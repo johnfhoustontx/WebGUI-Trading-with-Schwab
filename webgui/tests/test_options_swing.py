@@ -46,9 +46,9 @@ def test_status_text_moved_to_the_summary_strip():
     assert not hasattr(swing, "status_text")
 
 
-def test_family_options_alias_the_finder_groups():
-    from pages.options import finder_view
-    assert swing._FAMILY_OPTIONS == dict(finder_view.GROUPS)
+def test_family_options_alias_is_gone():
+    """The chips read finder_view.GROUPS directly; nothing else needed the alias."""
+    assert not hasattr(swing, "_FAMILY_OPTIONS")
 
 
 def test_scan_params_send_no_families():
@@ -322,6 +322,8 @@ def _fire_scan_timeout(card):
 
 
 def test_a_scan_that_never_comes_back_on_a_cold_feed_says_so(monkeypatch):
+    """Nothing has published this session: one still card names the cold feed,
+    and the status line says what to do - never four cards pulsing forever."""
     from nicegui import ui
     from pages import copy
     card = _render_page()
@@ -331,9 +333,9 @@ def test_a_scan_that_never_comes_back_on_a_cold_feed_says_so(monkeypatch):
     _click(_buttons(card)["Scan"], card)
     assert not empty.visible
     _fire_scan_timeout(card)
-    assert empty.visible and empty.text == copy.WAITING_OPTIONS
-    (grid,) = [e for e in card.descendants() if "grid" in e._classes]
-    assert not list(grid.descendants())          # the placeholders are gone
+    assert _placeholder_texts(card) == [copy.WAITING_OPTIONS]
+    assert not [e for e in _still_cards(card) if "animate-pulse" in e._classes]
+    assert [e for e in _widgets(card, ui.label) if e.text == swing.SCAN_SLOW]
 
 
 def _fire_poll(card):
@@ -346,6 +348,11 @@ def _fire_poll(card):
 
 def _publish(payload):
     bus_client.bus().cache_set("cache:options:swing", payload)
+
+
+def _still_cards(card):
+    (grid,) = [e for e in card.descendants() if "grid" in e._classes]
+    return list(grid.default_slot.children)
 
 
 def _placeholder_texts(card):
@@ -368,10 +375,16 @@ def test_a_slow_scan_says_it_is_still_coming_and_keeps_waiting(monkeypatch):
     _scan(card, monkeypatch, "msft")
     _fire_scan_timeout(card)
     (status,) = [e for e in _widgets(card, ui.label) if e.text == swing.SCAN_SLOW]
-    assert swing.SCAN_SLOW == ("The scan is taking longer than expected — "
-                               "results will appear when it finishes.")
-    assert _placeholder_texts(card) == ["Scanning MSFT…"] * 4
+    assert swing.SCAN_SLOW == (
+        "The scan is taking longer than expected. It will appear here if it "
+        "finishes; if nothing arrives, check System Status and scan again.")
+    # ONE still card, not four pulsing placeholders that would pulse forever
+    # when the scan never publishes (service down, handler raised).
+    assert _placeholder_texts(card) == ["No result for MSFT yet."]
+    assert len(_still_cards(card)) == 1
+    assert "animate-pulse" not in _still_cards(card)[0]._classes
     assert table.rows == []
+    assert table.props["no-data-label"] == "No result for MSFT yet."
     # ... and the late result still lands.
     _publish({**_PAYLOAD, "symbol": "MSFT"})
     _fire_poll(card)
@@ -473,3 +486,42 @@ def test_the_list_says_why_it_is_empty(monkeypatch):
     assert table.props["no-data-label"] == swing.fv.no_data_label(empty)
     _scan(card, monkeypatch, "qqq")
     assert table.props["no-data-label"] == "Scanning QQQ…"
+
+
+def test_a_quote_in_the_symbol_cannot_break_the_empty_label(monkeypatch):
+    from nicegui import ui
+    card = _render_page()
+    (table,) = _widgets(card, ui.table)
+    _scan(card, monkeypatch, 'a"b c')
+    assert table.props["no-data-label"] == 'Scanning A"B C…'
+
+
+def test_the_same_symbol_with_another_range_waits_for_its_own_result(monkeypatch):
+    """SPY 1-2 wk then SPY 1-3 mo: the 1-2 wk result must not paint as the 1-3 mo
+    scan. The handler echoes the request as ``params``."""
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    (table,) = _widgets(card, ui.table)
+    sent = []
+    monkeypatch.setattr(bus_client, "request", lambda d, cmd: sent.append(cmd["args"]))
+    _click(_buttons(card)["1–2 wk"], card)
+    _click(_buttons(card)["Scan"], card)
+    wk = sent[-1]
+    _click(_buttons(card)["1–3 mo"], card)
+    _click(_buttons(card)["Scan"], card)
+    mo = sent[-1]
+    assert (wk["dte_min"], mo["dte_min"]) == (7, 30)
+    _publish({**_PAYLOAD, "signals": [_NAKED], "params": wk})
+    _fire_poll(card)
+    assert table.rows == []                         # not the scan being waited on
+    _publish({**_PAYLOAD, "signals": [_FLY], "params": mo})
+    _fire_poll(card)
+    assert [r["id"] for r in table.rows] == ["fly"]
+
+
+def test_the_list_badge_shows_the_rounded_score():
+    from nicegui import ui
+    card = _render_page({**_PAYLOAD, "signals": [{**_FLY, "composite_score": 72.5}]})
+    (table,) = _widgets(card, ui.table)
+    assert table.rows[0]["score_text"] == "73"
+    assert "props.row.score_text" in swing._SCORE_SLOT

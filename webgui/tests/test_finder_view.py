@@ -427,7 +427,8 @@ def test_finder_rows_carry_shape_bars_and_paper_gate():
     assert row["expiry"] == "Oct 16 · 30d" and row["_dte"] == 30
     assert row["max_profit"] == "$375" and row["max_loss"] == "$125"
     assert row["_max_profit_n"] == 374.8 and row["_max_loss_n"] == 125.2
-    assert row["_rr"] == fv.risk_reward_bar(_FLY)
+    assert "_rr" not in row            # no list slot draws the split bar
+    assert row["score_text"] == "72"
     assert row["_score_class"] == "score-72.1" and row["_grade_class"] == "grade-Good"
     assert row["grade"] == "Good" and row["grade_reason"] == "ok"
     assert row["_undefined_risk"] is False
@@ -454,7 +455,7 @@ def test_finder_rows_degrade_on_a_bare_signal():
     row = fv.finder_rows([{"id": "b"}], **_HOOKS)[0]
     assert row["strategy"] == "" and row["cost"] == "—" and row["expiry"] == "—"
     assert row["pop"] == "—" and row["_pop"] is None and row["_pop_fill"] == ""
-    assert row["_payoff_svg"] == "" and row["_rr"] is None
+    assert row["_payoff_svg"] == "" and row["score_text"] == "—"
     assert row["max_profit"] == "—" and row["_max_profit_n"] is None
     assert row["_pop_n"] is None and row["_dte"] is None
 
@@ -497,13 +498,31 @@ def test_pop_fill_neutral_is_the_theme_accent_not_grey():
 # ------------------------------------------------------------ review fixes (Task 5)
 
 def test_payload_answers_scan_only_for_the_symbol_being_scanned():
+    msft = {"symbol": "MSFT"}
     assert fv.payload_answers_scan(None, {"symbol": "AAPL"}) is True
-    assert fv.payload_answers_scan("MSFT", {"symbol": "AAPL"}) is False
-    assert fv.payload_answers_scan("MSFT", {"symbol": "msft"}) is True
-    assert fv.payload_answers_scan("MSFT", None) is False
-    assert fv.payload_answers_scan("MSFT", {}) is False
+    assert fv.payload_answers_scan(msft, {"symbol": "AAPL"}) is False
+    assert fv.payload_answers_scan(msft, {"symbol": "msft"}) is True
+    assert fv.payload_answers_scan(msft, None) is False
+    assert fv.payload_answers_scan(msft, {}) is False
     # A blank request names no symbol, so any answer is its answer.
-    assert fv.payload_answers_scan("", {"symbol": "SPY"}) is True
+    assert fv.payload_answers_scan({"symbol": ""}, {"symbol": "SPY"}) is True
+
+
+def test_payload_answers_scan_compares_the_request_not_only_the_symbol():
+    """SPY 1-2 wk then SPY 1-3 mo: the first result must not paint as the second.
+    The handler echoes the request back as ``payload.params``."""
+    wk = {"symbol": "SPY", "dte_min": 7, "dte_max": 14, "put_d_min": -0.2,
+          "put_d_max": -0.1, "call_d_min": 0.1, "call_d_max": 0.2, "min_cr_fraction": 0.1}
+    mo = {**wk, "dte_min": 30, "dte_max": 90}
+    assert fv.payload_answers_scan(mo, {"symbol": "SPY", "params": wk}) is False
+    assert fv.payload_answers_scan(mo, {"symbol": "SPY", "params": mo}) is True
+    # Numbers compare as numbers (JSON round-trips 7 as 7.0 elsewhere).
+    assert fv.payload_answers_scan(mo, {"symbol": "SPY",
+                                        "params": {**mo, "dte_min": 30.0}}) is True
+    aggressive = {**mo, "call_d_max": 0.3}
+    assert fv.payload_answers_scan(aggressive, {"symbol": "SPY", "params": mo}) is False
+    # A payload that echoes no params can only be matched on its symbol.
+    assert fv.payload_answers_scan(mo, {"symbol": "SPY"}) is True
 
 
 def test_no_data_label_names_the_reason_in_the_pages_voice():
@@ -538,3 +557,13 @@ def test_payoff_svg_carries_nothing_but_numbers_and_fixed_colours():
     for bad in ("script", "img", "onload", "onerror", "alert"):
         assert bad not in svg
 
+
+def test_finder_rows_show_the_score_the_card_shows():
+    """One rounding rule for the list badge and the card: 72.5 reads 73 on both,
+    while the list still sorts on the raw score."""
+    sig = {**_FLY, "composite_score": 72.5}
+    row = fv.finder_rows([sig], **_HOOKS)[0]
+    assert row["score_text"] == fv.card_facts(sig)["score_text"] == "73"
+    assert row["composite_score"] == 72.5
+    assert {c["name"]: c for c in fv.finder_columns()}["composite_score"]["field"] == \
+        "composite_score"

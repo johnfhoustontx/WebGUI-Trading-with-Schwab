@@ -411,36 +411,6 @@ def test_strategy_rows_grade_reason_defaults_empty():
     assert row["_grade_class"] == TXT_POS
 
 
-# --- view_banner_text ------------------------------------------------------
-
-def test_view_banner_bullish():
-    txt = st.view_banner_text({"direction": "bullish", "conviction": 0.60,
-                               "vol_regime": "low"})
-    assert "Bullish" in txt
-    assert "0.60" in txt
-    assert "low" in txt
-    assert "long / debit" in txt
-
-
-def test_view_banner_bearish():
-    txt = st.view_banner_text({"direction": "bearish", "conviction": 0.40,
-                               "vol_regime": "high"})
-    assert "Bearish" in txt
-    assert "high" in txt
-
-
-def test_view_banner_neutral():
-    txt = st.view_banner_text({"direction": "neutral", "conviction": 0.30,
-                               "vol_regime": "mid"})
-    assert "Neutral" in txt
-    assert "condors" in txt or "flies" in txt or "credit" in txt
-
-
-def test_view_banner_empty():
-    assert "Run a scan" in st.view_banner_text({})
-    assert "Run a scan" in st.view_banner_text(None)
-
-
 # --- detail_signal ---------------------------------------------------------
 
 def test_detail_signal_fills_credit_and_breakeven():
@@ -587,21 +557,23 @@ def test_legs_summary_share_lots_scale_with_qty():
 
 
 def test_finder_offers_the_calculators_seven_groups():
-    from pages.options import swing
-    assert list(swing._FAMILY_OPTIONS) == [
+    from pages.options import finder_view
+    groups = dict(finder_view.GROUPS)
+    assert list(groups) == [
         "DIRECTIONAL", "VERTICAL", "NEUTRAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK"]
-    assert swing._FAMILY_OPTIONS["STRADDLE"] == "Straddles & strangles"
-    assert swing._FAMILY_OPTIONS["STOCK"] == "Stock + options"
+    assert groups["STRADDLE"] == "Straddles & strangles"
+    assert groups["STOCK"] == "Stock + options"
 
 
 def test_finder_new_group_labels_are_the_calculators_group_names():
-    from pages.options import swing
+    from pages.options import finder_view
     from pages.options.strategies import STRATEGY_GROUPS
+    groups = dict(finder_view.GROUPS)
     calc_names = {name for name, _codes in STRATEGY_GROUPS}
     for code in ("STRADDLE", "CALENDAR", "STOCK"):
-        assert swing._FAMILY_OPTIONS[code] in calc_names
+        assert groups[code] in calc_names
     # The Calculator splits the Finder's one group into two.
-    assert swing._FAMILY_OPTIONS["BUTTERFLY"] == "Butterflies & condors"
+    assert groups["BUTTERFLY"] == "Butterflies & condors"
     assert {"Butterflies", "Condors"} <= calc_names
 
 

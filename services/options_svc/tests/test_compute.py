@@ -474,6 +474,27 @@ def test_every_emitted_swing_candidate_carries_a_payoff_curve(monkeypatch, unfil
         assert len(curve) == 25 and all(len(p) == 2 for p in curve), s["type"]
 
 
+def test_a_row_whose_option_legs_carry_no_marks_gets_no_payoff_curve(monkeypatch,
+                                                                     unfiltered_swing):
+    """An adapted spread whose source row had no leg marks is priced at zero on
+    every leg, so its curve would draw an all-green shape beside a real max loss.
+    No marks means no shape (``None``), never a confident wrong one."""
+    _patch_swing_inputs(monkeypatch, _bs_ladder_chain())
+    base = {"symbol": "SPY", "type": "PCS", "credit": 0.6, "max_loss": 4.4,
+            "expiration": "2026-07-15", "underlying_price": 540.0}
+    unmarked = {**base, "short_strike": 530.0, "long_strike": 525.0}
+    marked = {**base, "short_strike": 520.0, "long_strike": 515.0,
+              "short_mark": 1.2, "long_mark": 0.6}
+    monkeypatch.setattr(compute.se, "screen_spreads", lambda *a, **k: [unmarked, marked])
+    out = compute.swing_scan("SPY", 5, 60, -0.20, -0.10, 0.10, 0.20, 0.10,
+                             families=["VERTICAL"])
+    by_short = {s.get("short_strike"): s for s in out["signals"] if s["type"] == "PCS"}
+    assert set(by_short) == {530.0, 520.0}, "both spreads must be emitted"
+    assert all((l.get("mark") or 0) == 0 for l in by_short[530.0]["legs"])
+    assert by_short[530.0]["payoff_curve"] is None
+    assert by_short[520.0]["payoff_curve"] is not None      # the control
+
+
 def test_the_payoff_curve_is_computed_only_for_rows_that_survive_the_cut(monkeypatch):
     """With the production quality cut in force, a curve is built once per EMITTED
     row and never for a candidate the cut removed - the curve is ~25 valuations

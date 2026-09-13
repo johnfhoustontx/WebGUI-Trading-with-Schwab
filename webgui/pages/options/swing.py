@@ -38,14 +38,11 @@ from .theme import (BADGE_ACCENT, BADGE_MUTED, BTN, BTN_3D, CARD, EYEBROW, LABEL
 # Before any scan has published for this session.
 EMPTY_PROMPT = "Enter a symbol and press Scan to rank every strategy for it."
 
-# The busy backstop fired but the scan is still running: a slow scan still lands
-# later, so this says so rather than calling it failed.
-SCAN_SLOW = ("The scan is taking longer than expected — "
-             "results will appear when it finishes.")
-
-# The seven build groups, by chip order. Kept under its old name because
-# test_strategy_table pins these labels against the Calculator's group names.
-_FAMILY_OPTIONS = dict(fv.GROUPS)
+# The busy backstop fired with no result: a slow scan still lands later, but a
+# scan that never publishes (service down, handler raised) never will - so the
+# line promises neither, and says what to do if nothing comes.
+SCAN_SLOW = ("The scan is taking longer than expected. It will appear here if it "
+             "finishes; if nothing arrives, check System Status and scan again.")
 
 # Quasar-internal escape hatch (the ONE ui.add_css this page injects):
 # - the app-wide TABLE_CSS caps every table body at 65vh; this list grows with the
@@ -149,6 +146,12 @@ def scanning_text(symbol):
     return f"Scanning {sym}…" if sym else "Scanning…"
 
 
+def waiting_text(symbol):
+    """The one still card after the busy backstop fires with no result."""
+    sym = (symbol or "").strip().upper()
+    return f"No result for {sym} yet." if sym else "No result yet."
+
+
 def finder_rows(signals):
     """``finder_view.finder_rows`` with the real score / grade classes and the
     ``_PAPER_TYPES`` gate, which live in widget-importing modules."""
@@ -186,7 +189,7 @@ _STRATEGY_SLOT = r'''
 
 _SCORE_SLOT = r'''
 <q-td :props="props">
-  <q-badge :class="props.row._score_class + ' text-[#111]'" :label="props.value ?? '—'"/>
+  <q-badge :class="props.row._score_class + ' text-[#111]'" :label="props.row.score_text"/>
 </q-td>
 '''
 
@@ -315,10 +318,10 @@ def render():
 
     by_id: dict = {}
     # scanning: the seq of the scan whose busy backstop is armed.
-    # scan_symbol: the symbol a scan is waiting on (None = nothing waiting); only
-    # a payload for it may replace the placeholders.
+    # scan_request: the swing_scan args a scan is waiting on (None = nothing
+    # waiting); only a payload answering THAT request may replace the placeholders.
     state = {"payload": None, "symbol": None, "active": None, "version": None,
-             "scanning": None, "scan_seq": 0, "scan_symbol": None}
+             "scanning": None, "scan_seq": 0, "scan_request": None}
 
     # --------------------------------------------------------------- controls
 
@@ -512,6 +515,20 @@ def render():
             for sig in picks:
                 _pick_card(sig)
 
+    def _set_no_data(text):
+        # Written to _props directly: a props STRING would be re-parsed, and a
+        # quote typed into the symbol box would break it.
+        table._props["no-data-label"] = text
+        table.update()
+
+    def _paint_still_card(text):
+        # One card that does not pulse: four pulsing placeholders would pulse
+        # forever for a scan that never publishes.
+        picks_grid.clear()
+        with picks_grid:
+            with ui.column().classes(f"{CARD} w-full h-40 items-center justify-center"):
+                ui.label(text).classes(f"text-sm {MUTED} text-center")
+
     def _paint_placeholders(symbol):
         picks_grid.clear()
         with picks_grid:
@@ -531,8 +548,7 @@ def render():
         visible = fv.filter_groups(signals, state["active"])
         _paint_cards(fv.top_picks(visible))
         table.rows = finder_rows(visible)
-        table.props(f'no-data-label="{fv.no_data_label(state["payload"])}"')
-        table.update()
+        _set_no_data(fv.no_data_label(state["payload"]))
         empty_line.set_visibility(not has_scan)
         table.set_visibility(has_scan)
 
@@ -545,7 +561,7 @@ def render():
         state["symbol"] = symbol
         state["payload"] = payload
         state["scanning"] = None
-        state["scan_symbol"] = None
+        state["scan_request"] = None
         by_id.clear()
         for s in signals:
             if s.get("id"):
@@ -563,16 +579,15 @@ def render():
             return                              # the result landed, or a newer scan
         state["scanning"] = None
         scan_busy.hide()
-        if (state["payload"] or {}).get("symbol"):
-            # Still waiting: the placeholders stay and scan_symbol stays set, so
-            # the late result paints when it lands and nothing else does.
-            status.text = SCAN_SLOW
-        else:
-            # Nothing has published this session at all - the feed, not the scan.
-            state["scan_symbol"] = None
-            empty_line.text = _copy.WAITING_OPTIONS
-            _paint_summary(state["payload"])
-            _paint_results()
+        # scan_request stays set: a genuinely late result still paints, and
+        # nothing else does. The pulsing placeholders become one still card - the
+        # cold-feed line when nothing has published this session at all.
+        symbol = (state["scan_request"] or {}).get("symbol")
+        text = (waiting_text(symbol) if (state["payload"] or {}).get("symbol")
+                else _copy.WAITING_OPTIONS)
+        _paint_still_card(text)
+        _set_no_data(text)
+        status.text = SCAN_SLOW
 
     @guard
     def _request_scan():
@@ -582,7 +597,7 @@ def render():
         state["scan_seq"] += 1
         seq = state["scan_seq"]
         state["scanning"] = seq
-        state["scan_symbol"] = params["symbol"]
+        state["scan_request"] = params
         status.text = ""
         # The panel described a row of the previous scan.
         detail_panel.clear()
@@ -592,8 +607,7 @@ def render():
         chips_row.clear()
         _paint_placeholders(params["symbol"])
         table.rows = []
-        table.props(f'no-data-label="{scanning_text(params["symbol"])}"')
-        table.update()
+        _set_no_data(scanning_text(params["symbol"]))
         empty_line.set_visibility(False)
         table.set_visibility(True)
         scan_busy.show(scanning_text(params["symbol"]))
@@ -626,8 +640,8 @@ def render():
             return
         state["version"] = version
         payload = bus_client.read("options:swing")
-        if not fv.payload_answers_scan(state["scan_symbol"], payload):
-            return      # another symbol's result - keep waiting for ours
+        if not fv.payload_answers_scan(state["scan_request"], payload):
+            return      # another request's result - keep waiting for ours
         _paint_payload(payload)
 
     ui.timer(2.0, _maybe_repaint)

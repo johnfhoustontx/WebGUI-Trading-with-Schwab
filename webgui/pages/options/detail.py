@@ -941,9 +941,12 @@ def render(width: int = 360):
             # `relative` wrapper so Quasar's `floating` badge anchors to the
             # button's top-right corner rather than the layout row.
             with ui.element("div").classes("relative"):
-                toggle_btn = ui.button(icon="last_page").props("flat round dense") \
-                    .tooltip("Collapse panel")
+                toggle_btn = ui.button(icon="last_page").props("flat round dense")
                 with toggle_btn:
+                    # ONE tooltip, retitled by set_open. ``Element.tooltip()``
+                    # builds a NEW Tooltip per call, so calling it on every toggle
+                    # piled up contradictory tooltips on the button.
+                    toggle_tip = ui.tooltip("Collapse panel")
                     flag_badge = ui.badge("", color="red").props("floating") \
                         .classes("text-xs")
                 flag_badge.set_visibility(False)
@@ -983,10 +986,12 @@ def render(width: int = 360):
         header.visible = state["open"] and state["has_signal"]
         if state["open"]:
             col.classes(remove="w-11", add=expanded_w)
-            toggle_btn.props("icon=last_page").tooltip("Collapse panel")
+            toggle_btn.props("icon=last_page")
+            toggle_tip.text = "Collapse panel"
         else:
             col.classes(remove=expanded_w, add="w-11")
-            toggle_btn.props("icon=first_page").tooltip("Expand panel")
+            toggle_btn.props("icon=first_page")
+            toggle_tip.text = "Expand panel"
 
     toggle_btn.on_click(lambda: set_open(not state["open"]))
     handle = _Handle(state, header, sig_title, sig_sub, gauge_el, gauge_caption,

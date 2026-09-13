@@ -558,7 +558,15 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # uses the scan's own spot + ATM IV and the row's front ``dte``; ``None`` when
     # the position cannot be valued (the page then draws no shape).
     for s in (signals if payoff else ()):
-        s["payoff_curve"] = ssn.payoff_curve(s.get("legs") or [], spot, atm_iv, s.get("dte"))
+        legs = s.get("legs") or []
+        # An adapted spread whose source row carried no leg marks has every option
+        # leg at mark 0, so its curve would price the entry as free and draw a
+        # shape that contradicts the row's real max loss. No marks, no shape.
+        option_legs = [l for l in legs if not ssn._is_stock(l)]
+        if option_legs and all(not (l.get("mark") or 0) for l in option_legs):
+            s["payoff_curve"] = None
+            continue
+        s["payoff_curve"] = ssn.payoff_curve(legs, spot, atm_iv, s.get("dte"))
     result = {"signals": signals, "view": view, "filtered_out": filtered_out,
               "vol_filtered": vol_filtered}
     if return_chain:

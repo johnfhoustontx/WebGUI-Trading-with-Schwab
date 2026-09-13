@@ -7,8 +7,8 @@ BEAR_PUT / PCS / CCS / IRON_CONDOR, each carrying a ``legs`` list, ``family``,
 ``bias``, ``net_debit``/``net_credit``, ``breakevens``, ``rr``, …). The Strategy
 Finder also emits straddles/strangles, butterflies/condors, calendars/diagonals
 (legs on two expirations) and share structures (a ``kind: "stock"`` leg). These pure
-functions format that shape into ``ui.table`` columns/rows + a market-view banner,
-and adapt a signal so the SHARED Trade detail panel (``detail.py``) renders it.
+functions format that shape into ``ui.table`` columns/rows (the Market Scanner's
+Directional tab), the legs line, and adapt a signal so the SHARED Trade detail panel (``detail.py``) renders it.
 
 No ``ui.`` calls live here — everything is unit-tested in
 ``webgui/tests/test_strategy_table.py``. Dynamic colors map a FINITE state (bias,
@@ -32,14 +32,6 @@ from .theme import TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL
 _PAPER_TYPES = {"PCS", "CCS", "IC", "IRON_CONDOR",
                 "LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
                 "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT"}
-
-# Inferred-view → what option families it favors (kept short for the banner).
-_FAVORS = {
-    "bullish": "long / debit",
-    "bearish": "short / put-debit / call-credit",
-    "neutral": "condors / flies / credit",
-}
-
 
 def _fmt_strike(value):
     """Strike → compact string: drop a trailing '.0' on whole numbers
@@ -275,27 +267,6 @@ def strategy_rows(signals):
     rows.sort(key=lambda r: (r["composite_score"] is not None, r["composite_score"] or 0),
               reverse=True)
     return rows
-
-
-def _favors(view):
-    """The option families an inferred direction favors (short banner phrase)."""
-    return _FAVORS.get((view or {}).get("direction"), "—")
-
-
-def view_banner_text(view):
-    """One-line inferred-market-view banner, e.g.
-    ``"Inferred view: Bullish · conviction 0.60 · IV low → favors long / debit"``.
-
-    Empty/None view → a neutral placeholder prompting a scan."""
-    view = view or {}
-    direction = view.get("direction")
-    if not direction:
-        return "Run a scan to infer the market view."
-    conviction = view.get("conviction")
-    conv_txt = f"{conviction:.2f}" if isinstance(conviction, (int, float)) else "—"
-    vol = view.get("vol_regime") or "—"
-    return (f"Inferred view: {direction.capitalize()} · conviction {conv_txt} · "
-            f"IV {vol} → favors {_favors(view)}")
 
 
 def detail_signal(signal):

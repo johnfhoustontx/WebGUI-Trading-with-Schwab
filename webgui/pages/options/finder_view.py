@@ -22,7 +22,7 @@ from .theme import THEME as _THEME   # config only - theme.py imports no widget 
 NO_READING = _fmt.NO_READING
 
 # The seven build groups ``swing_scan`` stamps on each candidate as ``group``, in
-# the order the chips render. ``swing._FAMILY_OPTIONS`` aliases this.
+# the order the chips render.
 GROUPS = [
     ("DIRECTIONAL", "Directional"),
     ("VERTICAL", "Spreads"),
@@ -306,19 +306,40 @@ def _conviction_word(c):
     return "high"
 
 
-def payload_answers_scan(scan_symbol, payload):
+def payload_answers_scan(scan, payload):
     """Whether a newly published payload is the answer to the scan in progress.
 
     ``cache:options:swing`` is ONE slot: scan AAPL then quickly MSFT and AAPL's
-    result still lands, as does any other tab's scan. While a scan waits
-    (``scan_symbol`` set), only a payload for that symbol may replace the
-    placeholders. ``None`` means nothing is waiting, so anything paints; a blank
-    request names no symbol, so any answer is its answer.
+    result still lands, as does any other tab's scan - and so does SPY 1-2 wk
+    while SPY 1-3 mo is waiting. ``scan`` is the request being waited on (the
+    ``swing_scan`` args) or None when nothing waits, in which case anything
+    paints. The symbol must match (a blank request names none, so any answer is
+    its answer), and every request field the payload echoes back in ``params``
+    (the handler stores the args there) must match too, numbers as numbers. A
+    payload that echoes no params can only be matched on its symbol.
     """
-    if scan_symbol is None or not str(scan_symbol).strip():
+    if scan is None:
         return True
-    got = (payload or {}).get("symbol")
-    return bool(got) and str(got).strip().upper() == str(scan_symbol).strip().upper()
+    want = str(scan.get("symbol") or "").strip().upper()
+    if not want:
+        return True
+    p = payload or {}
+    got = str(p.get("symbol") or "").strip().upper()
+    if got != want:
+        return False
+    echoed = p.get("params")
+    if not isinstance(echoed, dict):
+        return True
+    for key, value in scan.items():
+        if key == "symbol" or key not in echoed:
+            continue
+        a, b = _fmt.num(value), _fmt.num(echoed[key])
+        if a is None or b is None:
+            if value != echoed[key]:
+                return False
+        elif abs(a - b) > _BAND_TOL:
+            return False
+    return True
 
 
 def no_data_label(payload):
@@ -613,6 +634,12 @@ def finder_columns():
     return cols
 
 
+def _score_text(score):
+    """A score as its whole number (halves up), or the em-dash."""
+    f = _fmt.num(score)
+    return NO_READING if f is None else str(_half_up(f))
+
+
 def _max_profit_cell(sig):
     if _profit_unbounded(sig):
         return _INFINITY, _UNBOUNDED_SORT
@@ -653,6 +680,9 @@ def finder_rows(signals, *, score_class, grade_class, paper_types):
             "pop": pop["label"] if pop else NO_READING,
             "grade": s.get("grade") or "",
             "grade_reason": s.get("grade_reason") or "",
+            # The badge text - the same whole number the card shows; the column
+            # still sorts on the raw composite_score.
+            "score_text": _score_text(score),
             "_dte": None if dte is None else int(dte),
             "_max_profit_n": profit_n,
             "_max_loss_n": loss_n,
@@ -661,7 +691,6 @@ def finder_rows(signals, *, score_class, grade_class, paper_types):
             "_grade_class": grade_class(s.get("grade")),
             "_payoff_svg": payoff_svg(s.get("payoff_curve"), s.get("underlying_price"),
                                       width=72, height=20),
-            "_rr": risk_reward_bar(s),
             "_pop": pop,
             "_pop_fill": _pop_fill(pop),
             "_allow_paper": s.get("type") in paper_types,
@@ -682,7 +711,7 @@ def card_facts(sig):
     return {
         "title": s.get("strategy_label") or NO_READING,
         "score": score,
-        "score_text": NO_READING if score is None else str(_half_up(score)),
+        "score_text": _score_text(score),
         "grade": s.get("grade") or "",
         "expiry": expiry_text(s),
         "cost": cost_text(s),

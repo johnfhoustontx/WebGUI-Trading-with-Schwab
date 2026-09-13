@@ -744,3 +744,21 @@ def test_panel_opens_by_default_and_can_be_collapsed_then_opened():
 
     h.open()                          # idempotent
     assert h.is_open is True
+
+
+def test_toggling_the_panel_keeps_exactly_one_tooltip():
+    """``Element.tooltip()`` builds a NEW Tooltip on every call, so a toggle that
+    called it per open/collapse piled up contradictory tooltips."""
+    from nicegui import ui
+
+    with ui.card() as card:
+        h = detail.render()
+    tips = lambda: [e for e in card.descendants() if isinstance(e, ui.tooltip)]
+    assert len(tips()) == 1 and tips()[0].text == "Collapse panel"
+    for _ in range(3):
+        h.collapse()
+        h.open()
+    h.collapse()
+    assert len(tips()) == 1 and tips()[0].text == "Expand panel"
+    h.open()
+    assert len(tips()) == 1 and tips()[0].text == "Collapse panel"
