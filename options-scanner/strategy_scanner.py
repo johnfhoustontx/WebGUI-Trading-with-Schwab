@@ -310,12 +310,27 @@ def _front_exp(opts_by_exp):
     return min(opts_by_exp.items(), key=lambda kv: kv[1]["dte"]) if opts_by_exp else None
 
 
-def _atm_strike(strikes, spot):
+def _atm_strike(strikes, spot, prefer=()):
     """The listed strike nearest spot, or None for an empty ladder.
 
-    An exact tie (spot midway between two strikes) goes to the LOWER strike, so
-    the choice never depends on set iteration order."""
-    return min(strikes, key=lambda k: (abs(k - spot), k)) if strikes else None
+    An exact tie (spot midway between two strikes) goes first to a strike in
+    ``prefer`` - the strikes BOTH option maps list, so a tie never lands on a strike
+    one side does not offer - and then to the LOWER strike, so the choice never
+    depends on set iteration order."""
+    if not strikes:
+        return None
+    return min(strikes, key=lambda k: (abs(k - spot), k not in prefer, k))
+
+
+def _listed_strikes(chain, map_key, exp):
+    """The strikes the chain LISTS for expiration ``exp`` (``YYYY-MM-DD``) - the
+    raw keys, before ``extract_options`` drops a strike with no delta. An
+    at-the-money hole is judged on these: a strike missing only after that filter
+    is a hole, one the chain never lists is just not on the ladder."""
+    for exp_key, strikes in (chain.get(map_key) or {}).items():
+        if exp_key.split(":")[0] == exp:
+            return {float(k) for k in strikes}
+    return set()
 
 
 def _half_em(spot, atm_iv, dte):
@@ -451,6 +466,14 @@ def _front_pair(chain, dte_min, dte_max):
     return e, calls[e]["strikes"], puts[e]["strikes"]
 
 
+def _front_atm(chain, exp, spot):
+    """ATM for a single-expiry neutral structure: nearest the strikes either map
+    lists for ``exp``, an exact tie preferring one both maps list."""
+    lc = _listed_strikes(chain, "callExpDateMap", exp)
+    lp = _listed_strikes(chain, "putExpDateMap", exp)
+    return _atm_strike(lc | lp, spot, prefer=lc & lp)
+
+
 def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
                               put_band=None, call_band=None):
     """Long/short straddle (ATM) and long/short strangle (band-midpoint shorts).
@@ -465,11 +488,12 @@ def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
         return []
     exp, cs, ps = fp
     out = []
-    # The ATM over the UNION of both maps: extract_options drops a strike with no
-    # delta, so the true ATM can be missing from one side. Recentring on the next
-    # COMMON strike would build an off-centre "straddle" (a 0.30 call against a
+    # The ATM over the strikes EITHER map LISTS, judged before extract_options'
+    # delta filter: a strike with no delta on both sides would otherwise vanish
+    # from both extracted maps and the builder would recentre. Recentring on the
+    # next COMMON strike builds an off-centre "straddle" (a 0.30 call against a
     # -0.70 put); a hole at the money builds no straddle instead.
-    k = _atm_strike(set(cs) | set(ps), spot)
+    k = _front_atm(chain, exp, spot)
     if k is not None and k in cs and k in ps:
         for stype, side, label in (("LONG_STRADDLE", "long", "Long Straddle"),
                                    ("SHORT_STRADDLE", "short", "Short Straddle")):
@@ -489,7 +513,7 @@ def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
     return out
 
 
-_LISTED_TOL = 5e-5   # half of _symmetric_wing's round(..., 4) step
+_LISTED_TOL = 5e-5   # half of _symmetric_wing's round(..., 4) step - see _listed
 
 
 def _listed(strikes, target):
@@ -497,9 +521,11 @@ def _listed(strikes, target):
 
     Strike keys are floats parsed from the chain while wing distances are rounded,
     so ``k - d`` on a fractional ladder need not hash to the listed key. The
-    tolerance is HALF the 4-dp rounding step ``_symmetric_wing`` applies (5e-5):
-    that rounding can leave ``k - d`` up to that far off a listed key, and a
-    tighter tolerance would silently build nothing on a 5-decimal ladder.
+    tolerance is set at HALF the 4-dp rounding step ``_symmetric_wing`` applies
+    (5e-5) - a working choice, not a proven bound. Real listed strikes carry at
+    most three decimals, so the 4-dp rounding is exact for them and the gap left is
+    float error, far inside 5e-5; the margin only matters for a synthetic ladder
+    with more decimals than any chain lists.
     """
     if not strikes:
         return None
@@ -520,10 +546,10 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
         return []
     exp, cs, ps = fp
     both = set(cs) & set(ps)
-    # ATM over the UNION, and it must be listed on BOTH sides - see
-    # build_straddles_strangles. Recentring on a common strike after a hole at the
-    # money built a 95/105/115 "neutral" butterfly.
-    k = _atm_strike(set(cs) | set(ps), spot)
+    # ATM over the LISTED strikes, and it must survive extraction on BOTH sides -
+    # see build_straddles_strangles. Recentring on a common strike after a hole at
+    # the money built a 95/105/115 "neutral" butterfly.
+    k = _front_atm(chain, exp, spot)
     if k is None or k not in both:
         return []
     dte = _dte_for(exp)
@@ -585,6 +611,54 @@ def _usable_iv(iv):
     except (TypeError, ValueError):
         return False
     return math.isfinite(v) and v > 0
+
+
+def _calendar_atm(front_listed, back_listed, spot):
+    """The calendar strike from the two expiries' LISTED strikes, or None for a hole.
+
+    Start from the front ATM (nearest spot; an exact tie prefers a strike both
+    expiries list). Then find the strike the BACK ladder's own grid puts at that
+    spot: the front ATM itself when it sits on that grid, otherwise the nearer of
+    the two grid strikes either side of it. That back strike must be listed, and
+    listed on the front too; if not, the chain has a hole where it should have a
+    strike, and recentring would build an off-centre calendar.
+
+    * A weekly front lists $1 strikes where the monthly back lists $5, so a front
+      ATM of 102 is simply off the back grid - not a hole - and the calendar sits
+      at 100.
+    * An on-grid front ATM of 100 with the back 100 missing is a hole.
+    * An off-grid front ATM of 101 with the back 100 missing is a hole too. The
+      nearest strike both list there is 105, a four-point recentre that a
+      "within one back step of spot" guard would let through.
+
+    The grid step is the smallest gap between consecutive back strikes. Its ORIGIN
+    is the listed back strike nearest the front ATM, not the lowest back strike: a
+    chain can carry a stray off-grid strike far from the money (an adjusted
+    deliverable, a half-step wing), and anchoring the grid there would call every
+    at-the-money strike off-grid.
+    """
+    fa = _atm_strike(front_listed, spot, prefer=front_listed & back_listed)
+    if fa is None or not back_listed:
+        return None
+    back = sorted(back_listed)
+    gaps = [g for g in (round(b - a, 4) for a, b in zip(back, back[1:])) if g > 0]
+    if gaps:
+        step = min(gaps)
+        origin = _atm_strike(back_listed, fa)
+        x = (fa - origin) / step
+        if abs(x - round(x)) < 1e-6:
+            cands = [fa]
+        else:
+            lo = origin + math.floor(x) * step
+            cands = [lo, lo + step]
+    else:
+        cands = [fa]
+    listed = {c: _listed(back_listed, c) for c in cands}
+    g = min(cands, key=lambda c: (abs(c - fa), listed[c] is None, c))
+    k = listed[g]
+    if k is None or _listed(front_listed, k) is None:
+        return None
+    return _listed(front_listed, k)
 
 
 def _nearest_delta_strike(strikes, target):
@@ -654,13 +728,14 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
         if not backs:
             continue
         b_exp, b = min(backs, key=lambda kv: abs(kv[1]["dte"] - (f["dte"] + _CAL_BACK_OFFSET)))
-        # The ATM is taken over the UNION of the two expiries' strikes BEFORE the
-        # IV filter, and must survive the filter in BOTH. A true ATM dropped for a
-        # missing delta or an unusable IV is a hole at the money: recentring on the
-        # next common strike would build an off-centre "calendar", so that kind
-        # builds none. Taking it after the filter would let a sentinel-IV ATM on
-        # BOTH expiries silently recentre. The diagonal does not use this strike.
-        k = _atm_strike(set(raw[f_exp]["strikes"]) | set(raw[b_exp]["strikes"]), spot)
+        # The strike is judged on what the chain LISTS (see _calendar_atm), before
+        # the delta and IV filters, and must survive those filters in both
+        # expiries. A listed ATM dropped for a missing delta or an unusable IV is a
+        # hole: judging after the filters would let a sentinel-IV ATM on BOTH
+        # expiries silently recentre. The diagonal does not use this strike.
+        map_key = "callExpDateMap" if kind == "call" else "putExpDateMap"
+        k = _calendar_atm(_listed_strikes(chain, map_key, f_exp),
+                          _listed_strikes(chain, map_key, b_exp), spot)
         if k is not None and k in f["strikes"] and k in b["strikes"]:
             legs = [_leg_from(f["strikes"][k], kind, "short", f_exp),
                     _leg_from(b["strikes"][k], kind, "long", b_exp)]

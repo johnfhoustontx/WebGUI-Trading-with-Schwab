@@ -780,10 +780,11 @@ def test_short_strangle_aims_at_the_band_midpoint_and_long_mirrors_it():
 
 
 def test_a_far_ladder_keeps_both_short_structures():
-    """On a step-20 ladder the only OTM strikes sit far out (|delta| ~0.03), inside
-    any band, so the ceiling never binds here: the short straddle is built and any
-    short strangle's legs stay within the band. The test below exercises the
-    ceiling actually dropping a strangle."""
+    """On a step-20 ladder the only OTM strikes sit far out (|delta| ~0.015 call,
+    ~0.002 put): under the band's ceiling and below its floor, so the ceiling never
+    binds here - the short straddle is built and any short strangle's legs stay
+    under the ceiling. The test below exercises the ceiling actually dropping a
+    strangle."""
     rich = _ladder_chain(step=20.0, n=2)   # nothing between ATM (0.5) and far OTM
     out = _by_type(ss.build_straddles_strangles(
         rich, "XYZ", 100.0, 0.28, 5, 90, put_band=(-0.20, -0.30), call_band=(0.20, 0.30)))
@@ -794,7 +795,8 @@ def test_a_far_ladder_keeps_both_short_structures():
 
 def test_the_band_ceiling_binds_when_the_only_otm_strike_is_richer_than_it():
     """The step-20 ladder above never exercises the ceiling: its far strikes sit
-    at |delta| ~0.01, inside any band. Here the only OTM strikes are 105 (call
+    at |delta| ~0.015 call / ~0.002 put, under the ceiling and below the floor.
+    Here the only OTM strikes are 105 (call
     ~0.30) and 95 (put ~0.23), both richer than a 0.10 ceiling, so the short
     strangle must be dropped - while the straddle, which the band never binds,
     and the long strangle survive."""
@@ -1144,3 +1146,79 @@ def test_every_emitted_diagonal_costs_less_than_its_width(step, n):
         for s in sigs:
             if s["type"].startswith("DIAGONAL_"):
                 assert s["net_debit"] < _diag_width(s) * 100, s["id"]
+
+
+# ---- Review follow-up: judge an at-the-money hole on the strikes the chain LISTS ----
+def _merge_chains(*chains):
+    out = {"underlyingPrice": chains[0]["underlyingPrice"],
+           "callExpDateMap": {}, "putExpDateMap": {}}
+    for c in chains:
+        for m in ("callExpDateMap", "putExpDateMap"):
+            out[m].update(c[m])
+    return out
+
+
+def _raw_contract(chain, map_key, days, strike):
+    exp = [k for k in chain[map_key] if k.endswith(f":{days}")][0]
+    return chain[map_key][exp][strike][0]
+
+
+def test_mixed_strike_spacing_builds_the_calendar_at_the_nearest_common_strike():
+    """Weeklies list $1 strikes where the monthly lists $5. At spot 102 the nearest
+    strike is 102, which only the front lists - a structural ladder difference, not a
+    hole - so the calendar sits at the nearest strike BOTH expiries list."""
+    chain = _merge_chains(_ladder_chain(days=(7,), step=1.0, n=15),
+                          _ladder_chain(days=(35,), step=5.0, n=6))
+    out = _by_type(ss.build_calendars(chain, "XYZ", 102.0, 0.28, 5, 60))
+    assert {l["strike"] for l in out["CALENDAR_CALL"]["legs"]} == {100.0}
+    assert {l["strike"] for l in out["CALENDAR_PUT"]["legs"]} == {100.0}
+
+
+def test_a_delta_hole_on_both_sides_at_the_money_builds_no_straddle_fly_or_condor():
+    """A strike with no delta on the call AND the put side vanishes from both
+    extracted maps, so a union of those maps cannot see it and the builder
+    recentred (a straddle at 95, a 85/95/105 butterfly at spot 100)."""
+    chain = _ladder_chain()
+    for m in ("callExpDateMap", "putExpDateMap"):
+        _raw_contract(chain, m, 30, "100.0")["delta"] = None
+    straddles = _by_type(ss.build_straddles_strangles(chain, "XYZ", 100.0, 0.28, 5, 90))
+    assert "LONG_STRADDLE" not in straddles and "SHORT_STRADDLE" not in straddles
+    assert "LONG_STRANGLE" in straddles and "SHORT_STRANGLE" in straddles
+    assert ss.build_butterflies_condors(chain, "XYZ", 100.0, 0.28, 5, 90) == []
+
+
+def test_a_sentinel_iv_at_the_money_on_both_expiries_builds_no_call_calendar():
+    """The hole is judged BEFORE the IV filter: with the 100C unusable on both
+    expiries, the nearest strike both list is still 100, so no call calendar is
+    recentred onto 95 or 105. The put side is untouched."""
+    chain = _ladder_chain(days=(7, 35))
+    for d in (7, 35):
+        _raw_contract(chain, "callExpDateMap", d, "100.0")["volatility"] = -999.0
+    out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
+    assert "CALENDAR_CALL" not in out
+    assert {l["strike"] for l in out["CALENDAR_PUT"]["legs"]} == {100.0}
+
+
+def test_an_exact_tie_goes_to_the_strike_both_maps_list():
+    """Spot 102.5 sits midway between 100 and 105. The put chain does not list 100,
+    so the tie goes to 105 - listed on both sides - rather than to the lower strike
+    and then refusing to build."""
+    chain = _drop(_ladder_chain(), "putExpDateMap", 30, "100.0")
+    straddles = _by_type(ss.build_straddles_strangles(chain, "XYZ", 102.5, 0.28, 5, 90))
+    assert {l["strike"] for l in straddles["SHORT_STRADDLE"]["legs"]} == {105.0}
+    flies = _by_type(ss.build_butterflies_condors(chain, "XYZ", 102.5, 0.28, 5, 90))
+    body = next(l for l in flies["BUTTERFLY_CALL"]["legs"] if l["side"] == "short")
+    assert body["strike"] == 105.0
+
+
+def test_mixed_spacing_with_the_back_grid_strike_missing_builds_no_calendar():
+    """Front $1, back $5 with the back 100C absent, spot 101: the front ATM 101 is
+    off the back's $5 grid, and the back strike that grid puts next to it is 100 -
+    which is missing. The nearest strike both list is 105, a four-point recentre,
+    so the call kind is a hole. The put side, whose back 100 is intact, builds."""
+    chain = _merge_chains(_ladder_chain(days=(7,), step=1.0, n=15),
+                          _drop(_ladder_chain(days=(35,), step=5.0, n=6),
+                                "callExpDateMap", 35, "100.0"))
+    out = _by_type(ss.build_calendars(chain, "XYZ", 101.0, 0.28, 5, 60))
+    assert "CALENDAR_CALL" not in out
+    assert {l["strike"] for l in out["CALENDAR_PUT"]["legs"]} == {100.0}
