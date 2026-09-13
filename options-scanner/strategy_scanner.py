@@ -485,16 +485,23 @@ def _front_atm(chain, exp, spot):
 # nearest breakeven being CLOSE to spot. A short straddle/strangle wants the wide
 # zone; a long one profits from a big move, so the move it needs should be small.
 _STRADDLE_FAMILY = {"long": "VOLATILITY", "short": "NEUTRAL"}
+# A standard long strangle buys ~0.25-0.35 delta wings. On the $5 test ladder at
+# 30 DTE and the Finder's default bands that is PoP 34.5, against 17.7 buying the
+# short strangle's 110C/90P - under the LONG profile's 30 bar.
+_LONG_STRANGLE_DELTA = 0.30
 
 
 def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
                               put_band=None, call_band=None):
-    """Long/short straddle (ATM) and long/short strangle (band-midpoint shorts).
+    """Long/short straddle (ATM) and long/short strangle.
 
-    The short-delta band's CEILING binds the short STRANGLE only - a straddle's
-    shorts are ~0.50 delta by definition and applying it would delete the
-    structure every time. The long strangle buys the same strikes the short
-    strangle sells, so the two rows compare like for like.
+    The short strangle sells the out-of-the-money strikes nearest the short-delta
+    bands' midpoints, and those bands' CEILING binds it alone - a straddle's shorts
+    are ~0.50 delta by definition and applying it would delete the structure every
+    time. The long strangle buys its OWN wings nearest ``_LONG_STRANGLE_DELTA``
+    (0.30), whatever the bands say: a band says where you SELL premium, and buying
+    the short strangle's ~0.15-delta strikes gave a PoP that never cleared
+    the LONG profile's 30 bar. The two rows may sit on different strikes.
     """
     fp = _front_pair(chain, dte_min, dte_max)
     if not fp:
@@ -514,11 +521,16 @@ def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
             out.append(_assemble(stype, _STRADDLE_FAMILY[side], label, "neutral", legs,
                                  symbol, spot, atm_iv))
     cb, pb = _band_abs(call_band), _band_abs(put_band)
-    c = nearest_by_delta({s: v for s, v in cs.items() if s > spot}, _short_target(cb))
-    p = nearest_by_delta({s: v for s, v in ps.items() if s < spot}, _short_target(pb))
-    if c and p:
-        for stype, side, label in (("LONG_STRANGLE", "long", "Long Strangle"),
-                                   ("SHORT_STRANGLE", "short", "Short Strangle")):
+    otm_c = {s: v for s, v in cs.items() if s > spot}
+    otm_p = {s: v for s, v in ps.items() if s < spot}
+    wings = {"long": (nearest_by_delta(otm_c, _LONG_STRANGLE_DELTA),
+                      nearest_by_delta(otm_p, _LONG_STRANGLE_DELTA)),
+             "short": (nearest_by_delta(otm_c, _short_target(cb)),
+                       nearest_by_delta(otm_p, _short_target(pb)))}
+    for stype, side, label in (("LONG_STRANGLE", "long", "Long Strangle"),
+                               ("SHORT_STRANGLE", "short", "Short Strangle")):
+        c, p = wings[side]
+        if c and p:
             if side == "short" and ((cb and abs(c["delta"]) > cb[1])
                                     or (pb and abs(p["delta"]) > pb[1])):
                 continue

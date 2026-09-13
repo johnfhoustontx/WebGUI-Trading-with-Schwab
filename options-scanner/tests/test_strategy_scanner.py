@@ -769,7 +769,7 @@ def test_straddles_sit_at_the_money_on_the_front_expiry():
         assert out[t]["expiration"] == _exp(30) and out[t]["family"] == family
 
 
-def test_short_strangle_aims_at_the_band_midpoint_and_long_mirrors_it():
+def test_short_strangle_aims_at_the_band_midpoint_and_long_buys_thirty_delta_wings():
     out = _by_type(ss.build_straddles_strangles(
         _ladder_chain(), "XYZ", 100.0, 0.28, 5, 90,
         put_band=(-0.20, -0.10), call_band=(0.10, 0.20)))
@@ -777,7 +777,7 @@ def test_short_strangle_aims_at_the_band_midpoint_and_long_mirrors_it():
     long_ = {l["kind"]: l for l in out["LONG_STRANGLE"]["legs"]}
     assert short["call"]["strike"] > 100.0 and short["put"]["strike"] < 100.0
     assert abs(abs(short["call"]["delta"]) - 0.15) < 0.08
-    assert {k: l["strike"] for k, l in short.items()} == {k: l["strike"] for k, l in long_.items()}
+    assert all(abs(abs(l["delta"]) - 0.30) <= 0.10 for l in long_.values())
 
 
 def test_a_far_ladder_keeps_both_short_structures():
@@ -1526,3 +1526,17 @@ def test_a_back_spacing_change_next_to_the_money_builds_no_calendar():
     control = _by_type(ss.build_calendars(chain, "XYZ", 100.5, 0.28, 5, 60))
     assert _cal_strikes(control, "CALENDAR_CALL") == {100.0}
     assert _cal_strikes(control, "CALENDAR_PUT") == {100.0}
+
+
+# ---- Review follow-up: a long strangle buys its own thirty-delta wings ----
+def test_a_long_strangle_on_the_default_band_clears_the_long_pop_bar():
+    """Buying the strikes the short strangle sells put both wings near 0.15 delta
+    at the Finder's default band, and its PoP (17.7 here; 22-25 across the IV x DTE
+    cells a review tried) never cleared the LONG profile's 30 bar - the row was
+    always cut. Its own ~0.30-delta wings measure 34.5."""
+    import strategy_scoring as sc
+    s = _by_type(ss.build_straddles_strangles(
+        _ladder_chain(), "XYZ", 100.0, 0.28, 5, 90,
+        put_band=(-0.20, -0.10), call_band=(0.10, 0.20)))["LONG_STRANGLE"]
+    assert s["dte"] == 30
+    assert s["pop_pct"] >= sc.GATE_BARS["LONG"]["min"]["pop"] == 30
