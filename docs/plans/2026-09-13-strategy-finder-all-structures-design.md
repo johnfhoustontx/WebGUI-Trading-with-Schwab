@@ -82,13 +82,18 @@ Schwab calls**.
 | Long strangle | same deltas as the short strangle, bought |
 | Collar put, protective put | the long put at the put band's midpoint |
 | Butterfly / iron butterfly / condor wings | the strike nearest half the 1-σ expected move away |
-| Calendar | front = nearest expiry ≥ DTE min; back = expiry nearest front + 28 days that is ≤ DTE max; same strike (ATM) |
-| Diagonal | as a calendar, the back leg one strike further IN the money — a debit. *Revised while building:* the out-of-the-money version first approved priced as a credit, which is not the structure the name means |
+| Calendar | front = nearest expiry with DTE ≥ max(DTE min, **7**); back = expiry nearest front + 28 days that is ≤ DTE max, at least 7 days later; same strike (ATM). *Revised while building:* the page's default DTE min is 0, so the front was a 0–2 DTE expiry and every calendar measured R:R −0.004 to 0.27 and was cut |
+| Diagonal | as a calendar, the back leg is the IN-the-money back-month strike nearest **0.70 delta**, and the diagonal is skipped when its debit reaches the strike width. *Revised twice while building:* the out-of-the-money version priced as a credit; the one-strike-in-the-money version cost more than the width on a $5 ladder ($5.15 on $5), leaving an upside a dividend would erase and a misleading PoP |
 
 **No calendar is built when the window has no two expiries ≥ 7 days apart.** At
 the default 5–30 window the calendar is short; widening DTE max gives longer
 ones. This is the accepted cost of not fetching a second window — `$SPX` on a
 wide window has already timed out at the proxy.
+
+**Never emitted:** a calendar or diagonal whose max profit is not above zero, and any
+straddle, butterfly, condor, calendar or diagonal whose at-the-money strike is missing
+from one side of the chain (the builder skips rather than recentring on the next
+strike, which would build an off-centre structure under a neutral name).
 
 **The delta-band ceiling applies only where a short is out of the money by
 design** — strangle, covered call, collar. A straddle's or iron butterfly's shorts
@@ -109,8 +114,8 @@ Measured by pricing each structure with Black-Scholes (spot 100, IV 28%,
 | Long straddle, long strangle | LONG | PoP 36–43 vs 30; reward auto-passes (unbounded) | passes |
 | Call/put butterfly | DEBIT | R:R 3.4–3.9 vs 0.6; PoP 31–34 vs 30 | passes, barely on PoP |
 | Iron butterfly | DEBIT | identical to the long butterfly | passes, barely |
-| Call/put condor | DEBIT | R:R 0.67–0.81; PoP 54–57 | passes |
-| Calendar, diagonal | DEBIT | R:R 0.72–1.30; PoP 46–55 | passes |
+| Call/put condor | DEBIT | R:R 0.67–0.81; PoP 54–57 on a $1 ladder — ⚠ **ladder-dependent**: on $5 strikes around $100 it measures 0.22 at 14 DTE and 0.53 at 30 (cut), 0.79 at 45 | passes on fine ladders |
+| Calendar, diagonal | DEBIT | measured before the calendar front floor and the 0.70-delta diagonal — **re-measure with `tools/sweep_strategy_gates.py`** (Task 8) | to be re-measured |
 | Collar | DEBIT | R:R 1.06; PoP 51 | passes |
 | Protective put | LONG | PoP 46–48 | passes |
 | Short strangle (1-σ) | NAKED | PoP 73–76 vs 65; capeff far above 0.10/yr | passes |
