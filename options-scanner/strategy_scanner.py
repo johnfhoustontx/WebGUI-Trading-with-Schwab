@@ -10,6 +10,7 @@ import datetime as _dt
 import math
 
 import commissions as _cm
+import options_calculator as _oc
 
 _GRID_LO, _GRID_HI, _GRID_N = 0.5, 1.5, 401   # ±50% of spot payoff grid
 
@@ -74,11 +75,6 @@ def _sign(leg):
     return 1.0 if leg["side"] == "long" else -1.0
 
 
-def _pl_at(legs, entry_cost, S):
-    v = sum(_sign(l) * _intrinsic(l, S) * l.get("qty", 1) for l in legs)
-    return v - entry_cost
-
-
 def _is_stock(leg):
     """A 100-share-lot leg (the Calculator's D4 convention), not an option."""
     return leg.get("kind") == "stock"
@@ -96,16 +92,81 @@ def _option_contracts(legs):
     return sum(int(l.get("qty", 1) or 1) for l in legs if not _is_stock(l))
 
 
+def _option_legs(legs):
+    return [l for l in legs if not _is_stock(l)]
+
+
+def _front_expiration(legs):
+    """Earliest expiration among the OPTION legs (a share leg never expires)."""
+    exps = [l["expiration"] for l in _option_legs(legs) if l.get("expiration")]
+    return min(exps) if exps else None
+
+
+def _needs_front_valuation(legs):
+    """True when intrinsic-at-one-expiry is WRONG for this leg set: it holds a
+    share leg, or its option legs span more than one expiration.
+
+    Everything else - every structure the Finder built before 2026-09-13 - takes
+    the untouched intrinsic path, which is what keeps those numbers byte-identical.
+    """
+    if any(_is_stock(l) for l in legs):
+        return True
+    return len({l.get("expiration") for l in legs}) > 1
+
+
+def _front_value(leg, S, front):
+    """Per-share value of one leg at the FRONT expiration with the underlying at S.
+
+    A share is worth S. A leg expiring at the front is worth its intrinsic. A
+    later leg keeps time value: Black-Scholes at its OWN IV (the chain's
+    ``volatility`` is a percent) over the calendar days between the two
+    expirations. Both settle at 16:00 ET, so whole days / 365 is exact here and is
+    not the inline time-to-expiry CLAUDE.md forbids (that rule is about a
+    wall-clock ``now``, which does not enter this calculation).
+    """
+    if _is_stock(leg):
+        return float(S)
+    exp = leg.get("expiration")
+    if not front or not exp or exp == front:
+        return _intrinsic(leg, S)
+    days = (_dt.date.fromisoformat(exp) - _dt.date.fromisoformat(front)).days
+    if days <= 0:
+        return _intrinsic(leg, S)
+    T = days / 365.0
+    if S <= 0:
+        # bs_price takes log(S/K): at a stock price of zero a call is worthless
+        # and a put is worth its discounted strike (the S->0 limit of the formula).
+        if leg["kind"] == "call":
+            return 0.0
+        return leg["strike"] * math.exp(-_oc.RISK_FREE_RATE * T)
+    iv = leg.get("iv") or 0
+    sigma = iv / 100.0 if iv > 1.5 else (iv or 0.20)
+    return _oc.bs_price(S, leg["strike"], T, _oc.RISK_FREE_RATE,
+                        max(sigma, 0.01), leg["kind"])
+
+
+def _pl_at(legs, entry_cost, S, front=None):
+    if front is None:
+        v = sum(_sign(l) * _intrinsic(l, S) * l.get("qty", 1) for l in legs)
+    else:
+        v = sum(_sign(l) * _front_value(l, S, front) * l.get("qty", 1) for l in legs)
+    return v - entry_cost
+
+
 def payoff_metrics(legs, spot, symbol=None):
     entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)   # +debit
     net = round(entry_cost, 4)
+    # None on every single-expiry options set -> the unchanged intrinsic path.
+    front = _front_expiration(legs) if _needs_front_valuation(legs) else None
 
     # --- Tail analysis (structure-driven, not grid-driven) ---
     # As S->inf the payoff slope equals call_coeff = sum(sign*qty) over CALL legs.
     #   > 0 unbounded PROFIT (long call) ; < 0 unbounded LOSS (naked short call) ;
     #   == 0 bounded on the upside (verticals/condors/flies). The downside (S->0)
     # is ALWAYS bounded (puts floor at S=0), so never flag unbounded from below.
-    call_coeff = sum(_sign(l) * l.get("qty", 1) for l in legs if l["kind"] == "call")
+    # A long share lot slopes like a long call, so it counts here too.
+    call_coeff = sum(_sign(l) * l.get("qty", 1) for l in legs
+                     if l["kind"] == "call" or _is_stock(l))
     # Emit that SIDE explicitly: `unbounded` alone is True for both cases, so a
     # caller rendering a max-profit/max-loss cell cannot tell a long call from a
     # naked short. Kept as the OR of the two for back-compat (paper_trader reads it).
@@ -114,10 +175,13 @@ def payoff_metrics(legs, spot, symbol=None):
     unbounded = (call_coeff != 0)
 
     # --- Bounded extrema at payoff BREAKPOINTS (S=0, each strike, a far-high pt) ---
-    strikes = [l["strike"] for l in legs]
+    strikes = [l["strike"] for l in legs if l.get("strike") is not None]
     far_high = 2.0 * max(strikes) if strikes else spot * 2.0
-    points = sorted({0.0, far_high} | set(strikes))
-    pls = [_pl_at(legs, entry_cost, S) for S in points]
+    points = {0.0, far_high} | set(strikes)
+    if front is not None:
+        # A Black-Scholes-valued curve peaks BETWEEN breakpoints, so sample it.
+        points |= {far_high * i / 800 for i in range(801)}
+    pls = [_pl_at(legs, entry_cost, S, front) for S in sorted(points)]
     bounded_max = max(pls)
     bounded_min = min(pls)
 
@@ -149,7 +213,7 @@ def payoff_metrics(legs, spot, symbol=None):
     # --- Breakevens: scan a fine grid for sign changes + interpolate ---
     grid = [spot * (_GRID_LO + (_GRID_HI - _GRID_LO) * i / (_GRID_N - 1))
             for i in range(_GRID_N)]
-    gpls = [_pl_at(legs, entry_cost, S) for S in grid]
+    gpls = [_pl_at(legs, entry_cost, S, front) for S in grid]
     breakevens = []
     for i in range(1, len(grid)):
         if (gpls[i - 1] <= 0 < gpls[i]) or (gpls[i - 1] >= 0 > gpls[i]):
@@ -181,6 +245,7 @@ def pop_from_payoff(legs, spot, atm_iv, dte):
     if sigma <= 0:
         return None
     entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)
+    front = _front_expiration(legs) if _needs_front_valuation(legs) else None
     n = 801
     lo, hi = spot - 6 * sigma, spot + 6 * sigma
     prob = 0.0
@@ -190,7 +255,7 @@ def pop_from_payoff(legs, spot, atm_iv, dte):
         S = lo + (hi - lo) * i / (n - 1)
         cdf = _norm_cdf((S - spot) / sigma)
         mid = (S + prev_S) / 2
-        v = sum(_sign(l) * _intrinsic(l, mid) * l.get("qty", 1) for l in legs)
+        v = _pl_at(legs, 0.0, mid, front)
         if v - entry_cost > 0:
             prob += (cdf - prev_cdf)
         prev_S, prev_cdf = S, cdf
@@ -247,14 +312,14 @@ def _dte_for(exp_str):
 
 def _assemble(stype, family, label, bias, legs, symbol, spot, atm_iv):
     m = payoff_metrics(legs, spot, symbol)
-    front = min(legs, key=lambda l: l["expiration"])
-    dte = _dte_for(front["expiration"])
+    front_exp = _front_expiration(legs)
+    dte = _dte_for(front_exp)
     pop = pop_from_payoff(legs, spot, atm_iv, dte)
-    sk = "_".join(str(l["strike"]) for l in legs)
-    return {"id": f"{symbol}_{stype}_{front['expiration']}_{sk}",
+    sk = "_".join("SH" if _is_stock(l) else str(l["strike"]) for l in legs)
+    return {"id": f"{symbol}_{stype}_{front_exp}_{sk}",
             "symbol": symbol, "type": stype, "family": family,
             "strategy_label": label, "bias": bias, "legs": legs,
-            "expiration": front["expiration"], "dte": dte,
+            "expiration": front_exp, "dte": dte,
             "pop_pct": pop, "underlying_price": spot,
             "timestamp": _dt.datetime.now().isoformat(), **m}
 

@@ -596,3 +596,72 @@ def test_butterfly_commission_charges_four_contracts():
 def test_existing_qty_one_commission_is_unchanged():
     legs = [_leg("call", "long", 450.0, 6.0), _leg("call", "short", 455.0, 3.5)]
     assert ss.payoff_metrics(legs, spot=450.0)["commission"] == 2.60
+
+
+def test_single_expiry_options_never_take_the_front_valuation_path(monkeypatch):
+    """The existing nine structures must be byte-identical: prove the new path is
+    not even entered for an all-options single-expiry set."""
+    def _boom(*a, **k):
+        raise AssertionError("front-expiry valuation used on a single-expiry set")
+    monkeypatch.setattr(ss, "_front_value", _boom)
+    legs = [_leg("put", "short", 445.0, 3.5), _leg("put", "long", 440.0, 1.8)]
+    ss.payoff_metrics(legs, spot=450.0)
+    ss.pop_from_payoff(legs, 450.0, 0.18, 10)
+
+
+def _cal_legs(front_days=14, back_days=42, K=100.0):
+    import options_calculator as oc
+    f, b = front_days / 365, back_days / 365
+    short = _leg("call", "short", K, oc.bs_price(100.0, K, f, oc.RISK_FREE_RATE, 0.28, "call"),
+                 iv=28.0)
+    long_ = _leg("call", "long", K, oc.bs_price(100.0, K, b, oc.RISK_FREE_RATE, 0.26, "call"),
+                 iv=26.0)
+    short["expiration"], long_["expiration"] = _exp(front_days), _exp(back_days)
+    return short, long_
+
+
+def test_calendar_max_loss_is_its_debit_plus_commission():
+    short, long_ = _cal_legs()
+    m = ss.payoff_metrics([short, long_], spot=100.0)
+    debit = (long_["mark"] - short["mark"]) * 100
+    assert m["net_debit"] == round(debit, 2)
+    assert m["unbounded"] is False
+    assert abs(m["max_loss"] - (debit + 2.60)) < 1.0
+    assert m["max_profit"] > 0
+    assert len(m["breakevens"]) == 2
+
+
+def test_calendar_back_leg_is_not_valued_at_intrinsic():
+    """At the strike the front call is worthless and the back call still has time
+    value - intrinsic-only math would call the peak a loss of the whole debit."""
+    short, long_ = _cal_legs()
+    m = ss.payoff_metrics([short, long_], spot=100.0)
+    assert m["max_profit"] > 100.0
+
+
+def test_covered_call_max_loss_reaches_a_stock_price_of_zero():
+    call = _leg("call", "short", 105.0, 1.0)
+    call["expiration"] = _exp(30)
+    m = ss.payoff_metrics([_stock(100.0), call], spot=100.0)
+    # entry = 100 - 1 = 99/share; worst case the stock goes to zero.
+    assert abs(m["max_loss"] - (99.0 * 100 + 1.30)) < 0.01
+    assert abs(m["max_profit"] - (6.0 * 100 - 1.30)) < 0.01
+    assert m["unbounded_profit"] is False and m["unbounded_loss"] is False
+    assert m["commission"] == 1.30          # the share leg is not billed
+
+
+def test_protective_put_is_unbounded_upside_not_capped_at_the_grid():
+    put = _leg("put", "long", 95.0, 1.2)
+    put["expiration"] = _exp(30)
+    m = ss.payoff_metrics([_stock(100.0), put], spot=100.0)
+    assert m["unbounded_profit"] is True and m["max_profit"] is None
+    assert abs(m["max_loss"] - ((100.0 + 1.2 - 95.0) * 100 + 1.30)) < 0.01
+
+
+def test_assemble_takes_dte_from_the_front_OPTION_leg_not_a_share_leg():
+    call = _leg("call", "short", 105.0, 1.0)
+    call["expiration"] = _exp(30)
+    s = ss._assemble("COVERED_CALL", "DIRECTIONAL", "Covered Call", "bullish",
+                     [_stock(100.0), call], "XYZ", 100.0, 0.28)
+    assert s["expiration"] == _exp(30) and s["dte"] == 30
+    assert s["pop_pct"] is not None
