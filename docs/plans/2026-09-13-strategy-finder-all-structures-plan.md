@@ -682,12 +682,25 @@ def test_calendar_sells_the_front_and_buys_the_expiry_nearest_plus_28():
     assert out["CALENDAR_PUT"]["family"] == "NEUTRAL"
 
 
-def test_diagonal_back_leg_is_one_strike_further_out_of_the_money():
+def test_diagonal_back_leg_is_one_strike_further_IN_the_money_and_a_debit():
+    """The standard diagonal: sell the front at the money, buy the back month one
+    strike deeper in the money. That is a DEBIT whose loss is about what you paid;
+    the out-of-the-money version first planned came out as a credit."""
     out = _by_type(ss.build_calendars(_ladder_chain(days=(7, 35)), "XYZ", 100.0, 0.28, 5, 60))
     c = {l["side"]: l["strike"] for l in out["DIAGONAL_CALL"]["legs"]}
     p = {l["side"]: l["strike"] for l in out["DIAGONAL_PUT"]["legs"]}
-    assert c == {"short": 100.0, "long": 105.0}
-    assert p == {"short": 100.0, "long": 95.0}
+    assert c == {"short": 100.0, "long": 95.0}
+    assert p == {"short": 100.0, "long": 105.0}
+    for t in ("DIAGONAL_CALL", "DIAGONAL_PUT"):
+        assert out[t]["net_debit"] is not None
+
+
+def test_a_back_leg_with_the_schwab_sentinel_iv_is_never_chosen():
+    chain = _ladder_chain(days=(7, 35))
+    back = [k for k in chain["callExpDateMap"] if k.endswith(":35")][0]
+    chain["callExpDateMap"][back]["100.0"][0]["volatility"] = -999.0
+    out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
+    assert "CALENDAR_CALL" not in out        # no crash, and no 100C back leg
 
 
 def test_no_calendar_without_two_expiries_seven_days_apart():
@@ -703,9 +716,20 @@ def test_no_calendar_without_two_expiries_seven_days_apart():
 _CAL_BACK_OFFSET, _CAL_MIN_GAP = 28, 7
 
 
+def _usable_iv(iv):
+    """A chain IV (percent) that _front_value can price: finite and positive.
+    Schwab's -999 sentinel, NaN and 0 are not."""
+    try:
+        v = float(iv)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(v) and v > 0
+
+
 def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
     """Call/put calendar (same ATM strike) and call/put diagonal (back leg one
-    listed strike further OUT of the money), inside the scan's own DTE window.
+    listed strike further IN the money, so it is a debit), inside the scan's own
+    DTE window.
 
     Front = nearest expiry; back = the expiry whose DTE is nearest front + 28 with
     at least 7 days between them. No second chain fetch: a window without two such
@@ -713,7 +737,11 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
     """
     out = []
     for kind, label, direction in (("call", "Call", 1), ("put", "Put", -1)):
-        by_exp = extract_options(chain, kind, dte_min, dte_max)
+        # A back leg without a usable IV cannot be priced at the front expiry
+        # (_front_value raises on it), so it is never a candidate.
+        by_exp = {e: {**v, "strikes": {k: leg for k, leg in v["strikes"].items()
+                                       if _usable_iv(leg.get("iv"))}}
+                  for e, v in extract_options(chain, kind, dte_min, dte_max).items()}
         if len(by_exp) < 2:
             continue
         ordered = sorted(by_exp.items(), key=lambda kv: kv[1]["dte"])
@@ -729,9 +757,10 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
                 _leg_from(b["strikes"][k], kind, "long", b_exp)]
         out.append(_assemble(f"CALENDAR_{kind.upper()}", "NEUTRAL", f"{label} Calendar",
                              "neutral", legs, symbol, spot, atm_iv))
-        further = sorted(s for s in b["strikes"] if (s - k) * direction > 0)
-        if further:
-            kb = further[0] if direction > 0 else further[-1]
+        # One strike deeper IN the money: below ATM for a call, above for a put.
+        deeper = sorted(s for s in b["strikes"] if (k - s) * direction > 0)
+        if deeper:
+            kb = deeper[-1] if direction > 0 else deeper[0]
             legs = [_leg_from(f["strikes"][k], kind, "short", f_exp),
                     _leg_from(b["strikes"][kb], kind, "long", b_exp)]
             out.append(_assemble(f"DIAGONAL_{kind.upper()}", "DIRECTIONAL",

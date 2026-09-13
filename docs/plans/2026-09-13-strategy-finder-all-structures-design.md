@@ -83,7 +83,7 @@ Schwab calls**.
 | Collar put, protective put | the long put at the put band's midpoint |
 | Butterfly / iron butterfly / condor wings | the strike nearest half the 1-σ expected move away |
 | Calendar | front = nearest expiry ≥ DTE min; back = expiry nearest front + 28 days that is ≤ DTE max; same strike (ATM) |
-| Diagonal | as a calendar, the back leg one strike further out of the money |
+| Diagonal | as a calendar, the back leg one strike further IN the money — a debit. *Revised while building:* the out-of-the-money version first approved priced as a credit, which is not the structure the name means |
 
 **No calendar is built when the window has no two expiries ≥ 7 days apart.** At
 the default 5–30 window the calendar is short; widening DTE max gives longer
