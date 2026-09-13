@@ -617,7 +617,12 @@ def _usable_iv(iv):
     return math.isfinite(v) and v > 0
 
 
-_LADDER_MAX_STEP_FRAC = 0.10
+# A local strike step wider than max(10% of spot, $1) is a hole. A back month
+# listing only 80 and 120 under a $100 stock passes both the grid check (80 is on
+# a 40-wide grid) and the distance limit (20 points is inside that 40 step), so
+# only a step limit refuses it. The $1 floor keeps sub-$10 chains, whose $0.50 or
+# $1 spacing already exceeds 10% of spot.
+_LADDER_MAX_STEP_FRAC, _LADDER_MAX_STEP_FLOOR = 0.10, 1.0
 
 
 def _local_step(listed, spot):
@@ -628,8 +633,7 @@ def _local_step(listed, spot):
     from the strike nearest spot to its immediate listed neighbours - never from
     the whole ladder, so a stray far strike (62.5 on a $5 ladder) cannot distort
     it. Also a hole: fewer than two strikes (no spacing to judge by), and a local
-    step wider than 10% of spot - a ladder listing only 80 and 120 under a $100
-    stock passes the grid test (80 is "on" a 40-wide grid) yet covers nothing.
+    step wider than max(10% of spot, $1) - see ``_LADDER_MAX_STEP_FRAC``.
     """
     strikes = sorted(listed)
     if len(strikes) < 2:
@@ -638,7 +642,7 @@ def _local_step(listed, spot):
     i = strikes.index(origin)
     gaps = [abs(strikes[j] - origin) for j in (i - 1, i + 1) if 0 <= j < len(strikes)]
     step = round(min(gaps), 4)
-    if step <= 0 or step > _LADDER_MAX_STEP_FRAC * spot:
+    if step <= 0 or step > max(_LADDER_MAX_STEP_FRAC * spot, _LADDER_MAX_STEP_FLOOR):
         return None
     grid = origin + round((spot - origin) / step) * step
     return step if _listed(listed, grid) is not None else None

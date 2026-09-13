@@ -1330,3 +1330,15 @@ def test_a_back_expiry_listing_only_far_strikes_builds_no_calendar():
                                         {"80.0", "120.0"}))
     out = _by_type(ss.build_calendars(chain, "XYZ", 100.0, 0.28, 5, 60))
     assert "CALENDAR_CALL" not in out and "CALENDAR_PUT" not in out
+
+
+@pytest.mark.parametrize("chain_spot,step,spot,want", [
+    (8.0, 1.0, 8.0, 8.0), (10.0, 1.0, 9.5, 9.0), (4.0, 0.5, 4.0, 4.0),
+])
+def test_low_priced_chains_keep_their_calendars(chain_spot, step, spot, want):
+    """Sub-$10 stocks list $1 or $0.50 strikes - wider than 10% of spot - and a
+    10%-of-spot step limit alone refused every calendar on them."""
+    chain = _ladder_chain(spot=chain_spot, days=(7, 35), step=step, n=6, iv=40.0)
+    out = _by_type(ss.build_calendars(chain, "XYZ", spot, 0.40, 5, 60))
+    assert _cal_strikes(out, "CALENDAR_CALL") == {want}
+    assert _cal_strikes(out, "CALENDAR_PUT") == {want}
