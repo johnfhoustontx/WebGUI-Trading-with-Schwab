@@ -8,6 +8,9 @@ Covers strategy_scoring.py:
 """
 
 import datetime as _dt
+import math
+
+import pytest
 
 import strategy_scanner as ss
 import strategy_scoring as sc
@@ -671,6 +674,87 @@ def test_score_all_handles_bad_signal():
     assert len(out) == 2
     for s in out:
         assert 0 <= s["composite_score"] <= 100
+
+
+# ---- The breakeven factor's horizon: each candidate's OWN expiry ----
+# ``swing_scan`` used to pass ONE em_1sd = daily * sqrt(max(dte_min, 1)), so with
+# the Finder's default DTE min of 0 a 30-DTE breakeven was judged against a ONE-DAY
+# move. ``daily_move`` scales the move to each signal's own ``dte``.
+
+def _capture_em(monkeypatch):
+    seen = []
+    real = sc.q_breakeven_vs_em
+
+    def _spy(signal, em_1sd):
+        seen.append((signal.get("dte"), em_1sd))
+        return real(signal, em_1sd)
+
+    monkeypatch.setattr(sc, "q_breakeven_vs_em", _spy)
+    return seen
+
+
+def _dated_long_call(dte):
+    sig = _long_call_sig()
+    sig["dte"] = dte
+    return sig
+
+
+def test_score_all_daily_move_scales_em_to_each_signals_own_dte(monkeypatch):
+    seen = _capture_em(monkeypatch)
+    view = {"direction": "bullish", "conviction": 0.8, "vol_regime": "low"}
+    d = 2.0
+    sc.score_all([_dated_long_call(1), _dated_long_call(30)], view, 0.18, 99.0,
+                 daily_move=d)
+    by_dte = dict(seen)
+    assert by_dte[1] == pytest.approx(d * 1.0)
+    assert by_dte[30] == pytest.approx(d * math.sqrt(30))
+
+
+def test_score_all_daily_move_changes_the_breakeven_subscore_by_horizon():
+    # Identical signals but for dte: a 6-point breakeven against a 2-dollar daily
+    # move is out of reach in one day and well within reach in thirty.
+    view = {"direction": "bullish", "conviction": 0.8, "vol_regime": "low"}
+    out = sc.score_all([_dated_long_call(1), _dated_long_call(30)], view, 0.18, 99.0,
+                       daily_move=2.0)
+    q_be = {s["dte"]: s["factor_scores"]["q_be"] for s in out}
+    assert q_be[1] == 0.0
+    assert q_be[30] > 0.0
+
+
+def test_score_all_without_daily_move_uses_the_scalar_for_every_signal(monkeypatch):
+    seen = _capture_em(monkeypatch)
+    view = {"direction": "bullish", "conviction": 0.8, "vol_regime": "low"}
+    sc.score_all([_dated_long_call(1), _dated_long_call(30)], view, 0.18, 8.0)
+    assert sorted(em for _, em in seen) == [8.0, 8.0]
+
+
+def test_score_all_same_day_signal_takes_one_days_move(monkeypatch):
+    seen = _capture_em(monkeypatch)
+    view = {"direction": "bullish", "conviction": 0.8, "vol_regime": "low"}
+    sc.score_all([_dated_long_call(0)], view, 0.18, 8.0, daily_move=3.0)
+    assert [em for _, em in seen] == [3.0]
+
+
+@pytest.mark.parametrize("bad_dte", [None, "30", float("nan"), -5])
+def test_score_all_signal_without_a_usable_dte_keeps_the_scalar(monkeypatch, bad_dte):
+    # No horizon to scale to -> the caller's scalar, i.e. exactly today's reading,
+    # never a silent one-day move.
+    seen = _capture_em(monkeypatch)
+    view = {"direction": "bullish", "conviction": 0.8, "vol_regime": "low"}
+    sig = _long_call_sig()
+    if bad_dte is not None:
+        sig["dte"] = bad_dte
+    sc.score_all([sig], view, 0.18, 8.0, daily_move=3.0)
+    assert [em for _, em in seen] == [8.0]
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), 0, 0.0, -2.0, "2.0", True])
+def test_score_all_unusable_daily_move_falls_back_to_the_scalar(monkeypatch, bad):
+    seen = _capture_em(monkeypatch)
+    view = {"direction": "bullish", "conviction": 0.8, "vol_regime": "low"}
+    sc.score_all([_dated_long_call(1), _dated_long_call(30)], view, 0.18, 8.0,
+                 daily_move=bad)
+    assert sorted(em for _, em in seen) == [8.0, 8.0]
 
 
 #############################################

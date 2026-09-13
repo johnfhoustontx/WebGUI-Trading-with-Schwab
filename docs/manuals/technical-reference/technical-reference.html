@@ -1376,7 +1376,10 @@ quality   = weighted q_rr 0.30 · q_be 0.25 · q_pop 0.25 · q_liq 0.20
 composite = 0.7 · quality + 0.3 · fit
 </code></pre>
 <p><code>q_be</code> rewards a breakeven <strong>near spot</strong> for every family except <code>NEUTRAL</code>, where it
-rewards a <strong>wide</strong> profit zone (breakeven spread ÷ 1-σ move). Flies, condors, calendars
+rewards a <strong>wide</strong> profit zone (breakeven spread ÷ 1-σ move). Both are measured in units
+of the 1-σ move <strong>to that candidate's own expiry</strong> — daily expected move × √DTE, floored
+at one day — so a 30-DTE breakeven is judged against a 30-day move, not a 1-day one.
+Flies, condors, calendars
 and the short straddle/strangle carry <code>NEUTRAL</code>; the long straddle/strangle carry
 <code>VOLATILITY</code>, which takes the near-breakeven branch, because a long volatility trade
 wants the move it needs to be small. Diagonals and share structures are <code>DIRECTIONAL</code>.</p>

@@ -897,15 +897,55 @@ def score_strategy(signal, view, atm_iv, em_1sd, market_state=None):
     return signal
 
 
-def score_all(signals, view, atm_iv, em_1sd, market_state=None):
+def _positive_finite(v):
+    """``v`` as a float when it is a real, finite, positive number, else None.
+    ``bool`` is rejected (``float(True)`` is 1.0) and so is a string."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    v = float(v)
+    return v if math.isfinite(v) and v > 0 else None
+
+
+def _em_for_signal(sig, em_1sd, daily_move):
+    """The 1-sigma dollar move to THIS signal's own expiry.
+
+    ``daily_move * sqrt(max(dte, 1))`` when both the daily move and the signal's
+    ``dte`` are usable; otherwise the caller's scalar ``em_1sd`` — exactly the
+    pre-2026-09-13 reading, so an unknown horizon degrades to the old behaviour
+    rather than to a silent one-day move.
+    """
+    if daily_move is None or not isinstance(sig, dict):
+        return em_1sd
+    dte = sig.get("dte")
+    if isinstance(dte, bool) or not isinstance(dte, (int, float)):
+        return em_1sd
+    if not math.isfinite(dte) or dte < 0:
+        return em_1sd
+    return daily_move * math.sqrt(max(dte, 1))
+
+
+def score_all(signals, view, atm_iv, em_1sd, market_state=None, daily_move=None):
     """Score each signal (neutralizing on exception) and return sorted by
     composite_score descending. ``market_state`` is threaded to each
     ``score_strategy`` for the low-weight market-state family tilt.
+
+    ``daily_move`` (optional, dollars) makes the breakeven-vs-EM factor judge
+    each candidate against the move to ITS OWN expiry:
+    ``daily_move * sqrt(max(dte, 1))``. Without it every candidate shares the
+    scalar ``em_1sd``. ⚠ One scalar across a scan spanning DTE 0-120 is the bug
+    this parameter exists for: the Strategy Finder passed
+    ``daily * sqrt(max(dte_min, 1))``, which at its default DTE min of 0 is a
+    ONE-DAY move — so a 30-DTE directional breakeven scored ~0 on that factor and
+    a neutral profit zone ~100, for every structure. A non-finite, zero,
+    negative or non-numeric ``daily_move`` falls back to the scalar.
     """
+    daily_move = _positive_finite(daily_move)
     scored = []
     for sig in signals or []:
         try:
-            scored.append(score_strategy(sig, view, atm_iv, em_1sd, market_state=market_state))
+            scored.append(score_strategy(sig, view, atm_iv,
+                                         _em_for_signal(sig, em_1sd, daily_move),
+                                         market_state=market_state))
         except Exception:
             log.exception("score_all: skipping unscorable signal")
             if isinstance(sig, dict):

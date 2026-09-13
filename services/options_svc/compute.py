@@ -473,7 +473,14 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                            and se.check_earnings_conflict(earnings_date,
                                                           _latest_expiration(s)))]
 
-    signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state)
+    # ``daily_move`` makes the breakeven-vs-EM factor judge each candidate against
+    # the move to ITS OWN expiry (``dem * sqrt(max(dte, 1))``). ``em_1sd`` above is
+    # only the fallback when the daily move is unusable. ⚠ It used to be the only
+    # input: one scalar at the DTE FLOOR, which at the Finder's default floor of 0
+    # is a one-day move - a 30-DTE directional breakeven scored ~0 on that factor
+    # and a neutral profit zone ~100. The Income board rides this path too.
+    signals = ssc.score_all(signals, view, atm_iv, em_1sd, market_state=market_state,
+                            daily_move=dem)
 
     # Volatility gate (gap assessment B2) — refuse to SELL cheap premium, and,
     # when a ceiling is configured, to BUY expensive premium. Until 2026-09-12

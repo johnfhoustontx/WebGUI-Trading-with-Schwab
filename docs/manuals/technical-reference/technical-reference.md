@@ -879,7 +879,10 @@ composite = 0.7 · quality + 0.3 · fit
 ```
 
 `q_be` rewards a breakeven **near spot** for every family except `NEUTRAL`, where it
-rewards a **wide** profit zone (breakeven spread ÷ 1-σ move). Flies, condors, calendars
+rewards a **wide** profit zone (breakeven spread ÷ 1-σ move). Both are measured in units
+of the 1-σ move **to that candidate's own expiry** — daily expected move × √DTE, floored
+at one day — so a 30-DTE breakeven is judged against a 30-day move, not a 1-day one.
+Flies, condors, calendars
 and the short straddle/strangle carry `NEUTRAL`; the long straddle/strangle carry
 `VOLATILITY`, which takes the near-breakeven branch, because a long volatility trade
 wants the move it needs to be small. Diagonals and share structures are `DIRECTIONAL`.

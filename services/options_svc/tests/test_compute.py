@@ -464,7 +464,8 @@ def test_swing_scan_cut_boundary_is_inclusive(monkeypatch):
     """>= the floor survives; a hair below does not."""
     _swing_scan_market_state_env(monkeypatch)
 
-    def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+    def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None,
+                        daily_move=None):
         out = []
         for i, sig in enumerate(signals or []):
             sig["composite_score"] = 49.9 if i % 2 else 50.0
@@ -489,7 +490,8 @@ def test_swing_scan_drops_an_excluded_grade_regardless_of_score(monkeypatch):
     """
     _swing_scan_market_state_env(monkeypatch)
 
-    def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+    def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None,
+                        daily_move=None):
         out = []
         for sig in signals or []:
             sig["composite_score"] = 90.0
@@ -512,6 +514,58 @@ def test_swing_scan_ids_cover_only_the_emitted_signals(monkeypatch):
     assert out["signals"]
     ids = [s.get("id") for s in out["signals"]]
     assert all(ids) and len(set(ids)) == len(ids)
+
+
+def test_swing_scan_scores_each_candidate_against_its_own_expirys_move(monkeypatch):
+    """The breakeven factor's horizon is the CANDIDATE's expiry, not the scan's
+    DTE floor. ``swing_scan`` hands ``score_all`` the engine's DAILY expected move
+    as ``daily_move``; ``score_all`` scales it per signal.
+
+    Before 2026-09-13 only ``em_1sd = daily * sqrt(max(dte_min, 1))`` went in, so
+    at the Finder's default DTE min of 0 every candidate - 30 DTE included - was
+    judged against a one-day move.
+    """
+    _swing_scan_market_state_env(monkeypatch)
+    seen = {}
+
+    def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None,
+                        daily_move=None):
+        seen["em_1sd"], seen["daily_move"] = em_1sd, daily_move
+        return list(signals or [])
+
+    import strategy_scoring
+    monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+    compute.swing_scan("SPY", 0, 30, -0.20, -0.10, 0.10, 0.20, 0.10)
+    # The fixture's engine daily EM is 5.0 dollars.
+    assert seen["daily_move"] == 5.0
+    # The scalar survives as score_all's fallback, unchanged in meaning.
+    assert seen["em_1sd"] == 5.0
+
+
+def test_swing_scan_real_scoring_uses_the_candidates_dte_not_the_floor(monkeypatch,
+                                                                        unfiltered_swing):
+    """End to end through the REAL scorer: the chain's expiry is 15 DTE from today,
+    so with a DTE floor of 0 a directional candidate's breakeven sub-score must
+    equal ``q_breakeven_vs_em`` at the 15-day move, not at the one-day move."""
+    import datetime as _dt
+    import math
+
+    import strategy_scoring
+    _swing_scan_market_state_env(monkeypatch)
+    exp = (_dt.date.today() + _dt.timedelta(days=15)).isoformat()
+    chain = _swing_chain(exp_str=exp, dte=15)
+    monkeypatch.setattr(compute.se, "fetch_option_chain",
+                        lambda client, symbol, from_date=None, to_date=None: chain)
+    out = compute.swing_scan("SPY", 0, 30, -0.20, -0.10, 0.10, 0.20, 0.10,
+                             families=["DIRECTIONAL"])
+    longs = [s for s in out["signals"] if s["type"] == "LONG_CALL"]
+    assert longs, "fixture built no LONG_CALL - the assertion is vacuous"
+    sig = longs[0]
+    assert sig["dte"] == 15
+    want = strategy_scoring.q_breakeven_vs_em(sig, 5.0 * math.sqrt(15))
+    one_day = strategy_scoring.q_breakeven_vs_em(sig, 5.0)
+    assert want != one_day, "fixture cannot tell the two horizons apart"
+    assert sig["factor_scores"]["q_be"] == round(want, 1)
 
 
 # ── Paper account (moved from webgui/pages/options/portfolio.py) ────────────
