@@ -304,8 +304,12 @@ def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0):
     same front-expiry rule) and GROSS of commission - it is a shape, not a
     number the page quotes. ``None`` when the position cannot be valued (no spot,
     or a later leg with an unusable IV, which ``_front_value`` refuses): the page
-    then draws no shape rather than a made-up one.
+    then draws no shape rather than a made-up one. ``None`` too for ``n < 2``,
+    which is no grid at all. A missing, non-numeric, NaN or sub-one ``dte`` spans
+    a ONE-day move - the narrowest honest width, never a crash.
     """
+    if not isinstance(n, int) or n < 2:
+        return None
     try:
         s = float(spot)
     except (TypeError, ValueError):
@@ -313,7 +317,12 @@ def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0):
     if not math.isfinite(s) or s <= 0:
         return None
     iv = atm_iv if isinstance(atm_iv, (int, float)) and math.isfinite(atm_iv) and atm_iv > 0 else 0.20
-    move = s * iv * math.sqrt(max(int(dte or 0), 1) / 365.0)
+    try:
+        days = float(dte)
+    except (TypeError, ValueError):
+        days = 1.0
+    days = max(int(days), 1) if math.isfinite(days) else 1
+    move = s * iv * math.sqrt(days / 365.0)
     lo, hi = max(s - width_moves * move, 0.0), s + width_moves * move
     entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)
     front = _front_expiration(legs) if _needs_front_valuation(legs) else None

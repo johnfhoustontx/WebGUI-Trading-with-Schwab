@@ -1741,3 +1741,20 @@ def test_payoff_curve_refuses_unusable_inputs_quietly():
     bad[0]["expiration"], bad[1]["expiration"] = _exp(7), _exp(35)
     assert ss.payoff_curve(bad, spot=100.0, atm_iv=0.28, dte=7) is None
     assert ss.payoff_curve([_leg("call", "long", 100.0, 3.0)], spot=None, atm_iv=0.28, dte=30) is None
+
+
+def test_payoff_curve_refuses_a_degenerate_grid():
+    legs = [_leg("call", "long", 100.0, 3.0)]
+    assert ss.payoff_curve(legs, spot=100.0, atm_iv=0.28, dte=30, n=1) is None
+    assert ss.payoff_curve(legs, spot=100.0, atm_iv=0.28, dte=30, n=0) is None
+
+
+def test_payoff_curve_treats_a_bad_dte_as_one_day():
+    import math
+    legs = [_leg("call", "long", 100.0, 3.0)]
+    em = 100.0 * 0.28 * math.sqrt(1 / 365)
+    for bad in (float("nan"), "x", -5, None):
+        pts = ss.payoff_curve(legs, spot=100.0, atm_iv=0.28, dte=bad, n=25)
+        assert pts is not None and len(pts) == 25, bad
+        assert abs(pts[0][0] - (100.0 - 2 * em)) < 0.02, bad
+        assert abs(pts[-1][0] - (100.0 + 2 * em)) < 0.02, bad
