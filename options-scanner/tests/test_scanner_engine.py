@@ -2179,7 +2179,8 @@ class TestDirectionalSignals:
         """The cut is a floor, not a blanket suppression: >= the threshold survives."""
         import strategy_scoring
 
-        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None,
+                            daily_move=None):
             out = []
             for i, sig in enumerate(signals or []):
                 sig["composite_score"] = 49.9 if i % 2 else 50.0
@@ -2206,7 +2207,8 @@ class TestDirectionalSignals:
         import strategy_scoring
         monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MAX_PER_SYMBOL", 2)
 
-        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None,
+                            daily_move=None):
             out = []
             for i, sig in enumerate(signals or []):
                 sig["composite_score"] = 90.0 if i < 2 else 60.0
@@ -2233,7 +2235,8 @@ class TestDirectionalSignals:
         """
         import strategy_scoring
 
-        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None):
+        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None,
+                            daily_move=None):
             out = []
             for sig in signals or []:
                 sig["composite_score"] = 90.0
@@ -2244,6 +2247,53 @@ class TestDirectionalSignals:
         monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
         results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
         assert results["signals_directional"] == []
+
+    def test_directional_judges_breakevens_against_each_trades_own_expiry(
+            self, fake_client, monkeypatch):
+        """The Directional tab hands ``score_all`` the DAILY expected move, so each
+        candidate's breakeven is measured against ``daily * sqrt(max(dte, 1))`` -
+        the move to ITS OWN expiry - exactly as the Strategy Finder does.
+
+        It used to pass one ``daily * sqrt(window min)`` per window, so a DTE-4
+        trade in the 0-4 window was judged against a one-day move and a DTE-15
+        trade in the 5-15 window against a five-day one.
+        """
+        import math
+
+        import strategy_scoring
+        real_all = strategy_scoring.score_all
+        real_be = strategy_scoring.q_breakeven_vs_em
+        calls, ems, current = [], [], {}
+
+        def _spy_all(signals, view, atm_iv, em_1sd, market_state=None,
+                     daily_move=None):
+            calls.append((em_1sd, daily_move))
+            current["daily"] = daily_move
+            return real_all(signals, view, atm_iv, em_1sd,
+                            market_state=market_state, daily_move=daily_move)
+
+        def _spy_be(signal, em_1sd):
+            ems.append((signal.get("dte"), em_1sd, current.get("daily")))
+            return real_be(signal, em_1sd)
+
+        monkeypatch.setattr(strategy_scoring, "score_all", _spy_all)
+        monkeypatch.setattr(strategy_scoring, "q_breakeven_vs_em", _spy_be)
+        scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
+
+        assert calls, "the Directional path never scored - the assertions are vacuous"
+        dailies = {d for _, d in calls}
+        assert None not in dailies, "a Directional window scored without daily_move"
+        assert all(d > 0 for d in dailies)
+        assert ems, "no candidate reached the breakeven factor"
+        # Every candidate's move is the daily move of the score_all call that
+        # scored it (one call per symbol per window), scaled to its own dte.
+        for dte, em, daily in ems:
+            assert em == pytest.approx(daily * math.sqrt(max(dte, 1)))
+        # Non-vacuity: at least one candidate's own dte differs from its window
+        # minimum, or the old per-window scalar would satisfy the loop above.
+        assert any(dte not in (0, 1, 5) for dte, _, _ in ems), (
+            "every candidate sits at its window minimum - the fixture cannot tell "
+            "per-expiry from per-window")
 
     def test_directional_degrades_when_builder_raises(self, fake_client, monkeypatch):
         """A directional failure must never break the credit-spread scan."""

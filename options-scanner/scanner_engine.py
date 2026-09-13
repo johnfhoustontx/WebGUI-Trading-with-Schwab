@@ -1770,20 +1770,23 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 win_sigs = _ssn.build_directional(_chain, symbol, price, atm_iv, _lo, _hi)
                 if not win_sigs:
                     continue
-                # 1-sigma $ move over THIS window's horizon (feeds strategy_scoring's
-                # breakeven-vs-EM quality factor).
+                # The breakeven-vs-EM quality factor judges each candidate against
+                # the 1-sigma move to ITS OWN expiry: ``daily_move`` makes
+                # score_all use ``daily_em * sqrt(max(dte, 1))`` per signal.
+                # ``em_1sd`` (the move at this window's minimum) is only the
+                # fallback when the daily move is unusable.
                 #
-                # DEVIATES FROM THE TASK SPEC, which called for ONE em_1sd across
-                # both windows (sqrt(max(zerodte_min_dte, 1)) == sqrt(1)). Scoring
-                # PER WINDOW instead: q_be is `clamp((1 - dist/em_1sd) * 100)`, so a
-                # 1-day em_1sd would size a 5-15 DTE candidate's breakeven against a
-                # 0-DTE move (~2.65x too small at 7 DTE), drive its q_be to ~0, and
-                # systematically under-score the swing side of one jointly-sorted
-                # list. This is exactly compute.swing_scan's formula
-                # (daily_em * sqrt(dte_min)) applied to each window, so the same
-                # candidate scores identically on the Scanner and the Swing page.
+                # ⚠ It used to be the only input - one move per WINDOW - so a DTE-4
+                # trade in the 0-4 window was judged against a one-day move and a
+                # DTE-12 trade in the 5-15 window against a five-day one. q_be is
+                # `clamp((1 - dist/em_1sd) * 100)`, so a too-small move drives it
+                # toward 0 and under-scores the later trades in each window.
+                # ``compute.swing_scan`` passes the same ``daily_move``, so the
+                # same candidate scores identically on the Scanner and the
+                # Strategy Finder.
                 em_1sd = (daily_em or 0.0) * math.sqrt(max(_lo, 1))
-                _scored = _ssc.score_all(win_sigs, view, atm_iv, em_1sd)
+                _scored = _ssc.score_all(win_sigs, view, atm_iv, em_1sd,
+                                         daily_move=daily_em)
 
                 # Volatility gate (gap assessment B2). This list is MIXED --
                 # SHORT_PUT / SHORT_CALL beside LONG_CALL / LONG_PUT -- so the
