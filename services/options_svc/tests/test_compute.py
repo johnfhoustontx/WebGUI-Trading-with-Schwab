@@ -423,6 +423,74 @@ def test_the_calendar_earnings_control_builds_without_a_report(monkeypatch, unfi
     assert [s for s in out["signals"] if s["type"].startswith("CALENDAR")]
 
 
+# ── Display fields for the Strategy Finder: ``group`` + ``payoff_curve`` ──────
+
+def test_every_swing_candidate_names_the_group_that_built_it(monkeypatch, unfiltered_swing):
+    _patch_swing_inputs(monkeypatch, _bs_ladder_chain())
+    out = compute.swing_scan("SPY", 5, 60, -0.20, -0.10, 0.10, 0.20, 0.10)
+    groups = {s["type"]: s.get("group") for s in out["signals"]}
+    assert groups.get("LONG_CALL") == "DIRECTIONAL"
+    assert groups.get("BULL_CALL") == "VERTICAL"
+    assert groups.get("LONG_STRADDLE") == "STRADDLE"
+    assert groups.get("BUTTERFLY_CALL") == "BUTTERFLY"
+    assert groups.get("CALENDAR_CALL") == "CALENDAR"
+    assert groups.get("COVERED_CALL") == "STOCK"
+    assert all(s.get("group") for s in out["signals"])
+
+
+def test_adapted_credit_spreads_are_VERTICAL_and_iron_condors_NEUTRAL(monkeypatch,
+                                                                     unfiltered_swing):
+    """``_patch_swing_inputs`` stubs ``screen_spreads`` empty, so the two adapters
+    need their own fixture: one PCS and one IC out of the stubbed engine."""
+    _patch_swing_inputs(monkeypatch, _bs_ladder_chain())
+    pcs = {"symbol": "SPY", "type": "PCS", "short_strike": 530.0, "long_strike": 525.0,
+           "short_mark": 1.2, "long_mark": 0.6, "credit": 0.6, "max_loss": 4.4,
+           "expiration": "2026-07-15", "underlying_price": 540.0}
+    ic = {"type": "IC", "symbol": "SPY", "short_strike": 525.0, "long_strike": 520.0,
+          "short_mark": 1.1, "long_mark": 0.5, "call_short": 555.0, "call_long": 560.0,
+          "call_short_mark": 1.1, "call_long_mark": 0.5, "credit": 1.2, "max_loss": 3.8,
+          "expiration": "2026-07-15", "underlying_price": 540.0}
+    monkeypatch.setattr(compute.se, "screen_spreads", lambda *a, **k: [pcs])
+    monkeypatch.setattr(compute.se, "build_iron_condors", lambda spreads: [ic])
+    out = compute.swing_scan("SPY", 5, 60, -0.20, -0.10, 0.10, 0.20, 0.10,
+                             families=["VERTICAL", "NEUTRAL"])
+    groups = {s["type"]: s.get("group") for s in out["signals"]}
+    assert groups.get("PCS") == "VERTICAL"
+    assert groups.get("IC") == "NEUTRAL"
+
+
+def test_every_emitted_swing_candidate_carries_a_payoff_curve(monkeypatch, unfiltered_swing):
+    _patch_swing_inputs(monkeypatch, _bs_ladder_chain())
+    out = compute.swing_scan("SPY", 5, 60, -0.20, -0.10, 0.10, 0.20, 0.10)
+    for s in out["signals"]:
+        curve = s.get("payoff_curve")
+        assert curve is None or (len(curve) == 25 and all(len(p) == 2 for p in curve)), s["type"]
+    assert any(s.get("payoff_curve") for s in out["signals"])
+
+
+def test_the_payoff_curve_is_computed_only_for_rows_that_survive_the_cut(monkeypatch):
+    """With the production quality cut in force, a curve is built once per EMITTED
+    row and never for a candidate the cut removed - the curve is ~25 valuations
+    per row, and nothing reads it off a dropped one."""
+    import strategy_scanner as ssn
+
+    _patch_swing_inputs(monkeypatch, _bs_ladder_chain())
+    real = ssn.payoff_curve
+    seen = []
+
+    def _spy(legs, spot, atm_iv, dte, *a, **k):
+        seen.append((spot, atm_iv, dte))
+        return real(legs, spot, atm_iv, dte, *a, **k)
+
+    monkeypatch.setattr(ssn, "payoff_curve", _spy)
+    out = compute.swing_scan("SPY", 5, 60, -0.20, -0.10, 0.10, 0.20, 0.10)
+    assert out["filtered_out"] > 0, "fixture must have rows the cut removes"
+    assert len(seen) == len(out["signals"])
+    # The scan's spot and each row's own dte reach the builder.
+    assert all(spot == 540.0 for spot, _, _ in seen)
+    assert sorted(d for _, _, d in seen) == sorted(s.get("dte") for s in out["signals"])
+
+
 # ── Swing quality cut (score >= SWING_MIN_SCORE, no excluded grade) ─────────
 
 def test_swing_scan_drops_weak_candidates_across_every_family(monkeypatch):

@@ -252,6 +252,21 @@ def _latest_expiration(sig):
 _SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL",
                    "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK")
 
+
+def _tag_group(batch, group):
+    """Stamp ``group`` - the BUILD group from ``_SWING_FAMILIES`` - on each candidate.
+
+    An additive display field for the Strategy Finder, and deliberately distinct
+    from the scoring ``family`` a candidate already carries: a long straddle is
+    built by STRADDLE but scored as VOLATILITY, an iron condor built by NEUTRAL is
+    also scored NEUTRAL. The page groups by what built a row; scoring reads
+    ``family``. Returns the list so it wraps a builder call in place.
+    """
+    batch = list(batch)
+    for s in batch:
+        s["group"] = group
+    return batch
+
 # Emission cut for the Strategy Finder: a candidate must reach SWING_MIN_SCORE on
 # strategy_scoring's Fit+Quality composite AND not carry an excluded grade, or it
 # is dropped before the page ever sees it.
@@ -405,9 +420,11 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         # carried -0.334. ``build_directional`` aims a short at the band's
         # MIDPOINT and drops one richer than its ceiling, and it never touches
         # the LONG legs - see that docstring for why the rule is asymmetric.
-        signals += ssn.build_directional(chain, symbol, spot, atm_iv, dte_min, dte_max,
-                                        put_band=(put_d_min, put_d_max),
-                                        call_band=(call_d_min, call_d_max))
+        signals += _tag_group(ssn.build_directional(chain, symbol, spot, atm_iv,
+                                                    dte_min, dte_max,
+                                                    put_band=(put_d_min, put_d_max),
+                                                    call_band=(call_d_min, call_d_max)),
+                              "DIRECTIONAL")
 
     # Credit spreads feed BOTH the VERTICAL credit set AND the NEUTRAL iron condors,
     # so compute screen_spreads if EITHER family is requested.
@@ -419,24 +436,30 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                                          daily_expected_move=dem,
                                          earnings_date=earnings_date))
     if "VERTICAL" in fams:
-        signals += ssn.build_debit_verticals(chain, symbol, spot, atm_iv, dte_min, dte_max)
-        signals += [ssn.adapt_credit_spread(s) for s in spreads]
+        signals += _tag_group(ssn.build_debit_verticals(chain, symbol, spot, atm_iv,
+                                                        dte_min, dte_max), "VERTICAL")
+        signals += _tag_group([ssn.adapt_credit_spread(s) for s in spreads], "VERTICAL")
     if "NEUTRAL" in fams:
-        signals += [ssn.adapt_iron_condor(ic) for ic in se.build_iron_condors(spreads)]
+        signals += _tag_group([ssn.adapt_iron_condor(ic)
+                               for ic in se.build_iron_condors(spreads)], "NEUTRAL")
     # The four build groups added 2026-09-13. The short-delta band reaches the two
     # builders that SELL an out-of-the-money option (the short strangle, the
     # covered call's call) and binds nothing else - see each builder's docstring.
     bands = {"put_band": (put_d_min, put_d_max), "call_band": (call_d_min, call_d_max)}
     if "STRADDLE" in fams:
-        signals += ssn.build_straddles_strangles(chain, symbol, spot, atm_iv,
-                                                 dte_min, dte_max, **bands)
+        signals += _tag_group(ssn.build_straddles_strangles(chain, symbol, spot, atm_iv,
+                                                            dte_min, dte_max, **bands),
+                              "STRADDLE")
     if "BUTTERFLY" in fams:
-        signals += ssn.build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max)
+        signals += _tag_group(ssn.build_butterflies_condors(chain, symbol, spot, atm_iv,
+                                                            dte_min, dte_max), "BUTTERFLY")
     if "CALENDAR" in fams:
-        signals += ssn.build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max)
+        signals += _tag_group(ssn.build_calendars(chain, symbol, spot, atm_iv,
+                                                  dte_min, dte_max), "CALENDAR")
     if "STOCK" in fams:
-        signals += ssn.build_stock_structures(chain, symbol, spot, atm_iv,
-                                              dte_min, dte_max, **bands)
+        signals += _tag_group(ssn.build_stock_structures(chain, symbol, spot, atm_iv,
+                                                         dte_min, dte_max, **bands),
+                              "STOCK")
 
     # Window filters, BEFORE scoring — a candidate this window does not trade is
     # not a candidate the quality bar rejected, and ``filtered_out`` below is
@@ -525,6 +548,12 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     iv_rank = iv.get("iv_rank")
     for s in signals:
         s["iv_rank"] = iv_rank
+    # The Strategy Finder's payoff shape - an additive display field, built HERE,
+    # after the quality cut, so only emitted rows pay for its ~25 valuations. It
+    # uses the scan's own spot + ATM IV and the row's front ``dte``; ``None`` when
+    # the position cannot be valued (the page then draws no shape).
+    for s in signals:
+        s["payoff_curve"] = ssn.payoff_curve(s.get("legs") or [], spot, atm_iv, s.get("dte"))
     result = {"signals": signals, "view": view, "filtered_out": filtered_out,
               "vol_filtered": vol_filtered}
     if return_chain:
