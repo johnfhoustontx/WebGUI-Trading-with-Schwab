@@ -305,6 +305,29 @@ def _front_exp(opts_by_exp):
     return min(opts_by_exp.items(), key=lambda kv: kv[1]["dte"]) if opts_by_exp else None
 
 
+def _atm_strike(strikes, spot):
+    """The listed strike nearest spot, or None for an empty ladder."""
+    return min(strikes, key=lambda k: abs(k - spot)) if strikes else None
+
+
+def _half_em(spot, atm_iv, dte):
+    """Half the 1-sigma expected move to ``dte`` - the wing target (design doc)."""
+    return spot * max(atm_iv or 0.0, 0.0) * math.sqrt(max(dte, 1) / 365.0) / 2.0
+
+
+def _symmetric_wing(strikes, center, target):
+    """A wing DISTANCE listed on BOTH sides of ``center``, nearest ``target``.
+
+    Butterflies and condors are built symmetric on purpose: a broken wing is a
+    different risk profile, and a ladder that happens to lack the mirror strike
+    must not quietly produce one. None when no distance exists on both sides.
+    """
+    have = {round(k, 4) for k in strikes}
+    c = round(center, 4)
+    dists = [round(k - c, 4) for k in have if k > c and round(2 * c - k, 4) in have]
+    return min(dists, key=lambda d: abs(d - target)) if dists else None
+
+
 def _leg_from(leg_data, kind, side, exp):
     return {"kind": kind, "side": side, "strike": leg_data["strike"], "expiration": exp,
             "qty": 1, "mark": leg_data["mark"], "delta": leg_data["delta"],

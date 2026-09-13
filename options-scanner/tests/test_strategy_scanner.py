@@ -714,3 +714,23 @@ def test_calendar_with_an_unusable_back_leg_iv_raises(bad_iv):
     long_["iv"] = bad_iv
     with pytest.raises(ValueError, match="unpriceable later leg"):
         ss.payoff_metrics([short, long_], spot=100.0)
+
+
+def test_atm_strike_is_nearest_to_spot():
+    assert ss._atm_strike({95.0: {}, 100.0: {}, 105.0: {}}, 101.0) == 100.0
+    assert ss._atm_strike({}, 101.0) is None
+
+
+def test_symmetric_wing_picks_the_common_distance_nearest_the_target():
+    strikes = {90.0, 95.0, 100.0, 105.0, 110.0, 112.5}
+    assert ss._symmetric_wing(strikes, 100.0, 4.0) == 5.0
+    assert ss._symmetric_wing(strikes, 100.0, 9.0) == 10.0
+    # 12.5 exists above but 87.5 does not below -> never asymmetric
+    assert ss._symmetric_wing(strikes, 100.0, 12.4) == 10.0
+    assert ss._symmetric_wing({100.0}, 100.0, 5.0) is None
+
+
+def test_half_expected_move():
+    import math
+    assert abs(ss._half_em(100.0, 0.28, 30) - 100 * 0.28 * math.sqrt(30 / 365) / 2) < 1e-9
+    assert ss._half_em(100.0, 0.28, 0) == ss._half_em(100.0, 0.28, 1)
