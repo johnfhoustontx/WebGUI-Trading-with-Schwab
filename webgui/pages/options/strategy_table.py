@@ -21,12 +21,17 @@ from . import scanner
 from .theme import TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL
 
 
-# Structures the Paper-trade button is allowed for. Credit spreads (``IC`` is the
-# engine's internal iron-condor key, ``IRON_CONDOR`` the normalized one) PLUS the
-# defined-risk DEBIT structures the ledger now supports (long options + debit verticals).
-# Naked shorts (SHORT_CALL/SHORT_PUT) are excluded — undefined risk.
+# Structures the Paper-trade button is allowed for: the credit spreads (``IC`` is
+# the engine's iron-condor key, ``IRON_CONDOR`` the normalized one) PLUS
+# shared.structures.LEDGER_DEBIT, which Tier 1 cannot import - the two are pinned
+# equal by shared/tests/test_cross_tier_mirrors.py. Naked shorts, straddles and
+# strangles (analysis only, D1), the iron butterfly, calendars and every share
+# structure are excluded: the ledger's credit path only understands two-strike
+# spreads and iron condors, it settles at intrinsic (wrong for a back month), and
+# it holds no shares.
 _PAPER_TYPES = {"PCS", "CCS", "IC", "IRON_CONDOR",
-                "LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT"}
+                "LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
+                "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT"}
 
 # Inferred-view → what option families it favors (kept short for the banner).
 _FAVORS = {

@@ -630,3 +630,13 @@ def test_legs_summary_undated_leg_gets_no_date_and_does_not_move_the_front():
             {"kind": "put", "side": "long", "strike": 95.0, "expiration": None},
             {"kind": "call", "side": "long", "strike": 100.0, "expiration": "2026-11-13"}]
     assert st.legs_summary(legs) == "S 100C / L 95P / L 100C 11/13"
+
+
+
+def test_paper_button_on_butterfly_but_not_straddles_calendars_or_shares():
+    rows = {r["id"]: r for r in st.strategy_rows([
+        {"id": "a", "type": "BUTTERFLY_CALL"}, {"id": "b", "type": "CALENDAR_CALL"},
+        {"id": "c", "type": "COVERED_CALL"}, {"id": "d", "type": "IRON_BUTTERFLY"},
+        {"id": "e", "type": "LONG_STRADDLE"}, {"id": "f", "type": "SHORT_STRANGLE"}])}
+    assert rows["a"]["_allow_paper"] is True
+    assert not any(rows[k]["_allow_paper"] for k in "bcdef")    # e, f: D1

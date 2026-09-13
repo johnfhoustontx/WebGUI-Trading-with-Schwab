@@ -89,6 +89,12 @@ DEFAULTS = {
         "LONG_PUT": {"exit_dte": 21},
         "BULL_CALL": {"exit_dte": 21},
         "BEAR_PUT": {"exit_dte": 21},
+        # The Strategy Finder's long butterflies and condors (2026-09-13): the
+        # same time exit. No straddle/strangle - analysis only (D1).
+        "BUTTERFLY_CALL": {"exit_dte": 21},
+        "BUTTERFLY_PUT": {"exit_dte": 21},
+        "CONDOR_CALL": {"exit_dte": 21},
+        "CONDOR_PUT": {"exit_dte": 21},
     },
 }
 

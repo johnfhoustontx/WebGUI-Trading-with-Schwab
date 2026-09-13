@@ -64,3 +64,27 @@ def test_a_butterfly_reprices_with_the_two_lot_counted(monkeypatch):
     monkeypatch.setattr(signal_repricer, "_fetch_chain", lambda client, sym, exp: chain)
     rep = signal_repricer.reprice_legs(trade, _Client())
     assert rep["current_value"] == 1.0              # 7 - 2*4 + 2
+
+
+
+def _condor_signal(kind):
+    legs = [_leg(kind, "long", 90.0, 11.0), _leg(kind, "short", 95.0, 7.0),
+            _leg(kind, "short", 105.0, 2.0), _leg(kind, "long", 110.0, 1.0)]
+    return ss._assemble(f"CONDOR_{kind.upper()}", "NEUTRAL", "Condor", "neutral",
+                        legs, "XYZ", 100.0, 0.28)
+
+
+def test_the_ledger_debit_set_is_the_shared_taxonomy():
+    from shared import structures
+    assert paper_trader.PAPER_DEBIT_TYPES == set(structures.LEDGER_DEBIT)
+
+
+def test_a_finder_butterfly_and_condor_open_through_the_DEBIT_path():
+    """Before 2026-09-13 these fell into the credit branch and KeyErrored on
+    ``short_strike``. Now they are booked by their legs, qty included."""
+    fly = paper_trader.create_paper_trade(_fly_signal(), 2)
+    assert fly["direction"] == "DEBIT" and fly["strategy"] == "BUTTERFLY_CALL"
+    assert [l["qty"] for l in fly["legs"]] == [1, 2, 1]
+    assert fly["max_profit_total"] is not None           # bounded: target on max profit
+    condor = paper_trader.create_paper_trade(_condor_signal("call"), 1)
+    assert condor["direction"] == "DEBIT" and len(condor["legs"]) == 4

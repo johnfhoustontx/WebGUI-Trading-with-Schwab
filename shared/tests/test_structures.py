@@ -189,3 +189,21 @@ def test_no_module_spells_the_single_leg_set_as_a_literal():
     assert not offenders, (
         "these spell a structure set by hand; call the shared.structures "
         "predicates instead:\n  " + "\n  ".join(offenders))
+
+
+# --- the paper ledger's debit structures ------------------------------------
+
+def test_ledger_debit_is_the_four_originals_plus_the_four_finder_structures():
+    """The ledger settles a debit generically by its legs, so the list is what
+    the Paper button may send. No straddle or strangle: those are analysis only
+    (D1), pinned by options-scanner/tests/test_straddle_analysis_only.py."""
+    assert set(structures.LEDGER_DEBIT) == {
+        "LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
+        "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT"}
+
+
+def test_every_ledger_debit_name_is_its_own_canonical_spelling():
+    """The exit-rule tables are keyed on ``canonical``; an alias here would give
+    a structure the Paper button can send a table nobody reads."""
+    for name in structures.LEDGER_DEBIT:
+        assert structures.canonical(name) == name, name

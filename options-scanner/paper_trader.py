@@ -20,6 +20,8 @@ Version 1.0.0 Changes:
 - Trade lifecycle (open/close/expire)
 """
 
+import pathlib as _pathlib
+import sys as _sys
 import uuid
 from pathlib import Path
 from datetime import datetime
@@ -37,10 +39,16 @@ DATA_DIR.mkdir(exist_ok=True)
 # TRADE MODEL
 #############################################
 
-# Non-credit DEFINED-RISK structures the swing scanner produces that the ledger can now
-# paper-trade: long single options + debit verticals. Their max loss is the debit paid.
-# Naked shorts (SHORT_CALL/SHORT_PUT) are deliberately EXCLUDED (undefined risk).
-PAPER_DEBIT_TYPES = {"LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT"}
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import structures as _structures  # noqa: E402
+
+# Non-credit DEFINED-RISK structures the scanners produce that the ledger can
+# paper-trade: long single options, debit verticals, and the Strategy Finder's
+# long butterflies and condors. Their max loss is the debit paid. Naked shorts and
+# every straddle/strangle are deliberately EXCLUDED. See
+# shared.structures.LEDGER_DEBIT; kept as a set under its old name because the
+# call sites test membership against it.
+PAPER_DEBIT_TYPES = set(_structures.LEDGER_DEBIT)
 
 # Shares per option contract. Ledger rows store PER-SHARE prices (entry_credit,
 # max_loss_per) and PER-CONTRACT dollars (*_total); this is the factor between them.

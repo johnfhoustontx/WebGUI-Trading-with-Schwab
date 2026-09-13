@@ -441,3 +441,17 @@ def test_every_published_gamma_history_is_one_a_screen_actually_draws():
             f"but the live screens need {tuple(sorted(want))!r}. Too few and the "
             "screen draws an empty heatmap forever; too many and options_svc "
             "rewrites a grid key every minute that nothing reads.")
+
+
+# --- the Paper button and the ledger's debit path ---------------------------
+
+def test_the_pages_paper_button_covers_exactly_the_ledgers_debit_structures():
+    """The Paper button (webgui) and the ledger's debit path (options-scanner) are
+    two lists in tiers that cannot share one. A type with the button but not the
+    debit path falls into the CREDIT branch of create_paper_trade and KeyErrors on
+    short_strike; the converse is a structure the ledger supports that nobody can
+    send."""
+    taxonomy = set(_const("shared/structures.py", "LEDGER_DEBIT"))
+    page = set(_const("webgui/pages/options/strategy_table.py", "_PAPER_TYPES"))
+    credit = {"PCS", "CCS", "IC", "IRON_CONDOR"}
+    assert page == taxonomy | credit

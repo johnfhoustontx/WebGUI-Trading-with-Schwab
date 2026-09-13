@@ -45,6 +45,17 @@ _LEGS = {"IC": 4, **{s: 1 for s in SINGLE_LEG}}
 # against the alternatives it is ranked against - so the default is the spread.
 _DEFAULT_LEGS = 2
 
+# Debit structures the Paper LEDGER records, reprices and settles generically by
+# their legs (paper_trader._create_debit_trade / signal_repricer.reprice_legs /
+# legs_intrinsic_value). Anything NOT here that is not a credit spread falls into
+# create_paper_trade's credit branch and KeyErrors on ``short_strike`` - which is
+# why the page's Paper button is pinned to this list by test_cross_tier_mirrors.
+# ⚠ No straddle or strangle, long or short: they are ANALYSIS ONLY (D1,
+# docs/plans/2026-09-12-straddle-strangle-design.md), pinned by
+# options-scanner/tests/test_straddle_analysis_only.py.
+LEDGER_DEBIT = ("LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
+                "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT")
+
 
 def normalise(strategy) -> str:
     """A structure name in canonical form; ``""`` for anything absent."""

@@ -117,3 +117,18 @@ def test_a_TOML_edit_to_one_debit_table_leaves_its_siblings_alone(
     assert trade_mgmt.structure_rules("LONG_CALL")["exit_dte"] == 7
     assert trade_mgmt.structure_rules("LONG_PUT")["exit_dte"] == 21
     assert trade_mgmt.structure_rules("LONG_CALL")["tp_frac"] == 0.50
+
+
+
+# ── every structure the ledger can hold as a debit (2026-09-13) ─────────────
+
+def test_every_ledger_debit_structure_has_a_time_exit():
+    """``shared.structures.LEDGER_DEBIT`` is what the Paper button may send, so a
+    structure added there without a table would ride to expiry with no time
+    exit. Checked through the accessor AND in the shipped TOML, since the
+    accessor alone passes while a value lives only in DEFAULTS."""
+    shipped = _raw().get("structures", {})
+    for name in structures.LEDGER_DEBIT:
+        assert trade_mgmt.structure_rules(name).get("exit_dte") == 21, name
+        assert (shipped.get(name) or {}).get("exit_dte") == 21, name
+        assert (shipped.get(name) or {}).get("debit_stop_frac") in (None, 0), name

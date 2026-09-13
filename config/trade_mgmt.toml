@@ -183,6 +183,22 @@ exit_dte = 21
 exit_dte = 21
 # debit_stop_frac = 0.60
 
+# Strategy Finder debit structures (2026-09-13) — the same time exit as the four
+# above. The profit target needs no table: _debit_target_base already takes a
+# fraction of MAX PROFIT for a bounded butterfly/condor. No straddle/strangle
+# table: those are analysis only (D1), and test_straddle_analysis_only pins that.
+[structures.BUTTERFLY_CALL]
+exit_dte = 21
+
+[structures.BUTTERFLY_PUT]
+exit_dte = 21
+
+[structures.CONDOR_CALL]
+exit_dte = 21
+
+[structures.CONDOR_PUT]
+exit_dte = 21
+
 [rescue]
 # Escalation bands the at-risk board owns ALONE. The four it shares with [stops]
 # (delta_critical, delta_drift, money_tested_mult, dte_urgent) are deliberately
