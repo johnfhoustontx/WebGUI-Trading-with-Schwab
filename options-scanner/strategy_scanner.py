@@ -334,19 +334,21 @@ def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0):
     days = max(int(days), 1) if math.isfinite(days) else 1
     move = s * iv * math.sqrt(days / 365.0)
     lo, hi = s - width_moves * move, s + width_moves * move
-    strikes = [l["strike"] for l in _option_legs(legs) if l.get("strike") is not None]
-    if strikes:
-        lo, hi = min(lo, min(strikes) * 0.97), max(hi, max(strikes) * 1.03)
-    lo = max(lo, 0.0)
-    entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)
-    front = _front_expiration(legs) if _needs_front_valuation(legs) else None
     points = []
     try:
+        # One malformed leg (no mark, a non-numeric strike or qty) must cost that
+        # row its shape, never the whole scan it is drawn inside.
+        strikes = [l["strike"] for l in _option_legs(legs) if l.get("strike") is not None]
+        if strikes:
+            lo, hi = min(lo, min(strikes) * 0.97), max(hi, max(strikes) * 1.03)
+        lo = max(lo, 0.0)
+        entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)
+        front = _front_expiration(legs) if _needs_front_valuation(legs) else None
         for i in range(n):
             x = lo + (hi - lo) * i / (n - 1)
             pnl = _pl_at(legs, entry_cost, x, front) * _CONTRACT_MULT
             points.append([round(x, 2), round(pnl, 2)])
-    except ValueError:
+    except (KeyError, TypeError, ValueError):
         return None
     return points
 

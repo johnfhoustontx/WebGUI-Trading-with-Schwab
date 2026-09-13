@@ -1787,3 +1787,11 @@ def test_payoff_curve_accepts_a_numpy_iv():
     em = 100.0 * 0.28 * math.sqrt(30 / 365)
     assert abs(pts[0][0] - (100.0 - 2 * em)) < 0.02
     assert abs(pts[-1][0] - (100.0 + 2 * em)) < 0.02
+
+
+def test_payoff_curve_draws_nothing_for_a_malformed_leg():
+    no_mark = _leg("call", "long", 100.0, 3.0)
+    del no_mark["mark"]
+    assert ss.payoff_curve([no_mark], spot=100.0, atm_iv=0.28, dte=30) is None
+    bad_strike = [_leg("put", "short", 95.0, 1.0), _leg("put", "long", "x", 0.5)]
+    assert ss.payoff_curve(bad_strike, spot=100.0, atm_iv=0.28, dte=30) is None
