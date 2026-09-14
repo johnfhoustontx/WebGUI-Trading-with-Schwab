@@ -229,7 +229,7 @@ def test_scan_bar_groups_share_one_label_style():
 def test_an_expiry_preset_writes_both_boxes_and_a_hand_edit_clears_it():
     card = _render_page()
     buttons, active = _segment(card, _EXPIRY)
-    assert active == "Any"
+    assert active == "All"
     _click(buttons["2–6 wk"], card)
     assert (_number(card, "DTE min").value, _number(card, "DTE max").value) == (14, 42)
     assert _segment(card, _EXPIRY)[1] == "2–6 wk"
@@ -335,9 +335,8 @@ def test_delta_band_expander_does_not_claim_credit_spreads_only():
 
 def _fire_scan_timeout(card):
     from nicegui import ui
-    from pages import busy
     (timer,) = [t for t in card.descendants()
-                if isinstance(t, ui.timer) and t.interval == busy.BUSY_TIMEOUT_SEC]
+                if isinstance(t, ui.timer) and t.interval == swing.SCAN_TIMEOUT_SEC]
     with card:
         timer.callback()
 
@@ -624,8 +623,8 @@ def test_a_cached_hand_edited_scan_shows_custom_and_no_preset():
 def test_the_scan_bar_starts_on_defaults_with_an_empty_cache():
     from nicegui import ui
     card = _render_page()
-    assert (_number(card, "DTE min").value, _number(card, "DTE max").value) == (0, 120)
-    assert _segment(card, _EXPIRY)[1] == "Any"
+    assert (_number(card, "DTE min").value, _number(card, "DTE max").value) == (0, None)
+    assert _segment(card, _EXPIRY)[1] == "All"
     assert _segment(card, _RISK)[1] == swing.fv.RISK_DEFAULT
     (custom,) = [e for e in _widgets(card, ui.label) if e.text == swing.fv.RISK_CUSTOM]
     assert not custom.visible
@@ -640,3 +639,188 @@ def test_scanning_again_from_a_seeded_bar_resends_the_cached_params(monkeypatch)
     assert args == {"symbol": "NVDA", "dte_min": 7, "dte_max": 14,
                     "put_d_min": -0.30, "put_d_max": -0.20,
                     "call_d_min": 0.20, "call_d_max": 0.30, "min_cr_fraction": 0.15}
+
+
+# ------------------------------------------------- whole chain: no DTE limit
+# (docs/plans/2026-09-14-strategy-finder-whole-chain-design.md)
+
+_BANDS = {"put_d_min": -0.2, "put_d_max": -0.1, "call_d_min": 0.1, "call_d_max": 0.2}
+
+
+def test_scan_params_blank_dte_max_is_no_limit():
+    assert swing.scan_params("spy", 0, None, _BANDS, 10)["dte_max"] is None
+    assert swing.scan_params("spy", 0, "", _BANDS, 10)["dte_max"] is None
+    assert swing.scan_params("spy", 0, 60.0, _BANDS, 10)["dte_max"] == 60
+    assert isinstance(swing.scan_params("spy", 0, 60.0, _BANDS, 10)["dte_max"], int)
+
+
+def test_the_expiry_group_has_six_pills_and_all_is_the_default():
+    card = _render_page()
+    buttons, active = _segment(card, _EXPIRY)
+    assert list(buttons) == ["1–2 wk", "2–6 wk", "1–3 mo", "3–12 mo", "1 yr+", "All"]
+    assert active == "All"
+
+
+def test_the_dte_max_box_says_no_limit_when_blank():
+    card = _render_page()
+    box = _number(card, "DTE max")
+    assert box.value is None
+    assert box.props.get("placeholder") == "no limit"
+
+
+def test_all_then_scan_sends_no_upper_limit_and_a_typed_max_is_sent(monkeypatch):
+    card = _render_page(_cached_scan())
+    sent = []
+    monkeypatch.setattr(bus_client, "request", lambda d, cmd: sent.append(cmd["args"]))
+    _click(_buttons(card)["All"], card)
+    assert (_number(card, "DTE min").value, _number(card, "DTE max").value) == (0, None)
+    _click(_buttons(card)["Scan"], card)
+    assert sent[-1]["dte_min"] == 0 and sent[-1]["dte_max"] is None
+    _number(card, "DTE max").value = 60
+    assert _segment(card, _EXPIRY)[1] is None
+    _click(_buttons(card)["Scan"], card)
+    assert sent[-1]["dte_max"] == 60
+
+
+# --------------------------------------------------------- the earnings tag
+
+_EARN = {**_FLY, "id": "earn", "spans_earnings": True, "earnings_date": "2026-11-19"}
+
+
+def test_a_stamped_card_carries_the_earnings_badge_and_an_unstamped_one_does_not():
+    from nicegui import ui
+    card = _render_page({**_PAYLOAD, "signals": [_EARN, _NAKED]})
+    (grid,) = [e for e in card.descendants() if "grid" in e._classes]
+    tags = [e for e in grid.descendants()
+            if isinstance(e, ui.label) and e.text.startswith("Earnings")]
+    assert [t.text for t in tags] == ["Earnings Nov 19"]
+    assert set(swing.BADGE_WARN.split()) <= set(tags[0]._classes)
+
+
+def test_a_stamped_row_carries_the_earnings_text_and_an_unstamped_one_does_not():
+    rows = {r["id"]: r for r in swing.finder_rows([_EARN, _NAKED])}
+    assert rows["earn"]["earnings"] == "Earnings Nov 19"
+    assert rows["sp"]["earnings"] is None
+
+
+def test_the_strategy_slot_shows_the_earnings_tag_as_text_never_html():
+    slot = swing._STRATEGY_SLOT
+    assert 'v-if="props.row.earnings"' in slot
+    assert "{{ props.row.earnings }}" in slot
+    assert 'v-html="props.row.earnings"' not in slot
+    # The warn colour is the shared badge token, as classes.
+    assert swing.BADGE_WARN in slot
+
+
+# ------------------------------------------- the spinner holds until the answer
+
+def test_scan_timeout_is_three_minutes():
+    assert swing.SCAN_TIMEOUT_SEC == 180
+
+
+def test_scanning_text_is_the_counter_s_own_head():
+    for sym in ("spy", "", 'a"b c', None):
+        assert swing.scanning_text(sym) == swing.fv.scan_timeout_text(sym, None)
+
+
+def _scan_busy(card):
+    """The list's spinner scrim and its 1 s watchdog timer."""
+    from nicegui import ui
+    (spinner,) = [e for e in card.descendants() if isinstance(e, ui.spinner)]
+    scrim = spinner.parent_slot.parent
+    # build_busy mounts its watchdog outside the target, beside the page's own
+    # timers; it is the 1 s one whose body is busy's _tick.
+    (watchdog,) = [t for t in card.descendants()
+                   if isinstance(t, ui.timer) and t.interval == 1.0
+                   and getattr(t.callback, "__name__", "") == "_tick"]
+    return scrim, watchdog
+
+
+def _tick_after(card, monkeypatch, seconds):
+    from pages import busy
+    scrim, watchdog = _scan_busy(card)
+    start = busy._time.monotonic()
+    monkeypatch.setattr(busy._time, "monotonic", lambda: start + seconds)
+    with card:
+        watchdog.callback()
+    return scrim
+
+
+def test_the_spinner_outlasts_the_old_thirty_second_backstop(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    _scan(card, monkeypatch, "msft")
+    scrim = _tick_after(card, monkeypatch, 31)
+    assert scrim.visible
+    assert _placeholder_texts(card) == ["Scanning MSFT…"] * 4
+    (count,) = [e for e in scrim.descendants() if isinstance(e, ui.label)]
+    assert count.text == "Scanning MSFT… 31 s"
+    one_shots = [t for t in card.descendants()
+                 if isinstance(t, ui.timer) and t.interval == swing.SCAN_TIMEOUT_SEC]
+    assert len(one_shots) == 1
+
+
+def test_the_counter_names_the_current_request_s_symbol(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    _scan(card, monkeypatch, "aapl")
+    _scan(card, monkeypatch, "msft")
+    scrim = _tick_after(card, monkeypatch, 5)
+    (count,) = [e for e in scrim.descendants() if isinstance(e, ui.label)]
+    assert count.text == "Scanning MSFT… 5 s"
+
+
+def test_an_answering_payload_hides_the_spinner(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    (table,) = _widgets(card, ui.table)
+    _scan(card, monkeypatch, "msft")
+    scrim = _tick_after(card, monkeypatch, 31)
+    _publish({**_PAYLOAD, "symbol": "AAPL"})          # not ours
+    _fire_poll(card)
+    assert scrim.visible and table.rows == []
+    _publish({**_PAYLOAD, "symbol": "MSFT"})
+    _fire_poll(card)
+    assert not scrim.visible
+    assert {r["id"] for r in table.rows} == {"fly", "sp"}
+
+
+def test_a_failed_scan_answer_ends_the_wait_and_says_so(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    (table,) = _widgets(card, ui.table)
+    _scan(card, monkeypatch, "msft")
+    scrim, _ = _scan_busy(card)
+    assert scrim.visible
+    _publish({"symbol": "MSFT", "signals": [], "error": "TypeError", "spot": 410.5})
+    _fire_poll(card)
+    assert not scrim.visible
+    assert table.rows == []
+    assert table.props["no-data-label"] == (
+        "The scan for MSFT failed. Check System Status and scan again.")
+    assert _placeholder_texts(card) == []
+    (failed,) = [e for e in _widgets(card, ui.label) if e.text == "Scan failed"]
+    assert failed.parent_slot.parent.visible
+
+
+def test_a_zero_idea_answer_shows_the_price_in_the_summary(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    _scan(card, monkeypatch, "spy")
+    _publish({"symbol": "SPY", "signals": [], "spot": 764.48, "filtered_out": 18,
+              "vol_filtered": 0})
+    _fire_poll(card)
+    (price,) = [e for e in _widgets(card, ui.label) if e.text == "$764.48"]
+    summary = price.parent_slot.parent
+    assert summary.visible
+    texts = [e.text for e in summary.descendants() if isinstance(e, ui.label)]
+    assert "0 ideas · 18 below the quality bar" in texts
+    (table,) = _widgets(card, ui.table)
+    assert table.props["no-data-label"] == (
+        "No strategies cleared the quality bar for SPY at $764.48.")
+
+
+def test_a_payload_with_no_price_says_price_unavailable():
+    from nicegui import ui
+    card = _render_page({"symbol": "SPY", "signals": [], "filtered_out": 1})
+    assert [e for e in _widgets(card, ui.label) if e.text == "Price unavailable"]

@@ -7,7 +7,10 @@ runs ``compute.swing_scan`` and writes ``cache:options:swing``, and this page on
 **reads** that payload.
 
 Cache view read: ``options:swing`` →
-``{signals:[...], view:{...}, filtered_out, vol_filtered, symbol, params}``; each
+``{signals:[...], view:{...}, filtered_out, vol_filtered, symbol, params}`` - and,
+since the 2026-09-14 whole-chain build, ``spot``, ``not_shown``,
+``expiries_failed``, ``chain_missing``, ``no_expiries_in_range`` and ``error``
+(the service answers every scan request, a failed one included); each
 signal is the NORMALIZED multi-strategy shape (``legs``, ``net_debit`` /
 ``net_credit``, ``max_profit`` / ``max_loss``, ``pop_pct`` …) plus, since the
 2026-09-13 redesign, ``group`` (which chip it belongs to) and ``payoff_curve``
@@ -32,15 +35,23 @@ from . import detail, handoff, strategy_table
 from . import finder_view as fv
 from .inputs import bind_symbol_load, select_all_on_focus
 from .scanner import score_zone_class
-from .theme import (BADGE_ACCENT, BADGE_MUTED, BTN, BTN_3D, CARD, EYEBROW, LABEL,
-                    MUTED, THEME, TXT_NEG, TXT_POS)
+from .theme import (BADGE_ACCENT, BADGE_MUTED, BADGE_WARN, BTN, BTN_3D, CARD, EYEBROW,
+                    LABEL, MUTED, THEME, TXT_NEG, TXT_POS)
 
 # Before any scan has published for this session.
 EMPTY_PROMPT = "Enter a symbol and press Scan to rank every strategy for it."
 
-# The busy backstop fired with no result: a slow scan still lands later, but a
-# scan that never publishes (service down, handler raised) never will - so the
-# line promises neither, and says what to do if nothing comes.
+# How long the spinner and placeholders wait for the answer. The service answers
+# every scan request - a raising scan publishes an ``error`` answer within
+# seconds - so this is a safety ceiling for a service that is down or a command
+# that was dropped, not the shared 30 s panel backstop (busy.BUSY_TIMEOUT_SEC): a
+# whole-chain index scan measures 10-15 s, and a backstop that fires while the
+# work is still running says "finished" when it has not.
+SCAN_TIMEOUT_SEC = 180
+
+# The ceiling fired with no result: a slow scan still lands later, but a scan
+# that never publishes (service down, command dropped) never will - so the line
+# promises neither, and says what to do if nothing comes.
 SCAN_SLOW = ("The scan is taking longer than expected. It will appear here if it "
              "finishes; if nothing arrives, check System Status and scan again.")
 
@@ -127,10 +138,12 @@ def scan_params(symbol, dte_min, dte_max, bands, min_credit_pct):
     default) and the chips filter them on the page, instantly and without a
     rescan.
     """
+    # A blank DTE max is no upper limit: the service fetches every listed expiry.
+    blank_max = dte_max is None or (isinstance(dte_max, str) and not dte_max.strip())
     return {
         "symbol": (symbol or "").strip().upper(),
         "dte_min": int(dte_min),
-        "dte_max": int(dte_max),
+        "dte_max": None if blank_max else int(dte_max),
         "put_d_min": float(bands["put_d_min"]),
         "put_d_max": float(bands["put_d_max"]),
         "call_d_min": float(bands["call_d_min"]),
@@ -153,9 +166,9 @@ def initial_symbol(payload):
 
 def scanning_text(symbol):
     """What the placeholder cards say while a scan runs - the symbol being
-    scanned, never the previous one."""
-    sym = (symbol or "").strip().upper()
-    return f"Scanning {sym}…" if sym else "Scanning…"
+    scanned, never the previous one. The spinner's running count with no number,
+    so the two cannot word the same wait differently."""
+    return fv.scan_timeout_text(symbol, None)
 
 
 def waiting_text(symbol):
@@ -189,13 +202,16 @@ def card_view(sig):
 
 # v-html skips the DOMPurify pass ui.html gets. Safe here only because
 # ``finder_view.payoff_svg`` builds the string from formatted numbers and fixed
-# colour constants - no text from the payload - pinned by test_finder_view.
+# colour constants - no text from the payload - pinned by test_finder_view. The
+# earnings tag is text from the payload, so it is interpolated, never v-html.
 _STRATEGY_SLOT = r'''
 <q-td :props="props">
   <div class="flex flex-nowrap items-center gap-2">
     <span v-if="props.row._payoff_svg" class="inline-flex shrink-0"
           v-html="props.row._payoff_svg"></span>
     <span>{{ props.row.strategy || '—' }}</span>
+    <span v-if="props.row.earnings"
+          class="''' + BADGE_WARN + r''' px-1.5 text-[10px] whitespace-nowrap">{{ props.row.earnings }}</span>
   </div>
 </q-td>
 '''
@@ -282,7 +298,9 @@ def render():
                         dte_min = ui.number(value=start["dte_min"], min=0) \
                             .props(f'{_FIELD_PROPS} aria-label="DTE min"').classes("w-20")
                         ui.label("to").classes(f"text-xs {MUTED}")
-                        dte_max = ui.number(value=start["dte_max"], min=1) \
+                        # Blank is no upper limit (the All and 1 yr+ presets).
+                        dte_max = ui.number(value=start["dte_max"], min=1,
+                                            placeholder="no limit") \
                             .props(f'{_FIELD_PROPS} aria-label="DTE max"').classes("w-20")
                         ui.label("days").classes(f"text-xs {MUTED}")
                 with ui.column().classes("gap-1"):
@@ -336,14 +354,19 @@ def render():
             detail_panel = detail.render()
     # The list keeps its width until there is something to show.
     detail_panel.collapse()
-    scan_busy = _busy.build_busy(list_box, "Scanning…")
 
     by_id: dict = {}
-    # scanning: the seq of the scan whose busy backstop is armed.
+    # scanning: the seq of the scan whose timeout is armed.
     # scan_request: the swing_scan args a scan is waiting on (None = nothing
     # waiting); only a payload answering THAT request may replace the placeholders.
     state = {"payload": None, "symbol": None, "active": None, "version": None,
              "scanning": None, "scan_seq": 0, "scan_request": None}
+    # The running count names the request being waited on, read at each tick -
+    # never a symbol captured when the spinner was built.
+    scan_busy = _busy.build_busy(
+        list_box, "Scanning…", timeout=SCAN_TIMEOUT_SEC,
+        elapsed_label=lambda s: fv.scan_timeout_text(
+            (state["scan_request"] or {}).get("symbol"), s))
 
     # --------------------------------------------------------------- controls
 
@@ -420,6 +443,7 @@ def render():
             _select_signal(by_id.get(row.get("id")))
 
     table.on("rowClick", _on_row_click)
+
     # Per-row Calculator / Paper (gated) / Expected Move - legs-aware.
     handoff.add_strategy_row_actions(table, lambda row: by_id.get((row or {}).get("id")))
     table.add_slot("body-cell-strategy", _STRATEGY_SLOT)
@@ -440,8 +464,9 @@ def render():
             return
         with summary_box:
             ui.label(facts["symbol"]).classes(f"text-h6 font-bold {LABEL}")
-            if facts["price"]:
-                ui.label(facts["price"]).classes(f"text-subtitle1 {MUTED}")
+            # Always a string - the price, or "Price unavailable" - so an empty
+            # answer still reads as an answer about this symbol.
+            ui.label(facts["price"]).classes(f"text-subtitle1 {MUTED}")
             for pill in facts["pills"]:
                 ui.label(pill).classes(f"{BADGE_MUTED} {_PILL}")
             if facts["vol_rank"]:
@@ -499,7 +524,10 @@ def render():
                         f"{c['score_class']} text-[#111] text-xs font-bold rounded px-1.5")
                     if c["grade"]:
                         ui.label(c["grade"]).classes(f"text-xs {c['grade_class']}")
-            ui.label(c["expiry"]).classes(f"text-xs {MUTED}")
+            with ui.row().classes("items-center gap-2 flex-wrap"):
+                ui.label(c["expiry"]).classes(f"text-xs {MUTED}")
+                if c["earnings"]:
+                    ui.label(c["earnings"]).classes(f"{BADGE_WARN} {_PILL}")
             ui.label(c["legs"]).classes("text-xs")
             if c["payoff_svg"]:
                 ui.html(c["payoff_svg"]).classes("self-center max-w-full overflow-hidden")
@@ -633,7 +661,7 @@ def render():
         empty_line.set_visibility(False)
         table.set_visibility(True)
         scan_busy.show(scanning_text(params["symbol"]))
-        ui.timer(_busy.BUSY_TIMEOUT_SEC, lambda: _scan_timed_out(seq), once=True)
+        ui.timer(SCAN_TIMEOUT_SEC, lambda: _scan_timed_out(seq), once=True)
 
     scan_btn.on_click(_request_scan)
     # Enter OR tab/click-out of the Symbol field triggers the scan (mirrors the Scan
