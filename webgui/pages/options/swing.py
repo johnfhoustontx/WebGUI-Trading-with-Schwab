@@ -784,6 +784,13 @@ def render():
     def _request_scan():
         params = scan_params(symbol_in.value, dte_min.value, dte_max.value, _bands(),
                              mincr.value)
+        # One user action can reach here twice: typing a symbol then clicking Scan
+        # fires the box's focusout scan AND the button's. The service consumes
+        # commands one at a time, so an identical second scan would double a
+        # whole-chain wait and its Schwab calls. Only while the first is still in
+        # flight: after its answer (or the timeout) the same request scans again.
+        if state["scanning"] is not None and params == state["scan_request"]:
+            return
         bus_client.request("options", {"type": "swing_scan", "args": params})
         state["scan_seq"] += 1
         seq = state["scan_seq"]

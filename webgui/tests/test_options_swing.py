@@ -1042,3 +1042,75 @@ def test_the_scan_timeout_not_the_spinner_ends_the_wait(monkeypatch):
     _fire_scan_timeout(card)
     assert not scrim.visible
     assert _placeholder_texts(card) == ["No result for MSFT yet."]
+
+
+# ------------------------------------------------- one scan per request
+# Typing a symbol then clicking Scan fires the box's focusout scan AND the
+# button's: two identical whole-chain scans queued on a serial consumer.
+
+def _focusout(card):
+    from nicegui import ui
+    from nicegui.events import GenericEventArguments
+    symbol = _widgets(card, ui.input)[0]
+    (listener,) = [l for l in symbol._event_listeners.values() if l.type == "focusout"]
+    with symbol.parent_slot:
+        listener.handler(GenericEventArguments(sender=symbol, client=symbol.client,
+                                               args=None))
+
+
+def _recording(monkeypatch):
+    sent = []
+    monkeypatch.setattr(bus_client, "request", lambda d, cmd: sent.append(cmd["args"]))
+    return sent
+
+
+def _scan_timers(card):
+    from nicegui import ui
+    return [t for t in card.descendants()
+            if isinstance(t, ui.timer) and t.interval == swing.SCAN_TIMEOUT_SEC]
+
+
+def test_focusout_then_scan_with_the_same_params_sends_one_scan(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    sent = _recording(monkeypatch)
+    _widgets(card, ui.input)[0].value = "qqq"
+    _focusout(card)
+    _click(_buttons(card)["Scan"], card)
+    assert len(sent) == 1 and sent[0]["symbol"] == "QQQ"
+    assert len(_scan_timers(card)) == 1          # no second timer armed
+    assert _placeholder_texts(card) == ["Scanning QQQ…"] * 4
+
+
+def test_a_changed_request_while_one_is_in_flight_still_scans(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    sent = _recording(monkeypatch)
+    _widgets(card, ui.input)[0].value = "qqq"
+    _focusout(card)
+    _click(_buttons(card)["1–2 wk"], card)
+    _click(_buttons(card)["Scan"], card)
+    assert len(sent) == 2
+    assert (sent[0]["dte_min"], sent[1]["dte_min"]) == (0, 7)
+
+
+def test_the_same_request_after_its_answer_landed_scans_again(monkeypatch):
+    card = _render_page(_PAYLOAD)
+    sent = _recording(monkeypatch)
+    _click(_buttons(card)["Scan"], card)
+    _publish({**_PAYLOAD, "params": sent[0]})
+    _fire_poll(card)
+    _click(_buttons(card)["Scan"], card)
+    assert len(sent) == 2 and sent[0] == sent[1]
+
+
+def test_the_same_request_after_the_scan_timed_out_may_be_sent_again(monkeypatch):
+    card = _render_page(_PAYLOAD)
+    sent = _recording(monkeypatch)
+    _click(_buttons(card)["Scan"], card)
+    _click(_buttons(card)["Scan"], card)
+    assert len(sent) == 1
+    _fire_scan_timeout(card)
+    _click(_buttons(card)["Scan"], card)
+    assert len(sent) == 2 and sent[0] == sent[1]
+    assert _placeholder_texts(card) == ["Scanning SPY…"] * 4
