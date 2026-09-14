@@ -131,7 +131,7 @@ a dead one.
 
 - **The service always answers.** The `swing_scan` handler catches an exception from
   the scan, records it (`_degrade.degraded("options.swing_scan")`) and publishes an
-  answer for that request anyway: `signals: []`, `error: True`, the symbol, the params
+  answer for that request anyway: `signals: []`, `error` = the exception's class name (e.g. `"TypeError"`; readers test it for truthiness), the symbol, the params
   and the spot if it was read. A failed scan ends the wait in seconds.
 - **The page waits for that answer.** The spinner and placeholders stay up until a
   payload that answers THIS request lands (`payload_answers_scan`, unchanged), with a

@@ -505,7 +505,7 @@ everything with `not_shown == 0`; payoff curves are computed only for kept rows 
 - Modify: `services/options_svc/compute.py` (quote read BEFORE the chain; `spot` and
   `chain_missing` on every result)
 - Modify: `services/options_svc/handlers.py` (publish `spot`, `chain_missing`,
-  `expiries_failed`; catch a raising scan and publish `error: True`)
+  `expiries_failed`; catch a raising scan and publish `error` = the exception class name)
 - Test: `services/options_svc/tests/test_swing_answers.py` (new)
 
 **Step 1: Write the failing tests**
@@ -576,7 +576,7 @@ once a chain exists. Both early returns include `"spot": spot or None`,
 includes `"spot": spot, "chain_missing": False`. Handler: wrap the
 `compute.swing_scan(...)` call in `try/except Exception` → `_degrade.degraded("options.swing_scan")`
 and `result = {"signals": [], "view": {}, "filtered_out": 0, "vol_filtered": 0,
-"error": True}`; the payload copies `spot`, `chain_missing`, `expiries_failed` with
+"error": type(exc).__name__}`; the payload copies `spot`, `chain_missing`, `expiries_failed` with
 `.get` (absent → `None`/`False`/`0`), and `error` only when set.
 
 ⚠ `test_swing_scan_empty_when_no_chain` / `_no_spot` assert field by field precisely so
@@ -618,7 +618,7 @@ new keys do not break them — do not change them.
    `expiries_failed` of `None` adds no line (not counted is not zero). Counts also add
    `"N lower-scoring ideas not shown"` when `not_shown` is truthy (singular for 1).
 5. `no_data_label(payload)` names the symbol and price, in this precedence:
-   `error` → *The scan for SPY failed. Check System Status and scan again.* ·
+   a truthy `error` → *The scan for SPY failed. Check System Status and scan again.* ·
    `chain_missing` → *No option chain came back for SPY at $764.48.* ·
    `no_expiries_in_range` → *SPY at $764.48 has no expirations in this range.* · quality cut ·
    too cheap · built nothing — each *… for SPY at $764.48 …* (without a price:
@@ -651,7 +651,7 @@ new keys do not break them — do not change them.
    one-shot `ui.timer` in `_request_scan` uses `SCAN_TIMEOUT_SEC`. Tests: after a scan,
    the busy handle's `tick()` 31 s later (monkeypatch `busy._time.monotonic`) leaves the
    spinner visible and the placeholders up; an answering payload hides it; a payload
-   with `error: True` for this request hides it and the list says the error line;
+   with a truthy `error` (a class name such as `"TypeError"`) for this request hides it and the list says the error line;
    another symbol's payload does not.
 5. Summary strip paints on a zero-idea answer with the price. Test: payload with
    `signals: []`, `spot: 764.48` → the strip shows `$764.48` and `0 ideas`.
