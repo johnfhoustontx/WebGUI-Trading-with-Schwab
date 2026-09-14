@@ -412,10 +412,11 @@ by test. ⚠ The strip lists EVERY expiration (`expirations` from Schwab
 `/expirationchain`) while the chain holds only the ones fetched so far — a lazy
 `calc_load` / `sim_fetch` brings the nearest two plus any a leg needs, and
 `calc_load_expiry` / `sim_fetch_expiry` merge one more per click. Never go back to one
-fixed-window fetch: `$SPX`'s 60 days does not fit one proxy request, and no whole chain
-does either — SPY's timed out at the proxy's 30 s — which is why every `swing_scan`
-fetches through `compute.fetch_scan_chain`, runs of ≤ 8 consecutive listed expiries
-4 at a time, counting a failed run in `expiries_failed` rather than hiding it), **`chain_grid.py`**
+fixed-window fetch: `$SPX`'s 60 days does not fit one proxy request, and neither does a
+LARGE whole chain — SPY's timed out at the proxy's 30 s (NVDA's came back in 3.8 s) —
+which is why every `swing_scan` fetches through `compute.fetch_scan_chain`, runs of ≤ 8
+consecutive listed expiries 4 at a time, counting a failed run's EXPIRIES in
+`expiries_failed` rather than hiding them), **`chain_grid.py`**
 (PURE — the chain readers `extract_premium`/`extract_delta`/`leg_delta`/
 `chain_expiries`/`chain_strikes`, moved out of `calculator.py` and re-exported there,
 plus `chain_grid_rows`/`cell_text`/`parse_columns`), **`entry.py`** (PURE —
@@ -2629,8 +2630,8 @@ report (`spans_earnings` + `earnings_date`, rendered *Earnings Nov 19*) while th
 Market Scanner and the Income Window still **drop** it. Operator decision: a
 whole-chain scan out to a year would otherwise end every single stock at its next
 report. ⚠ In flag mode `screen_spreads` must receive NO date — it can only drop —
-and the paper ledger does not re-check earnings, so a flagged debit trade sent to
-Paper opens as it would from the Calculator. Every row
+and the paper ledger has no earnings check, so a tagged trade sent to Paper (a
+credit spread or condor as much as a debit trade) opens like any other. Every row
 is also **stamped** with the coverage it got (`earnings_status`), because a row that
 skipped the check must not look like one that passed it, and `not_listed`
 deliberately does not block — with no vendor key it is every symbol, so failing

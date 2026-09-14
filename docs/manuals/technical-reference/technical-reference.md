@@ -965,7 +965,8 @@ to today + `dte_max` + 2 (all of them when `dte_max` is `None`) — from today r
 from DTE min, because `run_iv_analysis` reads the near expiries for the ATM IV and
 expected move — and fetches runs of at most `SCAN_RUN_EXPIRIES` (8) consecutive listed
 expiries, `SCAN_FETCH_WORKERS` (4) at a time, merging the raw expiry maps. A run whose
-response is missing or holds no expiry is counted in `expiries_failed`. With no usable
+response is missing or holds no expiry adds its expiries to `expiries_failed` (a count of
+expiries, not of runs). With no usable
 expiration list it falls back to one fetch and reports `expiries_failed = None` (not
 counted, which is not zero). Measured 2026-09-14 pre-market: SPY's whole chain (34
 expiries, 12,956 contracts) **timed out at the proxy's 30 s** in one request and took

@@ -1376,7 +1376,8 @@ spinner counts the wait in seconds: *Scanning SPY… 12 s*. Reading a whole chai
 takes time; an index such as $SPX can need 10–15 seconds.
 
 The spinner stays up until the answer lands — including the answer for a scan that
-failed, which arrives within seconds. Only if nothing at all has come back after
+failed, which arrives as soon as it fails (that can be after the chain has been
+fetched, about 12 seconds on $SPX). Only if nothing at all has come back after
 **3 minutes** (the service is down, say) do the cards become one still card and the
 page says *The scan is taking longer than expected. It will appear here if it
 finishes; if nothing arrives, check System Status and scan again.* A late result
@@ -1395,7 +1396,8 @@ After every scan — an empty one included — one strip names:
 - the **Vol Rank** (one value per scan, so it lives here rather than on every row);
 - a **count line**, for example *16 ideas · 6 below the quality bar · 3 where premium
   is too cheap to sell · 40 lower-scoring ideas not shown*. The cut counts are
-  different reasons, explained below. A count that is zero is left out. When part
+  different reasons, explained below. The idea count always shows, even at *0
+  ideas*; the cut and not-shown counts are left out when they are zero. When part
   of the chain could not be fetched the line adds *2 expirations could not be
   loaded* — the ideas shown come from the rest of the chain. When the scan itself
   failed, the whole line reads **Scan failed**.
@@ -1468,14 +1470,16 @@ covers the whole list, not just the page you are on, so page 2 carries on where
 page 1 stopped. A new scan, or a chip click, starts back on page 1 and keeps the
 sort you chose. The list grows with the page rather than scrolling in a short box.
 
-**When the list is empty**, it says why, naming the symbol and its price:
+**When the list is empty**, it says why. It names the symbol, and the price when one
+was read (with no price the words *at $…* are left out); a failed scan names the
+symbol only:
 
 | Message | Meaning |
 | --- | --- |
 | *No strategies cleared the quality bar for SPY at $764.48.* | ideas were built, and every one failed the bar |
 | *No strategies for SPY at $764.48 — premium is too cheap to sell.* | every idea left would have sold premium, and this symbol's premium is historically cheap |
 | *No option chain came back for SPY at $764.48.* | the option chain did not arrive — a mistyped symbol reads this way too |
-| *SPY at $764.48 has no expirations in this expiry range.* | the symbol lists no expiration between today and your DTE max |
+| *SPY at $764.48 has no expirations in this expiry range.* | nothing is listed from today up to your DTE max (plus two days). DTE min is not considered here — if expirations exist but all fall below your DTE min, you get the *could not be built* message instead; lower DTE min or raise DTE max |
 | *No strategies could be built for SPY at $764.48 in this expiry range.* | none of the above: nothing could be built |
 | *The scan for SPY failed. Check System Status and scan again.* | the scan itself broke |
 
@@ -1562,9 +1566,9 @@ trades the Paper Ledger records correctly: credit spreads, iron condors, long ca
 and puts, debit spreads, and the call and put **butterflies and condors**. A debit
 trade that arrives with no debit to pay is refused rather than booked as free.
 Straddles and strangles are for study only and have no button; neither do the iron
-butterfly, calendars, diagonals or the share structures. The Paper Ledger does not
-check earnings again, so a tagged trade opens there just as it would from the
-Calculator. **Calculator** carries every
+butterfly, calendars, diagonals or the share structures. The Paper Ledger has no
+earnings check, so a trade tagged *Earnings* opens there like any other.
+**Calculator** carries every
 idea, calendars (both expirations) and share legs included — but clicking an
 expiration pill on the Calculator afterwards moves **every** option leg to that date,
 which collapses a calendar.

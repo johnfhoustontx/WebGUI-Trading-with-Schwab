@@ -3797,7 +3797,7 @@ limit.</p>
 </tr>
 <tr>
 <td>Chain</td>
-<td>fetched in groups of up to eight consecutive expirations, four groups at a time — one request for a whole index chain times out</td>
+<td>fetched in groups of up to eight consecutive expirations, four groups at a time — SPY's whole chain timed out at the proxy's 30 s as one request</td>
 </tr>
 </tbody>
 </table>
@@ -4026,8 +4026,9 @@ then left off, since it would name only the near month), <strong>every</strong> 
 <code>/</code>, and dollars stated <strong>per position</strong> rather than per contract when shares are part
 of it — a share lot is thousands of dollars, not a contract's worth.</p>
 <p><strong>The count line</strong> in the summary strip reads like <em>16 ideas · 6 below the quality bar ·
-3 where premium is too cheap to sell · 40 lower-scoring ideas not shown</em>; a zero count is
-left out. The <strong>below the quality bar</strong> count is what distinguishes <em>"the scan found
+3 where premium is too cheap to sell · 40 lower-scoring ideas not shown</em>. The idea count
+always shows, <em>0 ideas</em> included; the cut, not-shown and failed-expiration counts are left
+out at zero. The <strong>below the quality bar</strong> count is what distinguishes <em>"the scan found
 things and rejected them all"</em> from <em>"the scan found nothing"</em> — two very different
 situations that would otherwise look identical. The <strong>too cheap to sell</strong> count is a
 different reason: trades that would sell premium, dropped because this symbol's
@@ -4042,12 +4043,16 @@ volatility is historically low (trades that buy premium are kept).</p>
 <li><strong>Scan failed</strong> replaces the whole line when the scan itself broke — there is no count
   to report.</li>
 </ul>
-<p><strong>An empty list says why</strong>, naming the symbol and price: <em>No strategies cleared the
+<p><strong>An empty list says why</strong>, naming the symbol and — when one was read — the price (with no
+price the <em>at $…</em> is left out): <em>No strategies cleared the
 quality bar for SPY at $764.48.</em> · <em>No strategies for SPY at $764.48 — premium is too
 cheap to sell.</em> · <em>No option chain came back for SPY at $764.48.</em> (a mistyped symbol
-reads this way too) · <em>SPY at $764.48 has no expirations in this expiry range.</em> ·
+reads this way too) · <em>SPY at $764.48 has no expirations in this expiry range.</em> (nothing
+listed from today to DTE max + 2 days; DTE min is not considered, so expirations that all
+fall below DTE min read as <em>could not be built</em> instead) ·
 <em>No strategies could be built for SPY at $764.48 in this expiry range.</em> · and, for a
-failed scan, <em>The scan for SPY failed. Check System Status and scan again.</em></p>
+failed scan, which names the symbol only, <em>The scan for SPY failed. Check System Status
+and scan again.</em></p>
 <p><strong>While a scan runs</strong> the cards become placeholders reading <em>Scanning SPY…</em> — the symbol
 asked for, never the previous one — and a spinner counts the seconds, <em>Scanning SPY…
 12 s</em>. A whole index chain takes 10–15 seconds, so the count is what keeps a long wait
@@ -4083,8 +4088,8 @@ option leg to that one date, which collapses a calendar into a single-expiry tra
 structures (long call/put, bull call, bear put) and the <strong>call and put butterflies and
 condors</strong>. The ledger refuses a debit structure that arrives with no positive debit,
 rather than opening it as a free trade whose every later mark would overstate the
-result. The ledger does not check earnings again, so a tagged trade opens there as it
-would from the Calculator. No button for:</p>
+result. The ledger has no earnings check, so a trade tagged <em>Earnings</em> opens there like
+any other. No button for:</p>
 <table>
 <thead>
 <tr>

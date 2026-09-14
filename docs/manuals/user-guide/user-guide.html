@@ -1571,7 +1571,8 @@ symbol you asked for, never the previous one — the old list is cleared, and a
 spinner counts the wait in seconds: <em>Scanning SPY… 12 s</em>. Reading a whole chain
 takes time; an index such as $SPX can need 10–15 seconds.</p>
 <p>The spinner stays up until the answer lands — including the answer for a scan that
-failed, which arrives within seconds. Only if nothing at all has come back after
+failed, which arrives as soon as it fails (that can be after the chain has been
+fetched, about 12 seconds on $SPX). Only if nothing at all has come back after
 <strong>3 minutes</strong> (the service is down, say) do the cards become one still card and the
 page says <em>The scan is taking longer than expected. It will appear here if it
 finishes; if nothing arrives, check System Status and scan again.</em> A late result
@@ -1588,7 +1589,8 @@ settings.</p>
 <li>the <strong>Vol Rank</strong> (one value per scan, so it lives here rather than on every row);</li>
 <li>a <strong>count line</strong>, for example <em>16 ideas · 6 below the quality bar · 3 where premium
   is too cheap to sell · 40 lower-scoring ideas not shown</em>. The cut counts are
-  different reasons, explained below. A count that is zero is left out. When part
+  different reasons, explained below. The idea count always shows, even at <em>0
+  ideas</em>; the cut and not-shown counts are left out when they are zero. When part
   of the chain could not be fetched the line adds <em>2 expirations could not be
   loaded</em> — the ideas shown come from the rest of the chain. When the scan itself
   failed, the whole line reads <strong>Scan failed</strong>.</li>
@@ -1689,7 +1691,9 @@ sort by it. The list shows <strong>50 rows a page</strong>, with page controls u
 covers the whole list, not just the page you are on, so page 2 carries on where
 page 1 stopped. A new scan, or a chip click, starts back on page 1 and keeps the
 sort you chose. The list grows with the page rather than scrolling in a short box.</p>
-<p><strong>When the list is empty</strong>, it says why, naming the symbol and its price:</p>
+<p><strong>When the list is empty</strong>, it says why. It names the symbol, and the price when one
+was read (with no price the words <em>at $…</em> are left out); a failed scan names the
+symbol only:</p>
 <table>
 <thead>
 <tr>
@@ -1712,7 +1716,7 @@ sort you chose. The list grows with the page rather than scrolling in a short bo
 </tr>
 <tr>
 <td><em>SPY at $764.48 has no expirations in this expiry range.</em></td>
-<td>the symbol lists no expiration between today and your DTE max</td>
+<td>nothing is listed from today up to your DTE max (plus two days). DTE min is not considered here — if expirations exist but all fall below your DTE min, you get the <em>could not be built</em> message instead; lower DTE min or raise DTE max</td>
 </tr>
 <tr>
 <td><em>No strategies could be built for SPY at $764.48 in this expiry range.</em></td>
@@ -1840,9 +1844,9 @@ trades the Paper Ledger records correctly: credit spreads, iron condors, long ca
 and puts, debit spreads, and the call and put <strong>butterflies and condors</strong>. A debit
 trade that arrives with no debit to pay is refused rather than booked as free.
 Straddles and strangles are for study only and have no button; neither do the iron
-butterfly, calendars, diagonals or the share structures. The Paper Ledger does not
-check earnings again, so a tagged trade opens there just as it would from the
-Calculator. <strong>Calculator</strong> carries every
+butterfly, calendars, diagonals or the share structures. The Paper Ledger has no
+earnings check, so a trade tagged <em>Earnings</em> opens there like any other.
+<strong>Calculator</strong> carries every
 idea, calendars (both expirations) and share legs included — but clicking an
 expiration pill on the Calculator afterwards moves <strong>every</strong> option leg to that date,
 which collapses a calendar.</p>

@@ -2668,7 +2668,7 @@ limit.
 |---|---|
 | Service | `options_svc` (:8211), `swing_scan` command → `cache:options:swing` |
 | Trigger | On demand — press **Scan** |
-| Chain | fetched in groups of up to eight consecutive expirations, four groups at a time — one request for a whole index chain times out |
+| Chain | fetched in groups of up to eight consecutive expirations, four groups at a time — SPY's whole chain timed out at the proxy's 30 s as one request |
 
 ### Reading the screen
 
@@ -2835,8 +2835,9 @@ then left off, since it would name only the near month), **every** breakeven joi
 of it — a share lot is thousands of dollars, not a contract's worth.
 
 **The count line** in the summary strip reads like *16 ideas · 6 below the quality bar ·
-3 where premium is too cheap to sell · 40 lower-scoring ideas not shown*; a zero count is
-left out. The **below the quality bar** count is what distinguishes *"the scan found
+3 where premium is too cheap to sell · 40 lower-scoring ideas not shown*. The idea count
+always shows, *0 ideas* included; the cut, not-shown and failed-expiration counts are left
+out at zero. The **below the quality bar** count is what distinguishes *"the scan found
 things and rejected them all"* from *"the scan found nothing"* — two very different
 situations that would otherwise look identical. The **too cheap to sell** count is a
 different reason: trades that would sell premium, dropped because this symbol's
@@ -2851,12 +2852,16 @@ volatility is historically low (trades that buy premium are kept).
 - **Scan failed** replaces the whole line when the scan itself broke — there is no count
   to report.
 
-**An empty list says why**, naming the symbol and price: *No strategies cleared the
+**An empty list says why**, naming the symbol and — when one was read — the price (with no
+price the *at $…* is left out): *No strategies cleared the
 quality bar for SPY at $764.48.* · *No strategies for SPY at $764.48 — premium is too
 cheap to sell.* · *No option chain came back for SPY at $764.48.* (a mistyped symbol
-reads this way too) · *SPY at $764.48 has no expirations in this expiry range.* ·
+reads this way too) · *SPY at $764.48 has no expirations in this expiry range.* (nothing
+listed from today to DTE max + 2 days; DTE min is not considered, so expirations that all
+fall below DTE min read as *could not be built* instead) ·
 *No strategies could be built for SPY at $764.48 in this expiry range.* · and, for a
-failed scan, *The scan for SPY failed. Check System Status and scan again.*
+failed scan, which names the symbol only, *The scan for SPY failed. Check System Status
+and scan again.*
 
 **While a scan runs** the cards become placeholders reading *Scanning SPY…* — the symbol
 asked for, never the previous one — and a spinner counts the seconds, *Scanning SPY…
@@ -2897,8 +2902,8 @@ option leg to that one date, which collapses a calendar into a single-expiry tra
 structures (long call/put, bull call, bear put) and the **call and put butterflies and
 condors**. The ledger refuses a debit structure that arrives with no positive debit,
 rather than opening it as a free trade whose every later mark would overstate the
-result. The ledger does not check earnings again, so a tagged trade opens there as it
-would from the Calculator. No button for:
+result. The ledger has no earnings check, so a trade tagged *Earnings* opens there like
+any other. No button for:
 
 | Structure | Why |
 |---|---|

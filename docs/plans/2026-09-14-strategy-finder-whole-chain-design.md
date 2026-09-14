@@ -117,8 +117,8 @@ byte-identical. `every_expiry=False` keeps today's code path exactly.
   tag after the strategy name in the list.
 
 The Market Scanner, the Income Window and the paper engine keep the gate. The paper
-ledger does not re-check earnings, so a flagged debit trade sent to Paper opens as it
-would from the Calculator.
+ledger has no earnings check, so a tagged trade sent to Paper — a credit spread or
+condor as much as a debit trade — opens like any other.
 
 ### 5. The spinner lasts the whole wait (operator addition)
 

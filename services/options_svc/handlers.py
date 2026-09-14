@@ -470,8 +470,11 @@ EVENT_DRIVER_PERF = "events:options:driver_paper_perf"
 CACHE_DRIVER_ANALYTICS = "cache:options:driver_paper_analytics"
 EVENT_DRIVER_ANALYTICS = "events:options:driver_paper_analytics"
 
-# Defaults mirror the page's input defaults (symbol SPY, 5-30 DTE, the put/call
-# delta gates, min credit 10% -> 0.10 fraction). The page sends the fraction.
+# Defaults for a key the command omits. The page always sends every key (the
+# credit floor as a fraction), so only a scan enqueued from outside it reads these.
+# The delta gates and 10% credit floor match the page's defaults; the 5-30 DTE
+# window does not - the page defaults to All (0, no upper limit) - and a missing
+# key is defaulted on its own, so an omitted dte_max is 30, not "no limit".
 _SWING_DEFAULTS = {
     "symbol": "SPY",
     "dte_min": 5,

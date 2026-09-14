@@ -232,10 +232,11 @@ four top picks, and the full ranked list.
   ideas, so after the quality bar the page keeps the 25 highest-scoring of each
   strategy — the best 25 bull call spreads across all expirations, say — and
   counts the rest as *lower-scoring ideas not shown*.
-- **An empty list says why**, naming the symbol and price: nothing cleared the
-  quality bar, premium is too cheap to sell, no option chain came back, the symbol
-  has no expirations in this range, or nothing could be built in it. A scan that
-  failed reads *The scan for SPY failed. Check System Status and scan again.*
+- **An empty list says why**, naming the symbol and — when one was read — its
+  price: nothing cleared the quality bar, premium is too cheap to sell, no option
+  chain came back, nothing is listed up to your DTE max, or nothing could be built
+  in the range. A scan that failed names the symbol only: *The scan for SPY
+  failed. Check System Status and scan again.*
 - **Earnings.** A trade still open when the company reports is **kept and
   tagged** — *Earnings Nov 19* (with the year when it falls in another one) — as
   a warning badge on its card and a small tag after its name in the list. The
@@ -360,8 +361,8 @@ four top picks, and the full ranked list.
   strangles (study only), the iron butterfly, calendars, diagonals, or anything
   holding shares. The ledger also refuses a debit trade that arrives without a
   debit to pay.
-- **Paper does not check earnings again**: a trade tagged *Earnings* opens on
-  the ledger just as it would from the Calculator.
+- **The paper ledger has no earnings check**: a trade tagged *Earnings* opens
+  there like any other.
 - **Calculator** works on every idea, calendars and shares included — but
   clicking an expiration pill on the Calculator afterwards moves every option leg
   to that one date, which turns a calendar into something else.

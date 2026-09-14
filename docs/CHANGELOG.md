@@ -30,7 +30,7 @@ to be considered for trades.")
   Income Window, whose chain content does not change): list the expirations, keep those
   from TODAY to today + `dte_max` + 2 (all when `dte_max` is `None`), fetch runs of ≤ 8
   consecutive listed expiries ≤ 4 at a time, merge the raw expiry maps. A run that returns
-  no expiry is **counted** in `expiries_failed`; no expiration list falls back to the
+  no expiry has its **expiries counted** in `expiries_failed`; no expiration list falls back to the
   single fetch with `expiries_failed = None` (not counted, which is not zero).
 - **Every expiry** (`swing_scan(every_expiry=True)`, the Finder only): each single-expiry
   builder runs per listed expiry on the chain sliced to it with `dte_min = dte_max`, so
@@ -39,7 +39,8 @@ to be considered for trades.")
 - **Earnings flagged** (`earnings_mode="flag"`): `screen_spreads` gets no date, and each
   row the drop would remove gains `spans_earnings` + `earnings_date` — *Earnings Nov 19*
   as a warning badge on the card and a tag after the strategy name. The Market Scanner
-  and Income Window still drop; the paper ledger does not re-check.
+  and Income Window still drop; the paper ledger has no earnings check, so a tagged
+  trade sent to Paper opens like any other.
 - **Every request gets an answer, with the price.** The quote is read before the chain,
   so `spot` survives a missing chain; the payload adds `spot`, `chain_missing`,
   `no_expiries_in_range`, `expiries_failed` and `not_shown`. A scan that RAISES is
