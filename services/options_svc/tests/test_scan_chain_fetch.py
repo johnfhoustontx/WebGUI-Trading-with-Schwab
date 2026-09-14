@@ -143,9 +143,23 @@ def test_no_expiration_list_falls_back_to_the_single_fetch(monkeypatch):
     assert seen == [(TODAY, TODAY + dt.timedelta(days=32))] and failed is None
     assert _degrade.counts().get("options.scan_expirations") == 1
     seen.clear()
-    compute.fetch_scan_chain("SPY", dte_max=None)
-    assert seen == [(TODAY, None)]
+    _, failed = compute.fetch_scan_chain("SPY", dte_max=None)
+    # No dte_max is bounded too: the unbounded single call is the one measured
+    # timing out for SPY.
+    assert seen == [(TODAY, TODAY + dt.timedelta(days=compute._FALLBACK_MAX_DTE + 2))]
+    assert failed is None
     assert _degrade.counts().get("options.scan_expirations") == 2
+
+
+def test_the_fallback_bound_is_120_days_and_a_numeric_dte_max_keeps_its_own(monkeypatch):
+    assert compute._FALLBACK_MAX_DTE == 120
+    monkeypatch.setattr(compute, "option_expirations", lambda api: [])
+    seen = []
+    monkeypatch.setattr(compute.se, "fetch_option_chain",
+                        lambda client, symbol, from_date=None, to_date=None:
+                        seen.append((from_date, to_date)) or {"underlyingPrice": 1.0})
+    _, failed = compute.fetch_scan_chain("SPY", dte_max=400)
+    assert seen == [(TODAY, TODAY + dt.timedelta(days=402))] and failed is None
 
 
 def test_an_expiration_list_that_raises_falls_back_rather_than_failing(monkeypatch):

@@ -416,7 +416,8 @@ fixed-window fetch: `$SPX`'s 60 days does not fit one proxy request, and neither
 LARGE whole chain — SPY's timed out at the proxy's 30 s (NVDA's came back in 3.8 s) —
 which is why every `swing_scan` fetches through `compute.fetch_scan_chain`, runs of ≤ 8
 consecutive listed expiries 4 at a time, counting a failed run's EXPIRIES in
-`expiries_failed` rather than hiding them), **`chain_grid.py`**
+`expiries_failed` rather than hiding them; with no expiration list it falls back to
+one fetch, bounded to 120 days (`_FALLBACK_MAX_DTE`) when the scan has no DTE max), **`chain_grid.py`**
 (PURE — the chain readers `extract_premium`/`extract_delta`/`leg_delta`/
 `chain_expiries`/`chain_strikes`, moved out of `calculator.py` and re-exported there,
 plus `chain_grid_rows`/`cell_text`/`parse_columns`), **`entry.py`** (PURE —

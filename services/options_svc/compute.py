@@ -7224,6 +7224,13 @@ SCAN_RUN_EXPIRIES = 8
 # fetching up to this many runs, so up to 24 requests queue behind the proxy's
 # spacing. Acceptable for a once-daily pass.
 SCAN_FETCH_WORKERS = 4
+
+# The degraded fallback's horizon when no expiration list came back and the scan
+# has no dte_max: ONE unbounded /chains call is exactly what was measured timing
+# out for SPY at the proxy's 30 s, and the proxy keeps retrying it upstream. 120
+# days is the Strategy Finder's former default range, so the fallback still
+# returns the expiries most scans used before the whole-chain build.
+_FALLBACK_MAX_DTE = 120
 # The in-range filters take a number; "no upper limit" is this, never a guess at
 # the longest listed expiry.
 _NO_DTE_MAX = 100_000
@@ -7287,7 +7294,8 @@ def fetch_scan_chain(symbol, dte_max):
     zero. That fallback is degraded on BOTH paths: the proxy client swallows a
     transport error into a 502, which ``option_expirations`` turns into ``[]``, so
     the empty list, not the raise, is the realistic failure - and with no
-    dte_max its fallback is the whole-chain call that times out on SPY."""
+    dte_max its fallback would be the whole-chain call that times out on SPY, so
+    it is bounded to _FALLBACK_MAX_DTE (120) days instead."""
     from services._parallel import parallel_map
 
     client = _proxy.schwab_py_client
@@ -7302,7 +7310,8 @@ def fetch_scan_chain(symbol, dte_max):
             _degrade.degraded("options.scan_expirations",
                               detail=f"{symbol}: no expiration list", exc_info=False)
     if not exps:
-        to = None if dte_max is None else today + _dt.timedelta(days=int(dte_max) + 2)
+        horizon = _FALLBACK_MAX_DTE if dte_max is None else int(dte_max)
+        to = today + _dt.timedelta(days=horizon + 2)
         return se.fetch_option_chain(client, symbol, from_date=today, to_date=to), None
     runs = scan_expiry_runs(exps, dte_max, today)
     got = parallel_map(
