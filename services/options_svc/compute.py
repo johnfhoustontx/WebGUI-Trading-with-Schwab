@@ -21,6 +21,7 @@ import logging
 import math
 import sys
 import threading
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from repo_paths import DRIVER_PAPER_DB, ENV_FLAGS, OPTIONS_SCANNER
@@ -433,9 +434,12 @@ def _keep_best_per_type(signals, limit):
     return [s for i, s in enumerate(signals) if i in keep], len(signals) - len(keep)
 
 
-def _validate_scan_args(earnings_mode, per_type_limit):
-    """Raise ``ValueError`` for an unknown ``earnings_mode`` or a limit that is
-    not a positive int (``None`` is no limit)."""
+def _validate_scan_args(earnings_mode, per_type_limit, expiry_choice=None,
+                        ask_if_large=False):
+    """Raise ``ValueError`` for an unknown ``earnings_mode``, a limit that is not a
+    positive int (``None`` is no limit), an ``expiry_choice`` that is neither
+    ``None`` nor one of EXPIRY_CHOICES' keys, or an ``ask_if_large`` that is not a
+    bool."""
     # Refused before any fetch: a mistyped mode silently becoming the drop (or a
     # malformed limit silently becoming none) is a gate that reads like one.
     if earnings_mode not in _EARNINGS_MODES:
@@ -446,11 +450,20 @@ def _validate_scan_args(earnings_mode, per_type_limit):
                                        or per_type_limit < 1):
         raise ValueError(f"per_type_limit must be a positive int or None, "
                          f"got {per_type_limit!r}")
+    keys = tuple(k for k, _ in EXPIRY_CHOICES)
+    if expiry_choice is not None and (not isinstance(expiry_choice, str)
+                                      or expiry_choice not in keys):
+        raise ValueError(f"expiry_choice must be None or one of {keys}, "
+                         f"got {expiry_choice!r}")
+    if not isinstance(ask_if_large, bool):
+        raise ValueError(f"ask_if_large must be a bool, got {ask_if_large!r}")
 
 
 def _scan_result(*, signals=None, view=None, filtered_out=0, vol_filtered=0,
                  not_shown=0, expiries_failed, spot, chain_missing=False,
-                 no_expiries_in_range=False):
+                 no_expiries_in_range=False, needs_choice=False,
+                 expiration_count=None, expirations_scanned=None, choices=None,
+                 expiry_choice=None):
     """The one shape every ``swing_scan`` return takes, early empties included,
     so a key added for one path cannot be missing from another. Pure."""
     return {"signals": [] if signals is None else signals,
@@ -458,7 +471,90 @@ def _scan_result(*, signals=None, view=None, filtered_out=0, vol_filtered=0,
             "filtered_out": filtered_out, "vol_filtered": vol_filtered,
             "not_shown": not_shown, "expiries_failed": expiries_failed,
             "spot": spot, "chain_missing": chain_missing,
-            "no_expiries_in_range": no_expiries_in_range}
+            "no_expiries_in_range": no_expiries_in_range,
+            "needs_choice": needs_choice, "expiration_count": expiration_count,
+            "expirations_scanned": expirations_scanned, "choices": choices,
+            "expiry_choice": expiry_choice}
+
+
+class _FetchPlan(NamedTuple):
+    """What a swing scan fetches, decided before any chain call.
+
+    ``action`` is ``"ask"`` (answer with the choices, fetch nothing), ``"choice"``
+    (fetch ``fetch_dates``, build on ``dates``) or ``"scan"`` (today's fetch). The
+    four answer fields are what the result carries on every path of this plan."""
+    action: str
+    dates: list | None = None
+    fetch_dates: list | None = None
+    expiry_choice: str | None = None
+    expiration_count: int | None = None
+    expirations_scanned: int | None = None
+    choices: list | None = None
+
+    def answer(self):
+        return {"expiry_choice": self.expiry_choice,
+                "expiration_count": self.expiration_count,
+                "expirations_scanned": self.expirations_scanned,
+                "choices": self.choices}
+
+
+def _iv_reference_date(rows, dte_max):
+    """The listed expiry the WHOLE scan would read its ATM IV from, or None.
+
+    ``extract_atm_iv`` takes the expiry nearest 30 DTE inside 7-60, else the one
+    nearest 30 with any DTE above 0, the earlier winning a tie (it keeps the first
+    strictly closer key, in expiry order). The whole scan's chain is today to
+    dte_max + 2 (scan_expiry_runs), so the candidates are that window's rows."""
+    window = {e for run in scan_expiry_runs([r[0] for r in rows], dte_max) for e in run}
+    listed = [r for r in rows if r[0] in window]
+    for pool in ([r for r in listed if 7 <= r[2] <= 60], [r for r in listed if r[2] > 0]):
+        if pool:
+            return min(pool, key=lambda r: (abs(r[2] - 30), r[0]))[0]
+    return None
+
+
+def _plan_fetch(rows, dte_min, dte_max, expiry_choice, ask_if_large):
+    """Decide the fetch from the listed ``rows`` (``(date, type, dte)``). Pure.
+
+    No rows: nothing to count, so never ask (today's fetch; ``expiration_count``
+    None - a count never taken is not zero). A range of LARGE_CHAIN_EXPIRIES or
+    fewer, or a caller that does not ask (the Income Window): today's fetch, any
+    choice ignored. A large range with no choice: ask. With one: fetch its dates.
+
+    ⚠ A choice also fetches the expiry the whole scan would read its ATM IV from
+    when the choice leaves it out, so the IV analysis - and the daily move every
+    candidate is scored against - cannot change with the choice. "Only when no
+    chosen expiry is inside 7-60 DTE" is not enough: Monthlies only keeps the 46-
+    day monthly, and extract_atm_iv would read it instead of the 29-day weekly the
+    whole scan uses. The scan slices that expiry back out before building."""
+    if not rows:
+        return _FetchPlan("scan")
+    count = len(rows_in_range(rows, dte_min, dte_max))
+    if not (ask_if_large and count > LARGE_CHAIN_EXPIRIES):
+        return _FetchPlan("scan", expiration_count=count)
+    choices = choice_summary(rows, dte_min, dte_max)
+    if expiry_choice is None:
+        return _FetchPlan("ask", expiration_count=count, choices=choices)
+    dates = choice_dates(rows, expiry_choice, dte_min, dte_max)
+    ref = _iv_reference_date(rows, dte_max) if dates else None
+    extra = [ref] if ref is not None and ref not in dates else []
+    return _FetchPlan("choice", dates=dates, fetch_dates=dates + extra,
+                      expiry_choice=expiry_choice, expiration_count=count,
+                      expirations_scanned=len(dates), choices=choices)
+
+
+def _scan_expiration_rows(symbol):
+    """The typed expiration list, listed ONCE per scan; ``[]`` when there is none.
+    Both failures speak exactly as fetch_scan_chain's own listing does."""
+    try:
+        rows = option_expiration_rows(symbol)
+    except Exception:  # noqa: BLE001 - no list means today's fallback fetch
+        _degrade.degraded("options.scan_expirations", detail=symbol)
+        return []
+    if not rows:
+        _degrade.degraded("options.scan_expirations",
+                          detail=f"{symbol}: no expiration list", exc_info=False)
+    return rows or []
 
 
 def _attach_payoff_curves(ssn, signals, spot, atm_iv):
@@ -480,7 +576,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                market_state=None, trade_type="SWING", structures=None,
                earnings_date=None, return_chain=False, payoff=True,
                every_expiry=False, earnings_mode="drop",
-               per_type_limit=None) -> dict:
+               per_type_limit=None, expiry_choice=None, ask_if_large=False) -> dict:
     """Run the multi-strategy swing scan pipeline; returns ``{"signals", "view"}``.
 
     The pipeline builds NORMALIZED candidates across families
@@ -571,6 +667,19 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     order; ``not_shown`` counts the rest (0 on every result without a limit).
     Ids and payoff curves are built after it, so dropped rows cost nothing more.
 
+    ``ask_if_large`` (default False; only the Strategy Finder's handler passes
+    True) and ``expiry_choice`` (default None, else an EXPIRY_CHOICES key) limit a
+    LARGE range - more than LARGE_CHAIN_EXPIRIES listed expirations inside
+    ``dte_min``..``dte_max``, counted on Schwab's ``daysToExpiration``. With no
+    choice the result is the chooser answer: ``needs_choice`` True, the
+    ``choices``, ``expiration_count``, and no chain fetched. With one, only its
+    expirations are built (see :func:`_plan_fetch` for the IV reference fetched
+    beside them). A choice on a range that is not large, or without
+    ``ask_if_large``, is ignored. Every result carries ``needs_choice``,
+    ``expiration_count`` (None when no expiration list loaded),
+    ``expirations_scanned`` and ``expiry_choice`` (both None unless a choice was
+    applied) and ``choices`` (None unless the range was large and asked about).
+
     ``payoff`` (default True) attaches each emitted row's ``payoff_curve`` for the
     Strategy Finder. :func:`income_scan` passes False: nothing reads a curve off
     ``cache:options:income``, so it would be published bytes and ~25 valuations
@@ -588,7 +697,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     import strategy_scanner as ssn
     import strategy_scoring as ssc
 
-    _validate_scan_args(earnings_mode, per_type_limit)   # refused before any fetch
+    # Refused before any fetch.
+    _validate_scan_args(earnings_mode, per_type_limit, expiry_choice, ask_if_large)
 
     client = _proxy.schwab_py_client
 
@@ -596,9 +706,29 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # price it was asked at (design section 6: "no results" names the price).
     quote = _proxy.schwab_client.get_quote(symbol) or {}
     spot = _usable_spot(quote.get("last"))
+    # The expirations are listed once, here, and counted before any chain call:
+    # a large range asks which expirations to scan (see _plan_fetch).
+    rows = _scan_expiration_rows(symbol)
+    plan = _plan_fetch(rows, dte_min, dte_max, expiry_choice, ask_if_large)
+    if plan.action == "ask":
+        # Nothing was attempted, so nothing failed: 0 rather than None, which
+        # would claim a fetch whose count was never taken.
+        return _scan_result(spot=spot, expiries_failed=0, needs_choice=True,
+                            **plan.answer())
+    if plan.action == "choice" and not plan.dates:
+        return _scan_result(spot=spot, expiries_failed=0, no_expiries_in_range=True,
+                            **plan.answer())
     # Expiry groups rather than one call (see fetch_scan_chain): a whole chain in
     # one call timed out at the proxy. A group that fails is counted, not hidden.
-    chain, expiries_failed = fetch_scan_chain(symbol, dte_max)
+    #
+    # ⚠ With no rows the two-argument call is kept, and fetch_scan_chain then asks
+    # for the list once more (and speaks again if that fails too) before its
+    # single-fetch fallback: a retry on the degraded path only.
+    if rows:
+        chain, expiries_failed = fetch_scan_chain(symbol, dte_max, rows=rows,
+                                                  dates=plan.fetch_dates)
+    else:
+        chain, expiries_failed = fetch_scan_chain(symbol, dte_max)
     # Every builder and screen_spreads compares DTE against a number.
     hi = _NO_DTE_MAX if dte_max is None else dte_max
     # Off-hours/weekend the chain fetch can return None, and a symbol Schwab does
@@ -609,7 +739,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     if not chain or chain.get("status") == "FAILED":
         return _scan_result(spot=spot, expiries_failed=expiries_failed,
                             chain_missing=expiries_failed != 0,
-                            no_expiries_in_range=expiries_failed == 0)
+                            no_expiries_in_range=expiries_failed == 0,
+                            **plan.answer())
     if spot is None:
         spot = _usable_spot(chain.get("underlyingPrice"))
     # Off-hours the quote can miss AND the chain can carry no usable
@@ -617,10 +748,14 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # price off spot (spot*0.20, spot*atm_iv), so a None spot would TypeError.
     # Answer with an explicit empty result BEFORE any builder runs.
     if spot is None:
-        return _scan_result(spot=None, expiries_failed=expiries_failed)
+        return _scan_result(spot=None, expiries_failed=expiries_failed, **plan.answer())
     hist = se.fetch_price_history(client, symbol)
     tech = se.calc_technicals(hist) if hist is not None else {}
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
+    if plan.dates is not None:
+        # The IV reference _plan_fetch added is for the analysis above only; cut
+        # to the chosen expirations so it can never become a candidate.
+        chain = chain_slice(chain, plan.dates)
     dem = ((iv.get("expected_moves") or {}).get("daily") or {}).get("move_dollars")
 
     # ATM IV (DECIMAL fraction) from the engine's authoritative dollar daily EM —
@@ -817,7 +952,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         _attach_payoff_curves(ssn, signals, spot, atm_iv)
     result = _scan_result(signals=signals, view=view, filtered_out=filtered_out,
                           vol_filtered=vol_filtered, not_shown=not_shown,
-                          expiries_failed=expiries_failed, spot=spot)
+                          expiries_failed=expiries_failed, spot=spot, **plan.answer())
     if return_chain:
         # Handed back IN MEMORY so a second screen over the SAME symbol (the
         # covered-call one, see publish_income) can reuse this chain instead of
@@ -7280,14 +7415,20 @@ def merge_raw_chains(chains):
     return out
 
 
-def fetch_scan_chain(symbol, dte_max):
+def fetch_scan_chain(symbol, dte_max, *, rows=None, dates=None):
     """``(chain, expiries_failed)`` for a swing scan.
 
     Lists the expirations, fetches them in runs (see scan_expiry_runs) at most
-    SCAN_FETCH_WORKERS at a time, and merges. A run whose response is missing or
-    holds no expiry is COUNTED in expiries_failed, never hidden: each run's range
-    is built from listed expiries, so an empty one is a failure. Every run failing
-    is ``(None, count)``.
+    SCAN_FETCH_WORKERS at a time, and merges. ``rows`` (typed ``(date, type,
+    dte)``, as swing_scan listed them) replaces the listing, so nothing is listed
+    twice; an empty ``rows`` takes the single-fetch fallback without listing.
+    ``dates`` fetches exactly those expiries instead of today..dte_max + 2, in runs
+    consecutive in the listing (:func:`expiry_runs`), each cut to at most
+    SCAN_RUN_EXPIRIES - so monthlies, which are not neighbours, are one run each.
+
+    A run whose response is missing or holds no expiry is COUNTED in
+    expiries_failed, never hidden: each run's range is built from listed expiries,
+    so an empty one is a failure. Every run failing is ``(None, count)``.
 
     No usable expiration list falls back to the single fetch this function
     replaced, and returns ``expiries_failed=None`` - a count never taken is not
@@ -7300,20 +7441,27 @@ def fetch_scan_chain(symbol, dte_max):
 
     client = _proxy.schwab_py_client
     today = _dt.date.today()
-    try:
-        exps = option_expirations(symbol)
-    except Exception:  # noqa: BLE001 - the single fetch is the fallback
-        _degrade.degraded("options.scan_expirations", detail=symbol)
-        exps = None
+    if rows is not None:
+        exps = [r[0] for r in rows]       # the caller listed, and spoke if it failed
     else:
-        if not exps:
-            _degrade.degraded("options.scan_expirations",
-                              detail=f"{symbol}: no expiration list", exc_info=False)
+        try:
+            exps = option_expirations(symbol)
+        except Exception:  # noqa: BLE001 - the single fetch is the fallback
+            _degrade.degraded("options.scan_expirations", detail=symbol)
+            exps = None
+        else:
+            if not exps:
+                _degrade.degraded("options.scan_expirations",
+                                  detail=f"{symbol}: no expiration list", exc_info=False)
     if not exps:
         horizon = _FALLBACK_MAX_DTE if dte_max is None else int(dte_max)
         to = today + _dt.timedelta(days=horizon + 2)
         return se.fetch_option_chain(client, symbol, from_date=today, to_date=to), None
-    runs = scan_expiry_runs(exps, dte_max, today)
+    if dates is None:
+        runs = scan_expiry_runs(exps, dte_max, today)
+    else:
+        runs = [run[i:i + SCAN_RUN_EXPIRIES] for run in expiry_runs(exps, dates)
+                for i in range(0, len(run), SCAN_RUN_EXPIRIES)]
     got = parallel_map(
         lambda run: se.fetch_option_chain(client, symbol,
                                           from_date=_dt.date.fromisoformat(run[0]),

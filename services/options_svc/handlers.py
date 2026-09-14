@@ -485,6 +485,9 @@ _SWING_DEFAULTS = {
     "call_d_max": 0.20,
     "min_cr_fraction": 0.10,
     "families": None,
+    # Which expirations of a large chain to scan (compute.EXPIRY_CHOICES); None
+    # answers a large range with the choices instead of scanning it.
+    "expiry_choice": None,
 }
 
 # The fields ScanResult validates — we project the engine dict onto exactly
@@ -676,10 +679,14 @@ def swing_scan(bus, args: dict) -> None:
         result = compute.swing_scan(**params, market_state=market_state,
                                    earnings_date=earnings_date, every_expiry=True,
                                    earnings_mode="flag",
-                                   per_type_limit=compute.FINDER_PER_TYPE_LIMIT)
+                                   per_type_limit=compute.FINDER_PER_TYPE_LIMIT,
+                                   # More than LARGE_CHAIN_EXPIRIES in range and
+                                   # no expiry_choice: answer with the choices.
+                                   ask_if_large=True)
     except Exception as exc:  # noqa: BLE001 — see above.
         _degrade.degraded("options.swing_scan", detail=params["symbol"])
         result = {"signals": [], "view": {}, "spot": None, "expiries_failed": None,
+                  "needs_choice": False, "choices": None, "expiry_choice": None,
                   "error": type(exc).__name__}
     # STAMP every row with the coverage it actually got, the same field the
     # income board carries: a row that skipped the check must not look like a row
@@ -705,6 +712,14 @@ def swing_scan(bus, args: dict) -> None:
                "chain_missing": bool(result.get("chain_missing")),
                "no_expiries_in_range": bool(result.get("no_expiries_in_range")),
                "expiries_failed": result.get("expiries_failed"),
+               # The large-chain chooser: whether this answer is the choices
+               # rather than a scan, the in-range count, how many of them were
+               # scanned, and which choice was applied (None: none was).
+               "needs_choice": bool(result.get("needs_choice")),
+               "expiration_count": result.get("expiration_count"),
+               "expirations_scanned": result.get("expirations_scanned"),
+               "choices": result.get("choices"),
+               "expiry_choice": result.get("expiry_choice"),
                "symbol": params["symbol"], "params": args}
     if result.get("error"):
         payload["error"] = result["error"]
