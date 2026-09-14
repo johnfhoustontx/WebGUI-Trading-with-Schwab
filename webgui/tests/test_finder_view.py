@@ -567,3 +567,79 @@ def test_finder_rows_show_the_score_the_card_shows():
     assert row["composite_score"] == 72.5
     assert {c["name"]: c for c in fv.finder_columns()}["composite_score"]["field"] == \
         "composite_score"
+
+
+# ------------------------------------------------ scan bar from the cached scan
+# The Expiry and Risk style controls start on the params the cached result was
+# scanned with, so the bar never describes a different scan than the ideas below.
+
+_PAGE_PARAMS = {"symbol": "NVDA", "dte_min": 7, "dte_max": 14,
+                "put_d_min": -0.30, "put_d_max": -0.20,
+                "call_d_min": 0.20, "call_d_max": 0.30, "min_cr_fraction": 0.15}
+
+
+def test_scan_controls_follow_the_cached_params():
+    got = fv.scan_controls_from({"symbol": "NVDA", "params": _PAGE_PARAMS})
+    assert got["dte_min"] == 7 and got["dte_max"] == 14
+    assert (got["put_d_min"], got["put_d_max"]) == (-0.30, -0.20)
+    assert (got["call_d_min"], got["call_d_max"]) == (0.20, 0.30)
+    assert got["min_credit_pct"] == 15.0
+    assert fv.expiry_preset_for(got["dte_min"], got["dte_max"]) == "1–2 wk"
+    assert fv.risk_style_for(got["put_d_min"], got["put_d_max"],
+                             got["call_d_min"], got["call_d_max"]) == "Aggressive"
+
+
+def test_scan_controls_default_with_nothing_cached():
+    want = {"dte_min": 0, "dte_max": 120, **fv.risk_bands(fv.RISK_DEFAULT),
+            "min_credit_pct": 10.0}
+    for payload in (None, {}, {"symbol": "SPY"}, {"params": None},
+                    {"params": "junk"}, {"params": {}}):
+        assert fv.scan_controls_from(payload) == want
+
+
+def test_the_credit_floor_converts_without_float_noise():
+    got = fv.scan_controls_from({"params": {"min_cr_fraction": 0.1}})
+    assert got["min_credit_pct"] == 10.0
+
+
+def test_a_bad_dte_pair_falls_back_as_a_pair():
+    default = (0, 120)
+    for dte in ({"dte_min": 7}, {"dte_max": 14},
+                {"dte_min": 30, "dte_max": 7},
+                {"dte_min": -1, "dte_max": 14},
+                {"dte_min": 0, "dte_max": 0},
+                {"dte_min": float("nan"), "dte_max": 14},
+                {"dte_min": True, "dte_max": 14},
+                {"dte_min": 7.5, "dte_max": 14}):
+        got = fv.scan_controls_from({"params": dte})
+        assert (got["dte_min"], got["dte_max"]) == default, dte
+
+
+def test_dte_values_come_back_as_whole_days():
+    got = fv.scan_controls_from({"params": {"dte_min": 7.0, "dte_max": 14.0}})
+    assert (got["dte_min"], got["dte_max"]) == (7, 14)
+    assert all(isinstance(got[k], int) for k in ("dte_min", "dte_max"))
+
+
+def test_bands_fall_back_as_a_set_when_any_is_missing_or_bad():
+    default = fv.risk_bands(fv.RISK_DEFAULT)
+    partial = {k: v for k, v in _PAGE_PARAMS.items() if k != "call_d_max"}
+    nan = {**_PAGE_PARAMS, "put_d_min": float("nan")}
+    for params in (partial, nan):
+        got = fv.scan_controls_from({"params": params})
+        assert {k: got[k] for k in default} == default
+
+
+def test_a_hand_edited_band_is_kept_and_reads_custom():
+    params = {**_PAGE_PARAMS, "put_d_min": -0.27}
+    got = fv.scan_controls_from({"params": params})
+    assert got["put_d_min"] == -0.27
+    assert fv.risk_style_for(got["put_d_min"], got["put_d_max"],
+                             got["call_d_min"], got["call_d_max"]) == fv.RISK_CUSTOM
+
+
+def test_a_bad_credit_floor_falls_back_alone():
+    for frac in (-0.05, float("nan"), None, True):
+        got = fv.scan_controls_from({"params": {**_PAGE_PARAMS, "min_cr_fraction": frac}})
+        assert got["min_credit_pct"] == 10.0
+        assert got["dte_min"] == 7            # the other groups still follow

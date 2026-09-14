@@ -253,6 +253,10 @@ def render():
     # so a scan landing between the two reads is repainted, never missed.
     cached_version = bus_client.read_version("options:swing")
     cached = bus_client.read("options:swing")
+    # ...and the Expiry, Risk style and Advanced fields start on the params that
+    # result was scanned with, for the same reason.
+    start = fv.scan_controls_from(cached)
+    start_risk = fv.risk_toggle_value(*(start[k] for k in fv.BAND_KEYS))
 
     with ui.column().classes("w-full gap-3"):
         # 1 - Scan bar. One bottom-aligned row that wraps: every group carries the
@@ -272,24 +276,24 @@ def render():
                     with ui.row().classes("items-center gap-2 flex-wrap"):
                         expiry_seg = _Segmented(
                             [label for label, _lo, _hi in fv.EXPIRY_PRESETS],
-                            fv.expiry_preset_for(0, 120),
+                            fv.expiry_preset_for(start["dte_min"], start["dte_max"]),
                             lambda v: _on_expiry_choice(v))
-                        dte_min = ui.number(value=0, min=0) \
+                        dte_min = ui.number(value=start["dte_min"], min=0) \
                             .props(f'{_FIELD_PROPS} aria-label="DTE min"').classes("w-20")
                         ui.label("to").classes(f"text-xs {MUTED}")
-                        dte_max = ui.number(value=120, min=1) \
+                        dte_max = ui.number(value=start["dte_max"], min=1) \
                             .props(f'{_FIELD_PROPS} aria-label="DTE max"').classes("w-20")
                         ui.label("days").classes(f"text-xs {MUTED}")
                 with ui.column().classes("gap-1"):
                     ui.label("Risk style").classes(EYEBROW)
                     with ui.row().classes("items-center gap-2 no-wrap"):
-                        risk_seg = _Segmented(list(fv.RISK_STYLES), fv.RISK_DEFAULT,
+                        risk_seg = _Segmented(list(fv.RISK_STYLES), start_risk,
                                               lambda v: _on_risk_choice(v))
                         # Read-only: shown when the Advanced fields match no style.
                         # It is never an option, so it can never be "chosen".
                         custom_badge = ui.label(fv.RISK_CUSTOM) \
                             .classes(f"{BADGE_MUTED} {_PILL}")
-                        custom_badge.set_visibility(False)
+                        custom_badge.set_visibility(start_risk is None)
                 scan_btn = ui.button("Scan", icon="search", color=None) \
                     .props("no-caps").classes(f"{BTN_3D} h-10 px-4")
                 status = ui.label("").classes(f"text-sm {MUTED} self-center")
@@ -301,7 +305,6 @@ def render():
                     .classes("finder-advanced w-full") \
                     .props(f'dense header-class="px-1 min-h-[32px] text-xs '
                            f'text-[{_PALETTE["muted"]}]"'):
-                start = fv.risk_bands(fv.RISK_DEFAULT)
                 with ui.row().classes("items-end gap-2 flex-wrap pt-1"):
                     put_dmin = ui.number("Put Δ min", value=start["put_d_min"],
                                          format="%.2f").classes("w-24")
@@ -311,7 +314,7 @@ def render():
                                           format="%.2f").classes("w-24")
                     call_dmax = ui.number("Call Δ max", value=start["call_d_max"],
                                           format="%.2f").classes("w-24")
-                    mincr = ui.number("Min credit %", value=10.0,
+                    mincr = ui.number("Min credit %", value=start["min_credit_pct"],
                                       format="%.1f").classes("w-28")
 
         # 2 - Summary strip (hidden until a scan has published).

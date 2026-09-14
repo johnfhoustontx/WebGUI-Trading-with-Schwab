@@ -572,3 +572,50 @@ def test_tabbing_out_of_the_seeded_box_does_not_rescan(monkeypatch):
         listener.handler(GenericEventArguments(sender=symbol, client=symbol.client,
                                                args=None))
     assert sent == []
+
+
+def _cached_scan(**params):
+    base = {"symbol": "NVDA", "dte_min": 7, "dte_max": 14,
+            "put_d_min": -0.30, "put_d_max": -0.20,
+            "call_d_min": 0.20, "call_d_max": 0.30, "min_cr_fraction": 0.15}
+    return {**_PAYLOAD, "symbol": "NVDA", "params": {**base, **params}}
+
+
+def test_the_scan_bar_starts_on_the_cached_scan_s_params():
+    card = _render_page(_cached_scan())
+    assert (_number(card, "DTE min").value, _number(card, "DTE max").value) == (7, 14)
+    assert _segment(card, _EXPIRY)[1] == "1–2 wk"
+    assert _segment(card, _RISK)[1] == "Aggressive"
+    assert _number(card, "Put Δ min").value == -0.30
+    assert _number(card, "Call Δ max").value == 0.30
+    assert _number(card, "Min credit %").value == 15.0
+
+
+def test_a_cached_hand_edited_scan_shows_custom_and_no_preset():
+    from nicegui import ui
+    card = _render_page(_cached_scan(dte_min=3, dte_max=21, put_d_min=-0.27))
+    assert _segment(card, _EXPIRY)[1] is None
+    assert _segment(card, _RISK)[1] is None
+    (custom,) = [e for e in _widgets(card, ui.label) if e.text == swing.fv.RISK_CUSTOM]
+    assert custom.visible
+
+
+def test_the_scan_bar_starts_on_defaults_with_an_empty_cache():
+    from nicegui import ui
+    card = _render_page()
+    assert (_number(card, "DTE min").value, _number(card, "DTE max").value) == (0, 120)
+    assert _segment(card, _EXPIRY)[1] == "Any"
+    assert _segment(card, _RISK)[1] == swing.fv.RISK_DEFAULT
+    (custom,) = [e for e in _widgets(card, ui.label) if e.text == swing.fv.RISK_CUSTOM]
+    assert not custom.visible
+
+
+def test_scanning_again_from_a_seeded_bar_resends_the_cached_params(monkeypatch):
+    card = _render_page(_cached_scan())
+    sent = []
+    monkeypatch.setattr(bus_client, "request", lambda *a, **k: sent.append(a))
+    _click(_buttons(card)["Scan"], card)
+    args = sent[0][1]["args"]
+    assert args == {"symbol": "NVDA", "dte_min": 7, "dte_max": 14,
+                    "put_d_min": -0.30, "put_d_max": -0.20,
+                    "call_d_min": 0.20, "call_d_max": 0.30, "min_cr_fraction": 0.15}

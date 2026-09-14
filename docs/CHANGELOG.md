@@ -67,8 +67,12 @@ appealing and easy to use".)
   always started at `SPY`, so returning after an NVDA scan showed "SPY" above NVDA's
   ideas. `swing.initial_symbol` seeds it from the cached payload, read before the
   scan bar is built so `bind_symbol_load`'s tab-out dedup starts on that symbol and a
-  tab-out does not rescan. The DTE and risk-style controls still start at their
-  defaults, not at the cached scan's params.
+  tab-out does not rescan. **The Expiry, Risk style and Advanced fields follow it
+  too** (`finder_view.scan_controls_from` over the echoed `params`): each group — the
+  DTE pair, the four delta bands, the credit floor — falls back to the PAGE default as
+  a group when missing or malformed, so a scan enqueued from outside the page (no
+  `dte_min`, which the service would default to 5–30) reads as the page default, not
+  as the service's.
 - Design + plan: [`docs/plans/2026-09-13-strategy-finder-redesign-design.md`](plans/2026-09-13-strategy-finder-redesign-design.md)
   / [`-plan.md`](plans/2026-09-13-strategy-finder-redesign-plan.md).
 

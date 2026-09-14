@@ -187,6 +187,47 @@ def bands_for_choice(choice):
     return risk_bands(choice) if choice in RISK_STYLES else None
 
 
+DEFAULT_DTE = expiry_range_for("Any")
+DEFAULT_MIN_CREDIT_PCT = 10.0
+BAND_KEYS = ("put_d_min", "put_d_max", "call_d_min", "call_d_max")
+
+
+def scan_controls_from(payload):
+    """The scan bar's starting values: the params the cached result was scanned
+    with (the handler echoes the command args as ``params``), so the bar never
+    describes a different scan than the ideas under it.
+
+    Three groups, each falling back to the page's own default AS A GROUP: a DTE
+    pair must be two whole days, ``0 <= min <= max`` and ``max >= 1``; the four
+    delta bands must all be real numbers; the credit floor must be a
+    non-negative fraction. A missing key falls back to the PAGE default, not the
+    service's - every scan the page sends carries every key, so only a scan
+    enqueued from outside the page can lack one.
+
+    Returns ``dte_min``, ``dte_max``, the four band keys and ``min_credit_pct``
+    (percent, as the field shows it).
+    """
+    params = (payload or {}).get("params")
+    params = params if isinstance(params, dict) else {}
+    out = {}
+
+    lo, hi = _fmt.num(params.get("dte_min")), _fmt.num(params.get("dte_max"))
+    whole = lo is not None and hi is not None and lo == int(lo) and hi == int(hi)
+    if whole and 0 <= lo <= hi and hi >= 1:
+        out["dte_min"], out["dte_max"] = int(lo), int(hi)
+    else:
+        out["dte_min"], out["dte_max"] = DEFAULT_DTE
+
+    bands = {k: _fmt.num(params.get(k)) for k in BAND_KEYS}
+    out.update(bands if all(v is not None for v in bands.values())
+               else risk_bands(RISK_DEFAULT))
+
+    frac = _fmt.num(params.get("min_cr_fraction"))
+    out["min_credit_pct"] = (round(frac * 100.0, 6) if frac is not None and frac >= 0
+                             else DEFAULT_MIN_CREDIT_PCT)
+    return out
+
+
 def risk_toggle_value(put_d_min, put_d_max, call_d_min, call_d_max):
     """The toggle's value for four band fields: a style name, or None for Custom.
 
