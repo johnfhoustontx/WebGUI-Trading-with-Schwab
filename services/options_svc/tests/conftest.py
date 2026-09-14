@@ -96,6 +96,25 @@ def _in_memory_gex_db(monkeypatch):
                             raising=False)
 
 
+class _NoExpirationList:
+    """A non-200 proxy response: ``option_expirations`` reads it as ``[]``."""
+    status_code = 503
+
+    def json(self):
+        return {}
+
+
+@pytest.fixture(autouse=True)
+def _no_live_expiration_list(monkeypatch):
+    """Task 1's grouped fetch lists expirations first; unstubbed, every scan test
+    makes a live expirationchain call, which on the VPS reaches Schwab."""
+    # On the shared CLIENT, not ``compute.option_expirations``: a test that stubs
+    # either one still wins, since its own setattr runs after this. With no list
+    # a scan takes the single-fetch fallback those tests were written against.
+    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_expirations",
+                        lambda symbol: _NoExpirationList(), raising=False)
+
+
 # ── The Strategy Finder's whole-chain scan (2026-09-14) ──────────────────────
 # Expiries at DTE 3 (under the 7-day front floor), 10 and 38 (a calendar pair
 # 28 days apart), 14 (inside the 10's 7-day gap, so too near to be its back
