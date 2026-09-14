@@ -433,6 +433,35 @@ def _keep_best_per_type(signals, limit):
     return [s for i, s in enumerate(signals) if i in keep], len(signals) - len(keep)
 
 
+def _validate_scan_args(earnings_mode, per_type_limit):
+    """Raise ``ValueError`` for an unknown ``earnings_mode`` or a limit that is
+    not a positive int (``None`` is no limit)."""
+    # Refused before any fetch: a mistyped mode silently becoming the drop (or a
+    # malformed limit silently becoming none) is a gate that reads like one.
+    if earnings_mode not in _EARNINGS_MODES:
+        raise ValueError(f"earnings_mode must be one of {_EARNINGS_MODES}, "
+                         f"got {earnings_mode!r}")
+    if per_type_limit is not None and (isinstance(per_type_limit, bool)
+                                       or not isinstance(per_type_limit, int)
+                                       or per_type_limit < 1):
+        raise ValueError(f"per_type_limit must be a positive int or None, "
+                         f"got {per_type_limit!r}")
+
+
+def _attach_payoff_curves(ssn, signals, spot, atm_iv):
+    """Set each row's ``payoff_curve`` in place (see the call site)."""
+    for s in signals:
+        legs = s.get("legs") or []
+        # An adapted spread whose source row carried no leg marks has every option
+        # leg at mark 0, so its curve would price the entry as free and draw a
+        # shape that contradicts the row's real max loss. No marks, no shape.
+        option_legs = [l for l in legs if not ssn._is_stock(l)]
+        if option_legs and all(not (l.get("mark") or 0) for l in option_legs):
+            s["payoff_curve"] = None
+            continue
+        s["payoff_curve"] = ssn.payoff_curve(legs, spot, atm_iv, s.get("dte"))
+
+
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                call_d_min, call_d_max, min_cr_fraction, families=None,
                market_state=None, trade_type="SWING", structures=None,
@@ -546,16 +575,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     import strategy_scanner as ssn
     import strategy_scoring as ssc
 
-    # Refused before any fetch: a mistyped mode silently becoming the drop (or a
-    # malformed limit silently becoming none) is a gate that reads like one.
-    if earnings_mode not in _EARNINGS_MODES:
-        raise ValueError(f"earnings_mode must be one of {_EARNINGS_MODES}, "
-                         f"got {earnings_mode!r}")
-    if per_type_limit is not None and (isinstance(per_type_limit, bool)
-                                       or not isinstance(per_type_limit, int)
-                                       or per_type_limit < 1):
-        raise ValueError(f"per_type_limit must be a positive int or None, "
-                         f"got {per_type_limit!r}")
+    _validate_scan_args(earnings_mode, per_type_limit)
 
     client = _proxy.schwab_py_client
 
@@ -788,16 +808,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # after the quality cut, so only emitted rows pay for its ~25 valuations. It
     # uses the scan's own spot + ATM IV and the row's front ``dte``; ``None`` when
     # the position cannot be valued (the page then draws no shape).
-    for s in (signals if payoff else ()):
-        legs = s.get("legs") or []
-        # An adapted spread whose source row carried no leg marks has every option
-        # leg at mark 0, so its curve would price the entry as free and draw a
-        # shape that contradicts the row's real max loss. No marks, no shape.
-        option_legs = [l for l in legs if not ssn._is_stock(l)]
-        if option_legs and all(not (l.get("mark") or 0) for l in option_legs):
-            s["payoff_curve"] = None
-            continue
-        s["payoff_curve"] = ssn.payoff_curve(legs, spot, atm_iv, s.get("dte"))
+    if payoff:
+        _attach_payoff_curves(ssn, signals, spot, atm_iv)
     result = {"signals": signals, "view": view, "filtered_out": filtered_out,
               "vol_filtered": vol_filtered, "not_shown": not_shown,
               "expiries_failed": expiries_failed, "spot": spot,
