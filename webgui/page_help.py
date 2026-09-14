@@ -237,7 +237,8 @@ four top picks, and the full ranked list.
   expirations · Monthlies only*, with a **Change** link that brings the card back
   (nothing rescans until you pick). A range of 30 or fewer expirations ignores the
   remembered pick and scans all of them. If the pick holds nothing in the range you
-  now ask for — *Next 30 days* with DTE min at 60, say — the list says *Next 30 days
+  now ask for — *Next 30 days* on $SPX with DTE min at 31, say (33 expirations in
+  range, none within 30 days, so *Scanned 0 of 33*) — the list says *Next 30 days
   holds no expirations in this range for $SPX — use Change to pick another.*
 - **A pick builds only its expirations**, so a calendar pairs only within them:
   *Next 30 days* keeps a calendar's later month within 30 days, and *Monthlies

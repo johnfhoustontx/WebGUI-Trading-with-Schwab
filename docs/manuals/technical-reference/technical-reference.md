@@ -1026,8 +1026,9 @@ still listed. Schwab's types, measured on prod the same day:
 | NVDA | 25 | 10 | 15 | — | — | 9 | 13 |
 
 **With `expiry_choice`** only that choice's dates are fetched (`fetch_scan_chain(rows=,
-dates=)`: runs consecutive in the listing, each cut to 8 — so monthlies, which are not
-neighbours, are one run each) and the chain is **sliced to them before any builder runs**.
+dates=)`: runs consecutive in the listing, each cut to 8 — so a monthly with weeklies
+listed between it and the next is a run of its own, while far-dated monthlies that are
+neighbours in the listing share one) and the chain is **sliced to them before any builder runs**.
 Calendars therefore pair only within the choice: *Next 30 days* caps a calendar's back
 month at 30 days, and *Monthlies only* pairs monthlies with monthlies. ⚠ **The IV
 reference is always kept.** `_iv_reference_date` finds the expiry the WHOLE scan's
@@ -1037,8 +1038,10 @@ it beside the choice for `run_iv_analysis` alone, then slices it back out — so
 IV, the Vol Rank and the daily expected move every candidate is scored against are the
 whole chain's whatever the choice. "Only when no chosen expiry is inside 7–60" would not
 do: *Monthlies only* keeps a 46-day monthly that `extract_atm_iv` would read instead of the
-29-day weekly. A reference that does not load degrades as `options.scan_iv_reference`
-(the analysis falls back to a chosen expiry). **`expiries_failed` counts chosen expiries
+29-day weekly. A reference that does not load degrades as `options.scan_iv_reference`,
+and `extract_atm_iv` then reads the chosen expiry nearest 30 DTE instead (inside 7–60,
+else any above 0) — or, when no chosen expiry is more than 0 DTE, returns `None`, so the
+scan has no ATM IV rather than a fallback one. **`expiries_failed` counts chosen expiries
 only**, recounted from what the merged chain holds, so it can never exceed
 `expirations_scanned`; if no chosen expiry loaded the answer is `chain_missing`, with no
 price history fetched. A choice holding no expiry in the range returns

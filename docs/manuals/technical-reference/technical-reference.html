@@ -1661,8 +1661,9 @@ still listed. Schwab's types, measured on prod the same day:</p>
 </tbody>
 </table>
 <p><strong>With <code>expiry_choice</code></strong> only that choice's dates are fetched (<code>fetch_scan_chain(rows=,
-dates=)</code>: runs consecutive in the listing, each cut to 8 — so monthlies, which are not
-neighbours, are one run each) and the chain is <strong>sliced to them before any builder runs</strong>.
+dates=)</code>: runs consecutive in the listing, each cut to 8 — so a monthly with weeklies
+listed between it and the next is a run of its own, while far-dated monthlies that are
+neighbours in the listing share one) and the chain is <strong>sliced to them before any builder runs</strong>.
 Calendars therefore pair only within the choice: <em>Next 30 days</em> caps a calendar's back
 month at 30 days, and <em>Monthlies only</em> pairs monthlies with monthlies. ⚠ <strong>The IV
 reference is always kept.</strong> <code>_iv_reference_date</code> finds the expiry the WHOLE scan's
@@ -1672,8 +1673,10 @@ it beside the choice for <code>run_iv_analysis</code> alone, then slices it back
 IV, the Vol Rank and the daily expected move every candidate is scored against are the
 whole chain's whatever the choice. "Only when no chosen expiry is inside 7–60" would not
 do: <em>Monthlies only</em> keeps a 46-day monthly that <code>extract_atm_iv</code> would read instead of the
-29-day weekly. A reference that does not load degrades as <code>options.scan_iv_reference</code>
-(the analysis falls back to a chosen expiry). <strong><code>expiries_failed</code> counts chosen expiries
+29-day weekly. A reference that does not load degrades as <code>options.scan_iv_reference</code>,
+and <code>extract_atm_iv</code> then reads the chosen expiry nearest 30 DTE instead (inside 7–60,
+else any above 0) — or, when no chosen expiry is more than 0 DTE, returns <code>None</code>, so the
+scan has no ATM IV rather than a fallback one. <strong><code>expiries_failed</code> counts chosen expiries
 only</strong>, recounted from what the merged chain holds, so it can never exceed
 <code>expirations_scanned</code>; if no chosen expiry loaded the answer is <code>chain_missing</code>, with no
 price history fetched. A choice holding no expiry in the range returns

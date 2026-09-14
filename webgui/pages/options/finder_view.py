@@ -548,9 +548,10 @@ def no_data_label(payload):
     cut · premium too cheap to sell · nothing could be built.
 
     A remembered choice can hold nothing in the range the bar now asks for (Next
-    30 days, with DTE min at 60): the service answers ``no_expiries_in_range``
-    with ``expirations_scanned`` 0 while the chain lists 56, so "no expirations in
-    this expiry range" would be false beside "Scanned 0 of 56 expirations". That
+    30 days on $SPX with DTE min at 31): the service answers
+    ``no_expiries_in_range`` with ``expirations_scanned`` 0 while 33 expirations
+    are in range, so "no expirations in this expiry range" would be false beside
+    "Scanned 0 of 33 expirations". That
     line names the choice instead, and points at Change only when the page draws
     it - a known choice, both counts read, and choices to reopen.
 

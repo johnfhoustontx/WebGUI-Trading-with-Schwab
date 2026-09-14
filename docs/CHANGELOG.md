@@ -42,11 +42,17 @@ chains) don't load the complete chain, give me option what to load.")
   `est_seconds = count × SCAN_SEC_PER_EXPIRY` 0.75 rounded half up) and **no chain is
   fetched**. The four `EXPIRY_CHOICES`: *Next 30 days* (DTE ≤ 30) · *Next 90 days* (DTE ≤ 90)
   · *Monthlies only* (type `S` — not weeklies, quarterlies or month-end) · *Everything*.
-  With a choice only its expirations are fetched (monthlies one run each) and built, so
+  With a choice only its expirations are fetched (in runs consecutive in the listing, so
+  a monthly between weeklies is its own run) and built, so
   calendars pair within the choice; the answer adds `expiry_choice` and
   `expirations_scanned`. A choice on a range of 30 or fewer is ignored (`expiry_choice:
   null`), which lets the page send a remembered pick blind; an unknown one is a
-  `ValueError` → the handler's error answer; no expiration list never asks.
+  `ValueError` → the handler's error answer; no expiration list never asks. **The IV
+  reference is always kept:** a choice that leaves out the expiry the whole scan reads
+  ATM IV from gets it fetched beside the choice for `run_iv_analysis` alone, then sliced
+  away, so the IV, Vol Rank and expected move do not change with the choice. "Only when no
+  chosen expiry is inside 7–60 DTE" was not enough: *Monthlies only* keeps a 46-day
+  monthly that would have replaced the 29-day weekly.
 - **Page.** One chooser card replaces the top picks (*$SPX lists 56 expirations in this
   range. Choose what to scan:*, buttons *Next 30 days · 23 · ~17 s*, a zero-count choice
   disabled), the count line *56 expirations — choose what to scan*, the list *Choose which
@@ -62,27 +68,31 @@ chains) don't load the complete chain, give me option what to load.")
     within **±1 day** of the calendar difference (a 0 on every row is a bad field, not
     clock skew; reported once as the degrade `options.expiration_dte`). Live, the list's
     `daysToExpiration` equalled the chain keys' DTE for SPY and NVDA with 0 mismatches.
-  - **The IV reference is always kept.** A choice that leaves out the expiry the whole
-    scan reads ATM IV from gets it fetched beside the choice for `run_iv_analysis` alone,
-    then sliced away, so the IV, Vol Rank and expected move never change with the choice.
-    "Only when no chosen expiry is inside 7–60 DTE" was not enough: *Monthlies only*
-    keeps a 46-day monthly that would have replaced the 29-day weekly.
+  - **A negative DTE min is clamped at 0**, so it cannot admit a past expiry into the
+    count.
   - **Failures count chosen expirations only**, recounted from the merged chain, so the
     reference cannot push `expiries_failed` past `expirations_scanned`; a reference that
     did not load is the degrade `options.scan_iv_reference`.
+  - **Chooser words degrade to the ordinary lines.** An answer that asked but carries no
+    usable choice draws no card, so the summary and the empty list fall through to their
+    ordinary counts and reasons instead of telling the reader to choose; a choice holding
+    no expirations drops its *~N s* estimate (*Monthlies only · 0*).
   - **The scan timeout never fired after a pick.** Its `ui.timer` was built in the sender's
     slot — for a pick, the chooser card the scan clears — so it was deleted with it. It
     mounts in the never-cleared list box.
   - **The stale guard needed an exact `expiry_choice`.** The shared guard skips a field
     the echo lacks, so the plain scan that asked could end the wait of the pick sent after
     it; `swing.answers_request` also requires the echoed `expiry_choice` to match.
-  - **An empty pick says so.** A remembered *Next 30 days* with DTE min at 60 read
-    "$SPX has no expirations in this expiry range." beside "Scanned 0 of 56 expirations";
+  - **An empty pick says so.** A remembered *Next 30 days* on $SPX with DTE min at 31 (33
+    expirations in range, none within 30 days) read "$SPX has no expirations in this
+    expiry range." beside "Scanned 0 of 33 expirations";
     it now reads *Next 30 days holds no expirations in this range for $SPX — use Change to
     pick another.* (the Change clause only when Change is drawn).
   - **The box and its dedupe agree.** A pick that writes another symbol into the box (and
     the Trade Plan hand-off) now tells `bind_symbol_load`'s dedupe
     (`inputs.mark_symbol_loaded`), so the next tab-out does not scan it a second time.
+  - **Change is reachable by keyboard and screen reader:** an `aria-label` ("Change which
+    expirations to scan") and an underline on keyboard focus as well as on hover.
 - **Docs:** `page_help.py`, the User Guide, Reference Guide, Technical Reference and API
   Reference; `docs/webgui-routes.md`; CLAUDE.md's route row and chain note in place; the
   "about 20 s" figure replaced by the live numbers everywhere it was claimed.

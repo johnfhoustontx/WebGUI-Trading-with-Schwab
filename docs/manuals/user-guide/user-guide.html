@@ -1657,9 +1657,11 @@ for $SPX.</em></p>
   nothing rescans until you pick.</li>
 <li><strong>A range of 30 or fewer expirations never asks</strong>, and ignores a remembered pick:
   everything in it is scanned, and the <em>Scanned … of …</em> part is not shown.</li>
-<li><strong>A pick can hold nothing</strong> in the range you ask for next — <em>Next 30 days</em> with DTE
-  min at 60, say. The list then says <em>Next 30 days holds no expirations in this range
-  for $SPX — use Change to pick another.</em></li>
+<li><strong>A pick can hold nothing</strong> in the range you ask for next — <em>Next 30 days</em> on $SPX
+  with DTE min at 31, say, where 33 expirations are in range and none is within 30 days.
+  The count line ends <em>Scanned 0 of 33 expirations · Next 30 days</em>, and the list says
+  <em>Next 30 days holds no expirations in this range for $SPX — use Change to pick
+  another.</em></li>
 <li><strong>A pick builds only its expirations</strong>, so calendars and diagonals pair only within
   them: <em>Next 30 days</em> keeps the later month within 30 days, and <em>Monthlies only</em> pairs
   a monthly with a later monthly.</li>
