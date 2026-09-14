@@ -462,7 +462,9 @@ def choice_label(key):
 
 def _whole_count(v):
     """A count as an int when it was READ as a whole number >= 0, else None - so
-    ``True``, NaN, ``"56"`` and ``2.5`` are all "not read", never a number."""
+    ``True``, NaN, ``"lots"`` and ``2.5`` are all "not read", never a number. A
+    numeric string such as ``"56"`` IS read, through ``_fmt.num``, exactly as the
+    module's other counts are."""
     f = _fmt.num(v)
     return int(f) if f is not None and f >= 0 and f == int(f) else None
 
@@ -494,9 +496,12 @@ def chooser_facts(payload):
     each button ``{"key", "text", "enabled"}`` in the payload's order, its text
     ``"Next 30 days · 23 · ~17 s"``. A part that was not read (the count, the
     estimate) is dropped rather than printed as 0, and a button is enabled only
-    when its count was read and is above zero. A failed scan wins; entries with
-    no known key are skipped, and a list with none left is no chooser - the page
-    then shows its ordinary empty line.
+    when its count was read and is above zero; a choice holding nothing drops its
+    estimate too, since there is no wait to quote. A failed scan wins; entries
+    with no known key are skipped, and a list with none left is no chooser - and
+    then :func:`summary_facts` and :func:`no_data_label` do not ask either, but
+    fall through to their ordinary lines, so no sentence points at a card the
+    page cannot draw.
     """
     p = payload or {}
     if p.get("error") or not p.get("needs_choice"):
@@ -514,7 +519,7 @@ def chooser_facts(payload):
         if count is not None:
             parts.append(f"{count:,}")
         est = _fmt.num(entry.get("est_seconds"))
-        if est is not None and est >= 0:
+        if est is not None and est >= 0 and count != 0:
             parts.append(f"~{_half_up(est):,} s")
         buttons.append({"key": key, "text": " · ".join(parts),
                         "enabled": count is not None and count > 0})
@@ -554,7 +559,7 @@ def no_data_label(payload):
     if p.get("error"):
         failed = f"The scan for {symbol} failed." if symbol else "The scan failed."
         return f"{failed} Check System Status and scan again."
-    if p.get("needs_choice"):
+    if chooser_facts(p) is not None:
         tail = f" for {symbol}" if symbol else ""
         return f"Choose which expirations to scan{tail}."
     if p.get("chain_missing"):
@@ -593,7 +598,8 @@ def summary_facts(payload):
     lives here rather than in the list because a scan is one symbol, so every row
     carried the same value.
 
-    A large chain that ASKED (``needs_choice``) counts nothing yet: its line is
+    A large chain that ASKED (``needs_choice``, with a choice to offer) counts
+    nothing yet: its line is
     ``"56 expirations — choose what to scan"``. A scan limited by a choice adds
     ``"Scanned 19 of 56 expirations · Monthlies only"`` - only when the choice is
     one of the four and both counts were read - and ``can_change`` is True
@@ -638,7 +644,7 @@ def summary_facts(payload):
         return {"symbol": symbol, "price": price, "pills": pills,
                 "vol_rank": vol_rank, "counts": "Scan failed", "can_change": False}
 
-    if p.get("needs_choice"):
+    if chooser_facts(p) is not None:
         listed = _whole_count(p.get("expiration_count"))
         counts = ("Choose what to scan" if listed is None
                   else f"{_expirations(listed)} — choose what to scan")

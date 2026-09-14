@@ -1021,7 +1021,8 @@ def test_chooser_title_never_prints_a_count_it_did_not_read():
 def test_a_choice_with_nothing_in_it_is_disabled_and_says_zero():
     zero = {"key": "monthly", "label": "Monthlies only", "count": 0, "est_seconds": 0}
     f = fv.chooser_facts({**_ASK, "choices": [zero]})
-    assert f["buttons"] == [{"key": "monthly", "text": "Monthlies only · 0 · ~0 s",
+    # Nothing to scan takes no time worth quoting, so the estimate part goes.
+    assert f["buttons"] == [{"key": "monthly", "text": "Monthlies only · 0",
                              "enabled": False}]
 
 
@@ -1126,3 +1127,27 @@ def test_no_data_label_on_an_answer_that_asks():
         "Choose which expirations to scan.")
     assert fv.no_data_label({**_ASK, "error": "TypeError"}) == (
         "The scan for $SPX failed. Check System Status and scan again.")
+
+
+def test_whole_count_reads_a_numeric_string_like_every_other_count():
+    # _fmt.num reads "56" as 56.0, as it does for the module's other counts.
+    assert fv._whole_count("56") == 56
+    assert fv.chooser_facts({**_ASK, "expiration_count": "56"})["title"] == (
+        "$SPX lists 56 expirations in this range.")
+    for junk in (True, float("nan"), "lots", 2.5, -1, "2.5"):
+        assert fv._whole_count(junk) is None, junk
+
+
+def test_an_ask_with_no_usable_choices_never_tells_the_reader_to_choose():
+    # needs_choice with nothing to choose from draws no chooser, so neither line
+    # may point at one: both fall through to their ordinary wording.
+    for bad in (None, [], "all", [{"key": "weekly", "count": 3}]):
+        broken = {**_ASK, "choices": bad}
+        assert fv.chooser_facts(broken) is None
+        f = fv.summary_facts(broken)
+        assert "choose" not in f["counts"].lower(), bad
+        assert f["counts"] == "0 ideas"
+        assert f["can_change"] is False
+        assert fv.no_data_label(broken) == (
+            fv.no_data_label({**broken, "needs_choice": False}))
+        assert "Choose" not in fv.no_data_label(broken)
