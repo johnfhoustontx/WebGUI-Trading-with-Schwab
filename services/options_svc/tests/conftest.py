@@ -94,3 +94,78 @@ def _in_memory_gex_db(monkeypatch):
     if "gex_history_db" in _sys.modules:
         monkeypatch.setattr(_sys.modules["gex_history_db"], "connect", _connect,
                             raising=False)
+
+
+# ── The Strategy Finder's whole-chain scan (2026-09-14) ──────────────────────
+# Expiries at DTE 3 (under the 7-day front floor), 10 and 38 (a calendar pair
+# 28 days apart) and 400 (the long end no DTE max used to reach).
+SCAN_ENV_DTES = (3, 10, 38, 400)
+
+
+def _whole_chain(dtes=SCAN_ENV_DTES, spot=540.0, delta_iv=0.18, price_iv=0.234,
+                 lo=400.0, hi=700.0, step=2.5):
+    """A symmetric Black-Scholes chain whose marks are priced RICH: at
+    ``price_iv`` (1.3x) against deltas at ``delta_iv``. A flat, fairly priced
+    chain builds no credit spread at all - ``screen_spreads``'s edge floor wants
+    credit/width above |delta| - and only the rich marks give the real engine
+    PCS and CCS on more than one expiry. $2.50 strikes, because a $5 width at
+    540 cannot be sized under the $250 per-trade cap."""
+    import datetime as dt
+
+    import options_calculator as oc
+
+    calls, puts = {}, {}
+    for dte in dtes:
+        key = f"{(dt.date.today() + dt.timedelta(days=dte)).isoformat()}:{dte}"
+        T = dte / 365.0
+        calls[key], puts[key] = {}, {}
+        n = int(round((hi - lo) / step))
+        for i in range(n + 1):
+            k = lo + i * step
+            for kind, m in (("call", calls[key]), ("put", puts[key])):
+                mark = round(max(oc.bs_price(spot, k, T, oc.RISK_FREE_RATE, price_iv, kind),
+                                 0.05), 2)
+                m[f"{k}"] = [{
+                    "delta": round(oc.bs_delta(spot, k, T, oc.RISK_FREE_RATE, delta_iv, kind), 4),
+                    "mark": mark, "bid": round(max(mark - 0.05, 0.01), 2),
+                    "ask": round(mark + 0.05, 2), "theta": -0.05, "vega": 0.30,
+                    "gamma": 0.01, "volatility": price_iv * 100.0,
+                    "totalVolume": 1000, "openInterest": 5000}]
+    return {"underlyingPrice": spot, "callExpDateMap": calls, "putExpDateMap": puts}
+
+
+@pytest.fixture
+def scan_env(monkeypatch):
+    """``swing_scan`` over :func:`_whole_chain` with every non-chain input
+    stubbed, the quality cut off, and the REAL builders and ``screen_spreads``.
+
+    Exposes ``chain``, ``ssn`` (strategy_scanner), ``spot``, ``atm_iv`` (the
+    value swing_scan derives from the stubbed $5.00 daily move), ``nearest``
+    (the DTE-3 expiry) and ``exp_by_dte``."""
+    import math
+    import types
+
+    import strategy_scanner as ssn
+
+    chain = _whole_chain()
+    spot, daily_move = 540.0, 5.0
+    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max: (chain, 0))
+    monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
+                        lambda symbol: {"last": spot})
+    monkeypatch.setattr(compute.se, "fetch_price_history", lambda client, symbol: {"h": 1})
+    monkeypatch.setattr(compute.se, "calc_technicals",
+                        lambda hist: {"trend": "NEUTRAL", "rsi14": 50,
+                                      "price": spot, "sma20": spot})
+    monkeypatch.setattr(compute, "run_iv_analysis",
+                        lambda client, symbol, price=None, hist=None, chain=None:
+                        {"iv_rank": 50.0,
+                         "expected_moves": {"daily": {"move_dollars": daily_move}}})
+    # The liquidity gate skips its volume and spread checks outside market hours;
+    # pinned so the spread set does not depend on the hour the suite runs.
+    monkeypatch.setattr(compute.se, "_is_options_market_open", lambda: False)
+    monkeypatch.setattr(compute, "SWING_MIN_SCORE", 0.0)
+    monkeypatch.setattr(compute, "SWING_EXCLUDED_GRADES", ())
+    exp_by_dte = {int(k.split(":")[1]): k.split(":")[0] for k in chain["callExpDateMap"]}
+    return types.SimpleNamespace(
+        chain=chain, ssn=ssn, spot=spot, atm_iv=daily_move * math.sqrt(365.0) / spot,
+        nearest=exp_by_dte[min(exp_by_dte)], exp_by_dte=exp_by_dte)

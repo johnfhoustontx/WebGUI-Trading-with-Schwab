@@ -267,6 +267,104 @@ def _tag_group(batch, group):
         s["group"] = group
     return batch
 
+
+# ── every expiry (the Strategy Finder's whole-chain scan, 2026-09-14) ──────────
+_EXP_MAPS = ("callExpDateMap", "putExpDateMap")
+
+
+def _index_expiries(chain):
+    """``{map key: {expiry: [(chain key, strikes)]}}``, in chain order. Built once
+    per scan, so cutting the chain to an expiry is a lookup rather than a pass
+    over every key of a 56-expiry chain."""
+    idx = {}
+    for key in _EXP_MAPS:
+        by_exp = idx[key] = {}
+        for k, v in (chain.get(key) or {}).items():
+            by_exp.setdefault(k.split(":")[0], []).append((k, v))
+    return idx
+
+
+def _slice_indexed(chain, idx, keep):
+    out = dict(chain)
+    for key in _EXP_MAPS:
+        out[key] = {k: v for e, pairs in idx[key].items() if e in keep for k, v in pairs}
+    return out
+
+
+def chain_slice(chain, keep):
+    """``chain`` with both expiry maps cut to the expiries named in ``keep``
+    (``YYYY-MM-DD``). Top-level fields and the per-expiry strike dicts are shared
+    with ``chain``, not copied."""
+    return _slice_indexed(chain, _index_expiries(chain), set(keep))
+
+
+def listed_expiry_dtes(chain, dte_min, dte_max):
+    """``[(expiry, dte)]`` for every expiry either map lists inside the window,
+    nearest first. DTE is the chain key's own (``YYYY-MM-DD:dte``), as the
+    builders read it."""
+    seen = {}
+    for key in _EXP_MAPS:
+        for k in chain.get(key) or {}:
+            exp, dte = k.split(":")[0], int(float(k.split(":")[1]))
+            if dte_min <= dte <= dte_max:
+                seen[exp] = dte
+    return sorted(seen.items(), key=lambda kv: kv[1])
+
+
+def _build_every_expiry(ssn, chain, symbol, spot, atm_iv, dte_min, dte_max, fams,
+                        bands, spreads):
+    """Every requested build group on every listed expiry in the window.
+
+    The builders each take the NEAREST expiry in their window, so each runs on the
+    chain cut to one expiry with ``dte_min = dte_max`` = that expiry's DTE - and
+    builds exactly that expiry, unchanged. Credit spreads already cover every
+    expiry (``spreads`` is one ``screen_spreads`` pass); iron condors are paired
+    per expiry rather than the top three across the scan.
+    """
+    listed = listed_expiry_dtes(chain, dte_min, dte_max)
+    idx = _index_expiries(chain)
+    out = []
+    for exp, dte in listed:
+        one = _slice_indexed(chain, idx, {exp})
+        if "DIRECTIONAL" in fams:
+            out += _tag_group(ssn.build_directional(one, symbol, spot, atm_iv, dte, dte,
+                                                    **bands), "DIRECTIONAL")
+        if "VERTICAL" in fams:
+            out += _tag_group(ssn.build_debit_verticals(one, symbol, spot, atm_iv, dte, dte),
+                              "VERTICAL")
+        if "STRADDLE" in fams:
+            out += _tag_group(ssn.build_straddles_strangles(one, symbol, spot, atm_iv,
+                                                            dte, dte, **bands), "STRADDLE")
+        if "BUTTERFLY" in fams:
+            out += _tag_group(ssn.build_butterflies_condors(one, symbol, spot, atm_iv,
+                                                            dte, dte), "BUTTERFLY")
+        if "STOCK" in fams:
+            out += _tag_group(ssn.build_stock_structures(one, symbol, spot, atm_iv,
+                                                         dte, dte, **bands), "STOCK")
+        # A front under the week floor would make the builder jump to the next
+        # expiry - a duplicate of that expiry's own turn - so it builds nothing.
+        if "CALENDAR" in fams and dte >= ssn._MIN_FRONT_DTE:
+            # This expiry plus every one far enough out to be its back month. The
+            # ones in between can be neither, and leaving them out keeps the slices
+            # from growing with the square of a 56-expiry chain.
+            later = {e for e, d in listed if d >= dte + ssn._CAL_MIN_GAP} | {exp}
+            cals = ssn.build_calendars(_slice_indexed(chain, idx, later), symbol, spot,
+                                       atm_iv, dte, dte_max)
+            # The builder's front is the nearest expiry with a usable leg, so one
+            # with none on a side would build the NEXT expiry's calendar there -
+            # which that expiry's own turn builds too. Keep only this front's.
+            out += _tag_group([s for s in cals if s.get("expiration") == exp], "CALENDAR")
+    if "VERTICAL" in fams:
+        out += _tag_group([ssn.adapt_credit_spread(s) for s in spreads], "VERTICAL")
+    if "NEUTRAL" in fams:
+        by_exp = {}
+        for s in spreads:
+            by_exp.setdefault(s.get("expiration"), []).append(s)
+        for group in by_exp.values():
+            out += _tag_group([ssn.adapt_iron_condor(ic)
+                               for ic in se.build_iron_condors(group)], "NEUTRAL")
+    return out
+
 # Emission cut for the Strategy Finder: a candidate must reach SWING_MIN_SCORE on
 # strategy_scoring's Fit+Quality composite AND not carry an excluded grade, or it
 # is dropped before the page ever sees it.
@@ -299,7 +397,8 @@ def _passes_swing_cut(sig):
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                call_d_min, call_d_max, min_cr_fraction, families=None,
                market_state=None, trade_type="SWING", structures=None,
-               earnings_date=None, return_chain=False, payoff=True) -> dict:
+               earnings_date=None, return_chain=False, payoff=True,
+               every_expiry=False) -> dict:
     """Run the multi-strategy swing scan pipeline; returns ``{"signals", "view"}``.
 
     The pipeline builds NORMALIZED candidates across families
@@ -358,6 +457,11 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
       straight over the report the spreads were just protected from.
     * ``return_chain`` adds the fetched ``chain`` + ``spot`` to the returned
       dict so the covered-call screen can reuse them (see the return statement).
+
+    ``every_expiry`` (default False) builds every group on EVERY listed expiry in
+    the window instead of the nearest one each builder takes (see
+    :func:`_build_every_expiry`) - the Strategy Finder's whole-chain scan. False
+    is the nearest-expiry path the Income Window relies on, unchanged.
 
     ``payoff`` (default True) attaches each emitted row's ``payoff_curve`` for the
     Strategy Finder. :func:`income_scan` passes False: nothing reads a curve off
@@ -423,22 +527,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     view = ssc.infer_market_view(tech or {}, iv or {})
 
     fams = set(families) if families else set(_SWING_FAMILIES)
-    signals = []
-    if "DIRECTIONAL" in fams:
-        # ⚠ The short-delta band goes to BOTH builders (gap assessment A4). It
-        # used to reach ``screen_spreads`` alone, so in ONE call the Income
-        # Window's documented 0.15-0.25 band governed its credit spreads while
-        # its cash-secured put was built at a fixed 0.28 target: measured on the
-        # live board 2026-09-11, the day's only SHORT_PUT (XOM 160, 35 DTE)
-        # carried -0.334. ``build_directional`` aims a short at the band's
-        # MIDPOINT and drops one richer than its ceiling, and it never touches
-        # the LONG legs - see that docstring for why the rule is asymmetric.
-        signals += _tag_group(ssn.build_directional(chain, symbol, spot, atm_iv,
-                                                    dte_min, hi,
-                                                    put_band=(put_d_min, put_d_max),
-                                                    call_band=(call_d_min, call_d_max)),
-                              "DIRECTIONAL")
-
+    bands = {"put_band": (put_d_min, put_d_max), "call_band": (call_d_min, call_d_max)}
     # Credit spreads feed BOTH the VERTICAL credit set AND the NEUTRAL iron condors,
     # so compute screen_spreads if EITHER family is requested.
     spreads = []
@@ -448,31 +537,50 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                                          min_cr_fraction, trade_type, spot=spot,
                                          daily_expected_move=dem,
                                          earnings_date=earnings_date))
-    if "VERTICAL" in fams:
-        signals += _tag_group(ssn.build_debit_verticals(chain, symbol, spot, atm_iv,
-                                                        dte_min, hi), "VERTICAL")
-        signals += _tag_group([ssn.adapt_credit_spread(s) for s in spreads], "VERTICAL")
-    if "NEUTRAL" in fams:
-        signals += _tag_group([ssn.adapt_iron_condor(ic)
-                               for ic in se.build_iron_condors(spreads)], "NEUTRAL")
-    # The four build groups added 2026-09-13. The short-delta band reaches the two
-    # builders that SELL an out-of-the-money option (the short strangle, the
-    # covered call's call) and binds nothing else - see each builder's docstring.
-    bands = {"put_band": (put_d_min, put_d_max), "call_band": (call_d_min, call_d_max)}
-    if "STRADDLE" in fams:
-        signals += _tag_group(ssn.build_straddles_strangles(chain, symbol, spot, atm_iv,
-                                                            dte_min, hi, **bands),
-                              "STRADDLE")
-    if "BUTTERFLY" in fams:
-        signals += _tag_group(ssn.build_butterflies_condors(chain, symbol, spot, atm_iv,
-                                                            dte_min, hi), "BUTTERFLY")
-    if "CALENDAR" in fams:
-        signals += _tag_group(ssn.build_calendars(chain, symbol, spot, atm_iv,
-                                                  dte_min, hi), "CALENDAR")
-    if "STOCK" in fams:
-        signals += _tag_group(ssn.build_stock_structures(chain, symbol, spot, atm_iv,
-                                                         dte_min, hi, **bands),
-                              "STOCK")
+    if every_expiry:
+        signals = _build_every_expiry(ssn, chain, symbol, spot, atm_iv, dte_min, hi,
+                                      fams, bands, spreads)
+    else:
+        signals = []
+        if "DIRECTIONAL" in fams:
+            # ⚠ The short-delta band goes to BOTH builders (gap assessment A4). It
+            # used to reach ``screen_spreads`` alone, so in ONE call the Income
+            # Window's documented 0.15-0.25 band governed its credit spreads while
+            # its cash-secured put was built at a fixed 0.28 target: measured on the
+            # live board 2026-09-11, the day's only SHORT_PUT (XOM 160, 35 DTE)
+            # carried -0.334. ``build_directional`` aims a short at the band's
+            # MIDPOINT and drops one richer than its ceiling, and it never touches
+            # the LONG legs - see that docstring for why the rule is asymmetric.
+            signals += _tag_group(ssn.build_directional(chain, symbol, spot, atm_iv,
+                                                        dte_min, hi,
+                                                        put_band=(put_d_min, put_d_max),
+                                                        call_band=(call_d_min, call_d_max)),
+                                  "DIRECTIONAL")
+
+        if "VERTICAL" in fams:
+            signals += _tag_group(ssn.build_debit_verticals(chain, symbol, spot, atm_iv,
+                                                            dte_min, hi), "VERTICAL")
+            signals += _tag_group([ssn.adapt_credit_spread(s) for s in spreads], "VERTICAL")
+        if "NEUTRAL" in fams:
+            signals += _tag_group([ssn.adapt_iron_condor(ic)
+                                   for ic in se.build_iron_condors(spreads)], "NEUTRAL")
+        # The four build groups added 2026-09-13. The short-delta band reaches the two
+        # builders that SELL an out-of-the-money option (the short strangle, the
+        # covered call's call) and binds nothing else - see each builder's docstring.
+        if "STRADDLE" in fams:
+            signals += _tag_group(ssn.build_straddles_strangles(chain, symbol, spot, atm_iv,
+                                                                dte_min, hi, **bands),
+                                  "STRADDLE")
+        if "BUTTERFLY" in fams:
+            signals += _tag_group(ssn.build_butterflies_condors(chain, symbol, spot, atm_iv,
+                                                                dte_min, hi), "BUTTERFLY")
+        if "CALENDAR" in fams:
+            signals += _tag_group(ssn.build_calendars(chain, symbol, spot, atm_iv,
+                                                      dte_min, hi), "CALENDAR")
+        if "STOCK" in fams:
+            signals += _tag_group(ssn.build_stock_structures(chain, symbol, spot, atm_iv,
+                                                             dte_min, hi, **bands),
+                                  "STOCK")
 
     # Window filters, BEFORE scoring — a candidate this window does not trade is
     # not a candidate the quality bar rejected, and ``filtered_out`` below is
