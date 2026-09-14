@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-12</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-14</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -532,8 +532,8 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 </tr>
 <tr>
 <td><code>swing_scan</code></td>
-<td><code>{symbol, dte_min, dte_max, put_d_min, put_d_max, call_d_min, call_d_max, min_cr_fraction}</code></td>
-<td><code>cache:options:swing</code></td>
+<td><code>{symbol, dte_min, dte_max, put_d_min, put_d_max, call_d_min, call_d_max, min_cr_fraction}</code> — <code>dte_max: null</code> is <strong>no upper limit</strong> (every listed expiry); a MISSING key takes the handler default (5–30). Every listed expiry in the range is built, a report is flagged rather than dropped, and the best 25 rows of each <code>type</code> are kept</td>
+<td><code>cache:options:swing</code> — <code>{signals[], view, filtered_out, vol_filtered, not_shown, spot, chain_missing, no_expiries_in_range, expiries_failed, symbol, params, error?}</code>. Published for <strong>every</strong> request: a scan that raises still answers, with <code>signals: []</code> and <code>error</code> = the exception's class name (test it for truthiness). <code>spot</code> is <code>null</code> when no price was read, never 0; <code>expiries_failed</code> is <code>null</code> when the expiration list was unavailable (not counted, which is not zero). Each row carries <code>earnings_status</code>, and a row open through a report adds <code>spans_earnings: true</code> + <code>earnings_date</code></td>
 </tr>
 <tr>
 <td><code>refresh_paper</code></td>

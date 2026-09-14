@@ -222,7 +222,7 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 | Type | Args | Published view |
 |------|------|----------------|
 | `rescan` | — | `cache:options:scan` |
-| `swing_scan` | `{symbol, dte_min, dte_max, put_d_min, put_d_max, call_d_min, call_d_max, min_cr_fraction}` | `cache:options:swing` |
+| `swing_scan` | `{symbol, dte_min, dte_max, put_d_min, put_d_max, call_d_min, call_d_max, min_cr_fraction}` — `dte_max: null` is **no upper limit** (every listed expiry); a MISSING key takes the handler default (5–30). Every listed expiry in the range is built, a report is flagged rather than dropped, and the best 25 rows of each `type` are kept | `cache:options:swing` — `{signals[], view, filtered_out, vol_filtered, not_shown, spot, chain_missing, no_expiries_in_range, expiries_failed, symbol, params, error?}`. Published for **every** request: a scan that raises still answers, with `signals: []` and `error` = the exception's class name (test it for truthiness). `spot` is `null` when no price was read, never 0; `expiries_failed` is `null` when the expiration list was unavailable (not counted, which is not zero). Each row carries `earnings_status`, and a row open through a report adds `spans_earnings: true` + `earnings_date` |
 | `refresh_paper` | — | `cache:options:paper_account` |
 | `paper_entry` | — | `cache:options:paper_account` |
 | `paper_manage` | — | `cache:options:paper_account` |

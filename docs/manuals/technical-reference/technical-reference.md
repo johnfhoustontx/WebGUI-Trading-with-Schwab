@@ -901,7 +901,14 @@ wants the move it needs to be small. Diagonals and share structures are `DIRECTI
 `DEBIT`). Failing any `min` bar caps the composite at **39** (`GATE_FAIL_CAP`) and grades
 **Weak**; clearing every `excellent` bar with composite ≥ **78** is **Strong**; otherwise
 ≥ **58** is **Good**, else **Marginal**. The service then cuts anything **Weak or under 50**
-(`SWING_MIN_SCORE`) and reports the count as *below the quality bar*.
+(`SWING_MIN_SCORE`) and reports the count as *below the quality bar*. For the Strategy
+Finder it then keeps the best **`FINDER_PER_TYPE_LIMIT` (25)** rows of each `type` by
+`composite_score` (a missing or non-finite score ranks last) and reports the rest as
+`not_shown` — *lower-scoring ideas not shown*. The counts never overlap and are taken in
+the order `vol_filtered` → `filtered_out` → `not_shown`; ids and payoff curves are built
+after the limit. Measured on a synthetic `$SPX`-sized chain (56 expiries, 25.6k
+contracts), the every-expiry scan left 1,061 rows after the quality cut (2.27 MB of cache
+payload); the limit publishes 510 (1.07 MB). The Income board passes no limit.
 
 | Profile | Types | `min` liq / reward / PoP | `excellent` liq / reward / PoP |
 |---|---|---|---|
@@ -926,11 +933,43 @@ is already higher keeps it. The floor is applied inside `_front_pair` itself, so
 caller takes it: straddles and strangles (`build_straddles_strangles`), call/put/iron
 butterflies and call/put condors (`build_butterflies_condors`) and the share structures
 (`build_stock_structures`). Calendars and diagonals apply the same constant to their front
-month in `build_calendars`. Only the single-leg directionals, the debit and credit
-verticals and the iron condor built from the credit spreads keep the nearest expiry in
-the window. At the page's default DTE min of 0 this
-means no straddle, strangle, fly, condor or share structure is built on a 0–6 DTE expiry
-(operator decision, 2026-09-13 — on a daily-listing name those were same-day bets).
+month in `build_calendars`. The single-leg directionals, the debit and credit verticals
+and the iron condor built from the credit spreads take no floor. At the page's default
+DTE min of 0 this means no straddle, strangle, fly, condor or share structure is built on
+a 0–6 DTE expiry (operator decision, 2026-09-13 — on a daily-listing name those were
+same-day bets).
+
+**Every expiry, not the nearest (the Strategy Finder, 2026-09-14).** Each builder takes
+the NEAREST expiry in its window. The Finder's handler calls `swing_scan(...,
+every_expiry=True)`, and `_build_every_expiry` runs each single-expiry builder once per
+listed expiry *e* (DTE *d*) on the chain **sliced to *e*** with `dte_min = dte_max = d` —
+so the builders themselves are unchanged and build exactly that expiry. On an expiry
+under 7 DTE the `_front_pair` floor leaves nothing, as above. Calendars take each expiry
+with *d* ≥ 7 as the front, over a slice holding it plus the expiries at least
+`_CAL_MIN_GAP` (7) days later, and keep only rows whose front is *e* (a front with no
+usable leg would otherwise build the next expiry's calendar twice). Credit spreads are one
+`screen_spreads` pass over the whole chain, which already covers every expiry; iron
+condors are paired **within** each expiry instead of the top three across the scan. The
+Income Window keeps `every_expiry=False`.
+
+**Earnings: flagged, not dropped.** The Finder also passes `earnings_mode="flag"`:
+`screen_spreads` receives no earnings date, and every candidate the drop would have
+removed — `earnings_gate_applies(trade_type, dte)` and `check_earnings_conflict(date,
+latest leg expiry)` — keeps its place and gains `spans_earnings: True` plus
+`earnings_date`. The Income Window keeps the default `"drop"`, and the Market Scanner's
+`run_full_scan` still drops inside `screen_spreads`.
+
+**The chain.** `compute.fetch_scan_chain(symbol, dte_max)` serves every `swing_scan`
+caller. It lists expirations (`/expirationchain`, 0.2–0.3 s), keeps those from **today**
+to today + `dte_max` + 2 (all of them when `dte_max` is `None`) — from today rather than
+from DTE min, because `run_iv_analysis` reads the near expiries for the ATM IV and
+expected move — and fetches runs of at most `SCAN_RUN_EXPIRIES` (8) consecutive listed
+expiries, `SCAN_FETCH_WORKERS` (4) at a time, merging the raw expiry maps. A run whose
+response is missing or holds no expiry is counted in `expiries_failed`. With no usable
+expiration list it falls back to one fetch and reports `expiries_failed = None` (not
+counted, which is not zero). Measured 2026-09-14 pre-market: SPY's whole chain (34
+expiries, 12,956 contracts) **timed out at the proxy's 30 s** in one request and took
+6.5 s grouped; `$SPX` (56 expiries, 25,650 contracts) took 11–12 s.
 
 `_priced_inside` then drops a structure whose mid-mark price is impossible for its
 payoff. A long butterfly or condor is worth between 0 and its wing at expiry, so its

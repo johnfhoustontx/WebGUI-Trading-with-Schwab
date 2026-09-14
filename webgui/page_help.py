@@ -182,16 +182,20 @@ plus single-leg directional trades on their own tab.
 **Strategy Finder — the simple version**
 
 Like the Market Scanner, but you pick one symbol and it ranks every strategy
-it can build for it on one score. Top to bottom: the scan bar, a summary of the
-scan, strategy chips, up to four top picks, and the full ranked list.
+it can build for it on one score. It reads the **whole option chain**: every
+strategy is built on **every expiration** in your range, not just the nearest
+one. Top to bottom: the scan bar, a summary of the scan, strategy chips, up to
+four top picks, and the full ranked list.
 
 **The scan bar**
 
 - **Symbol**, then **Scan** (Enter, or tabbing out of the box, scans too).
-- **Expiry** — four presets, *1–2 wk · 2–6 wk · 1–3 mo · Any*, fill in **DTE
-  min / max** (days to expiration) for you. Type in either box and the preset
-  lets go, so a range you set by hand is never mislabelled. A wider range finds
-  more.
+- **Expiry** — six presets fill in **DTE min / max** (days to expiration) for
+  you: *1–2 wk* 7–14 · *2–6 wk* 14–42 · *1–3 mo* 30–90 · *3–12 mo* 90–365 ·
+  *1 yr+* 365 and up · **All** (the default), every expiration from today on.
+  A blank **DTE max** reads *no limit* and means exactly that; a blank **DTE
+  min** counts from today. Type in either box and the preset lets go, so a range
+  you set by hand is never mislabelled. A wider range finds more.
 - **Risk style** — how far out of the money the options you **sell** sit:
   *Conservative* 0.05–0.10 delta, *Balanced* 0.10–0.20 (the default) and
   *Aggressive* 0.20–0.30, on both the put and the call side. A smaller delta is
@@ -217,8 +221,26 @@ scan, strategy chips, up to four top picks, and the full ranked list.
 
 - **The summary** names the symbol and its price, the market view the scan
   inferred as pills (direction, conviction, volatility), the **Vol Rank**, and a
-  count: *16 ideas · 6 below the quality bar · 0 where premium is too cheap to
-  sell*.
+  count: *16 ideas · 6 below the quality bar · 3 where premium is too cheap to
+  sell · 40 lower-scoring ideas not shown*. It appears for **every** answer, an
+  empty one included, so a scan with no ideas still shows the price it was asked
+  at — or **Price unavailable** when no price could be read, never $0.00. Two more
+  pieces can join the count: *2 expirations could not be loaded* (part of the chain
+  did not arrive, so the ideas come from the rest of it), and **Scan failed** in
+  place of the whole count when the scan itself broke.
+- **The best 25 of each strategy are listed.** A whole chain can hold hundreds of
+  ideas, so after the quality bar the page keeps the 25 highest-scoring of each
+  strategy — the best 25 bull call spreads across all expirations, say — and
+  counts the rest as *lower-scoring ideas not shown*.
+- **An empty list says why**, naming the symbol and price: nothing cleared the
+  quality bar, premium is too cheap to sell, no option chain came back, the symbol
+  has no expirations in this range, or nothing could be built in it. A scan that
+  failed reads *The scan for SPY failed. Check System Status and scan again.*
+- **Earnings.** A trade still open when the company reports is **kept and
+  tagged** — *Earnings Nov 19* (with the year when it falls in another one) — as
+  a warning badge on its card and a small tag after its name in the list. The
+  report can move the stock sharply either way, so read the tag before trading
+  it. The Market Scanner and the Income Window drop those trades instead.
 - **Strategy chips** — one per group with its count, plus **All**. Click a chip
   to show only that group; click more to add them; click the last one off (or
   **All**) to see everything again. Chips filter instantly — nothing is
@@ -246,7 +268,9 @@ scan, strategy chips, up to four top picks, and the full ranked list.
   Max loss · Probability of profit · Grade, then the Calculator / Paper /
   Expected Move buttons. **Strikes** reads like the cards: `L 765P / S 761P`, a
   leg on a later expiration adds its date (`S 220P / L 220P 10/16`), and a share
-  leg reads `L 100 shares`. Click a number column's header to sort by it. A naked short's max loss
+  leg reads `L 100 shares`. The list shows **50 rows a page**, with page
+  controls under it. Click a number column's header to sort by it — the sort
+  covers the whole list, so page 2 carries on from page 1. A naked short's max loss
   carries an **undefined risk** tag, since that figure is a margin estimate, not a
   cap.
 - **Cost** says which way the money moves: `$195 debit`, `$804 credit`, and
@@ -258,11 +282,13 @@ scan, strategy chips, up to four top picks, and the full ranked list.
   (`$95.20 / $104.80`), and a position holding shares states its dollars **per
   position** rather than per contract.
 - **While a scan runs** the cards read *Scanning SPY…* — the symbol you asked for,
-  never the one before. If nothing has come back after a while, the cards become
-  one still card and the page says the scan is taking longer than expected: a late
-  result still appears, and if nothing arrives, check **System Status** and scan
-  again. Results that land are always for the scan you asked for — same symbol,
-  same settings.
+  never the one before — and the spinner counts the wait: *Scanning SPY… 12 s*.
+  A whole chain takes a while: an index such as $SPX can need 10–15 seconds. The
+  spinner stays until the answer lands, a failed scan's included. Only after
+  **3 minutes** with nothing back do the cards become one still card saying the
+  scan is taking longer than expected: a late result still appears, and if nothing
+  arrives, check **System Status** and scan again. Results that land are always for
+  the scan you asked for — same symbol, same settings.
 
 **The seven groups**
 
@@ -290,11 +316,13 @@ scan, strategy chips, up to four top picks, and the full ranked list.
   near one at least 7 days out, the later one about four weeks after it and at
   least a week after it. A narrow range, such as the *1–2 wk* preset, often holds
   no such pair and builds no calendar — pick a wider preset or raise **DTE max**.
+- **Every structure is built on every expiration in your range** — a calendar
+  takes each one in turn as its near month.
 - **Straddles, strangles, butterflies, the iron butterfly, condors and the share
-  structures also use an expiration at least 7 days out** — so with **DTE min** at
-  0 none of them is built on a 0–6 day expiration. You do not need to raise DTE min
-  to get this; the 7-day floor applies by itself. Directional trades and the debit
-  and credit spreads still use the nearest expiration in your range.
+  structures skip expirations under 7 days out** — so with **DTE min** at 0 none of
+  them is built on a 0–6 day expiration. You do not need to raise DTE min to get
+  this; the 7-day floor applies by itself. Directional trades, the debit and credit
+  spreads and iron condors are built on those near expirations too.
 - **Nothing is built off-centre.** If the at-the-money strike is missing from the
   chain, the straddle, butterflies, condors and calendar are skipped rather than
   quietly moved to the next strike.
@@ -332,6 +360,8 @@ scan, strategy chips, up to four top picks, and the full ranked list.
   strangles (study only), the iron butterfly, calendars, diagonals, or anything
   holding shares. The ledger also refuses a debit trade that arrives without a
   debit to pay.
+- **Paper does not check earnings again**: a trade tagged *Earnings* opens on
+  the ledger just as it would from the Calculator.
 - **Calculator** works on every idea, calendars and shares included — but
   clicking an expiration pill on the Calculator afterwards moves every option leg
   to that one date, which turns a calendar into something else.

@@ -4,7 +4,86 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-13 (**Strategy Finder redesign — top picks, a slim list,
+**Last updated:** 2026-09-14 (**Strategy Finder — the whole chain, every expiry.**
+Operator request: "I need the restriction of 120 days to be removed and the full chain
+to be considered for trades.")
+
+- **What was actually restricted.** The 120 days was only the page's *Any* preset; the
+  service took any `dte_max`. The real limit was inside the builders, each of which
+  builds on ONE expiry — the directionals and debit verticals on the nearest in range,
+  straddles/flies/condors/share structures on the nearest ≥ 7 DTE, calendars on that
+  front plus a back month; only the credit spreads covered every expiry, and iron
+  condors were the top 3 across the scan. Widening the range alone changed nothing: a
+  synthetic 56-expiry chain still produced exactly 16 ideas.
+- **Operator decisions:** *full chain* = **every expiry**, every builder on every listed
+  expiry in range · long-dated single-stock candidates spanning a report are **kept and
+  flagged**, not dropped · **the spinner stays until the data lands** · an empty answer
+  **still shows the spot price** · and, found in review, **the best 25 of each strategy
+  type** with the rest counted and the list **paged 50 rows at a time**.
+- **Measured before building** (prod, pre-market): NVDA 25 expiries / 3,984 contracts in
+  one `/chains` call 3.8 s (5.1 MB), grouped 2.2 s; **SPY 34 expiries / 12,956 contracts
+  timed out at the proxy's 30 s in one call** and took **6.5 s** (16.6 MB) in groups of 8,
+  4 at a time; QQQ 5.7 s; **`$SPX` 56 expiries (to 2031-12-19) / 25,650 contracts 11–12 s**
+  (37.7 MB). The expiration list costs 0.2–0.3 s; the builders plus scoring 0.5 s on a
+  synthetic `$SPX`-sized chain.
+- **The fetch** (`compute.fetch_scan_chain`, every `swing_scan` caller including the
+  Income Window, whose chain content does not change): list the expirations, keep those
+  from TODAY to today + `dte_max` + 2 (all when `dte_max` is `None`), fetch runs of ≤ 8
+  consecutive listed expiries ≤ 4 at a time, merge the raw expiry maps. A run that returns
+  no expiry is **counted** in `expiries_failed`; no expiration list falls back to the
+  single fetch with `expiries_failed = None` (not counted, which is not zero).
+- **Every expiry** (`swing_scan(every_expiry=True)`, the Finder only): each single-expiry
+  builder runs per listed expiry on the chain sliced to it with `dte_min = dte_max`, so
+  **no builder changed** and `every_expiry=False` is byte-identical; calendars take each
+  front ≥ 7 DTE; iron condors pair per expiry.
+- **Earnings flagged** (`earnings_mode="flag"`): `screen_spreads` gets no date, and each
+  row the drop would remove gains `spans_earnings` + `earnings_date` — *Earnings Nov 19*
+  as a warning badge on the card and a tag after the strategy name. The Market Scanner
+  and Income Window still drop; the paper ledger does not re-check.
+- **Every request gets an answer, with the price.** The quote is read before the chain,
+  so `spot` survives a missing chain; the payload adds `spot`, `chain_missing`,
+  `no_expiries_in_range`, `expiries_failed` and `not_shown`. A scan that RAISES is
+  degraded and still publishes, with `signals: []` and `error` = the exception's class
+  name. A mistyped symbol's Schwab `status: "FAILED"` body (truthy, both maps empty)
+  passed the old `not chain` guard and published neither flag — it now reads as no chain.
+  A failed scan's count line reads **Scan failed** rather than "0 ideas", a count nobody
+  read. The summary strip always shows a price (*Price unavailable* without one, never
+  $0.00), and the empty list names symbol, price and reason: quality bar · too cheap to
+  sell · no option chain · no expirations in range · nothing built · *The scan for SPY
+  failed. Check System Status and scan again.*
+- **The spinner lasts the whole wait.** It counts (*Scanning SPY… 12 s*, `elapsed_label`)
+  and ends only on a payload answering the request; the shared 30 s backstop is replaced
+  by one `SCAN_TIMEOUT_SEC = 180` ceiling for a service that is down or a dropped command.
+- **Best 25 per type, paged list.** Measured in review on a synthetic `$SPX`-sized chain:
+  every expiry left **1,061 rows after the quality cut — a 2.27 MB payload**, before ~3 MB
+  of per-row payoff SVG reached the browser on every paint and chip click (off-hours is
+  worse: the liquidity gate relaxes when the market is closed). `FINDER_PER_TYPE_LIMIT =
+  25`, applied after the quality cut and before ids and payoff curves, publishes **510
+  rows / 1.07 MB**. Even 510 rows are **~1.96 MB** of list rows (~1.4 MB of it payoff
+  SVG) against **~190 KB for a 50-row page**, and Quasar's client-side pagination would
+  still ship every row, so the list is paged **server-side** (`swing.page_of` sorts the
+  whole list, then slices; shapes are built per page; one table push per paint).
+- **Page:** presets *1–2 wk · 2–6 wk · 1–3 mo · 3–12 mo (90–365) · 1 yr+ (365–none) ·
+  All (0–none, the default)*; a blank DTE max (placeholder *no limit*) sends
+  `dte_max: null`, and a blank DTE min sends 0 rather than an `int(None)` that made Scan
+  silently do nothing. Following a cached scan restores a `null` max.
+- **Tests stay off the proxy.** Listing expirations first put every scan test that did not
+  stub it on a live `/passthrough` expirationchain call — 69 across five files, which on
+  the VPS reach Schwab. An autouse fixture in `services/options_svc/tests/conftest.py`
+  answers the shared client's `get_option_expirations` with a 503, so those scans take the
+  single-fetch fallback they were written against; it patches the CLIENT, so a test
+  stubbing either layer still wins. No assertion changed. Two early-return tests that
+  reading the quote first put on the proxy now stub `get_quote`.
+- **Docs:** `page_help.py`, the User Guide, Reference Guide, Technical Reference and API
+  Reference; `docs/webgui-routes.md`; CLAUDE.md's route row, earnings section and chain
+  note corrected in place.
+- **Still to measure:** the score's expiry mix on a live chain (pre-market chains carry no
+  quotes) — wall time, rows, payload size and the DTE spread of the top picks on SPY, NVDA
+  and `$SPX` after the open.
+- Design + plan: [`docs/plans/2026-09-14-strategy-finder-whole-chain-design.md`](plans/2026-09-14-strategy-finder-whole-chain-design.md)
+  / [`-plan.md`](plans/2026-09-14-strategy-finder-whole-chain-plan.md).
+
+**Prior —** 2026-09-13 (**Strategy Finder redesign — top picks, a slim list,
 chips and presets.** Operator request: "make the Strategy Finder page more visually
 appealing and easy to use".)
 

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-13</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-14</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -1398,7 +1398,14 @@ wants the move it needs to be small. Diagonals and share structures are <code>DI
 <code>DEBIT</code>). Failing any <code>min</code> bar caps the composite at <strong>39</strong> (<code>GATE_FAIL_CAP</code>) and grades
 <strong>Weak</strong>; clearing every <code>excellent</code> bar with composite ≥ <strong>78</strong> is <strong>Strong</strong>; otherwise
 ≥ <strong>58</strong> is <strong>Good</strong>, else <strong>Marginal</strong>. The service then cuts anything <strong>Weak or under 50</strong>
-(<code>SWING_MIN_SCORE</code>) and reports the count as <em>below the quality bar</em>.</p>
+(<code>SWING_MIN_SCORE</code>) and reports the count as <em>below the quality bar</em>. For the Strategy
+Finder it then keeps the best <strong><code>FINDER_PER_TYPE_LIMIT</code> (25)</strong> rows of each <code>type</code> by
+<code>composite_score</code> (a missing or non-finite score ranks last) and reports the rest as
+<code>not_shown</code> — <em>lower-scoring ideas not shown</em>. The counts never overlap and are taken in
+the order <code>vol_filtered</code> → <code>filtered_out</code> → <code>not_shown</code>; ids and payoff curves are built
+after the limit. Measured on a synthetic <code>$SPX</code>-sized chain (56 expiries, 25.6k
+contracts), the every-expiry scan left 1,061 rows after the quality cut (2.27 MB of cache
+payload); the limit publishes 510 (1.07 MB). The Income board passes no limit.</p>
 <table>
 <thead>
 <tr>
@@ -1454,11 +1461,40 @@ is already higher keeps it. The floor is applied inside <code>_front_pair</code>
 caller takes it: straddles and strangles (<code>build_straddles_strangles</code>), call/put/iron
 butterflies and call/put condors (<code>build_butterflies_condors</code>) and the share structures
 (<code>build_stock_structures</code>). Calendars and diagonals apply the same constant to their front
-month in <code>build_calendars</code>. Only the single-leg directionals, the debit and credit
-verticals and the iron condor built from the credit spreads keep the nearest expiry in
-the window. At the page's default DTE min of 0 this
-means no straddle, strangle, fly, condor or share structure is built on a 0–6 DTE expiry
-(operator decision, 2026-09-13 — on a daily-listing name those were same-day bets).</p>
+month in <code>build_calendars</code>. The single-leg directionals, the debit and credit verticals
+and the iron condor built from the credit spreads take no floor. At the page's default
+DTE min of 0 this means no straddle, strangle, fly, condor or share structure is built on
+a 0–6 DTE expiry (operator decision, 2026-09-13 — on a daily-listing name those were
+same-day bets).</p>
+<p><strong>Every expiry, not the nearest (the Strategy Finder, 2026-09-14).</strong> Each builder takes
+the NEAREST expiry in its window. The Finder's handler calls <code>swing_scan(...,
+every_expiry=True)</code>, and <code>_build_every_expiry</code> runs each single-expiry builder once per
+listed expiry <em>e</em> (DTE <em>d</em>) on the chain <strong>sliced to <em>e</em></strong> with <code>dte_min = dte_max = d</code> —
+so the builders themselves are unchanged and build exactly that expiry. On an expiry
+under 7 DTE the <code>_front_pair</code> floor leaves nothing, as above. Calendars take each expiry
+with <em>d</em> ≥ 7 as the front, over a slice holding it plus the expiries at least
+<code>_CAL_MIN_GAP</code> (7) days later, and keep only rows whose front is <em>e</em> (a front with no
+usable leg would otherwise build the next expiry's calendar twice). Credit spreads are one
+<code>screen_spreads</code> pass over the whole chain, which already covers every expiry; iron
+condors are paired <strong>within</strong> each expiry instead of the top three across the scan. The
+Income Window keeps <code>every_expiry=False</code>.</p>
+<p><strong>Earnings: flagged, not dropped.</strong> The Finder also passes <code>earnings_mode="flag"</code>:
+<code>screen_spreads</code> receives no earnings date, and every candidate the drop would have
+removed — <code>earnings_gate_applies(trade_type, dte)</code> and <code>check_earnings_conflict(date,
+latest leg expiry)</code> — keeps its place and gains <code>spans_earnings: True</code> plus
+<code>earnings_date</code>. The Income Window keeps the default <code>"drop"</code>, and the Market Scanner's
+<code>run_full_scan</code> still drops inside <code>screen_spreads</code>.</p>
+<p><strong>The chain.</strong> <code>compute.fetch_scan_chain(symbol, dte_max)</code> serves every <code>swing_scan</code>
+caller. It lists expirations (<code>/expirationchain</code>, 0.2–0.3 s), keeps those from <strong>today</strong>
+to today + <code>dte_max</code> + 2 (all of them when <code>dte_max</code> is <code>None</code>) — from today rather than
+from DTE min, because <code>run_iv_analysis</code> reads the near expiries for the ATM IV and
+expected move — and fetches runs of at most <code>SCAN_RUN_EXPIRIES</code> (8) consecutive listed
+expiries, <code>SCAN_FETCH_WORKERS</code> (4) at a time, merging the raw expiry maps. A run whose
+response is missing or holds no expiry is counted in <code>expiries_failed</code>. With no usable
+expiration list it falls back to one fetch and reports <code>expiries_failed = None</code> (not
+counted, which is not zero). Measured 2026-09-14 pre-market: SPY's whole chain (34
+expiries, 12,956 contracts) <strong>timed out at the proxy's 30 s</strong> in one request and took
+6.5 s grouped; <code>$SPX</code> (56 expiries, 25,650 contracts) took 11–12 s.</p>
 <p><code>_priced_inside</code> then drops a structure whose mid-mark price is impossible for its
 payoff. A long butterfly or condor is worth between 0 and its wing at expiry, so its
 <code>net_debit</code> must lie strictly inside <code>(0, wing × 100)</code>; an iron butterfly is that payoff

@@ -349,7 +349,7 @@ Routes:
 | `/options/captured` | Captured Signals — newest capture first, with a day footer (opened/closed today · booked P&L · open P&L). [Detail](docs/webgui-routes.md) | built |
 | `/options/portfolio` | Paper Account (the engine’s paper account) | built |
 | `/options/calculator` | Calculator — the shared **entry panel** (ticker · strategy · expiry strip · chain grid beside the leg table) over collapsed pricing assumptions, six metric cards + the P&L matrix, in its own `[calc]` palette. **No action buttons**: a landed chain prices the legs and implies IV, and every edit re-prices after a 0.3 s debounce. ⚠ A grid click MOVES the leg on that side and type (adding one only when none matches) and prices at the MARK whichever side (Bid sells, Ask buys); each row's Bid / Mark / Ask dropdown re-prices it. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
-| `/options/swing` | Strategy Finder — single-symbol scan over seven build groups (directional · spreads · iron condors · straddles & strangles · butterflies & condors · calendars & diagonals · stock + options) ranked on one 0–100 Fit+Quality score; sub-50 and Weak candidates are cut service-side. ⚠ Paper only for the credit spreads, iron condors and `shared.structures.LEDGER_DEBIT`; straddles/strangles stay analysis only (D1). [Detail](docs/webgui-routes.md) | built |
+| `/options/swing` | Strategy Finder — single-symbol scan over seven build groups (directional · spreads · iron condors · straddles & strangles · butterflies & condors · calendars & diagonals · stock + options) ranked on one 0–100 Fit+Quality score, built on **every listed expiry** in the range — the whole chain by default (*All*, `dte_max: null`). Sub-50 and Weak candidates are cut service-side, then only the **best 25 of each strategy type** are kept (the rest counted as `not_shown`) and the list pages 50 rows at a time server-side. A trade open through an earnings report is **flagged, not dropped**. ⚠ Paper only for the credit spreads, iron condors and `shared.structures.LEDGER_DEBIT`; straddles/strangles stay analysis only (D1). [Detail](docs/webgui-routes.md) | built |
 | `/options/income` | Income Window — the 30–45 DTE premium board (put + call credit spreads, cash-secured puts, covered calls against held lots), jointly ranked across the whole watchlist. Tier-1 reader of `cache:options:income`, published **once daily** from `[slots.income]`. ⚠ Rows are **heterogeneous** (an adapted spread carries both the flat and the normalized shape, a `SHORT_PUT` only the normalized) — read a field both carry, and read the per-CONTRACT `net_credit`, never the per-share `credit`. [Detail](docs/webgui-routes.md) | built |
 | `/options/shares` | Shares — the paper account's equity lots (put assignment converts a cash-secured put into stock at the strike). A second **reader** of `cache:options:paper_account`, not a second book. ⚠ No live equity mark exists anywhere in this app, so Mark/Unrealized are an em-dash on every row; a covering call is matched per **symbol**, not per lot. [Detail](docs/webgui-routes.md) | built |
 | `/options/gamma` | Dealer Positioning — GEX/Charm/DEX/Vanna bars + intraday heatmap, flip/walls, the Flow and Net Prem console panels, Term structure, and the Claude briefing (Analyze). [Detail](docs/webgui-routes.md) | built |
@@ -412,7 +412,10 @@ by test. ⚠ The strip lists EVERY expiration (`expirations` from Schwab
 `/expirationchain`) while the chain holds only the ones fetched so far — a lazy
 `calc_load` / `sim_fetch` brings the nearest two plus any a leg needs, and
 `calc_load_expiry` / `sim_fetch_expiry` merge one more per click. Never go back to one
-fixed-window fetch: `$SPX`'s 60 days does not fit one proxy request), **`chain_grid.py`**
+fixed-window fetch: `$SPX`'s 60 days does not fit one proxy request, and no whole chain
+does either — SPY's timed out at the proxy's 30 s — which is why every `swing_scan`
+fetches through `compute.fetch_scan_chain`, runs of ≤ 8 consecutive listed expiries
+4 at a time, counting a failed run in `expiries_failed` rather than hiding it), **`chain_grid.py`**
 (PURE — the chain readers `extract_premium`/`extract_delta`/`leg_delta`/
 `chain_expiries`/`chain_strikes`, moved out of `calculator.py` and re-exported there,
 plus `chain_grid_rows`/`cell_text`/`parse_columns`), **`entry.py`** (PURE —
@@ -2315,8 +2318,9 @@ the close", and `page_help.py` plus the Reference Guide both told the reader it
 never a membership test on `EARNINGS_GATED_TRADE_TYPES`.** That tuple is still
 the underlying data, but the exemption now needs DTE, so both mirror sites —
 `screen_spreads` and `options_svc.compute.swing_scan` — must call the predicate
-or they drift; `swing_scan` filters **per signal**, since one scan spans a DTE
-range. An AST guard in `test_earnings_gate_mirror.py` pins it.
+or they drift; `swing_scan` decides **per signal**, since one scan spans a DTE
+range — dropping the row, or in the Strategy Finder's `earnings_mode="flag"`
+tagging it, over exactly the same set. An AST guard in `test_earnings_gate_mirror.py` pins it.
 
 ⚠ **`run_full_scan` passed NO `earnings_date` until 2026-09-09**, so
 `if earnings_date and ...` was always False and the gate was a no-op on every
@@ -2618,8 +2622,16 @@ openable there: the conservative direction.
 supplied a date, but the Strategy Finder's handler passed **none** — so
 `if earnings_date and ...` was always False and the gate was a no-op on that whole
 surface while reading exactly like protection, the same shape as the defect A1
-fixed on the Market Scanner. Three scan paths; the gate was live on one. Every row
-is now **stamped** with the coverage it got (`earnings_status`), because a row that
+fixed on the Market Scanner. Three scan paths; the gate was live on one. The
+handler now supplies the date — and since 2026-09-14 passes
+**`earnings_mode="flag"`**, so the Finder **keeps and tags** a row open through a
+report (`spans_earnings` + `earnings_date`, rendered *Earnings Nov 19*) while the
+Market Scanner and the Income Window still **drop** it. Operator decision: a
+whole-chain scan out to a year would otherwise end every single stock at its next
+report. ⚠ In flag mode `screen_spreads` must receive NO date — it can only drop —
+and the paper ledger does not re-check earnings, so a flagged debit trade sent to
+Paper opens as it would from the Calculator. Every row
+is also **stamped** with the coverage it got (`earnings_status`), because a row that
 skipped the check must not look like one that passed it, and `not_listed`
 deliberately does not block — with no vendor key it is every symbol, so failing
 closed would empty the page. ⚠ `scan_earnings` is a thin WRAPPER, not

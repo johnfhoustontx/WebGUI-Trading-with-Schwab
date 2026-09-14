@@ -2658,7 +2658,9 @@ in a symbol you are short premium in.
 
 The Market Scanner inverted. Instead of scanning many symbols for one kind of trade, you
 give it **one symbol** and it ranks **every strategy family** for that symbol on a single
-comparable score.
+comparable score. It reads the **whole option chain**: every structure is built on every
+listed expiration inside your range, out to the last one when the range has no upper
+limit.
 
 ### Where the data comes from
 
@@ -2666,6 +2668,7 @@ comparable score.
 |---|---|
 | Service | `options_svc` (:8211), `swing_scan` command → `cache:options:swing` |
 | Trigger | On demand — press **Scan** |
+| Chain | fetched in groups of up to eight consecutive expirations, four groups at a time — one request for a whole index chain times out |
 
 ### Reading the screen
 
@@ -2676,9 +2679,11 @@ up to four **top picks**, and the **ranked list**, with the Trade detail panel b
 too). Nothing else rescans — change the settings, then press Scan.
 
 - **Expiry** presets fill the **DTE min / max** boxes beside them: **1–2 wk** (7–14 days),
-  **2–6 wk** (14–42), **1–3 mo** (30–90) and **Any** (0–120, the default). Typing in
-  either box releases the preset, so a hand-set range is never shown under a preset's
-  name. A wider range allows more candidates.
+  **2–6 wk** (14–42), **1–3 mo** (30–90), **3–12 mo** (90–365), **1 yr+** (365 and up)
+  and **All** (0 and up, the default). A blank **DTE max** reads *no limit* and scans
+  every listed expiration; a blank **DTE min** counts from today. Typing in either box
+  releases the preset, so a hand-set range is never shown under a preset's name. A wider
+  range allows more candidates — and takes longer.
 - **Risk style** sets the short-leg delta bands on **both** sides at once:
   **Conservative** 0.05–0.10, **Balanced** 0.10–0.20 (the default) and **Aggressive**
   0.20–0.30. It is shorthand for the four delta fields under **Advanced**; edit those by
@@ -2710,14 +2715,15 @@ money by definition.
 **How the newer structures are built** — all from the chain the scan already fetched,
 so they cost no extra data:
 
-- **Which expiration** — every newer structure except the calendar and diagonal (which
-  take two, below) sits on the **nearest expiration at least 7 days out** inside your
-  DTE range: straddles, strangles, butterflies, the iron butterfly, condors and the
-  share structures. With DTE min at 0 none of them is built on a 0–6 day expiration,
-  and nothing needs widening for it — the floor applies by itself. A structure that
-  close to expiry is a same-day bet rather than the trade its name describes (an
-  operator decision). The Directional rows and the debit and credit spreads still take
-  the nearest expiration in the range.
+- **Which expiration** — **every** listed expiration inside your DTE range, each built
+  separately: a scan does not stop at the nearest one. Straddles, strangles,
+  butterflies, the iron butterfly, condors and the share structures skip expirations
+  **less than 7 days out**, so with DTE min at 0 none of them is built on a 0–6 day
+  expiration, and nothing needs widening for it — the floor applies by itself. A
+  structure that close to expiry is a same-day bet rather than the trade its name
+  describes (an operator decision). The Directional rows, the debit and credit spreads
+  and the iron condors are built on the near expirations too; iron condors are paired
+  within each expiration.
 - **Straddle, butterfly body, iron butterfly body** — the at-the-money strike. If that
   strike is missing from either side of the chain the structure is **skipped**, never
   moved to the next strike: an off-centre "straddle" is a different trade under a neutral
@@ -2734,9 +2740,9 @@ so they cost no extra data:
   the wing. When wide quotes put the mid prices outside that range — a long butterfly
   "paid" a credit reports a 100% probability of profit and ranks first — the row is **not
   shown**: the prices are wrong, not the trade good.
-- **Calendar** — the near expiration at least **7 days** out, the later one nearest
-  **near + 28 days** and at least a week after it, both inside your DTE range; same
-  at-the-money strike. Skipped when either month's strike ladder has a hole at the money.
+- **Calendar** — each expiration at least **7 days** out takes a turn as the near month;
+  the later one is the expiration nearest **near + 28 days** and at least a week after
+  it, both inside your DTE range; same at-the-money strike. Skipped when either month's strike ladder has a hole at the money.
   If DTE max does not reach a second expiration, no calendar is built — widen it.
 - **Diagonal** — short the near month out of the money near **0.30 delta** (accepted
   only between 0.15 and 0.45), long the later month in the money near **0.70 delta**.
@@ -2752,7 +2758,9 @@ so they cost no extra data:
 no shares — so these rows get no Paper button. (On the paper account, `COVERED_CALL`
 means the option leg alone.)
 
-**The summary strip.** After a scan it names the symbol and its price, the **Vol Rank**
+**The summary strip.** After every scan — an empty one included — it names the symbol and
+its price (**Price unavailable** when no price could be read, never $0.00, so an answer
+with no ideas still reads as an answer about that symbol), the **Vol Rank**
 (one value per scan, so it is not repeated on every row), and the *market view* the
 scanner inferred before ranking anything — shown as pills for a direction, a conviction
 level and a volatility regime, read from the symbol's technicals and implied volatility.
@@ -2773,7 +2781,8 @@ best-scoring idea onto a card before any group gets a second — the cards exist
 structures, and four spreads in a row would be one idea shown four times. When fewer than
 four groups are showing (a single chip clicked, say), the spare cards go to the next-best
 ideas by score, so the row still fills. A card carries the score and grade, the
-expiration and days to go, the legs, the cost, **Calculator** and — where the Paper
+expiration and days to go (with an *Earnings Nov 19* warning badge when a report lands
+before it expires — see **Earnings** below), the legs, the cost, **Calculator** and — where the Paper
 Ledger can record it — **Paper**, plus three pictures:
 
 | Picture | How to read it |
@@ -2792,7 +2801,7 @@ mistaken for a contract's worth.
 
 | Column | Shows |
 |---|---|
-| **Strategy** | name, with a small payoff shape |
+| **Strategy** | name, with a small payoff shape, and an *Earnings Nov 19* tag when the trade is open through a report |
 | **Score** | 0–100, coloured by zone |
 | **Strikes** | each leg, as on the cards: `L 765P / S 761P`; a leg on a later expiration adds its date (`S 220P / L 220P 10/16`), a share leg reads `L 100 shares` |
 | **Expiry** | expiration and days to go |
@@ -2802,8 +2811,10 @@ mistaken for a contract's worth.
 | **Grade** | quality grade, with its reason on hover |
 
 The last column holds **Send to Calculator**, **Send to Paper trade** (where allowed) and
-**Expected Move**. The number columns sort on their values. The list grows with the page
-rather than scrolling in a short box. Breakevens and bias are not columns — they are in the
+**Expected Move**. The number columns sort on their values. The list is paged, **50 rows a
+page** — a sort orders the whole list before it is paged, so page 2 continues page 1 — and
+a new scan or chip click starts back on page 1 in the sort last chosen. The list grows
+with the page rather than scrolling in a short box. Breakevens and bias are not columns — they are in the
 detail panel, along with each leg written out in full.
 
 **The Grade is quality-gated, not fit-gated** — it is driven by structural quality and
@@ -2824,17 +2835,38 @@ then left off, since it would name only the near month), **every** breakeven joi
 of it — a share lot is thousands of dollars, not a contract's worth.
 
 **The count line** in the summary strip reads like *16 ideas · 6 below the quality bar ·
-0 where premium is too cheap to sell*. The **below the quality bar** count is what
-distinguishes *"the scan found things and rejected them all"* from *"the scan found
-nothing"* — two very different situations that would otherwise look identical. The **too
-cheap to sell** count is a different reason: trades that would sell premium, dropped
-because this symbol's volatility is historically low (trades that buy premium are kept).
+3 where premium is too cheap to sell · 40 lower-scoring ideas not shown*; a zero count is
+left out. The **below the quality bar** count is what distinguishes *"the scan found
+things and rejected them all"* from *"the scan found nothing"* — two very different
+situations that would otherwise look identical. The **too cheap to sell** count is a
+different reason: trades that would sell premium, dropped because this symbol's
+volatility is historically low (trades that buy premium are kept).
+
+- **Lower-scoring ideas not shown** — a whole chain can produce hundreds of ideas, so
+  after the quality bar the Finder keeps the **best 25 of each strategy** (the 25
+  highest-scoring bull call spreads across every expiration, say) and counts the rest.
+  The chip counts cover only what is listed.
+- **N expirations could not be loaded** — part of the chain did not arrive; the ideas
+  come from the rest of it, so a thin list is not the whole story.
+- **Scan failed** replaces the whole line when the scan itself broke — there is no count
+  to report.
+
+**An empty list says why**, naming the symbol and price: *No strategies cleared the
+quality bar for SPY at $764.48.* · *No strategies for SPY at $764.48 — premium is too
+cheap to sell.* · *No option chain came back for SPY at $764.48.* (a mistyped symbol
+reads this way too) · *SPY at $764.48 has no expirations in this expiry range.* ·
+*No strategies could be built for SPY at $764.48 in this expiry range.* · and, for a
+failed scan, *The scan for SPY failed. Check System Status and scan again.*
 
 **While a scan runs** the cards become placeholders reading *Scanning SPY…* — the symbol
-asked for, never the previous one. A slow scan turns them into one still card and says
-it is taking longer than expected — a late result still appears, and if nothing arrives,
-check System Status and scan again; whatever lands belongs to the scan asked for, same
-symbol and same settings.
+asked for, never the previous one — and a spinner counts the seconds, *Scanning SPY…
+12 s*. A whole index chain takes 10–15 seconds, so the count is what keeps a long wait
+from reading as a hang. The spinner stays until the answer lands: the service answers
+every scan request, a failed one included. Only after **3 minutes** with no answer —
+the service down, say — do the placeholders turn into one still card saying the scan is
+taking longer than expected; a late result still appears, and if nothing arrives, check
+System Status and scan again. Whatever lands belongs to the scan asked for, same symbol
+and same settings.
 
 ⚠ **On fairly priced options, two structures are in that count on nearly every scan: the
 short straddle and the covered call.** Both are judged as premium sales, whose bar asks
@@ -2847,8 +2879,14 @@ The covered call stayed cut in every case tested. The long straddle and
 long strangle typically pass only as *Marginal*. Measured outcomes for every structure are
 in the *Technical Reference* (Strategy Finder scoring).
 
-**Earnings.** A calendar or diagonal is checked against its **latest** expiration: the
-back month is still open through a report that lands after the front expires.
+**Earnings.** A trade still open when the company next reports is **kept and tagged**
+*Earnings Nov 19* (the year is added when it falls in another one), not dropped — an
+operator decision, because a scan out to a year would otherwise stop every single stock
+at its next report. A report can gap the stock either way, which is the tag's whole
+point. A calendar or diagonal is checked against its **latest** expiration: the back
+month is still open through a report that lands after the front expires. The
+[Market Scanner](#market-scanner) and the [Income](#income) window **drop** such
+trades instead.
 
 **Calculator** (on a card) and the list's **Send to Calculator** and **Expected Move**
 work for all types — a calendar arrives with both expirations and a share leg as the Calculator's
@@ -2859,7 +2897,8 @@ option leg to that one date, which collapses a calendar into a single-expiry tra
 structures (long call/put, bull call, bear put) and the **call and put butterflies and
 condors**. The ledger refuses a debit structure that arrives with no positive debit,
 rather than opening it as a free trade whose every later mark would overstate the
-result. No button for:
+result. The ledger does not check earnings again, so a tagged trade opens there as it
+would from the Calculator. No button for:
 
 | Structure | Why |
 |---|---|
