@@ -143,6 +143,10 @@ def test_the_quality_cut_still_reports_its_own_drops(monkeypatch):
 def test_both_counts_are_present_on_the_early_return_paths(monkeypatch):
     """A null chain and a null spot both short-circuit before any gate runs; a
     reader doing ``out["vol_filtered"]`` must not KeyError there."""
+    # The quote is read before the chain, and the chain fetch lists expirations
+    # first; both stubbed so the test stays off the proxy.
+    monkeypatch.setattr(compute._proxy.schwab_client, "get_quote", lambda s: {})
+    monkeypatch.setattr(compute, "option_expirations", lambda s: [])
     monkeypatch.setattr(compute.se, "fetch_option_chain", lambda *a, **k: None)
     out = compute.swing_scan("TEST", 30, 45, -0.25, -0.15, 0.15, 0.25, 0.12)
     assert out["vol_filtered"] == 0 and out["filtered_out"] == 0

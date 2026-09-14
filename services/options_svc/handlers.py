@@ -664,18 +664,20 @@ def swing_scan(bus, args: dict) -> None:
     # The Strategy Finder's whole-chain scan: every listed expiry, a report TAGGED
     # rather than dropped, and the best FINDER_PER_TYPE_LIMIT of each strategy type
     # (design docs/plans/2026-09-14-strategy-finder-whole-chain-design.md).
+    #
     # A scan that RAISES still answers its request. Before, the scaffold swallowed
     # the exception and nothing was published, so the page could not tell a dead
-    # scan from a slow one and waited out its ceiling (design section 5).
+    # scan from a slow one and waited out its ceiling (design section 5). The
+    # answer names the exception CLASS; the traceback is in the degrade's log line.
     try:
         result = compute.swing_scan(**params, market_state=market_state,
                                    earnings_date=earnings_date, every_expiry=True,
                                    earnings_mode="flag",
                                    per_type_limit=compute.FINDER_PER_TYPE_LIMIT)
-    except Exception:  # noqa: BLE001 — see above.
+    except Exception as exc:  # noqa: BLE001 — see above.
         _degrade.degraded("options.swing_scan", detail=params["symbol"])
         result = {"signals": [], "view": {}, "spot": None, "expiries_failed": None,
-                  "error": True}
+                  "error": type(exc).__name__}
     # STAMP every row with the coverage it actually got, the same field the
     # income board carries: a row that skipped the check must not look like a row
     # that passed it.
@@ -702,7 +704,7 @@ def swing_scan(bus, args: dict) -> None:
                "expiries_failed": result.get("expiries_failed"),
                "symbol": params["symbol"], "params": args}
     if result.get("error"):
-        payload["error"] = True
+        payload["error"] = result["error"]
     version = bus.cache_set(CACHE_SWING, payload)
     bus.publish(EVENT_SWING, {"version": version})
 

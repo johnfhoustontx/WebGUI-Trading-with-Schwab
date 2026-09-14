@@ -448,6 +448,19 @@ def _validate_scan_args(earnings_mode, per_type_limit):
                          f"got {per_type_limit!r}")
 
 
+def _scan_result(*, signals=None, view=None, filtered_out=0, vol_filtered=0,
+                 not_shown=0, expiries_failed, spot, chain_missing=False,
+                 no_expiries_in_range=False):
+    """The one shape every ``swing_scan`` return takes, early empties included,
+    so a key added for one path cannot be missing from another. Pure."""
+    return {"signals": [] if signals is None else signals,
+            "view": {} if view is None else view,
+            "filtered_out": filtered_out, "vol_filtered": vol_filtered,
+            "not_shown": not_shown, "expiries_failed": expiries_failed,
+            "spot": spot, "chain_missing": chain_missing,
+            "no_expiries_in_range": no_expiries_in_range}
+
+
 def _attach_payoff_curves(ssn, signals, spot, atm_iv):
     """Set each row's ``payoff_curve`` in place (see the call site)."""
     for s in signals:
@@ -575,7 +588,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     import strategy_scanner as ssn
     import strategy_scoring as ssc
 
-    _validate_scan_args(earnings_mode, per_type_limit)
+    _validate_scan_args(earnings_mode, per_type_limit)   # refused before any fetch
 
     client = _proxy.schwab_py_client
 
@@ -588,31 +601,23 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     chain, expiries_failed = fetch_scan_chain(symbol, dte_max)
     # Every builder and screen_spreads compares DTE against a number.
     hi = _NO_DTE_MAX if dte_max is None else dte_max
-    # Off-hours/weekend the chain fetch can return None; the candidate builders
-    # below would AttributeError on chain.get(...)/extract_options(None). Degrade
-    # to an explicit empty result so the handler still publishes a fresh view.
-    #
-    # Two different empties: ``(None, 0)`` is an expiration list that loaded with
-    # no listed expiry in the window, which is an answer, while a failed run (or
-    # the single fetch, whose ``None`` count was never taken) is a chain that did
-    # not come back. The page words them differently.
-    if not chain:
-        return {"signals": [], "view": {}, "filtered_out": 0,
-                "vol_filtered": 0, "not_shown": 0, "expiries_failed": expiries_failed,
-                "spot": spot, "chain_missing": expiries_failed != 0,
-                "no_expiries_in_range": expiries_failed == 0}
+    # Off-hours/weekend the chain fetch can return None, and a symbol Schwab does
+    # not know comes back from the single fetch as a truthy FAILED body with both
+    # expiry maps empty. Neither holds anything to build on, so both are "no
+    # chain": an explicit empty answer, with the two flags the docstring defines.
+    # ``status`` is the test ``run_full_scan`` already applies to the same body.
+    if not chain or chain.get("status") == "FAILED":
+        return _scan_result(spot=spot, expiries_failed=expiries_failed,
+                            chain_missing=expiries_failed != 0,
+                            no_expiries_in_range=expiries_failed == 0)
     if spot is None:
         spot = _usable_spot(chain.get("underlyingPrice"))
-    # Off-hours the quote can miss AND the chain dict can lack ``underlyingPrice``
-    # (the engine defaults that key to 0; compute uses a bare .get()), leaving
-    # spot None. The candidate builders price off spot (spot*0.20, spot*atm_iv),
-    # so a None spot would TypeError and the scaffold would swallow it -> NO cache
-    # write -> the page hangs on "Scanning…". Degrade to an explicit empty result
-    # (matching the no-chain guard above) BEFORE any builder runs.
+    # Off-hours the quote can miss AND the chain can carry no usable
+    # ``underlyingPrice`` (absent, or 0), leaving spot None. The candidate builders
+    # price off spot (spot*0.20, spot*atm_iv), so a None spot would TypeError.
+    # Answer with an explicit empty result BEFORE any builder runs.
     if spot is None:
-        return {"signals": [], "view": {}, "filtered_out": 0,
-                "vol_filtered": 0, "not_shown": 0, "expiries_failed": expiries_failed,
-                "spot": None, "chain_missing": False, "no_expiries_in_range": False}
+        return _scan_result(spot=None, expiries_failed=expiries_failed)
     hist = se.fetch_price_history(client, symbol)
     tech = se.calc_technicals(hist) if hist is not None else {}
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
@@ -810,10 +815,9 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # the position cannot be valued (the page then draws no shape).
     if payoff:
         _attach_payoff_curves(ssn, signals, spot, atm_iv)
-    result = {"signals": signals, "view": view, "filtered_out": filtered_out,
-              "vol_filtered": vol_filtered, "not_shown": not_shown,
-              "expiries_failed": expiries_failed, "spot": spot,
-              "chain_missing": False, "no_expiries_in_range": False}
+    result = _scan_result(signals=signals, view=view, filtered_out=filtered_out,
+                          vol_filtered=vol_filtered, not_shown=not_shown,
+                          expiries_failed=expiries_failed, spot=spot)
     if return_chain:
         # Handed back IN MEMORY so a second screen over the SAME symbol (the
         # covered-call one, see publish_income) can reuse this chain instead of

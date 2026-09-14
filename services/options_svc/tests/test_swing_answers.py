@@ -22,6 +22,10 @@ from shared.bus import Bus
 BANDS = (-0.2, -0.1, 0.1, 0.2, 0.1)
 
 
+def _raise_builder_bug(**k):
+    raise TypeError("builder bug")
+
+
 def _no_chain(monkeypatch, failed, quote):
     monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max: (None, failed))
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote", lambda s: quote)
@@ -48,6 +52,18 @@ def test_a_fallback_fetch_that_returned_nothing_is_a_missing_chain(monkeypatch):
     out = compute.swing_scan("SPY", 0, None, *BANDS)
     assert out["chain_missing"] is True and out["no_expiries_in_range"] is False
     assert out["expiries_failed"] is None
+
+
+def test_a_failed_symbol_reads_as_no_chain(monkeypatch):
+    """A symbol Schwab does not know: the single-fetch fallback hands back a
+    TRUTHY FAILED body with both expiry maps empty. It holds nothing to build
+    on, so it is a missing chain - not a chain that happened to build nothing."""
+    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max: (
+        {"status": "FAILED", "callExpDateMap": {}, "putExpDateMap": {}}, None))
+    monkeypatch.setattr(compute._proxy.schwab_client, "get_quote", lambda s: {"last": 12.5})
+    out = compute.swing_scan("SPYY", 0, None, *BANDS)
+    assert out["chain_missing"] is True and out["no_expiries_in_range"] is False
+    assert out["signals"] == [] and out["spot"] == 12.5
 
 
 def test_the_quote_is_read_before_the_chain(monkeypatch):
@@ -123,16 +139,13 @@ def test_a_scan_that_raises_still_answers_its_request(monkeypatch):
     """Otherwise nothing is published and the page waits out its ceiling."""
     monkeypatch.setattr(compute, "scan_earnings", lambda s: ("not_listed", None))
 
-    def _boom(**k):
-        raise RuntimeError("builder bug")
-
-    monkeypatch.setattr(compute, "swing_scan", _boom)
+    monkeypatch.setattr(compute, "swing_scan", _raise_builder_bug)
     bus = Bus(fake=True)
     sub = bus.subscribe(handlers.EVENT_SWING)
     handlers.swing_scan(bus, {"symbol": "SPY", "dte_min": 7})
     env = bus.cache_get(handlers.CACHE_SWING)
     p = env.payload
-    assert p["error"] is True and p["signals"] == [] and p["symbol"] == "SPY"
+    assert p["error"] == "TypeError" and p["signals"] == [] and p["symbol"] == "SPY"
     assert p["params"] == {"symbol": "SPY", "dte_min": 7}
     assert p["view"] == {} and p["spot"] is None and p["expiries_failed"] is None
     assert p["filtered_out"] == 0 and p["vol_filtered"] == 0 and p["not_shown"] == 0
@@ -142,12 +155,18 @@ def test_a_scan_that_raises_still_answers_its_request(monkeypatch):
     assert msg is not None and msg["version"] == env.version
 
 
-def test_a_raising_scan_is_recorded_as_a_degrade(monkeypatch):
+def test_a_raising_scan_is_recorded_as_a_degrade_with_its_traceback(monkeypatch, caplog):
+    """The answer names only the class; the traceback must reach the log."""
+    import logging
+
     from services import _degrade
 
     monkeypatch.setattr(compute, "scan_earnings", lambda s: ("not_listed", None))
-    monkeypatch.setattr(compute, "swing_scan",
-                        lambda **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(compute, "swing_scan", _raise_builder_bug)
     before = _degrade.counts().get("options.swing_scan", 0)
-    handlers.swing_scan(Bus(fake=True), {"symbol": "SPY"})
+    with caplog.at_level(logging.WARNING):
+        handlers.swing_scan(Bus(fake=True), {"symbol": "SPY"})
     assert _degrade.counts().get("options.swing_scan", 0) == before + 1
+    records = [r for r in caplog.records if "options.swing_scan" in r.getMessage()]
+    assert records and records[-1].levelno == logging.WARNING
+    assert records[-1].exc_info and records[-1].exc_info[0] is TypeError
