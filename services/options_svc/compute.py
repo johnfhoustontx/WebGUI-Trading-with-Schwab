@@ -274,8 +274,8 @@ _EXP_MAPS = ("callExpDateMap", "putExpDateMap")
 
 def _index_expiries(chain):
     """``{map key: {expiry: [(chain key, strikes)]}}``, in chain order. Built once
-    per scan, so cutting the chain to an expiry is a lookup rather than a pass
-    over every key of a 56-expiry chain."""
+    per scan, so each slice walks the listed expiries instead of splitting every
+    chain key again."""
     idx = {}
     for key in _EXP_MAPS:
         by_exp = idx[key] = {}
@@ -285,6 +285,7 @@ def _index_expiries(chain):
 
 
 def _slice_indexed(chain, idx, keep):
+    """``chain`` cut to the expiries in the set ``keep``, read off ``idx``."""
     out = dict(chain)
     for key in _EXP_MAPS:
         out[key] = {k: v for e, pairs in idx[key].items() if e in keep for k, v in pairs}
@@ -341,18 +342,17 @@ def _build_every_expiry(ssn, chain, symbol, spot, atm_iv, dte_min, dte_max, fams
         if "STOCK" in fams:
             out += _tag_group(ssn.build_stock_structures(one, symbol, spot, atm_iv,
                                                          dte, dte, **bands), "STOCK")
-        # A front under the week floor would make the builder jump to the next
-        # expiry - a duplicate of that expiry's own turn - so it builds nothing.
+        # Calendars take this expiry as the front: it must be at least a week out,
+        # and the builder sees it plus only the expiries far enough out to be its
+        # back month (those in between can be neither, and leaving them out keeps
+        # the slices from growing with the square of a 56-expiry chain). The
+        # builder's front is the nearest expiry with a usable leg, so a front with
+        # none on a side would build the NEXT expiry's calendar - a duplicate of
+        # that expiry's own turn. Only this front's rows are kept.
         if "CALENDAR" in fams and dte >= ssn._MIN_FRONT_DTE:
-            # This expiry plus every one far enough out to be its back month. The
-            # ones in between can be neither, and leaving them out keeps the slices
-            # from growing with the square of a 56-expiry chain.
             later = {e for e, d in listed if d >= dte + ssn._CAL_MIN_GAP} | {exp}
             cals = ssn.build_calendars(_slice_indexed(chain, idx, later), symbol, spot,
                                        atm_iv, dte, dte_max)
-            # The builder's front is the nearest expiry with a usable leg, so one
-            # with none on a side would build the NEXT expiry's calendar there -
-            # which that expiry's own turn builds too. Keep only this front's.
             out += _tag_group([s for s in cals if s.get("expiration") == exp], "CALENDAR")
     if "VERTICAL" in fams:
         out += _tag_group([ssn.adapt_credit_spread(s) for s in spreads], "VERTICAL")
@@ -364,6 +364,7 @@ def _build_every_expiry(ssn, chain, symbol, spot, atm_iv, dte_min, dte_max, fams
             out += _tag_group([ssn.adapt_iron_condor(ic)
                                for ic in se.build_iron_condors(group)], "NEUTRAL")
     return out
+
 
 # Emission cut for the Strategy Finder: a candidate must reach SWING_MIN_SCORE on
 # strategy_scoring's Fit+Quality composite AND not carry an excluded grade, or it
@@ -527,6 +528,9 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     view = ssc.infer_market_view(tech or {}, iv or {})
 
     fams = set(families) if families else set(_SWING_FAMILIES)
+    # The short-delta bands reach the builders that SELL an out-of-the-money option
+    # (the directional shorts, the short strangle, the covered call's call) and bind
+    # nothing else - see each builder's docstring.
     bands = {"put_band": (put_d_min, put_d_max), "call_band": (call_d_min, call_d_max)}
     # Credit spreads feed BOTH the VERTICAL credit set AND the NEUTRAL iron condors,
     # so compute screen_spreads if EITHER family is requested.
@@ -564,9 +568,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         if "NEUTRAL" in fams:
             signals += _tag_group([ssn.adapt_iron_condor(ic)
                                    for ic in se.build_iron_condors(spreads)], "NEUTRAL")
-        # The four build groups added 2026-09-13. The short-delta band reaches the two
-        # builders that SELL an out-of-the-money option (the short strangle, the
-        # covered call's call) and binds nothing else - see each builder's docstring.
+        # The four build groups added 2026-09-13.
         if "STRADDLE" in fams:
             signals += _tag_group(ssn.build_straddles_strangles(chain, symbol, spot, atm_iv,
                                                                 dte_min, hi, **bands),

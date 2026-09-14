@@ -98,8 +98,9 @@ def _in_memory_gex_db(monkeypatch):
 
 # ── The Strategy Finder's whole-chain scan (2026-09-14) ──────────────────────
 # Expiries at DTE 3 (under the 7-day front floor), 10 and 38 (a calendar pair
-# 28 days apart) and 400 (the long end no DTE max used to reach).
-SCAN_ENV_DTES = (3, 10, 38, 400)
+# 28 days apart), 14 (inside the 10's 7-day gap, so too near to be its back
+# month, yet a front of its own) and 400 (the long end no DTE max used to reach).
+SCAN_ENV_DTES = (3, 10, 14, 38, 400)
 
 
 def _whole_chain(dtes=SCAN_ENV_DTES, spot=540.0, delta_iv=0.18, price_iv=0.234,
