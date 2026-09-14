@@ -104,6 +104,12 @@ services/trade_svc/data/
 # tools/promote.sh refuses a dirty tree.
 deploy/site/live/*.webp
 
+# The published market reports behind report.html. Written on the operator's
+# workstation (outside this repo) and uploaded into the served root on the box
+# after each scheduled report. Same reason as live/*.webp: tracked, the first
+# upload would dirty prod's tree and tools/promote.sh refuses a dirty tree.
+deploy/site/reports/
+
 # The marketing gallery's screenshots, re-photographed from the PRIVATE app by
 # tools/capture_gallery_shots.py on the box that serves the site. Same reason as
 # deploy/site/live/*.webp above: committed, a capture run would dirty prod's
