@@ -20,6 +20,8 @@ from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
 from .theme import THEME as _THEME   # config only - theme.py imports no widget code
 
 NO_READING = _fmt.NO_READING
+# What the summary strip says when no price was read - words, never $0.00.
+PRICE_UNAVAILABLE = "Price unavailable"
 
 # The seven build groups ``swing_scan`` stamps on each candidate as ``group``, in
 # the order the chips render.
@@ -434,7 +436,10 @@ def _spot(payload):
     return spot
 
 
-PRICE_UNAVAILABLE = "Price unavailable"
+def _price_text(spot):
+    """A read price as ``$764.48``; :data:`PRICE_UNAVAILABLE` for no reading."""
+    f = _fmt.num(spot)
+    return PRICE_UNAVAILABLE if f is None else f"${f:,.2f}"
 
 
 def no_data_label(payload):
@@ -445,29 +450,34 @@ def no_data_label(payload):
     THIS symbol and not a page that failed to load. Precedence: a failed scan
     (``error`` is the exception's class name - tested for truthiness) · no chain
     came back · no expirations in the range · the quality cut · premium too cheap
-    to sell · nothing could be built. Without a price the symbol stands alone;
-    with no symbol at all the sentences fall back to "this symbol".
+    to sell · nothing could be built.
+
+    One subject throughout: ``SPY at $764.48``, ``SPY`` without a price, and
+    ``this symbol`` with no symbol at all. Two exceptions, both deliberate: a
+    failed scan names the symbol but no price (the failure is the news), and the
+    no-symbol "too cheap" sentence keeps its original wording, which the uniform
+    form would have reworded.
     """
     p = payload or {}
-    symbol = str(p.get("symbol") or "").strip()
+    symbol = str(p.get("symbol") or "").strip().upper()
     spot = _spot(p)
-    at = "" if spot is None else f" at ${spot:,.2f}"
-    who = f"{symbol}{at}" if symbol else "this symbol"
+    at = "" if spot is None else f" at {_price_text(spot)}"
+    subject = f"{symbol}{at}" if symbol else "this symbol"
 
     if p.get("error"):
-        return (f"The scan for {symbol} failed." if symbol else "The scan failed.") + \
-            " Check System Status and scan again."
+        failed = f"The scan for {symbol} failed." if symbol else "The scan failed."
+        return f"{failed} Check System Status and scan again."
     if p.get("chain_missing"):
-        return f"No option chain came back for {who}."
+        return f"No option chain came back for {subject}."
     if p.get("no_expiries_in_range"):
-        return f"{who if symbol else 'This symbol'} has no expirations in this range."
+        return f"{subject[0].upper()}{subject[1:]} has no expirations in this expiry range."
     if _fmt.num(p.get("filtered_out")):
-        return f"No strategies cleared the quality bar for {who}."
+        return f"No strategies cleared the quality bar for {subject}."
     if _fmt.num(p.get("vol_filtered")):
         if not symbol:
             return "No strategies to show — premium is too cheap to sell for this symbol."
-        return f"No strategies for {who} — premium is too cheap to sell."
-    return f"No strategies could be built for {who} in this expiry range."
+        return f"No strategies for {subject} — premium is too cheap to sell."
+    return f"No strategies could be built for {subject} in this expiry range."
 
 
 def scan_timeout_text(symbol, seconds):
@@ -510,8 +520,7 @@ def summary_facts(payload):
 
     # Every answer shows a price - an empty one too, so it reads as an answer -
     # and a missing reading says so in words, never as $0.00.
-    spot = _spot(p)
-    price = PRICE_UNAVAILABLE if spot is None else f"${spot:,.2f}"
+    price = _price_text(_spot(p))
 
     view = p.get("view") or {}
     pills = []
@@ -525,6 +534,12 @@ def summary_facts(payload):
 
     rank = _fmt.num(first.get("iv_rank"))
     vol_rank = None if rank is None else f"Vol Rank {_half_up(rank)}"
+
+    if p.get("error"):
+        # A failed scan read no ideas and no cuts: "0 ideas" would be a count
+        # nobody read. ``error`` is the exception's class name - truthiness only.
+        return {"symbol": symbol, "price": price, "pills": pills,
+                "vol_rank": vol_rank, "counts": "Scan failed"}
 
     n = len(signals)
     parts = [f"{n:,} idea" if n == 1 else f"{n:,} ideas"]

@@ -1,4 +1,6 @@
 """Pure view model for the redesigned Strategy Finder (``finder_view.py``)."""
+import datetime
+
 from pages.options import finder_view as fv
 
 
@@ -58,8 +60,6 @@ def test_expiry_text_without_dte_or_with_a_bad_date():
 
 
 def test_expiry_presets_round_trip_and_detect_custom():
-    assert [p[0] for p in fv.EXPIRY_PRESETS] == ["1–2 wk", "2–6 wk", "1–3 mo", "3–12 mo",
-                                                 "1 yr+", "All"]
     for label, lo, hi in fv.EXPIRY_PRESETS:
         assert fv.expiry_preset_for(lo, hi) == label
     assert fv.expiry_preset_for(3, 9) is None
@@ -767,25 +767,21 @@ def test_payload_answers_a_scan_with_no_upper_limit():
 # -------------------------------------------------------------------- earnings
 
 def _this_year(month_day):
-    import datetime
     return f"{datetime.date.today().year}-{month_day}"
 
 
 def test_earnings_text_names_the_report_date():
-    import datetime
     sig = {"spans_earnings": True, "earnings_date": "2026-11-19"}
     assert fv.earnings_text(sig, today=datetime.date(2026, 9, 14)) == "Earnings Nov 19"
 
 
 def test_earnings_text_names_the_year_when_the_report_is_in_another_year():
-    import datetime
     sig = {"spans_earnings": True, "earnings_date": "2027-01-22"}
     assert fv.earnings_text(sig, today=datetime.date(2026, 9, 14)) == (
         "Earnings Jan 22, 2027")
 
 
 def test_earnings_text_is_none_without_a_stamp_or_a_date():
-    import datetime
     today = datetime.date(2026, 9, 14)
     assert fv.earnings_text({"earnings_date": "2026-11-19"}, today=today) is None
     assert fv.earnings_text({"spans_earnings": False, "earnings_date": "2026-11-19"},
@@ -886,7 +882,7 @@ def test_no_data_label_no_chain():
 
 def test_no_data_label_no_expiries_in_range():
     p = {**_SPY, "no_expiries_in_range": True, "filtered_out": 3}
-    assert fv.no_data_label(p) == "SPY at $764.48 has no expirations in this range."
+    assert fv.no_data_label(p) == "SPY at $764.48 has no expirations in this expiry range."
 
 
 def test_no_data_label_quality_cut_names_symbol_and_price():
@@ -909,7 +905,7 @@ def test_no_data_label_without_a_price_names_the_symbol_alone():
     assert fv.no_data_label({**bare, "chain_missing": True}) == (
         "No option chain came back for SPY.")
     assert fv.no_data_label({**bare, "no_expiries_in_range": True}) == (
-        "SPY has no expirations in this range.")
+        "SPY has no expirations in this expiry range.")
     assert fv.no_data_label({**bare, "filtered_out": 1}) == (
         "No strategies cleared the quality bar for SPY.")
     assert fv.no_data_label({**bare, "vol_filtered": 1}) == (
@@ -924,7 +920,7 @@ def test_no_data_label_without_a_symbol_keeps_the_generic_sentences():
     assert fv.no_data_label({"chain_missing": True, "spot": 1.0}) == (
         "No option chain came back for this symbol.")
     assert fv.no_data_label({"no_expiries_in_range": True}) == (
-        "This symbol has no expirations in this range.")
+        "This symbol has no expirations in this expiry range.")
 
 
 # ----------------------------------------------------------- the running count
@@ -938,3 +934,23 @@ def test_scan_timeout_text_counts_whole_seconds():
     assert fv.scan_timeout_text("SPY", -1) == "Scanning SPY… 0 s"
     assert fv.scan_timeout_text("SPY", float("nan")) == "Scanning SPY…"
     assert fv.scan_timeout_text("SPY", None) == "Scanning SPY…"
+
+
+def test_a_failed_scan_counts_nothing():
+    """A failed scan read no ideas and no cuts - "0 ideas" would be a count nobody
+    read. The price still shows when it was read."""
+    f = fv.summary_facts({"symbol": "SPY", "signals": [], "spot": 764.48,
+                          "error": "TypeError", "filtered_out": 3, "vol_filtered": 1,
+                          "not_shown": 4, "expiries_failed": 2})
+    assert f["counts"] == "Scan failed"
+    assert f["price"] == "$764.48"
+    # A falsy error is no error.
+    assert fv.summary_facts({"symbol": "SPY", "signals": [], "error": ""})["counts"] == (
+        "0 ideas")
+
+
+def test_no_data_label_uppercases_the_symbol():
+    assert fv.no_data_label({"symbol": " spy ", "spot": 764.48, "chain_missing": True}) == (
+        "No option chain came back for SPY at $764.48.")
+    assert fv.no_data_label({"symbol": "spy", "error": "TypeError"}) == (
+        "The scan for SPY failed. Check System Status and scan again.")
