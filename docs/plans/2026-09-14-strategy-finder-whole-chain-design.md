@@ -184,9 +184,10 @@ checks when the market is closed, so long-dated strikes are not cut.
 - **Many more ideas.** SPY could produce several hundred before the quality cut. The
   top-pick cards, the chips and the sortable Expiry column do the narrowing; illiquid
   long-dated strikes fall to the existing liquidity checks.
-- **Scan time** about 20 s for $SPX (measured on a synthetic chain of that size; live
-  figure pending): the 11–12 s fetch plus a 6.55 s every-expiry build (calendars about
-  half), well inside the page's 180 s ceiling (`SCAN_TIMEOUT_SEC`, §5). Commands on
+- **Scan time** — estimated at about 20 s for $SPX from a synthetic chain (the 11–12 s
+  fetch plus a 6.55 s every-expiry build, calendars about half); measured live after the
+  promote at **40.1 s for $SPX**, 25.7–27.4 s for SPY and 13.5 s for NVDA (range *All*).
+  Still well inside the page's 180 s ceiling (`SCAN_TIMEOUT_SEC`, §5). Commands on
   `cmd:options` run one at a time, so a Calculator load or Gamma refresh clicked during a
   scan waits behind it.
 - **Payload size** grows with the rows (each carries a 25-point payoff curve). Measured

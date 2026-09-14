@@ -4,7 +4,92 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-14 (**Strategy Finder — the whole chain, every expiry.**
+**Last updated:** 2026-09-14 (**Strategy Finder — ask before loading a large chain.**
+Operator request: "Fix the DTE max box and the docs timing. For SPX (and other large
+chains) don't load the complete chain, give me option what to load.")
+
+- **Why.** Whole-chain scans measured on prod after the promote below (~12:30 CT, range
+  *All*, every expiry, 0 failed expirations; the per-type limit of 25 did not bind):
+
+  | Symbol | Listed expirations | Wall time | Rows |
+  |---|---|---|---|
+  | NVDA | 25 | 13.5 s | 139 |
+  | SPY | 34 | 25.7–27.4 s | 162–167 |
+  | `$SPX` | 56 | **40.1 s** | 69 |
+
+  `cmd:options` runs one command at a time, so a `$SPX` scan also held up Calculator and
+  Simulator loads, whose wait overlay gives up at 30 s. The docs said "about 20 s" (a
+  synthetic figure), and the DTE max box clipped its own placeholder to "no limi".
+- **Schwab types every expiration** (`/expirationchain` `expirationType`, measured the same
+  day; the list costs 0.2–0.3 s and the scan already fetched it):
+
+  | Symbol | Total | W weekly | S standard monthly | Q quarterly | M month-end | ≤ 30 d | ≤ 90 d |
+  |---|---|---|---|---|---|---|---|
+  | `$SPX` | 56 | 32 | 19 | 4 | 1 | 23 | 35 |
+  | `$NDX` | 47 | 27 | 15 | 4 | 1 | 23 | 32 |
+  | SPY | 34 | 16 | 13 | 4 | 1 | 14 | 19 |
+  | QQQ | 33 | 14 | 14 | 4 | 1 | 14 | 19 |
+  | IWM | 33 | 14 | 15 | 4 | — | 14 | 18 |
+  | NVDA | 25 | 10 | 15 | — | — | 9 | 13 |
+
+- **Operator decision:** ask when the chain is large — a chooser before any chain is
+  fetched; small chains scan straight away.
+- **Service.** `swing_scan(..., expiry_choice=None, ask_if_large=False)`; only the Finder's
+  handler passes `ask_if_large=True`, so **the Income Window never asks**. The typed list is
+  read once per scan and `_plan_fetch` counts the expirations inside `dte_min`..`dte_max`.
+  More than `LARGE_CHAIN_EXPIRIES` (30) and no choice: the answer is `needs_choice`,
+  `expiration_count` and `choices` (`[{key, label, count, est_seconds}]`,
+  `est_seconds = count × SCAN_SEC_PER_EXPIRY` 0.75 rounded half up) and **no chain is
+  fetched**. The four `EXPIRY_CHOICES`: *Next 30 days* (DTE ≤ 30) · *Next 90 days* (DTE ≤ 90)
+  · *Monthlies only* (type `S` — not weeklies, quarterlies or month-end) · *Everything*.
+  With a choice only its expirations are fetched (monthlies one run each) and built, so
+  calendars pair within the choice; the answer adds `expiry_choice` and
+  `expirations_scanned`. A choice on a range of 30 or fewer is ignored (`expiry_choice:
+  null`), which lets the page send a remembered pick blind; an unknown one is a
+  `ValueError` → the handler's error answer; no expiration list never asks.
+- **Page.** One chooser card replaces the top picks (*$SPX lists 56 expirations in this
+  range. Choose what to scan:*, buttons *Next 30 days · 23 · ~17 s*, a zero-count choice
+  disabled), the count line *56 expirations — choose what to scan*, the list *Choose which
+  expirations to scan for $SPX.* The pick is remembered per symbol while the page is open
+  (never persisted) and goes through the one scan path; after it the count line ends
+  *Scanned 19 of 56 expirations · Monthlies only* beside a **Change** link that reopens the
+  chooser from the answer's `choices` without scanning. The DTE boxes go `w-20` → `w-24`.
+- **Found in review and fixed before shipping:**
+  - **The DTE basis.** The chooser first counted the host's calendar difference, a day off
+    Schwab's own `daysToExpiration` (the number in the chain keys the builders filter on)
+    between 23:00 and 24:00 CT — and the fetch asks for exactly the chosen dates, so a
+    boundary expiry could drop silently. It counts Schwab's number now, trusted only
+    within **±1 day** of the calendar difference (a 0 on every row is a bad field, not
+    clock skew; reported once as the degrade `options.expiration_dte`). Live, the list's
+    `daysToExpiration` equalled the chain keys' DTE for SPY and NVDA with 0 mismatches.
+  - **The IV reference is always kept.** A choice that leaves out the expiry the whole
+    scan reads ATM IV from gets it fetched beside the choice for `run_iv_analysis` alone,
+    then sliced away, so the IV, Vol Rank and expected move never change with the choice.
+    "Only when no chosen expiry is inside 7–60 DTE" was not enough: *Monthlies only*
+    keeps a 46-day monthly that would have replaced the 29-day weekly.
+  - **Failures count chosen expirations only**, recounted from the merged chain, so the
+    reference cannot push `expiries_failed` past `expirations_scanned`; a reference that
+    did not load is the degrade `options.scan_iv_reference`.
+  - **The scan timeout never fired after a pick.** Its `ui.timer` was built in the sender's
+    slot — for a pick, the chooser card the scan clears — so it was deleted with it. It
+    mounts in the never-cleared list box.
+  - **The stale guard needed an exact `expiry_choice`.** The shared guard skips a field
+    the echo lacks, so the plain scan that asked could end the wait of the pick sent after
+    it; `swing.answers_request` also requires the echoed `expiry_choice` to match.
+  - **An empty pick says so.** A remembered *Next 30 days* with DTE min at 60 read
+    "$SPX has no expirations in this expiry range." beside "Scanned 0 of 56 expirations";
+    it now reads *Next 30 days holds no expirations in this range for $SPX — use Change to
+    pick another.* (the Change clause only when Change is drawn).
+  - **The box and its dedupe agree.** A pick that writes another symbol into the box (and
+    the Trade Plan hand-off) now tells `bind_symbol_load`'s dedupe
+    (`inputs.mark_symbol_loaded`), so the next tab-out does not scan it a second time.
+- **Docs:** `page_help.py`, the User Guide, Reference Guide, Technical Reference and API
+  Reference; `docs/webgui-routes.md`; CLAUDE.md's route row and chain note in place; the
+  "about 20 s" figure replaced by the live numbers everywhere it was claimed.
+- Design + plan: [`docs/plans/2026-09-14-strategy-finder-large-chain-chooser-design.md`](plans/2026-09-14-strategy-finder-large-chain-chooser-design.md)
+  / [`-plan.md`](plans/2026-09-14-strategy-finder-large-chain-chooser-plan.md).
+
+**Prior —** 2026-09-14 (**Strategy Finder — the whole chain, every expiry.**
 Operator request: "I need the restriction of 120 days to be removed and the full chain
 to be considered for trades.")
 
@@ -26,8 +111,8 @@ to be considered for trades.")
   4 at a time; QQQ 5.7 s; **`$SPX` 56 expiries (to 2031-12-19) / 25,650 contracts 11–12 s**
   (37.7 MB). The expiration list costs 0.2–0.3 s; the builders plus scoring 0.5 s on a
   synthetic `$SPX`-sized chain before every-expiry building. Built on EVERY expiry that
-  chain measured 6.55 s (calendars about half), so a whole `$SPX` scan takes about 20 s
-  (live figure pending).
+  chain measured 6.55 s (calendars about half), so a whole `$SPX` scan was estimated at
+  about 20 s — live it took 40.1 s (see *Measured after the open*, below).
 - **The fetch** (`compute.fetch_scan_chain`, every `swing_scan` caller including the
   Income Window, whose chain content does not change): list the expirations, keep those
   from TODAY to today + `dte_max` + 2 (all when `dte_max` is `None`), fetch runs of ≤ 8
@@ -80,9 +165,11 @@ to be considered for trades.")
 - **Docs:** `page_help.py`, the User Guide, Reference Guide, Technical Reference and API
   Reference; `docs/webgui-routes.md`; CLAUDE.md's route row, earnings section and chain
   note corrected in place.
-- **Still to measure:** the score's expiry mix on a live chain (pre-market chains carry no
-  quotes) — wall time, rows, payload size and the DTE spread of the top picks on SPY, NVDA
-  and `$SPX` after the open.
+- **Measured after the open** (prod, ~12:30 CT, range *All*): NVDA 25 expirations 13.5 s /
+  139 rows · SPY 34 → 25.7–27.4 s / 162–167 rows · `$SPX` 56 → 40.1 s / 69 rows; the
+  per-type limit of 25 did not bind and no expiration failed. SPY's top picks were led by
+  short straddles 1–2 years out (observed, not investigated). Payload size was not
+  measured. The `$SPX` wall time led to the large-chain chooser above.
 - Design + plan: [`docs/plans/2026-09-14-strategy-finder-whole-chain-design.md`](plans/2026-09-14-strategy-finder-whole-chain-design.md)
   / [`-plan.md`](plans/2026-09-14-strategy-finder-whole-chain-plan.md).
 

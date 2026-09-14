@@ -1569,7 +1569,35 @@ press <strong>Scan</strong> when you are ready.</p>
 <p>The top-pick cards turn into grey placeholders reading <em>Scanning SPY…</em> — always the
 symbol you asked for, never the previous one — the old list is cleared, and a
 spinner counts the wait in seconds: <em>Scanning SPY… 12 s</em>. Reading a whole chain
-takes time; an index such as $SPX can need about 20 seconds.</p>
+takes time. Measured during market hours with the <strong>All</strong> range:</p>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Expirations</th>
+<th>About</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NVDA</td>
+<td>25</td>
+<td>14 s</td>
+</tr>
+<tr>
+<td>SPY</td>
+<td>34</td>
+<td>26 s</td>
+</tr>
+<tr>
+<td>$SPX</td>
+<td>56</td>
+<td>40 s</td>
+</tr>
+</tbody>
+</table>
+<p>The service handles one request at a time, so a Calculator or Simulator load you
+start during a scan waits behind it.</p>
 <p>The spinner stays up until the answer lands — including the answer for a scan that
 failed, which arrives as soon as it fails (that can be after the chain has been
 fetched, about 12 seconds on $SPX). Only if nothing at all has come back after
@@ -1578,6 +1606,68 @@ page says <em>The scan is taking longer than expected. It will appear here if it
 finishes; if nothing arrives, check System Status and scan again.</em> A late result
 still appears. Whatever lands belongs to the scan you asked for — same symbol, same
 settings.</p>
+<p><strong>When the chain is large, it asks first</strong></p>
+<p>If your range holds <strong>more than 30 expirations</strong> — $SPX lists 56 with <strong>All</strong> — the
+Finder asks what to load before it fetches anything. The top picks give way to one
+card, <em>$SPX lists 56 expirations in this range. Choose what to scan:</em>, with four
+buttons. Each shows how many expirations it keeps and a rough wait, worked out at
+about 0.75 seconds an expiration:</p>
+<table>
+<thead>
+<tr>
+<th>Button</th>
+<th>Keeps</th>
+<th>$SPX, All</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Next 30 days</strong></td>
+<td>expirations up to 30 days out</td>
+<td><em>Next 30 days · 23 · ~17 s</em></td>
+</tr>
+<tr>
+<td><strong>Next 90 days</strong></td>
+<td>expirations up to 90 days out</td>
+<td><em>Next 90 days · 35 · ~26 s</em></td>
+</tr>
+<tr>
+<td><strong>Monthlies only</strong></td>
+<td>Schwab's standard monthly expirations — not the weeklies, quarterlies or month-end ones</td>
+<td><em>Monthlies only · 19 · ~14 s</em></td>
+</tr>
+<tr>
+<td><strong>Everything</strong></td>
+<td>every expiration in the range</td>
+<td><em>Everything · 56 · ~42 s</em></td>
+</tr>
+</tbody>
+</table>
+<p>Every choice counts only expirations inside your DTE min / max, and a choice that holds
+none is greyed out. While the card is up, the summary's count line reads <em>56
+expirations — choose what to scan</em> and the list reads <em>Choose which expirations to scan
+for $SPX.</em></p>
+<ul>
+<li><strong>Click a button</strong> and the scan runs as usual, spinner and all, for that symbol.</li>
+<li><strong>The pick is remembered for that symbol</strong> while the page is open (it is not saved
+  when you leave): scan $SPX again and it uses the same choice without asking. Another
+  symbol has its own pick, or none.</li>
+<li><strong>After a scan with a choice</strong>, the count line ends <em>Scanned 19 of 56 expirations ·
+  Monthlies only</em>, with a <strong>Change</strong> link beside it. Change brings the card back;
+  nothing rescans until you pick.</li>
+<li><strong>A range of 30 or fewer expirations never asks</strong>, and ignores a remembered pick:
+  everything in it is scanned, and the <em>Scanned … of …</em> part is not shown.</li>
+<li><strong>A pick can hold nothing</strong> in the range you ask for next — <em>Next 30 days</em> with DTE
+  min at 60, say. The list then says <em>Next 30 days holds no expirations in this range
+  for $SPX — use Change to pick another.</em></li>
+<li><strong>A pick builds only its expirations</strong>, so calendars and diagonals pair only within
+  them: <em>Next 30 days</em> keeps the later month within 30 days, and <em>Monthlies only</em> pairs
+  a monthly with a later monthly.</li>
+<li><strong>The volatility read does not change with the pick.</strong> The Vol Rank, implied
+  volatility and expected move every idea is scored against are those of the whole
+  chain; the expiration they come from is loaded for that alone.</li>
+<li>The <strong>Income Window</strong> never asks.</li>
+</ul>
 <p><strong>The summary strip</strong></p>
 <p>After every scan — an empty one included — one strip names:</p>
 <ul>
@@ -1792,9 +1882,9 @@ contract.</p>
   weeks</strong> after it, and at least a week after it. A narrow range, such as the
   <strong>1–2 wk</strong> preset, often holds no such pair and builds no calendar; pick a wider
   preset or raise <strong>DTE max</strong>. No extra data is fetched for them.</li>
-<li><strong>Every structure is built on every expiration in your range</strong>, not only the
-  nearest one — a calendar or diagonal takes each expiration in turn as its near
-  month.</li>
+<li><strong>Every structure is built on every expiration in your range</strong> (in your pick, when
+  a large chain asked), not only the nearest one — a calendar or diagonal takes each
+  expiration in turn as its near month.</li>
 <li><strong>Only the best 25 of each strategy are listed.</strong> A whole chain can produce
   hundreds of ideas, so after the quality bar the Finder keeps the 25
   highest-scoring of each strategy — for example the best 25 bull call spreads

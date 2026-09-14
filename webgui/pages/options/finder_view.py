@@ -595,9 +595,9 @@ def no_data_label(payload):
 def scan_timeout_text(symbol, seconds):
     """The spinner's running count while a scan runs: ``"Scanning SPY… 12 s"``.
 
-    Whole seconds, rounded down. A whole-chain index scan legitimately takes
-    about 20 s for $SPX (measured on a synthetic chain of that size; live figure
-    pending), so the count is what keeps a long wait from reading as a hang. An
+    Whole seconds, rounded down. A whole-chain scan legitimately takes 40 s for
+    $SPX and 26 s for SPY (measured live), so the count is what keeps a long wait
+    from reading as a hang. An
     unreadable count drops the number rather than printing one it did not read.
     """
     sym = str(symbol or "").strip().upper()

@@ -51,9 +51,9 @@ EMPTY_PROMPT = "Enter a symbol and press Scan to rank every strategy for it."
 # every scan request - a raising scan publishes an ``error`` answer within
 # seconds - so this is a safety ceiling for a service that is down or a command
 # that was dropped, not the shared 30 s panel backstop (busy.BUSY_TIMEOUT_SEC): a
-# whole-chain index scan takes about 20 s for $SPX (measured on a synthetic chain
-# of that size; live figure pending), and a backstop that fires while the work
-# is still running says "finished" when it has not.
+# whole-chain scan measured 40 s live for $SPX (56 expirations) and 26 s for SPY,
+# and a backstop that fires while the work is still running says "finished" when
+# it has not.
 SCAN_TIMEOUT_SEC = 180
 
 # The ranked list is paged SERVER-SIDE, this many rows at a time. Measured on a

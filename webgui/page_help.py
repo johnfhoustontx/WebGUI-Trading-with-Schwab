@@ -217,6 +217,33 @@ four top picks, and the full ranked list.
   - Raising deltas/credit → fewer but richer trades; lowering → more but lower
     quality.
 
+**A large chain asks first**
+
+- When your range holds **more than 30 expirations** (an index such as $SPX lists
+  56), the Finder asks before it loads anything. One card replaces the top picks —
+  *$SPX lists 56 expirations in this range. Choose what to scan:* — with four
+  buttons, each giving how many expirations it keeps and a rough wait (about
+  0.75 s an expiration): *Next 30 days · 23 · ~17 s*.
+  - **Next 30 days** — expirations up to 30 days out.
+  - **Next 90 days** — up to 90 days out.
+  - **Monthlies only** — Schwab's standard monthly expirations; not the weeklies,
+    quarterlies or month-end ones.
+  - **Everything** — every expiration in the range.
+
+  A choice that holds none is shown greyed out. The summary reads *56 expirations —
+  choose what to scan* and the list *Choose which expirations to scan for $SPX.*
+- **Your pick is remembered for that symbol** while the page is open, so scanning
+  $SPX again uses it without asking. The count line then ends *Scanned 19 of 56
+  expirations · Monthlies only*, with a **Change** link that brings the card back
+  (nothing rescans until you pick). A range of 30 or fewer expirations ignores the
+  remembered pick and scans all of them. If the pick holds nothing in the range you
+  now ask for — *Next 30 days* with DTE min at 60, say — the list says *Next 30 days
+  holds no expirations in this range for $SPX — use Change to pick another.*
+- **A pick builds only its expirations**, so a calendar pairs only within them:
+  *Next 30 days* keeps a calendar's later month within 30 days, and *Monthlies
+  only* pairs monthlies with monthlies. The **Vol Rank**, the implied volatility
+  and the expected move stay those of the whole chain whatever you pick.
+
 **After a scan**
 
 - **The summary** names the symbol and its price, the market view the scan
@@ -284,8 +311,10 @@ four top picks, and the full ranked list.
   position** rather than per contract.
 - **While a scan runs** the cards read *Scanning SPY…* — the symbol you asked for,
   never the one before — and the spinner counts the wait: *Scanning SPY… 12 s*.
-  A whole chain takes a while: an index such as $SPX can need about 20 seconds. The
-  spinner stays until the answer lands, a failed scan's included. Only after
+  A whole chain takes a while — measured with **All**: NVDA (25 expirations)
+  about 14 s, SPY (34) about 26 s, $SPX (56) about 40 s. The service runs one
+  request at a time, so a Calculator or Simulator load clicked meanwhile waits
+  behind the scan. The spinner stays until the answer lands, a failed scan's included. Only after
   **3 minutes** with nothing back do the cards become one still card saying the
   scan is taking longer than expected: a late result still appears, and if nothing
   arrives, check **System Status** and scan again. Results that land are always for

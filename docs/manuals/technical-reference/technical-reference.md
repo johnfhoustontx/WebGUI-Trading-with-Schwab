@@ -971,9 +971,85 @@ expiration list it falls back to one fetch — bounded to 120 days when the scan
 DTE max (`_FALLBACK_MAX_DTE`) — and reports `expiries_failed = None` (not
 counted, which is not zero). Measured 2026-09-14 pre-market: SPY's whole chain (34
 expiries, 12,956 contracts) **timed out at the proxy's 30 s** in one request and took
-6.5 s grouped; `$SPX` (56 expiries, 25,650 contracts) took 11–12 s to fetch. Building
-every structure on every expiry adds 6.55 s on a synthetic chain of that size
-(calendars about half of it), so a whole `$SPX` scan takes about 20 s for `$SPX` (measured on a synthetic chain of that size; live figure pending).
+6.5 s grouped; `$SPX` (56 expiries, 25,650 contracts) took 11–12 s to fetch. Whole
+scans measured live the same day (~12:30 CT, range *All*, every expiry, none failed):
+
+| Symbol | Expirations | Wall time | Rows published |
+|---|---|---|---|
+| NVDA | 25 | 13.5 s | 139 |
+| SPY | 34 | 25.7–27.4 s | 162–167 |
+| `$SPX` | 56 | 40.1 s | 69 |
+
+The per-type limit of 25 did not bind on any of them. `cmd:options` is consumed one
+command at a time, so a Calculator or Simulator load enqueued during a `$SPX` scan waits
+behind it — and those pages' wait overlay gives up at 30 s.
+
+**A large chain asks first (the Strategy Finder, 2026-09-14).** `swing_scan` lists the
+expirations ONCE (`option_expiration_rows` → `parse_expiration_rows`, rows of
+`(date, expirationType, dte)`) and `_plan_fetch` decides the fetch before any chain call.
+Each row's DTE is **Schwab's own `daysToExpiration`** — the number Schwab writes into the
+chain keys (`"YYYY-MM-DD:dte"`) the builders filter on, which differs from the host's
+calendar difference by a day between 23:00 and 24:00 CT, and the fetch asks for exactly
+the chosen dates, so counting on the calendar could silently drop a boundary expiry. The
+calendar difference is used instead when the field is not a non-negative whole number, or
+when it is **more than one day** from the calendar difference (no clock skew explains
+two days, so such a value is a bad field); that second case speaks once per listing as
+the degrade `options.expiration_dte`. Checked live on SPY and NVDA: the list's
+`daysToExpiration` matched the chain keys' DTE on every expiry. A date listed twice keeps
+`"S"` if either row says so.
+
+The expirations inside `dte_min`..`dte_max` (no upper bound for `None`, never below 0) are
+counted. More than **`LARGE_CHAIN_EXPIRIES` (30)**, with `ask_if_large=True` — passed by the
+Finder's handler alone; **the Income Window never asks** — and no `expiry_choice`, and the
+scan returns `needs_choice: True`, `expiration_count` and `choices` **without fetching a
+chain** (`expiries_failed` 0: nothing was attempted). `choice_summary` gives one entry per
+`EXPIRY_CHOICES` key, in order, each counted inside the range:
+
+| Key | Label | Keeps (`choice_dates`) |
+|---|---|---|
+| `next_30` | Next 30 days | DTE ≤ 30 |
+| `next_90` | Next 90 days | DTE ≤ 90 |
+| `monthly` | Monthlies only | `expirationType == "S"` — not `W` weekly, `Q` quarterly or `M` month-end |
+| `all` | Everything | all of them |
+
+`est_seconds` is `count × SCAN_SEC_PER_EXPIRY` (0.75 — live SPY 26 s / 34, `$SPX` 40 s /
+56), a half rounding **up** (Python's `round` would take 4.5 to 4). A choice with count 0 is
+still listed. Schwab's types, measured on prod the same day:
+
+| Symbol | Total | W | S | Q | M | ≤ 30 d | ≤ 90 d |
+|---|---|---|---|---|---|---|---|
+| `$SPX` | 56 | 32 | 19 | 4 | 1 | 23 | 35 |
+| `$NDX` | 47 | 27 | 15 | 4 | 1 | 23 | 32 |
+| SPY | 34 | 16 | 13 | 4 | 1 | 14 | 19 |
+| QQQ | 33 | 14 | 14 | 4 | 1 | 14 | 19 |
+| IWM | 33 | 14 | 15 | 4 | — | 14 | 18 |
+| NVDA | 25 | 10 | 15 | — | — | 9 | 13 |
+
+**With `expiry_choice`** only that choice's dates are fetched (`fetch_scan_chain(rows=,
+dates=)`: runs consecutive in the listing, each cut to 8 — so monthlies, which are not
+neighbours, are one run each) and the chain is **sliced to them before any builder runs**.
+Calendars therefore pair only within the choice: *Next 30 days* caps a calendar's back
+month at 30 days, and *Monthlies only* pairs monthlies with monthlies. ⚠ **The IV
+reference is always kept.** `_iv_reference_date` finds the expiry the WHOLE scan's
+`extract_atm_iv` would read (nearest 30 DTE inside 7–60, else nearest 30 above 0, the
+earlier on a tie, from today to `dte_max` + 2) and, when the choice leaves it out, fetches
+it beside the choice for `run_iv_analysis` alone, then slices it back out — so the ATM
+IV, the Vol Rank and the daily expected move every candidate is scored against are the
+whole chain's whatever the choice. "Only when no chosen expiry is inside 7–60" would not
+do: *Monthlies only* keeps a 46-day monthly that `extract_atm_iv` would read instead of the
+29-day weekly. A reference that does not load degrades as `options.scan_iv_reference`
+(the analysis falls back to a chosen expiry). **`expiries_failed` counts chosen expiries
+only**, recounted from what the merged chain holds, so it can never exceed
+`expirations_scanned`; if no chosen expiry loaded the answer is `chain_missing`, with no
+price history fetched. A choice holding no expiry in the range returns
+`no_expiries_in_range` with `expirations_scanned` 0 and fetches nothing.
+
+A choice is applied only to a large range: on 30 or fewer expirations, or without
+`ask_if_large`, it is ignored, the whole range is scanned and `expiry_choice` is `None` —
+which is what lets the page send a remembered pick without knowing the count. With no
+expiration list there is nothing to count, so nothing is asked (the single fallback fetch,
+`expiration_count` `None`). An unknown `expiry_choice`, or a non-bool `ask_if_large`, raises
+`ValueError` before any fetch.
 
 `_priced_inside` then drops a structure whose mid-mark price is impossible for its
 payoff. A long butterfly or condor is worth between 0 and its wing at expiry, so its

@@ -2668,7 +2668,8 @@ limit.
 |---|---|
 | Service | `options_svc` (:8211), `swing_scan` command → `cache:options:swing` |
 | Trigger | On demand — press **Scan** |
-| Chain | fetched in groups of up to eight consecutive expirations, four groups at a time — SPY's whole chain timed out at the proxy's 30 s as one request |
+| Chain | fetched in groups of up to eight consecutive expirations, four groups at a time — SPY's whole chain timed out at the proxy's 30 s as one request. A range holding more than 30 expirations asks which to load first |
+| Scan time | whole chain, **All**, market hours: NVDA (25 expirations) ~14 s · SPY (34) ~26 s · $SPX (56) ~40 s. The service runs one command at a time, so a Calculator or Simulator load waits behind a scan |
 
 ### Reading the screen
 
@@ -2688,6 +2689,37 @@ too). Nothing else rescans — change the settings, then press Scan.
   **Conservative** 0.05–0.10, **Balanced** 0.10–0.20 (the default) and **Aggressive**
   0.20–0.30. It is shorthand for the four delta fields under **Advanced**; edit those by
   hand to anything else and the picker shows **Custom**.
+
+**A large chain asks first.** When the range holds **more than 30 expirations**, the
+Finder fetches nothing and asks. One card takes the top picks' place — *$SPX lists 56
+expirations in this range. Choose what to scan:* — with four buttons, each giving the
+expirations it keeps (inside your DTE range) and a rough wait at about 0.75 s an
+expiration, *Next 30 days · 23 · ~17 s*:
+
+| Choice | Keeps |
+|---|---|
+| **Next 30 days** | expirations up to 30 days out |
+| **Next 90 days** | up to 90 days out |
+| **Monthlies only** | Schwab's standard monthly expirations — not weeklies, quarterlies or month-end |
+| **Everything** | every expiration in the range |
+
+A choice holding none is greyed out. Until you pick, the count line reads *56 expirations
+— choose what to scan* and the list *Choose which expirations to scan for $SPX.* The pick
+is **remembered per symbol** while the page is open, so a rescan of $SPX uses it without
+asking; the count line then ends *Scanned 19 of 56 expirations · Monthlies only* beside a
+**Change** link that reopens the card without scanning. A range of 30 or fewer
+expirations never asks and ignores a remembered pick. A pick that holds nothing in the
+range asked for reads *Next 30 days holds no expirations in this range for $SPX — use
+Change to pick another.* Two consequences worth knowing:
+
+- **Only the chosen expirations are built**, so calendars and diagonals pair within them —
+  *Next 30 days* keeps a calendar's later month inside 30 days, and *Monthlies only* pairs
+  monthlies with monthlies.
+- **The volatility read is the whole chain's.** The Vol Rank, the implied volatility and
+  the expected move every candidate is scored against do not change with the pick: the
+  expiration they are read from is fetched for that alone when the pick leaves it out.
+
+The Income Window scans through the same service and never asks.
 
 **Every scan builds all seven strategy groups** — the chips below choose what you see,
 not what is built:
@@ -2715,8 +2747,8 @@ money by definition.
 **How the newer structures are built** — all from the chain the scan already fetched,
 so they cost no extra data:
 
-- **Which expiration** — **every** listed expiration inside your DTE range, each built
-  separately: a scan does not stop at the nearest one. Straddles, strangles,
+- **Which expiration** — **every** listed expiration inside your DTE range (inside the
+  pick, on a large chain), each built separately: a scan does not stop at the nearest one. Straddles, strangles,
   butterflies, the iron butterfly, condors and the share structures skip expirations
   **less than 7 days out**, so with DTE min at 0 none of them is built on a 0–6 day
   expiration, and nothing needs widening for it — the floor applies by itself. A
@@ -2859,14 +2891,16 @@ cheap to sell.* · *No option chain came back for SPY at $764.48.* (a mistyped s
 reads this way too) · *SPY at $764.48 has no expirations in this expiry range.* (nothing
 listed from today to DTE max + 2 days; DTE min is not considered, so expirations that all
 fall below DTE min read as *could not be built* instead) ·
-*No strategies could be built for SPY at $764.48 in this expiry range.* · and, for a
-failed scan, which names the symbol only, *The scan for SPY failed. Check System Status
+*No strategies could be built for SPY at $764.48 in this expiry range.* · for a large
+chain still waiting on a pick, *Choose which expirations to scan for $SPX.* · for a pick
+that holds nothing in the range, *Next 30 days holds no expirations in this range for
+$SPX — use Change to pick another.* · and, for a failed scan, which names the symbol only, *The scan for SPY failed. Check System Status
 and scan again.*
 
 **While a scan runs** the cards become placeholders reading *Scanning SPY…* — the symbol
 asked for, never the previous one — and a spinner counts the seconds, *Scanning SPY…
-12 s*. A whole index chain takes about 20 seconds, so the count is what keeps a long wait
-from reading as a hang. The spinner stays until the answer lands: the service answers
+12 s*. A whole chain takes a while — about 14 s for NVDA, 26 s for SPY and 40 s for $SPX
+— so the count is what keeps a long wait from reading as a hang. The spinner stays until the answer lands: the service answers
 every scan request, a failed one included. Only after **3 minutes** with no answer —
 the service down, say — do the placeholders turn into one still card saying the scan is
 taking longer than expected; a late result still appears, and if nothing arrives, check

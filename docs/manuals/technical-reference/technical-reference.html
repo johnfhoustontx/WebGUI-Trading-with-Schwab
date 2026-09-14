@@ -1496,9 +1496,194 @@ expiration list it falls back to one fetch — bounded to 120 days when the scan
 DTE max (<code>_FALLBACK_MAX_DTE</code>) — and reports <code>expiries_failed = None</code> (not
 counted, which is not zero). Measured 2026-09-14 pre-market: SPY's whole chain (34
 expiries, 12,956 contracts) <strong>timed out at the proxy's 30 s</strong> in one request and took
-6.5 s grouped; <code>$SPX</code> (56 expiries, 25,650 contracts) took 11–12 s to fetch. Building
-every structure on every expiry adds 6.55 s on a synthetic chain of that size
-(calendars about half of it), so a whole <code>$SPX</code> scan takes about 20 s for <code>$SPX</code> (measured on a synthetic chain of that size; live figure pending).</p>
+6.5 s grouped; <code>$SPX</code> (56 expiries, 25,650 contracts) took 11–12 s to fetch. Whole
+scans measured live the same day (~12:30 CT, range <em>All</em>, every expiry, none failed):</p>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Expirations</th>
+<th>Wall time</th>
+<th>Rows published</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NVDA</td>
+<td>25</td>
+<td>13.5 s</td>
+<td>139</td>
+</tr>
+<tr>
+<td>SPY</td>
+<td>34</td>
+<td>25.7–27.4 s</td>
+<td>162–167</td>
+</tr>
+<tr>
+<td><code>$SPX</code></td>
+<td>56</td>
+<td>40.1 s</td>
+<td>69</td>
+</tr>
+</tbody>
+</table>
+<p>The per-type limit of 25 did not bind on any of them. <code>cmd:options</code> is consumed one
+command at a time, so a Calculator or Simulator load enqueued during a <code>$SPX</code> scan waits
+behind it — and those pages' wait overlay gives up at 30 s.</p>
+<p><strong>A large chain asks first (the Strategy Finder, 2026-09-14).</strong> <code>swing_scan</code> lists the
+expirations ONCE (<code>option_expiration_rows</code> → <code>parse_expiration_rows</code>, rows of
+<code>(date, expirationType, dte)</code>) and <code>_plan_fetch</code> decides the fetch before any chain call.
+Each row's DTE is <strong>Schwab's own <code>daysToExpiration</code></strong> — the number Schwab writes into the
+chain keys (<code>"YYYY-MM-DD:dte"</code>) the builders filter on, which differs from the host's
+calendar difference by a day between 23:00 and 24:00 CT, and the fetch asks for exactly
+the chosen dates, so counting on the calendar could silently drop a boundary expiry. The
+calendar difference is used instead when the field is not a non-negative whole number, or
+when it is <strong>more than one day</strong> from the calendar difference (no clock skew explains
+two days, so such a value is a bad field); that second case speaks once per listing as
+the degrade <code>options.expiration_dte</code>. Checked live on SPY and NVDA: the list's
+<code>daysToExpiration</code> matched the chain keys' DTE on every expiry. A date listed twice keeps
+<code>"S"</code> if either row says so.</p>
+<p>The expirations inside <code>dte_min</code>..<code>dte_max</code> (no upper bound for <code>None</code>, never below 0) are
+counted. More than <strong><code>LARGE_CHAIN_EXPIRIES</code> (30)</strong>, with <code>ask_if_large=True</code> — passed by the
+Finder's handler alone; <strong>the Income Window never asks</strong> — and no <code>expiry_choice</code>, and the
+scan returns <code>needs_choice: True</code>, <code>expiration_count</code> and <code>choices</code> <strong>without fetching a
+chain</strong> (<code>expiries_failed</code> 0: nothing was attempted). <code>choice_summary</code> gives one entry per
+<code>EXPIRY_CHOICES</code> key, in order, each counted inside the range:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Label</th>
+<th>Keeps (<code>choice_dates</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>next_30</code></td>
+<td>Next 30 days</td>
+<td>DTE ≤ 30</td>
+</tr>
+<tr>
+<td><code>next_90</code></td>
+<td>Next 90 days</td>
+<td>DTE ≤ 90</td>
+</tr>
+<tr>
+<td><code>monthly</code></td>
+<td>Monthlies only</td>
+<td><code>expirationType == "S"</code> — not <code>W</code> weekly, <code>Q</code> quarterly or <code>M</code> month-end</td>
+</tr>
+<tr>
+<td><code>all</code></td>
+<td>Everything</td>
+<td>all of them</td>
+</tr>
+</tbody>
+</table>
+<p><code>est_seconds</code> is <code>count × SCAN_SEC_PER_EXPIRY</code> (0.75 — live SPY 26 s / 34, <code>$SPX</code> 40 s /
+56), a half rounding <strong>up</strong> (Python's <code>round</code> would take 4.5 to 4). A choice with count 0 is
+still listed. Schwab's types, measured on prod the same day:</p>
+<table>
+<thead>
+<tr>
+<th>Symbol</th>
+<th>Total</th>
+<th>W</th>
+<th>S</th>
+<th>Q</th>
+<th>M</th>
+<th>≤ 30 d</th>
+<th>≤ 90 d</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>$SPX</code></td>
+<td>56</td>
+<td>32</td>
+<td>19</td>
+<td>4</td>
+<td>1</td>
+<td>23</td>
+<td>35</td>
+</tr>
+<tr>
+<td><code>$NDX</code></td>
+<td>47</td>
+<td>27</td>
+<td>15</td>
+<td>4</td>
+<td>1</td>
+<td>23</td>
+<td>32</td>
+</tr>
+<tr>
+<td>SPY</td>
+<td>34</td>
+<td>16</td>
+<td>13</td>
+<td>4</td>
+<td>1</td>
+<td>14</td>
+<td>19</td>
+</tr>
+<tr>
+<td>QQQ</td>
+<td>33</td>
+<td>14</td>
+<td>14</td>
+<td>4</td>
+<td>1</td>
+<td>14</td>
+<td>19</td>
+</tr>
+<tr>
+<td>IWM</td>
+<td>33</td>
+<td>14</td>
+<td>15</td>
+<td>4</td>
+<td>—</td>
+<td>14</td>
+<td>18</td>
+</tr>
+<tr>
+<td>NVDA</td>
+<td>25</td>
+<td>10</td>
+<td>15</td>
+<td>—</td>
+<td>—</td>
+<td>9</td>
+<td>13</td>
+</tr>
+</tbody>
+</table>
+<p><strong>With <code>expiry_choice</code></strong> only that choice's dates are fetched (<code>fetch_scan_chain(rows=,
+dates=)</code>: runs consecutive in the listing, each cut to 8 — so monthlies, which are not
+neighbours, are one run each) and the chain is <strong>sliced to them before any builder runs</strong>.
+Calendars therefore pair only within the choice: <em>Next 30 days</em> caps a calendar's back
+month at 30 days, and <em>Monthlies only</em> pairs monthlies with monthlies. ⚠ <strong>The IV
+reference is always kept.</strong> <code>_iv_reference_date</code> finds the expiry the WHOLE scan's
+<code>extract_atm_iv</code> would read (nearest 30 DTE inside 7–60, else nearest 30 above 0, the
+earlier on a tie, from today to <code>dte_max</code> + 2) and, when the choice leaves it out, fetches
+it beside the choice for <code>run_iv_analysis</code> alone, then slices it back out — so the ATM
+IV, the Vol Rank and the daily expected move every candidate is scored against are the
+whole chain's whatever the choice. "Only when no chosen expiry is inside 7–60" would not
+do: <em>Monthlies only</em> keeps a 46-day monthly that <code>extract_atm_iv</code> would read instead of the
+29-day weekly. A reference that does not load degrades as <code>options.scan_iv_reference</code>
+(the analysis falls back to a chosen expiry). <strong><code>expiries_failed</code> counts chosen expiries
+only</strong>, recounted from what the merged chain holds, so it can never exceed
+<code>expirations_scanned</code>; if no chosen expiry loaded the answer is <code>chain_missing</code>, with no
+price history fetched. A choice holding no expiry in the range returns
+<code>no_expiries_in_range</code> with <code>expirations_scanned</code> 0 and fetches nothing.</p>
+<p>A choice is applied only to a large range: on 30 or fewer expirations, or without
+<code>ask_if_large</code>, it is ignored, the whole range is scanned and <code>expiry_choice</code> is <code>None</code> —
+which is what lets the page send a remembered pick without knowing the count. With no
+expiration list there is nothing to count, so nothing is asked (the single fallback fetch,
+<code>expiration_count</code> <code>None</code>). An unknown <code>expiry_choice</code>, or a non-bool <code>ask_if_large</code>, raises
+<code>ValueError</code> before any fetch.</p>
 <p><code>_priced_inside</code> then drops a structure whose mid-mark price is impossible for its
 payoff. A long butterfly or condor is worth between 0 and its wing at expiry, so its
 <code>net_debit</code> must lie strictly inside <code>(0, wing × 100)</code>; an iron butterfly is that payoff
