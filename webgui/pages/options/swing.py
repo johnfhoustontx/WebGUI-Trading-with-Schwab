@@ -10,7 +10,11 @@ Cache view read: ``options:swing`` →
 ``{signals:[...], view:{...}, filtered_out, vol_filtered, symbol, params}`` - and,
 since the 2026-09-14 whole-chain build, ``spot``, ``not_shown``,
 ``expiries_failed``, ``chain_missing``, ``no_expiries_in_range`` and ``error``
-(the service answers every scan request, a failed one included); each
+(the service answers every scan request, a failed one included) and, for a
+chain listing more than 30 expirations in range, ``needs_choice`` /
+``expiration_count`` / ``expirations_scanned`` / ``choices`` /
+``expiry_choice`` (the chooser - design
+``docs/plans/2026-09-14-strategy-finder-large-chain-chooser-design.md``); each
 signal is the NORMALIZED multi-strategy shape (``legs``, ``net_debit`` /
 ``net_credit``, ``max_profit`` / ``max_loss``, ``pop_pct`` …) plus, since the
 2026-09-13 redesign, ``group`` (which chip it belongs to) and ``payoff_curve``
@@ -93,6 +97,16 @@ SEG_ON = f"{BADGE_ACCENT} px-2.5 min-h-[30px] text-xs font-normal"
 SEG_OFF = (f"bg-transparent text-[{_PALETTE['muted']}] hover:text-[{_PALETTE['title']}] "
            "rounded-[6px] px-2.5 min-h-[30px] text-xs font-normal")
 _FIELD_PROPS = "dense outlined"
+# Both DTE boxes. ``w-20`` clipped DTE max's "no limit" placeholder: the dense
+# outlined field spends 24px on its side padding and Chrome's number spinner
+# about 15px more when it shows, leaving ~41px for text that needs ~46px at 14px.
+# ``w-24`` leaves ~57px. DTE min matches so the pair lines up.
+DTE_BOX = "w-24"
+
+# The summary strip's Change control reads as a link, not a button: flat, no
+# fill, the focus blue, underlined on hover.
+CHANGE_LINK = (f"text-sm text-[{_PALETTE['focus']}] hover:underline font-normal "
+               "px-1 min-h-0")
 
 
 class _Segmented:
@@ -146,17 +160,20 @@ def _blank(value):
     return value is None or (isinstance(value, str) and not value.strip())
 
 
-def scan_params(symbol, dte_min, dte_max, bands, min_credit_pct):
+def scan_params(symbol, dte_min, dte_max, bands, min_credit_pct, expiry_choice=None):
     """The ``swing_scan`` command args.
 
     No ``families``: every scan builds all seven groups (the service's ``None``
     default) and the chips filter them on the page, instantly and without a
-    rescan.
+    rescan. ``expiry_choice`` - which of a large chain's expirations to scan -
+    is sent only when there is one: the key is left out rather than sent as
+    null, so a request with no pick is exactly the request it was before the
+    chooser existed.
     """
     # A blank DTE max is no upper limit: the service fetches every listed expiry.
     # A blank DTE min is 0 - from today - rather than an int(None) that would
     # make Scan silently do nothing.
-    return {
+    params = {
         "symbol": (symbol or "").strip().upper(),
         "dte_min": 0 if _blank(dte_min) else int(dte_min),
         "dte_max": None if _blank(dte_max) else int(dte_max),
@@ -166,6 +183,27 @@ def scan_params(symbol, dte_min, dte_max, bands, min_credit_pct):
         "call_d_max": float(bands["call_d_max"]),
         "min_cr_fraction": pct_to_fraction(min_credit_pct),
     }
+    if expiry_choice is not None:
+        params["expiry_choice"] = expiry_choice
+    return params
+
+
+def answers_request(request, payload):
+    """``finder_view.payload_answers_scan``, and the same ``expiry_choice``.
+
+    The shared guard skips a field the echo lacks, so on its own it would let the
+    plain scan that ASKED paint over the pick waiting after it (or the reverse,
+    in either order). The handler echoes the args verbatim, so an echoed
+    ``params`` without the key means a request that sent none - absent on both
+    sides is the same request. A payload echoing no ``params`` at all can only be
+    matched on its symbol, as before.
+    """
+    if not fv.payload_answers_scan(request, payload):
+        return False
+    echoed = (payload or {}).get("params")
+    if request is None or not isinstance(echoed, dict):
+        return True
+    return request.get("expiry_choice") == echoed.get("expiry_choice")
 
 
 DEFAULT_SYMBOL = "SPY"
@@ -387,12 +425,14 @@ def render():
                             fv.expiry_preset_for(start["dte_min"], start["dte_max"]),
                             lambda v: _on_expiry_choice(v))
                         dte_min = ui.number(value=start["dte_min"], min=0) \
-                            .props(f'{_FIELD_PROPS} aria-label="DTE min"').classes("w-20")
+                            .props(f'{_FIELD_PROPS} aria-label="DTE min"') \
+                            .classes(DTE_BOX)
                         ui.label("to").classes(f"text-xs {MUTED}")
                         # Blank is no upper limit (the All and 1 yr+ presets).
                         dte_max = ui.number(value=start["dte_max"], min=1,
                                             placeholder="no limit") \
-                            .props(f'{_FIELD_PROPS} aria-label="DTE max"').classes("w-20")
+                            .props(f'{_FIELD_PROPS} aria-label="DTE max"') \
+                            .classes(DTE_BOX)
                         ui.label("days").classes(f"text-xs {MUTED}")
                 with ui.column().classes("gap-1"):
                     ui.label("Risk style").classes(EYEBROW)
@@ -459,9 +499,11 @@ def render():
     # waiting); only a payload answering THAT request may replace the placeholders.
     # rows: every visible list row, shapeless; the table holds only the current
     # page of them, with shapes. row_signal: id(row) -> the signal it was built from.
+    # choice_by_symbol: SYMBOL -> the expiry choice picked for its large chain on
+    # this page build; a fresh build starts empty.
     state = {"payload": None, "symbol": None, "active": None, "version": None,
              "scanning": None, "scan_seq": 0, "scan_request": None, "rows": [],
-             "row_signal": {}}
+             "row_signal": {}, "choice_by_symbol": {}}
     # The running count names the request being waited on, read at each tick -
     # never a symbol captured when the spinner was built. The spinner's own
     # deadline sits past SCAN_TIMEOUT_SEC so _scan_timed_out is the one thing
@@ -613,6 +655,24 @@ def render():
             if facts["vol_rank"]:
                 ui.label(facts["vol_rank"]).classes(f"{BADGE_ACCENT} {_PILL}")
             ui.label(facts["counts"]).classes(f"text-sm {MUTED} ml-auto")
+            # Beside the "Scanned N of M" part it explains - and only when the
+            # answer still carries choices to reopen, or Change would open nothing.
+            if facts["can_change"] and _change_facts(payload) is not None:
+                ui.button("Change", color=None).props("flat dense no-caps") \
+                    .classes(CHANGE_LINK).on("click", lambda _e: _reopen_chooser())
+
+    def _change_facts(payload):
+        """The chooser card an applied choice can reopen: the answer's own
+        ``choices``, read as if it had asked. None when it carries none usable."""
+        return fv.chooser_facts({**(payload or {}), "needs_choice": True})
+
+    @guard
+    def _reopen_chooser():
+        # No scan: the pick is what scans. A chip click or a new scan restores the
+        # cards, since both repaint the grid.
+        facts = _change_facts(state["payload"])
+        if facts is not None:
+            _paint_chooser(facts, (state["payload"] or {}).get("symbol"))
 
     @guard
     def _on_chip(code):
@@ -706,6 +766,41 @@ def render():
             for sig in picks:
                 _pick_card(sig)
 
+    def _paint_chooser(facts, symbol):
+        # ONE full-width card in place of the top picks: a large chain answered
+        # with choices before any chain was fetched, so there is nothing to pick
+        # from yet. A choice holding no expirations is drawn, but disabled.
+        picks_grid.clear()
+        with picks_grid:
+            with ui.column().classes(f"{CARD} col-span-full w-full gap-2"):
+                ui.label(facts["title"]).classes(f"text-sm font-bold {LABEL}")
+                ui.label(facts["prompt"]).classes(f"text-sm {MUTED}")
+                with ui.row().classes("items-center gap-2 flex-wrap"):
+                    for b in facts["buttons"]:
+                        btn = ui.button(b["text"], color=None).props("no-caps") \
+                            .classes(BTN)
+                        if b["enabled"]:
+                            btn.on("click", lambda _e, k=b["key"]: _on_pick(symbol, k))
+                        else:
+                            btn.props("disable")
+
+    @guard
+    def _on_pick(symbol, key):
+        # The pick belongs to the chain the card described, so it scans that
+        # symbol even if the box has since been edited - and it is remembered for
+        # that symbol for as long as the page is open (never persisted): scanning
+        # it again sends the same choice rather than asking again.
+        sym = str(symbol or "").strip().upper() or \
+            (symbol_in.value or "").strip().upper()
+        if not sym:
+            return
+        state["choice_by_symbol"][sym] = key
+        if (symbol_in.value or "").strip().upper() != sym:
+            symbol_in.value = sym
+        # The one scan path, so the in-flight dedupe, the spinner, the
+        # placeholders, the stale guard and the timeout all apply to a pick.
+        _request_scan()
+
     def _set_no_data(text):
         # Written to _props directly: a props STRING would be re-parsed, and a
         # quote typed into the symbol box would break it.
@@ -735,9 +830,14 @@ def render():
         """Chips, cards and list from the CACHED payload - no scan."""
         signals = _signals()
         has_scan = bool((state["payload"] or {}).get("symbol"))
-        _paint_chips(signals)
         visible = fv.filter_groups(signals, state["active"])
-        _paint_cards(fv.top_picks(visible))
+        chooser = fv.chooser_facts(state["payload"])
+        if chooser is None:
+            _paint_chips(signals)
+            _paint_cards(fv.top_picks(visible))
+        else:
+            chips_row.clear()
+            _paint_chooser(chooser, (state["payload"] or {}).get("symbol"))
         with _table_batch():
             _set_rows(visible)
             _set_no_data(fv.no_data_label(state["payload"]))
@@ -783,13 +883,17 @@ def render():
 
     @guard
     def _request_scan():
+        sym = (symbol_in.value or "").strip().upper()
         params = scan_params(symbol_in.value, dte_min.value, dte_max.value, _bands(),
-                             mincr.value)
+                             mincr.value,
+                             expiry_choice=state["choice_by_symbol"].get(sym))
         # One user action can reach here twice: typing a symbol then clicking Scan
         # fires the box's focusout scan AND the button's. The service consumes
         # commands one at a time, so an identical second scan would double a
         # whole-chain wait and its Schwab calls. Only while the first is still in
         # flight: after its answer (or the timeout) the same request scans again.
+        # The comparison includes ``expiry_choice``, so a pick is never mistaken
+        # for the plain scan that asked for it.
         if state["scanning"] is not None and params == state["scan_request"]:
             return
         bus_client.request("options", {"type": "swing_scan", "args": params})
@@ -811,7 +915,11 @@ def render():
             table.set_visibility(True)
         empty_line.set_visibility(False)
         scan_busy.show(scanning_text(params["symbol"]))
-        ui.timer(SCAN_TIMEOUT_SEC, lambda: _scan_timed_out(seq), once=True)
+        # Mounted in list_box, which is never cleared: a handler builds in its
+        # SENDER's slot, and a chooser pick's sender was just cleared away with
+        # the grid above - a timer left there would be deleted and never fire.
+        with list_box:
+            ui.timer(SCAN_TIMEOUT_SEC, lambda: _scan_timed_out(seq), once=True)
 
     scan_btn.on_click(_request_scan)
     # Enter OR tab/click-out of the Symbol field triggers the scan (mirrors the Scan
@@ -840,7 +948,7 @@ def render():
             return
         state["version"] = version
         payload = bus_client.read("options:swing")
-        if not fv.payload_answers_scan(state["scan_request"], payload):
+        if not answers_request(state["scan_request"], payload):
             return      # another request's result - keep waiting for ours
         _paint_payload(payload)
 

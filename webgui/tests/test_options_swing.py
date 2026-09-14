@@ -1114,3 +1114,252 @@ def test_the_same_request_after_the_scan_timed_out_may_be_sent_again(monkeypatch
     _click(_buttons(card)["Scan"], card)
     assert len(sent) == 2 and sent[0] == sent[1]
     assert _placeholder_texts(card) == ["Scanning SPY…"] * 4
+
+
+# ------------------------------------------------ the large-chain chooser
+# (docs/plans/2026-09-14-strategy-finder-large-chain-chooser-design.md §2-3)
+
+_CHOICES = [
+    {"key": "next_30", "label": "Next 30 days", "count": 23, "est_seconds": 17},
+    {"key": "next_90", "label": "Next 90 days", "count": 35, "est_seconds": 26},
+    {"key": "monthly", "label": "Monthlies only", "count": 0, "est_seconds": 0},
+    {"key": "all", "label": "Everything", "count": 56, "est_seconds": 42},
+]
+_ASK_PARAMS = {"symbol": "$SPX", "dte_min": 0, "dte_max": None,
+               "put_d_min": -0.25, "put_d_max": -0.15,
+               "call_d_min": 0.15, "call_d_max": 0.25, "min_cr_fraction": 0.10}
+_ASK = {"symbol": "$SPX", "spot": 6512.25, "signals": [], "needs_choice": True,
+        "expiration_count": 56, "choices": _CHOICES, "expiry_choice": None,
+        "params": _ASK_PARAMS}
+_NEXT_90 = "Next 90 days · 35 · ~26 s"
+_ALL_CHAIN = "Everything · 56 · ~42 s"
+
+
+def _chosen(params, **kw):
+    """The answer to a scan that applied ``params['expiry_choice']``."""
+    return {"symbol": params["symbol"], "spot": 6512.25, "signals": [_FLY, _NAKED],
+            "needs_choice": False, "expiration_count": 56, "expirations_scanned": 35,
+            "choices": _CHOICES, "expiry_choice": params.get("expiry_choice"),
+            "params": params, **kw}
+
+
+def _grid(card):
+    (grid,) = [e for e in card.descendants() if "grid" in e._classes]
+    return grid
+
+
+def _chooser_buttons(card):
+    from nicegui import ui
+    return {b.text: b for b in _grid(card).descendants() if isinstance(b, ui.button)}
+
+
+def _summary_labels(card):
+    from nicegui import ui
+    (price,) = [e for e in _widgets(card, ui.label) if e.text == "$6,512.25"]
+    return [e.text for e in price.parent_slot.parent.descendants()
+            if isinstance(e, ui.label)]
+
+
+def _change_buttons(card):
+    from nicegui import ui
+    return [b for b in _widgets(card, ui.button) if getattr(b, "text", "") == "Change"]
+
+
+def test_scan_params_carry_expiry_choice_only_when_one_is_given():
+    base = swing.scan_params("spy", 0, None, _BANDS, 10)
+    assert "expiry_choice" not in base
+    assert "expiry_choice" not in swing.scan_params("spy", 0, None, _BANDS, 10,
+                                                    expiry_choice=None)
+    chosen = swing.scan_params("spy", 0, None, _BANDS, 10, expiry_choice="monthly")
+    assert chosen == {**base, "expiry_choice": "monthly"}
+
+
+def test_the_stale_guard_tolerates_expiry_choice_on_either_side_only():
+    ask = {"symbol": "$SPX", "params": _ASK_PARAMS}
+    # The request sends a choice an older echo does not carry - and the reverse.
+    assert swing.fv.payload_answers_scan({**_ASK_PARAMS, "expiry_choice": "all"}, ask)
+    assert swing.fv.payload_answers_scan(
+        _ASK_PARAMS, {**ask, "params": {**_ASK_PARAMS, "expiry_choice": "all"}})
+    # Both carry one: they must agree.
+    assert not swing.fv.payload_answers_scan(
+        {**_ASK_PARAMS, "expiry_choice": "next_30"},
+        {**ask, "params": {**_ASK_PARAMS, "expiry_choice": "all"}})
+
+
+def test_a_chooser_answer_draws_one_card_of_four_buttons():
+    from nicegui import ui
+    card = _render_page(_ASK)
+    (only,) = list(_grid(card).default_slot.children)
+    assert "col-span-full" in only._classes
+    assert set(swing.CARD.split()) <= set(only._classes)
+    texts = [e.text for e in only.descendants() if isinstance(e, ui.label)]
+    assert texts == ["$SPX lists 56 expirations in this range.", "Choose what to scan:"]
+    buttons = _chooser_buttons(card)
+    assert list(buttons) == ["Next 30 days · 23 · ~17 s", _NEXT_90,
+                             "Monthlies only · 0", _ALL_CHAIN]
+    for text, b in buttons.items():
+        assert set(swing.BTN.split()) <= set(b._classes) and "no-caps" in b.props
+        assert ("disable" in b.props) is (text == "Monthlies only · 0"), text
+    assert not [e for e in only.descendants() if "animate-pulse" in e._classes]
+    # No chips, an empty list that names the choice, and a summary that asks.
+    (table,) = _widgets(card, ui.table)
+    assert table.rows == [] and table.visible
+    assert table.props["no-data-label"] == "Choose which expirations to scan for $SPX."
+    assert not [t for t in _buttons(card) if t.startswith("All ")]
+    assert "56 expirations — choose what to scan" in _summary_labels(card)
+    assert _change_buttons(card) == []
+
+
+def test_a_pick_scans_with_that_choice_and_waits_like_any_scan(monkeypatch):
+    card = _render_page(_ASK)
+    sent = _recording(monkeypatch)
+    _click(_chooser_buttons(card)[_NEXT_90], card)
+    assert sent == [{**_ASK_PARAMS, "expiry_choice": "next_90"}]
+    assert _placeholder_texts(card) == ["Scanning $SPX…"] * 4
+    scrim, _ = _scan_busy(card)
+    assert scrim.visible
+    # The timeout outlives the chooser card it was clicked from.
+    assert len(_scan_timers(card)) == 1
+    _fire_scan_timeout(card)
+    assert not scrim.visible
+    assert _placeholder_texts(card) == ["No result for $SPX yet."]
+
+
+def test_a_chosen_scan_lands_with_the_scanned_line_and_change(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_ASK)
+    sent = _recording(monkeypatch)
+    _click(_chooser_buttons(card)[_NEXT_90], card)
+    _publish(_chosen(sent[-1]))
+    _fire_poll(card)
+    (table,) = _widgets(card, ui.table)
+    assert {r["id"] for r in table.rows} == {"fly", "sp"}
+    assert "2 ideas · Scanned 35 of 56 expirations · Next 90 days" in _summary_labels(card)
+    (change,) = _change_buttons(card)
+    assert "flat" in change.props and "no-caps" in change.props
+
+
+def test_the_pick_is_remembered_for_that_symbol_and_not_for_another(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_ASK)
+    sent = _recording(monkeypatch)
+    _click(_chooser_buttons(card)[_NEXT_90], card)
+    _publish(_chosen(sent[-1]))
+    _fire_poll(card)
+    box = _widgets(card, ui.input)[0]
+    box.value = "$spx"                               # typed lower-case
+    _click(_buttons(card)["Scan"], card)
+    assert sent[-1] == {**_ASK_PARAMS, "expiry_choice": "next_90"}
+    _publish(_chosen(sent[-1]))
+    _fire_poll(card)
+    box.value = "qqq"
+    _click(_buttons(card)["Scan"], card)
+    assert sent[-1]["symbol"] == "QQQ" and "expiry_choice" not in sent[-1]
+
+
+def test_a_fresh_page_remembers_no_pick(monkeypatch):
+    card = _render_page(_ASK)
+    sent = _recording(monkeypatch)
+    _click(_chooser_buttons(card)[_NEXT_90], card)
+    assert sent[-1]["expiry_choice"] == "next_90"
+    card = _render_page(_ASK)
+    _click(_buttons(card)["Scan"], card)
+    assert sent[-1] == _ASK_PARAMS
+
+
+def test_a_pick_scans_the_chooser_s_symbol_even_if_the_box_moved_on(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_ASK)
+    sent = _recording(monkeypatch)
+    box = _widgets(card, ui.input)[0]
+    box.value = "msft"
+    _click(_chooser_buttons(card)[_NEXT_90], card)
+    assert sent[-1] == {**_ASK_PARAMS, "expiry_choice": "next_90"}
+    assert box.value == "$SPX"
+
+
+def test_change_reopens_the_chooser_without_a_scan_and_a_pick_scans(monkeypatch):
+    card = _render_page(_chosen({**_ASK_PARAMS, "expiry_choice": "next_90"}))
+    sent = _recording(monkeypatch)
+    (change,) = _change_buttons(card)
+    _click(change, card)
+    assert sent == []
+    assert list(_chooser_buttons(card)) == ["Next 30 days · 23 · ~17 s", _NEXT_90,
+                                            "Monthlies only · 0", _ALL_CHAIN]
+    _click(_chooser_buttons(card)[_ALL_CHAIN], card)
+    assert sent == [{**_ASK_PARAMS, "expiry_choice": "all"}]
+
+
+def test_no_change_control_without_choices_to_offer():
+    for bad in (None, [], [{"key": "weekly", "count": 3}]):
+        card = _render_page(_chosen({**_ASK_PARAMS, "expiry_choice": "next_90"},
+                                    choices=bad))
+        assert _change_buttons(card) == [], bad
+
+
+def test_a_chooser_answer_for_another_symbol_never_lands_under_a_scan(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    (table,) = _widgets(card, ui.table)
+    _scan(card, monkeypatch, "msft")
+    _publish(_ASK)
+    _fire_poll(card)
+    assert _placeholder_texts(card) == ["Scanning MSFT…"] * 4
+    assert table.props["no-data-label"] == "Scanning MSFT…"
+
+
+def test_a_pick_while_a_scan_without_one_is_in_flight_still_sends(monkeypatch):
+    from nicegui.events import GenericEventArguments
+    card = _render_page(_ASK)
+    sent = _recording(monkeypatch)
+    pick = _chooser_buttons(card)[_NEXT_90]
+    (listener,) = [l for l in pick._event_listeners.values()
+                   if l.type.split(".")[0] == "click"]
+    _click(_buttons(card)["Scan"], card)            # $SPX, no choice, in flight
+    with card:
+        listener.handler(GenericEventArguments(sender=pick, client=card.client, args=None))
+    assert sent == [_ASK_PARAMS, {**_ASK_PARAMS, "expiry_choice": "next_90"}]
+    # ...and the same chosen request again, still in flight, is one scan.
+    _click(_buttons(card)["Scan"], card)
+    assert len(sent) == 2
+
+
+def test_the_dte_boxes_fit_the_no_limit_placeholder_and_align():
+    card = _render_page()
+    for label in ("DTE min", "DTE max"):
+        classes = _number(card, label)._classes
+        assert "w-24" in classes and "w-20" not in classes, label
+
+
+def test_answers_request_needs_the_same_expiry_choice_when_params_are_echoed():
+    plain = dict(_ASK_PARAMS)
+    pick = {**_ASK_PARAMS, "expiry_choice": "next_90"}
+    assert swing.answers_request(pick, _chosen(pick))
+    assert swing.answers_request(plain, _ASK)
+    assert not swing.answers_request(pick, _ASK)                 # the ask, not the pick
+    assert not swing.answers_request(plain, _chosen(pick))       # the pick, not the ask
+    # Everything the shared guard already refuses stays refused.
+    assert not swing.answers_request(pick, {**_chosen(pick), "symbol": "SPY"})
+    # No echo to compare, or nothing waiting: the old behaviour.
+    assert swing.answers_request(pick, {"symbol": "$SPX", "signals": []})
+    assert swing.answers_request(None, _ASK)
+
+
+def test_the_ask_that_preceded_a_pick_never_ends_the_pick_s_wait(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_ASK)
+    sent = _recording(monkeypatch)
+    pick = _chooser_buttons(card)[_NEXT_90]
+    (listener,) = [l for l in pick._event_listeners.values()
+                   if l.type.split(".")[0] == "click"]
+    from nicegui.events import GenericEventArguments
+    _click(_buttons(card)["Scan"], card)            # a plain $SPX scan in flight
+    with card:
+        listener.handler(GenericEventArguments(sender=pick, client=card.client, args=None))
+    _publish({**_ASK, "params": sent[0]})           # the plain scan's answer: it asks
+    _fire_poll(card)
+    assert _placeholder_texts(card) == ["Scanning $SPX…"] * 4
+    _publish(_chosen(sent[1]))
+    _fire_poll(card)
+    (table,) = _widgets(card, ui.table)
+    assert {r["id"] for r in table.rows} == {"fly", "sp"}
