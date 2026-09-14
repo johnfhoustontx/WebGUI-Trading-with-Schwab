@@ -3214,6 +3214,26 @@ ex-dividend *date* anywhere in this repo, only `dividendYield`, so it described 
 test that does not exist. Design:
 [the B5/B7/B8 doc](docs/plans/2026-09-12-position-awareness-design.md).
 
+## The scheduled briefings bill the SUBSCRIPTION, and the API counter counts only the key
+
+**`services/options_svc/claude_cli.py`** runs the four `[slots.analyze]` briefings
+through `claude -p` with `CLAUDE_CODE_OAUTH_TOKEN` rather than the API key, falling back
+per call to the key. It implements `client.messages.create`, so a briefing's prompts,
+parsing and rendering are identical on either path. Everything else that calls Claude
+(Analyze button, Desk summary, driver) is still on the key. Design:
+[the doc](docs/plans/2026-09-14-briefings-on-claude-subscription-design.md).
+
+⚠ **Claude Code prefers `ANTHROPIC_API_KEY` whenever it is set**, so a CLI call from a
+process that carries the key bills the key while every log line says "subscription".
+The child env strips it AND the client refuses any run whose init event reports an
+`apiKeySource` other than `"none"` — keep both if you touch this or add another CLI
+caller. ⚠ **`_count_anthropic_call(client)` skips a client with
+`bills_api_per_call = False`**, and `FallbackClient` counts its own fallback, so
+Settings → API usage is a count of BILLED calls; a new call site must pass its client
+or it will count subscription calls as spend. ⚠ The options_svc conftest makes
+`claude_cli._default_run` raise — the subscription is real money too, and the CLI and
+token ARE installed on the prod box.
+
 ## Observability — a swallowed exception must leave a trace
 
 **`services/_degrade.py` is the house guard-rail for the repo's most expensive bug

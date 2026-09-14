@@ -4,7 +4,29 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-14 (**Strategy Finder — ask before loading a large chain.**
+**Last updated:** 2026-09-14 (**Scheduled gamma briefings run on the Claude subscription.**
+Operator request: keep the briefings' information without the API spend.)
+
+- **What changed.** The four `[slots.analyze]` briefings — 8 billed API calls per
+  trading day (news research + analysis each) — now run both phases through
+  `claude -p` on the subscription via the new `services/options_svc/claude_cli.py`,
+  falling back per call to the API key. Prompts, parsing, overrides and rendering are
+  untouched: the module implements `client.messages.create` and `run_scheduled_gamma_analyze`
+  hands that client to `gamma_analyze` / `eod_briefing` (new optional `news_client`).
+  Ad-hoc Analyze, the Desk summary and the driver stay on the API.
+- **Guards:** API-key env stripped from the child and `apiKeySource` must be `none`;
+  a news answer needs at least one successful `WebSearch`; token only in the env;
+  `_count_anthropic_call(client)` skips `bills_api_per_call = False` so Settings → API
+  usage stays a billed count; the conftest makes the real CLI runner raise.
+- **Switches:** `BRIEFING_ENGINE=api` (options_svc env) turns it off;
+  `CLAUDE_CLI_PATH` / `CLAUDE_CLI_TOKEN_FILE` locate the CLI and token. Absent CLI or
+  token → the API path, unchanged.
+- **Verified:** options_svc **1860 passed**; live on vps2 against prod's compute with
+  nothing cached or pushed — intraday 73 s and EOD 52 s briefings, 4 subscription
+  calls, 0 fallbacks, page layout matching. Design:
+  [2026-09-14-briefings-on-claude-subscription-design](plans/2026-09-14-briefings-on-claude-subscription-design.md).
+
+**Prior —** 2026-09-14 (**Strategy Finder — ask before loading a large chain.**
 Operator request: "Fix the DTE max box and the docs timing. For SPX (and other large
 chains) don't load the complete chain, give me option what to load.")
 

@@ -137,11 +137,16 @@ The proxy owns all Schwab authentication; no other process holds credentials.
 
 | Requirement | Detail | Status |
 |-------------|--------|--------|
-| **`ANTHROPIC_API_KEY`** | Resolution order: the **env var** first, then a gitignored **`shared/anthropic_key.txt`**. Powers the Driver's Claude decision layer, the Gamma **Analyze**/**Explain** infographics + the 4×/day auto-briefings, and the market summary (the ticker and the Desk's Market Summary frame — one sentence, one generator). | Optional |
+| **`ANTHROPIC_API_KEY`** | Resolution order: the **env var** first, then a gitignored **`shared/anthropic_key.txt`**. Powers the Driver's Claude decision layer, the Gamma **Analyze**/**Explain** infographics, the market summary (the ticker and the Desk's Market Summary frame — one sentence, one generator), and the **fallback** for the 4×/day auto-briefings. | Optional |
+| **Claude Code CLI + subscription token** | The 4×/day auto-briefings (both phases — news research and the analysis) run on the **Claude subscription** through `claude -p` instead of the API key, via `services/options_svc/claude_cli.py`. Needs the CLI at **`CLAUDE_CLI_PATH`** (default `~/.local/bin/claude`) and a 600 file at **`CLAUDE_CLI_TOKEN_FILE`** (default `~/.config/neuralstrike/claude.env`) holding `CLAUDE_CODE_OAUTH_TOKEN=…` from `claude setup-token`. **`BRIEFING_ENGINE=api`** in options_svc's environment switches it off. If either is missing the briefings use the API key exactly as before; if a CLI run fails, that one call is repeated on the API key. The ad-hoc **Analyze** button stays on the API key. | Optional |
 
 Without a key those features **degrade safely** — most importantly the autonomous
 driver **stands down rather than trading blind**, and the Gamma infographics render
 a readable "no key" page.
+
+The **Settings → API usage** Claude count is a count of calls **billed to the API
+key**. A briefing call that ran on the subscription is not counted; one that fell
+back to the key is.
 
 ## Data files
 

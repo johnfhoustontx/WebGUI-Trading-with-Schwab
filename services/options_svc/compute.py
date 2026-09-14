@@ -5842,7 +5842,7 @@ def _research_news(label: str, context: str = "", client=None, eod: bool = False
     if context:
         ask += f"\n\nMarket context (already computed, do not re-derive):\n{context}"
     try:
-        _count_anthropic_call()
+        _count_anthropic_call(client)
         resp = client.messages.create(
             model=_NEWS_MODEL,
             max_tokens=_NEWS_MAX_TOKENS,
@@ -6609,19 +6609,27 @@ def analyze_history_doc(briefings, title="Gamma Briefings") -> str:
 
 
 
-def _count_anthropic_call():
+def _count_anthropic_call(client=None):
     """Best-effort per-day Claude-call counter (Settings -> API usage).
 
     Recorded immediately before each ``messages.create`` so every real attempt
     counts and no-key/stand-down paths (which never reach the API) do not.
-    Never raises — counting must not break a Claude call."""
+    Never raises — counting must not break a Claude call.
+
+    A client declaring ``bills_api_per_call = False`` is skipped: the scheduled
+    briefings' ``claude_cli.FallbackClient`` runs on the Claude subscription and
+    records a call itself only when it falls back to the API key, so this count
+    stays a count of BILLED API calls — the number that shows whether the move
+    to the subscription is actually saving anything."""
+    if getattr(client, "bills_api_per_call", True) is False:
+        return
     try:
         from shared import anthropic_counter
         anthropic_counter.record()
     except Exception:  # noqa: BLE001
         pass
 
-def gamma_analyze(client=None, label: str | None = None) -> dict:
+def gamma_analyze(client=None, label: str | None = None, news_client=None) -> dict:
     """Run the bundled SPX/SPY/QQQ briefing through Claude → ``{"html", "prompt"}``.
 
     Fetch each of $SPX/SPY/QQQ, build its analysis blocks (defensive per-symbol →
@@ -6633,6 +6641,8 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
     ``gamma_explain``). ``client`` is injected in tests; in production it is built
     from the resolved API key. ``label`` (e.g. ``"Auto · Premarket · Jun 28 8:01 AM
     CT"``) is appended to the doc subtitle so a scheduled run shows which slot + when.
+    ``news_client`` runs the news phase (``_research_news``); ``None`` keeps its own
+    API-key client. The scheduled slots pass the Claude Code CLI client for both.
 
     Returns ``{"html", "prompt", "analysis"}`` (``analysis`` = the parsed structured
     payload). Every failure surface degrades to a readable HTML page (so the tab
@@ -6707,7 +6717,7 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
         movers = []
     news = []
     try:
-        news = _research_news(label or "intraday") or []
+        news = _research_news(label or "intraday", client=news_client) or []
         _blk = _news_prompt_block(news)
         if _blk:
             prompt = f"{prompt}\n\n{_blk}"
@@ -6724,7 +6734,7 @@ def gamma_analyze(client=None, label: str | None = None) -> dict:
             "prompt": prompt}
 
     try:
-        _count_anthropic_call()
+        _count_anthropic_call(client)
         resp = client.messages.create(
             model=_ANALYZE_MODEL,
             max_tokens=_ANALYZE_MAX_TOKENS,
@@ -7132,7 +7142,7 @@ def _eod_cache_reads() -> tuple:
         return {}, {}, {}
 
 
-def eod_briefing(client=None, label: str | None = None) -> dict:
+def eod_briefing(client=None, label: str | None = None, news_client=None) -> dict:
     """End-of-day RETROSPECTIVE briefing → ``{"html", "prompt", "analysis"}``.
 
     Serves the 15:15 CT ``close`` slot. Same shape and failure discipline as
@@ -7199,7 +7209,7 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
     try:
         ctx = ", ".join(f"{s} {(chains.get(s) or {}).get('underlyingPrice')}"
                         for s in ("$SPX", "SPY", "QQQ") if chains.get(s))
-        news = _research_news(label or "close", context=ctx, eod=True) or []
+        news = _research_news(label or "close", context=ctx, eod=True, client=news_client) or []
         block = _news_prompt_block(news)
         if block:
             prompt = f"{prompt}\n\n{block}"
@@ -7215,7 +7225,7 @@ def eod_briefing(client=None, label: str | None = None) -> dict:
             "on the options service.</p>", subtitle, title=_EOD_TITLE), "prompt": prompt}
 
     try:
-        _count_anthropic_call()
+        _count_anthropic_call(client)
         resp = client.messages.create(
             model=_ANALYZE_MODEL,
             max_tokens=_EOD_MAX_TOKENS,

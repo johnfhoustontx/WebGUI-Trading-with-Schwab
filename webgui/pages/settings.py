@@ -329,8 +329,10 @@ def render():
         ui.label("API usage").classes("text-subtitle1 font-bold")
         ui.label("Outbound Schwab API calls counted at the proxy per actual HTTP "
                  "request (market data + trading, including retries), and Claude "
-                 "(Anthropic) calls counted at each call site (driver decider, "
-                 "Gamma Analyze, ticker summary). Counts accumulate going "
+                 "(Anthropic) API calls counted at each call site (driver decider, "
+                 "Gamma Analyze, ticker summary). The scheduled gamma briefings "
+                 "run on the Claude subscription and count here only when one "
+                 "falls back to the API. Counts accumulate going "
                  "forward.").classes("opacity-70 text-sm")
 
         ui.label("Schwab").classes("text-xs font-bold opacity-80 mt-1")

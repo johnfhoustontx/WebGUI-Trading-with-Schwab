@@ -2731,3 +2731,44 @@ def test_publish_matrix_keeps_every_key_the_pages_read(monkeypatch):
     cached = bus.cache_get("cache:options:matrix").payload
     assert cached == view
     assert cached["error"] == "matrix unavailable"
+
+
+# ── scheduled briefings run on the Claude Code CLI client when one is available ──
+
+def test_scheduled_briefings_use_the_cli_client_for_both_phases(monkeypatch, tmp_path):
+    _isolate_briefing_db(monkeypatch, tmp_path)
+    from services.options_svc import claude_cli
+    bus = Bus(fake=True)
+    cli = object()
+    monkeypatch.setattr(claude_cli, "make_briefing_client", lambda **kw: cli)
+    monkeypatch.setattr(handlers.push_notify, "send_gamma_briefing", lambda *a, **k: None)
+    got = {}
+
+    def _recorder(kind):
+        def _run(**kw):
+            got[kind] = kw
+            return {"html": "x"}
+        return _run
+    monkeypatch.setattr(handlers.compute, "gamma_analyze", _recorder("intraday"))
+    monkeypatch.setattr(handlers.compute, "eod_briefing", _recorder("close"))
+
+    handlers.run_scheduled_gamma_analyze(bus, "midday")
+    handlers.run_scheduled_gamma_analyze(bus, "close")
+
+    for slot in ("intraday", "close"):
+        assert got[slot]["client"] is cli and got[slot]["news_client"] is cli
+
+
+def test_scheduled_briefings_fall_back_to_the_api_path_when_no_cli_client(monkeypatch, tmp_path):
+    _isolate_briefing_db(monkeypatch, tmp_path)
+    from services.options_svc import claude_cli
+    bus = Bus(fake=True)
+    monkeypatch.setattr(claude_cli, "make_briefing_client", lambda **kw: None)
+    monkeypatch.setattr(handlers.push_notify, "send_gamma_briefing", lambda *a, **k: None)
+    got = []
+    monkeypatch.setattr(handlers.compute, "gamma_analyze",
+                        lambda **kw: got.append(kw) or {"html": "x"})
+
+    handlers.run_scheduled_gamma_analyze(bus, "midday")
+
+    assert "client" not in got[0] and "news_client" not in got[0]     # exactly as before

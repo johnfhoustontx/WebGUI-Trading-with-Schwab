@@ -2089,8 +2089,17 @@ def run_scheduled_gamma_analyze(bus, slot) -> None:
     title = ANALYZE_SLOT_TITLES.get(slot, slot)
     hr = (now.strftime("%I").lstrip("0") or "12")  # portable 12-hour (no %-I on Windows)
     label = f"Auto · {title} · {now.strftime('%b %d')} {hr}:{now.strftime('%M %p')} CT"
-    res = (compute.eod_briefing(label=label) if slot == "close"
-           else compute.gamma_analyze(label=label))
+    # Both Claude phases (news + analysis) run on the Claude subscription through
+    # the Claude Code CLI when it is installed, falling back per call to the API
+    # key; with no CLI client the briefing calls exactly as it always did. The
+    # ad-hoc Analyze button deliberately stays on the API (claude_cli docstring).
+    from services.options_svc import claude_cli
+    cli_client = claude_cli.make_briefing_client(
+        api_factory=compute._make_analyze_client,
+        count_api_call=compute._count_anthropic_call)
+    via = {"client": cli_client, "news_client": cli_client} if cli_client else {}
+    res = (compute.eod_briefing(label=label, **via) if slot == "close"
+           else compute.gamma_analyze(label=label, **via))
     res = {**res, "slot": slot, "generated_at": now.isoformat()}
     version = bus.cache_set(CACHE_GAMMA_ANALYZE_SCHED[slot], res)
     bus.publish(EVENT_GAMMA_ANALYZE_SCHED[slot], {"version": version})

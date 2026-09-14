@@ -28,6 +28,14 @@ def _no_live_claude(monkeypatch):
     patched function is ever called. Mirrors ``services/market_svc/tests/conftest.py``.
     """
     monkeypatch.setattr(compute, "_make_analyze_client", lambda: None)
+    # The scheduled briefings' Claude Code CLI path spends the SUBSCRIPTION rather
+    # than the key, but it is just as real — and on the prod box the CLI and its
+    # token are installed. Tests inject their own `run`; the real one must never fire.
+    from services.options_svc import claude_cli
+
+    def _no_real_cli(*a, **k):
+        raise AssertionError("a test reached the real Claude Code CLI")
+    monkeypatch.setattr(claude_cli, "_default_run", _no_real_cli)
 
 
 # Wed 2026-08-12, 10:00 CT: a plain trading day inside the 08:00–15:20 CT

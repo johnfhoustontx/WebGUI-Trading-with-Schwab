@@ -1140,8 +1140,10 @@ Controls the alert chimes, notifications, the ticker, and the app's look.
 - **Appearance** — every color, font, and menu style, editable in-app (tabs of
   clickable color swatches). **Save & restart web GUI** applies the change.
 - **API usage** — how many calls the app made to Schwab (counted at the
-  gateway) and to Claude (counted at each call site), today / this week /
-  this month.
+  gateway) and to the Claude API (counted at each call site), today / this
+  week / this month. The four automatic gamma briefings run on the Claude
+  subscription instead, so they only appear here on a day one falls back to
+  the API.
 - **Maintenance** — **Vacuum GEX history DB** shrinks the intraday options
   database on disk (run it after hours; it locks the file for minutes).
 - **Test sound** also unlocks browser audio (browsers block it until you click

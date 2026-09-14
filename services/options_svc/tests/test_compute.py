@@ -6140,3 +6140,48 @@ def test_sim_run_baseline_is_none_not_zero_when_the_sweep_is_empty(monkeypatch):
     monkeypatch.setattr(eng, "aggregate_position", _agg)
     out = compute.sim_run("SPY", "2026-06-19", "call", 450, "buy", 5, 1.5)
     assert out["whatif_baseline"] is None
+
+
+# ── the scheduled briefings' news phase can run on an injected client ──
+
+def _stub_briefing_inputs(monkeypatch, news_seen):
+    from services.options_svc import compute
+    monkeypatch.setattr(compute, "_gamma_fetch_chain", lambda s: {"underlyingPrice": 100.0})
+    monkeypatch.setattr(compute, "_gamma_blocks_for", lambda s, c: {"sym": s})
+    monkeypatch.setattr(compute, "_session_expected_move", lambda c: 1.0)
+    monkeypatch.setattr(compute, "_eod_session_recap", lambda lv: {})
+    monkeypatch.setattr(compute, "_notable_movers", lambda *a, **k: [])
+
+    def _news(label, context="", client=None, eod=False, now=None):
+        news_seen.append(client)
+        return []
+    monkeypatch.setattr(compute, "_research_news", _news)
+
+
+class _ToolClient:
+    def __init__(self, name):
+        blk = type("B", (), {"type": "tool_use", "name": name,
+                             "input": {"regime": "r", "bias": 0, "headline": "h",
+                                       "narrative": "n", "why": "w", "indices": []}})()
+        resp = type("R", (), {"content": [blk]})()
+        self.messages = type("M", (), {"create": staticmethod(lambda **kw: resp)})()
+
+
+def test_gamma_analyze_hands_news_client_to_the_news_phase(monkeypatch):
+    from services.options_svc import compute
+    seen = []
+    _stub_briefing_inputs(monkeypatch, seen)
+    marker = object()
+    compute.gamma_analyze(client=_ToolClient("submit_analysis"), news_client=marker)
+    assert seen == [marker]
+    compute.gamma_analyze(client=_ToolClient("submit_analysis"))     # the ad-hoc button
+    assert seen[-1] is None                                           # unchanged: API factory
+
+
+def test_eod_briefing_hands_news_client_to_the_news_phase(monkeypatch):
+    from services.options_svc import compute
+    seen = []
+    _stub_briefing_inputs(monkeypatch, seen)
+    marker = object()
+    compute.eod_briefing(client=_ToolClient("submit_eod"), news_client=marker)
+    assert seen == [marker]

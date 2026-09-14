@@ -517,8 +517,10 @@ explains the projected-close overlay and the projected-flip line.
 The view refreshes automatically every two minutes; switching views is instant and
 doesn't re-fetch.
 
-> **Analyze and the automatic briefings call the Claude API**, so they cost money per
-> run. The running count is on the **Settings** page under *API usage*.
+> **Analyze calls the Claude API**, so it costs money per run. **The four automatic
+> briefings run on your Claude subscription** through Claude Code on the server, and
+> fall back to the API only when that fails. The running count of billed API calls is
+> on the **Settings** page under *API usage*.
 
 ## Opportunity Board
 
