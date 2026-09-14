@@ -58,7 +58,8 @@ def test_expiry_text_without_dte_or_with_a_bad_date():
 
 
 def test_expiry_presets_round_trip_and_detect_custom():
-    assert [p[0] for p in fv.EXPIRY_PRESETS] == ["1–2 wk", "2–6 wk", "1–3 mo", "Any"]
+    assert [p[0] for p in fv.EXPIRY_PRESETS] == ["1–2 wk", "2–6 wk", "1–3 mo", "3–12 mo",
+                                                 "1 yr+", "All"]
     for label, lo, hi in fv.EXPIRY_PRESETS:
         assert fv.expiry_preset_for(lo, hi) == label
     assert fv.expiry_preset_for(3, 9) is None
@@ -147,7 +148,7 @@ def test_summary_facts_conviction_bands_and_cheap_premium():
     assert conv(0.67) == ["Conviction high"]
     f = fv.summary_facts({"symbol": "X", "vol_filtered": 3, "signals": []})
     assert f["counts"] == "0 ideas · 3 where premium is too cheap to sell"
-    assert f["price"] is None and f["vol_rank"] is None
+    assert f["price"] == "Price unavailable" and f["vol_rank"] is None
     one = fv.summary_facts({"symbol": "X", "signals": [{"underlying_price": 1.0}]})
     assert one["counts"] == "1 idea"
 
@@ -327,7 +328,7 @@ def test_summary_facts_reports_both_drops_separately():
 
 def test_expiry_range_for_a_preset_and_not_for_anything_else():
     assert fv.expiry_range_for("2–6 wk") == (14, 42)
-    assert fv.expiry_range_for("Any") == (0, 120)
+    assert fv.expiry_range_for("All") == (0, None)
     assert fv.expiry_range_for(None) is None
     assert fv.expiry_range_for("Custom") is None
 
@@ -651,7 +652,7 @@ def test_scan_controls_follow_the_cached_params():
 
 
 def test_scan_controls_default_with_nothing_cached():
-    want = {"dte_min": 0, "dte_max": 120, **fv.risk_bands(fv.RISK_DEFAULT),
+    want = {"dte_min": 0, "dte_max": None, **fv.risk_bands(fv.RISK_DEFAULT),
             "min_credit_pct": 10.0}
     for payload in (None, {}, {"symbol": "SPY"}, {"params": None},
                     {"params": "junk"}, {"params": {}}):
@@ -664,7 +665,7 @@ def test_the_credit_floor_converts_without_float_noise():
 
 
 def test_a_bad_dte_pair_falls_back_as_a_pair():
-    default = (0, 120)
+    default = (0, None)
     for dte in ({"dte_min": 7}, {"dte_max": 14},
                 {"dte_min": 30, "dte_max": 7},
                 {"dte_min": -1, "dte_max": 14},
@@ -704,3 +705,236 @@ def test_a_bad_credit_floor_falls_back_alone():
         got = fv.scan_controls_from({"params": {**_PAGE_PARAMS, "min_cr_fraction": frac}})
         assert got["min_credit_pct"] == 10.0
         assert got["dte_min"] == 7            # the other groups still follow
+
+
+# ------------------------------------------------ the whole chain (2026-09-14)
+# Design: docs/plans/2026-09-14-strategy-finder-whole-chain-design.md
+
+def test_presets_reach_past_120_days_and_all_has_no_upper_limit():
+    assert fv.EXPIRY_PRESETS == [("1–2 wk", 7, 14), ("2–6 wk", 14, 42),
+                                 ("1–3 mo", 30, 90), ("3–12 mo", 90, 365),
+                                 ("1 yr+", 365, None), ("All", 0, None)]
+    for label, lo, hi in fv.EXPIRY_PRESETS:
+        assert fv.expiry_range_for(label) == (lo, hi)
+        assert fv.expiry_preset_for(lo, hi) == label
+    assert fv.expiry_preset_for(0, None) == "All"
+    assert fv.expiry_preset_for(365, None) == "1 yr+"
+    assert fv.DEFAULT_DTE == (0, None)
+
+
+def test_the_old_any_range_is_now_a_hand_typed_range():
+    assert fv.expiry_preset_for(0, 120) is None
+    assert fv.expiry_range_for("Any") is None
+
+
+def test_an_unreadable_upper_bound_is_not_no_limit():
+    """Only a real absence means no limit; junk in the field matches no preset."""
+    assert fv.expiry_preset_for(0, float("nan")) is None
+    assert fv.expiry_preset_for(0, "junk") is None
+    assert fv.expiry_preset_for(None, None) is None
+
+
+def _dte(got):
+    return got["dte_min"], got["dte_max"]
+
+
+def test_scan_controls_follow_a_cached_scan_with_no_upper_limit():
+    assert _dte(fv.scan_controls_from({"params": {"dte_min": 0, "dte_max": None}})) == (0, None)
+    assert _dte(fv.scan_controls_from({"params": {"dte_min": 90, "dte_max": None}})) == (90, None)
+    got = fv.scan_controls_from({"params": {"dte_min": 365.0, "dte_max": None}})
+    assert _dte(got) == (365, None) and isinstance(got["dte_min"], int)
+    assert fv.expiry_preset_for(*_dte(got)) == "1 yr+"
+
+
+def test_no_upper_limit_still_needs_a_whole_lower_bound():
+    for dte in ({"dte_max": None}, {"dte_min": None, "dte_max": None},
+                {"dte_min": -1, "dte_max": None}, {"dte_min": 7.5, "dte_max": None},
+                {"dte_min": float("nan"), "dte_max": None},
+                {"dte_min": True, "dte_max": None},
+                {"dte_min": 7}):                  # a MISSING max is not no limit
+        assert _dte(fv.scan_controls_from({"params": dte})) == (0, None), dte
+
+
+def test_payload_answers_a_scan_with_no_upper_limit():
+    want = {"symbol": "SPY", "dte_min": 0, "dte_max": None}
+    assert fv.payload_answers_scan(want, {"symbol": "SPY", "params": dict(want)}) is True
+    assert fv.payload_answers_scan(want, {"symbol": "SPY",
+                                          "params": {**want, "dte_max": 120}}) is False
+    assert fv.payload_answers_scan({**want, "dte_max": 120},
+                                   {"symbol": "SPY", "params": want}) is False
+
+
+# -------------------------------------------------------------------- earnings
+
+def _this_year(month_day):
+    import datetime
+    return f"{datetime.date.today().year}-{month_day}"
+
+
+def test_earnings_text_names_the_report_date():
+    import datetime
+    sig = {"spans_earnings": True, "earnings_date": "2026-11-19"}
+    assert fv.earnings_text(sig, today=datetime.date(2026, 9, 14)) == "Earnings Nov 19"
+
+
+def test_earnings_text_names_the_year_when_the_report_is_in_another_year():
+    import datetime
+    sig = {"spans_earnings": True, "earnings_date": "2027-01-22"}
+    assert fv.earnings_text(sig, today=datetime.date(2026, 9, 14)) == (
+        "Earnings Jan 22, 2027")
+
+
+def test_earnings_text_is_none_without_a_stamp_or_a_date():
+    import datetime
+    today = datetime.date(2026, 9, 14)
+    assert fv.earnings_text({"earnings_date": "2026-11-19"}, today=today) is None
+    assert fv.earnings_text({"spans_earnings": False, "earnings_date": "2026-11-19"},
+                            today=today) is None
+    # earnings_status rides on EVERY row; it is not the stamp.
+    assert fv.earnings_text({"earnings_status": "found", "earnings_date": "2026-11-19"},
+                            today=today) is None
+    for bad in (None, "", "garbage", 20261119):
+        assert fv.earnings_text({"spans_earnings": True, "earnings_date": bad},
+                                today=today) is None
+    assert fv.earnings_text({"spans_earnings": True}, today=today) is None
+    assert fv.earnings_text(None) is None
+
+
+def test_card_and_row_carry_the_earnings_tag():
+    stamped = {**_FLY, "spans_earnings": True, "earnings_date": _this_year("11-19")}
+    assert fv.card_facts(stamped)["earnings"] == "Earnings Nov 19"
+    assert fv.finder_rows([stamped], **_HOOKS)[0]["earnings"] == "Earnings Nov 19"
+    assert fv.card_facts(_FLY)["earnings"] is None
+    assert fv.finder_rows([_FLY], **_HOOKS)[0]["earnings"] is None
+
+
+# ------------------------------------------------------ price on every answer
+
+def test_summary_shows_the_spot_on_a_zero_idea_answer():
+    f = fv.summary_facts({"symbol": "SPY", "signals": [], "spot": 764.48,
+                          "filtered_out": 18})
+    assert f["price"] == "$764.48"
+    assert f["counts"] == "0 ideas · 18 below the quality bar"
+
+
+def test_summary_price_prefers_the_payload_spot_over_a_row():
+    f = fv.summary_facts({"symbol": "SPY", "spot": 764.48,
+                          "signals": [{"underlying_price": 700.0}]})
+    assert f["price"] == "$764.48"
+    # A payload written before spot existed still takes the first row's price.
+    old = fv.summary_facts({"symbol": "SPY", "signals": [{"underlying_price": 700.0}]})
+    assert old["price"] == "$700.00"
+
+
+def test_summary_says_price_unavailable_never_a_zero():
+    for spot in (None, float("nan"), "junk", True):
+        f = fv.summary_facts({"symbol": "SPY", "signals": [], "spot": spot})
+        assert f["price"] == "Price unavailable", spot
+    f = fv.summary_facts({"symbol": "SPY", "spot": float("nan"),
+                          "signals": [{"underlying_price": float("nan")}]})
+    assert f["price"] == "Price unavailable"
+
+
+def test_summary_counts_expirations_that_could_not_be_loaded():
+    base = {"symbol": "SPY", "signals": [{"id": "a"}]}
+    assert fv.summary_facts({**base, "expiries_failed": 3})["counts"] == (
+        "1 idea · 3 expirations could not be loaded")
+    assert fv.summary_facts({**base, "expiries_failed": 1})["counts"] == (
+        "1 idea · 1 expiration could not be loaded")
+    # None is "not counted", not zero: no line either way.
+    for n in (None, 0):
+        assert fv.summary_facts({**base, "expiries_failed": n})["counts"] == "1 idea"
+
+
+def test_summary_counts_the_ideas_not_shown():
+    base = {"symbol": "$SPX", "signals": [{"id": "a"}]}
+    assert fv.summary_facts({**base, "not_shown": 1040})["counts"] == (
+        "1 idea · 1,040 lower-scoring ideas not shown")
+    assert fv.summary_facts({**base, "not_shown": 1})["counts"] == (
+        "1 idea · 1 lower-scoring idea not shown")
+    assert fv.summary_facts({**base, "not_shown": 0})["counts"] == "1 idea"
+
+
+def test_summary_counts_every_reason_in_order():
+    f = fv.summary_facts({"symbol": "SPY", "signals": [{"id": "a"}] * 2,
+                          "filtered_out": 18, "vol_filtered": 2, "not_shown": 5,
+                          "expiries_failed": 2})
+    assert f["counts"] == ("2 ideas · 18 below the quality bar · "
+                           "2 where premium is too cheap to sell · "
+                           "5 lower-scoring ideas not shown · "
+                           "2 expirations could not be loaded")
+
+
+# ---------------------------------------------------------- the empty answer
+
+_SPY = {"symbol": "SPY", "signals": [], "spot": 764.48}
+
+
+def test_no_data_label_a_failed_scan_comes_first():
+    for err in ("TypeError", "ConnectionError"):
+        p = {**_SPY, "error": err, "chain_missing": True, "filtered_out": 3}
+        assert fv.no_data_label(p) == (
+            "The scan for SPY failed. Check System Status and scan again.")
+    # A falsy error is no error.
+    assert "failed" not in fv.no_data_label({**_SPY, "error": ""})
+
+
+def test_no_data_label_no_chain():
+    p = {**_SPY, "chain_missing": True, "no_expiries_in_range": True, "filtered_out": 3}
+    assert fv.no_data_label(p) == "No option chain came back for SPY at $764.48."
+
+
+def test_no_data_label_no_expiries_in_range():
+    p = {**_SPY, "no_expiries_in_range": True, "filtered_out": 3}
+    assert fv.no_data_label(p) == "SPY at $764.48 has no expirations in this range."
+
+
+def test_no_data_label_quality_cut_names_symbol_and_price():
+    p = {**_SPY, "filtered_out": 4, "vol_filtered": 2}
+    assert fv.no_data_label(p) == "No strategies cleared the quality bar for SPY at $764.48."
+
+
+def test_no_data_label_too_cheap_names_symbol_and_price():
+    assert fv.no_data_label({**_SPY, "vol_filtered": 3}) == (
+        "No strategies for SPY at $764.48 — premium is too cheap to sell.")
+
+
+def test_no_data_label_built_nothing_names_symbol_and_price():
+    assert fv.no_data_label(_SPY) == (
+        "No strategies could be built for SPY at $764.48 in this expiry range.")
+
+
+def test_no_data_label_without_a_price_names_the_symbol_alone():
+    bare = {"symbol": "SPY", "signals": [], "spot": None}
+    assert fv.no_data_label({**bare, "chain_missing": True}) == (
+        "No option chain came back for SPY.")
+    assert fv.no_data_label({**bare, "no_expiries_in_range": True}) == (
+        "SPY has no expirations in this range.")
+    assert fv.no_data_label({**bare, "filtered_out": 1}) == (
+        "No strategies cleared the quality bar for SPY.")
+    assert fv.no_data_label({**bare, "vol_filtered": 1}) == (
+        "No strategies for SPY — premium is too cheap to sell.")
+    assert fv.no_data_label({**bare, "spot": float("nan")}) == (
+        "No strategies could be built for SPY in this expiry range.")
+
+
+def test_no_data_label_without_a_symbol_keeps_the_generic_sentences():
+    assert fv.no_data_label({"error": "TypeError"}) == (
+        "The scan failed. Check System Status and scan again.")
+    assert fv.no_data_label({"chain_missing": True, "spot": 1.0}) == (
+        "No option chain came back for this symbol.")
+    assert fv.no_data_label({"no_expiries_in_range": True}) == (
+        "This symbol has no expirations in this range.")
+
+
+# ----------------------------------------------------------- the running count
+
+def test_scan_timeout_text_counts_whole_seconds():
+    assert fv.scan_timeout_text("SPY", 12) == "Scanning SPY… 12 s"
+    assert fv.scan_timeout_text("SPY", 12.9) == "Scanning SPY… 12 s"
+    assert fv.scan_timeout_text(" $spx ", 0.2) == "Scanning $SPX… 0 s"
+    assert fv.scan_timeout_text("", 31) == "Scanning… 31 s"
+    assert fv.scan_timeout_text(None, 31) == "Scanning… 31 s"
+    assert fv.scan_timeout_text("SPY", -1) == "Scanning SPY… 0 s"
+    assert fv.scan_timeout_text("SPY", float("nan")) == "Scanning SPY…"
+    assert fv.scan_timeout_text("SPY", None) == "Scanning SPY…"

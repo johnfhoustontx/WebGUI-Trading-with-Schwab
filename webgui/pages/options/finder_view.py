@@ -116,14 +116,43 @@ def expiry_text(sig):
     return text
 
 
+def earnings_text(sig, today=None):
+    """``"Earnings Nov 19"`` for a candidate the service stamped as holding through
+    an earnings report, else None.
+
+    Keyed on ``spans_earnings`` alone - ``earnings_status`` rides on EVERY row (it
+    names the calendar coverage the scan got, not a conflict). The year is added
+    only when the report falls in another calendar year than ``today``
+    (``"Earnings Jan 22, 2027"``). A stamp with no readable date is no tag: a
+    warning that cannot say when is not one.
+    """
+    s = sig or {}
+    if not s.get("spans_earnings"):
+        return None
+    raw = s.get("earnings_date")
+    if not isinstance(raw, str):
+        return None
+    try:
+        d = _dt.date.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+    text = f"Earnings {_MONTHS[d.month - 1]} {d.day}"
+    if d.year != (today or _dt.date.today()).year:
+        text += f", {d.year}"
+    return text
+
+
 # ------------------------------------------------------------------------ presets
 
-# (label, DTE min, DTE max). "Any" is the DTE inputs' own full range.
+# (label, DTE min, DTE max). A max of None is no upper limit: the scan command
+# carries ``dte_max: null`` and the service fetches every listed expiry.
 EXPIRY_PRESETS = [
     ("1–2 wk", 7, 14),
     ("2–6 wk", 14, 42),
     ("1–3 mo", 30, 90),
-    ("Any", 0, 120),
+    ("3–12 mo", 90, 365),
+    ("1 yr+", 365, None),
+    ("All", 0, None),
 ]
 
 
@@ -137,8 +166,15 @@ def expiry_range_for(label):
 
 
 def expiry_preset_for(lo, hi):
-    """The preset label a DTE range matches, or None when it is hand-edited."""
-    a, b = _fmt.num(lo), _fmt.num(hi)
+    """The preset label a DTE range matches, or None when it is hand-edited.
+
+    Only a real ``None`` upper bound matches a no-limit preset: junk in the field
+    (NaN, text) is not "no limit" and matches nothing.
+    """
+    a = _fmt.num(lo)
+    b = None if hi is None else _fmt.num(hi)
+    if a is None or (hi is not None and b is None):
+        return None
     for label, p_lo, p_hi in EXPIRY_PRESETS:
         if a == p_lo and b == p_hi:
             return label
@@ -187,7 +223,7 @@ def bands_for_choice(choice):
     return risk_bands(choice) if choice in RISK_STYLES else None
 
 
-DEFAULT_DTE = expiry_range_for("Any")
+DEFAULT_DTE = expiry_range_for("All")
 DEFAULT_MIN_CREDIT_PCT = 10.0
 BAND_KEYS = ("put_d_min", "put_d_max", "call_d_min", "call_d_max")
 
@@ -198,7 +234,9 @@ def scan_controls_from(payload):
     describes a different scan than the ideas under it.
 
     Three groups, each falling back to the page's own default AS A GROUP: a DTE
-    pair must be two whole days, ``0 <= min <= max`` and ``max >= 1``; the four
+    pair must be two whole days, ``0 <= min <= max`` and ``max >= 1`` - or a whole
+    ``min >= 0`` with ``dte_max`` explicitly None, which is no upper limit (a
+    MISSING ``dte_max`` is not, and falls back like any bad pair); the four
     delta bands must all be real numbers; the credit floor must be a
     non-negative fraction. A missing key falls back to the PAGE default, not the
     service's - every scan the page sends carries every key, so only a scan
@@ -212,8 +250,10 @@ def scan_controls_from(payload):
     out = {}
 
     lo, hi = _fmt.num(params.get("dte_min")), _fmt.num(params.get("dte_max"))
-    whole = lo is not None and hi is not None and lo == int(lo) and hi == int(hi)
-    if whole and 0 <= lo <= hi and hi >= 1:
+    lo_ok = lo is not None and lo == int(lo) and lo >= 0
+    if lo_ok and "dte_max" in params and params["dte_max"] is None:
+        out["dte_min"], out["dte_max"] = int(lo), None
+    elif lo_ok and hi is not None and hi == int(hi) and lo <= hi and hi >= 1:
         out["dte_min"], out["dte_max"] = int(lo), int(hi)
     else:
         out["dte_min"], out["dte_max"] = DEFAULT_DTE
@@ -383,15 +423,66 @@ def payload_answers_scan(scan, payload):
     return True
 
 
+def _spot(payload):
+    """The answer's price: the payload's ``spot``, else the first row's
+    ``underlying_price`` (a payload written before ``spot`` existed), else None."""
+    p = payload or {}
+    spot = _fmt.num(p.get("spot"))
+    if spot is None:
+        first = next((s for s in (p.get("signals") or []) if s), {})
+        spot = _fmt.num(first.get("underlying_price"))
+    return spot
+
+
+PRICE_UNAVAILABLE = "Price unavailable"
+
+
 def no_data_label(payload):
     """What the empty list says after a scan that returned no rows - the reason,
-    in the page's voice, rather than Quasar's "No data available"."""
+    in the page's voice, rather than Quasar's "No data available".
+
+    It names the symbol and the price, so an empty list reads as an answer about
+    THIS symbol and not a page that failed to load. Precedence: a failed scan
+    (``error`` is the exception's class name - tested for truthiness) · no chain
+    came back · no expirations in the range · the quality cut · premium too cheap
+    to sell · nothing could be built. Without a price the symbol stands alone;
+    with no symbol at all the sentences fall back to "this symbol".
+    """
     p = payload or {}
+    symbol = str(p.get("symbol") or "").strip()
+    spot = _spot(p)
+    at = "" if spot is None else f" at ${spot:,.2f}"
+    who = f"{symbol}{at}" if symbol else "this symbol"
+
+    if p.get("error"):
+        return (f"The scan for {symbol} failed." if symbol else "The scan failed.") + \
+            " Check System Status and scan again."
+    if p.get("chain_missing"):
+        return f"No option chain came back for {who}."
+    if p.get("no_expiries_in_range"):
+        return f"{who if symbol else 'This symbol'} has no expirations in this range."
     if _fmt.num(p.get("filtered_out")):
-        return "No strategies cleared the quality bar for this symbol."
+        return f"No strategies cleared the quality bar for {who}."
     if _fmt.num(p.get("vol_filtered")):
-        return "No strategies to show — premium is too cheap to sell for this symbol."
-    return "No strategies could be built for this symbol in this expiry range."
+        if not symbol:
+            return "No strategies to show — premium is too cheap to sell for this symbol."
+        return f"No strategies for {who} — premium is too cheap to sell."
+    return f"No strategies could be built for {who} in this expiry range."
+
+
+def scan_timeout_text(symbol, seconds):
+    """The spinner's running count while a scan runs: ``"Scanning SPY… 12 s"``.
+
+    Whole seconds, rounded down. A whole-chain index scan legitimately takes
+    10-15 s, so the count is what keeps a long wait from reading as a hang. An
+    unreadable count drops the number rather than printing one it did not read.
+    """
+    sym = str(symbol or "").strip().upper()
+    head = f"Scanning {sym}…" if sym else "Scanning…"
+    sec = _fmt.num(seconds)
+    if sec is None:
+        return head
+    return f"{head} {max(0, int(_math.floor(sec)))} s"
 
 
 def summary_facts(payload):
@@ -417,8 +508,10 @@ def summary_facts(payload):
     signals = [s for s in (p.get("signals") or []) if s]
     first = signals[0] if signals else {}
 
-    spot = _fmt.num(first.get("underlying_price"))
-    price = None if spot is None else f"${spot:,.2f}"
+    # Every answer shows a price - an empty one too, so it reads as an answer -
+    # and a missing reading says so in words, never as $0.00.
+    spot = _spot(p)
+    price = PRICE_UNAVAILABLE if spot is None else f"${spot:,.2f}"
 
     view = p.get("view") or {}
     pills = []
@@ -434,13 +527,23 @@ def summary_facts(payload):
     vol_rank = None if rank is None else f"Vol Rank {_half_up(rank)}"
 
     n = len(signals)
-    parts = [f"{n} idea" if n == 1 else f"{n} ideas"]
+    parts = [f"{n:,} idea" if n == 1 else f"{n:,} ideas"]
     below = _fmt.num(p.get("filtered_out"))
     if below:
-        parts.append(f"{int(below)} below the quality bar")
+        parts.append(f"{int(below):,} below the quality bar")
     cheap = _fmt.num(p.get("vol_filtered"))
     if cheap:
-        parts.append(f"{int(cheap)} where premium is too cheap to sell")
+        parts.append(f"{int(cheap):,} where premium is too cheap to sell")
+    # The service keeps the best 25 of each strategy type; the rest are counted.
+    hidden = _fmt.num(p.get("not_shown"))
+    if hidden:
+        parts.append(f"{int(hidden):,} lower-scoring idea{'' if hidden == 1 else 's'} "
+                     "not shown")
+    # None is "not counted", which is not zero - both add no line.
+    failed = _fmt.num(p.get("expiries_failed"))
+    if failed:
+        parts.append(f"{int(failed):,} expiration{'' if failed == 1 else 's'} "
+                     "could not be loaded")
 
     return {"symbol": symbol, "price": price, "pills": pills,
             "vol_rank": vol_rank, "counts": " · ".join(parts)}
@@ -747,6 +850,7 @@ def finder_rows(signals, *, score_class, grade_class, paper_types, legs_text):
             "composite_score": score,
             "strikes": _unbroken_legs(legs_text(s.get("legs"))),
             "expiry": expiry_text(s),
+            "earnings": earnings_text(s),
             "cost": cost_text(s),
             "max_profit": profit_text,
             "max_loss": loss_text,
@@ -787,6 +891,7 @@ def card_facts(sig):
         "score_text": _score_text(score),
         "grade": s.get("grade") or "",
         "expiry": expiry_text(s),
+        "earnings": earnings_text(s),
         "cost": cost_text(s),
         # A card is ~300px wide; the list keeps its 72x20 shape.
         "payoff_svg": payoff_svg(s.get("payoff_curve"), s.get("underlying_price"),
