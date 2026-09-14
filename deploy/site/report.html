@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NeuralStrike — Market report</title>
+<meta name="description" content="The latest NeuralStrike market assessment: the macro view down to the ten largest names, updated five times through the trading day.">
+<meta name="theme-color" content="#161826">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="stylesheet" href="assets/nocturne.css">
+<link rel="stylesheet" href="assets/site.css">
+
+<!--
+  MARKET REPORT — a frame around the latest market assessment.
+
+  The report itself is reports/latest.html, which is NOT in git. The five daily
+  reports are written on the operator's workstation (outside this repo) and
+  uploaded into deploy/site/reports/ on the box that serves this file, so the
+  directory is gitignored exactly like live/*.webp: tracked, the first upload
+  would dirty prod's tree and tools/promote.sh refuses a dirty tree.
+
+  ── WHY A FRAME ─────────────────────────────────────────────────────────────
+  The report is a self-contained document with its own stylesheet, drawn to be
+  printed as a PDF. Inlining it into this page would put two stylesheets over
+  one DOM; generating this page around it would move the site's nav into a
+  generator outside the repo, where nothing here could test it. A same-origin
+  frame keeps the nav in this tracked file and the report whole. It loads
+  nothing off-origin and runs no script — the frame scrolls on its own.
+
+  ── NO TIMESTAMP HERE, DELIBERATELY ─────────────────────────────────────────
+  Same reason as live.html: this file is served long after anything it could
+  say. The report carries its own time stamp in its header.
+-->
+</head>
+
+<body>
+<div class="ns-page-sub ns-live-page">
+
+  <nav class="ns-nav">
+    <a class="ns-lockup" href="index.html">
+      <svg class="ns-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <rect x="5" y="30.75" width="54" height="2.5" rx="1.25" class="ns-mark-rule"/>
+        <path d="M20 11 L32 23 L44 11" class="ns-mark-fig" stroke-width="4.6"/>
+        <path d="M20 53 L32 41 L44 53" class="ns-mark-fig" stroke-width="6.2"/>
+      </svg>
+      <span class="ns-brand">Neural<span class="ns-brand-b">Strike</span></span>
+    </a>
+    <span class="ns-crumb">/ Market report</span>
+    <span class="ns-spacer"></span>
+    <a class="ns-navlink" href="glossary.html">Glossary</a>
+    <a class="ns-navlink" href="gallery.html">Gallery</a>
+    <a class="ns-navlink" href="live.html">Live screens</a>
+    <a class="btn btn-ghost btn-outline" href="index.html">Back to overview</a>
+  </nav>
+
+  <main class="ns-live-main ns-report-main">
+    <div class="ns-live-head ns-report-head">
+      <p class="ns-eyebrow">Market report</p>
+      <h1 class="ns-live-title">The latest read on the market.</h1>
+      <p class="ns-live-lede">
+        From the macro view down to the ten largest names, with calls and the confidence behind
+        them. Rewritten five times each trading day — pre-market, the open, after the first hour,
+        at lunch and at the close — and each report grades the ones before it.
+      </p>
+      <p class="ns-report-links">
+        <a href="reports/latest.html">Open the report on its own page</a>
+      </p>
+    </div>
+
+    <iframe class="ns-report-frame" src="reports/latest.html"
+            title="The latest NeuralStrike market report"></iframe>
+  </main>
+
+</div>
+</body>
+</html>

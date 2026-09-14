@@ -982,3 +982,31 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
   color: color-mix(in srgb, var(--color-text) 60%, transparent);
 }
 .ns-live-foot { padding: 0 clamp(20px, 5vw, 72px) 40px; }
+
+/* ─── Market report ──────────────────────────────────────────────────────
+ *
+ * report.html frames reports/latest.html, a self-contained document uploaded
+ * after each scheduled report (see that page's header comment). The frame
+ * scrolls on its own and is sized to the viewport rather than to its content:
+ * matching the content height would need a script, and this site runs none
+ * it does not have to.
+ */
+.ns-report-main { padding-top: clamp(22px, 3.5vw, 44px); }
+.ns-report-head { margin-bottom: clamp(18px, 3vw, 28px); }
+/* Shorter than the live grid's title: here the page's content is the frame
+ * below it, and a hero-sized heading pushes the report under the fold. */
+.ns-report-head .ns-live-title { font-size: clamp(26px, 3vw, 38px); margin-bottom: 12px; }
+.ns-report-head .ns-live-lede { font-size: 15px; }
+.ns-report-links {
+  margin: 14px 0 0;
+  font-size: 14px;
+}
+.ns-report-frame {
+  display: block;
+  width: 100%;
+  max-width: 1100px;
+  height: max(640px, calc(100vh - 140px));
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md);
+  background: #070a14;             /* the report's own ground, so it never flashes white */
+}

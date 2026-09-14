@@ -155,8 +155,10 @@ def test_the_site_directory_holds_nothing_but_site_assets():
     ``deploy/tests/`` instead. **Nothing that is not served belongs under this
     directory**, however natural its placement looks.
     """
+    # ⚠ ``.pdf`` was added on 2026-09-14 for the market reports' downloads,
+    # uploaded into reports/ on the box. Same deliberation as .woff2 above.
     allowed = {".html", ".css", ".js", ".svg", ".png", ".jpg", ".ico", ".webp",
-               ".txt", ".woff2"}
+               ".txt", ".woff2", ".pdf"}
     root = pathlib.Path(repo_paths.SITE_ROOT)
     # Not vacuous: an empty or missing served root would pass every assertion
     # below while Caddy served a 404 for the whole public site.

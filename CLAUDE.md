@@ -724,6 +724,10 @@ heatmap, silently**, because a missing history key reads as "no history yet".
 ⚠ **`deploy/site/live/*.webp` is generated, gitignored state under `SITE_ROOT`** — the
 same shape as `webgui/data/`. Committed, the captures would dirty prod's tree the
 moment the capture timer first fires, and **`tools/promote.sh` refuses a dirty tree.**
+**`deploy/site/reports/` is the same** — the market reports `report.html` frames, uploaded
+from the operator's workstation by tooling that lives outside this repo
+(`D:\NeuralStrike Reports\tools\publish.py`, which refuses to upload until prod ignores
+the directory). ⚠ The frame's `reports/latest.html` name is the contract with that tool.
 **`deploy/site/assets/shots/*.webp` — the marketing gallery — is the same, with THREE
 TRACKED EXCEPTIONS** (`image16/17/18`). Those name a Simulator view that lives in page
 state rather than in the URL, so **nothing regenerates them**: ignored, a fresh clone

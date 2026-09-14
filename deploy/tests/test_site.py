@@ -33,7 +33,7 @@ SITE = pathlib.Path(repo_paths.SITE_ROOT)
 # ⚠ EVERY page belongs here. A page left out is not partially checked, it is
 # UNCHECKED -- no link resolution, no app-host guard, no origin guard. The
 # glossary shipped with none of them until it was added.
-PAGES = ("index.html", "gallery.html", "live.html", "glossary.html")
+PAGES = ("index.html", "gallery.html", "live.html", "glossary.html", "report.html")
 
 # The site calls nobody. Empty on purpose, and widening it is a decision:
 # every entry is a third party learning the IP of everyone who loads the page.
@@ -69,7 +69,10 @@ ALLOWED_OUTBOUND = (
 # test_the_live_grid_offers_every_published_screen instead: the slugs are
 # checked against webgui/live_screens.py, which is also what the capture script
 # names its files from.
-GENERATED_REF_PREFIXES = ("live/",)
+# `reports/` is the same shape: the market reports are uploaded into the served
+# root after each scheduled run and gitignored for the same promote reason. What
+# pins those paths instead is test_the_report_page_frames_the_latest_report.
+GENERATED_REF_PREFIXES = ("live/", "reports/")
 
 
 def _regenerated_shot_refs():
@@ -478,7 +481,7 @@ def test_the_stacked_rail_resets_its_flex_basis():
 MARK_LARGE = ("M20 11 L32 23 L44 11", "M20 53 L32 41 L44 53")
 MARK_SMALL = ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52")
 
-MARK_LARGE_FILES = ("index.html", "gallery.html", "live.html", "assets/mark.svg")
+MARK_LARGE_FILES = ("index.html", "gallery.html", "live.html", "report.html", "assets/mark.svg")
 MARK_SMALL_FILES = ("assets/favicon.svg",)
 
 
@@ -1099,3 +1102,60 @@ def test_the_clock_data_loads_before_the_glow_logic():
     for tag in re.findall(r"<script\b[^>]*>", markup):
         if "market-" in tag:
             assert "defer" in tag, f"{tag} is not deferred, so it runs before the nav exists"
+
+
+# --- G. the market report ----------------------------------------------------
+
+def _nav(name):
+    m = re.search(r"<nav\b.*?</nav>", _markup(name), re.S)
+    assert m, f"{name} has no <nav>"
+    return m.group(0)
+
+
+def test_the_report_page_frames_the_latest_report():
+    """report.html is a frame around ONE generated file, and the file name is the
+    contract with the publisher that uploads it (tools outside this repo write
+    ``reports/latest.html``). Renaming either side leaves a page that loads a
+    404 inside a perfectly good nav, which no other test here would notice --
+    the reference check skips ``reports/`` because the file is not committed."""
+    markup = _markup("report.html")
+    frames = re.findall(r"<iframe\b[^>]*>", markup)
+    assert len(frames) == 1, f"report.html should frame exactly one document, has {len(frames)}"
+    assert 'src="reports/latest.html"' in frames[0]
+    assert "title=" in frames[0], "the report frame has no accessible title"
+    assert 'href="reports/latest.html"' in markup, (
+        "no plain link to the report, so a reader whose frame fails has no way in")
+
+
+def test_the_report_page_runs_nothing():
+    """The frame scrolls on its own. A script here could only be something that
+    crept in -- the same rule as the live grid."""
+    assert "<script" not in _markup("report.html")
+
+
+def test_the_market_report_is_in_every_destination_nav():
+    """The menu item IS the feature: a report page reachable only by typing its
+    URL is not published. Scoped to the <nav> for the reason given in
+    test_the_gallery_and_the_live_grid_link_to_each_other_IN_THE_NAV.
+    glossary.html is a leaf nav with no destination links, deliberately."""
+    for name in ("index.html", "gallery.html", "live.html"):
+        assert 'href="report.html"' in _nav(name), f"{name}'s nav has no Market report link"
+    nav = _nav("report.html")
+    for dest in ("glossary.html", "gallery.html", "live.html", "index.html"):
+        assert f'href="{dest}"' in nav, f"report.html's nav has no way to {dest}"
+
+
+def test_the_published_reports_are_never_committed():
+    """Uploads land in the served root on prod. Un-ignored, the first one dirties
+    the checkout and the next promote refuses to run -- during the session the
+    reports are being written for."""
+    import subprocess
+
+    probe = "deploy/site/reports/latest.html"
+    res = subprocess.run(["git", "check-ignore", "-q", probe],
+                         cwd=repo_paths.REPO_ROOT, capture_output=True)
+    assert res.returncode == 0, f"{probe} is not gitignored"
+
+
+def test_the_report_is_in_the_sitemap():
+    assert "https://neuralstrike.co/report.html" in _text("sitemap.txt")

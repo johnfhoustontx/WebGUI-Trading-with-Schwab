@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-13 (**Strategy Finder redesign — top picks, a slim list,
+**Last updated:** 2026-09-14 (**Market report on the public site.** Operator request: "create a
+menu item on the website that points to and displays the latest report".)
+
+- **`deploy/site/report.html`** — the site nav, a short head and a same-origin frame onto
+  `reports/latest.html`, plus a plain link to it. No script; the frame scrolls on its own.
+- **"Market report"** joins the nav on `index.html`, `gallery.html` and `live.html`, and
+  `sitemap.txt`. The glossary keeps its leaf nav.
+- **`deploy/site/reports/` is gitignored** generated state, uploaded after each of the five
+  scheduled daily reports by `D:\NeuralStrike Reports\tools\publish.py` (outside this repo). The
+  PDF keeps a dated name so Caddy's missing freshness header on `.pdf` cannot serve a stale copy.
+- **Tests:** `report.html` joins `PAGES` and `MARK_LARGE_FILES`; `reports/` joins
+  `GENERATED_REF_PREFIXES`; five new tests pin the frame target, no script, the nav link on every
+  destination page, the ignore rule and the sitemap. `.pdf` joins the served-root suffix list.
+  `deploy` suite 96 passed. Verified locally at 375 px and 1440 px: no horizontal overflow, every
+  resource same-origin.
+- Design: [`2026-09-14-site-market-report-design.md`](plans/2026-09-14-site-market-report-design.md).
+
+**Prior —** 2026-09-13 (**Strategy Finder redesign — top picks, a slim list,
 chips and presets.** Operator request: "make the Strategy Finder page more visually
 appealing and easy to use".)
 
