@@ -395,11 +395,40 @@ def _passes_swing_cut(sig):
             and sig.get("grade") not in SWING_EXCLUDED_GRADES)
 
 
+# The Strategy Finder's rows per strategy type. Measured on a synthetic
+# $SPX-sized chain (56 expiries, 25.6k contracts), the every-expiry scan left
+# 1,061 rows after the quality cut - a 2.27 MB cache payload before ~3 MB of
+# per-row payoff shapes reached the browser. The rest are counted, not shown.
+FINDER_PER_TYPE_LIMIT = 25
+
+_EARNINGS_MODES = ("drop", "flag")
+
+
+def _keep_best_per_type(signals, limit):
+    """``(kept, dropped count)``: the best ``limit`` rows of each ``type`` by
+    ``composite_score``, in their existing relative order. A missing or
+    non-finite score ranks last - never as 0, which is a real score. Pure."""
+    def rank(i):
+        v = signals[i].get("composite_score")
+        ok = (isinstance(v, (int, float)) and not isinstance(v, bool)
+              and math.isfinite(v))
+        return (not ok, -v if ok else 0.0)
+
+    taken, keep = {}, set()
+    for i in sorted(range(len(signals)), key=rank):
+        typ = signals[i].get("type")
+        if taken.get(typ, 0) < limit:
+            taken[typ] = taken.get(typ, 0) + 1
+            keep.add(i)
+    return [s for i, s in enumerate(signals) if i in keep], len(signals) - len(keep)
+
+
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                call_d_min, call_d_max, min_cr_fraction, families=None,
                market_state=None, trade_type="SWING", structures=None,
                earnings_date=None, return_chain=False, payoff=True,
-               every_expiry=False) -> dict:
+               every_expiry=False, earnings_mode="drop",
+               per_type_limit=None) -> dict:
     """Run the multi-strategy swing scan pipeline; returns ``{"signals", "view"}``.
 
     The pipeline builds NORMALIZED candidates across families
@@ -464,6 +493,18 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     :func:`_build_every_expiry`) - the Strategy Finder's whole-chain scan. False
     is the nearest-expiry path the Income Window relies on, unchanged.
 
+    ``earnings_mode`` (default ``"drop"``) says what ``earnings_date`` does. The
+    drop is described above and is the Income Window's. ``"flag"`` is the
+    Strategy Finder's: ``screen_spreads`` gets no date, nothing is dropped, and
+    each row the drop WOULD have removed instead gains ``spans_earnings: True``
+    and ``earnings_date``; other rows gain neither key. Any other value raises
+    ``ValueError``.
+
+    ``per_type_limit`` (default ``None``, no limit) keeps the best N rows of each
+    ``type`` by ``composite_score`` after the quality cut, in their existing
+    order; ``not_shown`` counts the rest (0 on every result without a limit).
+    Ids and payoff curves are built after it, so dropped rows cost nothing more.
+
     ``payoff`` (default True) attaches each emitted row's ``payoff_curve`` for the
     Strategy Finder. :func:`income_scan` passes False: nothing reads a curve off
     ``cache:options:income``, so it would be published bytes and ~25 valuations
@@ -481,6 +522,17 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     import strategy_scanner as ssn
     import strategy_scoring as ssc
 
+    # Refused before any fetch: a mistyped mode silently becoming the drop (or a
+    # malformed limit silently becoming none) is a gate that reads like one.
+    if earnings_mode not in _EARNINGS_MODES:
+        raise ValueError(f"earnings_mode must be one of {_EARNINGS_MODES}, "
+                         f"got {earnings_mode!r}")
+    if per_type_limit is not None and (isinstance(per_type_limit, bool)
+                                       or not isinstance(per_type_limit, int)
+                                       or per_type_limit < 1):
+        raise ValueError(f"per_type_limit must be a positive int or None, "
+                         f"got {per_type_limit!r}")
+
     client = _proxy.schwab_py_client
 
     # Expiry groups rather than one call (see fetch_scan_chain): a whole chain in
@@ -493,7 +545,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # to an explicit empty result so the handler still publishes a fresh view.
     if not chain:
         return {"signals": [], "view": {}, "filtered_out": 0,
-                "vol_filtered": 0, "expiries_failed": expiries_failed}
+                "vol_filtered": 0, "not_shown": 0, "expiries_failed": expiries_failed}
     quote = _proxy.schwab_client.get_quote(symbol) or {}
     spot = quote.get("last") or chain.get("underlyingPrice")
     # Off-hours the quote can miss AND the chain dict can lack ``underlyingPrice``
@@ -504,7 +556,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # (matching the no-chain guard above) BEFORE any builder runs.
     if not spot:
         return {"signals": [], "view": {}, "filtered_out": 0,
-                "vol_filtered": 0, "expiries_failed": expiries_failed}
+                "vol_filtered": 0, "not_shown": 0, "expiries_failed": expiries_failed}
     hist = se.fetch_price_history(client, symbol)
     tech = se.calc_technicals(hist) if hist is not None else {}
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
@@ -540,7 +592,11 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                                          put_d_max, call_d_min, call_d_max,
                                          min_cr_fraction, trade_type, spot=spot,
                                          daily_expected_move=dem,
-                                         earnings_date=earnings_date))
+                                         # screen_spreads can only drop; in
+                                         # flag mode the tag is added below.
+                                         earnings_date=(earnings_date
+                                                        if earnings_mode == "drop"
+                                                        else None)))
     if every_expiry:
         signals = _build_every_expiry(ssn, chain, symbol, spot, atm_iv, dte_min, hi,
                                       fams, bands, spreads)
@@ -617,10 +673,24 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         # least ``strategy_scanner._MIN_FRONT_DTE`` (7) days, so it can never take
         # the 0-DTE bucket's same-day exemption. A multi-expiry builder with a
         # same-day front would need the predicate fed the latest leg's DTE too.
-        signals = [s for s in signals
-                   if not (se.earnings_gate_applies(trade_type, s.get("dte"))
-                           and se.check_earnings_conflict(earnings_date,
-                                                          _latest_expiration(s)))]
+        def _spans(s):
+            return (se.earnings_gate_applies(trade_type, s.get("dte"))
+                    and se.check_earnings_conflict(earnings_date, _latest_expiration(s)))
+
+        if earnings_mode == "flag":
+            # The Strategy Finder keeps these and TAGS them (operator decision
+            # 2026-09-14): its whole-chain scan would otherwise end every single
+            # stock at its next report. The tagged set is exactly the dropped
+            # set, same-day exemption included - and that hides no real span:
+            # the exemption covers only a row expiring TODAY, which cannot be held
+            # through a report (one today printed before the open or lands after
+            # the close), while check_earnings_conflict also counts reports up to
+            # five days PAST, so ignoring the exemption would tag it falsely.
+            for s in signals:
+                if _spans(s):
+                    s["spans_earnings"], s["earnings_date"] = True, earnings_date
+        else:
+            signals = [s for s in signals if not _spans(s)]
 
     # ``daily_move`` makes the breakeven-vs-EM factor judge each candidate against
     # the move to ITS OWN expiry (``dem * sqrt(max(dte, 1))``). ``em_1sd`` above is
@@ -664,6 +734,12 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     signals = [s for s in signals if _passes_swing_cut(s)]
     filtered_out = scored_n - len(signals)
 
+    # The per-type limit, BEFORE ids, the IV-rank stamp and the payoff curves, so a
+    # row the reader never gets costs none of them.
+    not_shown = 0
+    if per_type_limit is not None:
+        signals, not_shown = _keep_best_per_type(signals, per_type_limit)
+
     assign_ids(signals, symbol)
     # Surface the symbol's IV Rank onto every candidate for the table's IV Rank
     # column. Single-symbol scan, so all candidates share the one value; None when
@@ -686,7 +762,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
             continue
         s["payoff_curve"] = ssn.payoff_curve(legs, spot, atm_iv, s.get("dte"))
     result = {"signals": signals, "view": view, "filtered_out": filtered_out,
-              "vol_filtered": vol_filtered, "expiries_failed": expiries_failed}
+              "vol_filtered": vol_filtered, "not_shown": not_shown,
+              "expiries_failed": expiries_failed}
     if return_chain:
         # Handed back IN MEMORY so a second screen over the SAME symbol (the
         # covered-call one, see publish_income) can reuse this chain instead of

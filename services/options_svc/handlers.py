@@ -661,8 +661,13 @@ def swing_scan(bus, args: dict) -> None:
     except Exception:  # noqa: BLE001 — see above.
         _degrade.degraded("options.swing_earnings")
         status, earnings_date = "not_listed", None
+    # The Strategy Finder's whole-chain scan: every listed expiry, a report TAGGED
+    # rather than dropped, and the best FINDER_PER_TYPE_LIMIT of each strategy type
+    # (design docs/plans/2026-09-14-strategy-finder-whole-chain-design.md).
     result = compute.swing_scan(**params, market_state=market_state,
-                               earnings_date=earnings_date)
+                               earnings_date=earnings_date, every_expiry=True,
+                               earnings_mode="flag",
+                               per_type_limit=compute.FINDER_PER_TYPE_LIMIT)
     # STAMP every row with the coverage it actually got, the same field the
     # income board carries: a row that skipped the check must not look like a row
     # that passed it.
@@ -676,6 +681,8 @@ def swing_scan(bus, args: dict) -> None:
                # is wrong for selling premium, not that the candidate was poor.
                # Gap assessment B2.
                "vol_filtered": result.get("vol_filtered") or 0,
+               # Lower-scoring rows past the per-type limit: counted, not shown.
+               "not_shown": result.get("not_shown") or 0,
                "symbol": params["symbol"], "params": args}
     version = bus.cache_set(CACHE_SWING, payload)
     bus.publish(EVENT_SWING, {"version": version})
