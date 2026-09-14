@@ -824,3 +824,115 @@ def test_a_payload_with_no_price_says_price_unavailable():
     from nicegui import ui
     card = _render_page({"symbol": "SPY", "signals": [], "filtered_out": 1})
     assert [e for e in _widgets(card, ui.label) if e.text == "Price unavailable"]
+
+
+# ---------------------------------------------------------------- paged list
+
+def _many(n):
+    return [{**_FLY, "id": f"s{i:03d}", "composite_score": 50.0 + (i % 40),
+             "max_loss": float(i), "group": "BUTTERFLY" if i % 2 else "VERTICAL"}
+            for i in range(n)]
+
+
+_COLS = swing.fv.finder_columns()
+
+
+def test_page_of_slices_fifty_and_reports_the_total():
+    rows = [{"id": i, "_max_loss_n": i} for i in range(120)]
+    page, pag = swing.page_of(rows, _COLS, None)
+    assert [r["id"] for r in page] == list(range(50))
+    assert pag == {"sortBy": None, "descending": False, "page": 1,
+                   "rowsPerPage": swing.PAGE_SIZE, "rowsNumber": 120}
+    page, pag = swing.page_of(rows, _COLS, {"page": 3, "rowsPerPage": 50})
+    assert [r["id"] for r in page] == list(range(100, 120)) and pag["page"] == 3
+
+
+def test_page_of_sorts_the_whole_list_before_slicing():
+    rows = [{"id": i, "_max_loss_n": (i * 37) % 120} for i in range(120)]
+    req = {"sortBy": "max_loss", "descending": True, "page": 1, "rowsPerPage": 50}
+    page, pag = swing.page_of(rows, _COLS, req)
+    assert [r["_max_loss_n"] for r in page] == list(range(119, 69, -1))
+    assert (pag["sortBy"], pag["descending"]) == ("max_loss", True)
+    page, _ = swing.page_of(rows, _COLS, {**req, "descending": False, "page": 2})
+    assert [r["_max_loss_n"] for r in page] == list(range(50, 100))
+
+
+def test_page_of_sorts_like_quasar_missing_first_ascending():
+    rows = [{"id": "a", "_pop_n": 40.0}, {"id": "b", "_pop_n": None},
+            {"id": "c", "_pop_n": 10.0}]
+    up, _ = swing.page_of(rows, _COLS, {"sortBy": "pop", "descending": False})
+    down, _ = swing.page_of(rows, _COLS, {"sortBy": "pop", "descending": True})
+    assert [r["id"] for r in up] == ["b", "c", "a"]
+    assert [r["id"] for r in down] == ["a", "c", "b"]
+    text, _ = swing.page_of([{"id": 1, "strategy": "b"}, {"id": 2, "strategy": "A"}],
+                            _COLS, {"sortBy": "strategy", "descending": False})
+    assert [r["id"] for r in text] == [2, 1]
+
+
+def test_page_of_clamps_a_page_past_the_end_and_ignores_an_unknown_column():
+    rows = [{"id": i} for i in range(60)]
+    page, pag = swing.page_of(rows, _COLS, {"page": 9, "sortBy": "nope",
+                                            "rowsPerPage": 0})
+    assert pag["page"] == 2 and pag["rowsPerPage"] == swing.PAGE_SIZE
+    assert pag["sortBy"] is None
+    assert [r["id"] for r in page] == list(range(50, 60))
+    empty, pag = swing.page_of([], _COLS, {"page": 4})
+    assert empty == [] and pag["page"] == 1 and pag["rowsNumber"] == 0
+
+
+def _request_page(card, pagination):
+    from nicegui import ui
+    from nicegui.events import GenericEventArguments
+    (table,) = _widgets(card, ui.table)
+    (listener,) = [l for l in table._event_listeners.values() if l.type == "request"]
+    with card:
+        listener.handler(GenericEventArguments(sender=table, client=table.client,
+                                               args={"pagination": pagination}))
+
+
+def test_the_list_sends_one_page_at_a_time():
+    from nicegui import ui
+    card = _render_page({**_PAYLOAD, "signals": _many(120)})
+    (table,) = _widgets(card, ui.table)
+    assert len(table.rows) == 50
+    assert table.pagination["rowsPerPage"] == 50
+    assert table.pagination["rowsNumber"] == 120 and table.pagination["page"] == 1
+    assert table.props["rows-per-page-options"] == [50]
+    _request_page(card, {"sortBy": "max_loss", "descending": True, "page": 2,
+                         "rowsPerPage": 50})
+    assert [r["id"] for r in table.rows][:2] == ["s069", "s068"]
+    assert table.pagination["page"] == 2 and table.pagination["sortBy"] == "max_loss"
+
+
+def test_a_chip_click_returns_the_list_to_page_one():
+    from nicegui import ui
+    card = _render_page({**_PAYLOAD, "signals": _many(120)})
+    (table,) = _widgets(card, ui.table)
+    _request_page(card, {"sortBy": "max_loss", "descending": True, "page": 2,
+                         "rowsPerPage": 50})
+    _click(_buttons(card)["Spreads 60"], card)
+    assert table.pagination["page"] == 1 and table.pagination["rowsNumber"] == 60
+    # The sort the reader chose survives the filter.
+    assert table.rows[0]["id"] == "s118"
+
+
+def test_a_new_scan_returns_the_list_to_page_one(monkeypatch):
+    from nicegui import ui
+    card = _render_page({**_PAYLOAD, "signals": _many(120)})
+    (table,) = _widgets(card, ui.table)
+    _request_page(card, {"sortBy": None, "descending": False, "page": 3,
+                         "rowsPerPage": 50})
+    assert table.pagination["page"] == 3
+    _scan(card, monkeypatch, "spy")
+    assert table.pagination["page"] == 1 and table.rows == []
+    _publish({**_PAYLOAD, "signals": _many(120)})
+    _fire_poll(card)
+    assert table.pagination["page"] == 1 and len(table.rows) == 50
+
+
+def test_a_row_click_on_a_later_page_selects_its_signal():
+    card = _render_page({**_PAYLOAD, "signals": _many(120)})
+    _request_page(card, {"sortBy": None, "descending": False, "page": 3,
+                         "rowsPerPage": 50})
+    _row_click(card, "s119")
+    assert "w-[360px]" in _panel(card)._classes

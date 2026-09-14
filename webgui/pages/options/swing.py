@@ -49,6 +49,13 @@ EMPTY_PROMPT = "Enter a symbol and press Scan to rank every strategy for it."
 # work is still running says "finished" when it has not.
 SCAN_TIMEOUT_SEC = 180
 
+# The ranked list is paged SERVER-SIDE, this many rows at a time. Measured on a
+# synthetic 510-row answer (the service's best 25 of each type across the whole
+# chain): ~1.96 MB of rows, ~1.4 MB of it the per-row payoff SVG, where 50 rows
+# are ~190 KB. Quasar's client-side pagination would still ship every row over
+# the websocket on every paint and every chip click, so only the page is sent.
+PAGE_SIZE = 50
+
 # The ceiling fired with no result: a slow scan still lands later, but a scan
 # that never publishes (service down, command dropped) never will - so the line
 # promises neither, and says what to do if nothing comes.
@@ -196,6 +203,54 @@ def card_view(sig):
     out["grade_class"] = strategy_table.grade_class(s.get("grade"))
     out["allow_paper"] = s.get("type") in strategy_table._PAPER_TYPES
     return out
+
+
+# ------------------------------------------------------------------ paging
+
+def _sort_value(v):
+    """A cell's sort key, ordered the way Quasar's default column sort orders it:
+    a missing value below everything, numbers numerically, text case-blind.
+    Numbers sort before text rather than raising on a mixed column."""
+    if v is None or v != v:                      # None, or NaN
+        return (0, 0, 0.0)
+    if isinstance(v, (int, float)):
+        return (1, 0, float(v))
+    return (1, 1, str(v).lower())
+
+
+def page_of(rows, columns, request):
+    """One page of ``rows`` for a Quasar server-side ``request`` pagination.
+
+    Returns ``(page_rows, pagination)``. The WHOLE list is sorted before it is
+    sliced, on the column's ``field`` (the numeric twin for the money, odds and
+    expiry columns), so page 2 continues page 1's order. ``sortBy`` names a
+    COLUMN, as Quasar sends it; a column that is unknown or not sortable sorts
+    nothing and the rows keep their ranked order. The page is clamped to the
+    list, and the page size is always :data:`PAGE_SIZE` - the table offers no
+    other, and a request for 0 ("all") would ship every row this exists to hold
+    back.
+    """
+    req = request if isinstance(request, dict) else {}
+    fields = {c.get("name"): c.get("field") for c in columns or [] if c.get("sortable")}
+    sort_by = req.get("sortBy")
+    field = fields.get(sort_by) if isinstance(sort_by, str) else None
+    rows = list(rows or [])
+    if field is None:
+        sort_by, descending = None, False
+    else:
+        descending = bool(req.get("descending"))
+        rows = sorted(rows, key=lambda r: _sort_value(r.get(field)), reverse=descending)
+    n = len(rows)
+    last = max(1, -(-n // PAGE_SIZE))
+    try:
+        page = int(req.get("page") or 1)
+    except (TypeError, ValueError):
+        page = 1
+    page = min(max(page, 1), last)
+    start = (page - 1) * PAGE_SIZE
+    return rows[start:start + PAGE_SIZE], {
+        "sortBy": sort_by, "descending": descending, "page": page,
+        "rowsPerPage": PAGE_SIZE, "rowsNumber": n}
 
 
 # ------------------------------------------------------------------ table slots
@@ -349,8 +404,15 @@ def render():
             list_box = ui.column().classes("flex-grow min-w-0 gap-2 min-h-[120px]")
             with list_box:
                 empty_line = ui.label(EMPTY_PROMPT).classes(f"text-sm {MUTED}")
-                table = ui.table(columns=fv.finder_columns(), rows=[], row_key="id") \
+                # Server-side paging (PAGE_SIZE): ``rowsNumber`` is what puts
+                # Quasar in server mode, where a page or sort click emits
+                # ``request`` and the page answers with that page's rows.
+                table = ui.table(columns=fv.finder_columns(), rows=[], row_key="id",
+                                 pagination={"sortBy": None, "descending": False,
+                                             "page": 1, "rowsPerPage": PAGE_SIZE,
+                                             "rowsNumber": 0}) \
                     .classes("finder-table w-full")
+                table._props["rows-per-page-options"] = [PAGE_SIZE]
             detail_panel = detail.render()
     # The list keeps its width until there is something to show.
     detail_panel.collapse()
@@ -359,8 +421,9 @@ def render():
     # scanning: the seq of the scan whose timeout is armed.
     # scan_request: the swing_scan args a scan is waiting on (None = nothing
     # waiting); only a payload answering THAT request may replace the placeholders.
+    # rows: every visible list row; the table holds only the current page of them.
     state = {"payload": None, "symbol": None, "active": None, "version": None,
-             "scanning": None, "scan_seq": 0, "scan_request": None}
+             "scanning": None, "scan_seq": 0, "scan_request": None, "rows": []}
     # The running count names the request being waited on, read at each tick -
     # never a symbol captured when the spinner was built.
     scan_busy = _busy.build_busy(
@@ -444,6 +507,24 @@ def render():
 
     table.on("rowClick", _on_row_click)
 
+    def _show_page(request):
+        page, pagination = page_of(state["rows"], table.columns, request)
+        table.rows = page
+        table.pagination = pagination
+        table.update()
+
+    def _set_rows(rows):
+        """A new list - a scan's answer or a chip change - starts on page 1, in
+        the sort the reader last chose."""
+        state["rows"] = rows
+        _show_page({**table.pagination, "page": 1})
+
+    @guard
+    def _on_page_request(event):
+        args = event.args if isinstance(event.args, dict) else {}
+        _show_page(args.get("pagination"))
+
+    table.on("request", _on_page_request, ["pagination"])
     # Per-row Calculator / Paper (gated) / Expected Move - legs-aware.
     handoff.add_strategy_row_actions(table, lambda row: by_id.get((row or {}).get("id")))
     table.add_slot("body-cell-strategy", _STRATEGY_SLOT)
@@ -597,7 +678,7 @@ def render():
         _paint_chips(signals)
         visible = fv.filter_groups(signals, state["active"])
         _paint_cards(fv.top_picks(visible))
-        table.rows = finder_rows(visible)
+        _set_rows(finder_rows(visible))
         _set_no_data(fv.no_data_label(state["payload"]))
         empty_line.set_visibility(not has_scan)
         table.set_visibility(has_scan)
@@ -656,7 +737,7 @@ def render():
         summary_box.set_visibility(False)
         chips_row.clear()
         _paint_placeholders(params["symbol"])
-        table.rows = []
+        _set_rows([])
         _set_no_data(scanning_text(params["symbol"]))
         empty_line.set_visibility(False)
         table.set_visibility(True)
