@@ -333,6 +333,12 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     ``_proxy.schwab_client.get_quote(symbol)`` fetches the quote.
     ``min_cr_fraction`` arrives already as a fraction.
 
+    ``dte_max=None`` means no upper limit: the fetch takes every listed expiry
+    from today, and the builders + ``screen_spreads`` receive ``_NO_DTE_MAX``.
+    The chain arrives in expiry groups (:func:`fetch_scan_chain`); every returned
+    dict carries ``expiries_failed``, the count of expiries whose group did not
+    load, so a partial chain is never read as a whole one.
+
     Four parameters exist for the 30-45 DTE INCOME window (:func:`income_scan`)
     and all four default to today's behaviour, because nine existing call sites
     pass none of them:
@@ -364,7 +370,6 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     liquidity normalizer). In the real (process-isolated) service these resolve
     unambiguously to options-scanner's modules.
     """
-    import datetime as dt
     import math
 
     import strategy_scanner as ssn
@@ -372,15 +377,17 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
 
     client = _proxy.schwab_py_client
 
-    today = dt.date.today()
-    chain = se.fetch_option_chain(client, symbol, from_date=today,
-                                  to_date=today + dt.timedelta(days=dte_max + 2))
+    # Expiry groups rather than one call (see fetch_scan_chain): a whole chain in
+    # one call timed out at the proxy. A group that fails is counted, not hidden.
+    chain, expiries_failed = fetch_scan_chain(symbol, dte_max)
+    # Every builder and screen_spreads compares DTE against a number.
+    hi = _NO_DTE_MAX if dte_max is None else dte_max
     # Off-hours/weekend the chain fetch can return None; the candidate builders
     # below would AttributeError on chain.get(...)/extract_options(None). Degrade
     # to an explicit empty result so the handler still publishes a fresh view.
     if not chain:
         return {"signals": [], "view": {}, "filtered_out": 0,
-                "vol_filtered": 0}
+                "vol_filtered": 0, "expiries_failed": expiries_failed}
     quote = _proxy.schwab_client.get_quote(symbol) or {}
     spot = quote.get("last") or chain.get("underlyingPrice")
     # Off-hours the quote can miss AND the chain dict can lack ``underlyingPrice``
@@ -391,7 +398,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # (matching the no-chain guard above) BEFORE any builder runs.
     if not spot:
         return {"signals": [], "view": {}, "filtered_out": 0,
-                "vol_filtered": 0}
+                "vol_filtered": 0, "expiries_failed": expiries_failed}
     hist = se.fetch_price_history(client, symbol)
     tech = se.calc_technicals(hist) if hist is not None else {}
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
@@ -426,7 +433,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         # MIDPOINT and drops one richer than its ceiling, and it never touches
         # the LONG legs - see that docstring for why the rule is asymmetric.
         signals += _tag_group(ssn.build_directional(chain, symbol, spot, atm_iv,
-                                                    dte_min, dte_max,
+                                                    dte_min, hi,
                                                     put_band=(put_d_min, put_d_max),
                                                     call_band=(call_d_min, call_d_max)),
                               "DIRECTIONAL")
@@ -435,14 +442,14 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # so compute screen_spreads if EITHER family is requested.
     spreads = []
     if {"VERTICAL", "NEUTRAL"} & fams:
-        spreads = list(se.screen_spreads(chain, symbol, dte_min, dte_max, put_d_min,
+        spreads = list(se.screen_spreads(chain, symbol, dte_min, hi, put_d_min,
                                          put_d_max, call_d_min, call_d_max,
                                          min_cr_fraction, trade_type, spot=spot,
                                          daily_expected_move=dem,
                                          earnings_date=earnings_date))
     if "VERTICAL" in fams:
         signals += _tag_group(ssn.build_debit_verticals(chain, symbol, spot, atm_iv,
-                                                        dte_min, dte_max), "VERTICAL")
+                                                        dte_min, hi), "VERTICAL")
         signals += _tag_group([ssn.adapt_credit_spread(s) for s in spreads], "VERTICAL")
     if "NEUTRAL" in fams:
         signals += _tag_group([ssn.adapt_iron_condor(ic)
@@ -453,17 +460,17 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     bands = {"put_band": (put_d_min, put_d_max), "call_band": (call_d_min, call_d_max)}
     if "STRADDLE" in fams:
         signals += _tag_group(ssn.build_straddles_strangles(chain, symbol, spot, atm_iv,
-                                                            dte_min, dte_max, **bands),
+                                                            dte_min, hi, **bands),
                               "STRADDLE")
     if "BUTTERFLY" in fams:
         signals += _tag_group(ssn.build_butterflies_condors(chain, symbol, spot, atm_iv,
-                                                            dte_min, dte_max), "BUTTERFLY")
+                                                            dte_min, hi), "BUTTERFLY")
     if "CALENDAR" in fams:
         signals += _tag_group(ssn.build_calendars(chain, symbol, spot, atm_iv,
-                                                  dte_min, dte_max), "CALENDAR")
+                                                  dte_min, hi), "CALENDAR")
     if "STOCK" in fams:
         signals += _tag_group(ssn.build_stock_structures(chain, symbol, spot, atm_iv,
-                                                         dte_min, dte_max, **bands),
+                                                         dte_min, hi, **bands),
                               "STOCK")
 
     # Window filters, BEFORE scoring — a candidate this window does not trade is
@@ -568,7 +575,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
             continue
         s["payoff_curve"] = ssn.payoff_curve(legs, spot, atm_iv, s.get("dte"))
     result = {"signals": signals, "view": view, "filtered_out": filtered_out,
-              "vol_filtered": vol_filtered}
+              "vol_filtered": vol_filtered, "expiries_failed": expiries_failed}
     if return_chain:
         # Handed back IN MEMORY so a second screen over the SAME symbol (the
         # covered-call one, see publish_income) can reuse this chain instead of
@@ -6962,6 +6969,76 @@ def option_expirations(api):
     if getattr(resp, "status_code", None) != 200:
         return []
     return parse_expiration_list(resp.json())
+
+
+# ── the Strategy Finder's whole-chain fetch (2026-09-14) ─────────────────────
+# One /chains call for SPY's whole chain timed out at the proxy's 30 s. Groups of
+# consecutive expiries, fetched a few at a time, returned SPY's 34 expiries in
+# 6.5 s and $SPX's 56 in 11 s (measured on prod). Every swing_scan caller rides
+# this path; the Income Window's 30-45 DTE window is one or two runs.
+SCAN_RUN_EXPIRIES = 8
+SCAN_FETCH_WORKERS = 4
+# The in-range filters take a number; "no upper limit" is this, never a guess at
+# the longest listed expiry.
+_NO_DTE_MAX = 100_000
+
+
+def scan_expiry_runs(expirations, dte_max, today=None):
+    """Listed expiries from TODAY to today + dte_max + 2 (every one when dte_max is
+    None), in runs of at most SCAN_RUN_EXPIRIES consecutive listed expiries.
+
+    From today, not from dte_min: run_iv_analysis reads the near expiries for the
+    IV and expected move, exactly as the single fetch delivered them."""
+    today = today or _dt.date.today()
+    last = None if dte_max is None else today + _dt.timedelta(days=int(dte_max) + 2)
+    keep = [e for e in expirations or []
+            if _dt.date.fromisoformat(e) >= today
+            and (last is None or _dt.date.fromisoformat(e) <= last)]
+    return [keep[i:i + SCAN_RUN_EXPIRIES] for i in range(0, len(keep), SCAN_RUN_EXPIRIES)]
+
+
+def merge_raw_chains(chains):
+    """RAW chains as one: the two expiry maps unioned, every other top-level field
+    from the first chain that arrived. None when none did. Inputs not mutated."""
+    got = [c for c in chains if c]
+    if not got:
+        return None
+    out = {k: v for k, v in got[0].items() if k not in ("callExpDateMap", "putExpDateMap")}
+    for key in ("callExpDateMap", "putExpDateMap"):
+        merged = {}
+        for c in got:
+            merged.update(c.get(key) or {})
+        out[key] = merged
+    return out
+
+
+def fetch_scan_chain(symbol, dte_max):
+    """``(chain, expiries_failed)`` for a swing scan.
+
+    Lists the expirations, fetches them in runs (see scan_expiry_runs) at most
+    SCAN_FETCH_WORKERS at a time, and merges. A run that fails is COUNTED in
+    expiries_failed, never hidden. No usable expiration list falls back to the
+    single fetch this function replaced."""
+    from services._parallel import parallel_map
+
+    client = _proxy.schwab_py_client
+    today = _dt.date.today()
+    try:
+        exps = option_expirations(symbol)
+    except Exception:  # noqa: BLE001 - the single fetch is the fallback
+        _degrade.degraded("options.scan_expirations")
+        exps = []
+    if not exps:
+        to = None if dte_max is None else today + _dt.timedelta(days=int(dte_max) + 2)
+        return se.fetch_option_chain(client, symbol, from_date=today, to_date=to), 0
+    runs = scan_expiry_runs(exps, dte_max, today)
+    got = parallel_map(
+        lambda run: se.fetch_option_chain(client, symbol,
+                                          from_date=_dt.date.fromisoformat(run[0]),
+                                          to_date=_dt.date.fromisoformat(run[-1])),
+        runs, workers=SCAN_FETCH_WORKERS)
+    failed = sum(len(run) for run, chain in zip(runs, got) if not chain)
+    return merge_raw_chains(got), failed
 
 
 def initial_expiries(expirations, wanted=None, n=INITIAL_EXPIRY_COUNT):
