@@ -398,10 +398,20 @@ def _passes_swing_cut(sig):
 # The Strategy Finder's rows per strategy type. Measured on a synthetic
 # $SPX-sized chain (56 expiries, 25.6k contracts), the every-expiry scan left
 # 1,061 rows after the quality cut - a 2.27 MB cache payload before ~3 MB of
-# per-row payoff shapes reached the browser. The rest are counted, not shown.
+# per-row payoff shapes reached the browser. With this limit the same chain
+# publishes 510 rows, 1.07 MB. The rest are counted, not shown.
 FINDER_PER_TYPE_LIMIT = 25
 
 _EARNINGS_MODES = ("drop", "flag")
+
+
+def _usable_spot(value):
+    """``value`` as a float when it is a finite positive number, else ``None``.
+    The proxy client fills a missing ``lastPrice`` with 0, and a 0 spot is not a
+    price - it is the absence of one. Pure."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value) if math.isfinite(value) and value > 0 else None
 
 
 def _keep_best_per_type(signals, limit):
@@ -469,6 +479,19 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     load, so a partial chain is never read as a whole one - or ``None`` when no
     expiration list was available and the single fetch ran instead.
 
+    Every returned dict, the two early empties included, also carries ``spot``
+    (the quote's last price, else the chain's ``underlyingPrice``; ``None`` when
+    neither is a finite positive number, never 0) and two flags that say why a
+    result can be empty before anything is built: ``no_expiries_in_range`` (no
+    chain, and the expiration list loaded with no listed expiry in the window)
+    and ``chain_missing`` (no chain, and runs failed or the uncounted single
+    fetch returned nothing). Both are False whenever a chain came back.
+
+    The counts never overlap and are taken in this order - ``vol_filtered``, then
+    ``filtered_out``, then ``not_shown`` - so every row built and kept by the
+    window filters (``structures``, the earnings drop) is counted in exactly one
+    of them or returned.
+
     Four parameters exist for the 30-45 DTE INCOME window (:func:`income_scan`)
     and all four default to today's behaviour, because nine existing call sites
     pass none of them:
@@ -485,8 +508,9 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
       BUILDERS produced. ``strategy_scanner`` does not consult the calendar at
       all, so without the second half a 35-DTE cash-secured put would sail
       straight over the report the spreads were just protected from.
-    * ``return_chain`` adds the fetched ``chain`` + ``spot`` to the returned
-      dict so the covered-call screen can reuse them (see the return statement).
+    * ``return_chain`` adds the fetched ``chain`` to the returned dict so the
+      covered-call screen can reuse it with the ``spot`` beside it (see the
+      return statement).
 
     ``every_expiry`` (default False) builds every group on EVERY listed expiry in
     the window instead of the nearest one each builder takes (see
@@ -535,6 +559,10 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
 
     client = _proxy.schwab_py_client
 
+    # The quote BEFORE the chain, so an answer with no chain still carries the
+    # price it was asked at (design section 6: "no results" names the price).
+    quote = _proxy.schwab_client.get_quote(symbol) or {}
+    spot = _usable_spot(quote.get("last"))
     # Expiry groups rather than one call (see fetch_scan_chain): a whole chain in
     # one call timed out at the proxy. A group that fails is counted, not hidden.
     chain, expiries_failed = fetch_scan_chain(symbol, dte_max)
@@ -543,20 +571,28 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # Off-hours/weekend the chain fetch can return None; the candidate builders
     # below would AttributeError on chain.get(...)/extract_options(None). Degrade
     # to an explicit empty result so the handler still publishes a fresh view.
+    #
+    # Two different empties: ``(None, 0)`` is an expiration list that loaded with
+    # no listed expiry in the window, which is an answer, while a failed run (or
+    # the single fetch, whose ``None`` count was never taken) is a chain that did
+    # not come back. The page words them differently.
     if not chain:
         return {"signals": [], "view": {}, "filtered_out": 0,
-                "vol_filtered": 0, "not_shown": 0, "expiries_failed": expiries_failed}
-    quote = _proxy.schwab_client.get_quote(symbol) or {}
-    spot = quote.get("last") or chain.get("underlyingPrice")
+                "vol_filtered": 0, "not_shown": 0, "expiries_failed": expiries_failed,
+                "spot": spot, "chain_missing": expiries_failed != 0,
+                "no_expiries_in_range": expiries_failed == 0}
+    if spot is None:
+        spot = _usable_spot(chain.get("underlyingPrice"))
     # Off-hours the quote can miss AND the chain dict can lack ``underlyingPrice``
     # (the engine defaults that key to 0; compute uses a bare .get()), leaving
     # spot None. The candidate builders price off spot (spot*0.20, spot*atm_iv),
     # so a None spot would TypeError and the scaffold would swallow it -> NO cache
     # write -> the page hangs on "Scanning…". Degrade to an explicit empty result
     # (matching the no-chain guard above) BEFORE any builder runs.
-    if not spot:
+    if spot is None:
         return {"signals": [], "view": {}, "filtered_out": 0,
-                "vol_filtered": 0, "not_shown": 0, "expiries_failed": expiries_failed}
+                "vol_filtered": 0, "not_shown": 0, "expiries_failed": expiries_failed,
+                "spot": None, "chain_missing": False, "no_expiries_in_range": False}
     hist = se.fetch_price_history(client, symbol)
     tech = se.calc_technicals(hist) if hist is not None else {}
     iv = run_iv_analysis(client, symbol, price=spot, hist=hist, chain=chain) or {}
@@ -684,8 +720,9 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
             # set, same-day exemption included - and that hides no real span:
             # the exemption covers only a row expiring TODAY, which cannot be held
             # through a report (one today printed before the open or lands after
-            # the close), while check_earnings_conflict also counts reports up to
-            # five days PAST, so ignoring the exemption would tag it falsely.
+            # the close). check_earnings_conflict also counts a report from the
+            # last five days as a conflict, so ignoring the exemption would tag
+            # those rows falsely.
             for s in signals:
                 if _spans(s):
                     s["spans_earnings"], s["earnings_date"] = True, earnings_date
@@ -763,7 +800,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         s["payoff_curve"] = ssn.payoff_curve(legs, spot, atm_iv, s.get("dte"))
     result = {"signals": signals, "view": view, "filtered_out": filtered_out,
               "vol_filtered": vol_filtered, "not_shown": not_shown,
-              "expiries_failed": expiries_failed}
+              "expiries_failed": expiries_failed, "spot": spot,
+              "chain_missing": False, "no_expiries_in_range": False}
     if return_chain:
         # Handed back IN MEMORY so a second screen over the SAME symbol (the
         # covered-call one, see publish_income) can reuse this chain instead of
@@ -776,7 +814,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         # contract says so in its own docstring. The two early-return guards
         # above deliberately do not carry the key: there is no chain in either
         # case, so ``.get("chain")`` is None, which is the honest answer.
-        result["chain"], result["spot"] = chain, spot
+        result["chain"] = chain
     return result
 
 

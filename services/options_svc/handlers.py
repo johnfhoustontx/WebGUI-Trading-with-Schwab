@@ -664,10 +664,18 @@ def swing_scan(bus, args: dict) -> None:
     # The Strategy Finder's whole-chain scan: every listed expiry, a report TAGGED
     # rather than dropped, and the best FINDER_PER_TYPE_LIMIT of each strategy type
     # (design docs/plans/2026-09-14-strategy-finder-whole-chain-design.md).
-    result = compute.swing_scan(**params, market_state=market_state,
-                               earnings_date=earnings_date, every_expiry=True,
-                               earnings_mode="flag",
-                               per_type_limit=compute.FINDER_PER_TYPE_LIMIT)
+    # A scan that RAISES still answers its request. Before, the scaffold swallowed
+    # the exception and nothing was published, so the page could not tell a dead
+    # scan from a slow one and waited out its ceiling (design section 5).
+    try:
+        result = compute.swing_scan(**params, market_state=market_state,
+                                   earnings_date=earnings_date, every_expiry=True,
+                                   earnings_mode="flag",
+                                   per_type_limit=compute.FINDER_PER_TYPE_LIMIT)
+    except Exception:  # noqa: BLE001 — see above.
+        _degrade.degraded("options.swing_scan", detail=params["symbol"])
+        result = {"signals": [], "view": {}, "spot": None, "expiries_failed": None,
+                  "error": True}
     # STAMP every row with the coverage it actually got, the same field the
     # income board carries: a row that skipped the check must not look like a row
     # that passed it.
@@ -683,7 +691,18 @@ def swing_scan(bus, args: dict) -> None:
                "vol_filtered": result.get("vol_filtered") or 0,
                # Lower-scoring rows past the per-type limit: counted, not shown.
                "not_shown": result.get("not_shown") or 0,
+               # The price the scan was asked at, on every answer - None when no
+               # price was read, never 0.
+               "spot": result.get("spot"),
+               # Why an answer can be empty before anything was built; the page
+               # words them differently. ``expiries_failed`` is published as is:
+               # None means the count was never taken, which is not zero.
+               "chain_missing": bool(result.get("chain_missing")),
+               "no_expiries_in_range": bool(result.get("no_expiries_in_range")),
+               "expiries_failed": result.get("expiries_failed"),
                "symbol": params["symbol"], "params": args}
+    if result.get("error"):
+        payload["error"] = True
     version = bus.cache_set(CACHE_SWING, payload)
     bus.publish(EVENT_SWING, {"version": version})
 

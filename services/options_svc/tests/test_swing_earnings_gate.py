@@ -247,11 +247,8 @@ def _one_row_scan(monkeypatch, *, trade_type, dte, report, mode):
 ])
 def test_the_flag_tags_exactly_the_rows_the_drop_removes(
         trade_type, dte, report_days, monkeypatch):
-    """The flag honours the same-day exemption the drop does, and that hides no
-    real span: the exemption covers only a row expiring TODAY, which cannot be
-    held through a report - one today has printed before the open or lands
-    after the close, and ``check_earnings_conflict`` also counts reports up to
-    five days PAST. Ignoring the exemption would tag those rows falsely."""
+    """The flag honours the same-day exemption the drop does. Why that hides no
+    real span is explained at the flag branch in ``compute.swing_scan``."""
     report = _report_in(report_days)
     dropped = _one_row_scan(monkeypatch, trade_type=trade_type, dte=dte,
                             report=report, mode="drop") == []
