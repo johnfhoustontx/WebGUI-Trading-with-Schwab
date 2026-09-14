@@ -954,3 +954,175 @@ def test_no_data_label_uppercases_the_symbol():
         "No option chain came back for SPY at $764.48.")
     assert fv.no_data_label({"symbol": "spy", "error": "TypeError"}) == (
         "The scan for SPY failed. Check System Status and scan again.")
+
+
+# ---------------------------------------------------- the large-chain chooser
+
+_CHOICES = [
+    {"key": "next_30", "label": "Next 30 days", "count": 23, "est_seconds": 17},
+    {"key": "next_90", "label": "Next 90 days", "count": 35, "est_seconds": 26},
+    {"key": "monthly", "label": "Monthlies only", "count": 19, "est_seconds": 14},
+    {"key": "all", "label": "Everything", "count": 56, "est_seconds": 42},
+]
+_ASK = {"symbol": "$SPX", "spot": 6512.25, "signals": [], "needs_choice": True,
+        "expiration_count": 56, "choices": _CHOICES, "expiry_choice": None,
+        "params": {"symbol": "$SPX"}}
+
+
+def test_choice_label_is_a_fixed_map_of_the_four_keys():
+    assert fv.choice_label("next_30") == "Next 30 days"
+    assert fv.choice_label("next_90") == "Next 90 days"
+    assert fv.choice_label("monthly") == "Monthlies only"
+    assert fv.choice_label("all") == "Everything"
+    for junk in ("weekly", "", None, 3, "ALL", ["all"]):
+        assert fv.choice_label(junk) is None
+
+
+def test_chooser_facts_for_a_large_chain():
+    f = fv.chooser_facts(_ASK)
+    assert f["title"] == "$SPX lists 56 expirations in this range."
+    assert f["prompt"] == "Choose what to scan:"
+    assert f["buttons"] == [
+        {"key": "next_30", "text": "Next 30 days · 23 · ~17 s", "enabled": True},
+        {"key": "next_90", "text": "Next 90 days · 35 · ~26 s", "enabled": True},
+        {"key": "monthly", "text": "Monthlies only · 19 · ~14 s", "enabled": True},
+        {"key": "all", "text": "Everything · 56 · ~42 s", "enabled": True},
+    ]
+
+
+def test_chooser_facts_is_none_unless_the_answer_asks():
+    assert fv.chooser_facts(None) is None
+    assert fv.chooser_facts({}) is None
+    # An old payload, and an answer that scanned, carry no chooser.
+    assert fv.chooser_facts({"symbol": "SPY", "signals": [{"id": "a"}]}) is None
+    assert fv.chooser_facts({**_ASK, "needs_choice": False}) is None
+    # A failed scan wins over everything.
+    assert fv.chooser_facts({**_ASK, "error": "TypeError"}) is None
+
+
+def test_chooser_facts_keeps_the_payload_order():
+    f = fv.chooser_facts({**_ASK, "choices": list(reversed(_CHOICES))})
+    assert [b["key"] for b in f["buttons"]] == ["all", "monthly", "next_90", "next_30"]
+
+
+def test_chooser_title_never_prints_a_count_it_did_not_read():
+    for junk in (None, "lots", float("nan"), True, -3, 2.5):
+        f = fv.chooser_facts({**_ASK, "expiration_count": junk})
+        assert f["title"] == "$SPX lists many expirations in this range.", junk
+    assert fv.chooser_facts({**_ASK, "expiration_count": 1})["title"] == (
+        "$SPX lists 1 expiration in this range.")
+    assert fv.chooser_facts({**_ASK, "expiration_count": 1200})["title"] == (
+        "$SPX lists 1,200 expirations in this range.")
+    assert fv.chooser_facts({**_ASK, "symbol": " spx "})["title"].startswith("SPX lists")
+    assert fv.chooser_facts({**_ASK, "symbol": ""})["title"] == (
+        "This symbol lists 56 expirations in this range.")
+
+
+def test_a_choice_with_nothing_in_it_is_disabled_and_says_zero():
+    zero = {"key": "monthly", "label": "Monthlies only", "count": 0, "est_seconds": 0}
+    f = fv.chooser_facts({**_ASK, "choices": [zero]})
+    assert f["buttons"] == [{"key": "monthly", "text": "Monthlies only · 0 · ~0 s",
+                             "enabled": False}]
+
+
+def test_a_choice_drops_the_parts_it_could_not_read():
+    def button(**kw):
+        entry = {"key": "all", "label": "Everything", "count": 56, "est_seconds": 42}
+        entry.update(kw)
+        return fv.chooser_facts({**_ASK, "choices": [entry]})["buttons"][0]
+    assert button(count=None) == {"key": "all", "text": "Everything · ~42 s",
+                                  "enabled": False}
+    assert button(count=float("nan"))["enabled"] is False
+    assert button(count=True)["text"] == "Everything · ~42 s"
+    assert button(count=-2)["text"] == "Everything · ~42 s"
+    assert button(est_seconds=None)["text"] == "Everything · 56"
+    assert button(est_seconds="soon")["text"] == "Everything · 56"
+    assert button(count=None, est_seconds=None)["text"] == "Everything"
+    assert button(count=1500, est_seconds=1125)["text"] == "Everything · 1,500 · ~1,125 s"
+    assert button(est_seconds=16.5)["text"] == "Everything · 56 · ~17 s"
+
+
+def test_a_choice_label_falls_back_to_the_fixed_map():
+    for junk in (None, "", "   ", 7):
+        entry = {"key": "next_90", "label": junk, "count": 35, "est_seconds": 26}
+        f = fv.chooser_facts({**_ASK, "choices": [entry]})
+        assert f["buttons"][0]["text"] == "Next 90 days · 35 · ~26 s", junk
+    entry = {"key": "next_90", "count": 35, "est_seconds": 26}
+    assert fv.chooser_facts({**_ASK, "choices": [entry]})["buttons"][0]["text"] == (
+        "Next 90 days · 35 · ~26 s")
+
+
+def test_malformed_choices_are_skipped_and_none_left_is_no_chooser():
+    junk = [None, "all", {"label": "Everything", "count": 4},
+            {"key": "weekly", "label": "Weeklies", "count": 4}, {"key": None}]
+    f = fv.chooser_facts({**_ASK, "choices": junk + [_CHOICES[2]]})
+    assert [b["key"] for b in f["buttons"]] == ["monthly"]
+    assert fv.chooser_facts({**_ASK, "choices": junk}) is None
+    for bad in (None, [], {"key": "all"}, "all", 4):
+        assert fv.chooser_facts({**_ASK, "choices": bad}) is None
+
+
+def test_summary_on_an_answer_that_asks():
+    f = fv.summary_facts(_ASK)
+    assert f["symbol"] == "$SPX" and f["price"] == "$6,512.25"
+    assert f["counts"] == "56 expirations — choose what to scan"
+    assert f["can_change"] is False
+    for junk in (None, float("nan"), "lots", True):
+        assert fv.summary_facts({**_ASK, "expiration_count": junk})["counts"] == (
+            "Choose what to scan")
+    assert fv.summary_facts({**_ASK, "expiration_count": 1})["counts"] == (
+        "1 expiration — choose what to scan")
+    # A failed scan still wins.
+    failed = fv.summary_facts({**_ASK, "error": "TypeError"})
+    assert failed["counts"] == "Scan failed" and failed["can_change"] is False
+
+
+def test_summary_names_the_choice_a_scan_applied():
+    base = {"symbol": "$SPX", "spot": 6512.25, "signals": [{"id": "a"}] * 3,
+            "needs_choice": False, "expiration_count": 56, "expirations_scanned": 19,
+            "choices": _CHOICES, "expiry_choice": "monthly", "expiries_failed": 1}
+    f = fv.summary_facts(base)
+    assert f["counts"] == ("3 ideas · 1 expiration could not be loaded · "
+                           "Scanned 19 of 56 expirations · Monthlies only")
+    assert f["can_change"] is True
+    one = fv.summary_facts({**base, "expirations_scanned": 1, "expiries_failed": 0})
+    assert one["counts"] == "3 ideas · Scanned 1 of 56 expirations · Monthlies only"
+    big = fv.summary_facts({**base, "expirations_scanned": 1100, "expiration_count": 2400,
+                            "expiries_failed": 0, "expiry_choice": "all"})
+    assert big["counts"] == "3 ideas · Scanned 1,100 of 2,400 expirations · Everything"
+
+
+def test_summary_adds_no_scanned_line_without_a_known_choice_and_both_counts():
+    base = {"symbol": "$SPX", "signals": [{"id": "a"}], "expiration_count": 56,
+            "expirations_scanned": 19, "expiry_choice": "monthly"}
+    assert fv.summary_facts(base)["can_change"] is True
+    for change in ({"expiry_choice": None}, {"expiry_choice": "weekly"},
+                   {"expirations_scanned": None}, {"expiration_count": None},
+                   {"expirations_scanned": float("nan")}, {"expiration_count": "lots"},
+                   {"expiration_count": True}):
+        f = fv.summary_facts({**base, **change})
+        assert f["counts"] == "1 idea", change
+        assert f["can_change"] is False, change
+
+
+def test_an_old_payload_renders_exactly_as_before():
+    old = {"symbol": "SPY", "filtered_out": 6, "spot": 540.12,
+           "view": {"direction": "neutral"}, "signals": [{"iv_rank": 55.0}] * 2}
+    assert fv.summary_facts(old) == {
+        "symbol": "SPY", "price": "$540.12", "pills": ["Neutral"],
+        "vol_rank": "Vol Rank 55", "counts": "2 ideas · 6 below the quality bar",
+        "can_change": False}
+    assert fv.no_data_label({**_SPY, "filtered_out": 2}) == (
+        "No strategies cleared the quality bar for SPY at $764.48.")
+    assert fv.chooser_facts(old) is None
+
+
+def test_no_data_label_on_an_answer_that_asks():
+    assert fv.no_data_label(_ASK) == "Choose which expirations to scan for $SPX."
+    # Ahead of every other reason but a failure.
+    assert fv.no_data_label({**_ASK, "chain_missing": True, "filtered_out": 3}) == (
+        "Choose which expirations to scan for $SPX.")
+    assert fv.no_data_label({**_ASK, "symbol": None}) == (
+        "Choose which expirations to scan.")
+    assert fv.no_data_label({**_ASK, "error": "TypeError"}) == (
+        "The scan for $SPX failed. Check System Status and scan again.")

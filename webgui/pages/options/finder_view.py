@@ -442,15 +442,102 @@ def _price_text(spot):
     return PRICE_UNAVAILABLE if f is None else f"${f:,.2f}"
 
 
+# ----------------------------------------------------------- large-chain chooser
+
+# The four ways to limit a large chain, in the service's order
+# (``options_svc.compute.EXPIRY_CHOICES``, which Tier 1 cannot import). The
+# payload carries its own labels; this map is the fallback when one is unusable.
+_CHOICE_LABELS = {
+    "next_30": "Next 30 days",
+    "next_90": "Next 90 days",
+    "monthly": "Monthlies only",
+    "all": "Everything",
+}
+
+
+def choice_label(key):
+    """The label for one of the four expiry choices, or None for anything else."""
+    return _CHOICE_LABELS.get(key) if isinstance(key, str) else None
+
+
+def _whole_count(v):
+    """A count as an int when it was READ as a whole number >= 0, else None - so
+    ``True``, NaN, ``"56"`` and ``2.5`` are all "not read", never a number."""
+    f = _fmt.num(v)
+    return int(f) if f is not None and f >= 0 and f == int(f) else None
+
+
+def _expirations(n):
+    return f"{n:,} expiration{'' if n == 1 else 's'}"
+
+
+def _symbol_of(payload):
+    return str((payload or {}).get("symbol") or "").strip().upper()
+
+
+def _label_for(payload_choices, key):
+    """``key``'s label from the payload's own choices, else the fixed map."""
+    for entry in payload_choices if isinstance(payload_choices, list) else []:
+        if isinstance(entry, dict) and entry.get("key") == key:
+            label = entry.get("label")
+            if isinstance(label, str) and label.strip():
+                return label.strip()
+            break
+    return choice_label(key)
+
+
+def chooser_facts(payload):
+    """The chooser card for an answer that ASKED instead of scanning, else None.
+
+    A scan over more than 30 expirations answers with ``needs_choice`` and four
+    ``choices`` before fetching any chain. ``{"title", "prompt", "buttons"}``,
+    each button ``{"key", "text", "enabled"}`` in the payload's order, its text
+    ``"Next 30 days · 23 · ~17 s"``. A part that was not read (the count, the
+    estimate) is dropped rather than printed as 0, and a button is enabled only
+    when its count was read and is above zero. A failed scan wins; entries with
+    no known key are skipped, and a list with none left is no chooser - the page
+    then shows its ordinary empty line.
+    """
+    p = payload or {}
+    if p.get("error") or not p.get("needs_choice"):
+        return None
+    choices = p.get("choices")
+    if not isinstance(choices, list):
+        return None
+    buttons = []
+    for entry in choices:
+        if not isinstance(entry, dict) or choice_label(entry.get("key")) is None:
+            continue
+        key = entry["key"]
+        parts = [_label_for(choices, key)]
+        count = _whole_count(entry.get("count"))
+        if count is not None:
+            parts.append(f"{count:,}")
+        est = _fmt.num(entry.get("est_seconds"))
+        if est is not None and est >= 0:
+            parts.append(f"~{_half_up(est):,} s")
+        buttons.append({"key": key, "text": " · ".join(parts),
+                        "enabled": count is not None and count > 0})
+    if not buttons:
+        return None
+    symbol = _symbol_of(p) or "This symbol"
+    listed = _whole_count(p.get("expiration_count"))
+    # "many" rather than a number nobody read.
+    how_many = "many expirations" if listed is None else _expirations(listed)
+    return {"title": f"{symbol} lists {how_many} in this range.",
+            "prompt": "Choose what to scan:", "buttons": buttons}
+
+
 def no_data_label(payload):
     """What the empty list says after a scan that returned no rows - the reason,
     in the page's voice, rather than Quasar's "No data available".
 
     It names the symbol and the price, so an empty list reads as an answer about
     THIS symbol and not a page that failed to load. Precedence: a failed scan
-    (``error`` is the exception's class name - tested for truthiness) · no chain
-    came back · no expirations in the range · the quality cut · premium too cheap
-    to sell · nothing could be built.
+    (``error`` is the exception's class name - tested for truthiness) · a large
+    chain that asked which expirations to scan · no chain came back · no
+    expirations in the range · the quality cut · premium too cheap to sell ·
+    nothing could be built.
 
     One subject throughout: ``SPY at $764.48``, ``SPY`` without a price, and
     ``this symbol`` with no symbol at all. Two exceptions, both deliberate: a
@@ -467,6 +554,9 @@ def no_data_label(payload):
     if p.get("error"):
         failed = f"The scan for {symbol} failed." if symbol else "The scan failed."
         return f"{failed} Check System Status and scan again."
+    if p.get("needs_choice"):
+        tail = f" for {symbol}" if symbol else ""
+        return f"Choose which expirations to scan{tail}."
     if p.get("chain_missing"):
         return f"No option chain came back for {subject}."
     if p.get("no_expiries_in_range"):
@@ -499,9 +589,15 @@ def scan_timeout_text(symbol, seconds):
 def summary_facts(payload):
     """The summary strip's facts, or None before any scan has published.
 
-    ``{"symbol", "price", "pills", "vol_rank", "counts"}``. Vol Rank lives here
-    rather than in the list because a scan is one symbol, so every row carried the
-    same value.
+    ``{"symbol", "price", "pills", "vol_rank", "counts", "can_change"}``. Vol Rank
+    lives here rather than in the list because a scan is one symbol, so every row
+    carried the same value.
+
+    A large chain that ASKED (``needs_choice``) counts nothing yet: its line is
+    ``"56 expirations — choose what to scan"``. A scan limited by a choice adds
+    ``"Scanned 19 of 56 expirations · Monthlies only"`` - only when the choice is
+    one of the four and both counts were read - and ``can_change`` is True
+    exactly then, so the page offers Change beside the line it explains.
 
     ⚠ **Two drops, two sentences, never merged** (moved here from the old
     ``swing.status_text``). The service's quality cut and the volatility gate (gap
@@ -540,7 +636,14 @@ def summary_facts(payload):
         # A failed scan read no ideas and no cuts: "0 ideas" would be a count
         # nobody read. ``error`` is the exception's class name - truthiness only.
         return {"symbol": symbol, "price": price, "pills": pills,
-                "vol_rank": vol_rank, "counts": "Scan failed"}
+                "vol_rank": vol_rank, "counts": "Scan failed", "can_change": False}
+
+    if p.get("needs_choice"):
+        listed = _whole_count(p.get("expiration_count"))
+        counts = ("Choose what to scan" if listed is None
+                  else f"{_expirations(listed)} — choose what to scan")
+        return {"symbol": symbol, "price": price, "pills": pills,
+                "vol_rank": vol_rank, "counts": counts, "can_change": False}
 
     n = len(signals)
     parts = [f"{n:,} idea" if n == 1 else f"{n:,} ideas"]
@@ -560,9 +663,19 @@ def summary_facts(payload):
     if failed:
         parts.append(f"{int(failed):,} expiration{'' if failed == 1 else 's'} "
                      "could not be loaded")
+    # Last, so it sits beside the Change link the page draws after the line.
+    choice = p.get("expiry_choice")
+    scanned = _whole_count(p.get("expirations_scanned"))
+    listed = _whole_count(p.get("expiration_count"))
+    can_change = (choice_label(choice) is not None
+                  and scanned is not None and listed is not None)
+    if can_change:
+        parts.append(f"Scanned {scanned:,} of {_expirations(listed)} · "
+                     f"{_label_for(p.get('choices'), choice)}")
 
     return {"symbol": symbol, "price": price, "pills": pills,
-            "vol_rank": vol_rank, "counts": " · ".join(parts)}
+            "vol_rank": vol_rank, "counts": " · ".join(parts),
+            "can_change": can_change}
 
 
 # ------------------------------------------------------------------------- bars
