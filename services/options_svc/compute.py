@@ -337,7 +337,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     from today, and the builders + ``screen_spreads`` receive ``_NO_DTE_MAX``.
     The chain arrives in expiry groups (:func:`fetch_scan_chain`); every returned
     dict carries ``expiries_failed``, the count of expiries whose group did not
-    load, so a partial chain is never read as a whole one.
+    load, so a partial chain is never read as a whole one - or ``None`` when no
+    expiration list was available and the single fetch ran instead.
 
     Four parameters exist for the 30-45 DTE INCOME window (:func:`income_scan`)
     and all four default to today's behaviour, because nine existing call sites
@@ -6975,8 +6976,12 @@ def option_expirations(api):
 # One /chains call for SPY's whole chain timed out at the proxy's 30 s. Groups of
 # consecutive expiries, fetched a few at a time, returned SPY's 34 expiries in
 # 6.5 s and $SPX's 56 in 11 s (measured on prod). Every swing_scan caller rides
-# this path; the Income Window's 30-45 DTE window is one or two runs.
+# this path. The Income Window's fetch is today..+47 days (runs start from today,
+# not from its 30-day floor), so a daily-expiry name takes several runs.
 SCAN_RUN_EXPIRIES = 8
+# Nested concurrency: publish_income already fans out 6 symbols at a time, each
+# fetching up to this many runs, so up to 24 requests queue behind the proxy's
+# spacing. Acceptable for a once-daily pass.
 SCAN_FETCH_WORKERS = 4
 # The in-range filters take a number; "no upper limit" is this, never a guess at
 # the longest listed expiry.
@@ -6987,8 +6992,11 @@ def scan_expiry_runs(expirations, dte_max, today=None):
     """Listed expiries from TODAY to today + dte_max + 2 (every one when dte_max is
     None), in runs of at most SCAN_RUN_EXPIRIES consecutive listed expiries.
 
-    From today, not from dte_min: run_iv_analysis reads the near expiries for the
-    IV and expected move, exactly as the single fetch delivered them."""
+    From today, not from dte_min, so the merged chain holds exactly what the
+    single fetch delivered. ``run_iv_analysis`` reuses it: ``extract_atm_iv``
+    takes the expiry nearest 30 DTE within 7-60 days (else any later one), so a
+    window starting at dte_min, or ending at a narrower dte_max, would change
+    which expiry the scan's ATM IV and expected move come from."""
     today = today or _dt.date.today()
     last = None if dte_max is None else today + _dt.timedelta(days=int(dte_max) + 2)
     keep = [e for e in expirations or []
@@ -6997,10 +7005,22 @@ def scan_expiry_runs(expirations, dte_max, today=None):
     return [keep[i:i + SCAN_RUN_EXPIRIES] for i in range(0, len(keep), SCAN_RUN_EXPIRIES)]
 
 
+def _chain_has_expiries(chain):
+    """True when a raw chain carries at least one expiry in either map. A 200 with
+    both maps empty (a Schwab FAILED body, say) holds nothing a run asked for."""
+    return bool(chain) and bool((chain.get("callExpDateMap") or {})
+                                or (chain.get("putExpDateMap") or {}))
+
+
 def merge_raw_chains(chains):
     """RAW chains as one: the two expiry maps unioned, every other top-level field
-    from the first chain that arrived. None when none did. Inputs not mutated."""
-    got = [c for c in chains if c]
+    from the first NON-EMPTY chain, in expiry order. A chain with no expiry in
+    either map is skipped, so it can never supply ``underlyingPrice`` 0. None when
+    no chain has an expiry.
+
+    The top-level dict and the two expiry maps are new; the per-expiry strike
+    dicts are shared with the inputs, not copied."""
+    got = [c for c in chains if _chain_has_expiries(c)]
     if not got:
         return None
     out = {k: v for k, v in got[0].items() if k not in ("callExpDateMap", "putExpDateMap")}
@@ -7016,9 +7036,17 @@ def fetch_scan_chain(symbol, dte_max):
     """``(chain, expiries_failed)`` for a swing scan.
 
     Lists the expirations, fetches them in runs (see scan_expiry_runs) at most
-    SCAN_FETCH_WORKERS at a time, and merges. A run that fails is COUNTED in
-    expiries_failed, never hidden. No usable expiration list falls back to the
-    single fetch this function replaced."""
+    SCAN_FETCH_WORKERS at a time, and merges. A run whose response is missing or
+    holds no expiry is COUNTED in expiries_failed, never hidden: each run's range
+    is built from listed expiries, so an empty one is a failure. Every run failing
+    is ``(None, count)``.
+
+    No usable expiration list falls back to the single fetch this function
+    replaced, and returns ``expiries_failed=None`` - a count never taken is not
+    zero. That fallback is degraded on BOTH paths: the proxy client swallows a
+    transport error into a 502, which ``option_expirations`` turns into ``[]``, so
+    the empty list, not the raise, is the realistic failure - and with no
+    dte_max its fallback is the whole-chain call that times out on SPY."""
     from services._parallel import parallel_map
 
     client = _proxy.schwab_py_client
@@ -7026,18 +7054,23 @@ def fetch_scan_chain(symbol, dte_max):
     try:
         exps = option_expirations(symbol)
     except Exception:  # noqa: BLE001 - the single fetch is the fallback
-        _degrade.degraded("options.scan_expirations")
-        exps = []
+        _degrade.degraded("options.scan_expirations", detail=symbol)
+        exps = None
+    else:
+        if not exps:
+            _degrade.degraded("options.scan_expirations",
+                              detail=f"{symbol}: no expiration list", exc_info=False)
     if not exps:
         to = None if dte_max is None else today + _dt.timedelta(days=int(dte_max) + 2)
-        return se.fetch_option_chain(client, symbol, from_date=today, to_date=to), 0
+        return se.fetch_option_chain(client, symbol, from_date=today, to_date=to), None
     runs = scan_expiry_runs(exps, dte_max, today)
     got = parallel_map(
         lambda run: se.fetch_option_chain(client, symbol,
                                           from_date=_dt.date.fromisoformat(run[0]),
                                           to_date=_dt.date.fromisoformat(run[-1])),
         runs, workers=SCAN_FETCH_WORKERS)
-    failed = sum(len(run) for run, chain in zip(runs, got) if not chain)
+    failed = sum(len(run) for run, chain in zip(runs, got)
+                 if not _chain_has_expiries(chain))
     return merge_raw_chains(got), failed
 
 

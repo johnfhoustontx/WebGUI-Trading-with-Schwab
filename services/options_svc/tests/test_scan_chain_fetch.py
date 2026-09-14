@@ -5,6 +5,7 @@ consecutive expiries, 4 at a time, returned it in 6.5 s ($SPX's 56 expiries in 1
 """
 import datetime as dt
 
+from services import _degrade
 from services.options_svc import compute
 
 TODAY = dt.date.today()
@@ -47,6 +48,18 @@ def test_raw_merge_unions_expiry_maps_and_keeps_top_level_fields():
     assert set(out["callExpDateMap"]) == {"x:1", "y:9"}
     assert set(out["putExpDateMap"]) == {"x:1"}
     assert a["callExpDateMap"] == {"x:1": {"1.0": []}}      # inputs not mutated
+    assert out["callExpDateMap"] is not a["callExpDateMap"]
+
+
+def test_merge_takes_top_level_fields_from_the_first_chain_with_an_expiry():
+    """A 200 whose maps are both empty (a FAILED body) carries underlyingPrice 0;
+    it must not be the chain the top-level fields come from."""
+    empty = {"status": "FAILED", "underlyingPrice": 0.0,
+             "callExpDateMap": {}, "putExpDateMap": {}}
+    good = {"underlyingPrice": 541.0, "callExpDateMap": {"y:9": {}}, "putExpDateMap": {}}
+    out = compute.merge_raw_chains([empty, good])
+    assert out["underlyingPrice"] == 541.0 and "status" not in out
+    assert compute.merge_raw_chains([empty]) is None
 
 
 def test_merge_of_nothing_is_None():
@@ -73,20 +86,71 @@ def test_fetch_groups_runs_and_counts_a_failed_one(monkeypatch):
     assert chain is not None and len(chain["callExpDateMap"]) == 2
 
 
+def test_fetch_with_a_bounded_dte_max_asks_for_runs_ending_at_the_slack(monkeypatch):
+    exps = [_d(i) for i in range(0, 50)]                 # daily expiries
+    monkeypatch.setattr(compute, "option_expirations", lambda api: exps)
+    seen = []
+
+    def _fetch(client, symbol, from_date=None, to_date=None):
+        seen.append((from_date, to_date))
+        return {"underlyingPrice": 1.0,
+                "callExpDateMap": {f"{from_date}:1": {}}, "putExpDateMap": {}}
+
+    monkeypatch.setattr(compute.se, "fetch_option_chain", _fetch)
+    chain, failed = compute.fetch_scan_chain("SPY", dte_max=30)
+    d = lambda n: TODAY + dt.timedelta(days=n)          # noqa: E731
+    assert sorted(seen) == [(d(0), d(7)), (d(8), d(15)), (d(16), d(23)),
+                            (d(24), d(31)), (d(32), d(32))]
+    assert failed == 0 and len(chain["callExpDateMap"]) == 5
+
+
+def test_a_run_with_both_maps_empty_is_a_failed_run(monkeypatch):
+    exps = [_d(i) for i in range(1, 11)]                 # runs of 8, 2
+    monkeypatch.setattr(compute, "option_expirations", lambda api: exps)
+
+    def _fetch(client, symbol, from_date=None, to_date=None):
+        if str(from_date) == exps[0]:
+            return {"status": "FAILED", "underlyingPrice": 0.0,
+                    "callExpDateMap": {}, "putExpDateMap": {}}
+        return {"underlyingPrice": 540.0,
+                "callExpDateMap": {f"{from_date}:9": {}}, "putExpDateMap": {}}
+
+    monkeypatch.setattr(compute.se, "fetch_option_chain", _fetch)
+    chain, failed = compute.fetch_scan_chain("SPY", dte_max=None)
+    assert failed == 8
+    assert chain["underlyingPrice"] == 540.0 and "status" not in chain
+
+
+def test_every_run_empty_is_no_chain_with_the_count(monkeypatch):
+    monkeypatch.setattr(compute, "option_expirations", lambda api: [_d(1), _d(2)])
+    monkeypatch.setattr(compute.se, "fetch_option_chain",
+                        lambda client, symbol, from_date=None, to_date=None:
+                        {"underlyingPrice": 0.0, "callExpDateMap": {}, "putExpDateMap": {}})
+    assert compute.fetch_scan_chain("SPY", dte_max=None) == (None, 2)
+
+
 def test_no_expiration_list_falls_back_to_the_single_fetch(monkeypatch):
+    """The realistic failure: the proxy client turns a transport error into a
+    502 and option_expirations into []. The fallback speaks, and its count is
+    None - a count never taken is not zero."""
+    _degrade.reset()
     monkeypatch.setattr(compute, "option_expirations", lambda api: [])
     seen = []
     monkeypatch.setattr(compute.se, "fetch_option_chain",
                         lambda client, symbol, from_date=None, to_date=None:
                         seen.append((from_date, to_date)) or {"underlyingPrice": 1.0})
     chain, failed = compute.fetch_scan_chain("SPY", dte_max=30)
-    assert seen == [(TODAY, TODAY + dt.timedelta(days=32))] and failed == 0
+    assert seen == [(TODAY, TODAY + dt.timedelta(days=32))] and failed is None
+    assert _degrade.counts().get("options.scan_expirations") == 1
     seen.clear()
     compute.fetch_scan_chain("SPY", dte_max=None)
     assert seen == [(TODAY, None)]
+    assert _degrade.counts().get("options.scan_expirations") == 2
 
 
 def test_an_expiration_list_that_raises_falls_back_rather_than_failing(monkeypatch):
+    _degrade.reset()
+
     def _boom(api):
         raise RuntimeError("proxy down")
     monkeypatch.setattr(compute, "option_expirations", _boom)
@@ -94,7 +158,8 @@ def test_an_expiration_list_that_raises_falls_back_rather_than_failing(monkeypat
                         lambda client, symbol, from_date=None, to_date=None:
                         {"underlyingPrice": 1.0})
     chain, failed = compute.fetch_scan_chain("SPY", dte_max=30)
-    assert chain == {"underlyingPrice": 1.0} and failed == 0
+    assert chain == {"underlyingPrice": 1.0} and failed is None
+    assert _degrade.counts().get("options.scan_expirations") == 1    # once, not twice
 
 
 def test_every_run_failing_is_no_chain(monkeypatch):
