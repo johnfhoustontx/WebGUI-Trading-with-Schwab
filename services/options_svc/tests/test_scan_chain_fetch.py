@@ -189,7 +189,7 @@ def test_swing_scan_accepts_no_dte_max(monkeypatch):
     explicit empty result, carrying the (zero) failed-expiry count."""
     seen = {}
 
-    def _fetch(symbol, dte_max):
+    def _fetch(symbol, dte_max, **_):
         seen["dte_max"] = dte_max
         return None, 0
 
@@ -207,7 +207,7 @@ def test_swing_scan_hands_the_builders_a_number_when_there_is_no_dte_max(monkeyp
     import strategy_scanner as ssn
 
     chain = {"underlyingPrice": 540.0, "callExpDateMap": {}, "putExpDateMap": {}}
-    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max: (chain, 3))
+    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max, **_: (chain, 3))
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
                         lambda s: {"last": 540.0})
     monkeypatch.setattr(compute.se, "fetch_price_history", lambda c, s: None)

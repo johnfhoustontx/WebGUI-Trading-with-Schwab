@@ -720,15 +720,11 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                             **plan.answer())
     # Expiry groups rather than one call (see fetch_scan_chain): a whole chain in
     # one call timed out at the proxy. A group that fails is counted, not hidden.
-    #
-    # ⚠ With no rows the two-argument call is kept, and fetch_scan_chain then asks
-    # for the list once more (and speaks again if that fails too) before its
-    # single-fetch fallback: a retry on the degraded path only.
-    if rows:
-        chain, expiries_failed = fetch_scan_chain(symbol, dte_max, rows=rows,
-                                                  dates=plan.fetch_dates)
-    else:
-        chain, expiries_failed = fetch_scan_chain(symbol, dte_max)
+    # ``rows`` is passed even when empty: the list was already asked for (and the
+    # failure reported) above, so an empty one goes straight to the single-fetch
+    # fallback rather than asking a failing proxy a second time.
+    chain, expiries_failed = fetch_scan_chain(symbol, dte_max, rows=rows,
+                                              dates=plan.fetch_dates)
     # Every builder and screen_spreads compares DTE against a number.
     hi = _NO_DTE_MAX if dte_max is None else dte_max
     # Off-hours/weekend the chain fetch can return None, and a symbol Schwab does
@@ -7492,9 +7488,12 @@ def parse_expiration_rows(payload, today=None):
 
     ``dte`` is the row's own ``daysToExpiration`` - the number Schwab also writes
     into the chain keys (``"YYYY-MM-DD:dte"``) the builders filter on, which is one
-    day off the host's calendar difference between 23:00 and 24:00 CT. Only when
-    that field is not a non-negative whole number does it fall back to
-    ``(date - today).days``; ``today`` is used for nothing else.
+    day off the host's calendar difference between 23:00 and 24:00 CT. It falls
+    back to ``(date - today).days`` when that field is not a non-negative whole
+    number, or when it is more than one day from the calendar difference: no clock
+    skew explains two days, so such a number (a 0 on every row, say) is a bad
+    field, and trusting it would count and choose expirations on garbage. That
+    second fallback is reported once per call, naming the first such date.
 
     The type is stripped and upper-cased; a missing, blank or non-string type is
     ``None``, never a guess. A date listed twice keeps ``"S"`` if either row says
@@ -7503,7 +7502,7 @@ def parse_expiration_rows(payload, today=None):
     usable ``daysToExpiration``."""
     today = today or _dt.date.today()
     rows = payload.get("expirationList") if isinstance(payload, dict) else None
-    kinds, dtes = {}, {}
+    kinds, dtes, implausible = {}, {}, None
     for row in rows or []:
         if not isinstance(row, dict):
             continue
@@ -7516,8 +7515,13 @@ def parse_expiration_rows(payload, today=None):
         if date not in kinds or kind == _STANDARD_MONTHLY or (kinds[date] is None and kind):
             kinds[date] = kind
         dte = _schwab_dte(row.get("daysToExpiration"))
+        if dte is not None and abs(dte - (_dt.date.fromisoformat(date) - today).days) > 1:
+            implausible = implausible or date
+            dte = None
         if dtes.get(date) is None:
             dtes[date] = dte
+    if implausible is not None:
+        _degrade.degraded("options.expiration_dte", detail=implausible, exc_info=False)
     return [(d, kinds[d], dtes[d] if dtes[d] is not None
              else (_dt.date.fromisoformat(d) - today).days)
             for d in sorted(kinds)]

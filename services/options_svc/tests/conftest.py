@@ -169,7 +169,7 @@ def scan_env(monkeypatch):
 
     chain = _whole_chain()
     spot, daily_move = 540.0, 5.0
-    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max: (chain, 0))
+    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max, **_: (chain, 0))
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
                         lambda symbol: {"last": spot})
     monkeypatch.setattr(compute.se, "fetch_price_history", lambda client, symbol: {"h": 1})

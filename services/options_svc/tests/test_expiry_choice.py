@@ -171,6 +171,39 @@ def test_parse_missing_dte_falls_back_to_the_calendar():
     assert compute.parse_expiration_rows(payload, today=TODAY) == [("2026-10-15", "W", 31)]
 
 
+def test_parse_an_implausible_schwab_dte_counts_by_the_calendar_and_speaks_once():
+    # A 0 on every row: no clock skew explains it, so the calendar decides, and
+    # the call is reported once, naming the first date it distrusted.
+    from services import _degrade
+
+    _degrade.reset()
+    pairs = SPX_PAIRS[1:]                      # from Sep 18: every row >= 4 days out
+    payload = _payload(pairs, dtes={d: 0 for d, _ in pairs})
+    assert compute.parse_expiration_rows(payload, today=TODAY) == SPX_ROWS[1:]
+    assert _degrade.counts().get("options.expiration_dte") == 1
+
+
+def test_parse_a_schwab_dte_one_day_off_the_calendar_is_trusted_silently():
+    # 23:00-24:00 CT: Schwab one day ahead of the host, in either direction by
+    # exactly one day.
+    from services import _degrade
+
+    _degrade.reset()
+    payload = _payload([("2026-10-15", "W"), ("2026-10-16", "S")],
+                       dtes={"2026-10-15": 30, "2026-10-16": 33})
+    assert compute.parse_expiration_rows(payload, today=TODAY) == [
+        ("2026-10-15", "W", 30), ("2026-10-16", "S", 33)]
+    assert "options.expiration_dte" not in _degrade.counts()
+
+
+def test_parse_a_duplicate_can_supply_the_plausible_dte_a_bad_row_did_not():
+    payload = {"expirationList": [
+        {"expirationDate": "2026-10-15", "expirationType": "W", "daysToExpiration": 0},
+        {"expirationDate": "2026-10-15", "expirationType": "W", "daysToExpiration": 30},
+    ]}
+    assert compute.parse_expiration_rows(payload, today=TODAY) == [("2026-10-15", "W", 30)]
+
+
 def test_parse_duplicate_takes_the_first_usable_schwab_dte():
     payload = {"expirationList": [
         {"expirationDate": "2026-10-15", "expirationType": "W", "daysToExpiration": "x"},

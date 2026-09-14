@@ -220,7 +220,7 @@ def _one_row_scan(monkeypatch, *, trade_type, dte, report, mode):
            "credit": 0.44, "max_loss": 1.56, "expiration": _report_in(dte),
            "dte": dte, "underlying_price": 163.0}
     monkeypatch.setattr(compute, "fetch_scan_chain",
-                        lambda s, d: ({"underlyingPrice": 163.0, "putExpDateMap": {},
+                        lambda s, d, **_: ({"underlyingPrice": 163.0, "putExpDateMap": {},
                                        "callExpDateMap": {}}, 0))
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
                         lambda *a, **kw: {"last": 163.0})

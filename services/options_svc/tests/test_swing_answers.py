@@ -27,7 +27,7 @@ def _raise_builder_bug(**k):
 
 
 def _no_chain(monkeypatch, failed, quote):
-    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max: (None, failed))
+    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max, **_: (None, failed))
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote", lambda s: quote)
 
 
@@ -58,7 +58,7 @@ def test_a_failed_symbol_reads_as_no_chain(monkeypatch):
     """A symbol Schwab does not know: the single-fetch fallback hands back a
     TRUTHY FAILED body with both expiry maps empty. It holds nothing to build
     on, so it is a missing chain - not a chain that happened to build nothing."""
-    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max: (
+    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max, **_: (
         {"status": "FAILED", "callExpDateMap": {}, "putExpDateMap": {}}, None))
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote", lambda s: {"last": 12.5})
     out = compute.swing_scan("SPYY", 0, None, *BANDS)
@@ -71,7 +71,7 @@ def test_the_quote_is_read_before_the_chain(monkeypatch):
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
                         lambda s: calls.append("quote") or {"last": 540.0})
     monkeypatch.setattr(compute, "fetch_scan_chain",
-                        lambda symbol, dte_max: calls.append("chain") or (None, 2))
+                        lambda symbol, dte_max, **_: calls.append("chain") or (None, 2))
     compute.swing_scan("SPY", 0, None, *BANDS)
     assert calls == ["quote", "chain"]
 
@@ -100,7 +100,7 @@ def test_an_unusable_quote_falls_back_to_the_chain(bad, scan_env, monkeypatch):
 def test_no_usable_price_anywhere_is_None_and_nothing_is_built(bad, monkeypatch):
     """The spot guard keeps its meaning (the builders price off spot) - the
     result now says so with ``spot: None``, never a zero."""
-    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max: (
+    monkeypatch.setattr(compute, "fetch_scan_chain", lambda symbol, dte_max, **_: (
         {"underlyingPrice": bad, "callExpDateMap": {"x": {}}, "putExpDateMap": {}}, 0))
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote", lambda s: {"last": bad})
     out = compute.swing_scan("SPY", 0, None, *BANDS)

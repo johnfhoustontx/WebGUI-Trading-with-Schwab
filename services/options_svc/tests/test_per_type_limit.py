@@ -30,7 +30,7 @@ def rows_scan(monkeypatch):
     import strategy_scoring as ssc
 
     monkeypatch.setattr(compute, "fetch_scan_chain",
-                        lambda s, d: ({"underlyingPrice": 100.0, "putExpDateMap": {},
+                        lambda s, d, **_: ({"underlyingPrice": 100.0, "putExpDateMap": {},
                                        "callExpDateMap": {}}, 0))
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote",
                         lambda *a, **k: {"last": 100.0})
@@ -132,10 +132,10 @@ def test_a_limit_that_is_not_a_positive_count_is_refused(bad, rows_scan):
 def test_the_early_returns_carry_not_shown(monkeypatch):
     # The quote is read before the chain; stubbed so the test stays off the proxy.
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote", lambda s: {})
-    monkeypatch.setattr(compute, "fetch_scan_chain", lambda s, d: (None, 3))
+    monkeypatch.setattr(compute, "fetch_scan_chain", lambda s, d, **_: (None, 3))
     assert compute.swing_scan("SPY", 0, None, *BANDS, per_type_limit=25)["not_shown"] == 0
     monkeypatch.setattr(compute, "fetch_scan_chain",
-                        lambda s, d: ({"putExpDateMap": {}, "callExpDateMap": {}}, 0))
+                        lambda s, d, **_: ({"putExpDateMap": {}, "callExpDateMap": {}}, 0))
     monkeypatch.setattr(compute._proxy.schwab_client, "get_quote", lambda s: {})
     assert compute.swing_scan("SPY", 0, None, *BANDS, per_type_limit=25)["not_shown"] == 0
 

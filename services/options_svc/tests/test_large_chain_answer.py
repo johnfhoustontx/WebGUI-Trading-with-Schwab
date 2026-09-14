@@ -254,31 +254,43 @@ def test_ask_if_large_must_be_a_bool(large_env, bad):
         _scan(ask_if_large=bad)
 
 
-def test_no_expiration_list_never_asks(large_env, monkeypatch):
+_SINGLE_FETCH = [(TODAY.isoformat(),
+                  (TODAY + dt.timedelta(days=compute._FALLBACK_MAX_DTE + 2)).isoformat())]
+
+
+def test_no_expiration_list_is_one_listing_one_degrade_and_the_single_fetch(large_env):
     _degrade.reset()
     large_env.rows = []
-    monkeypatch.setattr(compute, "option_expirations", lambda api: [])
     out = _scan()
     assert out["needs_choice"] is False and out["expiration_count"] is None
     assert out["expiry_choice"] is None and out["choices"] is None
+    # Asked once, reported once: the failing proxy is not asked a second time.
+    assert large_env.listings == 1 and large_env.plain_listings == 0
+    assert _degrade.counts().get("options.scan_expirations") == 1
     # The bounded single fetch, whose count was never taken.
-    assert large_env.fetches == [(TODAY.isoformat(),
-                                  (TODAY + dt.timedelta(days=compute._FALLBACK_MAX_DTE
-                                                        + 2)).isoformat())]
-    assert out["expiries_failed"] is None
-    assert _degrade.counts().get("options.scan_expirations", 0) >= 1
+    assert large_env.fetches == _SINGLE_FETCH and out["expiries_failed"] is None
 
 
-def test_a_listing_that_raises_is_a_degrade_and_never_asks(large_env, monkeypatch):
+def test_a_listing_that_raises_is_one_degrade_and_never_asks(large_env, monkeypatch):
     _degrade.reset()
 
     def _boom(api):
+        large_env.listings += 1
         raise RuntimeError("proxy down")
     monkeypatch.setattr(compute, "option_expiration_rows", _boom)
-    monkeypatch.setattr(compute, "option_expirations", lambda api: [])
     out = _scan()
     assert out["needs_choice"] is False and out["expiration_count"] is None
-    assert _degrade.counts().get("options.scan_expirations", 0) >= 1
+    assert large_env.listings == 1 and large_env.plain_listings == 0
+    assert _degrade.counts().get("options.scan_expirations") == 1
+    assert large_env.fetches == _SINGLE_FETCH and out["expiries_failed"] is None
+
+
+def test_fetch_with_empty_rows_takes_the_single_fetch_without_listing(large_env):
+    _degrade.reset()
+    chain, failed = compute.fetch_scan_chain("$SPX", None, rows=[])
+    assert large_env.plain_listings == 0 and large_env.listings == 0
+    assert large_env.fetches == _SINGLE_FETCH and failed is None
+    assert "options.scan_expirations" not in _degrade.counts()
 
 
 def test_the_conftest_stub_keeps_the_typed_listing_off_the_proxy():
