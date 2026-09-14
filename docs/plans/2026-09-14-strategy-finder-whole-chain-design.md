@@ -46,6 +46,7 @@ live chain (pre-market chains carry no quotes); that is part of verification.
 | Earnings on long-dated single-stock candidates | **Show and flag** — keep the candidate, tag it with the report date |
 | While a scan runs | **The spinner stays until the data lands** |
 | A scan with no ideas | **Still shows the spot price**, so an empty answer reads as an answer |
+| ~1,000 rows from an index scan (found in review) | **Best 25 of each strategy type**, the rest counted as not shown; the list paged 50 at a time |
 
 ## Design
 
@@ -160,7 +161,25 @@ results were returned."
   - *The scan for SPY failed. Check System Status and scan again.* (`error`)
   - otherwise *No strategies could be built for SPY at $764.48 in this expiry range.*
 
-### 7. Consequences, stated
+### 7. The best 25 of each strategy type (operator decision, during the build)
+
+Measured in the Task 2 review on a synthetic $SPX-sized chain (56 expiries, 25.6k
+contracts): every expiry left **1,061 rows after the quality cut** — a 2.27 MB cache
+payload, and ~3 MB more of per-row payoff SVG pushed to the browser on every paint and
+every chip click. Off-hours it is worse: the liquidity gate relaxes its volume and spread
+checks when the market is closed, so long-dated strikes are not cut.
+
+- The whole chain is still scanned, scored and cut. After the quality cut the service
+  keeps the **best `FINDER_PER_TYPE_LIMIT = 25` rows of each `type`** (e.g. the best 25
+  bull call spreads across all expiries), ranked by `composite_score`, and counts the
+  rest as **`not_shown`**. `swing_scan(..., per_type_limit=None)`; the Finder's handler
+  passes 25. Ids and payoff curves are built after the limit, so dropped rows cost
+  nothing further.
+- The page's count line adds *"1,040 lower-scoring ideas not shown"*.
+- The ranked list is **paged, 50 rows at a time** (Quasar `rows-per-page`), so the
+  browser never draws hundreds of payoff shapes at once.
+
+### 8. Consequences, stated
 
 - **Many more ideas.** SPY could produce several hundred before the quality cut. The
   top-pick cards, the chips and the sortable Expiry column do the narrowing; illiquid

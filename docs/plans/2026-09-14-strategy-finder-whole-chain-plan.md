@@ -481,6 +481,18 @@ if both files need it; check that file does not already define a clashing name.)
 Handler: `compute.swing_scan(**params, market_state=..., earnings_date=...,
 every_expiry=True, earnings_mode="flag")`.
 
+**Step 3b — the per-type limit (operator decision during the build; design §7).**
+`swing_scan(..., per_type_limit=None)`. When set, AFTER the quality cut and BEFORE
+`assign_ids` / the iv_rank stamp / payoff curves: rank by `composite_score` (a missing
+score ranks last), keep the best `per_type_limit` rows of each `type`, and return
+`not_shown` = the number dropped (0 when nothing was dropped; absent-limit callers get 0).
+Keep the surviving rows in their existing relative order. `FINDER_PER_TYPE_LIMIT = 25` is
+a module constant; the Finder handler passes it. Tests: 30 rows of one type + 3 of
+another → 25 + 3 kept, `not_shown == 5`, the kept 25 are the top scores; `None` keeps
+everything with `not_shown == 0`; payoff curves are computed only for kept rows (spy on
+`ssn.payoff_curve`); ids unique after the limit; the handler passes
+`per_type_limit=compute.FINDER_PER_TYPE_LIMIT`; `income_scan` passes none.
+
 **Step 4: Run `test_swing_earnings_gate.py`, `test_income_scan.py`, `test_every_expiry.py`.**
 
 **Step 5: Commit** — `feat(finder-svc): the Finder flags candidates that hold through earnings`
@@ -548,6 +560,15 @@ def test_a_scan_that_raises_still_answers_its_request(monkeypatch):
 
 **Step 2: Run — fail.**
 
+**Step 2b — "none in range" is not "the fetch failed"** (from the Task 1 spec review).
+`fetch_scan_chain` returns `(None, 0)` when the expiration list succeeded but no listed
+expiry falls in the window, `(None, N>0)` when runs failed, and `(chain_or_None, None)` on
+the single-fetch fallback. So: `chain_missing = chain is None and expiries_failed != 0`
+(a fallback that returned nothing, or failed runs), and `no_expiries_in_range = chain is
+None and expiries_failed == 0`. Both are published; the page words them differently.
+`expiries_failed` may be `None` (not counted) — publish it as is, never coerce to 0.
+Also publish `not_shown` (Task 3). Add tests for both flags.
+
 **Step 3: Implement.** `swing_scan`: move `quote = _proxy.schwab_client.get_quote(symbol)`
 above the fetch; `spot = quote.get("last")`, then `spot = spot or chain.get("underlyingPrice")`
 once a chain exists. Both early returns include `"spot": spot or None`,
@@ -594,9 +615,12 @@ new keys do not break them — do not change them.
    add `"N expirations could not be loaded"` when `expiries_failed` is truthy (singular
    for 1). Tests: zero signals + spot → price shown and `"0 ideas · 18 below the quality
    bar"`; no spot anywhere → `"Price unavailable"`; `spot` NaN → unavailable.
+   `expiries_failed` of `None` adds no line (not counted is not zero). Counts also add
+   `"N lower-scoring ideas not shown"` when `not_shown` is truthy (singular for 1).
 5. `no_data_label(payload)` names the symbol and price, in this precedence:
    `error` → *The scan for SPY failed. Check System Status and scan again.* ·
-   `chain_missing` → *No option chain came back for SPY at $764.48.* · quality cut ·
+   `chain_missing` → *No option chain came back for SPY at $764.48.* ·
+   `no_expiries_in_range` → *SPY at $764.48 has no expirations in this range.* · quality cut ·
    too cheap · built nothing — each *… for SPY at $764.48 …* (without a price:
    *… for SPY …*). One test per branch plus the no-price form.
 6. `scan_timeout_text(symbol, seconds)` → `"Scanning SPY… 12 s"` for the elapsed count.
@@ -632,6 +656,10 @@ new keys do not break them — do not change them.
 5. Summary strip paints on a zero-idea answer with the price. Test: payload with
    `signals: []`, `spot: 764.48` → the strip shows `$764.48` and `0 ideas`.
 6. `_set_no_data(fv.no_data_label(payload))` wherever the empty list is painted.
+7. **Paged list** (design §7): the table shows 50 rows per page
+   (`pagination={"rowsPerPage": 50, ...}` or the Quasar prop, keeping the existing sort
+   behaviour), and a new scan or chip change returns to page 1. Test: 120 rows → the
+   table's pagination is 50 per page; a chip click resets to page 1.
 
 **Commit** — `feat(finder): blank DTE max is no limit; earnings tag; spinner holds until the answer`
 
