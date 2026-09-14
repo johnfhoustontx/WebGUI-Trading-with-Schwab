@@ -39,7 +39,7 @@ from pages.ui_guard import guard
 
 from . import detail, handoff, strategy_table
 from . import finder_view as fv
-from .inputs import bind_symbol_load, select_all_on_focus
+from .inputs import bind_symbol_load, mark_symbol_loaded, select_all_on_focus
 from .scanner import score_zone_class
 from .theme import (BADGE_ACCENT, BADGE_MUTED, BADGE_WARN, BTN, BTN_3D, CARD, EYEBROW,
                     LABEL, MUTED, THEME, TXT_NEG, TXT_POS)
@@ -104,9 +104,9 @@ _FIELD_PROPS = "dense outlined"
 DTE_BOX = "w-24"
 
 # The summary strip's Change control reads as a link, not a button: flat, no
-# fill, the focus blue, underlined on hover.
-CHANGE_LINK = (f"text-sm text-[{_PALETTE['focus']}] hover:underline font-normal "
-               "px-1 min-h-0")
+# fill, the focus blue, underlined on hover and on keyboard focus.
+CHANGE_LINK = (f"text-sm text-[{_PALETTE['focus']}] hover:underline focus-visible:underline "
+               "font-normal px-1 min-h-0")
 
 
 class _Segmented:
@@ -658,7 +658,8 @@ def render():
             # Beside the "Scanned N of M" part it explains - and only when the
             # answer still carries choices to reopen, or Change would open nothing.
             if facts["can_change"] and _change_facts(payload) is not None:
-                ui.button("Change", color=None).props("flat dense no-caps") \
+                ui.button("Change", color=None) \
+                    .props('flat dense no-caps aria-label="Change which expirations to scan"') \
                     .classes(CHANGE_LINK).on("click", lambda _e: _reopen_chooser())
 
     def _change_facts(payload):
@@ -789,14 +790,15 @@ def render():
         # The pick belongs to the chain the card described, so it scans that
         # symbol even if the box has since been edited - and it is remembered for
         # that symbol for as long as the page is open (never persisted): scanning
-        # it again sends the same choice rather than asking again.
-        sym = str(symbol or "").strip().upper() or \
-            (symbol_in.value or "").strip().upper()
+        # it again sends the same choice rather than asking again. No symbol, no
+        # pick: guessing the box's would remember the choice for another chain.
+        sym = str(symbol or "").strip().upper()
         if not sym:
             return
         state["choice_by_symbol"][sym] = key
         if (symbol_in.value or "").strip().upper() != sym:
             symbol_in.value = sym
+            mark_symbol_loaded(symbol_in, sym)
         # The one scan path, so the in-flight dedupe, the spinner, the
         # placeholders, the stale guard and the timeout all apply to a pick.
         _request_scan()
@@ -936,6 +938,7 @@ def render():
     _handoff_sym = handoff.take_pending_swing()
     if _handoff_sym:
         symbol_in.value = _handoff_sym
+        mark_symbol_loaded(symbol_in, _handoff_sym)
         _request_scan()
 
     @guard

@@ -1,4 +1,5 @@
-from pages.options.inputs import bind_symbol_load, select_all_on_focus, should_load
+from pages.options.inputs import (bind_symbol_load, mark_symbol_loaded,
+                                  select_all_on_focus, should_load)
 
 
 def test_select_all_on_focus_uppercases_and_chains():
@@ -45,3 +46,31 @@ def test_build_loading_overlay_handle_starts_hidden():
     assert ov.element.visible is True
     ov.hide()
     assert ov.element.visible is False
+
+
+def _focusout(inp):
+    from nicegui.events import GenericEventArguments
+    (listener,) = [l for l in inp._event_listeners.values() if l.type == "focusout"]
+    listener.handler(GenericEventArguments(sender=inp, client=inp.client, args=None))
+
+
+def test_mark_symbol_loaded_keeps_the_dedupe_in_step_with_a_code_write():
+    """A page that writes the box and loads it itself must tell the dedupe, or
+    the next tab-out reads the new symbol as unloaded and loads it again."""
+    from nicegui import ui
+    fired = []
+    with ui.card():
+        inp = bind_symbol_load(ui.input("Symbol", value="SPY"), lambda: fired.append(1))
+        inp.value = "$SPX"
+        mark_symbol_loaded(inp, " $spx ")
+        _focusout(inp)
+        assert fired == []
+        inp.value = "QQQ"                            # a real edit still loads
+        _focusout(inp)
+        assert fired == [1]
+
+
+def test_mark_symbol_loaded_ignores_an_unbound_input():
+    from nicegui import ui
+    with ui.card():
+        mark_symbol_loaded(ui.input("Symbol", value="SPY"), "QQQ")   # no error

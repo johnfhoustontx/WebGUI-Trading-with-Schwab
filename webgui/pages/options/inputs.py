@@ -61,4 +61,17 @@ def bind_symbol_load(inp, load, *, tab=True):
     inp.on('keydown.enter', _fire)
     if tab:
         inp.on('focusout', _fire)
+    inp._symbol_load_last = last        # for mark_symbol_loaded
     return inp
+
+
+def mark_symbol_loaded(inp, value):
+    """Tell ``bind_symbol_load``'s dedup that ``value`` is already loaded.
+
+    For a page that writes the Symbol field from CODE and loads that symbol itself
+    (a hand-off, a pick naming another symbol): the dedup still remembers the
+    previous symbol, so the next tab-out would read the new one as unloaded and
+    load it a second time. A field that was never bound is left alone."""
+    last = getattr(inp, "_symbol_load_last", None)
+    if last is not None:
+        last["sym"] = (value or "").strip().upper()

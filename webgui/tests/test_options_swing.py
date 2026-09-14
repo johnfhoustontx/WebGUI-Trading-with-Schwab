@@ -1174,16 +1174,7 @@ def test_scan_params_carry_expiry_choice_only_when_one_is_given():
     assert chosen == {**base, "expiry_choice": "monthly"}
 
 
-def test_the_stale_guard_tolerates_expiry_choice_on_either_side_only():
-    ask = {"symbol": "$SPX", "params": _ASK_PARAMS}
-    # The request sends a choice an older echo does not carry - and the reverse.
-    assert swing.fv.payload_answers_scan({**_ASK_PARAMS, "expiry_choice": "all"}, ask)
-    assert swing.fv.payload_answers_scan(
-        _ASK_PARAMS, {**ask, "params": {**_ASK_PARAMS, "expiry_choice": "all"}})
-    # Both carry one: they must agree.
-    assert not swing.fv.payload_answers_scan(
-        {**_ASK_PARAMS, "expiry_choice": "next_30"},
-        {**ask, "params": {**_ASK_PARAMS, "expiry_choice": "all"}})
+# The stale guard's own expiry_choice tolerance is pinned in test_finder_view.py.
 
 
 def test_a_chooser_answer_draws_one_card_of_four_buttons():
@@ -1363,3 +1354,80 @@ def test_the_ask_that_preceded_a_pick_never_ends_the_pick_s_wait(monkeypatch):
     _fire_poll(card)
     (table,) = _widgets(card, ui.table)
     assert {r["id"] for r in table.rows} == {"fly", "sp"}
+
+
+def test_change_carries_an_accessible_name_and_a_keyboard_focus_mark():
+    card = _render_page(_chosen({**_ASK_PARAMS, "expiry_choice": "next_90"}))
+    (change,) = _change_buttons(card)
+    assert change.props.get("aria-label") == "Change which expirations to scan"
+    assert "focus-visible:underline" in change._classes
+
+
+def test_an_empty_pick_says_so_and_offers_change(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_ASK)
+    sent = _recording(monkeypatch)
+    _click(_chooser_buttons(card)["Next 30 days · 23 · ~17 s"], card)
+    _publish({**_chosen(sent[-1]), "signals": [], "no_expiries_in_range": True,
+              "expirations_scanned": 0, "expiries_failed": 0})
+    _fire_poll(card)
+    (table,) = _widgets(card, ui.table)
+    assert table.props["no-data-label"] == (
+        "Next 30 days holds no expirations in this range for $SPX — "
+        "use Change to pick another.")
+    assert "0 ideas · Scanned 0 of 56 expirations · Next 30 days" in _summary_labels(card)
+    assert len(_change_buttons(card)) == 1
+
+
+def test_a_remembered_pick_on_a_small_range_paints_and_ends_the_wait(monkeypatch):
+    """A range of 30 or fewer expirations ignores the choice: the echo still
+    carries the request's expiry_choice, the answer's own is null."""
+    from nicegui import ui
+    card = _render_page(_ASK)
+    sent = _recording(monkeypatch)
+    _click(_chooser_buttons(card)[_NEXT_90], card)
+    scrim, _ = _scan_busy(card)
+    assert scrim.visible
+    _publish({"symbol": "$SPX", "spot": 6512.25, "signals": [_FLY],
+              "needs_choice": False, "expiration_count": 12, "expirations_scanned": None,
+              "choices": None, "expiry_choice": None, "params": sent[-1]})
+    _fire_poll(card)
+    assert not scrim.visible
+    (table,) = _widgets(card, ui.table)
+    assert [r["id"] for r in table.rows] == ["fly"]
+    assert "1 idea" in _summary_labels(card)
+    assert _change_buttons(card) == []
+
+
+def test_tabbing_out_after_a_pick_sends_no_second_scan(monkeypatch):
+    card = _render_page(_PAYLOAD)                    # the box, and its dedupe, on SPY
+    sent = _recording(monkeypatch)
+    _publish(_ASK)                                   # nothing waiting: the ask paints
+    _fire_poll(card)
+    _click(_chooser_buttons(card)[_NEXT_90], card)
+    assert len(sent) == 1
+    _publish(_chosen(sent[-1]))
+    _fire_poll(card)
+    _focusout(card)                                  # the box now reads $SPX
+    assert len(sent) == 1
+
+
+def test_tabbing_out_after_a_handoff_sends_no_second_scan(monkeypatch):
+    from nicegui import ui
+    from pages.options import handoff
+    sent = _recording(monkeypatch)
+    handoff.set_pending_swing("NVDA")
+    card = _render_page(_PAYLOAD)
+    assert [a["symbol"] for a in sent] == ["NVDA"]
+    _publish({**_PAYLOAD, "symbol": "NVDA", "params": sent[-1]})
+    _fire_poll(card)
+    assert _widgets(card, ui.input)[0].value == "NVDA"
+    _focusout(card)
+    assert len(sent) == 1
+
+
+def test_an_ask_with_no_symbol_draws_no_chooser(monkeypatch):
+    card = _render_page({**_ASK, "symbol": ""})
+    sent = _recording(monkeypatch)
+    assert _chooser_buttons(card) == {}
+    assert sent == []

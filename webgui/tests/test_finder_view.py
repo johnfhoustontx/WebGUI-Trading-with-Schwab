@@ -1014,8 +1014,9 @@ def test_chooser_title_never_prints_a_count_it_did_not_read():
     assert fv.chooser_facts({**_ASK, "expiration_count": 1200})["title"] == (
         "$SPX lists 1,200 expirations in this range.")
     assert fv.chooser_facts({**_ASK, "symbol": " spx "})["title"].startswith("SPX lists")
-    assert fv.chooser_facts({**_ASK, "symbol": ""})["title"] == (
-        "This symbol lists 56 expirations in this range.")
+    # No symbol: a pick could scan nothing, so there is no chooser at all.
+    for blank in ("", "   ", None):
+        assert fv.chooser_facts({**_ASK, "symbol": blank}) is None, blank
 
 
 def test_a_choice_with_nothing_in_it_is_disabled_and_says_zero():
@@ -1123,8 +1124,9 @@ def test_no_data_label_on_an_answer_that_asks():
     # Ahead of every other reason but a failure.
     assert fv.no_data_label({**_ASK, "chain_missing": True, "filtered_out": 3}) == (
         "Choose which expirations to scan for $SPX.")
+    # With no symbol there is no chooser to point at: the ordinary line.
     assert fv.no_data_label({**_ASK, "symbol": None}) == (
-        "Choose which expirations to scan.")
+        "No strategies could be built for this symbol in this expiry range.")
     assert fv.no_data_label({**_ASK, "error": "TypeError"}) == (
         "The scan for $SPX failed. Check System Status and scan again.")
 
@@ -1151,3 +1153,67 @@ def test_an_ask_with_no_usable_choices_never_tells_the_reader_to_choose():
         assert fv.no_data_label(broken) == (
             fv.no_data_label({**broken, "needs_choice": False}))
         assert "Choose" not in fv.no_data_label(broken)
+
+
+# The stale guard (moved from test_options_swing.py, same assertions).
+_ASK_PARAMS = {"symbol": "$SPX", "dte_min": 0, "dte_max": None,
+               "put_d_min": -0.25, "put_d_max": -0.15,
+               "call_d_min": 0.15, "call_d_max": 0.25, "min_cr_fraction": 0.10}
+
+
+def test_the_stale_guard_tolerates_expiry_choice_on_either_side_only():
+    ask = {"symbol": "$SPX", "params": _ASK_PARAMS}
+    # The request sends a choice an older echo does not carry - and the reverse.
+    assert fv.payload_answers_scan({**_ASK_PARAMS, "expiry_choice": "all"}, ask)
+    assert fv.payload_answers_scan(
+        _ASK_PARAMS, {**ask, "params": {**_ASK_PARAMS, "expiry_choice": "all"}})
+    # Both carry one: they must agree.
+    assert not fv.payload_answers_scan(
+        {**_ASK_PARAMS, "expiry_choice": "next_30"},
+        {**ask, "params": {**_ASK_PARAMS, "expiry_choice": "all"}})
+
+
+# A remembered pick that holds nothing in the range the bar now asks for.
+_EMPTY_PICK = {"symbol": "$SPX", "spot": 6512.25, "signals": [], "needs_choice": False,
+               "no_expiries_in_range": True, "expiries_failed": 0,
+               "expiration_count": 56, "expirations_scanned": 0,
+               "choices": _CHOICES, "expiry_choice": "next_30"}
+
+
+def test_an_empty_pick_names_the_choice_not_the_range():
+    assert fv.no_data_label(_EMPTY_PICK) == (
+        "Next 30 days holds no expirations in this range for $SPX — "
+        "use Change to pick another.")
+    # The answer's own label, else the fixed map.
+    relabelled = [{**c, "label": "Up to a month"} if c["key"] == "next_30" else c
+                  for c in _CHOICES]
+    assert fv.no_data_label({**_EMPTY_PICK, "choices": relabelled}).startswith(
+        "Up to a month holds no expirations")
+    # No symbol: no summary strip, so no Change to point at either.
+    assert fv.no_data_label({**_EMPTY_PICK, "symbol": None}) == (
+        "Next 30 days holds no expirations in this range.")
+    # It reads as "Scanned 0 of 56" beside it, with Change drawn.
+    f = fv.summary_facts(_EMPTY_PICK)
+    assert f["counts"] == "0 ideas · Scanned 0 of 56 expirations · Next 30 days"
+    assert f["can_change"] is True
+
+
+def test_an_empty_pick_with_nothing_to_change_to_does_not_offer_change():
+    # The page draws Change only when the answer carries usable choices and the
+    # listed count was read; the sentence must not promise a control that is absent.
+    for change in ({"choices": None}, {"choices": []}, {"expiration_count": None}):
+        assert fv.no_data_label({**_EMPTY_PICK, **change}) == (
+            "Next 30 days holds no expirations in this range for $SPX."), change
+
+
+def test_the_empty_pick_line_needs_a_known_choice_and_a_read_zero():
+    ordinary = "$SPX at $6,512.25 has no expirations in this expiry range."
+    for change in ({"expiry_choice": None}, {"expiry_choice": "weekly"},
+                   {"expirations_scanned": None}, {"expirations_scanned": 3},
+                   {"expirations_scanned": False}, {"expirations_scanned": float("nan")}):
+        assert fv.no_data_label({**_EMPTY_PICK, **change}) == ordinary, change
+    # A failure still wins, and an answer that asks still asks.
+    assert fv.no_data_label({**_EMPTY_PICK, "error": "TypeError"}) == (
+        "The scan for $SPX failed. Check System Status and scan again.")
+    assert fv.no_data_label({**_EMPTY_PICK, "needs_choice": True}) == (
+        "Choose which expirations to scan for $SPX.")

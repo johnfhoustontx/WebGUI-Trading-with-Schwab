@@ -501,11 +501,15 @@ def chooser_facts(payload):
     with no known key are skipped, and a list with none left is no chooser - and
     then :func:`summary_facts` and :func:`no_data_label` do not ask either, but
     fall through to their ordinary lines, so no sentence points at a card the
-    page cannot draw.
+    page cannot draw. An answer with no symbol is no chooser either: a pick
+    scans the symbol the card describes, and there would be none.
     """
     p = payload or {}
     if p.get("error") or not p.get("needs_choice"):
         return None
+    symbol = _symbol_of(p)
+    if not symbol:
+        return None                 # a pick would have no chain to scan
     choices = p.get("choices")
     if not isinstance(choices, list):
         return None
@@ -525,7 +529,6 @@ def chooser_facts(payload):
                         "enabled": count is not None and count > 0})
     if not buttons:
         return None
-    symbol = _symbol_of(p) or "This symbol"
     listed = _whole_count(p.get("expiration_count"))
     # "many" rather than a number nobody read.
     how_many = "many expirations" if listed is None else _expirations(listed)
@@ -540,9 +543,16 @@ def no_data_label(payload):
     It names the symbol and the price, so an empty list reads as an answer about
     THIS symbol and not a page that failed to load. Precedence: a failed scan
     (``error`` is the exception's class name - tested for truthiness) · a large
-    chain that asked which expirations to scan · no chain came back · no
-    expirations in the range · the quality cut · premium too cheap to sell ·
-    nothing could be built.
+    chain that asked which expirations to scan · a choice that held no
+    expirations · no chain came back · no expirations in the range · the quality
+    cut · premium too cheap to sell · nothing could be built.
+
+    A remembered choice can hold nothing in the range the bar now asks for (Next
+    30 days, with DTE min at 60): the service answers ``no_expiries_in_range``
+    with ``expirations_scanned`` 0 while the chain lists 56, so "no expirations in
+    this expiry range" would be false beside "Scanned 0 of 56 expirations". That
+    line names the choice instead, and points at Change only when the page draws
+    it - a known choice, both counts read, and choices to reopen.
 
     One subject throughout: ``SPY at $764.48``, ``SPY`` without a price, and
     ``this symbol`` with no symbol at all. Two exceptions, both deliberate: a
@@ -562,6 +572,13 @@ def no_data_label(payload):
     if chooser_facts(p) is not None:
         tail = f" for {symbol}" if symbol else ""
         return f"Choose which expirations to scan{tail}."
+    choice = p.get("expiry_choice")
+    if choice_label(choice) is not None and _whole_count(p.get("expirations_scanned")) == 0:
+        tail = f" for {symbol}" if symbol else ""
+        head = f"{_label_for(p.get('choices'), choice)} holds no expirations in this range{tail}"
+        offers_change = (summary_facts(p) or {}).get("can_change") and \
+            chooser_facts({**p, "needs_choice": True}) is not None
+        return f"{head} — use Change to pick another." if offers_change else f"{head}."
     if p.get("chain_missing"):
         return f"No option chain came back for {subject}."
     if p.get("no_expiries_in_range"):
