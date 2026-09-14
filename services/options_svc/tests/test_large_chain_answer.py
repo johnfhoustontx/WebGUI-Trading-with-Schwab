@@ -189,17 +189,95 @@ def test_the_iv_reference_reaches_the_iv_analysis_and_never_a_candidate(large_en
     assert IV_REFERENCE not in _signal_expiries(out)
 
 
-def test_the_iv_reference_is_the_one_the_whole_scan_would_read(large_env):
+@pytest.mark.parametrize("dte_min, dte_max, threshold", [
+    (0, None, compute.LARGE_CHAIN_EXPIRIES),
+    # These two ranges hold 25 and 11 expirations: the threshold is lowered so the
+    # choices really apply inside them rather than being ignored.
+    (0, 60, 10),
+    (45, None, 5),
+])
+def test_the_iv_reference_is_the_one_the_whole_scan_would_read(large_env, monkeypatch,
+                                                              dte_min, dte_max, threshold):
     """The IV input must not change with the choice: the same expiry the
-    everything scan hands extract_atm_iv, nearest 30 DTE inside 7-60."""
+    everything scan hands extract_atm_iv, nearest 30 DTE inside 7-60 - which the
+    whole scan fetches from today, whatever dte_min says."""
     import iv_analysis
 
-    _scan(ask_if_large=False)
+    monkeypatch.setattr(compute, "LARGE_CHAIN_EXPIRIES", threshold)
+
+    def _run(**kw):
+        large_env.iv_chain = None
+        return compute.swing_scan("$SPX", dte_min, dte_max, *BANDS,
+                                  families=("DIRECTIONAL",), every_expiry=True,
+                                  earnings_mode="flag", payoff=False, **kw)
+
+    _run(ask_if_large=False)
     whole = iv_analysis.extract_atm_iv(large_env.iv_chain)
+    applied = 0
     for choice in ("next_30", "next_90", "monthly", "all"):
-        large_env.fetches.clear()
-        _scan(expiry_choice=choice)
+        out = _run(ask_if_large=True, expiry_choice=choice)
+        if not out["expirations_scanned"]:
+            continue                        # nothing chosen in range: no analysis
+        applied += 1
+        assert out["expiry_choice"] == choice
         assert iv_analysis.extract_atm_iv(large_env.iv_chain) == whole, choice
+    assert applied >= 3
+
+
+def _failing(monkeypatch, dates):
+    """Make the spy's run starting at any of ``dates`` come back empty."""
+    real = compute.se.fetch_option_chain
+    dates = set(dates)
+
+    def _fetch(client, symbol, from_date=None, to_date=None):
+        out = real(client, symbol, from_date=from_date, to_date=to_date)
+        return None if str(from_date) in dates else out
+    monkeypatch.setattr(compute.se, "fetch_option_chain", _fetch)
+
+
+def test_every_chosen_expiry_failing_is_a_missing_chain_even_if_the_reference_loaded(
+        large_env, monkeypatch):
+    _degrade.reset()
+    _failing(monkeypatch, MONTHLY)
+    out = _scan(expiry_choice="monthly")
+    assert (IV_REFERENCE, IV_REFERENCE) in large_env.fetches
+    assert out["chain_missing"] is True and out["no_expiries_in_range"] is False
+    assert out["expiries_failed"] == out["expirations_scanned"] == len(MONTHLY)
+    assert large_env.histories == 0 and large_env.iv_chain is None
+    assert out["expiry_choice"] == "monthly" and out["expiration_count"] == 34
+    assert out["choices"] == compute.choice_summary(SPX_ROWS, 0, None)
+    assert out["signals"] == []
+
+
+def test_everything_failing_counts_only_the_chosen_expiries(large_env, monkeypatch):
+    _failing(monkeypatch, MONTHLY + [IV_REFERENCE])
+    out = _scan(expiry_choice="monthly")
+    assert out["expiries_failed"] == out["expirations_scanned"] == len(MONTHLY)
+    assert out["chain_missing"] is True and large_env.histories == 0
+
+
+def test_a_failed_iv_reference_is_not_a_failed_expiry_but_leaves_a_trace(
+        large_env, monkeypatch):
+    _degrade.reset()
+    _failing(monkeypatch, [IV_REFERENCE])
+    out = _scan(expiry_choice="monthly")
+    assert out["expiries_failed"] == 0 and out["chain_missing"] is False
+    assert _degrade.counts().get("options.scan_iv_reference") == 1
+    assert IV_REFERENCE not in {k.split(":")[0] for k in large_env.iv_chain["callExpDateMap"]}
+    assert out["signals"]
+
+
+def test_one_failed_monthly_and_a_failed_reference_count_one(large_env, monkeypatch):
+    _failing(monkeypatch, [MONTHLY[0], IV_REFERENCE])
+    out = _scan(expiry_choice="monthly")
+    assert out["expiries_failed"] == 1 and out["chain_missing"] is False
+    assert MONTHLY[0] not in _signal_expiries(out)
+
+
+def test_no_iv_reference_degrade_when_the_choice_already_holds_it(large_env):
+    _degrade.reset()
+    _scan(expiry_choice="next_30")
+    assert "options.scan_iv_reference" not in _degrade.counts()
 
 
 def test_next_30_fetches_contiguous_runs_of_at_most_eight(large_env):

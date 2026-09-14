@@ -481,11 +481,14 @@ class _FetchPlan(NamedTuple):
     """What a swing scan fetches, decided before any chain call.
 
     ``action`` is ``"ask"`` (answer with the choices, fetch nothing), ``"choice"``
-    (fetch ``fetch_dates``, build on ``dates``) or ``"scan"`` (today's fetch). The
-    four answer fields are what the result carries on every path of this plan."""
+    (fetch ``fetch_dates``, build on ``dates``) or ``"scan"`` (today's fetch).
+    ``iv_reference`` is the expiry fetched beside a choice for the IV analysis
+    alone, None when the choice already holds it. The four answer fields are what
+    the result carries on every path of this plan."""
     action: str
     dates: list | None = None
     fetch_dates: list | None = None
+    iv_reference: str | None = None
     expiry_choice: str | None = None
     expiration_count: int | None = None
     expirations_scanned: int | None = None
@@ -537,8 +540,10 @@ def _plan_fetch(rows, dte_min, dte_max, expiry_choice, ask_if_large):
         return _FetchPlan("ask", expiration_count=count, choices=choices)
     dates = choice_dates(rows, expiry_choice, dte_min, dte_max)
     ref = _iv_reference_date(rows, dte_max) if dates else None
-    extra = [ref] if ref is not None and ref not in dates else []
-    return _FetchPlan("choice", dates=dates, fetch_dates=dates + extra,
+    ref = ref if ref not in dates else None
+    return _FetchPlan("choice", dates=dates,
+                      fetch_dates=dates + ([ref] if ref is not None else []),
+                      iv_reference=ref,
                       expiry_choice=expiry_choice, expiration_count=count,
                       expirations_scanned=len(dates), choices=choices)
 
@@ -720,11 +725,25 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                             **plan.answer())
     # Expiry groups rather than one call (see fetch_scan_chain): a whole chain in
     # one call timed out at the proxy. A group that fails is counted, not hidden.
-    # ``rows`` is passed even when empty: the list was already asked for (and the
-    # failure reported) above, so an empty one goes straight to the single-fetch
-    # fallback rather than asking a failing proxy a second time.
+    # ``rows`` even when empty: see fetch_scan_chain's docstring.
     chain, expiries_failed = fetch_scan_chain(symbol, dte_max, rows=rows,
                                               dates=plan.fetch_dates)
+    if plan.action == "choice":
+        # Recounted from what the merged chain holds, so only a CHOSEN expiry
+        # counts as failed: the IV reference is not one the reader asked to scan,
+        # and the count can never exceed expirations_scanned.
+        loaded = _loaded_expiries(chain)
+        expiries_failed = len(set(plan.dates) - loaded)
+        if not set(plan.dates) & loaded:
+            # The reference alone loaded: nothing to build on, so the answer is a
+            # missing chain - and no price history is fetched for it.
+            return _scan_result(spot=spot, expiries_failed=expiries_failed,
+                                chain_missing=True, **plan.answer())
+        if plan.iv_reference is not None and plan.iv_reference not in loaded:
+            # The IV analysis falls back to a chosen expiry, so the daily move the
+            # candidates are scored against differs from the whole scan's.
+            _degrade.degraded("options.scan_iv_reference", detail=symbol,
+                              exc_info=False)
     # Every builder and screen_spreads compares DTE against a number.
     hi = _NO_DTE_MAX if dte_max is None else dte_max
     # Off-hours/weekend the chain fetch can return None, and a symbol Schwab does
@@ -7417,7 +7436,9 @@ def fetch_scan_chain(symbol, dte_max, *, rows=None, dates=None):
     Lists the expirations, fetches them in runs (see scan_expiry_runs) at most
     SCAN_FETCH_WORKERS at a time, and merges. ``rows`` (typed ``(date, type,
     dte)``, as swing_scan listed them) replaces the listing, so nothing is listed
-    twice; an empty ``rows`` takes the single-fetch fallback without listing.
+    twice; an empty ``rows`` takes the single-fetch fallback without listing (the
+    caller already asked, and reported the failure - a failing proxy is not asked
+    a second time).
     ``dates`` fetches exactly those expiries instead of today..dte_max + 2, in runs
     consecutive in the listing (:func:`expiry_runs`), each cut to at most
     SCAN_RUN_EXPIRIES - so monthlies, which are not neighbours, are one run each.
@@ -7493,7 +7514,8 @@ def parse_expiration_rows(payload, today=None):
     number, or when it is more than one day from the calendar difference: no clock
     skew explains two days, so such a number (a 0 on every row, say) is a bad
     field, and trusting it would count and choose expirations on garbage. That
-    second fallback is reported once per call, naming the first such date.
+    second fallback is reported once per call, naming the first date it decided -
+    a duplicate row that supplies a plausible number means that date is not one.
 
     The type is stripped and upper-cased; a missing, blank or non-string type is
     ``None``, never a guess. A date listed twice keeps ``"S"`` if either row says
@@ -7502,7 +7524,7 @@ def parse_expiration_rows(payload, today=None):
     usable ``daysToExpiration``."""
     today = today or _dt.date.today()
     rows = payload.get("expirationList") if isinstance(payload, dict) else None
-    kinds, dtes, implausible = {}, {}, None
+    kinds, dtes, distrusted = {}, {}, {}
     for row in rows or []:
         if not isinstance(row, dict):
             continue
@@ -7516,12 +7538,13 @@ def parse_expiration_rows(payload, today=None):
             kinds[date] = kind
         dte = _schwab_dte(row.get("daysToExpiration"))
         if dte is not None and abs(dte - (_dt.date.fromisoformat(date) - today).days) > 1:
-            implausible = implausible or date
+            distrusted[date] = None           # a dict: first-seen order, no repeats
             dte = None
         if dtes.get(date) is None:
             dtes[date] = dte
-    if implausible is not None:
-        _degrade.degraded("options.expiration_dte", detail=implausible, exc_info=False)
+    fell_back = next((d for d in distrusted if dtes[d] is None), None)
+    if fell_back is not None:
+        _degrade.degraded("options.expiration_dte", detail=fell_back, exc_info=False)
     return [(d, kinds[d], dtes[d] if dtes[d] is not None
              else (_dt.date.fromisoformat(d) - today).days)
             for d in sorted(kinds)]

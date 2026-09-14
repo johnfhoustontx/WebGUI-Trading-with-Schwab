@@ -197,11 +197,33 @@ def test_parse_a_schwab_dte_one_day_off_the_calendar_is_trusted_silently():
 
 
 def test_parse_a_duplicate_can_supply_the_plausible_dte_a_bad_row_did_not():
+    # The date is decided by Schwab's number, not the calendar, so nothing fell
+    # back and nothing is reported - in either row order.
+    from services import _degrade
+
+    good = {"expirationDate": "2026-10-15", "expirationType": "W", "daysToExpiration": 30}
+    bad = {"expirationDate": "2026-10-15", "expirationType": "W", "daysToExpiration": 0}
+    for order in ([bad, good], [good, bad]):
+        _degrade.reset()
+        assert compute.parse_expiration_rows({"expirationList": order}, today=TODAY) == [
+            ("2026-10-15", "W", 30)]
+        assert "options.expiration_dte" not in _degrade.counts()
+
+
+def test_parse_reports_the_first_date_that_fell_back(monkeypatch):
+    from services import _degrade
+
+    seen = []
+    monkeypatch.setattr(_degrade, "degraded", lambda area, **k: seen.append((area, k)))
     payload = {"expirationList": [
         {"expirationDate": "2026-10-15", "expirationType": "W", "daysToExpiration": 0},
         {"expirationDate": "2026-10-15", "expirationType": "W", "daysToExpiration": 30},
+        {"expirationDate": "2026-10-16", "expirationType": "S", "daysToExpiration": 0},
     ]}
-    assert compute.parse_expiration_rows(payload, today=TODAY) == [("2026-10-15", "W", 30)]
+    assert compute.parse_expiration_rows(payload, today=TODAY) == [
+        ("2026-10-15", "W", 30), ("2026-10-16", "S", 32)]
+    assert seen == [("options.expiration_dte",
+                     {"detail": "2026-10-16", "exc_info": False})]
 
 
 def test_parse_duplicate_takes_the_first_usable_schwab_dte():
