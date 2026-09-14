@@ -7324,6 +7324,100 @@ def fetch_scan_chain(symbol, dte_max):
     return merge_raw_chains(got), failed
 
 
+# ── the Finder asks before loading a large chain (2026-09-14) ────────────────
+# $SPX lists 56 expirations and scans in about 40 s. More than this many inside
+# the requested DTE range, and the Finder answers with the four choices below
+# instead of fetching. Schwab types every listed expiration (W weekly, S standard
+# monthly, Q quarterly, M month-end), which is what makes "monthlies only" a
+# choice at all.
+LARGE_CHAIN_EXPIRIES = 30
+SCAN_SEC_PER_EXPIRY = 0.75         # live 2026-09-14: SPY 26 s / 34, $SPX 40 s / 56
+EXPIRY_CHOICES = (("next_30", "Next 30 days"), ("next_90", "Next 90 days"),
+                  ("monthly", "Monthlies only"), ("all", "Everything"))
+_STANDARD_MONTHLY = "S"
+
+
+def parse_expiration_rows(payload):
+    """Schwab ``/expirationchain`` → ``[(ISO date, expirationType)]``, sorted by date
+    and unique by date. Junk rows are dropped exactly as ``parse_expiration_list``
+    drops them; a missing or blank type is ``None``, never a guess.
+
+    A date listed twice keeps ``"S"`` if either row says so (the monthly choice must
+    not lose a standard monthly to a duplicate typed otherwise), else the first
+    listed non-``None`` type."""
+    rows = payload.get("expirationList") if isinstance(payload, dict) else None
+    out = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            date = _dt.date.fromisoformat(str(row.get("expirationDate"))[:10]).isoformat()
+        except (TypeError, ValueError):
+            continue
+        kind = row.get("expirationType") or None
+        if date not in out or kind == _STANDARD_MONTHLY or (out[date] is None and kind):
+            out[date] = kind
+    return sorted(out.items())
+
+
+def option_expiration_rows(api):
+    """Every listed expiration for ``api`` with its type, or ``[]`` on no client
+    method or a non-200 — the same degrade as ``option_expirations``, which the
+    Calculator keeps using for the plain date list."""
+    fetch = getattr(_proxy.schwab_py_client, "get_option_expirations", None)
+    if fetch is None:
+        return []
+    resp = fetch(api)
+    if getattr(resp, "status_code", None) != 200:
+        return []
+    return parse_expiration_rows(resp.json())
+
+
+def _row_dte(row, today):
+    return (_dt.date.fromisoformat(row[0]) - today).days
+
+
+def rows_in_range(rows, dte_min, dte_max, today=None):
+    """Rows whose calendar DTE ``(date - today).days`` lies in ``[dte_min,
+    dte_max]``, both inclusive; ``dte_max`` None is no upper bound. Calendar days,
+    as ``scan_expiry_runs`` counts them."""
+    today = today or _dt.date.today()
+    lo = 0 if dte_min is None else int(dte_min)
+    hi = None if dte_max is None else int(dte_max)
+    return [r for r in rows or []
+            if _row_dte(r, today) >= lo and (hi is None or _row_dte(r, today) <= hi)]
+
+
+def choice_dates(rows, choice, dte_min, dte_max, today=None):
+    """The in-range dates ``choice`` keeps: ``next_30`` DTE ≤ 30, ``next_90`` DTE ≤
+    90, ``monthly`` type ``"S"`` only (not quarterlies or month-ends), ``all``
+    everything. An unknown choice raises ``ValueError``."""
+    today = today or _dt.date.today()
+    keep = {
+        "next_30": lambda r: _row_dte(r, today) <= 30,
+        "next_90": lambda r: _row_dte(r, today) <= 90,
+        "monthly": lambda r: r[1] == _STANDARD_MONTHLY,
+        "all": lambda r: True,
+    }.get(choice) if isinstance(choice, str) else None
+    if keep is None:
+        raise ValueError(f"unknown expiry_choice: {choice!r}")
+    return [r[0] for r in rows_in_range(rows, dte_min, dte_max, today) if keep(r)]
+
+
+def choice_summary(rows, dte_min, dte_max, today=None):
+    """One ``{"key", "label", "count", "est_seconds"}`` per EXPIRY_CHOICES entry, in
+    that order; a choice with count 0 is still listed. The estimate rounds half UP
+    (6 expiries x 0.75 = 4.5 → 5 s): Python's ``round`` would print 4, and a time
+    promised to the reader should not come in under the arithmetic."""
+    today = today or _dt.date.today()
+    out = []
+    for key, label in EXPIRY_CHOICES:
+        count = len(choice_dates(rows, key, dte_min, dte_max, today))
+        out.append({"key": key, "label": label, "count": count,
+                    "est_seconds": int(math.floor(count * SCAN_SEC_PER_EXPIRY + 0.5))})
+    return out
+
+
 def initial_expiries(expirations, wanted=None, n=INITIAL_EXPIRY_COUNT):
     """The expiries a lazy load fetches up front: the first ``n`` listed, plus any
     ``wanted`` one that is listed (a restored or handed-off leg's expiry must
