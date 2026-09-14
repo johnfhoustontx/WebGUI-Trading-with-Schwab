@@ -1373,7 +1373,7 @@ press **Scan** when you are ready.
 The top-pick cards turn into grey placeholders reading *Scanning SPY…* — always the
 symbol you asked for, never the previous one — the old list is cleared, and a
 spinner counts the wait in seconds: *Scanning SPY… 12 s*. Reading a whole chain
-takes time; an index such as $SPX can need 10–15 seconds.
+takes time; an index such as $SPX can need about 20 seconds.
 
 The spinner stays up until the answer lands — including the answer for a scan that
 failed, which arrives as soon as it fails (that can be after the chain has been

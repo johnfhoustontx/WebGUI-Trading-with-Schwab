@@ -1492,10 +1492,13 @@ expected move — and fetches runs of at most <code>SCAN_RUN_EXPIRIES</code> (8)
 expiries, <code>SCAN_FETCH_WORKERS</code> (4) at a time, merging the raw expiry maps. A run whose
 response is missing or holds no expiry adds its expiries to <code>expiries_failed</code> (a count of
 expiries, not of runs). With no usable
-expiration list it falls back to one fetch and reports <code>expiries_failed = None</code> (not
+expiration list it falls back to one fetch — bounded to 120 days when the scan has no
+DTE max (<code>_FALLBACK_MAX_DTE</code>) — and reports <code>expiries_failed = None</code> (not
 counted, which is not zero). Measured 2026-09-14 pre-market: SPY's whole chain (34
 expiries, 12,956 contracts) <strong>timed out at the proxy's 30 s</strong> in one request and took
-6.5 s grouped; <code>$SPX</code> (56 expiries, 25,650 contracts) took 11–12 s.</p>
+6.5 s grouped; <code>$SPX</code> (56 expiries, 25,650 contracts) took 11–12 s to fetch. Building
+every structure on every expiry adds 6.55 s on a synthetic chain of that size
+(calendars about half of it), so a whole <code>$SPX</code> scan takes about 20 s for <code>$SPX</code> (measured on a synthetic chain of that size; live figure pending).</p>
 <p><code>_priced_inside</code> then drops a structure whose mid-mark price is impossible for its
 payoff. A long butterfly or condor is worth between 0 and its wing at expiry, so its
 <code>net_debit</code> must lie strictly inside <code>(0, wing × 100)</code>; an iron butterfly is that payoff

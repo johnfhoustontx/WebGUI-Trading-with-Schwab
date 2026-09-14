@@ -1473,8 +1473,10 @@ briefings, the thrice-daily action digest, the nightly momentum cascade, and the
 nightly **`calibration`** rebuild (16:30 CT, after `[windows.collection] stop`
 so the day's outcomes have settled — it reads `signals.db` only and costs no
 Schwab or Claude call), and the once-daily **`income`** scan (08:45 CT — the
-30–45 DTE window, ~23 `/chains` calls against the ~690 the autoscan cadence would
-cost). They
+30–45 DTE window, against the ~690 `/chains` calls the autoscan cadence would
+cost; since 2026-09-14 that is more than one call per symbol — each adds an
+expiration-list call, and a symbol listing daily expiries needs several fetch
+runs). They
 are named clock marks, the same thing `[windows]` already models, and **each
 `analyze` slot is a paid Claude call** while `income` is the largest scheduled
 Schwab spend on that table, so it is the direct control on both.

@@ -2865,7 +2865,7 @@ and scan again.*
 
 **While a scan runs** the cards become placeholders reading *Scanning SPY…* — the symbol
 asked for, never the previous one — and a spinner counts the seconds, *Scanning SPY…
-12 s*. A whole index chain takes 10–15 seconds, so the count is what keeps a long wait
+12 s*. A whole index chain takes about 20 seconds, so the count is what keeps a long wait
 from reading as a hang. The spinner stays until the answer lands: the service answers
 every scan request, a failed one included. Only after **3 minutes** with no answer —
 the service down, say — do the placeholders turn into one still card saying the scan is

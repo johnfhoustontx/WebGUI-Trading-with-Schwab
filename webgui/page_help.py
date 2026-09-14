@@ -284,7 +284,7 @@ four top picks, and the full ranked list.
   position** rather than per contract.
 - **While a scan runs** the cards read *Scanning SPY…* — the symbol you asked for,
   never the one before — and the spinner counts the wait: *Scanning SPY… 12 s*.
-  A whole chain takes a while: an index such as $SPX can need 10–15 seconds. The
+  A whole chain takes a while: an index such as $SPX can need about 20 seconds. The
   spinner stays until the answer lands, a failed scan's included. Only after
   **3 minutes** with nothing back do the cards become one still card saying the
   scan is taking longer than expected: a late result still appears, and if nothing

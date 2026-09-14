@@ -25,7 +25,9 @@ to be considered for trades.")
   timed out at the proxy's 30 s in one call** and took **6.5 s** (16.6 MB) in groups of 8,
   4 at a time; QQQ 5.7 s; **`$SPX` 56 expiries (to 2031-12-19) / 25,650 contracts 11–12 s**
   (37.7 MB). The expiration list costs 0.2–0.3 s; the builders plus scoring 0.5 s on a
-  synthetic `$SPX`-sized chain.
+  synthetic `$SPX`-sized chain before every-expiry building. Built on EVERY expiry that
+  chain measured 6.55 s (calendars about half), so a whole `$SPX` scan takes about 20 s
+  (live figure pending).
 - **The fetch** (`compute.fetch_scan_chain`, every `swing_scan` caller including the
   Income Window, whose chain content does not change): list the expirations, keep those
   from TODAY to today + `dte_max` + 2 (all when `dte_max` is `None`), fetch runs of ≤ 8
