@@ -61,8 +61,14 @@ appealing and easy to use".)
   skips curves** (`income_scan` passes `payoff=False`) — nothing reads one there.
 - **Docs:** `page_help.py`, the User Guide and the Reference Guide describe the new
   page; `docs/webgui-routes.md` has the route detail.
-- ⚠ **The marketing gallery shot is stale** — `tools/gallery_screens.py` `image19`
-  (`/options/swing`) still shows the old table until the next gallery capture run.
+- **Gallery shot recaptured** — `tools/gallery_screens.py` `image19` (`/options/swing`)
+  was re-shot on prod after the promote, from a SPY scan.
+- **The Symbol box follows the painted result** (follow-up the same evening). It
+  always started at `SPY`, so returning after an NVDA scan showed "SPY" above NVDA's
+  ideas. `swing.initial_symbol` seeds it from the cached payload, read before the
+  scan bar is built so `bind_symbol_load`'s tab-out dedup starts on that symbol and a
+  tab-out does not rescan. The DTE and risk-style controls still start at their
+  defaults, not at the cached scan's params.
 - Design + plan: [`docs/plans/2026-09-13-strategy-finder-redesign-design.md`](plans/2026-09-13-strategy-finder-redesign-design.md)
   / [`-plan.md`](plans/2026-09-13-strategy-finder-redesign-plan.md).
 

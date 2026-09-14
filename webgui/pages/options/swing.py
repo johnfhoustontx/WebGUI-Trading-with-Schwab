@@ -139,6 +139,18 @@ def scan_params(symbol, dte_min, dte_max, bands, min_credit_pct):
     }
 
 
+DEFAULT_SYMBOL = "SPY"
+
+
+def initial_symbol(payload):
+    """What the Symbol box starts on: the symbol of the result the page is about
+    to paint, so the box never names a different symbol than the ideas below it.
+    ``SPY`` when nothing has been scanned yet."""
+    sym = (payload or {}).get("symbol")
+    sym = sym.strip().upper() if isinstance(sym, str) else ""
+    return sym or DEFAULT_SYMBOL
+
+
 def scanning_text(symbol):
     """What the placeholder cards say while a scan runs - the symbol being
     scanned, never the previous one."""
@@ -235,6 +247,12 @@ def render():
     # No page title - the tab strip names the page (2026-07-11 dead-space cleanup).
     ui.add_css(FINDER_CSS)
     sync = {"on": False}        # True while code writes linked controls
+    # Read the cached result BEFORE the scan bar is built: the Symbol box starts
+    # on its symbol, and bind_symbol_load seeds its dedup from the box's value at
+    # bind time - set later, the first tab-out would fire a scan. Version first,
+    # so a scan landing between the two reads is repainted, never missed.
+    cached_version = bus_client.read_version("options:swing")
+    cached = bus_client.read("options:swing")
 
     with ui.column().classes("w-full gap-3"):
         # 1 - Scan bar. One bottom-aligned row that wraps: every group carries the
@@ -246,7 +264,7 @@ def render():
                 with ui.column().classes("gap-1"):
                     ui.label("Symbol").classes(EYEBROW)
                     symbol_in = select_all_on_focus(
-                        ui.input(value="SPY")
+                        ui.input(value=initial_symbol(cached))
                         .props(f"{_FIELD_PROPS} autofocus aria-label=Symbol")
                         .classes("w-28"))
                 with ui.column().classes("gap-1"):
@@ -619,8 +637,8 @@ def render():
     bind_symbol_load(symbol_in, _request_scan)
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
-    state["version"] = bus_client.read_version("options:swing")
-    _paint_payload(bus_client.read("options:swing"))
+    state["version"] = cached_version
+    _paint_payload(cached)
 
     # A symbol handed over from the Trade Plan: seed the input and scan at once,
     # the same one-shot pattern Dealer Positioning uses. After the initial paint,

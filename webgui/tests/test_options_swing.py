@@ -525,3 +525,50 @@ def test_the_list_badge_shows_the_rounded_score():
     (table,) = _widgets(card, ui.table)
     assert table.rows[0]["score_text"] == "73"
     assert "props.row.score_text" in swing._SCORE_SLOT
+
+
+# ------------------------------------------------------------ the symbol box
+# The box used to start at SPY whatever the painted result was, so returning to
+# the page after an NVDA scan showed "SPY" above NVDA's ideas.
+
+def test_initial_symbol_is_the_painted_scan_s_symbol():
+    assert swing.initial_symbol({"symbol": "NVDA"}) == "NVDA"
+    assert swing.initial_symbol({"symbol": " qqq "}) == "QQQ"
+
+
+def test_initial_symbol_falls_back_to_spy_with_nothing_painted():
+    assert swing.initial_symbol(None) == "SPY"
+    assert swing.initial_symbol({}) == "SPY"
+    assert swing.initial_symbol({"symbol": ""}) == "SPY"
+    assert swing.initial_symbol({"symbol": None}) == "SPY"
+    assert swing.initial_symbol({"symbol": 5}) == "SPY"
+
+
+def test_the_symbol_box_starts_on_the_cached_scan():
+    from nicegui import ui
+    card = _render_page({**_PAYLOAD, "symbol": "NVDA"})
+    assert _widgets(card, ui.input)[0].value == "NVDA"
+
+
+def test_the_symbol_box_starts_on_spy_with_an_empty_cache():
+    from nicegui import ui
+    card = _render_page()
+    assert _widgets(card, ui.input)[0].value == "SPY"
+
+
+def test_tabbing_out_of_the_seeded_box_does_not_rescan(monkeypatch):
+    """The dedup is seeded from the box's value at bind time, so the box must
+    already hold the cached symbol by then - otherwise the first tab-out reads
+    NVDA != SPY and fires a scan nobody asked for."""
+    from nicegui import ui
+    from nicegui.events import GenericEventArguments
+    card = _render_page({**_PAYLOAD, "symbol": "NVDA"})
+    sent = []
+    monkeypatch.setattr(bus_client, "request", lambda *a, **k: sent.append(a))
+    symbol = _widgets(card, ui.input)[0]
+    (listener,) = [l for l in symbol._event_listeners.values()
+                   if l.type == "focusout"]
+    with symbol.parent_slot:
+        listener.handler(GenericEventArguments(sender=symbol, client=symbol.client,
+                                               args=None))
+    assert sent == []
