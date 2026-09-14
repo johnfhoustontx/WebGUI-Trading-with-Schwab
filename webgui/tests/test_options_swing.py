@@ -91,6 +91,27 @@ def test_finder_rows_wire_the_real_classes_and_paper_gate():
     assert rows["sp"]["_grade_class"] == strategy_table.grade_class("Marginal")
 
 
+def test_list_rows_name_the_strikes_the_card_does():
+    """The list's Strikes cell is the same legs line the top-pick card prints."""
+    from pages.options import strategy_table
+    rows = {r["id"]: r for r in swing.finder_rows([_FLY, _NAKED])}
+    strikes = rows["fly"]["strikes"].replace(" ", " ")
+    assert strikes == strategy_table.legs_summary(_FLY["legs"])
+    assert strikes == swing.card_view(_FLY)["legs"] == "L 95C / S 2×100C / L 105C"
+
+
+def test_a_calendar_row_names_its_back_month():
+    from pages.options import strategy_table
+    cal = {**_FLY, "id": "cal", "type": "CALENDAR_PUT",
+           "legs": [{"side": "short", "kind": "put", "strike": 220.0,
+                     "expiration": "2026-09-21", "qty": 1},
+                    {"side": "long", "kind": "put", "strike": 220.0,
+                     "expiration": "2026-10-16", "qty": 1}]}
+    (row,) = swing.finder_rows([cal])
+    strikes = row["strikes"].replace(" ", " ")
+    assert strikes == strategy_table.legs_summary(cal["legs"]) == "S 220P / L 220P 10/16"
+
+
 def test_card_view_adds_legs_and_the_paper_gate():
     from pages.options import strategy_table
     card = swing.card_view(_FLY)

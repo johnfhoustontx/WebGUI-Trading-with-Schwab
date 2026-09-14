@@ -166,10 +166,11 @@ def waiting_text(symbol):
 
 def finder_rows(signals):
     """``finder_view.finder_rows`` with the real score / grade classes and the
-    ``_PAPER_TYPES`` gate, which live in widget-importing modules."""
+    ``_PAPER_TYPES`` gate and the legs line, which live in widget-importing modules."""
     return fv.finder_rows(signals, score_class=score_zone_class,
                           grade_class=strategy_table.grade_class,
-                          paper_types=strategy_table._PAPER_TYPES)
+                          paper_types=strategy_table._PAPER_TYPES,
+                          legs_text=strategy_table.legs_summary)
 
 
 def card_view(sig):

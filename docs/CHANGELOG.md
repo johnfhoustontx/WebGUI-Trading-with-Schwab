@@ -61,6 +61,10 @@ appealing and easy to use".)
   skips curves** (`income_scan` passes `payoff=False`) — nothing reads one there.
 - **Docs:** `page_help.py`, the User Guide and the Reference Guide describe the new
   page; `docs/webgui-routes.md` has the route detail.
+- **The list names each row's strikes** (operator request the same evening: "the details
+  of the trade … listed in the rows i.e. Strikes and expiration"). A **Strikes** column
+  beside Expiry prints the card's legs line (`strategy_table.legs_summary`) — `L 765P /
+  S 761P`, a back-month leg with its date, `L 100 shares`. Expiry was already a column.
 - **Gallery shot recaptured** — `tools/gallery_screens.py` `image19` (`/options/swing`)
   was re-shot on prod after the promote, from a SPY scan.
 - **The Symbol box follows the painted result** (follow-up the same evening). It

@@ -1432,6 +1432,7 @@ Every idea the chips show, best score first:
 | --- | --- |
 | **Strategy** | the name, with a small payoff shape beside it |
 | **Score** | the 0–100 score, coloured by zone |
+| **Strikes** | each leg in short form, e.g. `L 765P / S 761P` (long 765 put, short 761 put); a leg on a later expiration adds its date, and a share leg reads `L 100 shares` |
 | **Expiry** | the expiration and days to go |
 | **Cost** | debit or credit in dollars, with *for 100 shares* when stock is held |
 | **Max profit** | in dollars, or **∞** when there is no limit |

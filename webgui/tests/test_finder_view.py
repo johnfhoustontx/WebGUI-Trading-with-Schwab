@@ -389,8 +389,40 @@ def test_carry_chips_survives_a_repaint_and_resets_on_a_new_symbol():
 
 def test_finder_columns_fit_without_the_old_extras():
     names = [c["name"] for c in fv.finder_columns()]
-    assert names == ["strategy", "composite_score", "expiry", "cost", "max_profit",
-                     "max_loss", "pop", "grade", "actions"]
+    assert names == ["strategy", "composite_score", "strikes", "expiry", "cost",
+                     "max_profit", "max_loss", "pop", "grade", "actions"]
+
+
+def test_the_strikes_column_sits_beside_expiry_and_shows_its_text():
+    """Operator request: a row names its strikes and expiration without opening
+    the detail panel. Legs text does not sort meaningfully, so it does not sort."""
+    cols = {c["name"]: c for c in fv.finder_columns()}
+    assert cols["strikes"]["label"] == "Strikes"
+    assert cols["strikes"]["field"] == "strikes"
+    assert not cols["strikes"]["sortable"]
+
+
+def test_the_two_long_text_columns_wrap_so_the_actions_stay_on_screen():
+    """Measured in the local harness at the app's 1440 px content width: with
+    Strikes on one line a condor's legs and a collar's cost pushed the table 200 px
+    past its box, hiding the action buttons - the redesign's first complaint.
+    Letting those two cells wrap brings it back inside. Quasar's own td rule is
+    nowrap; a Tailwind class beats it (NiceGUI layers Quasar below utilities)."""
+    cols = {c["name"]: c for c in fv.finder_columns()}
+    wrapping = {n for n, c in cols.items()
+                if "whitespace-normal" in c.get("classes", "").split()}
+    assert wrapping == {"strikes", "cost"}
+    # A minimum width each, or the browser squeezes them to one leg per line
+    # (a condor four lines tall, measured). Strikes gets room for two legs.
+    assert "min-w-[10.5rem]" in cols["strikes"]["classes"].split()
+    assert "min-w-[7rem]" in cols["cost"]["classes"].split()
+
+
+def test_every_header_may_wrap_to_give_the_legs_room():
+    """A header's label, not its numbers, set three columns' width ("Probability of
+    profit" held 187 px over a 110 px bar); wrapping headers hands that to Strikes."""
+    for col in fv.finder_columns():
+        assert "whitespace-normal" in col.get("headerClasses", "").split(), col["name"]
 
 
 def test_finder_columns_sort_numbers_by_number():
@@ -413,7 +445,8 @@ _FLY = {"id": "x", "type": "BUTTERFLY_CALL", "group": "BUTTERFLY",
         "payoff_curve": [[90, -120], [100, 380], [110, -120]], "underlying_price": 100.0}
 
 _HOOKS = {"score_class": lambda s: f"score-{s}", "grade_class": lambda g: f"grade-{g}",
-          "paper_types": {"BUTTERFLY_CALL"}}
+          "paper_types": {"BUTTERFLY_CALL"},
+          "legs_text": lambda legs: f"legs-{len(legs or [])}"}
 
 
 def test_finder_rows_carry_shape_bars_and_paper_gate():
@@ -432,11 +465,39 @@ def test_finder_rows_carry_shape_bars_and_paper_gate():
     assert row["_score_class"] == "score-72.1" and row["_grade_class"] == "grade-Good"
     assert row["grade"] == "Good" and row["grade_reason"] == "ok"
     assert row["_undefined_risk"] is False
+    assert row["strikes"] == "legs-0"          # _FLY here carries no legs
 
 
 def test_finder_rows_paper_gate_and_hooks_are_injected():
-    row = fv.finder_rows([_FLY], score_class=str, grade_class=str, paper_types=set())[0]
+    row = fv.finder_rows([_FLY], score_class=str, grade_class=str, paper_types=set(),
+                         legs_text=lambda legs: "L 1C")[0]
     assert row["_allow_paper"] is False
+    assert row["strikes"] == "L 1C"
+
+
+def test_a_wrapped_strikes_cell_breaks_between_legs_never_inside_one():
+    """The cell wraps at spaces, and a leg reads "S 530P" - so a plain space would
+    strand the "S" on one line and the strike on the next. Inside a leg the spaces
+    are non-breaking, and so is the space BEFORE each slash, so a line ends "S 560C /"
+    rather than the next one starting "/ L 540P"."""
+    hooks = {**_HOOKS, "legs_text": lambda legs: "L 100 shares / S 560C / L 540P 10/19"}
+    (row,) = fv.finder_rows([_FLY], **hooks)
+    nb = " "
+    assert row["strikes"] == f"L{nb}100{nb}shares{nb}/ S{nb}560C{nb}/ L{nb}540P{nb}10/19"
+    assert row["strikes"].replace(nb, " ") == "L 100 shares / S 560C / L 540P 10/19"
+
+
+def test_an_empty_legs_line_passes_through():
+    (row,) = fv.finder_rows([_FLY], **{**_HOOKS, "legs_text": lambda legs: "—"})
+    assert row["strikes"] == "—"
+
+
+def test_finder_rows_hand_the_legs_to_the_legs_hook():
+    seen = []
+    legs = [{"side": "long", "kind": "call", "strike": 100.0}]
+    fv.finder_rows([{**_FLY, "legs": legs}], **{**_HOOKS,
+                   "legs_text": lambda l: seen.append(l) or "x"})
+    assert seen == [legs]
 
 
 def test_finder_rows_mark_unbounded_sides():

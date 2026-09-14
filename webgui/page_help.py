@@ -242,15 +242,17 @@ scan, strategy chips, up to four top picks, and the full ranked list.
 
   Click a card to open it in the detail panel.
 - **The ranked list** — every idea the chips show, best score first: Strategy
-  (with a small payoff shape) · Score · Expiry · Cost · Max profit · Max loss ·
-  Probability of profit · Grade, then the Calculator / Paper / Expected Move
-  buttons. Click a number column's header to sort by it. A naked short's max loss
+  (with a small payoff shape) · Score · Strikes · Expiry · Cost · Max profit ·
+  Max loss · Probability of profit · Grade, then the Calculator / Paper /
+  Expected Move buttons. **Strikes** reads like the cards: `L 765P / S 761P`, a
+  leg on a later expiration adds its date (`S 220P / L 220P 10/16`), and a share
+  leg reads `L 100 shares`. Click a number column's header to sort by it. A naked short's max loss
   carries an **undefined risk** tag, since that figure is a margin estimate, not a
   cap.
 - **Cost** says which way the money moves: `$195 debit`, `$804 credit`, and
   `$54,058 debit for 100 shares` when the trade holds stock.
 - **Click a card or a row** for the Trade detail panel, which starts closed so the
-  list keeps its width. The legs, breakevens and bias live there: a share leg reads
+  list keeps its width. The full legs, breakevens and bias live there: a share leg reads
   `Buy 100 shares`, a butterfly's middle `Sell 2× 100 C`, a calendar or diagonal
   lists each leg with its own expiration date, every breakeven is shown
   (`$95.20 / $104.80`), and a position holding shares states its dollars **per

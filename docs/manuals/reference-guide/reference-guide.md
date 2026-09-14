@@ -2794,6 +2794,7 @@ mistaken for a contract's worth.
 |---|---|
 | **Strategy** | name, with a small payoff shape |
 | **Score** | 0–100, coloured by zone |
+| **Strikes** | each leg, as on the cards: `L 765P / S 761P`; a leg on a later expiration adds its date (`S 220P / L 220P 10/16`), a share leg reads `L 100 shares` |
 | **Expiry** | expiration and days to go |
 | **Cost** | as on the cards |
 | **Max profit** / **Max loss** | dollars, or **∞**; a naked short's loss carries an *undefined risk* tag, because its figure is a margin estimate, not a cap |
@@ -2802,8 +2803,8 @@ mistaken for a contract's worth.
 
 The last column holds **Send to Calculator**, **Send to Paper trade** (where allowed) and
 **Expected Move**. The number columns sort on their values. The list grows with the page
-rather than scrolling in a short box. Legs, breakevens and bias are not columns — they are
-in the detail panel.
+rather than scrolling in a short box. Breakevens and bias are not columns — they are in the
+detail panel, along with each leg written out in full.
 
 **The Grade is quality-gated, not fit-gated** — it is driven by structural quality and
 per-family hard gates, and carries a tooltip explaining the reason. A high score with a

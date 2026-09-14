@@ -650,17 +650,29 @@ def payoff_svg(curve, spot, width=120, height=32):
 _UNBOUNDED_SORT = 1e12
 
 
+# The two long-text cells may wrap (at their spaces), each with a floor so the
+# browser does not squeeze them to a word per line: room for two legs, and for
+# "$54,058 debit". Every header may wrap too - a label, not its numbers, was
+# setting the widest columns. Measured in the local harness at 1372 px.
+_WRAP_CELL = {"strikes": "whitespace-normal min-w-[10.5rem]",
+              "cost": "whitespace-normal min-w-[7rem]"}
+_WRAP_HEADER = "whitespace-normal"
+
+
 def finder_columns():
     """``ui.table`` columns for the slim ranked list.
 
-    Legs, breakevens, bias and Vol Rank are gone from the list (the detail panel
-    and the summary strip carry them). The money, odds and expiry columns sort on
+    Breakevens, bias and Vol Rank are not in the list (the detail panel and the
+    summary strip carry them). Strikes ARE, beside Expiry, so a row names its
+    contracts without a click - a later-expiring leg carries its own date in that
+    text, the way the top-pick cards print it. The money, odds and expiry columns sort on
     a NUMERIC twin field - their shown text ("$1,234", "Oct 16 · 30d") would sort
     as a string - and the page's slots render the text.
     """
     spec = [
         ("strategy", "Strategy", "strategy", True),
         ("composite_score", "Score", "composite_score", True),
+        ("strikes", "Strikes", "strikes", False),
         ("expiry", "Expiry", "_dte", True),
         ("cost", "Cost", "cost", False),
         ("max_profit", "Max profit", "_max_profit_n", True),
@@ -670,8 +682,14 @@ def finder_columns():
     ]
     cols = [{"name": name, "label": label, "field": field, "sortable": sortable,
              "align": "left"} for name, label, field, sortable in spec]
+    # Unwrapped, a condor's legs and a collar's "for 100 shares" push the actions
+    # off-screen at 1440 px.
     cols.append({"name": "actions", "label": "", "field": "actions",
                  "sortable": False, "align": "center"})
+    for col in cols:
+        col["headerClasses"] = _WRAP_HEADER
+        if col["name"] in _WRAP_CELL:
+            col["classes"] = _WRAP_CELL[col["name"]]
     return cols
 
 
@@ -695,13 +713,26 @@ def _max_loss_cell(sig):
     return (NO_READING, None) if v is None else (money(abs(v)), abs(v))
 
 
-def finder_rows(signals, *, score_class, grade_class, paper_types):
+_LEG_SEP = " / "
+_NBSP = " "
+
+
+def _unbroken_legs(text):
+    """A legs line whose wrapping cell may break only BETWEEN legs, after the
+    slash: the spaces inside a leg ("S 530P", "L 100 shares") and the one before
+    each slash become non-breaking."""
+    parts = (p.replace(" ", _NBSP) for p in str(text).split(_LEG_SEP))
+    return (_NBSP + "/ ").join(parts)
+
+
+def finder_rows(signals, *, score_class, grade_class, paper_types, legs_text):
     """Rows for the ranked list, best score first.
 
-    The three hooks are INJECTED because their homes (``scanner.score_zone_class``,
-    ``strategy_table.grade_class`` and ``strategy_table._PAPER_TYPES``) import the
-    widget library; ``swing.finder_rows`` passes the real ones, so the paper gate
-    stays one set rather than a copy here.
+    The four hooks are INJECTED because their homes (``scanner.score_zone_class``,
+    ``strategy_table.grade_class``, ``strategy_table._PAPER_TYPES`` and
+    ``strategy_table.legs_summary``) import the widget library;
+    ``swing.finder_rows`` passes the real ones, so the paper gate stays one set
+    and the Strikes cell is the same legs line the top-pick card prints.
     """
     rows = []
     for s in ranked(signals):
@@ -714,6 +745,7 @@ def finder_rows(signals, *, score_class, grade_class, paper_types):
             "id": s.get("id"),
             "strategy": s.get("strategy_label") or "",
             "composite_score": score,
+            "strikes": _unbroken_legs(legs_text(s.get("legs"))),
             "expiry": expiry_text(s),
             "cost": cost_text(s),
             "max_profit": profit_text,
