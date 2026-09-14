@@ -24,6 +24,8 @@ those widgets show comes from the PURE ``finder_view`` module; this file is
 widgets and wiring. Design:
 ``docs/plans/2026-09-13-strategy-finder-redesign-design.md``.
 """
+from contextlib import contextmanager
+
 import bus_client
 from nicegui import ui
 
@@ -138,6 +140,11 @@ def pct_to_fraction(value):
     return float(value) / 100.0
 
 
+def _blank(value):
+    """An empty number box: ``None``, or text with nothing in it."""
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 def scan_params(symbol, dte_min, dte_max, bands, min_credit_pct):
     """The ``swing_scan`` command args.
 
@@ -146,11 +153,12 @@ def scan_params(symbol, dte_min, dte_max, bands, min_credit_pct):
     rescan.
     """
     # A blank DTE max is no upper limit: the service fetches every listed expiry.
-    blank_max = dte_max is None or (isinstance(dte_max, str) and not dte_max.strip())
+    # A blank DTE min is 0 - from today - rather than an int(None) that would
+    # make Scan silently do nothing.
     return {
         "symbol": (symbol or "").strip().upper(),
-        "dte_min": int(dte_min),
-        "dte_max": None if blank_max else int(dte_max),
+        "dte_min": 0 if _blank(dte_min) else int(dte_min),
+        "dte_max": None if _blank(dte_max) else int(dte_max),
         "put_d_min": float(bands["put_d_min"]),
         "put_d_max": float(bands["put_d_max"]),
         "call_d_min": float(bands["call_d_min"]),
@@ -191,6 +199,33 @@ def finder_rows(signals):
                           grade_class=strategy_table.grade_class,
                           paper_types=strategy_table._PAPER_TYPES,
                           legs_text=strategy_table.legs_summary)
+
+
+def list_rows(signals):
+    """The ranked list's rows WITHOUT their payoff shapes, and the signal each row
+    was built from (in row order).
+
+    The shape is the costly part of a row and only the page on screen is sent
+    (:func:`page_of`), so it is added per page by :func:`with_shapes`. Paging
+    sorts on scalar fields only, so a shapeless row sorts exactly as a full one.
+    """
+    sigs = fv.ranked(signals)
+    # ``ranked`` is a stable total order, so ranking the already-ranked copies in
+    # finder_rows keeps them in step with ``sigs``.
+    rows = finder_rows([{**s, "payoff_curve": None} for s in sigs])
+    return rows, sigs
+
+
+def with_shapes(page, signal_for):
+    """``page``'s rows with their ``_payoff_svg`` built - through the same
+    ``finder_rows`` the list uses, so the shape's size and colours stay one spec.
+    ``signal_for(row)`` returns the row's signal, or None to leave it shapeless."""
+    out = []
+    for row in page:
+        sig = signal_for(row)
+        shape = finder_rows([sig])[0]["_payoff_svg"] if sig else row.get("_payoff_svg", "")
+        out.append({**row, "_payoff_svg": shape})
+    return out
 
 
 def card_view(sig):
@@ -421,13 +456,17 @@ def render():
     # scanning: the seq of the scan whose timeout is armed.
     # scan_request: the swing_scan args a scan is waiting on (None = nothing
     # waiting); only a payload answering THAT request may replace the placeholders.
-    # rows: every visible list row; the table holds only the current page of them.
+    # rows: every visible list row, shapeless; the table holds only the current
+    # page of them, with shapes. row_signal: id(row) -> the signal it was built from.
     state = {"payload": None, "symbol": None, "active": None, "version": None,
-             "scanning": None, "scan_seq": 0, "scan_request": None, "rows": []}
+             "scanning": None, "scan_seq": 0, "scan_request": None, "rows": [],
+             "row_signal": {}}
     # The running count names the request being waited on, read at each tick -
-    # never a symbol captured when the spinner was built.
+    # never a symbol captured when the spinner was built. The spinner's own
+    # deadline sits past SCAN_TIMEOUT_SEC so _scan_timed_out is the one thing
+    # that ends a wait: it hides the spinner AND says what happened.
     scan_busy = _busy.build_busy(
-        list_box, "Scanning…", timeout=SCAN_TIMEOUT_SEC,
+        list_box, "Scanning…", timeout=SCAN_TIMEOUT_SEC + 5,
         elapsed_label=lambda s: fv.scan_timeout_text(
             (state["scan_request"] or {}).get("symbol"), s))
 
@@ -507,16 +546,36 @@ def render():
 
     table.on("rowClick", _on_row_click)
 
+    batch = {"depth": 0}
+
+    @contextmanager
+    def _table_batch():
+        """Every table write inside is ONE update, at the end - a paint sets
+        rows, pagination, the empty line and visibility, and each write would
+        otherwise call update on its own (NiceGUI's outbox coalesces them per
+        flush, so this is one clear push rather than a traffic cut). Nests: only
+        the outermost updates."""
+        batch["depth"] += 1
+        try:
+            with table.props.suspend_updates(), table.classes.suspend_updates():
+                yield
+        finally:
+            batch["depth"] -= 1
+        if batch["depth"] == 0:
+            table.update()
+
     def _show_page(request):
         page, pagination = page_of(state["rows"], table.columns, request)
-        table.rows = page
-        table.pagination = pagination
-        table.update()
+        with _table_batch():
+            table.rows = with_shapes(page, lambda r: state["row_signal"].get(id(r)))
+            table.pagination = pagination
 
-    def _set_rows(rows):
+    def _set_rows(signals):
         """A new list - a scan's answer or a chip change - starts on page 1, in
         the sort the reader last chose."""
+        rows, sigs = list_rows(signals)
         state["rows"] = rows
+        state["row_signal"] = {id(r): s for r, s in zip(rows, sigs)}
         _show_page({**table.pagination, "page": 1})
 
     @guard
@@ -649,8 +708,8 @@ def render():
     def _set_no_data(text):
         # Written to _props directly: a props STRING would be re-parsed, and a
         # quote typed into the symbol box would break it.
-        table._props["no-data-label"] = text
-        table.update()
+        with _table_batch():
+            table._props["no-data-label"] = text
 
     def _paint_still_card(text):
         # One card that does not pulse: four pulsing placeholders would pulse
@@ -678,10 +737,11 @@ def render():
         _paint_chips(signals)
         visible = fv.filter_groups(signals, state["active"])
         _paint_cards(fv.top_picks(visible))
-        _set_rows(finder_rows(visible))
-        _set_no_data(fv.no_data_label(state["payload"]))
+        with _table_batch():
+            _set_rows(visible)
+            _set_no_data(fv.no_data_label(state["payload"]))
+            table.set_visibility(has_scan)
         empty_line.set_visibility(not has_scan)
-        table.set_visibility(has_scan)
 
     def _paint_payload(payload):
         payload = payload or {}
@@ -737,10 +797,11 @@ def render():
         summary_box.set_visibility(False)
         chips_row.clear()
         _paint_placeholders(params["symbol"])
-        _set_rows([])
-        _set_no_data(scanning_text(params["symbol"]))
+        with _table_batch():
+            _set_rows([])
+            _set_no_data(scanning_text(params["symbol"]))
+            table.set_visibility(True)
         empty_line.set_visibility(False)
-        table.set_visibility(True)
         scan_busy.show(scanning_text(params["symbol"]))
         ui.timer(SCAN_TIMEOUT_SEC, lambda: _scan_timed_out(seq), once=True)
 

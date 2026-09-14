@@ -728,11 +728,11 @@ def _scan_busy(card):
     from nicegui import ui
     (spinner,) = [e for e in card.descendants() if isinstance(e, ui.spinner)]
     scrim = spinner.parent_slot.parent
+    from pages import busy
     # build_busy mounts its watchdog outside the target, beside the page's own
-    # timers; it is the 1 s one whose body is busy's _tick.
+    # timers; it carries busy's marker.
     (watchdog,) = [t for t in card.descendants()
-                   if isinstance(t, ui.timer) and t.interval == 1.0
-                   and getattr(t.callback, "__name__", "") == "_tick"]
+                   if isinstance(t, ui.timer) and busy.WATCHDOG_MARK in t._markers]
     return scrim, watchdog
 
 
@@ -936,3 +936,109 @@ def test_a_row_click_on_a_later_page_selects_its_signal():
                          "rowsPerPage": 50})
     _row_click(card, "s119")
     assert "w-[360px]" in _panel(card)._classes
+
+
+def test_the_page_request_asks_the_browser_for_the_pagination_only():
+    """The wire shape: Quasar's ``request`` also carries a ``getCellValue``
+    function, so the listener names the one field it reads. Dropping the args
+    list would change what the browser sends."""
+    from nicegui import ui
+    card = _render_page({**_PAYLOAD, "signals": _many(120)})
+    (table,) = _widgets(card, ui.table)
+    (listener,) = [l for l in table._event_listeners.values() if l.type == "request"]
+    assert listener.args == [["pagination"]]
+
+
+# ------------------------------------------------------------ review fixes
+
+def test_scan_params_blank_dte_min_is_zero():
+    assert swing.scan_params("spy", None, 30, _BANDS, 10)["dte_min"] == 0
+    assert swing.scan_params("spy", " ", 30, _BANDS, 10)["dte_min"] == 0
+    assert swing.scan_params("spy", 7.0, 30, _BANDS, 10)["dte_min"] == 7
+
+
+def test_a_blank_dte_min_box_still_scans_from_today(monkeypatch):
+    card = _render_page()
+    sent = []
+    monkeypatch.setattr(bus_client, "request", lambda d, cmd: sent.append(cmd["args"]))
+    _number(card, "DTE min").value = None
+    _click(_buttons(card)["Scan"], card)
+    assert sent and sent[-1]["dte_min"] == 0 and sent[-1]["dte_max"] is None
+
+
+def _count_updates(monkeypatch, table):
+    calls = []
+    real = table.update
+    monkeypatch.setattr(table, "update", lambda: (calls.append(1), real())[1])
+    return calls
+
+
+def test_a_chip_repaint_pushes_the_table_once(monkeypatch):
+    from nicegui import ui
+    card = _render_page({**_PAYLOAD, "signals": _many(120)})
+    (table,) = _widgets(card, ui.table)
+    calls = _count_updates(monkeypatch, table)
+    _click(_buttons(card)["Spreads 60"], card)
+    assert len(calls) == 1
+
+
+def test_an_answer_and_a_scan_each_push_the_table_once(monkeypatch):
+    from nicegui import ui
+    card = _render_page(_PAYLOAD)
+    (table,) = _widgets(card, ui.table)
+    calls = _count_updates(monkeypatch, table)
+    _scan(card, monkeypatch, "msft")
+    assert len(calls) == 1
+    calls.clear()
+    _publish({**_PAYLOAD, "symbol": "MSFT", "signals": _many(120)})
+    _fire_poll(card)
+    assert len(calls) == 1 and len(table.rows) == 50
+    calls.clear()
+    _request_page(card, {"sortBy": None, "descending": False, "page": 2,
+                         "rowsPerPage": 50})
+    assert len(calls) == 1
+
+
+def test_payoff_shapes_are_built_only_for_the_page_sent(monkeypatch):
+    from nicegui import ui
+    built = []
+    real = swing.fv.payoff_svg
+
+    def spy(curve, spot, width=120, height=32):
+        if curve and width == 72:            # a list-row shape with a curve to draw
+            built.append(1)
+        return real(curve, spot, width=width, height=height)
+
+    monkeypatch.setattr(swing.fv, "payoff_svg", spy)
+    card = _render_page({**_PAYLOAD, "signals": _many(120)})
+    (table,) = _widgets(card, ui.table)
+    assert len(built) == 50
+    assert all(r["_payoff_svg"].startswith("<svg") for r in table.rows)
+    built.clear()
+    _request_page(card, {"sortBy": "max_loss", "descending": True, "page": 3,
+                         "rowsPerPage": 50})
+    assert len(built) == 20 and len(table.rows) == 20
+    assert all(r["_payoff_svg"].startswith("<svg") for r in table.rows)
+
+
+def test_list_rows_are_shapeless_and_paired_with_their_signals():
+    sigs = _many(5)
+    rows, paired = swing.list_rows(sigs)
+    assert [r["id"] for r in rows] == [s["id"] for s in paired]
+    assert all(r["_payoff_svg"] == "" for r in rows)
+    shaped = swing.with_shapes(rows[:2], lambda r: {s["id"]: s for s in paired}[r["id"]])
+    assert [r["_payoff_svg"] for r in shaped] == [
+        swing.finder_rows([s])[0]["_payoff_svg"] for s in paired[:2]]
+    assert rows[0]["_payoff_svg"] == ""          # the stored row is not mutated
+
+
+def test_the_scan_timeout_not_the_spinner_ends_the_wait(monkeypatch):
+    """The spinner's own deadline sits past SCAN_TIMEOUT_SEC, so the timed-out
+    handler - which also says what happened - is the one thing that ends it."""
+    card = _render_page(_PAYLOAD)
+    _scan(card, monkeypatch, "msft")
+    scrim = _tick_after(card, monkeypatch, swing.SCAN_TIMEOUT_SEC + 1)
+    assert scrim.visible
+    _fire_scan_timeout(card)
+    assert not scrim.visible
+    assert _placeholder_texts(card) == ["No result for MSFT yet."]

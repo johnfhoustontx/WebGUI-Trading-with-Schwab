@@ -45,6 +45,9 @@ from nicegui import ui
 # backstop: it says "finished" while the work is still running.
 BUSY_TIMEOUT_SEC = 30.0
 
+# The marker on each spinner's watchdog timer.
+WATCHDOG_MARK = "busy-watchdog"
+
 
 def build_busy(target, text="Loading…", timeout=BUSY_TIMEOUT_SEC,
                elapsed_label=None):
@@ -92,6 +95,11 @@ def build_busy(target, text="Loading…", timeout=BUSY_TIMEOUT_SEC,
                 pass
 
     watchdog = ui.timer(1.0, _tick, active=False)
+    # Marked so a page's test can find THIS timer among the page's own without
+    # depending on a function name. Guarded: some page tests swap ui.timer for a
+    # stand-in with no markers (test_expected_move's capturing timer).
+    if hasattr(watchdog, "mark"):
+        watchdog.mark(WATCHDOG_MARK)
 
     def show(msg=None):
         if msg is not None:
