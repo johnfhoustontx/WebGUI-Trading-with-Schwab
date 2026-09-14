@@ -48,8 +48,13 @@ The list costs 0.2–0.3 s and the scan already fetches it first.
 ### 1. A large chain answers with choices, not with a chain (service)
 
 - **`LARGE_CHAIN_EXPIRIES = 30`.** The Finder's scan counts the listed expirations inside
-  the requested DTE range (`dte_min` to `dte_max`, no upper bound when `null`). More than
-  30, and the request carries no `expiry_choice`: the service **does not fetch the chain**.
+  the requested DTE range (`dte_min` to `dte_max`, no upper bound when `null`), counting
+  each expiration's DTE as **Schwab's `daysToExpiration`** from that list: the same
+  number Schwab writes into the chain keys (`"YYYY-MM-DD:dte"`) the builders filter on.
+  The host's calendar difference is a day off between 23:00 and 24:00 CT, and the fetch
+  asks for exactly the chosen dates, so counting on it could silently drop a boundary
+  expiry. The calendar difference is used only when a row carries no usable number.
+  More than 30, and the request carries no `expiry_choice`: the service **does not fetch the chain**.
   It answers with `needs_choice: True`, `expiration_count`, `choices`, the symbol, the
   spot and the echoed params.
 - **Four choices**, each counted inside the requested range, in this order:
@@ -61,7 +66,7 @@ The list costs 0.2–0.3 s and the scan already fetches it first.
   | `monthly` | Monthlies only | `expirationType == "S"` |
   | `all` | Everything | all of them |
 
-  Each choice carries `count` and `est_seconds = round(count × SCAN_SEC_PER_EXPIRY)`, with
+  Each choice carries `count` and `est_seconds = count × SCAN_SEC_PER_EXPIRY` rounded half up (not to even), with
   `SCAN_SEC_PER_EXPIRY = 0.75` (live: SPY 26 s / 34, $SPX 40 s / 56). A choice with
   `count` 0 is still listed; the page draws it disabled.
 - **With `expiry_choice`:** only that choice's expirations are fetched and built.

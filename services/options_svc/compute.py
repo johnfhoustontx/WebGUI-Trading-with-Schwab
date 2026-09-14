@@ -7337,16 +7337,25 @@ EXPIRY_CHOICES = (("next_30", "Next 30 days"), ("next_90", "Next 90 days"),
 _STANDARD_MONTHLY = "S"
 
 
-def parse_expiration_rows(payload):
-    """Schwab ``/expirationchain`` → ``[(ISO date, expirationType)]``, sorted by date
-    and unique by date. Junk rows are dropped exactly as ``parse_expiration_list``
-    drops them; a missing or blank type is ``None``, never a guess.
+def parse_expiration_rows(payload, today=None):
+    """Schwab ``/expirationchain`` → ``[(ISO date, expirationType, dte)]``, sorted by
+    date and unique by date. Junk rows are dropped exactly as
+    ``parse_expiration_list`` drops them.
 
-    A date listed twice keeps ``"S"`` if either row says so (the monthly choice must
-    not lose a standard monthly to a duplicate typed otherwise), else the first
-    listed non-``None`` type."""
+    ``dte`` is the row's own ``daysToExpiration`` - the number Schwab also writes
+    into the chain keys (``"YYYY-MM-DD:dte"``) the builders filter on, which is one
+    day off the host's calendar difference between 23:00 and 24:00 CT. Only when
+    that field is not a non-negative whole number does it fall back to
+    ``(date - today).days``; ``today`` is used for nothing else.
+
+    The type is stripped and upper-cased; a missing, blank or non-string type is
+    ``None``, never a guess. A date listed twice keeps ``"S"`` if either row says
+    so (the monthly choice must not lose a standard monthly to a duplicate typed
+    otherwise), else the first listed non-``None`` type, and the first row's
+    usable ``daysToExpiration``."""
+    today = today or _dt.date.today()
     rows = payload.get("expirationList") if isinstance(payload, dict) else None
-    out = {}
+    kinds, dtes = {}, {}
     for row in rows or []:
         if not isinstance(row, dict):
             continue
@@ -7354,16 +7363,32 @@ def parse_expiration_rows(payload):
             date = _dt.date.fromisoformat(str(row.get("expirationDate"))[:10]).isoformat()
         except (TypeError, ValueError):
             continue
-        kind = row.get("expirationType") or None
-        if date not in out or kind == _STANDARD_MONTHLY or (out[date] is None and kind):
-            out[date] = kind
-    return sorted(out.items())
+        raw = row.get("expirationType")
+        kind = (raw.strip().upper() or None) if isinstance(raw, str) else None
+        if date not in kinds or kind == _STANDARD_MONTHLY or (kinds[date] is None and kind):
+            kinds[date] = kind
+        dte = _schwab_dte(row.get("daysToExpiration"))
+        if dtes.get(date) is None:
+            dtes[date] = dte
+    return [(d, kinds[d], dtes[d] if dtes[d] is not None
+             else (_dt.date.fromisoformat(d) - today).days)
+            for d in sorted(kinds)]
+
+
+def _schwab_dte(raw):
+    """``daysToExpiration`` as an int when it is a real non-negative whole number
+    (an int, or a float with no fraction), else None. A bool is not a count."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return None
+    if isinstance(raw, float) and (not math.isfinite(raw) or not raw.is_integer()):
+        return None
+    return int(raw) if raw >= 0 else None
 
 
 def option_expiration_rows(api):
-    """Every listed expiration for ``api`` with its type, or ``[]`` on no client
-    method or a non-200 — the same degrade as ``option_expirations``, which the
-    Calculator keeps using for the plain date list."""
+    """Every listed expiration for ``api`` with its type and DTE, or ``[]`` on no
+    client method or a non-200 — the same degrade as ``option_expirations``, which
+    the Calculator keeps using for the plain date list."""
     fetch = getattr(_proxy.schwab_py_client, "get_option_expirations", None)
     if fetch is None:
         return []
@@ -7373,46 +7398,39 @@ def option_expiration_rows(api):
     return parse_expiration_rows(resp.json())
 
 
-def _row_dte(row, today):
-    return (_dt.date.fromisoformat(row[0]) - today).days
-
-
-def rows_in_range(rows, dte_min, dte_max, today=None):
-    """Rows whose calendar DTE ``(date - today).days`` lies in ``[dte_min,
-    dte_max]``, both inclusive; ``dte_max`` None is no upper bound. Calendar days,
-    as ``scan_expiry_runs`` counts them."""
-    today = today or _dt.date.today()
-    lo = 0 if dte_min is None else int(dte_min)
+def rows_in_range(rows, dte_min, dte_max):
+    """Rows whose DTE (the third element, Schwab's ``daysToExpiration``) lies in
+    ``[dte_min, dte_max]``, both inclusive. ``dte_max`` None is no upper bound, and
+    the floor never goes below 0, so a negative ``dte_min`` cannot admit a past
+    expiry."""
+    lo = 0 if dte_min is None else max(0, int(dte_min))
     hi = None if dte_max is None else int(dte_max)
-    return [r for r in rows or []
-            if _row_dte(r, today) >= lo and (hi is None or _row_dte(r, today) <= hi)]
+    return [r for r in rows or [] if r[2] >= lo and (hi is None or r[2] <= hi)]
 
 
-def choice_dates(rows, choice, dte_min, dte_max, today=None):
+def choice_dates(rows, choice, dte_min, dte_max):
     """The in-range dates ``choice`` keeps: ``next_30`` DTE ≤ 30, ``next_90`` DTE ≤
     90, ``monthly`` type ``"S"`` only (not quarterlies or month-ends), ``all``
     everything. An unknown choice raises ``ValueError``."""
-    today = today or _dt.date.today()
     keep = {
-        "next_30": lambda r: _row_dte(r, today) <= 30,
-        "next_90": lambda r: _row_dte(r, today) <= 90,
+        "next_30": lambda r: r[2] <= 30,
+        "next_90": lambda r: r[2] <= 90,
         "monthly": lambda r: r[1] == _STANDARD_MONTHLY,
         "all": lambda r: True,
     }.get(choice) if isinstance(choice, str) else None
     if keep is None:
         raise ValueError(f"unknown expiry_choice: {choice!r}")
-    return [r[0] for r in rows_in_range(rows, dte_min, dte_max, today) if keep(r)]
+    return [r[0] for r in rows_in_range(rows, dte_min, dte_max) if keep(r)]
 
 
-def choice_summary(rows, dte_min, dte_max, today=None):
+def choice_summary(rows, dte_min, dte_max):
     """One ``{"key", "label", "count", "est_seconds"}`` per EXPIRY_CHOICES entry, in
-    that order; a choice with count 0 is still listed. The estimate rounds half UP
-    (6 expiries x 0.75 = 4.5 → 5 s): Python's ``round`` would print 4, and a time
-    promised to the reader should not come in under the arithmetic."""
-    today = today or _dt.date.today()
+    that order; a choice with count 0 is still listed. ``est_seconds`` is
+    ``count x SCAN_SEC_PER_EXPIRY`` where a half rounds up, not to even (6 expiries
+    x 0.75 = 4.5 → 5 s; Python's ``round`` gives 4)."""
     out = []
     for key, label in EXPIRY_CHOICES:
-        count = len(choice_dates(rows, key, dte_min, dte_max, today))
+        count = len(choice_dates(rows, key, dte_min, dte_max))
         out.append({"key": key, "label": label, "count": count,
                     "est_seconds": int(math.floor(count * SCAN_SEC_PER_EXPIRY + 0.5))})
     return out

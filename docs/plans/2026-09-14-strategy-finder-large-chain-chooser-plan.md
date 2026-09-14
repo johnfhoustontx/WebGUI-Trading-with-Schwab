@@ -48,27 +48,35 @@ EXPIRY_CHOICES = (("next_30", "Next 30 days"), ("next_90", "Next 90 days"),
                   ("monthly", "Monthlies only"), ("all", "Everything"))
 ```
 
-- `parse_expiration_rows(payload) -> list[tuple[str, str | None]]` — `(ISO date,
-  expirationType)` from `/expirationchain`, sorted by date, unique by date, junk rows
-  dropped (same tolerance as `parse_expiration_list`; a missing type is `None`).
+- `parse_expiration_rows(payload, today=None) -> list[tuple[str, str | None, int]]` —
+  `(ISO date, expirationType, dte)` from `/expirationchain`, sorted by date, unique by
+  date, junk rows dropped (same tolerance as `parse_expiration_list`). The type is
+  stripped and upper-cased; a missing, blank or non-string type is `None`; a duplicate
+  date keeps `"S"` if any of its rows says so. `dte` is **Schwab's `daysToExpiration`**
+  (the same basis the chain keys use) when it is a non-negative whole number (int, or a
+  float with no fraction; bool/NaN/str rejected), else the calendar difference against
+  `today` — the only use of `today`.
 - `option_expiration_rows(api)` — like `option_expirations` but returns the typed rows
   (`[]` on no method / non-200). `option_expirations` stays as is (the Calculator uses
   it).
-- `rows_in_range(rows, dte_min, dte_max, today=None)` — rows whose calendar DTE
-  `(date - today).days` is in `[dte_min, dte_max]` (`dte_max` None = no upper bound).
-- `choice_dates(rows, choice, dte_min, dte_max, today=None) -> list[str]` — the in-range
+- `rows_in_range(rows, dte_min, dte_max)` — rows whose `dte` is in `[dte_min, dte_max]`
+  (`dte_max` None = no upper bound; the lower bound is clamped at 0, so a negative
+  `dte_min` never admits a past row).
+- `choice_dates(rows, choice, dte_min, dte_max) -> list[str]` — the in-range
   dates a choice keeps: `next_30` DTE ≤ 30, `next_90` DTE ≤ 90, `monthly` type `"S"`, `all`
   everything. Unknown `choice` → `ValueError`.
-- `choice_summary(rows, dte_min, dte_max, today=None) -> list[dict]` — one dict per
+- `choice_summary(rows, dte_min, dte_max) -> list[dict]` — one dict per
   `EXPIRY_CHOICES` entry, in that order: `{"key", "label", "count", "est_seconds"}` with
-  `est_seconds = round(count * SCAN_SEC_PER_EXPIRY)`.
+  `est_seconds = count * SCAN_SEC_PER_EXPIRY` rounded half up (not to even: 4.5 → 5).
 
 Tests: parsing (W/S/Q/M kept; bad date and non-dict rows dropped; duplicates collapse;
 order); range with a `dte_min` floor, a `dte_max`, and `None`; each choice's dates on a
 fixture shaped like $SPX (dailies/weeklies inside 30 d, monthlies S, quarterlies Q, a
 month-end M, LEAPS); `monthly` excludes Q and M; `next_30` inside `dte_min=7` excludes
-DTE < 7; summary order, counts and `est_seconds` rounding; unknown choice raises. Use
-`today=` everywhere in tests (no midnight flake).
+DTE < 7; a row whose `daysToExpiration` differs from the calendar difference counts by
+Schwab's number; a missing or garbage `daysToExpiration` falls back to the calendar;
+summary order, counts and half-up `est_seconds`; unknown choice raises. Pass `today=`
+wherever the calendar fallback can be reached (no midnight flake).
 
 Commit `feat(finder-svc): typed expirations and the four load choices`.
 
@@ -81,7 +89,7 @@ tests `services/options_svc/tests/test_large_chain_answer.py` (new).
 
 1. **Fetch.** `fetch_scan_chain(symbol, dte_max, *, rows=None, dates=None)`:
    - `rows` given → do not list again (no second `/expirationchain` call).
-   - `dates` given → fetch exactly those dates: `expiry_runs([d for d, _ in rows],
+   - `dates` given → fetch exactly those dates: `expiry_runs([r[0] for r in rows],
      dates)` (runs consecutive in the LISTING), each run split to at most
      `SCAN_RUN_EXPIRIES`; failed-run counting unchanged.
    - Neither given → today's behaviour exactly (existing tests stay green unmodified).
@@ -97,7 +105,8 @@ tests `services/options_svc/tests/test_large_chain_answer.py` (new).
    - `large and expiry_choice` → `dates = choice_dates(rows, expiry_choice, dte_min,
      dte_max)`. **The IV input must not change with the choice:** `run_iv_analysis` reads
      the expiry nearest 30 DTE within 7–60 days, so if no chosen date has a DTE in 7–60,
-     also FETCH the listed date nearest 30 DTE. Then **slice the fetched chain to the
+     also FETCH the listed date nearest 30 DTE (DTE throughout is the row's Schwab
+     `daysToExpiration`, the chain keys' basis). Then **slice the fetched chain to the
      chosen dates** (`chain_slice`) for everything after the IV analysis, so that helper
      date can never become a candidate. The answer carries `expiry_choice`,
      `expiration_count=len(in_range)`, `expirations_scanned=len(dates)`, `choices`.
