@@ -45,13 +45,58 @@ def short_reason(rung):
     return _SHORT.get(rung.get("code"), "blocked")
 
 
-def _unavailable():
+BAD_QUANTITY = "Quantity must be a whole number of at least 1."
+
+
+def whole_quantity(qty):
+    """``qty`` as an int >= 1, or ``None`` - the Ledger's own quantity rule.
+
+    A line-for-line mirror of the service's ``compute._whole_quantity`` (Tier 1
+    cannot import it): an int that is not a bool, or a float/str holding a whole
+    number. None, 2.9, "2.5", 0, a negative, NaN or unparseable text is ``None``.
+    ``float.is_integer`` is False for NaN and both infinities, so it carries the
+    service's ``math.isfinite`` check without a ``math`` import. The service
+    answers every ``None`` here with an error, never a cap check, so the preview
+    must not evaluate one either; the options service's agreement test pins the
+    parity.
+    """
+    if isinstance(qty, bool):
+        return None
+    if isinstance(qty, int):
+        n = qty
+    elif isinstance(qty, float):
+        if not qty.is_integer():
+            return None
+        n = int(qty)
+    elif isinstance(qty, str):
+        text = qty.strip()
+        try:
+            n = int(text)
+        except ValueError:
+            try:
+                f = float(text)
+            except ValueError:
+                return None
+            if not f.is_integer():
+                return None
+            n = int(f)
+    else:
+        return None
+    return n if n >= 1 else None
+
+
+def _unavailable(text=UNAVAILABLE):
     return {"available": False, "lines": [], "breach": None, "block_text": "",
-            "max_quantity": None, "unavailable_text": UNAVAILABLE}
+            "max_quantity": None, "unavailable_text": text}
 
 
 def preview(signal, caps, qty=1):
     """``{available, lines, breach, block_text, max_quantity, unavailable_text}``."""
+    # Quantity FIRST, as the service checks it first: a bad quantity is the
+    # reader's to fix whatever state the caps view is in.
+    q = whole_quantity(qty)
+    if q is None:
+        return _unavailable(BAD_QUANTITY)
     sig = signal if isinstance(signal, dict) else {}
     per = num(sig.get("ledger_risk_per_contract"))
     if (not isinstance(caps, dict) or not isinstance(caps.get("limits"), dict)
@@ -62,10 +107,6 @@ def preview(signal, caps, qty=1):
     if book is None:
         book = []
     if not isinstance(book, (list, tuple)):
-        return _unavailable()
-    try:
-        q = max(1, int(qty or 1))
-    except (TypeError, ValueError, OverflowError):
         return _unavailable()
     raw_symbol = sig.get("symbol")
     symbol = raw_symbol.strip().upper() if isinstance(raw_symbol, str) else ""

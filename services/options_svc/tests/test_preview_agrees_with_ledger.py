@@ -24,10 +24,23 @@ import sqlite3
 import pytest
 
 from services.options_svc import compute, handlers
+from shared import book_caps
 from shared.bus import Bus
 from shared.bus.client import reset_fake_bus
 
-_WEBGUI = pathlib.Path(__file__).resolve().parents[3] / "webgui"
+_REPO = pathlib.Path(__file__).resolve().parents[3]
+_WEBGUI = _REPO / "webgui"
+
+
+def _root_is_protected():
+    """The repo-root conftest's ``is_protected`` - the live-store rule itself,
+    loaded from its file so this test cannot drift from it."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "_root_conftest_live_db_rule", _REPO / "conftest.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.is_protected
 
 
 @pytest.fixture
@@ -116,21 +129,49 @@ def _published_view():
 
 @pytest.fixture(scope="module")
 def templates(tmp_path_factory):
-    """``{book name: (template db path, published view)}``."""
+    """``{book name: (template db path, published view)}``.
+
+    ⚠ Module-scoped, so it runs BEFORE the repo-root conftest's function-scoped
+    ``_block_live_databases`` guard exists. It therefore installs the same
+    refusal itself, at the same chokepoint (``sqlite3.connect``) and with the
+    root conftest's own ``is_protected``, for the fixture's whole lifetime - and
+    asserts the Ledger really points at tmp before it writes anything.
+    """
+    is_protected = _root_is_protected()
     root = tmp_path_factory.mktemp("ledger_books")
     out = {}
-    for name, trades in BOOKS.items():
-        db_path = root / f"{name}.db"
-        with pytest.MonkeyPatch.context() as mp:
-            _point_ledger_at(mp, db_path)
-            for sig, qty in trades:
-                opened = compute.create_paper_trade(dict(sig), qty)
-                assert opened["status"] == "opened", (name, sig["symbol"], opened)
-            view = _published_view()
-            assert len(view["open"]) == len(trades), (name, view["open"])
-        out[name] = (db_path, view)
-    reset_fake_bus()
-    return out
+    with pytest.MonkeyPatch.context() as guard:
+        real_connect = sqlite3.connect
+
+        def _guarded(database, *a, **kw):
+            if is_protected(database):
+                raise RuntimeError(
+                    f"refusing to open a live database from a test: {database}")
+            return real_connect(database, *a, **kw)
+
+        guard.setattr(sqlite3, "connect", _guarded)
+        for name, trades in BOOKS.items():
+            db_path = root / f"{name}.db"
+            with pytest.MonkeyPatch.context() as mp:
+                _point_ledger_at(mp, db_path)
+                import trades_db
+                assert not is_protected(trades_db.DEFAULT_DB_PATH)
+                assert pathlib.Path(trades_db.DEFAULT_DB_PATH) == db_path
+                for sig, qty in trades:
+                    opened = compute.create_paper_trade(dict(sig), qty)
+                    assert opened["status"] == "opened", (name, sig["symbol"], opened)
+                view = _published_view()
+                assert len(view["open"]) == len(trades), (name, view["open"])
+            out[name] = (db_path, view)
+        reset_fake_bus()
+        yield out
+
+
+def test_the_template_guard_uses_the_live_store_rule():
+    """The rule the fixture installs really refuses a live store path."""
+    is_protected = _root_is_protected()
+    assert is_protected(_REPO / "options-scanner" / "data" / "trades.db")
+    assert not is_protected(_REPO / "tmp-not-live" / "trades.db")
 
 
 def _fresh_copy(template, dest):
@@ -146,6 +187,8 @@ def _ledger_outcome(templates, tmp_path, monkeypatch, book_name, cand_name, qty)
     db_path = tmp_path / f"{book_name}-{cand_name}-{qty}.db"
     _fresh_copy(templates[book_name][0], db_path)
     _point_ledger_at(monkeypatch, db_path)
+    import trades_db
+    assert pathlib.Path(trades_db.DEFAULT_DB_PATH) == db_path
     return compute.create_paper_trade(dict(CANDIDATES[cand_name]), qty)
 
 
@@ -163,6 +206,11 @@ def test_the_preview_and_the_ledger_agree(book_fit, templates, tmp_path, monkeyp
 
     assert (p["breach"] is None) == (outcome["status"] == "opened"), (
         book_name, cand_name, qty, p["breach"], outcome.get("code"))
+    # Line for line, opened AND refused: the reader sees the sentences the
+    # Ledger computed, not merely the same verdict.
+    assert [l["text"] for l in p["lines"]] == [
+        book_caps.describe(r) for r in outcome["rungs"]], (book_name, cand_name, qty)
+    assert [l["code"] for l in p["lines"]] == [r["code"] for r in outcome["rungs"]]
     if outcome["status"] == "refused":
         assert p["breach"]["code"] == outcome["code"]
         assert p["max_quantity"] == outcome["max_quantity"]
@@ -174,8 +222,6 @@ def test_the_grid_exercises_every_rung_the_ledger_enforces(templates, tmp_path,
     """Guard against a vacuous grid: across the cases, both an open and a refusal
     on each of the seven rungs must occur, or the agreement proves less than it
     reads."""
-    from shared import book_caps
-
     seen, opened = set(), 0
     for book_name, cand_name, qty in CASES:
         out = _ledger_outcome(templates, tmp_path, monkeypatch, book_name,
@@ -187,3 +233,27 @@ def test_the_grid_exercises_every_rung_the_ledger_enforces(templates, tmp_path,
     assert opened > 0
     assert seen == set(book_caps.DISPLAY_ORDER), sorted(
         set(book_caps.DISPLAY_ORDER) - seen)
+
+
+BAD_OR_ODD_QTYS = (0, -3, True, None, 2.9, "2.5", float("nan"), "2", 2.0)
+
+
+@pytest.mark.parametrize("qty", BAD_OR_ODD_QTYS)
+def test_the_quantity_rule_matches_the_ledgers(book_fit, templates, tmp_path,
+                                              monkeypatch, qty):
+    """The service answers ``error`` exactly when the preview refuses the
+    quantity, and a whole number in another type is the same number on both."""
+    view = templates["mixed"][1]
+    stamped = compute.stamp_candidate(dict(CANDIDATES["orcl_190"]), trade_type="SWING")
+    p = book_fit.preview(stamped, view, qty)
+    outcome = _ledger_outcome(templates, tmp_path, monkeypatch, "mixed", "orcl_190", qty)
+    bad_for_preview = (not p["available"]
+                       and p["unavailable_text"] == book_fit.BAD_QUANTITY)
+    assert bad_for_preview == (outcome["status"] == "error"), (qty, p, outcome)
+    assert (compute._whole_quantity(qty) is None) == bad_for_preview
+    if bad_for_preview:
+        assert outcome["message"] == book_fit.BAD_QUANTITY
+    else:
+        assert outcome["qty"] == book_fit.whole_quantity(qty) == 2
+        assert [l["text"] for l in p["lines"]] == [
+            book_caps.describe(r) for r in outcome["rungs"]]

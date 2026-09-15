@@ -1,3 +1,5 @@
+import pytest
+
 from pages.options import book_fit
 
 CAPS = {"limits": {"max_positions_per_symbol": 3, "max_risk_per_symbol": 750.0,
@@ -59,19 +61,36 @@ def test_short_reason_for_the_checklist_chip():
     assert book_fit.short_reason({"code": "TRADE_RISK_CAP", "cap": 250.0}) == "over $250 per trade"
 
 
-def test_the_page_module_imports_nothing_tier1_forbids():
+def test_the_page_module_imports_exactly_book_caps_and_num():
+    """An AST walk over book_fit.py: its imports are exactly ``shared.book_caps``
+    and ``num`` from the sibling ``..fmt`` - so no service, engine, sqlite3,
+    sectors loader or UI framework can arrive, directly or by name. A dynamic
+    import (``__import__`` / ``importlib``) would dodge the walk, so those names
+    are refused outright."""
+    import ast
     import inspect
-    src = inspect.getsource(book_fit)
-    for banned in ("services", "sqlite3", "shared.sectors", "paper_trader", "nicegui"):
-        assert banned not in src.replace("shared.book_caps", "")
+    tree = ast.parse(inspect.getsource(book_fit))
+    imports = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                imports.add(("import", a.name, None, 0))
+        elif isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                imports.add(("from", node.module, a.name, node.level))
+    assert imports == {("from", "shared", "book_caps", 0),
+                       ("from", "fmt", "num", 2)}
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    assert not ({"__import__", "importlib", "exec", "eval"} & (names | attrs))
 
 
 # --- a malformed caps view is "no preview", never a raise --------------------
 
-def _unavailable(p):
+def _unavailable(p, text=None):
     return (p["available"] is False and p["lines"] == [] and p["breach"] is None
-            and p["max_quantity"] is None
-            and p["unavailable_text"] == book_fit.UNAVAILABLE)
+            and p["max_quantity"] is None and p["block_text"] == ""
+            and p["unavailable_text"] == (text or book_fit.UNAVAILABLE))
 
 
 def test_limits_missing_a_required_cap_means_no_preview():
@@ -102,8 +121,63 @@ def test_an_open_row_with_a_non_string_symbol_means_no_preview():
 
 
 def test_a_non_numeric_quantity_means_no_preview():
-    assert _unavailable(book_fit.preview(SIG, CAPS, qty="lots"))
-    assert _unavailable(book_fit.preview(SIG, CAPS, qty=object()))
+    assert _unavailable(book_fit.preview(SIG, CAPS, qty="lots"), book_fit.BAD_QUANTITY)
+    assert _unavailable(book_fit.preview(SIG, CAPS, qty=object()), book_fit.BAD_QUANTITY)
+
+
+BAD_QTYS = (0, -3, True, False, None, 2.9, "2.5", float("nan"), float("inf"),
+            "", " ", "abc", "nan", -1.0, [2])
+
+
+def test_the_quantity_rule_text_is_the_ledgers_word_for_word():
+    assert book_fit.BAD_QUANTITY == "Quantity must be a whole number of at least 1."
+
+
+
+@pytest.mark.parametrize("qty", BAD_QTYS)
+def test_a_quantity_that_is_not_a_whole_number_of_at_least_one_is_refused(qty):
+    assert _unavailable(book_fit.preview(SIG, CAPS, qty=qty), book_fit.BAD_QUANTITY)
+    assert book_fit.whole_quantity(qty) is None
+
+
+@pytest.mark.parametrize("qty", BAD_QTYS)
+def test_a_bad_quantity_is_named_even_when_the_caps_view_is_missing(qty):
+    assert _unavailable(book_fit.preview(SIG, None, qty=qty), book_fit.BAD_QUANTITY)
+
+
+@pytest.mark.parametrize("qty", ("2", 2.0, " 2 ", "2.0", 2))
+def test_a_whole_number_in_another_type_is_evaluated_as_that_number(qty):
+    p = book_fit.preview(SIG, CAPS, qty=qty)
+    assert p["available"] and book_fit.whole_quantity(qty) == 2
+    assert p["breach"]["code"] == "TRADE_RISK_CAP"
+    assert p["block_text"] == "Risks $364, over the $250 per-trade limit"
+
+
+def test_a_non_positive_per_contract_risk_means_no_preview():
+    for per in (0, 0.0, -182.0, float("nan"), True, "junk"):
+        p = book_fit.preview({**SIG, "ledger_risk_per_contract": per}, CAPS, qty=1)
+        assert _unavailable(p), per
+
+
+def test_empty_limits_mean_no_preview():
+    assert _unavailable(book_fit.preview(SIG, {**CAPS, "limits": {}}, qty=1))
+
+
+def test_an_open_book_of_none_is_an_empty_book():
+    p = book_fit.preview(SIG, {**CAPS, "open": None}, qty=1)
+    empty = book_fit.preview(SIG, {**CAPS, "open": []}, qty=1)
+    assert p["available"] and p == empty
+    symbol = [l for l in p["lines"] if l["code"] == "SYMBOL_POSITION_CAP"][0]
+    assert symbol["text"] == "Position 1 of 3 in ORCL"
+    assert p["max_quantity"] == 1
+
+
+def test_labels_and_short_reasons_cover_every_rung():
+    from shared import book_caps
+    assert set(book_fit._LABELS) == set(book_caps.DISPLAY_ORDER)
+    assert set(book_fit._SHORT) == set(book_caps.DISPLAY_ORDER)
+    for code in book_caps.DISPLAY_ORDER:
+        assert book_fit.short_reason({"code": code}) != "blocked"
 
 
 def test_an_empty_open_book_is_a_real_book():
