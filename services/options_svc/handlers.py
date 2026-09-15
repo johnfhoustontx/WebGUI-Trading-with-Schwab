@@ -517,9 +517,37 @@ _SCAN_DEFAULTS = {
 }
 
 
+def _stamp_scan(result) -> None:
+    """Stamp every candidate list of a raw scan result (design 2026-09-15).
+
+    Before the ScanResult projection, which drops ``iv_data``. Earnings are read
+    ONCE per symbol. A Directional row's floor is its WINDOW's (DTE 0-4 is the
+    0-DTE bucket, the scanner's own rule). Best-effort: a stamp failure is a
+    degrade, never a lost scan."""
+    earnings = {}
+    iv_data = result.get("iv_data") or {}
+    try:
+        for key, trade_type in (("signals_0dte", "0-DTE"), ("signals_swing", "SWING"),
+                                ("signals_directional", None)):
+            for row in result.get(key) or []:
+                sym = row.get("symbol")
+                if sym not in earnings:
+                    try:
+                        earnings[sym] = compute.scan_earnings(sym)
+                    except Exception:  # noqa: BLE001
+                        earnings[sym] = ("not_listed", None)
+                tt = trade_type or ("0-DTE" if (row.get("dte") or 0) <= 4 else "SWING")
+                rank = (iv_data.get(sym) or {}).get("iv_rank")
+                compute.stamp_candidate(row, trade_type=tt, earnings=earnings[sym],
+                                        iv_rank_known=rank is not None)
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.stamp_scan")
+
+
 def rescan(bus) -> None:
     """Run a scan, validate its shape, cache the full result, publish an event."""
     result = compute.run_scan()
+    _stamp_scan(result)
 
     # Validation gate: project onto ScanResult fields and construct the model so
     # a gross shape drift (e.g. signals_0dte not a list) raises BEFORE caching.
@@ -704,6 +732,15 @@ def swing_scan(bus, args: dict) -> None:
     signals = result["signals"]
     for sig in signals:
         sig["earnings_status"] = status
+    # The checklist stamps (design 2026-09-15). Best-effort: a stamp failure is a
+    # degrade, never a lost answer - the earnings_status stamp above stays outside.
+    try:
+        for sig in signals:
+            compute.stamp_candidate(sig, trade_type="SWING",
+                                    earnings=(status, earnings_date),
+                                    iv_rank_known=sig.get("iv_rank") is not None)
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.stamp_swing")
     payload = {"signals": signals, "view": result.get("view"),
                "filtered_out": result.get("filtered_out") or 0,
                # Kept SEPARATE from filtered_out, which the page renders as
@@ -987,6 +1024,15 @@ def publish_income(bus, symbols=None) -> None:
             _degrade.degraded("options.covered_calls")
 
     candidates.sort(key=_income_rank, reverse=True)
+
+    # The checklist stamps (design 2026-09-15). No ``earnings`` passed: an income
+    # row already carries its own coverage. Best-effort, never a lost board.
+    try:
+        for row in candidates:
+            compute.stamp_candidate(row, trade_type="INCOME",
+                                    iv_rank_known=row.get("iv_rank") is not None)
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.stamp_income")
 
     # Validation gate BEFORE the write, like rescan/publish_matrix: a gross shape
     # drift raises here rather than reaching the page as a half-valid board.
