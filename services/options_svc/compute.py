@@ -2696,6 +2696,47 @@ def ledger_book_state(trades=None) -> dict:
             "equity": round(start + realized, 2), "limits": limits}
 
 
+def _whole_quantity(qty):
+    """``qty`` as an int >= 1, or ``None``.
+
+    Accepts an int (never a bool), or a float/str that represents a whole number
+    (``3.0``, ``"3"``, ``"3.0"``). Anything else - None, 2.9, 0, a negative, a
+    non-finite float, unparseable text - is ``None``.
+    """
+    if isinstance(qty, bool):
+        return None
+    if isinstance(qty, int):
+        n = qty
+    elif isinstance(qty, float):
+        if not (math.isfinite(qty) and qty.is_integer()):
+            return None
+        n = int(qty)
+    elif isinstance(qty, str):
+        text = qty.strip()
+        try:
+            n = int(text)
+        except ValueError:
+            try:
+                f = float(text)
+            except ValueError:
+                return None
+            if not (math.isfinite(f) and f.is_integer()):
+                return None
+            n = int(f)
+    else:
+        return None
+    return n if n >= 1 else None
+
+
+def _json_safe_scalar(value):
+    """``value`` if it serializes to JSON as itself, else ``None``."""
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float) and math.isfinite(value):
+        return value
+    return None
+
+
 def create_paper_trade(signal: dict, qty: int) -> dict:
     """Create a Paper LEDGER trade if it clears every risk cap; return the outcome.
 
@@ -2716,15 +2757,35 @@ def create_paper_trade(signal: dict, qty: int) -> dict:
     from shared import sectors as _sectors
 
     sig = signal or {}
+    n_qty = _whole_quantity(qty)
+    if n_qty is None:
+        return {"symbol": sig.get("symbol"), "type": sig.get("type"),
+                "expiration": sig.get("expiration"), "qty": _json_safe_scalar(qty),
+                "rungs": [], "status": "error",
+                "message": "Quantity must be a whole number of at least 1."}
     base = {"symbol": sig.get("symbol"), "type": sig.get("type"),
-            "expiration": sig.get("expiration"), "qty": int(qty), "rungs": []}
+            "expiration": sig.get("expiration"), "qty": n_qty, "rungs": []}
     try:
-        trade = paper_trader.create_paper_trade(sig, int(qty))
-    except (ValueError, KeyError, TypeError) as exc:
+        trade = paper_trader.create_paper_trade(sig, n_qty)
+    except ValueError as exc:
+        # paper_trader's deliberate refusals ("not paper-tradeable", "has no debit").
         return {**base, "status": "error", "message": str(exc)}
+    except KeyError as exc:
+        # A malformed signal is a producer defect: leave a trace, still tell the screen.
+        _degrade.degraded("options.create_paper_trade", detail=sig.get("symbol"))
+        return {**base, "status": "error",
+                "message": f"The signal is missing {exc.args[0]!r}, so it cannot "
+                           "be paper traded."}
+    except TypeError:
+        _degrade.degraded("options.create_paper_trade", detail=sig.get("symbol"))
+        return {**base, "status": "error",
+                "message": "The signal has a field of the wrong type, so it cannot "
+                           "be paper traded."}
     # shared.book_caps counts an unusable candidate risk as ZERO, which is right
     # for the Account (its entry cycle sized the trade first) and wrong here.
     risk = trade.get("max_loss_total")
+    # Deliberately mirrors paper_trader._is_positive_finite rather than calling it,
+    # because tests stub paper_trader.
     if not (isinstance(risk, (int, float)) and not isinstance(risk, bool)
             and math.isfinite(risk) and risk > 0):
         return {**base, "status": "error",
@@ -2739,11 +2800,27 @@ def create_paper_trade(signal: dict, qty: int) -> dict:
     base["rungs"] = rungs
     breach = book_caps.first_breach(rungs, book_caps.DISPLAY_ORDER)
     if breach is not None:
-        per = (trade["max_loss_total"] / int(qty)) if int(qty) else None
+        per = trade["max_loss_total"] / n_qty
+        n = book_caps.max_quantity(book["open"], candidate, per,
+                                   book["limits"], book["equity"])
+        # Never suggest a quantity that re-submitting would refuse: re-check each
+        # candidate against the trade the Ledger would actually BOOK (its own
+        # rounding), stepping down until one clears. Runs only on a refusal.
+        while n > 0:
+            probe = paper_trader.create_paper_trade(sig, n)
+            if book_caps.first_breach(
+                    book_caps.evaluate(book["open"], candidate,
+                                       probe["max_loss_total"], book["limits"],
+                                       book["equity"]),
+                    book_caps.DISPLAY_ORDER) is None:
+                break
+            n -= 1
         return {**base, "status": "refused", "code": breach["code"],
-                "message": book_caps.describe(breach),
-                "max_quantity": book_caps.max_quantity(
-                    book["open"], candidate, per, book["limits"], book["equity"])}
+                "message": book_caps.describe(breach), "max_quantity": n}
+    # The read-book-then-insert above is NOT atomic. It is safe because options_svc
+    # consumes cmd:options with ONE consumer and runs a batch's commands in order,
+    # so two quick clicks are checked in sequence. A second consumer would need a
+    # lock around the check and this insert.
     paper_trader.add_trade(trade)
     return {**base, "status": "opened", "trade_id": trade["trade_id"],
             "trade": trade}

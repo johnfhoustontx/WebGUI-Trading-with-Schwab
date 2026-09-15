@@ -154,3 +154,37 @@ def test_a_trade_whose_max_loss_cannot_be_read_is_refused_not_opened(ledger):
     assert out["status"] == "error"
     assert out["message"] == "The trade's max loss could not be read, so the risk caps cannot be checked."
     assert ledger.get_open_trades() == []
+
+
+@pytest.mark.parametrize("qty", [None, "abc", 0, -2, 2.9, True])
+def test_a_bad_quantity_is_an_error_outcome_and_writes_nothing(ledger, qty):
+    out = compute.create_paper_trade(_pcs(), qty)
+    assert out["status"] == "error"
+    assert out["message"] == "Quantity must be a whole number of at least 1."
+    assert ledger.get_open_trades() == []
+
+
+@pytest.mark.parametrize("qty", ["2", 2.0])
+def test_a_whole_number_quantity_in_another_type_is_accepted(ledger, qty):
+    out = compute.create_paper_trade(_pcs(), qty)
+    assert out["status"] == "opened" and out["qty"] == 2
+    assert ledger.get_open_trades()[0]["quantity"] == 2
+
+
+def test_a_signal_missing_a_field_degrades_and_says_which(ledger, monkeypatch):
+    from services.options_svc import compute as c
+    seen = []
+    monkeypatch.setattr(c._degrade, "degraded", lambda area, **kw: seen.append((area, kw)))
+    sig = {k: v for k, v in _pcs().items() if k != "short_strike"}
+    out = compute.create_paper_trade(sig, 1)
+    assert out["status"] == "error"
+    assert out["message"] == "The signal is missing 'short_strike', so it cannot be paper traded."
+    assert seen and seen[0][0] == "options.create_paper_trade"
+    assert ledger.get_open_trades() == []
+
+
+def test_the_suggested_quantity_really_opens(ledger):
+    """max_quantity is re-checked against what the Ledger would book."""
+    out = compute.create_paper_trade(_pcs(), 4)
+    assert out["status"] == "refused" and out["max_quantity"] == 3
+    assert compute.create_paper_trade(_pcs(), out["max_quantity"])["status"] == "opened"
