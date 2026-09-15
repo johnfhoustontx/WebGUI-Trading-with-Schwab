@@ -1930,9 +1930,10 @@ re-marks everything as new; that is page-side state, and deliberate.
 **Row actions** send a signal to the [Calculator](#calculator), open its
 [Expected Move](#expected-move), or paper-trade it. A paper trade goes to the
 [Paper Ledger](#paper-ledger) only if it fits that ledger's risk limits ($750 per
-trade, plus limits per symbol, sector, expiration and for the whole ledger); a
-message a moment later says whether it opened — or why not, and how many contracts
-would fit when a smaller size would.
+trade, plus limits per symbol, sector, expiration and for the whole ledger). The
+Paper trade box shows each limit in green or red for the quantity typed before you
+send, and a message a moment later says whether it opened — or why not, and how many
+contracts would fit when a smaller size would.
 
 **Click a row** to open the Trade detail panel on the right, with a probability
 speedometer and full contract detail.
@@ -2372,6 +2373,18 @@ The last four rows are the [Paper Account](#paper-account)'s own six concentrati
 The per-trade limit is not: the engine's is **$250**, which also decides how wide the
 scanner builds its spreads, and at $250 most of the Directional tab's long options
 could not be opened by hand at all.
+
+**The Paper trade box previews the same check before you send.** Under the trade's
+*Risk $X per contract* it shows one line per limit for the quantity typed — green
+when it fits (*Position 2 of 3 in ORCL*), red when it breaks (*Risks $950, over the
+$750 per-trade limit*), grey when it was not checked. A red line greys out
+**Create** and says *Up to N contracts fit.* (or that no quantity fits), and the
+**Quantity** box drops back to the largest quantity that fits when you leave it; 100
+is the box's own ceiling. The preview reads the same limits and the same open
+trades the ledger uses, so the two agree — but the book can change before the
+trade arrives, so the ledger checks again and its message is the answer. When the
+box cannot preview a trade it says so and **Create** stays available: a missing
+preview is never a refusal.
 
 **Every click gets an answer while the options service is running**, a second or so
 later, on the page you sent it from:
@@ -2983,8 +2996,9 @@ structures (long call/put, bull call, bear put) and the **call and put butterfli
 condors**. The ledger refuses a debit structure that arrives with no positive debit,
 rather than opening it as a free trade whose every later mark would overstate the
 result. Every trade the button sends is checked against the ledger's [risk
-limits](#paper-ledger), and a message says whether it opened — or why not, and how many
-contracts would fit when a smaller size would. The ledger has no earnings check, so a
+limits](#paper-ledger): the Paper trade box shows each limit in green or red for the
+quantity typed before you send, and a message afterwards says whether it opened — or
+why not, and how many contracts would fit when a smaller size would. The ledger has no earnings check, so a
 trade tagged *Earnings* opens there like any other. No button for:
 
 | Structure | Why |

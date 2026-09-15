@@ -107,8 +107,8 @@ page's `trade_type` '0-DTE' cannot key differently — exactly the cross-tier
 mirror `test_cross_tier_mirrors.py` exists to prevent) ·
 `shared.book_caps` (since 2026-09-15; pure — `math` plus
 `shared.driver_policy.open_risk_dollars`, itself math-only; the Paper
-dialog's preview will evaluate the SAME rungs the service enforces, so it
-imports the one cap module rather than a Tier-1 copy, and
+dialog's preview (`pages/options/book_fit.py`) evaluates the SAME rungs the
+service enforces, so it imports the one cap module rather than a Tier-1 copy, and
 `webgui/tests/test_book_caps_tier1.py` pins its exact import set) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
@@ -2329,7 +2329,8 @@ change to a second service's envelope with its own measurement. Design:
 trade, deployment, symbol positions, symbol risk, sector positions, sector risk,
 expiry positions — over plain rows, and reports **every** rung (`used`, `after`,
 `cap`, `binds`, `skipped`) rather than only the first breach, plus `first_breach`,
-`max_quantity` and `describe` (the sentence the Paper toast shows). It imports
+`max_quantity` and `describe` (the sentence both the Paper toast and the Paper
+dialog's preview lines show). It imports
 only `math` and `shared.driver_policy`, which is what puts it on the Tier-1
 allow-list. The Account's `concentration_reject` is an adapter over it, and
 `options-scanner/tests/test_book_caps_equivalence.py` holds a frozen copy of the
@@ -2366,6 +2367,42 @@ and Strategy Finder watch it through `handoff.watch_paper_results`, and ⚠ that
 watch must compare versions with **`!=`**, since the TTL expiring resets the
 `:ver` counter to 1. A quantity that is not a whole number ≥ 1, a malformed
 signal, or an unreadable max loss is an **error** outcome, never a write.
+
+**The Paper dialog previews the SAME decision before the click**
+(`handoff.paper_dialog_view` over the pure `pages/options/book_fit.preview`),
+reading **`cache:options:ledger_caps`** once on open and the row's stamps. Two
+rules had to become ONE before the two ends could agree:
+
+- **One bucket rule, `book_caps.sector_bucket(table, symbol)`.**
+  `shared.sectors.group_key` delegates to it over the loaded table, and the page
+  runs it over the table the service publishes — so `ledger_caps` carries the
+  **WHOLE** `config/sectors.toml` table, never a map derived from the watchlist
+  (which left a Strategy Finder symbol's sector rungs unchecked in the preview).
+  `test_sector_bucket_parity.py` freezes `group_key`'s pre-delegation body.
+- **One rounding rule, `book_caps.booked_risk(basis, qty)`.** `paper_trader`
+  books every `max_loss_total` through it, the stamp `ledger_risk_basis` is the
+  UNROUNDED figure it books from, and the preview computes every quantity from
+  that basis. ⚠ **Never preview from the cent-rounded `ledger_risk_per_contract`
+  × qty**: a $1.87504 per-share spread stamps $187.50, previews four contracts at
+  $750.00 inside a $750 limit, and books $750.02 — refused.
+  `test_ledger_booking_identical.py` pins the booking byte-identical; a NaN, inf or
+  bool max loss now books `None`, which the service refuses with a degrade.
+
+`refresh_ledger_caps` writes under **`_LEDGER_CAPS_LOCK`** — the command consumer
+and the manage tick call `refresh_paper_trades` on different executor threads,
+and interleaved an OLDER book overwrites a newer one until the next Ledger change
+— from a **`finally`** in `refresh_paper_trades` (the book follows every Ledger
+change even when that view raises), with `skip_unchanged`, plus once at startup.
+⚠ **A dialog that cannot preview never blocks.** No view, no stamp or a malformed
+limits map is "can't preview", and Create stays enabled because the service still
+checks; only a known breach, a bad quantity or one above the dialog's ceiling of
+100 disables it — the page must never refuse a trade the Ledger would open. The
+quantity box's max is the largest fitting quantity, never below a typed quantity
+that fits (`max_quantity` can land one short on sub-cent risk and the box clamps on
+blur). **`services/options_svc/tests/test_preview_agrees_with_ledger.py` is the
+guard**: real books through the real publish and `create_paper_trade`, preview
+and Ledger compared line for line, sub-cent risk and the suggested-quantity
+step-down included. A change to either end that it does not cover is unguarded.
 
 ⚠ **The read-book-then-insert is not atomic.** It is safe only because
 `options_svc` runs ONE consumer on `cmd:options` and processes a batch in order; a

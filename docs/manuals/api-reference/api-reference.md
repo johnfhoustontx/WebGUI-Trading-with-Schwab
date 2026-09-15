@@ -257,6 +257,41 @@ The paper-manage cycle also overlays `rescue_state` / `heat` onto
 `cache:options:paper_account` and publishes `cache:options:rescue_summary` (tested +
 critical counts) for the nav badge.
 
+**Candidate stamps.** Every candidate row on `cache:options:scan` (and so
+`scan_day`), `cache:options:swing` and `cache:options:income` is stamped at publish
+time by `compute.stamp_candidate` — from `rescan` (the 0-DTE, swing and Directional
+lists), `swing_scan` and the income scan. Stamping is best-effort **per row**: a row
+whose stamping raises may be left without some stamps, the rows after it are still
+stamped, and the pass records one degrade (`options.stamp_scan` · `options.stamp_swing` ·
+`options.stamp_income`). Every stamp is `null` when unknown, never a guessed zero.
+
+| Field | Meaning |
+|---|---|
+| `ledger_risk_basis` | The unrounded figure the Paper Ledger books risk from: `{"per_share": x}` (credit structures) or `{"per_contract": y}` (debit structures). `shared.book_caps.booked_risk(basis, qty)` is exactly the `max_loss_total` the Ledger books for `qty` contracts. `null` when the Ledger would refuse the structure or book no positive risk |
+| `ledger_risk_per_contract` | `booked_risk(basis, 1)` — the booked risk of one contract, for display. ⚠ Do not multiply it by a quantity: it is cent-rounded, and a sub-cent per-share figure books differently (use the basis) |
+| `friction_pct` | The round-trip bid-ask width as a percent of the per-share credit or debit. `null` for any row holding a share leg, and when a leg's quote is missing or crossed |
+| `em_to_expiry` | The daily expected move × √max(DTE, 1), in dollars |
+| `vol_floor` | The IV-rank floor for the row's trade type (`config/scanner.toml`); a Directional row takes its DTE window's — DTE 0–4 the 0-DTE floor, later the swing floor |
+| `iv_rank_known` | Whether the row had an IV rank to gate on |
+| `earnings_status` · `earnings_date` | The earnings coverage and next report date. Stamped on scanner and Strategy Finder rows; an income row already carries its own |
+
+**`cache:options:ledger_caps`** (event `events:options:ledger_caps`) — the Paper
+Ledger's book, as the Paper dialog's preview reads it:
+`{limits, starting_balance, realized_pnl, equity, open[], sectors, unmapped_prefix}`.
+`limits` is the Ledger's rung map (`max_risk_per_trade`, `max_deployed_risk_pct`,
+`max_positions_per_symbol`, `max_risk_per_symbol`, `max_positions_per_sector`,
+`max_risk_per_sector`, `max_positions_per_expiry`); `equity` is `starting_balance` +
+`realized_pnl` of closed trades; each `open` row is
+`{symbol, expiration, max_loss_total, sector}`; `sectors` is the **whole**
+`config/sectors.toml` symbol → sector table, so a reader buckets any symbol with
+`shared.book_caps.sector_bucket(sectors, symbol)` (an unmapped symbol is its own
+`unmapped_prefix` + symbol bucket; `unmapped_prefix` is informational). Written by
+`handlers.refresh_ledger_caps` with `skip_unchanged` (an unchanged book bumps no
+version and fires no event), under a lock, at the end of every `refresh_paper_trades`
+— every `paper_*` Ledger command and the paper-manage cycle — even when that view's
+own publish raises, and once at service start. A failure is a degrade
+(`options.ledger_caps`), never a raise. No TTL.
+
 ## Portfolio service — :8212
 
 **Entry:** `services/portfolio_svc/app.py`. **Scheduler:** initial rebuild + SSE
@@ -510,6 +545,7 @@ cache:options:swing            events:options:swing
 cache:options:paper_account    events:options:paper_account
 cache:options:paper_trades     events:options:paper_trades
 cache:options:paper_create     events:options:paper_create   (TTL 600 s; the Paper button's answer)
+cache:options:ledger_caps      events:options:ledger_caps    (the Paper Ledger's book, for the Paper dialog preview)
 cache:options:paper_analyze    events:options:paper_analyze
 cache:options:captured         events:options:captured
 cache:options:captured_flags   events:options:captured_flags

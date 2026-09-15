@@ -408,7 +408,8 @@ def send_to_paper(signal):
         lines_box = ui.column().classes("gap-1 w-full")
         note = ui.label("").classes(f"text-xs {MUTED}")
         # No separate block sentence: the binding checklist line already says
-        # it in red. ``block_text`` stays in the view for the tests and toast.
+        # it in red. ``block_text`` stays in the view for the tests; the refusal
+        # toast uses the service's own ``message``, not this.
         fits = ui.label("").classes(f"text-xs {MUTED}")
         qty = ui.number("Quantity", value=1, min=1, max=view["qty_max"])
 

@@ -166,7 +166,9 @@ plus single-leg directional trades on their own tab.
 - **Paper-trading a row is checked against the Paper Ledger's risk limits** ($750
   per trade, plus limits per symbol, sector, expiration and for the whole ledger).
   A message a moment after you send it says it opened, or why it was not — and
-  when a smaller size would fit, how many contracts.
+  when a smaller size would fit, how many contracts. Before you send, the Paper
+  trade box shows each limit in green (fits) or red (breaks) for the quantity you
+  type, and greys out Create when one breaks.
 - **Probability vs Needs** (in the detail panel) — "Needs" is the win rate this
   trade's own price DEMANDS to break even. Probability above it is cushion,
   below it means the trade loses money over time even when it usually wins.
@@ -398,7 +400,8 @@ four top picks, and the full ranked list.
 - **Paper checks the ledger's risk limits** ($750 per trade, plus limits per
   symbol, sector, expiration and for the whole ledger). A message a moment later
   says the trade opened, or why it was not — and, when a smaller size would fit,
-  how many contracts.
+  how many contracts. The Paper trade box shows each limit in green or red for
+  the quantity you type before you send.
 - **The paper ledger has no earnings check**: a trade tagged *Earnings* opens
   there like any other.
 - **Calculator** works on every idea, calendars and shares included — but

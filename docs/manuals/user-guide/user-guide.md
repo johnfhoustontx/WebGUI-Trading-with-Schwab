@@ -1004,8 +1004,9 @@ two-pane layout.
 
 - **Send to Calculator** — open the P&L Calculator pre-filled with this trade.
 - **Send to Paper trade** — create a paper trade from this signal, if it fits the
-  Paper Ledger's risk limits; a message a moment later says whether it opened
-  (see *Risk limits on new trades* under **Paper Ledger**).
+  Paper Ledger's risk limits. The box shows each limit in green or red for the
+  quantity you type before you send, and a message a moment later says whether it
+  opened (see *Risk limits on new trades* under **Paper Ledger**).
 - **Expected Move** — open the Expected Move chart for this trade in a new tab.
 
 The list re-scans itself every 15 minutes between 08:00 and 15:15 CT on trading
@@ -1178,6 +1179,34 @@ message says why. The limits:
 | Per sector | **5** open positions and **$1,500** of max loss (the index products — $SPX, SPY, QQQ, $NDX, DIA, IWM — share one group) |
 | Per expiration | **5** open positions expiring the same day, across every symbol |
 | Whole ledger | open max loss at most **20%** of equity — $25,000 plus the realized P&L of your closed trades |
+
+**The Paper trade box shows the limits before you send.** It opens with a heading
+such as *Paper trade ORCL Credit spread — put · 2026-10-16*, the trade's risk (*Risk
+$190 per contract*), and one line for each limit, worked out for the quantity you
+type:
+
+- **green** — this trade fits that limit: *Position 2 of 3 in ORCL*, *ORCL risk
+  would reach $380 of $750*;
+- **red** — this quantity breaks it: *Risks $950, over the $750 per-trade limit*,
+  *ORCL already holds 3 of 3 positions*;
+- **grey** — *Not checked*, with the reason.
+
+When a line is red, **Create** is greyed out and the box says *Up to N contracts
+fit.*, or *No quantity fits the paper ledger's limits right now.* When you leave the
+**Quantity** box, a number above the largest quantity that fits drops back to it (to 1 when nothing
+fits).
+The box never takes more than 100 (*The dialog opens at most 100 contracts in one
+trade.*), and **Create** is also greyed out when the quantity is not a whole number
+of at least 1.
+
+The lines are a preview. The book can change between opening the box and pressing
+**Create**, so the paper ledger checks every limit again when the trade arrives —
+the message below is the final answer. If the box says *Can't preview this trade
+here — the paper ledger still checks every cap when you create it.*, **Create**
+still works and the ledger decides. Pressing **Create** shows *Sent 2 contracts — the
+paper ledger answers in a moment.*; if instead it says *Could not reach the options
+service — the trade was not sent.*, nothing was sent and you can press **Create**
+again.
 
 A second or so after you press **Create** in the quantity box, a message answers the click:
 
@@ -1650,8 +1679,9 @@ and puts, debit spreads, and the call and put **butterflies and condors**. A deb
 trade that arrives with no debit to pay is refused rather than booked as free.
 Straddles and strangles are for study only and have no button; neither do the iron
 butterfly, calendars, diagonals or the share structures. A trade the button takes
-is still checked against the Paper Ledger's risk limits, and a message says if it
-was not opened and why (see *Risk limits on new trades* under **Paper Ledger**).
+is still checked against the Paper Ledger's risk limits — the Paper trade box shows
+each limit before you send — and a message says if it was not opened and why (see
+*Risk limits on new trades* under **Paper Ledger**).
 The Paper Ledger has no earnings check, so a trade tagged *Earnings* opens there
 like any other.
 **Calculator** carries every
@@ -1860,7 +1890,7 @@ Three buttons appear on signal rows across the Options section:
 | Action | Available on | Effect |
 |--------|--------------|--------|
 | **Send to Calculator** | Market Scanner, Strategy Finder | Opens the Calculator pre-filled (strategy, symbol, expiry, strikes, premiums, IV) and runs it. |
-| **Send to Paper trade** | Market Scanner, Strategy Finder | Asks for a quantity, then creates a Paper Ledger trade if it fits the ledger's risk limits. A message a moment later says it opened, or why not. Stays on the current page. |
+| **Send to Paper trade** | Market Scanner, Strategy Finder | Asks for a quantity, showing each of the ledger's risk limits in green (fits) or red (breaks) for that quantity, then creates a Paper Ledger trade if it fits. A message a moment later says it opened, or why not. Stays on the current page. |
 | **Expected Move** | Market Scanner, Strategy Finder, Paper Ledger, Captured, Calculator | Opens the Expected Move chart in a new browser tab, pre-filled and drawn. |
 
 ---

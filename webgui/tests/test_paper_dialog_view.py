@@ -177,8 +177,10 @@ def test_send_to_paper_reads_caps_once_and_rechecks_on_confirm():
 
 def test_a_fitting_quantity_is_never_below_the_box_max(monkeypatch):
     """book_caps.max_quantity can land one short at an exact cap on sub-cent
-    risk; the blur clamp must not cut a quantity that fits. Driven through a
-    stubbed preview (no real sub-cent case turned up in a brute-force search)."""
+    risk; the blur clamp must not cut a quantity that fits. Real cases exist (a
+    search found 4,291 of 200,000, e.g. per_share 0.69417 at 35 contracts under a
+    $2,429.59 per-trade cap); the stubbed preview keeps this test independent of
+    which cases a given book_caps happens to produce."""
     def fake(signal, caps, qty):
         return {"available": True, "lines": [], "breach": None, "block_text": "",
                 "max_quantity": 3, "unavailable_text": ""}

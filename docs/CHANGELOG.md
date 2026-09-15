@@ -4,7 +4,61 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-15 (**Paper Ledger capped; one cap module.**
+**Last updated:** 2026-09-15 (**Paper dialog previews the ledger's limits.**
+Phase 3 of the trade-checklist work: say whether a trade fits before the click,
+not only after it.)
+
+- **Row stamps.** `options_svc.compute.stamp_candidate` stamps every candidate at
+  publish time — `handlers._stamp_scan` in `rescan` (0-DTE, swing and Directional
+  lists), `swing_scan` and `publish_income` — best-effort per row, one named
+  degrade a pass (`options.stamp_scan` / `stamp_swing` / `stamp_income`). Fields:
+  `ledger_risk_basis` (`{"per_share": x}` or `{"per_contract": y}`, the unrounded
+  figure the Ledger books from), `ledger_risk_per_contract`, `friction_pct`
+  (round-trip bid-ask as % of the per-share credit or debit; `None` for share
+  structures and crossed or missing quotes), `em_to_expiry` (daily expected move ×
+  √max(DTE, 1)), `vol_floor` (the trade type's IV-rank floor; a Directional row
+  takes its DTE window's), `iv_rank_known`, and on scanner and Finder rows
+  `earnings_status` / `earnings_date`. They ride `cache:options:scan`, `scan_day`,
+  `swing` and `income`.
+- **`cache:options:ledger_caps`.** `handlers.refresh_ledger_caps` publishes the
+  Ledger's book — `limits`, `starting_balance`, `realized_pnl`, `equity`, `open`
+  (`symbol`, `expiration`, `max_loss_total`, `sector`), the whole
+  `config/sectors.toml` table and `unmapped_prefix` — with `skip_unchanged` and
+  `events:options:ledger_caps`, under a lock, from a `finally` at the end of every
+  `refresh_paper_trades`, and once at startup.
+- **One bucket rule and one rounding rule.** `shared.book_caps.sector_bucket` is
+  the sector bucket rule (`shared.sectors.group_key` delegates to it; a parity test
+  freezes the old body). `shared.book_caps.booked_risk` is the risk rounding rule;
+  `paper_trader` books every `max_loss_total` through it (byte-identical), and a
+  NaN, inf or bool max loss now books `None`, which the service refuses with a
+  degrade. The reason: a $1.87504 per-share spread stamped at $187.50 a contract
+  previewed four contracts at $750.00 while the Ledger booked $750.02 and refused.
+  `book_caps.money` is public.
+- **The Paper dialog.** `handoff.send_to_paper` over the pure `paper_dialog_view`
+  and `book_fit.preview` reads `options:ledger_caps` once on open and shows
+  *Paper trade SYMBOL <structure> · EXPIRY*, *Risk $X per contract*, and one line
+  per limit — green fits, red breaks, grey not checked — worded from the trade's
+  side (*Position 3 of 3 in ORCL*, *ORCL already holds 3 of 3 positions*). The
+  quantity box's max is the largest quantity that fits (never below a fitting typed
+  quantity; 1 when nothing fits; 100 is the dialog's own ceiling). Create is
+  disabled on a breach, a quantity that is not a whole number ≥ 1, or one above 100,
+  with *Up to N contracts fit.* / *No quantity fits the paper ledger's limits right
+  now.* / *The dialog opens at most 100 contracts in one trade.* When it cannot
+  preview (no view, no stamp) it says so and Create stays enabled, because the
+  service still checks. A double click sends once; an unreachable bus says *Could
+  not reach the options service — the trade was not sent.* and allows a retry. The
+  send toast is now *Sent N contracts — the paper ledger answers in a moment.*
+- **Agreement guarantee.** `services/options_svc/tests/test_preview_agrees_with_ledger.py`
+  proves the preview and the Ledger decide identically, line for line, over real
+  books, stamps and enforcement — sub-cent risk and the suggested-quantity
+  step-down included.
+- **Verified in the local page harness:** a fitting trade, an over-limit quantity,
+  open and toast, the full symbol, the blocked $900 row, and the line colours.
+- Design + plan:
+  [design](plans/2026-09-15-trade-checklist-and-ledger-caps-design.md) ·
+  [plan](plans/2026-09-15-trade-checklist-and-ledger-caps-plan.md).
+
+**Prior —** 2026-09-15 (**Paper Ledger capped; one cap module.**
 Operator request: the Paper button opened whatever quantity was typed into a book
 with no risk limit at all.)
 
