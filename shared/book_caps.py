@@ -53,6 +53,20 @@ DISPLAY_ORDER = (TRADE_RISK_CAP, DEPLOYMENT_CAP, SYMBOL_POSITION_CAP,
 # per-trade rung: the entry cycle's sizing refuses that as RISK_TOO_HIGH.
 # This is concentration_reject's historical early-return order, written out
 # as a literal on purpose: it must NOT follow a reorder of DISPLAY_ORDER.
+#
+# Why this order (carried over from concentration_reject's docstring):
+#
+# The position cap is reported ahead of the risk cap when both bind: a count
+# is the more legible thing to read in a log line, and it is the limit the
+# operator set out to enforce.
+#
+# The BOOK-WIDE deployment cap (gap assessment B3) - total open max loss as a
+# fraction of equity - is reported FIRST when it binds: if the book as a whole
+# is full, which symbol was asked for is irrelevant, and the broader reason is
+# the more useful log line.
+#
+# The sector rungs (gap assessment B4) are reported after the symbol ones and
+# before expiry - see the comment at that rung in ``evaluate``.
 ACCOUNT_ORDER = (DEPLOYMENT_CAP, SYMBOL_POSITION_CAP, SYMBOL_RISK_CAP,
                  SECTOR_POSITION_CAP, SECTOR_RISK_CAP, EXPIRY_POSITION_CAP)
 
@@ -95,8 +109,8 @@ def evaluate(book, candidate, added_risk, limits, equity=None):
     """Every rung for opening ``candidate`` into ``book``, in DISPLAY_ORDER.
 
     ``book`` rows: ``{symbol, expiration, max_loss_total, sector}`` for OPEN
-    positions (``max_loss`` × ``quantity`` is the fallback ``open_risk_dollars``
-    already understands). ``candidate``: ``{symbol, expiration, sector}``.
+    positions (closed rows tie up no capital and must not count; ``max_loss`` ×
+    ``quantity`` is the fallback ``open_risk_dollars`` already understands). ``candidate``: ``{symbol, expiration, sector}``.
     ``added_risk``: the candidate's total max loss in dollars (an unusable
     value counts as 0.0 - see the module docstring).
 
@@ -122,6 +136,18 @@ def evaluate(book, candidate, added_risk, limits, equity=None):
     else:
         out.append(_skip(TRADE_RISK_CAP, "risk", None, "no per-trade limit"))
 
+    # Book-wide (gap assessment B3).
+    #
+    # ⚠ **No equity, or a non-finite one, SKIPS this cap rather than treating it
+    # as zero.** A fraction of an unknown cannot be enforced, and a zero
+    # denominator would refuse every trade forever — which reads as a broken
+    # engine, not as a cap. The cap is likewise opt-in by DATA: a ``limits`` dict
+    # without ``max_deployed_risk_pct`` keeps the pre-B3 behaviour, so every
+    # existing caller is untouched.
+    #
+    # ``open_risk_dollars`` for the same reason the symbol sum uses it: it
+    # drops a non-finite row instead of poisoning the total, and a NaN total
+    # makes every ``>`` False — silently switching the ceiling off.
     pct = limits.get("max_deployed_risk_pct")
     eq = _finite(equity)
     if not pct:
@@ -136,10 +162,33 @@ def evaluate(book, candidate, added_risk, limits, equity=None):
     same_symbol = [p for p in rows if _key(p.get("symbol")) == sym]
     out.append(_count(SYMBOL_POSITION_CAP, sym, len(same_symbol),
                       limits["max_positions_per_symbol"]))
+    # ⚠ Summed through ``open_risk_dollars`` rather than a local ``sum(...)``:
+    # it drops non-finite rows instead of poisoning the total, and a NaN total
+    # makes every ``>`` comparison False -- silently switching the ceiling off
+    # while the code still reads like a guard. That is the repo's documented
+    # pins-the-bound trap; reusing the one hardened summation beats a tenth copy.
     out.append(_risk(SYMBOL_RISK_CAP, sym, open_risk_dollars(same_symbol), added,
                      limits["max_risk_per_symbol"]))
 
+    # SECTOR (gap assessment B4) - the rung between the per-symbol caps and the
+    # book-wide one. Four DIFFERENT semiconductors at the full symbol cap breach
+    # nothing above this, which is exactly the correlated book the playbook warns
+    # about; measured, the driver's book once held $21,531 across 15 Information
+    # Technology positions, 86% of a $25,000 account in one sector.
+    #
+    # Reported AFTER the symbol rungs and BEFORE expiry, deliberately: when both a
+    # symbol cap and the sector cap bind, "you already hold three MU" is the
+    # actionable sentence - the operator can pick another name - while "tech is
+    # full" is the answer only once the symbol has room. A shared expiry is the
+    # weaker coincidence of the two, so it stays last.
+    #
+    # Opt-in by DATA like the deployment cap above: a ``limits`` dict without the
+    # keys, or a cap of 0, keeps the pre-B4 behaviour untouched.
     bucket = cand.get("sector")
+    # A row whose symbol lands in no bucket is skipped rather than
+    # grouped: ``group_key`` gives an unmapped symbol a bucket of its OWN,
+    # so an unknown name is still capped against itself and can neither
+    # borrow another sector's allowance nor drag unrelated names in.
     same_sector = ([p for p in rows if p.get("sector") == bucket]
                    if bucket is not None else [])
     max_n = limits.get("max_positions_per_sector")
@@ -149,6 +198,9 @@ def evaluate(book, candidate, added_risk, limits, equity=None):
         out.append(_skip(SECTOR_POSITION_CAP, "count", None, "sector unknown"))
     else:
         out.append(_count(SECTOR_POSITION_CAP, bucket, len(same_sector), max_n))
+    # Through ``open_risk_dollars`` for the same reason as the deployment and
+    # symbol sums: a NaN row would poison the sum, and a NaN total makes every
+    # ``>`` False - switching the ceiling off silently.
     max_risk = limits.get("max_risk_per_sector")
     if not max_risk:
         out.append(_skip(SECTOR_RISK_CAP, "risk", bucket, "no sector limit"))

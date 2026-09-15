@@ -25,19 +25,22 @@ import sys as _sys
 import config_paper
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
-from shared.driver_policy import open_risk_dollars  # noqa: E402
+from shared.driver_policy import open_risk_dollars  # noqa: E402,F401  (kept: re-exported for callers)
 from shared import sectors as _sectors  # noqa: E402
+from shared import book_caps as _book_caps  # noqa: E402
 
 #############################################
 # REASONS
 #############################################
 
-SYMBOL_POSITION_CAP = "SYMBOL_POSITION_CAP"
-SYMBOL_RISK_CAP = "SYMBOL_RISK_CAP"
-EXPIRY_POSITION_CAP = "EXPIRY_POSITION_CAP"
-SECTOR_POSITION_CAP = "SECTOR_POSITION_CAP"
-SECTOR_RISK_CAP = "SECTOR_RISK_CAP"
-DEPLOYMENT_CAP = "DEPLOYMENT_CAP"
+# The reason codes live in shared.book_caps since 2026-09-15 and are re-exported
+# here so every existing caller and log line keeps its spelling.
+SYMBOL_POSITION_CAP = _book_caps.SYMBOL_POSITION_CAP
+SYMBOL_RISK_CAP = _book_caps.SYMBOL_RISK_CAP
+EXPIRY_POSITION_CAP = _book_caps.EXPIRY_POSITION_CAP
+SECTOR_POSITION_CAP = _book_caps.SECTOR_POSITION_CAP
+SECTOR_RISK_CAP = _book_caps.SECTOR_RISK_CAP
+DEPLOYMENT_CAP = _book_caps.DEPLOYMENT_CAP
 
 #############################################
 # POLICY
@@ -72,96 +75,25 @@ def concentration_reject(positions, symbol, expiration, added_risk,
                          limits=None, equity=None, sector_of=None):
     """Return the reason opening this candidate would breach a cap, else None.
 
-    ``positions`` is the OPEN book (closed rows tie up no capital and must not
-    count). ``added_risk`` is the candidate's ``max_loss_total`` in dollars.
+    A thin adapter over ``shared.book_caps`` since 2026-09-15: sectors are
+    resolved here exactly as before (``_group_of``, including the ``?SYMBOL``
+    bucket and raise-means-no-grouping), then every rung is evaluated there and
+    the first breach is reported in the Account's historical order - deployment,
+    symbol, sector, expiry. ``tests/test_book_caps_equivalence.py`` holds the
+    pre-change function frozen and proves the decisions are identical.
 
-    The position cap is reported ahead of the risk cap when both bind: a count
-    is the more legible thing to read in a log line, and it is the limit the
-    operator set out to enforce.
-
-    ``equity`` enables the BOOK-WIDE deployment cap (gap assessment B3) — total
-    open max loss as a fraction of it. It is reported FIRST when it binds: if the
-    book as a whole is full, which symbol was asked for is irrelevant, and the
-    broader reason is the more useful log line.
-
-``sector_of`` overrides the sector lookup (gap assessment B4); absent, the
-    real ``shared.sectors`` map is used. The sector rungs are reported after the
-    symbol ones and before expiry - see the comment at that check.
-
-    ⚠ **No equity, or a non-finite one, SKIPS that cap rather than treating it as
-    zero.** A fraction of an unknown cannot be enforced, and a zero denominator
-    would refuse every trade forever — which reads as a broken engine, not as a
-    cap. The cap is likewise opt-in by DATA: a ``limits`` dict without
-    ``max_deployed_risk_pct`` keeps the pre-B3 behaviour, so every existing caller
-    is untouched.
+    (The rest of the old docstring's reasoning - why the deployment cap reports
+    first, why sector precedes expiry, why no equity skips - still holds and is
+    recorded on ``shared.book_caps``.)
     """
     limits = limits or default_limits()
-    rows = [p for p in positions or () if isinstance(p, dict)]
-
-    # Book-wide first — see the docstring.
-    pct = limits.get("max_deployed_risk_pct")
-    eq = _finite(equity)
-    if pct and eq and eq > 0:
-        # ``open_risk_dollars`` for the same reason the symbol sum uses it: it
-        # drops a non-finite row instead of poisoning the total, and a NaN total
-        # makes every ``>`` False — silently switching the ceiling off.
-        if open_risk_dollars(rows) + _finite(added_risk) > pct * eq:
-            return DEPLOYMENT_CAP
-
-    sym = _key(symbol)
-    same_symbol = [p for p in rows if _key(p.get("symbol")) == sym]
-
-    if len(same_symbol) >= limits["max_positions_per_symbol"]:
-        return SYMBOL_POSITION_CAP
-
-    # ⚠ Summed through ``open_risk_dollars`` rather than a local ``sum(...)``:
-    # it drops non-finite rows instead of poisoning the total, and a NaN total
-    # makes every ``>`` comparison False -- silently switching the ceiling off
-    # while the code still reads like a guard. That is the repo's documented
-    # pins-the-bound trap; reusing the one hardened summation beats a tenth copy.
-    if open_risk_dollars(same_symbol) + _finite(added_risk) > limits["max_risk_per_symbol"]:
-        return SYMBOL_RISK_CAP
-
-    # SECTOR (gap assessment B4) - the rung between the per-symbol caps and the
-    # book-wide one. Four DIFFERENT semiconductors at the full symbol cap breach
-    # nothing above this, which is exactly the correlated book the playbook warns
-    # about; measured, the driver's book once held $21,531 across 15 Information
-    # Technology positions, 86% of a $25,000 account in one sector.
-    #
-    # Reported AFTER the symbol rungs and BEFORE expiry, deliberately: when both a
-    # symbol cap and the sector cap bind, "you already hold three MU" is the
-    # actionable sentence - the operator can pick another name - while "tech is
-    # full" is the answer only once the symbol has room. A shared expiry is the
-    # weaker coincidence of the two, so it stays last.
-    #
-    # Opt-in by DATA like the deployment cap above: a ``limits`` dict without the
-    # keys, or a cap of 0, keeps the pre-B4 behaviour untouched.
-    max_sector_n = limits.get("max_positions_per_sector")
-    max_sector_risk = limits.get("max_risk_per_sector")
-    if max_sector_n or max_sector_risk:
-        bucket = _group_of(symbol, sector_of)
-        if bucket is not None:
-            # A row whose symbol lands in no bucket is skipped rather than
-            # grouped: ``group_key`` gives an unmapped symbol a bucket of its OWN,
-            # so an unknown name is still capped against itself and can neither
-            # borrow another sector's allowance nor drag unrelated names in.
-            same_sector = [p for p in rows
-                           if _group_of(p.get("symbol"), sector_of) == bucket]
-            if max_sector_n and len(same_sector) >= max_sector_n:
-                return SECTOR_POSITION_CAP
-            # Through ``open_risk_dollars`` for the third time in this function,
-            # and for the same reason: a NaN row would poison the sum, and a NaN
-            # total makes every ``>`` False - switching the ceiling off silently.
-            if max_sector_risk and (open_risk_dollars(same_sector)
-                                    + _finite(added_risk)) > max_sector_risk:
-                return SECTOR_RISK_CAP
-
-    exp = (expiration or "").strip()
-    same_expiry = [p for p in rows if (p.get("expiration") or "").strip() == exp]
-    if len(same_expiry) >= limits["max_positions_per_expiry"]:
-        return EXPIRY_POSITION_CAP
-
-    return None
+    book = [dict(p, sector=_group_of(p.get("symbol"), sector_of))
+            for p in positions or () if isinstance(p, dict)]
+    candidate = {"symbol": symbol, "expiration": expiration,
+                 "sector": _group_of(symbol, sector_of)}
+    rungs = _book_caps.evaluate(book, candidate, added_risk, limits, equity)
+    breach = _book_caps.first_breach(rungs, _book_caps.ACCOUNT_ORDER)
+    return breach["code"] if breach else None
 
 
 def _group_of(symbol, sector_of=None):
