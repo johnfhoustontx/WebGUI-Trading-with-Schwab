@@ -2396,7 +2396,7 @@ change even when that view raises), with `skip_unchanged`, plus once at startup.
 ⚠ **A dialog that cannot preview never blocks.** No view, no stamp or a malformed
 limits map is "can't preview", and Create stays enabled because the service still
 checks; only a known breach, a bad quantity or one above the dialog's ceiling of
-100 disables it — the page must never refuse a trade the Ledger would open. The
+100 disables it — missing data must never become a refusal on the page. The
 quantity box's max is the largest fitting quantity, never below a typed quantity
 that fits (`max_quantity` can land one short on sub-cent risk and the box clamps on
 blur). **`services/options_svc/tests/test_preview_agrees_with_ledger.py` is the
