@@ -422,6 +422,8 @@ git commit -m "feat(shared): book_caps - every paper risk rung in one pure modul
 
 ### Task 2: `max_quantity` and `describe`
 
+> **Revised after code review (commit `09901cf`):** the count sentences read from the trade's side ("Position 3 of 3 in ORCL" / "ORCL already holds 3 of 3 positions"), the deployment line says "across the book", an unmapped bucket reads "IONQ's own group (no sector on file)", and an unknown code never prints a raw constant. `shared/book_caps.py` and its tests are authoritative; the code below is the first cut.
+
 **Files:**
 - Modify: `shared/book_caps.py`
 - Test: `shared/tests/test_book_caps.py`
@@ -1347,9 +1349,9 @@ def test_opened():
 def test_refused_names_the_cap_and_the_quantity_that_fits():
     text, kind = handoff.paper_result_toast({
         "status": "refused", "symbol": "ORCL", "code": "SYMBOL_POSITION_CAP",
-        "message": "Already 3 of 3 positions in ORCL", "max_quantity": 0})
+        "message": "ORCL already holds 3 of 3 positions", "max_quantity": 0})
     assert kind == "warning"
-    assert text == "Not opened — Already 3 of 3 positions in ORCL."
+    assert text == "Not opened — ORCL already holds 3 of 3 positions."
 
 
 def test_refused_with_room_for_a_smaller_quantity_says_so():
@@ -2071,7 +2073,7 @@ No repo files. Follow memory note *local-page-harness-replaces-missing-dev*: a s
 2. Render `pages.options.scanner.render()` at `/`; open it in the Browser pane.
 3. Click Paper on the $190 row → dialog shows seven lines, Create enabled, quantity max 1. Create → toast "Opened 1 × ...".
 4. Click Paper on the $425 row → Per trade line red, Create disabled, text "Risks $425, over the $250 per-trade limit".
-5. Open two more $190 trades on the same symbol, then a fourth → toast "Not opened — Already 3 of 3 positions in ORCL."
+5. Open two more $190 trades on the same symbol, then a fourth → toast "Not opened — ORCL already holds 3 of 3 positions."
 6. Screenshot the refused dialog and the toast; report both.
 
 Expected: all of the above. Any mismatch is a bug to fix before Phase 4.
