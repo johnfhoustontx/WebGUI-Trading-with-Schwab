@@ -81,7 +81,8 @@ def calibrated_facts(signal, payload):
     ``None`` whenever the bucket is absent, the cache is cold, or the bucket
     does not ``speak`` -- the service sets that flag when the day-clustered t is
     inside +/-2, because one scan emits a dozen correlated signals and an EV we
-    cannot separate from zero is not a recommendation.
+    cannot separate from zero is not a recommendation -- or the row was scored
+    by strategy_scoring (it carries fit_score).
     """
     s = signal or {}
     buckets = (payload or {}).get("buckets") if isinstance(payload, dict) else None
@@ -92,6 +93,9 @@ def calibrated_facts(signal, payload):
     # is that model's Fit+Quality, not the scanner composite the calibration
     # buckets are built on (strategy_scoring.py writes it). Same trade_type,
     # different scale: answering would print another model's history.
+    # INCOME's bucket is recorded from the board's strategy_scoring composite
+    # (compute.income_capture_row), so if an Income row ever reaches this panel
+    # this guard would hide the one bucket on the matching scale - revisit then.
     if s.get("fit_score") is not None:
         return None
 
