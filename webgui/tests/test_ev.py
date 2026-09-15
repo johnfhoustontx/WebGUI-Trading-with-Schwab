@@ -183,3 +183,51 @@ class TestTheProducersSupplyWhatThisReads:
     def test_a_signal_missing_both_names_yields_nothing(self):
         assert ev.calibrated_facts({"credit": 1.0, "max_loss": 1.0},
                                    _payload(**{"0DTE|60-65": _bucket()})) is None
+
+
+def test_a_finder_row_never_reads_a_scanner_calibration_bucket():
+    """strategy_scoring overwrites composite_score with Fit+Quality while the row
+    keeps trade_type SWING; a bucket built on the scanner's score must not answer."""
+    from pages.options import ev
+    cal = {"buckets": {"SWING|70-75": {"speaks": True, "ev_r": 0.8, "n": 30, "days": 12}}}
+    row = {"trade_type": "SWING", "composite_score": 72.0, "fit_score": 70.0}
+    assert ev.calibrated_facts(row, cal) is None
+    assert ev.calibrated_facts({k: v for k, v in row.items() if k != "fit_score"}, cal)
+
+
+def test_a_finder_row_built_by_the_real_producer_reads_no_bucket(monkeypatch):
+    """Driven from the PRODUCER, not an invented dict: a real screen_spreads-shaped
+    PCS through strategy_scanner.adapt_credit_spread and strategy_scoring.score_all,
+    then strategy_table.detail_signal -- the exact dict the panel receives."""
+    import pathlib
+    from shared.calibration import bucket_key
+    from pages.options import strategy_table
+
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    monkeypatch.syspath_prepend(str(repo / "options-scanner"))
+    import strategy_scanner
+    import strategy_scoring
+
+    raw = {"symbol": "SPY", "type": "PCS", "trade_type": "SWING",
+           "expiration": "2026-10-16", "dte": 30,
+           "short_strike": 590.0, "long_strike": 585.0, "width": 5.0,
+           "short_mark": 1.10, "long_mark": 0.40,
+           "credit": 0.70, "max_loss": 4.30,
+           "pop_pct": 72.0, "short_delta": -0.20,
+           "net_theta": 0.15, "net_vega": -0.09,
+           "breakeven": 589.30, "underlying_price": 610.0,
+           "bid": 1.08, "ask": 1.12}
+    norm = strategy_scanner.adapt_credit_spread(raw)
+    view = {"direction": "bullish", "conviction": 0.6, "vol_regime": "mid"}
+    scored = strategy_scoring.score_all([norm], view, 0.2, 12.0)
+    assert len(scored) == 1
+    row = strategy_table.detail_signal(scored[0])
+
+    # The premise the guard keys on, stated against the producer's output.
+    assert row["fit_score"] is not None
+    assert row["trade_type"] == "SWING"
+    key = bucket_key(row["trade_type"], row["composite_score"])
+    assert key is not None
+    cal = {"buckets": {key: {"speaks": True, "ev_r": 0.8, "n": 30, "days": 12}}}
+
+    assert ev.calibrated_facts(row, cal) is None

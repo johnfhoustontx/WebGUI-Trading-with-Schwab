@@ -88,6 +88,13 @@ def calibrated_facts(signal, payload):
     if not isinstance(buckets, dict):
         return None
 
+    # A row scored by strategy_scoring carries fit_score, and its composite_score
+    # is that model's Fit+Quality, not the scanner composite the calibration
+    # buckets are built on (strategy_scoring.py writes it). Same trade_type,
+    # different scale: answering would print another model's history.
+    if s.get("fit_score") is not None:
+        return None
+
     # ⚠ Reads `trade_type`/`composite_score` ONLY, deliberately. The panel is
     # shared and each table synthesizes its own signal-like dict, but every
     # synthesizer is responsible for supplying those two names — Captured
