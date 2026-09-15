@@ -83,6 +83,34 @@ ACCOUNT_ORDER = (DEPLOYMENT_CAP, SYMBOL_POSITION_CAP, SYMBOL_RISK_CAP,
 # The Paper dialog's own maximum quantity.
 QTY_CEILING = 100
 
+# Prefix of the single-symbol bucket an UNMAPPED name gets. No real sector name
+# contains ``?``, so the bucket can never collide with one.
+UNMAPPED_PREFIX = "?"
+
+
+def sector_bucket(table, symbol):
+    """The sector bucket ``symbol`` is capped in, over a symbol -> sector ``table``.
+
+    THE bucket rule: ``shared.sectors.group_key`` delegates here with the loaded
+    ``config/sectors.toml`` table, and the Paper dialog calls it over the table
+    the service publishes, so the preview and the click cannot disagree about
+    which bucket a symbol is in. Pure - the caller supplies the table.
+
+    Not a string -> ``None``. The key is the stripped, uppercased symbol, and an
+    empty one -> ``None`` ("no grouping possible", never a bucket). A mapped key
+    whose value is a non-empty string -> that sector; anything else (unmapped,
+    a non-dict table, a non-string value) -> ``"?" + key``, a bucket of its own.
+    """
+    if not isinstance(symbol, str):
+        return None
+    key = symbol.strip().upper()
+    if not key:
+        return None
+    value = table.get(key) if isinstance(table, dict) else None
+    if isinstance(value, str) and value:
+        return value
+    return UNMAPPED_PREFIX + key
+
 
 def _finite(value):
     """A usable number, or 0.0. An unreadable candidate risk counts as zero

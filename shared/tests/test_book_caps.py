@@ -262,3 +262,39 @@ def test_an_unmapped_bucket_reads_as_its_own_group():
     assert bc.scope_label("?IONQ") == "IONQ's own group (no sector on file)"
     assert bc.describe(bc._count(bc.SECTOR_POSITION_CAP, "?IONQ", 0, 5)) == \
         "Position 1 of 5 in IONQ's own group (no sector on file)"
+
+
+# --- sector_bucket: the one bucket rule the service and the page share -------
+_TABLE = {"ORCL": "Information Technology", "XOM": "Energy", "BAD": 7, "EMPTY": ""}
+
+
+def test_sector_bucket_returns_a_mapped_sector():
+    assert bc.sector_bucket(_TABLE, "XOM") == "Energy"
+
+
+def test_sector_bucket_normalises_case_and_whitespace():
+    assert bc.sector_bucket(_TABLE, "  orcl ") == "Information Technology"
+
+
+def test_sector_bucket_gives_an_unmapped_symbol_its_own_bucket():
+    assert bc.sector_bucket(_TABLE, "zzzq") == "?ZZZQ"
+    assert bc.UNMAPPED_PREFIX == "?"
+
+
+def test_sector_bucket_refuses_a_non_string_symbol():
+    assert bc.sector_bucket(_TABLE, None) is None
+    assert bc.sector_bucket(_TABLE, 123) is None
+
+
+def test_sector_bucket_refuses_an_empty_symbol():
+    assert bc.sector_bucket(_TABLE, "") is None
+    assert bc.sector_bucket(_TABLE, "   ") is None
+
+
+def test_sector_bucket_with_no_table_buckets_the_symbol_alone():
+    assert bc.sector_bucket(None, "orcl") == "?ORCL"
+
+
+def test_sector_bucket_ignores_a_non_string_or_empty_table_value():
+    assert bc.sector_bucket(_TABLE, "bad") == "?BAD"
+    assert bc.sector_bucket(_TABLE, "empty") == "?EMPTY"

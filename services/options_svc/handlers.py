@@ -15,6 +15,7 @@ Kept synchronous: the scaffold's consumer loop handles sync handlers.
 """
 import datetime as _dt
 import logging
+import threading
 import time
 
 from services.options_svc import compute
@@ -202,12 +203,19 @@ EVENT_PAPER_CREATE = "events:options:paper_create"
 PAPER_CREATE_TTL_SEC = 600
 
 # The Paper LEDGER's book as the risk caps see it - open trades, equity, the
-# limits in force, and a symbol -> sector-bucket map - so the Paper dialog can
-# preview whether a trade fits BEFORE the click (design 2026-09-15, Part 1). The
-# web tier may not import shared.sectors, hence ``sector_of``. Republished by
-# every ``refresh_paper_trades``; the service still enforces on the click.
+# limits in force, and the WHOLE symbol -> sector table plus the unmapped-bucket
+# prefix - so the Paper dialog can preview whether a trade fits BEFORE the click
+# (design 2026-09-15, Part 1). The web tier may not import shared.sectors, so it
+# runs ``shared.book_caps.sector_bucket`` over the published table: the same rule
+# ``sectors.group_key`` delegates to, for ANY symbol. Republished by every
+# ``refresh_paper_trades``; the service still enforces on the click.
 CACHE_LEDGER_CAPS = "cache:options:ledger_caps"
 EVENT_LEDGER_CAPS = "events:options:ledger_caps"
+# The command consumer and the manage tick run refresh_paper_trades on different
+# executor threads. Without this lock two refreshes can interleave read-book and
+# write, and an OLDER book overwrites a newer one - staying wrong until the next
+# Ledger change.
+_LEDGER_CAPS_LOCK = threading.Lock()
 
 CACHE_PAPER = "cache:options:paper_account"
 EVENT_PAPER = "events:options:paper_account"
@@ -1308,39 +1316,49 @@ def refresh_paper_trades(bus, reprice: bool = True) -> None:
     of a blank column (the reprice is skipped off-hours inside the view). No strict
     contract: the view is a loosely-shaped read-only dict (``{"trades": [...]}``)
     that only the Paper Trades page consumes, and ``compute.paper_trades_view`` is
-    already fully defensive."""
-    data = compute.paper_trades_view(reprice=reprice)
-    version = bus.cache_set(CACHE_PAPER_TRADES, data)
-    bus.publish(EVENT_PAPER_TRADES, {"version": version})
-    refresh_ledger_caps(bus)
+    already fully defensive.
 
-
-def _scan_universe():
-    """Every symbol a candidate can carry: the scanner watchlist. Read defensively."""
+    The Ledger's caps book is republished in a ``finally`` so it follows every
+    Ledger change even when this view or its publish raises. The trades just
+    read are forwarded (the reprice only adds ``unrealized_pnl``, which the book
+    ignores) - but NOT an empty list: ``paper_trades_view`` answers ``[]`` on a
+    read failure too, and forwarding that would publish an empty book as fact.
+    An empty ledger just costs the book its own read."""
+    trades = None
     try:
-        import watchlist
-        return list(watchlist.get_scan_symbols())
-    except Exception:  # noqa: BLE001
-        log.warning("ledger_caps: scan universe unreadable; sector_of covers open trades only",
-                    exc_info=True)
-        return []
+        data = compute.paper_trades_view(reprice=reprice)
+        trades = (data or {}).get("trades") or None
+        version = bus.cache_set(CACHE_PAPER_TRADES, data)
+        bus.publish(EVENT_PAPER_TRADES, {"version": version})
+    finally:
+        if trades is None:
+            refresh_ledger_caps(bus)
+        else:
+            refresh_ledger_caps(bus, trades=trades)
 
 
-def refresh_ledger_caps(bus) -> None:
+def refresh_ledger_caps(bus, trades=None) -> None:
     """Publish the Paper Ledger's book for the Paper dialog preview (design
-    2026-09-15, Part 1). Republished whenever the Ledger refreshes. A symbol
-    missing from ``sector_of`` makes the page's sector rungs read 'unknown';
-    the service still enforces on the click.
+    2026-09-15, Part 1). Republished whenever the Ledger refreshes.
+
+    Carries the whole ``sectors.toml`` table and ``unmapped_prefix``; the page
+    buckets any symbol with ``book_caps.sector_bucket`` over it, the rule
+    ``sectors.group_key`` itself delegates to. ``trades`` (all Ledger trades,
+    already read) skips a second DB read.
 
     ``event=`` rides the write, so an unchanged book (``skip_unchanged``) bumps
-    no version and fires no repaint event."""
+    no version and fires no repaint event. Never raises: a failure is a degrade.
+    """
     try:
+        from shared import book_caps as _book_caps
         from shared import sectors as _sectors
-        state = compute.ledger_book_state()
-        symbols = set(_scan_universe()) | {r.get("symbol") for r in state["open"]}
-        state["sector_of"] = {s: _sectors.group_key(s) for s in symbols if s}
-        bus.cache_set(CACHE_LEDGER_CAPS, state, event=EVENT_LEDGER_CAPS,
-                      skip_unchanged=True)
+        with _LEDGER_CAPS_LOCK:
+            state = (compute.ledger_book_state() if trades is None
+                     else compute.ledger_book_state(trades=trades))
+            state["sectors"] = dict(_sectors.load().get("sectors") or {})
+            state["unmapped_prefix"] = _book_caps.UNMAPPED_PREFIX
+            bus.cache_set(CACHE_LEDGER_CAPS, state, event=EVENT_LEDGER_CAPS,
+                          skip_unchanged=True)
     except Exception:  # noqa: BLE001
         _degrade.degraded("options.ledger_caps")
 

@@ -27,6 +27,7 @@ internal correlation is only 0.240, because it holds IBM and TXN beside IONQ/RGT
 (0.939) and CRWV/NBIS (0.838).
 """
 from repo_paths import SECTORS_TOML
+from shared import book_caps
 from shared.config_toml import toml_loader
 
 #: The closed vocabulary — the 11 GICS sectors as ``sentiment-dashboard``'s
@@ -55,8 +56,9 @@ SECTORS = frozenset({
 })
 
 #: Prefix for the synthetic single-symbol bucket an UNMAPPED name gets. Chosen so
-#: it can never collide with a real sector name (none contains ``?``).
-_LONE = "?"
+#: it can never collide with a real sector name (none contains ``?``). The
+#: bucket rule itself lives in ``shared.book_caps.sector_bucket``.
+_LONE = book_caps.UNMAPPED_PREFIX
 
 DEFAULTS: dict = {"sectors": {}}
 
@@ -106,11 +108,13 @@ def group_key(symbol):
 
     Returns ``None`` only for input that is not a symbol at all, which the caller
     should treat as "no grouping possible" rather than as a bucket.
+
+    Delegates to ``shared.book_caps.sector_bucket`` over the loaded table, so the
+    Paper dialog's preview (which runs that rule over the published table) and
+    this enforcement cannot disagree. ``test_sector_bucket_parity`` pins the
+    answers to this function's pre-delegation body.
     """
-    key = _key(symbol)
-    if key is None:
-        return None
-    return sector_of(key) or (_LONE + key)
+    return book_caps.sector_bucket(load().get("sectors"), symbol)
 
 
 def is_mapped(symbol) -> bool:
