@@ -201,6 +201,14 @@ CACHE_PAPER_CREATE = "cache:options:paper_create"
 EVENT_PAPER_CREATE = "events:options:paper_create"
 PAPER_CREATE_TTL_SEC = 600
 
+# The Paper LEDGER's book as the risk caps see it - open trades, equity, the
+# limits in force, and a symbol -> sector-bucket map - so the Paper dialog can
+# preview whether a trade fits BEFORE the click (design 2026-09-15, Part 1). The
+# web tier may not import shared.sectors, hence ``sector_of``. Republished by
+# every ``refresh_paper_trades``; the service still enforces on the click.
+CACHE_LEDGER_CAPS = "cache:options:ledger_caps"
+EVENT_LEDGER_CAPS = "events:options:ledger_caps"
+
 CACHE_PAPER = "cache:options:paper_account"
 EVENT_PAPER = "events:options:paper_account"
 # Manual (scanner-baseline) book performance analytics — the benchmark to compare the
@@ -1304,6 +1312,37 @@ def refresh_paper_trades(bus, reprice: bool = True) -> None:
     data = compute.paper_trades_view(reprice=reprice)
     version = bus.cache_set(CACHE_PAPER_TRADES, data)
     bus.publish(EVENT_PAPER_TRADES, {"version": version})
+    refresh_ledger_caps(bus)
+
+
+def _scan_universe():
+    """Every symbol a candidate can carry: the scanner watchlist. Read defensively."""
+    try:
+        import watchlist
+        return list(watchlist.get_scan_symbols())
+    except Exception:  # noqa: BLE001
+        log.warning("ledger_caps: scan universe unreadable; sector_of covers open trades only",
+                    exc_info=True)
+        return []
+
+
+def refresh_ledger_caps(bus) -> None:
+    """Publish the Paper Ledger's book for the Paper dialog preview (design
+    2026-09-15, Part 1). Republished whenever the Ledger refreshes. A symbol
+    missing from ``sector_of`` makes the page's sector rungs read 'unknown';
+    the service still enforces on the click.
+
+    ``event=`` rides the write, so an unchanged book (``skip_unchanged``) bumps
+    no version and fires no repaint event."""
+    try:
+        from shared import sectors as _sectors
+        state = compute.ledger_book_state()
+        symbols = set(_scan_universe()) | {r.get("symbol") for r in state["open"]}
+        state["sector_of"] = {s: _sectors.group_key(s) for s in symbols if s}
+        bus.cache_set(CACHE_LEDGER_CAPS, state, event=EVENT_LEDGER_CAPS,
+                      skip_unchanged=True)
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.ledger_caps")
 
 
 def _publish_captured(bus, signals) -> None:

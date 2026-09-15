@@ -566,6 +566,12 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.refresh_paper_trades, bus)
     except Exception:
         log.exception("startup refresh_paper_trades degraded")
+    # The Ledger's book for the Paper dialog preview. refresh_paper_trades above
+    # already republishes it on success; this call is independent so a failed
+    # trades view cannot leave the preview without a book until the first
+    # Ledger change. refresh_ledger_caps never raises (it degrades), and an
+    # unchanged book is a skipped write.
+    await loop_.run_in_executor(None, handlers.refresh_ledger_caps, bus)
     # One-shot startup refresh of the open captured-signals view so the Captured
     # Signals page has data on first load. The signal set only changes on user
     # actions (reload/reprice/close commands re-publish it), so it is NOT polled
