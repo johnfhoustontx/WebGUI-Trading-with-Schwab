@@ -2861,7 +2861,17 @@ def _friction_pct(row):
     ``spread_bid``/``spread_ask`` are built from BOTH legs (short.bid - long.ask,
     short.ask - long.bid), so their difference is the whole round trip; an iron
     condor sums its two sides'. Normalized rows without them sum ask - bid over
-    their legs. None when any figure is missing - never a guessed zero."""
+    their legs. None when any figure is missing - never a guessed zero.
+
+    A row holding a SHARE leg (or any leg that is not a call or put) is None
+    before anything is computed: the share purchase dominates ``net_debit``, so
+    a COVERED_CALL / PROTECTIVE_PUT / COLLAR would read 0.0% - a reading of
+    "free" that was never measured."""
+    raw_legs = row.get("legs")
+    if isinstance(raw_legs, (list, tuple)) and any(
+            not isinstance(l, dict) or str(l.get("kind", "")).lower() not in ("call", "put")
+            for l in raw_legs):
+        return None
     credit = _num_or_none(row.get("credit"))
     if credit is None:
         nc, nd = _num_or_none(row.get("net_credit")), _num_or_none(row.get("net_debit"))
@@ -2872,11 +2882,9 @@ def _friction_pct(row):
     if sb is not None and sa is not None and sa >= sb:
         width = sa - sb
     else:
-        raw_legs = row.get("legs")
         if not isinstance(raw_legs, (list, tuple)):
             return None
-        legs = [l for l in raw_legs if isinstance(l, dict)
-                and str(l.get("kind", "")).lower() in ("call", "put")]
+        legs = list(raw_legs)   # every leg is a call or put, checked above
         if not legs:
             return None
         width = 0.0
@@ -2898,7 +2906,7 @@ def _em_to_expiry(row):
         em = moves.get("daily") if isinstance(moves, dict) else None
         daily = _num_or_none(em.get("move_dollars")) if isinstance(em, dict) else _num_or_none(em)
     dte = _num_or_none(row.get("dte"))
-    if not daily or dte is None:
+    if daily is None or daily <= 0 or dte is None:
         return None
     return round(daily * math.sqrt(max(dte, 1.0)), 4)
 

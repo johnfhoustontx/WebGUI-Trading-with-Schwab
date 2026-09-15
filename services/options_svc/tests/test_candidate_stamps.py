@@ -70,6 +70,7 @@ def test_em_to_expiry_reads_a_finder_rows_daily_em():
 def test_vol_floor_is_the_trade_types_floor():
     from shared import scanner_config
     stamped = compute.stamp_candidate(_raw_pcs(), trade_type="0-DTE")
+    assert stamped["vol_floor"] is not None
     assert stamped["vol_floor"] == scanner_config.min_iv_rank().get("0-DTE")
 
 
@@ -107,3 +108,29 @@ def test_swing_scan_stamps_its_daily_move_on_every_row():
     import inspect
     src = inspect.getsource(compute.swing_scan)
     assert 's["daily_em"] = dem' in src
+
+
+def test_share_structures_have_no_friction_reading(monkeypatch):
+    """A covered call / protective put / collar's net_debit is mostly the share
+    purchase, so a friction % over it would read ~0 - "free", never measured."""
+    import datetime as dt
+    import pathlib
+
+    import strategy_scanner
+
+    tests_dir = pathlib.Path(__file__).resolve().parents[3] / "options-scanner" / "tests"
+    monkeypatch.syspath_prepend(str(tests_dir))
+    from test_scanner_engine import _chain_at
+
+    exp = (dt.date.today() + dt.timedelta(days=10)).isoformat()
+    chain = _chain_at(100.0, exp, 10)
+    rows = strategy_scanner.build_stock_structures(chain, "ORCL", 100.0, 0.18, 5, 15)
+    assert rows, "the producer built no share structures - the test would be vacuous"
+    for row in rows:
+        stamped = compute.stamp_candidate(dict(row), trade_type="SWING")
+        assert stamped["friction_pct"] is None, row.get("type")
+
+
+def test_a_non_positive_daily_move_has_no_expected_move():
+    row = {"dte": 5, "daily_em": -1.0}
+    assert compute.stamp_candidate(row, trade_type="SWING")["em_to_expiry"] is None
