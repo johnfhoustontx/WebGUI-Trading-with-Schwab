@@ -1775,6 +1775,8 @@ git commit -m "feat(options-svc): stamp scan, Finder and Income candidates at pu
 
 ### Task 12: Publish `cache:options:ledger_caps`
 
+> **Revised after code review:** the view publishes the WHOLE sector table (`sectors`, from `config/sectors.toml`) and `unmapped_prefix`, not a watchlist-derived `sector_of` map, and the bucket rule lives once in `shared.book_caps.sector_bucket(table, symbol)`, which `shared.sectors.group_key` delegates to. A Strategy Finder symbol outside the watchlist would otherwise have shown its sector rungs as unchecked while the service enforced them. A lock serialises the read-and-write, and the refresh runs in a `finally`. The committed code and tests are authoritative.
+
 **Files:**
 - Modify: `services/options_svc/handlers.py` (new `refresh_ledger_caps`; call it at the end of `refresh_paper_trades`)
 - Modify: `services/options_svc/app.py` — find the startup warm-up block (`grep -n "refresh_paper" services/options_svc/app.py services/options_svc/scheduler.py`) and call `handlers.refresh_ledger_caps(bus)` there once
@@ -1879,7 +1881,7 @@ CAPS = {"limits": {"max_positions_per_symbol": 3, "max_risk_per_symbol": 750.0,
         "equity": 25000.0,
         "open": [{"symbol": "ORCL", "expiration": "2026-10-17",
                   "max_loss_total": 410.0, "sector": "Information Technology"}] ,
-        "sector_of": {"ORCL": "Information Technology"}}
+        "sectors": {"ORCL": "Information Technology"}, "unmapped_prefix": "?"}
 
 SIG = {"symbol": "ORCL", "type": "PCS", "expiration": "2026-10-17",
        "ledger_risk_per_contract": 182.0}
@@ -1910,10 +1912,19 @@ def test_no_caps_view_means_no_preview():
     assert book_fit.preview(SIG, None, qty=1)["available"] is False
 
 
-def test_unknown_sector_symbol_reads_unknown_not_blocked():
+def test_a_symbol_outside_the_table_is_capped_in_its_own_group():
+    """Exactly the service's rule (book_caps.sector_bucket): an unmapped name is
+    its own bucket, so its sector rungs are evaluated, never skipped."""
     p = book_fit.preview({**SIG, "symbol": "ZZZZ"}, CAPS, qty=1)
     sector = [l for l in p["lines"] if l["code"] == "SECTOR_POSITION_CAP"][0]
-    assert sector["tone"] == "muted"
+    assert sector["tone"] == "pos"
+    assert sector["text"] == "Position 1 of 5 in ZZZZ's own group (no sector on file)"
+
+
+def test_no_sector_table_means_no_preview():
+    """Without the table the page cannot compute the bucket the service will."""
+    caps = {k: v for k, v in CAPS.items() if k != "sectors"}
+    assert book_fit.preview(SIG, caps, qty=1)["available"] is False
 
 
 def test_short_reason_for_the_checklist_chip():
@@ -1972,12 +1983,13 @@ def preview(signal, caps, qty=1):
     """``{available, lines, breach, block_text, max_quantity, unavailable_text}``."""
     sig = signal or {}
     per = num(sig.get("ledger_risk_per_contract"))
-    if not isinstance(caps, dict) or not caps.get("limits") or per is None or per <= 0:
+    if (not isinstance(caps, dict) or not caps.get("limits")
+            or not isinstance(caps.get("sectors"), dict) or per is None or per <= 0):
         return {"available": False, "lines": [], "breach": None, "block_text": "",
                 "max_quantity": None, "unavailable_text": UNAVAILABLE}
     symbol = (sig.get("symbol") or "").strip().upper()
     candidate = {"symbol": symbol, "expiration": sig.get("expiration"),
-                 "sector": (caps.get("sector_of") or {}).get(symbol)}
+                 "sector": book_caps.sector_bucket(caps.get("sectors"), symbol)}
     book, limits, equity = caps.get("open") or [], caps["limits"], caps.get("equity")
     q = max(1, int(qty or 1))
     rungs = book_caps.evaluate(book, candidate, per * q, limits, equity)
@@ -2132,7 +2144,8 @@ LIMITS = {"max_positions_per_symbol": 3, "max_risk_per_symbol": 750.0,
           "max_positions_per_expiry": 5, "max_positions_per_sector": 5,
           "max_risk_per_sector": 1500.0, "max_deployed_risk_pct": 0.2,
           "max_risk_per_trade": 250.0}
-CAPS = {"limits": LIMITS, "equity": 25000.0, "open": [], "sector_of": {"ORCL": "IT"}}
+CAPS = {"limits": LIMITS, "equity": 25000.0, "open": [], "sectors": {"ORCL": "IT"},
+        "unmapped_prefix": "?"}
 
 
 def _pcs(**over):

@@ -214,12 +214,12 @@ the outcome; the dialog's own toast stops claiming anything beyond "sent".
 ```json
 {"limits": {...}, "starting_balance": 25000.0, "realized_pnl": -120.5,
  "equity": 24879.5,
- "open": [{"symbol", "expiration", "risk", "sector"}],
- "sector_of": {"ORCL": "Information Technology", "...": "..."}}
+ "open": [{"symbol", "expiration", "max_loss_total", "sector"}],
+ "sectors": {"ORCL": "Information Technology", "...": "..."},
+ "unmapped_prefix": "?"}
 ```
 
-`sector_of` covers the scan universe plus open trades. Republished wherever
-`refresh_paper_trades` runs (open, close, delete, expiry) and at startup.
+`sectors` is the WHOLE `config/sectors.toml` table (~340 names, ~10 KB), not a watchlist subset: the page computes a candidate's bucket with `shared.book_caps.sector_bucket(table, symbol)` — the one bucket rule, which `shared.sectors.group_key` delegates to — so an unmapped symbol is its own `?SYMBOL` bucket on both sides. Republished (under a lock, in a `finally`) wherever `refresh_paper_trades` runs, and at startup.
 
 ### The Paper dialog is the full preview
 
