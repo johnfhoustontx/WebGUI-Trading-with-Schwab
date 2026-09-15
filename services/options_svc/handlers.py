@@ -191,6 +191,16 @@ CACHE_INCOME_OPEN = "cache:options:income_open"
 EVENT_INCOME_OPEN = "events:options:income_open"
 INCOME_OPEN_TTL_SEC = 600
 
+# The OUTCOME of one ``paper_create`` - opened, refused by a risk cap, stale, or
+# an error - which the Scanner and Strategy Finder turn into a toast. Same shape
+# and reasoning as CACHE_INCOME_OPEN: written on EVERY outcome, a per-publish
+# ``seq`` so two identical refusals are two visible answers, and a TTL so an old
+# answer is not read as fresh after a restart. Until 2026-09-15 a refused
+# paper_create raised and was dead-lettered: a button that did nothing.
+CACHE_PAPER_CREATE = "cache:options:paper_create"
+EVENT_PAPER_CREATE = "events:options:paper_create"
+PAPER_CREATE_TTL_SEC = 600
+
 CACHE_PAPER = "cache:options:paper_account"
 EVENT_PAPER = "events:options:paper_account"
 # Manual (scanner-baseline) book performance analytics — the benchmark to compare the
@@ -2358,6 +2368,22 @@ def _publish_income_open(bus, result: dict) -> None:
 
 _INCOME_OPEN_SEQ = 0
 
+_PAPER_CREATE_SEQ = 0
+
+
+def _publish_paper_create(bus, result: dict) -> None:
+    """Cache one ``paper_create`` outcome with a ``seq`` and ``ts`` (see
+    CACHE_PAPER_CREATE). The booked trade dict is dropped: the page needs the
+    answer, not the row, and the Ledger view carries the row."""
+    global _PAPER_CREATE_SEQ
+    _PAPER_CREATE_SEQ += 1
+    payload = {k: v for k, v in (result or {}).items() if k != "trade"}
+    payload.setdefault("status", "error")
+    payload["seq"] = _PAPER_CREATE_SEQ
+    payload.setdefault("ts", _dt.datetime.now(mc.CT).isoformat())
+    version = bus.cache_set(CACHE_PAPER_CREATE, payload, ttl=PAPER_CREATE_TTL_SEC)
+    bus.publish(EVENT_PAPER_CREATE, {"version": version})
+
 
 def run_income_open(bus, command) -> None:
     """Open one Income-board candidate into the manual paper ACCOUNT.
@@ -2546,9 +2572,9 @@ def handle_command(bus, command) -> None:
         # R5: refuse a stale manual paper-open (a restart replay would open on
         # stale economics). Surfaced via the R1 results list + logged; the ledger
         # is still refreshed so the page repaints.
+        sig = command.args.get("signal") or {}
         if _is_stale_open(command):
             age = _command_age_seconds(command)
-            sig = command.args.get("signal") or {}
             log.warning(
                 "REJECTED stale paper_create for %s: age %.0fs > %ds (enqueue ts=%s)",
                 sig.get("symbol"), age or -1, STALE_OPEN_MAX_AGE_SEC,
@@ -2556,9 +2582,17 @@ def handle_command(bus, command) -> None:
             _record_open_result({"status": "rejected", "reason": "stale_command",
                                  "symbol": sig.get("symbol"),
                                  "age_sec": round(age or 0, 1), "source": "manual"})
+            _publish_paper_create(bus, {"status": "stale", "symbol": sig.get("symbol"),
+                                        "type": sig.get("type"),
+                                        "message": "The request waited too long to be "
+                                                   "processed, so it was not acted on. "
+                                                   "Try again"})
         else:
-            compute.create_paper_trade(command.args.get("signal"),
-                                       command.args.get("qty", 1))
+            outcome = compute.create_paper_trade(sig, command.args.get("qty", 1)) or {}
+            if outcome.get("status") == "refused":
+                log.info("REFUSED paper_create %s %s: %s", sig.get("symbol"),
+                         outcome.get("code"), outcome.get("message"))
+            _publish_paper_create(bus, outcome)
         refresh_paper_trades(bus)
     elif command.type == "paper_reload":
         refresh_paper_trades(bus)
