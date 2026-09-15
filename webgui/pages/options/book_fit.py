@@ -147,5 +147,5 @@ def preview(signal, caps, qty=1):
                 "max_quantity": _max_quantity(book, candidate, basis, added, q,
                                               limits, equity),
                 "unavailable_text": ""}
-    except (KeyError, TypeError, AttributeError, ValueError):
+    except (KeyError, TypeError, AttributeError, ValueError, OverflowError):
         return _unavailable()

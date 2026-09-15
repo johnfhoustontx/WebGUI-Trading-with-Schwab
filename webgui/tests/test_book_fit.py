@@ -240,3 +240,17 @@ def test_labels_and_short_reasons_cover_every_rung():
 def test_an_empty_open_book_is_a_real_book():
     p = book_fit.preview(SIG, {**CAPS, "open": []}, qty=1)
     assert p["available"] and p["breach"] is None
+
+
+def test_numbers_too_large_for_a_float_mean_no_preview_never_a_raise():
+    """``book_caps`` turns an int equity or cap into a float, which OVERFLOWS for a
+    huge int rather than reaching inf - the preview must say "no preview"."""
+    assert _unavailable(book_fit.preview(SIG, {**CAPS, "equity": 10**400}, qty=1))
+    limits = {**CAPS["limits"], "max_risk_per_symbol": 10**400}
+    assert _unavailable(book_fit.preview(SIG, {**CAPS, "limits": limits}, qty=1))
+
+
+def test_a_quantity_too_large_to_book_means_no_preview():
+    assert _unavailable(book_fit.preview(SIG, CAPS, qty=10**400))
+    sig = {**SIG, "ledger_risk_basis": {"per_share": 2}}
+    assert _unavailable(book_fit.preview(sig, CAPS, qty=10**400))

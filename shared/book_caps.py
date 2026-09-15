@@ -1,12 +1,15 @@
 """shared/book_caps.py - the paper books' risk caps, evaluated in ONE place.
 
-Three callers share this module and must never disagree:
+Four callers share this module and must never disagree:
 
 * ``options-scanner/paper_concentration.concentration_reject`` - the Paper
   ACCOUNT's automatic entry cycle (a thin adapter over this since 2026-09-15);
 * ``services/options_svc/compute.create_paper_trade`` - the Paper LEDGER, which
   the Paper button opens into and which enforced no cap at all before this;
-* ``webgui/pages/options/book_fit`` - the Paper dialog's preview.
+* ``webgui/pages/options/book_fit`` - the Paper dialog's preview;
+* ``options-scanner/paper_trader`` - the Paper LEDGER's booking, which books every
+  ``max_loss_total`` through ``booked_risk``, the one rounding rule the preview
+  and the service's candidate stamp use too.
 
 Pure: ``math`` and ``shared.driver_policy.open_risk_dollars`` (itself math-only).
 Sectors arrive RESOLVED on every row as ``sector``, so this module never reads
@@ -143,25 +146,31 @@ def booked_risk(basis, qty):
       debit branch's ``round(max_loss * quantity, 2)``.
 
     Anything else - not a dict, neither key or both, a bool, a non-number, a
-    non-finite value or result - is None. A zero basis books 0.0; deciding
-    whether that is usable risk is the caller's job.
+    non-finite value or result, or arithmetic that overflows - is None. A zero
+    basis books 0.0; deciding whether that is usable risk is the caller's job.
     """
-    if not isinstance(basis, dict) or not _real(qty):
-        return None
-    has_share, has_contract = "per_share" in basis, "per_contract" in basis
-    if has_share == has_contract:
-        return None
-    if has_share:
-        x = basis["per_share"]
-        if not _real(x):
+    # OverflowError anywhere below - a huge int quantity or basis cannot even be
+    # tested with ``math.isfinite``, and times a float it overflows rather than
+    # reaching inf - is "no figure", never a raise.
+    try:
+        if not isinstance(basis, dict) or not _real(qty):
             return None
-        total = round(x * qty * _CONTRACT_MULT, 2)
-    else:
-        y = basis["per_contract"]
-        if not _real(y):
+        has_share, has_contract = "per_share" in basis, "per_contract" in basis
+        if has_share == has_contract:
             return None
-        total = round(y * qty, 2)
-    return total if math.isfinite(total) else None
+        if has_share:
+            x = basis["per_share"]
+            if not _real(x):
+                return None
+            total = round(x * qty * _CONTRACT_MULT, 2)
+        else:
+            y = basis["per_contract"]
+            if not _real(y):
+                return None
+            total = round(y * qty, 2)
+        return total if math.isfinite(total) else None
+    except OverflowError:
+        return None
 
 
 def _finite(value):

@@ -188,3 +188,30 @@ def test_the_suggested_quantity_really_opens(ledger):
     out = compute.create_paper_trade(_pcs(), 4)
     assert out["status"] == "refused" and out["max_quantity"] == 3
     assert compute.create_paper_trade(_pcs(), out["max_quantity"])["status"] == "opened"
+
+
+@pytest.mark.parametrize("sig", [
+    {"symbol": "SPY", "type": "LONG_CALL", "expiration": "2026-10-17",
+     "net_debit": 300.0, "legs": [{"kind": "call", "side": "long", "strike": 500}]},
+    {**_pcs(symbol="MU"), "max_loss": float("nan")},
+])
+def test_a_booked_max_loss_that_is_not_usable_leaves_a_health_trace(ledger, monkeypatch, sig):
+    """A tradeable structure that books no usable risk is a producer defect: it is
+    still the same error to the screen, and it is recorded as a degrade."""
+    seen = []
+    monkeypatch.setattr(compute._degrade, "degraded",
+                        lambda area, **kw: seen.append((area, kw)))
+    out = compute.create_paper_trade(sig, 1)
+    assert out["status"] == "error"
+    assert out["message"] == ("The trade's max loss could not be read, so the risk "
+                              "caps cannot be checked.")
+    assert seen == [("options.create_paper_trade", {"detail": sig["symbol"]})]
+    assert ledger.get_open_trades() == []
+
+
+def test_a_trade_that_opens_records_no_degrade(ledger, monkeypatch):
+    seen = []
+    monkeypatch.setattr(compute._degrade, "degraded",
+                        lambda area, **kw: seen.append((area, kw)))
+    assert compute.create_paper_trade(_pcs(), 1)["status"] == "opened"
+    assert seen == []

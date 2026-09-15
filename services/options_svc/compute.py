@@ -2790,6 +2790,9 @@ def create_paper_trade(signal: dict, qty: int) -> dict:
     # because tests stub paper_trader.
     if not (isinstance(risk, (int, float)) and not isinstance(risk, bool)
             and math.isfinite(risk) and risk > 0):
+        # A tradeable structure that books no usable risk is a producer defect (a
+        # signal without a max loss, or a NaN one): keep its /health trace.
+        _degrade.degraded("options.create_paper_trade", detail=sig.get("symbol"))
         return {**base, "status": "error",
                 "message": "The trade's max loss could not be read, so the risk "
                            "caps cannot be checked."}

@@ -71,6 +71,13 @@ def _r700(sym, exp):
 
 E1, E2 = "2026-10-17", "2026-10-24"
 
+
+def _raw(sym, exp, max_loss, width=10.0):
+    """A raw per-share PCS with an EXACT per-share max loss (no rounding)."""
+    return {"symbol": sym, "type": "PCS", "trade_type": "SWING", "expiration": exp,
+            "dte": 30, "short_strike": 100.0, "long_strike": 100.0 - width,
+            "width": width, "credit": round(width - max_loss, 6), "max_loss": max_loss}
+
 # Each book is a list of (signal, qty) opened through the real Ledger path.
 BOOKS = {
     "empty": [],
@@ -88,6 +95,13 @@ BOOKS = {
                     (_r190("AVGO", E2), 1)],
     # IT holds $1,400 in only 2 positions (sector RISK nearly full, count not).
     "sector_risk": [(_r700("MSFT", E2), 1), (_r700("NVDA", E2), 1)],
+    # The rung where the SERVICE's step-down matters. A trade closed for +$0.02
+    # (BOOK_CLOSES) makes equity $25,000.02, so the deployment ceiling is
+    # $5,000.004 - a room that is not a whole cent - against $4,487.06 open.
+    "deploy_step": [(_raw("XOM", E1, 7.0), 1), (_raw("MSFT", E1, 7.0), 1),
+                    (_raw("JPM", E1, 7.0), 1), (_raw("KO", E2, 7.0), 1),
+                    (_raw("UNH", E2, 7.0), 1), (_raw("AAPL", E2, 7.0), 1),
+                    (_raw("CVX", E1, 2.8706), 1)],
     # $4,900 of open risk against a $5,000 deployment ceiling.
     "deployed": [(_r700("XOM", E1), 1), (_r700("MSFT", E1), 1),
                  (_r700("JPM", E1), 1), (_r700("KO", E2), 1),
@@ -122,6 +136,18 @@ CANDIDATES = {
 }
 
 QTYS = (1, 2, 3, 4, 5)
+
+# Trades opened and then CLOSED before a book's open trades, as (signal, qty,
+# exit debit per share): they move equity through realized P&L and hold no risk.
+BOOK_CLOSES = {
+    "deploy_step": [(_pcs("SPY", E1, 0.60, 2.5), 1, 0.5998)],     # +$0.02
+}
+
+# $0.854909 a share: 16 contracts book $1,367.85 (over the $750 per-trade limit),
+# so the Ledger suggests a size. max_quantity proposes floor($512.944 / $85.490625)
+# = 6 against the deployment room, but SIX contracts BOOK $512.95 - over by
+# $0.006 - so both sides must step down to 5.
+DEPLOY_STEP_SIGNAL = _raw("ORCL", E2, 0.854909)
 
 CASES = list(itertools.product(BOOKS, CANDIDATES, QTYS))
 
@@ -172,9 +198,15 @@ def templates(tmp_path_factory):
             db_path = root / f"{name}.db"
             with pytest.MonkeyPatch.context() as mp:
                 _point_ledger_at(mp, db_path)
+                import paper_trader
                 import trades_db
                 assert not is_protected(trades_db.DEFAULT_DB_PATH)
                 assert pathlib.Path(trades_db.DEFAULT_DB_PATH) == db_path
+                for sig, qty, exit_debit in BOOK_CLOSES.get(name, ()):
+                    opened = compute.create_paper_trade(dict(sig), qty)
+                    assert opened["status"] == "opened", (name, opened)
+                    closed = paper_trader.close_paper_trade(opened["trade"], exit_debit)
+                    paper_trader.update_trade(opened["trade_id"], closed)
                 for sig, qty in trades:
                     opened = compute.create_paper_trade(dict(sig), qty)
                     assert opened["status"] == "opened", (name, sig["symbol"], opened)
@@ -265,6 +297,41 @@ def test_the_sub_cent_candidates_really_sit_on_the_per_trade_edge(templates, tmp
     assert b["status"] == "opened" and b["trade"]["max_loss_total"] == 749.99
     assert a["message"] == "Risks $750.02, over the $750 per-trade limit"
     assert d["message"] == "Risks $750.01, over the $750 per-trade limit"
+
+
+def test_the_service_step_down_case_agrees_at_the_deployment_rung(
+        book_fit, templates, tmp_path, monkeypatch):
+    """The one case in the grid where ``book_caps.max_quantity``'s proposal is too
+    big and only the step-down reaches the right answer - on BOTH sides."""
+    view = templates["deploy_step"][1]
+    assert view["equity"] == 25000.02
+    assert sum(r["max_loss_total"] for r in view["open"]) == pytest.approx(4487.06)
+
+    stamped = compute.stamp_candidate(dict(DEPLOY_STEP_SIGNAL), trade_type="SWING")
+    assert book_caps.booked_risk(stamped["ledger_risk_basis"], 16) == 1367.85
+    assert book_caps.booked_risk(stamped["ledger_risk_basis"], 6) == 512.95
+    per = 1367.85 / 16
+    proposal = book_caps.max_quantity(view["open"], {
+        "symbol": "ORCL", "expiration": E2,
+        "sector": book_caps.sector_bucket(view["sectors"], "ORCL")},
+        per, view["limits"], view["equity"])
+    assert proposal == 6, "the case no longer needs a step-down - it proves nothing"
+
+    p = book_fit.preview(stamped, view, 16)
+    db_path = tmp_path / "deploy-step-16.db"
+    _fresh_copy(templates["deploy_step"][0], db_path)
+    _point_ledger_at(monkeypatch, db_path)
+    outcome = compute.create_paper_trade(dict(DEPLOY_STEP_SIGNAL), 16)
+
+    assert outcome["status"] == "refused" and outcome["code"] == "TRADE_RISK_CAP"
+    assert p["breach"]["code"] == outcome["code"]
+    assert p["max_quantity"] == outcome["max_quantity"] == 5
+    assert [l["text"] for l in p["lines"]] == [
+        book_caps.describe(r) for r in outcome["rungs"]]
+    assert p["block_text"] == outcome["message"]
+    # And the suggestion really opens, exactly as the preview said it would.
+    assert book_fit.preview(stamped, view, 5)["breach"] is None
+    assert compute.create_paper_trade(dict(DEPLOY_STEP_SIGNAL), 5)["status"] == "opened"
 
 
 BAD_OR_ODD_QTYS = (0, -3, True, None, 2.9, "2.5", float("nan"), "2", 2.0)

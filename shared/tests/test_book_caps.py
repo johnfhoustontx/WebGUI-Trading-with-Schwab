@@ -342,3 +342,12 @@ def test_booked_risk_is_none_for_an_unusable_basis(basis):
 @pytest.mark.parametrize("qty", [None, "2", True, float("nan"), float("inf")])
 def test_booked_risk_is_none_for_an_unusable_quantity(qty):
     assert bc.booked_risk({"per_share": 1.9}, qty) is None
+
+
+@pytest.mark.parametrize("basis,qty", [
+    ({"per_share": 2}, 10**400), ({"per_share": 2.0}, 10**400),
+    ({"per_contract": 1.5}, 10**400), ({"per_share": 10**400}, 1),
+    ({"per_contract": 10**400}, 2.0),
+])
+def test_booked_risk_never_raises_on_overflow(basis, qty):
+    assert bc.booked_risk(basis, qty) is None

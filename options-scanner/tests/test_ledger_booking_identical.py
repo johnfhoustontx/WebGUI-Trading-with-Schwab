@@ -15,6 +15,8 @@ total, which is the contract the service's stamp and the Paper dialog preview re
 import datetime
 import random
 
+import pytest
+
 import paper_trader
 import strategy_scanner
 from shared import book_caps
@@ -128,3 +130,39 @@ def test_risk_basis_names_the_figure_each_branch_books_from():
     debit = _debit(rng)
     assert paper_trader.risk_basis(debit) == {"per_contract": debit["max_loss"]}
     assert paper_trader.risk_basis({**debit, "max_loss": None}) == {"per_contract": 0.0}
+
+
+def _raw_pcs_with(max_loss):
+    return {"symbol": "SPY", "type": "PCS", "trade_type": "SWING", "expiration": _EXP,
+            "dte": 21, "short_strike": 500.0, "long_strike": 497.5, "width": 2.5,
+            "credit": 0.60, "max_loss": max_loss}
+
+
+def _debit_with(max_loss):
+    return {"symbol": "SPY", "type": "LONG_CALL", "trade_type": "SWING",
+            "expiration": _EXP, "dte": 21, "net_debit": 300.0, "max_loss": max_loss,
+            "legs": [{"kind": "call", "side": "long", "strike": 500.0}]}
+
+
+
+@pytest.mark.parametrize("max_loss", [float("nan"), float("inf"), True, None])
+def test_an_unusable_credit_max_loss_books_none(max_loss):
+    """THE DELIBERATE BEHAVIOUR CHANGE of a3fa0ae (booked_risk as the one rule).
+
+    Before it the credit branch booked ``round(x * q * 100, 2)`` for whatever
+    ``max_loss`` was: NaN -> nan, inf -> inf, True -> 100, and None raised
+    TypeError. Every finite number books byte-identically (the grid above); these
+    four now book None, which the service answers with its "max loss could not be
+    read" error and a degrade - never a nan or a $100 risk that clears every cap."""
+    trade = paper_trader.create_paper_trade(_raw_pcs_with(max_loss), 1)
+    assert trade["max_loss_total"] is None
+
+
+@pytest.mark.parametrize("max_loss", [float("nan"), float("inf"), True])
+def test_an_unusable_debit_max_loss_books_none(max_loss):
+    """The same change on the debit branch (see the credit test above): NaN/inf
+    booked nan/inf and True booked 1; all three now book None. A missing or zero
+    ``max_loss`` still books 0.0, as it always did."""
+    trade = paper_trader.create_paper_trade(_debit_with(max_loss), 1)
+    assert trade["max_loss_total"] is None
+    assert paper_trader.create_paper_trade(_debit_with(None), 1)["max_loss_total"] == 0.0
