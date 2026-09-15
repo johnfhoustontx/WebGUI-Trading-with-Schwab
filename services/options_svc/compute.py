@@ -959,6 +959,8 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     iv_rank = iv.get("iv_rank")
     for s in signals:
         s["iv_rank"] = iv_rank
+        # The daily expected move, so stamp_candidate can size em_to_expiry.
+        s["daily_em"] = dem
     # The Strategy Finder's payoff shape - an additive display field, built HERE,
     # after the quality cut, so only emitted rows pay for its ~25 valuations. It
     # uses the scan's own spot + ATM IV and the row's front ``dte``; ``None`` when
@@ -2824,6 +2826,95 @@ def create_paper_trade(signal: dict, qty: int) -> dict:
     paper_trader.add_trade(trade)
     return {**base, "status": "opened", "trade_id": trade["trade_id"],
             "trade": trade}
+
+
+# ---------------------------------------------------------------------------
+# Candidate stamps - the per-row facts the Go / No-Go checklist reads
+# (design 2026-09-15-trade-checklist-and-ledger-caps, Part 2). The web tier
+# cannot import engines, so the service stamps these at publish time.
+# ---------------------------------------------------------------------------
+
+def _num_or_none(value):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def ledger_risk_per_contract(row):
+    """The max loss the Paper LEDGER would book for ONE contract of ``row``, or
+    None if the Ledger refuses the structure. Uses ``paper_trader`` itself, so
+    the preview and the enforcement can never compute different units."""
+    import paper_trader
+    try:
+        total = paper_trader.create_paper_trade(row, 1).get("max_loss_total")
+    except Exception:  # noqa: BLE001 - an untradeable row simply has no figure
+        return None
+    v = _num_or_none(total)
+    return v if v is not None and v > 0 else None
+
+
+def _friction_pct(row):
+    """Round-trip bid-ask width as a percent of the per-share credit or debit.
+
+    ``spread_bid``/``spread_ask`` are built from BOTH legs (short.bid - long.ask,
+    short.ask - long.bid), so their difference is the whole round trip; an iron
+    condor sums its two sides'. Normalized rows without them sum ask - bid over
+    their legs. None when any figure is missing - never a guessed zero."""
+    credit = _num_or_none(row.get("credit"))
+    if credit is None:
+        nc, nd = _num_or_none(row.get("net_credit")), _num_or_none(row.get("net_debit"))
+        credit = (nc / 100.0) if nc else ((nd / 100.0) if nd else None)
+    if not credit:
+        return None
+    sb, sa = _num_or_none(row.get("spread_bid")), _num_or_none(row.get("spread_ask"))
+    if sb is not None and sa is not None and sa >= sb:
+        width = sa - sb
+    else:
+        raw_legs = row.get("legs")
+        if not isinstance(raw_legs, (list, tuple)):
+            return None
+        legs = [l for l in raw_legs if isinstance(l, dict)
+                and str(l.get("kind", "")).lower() in ("call", "put")]
+        if not legs:
+            return None
+        width = 0.0
+        for leg in legs:
+            b, a = _num_or_none(leg.get("bid")), _num_or_none(leg.get("ask"))
+            if b is None or a is None or a < b:
+                return None
+            width += (a - b) * (_num_or_none(leg.get("qty")) or 1.0)
+    return round(width / abs(credit) * 100.0, 1)
+
+
+def _em_to_expiry(row):
+    """Daily expected move x sqrt(max(DTE, 1)) - the convention
+    ``strategy_scoring.score_all(daily_move=...)`` uses, so the check and the
+    score measure distance the same way."""
+    daily = _num_or_none(row.get("daily_em"))
+    if daily is None:
+        moves = row.get("expected_moves")
+        em = moves.get("daily") if isinstance(moves, dict) else None
+        daily = _num_or_none(em.get("move_dollars")) if isinstance(em, dict) else _num_or_none(em)
+    dte = _num_or_none(row.get("dte"))
+    if not daily or dte is None:
+        return None
+    return round(daily * math.sqrt(max(dte, 1.0)), 4)
+
+
+def stamp_candidate(row, *, trade_type, earnings=None, iv_rank_known=None):
+    """Stamp the facts the checklist needs onto one candidate row (in place;
+    returns it). Design 2026-09-15, Part 2. Every stamp is None when unknown."""
+    row["ledger_risk_per_contract"] = ledger_risk_per_contract(row)
+    row["friction_pct"] = _friction_pct(row)
+    row["em_to_expiry"] = _em_to_expiry(row)
+    row["vol_floor"] = _scanner_config.min_iv_rank().get(trade_type)
+    if earnings is not None:
+        row["earnings_status"], row["earnings_date"] = earnings
+    if iv_rank_known is not None:
+        row["iv_rank_known"] = bool(iv_rank_known)
+    return row
 
 
 def _find_trade(trade_id):
