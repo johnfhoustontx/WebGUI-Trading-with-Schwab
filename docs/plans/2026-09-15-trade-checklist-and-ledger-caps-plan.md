@@ -2411,14 +2411,16 @@ def test_context_indexes_the_board_by_symbol_and_reads_the_other_views(monkeypat
     assert ctx["matrix"]["ORCL"]["spot"] == 110.0
     assert ctx["regime"]["direction"] == 1
     assert ctx["caps"] == {"limits": {}}
-    assert ctx["calibration"] == {}
+    # A cold view is None, never {}: checks marks None as a missing view, so the
+    # summary reads "Partly checked" instead of "Clear" (Task 17 review).
+    assert ctx["calibration"] is None
 
 
 def test_a_cold_bus_yields_empty_context_not_a_raise(monkeypatch):
     _fresh(monkeypatch)
     monkeypatch.setattr(bus_client, "_bus", Bus(fake=True))
     ctx = checks_feed.read_context()
-    assert ctx == {"matrix": {}, "regime": None, "calibration": {}, "caps": None}
+    assert ctx == {"matrix": None, "regime": None, "calibration": None, "caps": None}
 
 
 def test_versions_lists_the_views_that_should_refresh_the_column():
@@ -2458,11 +2460,15 @@ def _gated(view):
 
 
 def read_context():
-    board = _gated(MATRIX_VIEW) or {}
-    by_symbol = {(r.get("symbol") or "").upper(): r
-                 for r in board.get("rows") or [] if isinstance(r, dict)}
+    """Every view as it is, and None when it is cold - never an empty stand-in:
+    ``checks`` marks a None input as a missing view, which keeps the summary out
+    of "Clear" (an empty dict would let it read Clear with a check missing)."""
+    board = _gated(MATRIX_VIEW)
+    by_symbol = ({(r.get("symbol") or "").upper(): r
+                  for r in board.get("rows") or [] if isinstance(r, dict)}
+                 if isinstance(board, dict) else None)
     return {"matrix": by_symbol, "regime": _gated(REGIME_VIEW),
-            "calibration": _gated(CALIBRATION_VIEW) or {}, "caps": _gated(CAPS_VIEW)}
+            "calibration": _gated(CALIBRATION_VIEW), "caps": _gated(CAPS_VIEW)}
 
 
 def checks_for(row, ctx):
