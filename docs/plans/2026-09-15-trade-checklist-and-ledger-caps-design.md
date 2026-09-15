@@ -101,8 +101,8 @@ Pure. Imports `math` and `shared.driver_policy.open_risk_dollars` (itself
 math-only), nothing else. It works on plain data:
 
 ```python
-position  = {"symbol", "expiration", "risk", "sector"}   # open book row
-candidate = {"symbol", "expiration", "risk", "sector"}   # risk = max_loss_total $
+position  = {"symbol", "expiration", "max_loss_total", "sector"}  # open book row
+candidate = {"symbol", "expiration", "sector"}                     # + added_risk $
 ```
 
 Sectors are resolved **before** the call, so the module never reads
@@ -110,8 +110,9 @@ Sectors are resolved **before** the call, so the module never reads
 candidate and leaves that row out of every sector count, which is exactly today's
 `_group_of → None` behaviour.
 
-`evaluate(book, candidate, limits, equity) -> list[Rung]`, every rung in display
-order:
+`evaluate(book, candidate, added_risk, limits, equity) -> list[Rung]`, every rung
+in display order. Book rows keep `max_loss_total` (with the `max_loss × quantity`
+fallback) so `open_risk_dollars` sums them unchanged:
 
 | Rung | Code | Compares |
 |---|---|---|
@@ -124,16 +125,24 @@ order:
 | Expiry positions | `EXPIRY_POSITION_CAP` | same-expiry count ≥ cap |
 
 Each `Rung` carries `code`, `used`, `cap`, `after`, `binds`, and `skipped` (a
-reason string, or `None`). **Skipped is never passed:** no equity, a
-non-finite equity, a missing key or a zero cap reports `skipped`, matching
-`concentration_reject`'s opt-in-by-data rules. Every risk sum goes through
-`open_risk_dollars`, so a NaN row cannot switch a ceiling off.
+reason string, or `None`). **Skipped is never passed.** The skip rules copy
+`concentration_reject` exactly, and they differ by rung:
+
+- **Opt-in rungs** — per trade, deployment, both sector rungs — are skipped when
+  their key is missing or zero, and deployment also when equity is missing,
+  non-finite or not positive.
+- **The three original rungs** — symbol positions, symbol risk, expiry positions
+  — are always evaluated. A zero cap refuses everything, and a missing key is an
+  error, both exactly as today.
+
+Every risk sum goes through `open_risk_dollars`, so a NaN row cannot switch a
+ceiling off.
 
 `first_breach(rungs, order=...)` returns the first binding code. The Account keeps
 its existing log order (deployment, symbol, sector, expiry, and no per-trade rung,
 since its sizing handles that); the Ledger and the screen use display order.
 
-`max_quantity(book, candidate_per_contract, limits, equity)` is the largest
+`max_quantity(book, candidate, per_contract, limits, equity)` is the largest
 quantity whose risk clears every **risk** rung. Count rungs do not depend on
 quantity, so a binding count rung means 0.
 
@@ -225,7 +234,7 @@ removed its failures before a row reached the page, and the rest are judgment.
 | Book fit | clears every rung | red: blocked, with the reason | `ledger_caps` + `ledger_risk_per_contract` |
 | Earnings | no report before expiry | a report lands before expiry (date shown) | stamp `earnings_status` / `earnings_date` |
 | Vol rank | ≥ floor + 10 | within 10 points above the floor | stamp `vol_floor` + `iv_rank`; short-premium (negative `net_vega`) only |
-| Cost to trade | bid-ask round trip ≤ 10% of credit/debit | > 10% (red-toned text above 25%, still not blocking) | stamp `friction_pct`, every leg |
+| Cost to trade | bid-ask round trip ≤ 10% of credit/debit | > 10%, worded "very wide" above 25% (amber, not red: red means blocked) | stamp `friction_pct`, every leg |
 | Strike vs expected move | short strike ≥ 1 expected move from price | inside 1 | stamp `em_to_expiry` ($) + live `spot` from the matrix |
 | Strike vs wall | short strike beyond the put wall (PCS) / call wall (CCS); iron condor both | inside the wall | matrix `put_wall` / `call_wall`, live |
 | Dealer gamma | price above the flip | below the flip | matrix `gex_regime`, live; short premium only |
@@ -248,11 +257,13 @@ checklist has the data; it gets no column yet):
 | `earnings_status`, `earnings_date` | `compute.scan_earnings`; Scanner and Directional rows lack it today |
 | `vol_floor` | `shared.scanner_config.min_iv_rank()` for the row's trade type |
 | `friction_pct` | Σ over legs of (ask − bid) ÷ \|credit or debit\| per share; `None` if any leg lacks a quote |
-| `em_to_expiry` | spot × IV × √T with T from `compute.time_to_expiry_years` (the tier's one helper) |
+| `em_to_expiry` | daily expected move × √max(DTE, 1) — the convention `strategy_scoring.score_all(daily_move=…)` already uses, so the check and the score measure distance the same way. Daily move: `expected_moves.daily.move_dollars` on Scanner rows; `compute.swing_scan` stamps its own `dem` as `daily_em` |
 
-Scanner rows keep only the short leg's quote today, so the scan also keeps the
-long leg's `bid` / `ask` for `friction_pct`. `scan_day` rows written before the
-stamps exist read as unchecked for those lines.
+Scanner rows need no new quote fields: `spread_bid` / `spread_ask` are built
+from BOTH legs (`short.bid − long.ask`, `short.ask − long.bid`), so their
+difference already is the round-trip width, and an iron condor sums its two
+sides'. Normalized rows without them sum `ask − bid` over their `legs`.
+`scan_day` rows written before the stamps exist read as unchecked for those lines.
 
 ### `webgui/pages/options/checks.py` (Tier 1, pure)
 
