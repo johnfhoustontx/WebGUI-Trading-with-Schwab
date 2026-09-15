@@ -2403,9 +2403,10 @@ quantity box's max is the largest fitting quantity, never below a typed quantity
 that fits (`max_quantity` can land one short on sub-cent risk and the box clamps on
 blur). The **checklist's Paper book line is the same `book_fit.preview` at
 quantity 1**, so a row's chip and the dialog cannot disagree — and it obeys the
-same rule: no preview is a GREY line, never `Blocked`. It is what "Only clear"
-filters on separately from the verdict (`checks_table._checks_clear`), because a
-grey book line leaves the chip Clear while the fit was never tested. **`services/options_svc/tests/test_preview_agrees_with_ledger.py` is the
+same rule: no preview is a GREY line, never `Blocked`. It is why "Only clear"
+filters on its own stamp (`stamp_checks`'s `_checks_clear`) rather than on the
+verdict: a grey book line leaves the chip Clear while the fit was never tested.
+**`services/options_svc/tests/test_preview_agrees_with_ledger.py` is the
 guard**: real books through the real publish and `create_paper_trade`, preview
 and Ledger compared line for line, sub-cent risk and the suggested-quantity
 step-down included. A change to either end that it does not cover is unguarded.
