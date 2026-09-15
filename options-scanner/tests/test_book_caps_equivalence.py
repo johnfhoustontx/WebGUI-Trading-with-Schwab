@@ -171,6 +171,12 @@ def test_production_limits_are_usable_by_evaluate():
 
 
 def test_limits_none_uses_the_shipped_policy():
+    """``limits=None`` must resolve the shipped policy: a book already holding
+    the configured number of positions in one symbol is refused on that count."""
+    limits = pc.default_limits()
+    n = limits["max_positions_per_symbol"]
     book = [{"symbol": "ORCL", "expiration": "2026-10-17",
-             "max_loss_total": 100.0}] * 3
-    assert pc.concentration_reject(book, "ORCL", "2026-10-24", 50.0)         == pc.SYMBOL_POSITION_CAP
+             "max_loss_total": 100.0}] * n
+    got = pc.concentration_reject(book, "ORCL", "2026-10-24", 50.0)
+    expected = frozen_concentration_reject(book, "ORCL", "2026-10-24", 50.0, limits)
+    assert got == expected == pc.SYMBOL_POSITION_CAP

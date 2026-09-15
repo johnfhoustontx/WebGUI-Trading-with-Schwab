@@ -33,13 +33,14 @@ Where this RAISES and the old early-return function did not: ``evaluate``
 computes every rung before a breach is chosen, so a required cap
 (``max_positions_per_symbol``, ``max_risk_per_symbol``,
 ``max_positions_per_expiry``) that is missing raises ``KeyError``, and one that
-is None raises ``TypeError``, REGARDLESS of which rung binds - and a non-string
-truthy symbol raises ``AttributeError``. The old ``concentration_reject``
+is None raises ``TypeError``, REGARDLESS of which rung binds - and a truthy
+non-string symbol (on the candidate or on a book row) or a truthy non-string
+expiration raises ``AttributeError``. The old ``concentration_reject``
 returned at its first breach, so an earlier binding rung could answer before
 it ever reached the bad value. Production limits come from ``config_paper``'s
 literal constants (pinned by a test in
-``options-scanner/tests/test_book_caps_equivalence.py``) and symbols are
-strings or None, so no production call reaches either.
+``options-scanner/tests/test_book_caps_equivalence.py``) and symbols and
+expirations are strings or None, so no production call reaches any of these.
 """
 import math
 
