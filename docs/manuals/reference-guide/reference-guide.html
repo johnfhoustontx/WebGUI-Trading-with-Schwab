@@ -3064,7 +3064,7 @@ number, so reading that sign would call every credit spread a premium <em>purcha
 </tr>
 <tr>
 <td><strong>2 cautions</strong></td>
-<td>that many amber lines. The full text is on hover, the reasons in the detail panel</td>
+<td>that many amber lines. Hovering <strong>names them</strong> rather than repeating the count</td>
 </tr>
 <tr>
 <td><strong>Blocked · symbol full</strong></td>
@@ -3088,6 +3088,18 @@ number, so reading that sign would call every credit spread a premium <em>purcha
 outranks an incomplete reading</strong>: a row reading <em>2 cautions</em> may also have a line
 the checks could not finish. Only <em>Clear</em> promises that nothing is outstanding —
 which is exactly why a missing feed is reported as <em>Partly checked</em> instead.</p>
+<p><strong>What hovering gives you</strong> depends on the chip, and it is always the thing the
+chip does not already say. <em>Blocked</em>, <em>Clear</em> and <em>Partly checked</em> hover with
+their full verdict — the binding limit, the counts. A <strong>caution</strong> chip hovers with
+the cautions <strong>themselves</strong>, in the checks' own words, up to three and then <em>…</em> —
+<em>Short 200 call is 0.5 expected moves from the price · Price below the gamma flip
+— moves can accelerate · Market direction is up, against this bearish trade</em> —
+because "3 cautions" on hover would only repeat the cell. The detail panel is
+where you read every line, cautions and all.</p>
+<p><strong>Neither page's Checks column sorts.</strong> Its words would sort alphabetically, which
+is not an ordering of how clear a trade is — <em>Blocked</em> would file beside <em>Clear</em>
+and ahead of a row with one caution. Sort on Score or Grade and read the chips
+down the column.</p>
 <p><strong>Why a check cannot run, and what it says instead.</strong> Each check reads its own
 inputs, and each says which is missing rather than assuming: <em>No IV history</em>,
 <em>Bid-ask not measured</em>, <em>Expected move not measured</em>, <em>Breakevens unknown</em>, <em>No
@@ -4337,7 +4349,7 @@ mistaken for a contract's worth.</p>
 </tr>
 <tr>
 <td><strong>Checks</strong></td>
-<td>the <a href="#the-go-no-go-checklist">Go / No-Go checklist's</a> verdict in one chip, the full sentence on hover and every line in the detail panel. <strong>Not sortable</strong>: its words would sort alphabetically, which is not an ordering of how clear a trade is</td>
+<td>the <a href="#the-go-no-go-checklist">Go / No-Go checklist's</a> verdict in one chip — on hover, the full sentence, or the cautions themselves on a caution chip; every line in the detail panel. <strong>Not sortable</strong>, as on the Market Scanner</td>
 </tr>
 <tr>
 <td><strong>Grade</strong></td>

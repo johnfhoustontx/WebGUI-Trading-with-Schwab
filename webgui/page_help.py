@@ -164,10 +164,12 @@ plus single-leg directional trades on their own tab.
 - **Checks** — the go / no-go checklist for that row, in one chip: *Clear · 7 of
   9* (nothing to worry about), *2 cautions*, *Blocked* (the paper ledger would
   refuse it), *Partly checked* (something the checks read hasn't loaded yet) or a
-  dash before the checks have run. Hover the chip for the whole verdict, and
-  click the row to read all nine lines — paper book, earnings, vol rank, cost to
-  trade, distance to the expected move and to the walls, dealer gamma, direction,
-  and the track record of trades like it. A check that doesn't apply to a trade is left
+  dash before the checks have run. Hover the chip for the whole verdict — or, on
+  a caution chip, for the cautions themselves, up to three of them. The column
+  doesn't sort; its words would sort alphabetically, which says nothing about how
+  clear a trade is. Click the row to read all nine lines — paper book, earnings,
+  vol rank, cost to trade, distance to the expected move and to the walls, dealer
+  gamma, direction, and the track record of trades like it. A check that doesn't apply to a trade is left
   out rather than shown as passing, and only the paper-book line can be red:
   the rest are judgment, not gates.
 - **Only clear** (the switch by **Run scan**) hides every row that isn't fully
@@ -326,7 +328,8 @@ four top picks, and the full ranked list.
 - **Checks** — the same go / no-go checklist the Market Scanner shows, in one
   chip per row: *Clear · 7 of 9*, *2 cautions*, *Blocked* (the paper ledger would
   refuse it), *Partly checked* (something the checks read hasn't loaded yet), or
-  a dash until they have run. Hover for the whole verdict; click the row to read
+  a dash until they have run. Hover for the whole verdict — or, on a caution
+  chip, for the cautions themselves, up to three of them; click the row to read
   every line in the detail panel. The column doesn't sort — its words would sort
   alphabetically, which says nothing about how clear a trade is.
 - **Only clear** (the switch beside the strategy chips) hides every idea that

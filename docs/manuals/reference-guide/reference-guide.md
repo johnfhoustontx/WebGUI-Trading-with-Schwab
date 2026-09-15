@@ -1984,7 +1984,7 @@ number, so reading that sign would call every credit spread a premium *purchase*
 | Chip | Meaning |
 |---|---|
 | **Clear · 7 of 9** | every check that ran passed; nine exist, seven applied |
-| **2 cautions** | that many amber lines. The full text is on hover, the reasons in the detail panel |
+| **2 cautions** | that many amber lines. Hovering **names them** rather than repeating the count |
 | **Blocked · symbol full** | the paper book would refuse it, with the binding limit named |
 | **Partly checked · 5 of 7 checked** | at least one grey line is grey *because a feed it reads was not there* — so the verdict is incomplete, and deliberately not "Clear" |
 | **unchecked** | nothing could be judged at all |
@@ -1994,6 +1994,20 @@ They are decided in that order, so a **block outranks a caution and a caution
 outranks an incomplete reading**: a row reading *2 cautions* may also have a line
 the checks could not finish. Only *Clear* promises that nothing is outstanding —
 which is exactly why a missing feed is reported as *Partly checked* instead.
+
+**What hovering gives you** depends on the chip, and it is always the thing the
+chip does not already say. *Blocked*, *Clear* and *Partly checked* hover with
+their full verdict — the binding limit, the counts. A **caution** chip hovers with
+the cautions **themselves**, in the checks' own words, up to three and then *…* —
+*Short 200 call is 0.5 expected moves from the price · Price below the gamma flip
+— moves can accelerate · Market direction is up, against this bearish trade* —
+because "3 cautions" on hover would only repeat the cell. The detail panel is
+where you read every line, cautions and all.
+
+**Neither page's Checks column sorts.** Its words would sort alphabetically, which
+is not an ordering of how clear a trade is — *Blocked* would file beside *Clear*
+and ahead of a row with one caution. Sort on Score or Grade and read the chips
+down the column.
 
 **Why a check cannot run, and what it says instead.** Each check reads its own
 inputs, and each says which is missing rather than assuming: *No IV history*,
@@ -3000,7 +3014,7 @@ mistaken for a contract's worth.
 | **Cost** | as on the cards |
 | **Max profit** / **Max loss** | dollars, or **∞**; a naked short's loss carries an *undefined risk* tag, because its figure is a margin estimate, not a cap |
 | **Probability of profit** | bar plus percent |
-| **Checks** | the [Go / No-Go checklist's](#the-go-no-go-checklist) verdict in one chip, the full sentence on hover and every line in the detail panel. **Not sortable**: its words would sort alphabetically, which is not an ordering of how clear a trade is |
+| **Checks** | the [Go / No-Go checklist's](#the-go-no-go-checklist) verdict in one chip — on hover, the full sentence, or the cautions themselves on a caution chip; every line in the detail panel. **Not sortable**, as on the Market Scanner |
 | **Grade** | quality grade, with its reason on hover |
 
 The last column holds **Send to Calculator**, **Send to Paper trade** (where allowed) and

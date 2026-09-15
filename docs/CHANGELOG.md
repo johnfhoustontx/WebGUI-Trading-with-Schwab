@@ -40,7 +40,12 @@ belongs to.)
   `only_clear_empty_label`, `restamp` onto shallow copies, and the two
   `read_and_restamp*` readers. The verdict reads *Blocked · sector full* ·
   *2 cautions* · *Clear · 7 checked* · *Partly checked · 5 of 7 checked* ·
-  *unchecked*; the cell shows the short form with the full text on hover.
+  *unchecked*; the cell shows the short form. **The hover is the verdict except
+  on a caution**, whose chip would only repeat the cell: `verdict` returns
+  `reasons` there — the amber lines' own words joined with ` · `, at most three
+  and then *…* — and `stamp_checks` writes it as `_checks_tip`, which the shared
+  slot prefers. **Neither page's column sorts**: its words sort alphabetically,
+  which is not an ordering of how clear a trade is.
   **`_checks_clear` is what Only clear filters on** — the chip reads Clear AND no
   Paper book line is grey: a grey book line does not change the verdict, but a
   row whose fit was never checked must not pass a filter that promises it was.
@@ -74,13 +79,22 @@ belongs to.)
   rows were being answered with Market Scanner buckets built on another scale.
   The Track record check and the detail panel's *Signals like this* line both
   disappear on Finder rows rather than printing another model's history.
+- **Verified in the local page harness** (fake bus, the real `options_svc`
+  handlers, a temporary Ledger DB, seeded `matrix` / `regime` / `calibration`):
+  the chips read *Clear · 9 of 9*, *Blocked* and *3 cautions*; **Only clear** left
+  one row and the tabs read *0-DTE (0 of 1) · Swing (1 of 3) · Directional (0)*;
+  the detail panel listed all nine lines; the Paper dialog previewed all seven
+  rungs; and creating 3 ORCL contracts flipped that row to *Blocked · symbol risk
+  full* within one poll, the panel reading *ORCL risk would reach $760 of $750* —
+  preview and Ledger agreeing. Read off the live DOM: the screenshot tool times
+  out on this app.
 - **Known limits.** A `scan_day` row published before the stamps existed reads
   unchecked for the lines they feed; the checklist judges what the page can see,
   so a cold feed is *Partly checked* rather than a verdict; and the column is a
   display, never a gate — the Paper Ledger still checks every cap on Create.
 - Commits `5906863` · `18962dd` · `cb5e051` · `ec7555a` · `7f1b747` ·
   `f4cdedb` · `e29f4b1` · `266c1c5` · `c6f4d26` · `afb77d6` · `f99a266` ·
-  `8384497` · `1972f60` · `0e01871`. Design + plan:
+  `8384497` · `1972f60` · `0e01871` · `a9d817a`. Design + plan:
   [design](plans/2026-09-15-trade-checklist-and-ledger-caps-design.md) ·
   [plan](plans/2026-09-15-trade-checklist-and-ledger-caps-plan.md).
 

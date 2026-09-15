@@ -1020,10 +1020,16 @@ that trade, boiled down to a few words.
 A caution outranks an incomplete reading: a row showing *2 cautions* may still have
 a line the checks could not finish, and clicking the row shows which.
 
-Hover a chip for the whole sentence. **Click the row** and the detail panel lists
-all nine, each with a line of its own — *Earnings Nov 19, before expiry*, *Bid-ask
-round trip 18% of the credit*, *Short 145 put is 0.7 expected moves from the
-price*. Two rules are worth knowing:
+**Hover a chip** and it tells you what it could not fit in the cell: *Blocked*,
+*Clear* and *Partly checked* give their full wording, and a **caution chip names
+the cautions themselves** — *Short 200 call is 0.5 expected moves from the price ·
+Price below the gamma flip — moves can accelerate* — up to three of them, then *…*
+The column does not sort: its words would sort alphabetically, which says nothing
+about how clear a trade is.
+
+**Click the row** and the detail panel lists all nine, each with a line of its own
+— *Earnings Nov 19, before expiry*, *Bid-ask round trip 18% of the credit*, *Short
+145 put is 0.7 expected moves from the price*. Two rules are worth knowing:
 
 - **A check that does not apply is left out, not shown as passing.** A long call
   has no short strike, so it gets no expected-move or wall line at all. That is
@@ -1635,7 +1641,7 @@ Every idea the chips show, best score first:
 | **Max profit** | in dollars, or **∞** when there is no limit |
 | **Max loss** | in dollars, or **∞**; a naked short also carries an *undefined risk* tag |
 | **Probability of profit** | a small bar plus the percent, in the same colours as the cards |
-| **Checks** | the go / no-go checklist's verdict for that idea, in one chip — *Clear · 7 of 9*, *2 cautions*, *Blocked*, *Partly checked*, or a dash until the checks have run. Hover for the whole sentence; click the row to read all nine lines in the detail panel. This column does not sort |
+| **Checks** | the go / no-go checklist's verdict for that idea, in one chip — *Clear · 7 of 9*, *2 cautions*, *Blocked*, *Partly checked*, or a dash until the checks have run. Hover for the whole sentence — or, on a caution chip, for the cautions themselves; click the row to read all nine lines in the detail panel. This column does not sort, and neither does the Market Scanner's |
 | **Grade** | quality grade; hover it for the reason |
 
 The last column holds the three action buttons (hover for their names): **Send to

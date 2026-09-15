@@ -1192,8 +1192,8 @@ two-pane layout.</p>
 (credit, max loss, DTE, delta, theta, IV rank, and more) — with the full
 checklist at the top.</p>
 <h3 id="using-the-checklist-to-pick-a-trade">Using the checklist to pick a trade</h3>
-<p>Every candidate row carries a <strong>Checks</strong> chip: the nine checks that trade has to
-clear, boiled down to a few words.</p>
+<p>Every candidate row carries a <strong>Checks</strong> chip: the nine things worth knowing about
+that trade, boiled down to a few words.</p>
 <table>
 <thead>
 <tr>
@@ -1205,18 +1205,18 @@ clear, boiled down to a few words.</p>
 <tbody>
 <tr>
 <td><strong>Clear · 7 of 9</strong></td>
-<td>Nothing to worry about. The count is how many of the checks actually ran — two of nine did not apply to this structure</td>
+<td>Nothing on the list wants your attention. The count is how many checks actually ran — two of the nine did not apply to this structure</td>
 <td>Read on</td>
 </tr>
 <tr>
 <td><strong>2 cautions</strong></td>
-<td>Everything ran, and two checks want you to look</td>
+<td>Two checks want you to look</td>
 <td>Click the row and read which</td>
 </tr>
 <tr>
 <td><strong>Blocked</strong></td>
 <td>The Paper Ledger would refuse this trade, and the chip says why in short (<em>Blocked · symbol full</em>)</td>
-<td>Trade a smaller size, or a different name</td>
+<td>Lower the quantity, or pick another name or expiration</td>
 </tr>
 <tr>
 <td><strong>Partly checked</strong></td>
@@ -1230,10 +1230,17 @@ clear, boiled down to a few words.</p>
 </tr>
 </tbody>
 </table>
-<p>Hover a chip for the whole sentence. <strong>Click the row</strong> and the detail panel lists
-all nine, each with a line of its own — <em>Earnings Nov 19, before expiry</em>, <em>Bid-ask
-round trip 18% of the credit</em>, <em>Short 145 put is 0.7 expected moves from the
-price</em>. Two rules are worth knowing:</p>
+<p>A caution outranks an incomplete reading: a row showing <em>2 cautions</em> may still have
+a line the checks could not finish, and clicking the row shows which.</p>
+<p><strong>Hover a chip</strong> and it tells you what it could not fit in the cell: <em>Blocked</em>,
+<em>Clear</em> and <em>Partly checked</em> give their full wording, and a <strong>caution chip names
+the cautions themselves</strong> — <em>Short 200 call is 0.5 expected moves from the price ·
+Price below the gamma flip — moves can accelerate</em> — up to three of them, then <em>…</em>
+The column does not sort: its words would sort alphabetically, which says nothing
+about how clear a trade is.</p>
+<p><strong>Click the row</strong> and the detail panel lists all nine, each with a line of its own
+— <em>Earnings Nov 19, before expiry</em>, <em>Bid-ask round trip 18% of the credit</em>, <em>Short
+145 put is 0.7 expected moves from the price</em>. Two rules are worth knowing:</p>
 <ul>
 <li><strong>A check that does not apply is left out, not shown as passing.</strong> A long call
   has no short strike, so it gets no expected-move or wall line at all. That is
@@ -1936,7 +1943,7 @@ all four. Each card shows:</p>
 </tr>
 <tr>
 <td><strong>Checks</strong></td>
-<td>the go / no-go checklist's verdict for that idea, in one chip — <em>Clear · 7 of 9</em>, <em>2 cautions</em>, <em>Blocked</em>, <em>Partly checked</em>, or a dash until the checks have run. Hover for the whole sentence; click the row to read all nine lines in the detail panel. This column does not sort</td>
+<td>the go / no-go checklist's verdict for that idea, in one chip — <em>Clear · 7 of 9</em>, <em>2 cautions</em>, <em>Blocked</em>, <em>Partly checked</em>, or a dash until the checks have run. Hover for the whole sentence — or, on a caution chip, for the cautions themselves; click the row to read all nine lines in the detail panel. This column does not sort, and neither does the Market Scanner's</td>
 </tr>
 <tr>
 <td><strong>Grade</strong></td>
