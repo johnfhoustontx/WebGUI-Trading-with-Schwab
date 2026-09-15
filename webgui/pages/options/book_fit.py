@@ -85,6 +85,21 @@ def whole_quantity(qty):
     return n if n >= 1 else None
 
 
+def _max_quantity(book, candidate, basis, added, q, limits, equity):
+    """The Ledger's own suggested quantity rule (``compute.create_paper_trade``'s
+    refusal branch), step for step: the per-contract figure is this quantity's
+    booked total over the quantity, ``book_caps.max_quantity`` proposes, and the
+    proposal steps down until the total the Ledger would BOOK at that size clears
+    every rung."""
+    n = book_caps.max_quantity(book, candidate, added / q, limits, equity)
+    while n and n > 0 and book_caps.first_breach(
+            book_caps.evaluate(book, candidate, book_caps.booked_risk(basis, n),
+                               limits, equity),
+            book_caps.DISPLAY_ORDER) is not None:
+        n -= 1
+    return n
+
+
 def _unavailable(text=UNAVAILABLE):
     return {"available": False, "lines": [], "breach": None, "block_text": "",
             "max_quantity": None, "unavailable_text": text}
@@ -98,10 +113,14 @@ def preview(signal, caps, qty=1):
     if q is None:
         return _unavailable(BAD_QUANTITY)
     sig = signal if isinstance(signal, dict) else {}
-    per = num(sig.get("ledger_risk_per_contract"))
+    # The Ledger's own booking basis, never the cent-rounded per-contract figure:
+    # every quantity's risk is ``booked_risk(basis, q)``, exactly what the Ledger
+    # will book (a $1.87504 per-share spread is $750.02 at four, not 4 x $187.50).
+    basis = sig.get("ledger_risk_basis")
+    one = book_caps.booked_risk(basis, 1)
     if (not isinstance(caps, dict) or not isinstance(caps.get("limits"), dict)
             or not caps.get("limits")
-            or not isinstance(caps.get("sectors"), dict) or per is None or per <= 0):
+            or not isinstance(caps.get("sectors"), dict) or one is None or one <= 0):
         return _unavailable()
     book = caps.get("open")
     if book is None:
@@ -114,7 +133,10 @@ def preview(signal, caps, qty=1):
                  "sector": book_caps.sector_bucket(caps.get("sectors"), symbol)}
     limits, equity = caps["limits"], caps.get("equity")
     try:
-        rungs = book_caps.evaluate(book, candidate, per * q, limits, equity)
+        added = book_caps.booked_risk(basis, q)
+        if added is None or added <= 0:
+            return _unavailable()
+        rungs = book_caps.evaluate(book, candidate, added, limits, equity)
         breach = book_caps.first_breach(rungs, book_caps.DISPLAY_ORDER)
         lines = [{"code": r["code"], "label": _LABELS[r["code"]],
                   "text": book_caps.describe(r),
@@ -122,8 +144,8 @@ def preview(signal, caps, qty=1):
                  for r in rungs]
         return {"available": True, "lines": lines, "breach": breach,
                 "block_text": book_caps.describe(breach) if breach else "",
-                "max_quantity": book_caps.max_quantity(book, candidate, per,
-                                                       limits, equity),
+                "max_quantity": _max_quantity(book, candidate, basis, added, q,
+                                              limits, equity),
                 "unavailable_text": ""}
     except (KeyError, TypeError, AttributeError, ValueError):
         return _unavailable()

@@ -12,7 +12,8 @@ CAPS = {"limits": {"max_positions_per_symbol": 3, "max_risk_per_symbol": 750.0,
         "sectors": {"ORCL": "Information Technology"}, "unmapped_prefix": "?"}
 
 SIG = {"symbol": "ORCL", "type": "PCS", "expiration": "2026-10-17",
-       "ledger_risk_per_contract": 182.0}
+       "ledger_risk_per_contract": 182.0,
+       "ledger_risk_basis": {"per_contract": 182.0}}
 
 
 def test_preview_for_one_contract():
@@ -30,7 +31,8 @@ def test_preview_blocks_at_two_contracts_and_names_why():
 
 
 def test_no_stamp_means_no_preview_never_a_green():
-    p = book_fit.preview({**SIG, "ledger_risk_per_contract": None}, CAPS, qty=1)
+    p = book_fit.preview({**SIG, "ledger_risk_per_contract": None,
+                          "ledger_risk_basis": None}, CAPS, qty=1)
     assert p["available"] is False
     assert p["unavailable_text"] == ("Can't preview this trade here — the paper "
                                      "ledger still checks every cap when you create it.")
@@ -154,9 +156,64 @@ def test_a_whole_number_in_another_type_is_evaluated_as_that_number(qty):
 
 
 def test_a_non_positive_per_contract_risk_means_no_preview():
-    for per in (0, 0.0, -182.0, float("nan"), True, "junk"):
-        p = book_fit.preview({**SIG, "ledger_risk_per_contract": per}, CAPS, qty=1)
+    for per in (0, 0.0, -182.0, float("nan"), True, "junk", None):
+        p = book_fit.preview({**SIG, "ledger_risk_per_contract": per,
+                              "ledger_risk_basis": {"per_contract": per}}, CAPS, qty=1)
         assert _unavailable(p), per
+
+
+@pytest.mark.parametrize("basis", [
+    None, "182", [182.0], {}, {"per_share": 1.82, "per_contract": 182.0},
+    {"per_share": 0.0}, {"per_share": -1.82}, {"per_share": float("inf")},
+    {"per_share": 1e307}, {"other": 182.0},
+])
+def test_an_unusable_risk_basis_means_no_preview_never_a_green(basis):
+    """The per-contract figure alone is not enough: without the booking basis the
+    page cannot compute the total the Ledger will book at this quantity."""
+    p = book_fit.preview({**SIG, "ledger_risk_basis": basis}, CAPS, qty=1)
+    assert _unavailable(p), basis
+
+
+def test_the_preview_reads_the_basis_not_the_per_contract_figure():
+    """A stale or contradictory per-contract stamp cannot change the answer."""
+    p = book_fit.preview({**SIG, "ledger_risk_per_contract": 1.0}, CAPS, qty=2)
+    assert p["block_text"] == "Risks $364, over the $250 per-trade limit"
+    p = book_fit.preview({k: v for k, v in SIG.items()
+                          if k != "ledger_risk_per_contract"}, CAPS, qty=1)
+    assert p["available"] and p["breach"] is None
+
+
+def test_a_sub_cent_per_share_basis_is_rounded_as_the_ledger_books_it():
+    """$1.87504 a share is $187.50 for one contract but $750.02 for four - the
+    Ledger rounds the TOTAL. Against a $750 limit four is over, three is the most."""
+    caps = {**CAPS, "open": [], "limits": {**CAPS["limits"], "max_risk_per_trade": 750.0}}
+    sig = {**SIG, "ledger_risk_per_contract": 187.5,
+           "ledger_risk_basis": {"per_share": 1.87504}}
+    p = book_fit.preview(sig, caps, qty=4)
+    assert p["breach"]["code"] == "TRADE_RISK_CAP"
+    assert p["block_text"] == "Risks $750.02, over the $750 per-trade limit"
+    assert p["max_quantity"] == 3
+    assert book_fit.preview(sig, caps, qty=3)["breach"] is None
+    # At one contract the proposal is floor($750 / $187.50) = 4, and only the
+    # step-down (4 books $750.02) brings it to 3 - at every quantity.
+    for q in range(1, 6):
+        assert book_fit.preview(sig, caps, qty=q)["max_quantity"] == 3, q
+
+
+def test_max_quantity_steps_down_past_a_rounding_edge_as_the_ledger_does():
+    """max_quantity's proposal uses total / qty; the step-down re-checks the total
+    booked at each size, so a proposal whose booked total crosses the cap drops."""
+    from shared import book_caps
+    caps = {**CAPS, "open": [], "limits": {**CAPS["limits"], "max_risk_per_trade": 750.0,
+                                           "max_risk_per_symbol": 10_000.0,
+                                           "max_risk_per_sector": 10_000.0,
+                                           "max_deployed_risk_pct": 0}}
+    sig = {**SIG, "ledger_risk_basis": {"per_share": 1.874975}}
+    for q in range(1, 6):
+        p = book_fit.preview(sig, caps, qty=q)
+        n = p["max_quantity"]
+        assert book_caps.booked_risk(sig["ledger_risk_basis"], n) <= 750.0
+        assert book_caps.booked_risk(sig["ledger_risk_basis"], n + 1) > 750.0
 
 
 def test_empty_limits_mean_no_preview():

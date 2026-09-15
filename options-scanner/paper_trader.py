@@ -41,6 +41,7 @@ DATA_DIR.mkdir(exist_ok=True)
 #############################################
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import book_caps  # noqa: E402
 from shared import structures as _structures  # noqa: E402
 
 # Non-credit DEFINED-RISK structures the scanners produce that the ledger can
@@ -90,7 +91,7 @@ def _create_debit_trade(signal, quantity, mode, now):
         "entry_credit": round(-net_debit / mult, 4),             # per share
         "entry_credit_total": round(-net_debit * quantity, 2),
         "max_loss_per": round(max_loss / mult, 4),               # per share
-        "max_loss_total": round(max_loss * quantity, 2),
+        "max_loss_total": book_caps.booked_risk({"per_contract": max_loss}, quantity),
         "max_profit_total": (round(max_profit * quantity, 2)
                              if max_profit is not None else None),
         "unbounded": bool(signal.get("unbounded")),
@@ -146,6 +147,24 @@ def _credit_max_loss_per_share(signal):
     return round((max_loss - commission) / _CONTRACT_MULT, 4)
 
 
+def risk_basis(signal):
+    """The figure the Ledger books risk FROM, in the shape ``shared.book_caps.booked_risk``
+    reads: ``{"per_share": x}`` for a credit structure, ``{"per_contract": y}`` for a
+    debit one. ``booked_risk(risk_basis(signal), quantity)`` is exactly the
+    ``max_loss_total`` ``create_paper_trade`` books - the same values through the same
+    arithmetic - which is what lets the Paper dialog preview a quantity the way the
+    Ledger will book it rather than from a cent-rounded per-contract figure.
+
+    Only meaningful for a type the Ledger trades: callers validate first (the service
+    stamps a basis only once ``create_paper_trade(signal, 1)`` has succeeded). Any
+    other type is treated as a credit structure, so it may raise ``KeyError`` on a
+    missing ``max_loss`` exactly as the credit branch would.
+    """
+    if signal.get("type") in PAPER_DEBIT_TYPES:
+        return {"per_contract": signal.get("max_loss") or 0.0}
+    return {"per_share": _credit_max_loss_per_share(signal)}
+
+
 def _is_positive_finite(value):
     """A real, finite number above zero (a bool is not one)."""
     return (isinstance(value, (int, float)) and not isinstance(value, bool)
@@ -195,7 +214,7 @@ def create_paper_trade(signal, quantity=1, mode="PAPER"):
         "entry_credit": signal["credit"],
         "entry_credit_total": round(signal["credit"] * quantity * multiplier, 2),
         "max_loss_per": max_loss_per,
-        "max_loss_total": round(max_loss_per * quantity * multiplier, 2),
+        "max_loss_total": book_caps.booked_risk({"per_share": max_loss_per}, quantity),
         "breakeven": signal.get("breakeven", ""),
         "short_delta": signal.get("short_delta", 0),
         "net_theta": signal.get("net_theta", 0),

@@ -2842,17 +2842,36 @@ def _num_or_none(value):
     return v if math.isfinite(v) else None
 
 
-def ledger_risk_per_contract(row):
-    """The max loss the Paper LEDGER would book for ONE contract of ``row``, or
-    None if the Ledger refuses the structure. Uses ``paper_trader`` itself, so
-    the preview and the enforcement can never compute different units."""
+def ledger_risk_basis(row):
+    """The figure the Paper LEDGER books ``row``'s risk from
+    (``paper_trader.risk_basis``), or None if the Ledger refuses the structure or
+    books no positive risk for one contract.
+
+    The Paper dialog previews a quantity with ``shared.book_caps.booked_risk`` over
+    THIS, the arithmetic the Ledger books with - never by multiplying a cent-rounded
+    per-contract figure, which a sub-cent per-share max loss can push across a cap
+    (measured: $187.50 x 4 = $750.00 previewed inside a $750 limit while the Ledger
+    booked $750.02 and refused)."""
     import paper_trader
+    from shared import book_caps
     try:
-        total = paper_trader.create_paper_trade(row, 1).get("max_loss_total")
+        # Validates first: risk_basis is only meaningful for a type the Ledger trades.
+        paper_trader.create_paper_trade(row, 1)
+        basis = paper_trader.risk_basis(row)
     except Exception:  # noqa: BLE001 - an untradeable row simply has no figure
         return None
-    v = _num_or_none(total)
-    return v if v is not None and v > 0 else None
+    per = book_caps.booked_risk(basis, 1)
+    return basis if per is not None and per > 0 else None
+
+
+def ledger_risk_per_contract(row):
+    """The max loss the Paper LEDGER would book for ONE contract of ``row``, or
+    None if the Ledger refuses the structure. ``booked_risk(ledger_risk_basis(row), 1)``,
+    which is ``paper_trader``'s own booking arithmetic, so the preview and the
+    enforcement can never compute different units."""
+    from shared import book_caps
+    basis = ledger_risk_basis(row)
+    return book_caps.booked_risk(basis, 1) if basis is not None else None
 
 
 def _friction_pct(row):
@@ -2914,7 +2933,13 @@ def _em_to_expiry(row):
 def stamp_candidate(row, *, trade_type, earnings=None, iv_rank_known=None):
     """Stamp the facts the checklist needs onto one candidate row (in place;
     returns it). Design 2026-09-15, Part 2. Every stamp is None when unknown."""
-    row["ledger_risk_per_contract"] = ledger_risk_per_contract(row)
+    from shared import book_caps
+    # The basis is what the preview computes every quantity's risk from; the
+    # per-contract figure stays for the readers that show one contract.
+    basis = ledger_risk_basis(row)
+    row["ledger_risk_basis"] = basis
+    row["ledger_risk_per_contract"] = (book_caps.booked_risk(basis, 1)
+                                       if basis is not None else None)
     row["friction_pct"] = _friction_pct(row)
     row["em_to_expiry"] = _em_to_expiry(row)
     row["vol_floor"] = _scanner_config.min_iv_rank().get(trade_type)

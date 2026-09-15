@@ -112,6 +112,58 @@ def sector_bucket(table, symbol):
     return UNMAPPED_PREFIX + key
 
 
+# Shares per option contract - the Ledger's ``paper_trader._CONTRACT_MULT``.
+_CONTRACT_MULT = 100
+
+
+def _real(value):
+    """An int or float that is not a bool and is finite - kept in its OWN type,
+    because ``booked_risk`` must return exactly what the Ledger books, and an int
+    per-share figure books an int total."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool)
+            and math.isfinite(value))
+
+
+def booked_risk(basis, qty):
+    """The max loss the Paper LEDGER books for ``qty`` contracts, or None.
+
+    THE risk rounding rule, shared by ``paper_trader`` (which books with it), the
+    service's candidate stamp and the Paper dialog preview - so a sub-cent
+    per-share figure can never be rounded one way for the preview and another
+    for the booking. Measured before this existed: a $1.87504 per-share spread
+    stamped as $187.50 a contract previewed four contracts at $750.00 (inside a
+    $750 limit) while the Ledger booked $750.02 and refused.
+
+    ``basis`` is ``paper_trader.risk_basis(signal)``:
+
+    * ``{"per_share": x}`` (credit structures) -> ``round(x * qty * 100, 2)``,
+      the credit branch's ``round(max_loss_per * quantity * multiplier, 2)``
+      with the same operand order, so the float is byte-identical;
+    * ``{"per_contract": y}`` (debit structures) -> ``round(y * qty, 2)``, the
+      debit branch's ``round(max_loss * quantity, 2)``.
+
+    Anything else - not a dict, neither key or both, a bool, a non-number, a
+    non-finite value or result - is None. A zero basis books 0.0; deciding
+    whether that is usable risk is the caller's job.
+    """
+    if not isinstance(basis, dict) or not _real(qty):
+        return None
+    has_share, has_contract = "per_share" in basis, "per_contract" in basis
+    if has_share == has_contract:
+        return None
+    if has_share:
+        x = basis["per_share"]
+        if not _real(x):
+            return None
+        total = round(x * qty * _CONTRACT_MULT, 2)
+    else:
+        y = basis["per_contract"]
+        if not _real(y):
+            return None
+        total = round(y * qty, 2)
+    return total if math.isfinite(total) else None
+
+
 def _finite(value):
     """A usable number, or 0.0. An unreadable candidate risk counts as zero
     here, so callers that did not size the trade must reject it first (see the

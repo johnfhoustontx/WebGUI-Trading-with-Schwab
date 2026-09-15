@@ -101,6 +101,24 @@ CANDIDATES = {
     "pcs_900": _pcs("MSFT", E2, 1.00, 10.0),
     "unmapped_190": _r190("ZZZQ", E1),
     "xom_190": _r190("XOM", E2),
+    # Sub-cent per-share risk, sized so four contracts land within a cent of the
+    # $750 per-trade limit. A: $187.504 a contract books $750.02 at four (over).
+    # B: $187.4975 books $749.99 at four (inside). A cent-rounded per-contract
+    # figure previewed both as $750.00 - a green the Ledger refused, for A.
+    "subcent_a": {"symbol": "KO", "type": "PCS", "trade_type": "SWING",
+                  "expiration": E2, "dte": 30, "short_strike": 100.0,
+                  "long_strike": 97.5, "width": 2.5, "credit": 0.62496,
+                  "max_loss": 1.87504},
+    "subcent_b": {"symbol": "KO", "type": "PCS", "trade_type": "SWING",
+                  "expiration": E2, "dte": 30, "short_strike": 100.0,
+                  "long_strike": 97.5, "width": 2.5, "credit": 0.625025,
+                  "max_loss": 1.874975},
+    # A DEBIT whose per-contract risk has fractional cents: $187.50375, so four
+    # contracts round to $750.01 against the $750 limit.
+    "debit_fraction": {"symbol": "KO", "type": "LONG_CALL", "trade_type": "SWING",
+                       "expiration": E2, "dte": 30, "net_debit": 187.50375,
+                       "max_loss": 187.50375, "max_profit": None, "unbounded": True,
+                       "legs": [{"kind": "call", "side": "long", "strike": 60.0}]},
 }
 
 QTYS = (1, 2, 3, 4, 5)
@@ -233,6 +251,20 @@ def test_the_grid_exercises_every_rung_the_ledger_enforces(templates, tmp_path,
     assert opened > 0
     assert seen == set(book_caps.DISPLAY_ORDER), sorted(
         set(book_caps.DISPLAY_ORDER) - seen)
+
+
+def test_the_sub_cent_candidates_really_sit_on_the_per_trade_edge(templates, tmp_path,
+                                                                 monkeypatch):
+    """Guard against a vacuous edge: at four contracts on the empty book the Ledger
+    refuses A and the fractional debit by a cent or two, and opens B a cent inside."""
+    a = _ledger_outcome(templates, tmp_path, monkeypatch, "empty", "subcent_a", 4)
+    b = _ledger_outcome(templates, tmp_path, monkeypatch, "empty", "subcent_b", 4)
+    d = _ledger_outcome(templates, tmp_path, monkeypatch, "empty", "debit_fraction", 4)
+    assert (a["status"], a["code"], a["max_quantity"]) == ("refused", "TRADE_RISK_CAP", 3)
+    assert (d["status"], d["code"], d["max_quantity"]) == ("refused", "TRADE_RISK_CAP", 3)
+    assert b["status"] == "opened" and b["trade"]["max_loss_total"] == 749.99
+    assert a["message"] == "Risks $750.02, over the $750 per-trade limit"
+    assert d["message"] == "Risks $750.01, over the $750 per-trade limit"
 
 
 BAD_OR_ODD_QTYS = (0, -3, True, None, 2.9, "2.5", float("nan"), "2", 2.0)

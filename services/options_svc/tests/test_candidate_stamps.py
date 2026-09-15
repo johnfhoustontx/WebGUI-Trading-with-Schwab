@@ -134,3 +134,58 @@ def test_share_structures_have_no_friction_reading(monkeypatch):
 def test_a_non_positive_daily_move_has_no_expected_move():
     row = {"dte": 5, "daily_em": -1.0}
     assert compute.stamp_candidate(row, trade_type="SWING")["em_to_expiry"] is None
+
+
+def _stamp_basis_rows():
+    import strategy_scanner
+    raw = _raw_pcs()
+    ic = {**_raw_pcs(), "id": "ORCL_IC", "type": "IC", "call_short": 120.0,
+          "call_long": 122.5, "credit": 1.13337, "max_loss": 1.36663}
+    bull = {"symbol": "ORCL", "type": "BULL_CALL", "trade_type": "SWING",
+            "expiration": "2026-10-17", "dte": 12, "net_debit": 120.0,
+            "max_loss": 121.30, "max_profit": 128.70,
+            "legs": [{"kind": "call", "side": "long", "strike": 100.0},
+                     {"kind": "call", "side": "short", "strike": 102.5}]}
+    frac = {"symbol": "ORCL", "type": "LONG_CALL", "trade_type": "SWING",
+            "expiration": "2026-10-17", "dte": 12, "net_debit": 212.3349,
+            "max_loss": 212.3349, "max_profit": None, "unbounded": True,
+            "legs": [{"kind": "call", "side": "long", "strike": 100.0}]}
+    subcent = {**_raw_pcs(), "credit": 0.62496, "max_loss": 1.87504}
+    return {"raw_pcs": raw, "normalized_pcs": strategy_scanner.adapt_credit_spread(raw),
+            "ic": ic, "debit_vertical": bull, "fractional_cent_debit": frac,
+            "subcent_pcs": subcent}
+
+
+@pytest.mark.parametrize("name", ["raw_pcs", "normalized_pcs", "ic", "debit_vertical",
+                                  "fractional_cent_debit", "subcent_pcs"])
+def test_the_risk_basis_books_every_quantity_exactly_as_the_ledger(name):
+    """The preview computes each quantity from ``ledger_risk_basis``; it must be the
+    Ledger's own booked total at every quantity, exactly (==, not approx)."""
+    import paper_trader
+    from shared import book_caps
+    row = _stamp_basis_rows()[name]
+    stamped = compute.stamp_candidate(dict(row), trade_type="SWING")
+    basis = stamped["ledger_risk_basis"]
+    assert isinstance(basis, dict), name
+    assert stamped["ledger_risk_per_contract"] == paper_trader.create_paper_trade(
+        dict(row), 1)["max_loss_total"]
+    for q in range(1, 11):
+        assert book_caps.booked_risk(basis, q) == paper_trader.create_paper_trade(
+            dict(row), q)["max_loss_total"], (name, q)
+
+
+def test_the_risk_basis_is_none_whenever_the_per_contract_figure_is():
+    for row in ({"symbol": "SPY", "type": "LONG_STRADDLE"}, {"type": object()},
+                {"symbol": "X", "type": "LONG_CALL", "net_debit": 300.0, "legs": []},
+                {**_raw_pcs(), "max_loss": 0.0}):
+        stamped = compute.stamp_candidate(dict(row), trade_type="SWING")
+        assert stamped["ledger_risk_basis"] is None
+        assert stamped["ledger_risk_per_contract"] is None
+
+
+def test_a_sub_cent_basis_books_the_total_not_four_rounded_contracts():
+    from shared import book_caps
+    stamped = compute.stamp_candidate(dict(_stamp_basis_rows()["subcent_pcs"]),
+                                      trade_type="SWING")
+    assert stamped["ledger_risk_per_contract"] == 187.5
+    assert book_caps.booked_risk(stamped["ledger_risk_basis"], 4) == 750.02

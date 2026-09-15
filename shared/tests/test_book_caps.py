@@ -298,3 +298,47 @@ def test_sector_bucket_with_no_table_buckets_the_symbol_alone():
 def test_sector_bucket_ignores_a_non_string_or_empty_table_value():
     assert bc.sector_bucket(_TABLE, "bad") == "?BAD"
     assert bc.sector_bucket(_TABLE, "empty") == "?EMPTY"
+
+
+# --- booked_risk: the one rounding rule the Ledger books with ----------------
+
+def test_booked_risk_per_share_is_the_credit_branchs_expression():
+    for x, q in ((1.9, 1), (1.87504, 4), (1.874975, 4), (0.333333, 7), (2.12345, 100)):
+        assert bc.booked_risk({"per_share": x}, q) == round(x * q * 100, 2)
+
+
+def test_booked_risk_per_contract_is_the_debit_branchs_expression():
+    for y, q in ((300.0, 1), (187.505, 4), (212.3349, 3), (99.995, 100)):
+        assert bc.booked_risk({"per_contract": y}, q) == round(y * q, 2)
+
+
+def test_booked_risk_rounds_the_total_not_the_contract():
+    """The sub-cent case the preview once got wrong: $187.504 a contract."""
+    assert bc.booked_risk({"per_share": 1.87504}, 4) == 750.02
+    assert bc.booked_risk({"per_share": 1.87504}, 1) == 187.5
+
+
+def test_booked_risk_keeps_an_int_total_for_an_int_basis():
+    out = bc.booked_risk({"per_share": 2}, 3)
+    assert out == 600 and type(out) is type(round(2 * 3 * 100, 2))
+
+
+def test_booked_risk_of_a_zero_basis_is_zero():
+    assert bc.booked_risk({"per_contract": 0.0}, 5) == 0.0
+
+
+@pytest.mark.parametrize("basis", [
+    None, [], "per_share", {}, {"other": 1.0},
+    {"per_share": 1.0, "per_contract": 100.0},
+    {"per_share": None}, {"per_share": "1.9"}, {"per_share": True},
+    {"per_share": float("nan")}, {"per_share": float("inf")},
+    {"per_contract": None}, {"per_contract": float("-inf")}, {"per_contract": False},
+    {"per_share": 1e307},
+])
+def test_booked_risk_is_none_for_an_unusable_basis(basis):
+    assert bc.booked_risk(basis, 2) is None
+
+
+@pytest.mark.parametrize("qty", [None, "2", True, float("nan"), float("inf")])
+def test_booked_risk_is_none_for_an_unusable_quantity(qty):
+    assert bc.booked_risk({"per_share": 1.9}, qty) is None
