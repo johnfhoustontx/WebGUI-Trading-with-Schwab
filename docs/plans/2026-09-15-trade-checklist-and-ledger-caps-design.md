@@ -401,6 +401,25 @@ Docs move with each step: CLAUDE.md (allow-list gains `shared.book_caps` and
 module"), `docs/webgui-routes.md`, the User Guide (Paper dialog), the Reference
 Guide (Checks, Why no trade?), `webgui/page_help.py`, and the CHANGELOG.
 
+## Known limits of the Ledger caps (found in review, accepted)
+
+- **Deleting Ledger history moves the equity basis.** Equity is $25,000 plus the
+  realized P&L of the closed trades the Ledger still holds. The Paper page's
+  "Delete closed" button, or deleting a single closed trade, removes that history,
+  so deleting losing trades raises equity and loosens the 20% deployment cap. It is
+  accepted for a single-user paper book whose only deleter is the operator; the
+  alternative is rebuilding realized P&L from the `trade_events` log, which
+  survives a delete. Screens must not call this figure the account's equity.
+- **An open Ledger row with no usable max loss counts as $0.** Old debit rows can
+  carry `max_loss_total = 0` (the writer used `max_loss or 0.0`). Such a row still
+  counts toward every position cap but adds nothing to a risk sum. New trades
+  cannot reach that state: `create_paper_trade` refuses a trade whose max loss is
+  not a positive finite number.
+- **The $750 per-trade limit equals `MAX_RISK_PER_SYMBOL`.** One maximum-size Ledger
+  trade fills its symbol's risk budget alone, so the next trade on that name is
+  refused whatever its size. The Paper dialog shows both lines, so the refusal is
+  legible rather than mysterious.
+
 ## Out of scope, recorded
 
 - **Income Window** checklist and caps on `income_open`.
