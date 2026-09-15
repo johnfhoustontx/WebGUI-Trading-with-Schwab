@@ -36,7 +36,8 @@ def test_a_cold_bus_yields_empty_context_not_a_raise(monkeypatch):
 
 
 def test_versions_lists_the_views_that_should_refresh_the_column():
-    assert set(checks_feed.REFRESH_VIEWS) == {"options:ledger_caps", "sentiment:regime"}
+    assert set(checks_feed.REFRESH_VIEWS) == {"options:ledger_caps", "sentiment:regime",
+                                              "options:calibration"}
 
 
 def test_a_raising_bus_read_costs_only_that_view(monkeypatch):

@@ -101,9 +101,14 @@ def test_a_row_with_no_matching_signal_is_unchecked():
 
 
 def test_only_clear_keeps_only_the_clear_rows():
-    rows = [{"id": s, "_checks_state": s} for s in ("pos", "warn", "neg", "muted")]
+    rows = [{"id": s, "_checks_state": s, "_checks_clear": s == "pos"}
+            for s in ("pos", "warn", "neg", "muted")]
     rows.append({"id": "none"})
     assert [r["id"] for r in scanner.only_clear(rows)] == ["pos"]
+
+
+def test_only_clear_fails_closed_on_a_row_without_the_clear_stamp():
+    assert scanner.only_clear([{"id": "p", "_checks_state": "pos"}]) == []
 
 
 # ── end to end over the real builders ────────────────────────────────────────
@@ -291,7 +296,7 @@ def test_empty_label_when_every_hidden_row_is_partly_checked():
 def test_empty_label_when_rows_were_hidden_for_other_reasons():
     full = _rows_in(*(["muted"] * 38 + ["warn", "neg"]))
     assert scanner.only_clear_empty_label(full, [], filtering=True) == (
-        "No row reads Clear — 40 hidden by Only clear.")
+        "No row is fully clear — 40 hidden by Only clear.")
 
 
 def test_empty_label_is_the_normal_one_otherwise():
@@ -304,12 +309,20 @@ def test_empty_label_is_the_normal_one_otherwise():
 # ── a context change re-stamps; only a scan change re-reads the day union ────
 def test_repaint_action_decides_rebuild_restamp_or_skip():
     day, live = scanner._DAY_VIEW, scanner._LIVE_VIEW
-    caps, regime = checks_feed.REFRESH_VIEWS
+    caps, regime = checks_feed.CAPS_VIEW, checks_feed.REGIME_VIEW
     assert scanner.repaint_action({day}) == "rebuild"
     assert scanner.repaint_action({live, caps}) == "rebuild"
     assert scanner.repaint_action({caps}) == "restamp"
     assert scanner.repaint_action({regime}) == "restamp"
     assert scanner.repaint_action(set()) == "skip"
+
+
+def test_a_calibration_change_restamps_the_rows():
+    """The nightly calibration rebuild must reach the Track record line the same
+    evening, not wait for the Opportunity Board to move the next morning."""
+    assert checks_feed.CALIBRATION_VIEW in checks_feed.REFRESH_VIEWS
+    assert scanner.repaint_action({checks_feed.CALIBRATION_VIEW}) == "restamp"
+    assert scanner.repaint_action({scanner._DAY_VIEW, checks_feed.CALIBRATION_VIEW}) == "rebuild"
 
 
 def test_repaint_action_on_the_timer_restamps_only_when_the_board_moved():

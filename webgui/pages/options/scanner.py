@@ -479,9 +479,9 @@ def only_clear(rows):
     """Rows whose checklist reads Clear - no blocks, no cautions, nothing missing -
     and whose Paper book fit, when the row has that line, was actually checked.
 
-    A row with no ``_checks_clear`` stamp is judged on its state alone."""
+    A row with no ``_checks_clear`` stamp is hidden: the filter fails closed."""
     return [r for r in rows
-            if r.get("_checks_state") == "pos" and r.get("_checks_clear", True)]
+            if r.get("_checks_state") == "pos" and r.get("_checks_clear", False)]
 
 
 def filtered_tab_label(base, total, shown, *, have, filtering):
@@ -508,7 +508,9 @@ def only_clear_empty_label(full_rows, shown_rows, *, filtering):
     if all(r.get("_checks_state") == "muted" for r in full_rows):
         return ("Every row is only partly checked — a feed the checks read hasn't "
                 f"loaded. Turn off Only clear to see all {n}.")
-    return f"No row reads Clear — {n} hidden by Only clear."
+    # "fully clear", not "reads Clear": a hidden row can read Clear on its chip
+    # while its paper book fit went unchecked.
+    return f"No row is fully clear — {n} hidden by Only clear."
 
 
 def repaint_action(moved, *, timer=False, matrix_moved=False):

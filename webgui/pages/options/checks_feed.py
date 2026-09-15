@@ -17,7 +17,10 @@ MATRIX_VIEW = "options:matrix"
 REGIME_VIEW = "sentiment:regime"
 CALIBRATION_VIEW = "options:calibration"
 CAPS_VIEW = "options:ledger_caps"
-REFRESH_VIEWS = (CAPS_VIEW, REGIME_VIEW)
+# The calibration view moves about once a day (the nightly rebuild); listing it
+# here is what gets a new Track record line onto the tables that evening rather
+# than whenever the Opportunity Board next moves.
+REFRESH_VIEWS = (CAPS_VIEW, REGIME_VIEW, CALIBRATION_VIEW)
 TABLE_REFRESH_SEC = 300.0
 
 # Module-level on purpose, shared by every tab in this process (the same shape
