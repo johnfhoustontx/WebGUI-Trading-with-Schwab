@@ -247,6 +247,6 @@ def describe(rung):
         return f"{scope} risk would reach {_money(after)} of {_money(cap)}"
     if code == EXPIRY_POSITION_CAP:
         if rung["binds"]:
-            return f"{used} of {cap} positions already expire {scope}"
-        return f"Position {after} of {cap} expiring {scope}"
+            return f"{used} of {cap} positions across the book already expire {scope}"
+        return f"Position {after} of {cap} expiring {scope} across the book"
     return "Over a risk limit" if rung.get("binds") else "Within a risk limit"

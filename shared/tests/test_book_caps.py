@@ -238,14 +238,14 @@ def test_count_lines_that_pass_name_the_position_this_trade_would_be():
     rungs = _by_code(bc.evaluate(book, _cand(), 10.0, LIMITS, 25000.0))
     assert bc.describe(rungs[bc.SYMBOL_POSITION_CAP]) == "Position 2 of 3 in ORCL"
     assert bc.describe(rungs[bc.SECTOR_POSITION_CAP]) == "Position 3 of 5 in Information Technology"
-    assert bc.describe(rungs[bc.EXPIRY_POSITION_CAP]) == "Position 1 of 5 expiring 2026-10-17"
+    assert bc.describe(rungs[bc.EXPIRY_POSITION_CAP]) == "Position 1 of 5 expiring 2026-10-17 across the book"
 
 
 def test_binding_count_lines_state_what_the_book_already_holds():
     assert bc.describe(bc._count(bc.SECTOR_POSITION_CAP, "Energy", 5, 5)) == \
         "Energy is full (5 of 5 positions)"
     assert bc.describe(bc._count(bc.EXPIRY_POSITION_CAP, "2026-10-17", 5, 5)) == \
-        "5 of 5 positions already expire 2026-10-17"
+        "5 of 5 positions across the book already expire 2026-10-17"
 
 
 def test_deployment_line_says_it_covers_the_whole_book():
