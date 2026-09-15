@@ -719,12 +719,12 @@ def only_clear_counts(base, total, shown, *, filtering, chip_filtered=False):
 
     The part goes BEFORE "Scanned N of M · <choice>", which stays last beside
     the Change link it explains. With a strategy chip active ``total`` is the
-    chip's list, not the scan, so it says ``"3 of 20 in the chosen strategies
+    chip's list, not the scan, so it says ``"3 of the 20 in the chosen strategies
     shown"`` rather than reading as a share of the whole scan."""
     hidden = (total or 0) - (shown or 0)
     if not filtering or hidden <= 0:
         return base
-    of = (f"{shown:,} of {total:,} in the chosen strategies shown" if chip_filtered
+    of = (f"{shown:,} of the {total:,} in the chosen strategies shown" if chip_filtered
           else f"{shown:,} of {total:,} shown")
     part = f"{of}{_PART_SEP}{hidden:,} hidden by Only clear"
     head, sep, tail = base.partition(_PART_SEP + SCANNED_HEAD)

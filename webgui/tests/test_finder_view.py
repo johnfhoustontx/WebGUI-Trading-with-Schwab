@@ -1261,6 +1261,6 @@ def test_only_clear_counts_sit_before_the_scanned_part_beside_change():
 def test_only_clear_counts_under_a_chip_count_the_chosen_strategies_not_the_scan():
     base = "40 ideas · 2 below the quality bar"
     assert fv.only_clear_counts(base, 20, 3, filtering=True, chip_filtered=True) == (
-        "40 ideas · 2 below the quality bar · 3 of 20 in the chosen strategies shown · "
+        "40 ideas · 2 below the quality bar · 3 of the 20 in the chosen strategies shown · "
         "17 hidden by Only clear")
     assert fv.only_clear_counts(base, 20, 20, filtering=True, chip_filtered=True) == base
