@@ -358,8 +358,13 @@ def max_quantity(book, candidate, per_contract, limits, equity=None,
     return max(0, best)
 
 
-def _money(v):
+def money(v):
+    """``$190`` when the cents are .00, else ``$187.50`` - the one dollar shape
+    for cap sentences and the Paper dialog alike."""
     return f"${v:,.0f}" if abs(v - round(v)) < 0.005 else f"${v:,.2f}"
+
+
+_money = money
 
 
 def scope_label(scope):

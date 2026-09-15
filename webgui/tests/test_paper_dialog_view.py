@@ -84,7 +84,8 @@ def test_a_breach_where_nothing_fits():
     assert v["can_create"] is False
     assert v["block_text"] == "ORCL already holds 3 of 3 positions"
     assert v["fits_text"] == "No quantity fits the paper ledger's limits right now."
-    assert v["qty_max"] == 100
+    # Nothing fits: the box holds at 1 (review fix; was the 100 ceiling).
+    assert v["qty_max"] == 1
 
 
 def test_an_unusable_quantity_blocks_with_the_quantity_message():
@@ -162,3 +163,188 @@ def test_send_to_paper_reads_caps_once_and_rechecks_on_confirm():
     # the re-check returns BEFORE the enqueue
     assert confirm_src.index("can_create") < confirm_src.index("bus_client.request")
     assert "on_value_change" in src
+    # Review fix: the block sentence is not painted separately - the red
+    # checklist line already says it. (Added assertion; none above changed.)
+    # ast.unparse drops comments, so only CODE that mentions it counts.
+    assert "block_text" not in ast.unparse(tree)
+    # the latch is set and Create disabled BEFORE the enqueue
+    assert confirm_src.index("state['sent'] = True") < confirm_src.index("bus_client.request")
+    assert confirm_src.index("create.disable()") < confirm_src.index("bus_client.request")
+    assert confirm_src.index("if state['sent']") < confirm_src.index("paper_dialog_view")
+
+
+# --- review fixes: quantity rules -------------------------------------------
+
+def test_a_fitting_quantity_is_never_below_the_box_max(monkeypatch):
+    """book_caps.max_quantity can land one short at an exact cap on sub-cent
+    risk; the blur clamp must not cut a quantity that fits. Driven through a
+    stubbed preview (no real sub-cent case turned up in a brute-force search)."""
+    def fake(signal, caps, qty):
+        return {"available": True, "lines": [], "breach": None, "block_text": "",
+                "max_quantity": 3, "unavailable_text": ""}
+    monkeypatch.setattr(book_fit, "preview", fake)
+    v = handoff.paper_dialog_view(SIG, CAPS, 4)
+    assert v["can_create"] is True
+    assert v["qty_max"] == 4
+
+
+def test_above_the_dialog_ceiling_blocks_with_its_own_sentence():
+    # 101 contracts with no caps view, so no rung is evaluated and only the
+    # dialog's own ceiling can block it.
+    v = handoff.paper_dialog_view(SIG, None, 101)
+    assert v["can_create"] is False
+    assert v["fits_text"] == "The dialog opens at most 100 contracts in one trade."
+    assert v["qty_max"] == 100
+
+
+def test_sent_text_names_the_quantity():
+    assert handoff.sent_text(1) == "Sent 1 contract — the paper ledger answers in a moment."
+    assert handoff.sent_text(3) == "Sent 3 contracts — the paper ledger answers in a moment."
+
+
+# --- the real send_to_paper under a fake ``ui`` ------------------------------
+
+class _El:
+    def __init__(self, *a, **k):
+        self.kw, self.args = k, a
+        self.value = k.get("value")
+        self._props = {"max": k.get("max")}
+        self.enabled = True
+        self.closed = False
+        self.handlers = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def classes(self, *a, **k):
+        return self
+
+    def props(self, *a, **k):
+        return self
+
+    def set_text(self, t):
+        self.text = t
+
+    def set_visibility(self, v):
+        self.visible = v
+
+    def clear(self):
+        pass
+
+    def update(self):
+        pass
+
+    def set_enabled(self, v):
+        self.enabled = v
+
+    def disable(self):
+        self.enabled = False
+
+    def enable(self):
+        self.enabled = True
+
+    def on_value_change(self, h):
+        self.handlers.append(h)
+        return self
+
+    def open(self):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
+class _FakeUi:
+    def __init__(self):
+        self.buttons, self.notes, self.dialogs, self.numbers = {}, [], [], []
+        self.labels = []
+
+    def dialog(self):
+        d = _El()
+        self.dialogs.append(d)
+        return d
+
+    def card(self, *a, **k):
+        return _El()
+
+    column = row = card
+
+    def label(self, *a, **k):
+        el = _El(*a, **k)
+        self.labels.append(el)
+        return el
+
+    def number(self, *a, **k):
+        n = _El(*a, **k)
+        self.numbers.append(n)
+        return n
+
+    def button(self, text, **k):
+        b = _El(text, **k)
+        self.buttons[text] = b
+        return b
+
+    def notify(self, text, type=None):
+        self.notes.append((text, type))
+
+
+def _open_dialog(monkeypatch, request):
+    fake = _FakeUi()
+    monkeypatch.setattr(handoff, "ui", fake)
+    monkeypatch.setattr(handoff.bus_client, "read", lambda view: CAPS)
+    monkeypatch.setattr(handoff.bus_client, "request", request)
+    handoff.send_to_paper(SIG)
+    return fake
+
+
+def test_a_second_click_sends_nothing(monkeypatch):
+    sent = []
+    fake = _open_dialog(monkeypatch, lambda domain, cmd: sent.append((domain, cmd)))
+    create = fake.buttons["Create"]
+    fake.numbers[0].value = 2.0
+    confirm = create.kw["on_click"]
+    confirm()
+    confirm()                      # the queued double click
+    assert len(sent) == 1
+    assert sent[0][1]["args"]["qty"] == 2
+    assert create.enabled is False
+    assert fake.notes == [("Sent 2 contracts — the paper ledger answers in a moment.",
+                           "info")]
+    assert fake.dialogs[0].closed is True
+
+
+def test_a_send_that_cannot_reach_the_bus_can_be_retried(monkeypatch):
+    calls = []
+
+    def down(domain, cmd):
+        calls.append(cmd)
+        raise ConnectionError("redis down")
+
+    fake = _open_dialog(monkeypatch, down)
+    create = fake.buttons["Create"]
+    confirm = create.kw["on_click"]
+    confirm()
+    assert fake.notes == [("Could not reach the options service — the trade was "
+                           "not sent.", "negative")]
+    assert create.enabled is True and fake.dialogs[0].closed is False
+    confirm()                      # the retry really runs again
+    assert len(calls) == 2
+
+
+def test_an_unreadable_caps_view_leaves_create_enabled(monkeypatch):
+    fake = _FakeUi()
+    monkeypatch.setattr(handoff, "ui", fake)
+
+    def boom(view):
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(handoff.bus_client, "read", boom)
+    monkeypatch.setattr(handoff.bus_client, "request", lambda d, c: None)
+    handoff.send_to_paper(SIG)
+    assert fake.buttons["Create"].enabled is True
+    shown = [e.text for e in fake.labels
+             if getattr(e, "visible", False) and hasattr(e, "text")]
+    assert book_fit.UNAVAILABLE in shown
