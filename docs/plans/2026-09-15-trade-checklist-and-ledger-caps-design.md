@@ -85,7 +85,7 @@ Redis**.
 | Question | Decision |
 |---|---|
 | Which book does book-fit describe? | Cap the Paper button: the Ledger enforces the caps against its own open trades |
-| Per-trade limit on the Ledger | **$250**, the Account's `MAX_RISK_PER_TRADE` — one rule for both books |
+| Per-trade limit on the Ledger | **$750**, its own `config_paper.LEDGER_MAX_RISK_PER_TRADE`; the Account's `MAX_RISK_PER_TRADE` stays $250. First decided as $250 for both books, changed after the measurement below showed that left two thirds of Directional long options unopenable |
 | Ledger equity for the deployment cap | **$25,000 + the Ledger's realized P&L** from closed trades (moves on a close, never on a mark) |
 | Rung order on screen | **Per trade first**, then deployment, symbol, sector, expiry — "lower the quantity" is the fix you can act on immediately |
 | Architecture | Hybrid (C): the service stamps what is fixed per candidate, publishes the book, and one pure cap module is shared by all three callers; the page joins live context |
@@ -109,6 +109,10 @@ Over-cap names led by TSLA, SPCX, HOOD, NVDA, AAPL, PLTR, DELL, $SPX. The credit
 spreads are sized to the same $250 by `scanner_engine.DEFAULT_MAX_RISK_DOLLARS`
 already, so the cap bites almost entirely on long options: **about two thirds of
 Directional and Finder long-option ideas become unopenable in the Ledger.**
+
+Re-measured an hour later at **$750** (scan of 09:45 CT): Directional live **27 of 130
+(21%)**, whole day union **68 of 293 (23%)**, led by $SPX, META, QQQ, MU and DELL. The
+operator moved the Ledger's per-trade limit to $750 on that evidence.
 
 ## Part 1 — Ledger caps and enforcement
 

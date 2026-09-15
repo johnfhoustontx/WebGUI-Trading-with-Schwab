@@ -849,7 +849,18 @@ git commit -m "docs(tier1): shared.book_caps joins the import allow-list, pinned
 
 ### Task 5: `compute.ledger_book_state`
 
+> **Operator decision, 2026-09-15 (after the Task 0a measurement):** the Ledger's per-trade limit is **$750**, its own constant `config_paper.LEDGER_MAX_RISK_PER_TRADE`; the Account keeps `MAX_RISK_PER_TRADE = $250`. At $250, 62% of Directional long options were unopenable; at $750, 21-23%.
+
 **Files:**
+- Modify: `options-scanner/config_paper.py` - add, directly after `MAX_RISK_PER_TRADE`:
+  ```python
+  # The Paper LEDGER's own per-trade limit (the book the webgui Paper button opens
+  # into). Separate from MAX_RISK_PER_TRADE, which sizes the automatic Account and
+  # the scanner's width search: at $250 about two thirds of Directional long
+  # options could not be opened by hand (measured on prod 2026-09-15); at $750
+  # about a fifth. Operator decision, 2026-09-15.
+  LEDGER_MAX_RISK_PER_TRADE = 750.0
+  ```
 - Modify: `services/options_svc/compute.py` (add beside `paper_trades_view`, ~line 2626)
 - Test: `services/options_svc/tests/test_ledger_caps.py`
 
@@ -909,7 +920,7 @@ def test_limits_are_the_accounts_plus_the_per_trade_cap(ledger):
     import paper_concentration
     limits = compute.ledger_book_state()["limits"]
     assert limits == {**paper_concentration.default_limits(),
-                      "max_risk_per_trade": config_paper.MAX_RISK_PER_TRADE}
+                      "max_risk_per_trade": config_paper.LEDGER_MAX_RISK_PER_TRADE}
 
 
 def test_a_non_finite_realized_pnl_is_dropped_not_summed(ledger, monkeypatch):
@@ -937,9 +948,10 @@ def ledger_book_state(trades=None) -> dict:
     ``shared.sectors.group_key`` (an unmapped name is its own ``?SYMBOL``
     bucket). ``equity``: ``STARTING_BALANCE`` plus the realized P&L of every
     closed or expired Ledger trade - it moves when a trade closes, never on a
-    mark (operator decision). ``limits``: the Account's six caps plus
-    ``MAX_RISK_PER_TRADE``, read at call time so a config edit plus a restart
-    moves both books together.
+    mark (operator decision). ``limits``: the Account's six caps plus the
+    Ledger's own ``LEDGER_MAX_RISK_PER_TRADE`` ($750; the Account's per-trade
+    limit stays $250), read at call time so a config edit plus a restart moves
+    them.
     """
     import config_paper
     import paper_concentration
@@ -966,7 +978,7 @@ def ledger_book_state(trades=None) -> dict:
             realized += pnl
     start = float(config_paper.STARTING_BALANCE)
     limits = dict(paper_concentration.default_limits(),
-                  max_risk_per_trade=config_paper.MAX_RISK_PER_TRADE)
+                  max_risk_per_trade=config_paper.LEDGER_MAX_RISK_PER_TRADE)
     return {"open": open_rows, "starting_balance": start,
             "realized_pnl": round(realized, 2),
             "equity": round(start + realized, 2), "limits": limits}
@@ -979,7 +991,7 @@ Confirm `math` is imported at the top of `compute.py` (`grep -n "^import math" s
 **Step 5: Commit**
 
 ```bash
-git add services/options_svc/compute.py services/options_svc/tests/test_ledger_caps.py
+git add options-scanner/config_paper.py services/options_svc/compute.py services/options_svc/tests/test_ledger_caps.py
 git commit -m "feat(options-svc): ledger_book_state - the Paper Ledger as the caps see it" -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
@@ -1001,18 +1013,24 @@ def test_a_trade_within_every_cap_opens_and_reports_it(ledger):
 
 
 def test_over_the_per_trade_cap_is_refused_and_nothing_is_written(ledger):
-    out = compute.create_paper_trade(_pcs(credit=1.00, width=5.0), 1)   # $400
+    out = compute.create_paper_trade(_pcs(credit=1.00, width=10.0), 1)  # $900
     assert out["status"] == "refused"
     assert out["code"] == "TRADE_RISK_CAP"
     assert out["max_quantity"] == 0
-    assert "over the $250 per-trade limit" in out["message"]
+    assert "over the $750 per-trade limit" in out["message"]
     assert ledger.get_open_trades() == []
 
 
 def test_quantity_counts_toward_the_per_trade_cap(ledger):
-    out = compute.create_paper_trade(_pcs(), 2)          # 2 x $190 = $380
+    out = compute.create_paper_trade(_pcs(), 4)          # 4 x $190 = $760
     assert out["status"] == "refused" and out["code"] == "TRADE_RISK_CAP"
-    assert out["max_quantity"] == 1
+    assert out["max_quantity"] == 3
+
+
+def test_the_account_limit_does_not_bind_the_ledger(ledger):
+    """$400 is over the Account's $250 but inside the Ledger's own $750."""
+    out = compute.create_paper_trade(_pcs(credit=1.00, width=5.0), 1)
+    assert out["status"] == "opened"
 
 
 def test_a_fourth_position_in_one_symbol_is_refused(ledger):
@@ -1026,7 +1044,7 @@ def test_a_fourth_position_in_one_symbol_is_refused(ledger):
 def test_the_limit_really_binds_when_config_moves(ledger, monkeypatch):
     """Discriminating: the cap is read at call time, not copied from a literal."""
     import config_paper
-    monkeypatch.setattr(config_paper, "MAX_RISK_PER_TRADE", 100.0)
+    monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_TRADE", 100.0)
     out = compute.create_paper_trade(_pcs(), 1)          # $190
     assert out["status"] == "refused" and out["code"] == "TRADE_RISK_CAP"
 
@@ -1063,8 +1081,8 @@ def test_a_trade_whose_max_loss_cannot_be_read_is_refused_not_opened(ledger):
 def create_paper_trade(signal: dict, qty: int) -> dict:
     """Create a Paper LEDGER trade if it clears every risk cap; return the outcome.
 
-    Since 2026-09-15 the Ledger enforces the Account's caps plus the $250
-    per-trade limit, against its OWN open trades (design
+    Since 2026-09-15 the Ledger enforces the Account's six caps plus its own
+    $750 per-trade limit (``LEDGER_MAX_RISK_PER_TRADE``), against its OWN open trades (design
     2026-09-15-trade-checklist-and-ledger-caps). The checked risk is the
     ``max_loss_total`` of the trade ``paper_trader`` builds - the number it
     books - so the per-share/per-contract unit traps cannot separate them.
@@ -1158,7 +1176,7 @@ Expected: PASS. Then run the full options_svc suite and compare the failing set 
 
 ```bash
 git add services/options_svc/compute.py services/options_svc/tests/test_ledger_caps.py services/options_svc/tests/test_compute.py
-git commit -m "feat(paper-ledger): the Paper button enforces the book's risk caps" -m "Per-trade \$250 plus the Account's six concentration rungs, against the Ledger's own open trades and \$25k + realized P&L. A refusal writes nothing." -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+git commit -m "feat(paper-ledger): the Paper button enforces the book's risk caps" -m "Per-trade \$750 (the Ledger's own limit) plus the Account's six concentration rungs, against the Ledger's own open trades and \$25k + realized P&L. A refusal writes nothing." -m "Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ### Task 7: Publish every `paper_create` outcome to `cache:options:paper_create`
@@ -1357,7 +1375,7 @@ def test_refused_names_the_cap_and_the_quantity_that_fits():
 def test_refused_with_room_for_a_smaller_quantity_says_so():
     text, _ = handoff.paper_result_toast({
         "status": "refused", "symbol": "SPY", "code": "TRADE_RISK_CAP",
-        "message": "Risks $380, over the $250 per-trade limit", "max_quantity": 1})
+        "message": "Risks $900, over the $750 per-trade limit", "max_quantity": 1})
     assert text.endswith("Up to 1 contract fits.")
 
 
@@ -1445,7 +1463,7 @@ git commit -m "feat(webgui): the Paper button's answer - opened or refused and w
 ### Task 9: Phase 2 docs
 
 **Files:**
-- Modify: `CLAUDE.md` — add a section after "The paper engine's risk envelope has SIX rungs, not two": **"The Paper Ledger is capped, and there is one cap module"** (5–8 sentences: the Ledger enforces per-trade $250 + the six rungs against its own open trades; equity = $25k + realized; `shared.book_caps` is shared by the Account, the Ledger and the preview; `concentration_reject` is an adapter proven identical by a frozen copy; every outcome is published to `cache:options:paper_create`). Also correct in place the sentence in the rungs section that says concentration refusals leave no UI trace — true for the Account's auto cycle, no longer for the Paper button.
+- Modify: `CLAUDE.md` — add a section after "The paper engine's risk envelope has SIX rungs, not two": **"The Paper Ledger is capped, and there is one cap module"** (5–8 sentences: the Ledger enforces its own per-trade `LEDGER_MAX_RISK_PER_TRADE` ($750; the Account stays $250) + the six rungs against its own open trades; equity = $25k + realized; `shared.book_caps` is shared by the Account, the Ledger and the preview; `concentration_reject` is an adapter proven identical by a frozen copy; every outcome is published to `cache:options:paper_create`). Also correct in place the sentence in the rungs section that says concentration refusals leave no UI trace — true for the Account's auto cycle, no longer for the Paper button.
 - Modify: `docs/manuals/` User Guide — the Paper trade section: the button can now refuse, and the toast says why.
 - Modify: `webgui/page_help.py` — `/options/scanner` and `/options/swing` entries: one sentence each about the Paper button's caps.
 - Modify: `docs/CHANGELOG.md` — dated entry for Phases 1–2.
@@ -1900,7 +1918,8 @@ def test_unknown_sector_symbol_reads_unknown_not_blocked():
 
 def test_short_reason_for_the_checklist_chip():
     assert book_fit.short_reason({"code": "SECTOR_POSITION_CAP"}) == "sector full"
-    assert book_fit.short_reason({"code": "TRADE_RISK_CAP"}) == "over $250 per trade"
+    assert book_fit.short_reason({"code": "TRADE_RISK_CAP", "cap": 750.0}) == "over $750 per trade"
+    assert book_fit.short_reason({"code": "TRADE_RISK_CAP", "cap": 250.0}) == "over $250 per trade"
 ```
 
 **Step 2: Run to verify they fail.**
@@ -1922,7 +1941,7 @@ from ..fmt import num
 UNAVAILABLE = ("Can't preview this trade here — the paper ledger still checks "
                "every cap when you create it.")
 
-_SHORT = {book_caps.TRADE_RISK_CAP: "over $250 per trade",
+_SHORT = {book_caps.TRADE_RISK_CAP: "over the per-trade limit",
           book_caps.DEPLOYMENT_CAP: "book fully deployed",
           book_caps.SYMBOL_POSITION_CAP: "symbol full",
           book_caps.SYMBOL_RISK_CAP: "symbol risk full",
@@ -1940,7 +1959,13 @@ _LABELS = {book_caps.TRADE_RISK_CAP: "Per trade",
 
 
 def short_reason(rung):
-    return _SHORT.get((rung or {}).get("code"), "blocked")
+    """A few words for the checklist chip. The per-trade wording names the
+    rung's own cap, never a hard-coded figure: the Ledger's limit is config."""
+    rung = rung or {}
+    cap = num(rung.get("cap"))
+    if rung.get("code") == book_caps.TRADE_RISK_CAP and cap is not None:
+        return f"over ${cap:,.0f} per trade"
+    return _SHORT.get(rung.get("code"), "blocked")
 
 
 def preview(signal, caps, qty=1):
@@ -2069,10 +2094,10 @@ git commit -m "feat(webgui): the Paper dialog previews every cap and caps the qu
 No repo files. Follow memory note *local-page-harness-replaces-missing-dev*: a scratchpad NiceGUI app with `bus_client._bus = Bus(fake=True)`, the REAL `services.options_svc.handlers`, a daemon thread consuming `cmd:options`, and a temporary Ledger DB (`trades_db.DEFAULT_DB_PATH` → scratchpad, `trade_tracker_client.track`/`untrack` stubbed).
 
 **Steps:**
-1. Seed `cache:options:scan_day` and `cache:options:scan` with two stamped rows (one $190 PCS, one $425 PCS) by calling `handlers._stamp_scan` on a hand-built result, then `bus.cache_set`. Call `handlers.refresh_ledger_caps(bus)`.
+1. Seed `cache:options:scan_day` and `cache:options:scan` with two stamped rows (one $190 PCS, one $900 PCS) by calling `handlers._stamp_scan` on a hand-built result, then `bus.cache_set`. Call `handlers.refresh_ledger_caps(bus)`.
 2. Render `pages.options.scanner.render()` at `/`; open it in the Browser pane.
-3. Click Paper on the $190 row → dialog shows seven lines, Create enabled, quantity max 1. Create → toast "Opened 1 × ...".
-4. Click Paper on the $425 row → Per trade line red, Create disabled, text "Risks $425, over the $250 per-trade limit".
+3. Click Paper on the $190 row → dialog shows seven lines, Create enabled, quantity max 3. Create → toast "Opened 1 × ...".
+4. Click Paper on the $900 row → Per trade line red, Create disabled, text "Risks $900, over the $750 per-trade limit".
 5. Open two more $190 trades on the same symbol, then a fourth → toast "Not opened — ORCL already holds 3 of 3 positions."
 6. Screenshot the refused dialog and the toast; report both.
 
