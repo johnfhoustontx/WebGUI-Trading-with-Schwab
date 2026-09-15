@@ -31,6 +31,7 @@ the gauge**: it was the only chart on all four pages that mount this panel
 now. If one of those pages ever gains a chart created after first render, it has
 to bring its own anchor — this panel no longer provides one.
 """
+import logging
 import re
 
 from nicegui import background_tasks, core, run, ui
@@ -46,6 +47,8 @@ from .theme import (TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL,
 # Semantic state-color class tokens (Tailwind text-[...] arbitrary values). Names
 # kept (many refs) but the VALUES are now class strings applied via .classes().
 GREEN, AMBER, RED, NEUTRAL = TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL
+
+log = logging.getLogger(__name__)
 
 # ⚠ ``iv`` renders as "Vol Rank", not "IV Rank", and that is the honest name:
 # ``iv_analysis.calc_iv_rank_percentile`` places current ATM IV inside the
@@ -97,9 +100,11 @@ CHECKING_TEXT = "Checking…"
 # When no check applies at all (not a read in flight).
 NO_CHECKS_TEXT = "No checks apply to this trade"
 # When the page no longer lists the open row: a verdict on it would be about a
-# signal the table has dropped.
-GONE_SCAN_TEXT = "This signal is no longer in today's scan"
-GONE_FINDER_TEXT = "This trade is no longer in the scan's results"
+# signal the table has dropped. The line names the WHOLE panel, because the
+# contract, score bar and economics around it still describe the departed row.
+_GONE_TAIL = " — the details below are as it last read"
+GONE_SCAN_TEXT = "This signal is no longer in today's scan" + _GONE_TAIL
+GONE_FINDER_TEXT = "This trade is no longer in the scan's results" + _GONE_TAIL
 
 
 def pop_color(pop):
@@ -956,7 +961,12 @@ class _Handle:
     def set_candidate_source(self, lookup, gone_text=GONE_SCAN_TEXT):
         """Register the page's ``lookup(id)`` -> fresh candidate, or None when the
         page no longer lists that row. :meth:`refresh_checks` consults it, so a
-        row that has left the table says so instead of keeping its old verdict."""
+        row that has left the table says so instead of keeping its old verdict.
+
+        Gone is TERMINAL for that selection: the panel stops judging the row, so
+        a later refresh leaves the line alone even if the id comes back. Recovery
+        is a re-click: only a fresh selection judges the row again, and only it
+        refreshes the stale cards below the line."""
         self._candidate_source = lookup
         self._gone_text = gone_text
 
@@ -972,7 +982,16 @@ class _Handle:
         if self._candidate is None or self._checks_box is None:
             return
         if candidate is None and self._candidate_source is not None:
-            candidate = self._candidate_source(self._candidate.get("id"))
+            try:
+                candidate = self._candidate_source(self._candidate.get("id"))
+            except Exception as exc:    # noqa: BLE001 - see below
+                # This runs in the TAIL of a payload paint / re-stamp, and the
+                # Finder's lookup builds a whole row (payoff SVG) inside it: a
+                # raise here would abandon the rest of that paint. The row cannot
+                # be judged, so say what a missing row says.
+                log.warning("checklist candidate lookup failed (%s)",
+                            type(exc).__name__, exc_info=exc)
+                candidate = None
             if candidate is None:
                 self._show_gone()
                 return

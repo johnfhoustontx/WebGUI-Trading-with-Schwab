@@ -1164,3 +1164,32 @@ def test_an_identical_refresh_keeps_the_rendered_elements(monkeypatch):
     assert label_ids() == before
     h.refresh_checks({**_CTX, "matrix": None})          # a different view repaints
     assert label_ids() != before
+
+
+def test_the_gone_line_says_the_rest_of_the_panel_is_stale():
+    """The contract, score bar and economics still describe the departed row, so
+    the muted line has to say the whole panel is a last reading."""
+    tail = " — the details below are as it last read"
+    assert detail.GONE_SCAN_TEXT == "This signal is no longer in today's scan" + tail
+    assert detail.GONE_FINDER_TEXT == ("This trade is no longer in the scan's "
+                                       "results" + tail)
+
+
+def test_a_raising_lookup_shows_the_gone_line_instead_of_propagating(monkeypatch):
+    """The Finder's lookup builds a whole row (payoff SVG) inside this call, and it
+    runs in the tail of a payload paint / re-stamp: a raise there would abandon
+    the rest of that paint."""
+    card, h, _sig = _open_on(monkeypatch)
+
+    def boom(_id):
+        raise ValueError("row builder blew up")
+    h.set_candidate_source(boom, gone_text=detail.GONE_FINDER_TEXT)
+    h.refresh_checks(_CTX)                       # must not raise
+    texts = _texts(card)
+    assert detail.GONE_FINDER_TEXT in texts and not _verdicts(texts)
+    assert h.checklist_id is None
+
+
+def test_the_candidate_source_docstring_says_gone_is_terminal():
+    doc = detail._Handle.set_candidate_source.__doc__
+    assert "re-click" in doc and "terminal" in doc.lower()
