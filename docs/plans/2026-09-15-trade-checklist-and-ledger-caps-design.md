@@ -223,6 +223,11 @@ the outcome; the dialog's own toast stops claiming anything beyond "sent".
 
 ### The Paper dialog is the full preview
 
+Each quantity's risk is computed with `shared.book_caps.booked_risk(basis, qty)`
+from the row's `ledger_risk_basis` stamp — the rounding `paper_trader` books
+`max_loss_total` with — so the preview and the Ledger cannot disagree by a cent at
+a cap. (A cent-rounded per-contract risk times the quantity did, on sub-cent rows.)
+
 Each row carries a service stamp `ledger_risk_per_contract` (Part 2). The dialog
 runs `book_caps.evaluate` over `ledger_caps` and renders one line per rung:
 

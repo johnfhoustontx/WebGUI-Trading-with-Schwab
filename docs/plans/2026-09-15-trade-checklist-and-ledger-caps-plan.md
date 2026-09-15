@@ -1865,6 +1865,8 @@ git commit -m "feat(options-svc): publish the Ledger's book for the Paper dialog
 
 ### Task 13: Tier-1 `book_fit` — the preview's pure logic
 
+> **Revised after review (commits 0089bf6, a3fa0ae):** the preview reads the stamp `ledger_risk_basis` (`{"per_share": x}` or `{"per_contract": y}`), not the cent-rounded `ledger_risk_per_contract`, and computes each quantity's risk with `shared.book_caps.booked_risk(basis, qty)` — the SAME rounding `paper_trader` now books `max_loss_total` through (proven byte-identical over 80,000 bookings). A cent-rounded per-contract figure had let a sub-cent risk preview green at four contracts while the Ledger refused $750.02. It mirrors the service's quantity rule and its suggested-quantity step-down, and `services/options_svc/tests/test_preview_agrees_with_ledger.py` proves preview and Ledger agree line for line over real books, stamps and enforcement. The committed code is authoritative.
+
 **Files:**
 - Create: `webgui/pages/options/book_fit.py`
 - Test: `webgui/tests/test_book_fit.py`
