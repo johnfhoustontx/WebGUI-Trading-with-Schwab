@@ -71,3 +71,18 @@ def test_limits_follow_the_ledger_constant_at_call_time(ledger, monkeypatch):
     import config_paper
     monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_TRADE", 123.0)
     assert compute.ledger_book_state()["limits"]["max_risk_per_trade"] == 123.0
+
+
+def test_a_realized_pnl_that_is_not_a_number_is_skipped():
+    rows = [{"status": "CLOSED", "realized_pnl": None},
+            {"status": "CLOSED", "realized_pnl": "junk"},
+            {"status": "EXPIRED", "realized_pnl": -30.0}]
+    state = compute.ledger_book_state(trades=rows)
+    assert state["realized_pnl"] == pytest.approx(-30.0)
+    assert state["equity"] == pytest.approx(24970.0)
+
+
+def test_an_unmapped_symbol_gets_its_own_bucket():
+    rows = [{"status": "OPEN", "symbol": "ZZZQ", "expiration": "2026-10-17",
+             "max_loss_total": 50.0}]
+    assert compute.ledger_book_state(trades=rows)["open"][0]["sector"] == "?ZZZQ"
