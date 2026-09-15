@@ -23,6 +23,12 @@ PAPER_MODE = True   # gates ALL order submission; flip False to disarm entirely
 
 STARTING_BALANCE     = 25_000.0
 MAX_RISK_PER_TRADE   = 250.0
+# The Paper LEDGER's own per-trade limit (the book the webgui Paper button opens
+# into). Separate from MAX_RISK_PER_TRADE, which sizes the automatic Account and
+# the scanner's width search: at $250 about two thirds of Directional long
+# options could not be opened by hand (measured on prod 2026-09-15); at $750
+# about a fifth. Operator decision, 2026-09-15.
+LEDGER_MAX_RISK_PER_TRADE = 750.0
 MAX_SESSION_DRAWDOWN = 2_500.0
 
 #############################################

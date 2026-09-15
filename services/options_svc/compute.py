@@ -2653,6 +2653,49 @@ def paper_trades_view(reprice: bool = False) -> dict:
     return {"trades": trades}
 
 
+def ledger_book_state(trades=None) -> dict:
+    """The Paper LEDGER as the risk caps see it (design 2026-09-15, Part 1).
+
+    ``open``: OPEN trades as ``shared.book_caps`` rows, sectors resolved with
+    ``shared.sectors.group_key`` (an unmapped name is its own ``?SYMBOL``
+    bucket). ``equity``: ``STARTING_BALANCE`` plus the realized P&L of every
+    closed or expired Ledger trade - it moves when a trade closes, never on a
+    mark (operator decision). ``limits``: the Account's six caps plus the
+    Ledger's own ``LEDGER_MAX_RISK_PER_TRADE`` ($750; the Account's per-trade
+    limit stays $250), read at call time so a config edit plus a restart moves
+    them.
+    """
+    import config_paper
+    import paper_concentration
+    import paper_trader
+    from shared import sectors as _sectors
+
+    if trades is None:
+        trades = paper_trader.get_all_trades()
+    open_rows, realized = [], 0.0
+    for t in trades or ():
+        if not isinstance(t, dict):
+            continue
+        if t.get("status") == "OPEN":
+            open_rows.append({"symbol": t.get("symbol"),
+                              "expiration": t.get("expiration"),
+                              "max_loss_total": t.get("max_loss_total"),
+                              "sector": _sectors.group_key(t.get("symbol"))})
+            continue
+        try:
+            pnl = float(t.get("realized_pnl"))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(pnl):
+            realized += pnl
+    start = float(config_paper.STARTING_BALANCE)
+    limits = dict(paper_concentration.default_limits(),
+                  max_risk_per_trade=config_paper.LEDGER_MAX_RISK_PER_TRADE)
+    return {"open": open_rows, "starting_balance": start,
+            "realized_pnl": round(realized, 2),
+            "equity": round(start + realized, 2), "limits": limits}
+
+
 def create_paper_trade(signal: dict, qty: int) -> dict:
     """Create + persist a paper trade from a scanner/swing ``signal``.
 
