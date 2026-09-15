@@ -468,10 +468,11 @@ def repaint_action(moved, *, timer=False, matrix_moved=False):
 
 
 def _read_and_restamp(rows_by_key, sigs_by_key):
-    """Read the checklist's live context and re-stamp copies of the painted rows.
-    **Blocking** — go through ``run.io_bound``."""
-    from . import checks_feed
-    return restamp(rows_by_key, sigs_by_key, checks_feed.read_context())
+    """Read the checklist's live context and re-stamp copies of the painted rows,
+    through the reader the Strategy Finder shares. **Blocking** — go through
+    ``run.io_bound``."""
+    from . import checks_table
+    return checks_table.read_and_restamp_tables(rows_by_key, sigs_by_key)[1]
 
 
 def _short_time(iso):

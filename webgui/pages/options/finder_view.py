@@ -694,7 +694,7 @@ def summary_facts(payload):
     can_change = (choice_label(choice) is not None
                   and scanned is not None and listed is not None)
     if can_change:
-        parts.append(f"Scanned {scanned:,} of {_expirations(listed)} · "
+        parts.append(f"{SCANNED_HEAD}{scanned:,} of {_expirations(listed)} · "
                      f"{_label_for(p.get('choices'), choice)}")
 
     return {"symbol": symbol, "price": price, "pills": pills,
@@ -702,18 +702,35 @@ def summary_facts(payload):
             "can_change": can_change}
 
 
-def only_clear_counts(base, total, shown, *, filtering):
+# The head of the "Scanned N of M · <choice>" part - shared by the builder and
+# only_clear_counts, which must keep that part last.
+SCANNED_HEAD = "Scanned "
+_PART_SEP = " · "
+
+
+def only_clear_counts(base, total, shown, *, filtering, chip_filtered=False):
     """The summary strip's count line while "Only clear" may be on.
 
     ``base`` is :func:`summary_facts`' ``counts``, kept word for word; filtering
     and hiding at least one of the list's ``total`` rows adds
     ``"3 of 40 shown · 37 hidden by Only clear"``. Nothing hidden adds nothing:
     a list with nothing to hide would otherwise read as a filter that did
-    something."""
+    something.
+
+    The part goes BEFORE "Scanned N of M · <choice>", which stays last beside
+    the Change link it explains. With a strategy chip active ``total`` is the
+    chip's list, not the scan, so it says ``"3 of 20 in the chosen strategies
+    shown"`` rather than reading as a share of the whole scan."""
     hidden = (total or 0) - (shown or 0)
     if not filtering or hidden <= 0:
         return base
-    return f"{base} · {shown:,} of {total:,} shown · {hidden:,} hidden by Only clear"
+    of = (f"{shown:,} of {total:,} in the chosen strategies shown" if chip_filtered
+          else f"{shown:,} of {total:,} shown")
+    part = f"{of}{_PART_SEP}{hidden:,} hidden by Only clear"
+    head, sep, tail = base.partition(_PART_SEP + SCANNED_HEAD)
+    if sep:
+        return f"{head}{_PART_SEP}{part}{sep}{tail}"
+    return f"{base}{_PART_SEP}{part}"
 
 
 # ------------------------------------------------------------------------- bars

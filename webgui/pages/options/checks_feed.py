@@ -10,6 +10,8 @@ until the view's version moves, so every payload here - ``matrix`` (and the
 board rows it indexes), ``regime``, ``calibration``, ``caps`` - is shared state.
 No caller (``checks``, ``book_fit``, the pages) may mutate one; copy first.
 """
+import threading
+
 import bus_client
 
 # NOTE view names carry no `cache:` prefix - bus_client.read* adds it.
@@ -27,11 +29,18 @@ TABLE_REFRESH_SEC = 300.0
 # as detail.py's calibration memo): the webgui is single-user, and a version
 # probe per view is all an unchanged read costs whoever asks next.
 _memos = {MATRIX_VIEW: {}, REGIME_VIEW: {}, CALIBRATION_VIEW: {}, CAPS_VIEW: {}}
+# One lock per view around the probe / read / memo store. Every tab's re-stamp
+# runs on its own io_bound worker thread; unlocked, a thread that read an OLD
+# payload could store its version and payload over a newer thread's (or, the
+# two stores interleaving, pair the new version with the old payload), and the
+# memo would then serve that payload until the view next moved.
+_locks = {view: threading.Lock() for view in _memos}
 
 
 def _gated(view):
     try:
-        payload, _changed = bus_client.read_gated(view, _memos[view])
+        with _locks[view]:
+            payload, _changed = bus_client.read_gated(view, _memos[view])
         return payload
     except Exception:  # noqa: BLE001 - a missing view costs its checks, not the page
         return None

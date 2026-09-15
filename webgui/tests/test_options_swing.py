@@ -1473,7 +1473,7 @@ def _pcs(i, **over):
             "composite_score": 50.0 + (i % 40), **over}
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def fresh_feed(monkeypatch):
     """checks_feed's memos are module-level and keyed on a view's VERSION, which a
     fresh fake bus restarts at 1 - so a memo left by another test would hand back
@@ -1496,7 +1496,8 @@ def _render_with_context(payload, **context):
     from nicegui import ui
     bus_client.reset()
     _publish_context(**context)
-    _publish(payload)
+    if payload is not None:
+        _publish(payload)
     with ui.card() as card:
         swing.render()
     return card
@@ -1731,3 +1732,130 @@ def test_a_restamp_that_read_under_a_newer_list_never_paints_the_old_rows(monkey
     _run_checks_tick(card)              # the newer list is stamped against the new read
     assert sorted(r["id"] for r in table.rows) == ["p007", "p008", "p009"]
     assert {r["_checks_state"] for r in table.rows} == {"neg"}   # equity 1.0: blocked
+
+
+def _race_restamp(monkeypatch, card, during):
+    """Run one checks tick whose off-loop read lets ``during`` happen mid-read."""
+    from nicegui import run
+    real = run.io_bound
+
+    async def racing(fn, *args):
+        result = fn(*args)
+        during()
+        return result
+
+    monkeypatch.setattr(run, "io_bound", racing)
+    try:
+        _run_checks_tick(card)
+    finally:
+        monkeypatch.setattr(run, "io_bound", real)
+
+
+def test_a_fresh_tab_s_first_answer_waits_for_the_first_read_then_stamps():
+    """No context read yet: nothing is stamped (the cell shows its dash) rather
+    than every row reading "Partly checked" for the first half second."""
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL", "signals": [_pcs(1)]})
+    table = _table(card)
+    (row,) = table.rows
+    assert "_checks_state" not in row and "_checks_short" not in row
+    _switch(card).value = True
+    assert table.rows == []                             # Only clear fails closed
+    assert table.props["no-data-label"] == (
+        "The checks haven't loaded yet — turn off Only clear to see all 1.")
+    _switch(card).value = False
+    _run_checks_tick(card)
+    (row,) = table.rows
+    assert row["_checks_short"] == "Clear · 8 of 8"
+
+
+def test_the_tick_reads_nothing_while_the_list_is_empty(monkeypatch, fresh_feed):
+    card = _render_with_context(None)
+    reads = _count_context_reads(monkeypatch, fresh_feed)
+    _run_checks_tick(card)
+    _run_checks_tick(card)
+    assert reads == []
+    _publish({**_PAYLOAD, "symbol": "ORCL", "signals": [_pcs(1)]})
+    _fire_poll(card)
+    _run_checks_tick(card)
+    assert reads == [1]
+    assert _table(card).rows[0]["_checks_short"] == "Clear · 8 of 8"
+
+
+def test_a_toggle_mid_restamp_refilters_the_fresh_rows(monkeypatch):
+    signals = [_pcs(i, friction_pct=3.4 if i % 2 else 30.0) for i in range(6)]
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL", "signals": signals},
+                                caps=False)
+    _run_checks_tick(card)
+    table = _table(card)
+    assert not [r for r in table.rows if r["_checks_clear"]]    # no caps: none clear
+    bus_client.bus().cache_set("cache:options:ledger_caps", _CHECK_CAPS)
+    _fire_poll(card)
+    _race_restamp(monkeypatch, card, lambda: setattr(_switch(card), "value", True))
+    assert sorted(r["id"] for r in table.rows) == ["p001", "p003", "p005"]
+    assert all(r["_checks_short"] == "Clear · 8 of 8" for r in table.rows)
+    assert table.pagination["rowsNumber"] == 3
+
+
+def test_a_chip_click_mid_restamp_drops_the_stale_copies(monkeypatch, fresh_feed):
+    from pages.options import checks
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL",
+                                 "signals": [_pcs(1, group="VERTICAL"), _FLY]}, caps=False)
+    _run_checks_tick(card)
+    bus_client.bus().cache_set("cache:options:ledger_caps", _CHECK_CAPS)
+    _fire_poll(card)
+    _race_restamp(monkeypatch, card,
+                  lambda: _click(_buttons(card)["Butterflies & condors 1"], card))
+    table = _table(card)
+    assert [r["id"] for r in table.rows] == ["fly"]
+    _run_checks_tick(card)                              # the chip's list, stamped next
+    (row,) = table.rows
+    expected = fresh_feed.checks_for({**_FLY, "_allow_paper": True},
+                                     fresh_feed.read_context())
+    assert row["id"] == "fly" and row["checks"] == checks.verdict(expected)["text"]
+    assert "book" in {c["key"] for c in expected}
+
+
+def test_a_scan_requested_mid_restamp_keeps_its_empty_list(monkeypatch, fresh_feed):
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL", "signals": [_pcs(1)]},
+                                caps=False)
+    _run_checks_tick(card)
+    bus_client.bus().cache_set("cache:options:ledger_caps", _CHECK_CAPS)
+    _fire_poll(card)
+    _race_restamp(monkeypatch, card, lambda: _scan(card, monkeypatch, "msft"))
+    table = _table(card)
+    assert table.rows == []
+    assert table.props["no-data-label"] == swing.scanning_text("MSFT")
+    reads = _count_context_reads(monkeypatch, fresh_feed)
+    _run_checks_tick(card)
+    assert reads == [] and table.rows == []
+
+
+def test_a_chosen_answer_landing_mid_restamp_wins(monkeypatch):
+    from nicegui import ui
+    card = _render_with_context(None, caps=False)
+    sent = _recording(monkeypatch)
+    _publish(_ASK)
+    _fire_poll(card)
+    _click(_chooser_buttons(card)[_NEXT_90], card)
+    _publish(_chosen(sent[-1]))
+    _fire_poll(card)
+    _run_checks_tick(card)
+    table = _table(card)
+    assert {r["id"] for r in table.rows} == {"fly", "sp"}
+    bus_client.bus().cache_set("cache:options:ledger_caps", _CHECK_CAPS)
+    _fire_poll(card)
+
+    def pick_and_answer():
+        (change,) = _change_buttons(card)
+        _click(change, card)
+        _click(_chooser_buttons(card)[_ALL_CHAIN], card)
+        _publish(_chosen(sent[-1], signals=[_pcs(3, symbol="$SPX")]))
+        _fire_poll(card)
+
+    _race_restamp(monkeypatch, card, pick_and_answer)
+    assert sent[-1]["expiry_choice"] == "all"
+    assert [r["id"] for r in table.rows] == ["p003"]
+    assert "_checks_state" in table.rows[0]             # stamped from the last read
+    assert any("Everything" in e.text for e in _widgets(card, ui.label))
+    _run_checks_tick(card)
+    assert [r["id"] for r in table.rows] == ["p003"]

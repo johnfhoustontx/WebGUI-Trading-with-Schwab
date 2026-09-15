@@ -111,3 +111,57 @@ def test_the_module_imports_no_ui_framework():
     mods = {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | \
            {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     assert not {m for m in mods if m.split(".")[0] in {"nicegui", "services", "sqlite3", "redis"}}
+
+
+def test_two_threads_never_leave_the_memo_on_an_older_read(monkeypatch):
+    """Two tabs' worker threads read one view: the first reads the OLD payload
+    and stalls, the view moves, the second reads the new one. Unlocked, the
+    second probes while the first is mid-read and the first then stores its
+    older version and payload over the second's; locked, the second waits."""
+    import threading
+
+    import bus_client
+    from pages.options import checks_feed
+
+    monkeypatch.setattr(checks_feed, "_memos", {v: {} for v in checks_feed._memos})
+    view = checks_feed.CAPS_VIEW
+    store = {"ver": 1, "payload": {"n": 1}}
+    first_reading, release, second_probed = (threading.Event(), threading.Event(),
+                                             threading.Event())
+
+    def read_version(_view):
+        if threading.current_thread().name == "second":
+            second_probed.set()
+        return store["ver"]
+
+    def read(_view):
+        payload = dict(store["payload"])
+        if threading.current_thread().name == "first":
+            first_reading.set()
+            release.wait(5)
+        return payload
+
+    monkeypatch.setattr(bus_client, "read_version", read_version)
+    monkeypatch.setattr(bus_client, "read", read)
+    got = {}
+    first = threading.Thread(name="first", target=lambda: got.__setitem__(
+        "first", checks_feed._gated(view)))
+    second = threading.Thread(name="second", target=lambda: got.__setitem__(
+        "second", checks_feed._gated(view)))
+    first.start()
+    assert first_reading.wait(5)
+    store.update(ver=2, payload={"n": 2})               # the service republishes
+    second.start()
+    assert not second_probed.wait(0.3)                  # held off while first reads
+    release.set()
+    first.join(5)
+    second.join(5)
+    assert got == {"first": {"n": 1}, "second": {"n": 2}}
+    memo = checks_feed._memos[view]
+    assert (memo["ver"], memo["payload"]) == (2, {"n": 2})
+
+
+def test_each_view_has_its_own_lock():
+    from pages.options import checks_feed
+    assert set(checks_feed._locks) == set(checks_feed._memos)
+    assert len({id(lock) for lock in checks_feed._locks.values()}) == len(checks_feed._locks)

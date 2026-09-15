@@ -5,6 +5,10 @@ No widget library and no page module: the Finder must not import the scanner
 PAGE for these, and two tables wording or filtering one verdict differently
 would be a defect, not a style difference. ``checks`` / ``checks_feed`` are
 imported lazily inside the functions, as they were in ``scanner.py``.
+
+Everything here is pure except the two ``read_and_restamp*`` wrappers at the
+bottom, which read the live context through ``checks_feed`` (Redis) and so
+BLOCK: a page calls them through ``run.io_bound``, never on the event loop.
 """
 
 
@@ -95,6 +99,10 @@ def only_clear_empty_label(full_rows, shown_rows, *, filtering):
     if not filtering or not full_rows or shown_rows:
         return None
     n = len(full_rows)
+    # A page that has not read the checklist's context yet leaves rows unstamped
+    # (a dash, not a verdict), so no row has been judged at all.
+    if all("_checks_state" not in r for r in full_rows):
+        return f"The checks haven't loaded yet — turn off Only clear to see all {n}."
     if all(r.get("_checks_state") == "muted" for r in full_rows):
         return ("Every row is only partly checked — a feed the checks read hasn't "
                 f"loaded. Turn off Only clear to see all {n}.")
@@ -118,12 +126,21 @@ def restamp(rows_by_key, sigs_by_key, ctx, build=None, memo=None):
     return out
 
 
-def read_and_restamp(rows, signals):
-    """``(ctx, copies, memo)``: read the checklist's live context, then re-stamp
-    SHALLOW COPIES of one table's ``rows`` against it, filling a fresh memo.
-    **Blocking** (a Redis read) - go through ``run.io_bound``."""
+def read_and_restamp_tables(rows_by_key, sigs_by_key):
+    """``(ctx, {key: copies}, memo)``: read the checklist's live context ONCE, then
+    :func:`restamp` every table against it, filling a fresh memo.
+
+    NOT pure - the one Redis read in this module. **Blocking** - go through
+    ``run.io_bound``. The Market Scanner's three tables share one read, so a
+    re-stamp can never show two tables stamped against different contexts."""
     from . import checks_feed
     ctx = checks_feed.read_context()
     memo = {}
-    fresh = restamp({"rows": rows}, {"rows": signals}, ctx, memo=memo)["rows"]
-    return ctx, fresh, memo
+    return ctx, restamp(rows_by_key, sigs_by_key, ctx, memo=memo), memo
+
+
+def read_and_restamp(rows, signals):
+    """``(ctx, copies, memo)`` for ONE table - :func:`read_and_restamp_tables`
+    over a single list. NOT pure; **blocking** - go through ``run.io_bound``."""
+    ctx, out, memo = read_and_restamp_tables({"rows": rows}, {"rows": signals})
+    return ctx, out["rows"], memo

@@ -101,3 +101,24 @@ def test_read_and_restamp_reads_the_context_off_the_loop_and_returns_copies(monk
     assert fresh[0] is not rows[0] and fresh[0]["_checks_state"] == "warn"
     assert fresh[0]["_new"] is True
     assert memo["a"]["_checks_state"] == "warn"
+
+
+def test_the_empty_label_before_any_row_was_checked_says_the_checks_are_loading():
+    rows = [{"id": "a"}, {"id": "b"}]
+    assert ct.only_clear_empty_label(rows, [], filtering=True) == (
+        "The checks haven't loaded yet — turn off Only clear to see all 2.")
+    assert ct.only_clear(rows) == []                     # still fails closed
+
+
+def test_the_scanner_restamps_through_the_shared_reader(monkeypatch):
+    from pages.options import scanner
+    seen = {}
+
+    def shared(rows_by_key, sigs_by_key):
+        seen["args"] = (rows_by_key, sigs_by_key)
+        return "CTX", {"signals_swing": ["copy"]}, {}
+
+    monkeypatch.setattr(ct, "read_and_restamp_tables", shared)
+    assert scanner._read_and_restamp({"signals_swing": ["row"]}, {"signals_swing": []}) == {
+        "signals_swing": ["copy"]}
+    assert seen["args"] == ({"signals_swing": ["row"]}, {"signals_swing": []})

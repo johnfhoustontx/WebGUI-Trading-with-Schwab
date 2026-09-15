@@ -1243,3 +1243,24 @@ def test_only_clear_counts_add_nothing_when_nothing_is_hidden():
     assert fv.only_clear_counts("Scan failed", 0, 0, filtering=True) == "Scan failed"
     assert fv.only_clear_counts("1 idea", 1, 0, filtering=True) == (
         "1 idea · 0 of 1 shown · 1 hidden by Only clear")
+
+
+def test_only_clear_counts_sit_before_the_scanned_part_beside_change():
+    """"Scanned N of M · <choice>" stays LAST, beside the Change link it explains."""
+    base = fv.summary_facts({"symbol": "$SPX", "spot": 6512.25,
+                             "signals": [{"id": "a"}] * 19, "needs_choice": False,
+                             "expiration_count": 56, "expirations_scanned": 19,
+                             "choices": _CHOICES, "expiry_choice": "monthly"})["counts"]
+    assert base == "19 ideas · Scanned 19 of 56 expirations · Monthlies only"
+    assert fv.only_clear_counts(base, 19, 3, filtering=True) == (
+        "19 ideas · 3 of 19 shown · 16 hidden by Only clear · "
+        "Scanned 19 of 56 expirations · Monthlies only")
+    assert fv.only_clear_counts(base, 19, 3, filtering=False) == base
+
+
+def test_only_clear_counts_under_a_chip_count_the_chosen_strategies_not_the_scan():
+    base = "40 ideas · 2 below the quality bar"
+    assert fv.only_clear_counts(base, 20, 3, filtering=True, chip_filtered=True) == (
+        "40 ideas · 2 below the quality bar · 3 of 20 in the chosen strategies shown · "
+        "17 hidden by Only clear")
+    assert fv.only_clear_counts(base, 20, 20, filtering=True, chip_filtered=True) == base

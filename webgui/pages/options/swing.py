@@ -672,7 +672,7 @@ def render():
         if counts_line["label"] is not None:
             counts_line["label"].text = fv.only_clear_counts(
                 counts_line["base"], len(state["all_rows"]), len(state["rows"]),
-                filtering=filtering)
+                filtering=filtering, chip_filtered=state["active"] is not None)
 
     def _adopt(rows, sigs):
         state["all_rows"], state["sigs"] = rows, sigs
@@ -683,9 +683,13 @@ def render():
         """A new list - a scan's answer or a chip change - starts on page 1, in
         the sort the reader last chose. Each row is stamped with the checklist
         from the last context read (no Redis read here, on the loop), its own
-        ``_allow_paper`` handed across by ``stamp_checks``."""
+        ``_allow_paper`` handed across by ``stamp_checks``. Before the page's
+        first read nothing is stamped: the cell shows its dash and Only clear
+        hides the row, where stamping against no context would print "Partly
+        checked" on every row until the tick's read landed."""
         rows, sigs = list_rows(signals)
-        ct.stamp_checks(rows, sigs, checks["ctx"], memo=checks["memo"])
+        if checks["ctx"] is not None:
+            ct.stamp_checks(rows, sigs, checks["ctx"], memo=checks["memo"])
         state["gen"] += 1
         _adopt(rows, sigs)
         _show_page({**table.pagination, "page": 1})
@@ -1076,7 +1080,9 @@ def render():
 
     @guard_async
     async def _checks_tick():
-        if not checks["due"] or checks["busy"]:
+        # An empty list has nothing to stamp, so no read; ``due`` stays set for
+        # the list that comes next.
+        if not checks["due"] or checks["busy"] or not state["all_rows"]:
             return
         checks["due"] = False
         await _restamp()
