@@ -33,12 +33,13 @@ to bring its own anchor — this panel no longer provides one.
 """
 import re
 
-from nicegui import ui
+from nicegui import background_tasks, core, run, ui
 
 import bus_client
 
 from ..fmt import num
-from . import ev, svg
+from ..ui_guard import is_deleted_error
+from . import checks, checks_feed, ev, svg
 from .theme import (TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL,
                     TILE_3D, CARD, EYEBROW, MUTED)
 
@@ -89,6 +90,10 @@ _SWING_FACTOR_LABELS = [
 ]
 
 _PLACEHOLDER = "Select a signal to view details…"
+
+# The checklist's line while the context it needs is still being read - never a
+# verdict, which would claim a check that has not run.
+CHECKING_TEXT = "Checking…"
 
 
 def pop_color(pop):
@@ -724,6 +729,49 @@ def _calibration():
         return {}
 
 
+# ── the checklist (design 2026-09-15) ────────────────────────────────────
+
+
+def checklist_candidate(signal, allow_paper):
+    """The dict the checklist reads for a CANDIDATE: the RAW signal the table
+    stamped its chip from, plus that row's Paper gate - exactly what
+    ``checks_table.stamp_checks`` hands ``checks_for``, so the panel and the
+    table's chip judge the same thing. Not the ``detail_signal`` copy the panel
+    displays, which rescales per-contract dollars. ``None`` for a non-dict.
+
+    Only a page offering the trade to be OPENED builds one. A page showing a
+    position already held passes none, and the panel then shows no checklist:
+    whether to open a trade is the wrong question about one you hold."""
+    if not isinstance(signal, dict):
+        return None
+    return {**signal, "_allow_paper": allow_paper}
+
+
+def checklist_view(items):
+    """PURE: ``{"summary": {state, text, class}, "lines": [{label, text, class}]}``
+    for :func:`checks.build_checks` items, or ``None`` when there are none. An
+    unknown tone reads grey."""
+    items = [c for c in (items or []) if isinstance(c, dict)]
+    if not items:
+        return None
+    muted = checks.TONE_CLASS["muted"]
+    return {"summary": checks.summary(items),
+            "lines": [{"label": c.get("label", ""), "text": c.get("text", ""),
+                       "class": checks.TONE_CLASS.get(c.get("tone"), muted)}
+                      for c in items]}
+
+
+def _spawn(coro):
+    """Run ``coro`` on the app's event loop in the background (a seam for tests).
+
+    With no app loop (the app is not running) nothing could paint the result, so
+    the coroutine is closed unstarted and the line stays Checking."""
+    if core.loop is None:
+        coro.close()
+        return
+    background_tasks.create(coro, name="detail checklist")
+
+
 def _signal_title(s):
     return " · ".join(x for x in (s.get("symbol", ""), s.get("type", ""),
                                   s.get("trade_type", "")) if x) or "Signal"
@@ -857,6 +905,12 @@ class _Handle:
         self._flag_box = flag_box    # rebuilt per selection; empty when clean
         self._flag_badge = flag_badge  # floats on the toggle; survives collapse
         self._body = body            # cleared + rebuilt per selection
+        # The checklist: the candidate it judges (None on a position page, or
+        # before a selection), the box it paints into (top of the body), and a
+        # sequence number that drops an off-loop read answering an older paint.
+        self._candidate = None
+        self._checks_box = None
+        self._checks_seq = 0
 
     # Open / collapse from the page. The panel opens by default (three pages mount
     # it that way); the Strategy Finder collapses it at build and opens it on the
@@ -877,6 +931,64 @@ class _Handle:
         if self.is_open and self._set_open:
             self._set_open(False)
 
+    @property
+    def checklist_id(self):
+        """The id of the candidate the checklist judges, or None when none shows."""
+        return self._candidate.get("id") if self._candidate else None
+
+    def refresh_checks(self, ctx, candidate=None):
+        """Repaint ONLY the checklist, against the context the page just re-stamped
+        its rows with - the contract and economics below stay as they are, and any
+        expansion the reader opened stays open. ``candidate`` replaces the judged
+        row when it has the SAME id (a signal whose Paper gate closed as it went
+        stale); any other is ignored. A no-op when no checklist shows."""
+        if self._candidate is None or self._checks_box is None:
+            return
+        if isinstance(candidate, dict) and candidate.get("id") == self._candidate.get("id"):
+            self._candidate = candidate
+        self._paint_checks(ctx)
+
+    def _paint_checks(self, ctx):
+        """Paint from ``ctx`` when the page holds one. Otherwise say Checking and
+        read it OFF the loop: the context read blocks on per-view locks around a
+        Redis round-trip, so it never runs on the event loop."""
+        self._checks_seq += 1
+        if isinstance(ctx, dict):
+            self._render_checks(checks_feed.checks_for(self._candidate, ctx))
+            return
+        self._render_checking()
+        _spawn(self._load_checks(self._checks_seq))
+
+    async def _load_checks(self, seq):
+        ctx = await run.io_bound(checks_feed.read_context)
+        # A newer paint, a clear or another selection since: this read is not theirs.
+        if seq != self._checks_seq or self._candidate is None or not isinstance(ctx, dict):
+            return
+        try:
+            self._render_checks(checks_feed.checks_for(self._candidate, ctx))
+        except RuntimeError as exc:     # the tab went away while it read
+            if not is_deleted_error(exc):
+                raise
+
+    def _render_checking(self):
+        self._checks_box.clear()
+        with self._checks_box:
+            ui.label(CHECKING_TEXT).classes(f"text-sm {MUTED}")
+
+    def _render_checks(self, items):
+        view = checklist_view(items)
+        self._checks_box.clear()
+        with self._checks_box:
+            if view is None:
+                ui.label(CHECKING_TEXT).classes(f"text-sm {MUTED}")
+                return
+            chip = view["summary"]
+            ui.label(chip["text"]).classes(f"text-sm font-bold {chip['class']}")
+            for line in view["lines"]:
+                with ui.row().classes("w-full no-wrap gap-2 items-start"):
+                    ui.label(line["label"]).classes(f"text-xs w-24 shrink-0 {MUTED}")
+                    ui.label(line["text"]).classes(f"text-xs {line['class']}")
+
     def _set_flag_badge(self, n):
         txt = flag_badge_text(n)
         self._flag_badge.text = txt
@@ -884,6 +996,8 @@ class _Handle:
 
     def clear(self):
         self._state["has_signal"] = False
+        self._candidate, self._checks_box = None, None
+        self._checks_seq += 1
         self._header.set_visibility(False)
         self._flag_box.clear()
         self._set_flag_badge(0)
@@ -891,7 +1005,11 @@ class _Handle:
         with self._body:
             ui.label(_PLACEHOLDER).classes("opacity-60")
 
-    def update(self, signal):
+    def update(self, signal, *, candidate=None, ctx=None):
+        """Show ``signal``. ``candidate`` (from :func:`checklist_candidate`) opts
+        in to the Go/No-Go checklist at the top, judged against ``ctx`` - the
+        context the page last stamped its rows with; without one the panel reads
+        it off the loop. No candidate, no checklist."""
         if not signal:
             self.clear()
             return
@@ -920,9 +1038,17 @@ class _Handle:
                     f"text-xs {flag_class(f['state'])}")
         self._set_flag_badge(len(flags))
 
+        self._candidate = candidate if isinstance(candidate, dict) else None
+        self._checks_box = None
+        self._checks_seq += 1
         self._body.clear()
         with self._body:
+            # 0 - THE CHECKLIST, above the contract: what this trade has to clear.
+            if self._candidate is not None:
+                self._checks_box = ui.column().classes(f"w-full gap-1 {CARD}")
             _build_cards(s)
+        if self._candidate is not None:
+            self._paint_checks(ctx)
 
 
 def render(width: int = 360):

@@ -467,12 +467,33 @@ def repaint_action(moved, *, timer=False, matrix_moved=False):
     return "skip"
 
 
-def _read_and_restamp(rows_by_key, sigs_by_key):
+def _read_and_restamp(rows_by_key, sigs_by_key, ctx_out=None):
     """Read the checklist's live context and re-stamp copies of the painted rows,
     through the reader the Strategy Finder shares. **Blocking** — go through
-    ``run.io_bound``."""
+    ``run.io_bound``.
+
+    ``ctx_out`` (a dict) receives the context under ``"ctx"``, so the page can
+    hand the Trade detail panel the SAME context the rows were stamped against
+    rather than the panel reading its own."""
     from . import checks_table
-    return checks_table.read_and_restamp_tables(rows_by_key, sigs_by_key)[1]
+    ctx, out, _memo = checks_table.read_and_restamp_tables(rows_by_key, sigs_by_key)
+    if isinstance(ctx_out, dict):
+        ctx_out["ctx"] = ctx
+    return out
+
+
+def checklist_candidate_for(row_id, by_id, painted):
+    """The Trade detail panel's checklist candidate for a clicked id: the raw
+    signal plus the PAINTED row's ``_allow_paper`` - the gate ``stamp_stale``
+    settled and the table's chip was judged with (a stale row's is closed). Read
+    from the server's own rows, never the browser's copy. ``None`` for an id with
+    no signal; a signal with no painted row yet hands no gate across."""
+    sig = (by_id or {}).get(row_id)
+    if not isinstance(sig, dict):
+        return None
+    row = next((r for rows in (painted or {}).values() for r in rows or []
+                if r.get("id") == row_id), None)
+    return detail.checklist_candidate(sig, (row or {}).get("_allow_paper"))
 
 
 def _short_time(iso):
@@ -583,7 +604,8 @@ def _build_populate(day_env, live, ctx=None):
         stamp_stale(rows[key], sigs[key])
         stamp_checks(rows[key], sigs[key], ctx)
     return {"today": today, "sigs": sigs, "by_id": by_id, "rows": rows,
-            "have": day_is_today(day_env, today), "day_env": day_env, "live": live}
+            "have": day_is_today(day_env, today), "day_env": day_env, "live": live,
+            "ctx": ctx}
 
 
 def _read_and_build():
@@ -719,15 +741,22 @@ def render():
     # Shared by the deferred first read + the 2 s poll so the two big
     # off-loop reads can never stack (the gamma.py precedent).
     state = {"fetching": False}
+    # The checklist context the painted rows were last stamped against (None
+    # until the first off-loop read lands), handed to the Trade detail panel so
+    # its checklist and the row's chip judge against the same read.
+    checks_ctx = {"ctx": None}
 
     def _clicked(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
         return by_id.get(row.get("id")) if isinstance(row, dict) else None
 
+    def _candidate(sig):
+        return checklist_candidate_for(sig.get("id"), by_id, painted)
+
     def _select(event):
         sig = _clicked(event)
         if sig:
-            detail_panel.update(sig)
+            detail_panel.update(sig, candidate=_candidate(sig), ctx=checks_ctx["ctx"])
 
     def _select_dir(event):
         # The normalized multi-leg shape needs the shared adapter (net_credit →
@@ -735,7 +764,16 @@ def render():
         from . import strategy_table
         sig = _clicked(event)
         if sig:
-            detail_panel.update(strategy_table.detail_signal(sig))
+            detail_panel.update(strategy_table.detail_signal(sig),
+                                candidate=_candidate(sig), ctx=checks_ctx["ctx"])
+
+    def _refresh_detail_checks():
+        """After a rebuild or re-stamp, repaint the open checklist against the new
+        context, with the candidate's gate as the rows now carry it."""
+        cur = detail_panel.checklist_id
+        if cur is not None:
+            detail_panel.refresh_checks(
+                checks_ctx["ctx"], candidate=checklist_candidate_for(cur, by_id, painted))
 
     for _t in (table_0dte, table_swing):
         _t.on("rowClick", _select)
@@ -835,6 +873,9 @@ def render():
         # or while a stale-dated envelope is gated out. _paint_tables writes them.
         counts["have"] = built["have"]
         _paint_tables()
+        if built.get("ctx") is not None:
+            checks_ctx["ctx"] = built["ctx"]
+        _refresh_detail_checks()
 
         scan_busy.hide()
         status.text = status_line(live)
@@ -887,12 +928,17 @@ def render():
         if state["fetching"]:
             return
         state["fetching"] = True
+        holder = {}
         try:
-            fresh = await run.io_bound(_read_and_restamp, dict(painted), dict(painted_sigs))
+            fresh = await run.io_bound(_read_and_restamp, dict(painted), dict(painted_sigs),
+                                       holder)
         finally:
             state["fetching"] = False
         painted.update(fresh)
         _paint_tables()
+        if holder.get("ctx") is not None:
+            checks_ctx["ctx"] = holder["ctx"]
+        _refresh_detail_checks()
 
     @guard_async
     async def _maybe_repaint():

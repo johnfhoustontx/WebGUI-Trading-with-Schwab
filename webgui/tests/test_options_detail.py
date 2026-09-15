@@ -762,3 +762,300 @@ def test_toggling_the_panel_keeps_exactly_one_tooltip():
     assert len(tips()) == 1 and tips()[0].text == "Expand panel"
     h.open()
     assert len(tips()) == 1 and tips()[0].text == "Collapse panel"
+
+
+# ── the checklist at the top of the panel (design 2026-09-15) ────────────────
+_LIMITS = {"max_positions_per_symbol": 3, "max_risk_per_symbol": 750.0,
+           "max_positions_per_expiry": 5, "max_positions_per_sector": 5,
+           "max_risk_per_sector": 1500.0, "max_deployed_risk_pct": 0.2,
+           "max_risk_per_trade": 250.0}
+_CAPS = {"limits": _LIMITS, "equity": 25000.0, "open": [], "sectors": {"ORCL": "IT"},
+         "unmapped_prefix": "?"}
+_BOARD = {"symbol": "ORCL", "spot": 110.0, "put_wall": 102.0, "call_wall": 120.0,
+          "gex_regime": "above", "trend_dir": 0.4, "trend_state": "up"}
+_CTX = {"matrix": {"ORCL": _BOARD}, "regime": {"direction": 1},
+        "calibration": {"by_bucket": {}}, "caps": _CAPS}
+_COLD = {"matrix": None, "regime": None, "calibration": None, "caps": None}
+
+
+def _scanner_pcs(**over):
+    """A stamped Market Scanner PCS signal, as the options service publishes it."""
+    sig = {"id": "ORCL_PCS_2026-10-17_100_97.5", "symbol": "ORCL", "type": "PCS",
+           "trade_type": "SWING", "expiration": "2026-10-17", "dte": 12,
+           "short_strike": 100.0, "long_strike": 97.5, "width": 2.5,
+           "credit": 0.60, "max_loss": 1.90, "pop_pct": 72.0,
+           "iv_rank": 55.0, "iv_rank_known": True, "vol_floor": 30,
+           "friction_pct": 8.0, "em_to_expiry": 6.0,
+           "earnings_status": "none_scheduled", "earnings_date": None,
+           "ledger_risk_per_contract": 190.0, "ledger_risk_basis": {"per_contract": 190.0},
+           "underlying_price": 110.0, "composite_score": 70, "grade": "Good"}
+    sig.update(over)
+    return sig
+
+
+def _finder_pcs(**over):
+    """A stamped Strategy Finder PCS: normalized legs, per-contract dollars and a
+    ``fit_score`` (which is what omits the track-record line)."""
+    sig = {"id": "f1", "symbol": "ORCL", "type": "PCS", "group": "SPREADS",
+           "expiration": "2026-10-17", "dte": 32, "fit_score": 64.0,
+           "legs": [{"side": "short", "kind": "put", "strike": 100.0, "qty": 1},
+                    {"side": "long", "kind": "put", "strike": 97.5, "qty": 1}],
+           "net_credit": 60.0, "max_profit": 60.0, "max_loss": 190.0, "net_vega": -0.2,
+           "iv_rank": 55.0, "iv_rank_known": True, "vol_floor": 30,
+           "friction_pct": 8.0, "em_to_expiry": 6.0,
+           "earnings_status": "none_scheduled", "earnings_date": None,
+           "ledger_risk_per_contract": 190.0, "ledger_risk_basis": {"per_contract": 190.0},
+           "underlying_price": 110.0, "composite_score": 70, "grade": "Good"}
+    sig.update(over)
+    return sig
+
+
+def test_checklist_candidate_hands_the_rows_paper_gate_across_without_mutating():
+    sig = _scanner_pcs()
+    cand = detail.checklist_candidate(sig, True)
+    assert cand["_allow_paper"] is True and cand["id"] == sig["id"]
+    assert "_allow_paper" not in sig
+    assert detail.checklist_candidate(None, True) is None
+
+
+def test_checks_for_a_stamped_scanner_row_runs_every_check_in_order():
+    from pages.options import checks_feed
+    items = checks_feed.checks_for(detail.checklist_candidate(_scanner_pcs(), True), _CTX)
+    assert [c["key"] for c in items] == ["book", "earnings", "vol", "cost", "em",
+                                         "wall", "gamma", "direction", "record"]
+
+
+def test_checks_for_a_stamped_finder_row_has_no_record_line():
+    from pages.options import checks_feed, strategy_table
+    sig = _finder_pcs()
+    items = checks_feed.checks_for(
+        detail.checklist_candidate(sig, sig["type"] in strategy_table._PAPER_TYPES), _CTX)
+    assert [c["key"] for c in items] == ["book", "earnings", "vol", "cost", "em",
+                                         "wall", "gamma", "direction"]
+
+
+def test_the_finder_detail_signal_keeps_the_checklist_stamps():
+    from pages.options import strategy_table
+    out = strategy_table.detail_signal(_finder_pcs())
+    for key in ("fit_score", "ledger_risk_basis", "ledger_risk_per_contract",
+                "friction_pct", "em_to_expiry", "earnings_status", "vol_floor"):
+        assert out[key] == _finder_pcs()[key]
+
+
+def test_checklist_view_is_the_summary_then_one_line_per_check():
+    from pages.options import checks
+    items = [{"key": "book", "label": "Paper book", "tone": "pos", "text": "Fits"},
+             {"key": "cost", "label": "Bid-ask", "tone": "muted", "text": "Not measured"}]
+    view = detail.checklist_view(items)
+    assert view["summary"] == checks.summary(items)
+    assert view["lines"] == [
+        {"label": "Paper book", "text": "Fits", "class": checks.TONE_CLASS["pos"]},
+        {"label": "Bid-ask", "text": "Not measured", "class": checks.TONE_CLASS["muted"]}]
+    assert detail.checklist_view([]) is None
+    # An unknown tone reads grey rather than raising on a repaint.
+    odd = detail.checklist_view([{"label": "X", "text": "y", "tone": "??"}])
+    assert odd["lines"][0]["class"] == checks.TONE_CLASS["muted"]
+
+
+def _no_loop_reads(monkeypatch):
+    """The panel must never read the context on the event loop: fail if it tries."""
+    from pages.options import checks_feed
+
+    def boom():
+        raise AssertionError("read_context called on the event loop")
+    monkeypatch.setattr(checks_feed, "read_context", boom)
+
+
+def _capture_spawn(monkeypatch):
+    spawned = []
+    monkeypatch.setattr(detail, "_spawn", lambda coro: spawned.append(coro))
+    return spawned
+
+
+def _texts(card):
+    from nicegui import ui
+    return [e.text for e in card.descendants() if isinstance(e, ui.label)]
+
+
+def _verdicts(texts):
+    return [t for t in texts
+            if t.startswith(("Partly checked", "Clear", "Blocked", "unchecked"))
+            or t.endswith(("caution", "cautions"))]
+
+
+def test_a_candidate_with_the_pages_context_shows_the_list_above_the_contract(monkeypatch):
+    from nicegui import ui
+    from pages.options import checks
+    _no_loop_reads(monkeypatch)
+    with ui.card() as card:
+        h = detail.render()
+    sig = _scanner_pcs()
+    h.update(sig, candidate=detail.checklist_candidate(sig, True), ctx=_CTX)
+    texts = _texts(card)
+    assert h.checklist_id == sig["id"]
+    (verdict,) = _verdicts(texts)
+    assert verdict.startswith("Clear")
+    for key in checks.ORDER:
+        assert checks.LABELS[key] in texts
+    assert texts.index(verdict) < texts.index(detail.contract_lines(sig)[0])
+
+
+def test_a_cold_context_shows_a_partly_checked_list_with_every_line(monkeypatch):
+    """All views None: the summary cannot read Clear, and a grey line still shows."""
+    from nicegui import ui
+    _no_loop_reads(monkeypatch)
+    with ui.card() as card:
+        h = detail.render()
+    sig = _scanner_pcs()
+    h.update(sig, candidate=detail.checklist_candidate(sig, True), ctx=_COLD)
+    texts = _texts(card)
+    (verdict,) = _verdicts(texts)
+    assert verdict.startswith("Partly checked")
+    for label in ("Paper book", "Earnings", "Walls", "Dealer gamma"):
+        assert label in texts
+
+
+def test_no_held_context_says_checking_then_paints_from_an_off_loop_read(monkeypatch):
+    """A page with no context yet: never a verdict and never a read on the loop.
+    The read goes through run.io_bound and the list paints when it lands."""
+    import asyncio
+    from nicegui import run, ui
+    from pages.options import checks_feed
+    _no_loop_reads(monkeypatch)
+    spawned = _capture_spawn(monkeypatch)
+    with ui.card() as card:
+        h = detail.render()
+    sig = _scanner_pcs()
+    h.update(sig, candidate=detail.checklist_candidate(sig, True))
+    texts = _texts(card)
+    assert detail.CHECKING_TEXT in texts and not _verdicts(texts)
+    assert len(spawned) == 1
+
+    off_loop = []
+
+    async def fake_io_bound(fn, *args, **kwargs):
+        off_loop.append(fn)
+        return _CTX
+    monkeypatch.setattr(run, "io_bound", fake_io_bound)
+    asyncio.run(spawned[0])
+    assert off_loop == [checks_feed.read_context]
+    texts = _texts(card)
+    assert detail.CHECKING_TEXT not in texts
+    assert _verdicts(texts)[0].startswith("Clear")
+
+
+def test_an_off_loop_read_for_an_old_selection_is_dropped(monkeypatch):
+    import asyncio
+    from nicegui import run, ui
+    _no_loop_reads(monkeypatch)
+    spawned = _capture_spawn(monkeypatch)
+    with ui.card() as card:
+        h = detail.render()
+    sig = _scanner_pcs()
+    h.update(sig, candidate=detail.checklist_candidate(sig, True))
+    # The reader picks another row, with the page's context, before the read lands.
+    other = _scanner_pcs(id="other")
+    h.update(other, candidate=detail.checklist_candidate(other, False), ctx=_COLD)
+
+    async def fake_io_bound(fn, *args, **kwargs):
+        return _CTX
+    monkeypatch.setattr(run, "io_bound", fake_io_bound)
+    asyncio.run(spawned[0])
+    texts = _texts(card)
+    (verdict,) = _verdicts(texts)
+    assert verdict.startswith("Partly checked") and "Paper book" not in texts
+
+
+def test_no_candidate_means_no_checklist(monkeypatch):
+    """A position already held (Paper Ledger, Captured Signals) is not a Go/No-Go
+    decision: without an explicit candidate the panel shows no checklist."""
+    from nicegui import ui
+    from pages.options import checks
+    _no_loop_reads(monkeypatch)
+    spawned = _capture_spawn(monkeypatch)
+    with ui.card() as card:
+        h = detail.render()
+    h.update(_scanner_pcs())
+    texts = _texts(card)
+    assert not _verdicts(texts) and detail.CHECKING_TEXT not in texts
+    assert not set(checks.LABELS.values()) & set(texts)
+    assert h.checklist_id is None and spawned == []
+
+
+def test_refresh_repaints_the_list_in_place_against_the_pages_new_context(monkeypatch):
+    from nicegui import ui
+    _no_loop_reads(monkeypatch)
+    with ui.card() as card:
+        h = detail.render()
+    sig = _scanner_pcs()
+    h.update(sig, candidate=detail.checklist_candidate(sig, True), ctx=_CTX)
+    assert _verdicts(_texts(card))[0].startswith("Clear")
+    h.refresh_checks({**_CTX, "matrix": None})       # the board went cold
+    texts = _texts(card)
+    (verdict,) = _verdicts(texts)
+    assert verdict.startswith("Partly checked")
+    assert detail.contract_lines(sig)[0] in texts      # the rest was not rebuilt
+
+
+def test_refresh_takes_a_fresh_candidate_for_the_same_id_only(monkeypatch):
+    from nicegui import ui
+    _no_loop_reads(monkeypatch)
+    with ui.card() as card:
+        h = detail.render()
+    sig = _scanner_pcs()
+    h.update(sig, candidate=detail.checklist_candidate(sig, True), ctx=_CTX)
+    assert "Paper book" in _texts(card)
+    # The signal went stale: its Paper gate closed, so the book line goes.
+    h.refresh_checks(_CTX, candidate=detail.checklist_candidate(sig, False))
+    assert "Paper book" not in _texts(card)
+    # Another id's candidate is not this panel's: ignored.
+    h.refresh_checks(_CTX, candidate=detail.checklist_candidate(_scanner_pcs(id="x"), True))
+    assert "Paper book" not in _texts(card)
+
+
+def test_refresh_without_a_candidate_is_a_no_op_and_clear_forgets_it(monkeypatch):
+    from nicegui import ui
+    _no_loop_reads(monkeypatch)
+    spawned = _capture_spawn(monkeypatch)
+    with ui.card() as card:
+        h = detail.render()
+    h.refresh_checks(_CTX)                       # nothing selected - nothing built
+    assert "Paper book" not in _texts(card)
+    sig = _scanner_pcs()
+    h.update(sig, candidate=detail.checklist_candidate(sig, True), ctx=_CTX)
+    h.clear()
+    assert h.checklist_id is None
+    h.refresh_checks(_CTX)
+    h.refresh_checks(None)
+    assert "Paper book" not in _texts(card) and spawned == []
+
+
+def test_the_position_pages_never_hand_the_panel_a_candidate():
+    import inspect
+    from pages.options import captured, paper
+    for mod in (captured, paper):
+        src = inspect.getsource(mod)
+        assert "detail_panel.update(" in src
+        assert "candidate=" not in src and "refresh_checks" not in src
+
+
+def test_the_panel_never_reads_the_context_on_the_loop_at_source_level():
+    import inspect
+    src = inspect.getsource(detail)
+    assert "run.io_bound(checks_feed.read_context)" in src
+    assert src.count("read_context") == src.count("run.io_bound(checks_feed.read_context)")
+
+
+def test_spawn_without_a_running_app_loop_closes_the_read_instead_of_raising(monkeypatch):
+    """No NiceGUI loop (the app is not running): nothing could paint the result,
+    so the read is dropped and the line stays Checking - never a raise out of a
+    row click."""
+    from nicegui import core
+    monkeypatch.setattr(core, "loop", None)
+    ran = []
+
+    async def read():
+        ran.append(True)
+    coro = read()
+    detail._spawn(coro)
+    assert ran == [] and coro.cr_frame is None      # closed, never started

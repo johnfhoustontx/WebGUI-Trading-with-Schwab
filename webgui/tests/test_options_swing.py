@@ -1859,3 +1859,36 @@ def test_a_chosen_answer_landing_mid_restamp_wins(monkeypatch):
     assert any("Everything" in e.text for e in _widgets(card, ui.label))
     _run_checks_tick(card)
     assert [r["id"] for r in table.rows] == ["p003"]
+
+
+def test_a_finder_selection_hands_the_panel_its_paper_gate_so_the_book_line_shows(monkeypatch):
+    """The Finder holds no context until its first re-stamp lands, so the panel
+    reads one OFF the loop (run.io_bound, faked here and run at once)."""
+    import asyncio
+    from nicegui import run, ui
+    from pages.options import checks_feed, detail
+    cold = {"matrix": None, "regime": None, "calibration": None, "caps": None}
+    reads = []
+
+    async def fake_io_bound(fn, *args, **kwargs):
+        reads.append(fn)
+        return cold
+    monkeypatch.setattr(run, "io_bound", fake_io_bound)
+    monkeypatch.setattr(detail, "_spawn", asyncio.run)
+    card = _render_page(_PAYLOAD)
+    _row_click(card, "fly")                          # a butterfly may go to Paper
+    labels = [e.text for e in _widgets(card, ui.label)]
+    assert reads == [checks_feed.read_context]
+    assert "Paper book" in labels
+    assert "unchecked" in labels                      # every view cold: no verdict
+    _row_click(card, "sp")                           # a naked short: analysis only
+    labels = [e.text for e in _widgets(card, ui.label)]
+    assert "Paper book" not in labels and "Earnings" in labels
+
+
+def test_the_finder_hands_its_held_context_and_refreshes_the_open_checklist():
+    import inspect
+    src = inspect.getsource(swing.render)
+    assert 'ctx=checks["ctx"]' in src
+    assert "candidate=" in src
+    assert "detail_panel.refresh_checks(ctx)" in src

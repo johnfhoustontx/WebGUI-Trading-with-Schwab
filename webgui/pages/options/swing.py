@@ -616,7 +616,15 @@ def render():
         # Every selection opens the panel: a click that updated a collapsed panel
         # invisibly would read as a click that did nothing.
         detail_panel.open()
-        detail_panel.update(strategy_table.detail_signal(sig))
+        # The checklist judges the RAW signal with the Paper gate its list row
+        # carries - fixed by structure here (finder_rows' ``paper_types``) - against
+        # the context the list was last stamped with. None before the first read:
+        # the panel then says Checking and reads off the loop.
+        detail_panel.update(
+            strategy_table.detail_signal(sig),
+            candidate=detail.checklist_candidate(
+                sig, sig.get("type") in strategy_table._PAPER_TYPES),
+            ctx=checks["ctx"])
 
     def _on_row_click(event):
         args = event.args
@@ -1069,6 +1077,8 @@ def render():
             return                              # the app is stopping
         ctx, fresh, memo = result
         checks["ctx"] = ctx
+        # An open checklist follows the read, whether or not this list survives it.
+        detail_panel.refresh_checks(ctx)
         if gen != state["gen"]:
             checks["memo"] = {}
             checks["due"] = True

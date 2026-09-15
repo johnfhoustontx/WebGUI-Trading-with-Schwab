@@ -2,8 +2,13 @@
 
 Separate from ``checks`` so that module stays pure. The Opportunity Board view
 updates every minute; the tables re-stamp on the REFRESH_VIEWS changing or a
-5-minute timer (operator decision), while the detail panel and the Paper dialog
-call ``read_context`` on every open.
+5-minute timer (operator decision). The Trade detail panel reuses the context its
+page last stamped the rows with, and reads one itself (off the loop) only when the
+page holds none yet.
+
+⚠ ``read_context`` BLOCKS: each view is read under a per-view lock held across a
+Redis round-trip. Every caller runs it through ``run.io_bound``, never on the
+event loop.
 
 ⚠ ``read_gated`` hands back the SAME payload object to every tab and thread
 until the view's version moves, so every payload here - ``matrix`` (and the
@@ -38,6 +43,9 @@ _locks = {view: threading.Lock() for view in _memos}
 
 
 def _gated(view):
+    """One view's payload through its version-gated memo, or None. **Blocking** -
+    it holds the view's lock across a Redis round-trip; reach it only through
+    :func:`read_context` under ``run.io_bound``."""
     try:
         with _locks[view]:
             payload, _changed = bus_client.read_gated(view, _memos[view])
@@ -66,7 +74,10 @@ def _index_board(board):
 def read_context():
     """Every view as it is, and None when it is cold - never an empty stand-in:
     ``checks`` marks a None input as a missing view, which keeps the summary out
-    of "Clear" (an empty dict would let it read Clear with a check missing)."""
+    of "Clear" (an empty dict would let it read Clear with a check missing).
+
+    **Blocking** (four locked Redis reads): call it through ``run.io_bound``,
+    never on the event loop."""
     return {"matrix": _index_board(_gated(MATRIX_VIEW)), "regime": _gated(REGIME_VIEW),
             "calibration": _gated(CALIBRATION_VIEW), "caps": _gated(CAPS_VIEW)}
 

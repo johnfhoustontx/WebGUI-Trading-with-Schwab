@@ -368,3 +368,45 @@ def test_the_checks_slot_shows_the_short_chip_with_the_full_text_in_a_tooltip():
     assert "props.row._checks_short" in scanner._CHECKS_SLOT
     assert "<q-tooltip" in scanner._CHECKS_SLOT
     assert "{{ props.value }}" in scanner._CHECKS_SLOT
+
+
+# ── the Trade detail panel's checklist ───────────────────────────────────────
+def test_checklist_candidate_for_takes_the_painted_rows_paper_gate():
+    live = _pcs_signal()
+    stale = _pcs_signal(id="old", live=False, stale_since="2026-07-16T11:00:00")
+    painted = {"signals_swing": _stamped(live) + _stamped(stale)}
+    by_id = {live["id"]: live, stale["id"]: stale}
+    cand = scanner.checklist_candidate_for(live["id"], by_id, painted)
+    assert cand["_allow_paper"] is True and cand["id"] == live["id"]
+    assert "book" in {c["key"] for c in checks_feed.checks_for(cand, _ctx())}
+    gone = scanner.checklist_candidate_for("old", by_id, painted)
+    assert gone["_allow_paper"] is False
+    assert "book" not in {c["key"] for c in checks_feed.checks_for(gone, _ctx())}
+    assert scanner.checklist_candidate_for("nope", by_id, painted) is None
+    # A signal with no painted row yet has no gate to hand across.
+    assert scanner.checklist_candidate_for(live["id"], by_id, {})["_allow_paper"] is None
+
+
+def test_build_populate_carries_the_context_it_stamped_against():
+    env = {"date": scanner.today_ct(), "signals_0dte": [], "signals_swing": [_pcs_signal()],
+           "signals_directional": []}
+    ctx = _ctx()
+    assert scanner._build_populate(env, {}, ctx)["ctx"] is ctx
+
+
+def test_read_and_restamp_can_hand_back_the_context_it_read(monkeypatch):
+    sig = _pcs_signal()
+    rows = _stamped(sig, _ctx(calibration=None))
+    ctx = _ctx(calibration=_CAL)
+    monkeypatch.setattr(checks_feed, "read_context", lambda: ctx)
+    holder = {}
+    scanner._read_and_restamp({"signals_swing": rows}, {"signals_swing": [sig]}, holder)
+    assert holder["ctx"] is ctx
+
+
+def test_render_hands_the_detail_panel_a_candidate_and_refreshes_it():
+    src = inspect.getsource(scanner.render)
+    assert src.count("candidate=") >= 2          # the signal and directional clicks
+    assert "checklist_candidate_for(" in src
+    assert "detail_panel.refresh_checks(" in src
+    assert "checks_feed.read_context()" not in src
