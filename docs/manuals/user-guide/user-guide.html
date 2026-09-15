@@ -110,7 +110,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#strategy-what-should-i-trade">STRATEGY — what should I trade?</a><ul>
 <li><a href="#calculator">Calculator</a></li>
 <li><a href="#simulator">Simulator</a></li>
-<li><a href="#market-scanner">Market Scanner</a></li>
+<li><a href="#market-scanner">Market Scanner</a><ul>
+<li><a href="#using-the-checklist-to-pick-a-trade">Using the checklist to pick a trade</a></li>
+</ul>
+</li>
 <li><a href="#income">Income</a><ul>
 <li><a href="#opening-one-in-the-paper-account">Opening one in the paper account</a></li>
 </ul>
@@ -1178,12 +1181,81 @@ two-pane layout.</p>
 <li>A table of candidate signals. Columns include Symbol, Type, Expiration, DTE,
   Short/Long strikes, Credit, Max Loss, Risk/Reward %, Probability of Profit %,
   a color-coded <strong>Score</strong> chip, and a letter <strong>Grade</strong>.</li>
+<li>A <strong>Checks</strong> column — the go / no-go checklist's verdict for that row, in one
+  chip (see below).</li>
+<li>An <strong>Only clear</strong> switch beside <strong>Run scan</strong>.</li>
 <li>A plain-English <strong>VIX term</strong> label (for example, <em>"VIX term: Contango (near-term
   calm) · as of 1:32 PM"</em>).</li>
 <li>Brand-new signals get a <strong>NEW</strong> badge.</li>
 </ul>
 <p><strong>Right pane — the detail panel:</strong> click any row to see its full breakdown
-(credit, max loss, DTE, delta, theta, IV rank, and more).</p>
+(credit, max loss, DTE, delta, theta, IV rank, and more) — with the full
+checklist at the top.</p>
+<h3 id="using-the-checklist-to-pick-a-trade">Using the checklist to pick a trade</h3>
+<p>Every candidate row carries a <strong>Checks</strong> chip: the nine checks that trade has to
+clear, boiled down to a few words.</p>
+<table>
+<thead>
+<tr>
+<th>Chip</th>
+<th>What it means</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Clear · 7 of 9</strong></td>
+<td>Nothing to worry about. The count is how many of the checks actually ran — two of nine did not apply to this structure</td>
+<td>Read on</td>
+</tr>
+<tr>
+<td><strong>2 cautions</strong></td>
+<td>Everything ran, and two checks want you to look</td>
+<td>Click the row and read which</td>
+</tr>
+<tr>
+<td><strong>Blocked</strong></td>
+<td>The Paper Ledger would refuse this trade, and the chip says why in short (<em>Blocked · symbol full</em>)</td>
+<td>Trade a smaller size, or a different name</td>
+</tr>
+<tr>
+<td><strong>Partly checked</strong></td>
+<td>Something the checks read has not loaded, so the verdict is incomplete</td>
+<td>Wait a moment, or check <strong>System Status</strong></td>
+</tr>
+<tr>
+<td><strong>—</strong></td>
+<td>The checks have not run on this page yet</td>
+<td>Wait a moment</td>
+</tr>
+</tbody>
+</table>
+<p>Hover a chip for the whole sentence. <strong>Click the row</strong> and the detail panel lists
+all nine, each with a line of its own — <em>Earnings Nov 19, before expiry</em>, <em>Bid-ask
+round trip 18% of the credit</em>, <em>Short 145 put is 0.7 expected moves from the
+price</em>. Two rules are worth knowing:</p>
+<ul>
+<li><strong>A check that does not apply is left out, not shown as passing.</strong> A long call
+  has no short strike, so it gets no expected-move or wall line at all. That is
+  why the count says <em>7 of 9</em> rather than claiming nine passes.</li>
+<li><strong>Only the paper-book line can be red.</strong> Everything the app treats as a hard
+  rule was applied before the row reached the table; the rest are judgment, which
+  is why they are amber and never a refusal.</li>
+</ul>
+<p><strong>Only clear</strong> hides every row that is not fully clear — blocks, cautions, and
+anything the checks could not finish, including a row whose paper-book fit was
+never checked. The tab counts follow it (<em>Swing (3 of 40)</em>), and when it empties a
+table the table says which happened: <em>No row is fully clear — 40 hidden by Only
+clear.</em>, or, when a feed has not loaded, <em>Every row is only partly checked — a
+feed the checks read hasn't loaded. Turn off Only clear to see all 40.</em> Switching
+it on and off re-filters what is already on screen; nothing is re-scanned.</p>
+<p>The checks refresh themselves: whenever the paper ledger, the market regime or the
+overnight calibration changes, and otherwise every five minutes against the
+Opportunity Board. <strong>A refresh never re-runs the scan</strong> — the prices on the row are
+the scan's. While a refresh is in flight the panel says <em>Checking…</em> rather than
+showing a stale verdict, and if the row you have open drops out of the day's scan
+the checklist says <em>This signal is no longer in today's scan — the details below are
+as it last read</em> and stops judging it. Click another row to start again.</p>
 <p><strong>Per-row action buttons</strong> (also see <em>Cross-page actions</em> below):</p>
 <ul>
 <li><strong>Send to Calculator</strong> — open the P&amp;L Calculator pre-filled with this trade.</li>
@@ -1775,6 +1847,20 @@ for $SPX.</em></p>
   is rescanned. The cards and the list both follow the chips.</li>
 <li>A new symbol starts back at <strong>All</strong>.</li>
 </ul>
+<p><strong>Only clear</strong></p>
+<p>The switch beside the chips hides every idea that is not fully clear on the
+checklist — blocks, cautions, and anything the checks could not finish (see <em>Using
+the checklist to pick a trade</em> under <strong>Market Scanner</strong>; the checks are the same
+nine). Two things to know here:</p>
+<ul>
+<li>It filters the <strong>ranked list only</strong>. The top-pick cards go on showing the best
+  idea from each group, so you can still see what was rejected and why.</li>
+<li>The count line says what it hid — <em>3 of 40 shown · 37 hidden by Only clear</em> —
+  and, while a strategy chip is on, counts against that chip rather than the whole
+  scan: <em>3 of the 20 in the chosen strategies shown</em>.</li>
+</ul>
+<p>Nothing is re-scanned when you flip it, and the checks themselves refresh on their
+own without re-scanning either.</p>
 <p><strong>Top picks</strong></p>
 <p>Up to four cards: the best-scoring idea from each <strong>different</strong> group among what
 the chips are showing comes first — so four near-identical spreads never crowd out
@@ -1849,6 +1935,10 @@ all four. Each card shows:</p>
 <td>a small bar plus the percent, in the same colours as the cards</td>
 </tr>
 <tr>
+<td><strong>Checks</strong></td>
+<td>the go / no-go checklist's verdict for that idea, in one chip — <em>Clear · 7 of 9</em>, <em>2 cautions</em>, <em>Blocked</em>, <em>Partly checked</em>, or a dash until the checks have run. Hover for the whole sentence; click the row to read all nine lines in the detail panel. This column does not sort</td>
+</tr>
+<tr>
 <td><strong>Grade</strong></td>
 <td>quality grade; hover it for the reason</td>
 </tr>
@@ -1900,7 +1990,12 @@ symbol only:</p>
 </table>
 <p><strong>The detail panel</strong></p>
 <p>The Trade detail panel beside the list starts <strong>closed</strong>, so the list keeps its
-width, and opens whenever you click a card or a row. A new scan clears it. The legs,
+width, and opens whenever you click a card or a row. A new scan clears it. It opens
+with the <strong>checklist</strong> — the nine checks behind the row's chip, one line each — and
+says <em>Checking…</em> for the moment it takes to read them. If the idea you are reading
+drops out of the results, the checklist says <em>This trade is no longer in the scan's
+results — the details below are as it last read</em>, so the panel is never a verdict on
+a row that has gone. The legs,
 breakevens and bias live here rather than in the list, and they read the way the
 position is held: a share leg is <strong>Buy 100 shares</strong>, a calendar or diagonal lists
 each leg with <strong>its own expiration date</strong> (and drops the single "Exp" line, which

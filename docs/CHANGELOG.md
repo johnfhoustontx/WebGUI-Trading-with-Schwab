@@ -4,7 +4,87 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-15 (**Paper dialog previews the ledger's limits.**
+**Last updated:** 2026-09-15 (**The Go / No-Go checklist.** Phase 4 of the
+trade-checklist work: every check a candidate has to clear, stated on the row it
+belongs to.)
+
+- **`webgui/pages/options/checks.py` — nine checks, pure.** In order: **Paper
+  book · Earnings · Vol rank · Cost to trade · Expected move · Walls · Dealer
+  gamma · Direction · Track record**, each `{key, label, tone, text}` with tone
+  `pos` / `warn` / `neg` / `muted`. Two rules carry the design: a check that does
+  not apply to a structure is **omitted, never shown as passing**, and **only the
+  Paper book line can be red** — every other hard gate removed its failures
+  before the row reached the page, and the rest are judgment. `build_checks`
+  never raises: each line is guarded on its own, so a broken field costs that one
+  line (*Couldn't check*) rather than the list, and the guard logs the FIRST
+  failure of each (check, exception type) and counts the rest — the list is
+  rebuilt on every repaint, so a field broken on every row would otherwise flood
+  the log. Thresholds are module constants with one consumer each
+  (`VOL_MARGIN` 10 points above the floor · `FRICTION_OK_PCT` 10 /
+  `FRICTION_WIDE_PCT` 25 · `EM_OK` 1.0 expected move).
+- **Short premium is read from the structure and its economics, never from
+  `net_vega` first.** The scanner's `net_vega` is `short.vega − long.vega`, which
+  is POSITIVE for a credit spread, and an adapted iron condor's legs carry vega
+  0 — reading its sign made every Finder credit spread look like long premium.
+  `CREDIT_TYPES` / `DEBIT_TYPES` mirror `shared.structures`, pinned by test.
+- **`checks_feed.py` — the live context, read once.** Four views through
+  version-gated memos, one lock per view: `options:matrix` (indexed by symbol),
+  `sentiment:regime`, `options:calibration`, `options:ledger_caps`. A cold view
+  is passed as **`None`, never an empty stand-in** — `checks` marks a missing
+  view, and the summary then refuses to say Clear. The read blocks, so every
+  caller goes through `run.io_bound`; the payloads are shared objects and no
+  caller may mutate one.
+- **`checks_table.py` — the column and the filter, shared by both tables.**
+  `stamp_checks` (which runs AFTER `_allow_paper` is settled, since the Paper
+  book line reads that gate), `only_clear`, `filtered_tab_label`,
+  `only_clear_empty_label`, `restamp` onto shallow copies, and the two
+  `read_and_restamp*` readers. The verdict reads *Blocked · sector full* ·
+  *2 cautions* · *Clear · 7 checked* · *Partly checked · 5 of 7 checked* ·
+  *unchecked*; the cell shows the short form with the full text on hover.
+  **`_checks_clear` is what Only clear filters on** — the chip reads Clear AND no
+  Paper book line is grey: a grey book line does not change the verdict, but a
+  row whose fit was never checked must not pass a filter that promises it was.
+  An unstamped row is hidden; the filter fails closed.
+- **Market Scanner.** The column on all three tables, an **Only clear** switch
+  beside Run scan, tab counts that follow it (*Swing (3 of 40)*), and three empty
+  lines that tell a filter doing its job apart from a feed that has not loaded.
+  A scan view moving rebuilds; a `REFRESH_VIEWS` version moving re-stamps the
+  painted rows; the Opportunity Board (which moves every minute) re-stamps only
+  on the fixed `TABLE_REFRESH_SEC` **5-minute** cadence, and only when one cheap
+  `:ver` probe says it moved — so it costs nothing off-hours. **A re-stamp never
+  re-scans.**
+- **Strategy Finder.** The same column (not sortable there — its words sort
+  alphabetically, not by how clear a trade is) and switch. The switch filters the
+  **ranked list only**, not the top-pick cards, and the summary's count line
+  gains *3 of 40 shown · 37 hidden by Only clear* — or *3 of the 20 in the chosen
+  strategies shown* while a strategy chip is active, so it never reads as a share
+  of the whole scan. A re-stamp is flagged by the 2 s poll, a new answer or the
+  board timer and taken by a 0.5 s tick off the loop.
+- **Trade detail panel.** The full list above the contract, judged on the SAME
+  candidate the row's chip was (the raw signal plus that row's Paper gate), on
+  candidate pages only — a page showing a position you already hold passes none,
+  because whether to open a trade is the wrong question about one you hold. It
+  reads *Checking…* while the context is read off the loop, never a verdict; a
+  row that has left the page says so (*This signal is no longer in today's scan
+  — the details below are as it last read*) and stops being judged until the
+  reader clicks a row again.
+- **The calibration guard.** `ev.calibrated_facts` now returns `None` for a row
+  carrying `fit_score`: `strategy_scoring` overwrites `composite_score` with its
+  Fit+Quality score while the row keeps `trade_type="SWING"`, so the Finder's
+  rows were being answered with Market Scanner buckets built on another scale.
+  The Track record check and the detail panel's *Signals like this* line both
+  disappear on Finder rows rather than printing another model's history.
+- **Known limits.** A `scan_day` row published before the stamps existed reads
+  unchecked for the lines they feed; the checklist judges what the page can see,
+  so a cold feed is *Partly checked* rather than a verdict; and the column is a
+  display, never a gate — the Paper Ledger still checks every cap on Create.
+- Commits `5906863` · `18962dd` · `cb5e051` · `ec7555a` · `7f1b747` ·
+  `f4cdedb` · `e29f4b1` · `266c1c5` · `c6f4d26` · `afb77d6` · `f99a266` ·
+  `8384497` · `1972f60` · `0e01871`. Design + plan:
+  [design](plans/2026-09-15-trade-checklist-and-ledger-caps-design.md) ·
+  [plan](plans/2026-09-15-trade-checklist-and-ledger-caps-plan.md).
+
+**Prior —** 2026-09-15 (**Paper dialog previews the ledger's limits.**
 Phase 3 of the trade-checklist work: say whether a trade fits before the click,
 not only after it.)
 

@@ -161,6 +161,19 @@ plus single-leg directional trades on their own tab.
   opposite. It is **not** a comparison of today's option prices against last
   year's option prices — nobody sells that data, so the app started recording its
   own on 2026-09-12 and it will take about a year to be usable.
+- **Checks** — the go / no-go checklist for that row, in one chip: *Clear · 7 of
+  9* (nothing to worry about), *2 cautions*, *Blocked* (the paper ledger would
+  refuse it), *Partly checked* (something the checks read hasn't loaded yet) or a
+  dash before the checks have run. Hover the chip for the whole verdict, and
+  click the row to read all nine lines — paper book, earnings, vol rank, cost to
+  trade, distance to the expected move and to the walls, dealer gamma, direction,
+  and the track record of trades like it. A check that doesn't apply to a trade is left
+  out rather than shown as passing, and only the paper-book line can be red:
+  the rest are judgment, not gates.
+- **Only clear** (the switch by **Run scan**) hides every row that isn't fully
+  clear — blocks, cautions, and anything the checks couldn't finish. The tab
+  counts follow it (*Swing (3 of 40)*), and an emptied table says which of those
+  it was. Nothing is re-scanned; it only filters what is already there.
 - **Click a row** for full details; the row buttons send it to the Calculator,
   paper-trade it, or chart its Expected Move.
 - **Paper-trading a row is checked against the Paper Ledger's risk limits** ($750
@@ -310,6 +323,16 @@ four top picks, and the full ranked list.
   cap.
 - **Cost** says which way the money moves: `$195 debit`, `$804 credit`, and
   `$54,058 debit for 100 shares` when the trade holds stock.
+- **Checks** — the same go / no-go checklist the Market Scanner shows, in one
+  chip per row: *Clear · 7 of 9*, *2 cautions*, *Blocked* (the paper ledger would
+  refuse it), *Partly checked* (something the checks read hasn't loaded yet), or
+  a dash until they have run. Hover for the whole verdict; click the row to read
+  every line in the detail panel. The column doesn't sort — its words would sort
+  alphabetically, which says nothing about how clear a trade is.
+- **Only clear** (the switch beside the strategy chips) hides every idea that
+  isn't fully clear. It filters the **list** only — the top-pick cards still show
+  the best of each group — and the count line says what it hid: *3 of 40 shown ·
+  37 hidden by Only clear*. Nothing is re-scanned.
 - **Click a card or a row** for the Trade detail panel, which starts closed so the
   list keeps its width. The full legs, breakevens and bias live there: a share leg reads
   `Buy 100 shares`, a butterfly's middle `Sell 2× 100 C`, a calendar or diagonal

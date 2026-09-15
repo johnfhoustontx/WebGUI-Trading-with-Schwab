@@ -1936,7 +1936,95 @@ send, and a message a moment later says whether it opened — or why not, and ho
 contracts would fit when a smaller size would.
 
 **Click a row** to open the Trade detail panel on the right, with a probability
-speedometer and full contract detail.
+speedometer and full contract detail — and the checklist at the top of it.
+
+### The Go / No-Go checklist
+
+The **Checks** column states, in one chip, what a candidate has and has not
+cleared. It is a *reading*, not a gate: the only thing on it that can stop a trade
+is the paper book, because every rule the app enforces was already applied before
+the row reached the table. The same nine checks appear on the
+[Strategy Finder](#strategy-finder) and, written out one line each, in the Trade
+detail panel.
+
+| Check | What it reads | Green | Amber |
+|---|---|---|---|
+| **Paper book** | the [Paper Ledger's](#paper-ledger) limits against its own open trades, for one contract | it fits, with the largest quantity that would | — (this one is **red** when it does not: *over $750 per trade*, *symbol full*, *sector risk full* …) |
+| **Earnings** | whether the company reports before the trade expires | no report scheduled, or one **after** expiry | a report **before** expiry, or on expiry day, with the date |
+| **Vol rank** | how rich this symbol's premium is against the floor the scan applies | at least **10 points above** the floor | inside those 10 points |
+| **Cost to trade** | the round-trip bid-ask as a share of the credit or debit | **10%** or less | more, and worded *very wide* above **25%** |
+| **Expected move** | how far the short strike (or, for a straddle-shaped trade, the break-even) sits from the price in expected moves to expiry | **1.0** expected move or more | inside one, or already at or past the price |
+| **Walls** | the same strike against the [Opportunity Board's](#opportunity-board) call and put walls | beyond the wall on that side | inside it |
+| **Dealer gamma** | the board's gamma regime for the symbol | price **above** the flip | below it — *moves can accelerate* |
+| **Direction** | the trade's own bias against the tape: a 0–4 DTE trade against the symbol's intraday move, a longer hold against the market's committed direction | agrees, and says which reading it used | opposes |
+| **Track record** | the calibrated expected value for this trade type and score band, from your own closed trades | positive | zero or negative |
+
+**Two rules decide what you see.** A check that does not apply to a structure is
+**omitted, never shown as passing** — a long call has no short strike, so it gets no
+expected-move or wall line, which is why the chip counts (*Clear · 7 of 9*) rather
+than claiming nine passes. And **only the paper-book line can be red**: the other
+eight are judgment, and an amber line is a reason to look, not a refusal.
+
+**Which lines a row does not get:**
+
+| Line | Left out when |
+|---|---|
+| **Vol rank**, **Expected move**, **Walls**, **Dealer gamma** | the trade **buys** premium rather than selling it. A long call is not made better or worse by rich premium or by where the dealer walls sit |
+| **Vol rank** | the scan applies no floor to this trade type |
+| **Direction** | the trade has no directional bias — an iron condor is neutral by construction |
+| **Track record** | the row was scored by the Strategy Finder's Fit+Quality model. Its score is not on the scale the calibration buckets are built from, so answering would print another model's history (the detail panel's *Signals like this* row is withheld on those rows for the same reason) |
+| **Paper book** | the row cannot be paper-traded — a structure the ledger does not record, or a dropped row whose price is frozen |
+
+Whether a trade sells or buys premium is read from **what it is and what it costs**,
+never from its vega: the scanner reports a credit spread's net vega as a positive
+number, so reading that sign would call every credit spread a premium *purchase*.
+
+**The verdicts:**
+
+| Chip | Meaning |
+|---|---|
+| **Clear · 7 of 9** | every check that ran passed; nine exist, seven applied |
+| **2 cautions** | that many amber lines. The full text is on hover, the reasons in the detail panel |
+| **Blocked · symbol full** | the paper book would refuse it, with the binding limit named |
+| **Partly checked · 5 of 7 checked** | at least one grey line is grey *because a feed it reads was not there* — so the verdict is incomplete, and deliberately not "Clear" |
+| **unchecked** | nothing could be judged at all |
+| **—** | the page has not read the checks yet |
+
+They are decided in that order, so a **block outranks a caution and a caution
+outranks an incomplete reading**: a row reading *2 cautions* may also have a line
+the checks could not finish. Only *Clear* promises that nothing is outstanding —
+which is exactly why a missing feed is reported as *Partly checked* instead.
+
+**Why a check cannot run, and what it says instead.** Each check reads its own
+inputs, and each says which is missing rather than assuming: *No IV history*,
+*Bid-ask not measured*, *Expected move not measured*, *Breakevens unknown*, *No
+wall reading*, *No gamma flip reading*, *No reading of market direction*, *No
+earnings coverage*, *Not enough history for this score*. The paper-book line
+without a book to check against says the same thing the Paper trade box does —
+*Can't preview this trade here — the paper ledger still checks every cap when you
+create it.* A line that fails unexpectedly reads *Couldn't check*, and costs that
+one line, never the list.
+
+The distinction the summary turns on: a grey line because the check **does not
+apply** leaves the verdict Clear; a grey line because a **live feed was not there**
+makes it *Partly checked*. Four feeds carry the live half — the Opportunity Board
+(price, walls, gamma regime, intraday trend), the market regime, the overnight
+calibration, and the paper ledger's book — and a cold one is passed through as
+absent rather than as an empty reading, precisely so the summary cannot read Clear
+with a check missing.
+
+**Refresh.** The column re-stamps when the paper ledger's book, the market regime
+or the calibration changes, and otherwise on a fixed **five-minute** cadence, and
+then only if the Opportunity Board has actually moved since the last stamp. **A
+re-stamp never re-scans** — a scan is a paid Schwab fetch, and the row's prices stay
+the scan's. The detail panel reads its context live, showing *Checking…* rather
+than a stale verdict while it does.
+
+**Only clear** keeps a row only when its chip reads Clear **and** its paper-book fit
+was actually checked. A row that reads Clear over a grey book line is hidden: a grey
+book line does not change the verdict, but the filter promises a fit was tested. A
+row carrying no verdict at all is hidden for the same reason — the filter fails
+closed. It re-filters rows already on screen and reads nothing.
 
 ### Why it matters
 
@@ -2867,6 +2955,19 @@ A chip shows only its group; more chips add groups; removing the last chip, or c
 **All**, shows everything. The filter is instant — nothing is rescanned — and both the
 cards and the list follow it. A new symbol starts back at All.
 
+**Only clear**, the switch beside the chips, hides every idea that is not fully
+clear on the [Go / No-Go checklist](#the-go-no-go-checklist) — the same nine checks
+the Market Scanner shows, read against the same live feeds. Two differences from
+the Scanner's copy, both deliberate: it filters the **ranked list only**, leaving
+the top-pick cards to go on showing the best of each group (the cards exist to
+compare structures, and hiding one would remove the comparison rather than a
+candidate), and the summary's count line reports the hiding — *3 of 40 shown · 37
+hidden by Only clear*, or *3 of the 20 in the chosen strategies shown* while a
+strategy chip is active, since the total is then the chip's list and reading it as
+a share of the whole scan would be wrong. Nothing hidden adds nothing to the line.
+A list painted before the page has read the checks carries no verdicts at all, and
+those rows are hidden rather than judged.
+
 **Top picks.** Up to four cards. Each group among what the chips show gets its
 best-scoring idea onto a card before any group gets a second — the cards exist to compare
 structures, and four spreads in a row would be one idea shown four times. When fewer than
@@ -2899,6 +3000,7 @@ mistaken for a contract's worth.
 | **Cost** | as on the cards |
 | **Max profit** / **Max loss** | dollars, or **∞**; a naked short's loss carries an *undefined risk* tag, because its figure is a margin estimate, not a cap |
 | **Probability of profit** | bar plus percent |
+| **Checks** | the [Go / No-Go checklist's](#the-go-no-go-checklist) verdict in one chip, the full sentence on hover and every line in the detail panel. **Not sortable**: its words would sort alphabetically, which is not an ordering of how clear a trade is |
 | **Grade** | quality grade, with its reason on hover |
 
 The last column holds **Send to Calculator**, **Send to Paper trade** (where allowed) and
@@ -2923,7 +3025,12 @@ shares` for a share lot, `Sell 2× 100 C` for a butterfly's body, each leg on it
 with its own date when the legs span more than one expiration (the single "Exp" caption is
 then left off, since it would name only the near month), **every** breakeven joined with
 ` / `, and dollars stated **per position** rather than per contract when shares are part
-of it — a share lot is thousands of dollars, not a contract's worth.
+of it — a share lot is thousands of dollars, not a contract's worth. It opens with the
+**checklist** — the nine checks behind the row's chip, written out — and judges the same
+candidate the chip was judged on, including that row's paper-trade gate; it says
+*Checking…* while it reads the feeds, and *This trade is no longer in the scan's results
+— the details below are as it last read* once the list stops carrying the row, rather
+than keeping a verdict on something that has gone.
 
 **The count line** in the summary strip reads like *16 ideas · 6 below the quality bar ·
 3 where premium is too cheap to sell · 40 lower-scoring ideas not shown*. The idea count

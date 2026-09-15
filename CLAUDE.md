@@ -107,7 +107,9 @@ page's `trade_type` '0-DTE' cannot key differently — exactly the cross-tier
 mirror `test_cross_tier_mirrors.py` exists to prevent) ·
 `shared.book_caps` (since 2026-09-15; pure — `math` plus
 `shared.driver_policy.open_risk_dollars`, itself math-only; the Paper
-dialog's preview (`pages/options/book_fit.py`) evaluates the SAME rungs the
+dialog's preview (`pages/options/book_fit.py`) — and, through it, the
+checklist's Paper book line (`pages/options/checks.py`, which also takes
+`book_caps.describe` for the blocked wording) — evaluates the SAME rungs the
 service enforces, so it imports the one cap module rather than a Tier-1 copy, and
 `webgui/tests/test_book_caps_tier1.py` pins its exact import set) ·
 `repo_paths` · `requests` — **only** for the
@@ -2399,7 +2401,11 @@ checks; only a known breach, a bad quantity or one above the dialog's ceiling of
 100 disables it — missing data must never become a refusal on the page. The
 quantity box's max is the largest fitting quantity, never below a typed quantity
 that fits (`max_quantity` can land one short on sub-cent risk and the box clamps on
-blur). **`services/options_svc/tests/test_preview_agrees_with_ledger.py` is the
+blur). The **checklist's Paper book line is the same `book_fit.preview` at
+quantity 1**, so a row's chip and the dialog cannot disagree — and it obeys the
+same rule: no preview is a GREY line, never `Blocked`. It is what "Only clear"
+filters on separately from the verdict (`checks_table._checks_clear`), because a
+grey book line leaves the chip Clear while the fit was never tested. **`services/options_svc/tests/test_preview_agrees_with_ledger.py` is the
 guard**: real books through the real publish and `create_paper_trade`, preview
 and Ledger compared line for line, sub-cent risk and the suggested-quantity
 step-down included. A change to either end that it does not cover is unguarded.

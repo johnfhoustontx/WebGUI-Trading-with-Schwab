@@ -16,7 +16,7 @@ def test_options_helpers_have_no_inline_style():
     base = pathlib.Path(__file__).resolve().parents[1] / "pages" / "options"
     for fn in ["detail.py", "overlay.py", "leg_editor.py", "strategy_menu.py",
                "entry_panel.py", "chain_grid.py", "entry.py", "handoff.py",
-               "checks_table.py"]:
+               "checks_table.py", "checks.py", "checks_feed.py", "book_fit.py"]:
         src = (base / fn).read_text(encoding="utf-8")
         assert ".style(" not in src, f"{fn} still uses .style()"
 
