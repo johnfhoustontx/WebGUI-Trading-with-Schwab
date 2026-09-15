@@ -263,7 +263,9 @@ time by `compute.stamp_candidate` — from `rescan` (the 0-DTE, swing and Direct
 lists), `swing_scan` and the income scan. Stamping is best-effort **per row**: a row
 whose stamping raises may be left without some stamps, the rows after it are still
 stamped, and the pass records one degrade (`options.stamp_scan` · `options.stamp_swing` ·
-`options.stamp_income`). Every stamp is `null` when unknown, never a guessed zero.
+`options.stamp_income`). On a scan, a symbol whose earnings lookup fails also records
+`options.stamp_scan_earnings` (once per symbol) and is stamped `not_listed` with no
+date. Every stamp is `null` when unknown, never a guessed zero.
 
 | Field | Meaning |
 |---|---|
@@ -288,7 +290,9 @@ Ledger's book, as the Paper dialog's preview reads it:
 `unmapped_prefix` + symbol bucket; `unmapped_prefix` is informational). Written by
 `handlers.refresh_ledger_caps` with `skip_unchanged` (an unchanged book bumps no
 version and fires no event), under a lock, at the end of every `refresh_paper_trades`
-— every `paper_*` Ledger command and the paper-manage cycle — even when that view's
+— after every Ledger-changing command (`paper_create`, `paper_reload`, `paper_close`,
+`paper_delete`, `paper_delete_closed`; not `paper_analyze`, which publishes only
+`cache:options:paper_analyze`) and the paper-manage cycle — even when that view's
 own publish raises, and once at service start. A failure is a degrade
 (`options.ledger_caps`), never a raise. No TTL.
 

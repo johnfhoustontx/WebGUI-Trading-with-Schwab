@@ -1193,11 +1193,10 @@ type:
 
 When a line is red, **Create** is greyed out and the box says *Up to N contracts
 fit.*, or *No quantity fits the paper ledger's limits right now.* When you leave the
-**Quantity** box, a number above the largest quantity that fits drops back to it (to 1 when nothing
-fits).
-The box never takes more than 100 (*The dialog opens at most 100 contracts in one
-trade.*), and **Create** is also greyed out when the quantity is not a whole number
-of at least 1.
+**Quantity** box, a number above the largest quantity that fits drops back to it (to
+1 when nothing fits). The box also stops at 100 contracts, the most one trade can
+open, and **Create** is greyed out when the quantity is not a whole number of at
+least 1.
 
 The lines are a preview. The book can change between opening the box and pressing
 **Create**, so the paper ledger checks every limit again when the trade arrives —

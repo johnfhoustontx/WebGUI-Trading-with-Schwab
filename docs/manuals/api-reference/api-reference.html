@@ -679,7 +679,9 @@ time by <code>compute.stamp_candidate</code> — from <code>rescan</code> (the 0
 lists), <code>swing_scan</code> and the income scan. Stamping is best-effort <strong>per row</strong>: a row
 whose stamping raises may be left without some stamps, the rows after it are still
 stamped, and the pass records one degrade (<code>options.stamp_scan</code> · <code>options.stamp_swing</code> ·
-<code>options.stamp_income</code>). Every stamp is <code>null</code> when unknown, never a guessed zero.</p>
+<code>options.stamp_income</code>). On a scan, a symbol whose earnings lookup fails also records
+<code>options.stamp_scan_earnings</code> (once per symbol) and is stamped <code>not_listed</code> with no
+date. Every stamp is <code>null</code> when unknown, never a guessed zero.</p>
 <table>
 <thead>
 <tr>
@@ -731,7 +733,9 @@ Ledger's book, as the Paper dialog's preview reads it:
 <code>unmapped_prefix</code> + symbol bucket; <code>unmapped_prefix</code> is informational). Written by
 <code>handlers.refresh_ledger_caps</code> with <code>skip_unchanged</code> (an unchanged book bumps no
 version and fires no event), under a lock, at the end of every <code>refresh_paper_trades</code>
-— every <code>paper_*</code> Ledger command and the paper-manage cycle — even when that view's
+— after every Ledger-changing command (<code>paper_create</code>, <code>paper_reload</code>, <code>paper_close</code>,
+<code>paper_delete</code>, <code>paper_delete_closed</code>; not <code>paper_analyze</code>, which publishes only
+<code>cache:options:paper_analyze</code>) and the paper-manage cycle — even when that view's
 own publish raises, and once at service start. A failure is a degrade
 (<code>options.ledger_caps</code>), never a raise. No TTL.</p>
 <h2 id="portfolio-service-8212">Portfolio service — :8212</h2>

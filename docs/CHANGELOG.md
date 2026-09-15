@@ -11,7 +11,9 @@ not only after it.)
 - **Row stamps.** `options_svc.compute.stamp_candidate` stamps every candidate at
   publish time — `handlers._stamp_scan` in `rescan` (0-DTE, swing and Directional
   lists), `swing_scan` and `publish_income` — best-effort per row, one named
-  degrade a pass (`options.stamp_scan` / `stamp_swing` / `stamp_income`). Fields:
+  degrade a pass (`options.stamp_scan` / `stamp_swing` / `stamp_income`), plus
+  `options.stamp_scan_earnings` for each scanned symbol whose earnings lookup fails
+  (stamped `not_listed`). Fields:
   `ledger_risk_basis` (`{"per_share": x}` or `{"per_contract": y}`, the unrounded
   figure the Ledger books from), `ledger_risk_per_contract`, `friction_pct`
   (round-trip bid-ask as % of the per-share credit or debit; `None` for share
