@@ -202,8 +202,10 @@ def _book(row, caps, qty):
         return None
     fit = book_fit.preview(row, caps, qty)
     if not fit.get("available"):
+        # book_fit.preview always sets unavailable_text; the fallback is that
+        # same sentence, never a second wording of it that could drift.
         return _check("book", "muted",
-                      fit.get("unavailable_text") or "The paper book's limits aren't available")
+                      fit.get("unavailable_text") or book_fit.UNAVAILABLE)
     breach = fit.get("breach")
     if breach:
         return _check("book", "neg", book_caps.describe(breach), breach=breach)
