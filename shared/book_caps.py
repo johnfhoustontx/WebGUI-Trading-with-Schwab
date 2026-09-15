@@ -173,3 +173,69 @@ def first_breach(rungs, order):
         if r is not None and r["binds"]:
             return r
     return None
+
+
+def max_quantity(book, candidate, per_contract, limits, equity=None,
+                 ceiling=QTY_CEILING):
+    """The largest quantity that clears every rung, or None when the per-contract
+    risk is unusable. A binding COUNT rung means 0: adding one position breaks it
+    whatever the size."""
+    try:
+        per = float(per_contract)
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(per) and per > 0):
+        return None
+    best = ceiling
+    for r in evaluate(book, candidate, 0.0, limits, equity):
+        if r["skipped"]:
+            continue
+        if r["kind"] == "count":
+            if r["binds"]:
+                return 0
+            continue
+        room = r["cap"] - r["used"]
+        if room < 0:
+            return 0
+        n = math.floor(room / per + 1e-9)
+        while n > 0 and r["used"] + n * per > r["cap"]:
+            n -= 1
+        best = min(best, n)
+    return max(0, best)
+
+
+def _money(v):
+    return f"${v:,.0f}" if abs(v - round(v)) < 0.005 else f"${v:,.2f}"
+
+
+def scope_label(scope):
+    """A sector bucket for a reader: ``?IONQ`` is an unmapped symbol's own bucket."""
+    if isinstance(scope, str) and scope.startswith("?"):
+        return f"{scope[1:]} (no sector on file)"
+    return scope or ""
+
+
+def describe(rung):
+    """One plain sentence for a rung."""
+    if rung.get("skipped"):
+        return f"Not checked: {rung['skipped']}"
+    code, scope = rung["code"], scope_label(rung.get("scope"))
+    used, after, cap = rung["used"], rung["after"], rung["cap"]
+    if code == TRADE_RISK_CAP:
+        word = "over" if rung["binds"] else "within"
+        return f"Risks {_money(after)}, {word} the {_money(cap)} per-trade limit"
+    if code == DEPLOYMENT_CAP:
+        return f"Open risk would reach {_money(after)} of {_money(cap)}"
+    if code == SYMBOL_POSITION_CAP:
+        return f"Already {used} of {cap} positions in {scope}"
+    if code == SYMBOL_RISK_CAP:
+        return f"{scope} risk would reach {_money(after)} of {_money(cap)}"
+    if code == SECTOR_POSITION_CAP:
+        if rung["binds"]:
+            return f"{scope} is full ({used} of {cap} positions)"
+        return f"{scope}: {used} of {cap} positions"
+    if code == SECTOR_RISK_CAP:
+        return f"{scope} risk would reach {_money(after)} of {_money(cap)}"
+    if code == EXPIRY_POSITION_CAP:
+        return f"Already {used} of {cap} positions expiring {scope}"
+    return code

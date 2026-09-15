@@ -168,3 +168,66 @@ def test_an_unusable_candidate_risk_counts_as_zero_exactly_as_the_account_always
     """Pinned on purpose: callers that did not size the trade must refuse it first."""
     r = _by_code(bc.evaluate([], _cand(), risk, LIMITS, 25000.0))[bc.TRADE_RISK_CAP]
     assert (r["after"], r["binds"], r["skipped"]) == (0.0, False, None)
+
+
+def test_max_quantity_is_bounded_by_the_tightest_risk_rung():
+    # per trade: floor(250/80)=3; symbol risk: floor((750-600)/80)=1
+    book = [_row("ORCL", risk=600.0)]
+    assert bc.max_quantity(book, _cand(), 80.0, LIMITS, 25000.0) == 1
+
+
+def test_max_quantity_is_zero_when_a_count_rung_binds():
+    book = [_row("ORCL")] * 3
+    assert bc.max_quantity(book, _cand(), 1.0, LIMITS, 25000.0) == 0
+
+
+def test_max_quantity_is_zero_when_one_contract_is_over_the_trade_cap():
+    assert bc.max_quantity([], _cand(), 425.0, LIMITS, 25000.0) == 0
+
+
+def test_max_quantity_respects_the_dialog_ceiling():
+    limits = {**LIMITS, "max_risk_per_trade": 0, "max_risk_per_symbol": 1e12,
+              "max_risk_per_sector": 0, "max_deployed_risk_pct": 0}
+    assert bc.max_quantity([], _cand(), 1.0, limits, 25000.0) == bc.QTY_CEILING
+
+
+def test_max_quantity_never_overshoots_on_floating_point():
+    q = bc.max_quantity([], _cand(), 83.33, LIMITS, 25000.0)
+    assert q == 3 and q * 83.33 <= 250.0
+
+
+@pytest.mark.parametrize("per", [None, 0, -1, float("nan"), "x"])
+def test_max_quantity_is_none_for_an_unusable_contract_risk(per):
+    assert bc.max_quantity([], _cand(), per, LIMITS, 25000.0) is None
+
+
+def test_max_quantity_agrees_with_evaluate():
+    book = [_row("ORCL", risk=300.0), _row("MSFT", risk=900.0)]
+    per = 70.0
+    q = bc.max_quantity(book, _cand(), per, LIMITS, 25000.0)
+    assert bc.first_breach(bc.evaluate(book, _cand(), q * per, LIMITS, 25000.0),
+                           bc.DISPLAY_ORDER) is None
+    assert bc.first_breach(bc.evaluate(book, _cand(), (q + 1) * per, LIMITS, 25000.0),
+                           bc.DISPLAY_ORDER) is not None
+
+
+def test_describe_names_the_cap_in_plain_words():
+    book = [_row("ORCL")] * 3
+    r = bc.first_breach(bc.evaluate(book, _cand(), 10.0, LIMITS, 25000.0),
+                        bc.DISPLAY_ORDER)
+    assert bc.describe(r) == "Already 3 of 3 positions in ORCL"
+
+
+def test_describe_an_unmapped_sector_says_so():
+    r = bc._count(bc.SECTOR_POSITION_CAP, "?IONQ", 5, 5)
+    assert "IONQ (no sector on file)" in bc.describe(r)
+
+
+def test_describe_a_trade_risk_breach():
+    r = bc._risk(bc.TRADE_RISK_CAP, None, 0.0, 425.0, 250.0)
+    assert bc.describe(r) == "Risks $425, over the $250 per-trade limit"
+
+
+def test_describe_a_skipped_rung():
+    r = bc._skip(bc.DEPLOYMENT_CAP, "risk", None, "no equity figure")
+    assert bc.describe(r) == "Not checked: no equity figure"
