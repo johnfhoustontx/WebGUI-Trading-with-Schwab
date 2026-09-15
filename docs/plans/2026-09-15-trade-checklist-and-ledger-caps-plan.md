@@ -2096,9 +2096,9 @@ No repo files. Follow memory note *local-page-harness-replaces-missing-dev*: a s
 **Steps:**
 1. Seed `cache:options:scan_day` and `cache:options:scan` with two stamped rows (one $190 PCS, one $900 PCS) by calling `handlers._stamp_scan` on a hand-built result, then `bus.cache_set`. Call `handlers.refresh_ledger_caps(bus)`.
 2. Render `pages.options.scanner.render()` at `/`; open it in the Browser pane.
-3. Click Paper on the $190 row → dialog shows seven lines, Create enabled, quantity max 3. Create → toast "Opened 1 × ...".
+3. Click Paper on the $190 row → dialog shows seven lines, Create enabled, quantity max 3. Create → toast "Paper ledger: opened 1 × ORCL Credit spread — put."
 4. Click Paper on the $900 row → Per trade line red, Create disabled, text "Risks $900, over the $750 per-trade limit".
-5. Open two more $190 trades on the same symbol, then a fourth → toast "Not opened — ORCL already holds 3 of 3 positions."
+5. Open two more $190 trades on the same symbol, then a fourth → toast "Paper ledger: not opened — ORCL already holds 3 of 3 positions."
 6. Screenshot the refused dialog and the toast; report both.
 
 Expected: all of the above. Any mismatch is a bug to fix before Phase 4.
