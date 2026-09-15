@@ -211,12 +211,18 @@ def _money(v):
 def scope_label(scope):
     """A sector bucket for a reader: ``?IONQ`` is an unmapped symbol's own bucket."""
     if isinstance(scope, str) and scope.startswith("?"):
-        return f"{scope[1:]} (no sector on file)"
+        return f"{scope[1:]}'s own group (no sector on file)"
     return scope or ""
 
 
 def describe(rung):
-    """One plain sentence for a rung."""
+    """One plain sentence for a rung.
+
+    Every line reads from the trade's side. A count line that passes states the
+    position THIS trade would be ("Position 2 of 3 in ORCL"); a binding count
+    line states what the book already holds. Risk lines state the total the
+    book would reach with this trade in it.
+    """
     if rung.get("skipped"):
         return f"Not checked: {rung['skipped']}"
     code, scope = rung["code"], scope_label(rung.get("scope"))
@@ -225,17 +231,22 @@ def describe(rung):
         word = "over" if rung["binds"] else "within"
         return f"Risks {_money(after)}, {word} the {_money(cap)} per-trade limit"
     if code == DEPLOYMENT_CAP:
-        return f"Open risk would reach {_money(after)} of {_money(cap)}"
+        return (f"Open risk across the book would reach {_money(after)} "
+                f"of {_money(cap)}")
     if code == SYMBOL_POSITION_CAP:
-        return f"Already {used} of {cap} positions in {scope}"
+        if rung["binds"]:
+            return f"{scope} already holds {used} of {cap} positions"
+        return f"Position {after} of {cap} in {scope}"
     if code == SYMBOL_RISK_CAP:
         return f"{scope} risk would reach {_money(after)} of {_money(cap)}"
     if code == SECTOR_POSITION_CAP:
         if rung["binds"]:
             return f"{scope} is full ({used} of {cap} positions)"
-        return f"{scope}: {used} of {cap} positions"
+        return f"Position {after} of {cap} in {scope}"
     if code == SECTOR_RISK_CAP:
         return f"{scope} risk would reach {_money(after)} of {_money(cap)}"
     if code == EXPIRY_POSITION_CAP:
-        return f"Already {used} of {cap} positions expiring {scope}"
-    return code
+        if rung["binds"]:
+            return f"{used} of {cap} positions already expire {scope}"
+        return f"Position {after} of {cap} expiring {scope}"
+    return "Over a risk limit" if rung.get("binds") else "Within a risk limit"

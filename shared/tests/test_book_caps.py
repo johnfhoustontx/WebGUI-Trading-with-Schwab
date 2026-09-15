@@ -215,12 +215,12 @@ def test_describe_names_the_cap_in_plain_words():
     book = [_row("ORCL")] * 3
     r = bc.first_breach(bc.evaluate(book, _cand(), 10.0, LIMITS, 25000.0),
                         bc.DISPLAY_ORDER)
-    assert bc.describe(r) == "Already 3 of 3 positions in ORCL"
+    assert bc.describe(r) == "ORCL already holds 3 of 3 positions"
 
 
 def test_describe_an_unmapped_sector_says_so():
     r = bc._count(bc.SECTOR_POSITION_CAP, "?IONQ", 5, 5)
-    assert "IONQ (no sector on file)" in bc.describe(r)
+    assert "IONQ's own group (no sector on file)" in bc.describe(r)
 
 
 def test_describe_a_trade_risk_breach():
@@ -231,3 +231,34 @@ def test_describe_a_trade_risk_breach():
 def test_describe_a_skipped_rung():
     r = bc._skip(bc.DEPLOYMENT_CAP, "risk", None, "no equity figure")
     assert bc.describe(r) == "Not checked: no equity figure"
+
+
+def test_count_lines_that_pass_name_the_position_this_trade_would_be():
+    book = [_row("ORCL", expiration="2026-10-24"), _row("MSFT", expiration="2026-10-31")]
+    rungs = _by_code(bc.evaluate(book, _cand(), 10.0, LIMITS, 25000.0))
+    assert bc.describe(rungs[bc.SYMBOL_POSITION_CAP]) == "Position 2 of 3 in ORCL"
+    assert bc.describe(rungs[bc.SECTOR_POSITION_CAP]) == "Position 3 of 5 in Information Technology"
+    assert bc.describe(rungs[bc.EXPIRY_POSITION_CAP]) == "Position 1 of 5 expiring 2026-10-17"
+
+
+def test_binding_count_lines_state_what_the_book_already_holds():
+    assert bc.describe(bc._count(bc.SECTOR_POSITION_CAP, "Energy", 5, 5)) == \
+        "Energy is full (5 of 5 positions)"
+    assert bc.describe(bc._count(bc.EXPIRY_POSITION_CAP, "2026-10-17", 5, 5)) == \
+        "5 of 5 positions already expire 2026-10-17"
+
+
+def test_deployment_line_says_it_covers_the_whole_book():
+    r = bc._risk(bc.DEPLOYMENT_CAP, None, 1240.0, 182.0, 4976.0)
+    assert bc.describe(r) == "Open risk across the book would reach $1,422 of $4,976"
+
+
+def test_an_unknown_code_never_shows_a_raw_constant():
+    assert bc.describe({"code": "NEW_CAP", "binds": True, "skipped": None,
+                        "scope": None, "used": 1, "after": 2, "cap": 1}) == "Over a risk limit"
+
+
+def test_an_unmapped_bucket_reads_as_its_own_group():
+    assert bc.scope_label("?IONQ") == "IONQ's own group (no sector on file)"
+    assert bc.describe(bc._count(bc.SECTOR_POSITION_CAP, "?IONQ", 0, 5)) == \
+        "Position 1 of 5 in IONQ's own group (no sector on file)"
