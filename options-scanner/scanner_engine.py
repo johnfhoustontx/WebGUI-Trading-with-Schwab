@@ -1344,9 +1344,20 @@ def size_contracts(n_target, n_risk):
     return contracts
 
 
+# The stages a candidate width passes through, in search order. A strike that
+# finds NO width is attributed to the FURTHEST stage its best width reached —
+# "every width cleared the credit floor but one contract costs more than the
+# cap" is actionable, where a bare "no width" is not. ⚠ The ORDER is the
+# meaning: an entry's position in this tuple is its rank, so a new stage goes
+# where the search reaches it, never merely at the end.
+WIDTH_STAGES = ("long_leg_missing", "long_leg_unpriced", "long_leg_illiquid",
+                "no_credit", "sanity_cap", "credit_floor", "edge_floor",
+                "over_trade_cap", "no_contracts", "no_positive_ev")
+
+
 def select_best_width(short, opts, side, strike_increment, trade_type,
                       min_cr_pct, account_size=100000, max_risk_pct=0.05,
-                      max_risk_dollars=None):
+                      max_risk_dollars=None, reasons=None):
     """Select the width that maximizes expected total dollar P&L.
 
     For each candidate width that passes liquidity and the credit/width sanity
@@ -1377,6 +1388,14 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
             of zero: zero would refuse every width (reading as a broken scanner)
             and a NaN would make every ``>`` False, silently restoring the
             phantom. See ``DEFAULT_MAX_RISK_DOLLARS``.
+        reasons: optional ``collections.Counter``. When supplied AND this strike
+            finds no width at all, the FURTHEST stage any candidate width reached
+            (see ``WIDTH_STAGES``) is incremented by one — one count per STRIKE,
+            never per width, because the question the funnel answers is "why did
+            this strike produce nothing", not "how many widths were tried".
+            ⚠ Counting only. It must never change which width wins, and
+            ``test_scan_funnel.py`` proves that by equivalence rather than by
+            inspection.
 
     Returns:
         Tuple (width, long_leg_opts, credit, max_loss) or None.
@@ -1394,39 +1413,53 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
         budget = None
 
     candidates = []
+    furthest = -1   # index into WIDTH_STAGES; -1 = no width was even examined
     for mult in WIDTH_MULTIPLIERS:
         w = mult * strike_increment
         if w > MAX_WIDTH_DOLLARS:
             break
         long_k = (k - w) if side == "PCS" else (k + w)
         if long_k not in opts:
+            furthest = max(furthest, 0)          # long_leg_missing
             continue
         lo = opts[long_k]
         if lo["mark"] <= 0:
+            furthest = max(furthest, 1)          # long_leg_unpriced
             continue
         if not passes_liquidity_gate(lo, trade_type, is_short_leg=False):
+            furthest = max(furthest, 2)          # long_leg_illiquid
             continue
         credit = _entry_credit(short, lo, w)
         if credit is None or credit <= 0:
+            furthest = max(furthest, 3)          # no_credit
             continue
         ml = w - credit
         if ml <= 0:
+            # A credit at or above the width is a quote fault, not a spread —
+            # it belongs with the other "there is no credit to work with" case
+            # rather than with the sanity cap, which is about a credit that is
+            # merely implausible.
+            furthest = max(furthest, 3)          # no_credit
             continue
         if credit / w > 0.95:
+            furthest = max(furthest, 4)          # sanity_cap
             continue  # sanity cap on absurd marks
         effective_min = calc_effective_min_credit(w, min_cr_pct)
         if credit / w < effective_min:
+            furthest = max(furthest, 5)          # credit_floor
             continue
         # Delta-aware edge floor: pay strictly above the assignment-probability
         # breakeven (|delta|) plus a margin. (E[PnL]>0 below is the zero-margin
         # form of this; this makes the margin explicit.)
         if credit / w < abs(d) + EDGE_MARGIN:
+            furthest = max(furthest, 6)          # edge_floor
             continue
 
         # A width whose ONE contract busts the real budget can never be opened,
         # so it is not a candidate — dropping it here is what stops the search
         # winning a race the entry cycle then refuses (A6).
         if budget is not None and ml * 100 > budget:
+            furthest = max(furthest, 7)          # over_trade_cap
             continue
 
         # Contract sizing: hit profit target on a win, bounded by risk cap.
@@ -1435,16 +1468,23 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
                   else calculate_position_size(ml, account_size, max_risk_pct))
         contracts = size_contracts(n_target, n_risk)
         if contracts <= 0:
+            furthest = max(furthest, 8)          # no_contracts
             continue   # the risk cap leaves no room for this width
 
         # Expected total $P&L at the sized position.
         e_pnl = (credit * pop - ml * (1 - pop)) * contracts * 100
         if e_pnl <= 0:
+            furthest = max(furthest, 9)          # no_positive_ev
             continue
 
         candidates.append((e_pnl, w, lo, credit, ml))
 
     if not candidates:
+        if reasons is not None:
+            # ``max(furthest, 0)``: a strike whose every width sat above
+            # MAX_WIDTH_DOLLARS examines nothing, and the honest answer there is
+            # still that no long leg was reachable.
+            reasons[WIDTH_STAGES[max(furthest, 0)]] += 1
         return None
 
     # Highest E[PnL] first; ties broken by narrower width (less capital at risk)
