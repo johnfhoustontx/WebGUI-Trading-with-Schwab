@@ -18,7 +18,7 @@ import bus_client
 # rather than emitted. In the private app the resolution is the identity.
 import shell as _shell
 
-from .theme import BTN_3D
+from .theme import BTN_3D, MUTED, TXT_NEG, TXT_POS
 
 _pending = {"calculator": None, "expected_move": None, "swing": None,
             "calculator_legs": None, "gamma": None}
@@ -297,31 +297,150 @@ def watch_paper_results():
     return watch_view(PAPER_CREATE_VIEW, _on_change, interval=PAPER_RESULT_POLL_SEC)
 
 
+LEDGER_CAPS_VIEW = "options:ledger_caps"
+# The dialog's own quantity ceiling when the preview names none.
+PAPER_QTY_CEILING = 100
+
+# A preview line's tone -> the theme's text token. A fixed map (the finite-set
+# rule): a tone the map does not know renders muted, never unstyled.
+_TONE_CLASS = {"pos": TXT_POS, "neg": TXT_NEG, "muted": MUTED}
+
+
+def _dialog_money(v):
+    """``$190`` when the cents are .00, else ``$187.50`` - the app's money shape."""
+    return f"${v:,.0f}" if abs(v - round(v)) < 0.005 else f"${v:,.2f}"
+
+
+def paper_dialog_view(signal, caps, qty):
+    """Everything the Paper dialog shows for ``qty`` contracts. PURE.
+
+    ``caps`` is the ``options:ledger_caps`` view as read when the dialog opened.
+    The preview is ``book_fit.preview`` - the service's own rungs, line for line.
+
+    ``can_create`` blocks only what the page KNOWS the Ledger will refuse: a
+    breach, or a quantity that is not a whole number of at least 1. A preview
+    that is unavailable for any other reason (no caps view, no risk stamp) does
+    NOT block - the service checks every cap on the click, so a trade the page
+    merely cannot preview is still the Ledger's to decide.
+    """
+    from shared import book_caps
+
+    from . import book_fit
+    from .strategies import strategy_label
+
+    sig = signal if isinstance(signal, dict) else {}
+    p = book_fit.preview(sig, caps, qty)
+
+    label = strategy_label(sig.get("type") or "") or ""
+    title = " ".join(part for part in ("Paper trade", str(sig.get("symbol") or ""),
+                                       label) if part)
+    if sig.get("expiration"):
+        title += f" · {sig['expiration']}"
+
+    one = book_caps.booked_risk(sig.get("ledger_risk_basis"), 1)
+    risk_text = (f"Risk {_dialog_money(one)} per contract"
+                 if one is not None and one > 0 else "")
+
+    bad_qty = book_fit.whole_quantity(qty) is None
+    available = bool(p.get("available"))
+    breach = p.get("breach") if available else None
+    fits = p.get("max_quantity")
+    fits = fits if isinstance(fits, int) and not isinstance(fits, bool) else None
+
+    fits_text = ""
+    if breach is not None:
+        if fits is not None and fits > 0:
+            fits_text = ("Up to 1 contract fits." if fits == 1
+                         else f"Up to {fits} contracts fit.")
+        else:
+            fits_text = "No quantity fits the paper ledger's limits right now."
+
+    lines = [{**line, "class": _TONE_CLASS.get(line.get("tone"), MUTED)}
+             for line in (p.get("lines") or [])]
+    return {
+        "title": title,
+        "risk_text": risk_text,
+        "lines": lines,
+        "note": "" if available else (p.get("unavailable_text") or ""),
+        "block_text": p.get("block_text") or "",
+        "fits_text": fits_text,
+        "can_create": not (bad_qty or breach is not None),
+        "qty_max": fits if available and fits is not None and fits > 0
+        else PAPER_QTY_CEILING,
+    }
+
+
 def send_to_paper(signal):
     if not signal:
         ui.notify("Select a signal first.", type="warning")
         return
 
-    with ui.dialog() as dlg, ui.card():
-        ui.label(f"Paper trade {signal.get('symbol')} {signal.get('type')} "
-                 f"{signal.get('expiration', '')}").classes("text-subtitle1")
-        qty = ui.number("Quantity", value=1, min=1, max=100)
+    # Read ONCE when the dialog opens: the preview recomputes on every quantity
+    # change against this snapshot, and the service re-checks on the click.
+    caps = bus_client.read(LEDGER_CAPS_VIEW)
+    state = {"view": paper_dialog_view(signal, caps, 1)}
+
+    with ui.dialog() as dlg, ui.card().classes("min-w-[320px] gap-2"):
+        view = state["view"]
+        ui.label(view["title"]).classes("text-subtitle1")
+        risk = ui.label(view["risk_text"]).classes(f"text-sm {MUTED}")
+        lines_box = ui.column().classes("gap-1 w-full")
+        note = ui.label("").classes(f"text-xs {MUTED}")
+        block = ui.label("").classes(f"text-sm {TXT_NEG}")
+        fits = ui.label("").classes(f"text-xs {MUTED}")
+        qty = ui.number("Quantity", value=1, min=1, max=view["qty_max"])
 
         def confirm():
+            # Re-check at click time: the button's enabled state is a display,
+            # never the gate.
+            current = paper_dialog_view(signal, caps, qty.value)
+            if not current["can_create"]:
+                return
             # Engine-free: enqueue a paper_create command for the options service
             # to build + persist the trade (then refresh the Paper Trades ledger
             # view). The signal dict is a plain dict of strings/numbers, so it is
             # JSON-serializable onto the command stream.
             bus_client.request("options", {
                 "type": "paper_create",
-                "args": {"signal": signal, "qty": int(qty.value or 1)},
+                "args": {"signal": signal, "qty": int(qty.value)},
             })
             ui.notify("Sent — the paper ledger answers in a moment.", type="info")
             dlg.close()
 
         with ui.row():
-            ui.button("Create", color=None, on_click=confirm).props("no-caps").classes(BTN_3D)
+            create = ui.button("Create", color=None, on_click=confirm) \
+                .props("no-caps").classes(BTN_3D)
             ui.button("Cancel", on_click=dlg.close).props("flat")
+
+        def paint(v):
+            risk.set_text(v["risk_text"])
+            risk.set_visibility(bool(v["risk_text"]))
+            lines_box.clear()
+            with lines_box:
+                for line in v["lines"]:
+                    with ui.row().classes("gap-2 items-baseline no-wrap"):
+                        ui.label(line["label"]).classes(f"text-xs {MUTED} w-24 shrink-0")
+                        ui.label(line["text"]).classes(f"text-sm {line['class']}")
+            for el, key in ((note, "note"), (block, "block_text"), (fits, "fits_text")):
+                el.set_text(v[key])
+                el.set_visibility(bool(v[key]))
+            # ``ui.number`` keeps ``max`` in ``_props``. Written straight to the
+            # prop + update(), NOT through the ``max`` setter: the setter also
+            # runs ``sanitize()``, which would clamp the value the reader just
+            # typed before the breach line and "Up to N fit" could say why. The
+            # element's own blur handler still clamps to this max on leaving
+            # the field.
+            if qty._props.get("max") != v["qty_max"]:
+                qty._props["max"] = v["qty_max"]
+                qty.update()
+            create.set_enabled(v["can_create"])
+
+        def on_qty(e):
+            state["view"] = paper_dialog_view(signal, caps, e.value)
+            paint(state["view"])
+
+        qty.on_value_change(on_qty)
+        paint(view)
     dlg.open()
 
 
