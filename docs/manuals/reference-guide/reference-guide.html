@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-14</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-15</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -256,6 +256,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#what-it-is_17">What it is</a></li>
 <li><a href="#where-the-data-comes-from_16">Where the data comes from</a></li>
 <li><a href="#automatic-exits">Automatic exits</a></li>
+<li><a href="#risk-limits-on-new-trades">Risk limits on new trades</a></li>
 <li><a href="#reading-the-screen_16">Reading the screen</a></li>
 <li><a href="#why-it-matters_16">Why it matters</a></li>
 <li><a href="#when-to-use-it_15">When to use it</a></li>
@@ -2927,7 +2928,10 @@ never be confused.</p>
 acknowledged on first paint, keyed on the signal's unique id. Restarting the web app
 re-marks everything as new; that is page-side state, and deliberate.</p>
 <p><strong>Row actions</strong> send a signal to the <a href="#calculator">Calculator</a>, open its
-<a href="#expected-move">Expected Move</a>, or paper-trade it.</p>
+<a href="#expected-move">Expected Move</a>, or paper-trade it. A paper trade goes to the
+<a href="#paper-ledger">Paper Ledger</a> only if it fits that ledger's risk limits ($750 per
+trade, plus limits per symbol, sector, expiration and for the whole ledger); a
+message a moment later says it opened, or why not and how many contracts would fit.</p>
 <p><strong>Click a row</strong> to open the Trade detail panel on the right, with a probability
 speedometer and full contract detail.</p>
 <h3 id="why-it-matters_12">Why it matters</h3>
@@ -3341,6 +3345,10 @@ source of "why does this number not match" in the app:</p>
 <td><code>options_svc</code> (:8211), <code>cache:options:paper_trades</code></td>
 </tr>
 <tr>
+<td>New trades</td>
+<td>Checked against the risk limits below; the answer is <code>cache:options:paper_create</code>, shown as a message on the page that sent the trade</td>
+</tr>
+<tr>
 <td>Re-pricing</td>
 <td>Open trades are re-priced on page load and on the management cycle, during market hours only</td>
 </tr>
@@ -3421,6 +3429,62 @@ ever recorded a closed long option or debit spread, so 50% and 21 days come
 from published practitioner guidance rather than from this book's own history.
 They live in a config file for exactly that reason.</p>
 </blockquote>
+<h3 id="risk-limits-on-new-trades">Risk limits on new trades</h3>
+<p><strong>Since 2026-09-15 the ledger can say no.</strong> A trade sent from the <a href="#market-scanner">Market
+Scanner</a> or <a href="#strategy-finder">Strategy Finder</a> is checked against
+this ledger's <strong>own</strong> open trades before anything is written. Before then it had no
+limit at all — the quantity you typed was the quantity booked.</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Level</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Per trade</td>
+<td>at most <strong>$750</strong> of max loss</td>
+</tr>
+<tr>
+<td>Per symbol</td>
+<td><strong>3</strong> open positions and <strong>$750</strong> of max loss</td>
+</tr>
+<tr>
+<td>Per sector</td>
+<td><strong>5</strong> open positions and <strong>$1,500</strong> of max loss — the index products ($SPX, SPY, QQQ, $NDX, DIA, IWM) count as one group</td>
+</tr>
+<tr>
+<td>Per expiration</td>
+<td><strong>5</strong> open positions expiring the same day, across every symbol</td>
+</tr>
+<tr>
+<td>Whole ledger</td>
+<td>open max loss at most <strong>20%</strong> of equity — $25,000 plus the realized P&amp;L of closed trades</td>
+</tr>
+</tbody>
+</table>
+<p>The last four are the <a href="#paper-account">Paper Account</a>'s own concentration limits.
+The per-trade limit is not: the engine's is <strong>$250</strong>, which also decides how wide the
+scanner builds its spreads, and at $250 most of the Directional tab's long options
+could not be opened by hand at all.</p>
+<p><strong>Every click gets an answer</strong>, a second or so later, on the page you sent it from:</p>
+<ul>
+<li><em>Paper ledger: opened 2 × SPY Credit spread — put.</em></li>
+<li><em>Paper ledger: not opened — risks $900, over the $750 per-trade limit. Up to 1
+  contract fits.</em> <strong>Up to N contracts fit</strong> is the largest size of the same trade that
+  clears every limit now; it is left off when not even one does.</li>
+<li><em>Paper ledger: not opened — ORCL already holds 3 of 3 positions.</em></li>
+</ul>
+<p>⚠ <strong>Three things that follow from the rules:</strong></p>
+<ul>
+<li><strong>Delete all closed moves the 20% limit</strong>, because equity is built from the
+  realized P&amp;L of closed trades and deleting them deletes that history.</li>
+<li><strong>One $750 trade fills its symbol</strong>: the per-trade limit and the per-symbol risk
+  limit are the same number.</li>
+<li><strong>An old open row whose max loss cannot be read counts $0</strong> toward the dollar
+  limits, though it still counts toward the position limits.</li>
+</ul>
 <h3 id="reading-the-screen_16">Reading the screen</h3>
 <p>Columns: <strong>SYMBOL · STRAT · STRIKES · EXP · QTY · CREDIT · RISK · P&amp;L · STATUS ·
 ENTRY</strong>, newest first. P&amp;L shows realized for closed trades and live unrealized for open
@@ -4142,8 +4206,10 @@ option leg to that one date, which collapses a calendar into a single-expiry tra
 structures (long call/put, bull call, bear put) and the <strong>call and put butterflies and
 condors</strong>. The ledger refuses a debit structure that arrives with no positive debit,
 rather than opening it as a free trade whose every later mark would overstate the
-result. The ledger has no earnings check, so a trade tagged <em>Earnings</em> opens there like
-any other. No button for:</p>
+result. Every trade the button sends is checked against the ledger's <a href="#paper-ledger">risk
+limits</a>, and a message says whether it opened — or why not, and how many
+contracts would fit when a smaller size would. The ledger has no earnings check, so a
+trade tagged <em>Earnings</em> opens there like any other. No button for:</p>
 <table>
 <thead>
 <tr>
@@ -5166,7 +5232,7 @@ workflow.</p>
 <td>Market Scanner · Strategy Finder</td>
 <td><strong>Send to Paper trade</strong></td>
 <td>Paper Ledger</td>
-<td>The trade, as a paper entry</td>
+<td>The trade, as a paper entry — if it fits the ledger's risk limits; a message answers either way</td>
 </tr>
 <tr>
 <td>Market Scanner · Strategy Finder · Paper · Captured · Calculator</td>

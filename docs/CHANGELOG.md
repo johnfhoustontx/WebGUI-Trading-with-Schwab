@@ -16,7 +16,7 @@ with no risk limit at all.)
 - **The Account did not change.** `paper_concentration.concentration_reject` is now
   a thin adapter over it; `options-scanner/tests/test_book_caps_equivalence.py`
   freezes the pre-change function and proves identical decisions over 5000
-  generated books. options-scanner **1736 passed / 2 skipped** after the rewire.
+  generated books. options-scanner **1734 passed / 2 skipped** after the rewire (1736 collected).
 - **The Paper Ledger is capped.** `options_svc.compute.create_paper_trade` checks
   the `max_loss_total` of the trade `paper_trader` would book against the Ledger's
   OWN open trades and writes nothing on a refusal: a **$750** per-trade limit
@@ -26,7 +26,8 @@ with no risk limit at all.)
   realized P&L of the Ledger's closed trades (moves on a close, never on a mark).
   A quantity that is not a whole number ≥ 1, a signal missing a field, or an
   unreadable max loss is an error outcome with nothing written (missing-field and
-  wrong-type also record a degrade on /health). options_svc **1987 passed**.
+  wrong-type also record a degrade on /health). options_svc **1987 passed** after
+  Task 6's fixes (mid-series).
 - **Why $750, not the Account's $250.** Measured on prod 2026-09-15: at $250, 62% of
   the Directional tab's long options could not be opened by hand; at $750, about a
   fifth. The Account's `MAX_RISK_PER_TRADE` stays $250 because it also sizes the
@@ -36,9 +37,10 @@ with no risk limit at all.)
   `seq`), and still publishes an error before dead-lettering when the command
   raises. The Market Scanner and Strategy Finder watch it (1 s poll) and toast it:
   *Paper ledger: opened 2 × SPY Credit spread — put.* · *Paper ledger: not opened —
-  risks $900, over the $750 per-trade limit.* (with *Up to N contracts fit.* when N
-  is above zero) · *Paper ledger: not opened — ORCL already holds 3 of 3
-  positions.* The dialog's own toast now says only *Sent — the paper ledger answers
+  risks $900, over the $750 per-trade limit.* (with a suffix when a smaller size
+  would clear — see below) · *Paper ledger: not opened — ORCL already holds 3 of 3
+  positions.* The suffix reads *Up to N contracts fit.*, or *Up to 1 contract
+  fits.* The dialog's own toast now says only *Sent — the paper ledger answers
   in a moment.* webgui **4242 passed / 1 skipped**.
 - **Known limits (accepted in review).** *Delete all closed* removes realized
   history, so equity and the deployment cap move; an old open Ledger row with no

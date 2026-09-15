@@ -1928,7 +1928,10 @@ acknowledged on first paint, keyed on the signal's unique id. Restarting the web
 re-marks everything as new; that is page-side state, and deliberate.
 
 **Row actions** send a signal to the [Calculator](#calculator), open its
-[Expected Move](#expected-move), or paper-trade it.
+[Expected Move](#expected-move), or paper-trade it. A paper trade goes to the
+[Paper Ledger](#paper-ledger) only if it fits that ledger's risk limits ($750 per
+trade, plus limits per symbol, sector, expiration and for the whole ledger); a
+message a moment later says it opened, or why not and how many contracts would fit.
 
 **Click a row** to open the Trade detail panel on the right, with a probability
 speedometer and full contract detail.
@@ -2286,6 +2289,7 @@ They are fully isolated. Nothing crosses between them.
 | | |
 |---|---|
 | Service | `options_svc` (:8211), `cache:options:paper_trades` |
+| New trades | Checked against the risk limits below; the answer is `cache:options:paper_create`, shown as a message on the page that sent the trade |
 | Re-pricing | Open trades are re-priced on page load and on the management cycle, during market hours only |
 | Management cycle | **Hourly, 09:00–14:00 CT** on trading days (the manual paper account's own cadence — there is no 15:00 run), plus **Run manage cycle** on [Paper Account](#paper-account) |
 
@@ -2347,6 +2351,43 @@ percent-of-premium stop on if you want one.
 > ever recorded a closed long option or debit spread, so 50% and 21 days come
 > from published practitioner guidance rather than from this book's own history.
 > They live in a config file for exactly that reason.
+
+### Risk limits on new trades
+
+**Since 2026-09-15 the ledger can say no.** A trade sent from the [Market
+Scanner](#market-scanner) or [Strategy Finder](#strategy-finder) is checked against
+this ledger's **own** open trades before anything is written. Before then it had no
+limit at all — the quantity you typed was the quantity booked.
+
+| Limit | Level |
+|---|---|
+| Per trade | at most **$750** of max loss |
+| Per symbol | **3** open positions and **$750** of max loss |
+| Per sector | **5** open positions and **$1,500** of max loss — the index products ($SPX, SPY, QQQ, $NDX, DIA, IWM) count as one group |
+| Per expiration | **5** open positions expiring the same day, across every symbol |
+| Whole ledger | open max loss at most **20%** of equity — $25,000 plus the realized P&L of closed trades |
+
+The last four are the [Paper Account](#paper-account)'s own concentration limits.
+The per-trade limit is not: the engine's is **$250**, which also decides how wide the
+scanner builds its spreads, and at $250 most of the Directional tab's long options
+could not be opened by hand at all.
+
+**Every click gets an answer**, a second or so later, on the page you sent it from:
+
+- *Paper ledger: opened 2 × SPY Credit spread — put.*
+- *Paper ledger: not opened — risks $900, over the $750 per-trade limit. Up to 1
+  contract fits.* **Up to N contracts fit** is the largest size of the same trade that
+  clears every limit now; it is left off when not even one does.
+- *Paper ledger: not opened — ORCL already holds 3 of 3 positions.*
+
+⚠ **Three things that follow from the rules:**
+
+- **Delete all closed moves the 20% limit**, because equity is built from the
+  realized P&L of closed trades and deleting them deletes that history.
+- **One $750 trade fills its symbol**: the per-trade limit and the per-symbol risk
+  limit are the same number.
+- **An old open row whose max loss cannot be read counts $0** toward the dollar
+  limits, though it still counts toward the position limits.
 
 ### Reading the screen
 
@@ -2936,8 +2977,10 @@ option leg to that one date, which collapses a calendar into a single-expiry tra
 structures (long call/put, bull call, bear put) and the **call and put butterflies and
 condors**. The ledger refuses a debit structure that arrives with no positive debit,
 rather than opening it as a free trade whose every later mark would overstate the
-result. The ledger has no earnings check, so a trade tagged *Earnings* opens there like
-any other. No button for:
+result. Every trade the button sends is checked against the ledger's [risk
+limits](#paper-ledger), and a message says whether it opened — or why not, and how many
+contracts would fit when a smaller size would. The ledger has no earnings check, so a
+trade tagged *Earnings* opens there like any other. No button for:
 
 | Structure | Why |
 |---|---|
@@ -3752,7 +3795,7 @@ workflow.
 | From | Action | To | What carries across |
 |---|---|---|---|
 | Market Scanner · Strategy Finder | **Send to Calculator** | Calculator | Symbol and all legs (the chain loads first, then the legs apply) |
-| Market Scanner · Strategy Finder | **Send to Paper trade** | Paper Ledger | The trade, as a paper entry |
+| Market Scanner · Strategy Finder | **Send to Paper trade** | Paper Ledger | The trade, as a paper entry — if it fits the ledger's risk limits; a message answers either way |
 | Market Scanner · Strategy Finder · Paper · Captured · Calculator | **Expected Move** | Expected Move (new tab) | Symbol, expiry and strikes |
 | Calculator ⇄ Simulator | *(nothing to press)* | the other page | One shared position: symbol, strategy, legs, selected expiration — whichever page was edited last |
 | Flow Alerts | **click a row** | Dealer Positioning | That row's symbol |

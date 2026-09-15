@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-14</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-15</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -206,7 +206,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Paper Ledger</strong></td>
 <td><code>options_svc</code></td>
-<td><code>cache:options:paper_trades</code>, <code>:paper_analyze</code></td>
+<td><code>cache:options:paper_trades</code>, <code>:paper_analyze</code>, <code>:paper_create</code> (the Paper button's answer, read by Market Scanner and Strategy Finder)</td>
 </tr>
 <tr>
 <td><strong>Paper Account</strong></td>
@@ -557,8 +557,8 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 </tr>
 <tr>
 <td><code>paper_create</code></td>
-<td><code>{signal, qty}</code></td>
-<td><code>cache:options:paper_trades</code></td>
+<td><code>{signal, qty}</code> — opens into the Paper <strong>Ledger</strong> only if every risk cap in <code>shared.book_caps</code> clears against the Ledger's own open trades ($750 per trade, plus the Account's symbol / sector / expiry / deployment caps); a refusal writes nothing</td>
+<td><code>cache:options:paper_trades</code> + <code>cache:options:paper_create</code> — the outcome, written on <strong>every</strong> answer with a 600 s TTL: <code>{status, symbol, type, expiration, qty, rungs[], seq, ts}</code> plus, by <code>status</code>: <code>opened</code> → <code>trade_id</code>; <code>refused</code> → <code>code</code> (the binding rung), <code>message</code> (a plain sentence), <code>max_quantity</code> (the largest quantity that clears every cap now; <code>0</code> when none does); <code>error</code> / <code>stale</code> → <code>message</code>. <code>status</code> is one of <code>opened</code> · <code>refused</code> · <code>stale</code> · <code>error</code>. <code>seq</code> rises on each publish, so two identical refusals are two answers; the <code>:ver</code> counter can reset to 1 when the TTL expires, so compare versions with <code>!=</code>. Each rung is <code>{code, kind, scope, used, after, cap, binds, skipped}</code> — <code>kind</code> <code>count</code> or <code>risk</code>, a skipped rung has <code>used</code>/<code>after</code>/<code>cap</code> <code>null</code> and <code>binds: false</code>; <code>rungs</code> is <code>[]</code> on <code>stale</code> and on errors raised before the caps ran. <code>qty</code> is <code>null</code> on <code>stale</code>, the as-sent value on a bad quantity, and absent when the command raised. A command that <strong>raises</strong> publishes an <code>error</code> (<code>message</code> <em>The paper ledger could not process the request.</em>) and is then dead-lettered</td>
 </tr>
 <tr>
 <td><code>paper_reload</code></td>
@@ -1135,6 +1135,7 @@ cache:options:header           events:options:header
 cache:options:swing            events:options:swing
 cache:options:paper_account    events:options:paper_account
 cache:options:paper_trades     events:options:paper_trades
+cache:options:paper_create     events:options:paper_create   (TTL 600 s; the Paper button's answer)
 cache:options:paper_analyze    events:options:paper_analyze
 cache:options:captured         events:options:captured
 cache:options:captured_flags   events:options:captured_flags

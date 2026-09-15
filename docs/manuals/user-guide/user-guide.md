@@ -1003,7 +1003,7 @@ two-pane layout.
 **Per-row action buttons** (also see *Cross-page actions* below):
 
 - **Send to Calculator** — open the P&L Calculator pre-filled with this trade.
-- **Send to Paper Trade** — create a paper trade from this signal, if it fits the
+- **Send to Paper trade** — create a paper trade from this signal, if it fits the
   Paper Ledger's risk limits; a message a moment later says whether it opened
   (see *Risk limits on new trades* under **Paper Ledger**).
 - **Expected Move** — open the Expected Move chart for this trade in a new tab.
@@ -1860,7 +1860,7 @@ Three buttons appear on signal rows across the Options section:
 | Action | Available on | Effect |
 |--------|--------------|--------|
 | **Send to Calculator** | Market Scanner, Strategy Finder | Opens the Calculator pre-filled (strategy, symbol, expiry, strikes, premiums, IV) and runs it. |
-| **Send to Paper Trade** | Market Scanner, Strategy Finder | Asks for a quantity, then creates a Paper Ledger trade if it fits the ledger's risk limits. A message a moment later says it opened, or why not. Stays on the current page. |
+| **Send to Paper trade** | Market Scanner, Strategy Finder | Asks for a quantity, then creates a Paper Ledger trade if it fits the ledger's risk limits. A message a moment later says it opened, or why not. Stays on the current page. |
 | **Expected Move** | Market Scanner, Strategy Finder, Paper Ledger, Captured, Calculator | Opens the Expected Move chart in a new browser tab, pre-filled and drawn. |
 
 ---

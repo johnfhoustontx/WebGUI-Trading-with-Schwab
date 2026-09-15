@@ -397,7 +397,8 @@ four top picks, and the full ranked list.
   debit to pay.
 - **Paper checks the ledger's risk limits** ($750 per trade, plus limits per
   symbol, sector, expiration and for the whole ledger). A message a moment later
-  says the trade opened, or why it was not and how many contracts would fit.
+  says the trade opened, or why it was not — and, when a smaller size would fit,
+  how many contracts.
 - **The paper ledger has no earnings check**: a trade tagged *Earnings* opens
   there like any other.
 - **Calculator** works on every idea, calendars and shares included — but

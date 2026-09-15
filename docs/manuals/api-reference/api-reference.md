@@ -33,7 +33,7 @@ keys that feed it. Menu order matches the rail.
 | **Strategy Finder** | `options_svc` | `cache:options:swing` |
 | **Expected Move** | `options_svc` | `cache:options:em_chain`, `:expected_move` |
 | **Captured Signals** | `options_svc` | `cache:options:captured`, `:captured_flags`, `:captured_closed` |
-| **Paper Ledger** | `options_svc` | `cache:options:paper_trades`, `:paper_analyze` |
+| **Paper Ledger** | `options_svc` | `cache:options:paper_trades`, `:paper_analyze`, `:paper_create` (the Paper button's answer, read by Market Scanner and Strategy Finder) |
 | **Paper Account** | `options_svc` | `cache:options:paper_account`, `:paper_analytics` |
 | **Rescue** | `options_svc` | `cache:options:rescue:<position_id>`, `:rescue_summary` |
 | **Trade Analyzer** | `trade_svc` :8213 | `cache:trade:analysis`, `:deepdive`, `:deepdive_query` |
@@ -227,7 +227,7 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 | `paper_entry` | — | `cache:options:paper_account` |
 | `paper_manage` | — | `cache:options:paper_account` |
 | `paper_reset` | `{starting_balance}` | `cache:options:paper_account` |
-| `paper_create` | `{signal, qty}` | `cache:options:paper_trades` |
+| `paper_create` | `{signal, qty}` — opens into the Paper **Ledger** only if every risk cap in `shared.book_caps` clears against the Ledger's own open trades ($750 per trade, plus the Account's symbol / sector / expiry / deployment caps); a refusal writes nothing | `cache:options:paper_trades` + `cache:options:paper_create` — the outcome, written on **every** answer with a 600 s TTL: `{status, symbol, type, expiration, qty, rungs[], seq, ts}` plus, by `status`: `opened` → `trade_id`; `refused` → `code` (the binding rung), `message` (a plain sentence), `max_quantity` (the largest quantity that clears every cap now; `0` when none does); `error` / `stale` → `message`. `status` is one of `opened` · `refused` · `stale` · `error`. `seq` rises on each publish, so two identical refusals are two answers; the `:ver` counter can reset to 1 when the TTL expires, so compare versions with `!=`. Each rung is `{code, kind, scope, used, after, cap, binds, skipped}` — `kind` `count` or `risk`, a skipped rung has `used`/`after`/`cap` `null` and `binds: false`; `rungs` is `[]` on `stale` and on errors raised before the caps ran. `qty` is `null` on `stale`, the as-sent value on a bad quantity, and absent when the command raised. A command that **raises** publishes an `error` (`message` *The paper ledger could not process the request.*) and is then dead-lettered |
 | `paper_reload` | — | `cache:options:paper_trades` |
 | `paper_close` | `{trade_id, debit}` | `cache:options:paper_trades` |
 | `paper_delete` | `{trade_id}` | `cache:options:paper_trades` |
@@ -509,6 +509,7 @@ cache:options:header           events:options:header
 cache:options:swing            events:options:swing
 cache:options:paper_account    events:options:paper_account
 cache:options:paper_trades     events:options:paper_trades
+cache:options:paper_create     events:options:paper_create   (TTL 600 s; the Paper button's answer)
 cache:options:paper_analyze    events:options:paper_analyze
 cache:options:captured         events:options:captured
 cache:options:captured_flags   events:options:captured_flags

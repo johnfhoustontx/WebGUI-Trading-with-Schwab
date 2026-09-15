@@ -2329,7 +2329,7 @@ change to a second service's envelope with its own measurement. Design:
 trade, deployment, symbol positions, symbol risk, sector positions, sector risk,
 expiry positions — over plain rows, and reports **every** rung (`used`, `after`,
 `cap`, `binds`, `skipped`) rather than only the first breach, plus `first_breach`,
-`max_quantity` and `describe` (the plain sentence every screen shows). It imports
+`max_quantity` and `describe` (the sentence the Paper toast shows). It imports
 only `math` and `shared.driver_policy`, which is what puts it on the Tier-1
 allow-list. The Account's `concentration_reject` is an adapter over it, and
 `options-scanner/tests/test_book_caps_equivalence.py` holds a frozen copy of the
@@ -2357,7 +2357,8 @@ refusal. Three decisions in it are load-bearing:
   `STARTING_BALANCE` + realized P&L of its closed trades — it moves on a close,
   never on a mark.
 
-**Every click is answered.** `handlers` publishes each outcome — opened, refused,
+**Every click the options service consumes is answered** — nothing publishes
+while the service is down. `handlers` publishes each outcome — opened, refused,
 stale, error — to **`cache:options:paper_create`** (600 s TTL, a per-publish
 `seq`), including after `create_paper_trade` raises, before dead-lettering: a
 refusal the screen cannot see is a button that does nothing. The Market Scanner
