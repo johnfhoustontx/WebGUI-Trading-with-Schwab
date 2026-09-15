@@ -4,7 +4,53 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-14 (**Scheduled gamma briefings run on the Claude subscription.**
+**Last updated:** 2026-09-15 (**Paper Ledger capped; one cap module.**
+Operator request: the Paper button opened whatever quantity was typed into a book
+with no risk limit at all.)
+
+- **One cap module.** `shared/book_caps.py` evaluates every paper-book rung — per
+  trade, deployment, symbol positions, symbol risk, sector positions, sector risk,
+  expiry positions — over plain data, reporting each rung (`used`, `after`, `cap`,
+  `binds`, `skipped`) plus `first_breach`, `max_quantity` and `describe` (plain
+  sentences). Pure (`math` + `shared.driver_policy`); on the Tier-1 allow-list.
+- **The Account did not change.** `paper_concentration.concentration_reject` is now
+  a thin adapter over it; `options-scanner/tests/test_book_caps_equivalence.py`
+  freezes the pre-change function and proves identical decisions over 5000
+  generated books. options-scanner **1736 passed / 2 skipped** after the rewire.
+- **The Paper Ledger is capped.** `options_svc.compute.create_paper_trade` checks
+  the `max_loss_total` of the trade `paper_trader` would book against the Ledger's
+  OWN open trades and writes nothing on a refusal: a **$750** per-trade limit
+  (`config_paper.LEDGER_MAX_RISK_PER_TRADE`), plus the Account's six caps — 3
+  positions / $750 per symbol, 5 positions / $1,500 per sector, 5 positions per
+  expiry across the book, 20% of equity deployed. Equity is $25,000 plus the
+  realized P&L of the Ledger's closed trades (moves on a close, never on a mark).
+  A quantity that is not a whole number ≥ 1, a signal missing a field, or an
+  unreadable max loss is an error outcome with nothing written (missing-field and
+  wrong-type also record a degrade on /health). options_svc **1987 passed**.
+- **Why $750, not the Account's $250.** Measured on prod 2026-09-15: at $250, 62% of
+  the Directional tab's long options could not be opened by hand; at $750, about a
+  fifth. The Account's `MAX_RISK_PER_TRADE` stays $250 because it also sizes the
+  scanner's widths.
+- **Every Paper click is answered.** `handlers` publishes each outcome (opened /
+  refused / stale / error) to `cache:options:paper_create` (600 s TTL, per-publish
+  `seq`), and still publishes an error before dead-lettering when the command
+  raises. The Market Scanner and Strategy Finder watch it (1 s poll) and toast it:
+  *Paper ledger: opened 2 × SPY Credit spread — put.* · *Paper ledger: not opened —
+  risks $900, over the $750 per-trade limit.* (with *Up to N contracts fit.* when N
+  is above zero) · *Paper ledger: not opened — ORCL already holds 3 of 3
+  positions.* The dialog's own toast now says only *Sent — the paper ledger answers
+  in a moment.* webgui **4242 passed / 1 skipped**.
+- **Known limits (accepted in review).** *Delete all closed* removes realized
+  history, so equity and the deployment cap move; an old open Ledger row with no
+  usable max loss counts $0 toward the risk sums (still counts toward the position
+  caps); the $750 per-trade limit equals the $750 per-symbol risk cap, so one
+  maximum-size trade fills its symbol; the read-book-then-insert is safe only
+  because `options_svc` runs one consumer on `cmd:options`.
+- Design + plan:
+  [design](plans/2026-09-15-trade-checklist-and-ledger-caps-design.md) ·
+  [plan](plans/2026-09-15-trade-checklist-and-ledger-caps-plan.md).
+
+**Prior —** 2026-09-14 (**Scheduled gamma briefings run on the Claude subscription.**
 Operator request: keep the briefings' information without the API spend.)
 
 - **What changed.** The four `[slots.analyze]` briefings — 8 billed API calls per

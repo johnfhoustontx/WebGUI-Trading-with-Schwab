@@ -2227,7 +2227,8 @@ invisible when wrong:
 and clear both ends. On 2026-09-08 it was: 14 open positions, all ORCL, $2,829 —
 11.6% of a $24,490 account — one direction, one expiry, over a report the next
 day. **`paper_concentration.concentration_reject`** is the missing middle,
-enforced at `run_entry_cycle`: `MAX_POSITIONS_PER_SYMBOL` ·
+enforced at `run_entry_cycle` — and since 2026-09-15 a thin adapter over
+`shared/book_caps.py` (see the next section): `MAX_POSITIONS_PER_SYMBOL` ·
 `MAX_RISK_PER_SYMBOL` · `MAX_POSITIONS_PER_EXPIRY` (**counted across symbols** —
 five positions on one Friday is a bet on a date).
 
@@ -2235,9 +2236,12 @@ five positions on one Friday is a bet on a date).
 `RISK_TOO_HIGH`. The condition is transient — it describes the book at this
 instant, not the signal — and an order row would make `has_order_for_signal`
 blacklist the signal permanently, so a name that freed up an hour later could
-never be entered. **Accepted consequence: it leaves no trace in the UI**, only
-the journal (`SKIPPED <sym> <reason> (concentration cap)`); the visible symptom
-is a good signal that never opens. Do not "fix" that by recording the row.
+never be entered. **Accepted consequence, for the automatic Account's entry
+cycle: it leaves no trace in the UI**, only the journal
+(`SKIPPED <sym> <reason> (concentration cap)`); the visible symptom is a good
+signal that never opens. Do not "fix" that by recording the row. (A Paper-button
+trade into the Ledger is the opposite case: a click is a person waiting, so its
+refusal comes back as a toast.)
 
 **The FIFTH rung is the book-wide deployment cap** (`MAX_DEPLOYED_RISK_PCT`,
 0.20): total open max loss as a fraction of equity. The four above are per trade,
@@ -2263,8 +2267,8 @@ enforced, and a zero denominator would refuse every trade forever, which reads a
 a broken engine. ⚠ **A hand-opened cash-secured put consumes it fast**: that
 structure's `max_loss_total` is the whole strike notional, so one $15k CSP is 62%
 of this book and the auto entry cycle then stops opening spreads — correctly (the
-cash really is committed) but invisibly, since a concentration breach leaves no UI
-trace. Check the journal before assuming the engine is stuck.
+cash really is committed) but invisibly, since the entry cycle's concentration
+breach leaves no UI trace. Check the journal before assuming the engine is stuck.
 
 The risk sum goes through **`shared.driver_policy.open_risk_dollars`** rather
 than a local `sum(...)` — a NaN total makes every `>` False and silently
@@ -2318,6 +2322,59 @@ risk, `max_concurrent` and `daily_risk_budget` — not `concentration_reject`, w
 lives in a module `driver_svc` policy cannot reach. Extending the cap there is a
 change to a second service's envelope with its own measurement. Design:
 [the B4 doc](docs/plans/2026-09-12-sector-cap-design.md).
+
+## The Paper Ledger is capped, and there is one cap module
+
+**`shared/book_caps.py` evaluates every paper-book rung in ONE place** — per
+trade, deployment, symbol positions, symbol risk, sector positions, sector risk,
+expiry positions — over plain rows, and reports **every** rung (`used`, `after`,
+`cap`, `binds`, `skipped`) rather than only the first breach, plus `first_breach`,
+`max_quantity` and `describe` (the plain sentence every screen shows). It imports
+only `math` and `shared.driver_policy`, which is what puts it on the Tier-1
+allow-list. The Account's `concentration_reject` is an adapter over it, and
+`options-scanner/tests/test_book_caps_equivalence.py` holds a frozen copy of the
+pre-module function and proves identical decisions over generated books — **edit
+the rungs in `book_caps`, never in the adapter.**
+
+**The Ledger — the book the Paper button opens into — enforced no cap at all
+until 2026-09-15.** `options_svc.compute.create_paper_trade` now evaluates the
+rungs against the Ledger's **own** open trades and **writes nothing** on a
+refusal. Three decisions in it are load-bearing:
+
+- **It checks the risk it would BOOK** — the `max_loss_total` of the trade
+  `paper_trader` builds — never a figure recomputed from the signal, so the
+  per-share / per-contract unit traps cannot separate what was checked from what
+  was stored.
+- **`book_caps` counts an unusable candidate risk as ZERO** (right for the Account,
+  whose entry cycle sized the trade first), so **any non-Account caller must refuse
+  a non-positive or non-finite risk BEFORE calling `evaluate`** — or a trade with
+  no readable max loss passes every risk rung.
+- **Per-trade limits differ by book on purpose.** `LEDGER_MAX_RISK_PER_TRADE` is
+  $750; the Account's `MAX_RISK_PER_TRADE` stays $250, because that constant also
+  sizes the scanner's widths (`DEFAULT_MAX_RISK_DOLLARS`), and at $250 most of the
+  Directional tab's long options could not be opened by hand. The six concentration
+  caps are the Account's. Ledger equity for the deployment cap is
+  `STARTING_BALANCE` + realized P&L of its closed trades — it moves on a close,
+  never on a mark.
+
+**Every click is answered.** `handlers` publishes each outcome — opened, refused,
+stale, error — to **`cache:options:paper_create`** (600 s TTL, a per-publish
+`seq`), including after `create_paper_trade` raises, before dead-lettering: a
+refusal the screen cannot see is a button that does nothing. The Market Scanner
+and Strategy Finder watch it through `handoff.watch_paper_results`, and ⚠ that
+watch must compare versions with **`!=`**, since the TTL expiring resets the
+`:ver` counter to 1. A quantity that is not a whole number ≥ 1, a malformed
+signal, or an unreadable max loss is an **error** outcome, never a write.
+
+⚠ **The read-book-then-insert is not atomic.** It is safe only because
+`options_svc` runs ONE consumer on `cmd:options` and processes a batch in order; a
+second consumer needs a lock around the check and the insert. Accepted limits:
+**Delete all closed** on the Paper Ledger removes realized history, so equity —
+and the deployment cap — moves with it; an old open row with no usable max loss
+counts **$0** toward the risk sums (it still counts toward the position caps); and
+because the $750 per-trade limit equals the $750 per-symbol risk cap, one
+maximum-size trade fills its symbol. Design:
+[the doc](docs/plans/2026-09-15-trade-checklist-and-ledger-caps-design.md).
 
 ## ⚠ The "0-DTE" bucket spans DTE 0..4 — the name is a WINDOW LABEL, not a DTE
 

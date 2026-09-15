@@ -1003,7 +1003,9 @@ two-pane layout.
 **Per-row action buttons** (also see *Cross-page actions* below):
 
 - **Send to Calculator** — open the P&L Calculator pre-filled with this trade.
-- **Send to Paper Trade** — create a paper trade from this signal.
+- **Send to Paper Trade** — create a paper trade from this signal, if it fits the
+  Paper Ledger's risk limits; a message a moment later says whether it opened
+  (see *Risk limits on new trades* under **Paper Ledger**).
 - **Expected Move** — open the Expected Move chart for this trade in a new tab.
 
 The list re-scans itself every 15 minutes between 08:00 and 15:15 CT on trading
@@ -1163,6 +1165,34 @@ since 2026-09-13 so do butterflies and condors.
 - Click a row to load its **detail panel**; the app automatically runs a live
   analysis and overlays current Greeks and P&L.
 - Each row also has an **Expected Move** button.
+
+**Risk limits on new trades.** A trade sent with **Send to Paper trade** (Market
+Scanner) or **Paper** (Strategy Finder) is checked against this ledger's own open
+trades before it is written. If it would break a limit, nothing is written and a
+message says why. The limits:
+
+| Limit | Level |
+| --- | --- |
+| Per trade | at most **$750** of max loss |
+| Per symbol | **3** open positions and **$750** of max loss |
+| Per sector | **5** open positions and **$1,500** of max loss (the index products — $SPX, SPY, QQQ, $NDX, DIA, IWM — share one group) |
+| Per expiration | **5** open positions expiring the same day, across every symbol |
+| Whole ledger | open max loss at most **20%** of equity — $25,000 plus the realized P&L of your closed trades |
+
+A second or so after you press **Create** in the quantity box, a message answers the click:
+
+- *Paper ledger: opened 2 × SPY Credit spread — put.*
+- *Paper ledger: not opened — risks $900, over the $750 per-trade limit. Up to 1
+  contract fits.* — **Up to N contracts fit** is the largest quantity of the same
+  trade that would clear every limit right now; send again with that number. It is
+  left off when not even one contract fits.
+- *Paper ledger: not opened — ORCL already holds 3 of 3 positions.* — close a
+  position in that symbol, sector or expiration first.
+
+⚠ Equity counts your closed trades' realized P&L, so **Delete all closed** also
+changes the 20% limit. A $750 trade by itself uses the whole $750 allowance for its
+symbol. The limits apply to this ledger only — the Paper Account's automatic
+engine has its own, with a $250 per-trade limit.
 
 **Automatic exits (long options, debit spreads, butterflies and condors only).** Checked **hourly,
 09:00–14:00 CT** on the same run as the paper account — so a target reached at
@@ -1619,8 +1649,11 @@ trades the Paper Ledger records correctly: credit spreads, iron condors, long ca
 and puts, debit spreads, and the call and put **butterflies and condors**. A debit
 trade that arrives with no debit to pay is refused rather than booked as free.
 Straddles and strangles are for study only and have no button; neither do the iron
-butterfly, calendars, diagonals or the share structures. The Paper Ledger has no
-earnings check, so a trade tagged *Earnings* opens there like any other.
+butterfly, calendars, diagonals or the share structures. A trade the button takes
+is still checked against the Paper Ledger's risk limits, and a message says if it
+was not opened and why (see *Risk limits on new trades* under **Paper Ledger**).
+The Paper Ledger has no earnings check, so a trade tagged *Earnings* opens there
+like any other.
 **Calculator** carries every
 idea, calendars (both expirations) and share legs included — but clicking an
 expiration pill on the Calculator afterwards moves **every** option leg to that date,
@@ -1827,7 +1860,7 @@ Three buttons appear on signal rows across the Options section:
 | Action | Available on | Effect |
 |--------|--------------|--------|
 | **Send to Calculator** | Market Scanner, Strategy Finder | Opens the Calculator pre-filled (strategy, symbol, expiry, strikes, premiums, IV) and runs it. |
-| **Send to Paper Trade** | Market Scanner, Strategy Finder | Asks for a quantity, then creates a paper trade. Stays on the current page. |
+| **Send to Paper Trade** | Market Scanner, Strategy Finder | Asks for a quantity, then creates a Paper Ledger trade if it fits the ledger's risk limits. A message a moment later says it opened, or why not. Stays on the current page. |
 | **Expected Move** | Market Scanner, Strategy Finder, Paper Ledger, Captured, Calculator | Opens the Expected Move chart in a new browser tab, pre-filled and drawn. |
 
 ---

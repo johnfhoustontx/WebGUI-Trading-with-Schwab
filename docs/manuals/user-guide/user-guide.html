@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-14</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-15</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1187,7 +1187,9 @@ two-pane layout.</p>
 <p><strong>Per-row action buttons</strong> (also see <em>Cross-page actions</em> below):</p>
 <ul>
 <li><strong>Send to Calculator</strong> — open the P&amp;L Calculator pre-filled with this trade.</li>
-<li><strong>Send to Paper Trade</strong> — create a paper trade from this signal.</li>
+<li><strong>Send to Paper Trade</strong> — create a paper trade from this signal, if it fits the
+  Paper Ledger's risk limits; a message a moment later says whether it opened
+  (see <em>Risk limits on new trades</em> under <strong>Paper Ledger</strong>).</li>
 <li><strong>Expected Move</strong> — open the Expected Move chart for this trade in a new tab.</li>
 </ul>
 <p>The list re-scans itself every 15 minutes between 08:00 and 15:15 CT on trading
@@ -1328,6 +1330,54 @@ since 2026-09-13 so do butterflies and condors.</p>
   analysis and overlays current Greeks and P&amp;L.</li>
 <li>Each row also has an <strong>Expected Move</strong> button.</li>
 </ul>
+<p><strong>Risk limits on new trades.</strong> A trade sent with <strong>Send to Paper trade</strong> (Market
+Scanner) or <strong>Paper</strong> (Strategy Finder) is checked against this ledger's own open
+trades before it is written. If it would break a limit, nothing is written and a
+message says why. The limits:</p>
+<table>
+<thead>
+<tr>
+<th>Limit</th>
+<th>Level</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Per trade</td>
+<td>at most <strong>$750</strong> of max loss</td>
+</tr>
+<tr>
+<td>Per symbol</td>
+<td><strong>3</strong> open positions and <strong>$750</strong> of max loss</td>
+</tr>
+<tr>
+<td>Per sector</td>
+<td><strong>5</strong> open positions and <strong>$1,500</strong> of max loss (the index products — $SPX, SPY, QQQ, $NDX, DIA, IWM — share one group)</td>
+</tr>
+<tr>
+<td>Per expiration</td>
+<td><strong>5</strong> open positions expiring the same day, across every symbol</td>
+</tr>
+<tr>
+<td>Whole ledger</td>
+<td>open max loss at most <strong>20%</strong> of equity — $25,000 plus the realized P&amp;L of your closed trades</td>
+</tr>
+</tbody>
+</table>
+<p>A second or so after you press <strong>Create</strong> in the quantity box, a message answers the click:</p>
+<ul>
+<li><em>Paper ledger: opened 2 × SPY Credit spread — put.</em></li>
+<li><em>Paper ledger: not opened — risks $900, over the $750 per-trade limit. Up to 1
+  contract fits.</em> — <strong>Up to N contracts fit</strong> is the largest quantity of the same
+  trade that would clear every limit right now; send again with that number. It is
+  left off when not even one contract fits.</li>
+<li><em>Paper ledger: not opened — ORCL already holds 3 of 3 positions.</em> — close a
+  position in that symbol, sector or expiration first.</li>
+</ul>
+<p>⚠ Equity counts your closed trades' realized P&amp;L, so <strong>Delete all closed</strong> also
+changes the 20% limit. A $750 trade by itself uses the whole $750 allowance for its
+symbol. The limits apply to this ledger only — the Paper Account's automatic
+engine has its own, with a $250 per-trade limit.</p>
 <p><strong>Automatic exits (long options, debit spreads, butterflies and condors only).</strong> Checked <strong>hourly,
 09:00–14:00 CT</strong> on the same run as the paper account — so a target reached at
 09:15 is acted on at 10:00, or immediately if you press <strong>Run manage cycle</strong> on
@@ -1938,8 +1988,11 @@ trades the Paper Ledger records correctly: credit spreads, iron condors, long ca
 and puts, debit spreads, and the call and put <strong>butterflies and condors</strong>. A debit
 trade that arrives with no debit to pay is refused rather than booked as free.
 Straddles and strangles are for study only and have no button; neither do the iron
-butterfly, calendars, diagonals or the share structures. The Paper Ledger has no
-earnings check, so a trade tagged <em>Earnings</em> opens there like any other.
+butterfly, calendars, diagonals or the share structures. A trade the button takes
+is still checked against the Paper Ledger's risk limits, and a message says if it
+was not opened and why (see <em>Risk limits on new trades</em> under <strong>Paper Ledger</strong>).
+The Paper Ledger has no earnings check, so a trade tagged <em>Earnings</em> opens there
+like any other.
 <strong>Calculator</strong> carries every
 idea, calendars (both expirations) and share legs included — but clicking an
 expiration pill on the Calculator afterwards moves <strong>every</strong> option leg to that date,
@@ -2139,7 +2192,7 @@ count is on the Settings page.</p>
 <tr>
 <td><strong>Send to Paper Trade</strong></td>
 <td>Market Scanner, Strategy Finder</td>
-<td>Asks for a quantity, then creates a paper trade. Stays on the current page.</td>
+<td>Asks for a quantity, then creates a Paper Ledger trade if it fits the ledger's risk limits. A message a moment later says it opened, or why not. Stays on the current page.</td>
 </tr>
 <tr>
 <td><strong>Expected Move</strong></td>

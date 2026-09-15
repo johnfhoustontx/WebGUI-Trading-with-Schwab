@@ -163,6 +163,10 @@ plus single-leg directional trades on their own tab.
   own on 2026-09-12 and it will take about a year to be usable.
 - **Click a row** for full details; the row buttons send it to the Calculator,
   paper-trade it, or chart its Expected Move.
+- **Paper-trading a row is checked against the Paper Ledger's risk limits** ($750
+  per trade, plus limits per symbol, sector, expiration and for the whole ledger).
+  A message a moment after you send it says it opened, or why it was not — and
+  when a smaller size would fit, how many contracts.
 - **Probability vs Needs** (in the detail panel) — "Needs" is the win rate this
   trade's own price DEMANDS to break even. Probability above it is cushion,
   below it means the trade loses money over time even when it usually wins.
@@ -391,6 +395,9 @@ four top picks, and the full ranked list.
   strangles (study only), the iron butterfly, calendars, diagonals, or anything
   holding shares. The ledger also refuses a debit trade that arrives without a
   debit to pay.
+- **Paper checks the ledger's risk limits** ($750 per trade, plus limits per
+  symbol, sector, expiration and for the whole ledger). A message a moment later
+  says the trade opened, or why it was not and how many contracts would fit.
 - **The paper ledger has no earnings check**: a trade tagged *Earnings* opens
   there like any other.
 - **Calculator** works on every idea, calendars and shares included — but
@@ -713,6 +720,13 @@ engine's positions live on **Paper Account**.
   stopping them, and you can still close any row by hand at any time.
 - **Credit spreads here are not managed** — they are tracked only. The engine's
   own book on **Paper Account** is the one that takes profit and cuts on them.
+- **New trades must fit this ledger's risk limits**: at most $750 of max loss
+  per trade; 3 positions and $750 per symbol; 5 positions and $1,500 per sector;
+  5 positions sharing one expiration; and open max loss at most 20% of equity
+  ($25,000 plus your closed trades' realized P&L, so **Delete all closed** moves
+  it). A trade that would break one is not written, and a message on the page you
+  sent it from says which limit — plus *Up to N contracts fit* when a smaller size
+  would clear them all.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """
