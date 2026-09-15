@@ -4,6 +4,11 @@ Separate from ``checks`` so that module stays pure. The Opportunity Board view
 updates every minute; the tables re-stamp on the REFRESH_VIEWS changing or a
 5-minute timer (operator decision), while the detail panel and the Paper dialog
 call ``read_context`` on every open.
+
+⚠ ``read_gated`` hands back the SAME payload object to every tab and thread
+until the view's version moves, so every payload here - ``matrix`` (and the
+board rows it indexes), ``regime``, ``calibration``, ``caps`` - is shared state.
+No caller (``checks``, ``book_fit``, the pages) may mutate one; copy first.
 """
 import bus_client
 

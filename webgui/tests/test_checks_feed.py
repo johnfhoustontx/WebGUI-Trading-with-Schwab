@@ -5,7 +5,7 @@ import bus_client
 from pages.options import checks_feed
 
 
-def _fresh(monkeypatch):
+def _fresh():
     """Module-level read_gated memos outlive a test; a fresh bus needs fresh memos."""
     reset_fake_bus()
     for memo in checks_feed._memos.values():
@@ -13,7 +13,7 @@ def _fresh(monkeypatch):
 
 
 def test_context_indexes_the_board_by_symbol_and_reads_the_other_views(monkeypatch):
-    _fresh(monkeypatch)
+    _fresh()
     bus = Bus(fake=True)
     monkeypatch.setattr(bus_client, "_bus", bus)
     bus.cache_set("cache:options:matrix", {"rows": [{"symbol": "ORCL", "spot": 110.0}]})
@@ -29,7 +29,7 @@ def test_context_indexes_the_board_by_symbol_and_reads_the_other_views(monkeypat
 
 
 def test_a_cold_bus_yields_empty_context_not_a_raise(monkeypatch):
-    _fresh(monkeypatch)
+    _fresh()
     monkeypatch.setattr(bus_client, "_bus", Bus(fake=True))
     ctx = checks_feed.read_context()
     assert ctx == {"matrix": None, "regime": None, "calibration": None, "caps": None}
@@ -40,7 +40,7 @@ def test_versions_lists_the_views_that_should_refresh_the_column():
 
 
 def test_a_raising_bus_read_costs_only_that_view(monkeypatch):
-    _fresh(monkeypatch)
+    _fresh()
     bus = Bus(fake=True)
     monkeypatch.setattr(bus_client, "_bus", bus)
     bus.cache_set("cache:sentiment:regime", {"direction": -1})
@@ -56,7 +56,7 @@ def test_a_raising_bus_read_costs_only_that_view(monkeypatch):
 
 
 def test_board_symbols_are_matched_case_insensitively(monkeypatch):
-    _fresh(monkeypatch)
+    _fresh()
     bus = Bus(fake=True)
     monkeypatch.setattr(bus_client, "_bus", bus)
     bus.cache_set("cache:options:matrix", {"rows": [{"symbol": "orcl", "spot": 110.0}, "junk"]})
@@ -109,4 +109,4 @@ def test_the_module_imports_no_ui_framework():
     tree = ast.parse(inspect.getsource(checks_feed))
     mods = {n.module or "" for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)} | \
            {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
-    assert not {m for m in mods if m.split(".")[0] in {"nicegui", "services", "sqlite3"}}
+    assert not {m for m in mods if m.split(".")[0] in {"nicegui", "services", "sqlite3", "redis"}}
