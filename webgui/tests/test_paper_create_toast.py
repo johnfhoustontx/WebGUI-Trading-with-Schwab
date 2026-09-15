@@ -59,6 +59,28 @@ def test_a_message_opening_on_a_ticker_keeps_its_capitals():
         "Paper ledger: not opened — IONQ's own group (no sector on file) is full (5 of 5 positions).")
 
 
+def test_a_sector_name_keeps_its_capitals():
+    text, _ = handoff.paper_result_toast({
+        "status": "refused", "message": "Information Technology is full (5 of 5 positions)",
+        "max_quantity": 0})
+    assert text == "Paper ledger: not opened — Information Technology is full (5 of 5 positions)."
+    text, _ = handoff.paper_result_toast({
+        "status": "refused", "message": "Energy risk would reach $1,550 of $1,500",
+        "max_quantity": 0})
+    assert text == "Paper ledger: not opened — Energy risk would reach $1,550 of $1,500."
+
+
+def test_our_own_sentence_openers_are_lowered():
+    text, _ = handoff.paper_result_toast({
+        "status": "refused",
+        "message": "Open risk across the book would reach $5,080 of $5,000",
+        "max_quantity": 0})
+    assert text == "Paper ledger: not opened — open risk across the book would reach $5,080 of $5,000."
+    assert handoff.paper_result_toast({
+        "status": "error", "message": "Quantity must be a whole number of at least 1."}) == (
+        "Paper ledger: not opened — quantity must be a whole number of at least 1.", "negative")
+
+
 def test_nothing_to_say_for_an_empty_payload():
     assert handoff.paper_result_toast(None) is None
     assert handoff.paper_result_toast({}) is None

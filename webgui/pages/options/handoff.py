@@ -257,14 +257,27 @@ def paper_result_toast(payload):
     return f"{lead}{message}.", "negative"
 
 
+# The sentence-opening words our OWN services emit, and the only first words a
+# toast lowers. An explicit list because letter case cannot tell a sentence word
+# from a proper noun: book_caps' sector refusals open on the sector name
+# ("Information Technology is full ...", "Energy risk would reach ..."), and a
+# case heuristic lowered those to "information Technology". Sources:
+# shared.book_caps.describe ("Risks $X, over ...", "Open risk across the book
+# ...") and the options service ("The paper ledger could not ...", "The request
+# waited ...", "The signal is missing ...", "The trade's max loss ...",
+# "Quantity must be ..."). A message opening on anything else keeps its capitals.
+_SENTENCE_OPENERS = frozenset({"Risks", "Open", "The", "Quantity"})
+
+
 def _continue_sentence(message):
     """Lower the first letter so a service sentence reads on after a dash. PURE.
 
-    Only when the second character is lower case or a space: "Risks $900" becomes
-    "risks $900", but a ticker ("ORCL already...", "IONQ's own...") keeps its
-    capitals."""
-    if (len(message) >= 2 and message[0].isalpha()
-            and (message[1].islower() or message[1] == " ")):
+    Only when the first word is one of ``_SENTENCE_OPENERS``: "Risks $900" becomes
+    "risks $900", while a sector, a ticker or anything else ("Information
+    Technology is full ...", "ORCL already holds ...") keeps its capitals."""
+    words = message.split(None, 1)
+    first = words[0].rstrip(",") if words else ""
+    if first in _SENTENCE_OPENERS:
         return message[0].lower() + message[1:]
     return message
 
