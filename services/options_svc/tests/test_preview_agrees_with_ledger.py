@@ -2,7 +2,7 @@
 
 The preview (``webgui/pages/options/book_fit``) reads the published
 ``cache:options:ledger_caps`` view and the candidate's
-``ledger_risk_per_contract`` stamp; the Ledger (``compute.create_paper_trade``)
+``ledger_risk_basis`` stamp; the Ledger (``compute.create_paper_trade``)
 reads its own trades.db and books the trade ``paper_trader`` builds. Both go
 through ``shared.book_caps``, but through different plumbing - the view's
 publish, the stamp, the sector table versus ``shared.sectors.group_key`` - and
