@@ -86,3 +86,71 @@ def test_an_unmapped_symbol_gets_its_own_bucket():
     rows = [{"status": "OPEN", "symbol": "ZZZQ", "expiration": "2026-10-17",
              "max_loss_total": 50.0}]
     assert compute.ledger_book_state(trades=rows)["open"][0]["sector"] == "?ZZZQ"
+
+
+def test_a_trade_within_every_cap_opens_and_reports_it(ledger):
+    out = compute.create_paper_trade(_pcs(), 1)
+    assert out["status"] == "opened"
+    assert out["trade_id"] and out["trade"]["trade_id"] == out["trade_id"]
+    assert [t["trade_id"] for t in ledger.get_open_trades()] == [out["trade_id"]]
+
+
+def test_over_the_per_trade_cap_is_refused_and_nothing_is_written(ledger):
+    out = compute.create_paper_trade(_pcs(credit=1.00, width=10.0), 1)  # $900
+    assert out["status"] == "refused"
+    assert out["code"] == "TRADE_RISK_CAP"
+    assert out["max_quantity"] == 0
+    assert "over the $750 per-trade limit" in out["message"]
+    assert ledger.get_open_trades() == []
+
+
+def test_quantity_counts_toward_the_per_trade_cap(ledger):
+    out = compute.create_paper_trade(_pcs(), 4)          # 4 x $190 = $760
+    assert out["status"] == "refused" and out["code"] == "TRADE_RISK_CAP"
+    assert out["max_quantity"] == 3
+
+
+def test_the_account_limit_does_not_bind_the_ledger(ledger):
+    """$400 is over the Account's $250 but inside the Ledger's own $750."""
+    out = compute.create_paper_trade(_pcs(credit=1.00, width=5.0), 1)
+    assert out["status"] == "opened"
+
+
+def test_a_fourth_position_in_one_symbol_is_refused(ledger):
+    for _ in range(3):
+        assert compute.create_paper_trade(_pcs(), 1)["status"] == "opened"
+    out = compute.create_paper_trade(_pcs(expiration="2026-10-24"), 1)
+    assert out["status"] == "refused" and out["code"] == "SYMBOL_POSITION_CAP"
+    assert len(ledger.get_open_trades()) == 3
+
+
+def test_the_limit_really_binds_when_config_moves(ledger, monkeypatch):
+    """Discriminating: the cap is read at call time, not copied from a literal."""
+    import config_paper
+    monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_TRADE", 100.0)
+    out = compute.create_paper_trade(_pcs(), 1)          # $190
+    assert out["status"] == "refused" and out["code"] == "TRADE_RISK_CAP"
+
+
+def test_every_outcome_carries_the_rungs_in_display_order(ledger):
+    from shared import book_caps
+    out = compute.create_paper_trade(_pcs(), 1)
+    assert [r["code"] for r in out["rungs"]] == list(book_caps.DISPLAY_ORDER)
+
+
+def test_an_untradeable_signal_is_an_error_outcome_not_a_raise(ledger):
+    out = compute.create_paper_trade({"symbol": "SPY", "type": "LONG_STRADDLE"}, 1)
+    assert out["status"] == "error" and "not paper-tradeable" in out["message"]
+
+
+def test_a_trade_whose_max_loss_cannot_be_read_is_refused_not_opened(ledger):
+    """book_caps counts an unusable risk as ZERO (the Account sized its trades
+    first). The Ledger did not, so it must refuse here - otherwise a debit signal
+    with no max_loss books max_loss_total 0.0 and clears every risk rung, while
+    the preview (which needs a positive risk) says it cannot check."""
+    sig = {"symbol": "SPY", "type": "LONG_CALL", "expiration": "2026-10-17",
+           "net_debit": 300.0, "legs": [{"kind": "call", "side": "long", "strike": 500}]}
+    out = compute.create_paper_trade(sig, 1)
+    assert out["status"] == "error"
+    assert out["message"] == "The trade's max loss could not be read, so the risk caps cannot be checked."
+    assert ledger.get_open_trades() == []

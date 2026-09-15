@@ -2697,17 +2697,56 @@ def ledger_book_state(trades=None) -> dict:
 
 
 def create_paper_trade(signal: dict, qty: int) -> dict:
-    """Create + persist a paper trade from a scanner/swing ``signal``.
+    """Create a Paper LEDGER trade if it clears every risk cap; return the outcome.
 
-    Mirrors the page's ``handoff.send_to_paper`` engine calls VERBATIM:
-    ``paper_trader.create_paper_trade(signal, qty)`` builds the trade dict, then
-    ``paper_trader.add_trade`` persists it to the ledger. Returns the created
-    trade dict (so the handler can surface its ``trade_id`` if it ever wants to)."""
+    Since 2026-09-15 the Ledger enforces the Account's six caps plus its own
+    $750 per-trade limit (``LEDGER_MAX_RISK_PER_TRADE``), against its OWN open trades (design
+    2026-09-15-trade-checklist-and-ledger-caps). The checked risk is the
+    ``max_loss_total`` of the trade ``paper_trader`` builds - the number it
+    books - so the per-share/per-contract unit traps cannot separate them.
+
+    Returns ``{"status": "opened"|"refused"|"error", "symbol", "type",
+    "expiration", "qty", "rungs", ...}``: ``opened`` adds ``trade_id`` and
+    ``trade``; ``refused`` adds ``code``, ``message`` and ``max_quantity``;
+    ``error`` adds ``message``. Never raises for a bad signal - a refusal the
+    screen cannot see is a button that does nothing.
+    """
     import paper_trader
+    from shared import book_caps
+    from shared import sectors as _sectors
 
-    trade = paper_trader.create_paper_trade(signal, int(qty))
+    sig = signal or {}
+    base = {"symbol": sig.get("symbol"), "type": sig.get("type"),
+            "expiration": sig.get("expiration"), "qty": int(qty), "rungs": []}
+    try:
+        trade = paper_trader.create_paper_trade(sig, int(qty))
+    except (ValueError, KeyError, TypeError) as exc:
+        return {**base, "status": "error", "message": str(exc)}
+    # shared.book_caps counts an unusable candidate risk as ZERO, which is right
+    # for the Account (its entry cycle sized the trade first) and wrong here.
+    risk = trade.get("max_loss_total")
+    if not (isinstance(risk, (int, float)) and not isinstance(risk, bool)
+            and math.isfinite(risk) and risk > 0):
+        return {**base, "status": "error",
+                "message": "The trade's max loss could not be read, so the risk "
+                           "caps cannot be checked."}
+
+    book = ledger_book_state()
+    candidate = {"symbol": trade["symbol"], "expiration": trade["expiration"],
+                 "sector": _sectors.group_key(trade["symbol"])}
+    rungs = book_caps.evaluate(book["open"], candidate, trade["max_loss_total"],
+                               book["limits"], book["equity"])
+    base["rungs"] = rungs
+    breach = book_caps.first_breach(rungs, book_caps.DISPLAY_ORDER)
+    if breach is not None:
+        per = (trade["max_loss_total"] / int(qty)) if int(qty) else None
+        return {**base, "status": "refused", "code": breach["code"],
+                "message": book_caps.describe(breach),
+                "max_quantity": book_caps.max_quantity(
+                    book["open"], candidate, per, book["limits"], book["equity"])}
     paper_trader.add_trade(trade)
-    return trade
+    return {**base, "status": "opened", "trade_id": trade["trade_id"],
+            "trade": trade}
 
 
 def _find_trade(trade_id):

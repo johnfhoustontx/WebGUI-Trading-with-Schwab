@@ -916,12 +916,15 @@ def test_find_trade_matches_by_id(monkeypatch):
 
 def test_create_paper_trade_creates_then_adds(monkeypatch):
     """create_paper_trade builds the trade via paper_trader.create_paper_trade,
-    persists it via add_trade (in that order), and returns the created trade."""
+    persists it via add_trade (in that order) when it clears the caps, and
+    returns an ``opened`` outcome carrying the created trade (the return was the
+    bare trade dict until the Ledger became capped on 2026-09-15)."""
     import sys as _sys
     import types as _types
 
     order = []
-    trade = {"trade_id": "T9", "symbol": "SPY"}
+    trade = {"trade_id": "T9", "symbol": "SPY", "expiration": "2026-10-17",
+             "max_loss_total": 100.0}
     signal = {"symbol": "SPY", "type": "PCS"}
 
     def _create(sig, qty):
@@ -932,10 +935,11 @@ def test_create_paper_trade_creates_then_adds(monkeypatch):
         order.append(("add", t))
 
     monkeypatch.setitem(_sys.modules, "paper_trader",
-                        _types.SimpleNamespace(create_paper_trade=_create, add_trade=_add))
+                        _types.SimpleNamespace(create_paper_trade=_create, add_trade=_add,
+                                               get_all_trades=lambda: []))
 
     out = compute.create_paper_trade(signal, 2)
-    assert out is trade
+    assert out["status"] == "opened" and out["trade"] is trade
     # create runs before add, with the signal + qty; add gets the created trade.
     assert order == [("create", signal, 2), ("add", trade)]
 
