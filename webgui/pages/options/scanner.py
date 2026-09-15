@@ -155,6 +155,7 @@ def signal_columns():
         ("iv_rank", "Vol Rank"),
         ("composite_score", "Score"),
         ("grade", "Grade"),
+        ("checks", "Checks"),          # the go / no-go checklist's one-chip verdict
         _DROPPED_COL,
     ]
     return [_col(field, label) for field, label in spec] + [_actions_col()]
@@ -183,7 +184,8 @@ def directional_columns():
     from . import strategy_table          # lazy: strategy_table imports scanner
     shared = strategy_table.strategy_columns()
     body = [c for c in shared if c["name"] != "actions"]
-    return [_col("symbol", "Symbol")] + body + [_col(*_DROPPED_COL), _actions_col()]
+    return ([_col("symbol", "Symbol")] + body
+            + [_col("checks", "Checks"), _col(*_DROPPED_COL), _actions_col()])
 
 
 def signal_rows(signals):
@@ -444,6 +446,31 @@ def stamp_stale(rows, signals):
     return rows
 
 
+def stamp_checks(rows, signals, ctx, build=None):
+    """Stamp the checklist summary (``checks`` / ``_checks_state`` /
+    ``_checks_class``) onto display rows, joined by id (the builders re-sort).
+
+    Runs AFTER ``stamp_stale``: the Paper book line needs the display row's
+    ``_allow_paper`` gate, which raw signals don't carry - passed the bare signal,
+    every row would silently lose that line. ``build`` is injectable for tests;
+    production uses ``checks_feed.checks_for``."""
+    from . import checks, checks_feed
+    build = build or checks_feed.checks_for
+    by_id = {s.get("id"): s for s in (signals or []) if s.get("id")}
+    for r in rows:
+        sig = by_id.get(r.get("id"))
+        items = build({**sig, "_allow_paper": r.get("_allow_paper")}, ctx) if sig else []
+        chip = checks.summary(items)
+        r["checks"], r["_checks_state"], r["_checks_class"] = (
+            chip["text"], chip["state"], chip["class"])
+    return rows
+
+
+def only_clear(rows):
+    """Rows whose checklist reads Clear - no blocks, no cautions, nothing missing."""
+    return [r for r in rows if r.get("_checks_state") == "pos"]
+
+
 def _short_time(iso):
     """ISO timestamp -> short local time like '1:32 PM'; '' on failure/None."""
     if not iso:
@@ -525,8 +552,10 @@ def _read_all():
     return (bus_client.read(_DAY_VIEW) or {}), (bus_client.read(_LIVE_VIEW) or {})
 
 
-def _build_populate(day_env, live):
-    """PURE, heavy row construction — the ~5,238 display-row dicts + the by-id map.
+def _build_populate(day_env, live, ctx=None):
+    """PURE, heavy row construction — the ~5,238 display-row dicts + the by-id map,
+    stamped with the day-union state and then the checklist chip (``ctx`` is a
+    ``checks_feed.read_context()`` result; None paints every chip unchecked).
 
     Runs OFF the event loop (via _read_and_build): only the New-marker stamps + the
     UI assignment are left for the loop (see _apply_populate). Returns everything
@@ -544,16 +573,22 @@ def _build_populate(day_env, live):
         "signals_swing": signal_rows(sigs["signals_swing"]),
         "signals_directional": directional_rows(sigs["signals_directional"]),
     }
+    for key in DAY_LISTS:
+        # ORDER IS LOAD-BEARING: stamp_stale settles ``_allow_paper``, which the
+        # checklist's Paper book line reads.
+        stamp_stale(rows[key], sigs[key])
+        stamp_checks(rows[key], sigs[key], ctx)
     return {"today": today, "sigs": sigs, "by_id": by_id, "rows": rows,
             "have": day_is_today(day_env, today), "day_env": day_env, "live": live}
 
 
 def _read_and_build():
-    """Read both payloads AND build the rows in ONE off-thread call, so the event
-    loop is left only the UI assignment. **Blocking + heavy** — go through
-    ``run.io_bound``."""
+    """Read both payloads and the checklist's live context, AND build the rows in
+    ONE off-thread call, so the event loop is left only the UI assignment.
+    **Blocking + heavy** — go through ``run.io_bound``."""
+    from . import checks_feed
     day_env, live = _read_all()
-    return _build_populate(day_env, live)
+    return _build_populate(day_env, live, checks_feed.read_context())
 
 
 # Quasar reads ``rowsPerPage: 0`` as INFINITE, and NiceGUI's ui.table defaults to
@@ -589,6 +624,16 @@ _SYMBOL_SLOT = r'''
 '''
 
 
+# The checklist's one-chip verdict, coloured by its state (a fixed class per state).
+_CHECKS_SLOT = r'''
+  <q-td :props="props">
+    <span :class="props.row._checks_class + ' text-xs whitespace-nowrap'">{{ props.value || '—' }}</span>
+  </q-td>
+'''
+
+_ONLY_CLEAR_TIP = "Hide rows with a caution, a block, or a check that couldn't run"
+
+
 def render():
     """Build the Options scanner page body (two-pane: tables + detail panel).
 
@@ -597,6 +642,7 @@ def render():
     options service owns the engine + the auto-scan schedule. Graceful-empty: when
     the service is cold (no cache) the page paints empty tables + a waiting status.
     """
+    from . import checks_feed
     ui.add_css(SCAN_CSS)  # compact signal-table columns
     # 0-DTE / Swing / Directional as SUBTABS directly under the main tab strip
     # (like Gamma's view tabs, 2026-07-11): rendered into shell.subtab_slot(),
@@ -636,7 +682,10 @@ def render():
     with ui.row().classes("w-full no-wrap gap-4 items-start"):
         with ui.column().classes("flex-grow min-w-0"):
             # Run scan sits right-aligned with the table's right edge.
-            with ui.row().classes("w-full justify-end"):
+            with ui.row().classes("w-full justify-end items-center gap-3"):
+                clear_toggle = ui.switch("Only clear", value=False)
+                with clear_toggle:
+                    ui.tooltip(_ONLY_CLEAR_TIP).props("delay=350")
                 scan_btn = ui.button("Run scan", icon="play_arrow", color=None) \
                     .props("no-caps").classes(BTN_3D)
             scan_panels = ui.tab_panels(tabs, value=tab_0dte).classes("w-full scan-panels")
@@ -661,7 +710,11 @@ def render():
     by_id: dict = {}
     # Last-seen bus cache versions for the fetch-free repaint timer. (NEW-signal
     # tracking lives at module level so it persists across navigation.)
-    seen = {_DAY_VIEW: None, _LIVE_VIEW: None}
+    _probe_views = (_DAY_VIEW, _LIVE_VIEW) + tuple(checks_feed.REFRESH_VIEWS)
+    seen = {v: None for v in _probe_views}
+    # The full stamped rows per table, so the "Only clear" switch can re-filter
+    # without re-reading the bus.
+    painted = {key: [] for key in DAY_LISTS}
     # Shared by the deferred first read + the 2 s poll so the two big
     # off-loop reads can never stack (the gamma.py precedent).
     state = {"fetching": False}
@@ -689,6 +742,7 @@ def render():
         handoff.add_row_actions(_t, lambda row: by_id.get(row.get("id")))
         _t.add_slot('body-cell-composite_score', _SCORE_SLOT)
         _t.add_slot('body-cell-symbol', _SYMBOL_SLOT)
+        _t.add_slot('body-cell-checks', _CHECKS_SLOT)
 
     table_dir.on("rowClick", _select_dir)
     # Legs-aware actions (the directional signal carries `legs`, not strikes), and
@@ -698,6 +752,7 @@ def render():
     handoff.watch_paper_results()
     table_dir.add_slot('body-cell-symbol', _SYMBOL_SLOT)
     table_dir.add_slot('body-cell-composite_score', _SCORE_SLOT)
+    table_dir.add_slot('body-cell-checks', _CHECKS_SLOT)
     table_dir.add_slot('body-cell-bias', r'''
       <q-td :props="props">
         <span :class="props.row._bias_class">{{ props.value || '—' }}</span>
@@ -725,6 +780,19 @@ def render():
         _apply_populate(_build_populate(day_env, live), notify=notify,
                         acknowledge=acknowledge)
 
+    def _paint_tables():
+        """Assign the stored rows to the tables, filtered when "Only clear" is on."""
+        for key, table in (("signals_0dte", table_0dte), ("signals_swing", table_swing),
+                           ("signals_directional", table_dir)):
+            table.rows = only_clear(painted[key]) if clear_toggle.value else painted[key]
+            table.update()
+
+    @guard
+    def _on_clear_toggle(_event):
+        _paint_tables()             # re-filter the stored rows; no bus read
+
+    clear_toggle.on_value_change(_on_clear_toggle)
+
     def _apply_populate(built, *, notify=True, acknowledge=False):
         """Paint the tables + detail map + bottom status from the OFF-LOOP-built
         ``built`` dict (see _build_populate). Only the New-marker stamps + the UI
@@ -733,19 +801,18 @@ def render():
         ``acknowledge`` — True only when the user is actually VIEWING the page (the
         initial paint), so a background repaint never clears their New markers.
         """
-        today, sigs, rows = built["today"], built["sigs"], built["rows"]
+        today, rows = built["today"], built["rows"]
         live = built["live"]
 
         by_id.clear()
         by_id.update(built["by_id"])
 
         new_ids = new_ids_for_paint(set(by_id), today, acknowledge)
-        for key, table in (("signals_0dte", table_0dte), ("signals_swing", table_swing),
-                           ("signals_directional", table_dir)):
-            stamp_stale(rows[key], sigs[key])
+        for key in DAY_LISTS:
+            # stamp_stale + stamp_checks already ran off the loop (_build_populate).
             stamp_new(rows[key], new_ids)
-            table.rows = rows[key]
-            table.update()
+            painted[key] = rows[key]
+        _paint_tables()
 
         # Day counts in each tab header — None (no count) until a day union for
         # TODAY exists, so the tabs don't show a misleading "(0)" before the first
@@ -787,15 +854,11 @@ def render():
             state["fetching"] = False
         _apply_populate(built, notify=False, acknowledge=True)
 
-    @guard_async
-    async def _maybe_repaint():
-        # Cheap on-loop probe: only the `:ver` counters (two tiny ints, one
-        # pipelined round-trip). The ~4.5 MB payload read happens ONLY on a change,
-        # and then off the loop.
-        versions = bus_client.read_versions((_DAY_VIEW, _LIVE_VIEW))
-        if versions == seen or state["fetching"]:
+    async def _rebuild():
+        """Re-read + rebuild off the loop and repaint. Shared by the version poll
+        and the 5-minute checklist refresh, under the same ``fetching`` guard."""
+        if state["fetching"]:
             return
-        seen.update(versions)          # latch BEFORE the await so we don't re-enter
         state["fetching"] = True
         try:
             built = await run.io_bound(_read_and_build)
@@ -804,7 +867,27 @@ def render():
         # NOT a view — the user may be away, so their New markers must survive.
         _apply_populate(built, notify=False, acknowledge=False)
 
-    seen.update(bus_client.read_versions((_DAY_VIEW, _LIVE_VIEW)))
+    @guard_async
+    async def _maybe_repaint():
+        # Cheap on-loop probe: only the `:ver` counters (a few tiny ints, one
+        # pipelined round-trip) - the two scan views plus the views the checklist
+        # re-stamps on. The ~4.5 MB payload read happens ONLY on a change, and
+        # then off the loop.
+        versions = bus_client.read_versions(_probe_views)
+        if versions == seen or state["fetching"]:
+            return
+        seen.update(versions)          # latch BEFORE the await so we don't re-enter
+        await _rebuild()
+
+    @guard_async
+    async def _force_repaint():
+        # The Opportunity Board moves every minute and its walls / flip / trend
+        # feed the checks, but it is not a re-stamp trigger: re-stamp on a fixed
+        # cadence instead (operator decision, checks_feed.TABLE_REFRESH_SEC).
+        await _rebuild()
+
+    seen.update(bus_client.read_versions(_probe_views))
     _populate({}, {}, notify=False)             # instant empty paint
     ui.timer(0.05, _initial_load, once=True)    # big day-union read off-loop
     ui.timer(2.0, _maybe_repaint)
+    ui.timer(checks_feed.TABLE_REFRESH_SEC, _force_repaint)

@@ -621,7 +621,7 @@ def test_credit_spread_column_labels_say_what_the_cell_holds():
     labels = [c["label"] for c in scanner.signal_columns()]
     assert labels == ["Symbol", "Strategy", "Expiry", "DTE", "Strikes",
                       "Credit", "Max loss", "R/R %", "PoP %", "Vol Rank",
-                      "Score", "Grade", "Dropped at", ""]
+                      "Score", "Grade", "Checks", "Dropped at", ""]
 
 
 def test_credit_STAYS_because_this_table_holds_no_debits():
