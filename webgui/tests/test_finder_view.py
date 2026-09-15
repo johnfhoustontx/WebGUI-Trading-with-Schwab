@@ -391,7 +391,7 @@ def test_carry_chips_survives_a_repaint_and_resets_on_a_new_symbol():
 def test_finder_columns_fit_without_the_old_extras():
     names = [c["name"] for c in fv.finder_columns()]
     assert names == ["strategy", "composite_score", "strikes", "expiry", "cost",
-                     "max_profit", "max_loss", "pop", "grade", "actions"]
+                     "max_profit", "max_loss", "pop", "checks", "grade", "actions"]
 
 
 def test_the_strikes_column_sits_beside_expiry_and_shows_its_text():
@@ -1217,3 +1217,29 @@ def test_the_empty_pick_line_needs_a_known_choice_and_a_read_zero():
         "The scan for $SPX failed. Check System Status and scan again.")
     assert fv.no_data_label({**_EMPTY_PICK, "needs_choice": True}) == (
         "Choose which expirations to scan for $SPX.")
+
+
+# ------------------------------------------------------------ the checklist
+
+def test_finder_columns_put_checks_just_before_grade():
+    cols = fv.finder_columns()
+    names = [c["name"] for c in cols]
+    assert names[names.index("grade") - 1] == "checks"
+    (checks,) = [c for c in cols if c["name"] == "checks"]
+    assert checks["label"] == "Checks" and checks["field"] == "checks"
+    # A verdict's words sort alphabetically, not by how clear a trade is.
+    assert checks["sortable"] is False
+
+
+def test_only_clear_counts_extend_the_count_line_while_filtering():
+    base = "40 ideas · 2 below the quality bar"
+    assert fv.only_clear_counts(base, 40, 3, filtering=True) == (
+        "40 ideas · 2 below the quality bar · 3 of 40 shown · 37 hidden by Only clear")
+    assert fv.only_clear_counts(base, 40, 3, filtering=False) == base
+
+
+def test_only_clear_counts_add_nothing_when_nothing_is_hidden():
+    assert fv.only_clear_counts("5 ideas", 5, 5, filtering=True) == "5 ideas"
+    assert fv.only_clear_counts("Scan failed", 0, 0, filtering=True) == "Scan failed"
+    assert fv.only_clear_counts("1 idea", 1, 0, filtering=True) == (
+        "1 idea · 0 of 1 shown · 1 hidden by Only clear")

@@ -9,6 +9,8 @@ the page must import NO engine / proxy / scoring code.
 """
 import inspect
 
+import pytest
+
 import bus_client
 from pages.options import swing
 
@@ -1431,3 +1433,301 @@ def test_an_ask_with_no_symbol_draws_no_chooser(monkeypatch):
     sent = _recording(monkeypatch)
     assert _chooser_buttons(card) == {}
     assert sent == []
+
+
+# ------------------------------------------------------------- the checklist
+# A Finder put credit spread in the shape the service publishes it: the
+# producer's keys (``strategy_scanner.adapt_credit_spread`` over a
+# ``screen_spreads`` row, dumped 2026-09-15), ``fit_score`` from the Finder's
+# scorer, and ``compute.stamp_candidate``'s stamps. Its risk ($190) fits the
+# $250 per-trade cap and its short strike sits beyond the board's put wall, so
+# with every view published it reads Clear.
+_FINDER_PCS = {
+    "id": "ORCL_0_PCS_90.0", "symbol": "ORCL", "type": "PCS", "trade_type": "SWING",
+    "group": "VERTICAL", "family": "VERTICAL", "strategy_label": "Put Credit Spread",
+    "bias": "bullish", "expiration": "2026-09-27", "dte": 12,
+    "short_strike": 90.0, "long_strike": 85.0, "width": 5.0, "credit": 2.34,
+    "net_credit": 234.0, "net_debit": None, "max_profit": 231.4, "max_loss": 268.6,
+    "pop_pct": 81.2, "composite_score": 70.0, "fit_score": 64.0, "grade": "Good",
+    "iv_rank": 55.0, "net_vega": 0.0, "underlying_price": 100.0, "breakevens": [87.66],
+    "legs": [{"kind": "put", "side": "short", "strike": 90.0, "expiration": "2026-09-27",
+              "qty": 1, "mark": 3.01, "delta": -0.1875},
+             {"kind": "put", "side": "long", "strike": 85.0, "expiration": "2026-09-27",
+              "qty": 1, "mark": 0.67, "delta": 0}],
+    "ledger_risk_basis": {"per_share": 1.9}, "ledger_risk_per_contract": 190.0,
+    "friction_pct": 3.4, "em_to_expiry": 6.0, "vol_floor": 30,
+    "earnings_status": "none_scheduled", "earnings_date": None, "iv_rank_known": True}
+_CHECK_CAPS = {"limits": {"max_positions_per_symbol": 3, "max_risk_per_symbol": 750.0,
+                          "max_positions_per_expiry": 5, "max_positions_per_sector": 5,
+                          "max_risk_per_sector": 1500.0, "max_deployed_risk_pct": 0.2,
+                          "max_risk_per_trade": 250.0},
+               "equity": 25000.0, "open": [], "sectors": {"ORCL": "IT"},
+               "unmapped_prefix": "?"}
+_CHECK_BOARD = {"rows": [{"symbol": "ORCL", "spot": 100.0, "put_wall": 92.0,
+                          "call_wall": 120.0, "gex_regime": "above", "trend_dir": 0.4,
+                          "trend_state": "up"}]}
+
+
+def _pcs(i, **over):
+    return {**_FINDER_PCS, "id": f"p{i:03d}", "max_loss": 200.0 + i,
+            "composite_score": 50.0 + (i % 40), **over}
+
+
+@pytest.fixture
+def fresh_feed(monkeypatch):
+    """checks_feed's memos are module-level and keyed on a view's VERSION, which a
+    fresh fake bus restarts at 1 - so a memo left by another test would hand back
+    that test's payload."""
+    from pages.options import checks_feed
+    monkeypatch.setattr(checks_feed, "_memos", {v: {} for v in checks_feed._memos})
+    return checks_feed
+
+
+def _publish_context(caps=True):
+    bus = bus_client.bus()
+    bus.cache_set("cache:options:matrix", _CHECK_BOARD)
+    bus.cache_set("cache:sentiment:regime", {"direction": 1})
+    bus.cache_set("cache:options:calibration", {"by_bucket": {}})
+    if caps:
+        bus.cache_set("cache:options:ledger_caps", _CHECK_CAPS)
+
+
+def _render_with_context(payload, **context):
+    from nicegui import ui
+    bus_client.reset()
+    _publish_context(**context)
+    _publish(payload)
+    with ui.card() as card:
+        swing.render()
+    return card
+
+
+def _marked_timer(card, mark):
+    from nicegui import ui
+    (timer,) = [t for t in card.descendants()
+                if isinstance(t, ui.timer) and mark in t._markers]
+    return timer
+
+
+def _run_checks_tick(card):
+    import asyncio
+    timer = _marked_timer(card, swing.CHECKS_TICK_MARK)
+    with card:
+        asyncio.run(timer.callback())
+
+
+def _fire_checks_refresh(card):
+    timer = _marked_timer(card, swing.CHECKS_REFRESH_MARK)
+    with card:
+        timer.callback()
+
+
+def _switch(card):
+    from nicegui import ui
+    (switch,) = _widgets(card, ui.switch)
+    return switch
+
+
+def _table(card):
+    from nicegui import ui
+    (table,) = _widgets(card, ui.table)
+    return table
+
+
+def _count_context_reads(monkeypatch, feed):
+    reads = []
+    real = feed.read_context
+    monkeypatch.setattr(feed, "read_context", lambda: (reads.append(1), real())[1])
+    return reads
+
+
+def test_the_list_carries_a_checks_chip_with_the_paper_book_line(fresh_feed):
+    from pages.options import checks
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL",
+                                 "signals": [_FINDER_PCS, _NAKED]})
+    _run_checks_tick(card)
+    rows = {r["id"]: r for r in _table(card).rows}
+    ctx = fresh_feed.read_context()
+
+    pcs = rows[_FINDER_PCS["id"]]
+    assert pcs["_allow_paper"] is True
+    items = fresh_feed.checks_for({**_FINDER_PCS, "_allow_paper": True}, ctx)
+    assert "book" in {c["key"] for c in items}
+    assert pcs["checks"] == checks.verdict(items)["text"] == "Clear · 8 checked"
+    assert pcs["_checks_short"] == "Clear · 8 of 8" and pcs["_checks_clear"] is True
+    # Handed the bare signal, the book line would silently drop out of the count.
+    assert "book" not in {c["key"] for c in fresh_feed.checks_for(_FINDER_PCS, ctx)}
+
+    naked = rows["sp"]
+    assert naked["_allow_paper"] is False
+    naked_items = fresh_feed.checks_for({**_NAKED, "_allow_paper": False}, ctx)
+    assert "book" not in {c["key"] for c in naked_items}
+    assert naked["checks"] == checks.verdict(naked_items)["text"]
+
+
+def test_a_new_answer_is_stamped_at_once_from_the_last_context_read(monkeypatch, fresh_feed):
+    """The answer paints on the loop with no Redis read of its own: it stamps from
+    the context the page last read (gate included), then asks for a fresh read."""
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL", "signals": [_pcs(1)]})
+    _run_checks_tick(card)
+    reads = _count_context_reads(monkeypatch, fresh_feed)
+    _publish({**_PAYLOAD, "symbol": "ORCL", "signals": [_pcs(5), _NAKED]})
+    _fire_poll(card)
+    rows = {r["id"]: r for r in _table(card).rows}
+    assert reads == []
+    assert rows["p005"]["checks"] == "Clear · 8 checked"          # the book line counted
+    assert rows["sp"]["_allow_paper"] is False
+    _run_checks_tick(card)
+    assert reads == [1]
+
+
+def test_a_chip_click_reuses_the_stamps_rather_than_checking_every_row_again(monkeypatch,
+                                                                            fresh_feed):
+    from pages.options import checks_table
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL",
+                                 "signals": [_pcs(1, group="VERTICAL"), _FLY]})
+    _run_checks_tick(card)
+    built = []
+    real = fresh_feed.checks_for
+    monkeypatch.setattr(fresh_feed, "checks_for",
+                        lambda row, ctx: (built.append(row["id"]), real(row, ctx))[1])
+    _click(_buttons(card)["Butterflies & condors 1"], card)
+    _click(_buttons(card)["All 2"], card)
+    assert built == []
+    assert {r["id"] for r in _table(card).rows} == {"p001", "fly"}
+    assert all(r["checks"] for r in _table(card).rows)
+    assert checks_table.CHECK_FIELDS[0] == "checks"
+
+
+def test_the_checks_column_uses_the_shared_slot_and_sits_before_grade():
+    from pages.options import checks_table
+    card = _render_page(_PAYLOAD)
+    table = _table(card)
+    names = [c["name"] for c in table.columns]
+    assert names[names.index("grade") - 1] == "checks"
+    assert swing._CHECKS_SLOT is checks_table.CHECKS_SLOT
+    assert "body-cell-checks" in table.slots
+
+
+def test_the_switch_says_what_it_hides():
+    from nicegui import ui
+    from pages.options import checks_table
+    card = _render_page(_PAYLOAD)
+    switch = _switch(card)
+    assert switch.value is False and switch.text == "Only clear"
+    (tip,) = [e for e in switch.descendants() if isinstance(e, ui.tooltip)]
+    assert tip.text == checks_table.ONLY_CLEAR_TIP
+
+
+def test_only_clear_filters_the_stored_rows_without_a_read_or_a_scan(monkeypatch, fresh_feed):
+    signals = [_pcs(i, friction_pct=3.4 if i % 2 else 30.0) for i in range(120)]
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL", "signals": signals})
+    _run_checks_tick(card)
+    table = _table(card)
+    assert table.pagination["rowsNumber"] == 120
+    _request_page(card, {"sortBy": "max_loss", "descending": True, "page": 2,
+                         "rowsPerPage": 50})
+    sent = []
+    monkeypatch.setattr(bus_client, "request", lambda *a, **k: sent.append(a))
+    reads = _count_context_reads(monkeypatch, fresh_feed)
+
+    _switch(card).value = True
+    assert table.pagination["rowsNumber"] == 60
+    assert table.rows and all(r["_checks_clear"] for r in table.rows)
+    # The reader's sort and page survive the filter.
+    assert table.pagination["page"] == 2 and table.pagination["sortBy"] == "max_loss"
+    losses = [r["_max_loss_n"] for r in table.rows]
+    assert losses == sorted(losses, reverse=True)
+
+    _switch(card).value = False
+    assert table.pagination["rowsNumber"] == 120 and table.pagination["page"] == 2
+    assert sent == [] and reads == []
+
+
+def test_an_emptied_only_clear_list_says_why_and_the_count_line_says_how_many(fresh_feed):
+    from nicegui import ui
+    payload = {**_PAYLOAD, "symbol": "ORCL", "signals": [_pcs(1, friction_pct=30.0),
+                                                         _pcs(2, friction_pct=30.0)]}
+    card = _render_with_context(payload)
+    _run_checks_tick(card)
+    table = _table(card)
+    assert {r["_checks_state"] for r in table.rows} == {"warn"}
+    counts = swing.fv.summary_facts(payload)["counts"]
+    (line,) = [e for e in _widgets(card, ui.label) if e.text == counts]
+
+    _switch(card).value = True
+    assert table.rows == []
+    assert table.props["no-data-label"] == "No row is fully clear — 2 hidden by Only clear."
+    assert line.text == f"{counts} · 0 of 2 shown · 2 hidden by Only clear"
+
+    _switch(card).value = False
+    assert table.props["no-data-label"] == swing.fv.no_data_label(payload)
+    assert line.text == counts and len(table.rows) == 2
+
+
+def test_a_refresh_view_moving_restamps_and_keeps_the_page_and_sort(monkeypatch, fresh_feed):
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL",
+                                 "signals": [_pcs(i) for i in range(120)]}, caps=False)
+    _run_checks_tick(card)
+    table = _table(card)
+    assert table.rows[0]["_checks_short"] == "Partly checked"   # no caps view yet
+    _request_page(card, {"sortBy": "max_loss", "descending": True, "page": 2,
+                         "rowsPerPage": 50})
+    before = [r["id"] for r in table.rows]
+    sent = []
+    monkeypatch.setattr(bus_client, "request", lambda *a, **k: sent.append(a))
+
+    bus_client.bus().cache_set("cache:options:ledger_caps", _CHECK_CAPS)
+    _fire_poll(card)                    # the probe sees the caps view move...
+    _run_checks_tick(card)              # ...and the tick re-stamps, off the loop
+    assert [r["id"] for r in table.rows] == before
+    assert table.pagination["page"] == 2 and table.pagination["sortBy"] == "max_loss"
+    assert table.pagination["descending"] is True
+    assert {r["_checks_short"] for r in table.rows} == {"Clear · 8 of 8"}
+    assert sent == []                   # a re-stamp never re-scans
+
+
+def test_the_board_timer_restamps_only_when_the_board_moved(monkeypatch, fresh_feed):
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL", "signals": [_pcs(1)]})
+    _run_checks_tick(card)
+    reads = _count_context_reads(monkeypatch, fresh_feed)
+
+    _fire_checks_refresh(card)
+    _run_checks_tick(card)
+    assert reads == []                  # the board has not moved: nothing read
+
+    bus_client.bus().cache_set("cache:options:matrix",
+                               {"rows": [{**_CHECK_BOARD["rows"][0], "spot": 101.0}]})
+    _fire_checks_refresh(card)
+    _run_checks_tick(card)
+    assert reads == [1]
+    _run_checks_tick(card)
+    assert reads == [1]                 # once per move, not once per tick
+
+
+def test_a_restamp_that_read_under_a_newer_list_never_paints_the_old_rows(monkeypatch,
+                                                                          fresh_feed):
+    from nicegui import run
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL",
+                                 "signals": [_pcs(1), _pcs(2)]})
+    _run_checks_tick(card)
+    newer = {**_PAYLOAD, "symbol": "ORCL", "signals": [_pcs(7), _pcs(8), _pcs(9)]}
+    real = run.io_bound
+
+    async def io_bound_racing_an_answer(fn, *args):
+        result = fn(*args)
+        _publish(newer)                 # a fresh scan's answer lands mid-read
+        _fire_poll(card)
+        return result
+
+    bus_client.bus().cache_set("cache:options:ledger_caps", {**_CHECK_CAPS, "equity": 1.0})
+    _fire_poll(card)
+    monkeypatch.setattr(run, "io_bound", io_bound_racing_an_answer)
+    _run_checks_tick(card)
+    table = _table(card)
+    assert sorted(r["id"] for r in table.rows) == ["p007", "p008", "p009"]
+
+    monkeypatch.setattr(run, "io_bound", real)
+    _run_checks_tick(card)              # the newer list is stamped against the new read
+    assert sorted(r["id"] for r in table.rows) == ["p007", "p008", "p009"]
+    assert {r["_checks_state"] for r in table.rows} == {"neg"}   # equity 1.0: blocked

@@ -45,3 +45,59 @@ def test_filtered_tab_label_needs_no_scanner_helper():
     assert ct.filtered_tab_label("Swing", 40, 3, have=True, filtering=False) == "Swing (40)"
     assert ct.filtered_tab_label("Swing", 40, 3, have=True, filtering=True) == "Swing (3 of 40)"
     assert ct.filtered_tab_label("Swing", 40, 3, have=False, filtering=True) == "Swing"
+
+
+# ── a memo spares a list that re-filters from re-stamping every row ──────────
+def _counting_build(calls):
+    def build(row, ctx):
+        calls.append(row["id"])
+        return [{"key": "cost", "tone": "pos", "text": "fine"}]
+    return build
+
+
+def test_stamp_checks_with_a_memo_stamps_each_id_once():
+    calls, memo = [], {}
+    sigs = [{"id": "a"}, {"id": "b"}]
+    ct.stamp_checks([{"id": "a"}, {"id": "b"}], sigs, None,
+                    build=_counting_build(calls), memo=memo)
+    again = [{"id": "b", "_allow_paper": True}]
+    ct.stamp_checks(again, sigs, None, build=_counting_build(calls), memo=memo)
+    assert calls == ["a", "b"]
+    assert set(memo) == {"a", "b"}
+    assert again[0]["_checks_state"] == "pos" and again[0]["_checks_clear"] is True
+    assert set(memo["b"]) == set(ct.CHECK_FIELDS)
+
+
+def test_a_memo_entry_is_a_copy_the_row_cannot_change():
+    memo = {}
+    rows = [{"id": "a"}]
+    ct.stamp_checks(rows, [{"id": "a"}], None, build=_counting_build([]), memo=memo)
+    rows[0]["checks"] = "edited"
+    assert memo["a"]["checks"] != "edited"
+
+
+def test_without_a_memo_every_call_stamps_again():
+    calls = []
+    sigs = [{"id": "a"}]
+    for _ in range(2):
+        ct.stamp_checks([{"id": "a"}], sigs, None, build=_counting_build(calls))
+    assert calls == ["a", "a"]
+
+
+def test_read_and_restamp_reads_the_context_off_the_loop_and_returns_copies(monkeypatch):
+    from pages.options import checks_feed
+    monkeypatch.setattr(checks_feed, "read_context", lambda: "CTX")
+    seen = []
+
+    def build(row, ctx):
+        seen.append(ctx)
+        return [{"key": "cost", "tone": "warn", "text": "wide"}]
+
+    monkeypatch.setattr(checks_feed, "checks_for", build)
+    rows = [{"id": "a", "_checks_state": "pos", "_new": True}]
+    ctx, fresh, memo = ct.read_and_restamp(rows, [{"id": "a"}])
+    assert ctx == "CTX" and seen == ["CTX"]
+    assert rows[0]["_checks_state"] == "pos"            # the painted row is untouched
+    assert fresh[0] is not rows[0] and fresh[0]["_checks_state"] == "warn"
+    assert fresh[0]["_new"] is True
+    assert memo["a"]["_checks_state"] == "warn"

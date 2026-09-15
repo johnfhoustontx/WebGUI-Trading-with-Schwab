@@ -702,6 +702,20 @@ def summary_facts(payload):
             "can_change": can_change}
 
 
+def only_clear_counts(base, total, shown, *, filtering):
+    """The summary strip's count line while "Only clear" may be on.
+
+    ``base`` is :func:`summary_facts`' ``counts``, kept word for word; filtering
+    and hiding at least one of the list's ``total`` rows adds
+    ``"3 of 40 shown · 37 hidden by Only clear"``. Nothing hidden adds nothing:
+    a list with nothing to hide would otherwise read as a filter that did
+    something."""
+    hidden = (total or 0) - (shown or 0)
+    if not filtering or hidden <= 0:
+        return base
+    return f"{base} · {shown:,} of {total:,} shown · {hidden:,} hidden by Only clear"
+
+
 # ------------------------------------------------------------------------- bars
 
 # Width classes snap to 5% steps: a FIXED, finite class set (the Tailwind
@@ -934,6 +948,9 @@ def finder_columns():
         ("max_profit", "Max profit", "_max_profit_n", True),
         ("max_loss", "Max loss", "_max_loss_n", True),
         ("pop", "Probability of profit", "_pop_n", True),
+        # The checklist's one-chip verdict (the full text on hover). Not sortable:
+        # its words sort alphabetically, not by how clear a trade is.
+        ("checks", "Checks", "checks", False),
         ("grade", "Grade", "grade", False),
     ]
     cols = [{"name": name, "label": label, "field": field, "sortable": sortable,

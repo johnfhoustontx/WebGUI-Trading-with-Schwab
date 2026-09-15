@@ -27,22 +27,40 @@ slim ranked list beside the shared Trade detail panel. Every sentence and number
 those widgets show comes from the PURE ``finder_view`` module; this file is
 widgets and wiring. Design:
 ``docs/plans/2026-09-13-strategy-finder-redesign-design.md``.
+
+The list's Checks column is the Go / No-Go checklist's verdict, stamped through
+the SAME widget-free helpers the Market Scanner uses (``checks_table``) against
+``checks_feed``'s live context. That context is a Redis read, so it runs off the
+event loop (``run.io_bound``) and is cached: a list the page rebuilds on the loop
+(a scan's answer, a chip click) stamps from the last context read, and a
+re-stamp re-reads it when a ``checks_feed.REFRESH_VIEWS`` version moves, when a
+new answer lands, and every ``TABLE_REFRESH_SEC`` if the Opportunity Board has
+moved. A re-stamp NEVER re-scans: a scan is a paid Schwab fetch.
 """
 from contextlib import contextmanager
 
 import bus_client
-from nicegui import ui
+from nicegui import run, ui
 
 from pages import busy as _busy
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
-from pages.ui_guard import guard
+from pages.ui_guard import guard, guard_async
 
-from . import detail, handoff, strategy_table
+from . import checks_feed, detail, handoff, strategy_table
+from . import checks_table as ct
 from . import finder_view as fv
 from .inputs import bind_symbol_load, mark_symbol_loaded, select_all_on_focus
 from .scanner import score_zone_class
 from .theme import (BADGE_ACCENT, BADGE_MUTED, BADGE_WARN, BTN, BTN_3D, CARD, EYEBROW,
                     LABEL, MUTED, THEME, TXT_NEG, TXT_POS)
+
+SWING_VIEW = "options:swing"
+# How often the page looks for a re-stamp it has been asked for. The tick itself
+# reads nothing: the 2 s poll, a new answer and the board timer only raise a
+# flag, and the re-stamp's Redis read runs off the loop.
+CHECKS_TICK_SEC = 0.5
+CHECKS_TICK_MARK = "finder-checks-tick"
+CHECKS_REFRESH_MARK = "finder-checks-refresh"
 
 # Before any scan has published for this session.
 EMPTY_PROMPT = "Enter a symbol and press Scan to rank every strategy for it."
@@ -380,6 +398,8 @@ _POP_SLOT = r'''
 </q-td>
 '''
 
+_CHECKS_SLOT = ct.CHECKS_SLOT
+
 _GRADE_SLOT = r'''
 <q-td :props="props">
   <span :class="props.row._grade_class">{{ props.value || '—' }}</span>
@@ -470,8 +490,12 @@ def render():
         # 2 - Summary strip (hidden until a scan has published).
         summary_box = ui.row().classes(f"{CARD} w-full items-center gap-3 flex-wrap")
         summary_box.set_visibility(False)
-        # 3 - Strategy chips.
-        chips_row = ui.row().classes("w-full items-center gap-2 flex-wrap")
+        # 3 - Strategy chips, and the list's "Only clear" filter beside them.
+        with ui.row().classes("w-full items-center gap-2 no-wrap"):
+            chips_row = ui.row().classes("flex-grow min-w-0 items-center gap-2 flex-wrap")
+            clear_switch = ui.switch("Only clear", value=False).classes("shrink-0")
+            with clear_switch:
+                ui.tooltip(ct.ONLY_CLEAR_TIP).props("delay=350")
         # 4 - Top picks: four across, two on a narrow screen, one on a phone.
         picks_grid = ui.element("div").classes(
             "grid w-full gap-3 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4")
@@ -501,9 +525,22 @@ def render():
     # page of them, with shapes. row_signal: id(row) -> the signal it was built from.
     # choice_by_symbol: SYMBOL -> the expiry choice picked for its large chain on
     # this page build; a fresh build starts empty.
+    # all_rows: every list row, stamped with the checklist; rows is all_rows, or
+    # only its clear rows while "Only clear" is on. sigs: all_rows' signals, in
+    # row order. gen: bumped by every new list, so a re-stamp that read against
+    # an older one is dropped. no_data: the empty-table line before Only clear.
     state = {"payload": None, "symbol": None, "active": None, "version": None,
              "scanning": None, "scan_seq": 0, "scan_request": None, "rows": [],
+             "all_rows": [], "sigs": [], "gen": 0, "no_data": None,
              "row_signal": {}, "choice_by_symbol": {}}
+    # The checklist: ctx is the last context read (None until the first), memo
+    # the stamps made against it, seen the refresh views' versions it answers,
+    # matrix the board version it was read at. due asks the tick for a re-stamp;
+    # busy is one in flight.
+    checks = {"ctx": None, "memo": {}, "seen": {}, "matrix": None,
+              "due": True, "busy": False}
+    # The count line and its words before Only clear, so the switch can extend it.
+    counts_line = {"label": None, "base": ""}
     # The running count names the request being waited on, read at each tick -
     # never a symbol captured when the spinner was built. The spinner's own
     # deadline sits past SCAN_TIMEOUT_SEC so _scan_timed_out is the one thing
@@ -613,12 +650,44 @@ def render():
             table.rows = with_shapes(page, lambda r: state["row_signal"].get(id(r)))
             table.pagination = pagination
 
+    def _write_no_data():
+        # Written to _props directly: a props STRING would be re-parsed, and a
+        # quote typed into the symbol box would break it. An emptied Only clear
+        # list says why; otherwise the page's own line stands.
+        with _table_batch():
+            empty = ct.only_clear_empty_label(state["all_rows"], state["rows"],
+                                              filtering=bool(clear_switch.value))
+            text = empty if empty is not None else state["no_data"]
+            if text is None:
+                table._props.pop("no-data-label", None)
+            else:
+                table._props["no-data-label"] = text
+
+    def _filter_rows():
+        """``rows`` from ``all_rows`` for the switch, with the empty line and the
+        count line following it. Reads nothing."""
+        filtering = bool(clear_switch.value)
+        state["rows"] = ct.only_clear(state["all_rows"]) if filtering else state["all_rows"]
+        _write_no_data()
+        if counts_line["label"] is not None:
+            counts_line["label"].text = fv.only_clear_counts(
+                counts_line["base"], len(state["all_rows"]), len(state["rows"]),
+                filtering=filtering)
+
+    def _adopt(rows, sigs):
+        state["all_rows"], state["sigs"] = rows, sigs
+        state["row_signal"] = {id(r): s for r, s in zip(rows, sigs)}
+        _filter_rows()
+
     def _set_rows(signals):
         """A new list - a scan's answer or a chip change - starts on page 1, in
-        the sort the reader last chose."""
+        the sort the reader last chose. Each row is stamped with the checklist
+        from the last context read (no Redis read here, on the loop), its own
+        ``_allow_paper`` handed across by ``stamp_checks``."""
         rows, sigs = list_rows(signals)
-        state["rows"] = rows
-        state["row_signal"] = {id(r): s for r, s in zip(rows, sigs)}
+        ct.stamp_checks(rows, sigs, checks["ctx"], memo=checks["memo"])
+        state["gen"] += 1
+        _adopt(rows, sigs)
         _show_page({**table.pagination, "page": 1})
 
     @guard
@@ -636,12 +705,24 @@ def render():
     table.add_slot("body-cell-max_loss", _MAX_LOSS_SLOT)
     table.add_slot("body-cell-pop", _POP_SLOT)
     table.add_slot("body-cell-grade", _GRADE_SLOT)
+    table.add_slot("body-cell-checks", _CHECKS_SLOT)
+
+    @guard
+    def _on_clear_toggle(_event):
+        # Re-filter the stored rows: no bus read, no scan. The reader's sort
+        # survives, and their page too (page_of clamps it to the shorter list).
+        with _table_batch():
+            _filter_rows()
+            _show_page(table.pagination)
+
+    clear_switch.on_value_change(_on_clear_toggle)
 
     # ---------------------------------------------------------------- painters
 
     def _paint_summary(payload):
         facts = fv.summary_facts(payload)
         summary_box.clear()
+        counts_line["label"], counts_line["base"] = None, ""
         summary_box.set_visibility(facts is not None)
         if facts is None:
             return
@@ -654,7 +735,9 @@ def render():
                 ui.label(pill).classes(f"{BADGE_MUTED} {_PILL}")
             if facts["vol_rank"]:
                 ui.label(facts["vol_rank"]).classes(f"{BADGE_ACCENT} {_PILL}")
-            ui.label(facts["counts"]).classes(f"text-sm {MUTED} ml-auto")
+            counts_line["base"] = facts["counts"]
+            counts_line["label"] = ui.label(facts["counts"]).classes(
+                f"text-sm {MUTED} ml-auto")
             # Beside the "Scanned N of M" part it explains - and only when the
             # answer still carries choices to reopen, or Change would open nothing.
             if facts["can_change"] and _change_facts(payload) is not None:
@@ -804,10 +887,8 @@ def render():
         _request_scan()
 
     def _set_no_data(text):
-        # Written to _props directly: a props STRING would be re-parsed, and a
-        # quote typed into the symbol box would break it.
-        with _table_batch():
-            table._props["no-data-label"] = text
+        state["no_data"] = text
+        _write_no_data()
 
     def _paint_still_card(text):
         # One card that does not pulse: four pulsing placeholders would pulse
@@ -844,6 +925,7 @@ def render():
             _set_rows(visible)
             _set_no_data(fv.no_data_label(state["payload"]))
             table.set_visibility(has_scan)
+        clear_switch.set_visibility(has_scan)
         empty_line.set_visibility(not has_scan)
 
     def _paint_payload(payload):
@@ -860,6 +942,10 @@ def render():
         for s in signals:
             if s.get("id"):
                 by_id[s["id"]] = s
+        # New signals: the stamps made for the last ones no longer apply, and the
+        # answer is re-stamped against a fresh context read, off the loop.
+        checks["memo"] = {}
+        checks["due"] = True
         status.text = ""
         scan_busy.hide()
         _paint_summary(payload)
@@ -915,6 +1001,7 @@ def render():
             _set_rows([])
             _set_no_data(scanning_text(params["symbol"]))
             table.set_visibility(True)
+        clear_switch.set_visibility(True)
         empty_line.set_visibility(False)
         scan_busy.show(scanning_text(params["symbol"]))
         # Mounted in list_box, which is never cleared: a handler builds in its
@@ -945,8 +1032,14 @@ def render():
     def _maybe_repaint():
         # Fetch-free: compare the bus cache version to the last-painted one and
         # only re-read + repaint on change. The service bumps it when a requested
-        # swing scan finishes.
-        version = bus_client.read_version("options:swing")
+        # swing scan finishes. The same pipelined probe carries the checklist's
+        # refresh views; one of those moving only asks for a re-stamp.
+        versions = bus_client.read_versions((SWING_VIEW,) + tuple(checks_feed.REFRESH_VIEWS))
+        refresh = {v: versions.get(v) for v in checks_feed.REFRESH_VIEWS}
+        if refresh != checks["seen"]:
+            checks["seen"] = refresh
+            checks["due"] = True
+        version = versions.get(SWING_VIEW)
         if version == state["version"]:
             return
         state["version"] = version
@@ -955,6 +1048,52 @@ def render():
             return      # another request's result - keep waiting for ours
         _paint_payload(payload)
 
+    async def _restamp():
+        """Re-read the context OFF the loop and re-stamp copies of the list. A new
+        list painted while it read (a scan's answer, a chip, a new scan) wins: the
+        copies are dropped and that list is re-stamped next."""
+        checks["busy"] = True
+        gen, sigs = state["gen"], state["sigs"]
+        try:
+            # Latched BEFORE the await, so a board move while this reads is not
+            # lost - and inside the try, so a bus error cannot leave busy stuck.
+            checks["matrix"] = bus_client.read_version(checks_feed.MATRIX_VIEW)
+            result = await run.io_bound(ct.read_and_restamp, state["all_rows"], sigs)
+        finally:
+            checks["busy"] = False
+        if not result:
+            return                              # the app is stopping
+        ctx, fresh, memo = result
+        checks["ctx"] = ctx
+        if gen != state["gen"]:
+            checks["memo"] = {}
+            checks["due"] = True
+            return
+        checks["memo"] = memo
+        with _table_batch():
+            _adopt(fresh, sigs)
+            _show_page(table.pagination)        # the reader's page and sort survive
+
+    @guard_async
+    async def _checks_tick():
+        if not checks["due"] or checks["busy"]:
+            return
+        checks["due"] = False
+        await _restamp()
+
+    @guard
+    def _checks_refresh():
+        # The Opportunity Board moves every minute and feeds the walls, gamma and
+        # direction checks, but only this fixed cadence re-stamps for it
+        # (operator decision, checks_feed.TABLE_REFRESH_SEC) - and only when it
+        # moved since the last read, so an idle evening costs one :ver probe.
+        if bus_client.read_version(checks_feed.MATRIX_VIEW) != checks["matrix"]:
+            checks["due"] = True
+
+    checks["seen"] = {v: ver for v, ver in bus_client.read_versions(
+        checks_feed.REFRESH_VIEWS).items()}
     ui.timer(2.0, _maybe_repaint)
+    ui.timer(CHECKS_TICK_SEC, _checks_tick).mark(CHECKS_TICK_MARK)
+    ui.timer(checks_feed.TABLE_REFRESH_SEC, _checks_refresh).mark(CHECKS_REFRESH_MARK)
     # Every Paper click's answer - opened, or refused and why - becomes a toast.
     handoff.watch_paper_results()

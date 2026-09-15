@@ -16,11 +16,14 @@ CHECKS_SLOT = r'''
   </q-td>
 '''
 
+# Every field ``stamp_checks`` writes - what a memo entry holds.
+CHECK_FIELDS = ("checks", "_checks_state", "_checks_class", "_checks_short", "_checks_clear")
+
 ONLY_CLEAR_TIP = ("Hide rows with a block, a caution, a feed that hasn't loaded, "
                   "or a paper book fit that couldn't be checked")
 
 
-def stamp_checks(rows, signals, ctx, build=None):
+def stamp_checks(rows, signals, ctx, build=None, memo=None):
     """Stamp the checklist verdict (``checks`` / ``_checks_state`` /
     ``_checks_class`` / ``_checks_short`` / ``_checks_clear``) onto display rows,
     joined by id (the builders re-sort).
@@ -34,12 +37,22 @@ def stamp_checks(rows, signals, ctx, build=None):
     ``stamp_stale``; the Finder's gate is fixed by structure): the Paper book line
     needs that gate, which raw signals don't carry - passed the bare signal, every
     row would silently lose that line. ``build`` is injectable for tests;
-    production uses ``checks_feed.checks_for``."""
+    production uses ``checks_feed.checks_for``.
+
+    ``memo`` (a caller-owned dict, ``{id: stamps}``) spares a list that is rebuilt
+    from the same signals - a Finder chip click - from re-checking every row: a
+    row whose id is in it takes those stamps, and every row stamped here adds its
+    own. It is valid only for ONE context and one ``_allow_paper`` per id, so the
+    caller empties it when either can change."""
     from . import checks, checks_feed
     build = build or checks_feed.checks_for
     by_id = {s.get("id"): s for s in (signals or []) if s.get("id")}
     for r in rows:
-        sig = by_id.get(r.get("id"))
+        key = r.get("id")
+        if memo is not None and key in memo:
+            r.update(memo[key])
+            continue
+        sig = by_id.get(key)
         items = build({**sig, "_allow_paper": r.get("_allow_paper")}, ctx) if sig else []
         chip = checks.verdict(items)
         r["checks"], r["_checks_state"], r["_checks_class"] = (
@@ -47,6 +60,8 @@ def stamp_checks(rows, signals, ctx, build=None):
         r["_checks_short"] = chip["short"]
         r["_checks_clear"] = chip["state"] == "pos" and not any(
             c.get("key") == "book" and c.get("tone") == "muted" for c in items)
+        if memo is not None and key is not None:
+            memo[key] = {f: r[f] for f in CHECK_FIELDS}
     return rows
 
 
@@ -88,7 +103,7 @@ def only_clear_empty_label(full_rows, shown_rows, *, filtering):
     return f"No row is fully clear — {n} hidden by Only clear."
 
 
-def restamp(rows_by_key, sigs_by_key, ctx, build=None):
+def restamp(rows_by_key, sigs_by_key, ctx, build=None, memo=None):
     """Re-stamp the checklist onto SHALLOW COPIES of painted rows.
 
     Copies, because the event loop may be filtering the very same dicts for the
@@ -97,6 +112,18 @@ def restamp(rows_by_key, sigs_by_key, ctx, build=None):
     out = {}
     for key, rows in (rows_by_key or {}).items():
         copies = [dict(r) for r in rows or []]
-        stamp_checks(copies, (sigs_by_key or {}).get(key) or [], ctx, build=build)
+        stamp_checks(copies, (sigs_by_key or {}).get(key) or [], ctx, build=build,
+                     memo=memo)
         out[key] = copies
     return out
+
+
+def read_and_restamp(rows, signals):
+    """``(ctx, copies, memo)``: read the checklist's live context, then re-stamp
+    SHALLOW COPIES of one table's ``rows`` against it, filling a fresh memo.
+    **Blocking** (a Redis read) - go through ``run.io_bound``."""
+    from . import checks_feed
+    ctx = checks_feed.read_context()
+    memo = {}
+    fresh = restamp({"rows": rows}, {"rows": signals}, ctx, memo=memo)["rows"]
+    return ctx, fresh, memo
