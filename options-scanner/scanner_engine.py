@@ -959,7 +959,46 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                    spot=None, daily_expected_move=None, earnings_date=None,
                    widths=None, account_size=100000, max_risk_pct=0.05,
                    now_ct=None, mode="PREMIUM",
-                   max_risk_dollars=DEFAULT_MAX_RISK_DOLLARS):
+                   max_risk_dollars=DEFAULT_MAX_RISK_DOLLARS, funnel=None):
+    """Screen one chain for credit spreads.
+
+    ``funnel``: an optional dict the pass fills with its reject tally, so a page
+    can answer "why was there no trade on this symbol today?" instead of only
+    "no signals". Counting ONLY — every key is written, never read, and nothing
+    about the screen moves when it is supplied; ``test_scan_funnel.py`` proves
+    that by equivalence rather than by inspection.
+
+    The keys, and exactly what each means:
+
+    ``expirations_in_window``      expirations inside [dte_min, dte_max]. ⚠ counted
+                                   PER SIDE — the pass walks the put map then the
+                                   call map, so one date listed in both is two.
+    ``expirations_skipped_earnings`` of those, dropped whole by the earnings gate.
+    ``delta_reject`` / ``delta_pass``  strikes outside / inside the delta band.
+    ``mark_fail``                  admitted, but the short leg has no usable mark.
+    ``delta_ceiling``              |delta| past MAX_ENTRY_SHORT_DELTA (PREMIUM only).
+    ``em_fail``                    short strike outside the expected-move window.
+    ``liq_fail_short``             the short leg failed its liquidity gate.
+    ``width_found``                a width was selected — i.e. a signal was emitted.
+    ``width_reasons``              a Counter over ``WIDTH_STAGES``: for each strike
+                                   that reached the width search and found nothing,
+                                   the FURTHEST stage its best width reached.
+
+    Over the auto-width path those partition the strikes that entered the search::
+
+        delta_pass == mark_fail + delta_ceiling + em_fail + liq_fail_short
+                      + width_found + sum(width_reasons.values())
+
+    Every key ACCUMULATES, so one funnel can be carried across a whole watchlist
+    and the equation above still holds over the total.
+
+    ⚠ Two populations are deliberately outside the tally, because they never
+    reach the strike loop: contracts with no delta at all, and strikes dropped by
+    the strike-increment filter. ⚠ And the EXPLICIT-widths branch
+    (``widths=[...]``) runs no width search, so it contributes no ``width_found``
+    and no ``width_reasons``; its own ``liq_long`` / ``credit`` counters stay
+    local to the log line.
+    """
     if not chain:
         return []
     if now_ct is None:
@@ -978,6 +1017,16 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
     # the last expiration's reasons.
     delta_pass = 0; mark_fail = 0; liq_fail_short = 0; liq_fail_long = 0
     em_fail = 0; credit_fail = 0; no_width = 0
+    delta_reject = 0; delta_ceiling = 0; width_found = 0
+    exps_in_window = 0; exps_skipped_earnings = 0
+
+    # The width counter is built whether or not a funnel was asked for: the
+    # "NO SPREADS" log line reports it on the auto-width path, and that line has
+    # to say something useful on a scan nobody instrumented. When a funnel IS
+    # supplied its OWN counter is used, so a caller accumulating one funnel
+    # across symbols keeps a single running tally.
+    width_reasons = (funnel.setdefault("width_reasons", Counter())
+                     if funnel is not None else Counter())
 
     for side, exp_map, d_min, d_max in [
         ("PCS", chain.get("putExpDateMap", {}), put_d_min, put_d_max),
@@ -988,6 +1037,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             exp_str, dte = parts[0], int(float(parts[1]))
             if not (dte_min <= dte <= dte_max):
                 continue
+            exps_in_window += 1
 
             # Earnings avoidance — for candidates whose positions are HELD
             # across sessions. SWING and INCOME always are, and at 30-45 DTE
@@ -999,6 +1049,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             # expiration], so a report earlier this week falls inside it.
             if earnings_date and earnings_gate_applies(trade_type, dte):
                 if check_earnings_conflict(earnings_date, exp_str):
+                    exps_skipped_earnings += 1
                     log.info(f"  [{trade_type}] Skipping {exp_str} — earnings conflict ({earnings_date})")
                     continue
 
@@ -1064,6 +1115,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             for k, short in opts.items():
                 d = short["delta"]
                 if not (d_min <= d <= d_max):
+                    delta_reject += 1
                     continue
                 delta_pass += 1
                 if short["mark"] <= 0:
@@ -1075,6 +1127,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                 # to spot (0.30-0.55 delta) with its own risk controls, so it is
                 # exempt.
                 if mode != "DIRECTIONAL" and abs(d) > MAX_ENTRY_SHORT_DELTA:
+                    delta_ceiling += 1
                     continue
                 # --- Strike validity: only SHORT leg must be in expected move window ---
                 if spot is not None and exp_daily_em is not None and exp_daily_em > 0:
@@ -1092,10 +1145,12 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                     selection = select_best_width(
                         short, opts, side, std_increment or 1.0, trade_type, min_cr_pct,
                         account_size=account_size, max_risk_pct=max_risk_pct,
-                        max_risk_dollars=max_risk_dollars)
+                        max_risk_dollars=max_risk_dollars,
+                        reasons=width_reasons)
                     if selection is None:
                         no_width += 1
                         continue
+                    width_found += 1
                     w, lo, credit, ml = selection
                     # Sanity cap already enforced inside select_best_width
                     pop = ((1 + d) if side == "PCS" else (1 - d)) * 100
@@ -1182,10 +1237,38 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                             "mode": mode,
                         })
 
+    if funnel is not None:
+        # ⚠ ACCUMULATE, never assign. ``width_reasons`` is reached through
+        # ``setdefault``, so it sums across calls; a scalar that merely
+        # overwrote would report the LAST call beside a Counter summing all of
+        # them, and the partition below would quietly stop holding on exactly
+        # the usage the funnel exists for — one funnel across a watchlist.
+        for key, val in (("expirations_in_window", exps_in_window),
+                         ("expirations_skipped_earnings", exps_skipped_earnings),
+                         ("delta_reject", delta_reject),
+                         ("delta_pass", delta_pass),
+                         ("mark_fail", mark_fail),
+                         ("delta_ceiling", delta_ceiling),
+                         ("em_fail", em_fail),
+                         ("liq_fail_short", liq_fail_short),
+                         ("width_found", width_found)):
+            funnel[key] = funnel.get(key, 0) + val
+
     if not results:
-        log.info(f"  [{trade_type}] NO SPREADS — delta={delta_pass} mark={mark_fail} em={em_fail} "
-                 f"liq_short={liq_fail_short} liq_long={liq_fail_long} credit={credit_fail} "
-                 f"no_width={no_width}")
+        head = (f"  [{trade_type}] NO SPREADS — exp={exps_in_window} "
+                f"earnings_skip={exps_skipped_earnings} delta={delta_pass} "
+                f"mark={mark_fail} delta_ceiling={delta_ceiling} em={em_fail} "
+                f"liq_short={liq_fail_short}")
+        if widths is None:
+            # The auto-width path never touches liq_long / credit — printing them
+            # meant printing two zeroes on every scan that took this branch, which
+            # read as "nothing failed there" rather than "nothing looked there".
+            # The width search's own stages are the answer.
+            detail = " ".join(f"{s}={width_reasons[s]}" for s in WIDTH_STAGES
+                              if width_reasons[s]) or "none"
+            log.info(f"{head} no_width={no_width} | widths: {detail}")
+        else:
+            log.info(f"{head} liq_long={liq_fail_long} credit={credit_fail}")
     else:
         log.info(f"  [{trade_type}] {len(results)} spreads produced")
     results.sort(key=lambda x: x["rr_pct"], reverse=True)
