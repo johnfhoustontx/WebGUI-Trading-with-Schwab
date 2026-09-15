@@ -16,12 +16,14 @@ BLOCK: a page calls them through ``run.io_bound``, never on the event loop.
 CHECKS_SLOT = r'''
   <q-td :props="props">
     <span :class="props.row._checks_class + ' text-xs whitespace-nowrap'">{{ props.row._checks_short || '—' }}</span>
-    <q-tooltip v-if="props.value">{{ props.value }}</q-tooltip>
+    <q-tooltip v-if="props.row._checks_tip">{{ props.row._checks_tip }}</q-tooltip>
+    <q-tooltip v-else-if="props.value">{{ props.value }}</q-tooltip>
   </q-td>
 '''
 
 # Every field ``stamp_checks`` writes - what a memo entry holds.
-CHECK_FIELDS = ("checks", "_checks_state", "_checks_class", "_checks_short", "_checks_clear")
+CHECK_FIELDS = ("checks", "_checks_state", "_checks_class", "_checks_short",
+                "_checks_clear", "_checks_tip")
 
 ONLY_CLEAR_TIP = ("Hide rows with a block, a caution, a feed that hasn't loaded, "
                   "or a paper book fit that couldn't be checked")
@@ -31,6 +33,9 @@ def stamp_checks(rows, signals, ctx, build=None, memo=None):
     """Stamp the checklist verdict (``checks`` / ``_checks_state`` /
     ``_checks_class`` / ``_checks_short`` / ``_checks_clear``) onto display rows,
     joined by id (the builders re-sort).
+
+    ``_checks_tip`` is the cell's hover - a caution chip's cautions, or the
+    verdict's own text.
 
     ``_checks_clear`` is what "Only clear" filters on: the chip reads Clear AND no
     Paper book line is grey. A grey book line (no risk stamp, or a book fit that
@@ -62,6 +67,9 @@ def stamp_checks(rows, signals, ctx, build=None, memo=None):
         r["checks"], r["_checks_state"], r["_checks_class"] = (
             chip["text"], chip["state"], chip["class"])
         r["_checks_short"] = chip["short"]
+        # The hover: a caution chip repeats its cell, so it names its cautions
+        # instead; every other state's own words already say something more.
+        r["_checks_tip"] = chip.get("reasons") or chip["text"]
         r["_checks_clear"] = chip["state"] == "pos" and not any(
             c.get("key") == "book" and c.get("tone") == "muted" for c in items)
         if memo is not None and key is not None:
@@ -80,10 +88,13 @@ def only_clear(rows):
 
 def filtered_tab_label(base, total, shown, *, have, filtering):
     """Tab header while "Only clear" may be on: ``'Swing (3 of 40)'`` filtered,
-    ``'Swing (40)'`` not, and the bare name before today's scan exists."""
+    ``'Swing (40)'`` not, and the bare name before today's scan exists.
+
+    An EMPTY tab keeps the plain ``'(0)'`` even while filtering: ``'(0 of 0)'``
+    reads as a filter that hid something, and there was nothing to hide."""
     if not have:
         return base
-    if filtering:
+    if filtering and total:
         return f"{base} ({shown} of {total})"
     return f"{base} ({total})"
 

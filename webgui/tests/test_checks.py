@@ -485,3 +485,41 @@ def test_verdict_carries_summary_unchanged():
                checks.build_checks(_pcs(), None, REGIME, {}, CAPS), []):
         full = checks.verdict(cs)
         assert {k: v for k, v in full.items() if k != "short"} == checks.summary(cs)
+
+
+# ── a caution chip's tooltip says WHICH cautions (review 2026-09-15) ─────────
+def _warn(n, text="wide"):
+    return [{"key": f"k{i}", "label": f"L{i}", "tone": "warn", "text": f"{text} {i}"}
+            for i in range(n)]
+
+
+def test_a_caution_verdict_lists_its_cautions_for_the_tooltip():
+    one = checks.verdict(_warn(1))
+    assert one["text"] == "1 caution" and one["reasons"] == "wide 0"
+    three = checks.verdict(_warn(3))
+    assert three["text"] == "3 cautions"
+    assert three["reasons"] == "wide 0 · wide 1 · wide 2"
+
+
+def test_more_than_three_cautions_list_the_first_three_and_trail_off():
+    many = checks.verdict(_warn(5))
+    assert many["reasons"] == "wide 0 · wide 1 · wide 2 · …"
+    assert many["text"] == "5 cautions"      # the chip's own words are unchanged
+
+
+def test_only_a_caution_verdict_carries_reasons():
+    clear = [{"key": "cost", "label": "Cost", "tone": "pos", "text": "fine"}]
+    blocked = [{"key": "book", "label": "Paper book", "tone": "neg", "text": "no",
+                "breach": None}]
+    for items in (clear, blocked, [], _warn(0)):
+        assert "reasons" not in checks.verdict(items)
+    # A blocked row can also carry cautions; its own text already names the block.
+    assert "reasons" not in checks.verdict(blocked + _warn(2))
+
+
+def test_summary_is_still_the_verdict_without_its_short_form():
+    """The documented invariant, now over a caution verdict too: only ``short``
+    is dropped, so a caller reading ``summary`` sees exactly what the chip did."""
+    items = _warn(2)
+    full = checks.verdict(items)
+    assert {k: v for k, v in full.items() if k != "short"} == checks.summary(items)

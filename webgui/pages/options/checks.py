@@ -26,6 +26,7 @@ from . import book_fit, ev
 
 log = logging.getLogger(__name__)
 
+_MAX_REASONS = 3           # cautions named in a tooltip before it trails off
 VOL_MARGIN = 10.0          # points above the floor before Vol rank reads green
 FRICTION_OK_PCT = 10.0     # round-trip bid-ask as % of credit/debit
 FRICTION_WIDE_PCT = 25.0   # above this the words say "very wide" (still amber)
@@ -448,7 +449,12 @@ def build_checks(row, matrix_row, regime, calibration, caps, qty=1):
 
 def verdict(checks):
     """``{state, text, class, short}`` - :func:`summary` plus ``short``, the few
-    words a table cell has room for (the full ``text`` goes in its tooltip)."""
+    words a table cell has room for (the full ``text`` goes in its tooltip).
+
+    A CAUTION verdict carries one more key, ``reasons``: the cautions' own words,
+    for a hover that would otherwise repeat the cell. ``summary`` keeps it (only
+    ``short`` is dropped); the detail panel's headline reads ``text`` and ignores
+    it."""
     checks = [c for c in (checks or []) if isinstance(c, dict)]
     checked = [c for c in checks if c.get("tone") != "muted"]
     if not checked:
@@ -459,11 +465,18 @@ def verdict(checks):
         return {"state": "neg",
                 "text": "Blocked · " + book_fit.short_reason(blocked[0].get("breach")),
                 "class": TONE_CLASS["neg"], "short": "Blocked"}
-    cautions = sum(1 for c in checks if c.get("tone") == "warn")
-    if cautions:
-        word = "caution" if cautions == 1 else "cautions"
-        text = f"{cautions} {word}"
-        return {"state": "warn", "text": text, "class": TONE_CLASS["warn"], "short": text}
+    warned = [c for c in checks if c.get("tone") == "warn"]
+    if warned:
+        word = "caution" if len(warned) == 1 else "cautions"
+        text = f"{len(warned)} {word}"
+        # ``reasons`` is what the TABLE hovers: the chip's own words repeat the
+        # cell ("3 cautions"), where the blocked chip names its breach. Capped,
+        # because a tooltip is read at a glance.
+        reasons = [str(c.get("text") or "") for c in warned[:_MAX_REASONS]]
+        if len(warned) > _MAX_REASONS:
+            reasons.append("…")
+        return {"state": "warn", "text": text, "class": TONE_CLASS["warn"],
+                "short": text, "reasons": " · ".join(reasons)}
     k, n = len(checked), len(checks)
     if any(c.get("missing_view") for c in checks):
         return {"state": "muted", "text": f"Partly checked · {k} of {n} checked",
@@ -475,7 +488,7 @@ def verdict(checks):
 
 def summary(checks):
     """``{state, text, class}`` for the one-chip verdict (:func:`verdict` without
-    its ``short`` key)."""
+    its ``short`` key; a caution verdict's ``reasons`` rides along)."""
     out = verdict(checks)
     del out["short"]
     return out

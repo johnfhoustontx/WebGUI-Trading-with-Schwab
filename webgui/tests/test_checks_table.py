@@ -122,3 +122,38 @@ def test_the_scanner_restamps_through_the_shared_reader(monkeypatch):
     assert scanner._read_and_restamp({"signals_swing": ["row"]}, {"signals_swing": []}) == {
         "signals_swing": ["copy"]}
     assert seen["args"] == ({"signals_swing": ["row"]}, {"signals_swing": []})
+
+
+def test_the_tooltip_stamp_names_the_cautions_and_falls_back_to_the_verdict():
+    from pages.options import checks
+
+    def build(row, _ctx):
+        if row["id"] == "warn":
+            return [{"key": "a", "label": "A", "tone": "warn", "text": "too wide"},
+                    {"key": "b", "label": "B", "tone": "warn", "text": "against trend"}]
+        return [{"key": "a", "label": "A", "tone": "pos", "text": "fine"}]
+
+    sigs = [{"id": "warn"}, {"id": "clear"}]
+    rows = [{"id": "warn", "_allow_paper": True}, {"id": "clear", "_allow_paper": True}]
+    ct.stamp_checks(rows, sigs, None, build=build)
+    by_id = {r["id"]: r for r in rows}
+    # A caution row's hover says WHICH cautions; the chip repeated itself before.
+    assert by_id["warn"]["_checks_tip"] == "too wide · against trend"
+    assert by_id["warn"]["checks"] == "2 cautions"
+    # Anything else keeps the verdict's own words (Blocked names the breach).
+    assert by_id["clear"]["_checks_tip"] == by_id["clear"]["checks"]
+    assert "_checks_tip" in ct.CHECK_FIELDS
+
+
+def test_the_slot_prefers_the_caution_list_but_still_shows_the_verdict():
+    assert "props.row._checks_tip" in ct.CHECKS_SLOT
+    assert "{{ props.value }}" in ct.CHECKS_SLOT
+    assert ct.CHECKS_SLOT.count("<q-tooltip") == 2       # one renders: v-if / v-else-if
+
+
+def test_an_empty_tab_reads_plainly_even_while_the_filter_is_on():
+    # "(0 of 0)" reads as a filter that hid something; nothing was there to hide.
+    assert ct.filtered_tab_label("Directional", 0, 0, have=True, filtering=True) == (
+        "Directional (0)")
+    assert ct.filtered_tab_label("Directional", 3, 0, have=True, filtering=True) == (
+        "Directional (0 of 3)")

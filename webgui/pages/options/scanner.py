@@ -112,9 +112,16 @@ def _strikes_text(s):
     return f"{_fmt_k(sk)}/{_fmt_k(lk)}" if sk is not None else "—"
 
 
-def _col(field, label):
-    return {"name": field, "label": label, "field": field, "sortable": True,
+def _col(field, label, sortable=True):
+    return {"name": field, "label": label, "field": field, "sortable": sortable,
             "align": "left"}
+
+
+# The checklist's verdict sorts alphabetically ("1 caution" before "Blocked"
+# before "Clear"), which is an order in nothing the reader cares about - so the
+# column does not sort, as the Strategy Finder's has not since it was built.
+def _checks_col():
+    return _col("checks", "Checks", sortable=False)
 
 
 def _actions_col():
@@ -158,10 +165,12 @@ def signal_columns():
         ("iv_rank", "Vol Rank"),
         ("composite_score", "Score"),
         ("grade", "Grade"),
-        ("checks", "Checks"),          # the go / no-go checklist's one-chip verdict
         _DROPPED_COL,
     ]
-    return [_col(field, label) for field, label in spec] + [_actions_col()]
+    cols = [_col(field, label) for field, label in spec]
+    # The go / no-go checklist's one-chip verdict, before the Dropped column.
+    cols.insert(len(cols) - 1, _checks_col())
+    return cols + [_actions_col()]
 
 
 def directional_columns():
@@ -188,7 +197,7 @@ def directional_columns():
     shared = strategy_table.strategy_columns()
     body = [c for c in shared if c["name"] != "actions"]
     return ([_col("symbol", "Symbol")] + body
-            + [_col("checks", "Checks"), _col(*_DROPPED_COL), _actions_col()])
+            + [_checks_col(), _col(*_DROPPED_COL), _actions_col()])
 
 
 def signal_rows(signals):

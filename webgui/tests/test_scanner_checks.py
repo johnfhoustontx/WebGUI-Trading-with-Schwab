@@ -442,3 +442,16 @@ def test_render_registers_the_scanner_lookup_with_the_panel():
     src = inspect.getsource(scanner.render)
     assert "detail_panel.set_candidate_source(" in src
     assert "GONE_SCAN_TEXT" in src
+
+
+def test_the_checks_column_is_not_sortable_on_either_scanner_tab():
+    """Its words sort alphabetically ("1 caution" before "Blocked" before
+    "Clear"), which is not an order in anything the reader cares about - the
+    Strategy Finder's column has said so since it was built."""
+    for cols in (scanner.signal_columns(), scanner.directional_columns()):
+        (checks_col,) = [c for c in cols if c["name"] == "checks"]
+        assert checks_col["sortable"] is False
+    # Every other data column still sorts.
+    for cols in (scanner.signal_columns(), scanner.directional_columns()):
+        assert [c["name"] for c in cols
+                if c.get("sortable") and c["name"] != "checks"]
