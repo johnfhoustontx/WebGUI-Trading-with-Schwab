@@ -94,6 +94,12 @@ _PLACEHOLDER = "Select a signal to view details…"
 # The checklist's line while the context it needs is still being read - never a
 # verdict, which would claim a check that has not run.
 CHECKING_TEXT = "Checking…"
+# When no check applies at all (not a read in flight).
+NO_CHECKS_TEXT = "No checks apply to this trade"
+# When the page no longer lists the open row: a verdict on it would be about a
+# signal the table has dropped.
+GONE_SCAN_TEXT = "This signal is no longer in today's scan"
+GONE_FINDER_TEXT = "This trade is no longer in the scan's results"
 
 
 def pop_color(pop):
@@ -755,7 +761,12 @@ def checklist_view(items):
     if not items:
         return None
     muted = checks.TONE_CLASS["muted"]
-    return {"summary": checks.summary(items),
+    summary = checks.summary(items)
+    # A headline, so it starts with a capital ("unchecked" is the table chip's
+    # word; the chip itself is unchanged).
+    text = summary.get("text") or ""
+    summary["text"] = text[:1].upper() + text[1:]
+    return {"summary": summary,
             "lines": [{"label": c.get("label", ""), "text": c.get("text", ""),
                        "class": checks.TONE_CLASS.get(c.get("tone"), muted)}
                       for c in items]}
@@ -911,6 +922,12 @@ class _Handle:
         self._candidate = None
         self._checks_box = None
         self._checks_seq = 0
+        # What the box shows now, compared by VALUE so an identical refresh leaves
+        # the elements alone: ("view", view) / ("checking",) / ("none",) / ("gone", text).
+        self._checks_shown = None
+        # The page's lookup, id -> fresh candidate or None when the row has left.
+        self._candidate_source = None
+        self._gone_text = GONE_SCAN_TEXT
 
     # Open / collapse from the page. The panel opens by default (three pages mount
     # it that way); the Strategy Finder collapses it at build and opens it on the
@@ -936,17 +953,37 @@ class _Handle:
         """The id of the candidate the checklist judges, or None when none shows."""
         return self._candidate.get("id") if self._candidate else None
 
+    def set_candidate_source(self, lookup, gone_text=GONE_SCAN_TEXT):
+        """Register the page's ``lookup(id)`` -> fresh candidate, or None when the
+        page no longer lists that row. :meth:`refresh_checks` consults it, so a
+        row that has left the table says so instead of keeping its old verdict."""
+        self._candidate_source = lookup
+        self._gone_text = gone_text
+
     def refresh_checks(self, ctx, candidate=None):
         """Repaint ONLY the checklist, against the context the page just re-stamped
         its rows with - the contract and economics below stay as they are, and any
         expansion the reader opened stays open. ``candidate`` replaces the judged
         row when it has the SAME id (a signal whose Paper gate closed as it went
-        stale); any other is ignored. A no-op when no checklist shows."""
+        stale); any other is ignored. Without one, the page's registered source
+        supplies the fresh row - and when it no longer has the id, the box says
+        the row has gone, with no verdict. A no-op when no checklist shows; an
+        identical view leaves the elements as they are."""
         if self._candidate is None or self._checks_box is None:
             return
+        if candidate is None and self._candidate_source is not None:
+            candidate = self._candidate_source(self._candidate.get("id"))
+            if candidate is None:
+                self._show_gone()
+                return
         if isinstance(candidate, dict) and candidate.get("id") == self._candidate.get("id"):
             self._candidate = candidate
         self._paint_checks(ctx)
+
+    def _show_gone(self):
+        self._candidate = None
+        self._checks_seq += 1           # a read still in flight is not for this box
+        self._show(("gone", self._gone_text), self._gone_text)
 
     def _paint_checks(self, ctx):
         """Paint from ``ctx`` when the page holds one. Otherwise say Checking and
@@ -956,7 +993,7 @@ class _Handle:
         if isinstance(ctx, dict):
             self._render_checks(checks_feed.checks_for(self._candidate, ctx))
             return
-        self._render_checking()
+        self._show(("checking",), CHECKING_TEXT)
         _spawn(self._load_checks(self._checks_seq))
 
     async def _load_checks(self, seq):
@@ -970,24 +1007,35 @@ class _Handle:
             if not is_deleted_error(exc):
                 raise
 
-    def _render_checking(self):
+    def _show(self, shown, text):
+        """One muted line in the box (Checking / no checks / gone)."""
+        if shown == self._checks_shown:
+            return
+        self._checks_shown = shown
         self._checks_box.clear()
         with self._checks_box:
-            ui.label(CHECKING_TEXT).classes(f"text-sm {MUTED}")
+            ui.label(text).classes(f"text-sm {MUTED}")
 
     def _render_checks(self, items):
         view = checklist_view(items)
+        if view is None:
+            self._show(("none",), NO_CHECKS_TEXT)
+            return
+        shown = ("view", view)
+        if shown == self._checks_shown:
+            return
+        self._checks_shown = shown
         self._checks_box.clear()
         with self._checks_box:
-            if view is None:
-                ui.label(CHECKING_TEXT).classes(f"text-sm {MUTED}")
-                return
             chip = view["summary"]
             ui.label(chip["text"]).classes(f"text-sm font-bold {chip['class']}")
             for line in view["lines"]:
                 with ui.row().classes("w-full no-wrap gap-2 items-start"):
                     ui.label(line["label"]).classes(f"text-xs w-24 shrink-0 {MUTED}")
-                    ui.label(line["text"]).classes(f"text-xs {line['class']}")
+                    # min-w-0 + break-words: a long unbroken token wraps inside
+                    # the no-wrap row instead of pushing it wider than the panel.
+                    ui.label(line["text"]).classes(
+                        f"text-xs min-w-0 break-words {line['class']}")
 
     def _set_flag_badge(self, n):
         txt = flag_badge_text(n)
@@ -996,7 +1044,7 @@ class _Handle:
 
     def clear(self):
         self._state["has_signal"] = False
-        self._candidate, self._checks_box = None, None
+        self._candidate, self._checks_box, self._checks_shown = None, None, None
         self._checks_seq += 1
         self._header.set_visibility(False)
         self._flag_box.clear()
@@ -1039,7 +1087,7 @@ class _Handle:
         self._set_flag_badge(len(flags))
 
         self._candidate = candidate if isinstance(candidate, dict) else None
-        self._checks_box = None
+        self._checks_box, self._checks_shown = None, None
         self._checks_seq += 1
         self._body.clear()
         with self._body:

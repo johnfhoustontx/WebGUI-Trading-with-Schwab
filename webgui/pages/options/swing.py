@@ -285,6 +285,21 @@ def with_shapes(page, signal_for):
     return out
 
 
+def checklist_candidate_for(row_id, by_id, rows):
+    """The Trade detail panel's checklist candidate for an id: the raw signal plus
+    the ``_allow_paper`` of the list row :func:`finder_rows` built for it - the
+    gate the row's chip was judged with. A signal with no list row (a top-pick
+    card while a strategy chip hides it) takes the gate from that same builder.
+    ``None`` when the scan no longer holds the id."""
+    sig = (by_id or {}).get(row_id)
+    if not isinstance(sig, dict):
+        return None
+    row = next((r for r in rows or [] if r.get("id") == row_id), None)
+    if row is None:
+        row = finder_rows([{**sig, "payoff_curve": None}])[0]
+    return detail.checklist_candidate(sig, row.get("_allow_paper"))
+
+
 def card_view(sig):
     """A top-pick card's facts: ``finder_view.card_facts`` plus the legs line, the
     score / grade classes and the paper gate."""
@@ -609,6 +624,13 @@ def render():
 
     # -------------------------------------------------------------- selection
 
+    # The panel asks this for the open row on every refresh: its gate as the list
+    # row carries it, or None once an answer no longer holds the row - which the
+    # panel shows as gone, never as a verdict.
+    detail_panel.set_candidate_source(
+        lambda row_id: checklist_candidate_for(row_id, by_id, state["all_rows"]),
+        gone_text=detail.GONE_FINDER_TEXT)
+
     @guard
     def _select_signal(sig):
         if not sig:
@@ -617,13 +639,11 @@ def render():
         # invisibly would read as a click that did nothing.
         detail_panel.open()
         # The checklist judges the RAW signal with the Paper gate its list row
-        # carries - fixed by structure here (finder_rows' ``paper_types``) - against
-        # the context the list was last stamped with. None before the first read:
-        # the panel then says Checking and reads off the loop.
+        # carries, against the context the list was last stamped with. None before
+        # the first read: the panel then says Checking and reads off the loop.
         detail_panel.update(
             strategy_table.detail_signal(sig),
-            candidate=detail.checklist_candidate(
-                sig, sig.get("type") in strategy_table._PAPER_TYPES),
+            candidate=checklist_candidate_for(sig.get("id"), by_id, state["all_rows"]),
             ctx=checks["ctx"])
 
     def _on_row_click(event):
@@ -962,6 +982,10 @@ def render():
         scan_busy.hide()
         _paint_summary(payload)
         _paint_results()
+        # An open checklist whose row this answer no longer holds says so now.
+        # Only then: a row still here is repainted by the re-stamp just asked for.
+        if detail_panel.checklist_id is not None and detail_panel.checklist_id not in by_id:
+            detail_panel.refresh_checks(checks["ctx"])
 
     # ------------------------------------------------------------------- scan
 

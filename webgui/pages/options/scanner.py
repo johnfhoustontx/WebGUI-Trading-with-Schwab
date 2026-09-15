@@ -767,13 +767,17 @@ def render():
             detail_panel.update(strategy_table.detail_signal(sig),
                                 candidate=_candidate(sig), ctx=checks_ctx["ctx"])
 
+    # The panel asks this for the open row on every refresh: the gate as the rows
+    # now carry it, or None once a rebuild dropped the row (cap eviction, a new
+    # day's first scan) - which the panel shows as gone, never as a verdict.
+    detail_panel.set_candidate_source(
+        lambda row_id: checklist_candidate_for(row_id, by_id, painted),
+        gone_text=detail.GONE_SCAN_TEXT)
+
     def _refresh_detail_checks():
         """After a rebuild or re-stamp, repaint the open checklist against the new
-        context, with the candidate's gate as the rows now carry it."""
-        cur = detail_panel.checklist_id
-        if cur is not None:
-            detail_panel.refresh_checks(
-                checks_ctx["ctx"], candidate=checklist_candidate_for(cur, by_id, painted))
+        context (a no-op when no checklist shows)."""
+        detail_panel.refresh_checks(checks_ctx["ctx"])
 
     for _t in (table_0dte, table_swing):
         _t.on("rowClick", _select)

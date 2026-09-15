@@ -879,7 +879,7 @@ def _texts(card):
 
 def _verdicts(texts):
     return [t for t in texts
-            if t.startswith(("Partly checked", "Clear", "Blocked", "unchecked"))
+            if t.startswith(("Partly checked", "Clear", "Blocked", "unchecked", "Unchecked"))
             or t.endswith(("caution", "cautions"))]
 
 
@@ -1059,3 +1059,108 @@ def test_spawn_without_a_running_app_loop_closes_the_read_instead_of_raising(mon
     coro = read()
     detail._spawn(coro)
     assert ran == [] and coro.cr_frame is None      # closed, never started
+
+
+# ── review follow-ups: a row that left, no checks, casing, wrapping, repaints ─
+def _open_on(monkeypatch, sig=None, ctx=None, allow=True):
+    from nicegui import ui
+    _no_loop_reads(monkeypatch)
+    with ui.card() as card:
+        h = detail.render()
+    sig = sig or _scanner_pcs()
+    h.update(sig, candidate=detail.checklist_candidate(sig, allow), ctx=ctx or _CTX)
+    return card, h, sig
+
+
+def test_a_row_that_left_the_page_shows_one_muted_line_and_no_verdict(monkeypatch):
+    """The page's lookup no longer finds the open id (a cap eviction, a new day's
+    first scan): the panel must not repaint the old candidate against the new
+    context and show a fresh Clear for a signal the table no longer lists."""
+    from pages.options import checks
+    card, h, sig = _open_on(monkeypatch)
+    h.set_candidate_source(lambda _id: None, gone_text=detail.GONE_SCAN_TEXT)
+    h.refresh_checks(_CTX)
+    texts = _texts(card)
+    assert detail.GONE_SCAN_TEXT in texts
+    assert not _verdicts(texts)
+    assert not set(checks.LABELS.values()) & set(texts)
+    (gone,) = [e for e in card.descendants()
+               if getattr(e, "text", None) == detail.GONE_SCAN_TEXT]
+    assert detail.MUTED.split()[0] in gone._classes
+    # It stays gone: a later refresh has no candidate to repaint.
+    assert h.checklist_id is None
+    h.refresh_checks(_CTX)
+    assert detail.GONE_SCAN_TEXT in _texts(card) and not _verdicts(_texts(card))
+
+
+def test_the_candidate_source_supplies_the_fresh_row_for_the_open_id(monkeypatch):
+    card, h, sig = _open_on(monkeypatch)
+    asked = []
+    h.set_candidate_source(
+        lambda i: (asked.append(i), detail.checklist_candidate(sig, False))[1])
+    h.refresh_checks(_CTX)
+    assert asked == [sig["id"]]
+    assert "Paper book" not in _texts(card)          # the gate the row carries now
+
+
+def test_a_gone_row_drops_a_read_still_in_flight(monkeypatch):
+    import asyncio
+    from nicegui import run
+    _no_loop_reads(monkeypatch)
+    spawned = _capture_spawn(monkeypatch)
+    from nicegui import ui
+    with ui.card() as card:
+        h = detail.render()
+    sig = _scanner_pcs()
+    h.update(sig, candidate=detail.checklist_candidate(sig, True))
+    h.set_candidate_source(lambda _id: None)
+    h.refresh_checks(_CTX)
+
+    async def fake_io_bound(fn, *args, **kwargs):
+        return _CTX
+    monkeypatch.setattr(run, "io_bound", fake_io_bound)
+    asyncio.run(spawned[0])
+    texts = _texts(card)
+    assert detail.GONE_SCAN_TEXT in texts and not _verdicts(texts)
+
+
+def test_no_checks_applying_says_so_never_checking(monkeypatch):
+    from pages.options import checks_feed
+    monkeypatch.setattr(checks_feed, "checks_for", lambda row, ctx: [])
+    card, h, _sig = _open_on(monkeypatch)
+    texts = _texts(card)
+    assert detail.NO_CHECKS_TEXT in texts
+    assert detail.CHECKING_TEXT not in texts and not _verdicts(texts)
+
+
+def test_the_panel_headline_is_capitalised_but_the_table_chip_is_not():
+    from pages.options import checks
+    items = [{"key": "cost", "label": "Cost to trade", "tone": "muted",
+              "text": "Bid-ask not measured"}]
+    view = detail.checklist_view(items)
+    assert view["summary"]["text"] == "Unchecked"
+    assert view["summary"]["state"] == "muted"
+    assert checks.verdict(items)["text"] == "unchecked"      # the chip is unchanged
+    assert checks.verdict(items)["short"] == "unchecked"
+
+
+def test_the_check_text_wraps_long_tokens_in_its_no_wrap_row(monkeypatch):
+    card, _h, _sig = _open_on(monkeypatch)
+    from nicegui import ui
+    (earn,) = [e for e in card.descendants()
+               if isinstance(e, ui.label) and e.text == "No report scheduled"]
+    assert "min-w-0" in earn._classes and "break-words" in earn._classes
+    assert "no-wrap" in earn.parent_slot.parent._classes
+
+
+def test_an_identical_refresh_keeps_the_rendered_elements(monkeypatch):
+    from nicegui import ui
+    card, h, sig = _open_on(monkeypatch)
+
+    def label_ids():
+        return [id(e) for e in card.descendants() if isinstance(e, ui.label)]
+    before = label_ids()
+    h.refresh_checks(dict(_CTX))                        # equal view, new dict
+    assert label_ids() == before
+    h.refresh_checks({**_CTX, "matrix": None})          # a different view repaints
+    assert label_ids() != before

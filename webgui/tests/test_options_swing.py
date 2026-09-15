@@ -1880,7 +1880,7 @@ def test_a_finder_selection_hands_the_panel_its_paper_gate_so_the_book_line_show
     labels = [e.text for e in _widgets(card, ui.label)]
     assert reads == [checks_feed.read_context]
     assert "Paper book" in labels
-    assert "unchecked" in labels                      # every view cold: no verdict
+    assert "Unchecked" in labels                      # every view cold: no verdict
     _row_click(card, "sp")                           # a naked short: analysis only
     labels = [e.text for e in _widgets(card, ui.label)]
     assert "Paper book" not in labels and "Earnings" in labels
@@ -1892,3 +1892,50 @@ def test_the_finder_hands_its_held_context_and_refreshes_the_open_checklist():
     assert 'ctx=checks["ctx"]' in src
     assert "candidate=" in src
     assert "detail_panel.refresh_checks(ctx)" in src
+
+
+# ── the panel's checklist follows the page (review follow-ups) ──────────────
+def test_the_finder_candidate_takes_the_gate_from_the_row_finder_rows_built():
+    from pages.options import detail
+    sig = dict(_FINDER_PCS)
+    by_id = {sig["id"]: sig}
+    # A row whose gate says closed: the candidate must follow the ROW, not re-derive
+    # the gate from the structure name.
+    rows = [{"id": sig["id"], "_allow_paper": False}]
+    cand = swing.checklist_candidate_for(sig["id"], by_id, rows)
+    assert cand["_allow_paper"] is False and cand["id"] == sig["id"]
+    assert cand == detail.checklist_candidate(sig, False)
+    # Not in the list (a pick card hidden by a strategy chip): the gate comes from
+    # the same row builder the list uses.
+    built = swing.finder_rows([{**sig, "payoff_curve": None}])[0]["_allow_paper"]
+    assert swing.checklist_candidate_for(sig["id"], by_id, [])["_allow_paper"] is built
+    assert swing.checklist_candidate_for("gone", by_id, rows) is None
+
+
+def test_the_finder_no_longer_recomputes_the_paper_gate_for_the_panel():
+    import inspect
+    assert "in strategy_table._PAPER_TYPES" not in inspect.getsource(swing.render)
+
+
+def _finder_panel_labels(card):
+    from nicegui import ui
+    return [e.text for e in _widgets(card, ui.label)]
+
+
+def test_a_new_answer_without_the_open_row_says_it_left_and_gives_no_verdict(fresh_feed):
+    from pages.options import checks, detail
+    card = _render_with_context({**_PAYLOAD, "symbol": "ORCL",
+                                 "signals": [_FINDER_PCS, _NAKED]})
+    _run_checks_tick(card)
+    _row_click(card, _FINDER_PCS["id"])
+    assert "Paper book" in _finder_panel_labels(card)
+    # Another answer lands while the panel is open, without that row.
+    _publish({**_PAYLOAD, "symbol": "ORCL", "signals": [_NAKED]})
+    _fire_poll(card)
+    labels = _finder_panel_labels(card)
+    assert detail.GONE_FINDER_TEXT in labels
+    assert not set(checks.LABELS.values()) & set(labels)
+    # The re-stamp that follows does not bring the old verdict back.
+    _run_checks_tick(card)
+    labels = _finder_panel_labels(card)
+    assert detail.GONE_FINDER_TEXT in labels and "Paper book" not in labels

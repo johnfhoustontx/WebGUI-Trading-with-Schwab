@@ -410,3 +410,35 @@ def test_render_hands_the_detail_panel_a_candidate_and_refreshes_it():
     assert "checklist_candidate_for(" in src
     assert "detail_panel.refresh_checks(" in src
     assert "checks_feed.read_context()" not in src
+
+
+def test_the_scanner_panel_marks_a_row_that_left_the_day_union(monkeypatch):
+    """The Scanner registers its lookup, so a rebuild that evicted the open row
+    reads as gone rather than as a fresh verdict on the old row."""
+    from nicegui import ui
+    from pages.options import detail
+    monkeypatch.setattr(checks_feed, "read_context",
+                        lambda: (_ for _ in ()).throw(AssertionError("on-loop read")))
+    live = _pcs_signal()
+    by_id = {live["id"]: live}
+    painted = {"signals_swing": _stamped(live)}
+    with ui.card() as card:
+        panel = detail.render()
+    panel.set_candidate_source(
+        lambda i: scanner.checklist_candidate_for(i, by_id, painted),
+        gone_text=detail.GONE_SCAN_TEXT)
+    panel.update(live, candidate=scanner.checklist_candidate_for(live["id"], by_id, painted),
+                 ctx=_ctx())
+    texts = [e.text for e in card.descendants() if isinstance(e, ui.label)]
+    assert "Paper book" in texts
+    by_id.clear()                                        # evicted by the rebuild
+    painted["signals_swing"] = []
+    panel.refresh_checks(_ctx())
+    texts = [e.text for e in card.descendants() if isinstance(e, ui.label)]
+    assert detail.GONE_SCAN_TEXT in texts and "Paper book" not in texts
+
+
+def test_render_registers_the_scanner_lookup_with_the_panel():
+    src = inspect.getsource(scanner.render)
+    assert "detail_panel.set_candidate_source(" in src
+    assert "GONE_SCAN_TEXT" in src
