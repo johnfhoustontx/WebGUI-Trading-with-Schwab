@@ -2572,7 +2572,8 @@ def handle_command(bus, command) -> None:
         # R5: refuse a stale manual paper-open (a restart replay would open on
         # stale economics). Surfaced via the R1 results list + logged; the ledger
         # is still refreshed so the page repaints.
-        sig = command.args.get("signal") or {}
+        raw = command.args.get("signal")
+        sig = raw if isinstance(raw, dict) else {}
         if _is_stale_open(command):
             age = _command_age_seconds(command)
             log.warning(
@@ -2584,14 +2585,30 @@ def handle_command(bus, command) -> None:
                                  "age_sec": round(age or 0, 1), "source": "manual"})
             _publish_paper_create(bus, {"status": "stale", "symbol": sig.get("symbol"),
                                         "type": sig.get("type"),
+                                        "expiration": sig.get("expiration"),
+                                        "qty": None, "rungs": [],
                                         "message": "The request waited too long to be "
                                                    "processed, so it was not acted on. "
-                                                   "Try again"})
+                                                   "Try again."})
         else:
-            outcome = compute.create_paper_trade(sig, command.args.get("qty", 1)) or {}
+            try:
+                outcome = compute.create_paper_trade(sig, command.args.get("qty", 1)) or {}
+            except Exception:
+                # Answer the page before the scaffold dead-letters the command: a
+                # raise (a locked trades.db, say) must not be a button that does
+                # nothing. Re-raised so the traceback and dead-letter still happen.
+                _publish_paper_create(bus, {
+                    "status": "error", "symbol": sig.get("symbol"),
+                    "type": sig.get("type"), "expiration": sig.get("expiration"),
+                    "rungs": [],
+                    "message": "The paper trade could not be processed. Nothing was opened."})
+                raise
             if outcome.get("status") == "refused":
                 log.info("REFUSED paper_create %s %s: %s", sig.get("symbol"),
                          outcome.get("code"), outcome.get("message"))
+            elif outcome.get("status") == "error":
+                log.warning("paper_create error for %s: %s", sig.get("symbol"),
+                            outcome.get("message"))
             _publish_paper_create(bus, outcome)
         refresh_paper_trades(bus)
     elif command.type == "paper_reload":

@@ -1,6 +1,8 @@
 """Every paper_create outcome reaches the screen."""
 import datetime as _dt
 
+import pytest
+
 from shared.bus import Bus
 from shared.bus.client import reset_fake_bus
 from shared.contracts.envelope import Command
@@ -87,22 +89,62 @@ def test_the_published_view_expires(monkeypatch):
 def test_the_real_outcome_round_trips_through_the_bus(monkeypatch, tmp_path):
     """Drive the REAL compute.create_paper_trade (not a stub) into a tmp Ledger and
     read the published payload back - the producer, not an invented dict."""
+    import config_paper
+    reset_fake_bus()
+    bus = Bus(fake=True)
+    _real_ledger(monkeypatch, tmp_path)
+    cap = config_paper.LEDGER_MAX_RISK_PER_TRADE
+    # Risk sized to sit $150 over whatever the cap is, so the refusal stays real
+    # if the cap moves (at $750 this is the 10-wide $1.00-credit, $900 spread).
+    risk = cap + 150
+    width = risk / 100 + 1.00
+    assert risk > cap
+    sig = {"symbol": "ORCL", "type": "PCS", "trade_type": "SWING",
+           "expiration": "2026-10-17", "dte": 30, "short_strike": 100.0,
+           "long_strike": 100.0 - width, "width": width, "credit": 1.00,
+           "max_loss": width - 1.00}
+    handlers.handle_command(bus, Command(type="paper_create", args={"signal": sig, "qty": 1}))
+    payload = bus.cache_get(handlers.CACHE_PAPER_CREATE).payload
+    assert payload["status"] == "refused" and payload["code"] == "TRADE_RISK_CAP"
+    assert payload["message"] == f"Risks ${risk:,.0f}, over the ${cap:,.0f} per-trade limit"
+    assert payload["max_quantity"] == 0
+    assert [r["code"] for r in payload["rungs"]][0] == "TRADE_RISK_CAP"
+
+
+def _real_ledger(monkeypatch, tmp_path):
+    """Point the REAL Ledger at a tmp trades.db and silence the tracker, so a
+    test drives compute.create_paper_trade itself rather than a stub."""
     import paper_trader  # noqa: F401  (ensures options-scanner is importable)
     import trade_tracker_client
     import trades_db
-    reset_fake_bus()
-    bus = Bus(fake=True)
     monkeypatch.setattr(trades_db, "DEFAULT_DB_PATH", tmp_path / "trades.db")
     monkeypatch.setattr(trades_db, "_initialised", set())
     monkeypatch.setattr(trade_tracker_client, "track", lambda t: True)
     monkeypatch.setattr(trade_tracker_client, "untrack", lambda tid: True)
     monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda reprice=True: {"trades": []})
-    sig = {"symbol": "ORCL", "type": "PCS", "trade_type": "SWING",
-           "expiration": "2026-10-17", "dte": 30, "short_strike": 100.0,
-           "long_strike": 90.0, "width": 10.0, "credit": 1.00, "max_loss": 9.00}
-    handlers.handle_command(bus, Command(type="paper_create", args={"signal": sig, "qty": 1}))
+
+
+def test_a_raise_still_publishes_an_error_then_propagates(monkeypatch):
+    reset_fake_bus()
+    bus = Bus(fake=True)
+
+    def _boom(s, q):
+        raise RuntimeError("db locked")
+
+    monkeypatch.setattr(handlers.compute, "create_paper_trade", _boom)
+    monkeypatch.setattr(handlers.compute, "paper_trades_view", lambda reprice=True: {"trades": []})
+    with pytest.raises(RuntimeError):
+        handlers.handle_command(bus, Command(type="paper_create",
+                                             args={"signal": {"symbol": "SPY"}, "qty": 1}))
     payload = bus.cache_get(handlers.CACHE_PAPER_CREATE).payload
-    assert payload["status"] == "refused" and payload["code"] == "TRADE_RISK_CAP"
-    assert payload["message"] == "Risks $900, over the $750 per-trade limit"
-    assert payload["max_quantity"] == 0
-    assert [r["code"] for r in payload["rungs"]][0] == "TRADE_RISK_CAP"
+    assert payload["status"] == "error"
+    assert payload["message"] == "The paper trade could not be processed. Nothing was opened."
+
+
+def test_a_non_dict_signal_publishes_an_error_not_a_crash(monkeypatch, tmp_path):
+    reset_fake_bus()
+    bus = Bus(fake=True)
+    _real_ledger(monkeypatch, tmp_path)
+    handlers.handle_command(bus, Command(type="paper_create",
+                                         args={"signal": "junk", "qty": 1}))
+    assert bus.cache_get(handlers.CACHE_PAPER_CREATE).payload["status"] == "error"
