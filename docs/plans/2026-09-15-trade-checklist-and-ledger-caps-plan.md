@@ -1038,6 +1038,19 @@ def test_every_outcome_carries_the_rungs_in_display_order(ledger):
 def test_an_untradeable_signal_is_an_error_outcome_not_a_raise(ledger):
     out = compute.create_paper_trade({"symbol": "SPY", "type": "LONG_STRADDLE"}, 1)
     assert out["status"] == "error" and "not paper-tradeable" in out["message"]
+
+
+def test_a_trade_whose_max_loss_cannot_be_read_is_refused_not_opened(ledger):
+    """book_caps counts an unusable risk as ZERO (the Account sized its trades
+    first). The Ledger did not, so it must refuse here - otherwise a debit signal
+    with no max_loss books max_loss_total 0.0 and clears every risk rung, while
+    the preview (which needs a positive risk) says it cannot check."""
+    sig = {"symbol": "SPY", "type": "LONG_CALL", "expiration": "2026-10-17",
+           "net_debit": 300.0, "legs": [{"kind": "call", "side": "long", "strike": 500}]}
+    out = compute.create_paper_trade(sig, 1)
+    assert out["status"] == "error"
+    assert out["message"] == "The trade's max loss could not be read, so the risk caps cannot be checked."
+    assert ledger.get_open_trades() == []
 ```
 
 **Step 2: Run to verify they fail.** Expected: FAIL (the current function returns the trade dict and never refuses).
@@ -1071,6 +1084,14 @@ def create_paper_trade(signal: dict, qty: int) -> dict:
         trade = paper_trader.create_paper_trade(sig, int(qty))
     except (ValueError, KeyError, TypeError) as exc:
         return {**base, "status": "error", "message": str(exc)}
+    # shared.book_caps counts an unusable candidate risk as ZERO, which is right
+    # for the Account (its entry cycle sized the trade first) and wrong here.
+    risk = trade.get("max_loss_total")
+    if not (isinstance(risk, (int, float)) and not isinstance(risk, bool)
+            and math.isfinite(risk) and risk > 0):
+        return {**base, "status": "error",
+                "message": "The trade's max loss could not be read, so the risk "
+                           "caps cannot be checked."}
 
     book = ledger_book_state()
     candidate = {"symbol": trade["symbol"], "expiration": trade["expiration"],
