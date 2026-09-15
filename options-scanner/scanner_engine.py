@@ -970,10 +970,12 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
 
     The keys, and exactly what each means:
 
-    ``expirations_in_window``      expirations inside [dte_min, dte_max]. ⚠ counted
+    ``expiration_sides_in_window`` expirations inside [dte_min, dte_max], counted
                                    PER SIDE — the pass walks the put map then the
-                                   call map, so one date listed in both is two.
-    ``expirations_skipped_earnings`` of those, dropped whole by the earnings gate.
+                                   call map, so one Friday listed in both is two.
+                                   The name says SIDES because a page reading
+                                   "2 expirations" over one Friday would be wrong.
+    ``expiration_sides_skipped_earnings`` of those, dropped by the earnings gate.
     ``delta_reject`` / ``delta_pass``  strikes outside / inside the delta band.
     ``mark_fail``                  admitted, but the short leg has no usable mark.
     ``delta_ceiling``              |delta| past MAX_ENTRY_SHORT_DELTA (PREMIUM only).
@@ -992,12 +994,21 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
     Every key ACCUMULATES, so one funnel can be carried across a whole watchlist
     and the equation above still holds over the total.
 
-    ⚠ Two populations are deliberately outside the tally, because they never
-    reach the strike loop: contracts with no delta at all, and strikes dropped by
-    the strike-increment filter. ⚠ And the EXPLICIT-widths branch
-    (``widths=[...]``) runs no width search, so it contributes no ``width_found``
-    and no ``width_reasons``; its own ``liq_long`` / ``credit`` counters stay
-    local to the log line.
+    ⚠ Two more counters sit OUTSIDE that partition, because the strikes they
+    count never reach the strike loop to be partitioned:
+
+    ``strikes_dropped_no_delta``   a strike with no contract row, or whose
+                                   contract carries no delta — either way there
+                                   is no delta to band it with.
+    ``strikes_dropped_off_increment`` strikes the strike-increment filter removed.
+
+    They exist because a chain the increment filter EMPTIES otherwise produces a
+    funnel of zeroes, which is precisely the shape where the page most needs a
+    reason. Do not fold them into the equation above.
+
+    ⚠ The EXPLICIT-widths branch (``widths=[...]``) runs no width search, so it
+    contributes no ``width_found`` and no ``width_reasons``; its own ``liq_long``
+    / ``credit`` counters stay local to the log line.
     """
     if not chain:
         return []
@@ -1018,15 +1029,15 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
     delta_pass = 0; mark_fail = 0; liq_fail_short = 0; liq_fail_long = 0
     em_fail = 0; credit_fail = 0; no_width = 0
     delta_reject = 0; delta_ceiling = 0; width_found = 0
-    exps_in_window = 0; exps_skipped_earnings = 0
+    exp_sides_in_window = 0; exp_sides_skipped_earnings = 0
+    dropped_no_delta = 0; dropped_off_increment = 0
 
-    # The width counter is built whether or not a funnel was asked for: the
-    # "NO SPREADS" log line reports it on the auto-width path, and that line has
-    # to say something useful on a scan nobody instrumented. When a funnel IS
-    # supplied its OWN counter is used, so a caller accumulating one funnel
-    # across symbols keeps a single running tally.
-    width_reasons = (funnel.setdefault("width_reasons", Counter())
-                     if funnel is not None else Counter())
+    # ⚠ CALL-LOCAL, always — never the funnel's own Counter. The funnel
+    # ACCUMULATES across symbols while the log line below describes ONE call, so
+    # sharing the object made the second symbol print "no_width=14 | widths:
+    # over_trade_cap=28", which contradicts itself on its face. It is folded
+    # into the funnel at the write-out point, exactly like the scalars.
+    width_reasons = Counter()
 
     for side, exp_map, d_min, d_max in [
         ("PCS", chain.get("putExpDateMap", {}), put_d_min, put_d_max),
@@ -1037,7 +1048,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             exp_str, dte = parts[0], int(float(parts[1]))
             if not (dte_min <= dte <= dte_max):
                 continue
-            exps_in_window += 1
+            exp_sides_in_window += 1
 
             # Earnings avoidance — for candidates whose positions are HELD
             # across sessions. SWING and INCOME always are, and at 30-45 DTE
@@ -1049,7 +1060,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             # expiration], so a report earlier this week falls inside it.
             if earnings_date and earnings_gate_applies(trade_type, dte):
                 if check_earnings_conflict(earnings_date, exp_str):
-                    exps_skipped_earnings += 1
+                    exp_sides_skipped_earnings += 1
                     log.info(f"  [{trade_type}] Skipping {exp_str} — earnings conflict ({earnings_date})")
                     continue
 
@@ -1078,10 +1089,15 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
             opts = {}
             for sk, contracts in strikes_data.items():
                 k = float(sk)
+                if not contracts:
+                    # No contract row at all. Same absence as a missing delta by
+                    # a different route, and it used to leave no trace whatever.
+                    dropped_no_delta += 1
                 if contracts:
                     c = contracts[0]
                     d = c.get("delta")
                     if d is None:
+                        dropped_no_delta += 1
                         continue
                     # Use mark if available; fall back to bid/ask midpoint
                     # or previous close for pre-market scans.
@@ -1110,6 +1126,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                         valid_strikes[sk] = v
                 log.debug(f"  [{trade_type}] {side} Increment filter: inc={std_increment} "
                           f"| {pre_inc_count} -> {len(valid_strikes)} survived")
+                dropped_off_increment += pre_inc_count - len(valid_strikes)
                 opts = valid_strikes
 
             for k, short in opts.items():
@@ -1238,25 +1255,35 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                         })
 
     if funnel is not None:
-        # ⚠ ACCUMULATE, never assign. ``width_reasons`` is reached through
-        # ``setdefault``, so it sums across calls; a scalar that merely
-        # overwrote would report the LAST call beside a Counter summing all of
-        # them, and the partition below would quietly stop holding on exactly
-        # the usage the funnel exists for — one funnel across a watchlist.
-        for key, val in (("expirations_in_window", exps_in_window),
-                         ("expirations_skipped_earnings", exps_skipped_earnings),
+        # ⚠ ACCUMULATE, never assign — one funnel is carried across a whole
+        # watchlist, and a key that overwrote would report the LAST symbol
+        # beside keys summing all of them, quietly breaking the partition on
+        # exactly the usage the funnel exists for.
+        for key, val in (("expiration_sides_in_window", exp_sides_in_window),
+                         ("expiration_sides_skipped_earnings", exp_sides_skipped_earnings),
                          ("delta_reject", delta_reject),
                          ("delta_pass", delta_pass),
                          ("mark_fail", mark_fail),
                          ("delta_ceiling", delta_ceiling),
                          ("em_fail", em_fail),
                          ("liq_fail_short", liq_fail_short),
-                         ("width_found", width_found)):
+                         ("width_found", width_found),
+                         ("strikes_dropped_no_delta", dropped_no_delta),
+                         ("strikes_dropped_off_increment", dropped_off_increment)):
             funnel[key] = funnel.get(key, 0) + val
+        # ⚠ COERCE rather than trust: a funnel that has been published and read
+        # back arrives with a plain dict here, and everything downstream reads
+        # ``most_common`` off it. An existing Counter is mutated in place, so a
+        # caller holding a reference keeps seeing its own object.
+        bucket = funnel.setdefault("width_reasons", Counter())
+        if not isinstance(bucket, Counter):
+            bucket = Counter(bucket)
+            funnel["width_reasons"] = bucket
+        bucket.update(width_reasons)
 
     if not results:
-        head = (f"  [{trade_type}] NO SPREADS — exp={exps_in_window} "
-                f"earnings_skip={exps_skipped_earnings} delta={delta_pass} "
+        head = (f"  [{trade_type}] NO SPREADS — exp_sides={exp_sides_in_window} "
+                f"earnings_skip={exp_sides_skipped_earnings} delta={delta_pass} "
                 f"mark={mark_fail} delta_ceiling={delta_ceiling} em={em_fail} "
                 f"liq_short={liq_fail_short}")
         if widths is None:
@@ -1432,10 +1459,19 @@ def size_contracts(n_target, n_risk):
 # "every width cleared the credit floor but one contract costs more than the
 # cap" is actionable, where a bare "no width" is not. ⚠ The ORDER is the
 # meaning: an entry's position in this tuple is its rank, so a new stage goes
-# where the search reaches it, never merely at the end.
-WIDTH_STAGES = ("long_leg_missing", "long_leg_unpriced", "long_leg_illiquid",
+# where the search reaches it, never merely at the end. ``increment_over_cap``
+# leads because it happens BEFORE any width is built: the first multiplier is 1,
+# so an increment wider than MAX_WIDTH_DOLLARS breaks the loop immediately.
+WIDTH_STAGES = ("increment_over_cap",
+                "long_leg_missing", "long_leg_unpriced", "long_leg_illiquid",
                 "no_credit", "sanity_cap", "credit_floor", "edge_floor",
                 "over_trade_cap", "no_contracts", "no_positive_ev")
+
+# Name -> rank. The search writes ``_STAGE["credit_floor"]`` rather than a bare
+# 5, because renumbering this tuple by hand is a change no test can catch:
+# swapping two integer literals leaves every count the same SHAPE and the suite
+# green, while the page renders the wrong reason.
+_STAGE = {name: i for i, name in enumerate(WIDTH_STAGES)}
 
 
 def select_best_width(short, opts, side, strike_increment, trade_type,
@@ -1496,25 +1532,25 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
         budget = None
 
     candidates = []
-    furthest = -1   # index into WIDTH_STAGES; -1 = no width was even examined
+    furthest = -1   # rank in WIDTH_STAGES; -1 = no width was ever CONSTRUCTED
     for mult in WIDTH_MULTIPLIERS:
         w = mult * strike_increment
         if w > MAX_WIDTH_DOLLARS:
             break
         long_k = (k - w) if side == "PCS" else (k + w)
         if long_k not in opts:
-            furthest = max(furthest, 0)          # long_leg_missing
+            furthest = max(furthest, _STAGE["long_leg_missing"])
             continue
         lo = opts[long_k]
         if lo["mark"] <= 0:
-            furthest = max(furthest, 1)          # long_leg_unpriced
+            furthest = max(furthest, _STAGE["long_leg_unpriced"])
             continue
         if not passes_liquidity_gate(lo, trade_type, is_short_leg=False):
-            furthest = max(furthest, 2)          # long_leg_illiquid
+            furthest = max(furthest, _STAGE["long_leg_illiquid"])
             continue
         credit = _entry_credit(short, lo, w)
         if credit is None or credit <= 0:
-            furthest = max(furthest, 3)          # no_credit
+            furthest = max(furthest, _STAGE["no_credit"])
             continue
         ml = w - credit
         if ml <= 0:
@@ -1522,27 +1558,27 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
             # it belongs with the other "there is no credit to work with" case
             # rather than with the sanity cap, which is about a credit that is
             # merely implausible.
-            furthest = max(furthest, 3)          # no_credit
+            furthest = max(furthest, _STAGE["no_credit"])
             continue
         if credit / w > 0.95:
-            furthest = max(furthest, 4)          # sanity_cap
+            furthest = max(furthest, _STAGE["sanity_cap"])
             continue  # sanity cap on absurd marks
         effective_min = calc_effective_min_credit(w, min_cr_pct)
         if credit / w < effective_min:
-            furthest = max(furthest, 5)          # credit_floor
+            furthest = max(furthest, _STAGE["credit_floor"])
             continue
         # Delta-aware edge floor: pay strictly above the assignment-probability
         # breakeven (|delta|) plus a margin. (E[PnL]>0 below is the zero-margin
         # form of this; this makes the margin explicit.)
         if credit / w < abs(d) + EDGE_MARGIN:
-            furthest = max(furthest, 6)          # edge_floor
+            furthest = max(furthest, _STAGE["edge_floor"])
             continue
 
         # A width whose ONE contract busts the real budget can never be opened,
         # so it is not a candidate — dropping it here is what stops the search
         # winning a race the entry cycle then refuses (A6).
         if budget is not None and ml * 100 > budget:
-            furthest = max(furthest, 7)          # over_trade_cap
+            furthest = max(furthest, _STAGE["over_trade_cap"])
             continue
 
         # Contract sizing: hit profit target on a win, bounded by risk cap.
@@ -1551,23 +1587,29 @@ def select_best_width(short, opts, side, strike_increment, trade_type,
                   else calculate_position_size(ml, account_size, max_risk_pct))
         contracts = size_contracts(n_target, n_risk)
         if contracts <= 0:
-            furthest = max(furthest, 8)          # no_contracts
+            furthest = max(furthest, _STAGE["no_contracts"])
             continue   # the risk cap leaves no room for this width
 
         # Expected total $P&L at the sized position.
         e_pnl = (credit * pop - ml * (1 - pop)) * contracts * 100
         if e_pnl <= 0:
-            furthest = max(furthest, 9)          # no_positive_ev
+            furthest = max(furthest, _STAGE["no_positive_ev"])
             continue
 
         candidates.append((e_pnl, w, lo, credit, ml))
 
     if not candidates:
         if reasons is not None:
-            # ``max(furthest, 0)``: a strike whose every width sat above
-            # MAX_WIDTH_DOLLARS examines nothing, and the honest answer there is
-            # still that no long leg was reachable.
-            reasons[WIDTH_STAGES[max(furthest, 0)]] += 1
+            # ``furthest < 0`` means the loop broke before building a single
+            # width — the narrowest candidate, one whole strike increment, is
+            # already past MAX_WIDTH_DOLLARS. Naming that ``long_leg_missing``
+            # sent the reader hunting for absent strikes that are all present.
+            stage = WIDTH_STAGES[furthest] if furthest >= 0 else "increment_over_cap"
+            # ⚠ ``+= 1`` would need ``Counter.__missing__``. This funnel exists
+            # to be PUBLISHED, so ``width_reasons`` routinely comes back from
+            # ``json.loads`` as a plain dict, and a KeyError here aborts the
+            # whole scan. ``.get`` works for Counter, dict and defaultdict alike.
+            reasons[stage] = reasons.get(stage, 0) + 1
         return None
 
     # Highest E[PnL] first; ties broken by narrower width (less capital at risk)

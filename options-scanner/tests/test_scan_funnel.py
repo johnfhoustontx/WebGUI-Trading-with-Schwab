@@ -11,17 +11,20 @@ matter more than any individual count:
     width reached.** "every width cleared the credit floor but one contract costs
     more than the cap" is actionable; "no width" is not.
 """
+import json
 import os
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from datetime import date, timedelta
+from unittest import mock
 
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import scanner_engine  # noqa: E402
 from scanner_engine import (DEFAULT_MAX_RISK_DOLLARS, WIDTH_STAGES,  # noqa: E402
-                            screen_spreads, select_best_width)
+                            _STAGE, screen_spreads, select_best_width)
 
 # The fixture builders live with the tests they were written for; reuse them
 # rather than growing a second, drifting copy of the same chain shape.
@@ -34,9 +37,13 @@ class TestWidthStages:
     def test_the_stage_order_is_the_search_order(self):
         """The constant is the vocabulary the page will render, so pin it whole."""
         assert WIDTH_STAGES == (
+            "increment_over_cap",
             "long_leg_missing", "long_leg_unpriced", "long_leg_illiquid",
             "no_credit", "sanity_cap", "credit_floor", "edge_floor",
             "over_trade_cap", "no_contracts", "no_positive_ev")
+        # The names are the page's vocabulary AND the rank: a stage's position
+        # is its severity, so _STAGE must stay in step with the tuple.
+        assert _STAGE == {n: i for i, n in enumerate(WIDTH_STAGES)}
 
     @pytest.mark.parametrize("marks,kwargs", [
         # A width is found (the E[PnL] race of test_picks_width_with_highest_total_epnl).
@@ -289,16 +296,17 @@ class TestScreenSpreadsFunnel:
         assert narrow["delta_pass"] < wide["delta_pass"]
         assert narrow["delta_reject"] > wide["delta_reject"]
 
-    def test_expirations_in_window_counts_the_dte_range(self):
-        """⚠ Counted PER SIDE — the pass walks the put map then the call map, so
-        one date listed in both is two side-expirations. Nothing in the DTE range
-        means nothing counted, and no strike examined."""
+    def test_expiration_sides_in_window_counts_the_dte_range(self):
+        """⚠ SIDES, not dates — the pass walks the put map then the call map, so
+        one Friday listed in both counts twice. The name says so because a page
+        reading "2 expirations" over a single Friday would simply be wrong.
+        Nothing in the DTE range means nothing counted, and no strike examined."""
         chain, _ = _spreads_chain(dte=7)
         inside, outside = {}, {}
         _screen(chain, funnel=inside, dte_min=0, dte_max=10)
         _screen(chain, funnel=outside, dte_min=20, dte_max=30)
-        assert inside["expirations_in_window"] == 2
-        assert outside["expirations_in_window"] == 0
+        assert inside["expiration_sides_in_window"] == 2
+        assert outside["expiration_sides_in_window"] == 0
         assert outside["delta_pass"] == 0
         assert outside["delta_reject"] == 0
 
@@ -311,8 +319,8 @@ class TestScreenSpreadsFunnel:
         signals = _screen(chain, funnel=funnel,
                           earnings_date=(date.today() + timedelta(days=2)).isoformat())
         assert signals == []
-        assert funnel["expirations_in_window"] == 2
-        assert funnel["expirations_skipped_earnings"] == 2
+        assert funnel["expiration_sides_in_window"] == 2
+        assert funnel["expiration_sides_skipped_earnings"] == 2
         assert funnel["delta_pass"] == 0
         assert funnel["delta_reject"] == 0
 
@@ -321,7 +329,7 @@ class TestScreenSpreadsFunnel:
         chain, _ = _spreads_chain(dte=7)
         funnel = {}
         _screen(chain, funnel=funnel)
-        assert funnel["expirations_skipped_earnings"] == 0
+        assert funnel["expiration_sides_skipped_earnings"] == 0
         assert funnel["delta_pass"] > 0
 
     def test_the_trade_cap_reaches_the_width_reasons(self):
@@ -358,7 +366,7 @@ class TestScreenSpreadsFunnel:
         assert funnel["width_reasons"] == Counter()
         assert funnel["width_found"] == 0
         assert funnel["delta_pass"] > 0
-        assert funnel["expirations_in_window"] == 2
+        assert funnel["expiration_sides_in_window"] == 2
 
     def _break_puts(self, chain, **fields):
         """Apply `fields` to every put contract in the chain's one expiration."""
@@ -461,7 +469,7 @@ class TestScreenSpreadsFunnel:
         _screen(chain, funnel=once)
         _screen(chain, funnel=twice)
         _screen(chain, funnel=twice)
-        for key in ("expirations_in_window", "expirations_skipped_earnings",
+        for key in ("expiration_sides_in_window", "expiration_sides_skipped_earnings",
                     "delta_reject", "delta_pass", "mark_fail", "delta_ceiling",
                     "em_fail", "liq_fail_short", "width_found"):
             assert twice[key] == 2 * once[key], key
@@ -483,3 +491,291 @@ class TestScreenSpreadsFunnel:
         # Vacuity: the two calls really did land in different buckets.
         assert funnel["width_found"] > 0
         assert funnel["width_reasons"]["over_trade_cap"] > 0
+
+
+class TestTheFourUntestedStages:
+    """``long_leg_unpriced`` · ``no_credit`` · ``sanity_cap`` · ``no_positive_ev``
+    had no test at all, which is exactly what makes a renumbering safe to get
+    wrong: swapping two literals keeps a green suite. One test each, in the shape
+    of the per-gate tests above."""
+
+    def test_an_unpriced_long_leg_is_named(self):
+        """The only long strike quotes a zero mark. It is examined and rejected,
+        so it must outrank the further widths whose strikes are simply absent."""
+        opts = _opts_from(510.0, {510.0: 2.50, 509.0: 0.0})
+        reasons = Counter()
+        assert select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                 trade_type="0-DTE", min_cr_pct=0.10,
+                                 reasons=reasons) is None
+        assert reasons == Counter({"long_leg_unpriced": 1})
+
+    def test_a_long_leg_dearer_than_the_short_is_named_no_credit(self):
+        """Buying the long for more than the short sells for is not a credit
+        spread. Whether ``_entry_credit`` answers None (untradeable) or a negative
+        number, both land in the same bucket — which is the point of the bucket."""
+        opts = _opts_from(510.0, {510.0: 1.00, 509.0: 3.00})
+        reasons = Counter()
+        assert select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                 trade_type="0-DTE", min_cr_pct=0.10,
+                                 reasons=reasons) is None
+        assert reasons == Counter({"no_credit": 1})
+
+    def test_a_credit_at_or_above_the_width_is_named_no_credit_not_sanity_cap(self):
+        """``ml <= 0`` is checked BEFORE the 0.95 cap, so a credit that exceeds
+        its own width lands in no_credit. Pins the boundary between the two
+        stages, which is the one place the ordering could silently flip."""
+        opts = _opts_from(510.0, {510.0: 2.50, 509.0: 1.40})
+        reasons = Counter()
+        assert select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                 trade_type="0-DTE", min_cr_pct=0.10,
+                                 reasons=reasons) is None
+        assert reasons == Counter({"no_credit": 1})
+
+    def test_an_absurd_credit_below_the_width_is_named_sanity_cap(self):
+        """credit ~0.972 on a $1 width: above the 0.95 cap (bad market data) but
+        still leaving a positive max loss, so it reaches the cap rather than
+        stopping at no_credit."""
+        opts = _opts_from(510.0, {510.0: 2.50, 509.0: 1.52})
+        reasons = Counter()
+        assert select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                 trade_type="0-DTE", min_cr_pct=0.10,
+                                 reasons=reasons) is None
+        assert reasons == Counter({"sanity_cap": 1})
+
+    def test_no_positive_ev_is_unreachable_while_the_edge_margin_is_positive(self):
+        """⚠ A fact worth writing down: for a PCS, E[PnL] per contract reduces to
+        ``credit - width*|delta|``, so ``e_pnl <= 0`` is exactly ``cr/w <= |d|``
+        — and the edge floor one line above already demands ``cr/w >= |d| +
+        EDGE_MARGIN``. With EDGE_MARGIN at 0.02 the EV branch is therefore DEAD
+        CODE, and no fixture can reach it.
+
+        That is why this test relaxes the floor instead of pretending otherwise:
+        it pins the attribution for the day the margin is lowered, and records
+        that the stage is currently unreachable rather than untested.
+        """
+        opts = _opts_from(510.0, {510.0: 2.50, 505.0: 1.50})
+        opts[510.0]["delta"] = -0.25          # cr/w is ~0.198, so EV is negative
+        reasons = Counter()
+        with mock.patch.object(scanner_engine, "EDGE_MARGIN", -0.10):
+            assert select_best_width(opts[510.0], opts, "PCS", strike_increment=5.0,
+                                     trade_type="0-DTE", min_cr_pct=0.10,
+                                     reasons=reasons) is None
+        assert reasons == Counter({"no_positive_ev": 1})
+
+    def test_the_edge_floor_still_catches_that_fixture_at_the_real_margin(self):
+        """The control for the test above: at the shipped EDGE_MARGIN the SAME
+        fixture stops one stage earlier. Without this, the patch could be hiding
+        a fixture that never reached the edge floor in the first place."""
+        opts = _opts_from(510.0, {510.0: 2.50, 505.0: 1.50})
+        opts[510.0]["delta"] = -0.25
+        reasons = Counter()
+        assert select_best_width(opts[510.0], opts, "PCS", strike_increment=5.0,
+                                 trade_type="0-DTE", min_cr_pct=0.10,
+                                 reasons=reasons) is None
+        assert reasons == Counter({"edge_floor": 1})
+
+
+class TestIncrementOverCap:
+    def test_an_increment_wider_than_the_cap_is_named_honestly(self):
+        """A $250 strike increment means the NARROWEST width is already past
+        MAX_WIDTH_DOLLARS, so the loop breaks having constructed no width at all.
+        Reporting ``long_leg_missing`` there sent the reader hunting for absent
+        strikes that are all present; the honest answer names the increment."""
+        opts = _opts_from(510.0, {510.0: 2.50, 260.0: 1.50})
+        reasons = Counter()
+        assert select_best_width(opts[510.0], opts, "PCS", strike_increment=250.0,
+                                 trade_type="0-DTE", min_cr_pct=0.10,
+                                 reasons=reasons) is None
+        assert reasons == Counter({"increment_over_cap": 1})
+
+    def test_a_workable_increment_never_reports_the_cap(self):
+        """The control: same shape, an increment the cap admits, so the real
+        first stage is reached instead."""
+        opts = _opts_from(510.0, {510.0: 2.50})
+        reasons = Counter()
+        assert select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                 trade_type="0-DTE", min_cr_pct=0.10,
+                                 reasons=reasons) is None
+        assert reasons == Counter({"long_leg_missing": 1})
+
+
+class TestReasonsAcceptsAPlainMapping:
+    """``reasons`` is a public parameter and the funnel exists to be PUBLISHED,
+    so a ``width_reasons`` that has been through ``json.loads`` comes back a
+    plain dict. ``Counter.__missing__`` is the only thing that made ``+= 1``
+    work on an absent key, so a plain dict used to raise KeyError straight out
+    of the scan."""
+
+    @pytest.mark.parametrize("empty", [dict, Counter, lambda: defaultdict(int)])
+    def test_every_mapping_shape_counts_without_raising(self, empty):
+        opts = _opts_from(510.0, {510.0: 2.50})
+        reasons = empty()
+        assert select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                                 trade_type="0-DTE", min_cr_pct=0.10,
+                                 reasons=reasons) is None
+        assert reasons["long_leg_missing"] == 1
+
+    def test_a_plain_dict_accumulates_rather_than_resetting(self):
+        opts = _opts_from(510.0, {510.0: 2.50})
+        reasons = {"long_leg_missing": 4}
+        for _ in range(2):
+            select_best_width(opts[510.0], opts, "PCS", strike_increment=1.0,
+                              trade_type="0-DTE", min_cr_pct=0.10, reasons=reasons)
+        assert reasons == {"long_leg_missing": 6}
+
+    def test_a_json_round_tripped_funnel_does_not_abort_the_scan(self):
+        """End to end: publish the funnel, read it back, keep scanning."""
+        chain, _ = _spreads_chain()
+        funnel = {}
+        _screen(chain, funnel=funnel, max_risk_dollars=50.0)
+        revived = json.loads(json.dumps(funnel))
+        assert isinstance(revived["width_reasons"], dict)
+        assert not isinstance(revived["width_reasons"], Counter)
+        _screen(chain, funnel=revived, max_risk_dollars=50.0)   # must not raise
+        assert revived["width_reasons"]["over_trade_cap"] == 28
+        assert revived["delta_pass"] == 32
+
+    def test_a_revived_funnel_is_coerced_so_the_counter_api_is_available(self):
+        """Coerced at the setdefault rather than trusted: everything downstream
+        reads ``most_common`` off this, and a plain dict has none."""
+        chain, _ = _spreads_chain()
+        funnel = {"width_reasons": {"edge_floor": 2}}
+        _screen(chain, funnel=funnel, max_risk_dollars=50.0)
+        assert isinstance(funnel["width_reasons"], Counter)
+        assert funnel["width_reasons"]["edge_floor"] == 2      # preserved
+        assert funnel["width_reasons"]["over_trade_cap"] == 14
+
+
+class TestTheLogLineStaysPerCall:
+    """⚠ The funnel ACCUMULATES and the log line describes ONE call. Mixing the
+    two is the same defect the scalars were fixed for, one layer down: a
+    per-call ``no_width`` printed beside the funnel's running Counter made the
+    second symbol's line read ``no_width=14 | widths: over_trade_cap=28``, which
+    is self-contradictory on its face."""
+
+    def _lines(self, caplog, funnel, calls=2, **over):
+        caplog.clear()
+        chain, _ = _spreads_chain()
+        with caplog.at_level("INFO", logger="scanner"):
+            for _ in range(calls):
+                assert _screen(chain, funnel=funnel, **over) == []
+        return [r.getMessage() for r in caplog.records if "NO SPREADS" in r.getMessage()]
+
+    def test_a_reused_funnel_does_not_inflate_the_log_line(self, caplog):
+        funnel = {}
+        lines = self._lines(caplog, funnel, **{"max_risk_dollars": 50.0})
+        assert len(lines) == 2
+        for line in lines:
+            assert "no_width=14" in line
+            assert "over_trade_cap=14" in line       # this call, not the running total
+            assert "over_trade_cap=28" not in line
+        # ...while the funnel itself still accumulates, which is its job.
+        assert funnel["width_reasons"]["over_trade_cap"] == 28
+
+    def test_the_log_is_identical_with_and_without_a_funnel(self, caplog):
+        """The line must not depend on whether anyone asked for a funnel."""
+        with_funnel = self._lines(caplog, {}, calls=1, **{"max_risk_dollars": 50.0})
+        without = self._lines(caplog, None, calls=1, **{"max_risk_dollars": 50.0})
+        assert with_funnel == without
+
+
+class TestCountersOutsideThePartition:
+    """A chain the increment filter empties produces a funnel of zeroes — no
+    delta_pass, no delta_reject, no width reasons — which is precisely the shape
+    where the page most needs a reason. These two say what happened BEFORE the
+    strike loop, and are deliberately outside the partition equation."""
+
+    def _mangle(self, chain, mutate):
+        key = next(iter(chain["putExpDateMap"]))
+        mutate(chain["putExpDateMap"][key])
+        return chain
+
+    def test_contracts_with_no_delta_are_counted(self):
+        def drop_delta(strikes):
+            for leg in strikes.values():
+                leg[0]["delta"] = None
+        chain, _ = _spreads_chain()
+        self._mangle(chain, drop_delta)
+        funnel = {}
+        _screen(chain, funnel=funnel)
+        assert funnel["strikes_dropped_no_delta"] == 61     # the whole put ladder
+        # Outside the partition: they never entered the strike loop at all.
+        assert funnel["delta_pass"] + funnel["delta_reject"] == 61   # calls only
+
+    def test_a_strike_with_no_contract_row_counts_as_no_delta(self):
+        """An empty contract list is the same absence by a different route, and
+        was silently dropped before. A strike with no contract has no delta."""
+        def empty_them(strikes):
+            for k in list(strikes):
+                strikes[k] = []
+        chain, _ = _spreads_chain()
+        self._mangle(chain, empty_them)
+        funnel = {}
+        _screen(chain, funnel=funnel)
+        assert funnel["strikes_dropped_no_delta"] == 61
+
+    def test_off_increment_strikes_are_counted(self):
+        """Half strikes on a $1 ladder: the increment filter drops them, and
+        without this counter that drop left no trace anywhere."""
+        chain, _ = _spreads_chain()
+        key = next(iter(chain["putExpDateMap"]))
+        strikes = chain["putExpDateMap"][key]
+        template = strikes[next(iter(strikes))][0]
+        for half in (495.5, 496.5, 497.5):
+            strikes[str(half)] = [dict(template, delta=-0.20, mark=3.2,
+                                       bid=3.18, ask=3.22)]
+        funnel = {}
+        _screen(chain, funnel=funnel)
+        assert funnel["strikes_dropped_off_increment"] == 3
+
+    def test_a_clean_chain_drops_nothing(self):
+        """Both counters are zero on the fixture every other test uses, so a
+        non-zero reading always means something really happened."""
+        chain, _ = _spreads_chain()
+        funnel = {}
+        _screen(chain, funnel=funnel)
+        assert funnel["strikes_dropped_no_delta"] == 0
+        assert funnel["strikes_dropped_off_increment"] == 0
+
+    def test_both_counters_accumulate_like_every_other_key(self):
+        chain, _ = _spreads_chain()
+        key = next(iter(chain["putExpDateMap"]))
+        for leg in chain["putExpDateMap"][key].values():
+            leg[0]["delta"] = None
+        funnel = {}
+        _screen(chain, funnel=funnel)
+        _screen(chain, funnel=funnel)
+        assert funnel["strikes_dropped_no_delta"] == 122
+
+    def test_an_emptied_chain_still_reports_a_reason(self):
+        """The whole point: every partition counter is zero, and the funnel is
+        still not silent."""
+        def drop_delta(strikes):
+            for leg in strikes.values():
+                leg[0]["delta"] = None
+        chain, _ = _spreads_chain()
+        self._mangle(chain, drop_delta)
+        # Kill the call side too, so NOTHING reaches the strike loop.
+        ckey = next(iter(chain["callExpDateMap"]))
+        for leg in chain["callExpDateMap"][ckey].values():
+            leg[0]["delta"] = None
+        funnel = {}
+        assert _screen(chain, funnel=funnel) == []
+        assert funnel["delta_pass"] == 0
+        assert funnel["delta_reject"] == 0
+        assert funnel["width_reasons"] == Counter()
+        assert funnel["strikes_dropped_no_delta"] == 122    # the reason
+        assert funnel["expiration_sides_in_window"] == 2
+
+    def test_the_new_counters_never_change_the_signals(self):
+        chain, _ = _spreads_chain()
+        key = next(iter(chain["putExpDateMap"]))
+        strikes = chain["putExpDateMap"][key]
+        template = strikes[next(iter(strikes))][0]
+        strikes["495.5"] = [dict(template, delta=-0.20, mark=3.2, bid=3.18, ask=3.22)]
+        other, _ = _spreads_chain()
+        okey = next(iter(other["putExpDateMap"]))
+        ostrikes = other["putExpDateMap"][okey]
+        otemplate = ostrikes[next(iter(ostrikes))][0]
+        ostrikes["495.5"] = [dict(otemplate, delta=-0.20, mark=3.2, bid=3.18, ask=3.22)]
+        assert _comparable(_screen(chain)) == _comparable(_screen(other, funnel={}))
