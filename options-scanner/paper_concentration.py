@@ -18,14 +18,12 @@ signal WITHOUT recording a rejected order, unlike ``RISK_TOO_HIGH``: an order ro
 would make ``has_order_for_signal`` blacklist the signal permanently, so a name
 that freed up an hour later could never be entered.
 """
-import math
 import pathlib as _pathlib
 import sys as _sys
 
 import config_paper
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
-from shared.driver_policy import open_risk_dollars  # noqa: E402,F401  (kept: re-exported for callers)
 from shared import sectors as _sectors  # noqa: E402
 from shared import book_caps as _book_caps  # noqa: E402
 
@@ -126,17 +124,3 @@ def _group_of(symbol, sector_of=None):
         return found if found else _sectors.group_key(key)
     except Exception:  # noqa: BLE001 - see the docstring.
         return None
-
-
-def _finite(value):
-    """The candidate's own risk, or 0.0 when it is not a usable number.
-
-    Zero is the right absence value HERE and only here: an unreadable candidate
-    risk must not be able to wave itself past the ceiling by arithmetic, and the
-    caller has already sized the trade -- a missing number means the book's
-    existing risk alone decides."""
-    try:
-        v = float(value)
-    except (TypeError, ValueError):
-        return 0.0
-    return v if math.isfinite(v) else 0.0

@@ -27,10 +27,19 @@ The skip rules copy ``concentration_reject`` exactly and differ by rung. Opt-in
 rungs (per trade, deployment, both sector rungs) skip when their key is missing
 or zero, and deployment also without a usable equity. The three original rungs
 (symbol positions, symbol risk, expiry positions) are always evaluated: a zero
-cap refuses everything and a missing key raises ``KeyError``. (One deliberate
-difference: the old function reached a missing required key only AFTER the
-deployment rung, so a binding deployment cap masked the ``KeyError``. Here it
-always raises. Every production caller passes complete limits.)
+cap refuses everything.
+
+Where this RAISES and the old early-return function did not: ``evaluate``
+computes every rung before a breach is chosen, so a required cap
+(``max_positions_per_symbol``, ``max_risk_per_symbol``,
+``max_positions_per_expiry``) that is missing raises ``KeyError``, and one that
+is None raises ``TypeError``, REGARDLESS of which rung binds - and a non-string
+truthy symbol raises ``AttributeError``. The old ``concentration_reject``
+returned at its first breach, so an earlier binding rung could answer before
+it ever reached the bad value. Production limits come from ``config_paper``'s
+literal constants (pinned by a test in
+``options-scanner/tests/test_book_caps_equivalence.py``) and symbols are
+strings or None, so no production call reaches either.
 """
 import math
 
@@ -110,7 +119,8 @@ def evaluate(book, candidate, added_risk, limits, equity=None):
 
     ``book`` rows: ``{symbol, expiration, max_loss_total, sector}`` for OPEN
     positions (closed rows tie up no capital and must not count; ``max_loss`` ×
-    ``quantity`` is the fallback ``open_risk_dollars`` already understands). ``candidate``: ``{symbol, expiration, sector}``.
+    ``quantity`` is the fallback ``open_risk_dollars`` already understands).
+    ``candidate``: ``{symbol, expiration, sector}``.
     ``added_risk``: the candidate's total max loss in dollars (an unusable
     value counts as 0.0 - see the module docstring).
 
@@ -142,8 +152,7 @@ def evaluate(book, candidate, added_risk, limits, equity=None):
     # as zero.** A fraction of an unknown cannot be enforced, and a zero
     # denominator would refuse every trade forever — which reads as a broken
     # engine, not as a cap. The cap is likewise opt-in by DATA: a ``limits`` dict
-    # without ``max_deployed_risk_pct`` keeps the pre-B3 behaviour, so every
-    # existing caller is untouched.
+    # without ``max_deployed_risk_pct``, or a zero, skips this rung.
     #
     # ``open_risk_dollars`` for the same reason the symbol sum uses it: it
     # drops a non-finite row instead of poisoning the total, and a NaN total
@@ -176,19 +185,22 @@ def evaluate(book, candidate, added_risk, limits, equity=None):
     # about; measured, the driver's book once held $21,531 across 15 Information
     # Technology positions, 86% of a $25,000 account in one sector.
     #
-    # Reported AFTER the symbol rungs and BEFORE expiry, deliberately: when both a
-    # symbol cap and the sector cap bind, "you already hold three MU" is the
-    # actionable sentence - the operator can pick another name - while "tech is
-    # full" is the answer only once the symbol has room. A shared expiry is the
-    # weaker coincidence of the two, so it stays last.
+    # In ACCOUNT_ORDER, the sector rungs are reported AFTER the symbol rungs and
+    # BEFORE expiry, deliberately: when both a symbol cap and the sector cap
+    # bind, "you already hold three MU" is the actionable sentence - the
+    # operator can pick another name - while "tech is full" is the answer only
+    # once the symbol has room. A shared expiry is the weaker coincidence of the
+    # two, so it stays last.
     #
     # Opt-in by DATA like the deployment cap above: a ``limits`` dict without the
-    # keys, or a cap of 0, keeps the pre-B4 behaviour untouched.
+    # keys, or a cap of 0, skips these rungs.
+    #
+    # The CALLER resolves sectors with ``shared.sectors.group_key``, which gives
+    # an unmapped symbol a bucket of its OWN (``"?SYMBOL"``), so an unknown name
+    # is still capped against itself and can neither borrow another sector's
+    # allowance nor drag unrelated names in. Here None means unknown: a None
+    # candidate sector skips both rungs, and a None row is never counted.
     bucket = cand.get("sector")
-    # A row whose symbol lands in no bucket is skipped rather than
-    # grouped: ``group_key`` gives an unmapped symbol a bucket of its OWN,
-    # so an unknown name is still capped against itself and can neither
-    # borrow another sector's allowance nor drag unrelated names in.
     same_sector = ([p for p in rows if p.get("sector") == bucket]
                    if bucket is not None else [])
     max_n = limits.get("max_positions_per_sector")
