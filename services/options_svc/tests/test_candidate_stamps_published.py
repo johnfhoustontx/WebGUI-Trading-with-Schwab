@@ -123,3 +123,40 @@ def test_the_income_board_carries_the_stamps_without_touching_its_earnings(monke
     assert cand["earnings_status"] == "not_listed"
     from shared import scanner_config
     assert cand["vol_floor"] == scanner_config.min_iv_rank().get("INCOME")
+
+
+def _raise_for_row_a(monkeypatch):
+    real = handlers.compute.stamp_candidate
+
+    def _stamp(row, **kw):
+        if row.get("id") == "a":
+            raise RuntimeError("bad row")
+        return real(row, **kw)
+    monkeypatch.setattr(handlers.compute, "stamp_candidate", _stamp)
+
+
+def test_one_bad_row_does_not_strip_the_rows_after_it(monkeypatch):
+    reset_fake_bus()
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "run_scan", _scan_result)
+    monkeypatch.setattr(handlers.compute, "scan_earnings", lambda s: ("none_scheduled", None))
+    monkeypatch.setattr(handlers.push_notify, "notify_signals", lambda *a, **k: None)
+    _raise_for_row_a(monkeypatch)
+    handlers.rescan(bus)
+    p = bus.cache_get(handlers.CACHE_SCAN).payload
+    assert "vol_floor" in p["signals_directional"][0]
+    assert "ledger_risk_per_contract" not in p["signals_swing"][0]
+
+
+def test_a_bad_row_records_one_degrade(monkeypatch):
+    reset_fake_bus()
+    bus = Bus(fake=True)
+    calls = []
+    monkeypatch.setattr(handlers.compute, "run_scan", _scan_result)
+    monkeypatch.setattr(handlers.compute, "scan_earnings", lambda s: ("none_scheduled", None))
+    monkeypatch.setattr(handlers.push_notify, "notify_signals", lambda *a, **k: None)
+    monkeypatch.setattr(handlers._degrade, "degraded",
+                        lambda area, **kw: calls.append(area))
+    _raise_for_row_a(monkeypatch)
+    handlers.rescan(bus)
+    assert calls.count("options.stamp_scan") == 1

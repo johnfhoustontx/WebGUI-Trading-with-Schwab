@@ -522,26 +522,58 @@ def _stamp_scan(result) -> None:
 
     Before the ScanResult projection, which drops ``iv_data``. Earnings are read
     ONCE per symbol. A Directional row's floor is its WINDOW's (DTE 0-4 is the
-    0-DTE bucket, the scanner's own rule). Best-effort: a stamp failure is a
-    degrade, never a lost scan."""
+    0-DTE bucket, the scanner's own rule). Best-effort PER ROW: one bad row
+    cannot strip the stamps from the rows after it, and a pass with failures
+    records ONE degrade, never a lost scan."""
     earnings = {}
     iv_data = result.get("iv_data") or {}
-    try:
-        for key, trade_type in (("signals_0dte", "0-DTE"), ("signals_swing", "SWING"),
-                                ("signals_directional", None)):
-            for row in result.get(key) or []:
+    failed, first = 0, None
+    for key, trade_type in (("signals_0dte", "0-DTE"), ("signals_swing", "SWING"),
+                            ("signals_directional", None)):
+        for row in result.get(key) or []:
+            try:
                 sym = row.get("symbol")
                 if sym not in earnings:
-                    try:
-                        earnings[sym] = compute.scan_earnings(sym)
-                    except Exception:  # noqa: BLE001
-                        earnings[sym] = ("not_listed", None)
-                tt = trade_type or ("0-DTE" if (row.get("dte") or 0) <= 4 else "SWING")
+                    earnings[sym] = _stamp_earnings(sym)
                 rank = (iv_data.get(sym) or {}).get("iv_rank")
-                compute.stamp_candidate(row, trade_type=tt, earnings=earnings[sym],
+                compute.stamp_candidate(row, trade_type=trade_type or _directional_window(row),
+                                        earnings=earnings[sym],
                                         iv_rank_known=rank is not None)
+            except Exception as exc:  # noqa: BLE001 - counted, one degrade below.
+                failed, first = failed + 1, first or exc
+    _report_stamp_failures("options.stamp_scan", failed, first)
+
+
+def _stamp_earnings(sym):
+    """``compute.scan_earnings`` for the stamps; a failed lookup speaks and falls
+    back to ``("not_listed", None)``, which is what ``swing_scan`` does too."""
+    try:
+        return compute.scan_earnings(sym)
     except Exception:  # noqa: BLE001
-        _degrade.degraded("options.stamp_scan")
+        _degrade.degraded("options.stamp_scan_earnings", detail=sym)
+        return ("not_listed", None)
+
+
+def _directional_window(row) -> str:
+    """The trade type whose volatility floor a Directional row answers to.
+
+    Mirrors ``zerodte_max_dte = 4`` in options-scanner
+    ``scanner_engine.run_full_scan`` (a function local, so not importable): DTE
+    0-4 is the 0-DTE window, anything later SWING. A directional row always
+    carries an int ``dte`` (``strategy_scanner._assemble`` -> ``_dte_for``, which
+    folds an unparseable expiry to 0), so a missing or non-numeric dte is not a
+    row the scanner emits; it takes SWING rather than the tighter 0-DTE bucket."""
+    dte = row.get("dte")
+    numeric = isinstance(dte, (int, float)) and not isinstance(dte, bool)
+    return "0-DTE" if numeric and dte <= 4 else "SWING"
+
+
+def _report_stamp_failures(area, failed, first) -> None:
+    """ONE degrade per publish for rows whose stamping raised, carrying the first
+    failure's traceback (``degraded`` is called outside the ``except`` here, so
+    the live exception would otherwise be gone)."""
+    if failed:
+        _degrade.degraded(area, detail=f"{failed} rows", exc_info=first)
 
 
 def rescan(bus) -> None:
@@ -734,13 +766,16 @@ def swing_scan(bus, args: dict) -> None:
         sig["earnings_status"] = status
     # The checklist stamps (design 2026-09-15). Best-effort: a stamp failure is a
     # degrade, never a lost answer - the earnings_status stamp above stays outside.
-    try:
-        for sig in signals:
+    # Per row, so one bad row cannot strip the rows after it; one degrade a pass.
+    failed, first = 0, None
+    for sig in signals:
+        try:
             compute.stamp_candidate(sig, trade_type="SWING",
                                     earnings=(status, earnings_date),
                                     iv_rank_known=sig.get("iv_rank") is not None)
-    except Exception:  # noqa: BLE001
-        _degrade.degraded("options.stamp_swing")
+        except Exception as exc:  # noqa: BLE001 - counted, one degrade below.
+            failed, first = failed + 1, first or exc
+    _report_stamp_failures("options.stamp_swing", failed, first)
     payload = {"signals": signals, "view": result.get("view"),
                "filtered_out": result.get("filtered_out") or 0,
                # Kept SEPARATE from filtered_out, which the page renders as
@@ -1027,12 +1062,15 @@ def publish_income(bus, symbols=None) -> None:
 
     # The checklist stamps (design 2026-09-15). No ``earnings`` passed: an income
     # row already carries its own coverage. Best-effort, never a lost board.
-    try:
-        for row in candidates:
+    # Per row, so one bad row cannot strip the rows after it; one degrade a pass.
+    failed, first = 0, None
+    for row in candidates:
+        try:
             compute.stamp_candidate(row, trade_type="INCOME",
                                     iv_rank_known=row.get("iv_rank") is not None)
-    except Exception:  # noqa: BLE001
-        _degrade.degraded("options.stamp_income")
+        except Exception as exc:  # noqa: BLE001 - counted, one degrade below.
+            failed, first = failed + 1, first or exc
+    _report_stamp_failures("options.stamp_income", failed, first)
 
     # Validation gate BEFORE the write, like rescan/publish_matrix: a gross shape
     # drift raises here rather than reaching the page as a half-valid board.
