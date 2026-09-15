@@ -2931,7 +2931,8 @@ re-marks everything as new; that is page-side state, and deliberate.</p>
 <a href="#expected-move">Expected Move</a>, or paper-trade it. A paper trade goes to the
 <a href="#paper-ledger">Paper Ledger</a> only if it fits that ledger's risk limits ($750 per
 trade, plus limits per symbol, sector, expiration and for the whole ledger); a
-message a moment later says it opened, or why not and how many contracts would fit.</p>
+message a moment later says whether it opened — or why not, and how many contracts
+would fit when a smaller size would.</p>
 <p><strong>Click a row</strong> to open the Trade detail panel on the right, with a probability
 speedometer and full contract detail.</p>
 <h3 id="why-it-matters_12">Why it matters</h3>
@@ -3464,11 +3465,12 @@ limit at all — the quantity you typed was the quantity booked.</p>
 </tr>
 </tbody>
 </table>
-<p>The last four are the <a href="#paper-account">Paper Account</a>'s own concentration limits.
+<p>The last four rows are the <a href="#paper-account">Paper Account</a>'s own six concentration limits.
 The per-trade limit is not: the engine's is <strong>$250</strong>, which also decides how wide the
 scanner builds its spreads, and at $250 most of the Directional tab's long options
 could not be opened by hand at all.</p>
-<p><strong>Every click gets an answer</strong>, a second or so later, on the page you sent it from:</p>
+<p><strong>Every click gets an answer while the options service is running</strong>, a second or so
+later, on the page you sent it from:</p>
 <ul>
 <li><em>Paper ledger: opened 2 × SPY Credit spread — put.</em></li>
 <li><em>Paper ledger: not opened — risks $900, over the $750 per-trade limit. Up to 1
@@ -3551,7 +3553,7 @@ credit collected — you sold high and can buy back lower.</p>
 price, status and reason.</p>
 <p><strong>Reset</strong> sets a new starting balance.</p>
 <h3 id="what-the-engine-will-refuse">What the engine will refuse</h3>
-<p>Five limits. The first four each refuse a single trade; the fifth
+<p>Eight limits. The first seven each refuse a single trade; the last
 stops the day.</p>
 <table>
 <thead>
@@ -3578,9 +3580,24 @@ stops the day.</p>
 <td>An entry that would push one name's summed max loss past the cap</td>
 </tr>
 <tr>
+<td><strong>Positions in one sector</strong></td>
+<td><strong>5</strong></td>
+<td>A sixth open position in the same sector; the index products ($SPX, SPY, QQQ, $NDX, DIA, IWM) count as one group</td>
+</tr>
+<tr>
+<td><strong>Risk in one sector</strong></td>
+<td><strong>$1,500</strong></td>
+<td>An entry that would push one sector's summed max loss past the cap</td>
+</tr>
+<tr>
 <td><strong>Positions in one expiry</strong></td>
 <td><strong>5</strong></td>
 <td>A sixth open position sharing an expiration date, <em>across all names</em></td>
+</tr>
+<tr>
+<td><strong>Open risk across the book</strong></td>
+<td><strong>20%</strong> of the session's starting equity</td>
+<td>An entry that would push the whole book's open max loss past that share</td>
 </tr>
 <tr>
 <td>Session drawdown</td>
@@ -3589,13 +3606,13 @@ stops the day.</p>
 </tr>
 </tbody>
 </table>
-<p>The three concentration limits were added on 2026-09-09. Before them the engine had
+<p>The six concentration limits (the bold rows) were added from 2026-09-09. Before them the engine had
 nothing between "one trade" and "the whole account", and a book could be entirely one
 name while clearing both ends — which is what happened: fourteen open positions, all
 ORCL, all expiring the same Friday, over an earnings report scheduled the day before.</p>
 <p>The expiry limit counts <strong>across symbols on purpose</strong>. Five positions expiring the same
 Friday is a bet on one date even when no single name is over its own cap.</p>
-<p>All three live in <code>options-scanner/config_paper.py</code> — edit and restart <code>options_svc</code>.</p>
+<p>All of these live in <code>options-scanner/config_paper.py</code> — edit and restart <code>options_svc</code>.</p>
 <h3 id="why-it-matters_17">Why it matters</h3>
 <p>This is the app's mechanical baseline. The engine applies the same rules every time
 without hesitation, fear or improvisation — so comparing it against your hand-kept
@@ -3608,7 +3625,7 @@ rules, or subtracts it. That is an uncomfortable comparison and a genuinely usef
   at the 10:00 run unless you press <strong>Run manage cycle</strong>.</li>
 <li><strong>Reset wipes the book.</strong> There is no undo.</li>
 <li>⚠ <strong>A concentration refusal leaves no row on this screen.</strong> The risk-per-trade and
-  buying-power refusals appear in the fills log as <code>REJECTED</code>; the three concentration
+  buying-power refusals appear in the fills log as <code>REJECTED</code>; the six concentration
   limits do not — they skip the signal silently and log to the service journal
   (<code>SKIPPED &lt;symbol&gt; &lt;reason&gt; (concentration cap)</code>). That is deliberate: the condition
   is <em>temporary</em>, and a rejected order row would blacklist the signal permanently, so a

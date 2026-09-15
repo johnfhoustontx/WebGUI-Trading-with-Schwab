@@ -1931,7 +1931,8 @@ re-marks everything as new; that is page-side state, and deliberate.
 [Expected Move](#expected-move), or paper-trade it. A paper trade goes to the
 [Paper Ledger](#paper-ledger) only if it fits that ledger's risk limits ($750 per
 trade, plus limits per symbol, sector, expiration and for the whole ledger); a
-message a moment later says it opened, or why not and how many contracts would fit.
+message a moment later says whether it opened — or why not, and how many contracts
+would fit when a smaller size would.
 
 **Click a row** to open the Trade detail panel on the right, with a probability
 speedometer and full contract detail.
@@ -2367,12 +2368,13 @@ limit at all — the quantity you typed was the quantity booked.
 | Per expiration | **5** open positions expiring the same day, across every symbol |
 | Whole ledger | open max loss at most **20%** of equity — $25,000 plus the realized P&L of closed trades |
 
-The last four are the [Paper Account](#paper-account)'s own concentration limits.
+The last four rows are the [Paper Account](#paper-account)'s own six concentration limits.
 The per-trade limit is not: the engine's is **$250**, which also decides how wide the
 scanner builds its spreads, and at $250 most of the Directional tab's long options
 could not be opened by hand at all.
 
-**Every click gets an answer**, a second or so later, on the page you sent it from:
+**Every click gets an answer while the options service is running**, a second or so
+later, on the page you sent it from:
 
 - *Paper ledger: opened 2 × SPY Credit spread — put.*
 - *Paper ledger: not opened — risks $900, over the $750 per-trade limit. Up to 1
@@ -2459,7 +2461,7 @@ price, status and reason.
 
 ### What the engine will refuse
 
-Five limits. The first four each refuse a single trade; the fifth
+Eight limits. The first seven each refuse a single trade; the last
 stops the day.
 
 | Limit | Default | Refuses |
@@ -2467,10 +2469,13 @@ stops the day.
 | Risk per trade | $250 | A spread whose single contract already exceeds the cap |
 | **Positions in one symbol** | **3** | A fourth open position in the same underlying |
 | **Risk in one symbol** | **$750** | An entry that would push one name's summed max loss past the cap |
+| **Positions in one sector** | **5** | A sixth open position in the same sector; the index products ($SPX, SPY, QQQ, $NDX, DIA, IWM) count as one group |
+| **Risk in one sector** | **$1,500** | An entry that would push one sector's summed max loss past the cap |
 | **Positions in one expiry** | **5** | A sixth open position sharing an expiration date, *across all names* |
+| **Open risk across the book** | **20%** of the session's starting equity | An entry that would push the whole book's open max loss past that share |
 | Session drawdown | $2,500 | Halts the account for the day |
 
-The three concentration limits were added on 2026-09-09. Before them the engine had
+The six concentration limits (the bold rows) were added from 2026-09-09. Before them the engine had
 nothing between "one trade" and "the whole account", and a book could be entirely one
 name while clearing both ends — which is what happened: fourteen open positions, all
 ORCL, all expiring the same Friday, over an earnings report scheduled the day before.
@@ -2478,7 +2483,7 @@ ORCL, all expiring the same Friday, over an earnings report scheduled the day be
 The expiry limit counts **across symbols on purpose**. Five positions expiring the same
 Friday is a bet on one date even when no single name is over its own cap.
 
-All three live in `options-scanner/config_paper.py` — edit and restart `options_svc`.
+All of these live in `options-scanner/config_paper.py` — edit and restart `options_svc`.
 
 ### Why it matters
 
@@ -2495,7 +2500,7 @@ The fills log is also the best available audit trail when a position behaves une
   at the 10:00 run unless you press **Run manage cycle**.
 - **Reset wipes the book.** There is no undo.
 - ⚠ **A concentration refusal leaves no row on this screen.** The risk-per-trade and
-  buying-power refusals appear in the fills log as `REJECTED`; the three concentration
+  buying-power refusals appear in the fills log as `REJECTED`; the six concentration
   limits do not — they skip the signal silently and log to the service journal
   (`SKIPPED <symbol> <reason> (concentration cap)`). That is deliberate: the condition
   is *temporary*, and a rejected order row would blacklist the signal permanently, so a
