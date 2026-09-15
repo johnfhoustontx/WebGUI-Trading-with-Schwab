@@ -75,6 +75,33 @@ def test_checks_for_passes_a_missing_board_row_as_none_so_the_summary_is_partly_
            "calibration": None, "caps": None}
     out = checks_feed.checks_for(row, ctx)
     assert checks.summary(out)["text"].startswith("Partly checked")
+    by_key = {c["key"]: c for c in out}
+    # The board-row path, pinned on its own: XOM is not on the board, so the two
+    # board-only checks are grey BECAUSE a view was missing.
+    assert by_key["wall"].get("missing_view") is True
+    assert by_key["gamma"].get("missing_view") is True
+
+
+def test_a_missing_board_row_alone_keeps_the_summary_partly_checked():
+    from pages.options import checks
+    row = {"id": "a", "symbol": "XOM", "type": "PCS", "trade_type": "SWING",
+           "expiration": "2026-10-17", "dte": 12, "short_strike": 100.0, "long_strike": 97.5,
+           "credit": 0.60, "iv_rank": 55.0, "iv_rank_known": True, "vol_floor": 30,
+           "friction_pct": 8.0, "em_to_expiry": 6.0, "earnings_status": "none_scheduled",
+           "earnings_date": None, "_allow_paper": False, "underlying_price": 110.0}
+    # Calibration is a REAL view (empty buckets grade the record line "not enough
+    # history" without calling the view missing) and caps is omitted - with
+    # _allow_paper False the book check does not apply - so the board row is the
+    # only missing view left.
+    ctx = {"matrix": {"ORCL": {"spot": 110.0}}, "regime": {"direction": 1},
+           "calibration": {"buckets": {}}}
+    out = checks_feed.checks_for(row, ctx)
+    by_key = {c["key"]: c for c in out}
+    assert "book" not in by_key
+    assert not by_key["record"].get("missing_view")
+    missing = {k for k, c in by_key.items() if c.get("missing_view")}
+    assert missing == {"wall", "gamma"}
+    assert checks.summary(out)["text"].startswith("Partly checked")
 
 
 def test_the_module_imports_no_ui_framework():
