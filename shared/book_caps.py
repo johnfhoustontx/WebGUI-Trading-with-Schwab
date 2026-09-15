@@ -15,6 +15,14 @@ config, and Tier 1 may import it.
 Every rung is reported, not only the first breach, because the preview shows
 headroom. A rung that cannot be evaluated is ``skipped`` - never passed.
 
+The CANDIDATE's own risk is not a rung input that can be skipped. An
+``added_risk`` that is None, NaN, non-numeric or zero counts as 0.0 - a pass on
+every risk rung - and a negative number is used as given, exactly as
+``concentration_reject`` always did, because the Account's entry cycle has
+sized the trade before calling. Any other caller (the Ledger, the preview) must
+refuse a candidate whose risk is not a positive finite number BEFORE calling
+``evaluate``.
+
 The skip rules copy ``concentration_reject`` exactly and differ by rung. Opt-in
 rungs (per trade, deployment, both sector rungs) skip when their key is missing
 or zero, and deployment also without a usable equity. The three original rungs
@@ -43,15 +51,19 @@ DISPLAY_ORDER = (TRADE_RISK_CAP, DEPLOYMENT_CAP, SYMBOL_POSITION_CAP,
                  EXPIRY_POSITION_CAP)
 # The Account's order, unchanged from ``concentration_reject``. It has no
 # per-trade rung: the entry cycle's sizing refuses that as RISK_TOO_HIGH.
-ACCOUNT_ORDER = DISPLAY_ORDER[1:]
+# This is concentration_reject's historical early-return order, written out
+# as a literal on purpose: it must NOT follow a reorder of DISPLAY_ORDER.
+ACCOUNT_ORDER = (DEPLOYMENT_CAP, SYMBOL_POSITION_CAP, SYMBOL_RISK_CAP,
+                 SECTOR_POSITION_CAP, SECTOR_RISK_CAP, EXPIRY_POSITION_CAP)
 
 # The Paper dialog's own maximum quantity.
 QTY_CEILING = 100
 
 
 def _finite(value):
-    """A usable number, or 0.0. Zero is the right absence value for a candidate's
-    risk: an unreadable number must not wave itself past a ceiling."""
+    """A usable number, or 0.0. An unreadable candidate risk counts as zero
+    here, so callers that did not size the trade must reject it first (see the
+    module docstring)."""
     try:
         v = float(value)
     except (TypeError, ValueError):
@@ -85,7 +97,19 @@ def evaluate(book, candidate, added_risk, limits, equity=None):
     ``book`` rows: ``{symbol, expiration, max_loss_total, sector}`` for OPEN
     positions (``max_loss`` × ``quantity`` is the fallback ``open_risk_dollars``
     already understands). ``candidate``: ``{symbol, expiration, sector}``.
-    ``added_risk``: the candidate's total max loss in dollars.
+    ``added_risk``: the candidate's total max loss in dollars (an unusable
+    value counts as 0.0 - see the module docstring).
+
+    ``sector`` on book rows and on the candidate must be the canonical
+    ``shared.sectors.group_key`` string, matched by exact equality: an unmapped
+    symbol's bucket is ``"?SYMBOL"``, and None means unknown - a None candidate
+    sector skips both sector rungs, and a None row never counts toward a sector.
+
+    Each rung is a dict with keys ``code``, ``kind`` (``"count"`` or
+    ``"risk"``), ``scope`` (the symbol, sector bucket or expiry, or None),
+    ``used``, ``after``, ``cap``, ``binds`` and ``skipped`` (a reason string, or
+    None). On a skipped rung ``used``, ``after`` and ``cap`` are None and
+    ``binds`` is False.
     """
     rows = [p for p in book or () if isinstance(p, dict)]
     cand = candidate if isinstance(candidate, dict) else {}

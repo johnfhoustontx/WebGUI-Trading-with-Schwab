@@ -125,3 +125,46 @@ def test_first_breach_follows_the_order_it_is_given():
     rungs = bc.evaluate(book, _cand(), 300.0, LIMITS, 25000.0)   # per trade binds too
     assert bc.first_breach(rungs, bc.DISPLAY_ORDER)["code"] == bc.TRADE_RISK_CAP
     assert bc.first_breach(rungs, bc.ACCOUNT_ORDER)["code"] == bc.SYMBOL_POSITION_CAP
+
+
+def test_account_order_is_the_historical_order_and_has_no_per_trade_rung():
+    assert bc.ACCOUNT_ORDER == (bc.DEPLOYMENT_CAP, bc.SYMBOL_POSITION_CAP,
+                                bc.SYMBOL_RISK_CAP, bc.SECTOR_POSITION_CAP,
+                                bc.SECTOR_RISK_CAP, bc.EXPIRY_POSITION_CAP)
+    assert bc.TRADE_RISK_CAP not in bc.ACCOUNT_ORDER
+
+
+def test_sector_positions_bind_at_the_cap_and_not_below_it():
+    below = [_row(s, expiration=f"2026-10-{17 + i}") for i, s in enumerate(("A", "B", "C", "D"))]
+    at = below + [_row("E", expiration="2026-11-20")]
+    r_below = _by_code(bc.evaluate(below, _cand(), 1.0, LIMITS, 25000.0))[bc.SECTOR_POSITION_CAP]
+    r_at = _by_code(bc.evaluate(at, _cand(), 1.0, LIMITS, 25000.0))[bc.SECTOR_POSITION_CAP]
+    assert (r_below["used"], r_below["binds"]) == (4, False)
+    assert (r_at["used"], r_at["binds"]) == (5, True)
+
+
+def test_sector_risk_sums_other_symbols_in_the_sector_and_ignores_other_sectors():
+    book = [_row("MSFT", expiration="2026-10-24", risk=700.0),
+            _row("AMD", expiration="2026-10-31", risk=700.0),
+            _row("XOM", expiration="2026-11-07", risk=5000.0, sector="Energy")]
+    r = _by_code(bc.evaluate(book, _cand(), 150.0, LIMITS, 1e9))[bc.SECTOR_RISK_CAP]
+    assert (r["used"], r["after"], r["binds"]) == (1400.0, 1550.0, True)
+
+
+@pytest.mark.parametrize("key", ["max_risk_per_trade", "max_deployed_risk_pct",
+                                 "max_positions_per_sector", "max_risk_per_sector"])
+def test_opt_in_rungs_skip_when_their_key_is_absent(key):
+    limits = {k: v for k, v in LIMITS.items() if k != key}
+    code = {"max_risk_per_trade": bc.TRADE_RISK_CAP,
+            "max_deployed_risk_pct": bc.DEPLOYMENT_CAP,
+            "max_positions_per_sector": bc.SECTOR_POSITION_CAP,
+            "max_risk_per_sector": bc.SECTOR_RISK_CAP}[key]
+    r = _by_code(bc.evaluate([], _cand(), 1e9, limits, 25000.0))[code]
+    assert r["skipped"] and r["binds"] is False
+
+
+@pytest.mark.parametrize("risk", [None, float("nan"), "junk", 0])
+def test_an_unusable_candidate_risk_counts_as_zero_exactly_as_the_account_always_did(risk):
+    """Pinned on purpose: callers that did not size the trade must refuse it first."""
+    r = _by_code(bc.evaluate([], _cand(), risk, LIMITS, 25000.0))[bc.TRADE_RISK_CAP]
+    assert (r["after"], r["binds"], r["skipped"]) == (0.0, False, None)
