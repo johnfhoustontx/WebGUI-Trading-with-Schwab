@@ -98,7 +98,7 @@ The monorepo was re-tiered (strangler-fig) into three **physically separate** ti
 portfolio, trade, driver, market — and every page reads Redis. The shape:
 
 **The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
-153 non-test `webgui/**/*.py`, extended 2026-08-21, and again 2026-08-25):
+153 non-test `webgui/**/*.py`, extended 2026-08-21, and again 2026-08-25, and 2026-09-15):
 `nicegui` · `shared.bus`
 (never `redis` directly) · `shared.market_calendar` · `shared.symbols` ·
 `shared.calibration` (pure arithmetic — `import math` and nothing else; Tier 1
@@ -106,10 +106,10 @@ takes only `bucket_key` from it, so the DB's `scanner_type` '0DTE' and the
 page's `trade_type` '0-DTE' cannot key differently — exactly the cross-tier
 mirror `test_cross_tier_mirrors.py` exists to prevent) ·
 `shared.book_caps` (since 2026-09-15; pure — `math` plus
-`shared.driver_policy.open_risk_dollars`, itself math-only) — the Paper
-dialog's preview must evaluate the SAME rungs the service enforces, so it
-imports the one cap module rather than a Tier-1 copy;
-`webgui/tests/test_book_caps_tier1.py` pins that it drags nothing in ·
+`shared.driver_policy.open_risk_dollars`, itself math-only; the Paper
+dialog's preview will evaluate the SAME rungs the service enforces, so it
+imports the one cap module rather than a Tier-1 copy, and
+`webgui/tests/test_book_caps_tier1.py` pins its exact import set) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
