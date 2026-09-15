@@ -93,6 +93,23 @@ Redis**.
 | Income Window | **Later.** Its button opens into the Account via `income_open`, which is also uncapped — the same decision as the Paper button, not taken silently |
 | No IV history on the Scanner's floor | **Keep refusing**, named and documented |
 
+## Measured before shipping
+
+Read-only, against prod's caches on 2026-09-15 (scan of 08:45 CT), counting the
+max loss the Ledger would book for ONE contract via `paper_trader.create_paper_trade`:
+
+| Source | Paper-tradeable rows | Over $250 for one contract |
+|---|---|---|
+| Market Scanner 0-DTE / Swing (live) | 0 | — (no credit spreads at that hour) |
+| Market Scanner Directional (live) | 82 | **51 (62%)** — 29 long puts, 22 long calls |
+| Directional, whole day union | 100 | **64 (64%)** |
+| Last Strategy Finder answer (PANW) | 2 | 2 (100%) |
+
+Over-cap names led by TSLA, SPCX, HOOD, NVDA, AAPL, PLTR, DELL, $SPX. The credit
+spreads are sized to the same $250 by `scanner_engine.DEFAULT_MAX_RISK_DOLLARS`
+already, so the cap bites almost entirely on long options: **about two thirds of
+Directional and Finder long-option ideas become unopenable in the Ledger.**
+
 ## Part 1 — Ledger caps and enforcement
 
 ### `shared/book_caps.py` — the one cap module
