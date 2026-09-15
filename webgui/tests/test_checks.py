@@ -220,3 +220,230 @@ def test_checks_imports_nothing_it_must_not():
         elif isinstance(n, ast.ImportFrom):
             names.add(("." * n.level) + (n.module or ""))
     assert not {x for x in names if x.split(".")[0] in {"nicegui", "bus_client", "services", "sqlite3"}}
+
+
+# ── short premium is read from the trade's economics, not net_vega ────────
+
+
+def _line(row, key, matrix=MATRIX, regime=REGIME, calibration=None, caps=CAPS):
+    cal = {} if calibration is None else calibration
+    found = [c for c in checks.build_checks(row, matrix, regime, cal, caps) if c["key"] == key]
+    return found[0] if found else None
+
+
+def _structures_tuples():
+    """The named tuples in shared/structures.py, read from its SOURCE - Tier 1
+    does not import that module."""
+    import ast
+    import pathlib
+    path = pathlib.Path(__file__).resolve().parents[2] / "shared" / "structures.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            names[node.targets[0].id] = node.value
+
+    def resolve(value):
+        if isinstance(value, ast.Tuple):
+            return tuple(e.value for e in value.elts)
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Add):
+            return resolve(value.left) + resolve(value.right)
+        if isinstance(value, ast.Name):
+            return resolve(names[value.id])
+        raise AssertionError(ast.dump(value))
+    return {k: resolve(names[k])
+            for k in ("LEDGER_CREDIT", "LEDGER_DEBIT", "SHORT_PUT", "COVERED_CALL")}
+
+
+def test_credit_and_debit_names_mirror_shared_structures():
+    t = _structures_tuples()
+    assert set(checks.CREDIT_TYPES) == (set(t["LEDGER_CREDIT"]) | set(t["SHORT_PUT"])
+                                        | set(t["COVERED_CALL"]) | {"SHORT_CALL"})
+    assert set(checks.DEBIT_TYPES) == set(t["LEDGER_DEBIT"])
+
+
+def _legged(type_, legs, **over):
+    row = _pcs(type=type_, legs=legs, credit=None, bias="neutral")
+    row.update(over)
+    return row
+
+
+_PCS_LEGS = [{"kind": "put", "side": "short", "strike": 100.0},
+             {"kind": "put", "side": "long", "strike": 97.5}]
+
+
+def test_a_finder_credit_spread_with_positive_net_vega_is_short_premium():
+    # The scanner's net_vega is short.vega - long.vega: POSITIVE for a credit spread.
+    row = _legged("PCS", _PCS_LEGS, net_vega=0.039, credit=0.60, net_credit=60.0)
+    assert {"vol", "em", "wall", "gamma"} <= set(_tones(row))
+
+
+def test_an_adapted_iron_condor_with_zero_vega_is_short_premium():
+    legs = _PCS_LEGS + [{"kind": "call", "side": "short", "strike": 121.0},
+                        {"kind": "call", "side": "long", "strike": 123.5}]
+    row = _legged("IRON_CONDOR", legs, net_vega=0.0, net_credit=120.0)
+    assert {"vol", "em", "wall", "gamma"} <= set(_tones(row))
+
+
+def test_a_covered_call_is_short_premium_despite_its_share_debit():
+    legs = [{"kind": "stock", "side": "long", "strike": None},
+            {"kind": "call", "side": "short", "strike": 121.0}]
+    assert "vol" in _tones(_legged("COVERED_CALL", legs, net_debit=9558.0, net_vega=-0.09))
+
+
+@pytest.mark.parametrize("over,short", [
+    ({"net_credit": 150.0, "net_vega": 0.04}, True),     # economics beat vega
+    ({"net_debit": 400.0, "net_vega": -0.10}, False),    # a debit is long premium
+    ({"net_credit": 150.0, "net_debit": 400.0}, False),  # a positive debit decides
+    ({"net_vega": -0.10}, True),                         # nothing else: vega
+    ({"net_vega": 0.10}, False),
+])
+def test_an_unnamed_structure_is_classified_by_economics_then_vega(over, short):
+    row = _legged("CUSTOM", _PCS_LEGS, **over)
+    assert ("vol" in _tones(row)) is short
+
+
+def test_a_scanner_credit_row_without_legs_or_numbers_stays_short_premium():
+    assert "vol" in _tones(_pcs(credit=None))
+
+
+# ── same-strike structures are measured from their breakevens ─────────────
+
+
+_STRADDLE = [{"kind": "put", "side": "short", "strike": 110.0},
+             {"kind": "call", "side": "short", "strike": 110.0}]
+
+
+def test_a_short_straddle_measures_expected_move_from_its_breakevens():
+    # spot 110, em 6: lower 96 is 2.3 expected moves away, upper 115 only 0.8
+    row = _legged("SHORT_STRADDLE", _STRADDLE, net_credit=900.0, breakevens=[96.0, 115.0])
+    em = _line(row, "em")
+    assert em["tone"] == "warn"
+    assert em["text"] == "Breakeven 115 is 0.8 expected moves from the price"
+
+
+def test_a_short_straddle_measures_walls_from_its_breakevens():
+    row = _legged("SHORT_STRADDLE", _STRADDLE, net_credit=900.0, breakevens=[96.0, 115.0])
+    wall = _line(row, "wall")
+    assert wall["tone"] == "warn"                 # upper 115 is below the 120 call wall
+    assert wall["text"] == "Breakeven 115 is below the 120 call wall"
+    wide = _legged("SHORT_STRADDLE", _STRADDLE, net_credit=900.0, breakevens=[96.0, 125.0])
+    assert _line(wide, "wall")["tone"] == "pos"
+    assert _line(wide, "em")["tone"] == "pos"
+
+
+def test_an_iron_butterfly_reads_a_breakeven_string():
+    legs = ([{"kind": "put", "side": "long", "strike": 100.0}] + _STRADDLE
+            + [{"kind": "call", "side": "long", "strike": 120.0}])
+    row = _legged("IRON_BUTTERFLY", legs, net_credit=500.0, breakeven="95.3 / 125")
+    em, wall = _line(row, "em"), _line(row, "wall")
+    assert em["tone"] == "pos" and em["text"].startswith("Breakeven ")
+    assert wall["text"] == ("Breakeven 95.3 is below the 102 put wall · "
+                            "Breakeven 125 is above the 120 call wall")
+
+
+def test_missing_breakevens_grey_both_lines():
+    row = _legged("SHORT_STRADDLE", _STRADDLE, net_credit=900.0)
+    for key in ("em", "wall"):
+        line = _line(row, key)
+        assert (line["tone"], line["text"]) == ("muted", "Breakevens unknown")
+
+
+def test_a_strangle_still_measures_its_short_strikes():
+    legs = [{"kind": "put", "side": "short", "strike": 100.0},
+            {"kind": "call", "side": "short", "strike": 121.0}]
+    row = _legged("SHORT_STRANGLE", legs, net_credit=300.0, breakevens=[97.0, 124.0])
+    assert _line(row, "em")["text"].startswith("Short 100 put")
+
+
+# ── a missing live view is never "Clear" ──────────────────────────────────
+
+
+def test_no_board_row_marks_its_lines_and_is_partly_checked():
+    cs = checks.build_checks(_pcs(), None, REGIME, {}, CAPS)
+    by = {c["key"]: c for c in cs}
+    assert by["wall"].get("missing_view") and by["gamma"].get("missing_view")
+    assert by["em"]["tone"] == "pos" and "missing_view" not in by["em"]   # scan price
+    assert "missing_view" not in by["record"]      # a published calibration, no bucket
+    assert checks.summary(cs) == {"state": "muted", "text": "Partly checked · 6 of 9 checked",
+                                  "class": checks.TONE_CLASS["muted"]}
+
+
+def test_no_board_and_no_scan_price_marks_the_expected_move():
+    line = _line(_pcs(underlying_price=None), "em", matrix=None)
+    assert line["tone"] == "muted" and line.get("missing_view")
+
+
+def test_no_regime_marks_a_swing_direction_but_not_a_zero_dte_one():
+    assert _line(_pcs(), "direction", regime=None).get("missing_view")
+    zero = _line(_pcs(trade_type="0-DTE", dte=0), "direction", regime=None)
+    assert zero["tone"] == "pos" and "missing_view" not in zero
+    assert _line(_pcs(trade_type="0-DTE", dte=0), "direction", matrix=None).get("missing_view")
+
+
+def test_no_caps_or_calibration_view_is_partly_checked():
+    cs = checks.build_checks(_pcs(), MATRIX, REGIME, None, None)
+    by = {c["key"]: c for c in cs}
+    assert by["book"].get("missing_view") and by["record"].get("missing_view")
+    assert checks.summary(cs)["text"] == "Partly checked · 7 of 9 checked"
+
+
+def test_a_caution_still_outranks_a_missing_view():
+    cs = checks.build_checks(_pcs(friction_pct=12.0), None, REGIME, {}, CAPS)
+    assert checks.summary(cs)["text"] == "1 caution"
+
+
+def test_a_grey_line_with_its_view_present_is_not_marked():
+    row = _pcs(ledger_risk_per_contract=None, ledger_risk_basis=None)
+    assert "missing_view" not in _line(row, "book")
+
+
+# ── the failure log is once per (check, exception type) ───────────────────
+
+
+def test_a_failing_check_logs_once_and_counts_repeats(monkeypatch, caplog):
+    monkeypatch.setattr(checks, "_LOGGED", set())
+    monkeypatch.setattr(checks, "_REPEATS", {})
+
+    def boom(row):
+        raise ValueError("bad field")
+    monkeypatch.setattr(checks, "_earnings", boom)
+    with caplog.at_level("WARNING", logger=checks.log.name):
+        for _ in range(3):
+            line = _line(_pcs(), "earnings")
+    assert (line["tone"], line["text"]) == ("muted", "Couldn't check")
+    assert "missing_view" not in line
+    assert len([r for r in caplog.records if r.name == checks.log.name]) == 1
+    assert checks._REPEATS == {("earnings", ValueError): 2}
+
+    def other(row):
+        raise KeyError("x")
+    monkeypatch.setattr(checks, "_earnings", other)
+    with caplog.at_level("WARNING", logger=checks.log.name):
+        _line(_pcs(), "earnings")
+    assert len([r for r in caplog.records if r.name == checks.log.name]) == 2
+
+
+# ── wording ───────────────────────────────────────────────────────────────
+
+
+def test_a_short_strike_on_the_wall_says_at_and_is_amber():
+    line = _line(_pcs(short_strike=102.0), "wall")
+    assert (line["tone"], line["text"]) == ("warn", "Short 102 put is at the 102 put wall")
+
+
+@pytest.mark.parametrize("friction,shown", [(10.19, "10.1%"), (8.96, "8.9%"), (8.0, "8%")])
+def test_friction_is_truncated_not_rounded(friction, shown):
+    assert f"round trip {shown} of" in _line(_pcs(friction_pct=friction), "cost")["text"]
+
+
+def test_the_month_name_does_not_follow_the_host_locale():
+    import inspect
+    assert "%b" not in inspect.getsource(checks)
+    row = _pcs(earnings_status="upcoming", earnings_date="2026-05-03", expiration="2026-05-15")
+    assert _line(row, "earnings")["text"] == "Earnings May 3, before expiry"
+
+
+def test_expected_move_text_says_from_the_price():
+    assert _line(_pcs(), "em")["text"] == "Short 100 put is 1.6 expected moves from the price"

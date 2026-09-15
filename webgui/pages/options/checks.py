@@ -5,10 +5,15 @@ with tone ``pos`` / ``warn`` / ``neg`` / ``muted``. A check that does not apply
 is OMITTED (never shown as passing); only ``book`` can be ``neg``, because every
 other hard gate already removed its failures upstream.
 
+A check that is grey BECAUSE a live view it reads was not supplied carries
+``"missing_view": True``, and the summary then refuses to say "Clear": a
+checklist that could not see the board is only partly checked.
+
 Every input may be None or junk. Each check is guarded on its own, so a bad
-field costs that one line ("Couldn't check") rather than the whole list - and
-the guard logs, because a line that silently reads grey on every row is a bug
-with nowhere else to surface.
+field costs that one line ("Couldn't check") rather than the whole list. The
+guard logs the FIRST failure of each (check, exception type) and counts the
+rest silently: the list is rebuilt on every repaint, so a field broken on every
+row would otherwise flood the log.
 """
 import datetime as _dt
 import logging
@@ -36,6 +41,27 @@ LABELS = {"book": "Paper book", "earnings": "Earnings", "vol": "Vol rank",
           "cost": "Cost to trade", "em": "Expected move", "wall": "Walls",
           "gamma": "Dealer gamma", "direction": "Direction", "record": "Track record"}
 
+# Structures that SELL premium, by name. A mirror of ``shared.structures``
+# LEDGER_CREDIT + SHORT_PUT + COVERED_CALL, plus the scanner's SHORT_CALL (no
+# ledger name): Tier 1 does not import ``shared.structures``, so
+# test_checks.py pins this against that file's source. A name here wins over the
+# row's economics - a covered call's net_debit is mostly the share purchase.
+CREDIT_TYPES = ("PCS", "CCS", "IC", "IRON_CONDOR", "SHORT_PUT", "NAKED_PUT",
+                "COVERED_CALL", "SHORT_CALL")
+
+# Structures that BUY premium, by name - a mirror of ``shared.structures``
+# LEDGER_DEBIT, pinned the same way.
+DEBIT_TYPES = ("LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
+               "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT")
+
+# Fixed English names: strftime's month abbreviation follows the host locale.
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+# (check key, exception type) pairs already logged, and the silent repeat count.
+_LOGGED = set()
+_REPEATS = {}
+
 
 def _check(key, tone, text, **extra):
     return {"key": key, "label": LABELS[key], "tone": tone, "text": text, **extra}
@@ -50,9 +76,16 @@ def _strike(v):
     return f"{v:,.0f}" if v == int(v) else f"{v:,.2f}".rstrip("0").rstrip(".")
 
 
+def _tenths(v):
+    """``v`` truncated to tenths, so a printed figure never rounds across a
+    threshold its colour was decided on (0.99 prints 0.9, 10.19 prints 10.1)."""
+    return math.floor(v * 10 + 1e-9) / 10
+
+
 def _pct(v):
-    """``8`` for 8.0, ``10.1`` for 10.1 - never rounds 10.1 up to a passing 10."""
-    return f"{v:.0f}" if v == int(v) else f"{v:.1f}"
+    """``8`` for 8.0, ``10.1`` for 10.1 - truncated like every other figure here."""
+    t = _tenths(v)
+    return f"{t:.0f}" if t == int(t) else f"{t:.1f}"
 
 
 def _date(v):
@@ -62,6 +95,11 @@ def _date(v):
         return _dt.date.fromisoformat(v[:10])
     except ValueError:
         return None
+
+
+def _type(row):
+    kind = row.get("type")
+    return kind.strip().upper() if isinstance(kind, str) else ""
 
 
 def _short_legs(row):
@@ -78,7 +116,7 @@ def _short_legs(row):
             if kind in ("put", "call") and strike is not None:
                 out.append((kind, strike))
         return out
-    kind = row.get("type")
+    kind = _type(row)
     short, call_short = num(row.get("short_strike")), num(row.get("call_short"))
     if kind == "PCS":
         pairs = [("put", short)]
@@ -92,8 +130,30 @@ def _short_legs(row):
 
 
 def _is_short_premium(row):
-    """The scanner's credit lists carry no ``legs``; a normalized row is short
-    premium when its position-signed vega is negative."""
+    """Whether the trade SELLS premium, read from what it is and what it costs.
+
+    ⚠ Never from ``net_vega`` first. The scanner's ``net_vega`` is
+    ``short.vega - long.vega`` - POSITIVE for a credit spread - and
+    ``adapt_credit_spread`` carries it across unchanged, while an adapted iron
+    condor's legs carry vega 0. Reading its sign made every Finder credit spread
+    look like long premium.
+
+    Order: a known credit or debit structure name; then the economics (a
+    positive per-share ``credit`` or ``net_credit`` with no positive
+    ``net_debit`` sells, a positive ``net_debit`` buys); then, only when neither
+    is available, a negative ``net_vega``. A scanner credit row with no legs and
+    nothing else to go on stays short premium - those lists hold nothing else.
+    """
+    kind = _type(row)
+    if kind in CREDIT_TYPES:
+        return True
+    if kind in DEBIT_TYPES:
+        return False
+    debit = num(row.get("net_debit"))
+    if debit is not None and debit > 0:
+        return False
+    if (num(row.get("credit")) or 0) > 0 or (num(row.get("net_credit")) or 0) > 0:
+        return True
     if not row.get("legs"):
         return True
     vega = num(row.get("net_vega"))
@@ -104,7 +164,33 @@ def _bias(row):
     bias = row.get("bias")
     if bias is not None:
         return bias
-    return {"PCS": "bullish", "CCS": "bearish", "IC": "neutral"}.get(row.get("type"))
+    return {"PCS": "bullish", "CCS": "bearish", "IC": "neutral"}.get(_type(row))
+
+
+def _is_zero_dte(row):
+    dte = num(row.get("dte"))
+    return row.get("trade_type") == "0-DTE" or (dte is not None and dte <= ZERO_DTE_MAX)
+
+
+def _same_strike(shorts):
+    """A short put and a short call at ONE strike - a short straddle or an iron
+    butterfly, whose strikes say nothing about where the trade starts losing."""
+    puts = {s for r, s in shorts if r == "put"}
+    return any(r == "call" and s in puts for r, s in shorts)
+
+
+def _breakevens(row):
+    """``(lower, upper)`` from ``breakevens`` or a ``"a / b"`` ``breakeven``, or None."""
+    raw = row.get("breakevens")
+    if isinstance(raw, (list, tuple)):
+        values = [num(v) for v in raw]
+    else:
+        text = row.get("breakeven")
+        values = [num(p) for p in text.split("/")] if isinstance(text, str) else []
+    values = [v for v in values if v is not None]
+    if len(values) < 2:
+        return None
+    return min(values), max(values)
 
 
 # ── the checks ────────────────────────────────────────────────────────────
@@ -136,7 +222,7 @@ def _earnings(row):
     when = _date(row.get("earnings_date"))
     if when is None:
         return _check("earnings", "muted", "Earnings date unknown")
-    day = f"{when:%b} {when.day}"
+    day = f"{_MONTHS[when.month - 1]} {when.day}"
     expiry = _date(row.get("expiration"))
     if expiry is None:
         return _check("earnings", "muted", f"Earnings {day}, expiry unknown")
@@ -187,24 +273,41 @@ def _spot(row, matrix):
     return num(row.get("underlying_price")), True
 
 
+def _em_points(row, shorts):
+    """``[(name, price, side)]`` the expected-move and wall checks measure:
+    the short strikes, or the breakevens for a same-strike structure. ``None``
+    when that structure's breakevens are missing."""
+    if _same_strike(shorts):
+        bands = _breakevens(row)
+        if bands is None:
+            return None
+        return [(f"Breakeven {_strike(bands[0])}", bands[0], "put"),
+                (f"Breakeven {_strike(bands[1])}", bands[1], "call")]
+    return [(f"Short {_strike(s)} {r}", s, r) for r, s in shorts]
+
+
 def _em(row, matrix):
     if not _is_short_premium(row):
         return None
     em = num(row.get("em_to_expiry"))
     spot, from_scan = _spot(row, matrix)
     shorts = _short_legs(row)
-    if em is None or em <= 0 or spot is None or not shorts:
+    if not shorts:
         return _check("em", "muted", "Expected move not measured")
-    # The nearest short decides.
-    dist, right, strike = min(
-        (((spot - s) if r == "put" else (s - spot)) / em, r, s) for r, s in shorts)
+    points = _em_points(row, shorts)
+    if points is None:
+        return _check("em", "muted", "Breakevens unknown")
+    if em is None or em <= 0 or spot is None:
+        return _check("em", "muted", "Expected move not measured")
+    # The nearest point decides.
+    dist, name = min((((spot - p) if side == "put" else (p - spot)) / em, name)
+                     for name, p, side in points)
     suffix = " (scan price)" if from_scan else ""
     if dist <= 0:
-        return _check("em", "warn", f"Short {_strike(strike)} {right} is at or past the price{suffix}")
-    # Tenths truncated so the words and the colour agree: 0.99 reads 0.9, amber.
-    tenths = math.floor(dist * 10 + 1e-9)
-    text = f"Short {_strike(strike)} {right} is {tenths / 10:.1f} expected moves from price{suffix}"
-    return _check("em", "pos" if tenths >= EM_OK * 10 else "warn", text)
+        return _check("em", "warn", f"{name} is at or past the price{suffix}")
+    tenths = _tenths(dist)
+    text = f"{name} is {tenths:.1f} expected moves from the price{suffix}"
+    return _check("em", "pos" if tenths >= EM_OK else "warn", text)
 
 
 def _wall(row, matrix):
@@ -213,16 +316,23 @@ def _wall(row, matrix):
     shorts = _short_legs(row)
     if not shorts:
         return _check("wall", "muted", "No short strike to check")
+    points = _em_points(row, shorts)
+    if points is None:
+        return _check("wall", "muted", "Breakevens unknown")
     walls = {"put": num(matrix.get("put_wall")), "call": num(matrix.get("call_wall"))}
-    if any(walls[r] is None for r, _ in shorts):
+    if any(walls[side] is None for _, _, side in points):
         return _check("wall", "muted", "No wall reading")
     inside, outside = [], []
-    for right, strike in shorts:
-        wall = walls[right]
-        beyond = strike < wall if right == "put" else strike > wall
-        side = ("below" if beyond else "above") if right == "put" else \
-               ("above" if beyond else "below")
-        line = f"Short {_strike(strike)} {right} is {side} the {_strike(wall)} {right} wall"
+    for name, price, side in points:
+        wall = walls[side]
+        beyond = price < wall if side == "put" else price > wall
+        if price == wall:
+            where = "at"
+        elif side == "put":
+            where = "below" if beyond else "above"
+        else:
+            where = "above" if beyond else "below"
+        line = f"{name} is {where} the {_strike(wall)} {side} wall"
         (outside if beyond else inside).append(line)
     if inside:
         return _check("wall", "warn", " · ".join(inside))
@@ -253,8 +363,7 @@ def _direction(row, matrix, regime):
     want = {"bullish": 1, "bearish": -1}.get(bias) if isinstance(bias, str) else None
     if want is None:
         return None
-    dte = num(row.get("dte"))
-    if row.get("trade_type") == "0-DTE" or (dte is not None and dte <= ZERO_DTE_MAX):
+    if _is_zero_dte(row):
         name = "Today's move"
         sign = 0 if matrix.get("trend_state") == "flat" else _sign(matrix.get("trend_dir"))
     else:
@@ -282,6 +391,29 @@ def _record(row, calibration):
 # ── public surface ────────────────────────────────────────────────────────
 
 
+def _log_once(key, exc):
+    seen = (key, type(exc))
+    if seen in _LOGGED:
+        _REPEATS[seen] = _REPEATS.get(seen, 0) + 1
+        return
+    _LOGGED.add(seen)
+    log.warning("checklist line %r failed (%s); later failures of this kind are "
+                "counted, not logged", key, type(exc).__name__, exc_info=exc)
+
+
+def _missing_views(row, matrix_row, regime, calibration, caps):
+    """Which checks, if grey, are grey because a view they read was not given."""
+    no_matrix = not isinstance(matrix_row, dict)
+    return {"book": not isinstance(caps, dict),
+            # The scan's own price stands in for the board's, so only a row with
+            # neither is short of a view.
+            "em": no_matrix and num(row.get("underlying_price")) is None,
+            "wall": no_matrix,
+            "gamma": no_matrix,
+            "direction": no_matrix if _is_zero_dte(row) else not isinstance(regime, dict),
+            "record": not isinstance(calibration, dict)}
+
+
 def build_checks(row, matrix_row, regime, calibration, caps, qty=1):
     """The checks that apply to ``row``, in :data:`ORDER`. Never raises."""
     r, m = _dict(row), _dict(matrix_row)
@@ -294,13 +426,21 @@ def build_checks(row, matrix_row, regime, calibration, caps, qty=1):
                 "gamma": lambda: _gamma(r, m),
                 "direction": lambda: _direction(r, m, regime),
                 "record": lambda: _record(r, calibration)}
+    try:
+        missing = _missing_views(r, matrix_row, regime, calibration, caps)
+    except Exception as exc:
+        _log_once("missing_view", exc)
+        missing = {}
     out = []
     for key in ORDER:
         try:
             check = builders[key]()
-        except Exception:
-            log.warning("checklist line %r failed for %r", key, r.get("id"), exc_info=True)
+        except Exception as exc:
+            _log_once(key, exc)
             check = _check(key, "muted", "Couldn't check")
+        else:
+            if check is not None and check["tone"] == "muted" and missing.get(key):
+                check["missing_view"] = True
         if check is not None:
             out.append(check)
     return out
@@ -322,5 +462,8 @@ def summary(checks):
         word = "caution" if cautions == 1 else "cautions"
         return {"state": "warn", "text": f"{cautions} {word}", "class": TONE_CLASS["warn"]}
     k, n = len(checked), len(checks)
+    if any(c.get("missing_view") for c in checks):
+        return {"state": "muted", "text": f"Partly checked · {k} of {n} checked",
+                "class": TONE_CLASS["muted"]}
     text = f"Clear · {k} checked" if k == n else f"Clear · {k} of {n} checked"
     return {"state": "pos", "text": text, "class": TONE_CLASS["pos"]}
