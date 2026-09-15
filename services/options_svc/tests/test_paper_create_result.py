@@ -138,7 +138,7 @@ def test_a_raise_still_publishes_an_error_then_propagates(monkeypatch):
                                              args={"signal": {"symbol": "SPY"}, "qty": 1}))
     payload = bus.cache_get(handlers.CACHE_PAPER_CREATE).payload
     assert payload["status"] == "error"
-    assert payload["message"] == "The paper trade could not be processed. Nothing was opened."
+    assert payload["message"] == "The paper ledger could not process the request."
 
 
 def test_a_non_dict_signal_publishes_an_error_not_a_crash(monkeypatch, tmp_path):

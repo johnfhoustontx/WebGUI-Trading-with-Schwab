@@ -19,14 +19,14 @@ def test_refused_names_the_cap_and_the_quantity_that_fits():
         "status": "refused", "symbol": "ORCL", "code": "SYMBOL_POSITION_CAP",
         "message": "ORCL already holds 3 of 3 positions", "max_quantity": 0})
     assert kind == "warning"
-    assert text == "Not opened — ORCL already holds 3 of 3 positions."
+    assert text == "Paper ledger: not opened — ORCL already holds 3 of 3 positions."
 
 
 def test_refused_with_room_for_a_smaller_quantity_says_so():
     text, _ = handoff.paper_result_toast({
         "status": "refused", "symbol": "SPY", "code": "TRADE_RISK_CAP",
         "message": "Risks $900, over the $750 per-trade limit", "max_quantity": 1})
-    assert text == "Not opened — Risks $900, over the $750 per-trade limit. Up to 1 contract fits."
+    assert text == "Paper ledger: not opened — risks $900, over the $750 per-trade limit. Up to 1 contract fits."
 
 
 def test_refused_with_room_for_several_uses_the_plural():
@@ -39,16 +39,24 @@ def test_refused_with_room_for_several_uses_the_plural():
 def test_stale_and_error():
     assert handoff.paper_result_toast({
         "status": "stale",
-        "message": "The request waited too long to be processed, so it was not acted on. Try again."}) == (
-        "Not opened — The request waited too long to be processed, so it was not acted on. Try again.",
+        "message": "The request waited too long to be processed. Try again."}) == (
+        "Paper ledger: not opened — the request waited too long to be processed. Try again.",
         "warning")
     assert handoff.paper_result_toast({"status": "error", "message": "boom"}) == (
-        "Not opened — boom.", "negative")
+        "Paper ledger: not opened — boom.", "negative")
 
 
 def test_a_missing_message_still_says_something():
     assert handoff.paper_result_toast({"status": "error"}) == (
-        "Not opened — the service gave no reason.", "negative")
+        "Paper ledger: not opened — the service gave no reason.", "negative")
+
+
+def test_a_message_opening_on_a_ticker_keeps_its_capitals():
+    assert handoff.paper_result_toast({
+        "status": "refused",
+        "message": "IONQ's own group (no sector on file) is full (5 of 5 positions)",
+        "max_quantity": 0})[0] == (
+        "Paper ledger: not opened — IONQ's own group (no sector on file) is full (5 of 5 positions).")
 
 
 def test_nothing_to_say_for_an_empty_payload():

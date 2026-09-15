@@ -2588,8 +2588,7 @@ def handle_command(bus, command) -> None:
                                         "expiration": sig.get("expiration"),
                                         "qty": None, "rungs": [],
                                         "message": "The request waited too long to be "
-                                                   "processed, so it was not acted on. "
-                                                   "Try again."})
+                                                   "processed. Try again."})
         else:
             try:
                 outcome = compute.create_paper_trade(sig, command.args.get("qty", 1)) or {}
@@ -2601,7 +2600,7 @@ def handle_command(bus, command) -> None:
                     "status": "error", "symbol": sig.get("symbol"),
                     "type": sig.get("type"), "expiration": sig.get("expiration"),
                     "rungs": [],
-                    "message": "The paper trade could not be processed. Nothing was opened."})
+                    "message": "The paper ledger could not process the request."})
                 raise
             if outcome.get("status") == "refused":
                 log.info("REFUSED paper_create %s %s: %s", sig.get("symbol"),

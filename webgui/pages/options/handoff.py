@@ -227,6 +227,9 @@ def paper_result_toast(payload):
 
     Refusals keep the service's own sentence (shared.book_caps.describe), so the
     toast and the Paper dialog preview can never word the same cap differently.
+    Every toast leads with "Paper ledger:"; a service sentence continues after the
+    dash with its first letter lowered - unless it opens on a ticker ("ORCL
+    already holds...", "IONQ's own group..."), which keeps its capitals.
     An opened trade names its structure in words (``strategy_label``), never the
     raw code, and leads with "Paper ledger:" so a label like "Credit spread —
     put" cannot run into the rest of the sentence."""
@@ -239,17 +242,31 @@ def paper_result_toast(payload):
         label = strategy_label(payload.get("type") or "")
         return (f"Paper ledger: opened {qty} × {payload.get('symbol', '')} {label}.",
                 "positive")
-    message = (payload.get("message") or "the service gave no reason").rstrip(".")
+    message = _continue_sentence(
+        (payload.get("message") or "the service gave no reason").rstrip("."))
+    lead = "Paper ledger: not opened — "
     if status == "refused":
-        text = f"Not opened — {message}."
+        text = f"{lead}{message}."
         fits = payload.get("max_quantity")
         if isinstance(fits, int) and not isinstance(fits, bool) and fits > 0:
             text += (f" Up to {fits} contract fits." if fits == 1
                      else f" Up to {fits} contracts fit.")
         return text, "warning"
     if status == "stale":
-        return f"Not opened — {message}.", "warning"
-    return f"Not opened — {message}.", "negative"
+        return f"{lead}{message}.", "warning"
+    return f"{lead}{message}.", "negative"
+
+
+def _continue_sentence(message):
+    """Lower the first letter so a service sentence reads on after a dash. PURE.
+
+    Only when the second character is lower case or a space: "Risks $900" becomes
+    "risks $900", but a ticker ("ORCL already...", "IONQ's own...") keeps its
+    capitals."""
+    if (len(message) >= 2 and message[0].isalpha()
+            and (message[1].islower() or message[1] == " ")):
+        return message[0].lower() + message[1:]
+    return message
 
 
 def watch_paper_results():
