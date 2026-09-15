@@ -447,3 +447,41 @@ def test_the_month_name_does_not_follow_the_host_locale():
 
 def test_expected_move_text_says_from_the_price():
     assert _line(_pcs(), "em")["text"] == "Short 100 put is 1.6 expected moves from the price"
+
+
+# ── the short chip (verdict) ──────────────────────────────────────────────
+
+
+def test_verdict_short_for_a_block_is_one_word():
+    blocked = checks.build_checks(_pcs(**_risk(425.0)), MATRIX, REGIME, {}, CAPS)
+    assert checks.verdict(blocked)["short"] == "Blocked"
+
+
+def test_verdict_short_for_cautions_is_the_count():
+    one = checks.build_checks(_pcs(friction_pct=12.0), MATRIX, REGIME, {}, CAPS)
+    assert checks.verdict(one)["short"] == "1 caution"
+    two = checks.build_checks(_pcs(short_strike=104.0, friction_pct=12.0), MATRIX, REGIME, {}, CAPS)
+    assert checks.verdict(two)["short"] == checks.summary(two)["text"]
+    assert checks.verdict(two)["short"].endswith("cautions")
+
+
+def test_verdict_short_for_clear_drops_the_word_checked():
+    clean = checks.build_checks(_pcs(), MATRIX, REGIME, {}, CAPS)   # record is muted
+    assert checks.verdict(clean)["short"] == "Clear · 8 of 9"
+
+
+def test_verdict_short_for_partly_checked_drops_the_counts():
+    cs = checks.build_checks(_pcs(), MATRIX, REGIME, None, None)
+    assert checks.verdict(cs)["short"] == "Partly checked"
+
+
+def test_verdict_short_for_nothing_checked():
+    assert checks.verdict([])["short"] == "unchecked"
+
+
+def test_verdict_carries_summary_unchanged():
+    for cs in (checks.build_checks(_pcs(), MATRIX, REGIME, {}, CAPS),
+               checks.build_checks(_pcs(**_risk(425.0)), MATRIX, REGIME, {}, CAPS),
+               checks.build_checks(_pcs(), None, REGIME, {}, CAPS), []):
+        full = checks.verdict(cs)
+        assert {k: v for k, v in full.items() if k != "short"} == checks.summary(cs)

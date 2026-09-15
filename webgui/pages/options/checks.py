@@ -446,24 +446,36 @@ def build_checks(row, matrix_row, regime, calibration, caps, qty=1):
     return out
 
 
-def summary(checks):
-    """``{state, text, class}`` for the one-chip verdict."""
+def verdict(checks):
+    """``{state, text, class, short}`` - :func:`summary` plus ``short``, the few
+    words a table cell has room for (the full ``text`` goes in its tooltip)."""
     checks = [c for c in (checks or []) if isinstance(c, dict)]
     checked = [c for c in checks if c.get("tone") != "muted"]
     if not checked:
-        return {"state": "muted", "text": "unchecked", "class": TONE_CLASS["muted"]}
+        return {"state": "muted", "text": "unchecked", "class": TONE_CLASS["muted"],
+                "short": "unchecked"}
     blocked = [c for c in checks if c.get("tone") == "neg"]
     if blocked:
         return {"state": "neg",
                 "text": "Blocked · " + book_fit.short_reason(blocked[0].get("breach")),
-                "class": TONE_CLASS["neg"]}
+                "class": TONE_CLASS["neg"], "short": "Blocked"}
     cautions = sum(1 for c in checks if c.get("tone") == "warn")
     if cautions:
         word = "caution" if cautions == 1 else "cautions"
-        return {"state": "warn", "text": f"{cautions} {word}", "class": TONE_CLASS["warn"]}
+        text = f"{cautions} {word}"
+        return {"state": "warn", "text": text, "class": TONE_CLASS["warn"], "short": text}
     k, n = len(checked), len(checks)
     if any(c.get("missing_view") for c in checks):
         return {"state": "muted", "text": f"Partly checked · {k} of {n} checked",
-                "class": TONE_CLASS["muted"]}
+                "class": TONE_CLASS["muted"], "short": "Partly checked"}
     text = f"Clear · {k} checked" if k == n else f"Clear · {k} of {n} checked"
-    return {"state": "pos", "text": text, "class": TONE_CLASS["pos"]}
+    return {"state": "pos", "text": text, "class": TONE_CLASS["pos"],
+            "short": f"Clear · {k} of {n}"}
+
+
+def summary(checks):
+    """``{state, text, class}`` for the one-chip verdict (:func:`verdict` without
+    its ``short`` key)."""
+    out = verdict(checks)
+    del out["short"]
+    return out

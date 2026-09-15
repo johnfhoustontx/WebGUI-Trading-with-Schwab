@@ -180,7 +180,8 @@ def test_render_wires_the_switch_the_refresh_timer_the_probe_and_the_slots():
 
 def test_the_only_clear_tooltip_is_plain_words():
     assert scanner._ONLY_CLEAR_TIP == (
-        "Hide rows with a caution, a block, or a check that couldn't run")
+        "Hide rows with a block, a caution, a feed that hasn't loaded, "
+        "or a paper book fit that couldn't be checked")
 
 
 def test_the_checks_slot_binds_classes_not_styles():
@@ -201,3 +202,156 @@ def test_read_and_build_passes_the_checklist_context(monkeypatch):
     monkeypatch.setattr(scanner, "_build_populate", fake_build)
     scanner._read_and_build()
     assert seen["ctx"] == "CTX"
+
+
+# ── Only clear hides a paper book fit that could not be checked ─────────────
+_CAL = {"by_bucket": {}}      # a published calibration with no bucket for the row
+
+
+def _stamped(sig, ctx=None, rows_fn=None):
+    rows = (rows_fn or scanner.signal_rows)([sig])
+    scanner.stamp_stale(rows, [sig])
+    return scanner.stamp_checks(rows, [sig], ctx or _ctx(calibration=_CAL))
+
+
+def test_only_clear_keeps_a_row_with_full_stamps():
+    rows = _stamped(_pcs_signal())
+    assert rows[0]["_checks_state"] == "pos" and rows[0]["_checks_clear"] is True
+    assert scanner.only_clear(rows) == rows
+
+
+def test_only_clear_hides_a_clear_row_whose_book_fit_could_not_be_checked():
+    rows = _stamped(_pcs_signal(ledger_risk_basis=None, ledger_risk_per_contract=None))
+    # The chip's own verdict is unchanged - a grey book line alone still reads Clear.
+    assert rows[0]["_checks_state"] == "pos"
+    assert rows[0]["_checks_clear"] is False
+    assert scanner.only_clear(rows) == []
+
+
+def test_only_clear_hides_a_row_with_no_stamps_at_all():
+    unstamped = ("ledger_risk_basis", "ledger_risk_per_contract", "friction_pct",
+                 "em_to_expiry", "vol_floor", "iv_rank_known", "earnings_status",
+                 "earnings_date")
+    bare = {k: v for k, v in _pcs_signal().items() if k not in unstamped}
+    rows = _stamped(bare)
+    assert rows[0]["_checks_clear"] is False
+    assert scanner.only_clear(rows) == []
+
+
+def test_only_clear_keeps_a_clear_naked_short_that_has_no_book_line():
+    naked = {"id": "ORCL_SHORT_PUT_2026-10-17_100", "symbol": "ORCL", "type": "SHORT_PUT",
+             "family": "DIRECTIONAL", "strategy_label": "Short Put", "bias": "bullish",
+             "legs": [{"side": "short", "kind": "put", "strike": 100.0,
+                       "expiration": "2026-10-17"}],
+             "expiration": "2026-10-17", "dte": 12, "composite_score": 70, "grade": "Good",
+             "max_profit": 1.2, "unbounded_loss": True, "net_vega": -0.3,
+             "iv_rank": 55.0, "iv_rank_known": True, "vol_floor": 30, "friction_pct": 8.0,
+             "em_to_expiry": 6.0, "earnings_status": "none_scheduled", "earnings_date": None,
+             "underlying_price": 110.0, "live": True}
+    rows = _stamped(naked, rows_fn=scanner.directional_rows)
+    items = checks_feed.checks_for({**naked, "_allow_paper": False}, _ctx(calibration=_CAL))
+    assert "book" not in {c["key"] for c in items}
+    assert rows[0]["_allow_paper"] is False
+    assert rows[0]["_checks_state"] == "pos"
+    assert scanner.only_clear(rows) == rows
+
+
+def test_stamp_checks_stamps_the_short_chip():
+    rows = _stamped(_pcs_signal())
+    assert rows[0]["_checks_short"] == "Clear · 8 of 9"
+    assert rows[0]["checks"] == "Clear · 8 of 9 checked"
+
+
+# ── tab counts follow the filter ─────────────────────────────────────────────
+def test_tab_label_while_filtered_reads_shown_of_total():
+    assert scanner.filtered_tab_label("Swing", 40, 3, have=True, filtering=True) == "Swing (3 of 40)"
+
+
+def test_tab_label_unfiltered_is_the_plain_count():
+    assert scanner.filtered_tab_label("Swing", 40, 3, have=True, filtering=False) == "Swing (40)"
+
+
+def test_tab_label_has_no_count_before_todays_scan_filtered_or_not():
+    assert scanner.filtered_tab_label("Swing", 0, 0, have=False, filtering=True) == "Swing"
+    assert scanner.filtered_tab_label("Swing", 0, 0, have=False, filtering=False) == "Swing"
+
+
+# ── an empty filtered table explains itself ──────────────────────────────────
+def _rows_in(*states):
+    return [{"id": f"r{i}", "_checks_state": s} for i, s in enumerate(states)]
+
+
+def test_empty_label_when_every_hidden_row_is_partly_checked():
+    full = _rows_in(*(["muted"] * 40))
+    assert scanner.only_clear_empty_label(full, [], filtering=True) == (
+        "Every row is only partly checked — a feed the checks read hasn't loaded. "
+        "Turn off Only clear to see all 40.")
+
+
+def test_empty_label_when_rows_were_hidden_for_other_reasons():
+    full = _rows_in(*(["muted"] * 38 + ["warn", "neg"]))
+    assert scanner.only_clear_empty_label(full, [], filtering=True) == (
+        "No row reads Clear — 40 hidden by Only clear.")
+
+
+def test_empty_label_is_the_normal_one_otherwise():
+    full = _rows_in("pos", "muted")
+    assert scanner.only_clear_empty_label(full, [], filtering=False) is None
+    assert scanner.only_clear_empty_label([], [], filtering=True) is None
+    assert scanner.only_clear_empty_label(full, full[:1], filtering=True) is None
+
+
+# ── a context change re-stamps; only a scan change re-reads the day union ────
+def test_repaint_action_decides_rebuild_restamp_or_skip():
+    day, live = scanner._DAY_VIEW, scanner._LIVE_VIEW
+    caps, regime = checks_feed.REFRESH_VIEWS
+    assert scanner.repaint_action({day}) == "rebuild"
+    assert scanner.repaint_action({live, caps}) == "rebuild"
+    assert scanner.repaint_action({caps}) == "restamp"
+    assert scanner.repaint_action({regime}) == "restamp"
+    assert scanner.repaint_action(set()) == "skip"
+
+
+def test_repaint_action_on_the_timer_restamps_only_when_the_board_moved():
+    assert scanner.repaint_action(set(), timer=True, matrix_moved=True) == "restamp"
+    assert scanner.repaint_action(set(), timer=True, matrix_moved=False) == "skip"
+
+
+def test_restamp_stamps_copies_and_leaves_the_painted_rows_alone():
+    sig = _pcs_signal()
+    rows = _stamped(sig, _ctx(calibration=None))
+    rows[0]["_new"] = True
+    before = dict(rows[0])
+    assert before["checks"] == "Partly checked · 8 of 9 checked"
+    out = scanner.restamp({"signals_swing": rows}, {"signals_swing": [sig]},
+                          _ctx(calibration=_CAL))
+    assert rows[0] == before
+    fresh = out["signals_swing"][0]
+    assert fresh is not rows[0]
+    assert fresh["checks"] == "Clear · 8 of 9 checked" and fresh["_checks_clear"] is True
+    assert fresh["_new"] is True and fresh["_allow_paper"] is True
+
+
+def test_read_and_restamp_reads_the_live_context(monkeypatch):
+    sig = _pcs_signal()
+    rows = _stamped(sig, _ctx(calibration=None))
+    monkeypatch.setattr(checks_feed, "read_context", lambda: _ctx(calibration=_CAL))
+    out = scanner._read_and_restamp({"signals_swing": rows}, {"signals_swing": [sig]})
+    assert out["signals_swing"][0]["_checks_state"] == "pos"
+
+
+def test_render_restamps_without_rereading_the_day_union():
+    src = inspect.getsource(scanner.render)
+    assert src.count("run.io_bound(_read_and_build)") == 2
+    assert "run.io_bound(_read_and_restamp" in src
+    assert "repaint_action(" in src
+    assert "bus_client.read_version(checks_feed.MATRIX_VIEW)" in src
+    assert '"no-data-label"' in src
+    assert "only_clear_empty_label(" in src
+    assert "filtered_tab_label(" in src
+
+
+def test_the_checks_slot_shows_the_short_chip_with_the_full_text_in_a_tooltip():
+    assert "props.row._checks_short" in scanner._CHECKS_SLOT
+    assert "<q-tooltip" in scanner._CHECKS_SLOT
+    assert "{{ props.value }}" in scanner._CHECKS_SLOT

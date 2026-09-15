@@ -447,8 +447,14 @@ def stamp_stale(rows, signals):
 
 
 def stamp_checks(rows, signals, ctx, build=None):
-    """Stamp the checklist summary (``checks`` / ``_checks_state`` /
-    ``_checks_class``) onto display rows, joined by id (the builders re-sort).
+    """Stamp the checklist verdict (``checks`` / ``_checks_state`` /
+    ``_checks_class`` / ``_checks_short`` / ``_checks_clear``) onto display rows,
+    joined by id (the builders re-sort).
+
+    ``_checks_clear`` is what "Only clear" filters on: the chip reads Clear AND no
+    Paper book line is grey. A grey book line (no risk stamp, or a book fit that
+    could not be computed) does not change the chip's verdict, but a row whose fit
+    was never checked must not pass a filter that promises it was.
 
     Runs AFTER ``stamp_stale``: the Paper book line needs the display row's
     ``_allow_paper`` gate, which raw signals don't carry - passed the bare signal,
@@ -460,15 +466,88 @@ def stamp_checks(rows, signals, ctx, build=None):
     for r in rows:
         sig = by_id.get(r.get("id"))
         items = build({**sig, "_allow_paper": r.get("_allow_paper")}, ctx) if sig else []
-        chip = checks.summary(items)
+        chip = checks.verdict(items)
         r["checks"], r["_checks_state"], r["_checks_class"] = (
             chip["text"], chip["state"], chip["class"])
+        r["_checks_short"] = chip["short"]
+        r["_checks_clear"] = chip["state"] == "pos" and not any(
+            c.get("key") == "book" and c.get("tone") == "muted" for c in items)
     return rows
 
 
 def only_clear(rows):
-    """Rows whose checklist reads Clear - no blocks, no cautions, nothing missing."""
-    return [r for r in rows if r.get("_checks_state") == "pos"]
+    """Rows whose checklist reads Clear - no blocks, no cautions, nothing missing -
+    and whose Paper book fit, when the row has that line, was actually checked.
+
+    A row with no ``_checks_clear`` stamp is judged on its state alone."""
+    return [r for r in rows
+            if r.get("_checks_state") == "pos" and r.get("_checks_clear", True)]
+
+
+def filtered_tab_label(base, total, shown, *, have, filtering):
+    """Tab header while "Only clear" may be on: ``'Swing (3 of 40)'`` filtered,
+    ``'Swing (40)'`` not, and the bare name before today's scan exists."""
+    if not have:
+        return base
+    if filtering:
+        return f"{base} ({shown} of {total})"
+    return tab_label(base, total)
+
+
+def only_clear_empty_label(full_rows, shown_rows, *, filtering):
+    """The table's empty-state line when "Only clear" has hidden every row, or
+    ``None`` for the table's normal empty label.
+
+    Every hidden row partly checked means a feed has not loaded, which the reader
+    can do nothing about but should know; anything else is the filter doing its
+    job."""
+    full_rows = full_rows or []
+    if not filtering or not full_rows or shown_rows:
+        return None
+    n = len(full_rows)
+    if all(r.get("_checks_state") == "muted" for r in full_rows):
+        return ("Every row is only partly checked — a feed the checks read hasn't "
+                f"loaded. Turn off Only clear to see all {n}.")
+    return f"No row reads Clear — {n} hidden by Only clear."
+
+
+def repaint_action(moved, *, timer=False, matrix_moved=False):
+    """``'rebuild'`` / ``'restamp'`` / ``'skip'`` for one repaint decision.
+
+    A scan view moving re-reads and rebuilds everything (the ~4.5 MB day union).
+    Only the checklist's refresh views moving re-stamps the rows already painted.
+    The timer re-stamps only when the Opportunity Board moved since the last stamp,
+    so it costs nothing off-hours."""
+    from . import checks_feed
+    moved = set(moved or ())
+    if timer:
+        return "restamp" if matrix_moved else "skip"
+    if moved & {_DAY_VIEW, _LIVE_VIEW}:
+        return "rebuild"
+    if moved & set(checks_feed.REFRESH_VIEWS):
+        return "restamp"
+    return "skip"
+
+
+def restamp(rows_by_key, sigs_by_key, ctx, build=None):
+    """Re-stamp the checklist onto SHALLOW COPIES of painted rows.
+
+    Copies, because the event loop may be filtering the very same dicts for the
+    "Only clear" switch while this runs off it. Every other stamp (``_new``,
+    ``_allow_paper``, the stale marks) rides along on the copy."""
+    out = {}
+    for key, rows in (rows_by_key or {}).items():
+        copies = [dict(r) for r in rows or []]
+        stamp_checks(copies, (sigs_by_key or {}).get(key) or [], ctx, build=build)
+        out[key] = copies
+    return out
+
+
+def _read_and_restamp(rows_by_key, sigs_by_key):
+    """Read the checklist's live context and re-stamp copies of the painted rows.
+    **Blocking** — go through ``run.io_bound``."""
+    from . import checks_feed
+    return restamp(rows_by_key, sigs_by_key, checks_feed.read_context())
 
 
 def _short_time(iso):
@@ -627,11 +706,13 @@ _SYMBOL_SLOT = r'''
 # The checklist's one-chip verdict, coloured by its state (a fixed class per state).
 _CHECKS_SLOT = r'''
   <q-td :props="props">
-    <span :class="props.row._checks_class + ' text-xs whitespace-nowrap'">{{ props.value || '—' }}</span>
+    <span :class="props.row._checks_class + ' text-xs whitespace-nowrap'">{{ props.row._checks_short || '—' }}</span>
+    <q-tooltip v-if="props.value">{{ props.value }}</q-tooltip>
   </q-td>
 '''
 
-_ONLY_CLEAR_TIP = "Hide rows with a caution, a block, or a check that couldn't run"
+_ONLY_CLEAR_TIP = ("Hide rows with a block, a caution, a feed that hasn't loaded, "
+                   "or a paper book fit that couldn't be checked")
 
 
 def render():
@@ -715,6 +796,13 @@ def render():
     # The full stamped rows per table, so the "Only clear" switch can re-filter
     # without re-reading the bus.
     painted = {key: [] for key in DAY_LISTS}
+    # The signals those rows were built from (a re-stamp needs them) and whether
+    # today's day union exists (the tab counts need it).
+    painted_sigs = {key: [] for key in DAY_LISTS}
+    counts = {"have": False}
+    # The Opportunity Board version the rows were last stamped against, so the
+    # 5-minute timer re-stamps only when the board has actually moved.
+    stamped = {"matrix": None}
     # Shared by the deferred first read + the 2 s poll so the two big
     # off-loop reads can never stack (the gamma.py precedent).
     state = {"fetching": False}
@@ -781,11 +869,27 @@ def render():
                         acknowledge=acknowledge)
 
     def _paint_tables():
-        """Assign the stored rows to the tables, filtered when "Only clear" is on."""
-        for key, table in (("signals_0dte", table_0dte), ("signals_swing", table_swing),
-                           ("signals_directional", table_dir)):
-            table.rows = only_clear(painted[key]) if clear_toggle.value else painted[key]
+        """Assign the stored rows to the tables, filtered when "Only clear" is on,
+        with the tab counts and the empty-state line following the filter."""
+        filtering = bool(clear_toggle.value)
+        for key, table, tab, base in (
+                ("signals_0dte", table_0dte, tab_0dte, "0-DTE"),
+                ("signals_swing", table_swing, tab_swing, "Swing"),
+                ("signals_directional", table_dir, tab_dir, "Directional")):
+            full = painted[key]
+            shown = only_clear(painted[key]) if filtering else full
+            empty = only_clear_empty_label(full, shown, filtering=filtering)
+            # Written to _props directly: a props STRING would be re-parsed.
+            if empty is None:
+                table._props.pop("no-data-label", None)
+            else:
+                table._props["no-data-label"] = empty
+            table.rows = shown
             table.update()
+            label = filtered_tab_label(base, len(full), len(shown),
+                                       have=counts["have"], filtering=filtering)
+            tab.props(f'label="{label}"')
+            tab.update()
 
     @guard
     def _on_clear_toggle(_event):
@@ -801,7 +905,7 @@ def render():
         ``acknowledge`` — True only when the user is actually VIEWING the page (the
         initial paint), so a background repaint never clears their New markers.
         """
-        today, rows = built["today"], built["rows"]
+        today, rows, sigs = built["today"], built["rows"], built["sigs"]
         live = built["live"]
 
         by_id.clear()
@@ -812,17 +916,12 @@ def render():
             # stamp_stale + stamp_checks already ran off the loop (_build_populate).
             stamp_new(rows[key], new_ids)
             painted[key] = rows[key]
+            painted_sigs[key] = sigs[key]
+        # Day counts in each tab header — no count until a day union for TODAY
+        # exists, so the tabs don't show a misleading "(0)" before the first scan
+        # or while a stale-dated envelope is gated out. _paint_tables writes them.
+        counts["have"] = built["have"]
         _paint_tables()
-
-        # Day counts in each tab header — None (no count) until a day union for
-        # TODAY exists, so the tabs don't show a misleading "(0)" before the first
-        # scan or while a stale-dated envelope is gated out.
-        have = built["have"]
-        for tab, base, key in ((tab_0dte, "0-DTE", "signals_0dte"),
-                               (tab_swing, "Swing", "signals_swing"),
-                               (tab_dir, "Directional", "signals_directional")):
-            tab.props(f'label="{tab_label(base, len(rows[key]) if have else None)}"')
-            tab.update()
 
         scan_busy.hide()
         status.text = status_line(live)
@@ -848,6 +947,7 @@ def render():
         if state["fetching"]:
             return
         state["fetching"] = True
+        stamped["matrix"] = bus_client.read_version(checks_feed.MATRIX_VIEW)
         try:
             built = await run.io_bound(_read_and_build)
         finally:
@@ -855,11 +955,12 @@ def render():
         _apply_populate(built, notify=False, acknowledge=True)
 
     async def _rebuild():
-        """Re-read + rebuild off the loop and repaint. Shared by the version poll
-        and the 5-minute checklist refresh, under the same ``fetching`` guard."""
+        """Re-read + rebuild off the loop and repaint, under the ``fetching``
+        guard. Only a scan view moving comes here."""
         if state["fetching"]:
             return
         state["fetching"] = True
+        stamped["matrix"] = bus_client.read_version(checks_feed.MATRIX_VIEW)
         try:
             built = await run.io_bound(_read_and_build)
         finally:
@@ -867,24 +968,50 @@ def render():
         # NOT a view — the user may be away, so their New markers must survive.
         _apply_populate(built, notify=False, acknowledge=False)
 
+    async def _restamp():
+        """Re-stamp the painted rows against a fresh context, off the loop, under
+        the ``fetching`` guard - no day-union read."""
+        if state["fetching"]:
+            return
+        state["fetching"] = True
+        try:
+            fresh = await run.io_bound(_read_and_restamp, dict(painted), dict(painted_sigs))
+        finally:
+            state["fetching"] = False
+        painted.update(fresh)
+        _paint_tables()
+
     @guard_async
     async def _maybe_repaint():
         # Cheap on-loop probe: only the `:ver` counters (a few tiny ints, one
         # pipelined round-trip) - the two scan views plus the views the checklist
-        # re-stamps on. The ~4.5 MB payload read happens ONLY on a change, and
-        # then off the loop.
+        # re-stamps on. The ~4.5 MB payload read happens ONLY when a scan view
+        # moved, and then off the loop; a context view alone re-stamps.
         versions = bus_client.read_versions(_probe_views)
         if versions == seen or state["fetching"]:
             return
+        moved = {v for v, ver in versions.items() if ver != seen.get(v)}
         seen.update(versions)          # latch BEFORE the await so we don't re-enter
-        await _rebuild()
+        action = repaint_action(moved)
+        if action == "rebuild":
+            await _rebuild()
+        elif action == "restamp":
+            stamped["matrix"] = bus_client.read_version(checks_feed.MATRIX_VIEW)
+            await _restamp()
 
     @guard_async
     async def _force_repaint():
         # The Opportunity Board moves every minute and its walls / flip / trend
         # feed the checks, but it is not a re-stamp trigger: re-stamp on a fixed
-        # cadence instead (operator decision, checks_feed.TABLE_REFRESH_SEC).
-        await _rebuild()
+        # cadence instead (operator decision, checks_feed.TABLE_REFRESH_SEC), and
+        # only when the board moved since the last stamp (one cheap :ver probe).
+        if state["fetching"]:
+            return
+        ver = bus_client.read_version(checks_feed.MATRIX_VIEW)
+        if repaint_action((), timer=True, matrix_moved=ver != stamped["matrix"]) != "restamp":
+            return
+        stamped["matrix"] = ver        # latch BEFORE the await
+        await _restamp()
 
     seen.update(bus_client.read_versions(_probe_views))
     _populate({}, {}, notify=False)             # instant empty paint
