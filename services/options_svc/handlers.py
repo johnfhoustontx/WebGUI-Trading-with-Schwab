@@ -1343,7 +1343,9 @@ def refresh_ledger_caps(bus, trades=None) -> None:
 
     Carries the whole ``sectors.toml`` table and ``unmapped_prefix``; the page
     buckets any symbol with ``book_caps.sector_bucket`` over it, the rule
-    ``sectors.group_key`` itself delegates to. ``trades`` (all Ledger trades,
+    ``sectors.group_key`` itself delegates to. ``unmapped_prefix`` is
+    informational only: the page buckets through ``book_caps.sector_bucket``,
+    which carries the same constant. ``trades`` (all Ledger trades,
     already read) skips a second DB read.
 
     ``event=`` rides the write, so an unchanged book (``skip_unchanged``) bumps

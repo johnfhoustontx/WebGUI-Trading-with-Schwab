@@ -1,6 +1,6 @@
 import pytest
 
-from shared import book_caps
+from shared import book_caps, sectors
 from shared.bus import Bus
 from shared.bus.client import reset_fake_bus
 from services.options_svc import handlers
@@ -24,6 +24,7 @@ def test_the_view_carries_limits_equity_open_trades_and_the_sector_table(monkeyp
     assert p["open"][0]["sector"] == "Information Technology"
     assert p["sectors"]["XOM"] == "Energy"
     assert p["sectors"]["ORCL"] == "Information Technology"
+    assert p["sectors"] == sectors.load()["sectors"]
     assert p["unmapped_prefix"] == book_caps.UNMAPPED_PREFIX
     assert book_caps.sector_bucket(p["sectors"], "zzzq") == "?ZZZQ"
 
