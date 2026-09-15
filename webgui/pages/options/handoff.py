@@ -214,6 +214,59 @@ def send_signal_to_calculator(sig):
         send_to_calculator(sig)
 
 
+PAPER_CREATE_VIEW = "options:paper_create"
+# Its OWN cadence, deliberately not the pages' 2 s repaint poll: the repaint
+# timer stays the only 2 s timer on the page (tests find it by interval), and a
+# toast about a second after the click reads as the button's answer. The probe
+# is the cheap ``:ver`` counter, so the faster tick costs nothing measurable.
+PAPER_RESULT_POLL_SEC = 1.0
+
+
+def paper_result_toast(payload):
+    """``(text, notify type)`` for one ``paper_create`` outcome, or None. PURE.
+
+    Refusals keep the service's own sentence (shared.book_caps.describe), so the
+    toast and the Paper dialog preview can never word the same cap differently.
+    An opened trade names its structure in words (``strategy_label``), never the
+    raw code, and leads with "Paper ledger:" so a label like "Credit spread —
+    put" cannot run into the rest of the sentence."""
+    if not isinstance(payload, dict) or not payload.get("status"):
+        return None
+    status = payload["status"]
+    if status == "opened":
+        from .strategies import strategy_label
+        qty = payload.get("qty") or 1
+        label = strategy_label(payload.get("type") or "")
+        return (f"Paper ledger: opened {qty} × {payload.get('symbol', '')} {label}.",
+                "positive")
+    message = (payload.get("message") or "the service gave no reason").rstrip(".")
+    if status == "refused":
+        text = f"Not opened — {message}."
+        fits = payload.get("max_quantity")
+        if isinstance(fits, int) and not isinstance(fits, bool) and fits > 0:
+            text += (f" Up to {fits} contract fits." if fits == 1
+                     else f" Up to {fits} contracts fit.")
+        return text, "warning"
+    if status == "stale":
+        return f"Not opened — {message}.", "warning"
+    return f"Not opened — {message}.", "negative"
+
+
+def watch_paper_results():
+    """Toast every ``paper_create`` answer on this page. ``watch_view`` seeds the
+    version (an answer published before the page opened is not replayed) and
+    compares with ``!=`` - required, because the view's TTL can reset its version
+    counter to 1."""
+    from pages.view_watch import watch_view
+
+    def _on_change():
+        toast = paper_result_toast(bus_client.read(PAPER_CREATE_VIEW))
+        if toast:
+            ui.notify(toast[0], type=toast[1])
+
+    return watch_view(PAPER_CREATE_VIEW, _on_change, interval=PAPER_RESULT_POLL_SEC)
+
+
 def send_to_paper(signal):
     if not signal:
         ui.notify("Select a signal first.", type="warning")
@@ -233,8 +286,7 @@ def send_to_paper(signal):
                 "type": "paper_create",
                 "args": {"signal": signal, "qty": int(qty.value or 1)},
             })
-            ui.notify("Sent to the paper ledger — it appears when the engine "
-                      "confirms.", type="positive")
+            ui.notify("Sent — the paper ledger answers in a moment.", type="info")
             dlg.close()
 
         with ui.row():

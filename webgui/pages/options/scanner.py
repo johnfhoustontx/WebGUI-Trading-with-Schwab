@@ -694,6 +694,8 @@ def render():
     # Legs-aware actions (the directional signal carries `legs`, not strikes), and
     # `_allow_paper` gates the Paper button — a naked short is undefined risk.
     handoff.add_strategy_row_actions(table_dir, lambda row: by_id.get(row.get("id")))
+    # Every Paper click's answer - opened, or refused and why - becomes a toast.
+    handoff.watch_paper_results()
     table_dir.add_slot('body-cell-symbol', _SYMBOL_SLOT)
     table_dir.add_slot('body-cell-composite_score', _SCORE_SLOT)
     table_dir.add_slot('body-cell-bias', r'''

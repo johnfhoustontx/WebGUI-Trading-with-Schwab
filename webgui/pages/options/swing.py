@@ -956,3 +956,5 @@ def render():
         _paint_payload(payload)
 
     ui.timer(2.0, _maybe_repaint)
+    # Every Paper click's answer - opened, or refused and why - becomes a toast.
+    handoff.watch_paper_results()
