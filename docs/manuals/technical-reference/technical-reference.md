@@ -1651,8 +1651,8 @@ largest call GEX) — the single-wall pair the Gamma page draws.
 
 ## Intraday collection
 
-The options service collects GEX snapshots every 2 minutes within 08:30–15:20 CT on
-trading days (reusing the standalone collector's `poll_once`) into `gex_history.db`,
+The options service collects GEX snapshots every minute within 08:00–15:20 CT on
+trading days (from 06:30 CT for ETH-eligible symbols) (reusing the standalone collector's `poll_once`) into `gex_history.db`,
 which feeds the strike × time heat map. The universe is the index base
 (`$SPX`/`$VIX`/`SPY`/`QQQ`) plus the watchlist.
 

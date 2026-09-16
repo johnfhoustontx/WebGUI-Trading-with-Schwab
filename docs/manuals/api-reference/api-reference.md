@@ -58,8 +58,13 @@ TIER 3  Redis (:6379)  ◀──cache_set + publish──  TIER 2  services
 
 **Rules of the model:**
 
-- The GUI imports only `nicegui` + `shared.bus` + `shared.contracts`. It never
-  imports an engine, never calls Schwab, and never computes domain results.
+- The GUI imports `nicegui` and `shared.bus` (never `redis` directly), plus a short
+  allow-list: `shared.market_calendar`, `shared.symbols`, `shared.calibration`
+  (only `bucket_key`), `repo_paths`, `requests` (only for the `/health` fan-out),
+  `fastapi.responses` (report routes) and a lazy `edge_tts` (spoken alerts). It
+  does **not** import `shared.contracts` — contracts are validated service-side on
+  write. It never imports an engine, never calls Schwab, and never computes domain
+  results.
 - Services never call each other. They communicate only by reading/writing Redis.
 - All market data flows through the proxy; no service holds Schwab credentials.
 - Every cache write **increments a version counter**; the GUI polls versions
@@ -214,8 +219,12 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 ## Options service — :8211
 
 **Entry:** `services/options_svc/app.py`. **Scheduler:** auto-scan (15-min slots,
-08:00–15:15 CT), GEX collection (2-min slots, 08:30–15:20 CT), paper auto-manage
-(5 min in market hours), header tick (each 30 s, skip-unchanged).
+08:00–15:15 CT), GEX collection (1-min slots, 08:00–15:20 CT; from 06:30 for
+ETH-eligible symbols), Paper Portfolio entry + manage (hourly at the top of the
+hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), driver paper
+auto-manage (1-min slots, 08:00–15:15 CT), captured-signal auto-manage (5-min
+slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
+skip-unchanged).
 
 **Commands (`cmd:options`):**
 

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-15</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-16</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -257,8 +257,13 @@ TIER 3  Redis (:6379)  ◀──cache_set + publish──  TIER 2  services
 </code></pre>
 <p><strong>Rules of the model:</strong></p>
 <ul>
-<li>The GUI imports only <code>nicegui</code> + <code>shared.bus</code> + <code>shared.contracts</code>. It never
-  imports an engine, never calls Schwab, and never computes domain results.</li>
+<li>The GUI imports <code>nicegui</code> and <code>shared.bus</code> (never <code>redis</code> directly), plus a short
+  allow-list: <code>shared.market_calendar</code>, <code>shared.symbols</code>, <code>shared.calibration</code>
+  (only <code>bucket_key</code>), <code>repo_paths</code>, <code>requests</code> (only for the <code>/health</code> fan-out),
+  <code>fastapi.responses</code> (report routes) and a lazy <code>edge_tts</code> (spoken alerts). It
+  does <strong>not</strong> import <code>shared.contracts</code> — contracts are validated service-side on
+  write. It never imports an engine, never calls Schwab, and never computes domain
+  results.</li>
 <li>Services never call each other. They communicate only by reading/writing Redis.</li>
 <li>All market data flows through the proxy; no service holds Schwab credentials.</li>
 <li>Every cache write <strong>increments a version counter</strong>; the GUI polls versions
@@ -513,8 +518,12 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 </table>
 <h2 id="options-service-8211">Options service — :8211</h2>
 <p><strong>Entry:</strong> <code>services/options_svc/app.py</code>. <strong>Scheduler:</strong> auto-scan (15-min slots,
-08:00–15:15 CT), GEX collection (2-min slots, 08:30–15:20 CT), paper auto-manage
-(5 min in market hours), header tick (each 30 s, skip-unchanged).</p>
+08:00–15:15 CT), GEX collection (1-min slots, 08:00–15:20 CT; from 06:30 for
+ETH-eligible symbols), Paper Portfolio entry + manage (hourly at the top of the
+hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), driver paper
+auto-manage (1-min slots, 08:00–15:15 CT), captured-signal auto-manage (5-min
+slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
+skip-unchanged).</p>
 <p><strong>Commands (<code>cmd:options</code>):</strong></p>
 <table>
 <thead>

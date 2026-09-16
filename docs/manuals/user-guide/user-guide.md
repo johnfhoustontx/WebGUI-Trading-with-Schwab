@@ -1446,8 +1446,8 @@ signal the system has flagged as **tested** or **critical**, heat-colored and so
 by **heat** (a 0–100 danger score — higher is more urgent). A position earns its
 heat from how close the underlying is to the short strike, the short-leg delta, P&L
 versus the credit taken in, days to expiration, and dealer-gamma / market-regime
-context. Detection rides the paper engine's 5-minute manage cycle, so the table
-stays current on its own.
+context. Detection rides the paper account's hourly manage cycle (09:00–14:00 CT, or
+whenever you press **Run manage cycle**), so the table stays current on its own.
 
 **A red badge** on the **Rescue** nav item shows how many positions are currently
 tested or critical. Opening the page clears it.

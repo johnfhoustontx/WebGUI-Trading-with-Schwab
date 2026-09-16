@@ -1218,7 +1218,8 @@ def run_manage_and_refresh(bus) -> None:
     (``compute.expire_ledger_trades`` — the Paper Trades tab otherwise never
     closes on expiration) and republishes the ledger view when any settled.
     Shared by the ``paper_manage`` command (manual button) and the scheduler's
-    auto-manage tick (``scheduler.manage_due``) so both run identical logic.
+    hourly Paper Portfolio cycle (``scheduler.paper_cycle_due`` →
+    ``run_paper_entry_and_manage``) so both run identical logic.
 
     Threads ``manual_paper_lifecycle_enabled(bus)`` (the Settings toggle, default
     OFF) into ``compute.run_manage_cycle(lifecycle=...)`` — this is the ONE
@@ -1251,7 +1252,7 @@ def run_manage_and_refresh(bus) -> None:
         log.exception("expire_ledger_trades degraded")
     refresh_paper_account(bus)
     # Piggyback the manage tick (no new cadence): refresh the paper-trade LEDGER
-    # too so its open positions get fresh live P&L every 5 min (and reflect any
+    # too so its open positions get fresh live P&L each hourly cycle (and reflect any
     # expiration settlement above; the account view is a separate book).
     # Defensive so a reprice hiccup never blocks the core paper refresh.
     try:
@@ -1274,7 +1275,7 @@ def run_paper_entry_and_manage(bus) -> None:
     manage reuses ``run_manage_and_refresh`` (which itself guards on an account
     and republishes the paper account + ledger + rescue-summary views). Shared by
     the scheduler's hourly ``paper_cycle_due`` tick (09:00–14:00 CT) — this is the
-    manual account's cadence; the isolated DRIVER account stays on the 5-min
+    manual account's cadence; the isolated DRIVER account stays on the 1-min
     ``manage_due`` slot."""
     if compute.has_paper_account():
         try:

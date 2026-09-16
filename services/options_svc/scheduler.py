@@ -509,8 +509,8 @@ async def loop(bus):
     sentiment dot) + GEX-status view — every tick during market hours, throttled
     to every _OFFHOURS_INTERVAL_MIN off-hours (see periodic_refresh_due) so the
     service stops the round-the-clock proxy/SQLite/Redis churn — then, on each
-    trading-day 15-min slot within 08:00-15:15 CT, run one rescan (plus 2-min GEX
-    collection; the isolated DRIVER paper account auto-manages on its own 5-min
+    trading-day 15-min slot within 08:00-15:15 CT, run one rescan (plus 1-min GEX
+    collection; the isolated DRIVER paper account auto-manages on its own 1-min
     slot, and the MANUAL Paper Portfolio runs entry+manage hourly at the top of
     the hour 09:00–14:00 CT — see paper_cycle_due — with no 15:00 run). Mirrors
     the page's former _autoscan_loop. The BLOCKING calls run in an executor so the
@@ -531,7 +531,7 @@ async def loop(bus):
             log.warning("startup BP reconcile corrected drift: %s", drift)
     except Exception:
         log.exception("startup buying-power reconcile degraded")
-    last_gex_slot = None  # 2-min GEX history-collection slot (see gex_due)
+    last_gex_slot = None  # 1-min GEX history-collection slot (see gex_due)
     last_manage_slot = None  # 1-min DRIVER paper auto-manage slot (see manage_due)
     last_captured_manage_slot = None  # 5-min captured auto-manage slot (see captured_manage_due)
     paper_ran = set()  # (date, hour) of fired hourly manual paper cycles (see paper_cycle_due)
@@ -726,7 +726,7 @@ async def loop(bus):
             branches.append(("gex", _gex_branch()))
 
         # DRIVER paper auto-manage — reprice + auto-close the ISOLATED driver
-        # account's open positions on each 5-min slot within market hours. (The
+        # account's open positions on each 1-min slot within market hours. (The
         # MANUAL Paper Portfolio no longer manages here — it runs entry+manage
         # hourly on its own paper_cycle_due slot below.) The blocking cycle (proxy
         # reprice) runs in the executor; independently guarded so a failure never
