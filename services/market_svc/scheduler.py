@@ -20,6 +20,7 @@ import logging
 from datetime import time as _time
 from zoneinfo import ZoneInfo
 
+from services import _heartbeat
 from services.market_svc import compute, handlers, report_summary
 from shared import market_calendar as mc
 
@@ -91,6 +92,7 @@ async def loop(bus) -> None:
     loop_ = asyncio.get_running_loop()
     report_stamp = None
     while True:
+        _heartbeat.tick()
         interval = poll_interval()
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)

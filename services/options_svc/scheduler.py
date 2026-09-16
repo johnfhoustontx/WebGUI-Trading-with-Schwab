@@ -17,6 +17,7 @@ import asyncio
 import logging
 from zoneinfo import ZoneInfo
 
+from services import _heartbeat
 from services.options_svc import compute, handlers
 from shared import market_calendar as mc
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
@@ -639,6 +640,7 @@ async def loop(bus):
         log.exception("startup publish_gamma_briefing_index degraded")
     running = {}  # branch key → last launched task (see launch_branches)
     while True:
+        _heartbeat.tick()
         now = _market_now()  # one clock read per tick, reused by every gate below
         # Decide which branches are DUE this tick (synchronous slot-gating,
         # unchanged), then LAUNCH their blocking work as keyed background tasks

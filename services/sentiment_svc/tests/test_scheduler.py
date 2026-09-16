@@ -94,20 +94,38 @@ def test_refresh_due_before_rth_is_off_hours():
 
 
 def test_sectors_due_once_per_rth_hour():
-    # 2026-06-15 is a Monday.
-    due1, slot1 = scheduler.sectors_due(_ct(2026, 6, 15, 9, 5), None)
+    """Once per RTH hour, at/after SECTORS_MINUTE past the hour."""
+    m = scheduler.SECTORS_MINUTE
+    due1, slot1 = scheduler.sectors_due(_ct(2026, 6, 15, 9, m), None)
     assert due1 is True
-    # same RTH hour -> not due again, slot unchanged.
-    due2, slot2 = scheduler.sectors_due(_ct(2026, 6, 15, 9, 45), slot1)
+    due2, slot2 = scheduler.sectors_due(_ct(2026, 6, 15, 9, 59), slot1)
     assert due2 is False and slot2 == slot1
-    # next hour -> due.
-    due3, slot3 = scheduler.sectors_due(_ct(2026, 6, 15, 10, 1), slot1)
-    assert due3 is True and slot3 != slot1
+    due3, _ = scheduler.sectors_due(_ct(2026, 6, 15, 10, m + 1), slot1)
+    assert due3 is True
 
 
-def test_sectors_due_fires_at_open_tick():
-    """The first tick at/after 08:30 CT fires (heals a premarket-start blank P/C)."""
-    assert scheduler.sectors_due(_ct(2026, 6, 15, 8, 32), None)[0] is True
+def test_sectors_due_waits_for_its_minute_past_the_hour():
+    """2026-09-16: the ~80-chain sector/industry P/C burst fired on the hour's
+    first tick, on top of options_svc's :00 rescan + paper cycle + snapshot,
+    and pushed the 1-min GEX poll past its slot at 09:01, 11:01, 12:01, 13:01
+    and 14:03. It now waits for :38 — clear of the :30 and :45 rescans."""
+    assert scheduler.SECTORS_MINUTE == 38
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 11, 0), None)[0] is False
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 11, 37), None)[0] is False
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 11, 38), None)[0] is True
+    # a late tick in the hour still catches it
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 11, 55), None)[0] is True
+
+
+def test_sectors_due_not_before_the_minute_does_not_consume_the_slot():
+    due, slot = scheduler.sectors_due(_ct(2026, 6, 15, 11, 10), "prev")
+    assert due is False and slot == "prev"
+
+
+def test_sectors_due_opening_hour_fires_at_its_minute_not_at_the_open():
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 8, 32), None)[0] is False
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 8, 38), None)[0] is True
+    assert scheduler.sectors_due(_ct(2026, 6, 15, 14, 38), None)[0] is True
 
 
 def test_sectors_due_not_off_hours_weekend_holiday():

@@ -53,7 +53,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from repo_paths import ENV_FLAGS  # noqa: E402
-from services import _degrade  # noqa: E402
+from services import _degrade, _heartbeat  # noqa: E402
 from shared.bus import Bus  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -148,10 +148,19 @@ class _SchedulerHealth:
     restarts: int = 0           # number of times it was restarted after failure
     last_start: float | None = field(default=None)  # monotonic ts of last (re)start
 
-    def last_tick_age_s(self):
+    def uptime_s(self):
+        """Seconds since the scheduler task last (re)started. On a healthy loop
+        this is process uptime, which is why it is NOT the tick age."""
         if self.last_start is None:
             return None
         return round(time.monotonic() - self.last_start, 3)
+
+    def last_tick_age_s(self):
+        """Seconds since the scheduler loop last went round (``_heartbeat``), or
+        ``None`` when no scheduler runs or this run has not ticked yet."""
+        if not self.has_scheduler or self.last_start is None:
+            return None
+        return _heartbeat.age_s()
 
 
 async def _run_scheduler(scheduler, bus) -> None:
@@ -182,6 +191,7 @@ async def _supervise_scheduler(
     """
     while True:
         health.last_start = time.monotonic()
+        _heartbeat.reset()
         try:
             await scheduler(bus)
             # Returned without raising — an unexpected exit for a loop-scheduler.
@@ -383,6 +393,10 @@ def make_app(
             "up": True,
             "scheduler_alive": hs.alive if hs.has_scheduler else True,
             "scheduler_restarts": hs.restarts,
+            # Two different clocks, and the difference is the point: uptime
+            # grows forever on a healthy loop, while the tick age stays under the
+            # loop's own interval unless the loop has stalled.
+            "scheduler_uptime_s": hs.uptime_s(),
             "scheduler_last_tick_age_s": hs.last_tick_age_s(),
             "degrades_total": _degrade.total(),
             "degrades": _degrade.counts(),

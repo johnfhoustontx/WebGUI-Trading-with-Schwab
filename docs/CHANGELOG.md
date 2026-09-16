@@ -4,7 +4,46 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-16 (**Captured signals are capped at two OPEN per symbol,
+**Last updated:** 2026-09-16 (**GEX slot skips traced to other services' chain
+bursts, and `/health` gains a real scheduler heartbeat.**)
+
+- **The symptom.** options_svc logged `scheduler branch 'gex' still running` 10–13
+  times a trading day (09-14: 13, 09-15: 12, 09-16: 10), each a lost 1-min GEX slot.
+- **The measurement.** The proxy access log (`journalctl --user -u
+  trading-prod-proxy`), classifying `/chains` requests by date window: GEX is
+  today→+7 (39,421 of 48,639 on 09-16). Each poll fetches **92** chains, in ~30 s
+  on a quiet minute (10:40). At 13:00 its fetch rate halved and the poll overran.
+  The extra load at the skips:
+  - **sentiment_svc's hourly sector/industry refresh** (`sectors_due`), ~80
+    `strikeCount=50` NTM chains, fired on the first tick of each RTH hour: bursts
+    at 08:31, 09:01, 11:00, 12:00, 13:00 and 14:02, matching skips at 08:31, 09:01,
+    11:01, 12:01, 13:01 and 14:03. Its docstring said "~24 extra proxy calls".
+  - **The Income board at 08:45**, beside the 08:45 rescan: skips at 08:46 and
+    08:48.
+  - 08:01 is the day's first rescan alone (~185 chains in its first minute); not
+    changed.
+- **The fix.** `sentiment_svc.scheduler.SECTORS_MINUTE = 38`: the hourly refresh
+  now fires on the first tick at/after :38 (08:38 first, 14:38 last), between the
+  :30 and :45 rescans. `[slots.income] morning` 08:45 → **08:52** (config and
+  `market_calendar` defaults), after the 08:45 rescan's fetches and before 09:00.
+  Expected: the day's skips fall to about one (08:01). Re-count after a full
+  trading day.
+- **The heartbeat.** `scheduler_last_tick_age_s` was time since the scheduler task
+  last (re)started, i.e. uptime on a healthy loop (8,178 s on prod while ticking
+  every 30 s), and a hung loop would read the same. New `services/_heartbeat.py`:
+  each of the five scheduler loops calls `_heartbeat.tick()` inside its `while`
+  (AST-guarded, checked to fail when one is removed), the supervisor resets it on
+  every (re)start, and `/health` reports `scheduler_last_tick_age_s` as the real
+  tick age plus `scheduler_uptime_s` (the old number). Both are `null` in a
+  suppressed environment, so the dev runbook's check moves to
+  `scheduler_uptime_s`. Nothing in the webgui read the field.
+- **Docs.** Reference Guide Appendix B (sector refresh and Income rows; gamma
+  collection is ~90 symbols, not ~45), the Sector & Industry and Income data-source
+  tables, the dev/prod runbook, CLAUDE.md, webgui-routes.
+
+---
+
+**Prior —** 2026-09-16 (**Captured signals are capped at two OPEN per symbol,
 across every scanner type.**)
 
 - **The defect.** `signal_recorder.record_signals` had no per-symbol limit. The Income

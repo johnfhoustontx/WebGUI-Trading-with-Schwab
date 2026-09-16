@@ -46,20 +46,20 @@ def test_the_scheduler_agrees_with_the_calendar_on_the_income_slots():
 # ── income_slot_due ──────────────────────────────────────────────────────────
 # 2026-09-08 is a Tuesday (a normal trading day).
 def test_income_slot_fires_at_its_target():
-    assert scheduler.income_slot_due(_ct(2026, 9, 8, 8, 45), set()) == "morning"
+    assert scheduler.income_slot_due(_ct(2026, 9, 8, 8, 52), set()) == "morning"
 
 
 def test_income_slot_fires_within_grace():
     """The grace tolerates a missed 30 s tick or a mid-window service start."""
-    assert scheduler.income_slot_due(_ct(2026, 9, 8, 9, 0), set()) == "morning"
+    assert scheduler.income_slot_due(_ct(2026, 9, 8, 9, 10), set()) == "morning"
 
 
 def test_income_slot_fires_once_per_trading_day():
     ran = set()
-    slot = scheduler.income_slot_due(_ct(2026, 9, 8, 8, 45), ran)
+    slot = scheduler.income_slot_due(_ct(2026, 9, 8, 8, 52), ran)
     assert slot == "morning"
     ran.add(("2026-09-08", slot))
-    assert scheduler.income_slot_due(_ct(2026, 9, 8, 8, 50), ran) is None
+    assert scheduler.income_slot_due(_ct(2026, 9, 8, 8, 58), ran) is None
 
 
 def test_income_slot_does_not_backfill_a_long_stale_slot():
@@ -74,9 +74,18 @@ def test_income_slot_is_silent_before_its_target():
 
 def test_income_slot_is_silent_on_a_weekend():
     # 2026-09-05 is a Saturday.
-    assert scheduler.income_slot_due(_ct(2026, 9, 5, 8, 45), set()) is None
+    assert scheduler.income_slot_due(_ct(2026, 9, 5, 8, 52), set()) is None
 
 
 def test_income_slot_is_silent_on_a_holiday():
     # 2026-07-03 is an NYSE holiday (observed Independence Day).
-    assert scheduler.income_slot_due(_ct(2026, 7, 3, 8, 45), set()) is None
+    assert scheduler.income_slot_due(_ct(2026, 7, 3, 8, 52), set()) is None
+
+
+def test_income_slot_is_clear_of_the_0845_rescan():
+    """2026-09-16: at 08:45 the income pass (~23 symbols, several chain runs
+    each) started beside the 08:45 autoscan rescan and pushed the 1-min GEX poll
+    past its slot at 08:46 and 08:48. 08:52 starts after that rescan's ~3 min
+    of fetches and finishes before the 09:00 one."""
+    assert scheduler._INCOME_SLOTS["morning"] == (8, 52)
+    assert scheduler.income_slot_due(_ct(2026, 9, 8, 8, 45), set()) is None

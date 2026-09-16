@@ -128,7 +128,10 @@ close   = "15:00"     # pre-close sweep
 # ~690 extra /chains calls a day instead of ~23. After the open so the chain
 # carries real marks rather than overnight stubs.
 grace_min = 20
-morning = "08:45"     # 09:45 ET
+# 08:52, not 08:45 (2026-09-16): at 08:45 the pass started beside the 08:45
+# autoscan rescan and pushed the 1-min GEX poll past its slot twice a morning.
+# 08:52 starts after that rescan's ~3 min of fetches and ends before 09:00's.
+morning = "08:52"     # 09:52 ET
 
 [slots.flow_delta]
 # The delta-notional flow-alert instrumentation (tools/flow_delta_instrumentation.py):

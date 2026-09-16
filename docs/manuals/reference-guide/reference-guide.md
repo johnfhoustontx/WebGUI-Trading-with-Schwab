@@ -1157,7 +1157,7 @@ rebuild it answers that by colour before you read any number.
 | | |
 |---|---|
 | Service | `sentiment_svc` (:8210), `cache:sentiment:sectors` |
-| Refresh | On the sentiment service's sector cadence; **Refresh** forces it |
+| Refresh | Once an hour during market hours, at **:38** past the hour (08:38 is the first); **Refresh** forces it |
 | Universe | The eleven Select Sector SPDR ETFs, plus ~70 industry ETFs |
 
 ### Reading the screen
@@ -2173,7 +2173,7 @@ rather than a directional thesis.
 | | |
 |---|---|
 | Service | `options_svc` (:8211) → `cache:options:income` |
-| Trigger | A scheduled once-daily pass (`[slots.income]` in `config/sessions.toml`) |
+| Trigger | A scheduled once-daily pass at 08:52 CT (`[slots.income]` in `config/sessions.toml`) |
 | Cost | One option chain per watchlist symbol, once per trading day |
 
 ### Reading the screen
@@ -3994,7 +3994,7 @@ What updates when. All times US Central.
 |---|---|---|---|
 | Market Dashboard | **3 s** | Regular hours | 15 s off-hours; 60 s at weekends |
 | Portfolio P&L | **2 s** | Streaming | Full rebuild every 10 min (hourly off-hours) |
-| Gamma collection | **1 min** | 08:00–15:20 | ~45 symbols; five series each |
+| Gamma collection | **1 min** | 08:00–15:20 | ~90 symbols; five series each. A poll that overruns its minute skips the next one |
 | Driver paper re-pricing | **1 min** | 08:00–15:15 | Keeps stops reacting within the minute |
 | Flow-alert detection | **1 min** | With the gamma collection | |
 | Opportunity Board | **1 min** | With the gamma collection | Spot/Day % overlaid on the ~30 s header tick |
@@ -4006,6 +4006,8 @@ What updates when. All times US Central.
 | Captured-signal management | **5 min** | Market hours | If enabled in Settings |
 | Term structure (gamma) | **5 min** | | The widest chain in the system |
 | Manual Paper Account cycle | **hourly** | 09:00–14:00 | No 15:00 run |
+| Sector & industry refresh (P/C, trends) | **hourly** | 08:38–14:38 | At :38, clear of the scanner's :30 and :45 runs |
+| Income Window board | **once daily** | 08:52 | After the 08:45 scan finishes |
 | Driver checkpoints | **30 min** | 09:45–15:30 ET | First fire-able slot 09:45; the open-bell slot is skipped |
 | Gamma Analyze briefings | **4× daily** | Premarket · ~18 min after open · midday · close | |
 | Momentum cascade | **nightly** | 16:20 | Daily bars change once a day |

@@ -281,9 +281,14 @@ false — `load_config` zeroes them recursively and **last**, so it overrides th
 ⚠ **`/health` will not answer this question, and it looks as though it does.**
 `scheduler_alive` is `true` on a dev service: it means "the restart budget is
 not exhausted", not "a scheduler is running", and it defaults true. The field
-that actually discriminates is **`scheduler_last_tick_age_s`** — `null` in dev,
-because the task never started. (On prod it is the age since the scheduler last
-*started*, not since its last tick, so a large value there is normal.)
+that actually discriminates is **`scheduler_uptime_s`** — `null` in dev,
+because the task never started. On prod it is time since the scheduler last
+started, so a large value is normal. **`scheduler_last_tick_age_s`** (since
+2026-09-16) is the real heartbeat: seconds since the loop last went round, also
+`null` in dev. On prod it should stay under the loop's own interval (30 s for
+options and driver, 120 s for sentiment, a few seconds for market and portfolio);
+a value climbing past that means the loop has stalled without crashing, which
+`scheduler_alive` cannot see.
 ## 3. Daily dev loop
 
 ```bash

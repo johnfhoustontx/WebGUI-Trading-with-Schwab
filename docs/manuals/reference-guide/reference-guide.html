@@ -1989,7 +1989,7 @@ rebuild it answers that by colour before you read any number.</p>
 </tr>
 <tr>
 <td>Refresh</td>
-<td>On the sentiment service's sector cadence; <strong>Refresh</strong> forces it</td>
+<td>Once an hour during market hours, at <strong>:38</strong> past the hour (08:38 is the first); <strong>Refresh</strong> forces it</td>
 </tr>
 <tr>
 <td>Universe</td>
@@ -3319,7 +3319,7 @@ rather than a directional thesis.</p>
 </tr>
 <tr>
 <td>Trigger</td>
-<td>A scheduled once-daily pass (<code>[slots.income]</code> in <code>config/sessions.toml</code>)</td>
+<td>A scheduled once-daily pass at 08:52 CT (<code>[slots.income]</code> in <code>config/sessions.toml</code>)</td>
 </tr>
 <tr>
 <td>Cost</td>
@@ -5493,7 +5493,7 @@ in the rail is the one that stops things.</p>
 <td>Gamma collection</td>
 <td><strong>1 min</strong></td>
 <td>08:00–15:20</td>
-<td>~45 symbols; five series each</td>
+<td>~90 symbols; five series each. A poll that overruns its minute skips the next one</td>
 </tr>
 <tr>
 <td>Driver paper re-pricing</td>
@@ -5560,6 +5560,18 @@ in the rail is the one that stops things.</p>
 <td><strong>hourly</strong></td>
 <td>09:00–14:00</td>
 <td>No 15:00 run</td>
+</tr>
+<tr>
+<td>Sector &amp; industry refresh (P/C, trends)</td>
+<td><strong>hourly</strong></td>
+<td>08:38–14:38</td>
+<td>At :38, clear of the scanner's :30 and :45 runs</td>
+</tr>
+<tr>
+<td>Income Window board</td>
+<td><strong>once daily</strong></td>
+<td>08:52</td>
+<td>After the 08:45 scan finishes</td>
 </tr>
 <tr>
 <td>Driver checkpoints</td>

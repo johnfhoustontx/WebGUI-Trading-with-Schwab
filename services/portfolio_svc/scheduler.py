@@ -20,6 +20,7 @@ import logging
 import threading
 from zoneinfo import ZoneInfo
 
+from services import _heartbeat
 from services.portfolio_svc import compute, handlers
 from services.portfolio_svc.state import STATE
 from shared import market_calendar as mc
@@ -163,6 +164,7 @@ async def loop(bus) -> None:
     try:
         while True:
             await asyncio.sleep(PUBLISH_INTERVAL_SEC)
+            _heartbeat.tick()
             secs_since_rebuild += PUBLISH_INTERVAL_SEC
             try:
                 if rebuild_due(secs_since_rebuild, state.rebuild_requested):

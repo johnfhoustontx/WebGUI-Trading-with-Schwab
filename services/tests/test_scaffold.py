@@ -3,7 +3,7 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from services import _scaffold
+from services import _heartbeat, _scaffold
 from services._scaffold import make_app
 from shared.bus import Bus
 
@@ -369,6 +369,7 @@ def test_healthy_scheduler_not_restarted_and_alive(schedulers_enabled):
     async def healthy(b):
         started.append(1)
         while True:
+            _heartbeat.tick()
             await asyncio.sleep(0.01)
 
     app = make_app("livex", scheduler=healthy, bus=bus)
@@ -383,6 +384,11 @@ def test_healthy_scheduler_not_restarted_and_alive(schedulers_enabled):
         assert body["scheduler_restarts"] == 0
         assert len(started) == 1  # ran exactly once, never restarted
         assert body["scheduler_last_tick_age_s"] is not None
+        assert body["scheduler_last_tick_age_s"] < 0.25
+        # uptime keeps growing while the tick age stays near zero (a margin,
+        # not the full 0.3 s: Windows timers land a few ms short)
+        assert (body["scheduler_uptime_s"]
+                - body["scheduler_last_tick_age_s"]) >= 0.2
 
 
 # --- degrade counters on /health --------------------------------------------
@@ -414,3 +420,106 @@ def test_health_reports_degrade_counts():
             assert body["degrades"] == {"probe.thing": 1}
     finally:
         _degrade.reset()
+
+
+# --- scheduler heartbeat: last tick vs uptime (2026-09-16) --------------------
+# ``scheduler_last_tick_age_s`` used to be "seconds since the scheduler task last
+# (re)started" — for a healthy loop that never restarts, just process uptime. On
+# prod it read 8,178 s on a scheduler that was ticking every 30 s, and a loop
+# that HUNG (never raising, never returning) would have looked identical. The
+# old number is now ``scheduler_uptime_s``; the tick age is real.
+
+
+def _wait_started(started):
+    for _ in range(40):
+        if started:
+            return
+        time.sleep(0.05)
+
+
+def test_a_loop_that_stops_ticking_shows_a_growing_tick_age(schedulers_enabled):
+    import asyncio
+
+    started = []
+
+    async def hangs_after_one_tick(b):
+        started.append(1)
+        _heartbeat.tick()
+        await asyncio.sleep(3600)          # alive, not raising — but stuck
+
+    app = make_app("hangx", scheduler=hangs_after_one_tick, bus=Bus(fake=True))
+    with TestClient(app) as client:
+        _wait_started(started)
+        time.sleep(0.4)
+        body = client.get("/health").json()
+        assert body["scheduler_alive"] is True       # the supervisor cannot see it
+        assert body["scheduler_last_tick_age_s"] >= 0.35
+        assert body["scheduler_uptime_s"] >= body["scheduler_last_tick_age_s"]
+
+
+def test_a_loop_that_never_ticks_reports_no_tick_age(schedulers_enabled):
+    import asyncio
+
+    started = []
+
+    async def silent(b):
+        started.append(1)
+        while True:
+            await asyncio.sleep(0.01)
+
+    app = make_app("silentx", scheduler=silent, bus=Bus(fake=True))
+    with TestClient(app) as client:
+        _wait_started(started)
+        body = client.get("/health").json()
+        assert body["scheduler_last_tick_age_s"] is None
+        assert body["scheduler_uptime_s"] is not None
+
+
+def test_a_restart_clears_the_previous_runs_tick(schedulers_enabled):
+    """A tick belongs to the run that made it: after a restart, a stale tick
+    from the dead run must not be reported as this run's heartbeat."""
+    _heartbeat.tick()
+    health = _scaffold._SchedulerHealth(has_scheduler=True)
+    import asyncio
+
+    async def dies(b):
+        raise RuntimeError("boom")
+
+    asyncio.run(_scaffold._supervise_scheduler(dies, None, health, 0.0, 0))
+    assert _heartbeat.age_s() is None
+
+
+def test_suppressed_environment_reports_neither(monkeypatch):
+    import repo_paths
+    monkeypatch.setitem(repo_paths.ENV_FLAGS, "schedulers", False)
+    monkeypatch.delenv("TRADING_ENABLE_SCHEDULERS", raising=False)
+
+    async def sched(b):
+        raise AssertionError("must not run")
+
+    _heartbeat.tick()   # a stale tick from an earlier test in this process
+    app = make_app("devx", scheduler=sched, bus=Bus(fake=True))
+    with TestClient(app) as client:
+        body = client.get("/health").json()
+        assert body["scheduler_uptime_s"] is None
+        assert body["scheduler_last_tick_age_s"] is None
+
+
+@pytest.mark.parametrize("svc", ["options_svc", "sentiment_svc", "driver_svc",
+                                 "market_svc", "portfolio_svc"])
+def test_every_service_loop_beats_inside_its_while_loop(svc):
+    """A beat outside the loop body would report one tick at startup and then a
+    forever-growing age — the old number under the new name."""
+    import ast
+    import pathlib
+
+    src = (pathlib.Path(__file__).resolve().parents[1] / svc / "scheduler.py").read_text(
+        encoding="utf-8")
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.AsyncFunctionDef) and n.name == "loop")
+    beats = [c for w in ast.walk(fn) if isinstance(w, ast.While)
+             for c in ast.walk(w)
+             if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+             and c.func.attr == "tick"
+             and isinstance(c.func.value, ast.Name) and c.func.value.id == "_heartbeat"]
+    assert beats, f"{svc}.scheduler.loop has no _heartbeat.tick() inside a while loop"

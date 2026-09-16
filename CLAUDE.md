@@ -1491,7 +1491,7 @@ Plus **`config/sessions.toml` gained `[slots]`** — the scheduled Claude-analyz
 briefings, the thrice-daily action digest, the nightly momentum cascade, and the
 nightly **`calibration`** rebuild (16:30 CT, after `[windows.collection] stop`
 so the day's outcomes have settled — it reads `signals.db` only and costs no
-Schwab or Claude call), and the once-daily **`income`** scan (08:45 CT — the
+Schwab or Claude call), and the once-daily **`income`** scan (08:52 CT, kept off the 08:45 rescan — the
 30–45 DTE window, against the ~690 `/chains` calls the autoscan cadence would
 cost; since 2026-09-14 that is more than one call per symbol — each adds an
 expiration-list call, and a symbol listing daily expiries needs several fetch
@@ -1983,7 +1983,11 @@ of its own** and **no Schwab credentials on disk** (only `schwab_proxy.py` reads
 them). Dev is `enable`d at boot; its generated `trading-dev-backup.timer` is
 deliberately **not** enabled, since its stores are a disposable copy of prod's.
 ⚠ `/health` cannot tell you whether schedulers are off — `scheduler_alive`
-defaults true and means "restart budget not exhausted". See the runbook.
+defaults true and means "restart budget not exhausted". Read
+`scheduler_uptime_s` (`null` = never started) and `scheduler_last_tick_age_s`
+(time since the loop last went round, via `services/_heartbeat.py`; each
+service's `scheduler.loop` must call `_heartbeat.tick()` inside its `while`, and
+a test enforces it). See the runbook.
 
 **Data flows one way.** `tools/snapshot_from_prod.py`, run **from dev**, copies
 prod's SQLite stores (online-backup API — **prod keeps running**) and `DUMP`s db 0
@@ -3558,6 +3562,18 @@ is given. The `SET` can't fold into the `INCR` (the envelope still embeds the ve
 for `cache_get`). options_svc header + gex_status use `skip_unchanged`; other periodic
 republishers (sentiment 120 s, portfolio per-tick, driver perf) still bump
 unconditionally — opt them in the same way if they prove chatty.
+
+**Every service shares the proxy's 5 req/s, so a scheduled chain burst must stay
+off the quarter hours (2026-09-16).** The 1-min GEX poll fetches ~92 chains in
+~30 s on a quiet minute, and anything else fetching chains in the same minute
+slows it; past 60 s, `launch_branches` skips the next slot and the heatmap loses
+that minute. The options autoscan owns :00/:15/:30/:45 (~3 min of fetches
+each), so sentiment's hourly sector P/C burst runs at **:38**
+(`sentiment_svc.scheduler.SECTORS_MINUTE`) and the Income board at **08:52**.
+Before scheduling a new chain fan-out, read the proxy's access log
+(`journalctl --user -u trading-prod-proxy`) for that minute. The skip warning is
+`scheduler branch 'gex' still running`. Other services' load never shows in
+options_svc's own log.
 
 **Measure before you optimise a localhost read — twice now the estimate was the
 bug (2026-08-20).** The Desk's 11-view seed was audited as "~50-100 ms of event-loop

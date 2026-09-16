@@ -28,6 +28,7 @@ import asyncio
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from services import _heartbeat
 from services.driver_svc import handlers, settings as _settings
 from shared import market_calendar as mc
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
@@ -143,6 +144,7 @@ async def loop(bus):
     loop_ = asyncio.get_event_loop()
     last_slot = None
     while True:
+        _heartbeat.tick()
         now = _now_et()
         # Re-arm a stale overnight halt FIRST so a just-cleared latch lets this
         # same poll's checkpoint fire.

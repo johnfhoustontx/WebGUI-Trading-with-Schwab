@@ -14,6 +14,7 @@ import logging
 from datetime import time as _time
 from zoneinfo import ZoneInfo
 
+from services import _heartbeat
 from services.sentiment_svc import handlers, order_flow_consumer
 from shared import market_calendar as mc
 
@@ -114,6 +115,17 @@ def bullbear_due(now, last_slot):
     return (slot != last_slot, slot)
 
 
+# Minute past each RTH hour at which the sector/industry recompute fires. NOT
+# the hour's first tick: that burst is ~80 NTM /chains calls (11 sectors plus
+# every industry ETF), and at :00 it landed on options_svc's :00 rescan, hourly
+# paper cycle and market snapshot. Measured 2026-09-16 from the proxy access
+# log, the shared 5 req/s budget halved the 1-min GEX poll's fetch rate and it
+# overran its slot at 09:01, 11:01, 12:01, 13:01 and 14:03 (and 08:31 at the
+# open). :38 sits between the :30 and :45 rescans (each ~3 min of fetches), after
+# the :30 snapshot, and still inside the last RTH hour (14:38).
+SECTORS_MINUTE = 38
+
+
 def sectors_due(now, last_slot):
     """(should_refresh_sectors, slot) — hourly RTH sector-fan-out recompute.
 
@@ -121,12 +133,13 @@ def sectors_due(now, last_slot):
     service startup + the manual Refresh button. A premarket start (the normal
     morning routine) meant every ETF's chain had zero option volume, so
     ``pcr_from_chain`` returned None for all 11 sectors and the P/C column
-    stayed BLANK all day (2026-07-09). Fire once per RTH hour: the first tick
-    at/after the 08:30 CT open heals the blank within one refresh cycle, and
-    the hourly recompute keeps P/C (a live volume ratio) current. ~24 extra
-    proxy calls per fire — cheap at 7×/day. When not due, ``last_slot`` passes
-    through unchanged."""
-    if not _is_rth(now):
+    stayed BLANK all day (2026-07-09). Fire once per RTH hour, on the first tick
+    at/after ``SECTORS_MINUTE`` past it (08:38 is the first), which heals the
+    blank and keeps P/C (a live volume ratio) current. Each fire is ~80 option
+    chains plus the price histories behind the trends — see ``SECTORS_MINUTE``
+    for why it is kept off the top of the hour. A tick before the minute leaves
+    ``last_slot`` unchanged, as does any tick that is not due."""
+    if not _is_rth(now) or now.minute < SECTORS_MINUTE:
         return (False, last_slot)
     slot = (now.date().isoformat(), now.hour)
     return (slot != last_slot, slot)
@@ -232,6 +245,7 @@ async def loop(bus):
     try:
         while True:
             await asyncio.sleep(REFRESH_INTERVAL_SEC)
+            _heartbeat.tick()
             now = _market_now()
             # The nightly momentum slot is checked BEFORE the off-hours refresh
             # throttle — it fires after the close, when refresh_due is mostly
