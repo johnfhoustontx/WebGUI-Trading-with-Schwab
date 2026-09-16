@@ -4,7 +4,35 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-16 (**The Desk's MARKET SUMMARY quotes the latest market
+**Last updated:** 2026-09-16 (**A `swing_scan` command that omits a key now runs the
+Strategy Finder's untouched scan.** The service filled missing DTE with 5–30 while the
+page defaults to 0 / All.)
+
+- **The defect.** `options_svc/handlers._SWING_DEFAULTS` is documented as the page's
+  defaults, but the page moved to DTE 0 / no upper limit and the dict stayed at 5–30,
+  pinned there by `test_swing_scan_uses_defaults_for_missing_args` asserting
+  `dte_min == 5`. The page always sends both DTE keys, so only a command enqueued
+  from outside the page was affected.
+- **The fix.** `dte_min` 0, `dte_max` None. The bands (Balanced ±0.10–0.20), the 10%
+  credit floor, `families` None and `expiry_choice` None already matched. With no
+  upper limit, a partial command on a large chain now answers with the expiry
+  choices, exactly as the page does.
+- **Why the floor moved down this time.** The 2026-09-05 fix (`1c86cb8`, on
+  `Using_Highcharts`, never merged) raised the page to 5 instead: then the
+  directional family was built on the nearest expiry and `em_1sd` derived from the
+  floor. `compute._build_every_expiry` now builds each expiry on its own and scoring
+  uses each candidate's own expiry move, so neither risk holds.
+- **The pin.** Two AST-only tests in `shared/tests/test_cross_tier_mirrors.py`:
+  the dict equals `finder_view`'s `DEFAULT_DTE` / `RISK_DEFAULT` /
+  `DEFAULT_MIN_CREDIT_PCT`, and covers exactly the keys `swing.scan_params` can send
+  (plus `families`). Each was checked to fail on seven separate breaks, one side at
+  a time. The API Reference's `swing_scan` row and a docstring in
+  `tools/sweep_naked_capeff.py` quoted the old defaults and were corrected.
+- **Suites:** options_svc 2385 passed, shared/tests 554 passed, before the doc edits.
+
+---
+
+**Prior —** 2026-09-16 (**The Desk's MARKET SUMMARY quotes the latest market
 report; market_svc's Claude summary call is retired.**)
 
 - **What the frame shows.** Up to five highlights — the latest published market

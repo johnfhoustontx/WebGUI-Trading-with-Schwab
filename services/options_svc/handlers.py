@@ -504,15 +504,18 @@ EVENT_DRIVER_PERF = "events:options:driver_paper_perf"
 CACHE_DRIVER_ANALYTICS = "cache:options:driver_paper_analytics"
 EVENT_DRIVER_ANALYTICS = "events:options:driver_paper_analytics"
 
-# Defaults for a key the command omits. The page always sends every key (the
-# credit floor as a fraction), so only a scan enqueued from outside it reads these.
-# The delta gates and 10% credit floor match the page's defaults; the 5-30 DTE
-# window does not - the page defaults to All (0, no upper limit) - and a missing
-# key is defaulted on its own, so an omitted dte_max is 30, not "no limit".
+# Defaults for a key the command omits: the Strategy Finder's UNTOUCHED scan
+# (webgui/pages/options/finder_view.py - DEFAULT_DTE "All", the Balanced risk
+# bands, DEFAULT_MIN_CREDIT_PCT), so a partial command runs the scan the page
+# would. The page always sends every key but ``families``, so only a scan
+# enqueued from outside it reads these. Tier 2 cannot import the page's values;
+# shared/tests/test_cross_tier_mirrors.py pins them, because a value test here
+# pinned the old 5-30 in place for two months. ``dte_max`` None is no upper
+# limit, so a large chain answers with the expiry choices, as it does on the page.
 _SWING_DEFAULTS = {
     "symbol": "SPY",
-    "dte_min": 5,
-    "dte_max": 30,
+    "dte_min": 0,
+    "dte_max": None,
     "put_d_min": -0.20,
     "put_d_max": -0.10,
     "call_d_min": 0.10,

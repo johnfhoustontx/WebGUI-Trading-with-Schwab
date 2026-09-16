@@ -419,3 +419,86 @@ def test_the_pages_paper_button_covers_exactly_the_ledgers_debit_structures():
     page = set(_const("webgui/pages/options/strategy_table.py", "_PAPER_TYPES"))
     credit = set(_const("shared/structures.py", "LEDGER_CREDIT"))
     assert page == taxonomy | credit
+
+
+# --- the Strategy Finder's swing-scan defaults ------------------------------
+# services/options_svc/handlers._SWING_DEFAULTS fills any key a ``swing_scan``
+# command omits. The page's untouched scan bar is a set of module constants in
+# webgui/pages/options/finder_view.py. Tier 2 cannot import Tier 1, so for two
+# months the two drifted: the page moved to DTE 0 / All while the dict stayed at
+# 5-30, which a value test ("dte_min == 5") pinned in place rather than caught.
+#
+# The 2026-09-05 fix moved the FLOOR the other way (to the service's 5), because
+# then the directional family was built on the nearest expiry and em_1sd was
+# derived from the floor. Neither holds since the whole-chain Finder:
+# compute._build_every_expiry builds each listed expiry on its own and scoring
+# judges each candidate against its own expiry's move, so the page's 0 is safe
+# and the dict follows the page.
+
+FINDER_VIEW = "webgui/pages/options/finder_view.py"
+FINDER_PAGE = "webgui/pages/options/swing.py"
+SWING_SERVICE = "services/options_svc/handlers.py"
+
+
+def _assign_value(rel_path, name):
+    """The AST of a module-level assignment's value, unevaluated."""
+    tree = ast.parse((ROOT / rel_path).read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                getattr(t, "id", None) == name for t in node.targets):
+            return node.value
+    pytest.fail(f"{rel_path} no longer defines {name}")
+
+
+def _finder_page_defaults():
+    """The scan the page sends when nobody touches the bar, as swing_scan args."""
+    call = _assign_value(FINDER_VIEW, "DEFAULT_DTE")
+    assert (isinstance(call, ast.Call) and getattr(call.func, "id", None) == "expiry_range_for"
+            and len(call.args) == 1 and isinstance(call.args[0], ast.Constant)), (
+        "DEFAULT_DTE is no longer expiry_range_for(<label>) - update this reader")
+    presets = {label: (lo, hi) for label, lo, hi in _const(FINDER_VIEW, "EXPIRY_PRESETS")}
+    dte_min, dte_max = presets[call.args[0].value]
+    lo, hi = _const(FINDER_VIEW, "RISK_STYLES")[_const(FINDER_VIEW, "RISK_DEFAULT")]
+    return {
+        "dte_min": dte_min, "dte_max": dte_max,
+        # finder_view.risk_bands: the put side is the negated band.
+        "put_d_min": -hi, "put_d_max": -lo, "call_d_min": lo, "call_d_max": hi,
+        "min_cr_fraction": _const(FINDER_VIEW, "DEFAULT_MIN_CREDIT_PCT") / 100.0,
+    }
+
+
+def _scan_params_keys():
+    """Every key swing.scan_params can send: its dict literal plus subscripts."""
+    tree = ast.parse((ROOT / FINDER_PAGE).read_text(encoding="utf-8"))
+    fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef)
+               and n.name == "scan_params"), None)
+    assert fn is not None, f"{FINDER_PAGE} no longer defines scan_params"
+    keys = set()
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Dict):
+            keys |= {k.value for k in node.keys if isinstance(k, ast.Constant)}
+        elif (isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store)
+              and isinstance(node.slice, ast.Constant)):
+            keys.add(node.slice.value)
+    return keys
+
+
+def test_swing_service_defaults_are_the_pages_untouched_scan():
+    service = _const(SWING_SERVICE, "_SWING_DEFAULTS")
+    for key, want in _finder_page_defaults().items():
+        assert service[key] == pytest.approx(want) if isinstance(want, float) \
+            else service[key] == want, (
+                f"_SWING_DEFAULTS[{key!r}] = {service[key]!r} but the Finder's "
+                f"untouched scan sends {want!r}. A command that omits the key must "
+                "run the same scan the page would. Change both.")
+
+
+def test_swing_service_defaults_cover_exactly_what_the_page_can_send():
+    """Every key the page sends has a fallback, and the only fallback the page
+    never sends is ``families`` - whose None means every group, which is what
+    the page's scan builds (the chips filter on the page, not in the scan)."""
+    service = _const(SWING_SERVICE, "_SWING_DEFAULTS")
+    sent = _scan_params_keys()
+    assert sent - set(service) == set(), f"no fallback for {sorted(sent - set(service))}"
+    assert set(service) - sent == {"families"}
+    assert service["families"] is None and service["expiry_choice"] is None

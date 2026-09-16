@@ -239,8 +239,8 @@ def scan_windows():
 
     The floor is only defensible if something other than taste bounds it, and
     the repo already states the boundary: `scanner_engine.run_full_scan` scans a
-    0-DTE window and a SWING window, and `options_svc`'s `_SWING_DEFAULTS` opens
-    the Strategy Finder at the same swing floor. A floor at or below
+    0-DTE window and a SWING window. (The Strategy Finder no longer shares that
+    floor: it scans from DTE 0 by default.) A floor at or below
     `swing_min` rescales ONLY horizons the 0-DTE window owns; above it, the
     floor starts discounting genuine swing candidates, which are not the problem
     this task exists to fix.

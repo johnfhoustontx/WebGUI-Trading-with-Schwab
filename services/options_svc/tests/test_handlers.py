@@ -1482,10 +1482,13 @@ def test_swing_scan_uses_defaults_for_missing_args(monkeypatch):
 
     monkeypatch.setattr(handlers.compute, "swing_scan", _rec)
 
-    # Only a symbol given -> the rest fall back to page-default params.
+    # Only a symbol given -> the rest fall back to the Finder's untouched scan
+    # (DTE 0 / no upper limit); shared/tests/test_cross_tier_mirrors.py pins that
+    # these ARE the page's values rather than numbers that happen to match.
     handlers.swing_scan(bus, {"symbol": "QQQ"})
     assert seen["params"]["symbol"] == "QQQ"
-    assert seen["params"]["dte_min"] == 5
+    assert seen["params"]["dte_min"] == 0
+    assert seen["params"]["dte_max"] is None
     assert seen["params"]["min_cr_fraction"] == 0.10
     assert seen["params"]["families"] is None
     # Even with no signals, the (empty) result is cached + published.

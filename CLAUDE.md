@@ -2113,7 +2113,7 @@ stubs return `bytes | str` where `decode_responses=True` guarantees `str`. They
 are fixed with `cast()` **plus a comment stating the invariant**, never a blanket
 ignore.
 
-**Two cross-tier mirrors are now pinned by test, not discipline**
+**Three cross-tier mirrors are now pinned by test, not discipline**
 (`shared/tests/test_cross_tier_mirrors.py`, which AST-parses the files and
 imports nothing, so it cannot itself trigger the `scoring` collision):
 - the five **regime display words**, duplicated in `driver_svc/compute.py`,
@@ -2125,6 +2125,15 @@ imports nothing, so it cannot itself trigger the `scoring` collision):
   built file; this adds the converse, which was the unguarded half: a manual
   that is BUILT but never listed in `pages/manuals.py` is silently unreachable,
   since that dict is also the serving whitelist.
+- the **Strategy Finder's swing defaults** — `options_svc/handlers._SWING_DEFAULTS`
+  (what a `swing_scan` command that omits a key runs) against the page's untouched
+  scan bar in `pages/options/finder_view.py` (`DEFAULT_DTE`, `RISK_DEFAULT`,
+  `DEFAULT_MIN_CREDIT_PCT`), plus the key set `swing.scan_params` sends. They
+  drifted for two months (page 0 / All, dict 5–30) under a value test that
+  pinned 5. ⚠ The 2026-09-05 attempt moved the floor the OTHER way, because the
+  directional family was then built on the nearest expiry and `em_1sd` came from
+  the floor; the whole-chain Finder builds every expiry separately and scores each
+  against its own expiry's move, so neither reason still holds.
 
 **`scoring/_common.py` now holds `clamp` and `num`.** Measured by AST with
 docstrings stripped: **`clamp` had NINE byte-identical private copies and `num`
