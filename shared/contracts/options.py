@@ -194,3 +194,30 @@ class NetPremiumSnapshot(_Base):
     ts: str | None = None              # publish time (NOT the per-row ts inside series)
     series: dict = {}                  # {symbol: [[ts, call_prem, put_prem], …]}
     error: str | None = None
+
+
+class ScanFunnel(_Base):
+    """cache:options:scan_funnel — why each symbol did or did not produce a
+    Market Scanner signal (design 2026-09-15, Part 3).
+
+    Its OWN view, for two reasons. The ``ScanResult`` projection would DROP it
+    (that contract does not declare the field, and a top-level key a contract
+    does not declare is a key the pages lose), and every scan reader — the
+    Scanner page, the day union, the autonomous driver — would otherwise pay for
+    bytes it never shows, which is the documented "a cropped payload is not a
+    BOUNDED payload" lesson taken one step earlier.
+
+    ``symbols`` maps a symbol to the account ``scanner_engine.run_full_scan``
+    built for it: the quote, the IV rank it measured, the earnings date it gated
+    on, whether it stopped before reaching a chain, and one bucket per scan
+    window. Like the other view models this validates only the ENVELOPE shape —
+    a bucket is heterogeneous (the two spread windows carry a strike tally the
+    DIRECTIONAL one has no analogue for) and over-specifying one would mean a
+    contract change every time a counter is added. ``run_full_scan``'s docstring
+    is the authority on the counters themselves.
+
+    Every field carries a default: Redis persists the view across a service
+    restart, so a payload written before a field existed must still validate.
+    """
+    timestamp: str | None = None       # the SCAN's stamp, not the publish time
+    symbols: dict[str, dict] = {}      # symbol -> the per-symbol account

@@ -24,7 +24,8 @@ from services.options_svc import push_notify
 from shared import market_calendar as mc
 from shared.notify.channels import _today_ct
 from shared.contracts.options import (IncomeScan, MatrixSnapshot,
-                                      NetPremiumSnapshot, ScanResult)
+                                      NetPremiumSnapshot, ScanFunnel,
+                                      ScanResult)
 from services import _degrade
 from services._parallel import parallel_map
 
@@ -162,6 +163,13 @@ EVENT_SCAN = "events:options:scan"
 # never be offered a signal that no longer qualifies, so that key stays live-only.
 CACHE_SCAN_DAY = "cache:options:scan_day"
 EVENT_SCAN_DAY = "events:options:scan_day"
+
+# Why each symbol did or did not produce a signal. A THIRD key rather than a
+# field on either of the two above: ScanResult does not declare it (so the
+# projection would drop it) and every scan reader would pay for bytes it never
+# shows. See shared.contracts.options.ScanFunnel.
+CACHE_SCAN_FUNNEL = "cache:options:scan_funnel"
+EVENT_SCAN_FUNNEL = "events:options:scan_funnel"
 
 CACHE_HEADER = "cache:options:header"
 EVENT_HEADER = "events:options:header"
@@ -625,6 +633,22 @@ def rescan(bus) -> None:
         bus.publish(EVENT_SCAN_DAY, {"version": day_version})
     except Exception:  # noqa: BLE001
         log.exception("scan day-union merge failed (non-fatal)")
+
+    # The per-symbol funnel — instrumentation, published AFTER the product it
+    # describes and inside its own guard. ``or {}`` so a scan run with
+    # ``collect_funnel=False`` (and any engine older than the funnel) publishes an
+    # empty view rather than degrading: "nothing was collected" is a true
+    # statement, and a degrade counter that ticks on the normal case is noise.
+    # The constructor IS the gate — a funnel that is not a mapping raises here and
+    # nothing is cached. ``skip_unchanged`` because this is republished on every
+    # scan of the day and an identical funnel must not wake the page's poller.
+    try:
+        snap = ScanFunnel(timestamp=result.get("timestamp"),
+                          symbols=result.get("funnel") or {})
+        bus.cache_set(CACHE_SCAN_FUNNEL, snap.model_dump(),
+                      event=EVENT_SCAN_FUNNEL, skip_unchanged=True)
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.scan_funnel")
 
     # Server-side phone push on genuinely-new signals (Telegram/Discord/Fi-SMS).
     # Best-effort; must never break the scan/publish path. First run after start

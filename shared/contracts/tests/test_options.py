@@ -162,3 +162,51 @@ def test_income_scan_survives_the_json_round_trip():
     assert back.warnings == ["no chain for XYZ"]
     # JSON has no tuple type — a tuple inside a row normalizes to a list
     assert back.candidates[0]["breakevens"] == [487.6]
+
+
+def test_scan_funnel_roundtrip_and_defaults():
+    """cache:options:scan_funnel — the per-symbol scan account."""
+    from shared.contracts.options import ScanFunnel
+
+    snap = ScanFunnel(
+        timestamp="2026-09-15T08:00:00",
+        symbols={"SPY": {"price": 500.0, "iv_rank": 100.0, "stop": None,
+                         "buckets": {"0DTE": {"chain": True,
+                                              "spreads": {"emitted": 8}}}}})
+    back = ScanFunnel.from_json(snap.to_json())
+    assert back.symbols["SPY"]["buckets"]["0DTE"]["spreads"]["emitted"] == 8
+    assert back.timestamp == "2026-09-15T08:00:00"
+
+
+def test_scan_funnel_defaults_let_a_pre_upgrade_payload_validate():
+    """Redis persists cache views across restarts, so every field defaults."""
+    from shared.contracts.options import ScanFunnel
+
+    snap = ScanFunnel()
+    assert snap.symbols == {}
+    assert snap.timestamp is None
+
+
+def test_scan_funnel_refuses_a_non_mapping():
+    """The constructor IS the gate — the publish site relies on it raising rather
+    than caching a shape the page cannot read."""
+    from shared.contracts.options import ScanFunnel
+
+    with pytest.raises(Exception):
+        ScanFunnel(symbols=["not", "a", "mapping"])
+
+
+def test_scan_funnel_keeps_a_heterogeneous_bucket_whole():
+    """Buckets are modelled loosely as ``dict`` — the spread windows carry a
+    strike tally the DIRECTIONAL one has no analogue for, and a contract that
+    over-specified either would have to change every time a counter is added."""
+    from shared.contracts.options import ScanFunnel
+
+    snap = ScanFunnel(symbols={
+        "SPY": {"buckets": {"SWING": {"strikes": {"width_reasons": {"no_credit": 16}}},
+                            "DIRECTIONAL": {"build_failed": False}}},
+        "NOPE": {"stop": "no_quote", "buckets": {}}})
+    back = ScanFunnel.from_json(snap.to_json())
+    assert (back.symbols["SPY"]["buckets"]["SWING"]["strikes"]["width_reasons"]
+            == {"no_credit": 16})
+    assert back.symbols["NOPE"]["stop"] == "no_quote"

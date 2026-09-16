@@ -349,8 +349,22 @@ Collected in `run_full_scan` per symbol and per bucket (`0DTE`, `SWING`,
 Its own view, validated on write by a new `ScanFunnel` contract in
 `shared/contracts/options.py`, written with `skip_unchanged`. Not folded into
 `cache:options:scan`: the `ScanResult` projection would drop it, and every scan
-reader would pay for bytes it never shows. Estimated ~50 KB for 80 symbols (to be
-measured).
+reader would pay for bytes it never shows.
+
+**Measured 2026-09-15: ~105 KB for 80 symbols — about twice the ~50 KB this doc
+estimated.** Method: a real `run_full_scan` over the deterministic `fake_client`
+fixture (SPY + QQQ, both DTE windows populated), its `funnel` projected through
+`ScanFunnel` and `json.dumps`'d exactly as `cache_set` writes it. That reads
+**2,678 B for two symbols — 1,339 B/symbol**, and the per-symbol cost is flat
+(the counters are a fixed key set, not a function of chain size), so 80 symbols
+extrapolates to **104,862 B**. ⚠ The fixture is far smaller than a real
+watchlist in SYMBOL COUNT but not in per-symbol shape, and its one soft spot is
+`width_reasons`, a sparse Counter the fixture fills with a single stage: filling
+all eleven in both spread buckets gives the **worst case, 1,772 B/symbol →
+141,742 B for 80** (79,757 B for the ~45 the live scan actually carries). So the
+honest range is **~105 KB typical, ~142 KB worst**, against the 5 MB
+`cache:options:gamma` the performance audit split — comfortably small, and the
+reason it is still its own key rather than a field on `cache:options:scan`.
 
 ### The panel
 
