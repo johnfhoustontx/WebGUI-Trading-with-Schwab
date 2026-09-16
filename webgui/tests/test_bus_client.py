@@ -163,12 +163,14 @@ def test_read_gated_never_caches_a_key_that_has_no_version_counter():
     it would serve that first payload forever — such a view reads through."""
     seen = {"n": 0}
 
-    def _fake_read(view):
+    def _fake_read_full(view):
+        # A pre-upgrade envelope still embeds a version; only the :ver counter
+        # is missing, so the probe below is what reads None.
         seen["n"] += 1
-        return {"legacy": True}
+        return {"legacy": True}, 1
 
-    real_read, real_ver = bus_client.read, bus_client.read_version
-    bus_client.read = _fake_read
+    real_read, real_ver = bus_client.read_full, bus_client.read_version
+    bus_client.read_full = _fake_read_full
     bus_client.read_version = lambda view: None
     try:
         memo = {}
@@ -180,7 +182,7 @@ def test_read_gated_never_caches_a_key_that_has_no_version_counter():
         assert payload == {"legacy": True} and changed is True
         assert seen["n"] == 2
     finally:
-        bus_client.read, bus_client.read_version = real_read, real_ver
+        bus_client.read_full, bus_client.read_version = real_read, real_ver
 
 
 def test_read_gated_recovers_when_an_absent_view_appears():
@@ -189,6 +191,53 @@ def test_read_gated_recovers_when_an_absent_view_appears():
     bus_client.bus().cache_set("cache:options:scan", {"signals": [9]})
     payload, changed = bus_client.read_gated("options:scan", memo)
     assert payload == {"signals": [9]} and changed is True
+
+
+# `Bus.cache_set` INCRs {key}:ver in one round-trip and SETs the envelope in a
+# LATER pipeline. A reader landing in that gap sees the new version beside the
+# old payload. Memoizing the PROBED version with that payload made the pair
+# sticky: every later probe matched, so the stale payload was served until the
+# next publish — a whole day for the nightly options:calibration view.
+
+def _half_written_publish(b, key, payload):
+    """Replay cache_set's two halves with a reader call in between: INCR first,
+    return a callable that completes the envelope SET with that same version."""
+    from shared.contracts.envelope import CacheEnvelope
+    version = b._r.incr(f"{key}:ver")
+
+    def _finish():
+        env = CacheEnvelope(version=version, ts="2026-09-16T00:00:00+00:00",
+                            payload=payload)
+        b._r.set(key, env.to_json())
+        b._r.set(f"{key}:ts", env.ts)
+    return _finish
+
+
+def test_read_gated_does_not_pin_an_old_payload_read_mid_publish():
+    memo = {}
+    b = bus_client.bus()
+    b.cache_set("cache:options:calibration", {"gen": 1})
+    bus_client.read_gated("options:calibration", memo)
+
+    finish = _half_written_publish(b, "cache:options:calibration", {"gen": 2})
+    mid, _ = bus_client.read_gated("options:calibration", memo)   # lands in the gap
+    assert mid == {"gen": 1}                                        # old envelope, fine
+    finish()
+
+    payload, changed = bus_client.read_gated("options:calibration", memo)
+    assert payload == {"gen": 2} and changed is True
+
+
+def test_read_gated_does_not_pin_an_absence_read_mid_first_publish():
+    memo = {}
+    b = bus_client.bus()
+    finish = _half_written_publish(b, "cache:options:calibration", {"gen": 1})
+    mid, _ = bus_client.read_gated("options:calibration", memo)
+    assert mid is None
+    finish()
+
+    payload, changed = bus_client.read_gated("options:calibration", memo)
+    assert payload == {"gen": 1} and changed is True
 
 
 # ── read-only mode + a pinned connection URL (2026-09-07) ──────────────────

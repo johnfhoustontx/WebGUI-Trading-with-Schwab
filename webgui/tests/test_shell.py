@@ -379,8 +379,10 @@ def test_watcher_flow_alerts_seed_fire_and_toggle(monkeypatch):
 
     flow = {"view": {"alerts": [{"id": "A", "type": "crossover", "side": "calls_over",
                                  "text": "seeded"}]}}
-    monkeypatch.setattr(main.bus_client, "read",
-                        lambda v: flow["view"] if v == "options:flow_alerts" else {})
+    # read_gated fetches through read_full; no :ver counter (read_version is the
+    # empty fake bus's None) means every tick reads through, as before.
+    monkeypatch.setattr(main.bus_client, "read_full",
+                        lambda v: (flow["view"] if v == "options:flow_alerts" else {}, None))
 
     # Seed tick: the pre-existing alert "A" is absorbed, nothing fires.
     assert main._watcher_compute() is None

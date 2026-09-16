@@ -134,15 +134,16 @@ def test_two_threads_never_leave_the_memo_on_an_older_read(monkeypatch):
             second_probed.set()
         return store["ver"]
 
-    def read(_view):
-        payload = dict(store["payload"])
+    def read_full(_view):
+        # An envelope carries its own version, snapshotted with its payload.
+        payload, ver = dict(store["payload"]), store["ver"]
         if threading.current_thread().name == "first":
             first_reading.set()
             release.wait(5)
-        return payload
+        return payload, ver
 
     monkeypatch.setattr(bus_client, "read_version", read_version)
-    monkeypatch.setattr(bus_client, "read", read)
+    monkeypatch.setattr(bus_client, "read_full", read_full)
     got = {}
     first = threading.Thread(name="first", target=lambda: got.__setitem__(
         "first", checks_feed._gated(view)))
@@ -158,7 +159,7 @@ def test_two_threads_never_leave_the_memo_on_an_older_read(monkeypatch):
     second.join(5)
     assert got == {"first": {"n": 1}, "second": {"n": 2}}
     memo = checks_feed._memos[view]
-    assert (memo["ver"], memo["payload"]) == (2, {"n": 2})
+    assert memo["state"] == (2, {"n": 2})
 
 
 def test_each_view_has_its_own_lock():

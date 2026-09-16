@@ -112,9 +112,6 @@ def read_version(view: str) -> int | None:
     return bus().cache_version(f"cache:{view}")
 
 
-_GATE_ABSENT = object()   # "we have observed this view as absent"
-
-
 def read_gated(view: str, memo: dict) -> tuple[dict | None, bool]:
     """``(payload, changed)`` — deserialize only when the view's version moved.
 
@@ -126,23 +123,30 @@ def read_gated(view: str, memo: dict) -> tuple[dict | None, bool]:
     transfer+parse per tick per open tab (~10 GB/day/tab) and a pair of integer
     probes; the views it reads change a few times an hour (2026-08-20).
 
-    An absent view is memoized too — ``(None, False)`` on repeat — so a cold or
-    never-published key does not re-probe its payload every tick. ``changed`` is
-    True on the FIRST observation of any state, including absence, so a caller
-    can seed itself on tick one.
+    An absent view is NOT memoized: with no version there is nothing to gate
+    on, so it reads through every call and reports ``changed=True`` each time
+    (a missing key costs one ``:ver`` GET plus one empty ``GET`` — no parse).
+    Likewise a ``None`` version on a key that does carry a payload (a
+    pre-upgrade write with no ``:ver`` counter) reads through, because a memo
+    keyed on ``None`` would have no invalidation signal and would serve that
+    first payload forever.
 
-    ⚠ A ``None`` version is NOT gated — it reads through, every time.
-    ``cache_set`` always INCRs ``{key}:ver`` so anything written by current code
-    has a counter, but a pre-upgrade key can carry a payload without one, and a
-    memo keyed on ``None`` would have no invalidation signal: it would serve that
-    first payload forever. Gate only when there is a version to gate on;
-    versionless views simply keep the old always-read behaviour.
+    ⚠ The memo is keyed on the ENVELOPE's version, never the probed one.
+    ``Bus.cache_set`` INCRs ``{key}:ver`` in one round-trip and SETs the
+    envelope in a later pipeline, so a probe can see version N while the
+    payload read still returns N-1 (or nothing, on a first publish). Pairing
+    the probed N with that old payload made every later probe match and pinned
+    the stale read until the next publish — a whole day for a nightly view.
+    Keyed on the envelope's own N-1, the next probe mismatches and re-reads.
+    The memo is written as ONE tuple so a concurrent reader never sees a
+    version from one read beside a payload from another.
     """
     ver = read_version(view)
-    if ver is not None and memo.get("ver") == ver:
-        return memo["payload"], False
-    payload = read(view)
-    memo["ver"], memo["payload"] = ver, payload
+    state = memo.get("state")
+    if ver is not None and state is not None and state[0] == ver:
+        return state[1], False
+    payload, env_ver = read_full(view)
+    memo["state"] = (env_ver, payload) if env_ver is not None else None
     return payload, True
 
 
