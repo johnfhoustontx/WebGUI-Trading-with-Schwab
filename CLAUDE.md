@@ -2632,10 +2632,22 @@ where it must not cut at all. The Market Scanner's two credit-spread lists keep
 their existing whole-list filter — those are uniformly short premium, so the
 per-signal form would be the same answer at more cost.
 
+⚠ **That whole-list filter is a DIFFERENT expression in a different place, and it
+disagrees with `vol_gate` about absence on purpose.** It lives in
+`run_full_scan` over `signals_0dte` / `signals_swing`, and an **unknown** IV rank
+is REFUSED there, not skipped — the 2026-09-15 operator decision: nothing sells
+premium against a volatility reading it does not have. Since then it is a NAMED
+refusal, `no_iv_history` beside `below_iv_floor` in the scan funnel, because "we
+have no history for this name" and "this name is cheap today" are different facts
+and only one is about today's market. ⚠ It is written `not (rank >= min_rank)`,
+never `rank < min_rank`: a NaN fails every comparison, so the naive spelling
+would KEEP a row the old `(rank or 0) >= min_rank` dropped.
+
 **Three absence rules, and each is the actual content of the function.** A
 missing `iv_rank` (`iv_analysis` returns `None` when HV history is too short) or
 a missing `net_vega` **skips** the gate — a bound cannot be enforced against an
-unknown, and an outage must degrade to ungated rather than to refused. A vega of
+unknown, and an outage must degrade to ungated rather than to refused (the
+Market Scanner's own floor above is the deliberate exception). A vega of
 **exactly zero is neither side**, so a vega-neutral structure is not handed the
 ceiling by a rounding sign (note `-0.0 < 0` is False, so the two spellings of
 zero would not even agree). And **`0` means OFF for both bounds, not "a bound at

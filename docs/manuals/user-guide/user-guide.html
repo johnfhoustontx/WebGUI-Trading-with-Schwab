@@ -112,6 +112,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#simulator">Simulator</a></li>
 <li><a href="#market-scanner">Market Scanner</a><ul>
 <li><a href="#using-the-checklist-to-pick-a-trade">Using the checklist to pick a trade</a></li>
+<li><a href="#why-was-there-no-trade-on-x-today">"Why was there no trade on X today?"</a></li>
 </ul>
 </li>
 <li><a href="#income">Income</a><ul>
@@ -1184,6 +1185,8 @@ two-pane layout.</p>
 <li>A <strong>Checks</strong> column — the go / no-go checklist's verdict for that row, in one
   chip (see below).</li>
 <li>An <strong>Only clear</strong> switch beside <strong>Run scan</strong>.</li>
+<li>A <strong>Why no trade?</strong> button left of <strong>Run scan</strong>, which explains where each
+  symbol stopped rather than changing what the table shows (see below).</li>
 <li>A plain-English <strong>VIX term</strong> label (for example, <em>"VIX term: Contango (near-term
   calm) · as of 1:32 PM"</em>).</li>
 <li>Brand-new signals get a <strong>NEW</strong> badge.</li>
@@ -1284,6 +1287,87 @@ signals" counts only those still qualifying.</p>
 50 or better, so empty means nothing cleared the bar rather than something
 failed. Index names (<code>$SPX</code>, <code>SPY</code>, <code>QQQ</code>) are also frequently absent, because
 their implied volatility is usually too low to clear the credit floor.</p>
+</blockquote>
+<h3 id="why-was-there-no-trade-on-x-today">"Why was there no trade on X today?"</h3>
+<p>The tables answer <em>what qualified</em>. <strong>Why no trade?</strong> — the small button just left
+of <strong>Run scan</strong> — answers the other half: where each symbol stopped in the last
+scan.</p>
+<ol>
+<li>Click <strong>Why no trade?</strong>. The box reads <em>Reading the last scan…</em> for a moment,
+   then fills.</li>
+<li>The row of chips at the top says how many symbols each window left empty —
+   <em>0-DTE · 1 of 4 produced nothing</em>, <em>Swing · 0 of 4 produced nothing</em>. That is
+   the shape of the day before you look at any one name.</li>
+<li>Pick your symbol from the <strong>Symbol</strong> box (you can type into it).</li>
+<li>Read the three cards — one for <strong>0-DTE</strong>, one for <strong>Swing</strong>, one for
+   <strong>Directional</strong>.</li>
+</ol>
+<p>Each card opens with one sentence, and that sentence is the answer:</p>
+<blockquote>
+<p><em>SPY · Swing: 38 short strikes were priced, and every one sat past the
+short-delta ceiling.</em></p>
+</blockquote>
+<p>Under it is the list of steps that window ran, with how many candidates were still
+alive after each — <em>In the delta band 38 · Priced 38 · Under the delta ceiling 0</em>.
+<strong>The highlighted row is where it stopped</strong>; everything below it is zero for that
+reason and nothing else. When the symbol <em>did</em> produce trades the headline simply
+says so — <em>SPY · Swing: 8 signals reached the board</em> — and the list shows how the
+count came down to them.</p>
+<p>Some cards have no list at all, and that is deliberate — <strong>the app will not print a
+column of zeros for something it never measured.</strong> Instead the card says what
+happened:</p>
+<table>
+<thead>
+<tr>
+<th>What the card says</th>
+<th>What it means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><em>Schwab returned no quote for this symbol.</em></td>
+<td>The scan stopped before it asked for a chain. Nothing about this symbol's options was looked at</td>
+</tr>
+<tr>
+<td><em>The scan could not read an options chain for this window.</em></td>
+<td>No chain came back for those expirations</td>
+</tr>
+<tr>
+<td><em>The chain for this window carried no underlying price, so nothing could be measured against it.</em></td>
+<td>The expirations were listed, but the chain quoted no price for the stock itself — common off-hours. Every distance and delta test needs that price</td>
+</tr>
+<tr>
+<td><em>This symbol was not in the last scan.</em></td>
+<td>The watchlist moved, or the scan has not reached it</td>
+</tr>
+<tr>
+<td><em>The scan recorded no account of this window for this symbol.</em></td>
+<td>Nothing usable was recorded for that window</td>
+</tr>
+<tr>
+<td><em>the single-leg build failed for this symbol; the scan logged the error</em></td>
+<td>The Directional pass crashed on this name. It is a fault, not a market condition — check the log</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Reading a spread card.</strong> The first six steps are about the short strike (is it in
+the delta band, does it have a price, is it under the delta ceiling, is it inside
+the expected move, is it liquid, and did a width get built around it); the rest are
+about the spreads that came out of those (the momentum veto, the per-symbol cap,
+the regime filter, the volatility floor, the dealer-gamma gate) and finally how
+many reached the board. Two of those counts can go <strong>up</strong>, which is not an error:
+iron condors are <em>built from</em> the survivors rather than being survivors, and a
+later pass can add trades of its own.</p>
+<p><strong>A card carrying the line <em>From an earlier scan.</em></strong> is telling you the account
+you are reading was written by an older scan than the signals in the table —
+reopen the box after the next scan. The box reads the funnel when you <strong>open</strong>
+it, so picking a different symbol is instant but refreshes nothing; close and
+reopen to re-read.</p>
+<blockquote>
+<p><strong>Two absences that look alike.</strong> <em>No signals</em> and <em>nothing was measured</em> are
+different answers, and this box is the only place that distinguishes them. A
+symbol with a full stage list genuinely lost its candidates to a market
+condition; a symbol with a sentence and no list never got that far.</p>
 </blockquote>
 <h2 id="income">Income</h2>
 <p><strong>Route:</strong> <code>/options/income</code>.</p>

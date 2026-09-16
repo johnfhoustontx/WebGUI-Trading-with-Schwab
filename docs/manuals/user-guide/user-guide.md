@@ -996,6 +996,8 @@ two-pane layout.
 - A **Checks** column — the go / no-go checklist's verdict for that row, in one
   chip (see below).
 - An **Only clear** switch beside **Run scan**.
+- A **Why no trade?** button left of **Run scan**, which explains where each
+  symbol stopped rather than changing what the table shows (see below).
 - A plain-English **VIX term** label (for example, *"VIX term: Contango (near-term
   calm) · as of 1:32 PM"*).
 - Brand-new signals get a **NEW** badge.
@@ -1076,6 +1078,66 @@ days; you rarely need to press **Run scan**.
 > 50 or better, so empty means nothing cleared the bar rather than something
 > failed. Index names (`$SPX`, `SPY`, `QQQ`) are also frequently absent, because
 > their implied volatility is usually too low to clear the credit floor.
+
+### "Why was there no trade on X today?"
+
+The tables answer *what qualified*. **Why no trade?** — the small button just left
+of **Run scan** — answers the other half: where each symbol stopped in the last
+scan.
+
+1. Click **Why no trade?**. The box reads *Reading the last scan…* for a moment,
+   then fills.
+2. The row of chips at the top says how many symbols each window left empty —
+   *0-DTE · 1 of 4 produced nothing*, *Swing · 0 of 4 produced nothing*. That is
+   the shape of the day before you look at any one name.
+3. Pick your symbol from the **Symbol** box (you can type into it).
+4. Read the three cards — one for **0-DTE**, one for **Swing**, one for
+   **Directional**.
+
+Each card opens with one sentence, and that sentence is the answer:
+
+> *SPY · Swing: 38 short strikes were priced, and every one sat past the
+> short-delta ceiling.*
+
+Under it is the list of steps that window ran, with how many candidates were still
+alive after each — *In the delta band 38 · Priced 38 · Under the delta ceiling 0*.
+**The highlighted row is where it stopped**; everything below it is zero for that
+reason and nothing else. When the symbol *did* produce trades the headline simply
+says so — *SPY · Swing: 8 signals reached the board* — and the list shows how the
+count came down to them.
+
+Some cards have no list at all, and that is deliberate — **the app will not print a
+column of zeros for something it never measured.** Instead the card says what
+happened:
+
+| What the card says | What it means |
+| --- | --- |
+| *Schwab returned no quote for this symbol.* | The scan stopped before it asked for a chain. Nothing about this symbol's options was looked at |
+| *The scan could not read an options chain for this window.* | No chain came back for those expirations |
+| *The chain for this window carried no underlying price, so nothing could be measured against it.* | The expirations were listed, but the chain quoted no price for the stock itself — common off-hours. Every distance and delta test needs that price |
+| *This symbol was not in the last scan.* | The watchlist moved, or the scan has not reached it |
+| *The scan recorded no account of this window for this symbol.* | Nothing usable was recorded for that window |
+| *the single-leg build failed for this symbol; the scan logged the error* | The Directional pass crashed on this name. It is a fault, not a market condition — check the log |
+
+**Reading a spread card.** The first six steps are about the short strike (is it in
+the delta band, does it have a price, is it under the delta ceiling, is it inside
+the expected move, is it liquid, and did a width get built around it); the rest are
+about the spreads that came out of those (the momentum veto, the per-symbol cap,
+the regime filter, the volatility floor, the dealer-gamma gate) and finally how
+many reached the board. Two of those counts can go **up**, which is not an error:
+iron condors are *built from* the survivors rather than being survivors, and a
+later pass can add trades of its own.
+
+**A card carrying the line *From an earlier scan.*** is telling you the account
+you are reading was written by an older scan than the signals in the table —
+reopen the box after the next scan. The box reads the funnel when you **open**
+it, so picking a different symbol is instant but refreshes nothing; close and
+reopen to re-read.
+
+> **Two absences that look alike.** *No signals* and *nothing was measured* are
+> different answers, and this box is the only place that distinguishes them. A
+> symbol with a full stage list genuinely lost its candidates to a market
+> condition; a symbol with a sentence and no list never got that far.
 
 ## Income
 

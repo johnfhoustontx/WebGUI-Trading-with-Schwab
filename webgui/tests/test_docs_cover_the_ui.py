@@ -124,6 +124,7 @@ SUBTABS_AND_SCREENS = [
     ("Market Scanner", "Scanner 0-DTE", "0-DTE"),
     ("Market Scanner", "Scanner Swing", "Swing"),
     ("Market Scanner", "Scanner Directional", "Directional"),
+    ("Market Scanner", "Why no trade dialog", "Why no trade"),
     ("Dealer Positioning", "Gamma view", "Gamma"),
     ("Dealer Positioning", "Charm view", "Charm"),
     ("Dealer Positioning", "Delta view", "Delta"),

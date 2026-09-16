@@ -4,7 +4,144 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-15 (**The Go / No-Go checklist.** Phase 4 of the
+**Last updated:** 2026-09-15 (**"Why no trade?" — the scan funnel.** Part 3 of the
+trade-checklist work: the tables say what qualified, this says where each symbol
+stopped.)
+
+- **The width search names why a strike found no width.**
+  `scanner_engine.select_best_width` takes an optional `reasons` counter and
+  attributes a strike that found NO width to the **furthest** stage its best width
+  reached (`WIDTH_STAGES`, eleven of them, ranked once in `_STAGE`), never to the
+  last `continue` executed — "every width cleared the credit floor but one contract
+  costs more than the cap" is actionable where a bare "no width" is not. One count
+  per STRIKE, not per width. Counting only: the parameter defaults to `None`, and
+  equivalence over the found width, a missing long leg, the credit floor, the trade
+  cap and the risk cap is proved by test rather than by inspection. `ml <= 0` files
+  under `no_credit` (a credit at or above the width is a quote fault, not a spread
+  that pays implausibly well), and `increment_over_cap` sits at index 0 for the
+  chain whose increment alone exceeds `MAX_WIDTH_DOLLARS`, where the loop breaks
+  having constructed no width at all.
+- **`screen_spreads` counts every rejection per strike.** An optional `funnel`
+  dict, filled with the pass's tally: `expiration_sides_in_window` /
+  `expiration_sides_skipped_earnings`, `delta_reject` / `delta_pass`, `mark_fail`,
+  `delta_ceiling` (which had no counter at all before this), `em_fail`,
+  `liq_fail_short`, `width_found`, and the `width_reasons` counter above. Over the
+  auto-width path they **partition** the strikes that entered the search
+  (`delta_pass == mark_fail + delta_ceiling + em_fail + liq_fail_short +
+  width_found + sum(width_reasons)`), and every key **accumulates**, so one funnel
+  carried across a watchlist keeps the equation over the total — which is why
+  `width_reasons` reaches the funnel through a coercing `setdefault` rather than a
+  scalar that would report the last call beside a counter summing all of them. Two
+  populations sit deliberately outside the equation because they never reach the
+  strike loop: `strikes_dropped_no_delta` and `strikes_dropped_off_increment`. The
+  counting is `.get(k, 0) + 1`, not `Counter.__missing__`, because this funnel is
+  **published** and comes back from `json.loads` as a plain dict. The "NO SPREADS"
+  log line now prints the width search's own stages on the auto-width path, where
+  it used to print two counters that path never touches.
+- **A per-symbol funnel in `run_full_scan`** (`results["funnel"]`, keyed by
+  symbol): the quote, the IV rank the scan measured, the earnings date it gated on,
+  whether it stopped before reaching a chain (`no_quote` / `no_data`), and one
+  bucket per scan window. The bucket keys are `0DTE`/`SWING`/`DIRECTIONAL` — the
+  spelling `signal_recorder` records and `shared.calibration` buckets on, not the
+  engine's own `trade_type`. A spread bucket carries `chain`, `underlying_zero`
+  (the chain arrived and quotes **no** underlying price, so the pass refused it
+  before counting anything — a per-WINDOW fact, deliberately not a symbol-level
+  `stop`, because the scan did reach a chain there), the `strikes` tally
+  **zero-filled** from `STRIKE_FUNNEL_KEYS` so the partition holds even in the two
+  states the pass returns early from, and a `spreads` block whose own identity
+  balances (`emitted == kept_after_cap + regime_pass_added − regime_filter −
+  below_iv_floor − no_iv_history − gamma_gate`). `chain_has_underlying` is the ONE
+  predicate both the engine's early return and the flag ask. The `DIRECTIONAL`
+  bucket partitions as `built == vol_gate + score_cut + capped + emitted`, **void
+  when `build_failed`** — that block is wrapped in a bare `except`, so without the
+  flag a crash reads as an honest bucket of zeroes. `collect_funnel=False` is the
+  equivalence lever, and the first test is the one that matters: the three signal
+  lists identical with collection on and off, compared as whole rows minus their
+  wall-clock stamp, and verified additionally against a golden captured from the
+  pre-change tree.
+- **⚠ The operator decision: an unknown IV rank is a NAMED refusal, not a silent
+  zero.** The floor was `(… .get("iv_rank") or 0) >= min_rank`, which refused an
+  unknown rank and a cheap one through the same expression and said neither out
+  loud. An unknown rank is **still refused** — nothing here sells premium against a
+  volatility reading it does not have — so the row set does not move; it is now
+  `no_iv_history` beside `below_iv_floor`, because "we have no history for this
+  name" and "this name is cheap today" are different facts and only one of them is
+  about today's market. Written `not (rank >= min_rank)`, never `rank < min_rank`:
+  a NaN fails every comparison, so the naive spelling would have KEPT a row the old
+  expression dropped. The equivalence test writes the old expression out literally
+  and drives it from the PRODUCER over six ranks.
+- **`ScanFunnel` + `cache:options:scan_funnel`**, published at the end of `rescan`
+  after the scan and the day union, inside its own guard degrading through
+  `_degrade.degraded("options.scan_funnel")` — the funnel is instrumentation and
+  the signals are the product, so a funnel fault can never cost a scan. Its OWN
+  view: the `ScanResult` projection would drop it (a top-level key a contract does
+  not declare is a key the pages lose), and every scan reader — the Scanner page,
+  the day union, the autonomous driver — would otherwise pay for bytes it never
+  shows. `result.get("funnel") or {}`, so a scan run with `collect_funnel=False`
+  publishes an EMPTY view rather than degrading. **Measured** through the contract
+  and `json.dumps` exactly as `cache_set` writes it: 2,678 B for the two-symbol
+  fixture — **~1.35 KB per symbol**, so **~105 KB at 80 symbols**, and **1.77 KB
+  per symbol** worst case with all eleven `WIDTH_STAGES` filled in both spread
+  buckets (**~142 KB**). The per-symbol cost is flat in chain size, which is the
+  only reason this view is small. ⚠ `skip_unchanged` **cannot fire** while
+  `timestamp` moves on every scan; the stamp stays because
+  `funnel_view.stale_note` compares it with the live scan's, and the test that
+  "proved" suppression was inverted to pin the republish instead.
+- **`webgui/pages/options/funnel_view.py` — the words.** A PURE Tier-1 reader
+  importing `..fmt` and nothing else, pinned by a fresh-interpreter probe:
+  `empty_symbols` lists the symbols a window emitted nothing for, `bucket_card`
+  turns one symbol's bucket into a headline plus the stage list with survivors
+  remaining, `stale_note` says the account predates the scan on screen. **The
+  binding stage is the answer** — the first stage whose remaining count is 0 — and
+  the headline is that stage's own sentence, naming the count that entered it and
+  why they stopped. Every stage and every `WIDTH_STAGES` reason has a sentence of
+  its own, and the tests iterate both sets to prove them mutually distinct, which
+  is the only check a shared fallback cannot pass. The arithmetic mirrors the
+  engine rather than intuition: `kept_after_cap` is ABSOLUTE and already carries
+  the iron condors built from the survivors, so the count can RISE across that
+  stage; `regime_pass_added` adds; `emitted` is read off the finished list, so it
+  is terminal even where the chain above it does not add up. **Never a zero the
+  payload did not supply** — an absent, junk or never-written counter reads as
+  SILENCE and the stage is dropped, and a symbol the scan never reached, a stop, a
+  window with no usable chain, a chain quoting no underlying price, a missing
+  bucket and a crashed directional build each return an empty stage list and say
+  what happened in words. The per-trade cap figure is NOT hardcoded: the Ledger's
+  limit is $750 and the Account's $250, so a literal would be wrong for one reader,
+  and the sentence says "the per-trade risk cap" until a publisher stamps one.
+  `test_keys_mirror_the_engine` reads `scanner_engine.py` as TEXT and fails if a
+  counter this module renders is not one the engine writes.
+- **The "Why no trade?" panel on the Market Scanner.** A flat button left of Run
+  scan — it explains the tables rather than changing them, so it must not read as
+  the page's action — opens a dialog over `cache:options:scan_funnel`: a chip per
+  scan window saying how many symbols it left empty of how many it accounts for, a
+  picker over every one of them, and one card per window built by `funnel_view`,
+  the binding stage in warn and every other row muted. Every sentence comes from
+  that module and the page never touches the tally — a test pins the absence of any
+  counter name and any `strikes`/`spreads` indexing in the panel, because a chain
+  that never loads publishes an empty tally and a hand-rolled `.get(…, 0)` there
+  would print exactly the zero this app forbids. The read happens on **open**,
+  never at page build, and goes through `run.io_bound` like the page's other bus
+  reads; it takes the live scan view too, for its timestamp alone, which is what
+  lets `stale_note` say *From an earlier scan.* Picking a symbol repaints from the
+  stored payload and re-reads nothing; closing and reopening re-reads. Until the
+  read lands the panel shows a loading line and no cards — the previous open's
+  verdict under a fresh dialog reads as this scan's answer, which is worse than no
+  answer.
+- **Verified in the local page harness** — a real `run_full_scan` funnel, dumped
+  through the scanner suite's fake client and published into the harness: SPY's
+  card read *SPY · Swing: 8 signals reached the board* over its stage list, with
+  the Directional stage list beside it; a symbol Schwab would not quote read *ZM ·
+  Swing: Schwab returned no quote for this symbol.*; and a window whose chain
+  carried no underlying price read *The chain for this window carried no underlying
+  price, so nothing could be measured against it.* The chips read *0-DTE · 1 of 4
+  produced nothing*. Read off the live DOM: the screenshot tool times out on this
+  app.
+- Commits `67bcad4` · `b0db0a1` · `65e1612` · `828c02d` · `f090d4b` · `b1246e4` ·
+  `55b2827` · `7c8b19f` · `78bb063`. Design + plan:
+  [design](plans/2026-09-15-trade-checklist-and-ledger-caps-design.md) ·
+  [plan](plans/2026-09-15-trade-checklist-and-ledger-caps-plan.md).
+
+**Prior —** 2026-09-15 (**The Go / No-Go checklist.** Phase 4 of the
 trade-checklist work: every check a candidate has to clear, stated on the row it
 belongs to.)
 

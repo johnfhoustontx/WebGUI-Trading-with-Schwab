@@ -220,6 +220,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#where-the-data-comes-from_12">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_12">Reading the screen</a></li>
 <li><a href="#the-go-no-go-checklist">The Go / No-Go checklist</a></li>
+<li><a href="#why-no-trade-the-scan-funnel">"Why no trade?" — the scan funnel</a></li>
 <li><a href="#why-it-matters_12">Why it matters</a></li>
 <li><a href="#when-to-use-it_12">When to use it</a></li>
 <li><a href="#caveats-and-gotchas_7">Caveats and gotchas</a></li>
@@ -3127,6 +3128,162 @@ was actually checked. A row that reads Clear over a grey book line is hidden: a 
 book line does not change the verdict, but the filter promises a fit was tested. A
 row carrying no verdict at all is hidden for the same reason — the filter fails
 closed. It re-filters rows already on screen and reads nothing.</p>
+<h3 id="why-no-trade-the-scan-funnel">"Why no trade?" — the scan funnel</h3>
+<p>The <strong>Why no trade?</strong> button left of <strong>Run scan</strong> opens the other half of the
+screen's answer. The tables report <em>what qualified</em>; this reports <em>where each
+symbol stopped</em>, per scan window, for the whole watchlist. It reads
+<code>cache:options:scan_funnel</code> — an account the scan keeps as it runs — <strong>when you
+open it</strong>, so it always describes the last completed scan and never costs anything
+while you are reading the tables. Nothing about it changes the tables, and it can
+never trigger a scan.</p>
+<p><strong>A card is a headline and a ladder.</strong> The headline is the <em>binding stage</em>: the
+first step whose survivor count reached zero, stated as a sentence naming how many
+entered it and why they stopped. Below it, each step of that window with the
+number still alive after it, the binding step picked out. Where nothing binds, the
+headline is simply how many reached the board.</p>
+<p><strong>The stages, per window.</strong> The two credit-spread windows (<strong>0-DTE</strong> and
+<strong>Swing</strong>) run the same ladder: six about the short strike, then the spreads built
+from it.</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>What had to be true</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>In the delta band</strong></td>
+<td>the strike's delta sits inside the band this trade type screens on</td>
+</tr>
+<tr>
+<td><strong>Priced</strong></td>
+<td>the short leg has a usable mark</td>
+</tr>
+<tr>
+<td><strong>Under the delta ceiling</strong></td>
+<td>its delta is not past the entry ceiling (a strike too close to the money to sell)</td>
+</tr>
+<tr>
+<td><strong>Inside the expected-move window</strong></td>
+<td>the short strike sits inside the move the market is pricing for that expiration</td>
+</tr>
+<tr>
+<td><strong>Short leg liquid</strong></td>
+<td>it clears the short leg's own liquidity gate</td>
+</tr>
+<tr>
+<td><strong>Width found</strong></td>
+<td>a long strike exists at some width that clears the credit floor, the edge floor and the per-trade risk cap. When none does, the headline names the <strong>furthest</strong> point the best width reached — "every width paid less than the credit floor this volatility regime asks for", "every width that cleared the credit and edge floors cost more than the per-trade risk cap", "this chain's strike increment is wider than the widest spread the scanner builds"</td>
+</tr>
+<tr>
+<td><strong>Spreads built</strong></td>
+<td>the screen returned it as a candidate</td>
+</tr>
+<tr>
+<td><strong>Past the momentum veto</strong></td>
+<td>the underlying had not already moved more than its expected day</td>
+</tr>
+<tr>
+<td><strong>Kept by the per-symbol cap</strong></td>
+<td>it survived the top-3-per-side cut</td>
+</tr>
+<tr>
+<td><strong>With the regime pass</strong></td>
+<td>a later, regime-gated pass may add trades here</td>
+</tr>
+<tr>
+<td><strong>Past the regime filter</strong></td>
+<td>sentiment and trend do not put it on the structurally doomed side</td>
+</tr>
+<tr>
+<td><strong>Past the volatility floor</strong></td>
+<td>the symbol's volatility rank clears the floor for this trade type</td>
+</tr>
+<tr>
+<td><strong>Past the dealer-gamma gate</strong></td>
+<td>the dealer-gamma regime does not veto index premium</td>
+</tr>
+<tr>
+<td><strong>Reached the board</strong></td>
+<td>it is in the list you are looking at</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Directional</strong> has no strike ladder of its own — the single-leg pass runs its own
+delta band, and mixing two passes' strike counts would make neither readable. Its
+stages are <strong>Candidates built · Past the volatility gate · Above the quality bar ·
+Kept by the per-symbol cap · Reached the board</strong>.</p>
+<p><strong>Why a binding stage is the answer, and not just the first zero.</strong> Everything
+below a zero is zero for that reason and nothing else, so reading further down the
+ladder tells you nothing about the market. The binding stage is the one place
+where a count went from <em>some</em> to <em>none</em>, which makes it the only step whose
+reason is about today.</p>
+<p><strong>Three counts do not behave like a funnel, deliberately.</strong> <em>Kept by the
+per-symbol cap</em> is an absolute count that already includes iron condors <strong>built
+from</strong> the survivors rather than being survivors — so it can be larger than the
+step above it. <em>With the regime pass</em> <strong>adds</strong>. And <em>Reached the board</em> is read
+straight off the finished list rather than accumulated, so it is the truth even
+where the ladder above it does not add up. None of the three is rendered as a
+subtraction, because that would show a number the scan never computed.</p>
+<p><strong>Why an unknown volatility rank is refused, and named.</strong> Selling premium needs a
+reading of how rich that premium is. When the app has no volatility history for a
+symbol it has no such reading — and it refuses the trade, exactly as it refuses
+one whose volatility is measurably too cheap. The two are <strong>counted separately</strong>
+and worded differently, because "we have no history for this name" is a statement
+about the app's own data and "this name is cheap today" is a statement about the
+market, and only the second is a reason to look somewhere else today. This is a
+deliberate exception to how the rest of the app treats a missing input: elsewhere
+an absent reading <em>skips</em> its gate rather than failing it.</p>
+<p><strong>Why some counts are absent rather than zero.</strong> A card with no ladder at all is
+not a symbol that failed every test — it is a symbol nothing measured, and the
+card says which:</p>
+<table>
+<thead>
+<tr>
+<th>The card says</th>
+<th>What happened</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><em>Schwab returned no quote for this symbol.</em></td>
+<td>the scan stopped before requesting a chain</td>
+</tr>
+<tr>
+<td><em>The scan could not read an options chain for this window.</em></td>
+<td>no chain came back for those expirations</td>
+</tr>
+<tr>
+<td><em>The chain for this window carried no underlying price, so nothing could be measured against it.</em></td>
+<td>the expirations were listed but the chain quoted no price for the underlying — Schwab does this off-hours. Every delta and distance test needs that price, so the screen refuses the chain before counting a single strike. <strong>This is not the same as "no chain"</strong>, and it is a fact about that one window, not about the symbol</td>
+</tr>
+<tr>
+<td><em>This symbol was not in the last scan.</em></td>
+<td>no account exists for it</td>
+</tr>
+<tr>
+<td><em>The scan recorded no account of this window for this symbol.</em></td>
+<td>nothing usable was recorded for the window</td>
+</tr>
+<tr>
+<td><em>the single-leg build failed for this symbol; the scan logged the error</em></td>
+<td>the Directional pass raised. A fault, not a market condition — without this line a crash would read as an honest bucket of zeros</td>
+</tr>
+</tbody>
+</table>
+<p>The same rule applies inside a ladder: a step whose counter was never written is
+<strong>dropped</strong>, not shown as zero. A zero on a card is always a count the scan really
+took.</p>
+<p><strong>The chips</strong> at the top of the box count symbols, not trades: <em>0-DTE · 1 of 4
+produced nothing</em>. A symbol whose window recorded nothing at all is <strong>left out</strong>
+of that count rather than filed under "produced nothing" — it has not emitted
+zero, it has said nothing. A symbol the scan stopped on <strong>is</strong> counted, because it
+really did produce no signal, and its card says why.</p>
+<p><strong>Staleness.</strong> Each card carries <em>From an earlier scan.</em> when the account was
+written by an older scan than the signals currently on the table — the two
+timestamps are compared, and with either missing the note is simply omitted rather
+than guessed at.</p>
 <h3 id="why-it-matters_12">Why it matters</h3>
 <p>This is the app's highest-throughput screen: it evaluates thousands of possible spreads
 across the watchlist every fifteen minutes and surfaces the few dozen worth a look. No

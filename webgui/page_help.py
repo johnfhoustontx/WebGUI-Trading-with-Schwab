@@ -176,6 +176,16 @@ plus single-leg directional trades on their own tab.
   clear — blocks, cautions, and anything the checks couldn't finish. The tab
   counts follow it (*Swing (3 of 40)*), and an emptied table says which of those
   it was. Nothing is re-scanned; it only filters what is already there.
+- **Why no trade?** (the small button left of **Run scan**) answers the opposite
+  question to the tables: not what qualified, but where each symbol stopped. Pick
+  a symbol and each of the three windows gets a card — a plain sentence ("38 short
+  strikes were priced, and every one sat past the short-delta ceiling"), then the
+  steps it went through with how many survived each. The step that took it to zero
+  is highlighted; that is the answer. When nothing looked at all — no quote from
+  Schwab, no chain, a chain with no price for the stock itself — the card says so
+  in words rather than showing a column of zeros, because "nothing passed" and
+  "nothing was measured" are different answers. It reads the last scan when you
+  open it, so reopen it after a new scan.
 - **Click a row** for full details; the row buttons send it to the Calculator,
   paper-trade it, or chart its Expected Move.
 - **Paper-trading a row is checked against the Paper Ledger's risk limits** ($750
