@@ -568,13 +568,24 @@ def _capture_target_cycle(seen):
 
 def test_cycle_uses_cumulative_mtd_target(fake_bus, monkeypatch):
     import datetime as _dt
+
+    # The handler's "today" is PINNED mid-month. A loss "earlier this month" needs a
+    # day before today in the same month, which the 1st does not have:
+    # mtd_realized_before_today counts closes strictly BEFORE today, so on the 1st
+    # the loss was excluded, the target stayed at the flat base, and this test
+    # failed on the first day of every month.
+    class _PinnedDate(_dt.date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 9, 16)
+
+    monkeypatch.setattr(handlers, "date", _PinnedDate)
     handlers.set_control(fake_bus, enabled=True)
     fake_bus.cache_set("cache:options:scan", {"signals_0dte": [], "signals_swing": []})
     # Driver book: behind the MTD pace (a loss earlier this month) -> ratchet toward cap.
-    m = _dt.date.today().strftime("%Y-%m")
     fake_bus.cache_set("cache:options:driver_paper_account", {
         "snapshot": {"session_pnl": 0.0}, "positions": [],
-        "closed_positions": [{"realized_pnl": -300.0, "exit_ts": f"{m}-01T15:00:00-05:00"}]})
+        "closed_positions": [{"realized_pnl": -300.0, "exit_ts": "2026-09-01T15:00:00-05:00"}]})
     seen = {}
     monkeypatch.setattr(handlers.compute, "fetch_market_context", lambda: {"vix": 14})
     monkeypatch.setattr(handlers.compute, "run_cycle", _capture_target_cycle(seen))
