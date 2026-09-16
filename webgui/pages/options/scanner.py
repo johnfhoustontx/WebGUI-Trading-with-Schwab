@@ -45,11 +45,11 @@ from nicegui import run, ui
 
 from pages.ui_guard import guard, guard_async
 
-from . import detail, handoff
+from . import detail, funnel_view, handoff
 from .checks_table import (  # re-exported: the scanner's names predate the move
     CHECKS_SLOT as _CHECKS_SLOT, ONLY_CLEAR_TIP as _ONLY_CLEAR_TIP, filtered_tab_label,
     only_clear, only_clear_empty_label, restamp, stamp_checks)
-from .theme import BTN_3D
+from .theme import BADGE_MUTED, BADGE_WARN, BTN_3D, CARD, EYEBROW, LABEL, MUTED, TXT_WARN
 
 
 def iv_rank_value(value):
@@ -659,6 +659,104 @@ _SYMBOL_SLOT = r'''
 '''
 
 
+# ── "Why no trade?" — the scan funnel panel ─────────────────────────────────
+#
+# The tables answer "what qualified"; this panel answers the other question,
+# off ``cache:options:scan_funnel`` — the per-symbol account
+# ``scanner_engine.run_full_scan`` keeps of where each window stopped.
+#
+# Every sentence on screen is built by the PURE ``funnel_view`` module. The page
+# owns only the read, the widgets and the symbol picker, which is what makes the
+# absent cases safe: a symbol the scan never reached, a payload that was never
+# published, and a whole-symbol ``stop`` all land on ``bucket_card(None, …)`` /
+# its stop branch and read as words, never as a stage list of confident zeroes.
+#
+# ⚠ The read happens on OPEN, never at page build. Nobody reading the tables has
+# asked for the funnel, and it goes through ``run.io_bound`` like every other bus
+# read on this page — the two big reads already share an in-flight guard because
+# a loop-side read here blocks every tab.
+
+_FUNNEL_VIEW = "options:scan_funnel"
+
+FUNNEL_TITLE = "Why no trade?"
+FUNNEL_LEAD = ("The tables show what qualified. This shows where each symbol "
+               "stopped in the last scan.")
+FUNNEL_LOADING = "Reading the last scan…"
+
+# The three scan windows, in the tab strip's own order. The keys are the
+# engine's own spellings (``funnel_view.BUCKET_LABELS`` carries the reader's).
+FUNNEL_BUCKETS = ("0DTE", "SWING", "DIRECTIONAL")
+
+
+def funnel_symbols(payload):
+    """Every symbol the funnel accounts for, sorted. PURE."""
+    symbols = payload.get("symbols") if isinstance(payload, dict) else None
+    if not isinstance(symbols, dict):
+        return []
+    return sorted(str(s) for s in symbols)
+
+
+def funnel_seed(payload_symbols, current=None):
+    """Which symbol to show: the reader's own while the new payload still
+    carries it, else the first. PURE; ``None`` when there is nothing to show."""
+    if current in payload_symbols:
+        return current
+    return payload_symbols[0] if payload_symbols else None
+
+
+def funnel_chips(payload):
+    """One chip per window: how many symbols it left empty, of how many. PURE.
+
+    ⚠ ``[]`` for a payload with no symbols. ``empty_symbols`` answers ``[]``
+    both for "nothing was empty" and for "there is nothing to read", and a chip
+    reading "0 of 0 produced nothing" off a cold view is exactly the zero this
+    app must never print.
+    """
+    symbols = payload.get("symbols") if isinstance(payload, dict) else None
+    if not isinstance(symbols, dict) or not symbols:
+        return []
+    total = len(symbols)
+    out = []
+    for bucket in FUNNEL_BUCKETS:
+        n = len(funnel_view.empty_symbols(payload, bucket))
+        label = funnel_view.BUCKET_LABELS[bucket]
+        out.append({"bucket": bucket, "label": label, "count": n,
+                    "text": f"{label} · {n} of {total} produced nothing"})
+    return out
+
+
+def funnel_cards(payload, symbol, scan_timestamp=None):
+    """The three window cards for one symbol, straight from ``funnel_view``.
+
+    PURE. The entry is LOOKED UP here rather than handed in, so every absent
+    case reaches ``bucket_card(None, …)`` — which says so in words — instead of
+    the caller having to remember to.
+    """
+    symbols = payload.get("symbols") if isinstance(payload, dict) else None
+    entry = symbols.get(symbol) if isinstance(symbols, dict) else None
+    note = funnel_view.stale_note(payload, scan_timestamp)
+    return [funnel_view.bucket_card(entry, bucket, symbol=symbol, note=note)
+            for bucket in FUNNEL_BUCKETS]
+
+
+def stage_class(stage):
+    """One stage row's Tailwind class: the BINDING stage — the wall the symbol
+    actually hit — in warn, every other row muted. PURE, mapped off a finite
+    state (the Tailwind-first standard)."""
+    return TXT_WARN if (stage or {}).get("binding") else MUTED
+
+
+def _read_funnel():
+    """Read the funnel view and the LIVE scan's stamp → ``(payload, live)``.
+    **Blocking** — go through ``run.io_bound``.
+
+    The live view is read for its ``timestamp`` alone: two stamps are what let
+    ``funnel_view.stale_note`` say the account predates the scan on screen, and
+    with one it correctly says nothing.
+    """
+    return (bus_client.read(_FUNNEL_VIEW) or {}), (bus_client.read(_LIVE_VIEW) or {})
+
+
 def render():
     """Build the Options scanner page body (two-pane: tables + detail panel).
 
@@ -711,6 +809,10 @@ def render():
                 clear_toggle = ui.switch("Only clear", value=False)
                 with clear_toggle:
                     ui.tooltip(_ONLY_CLEAR_TIP).props("delay=350")
+                # Flat, and left of Run scan: it explains the tables rather than
+                # changing them, so it must not read as the page's action.
+                why_btn = ui.button(FUNNEL_TITLE, icon="help_outline", color=None) \
+                    .props("no-caps flat dense").classes(f"text-xs {MUTED}")
                 scan_btn = ui.button("Run scan", icon="play_arrow", color=None) \
                     .props("no-caps").classes(BTN_3D)
             scan_panels = ui.tab_panels(tabs, value=tab_0dte).classes("w-full scan-panels")
@@ -897,6 +999,87 @@ def render():
         if notify:
             for w in (live.get("warnings") or []):
                 ui.notify(w, type="warning")
+
+    # ── "Why no trade?" ──────────────────────────────────────────────────────
+    # Built at the PAGE's own level, never inside a container a repaint clears:
+    # a ui.dialog leaves a canary in the slot it is built from and deletes
+    # itself when that canary goes (the swing.py precedent).
+    funnel_state = {"payload": {}, "scan_ts": None, "fetching": False}
+
+    with ui.dialog() as funnel_dlg, ui.card().classes("w-[720px] max-w-full gap-3"):
+        ui.label(FUNNEL_TITLE).classes(f"text-subtitle1 {LABEL}")
+        ui.label(FUNNEL_LEAD).classes(f"text-xs {MUTED}")
+        funnel_chips_box = ui.row().classes("gap-2 items-center flex-wrap")
+        funnel_sel = ui.select([], label="Symbol", with_input=True) \
+            .props("dense outlined options-dense").classes("w-56")
+        funnel_status = ui.label(FUNNEL_LOADING).classes(f"text-sm {MUTED}")
+        funnel_box = ui.column().classes("w-full gap-3")
+        with ui.row().classes("w-full justify-end"):
+            ui.button("Close", on_click=funnel_dlg.close).props("flat no-caps")
+
+    def _paint_funnel_cards():
+        """Repaint the three cards from the STORED payload — no bus read, so
+        picking a symbol costs nothing."""
+        funnel_box.clear()
+        with funnel_box:
+            for card in funnel_cards(funnel_state["payload"], funnel_sel.value,
+                                     funnel_state["scan_ts"]):
+                with ui.column().classes(f"{CARD} w-full gap-1"):
+                    ui.label(card["headline"]).classes(f"text-sm {LABEL}")
+                    if card["note"]:
+                        ui.label(card["note"]).classes(f"text-xs {EYEBROW}")
+                    for stage in card["stages"]:
+                        cls = f"text-xs {stage_class(stage)}"
+                        with ui.row().classes(
+                                "w-full justify-between items-baseline no-wrap gap-2"):
+                            ui.label(stage["label"]).classes(cls)
+                            ui.label(str(stage["remaining"])).classes(cls)
+
+    @guard
+    def _on_funnel_symbol(_event):
+        _paint_funnel_cards()       # from the stored payload; no bus read
+
+    funnel_sel.on_value_change(_on_funnel_symbol)
+
+    def _apply_funnel(payload, live):
+        funnel_state["payload"] = payload or {}
+        funnel_state["scan_ts"] = (live or {}).get("timestamp")
+        symbols = funnel_symbols(funnel_state["payload"])
+        funnel_sel.set_options(symbols,
+                               value=funnel_seed(symbols, funnel_sel.value))
+        funnel_sel.set_visibility(bool(symbols))
+        funnel_chips_box.clear()
+        with funnel_chips_box:
+            for chip in funnel_chips(funnel_state["payload"]):
+                ui.badge(chip["text"]).classes(
+                    BADGE_WARN if chip["count"] else BADGE_MUTED)
+        # Nothing published at all is the ONE thing the cards cannot say for the
+        # panel as a whole (they speak per symbol), so the waiting line carries it.
+        funnel_status.text = "" if symbols else _copy.WAITING_OPTIONS
+        funnel_status.set_visibility(bool(funnel_status.text))
+        _paint_funnel_cards()
+
+    @guard_async
+    async def _open_funnel():
+        # Read on OPEN, never at page build — and OFF the loop, like every other
+        # bus read here. Closing and reopening re-reads; picking a symbol does not.
+        funnel_dlg.open()
+        if funnel_state["fetching"]:
+            return
+        funnel_state["fetching"] = True
+        # Placeholder first: the previous open's verdict under a fresh dialog
+        # reads as this scan's answer, which is worse than no answer.
+        funnel_chips_box.clear()
+        funnel_box.clear()
+        funnel_status.text = FUNNEL_LOADING
+        funnel_status.set_visibility(True)
+        try:
+            payload, live = await run.io_bound(_read_funnel)
+        finally:
+            funnel_state["fetching"] = False
+        _apply_funnel(payload, live)
+
+    why_btn.on_click(_open_funnel)
 
     @guard
     def _request_scan():
