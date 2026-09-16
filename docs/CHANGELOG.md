@@ -4,7 +4,60 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-15 (**"Why no trade?" — the scan funnel.** Part 3 of the
+**Last updated:** 2026-09-16 (**The volatility floor reaches credit spreads and
+iron condors.** Before this, B2's gate never refused one on the Strategy Finder or
+the Income Window.)
+
+- **The defect.** `shared.vol_gate` keys short vs long premium on `net_vega`'s
+  sign. `scanner_engine.screen_spreads` writes `net_vega = short.vega − long.vega`
+  (POSITIVE for a credit spread: the scanner's convention, not the position's),
+  `strategy_scanner._normalize_credit` copied it into the normalized contract
+  unchanged, and `adapt_iron_condor`'s legs carry vega 0 so an IC read 0.0. Every
+  PCS, CCS and IC in `compute.swing_scan` therefore passed the floor.
+- **Measured before fixing**, read-only, on prod's nightly Redis dumps
+  (`cache:options:income`): the **2026-09-14 board, with the gate live, was two
+  IREN put credit spreads at IV rank 2.3** and the floor refused neither; 09-11
+  had 2 of 5 rows below it (IREN 0.1, CRWV 15.3, both PCS); 09-15 had 0 of 3. The
+  27 and 29 rows the gate did drop were single-leg shorts. The Finder snapshots on
+  those days (TSLA, IV rank 23) held no credit rows.
+- **`fit_vol` read the same inverted sign**: in a low regime a credit spread was
+  scored as long vega. On 09-11 the two SPY call spreads read fit_vol 57.1 / 57.3
+  against 42.9 / 42.7 position-signed, −1.7 composite each (XOM's short put moves
+  fourth → second). A mid regime moves composites by under 0.3.
+- **Fixed in the data, not the gate.** `shared.structures.position_greek(row,
+  greek)` converts: explicit `entry_net_<greek>_position` first, else
+  `−net_<greek>`. `screen_spreads` now writes `entry_net_vega_position` beside its
+  delta/theta ones; `build_iron_condors` writes the sum (still no `net_vega`, so
+  the Market Scanner's IC composite does not move); `_normalize_credit` stamps
+  position-signed `net_theta`/`net_vega` plus both explicit fields. A
+  gate-side structure classifier was rejected because it would have left
+  `fit_vol` and the Finder detail panel wrong beside native families that are
+  position-signed in the same ranked table.
+- **`paper_trader` could not simply keep negating.** Its credit branch receives
+  raw scanner rows AND Finder rows, so `entry_theta`/`entry_vega` now go through
+  `position_greek` (a Finder PCS would otherwise book as long vega), and the
+  ledger's `net_theta` stays in the scanner convention the Paper page reads. A raw
+  IC now books a real `entry_vega` where it booked `-0.0`.
+- **Tests.** New `services/options_svc/tests/test_vol_gate_on_real_rows.py` builds
+  every row with the real producers over a chain whose vega and theta fall away
+  from the money (a flat-greek chain makes every spread's net vega exactly 0 and
+  hides the defect): the producer convention pinned as a vacuity guard, position
+  signs per family, floor refuses/keeps with a long-premium sibling, `fit_vol`
+  direction, `swing_scan` end to end at IV rank 2.3, and raw-vs-Finder paper
+  booking agreement. `test_adapt_credit_spread_pcs_to_normalized` had fed the
+  adapter position-signed "source" greeks and asserted they survived; its
+  fixture now uses the producer's convention, with the same asserted outputs.
+  `checks.py` keeps its economics-first classifier, which is still right for raw
+  scanner rows; only its docstring moved.
+- **Suites:** options-scanner **1847 passed / 2 skipped**; `shared/tests` **555**;
+  webgui **4653 passed / 1 skipped**; options_svc **2364 passed / 7 failed**, the 7
+  (`test_earnings_gate_mirror.py` ×6, `test_expiry_choice.py::test_option_expiration_rows_returns_typed_rows`)
+  failing identically on `main` at `7695cdf` without this change.
+  [design correction](plans/2026-09-12-volatility-gate-design.md)
+
+---
+
+**Prior —** 2026-09-15 (**"Why no trade?" — the scan funnel.** Part 3 of the
 trade-checklist work: the tables say what qualified, this says where each symbol
 stopped.)
 

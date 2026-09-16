@@ -13,6 +13,13 @@ Strategy Finder emits debit verticals and long options beside its credit spreads
 and cheap volatility is precisely when those are the right trade — so a blanket
 per-list filter would cut hardest exactly where it should not cut at all. Every
 test below that asserts a drop has a long-premium sibling asserting a keep.
+
+⚠ These rows are INVENTED, and that is how this file passed while the gate never
+fired on a single Finder or Income credit spread: ``screen_spreads`` writes a
+credit spread's ``net_vega`` POSITIVE (short minus long), and the adapter carried
+it across unchanged until 2026-09-16. They pin the call site's wiring only; the
+sign the gate reads is pinned over the real producers in
+``test_vol_gate_on_real_rows.py``.
 """
 from services.options_svc import compute  # noqa: F401  (runs the sys.path glue)
 

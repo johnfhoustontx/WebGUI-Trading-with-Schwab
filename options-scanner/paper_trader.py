@@ -171,6 +171,13 @@ def _is_positive_finite(value):
             and math.isfinite(value) and value > 0)
 
 
+def _legacy_greek(signal, greek, default):
+    """``net_<greek>`` in the scanner's short-minus-long convention, whichever
+    convention ``signal`` arrived in; ``default`` when it carries none."""
+    pos = _structures.position_greek(signal, greek)
+    return default if pos is None else (-pos if pos else 0.0)
+
+
 def create_paper_trade(signal, quantity=1, mode="PAPER"):
     """Create a paper trade from a scanner signal.
 
@@ -217,10 +224,16 @@ def create_paper_trade(signal, quantity=1, mode="PAPER"):
         "max_loss_total": book_caps.booked_risk({"per_share": max_loss_per}, quantity),
         "breakeven": signal.get("breakeven", ""),
         "short_delta": signal.get("short_delta", 0),
-        "net_theta": signal.get("net_theta", 0),
+        # ``net_theta`` keeps the SCANNER convention (short minus long) the Paper
+        # page displays; ``entry_theta``/``entry_vega`` are position-signed. Both
+        # read through ``position_greek``, because this branch gets raw scanner
+        # rows AND Strategy Finder rows, and since 2026-09-16 the latter are
+        # position-signed - negating them again would book a credit spread as
+        # long vega.
+        "net_theta": _legacy_greek(signal, "theta", signal.get("net_theta", 0)),
         "entry_delta": None,  # signal lacks long-leg delta; honest unknown
-        "entry_theta": (-signal["net_theta"]) if signal.get("net_theta") is not None else None,
-        "entry_vega": (-signal["net_vega"]) if signal.get("net_vega") is not None else None,
+        "entry_theta": _structures.position_greek(signal, "theta"),
+        "entry_vega": _structures.position_greek(signal, "vega"),
         "entry_gamma": None,  # scanner does not carry net gamma
         # Persist entry-time spread quotes so liquidity scoring still works
         # for paper trades when the live chain is unavailable (after-hours,

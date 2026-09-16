@@ -2632,6 +2632,34 @@ where it must not cut at all. The Market Scanner's two credit-spread lists keep
 their existing whole-list filter — those are uniformly short premium, so the
 per-signal form would be the same answer at more cost.
 
+⚠ **Keying on vega sign is only as good as the sign, and the
+Finder's credit rows carried the wrong one from the day it shipped (fixed on
+branch 2026-09-16).** A raw scanner row's
+`net_vega` / `net_theta` are **`short − long`, NOT position-signed** — a credit
+spread carries POSITIVE vega and NEGATIVE theta — and `build_iron_condors` sums
+them the same way (it writes no `net_vega` at all, deliberately: the Market
+Scanner's composite reads a missing one as 0). `strategy_scanner._normalize_credit`
+copied that convention into the Finder's normalized contract, where every native
+family is position-signed, and an adapted IC read 0.0 from its vega-0 legs. So
+**every PCS, CCS and iron condor on the Strategy Finder and the Income Window
+passed the floor**, and `strategy_scoring.fit_vol` rewarded selling cheap
+volatility. Measured on prod's nightly Redis dumps: the **2026-09-14 Income board,
+two days after the gate shipped, was two IREN put credit spreads at IV rank 2.3**;
+B2's own verification had exercised a single-leg short, and its tests handed
+`swing_scan` invented rows (`{"type": "PCS", "net_vega": -0.31}`) no producer
+emits. **`shared.structures.position_greek(row, greek)` is now the one converter**:
+the explicit `entry_net_<greek>_position` wins (`screen_spreads` writes theta and
+vega, `build_iron_condors` vega, and an adapted row stamps both), else
+`−net_<greek>`. `paper_trader` reads through it too, because its credit branch gets
+raw rows AND Finder rows — negating a position-signed row again would book a credit
+spread as long vega — and it keeps writing the ledger's `net_theta` in the scanner
+convention the Paper page displays. ⚠ **Raw scanner rows keep the old convention**
+(`signal_recorder` stores it, the detail panel shows it), so anything new that reads
+a sign off a scanner row goes through `position_greek`, and any vega test builds its
+rows with the real producers over a chain whose greeks fall away from the money —
+a flat-vega chain makes every spread's net vega exactly 0 and hides this entirely
+(`services/options_svc/tests/test_vol_gate_on_real_rows.py`).
+
 ⚠ **That whole-list filter is a DIFFERENT expression in a different place, and it
 disagrees with `vol_gate` about absence on purpose.** It lives in
 `run_full_scan` over `signals_0dte` / `signals_swing`, and an **unknown** IV rank

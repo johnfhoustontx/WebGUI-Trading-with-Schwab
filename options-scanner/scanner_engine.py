@@ -38,6 +38,7 @@ sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo ro
 from shared.market_calendar import is_trading_day as _cal_is_trading_day  # noqa: E402
 from shared import scanner_config as _scfg  # noqa: E402
 from shared import vol_gate as _vol_gate  # noqa: E402
+from shared import structures as _structures  # noqa: E402
 from shared import iv_history as _iv_history  # noqa: E402
 from repo_paths import IV_HISTORY_DB  # noqa: E402
 
@@ -1217,6 +1218,9 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                         "net_vega": round((short["vega"] or 0) - (lo["vega"] or 0), 3),
                         "entry_net_delta_position": round((lo["delta"] or 0) - (short["delta"] or 0), 4),
                         "entry_net_theta_position": round((lo["theta"] or 0) - (short["theta"] or 0), 3),
+                        # Position-signed, beside the two above: ``net_vega`` is
+                        # short-minus-long, POSITIVE for a credit spread.
+                        "entry_net_vega_position": round((lo["vega"] or 0) - (short["vega"] or 0), 3),
                         "spread_bid": round((short.get("bid") or 0) - (lo.get("ask") or 0), 2),
                         "spread_ask": round((short.get("ask") or 0) - (lo.get("bid") or 0), 2),
                         "short_iv": round(short["iv"], 1), "breakeven": round(bk, 2),
@@ -1273,6 +1277,9 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                             "net_vega": round((short["vega"] or 0) - (lo["vega"] or 0), 3),
                             "entry_net_delta_position": round((lo["delta"] or 0) - (short["delta"] or 0), 4),
                             "entry_net_theta_position": round((lo["theta"] or 0) - (short["theta"] or 0), 3),
+                            # Position-signed, beside the two above: ``net_vega`` is
+                            # short-minus-long, POSITIVE for a credit spread.
+                            "entry_net_vega_position": round((lo["vega"] or 0) - (short["vega"] or 0), 3),
                             "spread_bid": round((short.get("bid") or 0) - (lo.get("ask") or 0), 2),
                             "spread_ask": round((short.get("ask") or 0) - (lo.get("bid") or 0), 2),
                             "short_iv": round(short["iv"], 1), "breakeven": round(bk, 2),
@@ -1333,6 +1340,13 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
     return results
 
 
+def _ic_position_vega(p, c):
+    """The iron condor's position-signed vega: its two verticals' sum, or None."""
+    pv = _structures.position_greek(p, "vega")
+    cv = _structures.position_greek(c, "vega")
+    return None if pv is None or cv is None else round(pv + cv, 3)
+
+
 def build_iron_condors(spreads, max_n=3):
     pcs = [s for s in spreads if s["type"] == "PCS"][:5]
     ccs = [s for s in spreads if s["type"] == "CCS"][:5]
@@ -1378,6 +1392,11 @@ def build_iron_condors(spreads, max_n=3):
                     "pop_pct": round(max(0.0, p["pop_pct"] + c["pop_pct"] - 100.0), 1),
                     "short_delta": round(p["short_delta"] + c["short_delta"], 4),
                     "net_theta": round(p["net_theta"] + c["net_theta"], 3),
+                    # Position-signed, and deliberately NOT a ``net_vega``: the Market
+                    # Scanner's composite reads a missing one as 0, so adding it would
+                    # move every IC score there. The Strategy Finder's adapter and the
+                    # Paper ledger are what need it - see structures.position_greek.
+                    "entry_net_vega_position": _ic_position_vega(p, c),
                     "breakeven": f"{p['breakeven']}/{c['breakeven']}",
                     "underlying_price": p["underlying_price"],
                     "timestamp": datetime.now(TZ).isoformat(),

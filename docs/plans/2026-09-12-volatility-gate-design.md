@@ -105,8 +105,10 @@ deliberately the minimal-policy choice — the same rule the rest of the app
 already lives under, which is what B2 literally asks for — and not the measured
 45, for the same reason: 45 is a level decision, and it belongs in one edit
 alongside the other two rather than being smuggled in on the one surface that had
-no floor to change. It cuts IREN (0.1) and CRWV (15.3) from the live board and
-keeps the two SPY rows at 34.9.
+no floor to change. It was meant to cut IREN (0.1) and CRWV (15.3) from the live
+board and keep the two SPY rows at 34.9 — and as first shipped it cut neither,
+because both are put credit spreads (see the 2026-09-16 correction under *The
+shape*).
 
 **Does not ship: the long-premium ceiling, enabled.** The mechanism ships and the
 config knob is one edit; the default is **off**. There is **no long-premium
@@ -151,6 +153,51 @@ returning `"IV_TOO_LOW"`, `"IV_TOO_HIGH"` or `None`. Three rules, each a decisio
 all 0. ⚠ `scanner_config.min_iv_rank()` is closed over `DEFAULTS["iv_rank"]` —
 `{k: sec.get(k, ...) for k in DEFAULTS[...]}` — so a key added to the **TOML
 alone is silently dropped**. Both halves, always; a test pins it.
+
+⚠ **Correction, 2026-09-16 — for the Finder and the Income Window this rule
+did not fire on a single credit spread or iron condor until the fix.** The vega sign it
+keys on was wrong on exactly those rows. `scanner_engine.screen_spreads` writes
+`net_vega = short.vega − long.vega`, **positive** for a credit spread (the
+scanner's convention, not the position's), `strategy_scanner._normalize_credit`
+copied it into the normalized contract unchanged, and `adapt_iron_condor`'s legs
+carry vega 0, so an IC read 0.0 — "neither side", ungated. What the gate DID
+catch on these surfaces was the natively built `SHORT_PUT` / `SHORT_CALL`, whose
+vega is position-signed from its legs; the verification below exercised one of
+those, and the call-site tests used invented rows (`{"type": "PCS",
+"net_vega": -0.31}`) that no producer emits.
+
+Measured on prod's nightly Redis dumps (`cache:options:income`, read-only):
+
+| board | rows | would the floor have refused them? |
+|---|---|---|
+| 2026-09-11 (before the gate) | IREN PCS 0.1 · SPY CCS 34.9 ×2 · XOM SHORT_PUT 69.2 · CRWV PCS 15.3 | IREN, CRWV — and, both being PCS, the gate as shipped would have kept them |
+| **2026-09-14** (gate live, 27 dropped) | IREN PCS 2.3 · IREN PCS 2.3 | **both — the whole board** |
+| 2026-09-15 (gate live, 29 dropped) | SPY CCS 40.9 ×3 | none |
+
+The 27 and 29 it did drop were single-leg shorts. The Strategy Finder snapshots
+on those days (TSLA, IV rank 23) held no credit rows, so the published cache
+shows no Finder leak, but it is the same `swing_scan` path.
+
+The same sign reached `strategy_scoring.fit_vol`, inverted: in a **low** regime
+a credit spread was scored as if long vega. On 2026-09-11 the SPY call spreads
+read fit_vol **57.1 / 57.3 where the position sign gives 42.9 / 42.7**, worth
+**−1.7 composite points** each, which moves XOM's short put from fourth to
+second. In a mid regime the tilt is ±5 points of fit_vol and moves composites by
+under 0.3.
+
+**The fix is in the data, not in `vol_gate`.** Classifying short premium from
+structure name or economics inside the gate would have fixed the gate and left
+`fit_vol` and the Finder's detail panel reading the wrong sign, beside native
+families that are position-signed in the same ranked table. Instead
+`_normalize_credit` converts through `shared.structures.position_greek`, which
+prefers an explicit `entry_net_<greek>_position` (`screen_spreads` now writes
+vega beside the theta and delta it already wrote; `build_iron_condors` writes the
+two sides' sum) and otherwise negates the scanner value. `paper_trader`'s credit
+branch reads through the same function because it receives both conventions.
+`webgui/pages/options/checks.py` classifies short premium by economics
+independently, which stays correct, because raw scanner rows still reach it.
+Pinned by `services/options_svc/tests/test_vol_gate_on_real_rows.py`, over the
+real producers.
 
 **Call sites, three:**
 

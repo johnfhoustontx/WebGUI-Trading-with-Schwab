@@ -18,6 +18,7 @@ docs/plans/2026-09-11-income-exit-rules-design.md §5.
 before testing and ``rescue`` did not, so the two genuinely disagreed about
 ``"short_put"``. One answer now, and it is the permissive one.
 """
+import math
 
 # The Income Window's cash-secured put. TWO spellings for ONE structure -
 # SHORT_PUT on the scan side, NAKED_PUT on the Calculator/rescue side - and both
@@ -117,3 +118,45 @@ def short_right(strategy) -> str:
 def option_legs(strategy) -> int:
     """Option legs it takes to close the position — the commission leg count."""
     return _LEGS.get(normalise(strategy), _DEFAULT_LEGS)
+
+
+# ── the scanner's greek sign convention ────────────────────────────────────
+
+def _finite(value):
+    """A real number or ``None`` (``bool`` and non-finite floats rejected)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    v = float(value)
+    return v if math.isfinite(v) else None
+
+
+def position_greek(row, greek):
+    """A scanner credit row's ``greek`` (``"theta"``/``"vega"``/``"delta"``) as the
+    POSITION holds it, or ``None`` when the row cannot say.
+
+    ⚠ **A scanner credit row's ``net_theta`` / ``net_vega`` are NOT
+    position-signed.** ``scanner_engine.screen_spreads`` writes them as
+    ``short.greek - long.greek`` - so a credit spread carries POSITIVE vega and
+    NEGATIVE theta, the opposite of what the position holds - and
+    ``build_iron_condors`` sums the two sides the same way. That convention is
+    load-bearing (``signal_recorder`` stores it, the Paper page displays it), so
+    it stays; what it must never do is reach anything that reads a position
+    sign. It did: ``strategy_scanner._normalize_credit`` copied it into the
+    Strategy Finder's normalized contract, where ``shared.vol_gate`` read every
+    credit spread as LONG premium and never applied the floor, and
+    ``strategy_scoring.fit_vol`` rewarded selling cheap volatility.
+
+    The explicit ``entry_net_<greek>_position`` field wins when the row carries
+    one (``screen_spreads`` writes delta, theta and vega; an adapted row carries
+    all it can). Otherwise the row is taken to be in the scanner convention and
+    its ``net_<greek>`` is negated - correct for a raw scanner row, and for an
+    adapted row cached before the explicit fields existed.
+    """
+    row = row or {}
+    explicit = _finite(row.get(f"entry_net_{greek}_position"))
+    if explicit is not None:
+        return explicit
+    legacy = _finite(row.get(f"net_{greek}"))
+    if legacy is None:
+        return None
+    return -legacy if legacy else 0.0

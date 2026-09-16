@@ -133,11 +133,13 @@ def _short_legs(row):
 def _is_short_premium(row):
     """Whether the trade SELLS premium, read from what it is and what it costs.
 
-    ⚠ Never from ``net_vega`` first. The scanner's ``net_vega`` is
-    ``short.vega - long.vega`` - POSITIVE for a credit spread - and
-    ``adapt_credit_spread`` carries it across unchanged, while an adapted iron
-    condor's legs carry vega 0. Reading its sign made every Finder credit spread
-    look like long premium.
+    ⚠ Never from ``net_vega`` first. A raw scanner row's ``net_vega`` is
+    ``short.vega - long.vega`` - POSITIVE for a credit spread - and until
+    2026-09-16 ``adapt_credit_spread`` carried it across unchanged while an
+    adapted iron condor read 0, so reading its sign made every Finder credit
+    spread look like long premium. The adapters now convert to position sign
+    (``shared.structures.position_greek``), but raw scanner rows still reach this
+    page in the old convention, so the economics stay first.
 
     Order: a known credit or debit structure name; then the economics (a
     positive per-share ``credit`` or ``net_credit`` with no positive

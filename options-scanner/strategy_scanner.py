@@ -20,9 +20,14 @@ produced by ``scanner_engine`` and only normalized here
 """
 import datetime as _dt
 import math
+import pathlib as _pathlib
+import sys as _sys
 
 import commissions as _cm
 import options_calculator as _oc
+
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import structures as _structures  # noqa: E402
 
 _GRID_LO, _GRID_HI, _GRID_N = 0.5, 1.5, 401   # ±50% of spot payoff grid
 
@@ -988,8 +993,9 @@ def _normalize_credit(sig, family, label, bias, legs, source_breakevens):
     Structural keys (breakevens/capital/rr/net_delta/net_gamma) are computed
     from the reconstructed legs via payoff_metrics; the source dict's
     authoritative economics (credit -> net_credit/max_profit, max_loss) and any
-    real source greeks (net_theta/net_vega/pop_pct) then RE-OVERRIDE so they win
-    over the leg-reconstructed zeros.
+    real source greeks (net_theta/net_vega, converted to POSITION sign - see
+    ``shared.structures.position_greek``) and pop_pct then RE-OVERRIDE so they
+    win over the leg-reconstructed zeros.
 
     ``source_breakevens`` are the structure-derived breakevens (short_strike
     -/+ credit). When the reconstructed legs have NO usable marks (all marks
@@ -1045,10 +1051,24 @@ def _normalize_credit(sig, family, label, bias, legs, source_breakevens):
         "unbounded": False, "unbounded_profit": False, "unbounded_loss": False,
         "timestamp": sig.get("timestamp") or _dt.datetime.now().isoformat(),
     })
-    # Keep authoritative source greeks/pop where present (don't let leg=0 clobber).
-    for k in ("net_theta", "net_vega", "pop_pct"):
-        if sig.get(k) is not None:
-            out[k] = sig[k]
+    # Keep the authoritative source PoP where present (don't let leg=0 clobber).
+    if sig.get("pop_pct") is not None:
+        out["pop_pct"] = sig["pop_pct"]
+    # The source greeks win over the legs' zeros too - but CONVERTED. The
+    # scanner writes ``net_theta``/``net_vega`` as short-minus-long (a credit
+    # spread's vega POSITIVE), while this contract is position-signed like every
+    # natively built family beside it in the Finder's one ranked table. Copied
+    # straight across, ``shared.vol_gate`` read every credit spread and iron
+    # condor as LONG premium and never applied the floor (the 2026-09-14 Income
+    # board was two IREN put spreads at IV rank 2.3), and ``fit_vol`` rewarded
+    # selling cheap volatility. The explicit position fields are stamped too, so
+    # ``paper_trader`` - which gets both raw scanner rows and these - never has to
+    # guess which convention it was handed.
+    for greek in ("theta", "vega"):
+        pos = _structures.position_greek(sig, greek)
+        if pos is not None:
+            out[f"net_{greek}"] = pos
+            out[f"entry_net_{greek}_position"] = pos
     return out
 
 

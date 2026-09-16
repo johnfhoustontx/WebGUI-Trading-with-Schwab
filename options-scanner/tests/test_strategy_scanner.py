@@ -288,7 +288,12 @@ def test_adapt_credit_spread_pcs_to_normalized():
            "expiration": "2026-07-10", "dte": 10, "short_strike": 445.0,
            "long_strike": 440.0, "short_mark": 3.5, "long_mark": 1.8,
            "credit": 1.7, "max_loss": 3.3, "pop_pct": 68.0, "underlying_price": 450.0,
-           "short_delta": -0.32, "net_theta": 0.04, "net_vega": -0.02}
+           # The scanner's own convention: short minus long, so a credit spread
+           # carries NEGATIVE theta and POSITIVE vega. This fixture used to hand
+           # the adapter position-signed values and assert they survived, which
+           # is how the adapter's copy-across passed while the Finder's credit
+           # rows reached vol_gate and fit_vol with the wrong sign.
+           "short_delta": -0.32, "net_theta": -0.04, "net_vega": 0.02}
     n = ss.adapt_credit_spread(pcs)
     assert n["family"] == "VERTICAL" and n["bias"] == "bullish"
     # per-contract dollars net of commission (2 legs x 0.65 x 2 = 2.60):
@@ -305,7 +310,8 @@ def test_adapt_credit_spread_pcs_to_normalized():
     assert n["rr"] is not None
     assert n["net_delta"] is not None
     assert n["timestamp"] is not None
-    assert n["net_theta"] == 0.04 and n["net_vega"] == -0.02  # source greeks win
+    # source greeks win over the legs' zeros, converted to POSITION sign
+    assert n["net_theta"] == 0.04 and n["net_vega"] == -0.02
     assert n["net_debit"] is None and n["unbounded"] is False
 
 

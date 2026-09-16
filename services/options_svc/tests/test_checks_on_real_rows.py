@@ -3,8 +3,8 @@
 ``webgui/pages/options/checks`` is unit-tested over hand-written fixtures, and
 that is exactly how its first short-premium rule shipped wrong: the scanner's
 ``net_vega`` is ``short.vega - long.vega`` (POSITIVE for a credit spread, not
-position-signed), ``adapt_credit_spread`` carries it across unchanged, and an
-adapted iron condor's legs carry vega 0. Measured on these producers, a Finder
+position-signed), ``adapt_credit_spread`` carried it across unchanged until
+2026-09-16, and an adapted iron condor's legs carry vega 0. Measured on these producers, a Finder
 put or call credit spread lost its Vol rank / Expected move / Walls / Dealer
 gamma lines and a Finder iron condor read "Clear · 3 checked". A fixture written
 to the assumption cannot see that; only the producers can.
