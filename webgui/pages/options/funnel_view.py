@@ -106,6 +106,14 @@ STOP_UNKNOWN = "The scan stopped on this symbol before it reached a chain."
 NOT_SCANNED = "This symbol was not in the last scan."
 NO_BUCKET = "The scan recorded no account of this window for this symbol."
 NO_CHAIN = "The scan could not read an options chain for this window."
+# ⚠ NOT the same absence as NO_CHAIN, and the difference is the whole point:
+# the expirations WERE listed, the underlying price was not, so screen_spreads
+# returns before it counts a single strike. Saying "no expiration was listed"
+# here - which the zero-filled tally would otherwise produce - is false.
+# The engine flags it per WINDOW (`underlying_zero`, on the two spread buckets
+# only; DIRECTIONAL takes its spot from the quote), never as a symbol `stop`.
+NO_UNDERLYING = ("The chain for this window carried no underlying price, so "
+                 "nothing could be measured against it.")
 STALE = "From an earlier scan."
 
 
@@ -404,6 +412,8 @@ def bucket_card(entry, bucket, symbol=None, note=None):
     else:
         if not b.get("chain"):
             return card(NO_CHAIN)
+        if b.get("underlying_zero"):
+            return card(NO_UNDERLYING)
         stages = _strike_stages(b.get("strikes")) + \
             _spread_stages(b.get("spreads"))
 

@@ -747,3 +747,66 @@ def test_width_stages_mirror_the_engines_tuple():
     assert block, "the engine's WIDTH_STAGES moved"
     names = tuple(re.findall(r'"([a-z_]+)"', block.group(1)))
     assert names == fv.WIDTH_STAGES, (names, fv.WIDTH_STAGES)
+
+
+# ── a chain that arrived with no underlying price (engine commit 7c8b19f) ───
+
+def test_a_chain_with_no_underlying_price_says_so_not_no_chain():
+    """``chain: True, underlying_zero: True`` is NOT the no-chain case: the
+    expirations WERE listed, the spot was not, and ``screen_spreads`` returns
+    before counting - so the zero-filled strike tally must not be read as
+    "no expiration was listed" (engine commit 7c8b19f).
+    """
+    e = _entry()
+    e["buckets"]["SWING"].update({"chain": True, "underlying_zero": True,
+                                  "strikes": _zeroed_strikes()})
+    card = fv.bucket_card(e, "SWING", symbol="MU")
+    assert card["stages"] == []
+    assert card["headline"].endswith(fv.NO_UNDERLYING)
+    assert card["headline"] != _prefixed(fv.NO_CHAIN)
+    assert "no expiration" not in card["headline"].lower()
+
+
+def test_no_chain_still_reads_as_no_chain_when_the_flag_is_false():
+    """The engine leaves ``underlying_zero`` False when no chain arrived at
+    all; the two absences must keep reading differently."""
+    e = _entry()
+    e["buckets"]["SWING"].update({"chain": False, "underlying_zero": False})
+    card = fv.bucket_card(e, "SWING", symbol="MU")
+    assert card["headline"] == _prefixed(fv.NO_CHAIN)
+
+
+def test_the_flag_is_ignored_once_a_chain_carried_a_price():
+    e = _entry()
+    e["buckets"]["SWING"]["underlying_zero"] = False
+    card = fv.bucket_card(e, "SWING", symbol="MU")
+    assert card["stages"], "the normal path must still count"
+
+
+def test_a_payload_published_before_the_flag_existed_still_reads():
+    """``underlying_zero`` is absent from every funnel published before
+    7c8b19f, and ``strikes`` was ``{}`` rather than zero-filled there."""
+    e = _entry()
+    e["buckets"]["SWING"] = {"chain": True, "strikes": {},
+                             "spreads": _spreads(emitted=0)}
+    card = fv.bucket_card(e, "SWING", symbol="MU")
+    assert fv.LABELS["built"] in _labels(card)
+    assert fv.NO_UNDERLYING not in card["headline"]
+
+
+def test_a_zero_filled_tally_still_names_the_delta_band():
+    """The post-7c8b19f shape for a window that read a chain and found no
+    listed expiration: every counter present and zero."""
+    e = _entry()
+    e["buckets"]["SWING"].update({"chain": True, "underlying_zero": False,
+                                  "strikes": _zeroed_strikes()})
+    card = fv.bucket_card(e, "SWING", symbol="MU")
+    assert _binding(card) == [fv.LABELS["delta_band"]]
+
+
+def _zeroed_strikes():
+    return {k: (0 if k != "width_reasons" else {}) for k in _strikes()}
+
+
+def _prefixed(sentence):
+    return f"MU · {fv.BUCKET_LABELS['SWING']}: {sentence}"
