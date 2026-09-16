@@ -246,8 +246,11 @@ def test_option_expiration_rows_returns_typed_rows(monkeypatch):
 
     monkeypatch.setattr(compute._proxy.schwab_py_client, "get_option_expirations",
                         _exps, raising=False)
-    # Every row carries a usable daysToExpiration, so the host date is never read.
-    assert compute.option_expiration_rows("$SPX") == SPX_ROWS
+    # ``today`` is load-bearing even though every row carries a daysToExpiration:
+    # the plausibility check compares that number to the calendar difference, so
+    # without it this test read the HOST date and failed from 2026-09-16, once the
+    # fixture's 09-14 fell more than a day behind.
+    assert compute.option_expiration_rows("$SPX", today=TODAY) == SPX_ROWS
     assert seen == ["$SPX"]
 
 

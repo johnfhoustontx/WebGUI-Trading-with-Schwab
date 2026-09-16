@@ -11,6 +11,7 @@ bucket spans DTE 0..4 (so an overnight hold in it can straddle a report) while
 this filter still keyed off the bare tuple, which exempts the whole bucket.
 """
 import ast
+import datetime as dt
 import pathlib
 
 import pytest
@@ -19,8 +20,17 @@ from services.options_svc import compute
 
 se = compute.se
 
+# Relative to the engine's own "today" (America/Chicago), never absolute:
+# check_earnings_conflict only counts a report from today-5 days onward, so the
+# original fixed 2026-09-10 report aged out of that window on 2026-09-16 and every
+# "was dropped" case below started failing. The September ORCL shape is kept:
+# report one day out, expiry the day after.
+_TODAY = dt.datetime.now(se.TZ).date()
+REPORT = (_TODAY + dt.timedelta(days=1)).isoformat()
+EXPIRY = (_TODAY + dt.timedelta(days=2)).isoformat()
 
-def _sig(dte, expiration="2026-09-11"):
+
+def _sig(dte, expiration=EXPIRY):
     return {"symbol": "ORCL", "type": "PCS", "short_strike": 145.0,
             "long_strike": 143.0, "short_mark": 1.2, "long_mark": 0.6,
             "credit": 0.44, "max_loss": 1.56, "expiration": expiration,
@@ -63,21 +73,21 @@ class TestTheTwoHalvesAgree:
     def test_the_filter_drops_exactly_what_the_engine_would(
             self, trade_type, dte, monkeypatch):
         kept = _run_swing_scan(monkeypatch, trade_type=trade_type, dte=dte,
-                               earnings_date="2026-09-10")
+                               earnings_date=REPORT)
         expected_dropped = se.earnings_gate_applies(trade_type, dte)
         assert (kept == []) is expected_dropped
 
 
 class TestTheSeptemberOrclCase:
     def test_a_three_day_hold_in_the_zero_dte_bucket_is_dropped(self, monkeypatch):
-        """dte 3, expiry 09-11, report 09-10 -- the shape that was captured
-        sixteen times on 2026-09-08."""
+        """dte 3, report tomorrow, expiry the day after -- the shape that was
+        captured sixteen times on 2026-09-08 (report 09-10, expiry 09-11)."""
         assert _run_swing_scan(monkeypatch, trade_type="0-DTE", dte=3,
-                               earnings_date="2026-09-10") == []
+                               earnings_date=REPORT) == []
 
     def test_a_same_day_expiry_keeps_its_exemption(self, monkeypatch):
         assert _run_swing_scan(monkeypatch, trade_type="0-DTE", dte=0,
-                               earnings_date="2026-09-10") != []
+                               earnings_date=REPORT) != []
 
     def test_no_earnings_date_drops_nothing(self, monkeypatch):
         assert _run_swing_scan(monkeypatch, trade_type="0-DTE", dte=3,
