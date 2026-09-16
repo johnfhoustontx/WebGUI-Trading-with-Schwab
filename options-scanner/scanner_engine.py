@@ -1679,8 +1679,58 @@ def _record_iv_snapshot(symbol, chain_iv, hist, spot=None):
                 pass
 
 
-def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
-    """Execute one full scan cycle. Returns structured results dict."""
+def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
+                  collect_funnel=True):
+    """Execute one full scan cycle. Returns structured results dict.
+
+    ``results["funnel"]`` is a PER-SYMBOL account of why that symbol did or did
+    not produce a signal, so a page can answer "why was there no trade on this
+    name today?" instead of only "no signals". Its shape, per symbol::
+
+        {"price": float|None,          # the quote; None = Schwab did not quote it
+         "iv_rank": float|None,        # what this scan's IV analysis measured
+         "earnings_date": str|None,    # the date the earnings gate read
+         "stop": None|"no_quote"|"no_data",
+         "buckets": {"0DTE": …, "SWING": …, "DIRECTIONAL": …}}
+
+    ⚠ The bucket keys are ``0DTE``/``SWING``, the spelling ``signal_recorder``
+    records and ``shared.calibration`` buckets on — NOT the engine's own
+    ``trade_type`` string ``"0-DTE"``. One name for one bucket across tiers is
+    exactly what ``test_cross_tier_mirrors`` exists to protect.
+
+    A spread bucket carries ``chain`` (the window's chain was usable), ``strikes``
+    (``screen_spreads``' own reject tally — see its docstring) and ``spreads``:
+
+    ``built``             signals ``screen_spreads`` returned.
+    ``momentum_veto``     of those, dropped by the intraday momentum veto.
+    ``iron_condors``      condors BUILT from the survivors — new rows, not
+                          survivors, which is why ``kept_after_cap`` can exceed
+                          ``built - momentum_veto``.
+    ``kept_after_cap``    what the per-symbol cap (top-3 PCS + top-3 CCS) plus
+                          those condors actually added to the list.
+    ``regime_pass_added`` rows the LATER regime-gated directional pass added to
+                          the same list for this symbol. That pass runs its own
+                          delta band, so it deliberately contributes nothing to
+                          ``strikes`` — mixing two passes' strike counts would
+                          make neither readable.
+    ``below_iv_floor`` / ``no_iv_history`` / ``regime_filter`` / ``gamma_gate``
+                          rows the four post-scoring filters removed.
+    ``emitted``           this symbol's rows in the final list. Terminal.
+
+    The ``DIRECTIONAL`` bucket is the single-leg pass, which has no strike-level
+    funnel of its own, and partitions exactly::
+
+        built == vol_gate + score_cut + capped + emitted
+
+    beside ``windows_without_candidates`` (a window whose chain was read and
+    offered nothing) and ``build_failed`` (that whole block is wrapped in a bare
+    ``except`` — without the flag a crash reads as an honest zero).
+
+    ``collect_funnel=False`` is the EQUIVALENCE LEVER: counting must never move a
+    decision, and ``TestScanFunnel`` proves that by running the same scan both
+    ways rather than by inspection. The key is present either way (``{}`` when
+    off) so a consumer never has to care which it got.
+    """
     from iv_analysis import run_iv_analysis
     from scoring import score_all_signals, score_iron_condor, calc_composite_score
     from gamma_tool import GammaEngine, get_gex_walls, calc_dex_from_chain, get_dex_walls, get_directional_walls
@@ -1705,6 +1755,7 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
         "signals_directional": [],
         "errors": [],
         "warnings": [],
+        "funnel": {},
     }
     if wl_warning:
         results["warnings"].append(wl_warning)
@@ -1820,11 +1871,69 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
     # which is exactly the pre-existing behaviour for that symbol.
     earnings_by_symbol = scan_earnings_dates(symbols)
 
+    # ── The per-symbol funnel (design 2026-09-15, Part 3) ───────────────────
+    # Seeded for EVERY requested symbol, ahead of the loop that skips the
+    # unquotable ones: a symbol missing from the funnel entirely is the one
+    # shape the page cannot render a reason for.
+    funnel = results["funnel"]
+
+    def _spread_bucket():
+        return {"chain": False, "strikes": {}, "spreads": {
+            "built": 0, "momentum_veto": 0, "iron_condors": 0,
+            "kept_after_cap": 0, "regime_pass_added": 0, "regime_filter": 0,
+            "below_iv_floor": 0, "no_iv_history": 0, "gamma_gate": 0,
+            "emitted": 0}}
+
+    if collect_funnel:
+        for _sym in symbols:
+            funnel[_sym] = {
+                "price": prices.get(_sym) or None,
+                "iv_rank": None,
+                "earnings_date": earnings_by_symbol.get(_sym),
+                "stop": None,
+                "buckets": {
+                    "0DTE": _spread_bucket(), "SWING": _spread_bucket(),
+                    "DIRECTIONAL": {"windows_without_candidates": 0, "built": 0,
+                                    "vol_gate": 0, "score_cut": 0, "capped": 0,
+                                    "emitted": 0, "build_failed": False}},
+            }
+
+    def _bucket(sym, name):
+        """The symbol's bucket, or None when collection is off — every call site
+        is guarded on that None, so the OFF path touches nothing."""
+        entry = funnel.get(sym)
+        return entry["buckets"][name] if entry else None
+
+    def _count_removed(name, field, before, after):
+        """Attribute a post-scoring filter's drops per symbol.
+
+        The filters take a whole list at a time, so the only honest reading is a
+        DIFF of the per-symbol counts either side of the step. Accumulates, like
+        every other counter here.
+        """
+        if not collect_funnel:
+            return
+        for sym, n in before.items():
+            gone = n - after.get(sym, 0)
+            b = _bucket(sym, name)
+            if gone and b is not None:
+                b["spreads"][field] += gone
+
+    def _by_symbol(rows):
+        return Counter(r.get("symbol") for r in rows)
+
     # Serial processing over pre-fetched data — all CPU-bound, no I/O.
     gex_context = {}  # symbol -> {"band", "walls"} for index dealer-gamma gate
     for symbol in symbols:
         data = per_sym.get(symbol)
         if data is None:
+            entry = funnel.get(symbol)
+            if entry is not None:
+                # A price of 0 is a quote the scan cannot use, which is why it
+                # reads the same as never having been quoted. "no_data" is the
+                # defensive other half — a symbol that WAS quoted and still came
+                # back with nothing — and is unreachable on today's fetch path.
+                entry["stop"] = "no_quote" if not prices.get(symbol) else "no_data"
             continue
         price = data["price"]
         tech = calc_technicals(data["hist"])
@@ -1832,6 +1941,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
 
         iv_data = data["iv_data"]
         results["iv_data"][symbol] = iv_data
+        if funnel.get(symbol) is not None:
+            funnel[symbol]["iv_rank"] = iv_data.get("iv_rank")
         # Daily volatility snapshot (gap assessment C3) - off the IV-window chain
         # and price history this loop already has, so no Schwab call. Never raises.
         _record_iv_snapshot(symbol, data.get("chain_iv"), data.get("hist"),
@@ -1847,7 +1958,10 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
 
         # 0-DTE
         chain_0 = data["chain_0"]
+        bucket_0 = _bucket(symbol, "0DTE")
         if chain_0 and chain_0.get("status") != "FAILED":
+            if bucket_0 is not None:
+                bucket_0["chain"] = True
             # Compute GEX + DEX walls for 0-DTE short strike proximity scoring
             gamma_engine = GammaEngine()
             gex_data = gamma_engine.calc_from_chain(chain_0)
@@ -1870,13 +1984,16 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                                   spot=price, daily_expected_move=daily_em,
                                   account_size=account_size, max_risk_pct=max_risk_pct,
                                   now_ct=datetime.now(TZ),
-                                  earnings_date=earnings_by_symbol.get(symbol))
+                                  earnings_date=earnings_by_symbol.get(symbol),
+                                  funnel=(bucket_0["strikes"]
+                                          if bucket_0 is not None else None))
 
             # Attach walls to every signal for scoring
             for s in sigs:
                 s["gex_walls"] = gex_walls
                 s["dex_walls"] = dex_walls
 
+            built_0 = len(sigs)
             sigs = _apply_momentum_veto(sigs, move_ratio)
             ics = build_iron_condors(sigs, 2)
             for ic in ics:
@@ -1885,11 +2002,21 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
 
             pcs = [s for s in sigs if s["type"] == "PCS"][:3]
             ccs = [s for s in sigs if s["type"] == "CCS"][:3]
-            results["signals_0dte"].extend(pcs + ccs + ics)
+            kept_0 = pcs + ccs + ics
+            results["signals_0dte"].extend(kept_0)
+            if bucket_0 is not None:
+                sp = bucket_0["spreads"]
+                sp["built"] += built_0
+                sp["momentum_veto"] += built_0 - len(sigs)
+                sp["iron_condors"] += len(ics)
+                sp["kept_after_cap"] += len(kept_0)
 
         # Swing
         chain_s = data["chain_s"]
+        bucket_s = _bucket(symbol, "SWING")
         if chain_s and chain_s.get("status") != "FAILED":
+            if bucket_s is not None:
+                bucket_s["chain"] = True
             pd_min_s, pd_max_s = -DELTA_SANITY_MAX, -1e-6
             cd_min_s, cd_max_s =  1e-6,  DELTA_SANITY_MAX
             min_cr_s = get_min_credit_pct(regime_label, "SWING")
@@ -1897,16 +2024,31 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                                   spot=price, daily_expected_move=daily_em,
                                   account_size=account_size, max_risk_pct=max_risk_pct,
                                   now_ct=datetime.now(TZ),
-                                  earnings_date=earnings_by_symbol.get(symbol))
+                                  earnings_date=earnings_by_symbol.get(symbol),
+                                  funnel=(bucket_s["strikes"]
+                                          if bucket_s is not None else None))
+            built_s = len(sigs)
             sigs = _apply_momentum_veto(sigs, move_ratio)
             ics = build_iron_condors(sigs, 2)
             pcs = [s for s in sigs if s["type"] == "PCS"][:3]
             ccs = [s for s in sigs if s["type"] == "CCS"][:3]
-            results["signals_swing"].extend(pcs + ccs + ics)
+            kept_s = pcs + ccs + ics
+            results["signals_swing"].extend(kept_s)
+            if bucket_s is not None:
+                sp = bucket_s["spreads"]
+                sp["built"] += built_s
+                sp["momentum_veto"] += built_s - len(sigs)
+                sp["iron_condors"] += len(ics)
+                sp["kept_after_cap"] += len(kept_s)
 
         # --- Single-leg directional candidates (own tab, own scorer) ---
         # Lazy import: strategy_scoring lazy-imports options-scanner's `scoring`
         # for its liquidity normalizer; keep the binding local to the call.
+        #
+        # ⚠ Resolved BEFORE the try, not inside it: the block opens with two lazy
+        # imports, so an ImportError would leave the name unbound and the except
+        # clause below would raise NameError over the real failure.
+        bucket_d = _bucket(symbol, "DIRECTIONAL")
         try:
             import strategy_scanner as _ssn
             import strategy_scoring as _ssc
@@ -1934,6 +2076,11 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                     continue
                 win_sigs = _ssn.build_directional(_chain, symbol, price, atm_iv, _lo, _hi)
                 if not win_sigs:
+                    # A window whose chain WAS read and offered nothing. A window
+                    # with no chain at all took the `continue` above and is
+                    # reported by the spread bucket's `chain` instead.
+                    if bucket_d is not None:
+                        bucket_d["windows_without_candidates"] += 1
                     continue
                 # The breakeven-vs-EM quality factor judges each candidate against
                 # the 1-sigma move to ITS OWN expiry: ``daily_move`` makes
@@ -1976,17 +2123,28 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                              f"{len(_scored) - len(_kept)} single-leg candidates "
                              f"removed for {symbol} (IV Rank "
                              f"{iv_data.get('iv_rank')})")
+                if bucket_d is not None:
+                    # `built` counts what reached the gates, i.e. the SCORED
+                    # rows: `score_all` returns one row per candidate (it
+                    # neutralises a failure rather than dropping it), so this is
+                    # `len(win_sigs)` on every shape this builder produces — and
+                    # taking it here is what makes the bucket partition exactly.
+                    bucket_d["built"] += len(_scored)
+                    bucket_d["vol_gate"] += len(_scored) - len(_kept)
                 dir_sigs += _kept
 
             # Drop everything that isn't worth showing, BEFORE the cap below --
             # otherwise a symbol whose best candidates are Weak spends its cap
             # slots on rows that are then dropped, emitting fewer than the cap's
             # worth of tradeable ideas.
+            _before_cut = len(dir_sigs)
             dir_sigs = [
                 s for s in dir_sigs
                 if (s.get("composite_score") or 0) >= SINGLE_LEG_MIN_SCORE
                 and s.get("grade") not in SINGLE_LEG_EXCLUDED_GRADES
             ]
+            if bucket_d is not None:
+                bucket_d["score_cut"] += _before_cut - len(dir_sigs)
 
             if dir_sigs:
                 # CURRENTLY INERT: _DIRECTIONAL has 4 entries x 2 windows = 8 ==
@@ -1997,8 +2155,14 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 # separately-sorted windows would truncate to an ARBITRARY 8 rather
                 # than the best 8. Sorting here keeps the cap meaning "the best".
                 dir_sigs.sort(key=lambda x: (x.get("composite_score") or 0), reverse=True)
-                results["signals_directional"].extend(
-                    dir_sigs[:SINGLE_LEG_MAX_PER_SYMBOL])
+                _capped = dir_sigs[:SINGLE_LEG_MAX_PER_SYMBOL]
+                if bucket_d is not None:
+                    # Counted even though the cap is CURRENTLY INERT (see above):
+                    # a zero here is the evidence for that claim, and the moment
+                    # _DIRECTIONAL grows it stops being zero without anyone
+                    # having to remember to start counting.
+                    bucket_d["capped"] += len(dir_sigs) - len(_capped)
+                results["signals_directional"].extend(_capped)
         except Exception:  # noqa: BLE001
             # Single-leg directional is additive -- never let it break the
             # credit-spread scan. log.exception (not warning): this try spans two
@@ -2007,6 +2171,11 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
             # per-symbol warning forever. Matches gex_collector.py's
             # degrade-and-continue convention; keeps the swallow, keeps the frame.
             log.exception(f"  single-leg directional build for {symbol} failed")
+            # ⚠ The trace is in the log, but the FUNNEL is what the page reads:
+            # without this flag a crashed build renders as a bucket of zeroes,
+            # indistinguishable from a chain that honestly offered nothing.
+            if bucket_d is not None:
+                bucket_d["build_failed"] = True
 
     # --- Directional pass (regime-gated) ---
     # Evaluate the regime ONCE — both the directional pass and the late
@@ -2074,6 +2243,12 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 dir_sigs_0 = [s for s in dir_sigs_0 if s["type"] == directional_side]
                 dir_sigs_0 = dir_sigs_0[:DIRECTIONAL_MAX_PER_SYMBOL_BUCKET]
                 results["signals_0dte"].extend(dir_sigs_0)
+                # ⚠ No `funnel=` on that screen_spreads call: this pass runs its
+                # OWN delta band, so folding its strike counts into the bucket's
+                # `strikes` would leave neither pass readable.
+                _b = _bucket(symbol, "0DTE")
+                if _b is not None:
+                    _b["spreads"]["regime_pass_added"] += len(dir_sigs_0)
 
             # SWING bucket
             chain_s = data.get("chain_s")
@@ -2094,14 +2269,20 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 dir_sigs_s = [s for s in dir_sigs_s if s["type"] == directional_side]
                 dir_sigs_s = dir_sigs_s[:DIRECTIONAL_MAX_PER_SYMBOL_BUCKET]
                 results["signals_swing"].extend(dir_sigs_s)
+                _b = _bucket(symbol, "SWING")
+                if _b is not None:
+                    _b["spreads"]["regime_pass_added"] += len(dir_sigs_s)
 
     # Sentiment/trend regime filter — drop signals on the structurally-doomed
     # side based on the SentimentDashboard bridge + per-symbol technical trend.
     # Reuses `sentiment_regime` evaluated once above.
     if sentiment_regime.get("active"):
         log.info(f"Sentiment regime: {sentiment_regime.get('reason')}")
-        results["signals_0dte"] = filter_signals(results["signals_0dte"], sentiment_regime)
-        results["signals_swing"] = filter_signals(results["signals_swing"], sentiment_regime)
+        for _key, _name in (("signals_0dte", "0DTE"), ("signals_swing", "SWING")):
+            _before = _by_symbol(results[_key])
+            results[_key] = filter_signals(results[_key], sentiment_regime)
+            _count_removed(_name, "regime_filter",
+                           _before, _by_symbol(results[_key]))
 
     #############################################
     # COMPOSITE SCORING
@@ -2156,23 +2337,52 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
                 s.pop("_pcs_signal", None)
                 s.pop("_ccs_signal", None)
 
-    # IV Rank hard floor — reject signals where IV is historically cheap
-    for trade_type, sig_list_key in [("0-DTE", "signals_0dte"), ("SWING", "signals_swing")]:
+    # IV Rank hard floor — reject signals where IV is historically cheap.
+    #
+    # The old one-liner was `(… .get("iv_rank") or 0) >= min_rank`, which refused
+    # an UNKNOWN rank and a CHEAP one through the same expression and said
+    # neither out loud. ⚠ 2026-09-15 operator decision: an unknown rank is STILL
+    # refused — nothing here may sell premium against a volatility reading it
+    # does not have — but it is now a named refusal, because "we have no history
+    # for this name" and "this name is cheap today" are different facts and only
+    # one of them is about today's market.
+    #
+    # ⚠ The row set is IDENTICAL, and staying identical is the whole constraint:
+    # `not (rank >= min_rank)` rather than `rank < min_rank` so a NaN rank still
+    # DROPS, exactly as `(nan or 0) >= min_rank` did. The naive spelling would
+    # have kept it (every comparison against a NaN is False) — the pins-the-bound
+    # trap running the other way. `TestNoIvHistoryIsANamedRefusal` proves the
+    # equivalence against the old expression written out literally.
+    for trade_type, sig_list_key, bucket_name in [
+            ("0-DTE", "signals_0dte", "0DTE"), ("SWING", "signals_swing", "SWING")]:
         min_rank = MIN_IV_RANK.get(trade_type, 0)
         if min_rank > 0:
             original_count = len(results[sig_list_key])
-            results[sig_list_key] = [
-                s for s in results[sig_list_key]
-                if (results["iv_data"].get(s["symbol"], {}).get("iv_rank") or 0) >= min_rank
-            ]
+            kept = []
+            for s in results[sig_list_key]:
+                rank = results["iv_data"].get(s["symbol"], {}).get("iv_rank")
+                if rank is None:
+                    _b = _bucket(s["symbol"], bucket_name)
+                    if _b is not None:
+                        _b["spreads"]["no_iv_history"] += 1
+                elif not (rank >= min_rank):
+                    _b = _bucket(s["symbol"], bucket_name)
+                    if _b is not None:
+                        _b["spreads"]["below_iv_floor"] += 1
+                else:
+                    kept.append(s)
+            results[sig_list_key] = kept
             filtered = original_count - len(results[sig_list_key])
             if filtered:
                 log.info(f"  [{trade_type}] IV Rank floor: {filtered} signals removed (IV Rank < {min_rank})")
 
     # Dealer-gamma regime gate (index premium only; directional pass exempt)
-    for key in ("signals_0dte", "signals_swing"):
+    for key, bucket_name in (("signals_0dte", "0DTE"), ("signals_swing", "SWING")):
         before = len(results[key])
+        before_by_sym = _by_symbol(results[key])
         results[key] = apply_gex_gate(results[key], gex_context)
+        _count_removed(bucket_name, "gamma_gate", before_by_sym,
+                       _by_symbol(results[key]))
         dropped = before - len(results[key])
         if dropped:
             log.info(f"  GEX-regime gate: {dropped} index signals removed ({key})")
@@ -2182,6 +2392,20 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05):
     results["signals_swing"].sort(key=lambda x: (x.get("composite_score", 0), x.get("rr_pct", 0)), reverse=True)
     results["signals_directional"].sort(
         key=lambda x: (x.get("composite_score") or 0), reverse=True)
+
+    # The funnel's terminal number, read straight off the finished lists rather
+    # than accumulated — every gate above has run, so this is the count the page
+    # renders beside the reasons. ASSIGNED, not added to: it is what SURVIVED,
+    # not another thing that happened.
+    if collect_funnel:
+        for key, bucket_name in (("signals_0dte", "0DTE"),
+                                 ("signals_swing", "SWING"),
+                                 ("signals_directional", "DIRECTIONAL")):
+            counts = _by_symbol(results[key])
+            for sym, entry in funnel.items():
+                b = entry["buckets"][bucket_name]
+                target = b if bucket_name == "DIRECTIONAL" else b["spreads"]
+                target["emitted"] = counts.get(sym, 0)
 
     # Add position sizing to all signals
     for sig_list in [results["signals_0dte"], results["signals_swing"]]:

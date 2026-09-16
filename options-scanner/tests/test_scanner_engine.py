@@ -2707,3 +2707,267 @@ class TestWidthSearchSizesAgainstTheRealBook:
         import scanner_engine as se
 
         assert se.DEFAULT_MAX_RISK_DOLLARS == config_paper.MAX_RISK_PER_TRADE
+
+
+# ── The per-symbol scan funnel ───────────────────────────────────────────────
+
+_FUNNEL_SYMBOLS = ["SPY", "QQQ"]
+
+
+def _pin_iv_ranks(monkeypatch, ranks):
+    """Move ONLY the ``iv_rank`` the scan reads, leaving every other input alone.
+
+    The fixture's IV analysis is real (it measures SPY 100, QQQ 50), so WRAPPING
+    it rather than replacing it keeps the pre-floor signal set exactly the one
+    every other test in this file sees — which is what makes the "the kept set
+    did not move" comparison below mean anything.
+
+    ``"*"`` pins every symbol; a symbol named by neither key keeps its REAL
+    measured rank, which is what lets one test pin SPY and leave QQQ as the
+    untouched control in the same scan.
+    """
+    import iv_analysis
+
+    real = iv_analysis.run_iv_analysis
+
+    def _wrapped(client, symbol, **kw):
+        data = real(client, symbol, **kw)
+        if symbol in ranks:
+            data["iv_rank"] = ranks[symbol]
+        elif "*" in ranks:
+            data["iv_rank"] = ranks["*"]
+        return data
+
+    monkeypatch.setattr(iv_analysis, "run_iv_analysis", _wrapped)
+
+
+def _signal_ids(signals):
+    """A stable identity per signal: the whole row minus its wall-clock stamp.
+
+    Stronger than a strike tuple — it catches a funnel that changed a SCORE or a
+    sizing field as well as one that dropped a row.
+    """
+    import json as _json
+
+    return sorted(_json.dumps({k: v for k, v in s.items() if k != "timestamp"},
+                              sort_keys=True, default=str) for s in signals)
+
+
+def _per_symbol(signals):
+    from collections import Counter as _Counter
+
+    return _Counter(s.get("symbol") for s in signals)
+
+
+def _boom(*a, **k):
+    raise RuntimeError("boom")
+
+
+class TestScanFunnel:
+    """``results["funnel"]`` — why each symbol did or did not produce a signal.
+
+    The funnel is COUNTING ONLY: ``collect_funnel=False`` is the equivalence
+    lever, and the first test here is the one that matters — a funnel that moved
+    a gate would change which trades the app emits, silently and everywhere.
+    """
+
+    def test_the_funnel_never_changes_the_signals(self, fake_client):
+        """Equivalence: the three lists are identical with collection on and off."""
+        with_funnel = scanner_engine.run_full_scan(
+            fake_client, symbols=_FUNNEL_SYMBOLS)
+        without = scanner_engine.run_full_scan(
+            fake_client, symbols=_FUNNEL_SYMBOLS, collect_funnel=False)
+        for key in ("signals_0dte", "signals_swing", "signals_directional"):
+            assert _signal_ids(with_funnel[key]) == _signal_ids(without[key]), key
+            assert with_funnel[key], key          # vacuity: there is a list to compare
+
+    def test_collection_off_leaves_the_key_present_and_empty(self, fake_client):
+        """The results SHAPE does not depend on the switch — a consumer reading
+        ``result["funnel"]`` must not have to care."""
+        res = scanner_engine.run_full_scan(
+            fake_client, symbols=_FUNNEL_SYMBOLS, collect_funnel=False)
+        assert res["funnel"] == {}
+
+    def test_every_requested_symbol_has_an_entry(self, fake_client):
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        assert sorted(res["funnel"]) == sorted(_FUNNEL_SYMBOLS)
+        for sym, entry in res["funnel"].items():
+            assert entry["price"] > 0
+            assert entry["stop"] is None
+            assert sorted(entry["buckets"]) == ["0DTE", "DIRECTIONAL", "SWING"]
+
+    def test_an_unquotable_symbol_reads_no_quote(self, fake_client, monkeypatch):
+        """A symbol Schwab prices at 0 never reaches a chain, so every bucket
+        below it is empty — and without ``stop`` that is indistinguishable from a
+        symbol whose chain simply offered nothing."""
+        import tests.test_scanner_engine as _self
+
+        monkeypatch.setitem(_self._FAKE_SYMBOLS, "NOPE", (0.0, 1))
+        res = scanner_engine.run_full_scan(
+            fake_client, symbols=_FUNNEL_SYMBOLS + ["NOPE"])
+        entry = res["funnel"]["NOPE"]
+        assert entry["stop"] == "no_quote"
+        assert entry["buckets"]["0DTE"]["chain"] is False
+        assert entry["buckets"]["0DTE"]["spreads"]["emitted"] == 0
+        # Vacuity: the two real symbols in the same scan did NOT stop.
+        assert res["funnel"]["SPY"]["stop"] is None
+
+    def test_the_funnel_carries_the_symbols_own_iv_rank(self, fake_client):
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for sym, entry in res["funnel"].items():
+            assert entry["iv_rank"] == res["iv_data"][sym]["iv_rank"]
+        # Vacuity: the two symbols really do read differently.
+        assert res["funnel"]["SPY"]["iv_rank"] != res["funnel"]["QQQ"]["iv_rank"]
+
+    def test_emitted_equals_that_symbols_count_in_the_final_lists(self, fake_client):
+        """The terminal number the page renders. If this ever stops matching, the
+        funnel is telling the user a story about a different scan."""
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for key, bucket in (("signals_0dte", "0DTE"), ("signals_swing", "SWING"),
+                            ("signals_directional", "DIRECTIONAL")):
+            counts = _per_symbol(res[key])
+            assert sum(counts.values()) > 0, key        # vacuity
+            for sym, entry in res["funnel"].items():
+                b = entry["buckets"][bucket]
+                got = b["emitted"] if bucket == "DIRECTIONAL" else b["spreads"]["emitted"]
+                assert got == counts.get(sym, 0), (key, sym)
+
+    def test_the_strike_funnel_partitions_per_symbol_and_bucket(self, fake_client):
+        """``screen_spreads``' own equation, now once per symbol per bucket rather
+        than once across the watchlist — which is the whole reason the funnel is
+        keyed by symbol."""
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for entry in res["funnel"].values():
+            for name in ("0DTE", "SWING"):
+                f = entry["buckets"][name]["strikes"]
+                accounted = (f["mark_fail"] + f["delta_ceiling"] + f["em_fail"]
+                             + f["liq_fail_short"] + f["width_found"]
+                             + sum(f["width_reasons"].values()))
+                assert f["delta_pass"] == accounted, name
+                assert f["delta_pass"] > 0, name        # vacuity
+
+    def test_the_funnel_survives_a_json_round_trip(self, fake_client):
+        """It exists to be PUBLISHED, so it has to serialize — the ``Counter``
+        under ``width_reasons`` included."""
+        import json as _json
+
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        revived = _json.loads(_json.dumps(res["funnel"]))
+        assert (revived["SPY"]["buckets"]["0DTE"]["strikes"]["width_reasons"]
+                == dict(res["funnel"]["SPY"]["buckets"]["0DTE"]
+                        ["strikes"]["width_reasons"]))
+
+    def test_the_spread_counters_describe_the_symbols_own_pass(self, fake_client):
+        """``built`` is per symbol per bucket, not the watchlist's total."""
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        one = scanner_engine.run_full_scan(fake_client, symbols=["SPY"])
+        for name in ("0DTE", "SWING"):
+            both = res["funnel"]["SPY"]["buckets"][name]["spreads"]
+            alone = one["funnel"]["SPY"]["buckets"][name]["spreads"]
+            assert both["built"] == alone["built"] > 0, name
+            assert both["kept_after_cap"] == alone["kept_after_cap"] > 0, name
+
+    def test_the_directional_bucket_partitions(self, fake_client):
+        """``built`` leaves through exactly one door: the volatility gate, the
+        score cut, the per-symbol cap, or the final list."""
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for entry in res["funnel"].values():
+            d = entry["buckets"]["DIRECTIONAL"]
+            assert d["built"] == (d["vol_gate"] + d["score_cut"] + d["capped"]
+                                  + d["emitted"])
+            assert d["built"] > 0                      # vacuity
+            assert d["score_cut"] > 0                  # the door really is used
+            assert d["build_failed"] is False
+
+    def test_a_directional_build_that_raises_says_so(self, fake_client, monkeypatch):
+        """The block is wrapped in a bare ``except`` that logs and continues, so
+        without this flag a crashed build is indistinguishable from a window that
+        honestly offered nothing — a funnel of zeroes with no reason in it."""
+        import strategy_scanner
+
+        monkeypatch.setattr(strategy_scanner, "build_directional", _boom)
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        assert res["signals_directional"] == []
+        for entry in res["funnel"].values():
+            assert entry["buckets"]["DIRECTIONAL"]["build_failed"] is True
+
+
+class TestNoIvHistoryIsANamedRefusal:
+    """The 2026-09-15 operator decision: an unknown IV rank is still REFUSED, and
+    now says so. Two counters where there was one silent ``or 0``."""
+
+    @pytest.mark.parametrize("rank", [None, 0.0, 29.9, 34.9, 100, float("nan")])
+    def test_the_split_keeps_exactly_the_rows_the_old_predicate_kept(
+            self, fake_client, monkeypatch, rank):
+        """The rule is a REWRITE of a one-line filter, so the thing worth pinning
+        is that the ROW SET did not move. The old expression is written out here
+        literally and applied to the same scan with the floor off.
+
+        ⚠ ``nan`` is the case a naive ``rank < min_rank`` would have changed:
+        every comparison against a NaN is False, so it would have been KEPT where
+        ``(nan or 0) >= min_rank`` dropped it — the pins-the-bound trap running
+        the other way.
+        """
+        _pin_iv_ranks(monkeypatch, {"*": rank})
+        monkeypatch.setattr(scanner_engine, "MIN_IV_RANK", {"0-DTE": 0, "SWING": 0})
+        base = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        monkeypatch.setattr(scanner_engine, "MIN_IV_RANK", {"0-DTE": 35, "SWING": 30})
+        after = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for key, floor in (("signals_0dte", 35), ("signals_swing", 30)):
+            old_kept = [s for s in base[key] if (rank or 0) >= floor]
+            assert _signal_ids(after[key]) == _signal_ids(old_kept), (key, rank)
+        assert base["signals_0dte"]                    # vacuity: something to cut
+
+    def test_an_unknown_rank_is_counted_as_no_iv_history_and_emits_nothing(
+            self, fake_client, monkeypatch):
+        """The named case: a symbol whose IV analysis measured nothing."""
+        _pin_iv_ranks(monkeypatch, {"SPY": None})
+        monkeypatch.setattr(scanner_engine, "MIN_IV_RANK", {"0-DTE": 35, "SWING": 30})
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        spy = res["funnel"]["SPY"]["buckets"]
+        for name in ("0DTE", "SWING"):
+            assert spy[name]["spreads"]["no_iv_history"] > 0, name
+            assert spy[name]["spreads"]["below_iv_floor"] == 0, name
+            assert spy[name]["spreads"]["emitted"] == 0, name
+        assert "SPY" not in _per_symbol(res["signals_0dte"])
+        # Vacuity: QQQ (rank 50) came through the same scan untouched.
+        assert res["funnel"]["QQQ"]["buckets"]["SWING"]["spreads"]["emitted"] > 0
+
+    def test_a_rank_below_the_floor_is_counted_separately(
+            self, fake_client, monkeypatch):
+        """The other half of the split — same refusal, different reason. If these
+        two ever collapse into one counter the page cannot tell "we have no
+        history for this name" from "this name is cheap today"."""
+        _pin_iv_ranks(monkeypatch, {"SPY": 10.0})
+        monkeypatch.setattr(scanner_engine, "MIN_IV_RANK", {"0-DTE": 35, "SWING": 30})
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        spy = res["funnel"]["SPY"]["buckets"]
+        for name in ("0DTE", "SWING"):
+            assert spy[name]["spreads"]["below_iv_floor"] > 0, name
+            assert spy[name]["spreads"]["no_iv_history"] == 0, name
+            assert spy[name]["spreads"]["emitted"] == 0, name
+
+    def test_a_rank_of_exactly_zero_is_a_reading_not_an_absence(
+            self, fake_client, monkeypatch):
+        """0.0 is the cheapest possible IV rank, not a missing one — and the old
+        ``or 0`` could not tell them apart at all."""
+        _pin_iv_ranks(monkeypatch, {"SPY": 0.0})
+        monkeypatch.setattr(scanner_engine, "MIN_IV_RANK", {"0-DTE": 35, "SWING": 30})
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        spy = res["funnel"]["SPY"]["buckets"]["SWING"]["spreads"]
+        assert spy["below_iv_floor"] > 0
+        assert spy["no_iv_history"] == 0
+
+    def test_a_floor_of_zero_refuses_nothing_and_counts_nothing(self, fake_client,
+                                                                monkeypatch):
+        """``MIN_IV_RANK`` 0 means the gate is OFF, so neither counter may fill —
+        an unknown rank is only refused where a floor exists to refuse it."""
+        _pin_iv_ranks(monkeypatch, {"*": None})
+        monkeypatch.setattr(scanner_engine, "MIN_IV_RANK", {"0-DTE": 0, "SWING": 0})
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for entry in res["funnel"].values():
+            for name in ("0DTE", "SWING"):
+                sp = entry["buckets"][name]["spreads"]
+                assert sp["no_iv_history"] == 0
+                assert sp["below_iv_floor"] == 0
+                assert sp["emitted"] > 0
