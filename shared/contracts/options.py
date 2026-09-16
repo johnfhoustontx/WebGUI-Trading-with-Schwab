@@ -216,6 +216,15 @@ class ScanFunnel(_Base):
     contract change every time a counter is added. ``run_full_scan``'s docstring
     is the authority on the counters themselves.
 
+    ⚠ **A symbol's account is a FIXED key set — keep it that way.** Measured
+    2026-09-15 through this contract and ``json.dumps``: **~1.35 KB per symbol**
+    (2,678 B for a two-symbol scan), so ~105 KB at 80 symbols, and **1.77 KB**
+    worst case with all eleven ``WIDTH_STAGES`` filled in both spread buckets
+    (~142 KB). The counters do not grow with chain size, which is the only
+    reason this view is small; a field that scales with strikes or expirations
+    would put it back in the class the performance audit split
+    ``cache:options:gamma`` out of.
+
     Every field carries a default: Redis persists the view across a service
     restart, so a payload written before a field existed must still validate.
     """

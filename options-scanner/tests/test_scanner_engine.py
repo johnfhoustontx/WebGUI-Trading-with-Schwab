@@ -1818,8 +1818,14 @@ def fake_client(monkeypatch):
     # Let the CREDIT-spread path produce signals too, so the "directional never
     # leaks into the credit lists" test has something to actually iterate.
     # Both mirror test_directional_screening: pin market-open for the liquidity
-    # gate, and drop the IV Rank floor (the stub iv_data has iv_rank=None, which
-    # would otherwise filter every credit spread away).
+    # gate, and drop the IV Rank floor.
+    # ⚠ The floor override is INERT for these two symbols. The comment here used
+    # to say "the stub iv_data has iv_rank=None, which would otherwise filter
+    # every credit spread away" — measured 2026-09-15, this fixture's IV analysis
+    # really runs and reports SPY 100 / QQQ 50, both clear of the 35/30 floors.
+    # It is kept because it pins the floor against a config change rather than
+    # because it rescues anything, and because the funnel tests below restore the
+    # production floors deliberately to exercise the two refusal counters.
     monkeypatch.setattr(scanner_engine, "_is_options_market_open", lambda: True)
     monkeypatch.setattr(scanner_engine, "MIN_IV_RANK", {"0-DTE": 0, "SWING": 0})
 
@@ -2971,3 +2977,164 @@ class TestNoIvHistoryIsANamedRefusal:
                 assert sp["no_iv_history"] == 0
                 assert sp["below_iv_floor"] == 0
                 assert sp["emitted"] > 0
+
+
+_STRIKE_KEYS = set(scanner_engine.STRIKE_FUNNEL_KEYS) | {"width_reasons"}
+
+
+def _partition(strikes):
+    """``screen_spreads``' own equation, as a consumer would write it — by
+    SUBSCRIPT, so a missing key raises exactly where a page would."""
+    return (strikes["mark_fail"] + strikes["delta_ceiling"] + strikes["em_fail"]
+            + strikes["liq_fail_short"] + strikes["width_found"]
+            + sum(strikes["width_reasons"].values()))
+
+
+class TestEveryBucketCarriesAReason:
+    """⚠ ``screen_spreads`` writes its funnel at a point AFTER two early returns
+    — no chain, and a chain quoting no underlying price. Before the zero-fill a
+    bucket that never reached the strike loop published ``strikes: {}``, so a
+    consumer written against the documented partition raised KeyError on exactly
+    the symbol the funnel exists to explain; and the no-underlying case
+    published ``chain: True`` with all-zero counters and no reason at all."""
+
+    def _blank_underlying(self, monkeypatch):
+        """Every scan window quotes ``underlyingPrice`` 0 — Schwab really does
+        this for some symbols off-hours — except the IV-analysis window, left
+        alone so ``iv_data`` stays the realistic one every other test sees."""
+        real = scanner_engine.fetch_option_chain
+        iv_window_from = date.today() + timedelta(days=20)
+
+        def _wrapped(client, symbol, from_date=None, **kw):
+            chain = real(client, symbol, from_date=from_date, **kw)
+            if isinstance(chain, dict) and from_date != iv_window_from:
+                return dict(chain, underlyingPrice=0)
+            return chain
+
+        monkeypatch.setattr(scanner_engine, "fetch_option_chain", _wrapped)
+
+    def test_a_symbol_that_never_reached_a_chain_still_partitions(
+            self, fake_client, monkeypatch):
+        """The unquotable symbol — the one the funnel exists for."""
+        import tests.test_scanner_engine as _self
+
+        monkeypatch.setitem(_self._FAKE_SYMBOLS, "NOPE", (0.0, 1))
+        res = scanner_engine.run_full_scan(
+            fake_client, symbols=_FUNNEL_SYMBOLS + ["NOPE"])
+        for name in ("0DTE", "SWING"):
+            strikes = res["funnel"]["NOPE"]["buckets"][name]["strikes"]
+            assert set(strikes) == _STRIKE_KEYS, name
+            assert strikes["delta_pass"] == _partition(strikes) == 0, name
+
+    def test_the_zero_fill_names_exactly_what_the_pass_writes(self, fake_client):
+        """The key set is stated once in ``STRIKE_FUNNEL_KEYS`` and written a
+        second time as explicit (key, value) pairs at the write-out — pairing
+        them positionally would be a silent renumbering hazard, so the guard is
+        that a bucket which RAN carries neither a key more nor a key less than
+        one which did not."""
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        ran = res["funnel"]["SPY"]["buckets"]["SWING"]["strikes"]
+        assert set(ran) == _STRIKE_KEYS
+        assert ran["delta_pass"] > 0          # vacuity: this one really screened
+
+    def test_a_chain_quoting_no_underlying_price_says_so(self, fake_client,
+                                                         monkeypatch):
+        """``chain: True`` with every counter zero is the state that used to
+        carry no reason at all — the same shape ``build_failed`` was added to
+        prevent one bucket over."""
+        self._blank_underlying(monkeypatch)
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        assert res["signals_0dte"] == []
+        assert res["signals_swing"] == []
+        for entry in res["funnel"].values():
+            for name in ("0DTE", "SWING"):
+                bucket = entry["buckets"][name]
+                assert bucket["chain"] is True, name       # a chain DID arrive
+                assert bucket["underlying_zero"] is True, name
+                assert _partition(bucket["strikes"]) == 0, name
+                # ⚠ NOT the symbol-level stop: the scan DID reach a chain here,
+                # and a page reading `stop` would tell the user it never did.
+                assert entry["stop"] is None
+
+    def test_a_usable_chain_is_not_flagged(self, fake_client):
+        """Vacuity guard: the reason above is not simply always present."""
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for entry in res["funnel"].values():
+            for name in ("0DTE", "SWING"):
+                assert entry["buckets"][name]["underlying_zero"] is False, name
+
+    def test_a_window_with_no_chain_is_not_flagged_either(self, fake_client,
+                                                          monkeypatch):
+        """The two absences are DIFFERENT facts and must read differently: no
+        chain at all (``chain`` False) against a chain whose spot is unusable.
+        An unquotable symbol reaches neither, so its flag stays False."""
+        import tests.test_scanner_engine as _self
+
+        monkeypatch.setitem(_self._FAKE_SYMBOLS, "NOPE", (0.0, 1))
+        res = scanner_engine.run_full_scan(
+            fake_client, symbols=_FUNNEL_SYMBOLS + ["NOPE"])
+        bucket = res["funnel"]["NOPE"]["buckets"]["0DTE"]
+        assert bucket["chain"] is False
+        assert bucket["underlying_zero"] is False
+
+    def test_one_predicate_decides_the_refusal_and_the_reason(self):
+        """``chain_has_underlying`` is the ONE rule — ``screen_spreads``' early
+        return and the funnel's reason ask it, so a mirrored ``== 0`` cannot
+        drift from the guard it describes."""
+        assert scanner_engine.chain_has_underlying({"underlyingPrice": 500.0})
+        assert not scanner_engine.chain_has_underlying({"underlyingPrice": 0})
+        assert not scanner_engine.chain_has_underlying({})
+        assert not scanner_engine.chain_has_underlying(None)
+
+    def test_a_negative_quote_reads_no_data(self, fake_client, monkeypatch):
+        """``active`` filters on ``price > 0`` while ``not price`` is False for a
+        negative one, so this is the live route to the second stop value — the
+        comment used to call it unreachable."""
+        import tests.test_scanner_engine as _self
+
+        monkeypatch.setitem(_self._FAKE_SYMBOLS, "NEG", (-5.0, 1))
+        res = scanner_engine.run_full_scan(
+            fake_client, symbols=_FUNNEL_SYMBOLS + ["NEG"])
+        assert res["funnel"]["NEG"]["stop"] == "no_data"
+        # Vacuity: a zero quote in the same scan still reads no_quote.
+        monkeypatch.setitem(_self._FAKE_SYMBOLS, "NOPE", (0.0, 1))
+        res = scanner_engine.run_full_scan(
+            fake_client, symbols=_FUNNEL_SYMBOLS + ["NOPE"])
+        assert res["funnel"]["NOPE"]["stop"] == "no_quote"
+
+
+class TestTheSpreadBucketBalances:
+    """``emitted == kept_after_cap + regime_pass_added - regime_filter -
+    below_iv_floor - no_iv_history - gamma_gate``. The DIRECTIONAL bucket's
+    partition was pinned from the start; this is the spread buckets' one, and
+    without it the four removal counters could drift from the list they describe
+    without any test noticing."""
+
+    def _check(self, entry, name):
+        sp = entry["buckets"][name]["spreads"]
+        assert sp["emitted"] == (
+            sp["kept_after_cap"] + sp["regime_pass_added"]
+            - sp["regime_filter"] - sp["below_iv_floor"]
+            - sp["no_iv_history"] - sp["gamma_gate"]), name
+        return sp
+
+    def test_the_identity_holds_on_a_clean_scan(self, fake_client):
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for entry in res["funnel"].values():
+            for name in ("0DTE", "SWING"):
+                sp = self._check(entry, name)
+                assert sp["kept_after_cap"] > 0, name      # vacuity
+
+    def test_the_identity_holds_when_a_removal_counter_really_fires(
+            self, fake_client, monkeypatch):
+        """The clean scan removes nothing, so the identity there is
+        ``emitted == kept_after_cap`` and proves none of the subtractions. Drop
+        SPY below the floor and the same equation has to absorb it."""
+        _pin_iv_ranks(monkeypatch, {"SPY": 10.0})
+        monkeypatch.setattr(scanner_engine, "MIN_IV_RANK", {"0-DTE": 35, "SWING": 30})
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for name in ("0DTE", "SWING"):
+            sp = self._check(res["funnel"]["SPY"], name)
+            assert sp["below_iv_floor"] > 0, name          # vacuity
+            assert sp["emitted"] == 0, name
+            self._check(res["funnel"]["QQQ"], name)

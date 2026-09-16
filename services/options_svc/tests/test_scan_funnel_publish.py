@@ -28,12 +28,12 @@ def _funnel():
     }
 
 
-def _scan_result(funnel=None):
+def _scan_result(funnel=None, ts="2026-09-15T08:00:00"):
     row = {"id": "a", "symbol": "SPY", "type": "PCS", "trade_type": "SWING",
            "expiration": "2026-10-17", "dte": 12, "short_strike": 100.0,
            "long_strike": 97.5, "width": 2.5, "credit": 0.60, "max_loss": 1.90}
     return {"signals_0dte": [], "signals_swing": [row], "signals_directional": [],
-            "iv_data": {"SPY": {"iv_rank": 100}}, "timestamp": "2026-09-15T08:00:00",
+            "iv_data": {"SPY": {"iv_rank": 100}}, "timestamp": ts,
             "errors": [], "warnings": [],
             "funnel": _funnel() if funnel is None else funnel}
 
@@ -87,25 +87,38 @@ def test_a_scan_with_no_funnel_publishes_an_empty_one(monkeypatch):
     assert bus.cache_get(handlers.CACHE_SCAN_FUNNEL).payload["symbols"] == {}
 
 
-def test_an_unchanged_funnel_does_not_wake_the_poller(monkeypatch):
-    """``skip_unchanged``: this view is republished on every scan of the day and
-    a byte-identical one must not bump the version the page polls."""
+def test_every_republish_bumps_the_version_because_the_timestamp_moves(monkeypatch):
+    """⚠ ``skip_unchanged`` CANNOT suppress this view, and the code says so.
+
+    ``ScanFunnel.timestamp`` is the scan's own stamp, fresh on every pass, so the
+    payload is never byte-identical and the flag can never fire — it is kept as
+    the safe default on a republisher, the same thing ``publish_income``
+    documents about its own ``ts``. The timestamp STAYS: ``funnel_view.stale_note``
+    compares it with the live scan's to print "From an earlier scan."
+
+    This test replaced one that pinned the opposite and passed only because the
+    fixture held the timestamp still — a suppression a future reader would have
+    believed in and built on.
+    """
     bus = _rescan(monkeypatch)
     first = bus.cache_version(handlers.CACHE_SCAN_FUNNEL)
-    monkeypatch.setattr(handlers.compute, "run_scan", lambda: _scan_result())
+    monkeypatch.setattr(handlers.compute, "run_scan",
+                        lambda: _scan_result(ts="2026-09-15T08:15:00"))
     handlers.rescan(bus)
-    assert bus.cache_version(handlers.CACHE_SCAN_FUNNEL) == first
+    assert bus.cache_version(handlers.CACHE_SCAN_FUNNEL) > first
+    assert (bus.cache_get(handlers.CACHE_SCAN_FUNNEL).payload["timestamp"]
+            == "2026-09-15T08:15:00")
 
 
-def test_a_changed_funnel_does_bump_the_version(monkeypatch):
-    """Vacuity guard for the test above — the key really is written each scan."""
+def test_a_changed_funnel_reaches_the_view(monkeypatch):
+    """The counters themselves are republished, not only the stamp."""
     bus = _rescan(monkeypatch)
-    first = bus.cache_version(handlers.CACHE_SCAN_FUNNEL)
     moved = _funnel()
     moved["SPY"]["buckets"]["0DTE"]["spreads"]["emitted"] = 0
     monkeypatch.setattr(handlers.compute, "run_scan", lambda: _scan_result(moved))
     handlers.rescan(bus)
-    assert bus.cache_version(handlers.CACHE_SCAN_FUNNEL) > first
+    payload = bus.cache_get(handlers.CACHE_SCAN_FUNNEL).payload
+    assert payload["symbols"]["SPY"]["buckets"]["0DTE"]["spreads"]["emitted"] == 0
 
 
 def test_the_view_keys_are_the_ones_the_page_will_read(monkeypatch):

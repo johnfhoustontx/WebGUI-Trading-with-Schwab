@@ -640,8 +640,12 @@ def rescan(bus) -> None:
     # empty view rather than degrading: "nothing was collected" is a true
     # statement, and a degrade counter that ticks on the normal case is noise.
     # The constructor IS the gate — a funnel that is not a mapping raises here and
-    # nothing is cached. ``skip_unchanged`` because this is republished on every
-    # scan of the day and an identical funnel must not wake the page's poller.
+    # nothing is cached. ⚠ ``skip_unchanged`` cannot fire while ``timestamp``
+    # moves on every scan (the same thing publish_income documents about its own
+    # fresh ``ts``) — and the timestamp STAYS, because ``funnel_view.stale_note``
+    # compares it with the live scan's to say "From an earlier scan." It is kept
+    # because it is the safe default on a republisher, not because it suppresses
+    # anything today.
     try:
         snap = ScanFunnel(timestamp=result.get("timestamp"),
                           symbols=result.get("funnel") or {})

@@ -954,6 +954,35 @@ def detect_strike_increment(strikes):
 # SPREAD SCREENING
 #############################################
 
+# The SCALAR keys ``screen_spreads`` writes into a ``funnel`` (``width_reasons``
+# is the twelfth and is a Counter). Exported because a reader needs the key set
+# to hold the documented partition, and ``run_full_scan`` zero-fills a bucket
+# with it: the pass returns EARLY on an unusable chain, so without a zero-fill a
+# symbol that never reached the strike loop published ``{}`` and every consumer
+# written against the equation below raised KeyError on exactly the symbol the
+# funnel exists to explain. ⚠ The write-out keeps its own explicit (key, value)
+# pairs — pairing them positionally with this tuple would be a silent
+# renumbering hazard — so `test_scan_funnel.py` pins the two sets equal instead.
+STRIKE_FUNNEL_KEYS = (
+    "expiration_sides_in_window", "expiration_sides_skipped_earnings",
+    "delta_reject", "delta_pass", "mark_fail", "delta_ceiling", "em_fail",
+    "liq_fail_short", "width_found",
+    "strikes_dropped_no_delta", "strikes_dropped_off_increment")
+
+
+def chain_has_underlying(chain):
+    """Can ``screen_spreads`` price this chain at all?
+
+    The ONE rule, because both ``screen_spreads``' own early return and the
+    funnel's ``no_underlying`` reason ask it — a mirrored `== 0` in the caller
+    would be free to drift from the guard it is meant to describe. ⚠ Schwab
+    returns a chain with ``underlyingPrice`` 0 off-hours for some symbols, and
+    the pass then refuses it BEFORE counting anything, which is why that state
+    needs a reason of its own rather than an all-zero funnel.
+    """
+    return bool(chain) and chain.get("underlyingPrice", 0) != 0
+
+
 def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                    call_d_min, call_d_max, min_cr_pct, trade_type,
                    spot=None, daily_expected_move=None, earnings_date=None,
@@ -1015,7 +1044,7 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
     if now_ct is None:
         now_ct = datetime.now(TZ)
     underlying = chain.get("underlyingPrice", 0)
-    if underlying == 0:
+    if not chain_has_underlying(chain):
         return []
 
     results = []
@@ -1698,8 +1727,18 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
     ``trade_type`` string ``"0-DTE"``. One name for one bucket across tiers is
     exactly what ``test_cross_tier_mirrors`` exists to protect.
 
-    A spread bucket carries ``chain`` (the window's chain was usable), ``strikes``
-    (``screen_spreads``' own reject tally — see its docstring) and ``spreads``:
+    A spread bucket carries ``chain`` (a chain arrived for this window),
+    ``underlying_zero`` (it arrived and quotes NO underlying price, so
+    ``screen_spreads`` refused it before counting anything — without it that
+    state is an all-zero bucket with no reason in it, exactly what
+    ``build_failed`` exists to prevent on the bucket below). ⚠ It is a
+    PER-WINDOW fact and deliberately not the symbol-level ``stop``: the scan did
+    reach a chain here, and a page reading ``stop`` would say it never did. It is
+    also NOT the zero-filled empty-window case — the expirations were listed, the
+    spot was not, so the two need different words. Then ``strikes``
+    (``screen_spreads``' own reject tally — see its docstring; ZERO-FILLED from
+    ``STRIKE_FUNNEL_KEYS``, so its partition equation holds in every state
+    including the two the pass returns early from) and ``spreads``:
 
     ``built``             signals ``screen_spreads`` returned.
     ``momentum_veto``     of those, dropped by the intraday momentum veto.
@@ -1717,14 +1756,21 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
                           rows the four post-scoring filters removed.
     ``emitted``           this symbol's rows in the final list. Terminal.
 
+    Those balance, which is what makes the four removal counters readable::
+
+        emitted == kept_after_cap + regime_pass_added
+                   - regime_filter - below_iv_floor - no_iv_history - gamma_gate
+
     The ``DIRECTIONAL`` bucket is the single-leg pass, which has no strike-level
     funnel of its own, and partitions exactly::
 
         built == vol_gate + score_cut + capped + emitted
 
-    beside ``windows_without_candidates`` (a window whose chain was read and
-    offered nothing) and ``build_failed`` (that whole block is wrapped in a bare
-    ``except`` — without the flag a crash reads as an honest zero).
+    ⚠ unless ``build_failed`` — the block is wrapped in a bare ``except``, so a
+    crash can land between any two of those counters and the identity is void.
+    Beside them, ``windows_without_candidates`` (a window whose chain was read
+    and offered nothing) and ``build_failed`` itself (without the flag a crash
+    reads as an honest zero).
 
     ``collect_funnel=False`` is the EQUIVALENCE LEVER: counting must never move a
     decision, and ``TestScanFunnel`` proves that by running the same scan both
@@ -1878,11 +1924,23 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
     funnel = results["funnel"]
 
     def _spread_bucket():
-        return {"chain": False, "strikes": {}, "spreads": {
-            "built": 0, "momentum_veto": 0, "iron_condors": 0,
-            "kept_after_cap": 0, "regime_pass_added": 0, "regime_filter": 0,
-            "below_iv_floor": 0, "no_iv_history": 0, "gamma_gate": 0,
-            "emitted": 0}}
+        # ⚠ ``strikes`` is ZERO-FILLED, not left empty. ``screen_spreads``
+        # writes it at a point AFTER two early returns (no chain, no underlying
+        # price), so a bucket that never reached the strike loop would otherwise
+        # publish ``{}`` — and the partition equation its docstring documents
+        # would raise KeyError on exactly the symbol the funnel exists to
+        # explain. Zero-filled it holds trivially (0 == 0 + … + 0) in every
+        # state, and the pass's ``funnel.get(key, 0) + val`` accumulation is
+        # already compatible with a pre-seeded key. A fresh Counter per bucket,
+        # never a shared one — ``setdefault`` at the write-out mutates it.
+        return {"chain": False, "underlying_zero": False,
+                "strikes": dict.fromkeys(STRIKE_FUNNEL_KEYS, 0)
+                | {"width_reasons": Counter()},
+                "spreads": {
+                    "built": 0, "momentum_veto": 0, "iron_condors": 0,
+                    "kept_after_cap": 0, "regime_pass_added": 0,
+                    "regime_filter": 0, "below_iv_floor": 0,
+                    "no_iv_history": 0, "gamma_gate": 0, "emitted": 0}}
 
     if collect_funnel:
         for _sym in symbols:
@@ -1931,8 +1989,11 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
             if entry is not None:
                 # A price of 0 is a quote the scan cannot use, which is why it
                 # reads the same as never having been quoted. "no_data" is the
-                # defensive other half — a symbol that WAS quoted and still came
-                # back with nothing — and is unreachable on today's fetch path.
+                # other half — a symbol that WAS quoted and still produced no
+                # per-symbol data. ⚠ It is reachable: ``active`` filters on
+                # ``price > 0``, so a NEGATIVE quote is dropped from the fetch
+                # while ``not prices.get(symbol)`` is False, and that is the one
+                # live route to it today.
                 entry["stop"] = "no_quote" if not prices.get(symbol) else "no_data"
             continue
         price = data["price"]
@@ -1962,6 +2023,7 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
         if chain_0 and chain_0.get("status") != "FAILED":
             if bucket_0 is not None:
                 bucket_0["chain"] = True
+                bucket_0["underlying_zero"] = not chain_has_underlying(chain_0)
             # Compute GEX + DEX walls for 0-DTE short strike proximity scoring
             gamma_engine = GammaEngine()
             gex_data = gamma_engine.calc_from_chain(chain_0)
@@ -2017,6 +2079,7 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
         if chain_s and chain_s.get("status") != "FAILED":
             if bucket_s is not None:
                 bucket_s["chain"] = True
+                bucket_s["underlying_zero"] = not chain_has_underlying(chain_s)
             pd_min_s, pd_max_s = -DELTA_SANITY_MAX, -1e-6
             cd_min_s, cd_max_s =  1e-6,  DELTA_SANITY_MAX
             min_cr_s = get_min_credit_pct(regime_label, "SWING")
