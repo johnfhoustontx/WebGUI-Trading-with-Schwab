@@ -22,19 +22,22 @@ class MarketDashboard(_Base):
 
 
 class MarketSummary(_Base):
-    """Market summary narrative payload (cache:market:summary).
+    """Market summary payload (cache:market:summary).
 
-    A short Claude-written verdict market_svc writes when the market readings it
-    consolidates change. It feeds both the webgui ticker (which leads its scroll
-    with this, followed by live rule-based data items) and the Desk's MARKET
-    SUMMARY frame. Defensive: an empty ``narrative`` (no key / API error) means
-    the ticker shows live items only and the Desk frame stays quiet.
+    The highlights of the latest published NeuralStrike market report, which
+    market_svc reads off ``deploy/site/reports/latest.html`` whenever the
+    report is replaced (``services/market_svc/report_summary.py``) — no Claude
+    call of its own. It feeds the Desk's MARKET SUMMARY frame and leads the
+    webgui ticker with ``headline``. Defensive: no report yet means an empty
+    payload, and both surfaces stay quiet rather than inventing a line.
     """
 
-    narrative: str = ""
-    # The six readings the sentence was written from (market_svc's summary
-    # packet). The Desk compares them with the live readings to say when the
-    # sentence has been overtaken. Empty on an older writer.
-    inputs: dict = {}
-    # When the sentence was written (UTC ISO). The Desk prints it as "as of".
-    as_of: str = ""
+    # The report's verdict title.
+    headline: str = ""
+    # Its section headlines, in report order — at most five.
+    highlights: list[str] = []
+    slot: str = ""           # premarket / open / first_hour / midday / close
+    slot_label: str = ""     # the report's own name for the slot, e.g. "Market close"
+    report_date: str = ""    # YYYY-MM-DD the report was written for
+    as_of: str = ""          # the report's own time stamp, e.g. "16:20 CT"
+    report_url: str = ""     # the full report on the public site

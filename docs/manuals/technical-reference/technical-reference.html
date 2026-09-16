@@ -480,7 +480,7 @@ page surfaces this as its own card.</p>
 <tbody>
 <tr>
 <td><strong><code>ANTHROPIC_API_KEY</code></strong></td>
-<td>Resolution order: the <strong>env var</strong> first, then a gitignored <strong><code>shared/anthropic_key.txt</code></strong>. Powers the Driver's Claude decision layer, the Gamma <strong>Analyze</strong>/<strong>Explain</strong> infographics, the market summary (the ticker and the Desk's Market Summary frame — one sentence, one generator), and the <strong>fallback</strong> for the 4×/day auto-briefings.</td>
+<td>Resolution order: the <strong>env var</strong> first, then a gitignored <strong><code>shared/anthropic_key.txt</code></strong>. Powers the Driver's Claude decision layer, the Gamma <strong>Analyze</strong>/<strong>Explain</strong> infographics, and the <strong>fallback</strong> for the 4×/day auto-briefings.</td>
 <td>Optional</td>
 </tr>
 <tr>
@@ -2922,7 +2922,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>market_svc</td>
-<td>Quote poll <strong>3 s</strong> RTH (<code>RTH_INTERVAL_SEC</code>), <strong>15 s</strong> off-hours (<code>OFFHOURS_INTERVAL_SEC</code>), <strong>60 s</strong> at weekends (<code>WEEKEND_INTERVAL_SEC</code>); Claude summary is <strong>change-driven, not clocked</strong> (2026-09-10) — each poll builds a fingerprint of the six readings at display resolution — the Bull/Bear sector counts compared with a one-sector tolerance — and writes a new sentence only when that fingerprint has moved, at least <strong>10 min</strong> have passed since the last attempt (<code>SUMMARY_MIN_GAP_SEC</code>), and fewer than <strong>30</strong> attempts have been made that CT day (<code>SUMMARY_DAILY_CAP</code>); a failed attempt still counts toward both and is retried once the gap has passed, while a reply the accuracy checks refuse counts too but is never retried on the same readings; nothing moves overnight or at weekends, so nothing is called.</td>
+<td>Quote poll <strong>3 s</strong> RTH (<code>RTH_INTERVAL_SEC</code>), <strong>15 s</strong> off-hours (<code>OFFHOURS_INTERVAL_SEC</code>), <strong>60 s</strong> at weekends (<code>WEEKEND_INTERVAL_SEC</code>); report summary re-read when the published market report changes (a stat of <code>deploy/site/reports/latest.html</code> + <code>latest.txt</code> per poll) — no Claude call.</td>
 </tr>
 </tbody>
 </table>

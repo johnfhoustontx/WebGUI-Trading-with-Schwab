@@ -23,10 +23,9 @@ from pages.ui_guard import guard_async
 def apply_ticker_enabled(value) -> None:
     """Persist the ticker toggle. It only shows or hides the marquee.
 
-    Until 2026-09-10 it also stopped market_svc's Claude call. That call now
-    writes the Desk's MARKET SUMMARY sentence too, so hiding the marquee must
-    not stop it — and it no longer runs on a clock: it is written only when the
-    market readings change."""
+    Until 2026-09-10 it also stopped market_svc's Claude call. That call was
+    retired on 2026-09-16: the ticker and the Desk now quote the latest market
+    report, so there is nothing for the toggle to stop."""
     app_settings.set("ticker_enabled", bool(value))
 
 
@@ -193,9 +192,8 @@ def render():
     with ui.card().classes("w-full max-w-2xl"):
         ui.label("Market summary ticker").classes("text-subtitle1 font-bold")
         ui.label("Scrolling market-summary marquee at the bottom of every page "
-                 "(live data items + the Claude market summary, which also "
-                 "feeds the Desk's Market Summary frame). Turning it off hides "
-                 "the marquee only.").classes("opacity-70 text-sm")
+                 "(live data items, led by the latest market report's headline). "
+                 "Turning it off hides the marquee only.").classes("opacity-70 text-sm")
 
         tick = ui.switch("Show the ticker", value=s["ticker_enabled"])
         tick.on_value_change(lambda e: apply_ticker_enabled(e.value))
@@ -330,7 +328,7 @@ def render():
         ui.label("Outbound Schwab API calls counted at the proxy per actual HTTP "
                  "request (market data + trading, including retries), and Claude "
                  "(Anthropic) API calls counted at each call site (driver decider, "
-                 "Gamma Analyze, ticker summary). The scheduled gamma briefings "
+                 "Gamma Analyze). The scheduled gamma briefings "
                  "run on the Claude subscription and count here only when one "
                  "falls back to the API. Counts accumulate going "
                  "forward.").classes("opacity-70 text-sm")

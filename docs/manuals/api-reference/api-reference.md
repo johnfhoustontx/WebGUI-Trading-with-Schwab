@@ -182,7 +182,7 @@ a contract (listed in *Cache Key Index*).
 | `DriverControl` | `driver.py` | `cache:driver:control` | `enabled`, `halted`, `reason`, `halted_date` (ISO date the latch was set, so it re-arms next day), `timestamp` |
 | `AutonomousState` | `driver.py` | `cache:driver:autonomous` | `date`, `enabled`, `halted`, `halt_reason`, `day_pnl`, `target`, `positions[]`, `decisions[]` (newest-first checkpoint log), `perf{}`, `last_cycle_ts`, `error`, `timestamp` |
 | `MarketDashboard` | `market.py` | `cache:market:dashboard` | `categories[]` (ordered frames of display-ready tiles), `proxy_up`, `errors[]` |
-| `MarketSummary` | `market.py` | `cache:market:summary` | `narrative` (a short Claude-written verdict; empty when there is no key or the call failed), `inputs` (the six-reading packet the sentence was written from — `{}` on an older writer), `as_of` (UTC ISO of the write) |
+| `MarketSummary` | `market.py` | `cache:market:summary` | `headline` (the latest published market report's verdict title), `highlights` (its section headlines in report order, at most 5; the headline alone when the report has no sections), `slot` (`premarket` / `open` / `first_hour` / `midday` / `close`), `slot_label` (the report's own name for the slot, e.g. "Market close"), `report_date` (`YYYY-MM-DD`), `as_of` (the report's own time stamp, e.g. "16:20 CT"), `report_url` (`https://<SITE_HOST>/report.html`). Empty until a report has been published. |
 | `CompositeSnapshot` | `sentiment.py` | (validation only) | `total: float`, `bias: str`, `components{}` |
 | `RescueAdvisory` | `options.py` | `cache:options:rescue:<position_id>` | `position_id`, `symbol`, `strategy`, `state`, `heat`, `mark`, `context[]`, `candidates[]`, `error` |
 | `RescueCandidate` | `options.py` | (embedded in `RescueAdvisory.candidates`) | `action`, `label`, `apply_kind` (`execute`\|`advisory`), `gross_cash`, `commission`, `net_cash`, `new_max_loss`, `breakeven`, `short_delta`, `width`, `expiry`, `dte_after`, `est_fill_legs[]`, `rationale[]`, `context[]`, `warnings[]`, `score` |
@@ -427,16 +427,6 @@ MARKET SUMMARY frame.
 | `RTH_INTERVAL_SEC` | `3` | Regular trading hours. |
 | `OFFHOURS_INTERVAL_SEC` | `15` | Outside RTH — futures trade nearly around the clock, so the board stays live. |
 | `WEEKEND_INTERVAL_SEC` | `60` | Saturday and Sunday before 17:00 CT, when futures are closed. |
-| `SUMMARY_MIN_GAP_SEC` | `10 * 60` | Minimum time between two Claude summary attempts, regardless of how often the readings change. |
-| `SUMMARY_DAILY_CAP` | `30` | Maximum Claude summary attempts per CT calendar day; resets at the date change. |
-
-Also in `services/market_svc/compute.py` — the **fingerprint** resolution the
-summary is written from, in `FINGERPRINT_COMPOSITE_STEP` (`0.5`),
-`FINGERPRINT_TREND_STEP` (`5.0`), `FINGERPRINT_CONFIDENCE_STEP` (`0.1`) and
-`FINGERPRINT_SECTOR_TOLERANCE` (`1`); words (trend, bias, signal, regime and the
-Bull/Bear horizon) compare exactly, while the Bull/Bear rising and beating counts
-may each differ by that many sectors. Compare two fingerprints with
-`same_summary_readings`, never with `==`.
 
 Each tick polls the proxy's raw `/quotes`, normalizes `change` across INDEX / EQUITY
 / FUTURE instrument types, computes the `$ADVN-$DECN` breadth spread and the
@@ -444,33 +434,27 @@ Each tick polls the proxy's raw `/quotes`, normalizes `change` across INDEX / EQ
 the dollar-weighted premium skew from `cache:options:matrix`, and publishes
 `cache:market:dashboard`.
 
-**The Claude summary is written on change, not on a clock** (2026-09-10). Each poll
-builds a packet of six readings — sentiment, trend, bias, signal, regime,
-Bull/Bear — off `cache:sentiment:composite`, `:regime` and `:bullbear`, and a
-fingerprint of it at the resolution above. A new sentence is written only when the
-fingerprint differs from the one the current sentence was written from, at least
-`SUMMARY_MIN_GAP_SEC` has passed since the last attempt, and fewer than
-`SUMMARY_DAILY_CAP` attempts have run today; the first poll after a restart with
-readings present always writes one. The model is sent only
-`{"facts": summary_facts(packet)}` — one plain-English statement per reading,
-written by the code — and may only join them and add a closing posture. A
-**failed** attempt (API error, timeout) returns `None`, publishes nothing — the
-last good sentence stays — and is retried on the same readings once the gap has
-passed. A **withheld** reply (a fact dropped or reworded, a wrong sector count, a
-credit spread tied to the wrong direction, a cut-off reply with no complete
-sentence, or nothing to state at all) returns the `WITHHELD` sentinel and also
-publishes nothing, but is **not** retried: the same readings are refused the same
-way, so a new sentence waits for the readings to move. Both still count toward the
-gap and the cap. It runs as
-a **background task** rather than inline, so a slow completion cannot stall the
-poll loop.
+**The summary is read off the published market report, with no Claude call**
+(2026-09-16). The daily market reports are rendered outside this repo and uploaded
+five times a trading day into `deploy/site/reports/` as `latest.html` (the page)
+and `latest.txt` (`"<day> <n> <slot> <as_of>"`). On the same poll loop,
+`scheduler.refresh_summary(bus, last_stamp)` stats those two files
+(`report_summary.report_stamp` — modification time and size) and, only when the
+stamp has changed, parses the page (`report_summary.read_report`): the
+`div.slotchip` text ("<label> · <as_of>"), the `h1` verdict headline, and each
+section's `h2` headline. Highlights are the section headlines in report order,
+capped at `MAX_HIGHLIGHTS` (`5`), falling back to the headline when the report has
+no sections. The payload is validated against `MarketSummary` and written with
+`skip_unchanged=True`. A report that does not parse (no `h1`) publishes nothing —
+the last good summary stays — and its stamp is still remembered, so the same
+bytes are not re-read until the report is replaced. A stat per poll is the whole
+steady-state cost; the service no longer uses `ANTHROPIC_API_KEY` or the
+environment's `allow_claude` flag.
 
 **Commands (`cmd:market`):** none. `handle_command` dispatches nothing and ignores
 every command type, including a replayed `enable_summary` / `disable_summary` from
-an older webgui — those, and the `cache:market:summary_enabled` key and the
-`SUMMARY_RTH_SEC` / `SUMMARY_OFFHOURS_SEC` clock they gated, were retired
-2026-09-10: the summary now feeds the Desk as well as the ticker, so the ticker
-toggle only hides the marquee and can no longer stop the Claude call.
+an older webgui — those, and the `cache:market:summary_enabled` key they wrote,
+were retired 2026-09-10. The ticker toggle only hides the marquee.
 
 ---
 

@@ -19,10 +19,11 @@ def test_publish_summary():
     from shared.bus import Bus
     from services.market_svc import handlers
     bus = Bus()
-    v = handlers.publish_summary(bus, {"narrative": "Cautious tape."})
+    v = handlers.publish_summary(bus, {"headline": "A rotation, not a rout",
+                                       "highlights": ["Chips broke"]})
     assert v >= 1
     env = bus.cache_get(handlers.CACHE_SUMMARY)
-    assert env.payload["narrative"] == "Cautious tape."
+    assert env.payload["highlights"] == ["Chips broke"]
 
 
 def test_retired_toggle_commands_are_ignored_not_errors():

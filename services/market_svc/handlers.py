@@ -27,8 +27,8 @@ def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:market`` command. There are none today.
 
     The ticker toggle's ``enable_summary`` / ``disable_summary`` were retired on
-    2026-09-10, when the summary began feeding the Desk as well as the marquee —
-    the toggle now only hides the marquee. Consumer groups replay the stream's
+    2026-09-10 (the summary is no longer written by a Claude call at all since
+    2026-09-16). Consumer groups replay the stream's
     backlog, so one of those can still arrive from an older webgui: it is
     ignored, like any unknown type."""
     log.debug("ignoring cmd:market %s", getattr(command, "type", None))

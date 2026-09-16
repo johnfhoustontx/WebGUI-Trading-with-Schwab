@@ -993,16 +993,17 @@ def regime_tone(reg):
 
 
 # ── the MARKET SUMMARY frame ─────────────────────────────────────────────────
-# One Claude-written sentence consolidating the six readings (market_svc's
-# change-driven summary, cache:market:summary) over six LIVE chips read off the
-# views this page already polls — so the chips are current even while the
-# sentence lags. Design: docs/plans/2026-09-10-desk-market-summary-design.md.
-SUMMARY_EMPTY = "No summary yet — one is written when the readings next change."
-SUMMARY_MOVED = "Readings have changed since this was written."
+# The highlights of the latest published market report (market_svc reads them
+# off the report page, cache:market:summary — at most five, no Claude call of
+# its own) and a link to the full report, over six LIVE chips read off the views
+# this page already polls. Designs: docs/plans/2026-09-10-desk-market-summary-
+# design.md (the chips) and 2026-09-16-desk-summary-from-market-report-design.md.
+SUMMARY_EMPTY = "No market report published yet."
+SUMMARY_LINK = "Read the full report"
+SUMMARY_MAX_POINTS = 5
 SENTIMENT_TIP = ("The sentiment composite, 0–10. A higher score means calmer, "
                  "more supportive conditions (quieter volatility, more call "
                  "buying, broader gains); a lower score means stress.")
-_SUMMARY_HORIZON = {True: "today", False: "quarter"}
 
 # The six chip labels, in ``summary_facts``' own order — used ONLY to build the
 # frame's COLD placeholders (every value starts ``_DASH``, exactly like the
@@ -1033,24 +1034,31 @@ def bullbear_distribution(counts, live):
     return f"{' · '.join(parts)} — counted {horizon}."
 
 
-def _as_of_text(iso):
+def report_provenance(summ):
+    """"Market close report · 14 Sep · 16:20 CT" — which report the highlights
+    came from, in the report's own words. Blank pieces are left out."""
+    label = str(summ.get("slot_label") or "").strip()
     try:
-        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        written = datetime.strptime(str(summ.get("report_date")), "%Y-%m-%d")
+        day = f"{written.day} {written:%b}"
     except (TypeError, ValueError):
-        return ""
-    return "" if dt.tzinfo is None else f"as of {dt.astimezone(_CT):%H:%M} CT"
+        day = ""
+    parts = [f"{label} report" if label else "", day,
+             str(summ.get("as_of") or "").strip()]
+    return " · ".join(p for p in parts if p)
 
 
 def summary_facts(summary_view, composite_view, history_view, regime_view,
                   bullbear_view, now=None):
     """Everything the MARKET SUMMARY frame draws, as plain data:
-    ``{"narrative", "as_of", "moved", "chips": [six {key,label,value,cls,tip}]}``.
+    ``{"points", "source", "url", "chips": [six {key,label,value,cls,tip}]}``.
 
+    ``points`` are the latest market report's highlights (at most
+    ``SUMMARY_MAX_POINTS``), ``source`` names that report and ``url`` links the
+    full one — ``""`` unless it is an https URL, since it is drawn as a link.
     Every chip reuses the strip's own derivation (the pill composite, the band
     facts, ``regime_display``, the map's headline), so the frame and the strip
-    cannot name one reading two ways. ``moved`` compares the WORDS and the
-    Bull/Bear count the sentence was written from (``inputs``) with the live
-    ones — a fact, not a promise of a refresh."""
+    cannot name one reading two ways."""
     now = now or datetime.now().astimezone()
     summ = summary_view if isinstance(summary_view, dict) else {}
     comp = composite_view if isinstance(composite_view, dict) else {}
@@ -1086,24 +1094,14 @@ def summary_facts(summary_view, composite_view, history_view, regime_view,
               bullbear_distribution(counts, live)),
     ]
 
-    narrative = str(summ.get("narrative") or "").strip()
-    inputs = summ.get("inputs") if isinstance(summ.get("inputs"), dict) else {}
-    moved = False
-    if narrative and inputs:
-        in_bb = inputs.get("bullbear") or {}
-        was = ((inputs.get("trend") or {}).get("word"), inputs.get("bias"),
-               inputs.get("signal"), (inputs.get("regime") or {}).get("word"),
-               in_bb.get("horizon"),
-               (in_bb.get("counts") or {}).get("rising_leading"))
-        counted = bool(sum(counts.values()))
-        now_is = (trend_word, _word_or_none(band["bias"]["value"]),
-                  _word_or_none(band["signal"]["value"]), reg["word"],
-                  _SUMMARY_HORIZON[live] if counted else None,
-                  counts["rising_leading"] if counted else None)
-        moved = was != now_is
-    return {"narrative": narrative,
-            "as_of": _as_of_text(summ.get("as_of")) if narrative else "",
-            "moved": moved, "chips": chips}
+    raw = summ.get("highlights") if isinstance(summ.get("highlights"), list) else []
+    points = [t for t in (" ".join(str(h).split()) for h in raw) if t]
+    points = points[:SUMMARY_MAX_POINTS]
+    url = str(summ.get("report_url") or "").strip() if points else ""
+    return {"points": points,
+            "source": report_provenance(summ) if points else "",
+            "url": url if url.startswith("https://") else "",
+            "chips": chips}
 
 
 # ── the Sentiment / Trend hero pills ─────────────────────────────────────────
@@ -3297,14 +3295,30 @@ def render():
 
         # ── the market summary ───────────────────────────────────────────────
         # At the BOTTOM, full width: the four panels above are per-symbol, and
-        # this is the page's conclusion — every reading on the strip, said once.
+        # this is the page's conclusion — the latest market report's highlights
+        # over every reading on the strip, said once.
         with ui.column().classes(f"{_TILE} w-full gap-[8px]"):
             with ui.row().classes("items-baseline w-full gap-4"):
                 ui.label("MARKET SUMMARY").classes(_STRIP_EYEBROW)
                 sum_asof = ui.label("").classes(
                     f"text-[11px] leading-none {CON_TXT_DIM}")
-            sum_text = ui.label(SUMMARY_EMPTY).classes(
+            sum_empty = ui.label(SUMMARY_EMPTY).classes(
                 f"text-[15px] leading-[1.5] {CON_TXT_MUTED}")
+            # A fixed set of point rows, filled in place — never rebuilt, so a
+            # repaint of the chips beside them costs no DOM churn.
+            sum_points = []
+            with ui.column().classes("w-full gap-[4px]"):
+                for _ in range(SUMMARY_MAX_POINTS):
+                    with ui.row().classes(
+                            "items-baseline w-full gap-2 no-wrap") as _row:
+                        ui.label("•").classes(f"text-[15px] {CON_TXT_DIM}")
+                        _pt = ui.label("").classes(
+                            f"text-[15px] leading-[1.5] {CON_TXT}")
+                    _row.set_visibility(False)
+                    sum_points.append((_row, _pt))
+            sum_link = ui.link(SUMMARY_LINK, "#", new_tab=True).classes(
+                f"text-[12px] underline {CON_TXT_MUTED}")
+            sum_link.set_visibility(False)
             sum_chips = []
             with ui.row().classes("items-baseline w-full gap-x-6 gap-y-1 flex-wrap"):
                 for _key, _label in _SUMMARY_CHIP_LABELS:
@@ -3312,9 +3326,6 @@ def render():
                         ui.label(_label).classes(_STRIP_EYEBROW)
                         sum_chips.append(ui.label(_DASH).classes(
                             f"text-[14px] {CON_TXT_MUTED}"))
-            sum_moved = ui.label(SUMMARY_MOVED).classes(
-                f"text-[11px] {CON_TXT_DIM}")
-            sum_moved.set_visibility(False)
         # The hover each chip currently carries — "" at build (cold chips).
         sum_tips = ["" for _ in sum_chips]
 
@@ -3404,11 +3415,16 @@ def render():
         f = summary_facts(_view("market:summary"), _view("sentiment:composite"),
                           _view("sentiment:history"), _view("sentiment:regime"),
                           _view("sentiment:bullbear"), now=state["wall_now"])
-        sum_text.text = f["narrative"] or SUMMARY_EMPTY
-        sum_text.classes(remove=_ALL_STATE_TEXT,
-                         add=CON_TXT if f["narrative"] else CON_TXT_MUTED)
-        sum_asof.text = f["as_of"]
-        sum_moved.set_visibility(f["moved"])
+        sum_empty.set_visibility(not f["points"])
+        for i, (row, lbl) in enumerate(sum_points):
+            text = f["points"][i] if i < len(f["points"]) else ""
+            lbl.text = text
+            row.set_visibility(bool(text))
+        sum_asof.text = f["source"]
+        if sum_link._props.get("href") != (f["url"] or "#"):
+            sum_link._props["href"] = f["url"] or "#"
+            sum_link.update()
+        sum_link.set_visibility(bool(f["url"]))
         for i, (lbl, chip) in enumerate(zip(sum_chips, f["chips"])):
             lbl.text = chip["value"]
             lbl.classes(remove=_ALL_STATE_TEXT, add=chip["cls"])

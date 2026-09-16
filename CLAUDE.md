@@ -742,6 +742,12 @@ moment the capture timer first fires, and **`tools/promote.sh` refuses a dirty t
 from the operator's workstation by tooling that lives outside this repo
 (`D:\NeuralStrike Reports\tools\publish.py`, which refuses to upload until prod ignores
 the directory). ⚠ The frame's `reports/latest.html` name is the contract with that tool.
+⚠ **So is its MARKUP, since 2026-09-16**: `market_svc/report_summary.py` reads that
+file to publish `cache:market:summary` — the Desk's MARKET SUMMARY highlights and the
+ticker's lead — from `div.slotchip`, the `h1` and each section `h2`. A renderer change
+that renames those publishes nothing (the last good summary stays, with one WARNING),
+so the Desk goes quietly stale rather than wrong. No Claude call sits behind the
+summary any more.
 **`deploy/site/assets/shots/*.webp` — the marketing gallery — is the same, with THREE
 TRACKED EXCEPTIONS** (`image16/17/18`). Those name a Simulator view that lives in page
 state rather than in the URL, so **nothing regenerates them**: ignored, a fresh clone
@@ -1885,7 +1891,7 @@ the code already has, so a suppressed dev cannot take a code path prod never tak
 | Flag | Enforced in | Effect |
 |---|---|---|
 | `allow_notifications` | `shared/notify/channels.py:load_config` | recursively zeroes **every** `enabled` key, LAST so it also overrides the `NOTIFY_ENABLED`/`TWITTER_ENABLED` env escapes — kills Telegram, Discord, Fi-SMS, the public **X/Twitter** poster and the sentiment state-transition alert in one stroke. `options_svc/push_notify.load_config` delegates here, so this is the single chokepoint |
-| `allow_claude` | the three client factories — `options_svc/compute.py`, `market_svc/compute.py`, `driver_svc/decider.py` — return `None` | falls into the existing *no-API-key* path: the briefing renders its explanatory page, the ticker narrative is empty, the decider stands down |
+| `allow_claude` | the two client factories — `options_svc/compute.py`, `driver_svc/decider.py` — return `None` | falls into the existing *no-API-key* path: the briefing renders its explanatory page, the decider stands down (market_svc makes no Claude call since 2026-09-16 — its summary quotes the published market report) |
 | `schedulers` | `services/_scaffold.py:_schedulers_enabled` (consumed by `make_app`) | all six services stop collecting and polling; **command handlers still run**, so the UI stays fully usable off the snapshot |
 | `autonomous_trading` | `driver_svc/handlers.py:run_autonomous_cycle` early-returns | belt-and-braces: `cycle` is also a *command* and the arm state lives in Redis, so the scheduler skip alone would not stop a snapshot that carried `cache:driver:control` enabled |
 
@@ -3510,8 +3516,7 @@ real levers if a page feels sluggish or a service churns CPU/network. Audited
   fsync on the ~60-70 calls/min hot path), `_rate_limit` holds a dedicated **`_rate_lock`**
   across its spacing (concurrent fan-outs no longer burst past 5 req/s → 429 risk), and the
   30 s reconcile logs INFO only on an actual change (else DEBUG).
-- **market_svc:** the Claude summary runs as a **background task** (`asyncio.create_task`,
-  no longer stalls the 2 s poll up to ~60 s), the deep-weekend poll throttles to 60 s
+- **market_svc:** the deep-weekend poll throttles to 60 s
   (`WEEKEND_INTERVAL_SEC` — futures closed), and `read_sector_pcr` is **version-gated**
   (deserializes the composite only when it changes, not every 2 s).
 - **sentiment_svc:** the state-transition phone push fires **outside `_TREND_LOCK`**

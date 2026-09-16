@@ -1,19 +1,23 @@
 from shared.contracts.market import MarketSummary
 
 
-def test_defaults_and_round_trip():
-    assert MarketSummary().narrative == ""
-    m = MarketSummary(narrative="Cautious tape.")
-    assert MarketSummary.from_json(m.to_json()).narrative == "Cautious tape."
+def test_defaults_are_empty_so_no_report_draws_nothing():
+    m = MarketSummary()
+    assert m.headline == "" and m.highlights == [] and m.report_url == ""
 
 
-def test_inputs_and_as_of_are_additive_with_empty_defaults():
-    """An older payload (narrative only) must still validate - the fields are
-    additive, and the Desk treats empty ones as 'no provenance'."""
-    m = MarketSummary(narrative="Quiet tape.")
-    assert m.inputs == {} and m.as_of == ""
-    full = MarketSummary(narrative="x", inputs={"bias": "Cautious"},
-                         as_of="2026-09-10T15:42:00+00:00")
-    back = MarketSummary.from_json(full.to_json())
-    assert back.inputs == {"bias": "Cautious"}
-    assert back.as_of == "2026-09-10T15:42:00+00:00"
+def test_round_trip():
+    m = MarketSummary(headline="A rotation, not a rout",
+                      highlights=["Chips broke", "Software ripped"],
+                      slot="close", slot_label="Market close",
+                      report_date="2026-09-14", as_of="16:20 CT",
+                      report_url="https://neuralstrike.co/report.html")
+    back = MarketSummary.from_json(m.to_json())
+    assert back == m
+
+
+def test_an_older_claude_payload_still_validates():
+    """A cache written before 2026-09-16 carries ``narrative``/``inputs``; the
+    service's first publish replaces it, but a reader must not choke first."""
+    m = MarketSummary(**{"narrative": "old", "inputs": {}, "as_of": "x"})
+    assert m.highlights == []

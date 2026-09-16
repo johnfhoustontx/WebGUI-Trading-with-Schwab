@@ -1582,14 +1582,17 @@ def test_render_hangs_the_bias_words_hover_on_the_sentiment_pill(monkeypatch):
 
 
 # ── the MARKET SUMMARY frame ─────────────────────────────────────────────────
-def _summary(narrative="Fear builds while the tape glides; lean defensive.",
-             **inputs):
-    base = {"trend": {"word": "Gliding", "score": 38.6}, "bias": "Cautious",
-            "signal": "Bearish", "regime": {"word": "Rallying", "confidence": 0.7},
-            "bullbear": {"horizon": "today", "counts": {"rising_leading": 1}}}
-    base.update(inputs)
-    return {"narrative": narrative, "inputs": base,
-            "as_of": "2026-09-10T15:42:00+00:00"}
+_REPORT_URL = "https://neuralstrike.co/report.html"
+
+
+def _summary(highlights=("Chips broke; software ripped",
+                         "SPX stalled one tick under its flip"), **over):
+    base = {"headline": "A rotation, not a rout",
+            "highlights": list(highlights), "slot": "close",
+            "slot_label": "Market close", "report_date": "2026-09-14",
+            "as_of": "16:20 CT", "report_url": _REPORT_URL}
+    base.update(over)
+    return base
 
 
 def _summary_views(**over):
@@ -1616,10 +1619,32 @@ def _facts(monkeypatch, live=True, **over):
                            v["regime"], v["bullbear"])
 
 
-def test_summary_facts_carry_the_sentence_and_when_it_was_written(monkeypatch):
+def test_summary_facts_carry_the_reports_highlights_and_link(monkeypatch):
     f = _facts(monkeypatch)
-    assert f["narrative"].startswith("Fear builds")
-    assert f["as_of"] == "as of 10:42 CT"
+    assert f["points"] == ["Chips broke; software ripped",
+                           "SPX stalled one tick under its flip"]
+    assert f["source"] == "Market close report · 14 Sep · 16:20 CT"
+    assert f["url"] == _REPORT_URL
+
+
+def test_the_summary_never_shows_more_than_five_points(monkeypatch):
+    many = _summary(highlights=[f"Point {i}" for i in range(1, 9)])
+    f = _facts(monkeypatch, summary=many)
+    assert f["points"] == [f"Point {i}" for i in range(1, 6)]
+    assert d.SUMMARY_MAX_POINTS == 5
+
+
+def test_only_an_https_report_link_is_drawn(monkeypatch):
+    for bad in ("javascript:alert(1)", "http://neuralstrike.co/report.html", ""):
+        assert _facts(monkeypatch, summary=_summary(report_url=bad))["url"] == ""
+
+
+def test_an_older_claude_summary_payload_draws_no_points(monkeypatch):
+    """The cache can still hold the retired Claude sentence until market_svc's
+    first report publish replaces it."""
+    old = {"narrative": "Fear builds.", "inputs": {}, "as_of": "2026-09-10T15:42:00+00:00"}
+    f = _facts(monkeypatch, summary=old)
+    assert f["points"] == [] and f["source"] == "" and f["url"] == ""
 
 
 def test_summary_chips_are_the_six_readings_in_order(monkeypatch):
@@ -1655,24 +1680,12 @@ def test_the_sentiment_chip_hover_states_the_scales_real_direction():
         assert banned not in tip, banned
 
 
-def test_the_summary_is_current_when_the_readings_match_its_inputs(monkeypatch):
-    assert _facts(monkeypatch)["moved"] is False
-
-
-def test_the_summary_says_when_the_readings_moved_past_it(monkeypatch):
-    moved = _summary(bias="Neutral")               # written when bias was Neutral
-    assert _facts(monkeypatch, summary=moved)["moved"] is True
-    regime_moved = _summary(regime={"word": "Whipsaw", "confidence": 0.4})
-    assert _facts(monkeypatch, summary=regime_moved)["moved"] is True
-    horizon_moved = _summary(bullbear={"horizon": "quarter",
-                                       "counts": {"rising_leading": 1}})
-    assert _facts(monkeypatch, summary=horizon_moved)["moved"] is True
-
-
-def test_no_sentence_reads_as_no_sentence_never_as_current(monkeypatch):
-    f = _facts(monkeypatch, summary={"narrative": "", "inputs": {}})
-    assert f["narrative"] == "" and f["as_of"] == "" and f["moved"] is False
-    assert _facts(monkeypatch, summary=None)["narrative"] == ""
+def test_no_report_reads_as_no_report(monkeypatch):
+    f = _facts(monkeypatch, summary={"highlights": []})
+    assert f["points"] == [] and f["source"] == "" and f["url"] == ""
+    assert _facts(monkeypatch, summary=None)["points"] == []
+    blanks = _summary(highlights=["", "   "])
+    assert _facts(monkeypatch, summary=blanks)["points"] == []
 
 
 def test_cold_readings_dash_and_carry_no_hover(monkeypatch):
@@ -1696,13 +1709,14 @@ def test_the_desk_reads_the_market_summary_on_its_one_poll():
 def test_render_mounts_the_market_summary_frame(monkeypatch):
     from pages import sentiment as S
     payloads = _full_payloads()
-    payloads["market:summary"] = _summary(
-        bias="Cautious", signal="Bearish",
-        regime={"word": "Rallying", "confidence": 0.71})
+    payloads["market:summary"] = _summary()
     _seed_bus(monkeypatch, payloads)
     texts = [t for t in _rendered_texts() if t]
     assert "MARKET SUMMARY" in texts
-    assert _summary()["narrative"] in texts
+    for point in _summary()["highlights"]:
+        assert point in texts
+    assert d.SUMMARY_LINK in texts
+    assert "Market close report · 14 Sep · 16:20 CT" in texts
     assert S.band_word_picture("signal", "Bearish") in texts
 
 

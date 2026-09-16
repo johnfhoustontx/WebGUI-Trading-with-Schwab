@@ -221,61 +221,35 @@ backlog or light every row.
 Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-dashboard-design.md)
 · [`2026-08-21-desk-voice-alerts-design.md`](plans/2026-08-21-desk-voice-alerts-design.md).
 
-**The MARKET SUMMARY frame + the Regime popup (2026-09-10).** Full width, below
+**The MARKET SUMMARY frame + the Regime popup (2026-09-10; the summary quotes the market report since 2026-09-16).** Full width, below
 the four panels; the public live Desk renders it too.
 
-- **A short plain-English summary** (`market_svc`'s existing ticker-narrative
-  call, Sonnet 5) consolidating six readings — Sentiment (0–10 composite,
-  high = calm and supportive, low = stress), Trend (flight word + score), Bias, Signal, Regime, Bull/Bear
-  (sector quadrant counts, today once the bell has rung else the quarter) — and
-  closing with a posture, next to an **"as of HH:MM CT"** timestamp. **The code
-  states the facts**: `compute.summary_facts` writes one plain-English statement
-  per reading (no app labels, scores or size multipliers — the chips carry
-  those), Claude is sent only those statements, joins them and adds one posture
-  sentence, and a reply that drops or rewords any statement is withheld
-  (`_missing_fact`), as is one that ties a credit spread to the wrong direction
-  or states a wrong sector count. It is written **on change,
-  not on a clock**: `market_svc` fingerprints the six readings at display
-  resolution every poll (words exact, composite to 0.5, trend score to 5, regime
-  confidence to 10%, horizon exact, and the Bull/Bear rising + beating counts
-  within one sector — `FINGERPRINT_SECTOR_TOLERANCE`, compared by
-  `same_summary_readings`) and writes only when that fingerprint moves, never
-  twice within `SUMMARY_MIN_GAP_SEC` (10 min), never past `SUMMARY_DAILY_CAP`
-  (30/day). A **failed** attempt (API error, timeout) publishes nothing — the last
-  good sentence stays — and is retried once the gap has passed. A **withheld**
-  reply also publishes nothing but is NOT retried: the same readings would be
-  refused the same way, so a new sentence waits for them to move. Both count
-  toward the gap and the cap. ⚠ A sentence's sector counts may therefore be one
-  sector off the live chips; the frame's moved-since line reads the exact counts
-  out of `inputs` and says so.
-- **A new `summary` region on the Desk's existing batched poll** —
-  `cache:market:summary` joins `VIEWS`, read alongside the ten the page already
-  polls. `summary_facts(summary_view, composite_view, history_view, regime_view,
-  bullbear_view, now)` is the pure function that builds everything the frame
-  draws: the narrative, the "as of" text, the `moved` flag, and the six chips
-  (each reusing the strip's own derivation — the pill composite, the band facts,
-  `regime_display`, the map's headline — so the frame and the strip can never name
-  one reading two ways).
+- **The latest market report's highlights (since 2026-09-16).** Up to five
+  points — the report's own section headlines, in report order — over the
+  report's provenance ("Market close report · 14 Sep · 16:20 CT") and a **Read
+  the full report** link (`report_url`, `https://<SITE_HOST>/report.html`, drawn
+  only when it is https). `market_svc/report_summary.py` parses
+  `deploy/site/reports/latest.html` (+ `latest.txt`) whenever its stamp changes
+  — a `stat` per poll — and publishes `cache:market:summary` (`MarketSummary`:
+  `headline`, `highlights`, `slot`, `slot_label`, `report_date`, `as_of`,
+  `report_url`). **No Claude call**: the change-driven Claude sentence
+  (`summary_facts`/`generate_summary`, the fingerprint gate, the 30/day cap) was
+  retired the same day. A report that does not parse publishes nothing, so the
+  last good highlights stay. ⚠ The markup is a contract with the report
+  renderer outside this repo: `div.slotchip`, `h1`, one `h2` per section.
+- **A `summary` region on the Desk's existing batched poll** —
+  `cache:market:summary` is in `VIEWS`. `summary_facts(summary_view,
+  composite_view, history_view, regime_view, bullbear_view, now)` builds
+  everything the frame draws: `points`, `source`, `url` and the six chips (each
+  reusing the strip's own derivation, so the frame and the strip can never name
+  one reading two ways). The point rows are a fixed set of five filled in place.
 - **Six live chips** — SENTIMENT, TREND, BIAS, SIGNAL, REGIME, BULL/BEAR — read
-  off the views the page already polls, so they are current even while the
-  sentence above them lags. Each carries the same hover its counterpart uses
-  elsewhere on the page, plus two new ones: **Sentiment** — "The sentiment
-  composite, 0–10. A higher score means calmer, more supportive conditions
-  (quieter volatility, more call buying, broader gains); a lower score means
-  stress." (`desk.SENTIMENT_TIP`; it called the scale contrarian until
-  2026-09-11, which was backwards) — and **Bull/Bear** —
-  `bullbear_distribution(counts, live)`, the full four-quadrant distribution and
-  its horizon, e.g. "Rising · Leading 4 · Falling · Lagging 2 — counted on
-  today's moves."
-- **The "moved since" line** (`desk.SUMMARY_MOVED`) appears when a chip's word,
-  or the Bull/Bear count, differs from `cache:market:summary`'s `inputs` — the
-  packet the current sentence was written from. It is a fact about the gap
-  between the live readings and the sentence, not a promise that a refresh is
-  imminent (the gap or the daily cap may delay one).
-- **Empty state** (`desk.SUMMARY_EMPTY`) — "No summary yet — one is written when
-  the readings next change." — before any sentence has ever been published (a
-  fresh restart, or no Claude key configured). An unpublished reading behind a
-  live chip shows a dash, never "Neutral".
+  off the views the page already polls. Each carries the same hover its
+  counterpart uses elsewhere on the page, plus **Sentiment**
+  (`desk.SENTIMENT_TIP`) and **Bull/Bear** (`bullbear_distribution(counts,
+  live)`, the four-quadrant distribution and its horizon).
+- **Empty state** (`desk.SUMMARY_EMPTY`) — "No market report published yet." An
+  unpublished reading behind a live chip shows a dash, never "Neutral".
 - **The Regime popup.** Hovering the Market Regime word — here and on
   `/sentiment`'s regime dial — shows one sentence per word from
   `regime_mix.REGIME_PICTURE`, keyed by the DISPLAYED word (11 entries: Balanced,

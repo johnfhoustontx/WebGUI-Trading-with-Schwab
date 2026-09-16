@@ -1,7 +1,7 @@
 """Market Summary Ticker (bottom of every page) — Tier-1, engine-free.
 
 Reads cache:market:dashboard + cache:sentiment:composite (live items) and
-cache:market:summary (Claude verdict), renders a fixed bottom marquee. The pure
+cache:market:summary (the latest market report's verdict headline), renders a fixed bottom marquee. The pure
 builders here (``ticker_items``/``item_class``/``speed_class``) carry the coverage;
 ``render_ticker`` does the widget + timer wiring (Task 5).
 
@@ -170,7 +170,7 @@ def render_ticker(active):
     """Fixed bottom marquee on every page (gated by the Settings toggle).
 
     Renders nothing when ``ticker_enabled`` is off. Reads the two live caches +
-    the Claude narrative, version-gated on a 4s timer so it's cheap on every page.
+    the market report's headline, version-gated on a 4s timer so it's cheap on every page.
     """
     if not app_settings.get("ticker_enabled"):
         return
@@ -189,7 +189,9 @@ def render_ticker(active):
         dash = bus_client.read("market:dashboard")
         sent = bus_client.read("sentiment:composite")
         summ = bus_client.read("market:summary") or {}
-        narrative = (summ.get("narrative") or "").strip()
+        # The latest market report's verdict (market_svc, off the published
+        # report). Not a Claude call of its own since 2026-09-16.
+        narrative = " ".join(str(summ.get("headline") or "").split())
         return narrative, ticker_items(dash, sent)
 
     def _paint(narrative, items):

@@ -77,8 +77,8 @@ The app reads market data and your positions from Schwab, so you need:
 ## Nice-to-have (optional)
 
 - **An Anthropic (Claude) API key** — only needed for the AI features: the Gamma
-  **Analyze**/**Explain** infographics, the autonomous **Claude Trades** driver, and
-  the market-summary ticker. Set it as the `ANTHROPIC_API_KEY` environment variable
+  **Analyze**/**Explain** infographics and the autonomous **Claude Trades** driver.
+  Set it as the `ANTHROPIC_API_KEY` environment variable
   (or in a `shared/anthropic_key.txt` file). Without it, those features simply stay
   quiet — nothing else is affected, and the auto-trader safely stands down.
 - **Push notifications** (Telegram / Discord / text message) — configured in
@@ -342,7 +342,7 @@ structure · what should I act on · what am I holding.*
 | **Opportunity Board** | The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
 | **Live Flow Alerts** | The five newest unusual-options events |
 | **Positions** | Your paper trades and Claude's together, with live marks and an **OK / Watch / At risk / Rescue** flag |
-| **Market Summary** | One Claude-written sentence, in plain English, tying Sentiment, Trend, Bias, Signal, Regime and Bull/Bear together and ending with a posture — full width, at the bottom |
+| **Market Summary** | Up to five highlights from the latest published market report, with which report they came from and a link to the full report, over six live chips (Sentiment, Trend, Bias, Signal, Regime, Bull/Bear) — full width, at the bottom |
 
 **Hover Bias, Signal or the market regime word** and a sentence explains what it
 means and, for Bias, what position size it implies.
@@ -398,33 +398,25 @@ Switch it off, change the voice or set its volume under **Settings → Spoken al
   the app telling you it was blocked. One click unlocks sound for the session; any
   other click on the page unlocks it too, the button just says so.
 
-**Market Summary** is the frame across the bottom. It reads the six panels above
-it together in plain English and closes with a posture — for example "Market
-conditions are under some stress, which this model reads as a warning. The model suggests
-trading smaller than usual. Prices are drifting lower, but sellers are not
-pushing them. … Stay cautious and favor defined-risk trades." The statement of
-each reading is written by the app itself, so it always matches the reading;
-Claude only joins the statements and adds the closing posture, and a reply that
-changes any statement is discarded — the previous summary stays up, and the app
-waits for the readings to move before asking again rather than putting the same
-question a second time. It
-deliberately avoids the app's labels and scores — the six chips under it show
-those. Two things about it are easy to misread:
+**Market Summary** is the frame across the bottom. It shows the highlights of the
+latest published **NeuralStrike market report** — the report the website publishes
+five times a trading day — as up to five bullet points, each one of the report's
+own section headlines in report order. Above them a line names the report, for
+example "Market close report · 14 Sep · 16:20 CT", and **Read the full report**
+opens the whole report on the website in a new tab. The highlights are quoted from
+the report as written; no AI rewrites them. Three things about the frame are easy
+to misread:
 
-- **It is written when the readings change, not on a schedule.** The **"as of
-  HH:MM CT"** in the top-right corner is when it was last written, and it can sit
-  unchanged for a while on a quiet tape — that is not staleness, it is nothing new
-  to say. The six chips underneath it are **live** regardless: SENTIMENT, TREND,
-  BIAS, SIGNAL, REGIME and BULL/BEAR update on every poll even while the sentence
-  above them lags, and hovering any of them explains that word — the same hover as
-  the top strip.
-- **A dim "Readings have changed since this was written." line** appears when a
-  chip's word, or the Bull/Bear count, has moved past what the sentence was
-  written from. It is a fact about the gap, not a promise that a new sentence is
-  coming soon — a new one is still gated by the change-driven write rule above.
-- **Before the first sentence is ever written** — a fresh restart, or no Claude
-  key configured — the frame reads "No summary yet — one is written when the
-  readings next change." instead of a blank space.
+- **It changes when a new report is published, not on a schedule.** Between
+  reports the bullets stay put, so check the report line for their age. The six
+  chips underneath are **live** regardless: SENTIMENT, TREND, BIAS, SIGNAL, REGIME
+  and BULL/BEAR update on every poll even while the report above them is hours
+  old, and hovering any of them explains that word — the same hover as the top
+  strip.
+- **If a new report can't be read, the previous highlights stay up** rather than
+  the frame going blank.
+- **Before any report has been published** the frame reads "No market report
+  published yet." instead of a blank space.
 
 ---
 
@@ -2178,10 +2170,10 @@ Preferences, all saved on your machine:
 > machine and is instant. The app pre-generates the common flow phrases in the
 > background at startup, so in practice you rarely hear the delay.
 
-> **Turning the ticker off only hides the scrolling bar.** The Claude-written
-> sentence behind it also feeds the Desk's **Market Summary** frame, so it keeps
-> being written — when the readings change, not on a clock — whether or not the
-> marquee is showing.
+> **Turning the ticker off only hides the scrolling bar.** The bar leads with the
+> headline of the latest published market report, and that same report also feeds
+> the Desk's **Market Summary** frame, so it keeps being picked up — whenever a new
+> report is published — whether or not the marquee is showing.
 
 > **Run Vacuum after hours.** It locks the database for minutes, and the tool
 > refuses to run while the collector is active.

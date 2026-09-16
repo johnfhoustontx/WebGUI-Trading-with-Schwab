@@ -8,23 +8,19 @@ off-hours cadence keeps them visibly ticking (the cash indices/internals are
 stale then anyway, and skip_unchanged means an unchanged payload costs
 nothing). The market-hours gate mirrors the other services.
 
-The Claude-written market summary is written ON THIS SAME LOOP, but only when
-the readings' fingerprint has changed (see ``SummaryGate``/``summary_due``
-below) — not on a clock, and no longer gated by the webgui ticker toggle
-(retired 2026-09-10, when the summary began feeding the Desk as well as the
-marquee).
+The market summary is refreshed ON THIS SAME LOOP: each poll stats the
+published market report (``report_summary.report_stamp``) and republishes
+``cache:market:summary`` only when the report was replaced. No Claude call —
+the change-driven Claude sentence this loop used to write was retired
+2026-09-16 in favour of the report's own highlights.
 """
 import asyncio
-import dataclasses
 import datetime as _dt
 import logging
-import operator
-import time
-from dataclasses import dataclass
 from datetime import time as _time
 from zoneinfo import ZoneInfo
 
-from services.market_svc import compute, handlers
+from services.market_svc import compute, handlers, report_summary
 from shared import market_calendar as mc
 
 _log = logging.getLogger("market_svc.scheduler")
@@ -72,130 +68,42 @@ def poll_interval(now=None):
     return OFFHOURS_INTERVAL_SEC
 
 
-# The summary is written ON CHANGE, not on a clock (2026-09-10): the Desk's
-# MARKET SUMMARY frame and the ticker both show it, and a clock refresh paid for
-# ~25 calls a day, most of them overnight rewrites of a market that had not
-# moved. Now a sentence is written only when the readings' fingerprint moves
-# (compute.summary_fingerprint, compared by compute.same_summary_readings),
-# never twice within the gap, and never past the daily ceiling — so a reading
-# flapping at a band boundary cannot run up cost.
-SUMMARY_MIN_GAP_SEC = 10 * 60
-SUMMARY_DAILY_CAP = 30
+def refresh_summary(bus, last_stamp, reports_dir=None):
+    """Republish the summary when the published report changed. Returns the
+    stamp to remember — a stat per poll is the whole steady-state cost.
 
-
-@dataclass(frozen=True)
-class SummaryGate:
-    fingerprint: tuple | None = None   # what the last sentence was written from
-    last_call: float | None = None     # monotonic seconds of the last call
-    day: _dt.date | None = None        # CT date the counter belongs to
-    calls_today: int = 0
-
-
-def summary_due(gate, fingerprint, *, now_mono, today, same=operator.eq):
-    """Write a new sentence this poll? (pure)
-
-    No — when there is nothing to summarize, when the readings have not changed
-    since the last sentence, within ``SUMMARY_MIN_GAP_SEC`` of the last call, or
-    once ``SUMMARY_DAILY_CAP`` calls have been made on ``today``. The first poll
-    after a restart (empty gate) with readings present is always due.
-
-    ``same`` decides whether two fingerprints describe the same readings: the
-    loop passes ``compute.same_summary_readings``, which lets the sector counts
-    drift by a sector; plain equality otherwise."""
-    if fingerprint is None:
-        return False
-    calls = gate.calls_today if gate.day == today else 0
-    if calls >= SUMMARY_DAILY_CAP:
-        return False
-    if same(gate.fingerprint, fingerprint):
-        return False
-    if gate.last_call is not None and now_mono - gate.last_call < SUMMARY_MIN_GAP_SEC:
-        return False
-    return True
-
-
-def record_summary(gate, fingerprint, *, now_mono, today):
-    """The gate after a call is launched (pure) — a NEW gate, never mutated."""
-    calls = gate.calls_today if gate.day == today else 0
-    return SummaryGate(fingerprint=fingerprint, last_call=now_mono, day=today,
-                       calls_today=calls + 1)
-
-
-async def _run_summary(loop_, bus, packet) -> str:
-    """Write the sentence + publish it, OFF the poll loop. Never raises.
-
-    Nothing is published unless a sentence was written, so the last good one
-    stays on the Desk rather than being blanked — the Desk's "readings have
-    changed" line already says when a sentence has been overtaken.
-
-    Returns what became of the attempt, which ``loop()`` uses to decide whether
-    the fingerprint it recorded at launch may stand:
-
-    - ``"published"`` — the sentence is on the Desk.
-    - ``"withheld"`` — ``generate_summary`` answered ``compute.WITHHELD``: the
-      reply was checked and refused, or there was nothing to state. The
-      fingerprint STANDS, so the same readings are not asked about again; they
-      would be refused the same way.
-    - ``"failed"`` — the attempt failed (``generate_summary`` returned None, or
-      anything raised). The fingerprint is forgotten, so the same readings are
-      retried once the gap has passed."""
-    try:
-        summary = await loop_.run_in_executor(None, compute.generate_summary, packet)
-        if summary is compute.WITHHELD:
-            return "withheld"
-        if summary is None:
-            return "failed"
-        await loop_.run_in_executor(None, handlers.publish_summary, bus, summary)
-        return "published"
-    except asyncio.CancelledError:
-        raise
-    except Exception:  # noqa: BLE001 — a summary failure can't affect the poll loop.
-        _log.exception("market summary generation failed")
-        return "failed"
-
-
-def _outcome(task) -> str:
-    """What became of a finished summary task: its own answer, or ``"failed"``
-    when it was cancelled or raised."""
-    if task.cancelled() or task.exception() is not None:
-        return "failed"
-    return task.result()
+    A report that does not parse publishes nothing, so the last good summary
+    stays, and its stamp IS remembered: the same bytes would fail the same way,
+    and re-reading them every 3 s would log a warning every 3 s."""
+    kw = {} if reports_dir is None else {"reports_dir": reports_dir}
+    stamp = report_summary.report_stamp(**kw)
+    if stamp is None or stamp == last_stamp:
+        return last_stamp
+    payload = report_summary.read_report(**kw)
+    if payload is None:
+        return stamp
+    handlers.publish_summary(bus, payload)
+    return stamp
 
 
 async def loop(bus) -> None:
-    """Poll → publish → (a new summary when the readings changed) → sleep."""
+    """Poll → publish → (the report summary, when the report changed) → sleep."""
     loop_ = asyncio.get_running_loop()
-    gate = SummaryGate()
-    summary_task = None
+    report_stamp = None
     while True:
         interval = poll_interval()
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)
             await loop_.run_in_executor(None, handlers.publish, bus, payload)
-            if summary_task is not None and summary_task.done():
-                if _outcome(summary_task) == "failed":
-                    # The attempt still counts toward the gap and the daily cap
-                    # (record_summary ran at launch), but it FAILED — forget its
-                    # fingerprint so the SAME readings are retried once the gap
-                    # has passed, instead of a transient failure freezing a stale
-                    # sentence until the market moves. A WITHHELD reply keeps
-                    # its fingerprint: the same readings would be refused again.
-                    gate = dataclasses.replace(gate, fingerprint=None)
-                summary_task = None
-            if summary_task is None:
-                packet = await loop_.run_in_executor(
-                    None, compute.read_summary_packet, bus)
-                fp = compute.summary_fingerprint(packet)
-                mono, today = time.monotonic(), _dt.datetime.now(_CT).date()
-                if summary_due(gate, fp, now_mono=mono, today=today,
-                               same=compute.same_summary_readings):
-                    gate = record_summary(gate, fp, now_mono=mono, today=today)
-                    # A BACKGROUND task: the call can take ~60 s (30 s timeout +
-                    # a retry) and must not stall the 3 s poll.
-                    summary_task = asyncio.create_task(
-                        _run_summary(loop_, bus, packet))
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — never let the scheduler die.
             _log.exception("market poll cycle failed")
+        try:
+            report_stamp = await loop_.run_in_executor(
+                None, refresh_summary, bus, report_stamp)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 — a summary failure can't stop the poll.
+            _log.exception("market report summary refresh failed")
         await asyncio.sleep(interval)

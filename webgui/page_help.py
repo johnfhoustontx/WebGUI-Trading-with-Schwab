@@ -102,18 +102,13 @@ on · what am I holding.*
   mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
   **Rescue**. The header totals open trades, open P&L, and how many need
   attention.
-- **Market Summary** — a short **plain-English** read of the readings above
-  (sentiment, trend, bias, signal, regime, Bull/Bear), ending with a trading
-  posture. The statement of each reading is **written by the app itself**, so it
-  cannot be misread; Claude only joins them and adds the closing posture, and a
-  reply that changes any statement is thrown away (the previous one stays). It
-  says what the readings *mean* rather than repeating their labels and numbers —
-  the chips underneath show those. It is written when those readings **change**, not on a
-  clock, so it carries an **"as of" time** rather than a fixed refresh cadence.
-  The six chips underneath it are **live** — they update on every poll even
-  while the sentence above them lags — and hovering any chip explains that
-  word, the same hover as the strip above. When the chips have moved since the
-  sentence was written, a dim line says so.
+- **Market Summary** — the **highlights of the latest market report**: up to
+  five points, each one of the report's own section headlines, with which report
+  they came from (for example *Market close report · 14 Sep · 16:20 CT*) and a
+  **Read the full report** link that opens it on the website. It changes when a
+  new report is published (five a trading day), not on a clock. The six chips
+  underneath are **live** — they update on every poll — and hovering any chip
+  explains that word, the same hover as the strip above.
 
 **Click any row** to open the page it came from, already set to that symbol.
 Nothing on this page places or changes a trade.
@@ -1188,9 +1183,8 @@ Controls the alert chimes, notifications, the ticker, and the app's look.
 - **Audio alert / sound / volume** — what plays when new signals appear.
 - **Market-hours only / minimum score** — when the app is allowed to bother you.
 - **Ticker** — the scrolling market-summary bar at the bottom of every page.
-  Switching it off only hides the bar — the Claude-written verdict it shows
-  also feeds the Desk's Market Summary frame, so it keeps being written either
-  way.
+  It leads with the latest market report's headline. Switching it off only
+  hides the bar.
 - **Appearance** — every color, font, and menu style, editable in-app (tabs of
   clickable color swatches). **Save & restart web GUI** applies the change.
 - **API usage** — how many calls the app made to Schwab (counted at the

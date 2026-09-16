@@ -4,7 +4,35 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-16 (**An adapted credit structure's `net_delta` is the
+**Last updated:** 2026-09-16 (**The Desk's MARKET SUMMARY quotes the latest market
+report; market_svc's Claude summary call is retired.**)
+
+- **What the frame shows.** Up to five highlights — the latest published market
+  report's own section headlines — with the report they came from ("Market close
+  report · 14 Sep · 16:20 CT") and a **Read the full report** link to
+  `https://neuralstrike.co/report.html`. The six live chips stay; the "readings have
+  changed since this was written" line went with the sentence it compared against.
+  The bottom ticker leads with the report's verdict headline.
+- **Where it comes from.** `services/market_svc/report_summary.py` parses
+  `deploy/site/reports/latest.html` (+ `latest.txt`), which the report tooling
+  uploads five times a trading day. `scheduler.refresh_summary` stats both files on
+  every market poll and republishes only when they change; a page that does not
+  parse publishes nothing and is not re-read until replaced.
+- **What was removed.** `compute.summary_facts` / `generate_summary` / the fact
+  tables and checks, the fingerprint gate (`SummaryGate`, `summary_due`,
+  `SUMMARY_MIN_GAP_SEC`, `SUMMARY_DAILY_CAP`), `_make_summary_client`, and their
+  tests (`test_summary.py`, `test_env_claude_guard.py`, the market_svc mirrors in
+  `test_cross_tier_mirrors.py`). That call was capped at 30 a day; 84 were measured
+  on 2026-09-11 before the cap. `MarketSummary` is now `headline` · `highlights` ·
+  `slot` · `slot_label` · `report_date` · `as_of` · `report_url`.
+- **Outside this repo, done the same day:** the report collector
+  (`~/neuralstrike-reports/tools/remote_collect.py` on vps2) no longer reads this
+  cache, and REPORT_GUIDE no longer lists it — it would have fed each report its
+  predecessor's highlights as "the app's read".
+
+---
+
+**Prior —** 2026-09-16 (**An adapted credit structure's `net_delta` is the
 position's.** Before this, a Finder/Income credit spread's delta ignored its long
 leg and an iron condor's read exactly 0.)
 

@@ -265,54 +265,33 @@ days to expiration, size, entry, live mark, unrealized profit or loss, and a fla
 unrealized P&L, and how many need attention. *At risk* and *Rescue* are the two
 that count toward that total; *Watch* does not.
 
-**Market Summary.** Full width, across the bottom. A short read of the six
-readings above it — Sentiment, Trend, Bias, Signal, Regime, Bull/Bear — closing
-with a trading posture, next to an **"as of HH:MM CT"** timestamp, always shown
-complete (never cut off mid-sentence). It is written in **plain everyday
-English**: it says what the readings mean rather than repeating the app's labels,
-scores or position sizes (the chips under it carry those). **Accuracy comes
-first, so the app states the facts itself**: each reading becomes one fixed
-plain-English statement written by the code ("Prices are drifting lower, but
-sellers are not pushing them."; "Today, 2 of the 11 sectors are rising and 9 are
-falling, and 6 are beating the S&P 500."). Claude is given only those statements,
-joins them, and adds one closing posture. The app then checks the reply and
-**withholds it** — the previous summary stays up — if any statement is missing or
-reworded, if a sector count disagrees with the app's own, or if it ties a credit
-spread to the wrong direction (a put credit spread is bullish-to-neutral, a call
-credit spread bearish-to-neutral). The posture is the only part in Claude's own
-words.
+**Market Summary.** Full width, across the bottom. The highlights of the latest
+published **NeuralStrike market report** — the same report the website publishes
+five times a trading day (pre-market, the open, the first hour, midday and the
+close). Up to **five bullet points**, which are the report's own section
+headlines in the order the report gives them, under a provenance line naming
+which report they came from — for example **"Market close report · 14 Sep ·
+16:20 CT"** — and a **Read the full report** link that opens the whole report on
+the website in a new tab. No Claude call is made to fill this frame: the
+highlights are quoted from the report, not rewritten.
 
-It is written **on change, not on a clock**: `market_svc` builds a fingerprint of
-the six readings at display resolution on every poll, and writes a new sentence
-only when that fingerprint differs from the one the last attempt was made from,
-at least ten minutes have passed since that attempt, and fewer than thirty
-attempts have been made that day. Small moves do not count as a change: a sector
-count one sector off, or a composite that has not crossed its step, still reads as
-the same market. A reply the accuracy checks refused also waits for the readings
-to move rather than putting the same question again, since the same readings are
-refused the same way.
+It changes **when a new report is published, not on a clock**: `market_svc`
+checks on every poll whether the published report has been replaced, and reads it
+again only when it has. So the bullets sit unchanged between reports, and the
+provenance line tells you how old they are. A report that cannot be read leaves
+the previous highlights up.
 
-So a sentence that sits unchanged is usually just a quiet tape — nothing crossed
-the display thresholds — but it can also be a reply that was refused. The line
-**"Readings have changed since this was written"** tells you which: while it is
-absent the market really has not moved, and when it is showing, the six chips
-below the sentence are the current reading.
-
-Underneath the sentence sit **six live chips** — SENTIMENT, TREND, BIAS, SIGNAL,
+Underneath the highlights sit **six live chips** — SENTIMENT, TREND, BIAS, SIGNAL,
 REGIME, BULL/BEAR — reading off the same views the top strip and the Bull/Bear
-strip already poll, so they are current even while the sentence above them lags
-behind. Hovering a chip opens the same hover its counterpart uses elsewhere on the
-page; the Sentiment chip's own hover reads "The sentiment composite, 0–10. A
+strip already poll, so they are current even while the report above them is
+hours old. Hovering a chip opens the same hover its counterpart uses elsewhere on
+the page; the Sentiment chip's own hover reads "The sentiment composite, 0–10. A
 higher score means calmer, more supportive conditions (quieter volatility, more
 call buying, broader gains); a lower score means stress." and the Bull/Bear chip's hover lists every quadrant's count and
 which horizon (today or the quarter) it was counted on.
 
-A dim **"Readings have changed since this was written."** line appears under the
-chips when a chip's word, or the Bull/Bear count, differs from what the sentence
-was written from — a fact about the gap between the two, not a promise that a
-refresh is imminent. Before any sentence has ever been written — a fresh restart,
-or no Claude key configured — the frame reads **"No summary yet — one is written
-when the readings next change."**
+Before any report has been published, the frame reads **"No market report
+published yet."**
 
 The same frame renders on the **public live Desk** (`live.neuralstrike.co`).
 
@@ -3884,10 +3863,11 @@ immediately, then ride toward full credit protected by a break-even stop. Off (t
 default) keeps the plain take-profit at +50%. The driver's isolated account is never
 affected by this toggle.
 
-**Show the ticker.** The scrolling marquee at the bottom of every page. **Turning it off
-only hides the marquee** — the Claude-written sentence behind it also feeds the Desk's
-Market Summary frame, so `market_svc` keeps writing it, on change rather than on a
-clock, whether or not the marquee is showing.
+**Show the ticker.** The scrolling marquee at the bottom of every page, led by the
+latest published market report's headline. **Turning it off only hides the
+marquee** — the report summary behind it also feeds the Desk's Market Summary frame,
+so `market_svc` keeps reading it whenever a new report is published, whether or not
+the marquee is showing.
 
 **Appearance.** Every colour, font and menu style, in seven tabs — surfaces, state
 colours, 3D buttons, gauges, charts, text, menu. **Save & restart web GUI** applies the
@@ -3895,8 +3875,8 @@ change; **Reset to defaults** is confirm-gated. Changes are written to
 `config/theme.toml`.
 
 **API usage.** Outbound **Schwab** calls counted at the gateway per actual HTTP request
-(including retries), and **Claude (Anthropic)** calls counted at each of the three call
-sites — the driver's decision maker, Gamma Analyze, and the ticker summary — for today,
+(including retries), and **Claude (Anthropic)** calls counted at each call site — the
+driver's decision maker and Gamma Analyze among them — for today,
 the last 7 days and the last 30 days.
 
 **Maintenance.** **Vacuum GEX history DB** compacts the intraday options database, with

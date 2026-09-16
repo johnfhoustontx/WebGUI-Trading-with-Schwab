@@ -224,8 +224,8 @@ just click <strong>Authorize</strong> again.</p>
 <h2 id="nice-to-have-optional">Nice-to-have (optional)</h2>
 <ul>
 <li><strong>An Anthropic (Claude) API key</strong> — only needed for the AI features: the Gamma
-  <strong>Analyze</strong>/<strong>Explain</strong> infographics, the autonomous <strong>Claude Trades</strong> driver, and
-  the market-summary ticker. Set it as the <code>ANTHROPIC_API_KEY</code> environment variable
+  <strong>Analyze</strong>/<strong>Explain</strong> infographics and the autonomous <strong>Claude Trades</strong> driver.
+  Set it as the <code>ANTHROPIC_API_KEY</code> environment variable
   (or in a <code>shared/anthropic_key.txt</code> file). Without it, those features simply stay
   quiet — nothing else is affected, and the auto-trader safely stands down.</li>
 <li><strong>Push notifications</strong> (Telegram / Discord / text message) — configured in
@@ -540,7 +540,7 @@ structure · what should I act on · what am I holding.</em></p>
 </tr>
 <tr>
 <td><strong>Market Summary</strong></td>
-<td>One Claude-written sentence, in plain English, tying Sentiment, Trend, Bias, Signal, Regime and Bull/Bear together and ending with a posture — full width, at the bottom</td>
+<td>Up to five highlights from the latest published market report, with which report they came from and a link to the full report, over six live chips (Sentiment, Trend, Bias, Signal, Regime, Bull/Bear) — full width, at the bottom</td>
 </tr>
 </tbody>
 </table>
@@ -591,33 +591,25 @@ you.</p>
   the app telling you it was blocked. One click unlocks sound for the session; any
   other click on the page unlocks it too, the button just says so.</li>
 </ul>
-<p><strong>Market Summary</strong> is the frame across the bottom. It reads the six panels above
-it together in plain English and closes with a posture — for example "Market
-conditions are under some stress, which this model reads as a warning. The model suggests
-trading smaller than usual. Prices are drifting lower, but sellers are not
-pushing them. … Stay cautious and favor defined-risk trades." The statement of
-each reading is written by the app itself, so it always matches the reading;
-Claude only joins the statements and adds the closing posture, and a reply that
-changes any statement is discarded — the previous summary stays up, and the app
-waits for the readings to move before asking again rather than putting the same
-question a second time. It
-deliberately avoids the app's labels and scores — the six chips under it show
-those. Two things about it are easy to misread:</p>
+<p><strong>Market Summary</strong> is the frame across the bottom. It shows the highlights of the
+latest published <strong>NeuralStrike market report</strong> — the report the website publishes
+five times a trading day — as up to five bullet points, each one of the report's
+own section headlines in report order. Above them a line names the report, for
+example "Market close report · 14 Sep · 16:20 CT", and <strong>Read the full report</strong>
+opens the whole report on the website in a new tab. The highlights are quoted from
+the report as written; no AI rewrites them. Three things about the frame are easy
+to misread:</p>
 <ul>
-<li><strong>It is written when the readings change, not on a schedule.</strong> The <strong>"as of
-  HH:MM CT"</strong> in the top-right corner is when it was last written, and it can sit
-  unchanged for a while on a quiet tape — that is not staleness, it is nothing new
-  to say. The six chips underneath it are <strong>live</strong> regardless: SENTIMENT, TREND,
-  BIAS, SIGNAL, REGIME and BULL/BEAR update on every poll even while the sentence
-  above them lags, and hovering any of them explains that word — the same hover as
-  the top strip.</li>
-<li><strong>A dim "Readings have changed since this was written." line</strong> appears when a
-  chip's word, or the Bull/Bear count, has moved past what the sentence was
-  written from. It is a fact about the gap, not a promise that a new sentence is
-  coming soon — a new one is still gated by the change-driven write rule above.</li>
-<li><strong>Before the first sentence is ever written</strong> — a fresh restart, or no Claude
-  key configured — the frame reads "No summary yet — one is written when the
-  readings next change." instead of a blank space.</li>
+<li><strong>It changes when a new report is published, not on a schedule.</strong> Between
+  reports the bullets stay put, so check the report line for their age. The six
+  chips underneath are <strong>live</strong> regardless: SENTIMENT, TREND, BIAS, SIGNAL, REGIME
+  and BULL/BEAR update on every poll even while the report above them is hours
+  old, and hovering any of them explains that word — the same hover as the top
+  strip.</li>
+<li><strong>If a new report can't be read, the previous highlights stay up</strong> rather than
+  the frame going blank.</li>
+<li><strong>Before any report has been published</strong> the frame reads "No market report
+  published yet." instead of a blank space.</li>
 </ul>
 <hr />
 <h1 id="markets-what-is-the-market-doing">MARKETS — what is the market doing?</h1>
@@ -2556,10 +2548,10 @@ Desk shows an <strong>Enable spoken alerts</strong> button when that happens.</p
 because the clip is made on demand; after that it plays from a cache on your own
 machine and is instant. The app pre-generates the common flow phrases in the
 background at startup, so in practice you rarely hear the delay.</p>
-<p><strong>Turning the ticker off only hides the scrolling bar.</strong> The Claude-written
-sentence behind it also feeds the Desk's <strong>Market Summary</strong> frame, so it keeps
-being written — when the readings change, not on a clock — whether or not the
-marquee is showing.</p>
+<p><strong>Turning the ticker off only hides the scrolling bar.</strong> The bar leads with the
+headline of the latest published market report, and that same report also feeds
+the Desk's <strong>Market Summary</strong> frame, so it keeps being picked up — whenever a new
+report is published — whether or not the marquee is showing.</p>
 <p><strong>Run Vacuum after hours.</strong> It locks the database for minutes, and the tool
 refuses to run while the collector is active.</p>
 </blockquote>
