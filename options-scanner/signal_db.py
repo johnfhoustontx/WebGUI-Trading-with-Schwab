@@ -242,6 +242,18 @@ def get_open_signals(scanner_type=None, db_path=DEFAULT_DB_PATH):
         conn.close()
 
 
+def count_open_by_symbol(db_path=DEFAULT_DB_PATH):
+    """``{symbol: n}`` of OPEN signals across every scanner type — the book the
+    recorder's per-symbol capture cap counts against."""
+    conn = connect(db_path)
+    try:
+        cur = conn.execute(
+            "SELECT symbol, COUNT(*) FROM signals WHERE status='OPEN' GROUP BY symbol")
+        return {sym: n for sym, n in cur.fetchall()}
+    finally:
+        conn.close()
+
+
 def peak_unrealized(signal_id, db_path=DEFAULT_DB_PATH):
     """The best unrealized P&L this signal has ever marked, or ``None``.
 

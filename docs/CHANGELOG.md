@@ -4,7 +4,33 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-16 (**A `swing_scan` command that omits a key now runs the
+**Last updated:** 2026-09-16 (**Captured signals are capped at two OPEN per symbol,
+across every scanner type.**)
+
+- **The defect.** `signal_recorder.record_signals` had no per-symbol limit. The Income
+  board captured every candidate it published, and SPY topped it two days running:
+  3 call credit spreads on 09-15 and 4 on 09-16, so 7 open SPY captures, all one
+  bearish bet. ORCL reached 16 captures on 09-08 through the 0-DTE path. The paper
+  Account's own `MAX_POSITIONS_PER_SYMBOL` limited only what the Account opened, not
+  what the capture feed recorded.
+- **The fix.** `[capture] max_open_per_symbol = 2` in `config/scanner.toml`, read via
+  `shared.scanner_config.capture_max_open_per_symbol()` (0 = off; a bad value falls
+  back to 2, not to off). The recorder counts OPEN signals per symbol with
+  `signal_db.count_open_by_symbol`, walks the eligible signals highest score first,
+  and skips a symbol at the cap. Only a real insert uses up a slot, so a spread
+  re-offered and ignored as a duplicate does not.
+  A lock serialises count-then-insert across the scan and Income threads. If the
+  count cannot be read, nothing is captured (fail closed). Skips log at INFO.
+- **Operator decisions.** The limit is 2, counted across 0DTE + SWING + INCOME together. Accepted
+  consequence: open Income captures can keep a 0-DTE signal on the same name out of
+  capture, and so out of the paper Account.
+- **Not changed.** The 7 SPY captures already open stay open; the cap stops new ones
+  until they fall below 2. Manuals (Reference Guide, Technical Reference) and the
+  Captured Signals page help are updated.
+
+---
+
+**Prior —** 2026-09-16 (**A `swing_scan` command that omits a key now runs the
 Strategy Finder's untouched scan.** The service filled missing DTE with 5–30 while the
 page defaults to 0 / All.)
 

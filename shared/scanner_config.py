@@ -49,6 +49,9 @@ DEFAULTS = {
         "gex_strong_neg": -0.30,
         "swing_min": 50.0,
     },
+    # At most this many OPEN captured signals per symbol, counted across every
+    # scanner type. 0 = off. See config/scanner.toml [capture].
+    "capture": {"max_open_per_symbol": 2},
 }
 
 load, reset_cache = toml_loader(SCANNER_TOML, DEFAULTS, label="scanner.toml")
@@ -134,3 +137,15 @@ def single_leg() -> dict:
 
 def scores() -> dict:
     return _section("scores")
+
+
+def capture_max_open_per_symbol() -> int:
+    """How many OPEN captured signals one symbol may hold, across all scanner
+    types; ``0`` turns the cap off. A missing, negative or non-integer value
+    falls back to the default rather than to "off" — a typo in a risk limit must
+    not silently remove it."""
+    default = DEFAULTS["capture"]["max_open_per_symbol"]
+    v = _section("capture").get("max_open_per_symbol", default)
+    if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+        return default
+    return v

@@ -798,6 +798,10 @@ Market Scanner, and since 2026-09-11 the once-daily **Income** board too.
   bell and you can still read its results on the Market Scanner — but a premarket
   quote is priced off *yesterday's* close, so a signal booked then carries a
   credit the open would have gapped away from. Only the booking waits for the bell.
+- **At most 2 open signals per symbol**, counting Market Scanner and Income rows
+  together. When a scan offers more, the highest-scoring ones are kept. Once a
+  symbol has 2 open, nothing new is captured for it until one closes, so the paper
+  Account can't take a third position in it from here either.
 """,
     "/options/portfolio": """
 **Paper Account — the simple version**

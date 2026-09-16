@@ -302,3 +302,141 @@ def test_wall_clock_is_gated_when_now_is_omitted(tmp_path, monkeypatch):
 
     monkeypatch.setattr(signal_recorder, "_now", lambda: RTH)
     assert signal_recorder.record_signals([_make_signal(score=60)], "0DTE", db_path=db) == 1
+
+
+# --- per-symbol cap on OPEN captured signals (2026-09-16) --------------------
+# The Income board recorded every candidate it offered, and on 2026-09-15/16 it
+# offered SPY call credit spreads seven times over, stacking seven open SPY
+# captures on one directional bet. The cap counts OPEN captured signals per
+# symbol across EVERY scanner type (operator decision), so an open income
+# capture occupies a slot a 0-DTE sighting of the same name would need.
+
+
+def _spy(short, score=60, type_="CCS", exp="2026-10-30"):
+    return _make_signal(score=score, symbol="SPY", type_=type_, short=short,
+                        long=short + 1, exp=exp)
+
+
+def _cap(monkeypatch, n):
+    monkeypatch.setattr(signal_recorder._scfg, "capture_max_open_per_symbol",
+                        lambda: n)
+
+
+def _open_symbols(db):
+    return sorted(r["symbol"] for r in signal_db.get_open_signals(db_path=db))
+
+
+def test_the_default_cap_is_two():
+    import shared.scanner_config as sc
+    assert sc.DEFAULTS["capture"]["max_open_per_symbol"] == 2
+
+
+def test_a_batch_records_at_most_the_cap_per_symbol(tmp_path, monkeypatch):
+    _cap(monkeypatch, 2)
+    db = tmp_path / "s.db"
+    sigs = [_spy(780), _spy(785), _spy(787), _spy(790)]
+
+    assert signal_recorder.record_signals(sigs, "INCOME", db_path=db, now=RTH) == 2
+    assert _open_symbols(db) == ["SPY", "SPY"]
+
+
+def test_the_highest_scoring_signals_take_the_slots(tmp_path, monkeypatch):
+    """A board lists candidates in whatever order it merged them; the slots go
+    to the best, not to whichever came first."""
+    _cap(monkeypatch, 2)
+    db = tmp_path / "s.db"
+    sigs = [_spy(780, score=52.1), _spy(785, score=57.1),
+            _spy(787, score=54.0), _spy(790, score=55.8)]
+
+    signal_recorder.record_signals(sigs, "INCOME", db_path=db, now=RTH)
+
+    kept = sorted(r["entry_score"] for r in signal_db.get_open_signals(db_path=db))
+    assert kept == [55.8, 57.1]
+
+
+def test_the_cap_holds_across_separate_scans(tmp_path, monkeypatch):
+    """Yesterday's open captures count against today's board — the stacking
+    that actually happened spanned two days."""
+    _cap(monkeypatch, 2)
+    db = tmp_path / "s.db"
+    assert signal_recorder.record_signals([_spy(784), _spy(782)], "INCOME",
+                                          db_path=db, now=RTH) == 2
+    assert signal_recorder.record_signals([_spy(780), _spy(790)], "INCOME",
+                                          db_path=db, now=RTH) == 0
+
+
+def test_the_cap_counts_every_scanner_type(tmp_path, monkeypatch):
+    _cap(monkeypatch, 2)
+    db = tmp_path / "s.db"
+    signal_recorder.record_signals([_spy(784), _spy(782)], "INCOME",
+                                   db_path=db, now=RTH)
+
+    zero_dte = _make_signal(score=70, symbol="SPY", short=690, long=688)
+    assert signal_recorder.record_signals([zero_dte], "0DTE", db_path=db, now=RTH) == 0
+
+
+def test_other_symbols_are_unaffected(tmp_path, monkeypatch):
+    _cap(monkeypatch, 2)
+    db = tmp_path / "s.db"
+    sigs = [_spy(780), _spy(785), _spy(787),
+            _make_signal(symbol="QQQ", short=600, long=599),
+            _make_signal(symbol="QQQ", short=601, long=600)]
+
+    assert signal_recorder.record_signals(sigs, "0DTE", db_path=db, now=RTH) == 4
+    assert _open_symbols(db) == ["QQQ", "QQQ", "SPY", "SPY"]
+
+
+def test_a_closed_capture_frees_its_slot(tmp_path, monkeypatch):
+    _cap(monkeypatch, 2)
+    db = tmp_path / "s.db"
+    signal_recorder.record_signals([_spy(784), _spy(782)], "INCOME",
+                                   db_path=db, now=RTH)
+    first = signal_db.get_open_signals(db_path=db)[0]
+    signal_db.close_signal_manually(first["signal_id"], 0.1, "MANUAL_CLOSE",
+                                    db_path=db)
+
+    assert signal_recorder.record_signals([_spy(790)], "INCOME",
+                                          db_path=db, now=RTH) == 1
+
+
+def test_a_deduped_resighting_does_not_consume_a_slot(tmp_path, monkeypatch):
+    """INSERT OR IGNORE discards a spread already captured; that must not
+    count as a capture, or the genuinely new spread behind it is refused."""
+    _cap(monkeypatch, 2)
+    db = tmp_path / "s.db"
+    signal_recorder.record_signals([_spy(784, score=70)], "INCOME",
+                                   db_path=db, now=RTH)
+
+    again = [_spy(784, score=70), _spy(790, score=60)]
+    assert signal_recorder.record_signals(again, "INCOME", db_path=db, now=RTH) == 1
+    assert len(signal_db.get_open_signals(db_path=db)) == 2
+
+
+def test_zero_turns_the_cap_off(tmp_path, monkeypatch):
+    _cap(monkeypatch, 0)
+    db = tmp_path / "s.db"
+    sigs = [_spy(780), _spy(785), _spy(787), _spy(790)]
+    assert signal_recorder.record_signals(sigs, "INCOME", db_path=db, now=RTH) == 4
+
+
+def test_the_cap_comes_from_config(monkeypatch):
+    import shared.scanner_config as sc
+    monkeypatch.setattr(sc, "load", lambda: {"capture": {"max_open_per_symbol": 5}})
+    assert sc.capture_max_open_per_symbol() == 5
+    monkeypatch.setattr(sc, "load", lambda: {"capture": {"max_open_per_symbol": "x"}})
+    assert sc.capture_max_open_per_symbol() == 2
+    monkeypatch.setattr(sc, "load", lambda: {})
+    assert sc.capture_max_open_per_symbol() == 2
+
+
+def test_an_unreadable_book_captures_nothing(tmp_path, monkeypatch):
+    """Fail closed: capture feeds the paper Account, so a book the cap cannot
+    count must not become an uncapped one."""
+    _cap(monkeypatch, 2)
+
+    def boom(**_kw):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(signal_recorder.signal_db, "count_open_by_symbol", boom)
+    db = tmp_path / "s.db"
+    assert signal_recorder.record_signals([_spy(780)], "INCOME", db_path=db, now=RTH) == 0

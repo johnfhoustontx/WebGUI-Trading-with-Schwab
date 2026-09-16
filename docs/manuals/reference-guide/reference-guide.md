@@ -2390,6 +2390,17 @@ without exception (the score was tuned for the short-dated core and this board
 runs 50–57 against it, which is exactly what the capture exists to test), and a
 cash-secured put row carries **no long strike**, because there isn't one.
 
+⚠ **From 2026-09-16 a symbol holds at most two open captures**, counted across
+**0DTE**, **SWING** and **INCOME** together (`[capture] max_open_per_symbol` in
+`config/scanner.toml`; 0 turns it off). Before it, the Income board captured every
+candidate it offered and stacked seven open SPY call credit spreads in two days:
+one bet, seven times over. When a scan offers more than the free slots, the
+highest-scoring signals are captured; once a symbol has two open, nothing new is
+captured for it until one closes. Because the paper Account enters from these
+captures, a symbol whose two slots are held by Income rows can't get a 0-DTE
+signal into the Account either. That trade-off was chosen on purpose. The
+skipped signals still show on the Market Scanner and the Income page.
+
 **The footer** sums the session in four figures: signals **opened today** and
 **closed today** (counts of captures and of closes, so a signal taken and closed in
 the same session appears in both), **P&L today (booked)** — the realized total of

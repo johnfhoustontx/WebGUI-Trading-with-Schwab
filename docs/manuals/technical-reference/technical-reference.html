@@ -1398,7 +1398,10 @@ path, so its <code>entry_score</code> changed basis on 2026-09-13</strong> — f
 before and after that date are not directly comparable for calibration. The capture
 takes whatever the board publishes (<code>capture_min_income = 0</code>), so no capture floor moved;
 a row whose score crosses the board's own 50 cut is the only way the published — and so
-captured — set can differ. Flies, condors, calendars
+captured — set can differ (apart from the per-symbol cap: since 2026-09-16
+<code>signal_recorder.record_signals</code> holds each symbol to <code>[capture] max_open_per_symbol</code>
+= 2 OPEN captures across all scanner types, highest score first, and captures nothing
+if it cannot read the open count). Flies, condors, calendars
 and the short straddle/strangle carry <code>NEUTRAL</code>; the long straddle/strangle carry
 <code>VOLATILITY</code>, which takes the near-breakeven branch, because a long volatility trade
 wants the move it needs to be small. Diagonals and share structures are <code>DIRECTIONAL</code>.</p>

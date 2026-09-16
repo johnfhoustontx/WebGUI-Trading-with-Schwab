@@ -16,6 +16,7 @@ also covers the manual Run-scan command, which runs at any hour and is subject
 to no window at all.
 """
 import logging
+import threading
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -46,6 +47,12 @@ MIN_SCORE = _scfg.scores()["capture_min"]   # config/scanner.toml
 # happen while they are refused. 0 means "whatever the board offered": the income
 # scan already cuts below ``swing_min`` service-side, so that is the real filter.
 _CAPTURE_FLOORS = {"INCOME": _scfg.scores()["capture_min_income"]}
+
+
+# Serialises count-then-insert. The 0DTE/SWING scan and the Income board record
+# from different executor threads; interleaved, both could read "1 open" and
+# both insert, landing a symbol one past its cap.
+_CAP_LOCK = threading.Lock()
 
 
 def capture_floor(scanner_type):
@@ -108,7 +115,8 @@ def _now():
 def record_signals(signals, scanner_type, db_path=signal_db.DEFAULT_DB_PATH,
                    now=None):
     """Record signals with score >= this type's ``capture_floor``, inside regular
-    hours only.
+    hours only, holding each symbol to ``[capture] max_open_per_symbol`` OPEN
+    captured signals counted across every scanner type (highest score first).
     Returns count inserted. Never raises — DB failures are logged and counted
     as 0.
 
@@ -140,12 +148,42 @@ def record_signals(signals, scanner_type, db_path=signal_db.DEFAULT_DB_PATH,
                      "none captured", scanner_type, now.isoformat(timespec="seconds"),
                      len(eligible))
         return 0
+    cap = _scfg.capture_max_open_per_symbol()
+    # Best first, so when a scan offers more than a symbol's free slots the
+    # highest-scoring signals take them. ``sorted`` is stable: ties keep the
+    # scan's own order.
+    eligible.sort(key=lambda s: s.get("composite_score", s.get("score", 0)),
+                  reverse=True)
     inserted = 0
-    for sig in eligible:
-        row = _to_row(sig, scanner_type, now)
-        try:
-            if _insert(row, db_path):
-                inserted += 1
-        except Exception as e:
-            log.error(f"signal_recorder insert failed: {e}")
+    capped = {}
+    with _CAP_LOCK:
+        open_n = {}
+        if cap:
+            try:
+                open_n = signal_db.count_open_by_symbol(db_path=db_path)
+            except Exception as e:
+                # Fail CLOSED: capture feeds the paper Account's entries, and an
+                # unreadable book must not become an uncapped one.
+                log.error(f"signal_recorder open-count read failed, "
+                          f"capturing nothing: {e}")
+                return 0
+        for sig in eligible:
+            sym = sig["symbol"]
+            if cap and open_n.get(sym, 0) >= cap:
+                capped[sym] = capped.get(sym, 0) + 1
+                continue
+            row = _to_row(sig, scanner_type, now)
+            try:
+                if _insert(row, db_path):
+                    inserted += 1
+                    open_n[sym] = open_n.get(sym, 0) + 1
+            except Exception as e:
+                log.error(f"signal_recorder insert failed: {e}")
+    if capped:
+        # INFO, like the out-of-hours refusal: the cap working is the answer,
+        # not a fault — but a scan that found structure and booked none of it
+        # must say why.
+        log.info("%s: %s at the %d-open-per-symbol capture cap", scanner_type,
+                 ", ".join(f"{s} ({n} skipped)" for s, n in sorted(capped.items())),
+                 cap)
     return inserted

@@ -116,3 +116,17 @@ gex_strong_neg = -0.30
 # express different intents ("no low-scoring trades" vs "no gate-failing trades")
 # and either may move alone.
 swing_min = 50.0
+
+[capture]
+# At most this many OPEN captured signals per symbol, counted across 0DTE, SWING
+# and INCOME together. 0 turns the cap off. When a scan offers more than the free
+# slots, the highest-scoring signals take them; a symbol at the cap captures
+# nothing new until one of its open signals closes.
+#
+# Added 2026-09-16: the Income board recorded every candidate it offered and
+# stacked seven open SPY call credit spreads over two days, one directional bet
+# seven times over. Counted across types by operator decision, so an open income
+# capture occupies a slot a 0-DTE sighting of the same name would need — and
+# since the paper Account enters from these captures, that can keep a 0-DTE
+# signal out of the Account too.
+max_open_per_symbol = 2
