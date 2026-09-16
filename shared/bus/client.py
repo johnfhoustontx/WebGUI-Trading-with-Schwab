@@ -112,8 +112,18 @@ class Bus:
         if fake or os.environ.get("PYTEST_CURRENT_TEST"):
             import fakeredis
 
+            # protocol=2 is load-bearing for test SPEED, not behaviour. redis-py 8
+            # defaults to RESP3, and on a RESP3 connect it runs the maintenance-
+            # notifications handshake, which calls socket.getaddrinfo on fakeredis's
+            # random UUID hostname. On Windows that waits for a slow NXDOMAIN:
+            # ~1.27 s per client, paid again by every Bus(fake=True). RESP2 skips the
+            # handshake (0.003 s). MaintNotificationsConfig(enabled=False) did NOT
+            # avoid it. Response shapes are unchanged: legacy_responses=True already
+            # maps RESP3 replies to RESP2 shapes (checked for every command the Bus
+            # uses). The real client below keeps the default protocol.
             self._r = fakeredis.FakeStrictRedis(server=_fake_server(),
-                                                decode_responses=True)
+                                                decode_responses=True,
+                                                protocol=2)
         else:
             import redis
 
