@@ -7856,17 +7856,21 @@ def _schwab_dte(raw):
     return int(raw) if raw >= 0 else None
 
 
-def option_expiration_rows(api):
+def option_expiration_rows(api, today=None):
     """Every listed expiration for ``api`` with its type and DTE, or ``[]`` on no
     client method or a non-200 — the same degrade as ``option_expirations``, which
-    the Calculator keeps using for the plain date list."""
+    the Calculator keeps using for the plain date list.
+
+    ``today`` passes through to :func:`parse_expiration_rows`. The host date IS read
+    even when every row carries a ``daysToExpiration``: it is what decides whether
+    Schwab's number is plausible."""
     fetch = getattr(_proxy.schwab_py_client, "get_option_expirations", None)
     if fetch is None:
         return []
     resp = fetch(api)
     if getattr(resp, "status_code", None) != 200:
         return []
-    return parse_expiration_rows(resp.json())
+    return parse_expiration_rows(resp.json(), today=today)
 
 
 def rows_in_range(rows, dte_min, dte_max):

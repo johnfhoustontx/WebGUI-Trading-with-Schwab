@@ -7,6 +7,7 @@ now only converts the credit-% input to a fraction (``pct_to_fraction``),
 enqueues a ``swing_scan`` command, and reads the result from the Redis bus. So
 the page must import NO engine / proxy / scoring code.
 """
+import datetime as dt
 import inspect
 
 import pytest
@@ -686,7 +687,11 @@ def test_all_then_scan_sends_no_upper_limit_and_a_typed_max_is_sent(monkeypatch)
 
 # --------------------------------------------------------- the earnings tag
 
-_EARN = {**_FLY, "id": "earn", "spans_earnings": True, "earnings_date": "2026-11-19"}
+# The report is in the CURRENT year: the tag adds ", <year>" for any other year
+# (finder_view.earnings_text), so a fixed 2026-11-19 reads "Earnings Nov 19, 2026"
+# from 1 January 2027. The year suffix has its own test beside the builder.
+_EARN = {**_FLY, "id": "earn", "spans_earnings": True,
+         "earnings_date": f"{dt.date.today().year}-11-19"}
 
 
 def test_a_stamped_card_carries_the_earnings_badge_and_an_unstamped_one_does_not():

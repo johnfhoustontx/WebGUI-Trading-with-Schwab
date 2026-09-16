@@ -165,13 +165,19 @@ def test_captured_performance_merges_open_signals_with_closed_outcomes(monkeypat
     """One row list, both states — which is exactly what the ledger book hands
     ``period_buckets`` and why its Opened column has always been right."""
     import sys
+    # Opened TODAY, never on a fixed date: the window starts at the earlier of
+    # the week and month start, so an absolute date falls out of it. The old
+    # 2026-09-03 left on Thursday 1 October, when the window begins Monday 28
+    # September.
+    opened_at = dt.datetime.now(compute._PROJ_CT_TZ).replace(
+        hour=0, minute=0, second=0, microsecond=0)
     stub = type(sys)("signal_db")
     stub.get_outcomes_in_range = lambda lo, hi: [_RAW]
     stub.get_open_signals = lambda: [{
         "signal_id": "open1", "symbol": "QQQ", "strategy": "CCS",
         "scanner_type": "SWING", "entry_credit": 0.80,
-        "first_seen_ts": "2026-09-03T11:00:00-05:00",
-        "first_seen_date": "2026-09-03"}]
+        "first_seen_ts": opened_at.isoformat(),
+        "first_seen_date": opened_at.date().isoformat()}]
     monkeypatch.setitem(sys.modules, "signal_db", stub)
 
     out = compute.captured_performance()
