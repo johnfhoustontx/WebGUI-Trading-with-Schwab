@@ -2648,9 +2648,13 @@ two days after the gate shipped, was two IREN put credit spreads at IV rank 2.3*
 B2's own verification had exercised a single-leg short, and its tests handed
 `swing_scan` invented rows (`{"type": "PCS", "net_vega": -0.31}`) no producer
 emits. **`shared.structures.position_greek(row, greek)` is now the one converter**:
-the explicit `entry_net_<greek>_position` wins (`screen_spreads` writes theta and
-vega, `build_iron_condors` vega, and an adapted row stamps both), else
-`−net_<greek>`. `paper_trader` reads through it too, because its credit branch gets
+the explicit `entry_net_<greek>_position` wins (`screen_spreads` writes delta,
+theta and vega, `build_iron_condors` delta and vega, and an adapted row stamps all
+three), else `−net_<greek>`. **Delta needs the explicit field**: a raw row has no
+`net_delta` to negate, and the adapter's reconstructed legs carry 0 on every long
+leg, so a leg-derived `net_delta` reads `−short_delta` for a vertical (median 7×
+the position's on prod's stored spreads) and exactly 0 for an iron condor — which
+`fit_directional` scores beside leg-exact native families. `paper_trader` reads through it too, because its credit branch gets
 raw rows AND Finder rows — negating a position-signed row again would book a credit
 spread as long vega — and it keeps writing the ledger's `net_theta` in the scanner
 convention the Paper page displays. ⚠ **Raw scanner rows keep the old convention**

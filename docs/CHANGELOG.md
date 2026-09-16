@@ -4,7 +4,61 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-16 (**The volatility floor reaches credit spreads and
+**Last updated:** 2026-09-16 (**An adapted credit structure's `net_delta` is the
+position's.** Before this, a Finder/Income credit spread's delta ignored its long
+leg and an iron condor's read exactly 0.)
+
+- **The defect.** `strategy_scanner._normalize_credit` took `net_delta` from
+  `payoff_metrics` over the legs `_credit_leg` rebuilds, which carry `short_delta`
+  on the short leg and 0 on every long leg (0 on all four of an IC's). An adapted
+  PCS/CCS therefore read `−short_delta`, and `strategy_scoring.fit_directional`
+  (`tanh(net_delta / DELTA_SCALE)`) scored that beside native families whose delta
+  is leg-exact, in one ranked table. The row already carried the exact
+  `entry_net_delta_position` (`long.delta − short.delta`) from `screen_spreads`.
+- **Measured before fixing**, read-only, on prod's nightly dumps. The 2026-09-11,
+  -14 and -15 `cache:options:income` boards (the Finder snapshots held no credit
+  rows): the 8 adapted spreads overstated delta **3–24×** (IREN 38/37 PCS 0.246
+  vs 0.032; SPY 784/785 CCS −0.241 vs −0.010). With each symbol's view inferred
+  back from its stored `fit_dir` (consistent across same-symbol rows: IREN bullish
+  0.76, SPY bearish 0.40–0.44, CRWV bearish 0.45), `fit_dir` moves **6–15 points**
+  toward 50 and composite **−1.2 to −2.7** (CRWV, against its view, +1.2). On 09-11
+  XOM's native short put moves **fourth → second** past both SPY call spreads; on
+  09-14 **IREN 35/33 PCS falls 51.0 → 49.5**, under the Finder's 50-point cut, so it
+  was on the board only because of the overstated delta. No grade changes. Over
+  the **905** PCS/CCS rows in prod's `signals.db` backup the overstatement ratio is
+  p10 2.1× / p50 7.0× / p90 14.1×, and at conviction 0.76 the composite error is
+  p50 2.3 / p90 3.0 points (max 4.8).
+- **Fixed in the data, as vega was.** `_normalize_credit`'s position-greek loop
+  now covers delta: an explicit `entry_net_delta_position` wins, else the legs'
+  reading stands (a raw row has no `net_delta`, so `position_greek`'s negation
+  fallback is unreachable for it). `build_iron_condors` writes
+  `entry_net_delta_position` as its two verticals' sum, and still **no raw
+  `net_delta`**, so `options-scanner/scoring.py`'s IC composite cannot start
+  reading one. Consumers checked: `fit_directional` is the only reader of an
+  adapted row's `net_delta`; `book_greeks` and the Paper page's greeks read the
+  repricer's marks, not signal rows; `paper_trader` and the driver read none.
+- **One stored-data change, accepted.** `signal_recorder` records
+  `sig.get("entry_net_delta_position", 0)`, so every IC in `signals.db` (10 in
+  prod) holds a fabricated **0**; new ICs now store the real sum. Its only reader
+  is `tools/replay_scoring.py`'s debater case, which was being told an IC was
+  exactly delta-neutral. Existing rows are left as they are. (INCOME rows go
+  through `income_capture_row`, which does not carry the field.)
+- **Tests.** New `services/options_svc/tests/test_net_delta_on_real_rows.py`,
+  every row from `screen_spreads` / `build_iron_condors` and the adapters over
+  `_chain_at` with a 20% put skew — without it the producers' top-ranked ICs pair
+  mirror-image verticals and are delta-neutral to the last digit, where 0 and the
+  true sum agree. Vacuity guards pin that the long leg carries real delta and the
+  first IC is not neutral; then exact PCS/CCS/IC delta, signs, the stamped field,
+  no raw IC `net_delta`, `fit_directional`, and `swing_scan` end to end. 10 of its
+  14 fail on `main`. No existing assertion changed.
+- **Suites:** options-scanner **1847 passed / 2 skipped**; `shared/tests` **555**;
+  webgui **4653 passed / 1 skipped**; options_svc **2378 passed / 7 failed**, the
+  same 7 known on `main` (`test_earnings_gate_mirror.py` ×6,
+  `test_expiry_choice.py::test_option_expiration_rows_returns_typed_rows`).
+
+---
+
+**Prior —** 2026-09-16 (**The volatility floor reaches credit spreads and
 iron condors.** Before this, B2's gate never refused one on the Strategy Finder or
 the Income Window.)
 

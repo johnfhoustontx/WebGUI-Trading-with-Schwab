@@ -993,7 +993,7 @@ def _normalize_credit(sig, family, label, bias, legs, source_breakevens):
     Structural keys (breakevens/capital/rr/net_delta/net_gamma) are computed
     from the reconstructed legs via payoff_metrics; the source dict's
     authoritative economics (credit -> net_credit/max_profit, max_loss) and any
-    real source greeks (net_theta/net_vega, converted to POSITION sign - see
+    real source greeks (net_delta/net_theta/net_vega, converted to POSITION sign - see
     ``shared.structures.position_greek``) and pop_pct then RE-OVERRIDE so they
     win over the leg-reconstructed zeros.
 
@@ -1064,7 +1064,16 @@ def _normalize_credit(sig, family, label, bias, legs, source_breakevens):
     # selling cheap volatility. The explicit position fields are stamped too, so
     # ``paper_trader`` - which gets both raw scanner rows and these - never has to
     # guess which convention it was handed.
-    for greek in ("theta", "vega"):
+    #
+    # Delta has the other half of the problem. The reconstructed legs carry the
+    # short leg's delta and 0 on every long leg (0 on all four of an IC's), so
+    # the legs' ``net_delta`` ignored the long leg that offsets the short:
+    # measured on prod's Income boards it overstated the position 3-24x (IREN
+    # 38/37 PCS 0.246 against 0.032) and inflated ``fit_directional`` for credit
+    # spreads ranked beside leg-exact native families. A raw row has no
+    # ``net_delta``, so only the explicit ``entry_net_delta_position`` can win
+    # here; without one the legs' reading stands, as before.
+    for greek in ("delta", "theta", "vega"):
         pos = _structures.position_greek(sig, greek)
         if pos is not None:
             out[f"net_{greek}"] = pos

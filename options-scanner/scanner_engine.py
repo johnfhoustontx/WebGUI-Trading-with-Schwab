@@ -1340,11 +1340,16 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
     return results
 
 
+def _ic_position_greek(p, c, greek, ndigits):
+    """The iron condor's position-signed ``greek``: its two verticals' sum, or None."""
+    pv = _structures.position_greek(p, greek)
+    cv = _structures.position_greek(c, greek)
+    return None if pv is None or cv is None else round(pv + cv, ndigits)
+
+
 def _ic_position_vega(p, c):
     """The iron condor's position-signed vega: its two verticals' sum, or None."""
-    pv = _structures.position_greek(p, "vega")
-    cv = _structures.position_greek(c, "vega")
-    return None if pv is None or cv is None else round(pv + cv, 3)
+    return _ic_position_greek(p, c, "vega", 3)
 
 
 def build_iron_condors(spreads, max_n=3):
@@ -1397,6 +1402,11 @@ def build_iron_condors(spreads, max_n=3):
                     # move every IC score there. The Strategy Finder's adapter and the
                     # Paper ledger are what need it - see structures.position_greek.
                     "entry_net_vega_position": _ic_position_vega(p, c),
+                    # Same reasoning, and likewise no raw ``net_delta``. Without it
+                    # the Finder's adapter read an IC's delta off four legs that
+                    # carry none (0.0 whatever the skew), and signal_recorder
+                    # stored a fabricated 0 for every IC.
+                    "entry_net_delta_position": _ic_position_greek(p, c, "delta", 4),
                     "breakeven": f"{p['breakeven']}/{c['breakeven']}",
                     "underlying_price": p["underlying_price"],
                     "timestamp": datetime.now(TZ).isoformat(),
