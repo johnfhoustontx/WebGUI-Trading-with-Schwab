@@ -1838,14 +1838,30 @@ in the target — it reads Redis (a *system* unit) and nothing else.
 
 ## Environments (dev / prod)
 
-Two checkouts of this repo run **simultaneously on one machine**: an always-on
-**prod** stack pinned to `main`, and a **dev** checkout where code is edited.
+The repo **supports** two checkouts running simultaneously on one machine: an
+always-on **prod** stack pinned to `main`, and a **dev** checkout where code is
+edited. Everything below about how an environment resolves its identity, ports
+and suppressions is live, tested code.
+
+⚠ **THE CURRENT BOX RUNS ONE CHECKOUT, AND IT IS AT
+`/home/administrator/dev`.** There is no dev environment, and
+**`/home/administrator/prod` DOES NOT EXIST** — a `cd` to it fails. The
+replacement server (2026-08-30, after the original VPS was suspended) was stood
+up as dev deliberately, so the stack could be restored with no Schwab
+credentials on disk, then **promoted in place** by flipping `name` to `"prod"`
+in `config/env.local.toml`. The directory name is a fossil of that. Measured
+2026-08-31: `systemctl --user list-unit-files 'trading-*'` shows only
+`trading-prod-*`, and nothing listens on 9500 or 9210-9215. **So the `dev`
+column below describes a configuration this repo can produce, not a thing that
+is running** — read it as the mechanism, and see THE DEVELOPMENT RULE for what
+that costs.
+
 Operator runbook: [`docs/dev-prod-environments.md`](docs/dev-prod-environments.md).
 Rationale: [design](docs/plans/2026-08-08-dev-prod-environments-design.md).
 
 | | prod | dev |
 |---|---|---|
-| Folder | `/home/administrator/prod` | `/home/administrator/dev` |
+| Folder | `/home/administrator/dev` ⚠ (not `…/prod` — see above) | — none exists today |
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — runs no proxy unit |
 | sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
 | webgui | `:8500` | `:9500` |
@@ -1934,11 +1950,35 @@ checkout: that skips the dirty-tree refusal, the stop, the conditional dependenc
 reinstall and the restart, all of which exist because prod is a live trading
 stack pinned to `main`.
 
-The order is: commit in dev (or a worktree) → fast-forward `Using_Highcharts` and
-`main` → **run it in dev and confirm the change actually works** → then promote.
-"Tests pass" is not "verified in dev" for anything with a runtime surface; the
-DEV chip, the Status-page restart gating and the launcher guards were all
-green in tests and wrong in practice.
+The order is: commit in a worktree → fast-forward `main` → **run it and confirm
+the change actually works** → then promote. "Tests pass" is not "verified" for
+anything with a runtime surface; the DEV chip, the Status-page restart gating and
+the launcher guards were all green in tests and wrong in practice.
+
+⚠ **With no dev environment, the middle step has nowhere to run — say so rather
+than skipping it silently.** `/home/administrator/dev` is the LIVE stack, so
+checking a feature branch out there is the exact disaster this rule exists to
+prevent, and the guard hook does not catch it: the hook matches the local Windows
+prod path, not an `ssh` command, and that directory is not named `prod`. The
+honest options are to stand a second checkout up as real dev (`name = "dev"`,
+ports 9500/9210-9215, `owns_proxy = false`, its own units), or to accept
+verifying a genuinely additive, read-only change on prod after it lands — and to
+name which one you took. A change under `deploy/site` is the exception that needs
+neither: Caddy serves that tree as static files, so serving the directory locally
+IS what production does.
+
+**The promote itself, verbatim:**
+
+```bash
+ssh vps2 'cd /home/administrator/dev && tools/promote.sh'
+```
+
+⚠ **Nothing goes after it.** `promote.sh` already runs
+`deploy.systemd.generate_units --install` *and* a `daemon-reload`, so a change to
+a unit, a timer or a `[slots.*]` time needs no second command. It
+`git pull --ff-only origin main`s, so **push to `main` first** or it pulls nothing
+and promotes the old commit quietly. It guards on `ENV_NAME`, not the folder name,
+so a directory called `dev` is no obstacle.
 
 **Enforced mechanically**, because knowing the rule was not enough: the whole
 environment split was built in a session that then bypassed `promote.bat` on
@@ -1975,13 +2015,16 @@ worth carrying forward. The shell-script equivalents that DO still bite are the
 CRLF one (see `.gitattributes`) and the fact that `is-active` is not proof the
 ports are free.
 
-**Both environments run simultaneously on the VPS, verified live 2026-08-29** —
-prod on 8100/8210-8215/8500 from `/home/administrator/prod`, dev on
-9210-9215/9500 from `/home/administrator/dev` with all four suppressions
-enforced (not merely configured), one shared Redis, and dev holding **no proxy
-of its own** and **no Schwab credentials on disk** (only `schwab_proxy.py` reads
-them). Dev is `enable`d at boot; its generated `trading-dev-backup.timer` is
-deliberately **not** enabled, since its stores are a disposable copy of prod's.
+**Both environments DID run simultaneously, verified live 2026-08-29** — prod on
+8100/8210-8215/8500, dev on 9210-9215/9500 with all four suppressions enforced
+(not merely configured), one shared Redis, and dev holding **no proxy of its
+own** and **no Schwab credentials on disk** (only `schwab_proxy.py` reads them).
+⚠ **That was the server suspended on 2026-08-30, and the arrangement did not
+survive the move.** The replacement box runs prod alone; the paragraph is kept
+because it is the only record that the split has actually worked end to end, and
+it is what standing dev back up would be restoring. Dev was `enable`d at boot;
+its generated `trading-dev-backup.timer` was deliberately **not** enabled, since
+its stores are a disposable copy of prod's.
 ⚠ `/health` cannot tell you whether schedulers are off — `scheduler_alive`
 defaults true and means "restart budget not exhausted". Read
 `scheduler_uptime_s` (`null` = never started) and `scheduler_last_tick_age_s`
@@ -1994,10 +2037,12 @@ prod's SQLite stores (online-backup API — **prod keeps running**) and `DUMP`s 
 into db 1. It hard-refuses unless `ENV_NAME == "dev"`, refuses when the two Redis
 DBs resolve equal, and refuses while dev is up. It **excludes `cmd:*`** (a stream
 is a queue dev would drain and EXECUTE) and **rewrites `cache:driver:control`
-disabled**. **Promotion is explicit:** merge to `main` and push from dev, then run
-`tools/promote.sh` in prod (dev-checkout guard, dirty-tree guard *before*
-stopping anything, `git pull --ff-only`, reinstall only if `requirements.lock`
-moved, restart).
+disabled**. **Promotion is explicit:** merge to `main` and push, then run
+`tools/promote.sh` in the prod checkout — which refuses unless `ENV_NAME`
+resolves to `prod` (the FOLDER NAME is not the test, and today's is `dev`),
+dirty-tree guard *before* stopping anything, `git pull --ff-only`, reinstall only
+if `requirements.lock` moved, `generate_units --install` + `daemon-reload`,
+restart.
 
 ⚠ **A NEW DEPENDENCY MUST GO IN `requirements.lock`, NOT ONLY IN
 `requirements.txt` — otherwise it ships to prod MISSING (2026-08-21).** Prod has
@@ -2008,7 +2053,8 @@ its `edge_tts` import and returns `None`, so the Desk's spoken alerts would have
 gone live on prod **completely silent**, with one log line and nothing on screen
 to say why. Caught before promoting only because prod's venv was checked
 directly. **Verify with a dry-run against the prod venv before promoting** —
-`/home/administrator/prod/.venv/bin/python -m pip install --dry-run -r requirements.lock`
+`/home/administrator/dev/.venv/bin/python -m pip install --dry-run -r requirements.lock`
+(that checkout IS prod — see the Environments section)
 should name exactly the packages you intended and nothing else. Regenerating the
 whole lock with `pip freeze` is the wrong fix: the lock has drifted from the
 venv before (132 entries against 135 installed, `tweepy` missing entirely), so a
@@ -3736,9 +3782,10 @@ root to `sys.path` at runtime):
 
 > **The venv lives INSIDE the checkout** (`.venv/bin/python`), so a relative path
 > works — until you make a git **worktree**, which has no venv of its own and
-> needs the checkout's absolute path
-> (`/home/administrator/prod/.venv/bin/python`). The same trap the Windows layout
-> had, in a different spelling.
+> needs the checkout's absolute path — on the VPS
+> `/home/administrator/dev/.venv/bin/python`, which IS prod's (see the
+> Environments section). The same trap the Windows layout had, in a different
+> spelling.
 >
 > Confining the `cd` to a **subshell** is the tidier habit but is **not**
 > load-bearing: the hooks in `.claude/settings.json` resolve their script from
