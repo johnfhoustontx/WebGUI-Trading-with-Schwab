@@ -591,3 +591,133 @@ def test_the_calculator_opens_with_the_shared_position(monkeypatch, sent_command
     _recalc(root)
     got = [c for c in sent_commands if c["type"] == "calc_compute"][-1]["args"]["legs"]
     assert [(l["strike"], l["premium"]) for l in got] == [(660.0, 9.99), (650.0, 1.0)]
+
+
+# ── Rate my trade (design 2026-09-16) ───────────────────────────────────────
+
+def _rate_button(root):
+    return [el for el in _walk(root) if getattr(el, "text", None) == "RATE MY TRADE"][0]
+
+
+def _rating_dialog(root):
+    """The Rate my trade dialog. NiceGUI mounts a ui.dialog in the client's
+    LAYOUT, not in the slot it was built from - so it is not under ``root``."""
+    dialogs = [el for el in root.client.elements.values() if isinstance(el, ui.dialog)
+               and any("rate-status" in getattr(e, "_classes", []) for e in _walk(el))]
+    assert dialogs, "the page built no Rate my trade dialog"
+    return dialogs[-1]
+
+
+def _rating_texts(root):
+    return _texts(_rating_dialog(root))
+
+
+def _timer_named(root, name):
+    for el in _walk(root) + _walk(_rating_dialog(root)):
+        if isinstance(el, ui.timer):
+            cb = el.callback
+            fn = getattr(cb, "func", cb)
+            if getattr(fn, "__name__", "") == name:
+                return el
+    raise AssertionError(f"no timer running {name}")
+
+
+def _drive_rating(root, monkeypatch):
+    """Run the rating poll once, with the checklist context stubbed (every view
+    cold) so nothing reaches Redis outside the fake bus."""
+    from pages.options import checks_feed
+    monkeypatch.setattr(checks_feed, "read_context",
+                        lambda: {"matrix": None, "regime": None,
+                                 "calibration": None, "caps": None})
+    timer = _timer_named(root, "_poll_rating")
+    with root:
+        result = timer.callback()
+        if asyncio.iscoroutine(result):
+            asyncio.new_event_loop().run_until_complete(result)
+
+
+_RATED_ROW = {"symbol": "SPY", "type": "PCS", "family": "VERTICAL", "grade": "Good",
+              "composite_score": 70.0, "structure_known": True, "legs": [],
+              "net_credit": 50.0, "max_loss": 450.0, "pop_pct": 72.0}
+
+
+def _rate(root, polls, sent_commands):
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+    _click(root, "RATE MY TRADE")
+    return [c for c in sent_commands if c["type"] == "calc_rate"][-1]["args"]
+
+
+def test_rate_button_waits_for_a_chain(page):
+    root, _ = page
+    assert not _rate_button(root).enabled
+
+
+def test_rate_button_turns_on_when_the_legs_are_priced(page):
+    root, polls = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
+    _drive(root, polls)
+    assert _rate_button(root).enabled
+
+
+def test_rate_sends_calc_rate_with_the_legs_and_their_shape(page, sent_commands):
+    root, polls = page
+    args = _rate(root, polls, sent_commands)
+    assert args["symbol"] == "SPY" and args["structure"] == "PCS"
+    assert len(args["legs"]) == 2 and args["request_id"]
+    assert "Rating…" in _rating_texts(root)
+
+
+def test_a_second_click_while_rating_sends_nothing(page, sent_commands):
+    root, polls = page
+    _rate(root, polls, sent_commands)
+    _click(root, "RATE MY TRADE")
+    assert len([c for c in sent_commands if c["type"] == "calc_rate"]) == 1
+
+
+def test_the_dialog_lives_outside_the_page_slot_so_an_edit_cannot_close_it(page):
+    root, _ = page
+    dialog = _rating_dialog(root)
+    assert dialog not in _walk(root)
+
+
+def test_a_matching_rating_paints_the_verdict_and_a_stale_one_does_not(
+        page, sent_commands, monkeypatch):
+    root, polls = page
+    rid = _rate(root, polls, sent_commands)["request_id"]
+    bus_client.bus().cache_set("cache:options:calc_rating", {
+        "request_id": "someone-else", "row": dict(_RATED_ROW, grade="Weak"), "error": None})
+    _drive_rating(root, monkeypatch)
+    texts = _rating_texts(root)
+    assert "Rating…" in texts and "Weak · 70" not in texts
+    bus_client.bus().cache_set("cache:options:calc_rating",
+                               {"request_id": rid, "row": _RATED_ROW, "error": None})
+    _drive_rating(root, monkeypatch)
+    texts = _rating_texts(root)
+    assert "Good · 70" in texts
+    # every checklist view is cold, so the checklist cannot read Clear: CAUTION
+    assert "CAUTION" in texts and "BUY" not in texts
+    assert "Rating…" not in texts
+
+
+def test_an_error_answer_says_so_with_no_verdict(page, sent_commands, monkeypatch):
+    root, polls = page
+    rid = _rate(root, polls, sent_commands)["request_id"]
+    bus_client.bus().cache_set("cache:options:calc_rating", {
+        "request_id": rid, "row": None, "error": "Load the chain first."})
+    _drive_rating(root, monkeypatch)
+    texts = _rating_texts(root)
+    assert "Load the chain first." in texts
+    assert not {"BUY", "CAUTION", "PASS"} & set(texts)
+
+
+def test_no_answer_in_time_says_the_service_did_not_answer(page, sent_commands):
+    root, polls = page
+    _rate(root, polls, sent_commands)
+    timer = _timer_named(root, "_rating_timeout")
+    with root:
+        timer.callback()
+    assert any("did not answer" in t for t in _rating_texts(root))
+    # and the button is free again
+    _click(root, "RATE MY TRADE")
+    assert len([c for c in sent_commands if c["type"] == "calc_rate"]) == 2

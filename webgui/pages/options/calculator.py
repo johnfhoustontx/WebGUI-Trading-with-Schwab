@@ -44,6 +44,8 @@ from .theme import (THEME, CALC_CSS, CALC_KEYFRAMES_CSS, CALC_FONT_HEAD_HTML,
                     CALC_EYEBROW, CALC_BODY, CALC_MUTED, CALC_DIM,
                     CALC_POS, CALC_NEG, CALC_ACCENT, CALC_WARN, CALC_STATE_TEXT,
                     CALC_EDGE_POS, CALC_EDGE_NEG, CALC_EDGE_ACCENT, CALC_EDGE_WARN)
+# The Rate my trade dialog wears the navy the shared Trade detail panel is drawn in.
+from .theme import CARD as _NAVY_CARD, MUTED as _NAVY_MUTED
 from . import page_state as _ps
 # The ONE position shared with the Simulator (replaces the copy buttons).
 from . import shared_position as _shared
@@ -1051,6 +1053,14 @@ def render():
     from . import leg_editor
     from . import strategies as S
     from . import overlay as _overlay
+    from functools import partial
+    from uuid import uuid4
+    from . import checks as _checks
+    from . import checks_feed as _checks_feed
+    from . import detail as _detail
+    from . import rate_trade as _rate_trade
+    from . import sim_view as _sim_view
+    from . import strategy_table as _strategy_table
 
     # This page's own language (.calc-v3), never the app-wide navy scope the
     # Simulator and Trade share (see the module header for which that is).
@@ -1062,6 +1072,20 @@ def render():
 
     # Full-screen wait overlay shown while a user-initiated Load is in flight.
     wait = _overlay.build_loading_overlay()
+
+    # RATE MY TRADE (design 2026-09-16). Built HERE, at the page's root, because a
+    # ui.dialog deletes itself when the slot it was built in is cleared - and the
+    # leg table's container is cleared on every edit (see swing.py _open_paper).
+    with ui.dialog() as rating_dialog, \
+            ui.card().classes(f"{_NAVY_CARD} w-[480px] max-w-full gap-3"):
+        with ui.row().classes("w-full items-center justify-between no-wrap"):
+            ui.label("RATE MY TRADE").classes(
+                "text-[12px] font-bold tracking-[.16em] text-[#eaf0fb]")
+            ui.button(icon="close", color=None, on_click=rating_dialog.close) \
+                .props("flat round dense").classes("text-[#8794b4]")
+        rating_status = ui.label("").classes(f"rate-status text-sm {_NAVY_MUTED}")
+        rating_banner = ui.column().classes("rate-banner w-full gap-1")
+        rating_panel = _detail.render(width=440)
 
     # Page state (local closure, not module globals — built per request).
     state = {
@@ -1085,6 +1109,8 @@ def render():
         "loading": False,      # True while a user-initiated load is in flight (overlay up)
         "applying": False,     # True while _apply_chain/_prefill set Expiry programmatically
         "chain_fetching": False,  # in-flight guard for the off-loop big-chain read
+        "rating_id": None,     # the Rate my trade request the open dialog waits on
+        "rating_ver": None,    # last-seen calc_rating cache version
     }
 
     # ── the numbered-frame helper ────────────────────────────────────────────
@@ -1157,9 +1183,16 @@ def render():
                     f"{CALC_DIM} text-[9px] tracking-[.14em] whitespace-nowrap")
                 maxloss_lbl = ui.label("").classes(
                     f"{CALC_WARN} text-[9px] tracking-[.14em] truncate min-w-0")
-            ui.button("EXPECTED MOVE", color=None, on_click=lambda: send_to_em()) \
-                .props("no-caps unelevated").classes(f"{CALC_BTN} h-[30px] px-3") \
-                .tooltip("Chart the expected move for these legs")
+            with ui.row().classes("items-center gap-2 no-wrap"):
+                ui.button("EXPECTED MOVE", color=None, on_click=lambda: send_to_em()) \
+                    .props("no-caps unelevated").classes(f"{CALC_BTN} h-[30px] px-3") \
+                    .tooltip("Chart the expected move for these legs")
+                rate_btn = ui.button("RATE MY TRADE", color=None,
+                                     on_click=lambda: rate_my_trade()) \
+                    .props("no-caps unelevated").classes(f"{CALC_BTN} h-[30px] px-3")
+                rate_btn.tooltip("Grade these legs with the Strategy Finder's scorer "
+                                 "and checklist: Buy, Caution or Pass")
+                rate_btn.set_enabled(False)
             action_lbl = ui.label("").classes(
                 f"w-full {CALC_MUTED} text-[9px] tracking-[.14em]")
 
@@ -1390,6 +1423,7 @@ def render():
         net_lbl.classes(remove=_TONE_SWAP, add=_TONE_TEXT[facts["net_tone"]])
         maxloss_lbl.text = facts["max_loss"]
         ready = _has_contracts(state.get("chain"))
+        rate_btn.set_enabled(ready and leg_editor.legs_ready(legs))
         if not ready:
             action_lbl.text = "load a chain before pricing"
         elif not leg_editor.legs_ready(legs):
@@ -1848,6 +1882,77 @@ def render():
     ui.timer(1.0, _poll_chain)
     ui.timer(1.0, _poll_result)
     ui.timer(1.0, _poll_iv)
+
+    # ── Rate my trade ────────────────────────────────────────────────────────
+    @guard
+    def rate_my_trade():
+        """Ask the service to grade the legs on screen, and open the dialog.
+        A click while a rating is pending does nothing."""
+        if state.get("rating_id"):
+            return
+        legs = editor.get_legs()
+        if not (_has_contracts(state.get("chain")) and leg_editor.legs_ready(legs)):
+            return
+        rid = uuid4().hex
+        state["rating_id"] = rid
+        state["rating_ver"] = bus_client.read_version("options:calc_rating")
+        rating_status.text = "Rating…"
+        rating_banner.clear()
+        rating_panel.clear()
+        bus_client.request("options", {"type": "calc_rate", "args": {
+            "request_id": rid, "symbol": _sym(),
+            "structure": _sim_view.template_for(legs) or "CUSTOM", "legs": legs}})
+        rating_dialog.open()
+        with rating_dialog:
+            ui.timer(_overlay.LOAD_TIMEOUT_SEC, partial(_rating_timeout, rid), once=True)
+
+    @guard
+    def _rating_timeout(rid):
+        if state.get("rating_id") != rid:
+            return                    # answered, or a newer request is open
+        state["rating_id"] = None
+        rating_status.text = "The rating service did not answer - try again."
+
+    def _paint_rating(row, ctx):
+        candidate = _detail.checklist_candidate(row, True)
+        items = _checks_feed.checks_for(candidate, ctx)
+        summary = _checks.summary(items)
+        view = _rate_trade.banner_view(row, summary.get("state"), items)
+        rating_status.text = ""
+        rating_banner.clear()
+        with rating_banner:
+            with ui.row().classes("items-baseline gap-3 no-wrap"):
+                ui.label(view["word"]).classes(
+                    f"rate-word text-[28px] font-bold tracking-[.12em] {view['tone']}")
+                ui.label(f"{view['grade']} · {view['score']}").classes(
+                    "rate-grade text-sm text-[#cdd8ee]")
+            for reason in view["reasons"]:
+                ui.label(reason).classes("rate-reason text-xs text-[#cdd8ee]")
+            ui.label("Graded with the Strategy Finder's scorer and Go/No-Go checklist. "
+                     "The word combines the two; it is not fitted to past outcomes.") \
+                .classes(f"text-[10px] {_NAVY_MUTED}")
+        rating_panel.update(_strategy_table.detail_signal(row), candidate=candidate,
+                            ctx=ctx)
+
+    @guard_async
+    async def _poll_rating():
+        version = bus_client.read_version("options:calc_rating")
+        if version == state["rating_ver"]:
+            return
+        state["rating_ver"] = version
+        payload = bus_client.read("options:calc_rating")
+        if not _rate_trade.request_matches(payload, state.get("rating_id")):
+            return
+        state["rating_id"] = None
+        row = payload.get("row")
+        if not isinstance(row, dict):
+            rating_status.text = payload.get("error") or "The trade could not be rated."
+            return
+        rating_status.text = "Checking…"
+        ctx = await run.io_bound(_checks_feed.read_context)
+        _paint_rating(row, ctx)
+
+    ui.timer(1.0, _poll_rating)
     ui.timer(0.1, _recalc_tick)
 
     # Per signal-type: leg specs as (option_type, side, strike_field, mark_field).
