@@ -973,6 +973,118 @@ def test_the_gallery_slot_is_after_the_open_so_the_screens_carry_live_data():
     assert (at.hour * 60 + at.minute) - (open_.hour * 60 + open_.minute) >= 20
 
 
+# --- the end-of-day report, which the button used to be the only way to get ---
+def test_the_eod_report_units_are_generated():
+    """/eod's Generate button, run for you. Without a timer the day's archive
+    exists only when somebody remembered to click, and the caches it reads are
+    gone by the next morning -- so a forgotten day is not a late day."""
+    all_units = units.render_all()
+    assert f"trading-{ENV_NAME}-eod-report.service" in all_units
+    assert f"trading-{ENV_NAME}-eod-report.timer" in all_units
+
+
+def test_the_eod_report_fires_once_a_day_at_the_configured_slot():
+    """Derived from [slots.eod_report], never typed. Exactly ONE OnCalendar: a
+    second line is a second archive write over the first one's output."""
+    from shared import market_calendar as mc
+    at = mc.slot_times("eod_report")["at"]
+    text = units.render_all()[f"trading-{ENV_NAME}-eod-report.timer"]
+    schedule = _directives(text, "OnCalendar")
+    assert schedule == [f"Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00"], schedule
+
+
+def test_the_eod_schedule_follows_the_slot_rather_than_a_literal(monkeypatch):
+    """Mutate the slot and the unit must move. A hardcoded 15:15 passes the
+    test above and fails this one."""
+    import datetime as _dt
+
+    monkeypatch.setattr(units, "slot_times", lambda name: {"at": _dt.time(21, 3)})
+    text = units.render_all()[f"trading-{ENV_NAME}-eod-report.timer"]
+    assert _directives(text, "OnCalendar") == ["Mon..Fri *-*-* 21:03:00"]
+
+
+def test_the_eod_report_runs_after_the_cash_close():
+    """An end-of-day report built before the close is a mid-day report with the
+    wrong name on it. Derived from [sessions.regular] rather than restating
+    15:00, and before collection stops so the caches are still warm."""
+    from shared import market_calendar as mc
+    at = mc.slot_times("eod_report")["at"]
+    _open, close = mc._session_bounds("regular")
+    assert at > close, (at, close)
+
+
+def test_the_eod_report_does_not_catch_up_after_downtime(rendered):
+    """Persistent=true would be actively wrong here, not merely wasteful. The
+    report is named for the day it is GENERATED on, from live caches -- so a
+    catch-up run after downtime writes tomorrow's date off pre-open caches and
+    then gets overwritten by tomorrow's real firing. It cannot recover the
+    missed day, because that day's caches are gone."""
+    tmr = rendered[f"trading-{ENV_NAME}-eod-report.timer"]
+    assert tmr["Timer"].get("Persistent", "false").lower() != "true"
+    assert tmr["Install"]["WantedBy"] == "timers.target"
+
+
+def test_the_eod_timer_does_not_filter_the_days_the_script_gates_on():
+    """Mon..Fri excludes weekends; holidays are the script's job, because only
+    the market calendar can see Thanksgiving. The same division of labour the
+    stream and live-capture timers use."""
+    text = units.render_all()[f"trading-{ENV_NAME}-eod-report.timer"]
+    schedule = _directives(text, "OnCalendar")
+    assert schedule, "the eod-report timer has no OnCalendar at all"
+    for oncal in schedule:
+        assert oncal.startswith("Mon..Fri "), oncal
+
+
+def test_the_eod_report_is_a_oneshot_that_does_not_retry(rendered):
+    """The tool writes NOTHING and exits non-zero when the caches read empty,
+    so a failure leaves the existing archive intact and surfaces in
+    `systemctl --user --failed`. A Restart= would turn a down bus into a retry
+    loop that eventually succeeds at an unknown hour -- writing the day's report
+    from whatever the caches held then, and hiding that it ever failed."""
+    svc = rendered[f"trading-{ENV_NAME}-eod-report.service"]
+    assert svc["Service"]["Type"] == "oneshot"
+    assert "Restart" not in svc["Service"]
+
+
+def test_the_eod_storm_cap_is_in_the_unit_section(rendered):
+    """systemd moved StartLimitIntervalSec/StartLimitBurst to [Unit] in v229 and
+    SILENTLY IGNORES them in [Service]."""
+    svc = rendered[f"trading-{ENV_NAME}-eod-report.service"]
+    assert int(svc["Unit"]["StartLimitBurst"]) > 0
+    assert int(svc["Unit"]["StartLimitIntervalSec"]) > 0
+    assert "StartLimitBurst" not in svc["Service"]
+
+
+def test_the_eod_report_is_not_a_member_of_the_fleet(rendered):
+    """The timer owns it. PartOf would stop it with the stack; an [Install]
+    would start it at boot, generating a report from overnight caches."""
+    svc = rendered[f"trading-{ENV_NAME}-eod-report.service"]
+    assert "PartOf" not in svc["Unit"]
+    assert "Install" not in svc
+    assert f"trading-{ENV_NAME}-eod-report.service" not in stack_services()
+
+
+def test_the_eod_report_is_not_cpu_contained_because_it_has_nothing_to_contain(rendered):
+    """Unlike the two capture units either side of it, this drives no browser
+    and fetches no chain -- it reads Redis and writes two local files. A quota
+    copied across from the gallery unit would be a knob with no subject."""
+    svc = rendered[f"trading-{ENV_NAME}-eod-report.service"]
+    assert "CPUQuota" not in svc["Service"]
+    assert "MemoryMax" not in svc["Service"]
+
+
+def test_the_eod_report_runs_the_tool_and_not_a_shell_wrapper(rendered):
+    exec_start = rendered[f"trading-{ENV_NAME}-eod-report.service"]["Service"]["ExecStart"]
+    assert exec_start.endswith("tools/generate_eod_report.py")
+    assert ".sh" not in exec_start
+
+
+def test_the_eod_report_timer_is_armed():
+    """A written-but-disabled timer is the failure that cost eleven days of
+    flow-delta reports; this one would be just as silent."""
+    assert f"trading-{ENV_NAME}-eod-report.timer" in units.timer_units()
+
+
 # --- arming, which is not the same thing as writing --------------------------
 #
 # A generated `.timer` that nothing enables is a FILE, not a schedule. That is

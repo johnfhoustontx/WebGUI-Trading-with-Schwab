@@ -167,6 +167,31 @@ h1235 = "12:35"
 h1335 = "13:35"
 h1435 = "14:35"
 
+[slots.eod_report]
+# The end-of-day report archive: what the Generate button on /eod does, run for
+# you once a trading day (tools/generate_eod_report.py writes
+# webgui/data/eod/<date>/summary.html + detail.html).
+#
+# 15:15 CT is chosen against the rest of the post-close order, not for tidiness:
+#   15:00  regular close; [slots.action_alert] close sweep
+#   15:10  the EOD push (options_svc eod_summary_due) -- the driver's manage
+#          cycle has settled the day's expiries by here
+#   15:15  THIS, and [slots.analyze] close, and the last [windows.scan] slot
+#   15:20  collection stops
+#   15:25  live_capture
+# Sharing the minute with the autoscan's last slot is free: this run makes NO
+# Schwab call and NO Claude call -- it reads the already-published options:*
+# caches and writes two local HTML files, in under a second.
+#
+# It writes NOTHING when every cache it reads is empty, so a run against a
+# stopped stack cannot overwrite a good report with a page of "No data".
+#
+# ⚠ Read by SYSTEMD, not by a service scheduler: generate_units.py turns this
+# into trading-<env>-eod-report.timer's OnCalendar. Changing this time needs
+# `python -m deploy.systemd.generate_units --install` and a
+# `systemctl --user daemon-reload`; a service restart will not pick it up.
+at = "15:15"     # 16:15 ET
+
 [slots.calibration]
 # The nightly signal-calibration rebuild -> cache:options:calibration, the
 # realized-outcome EV the Trade detail panel shows. AFTER [windows.collection]

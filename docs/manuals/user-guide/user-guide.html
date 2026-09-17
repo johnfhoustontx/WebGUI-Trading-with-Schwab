@@ -2475,10 +2475,15 @@ count is on the Settings page.</p>
 </table>
 <p>Both views use a jump-link table of contents, and every section is collapsible —
 which keeps working in the exported file as well as in the app.</p>
+<p><strong>It runs itself at 3:15 pm CT.</strong> Every trading day, a quarter of an hour after the
+cash close, the app archives the day's report for you — the same two files the
+<strong>Generate</strong> button writes. You only need the button to take an extra snapshot, or to
+recover a day the machine was off for. Weekends and market holidays are skipped.</p>
 <p><strong>The buttons:</strong></p>
 <ul>
 <li><strong>Generate</strong> snapshots the current data into standalone <code>summary.html</code> and
-  <code>detail.html</code> archived by date under <code>webgui/data/eod/&lt;date&gt;/</code>.</li>
+  <code>detail.html</code> archived by date under <code>webgui/data/eod/&lt;date&gt;/</code>. Pressing it after
+  the automatic run replaces that day's files with a fresh snapshot.</li>
 <li><strong>Open summary file</strong> / <strong>Open detail file</strong> open those archived files in a new
   browser tab.</li>
 <li>The <strong>Archive</strong> list reopens any past date.</li>

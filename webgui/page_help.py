@@ -1171,7 +1171,11 @@ A live grid of macro tickers, grouped into framed panels by category.
 An end-of-day summary of the day's options activity and Claude Trades (the autonomous driver).
 
 - **Summary tiles** plus per-section tables (scanner, captured, paper, driver).
-- **Generate** saves a dated HTML snapshot you can reopen later.
+- **It saves itself at 3:15 pm CT** every trading day, a quarter of an hour after
+  the close. You don't have to be here, and you don't have to press anything.
+- **Generate** saves a dated HTML snapshot you can reopen later — use it for an
+  extra snapshot, or to catch up a day the machine was off for. It replaces that
+  day's saved files.
 """,
     "/status": """
 **System Status — the simple version**

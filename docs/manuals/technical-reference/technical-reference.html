@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-16</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-17</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -2926,6 +2926,37 @@ the source; this table is a summary of them.</p>
 <tr>
 <td>market_svc</td>
 <td>Quote poll <strong>3 s</strong> RTH (<code>RTH_INTERVAL_SEC</code>), <strong>15 s</strong> off-hours (<code>OFFHOURS_INTERVAL_SEC</code>), <strong>60 s</strong> at weekends (<code>WEEKEND_INTERVAL_SEC</code>); report summary re-read when the published market report changes (a stat of <code>deploy/site/reports/latest.html</code> + <code>latest.txt</code> per poll) — no Claude call.</td>
+</tr>
+</tbody>
+</table>
+<p>Three once-a-day jobs are <strong>not</strong> on any service's loop — they are systemd timers,
+generated from <code>config/sessions.toml</code> by <code>deploy/systemd/generate_units.py</code>, so moving
+one needs <code>generate_units --install</code> plus a <code>daemon-reload</code> rather than a service
+restart. Each gates on the market calendar in its own script, so the timer only has to
+exclude weekends.</p>
+<table>
+<thead>
+<tr>
+<th>Job</th>
+<th>Slot</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>EOD report archive</td>
+<td><strong>15:15</strong> (<code>[slots.eod_report]</code>)</td>
+<td>Writes <code>webgui/data/eod/&lt;date&gt;/summary.html</code> + <code>detail.html</code> — the <code>/eod</code> <strong>Generate</strong> button, unattended. Reads Redis only: no Schwab call, no Claude call. Writes nothing if every cache read was empty.</td>
+</tr>
+<tr>
+<td>Marketing gallery recapture</td>
+<td><strong>09:07</strong> (<code>[slots.gallery_capture]</code>)</td>
+<td>Re-photographs the private app for the public gallery.</td>
+</tr>
+<tr>
+<td>Flow-delta instrumentation</td>
+<td><strong>16:00</strong> (<code>[slots.flow_delta]</code>)</td>
+<td>The only measurement of the <code>[big_delta]</code> / UOA thresholds.</td>
 </tr>
 </tbody>
 </table>

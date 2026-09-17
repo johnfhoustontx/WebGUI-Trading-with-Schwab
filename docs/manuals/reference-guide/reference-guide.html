@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-16</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-17</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -5222,6 +5222,9 @@ scanner, captured and driver tables. Both views use a jump-link table of content
 collapsible sections that work in the exported file as well as in the app.</p>
 <p><strong>Generate</strong> snapshots the current caches into standalone <code>summary.html</code> and
 <code>detail.html</code> under <code>webgui/data/eod/&lt;date&gt;/</code>. The <strong>Archive</strong> list reopens any past day.</p>
+<p><strong>It also runs by itself at 15:15 CT on every trading day</strong> — the same snapshot, from the
+same builders, fifteen minutes after the cash close and after the day's expiries have
+settled. The button is for an extra snapshot or for recovering a day the machine missed.</p>
 <h3 id="why-it-matters_23">Why it matters</h3>
 <p>The per-period tables are where a strategy's real shape appears. A book can show a
 healthy daily number for weeks and still be losing month to date, because the losses
@@ -5236,7 +5239,12 @@ and commissions are not in these numbers, so treat every figure as optimistic.</
 <li>Realized P&amp;L reads <code>$0</code> or <code>—</code> until trades actually close. That is by design, not a
   failure.</li>
 <li><strong>Generate</strong> captures the caches <em>at the moment you press it</em>. Generating mid-session
-  archives a partial day.</li>
+  archives a partial day — and it overwrites that date's files, including the 15:15
+  automatic run's.</li>
+<li>The automatic run <strong>writes nothing</strong> if every cache it reads is empty, so a stopped
+  stack leaves the existing report alone rather than replacing it with a page of
+  "No data" notes. A day it could not run is simply a day with no archived file; the
+  caches are still live, so pressing <strong>Generate</strong> recovers it until they reset overnight.</li>
 </ul>
 <h3 id="related-pages_27">Related pages</h3>
 <p><a href="#paper-ledger">Paper Ledger</a> · <a href="#paper-account">Paper Account</a> ·

@@ -620,21 +620,30 @@ def summary_fragment(snap: dict, detail_href: str, today=None) -> str:
 # ----------------------------------------------------------------------------- #
 # Snapshot + archive
 # ----------------------------------------------------------------------------- #
+# {snapshot key: cache view} — the ONE list, so ``has_data`` cannot come to
+# check a different set of views than ``read_snapshot`` reads.
+_CACHE_VIEWS = {
+    "scan": "options:scan",
+    "captured": "options:captured",
+    "captured_closed": "options:captured_closed",
+    "captured_perf": "options:captured_perf",
+    "paper_trades": "options:paper_trades",
+    "paper_account": "options:paper_account",
+    "driver_paper_account": "options:driver_paper_account",
+    "driver_paper_perf": "options:driver_paper_perf",
+}
+
+
 def read_snapshot() -> dict:
     """Snapshot the current Redis caches into one dict for the builders."""
     now = dt.datetime.now(_CT)
-    return {
+    snap = {
         "date": now.strftime("%Y-%m-%d"),
         "generated_at": now.strftime("%Y-%m-%d %H:%M CT"),
-        "scan": bus_client.read("options:scan") or {},
-        "captured": bus_client.read("options:captured") or {},
-        "captured_closed": bus_client.read("options:captured_closed") or {},
-        "captured_perf": bus_client.read("options:captured_perf") or {},
-        "paper_trades": bus_client.read("options:paper_trades") or {},
-        "paper_account": bus_client.read("options:paper_account") or {},
-        "driver_paper_account": bus_client.read("options:driver_paper_account") or {},
-        "driver_paper_perf": bus_client.read("options:driver_paper_perf") or {},
     }
+    for key, view in _CACHE_VIEWS.items():
+        snap[key] = bus_client.read(view) or {}
+    return snap
 
 
 def _ct_today() -> str:
@@ -691,9 +700,28 @@ def write_archive(root, date: str, summary_doc: str, detail_doc: str) -> dict:
     return {"summary": summ, "detail": det}
 
 
-def generate() -> dict:
-    """Snapshot caches, build both standalone docs, write the dated archive."""
-    snap = read_snapshot()
+def has_data(snap: dict) -> bool:
+    """True when at least one cache view in ``snap`` carried a payload.
+
+    An all-empty snapshot is not a quiet day — every builder here is defensive,
+    so a stopped stack or a bus that answered nothing renders a full report of
+    "No data" notes that looks exactly like a real one. The archive is written
+    per DATE and overwrites in place, so a second run against a cold cache would
+    replace the day's real report with that. Callers that are not a person
+    clicking Generate check this first (``tools/generate_eod_report.py``).
+    """
+    return any(bool(snap.get(k)) for k in _CACHE_VIEWS)
+
+
+def generate(snap: dict | None = None) -> dict:
+    """Snapshot caches, build both standalone docs, write the dated archive.
+
+    ``snap`` lets a caller reuse a snapshot it has already read — the scheduled
+    run inspects one with :func:`has_data` before committing to write it, and a
+    second ``read_snapshot()`` here would both cost a round trip and mean the
+    bytes examined were not the bytes written.
+    """
+    snap = read_snapshot() if snap is None else snap
     date = snap["date"]
     summary_doc = wrap_document(
         summary_fragment(snap, "detail.html"), EOD_CSS, f"EOD Summary {date}")

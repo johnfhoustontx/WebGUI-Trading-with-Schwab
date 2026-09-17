@@ -1980,6 +1980,18 @@ the source; this table is a summary of them.
 | driver_svc | Run gate polled every **30 s** (`POLL_INTERVAL_SEC`); checkpoints every **30 min** (`CHECKPOINT_MIN`, from `config/driver.toml`) inside the **09:45–15:30 ET** entry window (`checkpoint_due`) — the open-bell slot is deliberately skipped, so the first fire-able slot is 09:45 and the last entry decision is the 15:00 slot. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 
+Three once-a-day jobs are **not** on any service's loop — they are systemd timers,
+generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving
+one needs `generate_units --install` plus a `daemon-reload` rather than a service
+restart. Each gates on the market calendar in its own script, so the timer only has to
+exclude weekends.
+
+| Job | Slot | What it does |
+|-----|------|--------------|
+| EOD report archive | **15:15** (`[slots.eod_report]`) | Writes `webgui/data/eod/<date>/summary.html` + `detail.html` — the `/eod` **Generate** button, unattended. Reads Redis only: no Schwab call, no Claude call. Writes nothing if every cache read was empty. |
+| Marketing gallery recapture | **09:07** (`[slots.gallery_capture]`) | Re-photographs the private app for the public gallery. |
+| Flow-delta instrumentation | **16:00** (`[slots.flow_delta]`) | The only measurement of the `[big_delta]` / UOA thresholds. |
+
 > **Two cadences are easy to state wrongly, because they used to be the same
 > number.** The **driver's** isolated paper account re-prices every **1 minute**
 > (raised from 5 in July 2026 so its stops react within the minute and the −$1,500

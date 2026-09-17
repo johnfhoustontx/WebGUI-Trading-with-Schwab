@@ -2087,10 +2087,16 @@ An end-of-day rollup of the day's Options activity and Claude Trades.
 Both views use a jump-link table of contents, and every section is collapsible —
 which keeps working in the exported file as well as in the app.
 
+**It runs itself at 3:15 pm CT.** Every trading day, a quarter of an hour after the
+cash close, the app archives the day's report for you — the same two files the
+**Generate** button writes. You only need the button to take an extra snapshot, or to
+recover a day the machine was off for. Weekends and market holidays are skipped.
+
 **The buttons:**
 
 - **Generate** snapshots the current data into standalone `summary.html` and
-  `detail.html` archived by date under `webgui/data/eod/<date>/`.
+  `detail.html` archived by date under `webgui/data/eod/<date>/`. Pressing it after
+  the automatic run replaces that day's files with a fresh snapshot.
 - **Open summary file** / **Open detail file** open those archived files in a new
   browser tab.
 - The **Archive** list reopens any past date.

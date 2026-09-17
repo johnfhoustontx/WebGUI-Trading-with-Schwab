@@ -790,6 +790,98 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-gallery-capture.timer": tmr}
 
 
+def _eod_report_units():
+    """The end-of-day report archive: a oneshot plus its timer.
+
+    **15:15 CT, from [slots.eod_report]** -- a named clock mark firing once per
+    trading day, which is what that table models. It runs
+    ``tools/generate_eod_report.py``, which is the ``/eod`` Generate button with
+    nobody clicking it: the SAME builders in ``webgui/pages/eod.py`` write the
+    same ``webgui/data/eod/<date>/summary.html`` + ``detail.html``.
+
+    **A timer rather than a service scheduler slot, because of the tier rule.**
+    The builders are Tier-1 webgui code and Tier 2 may not import them, so an
+    ``options_svc`` slot would mean a second copy of the report free to drift
+    from the one the page renders. Nor could the webgui itself hold the
+    schedule: its only timers are per-client ``ui.timer``s, so the report would
+    be generated at 15:15 only when a browser tab happened to be open -- which
+    looks like a schedule right up until the day nobody is looking, which is
+    every day this exists for.
+
+    **No CPUQuota, no TimeoutStartSec.** Unlike the two capture units either
+    side of it, this one drives no browser and fetches no chain: it reads Redis
+    and writes two local HTML files in well under a second. The inherited
+    ``DefaultTimeoutStartSec`` is already three orders of magnitude of headroom,
+    and a quota here would be a knob with nothing to contain. That is also why
+    sharing 15:15 with the autoscan's last slot and [slots.analyze]'s close
+    briefing is free -- NO Schwab call and NO Claude call.
+
+    **EnvironmentFile is load-bearing, and the tool refuses rather than trusts
+    it.** This host runs ``requirepass``, so without ``MEMURAI_PASSWORD`` the
+    bus cannot authenticate. Every builder in ``pages/eod.py`` is defensive, so
+    a run that read nothing would otherwise write a complete report of "No data"
+    notes over the date's real one -- the exact shape of the flow-delta failure
+    below, where a degraded run still exited 0. ``generate_eod_report.py``
+    writes nothing and exits non-zero on an all-empty snapshot, so a broken
+    environment shows up in ``systemctl --user --failed`` instead of as a blank
+    report that looks fine.
+
+    **No Restart=.** The tool gates on ``is_trading_day`` and exits 0 on a
+    holiday, so a firing is not a run. A real failure is a Redis that a retry
+    minutes later will not fix, and the button is always there.
+
+    NOTE ``Mon..Fri`` filters weekends and NOT holidays -- the script's own
+    ``is_trading_day`` gate does that, the division of labour the stream and
+    live-capture timers use.
+    """
+    at = slot_times("eod_report")["at"]
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - end-of-day report archive
+# No PartOf and no [Install]: the timer owns this. It is a sub-second oneshot
+# that runs once a trading day, not a member of the fleet.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# LOAD-BEARING: MEMURAI_PASSWORD lives here. Without it the bus cannot
+# authenticate and the run would have nothing to report on -- which the tool
+# refuses rather than writes. See _eod_report_units.
+EnvironmentFile={_env_file()}
+ExecStart={_python()} -X utf8 tools/generate_eod_report.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - end-of-day report timer
+
+[Timer]
+# Derived from [slots.eod_report] in config/sessions.toml -- the unit and the
+# config cannot disagree about when the day's report is archived.
+# Mon..Fri excludes weekends only. Holidays are NOT filtered here and do not need
+# to be: generate_eod_report.main() gates on
+# shared.market_calendar.is_trading_day and exits 0, so a firing is not a run.
+OnCalendar=Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00
+# Deliberately NOT Persistent=true. The report is named for the day it is
+# generated ON, from caches that are live rather than historical, so a catch-up
+# run after downtime would not produce the missed day's report -- it would
+# produce the NEXT day's, off pre-open caches, and overwrite that date's real
+# one when the real firing came. A missed day is a day with no archived report,
+# which the button recovers in one click while the caches still hold the day.
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-eod-report.service": svc,
+            f"trading-{ENV_NAME}-eod-report.timer": tmr}
+
+
 def _flow_delta_units():
     """The delta-notional flow-alert instrumentation: a oneshot plus its timer.
 
@@ -895,6 +987,7 @@ def render_all():
     out.update(_stream_units())
     out.update(_live_capture_units())
     out.update(_gallery_capture_units())
+    out.update(_eod_report_units())
     out.update(_flow_delta_units())
     return out
 

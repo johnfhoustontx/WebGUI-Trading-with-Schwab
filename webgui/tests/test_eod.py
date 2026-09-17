@@ -452,3 +452,65 @@ def test_the_captured_section_says_the_dollars_are_one_contract():
     low = html.lower()
     assert "one contract" in low
     assert "not" in low and ("traded" in low or "taken" in low)
+
+
+# --- has_data: the gate the scheduled run needs and the button does not ------
+def test_has_data_is_false_for_a_snapshot_that_read_nothing():
+    """The whole point of the gate. Every builder here degrades to a "No data"
+    note, so an empty snapshot renders a complete-looking report -- and the
+    archive is keyed by date and overwrites in place, so an unattended run
+    committing that would destroy the day's real report."""
+    empty = {"date": "2026-09-17", "generated_at": "2026-09-17 15:15 CT"}
+    empty.update({k: {} for k in eod._CACHE_VIEWS})
+    assert eod.has_data(empty) is False
+
+
+def test_has_data_is_true_when_any_single_view_carried_a_payload():
+    """ANY view, not all of them: a day with no captured signals and a live
+    paper book is an ordinary day, and refusing it would skip real reports."""
+    for key in eod._CACHE_VIEWS:
+        snap = {k: {} for k in eod._CACHE_VIEWS}
+        snap[key] = {"rows": [1]}
+        assert eod.has_data(snap) is True, key
+
+
+def test_has_data_checks_the_views_read_snapshot_actually_reads(monkeypatch):
+    """One list, so the gate cannot drift into checking a different set of
+    views than the snapshot fills -- which would make it either vacuous (always
+    true) or a permanent refusal."""
+    monkeypatch.setattr(eod.bus_client, "read", lambda k: {"_k": k})
+    snap = eod.read_snapshot()
+    for key, view in eod._CACHE_VIEWS.items():
+        assert snap[key] == {"_k": view}
+    assert eod.has_data(snap) is True
+
+
+def test_a_missing_key_is_absence_not_an_error():
+    """A snapshot built by an older caller, or a partially built one, must read
+    as "no data" rather than raise inside a scheduled run."""
+    assert eod.has_data({}) is False
+
+
+# --- generate() reuses a snapshot the caller already read -------------------
+def test_generate_writes_the_snapshot_it_was_given(tmp_path, monkeypatch):
+    """The scheduled run inspects a snapshot, then writes THAT one. A second
+    read inside generate would mean the bytes checked were not the bytes
+    archived -- and at 15:15 the caches are still moving."""
+    monkeypatch.setattr(eod, "ARCHIVE_ROOT", tmp_path)
+    def _boom():
+        raise AssertionError("generate re-read the caches instead of using the "
+                             "snapshot it was handed")
+    monkeypatch.setattr(eod, "read_snapshot", _boom)
+    snap = dict(SAMPLE)
+    snap["date"] = "2026-09-17"
+    out = eod.generate(snap)
+    assert out["date"] == "2026-09-17"
+    assert (tmp_path / "2026-09-17" / "summary.html").is_file()
+
+
+def test_generate_still_reads_for_itself_when_given_nothing(tmp_path, monkeypatch):
+    """The button's path is unchanged -- it passes no snapshot."""
+    monkeypatch.setattr(eod, "ARCHIVE_ROOT", tmp_path)
+    monkeypatch.setattr(eod, "read_snapshot", lambda: dict(SAMPLE))
+    out = eod.generate()
+    assert (tmp_path / out["date"] / "detail.html").is_file()

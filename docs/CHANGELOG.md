@@ -4,7 +4,52 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-17 (**A half strike was priced off the whole strike
+**Last updated:** 2026-09-17 (**The EOD report runs itself at 15:15 CT.** Operator
+request: auto-run it at 3:15 each trading day.)
+
+- **What it does.** `/eod`'s Generate button, unattended, once per trading day at
+  15:15 CT -- the SAME builders writing the same
+  `webgui/data/eod/<date>/summary.html` + `detail.html`. No Schwab call, no Claude
+  call: it reads the published `options:*` caches and writes two local files in well
+  under a second, which is why sharing the minute with the autoscan's last slot and
+  `[slots.analyze]`'s close briefing is free. Design:
+  `docs/plans/2026-09-17-eod-report-auto-run-design.md`.
+- **Pieces.** `[slots.eod_report]` in `config/sessions.toml` (+ its default in
+  `shared/market_calendar.py`); `tools/generate_eod_report.py` (headless caller +
+  both gates); `_eod_report_units()` in `deploy/systemd/generate_units.py`
+  (`trading-<env>-eod-report.{service,timer}`); `_CACHE_VIEWS` / `has_data(snap)` /
+  `generate(snap=None)` in `webgui/pages/eod.py`.
+- **A systemd timer, not a service slot, and not an in-app timer.** The builders are
+  Tier 1, so `options_svc` may not import them and a copy there would be a second EOD
+  report free to drift. The webgui's only timers are per-client `ui.timer`s, so an
+  in-app schedule would mean "15:15 if a browser tab happens to be open" -- which
+  looks like a schedule right up until the day nobody is looking, which is every day
+  this exists for. Same pattern as `gallery_capture` and `flow_delta`; that makes
+  THREE systemd-read slots, and the `market_calendar` note calling `gallery_capture`
+  "the ONE" (already wrong when `flow_delta` landed) is corrected in place.
+- **An all-empty snapshot writes NOTHING and exits 1.** Every builder in `eod.py`
+  degrades to a "No data" note, so a run against a stopped stack -- or one whose bus
+  could not authenticate -- renders a complete-LOOKING report, and the archive
+  overwrites per DATE. Refusing puts it in `systemctl --user --failed` instead of
+  leaving a blank report nobody questions; the `EnvironmentFile` carrying
+  `MEMURAI_PASSWORD` is load-bearing and the message names it. The BUTTON keeps its
+  unconditional behaviour -- a person clicking it can see what they got.
+  `has_data` and `read_snapshot` walk one `_CACHE_VIEWS` list so the gate cannot check
+  a different set than the snapshot fills, and `generate(snap)` archives the bytes the
+  gate inspected rather than re-reading caches that are still moving.
+- **No `Persistent=`, unlike flow-delta.** The report is named for the day it is
+  generated ON, from LIVE caches, so a catch-up after downtime cannot recover the
+  missed day -- it would write the NEXT day's date off pre-open caches and then be
+  overwritten by that day's real firing. A missed day is a day with no file, and
+  Generate recovers it while the caches still hold the day. `Mon..Fri` excludes
+  weekends; holidays are the script's `is_trading_day` gate, exiting 0.
+- **Docs.** User Guide, Reference Guide (incl. the caveat that Generate overwrites the
+  automatic run's files), Technical Reference (a new table of the three systemd-owned
+  once-a-day jobs), `docs/webgui-routes.md`, and `webgui/page_help.py`.
+- ⚠ **Deploying it needs `generate_units --install`**, not a service restart -- the
+  slot is read at unit-GENERATION time. `--install` also arms the timer.
+
+**Prior —** 2026-09-17 (**A half strike was priced off the whole strike
 beside it.** Reported by the operator against UBER, which lists 72.0 AND 72.5 on
 its 2026-09-18 expiry.)
 

@@ -3758,6 +3758,10 @@ collapsible sections that work in the exported file as well as in the app.
 **Generate** snapshots the current caches into standalone `summary.html` and
 `detail.html` under `webgui/data/eod/<date>/`. The **Archive** list reopens any past day.
 
+**It also runs by itself at 15:15 CT on every trading day** — the same snapshot, from the
+same builders, fifteen minutes after the cash close and after the day's expiries have
+settled. The button is for an extra snapshot or for recovering a day the machine missed.
+
 ### Why it matters
 
 The per-period tables are where a strategy's real shape appears. A book can show a
@@ -3776,7 +3780,12 @@ and commissions are not in these numbers, so treat every figure as optimistic.
 - Realized P&L reads `$0` or `—` until trades actually close. That is by design, not a
   failure.
 - **Generate** captures the caches *at the moment you press it*. Generating mid-session
-  archives a partial day.
+  archives a partial day — and it overwrites that date's files, including the 15:15
+  automatic run's.
+- The automatic run **writes nothing** if every cache it reads is empty, so a stopped
+  stack leaves the existing report alone rather than replacing it with a page of
+  "No data" notes. A day it could not run is simply a day with no archived file; the
+  caches are still live, so pressing **Generate** recovers it until they reset overnight.
 
 ### Related pages
 
