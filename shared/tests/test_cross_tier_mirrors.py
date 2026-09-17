@@ -502,3 +502,28 @@ def test_swing_service_defaults_cover_exactly_what_the_page_can_send():
     assert sent - set(service) == set(), f"no fallback for {sorted(sent - set(service))}"
     assert set(service) - sent == {"families"}
     assert service["families"] is None and service["expiry_choice"] is None
+
+
+# ── Rate my trade: every Calculator template has a scorer identity ──────────
+
+def _dict_literal_keys(rel_path, name):
+    """The string keys of a module-level ``name = {...}`` dict literal."""
+    tree = ast.parse((ROOT / rel_path).read_text(encoding="utf-8"))
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Dict)
+                and any(isinstance(t, ast.Name) and t.id == name for t in node.targets)):
+            return {k.value for k in node.value.keys if isinstance(k, ast.Constant)}
+    raise AssertionError(f"{name} is not a dict literal in {rel_path}")
+
+
+def test_the_rating_map_covers_every_calculator_template():
+    """``calc_rate`` maps the Calculator's shape code to the Strategy Finder's
+    type. A template missing from the map would be rated as a CUSTOM structure
+    against the debit bars - wrong, and silently so. Neither tier can import the
+    other, so the two key sets are compared here."""
+    templates = _dict_literal_keys("webgui/pages/options/strategies.py",
+                                   "STRATEGY_TEMPLATES")
+    mapped = _dict_literal_keys("services/options_svc/rate_trade.py", "CALC_TO_SCORER")
+    assert templates, "found no Calculator templates"
+    assert templates == mapped, {"unmapped": templates - mapped,
+                                 "stale": mapped - templates}
