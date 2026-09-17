@@ -557,6 +557,7 @@ cache:options:gamma_briefings  events:options:gamma_briefings
 cache:options:gamma_analyze_premarket | _midday | _close    (per-slot auto briefings)
 cache:options:gamma_regime_state
 cache:options:market_snapshot  events:options:market_snapshot
+cache:options:trade_idea                                    (hourly post: last result + today's posted set)
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
 cache:options:calc_rating      events:options:calc_rating   (Rate my trade)

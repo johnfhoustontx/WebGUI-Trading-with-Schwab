@@ -25,6 +25,7 @@ import smtplib  # noqa: F401 — module handle for test monkeypatching
 
 from repo_paths import NOTIFICATIONS_CONFIG
 from services.options_svc import briefing_card, briefing_image, snapshot_card
+from services.options_svc import trade_idea, trade_idea_card
 from services.options_svc import market_snapshot
 from shared.notify.channels import (
     discord_target,
@@ -728,6 +729,49 @@ def send_market_snapshot(dashboard, trend, sentiment, regime, intraday, regime_h
     filename = f"market-snapshot-{slot.replace(':', '')}.png"
     send_telegram_photo(tok, chat, filename, png, caption)
     send_discord_file(webhook, filename, png, caption, content_type="image/png")
+    return True
+
+
+def trade_idea_config(config: dict | None = None) -> dict:
+    """The ``trade_idea`` block, or {} when notifications or the block are off.
+
+    Returned empty rather than False so the caller reads its selection knobs
+    (grades, min_score, max_age_min) from the same dict that gates the send."""
+    cfg = config or load_config()
+    if not cfg.get("enabled", True):
+        return {}
+    block = cfg.get("trade_idea")
+    if not isinstance(block, dict) or not block.get("enabled", True):
+        return {}
+    return block
+
+
+def send_trade_idea(idea: dict, *, now, config: dict | None = None) -> bool:
+    """Push one trade idea as a branded PNG to Telegram + Discord. Never raises.
+
+    Returns True if a send was attempted. On a render failure it falls back to
+    the text caption, never to silence -- the same rule as the snapshot. No SMS:
+    an image cannot ride SMS."""
+    cfg = config or load_config()
+    block = trade_idea_config(cfg)
+    if not block or not idea:
+        return False
+    caption = trade_idea.caption(idea)
+    tok, chat = telegram_target(cfg, "trade_idea")
+    webhook = discord_target(cfg, "trade_idea")
+    png = trade_idea_card.render_trade_idea_png(
+        idea, now=now, footer=str(block.get("footer") or ""))
+    if not png:
+        log.warning("trade idea %s: render failed - pushing text only", idea.get("id"))
+        send_telegram(tok, chat, _html.escape(caption))
+        send_discord(webhook, {"description": caption})
+        return True
+    if len(png) > _MS_MAX_BYTES:
+        log.warning("trade idea %s too large (%d bytes)", idea.get("id"), len(png))
+        return False
+    name = trade_idea.filename(idea, now)
+    send_telegram_photo(tok, chat, name, png, caption)
+    send_discord_file(webhook, name, png, caption, content_type="image/png")
     return True
 
 

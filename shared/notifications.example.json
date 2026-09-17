@@ -50,6 +50,14 @@
   "market_snapshot": {
     "enabled": true
   },
+  "trade_idea": {
+    "enabled": true,
+    "grades": ["Strong", "Good"],
+    "min_score": 0,
+    "max_age_min": 45,
+    "min_dte": 1,
+    "footer": "neuralstrike.co"
+  },
   "routes": {
     "signals": {
       "discord": "",
@@ -84,6 +92,10 @@
       "telegram_chat_id": 0
     },
     "market_state": {
+      "discord": "",
+      "telegram_chat_id": 0
+    },
+    "trade_idea": {
       "discord": "",
       "telegram_chat_id": 0
     }

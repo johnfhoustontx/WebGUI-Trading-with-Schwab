@@ -151,6 +151,22 @@ morning = "08:52"     # 09:52 ET
 #   16:30  calibration rebuild
 at = "16:00"
 
+[slots.trade_idea]
+# The hourly trade idea: ONE graded trade off the live Market Scanner, drawn as a
+# branded image and posted to Discord + Telegram (gate + channel +
+# grades in shared/notifications.json "trade_idea"). Five minutes after the :30
+# autoscan so the post reads a finished scan. Delete a line to drop a post, add
+# one to gain one; the names are free-form but must be unique. NO Schwab call and
+# NO Claude call. grace_min < 60 so a late slot cannot overlap the next hour.
+grace_min = 10
+h0835 = "08:35"
+h0935 = "09:35"
+h1035 = "10:35"
+h1135 = "11:35"
+h1235 = "12:35"
+h1335 = "13:35"
+h1435 = "14:35"
+
 [slots.calibration]
 # The nightly signal-calibration rebuild -> cache:options:calibration, the
 # realized-outcome EV the Trade detail panel shows. AFTER [windows.collection]

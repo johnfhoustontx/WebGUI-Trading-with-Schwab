@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-16</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-17</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -230,7 +230,11 @@ just click <strong>Authorize</strong> again.</p>
   quiet — nothing else is affected, and the auto-trader safely stands down.</li>
 <li><strong>Push notifications</strong> (Telegram / Discord / text message) — configured in
   <code>shared/notifications.json</code> if you want alerts on your phone. Skip it and the app
-  is silent on those channels.</li>
+  is silent on those channels. Once they are set, the app also posts one <strong>trade idea</strong>
+  an hour during the regular session (08:35–14:35 CT): the best Strong or Good trade
+  on the Market Scanner, drawn as an image with its legs, grade, risk, profit,
+  probability of profit and payoff chart. It skips an hour rather than post a weak,
+  stale or same-day trade. Turn it off with <code>"trade_idea": {"enabled": false}</code>.</li>
 <li><strong>The watchlist workbook</strong> <code>options-scanner/data/Top 20.xlsx</code> — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.</li>
 </ul>

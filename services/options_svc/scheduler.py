@@ -450,6 +450,28 @@ def market_snapshot_due(now, ran_slots):
     return None
 
 
+# ── Hourly trade idea (see config/sessions.toml [slots.trade_idea]) ──────────
+_TRADE_IDEA_SLOTS = {k: (t.hour, t.minute)
+                     for k, t in mc.slot_times("trade_idea").items()}
+_TRADE_IDEA_GRACE_MIN = mc.slot_grace_min("trade_idea")
+
+
+def trade_idea_due(now, ran_slots):
+    """Name of the trade-idea slot due now, or None. Mirrors ``action_alert_due``:
+    once per slot per trading day, within the grace window, never backfilled."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _TRADE_IDEA_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_TRADE_IDEA_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Scheduler loop ─────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan loop cadence)
 
@@ -543,6 +565,7 @@ async def loop(bus):
     income_ran = set()  # (date, slot) of fired income-window scans (see income_slot_due)
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
+    trade_idea_ran = set()  # (date, slot) of fired hourly trade-idea posts (see trade_idea_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
     # commands re-publish it), so it is NOT polled every tick. Guarded so a
@@ -937,6 +960,25 @@ async def loop(bus):
 
         if ms_slot:
             branches.append(("market_snapshot", _market_snapshot_branch(ms_slot)))
+
+        # Hourly trade idea - one graded trade off the live scan, posted as an
+        # image. Latched BEFORE the render+push so a slow render cannot refire.
+        try:
+            ti_slot = trade_idea_due(now, trade_idea_ran)
+            if ti_slot:
+                trade_idea_ran.add((now.date().isoformat(), ti_slot))
+        except Exception:
+            log.exception("trade_idea_due gate degraded")
+            ti_slot = None
+
+        async def _trade_idea_branch(slot_name):
+            try:
+                await loop_.run_in_executor(None, handlers.run_trade_idea, bus, slot_name)
+            except Exception:
+                log.exception("run_trade_idea branch degraded")
+
+        if ti_slot:
+            branches.append(("trade_idea", _trade_idea_branch(ti_slot)))
 
         # Launch all DUE branches as keyed background tasks (bounded by the fixed
         # key set). The tick does NOT wait for them — see launch_branches.

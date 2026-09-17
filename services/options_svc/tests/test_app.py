@@ -72,7 +72,7 @@ _BRANCH_HANDLERS = (
     "collect_gex_history", "refresh_gamma_current", "refresh_gamma_published",
     "run_driver_manage_and_refresh", "run_captured_manage_and_publish",
     "run_paper_entry_and_manage", "run_scheduled_gamma_analyze",
-    "run_action_alert", "run_eod_summary", "run_market_snapshot",
+    "run_action_alert", "run_eod_summary", "run_market_snapshot", "run_trade_idea",
     "refresh_calibration", "refresh_ledger_caps",
     # The income branch is due at the fixed 09:00 CT clock these tests pin
     # (slot 08:52 + 20 min grace), and unstubbed it fans out ~23 LIVE chain

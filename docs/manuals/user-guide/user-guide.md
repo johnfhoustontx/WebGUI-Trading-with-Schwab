@@ -83,7 +83,11 @@ The app reads market data and your positions from Schwab, so you need:
   quiet — nothing else is affected, and the auto-trader safely stands down.
 - **Push notifications** (Telegram / Discord / text message) — configured in
   `shared/notifications.json` if you want alerts on your phone. Skip it and the app
-  is silent on those channels.
+  is silent on those channels. Once they are set, the app also posts one **trade idea**
+  an hour during the regular session (08:35–14:35 CT): the best Strong or Good trade
+  on the Market Scanner, drawn as an image with its legs, grade, risk, profit,
+  probability of profit and payoff chart. It skips an hour rather than post a weak,
+  stale or same-day trade. Turn it off with `"trade_idea": {"enabled": false}`.
 - **The watchlist workbook** `options-scanner/data/Top 20.xlsx` — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.
 

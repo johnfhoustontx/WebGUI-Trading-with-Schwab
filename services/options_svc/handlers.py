@@ -280,6 +280,9 @@ CACHE_ACTION_ALERT = "cache:options:action_alert"
 EVENT_ACTION_ALERT = "events:options:action_alert"
 
 CACHE_MARKET_SNAPSHOT = "cache:options:market_snapshot"
+#: What the hourly trade idea last did (posted / skipped + why) and today's posted
+#: set, which is what stops the same trade or symbol posting twice in a day.
+CACHE_TRADE_IDEA = "cache:options:trade_idea"
 
 CACHE_EOD_SUMMARY = "cache:options:eod_summary"
 EVENT_EOD_SUMMARY = "events:options:eod_summary"
@@ -2388,6 +2391,80 @@ def run_market_snapshot(bus, slot):
                        "regime": regime})
     except Exception:  # noqa: BLE001
         log.exception("market snapshot %s: cache_set failed", slot)
+
+
+def run_trade_idea(bus, slot, now=None) -> dict:
+    """Pick one graded trade off the live scan and post it (Telegram + Discord).
+
+    Driven by ``scheduler.trade_idea_due`` on the ``[slots.trade_idea]`` marks.
+    Reads ``cache:options:scan`` only -- no Schwab call, no Claude call. Always
+    writes ``cache:options:trade_idea`` with what happened, because "no post this
+    hour" has several causes (off, stale scan, nothing eligible) and a skipped
+    hour must say which. Never raises into the scheduler."""
+    from zoneinfo import ZoneInfo as _ZI
+    from services.options_svc import trade_idea
+
+    now = now or _dt.datetime.now(_ZI("America/Chicago"))
+    today = now.date().isoformat()
+    prev = None
+    try:
+        env = bus.cache_get(CACHE_TRADE_IDEA)
+        prev = env.payload if env is not None else None
+    except Exception:  # noqa: BLE001 -- a missing state only risks a repeat post
+        log.exception("trade idea %s: state read failed", slot)
+    posted = trade_idea.todays_posted((prev or {}).get("posted"), today)
+    result = {"slot": slot, "at": now.isoformat(), "status": "skipped",
+              "reason": None, "candidates": 0, "idea": None, "posted": posted}
+
+    def _finish():
+        try:
+            bus.cache_set(CACHE_TRADE_IDEA, result)
+        except Exception:  # noqa: BLE001
+            log.exception("trade idea %s: cache_set failed", slot)
+        log.info("trade idea %s: %s %s", slot, result["status"],
+                 (result["idea"] or {}).get("id") or result["reason"])
+        return result
+
+    block = push_notify.trade_idea_config()
+    if not block:
+        result["reason"] = "disabled"
+        return _finish()
+    try:
+        env = bus.cache_get("cache:options:scan")
+        scan = env.payload if env is not None else None
+    except Exception:  # noqa: BLE001
+        log.exception("trade idea %s: scan read failed", slot)
+        scan = None
+    if not isinstance(scan, dict):
+        result["reason"] = "no scan"
+        return _finish()
+    age = trade_idea.scan_age_min(scan, now)
+    max_age = block.get("max_age_min", trade_idea.DEFAULT_MAX_AGE_MIN)
+    if age is None or age > max_age:
+        result["reason"] = ("stale scan (unknown age)" if age is None
+                            else f"stale scan ({age:.0f} min old)")
+        return _finish()
+    grades = tuple(block.get("grades") or trade_idea.DEFAULT_GRADES)
+    ideas = trade_idea.candidates(
+        scan, grades=grades, min_score=block.get("min_score") or 0,
+        today=now.date(), min_dte=block.get("min_dte", trade_idea.DEFAULT_MIN_DTE))
+    result["candidates"] = len(ideas)
+    idea = trade_idea.pick(ideas, posted, grades=grades)
+    if idea is None:
+        result["reason"] = "nothing eligible"
+        return _finish()
+    result["idea"] = idea
+    try:
+        sent = push_notify.send_trade_idea(idea, now=now)
+    except Exception:  # noqa: BLE001 -- the primitives never raise; belt and braces
+        _degrade.degraded("options.run_trade_idea.send")
+        sent = False
+    if sent:
+        result["status"] = "posted"
+        result["posted"] = trade_idea.next_posted(posted, idea, today)
+    else:
+        result["reason"] = "send failed"
+    return _finish()
 
 
 def run_eod_summary(bus, slot=None) -> None:

@@ -63,6 +63,22 @@ _DEFAULTS = {
         "hashtags": [], "discord_url": "", "extra_text": "",
         "disclaimer": "Not advice. Paper/educational.",
     },
+    # The hourly trade-idea image (options_svc, [slots.trade_idea]). ON by default:
+    # it posts to the `trade_idea` route, else the global Discord webhook and
+    # Telegram chat -- which is where the operator asked for it (2026-09-17).
+    # `grades` are the scanner grades allowed to post, best first; `min_score` a
+    # composite floor on top of them; `max_age_min` refuses a scan that old, since
+    # a stalled scanner would otherwise post a trade priced off a moved market.
+    # `min_dte` keeps a same-day expiry out of a post nobody can act on in time.
+    # `footer` is the one line of text under the card ("" for none).
+    "trade_idea": {
+        "enabled": True,
+        "grades": ["Strong", "Good"],
+        "min_score": 0,
+        "max_age_min": 45,
+        "min_dte": 1,
+        "footer": "neuralstrike.co",
+    },
     # Per-category channel routing (see `discord_target`/`telegram_target` below).
     # Deliberately EMPTY: pre-populating the nine categories here would make an
     # absent category indistinguishable from a blank one. `_deep_merge` folds the
@@ -169,6 +185,7 @@ def _disable_all(node: dict) -> None:
 ROUTE_CATEGORIES = (
     "signals", "flow_uoa", "flow_crossover", "flow_gamma_flip", "action_alert",
     "eod_summary", "gamma_briefing", "market_snapshot", "market_state",
+    "trade_idea",
 )
 
 # Category -> the pre-`routes` config key it used to read (back-compat only).

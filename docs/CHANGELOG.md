@@ -4,7 +4,38 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-16 (**Calculator: Rate my trade.** Operator request: a
+**Last updated:** 2026-09-17 (**Hourly trade idea post.** Operator request: every
+hour of the regular session, one proposed trade as a branded image on Discord and
+Telegram, for social media.)
+
+- **What it does.** On the `[slots.trade_idea]` marks (08:35–14:35 CT, five minutes
+  after the :30 autoscan) options_svc picks ONE trade off `cache:options:scan` and
+  posts a 2400×1350 PNG: symbol, strategy and bias, legs, grade and composite, max
+  risk, max profit, probability of profit, breakevens, and a payoff chart. No Schwab
+  or Claude call. Design: `docs/plans/2026-09-17-hourly-trade-idea-post-design.md`.
+- **Pieces.** `trade_idea.py` (PURE: normalise, select, caption),
+  `trade_idea_card.py` (Pillow, drawn at 2x natively, Inter from `deploy/site`, the
+  mark redrawn from its SVG geometry), `push_notify.send_trade_idea`,
+  `handlers.run_trade_idea` → `cache:options:trade_idea`, `scheduler.trade_idea_due`,
+  a `trade_idea` route category and config block.
+- **Selection.** Strong or Good only; never a trade already posted today; a symbol
+  not yet posted beats grade; grade beats variety. Refused outright: unbounded loss,
+  open through a report, unknown PoP, a multi-expiry or share leg, a scan older than
+  45 min, and anything expiring the same day (`min_dte` 1).
+- **Found on real data.** Replaying prod's 15:00 scan of 2026-09-16 through the
+  selector, six of seven hourly picks were SAME-DAY long options at $15–$33, hence
+  `min_dte`. With it the day was seven long options — the directional tab's grades
+  run higher than the credit tabs', so expect a mostly long-premium feed.
+- **Channels.** Operator: the global Discord webhook ("Spidey Bot") IS the Options
+  Signals channel, so no route is set; a `routes.trade_idea` block overrides both.
+  Footer "neuralstrike.co", no disclaimer, by choice.
+- **Units trap, designed out.** Credit rows are per share, directional rows per
+  contract; every dollar on the card comes from one payoff function over the legs,
+  the same one the chart draws.
+
+---
+
+**Prior —** 2026-09-16 (**Calculator: Rate my trade.** Operator request: a
 button that grades a hand-built trade like the Trade detail panel, with a Buy or
 Pass.)
 
