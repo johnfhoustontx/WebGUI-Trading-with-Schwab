@@ -21,6 +21,9 @@ import time
 from services.options_svc import compute
 from services.options_svc import flow_alerts
 from services.options_svc import push_notify
+# Rate my trade (design 2026-09-16): the Calculator's legs graded by the
+# Strategy Finder's own scorer.
+from services.options_svc import rate_trade
 from shared import market_calendar as mc
 from shared.notify.channels import _today_ct
 from shared.contracts.options import (IncomeScan, MatrixSnapshot,
@@ -140,7 +143,18 @@ def _is_stale_open(command) -> bool:
 # ⚠ This is an age gate, not true idempotency: two genuinely FRESH duplicates
 # still both run. It closes the REPLAY case with machinery the service already
 # trusts; a dedup store keyed on the stream message id would be the stronger fix.
-_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "income_scan")
+# ``calc_rate`` is harmless to repeat but spends Schwab calls (price history, IV
+# chains, earnings) answering a dialog nobody has open.
+_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "income_scan", "calc_rate")
+
+
+def _market_state(bus):
+    """The committed five-state market classifier (``cache:sentiment:composite``
+    ``derived.trend.state``), or None. Every level guarded: an absent composite
+    means no family-ranking tilt, never an error."""
+    env = bus.cache_get("cache:sentiment:composite")
+    payload = env.payload if env is not None else None
+    return (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
 
 
 def _is_stale_side_effect(command) -> bool:
@@ -426,6 +440,10 @@ EVENT_CALC_RESULT = "events:options:calc_result"
 
 CACHE_CALC_IV = "cache:options:calc_iv"
 EVENT_CALC_IV = "events:options:calc_iv"
+
+# Rate my trade: one answer per request, matched page-side by ``request_id``.
+CACHE_CALC_RATING = "cache:options:calc_rating"
+EVENT_CALC_RATING = "events:options:calc_rating"
 
 CACHE_CALIBRATION = "cache:options:calibration"
 EVENT_CALIBRATION = "events:options:calibration"
@@ -770,9 +788,7 @@ def swing_scan(bus, args: dict) -> None:
     ``remove_closed_from_captured`` / ``refresh_gamma_current``)."""
     args = args or {}
     params = {k: args.get(k, default) for k, default in _SWING_DEFAULTS.items()}
-    env = bus.cache_get("cache:sentiment:composite")
-    payload = env.payload if env is not None else None
-    market_state = (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
+    market_state = _market_state(bus)
     # The earnings gate (gap assessment A5). ``swing_scan`` has gated per signal
     # since the 0-DTE-bucket fix and ``income_scan`` supplied a date, but this
     # handler passed NONE — so ``if earnings_date and ...`` was always False and
@@ -1023,9 +1039,7 @@ def publish_income(bus, symbols=None) -> None:
     The spreads are the bulk of the board and must survive all three.
     """
     syms = list(symbols) if symbols is not None else _income_symbols()
-    env = bus.cache_get("cache:sentiment:composite")
-    payload = env.payload if env is not None else None
-    market_state = (((payload or {}).get("derived") or {}).get("trend") or {}).get("state")
+    market_state = _market_state(bus)
 
     # The covered-call half. ``held`` decides which chains are worth carrying
     # back out of the scan, so the pass retains a handful of chains rather than
@@ -2644,6 +2658,10 @@ def handle_command(bus, command) -> None:
     (args = the calc params dict) → run the summary + P&L grid math, cache the
     result + publish; ``calc_iv`` (args spot/strike/option_type/mark/expiry/rate) →
     imply IV from the option mark at the intraday time-to-expiry, cache + publish;
+    ``calc_rate`` (args request_id/symbol/structure/legs) → grade the Calculator's
+    legs with the Strategy Finder's scorer and checklist stamps against the cached
+    calc chain, cache ``{request_id, symbol, legs, row, error}`` + publish
+    (replay-guarded);
     ``expected_move`` (args symbol/expiry/legs) → build the
     expected-move cone payload, cache the result + publish; ``em_chain`` (args
     symbol) → expirations + strike ladders for the Expected Move dropdowns;
@@ -2930,6 +2948,18 @@ def handle_command(bus, command) -> None:
                               a.get("expiry"), a.get("rate", 0.045))
         version = bus.cache_set(CACHE_CALC_IV, res)
         bus.publish(EVENT_CALC_IV, {"version": version})
+    elif command.type == "calc_rate":
+        a = command.args or {}
+        env = bus.cache_get(CACHE_CALC_CHAIN)
+        out = rate_trade.rate(a.get("symbol"), a.get("structure"), a.get("legs"),
+                              env.payload if env is not None else None,
+                              market_state=_market_state(bus))
+        # Always answers its request - a refusal is a sentence the dialog shows,
+        # never a silence it would wait out.
+        version = bus.cache_set(CACHE_CALC_RATING, {
+            "request_id": a.get("request_id"), "symbol": a.get("symbol"),
+            "legs": a.get("legs"), "row": out.get("row"), "error": out.get("error")})
+        bus.publish(EVENT_CALC_RATING, {"version": version})
     elif command.type == "expected_move":
         a = command.args or {}
         res = compute.compute_expected_move(

@@ -2775,3 +2775,49 @@ def test_scheduled_briefings_fall_back_to_the_api_path_when_no_cli_client(monkey
     handlers.run_scheduled_gamma_analyze(bus, "midday")
 
     assert "client" not in got[0] and "news_client" not in got[0]     # exactly as before
+
+
+# ── Rate my trade (design 2026-09-16) ───────────────────────────────────────
+
+_RATE_LEGS = [{"option_type": "put", "side": "short", "strike": 440.0,
+               "expiry": "2026-10-16", "qty": 1, "premium": 2.0}]
+
+
+def test_calc_rate_reads_the_calc_chain_and_publishes_the_answer(monkeypatch):
+    bus = Bus(fake=True)
+    cc = {"symbol": "SPY", "api": "SPY", "price": 450.0, "chain": {"putExpDateMap": {}}}
+    bus.cache_set("cache:options:calc_chain", cc)
+    bus.cache_set("cache:sentiment:composite", {"derived": {"trend": {"state": "bullish"}}})
+    seen = {}
+
+    def _rate(symbol, structure, legs, chain_payload, market_state=None):
+        seen.update(symbol=symbol, structure=structure, legs=legs, cc=chain_payload,
+                    state=market_state)
+        return {"row": {"grade": "Good"}, "error": None}
+
+    monkeypatch.setattr(handlers.rate_trade, "rate", _rate)
+    sub = bus.subscribe("events:options:calc_rating")
+    handlers.handle_command(bus, Command(type="calc_rate", args={
+        "request_id": "r1", "symbol": "SPY", "structure": "NAKED_PUT", "legs": _RATE_LEGS}))
+    msg = sub.get_message(timeout=1.0)
+    sub.close()
+    env = bus.cache_get("cache:options:calc_rating")
+    assert env.payload == {"request_id": "r1", "symbol": "SPY", "legs": _RATE_LEGS,
+                           "row": {"grade": "Good"}, "error": None}
+    assert seen == {"symbol": "SPY", "structure": "NAKED_PUT", "legs": _RATE_LEGS,
+                    "cc": cc, "state": "bullish"}
+    assert msg is not None and msg.get("version") == env.version
+
+
+def test_calc_rate_with_no_chain_still_answers_its_request(monkeypatch):
+    bus = Bus(fake=True)
+    handlers.handle_command(bus, Command(type="calc_rate", args={
+        "request_id": "r2", "symbol": "SPY", "structure": "PCS", "legs": _RATE_LEGS}))
+    env = bus.cache_get("cache:options:calc_rating")
+    assert env.payload["request_id"] == "r2"
+    assert env.payload["row"] is None and env.payload["error"]
+
+
+def test_calc_rate_is_replay_guarded_and_documented():
+    assert "calc_rate" in handlers._REPLAY_GUARDED
+    assert "calc_rate" in (handlers.handle_command.__doc__ or "")
