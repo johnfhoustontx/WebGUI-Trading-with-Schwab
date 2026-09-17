@@ -2455,7 +2455,8 @@ def run_trade_idea(bus, slot, now=None) -> dict:
         return _finish()
     result["idea"] = idea
     try:
-        sent = push_notify.send_trade_idea(idea, now=now)
+        from repo_paths import TRADE_IDEAS_DIR
+        sent = push_notify.send_trade_idea(idea, now=now, archive_dir=TRADE_IDEAS_DIR)
     except Exception:  # noqa: BLE001 -- the primitives never raise; belt and braces
         _degrade.degraded("options.run_trade_idea.send")
         sent = False

@@ -24,6 +24,7 @@ PURE: no bus, no Schwab, no clock of its own. Every function takes what it reads
 """
 import datetime as _dt
 import math
+import pathlib
 
 MULT = 100
 
@@ -361,3 +362,21 @@ def caption(idea):
 def filename(idea, now):
     safe = "".join(c if c.isalnum() else "-" for c in str(idea.get("symbol") or "trade"))
     return f"trade-idea-{now:%Y-%m-%d-%H%M}-{safe}.png"
+
+
+def archive(root, idea, png, caption_text, now):
+    """Write the card and its caption under ``root/<day>/``; return the PNG path.
+
+    Never raises: the archive is a copy for posting by hand, and a full disk must
+    not turn into a missed Discord post. Returns None when nothing was written."""
+    try:
+        day = pathlib.Path(root) / f"{now:%Y-%m-%d}"
+        day.mkdir(parents=True, exist_ok=True)
+        path = day / filename(idea, now)
+        path.write_bytes(png)
+        path.with_suffix(".txt").write_text(caption_text + "\n", encoding="utf-8")
+        return path
+    except Exception:  # noqa: BLE001
+        import logging
+        logging.getLogger(__name__).warning("trade idea archive failed", exc_info=True)
+        return None

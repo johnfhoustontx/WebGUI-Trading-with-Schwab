@@ -47,6 +47,14 @@ not read the web GUI theme). Inter from `deploy/site/assets`, weights by variati
 name, card_kit's system fonts as the fallback. Never raises; a render failure posts
 the text caption instead.
 
+## Where the cards are kept
+
+Each posted card and caption is written to `options-scanner/data/trade_ideas/<day>/`
+(`repo_paths.TRADE_IDEAS_DIR`) as `trade-idea-<day>-<HHMM>-<SYMBOL>.png` + `.txt`.
+The workstation's "NeuralStrike social pull" task copies them into
+`D:\NeuralStrike Reports\Trade Ideas\<day>\` every 15 minutes, looking back five days.
+A failed save never blocks the post.
+
 ## Not done
 
 - No X/Twitter post; the existing X channel is separate and still off.

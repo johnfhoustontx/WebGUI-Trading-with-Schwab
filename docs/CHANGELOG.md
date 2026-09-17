@@ -29,6 +29,12 @@ Telegram, for social media.)
 - **Channels.** Operator: the global Discord webhook ("Spidey Bot") IS the Options
   Signals channel, so no route is set; a `routes.trade_idea` block overrides both.
   Footer "neuralstrike.co", no disclaimer, by choice.
+- **Kept for posting by hand.** Every posted card and its caption are also written to
+  `repo_paths.TRADE_IDEAS_DIR` (`options-scanner/data/trade_ideas/<day>/`, gitignored).
+  The workstation's "NeuralStrike social pull" task (`D:\NeuralStrike Reports\tools\pull_social.ps1`,
+  outside this repo) copies them to `D:\NeuralStrike Reports\Trade Ideas\<day>\`. Before this
+  reached prod, `~/neuralstrike-reports/tools/trade_idea_catchup.py` on vps2 redrew the latest
+  post from `cache:options:trade_idea`, so the 08:35 card was not lost.
 - **Units trap, designed out.** Credit rows are per share, directional rows per
   contract; every dollar on the card comes from one payoff function over the legs,
   the same one the chart draws.

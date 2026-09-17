@@ -746,12 +746,14 @@ def trade_idea_config(config: dict | None = None) -> dict:
     return block
 
 
-def send_trade_idea(idea: dict, *, now, config: dict | None = None) -> bool:
+def send_trade_idea(idea: dict, *, now, config: dict | None = None,
+                    archive_dir=None) -> bool:
     """Push one trade idea as a branded PNG to Telegram + Discord. Never raises.
 
     Returns True if a send was attempted. On a render failure it falls back to
     the text caption, never to silence -- the same rule as the snapshot. No SMS:
-    an image cannot ride SMS."""
+    an image cannot ride SMS. With ``archive_dir``, the posted card and caption are
+    also kept on disk (``trade_idea.archive``) for posting to social media by hand."""
     cfg = config or load_config()
     block = trade_idea_config(cfg)
     if not block or not idea:
@@ -770,6 +772,8 @@ def send_trade_idea(idea: dict, *, now, config: dict | None = None) -> bool:
         log.warning("trade idea %s too large (%d bytes)", idea.get("id"), len(png))
         return False
     name = trade_idea.filename(idea, now)
+    if archive_dir is not None:
+        trade_idea.archive(archive_dir, idea, png, caption, now)
     send_telegram_photo(tok, chat, name, png, caption)
     send_discord_file(webhook, name, png, caption, content_type="image/png")
     return True

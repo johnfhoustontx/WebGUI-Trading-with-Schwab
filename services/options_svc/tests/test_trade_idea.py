@@ -231,6 +231,21 @@ def test_send_posts_the_image_to_both_channels(monkeypatch):
     assert sent[1] == ("dc", "https://discord/global", "image/png")
 
 
+def test_the_posted_card_and_caption_are_archived_by_day(monkeypatch, tmp_path):
+    monkeypatch.setattr(push_notify, "send_telegram_photo", lambda *a: None)
+    monkeypatch.setattr(push_notify, "send_discord_file", lambda *a, **k: None)
+    push_notify.send_trade_idea(T.normalize(pcs()), now=NOW, config=_cfg(), archive_dir=tmp_path)
+    png = tmp_path / "2026-09-17" / "trade-idea-2026-09-17-1035-SPY.png"
+    assert png.read_bytes()[:4] == b"\x89PNG"
+    assert png.with_suffix(".txt").read_text(encoding="utf-8").startswith("Trade idea: SPY")
+
+
+def test_the_archive_never_raises(tmp_path):
+    blocker = tmp_path / "file"
+    blocker.write_text("x")
+    assert T.archive(blocker, T.normalize(pcs()), b"png", "cap", NOW) is None
+
+
 def test_a_trade_idea_route_overrides_the_global_channels(monkeypatch):
     hooks = []
     monkeypatch.setattr(push_notify, "send_telegram_photo", lambda *a: hooks.append(a[1]))
@@ -288,7 +303,7 @@ def pushes(monkeypatch):
     sent = []
     monkeypatch.setattr(push_notify, "trade_idea_config", lambda config=None: {"enabled": True})
     monkeypatch.setattr(push_notify, "send_trade_idea",
-                        lambda idea, now, config=None: sent.append(idea["id"]) or True)
+                        lambda idea, now, config=None, archive_dir=None: sent.append(idea["id"]) or True)
     return sent
 
 

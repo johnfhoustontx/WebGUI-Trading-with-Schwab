@@ -85,6 +85,12 @@ DRIVER_PAPER_DB = OPTIONS_SCANNER / "data" / "paper_account_driver.db"
 # gamma_briefing_report.py utility. One row per (CT date, slot).
 GAMMA_BRIEFING_DB = OPTIONS_SCANNER / "data" / "gamma_briefings.db"
 
+# Every hourly trade-idea card options_svc posts, kept as <day>/trade-idea-*.png
+# plus a .txt caption, for posting to social media by hand. The workstation's
+# "NeuralStrike social pull" task copies them into D:\NeuralStrike Reports.
+# Gitignored with the rest of options-scanner/data/.
+TRADE_IDEAS_DIR = OPTIONS_SCANNER / "data" / "trade_ideas"
+
 # Intraday 2-min sentiment + trend series for the /sentiment "Daily Sentiment &
 # Trend" graphs. Rolling last 5 trading days; written by sentiment_svc each refresh.
 SENTIMENT_INTRADAY_DB = SENTIMENT / "data" / "sentiment_intraday.db"
