@@ -240,3 +240,40 @@ def test_extract_price_mark_is_extract_premium_and_unknown_source_is_the_mark():
 def test_extract_price_a_zero_side_is_no_reading_not_a_zero_price():
     assert cg.extract_price(_Q_CHAIN, "put", 570.0, _Q_EXP, "bid") is None
     assert cg.extract_price(_Q_CHAIN, "put", 575.0, _Q_EXP, "ask") is None
+# -- a half-strike ladder (2026-09-17) --------------------------------------
+# Measured on UBER's 2026-09-18 expiry, which lists 72.0 AND 72.5: the old
+# "within 0.51" match answered a 72.5 leg with 72.0's quote, delta and mark.
+
+_H_EXP = "2026-09-18"
+_H_CALLS = {
+    "72.0": [{"bid": 0.18, "ask": 0.20, "mark": 0.19, "delta": 0.217}],
+    "72.5": [{"bid": 0.12, "ask": 0.14, "mark": 0.13, "delta": 0.152}],
+}
+
+
+def _half_chain(reverse=False):
+    keys = sorted(_H_CALLS, reverse=reverse)
+    return {"callExpDateMap": {f"{_H_EXP}:1": {k: _H_CALLS[k] for k in keys}}}
+
+
+def test_a_half_strike_reads_its_own_contract_whatever_order_the_chain_is_in():
+    """Dict order decided the old match, so both orders are pinned."""
+    for reverse in (False, True):
+        chain = _half_chain(reverse)
+        assert cg.extract_premium(chain, "call", 72.5, _H_EXP) == 0.13
+        assert cg.extract_premium(chain, "call", 72.0, _H_EXP) == 0.19
+        assert cg.extract_price(chain, "call", 72.5, _H_EXP, "bid") == 0.12
+        assert cg.extract_price(chain, "call", 72.0, _H_EXP, "bid") == 0.18
+        assert cg.extract_delta(chain, "call", 72.5, _H_EXP) == 0.152
+        assert cg.extract_delta(chain, "call", 72.0, _H_EXP) == 0.217
+
+
+def test_a_strike_the_expiry_does_not_list_is_no_reading():
+    """A leg carried onto an expiry with a coarser ladder - UBER's weeklies list
+    whole dollars only - shows an em-dash, never the next strike's price."""
+    chain = {"callExpDateMap": {"2026-09-25:8": {
+        "72.0": [{"mark": 0.40, "delta": 0.30}]}}}
+    assert cg.extract_premium(chain, "call", 72.5, "2026-09-25") is None
+    assert cg.extract_delta(chain, "call", 72.5, "2026-09-25") is None
+    assert cg.leg_delta(chain, {"option_type": "call", "side": "long",
+                                "strike": 72.5, "expiry": "2026-09-25"}) is None

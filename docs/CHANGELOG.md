@@ -4,7 +4,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-17 (**Hourly trade idea post.** Operator request: every
+**Last updated:** 2026-09-17 (**A half strike was priced off the whole strike
+beside it.** Reported by the operator against UBER, which lists 72.0 AND 72.5 on
+its 2026-09-18 expiry.)
+
+- **The defect.** `chain_grid._find_contract` matched a strike "within 0.51" — a
+  tolerance from the era when every ladder in view was whole-dollar or wider. On a
+  half-strike ladder the 0.5 neighbour is INSIDE it, and dict order decides, so a
+  72.5 leg took 72.0's contract. Measured on the live chain: mark **0.19** against
+  its own 0.13, bid 0.18 against 0.12, delta **0.217** against 0.152 — and that mark
+  is what the page implies its IV from, so one clicked wing skewed the whole grid.
+  It reached the grid click, the Bid/Mark/Ask refill, the leg row's delta and the
+  IV implication; `rate_trade` already matched exactly and was never affected.
+- **The fix.** The match is the chain's own strike, within 1e-6 for float noise. A
+  strike the expiry does not list is now an em-dash — never the neighbour's number.
+  `test_extract_premium_strike_tolerance` pinned the old answer (450.3 → 450.0's
+  premium): a characterization test recording what the code did, replaced by one
+  that states what it should do, plus a half-strike ladder asserted in BOTH dict
+  orders since order was what decided the old match.
+- **What was NOT a defect.** The chain grid renders every strike Schwab lists —
+  verified through the real Tier-1 path on the operator's own cached UBER chain
+  (67.5 and 72.5 render on 09-18). UBER's weeklies list whole dollars only; the
+  halves sit on 09-18 and the Oct-16 monthly, and the same fetch alone or in a
+  range returns the same ladder.
+
+**Prior —** 2026-09-17 (**Hourly trade idea post.** Operator request: every
 hour of the regular session, one proposed trade as a branded image on Discord and
 Telegram, for social media.)
 
@@ -38,8 +62,6 @@ Telegram, for social media.)
 - **Units trap, designed out.** Credit rows are per share, directional rows per
   contract; every dollar on the card comes from one payoff function over the legs,
   the same one the chart draws.
-
----
 
 **Prior —** 2026-09-16 (**Calculator: Rate my trade.** Operator request: a
 button that grades a hand-built trade like the Trade detail panel, with a Buy or

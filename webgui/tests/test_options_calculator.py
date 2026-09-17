@@ -76,8 +76,10 @@ def test_extract_premium_falls_back_to_mid():
     assert abs(calc.extract_premium(CHAIN_PREM, "put", 445.0) - 0.08) < 1e-9
 
 
-def test_extract_premium_strike_tolerance():
-    assert calc.extract_premium(CHAIN_PREM, "call", 450.3) == 1.25
+def test_extract_premium_is_no_reading_for_a_strike_the_chain_does_not_list():
+    """It used to match within 0.51 and answer with the NEIGHBOUR's premium."""
+    assert calc.extract_premium(CHAIN_PREM, "call", 450.3) is None
+    assert calc.extract_premium(CHAIN_PREM, "call", 449.5) is None
 
 
 def test_extract_premium_none_when_missing():

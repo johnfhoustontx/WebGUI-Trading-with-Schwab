@@ -66,13 +66,26 @@ def extract_atm_iv(chain, spot, expiry=None):
     return None if best is None else best * 100.0
 
 
+#: A strike matches the chain's own key or it does not exist. The epsilon is for
+#: float noise (``"72.50"`` parses to exactly 72.5, but a strike that has been
+#: through arithmetic may not), NOT a search radius.
+_STRIKE_EPS = 1e-6
+
+
 def _find_contract(chain, option_type, strike, expiry=None):
-    """The first chain contract matching one leg: call/put map, strike within
-    0.51, and — when ``expiry`` is given — that expiry only. None if not found.
+    """The chain contract for one leg: call/put map, that exact strike, and —
+    when ``expiry`` is given — that expiry only. None if the chain does not list
+    it.
 
     The shared walk behind ``extract_premium`` and ``extract_delta``, so the
     premium and the delta on one leg row are always read off the SAME contract
     and can never come from different strikes.
+
+    ⚠ The match used to be "within 0.51", which SWALLOWED a half-strike ladder:
+    on a UBER expiry listing 72.0 and 72.5, a 72.5 leg matched 72.0 first (dict
+    order) and was priced 0.19 against its own 0.13, with 72.0's delta beside it
+    and 72.0's mark implying the page's IV. A strike the chain does not carry is
+    now no reading — an em-dash — rather than the neighbour's number.
     """
     if not isinstance(chain, dict) or not isinstance(strike, (int, float)):
         return None
@@ -88,7 +101,8 @@ def _find_contract(chain, option_type, strike, expiry=None):
                 sk = float(strike_str)
             except (ValueError, TypeError):
                 continue
-            if abs(sk - strike) < 0.51 and isinstance(contracts, list) and contracts:
+            if (abs(sk - strike) <= _STRIKE_EPS
+                    and isinstance(contracts, list) and contracts):
                 return contracts[0]
     return None
 
@@ -96,8 +110,9 @@ def _find_contract(chain, option_type, strike, expiry=None):
 def extract_premium(chain, option_type, strike, expiry=None):
     """Premium for one leg (mark, else bid/ask mid) from the chain.
 
-    Matches the strike within 0.51 in the call/put map for ``option_type``.
-    When ``expiry`` is given, only that expiry is considered. None if not found.
+    Matches that exact strike in the call/put map for ``option_type``. When
+    ``expiry`` is given, only that expiry is considered. None if the chain does
+    not list the contract — never a neighbouring strike's premium.
     """
     c = _find_contract(chain, option_type, strike, expiry)
     if c is None:
