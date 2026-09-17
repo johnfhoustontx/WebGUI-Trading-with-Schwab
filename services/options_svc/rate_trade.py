@@ -156,3 +156,71 @@ def finder_legs(legs, chain, spot):
     for finder, qty in zip(out, _ratio([l.get("qty") for l in legs])):
         finder["qty"] = qty
     return out, None
+
+
+def _norm_symbol(s):
+    """``$SPX`` and ``spx`` name the same underlying on the Calculator."""
+    return str(s or "").strip().upper().lstrip("$")
+
+
+def rate(symbol, structure, legs, cc, market_state=None):
+    """``{"row", "error"}`` - one graded, stamped Strategy Finder row, or a
+    sentence saying why there is none.
+
+    ``cc`` is the ``cache:options:calc_chain`` payload the Calculator already
+    loaded, so the rating fetches no chain. The row is scored WITHOUT the Finder's
+    quality cut or the volatility gate's drop - a weak or cheap-premium trade still
+    comes back graded, with ``vol_gate_blocks`` saying what the gate would have done.
+    """
+    if not isinstance(cc, dict) or not cc.get("chain"):
+        return {"row": None, "error": "Load the chain first - there is nothing to rate against."}
+    cc_symbol = cc.get("symbol")
+    if _norm_symbol(cc_symbol) != _norm_symbol(symbol):
+        return {"row": None, "error": (f"The loaded chain is for {cc_symbol}, not {symbol} "
+                                        "- reload the chain and rate again.")}
+    spot = _price(cc.get("price"))
+    if spot is None:
+        return {"row": None, "error": "The chain carries no underlying price - reload it."}
+    finder, reason = finder_legs(legs, cc["chain"], spot)
+    if finder is None:
+        return {"row": None, "error": reason}
+    try:
+        return {"row": _score(symbol, structure, finder, legs, cc, spot, market_state),
+                "error": None}
+    except Exception as exc:  # noqa: BLE001 - a rating that raises still answers.
+        _degrade.degraded("options.calc_rate", detail=symbol)
+        return {"row": None,
+                "error": f"The rating could not be computed ({type(exc).__name__})."}
+
+
+def _score(symbol, structure, finder, page_legs, cc, spot, market_state):
+    client = compute._proxy.schwab_py_client
+    api = cc.get("api") or symbol
+    hist = se.fetch_price_history(client, api)
+    tech = se.calc_technicals(hist) if hist is not None else {}
+    iv = run_iv_analysis(client, api, price=spot, hist=hist, chain=cc["chain"]) or {}
+    dem, atm_iv = compute.scan_vol_inputs(iv, spot)
+    view = ssc.infer_market_view(tech or {}, iv)
+
+    net_delta = ssn.payoff_metrics(finder, spot, symbol).get("net_delta")
+    stype, family, label, bias, known = structure_meta(structure, net_delta)
+    row = ssn._assemble(stype, family, label, bias, finder, symbol, spot, atm_iv)
+    em_1sd = (dem or 0.0) * math.sqrt(max(row.get("dte") or 0, 1))
+    ssc.score_all([row], view, atm_iv, em_1sd, market_state=market_state, daily_move=dem)
+
+    iv_rank = iv.get("iv_rank")
+    row["vol_gate_blocks"] = bool(_vol_gate.signal_blocks(
+        row, floor=_scanner_config.min_iv_rank().get(TRADE_TYPE),
+        ceiling=_scanner_config.max_iv_rank().get(TRADE_TYPE), iv_rank=iv_rank))
+    row["iv_rank"] = iv_rank
+    row["daily_em"] = dem
+    row["structure_known"] = known
+    row["id"] = f"calc_rate_{symbol}"
+    try:
+        earnings = compute.scan_earnings(symbol)
+    except Exception:  # noqa: BLE001 - costs the earnings line, not the rating.
+        _degrade.degraded("options.calc_rate_earnings", detail=symbol)
+        earnings = ("not_listed", None)
+    compute.stamp_candidate(row, trade_type=TRADE_TYPE, earnings=earnings,
+                            iv_rank_known=iv_rank is not None)
+    return row
