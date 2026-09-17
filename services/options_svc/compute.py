@@ -576,6 +576,26 @@ def _attach_payoff_curves(ssn, signals, spot, atm_iv):
         s["payoff_curve"] = ssn.payoff_curve(legs, spot, atm_iv, s.get("dte"))
 
 
+def scan_vol_inputs(iv, spot):
+    """``(daily_move_dollars or None, atm_iv as a DECIMAL fraction)`` from an IV
+    analysis - the two volatility inputs every scored candidate is judged with.
+
+    Shared by :func:`swing_scan` and the Calculator's rating
+    (``rate_trade.rate``), so a hand-built trade and a scanned one read volatility
+    the same way. ATM IV comes from the engine's authoritative dollar daily EM,
+    which avoids the percent/decimal trap (``dem = spot·iv_dec·√(1/365)``); failing
+    that, ``current_iv`` (a PERCENT above 1.5), else 0.20."""
+    iv = iv or {}
+    dem = ((iv.get("expected_moves") or {}).get("daily") or {}).get("move_dollars")
+    atm_iv = None
+    if dem and spot and spot > 0:
+        atm_iv = (dem * math.sqrt(365.0)) / spot
+    if not atm_iv:
+        civ = iv.get("current_iv")
+        atm_iv = (civ / 100.0) if (civ and civ > 1.5) else (civ or 0.20)
+    return dem, atm_iv
+
+
 def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                call_d_min, call_d_max, min_cr_fraction, families=None,
                market_state=None, trade_type="SWING", structures=None,
@@ -771,16 +791,7 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         # The IV reference _plan_fetch added is for the analysis above only; cut
         # to the chosen expirations so it can never become a candidate.
         chain = chain_slice(chain, plan.dates)
-    dem = ((iv.get("expected_moves") or {}).get("daily") or {}).get("move_dollars")
-
-    # ATM IV (DECIMAL fraction) from the engine's authoritative dollar daily EM —
-    # avoids the percent/decimal trap (``dem = spot·iv_dec·√(1/365)``).
-    atm_iv = None
-    if dem and spot and spot > 0:
-        atm_iv = (dem * math.sqrt(365.0)) / spot
-    if not atm_iv:
-        civ = (iv or {}).get("current_iv")
-        atm_iv = (civ / 100.0) if (civ and civ > 1.5) else (civ or 0.20)
+    dem, atm_iv = scan_vol_inputs(iv, spot)
 
     # FALLBACK only: the 1-sigma move at the window's DTE minimum. score_all uses
     # it just when ``daily_move`` (dem, below) is unusable or a candidate carries no
