@@ -1,6 +1,6 @@
 # Calculator — Rate my trade (design)
 
-**Date:** 2026-09-16 · **Status:** approved by the operator, not yet built ·
+**Date:** 2026-09-16 · **Status:** approved by the operator; built 2026-09-16 ·
 **Plan:** [2026-09-16-calc-rate-my-trade-plan.md](2026-09-16-calc-rate-my-trade-plan.md)
 
 ## The ask
@@ -59,9 +59,12 @@ Finder already runs.
     `strategy_table.detail_signal` and judged as a candidate to OPEN
     (`detail.checklist_candidate(row, allow_paper=True)`), so the paper-book line
     runs too.
-* ⚠ **The dialog is built from a container that is never cleared.** A `ui.dialog`
-  deletes itself when the slot it was built in is cleared (`swing.py`'s
-  `_open_paper` note); the leg table's container is cleared on every edit.
+* ⚠ **The dialog is built at the page's root, never from the leg table.** A
+  `ui.dialog` deletes itself when the slot it was built in is cleared (`swing.py`'s
+  `_open_paper` note), and the leg table's container is cleared on every edit.
+  (Found while building: NiceGUI 3 then mounts the dialog in the client LAYOUT, so
+  it is not a descendant of the page's column — the tests reach it through
+  `root.client.elements`.)
 
 ## 2. The verdict rule (PURE, `webgui/pages/options/rate_trade.py`)
 
@@ -107,8 +110,8 @@ New module **`services/options_svc/rate_trade.py`** (pure where it can be):
      structure, as the Finder does.
 3. **Structure → scorer type.** A table (`CALC_TO_SCORER`) maps each Calculator
    template code to the Finder's `(type, family, label, bias)` — `NAKED_PUT` →
-   `SHORT_PUT`, `VERT_CALL_DEBIT` → `BULL_CALL`, `IC` → `IRON_CONDOR`, the rest by
-   name. `CUSTOM` keeps type `CUSTOM` (the DEBIT bars), family `CUSTOM`, bias from
+   `SHORT_PUT`, `VERT_CALL_DEBIT` → `BULL_CALL`, the rest by name (`IC` stays `IC`,
+   the type the Finder's adapted iron condor carries). `CUSTOM` keeps type `CUSTOM` (the DEBIT bars), family `CUSTOM`, bias from
    the sign of net delta, and sets `structure_known = False`.
 4. **Row.** `strategy_scanner._assemble(...)` — the same payoff metrics, PoP and
    net Greeks the Finder's builders produce.
@@ -122,7 +125,7 @@ New module **`services/options_svc/rate_trade.py`** (pure where it can be):
    — **without** `_passes_swing_cut` and **without** the volatility gate's drop: a
    weak or cheap-premium trade must still come back graded. The vol gate's verdict
    is carried instead as `vol_gate_blocks` so the banner can say it.
-7. **Stamps.** `iv_rank`, `daily_em`, `earnings_status` via `scan_earnings`, then
+7. **Stamps.** `iv_rank`, `daily_em`, `structure_known`, `earnings_status` via `scan_earnings`, then
    `compute.stamp_candidate(row, trade_type="SWING", …)` — the Finder's own stamps.
 8. **Publish** `cache:options:calc_rating` = `{request_id, symbol, legs, row,
    error}`; `error` is a reader's sentence, `row` None when it is set.

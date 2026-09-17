@@ -4,7 +4,32 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-16 (**GEX slot skips traced to other services' chain
+**Last updated:** 2026-09-16 (**Calculator: Rate my trade.** Operator request: a
+button that grades a hand-built trade like the Trade detail panel, with a Buy or
+Pass.)
+
+- **What it does.** RATE MY TRADE under the legs opens a window with **BUY /
+  CAUTION / PASS**, the grade and composite, the reasons, and the shared Trade detail
+  panel. The operator chose three words over two, and the full panel over a compact
+  scorecard.
+- **Nothing is re-derived.** New `calc_rate` on options_svc
+  (`services/options_svc/rate_trade.py`): the Calculator's legs become a Strategy
+  Finder row off the cached `calc_chain` (no chain fetch), scored by `score_all` and
+  stamped by `stamp_candidate` — minus the quality cut and the volatility drop, so a
+  weak or cheap-premium trade still comes back graded. `compute.scan_vol_inputs` is
+  the ATM-IV/daily-move block `swing_scan` used, now shared. The market-state read is
+  one handler helper where three copies were.
+- **The rule** lives PURE in `webgui/pages/options/rate_trade.py`; a check that could
+  not run is a caution and no grade is PASS. ⚠ Not fitted to outcomes.
+- **Found while building.** NiceGUI 3 mounts a `ui.dialog` in the client layout, not
+  under the element it was built in, so the page tests read the dialog through
+  `root.client.elements`.
+- **Verified** in the local harness (fake bus, real handlers, synthetic chain): a
+  1-wide 2-DTE put spread rated PASS · Weak 39 (fails PoP); a 555/545 27-DTE spread
+  PASS · Marginal 57 with cautions, the panel rendering beneath at 1440 px.
+  Not verified: a live chain, or the 30 s timeout line in a browser (unit-tested).
+
+**Prior —** 2026-09-16 (**GEX slot skips traced to other services' chain
 bursts, and `/health` gains a real scheduler heartbeat.**)
 
 - **The symptom.** options_svc logged `scheduler branch 'gex' still running` 10–13

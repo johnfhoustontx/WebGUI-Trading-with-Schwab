@@ -1554,8 +1554,8 @@ option chain. This is where you find out what a trade actually risks before you 
 
 | | |
 |---|---|
-| Service | `options_svc` (:8211) — `calc_load`, `calc_load_expiry`, `calc_compute`, `calc_iv` commands |
-| Cache keys | `cache:options:calc_chain`, `:calc_result`, `:calc_iv` |
+| Service | `options_svc` (:8211) — `calc_load`, `calc_load_expiry`, `calc_compute`, `calc_iv`, `calc_rate` commands |
+| Cache keys | `cache:options:calc_chain`, `:calc_result`, `:calc_iv`, `:calc_rating` |
 | Chain | Fetched on demand: the full expiration list plus strikes for the nearest two expirations when you enter a symbol, then one expiration per click. Each contract cut to bid, ask, mark, IV, delta, gamma, theta, vega, open interest and volume |
 | State | The page **remembers everything** — symbol, strategy, legs, fields — across navigation |
 
@@ -1609,6 +1609,41 @@ moment after you stop.
    what makes **calendars price correctly** — each leg is valued at its own time to
    expiration. The strip under the legs keeps a running **leg count, net premium and
    max loss** as you edit.
+
+### Rate my trade
+
+**Rate my trade** asks one question the rest of the page does not: *would the app
+take this trade?* It answers with the two judgements the scanners already apply to
+the trades they find, pointed at a trade you built by hand.
+
+1. **The grade** — the Strategy Finder's scorer. Your legs become a Strategy Finder
+   candidate (priced at the prices on your legs, quoted and Greeked from the chain
+   you loaded), and are scored on **fit** with the market view and **quality**
+   (reward to risk, breakevens against the expected move, probability of profit,
+   liquidity) into a 0–100 composite. Hard gates set the word: **Strong**, **Good**,
+   **Marginal**, or **Weak** when a gate fails. Unlike a scan, a weak trade is not
+   dropped — it comes back graded.
+2. **The checklist** — the Go/No-Go lines from the Trade detail panel: paper book,
+   earnings, volatility rank, cost to trade, expected move, walls, dealer gamma,
+   direction.
+
+| grade \ checklist | Clear | cautions, or checks that could not run | Blocked |
+|---|---|---|---|
+| **Strong / Good** | **BUY** | **CAUTION** | **PASS** |
+| **Marginal** | **CAUTION** | **PASS** | **PASS** |
+| **Weak** | **PASS** | **PASS** | **PASS** |
+
+**Why it matters.** Most hand-built trades are built around a view, and the view is
+the part that feels certain. The grade asks whether the trade is a *good way* to
+express it — a spread whose breakeven sits inside a normal day's move, or whose
+bid-ask costs a third of the credit, can be right on direction and still lose. The
+checklist asks whether *now* is the time: an earnings report inside the trade, cheap
+volatility for a premium sale, or a book already at its cap.
+
+**Limits.** The word is a rule over the grade and the checklist, **not fitted to past
+outcomes** — no calibration exists for hand-built trades. A structure that matches no
+template is judged against the debit bars, and the window says so. The checklist's
+expected-move line calls the loaded chain's price the "scan price".
 
 ### Stock legs — covered call, protective put, collar
 

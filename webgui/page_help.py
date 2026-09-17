@@ -489,8 +489,8 @@ each morning. Three kinds of trade sit on one ranked board:
 **Calculator — the simple version**
 
 Shows what an options trade makes or loses **before** you place it — any
-**multi-leg** structure. There are no buttons to press: type a ticker, build the
-legs, and the numbers follow every change.
+**multi-leg** structure. Type a ticker, build the legs, and the numbers follow
+every change; the one button, **Rate my trade**, asks for a verdict.
 
 - **Type a ticker and press Enter** (or tab out). The chain loads, the strategy's
   legs land on real strikes, every leg is **priced from the chain** (its mark),
@@ -551,6 +551,16 @@ legs, and the numbers follow every change.
 - Loading a **different** symbol clears the cards and matrix; refreshing the same
   one keeps them. Widening strikes raises the credit you collect but also the max
   loss.
+- **Rate my trade** (under the legs, once every leg has a strike) grades the
+  trade the way the **Strategy Finder** grades what it finds, and opens a window
+  with one word: **BUY** (grade Strong or Good, and the Go/No-Go checklist is
+  clear), **CAUTION** (a good grade with cautions, or Marginal with a clear
+  checklist) or **PASS** (anything Weak, anything blocked, or Marginal with
+  cautions). The reasons are listed under the word, and the full **Trade detail**
+  panel sits below. A check that could not run counts as a caution, so missing
+  data never earns a BUY. For a credit trade **BUY** means *take the trade*. The
+  trade is rated at **the prices on your legs**, not the chain's. ⚠ The word
+  combines the grade and the checklist; it is not tested against past results.
 - **The Simulator shows this same position.** Build it here, open the Simulator,
   and it is already there; change it there and it is changed here too. Your IV,
   rate and contracts stay on this page.

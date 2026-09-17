@@ -199,6 +199,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#what-it-is_11">What it is</a></li>
 <li><a href="#where-the-data-comes-from_10">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_10">Reading the screen</a></li>
+<li><a href="#rate-my-trade">Rate my trade</a></li>
 <li><a href="#stock-legs-covered-call-protective-put-collar">Stock legs — covered call, protective put, collar</a></li>
 <li><a href="#why-it-matters_10">Why it matters</a></li>
 <li><a href="#when-to-use-it_10">When to use it</a></li>
@@ -2444,11 +2445,11 @@ option chain. This is where you find out what a trade actually risks before you 
 <tbody>
 <tr>
 <td>Service</td>
-<td><code>options_svc</code> (:8211) — <code>calc_load</code>, <code>calc_load_expiry</code>, <code>calc_compute</code>, <code>calc_iv</code> commands</td>
+<td><code>options_svc</code> (:8211) — <code>calc_load</code>, <code>calc_load_expiry</code>, <code>calc_compute</code>, <code>calc_iv</code>, <code>calc_rate</code> commands</td>
 </tr>
 <tr>
 <td>Cache keys</td>
-<td><code>cache:options:calc_chain</code>, <code>:calc_result</code>, <code>:calc_iv</code></td>
+<td><code>cache:options:calc_chain</code>, <code>:calc_result</code>, <code>:calc_iv</code>, <code>:calc_rating</code></td>
 </tr>
 <tr>
 <td>Chain</td>
@@ -2510,6 +2511,62 @@ moment after you stop.</p>
    expiration. The strip under the legs keeps a running <strong>leg count, net premium and
    max loss</strong> as you edit.</li>
 </ol>
+<h3 id="rate-my-trade">Rate my trade</h3>
+<p><strong>Rate my trade</strong> asks one question the rest of the page does not: <em>would the app
+take this trade?</em> It answers with the two judgements the scanners already apply to
+the trades they find, pointed at a trade you built by hand.</p>
+<ol>
+<li><strong>The grade</strong> — the Strategy Finder's scorer. Your legs become a Strategy Finder
+   candidate (priced at the prices on your legs, quoted and Greeked from the chain
+   you loaded), and are scored on <strong>fit</strong> with the market view and <strong>quality</strong>
+   (reward to risk, breakevens against the expected move, probability of profit,
+   liquidity) into a 0–100 composite. Hard gates set the word: <strong>Strong</strong>, <strong>Good</strong>,
+   <strong>Marginal</strong>, or <strong>Weak</strong> when a gate fails. Unlike a scan, a weak trade is not
+   dropped — it comes back graded.</li>
+<li><strong>The checklist</strong> — the Go/No-Go lines from the Trade detail panel: paper book,
+   earnings, volatility rank, cost to trade, expected move, walls, dealer gamma,
+   direction.</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>grade \ checklist</th>
+<th>Clear</th>
+<th>cautions, or checks that could not run</th>
+<th>Blocked</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Strong / Good</strong></td>
+<td><strong>BUY</strong></td>
+<td><strong>CAUTION</strong></td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td><strong>Marginal</strong></td>
+<td><strong>CAUTION</strong></td>
+<td><strong>PASS</strong></td>
+<td><strong>PASS</strong></td>
+</tr>
+<tr>
+<td><strong>Weak</strong></td>
+<td><strong>PASS</strong></td>
+<td><strong>PASS</strong></td>
+<td><strong>PASS</strong></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why it matters.</strong> Most hand-built trades are built around a view, and the view is
+the part that feels certain. The grade asks whether the trade is a <em>good way</em> to
+express it — a spread whose breakeven sits inside a normal day's move, or whose
+bid-ask costs a third of the credit, can be right on direction and still lose. The
+checklist asks whether <em>now</em> is the time: an earnings report inside the trade, cheap
+volatility for a premium sale, or a book already at its cap.</p>
+<p><strong>Limits.</strong> The word is a rule over the grade and the checklist, <strong>not fitted to past
+outcomes</strong> — no calibration exists for hand-built trades. A structure that matches no
+template is judged against the debit bars, and the window says so. The checklist's
+expected-move line calls the loaded chain's price the "scan price".</p>
 <h3 id="stock-legs-covered-call-protective-put-collar">Stock legs — covered call, protective put, collar</h3>
 <p>⚠ <strong>A leg can be SHARES</strong>, not an option: set its Type to <strong>stock</strong>. That is what
 makes three whole-position structures analysable here, and they are the three the

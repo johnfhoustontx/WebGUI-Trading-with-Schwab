@@ -176,7 +176,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Calculator</strong></td>
 <td><code>options_svc</code></td>
-<td><code>cache:options:calc_chain</code>, <code>:calc_result</code>, <code>:calc_iv</code></td>
+<td><code>cache:options:calc_chain</code>, <code>:calc_result</code>, <code>:calc_iv</code>, <code>:calc_rating</code></td>
 </tr>
 <tr>
 <td><strong>Simulator</strong></td>
@@ -658,6 +658,11 @@ skip-unchanged).</p>
 <td><code>calc_compute</code></td>
 <td><code>{strategy, spot, iv, rate, ivadj, qty, expiry, legs[], range_*}</code> (each leg carries its own <code>expiry</code>/<code>qty</code>; <code>strategy="CUSTOM"</code> or any non-PCS/CCS/IC/single code → generic numeric summary)</td>
 <td><code>cache:options:calc_result</code></td>
+</tr>
+<tr>
+<td><code>calc_rate</code></td>
+<td><code>{request_id, symbol, structure, legs[]}</code> — <code>legs</code> in the Calculator's shape (<code>option_type</code>, <code>side</code>, <code>strike</code>, <code>expiry</code>, <code>qty</code>, <code>premium</code>); <code>structure</code> a Calculator template code or <code>"CUSTOM"</code>. Grades against <code>cache:options:calc_chain</code> (no chain fetch) with the Strategy Finder's <code>score_all</code> and <code>stamp_candidate</code>, without the quality cut or the volatility drop. Replay-guarded</td>
+<td><code>cache:options:calc_rating</code> — <code>{request_id, symbol, legs, row, error}</code>: <code>row</code> is a Strategy Finder candidate plus <code>grade</code>, <code>composite_score</code>, the checklist stamps, <code>vol_gate_blocks</code> and <code>structure_known</code>; <code>error</code> is a sentence when <code>row</code> is None (no chain, another symbol's chain, a contract the chain lacks, a failure). Always written, so a request is never left unanswered</td>
 </tr>
 <tr>
 <td><code>expected_move</code></td>
@@ -1203,6 +1208,7 @@ cache:options:gamma_regime_state
 cache:options:market_snapshot  events:options:market_snapshot
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
+cache:options:calc_rating      events:options:calc_rating   (Rate my trade)
 cache:options:driver_paper_account    events:options:driver_paper_account
 cache:options:driver_paper_perf       events:options:driver_paper_perf
 cache:options:driver_paper_analytics  events:options:driver_paper_analytics

@@ -27,7 +27,7 @@ keys that feed it. Menu order matches the rail.
 | **Sector & Industry** | `sentiment_svc` | `cache:sentiment:sectors` |
 | **Sector Rotation** · **RRG** | `sentiment_svc` | `cache:sentiment:rotation` |
 | **Momentum** | `sentiment_svc` | `cache:sentiment:momentum` |
-| **Calculator** | `options_svc` | `cache:options:calc_chain`, `:calc_result`, `:calc_iv` |
+| **Calculator** | `options_svc` | `cache:options:calc_chain`, `:calc_result`, `:calc_iv`, `:calc_rating` |
 | **Simulator** | `options_svc` | `cache:options:sim_meta`, `:sim_chain`, `:sim_result`, `:sim_replay` |
 | **Market Scanner** | `options_svc` | `cache:options:scan_day` (rendered), `:scan` (live counts) |
 | **Strategy Finder** | `options_svc` | `cache:options:swing` |
@@ -255,6 +255,7 @@ skip-unchanged).
 | `calc_load` | `{symbol, lazy?, expiries?}` — `lazy` (the Calculator) lists every expiration via Schwab `/expirationchain` and fetches strikes for the nearest two plus `expiries`; without it (Rescue) the fixed today..+60-day fetch | `cache:options:calc_chain` (a lazy load adds `expirations`) |
 | `calc_load_expiry` | `{symbol, expiry}` | merges one expiry's strikes into `cache:options:calc_chain`, marked `added` (and `failed` if Schwab returned nothing). A click for another symbol or an unlisted expiry writes nothing |
 | `calc_compute` | `{strategy, spot, iv, rate, ivadj, qty, expiry, legs[], range_*}` (each leg carries its own `expiry`/`qty`; `strategy="CUSTOM"` or any non-PCS/CCS/IC/single code → generic numeric summary) | `cache:options:calc_result` |
+| `calc_rate` | `{request_id, symbol, structure, legs[]}` — `legs` in the Calculator's shape (`option_type`, `side`, `strike`, `expiry`, `qty`, `premium`); `structure` a Calculator template code or `"CUSTOM"`. Grades against `cache:options:calc_chain` (no chain fetch) with the Strategy Finder's `score_all` and `stamp_candidate`, without the quality cut or the volatility drop. Replay-guarded | `cache:options:calc_rating` — `{request_id, symbol, legs, row, error}`: `row` is a Strategy Finder candidate plus `grade`, `composite_score`, the checklist stamps, `vol_gate_blocks` and `structure_known`; `error` is a sentence when `row` is None (no chain, another symbol's chain, a contract the chain lacks, a failure). Always written, so a request is never left unanswered |
 | `expected_move` | `{symbol, expiry, legs[], lookback}` | `cache:options:expected_move` |
 | `rescue` | `{position_id}` | `cache:options:rescue:<position_id>` |
 | `rescue_apply` | `{position_id, candidate}` | `cache:options:rescue:<position_id>` |
@@ -558,6 +559,7 @@ cache:options:gamma_regime_state
 cache:options:market_snapshot  events:options:market_snapshot
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
+cache:options:calc_rating      events:options:calc_rating   (Rate my trade)
 cache:options:driver_paper_account    events:options:driver_paper_account
 cache:options:driver_paper_perf       events:options:driver_paper_perf
 cache:options:driver_paper_analytics  events:options:driver_paper_analytics

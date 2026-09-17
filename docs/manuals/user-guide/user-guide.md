@@ -841,6 +841,25 @@ matrix) below it. It wears its own near-black palette rather than the app-wide n
   calendars and diagonals price each leg on its own clock) and its own quantity (so
   a 1-2-1 butterfly body trades at 2×). **Add leg**, **Reset to template**, and a
   remove ✕ that locks at the last leg.
+- **Rate my trade** (beside **Expected Move**, available once a chain is loaded and
+  every leg has a strike) grades the legs with the **Strategy Finder's own scorer
+  and Go/No-Go checklist** and opens a window:
+  - **One word.** **BUY** when the grade is Strong or Good and the checklist is
+    clear; **CAUTION** when a Strong or Good trade has cautions (or checks that
+    could not run), or a Marginal trade has a clear checklist; **PASS** for
+    anything Weak, anything **blocked**, or a Marginal trade with cautions.
+  - **The grade and score** (Strong / Good / Marginal / Weak, 0–100) and the
+    **reasons**: failed quality gates, the checklist's blocks and cautions, a note
+    when premium is cheaper than the scanners allow selling, and a note when the
+    legs match no template ("a custom structure — judged against the debit bars").
+  - **The Trade detail panel** the scanner shows — contract, credit or debit, max
+    loss, breakeven, probability, the checklist, Greeks, implied volatility and the
+    score factors.
+  The trade is rated at **the prices on your legs** and one structure's worth of
+  contracts (a 10-lot rates the same as a 1-lot). It costs a few Schwab calls per
+  click (a year of price history, the IV analysis, the earnings lookup) and nothing
+  otherwise. If no answer comes within 30 seconds the window says so. ⚠ The word is
+  a rule over the grade and the checklist, **not fitted to past outcomes**.
 - Under the legs, a strip keeps a running **leg count**, **net premium** and **max
   loss**. A **dash** there means *not known yet* rather than zero — max loss is blank
   when the loss has no bound (a naked call), cannot be settled on one date, or the
