@@ -189,3 +189,51 @@ def test_the_board_help_calls_the_columns_what_the_screen_calls_them():
         assert want in text, want
     for gone in ("**GEX** regime", "a **hotness** score", "spot,"):
         assert gone not in text, gone
+
+
+# ── the symbol opens its dossier (private app only) ──────────────────────────
+def test_dossier_route_names_the_dossier_for_a_clean_symbol():
+    assert matrix.dossier_route("MU") == "/symbol?symbol=MU"
+    assert matrix.dossier_route(" mu ") == "/symbol?symbol=MU"
+
+
+def test_dossier_route_quotes_an_index_symbol():
+    """``$`` is legal in a ticker and a URL meta-character."""
+    assert matrix.dossier_route("$SPX") == "/symbol?symbol=%24SPX"
+
+
+def test_dossier_route_refuses_what_the_allow_list_refuses():
+    """A row value is never interpolated into a URL unchecked."""
+    for bad in ("", None, "MU&x=1", "MU?symbol=X", "../desk", "TOOLONGSYM",
+                "MU SPY", "<b>"):
+        assert matrix.dossier_route(bad) is None, bad
+
+
+def test_matrix_rows_stamp_the_cleaned_symbol_only_when_it_passes():
+    rows = matrix.matrix_rows({"rows": [{"symbol": "MU"}, {"symbol": "MU&x"},
+                                        {}]})
+    assert [r["_dossier"] for r in rows] == ["MU", None, None]
+
+
+def test_the_plain_symbol_slot_draws_no_affordance():
+    """What the public screen mounts: exactly today's cell."""
+    slot = matrix.symbol_slot(linked=False)
+    assert slot == matrix._SYMBOL_SLOT
+    assert "$emit" not in slot and "cursor-pointer" not in slot
+
+
+def test_the_linked_symbol_slot_emits_only_for_a_cleaned_symbol():
+    slot = matrix.symbol_slot(linked=True)
+    assert f"$parent.$emit('{matrix.DOSSIER_EVENT}', props.row._dossier)" in slot
+    assert 'v-if="props.row._dossier"' in slot     # an unclean row stays plain
+    assert "v-else" in slot
+    assert matrix.DOSSIER_LINK_CLASS in slot
+    assert "props.row._eth" in slot                 # the ETH badge survives
+    assert ":style=" not in slot and "style=" not in slot
+
+
+def test_the_link_class_is_tailwind_with_no_named_palette_colour():
+    cls = matrix.DOSSIER_LINK_CLASS
+    assert "cursor-pointer" in cls
+    for named in ("slate", "blue", "sky", "emerald", "rose", "gray", "indigo"):
+        assert named not in cls, named

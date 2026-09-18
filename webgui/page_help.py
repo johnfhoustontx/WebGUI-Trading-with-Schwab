@@ -749,7 +749,10 @@ without opening each page.
   one overall verdict (buy / neutral / sell), and **Score** is how much is going
   on altogether — the board's default sort.
 - **Click any column header** to sort — e.g. highest Score or biggest movers
-  first. Sorting is the only control here; rows do not open anything.
+  first.
+- **Click a symbol** (the dotted underline) to open its **Symbol Dossier** —
+  its dealer structure, volatility, today's signals and flow alerts, and your
+  positions in that one name.
 - Green leans bullish, red leans bearish. Auto-refreshes as the data updates.
 """,
     "/options/flow": """

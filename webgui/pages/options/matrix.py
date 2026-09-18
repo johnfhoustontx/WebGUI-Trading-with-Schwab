@@ -8,18 +8,41 @@ no engine/service imports.
 from __future__ import annotations
 
 import datetime as _dt
+from urllib.parse import quote as _quote
 from zoneinfo import ZoneInfo
 
 import bus_client
+import shell as _shell
 from pages import busy as _busy
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from nicegui import run, ui
 
-from pages.ui_guard import guard_async
+from pages.ui_guard import guard, guard_async
+from shared.symbols import clean_symbol
 
 from .theme import CARD, EYEBROW, LABEL, PAGE, QUASAR_INTERNAL_CSS
 
 VIEW = "options:matrix"
+
+# ── the symbol opens its Symbol Dossier ─────────────────────────────────────
+# ``/symbol`` is served by the PRIVATE app only (it enqueues a fetch, which the
+# public process refuses), while this board is also published as
+# ``/opportunity``. So the affordance is drawn only where ``shell.can_navigate``
+# says the route exists, and the click goes through ``shell.navigate_to``.
+DOSSIER_ROUTE = "/symbol"        # pages/symbol.py ROUTE (not imported: that
+                                 # module would join the public import closure)
+DOSSIER_EVENT = "open_dossier"
+# No colour of its own — the cell keeps the table's text colour; the dotted
+# underline and the pointer are the affordance.
+DOSSIER_LINK_CLASS = ("cursor-pointer underline decoration-dotted "
+                      "underline-offset-4 hover:decoration-solid")
+
+
+def dossier_route(raw):
+    """``/symbol?symbol=<SYM>`` for a symbol ``shared.symbols.clean_symbol``
+    accepts, else None. A row value never reaches a URL unchecked."""
+    sym = clean_symbol(raw)
+    return None if sym is None else f"{DOSSIER_ROUTE}?symbol={_quote(sym)}"
 
 # The payload ``ts`` is emitted in UTC by the service; the app shows trading times
 # in Central (America/Chicago), matching the rest of the UI.
@@ -121,6 +144,8 @@ def matrix_rows(payload):
         t_state = r.get("trend_state", "flat")
         rows.append({
             "symbol": r.get("symbol", ""),
+            # The allow-listed symbol the dossier link carries; None = no link.
+            "_dossier": clean_symbol(r.get("symbol")),
             # Absent on a payload cached before the field existed (Redis keeps
             # the view across a service restart) → no badge.
             "_eth": bool(r.get("eth_eligible")),
@@ -196,6 +221,30 @@ _SYMBOL_SLOT = r'''
     </q-badge>
   </q-td>
 '''
+# The private app's symbol cell: the same cell, with the symbol as a link to its
+# dossier. A row whose symbol the allow-list refused (``_dossier`` None) stays
+# plain text.
+_SYMBOL_LINK_SLOT = (
+    '\n  <q-td :props="props">\n'
+    f'    <span v-if="props.row._dossier" class="{DOSSIER_LINK_CLASS}"\n'
+    f'          @click.stop="() => $parent.$emit(\'{DOSSIER_EVENT}\', '
+    'props.row._dossier)">{{ props.value }}'
+    '<q-tooltip>Open the Symbol Dossier</q-tooltip></span>\n'
+    '    <span v-else>{{ props.value }}</span>'
+) + r'''
+    <q-badge v-if="props.row._eth" :class="props.row._eth_class" label="ETH">
+      <q-tooltip>Trades in Cboe extended hours (GTH 06:30-08:25 / Curb 15:00-15:15 CT)</q-tooltip>
+    </q-badge>
+  </q-td>
+'''
+
+
+def symbol_slot(linked):
+    """The symbol cell's template: a dossier link where one can work, else the
+    plain cell (the public screen, where ``/symbol`` does not exist)."""
+    return _SYMBOL_LINK_SLOT if linked else _SYMBOL_SLOT
+
+
 _SIGNAL_SLOT = r'''
   <q-td :props="props">
     <q-badge :class="props.row._signal_class + ' px-2 py-1'" :label="props.value"/>
@@ -228,6 +277,16 @@ _REGIME_SLOT = r'''
 '''
 
 
+@guard
+def _open_dossier(e):
+    """The symbol cell's click. Re-checks the symbol — the event carries
+    whatever the browser sent — and navigates through the seam, which is a
+    no-op on an origin that does not serve ``/symbol``."""
+    route = dossier_route(e.args if isinstance(e.args, str) else None)
+    if route is not None:
+        _shell.navigate_to(route)
+
+
 def render():
     """Build the Options Matrix page body: a sortable table of every watchlist
     symbol, version-polling ``cache:options:matrix`` and repainting on change.
@@ -241,10 +300,14 @@ def render():
     with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
         with ui.column().classes(f"{CARD} w-full gap-2"):
             ui.label("Opportunity Board").classes(f"text-h6 {LABEL}")
-            # This page has NO row click-through, so sorting is the only thing
-            # a reader does here - and nothing on screen said so.
+            # Two things a reader does here: re-sort, and (private app only)
+            # click a symbol to open its dossier. Say only what works on THIS
+            # origin - the public screen has no dossier to open.
+            linked = _shell.can_navigate(DOSSIER_ROUTE)
             ui.label("Every watchlist symbol on one row, ranked by how much is "
-                     "going on. Click any column to re-sort.") \
+                     "going on. Click any column to re-sort"
+                     + ("; click a symbol to open its dossier." if linked
+                        else ".")) \
                 .classes(EYEBROW)
             # Summary band: signal counts across the whole grid.
             with ui.row().classes("items-center gap-2 flex-wrap pt-1"):
@@ -258,7 +321,9 @@ def render():
                 table = ui.table(columns=matrix_columns(), rows=[], row_key="symbol",
                                  pagination={"rowsPerPage": 0}) \
                     .classes("w-full matrix-table").props("dense")
-            table.add_slot("body-cell-symbol", _SYMBOL_SLOT)
+            table.add_slot("body-cell-symbol", symbol_slot(linked))
+            if linked:
+                table.on(DOSSIER_EVENT, _open_dossier)
             table.add_slot("body-cell-signal_label", _SIGNAL_SLOT)
             table.add_slot("body-cell-day_pct", _DAYPCT_SLOT)
             table.add_slot("body-cell-trend", _TREND_SLOT)

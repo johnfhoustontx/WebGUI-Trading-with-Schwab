@@ -593,6 +593,10 @@ today) **· Signal** (buy/neutral/sell) **· Hot**.
 **Hot** is the default sort. Click any column header to re-sort. Three tiles at the
 top count how many symbols are currently Buy, Neutral and Sell.
 
+**Click a symbol** (it carries a dotted underline) to open its [Symbol](#symbol)
+dossier at `/symbol?symbol=<ticker>`. The public copy of this board on
+live.neuralstrike.co has no dossier, so there the symbol is plain text.
+
 > **Hotness measures activity, not quality.** Use it to decide *where to look*,
 > then open Dealer Positioning or Strategy Finder for that symbol. It is not a
 > trade signal.

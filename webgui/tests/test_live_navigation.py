@@ -390,3 +390,103 @@ def test_the_flow_tape_hands_off_to_the_published_gamma_screen(monkeypatch,
     monkeypatch.setattr(handoff.ui, "notify", lambda *a, **k: None)
     handoff.send_to_gamma("SPY")
     assert went == ["/gamma"]
+
+
+# --- the Opportunity Board opens a Symbol Dossier (private app only) --------
+# ``/symbol`` is deliberately NOT published: the dossier enqueues a fetch, and
+# the public process refuses every enqueue. The board IS published (as
+# ``/opportunity``), so the same module renders in both processes and the link
+# has to be absent — not merely inert — on the public one.
+
+def test_the_dossier_is_not_a_published_route():
+    """The premise of the two tests below. If ``/symbol`` is ever published this
+    fails first, and the board's link can then be drawn on both origins."""
+    assert "/symbol" not in live_screens.PUBLIC_ROUTES
+
+
+def _matrix_table(monkeypatch, rows):
+    """Render the board over ``rows`` and return its table element."""
+    import bus_client
+    from nicegui import ui
+    from pages.options import matrix
+
+    payload = {"rows": rows}
+    monkeypatch.setattr(bus_client, "read_full", lambda v: (payload, 1))
+    monkeypatch.setattr(bus_client, "read", lambda v: payload)
+    monkeypatch.setattr(bus_client, "read_version", lambda v: 1)
+    before = set(ui.context.client.elements)
+    matrix.render()
+    new = [e for key, e in ui.context.client.elements.items()
+           if key not in before]
+    tables = [e for e in new if isinstance(e, ui.table)]
+    assert len(tables) == 1
+    table = tables[0]
+    # Whether THIS render's own copy promises a dossier (the client is shared
+    # across tests, so only elements this render added are read).
+    table.says_dossier = any("dossier" in (getattr(e, "text", "") or "")
+                             for e in new if isinstance(e, ui.label))
+    return table
+
+
+def _dossier_listeners(table):
+    from pages.options import matrix
+    return [lst for lst in table._event_listeners.values()
+            if lst.type == matrix.DOSSIER_EVENT]
+
+
+class _Evt:
+    def __init__(self, args):
+        self.args = args
+
+
+def test_the_private_board_opens_a_symbols_dossier(monkeypatch):
+    """⚠ THE ONE THAT PROTECTS THE APP: the symbol cell is a link, and the
+    link lands on ``/symbol?symbol=MU`` through the seam."""
+    from nicegui import ui
+    from pages.options import matrix
+
+    table = _matrix_table(monkeypatch, [{"symbol": "MU"}])
+    assert table.slots["body-cell-symbol"].template \
+        == matrix.symbol_slot(linked=True)
+    assert table.rows[0]["_dossier"] == "MU"
+    assert table.says_dossier
+
+    went = []
+    monkeypatch.setattr(ui.navigate, "to", lambda *a, **k: went.append(a[0]))
+    listeners = _dossier_listeners(table)
+    assert len(listeners) == 1
+    listeners[0].handler(_Evt("MU"))
+    assert went == ["/symbol?symbol=MU"]
+
+
+def test_the_private_board_refuses_a_symbol_the_allow_list_refuses(monkeypatch):
+    """The handler re-checks: the event carries whatever the browser sends."""
+    from nicegui import ui
+
+    table = _matrix_table(monkeypatch, [{"symbol": "MU"}])
+    went = []
+    monkeypatch.setattr(ui.navigate, "to", lambda *a, **k: went.append(a[0]))
+    (listener,) = _dossier_listeners(table)
+    for bad in ("MU&x=1", "../settings", "", None, {"symbol": "MU"}):
+        listener.handler(_Evt(bad))
+    assert went == []
+
+
+def test_the_published_board_draws_no_dossier_link(monkeypatch, published):
+    """No affordance, no handler — the plain cell, exactly as before."""
+    from nicegui import ui
+    from pages.options import matrix
+
+    table = _matrix_table(monkeypatch, [{"symbol": "MU"}])
+    assert table.slots["body-cell-symbol"].template == matrix._SYMBOL_SLOT
+    assert _dossier_listeners(table) == []
+
+    # ...and the copy does not promise one.
+    assert not table.says_dossier
+
+    # And the backstop: the route resolves nowhere on this origin.
+    went = []
+    monkeypatch.setattr(ui.navigate, "to", lambda *a, **k: went.append(a[0]))
+    shell = __import__("shell")
+    shell.navigate_to(matrix.dossier_route("MU"))
+    assert went == []

@@ -773,6 +773,10 @@ this board and open the two that stand out.
 
 The three tiles at the top count how many symbols are currently Buy, Neutral and Sell.
 
+**Click a symbol** — it carries a dotted underline — to open its [Symbol](#symbol)
+dossier. The public copy of this board (`/opportunity` on live.neuralstrike.co) does not
+link it: the dossier is not published there, so the symbol is plain text.
+
 ### Why it matters
 
 Options activity clusters. On most days, three or four names carry the unusual flow and
@@ -4190,7 +4194,7 @@ workflow.
 | Calculator ⇄ Simulator | *(nothing to press)* | the other page | One shared position: symbol, strategy, legs, selected expiration — whichever page was edited last |
 | Flow Alerts | **click a row** | Dealer Positioning | That row's symbol |
 | Symbol | **→ Dealer Positioning** | Dealer Positioning | The dossier's symbol |
-| Opportunity Board | read the row, then open | Dealer Positioning · Strategy Finder | (manual) |
+| Opportunity Board | **click a symbol** | Symbol | That row's symbol |
 
 Calculator and Simulator both **persist their full state** across navigation — symbol,
 strategy, legs, slider positions and active tab — so moving away and back does not lose
