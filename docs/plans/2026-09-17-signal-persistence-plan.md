@@ -290,9 +290,16 @@ def test_an_untrustworthy_baseline_omits_first_seen():
 def test_a_setup_appearing_after_a_cold_start_gets_a_real_stamp():
     cold = compute.merge_setups({}, {"MU|PCS|2026-10-17": 62.0}, "t1", seq=1,
                                 trustworthy_baseline=False)
+    # ⚠ Merge 2 passes True, and the first draft of this test passed False —
+    # which is UNREACHABLE. Merge 2 has a usable prev (the envelope merge 1 just
+    # wrote), so _trustworthy_baseline short-circuits on prev_usable. The flag
+    # and a non-empty prev map can never disagree at the call site, which is why
+    # merge_setups reads the flag alone rather than also inspecting prev.
     later = compute.merge_setups(cold, {"MU|PCS|2026-10-17": 62.0,
                                         "NVDA|CCS|2026-10-17": 70.0},
-                                 "t2", seq=2, trustworthy_baseline=False)
+                                 "t2", seq=2, trustworthy_baseline=True)
+    # Carried from an age_unknown map: MU was never seen from its true
+    # beginning, so it never acquires a stamp.
     assert "first_seen" not in later["MU|PCS|2026-10-17"]
     # This one genuinely arrived while we were watching, so its age is known.
     assert later["NVDA|CCS|2026-10-17"]["first_seen"] == "t2"
@@ -395,16 +402,24 @@ def merge_setups(prev_setups, live, now_iso, seq, trustworthy_baseline):
         entry["seen"] = int(entry.get("seen") or 0) + 1
         entry["last_seq"] = seq
         entry["last_live"] = now_iso
-        value = _as_finite(score)
+        value = _finite(score)
         if value is not None:
             entry["scores"] = (entry["scores"] + [value])[-_SETUP_SCORES_MAX:]
     return out
 ```
 
-⚠ `_as_finite` already exists in this module (it is the repo's standard NaN/bool
-rejector). Confirm with `grep -n "def _as_finite" services/options_svc/compute.py`
-before running; if it is absent, use `webgui/pages/fmt.py`'s `num` semantics —
-reject `bool`, reject non-finite — and add it locally.
+⚠ **The finite guard is `_finite` (compute.py:4301), NOT `_num_or_none` (:2932)
+or `_num` (:6596).** The plan first named a non-existent `_as_finite`. The two
+near neighbours are the wrong ones and look right: both coerce through
+`float(value)` inside a `try`, so `float(True)` is `1.0` and a **bool reads as a
+score**. That is the repo's documented bug class where a parsing guard is
+mistaken for a NaN guard — `_num` in `effort` / `rejection_defense` /
+`session_structure` caught `TypeError`/`ValueError` while letting NaN straight
+through. Leave a comment at the call site, or the next reader will "simplify" it
+to the nearer name.
+
+⚠ A forward reference is fine — `_finite` is defined far below `merge_setups`,
+and module globals resolve at call time.
 
 **Step 4: Run to verify they pass**
 
@@ -720,7 +735,7 @@ merged list just before the cap:
             if not key:
                 continue
             if entry.get("live"):
-                score = _as_finite(entry.get("composite_score"))
+                score = _finite(entry.get("composite_score"))   # NOT _num: bool
                 best = live_best.get(key)
                 if score is not None and (best is None or score > best):
                     live_best[key] = score
