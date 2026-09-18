@@ -798,15 +798,19 @@ def render(symbol=None):
                     "text-[14px] tabular-nums leading-none")
                 chip_lbl = ui.label("").classes(_CHIP)
                 ui.element("div").classes("grow")
-                finder_btn = ui.button(FIND_TRADES_LABEL, icon="search",
-                                       color=None).props(
-                    "no-caps dense flat").classes(
-                    f"text-[12px] tracking-[.1em] px-3 {CON_ACCENT}")
-                finder_btn.set_visibility(False)   # until a quote is known
-                refresh_btn = ui.button("Refresh", icon="refresh",
-                                        color=None).props(
-                    "no-caps dense flat").classes(
-                    f"text-[12px] tracking-[.1em] px-3 {CON_ACCENT}")
+                # ONE flex item, never two: the header row wraps, and on a
+                # phone two separate buttons can split across lines and strand
+                # Refresh at the left edge under the price.
+                with ui.row().classes("items-center gap-1 no-wrap"):
+                    finder_btn = ui.button(FIND_TRADES_LABEL, icon="search",
+                                           color=None).props(
+                        "no-caps dense flat").classes(
+                        f"text-[12px] tracking-[.1em] px-3 {CON_ACCENT}")
+                    finder_btn.set_visibility(False)  # until a quote is known
+                    refresh_btn = ui.button("Refresh", icon="refresh",
+                                            color=None).props(
+                        "no-caps dense flat").classes(
+                        f"text-[12px] tracking-[.1em] px-3 {CON_ACCENT}")
             msg_lbl = ui.label("").classes(_SUB)
 
         # ── bands ────────────────────────────────────────────────────────────

@@ -1472,3 +1472,16 @@ def test_find_trades_appears_once_a_look_up_returns_a_price(world):
 def test_a_rejected_symbol_offers_no_find_trades(world):
     (btn,) = _finder_buttons(_render_page("../../etc"))
     assert not btn.visible
+
+
+def test_find_trades_and_refresh_are_one_unit_in_the_header(world):
+    # The header row wraps. As two separate flex items the buttons can split
+    # across lines on a phone and strand Refresh at the left edge, so they
+    # share one non-wrapping parent.
+    elements = _render_page("MU")
+    (finder,) = _finder_buttons(elements)
+    (refresh,) = [e for e in elements
+                  if (getattr(e, "text", "") or "") == "Refresh"]
+    parent = finder.parent_slot.parent
+    assert refresh.parent_slot.parent is parent
+    assert "no-wrap" in parent.classes
