@@ -640,7 +640,7 @@ to the page that owns those facts:</p>
 <tr>
 <td><strong>Structure</strong></td>
 <td>A bar from the put wall to the call wall with spot and the gamma flip marked on it, which side of the flip price sits on and by how much, net gamma and the pins-or-runs word</td>
-<td>Dealer Positioning, already set to this symbol</td>
+<td>Dealer Positioning, already set to this symbol — shown only for a name the app already collects</td>
 </tr>
 <tr>
 <td><strong>Volatility</strong></td>
@@ -679,12 +679,24 @@ to the page that owns those facts:</p>
   spelling.</li>
 <li><strong>FETCH FAILED</strong> — Schwab could not be reached. The ticker may be fine; press
   <strong>Refresh</strong> in a minute.</li>
+<li><strong>QUEUED</strong> — the look-up has not answered after 30 seconds, usually because the
+  options service is busy with other work (a whole-chain Strategy Finder scan can
+  take 30–40 seconds). The request is still in line; the bands fill in when it
+  answers. Pressing Refresh here would only queue a second paid look-up behind the
+  first.</li>
 </ul>
 <p>⚠ <strong>An on-demand look-up costs 4–5 Schwab calls</strong> from the same allowance the
 live dealer charts depend on. So the page looks a name up <strong>only</strong> when you open
 a symbol it does not already cover, or when you press <strong>Refresh</strong> — never on its
 own timer. A second visit within 15 minutes reuses the previous look-up and costs
-nothing. For a <strong>scanned</strong> symbol Refresh just re-reads what the app already has.</p>
+nothing. Pressing <strong>Refresh</strong> within a minute of the last look-up fetches nothing
+either — the page says the reading is already current — unless that look-up failed,
+which is always retried. For a <strong>scanned</strong> symbol Refresh just re-reads
+what the app already has.</p>
+<p><strong>Walls after the close.</strong> For a name the app collects, the walls disappear once the
+dealer collector stops for the day, and the band says why. Walls from an on-demand
+look-up stay, marked <em>walls fetched 14:32</em>. If net gamma reads exactly zero — what an
+empty after-hours chain looks like — the walls are withheld either way.</p>
 <p><strong>Three kinds of empty are worded differently on purpose.</strong> <em>No data yet — the
 options feed hasn't published this session</em> means the service has not produced
 anything; <em>No signals for MU today</em> means everything is working and there is
@@ -1381,6 +1393,22 @@ that has stopped qualifying stays visible but is <strong>dimmed and frozen</stro
 with the time it dropped out, and its <strong>Paper</strong> button is removed — its price is
 stale, so a paper entry from it would be fictional. The status line's "N live
 signals" counts only those still qualifying.</p>
+</blockquote>
+<p><strong>How long has it been there, and is it getting better?</strong> Two columns beside
+<strong>Dropped at</strong> answer that, on all three tabs:</p>
+<ul>
+<li><strong>Seen since</strong> — when the setup first appeared today and how many scans it has
+  been live in, e.g. <em>09:15 · 14x</em>. A <em>setup</em> is the symbol, strategy and
+  expiration: when the exact strikes shift a notch as the price moves, the age
+  carries on rather than starting again. A dash means the app cannot vouch for the
+  start time — not that the signal is new.</li>
+<li><strong>Score trend</strong> — how the setup's best score has moved over the last hour:
+  <em>▲ +4.2</em> rising, <em>▼ −6.1</em> fading, <em>▬ +1.0</em> steady (within two points), or <em>new</em>
+  until it has four scans behind it.</li>
+</ul>
+<p>A setup that has held all morning with a steady or rising score is a different thing
+from one that appeared in a single scan. Neither column filters or sorts anything.</p>
+<blockquote>
 <p><strong>An empty Directional tab is normal.</strong> The engine only emits candidates scoring
 50 or better, so empty means nothing cleared the bar rather than something
 failed. Index names (<code>$SPX</code>, <code>SPY</code>, <code>QQQ</code>) are also frequently absent, because

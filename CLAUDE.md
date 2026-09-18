@@ -100,7 +100,11 @@ portfolio, trade, driver, market — and every page reads Redis. The shape:
 **The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
 153 non-test `webgui/**/*.py`, extended 2026-08-21, and again 2026-08-25, and 2026-09-15):
 `nicegui` · `shared.bus`
-(never `redis` directly) · `shared.market_calendar` · `shared.symbols` ·
+(never `redis` directly) · `shared.market_calendar` · `shared.symbols` (which
+also holds the ONE ticker allow-list, `SYMBOL_RE` / `clean_symbol`: a
+user-typed ticker becomes part of a Redis KEY NAME — `cache:options:dossier:<SYMBOL>`
+— so the `/symbol` page and `options_svc` must refuse exactly the same strings,
+and neither may grow a regex of its own) ·
 `shared.calibration` (pure arithmetic — `import math` and nothing else; Tier 1
 takes only `bucket_key` from it, so the DB's `scanner_type` '0DTE' and the
 page's `trade_type` '0-DTE' cannot key differently — exactly the cross-tier
@@ -195,8 +199,9 @@ open migration item. Full design:
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
 2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
 the drawer FOOT 2026-08-12**; **grouped into CAPTIONED SECTIONS 2026-08-16**):
-the left drawer holds **16 items** — a top-pinned **Desk** alone in a
-**caption-less leading `NAV_SECTIONS` block** (2026-08-18), 11 in three captioned
+the left drawer holds **17 items** — a top-pinned **Desk** and **Symbol** in a
+**caption-less leading `NAV_SECTIONS` block** (Desk 2026-08-18, Symbol 2026-09-17:
+the two entry points, *what is happening* and *tell me about X*), 11 in three captioned
 sections, plus a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**,
 **Settings**, **Stop All Services**, **Sign out**) — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
@@ -219,17 +224,17 @@ Sentiment group** (it was a flat item until 2026-07-27), and since
 
 **The rail's ORDER is data, not the sequence of render calls (2026-08-16).**
 `NAV_SECTIONS` is a list of `(caption, entries)` — a **caption-less leading block**
-(Desk alone) · **MARKETS** (Dealer
+(Desk · Symbol) · **MARKETS** (Dealer
 Positioning · Opportunity Board · Flow Alerts · Trend & Sentiment) · **STRATEGY**
 (Strategy Tools · Options · Strategy Finder · Trade Analyzer · Claude Trades) · **ACCOUNT**
 (Portfolio · More) — where an entry is either a GROUP (`_nav_group_link`) or a
 standalone rail page (`_nav_link`). **A caption of `None` means render NO header
 at all** — not an empty one — and the drawer loop skips `_nav_section_header` for
-it; that block is the rail's top-pinned mirror of `SYSTEM_RAIL`, and its page gets
-a bare one-crumb breadcrumb since no section sits above it. ⚠ `first=(_i == 0)`
+it; that block is the rail's top-pinned mirror of `SYSTEM_RAIL`, and its pages get
+a bare one-crumb breadcrumb since no section sits above them. ⚠ `first=(_i == 0)`
 in that loop is consequently **never True**, which is deliberate: the first
 *visible* caption keeps its `mt-4`, and that gap is what separates MARKETS from the
-Desk row above it. Entries reference their group/page **by name**
+Desk and Symbol rows above it. Entries reference their group/page **by name**
 via `_sec_group`/`_sec_page`, so `_NAV_GROUPS` / `OPTIONS_RAIL` / `FLAT_NAV` stay
 the single source of every label + icon and **a typo raises at import** rather
 than silently dropping a page out of the menu. `FLAT_NAV` no longer drives order
@@ -237,8 +242,8 @@ than silently dropping a page out of the menu. `FLAT_NAV` no longer drives order
 **derived** from `len(entries)` — never written down. The sentiment group renamed
 **"Market Trend & Sentiment" → "Trend & Sentiment"** now the MARKETS caption
 carries the word. **Every rail route is a shell page**, so `_nav_link` always
-navigates in place and `_LANDING_ROUTES` in `test_shell.py` holds the one route,
-`/desk`. (`EXTERNAL_RAIL_ROUTES` and `_nav_link`'s `new_tab=` existed solely for
+navigates in place and `_LANDING_ROUTES` in `test_shell.py` holds the two
+caption-less routes, `/desk` and `/symbol`. (`EXTERNAL_RAIL_ROUTES` and `_nav_link`'s `new_tab=` existed solely for
 the Live Mirror and went with it on 2026-09-02 — a rail row that opens elsewhere
 must not claim the active wash, so anything reviving that shape needs both.) ⚠ The
 Options group sits under STRATEGY while Dealer Positioning
@@ -288,7 +293,7 @@ this app's Highcharts have no ResizeObserver, so a reflow on every hover would
 leave charts mis-sized. No Quasar mini-mode, no JS, no hover round-trips. Because
 only the icon is visible when collapsed, **the icon is the affordance** (the
 `icon` arg is live again — the earlier colored-dot indicator is retired; a test
-guards that the 16 drawer icons stay non-empty + mutually distinct). Labels/title
+guards that the 17 drawer icons stay non-empty + mutually distinct). Labels/title
 clip and fade in via opacity; `.nav-drawer { overflow-x: hidden }` stops the
 264px of content raising a scrollbar in the rail. **Section captions cross-fade to
 HAIRLINES in the rail** (2026-08-16): `.nav-sep` is the exact INVERSE of the
@@ -349,8 +354,9 @@ Routes:
 |-------|------|--------|
 | `/` | **Redirect to `/desk`** (2026-08-18; was `/market` from 2026-08-16, and the Market Scanner before that). A redirect, not a second render — the shell keys the active nav item and breadcrumb off the route, so a page at two URLs would highlight nothing. | built |
 | `/desk` | **Desk — the HOME page.** Single-screen aggregate: regime + Day/Week/Month sentiment & trend rings · dealer positioning for `$SPX`/`SPY`/`QQQ`/`$NDX` (spot, flip, walls, net GEX, structure bar) · top-5 Opportunity · newest-5 Flow · merged paper+driver Positions with rescue flags. Tier-1 reader of **10 views** on ONE batched 2 s `read_versions`. Read-only + click-through. **No Highcharts** (deliberate). [Design](docs/plans/2026-08-18-desk-home-dashboard-design.md) | built |
-| `/options/scanner` | Options · Market Scanner — 0-DTE / Swing / Directional subtabs. Reads **`cache:options:scan_day`** (the day union), not `scan`, so dropped signals stay dimmed + frozen to EOD. [Detail](docs/webgui-routes.md) | built |
-| `/options/matrix` | Opportunity Board — one sortable row per watchlist symbol, default-sorted by Hotness. Tier-1 reader of `cache:options:matrix`. **Rows gained `call_wall`/`put_wall`/`net_gex`/`atm_iv`/`iv_state`/`dealer_regime` on 2026-08-18** (for the Desk; additive, no contract change — `MatrixSnapshot` validates only `rows: list[dict]`). All degrade to `None`/`"na"`, **never `0`** — the off-hours case turns on that distinction. [Detail](docs/webgui-routes.md) | built |
+| `/symbol` | **Symbol Dossier** — one screen per ticker (`?symbol=` — linkable, and allow-listed through `shared.symbols.clean_symbol` before it names anything): structure · volatility (Vol Rank, IV vs HV, expected move) · context · today's signals with age + score trend · flow · open positions in every book, each band linking out to the page that owns it. Reads 11 shared views + its own `cache:options:dossier:<SYMBOL>` on ONE batched 2 s `read_versions`. **Cache wins**: the paid on-demand `dossier` command (4–5 Schwab calls, 15-min TTL, a 60-s service-side dedup) only FILLS gaps, and is enqueued on navigation or Refresh for a symbol the scanner does not cover — never by the poll. **Private only** (it enqueues, so it is not a public live screen). No Highcharts. [Detail](docs/webgui-routes.md) | built |
+| `/options/scanner` | Options · Market Scanner — 0-DTE / Swing / Directional subtabs. Reads **`cache:options:scan_day`** (the day union), not `scan`, so dropped signals stay dimmed + frozen to EOD. ⚠ Each row's `setup_key` (`SYMBOL|TYPE|EXPIRATION`, strikes excluded) is a LOOKUP into the envelope's `setups` persistence map, **never a row key** — row identity stays `id` — and a setup whose start was not observed carries `age_unknown`, never a `first_seen` stamped `now`. [Detail](docs/webgui-routes.md) | built |
+| `/options/matrix` | Opportunity Board — one sortable row per watchlist symbol, default-sorted by Hotness. Tier-1 reader of `cache:options:matrix`. The symbol cell opens its `/symbol` dossier — drawn only where `shell.can_navigate` says the route exists, so the public `/opportunity` copy stays plain text. **Rows gained `call_wall`/`put_wall`/`net_gex`/`atm_iv`/`iv_state`/`dealer_regime` on 2026-08-18** (for the Desk; additive, no contract change — `MatrixSnapshot` validates only `rows: list[dict]`). All degrade to `None`/`"na"`, **never `0`** — the off-hours case turns on that distinction. [Detail](docs/webgui-routes.md) | built |
 | `/options/flow` | Flow Alerts — today's flow alerts (crossover · unusual activity · gamma flip · big_delta), newest first. Reader of `cache:options:flow_alerts`; resets overnight. [Detail](docs/webgui-routes.md) | built |
 | `/options/paper` | Paper Ledger — ledger table + shared detail panel; open trades repriced for live unrealized P&L on the manage tick. [Detail](docs/webgui-routes.md) | built |
 | `/options/captured` | Captured Signals — newest capture first, with a day footer (opened/closed today · booked P&L · open P&L). [Detail](docs/webgui-routes.md) | built |

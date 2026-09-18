@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-17</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-18</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -133,6 +133,11 @@ keys that feed it. Menu order matches the rail.</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td><strong>Symbol</strong></td>
+<td><code>options_svc</code> (+ <code>sentiment_svc</code> for context)</td>
+<td><code>cache:options:matrix</code>, <code>:scan_funnel</code>, <code>:scan_day</code>, <code>:gex_status</code>, <code>:flow_alerts</code>, the four paper books, <code>cache:sentiment:regime</code>, <code>:bullbear</code>; <code>cache:options:dossier:&lt;SYMBOL&gt;</code> via the <code>dossier</code> command</td>
+</tr>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
 <td><code>options_svc</code> :8211</td>
@@ -670,6 +675,11 @@ skip-unchanged).</p>
 <td><code>cache:options:expected_move</code></td>
 </tr>
 <tr>
+<td><code>dossier</code></td>
+<td><code>{symbol}</code> — cleaned by <code>shared.symbols.clean_symbol</code> (upper-cased, <code>[A-Z$][A-Z0-9$.]{0,7}</code>); anything it refuses is logged and writes nothing, because the symbol becomes part of the key name. Replay-guarded (a command older than 180 s is dropped). <strong>Deduplicated</strong> (<code>DOSSIER_DEDUP_SEC</code> = 60): if that symbol's dossier was written less than 60 s ago — measured on the envelope's own <code>ts</code>, the write time — the command is dropped and nothing is fetched or re-published. A recent success or <code>no_quote</code> blocks the fetch; a recent <code>fetch_failed</code> does <strong>not</strong> (a retry costs at most one quote call). An unreadable envelope counts as no recent dossier. Otherwise one fetch of <strong>4 Schwab calls, 5 at most</strong> (quote · GEX chain today..+7 d · 1-year daily price history · IV chain +20..+45 d · the IV analysis' own today..+60 d fallback when that window is empty); a <code>no_quote</code> or <code>fetch_failed</code> answer spends one</td>
+<td><strong><code>cache:options:dossier:&lt;SYMBOL&gt;</code></strong> (event <code>events:options:dossier:&lt;SYMBOL&gt;</code>), <strong>TTL 900 s</strong>, per symbol so two tabs never share a slot — <code>{symbol, error, fetched_at, spot, day_pct, flip, put_wall, call_wall, net_gex, iv_rank, current_iv, hv_current, earnings_status, earnings_date}</code>. Every key is always present; an absent reading is <code>null</code>, never 0. <code>fetched_at</code> is naive Central ISO. <code>current_iv</code> / <code>hv_current</code> are <strong>percents</strong> (48.5 = 48.5%); <code>iv_rank</code> is the scan's Vol Rank; <code>day_pct</code> is always <code>null</code> (no day-change parser is shared for a raw quote). <code>earnings_status</code> is three-valued: <code>upcoming</code> · <code>none_scheduled</code> · <code>not_listed</code> (the calendar has no data — not "no report"). Walls are assigned by side of spot, and both are <code>null</code> when <code>net_gex</code> is exactly <code>0.0</code> (the after-hours all-zero grid, whose walls would be an argmax tie-break); <code>flip</code> is kept either way. <code>error</code> is <code>null</code> on success, <code>"no_quote"</code> when Schwab <strong>answered</strong> and quoted nothing usable for the symbol (a typo — the other legs are skipped), or <code>"fetch_failed"</code> when the quote request itself failed (non-200 or raised: proxy down, timeout, token) — the ticker may be fine. One of the three later legs failing blanks only its own keys and records a degrade (<code>options.dossier_gex</code> · <code>_vol</code> · <code>_earnings</code>)</td>
+</tr>
+<tr>
 <td><code>rescue</code></td>
 <td><code>{position_id}</code></td>
 <td><code>cache:options:rescue:&lt;position_id&gt;</code></td>
@@ -734,6 +744,33 @@ date. Every stamp is <code>null</code> when unknown, never a guessed zero.</p>
 </tr>
 </tbody>
 </table>
+<p><strong><code>cache:options:scan_day</code></strong> — the day union the Market Scanner and the Symbol
+Dossier render: <code>{date, scan_seq, signals_0dte[], signals_swing[],
+signals_directional[], setups, truncated?}</code>. <code>date</code> is the <strong>Central</strong> trading date —
+check it before trusting any row's <code>live</code>, because a failed first merge of a new day
+leaves yesterday's envelope in place. <code>scan_seq</code> is this scan's 1-based number within
+the day. Each row is the scan's row plus <code>live</code>, <code>stale_since</code> (when it dropped out;
+<code>null</code> while live) and <strong><code>setup_key</code></strong> — <code>SYMBOL|TYPE|EXPIRATION</code>, strikes excluded
+(the row's front expiration — its <code>legs</code> only when the top-level field is
+unreadable), or <code>null</code> when a part is
+missing. ⚠ <code>setup_key</code> is a <strong>lookup into <code>setups</code>, never a row key</strong>: row identity
+stays <code>id</code>, and two adjacent strikes on one expiry are two rows sharing one entry.
+<code>setups</code> is <code>{setup_key: {seen, scores[], gaps, last_seq, last_live, first_seen |
+age_unknown}}</code> — <code>seen</code> the scans it was live in, <code>scores</code> its best composite per
+scan (the last 40), <code>gaps</code> how many times it went absent and came back. A setup whose
+start was not observed (the map rebuilt mid-session) carries <code>age_unknown: true</code> and
+<strong>no</strong> <code>first_seen</code>; nothing is ever stamped with the current time to fill the gap.
+<code>setups</code> is always present; an empty map on a scan whose persistence step failed
+(degrade <code>options.merge_setups</code>) means "no reading", never "all new". <code>truncated</code>
+(<code>{list: n_dropped}</code>) appears only when the 2000-per-list cap evicted stale rows; the
+map is trimmed after the rows and never loses an entry a surviving row references.</p>
+<p><strong><code>cache:options:scan_funnel</code></strong> — <code>{timestamp, symbols: {SYMBOL: account}}</code>, the
+per-symbol account of why a symbol did or did not produce a signal. Each account is
+<code>{price, iv_rank, hv_current, current_iv, earnings_date, stop, buckets}</code>:
+<code>hv_current</code> is 30-day realised volatility and <code>current_iv</code> the ATM implied
+volatility, both <strong>percents</strong>, <code>null</code> when the IV analysis did not measure them;
+<code>stop</code> is <code>null</code>, <code>"no_quote"</code> or <code>"no_data"</code>; <code>buckets</code> is keyed <code>0DTE</code> / <code>SWING</code> /
+<code>DIRECTIONAL</code>. Written after every scan with <code>skip_unchanged</code>.</p>
 <p><strong><code>cache:options:ledger_caps</code></strong> (event <code>events:options:ledger_caps</code>) — the Paper
 Ledger's book, as the Paper dialog's preview reads it:
 <code>{limits, starting_balance, realized_pnl, equity, open[], sectors, unmapped_prefix}</code>.
@@ -1181,7 +1218,9 @@ cmd:sentiment
 </code></pre>
 <p><strong>Options:</strong></p>
 <pre><code>cache:options:scan             events:options:scan          (ScanResult contract)
-cache:options:scan_day         events:options:scan_day      (the DAY UNION the Scanner renders)
+cache:options:scan_day         events:options:scan_day      (the DAY UNION the Scanner renders, + setups)
+cache:options:scan_funnel      events:options:scan_funnel   (per-symbol &quot;why no trade?&quot; account)
+cache:options:dossier:&lt;SYMBOL&gt; events:options:dossier:&lt;SYMBOL&gt;   (TTL 900 s; the Symbol Dossier's look-up)
 cache:options:matrix           events:options:matrix        (Opportunity Board)
 cache:options:flow_alerts      events:options:flow_alerts   (Flow Alerts, today only)
 cache:options:flow_alert_cooldowns  (uncapped seen-map behind the per-symbol counts)

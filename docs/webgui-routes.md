@@ -8,9 +8,10 @@ in [CHANGELOG.md](CHANGELOG.md).**
 ## `/desk`
 
 **Desk — the app's HOME page (NEW 2026-08-18).** `/` redirects here (it pointed at
-`/market` from 2026-08-16, and at the Market Scanner before that). Pinned ALONE at
-the top of the rail in a **caption-less leading `NAV_SECTIONS` block** — the mirror
-of the bottom-pinned `SYSTEM_RAIL` — so its breadcrumb is the bare leaf `Desk`.
+`/market` from 2026-08-16, and at the Market Scanner before that). Pinned at the
+top of the rail in a **caption-less leading `NAV_SECTIONS` block** — the mirror of
+the bottom-pinned `SYSTEM_RAIL` — so its breadcrumb is the bare leaf `Desk`. It
+was alone there until 2026-09-17, when `/symbol` joined it: the two entry points.
 
 ⚠ **Each panel scrolls sideways INSIDE itself below ~1877px (private) / ~1809px
 (public), rather than the document scrolling** (2026-09-09). The panel BODY is
@@ -259,6 +260,89 @@ the four panels; the public live Desk renders it too.
 
 Design: [`2026-09-10-desk-market-summary-design.md`](plans/2026-09-10-desk-market-summary-design.md).
 
+## `/symbol`
+
+**Symbol Dossier (NEW 2026-09-17)** — one screen per ticker, pinned beside the Desk
+in the caption-less leading rail block (icon `manage_search`; bare one-crumb
+breadcrumb). Desk answers *what is happening*, Symbol *tell me about X*. Built as an
+**index over the pages that own each fact**, never a replacement: every band ends
+in a link out, and every number comes from the builder its owning page uses.
+`webgui/pages/symbol.py` (widgets + band assembly) over the pure
+`pages/symbol_facts.py`; the wall/flip bar is `pages/structure.py`, shared with the
+Desk. Design + plan: [`2026-09-17-symbol-dossier-{design,plan}.md`](plans/2026-09-17-symbol-dossier-design.md).
+
+**The route takes `?symbol=`** (`symbol_page(symbol=None)`), so a dossier is
+linkable and bookmarkable. ⚠ That parameter is settable by anyone who reaches the
+app, and it names a view, a command and a Redis key — so it passes
+`shared.symbols.clean_symbol` (`[A-Z$][A-Z0-9$.]{0,7}` after upper/strip) first, the
+SAME allow-list the service applies; anything refused renders *"X is not a ticker
+symbol."* and enqueues nothing.
+
+**Bands**, one question each: **Structure** (put wall → call wall bar with spot and
+flip, flip side + distance, net GEX, pins-or-runs) · **Volatility** (Vol Rank bar,
+IV vs HV with the scorer's *high ≥ 1.2× / low ≤ 0.9× / mid* words, ATM IV + direction,
+1σ expected move for a day and a week) · **Context** (regime word, sector / industry
++ Bull/Bear quadrant and rank, earnings) · **Today** (signals with age + score trend +
+sparkline, and flow alerts) · **Your position** (all four books — account, ledger,
+driver, captured — with the rescue flag only where the book carries one). No
+Highcharts, the Desk's call.
+
+**Reads** 11 shared views (`options:matrix`, `:scan_funnel`, `:scan_day` via
+`read_gated`, `:gex_status`, `:flow_alerts`, the four books, `sentiment:regime`,
+`:bullbear`) + its own `options:dossier:<SYMBOL>` on ONE batched 2 s
+`read_versions`; `REGION_VIEWS` repaints only the bands whose views moved. The first
+read runs off the event loop (measured 37.6 ms against a 3.98 MB day union).
+
+**Coverage is per FACT, not per symbol** (`symbol_coverage`): **scanned** (a matrix
+row + a funnel account — everything cached), **collected** (a matrix row only —
+`$VIX`, the sector ETFs — structure cached, Vol Rank / IV vs HV / earnings fetched),
+**unknown** (nothing cached). A funnel account with no matrix row is a cold matrix
+and reads unknown.
+
+**The fetch rule — the one that costs money.** An on-demand `dossier` command on
+`cmd:options` (4–5 Schwab calls) is enqueued ONLY on navigation or an explicit
+Refresh, for a symbol that is not scanned, with a live options feed
+(`should_enqueue`); **the poll timer can never reach the enqueue**, pinned at
+source level. Navigation reuses a cached dossier inside its **15-min TTL** unless it
+recorded `fetch_failed`. The service adds a **60-s dedup**: a dossier written under
+a minute ago (and not `fetch_failed`) is not re-fetched, and the page answers that
+Refresh as already current. **Cache wins** (`merge_facts`): the fetch only fills
+gaps, since a one-minute matrix row beats a point-in-time snapshot; the per-fact
+`source` map is what lets the page say "fetched HH:MM" only beside facts that were.
+
+**Header chip**: `SCANNED HH:MM` (the funnel's scan time, so post-close Vol Rank
+reads its age) · `COLLECTED` / `COLLECTED · FETCHED HH:MM` · `FETCHED HH:MM` ·
+`FETCHING` · **`QUEUED`** (the 30 s `LOAD_TIMEOUT_SEC` backstop fired with no answer —
+`cmd:options` has one consumer, so a look-up can sit behind a 26–40 s whole-chain
+Finder scan; the page says it will appear when the service answers and does NOT
+invite Refresh, which would queue a second paid fetch) · `NOT FOUND` (`no_quote` —
+"check the symbol") · `FETCH FAILED` (an outage — never "check the symbol") ·
+`NO DATA`.
+
+**Walls are gated on where they came from.** A CACHED wall needs a live collector
+(`gex_freshness` → live / stopped / unknown, the Desk's rule, each worded apart); a
+FETCHED wall is shown with *walls fetched HH:MM*, because the collector never drew
+it. Both are withheld when net GEX reads exactly `0.0` — the after-hours all-zero
+grid, whose walls are an argmax tie-break — and the service refuses to publish walls
+for such a grid too (`dossier.zero_grid_walls_ok`, mirroring
+`structure.walls_trustworthy`). The bar needs BOTH walls, so a mixed-source or
+half-withheld pair draws no bar.
+
+**→ Dealer Positioning is drawn only for a scanned or collected symbol**
+(`gamma_link_allowed`). The Gamma page points the shared sticky
+`cache:options:gamma` slot at whatever it is handed and the service refreshes it
+every GEX tick; for an uncollected symbol that is a fresh chain fetch a minute, all
+session.
+
+**Empty states say different things**: a cold feed prints `copy.WAITING_OPTIONS` /
+`WAITING_SENTIMENT`; a quiet name prints its own line (*No signals for MU today.*,
+*No open position in MU.*); a previous session's day union prints the scanner's
+`day_note`, never live rows. Earnings keeps three values — `not_listed` reads *not
+covered by the calendar*, never *none scheduled*.
+
+**Private only**: it enqueues, which the public process refuses, so it is NOT in
+`live_screens.SCREENS`. Links in: the Opportunity Board's symbol cell.
+
 ## Trade detail panel — Expected Move on captured signals (2026-08-25)
 
 The panel gates its Expected Move expansion on the signal carrying an
@@ -402,10 +486,39 @@ The dialog holds three things. **Chips** (`funnel_chips`), one per window in `FU
 
 ⚠ **Every "cannot say" case reads as WORDS, not as a column of zeroes**, and the page owns none of them — it never touches the tally, which a test pins at source level (no counter name and no `strikes`/`spreads` indexing anywhere in the panel). The cases, each its own sentence: a symbol the scan never reached or an entry that is not a mapping (*This symbol was not in the last scan.*); a whole-symbol `stop` (*Schwab returned no quote for this symbol.* for `no_quote`, the price-history/chains line for `no_data`, and a generic stop sentence for a code neither names); a window with no chain (*The scan could not read an options chain for this window.*); **a chain that arrived quoting no underlying price** (`underlying_zero`, checked BEFORE the strike stages so it wins — *The chain for this window carried no underlying price, so nothing could be measured against it.*), which is deliberately **not** the no-chain wording, because the expirations WERE listed and only the spot was missing, and the zero-filled tally would otherwise render as "no expiration in this window was listed in the chain"; a missing bucket, or a bucket whose stages all dropped (*The scan recorded no account of this window for this symbol.*); and a crashed single-leg build (`build_failed` → *the single-leg build failed for this symbol; the scan logged the error*). A counter that is absent, junk or was never written is SILENCE — `funnel_view._count` answers `None` for anything that is not a real non-negative integer (`fmt.num` rejects bool and NaN) and the stage is DROPPED, not rendered as 0. ⚠ A funnel published before `underlying_zero` existed still reads, `strikes: {}` included.
 
+**Seen since / Score trend (2026-09-17).** Two columns on all three tables, between
+Checks and **Dropped at** so the lifecycle reads as one cluster: **Seen since** =
+`HH:MM · Nx` (first seen, scans live) and **Score trend** = `▲ +4.2` / `▬ +1.0` /
+`▼ −6.1` / `new` (`pages/options/persistence.py`: window 4 readings, deadband 2.0,
+`new` under 4). Stamped by `scanner.stamp_persistence`, joined by `id` like
+`stamp_stale`, over the envelope's **`setups`** map reached through each row's
+`setup_key`. ⚠ The invariants: `setup_key` (`SYMBOL|TYPE|EXPIRATION`, strikes
+excluded) is stamped **Tier-2 side** by `merge_day_signals` and never derived here, so
+there is no cross-tier mirror; it is a **lookup, never a row key** — row identity,
+"New" and the Paper button stay on `id` (`_sig_key` documents the bug a coarse row key
+caused); a setup whose start was not observed carries `age_unknown` and renders `—`,
+never a `first_seen` stamped *now* (the 2026-07-16 `first_seen` was deleted for lying
+on cold start); an absent map dashes every row — "no reading", never "all new". A
+**dropped** row is stamped too, frozen at what it was. The map is merged apart from the
+row lists (a fresh row replacing a carried one cannot erase it), pruned **after** the
+row cap and never of a key a surviving row references, and built under its own
+`try` → `_degrade.degraded("options.merge_setups")`, so a persistence bug empties the
+map rather than freezing the day union. Readout only: no sort, filter or checklist
+line. Design: [`2026-09-17-signal-persistence-design.md`](plans/2026-09-17-signal-persistence-design.md).
+
 
 ## `/options/matrix`
 
 Opportunity Board (**NEW 2026-07-20** — a **main-menu (left-rail) item directly under the Options group** (`main.OPTIONS_RAIL`, standalone page, NOT an Options tab-strip entry): at-a-glance **sortable grid of every watchlist stock** (~45 symbols = `collection_symbols()` minus `$VIX`), one row/symbol — Ticker/Spot/Day %/**Intraday trend**/**Call+Put flow acceleration**/P/C ratio/Net premium $M/**GEX regime**/# Signals/# Flow alerts/**Buy-Neutral-Sell** flow composite/**Hotness** (default sort, hottest first). Pure Tier-1 reader of **`cache:options:matrix`** (`webgui/pages/options/matrix.py`, version-polls ~2 s, in-place sortable `ui.table`, Tailwind-first colored cells) published by a new `options_svc` aggregator — pure `services/options_svc/matrix.py` (trend/accel/composite/hotness) + `compute.build_matrix` over `gex_history.db` (`load_flow_series` + cheap `latest_flip`) + per-symbol counts from `scan_day` (signals) + the **uncapped** `flow_alert_cooldowns` seen-map (flow alerts — not the capped `flow_alerts` rolling list, `_FLOW_ALERTS_MAX`=300 since 2026-08-09); built on the 1-min GEX branch + a ~30 s live spot/day% overlay on the header tick. Counts gate on `session_date`. See the 2026-07-20 "Last updated" entry)
+
+**The symbol cell opens its `/symbol` dossier (2026-09-18).** A dotted-underline link
+(`matrix.dossier_route`, the symbol through `shared.symbols.clean_symbol` first; a
+refused symbol stays plain text), emitted from the table slot and navigated with
+`shell.navigate_to`. ⚠ The board is also published as the public `/opportunity`
+screen, where `/symbol` does not exist — so the link slot is used only where
+`shell.can_navigate("/symbol")` is true, and `matrix.py` names the route as a string
+rather than importing `pages.symbol`, which would pull the dossier into the public
+process's import closure.
 
 ## `/options/flow`
 
@@ -518,6 +631,11 @@ Simulator (**Replay / What-if / IV-shock as SUBTABS under the main strip** + **C
 ## `/options/expected-move`
 
 Expected Move (candlestick price history (6-mo daily) + forward **ATM-IV expected-move cone** to the option's expiration (green/red dashed, √-time fan) + leg **strike lines** (short solid / long dashed, put/call colored) + axis **crosshair** w/ Date(X)+Price(Y) label boxes; opened in a **new browser tab** via stash-handoff from Scanner/Paper/Captured/Calculator, or standalone. **Expiry + strike are chain-driven DROPDOWNS since 2026-08-12** (was free text, where a typo silently produced "No ATM IV for …"): typing a symbol (tab-out/Enter via the shared `bind_symbol_load`) enqueues a new **`em_chain`** command → **`cache:options:em_chain`** (`compute.em_chain_meta`, today→+90d chain reduced SERVICE-side to `{expirations, strikes{expiry: ladder}, spot}` — measured 10.5 MB raw for a 90-day SPY chain vs **28.8 KB** of ladders, which is why this does NOT publish the raw chain the way the Calculator's `calc_chain` does); the expiry list carries a **DTE suffix** (`2026-08-12  (0d)`) so weeklies stay scannable, and strikes are **deduped across call+put** (put-vs-call is the toggle's job, so the ladder doesn't change under it). Picking an expiry redraws; picking a strike/put-call is a **LOCAL-only** repaint via `expected_move_figure(..., legs=…)` — no round trip, since the strike is only a plotLine. **Also since 2026-08-12 the CURRENT-DAY candle is drawn**: Schwab's `periodType=year&period=1` daily history ends at the PREVIOUS trading day, so `compute.today_candle` synthesizes the forming bar from the RAW quote (`schwab_py_client.get_quotes` — the normalized `get_quote` drops `openPrice`; the normalized client stays as a spot FALLBACK), gated on a trading day at/after the 08:30 CT open (premarket `openPrice` is still the prior session's) and no-op'd if the history ever includes today. Schwab's daily-candle epoch is **midnight CT** (verified live), so `_RTH_START`/`_PROJ_CT_TZ` are reused rather than host-local time. This also fixed the cone, which anchored at `candles[-1][0]` (yesterday) while sized from TODAY's spot and so overshot the expiry by a day. ⚠ after 15:00 CT the bar's close is `lastPrice`, which includes post-market prints, and Schwab's high/low may include extended hours — sub-tick on a 6-month chart, documented not fixed. Three page-state traps are commented in `render()`: `state["drawn_symbol"]` forces a redraw on a symbol switch that KEEPS the same expiry string (a shared monthly makes the `.value` write a no-op, so `on_value_change` never fires and the chart would pair the old symbol's candles with the new symbol's ladder), `state["strike_touched"]` keeps a look-back change from reverting a locally-picked strike while still letting an UNTOUCHED multi-leg handoff resend its own legs, and `state["seeding"]` must wrap `.update()` (not just the `.value=` write) because `ChoiceElement._update_options` re-validates and can re-null the value). **⚠ This page's IV + Expected move DELIBERATELY do not match ThinkorSwim, and the difference was measured, not guessed (2026-08-12, PLTR 2026-10-16, 65 DTE) — do NOT "fix" either number to match ToS without first deciding which definition you want.** TWO independent differences that push OPPOSITE ways: (1) **IV source** — `atm_iv_from_chain` reads the single strike nearest spot, which on an equity smile is its **MINIMUM** (measured: 46.08% at K=165, **45.59% at K=170≈spot**, 49.03% at K=175, 48.79% at K=145), while ToS publishes a per-SERIES IV aggregated across strikes and so necessarily sits above the ATM trough (52.11%). Schwab reports the SAME `volatility` for the ATM call and put, so put/call skew is NOT a factor — that's a dead end, don't re-investigate it. (2) **Move definition** — ours is **1 standard deviation** `S·σ·√(t/365)` (a 68% containment band, the correct basis for a *cone*); ToS's chain-header parenthetical is the **expected ABSOLUTE move**, smaller by exactly **√(2/π) ≈ 0.798**, which is what an ATM straddle prices. Reconciliation: 1σ at our IV = **32.90** (what we show) · 1σ at ToS's IV = 37.61 · abs-move at ToS's IV = **30.01** vs ToS's displayed **30.433** (1.4% off, = spot drift between the two readings). **The trap:** the two differences NEARLY CANCEL here (32.90 vs 30.43, ~8%), which is luck, not calibration — on a symbol with a flatter smile our IV would approach ToS's and our move would then read ~25% LARGER. The same `atm_iv` also sizes the drawn cone, so changing the definition changes the chart, not just the text line. The actual ATM straddle mark was 27.25 (real market price, model-free) if a third reference is ever wanted
+
+**A symbol-only hand-off is valid (2026-09-18).** The Symbol Dossier's link hands
+over a symbol with no expiry; the page loads that symbol's expirations and waits for
+a pick, where it used to try to draw and toast "Symbol + expiry required." Any
+caller handing over a symbol alone gets the same quiet chain load.
 
 ## `/sentiment`
 

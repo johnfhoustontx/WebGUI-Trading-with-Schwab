@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-17</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-18</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -127,6 +127,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#measured-outcomes-and-how-to-re-measure">Measured outcomes, and how to re-measure</a></li>
 </ul>
 </li>
+<li><a href="#signal-age-and-score-trend">Signal age and score trend</a></li>
 </ul>
 </li>
 <li><a href="#technical-indicators">Technical Indicators</a></li>
@@ -174,6 +175,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </li>
 <li><a href="#constants-appendix">Constants Appendix</a><ul>
 <li><a href="#service-cadences">Service cadences</a></li>
+<li><a href="#symbol-dossier-look-up">Symbol Dossier look-up</a></li>
 <li><a href="#desk-spoken-alerts-and-the-arrival-glow">Desk spoken alerts and the arrival glow</a></li>
 <li><a href="#commissions">Commissions</a></li>
 </ul>
@@ -211,6 +213,10 @@ would mean writing the same formulas out four times and letting the copies drift
 <tr>
 <td><strong>Desk</strong></td>
 <td>Composition only — every figure is produced by the same function that produces it on the page it summarises, so follow that page's row. Its own two constants (the arrival glow, the voice cache) are in the <em>Constants Appendix</em></td>
+</tr>
+<tr>
+<td><strong>Symbol</strong></td>
+<td>Composition, like the Desk. Its own arithmetic — IV vs HV and the expected move — is in <em>Options Scoring</em> → <strong>Expected move and IV analysis</strong>; the signal age and score trend in <strong>Signal age and score trend</strong>; the look-up's cost in the <em>Constants Appendix</em></td>
 </tr>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
@@ -1372,6 +1378,30 @@ vol_percentile = (# days with hv &lt; current_iv) / total_days · 100
 <p>Returned under both <code>iv_*</code> (legacy) and <code>hv_*</code> (honest) keys.</p>
 <p><strong>Historical volatility</strong> — <code>calc_historical_vol_series(candles, window=30)</code>:
 rolling 30-day std of daily log returns, annualized: <code>std · sqrt(252) · 100</code>.</p>
+<p><strong>The scan funnel carries both inputs</strong> (since 2026-09-17). Each symbol's account on
+<code>cache:options:scan_funnel</code> holds <code>hv_current</code> (the latest HV-30) and <code>current_iv</code>
+(ATM implied volatility) from the same <code>run_iv_analysis</code> pass that produced its Vol
+Rank. ⚠ Both are <strong>percents</strong> — 48.5 means 48.5% — and are <code>null</code> when the analysis
+did not measure them.</p>
+<p><strong>IV vs HV</strong> (the Symbol Dossier's Volatility band — <code>webgui/pages/symbol_facts.py:iv_vs_hv</code>):</p>
+<pre><code>ratio = current_iv / hv_current
+band  = &quot;high&quot;  if ratio &gt;= 1.2
+        &quot;low&quot;   if ratio &lt;= 0.9
+        &quot;mid&quot;   otherwise
+</code></pre>
+<p>The boundaries and words are <code>strategy_scoring.infer_market_view</code>'s own fallback,
+restated because Tier 1 cannot import the scorer and pinned equal to it by
+<code>shared/tests/test_cross_tier_mirrors.py</code> — so the dossier cannot describe a symbol in
+terms the Strategy Finder's scorer disagrees with. A missing input, <code>hv_current &lt;= 0</code>
+or a negative IV (Schwab's <code>-999</code> sentinel) gives no ratio and the band <code>na</code>.</p>
+<p><strong>The dossier's expected move</strong> (<code>symbol_facts.expected_move</code>) is the same 1σ form over
+<strong>calendar</strong> days, for one day and one week, with no 0.25-day floor:</p>
+<pre><code>em_day  = spot · (atm_iv/100) · sqrt(1 / 365)
+em_week = spot · (atm_iv/100) · sqrt(7 / 365)
+</code></pre>
+<p><code>atm_iv</code> is the Opportunity Board's ATM IV, falling back to the look-up's
+<code>current_iv</code> for a symbol the board does not carry. A non-positive spot or IV is no
+reading, never a zero move.</p>
 <h2 id="strategy-finder-scoring-fit-quality">Strategy Finder scoring (Fit + Quality)</h2>
 <p><strong>Files:</strong> <code>options-scanner/strategy_scanner.py</code> (builders, <code>payoff_metrics</code>,
 <code>pop_from_payoff</code>), <code>options-scanner/strategy_scoring.py</code> (<code>GATE_BARS</code>,
@@ -1845,6 +1875,68 @@ ladders). So "counted, not shown" is a statement about fair prices, not a guaran
 <p>Condors are the
 most ladder-dependent row: the wing is whichever listed distance is nearest half the
 expected move, so one step changes the structure.</p>
+<h2 id="signal-age-and-score-trend">Signal age and score trend</h2>
+<p><strong>Files:</strong> <code>services/options_svc/compute.py</code> (<code>setup_key</code>, <code>merge_setups</code>) ·
+<code>webgui/pages/options/persistence.py</code> (the display vocabulary). Shown in the Market
+Scanner's <strong>Seen since</strong> and <strong>Score trend</strong> columns and on the Symbol Dossier's
+signal rows.</p>
+<p><strong>The setup key.</strong> A signal's <code>id</code> encodes its strikes, and strikes are chosen by a
+delta band, so one increment of spot mints a new <code>id</code> for what is economically the
+same trade. Age is therefore tracked on a coarser key:</p>
+<pre><code>setup_key = SYMBOL | TYPE | EXPIRATION        e.g.  MU|PCS|2026-10-17
+</code></pre>
+<p>Strikes are excluded; <code>EXPIRATION</code> is the row's front expiration. A row missing any part
+gets no key and shows a dash — it is never folded into another setup. Two adjacent
+strikes on one expiration are two rows that share one age. The key is a <strong>lookup only</strong>:
+row identity, the "New" badge and the Paper button all stay on <code>id</code>.</p>
+<p><strong>What each scan records per setup</strong> (on <code>cache:options:scan_day</code> → <code>setups</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>seen</code></td>
+<td>+1 for every scan in which the setup has at least one live row</td>
+</tr>
+<tr>
+<td><code>scores</code></td>
+<td>that scan's <strong>best</strong> composite among the setup's rows, appended; the last 40 kept</td>
+</tr>
+<tr>
+<td><code>gaps</code></td>
+<td>+1 each time the setup returns after missing one or more scans (detected by scan sequence number, not the clock — a manual scan breaks the 15-minute grid)</td>
+</tr>
+<tr>
+<td><code>first_seen</code></td>
+<td>the scan time the setup first appeared — <strong>only</strong> when that was observed</td>
+</tr>
+<tr>
+<td><code>age_unknown</code></td>
+<td>set instead of <code>first_seen</code> when a setup appears in a scan that had no usable previous envelope (flushed, or from another date) <strong>outside</strong> the first 15 minutes of the scan window — at the day's first scan the time is exactly right, later it would be a guess</td>
+</tr>
+</tbody>
+</table>
+<p>A first-seen time is never stamped with "now" to fill a gap in knowledge: a restart at
+noon would otherwise date every 09:00 setup to 12:00.</p>
+<p><strong>The trend</strong> (<code>persistence.score_trend(scores, window=4, deadband=2.0)</code>):</p>
+<pre><code>fewer than 4 readings            -&gt; &quot;new&quot;      (no direction claimed)
+delta = scores[-1] - scores[-4]
+|delta| &lt;= 2.0                   -&gt; &quot;steady&quot;   (shown  ▬ +1.0)
+delta &gt;  2.0                     -&gt; &quot;rising&quot;   (shown  ▲ +4.2)
+delta &lt; -2.0                     -&gt; &quot;fading&quot;   (shown  ▼ -6.1)
+</code></pre>
+<p>Four readings is one hour at the 15-minute auto-scan cadence. The deadband exists
+because the composite is recomputed from scratch on every scan, so a point or two of
+movement between scans is noise. A trend is only ever computed within one setup, so
+the credit-spread composite and the Directional tab's Fit + Quality score never meet.</p>
+<p><strong>Seen since</strong> reads <code>HH:MM · Nx</code> — first seen, and the number of scans the setup was
+live in. It is a dash when the age is unknown, and the time alone when the count is
+unreadable (never <code>· 0x</code>). A dropped row keeps the values it had. The dossier adds one
+line per setup, <em>Live since 09:15 · 1 gap</em>, and a 64×16 px sparkline of <code>scores</code>.</p>
 <hr />
 <h1 id="technical-indicators">Technical Indicators</h1>
 <p><strong>File:</strong> <code>shared/analysis_lib/technical.py</code>. All operate on OHLCV DataFrames.</p>
@@ -2973,6 +3065,60 @@ tasks fixed it. A 2-minute figure also silently corrupted the flow-alert spike
 detector, which compares volume increments and reads a 2-minute delta as roughly
 twice baseline.</p>
 </blockquote>
+<h2 id="symbol-dossier-look-up">Symbol Dossier look-up</h2>
+<p>The one paid path on <code>/symbol</code>: the <code>dossier</code> command on <code>cmd:options</code>
+(<code>services/options_svc/dossier.py</code>), written to <code>cache:options:dossier:&lt;SYMBOL&gt;</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Constant</th>
+<th>Value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Schwab calls per look-up</td>
+<td><strong>4</strong>, <strong>5</strong> at most — quote · GEX chain (today..+7 d) · 1-year daily history · IV chain (+20..+45 d) · the IV analysis' today..+60 d fallback when that window is empty</td>
+<td><code>dossier.build_dossier</code></td>
+</tr>
+<tr>
+<td>Calls when the quote fails or finds nothing</td>
+<td><strong>1</strong> — the other legs are skipped</td>
+<td>same</td>
+</tr>
+<tr>
+<td>Cache lifetime</td>
+<td><strong>900 s</strong> (15 min) — a repeat visit inside it reuses the look-up</td>
+<td><code>handlers.DOSSIER_TTL_SEC</code></td>
+</tr>
+<tr>
+<td>Duplicate window</td>
+<td><strong>60 s</strong> — a second command for a symbol written this recently fetches nothing, unless that write was a <code>fetch_failed</code></td>
+<td><code>handlers.DOSSIER_DEDUP_SEC</code></td>
+</tr>
+<tr>
+<td>Replay window</td>
+<td><strong>180 s</strong> — an older queued command is dropped</td>
+<td><code>handlers.STALE_OPEN_MAX_AGE_SEC</code></td>
+</tr>
+<tr>
+<td>Page poll</td>
+<td><strong>2 s</strong>, one batched version read; the poll <strong>never</strong> enqueues a look-up</td>
+<td><code>pages/symbol.py:POLL_SEC</code>, <code>should_enqueue</code></td>
+</tr>
+<tr>
+<td>Wait before <strong>QUEUED</strong></td>
+<td><strong>30 s</strong> — the overlay drops and the chip reads QUEUED; the request stays on the stream and the poll picks up the answer. <code>cmd:options</code> has one consumer, so a look-up can sit behind a 26–40 s whole-chain Strategy Finder scan</td>
+<td><code>overlay.LOAD_TIMEOUT_SEC</code></td>
+</tr>
+</tbody>
+</table>
+<p>A symbol the scanner covers costs nothing: every fact is already cached, and where the
+cache and a look-up both hold a fact the cache wins, since the Opportunity Board is a
+minute fresh and a look-up is a snapshot. A look-up is one or two chains on a click,
+not a scheduled fan-out, so it does not need the off-quarter-hour placement the
+scheduled chain bursts do.</p>
 <h2 id="desk-spoken-alerts-and-the-arrival-glow">Desk spoken alerts and the arrival glow</h2>
 <p>Two Desk constants that are not derived from market data but are load-bearing, and
 both have a silent failure mode behind them.</p>

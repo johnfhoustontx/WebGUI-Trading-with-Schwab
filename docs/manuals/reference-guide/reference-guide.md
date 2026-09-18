@@ -391,7 +391,7 @@ a new trade, because the position band searches all four books at once.
 
 | Band | Question it answers | Goes deeper at |
 |---|---|---|
-| **Structure** | Where is price between the put wall and the call wall, and which side of the gamma flip? | [Dealer Positioning](#dealer-positioning), already set to the symbol |
+| **Structure** | Where is price between the put wall and the call wall, and which side of the gamma flip? | [Dealer Positioning](#dealer-positioning), already set to the symbol — offered only for a name the app already collects (see the caveats) |
 | **Volatility** | Is option premium rich or cheap for this name right now, and how far is it expected to move? | [Expected Move](#expected-move) |
 | **Context** | What is the market doing, where does this name sit in its sector, and when does it report? | [Bull / Bear Map](#bull-bear-map) |
 | **Today — Signals** | Did the scanner find a trade here today, how long has it been live, and is its score improving? | [Market Scanner](#market-scanner) |
@@ -425,8 +425,8 @@ the map does not rank says so rather than inventing a quadrant.
 
 **Signals.** Each row is a Market Scanner signal for this name, with the time its
 setup was first seen and how many scans it has survived (*09:15 · 3x*), its score
-trend (*▲ +4.0*, *▼ −3.5*, *steady*, or *new* while there are too few readings to name
-a direction), and a small line of the setup's best score across the day. Above the
+trend (*▲ +4.0* rising, *▼ −3.5* fading, *▬ +1.0* steady within two points, or *new*
+while there are fewer than four readings — an hour of scans — to name a direction), and a small line of the setup's best score across the day. Above the
 rows sits one line per setup — *Live since 09:15 · 1 gap* — because a setup can
 outlive any single row: the exact strikes change from scan to scan while the idea
 stays live. A dimmed row has dropped out of the latest scan; it keeps its age.
@@ -449,6 +449,7 @@ names which case you are in:
 | **FETCHED 14:32** | The app did not know the name, so it looked everything up at that time. |
 | **NOT FOUND** | Schwab answered and has no quote for the ticker. |
 | **FETCH FAILED** | Schwab could not be reached. The ticker may be fine. |
+| **QUEUED** | The look-up has not answered in 30 seconds — the options service handles one request at a time and may be busy (a whole-chain Strategy Finder scan takes 30–40 s). It is still in line and fills in when it answers; Refresh would only queue a second one. |
 
 Where the app already has a fact, **its own reading wins** over a look-up: the
 Opportunity Board refreshes every minute, a look-up is a snapshot.
@@ -458,13 +459,21 @@ Opportunity Board refreshes every minute, a look-up is a snapshot.
 - **A look-up happens only when you open a name or press Refresh — never on a
   timer.** Each one spends 4–5 calls from the same Schwab allowance the one-minute
   dealer collection depends on. A second visit within 15 minutes reuses the previous
-  look-up.
+  look-up. A Refresh within a minute of the last look-up fetches nothing either —
+  the service keeps what it wrote moments ago and the page says the reading is
+  already current — unless that look-up failed, which is always retried.
 - **Refresh on a scanned symbol fetches nothing.** It re-reads what the app has,
   which is already fresher than a look-up would be.
-- **The dealer walls disappear once the collector stops rather than going to
-  zero**, by the same rule as on the Desk: the band says the walls are withheld,
-  because the last walls drawn are not a current read, and an all-zero overnight
-  grid produces arbitrary ones.
+- **Walls the app collected disappear once the collector stops rather than going
+  to zero**, by the same rule as on the Desk: the band says the walls are withheld,
+  because the last walls drawn are not a current read. Walls the look-up read itself
+  are shown with their time (*walls fetched 14:32*), since the collector never drew
+  them. Either kind is withheld when net gamma reads exactly zero — the empty
+  after-hours grid, whose "walls" are arbitrary — and the band says so.
+- **The link to Dealer Positioning appears only for a name the app already
+  collects.** Dealer Positioning keeps refreshing whatever symbol it is showing every
+  minute; for a name outside the collection each refresh would be a fresh Schwab
+  chain fetch, all session, so the dossier does not offer to start that.
 - **This page is not on the public live site.** It looks names up on demand, which
   the public screens are not allowed to do.
 - **Nothing on this page can place, change, or close a trade.**
@@ -2053,10 +2062,12 @@ never be confused.
 | **MAX LOSS** | Width minus credit. **This is what you actually risk.** | Always compare it to the credit, not to the account. |
 | **R/R %** | Reward-to-risk. | Higher is better, but high R/R usually means low probability. |
 | **POP %** | Probability of profit. | Model-derived. Treat it as a ranking aid, not a forecast. |
-| **IV RANK** | Where current implied volatility sits in its own recent range. | High IV rank is the good environment for *selling* premium. |
+| **VOL RANK** | Where current at-the-money implied volatility sits against a year of *realised* volatility. | High is the good environment for *selling* premium. |
 | **SCORE** | The 0–100 composite. | The default ranking. |
 | **GRADE** | A quality letter. | Quality-gated separately from the score. |
-| **DROPPED** | When a signal stopped qualifying. | Blank means still live. |
+| **SEEN SINCE** | When this setup — symbol, strategy and expiration, whatever its exact strikes — first appeared today, and how many scans it has been live in: *09:15 · 14x*. | A long run is a steady setup; a low count late in the day is one that blinked in. A dash means the app cannot vouch for the start time (for example after its store was rebuilt mid-session), not that the setup is new. |
+| **SCORE TREND** | Which way the setup's best score has moved over the last hour of scans: *▲ +4.2* rising, *▼ −6.1* fading, *▬ +1.0* steady (within two points), *new* under four readings. | A readout, not a filter — nothing sorts or gates on it. |
+| **DROPPED AT** | When a signal stopped qualifying. | Blank means still live. A dropped row keeps its Seen since and Score trend as they were. |
 
 **New signals** are badged. "New" means *unseen since you last viewed this page* — it is
 acknowledged on first paint, keyed on the signal's unique id. Restarting the web app
@@ -4193,7 +4204,7 @@ workflow.
 | Market Scanner · Strategy Finder · Paper · Captured · Calculator | **Expected Move** | Expected Move (new tab) | Symbol, expiry and strikes |
 | Calculator ⇄ Simulator | *(nothing to press)* | the other page | One shared position: symbol, strategy, legs, selected expiration — whichever page was edited last |
 | Flow Alerts | **click a row** | Dealer Positioning | That row's symbol |
-| Symbol | **→ Dealer Positioning** | Dealer Positioning | The dossier's symbol |
+| Symbol | **→ Dealer Positioning** (names the app collects only) | Dealer Positioning | The dossier's symbol |
 | Opportunity Board | **click a symbol** | Symbol | That row's symbol |
 
 Calculator and Simulator both **persist their full state** across navigation — symbol,

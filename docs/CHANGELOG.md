@@ -8,10 +8,117 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 ticker, beside the Desk in the rail. Design and plan:
 `docs/plans/2026-09-17-symbol-dossier-{design,plan}.md`.)
 
+- **What it is.** Type a ticker (or open `/symbol?symbol=MU`) and one screen answers
+  what used to take about eight pages: Structure (walls, flip, net GEX) ·
+  Volatility (Vol Rank, IV vs HV, expected move) · Context (regime, sector and
+  Bull/Bear quadrant, earnings) · Today (signals with age and score trend, flow
+  alerts) · Your position (all four books). An index over the owning pages, never a
+  replacement: every band links out, every number comes from the builder that page
+  uses. No Highcharts. Pinned beside the Desk in the caption-less rail block, so the
+  drawer is now 17 items and `_LANDING_ROUTES` holds `/desk` + `/symbol`
+  (`4acd672`, `d9c6fae`).
+- **Pieces.** `webgui/pages/symbol.py` (widgets + band assembly, one batched 2 s
+  `read_versions` over 11 shared views + the symbol's own dossier view) over the pure
+  `webgui/pages/symbol_facts.py` (`symbol_coverage`, `merge_facts`, `iv_vs_hv`,
+  `expected_move`, the book scan — `74f782c`); a fixed 64×16 px score sparkline in
+  `pages/options/persistence.py` (`b252042`); `services/options_svc/dossier.py` +
+  the `dossier` command (`9b03cf8`, `683705a`, `26dc580`).
+- **The paid path.** A symbol the scanner covers is answered from cache. Anything
+  else enqueues `dossier` on `cmd:options` → `cache:options:dossier:<SYMBOL>`
+  (**per symbol, TTL 900 s** — not a shared slot, which is the `cache:options:gamma`
+  race). One fetch is **4 Schwab calls, 5 at most** (quote, GEX chain +7 d, 1-year
+  daily history, IV chain +20..+45 d, the IV analysis' +60 d fallback); a failed or
+  empty quote spends one. Enqueued only on navigation or Refresh — a source-level
+  test pins that the poll cannot reach it — and replay-guarded (`_REPLAY_GUARDED`).
+  The service then skips a fetch when that symbol's dossier was written under
+  **60 s** ago (`DOSSIER_DEDUP_SEC`, on the envelope's own `ts`), unless it recorded
+  `fetch_failed` (`5d169f5`). **Cache wins** the merge: the fetch only fills gaps.
+- **`error` is two words that must not be confused** (`683705a`): `no_quote` —
+  Schwab answered and quoted nothing ("check the symbol") — and `fetch_failed` — the
+  quote request itself failed, so the ticker may be fine. The first draft folded an
+  outage into "unknown symbol", the dead-service / quiet-tape confusion `copy.py`
+  exists to prevent.
+- **`shared.symbols.clean_symbol` / `SYMBOL_RE`** (`ad4921e`) — the ONE ticker
+  allow-list, used by the page (the `?symbol=` query parameter, which anyone can set),
+  the Opportunity Board link and the service, because the symbol is interpolated into
+  a Redis key name. The Gamma page had refused a `symbol` parameter for want of
+  exactly this allow-list.
+- **Two funnel fields** (`4ff8469`): `hv_current` and `current_iv` on each
+  `cache:options:scan_funnel` account — computed by `run_iv_analysis` all along and
+  dropped by the projection. Both **percents**. They make IV vs HV free for every
+  scanned symbol. IV vs HV's 1.2 / 0.9 bands and words are
+  `strategy_scoring.infer_market_view`'s, pinned by `test_cross_tier_mirrors.py`.
+- **`structure_positions` moved to `webgui/pages/structure.py`** (`d506ed5`) with
+  `flip_read`, `regime_word`, `walls_trustworthy` and `structure_map`; `desk.py`
+  imports them back by name, so `desk.structure_positions` still resolves for its
+  tests. Destination grepped for every imported name first — the `scorecard.py` move
+  found two shadowing bugs that way.
+- **Walls are gated on where they came from** (`d1ba6ef`, `fce4e7b`, `144a33c`). A
+  cached wall needs a live collector (the Desk's rule; *stopped* and *data age
+  unknown* worded apart); a fetched wall is shown as *walls fetched HH:MM*, since the
+  collector never drew it. A net GEX of exactly `0.0` is the after-hours all-zero
+  grid whose walls are an argmax tie-break: the service publishes no walls for it
+  (`dossier.zero_grid_walls_ok`, mirroring `structure.walls_trustworthy`) and the
+  page says why. The bar needs both walls, so a mixed pair draws none.
+- **→ Dealer Positioning only for a scanned or collected symbol** (`8fda0ab`). The
+  Gamma page points the sticky `cache:options:gamma` slot at whatever it is handed
+  and the service refreshes it every GEX tick — for an uncollected symbol, a chain
+  fetch a minute, all session.
+- **QUEUED** (`8fda0ab`). `cmd:options` has one consumer, so a look-up can sit behind
+  a 26–40 s whole-chain Strategy Finder scan and outlast the 30 s overlay backstop.
+  The chip then reads QUEUED and the page says the answer will appear — it does not
+  invite Refresh, which would queue a second paid fetch.
+- **Opportunity Board → dossier** (`278bcd4`). The symbol cell is a link, drawn only
+  where `shell.can_navigate("/symbol")` holds — the public `/opportunity` copy stays
+  plain text, and `matrix.py` names the route as a string rather than importing the
+  page into the public import closure.
+- **Private only.** The page enqueues, which the public process refuses, so it is not
+  in `live_screens.SCREENS`.
+- **Review fixes** (`59f97da`): a version race, a double Refresh, and stale walls.
+  And (`d1ba6ef`) a first read that raises no longer leaves blank bands forever —
+  each band paints its cold line and the poll retries the read until it lands.
 - **Expected Move no longer toasts "Symbol + expiry required." on a hand-off with no
-  expiry.** It loads that symbol's expirations silently instead. The dossier's link
-  is the new such caller; any existing caller that hands over a symbol without an
-  expiry now gets the same quiet chain load where it used to get the warning.
+  expiry** (`0fced08`). It loads that symbol's expirations silently instead. The
+  dossier's link is the new such caller; any existing caller that hands over a symbol
+  without an expiry now gets the same quiet chain load where it used to get the
+  warning.
+
+**Prior —** 2026-09-17 (**Signal age and score trend on the Market Scanner.** How
+long a setup has been in today's scan, and whether its score is rising or fading.
+Design and plan: `docs/plans/2026-09-17-signal-persistence-{design,plan}.md`.)
+
+- **The premise was wrong.** The feature was proposed as "the day union already holds
+  this". It did not: `merge_day_signals` added only `live` / `stale_since`, and on
+  every reappearance replaced the carried row with the fresh one — so a signal that
+  vanished and came back was byte-identical to one present all day.
+- **Keyed on the setup, not the signal** (`2dc3d30`, `ffb8510`, `761af1d`). The `id`
+  encodes strikes, and strikes step with spot (~30% of rows churn per scan), so age on
+  `id` would call a steady setup a stream of newcomers. `setup_key =
+  SYMBOL|TYPE|EXPIRATION`, stamped Tier-2 side on every row; a lookup, never a row
+  key. Missing part → `null`, never folded into another group.
+- **A `setups` map on `cache:options:scan_day`** (`b3e6adb`, `8a74192`, `25f4571`),
+  merged apart from the row lists so a fresh row cannot erase it:
+  `{seen, scores[] (last 40), gaps, last_seq, last_live, first_seen | age_unknown}`,
+  plus a day `scan_seq` so a gap is detected by sequence, not by clock. Pruned after
+  the row cap and never of a key a surviving row references; built in its own `try`
+  (`options.merge_setups` degrade) so a bug empties the map instead of freezing the
+  day union.
+- **`first_seen` is omitted, never fabricated** (`47c30e2`, `25a518c`). With no usable
+  previous envelope outside the scan window's first 15 minutes the entry is
+  `age_unknown` — the 2026-07-16 `first_seen` was deleted for stamping every 09:00
+  signal 12:00 after a restart. The union is stamped in **CT**, not host-local time
+  (`d9cf1d1`), or that window is unreachable on a host off Central.
+- **Measured on prod before shipping** (`08dbcad`): the day union was **0.88 MB** (487
+  rows, 478 Directional), not the 4.5 MB estimated; 221 setups at **2.2 rows per
+  setup**; the map + row stamps add **+102 KB (+11.0%)** at 40 scores (+65 KB at 12).
+  The pre-registered 5%-of-payload threshold was withdrawn as mis-specified against a
+  payload that varies 5×; 40 stays.
+- **Two columns on all three tabs** (`4790b05`, `6051e35`, `4db0a81`, `6e278c1`,
+  `727faa5`): **Seen since** (`09:15 · 14x`) and **Score trend** (`▲ +4.2` / `▬ +1.0` /
+  `▼ −6.1` / `new`; window 4 readings, deadband 2.0), beside **Dropped at**. A dropped
+  row keeps its values; an absent map dashes every row. Readout only — no sort, filter
+  or checklist line. Mutation tests killed three mutants the wiring survived
+  (`ba4e835`).
 
 **Prior —** 2026-09-17 (**The EOD report runs itself at 15:15 CT.** Operator
 request: auto-run it at 3:15 each trading day.)

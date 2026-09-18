@@ -440,7 +440,7 @@ to the page that owns those facts:
 
 | Band | What it gives you | Link |
 |------|-------------------|------|
-| **Structure** | A bar from the put wall to the call wall with spot and the gamma flip marked on it, which side of the flip price sits on and by how much, net gamma and the pins-or-runs word | Dealer Positioning, already set to this symbol |
+| **Structure** | A bar from the put wall to the call wall with spot and the gamma flip marked on it, which side of the flip price sits on and by how much, net gamma and the pins-or-runs word | Dealer Positioning, already set to this symbol — shown only for a name the app already collects |
 | **Volatility** | **Vol Rank** as a bar, **IV vs HV** with its word (*high* at 1.2× or more, *low* at 0.9× or less, otherwise *mid*), ATM implied vol and whether it is rising or falling, and the one-standard-deviation **expected move** for a day and a week | Expected Move |
 | **Context** | The market regime word, the name's sector and industry, its quadrant on the Bull / Bear map and its rank there (with last session's rank), and the next **earnings** date with how many days away it is | Bull / Bear Map |
 | **Today** | Two columns. **Signals**: this name's rows from today's Market Scanner, each with the time it was first seen and how many scans it has survived, its score trend, and a small line of the score across the day — plus one line per setup, such as *Live since 09:15 · 1 gap*. **Flow alerts**: this name's alerts, newest first | Market Scanner · Flow Alerts |
@@ -461,12 +461,25 @@ to the page that owns those facts:
   spelling.
 - **FETCH FAILED** — Schwab could not be reached. The ticker may be fine; press
   **Refresh** in a minute.
+- **QUEUED** — the look-up has not answered after 30 seconds, usually because the
+  options service is busy with other work (a whole-chain Strategy Finder scan can
+  take 30–40 seconds). The request is still in line; the bands fill in when it
+  answers. Pressing Refresh here would only queue a second paid look-up behind the
+  first.
 
 ⚠ **An on-demand look-up costs 4–5 Schwab calls** from the same allowance the
 live dealer charts depend on. So the page looks a name up **only** when you open
 a symbol it does not already cover, or when you press **Refresh** — never on its
 own timer. A second visit within 15 minutes reuses the previous look-up and costs
-nothing. For a **scanned** symbol Refresh just re-reads what the app already has.
+nothing. Pressing **Refresh** within a minute of the last look-up fetches nothing
+either — the page says the reading is already current — unless that look-up failed,
+which is always retried. For a **scanned** symbol Refresh just re-reads
+what the app already has.
+
+**Walls after the close.** For a name the app collects, the walls disappear once the
+dealer collector stops for the day, and the band says why. Walls from an on-demand
+look-up stay, marked *walls fetched 14:32*. If net gamma reads exactly zero — what an
+empty after-hours chain looks like — the walls are withheld either way.
 
 **Three kinds of empty are worded differently on purpose.** *No data yet — the
 options feed hasn't published this session* means the service has not produced
@@ -1151,6 +1164,21 @@ days; you rarely need to press **Run scan**.
 > with the time it dropped out, and its **Paper** button is removed — its price is
 > stale, so a paper entry from it would be fictional. The status line's "N live
 > signals" counts only those still qualifying.
+
+**How long has it been there, and is it getting better?** Two columns beside
+**Dropped at** answer that, on all three tabs:
+
+- **Seen since** — when the setup first appeared today and how many scans it has
+  been live in, e.g. *09:15 · 14x*. A *setup* is the symbol, strategy and
+  expiration: when the exact strikes shift a notch as the price moves, the age
+  carries on rather than starting again. A dash means the app cannot vouch for the
+  start time — not that the signal is new.
+- **Score trend** — how the setup's best score has moved over the last hour:
+  *▲ +4.2* rising, *▼ −6.1* fading, *▬ +1.0* steady (within two points), or *new*
+  until it has four scans behind it.
+
+A setup that has held all morning with a steady or rising score is a different thing
+from one that appeared in a single scan. Neither column filters or sorts anything.
 
 > **An empty Directional tab is normal.** The engine only emits candidates scoring
 > 50 or better, so empty means nothing cleared the bar rather than something

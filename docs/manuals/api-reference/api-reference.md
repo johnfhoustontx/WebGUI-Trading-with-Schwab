@@ -19,6 +19,7 @@ keys that feed it. Menu order matches the rail.
 
 | Menu page | Service | Primary cache key(s) |
 |---|---|---|
+| **Symbol** | `options_svc` (+ `sentiment_svc` for context) | `cache:options:matrix`, `:scan_funnel`, `:scan_day`, `:gex_status`, `:flow_alerts`, the four paper books, `cache:sentiment:regime`, `:bullbear`; `cache:options:dossier:<SYMBOL>` via the `dossier` command |
 | **Dealer Positioning** | `options_svc` :8211 | `cache:options:gamma`, `:gamma_hist_*`, `:gamma_symbols`, `:net_premium`, `:gamma_analyze*`, `:gamma_briefings` |
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
 | **Flow Alerts** | `options_svc` | `cache:options:flow_alerts` |
@@ -257,6 +258,7 @@ skip-unchanged).
 | `calc_compute` | `{strategy, spot, iv, rate, ivadj, qty, expiry, legs[], range_*}` (each leg carries its own `expiry`/`qty`; `strategy="CUSTOM"` or any non-PCS/CCS/IC/single code → generic numeric summary) | `cache:options:calc_result` |
 | `calc_rate` | `{request_id, symbol, structure, legs[]}` — `legs` in the Calculator's shape (`option_type`, `side`, `strike`, `expiry`, `qty`, `premium`); `structure` a Calculator template code or `"CUSTOM"`. Grades against `cache:options:calc_chain` (no chain fetch) with the Strategy Finder's `score_all` and `stamp_candidate`, without the quality cut or the volatility drop. Replay-guarded | `cache:options:calc_rating` — `{request_id, symbol, legs, row, error}`: `row` is a Strategy Finder candidate plus `grade`, `composite_score`, the checklist stamps, `vol_gate_blocks` and `structure_known`; `error` is a sentence when `row` is None (no chain, another symbol's chain, a contract the chain lacks, a failure). Always written, so a request is never left unanswered |
 | `expected_move` | `{symbol, expiry, legs[], lookback}` | `cache:options:expected_move` |
+| `dossier` | `{symbol}` — cleaned by `shared.symbols.clean_symbol` (upper-cased, `[A-Z$][A-Z0-9$.]{0,7}`); anything it refuses is logged and writes nothing, because the symbol becomes part of the key name. Replay-guarded (a command older than 180 s is dropped). **Deduplicated** (`DOSSIER_DEDUP_SEC` = 60): if that symbol's dossier was written less than 60 s ago — measured on the envelope's own `ts`, the write time — the command is dropped and nothing is fetched or re-published. A recent success or `no_quote` blocks the fetch; a recent `fetch_failed` does **not** (a retry costs at most one quote call). An unreadable envelope counts as no recent dossier. Otherwise one fetch of **4 Schwab calls, 5 at most** (quote · GEX chain today..+7 d · 1-year daily price history · IV chain +20..+45 d · the IV analysis' own today..+60 d fallback when that window is empty); a `no_quote` or `fetch_failed` answer spends one | **`cache:options:dossier:<SYMBOL>`** (event `events:options:dossier:<SYMBOL>`), **TTL 900 s**, per symbol so two tabs never share a slot — `{symbol, error, fetched_at, spot, day_pct, flip, put_wall, call_wall, net_gex, iv_rank, current_iv, hv_current, earnings_status, earnings_date}`. Every key is always present; an absent reading is `null`, never 0. `fetched_at` is naive Central ISO. `current_iv` / `hv_current` are **percents** (48.5 = 48.5%); `iv_rank` is the scan's Vol Rank; `day_pct` is always `null` (no day-change parser is shared for a raw quote). `earnings_status` is three-valued: `upcoming` · `none_scheduled` · `not_listed` (the calendar has no data — not "no report"). Walls are assigned by side of spot, and both are `null` when `net_gex` is exactly `0.0` (the after-hours all-zero grid, whose walls would be an argmax tie-break); `flip` is kept either way. `error` is `null` on success, `"no_quote"` when Schwab **answered** and quoted nothing usable for the symbol (a typo — the other legs are skipped), or `"fetch_failed"` when the quote request itself failed (non-200 or raised: proxy down, timeout, token) — the ticker may be fine. One of the three later legs failing blanks only its own keys and records a degrade (`options.dossier_gex` · `_vol` · `_earnings`) |
 | `rescue` | `{position_id}` | `cache:options:rescue:<position_id>` |
 | `rescue_apply` | `{position_id, candidate}` | `cache:options:rescue:<position_id>` |
 
@@ -286,6 +288,35 @@ date. Every stamp is `null` when unknown, never a guessed zero.
 | `vol_floor` | The IV-rank floor for the row's trade type (`config/scanner.toml`); a Directional row takes its DTE window's — DTE 0–4 the 0-DTE floor, later the swing floor |
 | `iv_rank_known` | Whether the row had an IV rank to gate on |
 | `earnings_status` · `earnings_date` | The earnings coverage and next report date. Stamped on scanner and Strategy Finder rows; an income row already carries its own |
+
+**`cache:options:scan_day`** — the day union the Market Scanner and the Symbol
+Dossier render: `{date, scan_seq, signals_0dte[], signals_swing[],
+signals_directional[], setups, truncated?}`. `date` is the **Central** trading date —
+check it before trusting any row's `live`, because a failed first merge of a new day
+leaves yesterday's envelope in place. `scan_seq` is this scan's 1-based number within
+the day. Each row is the scan's row plus `live`, `stale_since` (when it dropped out;
+`null` while live) and **`setup_key`** — `SYMBOL|TYPE|EXPIRATION`, strikes excluded
+(the row's front expiration — its `legs` only when the top-level field is
+unreadable), or `null` when a part is
+missing. ⚠ `setup_key` is a **lookup into `setups`, never a row key**: row identity
+stays `id`, and two adjacent strikes on one expiry are two rows sharing one entry.
+`setups` is `{setup_key: {seen, scores[], gaps, last_seq, last_live, first_seen |
+age_unknown}}` — `seen` the scans it was live in, `scores` its best composite per
+scan (the last 40), `gaps` how many times it went absent and came back. A setup whose
+start was not observed (the map rebuilt mid-session) carries `age_unknown: true` and
+**no** `first_seen`; nothing is ever stamped with the current time to fill the gap.
+`setups` is always present; an empty map on a scan whose persistence step failed
+(degrade `options.merge_setups`) means "no reading", never "all new". `truncated`
+(`{list: n_dropped}`) appears only when the 2000-per-list cap evicted stale rows; the
+map is trimmed after the rows and never loses an entry a surviving row references.
+
+**`cache:options:scan_funnel`** — `{timestamp, symbols: {SYMBOL: account}}`, the
+per-symbol account of why a symbol did or did not produce a signal. Each account is
+`{price, iv_rank, hv_current, current_iv, earnings_date, stop, buckets}`:
+`hv_current` is 30-day realised volatility and `current_iv` the ATM implied
+volatility, both **percents**, `null` when the IV analysis did not measure them;
+`stop` is `null`, `"no_quote"` or `"no_data"`; `buckets` is keyed `0DTE` / `SWING` /
+`DIRECTIONAL`. Written after every scan with `skip_unchanged`.
 
 **`cache:options:ledger_caps`** (event `events:options:ledger_caps`) — the Paper
 Ledger's book, as the Paper dialog's preview reads it:
@@ -532,7 +563,9 @@ cmd:sentiment
 
 ```
 cache:options:scan             events:options:scan          (ScanResult contract)
-cache:options:scan_day         events:options:scan_day      (the DAY UNION the Scanner renders)
+cache:options:scan_day         events:options:scan_day      (the DAY UNION the Scanner renders, + setups)
+cache:options:scan_funnel      events:options:scan_funnel   (per-symbol "why no trade?" account)
+cache:options:dossier:<SYMBOL> events:options:dossier:<SYMBOL>   (TTL 900 s; the Symbol Dossier's look-up)
 cache:options:matrix           events:options:matrix        (Opportunity Board)
 cache:options:flow_alerts      events:options:flow_alerts   (Flow Alerts, today only)
 cache:options:flow_alert_cooldowns  (uncapped seen-map behind the per-symbol counts)

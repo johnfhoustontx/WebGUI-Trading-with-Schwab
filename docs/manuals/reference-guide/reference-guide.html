@@ -856,7 +856,7 @@ a new trade, because the position band searches all four books at once.</p>
 <tr>
 <td><strong>Structure</strong></td>
 <td>Where is price between the put wall and the call wall, and which side of the gamma flip?</td>
-<td><a href="#dealer-positioning">Dealer Positioning</a>, already set to the symbol</td>
+<td><a href="#dealer-positioning">Dealer Positioning</a>, already set to the symbol — offered only for a name the app already collects (see the caveats)</td>
 </tr>
 <tr>
 <td><strong>Volatility</strong></td>
@@ -924,8 +924,8 @@ the map does not rank says so rather than inventing a quadrant.</p>
 </table>
 <p><strong>Signals.</strong> Each row is a Market Scanner signal for this name, with the time its
 setup was first seen and how many scans it has survived (<em>09:15 · 3x</em>), its score
-trend (<em>▲ +4.0</em>, <em>▼ −3.5</em>, <em>steady</em>, or <em>new</em> while there are too few readings to name
-a direction), and a small line of the setup's best score across the day. Above the
+trend (<em>▲ +4.0</em> rising, <em>▼ −3.5</em> fading, <em>▬ +1.0</em> steady within two points, or <em>new</em>
+while there are fewer than four readings — an hour of scans — to name a direction), and a small line of the setup's best score across the day. Above the
 rows sits one line per setup — <em>Live since 09:15 · 1 gap</em> — because a setup can
 outlive any single row: the exact strikes change from scan to scan while the idea
 stays live. A dimmed row has dropped out of the latest scan; it keeps its age.</p>
@@ -982,6 +982,10 @@ names which case you are in:</p>
 <td><strong>FETCH FAILED</strong></td>
 <td>Schwab could not be reached. The ticker may be fine.</td>
 </tr>
+<tr>
+<td><strong>QUEUED</strong></td>
+<td>The look-up has not answered in 30 seconds — the options service handles one request at a time and may be busy (a whole-chain Strategy Finder scan takes 30–40 s). It is still in line and fills in when it answers; Refresh would only queue a second one.</td>
+</tr>
 </tbody>
 </table>
 <p>Where the app already has a fact, <strong>its own reading wins</strong> over a look-up: the
@@ -991,13 +995,21 @@ Opportunity Board refreshes every minute, a look-up is a snapshot.</p>
 <li><strong>A look-up happens only when you open a name or press Refresh — never on a
   timer.</strong> Each one spends 4–5 calls from the same Schwab allowance the one-minute
   dealer collection depends on. A second visit within 15 minutes reuses the previous
-  look-up.</li>
+  look-up. A Refresh within a minute of the last look-up fetches nothing either —
+  the service keeps what it wrote moments ago and the page says the reading is
+  already current — unless that look-up failed, which is always retried.</li>
 <li><strong>Refresh on a scanned symbol fetches nothing.</strong> It re-reads what the app has,
   which is already fresher than a look-up would be.</li>
-<li><strong>The dealer walls disappear once the collector stops rather than going to
-  zero</strong>, by the same rule as on the Desk: the band says the walls are withheld,
-  because the last walls drawn are not a current read, and an all-zero overnight
-  grid produces arbitrary ones.</li>
+<li><strong>Walls the app collected disappear once the collector stops rather than going
+  to zero</strong>, by the same rule as on the Desk: the band says the walls are withheld,
+  because the last walls drawn are not a current read. Walls the look-up read itself
+  are shown with their time (<em>walls fetched 14:32</em>), since the collector never drew
+  them. Either kind is withheld when net gamma reads exactly zero — the empty
+  after-hours grid, whose "walls" are arbitrary — and the band says so.</li>
+<li><strong>The link to Dealer Positioning appears only for a name the app already
+  collects.</strong> Dealer Positioning keeps refreshing whatever symbol it is showing every
+  minute; for a name outside the collection each refresh would be a fresh Schwab
+  chain fetch, all session, so the dossier does not offer to start that.</li>
 <li><strong>This page is not on the public live site.</strong> It looks names up on demand, which
   the public screens are not allowed to do.</li>
 <li><strong>Nothing on this page can place, change, or close a trade.</strong></li>
@@ -3138,9 +3150,9 @@ never be confused.</p>
 <td>Model-derived. Treat it as a ranking aid, not a forecast.</td>
 </tr>
 <tr>
-<td><strong>IV RANK</strong></td>
-<td>Where current implied volatility sits in its own recent range.</td>
-<td>High IV rank is the good environment for <em>selling</em> premium.</td>
+<td><strong>VOL RANK</strong></td>
+<td>Where current at-the-money implied volatility sits against a year of <em>realised</em> volatility.</td>
+<td>High is the good environment for <em>selling</em> premium.</td>
 </tr>
 <tr>
 <td><strong>SCORE</strong></td>
@@ -3153,9 +3165,19 @@ never be confused.</p>
 <td>Quality-gated separately from the score.</td>
 </tr>
 <tr>
-<td><strong>DROPPED</strong></td>
+<td><strong>SEEN SINCE</strong></td>
+<td>When this setup — symbol, strategy and expiration, whatever its exact strikes — first appeared today, and how many scans it has been live in: <em>09:15 · 14x</em>.</td>
+<td>A long run is a steady setup; a low count late in the day is one that blinked in. A dash means the app cannot vouch for the start time (for example after its store was rebuilt mid-session), not that the setup is new.</td>
+</tr>
+<tr>
+<td><strong>SCORE TREND</strong></td>
+<td>Which way the setup's best score has moved over the last hour of scans: <em>▲ +4.2</em> rising, <em>▼ −6.1</em> fading, <em>▬ +1.0</em> steady (within two points), <em>new</em> under four readings.</td>
+<td>A readout, not a filter — nothing sorts or gates on it.</td>
+</tr>
+<tr>
+<td><strong>DROPPED AT</strong></td>
 <td>When a signal stopped qualifying.</td>
-<td>Blank means still live.</td>
+<td>Blank means still live. A dropped row keeps its Seen since and Score trend as they were.</td>
 </tr>
 </tbody>
 </table>
@@ -5923,7 +5945,7 @@ workflow.</p>
 </tr>
 <tr>
 <td>Symbol</td>
-<td><strong>→ Dealer Positioning</strong></td>
+<td><strong>→ Dealer Positioning</strong> (names the app collects only)</td>
 <td>Dealer Positioning</td>
 <td>The dossier's symbol</td>
 </tr>
