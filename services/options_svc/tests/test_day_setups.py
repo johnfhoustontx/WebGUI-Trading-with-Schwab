@@ -344,3 +344,55 @@ def test_a_cold_start_BEFORE_the_window_opens_claims_nothing():
     # "Run scan" is subject to no window at all — so we cannot know we are
     # first, and the safe direction is a dash rather than a claim.
     assert compute._trustworthy_baseline(False, "2026-09-17T03:00:00") is False
+
+
+def test_cap_never_evicts_a_setup_a_surviving_row_references():
+    # _cap_day_list evicts oldest-stale-first, so the naive order deletes the
+    # setup entry of a row that is still on screen.
+    setups = {f"S{i}|PCS|2026-10-17": {"seen": 1, "scores": [], "gaps": 0,
+                                       "last_live": f"t{i}"}
+              for i in range(10)}
+    referenced = {"S0|PCS|2026-10-17", "S1|PCS|2026-10-17"}
+    kept, dropped = compute._cap_setups(setups, referenced, max_entries=3)
+    assert referenced <= set(kept)
+    assert dropped == 7
+
+
+def test_cap_evicts_oldest_last_live_first():
+    setups = {"old|PCS|E": {"last_live": "2026-09-17T09:00:00"},
+              "new|PCS|E": {"last_live": "2026-09-17T14:00:00"}}
+    kept, _ = compute._cap_setups(setups, set(), max_entries=1)
+    assert set(kept) == {"new|PCS|E"}
+
+
+def test_cap_is_a_no_op_under_the_limit():
+    setups = {"a|PCS|E": {"last_live": "t"}}
+    kept, dropped = compute._cap_setups(setups, set(), max_entries=10)
+    assert kept == setups and dropped == 0
+
+
+def test_an_entry_with_no_last_live_is_evicted_first_and_never_raises():
+    # Reachable, which is what makes this worth pinning: merge_setups normalises
+    # seen/gaps/scores off a corrupt Redis envelope but carries the entry
+    # WITHOUT touching last_live, so a live map can genuinely hold one that has
+    # none. An unreadable age must lose the eviction race rather than win it by
+    # sorting as the literal "None" — and the sort must not raise on a mix of
+    # None and str, which is what the `str(... or "")` buys.
+    setups = {"nostamp|PCS|E": {"seen": 3},
+              "stamped|PCS|E": {"last_live": "2026-09-17T09:00:00"}}
+    kept, dropped = compute._cap_setups(setups, set(), max_entries=1)
+    assert set(kept) == {"stamped|PCS|E"}
+    assert dropped == 1
+
+
+def test_a_non_string_last_live_does_not_crash_the_eviction_sort():
+    # Reachable for the same reason: merge_setups copies last_live VERBATIM off
+    # the envelope, normalising only seen/gaps/scores. Without the str() the
+    # sort raises TypeError comparing int to str — which would take the whole
+    # cap down rather than cost one entry its place in the order. The winner is
+    # deliberately not asserted: which side of a digit-vs-digit comparison a
+    # corrupt stamp lands on is an accident, not a decision.
+    setups = {"numeric|PCS|E": {"last_live": 1_700_000_000},
+              "stamped|PCS|E": {"last_live": "2026-09-17T09:00:00"}}
+    kept, dropped = compute._cap_setups(setups, set(), max_entries=1)
+    assert dropped == 1 and len(kept) == 1

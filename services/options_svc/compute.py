@@ -332,6 +332,34 @@ def _cap_day_list(merged, key, max_per_list):
     return kept, dropped
 
 
+def _cap_setups(setups, referenced, max_entries=None):
+    """Trim the persistence map, evicting UNREFERENCED entries oldest-first.
+
+    ⚠ Runs AFTER ``_cap_day_list``, and never evicts a key a surviving row still
+    points at. The row cap evicts oldest-stale-first — it never evicts a LIVE row
+    at all — so the naive order would delete the setup entry of a STALE row that
+    is still on screen, and that row would render with a blank age for the rest
+    of the day. Reviewing a dropped signal is the point of the day union.
+
+    Returns ``(kept, n_dropped)``.
+    """
+    max_entries = _SETUP_MAX if max_entries is None else max_entries
+    over = len(setups) - max_entries
+    if over <= 0:
+        return setups, 0
+    evictable = [k for k in setups if k not in referenced]
+    evictable.sort(key=lambda k: str((setups[k] or {}).get("last_live") or ""))
+    doomed = set(evictable[:over])
+    if len(setups) - len(doomed) > max_entries:
+        log.warning("day setups: %d referenced entries exceed the %d cap — "
+                    "keeping them all", len(setups) - len(doomed), max_entries)
+    kept = {k: v for k, v in setups.items() if k not in doomed}
+    if doomed:
+        log.warning("day setups: evicted %d oldest unreferenced setup(s) at the "
+                    "%d cap", len(doomed), max_entries)
+    return kept, len(doomed)
+
+
 def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
     """Merge one scan's signals into the day's accumulated union. PURE.
 
