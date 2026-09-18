@@ -448,8 +448,9 @@ to the page that owns those facts:
 
 **The chip beside the price says where the numbers came from:**
 
-- **SCANNED** — the app scans this name all day, so every band is filled from
-  what it already has. Nothing is fetched.
+- **SCANNED 09:30** — the app scans this name all day, so every band is filled
+  from what it already has, and nothing is fetched. The time is the last scan's,
+  so after the close you can see how old the Vol Rank and IV vs HV are.
 - **COLLECTED** — the app tracks this name's dealer structure (the `$VIX` and
   sector-ETF kind) but does not scan it, so Vol Rank, IV vs HV and earnings are
   looked up on demand. After a look-up the chip reads **COLLECTED · FETCHED

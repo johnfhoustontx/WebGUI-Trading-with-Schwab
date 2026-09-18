@@ -435,7 +435,7 @@ stays live. A dimmed row has dropped out of the latest scan; it keeps its age.
 
 | | |
 |---|---|
-| Views | `options:matrix`, `options:scan_funnel`, `options:scan_day`, `options:flow_alerts`, the four paper books, `sentiment:regime`, `sentiment:bullbear` — one batched poll every 2 s |
+| Views | `options:matrix`, `options:scan_funnel`, `options:scan_day`, `options:gex_status` (whether the walls are current), `options:flow_alerts`, the four paper books, `sentiment:regime`, `sentiment:bullbear` — one batched poll every 2 s |
 | On-demand | `cmd:options` → `dossier` → `cache:options:dossier:<SYMBOL>`, kept 15 minutes |
 | Cost | Nothing for a scanned symbol. **4–5 Schwab calls** per on-demand look-up |
 
@@ -444,7 +444,7 @@ names which case you are in:
 
 | Chip | Meaning |
 |---|---|
-| **SCANNED** | The app scans this name all day. Every band is filled from what it already has; nothing is fetched, not even on Refresh. |
+| **SCANNED 09:30** | The app scans this name all day. Every band is filled from what it already has; nothing is fetched, not even on Refresh. The time is the last scan's, so after the close the Vol Rank and IV vs HV readings carry their age. |
 | **COLLECTED** | The app tracks the dealer structure (the `$VIX` and sector-ETF kind) but does not scan it, so Vol Rank, IV vs HV and earnings are looked up. |
 | **FETCHED 14:32** | The app did not know the name, so it looked everything up at that time. |
 | **NOT FOUND** | Schwab answered and has no quote for the ticker. |
@@ -461,8 +461,10 @@ Opportunity Board refreshes every minute, a look-up is a snapshot.
   look-up.
 - **Refresh on a scanned symbol fetches nothing.** It re-reads what the app has,
   which is already fresher than a look-up would be.
-- **The dealer walls disappear after the close rather than going to zero**, for the
-  same reason as on the Desk: an all-zero overnight grid produces arbitrary walls.
+- **The dealer walls disappear once the collector stops rather than going to
+  zero**, by the same rule as on the Desk: the band says the walls are withheld,
+  because the last walls drawn are not a current read, and an all-zero overnight
+  grid produces arbitrary ones.
 - **This page is not on the public live site.** It looks names up on demand, which
   the public screens are not allowed to do.
 - **Nothing on this page can place, change, or close a trade.**

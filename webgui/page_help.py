@@ -163,8 +163,9 @@ page that owns the fact, so this is an index, not a replacement.
   ledger, Claude's book and captured signals, with the rescue flag where one
   exists.
 
-The chip beside the price says where the numbers came from. **Scanned** — the
-app watches this name all day and everything is already here. **Collected** —
+The chip beside the price says where the numbers came from. **Scanned 09:30** —
+the app watches this name all day and everything is already here, as of that
+scan (after the close, that is how old the volatility numbers are). **Collected** —
 the app tracks its dealer structure but does not scan it. **Fetched 14:32** —
 the app did not know this name, so it looked it up on demand.
 

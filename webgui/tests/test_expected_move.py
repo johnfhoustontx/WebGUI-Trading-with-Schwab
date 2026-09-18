@@ -573,3 +573,29 @@ def test_handoff_multileg_survives_chain_auto_select_strike(monkeypatch):
     redraws = [c for c in calls if c[1].get("type") == "expected_move"]
     assert len(redraws) == 2
     assert redraws[-1][1]["args"]["legs"] == handed_legs
+
+
+def test_a_symbol_only_hand_off_loads_the_chain_without_a_warning(monkeypatch):
+    """The Symbol Dossier hands over a symbol with no expiry. That must open
+    the page on the symbol and load its expirations — not also try to draw and
+    toast "Symbol + expiry required." at a user who asked for nothing wrong."""
+    from nicegui import ui
+
+    import bus_client
+
+    bus_client.reset()
+    handoff.take_pending_expected_move()
+    calls, toasts = [], []
+    monkeypatch.setattr(bus_client, "request",
+                        lambda domain, command: calls.append((domain, command)))
+    monkeypatch.setattr(ui, "notify", lambda msg, **k: toasts.append(msg))
+    handoff.set_pending_expected_move({"symbol": "MU"})
+
+    with ui.card() as card:
+        em.render()
+
+    assert _find(card, ui.input, "Symbol").value == "MU"
+    kinds = [c[1].get("type") for c in calls]
+    assert "em_chain" in kinds
+    assert "expected_move" not in kinds
+    assert not [t for t in toasts if "expiry required" in t]

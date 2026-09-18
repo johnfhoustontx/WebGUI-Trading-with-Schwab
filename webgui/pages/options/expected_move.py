@@ -514,7 +514,11 @@ def render():
                 state["seeding"] = False
         state["ver"] = bus_client.read_version("options:expected_move")
         state["chain_ver"] = bus_client.read_version("options:em_chain")
-        _enqueue(pending)
+        # A symbol-only hand-off (the Symbol Dossier's link) has nothing to
+        # draw yet: load its expirations and let the user pick one, rather than
+        # toasting "Symbol + expiry required." at them.
+        if pending.get("expiry"):
+            _enqueue(pending)
         _load_chain()
     else:
         state["ver"] = bus_client.read_version("options:expected_move")
