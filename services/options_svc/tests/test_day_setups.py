@@ -329,3 +329,18 @@ def test_baseline_degrades_to_untrustworthy_when_the_window_is_unreadable(
     monkeypatch.setattr(mc, "window_bounds",
                         lambda name: (_ for _ in ()).throw(RuntimeError("boom")))
     assert compute._trustworthy_baseline(False, "2026-09-17T08:02:00") is False
+
+
+def test_a_scan_at_the_slot_boundary_is_not_the_first_slot():
+    # 08:15:00 belongs to the SECOND slot (autoscan_due buckets on
+    # minute // 15), so the bound is exclusive.
+    assert compute._trustworthy_baseline(False, "2026-09-17T08:15:00") is False
+
+
+def test_a_cold_start_BEFORE_the_window_opens_claims_nothing():
+    # Deliberate, and the reason is the asymmetry: inside the first slot a cold
+    # start is almost certainly the day's genuine first scan. Before the window
+    # opens there is no bound on how many manual scans may already have run —
+    # "Run scan" is subject to no window at all — so we cannot know we are
+    # first, and the safe direction is a dash rather than a claim.
+    assert compute._trustworthy_baseline(False, "2026-09-17T03:00:00") is False

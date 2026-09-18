@@ -216,6 +216,11 @@ def _trustworthy_baseline(prev_usable, now_iso):
     if prev_usable:
         return True
     try:
+        # ⚠ Keep this import INSIDE the function, and keep this SPELLING. The
+        # degrade test patches the module attribute `market_calendar.
+        # window_bounds`, so the call must stay an attribute lookup on the
+        # module; `from shared.market_calendar import window_bounds` binds the
+        # function object instead and the test would silently assert nothing.
         from shared import market_calendar as _mc
         start, _end = _mc.window_bounds("scan")
         now = _dt.datetime.fromisoformat(str(now_iso))
