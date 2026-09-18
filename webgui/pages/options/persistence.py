@@ -113,8 +113,12 @@ def persistence_facts(setup):
     a list, so this cannot arise today; the note is so nobody introduces one.
     """
     if not isinstance(setup, dict):
+        # ⚠ gaps None, not 0 — ONE meaning for one key across both exits: None is
+        # "no claim", an int is a reading. This branch returned 0 while the
+        # unreadable-value branch below returned None, so `facts["gaps"] > 0`
+        # raised on one path through this function and passed on the other.
         return {"since": DASH, "trend": "new", "trend_text": DASH,
-                "gaps": 0, "detail": ""}
+                "gaps": None, "detail": ""}
 
     # ⚠ num, NOT float_or: float_or is PERMISSIVE by design and passes NaN
     # through, and int(float("nan")) raises ValueError — which would propagate

@@ -22,7 +22,8 @@ Two cache views are read, and the split is deliberate:
   reads it and must never be offered a signal that no longer qualifies.
 
 The pure display transforms (``signal_columns``, ``signal_rows``,
-``directional_columns``, ``directional_rows``, ``stamp_stale``, ``day_is_today``,
+``directional_columns``, ``directional_rows``, ``stamp_stale``,
+``stamp_persistence``, ``day_is_today``,
 ``day_signals``, ``day_note``, ``unseen_ids``/``acknowledge_ids``/
 ``new_ids_for_paint``, ``status_line``, ``_round``) are unit-tested. ``render()``
 wires the two-pane widgets (tables + shared Trade detail panel), a small "Run
@@ -46,6 +47,7 @@ from nicegui import run, ui
 from pages.ui_guard import guard, guard_async
 
 from . import detail, funnel_view, handoff
+from . import persistence as _persistence
 from .checks_table import (  # re-exported: the scanner's names predate the move
     CHECKS_SLOT as _CHECKS_SLOT, ONLY_CLEAR_TIP as _ONLY_CLEAR_TIP, filtered_tab_label,
     only_clear, only_clear_empty_label, restamp, stamp_checks)
@@ -455,6 +457,37 @@ def stamp_stale(rows, signals):
         r["_row_class"] = STALE_ROW_CLASS if stale else ""
         r["stale_since"] = _short_time(signal.get("stale_since")) if stale else ""
         r["_allow_paper"] = bool(r.get("_allow_paper", True)) and not stale
+    return rows
+
+
+def stamp_persistence(rows, signals, setups):
+    """Stamp ``seen_since`` / ``score_trend`` / ``_trend_state`` onto display rows.
+
+    Joined by ``id`` for the same reason ``stamp_stale`` is: the row builders
+    re-sort by score, so row order does not track signal order. One stamper for
+    all three tabs.
+
+    The row reaches its setup through the SIGNAL's ``setup_key`` — Tier 2 stamps
+    that field, and Tier 1 never derives it, so there is no coarse-key logic here
+    to drift from the service's.
+
+    A STALE row is stamped like any other. Reviewing a dropped signal is the
+    point of the day union, and its age is frozen at what it was, not erased —
+    the opposite of ``_allow_paper``, which narrows on exactly that row.
+
+    ⚠ An absent map dashes every row. A pre-change envelope and a scan whose
+    setups block degraded both look like this, and both mean "no reading" — never
+    "brand new", which is a claim about the signal rather than about the data.
+    """
+    setups = setups if isinstance(setups, dict) else {}
+    by_id = {s.get("id"): s for s in (signals or []) if s.get("id")}
+    for r in rows:
+        signal = by_id.get(r.get("id")) or {}
+        entry = setups.get(signal.get("setup_key"))
+        facts = _persistence.persistence_facts(entry)
+        r["seen_since"] = facts["since"]
+        r["score_trend"] = facts["trend_text"]
+        r["_trend_state"] = facts["trend"]
     return rows
 
 

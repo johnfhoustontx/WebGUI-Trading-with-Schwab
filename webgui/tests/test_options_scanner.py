@@ -677,3 +677,69 @@ def test_the_scanner_help_explains_the_dropped_column():
     low = text.lower()
     assert "paper" in low and ("dimmed" in low or "greyed" in low
                               or "grey" in low)
+
+
+def test_stamp_persistence_joins_rows_to_setups_through_the_signal():
+    rows = [{"id": "MU_PCS_2026-10-17_180_175"}]
+    signals = [{"id": "MU_PCS_2026-10-17_180_175",
+                "setup_key": "MU|PCS|2026-10-17"}]
+    setups = {"MU|PCS|2026-10-17": {"first_seen": "2026-09-17T09:15:00",
+                                    "seen": 14, "gaps": 0,
+                                    "scores": [60.0, 61.0, 62.0, 66.0]}}
+    scanner.stamp_persistence(rows, signals, setups)
+    assert rows[0]["seen_since"] == "09:15 · 14x"
+    assert rows[0]["score_trend"] == "▲ +6.0"
+    assert rows[0]["_trend_state"] == "rising"
+
+
+def test_stamp_persistence_dashes_a_row_with_no_setup_key():
+    rows = [{"id": "X"}]
+    scanner.stamp_persistence(rows, [{"id": "X"}], {})
+    assert rows[0]["seen_since"] == "—"
+    assert rows[0]["score_trend"] == "—"
+
+
+def test_stamp_persistence_dashes_every_row_when_the_map_is_absent():
+    # A pre-change envelope, or a scan whose setups block degraded. Must read as
+    # "no reading", never as "brand new".
+    rows = [{"id": "X"}]
+    scanner.stamp_persistence(rows, [{"id": "X",
+                                      "setup_key": "MU|PCS|2026-10-17"}], None)
+    assert rows[0]["seen_since"] == "—"
+    assert rows[0]["score_trend"] == "—"
+
+
+def test_stamp_persistence_joins_by_id_not_by_position():
+    # The row builders re-sort by score, so row order does not track signal
+    # order — the same reason stamp_stale joins rather than zips.
+    rows = [{"id": "B"}, {"id": "A"}]
+    signals = [{"id": "A", "setup_key": "K_A"}, {"id": "B", "setup_key": "K_B"}]
+    setups = {"K_A": {"first_seen": "2026-09-17T09:00:00", "seen": 1,
+                      "gaps": 0, "scores": []},
+              "K_B": {"first_seen": "2026-09-17T14:00:00", "seen": 9,
+                      "gaps": 0, "scores": []}}
+    scanner.stamp_persistence(rows, signals, setups)
+    assert rows[0]["seen_since"] == "14:00 · 9x"
+    assert rows[1]["seen_since"] == "09:00 · 1x"
+
+
+def test_stamp_persistence_stamps_a_stale_row_too():
+    # Reviewing a dropped signal is the POINT of the day union, and its age is
+    # frozen, not erased. A stale row keeps its marks.
+    rows = [{"id": "X"}]
+    signals = [{"id": "X", "setup_key": "K", "live": False,
+                "stale_since": "2026-09-17T11:00:00"}]
+    setups = {"K": {"first_seen": "2026-09-17T09:15:00", "seen": 8, "gaps": 0,
+                    "scores": []}}
+    scanner.stamp_persistence(rows, signals, setups)
+    assert rows[0]["seen_since"] == "09:15 · 8x"
+
+
+def test_stamp_persistence_dashes_every_row_when_the_map_is_not_a_mapping():
+    # `setups or {}` would cover None, so only a TRUTHY non-dict — a list off a
+    # corrupt envelope — exercises the isinstance guard. Without it this raises
+    # AttributeError out of the row build, taking the whole page down.
+    rows = [{"id": "X"}]
+    scanner.stamp_persistence(rows, [{"id": "X", "setup_key": "K"}], ["junk"])
+    assert rows[0]["seen_since"] == "—"
+    assert rows[0]["score_trend"] == "—"

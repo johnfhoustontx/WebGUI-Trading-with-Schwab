@@ -111,6 +111,10 @@ def test_persistence_facts_for_a_missing_setup():
     facts = persistence.persistence_facts(None)
     assert facts["since"] == "—"
     assert facts["trend_text"] == "—"
+    # One meaning for one key: None is "no claim", an int is a reading. The
+    # corrupt-value branch already returns None; this one returned 0, so
+    # facts["gaps"] > 0 raised on one path and passed on the other.
+    assert facts["gaps"] is None
 
 
 @pytest.mark.parametrize("junk", ["x", None, float("nan"), [], {"a": 1}])
