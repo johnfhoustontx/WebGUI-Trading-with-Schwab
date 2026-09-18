@@ -71,12 +71,15 @@ def test_no_usable_quote_is_an_error_and_spends_no_further_calls(legs):
     assert legs["_earnings"].calls == []
 
 
-def test_a_raising_quote_leg_reads_as_no_quote_and_speaks(legs, degrades):
+def test_a_raising_quote_leg_reads_as_fetch_failed_and_speaks(legs, degrades):
+    # An outage is not an unknown symbol: "check the symbol" would be false.
     legs["_quote"].exc = RuntimeError("proxy down")
 
     out = dossier.build_dossier("MU")
 
-    assert out["error"] == "no_quote"
+    assert out["error"] == "fetch_failed"
+    assert out["spot"] is None
+    assert set(out) == _KEYS
     assert legs["_gex"].calls == [] and legs["_vol"].calls == []
     assert legs["_earnings"].calls == []
     assert "options.dossier_quote" in degrades
@@ -256,10 +259,51 @@ def test_a_symbol_omitted_from_the_response_is_no_quote(monkeypatch, legs):
     assert legs["_gex"].calls == [] and legs["_vol"].calls == []
 
 
-def test_a_non_200_quote_is_no_quote(monkeypatch):
+def test_an_omitted_symbol_is_no_quote_and_is_not_a_degrade(
+        monkeypatch, legs, degrades):
+    # Schwab's real "unknown ticker" answer: 200, the symbol simply absent.
+    _with_client(monkeypatch, _Resp({"errors": {"invalidSymbols": ["XYZQ"]}}))
+    monkeypatch.setattr(dossier, "_quote", _REAL_QUOTE)
+
+    out = dossier.build_dossier("XYZQ")
+
+    assert out["error"] == "no_quote"
+    assert "options.dossier_quote" not in degrades
+
+
+@pytest.mark.parametrize("status", [401, 500, 502, 503, 504, 400])
+def test_a_non_200_quote_is_fetch_failed_not_no_quote(
+        monkeypatch, legs, degrades, status):
+    # 502 is what SchwabPyProxyClient returns for a dead proxy, 504 a Schwab
+    # timeout, 401 an expired token: every one is an outage.
+    _with_client(monkeypatch, _Resp(_raw_quote("MU", 184.2), status=status))
+    monkeypatch.setattr(dossier, "_quote", _REAL_QUOTE)
+
+    out = dossier.build_dossier("MU")
+
+    assert out["error"] == "fetch_failed"
+    assert out["spot"] is None
+    assert legs["_gex"].calls == [] and legs["_vol"].calls == []
+    assert legs["_earnings"].calls == []
+    assert "options.dossier_quote" in degrades
+
+
+def test_a_non_200_quote_raises_from_the_leg(monkeypatch):
     _with_client(monkeypatch, _Resp(_raw_quote("MU", 184.2), status=503))
 
-    assert dossier._quote("MU") is None
+    with pytest.raises(dossier.QuoteFetchFailed):
+        dossier._quote("MU")
+
+
+def test_a_client_that_raises_is_fetch_failed(monkeypatch, legs):
+    class _Boom:
+        def get_quotes(self, symbols):
+            raise TimeoutError("proxy timed out")
+
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", _Boom())
+    monkeypatch.setattr(dossier, "_quote", _REAL_QUOTE)
+
+    assert dossier.build_dossier("MU")["error"] == "fetch_failed"
 
 
 @pytest.mark.parametrize("last", [0, 0.0, -1.0, float("nan"), float("inf"),

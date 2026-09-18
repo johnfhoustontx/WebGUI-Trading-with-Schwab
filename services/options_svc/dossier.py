@@ -24,6 +24,19 @@ Schwab cost of one full fetch: **4 calls, 5 at most** - quote, the GEX chain
 ``run_iv_analysis``' own today..+60d fallback when that window came back empty.
 A no-quote result spends exactly ONE: a typo must not pay for the other three.
 
+``error`` is ``None`` on success, and otherwise one of two words that must never
+be confused, because the page tells the user different things for each:
+
+* ``"no_quote"`` - the quote was ANSWERED and holds no usable price for this
+  symbol (omitted from a 200 response, or a zero / NaN / non-numeric last).
+  That really does mean "check the symbol".
+* ``"fetch_failed"`` - the quote could not be fetched at all: a non-200 status
+  or a raised exception (proxy down, timeout, expired token). The ticker may be
+  fine; telling the user to check it during an outage is the dead-service /
+  quiet-tape confusion ``webgui/pages/copy.py`` exists to prevent.
+
+Both short-circuit the other three legs.
+
 Absence is ``None`` at every key, never ``0``. One leg failing blanks only its
 own keys and speaks through ``_degrade``; the success and the degraded payload
 are both built from :data:`DOSSIER_KEYS`, so a reader can never ``KeyError``.
@@ -47,6 +60,11 @@ _VOL_KEYS = ("iv_rank", "current_iv", "hv_current")
 _EARNINGS_KEYS = ("earnings_status", "earnings_date")
 
 NO_QUOTE = "no_quote"
+FETCH_FAILED = "fetch_failed"
+
+
+class QuoteFetchFailed(Exception):
+    """The quote request itself failed - an outage, not an unknown symbol."""
 
 
 def _usable_price(v):
@@ -64,9 +82,30 @@ def _quote(symbol):
     quote (``apply_live_spots`` measures from the SESSION OPEN, which an
     uncollected symbol has none of), and writing a second quote parser here is
     how the ``get_quotes`` envelope bug shipped green once already.
+
+    Raises :class:`QuoteFetchFailed` on any non-200. The status code is what
+    separates an outage from an unknown ticker here, because of how the two
+    layers below answer:
+
+    * ``SchwabPyProxyClient._get`` NEVER raises - a connection error or timeout
+      to the proxy comes back as a synthetic **502**; and the proxy's own
+      ``/quotes`` passes Schwab's status through (401 token, 5xx, **504** on a
+      Schwab timeout). So a non-200 is, in practice, the outage signal.
+    * Schwab answers an unknown symbol with **200** and the symbol simply
+      absent from the body (it lists it under ``errors.invalidSymbols``), which
+      ``quote_last`` reads as None -> ``no_quote``.
+
+    The one ambiguous code is **400** (a malformed request). D4's handler
+    validates the symbol against ``SYMBOL_RE`` before this runs, so a 400 is a
+    request we built wrong, not a ticker the user typed wrong - it stays under
+    ``fetch_failed``, the less misleading word: "could not fetch" is true of a
+    bad symbol too, while "check the symbol" is false during an outage.
     """
     resp = compute._proxy.schwab_py_client.get_quotes([symbol])
-    raw = resp.json() if getattr(resp, "status_code", None) == 200 else {}
+    status = getattr(resp, "status_code", None)
+    if status != 200:
+        raise QuoteFetchFailed(f"quotes {symbol}: HTTP {status}")
+    raw = resp.json()
     spot = _usable_price(compute.quote_last(raw, symbol))
     if spot is None:
         return None
@@ -118,9 +157,10 @@ def build_dossier(symbol):
 
     try:
         quote = _quote(symbol)
-    except Exception:  # noqa: BLE001 - a raising quote is a missing quote
+    except Exception:  # noqa: BLE001 - an outage, NOT an unknown symbol
         _degrade.degraded("options.dossier_quote", detail=symbol)
-        quote = None
+        out["error"] = FETCH_FAILED
+        return out
     if not quote or quote.get("spot") is None:
         out["error"] = NO_QUOTE
         return out
