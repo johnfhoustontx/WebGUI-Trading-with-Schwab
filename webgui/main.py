@@ -645,6 +645,11 @@ TRADE_CHILDREN = [
 # Flat top-level items (single-page apps). (route, label, icon)
 FLAT_NAV = [
     ("/desk", "Desk", "space_dashboard"),
+    # The Symbol Dossier: one screen per ticker. It joins the Desk in the
+    # caption-less leading block (NAV_SECTIONS) — Desk answers "what is
+    # happening", Symbol answers "tell me about X", and those are the two entry
+    # points; everything else in the rail is a workflow step.
+    ("/symbol", "Symbol", "manage_search"),
     # Promoted out of the Options tab strip on 2026-09-13: it sits in the rail
     # directly under the Options group and above Trade Analyzer. It is a
     # one-symbol "which structure fits?" tool, used on its own rather than as a
@@ -752,12 +757,13 @@ def _sec_page(route: str):
 # time — never written down, so it cannot go stale when a page is added.
 #
 # A caption of None means "render NO header at all" — not an empty one. The Desk
-# is the landing page, so it is pinned ALONE above every caption: the rail's
-# mirror of the bottom-pinned SYSTEM_RAIL block, marking it as home rather than
-# filing it under one of the three workflow sections. Its breadcrumb is likewise
-# just ["Desk"], since there is no section to name above it.
+# (the landing page) and the Symbol Dossier are pinned above every caption: the
+# rail's mirror of the bottom-pinned SYSTEM_RAIL block, marking the two ENTRY
+# POINTS — "what is happening" and "tell me about X" — rather than filing either
+# under one of the three workflow sections. Their breadcrumbs are likewise a
+# bare ["Desk"] / ["Symbol"], since there is no section to name above them.
 NAV_SECTIONS = [
-    (None, [_sec_page("/desk")]),
+    (None, [_sec_page("/desk"), _sec_page("/symbol")]),
     ("MARKETS", [
         _sec_page("/options/gamma"),      # Dealer Positioning
         _sec_page("/options/matrix"),     # Opportunity Board
@@ -913,6 +919,9 @@ _NAV_LABEL = {route: label for route, label, _icon in
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
 _TAB_COLOR = {
     "/desk": "#f5c542",                   # Desk — gold, the landing page
+    # Orchid: hue 315, the widest gap left in this map's hue circle (Flow
+    # Alerts' magenta at 291 and Strategy Finder's pink at 340).
+    "/symbol": "#e64fc0",                 # Symbol — orchid
     "/options/scanner": "#42a5f5",        # Market Scanner — blue
     "/options/matrix": "#4dd0e1",         # Opportunity Board — cyan
     "/options/flow": "#d500f9",           # Flow Alerts — magenta
@@ -2269,6 +2278,18 @@ def desk_page() -> None:
     with _layout("/desk", "Desk"):
         from pages import desk
         desk.render()
+
+
+@_page("/symbol")
+def symbol_page(symbol: str | None = None) -> None:
+    # ⚠ A @ui.page signature IS its query-parameter surface (see live_main's
+    # ``_register`` and options_gamma_page below). This one is DELIBERATE — a
+    # dossier must be linkable and bookmarkable — and it reaches a Redis key name
+    # and a Schwab lookup, so pages.symbol.render allow-lists it through
+    # shared.symbols.clean_symbol HERE, and the service allow-lists it AGAIN.
+    with _layout("/symbol", "Symbol"):
+        from pages import symbol as _symbol_page
+        _symbol_page.render(symbol)
 
 
 @_page("/options/scanner")

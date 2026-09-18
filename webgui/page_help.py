@@ -136,6 +136,48 @@ reads 0 overnight, which would otherwise produce confident-looking walls that ar
 pure noise. A greyed panel with a timestamp means "this is the last good reading",
 not "the market is flat".
 """,
+    "/symbol": """
+**Symbol — the simple version**
+
+Type a ticker, press **Enter**, and get **one screen about that one name** —
+what would otherwise take about eight pages. Every band ends in a link to the
+page that owns the fact, so this is an index, not a replacement.
+
+- **Structure** — where price sits between the **put wall** and the **call
+  wall**, and which side of the **gamma flip** it is on. Above the flip, dealer
+  hedging tends to damp moves (pins); below it, hedging amplifies them (runs).
+- **Volatility** — **Vol Rank** (how today's implied vol compares with the past
+  year of *realised* movement — not a true IV rank), **IV vs HV** (is the market
+  charging more than the stock has been moving? *high* above 1.2×, *low* below
+  0.9×), ATM IV and whether it is rising, and the **expected move** for a day and
+  for a week.
+- **Context** — the market regime, the name's sector, industry and quadrant on
+  the Bull / Bear map with its rank, and the next **earnings** date. *Not
+  covered* means the calendar has no data for this name — it does **not** mean
+  no report is coming.
+- **Today** — this name's signals from the Market Scanner, each with **when it
+  first showed up**, how many scans it has survived, and whether its score is
+  rising or fading (the small line is the score across the day), beside its flow
+  alerts, newest first.
+- **Your position** — anything open in this name across the paper account, the
+  ledger, Claude's book and captured signals, with the rescue flag where one
+  exists.
+
+The chip beside the price says where the numbers came from. **Scanned** — the
+app watches this name all day and everything is already here. **Collected** —
+the app tracks its dealer structure but does not scan it. **Fetched 14:32** —
+the app did not know this name, so it looked it up on demand.
+
+⚠ **An on-demand look-up costs 4–5 calls to Schwab**, out of the same allowance
+the live dealer charts run on. So it happens **only** when you open a symbol the
+app does not already cover, or press **Refresh** — never on a timer. A repeat
+visit within 15 minutes reuses the last look-up and costs nothing. **Refresh**
+re-reads everything and, for a name the app does not scan, fetches it fresh.
+
+*No quote for XYZQ — check the symbol* means Schwab answered and has no such
+ticker. *Couldn't fetch* means Schwab could not be reached — the ticker may be
+fine; try again in a minute.
+""",
     "/options/scanner": """
 **Market Scanner — the simple version**
 

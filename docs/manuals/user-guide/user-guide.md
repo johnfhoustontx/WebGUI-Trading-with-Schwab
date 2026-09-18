@@ -226,7 +226,9 @@ The left edge is a narrow **icon rail** that widens when you hover it. Clicking 
 across the top; the other rail entries are **standalone pages** with no tab strip.
 
 The rail is organised into **three captioned sections**, each answering one
-question, plus a block of machine controls pinned to the bottom.
+question, plus a block of machine controls pinned to the bottom. Above the
+captions sit the two entry points: **Desk** (the home page — what is happening)
+and **Symbol** (one screen about one ticker).
 
 **MARKETS — what is the market doing?**
 
@@ -330,8 +332,8 @@ Three built-in help features are always within reach:
 ## Desk
 
 **Route:** `/desk` — and the app's **home page**, so plain
-`http://127.0.0.1:8500` lands here. In the rail it is pinned on its own above the
-section captions.
+`http://127.0.0.1:8500` lands here. In the rail it is pinned above the section
+captions, with **Symbol** directly beneath it.
 
 One screen aggregating the most useful element of every other page, laid out as
 the four questions you ask in order: *what is the market doing · where is the
@@ -421,6 +423,62 @@ to misread:
   the frame going blank.
 - **Before any report has been published** the frame reads "No market report
   published yet." instead of a blank space.
+
+---
+
+## Symbol
+
+**Route:** `/symbol` — or `/symbol?symbol=MU` to open one name directly, which
+makes a dossier linkable and bookmarkable. In the rail it sits under the Desk,
+above the section captions: the Desk answers *what is happening*, Symbol answers
+*tell me about this one name*.
+
+**How to use it:** type a ticker in the box at the top left and press **Enter**
+(or tab out of the box). Letters, digits, `$` and `.` are accepted — `MU`,
+`BRK.B`, `$SPX` all work. The page then fills five bands, each ending in a link
+to the page that owns those facts:
+
+| Band | What it gives you | Link |
+|------|-------------------|------|
+| **Structure** | A bar from the put wall to the call wall with spot and the gamma flip marked on it, which side of the flip price sits on and by how much, net gamma and the pins-or-runs word | Dealer Positioning, already set to this symbol |
+| **Volatility** | **Vol Rank** as a bar, **IV vs HV** with its word (*high* at 1.2× or more, *low* at 0.9× or less, otherwise *mid*), ATM implied vol and whether it is rising or falling, and the one-standard-deviation **expected move** for a day and a week | Expected Move |
+| **Context** | The market regime word, the name's sector and industry, its quadrant on the Bull / Bear map and its rank there (with last session's rank), and the next **earnings** date with how many days away it is | Bull / Bear Map |
+| **Today** | Two columns. **Signals**: this name's rows from today's Market Scanner, each with the time it was first seen and how many scans it has survived, its score trend, and a small line of the score across the day — plus one line per setup, such as *Live since 09:15 · 1 gap*. **Flow alerts**: this name's alerts, newest first | Market Scanner · Flow Alerts |
+| **Your position** | Anything open in this name in the paper account, the paper ledger, Claude's book or captured signals, with the rescue flag where the book carries one | Paper Ledger · Rescue |
+
+**The chip beside the price says where the numbers came from:**
+
+- **SCANNED** — the app scans this name all day, so every band is filled from
+  what it already has. Nothing is fetched.
+- **COLLECTED** — the app tracks this name's dealer structure (the `$VIX` and
+  sector-ETF kind) but does not scan it, so Vol Rank, IV vs HV and earnings are
+  looked up on demand. After a look-up the chip reads **COLLECTED · FETCHED
+  14:32**.
+- **FETCHED 14:32** — the app did not know this name at all, so it looked
+  everything up on demand at that time.
+- **NOT FOUND** — Schwab answered and has no quote for that ticker. Check the
+  spelling.
+- **FETCH FAILED** — Schwab could not be reached. The ticker may be fine; press
+  **Refresh** in a minute.
+
+⚠ **An on-demand look-up costs 4–5 Schwab calls** from the same allowance the
+live dealer charts depend on. So the page looks a name up **only** when you open
+a symbol it does not already cover, or when you press **Refresh** — never on its
+own timer. A second visit within 15 minutes reuses the previous look-up and costs
+nothing. For a **scanned** symbol Refresh just re-reads what the app already has.
+
+**Three kinds of empty are worded differently on purpose.** *No data yet — the
+options feed hasn't published this session* means the service has not produced
+anything; *No signals for MU today* means everything is working and there is
+simply nothing to show; *No quote for XYZQ — check the symbol* means the ticker
+itself is the problem.
+
+⚠ **Earnings "not covered" is not "none scheduled".** The first means the
+earnings calendar has no data for this name, so a report could still be coming;
+the second means the name is covered and nothing is on the calendar.
+
+**Nothing on this page can place or change a trade.** It reads, looks up and
+links.
 
 ---
 

@@ -56,6 +56,8 @@ one. Refreshing your browser will not help; restarting the service will.
 ## The three questions the menu answers
 
 The left menu is grouped into three captioned sections. Each answers one question.
+Above them sit the two entry points, with no caption: **Desk** (*what is happening
+right now?*) and **Symbol** (*tell me everything about this one ticker*).
 
 ### MARKETS — *what is the market doing?*
 
@@ -357,6 +359,119 @@ deliberately no second switch to fall out of step with the first.
   top of the Desk; one click unlocks sound for the session, and it speaks a line back
   to confirm.
 - **Nothing on this page can place, change, or close a trade.** It reads and links.
+
+---
+
+## Symbol
+
+*Menu: pinned at the top of the rail, under the Desk · Route `/symbol`, or
+`/symbol?symbol=MU` to open one name directly*
+
+### What it is
+
+One screen per ticker. Type a symbol and it answers what would otherwise take about
+eight pages: where price sits against the dealer structure, what the options market
+is charging for volatility, what the wider market and the name's sector are doing,
+what the scanner and the flow detectors found in it today, and whether you hold
+anything in it.
+
+It is built as an **index over the pages that own each fact**, never as a replacement
+for them. Every band ends in a link to the page that goes deeper, and every number is
+produced by the same function that produces it there — so the dossier cannot quietly
+disagree with the page it links to.
+
+### When to open it
+
+When a name comes up — in a flow alert, on the Opportunity Board, in the news — and
+you want the whole picture before deciding whether it deserves a closer look. It is
+also the quickest way to check "do I already hold something in this?" before opening
+a new trade, because the position band searches all four books at once.
+
+### The bands
+
+| Band | Question it answers | Goes deeper at |
+|---|---|---|
+| **Structure** | Where is price between the put wall and the call wall, and which side of the gamma flip? | [Dealer Positioning](#dealer-positioning), already set to the symbol |
+| **Volatility** | Is option premium rich or cheap for this name right now, and how far is it expected to move? | [Expected Move](#expected-move) |
+| **Context** | What is the market doing, where does this name sit in its sector, and when does it report? | [Bull / Bear Map](#bull-bear-map) |
+| **Today — Signals** | Did the scanner find a trade here today, how long has it been live, and is its score improving? | [Market Scanner](#market-scanner) |
+| **Today — Flow alerts** | Did anything unusual trade in this name today? | [Flow Alerts](#flow-alerts) |
+| **Your position** | What do I already have on in this name, and is any of it in trouble? | [Paper Ledger](#paper-ledger) · [Rescue](#rescue) |
+
+**Structure.** The bar runs from the put wall at the left end to the call wall at the
+right, with spot as a ring and the gamma flip as a thin amber tick. Under it: which
+side of the flip price sits on and how far, net gamma, and the pins-or-runs word.
+Above the flip, dealer hedging tends to damp moves; below it, hedging tends to
+amplify them.
+
+**Volatility.** **Vol Rank** is the app's variance-risk-premium reading — where today's
+at-the-money implied volatility sits against a year of *realised* volatility — and it
+is the same number the Market Scanner shows. **IV vs HV** divides implied volatility by
+30-day realised volatility and names the result with the scorer's own words: *high* at
+1.2× or more, *low* at 0.9× or less, otherwise *mid*. The **expected move** is one
+standard deviation over one and seven calendar days.
+
+**Context.** The market regime word is the one the Desk and the Sentiment page print.
+The sector, industry, quadrant and rank come from the nightly Bull / Bear map; a name
+the map does not rank says so rather than inventing a quadrant.
+
+**Earnings.** Three different answers, worded three different ways:
+
+| Reads | Means |
+|---|---|
+| **Earnings Oct 23 · in 35 days** | A report is on the calendar. |
+| **Earnings: none scheduled** | The calendar covers this name and has nothing on it. |
+| **Earnings: not covered by the calendar** | The calendar has no data for this name. A report could still be coming. |
+
+**Signals.** Each row is a Market Scanner signal for this name, with the time its
+setup was first seen and how many scans it has survived (*09:15 · 3x*), its score
+trend (*▲ +4.0*, *▼ −3.5*, *steady*, or *new* while there are too few readings to name
+a direction), and a small line of the setup's best score across the day. Above the
+rows sits one line per setup — *Live since 09:15 · 1 gap* — because a setup can
+outlive any single row: the exact strikes change from scan to scan while the idea
+stays live. A dimmed row has dropped out of the latest scan; it keeps its age.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Views | `options:matrix`, `options:scan_funnel`, `options:scan_day`, `options:flow_alerts`, the four paper books, `sentiment:regime`, `sentiment:bullbear` — one batched poll every 2 s |
+| On-demand | `cmd:options` → `dossier` → `cache:options:dossier:<SYMBOL>`, kept 15 minutes |
+| Cost | Nothing for a scanned symbol. **4–5 Schwab calls** per on-demand look-up |
+
+**Coverage is a property of each fact, not of the symbol.** The chip beside the price
+names which case you are in:
+
+| Chip | Meaning |
+|---|---|
+| **SCANNED** | The app scans this name all day. Every band is filled from what it already has; nothing is fetched, not even on Refresh. |
+| **COLLECTED** | The app tracks the dealer structure (the `$VIX` and sector-ETF kind) but does not scan it, so Vol Rank, IV vs HV and earnings are looked up. |
+| **FETCHED 14:32** | The app did not know the name, so it looked everything up at that time. |
+| **NOT FOUND** | Schwab answered and has no quote for the ticker. |
+| **FETCH FAILED** | Schwab could not be reached. The ticker may be fine. |
+
+Where the app already has a fact, **its own reading wins** over a look-up: the
+Opportunity Board refreshes every minute, a look-up is a snapshot.
+
+### Caveats and gotchas
+
+- **A look-up happens only when you open a name or press Refresh — never on a
+  timer.** Each one spends 4–5 calls from the same Schwab allowance the one-minute
+  dealer collection depends on. A second visit within 15 minutes reuses the previous
+  look-up.
+- **Refresh on a scanned symbol fetches nothing.** It re-reads what the app has,
+  which is already fresher than a look-up would be.
+- **The dealer walls disappear after the close rather than going to zero**, for the
+  same reason as on the Desk: an all-zero overnight grid produces arbitrary walls.
+- **This page is not on the public live site.** It looks names up on demand, which
+  the public screens are not allowed to do.
+- **Nothing on this page can place, change, or close a trade.**
+
+### Related pages
+
+[Desk](#desk) · [Dealer Positioning](#dealer-positioning) ·
+[Opportunity Board](#opportunity-board) · [Market Scanner](#market-scanner) ·
+[Flow Alerts](#flow-alerts)
 
 ---
 
@@ -4057,6 +4172,7 @@ What updates when. All times US Central.
 | Momentum cascade | **nightly** | 16:20 | Daily bars change once a day |
 | Sector Rotation / RRG | **manual** | | Cached; press Refresh |
 | Trade Analyzer | **on demand** | | |
+| Symbol look-up | **on demand** | | Only on opening a name the app does not scan, or on Refresh; kept 15 min |
 | Alert/badge watcher | **2 s** | | In the browser, on every page |
 
 # Appendix C — Moving between pages
@@ -4071,6 +4187,7 @@ workflow.
 | Market Scanner · Strategy Finder · Paper · Captured · Calculator | **Expected Move** | Expected Move (new tab) | Symbol, expiry and strikes |
 | Calculator ⇄ Simulator | *(nothing to press)* | the other page | One shared position: symbol, strategy, legs, selected expiration — whichever page was edited last |
 | Flow Alerts | **click a row** | Dealer Positioning | That row's symbol |
+| Symbol | **→ Dealer Positioning** | Dealer Positioning | The dossier's symbol |
 | Opportunity Board | read the row, then open | Dealer Positioning · Strategy Finder | (manual) |
 
 Calculator and Simulator both **persist their full state** across navigation — symbol,

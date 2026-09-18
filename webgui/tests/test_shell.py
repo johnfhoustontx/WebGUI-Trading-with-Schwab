@@ -22,7 +22,7 @@ def test_shell_registers_all_pages():
         "/trade", "/trade/evidence", "/trade/board", "/trade/plan",
         "/portfolio", "/driver", "/settings",
         "/eod", "/eod/detail", "/status", "/manuals", "/terminate",
-        "/market", "/desk",
+        "/market", "/desk", "/symbol",
     )
     for path in expected:
         assert path in routes, f"missing page route {path}; have {sorted(routes)}"
@@ -476,7 +476,7 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     # `_LANDING_ROUTES` is the explicit, enumerated exemption — a set rather than a
     # blanket "or len(trail) == 1", so a page that loses its section by accident
     # still fails here instead of being waved through as a second landing page.
-    _LANDING_ROUTES = {"/desk"}
+    _LANDING_ROUTES = {"/desk", "/symbol"}
     sections = {c.title() for c, _e in main.NAV_SECTIONS if c} | {main.SYSTEM_SECTION}
     for route in main._NAV_LABEL:
         trail = main.breadcrumb_trail(route)
@@ -594,16 +594,16 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 68px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 16 drawer items (the 12
-    NAV_SECTIONS entries — the pinned landing block's Desk, plus the 11 workflow
-    ones — + the 4 SYSTEM_RAIL rows at the foot); child-page icons are not rail
-    affordances (the tab strip renders labels only)."""
+    ``icon`` arg; the dot is retired. Scope is the 17 drawer items (the 13
+    NAV_SECTIONS entries — the pinned landing block's Desk and Symbol, plus the
+    11 workflow ones — + the 4 SYSTEM_RAIL rows at the foot); child-page icons
+    are not rail affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     items = _drawer_items()
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 16, f"expected 16 drawer items, got {len(items)}: {items}"
+    assert len(items) == 17, f"expected 17 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]
@@ -1437,7 +1437,7 @@ def test_nav_section_captions_and_their_derived_counts():
     import main
     assert [c for c, _e in main.NAV_SECTIONS] == [
         None, "MARKETS", "STRATEGY", "ACCOUNT"]
-    assert [len(e) for _c, e in main.NAV_SECTIONS] == [1, 4, 5, 2]
+    assert [len(e) for _c, e in main.NAV_SECTIONS] == [2, 4, 5, 2]
     # The renderer takes the count as an argument; the drawer passes len(entries).
     src = inspect.getsource(main._layout)
     assert "_nav_section_header(caption, len(entries), first=(_i == 0))" in src
@@ -1457,7 +1457,7 @@ def test_the_landing_block_is_pinned_above_every_caption():
     import main
     caption, entries = main.NAV_SECTIONS[0]
     assert caption is None, "the landing block must carry NO caption"
-    assert entries == [main._sec_page("/desk")]
+    assert entries == [main._sec_page("/desk"), main._sec_page("/symbol")]
     src = inspect.getsource(main._layout)
     assert "if caption is not None:" in src, (
         "the drawer must SKIP the header for a caption-less block")

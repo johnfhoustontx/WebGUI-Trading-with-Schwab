@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-17</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-18</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -92,6 +92,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#alert-badges-and-chimes">Alert badges and chimes</a></li>
 <li><a href="#getting-help-on-any-page">Getting help on any page</a></li>
 <li><a href="#desk">Desk</a></li>
+<li><a href="#symbol">Symbol</a></li>
 </ul>
 </li>
 <li><a href="#markets-what-is-the-market-doing">MARKETS — what is the market doing?</a><ul>
@@ -361,7 +362,9 @@ left running — it is a <em>system</em> service the app's own units cannot reac
 <strong>group</strong> opens its first page and shows that group's pages as a <strong>tab strip</strong>
 across the top; the other rail entries are <strong>standalone pages</strong> with no tab strip.</p>
 <p>The rail is organised into <strong>three captioned sections</strong>, each answering one
-question, plus a block of machine controls pinned to the bottom.</p>
+question, plus a block of machine controls pinned to the bottom. Above the
+captions sit the two entry points: <strong>Desk</strong> (the home page — what is happening)
+and <strong>Symbol</strong> (one screen about one ticker).</p>
 <p><strong>MARKETS — what is the market doing?</strong></p>
 <table>
 <thead>
@@ -508,8 +511,8 @@ the whole app.</p>
 <hr />
 <h2 id="desk">Desk</h2>
 <p><strong>Route:</strong> <code>/desk</code> — and the app's <strong>home page</strong>, so plain
-<code>http://127.0.0.1:8500</code> lands here. In the rail it is pinned on its own above the
-section captions.</p>
+<code>http://127.0.0.1:8500</code> lands here. In the rail it is pinned above the section
+captions, with <strong>Symbol</strong> directly beneath it.</p>
 <p>One screen aggregating the most useful element of every other page, laid out as
 the four questions you ask in order: <em>what is the market doing · where is the
 structure · what should I act on · what am I holding.</em></p>
@@ -615,6 +618,82 @@ to misread:</p>
 <li><strong>Before any report has been published</strong> the frame reads "No market report
   published yet." instead of a blank space.</li>
 </ul>
+<hr />
+<h2 id="symbol">Symbol</h2>
+<p><strong>Route:</strong> <code>/symbol</code> — or <code>/symbol?symbol=MU</code> to open one name directly, which
+makes a dossier linkable and bookmarkable. In the rail it sits under the Desk,
+above the section captions: the Desk answers <em>what is happening</em>, Symbol answers
+<em>tell me about this one name</em>.</p>
+<p><strong>How to use it:</strong> type a ticker in the box at the top left and press <strong>Enter</strong>
+(or tab out of the box). Letters, digits, <code>$</code> and <code>.</code> are accepted — <code>MU</code>,
+<code>BRK.B</code>, <code>$SPX</code> all work. The page then fills five bands, each ending in a link
+to the page that owns those facts:</p>
+<table>
+<thead>
+<tr>
+<th>Band</th>
+<th>What it gives you</th>
+<th>Link</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Structure</strong></td>
+<td>A bar from the put wall to the call wall with spot and the gamma flip marked on it, which side of the flip price sits on and by how much, net gamma and the pins-or-runs word</td>
+<td>Dealer Positioning, already set to this symbol</td>
+</tr>
+<tr>
+<td><strong>Volatility</strong></td>
+<td><strong>Vol Rank</strong> as a bar, <strong>IV vs HV</strong> with its word (<em>high</em> at 1.2× or more, <em>low</em> at 0.9× or less, otherwise <em>mid</em>), ATM implied vol and whether it is rising or falling, and the one-standard-deviation <strong>expected move</strong> for a day and a week</td>
+<td>Expected Move</td>
+</tr>
+<tr>
+<td><strong>Context</strong></td>
+<td>The market regime word, the name's sector and industry, its quadrant on the Bull / Bear map and its rank there (with last session's rank), and the next <strong>earnings</strong> date with how many days away it is</td>
+<td>Bull / Bear Map</td>
+</tr>
+<tr>
+<td><strong>Today</strong></td>
+<td>Two columns. <strong>Signals</strong>: this name's rows from today's Market Scanner, each with the time it was first seen and how many scans it has survived, its score trend, and a small line of the score across the day — plus one line per setup, such as <em>Live since 09:15 · 1 gap</em>. <strong>Flow alerts</strong>: this name's alerts, newest first</td>
+<td>Market Scanner · Flow Alerts</td>
+</tr>
+<tr>
+<td><strong>Your position</strong></td>
+<td>Anything open in this name in the paper account, the paper ledger, Claude's book or captured signals, with the rescue flag where the book carries one</td>
+<td>Paper Ledger · Rescue</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The chip beside the price says where the numbers came from:</strong></p>
+<ul>
+<li><strong>SCANNED</strong> — the app scans this name all day, so every band is filled from
+  what it already has. Nothing is fetched.</li>
+<li><strong>COLLECTED</strong> — the app tracks this name's dealer structure (the <code>$VIX</code> and
+  sector-ETF kind) but does not scan it, so Vol Rank, IV vs HV and earnings are
+  looked up on demand. After a look-up the chip reads <strong>COLLECTED · FETCHED
+  14:32</strong>.</li>
+<li><strong>FETCHED 14:32</strong> — the app did not know this name at all, so it looked
+  everything up on demand at that time.</li>
+<li><strong>NOT FOUND</strong> — Schwab answered and has no quote for that ticker. Check the
+  spelling.</li>
+<li><strong>FETCH FAILED</strong> — Schwab could not be reached. The ticker may be fine; press
+  <strong>Refresh</strong> in a minute.</li>
+</ul>
+<p>⚠ <strong>An on-demand look-up costs 4–5 Schwab calls</strong> from the same allowance the
+live dealer charts depend on. So the page looks a name up <strong>only</strong> when you open
+a symbol it does not already cover, or when you press <strong>Refresh</strong> — never on its
+own timer. A second visit within 15 minutes reuses the previous look-up and costs
+nothing. For a <strong>scanned</strong> symbol Refresh just re-reads what the app already has.</p>
+<p><strong>Three kinds of empty are worded differently on purpose.</strong> <em>No data yet — the
+options feed hasn't published this session</em> means the service has not produced
+anything; <em>No signals for MU today</em> means everything is working and there is
+simply nothing to show; <em>No quote for XYZQ — check the symbol</em> means the ticker
+itself is the problem.</p>
+<p>⚠ <strong>Earnings "not covered" is not "none scheduled".</strong> The first means the
+earnings calendar has no data for this name, so a report could still be coming;
+the second means the name is covered and nothing is on the calendar.</p>
+<p><strong>Nothing on this page can place or change a trade.</strong> It reads, looks up and
+links.</p>
 <hr />
 <h1 id="markets-what-is-the-market-doing">MARKETS — what is the market doing?</h1>
 <p>The four rail entries in this section establish the conditions a trade would be
