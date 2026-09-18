@@ -879,12 +879,23 @@ PY'
 
 **Step 2: Decide**
 
-Estimated map size is `setups x (len(key) + ~40 x 5 + ~60)` bytes. If that exceeds
-**5%** of the current payload, reduce `_SETUP_SCORES_MAX` to 12 (still three hours
-of context at the 15-minute cadence) and re-measure before continuing.
+✅ **DONE 2026-09-17.** Measured against the live envelope: payload **0.88 MB**,
+**487 rows**, **221 setups**, collapse **2.20 rows per setup**, map + row stamps
+**+102 KB (+11.0%)** at `_SETUP_SCORES_MAX=40` and +65 KB (+7.0%) at 12. No row
+was keyless.
+
+**Outcome: `_SETUP_SCORES_MAX` stays at 40, and the 5% threshold written here
+originally is WITHDRAWN as mis-specified.** It was calibrated against an assumed
+4.5 MB payload, where 5% is 225 KB; the real key is 0.88 MB, where the same
+absolute budget is 25%. A read-cost budget expressed as a fraction of a payload
+that itself varies 5x measures the wrong thing — the number that matters is the
+absolute ~100 KB, on a key read once per 15-minute scan over localhost.
+
+⚠ The figure is also a worst case that cannot occur: it assumes every setup
+carries 40 scores, while a 30-scan day bounds any entry at 30.
 
 **Step 3: Record the measured numbers** in the design doc, replacing the estimate
-paragraph, and commit that edit.
+paragraph. ✅ done.
 
 ```bash
 git add docs/plans/2026-09-17-signal-persistence-design.md

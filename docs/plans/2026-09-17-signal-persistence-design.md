@@ -61,17 +61,48 @@ the only shape that survives the two constraints above. The map is merged
 separately from the row lists, so a fresh row replacing a carried one cannot touch
 it, and it outlives `_cap_day_list` eviction.
 
-It is also far cheaper. Strike drift mints rows but not setups, so the row count
-collapses to a much smaller number of entries: an estimated few hundred against
-~5,200 rows, roughly +200 KB on a 4.5 MB key. The per-row alternative — a score
-series on every row — was measured by the exploration at **~+68%** on a key the
-page fetches whole on every version change.
+It is also cheaper than the per-row alternative — a score series on every row,
+measured by the exploration at **~+68%** on a key the page fetches whole on every
+version change.
 
-⚠ **That collapse ratio is an ESTIMATE, inferred from the 2026-07-16 churn figure,
-and must be measured on prod's real `scan_day` before the map ships unbounded.**
-This repo's record on unmeasured size claims is poor: `cache:options:gamma` carried
-a comment saying "well under ~1 MB" while measuring 4.99 MB. If the ratio is bad,
-`scores` caps and the entry keeps first/last/best instead.
+### Measured on prod, 2026-09-17 (replacing the original estimate)
+
+The first draft of this section estimated "a few hundred setups against ~5,200
+rows, roughly +200 KB on a 4.5 MB key (~4%)". Measured against the live
+`cache:options:scan_day`:
+
+| | estimated | measured |
+|---|---|---|
+| payload | 4.5 MB | **0.88 MB** |
+| rows | ~5,238 | **487** — 478 of them `signals_directional` |
+| setups | "a few hundred" | **221** |
+| collapse | implied ~10x | **2.20 rows per setup** |
+| map + row stamps | +200 KB (~4%) | **+102 KB (+11.0%)** at `_SETUP_SCORES_MAX=40` |
+| the same at 12 | — | +65 KB (+7.0%) |
+
+Row stamps are 15.6 KB of that; the rest is the map. No row was keyless.
+
+**Three corrections fall out of it.** The collapse is real but **modest** — 2.2x,
+not the order of magnitude implied; 77 of the 221 setups had exactly one row.
+The percentage is **~2.7x worse** than claimed, and it is structural rather than
+a light-day artefact: rows and setups scale together, so a heavy day moves both.
+And the absolute cost is **far smaller** than claimed, because the baseline
+payload was overstated 5x.
+
+⚠ **`_SETUP_SCORES_MAX` stays at 40, and the 5%-of-payload threshold this plan
+pre-registered is withdrawn as mis-specified.** That threshold was calibrated
+against a 4.5 MB key, where 5% is 225 KB; against the real 0.88 MB key the same
+absolute budget is 25%. Expressing a read-cost budget as a *fraction of a
+payload that itself varies 5x* measures the wrong thing. The number that matters
+is absolute: ~100 KB on a key read once per 15-minute scan, over localhost.
+
+The estimate is also a **worst case that cannot occur**: it assumes every setup
+carries a full 40-score series, while a 30-scan day bounds any entry at 30 and
+most sit far below. 40 is dead headroom that only manual re-scans can approach.
+Cutting to 12 would truncate the sparkline to three hours to save ~37 KB.
+
+⚠ Re-measure `seen` directly once this is deployed — a snapshot can bound the
+series length but cannot observe it.
 
 **Stamping is Tier-2 only.** `merge_day_signals` writes `setup_key` onto each row,
 so Tier 1 never derives it and no cross-tier mirror is created.
