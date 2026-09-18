@@ -82,3 +82,26 @@ def test_a_command_with_no_ts_still_runs(bus, monkeypatch):
         else setattr(cmd, "ts", None)
     handlers.handle_command(bus, cmd)
     assert fired == ["rescue"]
+
+
+# --- dossier: a replayed lookup must not re-spend 4-5 Schwab calls -----------
+
+def test_a_stale_dossier_command_does_not_fetch(bus, monkeypatch):
+    """Membership in ``_REPLAY_GUARDED`` does nothing by itself - the branch
+    has to call ``_is_stale_side_effect``. This fails if that call goes."""
+    fired = []
+    monkeypatch.setattr(handlers.dossier, "build_dossier",
+                        lambda symbol: fired.append(symbol) or {"symbol": symbol})
+    handlers.handle_command(
+        bus, _aged("dossier", handlers.STALE_OPEN_MAX_AGE_SEC + 60, symbol="MU"))
+    assert fired == [], "a replayed dossier command re-spent Schwab calls"
+    assert bus.cache_get(handlers.dossier_key("MU")) is None
+
+
+def test_a_fresh_dossier_command_does_fetch(bus, monkeypatch):
+    """Power check for the one above: the branch must actually run."""
+    fired = []
+    monkeypatch.setattr(handlers.dossier, "build_dossier",
+                        lambda symbol: fired.append(symbol) or {"symbol": symbol})
+    handlers.handle_command(bus, _aged("dossier", 1, symbol="MU"))
+    assert fired == ["MU"]

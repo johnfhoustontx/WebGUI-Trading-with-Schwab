@@ -361,3 +361,93 @@ def test_the_real_vol_leg_reads_all_three_on_the_scans_definitions(monkeypatch):
                          "iv_percentile": 70.0})
 
     assert dossier._vol("MU", 184.2) == _VOL
+
+
+# ── the ``dossier`` command (Task D4) ───────────────────────────────────────
+# Every test here stubs ``dossier.build_dossier``: the real one calls the proxy.
+
+from services.options_svc import handlers  # noqa: E402
+from shared.bus import Bus  # noqa: E402
+from shared.contracts.envelope import Command  # noqa: E402
+
+
+@pytest.fixture
+def built(monkeypatch):
+    """Stub build_dossier; record every symbol it was asked for."""
+    calls = []
+
+    def _fake(symbol):
+        calls.append(symbol)
+        return {"symbol": symbol, "error": None, "spot": 184.2}
+
+    monkeypatch.setattr(dossier, "build_dossier", _fake)
+    return calls
+
+
+def test_dossier_key_is_per_symbol_and_normalised():
+    assert handlers.dossier_key(" mu ") == "cache:options:dossier:MU"
+    assert handlers.dossier_key("MU") != handlers.dossier_key("NVDA")
+    assert handlers.dossier_event(" mu ") == "events:options:dossier:MU"
+
+
+def test_the_command_writes_its_own_symbols_key_and_never_the_gamma_slot(built):
+    bus = Bus(fake=True)
+    handlers.handle_command(bus, Command(type="dossier", args={"symbol": "MU"}))
+
+    env = bus.cache_get(handlers.dossier_key("MU"))
+    assert env is not None and env.payload["symbol"] == "MU"
+    assert bus.cache_get(handlers.dossier_key("NVDA")) is None
+    # The shared symbol-agnostic slot: a dossier written there would move the
+    # symbol under whoever has the Gamma page open.
+    assert bus.cache_get("cache:options:gamma") is None
+
+
+def test_the_write_carries_the_ttl_and_the_symbols_own_event(built, monkeypatch):
+    bus = Bus(fake=True)
+    writes = []
+    real = bus.cache_set
+
+    def _spy(key, payload, event=None, skip_unchanged=False, ttl=None):
+        writes.append({"key": key, "event": event, "ttl": ttl})
+        return real(key, payload, event=event, skip_unchanged=skip_unchanged,
+                    ttl=ttl)
+
+    monkeypatch.setattr(bus, "cache_set", _spy)
+    handlers.handle_command(bus, Command(type="dossier", args={"symbol": "MU"}))
+
+    assert writes == [{"key": "cache:options:dossier:MU",
+                       "event": "events:options:dossier:MU",
+                       "ttl": handlers.DOSSIER_TTL_SEC}]
+
+
+def test_the_ttl_is_one_autoscan_slot():
+    assert handlers.DOSSIER_TTL_SEC == 900
+
+
+def test_dossier_is_replay_guarded():
+    assert "dossier" in handlers._REPLAY_GUARDED
+
+
+@pytest.mark.parametrize("args", [
+    {"symbol": "../../etc"}, {"symbol": "cache:options:gamma"},
+    {"symbol": ""}, {"symbol": None}, {},
+])
+def test_a_malformed_symbol_writes_nothing_and_fetches_nothing(built, args,
+                                                               monkeypatch):
+    bus = Bus(fake=True)
+    writes = []
+    monkeypatch.setattr(bus, "cache_set",
+                        lambda *a, **k: writes.append((a, k)) or 1)
+    handlers.handle_command(bus, Command(type="dossier", args=args))
+    assert built == []
+    assert writes == []
+
+
+def test_a_lower_case_padded_symbol_is_normalised_before_the_fetch(built):
+    """The key and the payload must agree: build_dossier stores ``symbol``
+    exactly as passed, so it has to be handed the CLEANED symbol."""
+    bus = Bus(fake=True)
+    handlers.handle_command(bus, Command(type="dossier", args={"symbol": " mu "}))
+    assert built == ["MU"]
+    env = bus.cache_get("cache:options:dossier:MU")
+    assert env is not None and env.payload["symbol"] == "MU"

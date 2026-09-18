@@ -19,6 +19,8 @@ import threading
 import time
 
 from services.options_svc import compute
+# Symbol Dossier (design 2026-09-17): one ticker's on-demand fetch.
+from services.options_svc import dossier
 from services.options_svc import flow_alerts
 from services.options_svc import push_notify
 # Rate my trade (design 2026-09-16): the Calculator's legs graded by the
@@ -26,6 +28,7 @@ from services.options_svc import push_notify
 from services.options_svc import rate_trade
 from shared import market_calendar as mc
 from shared.notify.channels import _today_ct
+from shared.symbols import clean_symbol
 from shared.contracts.options import (IncomeScan, MatrixSnapshot,
                                       NetPremiumSnapshot, ScanFunnel,
                                       ScanResult)
@@ -145,7 +148,10 @@ def _is_stale_open(command) -> bool:
 # trusts; a dedup store keyed on the stream message id would be the stronger fix.
 # ``calc_rate`` is harmless to repeat but spends Schwab calls (price history, IV
 # chains, earnings) answering a dialog nobody has open.
-_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "income_scan", "calc_rate")
+# ``dossier``     -> 4-5 Schwab calls per queued lookup, for a page that has long
+#                   since moved on.
+_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "income_scan", "calc_rate",
+                   "dossier")
 
 
 def _market_state(bus):
@@ -376,6 +382,24 @@ def gamma_pub_key(symbol) -> str:
 
 def gamma_pub_event(symbol) -> str:
     return f"events:options:gamma_pub:{str(symbol).strip().upper()}"
+
+
+# One symbol's on-demand dossier. PER-SYMBOL, following gamma_pub_key rather
+# than the single shared cache:options:gamma slot: that one is symbol-agnostic
+# and refresh_gamma_current reads the symbol back out of it, so a dossier
+# written there would move the symbol under whoever has the Gamma page open.
+def dossier_key(symbol) -> str:
+    return f"cache:options:dossier:{str(symbol).strip().upper()}"
+
+
+def dossier_event(symbol) -> str:
+    return f"events:options:dossier:{str(symbol).strip().upper()}"
+
+
+# A full dossier costs 4-5 Schwab calls (quote, GEX chain, price history, IV
+# chain, and run_iv_analysis' own fallback). Fifteen minutes is one autoscan
+# slot, so a repeat lookup inside it reads this key and spends nothing.
+DOSSIER_TTL_SEC = 900
 
 
 def gamma_pub_history_key(symbol, view) -> str:
@@ -2740,6 +2764,9 @@ def handle_command(bus, command) -> None:
     legs with the Strategy Finder's scorer and checklist stamps against the cached
     calc chain, cache ``{request_id, symbol, legs, row, error}`` + publish
     (replay-guarded);
+    ``dossier`` (args symbol) → fetch one ticker's dossier, cache it per symbol
+    under ``dossier_key`` for ``DOSSIER_TTL_SEC`` + publish (replay-guarded; a
+    symbol failing ``shared.symbols.clean_symbol`` writes nothing);
     ``expected_move`` (args symbol/expiry/legs) → build the
     expected-move cone payload, cache the result + publish; ``em_chain`` (args
     symbol) → expirations + strike ladders for the Expected Move dropdowns;
@@ -3038,6 +3065,27 @@ def handle_command(bus, command) -> None:
             "request_id": a.get("request_id"), "symbol": a.get("symbol"),
             "legs": a.get("legs"), "row": out.get("row"), "error": out.get("error")})
         bus.publish(EVENT_CALC_RATING, {"version": version})
+    elif command.type == "dossier":
+        # The Symbol page's lookup for a ticker the cache cannot answer.
+        # Replay-guarded (see _REPLAY_GUARDED): each fetch is 4-5 Schwab calls.
+        if _is_stale_side_effect(command):
+            log.warning("REJECTED stale dossier for %r: age %.0fs > %ds (ts=%s) — "
+                        "a replayed lookup must not re-spend its Schwab calls",
+                        (command.args or {}).get("symbol"),
+                        _command_age_seconds(command) or -1,
+                        STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
+            return
+        # The symbol becomes part of a Redis KEY NAME, and build_dossier stores
+        # it exactly as passed - so it is cleaned here, once, and that one value
+        # is used for both the fetch and the key.
+        symbol = clean_symbol((command.args or {}).get("symbol"))
+        if symbol is None:
+            log.warning("dossier: refusing malformed symbol %r",
+                        (command.args or {}).get("symbol"))
+            return
+        payload = dossier.build_dossier(symbol)
+        bus.cache_set(dossier_key(symbol), payload,
+                      event=dossier_event(symbol), ttl=DOSSIER_TTL_SEC)
     elif command.type == "expected_move":
         a = command.args or {}
         res = compute.compute_expected_move(
