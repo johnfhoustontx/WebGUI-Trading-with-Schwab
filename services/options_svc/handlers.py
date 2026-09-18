@@ -399,7 +399,55 @@ def dossier_event(symbol) -> str:
 # A full dossier costs 4-5 Schwab calls (quote, GEX chain, price history, IV
 # chain, and run_iv_analysis' own fallback). Fifteen minutes is one autoscan
 # slot, so a repeat lookup inside it reads this key and spends nothing.
+# The fetch runs INLINE on the single cmd:options consumer, so its 4-5
+# sequential proxy calls hold up paper_create, rescue_apply and every other
+# command queued behind it - accepted at this cost.
 DOSSIER_TTL_SEC = 900
+
+# A dossier written this recently is not fetched again. The page waits 30 s for
+# an answer; a dossier queued behind a 26-40 s Strategy Finder scan outlasts
+# that, the user presses Refresh, and a SECOND command queues behind the first.
+# Two tabs opened on one uncovered symbol within seconds do the same. Because
+# options_svc runs ONE consumer processing cmd:options in order, the queued
+# duplicate always runs AFTER the first has written, so reading the key's own
+# envelope ts catches both cases. It deliberately cannot catch two commands
+# both processed before either writes - with one in-order consumer that cannot
+# happen. 60 s: long enough to cover a slow queue and a double tap, short
+# enough that a Refresh a minute later really fetches.
+#
+# ⚠ A recent ``fetch_failed`` does NOT suppress a retry. It records an outage,
+# not an answer, and the user asked again; the page's own reuse rule
+# (``pages/symbol.reusable_dossier``) already treats it as not reusable. The
+# cost of honouring the retry is bounded: the fetch short-circuits after the
+# quote leg, so a retry during an outage spends at most ONE quote call - and
+# none at all when the proxy itself is down (its client answers a synthetic
+# 502 without reaching Schwab). A success or a ``no_quote`` does suppress:
+# neither can change inside a minute.
+DOSSIER_DEDUP_SEC = 60
+
+
+def _recent_dossier(bus, symbol):
+    """The envelope ts age (s) of ``symbol``'s dossier when it was written
+    under ``DOSSIER_DEDUP_SEC`` ago and is not a ``fetch_failed``; else None.
+
+    Uses the envelope's OWN ``ts`` - the write time, since the dossier is never
+    written ``skip_unchanged`` - not the ``:ts`` side key. An unreadable
+    envelope or ts is "no recent dossier": the fetch runs, as it did before."""
+    try:
+        env = bus.cache_get(dossier_key(symbol))
+        if env is None:
+            return None
+        if (env.payload or {}).get("error") == dossier.FETCH_FAILED:
+            return None
+        when = _dt.datetime.fromisoformat(env.ts)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=_dt.timezone.utc)
+        age = (_dt.datetime.now(_dt.timezone.utc) - when).total_seconds()
+    except Exception:  # noqa: BLE001 - a dedup that raises must not block a fetch
+        log.warning("dossier dedup read failed for %s; fetching", symbol,
+                    exc_info=True)
+        return None
+    return age if 0 <= age < DOSSIER_DEDUP_SEC else None
 
 
 def gamma_pub_history_key(symbol, view) -> str:
@@ -3082,6 +3130,13 @@ def handle_command(bus, command) -> None:
         if symbol is None:
             log.warning("dossier: refusing malformed symbol %r",
                         (command.args or {}).get("symbol"))
+            return
+        # A duplicate queued behind a slow command, or a second tab: the cache
+        # answered moments ago (see DOSSIER_DEDUP_SEC).
+        recent = _recent_dossier(bus, symbol)
+        if recent is not None:
+            log.info("dossier: %s written %.0fs ago (< %ds) — not re-fetching",
+                     symbol, recent, DOSSIER_DEDUP_SEC)
             return
         payload = dossier.build_dossier(symbol)
         bus.cache_set(dossier_key(symbol), payload,

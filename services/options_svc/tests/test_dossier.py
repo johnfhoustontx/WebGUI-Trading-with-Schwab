@@ -568,3 +568,94 @@ def test_a_lower_case_padded_symbol_is_normalised_before_the_fetch(built):
     assert built == ["MU"]
     env = bus.cache_get("cache:options:dossier:MU")
     assert env is not None and env.payload["symbol"] == "MU"
+
+
+# -- the recent-write dedup (DOSSIER_DEDUP_SEC) -------------------------------
+# The aged envelope is written straight into the fake Redis with a back-dated
+# ts - the envelope's OWN write time is what the handler reads - so no test
+# sleeps.
+
+from shared.contracts.envelope import CacheEnvelope  # noqa: E402
+
+
+def _written(bus, symbol, seconds_ago, error=None):
+    ts = (_dt.datetime.now(_dt.timezone.utc)
+          - _dt.timedelta(seconds=seconds_ago)).isoformat()
+    env = CacheEnvelope(version=1, ts=ts,
+                        payload={"symbol": symbol, "error": error})
+    bus._r.set(handlers.dossier_key(symbol), env.to_json())
+
+
+def _ask(bus, symbol="MU"):
+    handlers.handle_command(bus, Command(type="dossier",
+                                         args={"symbol": symbol}))
+
+
+def test_a_dossier_written_moments_ago_is_not_fetched_again(built):
+    bus = Bus(fake=True)
+    _written(bus, "MU", 10)
+
+    _ask(bus)
+
+    assert built == [], "a dossier written 10 s ago was re-fetched"
+    # And the cached answer is left exactly as it was.
+    assert bus.cache_get(handlers.dossier_key("MU")).version == 1
+
+
+def test_a_dossier_older_than_the_window_is_fetched(built):
+    bus = Bus(fake=True)
+    _written(bus, "MU", 120)
+
+    _ask(bus)
+
+    assert built == ["MU"]
+
+
+def test_no_prior_dossier_is_fetched(built):
+    _ask(Bus(fake=True))
+
+    assert built == ["MU"]
+
+
+def test_a_recent_dossier_for_another_symbol_does_not_suppress(built):
+    bus = Bus(fake=True)
+    _written(bus, "NVDA", 5)
+
+    _ask(bus, "MU")
+
+    assert built == ["MU"]
+
+
+def test_a_recent_fetch_failed_does_not_suppress_a_retry(built):
+    # An outage, not an answer: the user asked again, and a retry during an
+    # outage costs at most one quote call (the quote leg short-circuits).
+    bus = Bus(fake=True)
+    _written(bus, "MU", 5, error=dossier.FETCH_FAILED)
+
+    _ask(bus)
+
+    assert built == ["MU"]
+
+
+def test_a_recent_no_quote_does_suppress(built):
+    # A typo will not start quoting inside a minute.
+    bus = Bus(fake=True)
+    _written(bus, "XYZQ", 5, error=dossier.NO_QUOTE)
+
+    _ask(bus, "XYZQ")
+
+    assert built == []
+
+
+def test_the_queued_duplicate_behind_a_real_write_is_suppressed(built):
+    # The Refresh-behind-a-slow-queue case end to end: two commands for one
+    # symbol, processed in order by the one consumer - one fetch.
+    bus = Bus(fake=True)
+    _ask(bus)
+    _ask(bus)
+
+    assert built == ["MU"]
+
+
+def test_the_dedup_window_is_a_minute():
+    assert handlers.DOSSIER_DEDUP_SEC == 60
