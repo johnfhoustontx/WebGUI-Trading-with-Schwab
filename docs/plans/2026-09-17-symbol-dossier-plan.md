@@ -10,7 +10,122 @@
 
 **Design:** [`2026-09-17-symbol-dossier-design.md`](2026-09-17-symbol-dossier-design.md)
 
-**Land [the persistence plan](2026-09-17-signal-persistence-plan.md) FIRST** — Task 8 here consumes `pages.options.persistence`.
+**Land [the persistence plan](2026-09-17-signal-persistence-plan.md) FIRST** — Task 8 here consumes `pages.options.persistence`. ✅ Landed and promoted as `727faa5`.
+
+---
+
+## ⚠ Verified corrections (2026-09-18) — these OVERRIDE the task text below
+
+A pre-implementation sweep against the code at `727faa5` found **17 wrong claims**
+in this plan, six of which would have broken the build, the suite or the running
+feature. The task bodies below are left as written for the record; where they
+disagree with this block, **this block wins**.
+
+**D1**
+- `structure_positions` has **seven** existing tests in `webgui/tests/test_desk.py:40-88`,
+  reached as `d.structure_positions` via `from pages import desk as d`. Move none of
+  them; they must keep passing through the re-export.
+- Pages import **absolutely**: `from pages.structure import structure_positions  # noqa: F401`
+  in desk.py's import block (not mid-module at line 111 — E402). `structure.py`
+  needs only `from pages.fmt import num as _finite`. No collisions exist in desk.py.
+
+**D2**
+- Tests go in `options-scanner/tests/test_scanner_engine.py::TestScanFunnel` (~2772),
+  **not** `test_scan_funnel.py` (which covers `screen_spreads`).
+- Use the **`fake_client`** fixture (`_FAKE_SYMBOLS` = SPY, QQQ) and `_FUNNEL_SYMBOLS`,
+  not `symbols=["MU"]`. The no-quote path is
+  `monkeypatch.setitem(_FAKE_SYMBOLS, "NOPE", (0.0, 1))` — there is no `_NoQuoteClient`.
+- `hv_current` is set only when `atm_iv and hv_series`, and `_empty_iv_data` lacks the
+  key, so `.get()` is required. Both values are **percents**.
+- The percent-to-decimal trap lives in `compute.scan_vol_inputs` (~869–887), not "compute.py:613".
+
+**D3 — redesigned legs**
+- **Quote:** options_svc quotes through `_proxy.schwab_py_client.get_quotes([sym]).json()`,
+  which is Schwab's **raw nested** shape, and `compute.quote_last(raw, symbol)` extracts
+  the price. The flattened `schwab_client` is not used here, and its dicts default
+  `"last": 0` and are always truthy, so "a falsy quote short-circuits" would never fire.
+- **Vol:** call `run_iv_analysis(_proxy.schwab_py_client, symbol, price=spot, hist=hist)`
+  with `hist = se.fetch_price_history(client, symbol)` — it fetches its own 20–45 DTE
+  chain and returns `current_iv`, `iv_rank` and `hv_current` together, on the scan's own
+  definitions. Precedent: `rate_trade._score`. The plan's `_vol` had no chain, so no
+  `current_iv`, so no rank.
+- **GEX:** `_light_gex_context(symbol)` → `_gex_from_snapshot(ctx)` (compute.py ~9601)
+  for flip/walls. It does **not** return ATM IV — that comes from the vol leg.
+- **Earnings:** `compute.scan_earnings(symbol)` → `(status, date)` in **one** read. Two
+  separate `lookup`/`coverage` reads can return `("upcoming", None)`, and a direct
+  `shared.earnings` connect trips the repo-root conftest's `sqlite3.connect` guard.
+- **Cost is 4–5 Schwab calls**, not three: quote, GEX chain, price history, IV chain,
+  plus `run_iv_analysis`' own fallback. Say so in `DOSSIER_TTL_SEC`'s comment.
+
+**D4 — the command**
+- Branch on **`elif command.type == "dossier":`** and read **`command.args`**. There is no
+  `kind`/`args`. The docstring drift test (`test_every_implemented_command_is_documented`)
+  only finds branches spelled `command.type == "…"`, so any other spelling is invisible to it.
+- ⚠ **Adding `"dossier"` to `_REPLAY_GUARDED` (handlers.py:148, four members today) does
+  NOTHING by itself.** Every guarded branch calls the guard explicitly:
+  ```python
+  if _is_stale_side_effect(command):
+      log.warning("REJECTED stale dossier (age %.0fs > %ss, ts=%s)",
+                  _command_age_seconds(command) or -1,
+                  STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
+      return
+  ```
+  Without it a fresh consumer group replays the backlog and spends Schwab calls — the
+  documented incident this list exists for.
+- The age field is **`Command.ts`** (ISO-8601 UTC string), read by `_command_age_seconds`.
+  Build aged commands with `test_replayed_commands.py::_aged(cmd_type, seconds, **args)`;
+  that file is the home for the replay test.
+- There is **no `fake_bus` fixture**. Use `Bus(fake=True)` and `Command(type=…, args=…)`.
+  Stub `dossier.build_dossier` in every handler test, or they call the proxy.
+- `re` is **not** imported in handlers.py — add it.
+- Docstring line must read ``` ``dossier`` (args symbol) → … ``` with the `→` within 80
+  characters of the backticks, or `test_no_command_is_documented_that_does_not_exist` misses it.
+
+**D5**
+- The IV/HV bands in `strategy_scoring.infer_market_view` (~391–396) are **bare literals**
+  (`>= 1.2` → `high`, `<= 0.9` → `low`), used only when `iv_rank is None`. Tier 1 cannot
+  import `options-scanner`, so the page defines its own constants **and** a mirror test in
+  `shared/tests/test_cross_tier_mirrors.py` (AST-parse, import nothing) pins them equal.
+  Use the scorer's words, `high` / `low` / `mid` — not `rich` / `cheap` / `normal`.
+- Book keys confirmed: `paper_account.positions`, `paper_trades.trades`,
+  `driver_paper_account.positions`, `captured.signals`. Mirror `desk.position_rows`, which
+  also filters closed rows via `_is_open`.
+
+**D6**
+- Import the allow-list: `from test_rings import _dompurify_allowlist` (seven test files do).
+  It returns **one** merged lowercase set; there is no `_parse`. Parse inline with the two
+  `re.findall` lines `test_rings` uses.
+
+**D7**
+- `overlay` and `inputs` are `pages/options/overlay.py` / `pages/options/inputs.py`.
+- The route list is the local tuple `expected` inside `test_shell_registers_all_pages` —
+  there is no `EXPECTED_ROUTES`.
+- ⚠ **Four more `test_shell.py` tests change** when `/symbol` joins the leading block —
+  all legitimate expectation changes:
+  `test_the_landing_block_is_pinned_above_every_caption` (entries),
+  `test_nav_section_captions_and_their_derived_counts` (`[1,4,5,2]` → `[2,4,5,2]`),
+  `test_drawer_icons_are_present_and_distinct` (hard-coded **16 → 17**), and
+  `test_breadcrumb_trail_starts_at_a_section_for_every_page` (`_LANDING_ROUTES`).
+- ⚠ **Docs cannot wait for Task 10.** `test_page_help.py::test_every_nav_route_has_a_guide`
+  needs a `page_help.HELP_MD` entry, and `test_docs_cover_the_ui.py` needs "Symbol"
+  explained in both guides and a `## Symbol` heading in the Reference Guide — so the page
+  help and manual sections land **in Task 7**, which is also CLAUDE.md's own rule.
+- New top-level page goes in `test_no_inline_style.py`'s `PHASE_8_FILES`, beside `desk.py`.
+- Add a `"/symbol"` entry to `_TAB_COLOR`, and update the `NAV_SECTIONS` comment that
+  says the Desk is "pinned ALONE".
+- **One symbol regex, not two.** The page's `[A-Z$][A-Z$.]{0,7}` and the service's
+  `[A-Z$.]{1,8}` disagree (the latter accepts `"."` and `".."`). Put `SYMBOL_RE` in
+  `shared/symbols.py` — on the Tier-1 allow-list and importable by services — and have
+  both ends use it.
+
+**D9**
+- The Opportunity Board has **no** per-row actions today and its copy says so
+  ("This page has NO row click-through"). `handoff.add_row_actions` is the wrong tool
+  (Calculator / Paper / Expected Move buttons for signal tables).
+- ⚠ The board is **published** as `/opportunity` and `/symbol` is not, so the link must go
+  through `shell.can_navigate` / `shell.navigate_to`, and must not be drawn on the public
+  screen. `tests/test_live_navigation.py` enumerates every internal navigation. The
+  "no row click-through" copy changes with it.
 
 ---
 
