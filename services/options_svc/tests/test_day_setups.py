@@ -307,3 +307,25 @@ def test_the_day_union_stamps_ct_never_the_host_wall_clock(monkeypatch):
     # because _trustworthy_baseline subtracts it from a naive window_bounds
     # time, which an aware stamp would make a TypeError.
     assert stamp == expected == "2026-09-17T08:02:30"
+
+
+def test_baseline_is_trustworthy_when_prev_was_usable():
+    assert compute._trustworthy_baseline(True, "2026-09-17T13:45:00") is True
+
+
+def test_baseline_is_trustworthy_inside_the_first_scan_slot():
+    # [windows.scan].start is 08:00 CT; the first slot runs to 08:15.
+    assert compute._trustworthy_baseline(False, "2026-09-17T08:02:00") is True
+
+
+def test_baseline_is_untrustworthy_after_a_cold_start_mid_session():
+    assert compute._trustworthy_baseline(False, "2026-09-17T12:03:00") is False
+
+
+def test_baseline_degrades_to_untrustworthy_when_the_window_is_unreadable(
+        monkeypatch):
+    # Unknown -> "we cannot claim an age", never -> "stamp it anyway".
+    import shared.market_calendar as mc
+    monkeypatch.setattr(mc, "window_bounds",
+                        lambda name: (_ for _ in ()).throw(RuntimeError("boom")))
+    assert compute._trustworthy_baseline(False, "2026-09-17T08:02:00") is False

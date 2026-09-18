@@ -197,6 +197,34 @@ _SETUP_SCORES_MAX = 40
 # Backstop on the map itself, mirroring _DAY_MAX_PER_LIST's role for the lists.
 _SETUP_MAX = 4000
 
+# One autoscan slot. scheduler.autoscan_due buckets on `now.minute // 15`.
+_SCAN_SLOT_MIN = 15
+
+
+def _trustworthy_baseline(prev_usable, now_iso):
+    """Whether a NEWCOMER in this merge may honestly be stamped ``first_seen``.
+
+    A usable ``prev`` means we have been watching, so any newcomer genuinely
+    arrived now. With no usable ``prev`` we are either at the day's first scan
+    (the stamp is exactly right) or recovering from a flushed / wrong-dated
+    envelope mid-session (the stamp would lie, which is why the 2026-07-16
+    implementation of this field was deleted). The clock separates the two.
+
+    Anything unreadable degrades to False — "we cannot claim an age" is the safe
+    direction; the page renders a dash.
+    """
+    if prev_usable:
+        return True
+    try:
+        from shared import market_calendar as _mc
+        start, _end = _mc.window_bounds("scan")
+        now = _dt.datetime.fromisoformat(str(now_iso))
+        opened = _dt.datetime.combine(now.date(), start)
+        elapsed = (now - opened).total_seconds() / 60.0
+        return 0 <= elapsed < _SCAN_SLOT_MIN
+    except Exception:  # noqa: BLE001
+        return False
+
 
 def merge_setups(prev_setups, live, now_iso, seq, trustworthy_baseline):
     """Merge one scan's live setups into the day's persistence map. PURE.
