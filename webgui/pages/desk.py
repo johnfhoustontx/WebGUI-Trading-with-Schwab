@@ -57,6 +57,9 @@ from pages.regime_mix import regime_picture as _regime_picture
 from pages import sentiment_bullbear as _bbmap
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
+# The structure bar's geometry, shared with the Symbol Dossier. Used below, and
+# also re-exported: ``desk.structure_positions`` is what test_desk calls.
+from pages.structure import structure_positions
 # The panel-width arithmetic, imported rather than restated so a width quoted
 # in a comment here and a width computed from the same CSS cannot drift apart.
 # ``grid_min_width_px``/``track_floors`` feed ``_ROW_SHELLS``/``_PIN_OFFSETS``
@@ -105,41 +108,6 @@ DESK_SYMBOLS = ("$SPX", "SPY", "$NDX", "QQQ")
 # that needs it. Every session BOUND still comes from ``market_calendar``; this
 # is only the zone a naive datetime is read in, which is that module's rule too.
 _CT = ZoneInfo("America/Chicago")
-
-
-# ── structure map ────────────────────────────────────────────────────────────
-def structure_positions(spot, flip, put_wall, call_wall):
-    """Percentage positions along the structure bar, or None if undrawable.
-
-    Returns ``{"put_wall": 0.0, "call_wall": 100.0, "spot": pct, "flip": pct|None}``
-    with the walls pinned to the ends, since the bar's whole job is to show where
-    price sits BETWEEN them.
-
-    Percentages, not a viewBox: the caller applies them as ``left-[{pct}%]``
-    Tailwind arbitrary values. Drawing this as a scaled SVG would need
-    ``vector-effect: non-scaling-stroke`` to stop the non-uniform scale smearing
-    the strokes, and DOMPurify strips that attribute — leaving strokes thick
-    horizontally and hairline vertically while the server-side string stays
-    perfectly correct, which is invisible to every test. Never raises.
-    """
-    lo, hi = _finite(put_wall), _finite(call_wall)
-    s = _finite(spot)
-    # No walls, no bar — and a non-finite spot is withheld rather than clamped,
-    # because the clamp would place it exactly ON a wall (see ``_finite``).
-    if lo is None or hi is None or s is None or hi <= lo:
-        return None
-    span = hi - lo
-
-    def _pct(v):
-        f = _finite(v)
-        if f is None:
-            return None
-        return round(min(100.0, max(0.0, (f - lo) / span * 100.0)), 2)
-
-    # The flip is optional decoration on a bar the walls already define, so a
-    # missing (or non-finite) flip costs the tick, not the whole bar.
-    return {"put_wall": 0.0, "call_wall": 100.0, "spot": _pct(s),
-            "flip": _pct(flip)}
 
 
 # ── dealer positioning rows ──────────────────────────────────────────────────

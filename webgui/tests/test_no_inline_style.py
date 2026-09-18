@@ -181,7 +181,10 @@ def test_sentiment_pages_have_no_inline_style():
 # exception), and its rings are a raw ``ui.html()`` SVG string built by
 # ``pages/rings.py`` — the out-of-scope case, not an inline style.
 PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
-                 "eod.py", "market.py", "ticker.py", "desk.py"]
+                 "eod.py", "market.py", "ticker.py", "desk.py",
+                 # The Desk's structure-bar geometry, shared with the Symbol
+                 # Dossier — pure today; it joins the guard beside desk.py.
+                 "structure.py"]
 
 
 def test_utility_pages_have_no_inline_style():
