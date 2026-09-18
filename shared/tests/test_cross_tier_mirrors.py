@@ -611,3 +611,25 @@ def test_the_dossier_refuses_zero_grid_walls_by_the_desks_rule():
         f"{WALL_RULE_SERVICE}:zero_grid_walls_ok has drifted from "
         f"{WALL_RULE_PAGE}:walls_trustworthy's zero-grid condition. A fetched "
         "dossier and the Desk would then disagree about which walls are real.")
+
+
+# --- the dossier dedup window ------------------------------------------------
+# options_svc skips a dossier fetch written under DOSSIER_DEDUP_SEC ago, and the
+# Symbol page's Refresh must know that window: pressed inside it, an enqueue is
+# a silent no-op server-side, and the page would sit on FETCHING, then report a
+# look-up "still queued" that is not queued at all. Tier 1 cannot import the
+# service, so the page restates the number.
+
+DEDUP_SOURCE = "services/options_svc/handlers.py"
+DEDUP_MIRROR = "webgui/pages/symbol.py"
+
+
+def test_the_dossier_dedup_window_agrees_across_tiers():
+    service = _const(DEDUP_SOURCE, "DOSSIER_DEDUP_SEC")
+    page = _const(DEDUP_MIRROR, "DOSSIER_DEDUP_SEC")
+    assert isinstance(service, (int, float)) and service > 0, (
+        "the service window is not a positive number - the pin would be vacuous")
+    assert page == service, (
+        f"{DEDUP_MIRROR}:DOSSIER_DEDUP_SEC ({page}) has drifted from "
+        f"{DEDUP_SOURCE}:DOSSIER_DEDUP_SEC ({service}). A Refresh inside the "
+        "service's window would then enqueue a fetch the service silently drops.")

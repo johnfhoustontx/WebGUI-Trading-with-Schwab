@@ -67,7 +67,8 @@ _FETCH_TRIGGERS = (NAVIGATE, REFRESH)
 NO_QUOTE, FETCH_FAILED = "no_quote", "fetch_failed"   # dossier.py's two words
 
 
-def should_enqueue(coverage, trigger, *, have_dossier=False, feed_cold=False):
+def should_enqueue(coverage, trigger, *, have_dossier=False, feed_cold=False,
+                   current=False):
     """Whether this ``trigger`` may spend a ``dossier`` fetch on ``coverage``.
 
     * ``poll`` — and anything unrecognised — NEVER enqueues. A clock must not
@@ -79,13 +80,71 @@ def should_enqueue(coverage, trigger, *, have_dossier=False, feed_cold=False):
     * On **navigation**, a dossier the service still holds (``have_dossier`` —
       see ``reusable_dossier``) is reused; the 15-minute TTL exists so a repeat
       lookup spends nothing, and only the page can decide not to ask.
-    * **Refresh** is the explicit re-fetch.
+    * **Refresh** is the explicit re-fetch — except of a dossier that is
+      ``current`` (``dossier_is_current``): the service would drop that fetch
+      as a duplicate, so the page must not send it.
     """
     if trigger not in _FETCH_TRIGGERS or feed_cold:
         return False
     if not sf.needs_fetch(coverage):
         return False
+    if trigger == REFRESH and current:
+        return False
     return not (trigger == NAVIGATE and have_dossier)
+
+
+# ⚠ A MIRROR of ``services/options_svc/handlers.py`` ``DOSSIER_DEDUP_SEC``: the
+# service skips a dossier fetch for a symbol whose key was written under this
+# many seconds ago (unless that write was a ``fetch_failed``). Tier 1 cannot
+# import the service, so the number is restated here, and
+# ``shared/tests/test_cross_tier_mirrors.py`` fails if the two drift. A Refresh
+# inside the window would be a silent no-op server-side — the version never
+# moves, and the page would sit on FETCHING and then claim a look-up "still
+# queued" that is not queued at all.
+DOSSIER_DEDUP_SEC = 60
+
+
+def _now_ct_naive():
+    """Now as a NAIVE Central wall-clock — the dossier's ``fetched_at`` basis
+    (``dossier._stamp``). Never host-local: off CT that is hours out."""
+    return _dt.datetime.now(_CT).replace(tzinfo=None)
+
+
+def _age_seconds(stamp, *, naive_zone):
+    """Seconds since ISO ``stamp``, or None. A naive stamp is read in
+    ``naive_zone`` — UTC for the envelope's write time, Central for
+    ``fetched_at`` — and an aware one is compared as the instant it names."""
+    try:
+        when = _dt.datetime.fromisoformat(str(stamp))
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=naive_zone)
+    return (_dt.datetime.now(_dt.timezone.utc) - when).total_seconds()
+
+
+def dossier_is_current(dossier, written_at=None):
+    """Whether the service would drop a Refresh of this dossier as a duplicate.
+
+    The service's own rule (``handlers._recent_dossier``): written under
+    ``DOSSIER_DEDUP_SEC`` ago and not a ``fetch_failed``. It measures the
+    ENVELOPE's write time, so ``written_at`` — the view's ``:ts`` stamp, the
+    same instant — is used when the page has it. Without it the page falls back
+    to ``fetched_at``, NAIVE CENTRAL, which is stamped when the fetch STARTS and
+    so reads a few seconds older than the write: the fallback errs toward
+    sending a Refresh the service may drop, never toward refusing one it would
+    run. A future stamp or anything unreadable is not current.
+    """
+    if not isinstance(dossier, dict) or not dossier:
+        return False
+    if dossier.get("error") == FETCH_FAILED:
+        return False
+    age = None
+    if written_at:
+        age = _age_seconds(written_at, naive_zone=_dt.timezone.utc)
+    if age is None:
+        age = _age_seconds(dossier.get("fetched_at"), naive_zone=_CT)
+    return age is not None and 0 <= age < DOSSIER_DEDUP_SEC
 
 
 def reusable_dossier(dossier):
@@ -201,7 +260,8 @@ def _hhmm(stamp):
 
 
 def coverage_chip(symbol, coverage, dossier, *, pending=False, raw="",
-                  feed_cold=False, scanned_at=None, queued=False):
+                  feed_cold=False, scanned_at=None, queued=False,
+                  current=False):
     """``{"label", "tone", "message"}`` for the header.
 
     The three absences the design separates never share a sentence: a symbol
@@ -255,17 +315,24 @@ def coverage_chip(symbol, coverage, dossier, *, pending=False, raw="",
         # no-quote is moot here rather than a verdict on the ticker.
         when = _hhmm(d.get("fetched_at")) if d and error is None else None
         label = f"COLLECTED · FETCHED {when}" if when else "COLLECTED"
-        return {"label": label, "tone": tone["accent"], "message": ""}
+        return {"label": label, "tone": tone["accent"],
+                "message": _current_line(when) if current and when else ""}
     if error == NO_QUOTE:
         return {"label": "NOT FOUND", "tone": tone["neg"],
                 "message": f"No quote for {symbol} — check the symbol"}
     if d is not None:
         when = _hhmm(d.get("fetched_at"))
         return {"label": f"FETCHED {when}" if when else "FETCHED",
-                "tone": tone["accent"], "message": ""}
+                "tone": tone["accent"],
+                "message": _current_line(when) if current and when else ""}
     return {"label": "NO DATA", "tone": tone["muted"],
             "message": (_copy.WAITING_OPTIONS if feed_cold else
                         f"No reading for {symbol} yet — try Refresh.")}
+
+
+def _current_line(when):
+    """A Refresh inside the dedup window: nothing was sent, and why."""
+    return f"Fetched {when} — already current."
 
 
 def gamma_link_allowed(coverage):
@@ -685,7 +752,7 @@ def render(symbol=None):
     state = {"versions": {}, "data": {}, "pending": False,
              "refreshing": False, "fetch_seq": 0, "timeout_timer": None,
              "seeded": False, "seeding": False, "cold_painted": False,
-             "queued": False,
+             "queued": False, "current": False, "current_timer": None,
              "scan_day_memo": {}}
 
     if CONSOLE_FONT_HEAD_HTML:
@@ -771,7 +838,8 @@ def render(symbol=None):
                              feed_cold=_feed_cold(),
                              scanned_at=(funnel.get("timestamp")
                                          if isinstance(funnel, dict) else None),
-                             queued=state["queued"])
+                             queued=state["queued"],
+                             current=state["current"])
 
     # ── painters ─────────────────────────────────────────────────────────────
     def _paint_header():
@@ -1027,11 +1095,13 @@ def render(symbol=None):
             return False
         have = reusable_dossier(_d(own_view))
         if not should_enqueue(_coverage(), trigger, have_dossier=have,
-                              feed_cold=_feed_cold()):
+                              feed_cold=_feed_cold(),
+                              current=state["current"]):
             return False
         bus_client.request("options", cmd)
         state["pending"] = True
         state["queued"] = False
+        state["current"] = False
         state["fetch_seq"] += 1
         overlay.show(f"Fetching {sym}…")
         _paint_header()
@@ -1077,11 +1147,34 @@ def render(symbol=None):
         state["refreshing"] = True
         refresh_btn.set_enabled(False)
         try:
-            _seed(await run.io_bound(_read_all))
+            pairs, written_at = await run.io_bound(_read_for_refresh)
+            _seed(pairs)
+            # Inside the service's dedup window a fetch would be dropped, so it
+            # is not sent: the cache was just re-read, and the chip says the
+            # dossier is already current. Chosen over disabling Refresh, which
+            # would need a countdown to not read as broken — and Refresh still
+            # has a job here (it re-reads every view).
+            _mark_current(dossier_is_current(_d(own_view), written_at))
             _enqueue_fetch("refresh")
         finally:
             state["refreshing"] = False
             refresh_btn.set_enabled(sym is not None)
+
+    def _read_for_refresh():
+        written_at = bus_client.read_meta(own_view)[1] if own_view else None
+        return _read_all(), written_at
+
+    def _mark_current(current):
+        state["current"] = bool(current)
+        if state["current_timer"] is not None:
+            state["current_timer"].cancel()
+            state["current_timer"] = None
+        if current:
+            # The line is true only inside the window; drop it when it ends.
+            with page_col:
+                state["current_timer"] = ui.timer(
+                    DOSSIER_DEDUP_SEC, lambda: _mark_current(False), once=True)
+        _paint_header()
 
     refresh_btn.on_click(_on_refresh)
     refresh_btn.set_enabled(sym is not None)

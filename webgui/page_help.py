@@ -140,12 +140,15 @@ not "the market is flat".
 **Symbol — the simple version**
 
 Type a ticker, press **Enter**, and get **one screen about that one name** —
-what would otherwise take about eight pages. Every band ends in a link to the
-page that owns the fact, so this is an index, not a replacement.
+what would otherwise take about eight pages. The bands link to the pages that
+own each fact, so this is an index, not a replacement.
 
 - **Structure** — where price sits between the **put wall** and the **call
   wall**, and which side of the **gamma flip** it is on. Above the flip, dealer
   hedging tends to damp moves (pins); below it, hedging amplifies them (runs).
+  Its **Dealer Positioning** link appears **only for names the app scans or
+  collects**: opening that page on any other name would make it re-fetch the
+  whole option chain from Schwab every minute for the rest of the session.
 - **Volatility** — **Vol Rank** (how today's implied vol compares with the past
   year of *realised* movement — not a true IV rank), **IV vs HV** (is the market
   charging more than the stock has been moving? *high* above 1.2×, *low* below
@@ -175,6 +178,12 @@ app does not already cover, or press **Refresh** — never on a timer. A repeat
 visit within 15 minutes reuses the last look-up and costs nothing. **Refresh**
 re-reads everything and, for a name the app does not scan, fetches it fresh.
 
+**Queued** means the look-up is still waiting behind other work on the options
+service — it will appear on its own when the service answers, so there is no
+need to press Refresh. Pressed within a minute of the last look-up, **Refresh**
+only re-reads the page and says *Fetched 14:32 — already current*: a second
+look-up that soon would be skipped anyway.
+
 *No quote for XYZQ — check the symbol* means Schwab answered and has no such
 ticker. *Couldn't fetch* means Schwab could not be reached — the ticker may be
 fine; try again in a minute.
@@ -199,6 +208,14 @@ plus single-leg directional trades on their own tab.
   opposite. It is **not** a comparison of today's option prices against last
   year's option prices — nobody sells that data, so the app started recording its
   own on 2026-09-12 and it will take about a year to be usable.
+- **Seen since** — when this setup first appeared in today's scans and how many
+  scans it has been live in, e.g. *09:15 · 14x*. A setup is the symbol, strategy
+  and expiration, whatever the exact strikes, so a strike shifting a notch does
+  not restart the clock. A dash means the start time can't be known — not that
+  the signal is new.
+- **Score trend** — how the setup's best score has moved over the last hour of
+  scans (four readings): *▲* rising, *▼* fading, *▬* steady (within two points),
+  or *new* until it has four scans behind it. Neither column filters or sorts.
 - **Checks** — the go / no-go checklist for that row, in one chip: *Clear · 7 of
   9* (nothing to worry about), *2 cautions*, *Blocked* (the paper ledger would
   refuse it), *Partly checked* (something the checks read hasn't loaded yet) or a

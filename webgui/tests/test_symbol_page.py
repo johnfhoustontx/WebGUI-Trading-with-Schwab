@@ -785,6 +785,132 @@ def test_the_page_shows_the_queued_line_after_its_timeout(world):
     assert len(sent) == 1
 
 
+# ── Refresh inside the service's dedup window ──────────────────────────────
+
+def _ago_ct(seconds):
+    """A naive-Central ``fetched_at`` ``seconds`` ago — the dossier's own
+    stamp format (dossier._stamp: naive CT, seconds precision)."""
+    import datetime as dt
+    now = dt.datetime.now(sp._CT).replace(tzinfo=None)
+    return (now - dt.timedelta(seconds=seconds)).isoformat(timespec="seconds")
+
+
+def _ago_utc(seconds):
+    import datetime as dt
+    now = dt.datetime.now(dt.timezone.utc)
+    return (now - dt.timedelta(seconds=seconds)).isoformat()
+
+
+def test_a_dossier_written_moments_ago_is_current_by_its_envelope_time():
+    # The service measures its dedup on the envelope's write time; the page
+    # reads the same stamp when it has it.
+    d = {"error": None, "fetched_at": _ago_ct(10)}
+    assert sp.dossier_is_current(d, _ago_utc(10)) is True
+    assert sp.dossier_is_current(d, _ago_utc(120)) is False
+
+
+def test_without_an_envelope_time_the_fetch_stamp_is_read_as_central():
+    """``fetched_at`` is NAIVE CENTRAL. Read as host-local or UTC it would be
+    off by hours on any machine not on CT — the persistence plan's trap."""
+    assert sp.dossier_is_current({"error": None,
+                                  "fetched_at": _ago_ct(10)}) is True
+    assert sp.dossier_is_current({"error": None,
+                                  "fetched_at": _ago_ct(120)}) is False
+
+
+def test_a_naive_utc_reading_of_the_stamp_would_be_hours_off():
+    import datetime as dt
+    stamp = _ago_ct(10)
+    as_utc = dt.datetime.fromisoformat(stamp).replace(tzinfo=dt.timezone.utc)
+    off = abs((dt.datetime.now(dt.timezone.utc) - as_utc).total_seconds())
+    assert off > 3600          # the page must not read it this way...
+    assert sp.dossier_is_current({"error": None, "fetched_at": stamp})
+
+
+@pytest.mark.parametrize("dossier", [
+    None, {}, {"error": "fetch_failed", "fetched_at": "x"},
+    {"error": None, "fetched_at": "garbage"},
+    {"error": None, "fetched_at": None}])
+def test_nothing_unreadable_or_failed_is_current(dossier):
+    assert sp.dossier_is_current(dossier) is False
+
+
+def test_a_recent_failed_fetch_is_never_current():
+    assert sp.dossier_is_current({"error": "fetch_failed",
+                                  "fetched_at": _ago_ct(5)},
+                                 _ago_utc(5)) is False
+
+
+def test_a_future_stamp_is_not_current():
+    assert sp.dossier_is_current({"error": None,
+                                  "fetched_at": _ago_ct(-300)}) is False
+
+
+def test_should_enqueue_refuses_a_refresh_of_a_current_dossier():
+    assert sp.should_enqueue(sf.UNKNOWN, "refresh", current=True) is False
+    assert sp.should_enqueue(sf.UNKNOWN, "refresh", current=False) is True
+
+
+@pytest.mark.parametrize("coverage", [sf.UNKNOWN, sf.COLLECTED])
+def test_the_chip_says_a_current_dossier_is_already_current(coverage):
+    chip = sp.coverage_chip("XYZQ", coverage,
+                            {"error": None,
+                             "fetched_at": "2026-09-18T14:32:05"},
+                            current=True)
+    assert chip["message"] == "Fetched 14:32 — already current."
+
+
+def _refresh_page(world, dossier):
+    from nicegui import ui
+    data, sent = world
+    data["options:dossier:XYZQ"] = dossier
+    before = set(ui.context.client.elements)
+    elements = _render_page("XYZQ")
+    # A fetch_failed dossier is retried on navigation; let that request time
+    # out first, so the Refresh below is not refused for being in flight.
+    for timer in _timeout_timers(before):
+        timer.callback()
+    sent.clear()
+    _run(_refresh(elements)())
+    return _texts(elements), sent
+
+
+def test_refresh_ten_seconds_after_a_fetch_sends_nothing(world):
+    texts, sent = _refresh_page(world, {
+        "symbol": "XYZQ", "error": None, "fetched_at": _ago_ct(10),
+        "spot": 12.5})
+    assert sent == []
+    assert any(t.endswith("— already current.") for t in texts)
+    assert "QUEUED" not in texts and "FETCHING" not in texts
+
+
+def test_refresh_two_minutes_after_a_fetch_sends_one(world):
+    texts, sent = _refresh_page(world, {
+        "symbol": "XYZQ", "error": None, "fetched_at": _ago_ct(120),
+        "spot": 12.5})
+    assert len(sent) == 1
+    assert not any("already current" in t for t in texts)
+
+
+def test_a_recent_failed_fetch_still_refreshes(world):
+    _texts_, sent = _refresh_page(world, {
+        "symbol": "XYZQ", "error": "fetch_failed",
+        "fetched_at": _ago_ct(10)})
+    assert len(sent) == 1
+
+
+def test_refresh_uses_the_envelope_time_when_it_has_one(world, monkeypatch):
+    """The stamp the service's dedup reads. fetched_at is taken BEFORE the
+    4-5 Schwab calls, so it can read a few seconds older than the write."""
+    import bus_client
+    monkeypatch.setattr(bus_client, "read_meta",
+                        lambda v: (1, _ago_utc(10)))
+    _texts_, sent = _refresh_page(world, {
+        "symbol": "XYZQ", "error": None, "fetched_at": _ago_ct(70),
+        "spot": 12.5})
+    assert sent == []
+
+
 def test_a_stale_timeout_is_keyed_to_its_own_request():
     # pure: the token rule the page's timeout uses
     assert sp.timeout_applies(3, 3) is True
