@@ -9590,9 +9590,14 @@ def _light_gex_context(symbol):
             summary = eng.snapshot_summary(gex, "gex")
         except Exception:
             summary = {}
+        # ``net_total`` is the same ``snapshot_summary`` figure the collector
+        # stores in its ``net_total`` column (the matrix's ``net_gex``), so a
+        # reader can apply the Desk's zero-grid wall rule to this context too.
+        # Additive: rescue reads only flip/walls/spot. None if the summary failed.
         return {"spot": spot,
                 "views": {"GEX": {"flip": (summary or {}).get("flip"),
-                                  "walls": gamma_walls("GEX", gex, spot)}}}
+                                  "walls": gamma_walls("GEX", gex, spot),
+                                  "net_total": (summary or {}).get("net_total")}}}
     except Exception:
         _degrade.degraded("options._light_gex_context")
         return None

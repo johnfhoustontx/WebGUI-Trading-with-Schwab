@@ -49,13 +49,13 @@ from services.options_svc import compute
 
 #: The payload's complete key set. BOTH shapes are built from it.
 DOSSIER_KEYS = ("symbol", "error", "fetched_at", "spot", "day_pct",
-                "flip", "put_wall", "call_wall",
+                "flip", "put_wall", "call_wall", "net_gex",
                 "iv_rank", "current_iv", "hv_current",
                 "earnings_status", "earnings_date")
 
 #: Which keys each leg owns - a leg can only ever write these.
 _QUOTE_KEYS = ("spot", "day_pct")
-_GEX_KEYS = ("flip", "put_wall", "call_wall")
+_GEX_KEYS = ("flip", "put_wall", "call_wall", "net_gex")
 _VOL_KEYS = ("iv_rank", "current_iv", "hv_current")
 _EARNINGS_KEYS = ("earnings_status", "earnings_date")
 
@@ -112,9 +112,48 @@ def _quote(symbol):
     return {"spot": spot, "day_pct": None}
 
 
+def zero_grid_walls_ok(net_gex):
+    """Whether walls picked from a grid with this net GEX may be published.
+
+    ⚠ MIRROR of the zero-grid condition in ``webgui/pages/structure.py``'s
+    ``walls_trustworthy`` (Tier 1 - a service cannot import it), pinned by
+    ``shared/tests/test_cross_tier_mirrors.py``. After the close Schwab zeroes
+    index open interest, the GEX grid is all zeros, and the wall picker's
+    max/min over an all-zero side returns the FIRST strike - an argmax
+    tie-break, not a level. A net GEX of EXACTLY zero is that signature; an
+    absent one (None) is not, so it keeps its walls. The Tier-1 rule's other
+    half (a stale collector) has no meaning for a fetch made seconds ago.
+    """
+    return not (net_gex is not None and net_gex == 0.0)
+
+
+def _finite_or_none(v):
+    """A finite float, or None. Zero survives: a computed 0.0 is the signal."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    v = float(v)
+    return v if math.isfinite(v) else None
+
+
 def _gex(symbol):
-    """``{"flip", "put_wall", "call_wall"}`` or None. Walls by side of spot."""
-    return compute._gex_from_snapshot(compute._light_gex_context(symbol))
+    """``{"flip", "put_wall", "call_wall", "net_gex"}`` or None.
+
+    Walls by side of spot (``_gex_from_snapshot``), and refused at the source on
+    an all-zero grid (:func:`zero_grid_walls_ok`). ``net_gex`` is the context's
+    ``net_total`` - ``GammaEngine.snapshot_summary``'s, the figure the collector
+    stores and the matrix publishes as ``net_gex``. The flip is kept either way,
+    as the Desk keeps it (``structure.flip_read`` never consults net GEX).
+    """
+    ctx = compute._light_gex_context(symbol)
+    levels = compute._gex_from_snapshot(ctx)
+    views = (ctx or {}).get("views") if isinstance(ctx, dict) else None
+    net_gex = _finite_or_none(((views or {}).get("GEX") or {}).get("net_total"))
+    if levels is None and net_gex is None:
+        return None
+    out = {**dict.fromkeys(_GEX_KEYS), **(levels or {}), "net_gex": net_gex}
+    if not zero_grid_walls_ok(net_gex):
+        out["put_wall"] = out["call_wall"] = None
+    return out
 
 
 def _vol(symbol, spot):

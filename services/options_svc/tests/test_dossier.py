@@ -16,7 +16,8 @@ _KEYS = set(dossier.DOSSIER_KEYS)
 _REAL_QUOTE = dossier._quote
 
 _QUOTE = {"spot": 184.2, "day_pct": None}
-_GEX = {"flip": 180.0, "put_wall": 175.0, "call_wall": 190.0}
+_GEX = {"flip": 180.0, "put_wall": 175.0, "call_wall": 190.0,
+        "net_gex": 2.5e9}
 _VOL = {"iv_rank": 62.5, "current_iv": 48.1, "hv_current": 41.3}
 _EARN = {"earnings_status": "upcoming", "earnings_date": "2026-09-24"}
 
@@ -99,7 +100,7 @@ def test_a_good_fetch_populates_every_key_from_its_leg(legs):
 
 
 @pytest.mark.parametrize("leg, own_keys", [
-    ("_gex", ("flip", "put_wall", "call_wall")),
+    ("_gex", ("flip", "put_wall", "call_wall", "net_gex")),
     ("_vol", ("iv_rank", "current_iv", "hv_current")),
     ("_earnings", ("earnings_status", "earnings_date")),
 ])
@@ -119,7 +120,7 @@ def test_one_leg_raising_blanks_only_its_own_keys(legs, degrades, leg, own_keys)
 
 
 @pytest.mark.parametrize("leg, own_keys", [
-    ("_gex", ("flip", "put_wall", "call_wall")),
+    ("_gex", ("flip", "put_wall", "call_wall", "net_gex")),
     ("_vol", ("iv_rank", "current_iv", "hv_current")),
     ("_earnings", ("earnings_status", "earnings_date")),
 ])
@@ -322,14 +323,130 @@ def test_the_real_gex_leg_assigns_a_lone_wall_by_spot(monkeypatch):
     snap = {"spot": 184.2, "views": {"GEX": {"flip": 180.0, "walls": [190.0]}}}
     monkeypatch.setattr(compute, "_light_gex_context", lambda symbol: snap)
 
+    # A context without net_total publishes net_gex None - unknown, never 0.
     assert dossier._gex("MU") == {"flip": 180.0, "put_wall": None,
-                                  "call_wall": 190.0}
+                                  "call_wall": 190.0, "net_gex": None}
 
 
 def test_the_real_gex_leg_with_no_context_is_none(monkeypatch):
     monkeypatch.setattr(compute, "_light_gex_context", lambda symbol: None)
 
     assert dossier._gex("MU") is None
+
+
+# ── the zero grid, through the REAL chain -> engine -> picker path ──────────
+#
+# After the close Schwab zeroes index open interest, so every strike's GEX is
+# 0.0 - and the wall picker's max/min over an all-zero side returns the FIRST
+# strike it sees, a "wall" that is an argmax tie-break. These chains go through
+# the real _light_gex_context (GammaEngine.calc_all_from_chain, snapshot_summary,
+# gamma_walls) so the test produces the defect rather than asserting its answer.
+
+_SPOT = 2400.0
+_STRIKES = (2380.0, 2390.0, 2410.0, 2420.0)
+
+
+def _chain(call_oi, put_oi):
+    # A non-today key: _find_nearest_exp_key's second pass picks it on any run
+    # date, so the fixture does not depend on the calendar.
+    key = "2099-01-02:5"
+
+    def _side(oi, delta):
+        return {f"{k:.1f}": [{"openInterest": oi(k), "gamma": 0.01,
+                              "volatility": 20.0, "delta": delta,
+                              "daysToExpiration": 5}] for k in _STRIKES}
+
+    return {"underlyingPrice": _SPOT,
+            "callExpDateMap": {key: _side(call_oi, 0.5)},
+            "putExpDateMap": {key: _side(put_oi, -0.5)}}
+
+
+def _use_chain(monkeypatch, chain):
+    monkeypatch.setattr(compute, "_gamma_fetch_chain", lambda symbol: chain)
+
+
+def test_an_all_zero_grid_publishes_no_walls_and_a_real_zero(monkeypatch):
+    _use_chain(monkeypatch, _chain(lambda k: 0, lambda k: 0))
+    # Precondition: the real picker DOES return walls here - the defect.
+    ctx = compute._light_gex_context("$RUT")
+    raw = compute._gex_from_snapshot(ctx)
+    assert raw["put_wall"] is not None and raw["call_wall"] is not None
+
+    out = dossier._gex("$RUT")
+
+    assert out["put_wall"] is None and out["call_wall"] is None
+    # A computed exact zero IS the signal: it must survive as 0.0, not None.
+    assert out["net_gex"] == 0.0 and out["net_gex"] is not None
+
+
+def test_an_all_zero_grid_blanks_the_walls_in_the_published_payload(
+        monkeypatch):
+    _use_chain(monkeypatch, _chain(lambda k: 0, lambda k: 0))
+    monkeypatch.setattr(dossier, "_quote",
+                        lambda symbol: {"spot": _SPOT, "day_pct": None})
+    monkeypatch.setattr(dossier, "_vol", lambda symbol, spot: dict(_VOL))
+    monkeypatch.setattr(dossier, "_earnings", lambda symbol: dict(_EARN))
+
+    out = dossier.build_dossier("$RUT")
+
+    assert out["error"] is None
+    assert out["put_wall"] is None and out["call_wall"] is None
+    assert out["net_gex"] == 0.0
+    assert set(out) == _KEYS
+
+
+def test_a_normal_grid_keeps_its_walls_and_a_nonzero_net(monkeypatch):
+    # The heaviest call OI above spot and the heaviest put OI below it.
+    _use_chain(monkeypatch, _chain(
+        lambda k: {2410.0: 900, 2420.0: 4000}.get(k, 100),
+        lambda k: {2380.0: 5000, 2390.0: 800}.get(k, 100)))
+
+    out = dossier._gex("$RUT")
+
+    assert out["call_wall"] == 2420.0
+    assert out["put_wall"] == 2380.0
+    assert out["net_gex"] is not None and out["net_gex"] != 0.0
+
+
+def test_net_gex_is_the_collectors_net_total(monkeypatch):
+    # The matrix's net_gex is the stored net_total column, which the collector
+    # writes from GammaEngine.snapshot_summary - the dossier must be that figure.
+    import gamma_tool as gt
+    chain = _chain(lambda k: 300, lambda k: 700)
+    _use_chain(monkeypatch, chain)
+    gex = gt.GammaEngine().calc_all_from_chain(chain)[0]
+    want = gt.GammaEngine.snapshot_summary(gex, "gex")["net_total"]
+
+    assert dossier._gex("$RUT")["net_gex"] == pytest.approx(want)
+    assert want != 0.0
+
+
+def test_a_zero_grid_keeps_its_flip_as_the_desk_does(monkeypatch):
+    # structure.flip_read never consults net GEX, so the Desk shows a flip on a
+    # zero grid; the dossier refuses only the walls. The real engine's flip on
+    # an all-zero grid is None anyway, so the flip rule is pinned on a context.
+    snap = {"spot": _SPOT, "views": {"GEX": {
+        "flip": 2395.0, "walls": [2380.0, 2410.0], "net_total": 0.0}}}
+    monkeypatch.setattr(compute, "_light_gex_context", lambda symbol: snap)
+
+    assert dossier._gex("$RUT") == {"flip": 2395.0, "put_wall": None,
+                                    "call_wall": None, "net_gex": 0.0}
+
+
+def test_net_gex_is_part_of_the_published_key_set():
+    # _KEYS is derived from DOSSIER_KEYS, so the identity test alone cannot see
+    # the key go missing from BOTH shapes at once.
+    assert "net_gex" in dossier.DOSSIER_KEYS
+
+
+def test_a_failing_gex_leg_blanks_net_gex_with_the_walls(legs, degrades):
+    legs["_gex"].exc = RuntimeError("boom")
+
+    out = dossier.build_dossier("MU")
+
+    assert out["net_gex"] is None
+    assert out["put_wall"] is None and out["call_wall"] is None
+    assert out["spot"] == 184.2 and out["iv_rank"] == 62.5
 
 
 # ── the REAL vol leg ────────────────────────────────────────────────────────

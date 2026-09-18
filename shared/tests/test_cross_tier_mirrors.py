@@ -571,3 +571,43 @@ def test_the_dossiers_iv_hv_bands_are_the_scorers():
         f"{DOSSIER_FACTS}:IV_HV_HIGH has drifted from {SCORER}'s `iv_hv >= {high}`")
     assert _const(DOSSIER_FACTS, "IV_HV_LOW") == low, (
         f"{DOSSIER_FACTS}:IV_HV_LOW has drifted from {SCORER}'s `iv_hv <= {low}`")
+
+
+# --- the zero-grid wall rule --------------------------------------------------
+# After the close Schwab zeroes index open interest, the GEX grid is all zeros,
+# and the wall picker's max/min over an all-zero side returns the FIRST strike -
+# a tie-break wearing the authority of a level. The Desk and the matrix refuse
+# those walls in Tier 1 (structure.walls_trustworthy, net GEX exactly zero); the
+# dossier refuses them at the SOURCE (dossier.zero_grid_walls_ok), because a
+# fetched symbol's walls must not depend on the page remembering the rule.
+# Services cannot import webgui, so the condition is written twice.
+
+WALL_RULE_PAGE = "webgui/pages/structure.py"
+WALL_RULE_SERVICE = "services/options_svc/dossier.py"
+
+
+def _zero_grid_condition(rel_path, fn_name):
+    """The expression of fn_name's LAST return, as an AST dump."""
+    path = ROOT / rel_path
+    assert path.exists(), f"mirror source moved: {rel_path}"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    fn = next((n for n in tree.body if isinstance(n, ast.FunctionDef)
+               and n.name == fn_name), None)
+    assert fn is not None, f"{rel_path} no longer defines {fn_name}"
+    # The function's own final statement - NOT ast.walk, whose breadth-first
+    # order would hand back a nested early return (walls_trustworthy's stale
+    # branch) as the "last" one.
+    returns = [n for n in fn.body if isinstance(n, ast.Return)]
+    assert returns, f"{rel_path}:{fn_name} has no top-level return"
+    return ast.dump(returns[-1].value)
+
+
+def test_the_dossier_refuses_zero_grid_walls_by_the_desks_rule():
+    page = _zero_grid_condition(WALL_RULE_PAGE, "walls_trustworthy")
+    service = _zero_grid_condition(WALL_RULE_SERVICE, "zero_grid_walls_ok")
+    # Non-vacuity: the rule really is the net-GEX-exactly-zero test.
+    assert "net_gex" in page and "0.0" in page
+    assert service == page, (
+        f"{WALL_RULE_SERVICE}:zero_grid_walls_ok has drifted from "
+        f"{WALL_RULE_PAGE}:walls_trustworthy's zero-grid condition. A fetched "
+        "dossier and the Desk would then disagree about which walls are real.")
