@@ -107,6 +107,57 @@ def _day_entry(signal):
     return out
 
 
+def _setup_expiry(signal):
+    """The signal's FRONT expiration as ``YYYY-MM-DD``, or ``''``.
+
+    Credit-spread rows carry ``expiration``. A directional row built by
+    ``strategy_scanner._assemble`` carries its dates on the legs, so the earliest
+    leg expiry is the setup's horizon. Both leg spellings are accepted because the
+    normalized leg dict uses ``expiry`` while some raw rows use ``expiration``.
+    """
+    raw = signal.get("expiration")
+    if raw:
+        return str(raw)[:10]
+    legs = signal.get("legs")
+    if isinstance(legs, list):
+        found = set()
+        for leg in legs:
+            if isinstance(leg, dict):
+                date = str(leg.get("expiry") or leg.get("expiration") or "")[:10]
+                if date:
+                    found.add(date)
+        if found:
+            return sorted(found)[0]
+    return ""
+
+
+def setup_key(signal):
+    """Coarse persistence identity — ``SYMBOL|TYPE|EXPIRATION``, STRIKES EXCLUDED.
+
+    The engine's ``id`` encodes the strikes (``scanner_engine.py:1208``), and
+    strike selection is delta-band driven, so one increment of spot mints a
+    brand-new id for what is economically the same setup — ~30% of rows churn per
+    scan. Age keyed on ``id`` would report a rock-steady setup as a stream of
+    one-scan newcomers, the exact inverse of the question being asked.
+
+    ⚠ This is a persistence LOOKUP, never a row key. Row identity stays ``id``;
+    ``webgui/pages/options/scanner.py`` ``_sig_key`` documents the bug from the
+    opposite mistake — a coarse key collapsing genuinely distinct signals. Two
+    adjacent strikes on one expiry are two rows that SHARE one age.
+
+    ``None`` when any component is missing: such a row has no persistence and is
+    never folded into another setup's group.
+    """
+    if not isinstance(signal, dict):
+        return None
+    symbol = str(signal.get("symbol") or "").strip().upper()
+    structure = str(signal.get("type") or "").strip().upper()
+    expiry = _setup_expiry(signal)
+    if not symbol or not structure or not expiry:
+        return None
+    return f"{symbol}|{structure}|{expiry}"
+
+
 def _cap_day_list(merged, key, max_per_list):
     """Trim ``merged`` to ``max_per_list``, evicting OLDEST-STALE-FIRST. Never
     evicts a ``live`` signal: if live alone exceeds the cap, the cap yields (the
