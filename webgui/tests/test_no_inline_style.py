@@ -185,8 +185,8 @@ PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
                  # The Desk's structure-bar geometry, shared with the Symbol
                  # Dossier — pure today; it joins the guard beside desk.py.
                  "structure.py",
-                 # The Symbol Dossier's pure fact-builders.
-                 "symbol_facts.py"]
+                 # The Symbol Dossier's pure fact-builders, and its page.
+                 "symbol_facts.py", "symbol.py"]
 
 
 def test_utility_pages_have_no_inline_style():
