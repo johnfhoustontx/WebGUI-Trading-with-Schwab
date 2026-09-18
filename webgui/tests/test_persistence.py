@@ -172,3 +172,80 @@ def test_one_gap_is_singular():
         {"first_seen": "2026-09-17T09:15:00", "seen": 9, "gaps": 1,
          "scores": []})
     assert "1 gap" in facts["detail"] and "gaps" not in facts["detail"]
+
+
+# --- score_sparkline -------------------------------------------------------
+
+def _spark_points(svg):
+    """The polyline's points parsed back to ``[(x, y), ...]``."""
+    import re
+
+    match = re.search(r'points="([^"]*)"', svg)
+    assert match, svg
+    return [tuple(float(c) for c in pair.split(","))
+            for pair in match.group(1).split()]
+
+
+def test_sparkline_is_a_fixed_pixel_box_with_no_viewbox():
+    # A viewBox scales non-uniformly, and the one attribute that would keep
+    # the stroke even under that scale (vector-effect) is stripped client-side.
+    out = persistence.score_sparkline([60.0, 62.0, 61.0, 65.0])
+    assert "viewbox" not in out.lower()
+    assert "vector-effect" not in out
+    assert 'width="64"' in out and 'height="16"' in out
+
+
+@pytest.mark.parametrize("scores", [
+    [], None, [60.0], [60.0, None], [None, "x"], [float("nan"), 60.0]])
+def test_sparkline_is_empty_under_two_usable_points(scores):
+    assert persistence.score_sparkline(scores) == ""
+
+
+def test_a_flat_series_draws_a_finite_line_at_mid_height():
+    out = persistence.score_sparkline([60.0, 60.0, 60.0])
+    assert "<polyline" in out
+    assert "nan" not in out.lower() and "inf" not in out.lower()
+    points = _spark_points(out)
+    assert len(points) == 3
+    # No range means no reading is "low": a flat line on the floor would
+    # read as a setup that collapsed.
+    assert {y for _, y in points} == {persistence.SPARK_H / 2}
+
+
+def test_sparkline_drops_junk_before_plotting():
+    points = _spark_points(
+        persistence.score_sparkline([60.0, float("nan"), 62.0, "x", 64.0]))
+    assert len(points) == 3
+
+
+def test_sparkline_spans_the_full_width():
+    points = _spark_points(persistence.score_sparkline([60.0, 62.0, 61.0]))
+    assert points[0][0] == 0.0
+    assert points[-1][0] == float(persistence.SPARK_W)
+
+
+def test_the_highest_score_is_plotted_highest_on_screen():
+    scores = [60.0, 70.0, 55.0, 65.0]
+    points = _spark_points(persistence.score_sparkline(scores))
+    ys = [y for _, y in points]
+    # SVG y grows DOWNWARD: the highest score must have the SMALLEST y.
+    assert ys[1] < ys[2]
+    assert ys[1] == min(ys) and ys[2] == max(ys)
+    # 1px inset, so the stroke is never clipped at either edge.
+    assert min(ys) == 1.0 and max(ys) == persistence.SPARK_H - 1.0
+
+
+def test_sparkline_emits_nothing_dompurify_would_strip():
+    import re
+
+    from test_rings import _dompurify_allowlist
+
+    allow = _dompurify_allowlist()
+    out = persistence.score_sparkline([60.0, 62.0, 61.0, 65.0])
+    tags = set(re.findall(r"<([a-zA-Z][\w-]*)", out))
+    attrs = set(re.findall(r'([a-zA-Z][\w-]*)="', out))
+    stripped = sorted(n for n in tags | attrs if n.lower() not in allow)
+    assert stripped == [], f"DOMPurify would strip: {stripped}"
+    # Non-vacuity: an SVG was parsed and its attributes really were checked.
+    assert {"svg", "polyline"} <= tags
+    assert {"points", "stroke-width", "width", "height"} <= attrs

@@ -93,6 +93,42 @@ def score_delta(scores, window=TREND_WINDOW):
     return values[-1] - values[-window]
 
 
+SPARK_W, SPARK_H = 64, 16
+
+
+def score_sparkline(scores, width=SPARK_W, height=SPARK_H):
+    """A fixed-size inline SVG of a setup's score series. ``''`` under 2 points.
+
+    ⚠ FIXED PIXELS, NO viewBox, deliberately. The idiomatic fluid form is
+    ``viewBox`` + ``preserveAspectRatio="none"`` + ``vector-effect:
+    non-scaling-stroke`` — and DOMPurify strips ``vector-effect``, so the strokes
+    render thick horizontally and hairline vertically while the server-side
+    string stays perfectly correct and every test passes. ``<polyline points>``
+    cannot take percentages either, so the percentage escape used by
+    ``rrg_view.tail_svg`` is unavailable. A fixed box needs neither.
+
+    The max plots at y=1 and the min at y=height-1 (a 1px inset so the stroke is
+    never clipped). A FLAT series sits at MID-height: with no range, no reading
+    is the low one, and a line on the floor would read as a setup that collapsed.
+    """
+    values = _usable(scores)
+    if len(values) < 2:
+        return ""
+    lo, hi = min(values), max(values)
+    step = width / (len(values) - 1)
+
+    def _y(v):
+        if hi == lo:
+            return height / 2
+        return height - (v - lo) / (hi - lo) * (height - 2) - 1
+
+    points = " ".join(f"{i * step:.1f},{_y(v):.1f}"
+                      for i, v in enumerate(values))
+    return (f'<svg width="{width}" height="{height}">'
+            f'<polyline points="{points}" fill="none" stroke="currentColor" '
+            f'stroke-width="1.2" stroke-linejoin="round"/></svg>')
+
+
 _MARKS = {"rising": "▲", "fading": "▼", "steady": "▬"}
 
 
