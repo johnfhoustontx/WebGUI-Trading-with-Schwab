@@ -1,5 +1,7 @@
 """Persistence identity + map for the day's scan union."""
 import copy
+import datetime as _dt
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -254,3 +256,54 @@ def test_a_garbage_prev_is_tolerated_in_every_shape_the_docstring_claims(prev):
     # observed. The blindness is exactly one merge long: last_seq is rewritten
     # to a real int on this very merge, and the next true gap is counted.
     assert out["K"]["gaps"] == 0
+
+
+# ── The day union's default timestamp basis ─────────────────────────────────
+#
+# A fixed instant: 13:02:30 UTC == 08:02:30 CT (CDT, UTC-5) on 2026-09-17.
+_FROZEN_UTC = _dt.datetime(2026, 9, 17, 13, 2, 30, tzinfo=_dt.timezone.utc)
+# ...seen from a host whose wall clock is NOT Central. Pretending the host is
+# nine hours ahead is what makes the test machine-independent: it fails on a
+# Central box exactly as it fails anywhere else.
+_FAKE_HOST_TZ = _dt.timezone(_dt.timedelta(hours=9))
+
+
+class _FrozenDatetime(_dt.datetime):
+    """``datetime`` frozen at ``_FROZEN_UTC``, on a host nine hours ahead."""
+
+    @classmethod
+    def now(cls, tz=None):
+        if tz is None:
+            return _FROZEN_UTC.astimezone(_FAKE_HOST_TZ).replace(tzinfo=None)
+        return _FROZEN_UTC.astimezone(tz)
+
+
+class _FrozenClockModule:
+    """Stands in for compute's ``_dt`` alias, swapping ONLY ``datetime``."""
+
+    datetime = _FrozenDatetime
+
+    def __getattr__(self, name):
+        return getattr(_dt, name)
+
+
+def test_the_day_union_stamps_ct_never_the_host_wall_clock(monkeypatch):
+    """``merge_day_signals``' default ``now_iso`` must be Central.
+
+    ``_trustworthy_baseline`` compares that stamp against 08:00 CT, and the
+    production caller (``handlers.rescan``) passes no ``now_iso`` at all — so on
+    a host that is not on America/Chicago the cold-start window is unreachable
+    and ``first_seen`` would never be stamped on any day, forever.
+    """
+    monkeypatch.setattr(compute, "_dt", _FrozenClockModule())
+    prev = {"date": "2026-09-17", "signals_0dte": [{"id": "a", "symbol": "MU"}]}
+
+    out = compute.merge_day_signals(prev, {"signals_0dte": []}, "2026-09-17")
+
+    stamp = out["signals_0dte"][0]["stale_since"]
+    expected = _FROZEN_UTC.astimezone(ZoneInfo("America/Chicago")).replace(
+        tzinfo=None).isoformat(timespec="seconds")
+    # Naive, because a tz-naive datetime in this project means Central — and
+    # because _trustworthy_baseline subtracts it from a naive window_bounds
+    # time, which an aware stamp would make a TypeError.
+    assert stamp == expected == "2026-09-17T08:02:30"

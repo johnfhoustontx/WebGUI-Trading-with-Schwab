@@ -336,7 +336,14 @@ def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
     Never mutates its inputs; never raises.
     """
     max_per_list = _DAY_MAX_PER_LIST if max_per_list is None else max_per_list
-    now_iso = now_iso or _dt.datetime.now().isoformat(timespec="seconds")
+    # ⚠ CT, not the host wall clock — the same basis ``today`` arrives on, and
+    # for the same reason. ``rescan`` passes no ``now_iso``, so this default IS
+    # the production stamp: read against 08:00 CT it decides whether a signal's
+    # age may be claimed at all (``_trustworthy_baseline``), and a host an hour
+    # off Central would make that window unreachable on every cold start.
+    # Naive, per the project convention that a tz-naive datetime means Central.
+    now_iso = now_iso or _dt.datetime.now(_PROJ_CT_TZ).replace(
+        tzinfo=None).isoformat(timespec="seconds")
 
     if not isinstance(prev, dict) or prev.get("date") != today:
         prev = {}
