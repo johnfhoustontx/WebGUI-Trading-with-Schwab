@@ -51,7 +51,8 @@ from . import persistence as _persistence
 from .checks_table import (  # re-exported: the scanner's names predate the move
     CHECKS_SLOT as _CHECKS_SLOT, ONLY_CLEAR_TIP as _ONLY_CLEAR_TIP, filtered_tab_label,
     only_clear, only_clear_empty_label, restamp, stamp_checks)
-from .theme import BADGE_MUTED, BADGE_WARN, BTN_3D, CARD, EYEBROW, LABEL, MUTED, TXT_WARN
+from .theme import (BADGE_MUTED, BADGE_WARN, BTN_3D, CARD, EYEBROW, LABEL, MUTED,
+                    TXT_NEG, TXT_NEUTRAL, TXT_POS, TXT_WARN)
 
 
 def iv_rank_value(value):
@@ -475,6 +476,27 @@ def stamp_stale(rows, signals):
     return rows
 
 
+# A data-driven colour maps a FINITE state to a fixed class (the Tailwind-first
+# standard). These are the theme's SEMANTIC tokens, not named-palette classes, so
+# the cell follows ``config/theme.toml`` like every other coloured cell in the
+# app. ``persistence.score_trend`` returns exactly these four states, and
+# ``_TREND_CLASSES`` is asserted to cover all of them — an unmapped state would
+# render unstyled, silently, and only for the rows in that state.
+_TREND_CLASSES = {"rising": TXT_POS, "fading": TXT_NEG,
+                  "steady": TXT_NEUTRAL, "new": MUTED}
+
+# Plain text, no badge — the ``body-cell-bias`` shape. The ``|| '—'`` is the net
+# for a row that reached a table WITHOUT passing through ``stamp_persistence``
+# (there is exactly one call site): undefined renders as the dash rather than as
+# a blank cell. It duplicates ``persistence.DASH`` in a Vue string, so a test
+# pins the two equal.
+_TREND_SLOT = r'''
+      <q-td :props="props">
+        <span :class="props.row._trend_class">{{ props.value || '—' }}</span>
+      </q-td>
+    '''
+
+
 def stamp_persistence(rows, signals, setups):
     """Stamp ``seen_since`` / ``score_trend`` / ``_trend_state`` onto display rows.
 
@@ -503,6 +525,9 @@ def stamp_persistence(rows, signals, setups):
         r["seen_since"] = facts["since"]
         r["score_trend"] = facts["trend_text"]
         r["_trend_state"] = facts["trend"]
+        # Mapped here, beside the state that produces it, so a state and its
+        # colour cannot be stamped from two different places.
+        r["_trend_class"] = _TREND_CLASSES.get(facts["trend"], MUTED)
     return rows
 
 
@@ -659,6 +684,11 @@ def _build_populate(day_env, live, ctx=None):
         # ORDER IS LOAD-BEARING: stamp_stale settles ``_allow_paper``, which the
         # checklist's Paper book line reads.
         stamp_stale(rows[key], sigs[key])
+        # Order-independent: this writes four keys neither of its neighbours
+        # reads or writes. It sits after stamp_stale so the block reads
+        # lifecycle-then-verdict. ``day_env`` is normalised to {} above, and
+        # stamp_persistence guards a non-dict ``setups`` inside the envelope.
+        stamp_persistence(rows[key], sigs[key], day_env.get("setups"))
         stamp_checks(rows[key], sigs[key], ctx)
     return {"today": today, "sigs": sigs, "by_id": by_id, "rows": rows,
             "have": day_is_today(day_env, today), "day_env": day_env, "live": live,
@@ -945,6 +975,7 @@ def render():
         _t.add_slot('body-cell-composite_score', _SCORE_SLOT)
         _t.add_slot('body-cell-symbol', _SYMBOL_SLOT)
         _t.add_slot('body-cell-checks', _CHECKS_SLOT)
+        _t.add_slot('body-cell-score_trend', _TREND_SLOT)
 
     table_dir.on("rowClick", _select_dir)
     # Legs-aware actions (the directional signal carries `legs`, not strikes), and
@@ -955,6 +986,7 @@ def render():
     table_dir.add_slot('body-cell-symbol', _SYMBOL_SLOT)
     table_dir.add_slot('body-cell-composite_score', _SCORE_SLOT)
     table_dir.add_slot('body-cell-checks', _CHECKS_SLOT)
+    table_dir.add_slot('body-cell-score_trend', _TREND_SLOT)
     table_dir.add_slot('body-cell-bias', r'''
       <q-td :props="props">
         <span :class="props.row._bias_class">{{ props.value || '—' }}</span>

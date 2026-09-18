@@ -762,3 +762,77 @@ def test_the_persistence_column_labels_name_what_the_value_is():
     assert labels["seen_since"] == "Seen since"
     # NOT "Score" — that column already exists and holds the composite.
     assert labels["score_trend"] == "Score trend"
+
+
+def test_the_trend_class_maps_a_finite_state_to_a_theme_token():
+    from pages.options import theme
+    rows = [{"id": "X"}]
+    signals = [{"id": "X", "setup_key": "K"}]
+    setups = {"K": {"first_seen": "2026-09-17T09:15:00", "seen": 9, "gaps": 0,
+                    "scores": [60.0, 61.0, 62.0, 66.0]}}
+    scanner.stamp_persistence(rows, signals, setups)
+    assert rows[0]["_trend_class"] == theme.TXT_POS
+
+
+def test_every_trend_state_has_a_class():
+    # A state with no entry would render unstyled — silently, and only for the
+    # rows in that state.
+    assert set(scanner._TREND_CLASSES) == {"rising", "fading", "steady", "new"}
+
+
+def test_a_dashed_row_still_gets_a_class():
+    rows = [{"id": "X"}]
+    scanner.stamp_persistence(rows, [{"id": "X"}], {})
+    assert rows[0]["_trend_class"]
+
+
+def test_the_trend_slot_dash_is_the_one_in_the_persistence_module():
+    """The slot's ``|| '—'`` net is a SECOND copy of the em-dash, in a Vue string
+    no Python test would otherwise reach. It is worth keeping (a row bypassing the
+    single stamp site renders a dash, not a blank cell), but only pinned."""
+    from pages.options import persistence
+    assert persistence.DASH in scanner._TREND_SLOT
+    assert "_trend_class" in scanner._TREND_SLOT
+
+
+def test_build_populate_stamps_the_persistence_columns_from_the_envelope():
+    """The wiring: one call site, reading ``setups`` off the day envelope. Without
+    it the columns render blank on every row, which looks like an empty map."""
+    day_env = {
+        "date": scanner.today_ct(),
+        "signals_0dte": [{"id": "A", "symbol": "MU", "type": "PCS", "live": True,
+                          "setup_key": "K"}],
+        "signals_swing": [], "signals_directional": [],
+        "setups": {"K": {"first_seen": "2026-09-17T09:15:00", "seen": 12,
+                         "gaps": 0, "scores": [60.0, 61.0, 62.0, 66.0]}},
+    }
+    out = scanner._build_populate(day_env, {})
+    row = out["rows"]["signals_0dte"][0]
+    assert row["seen_since"] == "09:15 · 12x"
+    assert row["score_trend"] == "▲ +6.0"
+
+
+def test_build_populate_dashes_the_columns_when_the_envelope_has_no_setups():
+    """A pre-change envelope. Must read as "no reading", never as "brand new"."""
+    day_env = {
+        "date": scanner.today_ct(),
+        "signals_0dte": [{"id": "A", "symbol": "MU", "type": "PCS", "live": True,
+                          "setup_key": "K"}],
+        "signals_swing": [], "signals_directional": [],
+    }
+    row = scanner._build_populate(day_env, {})["rows"]["signals_0dte"][0]
+    assert row["seen_since"] == "—" and row["score_trend"] == "—"
+
+
+def test_the_trend_slot_is_registered_on_all_three_tables():
+    """``add_slot`` runs inside ``render()``, which no unit test reaches — so a
+    table left off is invisible to every test here and surfaces only as one
+    uncoloured tab in the browser. Pinned at SOURCE level, the same reflex as
+    ``test_row_class_prop_binds_the_stamped_field`` uses for ``_ROW_CLASS_PROP``.
+
+    Two registrations, not three: the 0-DTE and Swing tables share one loop."""
+    import inspect
+    src = inspect.getsource(scanner)
+    assert src.count("add_slot('body-cell-score_trend', _TREND_SLOT)") == 2
+    assert "_t.add_slot('body-cell-score_trend', _TREND_SLOT)" in src
+    assert "table_dir.add_slot('body-cell-score_trend', _TREND_SLOT)" in src
