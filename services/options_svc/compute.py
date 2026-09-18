@@ -411,13 +411,13 @@ def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
 
     out = {"date": today}
     truncated = {}
-    for key in _DAY_LISTS:
-        cur_list = current.get(key) if isinstance(current, dict) else None
+    for key_list in _DAY_LISTS:
+        cur_list = current.get(key_list) if isinstance(current, dict) else None
         cur_list = cur_list if isinstance(cur_list, list) else []
         cur_by_id = {s["id"]: s for s in cur_list
                      if isinstance(s, dict) and s.get("id")}
 
-        prev_list = prev.get(key)
+        prev_list = prev.get(key_list)
         prev_list = prev_list if isinstance(prev_list, list) else []
 
         merged = []
@@ -446,9 +446,9 @@ def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
             fresh["live"] = True
             fresh["stale_since"] = None
             merged.append(fresh)
-        out[key], dropped = _cap_day_list(merged, key, max_per_list)
+        out[key_list], dropped = _cap_day_list(merged, key_list, max_per_list)
         if dropped:
-            truncated[key] = dropped
+            truncated[key_list] = dropped
     if truncated:
         out["truncated"] = truncated
     return out
