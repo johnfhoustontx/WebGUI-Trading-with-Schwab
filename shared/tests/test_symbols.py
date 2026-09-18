@@ -110,3 +110,33 @@ def test_all_three_copies_agree(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(net_premium)
+
+
+# --- the ticker allow-list (clean_symbol) -------------------------------------
+# Shared by the Symbol page and the options service's ``dossier`` command, whose
+# result becomes part of a Redis KEY NAME. The accept list is every real symbol
+# SHAPE the app handles (measured 2026-09-18 across config/, the watchlist
+# workbook and the code): plain equities, a class share, the $-indices including
+# digits and the ``.X`` breadth suffix, and the 8-character ceiling.
+
+@pytest.mark.parametrize("raw", [
+    "MU", "A", "GOOGL", "XLRE", "BIG10", "BRK.B",
+    "$SPX", "$NDX", "$VIX", "$VIX1D", "$VIX9D", "$VIX3M",
+    "$NYA50R", "$SPXA50R", "$NYHGH.X", "$VIX.X",
+])
+def test_clean_symbol_accepts_every_real_symbol_shape(raw):
+    assert symbols.clean_symbol(raw) == raw
+
+
+@pytest.mark.parametrize("raw", [
+    ".", "..", "../../etc", "MU NVDA", "mu nvda", "cache:options:gamma",
+    "MU:X", "BRK/B", "/ES", "", "   ", None, "ABCDEFGHI", "$SPXA50RX",
+    "1ABC", "BRK-B", "M\tU", "M*",
+])
+def test_clean_symbol_rejects_everything_else(raw):
+    assert symbols.clean_symbol(raw) is None
+
+
+def test_clean_symbol_normalises_case_and_whitespace():
+    assert symbols.clean_symbol(" mu ") == "MU"
+    assert symbols.clean_symbol("$spx") == "$SPX"

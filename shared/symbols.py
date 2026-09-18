@@ -20,6 +20,8 @@ comment in the TOML for the arithmetic.
 
 Missing file / bad TOML / missing key -> the built-in defaults, never a raise.
 """
+import re
+
 from repo_paths import SYMBOLS_TOML
 from shared.config_toml import toml_loader
 
@@ -101,3 +103,27 @@ def netprem_groups() -> tuple:
         out = [{"key": g["key"], "label": g["label"],
                 "symbols": tuple(g["symbols"])} for g in DEFAULTS["netprem_groups"]]
     return tuple(out)
+
+
+# One ticker allow-list for every tier that accepts a typed symbol. A leading
+# letter or ``$``, then up to seven letters, digits, ``$`` or ``.`` - measured
+# 2026-09-18 against every symbol the app handles: plain equities, ``BRK.B``,
+# the ``$``-indices including ``$VIX1D`` / ``$VIX9D`` / ``$VIX3M``, and the two
+# 8-character extremes ``$SPXA50R`` and ``$NYHGH.X``. A leading ``.`` is refused,
+# so ``.`` and ``..`` cannot pass; ``/`` is refused, which also excludes the
+# futures roots (``/ES``) - Schwab serves no futures chains, so a dossier for
+# one could never be built.
+SYMBOL_RE = re.compile(r"[A-Z$][A-Z0-9$.]{0,7}")
+
+
+def clean_symbol(raw):
+    """Normalise a user-supplied ticker, or ``None``.
+
+    ⚠ The result is interpolated into a Redis KEY NAME (the dossier cache key).
+    webgui/main.py records the Gamma page deliberately refusing a ``symbol``
+    query parameter because it had "no allow-list behind it"; this IS that
+    allow-list, shared by the page and the service so the two ends cannot
+    accept different tickers.
+    """
+    cleaned = str(raw or "").strip().upper()
+    return cleaned if SYMBOL_RE.fullmatch(cleaned) else None
