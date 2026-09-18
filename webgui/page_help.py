@@ -166,6 +166,14 @@ own each fact, so this is an index, not a replacement.
   ledger, Claude's book and captured signals, with the rescue flag where one
   exists.
 
+**Find trades** (top right, beside Refresh) opens the **Strategy Finder** on this
+name and starts its scan straight away — the step from "tell me about this
+ticker" to concrete trades you can paper. It appears only once the page has a
+real quote for the name, so it never sends you to a scan of a ticker Schwab does
+not know. The scan is the Finder's own work, not part of this page: a large
+option chain can take half a minute, and one listing more than 30 expirations
+asks which to load before it fetches anything.
+
 The chip beside the price says where the numbers came from. **Scanned 09:30** —
 the app watches this name all day and everything is already here, as of that
 scan (after the close, that is how old the volatility numbers are). **Collected** —

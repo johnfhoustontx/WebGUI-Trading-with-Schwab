@@ -348,6 +348,29 @@ def gamma_link_allowed(coverage):
     return coverage in (sf.SCANNED, sf.COLLECTED)
 
 
+FIND_TRADES_LABEL = "Find trades"
+FINDER_ROUTE = "/options/swing"
+
+
+def finder_allowed(sym, coverage, dossier):
+    """Whether the header may offer "Find trades" — a hand-off that opens the
+    Strategy Finder on this symbol and runs its scan at once
+    (``handoff.send_to_swing``, the Trade Plan's existing path).
+
+    Only for a symbol with a real quote: one the collector polls, or one whose
+    look-up came back with a price. Unlike the Dealer Positioning link this
+    starts no recurring cost — a Finder scan is one-shot, and a chain listing
+    more than 30 expirations asks before fetching — so the gate is about not
+    sending anyone to a scan that cannot work: a pending look-up, an unknown
+    ticker (``no_quote``) and an outage (``fetch_failed``) all withhold it."""
+    if not sym:
+        return False
+    if coverage in (sf.SCANNED, sf.COLLECTED):
+        return True
+    return isinstance(dossier, dict) and dossier.get("error") is None \
+        and _num(dossier.get("spot")) is not None
+
+
 def timeout_applies(token, current):
     """Whether a fetch timeout minted for request ``token`` may clear the page's
     pending state while request ``current`` is the latest. Only its own: an
@@ -775,6 +798,11 @@ def render(symbol=None):
                     "text-[14px] tabular-nums leading-none")
                 chip_lbl = ui.label("").classes(_CHIP)
                 ui.element("div").classes("grow")
+                finder_btn = ui.button(FIND_TRADES_LABEL, icon="search",
+                                       color=None).props(
+                    "no-caps dense flat").classes(
+                    f"text-[12px] tracking-[.1em] px-3 {CON_ACCENT}")
+                finder_btn.set_visibility(False)   # until a quote is known
                 refresh_btn = ui.button("Refresh", icon="refresh",
                                         color=None).props(
                     "no-caps dense flat").classes(
@@ -856,11 +884,25 @@ def render(symbol=None):
         chip_lbl.set_visibility(bool(chip["label"]))
         msg_lbl.text = chip["message"]
         msg_lbl.set_visibility(bool(chip["message"]))
+        finder_btn.set_visibility(_finder_ok())
 
     def _absent(body, empty_line):
         with body:
             ui.label(absence_message(sym, _chip(), _feed_cold(),
                                      empty_line)).classes(_EMPTY)
+
+    def _finder_ok():
+        return (finder_allowed(sym, _coverage(),
+                               _d(own_view) if own_view else None)
+                and _shell.can_navigate(FINDER_ROUTE))
+
+    @guard
+    def _to_finder(*_):
+        # Re-checked at click time: the quote can change after a paint.
+        if _finder_ok():
+            _handoff.send_to_swing(sym)
+
+    finder_btn.on_click(_to_finder)
 
     @guard
     def _to_gamma(*_):

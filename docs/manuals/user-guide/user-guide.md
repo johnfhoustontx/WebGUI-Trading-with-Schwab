@@ -467,6 +467,15 @@ to the page that owns those facts:
   answers. Pressing Refresh here would only queue a second paid look-up behind the
   first.
 
+**Finding trades on this name.** The **Find trades** button beside Refresh opens the
+**Strategy Finder** with this symbol filled in and starts its scan at once, so you go
+from reading about a ticker to ranked, paper-tradeable candidates in one click. It
+appears only once the page has a real quote — scanned, collected, or a look-up that
+came back with a price — and stays hidden while a look-up is pending, for **NOT
+FOUND**, and for **FETCH FAILED**, since the scan could not work on any of those.
+The scan is the Finder's, with the Finder's cost: a large chain can take half a
+minute, and a chain listing more than 30 expirations asks which to load first.
+
 ⚠ **An on-demand look-up costs 4–5 Schwab calls** from the same allowance the
 live dealer charts depend on. So the page looks a name up **only** when you open
 a symbol it does not already cover, or when you press **Refresh** — never on its

@@ -464,6 +464,12 @@ Opportunity Board refreshes every minute, a look-up is a snapshot.
   already current — unless that look-up failed, which is always retried.
 - **Refresh on a scanned symbol fetches nothing.** It re-reads what the app has,
   which is already fresher than a look-up would be.
+- **Find trades hands off; it does not scan here.** It opens the Strategy Finder on
+  the symbol and that page runs its own scan immediately, at the Finder's own cost
+  (a whole-chain scan; a chain with more than 30 expirations asks which to load
+  first). It is offered only once the name has a real quote, so a typo or an outage
+  never sends you to a scan that cannot work. Unlike the Dealer Positioning link,
+  it starts nothing recurring.
 - **Walls the app collected disappear once the collector stops rather than going
   to zero**, by the same rule as on the Desk: the band says the walls are withheld,
   because the last walls drawn are not a current read. Walls the look-up read itself

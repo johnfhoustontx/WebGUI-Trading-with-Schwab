@@ -310,6 +310,17 @@ Refresh as already current. **Cache wins** (`merge_facts`): the fetch only fills
 gaps, since a one-minute matrix row beats a point-in-time snapshot; the per-fact
 `source` map is what lets the page say "fetched HH:MM" only beside facts that were.
 
+**Find trades** (header, beside Refresh) hands the symbol to the Strategy Finder
+through the existing one-shot `handoff.send_to_swing` stash — the Trade Plan's path
+— and the Finder seeds its input and runs `swing_scan` at once. `finder_allowed`
+draws it only once the name has a **real quote** (scanned, collected, or a dossier
+with `error is None` and a finite spot): hidden while a look-up is pending and for
+`no_quote` / `fetch_failed`, re-checked at click time, and gated on
+`shell.can_navigate`. ⚠ Unlike the Dealer Positioning link it starts nothing
+recurring — a Finder scan is one-shot, and a chain listing more than 30 expirations
+asks before it fetches — so the gate is about not sending anyone to a scan that
+cannot work, not about cost.
+
 **Header chip**: `SCANNED HH:MM` (the funnel's scan time, so post-close Vol Rank
 reads its age) · `COLLECTED` / `COLLECTED · FETCHED HH:MM` · `FETCHED HH:MM` ·
 `FETCHING` · **`QUEUED`** (the 30 s `LOAD_TIMEOUT_SEC` backstop fired with no answer —

@@ -1396,3 +1396,79 @@ def test_the_page_imports_no_engine_and_no_service():
             mods.add(node.module or "")
     bad = {m for m in mods if m.startswith(("services", "sqlite3", "redis"))}
     assert not bad, bad
+
+
+# ── Find trades: a hand-off to the Strategy Finder ─────────────────────────
+
+_GOOD_FETCH = {"symbol": "XYZQ", "error": None,
+               "fetched_at": "2026-09-18T14:32:00", "spot": 12.5}
+
+
+@pytest.mark.parametrize("sym,coverage,dossier,allowed", [
+    ("MU", sf.SCANNED, None, True),
+    ("$VIX", sf.COLLECTED, None, True),
+    ("XYZQ", sf.UNKNOWN, _GOOD_FETCH, True),
+    # Nothing answered yet: the button would send the user to a scan of a
+    # ticker nobody has confirmed exists.
+    ("XYZQ", sf.UNKNOWN, None, False),
+    ("XYZQ", sf.UNKNOWN, {"symbol": "XYZQ", "error": "no_quote"}, False),
+    ("XYZQ", sf.UNKNOWN, {"symbol": "XYZQ", "error": "fetch_failed"}, False),
+    (None, sf.UNKNOWN, None, False),
+])
+def test_find_trades_is_offered_only_for_a_quoted_symbol(sym, coverage,
+                                                         dossier, allowed):
+    assert sp.finder_allowed(sym, coverage, dossier) is allowed
+
+
+def _finder_buttons(elements):
+    return [e for e in elements
+            if (getattr(e, "text", "") or "") == sp.FIND_TRADES_LABEL]
+
+
+def test_find_trades_opens_the_finder_on_this_symbol(world, monkeypatch):
+    from nicegui import ui
+    from pages.options import handoff
+    went = []
+    monkeypatch.setattr(ui.navigate, "to",
+                        lambda *a, **k: went.append(a[0]))
+    elements = _render_page("mu")
+    (btn,) = _finder_buttons(elements)
+    assert btn.visible
+    (handler,) = _click_handlers(elements, sp.FIND_TRADES_LABEL)
+    handler(None)
+    assert went == ["/options/swing"]
+    # The Finder takes this one-shot stash, seeds its input and scans.
+    assert handoff.take_pending_swing() == "MU"
+
+
+@pytest.mark.parametrize("dossier", [
+    None,
+    {"symbol": "XYZQ", "error": "no_quote"},
+    {"symbol": "XYZQ", "error": "fetch_failed"}])
+def test_find_trades_is_hidden_and_inert_without_a_quote(world, monkeypatch,
+                                                        dossier):
+    from pages.options import handoff
+    data, _sent = world
+    if dossier is not None:
+        data["options:dossier:XYZQ"] = dossier
+    handed = []
+    monkeypatch.setattr(handoff, "send_to_swing", lambda s: handed.append(s))
+    elements = _render_page("XYZQ")
+    (btn,) = _finder_buttons(elements)
+    assert not btn.visible
+    # a stale click (the page can change under a tap) still sends nothing
+    for h in _click_handlers(elements, sp.FIND_TRADES_LABEL):
+        h(None)
+    assert handed == []
+
+
+def test_find_trades_appears_once_a_look_up_returns_a_price(world):
+    data, _sent = world
+    data["options:dossier:XYZQ"] = dict(_GOOD_FETCH)
+    (btn,) = _finder_buttons(_render_page("XYZQ"))
+    assert btn.visible
+
+
+def test_a_rejected_symbol_offers_no_find_trades(world):
+    (btn,) = _finder_buttons(_render_page("../../etc"))
+    assert not btn.visible

@@ -4,7 +4,16 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-18 (**Symbol Dossier at `/symbol`** — one screen per
+**Last updated:** 2026-09-18 (**Symbol Dossier → Find trades**.) A header button
+beside Refresh opens the Strategy Finder on the dossier's symbol and runs its scan at
+once, through the existing `handoff.send_to_swing` stash. Drawn only once the name
+has a real quote (`finder_allowed`: scanned, collected, or a dossier with no error
+and a finite spot), re-checked at click time. Starts nothing recurring, unlike the
+Dealer Positioning link. 13 tests; three mutations (gate always true, no click-time
+re-check, visibility never set) each killed. Page help, User Guide, Reference Guide
+and `webgui-routes.md` updated.
+
+**Prior —** 2026-09-18 (**Symbol Dossier at `/symbol`** — one screen per
 ticker, beside the Desk in the rail. Design and plan:
 `docs/plans/2026-09-17-symbol-dossier-{design,plan}.md`.)
 
