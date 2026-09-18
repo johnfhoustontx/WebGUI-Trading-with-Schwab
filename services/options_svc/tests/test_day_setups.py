@@ -396,3 +396,90 @@ def test_a_non_string_last_live_does_not_crash_the_eviction_sort():
               "stamped|PCS|E": {"last_live": "2026-09-17T09:00:00"}}
     kept, dropped = compute._cap_setups(setups, set(), max_entries=1)
     assert dropped == 1 and len(kept) == 1
+
+
+def _row(symbol, stype, expiry, short, long_, score):
+    """A row shaped like scanner_engine's, including the strike-encoded id."""
+    return {"id": f"{symbol}_{stype}_{expiry}_{short}_{long_}",
+            "symbol": symbol, "type": stype, "expiration": expiry,
+            "short_strike": short, "long_strike": long_,
+            "composite_score": score}
+
+
+def test_rows_are_stamped_with_their_setup_key():
+    scan = {"signals_0dte": [_row("MU", "PCS", "2026-10-17", 180, 175, 62.0)]}
+    day = compute.merge_day_signals(None, scan, "2026-09-17",
+                                    now_iso="2026-09-17T08:02:00")
+    assert day["signals_0dte"][0]["setup_key"] == "MU|PCS|2026-10-17"
+
+
+def test_strike_drift_does_not_reset_the_setup_age():
+    # THE central case. A delta-band strike step mints a new id, so an id-keyed
+    # age would report this steady setup as a brand-new one-scan signal.
+    key = "MU|PCS|2026-10-17"
+    day = compute.merge_day_signals(
+        None, {"signals_0dte": [_row("MU", "PCS", "2026-10-17", 180, 175, 62.0)]},
+        "2026-09-17", now_iso="2026-09-17T08:02:00")
+    first_seen = day["setups"][key]["first_seen"]
+    for i, strike in enumerate((181, 182, 183), start=1):
+        day = compute.merge_day_signals(
+            day,
+            {"signals_0dte": [_row("MU", "PCS", "2026-10-17", strike,
+                                   strike - 5, 62.0 + i)]},
+            "2026-09-17", now_iso=f"2026-09-17T09:{i:02d}:00")
+    entry = day["setups"][key]
+    assert entry["first_seen"] == first_seen
+    assert entry["seen"] == 4
+    assert entry["scores"] == [62.0, 63.0, 64.0, 65.0]
+    # Four distinct rows, one shared age — the whole point of the coarse key.
+    assert len({r["id"] for r in day["signals_0dte"]}) == 4
+
+
+def test_the_representative_score_is_the_best_of_the_scan():
+    scan = {"signals_0dte": [
+        _row("MU", "PCS", "2026-10-17", 180, 175, 55.0),
+        _row("MU", "PCS", "2026-10-17", 185, 180, 71.0)]}
+    day = compute.merge_day_signals(None, scan, "2026-09-17",
+                                    now_iso="2026-09-17T08:02:00")
+    assert day["setups"]["MU|PCS|2026-10-17"]["scores"] == [71.0]
+
+
+def test_a_date_change_resets_the_setups_map():
+    day = compute.merge_day_signals(
+        None, {"signals_0dte": [_row("MU", "PCS", "2026-10-17", 180, 175, 62.0)]},
+        "2026-09-17", now_iso="2026-09-17T08:02:00")
+    fresh = compute.merge_day_signals(day, {"signals_0dte": []}, "2026-09-18",
+                                      now_iso="2026-09-18T08:02:00")
+    assert fresh["setups"] == {}
+    assert fresh["scan_seq"] == 1
+
+
+def test_scan_seq_increments_within_a_day():
+    day = compute.merge_day_signals(None, {}, "2026-09-17",
+                                    now_iso="2026-09-17T08:02:00")
+    assert day["scan_seq"] == 1
+    day = compute.merge_day_signals(day, {}, "2026-09-17",
+                                    now_iso="2026-09-17T08:17:00")
+    assert day["scan_seq"] == 2
+
+
+def test_a_broken_setups_block_does_not_break_the_row_merge(monkeypatch):
+    # The caller's except leaves the PREVIOUS envelope untouched, so an
+    # unguarded crash here would freeze the whole Scanner page, not just ages.
+    monkeypatch.setattr(compute, "merge_setups",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("x")))
+    scan = {"signals_0dte": [_row("MU", "PCS", "2026-10-17", 180, 175, 62.0)]}
+    day = compute.merge_day_signals(None, scan, "2026-09-17",
+                                    now_iso="2026-09-17T08:02:00")
+    assert len(day["signals_0dte"]) == 1
+    assert day["signals_0dte"][0]["live"] is True
+    assert day["setups"] == {}
+
+
+def test_every_surviving_row_key_is_present_in_the_map():
+    scan = {"signals_0dte": [_row("MU", "PCS", "2026-10-17", 180, 175, 62.0),
+                             _row("NVDA", "CCS", "2026-10-24", 190, 195, 70.0)]}
+    day = compute.merge_day_signals(None, scan, "2026-09-17",
+                                    now_iso="2026-09-17T08:02:00")
+    keys = {r["setup_key"] for r in day["signals_0dte"] if r.get("setup_key")}
+    assert keys <= set(day["setups"])

@@ -386,6 +386,23 @@ def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
     envelope -- including ``live=True`` entries. A consumer MUST gate on ``date``
     before trusting ``live``, or it will render day-old signals as live.
 
+    ``setups`` -- the day's persistence map, ``{setup_key: entry}`` (see
+    ``merge_setups``), ALWAYS present. Every merged row is stamped with its own
+    ``setup_key`` — ``None`` when no key is derivable, never the string, since
+    Tier 1 renders a dash on ``None``. Two adjacent strikes on one expiry are two
+    rows sharing one entry: that is the point of the coarse key, since the
+    engine's ``id`` encodes the strikes and strike drift would otherwise reset
+    the age of a rock-steady setup on every scan.
+
+    ``scan_seq`` -- this scan's 1-based sequence number within the day, so
+    ``merge_setups`` can tell a GAP from a consecutive scan. Wall-clock cannot:
+    a manual scan breaks the 15-minute grid. It resets with the day.
+
+    ⚠ The setups block carries its OWN guard. The caller's ``except`` leaves the
+    previous envelope in place, so a failure here would not degrade persistence —
+    it would freeze the whole day union. On a failure the map is empty and the
+    rows merge normally.
+
     ``truncated`` -- ``{list_name: n_dropped}``, present ONLY when the cap evicted
     something (absent = nothing dropped, and also what a pre-cap envelope looks
     like; both render the same, so absence is unambiguously "no notice"). The page
@@ -406,11 +423,21 @@ def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
     now_iso = now_iso or _dt.datetime.now(_PROJ_CT_TZ).replace(
         tzinfo=None).isoformat(timespec="seconds")
 
-    if not isinstance(prev, dict) or prev.get("date") != today:
+    # Captured BEFORE the reset: _trustworthy_baseline needs to know whether we
+    # were watching, which the reset is about to erase.
+    prev_usable = isinstance(prev, dict) and prev.get("date") == today
+    if not prev_usable:
         prev = {}
 
-    out = {"date": today}
+    # _finite, not a bare int(): scan_seq comes off the same untrusted envelope
+    # as the rest, and this line sits OUTSIDE the setups guard below — a corrupt
+    # value raising here would take the whole day union down, not just the map.
+    seq = int(_finite(prev.get("scan_seq")) or 0) + 1
+
+    out = {"date": today, "scan_seq": seq}
     truncated = {}
+    live_best = {}
+    referenced = set()
     for key_list in _DAY_LISTS:
         cur_list = current.get(key_list) if isinstance(current, dict) else None
         cur_list = cur_list if isinstance(cur_list, list) else []
@@ -446,11 +473,42 @@ def merge_day_signals(prev, current, today, now_iso=None, max_per_list=None):
             fresh["live"] = True
             fresh["stale_since"] = None
             merged.append(fresh)
+        for entry in merged:
+            key = setup_key(entry)
+            entry["setup_key"] = key
+            # ⚠ None is a perfectly valid dict key, so without this the keyless
+            # rows would share one fabricated bucket — invisible until it
+            # rendered as a group of unrelated signals with a common age.
+            if not key:
+                continue
+            if entry.get("live"):
+                score = _finite(entry.get("composite_score"))
+                best = live_best.get(key)
+                if score is not None and (best is None or score > best):
+                    live_best[key] = score
+                # A live setup counts as live even when its score is unreadable:
+                # the age is the point, the score only decorates it.
+                live_best.setdefault(key, None)
         out[key_list], dropped = _cap_day_list(merged, key_list, max_per_list)
         if dropped:
             truncated[key_list] = dropped
+        # AFTER the cap: an entry an evicted row referenced is no longer
+        # referenced, and holding it would defeat _cap_setups' own budget.
+        referenced.update(e.get("setup_key") for e in out[key_list]
+                          if e.get("setup_key"))
     if truncated:
         out["truncated"] = truncated
+    # Own guard: the CALLER's except leaves the previous envelope untouched, so an
+    # unguarded failure here would not degrade persistence — it would freeze the
+    # whole day union and the Scanner page with it.
+    try:
+        setups = merge_setups(prev.get("setups"), live_best, now_iso, seq,
+                              _trustworthy_baseline(prev_usable, now_iso))
+        setups, _evicted = _cap_setups(setups, referenced)
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.merge_setups")
+        setups = {}
+    out["setups"] = setups
     return out
 
 
