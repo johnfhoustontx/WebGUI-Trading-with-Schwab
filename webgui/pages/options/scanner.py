@@ -135,6 +135,13 @@ def _actions_col():
 # WHEN the signal stopped appearing in a scan, not whether it did.
 _DROPPED_COL = ("stale_since", "Dropped at")
 
+# How long the SETUP has been live today, and which way its score is going.
+# "Seen since" carries a time + a count, so it is not the bare "Age" a reader
+# would take for a DTE. "Score trend" and not "Score": the composite already
+# owns that word, and these are different quantities.
+_SEEN_COL = ("seen_since", "Seen since")
+_TREND_COL = ("score_trend", "Score trend")
+
 
 def signal_columns():
     """ui.table column defs for a credit-spread signal table (0-DTE / Swing).
@@ -167,11 +174,18 @@ def signal_columns():
         ("iv_rank", "Vol Rank"),
         ("composite_score", "Score"),
         ("grade", "Grade"),
+        _SEEN_COL,
+        _TREND_COL,
         _DROPPED_COL,
     ]
     cols = [_col(field, label) for field, label in spec]
-    # The go / no-go checklist's one-chip verdict, before the Dropped column.
-    cols.insert(len(cols) - 1, _checks_col())
+    # The go / no-go checklist's one-chip verdict, after Grade (the two are both
+    # verdicts) and BEFORE the lifecycle trio (Seen since / Score trend /
+    # Dropped at), which must stay adjacent. By NAME, not by offset: the old
+    # ``len(cols) - 1`` silently moved whenever a column was appended, and it
+    # landed Checks inside the trio the moment these two arrived.
+    cols.insert(next(i for i, c in enumerate(cols) if c["name"] == "seen_since"),
+                _checks_col())
     return cols + [_actions_col()]
 
 
@@ -199,7 +213,8 @@ def directional_columns():
     shared = strategy_table.strategy_columns()
     body = [c for c in shared if c["name"] != "actions"]
     return ([_col("symbol", "Symbol")] + body
-            + [_checks_col(), _col(*_DROPPED_COL), _actions_col()])
+            + [_checks_col(), _col(*_SEEN_COL), _col(*_TREND_COL),
+               _col(*_DROPPED_COL), _actions_col()])
 
 
 def signal_rows(signals):

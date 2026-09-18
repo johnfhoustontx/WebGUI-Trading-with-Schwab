@@ -44,16 +44,22 @@ def _ctx(**over):
 
 
 # ── columns ──────────────────────────────────────────────────────────────────
-def test_signal_columns_put_checks_just_before_the_dropped_column():
+def test_signal_columns_put_checks_just_before_the_lifecycle_cluster():
+    # The anchor moved from ``stale_since`` to ``seen_since`` when the lifecycle
+    # columns landed: Dropped was never what Checks related to, it was merely the
+    # last column before actions when this was written. Keeping the old spelling
+    # would have SPLIT the trio (Seen since / Score trend / Dropped at) to keep
+    # Checks beside Dropped. The invariant is renamed, not dropped.
     fields = [c["field"] for c in scanner.signal_columns()]
-    assert fields[fields.index("stale_since") - 1] == "checks"
+    assert fields[fields.index("seen_since") - 1] == "checks"
     labels = {c["field"]: c["label"] for c in scanner.signal_columns()}
     assert labels["checks"] == "Checks"
 
 
-def test_directional_columns_put_checks_just_before_the_dropped_column():
+def test_directional_columns_put_checks_just_before_the_lifecycle_cluster():
+    # Same anchor move as its sibling above, for the same reason.
     fields = [c["field"] for c in scanner.directional_columns()]
-    assert fields[fields.index("stale_since") - 1] == "checks"
+    assert fields[fields.index("seen_since") - 1] == "checks"
 
 
 # ── stamp_checks ─────────────────────────────────────────────────────────────

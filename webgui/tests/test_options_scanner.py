@@ -621,7 +621,8 @@ def test_credit_spread_column_labels_say_what_the_cell_holds():
     labels = [c["label"] for c in scanner.signal_columns()]
     assert labels == ["Symbol", "Strategy", "Expiry", "DTE", "Strikes",
                       "Credit", "Max loss", "R/R %", "PoP %", "Vol Rank",
-                      "Score", "Grade", "Checks", "Dropped at", ""]
+                      "Score", "Grade", "Checks", "Seen since", "Score trend",
+                      "Dropped at", ""]
 
 
 def test_credit_STAYS_because_this_table_holds_no_debits():
@@ -743,3 +744,21 @@ def test_stamp_persistence_dashes_every_row_when_the_map_is_not_a_mapping():
     scanner.stamp_persistence(rows, [{"id": "X", "setup_key": "K"}], ["junk"])
     assert rows[0]["seen_since"] == "—"
     assert rows[0]["score_trend"] == "—"
+
+
+def test_both_signal_tabs_carry_the_persistence_columns():
+    for cols in (scanner.signal_columns(), scanner.directional_columns()):
+        names = [c["name"] for c in cols]
+        # ADJACENCY, not just ordering. The weaker "seen_since before
+        # stale_since" version passes while the Checks column sits wedged
+        # between them, which is what the positional insert actually did.
+        i = names.index("seen_since")
+        assert names[i:i + 3] == ["seen_since", "score_trend", "stale_since"]
+        assert names.index("stale_since") < names.index("actions")
+
+
+def test_the_persistence_column_labels_name_what_the_value_is():
+    labels = {c["name"]: c["label"] for c in scanner.signal_columns()}
+    assert labels["seen_since"] == "Seen since"
+    # NOT "Score" — that column already exists and holds the composite.
+    assert labels["score_trend"] == "Score trend"
