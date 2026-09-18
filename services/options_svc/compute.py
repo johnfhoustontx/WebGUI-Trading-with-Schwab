@@ -107,27 +107,56 @@ def _day_entry(signal):
     return out
 
 
+def _iso_date(raw):
+    """``YYYY-MM-DD`` when ``raw`` really is a date, else ``''``.
+
+    The bare slice this replaced validated nothing, so a NaN, an epoch-ms int or
+    a bool minted a confident-looking key — the house NaN trap in its usual
+    shape, and a fabricated group of exactly the kind the design forbids. An
+    unstripped slice also collapsed two distinct whitespace-padded expirations
+    onto one key, re-making the ``_sig_key`` bug the docstring warns about.
+    """
+    text = str(raw).strip()[:10]
+    try:
+        _dt.date.fromisoformat(text)
+    except (ValueError, TypeError):
+        return ""
+    return text
+
+
 def _setup_expiry(signal):
     """The signal's FRONT expiration as ``YYYY-MM-DD``, or ``''``.
 
-    Credit-spread rows carry ``expiration``. A directional row built by
-    ``strategy_scanner._assemble`` carries its dates on the legs, so the earliest
-    leg expiry is the setup's horizon. Both leg spellings are accepted because the
-    normalized leg dict uses ``expiry`` while some raw rows use ``expiration``.
+    The top-level ``expiration`` is AUTHORITATIVE and is taken first. Every row
+    that reaches the three day lists carries one: a credit spread from
+    ``screen_spreads``, and a ``strategy_scanner._assemble`` row, whose
+    ``expiration`` is ``_front_expiration(legs)`` — already ``min()`` over the
+    OPTION legs — so for that producer the two sources cannot disagree.
+
+    ⚠ The legs branch is a DECLARED FALLBACK, not the live directional path. It
+    covers leg-set structures whose horizon lives only on the legs (covered call,
+    collar, calendars); none of those enters a day list today, so nothing
+    currently reaches it. Both leg spellings are accepted because
+    ``strategy_scanner._leg_from`` writes ``expiration`` while the normalized
+    Tier-1 leg dict writes ``expiry``. An unparseable top-level value falls
+    THROUGH to the legs rather than hard-failing — a readable leg date is better
+    than no key at all.
     """
-    raw = signal.get("expiration")
-    if raw:
-        return str(raw)[:10]
+    if not isinstance(signal, dict):
+        return ""
+    date = _iso_date(signal.get("expiration"))
+    if date:
+        return date
     legs = signal.get("legs")
     if isinstance(legs, list):
         found = set()
         for leg in legs:
             if isinstance(leg, dict):
-                date = str(leg.get("expiry") or leg.get("expiration") or "")[:10]
+                date = _iso_date(leg.get("expiry") or leg.get("expiration") or "")
                 if date:
                     found.add(date)
         if found:
-            return sorted(found)[0]
+            return min(found)
     return ""
 
 
