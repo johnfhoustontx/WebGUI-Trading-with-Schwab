@@ -483,3 +483,53 @@ def test_every_surviving_row_key_is_present_in_the_map():
                                     now_iso="2026-09-17T08:02:00")
     keys = {r["setup_key"] for r in day["signals_0dte"] if r.get("setup_key")}
     assert keys <= set(day["setups"])
+
+
+def test_a_keyless_row_never_fabricates_a_setup_group():
+    # setup_key is None for a row with no derivable identity, and None is a
+    # perfectly valid dict key — so without the guard EVERY keyless row in the
+    # scan shares one fabricated group, carrying an age and a best-score merged
+    # across unrelated symbols. Invisible until it rendered.
+    scan = {"signals_0dte": [
+        dict(_row("MU", "PCS", "2026-10-17", 180, 175, 62.0), expiration=None),
+        dict(_row("NVDA", "CCS", "2026-10-24", 190, 195, 71.0), expiration=None)]}
+    day = compute.merge_day_signals(None, scan, "2026-09-17",
+                                    now_iso="2026-09-17T08:02:00")
+    assert [r["setup_key"] for r in day["signals_0dte"]] == [None, None]
+    assert day["setups"] == {}
+
+
+def test_a_stale_row_carried_from_a_pre_feature_envelope_is_stamped_too():
+    # Stamping only LIVE rows looks equivalent, because _day_entry deep-copies a
+    # carried row and its stamp with it. It is not: a row already stale in the
+    # envelope when this code first runs would never be stamped at all, so it
+    # would render a dash for the rest of the day AND be missing from
+    # `referenced`, letting _cap_setups evict an entry a VISIBLE row points at.
+    prev = {"date": "2026-09-17", "scan_seq": 1,
+            "signals_0dte": [dict(_row("MU", "PCS", "2026-10-17", 180, 175, 62.0),
+                                  live=False, stale_since="2026-09-17T08:02:00")]}
+    day = compute.merge_day_signals(prev, {"signals_0dte": []}, "2026-09-17",
+                                    now_iso="2026-09-17T08:17:00")
+    row = day["signals_0dte"][0]
+    assert row["live"] is False
+    assert row["setup_key"] == "MU|PCS|2026-10-17"
+
+
+def test_a_setup_only_an_evicted_row_referenced_becomes_evictable(monkeypatch):
+    # `referenced` is collected AFTER the row cap. Collected before it, an entry
+    # whose only row the cap just evicted would still count as referenced and
+    # _cap_setups could never reclaim it — defeating its own budget on exactly
+    # the pathological day both caps exist for.
+    monkeypatch.setattr(compute, "_SETUP_MAX", 1)
+    day = compute.merge_day_signals(
+        None, {"signals_0dte": [_row("MU", "PCS", "2026-10-17", 180, 175, 62.0),
+                                _row("NVDA", "CCS", "2026-10-24", 190, 195, 70.0)]},
+        "2026-09-17", now_iso="2026-09-17T08:02:00", max_per_list=2)
+    assert set(day["setups"]) == {"MU|PCS|2026-10-17", "NVDA|CCS|2026-10-24"}
+    # MU stays live and survives the row cap; NVDA goes stale and is evicted, so
+    # nothing on screen points at its setup entry any more.
+    day = compute.merge_day_signals(
+        day, {"signals_0dte": [_row("MU", "PCS", "2026-10-17", 180, 175, 63.0)]},
+        "2026-09-17", now_iso="2026-09-17T08:17:00", max_per_list=1)
+    assert [r["id"] for r in day["signals_0dte"]] == ["MU_PCS_2026-10-17_180_175"]
+    assert set(day["setups"]) == {"MU|PCS|2026-10-17"}
