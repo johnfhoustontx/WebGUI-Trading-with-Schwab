@@ -133,10 +133,11 @@ def _setup_expiry(signal):
     ``expiration`` is ``_front_expiration(legs)`` — already ``min()`` over the
     OPTION legs — so for that producer the two sources cannot disagree.
 
-    ⚠ The legs branch is a DECLARED FALLBACK, not the live directional path. It
-    covers leg-set structures whose horizon lives only on the legs (covered call,
-    collar, calendars); none of those enters a day list today, so nothing
-    currently reaches it. Both leg spellings are accepted because
+    ⚠ The legs branch is a DECLARED FALLBACK, not a live path. Every
+    ``strategy_scanner`` row routes through ``_assemble`` and so carries the
+    top-level field; the fallback exists for a leg set assembled elsewhere (the
+    normalized Tier-1 dict, which spells it ``expiry``), none of which enters a
+    day list today. Both leg spellings are accepted because
     ``strategy_scanner._leg_from`` writes ``expiration`` while the normalized
     Tier-1 leg dict writes ``expiry``. An unparseable top-level value falls
     THROUGH to the legs rather than hard-failing — a readable leg date is better

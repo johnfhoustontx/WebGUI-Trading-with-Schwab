@@ -73,7 +73,8 @@ def test_the_top_level_expiration_wins_and_already_is_the_front_leg():
     # _assemble emits BOTH, with expiration already == min(leg expirations), so
     # the two cannot disagree for a real row. Pinning the precedence anyway.
     row = {"symbol": "NVDA", "type": "LONG_CALL", "expiration": "2026-10-17",
-           "legs": [{"expiration": "2026-10-17"}, {"expiration": "2026-11-21"}]}
+           "legs": [{"expiration": "2026-11-21"}]}     # legs DISAGREE — no real
+    # producer emits this; the row exists only to pin the documented branch order.
     assert compute.setup_key(row) == "NVDA|LONG_CALL|2026-10-17"
 
 
