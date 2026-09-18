@@ -214,7 +214,15 @@ def merge_setups(prev_setups, live, now_iso, seq, trustworthy_baseline):
     caller: a setup is several adjacent strikes, and the question being asked is
     whether the best thing it offers is improving.
 
-    Never mutates its inputs; never raises.
+    Never mutates its inputs.
+
+    ⚠ It does NOT "never raise", which is what this said until the guards were
+    audited against it. What it tolerates is a garbage ``prev_setups`` — any
+    shape, any entry, any field — because that is read straight off Redis and a
+    corrupt entry must cost one setup's counts, never the day's whole map. It
+    does NOT defend ``live`` (must be a mapping) or ``seq`` (must be an int):
+    Task 5 builds both as locals from the scan it just merged, so a bad one is a
+    bug in this tier, not bad data, and swallowing it would hide it.
     """
     out = {}
     if isinstance(prev_setups, dict):
@@ -226,6 +234,13 @@ def merge_setups(prev_setups, live, now_iso, seq, trustworthy_baseline):
                 # below ever becomes an in-place .append(); today the rebind makes
                 # each half individually unkillable, so do not delete it as dead.
                 copied["scores"] = list(scores) if isinstance(scores, list) else []
+                # seen/gaps come off the same untrusted envelope as scores and
+                # last_seq, and were read through a bare int(): one corrupt entry
+                # raised, and the CALLER's guard would then have dropped the whole
+                # day's map. Normalise here, at the one boundary the envelope
+                # crosses, so both counts degrade rather than the map.
+                copied["seen"] = int(_finite(copied.get("seen")) or 0)
+                copied["gaps"] = int(_finite(copied.get("gaps")) or 0)
                 out[key] = copied
 
     for key, score in (live or {}).items():
@@ -242,8 +257,10 @@ def merge_setups(prev_setups, live, now_iso, seq, trustworthy_baseline):
         else:
             last_seq = entry.get("last_seq")
             if isinstance(last_seq, int) and last_seq < seq - 1:
-                entry["gaps"] = int(entry.get("gaps") or 0) + 1
-        entry["seen"] = int(entry.get("seen") or 0) + 1
+                entry["gaps"] += 1
+        # Both counts are ints by construction here: a newcomer is built with
+        # zeroes just above, and a carried entry was normalised on copy.
+        entry["seen"] += 1
         entry["last_seq"] = seq
         entry["last_live"] = now_iso
         # _finite, NOT the nearer _num / _num_or_none: those coerce with float()

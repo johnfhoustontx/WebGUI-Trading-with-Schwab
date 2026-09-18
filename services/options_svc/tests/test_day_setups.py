@@ -162,24 +162,35 @@ def test_an_untrustworthy_baseline_omits_first_seen():
 def test_a_setup_appearing_after_a_cold_start_gets_a_real_stamp():
     cold = compute.merge_setups({}, {"MU|PCS|2026-10-17": 62.0}, "t1", seq=1,
                                 trustworthy_baseline=False)
-    # Merge 2 has a usable prev — the envelope merge 1 wrote — so
-    # _trustworthy_baseline short-circuits to True. The flag and a non-empty
-    # prev map can never disagree at the call site, which is why the
-    # implementation reads the flag alone rather than also inspecting prev.
+    # ⚠ Merge 2 passes True, and the first draft of this test passed False —
+    # which is UNREACHABLE. Merge 2 has a usable prev (the envelope merge 1 just
+    # wrote), so _trustworthy_baseline short-circuits on prev_usable. The flag
+    # and a non-empty prev map can never disagree at the call site, which is why
+    # merge_setups reads the flag alone rather than also inspecting prev.
     later = compute.merge_setups(cold, {"MU|PCS|2026-10-17": 62.0,
                                         "NVDA|CCS|2026-10-17": 70.0},
                                  "t2", seq=2, trustworthy_baseline=True)
+    # Carried from an age_unknown map: MU was never seen from its true
+    # beginning, so it never acquires a stamp.
     assert "first_seen" not in later["MU|PCS|2026-10-17"]
+    # This one genuinely arrived while we were watching, so its age is known.
     assert later["NVDA|CCS|2026-10-17"]["first_seen"] == "t2"
 
 
 def test_an_unusable_score_is_not_appended():
     # A None/NaN score must not poison the trend series; the sighting still counts.
-    out = compute.merge_setups({}, {"MU|PCS|2026-10-17": None}, "t1", seq=1,
-                               trustworthy_baseline=True)
-    entry = out["MU|PCS|2026-10-17"]
-    assert entry["scores"] == []
-    assert entry["seen"] == 1
+    # ⚠ bool is here because it is the ONLY thing separating _finite from its two
+    # near neighbours: _num_or_none and _num both coerce through float(), so
+    # float(True) is 1.0 and a bool books as a score of 1.0. Without this case,
+    # swapping to either neighbour passes the whole suite.
+    out = compute.merge_setups(
+        {}, {"K_NONE": None, "K_NAN": float("nan"), "K_BOOL": True}, "t1",
+        seq=1, trustworthy_baseline=True)
+    assert out["K_NONE"]["scores"] == []
+    assert out["K_NAN"]["scores"] == []
+    assert out["K_BOOL"]["scores"] == []
+    assert out["K_NONE"]["seen"] == 1
+    assert out["K_BOOL"]["seen"] == 1
 
 
 def test_scores_are_bounded_and_keep_the_TAIL():
@@ -201,3 +212,15 @@ def test_merge_setups_never_mutates_its_input():
     compute.merge_setups(prev, {"MU|PCS|2026-10-17": 63.0}, "t2", seq=2,
                          trustworthy_baseline=True)
     assert prev == snapshot
+
+
+@pytest.mark.parametrize("junk", ["x", None, float("nan"), [], {"a": 1}])
+def test_a_corrupt_prev_entry_degrades_rather_than_taking_the_map_down(junk):
+    # prev comes from Redis. Every other field read from it is isinstance-guarded;
+    # seen and gaps were not, so one corrupt entry raised and Task 5's guard would
+    # have dropped the WHOLE day's persistence map.
+    prev = {"K": {"seen": junk, "gaps": junk, "scores": [], "last_seq": 1}}
+    out = compute.merge_setups(prev, {"K": 62.0}, "t2", seq=2,
+                               trustworthy_baseline=True)
+    assert out["K"]["seen"] == 1
+    assert isinstance(out["K"]["gaps"], int)
