@@ -6,6 +6,8 @@ from these, so the two cannot describe the same setup differently.
 The map is built Tier-2-side by ``options_svc.compute.merge_setups``; this module
 never derives a ``setup_key`` (rows carry one), so there is no cross-tier mirror.
 """
+import datetime as _dt
+
 from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
 
 # One hour at the 15-minute autoscan cadence. Under this, no direction is named.
@@ -16,6 +18,38 @@ TREND_WINDOW = 4
 TREND_DEADBAND = 2.0
 
 DASH = "—"
+
+
+def _hhmm(value):
+    """``HH:MM`` for a timestamp, or :data:`DASH` when there is no time in it.
+
+    Replaces a positional ``str(value)[11:16]`` slice, which was correct for
+    every shape Tier 2 emits but whose FAILURE mode was an empty string — a
+    malformed value where this module reserves a dash for "nothing was read".
+
+    ⚠ ``datetime.fromisoformat`` accepts a DATE-ONLY string and invents
+    midnight for it, so the obvious parse-and-format shape renders ``00:00`` —
+    trading an empty string for a confidently wrong time, which is worse.
+    ``date.fromisoformat`` succeeds on exactly the date-only strings, so the
+    stdlib is the oracle for "did this carry a time at all" rather than another
+    character count. A real 00:00 is left alone: it is a reading.
+    """
+    # datetime FIRST — it subclasses date, so the order is load-bearing.
+    if isinstance(value, _dt.datetime):
+        return value.strftime("%H:%M")
+    if isinstance(value, _dt.date):     # a bare date carries no time to show
+        return DASH
+    text = str(value)
+    try:
+        _dt.date.fromisoformat(text)
+    except (ValueError, TypeError):
+        pass                            # not date-only: it may carry a time
+    else:
+        return DASH                     # date-only: never fabricate midnight
+    try:
+        return _dt.datetime.fromisoformat(text).strftime("%H:%M")
+    except (ValueError, TypeError):
+        return DASH
 
 
 def _usable(scores):
@@ -69,6 +103,14 @@ def persistence_facts(setup):
     has no derivable setup_key, or the map failed to build), a known-present
     setup whose age cannot be claimed (``age_unknown`` — a cold start), and a
     setup with too few readings to name a direction.
+
+    ⚠ ``scores`` must be a RE-ITERABLE sequence, never a generator: it is read
+    twice, by ``score_trend`` and by ``score_delta``, and that pair of calls is
+    the whole reason ``delta`` cannot be None on the formatted branch below —
+    both branch on the same length of the same series. A one-shot iterator
+    would drain on the first call, yielding a non-``new`` trend beside a None
+    delta, which is a TypeError in the format. A JSON decode always hands back
+    a list, so this cannot arise today; the note is so nobody introduces one.
     """
     if not isinstance(setup, dict):
         return {"since": DASH, "trend": "new", "trend_text": DASH,
@@ -78,12 +120,19 @@ def persistence_facts(setup):
     # through, and int(float("nan")) raises ValueError — which would propagate
     # out of here into the row stamper. fmt.py's own rule: when the question is
     # "is this a real reading", use num.
-    seen = int(_fmt.num(setup.get("seen")) or 0)
+    seen = _fmt.num(setup.get("seen"))
     first = setup.get("first_seen")
-    if setup.get("age_unknown") or not first:
+    stamp = DASH if setup.get("age_unknown") else _hhmm(first)
+    if stamp == DASH:
         since = DASH
+    elif seen is None:
+        # ⚠ NEVER "09:15 · 0x". An unreadable count rendered as zero claims the
+        # setup was seen no times, beside a stamp saying it was live at 09:15 —
+        # a confident zero contradicting the very line it sits in. Say only the
+        # part that was actually read.
+        since = stamp
     else:
-        since = f"{str(first)[11:16]} · {seen}x"
+        since = f"{stamp} · {int(seen)}x"
 
     trend = score_trend(setup.get("scores"))
     delta = score_delta(setup.get("scores"))
@@ -92,10 +141,15 @@ def persistence_facts(setup):
     else:
         trend_text = f"{_MARKS[trend]} {delta:+.1f}"
 
-    gaps = int(_fmt.num(setup.get("gaps")) or 0)
+    # ⚠ None, not 0: zero gaps is a positive claim of unbroken continuity, so
+    # folding "unreadable" into it is the same error one layer down. A falsy
+    # value is omitted from the sentence either way, so only a consumer of the
+    # returned dict can tell them apart — which is exactly who must.
+    gaps_read = _fmt.num(setup.get("gaps"))
+    gaps = None if gaps_read is None else int(gaps_read)
     detail = ""
     if since != DASH:
-        detail = f"Live since {str(first)[11:16]}"
+        detail = f"Live since {stamp}"
         if gaps:
             detail += f" · {gaps} gap" + ("s" if gaps != 1 else "")
     return {"since": since, "trend": trend, "trend_text": trend_text,
