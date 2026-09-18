@@ -173,6 +173,11 @@ def test_a_setup_appearing_after_a_cold_start_gets_a_real_stamp():
     # Carried from an age_unknown map: MU was never seen from its true
     # beginning, so it never acquires a stamp.
     assert "first_seen" not in later["MU|PCS|2026-10-17"]
+    # Pins the MAP's contract, not the render: persistence_facts also dashes on
+    # a missing first_seen, so dropping this flag changes nothing on screen
+    # today. It is the explicit record of "we could not know", where the missing
+    # stamp is only an inference from an absence.
+    assert later["MU|PCS|2026-10-17"]["age_unknown"] is True
     # This one genuinely arrived while we were watching, so its age is known.
     assert later["NVDA|CCS|2026-10-17"]["first_seen"] == "t2"
 
@@ -224,3 +229,28 @@ def test_a_corrupt_prev_entry_degrades_rather_than_taking_the_map_down(junk):
                                trustworthy_baseline=True)
     assert out["K"]["seen"] == 1
     assert isinstance(out["K"]["gaps"], int)
+
+
+@pytest.mark.parametrize("prev", [
+    None, [], "junk", 42,                         # any SHAPE
+    {"K": "junk"}, {"K": None}, {"K": []},        # any ENTRY
+    {"K": {"scores": "junk", "last_seq": 1}},     # any FIELD: scores
+    {"K": {"scores": [], "last_seq": "2"}},       # any FIELD: last_seq
+])
+def test_a_garbage_prev_is_tolerated_in_every_shape_the_docstring_claims(prev):
+    # prev comes straight off Redis. The docstring promises tolerance of any
+    # shape, any entry and any field; before this, four of those guards existed
+    # with nothing exercising them — the same state seen/gaps were in.
+    out = compute.merge_setups(prev, {"K": 62.0}, "t2", seq=2,
+                               trustworthy_baseline=True)
+    assert out["K"]["seen"] >= 1
+    assert isinstance(out["K"]["scores"], list)
+    assert out["K"]["scores"] == [62.0]
+    # ⚠ Deliberate, and it is the `last_seq: "2"` case that decides it: a
+    # non-int last_seq disables gap detection for that key, and the honest
+    # answer is to claim NO gap rather than invent one. A gap is a positive
+    # statement about the tape ("blinked three times"), so fabricating one from
+    # a corrupt field is the same error class as stamping a first_seen we never
+    # observed. The blindness is exactly one merge long: last_seq is rewritten
+    # to a real int on this very merge, and the next true gap is counted.
+    assert out["K"]["gaps"] == 0
