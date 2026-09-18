@@ -34,6 +34,18 @@ Run tests with the checkout's own venv. From the repo root:
 cd webgui && ../.venv/bin/python -m pytest -q
 ```
 
+⚠ **A git worktree has no venv of its own**, so those relative paths fail there —
+use the parent checkout's absolute path. On the Windows checkout that is
+`"D:/WebGUI Trading with Schwab/.venv/Scripts/python.exe"`; on the VPS it is
+`/home/administrator/dev/.venv/bin/python`, **which is prod's** (see the
+Environments section of `CLAUDE.md`).
+
+**Measured baseline before this work, `services/options_svc`: 2441 passed, 0
+failed.** ⚠ `CLAUDE.md`'s Tests section records 1216 for this suite — that entry
+is stale by roughly a factor of two. Collection was checked (2452 collected once,
+not double-counted), so the gap is genuine suite growth. Compare the failing
+**set**, never the count.
+
 ---
 
 ## Task 1: `setup_key` — the coarse persistence identity
@@ -89,6 +101,11 @@ def test_setup_key_is_none_when_any_component_is_missing(row):
     assert compute.setup_key(row) is None
 ```
 
+⚠ The landed file carries **12 further cases** the review added — unparseable and
+padded expirations, the producer's own `expiration` leg spelling, top-level-wins
+precedence, and the non-dict contract. `services/options_svc/tests/test_day_setups.py`
+as committed is the source of truth; the block above is only how it started.
+
 **Step 2: Run to verify they fail**
 
 Run: `.venv/bin/python -m pytest services/options_svc/tests/test_day_setups.py -q`
@@ -96,30 +113,56 @@ Expected: FAIL — `AttributeError: module 'compute' has no attribute 'setup_key
 
 **Step 3: Implement**
 
-Insert into `services/options_svc/compute.py` immediately after `_day_entry` (which ends ~line 108):
+> ⚠ **Corrected 2026-09-17 after review, landed as `ffb8510`.** The first draft of
+> this block sliced the raw value (`str(raw)[:10]`) and validated nothing, so a
+> NaN, an epoch-ms int or a bool minted a confident-looking key
+> (`MU|PCS|nan`) and two whitespace-padded expirations collapsed onto one —
+> re-making the very `_sig_key` bug the docstring warns about. Its docstring was
+> also **factually wrong**: `strategy_scanner._assemble` emits the top-level
+> `expiration` *and* the legs, with the former already `min()`-normalised over
+> the option legs (`_front_expiration`), so the legs branch is a fallback, not
+> the live directional path. And real legs spell it **`expiration`**
+> (`strategy_scanner.py:436` `_leg_from`), not `expiry` — the original test
+> exercised the one spelling no producer emits.
+
+Insert into `services/options_svc/compute.py` immediately after `_day_entry`
+(⚠ `_cap_day_list` sits between `_day_entry` and `merge_day_signals`, so the new
+pair lands before it — both are standalone, so order does not matter):
 
 ```python
+def _iso_date(raw):
+    """``YYYY-MM-DD`` when ``raw`` really is a date, else ``''``."""
+    text = str(raw).strip()[:10]
+    try:
+        _dt.date.fromisoformat(text)
+    except (ValueError, TypeError):
+        return ""
+    return text
+
+
 def _setup_expiry(signal):
     """The signal's FRONT expiration as ``YYYY-MM-DD``, or ``''``.
 
-    Credit-spread rows carry ``expiration``. A directional row built by
-    ``strategy_scanner._assemble`` carries its dates on the legs, so the earliest
-    leg expiry is the setup's horizon. Both leg spellings are accepted because the
-    normalized leg dict uses ``expiry`` while some raw rows use ``expiration``.
+    The top-level ``expiration`` is authoritative: ``strategy_scanner._assemble``
+    already emits it as ``min()`` over the option legs, so for a real row the two
+    sources cannot disagree.
+
+    ⚠ The legs branch is a DECLARED FALLBACK, not the live directional path. It
+    serves leg-set structures (covered call, collar, calendars) that today never
+    enter the three day lists. Both spellings are accepted because the producer
+    writes ``expiration`` and the Tier-1 normalized leg dict writes ``expiry``.
     """
-    raw = signal.get("expiration")
-    if raw:
-        return str(raw)[:10]
+    if not isinstance(signal, dict):
+        return ""
+    top = _iso_date(signal.get("expiration"))
+    if top:
+        return top
     legs = signal.get("legs")
     if isinstance(legs, list):
-        found = set()
-        for leg in legs:
-            if isinstance(leg, dict):
-                date = str(leg.get("expiry") or leg.get("expiration") or "")[:10]
-                if date:
-                    found.add(date)
+        found = {_iso_date(leg.get("expiry") or leg.get("expiration"))
+                 for leg in legs if isinstance(leg, dict)} - {""}
         if found:
-            return sorted(found)[0]
+            return min(found)
     return ""
 
 
@@ -153,7 +196,8 @@ def setup_key(signal):
 **Step 4: Run to verify they pass**
 
 Run: `.venv/bin/python -m pytest services/options_svc/tests/test_day_setups.py -q`
-Expected: PASS (7 tests)
+Expected: PASS — **23 cases** (4 named + 7 parametrized, plus the 12 validation
+cases the review added; the original "7 tests" here miscounted the parametrization).
 
 **Step 5: Commit**
 
