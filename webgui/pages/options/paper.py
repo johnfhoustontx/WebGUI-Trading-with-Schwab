@@ -217,13 +217,20 @@ def _num(v):
         return None
 
 
-def _dte_from_expiration(exp):
-    """Days from today to the expiration ISO date; None if unparseable."""
+def dte_from_expiration(exp):
+    """Days from today to the expiration ISO date; None if unparseable.
+
+    Public: the Desk and the Symbol Dossier read their DTE through it, so one
+    calendar answers for every page that prints a position's countdown."""
     try:
         import datetime as dt
         return (dt.date.fromisoformat(str(exp)[:10]) - dt.date.today()).days
     except (TypeError, ValueError):
         return None
+
+
+# The name this module's own callers (and test_desk) have always used.
+_dte_from_expiration = dte_from_expiration
 
 
 def _max_loss_per_share(t):

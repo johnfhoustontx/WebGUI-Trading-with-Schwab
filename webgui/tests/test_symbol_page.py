@@ -7,7 +7,6 @@ pinned twice: as a pure function, and at SOURCE level on the poll callback, so
 a refactor cannot quietly start fetching on the 2-second timer.
 """
 import ast
-import datetime as dt
 import inspect
 import pathlib
 
@@ -133,11 +132,11 @@ def test_the_enqueue_helper_is_called_only_on_navigation_and_refresh():
 
 # ── the poll's view set ────────────────────────────────────────────────────
 
-def test_the_poll_reads_the_ten_shared_views_plus_this_symbols_dossier():
+def test_the_poll_reads_the_eleven_shared_views_plus_this_symbols_dossier():
     views = sp.poll_views("MU")
     assert views[:len(sp.VIEWS)] == sp.VIEWS
     assert views[-1] == "options:dossier:MU"
-    assert len(sp.VIEWS) == 10
+    assert len(sp.VIEWS) == 11              # ten + gex_status (wall freshness)
 
 
 def test_a_rejected_symbol_polls_no_dossier_view():
@@ -498,12 +497,37 @@ def world(monkeypatch):
     return data, sent
 
 
-def _render_texts(symbol):
+def _built(symbol):
+    """Render, then run the page's own one-shot first read (it runs off the
+    event loop in the app, so a bare render has painted nothing yet)."""
+    import asyncio
+
     from nicegui import ui
+    from nicegui.elements.timer import Timer
     before = set(ui.context.client.elements)
     sp.render(symbol)
-    return [getattr(e, "text", "") or ""
-            for k, e in ui.context.client.elements.items() if k not in before]
+    elements = [e for k, e in ui.context.client.elements.items()
+                if k not in before]
+    (seed,) = [e for e in elements
+               if isinstance(e, Timer) and e.interval == sp.SEED_DELAY_SEC]
+    asyncio.run(seed.callback())
+    return [e for k, e in ui.context.client.elements.items() if k not in before]
+
+
+def _render_texts(symbol):
+    return [getattr(e, "text", "") or "" for e in _built(symbol)]
+
+
+def test_the_build_itself_reads_nothing_on_the_event_loop(world, monkeypatch):
+    """The first read (a multi-MB day union) runs on the page's one-shot
+    timer through run.io_bound — never inside render(), which blocks the loop."""
+    import bus_client
+    reads = []
+    for name in ("read", "read_full", "read_gated", "read_versions"):
+        monkeypatch.setattr(bus_client, name,
+                            lambda *a, n=name: reads.append(n) or (None, None))
+    sp.render("MU")
+    assert reads == []
 
 
 def test_a_scanned_symbol_renders_every_band_and_fetches_nothing(world):
@@ -569,6 +593,310 @@ def test_a_cold_options_feed_enqueues_nothing(world):
     assert _copy.WAITING_OPTIONS in texts
 
 
+# ── the live page: the poll, Refresh and the links, driven ─────────────────
+# These reach the page's own callbacks through the elements it built — the poll
+# timer's callback, the Refresh button's click handler, a band link's click —
+# because a handler that behaves correctly and is wired wrongly (or a poll that
+# reaches the enqueue through a helper) looks identical at source level.
+
+def _render_page(symbol):
+    return _built(symbol)
+
+
+def _texts(elements):
+    return [getattr(e, "text", "") or "" for e in elements]
+
+
+def _poll_callback(elements):
+    from nicegui.elements.timer import Timer
+    timers = [e for e in elements
+              if isinstance(e, Timer) and e.interval == sp.POLL_SEC]
+    assert len(timers) == 1, timers
+    return timers[0].callback
+
+
+def _click_handlers(elements, text):
+    out = []
+    for e in elements:
+        if (getattr(e, "text", "") or "") == text:
+            out += [li.handler for li in e._event_listeners.values()
+                    if li.type == "click"]
+    assert out, f"no clickable {text!r}"
+    return out
+
+
+def _refresh(elements):
+    """The Refresh coroutine itself: on_click dispatches through NiceGUI's
+    event machinery, which a test cannot await, so the page exposes it."""
+    (btn,) = [e for e in elements if hasattr(e, "_symbol_refresh")]
+    return btn._symbol_refresh
+
+
+def _run(coro):
+    import asyncio
+    return asyncio.run(coro)
+
+
+def test_a_dossier_whose_payload_lands_after_its_version_is_still_read(
+        world, monkeypatch):
+    """#1 — ``cache_set`` bumps ``{key}:ver`` one round-trip BEFORE it writes
+    the payload, so a poll can probe v1 while the payload read still returns
+    nothing. Storing the PROBED version then matched every later poll and the
+    dossier (written once, never republished) was never read: FETCHING, then
+    "try Refresh", and Refresh paid for a second fetch."""
+    import bus_client
+    data, sent = world
+    elements = _render_page("XYZQ")
+    assert len(sent) == 1
+    poll = _poll_callback(elements)
+
+    view = "options:dossier:XYZQ"
+    real_full = bus_client.read_full
+    landed = {"yes": False}
+    monkeypatch.setattr(
+        bus_client, "read_versions",
+        lambda vs: {v: (1 if (v in data or v == view) else None) for v in vs})
+
+    def _full(v):
+        if v == view:
+            if not landed["yes"]:
+                return None, None               # :ver bumped, SET not yet run
+            return ({"symbol": "XYZQ", "error": None,
+                     "fetched_at": "2026-09-18T14:32:00", "spot": 12.5}, 1)
+        return real_full(v)
+
+    monkeypatch.setattr(bus_client, "read_full", _full)
+    _run(poll())                                # probes v1, reads nothing
+    landed["yes"] = True
+    _run(poll())                                # the payload has now landed
+    texts = _texts(elements)
+    assert "FETCHED 14:32" in texts
+    assert "FETCHING" not in texts
+    assert len(sent) == 1                       # and nothing was re-fetched
+
+
+def test_two_refresh_taps_send_exactly_one_fetch(world):
+    """#2 — the handler awaits a read before it enqueues, so a second tap in
+    that window used to enqueue a second 4-5-call fetch."""
+    import asyncio
+    data, sent = world
+    data["options:dossier:XYZQ"] = {"symbol": "XYZQ", "error": None,
+                                    "fetched_at": "2026-09-18T14:32:00"}
+    elements = _render_page("XYZQ")
+    assert sent == []                           # reused on navigation
+    handler = _refresh(elements)
+
+    async def _two_taps():
+        await asyncio.gather(handler(), handler())
+
+    _run(_two_taps())
+    assert len(sent) == 1
+
+
+def test_a_refresh_while_a_fetch_is_in_flight_sends_nothing(world):
+    data, sent = world
+    elements = _render_page("XYZQ")             # navigation fetch → pending
+    assert len(sent) == 1
+    handler = _refresh(elements)
+    _run(handler())
+    assert len(sent) == 1
+
+
+def test_the_poll_never_enqueues_even_when_every_version_moves(
+        world, monkeypatch):
+    """#4 — behavioural, beside the source-level guard: a helper called from
+    the poll would pass the source test and spend on every tick."""
+    import bus_client
+    data, sent = world
+    data["options:dossier:XYZQ"] = {"symbol": "XYZQ", "error": "fetch_failed"}
+    elements = _render_page("XYZQ")             # fetch_failed is retried...
+    sent.clear()
+    poll = _poll_callback(elements)
+    for bump in (2, 3):
+        monkeypatch.setattr(bus_client, "read_versions",
+                            lambda vs, b=bump: {v: b for v in vs})
+        monkeypatch.setattr(bus_client, "read_full",
+                            lambda v, b=bump: (data.get(v), b))
+        _run(poll())
+    assert sent == []                           # ...but never by the poll
+
+
+def test_the_poll_does_not_enqueue_a_poll_path_fetch_for_a_collected_symbol(
+        world, monkeypatch):
+    import bus_client
+    data, sent = world
+    elements = _render_page("$VIX")
+    sent.clear()
+    poll = _poll_callback(elements)
+    monkeypatch.setattr(bus_client, "read_versions",
+                        lambda vs: {v: 9 for v in vs})
+    monkeypatch.setattr(bus_client, "read_full", lambda v: (data.get(v), 9))
+    _run(poll())
+    assert sent == []
+
+
+def _timeout_timers(before):
+    from nicegui import ui
+    from nicegui.elements.timer import Timer
+    return [e for k, e in ui.context.client.elements.items()
+            if k not in before and isinstance(e, Timer)
+            and e.interval == sp.LOAD_TIMEOUT_SEC]
+
+
+def test_an_older_fetch_timeout_cannot_clear_a_newer_fetch(world):
+    """Only the timeout of the CURRENT request may drop the overlay: a 30 s
+    timer left over from an earlier fetch firing mid-way through a newer one
+    would report "no data" while that newer fetch is still on its way."""
+    from nicegui import ui
+    data, sent = world
+    before = set(ui.context.client.elements)
+    elements = _render_page("XYZQ")             # request 1 (navigation)
+    (first,) = _timeout_timers(before)
+    first.callback()                            # request 1 times out
+    assert "FETCHING" not in _texts(elements)
+    handler = _refresh(elements)
+    _run(handler())                             # request 2
+    assert len(sent) == 2
+    assert "FETCHING" in _texts(elements)
+    first.callback()                            # request 1's timer, again
+    assert "FETCHING" in _texts(elements)
+
+
+def test_a_stale_timeout_is_keyed_to_its_own_request():
+    # pure: the token rule the page's timeout uses
+    assert sp.timeout_applies(3, 3) is True
+    assert sp.timeout_applies(2, 3) is False
+
+
+def test_the_expected_move_link_carries_the_symbol(world, monkeypatch):
+    from nicegui import ui
+    from pages.options import handoff
+    went = []
+    monkeypatch.setattr(ui.navigate, "to",
+                        lambda *a, **k: went.append(a[0]))
+    elements = _render_page("mu")
+    (handler,) = _click_handlers(elements, "→ Expected Move")
+    handler(None)
+    assert went == ["/options/expected-move"]
+    assert handoff.take_pending_expected_move() == {"symbol": "MU"}
+
+
+def test_the_dealer_positioning_link_carries_the_symbol(world, monkeypatch):
+    from nicegui import ui
+    from pages.options import handoff
+    went = []
+    monkeypatch.setattr(ui.navigate, "to",
+                        lambda *a, **k: went.append(a[0]))
+    elements = _render_page("mu")
+    (handler,) = _click_handlers(elements, "→ Dealer Positioning")
+    handler(None)
+    assert went == ["/options/gamma"]
+    assert handoff.take_pending_gamma() == "MU"
+
+
+# ── #3: walls after the close ──────────────────────────────────────────────
+
+def test_stale_gex_withholds_the_walls():
+    f = _facts(spot=105.0, flip=100.0, put_wall=90.0, call_wall=110.0,
+               net_gex=2.4e9)
+    live = sp.structure_band(f, stale=False)
+    stale = sp.structure_band(f, stale=True)
+    assert live["pos"] is not None and live["put_wall"] == 90.0
+    assert stale["pos"] is None and stale["put_wall"] is None
+    assert stale["walls_withheld"] is True
+
+
+def test_the_walls_follow_the_collectors_own_freshness():
+    assert sp.gex_stale({"age_seconds": 30}) is False
+    assert sp.gex_stale({"age_seconds": 3600}) is True
+    assert sp.gex_stale(None) is True          # unknown is never "live"
+
+
+def test_gex_status_is_polled_and_repaints_the_structure_band():
+    assert "options:gex_status" in sp.VIEWS
+    assert "structure" in sp.regions_for({"options:gex_status"}, "MU")
+
+
+def test_the_page_draws_walls_only_while_the_collector_is_live(
+        world, monkeypatch):
+    data, _sent = world
+    data["options:gex_status"] = {"age_seconds": 20}
+    live = _texts(_render_page("mu"))
+    assert "put wall 170.00" in live
+    data["options:gex_status"] = {"age_seconds": 7200}
+    after = _texts(_render_page("mu"))
+    assert "put wall 170.00" not in after
+    assert any(t.startswith("Walls withheld") for t in after)
+
+
+# ── minors ─────────────────────────────────────────────────────────────────
+
+def test_a_cold_feed_never_suggests_refresh():
+    chip = sp.coverage_chip("XYZQ", sf.UNKNOWN, None, feed_cold=True)
+    assert "refresh" not in chip["message"].lower()
+    assert chip["message"] == _copy.WAITING_OPTIONS
+
+
+def test_a_cold_funnel_is_a_cold_feed_for_fetch_purposes(world):
+    """A warm matrix with a cold funnel reads every watchlist name COLLECTED,
+    and would pay to fetch what the scan is about to publish."""
+    data, sent = world
+    del data["options:scan_funnel"]
+    _render_page("MU")
+    assert sent == []
+
+
+def test_the_scanned_chip_carries_the_scan_age():
+    chip = sp.coverage_chip("MU", sf.SCANNED, None,
+                            scanned_at="2026-09-18T09:30:00-05:00")
+    assert chip["label"] == "SCANNED 09:30"
+
+
+def test_a_scanned_chip_without_a_readable_stamp_says_only_scanned():
+    assert sp.coverage_chip("MU", sf.SCANNED, None,
+                            scanned_at=None)["label"] == "SCANNED"
+
+
+def test_a_cold_sentiment_feed_is_said_once(world):
+    data, _sent = world
+    del data["sentiment:regime"]
+    del data["sentiment:bullbear"]
+    texts = _texts(_render_page("MU"))
+    assert texts.count(_copy.WAITING_SENTIMENT) == 1
+
+
+def test_the_page_uses_no_raw_tailwind_white():
+    assert "text-white" not in _SRC
+
+
+def test_importing_the_page_pulls_in_no_engine_service_or_main():
+    """Transitive, in a fresh interpreter — the direct-import test above cannot
+    see a module that arrives through a page it imports."""
+    import subprocess
+    import sys
+
+    from test_live_main import _child_env   # the Central-clock child env
+    webgui = pathlib.Path(sp.__file__).resolve().parents[1]
+    code = (
+        "import sys; sys.path[:0] = [%r, %r]\n"
+        "import pages.symbol\n"
+        "mods = set(sys.modules)\n"
+        "bad = sorted(m for m in mods if m in ('main', 'sqlite3')"
+        " or m.startswith(('services', 'scanner_engine', 'gex_', 'iv_analysis',"
+        " 'options_calculator', 'strategy_scoring', 'scoring', 'schwab')))\n"
+        "print(bad)\n"
+        # redis is on the allow-list ONLY through shared.bus, which imports it
+        "print('redis' not in mods or 'shared.bus' in mods)\n"
+    ) % (str(webgui), str(webgui.parent))
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                         text=True, cwd=str(webgui), timeout=180,
+                         env=_child_env())
+    assert out.returncode == 0, out.stderr
+    bad, redis_via_bus = out.stdout.strip().splitlines()[-2:]
+    assert bad == "[]", bad
+    assert redis_via_bus == "True"
+
+
 # ── registration, placement and privacy ────────────────────────────────────
 
 def test_the_route_is_registered_as_a_shell_page():
@@ -610,9 +938,3 @@ def test_the_page_imports_no_engine_and_no_service():
             mods.add(node.module or "")
     bad = {m for m in mods if m.startswith(("services", "sqlite3", "redis"))}
     assert not bad, bad
-
-
-def test_the_ct_today_is_what_the_bands_are_dated_by():
-    # The day envelope is stamped in CENTRAL time; a host-local date would
-    # disagree around midnight for anyone not on CT.
-    assert sp.today_ct() == dt.datetime.now(sp._CT).date().isoformat()

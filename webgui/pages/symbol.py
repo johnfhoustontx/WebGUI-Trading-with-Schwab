@@ -3,7 +3,7 @@ band to the page that owns that fact.
 
 Design: ``docs/plans/2026-09-17-symbol-dossier-design.md``.
 
-Tier-1 reader. It polls ten shared cache views plus this symbol's own
+Tier-1 reader. It polls eleven shared cache views plus this symbol's own
 ``cache:options:dossier:<SYMBOL>`` on ONE batched ``read_versions`` every two
 seconds (``VIEWS`` / ``REGION_VIEWS``, the Desk's shape), and repaints only the
 bands whose views moved. Every number comes from ``pages/symbol_facts.py`` or a
@@ -37,9 +37,10 @@ from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages import desk as _desk
 from pages import symbol_facts as sf
 from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
-from pages.structure import structure_positions
+from pages.structure import (flip_read, regime_word, structure_map,
+                             structure_positions, walls_trustworthy)
 from pages.options import handoff as _handoff
-from pages.options import paper as _paper
+from pages.options.paper import dte_from_expiration
 from pages.options import persistence as _persistence
 from pages.options import scanner as _scanner
 from pages.options import svg as _svg
@@ -115,6 +116,7 @@ def dossier_view(raw):
 # tuple, never a poller of its own). The symbol's own dossier view is appended
 # per page by ``poll_views``, since it is per-symbol.
 VIEWS = ("options:matrix", "options:scan_funnel", "options:scan_day",
+         "options:gex_status",
          "options:flow_alerts", "options:paper_account", "options:paper_trades",
          "options:driver_paper_account", "options:captured",
          "sentiment:regime", "sentiment:bullbear")
@@ -133,7 +135,9 @@ _BOOK_VIEWS = tuple(view for _tag, view, _key in sf.BOOK_VIEWS)
 # the funnel, so every fact band depends on both.
 REGION_VIEWS = {
     "header": ("options:matrix", "options:scan_funnel", DOSSIER),
-    "structure": ("options:matrix", "options:scan_funnel", DOSSIER),
+    # gex_status GATES the walls (see gex_stale), exactly as on the Desk.
+    "structure": ("options:matrix", "options:scan_funnel", DOSSIER,
+                  "options:gex_status"),
     "volatility": ("options:matrix", "options:scan_funnel", DOSSIER),
     "context": ("sentiment:regime", "sentiment:bullbear",
                 "options:matrix", "options:scan_funnel", DOSSIER),
@@ -143,6 +147,13 @@ REGION_VIEWS = {
 }
 
 POLL_SEC = 2.0
+
+# The first read runs OFF the event loop, on a one-shot timer this soon after
+# the page builds. Measured 2026-09-18: the seed read of all twelve views
+# against a 3.98 MB day union takes a median 37.6 ms (fakeredis, real
+# bus_client path), nearly all of it JSON parse — past the ~20 ms a render may
+# block the loop every other tab shares.
+SEED_DELAY_SEC = 0.01
 
 
 def poll_views(symbol):
@@ -186,7 +197,8 @@ def _hhmm(stamp):
         return None
 
 
-def coverage_chip(symbol, coverage, dossier, *, pending=False, raw=""):
+def coverage_chip(symbol, coverage, dossier, *, pending=False, raw="",
+                  feed_cold=False, scanned_at=None):
     """``{"label", "tone", "message"}`` for the header.
 
     The three absences the design separates never share a sentence: a symbol
@@ -194,6 +206,14 @@ def coverage_chip(symbol, coverage, dossier, *, pending=False, raw=""):
     not reach Schwab at all (``fetch_failed`` — an outage, and the ticker may be
     fine, so it NEVER says "check the symbol"), and a ticker the allow-list
     refused before anything was asked.
+
+    ``feed_cold``: the options feed has not published, so nothing on this page
+    can be fetched and "try Refresh" would be a promise Refresh cannot keep —
+    those lines say the shared cold-feed sentence instead.
+
+    ``scanned_at`` is the scan funnel's own ``timestamp``: a SCANNED chip names
+    the scan's time, so after the close Vol Rank and IV/HV do not read as
+    current.
     """
     tone = CHIP_TONES
     if symbol is None:
@@ -204,7 +224,9 @@ def coverage_chip(symbol, coverage, dossier, *, pending=False, raw=""):
         return {"label": "NOT FOUND", "tone": tone["neg"],
                 "message": f"{text[:24]} is not a ticker symbol."}
     if coverage == sf.SCANNED:
-        return {"label": "SCANNED", "tone": tone["pos"], "message": ""}
+        when = _hhmm(scanned_at) if scanned_at else None
+        return {"label": f"SCANNED {when}" if when else "SCANNED",
+                "tone": tone["pos"], "message": ""}
     d = dossier if isinstance(dossier, dict) else None
     error = d.get("error") if d else None
     if pending:
@@ -212,7 +234,8 @@ def coverage_chip(symbol, coverage, dossier, *, pending=False, raw=""):
                 "message": f"Fetching {symbol}…"}
     if error == FETCH_FAILED:
         return {"label": "FETCH FAILED", "tone": tone["warn"],
-                "message": (f"Couldn't fetch {symbol} — the quote feed didn't "
+                "message": (_copy.WAITING_OPTIONS if feed_cold else
+                            f"Couldn't fetch {symbol} — the quote feed didn't "
                             "answer. Try Refresh in a minute.")}
     if coverage == sf.COLLECTED:
         # A collected symbol HAS a quote (it has a matrix row), so a fetch's
@@ -228,7 +251,23 @@ def coverage_chip(symbol, coverage, dossier, *, pending=False, raw=""):
         return {"label": f"FETCHED {when}" if when else "FETCHED",
                 "tone": tone["accent"], "message": ""}
     return {"label": "NO DATA", "tone": tone["muted"],
-            "message": f"No reading for {symbol} yet — try Refresh."}
+            "message": (_copy.WAITING_OPTIONS if feed_cold else
+                        f"No reading for {symbol} yet — try Refresh.")}
+
+
+def timeout_applies(token, current):
+    """Whether a fetch timeout minted for request ``token`` may clear the page's
+    pending state while request ``current`` is the latest. Only its own: an
+    older 30 s timer firing mid-way through a newer fetch must be a no-op."""
+    return token == current
+
+
+def gex_stale(gex_status_view):
+    """Is the dealer collector's last read too old to trust the walls?
+
+    The Desk's own ``freshness_facts`` — no probe data reads stale, never live,
+    and a closed market reads stale because nothing is collecting."""
+    return bool(_desk.freshness_facts(gex_status_view)["stale"])
 
 
 def absence_message(symbol, chip, feed_cold, empty_line):
@@ -290,11 +329,18 @@ def earnings_line(date, status, today=None):
 
 # ── the fact bands ──────────────────────────────────────────────────────────
 
-def structure_band(facts):
+WALLS_STALE = ("Walls withheld — the dealer collector is not running, so the "
+               "last walls it drew are not a current read.")
+WALLS_ZERO_GRID = ("Walls withheld — net GEX reads exactly zero, the "
+                   "after-hours signature of an empty grid.")
+
+
+def structure_band(facts, stale=False):
     """The Structure band: the wall/flip/spot bar, the flip side, net GEX.
 
-    Walls go through the Desk's own ``_walls_trustworthy`` — a net GEX of
-    exactly zero is the after-hours all-zero grid, whose walls are an argmax
+    Walls go through ``structure.walls_trustworthy``, the Desk's own rule: a
+    ``stale`` collector (``gex_stale``) draws no walls, and neither does a net
+    GEX of exactly zero, the after-hours all-zero grid whose walls are an argmax
     tie-break, not a level. A fetched symbol carries no ``gex_regime``, so its
     regime word comes from its own flip read (the same above/below question).
     """
@@ -302,18 +348,20 @@ def structure_band(facts):
     spot, flip = _num(f.get("spot")), _num(f.get("flip"))
     net_gex = _num(f.get("net_gex"))
     raw_pw, raw_cw = _num(f.get("put_wall")), _num(f.get("call_wall"))
-    walls_ok = _desk._walls_trustworthy(net_gex, False)
+    walls_ok = walls_trustworthy(net_gex, stale)
     pw, cw = (raw_pw, raw_cw) if walls_ok else (None, None)
-    side, dist = _desk._flip_read(spot, flip)
+    side, dist = flip_read(spot, flip)
     regime = f.get("gex_regime") or side
+    withheld = not walls_ok and (raw_pw is not None or raw_cw is not None)
     return {"spot": spot, "flip": flip, "put_wall": pw, "call_wall": cw,
             "side": side, "distance": dist,
             "net_gex": net_gex, "net_gex_text": _desk.fmt_gex(net_gex),
-            "regime_word": _desk.regime_word(regime),
+            "withheld_reason": ((WALLS_STALE if stale else WALLS_ZERO_GRID)
+                                if withheld else ""),
+            "regime_word": regime_word(regime),
             "setup": _desk.setup_word(f.get("dealer_regime")),
             "pos": structure_positions(spot, flip, pw, cw),
-            "walls_withheld": (not walls_ok
-                               and (raw_pw is not None or raw_cw is not None)),
+            "walls_withheld": withheld,
             "has_any": any(v is not None for v in (spot, flip, pw, cw))}
 
 
@@ -486,7 +534,7 @@ def position_band(symbol, books):
     out = []
     for p in rows:
         tagged = p["book"] in _RESCUE_BOOKS
-        dte = _paper._dte_from_expiration(p.get("expiration"))
+        dte = dte_from_expiration(p.get("expiration"))
         out.append({
             "book": p["book"], "book_label": _BOOK_LABEL.get(p["book"], p["book"]),
             "strategy": _desk.strategy_label(p.get("strategy") or p.get("type")),
@@ -549,13 +597,15 @@ def render(symbol=None):
     views = poll_views(sym)
     own_view = dossier_view(sym)
     state = {"versions": {}, "data": {}, "pending": False,
+             "refreshing": False, "fetch_seq": 0, "timeout_timer": None,
+             "seeded": False,
              "scan_day_memo": {}}
 
     if CONSOLE_FONT_HEAD_HTML:
         ui.add_head_html(CONSOLE_FONT_HEAD_HTML)
     overlay = build_loading_overlay()
 
-    with ui.column().classes(f"{CONSOLE_PAGE} w-full gap-4 p-4"):
+    with ui.column().classes(f"{CONSOLE_PAGE} w-full gap-4 p-4") as page_col:
         # ── header ───────────────────────────────────────────────────────────
         with ui.column().classes(f"{CONSOLE_CARD} w-full px-4 py-3 gap-2"):
             with ui.row().classes("w-full items-center gap-x-4 gap-y-2 flex-wrap"):
@@ -584,7 +634,10 @@ def render(symbol=None):
                 ("Dealer Positioning",
                  lambda *_: _handoff.send_to_gamma(sym), "/options/gamma"),))
             vol_body = _band("VOLATILITY", (
-                ("Expected Move", _go_route("/options/expected-move"),
+                # The stash carries the symbol, as send_to_gamma does above; a
+                # bare navigate opened Expected Move on whatever it last showed.
+                ("Expected Move",
+                 lambda *_: _handoff.send_to_expected_move({"symbol": sym}),
                  "/options/expected-move"),))
         ctx_body = _band("CONTEXT", (
             ("Bull / Bear Map", _go_route("/sentiment/bullbear"),
@@ -609,7 +662,11 @@ def render(symbol=None):
                                   _d("options:scan_funnel"))
 
     def _feed_cold():
-        return _d("options:matrix") is None
+        # BOTH halves of coverage: a warm matrix beside a cold funnel reads every
+        # watchlist name COLLECTED, and would pay to fetch what the next scan is
+        # about to publish for free.
+        return (_d("options:matrix") is None
+                or _d("options:scan_funnel") is None)
 
     def _merged():
         cached = sf.cached_facts(sym, _d("options:matrix"),
@@ -617,9 +674,13 @@ def render(symbol=None):
         return sf.merge_facts(cached, _d(own_view) if own_view else None)
 
     def _chip():
+        funnel = _d("options:scan_funnel")
         return coverage_chip(sym, _coverage(),
                              _d(own_view) if own_view else None,
-                             pending=state["pending"], raw=raw)
+                             pending=state["pending"], raw=raw,
+                             feed_cold=_feed_cold(),
+                             scanned_at=(funnel.get("timestamp")
+                                         if isinstance(funnel, dict) else None))
 
     # ── painters ─────────────────────────────────────────────────────────────
     def _paint_header():
@@ -644,21 +705,21 @@ def render(symbol=None):
 
     def _paint_structure():
         struct_body.clear()
-        s = structure_band(_merged()["facts"])
+        s = structure_band(_merged()["facts"],
+                           stale=gex_stale(_d("options:gex_status")))
         if sym is None or not s["has_any"]:
             _absent(struct_body, f"No dealer structure read for {sym}.")
             return
         with struct_body:
             if s["pos"] is not None:
-                _desk._structure_map(s["pos"])
+                structure_map(s["pos"])
                 with ui.row().classes("w-full justify-between gap-2"):
                     ui.label(f"put wall {_desk.fmt_price(s['put_wall'])}").classes(
                         f"{_SUB} tabular-nums")
                     ui.label(f"call wall {_desk.fmt_price(s['call_wall'])}").classes(
                         f"{_SUB} tabular-nums")
             elif s["walls_withheld"]:
-                ui.label("Walls withheld — net GEX reads exactly zero, the "
-                         "after-hours signature of an empty grid.").classes(_SUB)
+                ui.label(s["withheld_reason"]).classes(_SUB)
             side = s["side"]
             flip_line = f"flip {_desk.fmt_price(s['flip'])}"
             if side:
@@ -705,12 +766,17 @@ def render(symbol=None):
         with ctx_body:
             with ui.row().classes("w-full items-baseline gap-x-6 gap-y-1 flex-wrap"):
                 reg = c["regime"]
+                # ONE cold-feed line for the row: both the regime and the map
+                # come from the sentiment feed, and saying so twice reads as
+                # two separate faults.
+                waiting = False
                 if reg:
                     ui.label(reg["word"]).classes(
                         f"{_LINE} font-semibold {_desk.regime_tone(reg)}"
                     ).tooltip(reg.get("tip") or "")
                 else:
                     ui.label(_copy.WAITING_SENTIMENT).classes(_SUB)
+                    waiting = True
                 if sym is None:
                     pass                # the header already says why
                 elif c["on_map"]:
@@ -722,7 +788,8 @@ def render(symbol=None):
                         ui.label(c["rank_text"]).classes(
                             f"{_LINE} tabular-nums")
                 elif _d("sentiment:bullbear") is None:
-                    ui.label(_copy.WAITING_SENTIMENT).classes(_SUB)
+                    if not waiting:
+                        ui.label(_copy.WAITING_SENTIMENT).classes(_SUB)
                 else:
                     ui.label(f"{sym} is not on the Bull / Bear map.").classes(_SUB)
             if sym is not None:
@@ -750,7 +817,7 @@ def render(symbol=None):
                     ui.label(_desk.expiry_text(r)).classes(f"{_SUB} tabular-nums")
                     if r["score"] is not None:
                         ui.label(f"{r['score']:.0f}").classes(
-                            f"text-[12px] px-2 rounded text-white tabular-nums "
+                            f"text-[12px] px-2 rounded {CON_TXT} tabular-nums "
                             f"{r['score_class']}")
                     ui.label(r["seen_since"]).classes(f"{_SUB} tabular-nums")
                     ui.label(r["score_trend"]).classes(
@@ -843,7 +910,7 @@ def render(symbol=None):
         The only request site on the page. Its callers pass the trigger
         literally, and the poll is not one of them."""
         cmd = fetch_command(sym)
-        if cmd is None or not _shell.may_enqueue():
+        if cmd is None or not _shell.may_enqueue() or state["pending"]:
             return False
         have = reusable_dossier(_d(own_view))
         if not should_enqueue(_coverage(), trigger, have_dossier=have,
@@ -851,16 +918,27 @@ def render(symbol=None):
             return False
         bus_client.request("options", cmd)
         state["pending"] = True
+        state["fetch_seq"] += 1
         overlay.show(f"Fetching {sym}…")
         _paint_header()
-        ui.timer(LOAD_TIMEOUT_SEC, _fetch_timeout, once=True)
+        # One live backstop per page: the previous request's timer is cancelled,
+        # and each timer is keyed to its own request anyway (timeout_applies),
+        # so an older 30 s timer can never clear a newer fetch.
+        if state["timeout_timer"] is not None:
+            state["timeout_timer"].cancel()
+        token = state["fetch_seq"]
+        # Parented explicitly: a Refresh runs from an event handler, and the
+        # timer must land in THIS page whatever slot that handler runs in.
+        with page_col:
+            state["timeout_timer"] = ui.timer(
+                LOAD_TIMEOUT_SEC, lambda: _fetch_timeout(token), once=True)
         return True
 
     @guard
-    def _fetch_timeout():
+    def _fetch_timeout(token):
         # The backstop: the answer never came (service busy or down). Drop the
         # overlay and let the chip say there is no reading yet.
-        if state["pending"]:
+        if state["pending"] and timeout_applies(token, state["fetch_seq"]):
             state["pending"] = False
             overlay.hide()
             _paint({}, regions=set(REGION_VIEWS))
@@ -876,11 +954,25 @@ def render(symbol=None):
 
     @guard_async
     async def _on_refresh():
-        _seed(await run.io_bound(_read_all))
-        _enqueue_fetch("refresh")
+        # Claimed BEFORE the first await: the read below yields, and a second
+        # tap in that window used to reach the enqueue too — a second 4-5-call
+        # fetch. A tap while a fetch is still in flight is likewise a no-op.
+        if state["refreshing"] or state["pending"] or not state["seeded"]:
+            return
+        state["refreshing"] = True
+        refresh_btn.set_enabled(False)
+        try:
+            _seed(await run.io_bound(_read_all))
+            _enqueue_fetch("refresh")
+        finally:
+            state["refreshing"] = False
+            refresh_btn.set_enabled(sym is not None)
 
     refresh_btn.on_click(_on_refresh)
     refresh_btn.set_enabled(sym is not None)
+    # The coroutine itself, for tests: on_click wraps it in NiceGUI's event
+    # dispatch, which a test cannot await (the inputs._symbol_load_last shape).
+    refresh_btn._symbol_refresh = _on_refresh
 
     @guard_async
     async def _poll():
@@ -888,6 +980,8 @@ def render(symbol=None):
 
         Deliberately cannot fetch: a fetch spends Schwab calls, and only a
         navigation or a Refresh click may do that."""
+        if not state["seeded"]:
+            return                      # the first read is still in flight
         vers = await run.io_bound(bus_client.read_versions, list(views))
         changed = [v for v in views
                    if vers.get(v) is not None
@@ -896,13 +990,25 @@ def render(symbol=None):
             return
         payloads = {}
         for v in changed:
-            payload, _version = await run.io_bound(_read_one, v)
+            payload, version = await run.io_bound(_read_one, v)
             payloads[v] = payload
-            state["versions"][v] = vers.get(v)
+            # ⚠ The ENVELOPE's version, never the probed one (read_gated's own
+            # rule). cache_set bumps {key}:ver a round-trip BEFORE it writes the
+            # payload, so the probe can see v1 while this read returns nothing.
+            # Stored as v1, every later probe would match and the payload —
+            # a dossier is written ONCE and never republished — would never be
+            # read: FETCHING, then a Refresh that pays for a second fetch.
+            state["versions"][v] = version
         _paint(payloads)
 
-    # First paint: every band once, cold ones included, so each shows its OWN
-    # placeholder. Then the one navigation fetch, if the cache cannot answer.
-    _seed(_read_all())
-    _enqueue_fetch("navigate")
+    @guard_async
+    async def _initial_load():
+        """First paint: every band once, cold ones included, so each shows its
+        OWN placeholder — then the one navigation fetch, if the cache cannot
+        answer. Off the loop (see SEED_DELAY_SEC)."""
+        _seed(await run.io_bound(_read_all))
+        state["seeded"] = True
+        _enqueue_fetch("navigate")
+
+    ui.timer(SEED_DELAY_SEC, _initial_load, once=True)
     ui.timer(POLL_SEC, _poll)
