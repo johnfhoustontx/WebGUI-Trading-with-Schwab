@@ -2825,6 +2825,68 @@ class TestScanFunnel:
         # Vacuity: the two symbols really do read differently.
         assert res["funnel"]["SPY"]["iv_rank"] != res["funnel"]["QQQ"]["iv_rank"]
 
+    def test_every_account_carries_both_iv_vs_hv_keys(self, fake_client, monkeypatch):
+        """A missing key and a null read differently to a page, so the two legs
+        of the IV-vs-HV ratio are present on EVERY account — as None on a symbol
+        that stopped before IV analysis ran."""
+        import tests.test_scanner_engine as _self
+
+        monkeypatch.setitem(_self._FAKE_SYMBOLS, "NOPE", (0.0, 1))
+        res = scanner_engine.run_full_scan(
+            fake_client, symbols=_FUNNEL_SYMBOLS + ["NOPE"])
+        for sym, entry in res["funnel"].items():
+            assert "hv_current" in entry, sym
+            assert "current_iv" in entry, sym
+        nope = res["funnel"]["NOPE"]
+        assert nope["stop"] == "no_quote"
+        assert nope["hv_current"] is None
+        assert nope["current_iv"] is None
+
+    def test_a_failed_iv_analysis_reads_none_not_a_crash(self, fake_client,
+                                                         monkeypatch):
+        """The engine's fallback ``_empty_iv_data`` carries no ``hv_current`` key,
+        so the funnel must read it with ``.get`` — a subscript would raise and
+        take the whole scan down with one symbol's IV fetch."""
+        import iv_analysis
+
+        real = iv_analysis.run_iv_analysis
+
+        def _fails_for_spy(client, symbol, **kw):
+            if symbol == "SPY":
+                raise RuntimeError("boom")
+            return real(client, symbol, **kw)
+
+        monkeypatch.setattr(iv_analysis, "run_iv_analysis", _fails_for_spy)
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        assert res["funnel"]["SPY"]["hv_current"] is None
+        assert res["funnel"]["SPY"]["current_iv"] is None
+        # Vacuity: the untouched symbol in the same scan still measured both.
+        assert res["funnel"]["QQQ"]["hv_current"] is not None
+        assert res["funnel"]["QQQ"]["current_iv"] is not None
+
+    def test_the_funnel_carries_the_symbols_own_iv_and_hv(self, fake_client):
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for sym, entry in res["funnel"].items():
+            iv = res["iv_data"][sym]
+            # Vacuity first: an equality between two Nones asserts nothing.
+            assert iv["hv_current"] is not None, sym
+            assert iv["current_iv"] is not None, sym
+            assert entry["hv_current"] == pytest.approx(iv["hv_current"]), sym
+            assert entry["current_iv"] == pytest.approx(iv["current_iv"]), sym
+        # The two legs are different numbers here, so a swap cannot pass.
+        for sym, entry in res["funnel"].items():
+            assert entry["hv_current"] != pytest.approx(entry["current_iv"]), sym
+
+    def test_at_least_one_symbol_has_a_real_hv_reading(self, fake_client):
+        """Non-vacuity guard for the pair above: the fake run really produces a
+        finite, positive realized vol on the funnel."""
+        import math
+
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        readings = [e["hv_current"] for e in res["funnel"].values()]
+        assert any(isinstance(v, (int, float)) and math.isfinite(v) and v > 0
+                   for v in readings), readings
+
     def test_emitted_equals_that_symbols_count_in_the_final_lists(self, fake_client):
         """The terminal number the page renders. If this ever stops matching, the
         funnel is telling the user a story about a different scan."""

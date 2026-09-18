@@ -1747,6 +1747,9 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
 
         {"price": float|None,          # the quote; None = Schwab did not quote it
          "iv_rank": float|None,        # what this scan's IV analysis measured
+         "hv_current": float|None,     # 30-day realized vol, a PERCENT; None =
+                                       #   IV analysis did not run / measure it
+         "current_iv": float|None,     # ATM implied vol, a PERCENT; None likewise
          "earnings_date": str|None,    # the date the earnings gate read
          "stop": None|"no_quote"|"no_data",
          "buckets": {"0DTE": …, "SWING": …, "DIRECTIONAL": …}}
@@ -1976,6 +1979,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
             funnel[_sym] = {
                 "price": prices.get(_sym) or None,
                 "iv_rank": None,
+                "hv_current": None,
+                "current_iv": None,
                 "earnings_date": earnings_by_symbol.get(_sym),
                 "stop": None,
                 "buckets": {
@@ -2033,6 +2038,13 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
         results["iv_data"][symbol] = iv_data
         if funnel.get(symbol) is not None:
             funnel[symbol]["iv_rank"] = iv_data.get("iv_rank")
+            # The two legs of the IV-vs-HV ratio. iv_rank is a VRP proxy (current ATM IV
+            # inside the 52-week REALIZED-vol distribution), so it cannot answer "is IV
+            # high against realized" on its own. The ScanResult projection drops iv_data,
+            # so the funnel is the only per-symbol route to Redis for these. Both are
+            # PERCENTS (see compute.scan_vol_inputs for the decimal trap).
+            funnel[symbol]["hv_current"] = iv_data.get("hv_current")
+            funnel[symbol]["current_iv"] = iv_data.get("current_iv")
         # Daily volatility snapshot (gap assessment C3) - off the IV-window chain
         # and price history this loop already has, so no Schwab call. Never raises.
         _record_iv_snapshot(symbol, data.get("chain_iv"), data.get("hist"),
