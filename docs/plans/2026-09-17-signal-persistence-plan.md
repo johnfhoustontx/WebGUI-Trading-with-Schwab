@@ -445,7 +445,31 @@ A merge whose `prev` was usable can always stamp honestly. A merge with **no**
 usable `prev` is ambiguous: it is either the genuine first scan of the day (stamp
 is correct) or a flushed/wrong-dated envelope mid-session (stamp would lie). The
 discriminator is the clock — `[windows.scan].start` via
-`shared.market_calendar.window_bounds("scan")`.
+`shared.market_calendar.window_bounds("scan")`, which returns a **naive
+`(time, time)` pair** (`market_calendar.py:628` → `_parse_time`, which strips
+tz), so `_dt.datetime.combine(now.date(), start)` is the right shape.
+
+### ⚠ Step 0 — `now_iso` must be CT, or this feature silently never works
+
+`window_bounds("scan")` is **08:00 CT**. But the production caller supplies no
+`now_iso` at all — `handlers.py:654` calls
+`merge_day_signals(prev.payload, scan.model_dump(), today)`, and the function
+defaults `now_iso = _dt.datetime.now().isoformat(...)`, a **naive host-local wall
+clock**. `merge_day_signals`' own docstring already records that local ≠ CT on
+this stack (*"rescan would otherwise carry three date bases"*), which is exactly
+why `today` is passed as `_today_ct()`.
+
+So on a host that is not on America/Chicago, `0 <= elapsed < 15` can never be
+true at the real 08:00 CT scan, `_trustworthy_baseline` returns `False` on every
+cold start, and **`first_seen` is never stamped — the Seen since column renders
+`—` for every row, forever.** Every unit test in this task passes `now_iso`
+explicitly, so none of them can see it.
+
+Fix it in this task, before `_trustworthy_baseline` is written: default `now_iso`
+in `merge_day_signals` to **CT** using the `_PROJ_CT_TZ` already defined at
+`compute.py:34`, and add a test that a merge given no `now_iso` stamps a CT
+timestamp. Do not instead make `rescan` pass one — the default is the thing that
+is wrong, and a second caller would reintroduce it.
 
 **Step 1: Write the failing tests**
 
@@ -508,10 +532,19 @@ def _trustworthy_baseline(prev_usable, now_iso):
         return False
 ```
 
-⚠ Check `window_bounds`' actual return shape first —
-`grep -n "def window_bounds" -A 12 shared/market_calendar.py`. If it returns
-`datetime`s or a dict rather than a `(time, time)` pair, adapt the two lines that
-build `opened`; do not adapt the test.
+⚠ The `except` here is NOT the repo's banned degrade-to-a-plausible-default: an
+unreadable window means "we cannot claim an age", and `False` renders a dash. It
+never invents one.
+
+⚠ `market_calendar.load_config` already degrades to built-in defaults rather than
+raising, and `_window("scan")` is a known name, so **there is no reachable path
+that throws here**. `test_baseline_degrades_to_untrustworthy_when_the_window_is_unreadable`
+is therefore a synthetic case that only passes because it monkeypatches
+`window_bounds`. Keep it — it pins the intended direction of the degrade — but do
+not describe it as exercising a real failure mode.
+
+⚠ The monkeypatch works only because the implementation imports
+`market_calendar` **inside** the function on every call. Keep that import local.
 
 **Step 4: Run to verify they pass**
 
@@ -567,9 +600,10 @@ def _cap_setups(setups, referenced, max_entries=None):
     """Trim the persistence map, evicting UNREFERENCED entries oldest-first.
 
     ⚠ Runs AFTER ``_cap_day_list``, and never evicts a key a surviving row still
-    points at. The row cap evicts oldest-stale-first, so the naive order would
-    delete the setup entry of a row that is still on screen — the row would render
-    with a blank age for the rest of the day.
+    points at. The row cap evicts oldest-stale-first — it never evicts a LIVE row
+    at all — so the naive order would delete the setup entry of a STALE row that
+    is still on screen, and that row would render with a blank age for the rest
+    of the day. Reviewing a dropped signal is the point of the day union.
 
     Returns ``(kept, n_dropped)``.
     """
@@ -744,10 +778,23 @@ merged list just before the cap:
 ```
 
 ⚠ The existing loop variable is named `key` and now collides with the setup key.
-**Rename the loop variable to `key_list`** at its `for key in _DAY_LISTS:` header
-and at its three other uses (`current.get(key)`, `prev.get(key)`,
-`_cap_day_list(merged, key, ...)`, `out[key]`, `truncated[key]`). Do this rename
-first, as its own edit, and run the existing suite before adding anything.
+**Rename it to `key_list`.** Verified against the landed code — it is **five
+lines, six occurrences** (`_cap_day_list(merged, key, ...)` uses it twice on one
+line):
+
+| line | use |
+|---|---|
+| `for key in _DAY_LISTS:` | the header |
+| `cur_list = current.get(key) if isinstance(current, dict) else None` | |
+| `prev_list = prev.get(key)` | |
+| `out[key], dropped = _cap_day_list(merged, key, max_per_list)` | **two** |
+| `truncated[key] = dropped` | |
+
+Do this rename first, as its own commit, and run the suite before adding anything.
+
+⚠ Line numbers drift: Tasks 1 and 2 landed ~160 lines into this file, so
+`merge_day_signals` is now at **~285–367**, not the 138–218 this plan was written
+against. Anchor on names, not numbers.
 
 After the cap, record what survived:
 
@@ -772,12 +819,19 @@ After the cap, record what survived:
     out["setups"] = setups
 ```
 
-⚠ `compute.py` may not already import `_degrade`. Check
-`grep -n "_degrade" services/options_svc/compute.py`; if absent, either add
-`from . import _degrade` alongside the module's existing sibling imports or use
-`log.exception("day setups merge failed (non-fatal)")`. Do not leave it silent —
-`services/tests/test_no_silent_degrades.py` requires a guarded body of ≥15 lines
-to speak, and this one is on the borderline.
+⚠ **`compute.py` already imports it** — `from services import _degrade` at
+`compute.py:52`, used at 21 sites. Just call it. The earlier hedge in this plan
+suggested `from . import _degrade`, which would be **wrong**: the module lives at
+`services/_degrade.py`, not inside `services/options_svc/`.
+
+⚠ And the earlier claim that `test_no_silent_degrades` makes this "borderline"
+was wrong too — that guard's `MIN_BODY` is 15 **`try`-body lines** and this body
+is 3, so the rule does not bind at all. Speak anyway, for observability; just not
+because a test demands it.
+
+⚠ **`seq`'s own `int(...)` sits OUTSIDE this try**, up in edit (a). A corrupt
+`scan_seq` string in the envelope would take down the whole day union rather than
+just the map. Guard it there.
 
 (d) Update the docstring: add `setups` and `scan_seq` to the described envelope,
 and state that `setup_key` is stamped on every row.
@@ -930,7 +984,7 @@ from these, so the two cannot describe the same setup differently.
 The map is built Tier-2-side by ``options_svc.compute.merge_setups``; this module
 never derives a ``setup_key`` (rows carry one), so there is no cross-tier mirror.
 """
-from .. import fmt as _fmt
+from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
 
 # One hour at the 15-minute autoscan cadence. Under this, no direction is named.
 TREND_WINDOW = 4
@@ -942,6 +996,23 @@ TREND_DEADBAND = 2.0
 DASH = "—"
 
 
+def _usable(scores):
+    """The series as real floats, dropping anything ``num`` rejects.
+
+    ⚠ It returns the COERCED value, not the original. Filtering with ``num`` and
+    then keeping the raw entry is the trap: ``num("60.0")`` is 60.0, so a string
+    survives the filter and then raises ``TypeError`` on the subtraction below —
+    a parsing guard mistaken for a value guard, the same shape as the ``_num``
+    family in ``scoring/``.
+    """
+    out = []
+    for value in scores or []:
+        number = _fmt.num(value)
+        if number is not None:
+            out.append(number)
+    return out
+
+
 def score_trend(scores, window=TREND_WINDOW, deadband=TREND_DEADBAND):
     """``"new" | "rising" | "steady" | "fading"`` for a setup's score series.
 
@@ -949,7 +1020,7 @@ def score_trend(scores, window=TREND_WINDOW, deadband=TREND_DEADBAND):
     comparison reads from the END of the series, so a setup that collapsed this
     morning and has climbed for an hour reads as rising rather than fading.
     """
-    values = [v for v in (scores or []) if _fmt.num(v) is not None]
+    values = _usable(scores)
     if len(values) < window:
         return "new"
     delta = values[-1] - values[-window]
@@ -960,7 +1031,7 @@ def score_trend(scores, window=TREND_WINDOW, deadband=TREND_DEADBAND):
 
 def score_delta(scores, window=TREND_WINDOW):
     """The signed move over the trend window, or ``None`` when undefined."""
-    values = [v for v in (scores or []) if _fmt.num(v) is not None]
+    values = _usable(scores)
     if len(values) < window:
         return None
     return values[-1] - values[-window]
@@ -981,7 +1052,11 @@ def persistence_facts(setup):
         return {"since": DASH, "trend": "new", "trend_text": DASH,
                 "gaps": 0, "detail": ""}
 
-    seen = int(_fmt.float_or(setup.get("seen"), 0))
+    # ⚠ num, NOT float_or: float_or is PERMISSIVE by design and passes NaN
+    # through, and int(float("nan")) raises ValueError — which would propagate
+    # out of here into the row stamper. fmt.py's own rule: when the question is
+    # "is this a real reading", use num.
+    seen = int(_fmt.num(setup.get("seen")) or 0)
     first = setup.get("first_seen")
     if setup.get("age_unknown") or not first:
         since = DASH
@@ -995,7 +1070,7 @@ def persistence_facts(setup):
     else:
         trend_text = f"{_MARKS[trend]} {delta:+.1f}"
 
-    gaps = int(_fmt.float_or(setup.get("gaps"), 0))
+    gaps = int(_fmt.num(setup.get("gaps")) or 0)
     detail = ""
     if since != DASH:
         detail = f"Live since {str(first)[11:16]}"
@@ -1005,9 +1080,16 @@ def persistence_facts(setup):
             "gaps": gaps, "detail": detail}
 ```
 
-⚠ Confirm `webgui/pages/fmt.py` exports `num` and `float_or` with these
-semantics (`num` is strict and rejects NaN **and** bool; `float_or` coerces with a
-fallback). It does as of this writing — do not re-implement either.
+⚠ `fmt.num` rejects `None`, `bool` (ahead of coercion), non-coercible, NaN **and
+±inf** — verified. `fmt.float_or(v, default=None)` takes its fallback
+positionally but is **PERMISSIVE**: its own docstring says a NaN or a bool passes
+straight through. Use `num` everywhere here; `float_or` is the wrong tool for
+every value on this screen, because each one feeds a comparison or a format.
+
+⚠ Import spelling: `from pages import fmt as _fmt` is the house form for the
+`_fmt` alias in this package (`finder_view.py`, `income.py`, `shares.py`,
+`strategy_table.py` all use it with that exact trailing comment). The relative
+`from ..fmt import num` also exists but is used for direct-name imports.
 
 **Step 4: Run to verify they pass**
 
@@ -1024,7 +1106,17 @@ git commit -m "feat(webgui): pure signal age + score-trend vocabulary"
 
 **Files:**
 - Modify: `webgui/pages/options/scanner.py` (new function beside `stamp_stale`, ~line 421)
-- Test: `webgui/tests/test_scanner.py` (append; confirm the filename with `ls webgui/tests | grep scanner`)
+- Test: `webgui/tests/test_options_scanner.py` (append)
+
+⚠ That **is** the scanner page's suite — it imports `from pages.options import
+scanner` and already holds six `test_stamp_stale_*` cases. There is no
+`test_scanner.py`; an earlier draft of this plan named one, which would have
+silently created a new file. `test_scanner_checks.py` is a different module.
+
+⚠ `stamp_stale` spans lines **421–458**; insert after 458, before the two blank
+lines preceding `repaint_action`. Also update the module docstring's list of
+unit-tested transforms at **line 25**, which names `stamp_stale` and would
+otherwise go stale.
 
 **Step 1: Write the failing tests**
 
@@ -1097,7 +1189,7 @@ Add `from . import persistence as _persistence` to the module's imports.
 **Step 5: Commit**
 
 ```bash
-git add webgui/pages/options/scanner.py webgui/tests/test_scanner.py
+git add webgui/pages/options/scanner.py webgui/tests/test_options_scanner.py
 git commit -m "feat(webgui): stamp signal age and score trend onto scanner rows"
 ```
 
@@ -1107,7 +1199,7 @@ git commit -m "feat(webgui): stamp signal age and score trend onto scanner rows"
 
 **Files:**
 - Modify: `webgui/pages/options/scanner.py` — `signal_columns` (~line 134) and `directional_columns` (~line 174)
-- Test: `webgui/tests/test_scanner.py`
+- Test: `webgui/tests/test_options_scanner.py`
 
 **Step 1: Write the failing tests**
 
@@ -1115,10 +1207,12 @@ git commit -m "feat(webgui): stamp signal age and score trend onto scanner rows"
 def test_both_signal_tabs_carry_the_persistence_columns():
     for cols in (scanner.signal_columns(), scanner.directional_columns()):
         names = [c["name"] for c in cols]
-        assert "seen_since" in names and "score_trend" in names
-        # Beside the drop marker, so the lifecycle reads as one cluster, and
-        # before the actions column.
-        assert names.index("seen_since") < names.index("stale_since")
+        # ADJACENCY, not just ordering. The weaker "seen_since before
+        # stale_since" version of this test passes while the Checks column sits
+        # wedged between them, which is what signal_columns' positional
+        # `cols.insert(len(cols) - 1, ...)` actually does.
+        i = names.index("seen_since")
+        assert names[i:i + 3] == ["seen_since", "score_trend", "stale_since"]
         assert names.index("stale_since") < names.index("actions")
 
 
@@ -1152,6 +1246,23 @@ In `signal_columns`, insert into `spec` immediately before `_DROPPED_COL`:
         _DROPPED_COL,
 ```
 
+⚠ **That alone does not give the cluster.** The next line is
+`cols.insert(len(cols) - 1, _checks_col())` — a POSITIONAL insert off the tail,
+which lands the Checks column between `score_trend` and `stale_since`. Replace it
+with a name lookup so the three lifecycle columns really are adjacent and the
+insert stops depending on how many columns follow it:
+
+```python
+    cols = [_col(field, label) for field, label in spec]
+    # The go / no-go checklist's one-chip verdict, after Grade and BEFORE the
+    # lifecycle trio (Seen since / Score trend / Dropped at), which must stay
+    # adjacent. By name, not by offset: the old `len(cols) - 1` silently moved
+    # whenever a column was appended.
+    cols.insert(next(i for i, c in enumerate(cols) if c["name"] == "seen_since"),
+                _checks_col())
+    return cols + [_actions_col()]
+```
+
 In `directional_columns`, change the tail to:
 
 ```python
@@ -1165,7 +1276,7 @@ In `directional_columns`, change the tail to:
 **Step 5: Commit**
 
 ```bash
-git add webgui/pages/options/scanner.py webgui/tests/test_scanner.py
+git add webgui/pages/options/scanner.py webgui/tests/test_options_scanner.py
 git commit -m "feat(webgui): Seen since and Score trend columns on the Scanner"
 ```
 
@@ -1176,37 +1287,65 @@ git commit -m "feat(webgui): Seen since and Score trend columns on the Scanner"
 **Files:**
 - Modify: `webgui/pages/options/scanner.py` — the row-building path that already calls `stamp_stale`
 
-**Step 1: Locate the call sites**
+**Step 1: The call site — there is exactly ONE**
 
-```bash
-grep -n "stamp_stale" webgui/pages/options/scanner.py
-```
+`scanner.py:613`, inside the pure, off-loop `_build_populate`. The other four
+`stamp_stale` mentions in the file are comments, not calls. The real call is
+`stamp_stale(rows[key], sigs[key])`, **not** the `stamp_stale(rows, signals)` an
+earlier draft of this plan wrote.
 
 **Step 2: Add the sibling call**
 
-At every `stamp_stale(rows, signals)` site, add immediately after:
+In that loop, immediately after `stamp_stale(rows[key], sigs[key])`:
 
 ```python
-        stamp_persistence(rows, signals, (day_env or {}).get("setups"))
+        stamp_persistence(rows[key], sigs[key], day_env.get("setups"))
 ```
 
-⚠ The envelope must be the **day** envelope, and the existing code already gates it
-through `day_signals`/`day_is_today`. Read `setups` from the same envelope variable
-those calls use — never from `cache:options:scan`, which has no map.
+`day_env` is a `_build_populate` parameter already normalised to `{}` on line
+603, so no `or {}` is needed. ⚠ It must be the **day** envelope — never
+`cache:options:scan`, which has no map. ⚠ And mind the existing ORDER IS
+LOAD-BEARING comment above the call: `stamp_stale` settles `_allow_paper`, which
+`stamp_checks` reads. `stamp_persistence` writes only its own three fields, so it
+is order-independent — put it after `stamp_stale` anyway, so the block reads
+lifecycle-then-verdict.
 
 **Step 3: Add a colour class for the trend cell**
 
-The trend mark is a data-driven colour, so it maps from a **finite** state to a
-static class (never a runtime `text-[#hex]`):
+A data-driven colour maps from a **finite** state to a fixed class. ⚠ Use the
+theme's semantic tokens, **not** named-palette classes: an earlier draft of this
+plan specified `text-emerald-400` / `text-rose-400`, which appear nowhere in
+`scanner.py` or `theme.py` and would make this the one cell in the app that
+ignores the configurable `config/theme.toml` palette.
 
 ```python
-_TREND_CLASSES = {"rising": "text-emerald-400", "fading": "text-rose-400",
-                  "steady": "text-slate-400", "new": "text-slate-500"}
+_TREND_CLASSES = {"rising": TXT_POS, "fading": TXT_NEG,
+                  "steady": TXT_NEUTRAL, "new": MUTED}
 ```
 
-Apply it the way the existing `_score_class` is applied — find it with
-`grep -n "_score_class" webgui/pages/options/scanner.py` and mirror that wiring
-exactly.
+`MUTED` is already imported at `scanner.py:52`; add `TXT_POS`, `TXT_NEG` and
+`TXT_NEUTRAL` to that same `from .theme import ...` line (it currently pulls
+`TXT_WARN` only). The precedent to mirror is `strategy_table._bias_class`, whose
+module docstring states the rule.
+
+**Step 4: Wire it into the table**
+
+`_score_class` shows the full mechanism: stamp the class on the row dict, then
+bind it in a Quasar **body-cell slot**. The closer precedent for a plain text
+cell (no badge) is `scanner.py:910`:
+
+```python
+    table_dir.add_slot('body-cell-bias', r'''
+      <q-td :props="props">
+        <span :class="props.row._bias_class">{{ props.value || '—' }}</span>
+      </q-td>
+    ''')
+```
+
+So: `stamp_persistence` already writes `_trend_state`; map it to `_trend_class`
+there, define a `_TREND_SLOT` in that shape, and `add_slot('body-cell-score_trend',
+_TREND_SLOT)` on **all three** tables (`table_0dte`, `table_swing` at `:897`, and
+`table_dir` at `:908`).
 
 **Step 4: Run the full webgui suite**
 
