@@ -25,6 +25,7 @@ Private only: it enqueues commands, which the public process refuses, so it is
 NOT in ``live_screens.SCREENS``.
 """
 import datetime as _dt
+import logging
 from urllib.parse import quote as _quote
 from zoneinfo import ZoneInfo
 
@@ -53,6 +54,8 @@ from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
                                  CONSOLE_RULE)
 from pages.ui_guard import guard, guard_async
 from shared.symbols import clean_symbol
+
+log = logging.getLogger(__name__)
 
 ROUTE = "/symbol"
 _CT = ZoneInfo("America/Chicago")
@@ -135,7 +138,7 @@ _BOOK_VIEWS = tuple(view for _tag, view, _key in sf.BOOK_VIEWS)
 # the funnel, so every fact band depends on both.
 REGION_VIEWS = {
     "header": ("options:matrix", "options:scan_funnel", DOSSIER),
-    # gex_status GATES the walls (see gex_stale), exactly as on the Desk.
+    # gex_status GATES the cached walls (see gex_freshness), as on the Desk.
     "structure": ("options:matrix", "options:scan_funnel", DOSSIER,
                   "options:gex_status"),
     "volatility": ("options:matrix", "options:scan_funnel", DOSSIER),
@@ -262,12 +265,20 @@ def timeout_applies(token, current):
     return token == current
 
 
-def gex_stale(gex_status_view):
-    """Is the dealer collector's last read too old to trust the walls?
+LIVE, STOPPED, AGE_UNKNOWN = "live", "stopped", "unknown"
 
-    The Desk's own ``freshness_facts`` — no probe data reads stale, never live,
-    and a closed market reads stale because nothing is collecting."""
-    return bool(_desk.freshness_facts(gex_status_view)["stale"])
+
+def gex_freshness(gex_status_view):
+    """``"live"`` | ``"stopped"`` | ``"unknown"`` for the dealer collector.
+
+    The Desk's own ``freshness_facts``: a published age past its threshold is
+    STOPPED (a closed market reads stopped — nothing is collecting); no age at
+    all is UNKNOWN, the Desk's "Data age unknown", and never live. The two
+    are different claims, so the walls band says different things for them."""
+    facts = _desk.freshness_facts(gex_status_view)
+    if facts["age_seconds"] is None:
+        return AGE_UNKNOWN
+    return STOPPED if facts["stale"] else LIVE
 
 
 def absence_message(symbol, chip, feed_cold, empty_line):
@@ -331,38 +342,81 @@ def earnings_line(date, status, today=None):
 
 WALLS_STALE = ("Walls withheld — the dealer collector is not running, so the "
                "last walls it drew are not a current read.")
+WALLS_AGE_UNKNOWN = ("Walls withheld — data age unknown: the dealer collector "
+                     "has published no age, so its walls cannot be called "
+                     "current.")
 WALLS_ZERO_GRID = ("Walls withheld — net GEX reads exactly zero, the "
                    "after-hours signature of an empty grid.")
 
 
-def structure_band(facts, stale=False):
+def structure_band(facts, freshness=LIVE, source=None, fetched_at=None):
     """The Structure band: the wall/flip/spot bar, the flip side, net GEX.
 
-    Walls go through ``structure.walls_trustworthy``, the Desk's own rule: a
-    ``stale`` collector (``gex_stale``) draws no walls, and neither does a net
-    GEX of exactly zero, the after-hours all-zero grid whose walls are an argmax
-    tie-break, not a level. A fetched symbol carries no ``gex_regime``, so its
-    regime word comes from its own flip read (the same above/below question).
+    Each wall is gated on WHERE IT CAME FROM (``source`` is ``merge_facts``'
+    per-fact map):
+
+    * A **cached** wall is the collector's, so it is withheld unless the
+      collector is ``live`` (``gex_freshness``) — the Desk's rule. A wall of
+      unknown source is treated as cached, the conservative reading.
+    * A **fetched** wall came from the dossier's own chain read, seconds or
+      minutes old, and the collector never drew it — so the collector's state
+      says nothing about it. It is shown, with its fetch time.
+    * Both obey the zero-grid rule (``structure.walls_trustworthy``): a net GEX
+      of exactly zero is the after-hours all-zero grid whose walls are an
+      argmax tie-break. Net GEX is only ever a CACHED fact (the dossier carries
+      none), so for a fetched symbol the rule has nothing to read.
+
+    With the two walls from different moments the BAR is not drawn — it would
+    place spot between two walls read at different times, a geometry neither
+    source saw — unless both survive.
+
+    A fetched symbol carries no ``gex_regime``, so its regime word comes from
+    its own flip read (the same above/below question).
     """
     f = facts if isinstance(facts, dict) else {}
+    src = source if isinstance(source, dict) else {}
     spot, flip = _num(f.get("spot")), _num(f.get("flip"))
     net_gex = _num(f.get("net_gex"))
-    raw_pw, raw_cw = _num(f.get("put_wall")), _num(f.get("call_wall"))
-    walls_ok = walls_trustworthy(net_gex, stale)
-    pw, cw = (raw_pw, raw_cw) if walls_ok else (None, None)
+    grid_ok = walls_trustworthy(net_gex, False)
+    walls, reasons, fetched = {}, set(), False
+    for key in ("put_wall", "call_wall"):
+        raw_wall = _num(f.get(key))
+        is_fetch = src.get(key) == sf.SOURCE_FETCH
+        ok = grid_ok and (is_fetch or freshness == LIVE)
+        walls[key] = raw_wall if ok else None
+        if raw_wall is None:
+            continue
+        if not ok:
+            if not grid_ok:
+                reasons.add(WALLS_ZERO_GRID)
+            elif freshness == AGE_UNKNOWN:
+                reasons.add(WALLS_AGE_UNKNOWN)
+            else:
+                reasons.add(WALLS_STALE)
+        elif is_fetch:
+            fetched = True
+    pw, cw = walls["put_wall"], walls["call_wall"]
+    withheld = bool(reasons)
+    reason = next((r for r in (WALLS_ZERO_GRID, WALLS_AGE_UNKNOWN, WALLS_STALE)
+                   if r in reasons), "")
+    note = ""
+    if fetched:
+        when = _hhmm(fetched_at) if fetched_at else None
+        note = f"walls fetched {when}" if when else "walls fetched"
     side, dist = flip_read(spot, flip)
     regime = f.get("gex_regime") or side
-    withheld = not walls_ok and (raw_pw is not None or raw_cw is not None)
     return {"spot": spot, "flip": flip, "put_wall": pw, "call_wall": cw,
             "side": side, "distance": dist,
             "net_gex": net_gex, "net_gex_text": _desk.fmt_gex(net_gex),
-            "withheld_reason": ((WALLS_STALE if stale else WALLS_ZERO_GRID)
-                                if withheld else ""),
+            "withheld_reason": reason, "walls_note": note,
             "regime_word": regime_word(regime),
             "setup": _desk.setup_word(f.get("dealer_regime")),
+            # None whenever either wall is withheld: structure_positions needs
+            # BOTH, which is what keeps a mixed-source pair off one bar.
             "pos": structure_positions(spot, flip, pw, cw),
             "walls_withheld": withheld,
-            "has_any": any(v is not None for v in (spot, flip, pw, cw))}
+            "has_any": any(v is not None for v in (spot, flip, pw, cw))
+            or withheld}
 
 
 # The IV-vs-HV band word -> a fixed console class.
@@ -598,7 +652,7 @@ def render(symbol=None):
     own_view = dossier_view(sym)
     state = {"versions": {}, "data": {}, "pending": False,
              "refreshing": False, "fetch_seq": 0, "timeout_timer": None,
-             "seeded": False,
+             "seeded": False, "seeding": False, "cold_painted": False,
              "scan_day_memo": {}}
 
     if CONSOLE_FONT_HEAD_HTML:
@@ -612,7 +666,7 @@ def render(symbol=None):
                 inp = ui.input(placeholder="Ticker", value=sym or raw).props(
                     "dense outlined dark").classes("w-[140px]")
                 select_all_on_focus(inp)
-                sym_lbl = ui.label(sym or _DASH).classes(
+                ui.label(sym or _DASH).classes(
                     f"{CONSOLE_DISPLAY} text-[26px] font-bold tracking-[.06em] "
                     f"leading-none {CON_TXT}")
                 spot_lbl = ui.label(_DASH).classes(
@@ -705,20 +759,27 @@ def render(symbol=None):
 
     def _paint_structure():
         struct_body.clear()
-        s = structure_band(_merged()["facts"],
-                           stale=gex_stale(_d("options:gex_status")))
+        merged = _merged()
+        s = structure_band(merged["facts"],
+                           freshness=gex_freshness(_d("options:gex_status")),
+                           source=merged["source"],
+                           fetched_at=merged["fetched_at"])
         if sym is None or not s["has_any"]:
             _absent(struct_body, f"No dealer structure read for {sym}.")
             return
         with struct_body:
             if s["pos"] is not None:
                 structure_map(s["pos"])
+            if s["put_wall"] is not None or s["call_wall"] is not None:
                 with ui.row().classes("w-full justify-between gap-2"):
-                    ui.label(f"put wall {_desk.fmt_price(s['put_wall'])}").classes(
-                        f"{_SUB} tabular-nums")
-                    ui.label(f"call wall {_desk.fmt_price(s['call_wall'])}").classes(
-                        f"{_SUB} tabular-nums")
-            elif s["walls_withheld"]:
+                    for key, word in (("put_wall", "put wall"),
+                                      ("call_wall", "call wall")):
+                        if s[key] is not None:
+                            ui.label(f"{word} {_desk.fmt_price(s[key])}").classes(
+                                f"{_SUB} tabular-nums")
+            if s["walls_note"]:
+                ui.label(s["walls_note"]).classes(_SUB)
+            if s["walls_withheld"]:
                 ui.label(s["withheld_reason"]).classes(_SUB)
             side = s["side"]
             flip_line = f"flip {_desk.fmt_price(s['flip'])}"
@@ -981,7 +1042,15 @@ def render(symbol=None):
         Deliberately cannot fetch: a fetch spends Schwab calls, and only a
         navigation or a Refresh click may do that."""
         if not state["seeded"]:
-            return                      # the first read is still in flight
+            # The first read failed (Redis down at build) or is still running.
+            # Retrying it IS this tick's job — the page must recover when Redis
+            # returns, not sit on its cold lines until a reload.
+            try:
+                await _initial_load()
+            except Exception:           # noqa: BLE001 — logged, retried in 2 s
+                log.debug("symbol page: first read still failing",
+                          exc_info=True)
+            return
         vers = await run.io_bound(bus_client.read_versions, list(views))
         changed = [v for v in views
                    if vers.get(v) is not None
@@ -1006,8 +1075,25 @@ def render(symbol=None):
         """First paint: every band once, cold ones included, so each shows its
         OWN placeholder — then the one navigation fetch, if the cache cannot
         answer. Off the loop (see SEED_DELAY_SEC)."""
-        _seed(await run.io_bound(_read_all))
+        if state["seeding"] or state["seeded"]:
+            return                      # one first read at a time, and once
+        state["seeding"] = True
+        try:
+            pairs = await run.io_bound(_read_all)
+        except Exception:
+            # Never blank bands: paint every band from NO data, which is the
+            # cold-feed wording each already has — once, not every retry.
+            if not state["cold_painted"]:
+                state["cold_painted"] = True
+                _paint({}, regions=set(REGION_VIEWS))
+            raise
+        finally:
+            state["seeding"] = False
+        _seed(pairs)
         state["seeded"] = True
+        # The navigation's own fetch, even when it lands on a poll's retry: a
+        # page opened during a Redis blip still gets its one look-up, and only
+        # this one (seeded is set, so it cannot recur).
         _enqueue_fetch("navigate")
 
     ui.timer(SEED_DELAY_SEC, _initial_load, once=True)

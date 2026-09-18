@@ -796,20 +796,119 @@ def test_the_dealer_positioning_link_carries_the_symbol(world, monkeypatch):
 
 # ── #3: walls after the close ──────────────────────────────────────────────
 
+_CACHED = {"put_wall": "cache", "call_wall": "cache"}
+_FETCHED = {"put_wall": "fetch", "call_wall": "fetch"}
+
+
+def _walls(**kw):
+    return _facts(spot=105.0, flip=100.0, put_wall=90.0, call_wall=110.0, **kw)
+
+
 def test_stale_gex_withholds_the_walls():
-    f = _facts(spot=105.0, flip=100.0, put_wall=90.0, call_wall=110.0,
-               net_gex=2.4e9)
-    live = sp.structure_band(f, stale=False)
-    stale = sp.structure_band(f, stale=True)
+    f = _walls(net_gex=2.4e9)
+    live = sp.structure_band(f, freshness="live", source=_CACHED)
+    stale = sp.structure_band(f, freshness="stopped", source=_CACHED)
     assert live["pos"] is not None and live["put_wall"] == 90.0
     assert stale["pos"] is None and stale["put_wall"] is None
     assert stale["walls_withheld"] is True
+    assert stale["withheld_reason"] == sp.WALLS_STALE
+
+
+def test_fetched_walls_are_shown_while_the_collector_is_stopped():
+    """19:00 CT, an off-watchlist name: the fetch read its chain seconds ago
+    and the collector — which never drew these walls — is stopped. Withholding
+    them "because the collector is not running" would be false twice."""
+    s = sp.structure_band(_walls(), freshness="stopped", source=_FETCHED,
+                          fetched_at="2026-09-18T19:00:05")
+    assert s["pos"] is not None
+    assert (s["put_wall"], s["call_wall"]) == (90.0, 110.0)
+    assert s["walls_withheld"] is False
+    assert s["walls_note"] == "walls fetched 19:00"
+
+
+def test_fetched_walls_carry_no_note_when_the_fetch_time_is_unreadable():
+    s = sp.structure_band(_walls(), freshness="live", source=_FETCHED,
+                          fetched_at=None)
+    assert s["walls_note"] == "walls fetched"
+
+
+def test_cached_walls_carry_no_fetch_note():
+    s = sp.structure_band(_walls(), freshness="live", source=_CACHED)
+    assert s["walls_note"] == ""
+
+
+def test_walls_of_unknown_source_are_gated_as_cached():
+    # The conservative reading: with no provenance, the collector's rule holds.
+    s = sp.structure_band(_walls(), freshness="stopped", source=None)
+    assert s["pos"] is None and s["walls_withheld"] is True
+
+
+def test_mixed_sources_gate_each_wall_on_its_own_and_draw_no_bar():
+    """One wall from a stopped collector, one fetched just now. The fetched one
+    is current and shown; the collector's is withheld. The BAR is not drawn:
+    it would place spot between two walls read at different times, which is a
+    geometry neither source ever saw."""
+    src = {"put_wall": "cache", "call_wall": "fetch"}
+    s = sp.structure_band(_walls(), freshness="stopped", source=src,
+                          fetched_at="2026-09-18T14:32:00")
+    assert s["pos"] is None
+    assert s["put_wall"] is None and s["call_wall"] == 110.0
+    assert s["walls_withheld"] is True
+    assert s["withheld_reason"] == sp.WALLS_STALE
+    assert s["walls_note"] == "walls fetched 14:32"
+
+
+def test_mixed_sources_while_the_collector_is_live_draw_the_bar():
+    src = {"put_wall": "cache", "call_wall": "fetch"}
+    s = sp.structure_band(_walls(), freshness="live", source=src)
+    assert s["pos"] is not None
+
+
+def test_the_zero_grid_rule_still_gates_every_wall():
+    for src in (_CACHED, _FETCHED):
+        s = sp.structure_band(_walls(net_gex=0.0), freshness="live",
+                              source=src)
+        assert s["pos"] is None
+        assert s["withheld_reason"] == sp.WALLS_ZERO_GRID
+
+
+def test_an_unknown_collector_age_is_not_called_stopped():
+    """A cold gex_status means the age is UNKNOWN — the Desk says "Data age
+    unknown" for it, never that the collector stopped."""
+    s = sp.structure_band(_walls(), freshness="unknown", source=_CACHED)
+    assert s["pos"] is None
+    assert s["withheld_reason"] == sp.WALLS_AGE_UNKNOWN
+    assert sp.WALLS_AGE_UNKNOWN != sp.WALLS_STALE
+    assert "not running" not in sp.WALLS_AGE_UNKNOWN
+    assert "age unknown" in sp.WALLS_AGE_UNKNOWN.lower()
 
 
 def test_the_walls_follow_the_collectors_own_freshness():
-    assert sp.gex_stale({"age_seconds": 30}) is False
-    assert sp.gex_stale({"age_seconds": 3600}) is True
-    assert sp.gex_stale(None) is True          # unknown is never "live"
+    assert sp.gex_freshness({"age_seconds": 30}) == "live"
+    assert sp.gex_freshness({"age_seconds": 3600}) == "stopped"
+    assert sp.gex_freshness(None) == "unknown"     # never "live"
+    assert sp.gex_freshness({}) == "unknown"
+
+
+def test_the_page_shows_fetched_walls_after_the_close(world):
+    data, sent = world
+    data["options:gex_status"] = {"age_seconds": 7200}
+    data["options:dossier:IREN"] = {
+        "symbol": "IREN", "error": None, "fetched_at": "2026-09-18T19:00:05",
+        "spot": 12.5, "flip": 12.0, "put_wall": 11.0, "call_wall": 14.0}
+    texts = _texts(_render_page("IREN"))
+    assert sent == []                          # a fresh dossier is reused
+    assert "put wall 11.00" in texts and "call wall 14.00" in texts
+    assert "walls fetched 19:00" in texts
+    assert not any(t.startswith("Walls withheld") for t in texts)
+
+
+def test_the_page_says_age_unknown_for_a_cold_gex_status(world):
+    data, _sent = world
+    data.pop("options:gex_status", None)
+    texts = _texts(_render_page("mu"))
+    assert sp.WALLS_AGE_UNKNOWN in texts
+    assert sp.WALLS_STALE not in texts
 
 
 def test_gex_status_is_polled_and_repaints_the_structure_band():
@@ -826,7 +925,124 @@ def test_the_page_draws_walls_only_while_the_collector_is_live(
     data["options:gex_status"] = {"age_seconds": 7200}
     after = _texts(_render_page("mu"))
     assert "put wall 170.00" not in after
-    assert any(t.startswith("Walls withheld") for t in after)
+    assert sp.WALLS_STALE in after
+
+
+# ── a first read that fails ────────────────────────────────────────────────
+
+def test_a_failed_first_read_recovers_on_the_poll_without_a_reload(
+        world, monkeypatch):
+    """Redis down at page build: the seed raises. The page must say the feed is
+    waiting (not sit blank), and the poll must retry the first read until it
+    succeeds — then populate, with no reload."""
+    import bus_client
+    data, _sent = world
+    real_full = bus_client.read_full
+    down = {"yes": True}
+
+    def _full(v):
+        if down["yes"]:
+            raise ConnectionError("redis down")
+        return real_full(v)
+
+    monkeypatch.setattr(bus_client, "read_full", _full)
+    from nicegui import ui
+    from nicegui.elements.timer import Timer
+    before = set(ui.context.client.elements)
+    sp.render("mu")
+    elements = [e for k, e in ui.context.client.elements.items()
+                if k not in before]
+    (seed,) = [e for e in elements
+               if isinstance(e, Timer) and e.interval == sp.SEED_DELAY_SEC]
+    poll = _poll_callback(elements)
+    with pytest.raises(ConnectionError):
+        _run(seed.callback())
+
+    def _now():
+        return [getattr(e, "text", "") or "" for k, e in
+                ui.context.client.elements.items() if k not in before]
+
+    assert _copy.WAITING_OPTIONS in _now()      # said, not blank
+    _run(poll())                                # still down: retried, no crash
+    assert "SCANNED" not in " ".join(_now())
+    down["yes"] = False
+    _run(poll())                                # the retry succeeds
+    texts = _now()
+    assert any(t.startswith("SCANNED") for t in texts)
+    assert any(t.startswith("Earnings Dec 17") for t in texts)
+
+
+def test_a_recovered_first_read_spends_the_navigation_fetch_exactly_once(
+        world, monkeypatch):
+    """The navigation's one look-up still happens when the first read lands on
+    a poll's retry — and only once, however many polls follow."""
+    import bus_client
+    data, sent = world
+    real_full = bus_client.read_full
+    down = {"yes": True}
+    monkeypatch.setattr(
+        bus_client, "read_full",
+        lambda v: (_ for _ in ()).throw(ConnectionError()) if down["yes"]
+        else real_full(v))
+    from nicegui import ui
+    before = set(ui.context.client.elements)
+    sp.render("XYZQ")
+    elements = [e for k, e in ui.context.client.elements.items()
+                if k not in before]
+    poll = _poll_callback(elements)
+    _run(poll())
+    assert sent == []
+    down["yes"] = False
+    for _ in range(3):
+        _run(poll())
+    assert [c["args"]["symbol"] for _d, c in sent] == ["XYZQ"]
+
+
+def test_the_poll_reads_no_versions_until_the_first_read_has_landed(
+        world, monkeypatch):
+    """Before the seed, the poll's only job is to retry it — it never probes
+    versions against an empty baseline (which would read every view twice)."""
+    import bus_client
+    probes = []
+    real = bus_client.read_versions
+    monkeypatch.setattr(bus_client, "read_versions",
+                        lambda vs: probes.append(1) or real(vs))
+    monkeypatch.setattr(bus_client, "read_full",
+                        lambda v: (_ for _ in ()).throw(ConnectionError()))
+    from nicegui import ui
+    before = set(ui.context.client.elements)
+    sp.render("mu")
+    elements = [e for k, e in ui.context.client.elements.items()
+                if k not in before]
+    _run(_poll_callback(elements)())
+    assert probes == []
+
+
+def test_a_retry_already_in_flight_is_not_started_twice(world, monkeypatch):
+    import asyncio
+
+    import bus_client
+    calls = []
+    real_full = bus_client.read_full
+
+    def _full(v):
+        calls.append(v)
+        return real_full(v)
+
+    monkeypatch.setattr(bus_client, "read_full", _full)
+    from nicegui import ui
+    before = set(ui.context.client.elements)
+    sp.render("mu")
+    elements = [e for k, e in ui.context.client.elements.items()
+                if k not in before]
+    poll = _poll_callback(elements)
+
+    async def _both():
+        await asyncio.gather(poll(), poll())
+
+    _run(_both())
+    # One first read's worth of views (the day union goes through read_gated).
+    assert len(calls) == len(sp.poll_views("MU")) - 1
 
 
 # ── minors ─────────────────────────────────────────────────────────────────

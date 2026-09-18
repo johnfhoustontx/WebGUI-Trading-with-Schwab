@@ -4,7 +4,16 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-17 (**The EOD report runs itself at 15:15 CT.** Operator
+**Last updated:** 2026-09-18 (**Symbol Dossier at `/symbol`** — one screen per
+ticker, beside the Desk in the rail. Design and plan:
+`docs/plans/2026-09-17-symbol-dossier-{design,plan}.md`.)
+
+- **Expected Move no longer toasts "Symbol + expiry required." on a hand-off with no
+  expiry.** It loads that symbol's expirations silently instead. The dossier's link
+  is the new such caller; any existing caller that hands over a symbol without an
+  expiry now gets the same quiet chain load where it used to get the warning.
+
+**Prior —** 2026-09-17 (**The EOD report runs itself at 15:15 CT.** Operator
 request: auto-run it at 3:15 each trading day.)
 
 - **What it does.** `/eod`'s Generate button, unattended, once per trading day at
