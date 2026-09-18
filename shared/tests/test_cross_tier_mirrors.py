@@ -527,3 +527,47 @@ def test_the_rating_map_covers_every_calculator_template():
     assert templates, "found no Calculator templates"
     assert templates == mapped, {"unmapped": templates - mapped,
                                  "stale": mapped - templates}
+
+
+# ── IV vs HV bands: the Symbol Dossier and the strategy scorer ──────────────
+# ``strategy_scoring.infer_market_view`` falls back to the IV/HV ratio when
+# iv_rank is missing, with BARE LITERALS (``iv_hv >= 1.2`` -> "high",
+# ``iv_hv <= 0.9`` -> "low"). The dossier page (Tier 1) cannot import
+# options-scanner, so it restates them as IV_HV_HIGH / IV_HV_LOW. A dossier that
+# called a symbol "high" where the scorer said "mid" would be worse than none.
+
+SCORER = "options-scanner/strategy_scoring.py"
+DOSSIER_FACTS = "webgui/pages/symbol_facts.py"
+
+
+def _iv_hv_fallback_bounds():
+    """The ``iv_hv >= X`` / ``iv_hv <= Y`` literals in infer_market_view.
+
+    Only the inclusive operators: the iv_rank-primary branch's light nudge uses
+    strict ``> 1.3`` / ``< 0.85`` and is a different rule."""
+    tree = ast.parse((ROOT / SCORER).read_text(encoding="utf-8"))
+    fn = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+               and n.name == "infer_market_view"), None)
+    assert fn is not None, f"{SCORER} no longer defines infer_market_view"
+    found = {"ge": [], "le": []}
+    for node in ast.walk(fn):
+        if (isinstance(node, ast.Compare) and isinstance(node.left, ast.Name)
+                and node.left.id == "iv_hv" and len(node.ops) == 1
+                and isinstance(node.comparators[0], ast.Constant)):
+            op = node.ops[0]
+            if isinstance(op, ast.GtE):
+                found["ge"].append(node.comparators[0].value)
+            elif isinstance(op, ast.LtE):
+                found["le"].append(node.comparators[0].value)
+    assert len(found["ge"]) == 1 and len(found["le"]) == 1, (
+        f"expected one `iv_hv >=` and one `iv_hv <=` in infer_market_view, got "
+        f"{found} - if the fallback changed shape, this mirror must follow it")
+    return found["ge"][0], found["le"][0]
+
+
+def test_the_dossiers_iv_hv_bands_are_the_scorers():
+    high, low = _iv_hv_fallback_bounds()
+    assert _const(DOSSIER_FACTS, "IV_HV_HIGH") == high, (
+        f"{DOSSIER_FACTS}:IV_HV_HIGH has drifted from {SCORER}'s `iv_hv >= {high}`")
+    assert _const(DOSSIER_FACTS, "IV_HV_LOW") == low, (
+        f"{DOSSIER_FACTS}:IV_HV_LOW has drifted from {SCORER}'s `iv_hv <= {low}`")
