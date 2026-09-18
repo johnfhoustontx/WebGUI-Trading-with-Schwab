@@ -1,4 +1,6 @@
 """Persistence identity + map for the day's scan union."""
+import copy
+
 import pytest
 
 from services.options_svc import compute
@@ -87,3 +89,115 @@ def test_an_unparseable_top_level_falls_through_to_the_legs():
 def test_setup_expiry_honours_its_own_contract_on_a_non_dict():
     assert compute._setup_expiry("MU") == ""
     assert compute._setup_expiry(None) == ""
+
+
+def test_a_newcomer_is_stamped_and_counted():
+    out = compute.merge_setups({}, {"MU|PCS|2026-10-17": 62.0},
+                               "2026-09-17T09:15:00", seq=1,
+                               trustworthy_baseline=True)
+    entry = out["MU|PCS|2026-10-17"]
+    assert entry["first_seen"] == "2026-09-17T09:15:00"
+    assert entry["seen"] == 1
+    assert entry["scores"] == [62.0]
+    assert entry["gaps"] == 0
+    assert "age_unknown" not in entry
+
+
+def test_a_setup_present_in_every_scan_counts_every_scan():
+    setups = {}
+    for seq in range(1, 6):
+        setups = compute.merge_setups(
+            setups, {"MU|PCS|2026-10-17": 60.0 + seq},
+            f"2026-09-17T09:{seq:02d}:00", seq=seq, trustworthy_baseline=True)
+    entry = setups["MU|PCS|2026-10-17"]
+    assert entry["seen"] == 5
+    assert entry["scores"] == [61.0, 62.0, 63.0, 64.0, 65.0]
+    assert entry["gaps"] == 0
+    assert entry["first_seen"] == "2026-09-17T09:01:00"
+
+
+def test_an_absent_setup_is_carried_untouched():
+    first = compute.merge_setups({}, {"MU|PCS|2026-10-17": 62.0},
+                                 "2026-09-17T09:15:00", seq=1,
+                                 trustworthy_baseline=True)
+    second = compute.merge_setups(first, {}, "2026-09-17T09:30:00", seq=2,
+                                  trustworthy_baseline=True)
+    assert second["MU|PCS|2026-10-17"] == first["MU|PCS|2026-10-17"]
+
+
+def test_a_gap_is_counted_not_erased():
+    key = "MU|PCS|2026-10-17"
+    s = compute.merge_setups({}, {key: 62.0}, "t1", seq=1,
+                             trustworthy_baseline=True)
+    s = compute.merge_setups(s, {}, "t2", seq=2, trustworthy_baseline=True)
+    s = compute.merge_setups(s, {key: 61.0}, "t3", seq=3,
+                             trustworthy_baseline=True)
+    # The row-level `stale_since` is reset to None on return by the existing
+    # merge, which is exactly the erasure this map exists to survive.
+    assert s[key]["gaps"] == 1
+    assert s[key]["seen"] == 2
+    assert s[key]["first_seen"] == "t1"
+
+
+def test_consecutive_scans_are_not_a_gap():
+    key = "MU|PCS|2026-10-17"
+    s = compute.merge_setups({}, {key: 62.0}, "t1", seq=1,
+                             trustworthy_baseline=True)
+    s = compute.merge_setups(s, {key: 63.0}, "t2", seq=2,
+                             trustworthy_baseline=True)
+    assert s[key]["gaps"] == 0
+
+
+def test_an_untrustworthy_baseline_omits_first_seen():
+    # The 2026-07-16 design deleted a first_seen field because it stamped every
+    # 09:00 signal `first_seen=12:00` after a noon restart. Never fabricate.
+    out = compute.merge_setups({}, {"MU|PCS|2026-10-17": 62.0},
+                               "2026-09-17T12:03:00", seq=1,
+                               trustworthy_baseline=False)
+    entry = out["MU|PCS|2026-10-17"]
+    assert "first_seen" not in entry
+    assert entry["age_unknown"] is True
+
+
+def test_a_setup_appearing_after_a_cold_start_gets_a_real_stamp():
+    cold = compute.merge_setups({}, {"MU|PCS|2026-10-17": 62.0}, "t1", seq=1,
+                                trustworthy_baseline=False)
+    # Merge 2 has a usable prev — the envelope merge 1 wrote — so
+    # _trustworthy_baseline short-circuits to True. The flag and a non-empty
+    # prev map can never disagree at the call site, which is why the
+    # implementation reads the flag alone rather than also inspecting prev.
+    later = compute.merge_setups(cold, {"MU|PCS|2026-10-17": 62.0,
+                                        "NVDA|CCS|2026-10-17": 70.0},
+                                 "t2", seq=2, trustworthy_baseline=True)
+    assert "first_seen" not in later["MU|PCS|2026-10-17"]
+    assert later["NVDA|CCS|2026-10-17"]["first_seen"] == "t2"
+
+
+def test_an_unusable_score_is_not_appended():
+    # A None/NaN score must not poison the trend series; the sighting still counts.
+    out = compute.merge_setups({}, {"MU|PCS|2026-10-17": None}, "t1", seq=1,
+                               trustworthy_baseline=True)
+    entry = out["MU|PCS|2026-10-17"]
+    assert entry["scores"] == []
+    assert entry["seen"] == 1
+
+
+def test_scores_are_bounded_and_keep_the_TAIL():
+    key = "MU|PCS|2026-10-17"
+    s = {}
+    for seq in range(1, compute._SETUP_SCORES_MAX + 6):
+        s = compute.merge_setups(s, {key: float(seq)}, f"t{seq}", seq=seq,
+                                 trustworthy_baseline=True)
+    scores = s[key]["scores"]
+    assert len(scores) == compute._SETUP_SCORES_MAX
+    # The tail, because the trend window reads from the END.
+    assert scores[-1] == float(compute._SETUP_SCORES_MAX + 5)
+
+
+def test_merge_setups_never_mutates_its_input():
+    prev = {"MU|PCS|2026-10-17": {"seen": 1, "scores": [62.0], "gaps": 0,
+                                  "last_seq": 1, "first_seen": "t1"}}
+    snapshot = copy.deepcopy(prev)
+    compute.merge_setups(prev, {"MU|PCS|2026-10-17": 63.0}, "t2", seq=2,
+                         trustworthy_baseline=True)
+    assert prev == snapshot

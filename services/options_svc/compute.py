@@ -188,6 +188,72 @@ def setup_key(signal):
     return f"{symbol}|{structure}|{expiry}"
 
 
+# Bounded score series per setup. The autoscan fires at most once per 15-minute
+# slot over 08:00-15:15 CT == 30 scans/day, so this only truncates when manual
+# "Run scan" presses push a setup past it. The TAIL is kept, because the trend
+# window reads from the end.
+_SETUP_SCORES_MAX = 40
+
+# Backstop on the map itself, mirroring _DAY_MAX_PER_LIST's role for the lists.
+_SETUP_MAX = 4000
+
+
+def merge_setups(prev_setups, live, now_iso, seq, trustworthy_baseline):
+    """Merge one scan's live setups into the day's persistence map. PURE.
+
+    ``prev_setups`` -- the previous map (or None/garbage).
+    ``live``        -- ``{setup_key: representative score or None}`` for setups
+                       with at least one LIVE row in this scan.
+    ``seq``         -- this scan's sequence number within the day, so a GAP is
+                       detectable (``last_seq < seq - 1``). Wall-clock cannot do
+                       this: manual scans break the 15-minute grid.
+    ``trustworthy_baseline`` -- whether ``first_seen`` may honestly be stamped
+                       for a newcomer (see ``_trustworthy_baseline``).
+
+    The representative score is the setup's BEST this scan, decided by the
+    caller: a setup is several adjacent strikes, and the question being asked is
+    whether the best thing it offers is improving.
+
+    Never mutates its inputs; never raises.
+    """
+    out = {}
+    if isinstance(prev_setups, dict):
+        for key, entry in prev_setups.items():
+            if isinstance(entry, dict):
+                copied = dict(entry)
+                scores = copied.get("scores")
+                # The copy is what keeps the non-mutation guarantee if the append
+                # below ever becomes an in-place .append(); today the rebind makes
+                # each half individually unkillable, so do not delete it as dead.
+                copied["scores"] = list(scores) if isinstance(scores, list) else []
+                out[key] = copied
+
+    for key, score in (live or {}).items():
+        entry = out.get(key)
+        if entry is None:
+            entry = {"seen": 0, "scores": [], "gaps": 0}
+            if trustworthy_baseline:
+                entry["first_seen"] = now_iso
+            else:
+                # Omitted, NEVER stamped `now`. The 2026-07-16 design deleted a
+                # first_seen field precisely because it lied on cold start.
+                entry["age_unknown"] = True
+            out[key] = entry
+        else:
+            last_seq = entry.get("last_seq")
+            if isinstance(last_seq, int) and last_seq < seq - 1:
+                entry["gaps"] = int(entry.get("gaps") or 0) + 1
+        entry["seen"] = int(entry.get("seen") or 0) + 1
+        entry["last_seq"] = seq
+        entry["last_live"] = now_iso
+        # _finite, NOT the nearer _num / _num_or_none: those coerce with float()
+        # inside a try, so float(True) is 1.0 and a bool would read as a score.
+        value = _finite(score)
+        if value is not None:
+            entry["scores"] = (entry["scores"] + [value])[-_SETUP_SCORES_MAX:]
+    return out
+
+
 def _cap_day_list(merged, key, max_per_list):
     """Trim ``merged`` to ``max_per_list``, evicting OLDEST-STALE-FIRST. Never
     evicts a ``live`` signal: if live alone exceeds the cap, the cap yields (the
