@@ -872,6 +872,50 @@ def test_the_zero_grid_rule_still_gates_every_wall():
         assert s["withheld_reason"] == sp.WALLS_ZERO_GRID
 
 
+def test_a_fetched_zero_grid_says_why_it_has_no_walls():
+    """Since fce4e7b the service publishes NO walls for an all-zero grid (index
+    OI zeroed after hours) and carries net_gex = 0.0. With no wall value to
+    gate, the band must still say why the walls are missing — an unexplained
+    blank is what the Desk never shows."""
+    f = _facts(spot=105.0, flip=100.0, net_gex=0.0)
+    src = {"put_wall": None, "call_wall": None, "net_gex": "fetch"}
+    s = sp.structure_band(f, freshness="stopped", source=src,
+                          fetched_at="2026-09-18T19:00:05")
+    assert s["pos"] is None
+    assert s["walls_withheld"] is True
+    assert s["withheld_reason"] == sp.WALLS_ZERO_GRID
+
+
+def test_an_absent_net_gex_is_not_a_zero_grid():
+    # Unknown is not zero: no net GEX and no walls claims nothing about a grid.
+    f = _facts(spot=105.0, flip=100.0, net_gex=None)
+    s = sp.structure_band(f, freshness="live",
+                          source={"put_wall": None, "call_wall": None})
+    assert s["walls_withheld"] is False
+    assert s["withheld_reason"] == ""
+
+
+def test_a_fetched_zero_net_gex_also_withholds_cached_walls():
+    """Mixed source, deliberately conservative: the cache has walls but no net
+    GEX, and the fetch fills net GEX with 0.0. The zero-grid rule reads the one
+    net GEX the page has, so the cached walls are withheld too."""
+    src = {"put_wall": "cache", "call_wall": "cache", "net_gex": "fetch"}
+    s = sp.structure_band(_walls(net_gex=0.0), freshness="live", source=src)
+    assert s["pos"] is None
+    assert s["put_wall"] is None and s["call_wall"] is None
+    assert s["withheld_reason"] == sp.WALLS_ZERO_GRID
+
+
+def test_the_page_explains_a_fetched_zero_grid(world):
+    data, _sent = world
+    data["options:dossier:XSP"] = {
+        "symbol": "XSP", "error": None, "fetched_at": "2026-09-18T19:00:05",
+        "spot": 560.0, "flip": 555.0, "net_gex": 0.0,
+        "put_wall": None, "call_wall": None}
+    texts = _texts(_render_page("XSP"))
+    assert sp.WALLS_ZERO_GRID in texts
+
+
 def test_an_unknown_collector_age_is_not_called_stopped():
     """A cold gex_status means the age is UNKNOWN — the Desk says "Data age
     unknown" for it, never that the collector stopped."""

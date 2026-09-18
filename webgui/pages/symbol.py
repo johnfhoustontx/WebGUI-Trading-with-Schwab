@@ -363,8 +363,15 @@ def structure_band(facts, freshness=LIVE, source=None, fetched_at=None):
       says nothing about it. It is shown, with its fetch time.
     * Both obey the zero-grid rule (``structure.walls_trustworthy``): a net GEX
       of exactly zero is the after-hours all-zero grid whose walls are an
-      argmax tie-break. Net GEX is only ever a CACHED fact (the dossier carries
-      none), so for a fetched symbol the rule has nothing to read.
+      argmax tie-break. Net GEX may be CACHED (the matrix) or FETCHED (the
+      dossier carries it since fce4e7b, and the service then publishes no
+      walls at all for a zero grid). The reason is recorded whenever net GEX
+      reads 0.0, wall value or not, so a fetched zero-grid symbol says why its
+      walls are missing rather than showing a blank; an ABSENT net GEX claims
+      no grid either way. ⚠ One mixed-source consequence, deliberate and
+      conservative: when the cache has walls but no net GEX and the fetch
+      fills net GEX with 0.0, the cached walls are withheld as well — the
+      page has one net GEX, and it says the grid is empty.
 
     With the two walls from different moments the BAR is not drawn — it would
     place spot between two walls read at different times, a geometry neither
@@ -379,6 +386,8 @@ def structure_band(facts, freshness=LIVE, source=None, fetched_at=None):
     net_gex = _num(f.get("net_gex"))
     grid_ok = walls_trustworthy(net_gex, False)
     walls, reasons, fetched = {}, set(), False
+    if not grid_ok:
+        reasons.add(WALLS_ZERO_GRID)    # with or without a wall to withhold
     for key in ("put_wall", "call_wall"):
         raw_wall = _num(f.get(key))
         is_fetch = src.get(key) == sf.SOURCE_FETCH
