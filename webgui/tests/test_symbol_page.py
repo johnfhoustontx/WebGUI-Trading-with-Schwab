@@ -762,6 +762,29 @@ def test_an_older_fetch_timeout_cannot_clear_a_newer_fetch(world):
     assert "FETCHING" in _texts(elements)
 
 
+def test_a_timed_out_fetch_says_it_is_still_queued_not_try_refresh():
+    """options_svc runs ONE consumer on cmd:options, so a dossier queued behind
+    a 26-40 s whole-chain scan outlasts the 30 s backstop. It is still coming —
+    inviting Refresh then would queue a second paid fetch behind the first."""
+    chip = sp.coverage_chip("XYZQ", sf.UNKNOWN, None, queued=True)
+    assert "refresh" not in chip["message"].lower()
+    assert "queued" in chip["message"]
+    assert chip["label"] == "QUEUED"
+
+
+def test_the_page_shows_the_queued_line_after_its_timeout(world):
+    from nicegui import ui
+    _data, sent = world
+    before = set(ui.context.client.elements)
+    elements = _render_page("XYZQ")
+    (timer,) = _timeout_timers(before)
+    timer.callback()
+    texts = _texts(elements)
+    assert "QUEUED" in texts
+    assert not any("try Refresh" in t for t in texts)
+    assert len(sent) == 1
+
+
 def test_a_stale_timeout_is_keyed_to_its_own_request():
     # pure: the token rule the page's timeout uses
     assert sp.timeout_applies(3, 3) is True
@@ -779,6 +802,55 @@ def test_the_expected_move_link_carries_the_symbol(world, monkeypatch):
     handler(None)
     assert went == ["/options/expected-move"]
     assert handoff.take_pending_expected_move() == {"symbol": "MU"}
+
+
+@pytest.mark.parametrize("coverage,allowed", [
+    (sf.SCANNED, True), (sf.COLLECTED, True), (sf.UNKNOWN, False),
+    (None, False), ("", False)])
+def test_only_a_collected_symbol_may_link_to_dealer_positioning(coverage,
+                                                                allowed):
+    """The Gamma page points the shared sticky gamma slot at whatever it is
+    handed, and the service then refreshes that symbol every GEX tick. For a
+    symbol the collector does not poll there is no tick chain to reuse, so each
+    refresh is a fresh Schwab chain fetch — one a minute, all session."""
+    assert sp.gamma_link_allowed(coverage) is allowed
+
+
+def _gamma_links(elements):
+    return [e for e in elements
+            if (getattr(e, "text", "") or "") == "→ Dealer Positioning"]
+
+
+@pytest.mark.parametrize("dossier", [
+    None,
+    {"symbol": "XYZQ", "error": "no_quote"},
+    {"symbol": "XYZQ", "error": "fetch_failed"},
+    {"symbol": "XYZQ", "error": None, "fetched_at": "2026-09-18T14:32:00",
+     "spot": 12.5, "flip": 12.0, "put_wall": 11.0, "call_wall": 14.0}])
+def test_an_uncollected_symbol_draws_no_dealer_positioning_link(
+        world, monkeypatch, dossier):
+    from pages.options import handoff
+    data, _sent = world
+    if dossier is not None:
+        data["options:dossier:XYZQ"] = dossier
+    handed = []
+    monkeypatch.setattr(handoff, "send_to_gamma", lambda s: handed.append(s))
+    elements = _render_page("XYZQ")
+    assert _gamma_links(elements) == []
+    # and no other click on the page reaches it either
+    for e in elements:
+        for li in e._event_listeners.values():
+            if li.type == "click":
+                try:
+                    li.handler(None)
+                except TypeError:
+                    pass
+    assert handed == []
+
+
+@pytest.mark.parametrize("symbol", ["MU", "$VIX"])
+def test_a_scanned_or_collected_symbol_draws_the_link(world, symbol):
+    assert len(_gamma_links(_render_page(symbol))) == 1
 
 
 def test_the_dealer_positioning_link_carries_the_symbol(world, monkeypatch):

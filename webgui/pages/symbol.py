@@ -201,7 +201,7 @@ def _hhmm(stamp):
 
 
 def coverage_chip(symbol, coverage, dossier, *, pending=False, raw="",
-                  feed_cold=False, scanned_at=None):
+                  feed_cold=False, scanned_at=None, queued=False):
     """``{"label", "tone", "message"}`` for the header.
 
     The three absences the design separates never share a sentence: a symbol
@@ -235,6 +235,16 @@ def coverage_chip(symbol, coverage, dossier, *, pending=False, raw="",
     if pending:
         return {"label": "FETCHING", "tone": tone["accent"],
                 "message": f"Fetching {symbol}…"}
+    if queued and d is None:
+        # The 30 s backstop fired, but the request is still on the stream:
+        # options_svc runs ONE consumer on cmd:options, and a dossier queued
+        # behind a whole-chain Strategy Finder scan (26-40 s) outlasts it. The
+        # poll picks the answer up when it lands. Inviting Refresh here would
+        # queue a second paid fetch behind the first.
+        return {"label": "QUEUED", "tone": tone["muted"],
+                "message": (f"The look-up for {symbol} is still queued behind "
+                            "other work — it will appear here when the "
+                            "service answers.")}
     if error == FETCH_FAILED:
         return {"label": "FETCH FAILED", "tone": tone["warn"],
                 "message": (_copy.WAITING_OPTIONS if feed_cold else
@@ -256,6 +266,19 @@ def coverage_chip(symbol, coverage, dossier, *, pending=False, raw="",
     return {"label": "NO DATA", "tone": tone["muted"],
             "message": (_copy.WAITING_OPTIONS if feed_cold else
                         f"No reading for {symbol} yet — try Refresh.")}
+
+
+def gamma_link_allowed(coverage):
+    """Whether the Structure band may link to Dealer Positioning.
+
+    ⚠ Only for a symbol the collector already polls (scanned or collected).
+    The Gamma page adds whatever it is handed to its picker and points the
+    shared sticky ``cache:options:gamma`` slot at it; the service then
+    refreshes that symbol every GEX tick. A collected symbol's refresh reuses
+    the tick's own chain. Any other symbol has no tick chain, so every refresh
+    is a fresh Schwab chain fetch — one a minute, all session, until someone
+    picks another symbol. A link that starts that must not be drawn."""
+    return coverage in (sf.SCANNED, sf.COLLECTED)
 
 
 def timeout_applies(token, current):
@@ -662,6 +685,7 @@ def render(symbol=None):
     state = {"versions": {}, "data": {}, "pending": False,
              "refreshing": False, "fetch_seq": 0, "timeout_timer": None,
              "seeded": False, "seeding": False, "cold_painted": False,
+             "queued": False,
              "scan_day_memo": {}}
 
     if CONSOLE_FONT_HEAD_HTML:
@@ -693,9 +717,12 @@ def render(symbol=None):
         # ── bands ────────────────────────────────────────────────────────────
         with ui.element("div").classes(
                 "grid grid-cols-1 lg:grid-cols-2 gap-4 w-full"):
-            struct_body = _band("STRUCTURE", (
-                ("Dealer Positioning",
-                 lambda *_: _handoff.send_to_gamma(sym), "/options/gamma"),))
+            struct_body = _band("STRUCTURE")
+            # Filled by _paint_structure once coverage is KNOWN — the link is
+            # drawn only for a collected symbol (gamma_link_allowed), so a
+            # dead link is never on screen, not even for the first paint.
+            with struct_body.parent_slot.parent:
+                gamma_slot = ui.row().classes("gap-4 flex-wrap pt-1")
             vol_body = _band("VOLATILITY", (
                 # The stash carries the symbol, as send_to_gamma does above; a
                 # bare navigate opened Expected Move on whatever it last showed.
@@ -743,7 +770,8 @@ def render(symbol=None):
                              pending=state["pending"], raw=raw,
                              feed_cold=_feed_cold(),
                              scanned_at=(funnel.get("timestamp")
-                                         if isinstance(funnel, dict) else None))
+                                         if isinstance(funnel, dict) else None),
+                             queued=state["queued"])
 
     # ── painters ─────────────────────────────────────────────────────────────
     def _paint_header():
@@ -766,7 +794,22 @@ def render(symbol=None):
             ui.label(absence_message(sym, _chip(), _feed_cold(),
                                      empty_line)).classes(_EMPTY)
 
+    @guard
+    def _to_gamma(*_):
+        # Re-checked at click time too: coverage can change after a paint.
+        if gamma_link_allowed(_coverage()):
+            _handoff.send_to_gamma(sym)
+
+    def _paint_gamma_link():
+        gamma_slot.clear()
+        if (sym is not None and gamma_link_allowed(_coverage())
+                and _shell.can_navigate("/options/gamma")):
+            with gamma_slot:
+                ui.label("→ Dealer Positioning").classes(_LINK).on(
+                    "click", _to_gamma)
+
     def _paint_structure():
+        _paint_gamma_link()
         struct_body.clear()
         merged = _merged()
         s = structure_band(merged["facts"],
@@ -988,6 +1031,7 @@ def render(symbol=None):
             return False
         bus_client.request("options", cmd)
         state["pending"] = True
+        state["queued"] = False
         state["fetch_seq"] += 1
         overlay.show(f"Fetching {sym}…")
         _paint_header()
@@ -1010,6 +1054,7 @@ def render(symbol=None):
         # overlay and let the chip say there is no reading yet.
         if state["pending"] and timeout_applies(token, state["fetch_seq"]):
             state["pending"] = False
+            state["queued"] = True
             overlay.hide()
             _paint({}, regions=set(REGION_VIEWS))
 
