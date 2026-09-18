@@ -379,8 +379,16 @@ A position that only changes **flag** — OK to At risk to Rescue — glows ambe
 stays **silent**. It was already in the book, and the flag column has already told
 you.
 
+A symbol that **joins the Opportunity Board** is announced as well — *"N V D A.
+Joins the Opportunity Board, buy signal."* One that dropped off in the last half
+hour glows when it comes back but stays silent, so two names swapping places at
+the bottom of the board do not talk on every refresh.
+
 Switch it off, change the voice or set its volume under **Settings → Spoken alerts
-(Desk)**. It obeys the same *only during market hours* setting as the scanner chime.
+(Desk)**. Each section — **Opportunity Board**, **Live Flow Alerts**, **Positions**
+— also has its own switch there, so you can keep one talking and silence another; a
+silenced section still glows. It obeys the same *only during market hours* setting
+as the scanner chime.
 
 **Four things that will look like faults and are not:**
 
@@ -2265,8 +2273,10 @@ Preferences, all saved on your machine:
 - **Scanner alerts** — enable the audio alert, pick the sound (chime / bell /
   ping), a **Test sound** button, a **Volume** slider, an **only during market
   hours** toggle, and a **minimum score to alert**.
-- **Spoken alerts (Desk)** — the Desk announcing new flow alerts and newly-opened
-  positions out loud. An **on/off** switch, a **Voice** picker (six neural voices;
+- **Spoken alerts (Desk)** — the Desk announcing new flow alerts, newly-opened
+  positions and symbols joining the Opportunity Board out loud. An **on/off**
+  switch, one switch **per section** under it (greyed out while the main switch is
+  off), a **Voice** picker (six neural voices;
   Aria is the default), a **Volume** slider, and a **Test voice** button. There is
   deliberately no second market-hours toggle here: spoken alerts obey the *only
   during market hours* switch in **Scanner alerts** above.

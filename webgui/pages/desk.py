@@ -1701,6 +1701,7 @@ def arrival_state():
     the queue ``_paint`` fills and the poll drains.
     """
     return {"seen_flow": set(), "seen_pos": set(), "pos_flags": {},
+            "seen_board": set(), "board_left": {},
             "glow": {}, "first": True, "speak": []}
 
 
@@ -1769,6 +1770,114 @@ def fold_position_arrivals(state, rows, now):
     most_urgent = next((r for r in rows if isinstance(r, dict)
                         and r.get("position_id") == ids[0]), None)
     return _utterance(most_urgent, _voice.position_phrase, len(ids) - 1)
+
+
+# How long a symbol that dropped OFF the Opportunity Board stays quiet if it
+# climbs back on. The board is a ranking cut at ``BOARD_ROWS_N``, so two names
+# trading places at sixth would otherwise announce themselves on every matrix
+# refresh. The glow still marks a re-entry — it costs nothing and is accurate —
+# only the SENTENCE is withheld. It also silences the whole board reappearing
+# after a blip (a service restart publishes an empty matrix, then a full one):
+# every name on it left moments ago.
+BOARD_REENTRY_QUIET_SEC = 30 * 60
+
+
+def board_glow_key(symbol):
+    """The glow-map key for a board row.
+
+    Namespaced because the map is SHARED with the flow and position rows, and a
+    board row's only identity is its ticker — a bare symbol could in principle
+    collide with another panel's row id and light the wrong row.
+    """
+    return f"board:{symbol}"
+
+
+def fold_board_arrivals(state, rows, now):
+    """Fold symbols newly ON the Opportunity Board into the glow map; return
+    the utterance, or None.
+
+    ``rows`` is ``opportunity_rows`` — the board as drawn, hottest first — so
+    "new" means "joined the top ``BOARD_ROWS_N``", and the name spoken is the
+    hottest of the arrivals. A symbol that left within
+    ``BOARD_REENTRY_QUIET_SEC`` glows but is not spoken (see that constant).
+    """
+    syms = []
+    for r in rows or ():
+        sym = r.get("symbol") if isinstance(r, dict) else None
+        if isinstance(sym, str) and sym and sym not in syms:
+            syms.append(sym)
+    current = set(syms)
+    prev = state["seen_board"]
+    left = state["board_left"]
+    for sym in prev - current:
+        left[sym] = now
+    # Expire old departures. Written as ``not (0 <= age < span)`` for the same
+    # NaN reason as ``glow_step``: a wedged stamp must expire, not stick.
+    for sym in [k for k, t in left.items()
+                if not (0 <= now - t < BOARD_REENTRY_QUIET_SEC)]:
+        left.pop(sym, None)
+    state["seen_board"] = current
+    new = [s for s in syms if s not in prev]
+    if state["first"] or not new:
+        return None
+    fresh = [s for s in new if s not in left]
+    for sym in new:
+        state["glow"][board_glow_key(sym)] = (GLOW_NEW, now)
+        # Back on the board: its NEXT departure starts a new quiet window.
+        left.pop(sym, None)
+    if not fresh:
+        return None
+    hottest = next((r for r in rows if isinstance(r, dict)
+                    and r.get("symbol") == fresh[0]), None)
+    return _utterance(hottest, _voice.board_phrase, len(fresh) - 1)
+
+
+# ── per-section voice switches ───────────────────────────────────────────────
+# Which ``app_settings`` key lets each Desk section speak. They sit UNDER
+# ``voice_enabled`` (``should_speak``): a section switch can only narrow what
+# the master switch already allows.
+VOICE_SECTIONS = {"board": "voice_board", "flow": "voice_flow",
+                  "positions": "voice_positions"}
+
+# The order one paint's sentences are queued in. Flow first: it is the one
+# that goes stale fastest.
+SPEAK_ORDER = ("flow", "positions", "board")
+
+
+def section_speaks(settings, section):
+    """Whether ``section``'s own switch lets it speak.
+
+    An ABSENT key reads as on — ``app_settings.load`` merges the defaults, so
+    absence only happens for a hand-built dict, and "on" is the shipped
+    default. An unknown section never speaks: a typo must not become a voice
+    nobody can switch off.
+    """
+    key = VOICE_SECTIONS.get(section)
+    if key is None:
+        return False
+    return bool((settings or {}).get(key, True))
+
+
+def detect_utterances(changed, detectors, settings, now):
+    """Run each section's detector whose views changed; return what to say.
+
+    Detection runs whether or not a section may speak — it is what keeps the
+    seen-sets current and the rows glowing — and only the SENTENCE is dropped
+    for a section switched off. Skipping the detector instead would leave its
+    seen-set stale, so switching the section back on would announce everything
+    that arrived while it was off.
+
+    ``detectors`` maps section -> ``now -> utterance or None``.
+    """
+    out = []
+    for section in SPEAK_ORDER:
+        detect = detectors.get(section)
+        if detect is None or not changed.intersection(_REGION_VIEWS[section]):
+            continue
+        said = detect(now)
+        if said and section_speaks(settings, section):
+            out.append(said)
+    return out
 
 
 # ── the speak gate ───────────────────────────────────────────────────────────
@@ -2023,7 +2132,9 @@ def _prewarm_clips(seed):
         return
     try:
         settings = app_settings.load()
-        if not settings.get("voice_enabled"):
+        # The prewarm only warms FLOW phrases, so the flow switch gates it too.
+        if not settings.get("voice_enabled") or not section_speaks(
+                settings, "flow"):
             return          # nothing to warm, and the latch stays open so
                             # switching it on later still gets the benefit
         _voice.prewarm(prewarm_symbols(seed.get("options:matrix")),
@@ -3486,7 +3597,9 @@ def render():
         # ordering already carries the comparison the bar was drawing.
         el = ui.element("div").classes(
             f"{BOARD_GRID} {_row_shell(BOARD_GRID)} {_ROW} "
-            f"hover:bg-[{_C['line']}]/[0.06]")
+            f"hover:bg-[{_C['line']}]/[0.06] "
+            + glow_classes(state["glow"].get(board_glow_key(row["symbol"])),
+                           state["glow_now"]))
         with el:
             _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
             # SCORE is pinned by the stylesheet as this row's first cell; the
@@ -3717,6 +3830,11 @@ def render():
                              _view("options:captured"))
         return fold_position_arrivals(state, rows, now)
 
+    def _detect_board(now):
+        # The board AS DRAWN: "new" means "joined the top BOARD_ROWS_N".
+        return fold_board_arrivals(
+            state, opportunity_rows(_view("options:matrix")), now)
+
     def _paint(payloads):
         """Merge the changed views in, then repaint only what depends on them."""
         state["data"].update(payloads)
@@ -3732,12 +3850,10 @@ def render():
         state["wall_now"] = datetime.now().astimezone()
         # Detection FIRST: the painters read ``state["glow"]``, so a row has to
         # be marked before the paint that is supposed to draw it lit.
-        for region, detect in (("flow", _detect_flow),
-                               ("positions", _detect_positions)):
-            if changed.intersection(_REGION_VIEWS[region]):
-                said = detect(now)
-                if said:
-                    state["speak"].append(said)
+        state["speak"] = detect_utterances(
+            changed, {"flow": _detect_flow, "positions": _detect_positions,
+                      "board": _detect_board},
+            app_settings.load(), now)
         prune_glows(state["glow"], now)
         for region, deps in _REGION_VIEWS.items():
             if changed.intersection(deps):

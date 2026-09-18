@@ -2126,6 +2126,8 @@ both have a silent failure mode behind them.
 | Voice cache key | `sha1(voice \| rate \| full sentence)` → `webgui/data/voice/<hex>.mp3`, served at `/voice` | `voice.py:clip_name` |
 | Synthesis bound | **20 s** whole-call timeout; measured **~0.9–2.4 s** on a cache miss, **~110 µs** on a hit, ~22–28 KB a clip | `voice.py:SYNTH_TIMEOUT_SEC` |
 | Abandoned-temp sweep | `*.part` older than **3600 s**, swept at prewarm | `voice.py:_PART_MAX_AGE_SEC` |
+| Board re-entry quiet | a symbol back on the Opportunity Board within **1800 s** of leaving glows but is not spoken | `desk.py:BOARD_REENTRY_QUIET_SEC` |
+| Section switches | `voice_board` · `voice_flow` · `voice_positions`, each under `voice_enabled`; detection still runs for a silenced section so re-enabling it announces nothing stale | `desk.py:VOICE_SECTIONS`, `detect_utterances` |
 
 > **`GLOW_SEC` and `GLOW_STEPS` must move together.** The glow is a CSS animation,
 > and the Positions panel rebuilds every row on each re-price — **a rebuilt element

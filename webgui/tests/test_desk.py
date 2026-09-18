@@ -3852,3 +3852,134 @@ def test_the_desk_help_explains_what_the_signal_counts_COUNT():
     low = text.lower()
     assert "buy" in low and "neutral" in low and "sell" in low
     assert "watchlist" in low or "whole board" in low or "every symbol" in low
+
+
+# ── Opportunity Board arrivals ───────────────────────────────────────────────
+def _board(*syms, signal="buy"):
+    return [{"symbol": s, "signal": signal} for s in syms]
+
+
+def test_the_board_first_paint_is_silent_and_dark():
+    s = d.arrival_state()
+    assert d.fold_board_arrivals(s, _board("SPY", "QQQ"), now=1.0) is None
+    assert s["glow"] == {}
+    assert s["seen_board"] == {"SPY", "QQQ"}
+
+
+def test_a_symbol_joining_the_board_glows_and_is_spoken():
+    s = d.arrival_state()
+    d.fold_board_arrivals(s, _board("SPY", "QQQ"), now=1.0)
+    s["first"] = False
+    said = d.fold_board_arrivals(s, _board("NVDA", "SPY"), now=2.0)
+    assert said == "N V D A. Joins the Opportunity Board, buy signal."
+    assert s["glow"] == {d.board_glow_key("NVDA"): (d.GLOW_NEW, 2.0)}
+
+
+def test_the_hottest_arrival_is_named_and_the_rest_counted():
+    s = d.arrival_state()
+    d.fold_board_arrivals(s, _board("SPY"), now=1.0)
+    s["first"] = False
+    said = d.fold_board_arrivals(s, _board("NVDA", "AMD", "SPY"), now=2.0)
+    assert said.startswith("N V D A.") and said.endswith("Plus 1 more.")
+
+
+def test_a_symbol_bouncing_back_onto_the_board_glows_but_stays_quiet():
+    """Two names trading places at sixth must not talk on every refresh."""
+    s = d.arrival_state()
+    d.fold_board_arrivals(s, _board("SPY", "QQQ"), now=0.0)
+    s["first"] = False
+    d.fold_board_arrivals(s, _board("SPY"), now=10.0)          # QQQ drops off
+    said = d.fold_board_arrivals(s, _board("SPY", "QQQ"), now=20.0)
+    assert said is None
+    assert d.board_glow_key("QQQ") in s["glow"]
+
+
+def test_the_quiet_window_expires():
+    s = d.arrival_state()
+    d.fold_board_arrivals(s, _board("SPY", "QQQ"), now=0.0)
+    s["first"] = False
+    d.fold_board_arrivals(s, _board("SPY"), now=10.0)
+    later = 10.0 + d.BOARD_REENTRY_QUIET_SEC + 1
+    said = d.fold_board_arrivals(s, _board("SPY", "QQQ"), now=later)
+    assert said and said.startswith("Q Q Q.")
+
+
+def test_the_whole_board_reappearing_after_a_blip_is_silent():
+    s = d.arrival_state()
+    d.fold_board_arrivals(s, _board("SPY", "QQQ"), now=0.0)
+    s["first"] = False
+    d.fold_board_arrivals(s, [], now=5.0)                        # empty matrix
+    assert d.fold_board_arrivals(s, _board("SPY", "QQQ"), now=7.0) is None
+
+
+def test_the_board_fold_survives_a_malformed_row():
+    s = d.arrival_state()
+    d.fold_board_arrivals(s, [], now=0.0)
+    s["first"] = False
+    assert d.fold_board_arrivals(
+        s, ["junk", None, {"symbol": None}, {"symbol": "SPY"}], now=1.0)
+
+
+def test_a_board_row_wears_its_glow():
+    """The painter reads the glow under the namespaced key, so an arrival
+    actually lights up."""
+    src = inspect.getsource(d.render)
+    assert "board_glow_key(row[\"symbol\"])" in src
+
+
+# ── per-section voice switches ───────────────────────────────────────────────
+def test_section_switches_default_on_and_unknown_sections_never_speak():
+    assert d.section_speaks({}, "flow") is True
+    assert d.section_speaks({"voice_flow": False}, "flow") is False
+    assert d.section_speaks({"voice_flow": False}, "board") is True
+    assert d.section_speaks({}, "nonsense") is False
+
+
+def _detectors(calls):
+    def mk(section):
+        def detect(now):
+            calls.append(section)
+            return f"{section} said"
+        return detect
+    return {sec: mk(sec) for sec in ("flow", "positions", "board")}
+
+
+_ALL_VIEWS = {"options:flow_alerts", "options:paper_account", "options:matrix"}
+
+
+def test_every_section_speaks_by_default_in_speak_order():
+    calls = []
+    out = d.detect_utterances(_ALL_VIEWS, _detectors(calls), {}, now=1.0)
+    assert out == ["flow said", "positions said", "board said"]
+
+
+def test_a_section_switched_off_is_silent_but_still_detected():
+    """Detection must keep running, or switching a section back on would
+    announce everything that arrived while it was off."""
+    for section, key in d.VOICE_SECTIONS.items():
+        calls = []
+        out = d.detect_utterances(_ALL_VIEWS, _detectors(calls),
+                                  {key: False}, now=1.0)
+        assert f"{section} said" not in out
+        assert len(out) == 2
+        assert section in calls
+
+
+def test_only_sections_whose_views_changed_are_detected():
+    calls = []
+    out = d.detect_utterances({"options:matrix"}, _detectors(calls), {},
+                              now=1.0)
+    assert out == ["board said"] and calls == ["board"]
+
+
+def test_the_flow_switch_also_stops_the_flow_clip_prewarm(monkeypatch):
+    """The prewarm only warms flow phrases; with flow silenced it is a cost
+    for nothing."""
+    monkeypatch.setitem(d._PREWARMED, "done", False)
+    monkeypatch.setattr(d.app_settings, "load",
+                        lambda: {"voice_enabled": True, "voice_flow": False})
+    called = []
+    monkeypatch.setattr(d._voice, "prewarm", lambda *a, **k: called.append(a))
+    d._prewarm_clips({"options:matrix": {"rows": [{"symbol": "SPY"}]}})
+    assert called == []
+    assert d._PREWARMED["done"] is False

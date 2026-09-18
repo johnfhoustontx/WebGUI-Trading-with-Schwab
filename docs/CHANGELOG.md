@@ -4,7 +4,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-18 (**Symbol Dossier → Find trades**.) A header button
+**Last updated:** 2026-09-18 (**Desk spoken alerts — one switch per section, and
+the Opportunity Board speaks.**) Settings → Spoken alerts (Desk) gains three
+switches under the main one — **Opportunity Board**, **Live Flow Alerts**,
+**Positions** (`voice_board` / `voice_flow` / `voice_positions`, default on, greyed
+while `voice_enabled` is off). `desk.detect_utterances` always runs each section's
+fold, so rows still glow and a re-enabled section announces nothing stale; only the
+sentence is dropped. New: a symbol joining the board's top six speaks
+(`fold_board_arrivals` + `voice.board_phrase`, "N V D A. Joins the Opportunity
+Board, buy signal."), except one that left within `BOARD_REENTRY_QUIET_SEC` (30
+min), which glows silently. That covers names swapping at sixth and the whole board
+reappearing after an empty matrix. The flow-clip prewarm now also needs
+`voice_flow`. The three keys are reviewed as public-safe in `test_live_screens.py`:
+each only narrows `voice_enabled`, which the public origin pins off. Page help, User
+Guide, Reference Guide, Technical Reference and `webgui-routes.md` updated.
+
+**Prior —** 2026-09-18 (**Symbol Dossier → Find trades**.) A header button
 beside Refresh opens the Strategy Finder on the dossier's symbol and runs its scan at
 once, through the existing `handoff.send_to_swing` stash. Drawn only once the name
 has a real quote (`finder_allowed`: scanned, collected, or a dossier with no error

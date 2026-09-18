@@ -291,6 +291,28 @@ def position_phrase(row, extra=0):
     return _sentence(d.get("symbol"), body, extra)
 
 
+# The board signals worth a clause. "neutral" is the resting state, so saying
+# it would be a word that carries nothing — the same rule the board's own
+# rationale line follows.
+_BOARD_SIGNAL_WORDS = {"buy": "buy signal", "sell": "sell signal"}
+
+
+def board_phrase(row, extra=0):
+    """``'N V D A. Joins the Opportunity Board, buy signal.'``
+
+    Reads ``desk.opportunity_rows``' own ``signal`` field — the word the board's
+    chip prints — so the spoken and printed vocabularies cannot drift. Like the
+    other two phrases, it assumes the caller only gets here for a genuine
+    arrival; deciding which symbols those are is the Desk's job.
+    """
+    d = row if isinstance(row, dict) else {}
+    body = "Joins the Opportunity Board"
+    word = _BOARD_SIGNAL_WORDS.get(str(d.get("signal") or "").strip().lower())
+    if word:
+        body = f"{body}, {word}"
+    return _sentence(d.get("symbol"), body, extra)
+
+
 # ── the mp3 cache ────────────────────────────────────────────────────────────
 # Generated clips, gitignored and regenerating on demand. They live under
 # ``data/`` rather than ``static/`` precisely because they are generated: a

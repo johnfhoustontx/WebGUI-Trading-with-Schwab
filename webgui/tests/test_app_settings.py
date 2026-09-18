@@ -140,3 +140,19 @@ def test_unfreeze_restores_normal_behaviour(tmp_path, monkeypatch):
     app_settings.reset_cache()
     app_settings.set("macro_skin", "A")
     assert app_settings.get("macro_skin") == "A"
+
+
+def test_each_desk_voice_section_has_its_own_switch_and_ships_on():
+    """Opportunity Board, Live Flow Alerts and Positions speak by default, and
+    each can be switched off without touching the others."""
+    d = app_settings.DEFAULTS
+    for key in ("voice_board", "voice_flow", "voice_positions"):
+        assert d[key] is True
+
+
+def test_the_desk_section_map_and_the_defaults_agree():
+    """A section whose key is missing from DEFAULTS would read as on forever
+    with no Settings switch able to reach it."""
+    from pages import desk
+    for key in desk.VOICE_SECTIONS.values():
+        assert key in app_settings.DEFAULTS

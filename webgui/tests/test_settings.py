@@ -97,3 +97,12 @@ def test_apply_manual_paper_lifecycle_persists_even_if_the_bus_is_down(tmp_path,
     monkeypatch.setattr(S.bus_client, "request", _boom)
     S.apply_manual_paper_lifecycle(True)  # must not raise out of the click handler
     assert S.app_settings.load()["manual_paper_lifecycle_enabled"] is True
+
+
+def test_every_desk_voice_section_has_a_settings_switch():
+    """The Settings card's switches and the Desk's section map must cover the
+    same keys, or a section speaks with no way to silence it."""
+    from pages import desk
+    from pages import settings as st
+    assert ({k for k, _ in st.VOICE_SECTION_SWITCHES}
+            == set(desk.VOICE_SECTIONS.values()))

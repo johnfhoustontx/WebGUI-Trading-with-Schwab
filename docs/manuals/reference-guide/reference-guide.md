@@ -337,9 +337,17 @@ accident:
   reading a list. Six sentences back to back is a minute of talking over a moving
   tape.
 
-Everything about it is switchable under *Settings → Spoken alerts (Desk)*, and it
-obeys the **same** market-hours restriction as the scanner chime — there is
-deliberately no second switch to fall out of step with the first.
+- **A symbol joining the Opportunity Board speaks too** — *"N V D A. Joins the
+  Opportunity Board, buy signal."* (a neutral signal adds no clause). The board is a
+  ranking cut at six, so a symbol that dropped off within the **last 30 minutes**
+  glows when it climbs back on but stays silent; otherwise two names trading places
+  at sixth would talk on every refresh.
+
+Everything about it is switchable under *Settings → Spoken alerts (Desk)* —
+including **one switch per section** (Opportunity Board, Live Flow Alerts,
+Positions) under the main one. A section switched off still glows; only its
+sentence is dropped. It obeys the **same** market-hours restriction as the scanner
+chime — there is deliberately no second switch to fall out of step with the first.
 
 ### What the numbers are, and are not
 
@@ -4036,8 +4044,9 @@ it is what stops the app interrupting you for mediocre signals.
 > Browsers block audio until you interact with the page. **Test sound** — or **Test
 > voice** — unlocks it.
 
-**Spoken alerts (Desk).** Whether the Desk announces new flow alerts and
-newly-opened positions out loud, which of six neural voices does it, and how loud.
+**Spoken alerts (Desk).** Whether the Desk announces new flow alerts,
+newly-opened positions and symbols joining the Opportunity Board out loud — one
+main switch plus one per section — which of six neural voices does it, and how loud.
 **Test voice** speaks a sample and doubles as the audio unlock. Note what is *not*
 here: a market-hours toggle. Spoken alerts reuse the one in **Scanner alerts**, so
 the two can never disagree about when the app is allowed to make noise.

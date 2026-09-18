@@ -122,7 +122,14 @@ Premium shift alert, calls over."* A new position adds its strikes, expiry and e
 says **credit or debit** rather than leaving you to work out the sign. If several
 arrive at once it names the newest and counts the rest ("plus 5 more"). A position that only changes **status** — OK to At risk to Rescue — glows
 amber and stays **silent**: it was already there, and the flag column has already
-told you.
+told you. A symbol that **joins the Opportunity Board** is announced too — *"N V D
+A. Joins the Opportunity Board, buy signal."* — unless it only dropped off in the
+last half hour, which keeps two names swapping places at the bottom from talking
+on every refresh.
+
+Each of the three — **Opportunity Board**, **Live Flow Alerts** and **Positions** —
+has its own switch on the **Settings** page, under the main *Enable spoken
+alerts* switch. A section switched off still glows; it just stays quiet.
 
 ⚠ **If you never hear anything, your browser is probably blocking sound.** Browsers
 refuse to play audio until you have clicked something on the page, and they do it

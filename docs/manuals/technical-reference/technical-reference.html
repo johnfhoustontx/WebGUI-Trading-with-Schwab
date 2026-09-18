@@ -3161,6 +3161,16 @@ both have a silent failure mode behind them.</p>
 <td><code>*.part</code> older than <strong>3600 s</strong>, swept at prewarm</td>
 <td><code>voice.py:_PART_MAX_AGE_SEC</code></td>
 </tr>
+<tr>
+<td>Board re-entry quiet</td>
+<td>a symbol back on the Opportunity Board within <strong>1800 s</strong> of leaving glows but is not spoken</td>
+<td><code>desk.py:BOARD_REENTRY_QUIET_SEC</code></td>
+</tr>
+<tr>
+<td>Section switches</td>
+<td><code>voice_board</code> · <code>voice_flow</code> · <code>voice_positions</code>, each under <code>voice_enabled</code>; detection still runs for a silenced section so re-enabling it announces nothing stale</td>
+<td><code>desk.py:VOICE_SECTIONS</code>, <code>detect_utterances</code></td>
+</tr>
 </tbody>
 </table>
 <blockquote>

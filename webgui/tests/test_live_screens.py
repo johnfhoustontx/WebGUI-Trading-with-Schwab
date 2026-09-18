@@ -137,8 +137,11 @@ PUBLIC_UNSAFE_DEFAULTS = {
 #     never reaches the ~20-minute paid Claude verdict here;
 #   * or read by a published page purely to CHOOSE WHAT TO DRAW
 #     (``macro_skin``, the three ``gamma_*`` display knobs,
-#     ``alert_market_hours_only`` as a gate, the two remaining ``voice_*`` keys
-#     which are inert once ``voice_enabled`` is off);
+#     ``alert_market_hours_only`` as a gate, the remaining ``voice_*`` keys
+#     which are inert once ``voice_enabled`` is off -- the three per-section
+#     switches ``voice_board``/``voice_flow``/``voice_positions`` included: each
+#     can only NARROW what ``voice_enabled`` allows, so none can turn a
+#     synthesis on);
 #   * or nav chrome this process has none of (``nav_pinned``);
 #   * or ``chain_grid_columns`` -- read only by the Calculator/Simulator entry
 #     panel, neither published here, purely to choose which chain columns to
@@ -148,7 +151,8 @@ PUBLIC_UNSAFE_DEFAULTS = {
 PUBLIC_SAFE_DEFAULTS = {
     "alert_enabled", "alert_sound", "alert_volume", "alert_market_hours_only",
     "alert_min_score", "desktop_notifications", "flow_alerts_enabled",
-    "voice_name", "voice_volume", "captured_autoclose_enabled",
+    "voice_name", "voice_volume", "voice_board", "voice_flow",
+    "voice_positions", "captured_autoclose_enabled",
     "manual_paper_lifecycle_enabled", "ticker_enabled", "ticker_speed",
     "nav_pinned", "gamma_level_tracks", "gamma_spot_style",
     "gamma_spot_interval", "gamma_netprem_group", "gamma_netprem_mode",

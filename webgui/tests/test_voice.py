@@ -1024,3 +1024,23 @@ def test_the_prewarm_list_is_exactly_the_contract_less_pairs():
     want = {(k, s) for k, s in real if k not in voice.CONTRACT_KINDS}
     assert set(voice.FLOW_CAUSES) == want
     assert len(want) == 4
+
+
+# ── board_phrase ─────────────────────────────────────────────────────────────
+def test_board_phrase_names_the_ticker_and_a_directional_signal():
+    assert (voice.board_phrase({"symbol": "NVDA", "signal": "buy"})
+            == "N V D A. Joins the Opportunity Board, buy signal.")
+    assert (voice.board_phrase({"symbol": "SPY", "signal": "sell"})
+            == "S P Y. Joins the Opportunity Board, sell signal.")
+
+
+def test_board_phrase_says_nothing_for_a_neutral_or_unknown_signal():
+    """Neutral is the resting state: a clause for it would carry nothing."""
+    for sig in ("neutral", None, "", "garbage"):
+        assert (voice.board_phrase({"symbol": "SPY", "signal": sig})
+                == "S P Y. Joins the Opportunity Board.")
+
+
+def test_board_phrase_carries_the_burst_tail():
+    assert voice.board_phrase({"symbol": "SPY", "signal": "buy"},
+                              extra=2).endswith("Plus 2 more.")

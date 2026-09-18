@@ -19,6 +19,14 @@ from pages.options import theme
 from pages.options.theme import BTN_3D, BTN_3D_DANGER
 from pages.ui_guard import guard_async
 
+# The Desk's per-section voice switches: (app_settings key, label). The labels
+# name the Desk panel and what makes it speak, in the Desk's own order.
+VOICE_SECTION_SWITCHES = (
+    ("voice_board", "Opportunity Board — a symbol joins the board"),
+    ("voice_flow", "Live Flow Alerts — a new alert"),
+    ("voice_positions", "Positions — a newly-opened position"),
+)
+
 
 def apply_ticker_enabled(value) -> None:
     """Persist the ticker toggle. It only shows or hides the marquee.
@@ -128,13 +136,23 @@ def render():
 
     with ui.card().classes("w-full max-w-2xl"):
         ui.label("Spoken alerts (Desk)").classes("text-subtitle1 font-bold")
-        ui.label("Announce the ticker and the cause out loud when a new flow "
-                 "alert or a newly-opened position appears on the Desk. Uses "
-                 "the existing market-hours gate above.").classes(
-                 "opacity-70 text-sm")
+        ui.label("Announce the ticker and the cause out loud when something "
+                 "new appears on the Desk. Uses the existing market-hours gate "
+                 "above.").classes("opacity-70 text-sm")
 
         v_enable = ui.switch("Enable spoken alerts", value=s["voice_enabled"])
         v_enable.on_value_change(lambda e: app_settings.set("voice_enabled", e.value))
+
+        # One switch per Desk section, UNDER the master switch: each is greyed
+        # out while spoken alerts are off, because it can only narrow what the
+        # master switch already allows. Order follows the Desk's own panels.
+        ui.label("Speak for").classes("text-sm opacity-70")
+        with ui.column().classes("gap-0 pl-4"):
+            for key, label in VOICE_SECTION_SWITCHES:
+                sw = ui.switch(label, value=s[key])
+                sw.on_value_change(
+                    lambda e, k=key: app_settings.set(k, e.value))
+                sw.bind_enabled_from(v_enable, "value")
 
         with ui.row().classes("items-center gap-4"):
             # Wider than the sound picker beside it: the voice names are long.

@@ -172,6 +172,16 @@ flow kinds speak, `big_delta` included — that deliberately
 diverges from `alerts.py`'s quiet-live exclusion, because the exclusion exists to
 stop an *information-free chime* at that frequency and an announcement naming the
 ticker and the contract is not one.
+- **Per-section switches + the board voice (2026-09-18).** `voice_board` /
+  `voice_flow` / `voice_positions` sit under `voice_enabled` (Settings shows them
+  greyed while it is off). `desk.detect_utterances` runs every section's fold
+  regardless and drops only the SENTENCE for a silenced one — skipping the fold
+  would leave its seen-set stale, and re-enabling it would announce the backlog. A
+  symbol joining the top `BOARD_ROWS_N` speaks (`fold_board_arrivals`,
+  `voice.board_phrase`); one that left within `BOARD_REENTRY_QUIET_SEC` (30 min)
+  glows silently, which also covers the whole board reappearing after an empty
+  matrix. Board glow keys are namespaced `board:<SYMBOL>` since the glow map is
+  shared. The flow-clip prewarm is gated on `voice_flow` too.
 - **Two phrase forms, chosen by what the row CARRIES, not by the alert kind.**
   `uoa`/`big_delta` carry a strike + expiry and take the contract form (the word
   "alert" dropped, the side moved after the strike); `crossover`/`gamma_flip` carry

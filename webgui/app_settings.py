@@ -18,7 +18,13 @@ DEFAULTS = {
     # the existing alert_market_hours_only gate is honoured instead, because two
     # market-hours switches sitting beside each other is a drift hazard, not a
     # feature.
-    "voice_enabled": True,           # speak new Desk flow alerts + positions
+    "voice_enabled": True,           # master switch for every Desk announcement
+    # Per-section switches UNDER the master one: each only narrows what it
+    # already allows, so ``voice_enabled`` off is silence whatever these say
+    # (and the public origin's single pin keeps covering all of them).
+    "voice_board": True,             # a symbol joins the Opportunity Board
+    "voice_flow": True,              # a new Live Flow Alert
+    "voice_positions": True,         # a newly-opened position
     "voice_name": "en-US-AriaNeural",  # see voice.VOICES
     "voice_volume": 0.8,             # 0.0–1.0
     "captured_autoclose_enabled": True,  # auto-manage captured signals (break-even trail + auto-close)
