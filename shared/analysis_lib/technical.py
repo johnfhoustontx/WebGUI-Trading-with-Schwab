@@ -14,7 +14,7 @@ Version 1.0.0 Changes:
 
 import numpy as np
 import pandas as pd
-from typing import Optional, Dict, Tuple, List
+from typing import Optional, Dict, Tuple
 import logging
 
 # `config` is imported RELATIVELY when this module is loaded as part of the
@@ -24,9 +24,9 @@ import logging
 # swallowed into a fallback that would silently bind ANOTHER app's `config`
 # module -- exactly the cross-app collision documented in CLAUDE.md.
 if __package__:
-    from .config import (EMA_PERIODS, TREND_STATES, TIMEFRAME_WEIGHTS)
+    from .config import (TIMEFRAME_WEIGHTS)
 else:
-    from config import (EMA_PERIODS, TREND_STATES, TIMEFRAME_WEIGHTS)
+    from config import (TIMEFRAME_WEIGHTS)
 
 logger = logging.getLogger(__name__)
 
@@ -63,22 +63,6 @@ def calculate_ema(df: pd.DataFrame, period: int) -> Optional[pd.Series]:
         pd.Series(seq).ewm(alpha=multiplier, adjust=False).mean().to_numpy())
 
     return pd.Series(ema_values, index=df.index)
-
-
-def calculate_sma(df: pd.DataFrame, period: int) -> Optional[pd.Series]:
-    """Calculate Simple Moving Average
-    
-    Args:
-        df: DataFrame with 'close' column
-        period: SMA period
-        
-    Returns:
-        Series of SMA values or None if insufficient data
-    """
-    if df is None or len(df) < period:
-        return None
-    
-    return df['close'].rolling(window=period).mean()
 
 
 #############################################
@@ -191,43 +175,6 @@ def calculate_adx(df: pd.DataFrame, period: int = 14) -> float:
     return float(adx.iloc[-1]) if not pd.isna(adx.iloc[-1]) else 20.0
 
 
-def calculate_macd(
-    df: pd.DataFrame, 
-    fast: int = 12, 
-    slow: int = 26, 
-    signal: int = 9
-) -> Dict[str, float]:
-    """Calculate MACD
-    
-    Args:
-        df: DataFrame with 'close' column
-        fast: Fast EMA period
-        slow: Slow EMA period
-        signal: Signal line period
-        
-    Returns:
-        Dict with 'macd', 'signal', 'histogram' values
-    """
-    if df is None or len(df) < slow + signal:
-        return {'macd': 0, 'signal': 0, 'histogram': 0}
-    
-    ema_fast = calculate_ema(df, fast)
-    ema_slow = calculate_ema(df, slow)
-    
-    if ema_fast is None or ema_slow is None:
-        return {'macd': 0, 'signal': 0, 'histogram': 0}
-    
-    macd_line = ema_fast - ema_slow
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram = macd_line - signal_line
-
-    return {
-        'macd': float(macd_line.iloc[-1]) if not pd.isna(macd_line.iloc[-1]) else 0,
-        'signal': float(signal_line.iloc[-1]) if not pd.isna(signal_line.iloc[-1]) else 0,
-        'histogram': float(histogram.iloc[-1]) if not pd.isna(histogram.iloc[-1]) else 0,
-    }
-
-
 def macd_histogram_series(
     df: pd.DataFrame,
     fast: int = 12,
@@ -239,8 +186,9 @@ def macd_histogram_series(
     Computing the series once lets a caller read the last TWO histogram values
     without recomputing MACD on a truncated copy of the frame. Because the EMAs
     use an ``adjust=False`` recurrence (value at i depends only on bars ≤ i), the
-    series' ``iloc[-2]`` equals ``calculate_macd(df.iloc[:-1])['histogram']`` —
-    so it's a drop-in for the old two-call pattern. NOTE the exact equivalence for
+    series' ``iloc[-2]`` equals the histogram of ``df.iloc[:-1]`` computed on its
+    own — so it replaced the old two-call pattern (the ``calculate_macd`` helper
+    that pattern used was removed 2026-09-19). NOTE the exact equivalence for
     ``iloc[-2]`` requires ``len(df) >= slow + signal + 1`` (so the truncated frame
     is also sufficient); at exactly ``slow + signal`` the old two-call returned 0
     for the prev value while this returns the true histogram. The only caller
@@ -401,33 +349,6 @@ def calculate_volume_profile(
 # VOLATILITY INDICATORS
 #############################################
 
-def calculate_atr(df: pd.DataFrame, period: int = 14) -> float:
-    """Calculate Average True Range
-    
-    Args:
-        df: DataFrame with 'high', 'low', 'close' columns
-        period: ATR period
-        
-    Returns:
-        Current ATR value
-    """
-    if df is None or len(df) < period + 1:
-        return 0.0
-    
-    high = df['high']
-    low = df['low']
-    close = df['close']
-    
-    tr = pd.concat([
-        high - low,
-        (high - close.shift()).abs(),
-        (low - close.shift()).abs()
-    ], axis=1).max(axis=1)
-    
-    atr = tr.rolling(window=period).mean()
-    
-    return float(atr.iloc[-1]) if not pd.isna(atr.iloc[-1]) else 0.0
-
 
 #############################################
 # TREND ANALYSIS
@@ -515,62 +436,6 @@ def calculate_ema_alignment(
 #############################################
 # RELATIVE STRENGTH
 #############################################
-
-def calculate_relative_strength(
-    stock_df: pd.DataFrame,
-    benchmark_df: pd.DataFrame,
-    periods: List[int] = None
-) -> Dict[str, float]:
-    """Calculate relative strength vs benchmark (e.g., SPY)
-    
-    Args:
-        stock_df: Stock DataFrame with 'close' column
-        benchmark_df: Benchmark DataFrame with 'close' column
-        periods: List of lookback periods in days
-        
-    Returns:
-        Dict mapping period label to RS value (100 = parity)
-    """
-    if periods is None:
-        periods = [5, 21, 63, 126]  # 1W, 1M, 3M, 6M
-    
-    labels = ['1W', '1M', '3M', '6M']
-    results = {}
-    
-    if stock_df is None or benchmark_df is None:
-        return {label: 100.0 for label in labels[:len(periods)]}
-    
-    for i, period in enumerate(periods):
-        label = labels[i] if i < len(labels) else f'{period}D'
-        
-        if len(stock_df) <= period or len(benchmark_df) <= period:
-            results[label] = 100.0
-            continue
-        
-        stock_return = (
-            stock_df['close'].iloc[-1] / stock_df['close'].iloc[-period-1] - 1
-        )
-
-        benchmark_return = (
-            benchmark_df['close'].iloc[-1] / benchmark_df['close'].iloc[-period-1] - 1
-        )
-
-        # Parity-preserving ratio: 100 = parity, >100 = outperformance. Stable in
-        # down markets (no sign inversion when the benchmark return is negative),
-        # unlike the old return/return quotient.
-        results[label] = 100.0 * (1.0 + stock_return) / (1.0 + benchmark_return)
-    
-    # Calculate composite RS
-    if results:
-        weights = [0.10, 0.25, 0.35, 0.30][:len(results)]
-        total_weight = sum(weights)
-        composite = sum(
-            results[label] * w / total_weight 
-            for label, w in zip(results.keys(), weights)
-        )
-        results['composite'] = composite
-    
-    return results
 
 
 #############################################

@@ -1,15 +1,3 @@
-from shared.contracts.sentiment import IntradayHistory
-
-
-def test_intraday_history_accepts_points():
-    h = IntradayHistory(points=[{"ts": 1, "sentiment": 6.0, "trend": 70.0}])
-    assert h.points[0]["sentiment"] == 6.0
-
-
-def test_intraday_history_defaults_empty():
-    assert IntradayHistory().points == []
-
-
 def _valid_vec():
     return {"mean_reversion": 0.5, "trending": 0.3, "breakout": 0.05,
             "choppy": 0.1, "crisis": 0.05}

@@ -55,10 +55,6 @@ SECTORS = frozenset({
     "INDEX",
 })
 
-#: Prefix for the synthetic single-symbol bucket an UNMAPPED name gets. Chosen so
-#: it can never collide with a real sector name (none contains ``?``). The
-#: bucket rule itself lives in ``shared.book_caps.sector_bucket``.
-_LONE = book_caps.UNMAPPED_PREFIX
 
 DEFAULTS: dict = {"sectors": {}}
 
@@ -117,8 +113,3 @@ def group_key(symbol):
     return book_caps.sector_bucket(load().get("sectors"), symbol)
 
 
-def is_mapped(symbol) -> bool:
-    """Whether this symbol has a real sector. The count behind the log line that
-    keeps the map's coverage honest — an unmapped name is not an error, but a
-    growing number of them means the cap is quietly covering less of the book."""
-    return sector_of(symbol) is not None

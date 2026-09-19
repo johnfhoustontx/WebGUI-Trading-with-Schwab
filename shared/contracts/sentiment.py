@@ -17,10 +17,6 @@ class CompositeSnapshot(_Base):
     components: dict = {}
 
 
-class IntradayHistory(_Base):
-    points: list = []   # [{"ts": int, "sentiment": float, "trend": float}, ...]
-
-
 class RegimeState(_Base):
     ts: str                          # ISO-8601 of this sample
     as_of: str = ""                  # human/display stamp (may equal ts)

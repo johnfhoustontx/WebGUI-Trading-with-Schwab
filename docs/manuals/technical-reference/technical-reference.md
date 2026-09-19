@@ -1287,7 +1287,7 @@ read ADX 100**. ADX feeds the Day trend needle, the Week/Month structural arcs, 
 regime classifier's *trending* tells and the Trade page's momentum block, so readings
 recorded before that date are not comparable with ones after it.
 
-**MACD** — `calculate_macd(df, fast=12, slow=26, signal=9)`:
+**MACD** — `macd_histogram_series(df, fast=12, slow=26, signal=9)`:
 
 ```
 macd_line   = EMA(close,12) - EMA(close,26)
@@ -1295,8 +1295,8 @@ signal_line = EMA(macd_line, 9)
 histogram   = macd_line - signal_line
 ```
 
-`macd_histogram_series(df)` returns the full histogram series (so callers can read
-the prior bar for acceleration).
+It returns the full histogram series (so callers can read the prior bar for
+acceleration).
 
 **VWAP** — `calculate_vwap(df)`:
 

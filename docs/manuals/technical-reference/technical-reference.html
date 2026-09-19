@@ -1970,13 +1970,13 @@ downward movement too, and compared <code>-DM</code> against an already-filtered
 read ADX 100</strong>. ADX feeds the Day trend needle, the Week/Month structural arcs, the
 regime classifier's <em>trending</em> tells and the Trade page's momentum block, so readings
 recorded before that date are not comparable with ones after it.</p>
-<p><strong>MACD</strong> — <code>calculate_macd(df, fast=12, slow=26, signal=9)</code>:</p>
+<p><strong>MACD</strong> — <code>macd_histogram_series(df, fast=12, slow=26, signal=9)</code>:</p>
 <pre><code>macd_line   = EMA(close,12) - EMA(close,26)
 signal_line = EMA(macd_line, 9)
 histogram   = macd_line - signal_line
 </code></pre>
-<p><code>macd_histogram_series(df)</code> returns the full histogram series (so callers can read
-the prior bar for acceleration).</p>
+<p>It returns the full histogram series (so callers can read the prior bar for
+acceleration).</p>
 <p><strong>VWAP</strong> — <code>calculate_vwap(df)</code>:</p>
 <pre><code>typical = (high + low + close) / 3
 vwap    = cumsum(typical · volume) / cumsum(volume)

@@ -1,62 +1,25 @@
 """
-Sector Analysis - Sector/Industry Ranking and Rotation Analysis
-Version: 1.0.0
-Last Updated: 2025-01-01
+Sector Analysis - stock -> sector classification and stock-vs-sector strength.
 
-Sector and industry strength ranking per Blueprint Section 10.1-10.3.
-
-Version 1.0.0 Changes:
-- Initial implementation
-- Sector RS ranking (1-11)
-- Industry identification via FinViz
-- Rotation detection
+What survives of the Blueprint sector module: ``get_sector_info`` (local map,
+then FinViz) and ``calculate_stock_vs_sector_rs``, both consumed by
+portfolio-analyzer. The SectorRanker (sector RS ranking 1-11 + rotation
+quadrants) had no production caller and was removed 2026-09-19.
 """
 
 import logging
-import time
 import re
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List
 from dataclasses import dataclass
-from datetime import datetime
 
 import requests
 import pandas as pd
-
-# `config` is imported RELATIVELY when this module is loaded as part of the
-# package, and by bare name when it is loaded standalone (several consumers put
-# shared/analysis_lib directly on sys.path and `import sector_analysis`). The branch is on
-# __package__ rather than a try/except so a genuine error inside config.py is NOT
-# swallowed into a fallback that would silently bind ANOTHER app's `config`
-# module -- exactly the cross-app collision documented in CLAUDE.md.
-if __package__:
-    from .config import (SECTORS, SECTOR_ETFS, STYLE_SECTOR_RULES)
-else:
-    from config import (SECTORS, SECTOR_ETFS, STYLE_SECTOR_RULES)
 
 logger = logging.getLogger(__name__)
 
 #############################################
 # DATA CLASSES
 #############################################
-
-@dataclass
-class SectorRanking:
-    """Sector ranking result"""
-    symbol: str
-    name: str
-    rank: int
-    rs_1w: float  # Relative strength vs SPY (100 = parity)
-    rs_1m: float
-    rs_3m: float
-    rs_6m: float
-    composite_rs: float
-    pct_1w: float  # Actual 1-week % return
-    pct_1m: float  # Actual 1-month % return
-    pct_3m: float  # Actual 3-month % return
-    pct_above_50dma: float
-    cycle_position: str
-    trend: str  # RISING, FALLING, NEUTRAL
-    rotation_status: str = 'NEUTRAL'  # LEADING, WEAKENING, LAGGING, IMPROVING
 
 
 @dataclass 
@@ -291,231 +254,6 @@ class FinVizScraper:
             'Utilities': 'XLU',
         }
         return mapping.get(sector, 'SPY')
-    
-    @staticmethod
-    def get_industry_stocks(industry_code: str, limit: int = 20) -> List[str]:
-        """Get top stocks in an industry from FinViz
-        
-        Args:
-            industry_code: FinViz industry code
-            limit: Max stocks to return
-            
-        Returns:
-            List of stock symbols
-        """
-        try:
-            url = f"{FinVizScraper.BASE_URL}/screener.ashx?v=111&f=ind_{industry_code}&o=-marketcap"
-            response = requests.get(url, headers=FinVizScraper.HEADERS, timeout=10)
-            
-            if response.status_code != 200:
-                return []
-            
-            # Parse ticker symbols from screener
-            tickers = re.findall(r'<a href="quote\.ashx\?t=([A-Z]+)"', response.text)
-            return list(dict.fromkeys(tickers))[:limit]  # Remove duplicates, limit
-            
-        except Exception as e:
-            logger.warning(f"Error fetching industry stocks: {e}")
-            return []
-
-
-#############################################
-# SECTOR RANKER
-#############################################
-
-class SectorRanker:
-    """Rank sectors by relative strength (Blueprint Section 10.1)"""
-    
-    def __init__(self, market_client):
-        """
-        Args:
-            market_client: MarketDataClient instance for fetching data
-        """
-        self.client = market_client
-        self._rankings: List[SectorRanking] = []
-        self._last_update: Optional[datetime] = None
-    
-    def update_rankings(self, spy_df: pd.DataFrame = None) -> List[SectorRanking]:
-        """Update sector rankings
-        
-        Args:
-            spy_df: SPY daily DataFrame for RS calculation (optional, will fetch if None)
-            
-        Returns:
-            List of SectorRanking sorted by composite RS (best first)
-        """
-        logger.info("Updating sector rankings...")
-        
-        # Fetch SPY data if not provided
-        if spy_df is None:
-            spy_df = self.client.get_daily('SPY', months=12)
-        
-        if spy_df is None or len(spy_df) < 126:
-            logger.error("Insufficient SPY data for sector ranking")
-            return []
-        
-        rankings = []
-        
-        for etf in SECTOR_ETFS:
-            try:
-                df = self.client.get_daily(etf, months=12)
-                time.sleep(0.2)  # Rate limiting
-                
-                if df is None or len(df) < 126:
-                    logger.warning(f"Insufficient data for {etf}")
-                    continue
-                
-                # Calculate period returns
-                rs_1w = self._calc_return(df, 5)
-                rs_1m = self._calc_return(df, 21)
-                rs_3m = self._calc_return(df, 63)
-                rs_6m = self._calc_return(df, 126)
-                
-                # Calculate RS vs SPY
-                spy_1w = self._calc_return(spy_df, 5)
-                spy_1m = self._calc_return(spy_df, 21)
-                spy_3m = self._calc_return(spy_df, 63)
-                spy_6m = self._calc_return(spy_df, 126)
-                
-                # Sector RS vs SPY: parity-preserving growth-factor ratio
-                # 100 * (1 + sector) / (1 + spy) (100 == parity). A raw
-                # return/return ratio is unstable near spy=0 and SIGN-INVERTS
-                # when SPY is negative (a sector that fell less than SPY would
-                # wrongly rank weak). Returns are percents here, so /100 first.
-                rs_1w_vs = _rs_parity(rs_1w / 100.0, spy_1w / 100.0)
-                rs_1m_vs = _rs_parity(rs_1m / 100.0, spy_1m / 100.0)
-                rs_3m_vs = _rs_parity(rs_3m / 100.0, spy_3m / 100.0)
-                rs_6m_vs = _rs_parity(rs_6m / 100.0, spy_6m / 100.0)
-                
-                # Composite RS (weighted per Blueprint)
-                # 10% 1W, 25% 1M, 35% 3M, 30% 6M
-                composite = (
-                    rs_1w_vs * 0.10 +
-                    rs_1m_vs * 0.25 +
-                    rs_3m_vs * 0.35 +
-                    rs_6m_vs * 0.30
-                )
-                
-                # Calculate RS momentum for rotation status
-                # Momentum = change in RS over last month (1M vs 3M)
-                rs_momentum = rs_1m_vs - rs_3m_vs
-                rotation_status = determine_rrg_quadrant(composite, rs_momentum)
-                
-                # Determine trend
-                ema_20 = df['close'].ewm(span=20).mean()
-                trend = 'RISING' if ema_20.iloc[-1] > ema_20.iloc[-5] else 'FALLING'
-                if abs(ema_20.iloc[-1] - ema_20.iloc[-5]) / ema_20.iloc[-5] < 0.01:
-                    trend = 'NEUTRAL'
-                
-                sector_info = SECTORS.get(etf, {'name': etf, 'cycle': 'unknown'})
-                
-                rankings.append(SectorRanking(
-                    symbol=etf,
-                    name=sector_info['name'],
-                    rank=0,  # Will set after sorting
-                    rs_1w=round(rs_1w_vs, 1),
-                    rs_1m=round(rs_1m_vs, 1),
-                    rs_3m=round(rs_3m_vs, 1),
-                    rs_6m=round(rs_6m_vs, 1),
-                    composite_rs=round(composite, 1),
-                    pct_1w=round(rs_1w, 2),  # Actual % return
-                    pct_1m=round(rs_1m, 2),
-                    pct_3m=round(rs_3m, 2),
-                    pct_above_50dma=0,  # Would need breadth data
-                    cycle_position=sector_info['cycle'],
-                    trend=trend,
-                    rotation_status=rotation_status
-                ))
-                
-            except Exception as e:
-                logger.warning(f"Error processing {etf}: {e}")
-                continue
-        
-        # Sort by composite RS and assign ranks
-        rankings.sort(key=lambda x: x.composite_rs, reverse=True)
-        for i, r in enumerate(rankings):
-            r.rank = i + 1
-        
-        self._rankings = rankings
-        self._last_update = datetime.now()
-        
-        logger.info(f"Sector rankings updated: {len(rankings)} sectors")
-        return rankings
-    
-    def _calc_return(self, df: pd.DataFrame, periods: int) -> float:
-        """Calculate percent return over periods"""
-        if len(df) <= periods:
-            return 0.0
-        return (df['close'].iloc[-1] / df['close'].iloc[-periods-1] - 1) * 100
-    
-    def get_rankings(self) -> List[SectorRanking]:
-        """Get current rankings"""
-        return self._rankings
-    
-    def get_sector_rank(self, etf: str) -> int:
-        """Get rank for a specific sector ETF (1=best, 11=worst)"""
-        for r in self._rankings:
-            if r.symbol == etf:
-                return r.rank
-        return 99  # Unknown
-    
-    def get_top_sectors(self, n: int = 3) -> List[str]:
-        """Get top N sector ETF symbols"""
-        return [r.symbol for r in self._rankings[:n]]
-    
-    def get_bottom_sectors(self, n: int = 3) -> List[str]:
-        """Get bottom N sector ETF symbols"""
-        return [r.symbol for r in self._rankings[-n:]]
-    
-    def is_sector_acceptable(self, etf: str, style: str) -> Tuple[bool, str]:
-        """Check if sector meets style requirements
-        
-        Args:
-            etf: Sector ETF symbol
-            style: Trading style ('momentum', 'swing', 'buy_hold', 'speculative')
-            
-        Returns:
-            Tuple of (is_acceptable, reason)
-        """
-        rank = self.get_sector_rank(etf)
-        rules = STYLE_SECTOR_RULES.get(style, {})
-        
-        max_rank = rules.get('max_sector_rank')
-        avoid_bottom = rules.get('avoid_bottom', 0)
-        
-        if max_rank is not None and rank > max_rank:
-            return False, f"Sector rank {rank} exceeds max {max_rank} for {style}"
-        
-        if avoid_bottom > 0 and rank > (11 - avoid_bottom):
-            return False, f"Sector in bottom {avoid_bottom} (rank {rank}), avoid for {style}"
-        
-        return True, f"Sector rank {rank} acceptable for {style}"
-    
-    def format_rankings_table(self) -> str:
-        """Format rankings as text table"""
-        if not self._rankings:
-            return "No sector rankings available. Run update_rankings() first."
-        
-        lines = [
-            "=" * 80,
-            "SECTOR RANKINGS (By Relative Strength vs SPY)",
-            "=" * 80,
-            f"{'Rank':<5} {'ETF':<6} {'Sector':<25} {'1W RS':<8} {'1M RS':<8} {'3M RS':<8} {'Comp':<8} {'Trend':<8}",
-            "-" * 80
-        ]
-        
-        for r in self._rankings:
-            lines.append(
-                f"{r.rank:<5} {r.symbol:<6} {r.name:<25} {r.rs_1w:<8.1f} {r.rs_1m:<8.1f} "
-                f"{r.rs_3m:<8.1f} {r.composite_rs:<8.1f} {r.trend:<8}"
-            )
-        
-        lines.append("-" * 80)
-        lines.append(f"Top 3: {', '.join(self.get_top_sectors(3))}")
-        lines.append(f"Bottom 3: {', '.join(self.get_bottom_sectors(3))}")
-        lines.append("=" * 80)
-        
-        return "\n".join(lines)
 
 
 #############################################
@@ -594,21 +332,3 @@ def _rs_parity(stock_ret: float, sector_ret: float) -> float:
     return 100.0 * (1.0 + stock_ret) / denom
 
 
-def determine_rrg_quadrant(rs: float, rs_momentum: float) -> str:
-    """Determine Relative Rotation Graph quadrant
-    
-    Args:
-        rs: Relative strength value (100 = parity)
-        rs_momentum: Change in RS (positive = improving)
-        
-    Returns:
-        Quadrant: 'LEADING', 'WEAKENING', 'LAGGING', 'IMPROVING'
-    """
-    if rs >= 100 and rs_momentum >= 0:
-        return 'LEADING'
-    elif rs >= 100 and rs_momentum < 0:
-        return 'WEAKENING'
-    elif rs < 100 and rs_momentum < 0:
-        return 'LAGGING'
-    else:  # rs < 100 and rs_momentum >= 0
-        return 'IMPROVING'

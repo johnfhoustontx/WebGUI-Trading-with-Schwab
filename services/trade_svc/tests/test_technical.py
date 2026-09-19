@@ -152,14 +152,3 @@ def test_vwap_resets_per_session():
     assert round(vwap, 6) == 12.0
 
 
-def test_relative_strength_parity_stable_in_down_market():
-    """Parity-preserving RS: 100 = parity. When BOTH fall but the stock falls
-    less, RS must be > 100 (outperformance) — the old return/return quotient
-    sign-inverted here (negative/negative gave a spurious positive ratio of the
-    wrong magnitude)."""
-    # 6-bar frames; period=5 => compare iloc[-1] vs iloc[-6].
-    stock = pd.DataFrame({"close": [100, 100, 100, 100, 100, 95]})   # -5%
-    bench = pd.DataFrame({"close": [100, 100, 100, 100, 100, 90]})   # -10%
-    rs = technical.calculate_relative_strength(stock, bench, periods=[5])
-    # 100*(1-0.05)/(1-0.10) = 100*0.95/0.90 = 105.5556 -> outperformance
-    assert round(rs["1W"], 4) == 105.5556
