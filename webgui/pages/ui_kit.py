@@ -3,9 +3,10 @@
 Every page builds its header line, control bar, fields, buttons, loading
 region, table, empty state, confirm dialog and toast from here, so two screens
 cannot drift apart. The standard - and why each rule is what it is - is
-``docs/plans/2026-09-19-app-ui-consistency-design.md``;
-``tests/test_ui_kit_guard.py`` fails when a page builds a button, dialog, toast
-or table of its own.
+``docs/plans/2026-09-19-app-ui-consistency-design.md``. A planned
+``tests/test_ui_kit_guard.py`` will fail when a page builds a button, dialog,
+toast or table of its own; until it lands, using this kit is a convention
+rather than something enforced.
 
 Tier-1 safe: imports ``nicegui``, the theme, the busy spinner, the Symbol-field
 helpers, ``bus_client`` and ``shell`` - nothing outside the allow-list - so the
@@ -144,7 +145,9 @@ def icon_button(icon, *, tooltip, on_click=None):
     b = ui.button(icon=icon, color=None, on_click=on_click) \
         .props("flat round dense size=sm").classes(_t.MUTED)
     with b:
-        ui.tooltip(tooltip).props("delay=350")
+        # Capped like every other tooltip, and this is the one that runs long:
+        # with no label beside it, it carries the whole explanation.
+        ui.tooltip(tooltip).props("delay=350").classes("max-w-[340px]")
     return b
 
 
@@ -239,23 +242,28 @@ def header(title, *, view=None, stale=False, poll_sec=5.0, _now=None):
 
     @guard_async
     async def poll():
-        # A read that fails must not FREEZE the stamp: the last good time still
-        # keeps advancing towards stale, so a dead bus reads as falling behind
-        # rather than as a view that is quietly fine.
-        ts = None
+        # The fallback keys on whether the READ worked, never on whether it
+        # carried a time. A read that fails must not FREEZE the stamp - the last
+        # good time keeps advancing towards stale, so a dead bus reads as falling
+        # behind rather than as a view that is quietly fine. But a read that
+        # SUCCEEDS and finds nothing is a real absence (a TTL expiry, a flush, a
+        # renamed view), and showing the old time there would be exactly the
+        # made-up reading this stamp promises never to give.
+        ts, ok = None, False
         try:
             meta = await run.io_bound(bus_client.read_meta, view)
-            # run.io_bound answers None while the app is shutting down.
+            ok = meta is not None     # None = the app is stopping, not an empty view
             ts = meta[1] if meta else None
         except Exception:         # noqa: BLE001 - one warning, then keep polling
             if not state["warned"]:
                 state["warned"] = True
                 _log.warning("ui_kit header: cannot read %s; showing the last "
                              "stamp and letting it age", view, exc_info=True)
-        if ts is None:
-            ts = state["ts"]
+        if ok:
+            state["ts"] = ts          # believe an empty read
+            state["warned"] = False   # so a SECOND outage is logged as well
         else:
-            state["ts"] = ts
+            ts = state["ts"]
         now = now_fn()
         set_stamp(ts, _stale_after(view, now) if stale else None, now)
 
@@ -323,20 +331,30 @@ def select_field(label, options, *, value=None, width="w-40", on_change=None, **
 
 
 def field_valid(f):
-    """Whether a field's own validation passes - WITHOUT painting an error. PURE
-    over the field's value.
+    """Whether a field's own validation passes - WITHOUT painting an error.
 
     ``validate()`` is the wrong tool for asking: it SHOWS the first failing
     message, so using it to decide whether Go is live turns an untouched form
     red; and on a field with no validators it sets ``error = None``, which wipes
-    a message the page put there by hand (a Symbol field's "No such ticker")."""
+    a message the page put there by hand (a Symbol field's "No such ticker").
+
+    Not pure - it calls the field's own validators, which are the page's code.
+    Anything it cannot ANSWER counts as valid: a rule that raises, and an async
+    rule, which has no synchronous answer to give. Gating is the wrong place to
+    decide a field is bad, and the wrong place to take the page down - this runs
+    inside ``render()`` and again on every value change, so one bad rule would
+    mean the page never renders at all. The field's own blur ``validate()``
+    still surfaces the real error underneath."""
     rules = getattr(f, "validation", None)
     if rules is None:
         return True
     value = getattr(f, "value", None)
-    if isinstance(rules, dict):
-        return all(check(value) for check in rules.values())
-    result = rules(value)
+    try:
+        if isinstance(rules, dict):
+            return all(check(value) for check in rules.values())
+        result = rules(value)
+    except Exception:     # noqa: BLE001 - a page's rule may not break gating
+        return True
     if inspect.isawaitable(result):
         close = getattr(result, "close", None)   # never leave it un-awaited
         if callable(close):
@@ -358,7 +376,15 @@ def number_field(label, *, value=None, min=None, max=None, step=None, integer=Fa
     keystroke; the message shows in red under the field. The range is not
     passed to Quasar: ``ui.number.sanitize`` clamps a value to the ``min``/``max``
     PROPS on blur, which silently rewrites what the reader typed instead of
-    saying what was wrong with it. ``integer=True`` refuses a fraction."""
+    saying what was wrong with it. ``integer=True`` refuses a fraction.
+
+    ⚠ ``integer`` must NOT pass ``precision=0`` for the same reason. ``sanitize``
+    is registered on blur by ``ui.number`` itself, BEFORE the check added here,
+    and a precision makes it ROUND: a typed 2.5 became 2 (and 3.7 became 4) with
+    nothing said, which reaches a paper-trade Quantity. Without min/max props, a
+    format or a precision, ``sanitize`` is a no-op and the typed value survives
+    to be reported. A test that asks ``validate()`` cannot see this - it is the
+    blur ORDER that decides, so that test fires the blur listeners."""
     checks = {"Enter a number": lambda v: v is not None}
     if integer:
         checks["Whole numbers only"] = \
@@ -369,7 +395,6 @@ def number_field(label, *, value=None, min=None, max=None, step=None, integer=Fa
         checks[f"At most {max:g}"] = lambda v, hi=max: v is None or v <= hi
     with field(label, grow=width == "w-full"):
         n = ui.number(value=value, step=step, format=format, on_change=on_change,
-                      precision=0 if integer else None,
                       validation=checks).props(FIELD_PROPS).classes(width)
     n.without_auto_validation()
     n.on("blur", lambda _e: n.validate(return_result=False))
@@ -418,7 +443,13 @@ def gate(go, *fields):
     The check is SILENT (``field_valid``) - holding Go is not the moment to turn
     an untouched form red; each field paints its own message on ITS blur. Runs
     on change as well as blur, so correcting a value hands Go back without a
-    second blur, and never enables a button that is mid-command."""
+    second blur, and never enables a button that is mid-command.
+
+    ⚠ A field whose validation is an ASYNC function is treated as valid, since
+    there is no synchronous answer to read: Go can be live for the moment it
+    takes NiceGUI to paint the error underneath. Give a gated field synchronous
+    rules - ``number_field`` does, and ``select_field`` forwards a
+    ``validation=`` straight through, so this is reachable from a page."""
     def sync(_e=None):
         ok = [field_valid(f) for f in fields]     # a list: check EVERY field
         busy = getattr(go, "_kit_busy", None)
@@ -446,7 +477,14 @@ REGION_MIN_H = "min-h-[120px]"
 def region(text="Loading…", *, classes="w-full", timeout=_busy.BUSY_TIMEOUT_SEC):
     """A block whose contents a repaint replaces. Repaint ``content`` (clear and
     rebuild it); the spinner lives on ``outer``, so a clear can never delete it
-    - the bug five pages had. ``busy.show()`` on first load and every refresh."""
+    - the bug five pages had. ``busy.show()`` on first load and every refresh.
+
+    ``show()`` also reserves ``REGION_MIN_H`` on ``outer`` and ``hide()`` gives
+    it back, so the spinner has something to sit in while the region is empty;
+    ``timeout`` is the backstop that hides it if the data never lands, and it
+    releases the height too. Raise ``timeout`` for a region backing a
+    legitimately slow fetch - a backstop that fires while the work is still
+    running says "finished" when nothing is."""
     outer = ui.element("div").classes(classes)
     with outer:
         content = ui.column().classes("w-full gap-3")
@@ -557,12 +595,17 @@ def confirm(title, body="", *, confirm_text, on_confirm, danger=False,
     ``False`` keeps the dialog open (a check that failed), and anything else
     closes it. It runs at most once per open, and a trigger arriving WHILE it
     runs is ignored, so a click followed by a queued Enter cannot act twice.
+    ⚠ ``handle.run`` is therefore a COROUTINE function: a caller firing it
+    itself (rather than through the button or Enter) must await it, or the
+    action simply never happens.
     Build the dialog at the page's own level, never inside a container a repaint
     clears - a dialog deletes itself with its slot (the swing.py precedent).
     Build it ONCE and retitle it per use (``handle.title.text``,
     ``handle.body.text``) rather than a new dialog per click, which would leave
     one behind in the page each time; a caller that genuinely builds one per
-    click passes ``ephemeral=True`` and it deletes itself once closed."""
+    click passes ``ephemeral=True`` and it deletes itself once closed. ⚠ Such a
+    handle is SINGLE-USE - reopening it after it closes reaches a deleted
+    element, which NiceGUI answers with a warning and no dialog."""
     with ui.dialog() as dlg, ui.card().classes(CONFIRM_CARD):
         title_lbl = ui.label(title).classes(f"text-subtitle1 font-semibold {_t.LABEL}")
         body_lbl = ui.label(body).classes(f"text-sm {_t.MUTED}")

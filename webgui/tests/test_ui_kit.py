@@ -1,10 +1,11 @@
 """Tests for the page kit (pages/ui_kit.py) - the one look and behaviour."""
 import asyncio
 import datetime as dt
+import logging
 
 import pytest
 from nicegui import ui
-from nicegui.events import GenericEventArguments
+from nicegui.events import GenericEventArguments, handle_event
 
 from pages import ui_kit as kit
 from pages.options import theme
@@ -231,6 +232,44 @@ def test_a_bus_failure_keeps_the_last_stamp_and_still_lets_it_age(monkeypatch):
     assert theme.TXT_WARN in h.stamp.classes
 
 
+def test_a_view_that_goes_EMPTY_says_waiting_not_the_old_time(monkeypatch):
+    """A TTL expiry, a flush or a renamed view is a real absence. Keying the
+    fallback on "no ts" rather than on "the read failed" kept showing a time
+    nothing publishes any more, and aged it into Stale - a made-up reading,
+    which is the one thing the stamp promises never to do."""
+    reads = [(7, "2026-09-18T15:29:00+00:00"), (None, None)]
+    _patch_bus(monkeypatch, lambda _v: reads.pop(0))
+    with ui.card():
+        h = kit.header("Paper Ledger", view="options:paper_trades",
+                       _now=lambda: _utc(18, 15, 30))
+    asyncio.run(h.poll())
+    assert h.stamp.text == "Updated 10:29 AM CT"
+    asyncio.run(h.poll())
+    assert h.stamp.text == kit.WAITING_TEXT
+
+
+def test_a_second_outage_is_logged_too(monkeypatch, caplog):
+    """A latch that never resets means a bus that fails, recovers and fails
+    again is an outage nobody ever sees."""
+    down = object()
+    script = [down, (7, "2026-09-18T15:29:00+00:00"), down]
+
+    def read_meta(_view):
+        item = script.pop(0)
+        if item is down:
+            raise ConnectionError("redis is down")
+        return item
+
+    _patch_bus(monkeypatch, read_meta)
+    with ui.card():
+        h = kit.header("Paper Ledger", view="options:paper_trades",
+                       _now=lambda: _utc(18, 15, 30))
+    with caplog.at_level(logging.WARNING, logger="pages.ui_kit"):
+        for _ in range(3):
+            asyncio.run(h.poll())
+    assert len([r for r in caplog.records if "cannot read" in r.getMessage()]) == 2
+
+
 def test_a_poll_that_reads_nothing_does_not_invent_a_time(monkeypatch):
     """run.io_bound answers None while the app is stopping."""
     async def io_bound(_fn, *_a, **_kw):
@@ -280,16 +319,32 @@ def test_symbol_error_shows_under_the_field_and_clears():
     assert not inp._props.get("error")
 
 
+def _blur(el):
+    """Fire every blur listener, in registration order, the way a browser does.
+
+    ``ui.number`` registers its OWN ``sanitize`` on blur inside ``__init__``,
+    before anything the kit adds, and that order decides what the reader ends
+    up looking at. A test that calls ``validate()`` instead takes a path the
+    browser never takes."""
+    for listener in list(el._event_listeners.values()):
+        if listener.type == "blur":
+            handle_event(listener.handler,
+                         GenericEventArguments(sender=el, client=el.client, args=None))
+
+
 def test_number_field_checks_on_leaving_not_per_keystroke():
     with ui.card():
         n = kit.number_field("Contracts", value=1, min=1, max=100)
     n.value = 0
-    assert n.error is None
-    assert n.validate() is False and n.error == "At least 1"
+    assert n.error is None            # nothing said while they are still typing
+    _blur(n)
+    assert n.error == "At least 1"
     n.value = 101
-    assert n.validate() is False and n.error == "At most 100"
+    _blur(n)
+    assert n.error == "At most 100"
     n.value = None
-    assert n.validate() is False and n.error == "Enter a number"
+    _blur(n)
+    assert n.error == "Enter a number"
 
 
 def test_gate_holds_go_while_a_field_is_wrong():
@@ -437,12 +492,25 @@ def test_a_reported_error_lets_the_next_tab_out_retry():
 
 
 def test_an_integer_field_refuses_a_fraction():
+    """Through ``validate()`` alone this passed while the browser saw something
+    else entirely: a ``precision`` made ui.number's own blur ``sanitize`` round
+    2.5 to 2 BEFORE the check ran, so the field silently rewrote the reader's
+    number and said nothing - under a docstring refusing to do exactly that,
+    and in front of a paper-trade Quantity."""
     with ui.card():
         n = kit.number_field("Contracts", value=1, min=1, integer=True)
     n.value = 2.5
-    assert n.validate() is False and n.error == "Whole numbers only"
+    _blur(n)
+    assert n.value == 2.5                     # their number, untouched
+    assert n.error == "Whole numbers only"    # and told what is wrong with it
+
+
+def test_an_integer_field_passes_a_whole_number_through():
+    with ui.card():
+        n = kit.number_field("Contracts", value=1, min=1, integer=True)
     n.value = 3
-    assert n.validate() is True
+    _blur(n)
+    assert n.value == 3 and n.error is None
 
 
 def test_a_shown_error_clears_once_the_value_is_valid_again():
@@ -450,10 +518,28 @@ def test_a_shown_error_clears_once_the_value_is_valid_again():
     with ui.card():
         n = kit.number_field("Contracts", value=1, min=1)
     n.value = 0
-    n.validate(return_result=False)          # what the blur does
+    _blur(n)
     assert n.error == "At least 1"
     n.value = 5
     assert n.error is None
+
+
+def test_a_raising_validator_cannot_take_the_page_down():
+    """``gate`` runs inside ``render()`` and again on every value change, so one
+    bad rule would mean the page does not render at all - and would then keep
+    breaking every gated button on it."""
+    with ui.card():
+        bad_dict = ui.input(value="x", validation={"boom": lambda v: 1 / 0}) \
+            .without_auto_validation()
+        bad_fn = ui.input(value="x", validation=lambda v: 1 / 0) \
+            .without_auto_validation()
+        go = kit.button("Load", kind="primary")
+    assert kit.field_valid(bad_dict) is True     # unanswerable, not invalid
+    assert kit.field_valid(bad_fn) is True
+    sync = kit.gate(go, bad_dict, bad_fn)        # must not raise
+    assert go.enabled                            # its own blur will say otherwise
+    sync()
+    assert go.enabled
 
 
 # -- region, empty state, table ---------------------------------------------------
@@ -551,6 +637,15 @@ def test_a_tooltip_caps_its_width_with_a_class_not_a_prop():
     (tip,) = [e for e in b.descendants() if isinstance(e, ui.tooltip)]
     assert "max-w-[340px]" in tip.classes
     assert "max-width" not in str(tip._props)
+
+
+def test_an_icon_buttons_tooltip_is_capped_as_well():
+    """It carries the WHOLE explanation - there is no label beside it - so it is
+    the likelier one to run long."""
+    with ui.card():
+        b = kit.icon_button("delete", tooltip="Delete this trade from the ledger")
+    (tip,) = [e for e in b.descendants() if isinstance(e, ui.tooltip)]
+    assert "max-w-[340px]" in tip.classes
 
 
 # -- confirm dialog ---------------------------------------------------------------
