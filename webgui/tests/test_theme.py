@@ -377,3 +377,25 @@ def test_quasar_css_scope_is_a_parameter():
 
 def test_app_field_css_is_the_app_scope():
     assert theme.APP_FIELD_CSS == theme.build_quasar_css(theme.THEME, scope=".ns-app")
+
+
+def test_surface_css_paints_the_ground_and_the_selected_row():
+    t = theme.load_theme("Z:/nope.toml")
+    css = theme.build_surface_css(t)
+    assert "body.body--dark{background:radial-gradient(" in css
+    assert "#16243f 0%" in css and "#0c1424 55%" in css
+    assert ".kit-row-selected > td{background:rgba(59,130,246,.08);}" in css
+    assert ".kit-row-selected > td:first-child{box-shadow:inset 3px 0 0 #3b82f6;}" in css
+    assert ':not([class*="border"])' in css      # a page's own border class wins
+
+
+def test_quasar_colors_follow_the_palette_and_keep_the_accent():
+    t = theme.load_theme("Z:/nope.toml")
+    assert theme.build_quasar_colors(t) == {"dark": "#101a30", "dark_page": "#0c1424"}
+    t["menu"]["accent"] = "#6b86ff"
+    assert theme.build_quasar_colors(t)["primary"] == "#6b86ff"
+
+
+def test_the_live_surface_constants_are_built_from_the_theme():
+    assert theme.SURFACE_CSS == theme.build_surface_css(theme.THEME)
+    assert theme.QUASAR_COLORS == theme.build_quasar_colors(theme.THEME)

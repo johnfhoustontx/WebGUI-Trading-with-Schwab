@@ -487,6 +487,45 @@ def build_quasar_css(theme, scope=".calc-v2"):
 """
 
 
+def build_surface_css(theme):
+    """The app-wide SURFACE, painted once for every page by both entrypoints.
+
+    Raw CSS for what no page's ``.classes()`` reaches: the ``<body>`` ground
+    (Quasar's flat #121212 until 2026-09-19 - what a page with no wrapper sat
+    on), the default ``q-card`` frame, and the selected-row accent that
+    ``ui_kit.table`` stamps. Every rule yields to a page's own look: the card
+    rules skip an element carrying its own ``border`` / ``rounded`` class, and
+    a page that paints its own ground simply covers the body's."""
+    p = theme["palette"]
+    r, g, b = hex_rgb(p["focus"], (107, 134, 255))
+    return (
+        f"body.body--dark{{background:radial-gradient(130% 90% at 50% -20%,"
+        f"{p['page_bg1']} 0%,{p['page_bg2']} 55%,{p['page_bg3']} 100%) fixed;"
+        f"color:{p['text']};}}\n"
+        f'.ns-app .q-card--dark:not([class*="border"]){{border:1px solid '
+        f"{p['card_border']};box-shadow:none;}}\n"
+        f'.ns-app .q-card--dark:not([class*="rounded"]){{border-radius:12px;}}\n'
+        f".ns-app .kit-row-selected > td{{background:rgba({r},{g},{b},.08);}}\n"
+        f".ns-app .kit-row-selected > td:first-child{{box-shadow:inset 3px 0 0 "
+        f"{p['focus']};}}\n"
+    )
+
+
+def build_quasar_colors(theme):
+    """``ui.colors(**...)`` for both entrypoints.
+
+    ``dark`` is Quasar's own card / menu / dark-table fill (#1d1d1d stock) and
+    ``dark_page`` its page ground (#121212 stock); pointing them at the palette
+    makes every default Quasar surface the app's card instead of a grey one.
+    ``primary`` is ``[menu].accent`` when set, exactly as before."""
+    p = theme["palette"]
+    out = {"dark": p["card_bg"], "dark_page": p["page_bg2"]}
+    accent = str((theme.get("menu") or {}).get("accent") or "").strip()
+    if accent:
+        out["primary"] = accent
+    return out
+
+
 def save_theme_values(updates, path=None):
     """Save ``updates`` (``{section: {key: value}}``) as the operator's theme.
 
@@ -1300,6 +1339,8 @@ QUASAR_INTERNAL_CSS = build_quasar_css(THEME)
 # The same rules for EVERY page: both entrypoints put ``ns-app`` on their content
 # column and inject this, so a page no longer needs a scope class of its own.
 APP_FIELD_CSS = build_quasar_css(THEME, scope=".ns-app")
+SURFACE_CSS = build_surface_css(THEME)       # injected by BOTH entrypoints
+QUASAR_COLORS = build_quasar_colors(THEME)   # ui.colors(**QUASAR_COLORS) in both
 TYPOGRAPHY_CSS = build_typography_css(THEME)   # injected app-wide by main._layout
 FONT_HEAD_HTML = build_font_head_html(THEME)   # "" when no [typography].font_url
 NAV_THEME_CSS = build_nav_css(THEME)           # "" when [menu] is all-default
