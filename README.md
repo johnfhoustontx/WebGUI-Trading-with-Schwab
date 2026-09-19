@@ -27,7 +27,7 @@ schwab-proxy (:8100)                        owns Schwab auth/tokens + market dat
 
 - **Tier 1** imports only `nicegui` + `shared.bus` + `shared.contracts` (enforced by tests).
 - **Tier 2** services each import only their own engines (`options-scanner/`,
-  `sentiment-dashboard/`, `trade-analyzer/`, `portfolio-analyzer/`, `claude-driver/`),
+  `sentiment-dashboard/`, `trade-analyzer/`, `portfolio-analyzer/`),
   in separate OS processes so top-level module-name collisions can't occur.
 - **The proxy must run first** — everything reads market data through `http://127.0.0.1:8100`.
 
@@ -108,7 +108,7 @@ Lint locally: `uvx ruff check .` (config in `ruff.toml`); install hooks with `pr
 | `services/` | Tier-2 domain services + shared `_scaffold.py` |
 | `shared/` | `bus/` (Redis wrapper), `contracts/` (Pydantic payloads), `analysis_lib/` |
 | `schwab-proxy/` | Schwab API gateway / token manager (:8100) |
-| `options-scanner/`, `sentiment-dashboard/`, `trade-analyzer/`, `portfolio-analyzer/`, `claude-driver/` | copied engines (Tier-2 imports only) |
+| `options-scanner/`, `sentiment-dashboard/`, `trade-analyzer/`, `portfolio-analyzer/` | copied engines (Tier-2 imports only) |
 | `config/`, `repo_paths.py` | single-source ports/paths/commission rates |
 | `docs/plans/`, `docs/audits/` | design docs (de-facto ADRs) + audit reports |
 

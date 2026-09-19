@@ -589,12 +589,9 @@ automatically and start empty.</p>
 </tr>
 </tbody>
 </table>
-<p><code>config/ports.toml</code> also lists <code>options_analytics = 8200</code>, <code>approval = 8300</code>,
-<code>dashboard_frontend = 5173</code>, and an <code>[ml_servers]</code> block (MES 8000 / MNQ 8001 /
-ES 8004 / NQ 8005). <strong>None of these are started by this repo</strong> — 5173 and 8300
-are legacy/retired, and the ML servers plus the 8200 analytics service are
-<strong>separate external processes</strong> that <code>claude-driver</code> addresses over HTTP. If they
-aren't running, those paths simply degrade.</p>
+<p>Those, plus Redis on 6379, are every port <code>config/ports.toml</code> lists. (The legacy
+<code>options_analytics</code>, <code>approval</code>, <code>dashboard_frontend</code> and <code>[ml_servers]</code> entries
+were removed in September 2026 — nothing in the stack talks to those processes.)</p>
 <h2 id="optional-integrations">Optional integrations</h2>
 <table>
 <thead>
@@ -816,10 +813,6 @@ clamping is pure code in <code>guardrails.py</code>, never the model.</p>
 <tr>
 <td><code>portfolio-analyzer/</code></td>
 <td><code>src/</code> — sector breakdown, comparisons, evaluation.</td>
-</tr>
-<tr>
-<td><code>claude-driver/</code></td>
-<td>Morning orchestration + order approval logic.</td>
 </tr>
 <tr>
 <td><code>shared/</code></td>

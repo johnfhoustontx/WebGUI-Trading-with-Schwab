@@ -11,7 +11,6 @@ REPO_ROOT       = Path(__file__).resolve().parent
 SCHWAB_PROXY    = REPO_ROOT / "schwab-proxy"
 OPTIONS_SCANNER = REPO_ROOT / "options-scanner"
 SENTIMENT       = REPO_ROOT / "sentiment-dashboard"
-CLAUDE_DRIVER   = REPO_ROOT / "claude-driver"
 TRADE_ANALYZER  = REPO_ROOT / "trade-analyzer"
 SWING_MODEL        = TRADE_ANALYZER / "data" / "swing_model.json"
 SWING_MODEL_REPORT = TRADE_ANALYZER / "data" / "swing_model_report.md"
@@ -313,14 +312,10 @@ def _derive_ports(ports: dict, flags: dict) -> dict:
     """Apply an environment profile to the base port table. PURE.
 
     ``port_offset`` shifts the ports this repo OWNS (the six services and both
-    webgui processes — the app and the public live screens). Two things are
-    deliberately left alone:
-
-    * the **Memurai port** — both environments share one Redis server and are
-      separated by logical DB index instead, so there is no second service to
-      install or monitor;
-    * ``options_analytics`` / ``approval`` / the **ML servers** — external
-      processes this repo neither starts nor owns.
+    webgui processes — the app and the public live screens). The **Memurai
+    port** is deliberately left alone: both environments share one Redis server
+    and are separated by logical DB index instead, so there is no second service
+    to install or monitor.
 
     ``proxy_port`` overrides the offset entirely, which is how dev borrows prod's
     proxy on :8100 rather than holding a second copy of the one rotating Schwab
@@ -354,13 +349,10 @@ _derived = _derive_ports(_ports, ENV_FLAGS)
 PROXY_PORT       = _derived["proxy_port"]
 PROXY_HOST       = str(ENV_FLAGS.get("proxy_host") or "127.0.0.1")
 PROXY_URL        = f"http://{PROXY_HOST}:{PROXY_PORT}"
-ANALYTICS_URL    = f"http://127.0.0.1:{_ports['options_analytics']}"
-APPROVAL_PORT    = _ports["approval"]
 NICEGUI_PORT     = _derived["nicegui_port"]
 NICEGUI_URL      = f"http://127.0.0.1:{NICEGUI_PORT}"
 NICEGUI_LIVE_PORT = _derived["nicegui_live_port"]
 NICEGUI_LIVE_URL  = f"http://127.0.0.1:{NICEGUI_LIVE_PORT}"
-ML_SERVER_URLS   = {k: f"http://127.0.0.1:{v}" for k, v in _ports["ml_servers"].items()}
 MEMURAI_PORT  = _derived["memurai_port"]
 # The logical Redis DB index this environment owns. Exported as an int rather
 # than left for callers to parse back out of MEMURAI_URL or re-coerce from

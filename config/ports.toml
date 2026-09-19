@@ -2,10 +2,10 @@
 # profile's port_offset -- but only the ports repo_paths._derive_ports names.
 #
 #   [services]  -> offset AUTOMATICALLY. A new service here needs no code change.
-#   top-level   -> NOT offset unless _derive_ports is taught about it. That is
-#                  correct for a process this repo does not start (the ML servers,
-#                  options_analytics, approval) and a BUG for one it does: dev
-#                  would bind prod's port and the collision is invisible here.
+#   top-level   -> NOT offset unless _derive_ports is taught about it. That would
+#                  be correct for an external process this repo does not start,
+#                  and is a BUG for one it does: dev would bind prod's port and
+#                  the collision is invisible here.
 #
 # `proxy` is offset too, but a profile may pin `proxy_port` to opt out -- which is
 # how dev borrows prod's proxy instead of holding a second Schwab refresh token.
@@ -14,21 +14,12 @@
 #
 # See docs/plans/2026-08-08-dev-prod-environments-design.md.
 proxy = 8100
-options_analytics = 8200
-approval = 8300
-dashboard_frontend = 5173
 nicegui = 8500
 # The PUBLIC read-only screens (live.neuralstrike.co), a second NiceGUI process.
 # Offset with `nicegui` -- see the header note: a top-level port this repo
 # STARTS must be offset, or dev binds prod's and the collision is invisible.
 nicegui_live = 8501
 memurai = 6379
-
-[ml_servers]
-MES = 8000
-MNQ = 8001
-ES  = 8004
-NQ  = 8005
 
 [services]
 sentiment = 8210

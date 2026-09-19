@@ -5,15 +5,14 @@
 # Install it once into a single venv to run the whole stack:
 #     pip install -r requirements.txt
 #
-# Each app keeps its own requirements.txt (do not delete them). Today only
-# claude-driver/requirements.txt is populated; options-scanner's is empty and
-# schwab-proxy / sentiment-dashboard have none, so the entries below are the
-# union of claude-driver's pins plus the third-party packages the other apps
-# import at runtime.
+# Each app keeps its own requirements.txt (do not delete them). options-scanner's
+# is empty and schwab-proxy / sentiment-dashboard have none, so the entries below
+# are the union of the (since removed) claude-driver's pins plus the third-party
+# packages the other apps import at runtime.
 #
 # De-dup rule applied: where the same package was constrained differently, the
 # higher / looser constraint is kept and the dropped one is noted inline.
-# Sources: P=schwab-proxy  O=options-scanner  S=sentiment-dashboard  D=claude-driver
+# Sources: P=schwab-proxy  O=options-scanner  S=sentiment-dashboard  D=claude-driver (removed 2026-09-19)
 #
 # REPRODUCIBLE INSTALL: this file is the human-readable direct-dependency list.
 # For a byte-identical, fully-pinned environment (all transitive deps), install

@@ -176,12 +176,9 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | 8500 | webgui (NiceGUI) | Required |
 | 8501 | webgui_live — the PUBLIC read-only screens, a second NiceGUI process | Required |
 
-`config/ports.toml` also lists `options_analytics = 8200`, `approval = 8300`,
-`dashboard_frontend = 5173`, and an `[ml_servers]` block (MES 8000 / MNQ 8001 /
-ES 8004 / NQ 8005). **None of these are started by this repo** — 5173 and 8300
-are legacy/retired, and the ML servers plus the 8200 analytics service are
-**separate external processes** that `claude-driver` addresses over HTTP. If they
-aren't running, those paths simply degrade.
+Those, plus Redis on 6379, are every port `config/ports.toml` lists. (The legacy
+`options_analytics`, `approval`, `dashboard_frontend` and `[ml_servers]` entries
+were removed in September 2026 — nothing in the stack talks to those processes.)
 
 ## Optional integrations
 
@@ -311,7 +308,6 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | `sentiment-dashboard/` | Sentiment `scoring/` package + live composite + bridge. |
 | `trade-analyzer/` | `src/analysis` — recommendation, scoring, fundamentals, sector. |
 | `portfolio-analyzer/` | `src/` — sector breakdown, comparisons, evaluation. |
-| `claude-driver/` | Morning orchestration + order approval logic. |
 | `shared/` | `analysis_lib/` (technical, market data), `contracts/`, `bus/`. |
 | `services/` | The six Tier-2 domain services. |
 | `webgui/` | The NiceGUI front end. |

@@ -35,7 +35,7 @@ would make the gate red without any real defect. `line-length = 120`. `ruff form
 
 **Scope / excludes.** `.venv`, `**/data`, `**/logs`, `**/frontend`, `**/node_modules`,
 `docs`, plus the **grandfathered legacy engine dirs** (`options-scanner`,
-`sentiment-dashboard`, `trade-analyzer`, `portfolio-analyzer`, `claude-driver`) and a
+`sentiment-dashboard`, `trade-analyzer`, `portfolio-analyzer`) and a
 few legacy Tk modules under `shared/analysis_lib/` — these were copied verbatim from
 the source monorepo and carry pre-existing lint debt; tightening them is a separate pass.
 

@@ -720,8 +720,8 @@ hard-code ports or `D:\` paths.
 | webgui (NiceGUI) | 8500 | `NICEGUI_PORT` / `NICEGUI_URL` |
 | webgui_live (public screens) | 8501 | `NICEGUI_LIVE_PORT` / `NICEGUI_LIVE_URL` |
 
-> The `dashboard_frontend = 5173` entry in `config/ports.toml` belongs to the retired
-> React frontend and is **not** used by this app. The web GUI is on **8500**.
+> The web GUI is on **8500**. (The retired React frontend's `dashboard_frontend = 5173`
+> entry was removed from `config/ports.toml` in September 2026.)
 
 ## Environments — the ports above are the *prod* profile
 

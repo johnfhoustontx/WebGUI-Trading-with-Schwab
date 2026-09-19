@@ -798,3 +798,16 @@ def test_market_read_regime_direction_junk_is_neutral():
     payload = dict(_regime_payload(), direction="up", direction_strong="yes")
     st = compute._market_read(dict(_market_ctx(), regime=payload))["market_regime"]
     assert st["top"][0] == ("Trending", 0.52)
+
+
+def test_daily_max_loss_is_the_configured_halt(monkeypatch):
+    """The halt is ``config/driver.toml``'s ``daily_loss_halt``. An unusable value
+    falls back to that file's shipped default — never to the retired
+    ``claude-driver`` RISK_LIMITS path, whose 250 was six times tighter than the
+    configured 1,500."""
+    from shared import driver_limits
+    monkeypatch.setattr(compute._st, "DAILY_LOSS_HALT", 1234.0)
+    assert compute._daily_max_loss() == 1234.0
+    monkeypatch.setattr(compute._st, "DAILY_LOSS_HALT", "not a number")
+    assert compute._daily_max_loss() == float(
+        driver_limits.DEFAULTS["risk"]["daily_loss_halt"])

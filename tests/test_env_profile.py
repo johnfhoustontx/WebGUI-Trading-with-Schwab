@@ -244,16 +244,15 @@ def test_port_derivation_offsets_proxy_when_not_pinned():
 def test_port_derivation_leaves_external_ports_alone():
     """Fed the REAL ports.toml, the derivation must emit exactly these six keys.
 
-    The tests above pass synthetic tables that simply OMIT options_analytics /
-    approval / ml_servers, so to them "deliberately not offset" and "not in the
-    input" are indistinguishable — the decision is guarded by prose alone. Reading
-    the shipped file is the point: it is the only test here that notices a port
-    being ADDED to that file, which is exactly the case that silently goes
+    Reading the shipped file is the point: it is the only test here that notices
+    a port being ADDED to that file, which is exactly the case that silently goes
     un-offset (right for an external process, a bug for one this repo starts).
+    (The external ports this used to exercise — options_analytics, approval,
+    dashboard_frontend and the ML servers — were removed from ports.toml on
+    2026-09-19 with the last code that read them.)
     """
     ports = tomllib.loads(
         (REPO / "config" / "ports.toml").read_text(encoding="utf-8-sig"))
-    assert {"options_analytics", "approval", "ml_servers"} <= set(ports)  # non-vacuous
     d = repo_paths._derive_ports(ports, {"port_offset": 1000, "proxy_port": None,
                                          "redis_db": 1})
     assert set(d) == {"proxy_port", "nicegui_port", "nicegui_live_port",
@@ -267,8 +266,7 @@ def test_port_derivation_leaves_external_ports_alone():
     # (external — leave it un-offset)? Either way it gets listed below, which is
     # why this set is "every top-level port someone has ruled on", not "the
     # external ones" — `proxy`, `nicegui` and `nicegui_live` are all offset.
-    accounted_for = {"proxy", "options_analytics", "approval", "dashboard_frontend",
-                     "nicegui", "nicegui_live", "memurai"}
+    accounted_for = {"proxy", "nicegui", "nicegui_live", "memurai"}
     scalars = {k for k, v in ports.items() if not isinstance(v, dict)}
     assert scalars == accounted_for, (
         f"ports.toml top-level keys changed: {scalars ^ accounted_for}. If this "

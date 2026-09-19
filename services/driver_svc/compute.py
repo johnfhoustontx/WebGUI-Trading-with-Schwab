@@ -8,35 +8,16 @@ raising — any failure stands down), and ``open_driver_position`` /
 ``fetch_market_context`` supplies the VIX/SPX context the guardrails' VIX gate
 reads.
 
-This module must NOT import ``nicegui`` or anything from ``webgui/``. It needs
-only ``claude-driver/config.py``'s legacy ``RISK_LIMITS`` (the fallback daily-loss
-cap), imported standalone (its dir on ``sys.path``). Because ``driver_svc`` runs
-in its own process, pinning ``config`` as a top-level module cannot collide with
-the other domains' engines (the same isolation ``sentiment_svc`` relies on for
-``scoring`` and ``trade_svc`` for ``technical``). ``config.PAPER_TRADE`` is True —
-this service never modifies that flag.
+This module must NOT import ``nicegui`` or anything from ``webgui/``. Its risk
+envelope comes from ``config/driver.toml`` through ``driver_svc.settings``; it
+trades paper only.
 
 Every public function is defensive: a thrown engine degrades to an ``error`` /
 empty payload rather than raising, so one bad cycle can never crash the service.
 """
-import sys
-
 import requests
 
-from repo_paths import CLAUDE_DRIVER, PROXY_URL
-
-# ── isolated engine imports (separate process — no cross-app name collision) ──
-# claude-driver folder on sys.path so its hyphen-free top-level modules import by
-# name (``config`` is generic — safe only because this is a dedicated process).
-if str(CLAUDE_DRIVER) not in sys.path:
-    sys.path.insert(0, str(CLAUDE_DRIVER))
-
-# Legacy risk envelope — source the daily loss cap here so it can't drift from the
-# old rule-tree config (``claude-driver/config.py`` is on sys.path via CLAUDE_DRIVER).
-try:  # noqa: SIM105
-    from config import RISK_LIMITS as _RISK_LIMITS  # noqa: E402
-except Exception:  # noqa: BLE001 — defensive: fall back to the documented default.
-    _RISK_LIMITS = {}
+from repo_paths import PROXY_URL
 
 # Autonomous decision layer (Phase 4): the pure guardrails safety core + the static
 # tunables. ``decider`` is imported lazily inside ``run_cycle`` (the file already
@@ -44,24 +25,22 @@ except Exception:  # noqa: BLE001 — defensive: fall back to the documented def
 # late import keeps the patch point at ``services.driver_svc.decider.decide``).
 from services.driver_svc import guardrails as _g  # noqa: E402
 from services.driver_svc import settings as _st  # noqa: E402
+from shared import driver_limits as _driver_limits  # noqa: E402
 
 
 def _daily_max_loss() -> float:
-    """The daily-loss halt for the autonomous driver (defensive → 250.0).
+    """The daily-loss halt for the autonomous driver: ``settings.DAILY_LOSS_HALT``,
+    i.e. ``config/driver.toml`` ``[risk].daily_loss_halt``. Never raises.
 
-    Prefers the driver's OWN ``settings.DAILY_LOSS_HALT`` (all aggression knobs live in
-    settings.py now); falls back to the legacy ``config.RISK_LIMITS['daily_max_loss']``,
-    then 250.0. Never raises."""
+    An unusable value falls back to that file's SHIPPED default
+    (``driver_limits.DEFAULTS``), never to a separate literal. The fallback used
+    to be ``claude-driver/config.py``'s ``RISK_LIMITS['daily_max_loss']`` and then
+    250.0 — six times tighter than the configured 1,500, a different policy
+    reached only through a failure path."""
     try:
-        v = getattr(_st, "DAILY_LOSS_HALT", None)
-        if v is not None:
-            return float(v)
-    except (TypeError, ValueError):
-        pass
-    try:
-        return float(_RISK_LIMITS.get("daily_max_loss", 250.0))
-    except (TypeError, ValueError):
-        return 250.0
+        return float(_st.DAILY_LOSS_HALT)
+    except (AttributeError, TypeError, ValueError):
+        return float(_driver_limits.DEFAULTS["risk"]["daily_loss_halt"])
 
 
 # ── cumulative MTD banking target (2026-07-09) ───────────────────────────────
@@ -583,8 +562,7 @@ def run_cycle(scan_view, paper_view, *, target, limits, market, client=None) -> 
     sees the raw signals — only the compact menu + its ids), asks the decider, and
     runs the result through the code-authoritative guardrails (which resolve the ids
     back to raw signals via ``menu_by_id`` and clamp/reject/halt). The daily loss cap
-    is sourced from the legacy ``config.RISK_LIMITS`` (``_daily_max_loss``) so it can't
-    drift from the old rule tree.
+    is ``config/driver.toml``'s ``daily_loss_halt`` (``_daily_max_loss``).
 
     NEVER raises: any exception anywhere in build/decide/guardrails degrades to a
     stand-down result with the full renderable shape (the handler reads

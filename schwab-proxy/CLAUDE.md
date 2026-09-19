@@ -10,7 +10,7 @@ Central Schwab API gateway and token manager for the whole monorepo. It owns
 Schwab OAuth, refreshes tokens, rate-limits outbound Schwab calls, and exposes a
 local HTTP API so the other apps share one set of credentials instead of each
 authenticating directly. **It must be started first** — options-scanner,
-sentiment-dashboard, and claude-driver all fetch market data through it.
+sentiment-dashboard, and the Tier-2 services all fetch market data through it.
 
 ## Entry point & port
 
