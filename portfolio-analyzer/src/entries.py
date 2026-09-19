@@ -1,8 +1,7 @@
 """Cost-weighted entry (price + date) per symbol from BUY trades.
 
 This is a *pure-logic* module (no network, no filesystem). It consumes the
-8-key trade contract produced by the proxy ``/transactions`` endpoint and the
-CSV bootstrap importer::
+8-key trade contract produced by the proxy ``/transactions`` endpoint::
 
     {"trade_id", "symbol", "asset_type", "underlying", "quantity", "price",
      "instruction", "trade_date"}

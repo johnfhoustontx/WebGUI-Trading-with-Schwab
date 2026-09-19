@@ -1,6 +1,6 @@
 """Tests for ``build_portfolio`` — the full portfolio model assembler.
 
-Fully offline: every I/O dependency (data, classifier, ranker, benchmark) is
+Fully offline: every I/O dependency (data, classifier, benchmark) is
 injected. ``holding_vs_sector`` is monkeypatched at the ``src.sectors`` module
 global so no heavy ``shared/analysis_lib`` import is triggered.
 """
@@ -69,18 +69,6 @@ def fake_classify(underlying):
     return {"sector_etf": etf, "sector": name}
 
 
-class _Rank:
-    def __init__(self, symbol, composite_rs, rank):
-        self.symbol = symbol
-        self.composite_rs = composite_rs
-        self.rank = rank
-
-
-class FakeRanker:
-    def get_rankings(self):
-        return [_Rank("XLK", 112.0, 1)]
-
-
 TRADES = [
     {
         "symbol": "AAPL",
@@ -114,7 +102,7 @@ def _by_sector(sectors, sector):
 
 def test_model_has_holdings_and_sectors():
     model = build_portfolio(
-        FakeData(), TRADES, classify=fake_classify, ranker=FakeRanker(), benchmark=BENCHMARK
+        FakeData(), TRADES, classify=fake_classify, benchmark=BENCHMARK
     )
     assert "holdings" in model
     assert "sectors" in model
@@ -122,7 +110,7 @@ def test_model_has_holdings_and_sectors():
 
 def test_equity_holding_has_rs_and_excess():
     model = build_portfolio(
-        FakeData(), TRADES, classify=fake_classify, ranker=FakeRanker(), benchmark=BENCHMARK
+        FakeData(), TRADES, classify=fake_classify, benchmark=BENCHMARK
     )
     aapl = _by_symbol(model["holdings"], "AAPL")
     assert aapl["asset_type"] == "EQUITY"
@@ -142,7 +130,7 @@ def test_equity_holding_has_rs_and_excess():
 
 def test_option_rolls_into_underlying_sector_no_rs():
     model = build_portfolio(
-        FakeData(), TRADES, classify=fake_classify, ranker=FakeRanker(), benchmark=BENCHMARK
+        FakeData(), TRADES, classify=fake_classify, benchmark=BENCHMARK
     )
     opt = _by_symbol(model["holdings"], "AAPL  250620C00200000")
     assert opt["sector"] == "Technology"
@@ -152,7 +140,7 @@ def test_option_rolls_into_underlying_sector_no_rs():
 
 def test_future_sector_and_no_rs():
     model = build_portfolio(
-        FakeData(), TRADES, classify=fake_classify, ranker=FakeRanker(), benchmark=BENCHMARK
+        FakeData(), TRADES, classify=fake_classify, benchmark=BENCHMARK
     )
     fut = _by_symbol(model["holdings"], "/ES")
     assert fut["sector"] == "Futures"
@@ -161,31 +149,19 @@ def test_future_sector_and_no_rs():
     assert fut["since_purchase_excess"] is None
 
 
-def test_sector_row_has_benchmark_delta_and_tailwind():
+def test_sector_row_has_benchmark_delta():
     model = build_portfolio(
-        FakeData(), TRADES, classify=fake_classify, ranker=FakeRanker(), benchmark=BENCHMARK
+        FakeData(), TRADES, classify=fake_classify, benchmark=BENCHMARK
     )
     tech = _by_sector(model["sectors"], "Technology")
     assert tech["benchmark_delta"] is not None
     # weight - 0.30
     assert abs(tech["benchmark_delta"] - (tech["weight"] - 0.30)) < 1e-9
-    assert tech["tailwind"] == {"score": 112.0, "rank": 1}
-
-    futures = _by_sector(model["sectors"], "Futures")
-    assert futures["tailwind"] is None
-
-
-def test_no_ranker_means_tailwind_none():
-    model = build_portfolio(
-        FakeData(), TRADES, classify=fake_classify, ranker=None, benchmark=BENCHMARK
-    )
-    for row in model["sectors"]:
-        assert row["tailwind"] is None
 
 
 def test_no_benchmark_means_delta_none():
     model = build_portfolio(
-        FakeData(), TRADES, classify=fake_classify, ranker=FakeRanker(), benchmark=None
+        FakeData(), TRADES, classify=fake_classify, benchmark=None
     )
     for row in model["sectors"]:
         assert row["benchmark_delta"] is None

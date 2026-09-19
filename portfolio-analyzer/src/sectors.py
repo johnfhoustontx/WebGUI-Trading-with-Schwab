@@ -183,32 +183,6 @@ def weights_vs_benchmark(
     }
 
 
-def tailwind_headwind(ranker) -> dict[str, dict]:
-    """Comparison #4: per-sector tailwind/headwind from a sector ranker.
-
-    Thin pass-through over an *already-constructed* ranker (the shared
-    ``sector_analysis.SectorRanker`` in production; a fake in tests). This module
-    never imports or constructs the real ranker — wiring happens elsewhere — so
-    no network or heavy pandas/config import is pulled here.
-
-    Expected ranker interface (matches ``SectorRanker``):
-        ``ranker.get_rankings()`` returns a list of objects, each having
-        ``.symbol`` (sector ETF, e.g. ``"XLK"``), ``.composite_rs`` (the
-        composite relative-strength score) and ``.rank`` (1 = strongest).
-
-    Args:
-        ranker: object exposing ``get_rankings()`` as described above.
-
-    Returns:
-        ``{symbol: {"score": float, "rank": int}}`` keyed by sector ETF. A
-        higher score / lower rank is a tailwind; the reverse is a headwind.
-    """
-    return {
-        r.symbol: {"score": r.composite_rs, "rank": r.rank}
-        for r in ranker.get_rankings()
-    }
-
-
 def _load_calculate_stock_vs_sector_rs():
     """Lazily import ``calculate_stock_vs_sector_rs`` from sector_analysis.
 

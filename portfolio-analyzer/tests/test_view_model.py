@@ -13,7 +13,6 @@ from src.view_model import (
     format_signed_pct,
     format_weight,
     format_vs_sector,
-    format_tailwind,
     format_holdings_rows,
     format_performance_rows,
     format_sector_rows,
@@ -57,12 +56,6 @@ def test_format_vs_sector():
 def test_format_vs_sector_none_value_renders_dash():
     # A None value for a window must not raise; it renders the DASH placeholder.
     assert format_vs_sector({"1M": 110.0, "3M": None}) == "1M 110.0 / 3M —"
-
-
-def test_format_tailwind():
-    assert format_tailwind({"score": 112, "rank": 1}) == "112 (#1)"
-    assert format_tailwind(None) == "—"
-    assert format_tailwind({}) == "—"
 
 
 # --- holdings rows ---------------------------------------------------------
@@ -138,7 +131,6 @@ def _sector(**overrides):
         "sector": "Technology",
         "weight": 0.30,
         "benchmark_delta": 0.05,
-        "tailwind": {"score": 112, "rank": 1},
     }
     base.update(overrides)
     return base
@@ -152,14 +144,12 @@ def test_format_sector_rows_full():
     assert row["sector"] == "Technology"
     assert row["weight"] == "30.0%"
     assert row["benchmark_delta"] == "+5.0%"
-    assert row["tailwind"] == "112 (#1)"
 
 
 def test_format_sector_rows_none_values_show_dash():
-    model = {"sectors": [_sector(benchmark_delta=None, tailwind=None)]}
+    model = {"sectors": [_sector(benchmark_delta=None)]}
     row = format_sector_rows(model)[0]
     assert row["benchmark_delta"] == "—"
-    assert row["tailwind"] == "—"
 
 
 def test_format_sector_rows_negative_delta():

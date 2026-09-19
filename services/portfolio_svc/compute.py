@@ -2,7 +2,7 @@
 
 The service-side orchestration the legacy desktop ``portfolio_analyzer.py``
 performed across its build worker + streamed Tk redraws: pull positions and price
-history through the proxy, classify into sectors, run the four sector comparisons
+history through the proxy, classify into sectors, run the three sector comparisons
 (``build_portfolio``), compute the slow per-symbol baselines, score the live
 scorecard (``evaluate_portfolio`` + ``suggest``), and **format** the whole thing
 into display-ready rows via that app's ``view_model``. Formatting lives here (Tier
@@ -98,17 +98,16 @@ def load_trades(data, *, path=ENTRIES_PATH, today=None) -> list:
     return store.get("trades", [])
 
 
-def build_raw_model(data, trades, *, benchmark=None, ranker=None, classify=None):
+def build_raw_model(data, trades, *, benchmark=None, classify=None):
     """Build the raw ``{holdings, sectors}`` portfolio model defensively.
 
-    Returns ``(model, errors)``. ``classify``/``ranker`` are injectable (tests
-    pass a fake classifier to stay offline; production uses the real lazy
-    classifier and ``ranker=None`` → every tailwind is ``None``).
+    Returns ``(model, errors)``. ``classify`` is injectable (tests pass a fake
+    classifier to stay offline; production uses the real lazy classifier).
     """
     if benchmark is None:
         benchmark = load_benchmark()
     try:
-        kwargs = {"benchmark": benchmark, "ranker": ranker}
+        kwargs = {"benchmark": benchmark}
         if classify is not None:
             kwargs["classify"] = classify
         model = build_portfolio(data, trades, **kwargs)

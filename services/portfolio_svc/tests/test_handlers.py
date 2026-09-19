@@ -24,7 +24,7 @@ def _model():
                       "day_pl": 10.0, "total_pl": 100.0, "vs_sector_rs": None,
                       "since_purchase_excess": None}],
         "sectors": [{"sector": "Technology", "weight": 1.0,
-                     "benchmark_delta": None, "tailwind": None}],
+                     "benchmark_delta": None}],
     }
 
 

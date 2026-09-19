@@ -45,8 +45,8 @@ def apply_tick(model: dict, tick: dict) -> dict:
 
     Holdings not matching the tick symbol pass through unchanged. After updating
     holdings, sector weights are recomputed from the (updated) ``market_value``s
-    via :func:`src.sectors.sector_weights`. ``benchmark_delta`` and ``tailwind``
-    on each sector row are left untouched (they refresh on a full rebuild); a
+    via :func:`src.sectors.sector_weights`. ``benchmark_delta``
+    on each sector row is left untouched (they refresh on a full rebuild); a
     sector with no weight after the regroup defaults to ``0.0``.
 
     Returns a new ``{"holdings": [...], "sectors": [...]}`` dict.

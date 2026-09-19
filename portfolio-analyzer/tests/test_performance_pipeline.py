@@ -13,7 +13,7 @@ def test_tick_flows_through_to_performance_rows():
         "market_value": 1000.0, "day_pl": 0.0, "total_pl": 0.0,
         "vs_sector_rs": None, "since_purchase_excess": None,
     }], "sectors": [{"sector": "Technology", "weight": 1.0,
-                     "benchmark_delta": None, "tailwind": None}]}
+                     "benchmark_delta": None}]}
     baselines = {"ABC": {
         "symbol": "ABC", "entry_date": "2026-01-05", "entry_price": 100.0,
         "days_held": 100, "ann_vol": 0.20, "atr": 2.0, "peak_close": 115.0,

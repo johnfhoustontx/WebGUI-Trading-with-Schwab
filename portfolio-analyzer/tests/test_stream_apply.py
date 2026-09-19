@@ -41,10 +41,8 @@ def _equity_model():
             },
         ],
         "sectors": [
-            {"sector": "Technology", "weight": 0.75, "benchmark_delta": 0.1,
-             "tailwind": {"score": 112, "rank": 1}},
-            {"sector": "Financials", "weight": 0.25, "benchmark_delta": -0.05,
-             "tailwind": None},
+            {"sector": "Technology", "weight": 0.75, "benchmark_delta": 0.1},
+            {"sector": "Financials", "weight": 0.25, "benchmark_delta": -0.05},
         ],
     }
 
@@ -91,7 +89,7 @@ def test_apply_tick_option_multiplier():
             "since_purchase_excess": None,
         }],
         "sectors": [{"sector": "Technology", "weight": 1.0,
-                     "benchmark_delta": None, "tailwind": None}],
+                     "benchmark_delta": None}],
     }
     out = apply_tick(model, {"symbol": "AAPL  240119C00150000",
                              "last": 6.0, "net_change": None})
@@ -156,12 +154,11 @@ def test_apply_tick_recomputes_sector_weights():
     assert abs(weights["Financials"] - 500 / 3500) < 1e-9
 
 
-def test_apply_tick_preserves_sector_benchmark_and_tailwind():
+def test_apply_tick_preserves_sector_benchmark():
     model = _equity_model()
     out = apply_tick(model, {"symbol": "AAPL", "last": 300.0, "net_change": None})
     tech = next(s for s in out["sectors"] if s["sector"] == "Technology")
     assert tech["benchmark_delta"] == 0.1
-    assert tech["tailwind"] == {"score": 112, "rank": 1}
 
 
 def test_apply_tick_unknown_symbol_is_noop_on_holdings():

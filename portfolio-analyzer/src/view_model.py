@@ -40,7 +40,6 @@ SECTOR_COLUMNS = [
     {"key": "sector", "header": "Sector"},
     {"key": "weight", "header": "Weight"},
     {"key": "benchmark_delta", "header": "vs Benchmark"},
-    {"key": "tailwind", "header": "Tailwind"},
 ]
 
 # Performance tab columns.
@@ -117,23 +116,6 @@ def format_vs_sector(rs) -> str:
     return " / ".join(parts) if parts else DASH
 
 
-def format_tailwind(tailwind) -> str:
-    """Format a tailwind dict ``{"score": 112, "rank": 1}`` -> ``"112 (#1)"``.
-
-    ``None`` or an empty dict -> ``"—"``.
-    """
-    if not tailwind:
-        return DASH
-    score = tailwind.get("score")
-    rank = tailwind.get("rank")
-    if score is None:
-        return DASH
-    score_str = f"{score:g}" if isinstance(score, float) else str(score)
-    if rank is None:
-        return score_str
-    return f"{score_str} (#{rank})"
-
-
 def _fmt_qty(value) -> str:
     """Format a share quantity as a plain integer-ish string; ``None`` -> ``—``."""
     if value is None:
@@ -176,7 +158,7 @@ def format_sector_rows(model) -> list[dict]:
     """Build display-ready sector rows from ``model["sectors"]``.
 
     Each returned dict has the keys named in :data:`SECTOR_COLUMNS`:
-    ``sector``, ``weight``, ``benchmark_delta``, ``tailwind`` — all formatted as
+    ``sector``, ``weight``, ``benchmark_delta`` — all formatted as
     display strings. Missing values / keys render as ``"—"``.
     """
     sectors = (model or {}).get("sectors") or []
@@ -187,7 +169,6 @@ def format_sector_rows(model) -> list[dict]:
                 "sector": s.get("sector") or DASH,
                 "weight": format_weight(s.get("weight")),
                 "benchmark_delta": format_signed_pct(s.get("benchmark_delta")),
-                "tailwind": format_tailwind(s.get("tailwind")),
             }
         )
     return rows

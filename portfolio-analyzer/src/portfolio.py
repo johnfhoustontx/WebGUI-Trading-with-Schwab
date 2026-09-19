@@ -2,17 +2,20 @@
 
 ``build_portfolio`` is the orchestration layer: it pulls positions and price
 history through an injected ``data`` object, classifies positions into sectors,
-computes the four comparisons, and emits a plain ``{"holdings", "sectors"}``
+computes the three comparisons, and emits a plain ``{"holdings", "sectors"}``
 dict the UI renders. It owns no I/O of its own — every external dependency
-(``data``, ``classify``, ``ranker``, ``benchmark``) is injected, so the whole
+(``data``, ``classify``, ``benchmark``) is injected, so the whole
 thing runs offline in tests.
 
-The four comparisons (see ``src.sectors``):
+The three comparisons (see ``src.sectors``):
 
 1. ``vs_sector_rs`` — holding relative strength vs its sector ETF (EQUITY only).
 2. ``benchmark_delta`` — portfolio sector weight minus a benchmark weight.
 3. ``since_purchase_excess`` — since-entry return minus the sector's, per EQUITY.
-4. ``tailwind`` — per-sector tailwind/headwind score+rank from a sector ranker.
+
+(A fourth, a per-sector tailwind/headwind from ``SectorRanker``, was removed
+2026-09-19: production never constructed a ranker, so the column it fed was
+blank on every row.)
 """
 from __future__ import annotations
 
@@ -22,7 +25,6 @@ from src.sectors import (
     classify_positions,
     sector_weights,
     weights_vs_benchmark,
-    tailwind_headwind,
     holding_vs_sector,
     since_purchase_vs_sector,
     compute_since_purchase_returns,
@@ -49,7 +51,6 @@ def build_portfolio(
     trades,
     *,
     classify=None,
-    ranker=None,
     benchmark=None,
     months: int = 12,
 ) -> dict:
@@ -64,8 +65,6 @@ def build_portfolio(
         classify: optional ``underlying -> {"sector_etf", "sector"}`` callable.
             When ``None``, ``classify_positions`` uses its own default (the real
             lazy classifier).
-        ranker: optional sector ranker for comparison #4. When ``None``,
-            tailwind/headwind is skipped (every sector's ``tailwind`` is None).
         benchmark: optional ``{sector: weight}`` benchmark for comparison #2.
             When ``None`` (or empty) the benchmark delta is skipped (None).
         months: history window (months) requested from ``get_daily_history``.
@@ -77,7 +76,7 @@ def build_portfolio(
         ``vs_sector_rs`` (#1, EQUITY-only else None) and
         ``since_purchase_excess`` (#3, EQUITY-only else None).
 
-        Each sector row is ``{sector, weight, benchmark_delta, tailwind}``.
+        Each sector row is ``{sector, weight, benchmark_delta}``.
     """
     positions = data.get_positions()
     if classify is None:
@@ -98,7 +97,7 @@ def build_portfolio(
                 lambda row: _build_holding(row, data, entries, months), classified))
     else:
         holdings = [_build_holding(row, data, entries, months) for row in classified]
-    sectors = _build_sectors(classified, benchmark, ranker)
+    sectors = _build_sectors(classified, benchmark)
     return {"holdings": holdings, "sectors": sectors}
 
 
@@ -137,26 +136,15 @@ def _build_holding(row: dict, data, entries: dict, months: int) -> dict:
     return holding
 
 
-def _build_sectors(classified: list[dict], benchmark, ranker) -> list[dict]:
-    """Build per-sector rows: weight + comparisons #2 and #4."""
+def _build_sectors(classified: list[dict], benchmark) -> list[dict]:
+    """Build per-sector rows: weight + comparison #2."""
     my_weights = sector_weights(classified)
     bench_delta = weights_vs_benchmark(my_weights, benchmark or {})
-    tw = tailwind_headwind(ranker) if ranker is not None else {}
-
-    # Map sector NAME -> sector ETF using the classified rows. Tailwind is keyed
-    # by ETF symbol (e.g. "XLK") while weights are keyed by sector name (e.g.
-    # "Technology"); this bridge lets us look the tailwind up by name.
-    name_to_etf = {row["sector"]: row.get("sector_etf") for row in classified}
-
-    sectors = []
-    for sector, weight in my_weights.items():
-        etf = name_to_etf.get(sector)
-        sectors.append(
-            {
-                "sector": sector,
-                "weight": weight,
-                "benchmark_delta": bench_delta.get(sector),
-                "tailwind": tw.get(etf) if etf is not None else None,
-            }
-        )
-    return sectors
+    return [
+        {
+            "sector": sector,
+            "weight": weight,
+            "benchmark_delta": bench_delta.get(sector),
+        }
+        for sector, weight in my_weights.items()
+    ]

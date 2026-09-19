@@ -13,8 +13,7 @@ class PortfolioModel(_Base):
     * ``holdings_rows`` — per-position display dicts (``view_model``'s
       ``HOLDINGS_COLUMNS`` keys: symbol/sector/quantity/market_value/day_pl/
       total_pl/vs_sector/since_purchase).
-    * ``sector_rows`` — per-sector display dicts (sector/weight/benchmark_delta/
-      tailwind).
+    * ``sector_rows`` — per-sector display dicts (sector/weight/benchmark_delta).
     * ``performance_rows`` — per-position scorecard display dicts (symbol + grade
       letters + composite + ann_return + ... + top_action), worst-composite first.
     * ``suggestions`` — ``{symbol: [{"action", "severity", "reason", ...}]}``

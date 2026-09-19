@@ -118,7 +118,7 @@ def test_format_payload_builds_display_rows():
                       "day_pl": 10.0, "total_pl": 100.0,
                       "vs_sector_rs": {"1M": 110.0}, "since_purchase_excess": 0.05}],
         "sectors": [{"sector": "Technology", "weight": 1.0,
-                     "benchmark_delta": 0.02, "tailwind": None}],
+                     "benchmark_delta": 0.02}],
     }
     payload = compute.format_payload(model, {}, proxy_up=True, streaming=True,
                                      errors=[])

@@ -56,7 +56,6 @@ SECTOR_COLS = [
     {"name": "weight", "label": "Weight", "field": "weight"},
     {"name": "benchmark_delta", "label": "vs Benchmark",
      "field": "benchmark_delta"},
-    {"name": "tailwind", "label": "Tailwind", "field": "tailwind"},
 ]
 
 PERF_COLS = [

@@ -2170,7 +2170,7 @@ Your live Schwab portfolio, with sector context and a performance scorecard.
 - **Holdings** tab — Symbol, Sector, Qty, Market Value, Day P/L, Total P/L,
   vs-Sector relative strength, and since-purchase excess. P&L cells are color-coded
   and update live.
-- **Sectors** tab — your sector weights vs the benchmark, plus a tailwind reading.
+- **Sectors** tab — your sector weights vs the benchmark.
 - **Performance** tab — per-position letter grades (Return / Capital / Risk /
   Entry), a composite, annualized return, vs-sector, and drawdown. Click a row to
   see its **advisory suggestions** below the table.

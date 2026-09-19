@@ -5,7 +5,6 @@ from src.sectors import (
     compute_since_purchase_returns,
     holding_vs_sector,
     since_purchase_vs_sector,
-    tailwind_headwind,
     weights_vs_benchmark,
 )
 
@@ -22,32 +21,6 @@ def test_weights_vs_benchmark_covers_either_dict():
 
 def test_weights_vs_benchmark_empty_benchmark_returns_empty():
     assert weights_vs_benchmark({"Technology": 0.5}, {}) == {}
-
-
-class _FakeRanking:
-    def __init__(self, symbol, composite_rs, rank):
-        self.symbol = symbol
-        self.composite_rs = composite_rs
-        self.rank = rank
-
-
-class _FakeRanker:
-    """Matches the documented interface: ``get_rankings()`` returns objects
-    each having ``.symbol``, ``.composite_rs`` and ``.rank``."""
-
-    def get_rankings(self):
-        return [
-            _FakeRanking("XLK", 112.5, 1),
-            _FakeRanking("XLE", 88.0, 11),
-        ]
-
-
-def test_tailwind_headwind_adapts_ranker():
-    out = tailwind_headwind(_FakeRanker())
-    assert out == {
-        "XLK": {"score": 112.5, "rank": 1},
-        "XLE": {"score": 88.0, "rank": 11},
-    }
 
 
 def test_since_purchase_beats_sector():

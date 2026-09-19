@@ -49,8 +49,6 @@ access or a local token file.
 - **`trade_store.py`** — persistent JSON trade store
   (`data/entries.json`): dedupe-by-`trade_id` merge, `last_sync` watermark.
   Pure logic + filesystem, no network.
-- **`trades_import.py`** — one-time CSV bootstrap to seed the trade store with
-  historical trades.
 - **`sync.py`** — incremental **daily auto-sync**: on the first launch each day
   it pulls new trades since `last_sync` from the proxy — **across every linked
   account** (`data.account_hashes()`) — and merges them in (dedupe by `trade_id`).

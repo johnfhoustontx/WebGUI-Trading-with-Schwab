@@ -1568,7 +1568,7 @@ quadrant rule as the sentiment RRG.
 
 **Evaluation** (`evaluation.py`): a split-speed scorecard — slow **baselines**
 (relative-strength percentile, technical and fundamental scores) computed at load
-and refreshed on a cadence, plus a fast **live** P&L/tailwind update per tick —
+and refreshed on a cadence, plus a fast **live** P&L update per tick —
 producing per-position letter grades (Return / Capital / Risk / Entry), a composite,
 annualized return, and drawdown, with advisory suggestions.
 

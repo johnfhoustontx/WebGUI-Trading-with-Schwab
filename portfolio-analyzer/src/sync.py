@@ -1,8 +1,7 @@
 """Daily incremental transaction sync for the portfolio analyzer.
 
-The CSV bootstrap (``src.trades_import``) is the one-time historical backfill —
-the user imports a CSV once to seed the store. *This* module is the incremental
-daily sync: on the first launch each day it pulls NEW trades since ``last_sync``
+This module is the incremental daily sync: on the first launch each day it
+pulls NEW trades since ``last_sync``
 from the proxy and merges them into the trade store (dedupe by ``trade_id``),
 then bumps ``last_sync`` to today.
 
