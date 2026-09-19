@@ -35,22 +35,6 @@ def test_safe_frac_clamps_to_unit_interval():
     assert rm._safe_frac(0.25) == 0.25
 
 
-@pytest.mark.parametrize("points", [None, [], [None], ["x"], [{}],
-                                    [{"memberships": None}],
-                                    [{"memberships": "x", "ts": "y"}]])
-def test_never_raises_on_junk(points):
-    out = rm.regime_mix_svg(points)
-    assert out.startswith("<svg") and out.endswith("</svg>")
-
-
-def test_empty_history_renders_a_waiting_placeholder():
-    """Not an empty frame — before the first sample the panel must look like it
-    is waiting, not like it is broken."""
-    out = rm.regime_mix_svg([])
-    assert "Waiting for regime" in out
-    assert "<rect" not in out
-
-
 # ------------------------------------------------------------------ ranking
 def test_rows_are_ranked_by_current_membership():
     rows = rm.rank_rows(_session())
@@ -102,85 +86,11 @@ def test_lead_margin_is_none_without_history():
     assert rm.lead_margin([]) == (None, None, None)
 
 
-def test_footer_states_the_margin():
-    out = rm.regime_mix_svg(_session())
-    assert "Whipsaw leads Balanced by 10.2pp" in out
-    assert "tightest today 0.3pp" in out
-
-
-# ------------------------------------------------------------- the graphics
-def test_flat_series_draws_the_dashed_rule_not_an_amplified_line():
-    """Breakout sits at exactly zero for whole sessions. Auto-scaling a dead-flat
-    series would amplify floating-point dust into a plausible-looking squiggle;
-    it must read as "did not move" on both channels."""
-    rows = {r["key"]: r for r in rm.rank_rows(_session())}
-    assert rows["breakout"]["flat"] is True
-    assert rm._spark_path(rows["breakout"]["series"], 0, 0, 100, 20) == ""
-    out = rm.regime_mix_svg(_session())
-    assert "stroke-dasharray" in out
-    assert "—" in out                      # its change cell, not "+0.0pp"
-
-
-def test_sparkline_is_scaled_to_its_own_range():
-    """The point of the redesign: a 2pp move must use the full row height, the
-    same as a 9pp one."""
-    d = rm._spark_path([0.30, 0.31, 0.32], 0, 0, 100, 20)
-    ys = [float(m) for m in re.findall(r"[ML] [\d.]+ ([\d.]+)", d)]
-    assert min(ys) == pytest.approx(0.0)   # its own max touches the top
-    assert max(ys) == pytest.approx(20.0)  # its own min touches the bottom
-
-
-def test_bar_length_is_share_of_the_leader():
-    """The leader's bar is full-width; the rest read as distance from winning."""
-    out = rm.regime_mix_svg(_session())
-    assert f'width="{rm.BAR_W}"' in out    # the leader (and every track)
-    # Balanced is 0.286/0.388 of the leader.
-    assert f'width="{rm.BAR_W * 0.286 / 0.388:.1f}"' in out
-    # ... and a regime at zero draws no fill at all, only its track.
-    zero = rm.regime_mix_svg([_pt(1000, choppy=0.4)])
-    assert zero.count('width="0.0"') == 0
-
-
 def test_colour_follows_the_regime_not_the_rank():
     """Filtering or reordering must never repaint an entity a new colour."""
     rows = {r["key"]: r for r in rm.rank_rows(_session())}
     for key, row in rows.items():
         assert row["color"] == rm.REGIME_COLORS[key]
-
-
-# --------------------------------------------------------------- sanitizer
-def test_emits_nothing_ui_html_would_strip():
-    """Mirrors ``test_rings.test_ring_svg_emits_nothing_dompurify_would_strip``.
-
-    A stripped attribute changes nothing server-side — the string stays correct
-    and the page still renders, just wrong — so this is only checkable here. It
-    already cost the rings one real defect (``dominant-baseline``)."""
-    from test_rings import _dompurify_allowlist
-
-    allow = _dompurify_allowlist()
-    out = rm.regime_mix_svg(_session())
-    tags = set(re.findall(r"<([a-zA-Z][\w-]*)", out))
-    attrs = set(re.findall(r'([a-zA-Z][\w-]*)="', out))
-    stripped = sorted(n for n in tags | attrs if n.lower() not in allow)
-    assert not stripped, f"the sanitizer would strip: {stripped}"
-    assert {"svg", "rect", "path", "text"} <= tags
-
-
-def test_no_style_or_filter():
-    """``ui.html`` strips ``<style>``; ``<filter>`` may not survive the sanitizer.
-    Also the Tailwind-first guard: no inline ``style=`` anywhere."""
-    out = rm.regime_mix_svg(_session())
-    assert "<style" not in out
-    assert "<filter" not in out
-    assert "style=" not in out
-
-
-def test_label_text_is_escaped():
-    """The footer interpolates display labels; they go through ``_esc`` so the
-    contract holds even if a label ever carries a bare ampersand."""
-    out = rm.regime_mix_svg(_session())
-    assert "<script" not in out
-    assert re.search(r"<text[^>]*>[^<]*</text>", out)
 
 
 # ── the Regime word's hover ──────────────────────────────────────────────────

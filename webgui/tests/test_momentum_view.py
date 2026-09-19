@@ -138,25 +138,12 @@ def test_level_bars_survive_an_empty_level():
                for b in bars.values())
 
 
-def test_alignment_counts_only_stocks_where_all_three_levels_agree():
-    assert V.alignment_count(_levels()) == 26
-    assert V.alignment_count({"stock": []}) == 0
-    assert V.alignment_count(None) == 0
-
-
 def test_the_alignment_panel_lists_the_names_behind_its_count():
     # The count says HOW MANY have industry and sector behind them; the whole
     # value of the panel is WHICH, because that is the list you act on.
     a = V.aligned_names(_levels())
     assert a["count"] == 26
     assert [m["symbol"] for m in a["members"]] == [f"K{i}" for i in range(26)]
-
-
-def test_the_count_and_the_list_cannot_disagree():
-    # One filter, two readings — the number on the panel is len() of the list
-    # beneath it, so a change to the rule can never move only one of them.
-    for lv in (_levels(), {"stock": []}, None):
-        assert V.alignment_count(lv) == len(V.aligned_names(lv)["members"])
 
 
 def test_aligned_names_are_ordered_by_rank_so_the_head_leads_the_board():

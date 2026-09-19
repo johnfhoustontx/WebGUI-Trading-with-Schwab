@@ -283,15 +283,6 @@ def dte_label(dte):
     return "NEAREST EXPIRY" if v is None else f"{int(v)}DTE"
 
 
-def net_color(value):
-    """Cyan when call-led, magenta when put-led. A missing reading takes the
-    muted label colour — never one of the two, which would assert a side."""
-    v = _num(value)
-    if v is None:
-        return C["label"]
-    return C["call"] if v >= 0 else C["put"]
-
-
 #############################################
 # SCALE TOGGLE (Flow Field)
 #############################################

@@ -855,20 +855,6 @@ def test_fmt_net_prem_scales_exactly_once():
     assert d.fmt_net_prem(-8.1) == "-8.1M"
 
 
-def test_flip_text_drops_the_side_word_when_the_side_is_unknown():
-    row = d.dealer_rows({"rows": [_mrow("$SPX", spot=6700.0, flip=6600.0)]},
-                        stale=False)[0]
-    assert d.flip_text(row).startswith("6,600.00 · 1.5")
-    assert d.flip_text(row).endswith("% above")
-    # No flip at all -> an em-dash, not a bare "above".
-    noflip = d.dealer_rows({"rows": [_mrow("$SPX", flip=None)]}, stale=False)[0]
-    assert d.flip_text(noflip) == "—"
-    # A level with no usable side prints the level alone — never a default side,
-    # which would be a claim about dealer hedging nothing supports.
-    assert d.flip_text({"flip": 100.0, "flip_side": None,
-                        "flip_distance": None}) == "100.00"
-
-
 def test_strategy_and_dte_text():
     assert d.strategy_label("put_credit_spread") == "PUT CREDIT SPREAD"
     assert d.strategy_label(None) == "—"

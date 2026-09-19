@@ -113,22 +113,6 @@ def test_current_value_none_preserved():
     assert captured.captured_rows([{}])[0]["current_value"] is None
 
 
-def test_rec_color_take_profit_is_green():
-    assert captured.rec_color("TAKE_PROFIT") == captured.REC_GREEN
-
-
-def test_rec_color_cut_is_red():
-    assert captured.rec_color("CUT") == captured.REC_RED
-
-
-def test_rec_color_hold_is_amber():
-    assert captured.rec_color("HOLD") == captured.REC_AMBER
-
-
-def test_rec_color_unknown_is_grey():
-    assert captured.rec_color("WHATEVER") == "#666666"
-
-
 def test_row_stamps_rec_class_for_cut():
     from pages.options import theme
     row = captured.captured_rows([{"recommendation": "CUT"}])[0]

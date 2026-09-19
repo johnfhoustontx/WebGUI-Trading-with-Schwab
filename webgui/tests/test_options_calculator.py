@@ -29,10 +29,7 @@ def test_eval_date_labels():
 
 
 def test_formatters():
-    assert calc.fmt_dollar(1234) == "+1,234"
-    assert calc.fmt_dollar(-5) == "-5"
     assert calc.fmt_pct(12.34) == "+12.3%"
-    assert calc.fmt_dollar(None) == "—"
 
 
 def test_extract_atm_iv_picks_closest_strike():
@@ -107,11 +104,6 @@ def test_chain_strikes_by_expiry_and_kind():
     assert calc.chain_strikes(CHAIN_SEL, "2026-06-18", "put") == [445.0]
     assert calc.chain_strikes(CHAIN_SEL, "2026-06-22", "put") == [440.0]
     assert calc.chain_strikes(CHAIN_SEL, "2026-06-18", "put") != [440.0]
-
-
-def test_api_symbol_maps_spx():
-    assert calc.api_symbol("SPX") == "$SPX"
-    assert calc.api_symbol("spy") == "SPY"
 
 
 def test_strategy_options_cover_strategies():

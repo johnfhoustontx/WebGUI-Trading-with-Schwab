@@ -589,14 +589,6 @@ def _short_time(iso):
         return ""
 
 
-def tab_label(base, count):
-    """Tab header text with the live signal count, e.g. ``'0-DTE (3)'``.
-
-    ``count is None`` (no scan yet) renders just the base label so the tabs don't
-    show a misleading ``(0)`` before the first paint."""
-    return base if count is None else f"{base} ({count})"
-
-
 def status_line(results):
     """Slim bottom status-bar text: last-scan time + signal count (+ errors).
 

@@ -158,9 +158,9 @@ def aligned_names(levels, head=None):
     ``head`` the whole membership is the visible list, which is the page's
     default because a list you have to expand is not a list you act on.
 
-    ``alignment_count`` is ``len()`` of this, deliberately — the number printed
-    above the chips and the chips themselves come out of one filter, so a change
-    to the rule cannot move only one of them."""
+    The count it reports is ``len()`` of the membership, deliberately — the
+    number printed above the chips and the chips themselves come out of one
+    filter, so a change to the rule cannot move only one of them."""
     rows = [r for r in ((levels or {}).get("stock") or [])
             if list(r.get("alignment") or []) == [True, True, True]]
     rows.sort(key=lambda r: (_num(r.get("rank")) is None,
@@ -170,14 +170,6 @@ def aligned_names(levels, head=None):
     shown = members if head is None else members[:max(0, int(head))]
     return {"count": len(members), "members": members,
             "names": shown, "more": max(0, len(members) - len(shown))}
-
-
-def alignment_count(levels):
-    """Stocks whose industry **and** sector both confirm — all three true.
-
-    The highest-conviction rows on the page, and the only number here that says
-    the three levels are telling one story rather than three."""
-    return aligned_names(levels)["count"]
 
 
 # ── 3 · the quadrant panels ──────────────────────────────────────────────────

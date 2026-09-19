@@ -600,23 +600,6 @@ _ACTIONS_SLOT = """
 """
 
 
-_ROW_ACTIONS_DOC = """\
-Both row-action slots gate the Paper button on ``props.row._allow_paper`` — the
-ONLY action that is gated, because Calculator/Expected-Move merely inspect a
-signal while Paper BOOKS it. Two hazards share the flag:
-
-* an **undefined-risk** structure (a naked short) — stamped by
-  ``strategy_table.strategy_rows``;
-* a **dropped-out** day-union signal, frozen at an hours-old price — stamped by
-  ``scanner.stamp_stale``, which only ever NARROWS the flag.
-
-``paper_create`` records ``signal['credit']`` verbatim with no re-pricing, so an
-ungated button on a stale row writes a fictional entry into the manual paper book.
-Every caller of these slots MUST stamp ``_allow_paper`` (an absent field reads as
-falsy → no button, which fails safe).
-"""
-
-
 def add_row_actions(table, get_signal):
     """Add per-row Calculator / Paper-trade / Expected Move buttons to a signal table.
 

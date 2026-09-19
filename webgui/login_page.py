@@ -156,9 +156,6 @@ def verify_form_token(token: str | None, creds: auth_store.Credentials, *,
 # ``kind=auth.KIND_SESSION, max_age_sec=auth.SESSION_MAX_AGE_SEC`` by hand is
 # exactly such a call site. There is one place to read, and one to change.
 
-def mint_session_token(key: str, *, epoch: int, now: float | None = None) -> str:
-    return auth.mint_token(key, kind=auth.KIND_SESSION, epoch=epoch, now=now)
-
 
 def mint_remember_token(key: str, *, epoch: int, now: float | None = None) -> str:
     return auth.mint_token(key, kind=auth.KIND_REMEMBER, epoch=epoch, now=now)

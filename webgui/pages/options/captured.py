@@ -35,14 +35,8 @@ from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN, BTN,
 # *account* positions, so captured rows usually carry NO rescue_state — this
 # highlight is therefore a safe no-op here unless a signal is explicitly flagged.
 
-REC_RED, REC_AMBER, REC_GREEN = "#ef5350", "#ffa726", "#66bb6a"
 # Profit/loss cell colors (green in profit, red in loss).
 PNL_GREEN, PNL_RED = "#66bb6a", "#ef5350"
-
-
-def rec_color(rec):
-    """Recommendation -> badge color (green take-profit / red cut / amber hold)."""
-    return {"TAKE_PROFIT": REC_GREEN, "CUT": REC_RED, "HOLD": REC_AMBER}.get(rec, "#666666")
 
 
 def rec_class(rec):

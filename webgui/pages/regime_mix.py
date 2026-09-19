@@ -1,4 +1,6 @@
-"""Pure SVG builder for the Market Regime membership panel on ``/sentiment``.
+"""Pure ranking model behind the Market Regime membership table on
+``/sentiment`` (the Market Regime Console's share table, ``pages/console_regime``)
+and the regime vocabulary the Desk shares.
 
 Replaces the percent-stacked area chart that used to live in
 ``sentiment.build_regime_mix_figure``. The stack was the wrong encoding for this
@@ -26,17 +28,14 @@ rows and a lead change being both rare and the most interesting event of the
 day, the ORDER is signal rather than noise. Ties break on the fixed order so an
 exact tie cannot jitter between repaints.
 
-Pure functions, no NiceGUI import — mounted by the page via ``ui.html`` and
-updated with ``el.content`` (the same idiom as ``pages.rings``). Everything it
-emits must survive ``ui.html``'s sanitizer: no ``<style>``, no ``<filter>``, no
-``dominant-baseline`` — see ``rings._BASELINE_DY`` and the DOMPurify test.
+Pure functions, no NiceGUI import. The inline-SVG panel this module first
+drew was superseded by the console's share table, which renders these rows.
 """
-from pages.gauge import _esc
 from pages.options.theme import THEME
 
 # Same 5-color value palette as the rest of /sentiment (config/theme.toml
 # [charts]) — imported here rather than from ``sentiment`` because that module
-# imports THIS one, and the labels/colors belong with the builder that draws them.
+# imports THIS one, and the labels/colors belong with the model that ranks them.
 _CH = THEME["charts"]
 
 # Fixed key order. No longer a reading position (the rows are ranked), but still
@@ -105,23 +104,6 @@ def regime_picture(word):
     """The hover sentence for a displayed regime word, or "" for anything else."""
     return REGIME_PICTURE.get(str(word or "").strip(), "")
 
-
-# --- geometry (fixed 640-wide coordinate space; the SVG scales itself) -------
-VIEWBOX_W = 640
-ROW_H = 30
-HEAD_H = 16                  # column captions
-FOOT_H = 26                  # lead-margin line
-X_NAME = 16
-X_VALUE = 150                # right-aligned
-X_BAR, BAR_W, BAR_H = 162, 210, 8
-X_SPARK, SPARK_W, SPARK_H = 388, 118, 20
-X_DELTA = VIEWBOX_W          # right-aligned to the edge
-
-CHIP = 9                     # colour chip square
-TRACK = "#1b2233"            # dim bar track — the page's chip background
-MUTED = "#7f8db0"            # captions + no-data glyphs
-TEXT = "#cdd8ee"             # base row text
-BASELINE_DY = "0.35em"       # NOT dominant-baseline — see rings._BASELINE_DY
 
 # A session boundary. Same constant as ``sentiment._INTRADAY_GAP_MS`` (4h), and
 # the same reason: deltas must be measured from THIS session's open, not from
@@ -271,118 +253,3 @@ def lead_margin(points):
     return rows[0]["key"], (rows[0]["now"] - rows[1]["now"]), min(mins)
 
 
-def _fmt_pct(frac, decimals=1):
-    return f"{frac * 100:.{decimals}f}%"
-
-
-def _fmt_delta(frac, flat):
-    """Signed change in percentage points; an em-dash for a series that never
-    moved (a "+0.0pp" would read as a measurement rather than as absence)."""
-    if flat:
-        return "—"
-    sign = "+" if frac >= 0 else "−"
-    return f"{sign}{abs(frac) * 100:.1f}pp"
-
-
-def _text(x, y, body, size, fill, anchor="start", weight=None):
-    extra = f' font-weight="{weight}"' if weight else ""
-    return (f'<text x="{x:.1f}" y="{y:.1f}" text-anchor="{anchor}" '
-            f'dy="{BASELINE_DY}" font-size="{size}"{extra} '
-            f'fill="{fill}">{body}</text>')
-
-
-def _spark_path(series, x, y, w, h):
-    """Polyline for one regime's own range, scaled to its OWN min/max.
-
-    Returns "" for a series that cannot make a line (0 or 1 points) — the caller
-    draws the flat rule instead.
-    """
-    if len(series) < 2:
-        return ""
-    lo, hi = min(series), max(series)
-    span = hi - lo
-    if span < _FLAT_EPS:
-        return ""
-    dx = w / (len(series) - 1)
-    pts = []
-    for i, v in enumerate(series):
-        py = y + h * (1.0 - (v - lo) / span)
-        pts.append(f"{'L' if i else 'M'} {x + i * dx:.1f} {py:.1f}")
-    return " ".join(pts)
-
-
-def _id_token(uid):
-    """``uid`` reduced to characters legal in a DOM id (mirrors rings)."""
-    return "".join(c for c in str(uid or "") if c.isalnum() or c in "_-")
-
-
-def regime_mix_svg(points, uid="regime"):
-    """The ranked membership panel as one inline SVG string. Never raises.
-
-    ``points`` is ``cache:sentiment:regime_history``'s ``points`` list. An empty
-    or wholly unusable history renders a waiting placeholder rather than an
-    empty frame, so the panel never looks broken before the first sample.
-    """
-    rows = rank_rows(points) if session_points(points) else []
-    height = HEAD_H + ROW_H * len(REGIME_ORDER) + FOOT_H
-    head = (f'<svg xmlns="http://www.w3.org/2000/svg" '
-            f'viewBox="0 0 {VIEWBOX_W} {height}" width="100%" '
-            f'id="regime-mix-{_id_token(uid)}">')
-    if not rows:
-        return (head + _text(VIEWBOX_W / 2, height / 2, "Waiting for regime…",
-                             13, MUTED, anchor="middle") + "</svg>")
-
-    parts = [head]
-    # Column captions. "share" and "today" name what the two graphic columns
-    # mean, because a bar scaled to the leader and a sparkline scaled to itself
-    # are both relative and neither is self-evident.
-    parts.append(_text(X_VALUE, HEAD_H / 2, "share", 10, MUTED, anchor="end"))
-    parts.append(_text(X_SPARK, HEAD_H / 2, "today", 10, MUTED))
-    parts.append(_text(X_DELTA, HEAD_H / 2, "change", 10, MUTED, anchor="end"))
-
-    lead = rows[0]["now"]
-    for i, r in enumerate(rows):
-        top = HEAD_H + i * ROW_H
-        mid = top + ROW_H / 2
-        strong = (i == 0)
-        parts.append(f'<rect x="0" y="{mid - CHIP / 2:.1f}" width="{CHIP}" '
-                     f'height="{CHIP}" rx="2" fill="{r["color"]}"/>')
-        parts.append(_text(X_NAME, mid, _esc(r["label"]), 13, TEXT,
-                           weight=600 if strong else None))
-        parts.append(_text(X_VALUE, mid, _fmt_pct(r["now"]), 13, TEXT,
-                           anchor="end", weight=600 if strong else None))
-        # Bar length is share OF THE LEADER, so the leader's row is always full
-        # and the others read as "how close is this to winning" — the contest,
-        # which is the question the panel exists to answer. (Share of the total
-        # would compress everything into the same narrow band, which is exactly
-        # the failure the stacked chart had.)
-        parts.append(f'<rect x="{X_BAR}" y="{mid - BAR_H / 2:.1f}" '
-                     f'width="{BAR_W}" height="{BAR_H}" rx="4" fill="{TRACK}"/>')
-        if lead > 0 and r["now"] > 0:
-            parts.append(f'<rect x="{X_BAR}" y="{mid - BAR_H / 2:.1f}" '
-                         f'width="{BAR_W * r["now"] / lead:.1f}" height="{BAR_H}" '
-                         f'rx="4" fill="{r["color"]}" '
-                         f'opacity="{1 if strong else 0.55}"/>')
-        d = _spark_path(r["series"], X_SPARK, mid - SPARK_H / 2, SPARK_W, SPARK_H)
-        if d:
-            parts.append(f'<path d="{d}" fill="none" stroke="{r["color"]}" '
-                         f'stroke-width="1.75" stroke-linejoin="round" '
-                         f'stroke-linecap="round"/>')
-        else:
-            parts.append(f'<path d="M {X_SPARK} {mid:.1f} '
-                         f'L {X_SPARK + SPARK_W} {mid:.1f}" fill="none" '
-                         f'stroke="{r["color"]}" stroke-width="1.5" '
-                         f'opacity="0.45" stroke-dasharray="3 3"/>')
-        parts.append(_text(X_DELTA, mid, _fmt_delta(r["change"], r["flat"]),
-                           12, MUTED, anchor="end"))
-
-    _, margin, margin_min = lead_margin(points)
-    if margin is not None:
-        foot = (f'{rows[0]["label"]} leads {rows[1]["label"]} by '
-                f'{margin * 100:.1f}pp')
-        if margin_min is not None:
-            foot += f" · tightest today {margin_min * 100:.1f}pp"
-        parts.append(_text(0, HEAD_H + ROW_H * len(rows) + FOOT_H / 2,
-                           _esc(foot), 11, MUTED))
-    parts.append("</svg>")
-    return "".join(parts)

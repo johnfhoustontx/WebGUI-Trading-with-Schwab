@@ -127,18 +127,8 @@ def eval_date_labels(dates):
     return [d.strftime("%m/%d") if hasattr(d, "strftime") else str(d) for d in dates or []]
 
 
-def fmt_dollar(v):
-    return f"{v:+,.0f}" if isinstance(v, (int, float)) else "—"
-
-
 def fmt_pct(v):
     return f"{v:+.1f}%" if isinstance(v, (int, float)) else "—"
-
-
-def api_symbol(symbol):
-    """Map a user symbol to the Schwab API form ($SPX for SPX index)."""
-    s = (symbol or "").strip().upper()
-    return "$SPX" if s == "SPX" else s
 
 
 # ── the redesign's page-side readouts ────────────────────────────────────────

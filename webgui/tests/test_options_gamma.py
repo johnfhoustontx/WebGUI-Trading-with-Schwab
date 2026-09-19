@@ -103,23 +103,6 @@ def test_render_no_crash_when_spot_missing():
         gamma.render()  # must not raise
 
 
-def test_panel_flex_endpoints_and_monotonic():
-    bar0, heat0 = gamma.panel_flex(0)
-    assert heat0 == 0.28 and round(bar0 + heat0, 4) == 1.0      # session start: bars wide
-    barf, heatf = gamma.panel_flex(205)
-    assert heatf == 0.70 and round(barf + heatf, 4) == 1.0      # full session: heat wide
-    # clamps past a full session
-    assert gamma.panel_flex(300) == gamma.panel_flex(205)
-    # heat fraction is non-decreasing with more snapshots
-    heats = [gamma.panel_flex(n)[1] for n in range(0, 210, 20)]
-    assert heats == sorted(heats)
-    # midpoint is between the endpoints
-    _, heat_mid = gamma.panel_flex(102)
-    assert 0.28 < heat_mid < 0.70
-
-
-
-
 def test_heatmap_matrix_from_history():
     rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3}),
             ("09:35", 450, None, None, None, 0, {448.0: 7, 450.0: -1})]
@@ -368,15 +351,6 @@ def test_term_heatmap_handles_json_string_strike_keys():
     assert cats == ["450", "1000"]          # numeric order, not lexical "1000" < "450"
     assert "451" not in cats                 # all-zero strike still filtered
     assert any(p[2] == 9 for p in fig["series"][0]["data"])   # net value looked up by re-floated key
-
-
-def test_wrap_explain_fragment_and_document():
-    body = "<h2>GAMMA EXPOSURE (GEX)</h2><p>hi</p>"
-    frag = gamma.wrap_explain("$SPX", body, full=False)
-    assert "gx-explain" in frag and body in frag and "$SPX" in frag
-    assert not frag.lstrip().startswith("<!DOCTYPE")
-    doc = gamma.wrap_explain("$SPX", body, full=True)
-    assert doc.lstrip().startswith("<!DOCTYPE") and body in doc
 
 
 def test_summary_text_keeps_net_and_flip_drops_spot_and_strikes():

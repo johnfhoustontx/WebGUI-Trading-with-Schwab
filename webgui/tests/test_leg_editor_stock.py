@@ -105,37 +105,6 @@ def test_the_option_lists_are_never_None(leg):
 
 # ── the labels say what the number is ────────────────────────────────────
 
-def test_a_share_legs_quantity_is_labelled_LOTS():
-    """⚠ It counts 100-share lots. A reader who thinks it is shares types 100
-    and builds a 10,000-share position — every figure 100x."""
-    assert LE.leg_labels(_stock())["qty"] == "LOTS"
-
-
-def test_a_share_legs_premium_is_labelled_as_a_SHARE_PRICE():
-    labels = LE.leg_labels(_stock())
-    assert labels["premium"] != "PREMIUM"
-    assert "SHARE" in labels["premium"].upper()
-
-
-def test_a_share_leg_dashes_the_STRIKE_and_EXPIRY_labels():
-    """There is nothing to put there, and a blank cell reads as a missing value
-    rather than as an inapplicable one."""
-    labels = LE.leg_labels(_stock())
-    assert labels["strike"] == "—"
-    assert labels["expiry"] == "—"
-
-
-def test_an_OPTION_legs_labels_are_UNCHANGED():
-    """The control: every existing leg must render exactly as before."""
-    assert LE.leg_labels(_call()) == {"type": "TYPE", "side": "SIDE",
-                                      "expiry": "EXPIRY", "strike": "STRIKE",
-                                      "qty": "QTY", "premium": "PREMIUM"}
-
-
-@pytest.mark.parametrize("bad", [None, {}, {"option_type": None}, 7])
-def test_the_labels_never_raise_on_a_junk_leg(bad):
-    assert LE.leg_labels(bad)["qty"] in ("QTY", "LOTS")
-
 
 # ── flipping a leg's type clears what no longer applies ──────────────────
 
@@ -183,24 +152,6 @@ def test_retyping_keeps_the_normalized_key_set():
 
 
 # ── "set all legs to this expiry" must skip the share leg ────────────────
-
-def test_setting_ALL_legs_to_an_expiry_SKIPS_the_share_leg():
-    """⚠ The Calculator's top-level Expiry propagates to every leg, which would
-    stamp a date onto shares — the same stale-expiry hazard ``retype_leg``
-    guards, arriving from a different direction. Nothing else on the page can
-    write that field."""
-    legs = [_stock(), _call()]
-    out = LE.set_legs_expiry(legs, "2026-12-18")
-    stock = next(l for l in out if l["option_type"] == "stock")
-    opt = next(l for l in out if l["option_type"] == "call")
-    assert stock["expiry"] is None
-    assert opt["expiry"] == "2026-12-18"
-
-
-def test_setting_all_legs_to_an_expiry_is_UNCHANGED_for_options():
-    """The control: an option-only set still gets every leg stamped."""
-    out = LE.set_legs_expiry([_call(), _call(strike=95.0)], "2026-12-18")
-    assert [l["expiry"] for l in out] == ["2026-12-18", "2026-12-18"]
 
 
 # ── the render pass must not stamp an expiry either ──────────────────────

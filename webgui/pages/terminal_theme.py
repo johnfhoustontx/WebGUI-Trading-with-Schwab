@@ -44,13 +44,10 @@ SHELL = "w-full flex flex-col gap-[18px]"
 
 PANEL = ("flex flex-col rounded-xl border border-[#1c2740] "
          "bg-[linear-gradient(180deg,#0e1626,#0b1220)] px-5 pt-[19px] pb-5")
-PANEL_TIGHT = ("flex flex-col rounded-[11px] border border-[#1c2740] "
-               "bg-[linear-gradient(180deg,#0e1626,#0b1220)] px-[18px] py-[13px]")
 
 # ── type ────────────────────────────────────────────────────────────────────
 MONO = "font-['JetBrains_Mono',ui-monospace,monospace]"
 EYEBROW = "text-[9.5px] font-bold tracking-[0.14em] text-[#56678a] whitespace-nowrap"
-EYEBROW_WIDE = "text-[10px] font-bold tracking-[0.15em] text-[#56678a] whitespace-nowrap"
 PANEL_TITLE = "text-base font-bold tracking-[-0.01em] text-[#f2f6fc] whitespace-nowrap"
 SCREEN_TITLE = "text-[19px] font-extrabold tracking-[-0.015em] text-[#f2f6fc]"
 SUBTLE = "text-[11px] text-[#56678a]"
@@ -58,7 +55,6 @@ NOTE = "text-[11.5px] leading-[1.55] text-[#7d8db0]"
 BODY = "text-[13px] leading-[1.6] text-[#a8b6cf]"
 LABEL = "text-[12px] text-[#a8b6cf]"
 VALUE = f"{MONO} text-[12.5px] text-[#cfdaee] whitespace-nowrap"
-BIG_NUM = f"{MONO} text-[40px] font-bold leading-none tracking-[-0.02em] text-[#f2f6fc]"
 
 # ── semantic colour, as a FINITE set ────────────────────────────────────────
 # Data-driven colour maps to one of these, never to a runtime-built class: the
@@ -73,7 +69,6 @@ STATE_TEXT = f"{POS} {NEG} {WARN} {DIM} {OFF}"      # for .classes(remove=…)
 BAR_POS = "bg-[#34d399]"
 BAR_NEG = "bg-[#f87171]"
 BAR_DIM = "bg-[#4a5b7d]"
-BAR_CLASSES = f"{BAR_POS} {BAR_NEG} {BAR_DIM}"
 
 # Chips: (border, background, text) as one class string per state.
 CHIP_POS = "border-[#1f6b52] bg-[rgba(52,211,153,0.08)] text-[#34d399]"

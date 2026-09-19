@@ -567,16 +567,6 @@ def test_directional_rows_take_stale_and_new_marks():
     assert rows[0]["stale_since"] == "1:32 PM"
 
 
-# ── tab header counts ────────────────────────────────────────────────────────
-def test_tab_label_appends_count():
-    assert scanner.tab_label("0-DTE", 3) == "0-DTE (3)"
-    assert scanner.tab_label("Swing", 0) == "Swing (0)"
-
-
-def test_tab_label_no_count_when_none():
-    assert scanner.tab_label("0-DTE", None) == "0-DTE"
-
-
 # ── bottom status line ───────────────────────────────────────────────────────
 def test_status_line_waiting_when_empty():
     """A cold service must not read as a quiet market. The words are the shared

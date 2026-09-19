@@ -1072,13 +1072,6 @@ _WATCH_SCAN_MEMO: dict = {}
 _WATCH_FLOW_MEMO: dict = {}
 
 
-def reset_watcher_memos() -> None:
-    """Drop the watcher's payload memos (test helper; also safe after a manual
-    cache edit)."""
-    _WATCH_SCAN_MEMO.clear()
-    _WATCH_FLOW_MEMO.clear()
-
-
 _ALERT_STATE: dict = {
     "acked_scan": set(), "alerted": set(), "alerted_init": None,
     # Captured badge: the SET of acknowledged captured signal ids (not a version),

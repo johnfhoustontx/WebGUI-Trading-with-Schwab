@@ -69,16 +69,6 @@ def test_leg_editor_coerces_out_of_options_values_without_raising():
     assert legs[1]["expiry"] == "2026-06-23"     # absent expiry -> first available
 
 
-def test_set_legs_expiry_sets_every_leg():
-    legs = [{"option_type": "call", "side": "long", "strike": 100,
-             "expiry": "2026-07-17", "qty": 1, "premium": 2.5},
-            {"option_type": "put", "side": "short", "strike": 95,
-             "expiry": "2026-08-21", "qty": 2, "premium": 1.0}]
-    out = LE.set_legs_expiry(legs, "2026-09-18")
-    assert [l["expiry"] for l in out] == ["2026-09-18", "2026-09-18"]
-    assert out[0]["strike"] == 100 and out[1]["qty"] == 2   # other fields preserved
-
-
 def test_apply_expiry_propagates_to_all_legs():
     from nicegui import ui
     with ui.card() as container:

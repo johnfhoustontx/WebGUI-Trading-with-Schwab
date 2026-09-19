@@ -104,12 +104,6 @@ def should_enqueue(coverage, trigger, *, have_dossier=False, feed_cold=False,
 DOSSIER_DEDUP_SEC = 60
 
 
-def _now_ct_naive():
-    """Now as a NAIVE Central wall-clock — the dossier's ``fetched_at`` basis
-    (``dossier._stamp``). Never host-local: off CT that is hours out."""
-    return _dt.datetime.now(_CT).replace(tzinfo=None)
-
-
 def _age_seconds(stamp, *, naive_zone):
     """Seconds since ISO ``stamp``, or None. A naive stamp is read in
     ``naive_zone`` — UTC for the envelope's write time, Central for

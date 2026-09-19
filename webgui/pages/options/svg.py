@@ -36,16 +36,6 @@ def value_color(value):
     return _hex(_lerp_color(AMBER, GREEN, (v - 50.0) / 50.0))
 
 
-def _zone_color(v):
-    if v < 40:
-        return _hex(RED)
-    if v < 55:
-        return _hex(AMBER)
-    if v < 75:
-        return _hex(BLUE)
-    return _hex(GREEN)
-
-
 def gradient_bar_svg(value, width=150, height=12):
     """Horizontal bar filled to ``value`` (0-100), colored red→amber→green."""
     v = _clamp(value)

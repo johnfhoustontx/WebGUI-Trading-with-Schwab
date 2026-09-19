@@ -392,15 +392,6 @@ def flags_for(signal):
     return out
 
 
-def flag_count(signal):
-    """How many flags a signal raises -- drives the collapsed-strip badge.
-
-    Counts the iron-condor note too: a zero badge on an IC would restore exactly
-    the false confidence that note exists to prevent.
-    """
-    return len(flags_for(signal))
-
-
 def flag_badge_text(n):
     """Badge label for the collapse toggle; empty hides it. Caps at '9+'.
 

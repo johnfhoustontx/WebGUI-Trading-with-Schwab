@@ -60,27 +60,12 @@ def type_options(allow_stock=False) -> list:
     """
     return list(TYPE_OPTIONS) if allow_stock else list(OPTION_TYPE_OPTIONS)
 
-_OPTION_LABELS = {"type": "TYPE", "side": "SIDE", "expiry": "EXPIRY",
-                  "strike": "STRIKE", "qty": "QTY", "premium": "PREMIUM"}
-#: ⚠ A share leg's two numbers mean something else. ``qty`` counts 100-share
-#: LOTS (a reader who thinks it is shares types 100 and builds a 10,000-share
-#: position), and ``premium`` is the price PAID PER SHARE, not an option
-#: premium. Strike and expiry are dashed rather than blanked: an em-dash reads
-#: as "does not apply", a blank cell as "missing".
-_STOCK_LABELS = {**_OPTION_LABELS, "expiry": "—", "strike": "—",
-                 "qty": "LOTS", "premium": "$/SHARE"}
-
 
 #: The share-leg predicate lives in the PURE model (``strategies``), which
 #: ``calculator`` can import without dragging in nicegui. Re-exported here
 #: because this module is where the leg-editing helpers live.
 is_stock_leg = S.is_stock_leg
 _is_stock = S.is_stock_leg
-
-
-def leg_labels(leg) -> dict:
-    """The six column labels for one leg — option wording, or share wording."""
-    return dict(_STOCK_LABELS if _is_stock(leg) else _OPTION_LABELS)
 
 
 def leg_strike_options(leg, options) -> list:
@@ -166,26 +151,6 @@ def normalize_legs(legs, keep_premium=True):
             "premium": (l.get("premium") if keep_premium else None),
         })
     return out
-
-
-def set_legs_expiry(legs, expiry):
-    """Return normalized legs with every OPTION leg's expiry set to ``expiry``
-    (the Calculator's top-level Expiry → propagate to all legs). Other fields
-    preserved.
-
-    ⚠ **A SHARE leg is skipped.** Shares do not expire, and stamping a date onto
-    one is the same stale-expiry hazard ``retype_leg`` guards against, arriving
-    from the other direction: that date would join the front-expiry computation
-    in ``options_calculator.calc_summary_generic`` and, if earlier than the real
-    option leg's, price the option with time remaining at the wrong horizon.
-    """
-    out = normalize_legs(legs)
-    for l in out:
-        if _is_stock(l):
-            continue
-        l["expiry"] = expiry
-    return out
-
 
 
 def coerce_strike(value, options):
@@ -679,7 +644,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 # ⚠ A SHARE leg is skipped: ``coerce_choice(None, exps)`` answers
                 # the first expiry, so rendering a covered call used to stamp a
                 # date onto its shares — the stale-expiry hazard retype_leg and
-                # set_legs_expiry already guard, from a fourth direction.
+                # apply_expiry already guard, from a third direction.
                 e_val = None if _is_stock(leg) else coerce_choice(leg.get("expiry"), exps)
                 leg["expiry"] = e_val
                 s_opts = strikes_for(e_val, leg.get("option_type")) or []
@@ -744,8 +709,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     def apply_expiry(expiry):
         """Set every OPTION leg's expiry to ``expiry`` and re-render (strikes
         re-snap to that expiry's ladder via _render's coercion). Fires on_change.
-        In place, so each row keeps its price source and typed-price flag — the
-        rule ``set_legs_expiry`` states for share legs holds here too. The dirty
+        In place, so each row keeps its price source and typed-price flag, and a
+        share leg is skipped (it has no expiry to set). The dirty
         flag is preserved — an untouched single-expiry template still routes
         analytic."""
         for leg in state["legs"]:

@@ -1308,18 +1308,6 @@ def flip_sub_text(row):
     return f"{dist:.2f}% {side}"
 
 
-def flip_text(row):
-    """'6,680.00 · 0.49% above' — the flip level and where spot sits on it.
-
-    Composed from the two halves the panel renders separately, so the one-line
-    and the stacked readings can never say different things."""
-    level = fmt_price((row or {}).get("flip"))
-    if level == _DASH:
-        return _DASH
-    sub = flip_sub_text(row)
-    return f"{level} · {sub}" if sub else level
-
-
 def flow_kind_text(row):
     """'Unusual volume · Call' — the alert kind and the side it fired on.
 

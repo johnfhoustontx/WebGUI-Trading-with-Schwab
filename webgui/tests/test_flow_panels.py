@@ -128,12 +128,6 @@ def test_fmt_time_is_central_not_host_local():
     assert fp.fmt_time(1_755_264_600) == "08:30"
 
 
-def test_net_color_never_asserts_a_side_for_a_missing_reading():
-    assert fp.net_color(1.0) == fp.C["call"]
-    assert fp.net_color(-1.0) == fp.C["put"]
-    assert fp.net_color(None) not in (fp.C["call"], fp.C["put"])
-
-
 def test_dte_label_falls_back_rather_than_inventing_a_number():
     assert fp.dte_label(0) == "0DTE"
     assert fp.dte_label(3) == "3DTE"

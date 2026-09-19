@@ -273,11 +273,6 @@ def _s_dir_built(ctx):
     return "neither scan window had a chain to read."
 
 
-def _entered_strikes(ctx, noun="short strikes"):
-    n = ctx["entered"]
-    return f"{n} {noun if n != 1 else noun.rstrip('s')}"
-
-
 # stage label -> the binding sentence, as a string or a callable over the
 # context. ``{n}`` is the count that ENTERED the stage - the previous stage's
 # remaining, which is what makes "38 short strikes priced, and ..." a fact

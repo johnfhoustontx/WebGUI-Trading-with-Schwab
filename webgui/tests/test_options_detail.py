@@ -33,7 +33,7 @@ def test_flag_badge_text_hides_zero():
 
 
 def test_flag_badge_text_rejects_non_counts():
-    # flag_count feeds this, but the badge must not render junk if it ever gets
+    # len(flags_for(...)) feeds this, but the badge must not render junk if it ever gets
     # something else — and bool is an int subclass, so True must not read as "1".
     for junk in (None, -1, "3", 1.5, True, False):
         assert detail.flag_badge_text(junk) == ""
@@ -203,10 +203,6 @@ def test_flags_never_raise_on_garbage():
         assert isinstance(detail.flags_for(bad), list)
 
 
-def test_flag_count_counts_only_tripped_and_unmeasured():
-    assert detail.flag_count({"factor_scores": {"em": 30, "gex": 10}}) >= 2
-
-
 # --- flags fire only on REAL dealbreakers -----------------------------------
 # The inferred "== 50.0 means unmeasured" sentinel was removed: a realistic
 # swing signal lands on exactly 50.0 for em/gex/dex (no walls, no sized EM) AND
@@ -251,7 +247,7 @@ def test_iron_condor_reports_checks_unavailable():
     flags = detail.flags_for(sig)
     assert len(flags) == 1
     assert flags[0]["key"] == "ic" and flags[0]["state"] == "unavailable"
-    assert detail.flag_count(sig) >= 1
+    assert len(detail.flags_for(sig)) >= 1
 
 
 def test_iron_condor_detected_without_a_type_field():
@@ -337,7 +333,7 @@ def test_paper_trade_shape_raises_no_flags():
     sig = {"symbol": "SPY", "credit": 1.55, "max_loss": 3.45,
            "short_strike": 480, "long_strike": 475, "dte": 7}
     assert detail.flags_for(sig) == []
-    assert detail.flag_count(sig) == 0
+    assert len(detail.flags_for(sig)) == 0
 
 
 def test_scoreless_iron_condor_also_raises_no_flags():
@@ -426,7 +422,6 @@ def test_breakevens_returns_empty_for_missing_or_junk():
     assert detail.breakevens(None) == []
     assert detail.breakevens("") == []
     assert detail.breakevens("not/a/number") == []
-
 
 
 def test_breakevens_accepts_the_ledgers_legacy_comma_separator():

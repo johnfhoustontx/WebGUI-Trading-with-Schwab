@@ -51,18 +51,16 @@ PANEL_BORDER = "rgba(120,140,160,0.16)"   # hairline framing the washed plot are
 DARK_BG = "#1b1b1b"
 GRID = "#333333"
 FONT = "#e6e6e6"
-HOVER = {"bgcolor": "#222222", "bordercolor": "#444444", "font": {"size": 11, "color": FONT}}
 
 # Friendlier toggle/title labels: GEX→GAMMA, DEX→DELTA (internal view keys + the
 # engine/cache strings stay "GEX"/"DEX" — only the display label changes).
 _VIEW_LABELS = {"GEX": "GAMMA", "DEX": "DELTA"}
 
-# Shared plot-area geometry for the "by strike" bars + the intraday heatmap. Both
-# panels use the SAME chart height + top/bottom margins so their Strike axes occupy
-# the identical vertical pixel band — a given strike lines up across both panels (and
-# the shared-strike crosshair lands on the right row in each). The bottom margin fits
+# Shared plot-area margins for the "by strike" bars + the intraday heatmap. Both
+# panels use the SAME top/bottom margins so their Strike axes occupy the identical
+# vertical pixel band — a given strike lines up across both panels (and the
+# shared-strike crosshair lands on the right row in each). The bottom margin fits
 # the heatmap's rotated time labels; the bars just leave that space empty.
-_PLOT_HEIGHT = 680
 _PLOT_MARGIN_TOP = 48
 _PLOT_MARGIN_BOTTOM = 64
 
@@ -481,17 +479,6 @@ def bar_yrange(strikes, spot, pad_frac=0.04):
     return [lo - pad, hi + pad]
 
 
-def panel_flex(n_cols, full_cols=205, min_heat=0.28, max_heat=0.70):
-    """(bar_weight, heat_weight) flex ratio from intraday snapshot count.
-
-    full_cols ≈ two-minute slots in an 08:30–15:20 CT session. The heatmap
-    fraction lerps min_heat→max_heat with session progress so the heatmap grows
-    and the bars shrink as the day fills in; bars take the remainder."""
-    p = 0.0 if full_cols <= 0 else max(0.0, min(1.0, n_cols / full_cols))
-    heat = min_heat + (max_heat - min_heat) * p
-    return round(1.0 - heat, 4), round(heat, 4)
-
-
 # Fixed strike/heatmap flex split now that the full day + forward band are shown.
 # (strike, heat). Flip to (0.70, 0.30) if the day gets hard to read.
 _STRIKE_HEAT_SPLIT = (0.40, 0.60)
@@ -545,8 +532,8 @@ def status_strip_text(gex_status, summary, countdown):
 def flex_class(grow, grow2=1, basis="0%"):
     """Runtime arbitrary-value Tailwind class for a continuous flex ratio.
 
-    The bar/heatmap split is a genuinely continuous value (~82 distinct ratios over a
-    session via panel_flex) with no finite palette, so it uses a JIT-generated
+    The bar/heatmap split is a continuous weight (``_STRIKE_HEAT_SPLIT``) with no
+    finite palette, so it uses a JIT-generated
     arbitrary class (`_` = space). Reset per repaint via .classes(remove=prev, add=new)."""
     return f"flex-[{grow}_{grow2}_{basis}]"
 
@@ -1220,24 +1207,6 @@ EXPLAIN_CSS = """
 """
 
 
-def wrap_explain(symbol, body_html, full=False):
-    """Wrap explain body HTML in the scoped ``gx-explain`` container.
-
-    full=False -> fragment for inline injection (page provides CSS via add_css).
-    full=True  -> standalone HTML document with the CSS inlined (for download).
-    """
-    inner = (f'<div class="gx-explain">'
-             f'<div class="gx-title">Gamma Tool Explain — {symbol}</div>'
-             f'<div class="gx-sub">Dealer-positioning read across GEX, Charm, DEX and Vanna.</div>'
-             f"{body_html}</div>")
-    if not full:
-        return inner
-    return (f'<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">'
-            f"<title>Gamma Tool Explain — {symbol}</title>"
-            f"<style>body{{background:#1b1b1b;margin:0;padding:24px;}}{EXPLAIN_CSS}</style>"
-            f"</head><body>{inner}</body></html>")
-
-
 # The Flow view is drawn by ``flow_panels.divergence_panel`` (an SVG console
 # panel), not by a Highcharts figure — see that module's docstring for why. The
 # old ``flow_figure`` and its FLOW_PRICE/FLOW_CALL/FLOW_PUT palette are gone with
@@ -1305,7 +1274,6 @@ NET_PREM_COLORS = {
 }
 NET_PREM_FALLBACK = "#9e9e9e"
 NET_PREM_MODES = {"dollars": "Dollars ($M)", "skew": "Skew %"}
-_NET_PREM_AXIS = {"dollars": "Net premium ($M)", "skew": "Net premium (%)"}
 
 _NP_CT = ZoneInfo("America/Chicago")
 # The service's GEX collection window + a staleness bound at 2× its 1-min publish
@@ -2336,8 +2304,8 @@ def render(symbol: str | None = None, view: str | None = None):
     # Persistent panels: the Highcharts elements are created ONCE and updated in
     # place on every repaint (Highcharts diffs the new options) — rebuilding them
     # each time would flash. Message labels are toggled via set_visibility. Column
-    # flex weights are set per-render from the intraday snapshot count (panel_flex)
-    # so the heatmap grows / bars shrink through the session.
+    # flex weights are set per-render from the fixed _STRIKE_HEAT_SPLIT (bars full
+    # width on Term).
     # gap-0: bars + heatmap sit flush (no inter-panel gap). w-[calc(100%+1rem)] makes
     # the row 1rem wider than the content box so it extends INTO (and fills) the content
     # column's p-4 right padding — the heatmap's right edge then reaches the window edge.

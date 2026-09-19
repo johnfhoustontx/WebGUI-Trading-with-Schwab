@@ -141,8 +141,8 @@ NE = {k: f"border-[{v}]" for k, v in NEUTRAL.items()}
 
 # The two semantic accents outside the quadrant set: the flow band's footers and
 # the gauge's triggers speak "out/in" and "risk-off/risk-on", which share the
-# Lagging red and Leading green hues by design rather than by coincidence.
-TONE_HUE = {"down": 22.0, "up": 158.0}
+# Lagging red (hue 22) and Leading green (hue 158) by design rather than by
+# coincidence.
 TONE = {
     "down": {"txt": f"text-[{oklch_hex(0.75, 0.14, 22)}]",
              "dot": f"bg-[{oklch_hex(0.65, 0.16, 22)}]",
