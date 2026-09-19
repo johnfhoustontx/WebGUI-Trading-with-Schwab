@@ -49,6 +49,23 @@ def test_no_threshold_means_never_stale():
     assert kit.freshness("2026-09-11T15:00:00+00:00", _utc(18, 15, 0))[1] == "fresh"
 
 
+def test_a_naive_now_is_utc_as_well():
+    """The stamp is UTC when it has no zone, so `now` must be read the same way
+    - and subtracting a naive from an aware one raises outright."""
+    aware = kit.freshness("2026-09-18T15:00:00+00:00", _utc(18, 15, 30),
+                          stale_after_sec=600)
+    naive = kit.freshness("2026-09-18T15:00:00+00:00",
+                          dt.datetime(2026, 9, 18, 15, 30), stale_after_sec=600)
+    assert naive == aware == ("Stale · updated 10:00 AM CT", "stale")
+
+
+def test_the_scanner_is_not_called_stale_on_a_sunday():
+    """Its publisher only runs in the session, so by Sunday its newest write is
+    legitimately ~43h old."""
+    sunday_noon_ct = dt.datetime(2026, 9, 20, 17, 0, tzinfo=UTC)
+    assert kit._stale_after("options:scan", sunday_noon_ct) is None
+
+
 # -- toasts --------------------------------------------------------------------
 def test_toast_args_one_position_and_a_type_always():
     assert kit.toast_args("ok", "Saved") == {
@@ -156,6 +173,86 @@ def test_header_actions_sit_right_of_the_stamp():
         h = kit.header("X", view="v")
     kids = list(h.row.default_slot.children)
     assert kids.index(h.stamp) < kids.index(h.actions)
+
+
+def _patch_bus(monkeypatch, read_meta):
+    async def io_bound(fn, *a, **kw):
+        return fn(*a, **kw)
+    monkeypatch.setattr(kit.run, "io_bound", io_bound)
+    monkeypatch.setattr(kit.bus_client, "read_meta", read_meta)
+
+
+def test_an_unknown_page_width_is_an_error_not_a_silent_full_width():
+    with pytest.raises(ValueError):
+        kit.page("wide")
+
+
+def test_the_poll_stamps_what_the_bus_reports(monkeypatch):
+    now = _utc(18, 15, 30)
+    _patch_bus(monkeypatch, lambda _v: (7, "2026-09-18T15:29:00+00:00"))
+    with ui.card():
+        h = kit.header("Paper Ledger", view="options:paper_trades", _now=lambda: now)
+    asyncio.run(h.poll())
+    assert h.stamp.text == "Updated 10:29 AM CT"
+
+
+def test_a_scheduled_view_that_falls_behind_turns_amber(monkeypatch):
+    now = _utc(18, 15, 30)
+    old = (now - dt.timedelta(hours=2, minutes=30)).isoformat()
+    _patch_bus(monkeypatch, lambda _v: (7, old))
+    with ui.card():
+        h = kit.header("Paper Ledger", view="options:paper_trades", stale=True,
+                       _now=lambda: now)
+    asyncio.run(h.poll())
+    assert h.stamp.text.startswith("Stale") and theme.TXT_WARN in h.stamp.classes
+
+
+def test_a_bus_failure_keeps_the_last_stamp_and_still_lets_it_age(monkeypatch):
+    """The stamp froze on the last good reading and stayed 'Updated', so a dead
+    bus looked exactly like a quiet one."""
+    clock = {"now": _utc(18, 15, 30)}
+    calls = {"n": 0}
+
+    def read_meta(_view):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise ConnectionError("redis is down")
+        return (7, "2026-09-18T15:29:00+00:00")
+
+    _patch_bus(monkeypatch, read_meta)
+    with ui.card():
+        h = kit.header("Paper Ledger", view="options:paper_trades", stale=True,
+                       _now=lambda: clock["now"])
+    asyncio.run(h.poll())
+    assert h.stamp.text == "Updated 10:29 AM CT"
+    clock["now"] = _utc(18, 18, 30)                  # three hours on, still down
+    asyncio.run(h.poll())
+    assert h.stamp.text == "Stale · updated 10:29 AM CT"
+    assert theme.TXT_WARN in h.stamp.classes
+
+
+def test_a_poll_that_reads_nothing_does_not_invent_a_time(monkeypatch):
+    """run.io_bound answers None while the app is stopping."""
+    async def io_bound(_fn, *_a, **_kw):
+        return None
+    monkeypatch.setattr(kit.run, "io_bound", io_bound)
+    with ui.card():
+        h = kit.header("Paper Ledger", view="options:paper_trades",
+                       _now=lambda: _utc(18, 15, 30))
+    asyncio.run(h.poll())
+    assert h.stamp.text == kit.WAITING_TEXT
+
+
+def test_the_header_runs_one_poll_timer(monkeypatch):
+    """The repeating timer already fires immediately on connect, so the extra
+    0.1s once-timer was a second read of the same key on every page build."""
+    made = []
+    real = ui.timer
+    monkeypatch.setattr(kit.ui, "timer",
+                        lambda *a, **kw: made.append(a) or real(*a, **kw))
+    with ui.card():
+        kit.header("X", view="v", poll_sec=5.0)
+    assert [a[0] for a in made] == [5.0]
 
 
 # -- control bar and fields ---------------------------------------------------------
@@ -373,6 +470,29 @@ def test_the_region_spinner_survives_a_repaint():
     assert r.busy.element.visible
 
 
+def test_the_region_reserves_height_while_it_spins():
+    """The scrim is absolute inset-0, so before the first paint it covers an
+    empty div: a spinner nobody can see."""
+    with ui.card():
+        r = kit.region("Loading…")
+    assert kit.REGION_MIN_H not in r.outer.classes
+    r.busy.show()
+    assert kit.REGION_MIN_H in r.outer.classes
+    r.busy.hide()
+    assert kit.REGION_MIN_H not in r.outer.classes
+
+
+def test_the_region_backstop_releases_the_reserved_height_too():
+    """The watchdog runs busy.py's own hide(), which knows nothing about the
+    height this wrapper added."""
+    with ui.card():
+        r = kit.region("Loading…", timeout=0)
+    r.busy.show()
+    r.busy.timer.callback()             # what the 1s watchdog actually runs
+    assert not r.busy.element.visible
+    assert kit.REGION_MIN_H not in r.outer.classes
+
+
 def test_empty_state_is_one_muted_line():
     with ui.card():
         e = kit.empty("Nothing traded yet today")
@@ -409,6 +529,28 @@ def test_table_is_dense_flat_and_draws_the_selected_row():
     assert t._props.get("dense") is True and t._props.get("flat") is True
     assert "kit-row-selected" in t._props[":table-row-class-fn"]
     assert "row._row_class" in t._props[":table-row-class-fn"]     # a page's own class survives
+
+
+def test_showing_every_row_hides_the_records_per_page_footer():
+    """rowsPerPage 0 already shows every row; the footer below it then reads
+    "Records per page: All" under a table that has no pages."""
+    with ui.card():
+        every = kit.table([{"name": "a", "label": "A", "field": "a"}], [])
+        paged = kit.table([{"name": "a", "label": "A", "field": "a"}], [],
+                          rows_per_page=25)
+    assert every._props.get("hide-pagination") is True
+    assert paged._props.get("hide-pagination") is False
+    assert paged._props["pagination"] == {"rowsPerPage": 25}
+
+
+def test_a_tooltip_caps_its_width_with_a_class_not_a_prop():
+    """`max-width=340px` as a PROP lands as an inline style, which the app's
+    Tailwind-only standard bans (tests/test_no_inline_style.py)."""
+    with ui.card():
+        b = kit.button("Run scan", tooltip="Scans the whole watchlist")
+    (tip,) = [e for e in b.descendants() if isinstance(e, ui.tooltip)]
+    assert "max-w-[340px]" in tip.classes
+    assert "max-width" not in str(tip._props)
 
 
 # -- confirm dialog ---------------------------------------------------------------

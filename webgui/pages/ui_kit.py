@@ -16,6 +16,7 @@ module-level functions (``freshness``, ``toast_args``, ``button_classes``,
 import contextlib
 import datetime as _dt
 import inspect
+import logging
 import time
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -31,6 +32,7 @@ from pages.options.inputs import (bind_symbol_load, mark_symbol_loaded,
 from pages.ui_guard import guard, guard_async
 
 CT = ZoneInfo("America/Chicago")
+_log = logging.getLogger(__name__)
 
 # ── freshness: the header's "Updated" stamp ─────────────────────────────────
 WAITING_TEXT = "Waiting for data"
@@ -62,6 +64,8 @@ def freshness(ts, now, stale_after_sec=None):
     when = _parse_ts(ts)
     if when is None:
         return WAITING_TEXT, "waiting"
+    if now.tzinfo is None:          # read like a stamp: naive means UTC
+        now = now.replace(tzinfo=_dt.timezone.utc)
     local = when.astimezone(CT)
     clock = local.strftime("%I:%M %p").lstrip("0")
     if local.date() != now.astimezone(CT).date():
@@ -128,7 +132,9 @@ def button(text, *, kind="secondary", icon=None, on_click=None, tooltip=None,
         .props("no-caps unelevated").classes(button_classes(kind, tokens))
     if tooltip:
         with b:
-            ui.tooltip(tooltip).props("delay=350 max-width=340px")
+            # The width is a CLASS: as a prop it becomes an inline style, which
+            # the app's Tailwind-only standard bans.
+            ui.tooltip(tooltip).props("delay=350").classes("max-w-[340px]")
     return b
 
 
@@ -189,14 +195,20 @@ def set_busy(btn, busy=True, *, timeout=BUSY_TIMEOUT_SEC):
 TITLE = f"text-h6 font-semibold {_t.LABEL}"
 
 
+PAGE_WIDTHS = ("full", "form")
+
+
 def page(width="full"):
     """The page column. ``"form"`` caps a settings-style page at a readable
-    width; everything else is full width."""
+    width; ``"full"`` is full width. A typo raises rather than silently
+    choosing one of them."""
+    if width not in PAGE_WIDTHS:
+        raise ValueError(f"unknown page width {width!r}; use one of {PAGE_WIDTHS}")
     return ui.column().classes(
         "w-full gap-4" if width == "full" else "w-full max-w-3xl gap-4")
 
 
-def header(title, *, view=None, stale=False, poll_sec=5.0):
+def header(title, *, view=None, stale=False, poll_sec=5.0, _now=None):
     """The page's one header line: the title left; the Updated stamp and then
     the page actions right - add the primary action LAST so it sits rightmost.
 
@@ -207,16 +219,17 @@ def header(title, *, view=None, stale=False, poll_sec=5.0):
     own threshold (``alerts.stale_after``). An on-demand or once-a-day view
     leaves it off and is never called stale - its age says nothing. On the
     PUBLIC origin the title is omitted - live_main names the screen itself."""
+    now_fn = _now or (lambda: _dt.datetime.now(_dt.timezone.utc))
     with ui.row().classes("w-full items-center gap-3 flex-wrap min-h-[38px]") as row:
         title_lbl = None if shell.is_public() else ui.label(title).classes(TITLE)
         ui.space()
         stamp = ui.label("").classes(f"text-xs {_t.MUTED}")
         stamp.set_visibility(view is not None)
         actions = ui.row().classes("items-center gap-2 no-wrap")
-    state = {"cls": _t.MUTED}
+    state = {"cls": _t.MUTED, "ts": None, "warned": False}
 
     def set_stamp(ts, stale_after_sec=None, now=None):
-        now = now or _dt.datetime.now(_dt.timezone.utc)
+        now = now or now_fn()
         text, st = freshness(ts, now, stale_after_sec)
         stamp.text = text
         cls = FRESHNESS_CLASS[st]
@@ -224,17 +237,34 @@ def header(title, *, view=None, stale=False, poll_sec=5.0):
             stamp.classes(remove=state["cls"], add=cls)
             state["cls"] = cls
 
-    if view is not None:
-        @guard_async
-        async def _poll():
-            _ver, ts = await run.io_bound(bus_client.read_meta, view)
-            now = _dt.datetime.now(_dt.timezone.utc)
-            set_stamp(ts, _stale_after(view, now) if stale else None, now)
+    @guard_async
+    async def poll():
+        # A read that fails must not FREEZE the stamp: the last good time still
+        # keeps advancing towards stale, so a dead bus reads as falling behind
+        # rather than as a view that is quietly fine.
+        ts = None
+        try:
+            meta = await run.io_bound(bus_client.read_meta, view)
+            # run.io_bound answers None while the app is shutting down.
+            ts = meta[1] if meta else None
+        except Exception:         # noqa: BLE001 - one warning, then keep polling
+            if not state["warned"]:
+                state["warned"] = True
+                _log.warning("ui_kit header: cannot read %s; showing the last "
+                             "stamp and letting it age", view, exc_info=True)
+        if ts is None:
+            ts = state["ts"]
+        else:
+            state["ts"] = ts
+        now = now_fn()
+        set_stamp(ts, _stale_after(view, now) if stale else None, now)
 
-        ui.timer(0.1, _poll, once=True)
-        ui.timer(poll_sec, _poll)
+    if view is not None:
+        # ONE timer: a repeating ui.timer fires immediately once the client
+        # connects, so a 0.1s once-timer beside it just read the key twice.
+        ui.timer(poll_sec, poll)
     return SimpleNamespace(row=row, title=title_lbl, stamp=stamp, actions=actions,
-                           set_stamp=set_stamp)
+                           set_stamp=set_stamp, poll=poll if view is not None else None)
 
 
 def status_line(text=""):
@@ -406,15 +436,42 @@ def gate(go, *fields):
 
 
 # ── region, empty state, table ──────────────────────────────────────────────
-def region(text="Loading…", *, classes="w-full"):
+# While the region is empty - the first load, and every repaint that clears it
+# first - `absolute inset-0` resolves to a box of zero height, so the spinner is
+# there and invisible. Reserved only while spinning, so a short region does not
+# carry a hole under it afterwards.
+REGION_MIN_H = "min-h-[120px]"
+
+
+def region(text="Loading…", *, classes="w-full", timeout=_busy.BUSY_TIMEOUT_SEC):
     """A block whose contents a repaint replaces. Repaint ``content`` (clear and
     rebuild it); the spinner lives on ``outer``, so a clear can never delete it
     - the bug five pages had. ``busy.show()`` on first load and every refresh."""
     outer = ui.element("div").classes(classes)
     with outer:
         content = ui.column().classes("w-full gap-3")
-    spin = _busy.build_busy(outer, text)
-    return SimpleNamespace(outer=outer, content=content, busy=spin)
+    spin = _busy.build_busy(outer, text, timeout=timeout)
+
+    def show(msg=None):
+        outer.classes(add=REGION_MIN_H)
+        spin.show(msg)
+
+    def hide():
+        outer.classes(remove=REGION_MIN_H)
+        spin.hide()
+
+    def tick():
+        spin.tick()
+        if not spin.visible():          # the backstop hid it: release the height
+            outer.classes(remove=REGION_MIN_H)
+
+    # The watchdog calls busy.py's OWN hide(), which knows nothing about the
+    # height added here, so the timer runs this wrapper instead.
+    spin.timer.callback = guard(tick)
+    busy = SimpleNamespace(element=spin.element, label=spin.label, show=show,
+                           hide=hide, visible=spin.visible, tick=tick,
+                           timer=spin.timer)
+    return SimpleNamespace(outer=outer, content=content, busy=busy)
 
 
 EMPTY = f"w-full text-center text-[13px] {_t.MUTED} py-6"
@@ -460,10 +517,12 @@ def table(columns, rows=None, *, row_key="id", numeric=(), rows_per_page=0,
           classes="w-full"):
     """The one table: dense, flat, sticky header (the app-wide ``TABLE_CSS``),
     numbers right-aligned, sortable columns, and the selected row drawn from
-    ``_selected`` (``mark_selected``). ``rows_per_page=0`` shows every row."""
+    ``_selected`` (``mark_selected``). ``rows_per_page=0`` shows every row - and
+    hides the "Records per page" footer with it, which otherwise sits under a
+    table that has no pages."""
     t = ui.table(columns=table_columns(columns, numeric=numeric),
                  rows=list(rows or []), row_key=row_key,
-                 pagination={"rowsPerPage": rows_per_page}) \
+                 pagination={"rowsPerPage": rows_per_page} if rows_per_page else None) \
         .classes(classes).props(TABLE_PROPS)
     # Written to _props directly: a props STRING would be re-parsed and mangle
     # the quotes inside the arrow function (the scanner.py precedent).
