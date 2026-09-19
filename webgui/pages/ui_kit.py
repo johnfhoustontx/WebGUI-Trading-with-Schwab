@@ -246,3 +246,94 @@ def notice(text, *, icon="info"):
         ui.icon(icon).classes(_t.TXT_WARN)
         ui.label(text).classes(f"text-sm grow {_t.LABEL}")
     return row
+
+
+# ── control bar and fields ──────────────────────────────────────────────────
+FIELD_PROPS = "dense hide-bottom-space"
+
+
+def control_bar():
+    """The card that holds a page's fields: left to right, labels above, and
+    the Go button right after the last field (``with control_bar(): ...``)."""
+    return ui.row().classes(f"{_t.CARD} w-full items-end gap-x-4 gap-y-2 flex-wrap")
+
+
+@contextlib.contextmanager
+def field(label, *, grow=False):
+    """A labelled slot: the label ABOVE (never floating, never placeholder-only),
+    then whatever control the caller builds inside it."""
+    with ui.column().classes("gap-1 w-full" if grow else "gap-1") as col:
+        ui.label(label).classes(_t.EYEBROW)
+        yield col
+
+
+def text_field(label, *, value="", placeholder="", width="w-40", on_change=None):
+    """A labelled text input. A placeholder is an example value, never the label."""
+    with field(label, grow=width == "w-full"):
+        inp = ui.input(value=value, placeholder=placeholder or None,
+                       on_change=on_change).props(FIELD_PROPS).classes(width)
+    return inp
+
+
+def select_field(label, options, *, value=None, width="w-40", on_change=None, **kw):
+    """A labelled dropdown. A filter on what is on screen applies on change."""
+    with field(label, grow=width == "w-full"):
+        sel = ui.select(options, value=value, on_change=on_change, **kw) \
+            .props(f"{FIELD_PROPS} options-dense").classes(width)
+    return sel
+
+
+def number_field(label, *, value=None, min=None, max=None, step=None,
+                 width="w-28", format=None, on_change=None):
+    """A labelled number whose range is checked when you LEAVE it, not per
+    keystroke; the message shows in red under the field. The range is not
+    passed to Quasar, which would silently clamp instead of saying so."""
+    checks = {"Enter a number": lambda v: v is not None}
+    if min is not None:
+        checks[f"At least {min:g}"] = lambda v, lo=min: v is None or v >= lo
+    if max is not None:
+        checks[f"At most {max:g}"] = lambda v, hi=max: v is None or v <= hi
+    with field(label, grow=width == "w-full"):
+        n = ui.number(value=value, step=step, format=format, on_change=on_change,
+                      validation=checks).props(FIELD_PROPS).classes(width)
+    n.without_auto_validation()
+    n.on("blur", lambda _e: n.validate(return_result=False))
+    return n
+
+
+def symbol_field(label="Symbol", *, value="", on_load, tab=True, width="w-[110px]"):
+    """The one Symbol behaviour: uppercase; the whole ticker selected on click or
+    tab-in; Enter loads; tab-out loads only a CHANGED symbol (the dedup is seeded
+    from ``value``, so tabbing through the default is no load); an unknown
+    ticker is reported under it (``symbol_error``). The page's Go button calls
+    ``on_load`` directly, which always reloads."""
+    with field(label):
+        inp = ui.input(value=value) \
+            .props(f"{FIELD_PROPS} spellcheck=false").classes(f"{width} font-semibold")
+    select_all_on_focus(inp)
+    bind_symbol_load(inp, on_load, tab=tab)
+    return inp
+
+
+# A page that writes the Symbol field from code (a hand-off) marks it loaded.
+symbol_loaded = mark_symbol_loaded
+
+
+def symbol_error(inp, text=None):
+    """Show - or, with ``None``, clear - the message under a Symbol field."""
+    inp.error = text or None
+
+
+def gate(go, *fields):
+    """Keep ``go`` disabled while any of ``fields`` fails its check. Returns the
+    sync function, for a page that sets a value from code."""
+    def sync(_e=None):
+        ok = [f.validate() for f in fields]      # a list: validate EVERY field
+        if all(ok):
+            go.enable()
+        else:
+            go.disable()
+    for f in fields:
+        f.on("blur", sync)
+    sync()
+    return sync

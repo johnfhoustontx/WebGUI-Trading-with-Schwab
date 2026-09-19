@@ -154,3 +154,54 @@ def test_header_actions_sit_right_of_the_stamp():
         h = kit.header("X", view="v")
     kids = list(h.row.default_slot.children)
     assert kids.index(h.stamp) < kids.index(h.actions)
+
+
+# -- control bar and fields ---------------------------------------------------------
+def test_field_puts_its_label_above():
+    with ui.card():
+        with kit.field("Expiry") as col:
+            s = ui.select(["Oct 17"])
+    kids = list(col.default_slot.children)
+    assert kids[0].text == "Expiry" and kids[1] is s
+
+
+def test_symbol_field_is_the_one_symbol_behaviour():
+    with ui.card():
+        inp = kit.symbol_field(value="SPY", on_load=lambda: None)
+    assert "uppercase" in inp.classes                       # select_all_on_focus
+    assert inp._symbol_load_last["sym"] == "SPY"            # seeded: tabbing through SPY is no load
+
+
+def test_symbol_error_shows_under_the_field_and_clears():
+    with ui.card():
+        inp = kit.symbol_field(on_load=lambda: None)
+    kit.symbol_error(inp, "No such ticker")
+    assert inp._props["error"] is True and inp._props["error-message"] == "No such ticker"
+    kit.symbol_error(inp, None)
+    assert not inp._props.get("error")
+
+
+def test_number_field_checks_on_leaving_not_per_keystroke():
+    with ui.card():
+        n = kit.number_field("Contracts", value=1, min=1, max=100)
+    n.value = 0
+    assert n.error is None
+    assert n.validate() is False and n.error == "At least 1"
+    n.value = 101
+    assert n.validate() is False and n.error == "At most 100"
+    n.value = None
+    assert n.validate() is False and n.error == "Enter a number"
+
+
+def test_gate_holds_go_while_a_field_is_wrong():
+    with ui.card():
+        n = kit.number_field("Contracts", value=1, min=1)
+        go = kit.button("Load", kind="primary")
+    sync = kit.gate(go, n)
+    assert go.enabled
+    n.value = 0
+    sync()
+    assert not go.enabled
+    n.value = 3
+    sync()
+    assert go.enabled
