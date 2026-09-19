@@ -1571,7 +1571,7 @@ def _watcher_compute():
     chime gate.
     """
     # Version-gated: a tick where neither view moved costs two tiny :ver probes
-    # and no JSON parsing (see reset_watcher_memos). `scan` is read ONCE here and
+    # and no JSON parsing (see _WATCH_SCAN_MEMO / _WATCH_FLOW_MEMO). `scan` is read ONCE here and
     # passed to the badge helpers below.
     scan = bus_client.read_gated("options:scan", _WATCH_SCAN_MEMO)[0] or {}
     flow_view = bus_client.read_gated("options:flow_alerts", _WATCH_FLOW_MEMO)[0]
