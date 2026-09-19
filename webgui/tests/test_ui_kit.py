@@ -1,8 +1,10 @@
 """Tests for the page kit (pages/ui_kit.py) - the one look and behaviour."""
+import asyncio
 import datetime as dt
 
 import pytest
 from nicegui import ui
+from nicegui.events import GenericEventArguments
 
 from pages import ui_kit as kit
 from pages.options import theme
@@ -285,8 +287,8 @@ def test_a_destructive_confirm_is_solid_red_and_a_plain_one_primary():
 def test_confirm_runs_once_then_closes():
     d, fired = _confirm()
     d.open()
-    d.run()
-    d.run()                       # a queued Enter after the click
+    asyncio.run(d.run())
+    asyncio.run(d.run())          # a queued Enter after the click
     assert fired == [1] and d.dialog.value is False
 
 
@@ -296,7 +298,7 @@ def test_returning_false_keeps_the_dialog_open():
         d = kit.confirm("Open?", confirm_text="Open",
                         on_confirm=lambda: fired.append(1) or False)
     d.open()
-    d.run()
+    asyncio.run(d.run())
     assert fired == [1] and d.dialog.value is True
 
 
@@ -304,5 +306,112 @@ def test_a_disabled_confirm_does_nothing():
     d, fired = _confirm()
     d.open()
     d.confirm.disable()
-    d.run()
+    asyncio.run(d.run())
     assert fired == []
+
+
+def test_an_async_on_confirm_actually_RUNS():
+    """A coroutine is not False, so an unawaited one closed the dialog while the
+    action never happened - silently, because nothing raised."""
+    ran = []
+
+    async def act():
+        ran.append(1)
+
+    with ui.card():
+        d = kit.confirm("Go?", confirm_text="Go", on_confirm=act)
+    d.open()
+    asyncio.run(d.run())
+    assert ran == [1] and d.dialog.value is False
+
+
+def test_an_async_confirm_returning_false_keeps_the_dialog_open():
+    async def act():
+        return False
+
+    with ui.card():
+        d = kit.confirm("Go?", confirm_text="Go", on_confirm=act)
+    d.open()
+    asyncio.run(d.run())
+    assert d.dialog.value is True
+
+
+def test_a_second_trigger_while_the_action_runs_is_ignored():
+    """Click then Enter: the await gives the second trigger a window the ``done``
+    latch alone does not close, because ``done`` is only set after it returns."""
+    fired = []
+
+    async def act():
+        fired.append(1)
+        started.set()
+        await release.wait()
+
+    started, release = asyncio.Event(), asyncio.Event()
+    with ui.card():
+        d = kit.confirm("Go?", confirm_text="Go", on_confirm=act)
+    d.open()
+
+    async def drive():
+        first = asyncio.create_task(d.run())
+        await started.wait()
+        await d.run()                 # a queued Enter, mid-flight
+        release.set()
+        await first
+
+    asyncio.run(drive())
+    assert fired == [1] and d.dialog.value is False
+
+
+def test_enter_is_heard_on_the_dialog_not_the_card():
+    """Quasar focuses ``q-dialog__inner`` - the card's PARENT - when a dialog
+    opens, so a keydown listener on the card never hears Enter."""
+    d, _ = _confirm()
+    card = [e for e in d.dialog.descendants() if isinstance(e, ui.card)][0]
+    assert not [x for x in card._event_listeners.values() if "keydown" in x.type]
+    (enter,) = [x for x in d.dialog._event_listeners.values() if x.type == "keydown.enter"]
+    assert "e.repeat" in enter.js_handler          # auto-repeat must not re-fire
+    assert "isComposing" in enter.js_handler       # an IME commit is not a confirm
+    assert "TEXTAREA" in enter.js_handler          # Enter in a textarea is a newline
+
+
+def test_the_latch_resets_when_the_dialog_is_opened_directly():
+    """A page that opens the underlying dialog (or reuses the handle) must get a
+    working confirm, not a dead one."""
+    d, fired = _confirm()
+    d.open()
+    asyncio.run(d.run())
+    d.dialog.open()
+    asyncio.run(d.run())
+    assert fired == [1, 1]
+
+
+def test_a_body_filled_in_later_is_shown_on_open():
+    """The dialog is built ONCE and retitled per use, so a body set later must
+    become visible rather than staying hidden from the empty first build."""
+    with ui.card():
+        d = kit.confirm("Go?", confirm_text="Go", on_confirm=lambda: None)
+    assert not d.body.visible
+    d.body.text = "It cannot be undone."
+    d.open()
+    assert d.body.visible
+
+
+def test_the_confirm_card_fits_a_phone():
+    assert kit.CONFIRM_CARD.startswith("ns-app ")     # teleported outside .ns-app
+    assert "w-[min(520px,calc(100vw-48px))]" in kit.CONFIRM_CARD
+    assert "min-w-[360px]" not in kit.CONFIRM_CARD    # 360 + padding overflows a phone
+
+
+def test_an_ephemeral_dialog_deletes_itself_but_a_reused_one_stays():
+    """A dialog built per click would otherwise leave one element behind in the
+    page on every click."""
+    with ui.card():
+        once = kit.confirm("Go?", confirm_text="Go", on_confirm=lambda: None,
+                           ephemeral=True)
+        kept, _ = kit.confirm("Go?", confirm_text="Go", on_confirm=lambda: None), None
+    once.open()
+    asyncio.run(once.run())
+    assert once.dialog.is_deleted
+    kept.open()
+    asyncio.run(kept.run())
+    assert not kept.dialog.is_deleted

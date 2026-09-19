@@ -15,6 +15,7 @@ module-level functions (``freshness``, ``toast_args``, ``button_classes``,
 """
 import contextlib
 import datetime as _dt
+import inspect
 import time
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -408,23 +409,37 @@ def table(columns, rows=None, *, row_key="id", numeric=(), rows_per_page=0,
 # ── confirm dialog ──────────────────────────────────────────────────────────
 # ``ns-app`` on the card itself: a dialog is teleported to <body>, outside the
 # shell's content column, so without it a field in ``content`` would be stock.
-CONFIRM_CARD = f"ns-app {_t.CARD} min-w-[360px] max-w-[520px] gap-3"
+# The width is ONE rule rather than a min/max pair: a 360px minimum plus the
+# dialog's own margin overflows a narrow phone, and this app is used from one.
+CONFIRM_CARD = f"ns-app {_t.CARD} w-[min(520px,calc(100vw-48px))] gap-3"
+
+# Enter confirms - but only a real one. Auto-repeat would re-fire it while the
+# key is held, an IME commit (``isComposing``) is the reader choosing a
+# character rather than confirming, and Enter inside a textarea is a newline.
+# Quasar focuses ``q-dialog__inner`` - the CARD'S PARENT - when a dialog opens,
+# so this must be listened for on the DIALOG; on the card it never fires.
+CONFIRM_ENTER_JS = ("(e) => { if (!e.repeat && !e.isComposing && "
+                    "e.target.tagName !== 'TEXTAREA') emit(); }")
 
 
-def confirm(title, body="", *, confirm_text, on_confirm, danger=False):
+def confirm(title, body="", *, confirm_text, on_confirm, danger=False,
+            ephemeral=False):
     """The one confirm dialog: a title, one sentence, then Cancel and the
     confirm, right-aligned in that order. Enter confirms, Esc cancels. A
     destructive action passes ``danger=True`` - the only place solid red appears.
 
     Add any inputs to ``handle.content`` before ``open()``. ``on_confirm`` runs
-    first; returning ``False`` keeps the dialog open (a check that failed), and
-    anything else closes it. It runs at most once per ``open()``, so a click
-    followed by a queued Enter cannot act twice. Build the dialog at the page's
-    own level, never inside a container a repaint clears - a dialog deletes
-    itself with its slot (the swing.py precedent). Build it ONCE and retitle
-    it per use (``handle.title.text``, ``handle.body.text``) rather than a new
-    dialog per click, which would leave one behind in the page each time."""
-    with ui.dialog() as dlg, ui.card().classes(CONFIRM_CARD) as card:
+    first - it may be a COROUTINE function, which is awaited; returning
+    ``False`` keeps the dialog open (a check that failed), and anything else
+    closes it. It runs at most once per open, and a trigger arriving WHILE it
+    runs is ignored, so a click followed by a queued Enter cannot act twice.
+    Build the dialog at the page's own level, never inside a container a repaint
+    clears - a dialog deletes itself with its slot (the swing.py precedent).
+    Build it ONCE and retitle it per use (``handle.title.text``,
+    ``handle.body.text``) rather than a new dialog per click, which would leave
+    one behind in the page each time; a caller that genuinely builds one per
+    click passes ``ephemeral=True`` and it deletes itself once closed."""
+    with ui.dialog() as dlg, ui.card().classes(CONFIRM_CARD):
         title_lbl = ui.label(title).classes(f"text-subtitle1 font-semibold {_t.LABEL}")
         body_lbl = ui.label(body).classes(f"text-sm {_t.MUTED}")
         body_lbl.set_visibility(bool(body))
@@ -432,23 +447,42 @@ def confirm(title, body="", *, confirm_text, on_confirm, danger=False):
         with ui.row().classes("w-full justify-end gap-2 pt-1") as actions:
             cancel = button("Cancel", kind="secondary", on_click=dlg.close)
             ok = button(confirm_text, kind="danger_solid" if danger else "primary")
-    st = {"done": False}
+    st = {"done": False, "running": False}
 
-    @guard
-    def run_(_e=None):
-        if st["done"] or not ok.enabled:
+    @guard_async
+    async def run_(_e=None):
+        # ``running`` as well as ``done``: an awaited action leaves a window in
+        # which ``done`` is not set yet, and a queued Enter lands squarely in it.
+        if st["done"] or st["running"] or not ok.enabled:
             return
-        if on_confirm() is False:
+        st["running"] = True
+        try:
+            result = on_confirm()
+            if inspect.isawaitable(result):
+                result = await result
+        finally:
+            st["running"] = False
+        if result is False:
             return
         st["done"] = True
         dlg.close()
 
+    @guard
+    def _on_toggle(e):
+        # On the DIALOG's own value, so a page that opens ``handle.dialog``
+        # directly gets a live confirm rather than a spent one.
+        if e.value:
+            st["done"] = False
+            body_lbl.set_visibility(bool(body_lbl.text))
+        elif ephemeral:
+            dlg.delete()
+
     def open_():
-        st["done"] = False
         dlg.open()
 
+    dlg.on_value_change(_on_toggle)
     ok.on_click(run_)
-    card.on("keydown.enter", run_)
+    dlg.on("keydown.enter", run_, js_handler=CONFIRM_ENTER_JS)
     return SimpleNamespace(dialog=dlg, title=title_lbl, content=content, body=body_lbl,
                            actions=actions, cancel=cancel, confirm=ok, run=run_,
                            open=open_, close=dlg.close)
