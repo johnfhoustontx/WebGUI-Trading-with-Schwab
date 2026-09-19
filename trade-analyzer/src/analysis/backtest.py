@@ -41,22 +41,6 @@ def factor_ic(factor: pd.Series, forward: pd.Series) -> dict:
     return {"mean_ic": mean_ic, "icir": icir, "n_days": n}
 
 
-def quantile_spread(factor: pd.Series, forward: pd.Series, q: int = 5) -> float:
-    """Mean forward of the top minus the bottom quantile, per date, averaged."""
-    df = pd.DataFrame({"f": factor, "y": forward}).dropna()
-
-    def _one(g):
-        if len(g) < q:
-            return np.nan
-        bins = pd.qcut(g["f"].rank(method="first"), q, labels=False, duplicates="drop")
-        top = g["y"][bins == bins.max()].mean()
-        bot = g["y"][bins == bins.min()].mean()
-        return top - bot
-
-    sp = df.groupby(level="date").apply(_one).dropna()
-    return float(sp.mean()) if not sp.empty else 0.0
-
-
 def zscore_by_date(factors: pd.DataFrame, winsor=(0.02, 0.98)) -> pd.DataFrame:
     """Per date, across symbols: winsorize (clip to the cross-sectional quantile
     band) then standardize (x - mean)/std. A constant cross-section -> all zeros

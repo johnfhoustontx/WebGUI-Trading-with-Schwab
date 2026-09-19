@@ -42,11 +42,11 @@ Pure, well-tested, proxy-independent modules:
 |---|---|
 | `scoring.py` | 13 normalized scoring primitives → `[-100, +100]` (RSI, ADX, MACD, vol profile, PE/PEG, growth, ROE, margin, EPS streak, …) |
 | `recommendation.py` | `PositionVerdict` (1–8 wk, 11 weighted factors + hard gates: ADX<15, below 200EMA, earnings window, sector downtrend) and `InvestorVerdict` (months+, fundamentals). **`PositionVerdict` is now the *legacy* swing fallback** — the live 1–8 wk verdict is the validated factor model (see *Offline swing-model fit* below) |
-| `fundamentals.py` | `parse_schwab_fundamentals` / `parse_finviz_fundamentals` → `Fundamentals` dataclass with `is_sufficient()` gate |
+| `fundamentals.py` | `parse_schwab_fundamentals` → `Fundamentals` dataclass with `is_sufficient()` gate |
 | `sector_strength.py` | `compute_sector_strength` — 3-mo RS percentile vs SPY, confirmed-downtrend gate |
 | `markov.py` | PURE Markov-chain forecast over **5 composite-score bands** — `classify_band`/`count_matrix`/`pooled_prior`/`shrink` (Dirichlet)/`project`/`forecast`/`drift_tilt`; powers the Trade page's **Markov Forecast** card (forecasts the *legacy* technical-momentum composite) |
 | `factors.py` | PURE **swing factor library** — 10 causal, sign-corrected daily-OHLCV factors (`mom_12_1`/`mom_6_1`/`pth`/`str_5d`/`vol_adj_mom`/`trend_quality`/`low_vol`/`rs_spy`/`rs_sector`/`turnover`) + the `FACTORS` registry. Each is `(daily_df) → pd.Series`, **no look-ahead** (winsorize cross-sectionally at scoring, never per-factor) |
-| `backtest.py` | PURE **offline validation harness** — `factor_ic` (per-date Spearman rank IC + ICIR), `quantile_spread`, `zscore_by_date`, **`signed_ic_weights`** (the production weighter — keeps a factor's IC sign), `composite`, `walk_forward` (rolling OOS IC), `calibrate` (quantile bands → mean-fwd/hit-rate, isotonic-smoothed) |
+| `backtest.py` | PURE **offline validation harness** — `factor_ic` (per-date Spearman rank IC + ICIR), `zscore_by_date`, **`signed_ic_weights`** (the production weighter — keeps a factor's IC sign), `composite`, `walk_forward` (rolling OOS IC), `calibrate` (quantile bands → mean-fwd/hit-rate, isotonic-smoothed) |
 
 `recommendation.py` imports `scoring.py`, `fundamentals.py`, `sector_strength.py`.
 

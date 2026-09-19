@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from src.analysis.sector_strength import compute_sector_strength, SectorStrength, sector_etf_for
+from src.analysis.sector_strength import compute_sector_strength, SectorStrength
 
 def _synthetic_history(start: float, drift: float, days: int = 260, seed: int = 0):
     rng = np.random.default_rng(seed)
@@ -42,18 +42,3 @@ class TestComputeSectorStrength:
         assert 0.0 <= result.rs_3m_percentile <= 1.0
 
 
-class TestSectorEtfFor:
-    def test_known_sectors(self):
-        assert sector_etf_for("Technology") == "XLK"
-        assert sector_etf_for("Healthcare") == "XLV"
-        assert sector_etf_for("Financials") == "XLF"
-        assert sector_etf_for("Real Estate") == "XLRE"
-
-    def test_unknown_returns_none(self):
-        assert sector_etf_for("Cryptopunks") is None
-
-    def test_none_returns_none(self):
-        assert sector_etf_for(None) is None
-
-    def test_empty_returns_none(self):
-        assert sector_etf_for("") is None

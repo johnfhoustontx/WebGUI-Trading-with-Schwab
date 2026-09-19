@@ -2,9 +2,8 @@
 
 Missing fields stay None so downstream gate logic can detect "insufficient data".
 """
-import re
-from dataclasses import dataclass, field
-from datetime import date, datetime
+from dataclasses import dataclass
+from datetime import date
 from typing import List, Optional
 
 
@@ -169,69 +168,3 @@ def parse_schwab_fundamentals(payload: Optional[dict], as_of: str) -> Fundamenta
     )
 
 
-def _finviz_pct_to_fraction(s):
-    if not s or s.strip() in ("-", "—"):
-        return None
-    try:
-        return float(s.strip().rstrip("%")) / 100.0
-    except ValueError:
-        return None
-
-
-def _finviz_float(s):
-    if not s or s.strip() in ("-", "—"):
-        return None
-    try:
-        return float(s.strip().replace(",", ""))
-    except ValueError:
-        return None
-
-
-def _parse_finviz_earnings_date(raw, as_of):
-    """Parse strings like 'May 28 AMC' / 'May 28/B' into days from as_of."""
-    if not raw or raw.strip() in ("-", "—"):
-        return None
-    cleaned = re.sub(r"\s*(AMC|BMO|/A|/B|/AMC|/BMO)\s*$", "", raw.strip(), flags=re.IGNORECASE)
-    today = datetime.strptime(as_of, "%Y-%m-%d").date()
-    for fmt in ("%b %d", "%B %d"):
-        try:
-            d = datetime.strptime(cleaned, fmt).date().replace(year=today.year)
-            if d < today:
-                d = d.replace(year=today.year + 1)
-            return (d - today).days
-        except ValueError:
-            continue
-    return None
-
-
-def parse_finviz_fundamentals(fund: dict, as_of: str) -> Fundamentals:
-    """Adapt a finvizfinance ticker_fundament() dict into Fundamentals."""
-    if not fund:
-        return Fundamentals()
-
-    rev = _finviz_pct_to_fraction(fund.get("Sales Y/Y TTM"))
-    if rev is None:
-        # fallback: "Sales past 3/5Y" -> "1.81% 8.71%" - take first number
-        sp = fund.get("Sales past 3/5Y")
-        if sp:
-            rev = _finviz_pct_to_fraction(sp.split()[0])
-
-    eps = _finviz_pct_to_fraction(fund.get("EPS Y/Y TTM")) \
-        or _finviz_pct_to_fraction(fund.get("EPS this Y"))
-
-    surprise = _finviz_pct_to_fraction(fund.get("EPS Surprise"))
-    surprises = [surprise] if surprise is not None else None
-
-    return Fundamentals(
-        pe_ratio=_finviz_float(fund.get("P/E")),
-        peg_ratio=_finviz_float(fund.get("PEG")),
-        rev_growth_ttm=rev,
-        eps_growth_ttm=eps,
-        roe=_finviz_pct_to_fraction(fund.get("ROE")),
-        margin_expanding=None,    # finvizfinance does not expose YoY op margin
-        fcf=None,                 # not in ticker_fundament
-        eps_surprises=surprises,
-        last_eps_surprise=surprise,
-        guidance=None,            # not exposed
-        days_to_earnings=_parse_finviz_earnings_date(fund.get("Earnings"), as_of),
-    )

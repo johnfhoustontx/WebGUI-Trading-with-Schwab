@@ -24,7 +24,6 @@ from ._common import clamp as _clamp, num as _num
 # --- direction-score tunables -------------------------------------------------
 MIN_BARS = 200         # below this -> neutral 50.0 (EMA200 needs a full window)
 EMA_FAST = 20
-EMA_MID = 50
 EMA_SLOW = 200
 SLOPE_WINDOW = 20      # trailing bars for the signed slope sub-signal
 RSI_PERIOD = 14

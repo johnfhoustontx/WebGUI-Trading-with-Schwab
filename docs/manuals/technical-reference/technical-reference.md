@@ -461,8 +461,8 @@ highs/lows ratio nudges ±1. Confidence ≈ `sqrt(fields_present / 4)`.
 
 Two paths exist:
 
-- **Legacy / display** (`score_fallback`, and the tk app's day/3d/week blend at
-  40/40/20) — base 5 with categorical adjustments.
+- **Legacy / display** (the tk app's day/3d/week blend at 40/40/20) — base 5 with
+  categorical adjustments.
 - **Live composite** uses **dual momentum with a crash filter**
   (`compute_dual_momentum`), the more robust path used by `live_composite.py`.
 
@@ -1395,8 +1395,6 @@ panel + an aligned forward Series):
 - `factor_ic` — per-date cross-sectional **Spearman rank IC** of a factor vs the forward
   excess return, summarized as `{mean_ic, icir, n_days}`. **ICIR = mean_ic / σ(daily IC)**
   is only trusted with ≥ 5 IC-days and real daily-IC dispersion (else 0).
-- `quantile_spread` — mean forward of the top minus the bottom quintile, per date,
-  averaged.
 - `zscore_by_date` — per date, across symbols: winsorize to the **2/98** cross-sectional
   band, then standardize `(x − mean) / std`. Look-ahead-free (only same-date data).
 - **`signed_ic_weights`** — the production weighter: `weight_k = mean_ic_k / Σ|mean_ic|`,

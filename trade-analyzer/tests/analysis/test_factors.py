@@ -16,12 +16,6 @@ def _df(closes, highs=None, lows=None, vols=None):
     })
 
 
-def test_winsorize_clips_tails():
-    s = pd.Series([-100, 0, 0, 0, 100])
-    w = factors.winsorize(s, lower=0.2, upper=0.8)
-    assert w.max() < 100 and w.min() > -100
-
-
 def test_registry_lists_core_factors():
     names = set(factors.FACTORS)
     for f in ("mom_12_1", "mom_6_1", "pth", "str_5d", "vol_adj_mom",
@@ -131,12 +125,6 @@ def test_pth_within_bounds_on_gap_up():
     closes = list(np.linspace(100, 150, 299)) + [10_000]  # gap far above prior high
     s = factors.pth(_df(closes))
     assert (s.dropna() <= 1.5).all() and (s.dropna() >= 0).all()
-
-
-def test_winsorize_degenerate_band_passes_through():
-    s = pd.Series([5.0] + [0.0] * 99)   # 2/98 band collapses to 0
-    w = factors.winsorize(s)
-    assert w.max() == 5.0                # the lone signal is NOT annihilated
 
 
 def test_compute_factor_frame_bad_factor_becomes_nan_column(monkeypatch):

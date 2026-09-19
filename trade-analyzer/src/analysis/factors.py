@@ -12,7 +12,7 @@ backtest and the online scorer (no drift).
 (The earlier per-factor ``winsorize`` clipped each bar using its *entire*
 history — including future bars — so a historical bar's value depended on what
 happened later: a look-ahead bias that would inflate measured IC in the
-backtest. The ``winsorize`` utility is retained for the cross-sectional use.)
+backtest. Cross-sectional winsorizing lives in ``backtest.zscore_by_date``.)
 
 Reference-relative factors (RS) take an extra reference close Series aligned by
 date. The FACTORS registry is the single source of truth for what exists; the
@@ -22,22 +22,6 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
-
-
-def winsorize(s: pd.Series, lower: float = 0.02, upper: float = 0.98) -> pd.Series:
-    """Clip a series to its [lower, upper] quantiles (robustness to outliers).
-
-    A degenerate band (lo == hi, e.g. an almost-constant series) is left
-    untouched so winsorizing never annihilates the live signal it is meant to
-    protect.
-    """
-    s = pd.Series(s, dtype="float64")
-    if s.dropna().empty:
-        return s
-    lo, hi = s.quantile(lower), s.quantile(upper)
-    if not (np.isfinite(lo) and np.isfinite(hi)) or hi <= lo:
-        return s
-    return s.clip(lower=lo, upper=hi)
 
 
 def _close(df: pd.DataFrame) -> pd.Series:

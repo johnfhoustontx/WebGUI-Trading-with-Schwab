@@ -74,15 +74,6 @@ def test_spread_to_score_linear():
     assert rotation._spread_to_score(-2) == 1.0
 
 
-def test_score_fallback_categorical():
-    r = rotation.score_fallback(xly_xlp="Risk-On",
-                                smh_spy="Leading",
-                                iwm_spy="Leading",
-                                qqq_spy="Lagging")
-    # 5 + 2 + 1 + 1 - 1 = 8
-    assert r.score == 8
-
-
 # ── v4.4 Dual Momentum + RRG ──────────────────────────────────────
 
 import pytest

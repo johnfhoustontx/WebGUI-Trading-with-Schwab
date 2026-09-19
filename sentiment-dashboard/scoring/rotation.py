@@ -4,13 +4,11 @@ v4.4: Dual Momentum Ranking (3-month relative + $IRX absolute crash
 filter) is the new score driver. RRG quadrants (Leading / Weakening /
 Lagging / Improving) are computed per sector for UI display.
 
-The legacy cyclical-vs-defensive spread (``compute_rotation`` /
-``score_fallback``) is retained for backward compatibility with any
-external importer.
+The legacy cyclical-vs-defensive spread (``compute_rotation``) is retained
+for backward compatibility with any external importer.
 """
 from typing import Dict, List, Mapping, Optional, Sequence
 
-from .types import ScoreResult
 
 CYCLICAL_SECTORS = {
     "Consumer Discretionary", "Financials", "Industrials",
@@ -130,34 +128,6 @@ def compute_rotation(
         'confidence': confidence,
         'timeframes_present': list(present.keys()),
     }
-
-
-def score_fallback(xly_xlp: str = "Neutral",
-                   smh_spy: str = "Neutral",
-                   iwm_spy: str = "Neutral",
-                   qqq_spy: str = "Neutral") -> ScoreResult:
-    """Legacy categorical scoring from dropdowns when no sector data exists."""
-    s = 5
-    sigs = []
-    if xly_xlp == "Risk-On":
-        s += 2; sigs.append("XLY/XLP Risk-On")
-    elif xly_xlp == "Risk-Off":
-        s -= 2; sigs.append("XLY/XLP Risk-Off")
-    for v, label in ((smh_spy, "Semis"),
-                     (iwm_spy, "Small caps"),
-                     (qqq_spy, "Growth")):
-        if v == "Leading":
-            s += 1; sigs.append(f"{label} leading")
-        elif v == "Lagging":
-            s -= 1; sigs.append(f"{label} lagging")
-    s = max(1, min(10, s))
-    interp = (f"Rotation (no sector data yet): "
-              f"{', '.join(sigs) if sigs else 'Neutral'}")
-    # The legacy fallback historically did not publish a confidence — keep
-    # at 0.0 so callers that adopt it treat the signal as low-conviction
-    # (preserves prior composite behavior, where the fallback bypassed
-    # _component_confidence['rotation']).
-    return ScoreResult(score=s, confidence=0.0, interp=interp)
 
 
 # ── v4.4 Dual Momentum + RRG ──────────────────────────────────────

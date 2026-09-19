@@ -23,11 +23,6 @@ def test_factor_ic_detects_signal():
     assert abs(ic_n["mean_ic"]) < 0.2
 
 
-def test_quantile_spread_positive_for_signal():
-    f, fwd = _panel()
-    assert backtest.quantile_spread(f["good"], fwd, q=5) > 0
-
-
 def test_zscore_cross_section_is_standardized():
     f, _ = _panel()
     z = backtest.zscore_by_date(f)

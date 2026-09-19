@@ -1,21 +1,12 @@
 """Sector strength module.
 
 Computes a tailwind/headwind score (-100..+100) from a sector ETF's history
-versus SPY, plus a sector-name -> ETF lookup.
+versus SPY.
 """
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 import pandas as pd
-
-
-SECTOR_TO_ETF = {
-    "Technology": "XLK", "Healthcare": "XLV", "Financials": "XLF",
-    "Consumer Discretionary": "XLY", "Consumer Staples": "XLP",
-    "Energy": "XLE", "Industrials": "XLI", "Materials": "XLB",
-    "Utilities": "XLU", "Real Estate": "XLRE", "Communication Services": "XLC",
-}
 
 
 @dataclass
@@ -74,7 +65,3 @@ def compute_sector_strength(
     )
 
 
-def sector_etf_for(sector_name: Optional[str]) -> Optional[str]:
-    if not sector_name:
-        return None
-    return SECTOR_TO_ETF.get(sector_name)

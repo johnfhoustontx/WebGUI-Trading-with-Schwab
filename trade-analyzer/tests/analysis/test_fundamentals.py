@@ -1,4 +1,4 @@
-from src.analysis.fundamentals import parse_schwab_fundamentals, parse_finviz_fundamentals, Fundamentals
+from src.analysis.fundamentals import parse_schwab_fundamentals, Fundamentals
 
 
 class TestFundamentalsDataclass:
@@ -184,58 +184,3 @@ class TestParseSchwabRealInstrumentPayload:
         assert parse_schwab_fundamentals(payload, as_of="2026-06-16").roe == 0.21
 
 
-class TestParseFinvizFundamentals:
-    def test_well_formed_dict(self):
-        fund = {
-            "P/E": "22.50",
-            "PEG": "1.40",
-            "Sales Y/Y TTM": "18.50%",
-            "EPS Y/Y TTM": "22.00%",
-            "ROE": "21.00%",
-            "Oper. Margin": "31.00%",
-            "EPS Surprise": "8.00%",
-            "Earnings": "May 28 AMC",
-        }
-        f = parse_finviz_fundamentals(fund, as_of="2026-04-27")
-        assert f.pe_ratio == 22.5
-        assert f.peg_ratio == 1.4
-        assert abs(f.rev_growth_ttm - 0.185) < 1e-9
-        assert abs(f.eps_growth_ttm - 0.22) < 1e-9
-        assert abs(f.roe - 0.21) < 1e-9
-        assert f.last_eps_surprise == 0.08
-        assert f.eps_surprises == [0.08]
-        assert f.days_to_earnings == 31
-        assert f.is_sufficient() is True
-
-    def test_dash_values_become_none(self):
-        f = parse_finviz_fundamentals({"P/E": "-", "PEG": "-", "ROE": "-"}, as_of="2026-04-27")
-        assert f.pe_ratio is None
-        assert f.peg_ratio is None
-        assert f.roe is None
-
-    def test_missing_keys_become_none(self):
-        f = parse_finviz_fundamentals({}, as_of="2026-04-27")
-        assert f.pe_ratio is None
-        assert f.is_sufficient() is False
-
-    def test_none_input(self):
-        f = parse_finviz_fundamentals(None, as_of="2026-04-27")
-        assert f.is_sufficient() is False
-
-    def test_earnings_date_in_past_rolls_to_next_year(self):
-        f = parse_finviz_fundamentals({"Earnings": "Jan 15 AMC"}, as_of="2026-04-27")
-        assert f.days_to_earnings is not None
-        assert 250 <= f.days_to_earnings <= 270
-
-    def test_sales_fallback_to_3_5y(self):
-        # Sales Y/Y TTM missing - should pick first number from Sales past 3/5Y
-        fund = {"P/E": "20", "PEG": "1.5", "Sales past 3/5Y": "8.50% 12.00%",
-                "EPS Y/Y TTM": "10.00%", "ROE": "18.00%"}
-        f = parse_finviz_fundamentals(fund, as_of="2026-04-27")
-        assert abs(f.rev_growth_ttm - 0.085) < 1e-9
-
-    def test_eps_fallback_to_this_year(self):
-        # EPS Y/Y TTM missing - falls back to EPS this Y
-        fund = {"EPS this Y": "15.00%"}
-        f = parse_finviz_fundamentals(fund, as_of="2026-04-27")
-        assert abs(f.eps_growth_ttm - 0.15) < 1e-9

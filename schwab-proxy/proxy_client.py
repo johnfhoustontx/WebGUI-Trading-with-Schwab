@@ -67,14 +67,6 @@ def _apply_secret(session: "requests.Session") -> None:
 # HELPERS
 #############################################
 
-def proxy_available(base: str = PROXY_BASE) -> bool:
-    """Check if the Schwab proxy is running."""
-    try:
-        r = requests.get(f"{base}/health", timeout=3)
-        return r.status_code == 200 and r.json().get("status") == "ok"
-    except Exception:
-        return False
-
 
 @dataclass
 class FakeResponse:
