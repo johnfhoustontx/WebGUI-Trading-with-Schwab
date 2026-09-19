@@ -4,7 +4,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-19 (**Architecture audit: fixes, dead code, and Settings →
+**Last updated:** 2026-09-19 (**One look and one behaviour — Phase 0: the page kit.**)
+
+- **`webgui/pages/ui_kit.py`**, the pieces every screen will be built from: the
+  header line (title, an Updated stamp in CT from the view's `:ts` key, page
+  actions), control bar, labelled fields, the one Symbol field, four button
+  kinds with their own busy state, a region whose spinner survives repaints, the
+  one table (sortable, numbers right, selected row drawn), empty state, the one
+  confirm dialog (Cancel first, solid red only there) and toasts.
+- **App-wide surface:** both entrypoints paint the navy ground, default cards and
+  boxed fields (`.ns-app`, `theme.SURFACE_CSS` / `APP_FIELD_CSS`,
+  `ui.colors(**theme.QUASAR_COLORS)`), so a page with no wrapper no longer sits on
+  Quasar's grey. Table and subtab chrome follow the theme; table headers are
+  sentence case.
+- **The menu accent now reaches** the active nav pill, tab fill and icon.
+- **`[buttons_3d]` retired** — seven of its eight colours drove nothing;
+  `red_mid` is now `[palette].danger`.
+- **Settings → Appearance** is its own tab: groups that match the standard, a
+  live preview drawn from the same tokens, a staged Discard / Save footer and the
+  shared restart banner.
+- **Guard:** `tests/test_ui_kit_guard.py` (ratchet of pages still building raw
+  controls). **Harness:** `tools/ui_harness.py`.
+- Design: `docs/plans/2026-09-19-app-ui-consistency-design.md`; plan:
+  `docs/plans/2026-09-19-app-ui-consistency-phase0-plan.md`.
+
+**Prior —** 2026-09-19 (**Architecture audit: fixes, dead code, and Settings →
 Configuration.**)
 
 - **Paper Analyze restored.** `options_svc.compute.analyze_paper` lazily imported

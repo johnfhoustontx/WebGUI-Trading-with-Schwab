@@ -2266,8 +2266,8 @@ A health board for the whole stack.
 ## Settings
 
 **Route:** `/settings` — a standalone item at the **foot of the rail**, with System
-Status and Stop All Services. It has two tabs: **General** (your app preferences)
-and **Configuration** (the trading settings).
+Status and Stop All Services. It has three tabs: **General** (your app preferences),
+**Appearance** (every colour and font) and **Configuration** (the trading settings).
 
 ### Configuration
 
@@ -2335,9 +2335,10 @@ Preferences, all saved on your machine:
   The autonomous driver's account is never affected by this toggle.
 - **Show the ticker** — the scrolling bar at the bottom of every page, with a
   speed setting. It only shows or hides the marquee — see the note below.
-- **Appearance** — every colour, font and menu style, in six tabs. **Save &
-  restart web GUI** applies the change; **Reset** (confirm-gated) returns to the
-  shipped theme.
+- **Appearance** is its own tab now (**Settings → Appearance**): every colour and
+  font, grouped as surfaces, text, fields, buttons, status colours, charts, type
+  and menu, with a live preview. **Save changes**, then **Restart now**, applies
+  it to every screen; **Reset to shipped values** (confirm-gated) goes back.
 - **API usage** — how many calls the app has made to **Schwab** (counted at the
   gateway) and to **Claude** (counted at each call site), for today, the last 7 days
   and the last 30.

@@ -3,10 +3,10 @@
 Every page builds its header line, control bar, fields, buttons, loading
 region, table, empty state, confirm dialog and toast from here, so two screens
 cannot drift apart. The standard - and why each rule is what it is - is
-``docs/plans/2026-09-19-app-ui-consistency-design.md``. A planned
-``tests/test_ui_kit_guard.py`` will fail when a page builds a button, dialog,
-toast or table of its own; until it lands, using this kit is a convention
-rather than something enforced.
+``docs/plans/2026-09-19-app-ui-consistency-design.md``.
+``tests/test_ui_kit_guard.py`` fails when a page builds a button, dialog, toast
+or table of its own, or loads its own font; its ``ALLOWED`` ratchet names the
+pages not yet migrated, and a count there may only fall.
 
 Tier-1 safe: imports ``nicegui``, the theme, the busy spinner, the Symbol-field
 helpers, ``bus_client`` and ``shell`` - nothing outside the allow-list - so the

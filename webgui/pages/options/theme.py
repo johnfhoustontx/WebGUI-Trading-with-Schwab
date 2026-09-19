@@ -15,7 +15,8 @@ gauge (``pages/gauge.py``) and the Sentiment/Rotation chart palette
 (``pages/sentiment.py``) read the same ``THEME`` dict, so the whole look moves
 together.
 
-Apply to a new page::
+Apply to a ``.calc-v2`` page (a NEW page builds from ``pages/ui_kit.py`` instead,
+and needs no scope class for boxed fields)::
 
     from pages.options.theme import QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, BTN_PRIMARY
     ui.add_css(QUASAR_INTERNAL_CSS)
@@ -32,13 +33,15 @@ Inputs / selects / tabs inside ``.calc-v2`` are auto-restyled by
 label), ``LABEL`` / ``MUTED`` (text), ``BTN`` / ``BTN_PRIMARY`` (buttons),
 ``STRATEGY_BTN`` (boxed Strategy trigger box, applied alongside the
 ``strategy-menu-btn`` scope hook via ``strategy_menu.build_strategy_menu(
-boxed=True)``), ``TXT_*`` (semantic state text colors), ``BTN_3D*`` (3D gradient
-buttons), ``TILE_3D`` (raised metric tiles). The CSS-only hooks
+boxed=True)``), ``TXT_*`` (semantic state text colors), ``BTN_QUIET`` (text-only),
+``BTN_3D*`` (legacy aliases), ``TILE_3D`` (metric tiles). The CSS-only hooks
 ``QUASAR_INTERNAL_CSS`` styles: ``.calc-v2`` (scope), ``.strat-menu-navy`` (the
 teleported Strategy popup — GLOBAL, mounts on ``<body>`` outside ``.calc-v2``),
 ``.leg-head`` / ``.leg-row`` / ``.leg-strike`` (leg-table chrome). The **full
 palette reference** lives in ``config/theme.toml`` (every knob, commented) and
-the root ``CLAUDE.md`` "App theme — dark-navy 'dashboard'" section.
+the root ``CLAUDE.md`` "App theme — dark-navy 'dashboard'" section. Since
+2026-09-19 pages build their controls through ``pages/ui_kit.py``, and the
+boxed-field rules also ship app-wide as ``APP_FIELD_CSS`` under ``.ns-app``.
 """
 import pathlib
 import sys

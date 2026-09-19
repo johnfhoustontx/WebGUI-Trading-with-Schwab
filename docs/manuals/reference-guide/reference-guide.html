@@ -5655,11 +5655,12 @@ latest published market report's headline. <strong>Turning it off only hides the
 marquee</strong> — the report summary behind it also feeds the Desk's Market Summary frame,
 so <code>market_svc</code> keeps reading it whenever a new report is published, whether or not
 the marquee is showing.</p>
-<p><strong>Appearance.</strong> Every colour, font and menu style, in six tabs — surfaces, state
-colours, 3D buttons, charts, text, menu. <strong>Save &amp; restart web GUI</strong> applies the
-change; <strong>Reset</strong> (confirm-gated) returns to the shipped theme. Changes are saved as
-an override in <code>config/local/theme.toml</code>; the shipped <code>config/theme.toml</code> is never
-edited.</p>
+<p><strong>Appearance tab.</strong> Every colour and font in the app, grouped as surfaces, text,
+fields, buttons, status colours, charts, type and menu, with a live preview that
+shows an unsaved colour before anything else does. <strong>Save changes</strong> writes an
+override in <code>config/local/theme.toml</code> (the shipped <code>config/theme.toml</code> is never
+edited) and <strong>Restart now</strong> applies it to every screen; <strong>Reset to shipped values</strong>
+(confirm-gated) removes the override.</p>
 <p><strong>Configuration tab.</strong> Every trading setting the services read from <code>config/*.toml</code>
 — scanner floors, exit rules, the driver's risk envelope, flow-alert thresholds,
 session windows and scheduled-job times, symbol lists, the sector map and
@@ -5771,8 +5772,8 @@ in the rail is the one that stops things.</p>
 <td><strong>Summary</strong> · <strong>Detailed</strong> (<code>/eod/detail</code>)</td>
 </tr>
 <tr>
-<td><strong>Settings → Appearance</strong></td>
-<td>Surfaces · State colors · 3D buttons · Gauges · Charts · Text · Menu</td>
+<td><strong>Settings</strong></td>
+<td><strong>General</strong> · <strong>Appearance</strong> (Surfaces · Text · Fields · Buttons · Status colours · Charts · Type · Menu) · <strong>Configuration</strong></td>
 </tr>
 </tbody>
 </table>

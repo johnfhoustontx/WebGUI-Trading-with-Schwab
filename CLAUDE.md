@@ -379,7 +379,7 @@ Routes:
 | `/sentiment/momentum` | Momentum — a **numbered argument** (regime trio + dispersion · three levels + alignment · quadrant counts · one decomposed example · rank over recent sessions), with the ranked leaderboard behind a **collapsed expander**. Scatter + ribbon dropped. Recomputed **once nightly** (16:20 CT), not on the tick. [Detail](docs/webgui-routes.md) | built |
 | `/trade` | Trade Analyzer — on-demand Position (1–8wk) + Investor verdicts; Position runs the backtested IC-weighted factor model. Deep Dive and AI Query open separate reports. [Detail](docs/webgui-routes.md) | built |
 | `/driver` | Claude Trades — monitor + override for the autonomous Claude decision layer, trading defined-risk spreads into its **own isolated paper book**. Paper only. [Detail](docs/webgui-routes.md) | built |
-| `/settings` | Settings — two sub-tabs. **General**: alert/ticker preferences, the in-app theme editor, Schwab + Claude API call counts, and maintenance actions. **Configuration** (2026-09-19): every `config/*.toml` setting by purpose, from the `webgui/config_schema.py` catalogue, saved as `config/local/` overrides, with a restart offer. [Detail](docs/webgui-routes.md) | built |
+| `/settings` | Settings — three sub-tabs. **General**: alert/ticker preferences, Schwab + Claude API call counts, and maintenance actions. **Appearance** (2026-09-19): every colour and font in eight groups that follow the design standard rather than the TOML's sections, over a live preview, saved as a `config/local/theme.toml` override. **Configuration** (2026-09-19): every `config/*.toml` setting by purpose, from the `webgui/config_schema.py` catalogue, saved as `config/local/` overrides, with a restart offer. [Detail](docs/webgui-routes.md) | built |
 | `/portfolio` | Portfolio — Holdings / Sectors / Performance over the portfolio model, with live-streaming P&L via the service’s SSE consumer. | built |
 | `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` and `driver:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. [Detail](docs/webgui-routes.md) | built |
 | `/market` | Market Dashboard — live grid of ~48 macro tickers in framed category panels, coloured by semantic risk-on/off. Reader of `cache:market:dashboard`. [Detail](docs/webgui-routes.md) | built |
@@ -486,8 +486,10 @@ layer via `ui.html` (`rrg_view.tail_svg`, `momentum_view.rank_svg`) — read the
 `vector-effect` gotcha above before touching either.
 
 **App theme — dark-navy "dashboard" (Tailwind-first; the canonical reference).**
-The shared dark-navy look (page-scoped via the `.calc-v2` scope hook; promotable
-app-wide) is now a set of **Tailwind design-token constants** in
+The shared dark-navy look (**app-wide since 2026-09-19** — both entrypoints put
+`ns-app` on the content column and inject `SURFACE_CSS` + `APP_FIELD_CSS`, so a page
+needs no scope class of its own; `.calc-v2` survives as the Simulator/Trade hook for
+the leg-table and popup chrome) is now a set of **Tailwind design-token constants** in
 **`webgui/pages/options/theme.py`** applied via `.classes(CARD)` etc., plus a slim
 **`QUASAR_INTERNAL_CSS`** escape-hatch (the only `ui.add_css` a page injects) for the
 Quasar/Highcharts-internal DOM that component `.classes()` can't reach (`q-field__control`,
@@ -510,17 +512,18 @@ deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This sect
   `background-clip:text` are exactly what the Tailwind JIT won't emit.
 - **Restyle WITHOUT code edits (2026-07-09): `config/theme.toml`.** Every color
   (`repo_paths.THEME_TOML`, all knobs commented in-file) — surfaces/cards/text,
-  secondary+primary buttons, the **3D gradient buttons**, the semantic
+  secondary, primary and danger buttons, the semantic
   positive/warning/negative/neutral set, the Sentiment/Rotation
   chart palette (`sentiment.py CLR_*`),
   plus **`[typography]`** (app-wide font family + text-category sizes:
   titles/.text-h6 · subtitles/.text-subtitle1 · sections/.text-subtitle2 · body ·
   small/.text-xs+EYEBROW → `build_typography_css`, injected app-wide by
   `main._layout`) and **`[menu]`** (the application menu: `accent` → `ui.colors(
-  primary=…)`, which reaches **only Quasar-colored controls** — switches, sliders,
-  `color=primary` buttons — **NOT** the header bar (decoupled via `header_bg`) and
-  **NOT** the active nav pill / tab fills / icon accent (hardcoded rgba in
-  `main._NAV_CSS` — see the JIT gotcha below); `drawer_bg`/`text`/
+  primary=…)`, which reaches the Quasar-colored controls — switches, sliders,
+  `color=primary` buttons — **NOT** the header bar (decoupled via `header_bg`) and,
+  since 2026-09-19, the active nav pill, tab-strip fill and active icon
+  (`build_nav_css` re-emits them in the accent; the two washes are a `color-mix`, so
+  ANY CSS colour works, not only a 6-digit hex); `drawer_bg`/`text`/
   `hover_bg`/`title` emit override CSS via `build_nav_css` — every `[menu]` knob
   defaults `""` = stock look, no rule emitted) — is loaded ONCE at webgui startup
   (`theme.load_theme()` → `build_tokens`/`build_quasar_css`; missing
@@ -532,9 +535,8 @@ deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This sect
   Tailwind browser JIT does NOT generate an arbitrary class containing
   `var(...)` — the nav pill's old `bg-[var(--q-primary)]` silently produced no
   rule; it is now a plain `.nav-active` rule in `_NAV_CSS` with a **hardcoded
-  rgba wash**, so it does **not** follow the `accent` knob (nor do the tab-strip
-  fills or the active icon accent). Changing `accent` moves the Quasar controls
-  only; to move the nav accents, edit `main._NAV_CSS` as well. **`rgba(...)` was
+  rgba wash**, which stays the stock look; `build_nav_css` re-emits it in the
+  accent as raw CSS, which the JIT limit does not bind. **`rgba(...)` was
   wrongly caught by that ban until 2026-08-14** — this line read "`var(...)`
   **or `rgba(...)`**", which is overstated and cost a real workaround: probed
   live while building the Signals tiles, `shadow-[0_0_18px_-6px_rgba(…)]`
@@ -544,18 +546,26 @@ deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This sect
   functions generally. Note `rgba()` must be written with **no spaces** (a
   Tailwind arbitrary value cannot contain them, and underscores are the escape),
   and a `box-shadow` arbitrary needs the **rgba form, not a hex**.
-- **Apply to a new page:**
+- **Apply to a new page — use the kit (2026-09-19): `webgui/pages/ui_kit.py`.**
   ```python
-  from pages.options.theme import QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, LABEL, BTN_PRIMARY
-  ui.add_css(QUASAR_INTERNAL_CSS)
-  with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):    # .calc-v2 = CSS scope hook
-      ui.label("Title").classes(f"text-h6 {LABEL}")            # Tailwind token, not .style()
-      with ui.column().classes(f"{CARD} w-full gap-3"):        # bordered navy panel
-          ui.input("Symbol")                                    # auto-boxed (q-field)
-          ui.button("Go", color=None).props("no-caps").classes(BTN_PRIMARY)
+  from pages import ui_kit as kit
+  with kit.page():
+      head = kit.header("Title", view="options:matrix")   # title · Updated stamp · actions
+      with head.actions:
+          kit.button("Refresh", kind="secondary", icon="refresh", on_click=_refresh)
+      with kit.control_bar():
+          sym = kit.symbol_field(value="SPY", on_load=_load)
+          kit.button("Load", kind="primary", icon="search", on_click=_load)
+      region = kit.region("Loading…")
+      with region.content:
+          table = kit.table(columns, rows, numeric=("pnl",))
   ```
-  Inputs / selects / tabs inside `.calc-v2` are auto-restyled by `QUASAR_INTERNAL_CSS`;
-  **buttons need `color=None`** (drops Quasar's `bg-primary`) + a `BTN` / `BTN_PRIMARY` token.
+  Fields and tabs are boxed app-wide: both entrypoints put `ns-app` on the content
+  column and inject `theme.APP_FIELD_CSS` + `theme.SURFACE_CSS`, so a page adds no
+  scope class. `tests/test_ui_kit_guard.py` fails when a page builds a raw
+  `ui.button` / `ui.dialog` / `ui.notify` / `ui.table` or loads its own font; its
+  `ALLOWED` ratchet names the pages not yet migrated. The standard is
+  [the design doc](docs/plans/2026-09-19-app-ui-consistency-design.md).
   Reactive (repainted-in-place) label colors swap via `.classes(remove=<finite set>, add=…)`
   so repeated repaints don't stack conflicting `text-[…]` classes.
 - **Token vocabulary** (`.classes(<TOKEN>)`, all in `theme.py`): `PAGE` navy radial-gradient
@@ -563,8 +573,9 @@ deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This sect
   text · `BTN` / `BTN_PRIMARY` secondary / primary button · `STRATEGY_BTN` boxed Strategy
   trigger box (applied alongside the `strategy-menu-btn` scope hook via
   `strategy_menu.build_strategy_menu(..., boxed=True)`) · `TXT_POS/TXT_WARN/TXT_NEG/TXT_NEUTRAL`
-  semantic state text colors (+ `STATE_TEXT_CLASSES` for the reactive `remove=`) · `BTN_3D` /
-  `BTN_3D_DANGER` 3D gradient buttons. **CSS-only hooks** (`QUASAR_INTERNAL_CSS`, scoped under
+  semantic state text colors (+ `STATE_TEXT_CLASSES` for the reactive `remove=`) · `BTN_QUIET`
+  text-only button · `BTN_3D` / `BTN_3D_DANGER` legacy aliases of `BTN_PRIMARY` / `BTN_DANGER`,
+  removed once no page uses them. **CSS-only hooks** (`QUASAR_INTERNAL_CSS`, scoped under
   `.calc-v2` except the popup): `.calc-v2` scope hook (the page itself uses the `PAGE` token for
   the gradient) · `.strat-menu-navy` the teleported Strategy-menu popup (**GLOBAL** — Quasar
   menus mount on `<body>`, outside `.calc-v2`) · `.leg-head` / `.leg-row` / `.leg-strike`
@@ -1565,7 +1576,7 @@ the standing precedent for Tier 1 doing exactly that — so the duplication is g
 rather than merely policed.
 
 `config/theme.toml` is the single source of truth for the **webgui styling palette**
-(surfaces/cards/text, buttons incl. the 3D gradients, semantic state colors, the
+(surfaces/cards/text, buttons, semantic state colors, the
 Sentiment/Rotation chart palette), loaded once at webgui
 startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
 restyle without code changes; missing keys fall back to the built-in dark-navy defaults.

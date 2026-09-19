@@ -4071,11 +4071,12 @@ marquee** — the report summary behind it also feeds the Desk's Market Summary 
 so `market_svc` keeps reading it whenever a new report is published, whether or not
 the marquee is showing.
 
-**Appearance.** Every colour, font and menu style, in six tabs — surfaces, state
-colours, 3D buttons, charts, text, menu. **Save & restart web GUI** applies the
-change; **Reset** (confirm-gated) returns to the shipped theme. Changes are saved as
-an override in `config/local/theme.toml`; the shipped `config/theme.toml` is never
-edited.
+**Appearance tab.** Every colour and font in the app, grouped as surfaces, text,
+fields, buttons, status colours, charts, type and menu, with a live preview that
+shows an unsaved colour before anything else does. **Save changes** writes an
+override in `config/local/theme.toml` (the shipped `config/theme.toml` is never
+edited) and **Restart now** applies it to every screen; **Reset to shipped values**
+(confirm-gated) removes the override.
 
 **Configuration tab.** Every trading setting the services read from `config/*.toml`
 — scanner floors, exit rules, the driver's risk envelope, flow-alert thresholds,
@@ -4186,7 +4187,7 @@ Pages carrying their own subtab row, and what each subtab does.
 | **Rescue** | **At-Risk Board** · **Ad-hoc Trade** |
 | **Claude Trades** | Monitor (default) · **Performance** (closed trades and realized P&L) |
 | **EOD Report** | **Summary** · **Detailed** (`/eod/detail`) |
-| **Settings → Appearance** | Surfaces · State colors · 3D buttons · Gauges · Charts · Text · Menu |
+| **Settings** | **General** · **Appearance** (Surfaces · Text · Fields · Buttons · Status colours · Charts · Type · Menu) · **Configuration** |
 
 # Appendix B — Refresh cadences
 
