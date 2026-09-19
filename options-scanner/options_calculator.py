@@ -302,16 +302,6 @@ def _as_array(x):
     return np.asarray(x, dtype=float)
 
 
-def _is_vectorized(*args):
-    """Return True if any positional arg is array-like with ndim>0."""
-    import numpy as np
-    for a in args:
-        arr = np.asarray(a)
-        if arr.ndim > 0:
-            return True
-    return False
-
-
 def bs_price_v(S, K, T, r, sigma, option_type="call"):
     """Vectorized Black-Scholes theoretical price. Accepts scalar or array S/K."""
     import numpy as np

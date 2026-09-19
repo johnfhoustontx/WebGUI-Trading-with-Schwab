@@ -881,30 +881,3 @@ def last_snapshot_age(
     return int(time.time()) - last_ts, last_ts
 
 
-def first_snapshot_today(
-    conn: sqlite3.Connection,
-    symbol: str,
-    view: str,
-) -> dict:
-    """Return the gex_grid dict of today's earliest snapshot, or {} if none.
-
-    Used as the "vs Open" baseline for ΔDEX ghost bars.
-
-    Sargable ``ts >= ? AND ts < ?`` day-range (mirrors ``load_today``) so the
-    ``ts`` index applies, instead of wrapping ``ts`` in ``DATE(...)``.
-    """
-    start, end = _today_local_unix_range()
-    cur = conn.execute(
-        """
-        SELECT gex_json FROM snapshots
-         WHERE symbol = ? AND view = ?
-           AND ts >= ? AND ts < ?
-         ORDER BY ts ASC
-         LIMIT 1
-        """,
-        (symbol, view, start, end),
-    )
-    row = cur.fetchone()
-    if not row or not row[0]:
-        return {}
-    return _decode_grid(row[0])

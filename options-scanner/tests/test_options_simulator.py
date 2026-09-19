@@ -24,40 +24,6 @@ def test_chain_snapshot_constructs_with_empty_history():
     assert snap.price_history.empty
 
 
-from options_simulator.pnl import decompose
-
-
-def test_decompose_returns_all_greek_components():
-    greeks_t0 = {"delta": 0.5, "gamma": 0.02, "theta": -0.04, "vega": 0.11, "rho": 0.01}
-    out = decompose(greeks_t0, dS=1.0, dt_years=1/365, dsigma=0.01)
-    assert set(out.keys()) == {"delta", "gamma", "theta", "vega", "rho", "total"}
-
-
-def test_decompose_delta_contribution():
-    greeks_t0 = {"delta": 0.5, "gamma": 0.0, "theta": 0.0, "vega": 0.0, "rho": 0.0}
-    out = decompose(greeks_t0, dS=2.0, dt_years=0.0, dsigma=0.0)
-    assert out["delta"] == pytest.approx(1.0)
-    assert out["total"] == pytest.approx(1.0)
-
-
-def test_decompose_gamma_quadratic():
-    greeks_t0 = {"delta": 0.0, "gamma": 0.04, "theta": 0.0, "vega": 0.0, "rho": 0.0}
-    out = decompose(greeks_t0, dS=2.0, dt_years=0.0, dsigma=0.0)
-    assert out["gamma"] == pytest.approx(0.08)
-
-
-def test_decompose_theta_per_step_convention():
-    greeks_t0 = {"delta": 0.0, "gamma": 0.0, "theta": -0.05, "vega": 0.0, "rho": 0.0}
-    out = decompose(greeks_t0, dS=0.0, dt_years=1/365, dsigma=0.0)
-    assert out["theta"] == pytest.approx(-0.05)
-
-
-def test_decompose_vega_per_one_vol_point():
-    greeks_t0 = {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.20, "rho": 0.0}
-    out = decompose(greeks_t0, dS=0.0, dt_years=0.0, dsigma=0.01)
-    assert out["vega"] == pytest.approx(0.20)
-
-
 import numpy as np
 from options_simulator.engine import ReplayEngine
 

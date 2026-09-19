@@ -372,22 +372,6 @@ def test_last_snapshot_age_matches_date_filter(tmp_path, monkeypatch):
     assert last_ts == today_ts  # yesterday/older excluded
 
 
-def test_first_snapshot_today_matches_date_filter(tmp_path, monkeypatch):
-    """The sargable ts-range in first_snapshot_today returns today's earliest,
-    excluding prior days (same as the old DATE() filter)."""
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
-    conn = db.connect()
-    db.init_schema(conn)
-    grid_today = {5000.0: {"call": 1.0, "put": -0.5, "net": 0.5}}
-    db.insert_snapshot(conn, "$SPX", "dex",
-                       _make_summary(_day_ts(0, hour=9)), grid_today, 0)
-    # A prior-day row that is EARLIER in clock-time must NOT be picked.
-    db.insert_snapshot(conn, "$SPX", "dex",
-                       _make_summary(_day_ts(3, hour=8)),
-                       {9999.0: {"net": 1.0}}, 0)
-    assert db.first_snapshot_today(conn, "$SPX", "dex") == grid_today
-
-
 def test_last_snapshot_age_fresh(tmp_path, monkeypatch):
     dbpath = tmp_path / "t.db"
     monkeypatch.setattr(db, "DB_PATH", dbpath)
@@ -629,34 +613,6 @@ def test_init_schema_backfills_legacy_db(tmp_path, monkeypatch):
     db.init_schema(conn)
     cols_after = {r[1] for r in conn.execute("PRAGMA table_info(snapshots)")}
     assert cols_after == cols
-
-
-def test_first_snapshot_today_returns_earliest(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
-    conn = db.connect()
-    db.init_schema(conn)
-
-    import time as _time
-    # Three snapshots today at different seconds; earliest must win.
-    base = int(_time.time()) - 3600
-    for offset, spot in [(600, 5000.0), (0, 4998.0), (1200, 5002.0)]:
-        db.insert_snapshot(
-            conn, "$SPX", "dex",
-            {"ts": base + offset, "spot": spot, "flip": None,
-             "top_pos_strike": None, "top_neg_strike": None, "net_total": 0.0},
-            {5000.0: {"call": 1.0, "put": -0.5, "net": 0.5}},
-            0,
-        )
-    grid = db.first_snapshot_today(conn, "$SPX", "dex")
-    # The "earliest" snapshot is offset 0 (spot 4998) — its grid should come back.
-    assert grid == {5000.0: {"call": 1.0, "put": -0.5, "net": 0.5}}
-
-
-def test_first_snapshot_today_empty(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
-    conn = db.connect()
-    db.init_schema(conn)
-    assert db.first_snapshot_today(conn, "$SPX", "dex") == {}
 
 
 def test_insert_snapshot_roundtrips_skew_scalars(tmp_path, monkeypatch):

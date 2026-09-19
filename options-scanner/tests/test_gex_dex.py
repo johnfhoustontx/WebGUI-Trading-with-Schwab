@@ -222,14 +222,11 @@ def test_view_var_accepts_three_views():
         root.destroy()
 
 
-
-
 def test_dex_end_to_end_db_roundtrip(tmp_path, monkeypatch):
     """Collector-style write + UI-style read of a DEX row.
 
     Exercises the full persistence path: insert_snapshot with all three
-    0-DTE pressure fields, first_snapshot_today returning the grid, and
-    a direct SELECT verifying the pressure fields round-trip through
+    0-DTE pressure fields, and a direct SELECT verifying the pressure fields round-trip through
     SQLite REAL columns without loss.
     """
     import gex_history_db as db
@@ -249,10 +246,6 @@ def test_dex_end_to_end_db_roundtrip(tmp_path, monkeypatch):
     grid = {5000.0: {"call": 1e6, "put": -5e5, "net": 5e5}}
     db.insert_snapshot(conn, "$SPX", "dex", summary, grid, 0)
 
-    # "vs Open" baseline helper returns the grid verbatim for a single-row day.
-    baseline = db.first_snapshot_today(conn, "$SPX", "dex")
-    assert baseline == grid
-
     # Pressure fields persist through SQLite REAL columns without precision loss.
     row = conn.execute(
         "SELECT net_delta_0dte, projected_net_delta_close, hedge_pressure "
@@ -261,37 +254,3 @@ def test_dex_end_to_end_db_roundtrip(tmp_path, monkeypatch):
     assert row == (-1.2e9, -0.87e9, 3.3e8)
 
 
-def test_dex_end_to_end_multiple_snapshots_baseline_is_earliest(tmp_path, monkeypatch):
-    """Multi-snapshot day: first_snapshot_today picks the earliest row's grid.
-
-    This validates the exact behavior the ΔDEX ghost-bar overlay depends on:
-    when 5 DEX rows exist for today, the ghost shows the 8:30 baseline, not
-    the most recent.
-    """
-    import gex_history_db as db
-    import time as _time
-
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
-    conn = db.connect()
-    db.init_schema(conn)
-
-    base_ts = int(_time.time()) - 1800  # 30 min ago, safely within today
-    for offset_min, net in [(0, 1.0e8), (5, 2.0e8), (10, 3.0e8)]:
-        db.insert_snapshot(
-            conn, "$SPX", "dex",
-            {
-                "ts": base_ts + offset_min * 60,
-                "spot": 5000.0, "flip": 5000.0,
-                "top_pos_strike": None, "top_neg_strike": None,
-                "net_total": net,
-                "net_delta_0dte": None,
-                "projected_net_delta_close": None,
-                "hedge_pressure": None,
-            },
-            {5000.0: {"call": net, "put": 0.0, "net": net}},
-            0,
-        )
-
-    baseline = db.first_snapshot_today(conn, "$SPX", "dex")
-    # Earliest row had net=1.0e8, so that's the baseline grid.
-    assert baseline == {5000.0: {"call": 1.0e8, "put": 0.0, "net": 1.0e8}}

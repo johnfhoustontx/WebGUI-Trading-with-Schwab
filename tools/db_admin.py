@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
-from repo_paths import OPTIONS_SCANNER  # noqa: E402
+from repo_paths import OPTIONS_SCANNER, SCHWAB_PROXY  # noqa: E402
 
 DATA_DIR = OPTIONS_SCANNER / "data"
 BACKUP_DIR = DATA_DIR / "backups"
@@ -50,11 +50,13 @@ def default_targets():
     """Build the three option-trade DB targets, wiring each app's own init.
 
     Imports happen lazily and with options-scanner on sys.path so the schema
-    stays single-sourced in the owning modules.
+    stays single-sourced in the owning modules. trade_performance.db's schema is
+    owned by its only writer, the proxy's ``perf_writer``.
     """
     sys.path.insert(0, str(OPTIONS_SCANNER))
+    sys.path.insert(0, str(SCHWAB_PROXY))
     import trades_db
-    import trade_performance_db
+    import perf_writer
     import signal_db
 
     return [
@@ -67,7 +69,7 @@ def default_targets():
         DbTarget(
             name="trade_performance.db",
             path=DATA_DIR / "trade_performance.db",
-            init=lambda: trade_performance_db.init_schema(
+            init=lambda: perf_writer.init_schema(
                 DATA_DIR / "trade_performance.db"),
             ts_columns={"perf_events": "ts", "perf_iv_snapshots": "ts"},
         ),

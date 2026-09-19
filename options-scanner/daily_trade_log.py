@@ -49,7 +49,6 @@ TZ = ZoneInfo("America/Chicago")
 #############################################
 
 TARGET_DELTA = 0.16
-STOP_MULT = 2.0
 ENTRY_WINDOW_CT = (12.75, 13.5)   # capture between 12:45 and 13:30 CT
 DB_PATH = pathlib.Path(__file__).parent / "data" / "daily_trade_log.db"
 

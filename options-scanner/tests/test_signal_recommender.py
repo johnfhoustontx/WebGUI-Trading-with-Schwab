@@ -163,7 +163,7 @@ def test_a_spread_has_no_manage_dte_at_all():
 
 def test_manage_dte_closes_the_position_rather_than_only_advising():
     """``paper_engine.run_manage_cycle`` acts on the ACTION and stores the CODE
-    as the exit reason; ``plan_auto_closes`` acts on the code alone. Both have to
+    as the exit reason; ``auto_close_reason`` maps the code alone. Both have to
     recognise it, or the rule advises into the void."""
     assert rec.auto_close_reason("MANAGE_DTE") == "MANAGE_DTE"
     assert "MANAGE_DTE" in rec.CLOSE_REASON_CODES
@@ -667,30 +667,6 @@ def test_recommend_code_hold():
                               dte_remaining=10))["code"] == "HOLD"
 
 
-def test_plan_auto_closes_selects_by_code():
-    marks = [
-        ("a", {"recommendation_code": "TARGET_HIT", "current_value": 0.40}),
-        ("b", {"recommendation_code": "MONEY_STOP", "current_value": 3.10}),
-        ("c", {"recommendation_code": "TIME_STOP",  "current_value": 1.05}),
-        ("d", {"recommendation_code": "HOLD",       "current_value": 0.80}),
-    ]
-    out = rec.plan_auto_closes(marks)
-    assert out == [
-        ("a", 0.40, "TARGET_HIT"),
-        ("b", 3.10, "MONEY_STOP"),
-        ("c", 1.05, "TIME_STOP"),
-    ]
-
-
-def test_plan_auto_closes_skips_missing_value():
-    marks = [("a", {"recommendation_code": "TARGET_HIT", "current_value": None})]
-    assert rec.plan_auto_closes(marks) == []
-
-
-def test_plan_auto_closes_empty():
-    assert rec.plan_auto_closes([]) == []
-
-
 def test_build_mark_arms_carries_hold_code():
     # +50% arms break-even; the mark's code is HOLD (no TARGET_HIT emitted).
     mark = rec.build_mark(_signal_row(), _repricer_ok(unrealized_pnl=60.0),
@@ -762,10 +738,6 @@ def test_module_constants_come_from_the_shared_config():
     st = trade_mgmt.stops()
     assert sr.TP_FRAC == st["tp_frac"]
     assert sr.STOP_MULT == st["stop_mult"]
-    assert sr.DELTA_DRIFT == st["delta_drift"]
-    assert sr.DELTA_HARD_CEILING == st["delta_hard_ceiling"]
-    assert sr.DELTA_ABS_FALLBACK == st["delta_abs_fallback"]
-    assert sr.CUT_DTE == st["cut_dte"]
     assert sr.RECOVERY_DTE_MIN == st["recovery_dte_min"]
     assert sr.RECOVERY_MIN_CUSHION == st["recovery_min_cushion"]
     assert sr.DEFAULT_TRAIL_LADDER == trade_mgmt.default_trail_ladder()
@@ -783,10 +755,10 @@ def test_it_actually_READS_the_config_rather_than_agreeing_by_luck(monkeypatch):
     import signal_recommender as sr
 
     monkeypatch.setattr(trade_mgmt, "stops",
-                        lambda: {**trade_mgmt.DEFAULTS["stops"], "cut_dte": 99})
+                        lambda: {**trade_mgmt.DEFAULTS["stops"], "stop_mult": 99})
     try:
         importlib.reload(sr)
-        assert sr.CUT_DTE == 99, \
+        assert sr.STOP_MULT == 99, \
             "signal_recommender.py is not reading config/trade_mgmt.toml"
     finally:
         monkeypatch.undo()

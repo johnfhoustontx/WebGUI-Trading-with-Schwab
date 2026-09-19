@@ -210,25 +210,6 @@ def test_paper_trader_get_open_trades(paper_sandbox):
     assert [t["trade_id"] for t in open_trades] == ["open1"]
 
 
-def test_paper_trader_summary(paper_sandbox):
-    paper_trader.add_trade(_seed_trade("open1", status="OPEN"))
-    closed_trade = _seed_trade("closed1", status="CLOSED")
-    closed_trade["realized_pnl"] = 30.0
-    paper_trader.add_trade(closed_trade)
-    loser = _seed_trade("loser1", status="CLOSED")
-    loser["realized_pnl"] = -15.0
-    paper_trader.add_trade(loser)
-
-    summary = paper_trader.get_trade_summary()
-    assert summary["total_trades"] == 3
-    assert summary["open_count"] == 1
-    assert summary["closed_count"] == 2
-    assert summary["win_count"] == 1
-    assert summary["loss_count"] == 1
-    assert summary["win_rate"] == 50.0
-    assert summary["total_pnl"] == 15.0
-
-
 def test_legacy_json_migration_on_first_init(tmp_path, monkeypatch):
     """paper_trades.json alongside an uninitialized trades.db should be
     imported on first connect."""

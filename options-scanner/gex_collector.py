@@ -135,31 +135,6 @@ def acquire_collector_lock(path, *, source, owner, now, ttl=LOCK_TTL_SEC):
     return True
 
 
-def wait_for_lock(path, *, source, owner, now_fn, interrupted,
-                  check_interval=30, ttl=LOCK_TTL_SEC):
-    """Block until we can acquire the collector lock, then return True.
-
-    Unlike a single ``acquire_collector_lock`` call, this keeps retrying so an
-    **orphaned** lock — one a previous instance was killed without releasing —
-    is taken over as soon as it goes stale (past ``ttl``). A *live* foreign
-    owner that keeps heartbeating is never stolen from; we simply keep waiting.
-
-    ``now_fn()`` returns the current epoch seconds. ``interrupted(timeout)``
-    sleeps up to ``timeout`` seconds and returns True if we should stop waiting
-    (e.g. the window is closing) — when it returns True we give up and return
-    False. This is what lets a restart-within-TTL recover instead of leaving
-    the new in-tool collector idle for the whole session.
-    """
-    while True:
-        if acquire_collector_lock(path, source=source, owner=owner,
-                                  now=now_fn(), ttl=ttl):
-            return True
-        # A fresh foreign lock exists — wait, then re-check. We take over only
-        # once it ages past ttl (previous owner stopped heartbeating).
-        if interrupted(check_interval):
-            return False
-
-
 def touch_lock(path, *, source, owner, now):
     """Refresh the heartbeat (called after each successful poll)."""
     _write_lock(Path(path), source=source, owner=owner, now=now)

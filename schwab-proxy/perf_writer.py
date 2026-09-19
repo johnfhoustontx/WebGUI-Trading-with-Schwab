@@ -7,8 +7,8 @@ Version 1.0.0 Changes:
 - Initial implementation
 
 Writes streaming-derived lifecycle events + IV snapshots into the OptionsScanner
-trade_performance.db. Schema mirrors OptionsScanner/trade_performance_db.py; both
-sides init idempotently. Write failures are logged, never raised — the stream
+trade_performance.db. This module owns the schema (the options-scanner mirror
+was removed 2026-09-19, having no caller); init is idempotent. Write failures are logged, never raised — the stream
 loop must survive a transient DB lock.
 """
 import logging
@@ -22,7 +22,7 @@ from repo_paths import OPTIONS_SCANNER
 log = logging.getLogger("perf_writer")
 
 #############################################
-# PATH + SCHEMA (mirror of OptionsScanner side)
+# PATH + SCHEMA
 #############################################
 
 PERF_DB = OPTIONS_SCANNER / "data" / "trade_performance.db"

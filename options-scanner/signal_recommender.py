@@ -34,10 +34,6 @@ _STOPS = _trade_mgmt.stops()
 
 TP_FRAC = _STOPS["tp_frac"]                 # >= this credit captured -> ARM break-even
 STOP_MULT = _STOPS["stop_mult"]             # cut at >= this x credit, as a loss
-DELTA_DRIFT = _STOPS["delta_drift"]         # cut when short delta drifts this far past entry
-DELTA_HARD_CEILING = _STOPS["delta_hard_ceiling"]  # ...but never hold past this
-DELTA_ABS_FALLBACK = _STOPS["delta_abs_fallback"]  # absolute breach when entry delta unknown
-CUT_DTE = _STOPS["cut_dte"]                 # cut when DTE <= this and underwater
 RECOVERY_DTE_MIN = _STOPS["recovery_dte_min"]      # min DTE to DEFER a soft delta stop
 RECOVERY_MIN_CUSHION = _STOPS["recovery_min_cushion"]  # min spot<->strike cushion to defer
 
@@ -46,8 +42,8 @@ RECOVERY_MIN_CUSHION = _STOPS["recovery_min_cushion"]  # min spot<->strike cushi
 # the credit, the stop ratchets up to lock in ``lock_frac`` of the credit. The
 # DEFAULT is a single break-even rung (lock 0.0) — i.e. exactly the plain
 # break-even stop — so the ratchet is INERT until a caller passes a richer ladder
-# plus ``peak_pnl_frac`` in ctx. RATCHET_TRAIL_LADDER is the OPT-IN alternative,
-# not wired to any caller yet.
+# plus ``peak_pnl_frac`` in ctx. RATCHET_TRAIL_LADDER is the richer ladder; which
+# of the two is in force is ACTIVE_TRAIL_LADDER below.
 DEFAULT_TRAIL_LADDER = _trade_mgmt.default_trail_ladder()
 RATCHET_TRAIL_LADDER = _trade_mgmt.ratchet_trail_ladder()
 # The one in force, per ``[trail].active`` - "ratchet" as shipped 2026-09-12
@@ -588,20 +584,3 @@ def auto_close_reason(code):
     return code if code in CLOSE_REASON_CODES else None
 
 
-def plan_auto_closes(marks):
-    """From [(signal_id, mark_dict), ...] return [(signal_id, exit_value, reason), ...]
-    for the marks that should auto-close. Skips HOLD/unknown and any mark whose
-    current_value is None (never close on missing data).
-    """
-    plan = []
-    for signal_id, mark in marks:
-        if mark is None:
-            continue
-        reason = auto_close_reason(mark.get("recommendation_code"))
-        if reason is None:
-            continue
-        exit_value = mark.get("current_value")
-        if exit_value is None:
-            continue
-        plan.append((signal_id, exit_value, reason))
-    return plan

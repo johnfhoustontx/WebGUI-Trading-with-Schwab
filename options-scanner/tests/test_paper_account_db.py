@@ -5,22 +5,6 @@ def _db(tmp_path):
     return str(tmp_path / "acct.db")
 
 
-def test_has_traded_signal(tmp_path):
-    db = _db(tmp_path)
-    pdb.ensure_account(db, 25_000.0, "2026-06-03")
-    assert pdb.has_traded_signal(db, "sigX") is False
-    pid = pdb.insert_position(db, {
-        "signal_id": "sigX", "symbol": "QQQ", "strategy": "PCS", "short_strike": 1,
-        "long_strike": 0, "width": 1, "expiration": "2026-06-05", "dte_at_entry": 1,
-        "quantity": 1, "entry_credit": 0.5, "entry_order_id": 1, "max_loss_per": 50,
-        "max_loss_total": 50, "entry_ts": "t"})
-    assert pdb.has_traded_signal(db, "sigX") is True
-    # still True after the position closes (prevents re-entry churn)
-    pdb.close_position(db, pid, exit_debit=0.2, exit_order_id=2, realized_pnl=30,
-                       exit_reason="X", exit_ts="t", status="CLOSED")
-    assert pdb.has_traded_signal(db, "sigX") is True
-
-
 def test_has_order_for_signal(tmp_path):
     db = _db(tmp_path)
     pdb.ensure_account(db, 25_000.0, "2026-06-03")
@@ -32,25 +16,6 @@ def test_has_order_for_signal(tmp_path):
         "response_json": "{}"})
     # a rejected order still counts — so we don't retry the same signal
     assert pdb.has_order_for_signal(db, "sX") is True
-
-
-def test_purge_rejected_orders(tmp_path):
-    db = _db(tmp_path)
-    pdb.ensure_account(db, 25_000.0, "2026-06-03")
-    pdb.insert_order(db, {"signal_id": "a", "ts": "t", "symbol": "MU",
-        "side": "SELL_TO_OPEN", "strategy": "PCS", "legs": "[]", "quantity": 0,
-        "order_type": "NET_CREDIT", "limit_price": None, "status": "REJECTED",
-        "fill_price": None, "fill_ts": None, "reject_reason": "RISK_TOO_HIGH",
-        "response_json": "{}"})
-    pdb.insert_order(db, {"signal_id": "b", "ts": "t", "symbol": "QQQ",
-        "side": "SELL_TO_OPEN", "strategy": "PCS", "legs": "[]", "quantity": 1,
-        "order_type": "NET_CREDIT", "limit_price": 0.3, "status": "FILLED",
-        "fill_price": 0.3, "fill_ts": "t", "reject_reason": None,
-        "response_json": "{}"})
-    n = pdb.purge_rejected_orders(db)
-    assert n == 1
-    remaining = pdb.fetch_orders(db)
-    assert len(remaining) == 1 and remaining[0]["status"] == "FILLED"
 
 
 def test_init_seeds_single_account_row(tmp_path):

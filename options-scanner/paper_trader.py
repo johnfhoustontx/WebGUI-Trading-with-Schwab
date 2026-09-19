@@ -361,22 +361,6 @@ def load_trades():
         conn.close()
 
 
-def save_trades(trades):
-    """Replace the trades table with the given list. Retained for back-compat
-    with callers that used to overwrite paper_trades.json wholesale."""
-    conn = trades_db.connect()
-    try:
-        existing = {t["trade_id"] for t in trades_db.fetch_all(conn)}
-        incoming = {t["trade_id"] for t in trades}
-        for tid in existing - incoming:
-            trades_db.delete_trade(conn, tid)
-        for t in trades:
-            trades_db.insert_trade(conn, t)
-        conn.commit()
-    finally:
-        conn.close()
-
-
 def add_trade(trade):
     conn = trades_db.connect()
     try:
@@ -468,24 +452,3 @@ def _log_event(conn, trade, event):
 # SUMMARY STATS
 #############################################
 
-def get_trade_summary():
-    trades = load_trades()
-    open_trades = [t for t in trades if t["status"] == "OPEN"]
-    closed = [t for t in trades if t["status"] in ("CLOSED", "EXPIRED")]
-    winners = [t for t in closed if (t.get("realized_pnl") or 0) > 0]
-    losers = [t for t in closed if (t.get("realized_pnl") or 0) < 0]
-    total_pnl = sum(t.get("realized_pnl") or 0 for t in closed)
-    open_risk = sum(t.get("max_loss_total") or 0 for t in open_trades)
-    open_credit = sum(t.get("entry_credit_total") or 0 for t in open_trades)
-
-    return {
-        "total_trades": len(trades),
-        "open_count": len(open_trades),
-        "closed_count": len(closed),
-        "win_count": len(winners),
-        "loss_count": len(losers),
-        "win_rate": round(len(winners) / len(closed) * 100, 1) if closed else 0,
-        "total_pnl": round(total_pnl, 2),
-        "open_risk": round(open_risk, 2),
-        "open_credit": round(open_credit, 2),
-    }

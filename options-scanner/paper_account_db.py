@@ -466,19 +466,6 @@ def has_order_for_signal(db_path, signal_id):
         conn.close()
 
 
-def purge_rejected_orders(db_path=None):
-    """Delete all REJECTED order rows. They carry no cash/position effect, so
-    removing them is safe; the paper_engine log file retains a copy. Returns the
-    number of rows deleted."""
-    conn = connect(db_path)
-    try:
-        with conn:
-            cur = conn.execute("DELETE FROM paper_orders WHERE status='REJECTED'")
-        return cur.rowcount
-    finally:
-        conn.close()
-
-
 #############################################
 # POSITIONS
 #############################################
@@ -505,19 +492,6 @@ def has_open_position(db_path, signal_id):
     try:
         r = conn.execute("SELECT 1 FROM paper_positions WHERE signal_id=? "
                          "AND status='OPEN' LIMIT 1", (signal_id,)).fetchone()
-        return r is not None
-    finally:
-        conn.close()
-
-
-def has_traded_signal(db_path, signal_id):
-    """True if ANY position (open OR closed) exists for this signal. Used to
-    avoid re-opening a signal that already traded today — prevents the
-    stop-out/re-entry churn loop."""
-    conn = connect(db_path)
-    try:
-        r = conn.execute("SELECT 1 FROM paper_positions WHERE signal_id=? LIMIT 1",
-                         (signal_id,)).fetchone()
         return r is not None
     finally:
         conn.close()

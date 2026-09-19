@@ -210,7 +210,7 @@ venv, so that flag has always been a no-op.
 
 ## Options Simulator
 
-`options_simulator/` is **three flat modules**, not the Dash application older
+`options_simulator/` is **two flat modules**, not the Dash application older
 revisions of this file described (there is no `viz/`, `engine/` or `data/`
 package here, and no plotly/dash/py_vollib/mibian dependency - the webgui charts
 with Highcharts):
@@ -219,7 +219,6 @@ with Highcharts):
 |---|---|
 | `engine.py` | Black-Scholes pricing + analytical Greeks; `Leg` / `Position` / `aggregate_position` for arbitrary multi-leg positions (each leg scaled by `sign * ratio`, so a butterfly body can trade 2x) |
 | `data.py` | option-chain history load for Replay. Builds its index with `.tz_convert("America/Chicago").tz_localize(None)` - **a tz-naive datetime in this project means CENTRAL time** |
-| `pnl.py` | P&L decomposition into delta / gamma / theta / vega contributions |
 
 The three simulation modes (Replay, What-if, IV shock), the per-leg time
 treatment, and the shared strategy/leg editor all live in

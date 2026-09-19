@@ -33,4 +33,4 @@ def test_importing_options_simulator_pulls_in_no_gui_stack():
 
 
 def test_importing_the_simulator_engines_pulls_in_no_gui_stack():
-    assert _import_probe("from options_simulator import engine, data, pnl") == []
+    assert _import_probe("from options_simulator import engine, data") == []

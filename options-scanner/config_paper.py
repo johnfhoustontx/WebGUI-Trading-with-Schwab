@@ -100,17 +100,7 @@ MIN_ENTRY_SCORE = 60   # entry_score must be >= this AND rec must not be CUT
 # FILL SIMULATION
 #############################################
 
-SLIPPAGE_TICKS = 1      # ticks of slippage against the trader (1-2)
-OPTION_TICK    = 0.05   # net-spread tick size
-
 # Opening-auction protection: quotes are unreliable in the first minutes after
 # the 08:30 CT open, producing garbage (near-zero / negative) credit fills.
 OPEN_BUFFER_MIN = 5     # no NEW entries until this many minutes after the open
 MIN_FILL_CREDIT = 0.10  # reject a fill whose net credit is below this (bad quote)
-
-#############################################
-# ENGINE CADENCE (minutes; RTH only)
-#############################################
-
-ENTRY_CYCLE_MIN  = 2    # entry-scan cadence (2-5)
-MANAGE_CYCLE_MIN = 15   # re-price / exit cadence (matches auto-remark loop)
