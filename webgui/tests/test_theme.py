@@ -98,7 +98,6 @@ def test_load_theme_missing_file_returns_defaults():
     t = theme.load_theme("Z:/nope/does-not-exist.toml")
     assert t["palette"]["card_bg"] == "#101a30"
     assert t["semantic"]["positive"] == "#66bb6a"
-    assert t["gauge"]["needle"] == "#f5f5f5"
 
 
 def test_load_theme_merges_partial_override(tmp_path):

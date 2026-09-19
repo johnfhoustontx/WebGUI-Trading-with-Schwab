@@ -59,12 +59,6 @@ red_mid     = "#e5595b"        #   gradient middle
 red_bottom  = "#c9484a"        #   gradient bottom
 red_lip     = "#7a2a2b"        #   the 3D lip
 
-[gauge]                        # ── the speedometer gauges ───────────────────
-low    = "#e5595b"             # left of the arc (0)
-mid    = "#e6b45a"             # middle of the arc (50)
-high   = "#35c281"             # right of the arc (100)
-needle = "#eef1f6"             # needle + pivot
-
 [charts]                       # ── Sentiment / Sector-Rotation value colors ─
 green  = "#4dd6a0"             # positive values (lines, zones, table text)
 red    = "#f08183"             # negative values

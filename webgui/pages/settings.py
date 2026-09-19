@@ -92,7 +92,6 @@ _THEME_SECTIONS = [
     ("palette", "Surfaces", "color"),
     ("semantic", "State colors", "color"),
     ("buttons_3d", "3D buttons", "color"),
-    ("gauge", "Gauges", "color"),
     ("charts", "Charts", "color"),
     ("typography", "Text", "text"),
     ("menu", "Menu", "menu"),

@@ -2335,7 +2335,7 @@ Preferences, all saved on your machine:
   The autonomous driver's account is never affected by this toggle.
 - **Show the ticker** — the scrolling bar at the bottom of every page, with a
   speed setting. It only shows or hides the marquee — see the note below.
-- **Appearance** — every colour, font and menu style, in seven tabs. **Save &
+- **Appearance** — every colour, font and menu style, in six tabs. **Save &
   restart web GUI** applies the change; **Reset** (confirm-gated) returns to the
   shipped theme.
 - **API usage** — how many calls the app has made to **Schwab** (counted at the

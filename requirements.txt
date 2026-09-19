@@ -49,9 +49,6 @@ openpyxl                  # sentiment-dashboard: reads Sectors_Industries_ETFs.x
 
 # --- Windows desktop notifications (O, S) ---
 
-# --- Scheduling (D) ---
-apscheduler==3.10.4
-
 # --- LLM decision layer (NEW: autonomous driver) ---
 anthropic==0.112.0        # pinned (was >=0.40) — Anthropic SDK — Claude tool-use call in driver_svc.decider
                           # (imported lazily inside decider so the suite needs no install)

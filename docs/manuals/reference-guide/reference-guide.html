@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-18</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-19</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -5655,10 +5655,20 @@ latest published market report's headline. <strong>Turning it off only hides the
 marquee</strong> — the report summary behind it also feeds the Desk's Market Summary frame,
 so <code>market_svc</code> keeps reading it whenever a new report is published, whether or not
 the marquee is showing.</p>
-<p><strong>Appearance.</strong> Every colour, font and menu style, in seven tabs — surfaces, state
-colours, 3D buttons, gauges, charts, text, menu. <strong>Save &amp; restart web GUI</strong> applies the
-change; <strong>Reset to defaults</strong> is confirm-gated. Changes are written to
-<code>config/theme.toml</code>.</p>
+<p><strong>Appearance.</strong> Every colour, font and menu style, in six tabs — surfaces, state
+colours, 3D buttons, charts, text, menu. <strong>Save &amp; restart web GUI</strong> applies the
+change; <strong>Reset</strong> (confirm-gated) returns to the shipped theme. Changes are saved as
+an override in <code>config/local/theme.toml</code>; the shipped <code>config/theme.toml</code> is never
+edited.</p>
+<p><strong>Configuration tab.</strong> Every trading setting the services read from <code>config/*.toml</code>
+— scanner floors, exit rules, the driver's risk envelope, flow-alert thresholds,
+session windows and scheduled-job times, symbol lists, the sector map and
+commissions — grouped by purpose, each with a plain-English explanation, its unit and
+its allowed range. Open it when you want to tune how the app trades or alerts
+without a code change. Saves are overrides in <code>config/local/</code> (so Reset always
+restores the shipped value and updates never overwrite yours), and <strong>Save</strong> offers to
+restart the services the change affects — during market hours it warns that
+restarting the options service costs gamma-collection minutes.</p>
 <p><strong>API usage.</strong> Outbound <strong>Schwab</strong> calls counted at the gateway per actual HTTP request
 (including retries), and <strong>Claude (Anthropic)</strong> calls counted at each call site — the
 driver's decision maker and Gamma Analyze among them — for today,

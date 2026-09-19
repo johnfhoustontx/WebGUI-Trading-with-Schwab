@@ -511,8 +511,7 @@ deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This sect
 - **Restyle WITHOUT code edits (2026-07-09): `config/theme.toml`.** Every color
   (`repo_paths.THEME_TOML`, all knobs commented in-file) — surfaces/cards/text,
   secondary+primary buttons, the **3D gradient buttons**, the semantic
-  positive/warning/negative/neutral set (the `[gauge]` section is now UNREAD — the
-  speedometer builder it styled was removed 2026-09-19), the Sentiment/Rotation
+  positive/warning/negative/neutral set, the Sentiment/Rotation
   chart palette (`sentiment.py CLR_*`),
   plus **`[typography]`** (app-wide font family + text-category sizes:
   titles/.text-h6 · subtitles/.text-subtitle1 · sections/.text-subtitle2 · body ·

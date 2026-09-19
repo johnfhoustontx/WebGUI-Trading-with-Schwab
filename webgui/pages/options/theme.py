@@ -82,11 +82,6 @@ _DEFAULTS = {
         "red_top": "#ef6b6b", "red_mid": "#d33f3f",
         "red_bottom": "#b53030", "red_lip": "#7a1f1f",
     },
-    "gauge": {
-        # the speedometer face ramp (left → right) + needle/pivot
-        "low": "#ef5350", "mid": "#ffd54f", "high": "#66bb6a",
-        "needle": "#f5f5f5",
-    },
     "charts": {
         # Sentiment / Sector-Rotation value colors (lines, zones, table text)
         "green": "#66bb6a", "red": "#ef5350", "yellow": "#ffd54f",

@@ -4071,10 +4071,21 @@ marquee** — the report summary behind it also feeds the Desk's Market Summary 
 so `market_svc` keeps reading it whenever a new report is published, whether or not
 the marquee is showing.
 
-**Appearance.** Every colour, font and menu style, in seven tabs — surfaces, state
-colours, 3D buttons, gauges, charts, text, menu. **Save & restart web GUI** applies the
-change; **Reset to defaults** is confirm-gated. Changes are written to
-`config/theme.toml`.
+**Appearance.** Every colour, font and menu style, in six tabs — surfaces, state
+colours, 3D buttons, charts, text, menu. **Save & restart web GUI** applies the
+change; **Reset** (confirm-gated) returns to the shipped theme. Changes are saved as
+an override in `config/local/theme.toml`; the shipped `config/theme.toml` is never
+edited.
+
+**Configuration tab.** Every trading setting the services read from `config/*.toml`
+— scanner floors, exit rules, the driver's risk envelope, flow-alert thresholds,
+session windows and scheduled-job times, symbol lists, the sector map and
+commissions — grouped by purpose, each with a plain-English explanation, its unit and
+its allowed range. Open it when you want to tune how the app trades or alerts
+without a code change. Saves are overrides in `config/local/` (so Reset always
+restores the shipped value and updates never overwrite yours), and **Save** offers to
+restart the services the change affects — during market hours it warns that
+restarting the options service costs gamma-collection minutes.
 
 **API usage.** Outbound **Schwab** calls counted at the gateway per actual HTTP request
 (including retries), and **Claude (Anthropic)** calls counted at each call site — the
