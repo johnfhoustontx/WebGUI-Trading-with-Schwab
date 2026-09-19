@@ -420,58 +420,59 @@ def build_tokens(theme):
     }
 
 
-def build_quasar_css(theme):
+def build_quasar_css(theme, scope=".calc-v2"):
     """The Quasar-internal / teleported escape-hatch CSS from a theme dict.
 
     These rules style the Quasar-internal DOM that component ``.classes()``
     strings can't reach: the boxed q-field control (incl. the leg-table
     variants), the q-tab chrome, and the body-mounted ``.strat-menu-navy``
-    popup. Scoped under ``.calc-v2`` (the scope hook)."""
+    popup. Scoped under ``scope`` (``.calc-v2`` for the pages that still wrap
+    themselves; ``.ns-app`` app-wide)."""
     p = theme["palette"]
     focus_rgb = hex_rgb(p["focus"], (59, 130, 246))
     return f"""
 /* Boxed dark inputs — restyle the standard q-field control into a filled box. */
-.calc-v2 .q-field__control{{
+{scope} .q-field__control{{
   background:{p['input_bg']};border:1px solid {p['input_border']};border-radius:8px;padding:0 10px;min-height:40px;
 }}
-.calc-v2 .q-field__control:before,.calc-v2 .q-field__control:after{{border:0!important;}}
-.calc-v2 .q-field--focused .q-field__control{{
+{scope} .q-field__control:before,{scope} .q-field__control:after{{border:0!important;}}
+{scope} .q-field--focused .q-field__control{{
   border-color:{p['focus']};box-shadow:0 0 0 2px rgba({focus_rgb[0]},{focus_rgb[1]},{focus_rgb[2]},.28);
 }}
-.calc-v2 .q-field__label{{color:{p['muted']};}}
-.calc-v2 .q-field__native,.calc-v2 .q-field__native input,
-.calc-v2 .q-field__native textarea,.calc-v2 .q-field__native span{{color:{p['input_text']}!important;}}
-.calc-v2 .q-field__append .q-icon,.calc-v2 .q-field__prepend .q-icon{{color:{p['icon']};}}
+{scope} .q-field__label{{color:{p['muted']};}}
+{scope} .q-field__native,{scope} .q-field__native input,
+{scope} .q-field__native textarea,{scope} .q-field__native span{{color:{p['input_text']}!important;}}
+{scope} .q-field__append .q-icon,{scope} .q-field__prepend .q-icon{{color:{p['icon']};}}
 /* Strategy menu button internals — the q-btn__content layout + icon color are
    Quasar-internal (component .classes() can't reach them), so they must survive
    when a later phase swaps the button BOX style to the STRATEGY_BTN token. The
    base box rule (bg/border/radius/min-height) is intentionally NOT here. */
-.calc-v2 .strategy-menu-btn .q-btn__content{{justify-content:space-between;flex:1;text-transform:none;}}
-.calc-v2 .strategy-menu-btn .q-icon{{color:{p['icon']};}}
+{scope} .strategy-menu-btn .q-btn__content{{justify-content:space-between;flex:1;text-transform:none;}}
+{scope} .strategy-menu-btn .q-icon{{color:{p['icon']};}}
 /* Leg table header row */
-.calc-v2 .leg-head{{color:{p['muted']};font-size:12px;padding:0 2px 4px;}}
+{scope} .leg-head{{color:{p['muted']};font-size:12px;padding:0 2px 4px;}}
 /* Leg table rows — compact cells (less top/bottom padding, shorter height) and
    tighter side padding so "call"/"put" are not horizontally clipped. */
-.calc-v2 .leg-row .q-field__control{{min-height:32px;padding:0 6px;}}
-.calc-v2 .leg-row .q-field__control .q-field__native,
-.calc-v2 .leg-row .q-field__marginal{{min-height:32px;padding-top:0;padding-bottom:0;}}
-.calc-v2 .leg-row .q-field__append{{padding-left:0;}}
-.calc-v2 .leg-row .q-field__native{{font-size:13px;}}
+{scope} .leg-row .q-field__control{{min-height:32px;padding:0 6px;}}
+{scope} .leg-row .q-field__control .q-field__native,
+{scope} .leg-row .q-field__marginal{{min-height:32px;padding-top:0;padding-bottom:0;}}
+{scope} .leg-row .q-field__append{{padding-left:0;}}
+{scope} .leg-row .q-field__native{{font-size:13px;}}
 /* Leg table rows — dropdowns in narrow grid tracks: slim side padding and a
    smaller dropdown arrow, so "Sep 14", "570" and "Mark" fit. Sizes only. */
-.calc-v2 .leg-trow .q-field__control{{padding:0 4px;}}
-.calc-v2 .leg-trow .q-field__append{{padding-left:0;}}
-.calc-v2 .leg-trow .q-field__append .q-icon{{font-size:12px;}}
+{scope} .leg-trow .q-field__control{{padding:0 4px;}}
+{scope} .leg-trow .q-field__append{{padding-left:0;}}
+{scope} .leg-trow .q-field__append .q-icon{{font-size:12px;}}
 /* Centered strike value in the leg table. */
-.calc-v2 .leg-strike .q-field__native{{justify-content:center;text-align:center;}}
+{scope} .leg-strike .q-field__native{{justify-content:center;text-align:center;}}
 /* Tabs (Simulator) — light labels, accent indicator, transparent panels so the
    dark-transparent Highcharts panels sit on the page gradient. */
-.calc-v2 .q-tabs{{color:{p['icon']};}}
-.calc-v2 .q-tab__label{{font-weight:500;}}
-.calc-v2 .q-tab--active{{color:{p['input_text']};}}
-.calc-v2 .q-tab__indicator{{background:{p['focus']};}}
-.calc-v2 .q-tab-panels,.calc-v2 .q-tab-panel,.calc-v2 .q-panel{{background:transparent!important;}}
-/* Cascading Strategy menu popup — teleported to <body>, so NOT under .calc-v2.
+{scope} .q-tabs{{color:{p['icon']};}}
+{scope} .q-tab__label{{font-weight:500;}}
+{scope} .q-tab--active{{color:{p['input_text']};}}
+{scope} .q-tab__indicator{{background:{p['focus']};}}
+{scope} .q-tab-panels,{scope} .q-tab-panel,{scope} .q-panel{{background:transparent!important;}}
+/* Cascading Strategy menu popup — teleported to <body>, so NOT under {scope}.
    Theme it to match the cards. */
 .strat-menu-navy.q-menu{{
   background:{p['card_bg']}!important;border:1px solid {p['card_border']};
@@ -1296,6 +1297,9 @@ BADGE_ACCENT = _TOKENS["BADGE_ACCENT"]
 BADGE_MUTED = _TOKENS["BADGE_MUTED"]
 
 QUASAR_INTERNAL_CSS = build_quasar_css(THEME)
+# The same rules for EVERY page: both entrypoints put ``ns-app`` on their content
+# column and inject this, so a page no longer needs a scope class of its own.
+APP_FIELD_CSS = build_quasar_css(THEME, scope=".ns-app")
 TYPOGRAPHY_CSS = build_typography_css(THEME)   # injected app-wide by main._layout
 FONT_HEAD_HTML = build_font_head_html(THEME)   # "" when no [typography].font_url
 NAV_THEME_CSS = build_nav_css(THEME)           # "" when [menu] is all-default

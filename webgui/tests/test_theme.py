@@ -364,3 +364,16 @@ def test_quiet_button_is_text_only():
     q = toks["BTN_QUIET"]
     assert "bg-transparent" in q and "text-[#7f8db0]" in q     # default muted
     assert "border" not in q
+
+
+def test_quasar_css_scope_is_a_parameter():
+    t = theme.load_theme("Z:/nope.toml")
+    app = theme.build_quasar_css(t, scope=".ns-app")
+    assert ".ns-app .q-field__control{" in app
+    assert ".calc-v2" not in app
+    assert ".calc-v2 .q-field__control{" in theme.build_quasar_css(t)   # default unchanged
+    assert ".strat-menu-navy.q-menu{" in app       # the teleported popup stays global
+
+
+def test_app_field_css_is_the_app_scope():
+    assert theme.APP_FIELD_CSS == theme.build_quasar_css(theme.THEME, scope=".ns-app")
