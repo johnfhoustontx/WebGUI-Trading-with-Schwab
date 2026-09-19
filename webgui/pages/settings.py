@@ -2,10 +2,9 @@
 plus API-usage stats and database maintenance, and the Configuration tab
 (``pages/config_editor.py``) that edits every config/*.toml setting.
 
-Thin render(): each control writes through to app_settings; the Appearance
-section saves to the override file config/local/theme.toml
-(``theme.save_theme_values``) and applies on a web-GUI restart — the theme loads once at
-startup. The API-usage card reads the proxy's ``/stats/api_calls`` off-thread;
+Thin render(): each control writes through to app_settings; Appearance is its
+own tab (``pages/appearance.py``). The API-usage card reads the proxy's
+``/stats/api_calls`` off-thread;
 the Maintenance card runs ``tools/vacuum_gex.py`` as a subprocess off-thread
 (the tool itself refuses to run while the collector is active). Extensible —
 add new cards/sections here as more settings arrive.
@@ -16,8 +15,7 @@ import proxy as _proxy
 import voice
 from nicegui import run, ui
 
-from pages.options import theme
-from pages.options.theme import BTN_3D, BTN_3D_DANGER
+from pages.options.theme import BTN_3D
 from pages.ui_guard import guard_async
 
 # The Desk's per-section voice switches: (app_settings key, label). The labels
@@ -85,27 +83,17 @@ def api_stats_rows(stats):
     return [("Today", _fmt("today")), ("Last 7 days", _fmt("last_7_days")),
             ("Last 30 days", _fmt("last_30_days"))]
 
-# Appearance section layout: (toml section, tab label, editor kind).
-# "color" → clickable swatch tiles with a color picker; "text" → free-text
-# (sizes / font family); "menu" → free-text colors where "" keeps the stock look.
-_THEME_SECTIONS = [
-    ("palette", "Surfaces", "color"),
-    ("semantic", "State colors", "color"),
-    ("charts", "Charts", "color"),
-    ("typography", "Text", "text"),
-    ("menu", "Menu", "menu"),
-]
 
-
-SUBTABS = ("General", "Configuration")
+SUBTABS = ("General", "Appearance", "Configuration")
 
 
 def render():
-    """Two sub-tabs under the header, the Portfolio page's pattern: General (the
-    app preferences below) and Configuration (every config/*.toml setting)."""
+    """Three sub-tabs under the header, the Portfolio page's pattern: General
+    (the app preferences below), Appearance (every colour and font,
+    ``pages/appearance.py``) and Configuration (every config/*.toml setting)."""
     import page_help as _page_help
     import shell as _shell
-    from pages import config_editor
+    from pages import appearance, config_editor
 
     def _build_tabs():
         with ui.tabs().classes("compact-tabs").props(
@@ -126,6 +114,8 @@ def render():
     with ui.tab_panels(tabs, value="General").classes("w-full flush-panels"):
         with ui.tab_panel("General").classes("gap-4"):
             _render_general()
+        with ui.tab_panel("Appearance"):
+            appearance.render()
         with ui.tab_panel("Configuration"):
             config_editor.render()
 
@@ -259,117 +249,6 @@ def _render_general():
 
         ui.label("Changes apply on the next page load / navigation.").classes(
                  "opacity-60 text-xs")
-
-    # ── Appearance — every configurable GUI component (config/theme.toml) ────
-    with ui.card().classes("w-full max-w-2xl"):
-        ui.label("Appearance").classes("text-subtitle1 font-bold")
-        ui.label("Colors, fonts and menu styling for the whole app — saved to "
-                 "config/theme.toml. Changes apply after the web GUI restarts "
-                 "(use Save & restart, then reload the page).").classes(
-                 "opacity-70 text-sm")
-
-        t = theme.load_theme()          # current file values merged over defaults
-        inputs: dict = {}               # (section, key) -> text input element
-        colors: dict = {(sec, k): v for sec, _l, kind in _THEME_SECTIONS
-                        if kind == "color" for k, v in t[sec].items()}
-        tile_refs: dict = {}            # (section, key) -> (swatch el, hex label)
-
-        def _pick(sec, key, value):
-            """Color picked on a tile: update state + repaint swatch/hex in place."""
-            old = colors[(sec, key)]
-            colors[(sec, key)] = value
-            swatch, hex_lbl = tile_refs[(sec, key)]
-            # continuous value → runtime arbitrary class, reset via remove/add
-            swatch.classes(remove=f"bg-[{old}]", add=f"bg-[{value}]")
-            hex_lbl.text = value
-
-        def _tile(sec, key, val):
-            """One compact swatch tile (color block + name + hex; click to pick)."""
-            with ui.card().tight().classes(
-                    "w-[118px] cursor-pointer bg-[#0c1424] border border-white/10"):
-                swatch = ui.element("div").classes(f"w-full h-12 bg-[{val}]")
-                with ui.column().classes("px-2 py-1 gap-0"):
-                    ui.label(theme.knob_label(key)).classes(
-                        "text-[11px] font-bold leading-tight")
-                    hex_lbl = ui.label(val).classes("text-[10px] opacity-60")
-                ui.color_picker(on_pick=lambda e, s=sec, k=key: _pick(s, k, e.color))
-            tile_refs[(sec, key)] = (swatch, hex_lbl)
-
-        with ui.tabs().classes("w-full") as tabs:
-            tab_els = {sec: ui.tab(label) for sec, label, _k in _THEME_SECTIONS}
-        with ui.tab_panels(tabs, value=tab_els["palette"]).classes("w-full"):
-            for sec, label, kind in _THEME_SECTIONS:
-                with ui.tab_panel(tab_els[sec]).classes("p-2"):
-                    if kind == "color":
-                        with ui.row().classes("gap-2 flex-wrap"):
-                            for key, val in t[sec].items():
-                                _tile(sec, key, val)
-                    else:
-                        if kind == "menu":
-                            ui.label("Leave a field empty to keep the stock look "
-                                     "(colors, e.g. #2e7d32).").classes(
-                                     "opacity-60 text-xs")
-                        else:
-                            ui.label("Sizes are in pixels — just type a number "
-                                     "(e.g. 16 or 16px); bigger number = bigger "
-                                     "text.").classes("opacity-60 text-xs")
-                        with ui.grid(columns=2).classes("w-full gap-x-4"):
-                            for key, val in t[sec].items():
-                                ph = ("default" if (kind == "menu" or key == "family")
-                                      else "pixels, e.g. 14")
-                                el = ui.input(label=theme.knob_label(key), value=val,
-                                              placeholder=ph).classes("w-full")
-                                inputs[(sec, key)] = el
-
-        def _updates():
-            out: dict = {}
-            for sec, _label, kind in _THEME_SECTIONS:
-                if kind == "color":
-                    out[sec] = {k: colors[(sec, k)] for k in t[sec]}
-                else:
-                    out[sec] = {k: (inputs[(sec, k)].value or "").strip()
-                                for k in t[sec] if (sec, k) in inputs}
-            return out
-
-        def _save(notify=True):
-            theme.save_theme_values(_updates())
-            if notify:
-                ui.notify("Saved — restart the web GUI to apply (Save & restart, "
-                          "or More → System Status)", type="positive")
-
-        def _save_restart():
-            _save(notify=False)
-            from pages import status
-            ui.notify("Saved — restarting the web GUI; reload this page in a few "
-                      "seconds", type="warning")
-            status._do_restart({"kind": "self"})
-
-        def _reset():
-            shipped = theme.reset_theme()     # drops config/local/theme.toml
-            for (sec, key), el in inputs.items():          # text inputs
-                el.value = shipped[sec][key]
-                el.update()
-            for (sec, key) in list(colors):                # swatch tiles
-                _pick(sec, key, shipped[sec][key])
-            reset_dlg.close()
-            ui.notify("Reset to the shipped theme — restart the web GUI to apply",
-                      type="positive")
-
-        with ui.dialog() as reset_dlg, ui.card():
-            ui.label("Reset every appearance setting to the shipped theme?")
-            with ui.row():
-                ui.button("Reset", color=None).props("no-caps").classes(
-                    BTN_3D_DANGER).on_click(_reset)
-                ui.button("Cancel", color=None).props("no-caps").classes(
-                    BTN_3D).on_click(reset_dlg.close)
-
-        with ui.row().classes("items-center gap-3"):
-            ui.button("Save", icon="save", color=None).props("no-caps").classes(
-                BTN_3D).on_click(_save)
-            ui.button("Save & restart web GUI", icon="restart_alt", color=None).props(
-                "no-caps").classes(BTN_3D).on_click(_save_restart)
-            ui.button("Reset to defaults", color=None).props("no-caps").classes(
-                BTN_3D_DANGER).on_click(reset_dlg.open)
 
     # ── API usage — Schwab (proxy-counted) + Claude/Anthropic (shared store) ──
     with ui.card().classes("w-full max-w-2xl"):

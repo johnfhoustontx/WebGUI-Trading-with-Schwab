@@ -33,9 +33,10 @@ def test_console_section_exists_with_the_handoff_palette():
 def test_console_is_not_in_the_settings_appearance_editor():
     """Same reason [brand] is excluded: that editor's sections are single-kind
     and this one mixes colours with font text."""
-    from pages import settings
-    assert "console" not in {sec for sec, _label, _kind in settings._THEME_SECTIONS}
-    assert "brand" not in {sec for sec, _label, _kind in settings._THEME_SECTIONS}
+    from pages import appearance
+    sections = {s for _label, _kind, keys in appearance.GROUPS for s, _k in keys}
+    assert "console" not in sections
+    assert "brand" not in sections
 
 
 # -------------------------------------------------------------------- tokens

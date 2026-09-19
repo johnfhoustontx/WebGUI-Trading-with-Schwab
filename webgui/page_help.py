@@ -1274,23 +1274,22 @@ Shows whether each part of the app is alive.
     "/settings": """
 **Settings — the simple version**
 
-Two tabs. **General** holds the app's own preferences (below). **Configuration**
+Three tabs. **General** holds the app's own preferences (below). **Appearance**
+sets every colour and font, with a live preview; a saved change shows after a
+web GUI restart. **Configuration**
 holds every trading setting — scanner floors, exit rules, the driver's risk
 limits, flow alerts, market hours and schedules, symbols, the sector map and
 commissions — each with a plain-English explanation. Changes are saved as
 overrides on top of the shipped values (Reset always goes back), and **Save**
 offers to restart the services that read them.
 
-The General tab controls the alert chimes, notifications, the ticker, and the
-app's look.
+The General tab controls the alert chimes, notifications and the ticker.
 
 - **Audio alert / sound / volume** — what plays when new signals appear.
 - **Market-hours only / minimum score** — when the app is allowed to bother you.
 - **Ticker** — the scrolling market-summary bar at the bottom of every page.
   It leads with the latest market report's headline. Switching it off only
   hides the bar.
-- **Appearance** — every color, font, and menu style, editable in-app (tabs of
-  clickable color swatches). **Save & restart web GUI** applies the change.
 - **API usage** — how many calls the app made to Schwab (counted at the
   gateway) and to the Claude API (counted at each call site), today / this
   week / this month. The four automatic gamma briefings run on the Claude
@@ -1379,7 +1378,9 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
     },
     "/settings": {
         "General": "App preferences: alert sounds, spoken alerts, the ticker, "
-                   "appearance, API usage and maintenance.",
+                   "API usage and maintenance.",
+        "Appearance": "Every colour and font in the app, with a live preview. "
+                      "Saved changes show after a web GUI restart.",
         "Configuration": "Every trading setting — scanner floors, exit rules, the "
                          "driver's risk limits, flow alerts, schedules, symbols, "
                          "the sector map and commissions — with plain-English help.",

@@ -50,7 +50,7 @@ ALLOWED = {
     "sentiment_rotation.py": {"add_head_html": 1, "button": 1, "notify": 1},
     "sentiment_rrg.py": {"add_head_html": 1, "button": 1, "notify": 1},
     "sentiment_sectors.py": {"add_head_html": 1, "button": 3, "notify": 1},
-    "settings.py": {"button": 12, "dialog": 2, "notify": 4},
+    "settings.py": {"button": 7, "dialog": 1, "notify": 1},
     "status.py": {"button": 3, "notify": 4},
     "symbol.py": {"add_head_html": 1, "button": 2},
     "terminate.py": {"button": 3, "dialog": 1, "notify": 1},

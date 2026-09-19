@@ -614,8 +614,8 @@ FILES = (_SCANNER, _TRADE_MGMT, _DRIVER, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 
-# Appearance lives in its own editor (Settings -> General -> Appearance).
-NOT_HERE = {"theme.toml": "Settings → General → Appearance",
+# Appearance lives in its own editor (Settings -> Appearance).
+NOT_HERE = {"theme.toml": "Settings → Appearance",
             "env.local.example.toml": "a template, not a setting"}
 
 

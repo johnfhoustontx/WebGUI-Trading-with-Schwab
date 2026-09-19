@@ -106,3 +106,14 @@ def test_every_desk_voice_section_has_a_settings_switch():
     from pages import settings as st
     assert ({k for k, _ in st.VOICE_SECTION_SWITCHES}
             == set(desk.VOICE_SECTIONS.values()))
+
+
+def test_settings_has_three_tabs_in_order():
+    from pages import settings
+    assert settings.SUBTABS == ("General", "Appearance", "Configuration")
+
+
+def test_the_general_tab_no_longer_carries_the_appearance_card():
+    import inspect
+    from pages import settings
+    assert "Appearance" not in inspect.getsource(settings._render_general)
