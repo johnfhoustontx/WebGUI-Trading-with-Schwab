@@ -1977,6 +1977,11 @@ def _layout(active: str, title: str):
     _recompute_badges(_scan)
     ui.add_css(_NAV_CSS)
     ui.add_css(TABLE_CSS)    # app-wide fixed (sticky) table headers
+    # BEFORE SUBTAB_CSS: APP_FIELD_CSS also carries generic .q-tab rules at the
+    # same specificity as .compact-subtabs', so injection order decides - and
+    # the subtab row's own look must win.
+    ui.add_css(theme.SURFACE_CSS)    # page ground + default card frame (both entrypoints)
+    ui.add_css(theme.APP_FIELD_CSS)  # boxed fields on every page, under .ns-app
     ui.add_css(SUBTAB_CSS)   # a page's own view-tab row (.compact-subtabs)
     ui.add_css(PANEL_SCROLL_CSS)  # a dashboard panel keeps its own overflow
     # A screenshot session asks for the transient chrome to be suppressed; a
@@ -2002,14 +2007,10 @@ def _layout(active: str, title: str):
     if theme.BRAND_FONT_HEAD_HTML:
         ui.add_head_html(theme.BRAND_FONT_HEAD_HTML)
     ui.add_css(theme.BRAND_CSS)
-    if theme.MENU_ACCENT:
-        # [menu].accent → the Quasar primary, which reaches ONLY Quasar-colored
-        # controls (switches, sliders, color=primary buttons). The HEADER BAR is
-        # kept dark by [menu].header_bg (build_nav_css), decoupled from the accent
-        # — else a blue accent would paint the whole header blue. The active nav
-        # pill / tab fills / icon accent do NOT ride this either: they're hardcoded
-        # rgba in _NAV_CSS (the JIT can't emit var()/rgba() arbitraries).
-        ui.colors(primary=theme.MENU_ACCENT)
+    # Quasar's colour variables: primary = [menu].accent (Quasar controls), and
+    # dark / dark_page = the palette's card and page, so a default q-card or
+    # q-menu is the app's card rather than Quasar's grey (build_quasar_colors).
+    ui.colors(**theme.QUASAR_COLORS)
     # Browser tab: title = the selected menu item; favicon = this page's color.
     ui.page_title(window_title(_NAV_LABEL.get(active, theme.BRAND_NAME)))
     # The favicon is NOT injected here. It is declared by `_page`, which passes
@@ -2236,7 +2237,7 @@ def _layout(active: str, title: str):
     ticker.render_ticker(active)
 
     # pb-10 keeps the fixed footer marquee from covering the last content row.
-    with ui.column().classes("w-full p-4 gap-3 pb-10") as content:
+    with ui.column().classes("ns-app w-full p-4 gap-3 pb-10") as content:
         health = cached_health()  # memoized — no blocking HTTP on every navigation
         if not health.get("up"):
             with ui.row().classes(

@@ -468,6 +468,9 @@ def test_the_public_render_injects_the_page_level_css(monkeypatch):
     assert shell.TABLE_CSS in seen,         "the published tables render without their sticky headers"
     assert shell.SUBTAB_CSS in seen,         "the published subtab rows render as stock Quasar tabs"
     assert shell.PANEL_SCROLL_CSS in seen,   "the published /desk panels clip instead of scrolling"
+    from pages.options import theme
+    assert theme.SURFACE_CSS in seen,   "the published screens sit on Quasar's grey"
+    assert theme.APP_FIELD_CSS in seen, "the published fields render as stock Quasar"
 
 
 # --- the public header: whose screen a stranger is looking at ----------------

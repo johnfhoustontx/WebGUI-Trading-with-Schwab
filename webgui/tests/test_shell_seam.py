@@ -419,3 +419,26 @@ def test_table_and_subtab_chrome_follow_the_theme():
     assert "text-transform: uppercase" not in shell.TABLE_CSS   # sentence-case headers
     assert f"background: {p['card_bg']};" in shell.SUBTAB_CSS
     assert f"color: {p['muted']};" in shell.SUBTAB_CSS
+
+
+def test_both_entrypoints_paint_the_app_surface_and_fields():
+    """⚠ BOTH, or the public and private screens drift - the published pages
+    render the same modules."""
+    webgui = pathlib.Path(__file__).resolve().parents[1]
+    for path, func in ((webgui / "main.py", "_layout"),
+                       (webgui / "live_main.py", "_render")):
+        injected = _add_css_args(path, func)
+        assert "SURFACE_CSS" in injected, f"{path.name} lost the app surface"
+        assert "APP_FIELD_CSS" in injected, f"{path.name} lost the app-wide fields"
+        # APP_FIELD_CSS's generic .q-tab rules tie with .compact-subtabs' on
+        # specificity; the subtab row must be injected LATER so it wins.
+        assert injected.index("APP_FIELD_CSS") < injected.index("SUBTAB_CSS"), path.name
+        assert "ui.colors(**theme.QUASAR_COLORS)" in path.read_text(encoding="utf-8")
+
+
+def test_both_content_columns_carry_the_app_scope():
+    webgui = pathlib.Path(__file__).resolve().parents[1]
+    assert 'classes("ns-app w-full p-4 gap-3 pb-10")' in \
+        (webgui / "main.py").read_text(encoding="utf-8")
+    assert '_CONTENT = "ns-app w-full p-4 gap-3"' in \
+        (webgui / "live_main.py").read_text(encoding="utf-8")

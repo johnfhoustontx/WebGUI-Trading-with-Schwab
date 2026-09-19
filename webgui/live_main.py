@@ -236,7 +236,7 @@ else:                                   # pragma: no cover - a broken checkout
 # Board). Wrapping them again would draw a second frame around each, and a
 # navy gradient behind the void-black ones. A neutral container is what "cannot
 # drift from the private page" actually means here.
-_CONTENT = "w-full p-4 gap-3"
+_CONTENT = "ns-app w-full p-4 gap-3"
 
 # ── the public header ────────────────────────────────────────────────────────
 # The brand reached these screens through the browser TAB TITLE alone, which is
@@ -300,6 +300,12 @@ def _render(screen) -> None:
     # sideways. They live in ``shell`` precisely because this process cannot
     # import ``main``.
     ui.add_css(shell.TABLE_CSS)
+    # The app surface and the boxed fields, as in ``_layout``. BEFORE
+    # SUBTAB_CSS: APP_FIELD_CSS also carries generic .q-tab rules at the same
+    # specificity as .compact-subtabs', so injection order decides - and the
+    # subtab row's own look must win.
+    ui.add_css(theme.SURFACE_CSS)    # page ground + default card frame
+    ui.add_css(theme.APP_FIELD_CSS)  # boxed fields on every page, under .ns-app
     ui.add_css(shell.SUBTAB_CSS)
     ui.add_css(shell.PANEL_SCROLL_CSS)
     # The app-wide text presentation ``_layout`` injects. Not nav chrome: it is
@@ -311,11 +317,8 @@ def _render(screen) -> None:
         ui.add_head_html(theme.FONT_HEAD_HTML)
     if theme.TYPOGRAPHY_CSS:
         ui.add_css(theme.TYPOGRAPHY_CSS)
-    if theme.MENU_ACCENT:
-        # [menu].accent -> the Quasar primary, which reaches only Quasar-coloured
-        # controls (switches, sliders, color=primary buttons). Nothing nav-related
-        # rides it, so it is safe on a page with no rail.
-        ui.colors(primary=theme.MENU_ACCENT)
+    # Quasar's colour variables (accent primary, palette dark / dark_page), as in ``_layout``.
+    ui.colors(**theme.QUASAR_COLORS)
     # The brand identity, in ``main._layout``'s own order. The wordmark is two
     # gradients clipped to text, which the bundled Tailwind JIT will not emit —
     # so without BRAND_CSS the lockup paints two TRANSPARENT words, i.e. nothing
