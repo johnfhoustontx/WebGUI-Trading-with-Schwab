@@ -257,3 +257,52 @@ def test_table_is_dense_flat_and_draws_the_selected_row():
     assert t._props.get("dense") is True and t._props.get("flat") is True
     assert "kit-row-selected" in t._props[":table-row-class-fn"]
     assert "row._row_class" in t._props[":table-row-class-fn"]     # a page's own class survives
+
+
+# -- confirm dialog ---------------------------------------------------------------
+def _confirm(**kw):
+    fired = []
+    with ui.card():
+        d = kit.confirm("Delete the NVDA call credit?", "It leaves the ledger for good.",
+                        confirm_text="Delete", on_confirm=lambda: fired.append(1), **kw)
+    return d, fired
+
+
+def test_cancel_comes_first_and_the_row_is_right_aligned():
+    d, _ = _confirm(danger=True)
+    kids = list(d.actions.default_slot.children)
+    assert kids.index(d.cancel) < kids.index(d.confirm)
+    assert "justify-end" in d.actions.classes
+
+
+def test_a_destructive_confirm_is_solid_red_and_a_plain_one_primary():
+    d, _ = _confirm(danger=True)
+    assert set(theme.BTN_DANGER_SOLID.split()) <= set(d.confirm.classes)
+    d2, _ = _confirm()
+    assert set(theme.BTN_PRIMARY.split()) <= set(d2.confirm.classes)
+
+
+def test_confirm_runs_once_then_closes():
+    d, fired = _confirm()
+    d.open()
+    d.run()
+    d.run()                       # a queued Enter after the click
+    assert fired == [1] and d.dialog.value is False
+
+
+def test_returning_false_keeps_the_dialog_open():
+    fired = []
+    with ui.card():
+        d = kit.confirm("Open?", confirm_text="Open",
+                        on_confirm=lambda: fired.append(1) or False)
+    d.open()
+    d.run()
+    assert fired == [1] and d.dialog.value is True
+
+
+def test_a_disabled_confirm_does_nothing():
+    d, fired = _confirm()
+    d.open()
+    d.confirm.disable()
+    d.run()
+    assert fired == []

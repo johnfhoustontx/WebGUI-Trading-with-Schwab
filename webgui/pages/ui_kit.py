@@ -403,3 +403,52 @@ def table(columns, rows=None, *, row_key="id", numeric=(), rows_per_page=0,
     # the quotes inside the arrow function (the scanner.py precedent).
     t._props[":table-row-class-fn"] = ROW_CLASS_FN
     return t
+
+
+# ── confirm dialog ──────────────────────────────────────────────────────────
+# ``ns-app`` on the card itself: a dialog is teleported to <body>, outside the
+# shell's content column, so without it a field in ``content`` would be stock.
+CONFIRM_CARD = f"ns-app {_t.CARD} min-w-[360px] max-w-[520px] gap-3"
+
+
+def confirm(title, body="", *, confirm_text, on_confirm, danger=False):
+    """The one confirm dialog: a title, one sentence, then Cancel and the
+    confirm, right-aligned in that order. Enter confirms, Esc cancels. A
+    destructive action passes ``danger=True`` - the only place solid red appears.
+
+    Add any inputs to ``handle.content`` before ``open()``. ``on_confirm`` runs
+    first; returning ``False`` keeps the dialog open (a check that failed), and
+    anything else closes it. It runs at most once per ``open()``, so a click
+    followed by a queued Enter cannot act twice. Build the dialog at the page's
+    own level, never inside a container a repaint clears - a dialog deletes
+    itself with its slot (the swing.py precedent). Build it ONCE and retitle
+    it per use (``handle.title.text``, ``handle.body.text``) rather than a new
+    dialog per click, which would leave one behind in the page each time."""
+    with ui.dialog() as dlg, ui.card().classes(CONFIRM_CARD) as card:
+        title_lbl = ui.label(title).classes(f"text-subtitle1 font-semibold {_t.LABEL}")
+        body_lbl = ui.label(body).classes(f"text-sm {_t.MUTED}")
+        body_lbl.set_visibility(bool(body))
+        content = ui.column().classes("w-full gap-2")
+        with ui.row().classes("w-full justify-end gap-2 pt-1") as actions:
+            cancel = button("Cancel", kind="secondary", on_click=dlg.close)
+            ok = button(confirm_text, kind="danger_solid" if danger else "primary")
+    st = {"done": False}
+
+    @guard
+    def run_(_e=None):
+        if st["done"] or not ok.enabled:
+            return
+        if on_confirm() is False:
+            return
+        st["done"] = True
+        dlg.close()
+
+    def open_():
+        st["done"] = False
+        dlg.open()
+
+    ok.on_click(run_)
+    card.on("keydown.enter", run_)
+    return SimpleNamespace(dialog=dlg, title=title_lbl, content=content, body=body_lbl,
+                           actions=actions, cancel=cancel, confirm=ok, run=run_,
+                           open=open_, close=dlg.close)
