@@ -197,3 +197,17 @@ def test_utility_pages_have_no_inline_style():
         src = (base / fn).read_text(encoding="utf-8")
         assert ".style(" not in src, f"{fn} still uses .style()"
         assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
+
+
+# The page kit and the Appearance tab (2026-09-19 consistency work): the kit is
+# what every page's controls are built from, so a .style() there would spread
+# to every screen at once.
+def test_ui_kit_and_appearance_have_no_inline_style():
+    base = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    for fn in ("ui_kit.py", "appearance.py"):
+        path = base / fn
+        if not path.exists():          # appearance.py lands in Task 16
+            continue
+        src = path.read_text(encoding="utf-8")
+        assert ".style(" not in src, f"{fn} still uses .style()"
+        assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
