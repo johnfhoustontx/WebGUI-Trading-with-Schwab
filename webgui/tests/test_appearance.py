@@ -52,14 +52,38 @@ def test_css_text_error_refuses_what_would_break_the_stylesheet():
     assert "stylesheet" in appearance.css_text_error("red; color: blue")
 
 
+_FONT_URL = ("https://fonts.googleapis.com/css2"
+             "?family=IBM+Plex+Sans:wght@400;500;700&display=swap")
+
+
+def test_url_text_error_refuses_what_would_break_the_link_tag():
+    """``font_url`` goes into ``href="{url}"``, so a quote ends the attribute and
+    the rest of the tag is the author's. A real Google Fonts URL carries ``;``
+    and ``@``, which the STYLESHEET set bans - hence a set of its own."""
+    for ok in ("", _FONT_URL, "https://x/y?a=1"):
+        assert appearance.url_text_error(ok) is None, ok
+    for bad in ('https://x/f.css" onload="evil()',
+                "https://x/f.css' x='y", "https://x/<script>", "https://x/a>b",
+                "https://x/a b.css", "https://x/a\tb.css"):
+        assert appearance.url_text_error(bad) is not None, bad
+    assert "link" in appearance.url_text_error('https://x/f.css" x="y')
+    assert appearance.url_text_error("https://x/a b.css").startswith("Remove ")
+
+
 def test_field_error_gives_each_key_its_own_check():
     assert appearance.field_error("typography", "body", "0") is not None
     assert appearance.field_error("typography", "family", "a;b") is not None
     assert appearance.field_error("menu", "accent", "a;b") is not None
+    assert appearance.field_error("typography", "font_url", 'a"b') is not None
     # a size check must not run on a name, nor a CSS check on a size
     assert appearance.field_error("typography", "family", "Inter") is None
+    assert appearance.field_error("typography", "font_url", _FONT_URL) is None
     assert appearance.field_error("typography", "font_url", "https://x/y?a=1") is None
     assert appearance.field_error("palette", "card_bg", "#123456") is None
+    # the two text guards are NOT interchangeable: the font URL's own ; and @
+    # are exactly what the stylesheet set refuses
+    assert appearance.css_text_error(_FONT_URL) is not None
+    assert appearance.url_text_error("red;}") is None
 
 
 def test_is_hex_color():
@@ -69,12 +93,15 @@ def test_is_hex_color():
         assert not appearance.is_hex_color(bad), bad
 
 
-def test_only_the_groups_the_preview_cannot_show_carry_a_note():
+def test_every_group_the_preview_cannot_fully_show_carries_a_note():
+    """Charts and Menu are not in the preview at all; Type is only PARTLY there
+    (the title and caption sizes), which is the easier one to be misled by."""
     labels = {label for label, _kind, _keys in appearance.GROUPS}
-    assert set(appearance.GROUP_NOTES) == {"Charts", "Menu"}
+    assert set(appearance.GROUP_NOTES) == {"Charts", "Menu", "Type"}
     assert set(appearance.GROUP_NOTES) <= labels, "a note names no group"
     for note in appearance.GROUP_NOTES.values():
         assert "restart" in note
+    assert len(set(appearance.GROUP_NOTES.values())) == 3, "a note was copied"
 
 
 def test_edited_theme_overlays_without_mutating_the_base():
@@ -173,12 +200,13 @@ def _toasts(monkeypatch):
     return seen
 
 
-def test_only_the_groups_the_preview_cannot_show_draw_a_note(monkeypatch):
+def test_each_group_note_is_drawn_on_its_own_card(monkeypatch):
     host = _render(monkeypatch)
     texts = _texts(host)
     for label, note in appearance.GROUP_NOTES.items():
         assert note in texts, f"{label} lost its note"
-    assert sum(1 for t in texts if t in set(appearance.GROUP_NOTES.values())) == 2
+    notes = set(appearance.GROUP_NOTES.values())
+    assert sum(1 for t in texts if t in notes) == len(notes)
 
 
 def _preview_root(host):

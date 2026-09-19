@@ -43,13 +43,17 @@ GROUPS = [
 ]
 EDITABLE_SECTIONS = ("palette", "semantic", "charts", "typography", "menu")
 
-# A note under a group whose change the preview CANNOT show. Data rather than a
-# label test inside render(): the note belongs to the group, and a group that
-# grows a preview drops its entry here. Charts colours are Highcharts option
-# dicts and the menu is the shell around this page, so neither is on screen.
+# A note under a group whose change the preview cannot show - or cannot show in
+# FULL, which is the easier one to be misled by. Data rather than a label test
+# inside render(): the note belongs to the group, and a group that grows a
+# preview drops its entry here. Charts colours are Highcharts option dicts and
+# the menu is the shell around this page, so neither is on screen at all; the
+# preview draws only two of the eight Type knobs.
 GROUP_NOTES = {
     "Charts": "Chart colours are not in the preview — they show after a web GUI restart.",
     "Menu": "The menu is not in the preview — it shows after a web GUI restart.",
+    "Type": "Only the title and caption sizes show here; the rest of this group "
+            "applies after a web GUI restart.",
 }
 # What a restart costs, on its own so the dialog and the warning that names the
 # unsaved edits cannot drift apart.
@@ -65,6 +69,12 @@ MIN_SIZE, MAX_SIZE = 8, 48
 _CSS_TEXT_KEYS = (("typography", "family"),) + tuple(("menu", k) for k in (
     "accent", "header_bg", "drawer_bg", "text", "hover_bg", "title"))
 _CSS_BANNED = ("{", "}", ";", "<", "@import")
+# font_url lands in an ATTRIBUTE instead - build_font_head_html's
+# ``href="{url}"`` - where a quote ends it and the rest of the tag becomes the
+# author's. It needs a set of its OWN rather than the stylesheet one: a real
+# Google Fonts URL carries ``;`` and ``@`` (``wght@400;500;700``), both of which
+# that set refuses, and neither can hurt inside an attribute value.
+_URL_BANNED = ('"', "'", "<", ">")
 _HEX_RE = re.compile(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")
 
 
@@ -85,15 +95,28 @@ def size_error(value):
     return None
 
 
+def _text_error(value, banned, where, spaces=False):
+    """One message shape for every free-text guard: what to remove, and what it
+    is about to be pasted into. PURE."""
+    v = str(value or "")
+    bad = [c for c in banned if c in v.lower()]
+    if spaces and any(c.isspace() for c in v):
+        bad.append("spaces")
+    if bad:
+        return f"Remove {' '.join(bad)} — this text goes straight into {where}"
+    return None
+
+
 def css_text_error(value):
     """The message for a free-text value that would break app-wide CSS. PURE.
 
     Empty is fine - every one of these knobs defaults to "" = the stock look."""
-    v = str(value or "")
-    bad = [c for c in _CSS_BANNED if c in v.lower()]
-    if bad:
-        return f"Remove {' '.join(bad)} — this text goes straight into the app's stylesheet"
-    return None
+    return _text_error(value, _CSS_BANNED, "the app's stylesheet")
+
+
+def url_text_error(value):
+    """The message for a font URL that would break out of its link tag. PURE."""
+    return _text_error(value, _URL_BANNED, "the page's font link tag", spaces=True)
 
 
 def field_error(section, key, value):
@@ -101,6 +124,8 @@ def field_error(section, key, value):
     that says which check a key gets, so the editor and its tests agree."""
     if section == "typography" and key in _SIZE_KEYS:
         return size_error(value)
+    if (section, key) == ("typography", "font_url"):
+        return url_text_error(value)
     if (section, key) in _CSS_TEXT_KEYS:
         return css_text_error(value)
     return None
