@@ -60,3 +60,54 @@ def test_toast_args_one_position_and_a_type_always():
 def test_an_unknown_toast_kind_is_an_error():
     with pytest.raises(ValueError):
         kit.toast_args("loud", "x")
+
+
+# -- buttons -------------------------------------------------------------------
+def test_button_kinds_map_to_the_theme_tokens():
+    assert kit.button_classes("primary") == theme.BTN_PRIMARY
+    assert kit.button_classes("secondary") == theme.BTN
+    assert kit.button_classes("danger") == theme.BTN_DANGER
+    assert kit.button_classes("quiet") == theme.BTN_QUIET
+    assert kit.button_classes("danger_solid") == theme.BTN_DANGER_SOLID
+
+
+def test_an_unknown_button_kind_is_an_error_not_a_default():
+    with pytest.raises(ValueError):
+        kit.button_classes("blue")
+
+
+def test_preview_tokens_override_the_live_ones():
+    toks = dict(theme._TOKENS, BTN_PRIMARY="bg-[#123456]")
+    assert kit.button_classes("primary", toks) == "bg-[#123456]"
+
+
+def test_button_is_sentence_case_and_not_quasar_blue():
+    with ui.card():
+        b = kit.button("Run scan", kind="primary", icon="play_arrow")
+    assert b._props.get("no-caps") is True
+    assert "bg-primary" not in b.classes
+    assert set(theme.BTN_PRIMARY.split()) <= set(b.classes)
+
+
+def test_an_icon_button_must_say_what_it_does():
+    with pytest.raises(TypeError):
+        kit.icon_button("delete")          # tooltip is required
+
+
+def test_set_busy_spins_and_disables_then_releases():
+    with ui.card():
+        b = kit.button("Load", kind="primary")
+    kit.set_busy(b)
+    assert b._props.get("loading") is True and not b.enabled
+    kit.set_busy(b, False)
+    assert not b._props.get("loading") and b.enabled
+
+
+def test_the_backstop_releases_a_button_whose_answer_never_came():
+    with ui.card():
+        b = kit.button("Load")
+    kit.set_busy(b, timeout=0)
+    assert b._kit_busy["timer"].active is True
+    b._kit_busy["tick"]()
+    assert b.enabled and not b._props.get("loading")
+    assert b._kit_busy["timer"].active is False

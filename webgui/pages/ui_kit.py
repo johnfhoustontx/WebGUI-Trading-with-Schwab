@@ -101,3 +101,76 @@ def toast(kind, text):
     """Report the OUTCOME of an action. Validation is shown inline, waiting is
     shown by a spinner - neither is a toast."""
     ui.notify(**toast_args(kind, text))
+
+
+# ── buttons ──────────────────────────────────────────────────────────────────
+# Four kinds for pages: primary (one per area), secondary (everything else),
+# danger (outline), quiet (text only). danger_solid is the confirm dialog's own.
+BUTTON_KINDS = ("primary", "secondary", "danger", "quiet", "danger_solid")
+_KIND_TOKEN = {"primary": "BTN_PRIMARY", "secondary": "BTN", "danger": "BTN_DANGER",
+               "quiet": "BTN_QUIET", "danger_solid": "BTN_DANGER_SOLID"}
+BUSY_TIMEOUT_SEC = _busy.BUSY_TIMEOUT_SEC
+
+
+def button_classes(kind, tokens=None):
+    """The class string for a button kind. PURE. ``tokens`` lets the Appearance
+    preview draw with unsaved colours; pages never pass it."""
+    if kind not in _KIND_TOKEN:
+        raise ValueError(f"unknown button kind {kind!r}; use one of {BUTTON_KINDS}")
+    return (tokens or _t._TOKENS)[_KIND_TOKEN[kind]]
+
+
+def button(text, *, kind="secondary", icon=None, on_click=None, tooltip=None,
+           tokens=None):
+    """A labelled button: sentence case, verb first, one of the four kinds."""
+    b = ui.button(text, icon=icon, color=None, on_click=on_click) \
+        .props("no-caps unelevated").classes(button_classes(kind, tokens))
+    if tooltip:
+        with b:
+            ui.tooltip(tooltip).props("delay=350 max-width=340px")
+    return b
+
+
+def icon_button(icon, *, tooltip, on_click=None):
+    """An icon-only button (per row, per panel). The tooltip is REQUIRED: an
+    icon alone does not say what it does."""
+    b = ui.button(icon=icon, color=None, on_click=on_click) \
+        .props("flat round dense size=sm").classes(_t.MUTED)
+    with b:
+        ui.tooltip(tooltip).props("delay=350")
+    return b
+
+
+def _busy_state(btn):
+    """One backstop timer per button, created on first use and reused, so a
+    long session does not accumulate timers (the busy.py reasoning)."""
+    st = getattr(btn, "_kit_busy", None)
+    if st is None:
+        st = {"deadline": None}
+
+        def _tick():
+            if st["deadline"] is not None and time.monotonic() >= st["deadline"]:
+                set_busy(btn, False)
+
+        st["tick"] = _tick
+        with btn.parent_slot:
+            st["timer"] = ui.timer(1.0, guard(_tick), active=False)
+        btn._kit_busy = st
+    return st
+
+
+def set_busy(btn, busy=True, *, timeout=BUSY_TIMEOUT_SEC):
+    """Show a button's own spinner and hold it disabled until the result lands
+    (``set_busy(btn, False)``) or ``timeout`` passes - no double submits, and no
+    button left spinning when the answer never comes."""
+    st = _busy_state(btn)
+    if busy:
+        btn.props(add="loading")
+        btn.disable()
+        st["deadline"] = time.monotonic() + timeout
+        st["timer"].active = True
+    else:
+        btn.props(remove="loading")
+        btn.enable()
+        st["deadline"] = None
+        st["timer"].active = False
