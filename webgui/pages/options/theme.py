@@ -308,12 +308,19 @@ def load_theme(path=None):
                         merged[sec][k] = v.strip()
         # [buttons_3d] retired 2026-09-19. A file that still carries its one live
         # key and no [palette].danger keeps that colour rather than silently
-        # falling back to the default red.
-        legacy = (data.get("buttons_3d") or {}).get("red_mid")
-        own = (data.get("palette") or {}).get("danger")
-        if (isinstance(legacy, str) and legacy.strip()
-                and not (isinstance(own, str) and own.strip())):
-            merged["palette"]["danger"] = legacy.strip()
+        # falling back to the default red. Decided per LAYER, the operator's
+        # override first: the tracked file ships a danger, so the merged view
+        # always has one and would hide a red_mid an older override still holds.
+        def _set(v):
+            return isinstance(v, str) and v.strip()
+        for layer in (config_toml.read_overrides(path), data):
+            own = (layer.get("palette") or {}).get("danger")
+            legacy = (layer.get("buttons_3d") or {}).get("red_mid")
+            if _set(own):
+                break                       # this layer names its danger itself
+            if _set(legacy):
+                merged["palette"]["danger"] = legacy.strip()
+                break
     except Exception:  # noqa: BLE001 — styling must never break app startup.
         pass
     return merged
@@ -493,9 +500,10 @@ def build_surface_css(theme):
     Raw CSS for what no page's ``.classes()`` reaches: the ``<body>`` ground
     (Quasar's flat #121212 until 2026-09-19 - what a page with no wrapper sat
     on), the default ``q-card`` frame, and the selected-row accent that
-    ``ui_kit.table`` stamps. Every rule yields to a page's own look: the card
-    rules skip an element carrying its own ``border`` / ``rounded`` class, and
-    a page that paints its own ground simply covers the body's."""
+    ``ui_kit.table`` stamps. Every rule yields to a page's own look: each card
+    rule skips an element carrying its own ``border`` / ``rounded`` /
+    ``shadow``-or-``ring`` class, and a page that paints its own ground simply
+    covers the body's."""
     p = theme["palette"]
     r, g, b = hex_rgb(p["focus"], (107, 134, 255))
     return (
@@ -503,8 +511,10 @@ def build_surface_css(theme):
         f"{p['page_bg1']} 0%,{p['page_bg2']} 55%,{p['page_bg3']} 100%) fixed;"
         f"color:{p['text']};}}\n"
         f'.ns-app .q-card--dark:not([class*="border"]){{border:1px solid '
-        f"{p['card_border']};box-shadow:none;}}\n"
+        f"{p['card_border']};}}\n"
         f'.ns-app .q-card--dark:not([class*="rounded"]){{border-radius:12px;}}\n'
+        f'.ns-app .q-card--dark:not([class*="shadow"]):not([class*="ring"])'
+        f"{{box-shadow:none;}}\n"
         f".ns-app .kit-row-selected > td{{background:rgba({r},{g},{b},.08);}}\n"
         f".ns-app .kit-row-selected > td:first-child{{box-shadow:inset 3px 0 0 "
         f"{p['focus']};}}\n"
@@ -556,6 +566,11 @@ def save_theme_values(updates, path=None):
                 current.setdefault(sec, {})[key] = val
         if sec in current and not current[sec]:
             current.pop(sec)
+    # An explicit danger supersedes the retired [buttons_3d].red_mid. Drop the dead
+    # section, or choosing the shipped red (which removes the danger override)
+    # would let that stale colour take over again.
+    if "danger" in ((updates or {}).get("palette") or {}):
+        current.pop("buttons_3d", None)
     config_toml.write_overrides(path, current)
     return load_theme(path)
 

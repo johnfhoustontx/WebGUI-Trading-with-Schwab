@@ -399,3 +399,59 @@ def test_quasar_colors_follow_the_palette_and_keep_the_accent():
 def test_the_live_surface_constants_are_built_from_the_theme():
     assert theme.SURFACE_CSS == theme.build_surface_css(theme.THEME)
     assert theme.QUASAR_COLORS == theme.build_quasar_colors(theme.THEME)
+
+
+def test_each_default_card_rule_yields_to_its_own_page_class():
+    """A page's own border / rounded / shadow-or-ring class keeps what it set:
+    each default is a separate rule behind its own guard."""
+    css = theme.build_surface_css(theme.load_theme("Z:/nope.toml"))
+    assert '.ns-app .q-card--dark:not([class*="border"]){border:1px solid #213152;}' in css
+    assert '.ns-app .q-card--dark:not([class*="rounded"]){border-radius:12px;}' in css
+    assert ('.ns-app .q-card--dark:not([class*="shadow"]):not([class*="ring"])'
+            '{box-shadow:none;}') in css
+    assert css.count("box-shadow:none") == 1     # only the shadow/ring rule clears it
+
+
+# -- the retired red_mid in the OPERATOR'S override (config/local/theme.toml) --
+# The tracked file ships [palette].danger, so the merged view always carries one;
+# the fallback has to be decided on the override layer, or it never fires.
+
+
+def _danger_layers(tmp_path, monkeypatch, override):
+    monkeypatch.setenv("TRADING_CONFIG_OVERRIDES_IN_TESTS", "1")
+    p = tmp_path / "theme.toml"
+    p.write_text('[palette]\ndanger = "#e5595b"\n', encoding="utf-8")
+    (tmp_path / "local").mkdir()
+    (tmp_path / "local" / "theme.toml").write_text(override, encoding="utf-8")
+    return p
+
+
+def test_a_legacy_red_mid_in_the_override_beats_the_tracked_danger(tmp_path,
+                                                                   monkeypatch):
+    p = _danger_layers(tmp_path, monkeypatch, '[buttons_3d]\nred_mid = "#654321"\n')
+    assert theme.load_theme(p)["palette"]["danger"] == "#654321"
+
+
+def test_the_overrides_own_danger_beats_its_legacy_red_mid(tmp_path, monkeypatch):
+    p = _danger_layers(tmp_path, monkeypatch,
+                       '[palette]\ndanger = "#111111"\n[buttons_3d]\nred_mid = "#654321"\n')
+    assert theme.load_theme(p)["palette"]["danger"] == "#111111"
+
+
+def test_saving_a_danger_drops_the_retired_section_from_the_override(tmp_path,
+                                                                     monkeypatch):
+    p = _danger_layers(tmp_path, monkeypatch, '[buttons_3d]\nred_mid = "#654321"\n')
+    t = theme.save_theme_values({"palette": {"danger": "#abcdef"}}, path=p)
+    over = (tmp_path / "local" / "theme.toml").read_text(encoding="utf-8")
+    assert "buttons_3d" not in over and "#abcdef" in over
+    assert t["palette"]["danger"] == "#abcdef"
+
+
+def test_choosing_the_shipped_danger_does_not_revive_the_retired_key(tmp_path,
+                                                                    monkeypatch):
+    """Saving the shipped red drops the danger override - the old red_mid must
+    go with it, or that stale colour would take over again."""
+    p = _danger_layers(tmp_path, monkeypatch, '[buttons_3d]\nred_mid = "#654321"\n')
+    t = theme.save_theme_values({"palette": {"danger": "#e5595b"}}, path=p)
+    assert not (tmp_path / "local" / "theme.toml").exists()
+    assert t["palette"]["danger"] == "#e5595b"
