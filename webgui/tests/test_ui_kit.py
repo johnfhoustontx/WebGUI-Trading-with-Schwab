@@ -205,3 +205,55 @@ def test_gate_holds_go_while_a_field_is_wrong():
     n.value = 3
     sync()
     assert go.enabled
+
+
+# -- region, empty state, table ---------------------------------------------------
+def test_the_region_spinner_survives_a_repaint():
+    """Five pages mounted their spinner on the container their repaint clears,
+    so it was deleted on the first paint."""
+    with ui.card():
+        r = kit.region("Loading…")
+    with r.content:
+        ui.label("old rows")
+    r.content.clear()
+    assert r.busy.element in r.outer.default_slot.children
+    r.busy.show()
+    assert r.busy.element.visible
+
+
+def test_empty_state_is_one_muted_line():
+    with ui.card():
+        e = kit.empty("Nothing traded yet today")
+    assert e.text == "Nothing traded yet today" and theme.MUTED in e.classes
+
+
+def test_table_columns_sortable_and_numbers_right():
+    cols = [{"name": "symbol", "label": "Symbol", "field": "symbol"},
+            {"name": "pnl", "label": "P&L", "field": "pnl"},
+            {"name": "actions", "label": "", "field": "actions"}]
+    out = kit.table_columns(cols, numeric=("pnl",))
+    assert out[0]["sortable"] is True and out[0]["align"] == "left"
+    assert out[1]["align"] == "right"
+    assert out[2]["sortable"] is False
+    assert "sortable" not in cols[0]                  # the input is not mutated
+
+
+def test_an_explicit_unsortable_column_stays_unsortable():
+    out = kit.table_columns([{"name": "checks", "field": "checks", "sortable": False}])
+    assert out[0]["sortable"] is False
+
+
+def test_mark_selected_stamps_exactly_one_row():
+    rows = [{"id": 1}, {"id": 2}, {"id": 3}]
+    kit.mark_selected(rows, 2)
+    assert [r["_selected"] for r in rows] == [False, True, False]
+    kit.mark_selected(rows, None)
+    assert not any(r["_selected"] for r in rows)
+
+
+def test_table_is_dense_flat_and_draws_the_selected_row():
+    with ui.card():
+        t = kit.table([{"name": "symbol", "label": "Symbol", "field": "symbol"}], [])
+    assert t._props.get("dense") is True and t._props.get("flat") is True
+    assert "kit-row-selected" in t._props[":table-row-class-fn"]
+    assert "row._row_class" in t._props[":table-row-class-fn"]     # a page's own class survives

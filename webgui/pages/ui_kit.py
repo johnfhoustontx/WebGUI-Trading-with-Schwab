@@ -337,3 +337,69 @@ def gate(go, *fields):
         f.on("blur", sync)
     sync()
     return sync
+
+
+# ── region, empty state, table ──────────────────────────────────────────────
+def region(text="Loading…", *, classes="w-full"):
+    """A block whose contents a repaint replaces. Repaint ``content`` (clear and
+    rebuild it); the spinner lives on ``outer``, so a clear can never delete it
+    - the bug five pages had. ``busy.show()`` on first load and every refresh."""
+    outer = ui.element("div").classes(classes)
+    with outer:
+        content = ui.column().classes("w-full gap-3")
+    spin = _busy.build_busy(outer, text)
+    return SimpleNamespace(outer=outer, content=content, busy=spin)
+
+
+EMPTY = f"w-full text-center text-[13px] {_t.MUTED} py-6"
+
+
+def empty(text):
+    """The one empty-state line. "Nothing published yet" (copy.WAITING_*) and
+    "nothing to report" stay worded differently - the caller picks the words."""
+    return ui.label(text).classes(EMPTY)
+
+
+TABLE_PROPS = "dense flat"
+# Composes a page's own ``_row_class`` (e.g. the scanner's stale dimming) with
+# the selected-row accent, so neither has to give way.
+ROW_CLASS_FN = ("row => [row._row_class, row._selected ? 'kit-row-selected' : '']"
+                ".filter(Boolean).join(' ')")
+
+
+def table_columns(columns, *, numeric=()):
+    """Column defaults. PURE - returns new dicts. Every data column sortable
+    (``actions`` never; an explicit ``sortable: False`` stays); ``numeric``
+    columns right-aligned, the rest left."""
+    out = []
+    for col in columns:
+        c = dict(col)
+        if c.get("name") == "actions":
+            c["sortable"] = False
+        else:
+            c.setdefault("sortable", True)
+        c["align"] = "right" if c.get("name") in numeric else c.get("align", "left")
+        out.append(c)
+    return out
+
+
+def mark_selected(rows, row_id, *, key="id"):
+    """Stamp ``_selected`` so exactly the clicked row carries the accent."""
+    for r in rows:
+        r["_selected"] = row_id is not None and r.get(key) == row_id
+    return rows
+
+
+def table(columns, rows=None, *, row_key="id", numeric=(), rows_per_page=0,
+          classes="w-full"):
+    """The one table: dense, flat, sticky header (the app-wide ``TABLE_CSS``),
+    numbers right-aligned, sortable columns, and the selected row drawn from
+    ``_selected`` (``mark_selected``). ``rows_per_page=0`` shows every row."""
+    t = ui.table(columns=table_columns(columns, numeric=numeric),
+                 rows=list(rows or []), row_key=row_key,
+                 pagination={"rowsPerPage": rows_per_page}) \
+        .classes(classes).props(TABLE_PROPS)
+    # Written to _props directly: a props STRING would be re-parsed and mangle
+    # the quotes inside the arrow function (the scanner.py precedent).
+    t._props[":table-row-class-fn"] = ROW_CLASS_FN
+    return t
