@@ -1761,11 +1761,11 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
     navigates in place and claims the active wash when it is the current page."""
     base = ("w-full no-underline items-center rounded-[10px] px-3 py-1 "
             "transition-colors hover:bg-white/[0.06]")
-    # nav-active is a plain CSS rule in _NAV_CSS (a soft rgba navy wash) — NOT a
-    # Tailwind arbitrary class: the bundled Tailwind JIT emits neither var(...)
-    # nor rgba(...) arbitraries reliably (plain-hex ones are fine), so the old
-    # bg-[var(--q-primary)] silently produced no rule at all. The pill is now
-    # decoupled from --q-primary on purpose — see the rule's comment in _NAV_CSS.
+    # nav-active is a plain CSS rule, not a Tailwind class: the STOCK wash lives
+    # in _NAV_CSS, and [menu].accent re-emits it in the accent colour via
+    # theme.build_nav_css (injected after _NAV_CSS) — see the rule's comment
+    # there. (The old bg-[var(--q-primary)] class produced no rule at all: the
+    # bundled JIT does not emit var(...) arbitraries.)
     state = " nav-active" if path == active else ""
     n = _NAV_BADGES.get(path, 0)
     with ui.link(target=path).classes(base + state):

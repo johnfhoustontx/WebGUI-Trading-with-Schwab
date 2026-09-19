@@ -448,6 +448,10 @@ def build_quasar_css(theme, scope=".calc-v2"):
 {scope} .q-field--focused .q-field__control{{
   border-color:{p['focus']};box-shadow:0 0 0 2px rgba({focus_rgb[0]},{focus_rgb[1]},{focus_rgb[2]},.28);
 }}
+/* Quasar's `borderless` is the opt-out: a field drawn inside a frame of its own
+   (the Trade Signal Desk's symbol pill) gets no second box. AFTER the focused
+   rule, at the same specificity, so a focused borderless field stays clear. */
+{scope} .q-field--borderless .q-field__control{{background:transparent;border:0;padding:0;box-shadow:none;}}
 {scope} .q-field__label{{color:{p['muted']};}}
 {scope} .q-field__native,{scope} .q-field__native input,
 {scope} .q-field__native textarea,{scope} .q-field__native span{{color:{p['input_text']}!important;}}
@@ -1074,16 +1078,21 @@ def build_nav_css(theme):
         rules.append(f".nav-drawer a:hover{{background:{m['hover_bg']}!important;}}")
     if m["title"]:
         rules.append(f".nav-drawer .nav-title{{color:{m['title']}!important;}}")
-    if m.get("accent"):
+    a = str(m.get("accent") or "").strip()
+    if a:
         # The ONE accent reaches the active pill, the tab-strip fill and the
-        # active icon too (injected after main._NAV_CSS, whose stock rgba it
-        # overrides). Raw CSS may carry any value; the JIT limit that once kept
-        # these hard-coded applies to Tailwind classes only.
-        r, g, b = hex_rgb(m["accent"], (107, 134, 255))
+        # active icon too. Raw CSS may carry any value; the JIT limit that once
+        # kept these hard-coded applies to Tailwind classes only. The browser
+        # mixes the wash (color-mix), so ANY CSS colour works - #f80, a name,
+        # rgba(...) - where parsing a 6-digit hex here fell back to the stock
+        # blue for the pill and tab while the icon followed the value.
+        # No !important on the two washes: their _NAV_CSS rivals are normal
+        # declarations injected EARLIER, so these win on order. The icon needs
+        # it to beat the [menu].text rule's !important above.
         rules += [
-            f".nav-drawer .nav-active{{background:rgba({r},{g},{b},0.13)!important;}}",
-            f".nav-drawer .nav-active .nav-icon{{color:{m['accent']}!important;}}",
-            f".compact-tabs .q-tab--active{{background:rgba({r},{g},{b},0.16)!important;}}",
+            f".nav-drawer .nav-active{{background:color-mix(in srgb,{a} 13%,transparent);}}",
+            f".nav-drawer .nav-active .nav-icon{{color:{a}!important;}}",
+            f".compact-tabs .q-tab--active{{background:color-mix(in srgb,{a} 16%,transparent);}}",
         ]
     return "\n".join(rules)
 
@@ -1248,7 +1257,7 @@ def build_calc_css(theme):
   padding:0 7px;min-height:30px;
 }}
 .calc-v3 .q-field__control:before,.calc-v3 .q-field__control:after{{border:0!important;}}
-.calc-v3 .q-field--focused .q-field__control{{border-color:{c['accent']};}}
+.calc-v3 .q-field--focused .q-field__control{{border-color:{c['accent']};box-shadow:none;}}
 .calc-v3 .q-field__label{{color:{c['label']};font-size:8px;letter-spacing:.14em;}}
 .calc-v3 .q-field__native,.calc-v3 .q-field__native input,
 .calc-v3 .q-field__native span{{color:{c['soft']}!important;font-size:12px;}}
@@ -1368,7 +1377,6 @@ QUASAR_COLORS = build_quasar_colors(THEME)   # ui.colors(**QUASAR_COLORS) in bot
 TYPOGRAPHY_CSS = build_typography_css(THEME)   # injected app-wide by main._layout
 FONT_HEAD_HTML = build_font_head_html(THEME)   # "" when no [typography].font_url
 NAV_THEME_CSS = build_nav_css(THEME)           # "" when [menu] is all-default
-MENU_ACCENT = THEME["menu"]["accent"]          # "" = keep the stock Quasar primary
 
 # ── Brand identity (header lockup) ──────────────────────────────────────────
 BRAND_NAME_A = THEME["brand"]["name_a"]        # "Neural" — the gold half

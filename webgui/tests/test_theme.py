@@ -245,9 +245,10 @@ def test_menu_css_reflects_overrides(tmp_path):
     assert "#9fb4d8" in flat and "#1a2745" in flat and "#ffcc00" in flat
 
 
-def test_menu_accent_is_a_plain_value_not_css():
-    # accent recolors Quasar primary (header bar + active pill) via ui.colors in
-    # _layout — it is NOT part of the nav CSS block.
+def test_menu_accent_defaults_empty():
+    # Empty by default = the stock look: no Quasar primary override and no
+    # accent rules from build_nav_css. When set, the accent feeds ui.colors
+    # (via build_quasar_colors) AND build_nav_css's pill / tab fill / icon.
     t = theme.load_theme("Z:/nope.toml")
     assert t["menu"]["accent"] == ""
 
@@ -458,14 +459,60 @@ def test_choosing_the_shipped_danger_does_not_revive_the_retired_key(tmp_path,
     assert t["palette"]["danger"] == "#e5595b"
 
 
-def test_menu_accent_reaches_the_nav_pill_tabs_and_icon():
+def _accent_rules(accent):
+    """The three rules build_nav_css must emit for ``accent``, exactly."""
+    return (
+        f".nav-drawer .nav-active{{background:color-mix(in srgb,{accent} 13%,transparent);}}",
+        f".nav-drawer .nav-active .nav-icon{{color:{accent}!important;}}",
+        f".compact-tabs .q-tab--active{{background:color-mix(in srgb,{accent} 16%,transparent);}}",
+    )
+
+
+def _nav_css_for(accent):
     t = theme.load_theme("Z:/nope.toml")
-    t["menu"]["accent"] = "#ff8800"
-    css = theme.build_nav_css(t)
-    assert ".nav-drawer .nav-active{background:rgba(255,136,0,0.13)!important;}" in css
+    t["menu"]["accent"] = accent
+    return theme.build_nav_css(t)
+
+
+def test_menu_accent_reaches_the_nav_pill_tabs_and_icon():
+    css = _nav_css_for("#ff8800")
+    assert ".nav-drawer .nav-active{background:color-mix(in srgb,#ff8800 13%,transparent);}" in css
     assert ".nav-drawer .nav-active .nav-icon{color:#ff8800!important;}" in css
-    assert ".compact-tabs .q-tab--active{background:rgba(255,136,0,0.16)!important;}" in css
+    assert ".compact-tabs .q-tab--active{background:color-mix(in srgb,#ff8800 16%,transparent);}" in css
+
+
+def test_any_css_colour_accent_reaches_all_three_rules():
+    """The Appearance Menu field is free text, and its sibling hover_bg ships as
+    rgba(...). A parsed hex would fall back to the stock blue for these, so the
+    pill and tab fill stayed blue while the icon followed the value."""
+    for accent in ("#f80", "rgba(255,136,0,0.9)"):
+        css = _nav_css_for(accent)
+        for rule in _accent_rules(accent):
+            assert rule in css, (accent, rule)
+        assert "107,134,255" not in css, f"{accent}: a rule fell back to the stock blue"
+
+
+def test_a_padded_accent_is_stripped():
+    css = _nav_css_for(" #ff8800 ")
+    for rule in _accent_rules("#ff8800"):
+        assert rule in css, rule
+    assert " #ff8800 " not in css
 
 
 def test_an_empty_accent_leaves_the_stock_nav_alone():
     assert ".nav-active" not in theme.build_nav_css(theme.load_theme("Z:/nope.toml"))
+
+
+def test_a_borderless_field_opts_out_of_the_box():
+    """A ``borderless`` q-input inside a hand-drawn frame (the Trade Signal
+    Desk's symbol pill) must not get a second fill, border, padding or focus
+    glow. Placed AFTER the focused rule: same specificity, so order decides and
+    a focused borderless field stays clear too."""
+    rule = ("{s} .q-field--borderless .q-field__control"
+            "{{background:transparent;border:0;padding:0;box-shadow:none;}}")
+    t = theme.load_theme("Z:/nope.toml")
+    for scope, css in ((".ns-app", theme.build_quasar_css(t, scope=".ns-app")),
+                       (".calc-v2", theme.QUASAR_INTERNAL_CSS)):
+        want = rule.format(s=scope)
+        assert want in css, scope
+        assert css.index(want) > css.index(f"{scope} .q-field--focused .q-field__control{{"), scope

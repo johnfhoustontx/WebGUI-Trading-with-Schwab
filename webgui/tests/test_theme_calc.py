@@ -115,6 +115,16 @@ def test_build_calc_css_is_scoped_to_calc_v3_and_never_to_calc_v2():
     assert ".strat-menu-calc" in css
 
 
+def test_calc_focus_clears_the_app_focus_glow():
+    """The Calculator sits under ``.ns-app`` too, whose focused-field rule adds
+    a box-shadow glow at the same specificity. The calc focus rule must clear it,
+    or every focused Calculator field wears the app's blue ring."""
+    css = T.build_calc_css(T._DEFAULTS)
+    m = re.search(r"\.calc-v3 \.q-field--focused \.q-field__control\{([^}]*)\}", css)
+    assert m, "the calc focus rule is missing"
+    assert "box-shadow:none" in m.group(1)
+
+
 def test_calc_css_carries_the_configured_colours():
     css = T.build_calc_css(_theme(input_bg="#001122", icon="#003344",
                                   icon_soft="#005566"))
