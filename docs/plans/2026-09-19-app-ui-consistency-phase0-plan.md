@@ -497,6 +497,9 @@ def test_both_entrypoints_paint_the_app_surface_and_fields():
         injected = _add_css_args(path, func)
         assert "SURFACE_CSS" in injected, f"{path.name} lost the app surface"
         assert "APP_FIELD_CSS" in injected, f"{path.name} lost the app-wide fields"
+        # APP_FIELD_CSS's generic .q-tab rules tie with .compact-subtabs' on
+        # specificity; the subtab row must be injected LATER so it wins.
+        assert injected.index("APP_FIELD_CSS") < injected.index("SUBTAB_CSS"), path.name
         assert "ui.colors(**theme.QUASAR_COLORS)" in path.read_text(encoding="utf-8")
 
 
@@ -520,9 +523,12 @@ In `webgui/tests/test_live_main.py::test_the_public_render_injects_the_page_leve
 
 **Step 3: Implement.**
 
-In `main._layout`, after `ui.add_css(PANEL_SCROLL_CSS)  # a dashboard panel keeps its own overflow` add:
+In `main._layout`, directly after `ui.add_css(TABLE_CSS)` and **before** `ui.add_css(SUBTAB_CSS)` add:
 
 ```python
+    # BEFORE SUBTAB_CSS: APP_FIELD_CSS also carries generic .q-tab rules at the
+    # same specificity as .compact-subtabs', so injection order decides - and
+    # the subtab row's own look must win.
     ui.add_css(theme.SURFACE_CSS)    # page ground + default card frame (both entrypoints)
     ui.add_css(theme.APP_FIELD_CSS)  # boxed fields on every page, under .ns-app
 ```
@@ -538,7 +544,7 @@ Replace the whole `if theme.MENU_ACCENT:` block (its comment and the `ui.colors(
 
 and change the content column to `with ui.column().classes("ns-app w-full p-4 gap-3 pb-10") as content:` (keep its `pb-10` comment).
 
-In `webgui/live_main.py`: set `_CONTENT = "ns-app w-full p-4 gap-3"`; after `ui.add_css(shell.PANEL_SCROLL_CSS)` add the same two `ui.add_css(theme.…)` lines; replace the `if theme.MENU_ACCENT:` block with `ui.colors(**theme.QUASAR_COLORS)` and a one-line comment.
+In `webgui/live_main.py`: set `_CONTENT = "ns-app w-full p-4 gap-3"`; directly after `ui.add_css(shell.TABLE_CSS)` and before `ui.add_css(shell.SUBTAB_CSS)` add the same two `ui.add_css(theme.…)` lines (same ordering reason); replace the `if theme.MENU_ACCENT:` block with `ui.colors(**theme.QUASAR_COLORS)` and a one-line comment.
 
 **Step 4: Run** `cd webgui && $PY -m pytest tests/test_shell_seam.py tests/test_live_main.py tests/test_shell.py -q` — Expected: PASS. If an older test asserts the literal `ui.colors(primary=theme.MENU_ACCENT)`, change it to assert `ui.colors(**theme.QUASAR_COLORS)` — the accent still reaches `primary` through `build_quasar_colors` (Task 4 tests it).
 
@@ -1410,7 +1416,9 @@ def test_a_disabled_confirm_does_nothing():
 
 ```python
 # ── confirm dialog ──────────────────────────────────────────────────────────
-CONFIRM_CARD = f"{_t.CARD} min-w-[360px] max-w-[520px] gap-3"
+# ``ns-app`` on the card itself: a dialog is teleported to <body>, outside the
+# shell's content column, so without it a field in ``content`` would be stock.
+CONFIRM_CARD = f"ns-app {_t.CARD} min-w-[360px] max-w-[520px] gap-3"
 
 
 def confirm(title, body="", *, confirm_text, on_confirm, danger=False):

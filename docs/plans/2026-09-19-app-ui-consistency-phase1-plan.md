@@ -66,7 +66,8 @@ def info_dialog(title, *, width="w-[720px]"):
     """An information dialog: a title, a close ✕ top-right, no footer (the
     standard - a dialog that ASKS is ``confirm``). Put the body in
     ``handle.content``; build it once and repaint the content per use."""
-    with ui.dialog() as dlg, ui.card().classes(f"{_t.CARD} {width} max-w-full gap-3"):
+    # ns-app on the card: a dialog is teleported outside the shell's column.
+    with ui.dialog() as dlg, ui.card().classes(f"ns-app {_t.CARD} {width} max-w-full gap-3"):
         with ui.row().classes("w-full items-center no-wrap gap-2"):
             title_lbl = ui.label(title).classes(f"text-subtitle1 font-semibold {_t.LABEL}")
             ui.space()
@@ -186,6 +187,8 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 **Step 1: Rewrite the three fake-`ui` tests to drive the real dialog.** In `test_paper_dialog_view.py`, delete the `_El` and `_FakeUi` classes and `_open_dialog`, then add:
 
 ```python
+import asyncio
+
 from nicegui import ui
 
 
@@ -211,8 +214,8 @@ def test_a_second_click_sends_nothing(monkeypatch):
     sent = []
     dlg, notes = _open_dialog(monkeypatch, lambda domain, cmd: sent.append((domain, cmd)))
     _qty(dlg).value = 2.0
-    dlg.run()
-    dlg.run()                      # the queued double click
+    asyncio.run(dlg.run())
+    asyncio.run(dlg.run())         # the queued double click
     assert len(sent) == 1
     assert sent[0][1]["args"]["qty"] == 2
     assert dlg.confirm.enabled is False
@@ -228,11 +231,11 @@ def test_a_send_that_cannot_reach_the_bus_can_be_retried(monkeypatch):
         raise ConnectionError("redis down")
 
     dlg, notes = _open_dialog(monkeypatch, down)
-    dlg.run()
+    asyncio.run(dlg.run())
     assert notes == [("Could not reach the options service — the trade was "
                       "not sent.", "error")]
     assert dlg.confirm.enabled is True and dlg.dialog.value is True
-    dlg.run()                      # the retry really runs again
+    asyncio.run(dlg.run())         # the retry really runs again
     assert len(calls) == 2
 
 
@@ -259,7 +262,10 @@ Check `test_send_to_paper_reads_caps_once_and_rechecks_on_confirm`. Its AST chec
 
 ```python
     view = state["view"]
-    dlg = kit.confirm(view["title"], confirm_text="Create", on_confirm=lambda: confirm())
+    # ephemeral: this dialog is built per click, so it removes itself on close
+    # rather than leaving one element behind in the page each time.
+    dlg = kit.confirm(view["title"], confirm_text="Create", ephemeral=True,
+                      on_confirm=lambda: confirm())
     create = dlg.confirm
     with dlg.content:
         risk = ui.label(view["risk_text"]).classes(f"text-sm {MUTED}")
@@ -269,7 +275,7 @@ Check `test_send_to_paper_reads_caps_once_and_rechecks_on_confirm`. Its AST chec
         # min only: the ceiling MOVES with the quantity (paper_dialog_view's
         # qty_max is never below a typed quantity that fits), so it is painted
         # into _props["max"] by paint() below, never frozen into the check.
-        qty = kit.number_field("Quantity", value=1, min=1)
+        qty = kit.number_field("Quantity", value=1, min=1, integer=True)
 
     def confirm():
         if state["sent"]:
@@ -305,9 +311,10 @@ Keep the original comments on the latch, the re-check and the enqueue, beside th
         f"Open {row.get('symbol')} {kind} {row.get('expiration', '')}",
         "This opens into the paper account: collateral is reserved, and an "
         "assignment becomes shares.",
-        confirm_text="Open", on_confirm=lambda: _open())
+        confirm_text="Open", ephemeral=True, on_confirm=lambda: _open())
     with dlg.content:
-        qty = kit.number_field("Contracts", value=default_qty, min=1, max=100)
+        qty = kit.number_field("Contracts", value=default_qty, min=1, max=100,
+                               integer=True)
 
     def _open():
         if not qty.validate():
@@ -1276,7 +1283,8 @@ def test_the_adhoc_symbol_uses_the_one_symbol_field():
                                                     on_click=lambda: _adhoc_load())
                         adhoc_exp_sel = kit.select_field("Expiry", [], width="w-44")
                         adhoc_contracts = kit.number_field("Contracts", value=1,
-                                                           min=1, max=100)
+                                                           min=1, max=100,
+                                                           integer=True)
                     adhoc_status = kit.status_line(
                         "Pick a strategy, load a symbol, then set the legs.")
                     adhoc_leg_box = ui.column().classes("gap-2 w-full")
