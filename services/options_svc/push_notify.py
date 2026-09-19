@@ -419,10 +419,6 @@ _EOD_BOOK_ORDER = ("manual", "driver")
 _D_RED = 0xE74C3C
 
 
-def _money(v) -> str:
-    return f"${v:,.0f}" if isinstance(v, (int, float)) else "—"
-
-
 def _signed_money(v) -> str:
     return f"{'+' if v >= 0 else '-'}${abs(v):,.0f}" if isinstance(v, (int, float)) else "—"
 

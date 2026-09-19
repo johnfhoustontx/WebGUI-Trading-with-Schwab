@@ -18,7 +18,7 @@ uses ``trade_type`` for the DTE bucket (``"0-DTE"`` / ``"SWING"``); the model-fa
 menu projection (``compute.build_packet``) instead emits a normalized
 ``structure`` key. ``is_allowed`` therefore reads ``structure`` → ``type`` →
 ``trade_type`` so the SAME function classifies both the raw scanner signal and the
-projected menu item correctly. ``_max_loss`` is tolerant of ``None``/strings so a
+projected menu item correctly. ``driver_policy.max_loss_per_share`` is tolerant of ``None``/strings so a
 sparse or malformed signal can never raise here — it simply fails the allowlist.
 """
 
@@ -42,10 +42,6 @@ CONTRACT_MULTIPLIER = _policy.CONTRACT_MULTIPLIER
 
 normalize_structure = _policy.normalize_structure
 signal_structure = _policy.signal_structure
-
-# Backward-compatible private aliases (these were module-private helpers).
-_signal_structure = _policy.signal_structure
-_max_loss = _policy.max_loss_per_share
 
 
 _max_loss_dollars = _policy.max_loss_dollars
@@ -131,7 +127,7 @@ def clamp_quantity(signal, requested_qty, per_trade_max_risk, remaining_budget) 
     if not ml or ml <= 0:
         return 0
     try:
-        # ``ml`` is finite (``_max_loss`` guarantees it); guard the budget args so
+        # ``ml`` is finite (``_max_loss_dollars`` guarantees it); guard the budget args so
         # a NaN/inf/non-numeric cap can't crash the floor division either.
         if not (math.isfinite(float(per_trade_max_risk))
                 and math.isfinite(float(remaining_budget))):

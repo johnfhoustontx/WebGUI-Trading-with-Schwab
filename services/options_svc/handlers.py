@@ -134,14 +134,6 @@ def _is_stale_open(command) -> bool:
 #                   passes BOTH, re-applying a partial close or paying a second
 #                   roll's commission.
 #   gamma_analyze - a PAID Claude call.
-#   income_scan   - ~23 /chains fetches. It mutates nothing and bills no vendor,
-#                   so it is here for the THIRD reason: external budget. The
-#                   income window's whole design premise is call-count
-#                   minimisation - one pass a day instead of the autoscan's
-#                   cadence, ~23 calls against ~690 - and a backlog replay runs
-#                   it once per queued Refresh click with nobody watching. The
-#                   scheduled slot republishes the same board anyway, so a
-#                   dropped replay costs a reader nothing.
 #
 # ⚠ This is an age gate, not true idempotency: two genuinely FRESH duplicates
 # still both run. It closes the REPLAY case with machinery the service already
@@ -150,8 +142,7 @@ def _is_stale_open(command) -> bool:
 # chains, earnings) answering a dialog nobody has open.
 # ``dossier``     -> 4-5 Schwab calls per queued lookup, for a page that has long
 #                   since moved on.
-_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "income_scan", "calc_rate",
-                   "dossier")
+_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "calc_rate", "dossier")
 
 
 def _market_state(bus):
@@ -2741,9 +2732,7 @@ def run_income_open(bus, command) -> None:
 
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
-    ``swing_scan`` → on-demand parameterized swing scan; ``income_scan`` → force
-    a 30-45 DTE income pass over the watchlist (replay-guarded — see
-    ``_REPLAY_GUARDED``; normally runs on its own once-daily slot);
+    ``swing_scan`` → on-demand parameterized swing scan;
     ``income_open`` (args row, qty) → open one income candidate (a cash-secured
     put or a covered call) into the manual paper ACCOUNT — note the ACCOUNT, not
     the ledger ``paper_create`` writes;
@@ -2821,17 +2810,6 @@ def handle_command(bus, command) -> None:
         refresh_calibration(bus)
     elif command.type == "swing_scan":
         swing_scan(bus, command.args)
-    elif command.type == "income_scan":
-        # The page's Refresh. Replay-guarded (see _REPLAY_GUARDED): ~23 chain
-        # fetches is the largest per-command Schwab spend on this stream, and a
-        # backlog replay would run one pass per queued click.
-        if _is_stale_side_effect(command):
-            log.warning("REJECTED stale income_scan: age %.0fs > %ds (ts=%s) — "
-                        "a replayed command must not re-spend ~23 chain fetches",
-                        _command_age_seconds(command) or -1,
-                        STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
-            return
-        publish_income(bus)
     elif command.type == "income_open":
         run_income_open(bus, command)
     elif command.type == "refresh_paper":

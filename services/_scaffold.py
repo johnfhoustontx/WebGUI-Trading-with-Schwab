@@ -163,20 +163,6 @@ class _SchedulerHealth:
         return _heartbeat.age_s()
 
 
-async def _run_scheduler(scheduler, bus) -> None:
-    """Run the scheduler coroutine once; log+swallow any exception.
-
-    Retained for back-compat / direct use; supervision lives in
-    ``_supervise_scheduler``.
-    """
-    try:
-        await scheduler(bus)
-    except asyncio.CancelledError:
-        raise
-    except Exception:  # noqa: BLE001 — must never crash the app.
-        log.exception("scheduler task failed")
-
-
 async def _supervise_scheduler(
     scheduler, bus, health: _SchedulerHealth, backoff_s: float, max_restarts: int
 ) -> None:

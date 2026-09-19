@@ -298,50 +298,6 @@ def test_the_symbols_are_fanned_out_concurrently(monkeypatch):
     assert 1 <= calls["workers"] <= 8
 
 
-# ── the command path ─────────────────────────────────────────────────────────
-
-def test_the_income_scan_command_reaches_the_publisher(monkeypatch):
-    ran = []
-    monkeypatch.setattr(handlers, "publish_income", lambda bus: ran.append(bus))
-    bus = Bus(fake=True)
-
-    handlers.handle_command(bus, Command(type="income_scan"))
-
-    assert ran == [bus]
-
-
-def test_a_REPLAYED_income_scan_is_refused(monkeypatch):
-    """Consumer groups are created at id 0, so a fresh group re-delivers the
-    whole backlog — the documented incident where a first launch "burned a day's
-    API budget in one go". This pass is ~23 chain fetches whose entire design
-    premise is call-count minimisation, so it joins the replay-guarded set."""
-    ran = []
-    monkeypatch.setattr(handlers, "publish_income", lambda bus: ran.append(bus))
-    stale = (_dt.datetime.now(_dt.timezone.utc)
-             - _dt.timedelta(seconds=handlers.STALE_OPEN_MAX_AGE_SEC + 60))
-    bus = Bus(fake=True)
-
-    handlers.handle_command(bus, Command(type="income_scan", ts=stale.isoformat()))
-
-    assert ran == [], "a replayed income_scan must not re-spend the Schwab budget"
-
-
-def test_a_fresh_income_scan_command_still_runs(monkeypatch):
-    """The age gate must not swallow the user's own Refresh click."""
-    ran = []
-    monkeypatch.setattr(handlers, "publish_income", lambda bus: ran.append(bus))
-    fresh = _dt.datetime.now(_dt.timezone.utc).isoformat()
-    bus = Bus(fake=True)
-
-    handlers.handle_command(bus, Command(type="income_scan", ts=fresh))
-
-    assert len(ran) == 1
-
-
-@pytest.mark.parametrize("kind", ["income_scan"])
-def test_the_command_is_in_the_replay_guarded_set(kind):
-    assert kind in handlers._REPLAY_GUARDED
-
 # ── the scheduler branch ─────────────────────────────────────────────────────
 
 def test_the_loop_latches_the_income_slot_at_DISPATCH():

@@ -239,9 +239,6 @@ def _short_of(position):
     return position.get("call_short") or position.get("short_strike")
 
 
-_FUTURES_PREFIXES = ("/ES", "/NQ", "/MES", "/MNQ", "/RTY", "/YM")
-
-
 def _instrument_kind(symbol: str) -> str:
     s = (symbol or "").upper()
     if s.startswith("/"):
@@ -927,7 +924,6 @@ def build_futures_hedge(position, mark, price_leg, ctx) -> dict | None:
 # ``current_short_delta``, ``dte``.
 
 _SINGLE_LONG = ("LONG_CALL", "LONG_PUT")
-_SINGLE_NAKED = ("NAKED_CALL", "NAKED_PUT")
 
 
 def _num(x):

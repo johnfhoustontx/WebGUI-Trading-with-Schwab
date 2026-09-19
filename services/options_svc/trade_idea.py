@@ -340,12 +340,6 @@ def expiry_text(expiration):
     return f"{d:%b} {d.day}"
 
 
-def leg_text(lg):
-    """'Buy 1  940 Put  Sep 21'."""
-    side = "Buy" if lg["side"] == "long" else "Sell"
-    return f"{side} {lg['qty']} {strike_text(lg['strike'])} {lg['kind'].title()} {expiry_text(lg['expiration'])}"
-
-
 def caption(idea):
     """One plain-text line for Telegram and Discord beside the image."""
     legs = " / ".join(
