@@ -43,3 +43,13 @@ def test_updates_from_groups_by_section():
     assert appearance.updates_from({("palette", "card_bg"): "#111111",
                                     ("semantic", "positive"): "#222222"}) == {
         "palette": {"card_bg": "#111111"}, "semantic": {"positive": "#222222"}}
+
+
+def test_render_builds_every_group():
+    from nicegui import ui
+    with ui.card() as host:
+        appearance.render()
+    texts = {getattr(e, "text", None) for e in host.descendants()}
+    for label, _kind, _keys in appearance.GROUPS:
+        assert label in texts, f"group {label!r} did not render"
+    assert "Save changes" in texts and "Discard" in texts
