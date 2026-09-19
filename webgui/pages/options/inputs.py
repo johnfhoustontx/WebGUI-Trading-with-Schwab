@@ -33,11 +33,20 @@ def should_load(current, last_loaded):
     return bool(current) and current != last_loaded
 
 
-def bind_symbol_load(inp, load, *, tab=True):
+def bind_symbol_load(inp, load, *, tab=True, enter_always=False):
     """Wire the Symbol field's load triggers: pressing **Enter** (and, when ``tab``,
     **tabbing/clicking out**) fires ``load()`` — the same load/fetch/scan the page's
     button runs — but only when the uppercased symbol CHANGED since it last fired
     (via ``should_load``), so tabbing through an unchanged symbol won't re-fetch.
+
+    ``enter_always=True`` exempts **Enter** from that dedup: pressing Enter is the
+    reader typing the page's Load button, an explicit instruction to load *now*,
+    and the button itself has always bypassed the dedup for exactly that reason
+    (refreshing an unchanged symbol is the main thing it is for). A deliberate
+    re-press otherwise did nothing at all, with no way to tell it from a slow
+    fetch. Tab-out keeps the dedup either way — that one is incidental, not an
+    instruction. An EMPTY field still loads nothing. Off by default, so every
+    existing caller is unchanged.
     Seeds the dedup from the field's INITIAL value, so a default symbol (e.g. ``SPY``)
     does not auto-load the first time focus leaves the field. Returns ``inp``.
 
@@ -58,7 +67,17 @@ def bind_symbol_load(inp, load, *, tab=True):
             last["sym"] = cur
             load()
 
-    inp.on('keydown.enter', _fire)
+    def _fire_enter(*_):
+        if not enter_always:
+            _fire()
+            return
+        cur = (inp.value or "").strip().upper()
+        if not cur:
+            return
+        last["sym"] = cur       # mark it loaded, then load it regardless
+        load()
+
+    inp.on('keydown.enter', _fire_enter)
     if tab:
         inp.on('focusout', _fire)
     inp._symbol_load_last = last        # for mark_symbol_loaded

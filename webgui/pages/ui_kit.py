@@ -163,7 +163,11 @@ def _busy_state(btn):
 def set_busy(btn, busy=True, *, timeout=BUSY_TIMEOUT_SEC):
     """Show a button's own spinner and hold it disabled until the result lands
     (``set_busy(btn, False)``) or ``timeout`` passes - no double submits, and no
-    button left spinning when the answer never comes."""
+    button left spinning when the answer never comes.
+
+    Releasing re-applies the button's ``gate`` if it has one, rather than
+    enabling outright: the answer landing must not hand back a Go that the
+    fields do not currently allow."""
     st = _busy_state(btn)
     if busy:
         btn.props(add="loading")
@@ -172,9 +176,13 @@ def set_busy(btn, busy=True, *, timeout=BUSY_TIMEOUT_SEC):
         st["timer"].active = True
     else:
         btn.props(remove="loading")
-        btn.enable()
-        st["deadline"] = None
+        st["deadline"] = None          # cleared FIRST: the gate reads it
         st["timer"].active = False
+        release = getattr(btn, "_kit_gate", None)
+        if release is not None:
+            release()
+        else:
+            btn.enable()
 
 
 # ── page frame, header line, status line, notice ────────────────────────────
@@ -284,21 +292,58 @@ def select_field(label, options, *, value=None, width="w-40", on_change=None, **
     return sel
 
 
-def number_field(label, *, value=None, min=None, max=None, step=None,
+def field_valid(f):
+    """Whether a field's own validation passes - WITHOUT painting an error. PURE
+    over the field's value.
+
+    ``validate()`` is the wrong tool for asking: it SHOWS the first failing
+    message, so using it to decide whether Go is live turns an untouched form
+    red; and on a field with no validators it sets ``error = None``, which wipes
+    a message the page put there by hand (a Symbol field's "No such ticker")."""
+    rules = getattr(f, "validation", None)
+    if rules is None:
+        return True
+    value = getattr(f, "value", None)
+    if isinstance(rules, dict):
+        return all(check(value) for check in rules.values())
+    result = rules(value)
+    if inspect.isawaitable(result):
+        close = getattr(result, "close", None)   # never leave it un-awaited
+        if callable(close):
+            close()
+        return True                              # an async rule cannot answer here
+    return result is None
+
+
+def _clear_error_once_valid(f):
+    """Drop a message the field has outgrown. Without this the field stays red
+    over a good number until the reader blurs it a second time."""
+    if f.error is not None and field_valid(f):
+        f.error = None
+
+
+def number_field(label, *, value=None, min=None, max=None, step=None, integer=False,
                  width="w-28", format=None, on_change=None):
     """A labelled number whose range is checked when you LEAVE it, not per
     keystroke; the message shows in red under the field. The range is not
-    passed to Quasar, which would silently clamp instead of saying so."""
+    passed to Quasar: ``ui.number.sanitize`` clamps a value to the ``min``/``max``
+    PROPS on blur, which silently rewrites what the reader typed instead of
+    saying what was wrong with it. ``integer=True`` refuses a fraction."""
     checks = {"Enter a number": lambda v: v is not None}
+    if integer:
+        checks["Whole numbers only"] = \
+            lambda v: v is None or float(v).is_integer()
     if min is not None:
         checks[f"At least {min:g}"] = lambda v, lo=min: v is None or v >= lo
     if max is not None:
         checks[f"At most {max:g}"] = lambda v, hi=max: v is None or v <= hi
     with field(label, grow=width == "w-full"):
         n = ui.number(value=value, step=step, format=format, on_change=on_change,
+                      precision=0 if integer else None,
                       validation=checks).props(FIELD_PROPS).classes(width)
     n.without_auto_validation()
     n.on("blur", lambda _e: n.validate(return_result=False))
+    n.on_value_change(lambda _e: _clear_error_once_valid(n))
     return n
 
 
@@ -312,7 +357,7 @@ def symbol_field(label="Symbol", *, value="", on_load, tab=True, width="w-[110px
         inp = ui.input(value=value) \
             .props(f"{FIELD_PROPS} spellcheck=false").classes(f"{width} font-semibold")
     select_all_on_focus(inp)
-    bind_symbol_load(inp, on_load, tab=tab)
+    bind_symbol_load(inp, on_load, tab=tab, enter_always=True)
     return inp
 
 
@@ -321,21 +366,41 @@ symbol_loaded = mark_symbol_loaded
 
 
 def symbol_error(inp, text=None):
-    """Show - or, with ``None``, clear - the message under a Symbol field."""
+    """Show - or, with ``None``, clear - the message under a Symbol field.
+
+    Set ``inp.value`` BEFORE calling this: the field validates on change, so a
+    value written afterwards clears the message you just put there.
+
+    Reporting a message also forgets the symbol the dedup last fired on, so the
+    reader can tab out again and retry the SAME ticker. Without that, a symbol
+    the service rejected could never be retried from the field itself - it is
+    still 'the symbol we loaded', and only the page's Go button would work."""
     inp.error = text or None
+    last = getattr(inp, "_symbol_load_last", None)
+    if text and last is not None:
+        last["sym"] = ""
 
 
 def gate(go, *fields):
     """Keep ``go`` disabled while any of ``fields`` fails its check. Returns the
-    sync function, for a page that sets a value from code."""
+    sync function, for a page that sets a value from code.
+
+    The check is SILENT (``field_valid``) - holding Go is not the moment to turn
+    an untouched form red; each field paints its own message on ITS blur. Runs
+    on change as well as blur, so correcting a value hands Go back without a
+    second blur, and never enables a button that is mid-command."""
     def sync(_e=None):
-        ok = [f.validate() for f in fields]      # a list: validate EVERY field
-        if all(ok):
+        ok = [field_valid(f) for f in fields]     # a list: check EVERY field
+        busy = getattr(go, "_kit_busy", None)
+        if all(ok) and not (busy and busy["deadline"] is not None):
             go.enable()
         else:
             go.disable()
     for f in fields:
         f.on("blur", sync)
+        if hasattr(f, "on_value_change"):
+            f.on_value_change(sync)
+    go._kit_gate = sync
     sync()
     return sync
 

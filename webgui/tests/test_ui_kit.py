@@ -209,6 +209,156 @@ def test_gate_holds_go_while_a_field_is_wrong():
     assert go.enabled
 
 
+def _fire(el, kind):
+    """Fire an element's registered handler for ``kind`` (no browser here)."""
+    for listener in list(el._event_listeners.values()):
+        if listener.type == kind and listener.handler is not None:
+            listener.handler(GenericEventArguments(sender=el, client=el.client, args=None))
+
+
+def test_gate_does_not_paint_an_error_on_a_field_nobody_has_touched():
+    """A page opens with its required fields empty. Validating them to decide
+    whether Go is live must not turn the form red before the reader has typed."""
+    with ui.card():
+        n = kit.number_field("Contracts", value=None, min=1)
+        go = kit.button("Load", kind="primary")
+    kit.gate(go, n)
+    assert n.error is None
+    assert not go.enabled
+
+
+def test_a_gate_sync_cannot_wipe_a_symbol_error():
+    """``validate()`` on an input with no validators sets error=None, so a sync
+    for some OTHER field erased "No such ticker"."""
+    with ui.card():
+        inp = kit.symbol_field(value="SPY", on_load=lambda: None)
+        n = kit.number_field("Contracts", value=1, min=1)
+        go = kit.button("Load", kind="primary")
+    sync = kit.gate(go, inp, n)
+    kit.symbol_error(inp, "No such ticker")
+    sync()
+    assert inp.error == "No such ticker"
+
+
+def test_fixing_a_value_re_enables_go_without_a_second_blur():
+    with ui.card():
+        n = kit.number_field("Contracts", value=1, min=1)
+        go = kit.button("Load", kind="primary")
+    kit.gate(go, n)
+    n.value = 0
+    assert not go.enabled
+    n.value = 4
+    assert go.enabled
+
+
+def test_releasing_the_busy_state_re_applies_the_gate():
+    """The answer landing must not hand back a Go the fields do not allow."""
+    with ui.card():
+        n = kit.number_field("Contracts", value=1, min=1)
+        go = kit.button("Load", kind="primary")
+    kit.gate(go, n)
+    kit.set_busy(go)
+    n.value = 0
+    kit.set_busy(go, False)
+    assert not go.enabled
+
+
+def test_the_backstop_also_re_applies_the_gate():
+    with ui.card():
+        n = kit.number_field("Contracts", value=1, min=1)
+        go = kit.button("Load", kind="primary")
+    kit.gate(go, n)
+    kit.set_busy(go, timeout=0)
+    n.value = 0
+    go._kit_busy["tick"]()
+    assert not go.enabled
+
+
+def test_a_gate_sync_never_re_enables_a_busy_button():
+    """A blur while the command is in flight would otherwise allow a second
+    submit."""
+    with ui.card():
+        n = kit.number_field("Contracts", value=1, min=1)
+        go = kit.button("Load", kind="primary")
+    sync = kit.gate(go, n)
+    kit.set_busy(go)
+    sync()
+    assert not go.enabled and go._props.get("loading") is True
+
+
+def test_the_gate_is_reachable_from_the_button():
+    with ui.card():
+        n = kit.number_field("Contracts", value=1, min=1)
+        go = kit.button("Load", kind="primary")
+    sync = kit.gate(go, n)
+    assert go._kit_gate is sync
+
+
+def test_enter_reloads_even_an_unchanged_symbol():
+    """Enter is the Load button typed: it always reloads. Only tab-out dedups."""
+    fired = []
+    with ui.card():
+        inp = kit.symbol_field(value="SPY", on_load=lambda: fired.append(1))
+    _fire(inp, "keydown.enter")
+    _fire(inp, "keydown.enter")
+    assert fired == [1, 1]
+
+
+def test_tab_out_still_loads_only_a_changed_symbol():
+    fired = []
+    with ui.card():
+        inp = kit.symbol_field(value="SPY", on_load=lambda: fired.append(1))
+    _fire(inp, "focusout")
+    assert fired == []
+    inp.value = "QQQ"
+    _fire(inp, "focusout")
+    assert fired == [1]
+
+
+def test_enter_on_an_empty_symbol_loads_nothing():
+    fired = []
+    with ui.card():
+        inp = kit.symbol_field(on_load=lambda: fired.append(1))
+    _fire(inp, "keydown.enter")
+    assert fired == []
+
+
+def test_a_reported_error_lets_the_next_tab_out_retry():
+    """The dedup remembers the symbol it FIRED on, so a rejected one could never
+    be retried from the field itself."""
+    fired = []
+    with ui.card():
+        inp = kit.symbol_field(value="SPY", on_load=lambda: fired.append(1))
+    inp.value = "NVDQ"
+    _fire(inp, "focusout")
+    kit.symbol_error(inp, "No such ticker")
+    _fire(inp, "focusout")
+    assert fired == [1, 1]
+    kit.symbol_error(inp, None)
+    _fire(inp, "focusout")
+    assert fired == [1, 1]          # clearing the message is not a retry
+
+
+def test_an_integer_field_refuses_a_fraction():
+    with ui.card():
+        n = kit.number_field("Contracts", value=1, min=1, integer=True)
+    n.value = 2.5
+    assert n.validate() is False and n.error == "Whole numbers only"
+    n.value = 3
+    assert n.validate() is True
+
+
+def test_a_shown_error_clears_once_the_value_is_valid_again():
+    """Otherwise the field stays red over a good number until a second blur."""
+    with ui.card():
+        n = kit.number_field("Contracts", value=1, min=1)
+    n.value = 0
+    n.validate(return_result=False)          # what the blur does
+    assert n.error == "At least 1"
+    n.value = 5
+    assert n.error is None
+
+
 # -- region, empty state, table ---------------------------------------------------
 def test_the_region_spinner_survives_a_repaint():
     """Five pages mounted their spinner on the container their repaint clears,

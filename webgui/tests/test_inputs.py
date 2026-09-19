@@ -70,6 +70,58 @@ def test_mark_symbol_loaded_keeps_the_dedupe_in_step_with_a_code_write():
         assert fired == [1]
 
 
+def _enter(inp):
+    from nicegui.events import GenericEventArguments
+    (listener,) = [l for l in inp._event_listeners.values() if l.type == "keydown.enter"]
+    listener.handler(GenericEventArguments(sender=inp, client=inp.client, args=None))
+
+
+def test_enter_dedups_by_default_so_existing_callers_are_unchanged():
+    """Four pages bind this without the flag; Enter there still means what it
+    always did."""
+    from nicegui import ui
+    fired = []
+    with ui.card():
+        inp = bind_symbol_load(ui.input("Symbol", value="SPY"), lambda: fired.append(1))
+    _enter(inp)
+    assert fired == []                              # seeded 'SPY' → unchanged
+
+
+def test_enter_always_reloads_an_unchanged_symbol():
+    """Enter is the page's Load button typed, and that button has always
+    bypassed the dedup: re-pressing it is how you refresh a symbol."""
+    from nicegui import ui
+    fired = []
+    with ui.card():
+        inp = bind_symbol_load(ui.input("Symbol", value="SPY"),
+                               lambda: fired.append(1), enter_always=True)
+    _enter(inp)
+    _enter(inp)
+    assert fired == [1, 1]
+
+
+def test_enter_always_leaves_the_tab_out_dedup_alone():
+    """Tabbing out is incidental, not an instruction — it must not re-fetch."""
+    from nicegui import ui
+    fired = []
+    with ui.card():
+        inp = bind_symbol_load(ui.input("Symbol", value="SPY"),
+                               lambda: fired.append(1), enter_always=True)
+    _enter(inp)                                     # marks SPY loaded
+    _focusout(inp)
+    assert fired == [1]
+
+
+def test_enter_always_still_loads_nothing_for_an_empty_field():
+    from nicegui import ui
+    fired = []
+    with ui.card():
+        inp = bind_symbol_load(ui.input("Symbol", value=""),
+                               lambda: fired.append(1), enter_always=True)
+    _enter(inp)
+    assert fired == []
+
+
 def test_mark_symbol_loaded_ignores_an_unbound_input():
     from nicegui import ui
     with ui.card():
