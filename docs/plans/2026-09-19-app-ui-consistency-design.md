@@ -11,6 +11,7 @@ screens, which render the same page modules), plus Settings → Appearance.
 | Which style? | **A — the navy dashboard** (`theme.py` `PAGE`/`CARD`/`BTN*`, IBM Plex, `config/theme.toml` `[palette]`). |
 | Where do buttons sit? | **Page actions top-right, the Go button right after the fields.** |
 | Where do selected-row actions go? | **In the row's detail panel.** |
+| And the per-row icon buttons (Send to Calculator / Paper trade / Expected Move)? | **Into the panel too** — one rule, and the icon column goes. A page with no panel (Income Window) keeps its one per-row button. |
 | Does every page show a title? | **Yes — one line, shared with the page actions.** |
 | Settings → Appearance | **Update it to reflect the new standard.** |
 
@@ -86,9 +87,12 @@ evidence) plus screenshots of the 14 public screens found:
 - Title on the left (`[typography] titles`, `LABEL` colour). One line; no
   description line — the page's hover help (`page_help.py`) already explains it.
 - **Freshness stamp** on the right for every page that shows service data:
-  `Updated 10:42 CT`; `Stale · 12 min` in the warning colour past the page's own
-  threshold; `Waiting for data` before the first read. Central time everywhere.
-  Only a stamp the page can back — no static "live" claims.
+  `Updated 10:42 AM CT` (the view's `:ts` side key — when its publisher last
+  confirmed it current); `Waiting for data` before the first read. Only a view
+  published on a **schedule** can turn amber (`Stale · updated 10:00 AM CT`,
+  past the nav badge's own `alerts.stale_after` threshold) — an on-demand or
+  once-a-day view is never called stale, because its age says nothing. Central
+  time everywhere. Only a stamp the page can back — no static "live" claims.
 - **Page actions** after it — actions on the whole page (Refresh, Run scan, Run
   entry cycle, Generate). Primary rightmost.
 - A page with a Symbol control bar has **no header Refresh**: its Load button is
@@ -137,8 +141,10 @@ evidence) plus screenshots of the 14 public screens found:
 ### Rows and the detail panel
 - Row click **selects** the row (accent left edge on the row) and opens the
   **360 px detail panel on the right**. The row's actions (Close trade, Delete,
-  Analyze, Reprice…) sit in the **panel footer**, right-aligned: danger leftmost,
-  primary rightmost. No "Click a trade row first" warnings are possible.
+  Analyze, Reprice, and the sends — Calculator, Paper trade, Expected Move) sit
+  in the **panel footer**, right-aligned: danger leftmost, primary rightmost. No
+  "Click a trade row first" warnings are possible, and the per-row icon column
+  goes.
 - On pages without a panel, the **symbol cell is the link** (to `/symbol`, or the
   page the row belongs to) and row click does nothing. Flow Alerts' row click
   (which today jumps to Dealer Positioning) becomes a symbol link.
