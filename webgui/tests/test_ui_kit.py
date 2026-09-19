@@ -111,3 +111,46 @@ def test_the_backstop_releases_a_button_whose_answer_never_came():
     b._kit_busy["tick"]()
     assert b.enabled and not b._props.get("loading")
     assert b._kit_busy["timer"].active is False
+
+
+# -- page frame and header line ---------------------------------------------------
+def test_a_form_page_caps_its_width():
+    with ui.card():
+        full, form = kit.page(), kit.page("form")
+    assert "max-w-3xl" in form.classes and "max-w-3xl" not in full.classes
+
+
+def test_header_without_a_view_has_no_stamp():
+    with ui.card():
+        h = kit.header("Paper Ledger")
+    assert h.title.text == "Paper Ledger"
+    assert not h.stamp.visible
+
+
+def test_header_stamp_turns_warning_when_stale_and_back():
+    with ui.card():
+        h = kit.header("Paper Ledger", view="options:paper_trades")
+    now = _utc(18, 15, 30)
+    h.set_stamp("2026-09-18T15:00:00+00:00", 600, now)
+    assert h.stamp.text.startswith("Stale") and theme.TXT_WARN in h.stamp.classes
+    h.set_stamp("2026-09-18T15:29:00+00:00", 600, now)
+    assert h.stamp.text.startswith("Updated") and theme.TXT_WARN not in h.stamp.classes
+
+
+def test_the_public_origin_drops_the_title():
+    """live_main draws the screen's name in its own header."""
+    import shell
+    shell.publish({})
+    try:
+        with ui.card():
+            h = kit.header("Flow Alerts")
+        assert h.title is None
+    finally:
+        shell.unpublish()
+
+
+def test_header_actions_sit_right_of_the_stamp():
+    with ui.card():
+        h = kit.header("X", view="v")
+    kids = list(h.row.default_slot.children)
+    assert kids.index(h.stamp) < kids.index(h.actions)

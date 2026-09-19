@@ -174,3 +174,75 @@ def set_busy(btn, busy=True, *, timeout=BUSY_TIMEOUT_SEC):
         btn.enable()
         st["deadline"] = None
         st["timer"].active = False
+
+
+# ── page frame, header line, status line, notice ────────────────────────────
+TITLE = f"text-h6 font-semibold {_t.LABEL}"
+
+
+def page(width="full"):
+    """The page column. ``"form"`` caps a settings-style page at a readable
+    width; everything else is full width."""
+    return ui.column().classes(
+        "w-full gap-4" if width == "full" else "w-full max-w-3xl gap-4")
+
+
+def header(title, *, view=None, stale=False, poll_sec=5.0):
+    """The page's one header line: the title left; the Updated stamp and then
+    the page actions right - add the primary action LAST so it sits rightmost.
+
+    ``view`` is the bus view the page's data comes from; its ``:ts`` side key
+    (the time the publisher last confirmed it current) drives the stamp, read
+    off the loop every ``poll_sec``. No view, no stamp. ``stale=True`` only for
+    a view published on a SCHEDULE: it then turns amber past the nav badge's
+    own threshold (``alerts.stale_after``). An on-demand or once-a-day view
+    leaves it off and is never called stale - its age says nothing. On the
+    PUBLIC origin the title is omitted - live_main names the screen itself."""
+    with ui.row().classes("w-full items-center gap-3 flex-wrap min-h-[38px]") as row:
+        title_lbl = None if shell.is_public() else ui.label(title).classes(TITLE)
+        ui.space()
+        stamp = ui.label("").classes(f"text-xs {_t.MUTED}")
+        stamp.set_visibility(view is not None)
+        actions = ui.row().classes("items-center gap-2 no-wrap")
+    state = {"cls": _t.MUTED}
+
+    def set_stamp(ts, stale_after_sec=None, now=None):
+        now = now or _dt.datetime.now(_dt.timezone.utc)
+        text, st = freshness(ts, now, stale_after_sec)
+        stamp.text = text
+        cls = FRESHNESS_CLASS[st]
+        if cls != state["cls"]:
+            stamp.classes(remove=state["cls"], add=cls)
+            state["cls"] = cls
+
+    if view is not None:
+        @guard_async
+        async def _poll():
+            _ver, ts = await run.io_bound(bus_client.read_meta, view)
+            now = _dt.datetime.now(_dt.timezone.utc)
+            set_stamp(ts, _stale_after(view, now) if stale else None, now)
+
+        ui.timer(0.1, _poll, once=True)
+        ui.timer(poll_sec, _poll)
+    return SimpleNamespace(row=row, title=title_lbl, stamp=stamp, actions=actions,
+                           set_stamp=set_stamp)
+
+
+def status_line(text=""):
+    """The one line of counts a board shows above its table ("12 trades ·
+    3 open"). The time lives in the header stamp, never here."""
+    return ui.label(text).classes(_t.EYEBROW)
+
+
+_S = _t.THEME["semantic"]
+NOTICE = (f"w-full items-center gap-3 rounded-[10px] px-3 py-2 "
+          f"bg-[{_S['warning']}]/10 border border-[{_S['warning']}]/30")
+
+
+def notice(text, *, icon="info"):
+    """A one-line notice across the page (a pending restart, a service note).
+    Returns the row, so a caller may add a button inside ``with notice(...)``."""
+    with ui.row().classes(NOTICE) as row:
+        ui.icon(icon).classes(_t.TXT_WARN)
+        ui.label(text).classes(f"text-sm grow {_t.LABEL}")
+    return row
