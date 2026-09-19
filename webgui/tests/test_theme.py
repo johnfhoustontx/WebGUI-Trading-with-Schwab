@@ -456,3 +456,16 @@ def test_choosing_the_shipped_danger_does_not_revive_the_retired_key(tmp_path,
     t = theme.save_theme_values({"palette": {"danger": "#e5595b"}}, path=p)
     assert not (tmp_path / "local" / "theme.toml").exists()
     assert t["palette"]["danger"] == "#e5595b"
+
+
+def test_menu_accent_reaches_the_nav_pill_tabs_and_icon():
+    t = theme.load_theme("Z:/nope.toml")
+    t["menu"]["accent"] = "#ff8800"
+    css = theme.build_nav_css(t)
+    assert ".nav-drawer .nav-active{background:rgba(255,136,0,0.13)!important;}" in css
+    assert ".nav-drawer .nav-active .nav-icon{color:#ff8800!important;}" in css
+    assert ".compact-tabs .q-tab--active{background:rgba(255,136,0,0.16)!important;}" in css
+
+
+def test_an_empty_accent_leaves_the_stock_nav_alone():
+    assert ".nav-active" not in theme.build_nav_css(theme.load_theme("Z:/nope.toml"))

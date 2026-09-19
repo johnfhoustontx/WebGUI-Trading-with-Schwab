@@ -130,9 +130,9 @@ _DEFAULTS = {
     "menu": {
         # Application menu (header bar + left nav drawer). Every knob defaults
         # "" = keep the stock Quasar look; a value emits an override.
-        # accent → ui.colors(primary) = Quasar-colored CONTROLS ONLY (switches,
-        # sliders, color=primary buttons). NOT the header (header_bg) and NOT the
-        # nav pill / tab fills / icon accent (hardcoded rgba in main._NAV_CSS).
+        # accent → ui.colors(primary) (switches, sliders, color=primary
+        # buttons) AND the active nav pill / tab fill / icon accent, which
+        # build_nav_css re-emits in it. NOT the header (header_bg).
         "accent": "",
         "header_bg": "",  # top header bar background (decoupled from accent)
         "drawer_bg": "",  # menu panel background
@@ -1054,13 +1054,9 @@ def build_nav_css(theme):
     """Application-menu override CSS from ``[menu]`` (drawer bg / text / hover /
     caption). Emits a rule ONLY for a non-empty knob, so all-default config
     produces an empty string and the stock Quasar look can never drift. The
-    ``accent`` knob is NOT css — ``main._layout`` feeds it to ``ui.colors(
-    primary=…)``, which now reaches only Quasar-colored CONTROLS (switches,
-    sliders, ``color=primary`` buttons): the header bar is decoupled via
-    ``header_bg`` (below), and the active nav pill + tab-strip fills are
-    hardcoded rgba washes in ``main._NAV_CSS`` (the bundled Tailwind JIT does
-    not reliably emit ``var()``/``rgba()`` arbitraries, so they cannot ride
-    ``--q-primary``). Injected app-wide by ``main._layout``."""
+    ``accent`` knob feeds ``ui.colors(primary=…)`` (via ``build_quasar_colors``)
+    AND, since 2026-09-19, the active nav pill, tab-strip fill and active icon
+    below. Injected app-wide by ``main._layout``."""
     m = theme["menu"]
     rules = []
     if m.get("header_bg"):
@@ -1078,6 +1074,17 @@ def build_nav_css(theme):
         rules.append(f".nav-drawer a:hover{{background:{m['hover_bg']}!important;}}")
     if m["title"]:
         rules.append(f".nav-drawer .nav-title{{color:{m['title']}!important;}}")
+    if m.get("accent"):
+        # The ONE accent reaches the active pill, the tab-strip fill and the
+        # active icon too (injected after main._NAV_CSS, whose stock rgba it
+        # overrides). Raw CSS may carry any value; the JIT limit that once kept
+        # these hard-coded applies to Tailwind classes only.
+        r, g, b = hex_rgb(m["accent"], (107, 134, 255))
+        rules += [
+            f".nav-drawer .nav-active{{background:rgba({r},{g},{b},0.13)!important;}}",
+            f".nav-drawer .nav-active .nav-icon{{color:{m['accent']}!important;}}",
+            f".compact-tabs .q-tab--active{{background:rgba({r},{g},{b},0.16)!important;}}",
+        ]
     return "\n".join(rules)
 
 # ── Sector & Industry heat grid (/sentiment/sectors) helpers ─────────────────

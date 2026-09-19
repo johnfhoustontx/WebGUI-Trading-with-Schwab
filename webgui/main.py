@@ -1294,10 +1294,10 @@ _NAV_CSS = """
 .nav-drawer { gap: 2px; }
 /* Active nav item pill — the "Deep Slate" look: a SUBTLE navy tint (not a solid
    accent fill), paired with the item's own icon, which carries the active state
-   (see the .nav-active .nav-icon accent below). This wash and the .compact-tabs
-   fill below are both HARDCODED rgba here — neither rides [menu].accent /
-   --q-primary, because the bundled JIT emits neither var() nor rgba()
-   arbitraries reliably. Change the accent knob and these do NOT follow. */
+   (see the .nav-active .nav-icon accent below). The rgba here is the STOCK look;
+   when [menu].accent is set, theme.build_nav_css re-emits this wash, the
+   .compact-tabs fill and the icon accent in that colour (injected after this
+   block, so it wins) — since 2026-09-19. */
 .nav-drawer .nav-active { background: rgba(107,134,255,0.13); }
 .nav-drawer .nav-active .nav-label { color: #eef1f6; font-weight: 600; }
 .nav-drawer .q-item { border-radius: 10px; }
