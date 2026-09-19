@@ -34,8 +34,14 @@ _INDEX_ROOTS = {"SPX", "VIX", "OEX", "NDX", "RUT", "XSP", "DJX"}
 
 def _load_rates():
     try:
-        with open(_TOML_PATH, "rb") as fh:
-            return tomllib.load(fh)
+        # The tracked file plus the operator's config/local/ override. The
+        # repo-root import is inside the guard so this module still can't fail
+        # import (see above).
+        import sys
+        if str(_REPO_ROOT) not in sys.path:
+            sys.path.insert(0, str(_REPO_ROOT))
+        from shared import config_toml
+        return config_toml.read_layered(_TOML_PATH)
     except Exception:  # pragma: no cover - defensive
         return {}
 

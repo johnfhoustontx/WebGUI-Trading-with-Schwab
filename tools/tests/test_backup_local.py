@@ -42,6 +42,7 @@ def test_the_data_trees_are_swept_not_listed():
     "services/trade_svc/data",
     "shared/data",
     "schwab-proxy/data",
+    "config/local",                # Settings -> Configuration overrides
 ])
 def test_every_gitignored_data_tree_is_covered(tree):
     """Named individually so a deletion from DATA_TREES fails HERE, with the

@@ -256,40 +256,45 @@ def test_menu_accent_is_a_plain_value_not_css():
     assert t["menu"]["accent"] == ""
 
 
-# -- set_theme_values: comment-preserving TOML editor (Settings page, 2026-07-09) --
-
-_TOML = """# header comment stays
-[palette]                      # section comment stays
-card_bg      = "#101a30"       # cards / frames
-text         = "#cdd8ee"       # base body text
-
-[menu]
-accent    = ""                 # header bar
-title     = ""                 # caption
-"""
+# -- save_theme_values: the Appearance editor writes the OVERRIDE file ----------
+# (config/local/theme.toml), never the tracked theme.toml, which would dirty the
+# prod checkout and make tools/promote.sh refuse every later promote.
 
 
-def test_set_theme_values_updates_value_preserving_comments():
-    out = theme.set_theme_values(_TOML, {"palette": {"card_bg": "#222831"}})
-    assert 'card_bg      = "#222831"       # cards / frames' in out
-    assert "# header comment stays" in out
-    assert 'text         = "#cdd8ee"' in out                # untouched
+def _theme_files(tmp_path, monkeypatch):
+    monkeypatch.setenv("TRADING_CONFIG_OVERRIDES_IN_TESTS", "1")
+    p = tmp_path / "theme.toml"
+    p.write_text('# shipped\n[palette]\ncard_bg = "#101a30"\ntext = "#cdd8ee"\n',
+                 encoding="utf-8")
+    return p
 
 
-def test_set_theme_values_is_section_scoped():
-    # a key name that exists in two sections only updates the targeted section
-    out = theme.set_theme_values(_TOML, {"menu": {"title": "#ffcc00"}})
-    assert 'title     = "#ffcc00"' in out
-    assert 'card_bg      = "#101a30"' in out
+def test_save_theme_values_writes_the_override_not_the_tracked_file(tmp_path,
+                                                                    monkeypatch):
+    p = _theme_files(tmp_path, monkeypatch)
+    before = p.read_text(encoding="utf-8")
+    t = theme.save_theme_values({"palette": {"card_bg": "#222831",
+                                             "text": "#cdd8ee"}}, path=p)
+    assert p.read_text(encoding="utf-8") == before          # tracked file untouched
+    over = (tmp_path / "local" / "theme.toml").read_text(encoding="utf-8")
+    assert "#222831" in over
+    assert "#cdd8ee" not in over        # a shipped value is not an override
+    assert t["palette"]["card_bg"] == "#222831"
 
 
-def test_set_theme_values_missing_key_is_noop_and_multi_update():
-    out = theme.set_theme_values(_TOML, {
-        "palette": {"nope": "#000000", "text": "#ffffff"},
-        "menu": {"accent": "#2e7d32"}})
-    assert "#000000" not in out
-    assert 'text         = "#ffffff"' in out
-    assert 'accent    = "#2e7d32"' in out
+def test_reset_theme_drops_the_override(tmp_path, monkeypatch):
+    p = _theme_files(tmp_path, monkeypatch)
+    theme.save_theme_values({"palette": {"card_bg": "#222831"}}, path=p)
+    t = theme.reset_theme(path=p)
+    assert not (tmp_path / "local" / "theme.toml").exists()
+    assert t["palette"]["card_bg"] == "#101a30"
+
+
+
+
+
+
+
 
 
 def test_knob_label_humanizes_keys():

@@ -121,6 +121,9 @@ DATA_TREES = (
     "shared/data",
     "services/trade_svc/data",
     "schwab-proxy/data",
+    # The operator's Settings -> Configuration overrides (gitignored). Losing
+    # them silently reverts every tuned threshold to the shipped value.
+    "config/local",
 )
 
 # Excluded from the sweep, each for a stated reason -- never "it looked big".

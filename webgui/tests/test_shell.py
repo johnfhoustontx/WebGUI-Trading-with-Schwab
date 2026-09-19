@@ -1808,14 +1808,14 @@ def test_every_page_with_subtabs_binds_the_breadcrumb_leaf():
     """The mechanism is only worth having if it is applied consistently — the ask
     was explicitly "make this consistent for all menu items". Any page that mounts
     into subtab_slot() owns a view level and must name it in the header, so a
-    sixth subtab page added later fails here rather than silently skipping it."""
+    seventh subtab page added later fails here rather than silently skipping it."""
     import pathlib
     import re
 
     root = pathlib.Path(__file__).resolve().parents[1] / "pages"
     users = [p for p in root.rglob("*.py")
              if "subtab_slot()" in p.read_text(encoding="utf-8")]
-    assert len(users) == 5, f"expected 5 subtab pages, found {[p.name for p in users]}"
+    assert len(users) == 6, f"expected 6 subtab pages, found {[p.name for p in users]}"
     missing = [p.name for p in users
                if not re.search(r"bind_breadcrumb_leaf\(", p.read_text(encoding="utf-8"))]
     assert not missing, f"subtab pages that never name their view: {missing}"

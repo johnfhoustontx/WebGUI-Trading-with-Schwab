@@ -70,6 +70,7 @@ def test_subtab_help_covers_every_sub_tab():
         "/options/simulator": {"Price & Time", "Volatility", "History"},
         "/options/rescue": {"At-Risk Board", "Ad-hoc Trade"},
         "/portfolio": {"Holdings", "Sectors", "Performance"},
+        "/settings": {"General", "Configuration"},
     }
     for route, keys in expected.items():
         have = set(page_help.SUBTAB_HELP.get(route, {}))

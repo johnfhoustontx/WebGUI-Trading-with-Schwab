@@ -2266,7 +2266,51 @@ A health board for the whole stack.
 ## Settings
 
 **Route:** `/settings` — a standalone item at the **foot of the rail**, with System
-Status and Stop All Services.
+Status and Stop All Services. It has two tabs: **General** (your app preferences)
+and **Configuration** (the trading settings).
+
+### Configuration
+
+Every setting the trading services use — the thresholds that used to mean editing
+a file on the server — in one place, grouped by what they do:
+
+| Category | What it controls |
+|---|---|
+| **Trade selection** | Volatility (IV rank) floors and ceilings, minimum credit, directional and single-option rules, the score a signal needs to be recorded |
+| **Exits & trade management** | Take profit, stop loss, time and delta stops, the profit-lock ladder, per-structure rules, Rescue board warnings |
+| **Autonomous driver** | Daily targets, risk limits, the loss halt, decision cadence |
+| **Flow alerts** | Each detector's thresholds, and which alerts reach your phone |
+| **Market hours & schedules** | Session times, operating windows, and the time of every scheduled job (briefings, digests, reports) |
+| **Symbols & watchlists** | What the gamma collector polls, the BIG10 basket, the Net Prem groups |
+| **Sector map** | Which sector each symbol counts toward for the sector cap |
+| **Commissions** | Schwab's per-contract rates |
+| **Ports / Environments** | Shown for reference only |
+
+How to use it:
+
+1. Pick a category on the left, or type in **Search** (for example *take profit*,
+   *VIX*, *delta*) to find a setting anywhere.
+2. Change a value. Each row explains the setting in plain words. Percentages are
+   typed as percents (type `50` for 50%). A value outside its allowed range is
+   refused on the spot, with a sentence saying why.
+3. A changed row shows **Unsaved**; a row that differs from the shipped value shows
+   **Shipped: …** and a reset button that puts it back.
+4. Press **Save changes** at the bottom. The app then lists the services that must
+   restart to use the new values and offers **Restart now**. During market hours it
+   warns you first, because restarting the options service loses a minute or two
+   of gamma collection. You can choose **Later**; a yellow banner reminds you until
+   you restart.
+
+> **Your changes are kept separately from the shipped settings.** They are saved as
+> overrides, so app updates never overwrite them, **Reset** always takes you back,
+> and **Recent changes** at the bottom lists what was changed and when.
+
+> Some settings cost money or API budget when you loosen them — each category
+> with that risk shows a yellow note (for example, every scheduled Claude briefing
+> is a paid call, and each symbol added to collection costs about 440 Schwab calls a
+> day).
+
+### General
 
 Preferences, all saved on your machine:
 
@@ -2292,7 +2336,8 @@ Preferences, all saved on your machine:
 - **Show the ticker** — the scrolling bar at the bottom of every page, with a
   speed setting. It only shows or hides the marquee — see the note below.
 - **Appearance** — every colour, font and menu style, in seven tabs. **Save &
-  restart web GUI** applies the change; **Reset to defaults** is confirm-gated.
+  restart web GUI** applies the change; **Reset** (confirm-gated) returns to the
+  shipped theme.
 - **API usage** — how many calls the app has made to **Schwab** (counted at the
   gateway) and to **Claude** (counted at each call site), for today, the last 7 days
   and the last 30.

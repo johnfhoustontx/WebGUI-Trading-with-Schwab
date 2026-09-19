@@ -308,8 +308,8 @@ def load_theme(path=None):
         if path is None:
             from repo_paths import THEME_TOML
             path = THEME_TOML
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
+        from shared import config_toml
+        data = config_toml.read_layered(path)   # tracked file + local override
         for sec, vals in data.items():
             if sec in merged and isinstance(vals, dict):
                 for k, v in vals.items():
@@ -483,54 +483,47 @@ def build_quasar_css(theme):
 """
 
 
-def set_theme_values(text, updates):
-    """Update ``key = "value"`` lines in a theme-TOML string, preserving comments.
-
-    ``updates`` is ``{section: {key: new_value}}``. Line-based + section-scoped:
-    only a known ``key =`` line inside the targeted ``[section]`` is rewritten
-    (the quoted value is replaced; everything else on the line — alignment,
-    trailing comment — is kept). A key not present in the text is a no-op, so a
-    hand-trimmed config never gains surprise lines. Pure (string in/out); the
-    Settings page writes through :func:`save_theme_values`."""
-    import re
-    lines = text.splitlines(keepends=True)
-    section = None
-    out = []
-    for line in lines:
-        m_sec = re.match(r"\s*\[([^\]]+)\]", line)
-        if m_sec:
-            section = m_sec.group(1).strip()
-        elif section in updates:
-            m_kv = re.match(r'(\s*(\w+)\s*=\s*)"[^"]*"(.*)$', line, re.DOTALL)
-            if m_kv and m_kv.group(2) in updates[section]:
-                new = str(updates[section][m_kv.group(2)])
-                line = f'{m_kv.group(1)}"{new}"{m_kv.group(3)}'
-        out.append(line)
-    return "".join(out)
-
-
 def save_theme_values(updates, path=None):
-    """Write ``updates`` (``{section: {key: value}}``) into ``config/theme.toml``.
+    """Save ``updates`` (``{section: {key: value}}``) as the operator's theme.
 
-    Comment-preserving (see :func:`set_theme_values`). If the file is missing it
-    is (re)created from the built-in defaults first so every knob line exists.
-    Returns the merged theme dict re-loaded from disk. Used by the Settings
-    page's Appearance section; the running app picks the change up on the next
-    webgui restart (the theme loads once at import)."""
+    Written to the OVERRIDE file ``config/local/theme.toml``, never to the
+    tracked ``config/theme.toml``: editing a tracked file dirties the prod
+    checkout, and ``tools/promote.sh`` refuses a dirty tree, so the first saved
+    colour would have blocked every later promote (2026-09-19). Only values that
+    differ from the tracked file are kept, so choosing a shipped value again
+    removes its override. Returns the merged theme re-loaded from disk; the
+    running app picks it up on the next web GUI restart (the theme loads once)."""
+    from shared import config_toml
     if path is None:
         from repo_paths import THEME_TOML
         path = THEME_TOML
-    p = pathlib.Path(path)
-    if not p.exists():
-        rows = []
-        for sec, vals in _DEFAULTS.items():
-            rows.append(f"[{sec}]")
-            rows += [f'{k} = "{v}"' for k, v in vals.items()]
-            rows.append("")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("\n".join(rows), encoding="utf-8")
-    p.write_text(set_theme_values(p.read_text(encoding="utf-8"), updates),
-                 encoding="utf-8")
+    try:
+        with open(path, "rb") as f:
+            shipped = tomllib.load(f)
+    except Exception:  # noqa: BLE001 - no tracked file: every value is an override
+        shipped = {}
+    current = config_toml.read_overrides(path)
+    for sec, vals in (updates or {}).items():
+        for key, val in vals.items():
+            base = (shipped.get(sec) or {}).get(key, _DEFAULTS.get(sec, {}).get(key))
+            val = str(val)
+            if val == base:
+                current.get(sec, {}).pop(key, None)
+            else:
+                current.setdefault(sec, {})[key] = val
+        if sec in current and not current[sec]:
+            current.pop(sec)
+    config_toml.write_overrides(path, current)
+    return load_theme(path)
+
+
+def reset_theme(path=None):
+    """Drop every appearance override: back to the shipped ``config/theme.toml``."""
+    from shared import config_toml
+    if path is None:
+        from repo_paths import THEME_TOML
+        path = THEME_TOML
+    config_toml.write_overrides(path, {})
     return load_theme(path)
 
 

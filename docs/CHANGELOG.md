@@ -4,7 +4,39 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-18 (**Desk spoken alerts — one switch per section, and
+**Last updated:** 2026-09-19 (**Architecture audit: fixes, dead code, and Settings →
+Configuration.**)
+
+- **Paper Analyze restored.** `options_svc.compute.analyze_paper` lazily imported
+  `trade_analyzer`, deleted as dead in `fc334fa` (2026-08-20), so the Paper Ledger's
+  Analyze button raised on every click; its tests planted a fake module in
+  `sys.modules`. Module restored; its event context now reads the earnings calendar
+  (the macro `event_calendar` it used was deleted the next day). New guard
+  `services/options_svc/tests/test_lazy_imports_resolve.py` resolves every import in
+  every options_svc module with `find_spec`.
+- **Sector map corrected to GICS.** `config/sectors.toml` (the live sector cap) had
+  AAPL in Communication Services and GOOGL/NFLX in Information Technology; 30 rows
+  moved, including clean-tech out of Utilities, mortgage REITs to Financials, and the
+  2023 GICS reclass (WMT/COST/TGT → Consumer Staples, UBER → Industrials).
+- **Dead `cache:options:header` removed.** No reader since 2026-08-24, but it cost
+  a proxy quotes call every 30 s; the per-tick branch now calls
+  `refresh_matrix_spots` directly (the Opportunity Board's live-spot overlay).
+- **Dead code removed** across `shared/analysis_lib`, options-scanner,
+  trade-analyzer, sentiment, services and webgui (see the `refactor:` commits of this
+  date), including the always-blank Portfolio *Tailwind* column, the producerless
+  `income_scan` command and the legacy `claude-driver/` folder.
+- **Settings → Configuration.** Every `config/*.toml` setting, grouped by purpose,
+  with plain-English help, units, validation, per-key reset, search, a change log
+  and a restart offer. Driven by the `webgui/config_schema.py` catalogue; a TOML key
+  with no entry fails `test_config_schema.py`, which is how the new standing rule
+  (*configurable by default*, CLAUDE.md) stays enforced. Saves go to a new
+  gitignored override layer, `config/local/<name>.toml`, honoured by every loader —
+  the tracked files stay the shipped values, because writing them dirtied the prod
+  checkout and blocked `promote.sh`. The Appearance editor, which did write the
+  tracked `theme.toml`, now uses the same layer.
+  [Design](plans/2026-09-19-settings-configuration-design.md).
+
+**Prior —** 2026-09-18 (**Desk spoken alerts — one switch per section, and
 the Opportunity Board speaks.**) Settings → Spoken alerts (Desk) gains three
 switches under the main one — **Opportunity Board**, **Live Flow Alerts**,
 **Positions** (`voice_board` / `voice_flow` / `voice_positions`, default on, greyed

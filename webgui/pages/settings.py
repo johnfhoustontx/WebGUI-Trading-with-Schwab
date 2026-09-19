@@ -1,9 +1,10 @@
 """Settings page — GUI preferences (audio alerts, notifications, appearance),
-plus API-usage stats and database maintenance.
+plus API-usage stats and database maintenance, and the Configuration tab
+(``pages/config_editor.py``) that edits every config/*.toml setting.
 
 Thin render(): each control writes through to app_settings; the Appearance
-section writes through to config/theme.toml (``theme.save_theme_values``,
-comment-preserving) and applies on a web-GUI restart — the theme loads once at
+section saves to the override file config/local/theme.toml
+(``theme.save_theme_values``) and applies on a web-GUI restart — the theme loads once at
 startup. The API-usage card reads the proxy's ``/stats/api_calls`` off-thread;
 the Maintenance card runs ``tools/vacuum_gex.py`` as a subprocess off-thread
 (the tool itself refuses to run while the collector is active). Extensible —
@@ -98,7 +99,40 @@ _THEME_SECTIONS = [
 ]
 
 
+SUBTABS = ("General", "Configuration")
+
+
 def render():
+    """Two sub-tabs under the header, the Portfolio page's pattern: General (the
+    app preferences below) and Configuration (every config/*.toml setting)."""
+    import page_help as _page_help
+    import shell as _shell
+    from pages import config_editor
+
+    def _build_tabs():
+        with ui.tabs().classes("compact-tabs").props(
+                "dense no-caps inline-label align=left") as t:
+            for key in SUBTABS:
+                with ui.tab(key):
+                    ui.tooltip(_page_help.subtab_help("/settings", key)
+                               ).props("delay=350 max-width=340px")
+        return t
+
+    slot = _shell.subtab_slot()
+    if slot is not None:
+        with slot:
+            tabs = _build_tabs()
+    else:
+        tabs = _build_tabs()
+    _shell.bind_breadcrumb_leaf(tabs, initial="General")
+    with ui.tab_panels(tabs, value="General").classes("w-full flush-panels"):
+        with ui.tab_panel("General").classes("gap-4"):
+            _render_general()
+        with ui.tab_panel("Configuration"):
+            config_editor.render()
+
+
+def _render_general():
     ui.label("Settings").classes("text-h5")
     s = app_settings.load()
 
@@ -313,19 +347,18 @@ def render():
             status._do_restart({"kind": "self"})
 
         def _reset():
-            defaults = {sec: dict(vals) for sec, vals in theme._DEFAULTS.items()}
-            theme.save_theme_values(defaults)
+            shipped = theme.reset_theme()     # drops config/local/theme.toml
             for (sec, key), el in inputs.items():          # text inputs
-                el.value = defaults[sec][key]
+                el.value = shipped[sec][key]
                 el.update()
             for (sec, key) in list(colors):                # swatch tiles
-                _pick(sec, key, defaults[sec][key])
+                _pick(sec, key, shipped[sec][key])
             reset_dlg.close()
-            ui.notify("Reset to defaults — restart the web GUI to apply",
+            ui.notify("Reset to the shipped theme — restart the web GUI to apply",
                       type="positive")
 
         with ui.dialog() as reset_dlg, ui.card():
-            ui.label("Reset every appearance setting to the built-in defaults?")
+            ui.label("Reset every appearance setting to the shipped theme?")
             with ui.row():
                 ui.button("Reset", color=None).props("no-caps").classes(
                     BTN_3D_DANGER).on_click(_reset)

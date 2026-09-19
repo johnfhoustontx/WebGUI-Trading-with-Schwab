@@ -43,14 +43,13 @@ verbatim; see the note on ``prev_trading_day`` for the one semantic
 difference between the two.
 """
 import logging
-import os
-import tomllib
 from datetime import date, datetime, time, timedelta
 from enum import Enum
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 from repo_paths import SESSIONS_TOML
+from shared import config_toml as _config_toml
 
 log = logging.getLogger(__name__)
 
@@ -351,15 +350,12 @@ def load_config() -> dict:
     mutates the result poisons the cache for every other caller in the
     process, including the scheduler ticks in five services.
     """
-    try:
-        mtime = os.stat(_TOML_PATH).st_mtime
-    except Exception:
-        mtime = None
+    # Both layers: the tracked file and the operator's config/local/ override.
+    mtime = _config_toml.layered_mtime(_TOML_PATH)
     if _CACHE["cfg"] is not None and _CACHE["mtime"] == mtime:
         return _CACHE["cfg"]
     try:
-        with open(_TOML_PATH, "rb") as fh:
-            cfg = _merge(_DEFAULTS, tomllib.load(fh))
+        cfg = _merge(_DEFAULTS, _config_toml.read_layered(_TOML_PATH))
     except Exception:
         log.debug("sessions.toml load failed → defaults", exc_info=True)
         cfg = _merge(_DEFAULTS, {})

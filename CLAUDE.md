@@ -68,7 +68,7 @@ does not import from it or depend on it at runtime.
 | API gateway      | FastAPI + uvicorn (`schwab-proxy`)                                |
 | Brokerage SDK    | `schwab-py` (`schwab` package) — auth, market data, streaming     |
 | Data / numerics  | pandas, numpy, scipy                                              |
-| Scheduling       | APScheduler (claude-driver)                                       |
+| Scheduling       | per-service asyncio loops (`services/*/scheduler.py`)            |
 | Notifications    | Telegram · Discord · SMS-over-SMTP · X — all HTTP/SMTP, no OS hooks |
 | Spreadsheet I/O  | openpyxl                                                          |
 | Testing          | pytest                                                            |
@@ -83,7 +83,7 @@ schwab-proxy (:8100)  ──HTTP──>  webgui NiceGUI app (:8500)
    tokens + market data               ├─ Sentiment page → sentiment-dashboard scoring
                                        ├─ Trade    page  → trade-analyzer src/analysis
                                        ├─ Portfolio page → portfolio-analyzer src (live)
-                                       └─ Driver   page  → claude-driver orchestration
+                                       └─ Driver   page  → driver_svc (autonomous paper book)
         │
    shared/analysis_lib  ← shared library (technical, sector_analysis, config)
 ```
@@ -116,6 +116,9 @@ checklist's Paper book line (`pages/options/checks.py`, which also takes
 `book_caps.describe` for the blocked wording) — evaluates the SAME rungs the
 service enforces, so it imports the one cap module rather than a Tier-1 copy, and
 `webgui/tests/test_book_caps_tier1.py` pins its exact import set) ·
+`shared.config_toml` (since 2026-09-19; stdlib-only — `tomllib`/`os`/`json`/`re`
+— used by `config_store.py` behind Settings → Configuration to read the shipped
+files and write the operator's `config/local/` overrides) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
@@ -183,7 +186,6 @@ open migration item. Full design:
 | `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + `live_composite.py` (live intraday composite + bridge payload) + `publish_bridge.py` (headless bridge writer) + bridge + `sectors_ref.py`. **Its `market_calendar.py` was absorbed into `shared/market_calendar.py` and DELETED (2026-08-02)** — same module name and same three function names, but *inclusive* `prev/next_trading_day` vs the shared module's *exclusive*, an invisible one-day trap. | ported to NiceGUI `/sentiment` |
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
-| `claude-driver/`       | Legacy morning/intraday orchestration. The order-approval queue was REMOVED 2026-07-08; only `RISK_LIMITS` in `config.py` is still read. | superseded by `driver_svc` |
 | `shared/`              | `analysis_lib/` (technical · sector_analysis · config) + secret templates/values. | library          |
 | `tools/`               | `check_env.py`, `db_admin.py` maintenance utilities.        | CLI              |
 | `webgui/`              | **NEW** NiceGUI multi-page front-end. Shell + Options section built. | the new UI, :8500 |
@@ -377,7 +379,7 @@ Routes:
 | `/sentiment/momentum` | Momentum — a **numbered argument** (regime trio + dispersion · three levels + alignment · quadrant counts · one decomposed example · rank over recent sessions), with the ranked leaderboard behind a **collapsed expander**. Scatter + ribbon dropped. Recomputed **once nightly** (16:20 CT), not on the tick. [Detail](docs/webgui-routes.md) | built |
 | `/trade` | Trade Analyzer — on-demand Position (1–8wk) + Investor verdicts; Position runs the backtested IC-weighted factor model. Deep Dive and AI Query open separate reports. [Detail](docs/webgui-routes.md) | built |
 | `/driver` | Claude Trades — monitor + override for the autonomous Claude decision layer, trading defined-risk spreads into its **own isolated paper book**. Paper only. [Detail](docs/webgui-routes.md) | built |
-| `/settings` | Settings — alert/ticker preferences, the in-app theme editor, Schwab + Claude API call counts, and maintenance actions. [Detail](docs/webgui-routes.md) | built |
+| `/settings` | Settings — two sub-tabs. **General**: alert/ticker preferences, the in-app theme editor, Schwab + Claude API call counts, and maintenance actions. **Configuration** (2026-09-19): every `config/*.toml` setting by purpose, from the `webgui/config_schema.py` catalogue, saved as `config/local/` overrides, with a restart offer. [Detail](docs/webgui-routes.md) | built |
 | `/portfolio` | Portfolio — Holdings / Sectors / Performance over the portfolio model, with live-streaming P&L via the service’s SSE consumer. | built |
 | `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` and `driver:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. [Detail](docs/webgui-routes.md) | built |
 | `/market` | Market Dashboard — live grid of ~48 macro tickers in framed category panels, coloured by semantic risk-on/off. Reader of `cache:market:dashboard`. [Detail](docs/webgui-routes.md) | built |
@@ -388,7 +390,7 @@ The `pages/options/` subpackage shares `detail.py` (collapsible Trade detail pan
 tables), **`flow_panels.py`** (PURE builders for the two Options Flow console
 panels on the Gamma page's **Flow** + **Net Prem** subtabs — see the dedicated
 section below), `svg.py` (gradient-bar / range-marker SVG — the composite-score
-speedometer is now the shared Highcharts gauge in `pages/gauge.py`), `inputs.py`
+bar the Trade detail panel draws), `inputs.py`
 (`select_all_on_focus` + `should_load` symbol-input helpers — `should_load` dedups
 the symbol tab-out/Enter Load trigger), **`overlay.py`** (the shared full-screen
 **wait overlay** — `build_loading_overlay()` → a handle with `.show(msg)`/`.hide()`,
@@ -509,8 +511,9 @@ deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This sect
 - **Restyle WITHOUT code edits (2026-07-09): `config/theme.toml`.** Every color
   (`repo_paths.THEME_TOML`, all knobs commented in-file) — surfaces/cards/text,
   secondary+primary buttons, the **3D gradient buttons**, the semantic
-  positive/warning/negative/neutral set, the **speedometer gauge face + needle**
-  (`pages/gauge.py`), the Sentiment/Rotation chart palette (`sentiment.py CLR_*`),
+  positive/warning/negative/neutral set (the `[gauge]` section is now UNREAD — the
+  speedometer builder it styled was removed 2026-09-19), the Sentiment/Rotation
+  chart palette (`sentiment.py CLR_*`),
   plus **`[typography]`** (app-wide font family + text-category sizes:
   titles/.text-h6 · subtitles/.text-subtitle1 · sections/.text-subtitle2 · body ·
   small/.text-xs+EYEBROW → `build_typography_css`, injected app-wide by
@@ -795,9 +798,9 @@ consumers (`sentiment_svc.compute`, `trade_svc.compute`, `scoring.regime_evidenc
 `portfolio-analyzer/src/sectors`) carry a `sys.path` bootstrap to import
 `technical` **standalone** and dodge the package: a plain
 `from shared.analysis_lib import technical` raised. The app is gone; the init
-imports only `config`/`sector_analysis`/`technical`, and those two modules resolve
+imports only `config`/`sector_analysis`/`technical`, and `technical` resolves
 `config` **relatively when loaded as a package and by bare name when loaded
-standalone** — branched on `__package__`, deliberately *not* a `try/except`, so a
+standalone** (`sector_analysis` no longer imports it at all) — branched on `__package__`, deliberately *not* a `try/except`, so a
 real error inside `config.py` cannot fall through and silently bind another app's
 `config` (the very collision this section is about). The bootstraps still work and
 can go whenever their files are next touched.
@@ -835,7 +838,7 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
 **NiceGUI gotchas (learned, costly):**
 - `ui.html(...)` **strips `<style>` and `<iframe>`**. For CSS use `ui.add_css(css)`
   (rules only, scope with a class); render HTML *fragments*, not full documents.
-  See `pages/options/gamma.py` Explain (`EXPLAIN_CSS` + `wrap_explain`).
+  See `pages/options/gamma.py` Explain (`EXPLAIN_CSS`).
 - **`ui.html` sanitizes through the BUNDLED DOMPurify, and its allow-list is
   READABLE — so a stripped attribute is a testable invariant, not a mystery
   (cost: every label on the new /sentiment rings silently mis-positioned, with a
@@ -847,17 +850,19 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   default**, which is laxer in some places and stricter in others. It allows
   `alignment-baseline` and `baseline-shift` but **NOT `dominant-baseline`** —
   the obvious spelling for vertically centring SVG `<text>`, and the one
-  `rings._text` shipped with. Client-side every label dropped to the alphabetic
+  the ring dial's text builder shipped with. Client-side every label dropped to the alphabetic
   baseline while the **server-side string stayed correct**, so nothing in the
   suite could see it. Fixed with the pre-`dominant-baseline` idiom, `dy="0.35em"`
   (`rings._BASELINE_DY`), which is allow-listed and depends on no allow-list
   detail that can change under us; `sanitize=False` was considered and rejected
   as disproportionate for a dial. **The general fix is the test:**
-  `webgui/tests/test_rings.py::test_ring_svg_emits_nothing_dompurify_would_strip`
-  extracts the allow-list out of the shipped `nicegui/static/dompurify.mjs` (long
-  runs of quoted lowercase tokens, **dropping any run containing `script`** —
-  DOMPurify also ships DENY lists, and unioning those in blessed `<use>`) and
-  asserts every tag and attribute the builder emits survives it.
+  `webgui/tests/test_rings.py::_dompurify_allowlist` extracts the allow-list out
+  of the shipped `nicegui/static/dompurify.mjs` (long runs of quoted lowercase
+  tokens, **dropping any run containing `script`** — DOMPurify also ships DENY
+  lists, and unioning those in blessed `<use>`), and every hand-drawn SVG
+  builder's test (console dial, momentum, finder, persistence) asserts each tag
+  and attribute it emits survives it. (The ring dial itself was retired with the
+  console redesign and its builder removed 2026-09-19.)
 - **`vector-effect` is NOT allow-listed either — which makes a scaled `viewBox`
   a trap for any line you draw (2026-08-17, caught twice before shipping).** The
   standard way to stretch a drawing across a fluid-width box is
@@ -959,8 +964,7 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
 - Charts: **Highcharts** via `ui.highchart(options)` (the `nicegui-highcharts`
   element) — NOT Plotly. Build the options dict in a pure function so it's
   unit-testable; update in place with `el.options = fig; el.update()` (replaces the
-  old `update_figure`). Gauges are the shared `pages/gauge.py` angular gauge
-  (painted red→yellow→green rainbow face + needle). Heatmaps/bars in Gamma,
+  old `update_figure`). Heatmaps/bars in Gamma,
   line/column in Simulator, spline RRG in Sector Rotation, history line in Sentiment.
   **Gotchas (cost real time):** the `gauge` type auto-loads via `loadMore`, so pass
   NO `extras` — `extras=["highcharts-more"]` THROWS; `solid-gauge`/`heatmap` ARE
@@ -1391,18 +1395,9 @@ from repo_paths import PROXY_URL, APPSETTINGS, TOKENS, NICEGUI_PORT  # etc.
 
 ```toml
 proxy = 8100
-options_analytics = 8200
-approval = 8300
-dashboard_frontend = 5173
 nicegui = 8500            # the NiceGUI app
 nicegui_live = 8501       # the PUBLIC read-only screens (a second NiceGUI process)
 memurai = 6379            # Redis backbone (Tier 3)
-
-[ml_servers]              # external processes — not started by this repo
-MES = 8000
-MNQ = 8001
-ES  = 8004
-NQ  = 8005
 
 [services]                # Tier-2 domain services (repo_paths → SERVICE_PORTS/SERVICE_URLS)
 sentiment = 8210
@@ -1527,7 +1522,26 @@ returns `(load, reset)` and encodes the contract every config file here follows:
 built-in defaults are the real values and the TOML only overrides · deep-merged
 so a file setting one key keeps every sibling · mtime-cached · **never raises**.
 `flow_alerts.py` and `market_calendar.py` still carry their own older copies of
-that logic; new config goes through the factory. ⚠ `load()` hands back the
+that logic; new config goes through the factory.
+
+**The operator OVERRIDE layer (2026-09-19): `config/local/<name>.toml`, gitignored.**
+Load order is built-in defaults ← tracked `config/<name>.toml` ← local override,
+and **every** loader honours it — the factory, the two older copies above, both
+commission modules and `theme.load_theme` all read through
+`config_toml.read_layered`, with `layered_mtime` as the cache key so a saved
+override is seen without a restart where the value is not a module constant.
+Settings → Configuration (and the Appearance editor) write ONLY the override,
+through `config_toml.write_overrides` (atomic, round-trip-checked), and only
+values that differ from the shipped file. ⚠ **Never make the app write a tracked
+config file**: it dirties the prod checkout and `tools/promote.sh` refuses a dirty
+tree — the Appearance editor did exactly that until 2026-09-19. ⚠ Under pytest the
+layer is **ignored** (`"pytest" in sys.modules`, not `PYTEST_CURRENT_TEST`, because
+module-level constants resolve at collection time), so a tuned prod checkout still
+tests the shipped values; a test of the layer sets
+`TRADING_CONFIG_OVERRIDES_IN_TESTS=1`. `config/local/` is in
+`backup_local.DATA_TREES`, and `changes.jsonl` there is the edit history. ⚠ A loader
+added outside these must use `read_layered`, or the page will save a value the
+service never reads. ⚠ `load()` hands back the
 CACHED mapping, so **treat a config dict as read-only** — copying on every
 hot-path read would defeat the cache.
 
@@ -1553,7 +1567,7 @@ rather than merely policed.
 
 `config/theme.toml` is the single source of truth for the **webgui styling palette**
 (surfaces/cards/text, buttons incl. the 3D gradients, semantic state colors, the
-speedometer gauge face, the Sentiment/Rotation chart palette), loaded once at webgui
+Sentiment/Rotation chart palette), loaded once at webgui
 startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
 restyle without code changes; missing keys fall back to the built-in dark-navy defaults.
 See the "App theme — dark-navy 'dashboard'" section. **Six sections are page-scoped
@@ -1670,9 +1684,8 @@ deleted-client case, via `ui_guard`. Anything else propagates so NiceGUI logs it
 predicates**. Ten duplicated holiday sets and fourteen hardcoded window constants
 were consolidated onto it. **Do not add a new holiday literal or window constant
 anywhere** — add it here, or to `config/sessions.toml`. The two `tools/` copies went on 2026-08-20 (their justifying comment named the
-wrong module — market_calendar pulls in no heavy deps, measured). The one site
-left outside it is `claude-driver/config.py` (legacy; its morning-agent consumers were deleted
-2026-07-08, only `RISK_LIMITS` is still read), deliberately exempt.
+wrong module — market_calendar pulls in no heavy deps, measured). The last site
+outside it, `claude-driver/config.py`, was deleted with that folder on 2026-09-19.
 `shared/` is a namespace package, so
 `from shared.market_calendar import ...` resolves once the repo root is on
 `sys.path`; legacy app-dir callers (`options-scanner/scanner.py`,
@@ -2990,8 +3003,8 @@ cosmetic: it joins `calc_summary_generic`'s front-expiry computation, and if it
 were earlier than the real option leg's, the option would be priced with time
 remaining at the wrong horizon — a payoff diagram that is not a payoff. Closed at
 three writers (`build_default_legs` never sets one, `retype_leg` clears both
-fields when a leg crosses the stock/option boundary, `set_legs_expiry` skips
-share legs) **and** at the chokepoint both summary paths share:
+fields when a leg crosses the stock/option boundary, the leg editor's
+`apply_expiry` skips share legs) **and** at the chokepoint both summary paths share:
 `_leg_expiry_years` returns `None` for a share leg regardless, since a pasted or
 hand-built leg set can still arrive carrying one.
 
@@ -3942,11 +3955,12 @@ the healthy signal.) **sentiment_svc reads 325 passed / 1 failed** — the docum
 
 ## External processes (not in this repo)
 
-The ML prediction servers (MES 8000 / MNQ 8001 / ES 8004 / NQ 8005) and the
-options analytics service on 8200 are **separate, external processes**. Nothing
-in this repo calls them any more (the claude-driver scripts that did were removed
-2026-09-11); their ports stay in `config/ports.toml` only because
-`claude-driver/config.py` still reads them.
+None. The ML prediction servers (MES 8000 / MNQ 8001 / ES 8004 / NQ 8005) and the
+options analytics service on 8200 are separate processes this repo no longer
+calls: the claude-driver scripts that did were removed 2026-09-11, and the
+`claude-driver/` folder, its `config.py` and those ports' `config/ports.toml`
+entries (plus `approval` and `dashboard_frontend`) went on 2026-09-19. The
+driver's daily-loss halt now comes only from `config/driver.toml`.
 
 ## Design / plan docs
 

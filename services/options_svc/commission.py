@@ -10,6 +10,7 @@ import sys, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))  # repo root
 from repo_paths import REPO_ROOT  # noqa: E402
+from shared import config_toml as _config_toml  # noqa: E402
 
 try:
     import tomllib  # py3.11+
@@ -22,8 +23,8 @@ except ModuleNotFoundError:  # pragma: no cover
 
 def _load_rates() -> dict:
     path = pathlib.Path(REPO_ROOT) / "config" / "commissions.toml"
-    with open(path, "rb") as fh:
-        return tomllib.load(fh)
+    # The tracked file plus the operator's config/local/ override.
+    return _config_toml.read_layered(path)
 
 _RATES = _load_rates()
 

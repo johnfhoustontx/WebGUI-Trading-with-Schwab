@@ -7,6 +7,7 @@ import logging
 import tomllib
 
 from repo_paths import FLOW_ALERTS_TOML
+from shared import config_toml as _config_toml
 from services import _degrade
 
 log = logging.getLogger(__name__)
@@ -59,16 +60,12 @@ def load_thresholds() -> dict:
 
     mtime-cached: this is read on every 1-min flow-alert tick, but the file
     rarely changes — re-parse only when its mtime moves (or it's missing)."""
-    try:
-        import os
-        mtime = os.stat(_TOML_PATH).st_mtime
-    except Exception:
-        mtime = None
+    # Both layers: the tracked file and the operator's config/local/ override.
+    mtime = _config_toml.layered_mtime(_TOML_PATH)
     if _TOML_CACHE["cfg"] is not None and _TOML_CACHE["mtime"] == mtime:
         return _TOML_CACHE["cfg"]
     try:
-        with open(_TOML_PATH, "rb") as fh:
-            cfg = _merge(_DEFAULTS, tomllib.load(fh))
+        cfg = _merge(_DEFAULTS, _config_toml.read_layered(_TOML_PATH))
     except Exception:
         log.debug("flow_alerts.toml load failed → defaults", exc_info=True)
         cfg = _merge(_DEFAULTS, {})

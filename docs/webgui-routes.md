@@ -815,7 +815,24 @@ Claude Trades (nav label since 2026-07-11; **autonomous monitor + override** [le
 
 ## `/settings`
 
-Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound; ticker toggle/speed; **Appearance** — edits every `config/theme.toml` knob in-app (7 sections: palette / semantic / 3D buttons / gauge / charts / typography / menu; color pickers + text inputs, `theme.knob_label` humanized labels) with **Save** (comment-preserving `theme.save_theme_values`), **Save & restart web GUI** (reuses the Status page's windowless self-restart), and a confirm-gated **Reset to defaults**; **API usage** (2026-07-13) — outbound Schwab API-call counts Today / last 7 / last 30 days, read off-thread from the proxy's `GET /stats/api_calls`, **plus Claude (Anthropic) call counts** from the cross-tier `shared/anthropic_counter.py` store (`shared/data/anthropic_call_counts.db`, WAL — recorded immediately before every `messages.create` at the three call sites: driver decider / Gamma Analyze / market-ticker summary; services need a restart to start counting) (counted per actual HTTP request at the marketdata rate-limit chokepoint + the trader loop → per-day rows in `schwab-proxy/data/api_call_counts.db`, forward-only; requires a proxy restart to start counting); **Maintenance** (2026-07-13) — a confirm-gated **Vacuum GEX history DB** button (optional purge-first switch) that runs `tools/vacuum_gex.py` as a subprocess off-thread and prints the before→after size — the tool still refuses while the collector is active)
+**Two sub-tabs since 2026-09-19** (mounted in `shell.subtab_slot()`, breadcrumb
+bound): **General** — everything below — and **Configuration**
+(`pages/config_editor.py`). Configuration draws every `config/*.toml` setting from
+the `webgui/config_schema.py` catalogue, grouped by purpose (Trade selection · Exits
+& trade management · Autonomous driver · Flow alerts · Market hours & schedules ·
+Symbols & watchlists · Sector map · Commissions, plus Ports and Environments
+read-only): plain-English label and help per key, unit suffixes, fractions typed as
+percents, inline validation that says why a value is refused, cross-field checks on
+Save, a per-key **Shipped: X** chip with a reset button, a per-category reset, a
+search box across every setting, and a sticky Save / Discard bar. Save writes only
+the differences to `config/local/<name>.toml` (`config_store`, never the tracked
+file), logs each change to `config/local/changes.jsonl` (the "Recent changes"
+panel), and opens a restart dialog listing the units the changed keys need
+(`config_schema.restart_for`; `timers` means `generate_units --install`), warning
+during market hours. `test_config_schema.py` fails on any TOML key with no catalogue
+entry and round-trips every shipped value through its own field.
+
+General — the original page. Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound; ticker toggle/speed; **Appearance** — edits every `config/theme.toml` knob in-app (7 sections: palette / semantic / 3D buttons / gauge / charts / typography / menu; color pickers + text inputs, `theme.knob_label` humanized labels) with **Save** (`theme.save_theme_values`, which since 2026-09-19 writes the `config/local/theme.toml` override, never the tracked file), **Save & restart web GUI** (reuses the Status page's windowless self-restart), and a confirm-gated **Reset** (`theme.reset_theme`, drops the override); **API usage** (2026-07-13) — outbound Schwab API-call counts Today / last 7 / last 30 days, read off-thread from the proxy's `GET /stats/api_calls`, **plus Claude (Anthropic) call counts** from the cross-tier `shared/anthropic_counter.py` store (`shared/data/anthropic_call_counts.db`, WAL — recorded immediately before every `messages.create` at the three call sites: driver decider / Gamma Analyze / market-ticker summary; services need a restart to start counting) (counted per actual HTTP request at the marketdata rate-limit chokepoint + the trader loop → per-day rows in `schwab-proxy/data/api_call_counts.db`, forward-only; requires a proxy restart to start counting); **Maintenance** (2026-07-13) — a confirm-gated **Vacuum GEX history DB** button (optional purge-first switch) that runs `tools/vacuum_gex.py` as a subprocess off-thread and prints the before→after size — the tool still refuses while the collector is active)
 
 ## `/eod` · `/eod/detail`
 

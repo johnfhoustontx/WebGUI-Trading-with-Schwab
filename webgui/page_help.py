@@ -1274,7 +1274,15 @@ Shows whether each part of the app is alive.
     "/settings": """
 **Settings — the simple version**
 
-Controls the alert chimes, notifications, the ticker, and the app's look.
+Two tabs. **General** holds the app's own preferences (below). **Configuration**
+holds every trading setting — scanner floors, exit rules, the driver's risk
+limits, flow alerts, market hours and schedules, symbols, the sector map and
+commissions — each with a plain-English explanation. Changes are saved as
+overrides on top of the shipped values (Reset always goes back), and **Save**
+offers to restart the services that read them.
+
+The General tab controls the alert chimes, notifications, the ticker, and the
+app's look.
 
 - **Audio alert / sound / volume** — what plays when new signals appear.
 - **Market-hours only / minimum score** — when the app is allowed to bother you.
@@ -1368,6 +1376,13 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
                  "right.",
         "Directional": "Single-leg long or short calls/puts — a plain bullish or "
                        "bearish bet, scored on fit + quality (not the premium model).",
+    },
+    "/settings": {
+        "General": "App preferences: alert sounds, spoken alerts, the ticker, "
+                   "appearance, API usage and maintenance.",
+        "Configuration": "Every trading setting — scanner floors, exit rules, the "
+                         "driver's risk limits, flow alerts, schedules, symbols, "
+                         "the sector map and commissions — with plain-English help.",
     },
     "/options/gamma": {  # Dealer Positioning — the analytics lenses
         "GEX": "Gamma exposure by strike — where dealers must hedge. Big positive "

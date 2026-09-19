@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-18</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-19</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -146,7 +146,11 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </li>
 <li><a href="#system">SYSTEM</a><ul>
 <li><a href="#system-status">System Status</a></li>
-<li><a href="#settings">Settings</a></li>
+<li><a href="#settings">Settings</a><ul>
+<li><a href="#configuration">Configuration</a></li>
+<li><a href="#general">General</a></li>
+</ul>
+</li>
 <li><a href="#stop-all-services">Stop All Services</a></li>
 <li><a href="#sign-out">Sign out</a></li>
 </ul>
@@ -2663,7 +2667,82 @@ fetch anything.</p>
 </blockquote>
 <h2 id="settings">Settings</h2>
 <p><strong>Route:</strong> <code>/settings</code> — a standalone item at the <strong>foot of the rail</strong>, with System
-Status and Stop All Services.</p>
+Status and Stop All Services. It has two tabs: <strong>General</strong> (your app preferences)
+and <strong>Configuration</strong> (the trading settings).</p>
+<h3 id="configuration">Configuration</h3>
+<p>Every setting the trading services use — the thresholds that used to mean editing
+a file on the server — in one place, grouped by what they do:</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>What it controls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Trade selection</strong></td>
+<td>Volatility (IV rank) floors and ceilings, minimum credit, directional and single-option rules, the score a signal needs to be recorded</td>
+</tr>
+<tr>
+<td><strong>Exits &amp; trade management</strong></td>
+<td>Take profit, stop loss, time and delta stops, the profit-lock ladder, per-structure rules, Rescue board warnings</td>
+</tr>
+<tr>
+<td><strong>Autonomous driver</strong></td>
+<td>Daily targets, risk limits, the loss halt, decision cadence</td>
+</tr>
+<tr>
+<td><strong>Flow alerts</strong></td>
+<td>Each detector's thresholds, and which alerts reach your phone</td>
+</tr>
+<tr>
+<td><strong>Market hours &amp; schedules</strong></td>
+<td>Session times, operating windows, and the time of every scheduled job (briefings, digests, reports)</td>
+</tr>
+<tr>
+<td><strong>Symbols &amp; watchlists</strong></td>
+<td>What the gamma collector polls, the BIG10 basket, the Net Prem groups</td>
+</tr>
+<tr>
+<td><strong>Sector map</strong></td>
+<td>Which sector each symbol counts toward for the sector cap</td>
+</tr>
+<tr>
+<td><strong>Commissions</strong></td>
+<td>Schwab's per-contract rates</td>
+</tr>
+<tr>
+<td><strong>Ports / Environments</strong></td>
+<td>Shown for reference only</td>
+</tr>
+</tbody>
+</table>
+<p>How to use it:</p>
+<ol>
+<li>Pick a category on the left, or type in <strong>Search</strong> (for example <em>take profit</em>,
+   <em>VIX</em>, <em>delta</em>) to find a setting anywhere.</li>
+<li>Change a value. Each row explains the setting in plain words. Percentages are
+   typed as percents (type <code>50</code> for 50%). A value outside its allowed range is
+   refused on the spot, with a sentence saying why.</li>
+<li>A changed row shows <strong>Unsaved</strong>; a row that differs from the shipped value shows
+   <strong>Shipped: …</strong> and a reset button that puts it back.</li>
+<li>Press <strong>Save changes</strong> at the bottom. The app then lists the services that must
+   restart to use the new values and offers <strong>Restart now</strong>. During market hours it
+   warns you first, because restarting the options service loses a minute or two
+   of gamma collection. You can choose <strong>Later</strong>; a yellow banner reminds you until
+   you restart.</li>
+</ol>
+<blockquote>
+<p><strong>Your changes are kept separately from the shipped settings.</strong> They are saved as
+overrides, so app updates never overwrite them, <strong>Reset</strong> always takes you back,
+and <strong>Recent changes</strong> at the bottom lists what was changed and when.</p>
+<p>Some settings cost money or API budget when you loosen them — each category
+with that risk shows a yellow note (for example, every scheduled Claude briefing
+is a paid call, and each symbol added to collection costs about 440 Schwab calls a
+day).</p>
+</blockquote>
+<h3 id="general">General</h3>
 <p>Preferences, all saved on your machine:</p>
 <ul>
 <li><strong>Scanner alerts</strong> — enable the audio alert, pick the sound (chime / bell /
@@ -2688,7 +2767,8 @@ Status and Stop All Services.</p>
 <li><strong>Show the ticker</strong> — the scrolling bar at the bottom of every page, with a
   speed setting. It only shows or hides the marquee — see the note below.</li>
 <li><strong>Appearance</strong> — every colour, font and menu style, in seven tabs. <strong>Save &amp;
-  restart web GUI</strong> applies the change; <strong>Reset to defaults</strong> is confirm-gated.</li>
+  restart web GUI</strong> applies the change; <strong>Reset</strong> (confirm-gated) returns to the
+  shipped theme.</li>
 <li><strong>API usage</strong> — how many calls the app has made to <strong>Schwab</strong> (counted at the
   gateway) and to <strong>Claude</strong> (counted at each call site), for today, the last 7 days
   and the last 30.</li>

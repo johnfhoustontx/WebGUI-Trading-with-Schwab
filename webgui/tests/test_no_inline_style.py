@@ -186,7 +186,9 @@ PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
                  # Dossier — pure today; it joins the guard beside desk.py.
                  "structure.py",
                  # The Symbol Dossier's pure fact-builders, and its page.
-                 "symbol_facts.py", "symbol.py"]
+                 "symbol_facts.py", "symbol.py",
+                 # Settings -> Configuration.
+                 "config_editor.py"]
 
 
 def test_utility_pages_have_no_inline_style():
