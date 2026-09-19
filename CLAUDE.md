@@ -1413,6 +1413,22 @@ driver    = 8214
 market    = 8215
 ```
 
+**STANDING RULE — configurable by default (the user's instruction, 2026-09-19).**
+Where it is possible, a value an operator could reasonably want to tune — a
+threshold, a window, a cadence, a limit, a symbol list, a model name, a TTL —
+lives in a `config/*.toml` file read through `shared/config_toml.toml_loader`,
+**not** as a literal in code. Two obligations come with it:
+1. **New code** puts every such value in config from the start.
+2. **Code you touch** that already hard-codes one moves it while you are there.
+A value that goes into a TOML must also get an entry in
+`webgui/config_schema.py`, the catalogue behind **Settings → Configuration**, so
+the operator can see and edit it with a plain-English label and help text. A key
+missing from the catalogue still works, but it is invisible in the app, and
+`webgui/tests/test_config_schema.py` fails on it. The exceptions are values that
+are not operator choices: mathematical constants, contract/unit conventions
+(100 shares per contract), data-driven colour maps, and anything whose change
+needs code to follow it.
+
 **Rule: never hard-code `D:\` paths or port numbers in the apps.** Add them to
 `repo_paths.py` / `config/ports.toml` and import them.
 
@@ -3237,10 +3253,7 @@ record), and an **undefined profit factor is omitted, not printed** — `None` m
 driver page shows "—" because there it is a labelled chip, where the absence is
 legible.
 
-⚠ **`manual_analytics()` exists and nothing consumes it** — the equity curve and
-MAE/MFE analytics, a separate unused surface from the scorecard, and the THIRD
-"built, never called" this audit has turned up (after the ratchet ladder and the
-IV history). Recorded so it is not rediscovered as new. And C5's **trade-plan
+**`manual_analytics()` IS consumed** — `handlers` publishes it to `cache:options:paper_analytics`, and the Paper Account page's equity curve and excursion (MAE/MFE) panel read it. This file said otherwise until 2026-09-19. And C5's **trade-plan
 snapshot did not ship**: "the rules in force at entry" is now a much larger object
 than when it was written (six of those rules moved today) and needs a granularity
 decision of its own, while a free-text thesis implies a workflow change on a book

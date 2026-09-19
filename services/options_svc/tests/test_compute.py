@@ -521,7 +521,6 @@ def test_the_payoff_curve_is_computed_only_for_rows_that_survive_the_cut(monkeyp
     assert sorted(d for _, _, d in seen) == sorted(s.get("dte") for s in out["signals"])
 
 
-
 def _income_inputs(monkeypatch):
     """The income window over the symmetric ladder: one 35-DTE expiry and a PCS +
     CCS out of the stubbed spread screen, so ``income_scan`` emits rows."""
@@ -1001,7 +1000,7 @@ def test_analyze_paper_extracts_verdict_action(monkeypatch):
     monkeypatch.setitem(_sys.modules, "paper_trader",
                         _types.SimpleNamespace(get_all_trades=lambda: [trade]))
     fake_ta = _types.SimpleNamespace(
-        analyze_trade=lambda client, t, iv: {"verdict": {"action": "CLOSE"}})
+        analyze_trade=lambda client, t, iv, earnings_date=None: {"verdict": {"action": "CLOSE"}})
     monkeypatch.setitem(_sys.modules, "trade_analyzer", fake_ta)
 
     out = compute.analyze_paper("T1")
@@ -1026,7 +1025,7 @@ def test_analyze_paper_maps_live_detail(monkeypatch):
                      "unrealized_pnl": 12.0},
     }
     monkeypatch.setitem(_sys.modules, "trade_analyzer",
-                        _types.SimpleNamespace(analyze_trade=lambda c, t, i: result))
+                        _types.SimpleNamespace(analyze_trade=lambda c, t, i, earnings_date=None: result))
 
     out = compute.analyze_paper("T1")
     d = out["detail"]
@@ -1045,7 +1044,7 @@ def test_analyze_paper_defensive_on_missing_verdict(monkeypatch):
     monkeypatch.setitem(_sys.modules, "paper_trader",
                         _types.SimpleNamespace(get_all_trades=lambda: []))
     monkeypatch.setitem(_sys.modules, "trade_analyzer",
-                        _types.SimpleNamespace(analyze_trade=lambda c, t, i: None))
+                        _types.SimpleNamespace(analyze_trade=lambda c, t, i, earnings_date=None: None))
 
     out = compute.analyze_paper("gone")
     assert out["trade_id"] == "gone" and out["symbol"] is None
@@ -1061,7 +1060,7 @@ def test_analyze_paper_guards_runtimeerror_no_live_data(monkeypatch):
     monkeypatch.setitem(_sys.modules, "paper_trader",
                         _types.SimpleNamespace(get_all_trades=lambda: [trade]))
 
-    def _boom(c, t, i):
+    def _boom(c, t, i, earnings_date=None):
         raise RuntimeError("live data cannot be fetched")
 
     monkeypatch.setitem(_sys.modules, "trade_analyzer",
@@ -1082,7 +1081,7 @@ def test_analyze_paper_expired_trade_skips_engine_with_note(monkeypatch):
     monkeypatch.setitem(_sys.modules, "paper_trader",
                         _types.SimpleNamespace(get_all_trades=lambda: [trade]))
 
-    def _should_not_run(c, t, i):
+    def _should_not_run(c, t, i, earnings_date=None):
         raise AssertionError("analyze_trade must not be called for expired trades")
 
     monkeypatch.setitem(_sys.modules, "trade_analyzer",
@@ -1293,7 +1292,7 @@ def test_analyze_paper_note_none_on_success(monkeypatch):
                         _types.SimpleNamespace(get_all_trades=lambda: [trade]))
     monkeypatch.setitem(_sys.modules, "trade_analyzer",
                         _types.SimpleNamespace(
-                            analyze_trade=lambda c, t, i: {"verdict": {"action": "HOLD"}}))
+                            analyze_trade=lambda c, t, i, earnings_date=None: {"verdict": {"action": "HOLD"}}))
 
     out = compute.analyze_paper("T1")
     assert out["action"] == "HOLD" and out["note"] is None
@@ -1317,7 +1316,7 @@ def test_analyze_paper_includes_rationale_and_metrics(monkeypatch):
         "greeks": {"current": {}}, "market": {},
     }
     monkeypatch.setitem(_sys.modules, "trade_analyzer",
-                        _types.SimpleNamespace(analyze_trade=lambda c, t, i: result))
+                        _types.SimpleNamespace(analyze_trade=lambda c, t, i, earnings_date=None: result))
 
     out = compute.analyze_paper("T1")
     assert out["action"] == "TAKE PROFIT"
@@ -2627,27 +2626,6 @@ def test_gamma_analyze_degrades_when_no_chains(monkeypatch):
     assert "could not fetch" in out["html"].lower()
 
 
-# ── Header helpers (moved from webgui/tests/test_options_header.py) ──────────
-def test_sentiment_dot_no_data_when_inactive():
-    assert compute.sentiment_dot({"active": False})[1] == "No data"
-    assert compute.sentiment_dot(None)[1] == "No data"
-
-
-def test_sentiment_dot_bullish_when_ccs_blocked():
-    assert compute.sentiment_dot(
-        {"active": True, "allow_ccs": False, "allow_pcs": True})[1] == "Bullish"
-
-
-def test_sentiment_dot_bearish_when_pcs_blocked():
-    assert compute.sentiment_dot(
-        {"active": True, "allow_ccs": True, "allow_pcs": False})[1] == "Bearish"
-
-
-def test_sentiment_dot_neutral_when_both_allowed():
-    assert compute.sentiment_dot(
-        {"active": True, "allow_ccs": True, "allow_pcs": True})[1] == "Neutral"
-
-
 def test_quote_last_extracts_last_price():
     raw = {"SPY": {"quote": {"lastPrice": 742.36}}}
     assert compute.quote_last(raw, "SPY") == 742.36
@@ -2664,42 +2642,6 @@ class _FakeQuotesResp:
 
     def json(self):
         return self._data
-
-
-def test_refresh_header_shape(monkeypatch):
-    raw = {
-        "$SPX": {"quote": {"lastPrice": 5400.12}},
-        "SPY": {"quote": {"lastPrice": 742.36}},
-        "QQQ": {"quote": {"lastPrice": 480.0}},
-        "$VIX": {"quote": {"lastPrice": 14.2}},
-    }
-    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes",
-                        lambda syms: _FakeQuotesResp(raw))
-    monkeypatch.setattr(compute, "vix_regime",
-                        lambda v: {"label": "Calm", "color": "#1D9E75"})
-    monkeypatch.setattr(compute, "evaluate_regime",
-                        lambda: {"active": True, "allow_ccs": True, "allow_pcs": True})
-
-    out = compute.refresh_header()
-    assert out["prices"] == {"$SPX": 5400.12, "SPY": 742.36, "QQQ": 480.0}
-    assert out["vix"] == 14.2
-    assert out["vix_regime"] == {"label": "Calm", "color": "#1D9E75"}
-    assert out["sentiment"] == {"color": "#EFC347", "label": "Neutral"}  # neutral dot
-
-
-def test_refresh_header_quotes_failure_is_blank(monkeypatch):
-    def _boom(syms):
-        raise RuntimeError("proxy down")
-
-    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes", _boom)
-    monkeypatch.setattr(compute, "evaluate_regime", lambda: None)
-
-    out = compute.refresh_header()
-    assert out["prices"] == {"$SPX": None, "SPY": None, "QQQ": None}
-    assert out["vix"] is None
-    assert out["vix_regime"] == {}
-    # No active regime -> no-data dot.
-    assert out["sentiment"] == {"color": "#666666", "label": "No data"}
 
 
 # ── Simulator (moved from webgui/pages/options/simulator.py) ─────────────────
@@ -3495,22 +3437,6 @@ def test_calc_compute_multiday_builds_now_and_future_columns(monkeypatch):
     assert seen["times"][0] > 0 and seen["times"][-1] == 0.0
     # Summary priced at the intraday "Now" T (NOT the old 1/365 clamp).
     assert seen["T"] == pytest.approx(seen["times"][0], rel=1e-9)
-
-
-def test_refresh_header_sentiment_failure_is_no_data(monkeypatch):
-    raw = {"$VIX": {"quote": {"lastPrice": 22.0}}}
-    monkeypatch.setattr(compute._proxy.schwab_py_client, "get_quotes",
-                        lambda syms: _FakeQuotesResp(raw))
-    monkeypatch.setattr(compute, "vix_regime", lambda v: {"label": "Elevated"})
-
-    def _boom():
-        raise RuntimeError("bridge missing")
-
-    monkeypatch.setattr(compute, "evaluate_regime", _boom)
-
-    out = compute.refresh_header()
-    assert out["vix"] == 22.0
-    assert out["sentiment"] == {"color": "#666666", "label": "No data"}
 
 
 # ── Intraday GEX history collection ─────────────────────────────────────────

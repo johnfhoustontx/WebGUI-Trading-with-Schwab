@@ -68,7 +68,7 @@ _BRANCH_HANDLERS = (
     "refresh_paper_account", "refresh_paper_trades", "refresh_captured",
     "publish_captured_closed", "publish_captured_performance",
     "refresh_gamma", "publish_gamma_symbols",
-    "publish_gex_status", "publish_gamma_briefing_index", "refresh_header",
+    "publish_gex_status", "publish_gamma_briefing_index", "refresh_matrix_spots",
     "collect_gex_history", "refresh_gamma_current", "refresh_gamma_published",
     "run_driver_manage_and_refresh", "run_captured_manage_and_publish",
     "run_paper_entry_and_manage", "run_scheduled_gamma_analyze",

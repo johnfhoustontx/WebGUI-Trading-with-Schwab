@@ -260,19 +260,19 @@ def paper_cycle_due(now, ran_slots):
     return None
 
 
-# ── Per-tick refresh gating (header + GEX status) ───────────────────────────
-# refresh_header (a proxy quotes call + bridge read) and publish_gex_status (a
+# ── Per-tick refresh gating (matrix live spots + GEX status) ────────────────
+# refresh_matrix_spots (a proxy quotes call) and publish_gex_status (a
 # SQLite read + cache write) used to run on EVERY 30 s tick, 24/7 — making proxy
 # calls + DB opens + Redis writes all night and all weekend with no browser open.
 # Gate them: every tick during market hours (their natural ~30 s cadence), but
 # only once per _OFFHOURS_INTERVAL_MIN slot off-hours/weekends/holidays — enough
-# to keep the header/status current for a service started off-hours, without the
+# to keep the live spots/status current for a service started off-hours, without the
 # round-the-clock churn.
 _OFFHOURS_INTERVAL_MIN = 5
 
 
 def periodic_refresh_due(now, last_slot):
-    """(should_refresh, slot) for the per-tick header + GEX-status refreshes.
+    """(should_refresh, slot) for the per-tick matrix-spot + GEX-status refreshes.
 
     Trading day within market hours → always True (refresh every tick), slot
     unchanged. Otherwise → True at most once per _OFFHOURS_INTERVAL_MIN-minute
@@ -526,10 +526,10 @@ def calibration_due(now, last_session):
 
 
 async def loop(bus):
-    """Server-side 15-min auto-scan + gated header/GEX-status refresh.
+    """Server-side 15-min auto-scan + gated live-spot/GEX-status refresh.
 
-    Each 30 s tick: refresh the compact header view (quotes + VIX regime +
-    sentiment dot) + GEX-status view — every tick during market hours, throttled
+    Each 30 s tick: overlay live spots onto the Opportunity Board matrix
+    + refresh the GEX-status view — every tick during market hours, throttled
     to every _OFFHOURS_INTERVAL_MIN off-hours (see periodic_refresh_due) so the
     service stops the round-the-clock proxy/SQLite/Redis churn — then, on each
     trading-day 15-min slot within 08:00-15:15 CT, run one rescan (plus 1-min GEX
@@ -558,7 +558,7 @@ async def loop(bus):
     last_manage_slot = None  # 1-min DRIVER paper auto-manage slot (see manage_due)
     last_captured_manage_slot = None  # 5-min captured auto-manage slot (see captured_manage_due)
     paper_ran = set()  # (date, hour) of fired hourly manual paper cycles (see paper_cycle_due)
-    last_periodic_slot = None  # header + gex_status throttle slot (see periodic_refresh_due)
+    last_periodic_slot = None  # matrix spots + gex_status throttle slot (see periodic_refresh_due)
     calibration_session = None  # nightly calibration session sentinel (see calibration_due)
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
     action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
@@ -689,9 +689,9 @@ async def loop(bus):
 
         async def _periodic_branch():
             try:
-                await loop_.run_in_executor(None, handlers.refresh_header, bus)
+                await loop_.run_in_executor(None, handlers.refresh_matrix_spots, bus)
             except Exception:
-                log.exception("refresh_header branch degraded")
+                log.exception("refresh_matrix_spots branch degraded")
             try:
                 await loop_.run_in_executor(None, handlers.publish_gex_status, bus)
             except Exception:

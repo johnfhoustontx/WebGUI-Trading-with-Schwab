@@ -45,8 +45,7 @@ if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
 
 import scanner_engine as se  # noqa: E402
-from scanner_engine import run_full_scan, vix_regime  # noqa: E402
-from regime_filter import evaluate_regime  # noqa: E402
+from scanner_engine import run_full_scan  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
 
 from services import _degrade  # noqa: E402
@@ -3539,7 +3538,9 @@ def analyze_paper(trade_id) -> dict:
 
     note = None
     try:
-        result = trade_analyzer.analyze_trade(_proxy.schwab_py_client, t, None)
+        _cov, earnings_date = scan_earnings(t.get("symbol"))
+        result = trade_analyzer.analyze_trade(_proxy.schwab_py_client, t, None,
+                                              earnings_date=earnings_date)
     except Exception as exc:
         result = None
         note = f"Live data unavailable: {exc}"
@@ -3740,7 +3741,6 @@ def reprice_captured() -> dict:
 # includes TARGET_HIT for the flag list above).
 _LOSS_STOP_CODES = ("MONEY_STOP", "DELTA_STOP", "TIME_STOP")
 _CUT_HEAT_FLOOR = 60.0
-
 
 
 def _earnings_for(rows) -> dict:
@@ -4088,30 +4088,10 @@ def captured_closed_today() -> dict:
     return {"closed": closed, "total_realized": total}
 
 
-# ── Header strip (ported from webgui/pages/options/header.py) ───────────────
-# These were the GUI's header helpers; they're pure and now run here so the GUI
-# tier reads the whole header view from the bus (no proxy/engine call). As with
-# run_scan, the ``scoring`` collision can't occur in this process (no sentiment
-# code is loaded), so the eager imports above bind ``vix_regime``/``evaluate_regime``
-# unambiguously.
-
-HEADER_SYMBOLS = ["$SPX", "SPY", "QQQ", "$VIX"]
-
-_DOT_NO_DATA = ("#666666", "No data")
-_DOT_BULLISH = ("#1D9E75", "Bullish")
-_DOT_BEARISH = ("#E24B4A", "Bearish")
-_DOT_NEUTRAL = ("#EFC347", "Neutral")
-
-
-def sentiment_dot(regime):
-    """(color, label) for the sentiment indicator from an evaluate_regime() dict."""
-    if not regime or not regime.get("active"):
-        return _DOT_NO_DATA
-    if not regime.get("allow_ccs"):
-        return _DOT_BULLISH      # CCS blocked -> market biased up
-    if not regime.get("allow_pcs"):
-        return _DOT_BEARISH      # PCS blocked -> market biased down
-    return _DOT_NEUTRAL
+# ── Live quote helpers (the Opportunity Board's ~30 s spot overlay) ─────────
+# The header view these once served (cache:options:header) lost its last reader
+# on 2026-08-24 and was removed on 2026-09-19; the per-tick branch now calls
+# ``handlers.refresh_matrix_spots`` directly.
 
 
 def quote_last(raw, symbol):
@@ -4159,43 +4139,12 @@ def apply_live_spots(view, quotes_raw):
 def matrix_quotes(symbols):
     """One batched /quotes fetch for the matrix live-spot overlay. Defensive → {}.
 
-    Mirrors ``refresh_header``'s batched-quote idiom so the proxy dependency stays
-    in the compute layer (the handler only reads cache + calls this)."""
+    Keeps the proxy dependency in the compute layer (the handler only reads cache + calls this)."""
     try:
         return _proxy.schwab_py_client.get_quotes(list(symbols)).json() or {}
     except Exception:  # noqa: BLE001
         log.warning("matrix_quotes fetch degraded → {}", exc_info=True)
         return {}
-
-
-def refresh_header() -> dict:
-    """Compute the compact header view (quotes + VIX regime + sentiment dot).
-
-    Returns ``{"prices": {"$SPX","SPY","QQQ"}, "vix", "vix_regime", "sentiment"}``.
-    Defensive throughout: a quotes failure yields blank prices/regime; a sentiment
-    failure yields the no-data dot — the view is always a well-formed dict."""
-    try:
-        raw = _proxy.schwab_py_client.get_quotes(HEADER_SYMBOLS).json() or {}
-    except Exception:
-        log.warning("header quotes fetch degraded → blank prices", exc_info=True)
-        raw = {}
-
-    prices = {s: quote_last(raw, s) for s in ("$SPX", "SPY", "QQQ")}
-    vix = quote_last(raw, "$VIX")
-    regime = vix_regime(vix) or {} if isinstance(vix, (int, float)) else {}
-
-    try:
-        dot_color, dot_label = sentiment_dot(evaluate_regime())
-    except Exception:
-        log.warning("header sentiment dot degraded → no-data dot", exc_info=True)
-        dot_color, dot_label = _DOT_NO_DATA
-
-    return {
-        "prices": prices,
-        "vix": vix,
-        "vix_regime": regime,
-        "sentiment": {"color": dot_color, "label": dot_label},
-    }
 
 
 # ── Gamma (ported from webgui/pages/options/gamma.py) ───────────────────────
@@ -7193,7 +7142,6 @@ def analyze_history_doc(briefings, title="Gamma Briefings") -> str:
             f"<div class=\"ga-title\">{_h.escape(title)}</div>"
             f"<div class=\"ga-sub\">{len(parts)} briefing(s)</div>"
             f"{body}</div></body></html>")
-
 
 
 def _count_anthropic_call(client=None):

@@ -164,3 +164,18 @@ def test_a_missing_file_degrades_to_an_empty_map_rather_than_raising(monkeypatch
     sectors.reset_cache()
     assert sectors.sector_of("MU") is None
     assert sectors.group_key("MU") != "Information Technology"
+
+
+@pytest.mark.parametrize("symbol, sector", [
+    ("AAPL", "Information Technology"),
+    ("GOOGL", "Communication Services"),
+    ("NFLX", "Communication Services"),
+    ("WMT", "Consumer Staples"),
+    ("UBER", "Industrials"),
+    ("NLY", "Financials"),
+    ("GEV", "Industrials"),
+])
+def test_well_known_names_carry_their_GICS_sector(symbol, sector):
+    """The seed workbook swapped AAPL and GOOGL, and this map drives a live cap."""
+    from shared import sectors
+    assert sectors.sector_of(symbol) == sector

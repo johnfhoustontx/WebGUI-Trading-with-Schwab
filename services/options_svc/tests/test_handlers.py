@@ -114,42 +114,6 @@ def test_rescan_gate_rejects_malformed(monkeypatch):
     assert bus.cache_get("cache:options:scan") is None
 
 
-def test_refresh_header_caches_and_publishes(monkeypatch):
-    bus = Bus(fake=True)
-    view = {
-        "prices": {"$SPX": 5400.0, "SPY": 742.0, "QQQ": 480.0},
-        "vix": 14.2,
-        "vix_regime": {"label": "Calm", "color": "#1D9E75"},
-        "sentiment": {"color": "#EFC347", "label": "Neutral"},
-    }
-    monkeypatch.setattr(handlers.compute, "refresh_header", lambda: view)
-
-    sub = bus.subscribe("events:options:header")
-    handlers.refresh_header(bus)
-    msg = sub.get_message(timeout=1.0)
-    sub.close()
-
-    env = bus.cache_get("cache:options:header")
-    assert env is not None
-    assert env.payload == view
-    assert msg is not None and msg.get("version") == env.version
-
-
-def test_refresh_header_skips_unchanged(monkeypatch):
-    """An identical per-tick header view must NOT bump the version (no needless
-    GUI repaint). Changed data still bumps."""
-    bus = Bus(fake=True)
-    view = {"prices": {"$SPX": 5400.0}, "vix": 14.2}
-    monkeypatch.setattr(handlers.compute, "refresh_header", lambda: view)
-    handlers.refresh_header(bus)
-    v1 = bus.cache_get("cache:options:header").version
-    handlers.refresh_header(bus)  # identical compute output -> skip
-    assert bus.cache_get("cache:options:header").version == v1
-    monkeypatch.setattr(handlers.compute, "refresh_header", lambda: {"prices": {"$SPX": 5401.0}})
-    handlers.refresh_header(bus)  # changed -> bump
-    assert bus.cache_get("cache:options:header").version == v1 + 1
-
-
 def test_handle_command_rescan(monkeypatch):
     bus = Bus(fake=True)
     seen = {"calls": 0}
@@ -2274,29 +2238,6 @@ def test_refresh_matrix_spots_failure_does_not_raise(monkeypatch):
 
     monkeypatch.setattr(handlers.compute, "matrix_quotes", _boom)
     handlers.refresh_matrix_spots(bus)  # must not raise
-
-
-def test_refresh_header_invokes_matrix_spots(monkeypatch):
-    """refresh_header runs the matrix-spot overlay as a best-effort block."""
-    bus = Bus(fake=True)
-    monkeypatch.setattr(handlers.compute, "refresh_header", lambda: {"prices": {}})
-    called = {"n": 0}
-    monkeypatch.setattr(handlers, "refresh_matrix_spots",
-                        lambda b: called.__setitem__("n", called["n"] + 1))
-    handlers.refresh_header(bus)
-    assert called["n"] == 1
-
-
-def test_refresh_header_survives_matrix_spots_failure(monkeypatch):
-    bus = Bus(fake=True)
-    monkeypatch.setattr(handlers.compute, "refresh_header", lambda: {"prices": {}})
-
-    def _boom(b):
-        raise RuntimeError("overlay down")
-
-    monkeypatch.setattr(handlers, "refresh_matrix_spots", _boom)
-    handlers.refresh_header(bus)  # must not raise
-    assert bus.cache_get(handlers.CACHE_HEADER) is not None
 
 
 def test_run_flow_alerts_gamma_flip_baseline_then_transition(monkeypatch):

@@ -100,12 +100,12 @@ BOOKS = {
     # $5,000.004 - a room that is not a whole cent - against $4,487.06 open.
     "deploy_step": [(_raw("XOM", E1, 7.0), 1), (_raw("MSFT", E1, 7.0), 1),
                     (_raw("JPM", E1, 7.0), 1), (_raw("KO", E2, 7.0), 1),
-                    (_raw("UNH", E2, 7.0), 1), (_raw("AAPL", E2, 7.0), 1),
+                    (_raw("UNH", E2, 7.0), 1), (_raw("META", E2, 7.0), 1),
                     (_raw("CVX", E1, 2.8706), 1)],
     # $4,900 of open risk against a $5,000 deployment ceiling.
     "deployed": [(_r700("XOM", E1), 1), (_r700("MSFT", E1), 1),
                  (_r700("JPM", E1), 1), (_r700("KO", E2), 1),
-                 (_r700("UNH", E2), 1), (_r700("AAPL", E2), 1),
+                 (_r700("UNH", E2), 1), (_r700("META", E2), 1),
                  (_r700("CVX", E2), 1)],
 }
 

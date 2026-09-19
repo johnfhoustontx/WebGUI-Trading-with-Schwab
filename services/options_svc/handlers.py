@@ -191,8 +191,6 @@ EVENT_SCAN_DAY = "events:options:scan_day"
 CACHE_SCAN_FUNNEL = "cache:options:scan_funnel"
 EVENT_SCAN_FUNNEL = "events:options:scan_funnel"
 
-CACHE_HEADER = "cache:options:header"
-EVENT_HEADER = "events:options:header"
 
 CACHE_SWING = "cache:options:swing"
 EVENT_SWING = "events:options:swing"
@@ -760,27 +758,6 @@ def rescan(bus) -> None:
                                    seen_key=CACHE_NOTIFIED_SCAN, seed=seed)
     except Exception:  # noqa: BLE001
         log.exception("scanner push-notify failed (non-fatal)")
-
-
-def refresh_header(bus) -> None:
-    """Compute the compact header view and publish it to the bus.
-
-    No strict contract: the header view is a small, loosely-shaped read-only dict
-    (prices + vix + regime + sentiment dot) that only the header strip consumes,
-    so a Pydantic gate would be ceremony with no payoff (YAGNI). ``refresh_header``
-    is already fully defensive — it never returns a malformed shape — which is the
-    invariant the ScanResult gate exists to enforce for the heavier scan path."""
-    data = compute.refresh_header()
-    # Per-tick republisher: skip the version bump + publish when quotes/regime are
-    # byte-identical to the last write, so an unchanged header doesn't wake the
-    # GUI's version-poller into a needless repaint.
-    bus.cache_set(CACHE_HEADER, data, event=EVENT_HEADER, skip_unchanged=True)
-    # Best-effort ~30s live spot/day% overlay onto the 1-min matrix. Guarded so a
-    # matrix/quote failure can NEVER break the header refresh.
-    try:
-        refresh_matrix_spots(bus)
-    except Exception:
-        log.exception("refresh_matrix_spots after header degraded")
 
 
 def _cache_matrix(bus, view) -> None:
