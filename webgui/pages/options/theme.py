@@ -381,6 +381,10 @@ def build_tokens(theme):
             "rounded-[9px] min-h-[40px] font-semibold "
             f"shadow-[0_4px_14px_-4px_rgba({dr[0]},{dr[1]},{dr[2]},0.6)]"
         ),
+        # Quiet: text only, for a small link beside a control ("Why no trade?",
+        # "Change") that must not read as the page's action.
+        "BTN_QUIET": (f"bg-transparent text-[{p['muted']}] hover:text-[{p['title']}] "
+                      "rounded-[9px] min-h-[34px] px-2 font-medium"),
         "STRATEGY_BTN": (
             f"bg-[{p['input_bg']}] hover:border-[{p['focus']}] "
             f"border border-[{p['input_border']}] text-[{p['input_text']}] "
@@ -1275,6 +1279,7 @@ BTN = _TOKENS["BTN"]
 BTN_PRIMARY = _TOKENS["BTN_PRIMARY"]
 BTN_DANGER = _TOKENS["BTN_DANGER"]
 BTN_DANGER_SOLID = _TOKENS["BTN_DANGER_SOLID"]
+BTN_QUIET = _TOKENS["BTN_QUIET"]
 STRATEGY_BTN = _TOKENS["STRATEGY_BTN"]
 BTN_3D = _TOKENS["BTN_3D"]
 BTN_3D_DANGER = _TOKENS["BTN_3D_DANGER"]

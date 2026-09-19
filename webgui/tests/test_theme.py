@@ -67,7 +67,7 @@ def test_state_color_tokens_preserve_exact_hex():
 
 
 BTN_TOKENS = ["BTN", "BTN_PRIMARY", "BTN_DANGER", "BTN_DANGER_SOLID",
-              "BTN_3D", "BTN_3D_DANGER"]
+              "BTN_3D", "BTN_3D_DANGER", "BTN_QUIET"]
 
 
 def test_button_tokens_are_class_strings():
@@ -357,3 +357,10 @@ def test_palette_danger_wins_over_the_retired_key(tmp_path):
     p.write_text('[palette]\ndanger = "#111111"\n[buttons_3d]\nred_mid = "#222222"\n',
                  encoding="utf-8")
     assert theme.load_theme(p)["palette"]["danger"] == "#111111"
+
+
+def test_quiet_button_is_text_only():
+    toks = theme.build_tokens(theme.load_theme("Z:/nope.toml"))
+    q = toks["BTN_QUIET"]
+    assert "bg-transparent" in q and "text-[#7f8db0]" in q     # default muted
+    assert "border" not in q
