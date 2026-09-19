@@ -343,8 +343,9 @@ def test_danger_is_a_palette_colour(tmp_path):
 
 
 def test_a_saved_buttons_3d_red_mid_still_sets_danger(tmp_path):
-    """An override written before the retirement may still carry red_mid -
-    the one key of that section anything read. It keeps its colour."""
+    """A single TRACKED file (the override layer is off under pytest) that
+    still carries red_mid - the one key of that section anything read - and no
+    [palette].danger keeps its colour."""
     p = tmp_path / "theme.toml"
     p.write_text('[buttons_3d]\nred_mid = "#654321"\n', encoding="utf-8")
     t = theme.load_theme(p)

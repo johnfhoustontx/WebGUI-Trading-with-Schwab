@@ -143,22 +143,26 @@ def navigate_to(route: str, new_tab: bool = False) -> None:
 # are all chrome the public process does not mount, and moving them here would
 # ship rules for elements that do not exist.
 
+# The palette the two constants below are built from, so an Appearance edit
+# reaches the table and subtab chrome too (they hard-coded its hexes until
+# 2026-09-19).
+_P = theme.THEME["palette"]
+
 # Global table chrome (app-wide standard): EVERY data table gets a fixed (sticky)
 # header over a bounded, scrolling body, so the column headers stay visible as a long
 # table scrolls. Injected once per page by each entrypoint. Per-page table CSS
 # (.paper-table / .captured-table / .driver-table) may still set its own max-height —
 # its more-specific selector + later injection win over this baseline.
-TABLE_CSS = """
-.q-table__middle { max-height: 65vh; }
-/* Deep Slate table header: sticky, dark #141a30 inset, with uppercase faint
-   column labels (10.5px / 600 / .06em) — the trading-terminal look. */
-.q-table thead tr th {
-  position: sticky; top: 0; z-index: 1; background: #141a30;
-  font-size: 10.5px; font-weight: 600; letter-spacing: .06em;
-  text-transform: uppercase; color: #6d76a0;
-}
-/* Faint row dividers (Deep Slate) between body rows. */
-.q-table tbody tr:not(:last-child) td { border-bottom: 1px solid rgba(255,255,255,.04); }
+TABLE_CSS = f"""
+.q-table__middle {{ max-height: 65vh; }}
+/* Sticky header in the theme's inset tone; column labels in sentence case and
+   the eyebrow colour (the 2026-09-19 standard retired the uppercase tracking). */
+.q-table thead tr th {{
+  position: sticky; top: 0; z-index: 1; background: {_P['input_bg']};
+  font-size: 11px; font-weight: 600; color: {_P['icon']};
+}}
+/* Faint row dividers between body rows. */
+.q-table tbody tr:not(:last-child) td {{ border-bottom: 1px solid rgba(255,255,255,.04); }}
 """
 
 # Subtab row (a page's own view tabs, e.g. Gamma GEX/Charm/DEX/Vanna/Flow/Term)
@@ -169,17 +173,17 @@ TABLE_CSS = """
 # inline when it does not — see gamma.py), so it follows the page, not the shell:
 # the public /net-premium screen builds its group picker with this class and had
 # been drawing it as stock Quasar tabs.
-SUBTAB_CSS = """
-.compact-subtabs {
-  background: #0f1428; border-radius: 10px; padding: 3px 4px; min-height: 0;
-}
-.compact-subtabs .q-tab {
+SUBTAB_CSS = f"""
+.compact-subtabs {{
+  background: {_P['card_bg']}; border-radius: 10px; padding: 3px 4px; min-height: 0;
+}}
+.compact-subtabs .q-tab {{
   min-height: 26px; padding: 0 11px; margin-right: 2px;
-  border-radius: 7px; background: transparent; color: #8891ab;
-}
-.compact-subtabs .q-tab--active { background: rgba(255,255,255,.08); color: #eef1f6; }
-.compact-subtabs .q-tab__indicator { display: none; }
-.compact-subtabs .q-tab__label { font-size: 12px; }
+  border-radius: 7px; background: transparent; color: {_P['muted']};
+}}
+.compact-subtabs .q-tab--active {{ background: rgba(255,255,255,.08); color: {_P['title']}; }}
+.compact-subtabs .q-tab__indicator {{ display: none; }}
+.compact-subtabs .q-tab__label {{ font-size: 12px; }}
 """
 
 # ── a dashboard panel that has run out of width ──────────────────────────────

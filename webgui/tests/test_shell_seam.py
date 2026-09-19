@@ -408,3 +408,14 @@ def test_a_two_cell_pin_gets_a_two_cell_backdrop():
     # ⚠ it must NOT restate the gap reach: one ``margin-right`` in the whole
     # sheet is what ``test_the_pin_backdrop_covers_the_column_gap`` reads.
     assert "margin-right" not in wide, wide
+
+
+def test_table_and_subtab_chrome_follow_the_theme():
+    import shell
+    from pages.options import theme
+    p = theme.THEME["palette"]
+    assert f"background: {p['input_bg']};" in shell.TABLE_CSS
+    assert f"color: {p['icon']};" in shell.TABLE_CSS
+    assert "text-transform: uppercase" not in shell.TABLE_CSS   # sentence-case headers
+    assert f"background: {p['card_bg']};" in shell.SUBTAB_CSS
+    assert f"color: {p['muted']};" in shell.SUBTAB_CSS

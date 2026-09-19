@@ -308,9 +308,11 @@ def load_theme(path=None):
                         merged[sec][k] = v.strip()
         # [buttons_3d] retired 2026-09-19. A file that still carries its one live
         # key and no [palette].danger keeps that colour rather than silently
-        # falling back to the default red. Decided per LAYER, the operator's
-        # override first: the tracked file ships a danger, so the merged view
-        # always has one and would hide a red_mid an older override still holds.
+        # falling back to the default red. The operator's override file is
+        # checked FIRST, then the MERGED view (tracked + override) - not the
+        # tracked file alone. Override first because the tracked file ships a
+        # danger, so the merged view always has one and would hide a red_mid an
+        # older override still holds.
         def _set(v):
             return isinstance(v, str) and v.strip()
         for layer in (config_toml.read_overrides(path), data):
