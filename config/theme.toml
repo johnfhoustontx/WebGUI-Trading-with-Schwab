@@ -42,22 +42,13 @@ btn_hover    = "#20284a"       # secondary button + popup item hover
 btn_border   = "#2a3358"       # secondary button border
 primary      = "#6b86ff"       # primary button fill (blue accent)
 primary_hover = "#5877f2"      # primary button hover
+danger       = "#e5595b"       # solid danger fill (Stop all services, destructive confirms)
 
 [semantic]                     # ── state colors (labels, tiles, detail panel) ─
 positive = "#4dd6a0"           # good / up / profit (text-optimized green)
 warning  = "#e6b45a"           # caution / hold (amber)
 negative = "#f08183"           # bad / down / loss (text-optimized red)
 neutral  = "#9ba4c4"           # flat / no signal (secondary text)
-
-[buttons_3d]                   # ── the standard 3D gradient buttons ─────────
-blue_top    = "#8398ff"        # main action button — gradient top
-blue_mid    = "#6b86ff"        #   gradient middle (blue accent)
-blue_bottom = "#586fe6"        #   gradient bottom
-blue_lip    = "#3a4aa0"        #   the hard 3D "lip" shadow under the button
-red_top     = "#f08183"        # danger button (Delete etc.) — gradient top
-red_mid     = "#e5595b"        #   gradient middle
-red_bottom  = "#c9484a"        #   gradient bottom
-red_lip     = "#7a2a2b"        #   the 3D lip
 
 [charts]                       # ── Sentiment / Sector-Rotation value colors ─
 green  = "#4dd6a0"             # positive values (lines, zones, table text)

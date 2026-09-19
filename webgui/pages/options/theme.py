@@ -69,18 +69,14 @@ _DEFAULTS = {
         # buttons
         "btn_bg": "#15213b", "btn_hover": "#1b2950", "btn_border": "#2a3a5c",
         "primary": "#2563eb", "primary_hover": "#1d4fd1",
+        # The solid danger fill (Stop all services, a destructive confirm). Was
+        # [buttons_3d].red_mid - the one key of that retired section anything read.
+        "danger": "#d33f3f",
     },
     "semantic": {
         # positive / caution / negative / neutral state colors (labels, tiles)
         "positive": "#66bb6a", "warning": "#ffa726",
         "negative": "#ef5350", "neutral": "#bdbdbd",
-    },
-    "buttons_3d": {
-        # the standard 3D gradient buttons (Run scan / Paper actions / app-wide)
-        "blue_top": "#5aa0e6", "blue_mid": "#3a7bc0",
-        "blue_bottom": "#316eac", "blue_lip": "#244e78",
-        "red_top": "#ef6b6b", "red_mid": "#d33f3f",
-        "red_bottom": "#b53030", "red_lip": "#7a1f1f",
     },
     "charts": {
         # Sentiment / Sector-Rotation value colors (lines, zones, table text)
@@ -310,6 +306,14 @@ def load_theme(path=None):
                 for k, v in vals.items():
                     if k in merged[sec] and isinstance(v, str) and v.strip():
                         merged[sec][k] = v.strip()
+        # [buttons_3d] retired 2026-09-19. A file that still carries its one live
+        # key and no [palette].danger keeps that colour rather than silently
+        # falling back to the default red.
+        legacy = (data.get("buttons_3d") or {}).get("red_mid")
+        own = (data.get("palette") or {}).get("danger")
+        if (isinstance(legacy, str) and legacy.strip()
+                and not (isinstance(own, str) and own.strip())):
+            merged["palette"]["danger"] = legacy.strip()
     except Exception:  # noqa: BLE001 — styling must never break app startup.
         pass
     return merged
@@ -326,10 +330,10 @@ def hex_rgb(hexstr, default=(0, 0, 0)):
 
 def build_tokens(theme):
     """The full Tailwind design-token vocabulary generated from a theme dict."""
-    p, s, b = theme["palette"], theme["semantic"], theme["buttons_3d"]
+    p, s = theme["palette"], theme["semantic"]
     state_txt = [f"text-[{s[k]}]" for k in ("positive", "warning", "negative", "neutral")]
     pr = hex_rgb(p["primary"], (107, 134, 255))       # primary glow rgb
-    dr = hex_rgb(b["red_mid"], (229, 89, 91))         # solid-danger glow rgb
+    dr = hex_rgb(p["danger"], (211, 63, 63))          # solid-danger glow rgb
     # Flat "Deep Slate" buttons — built as locals so the legacy BTN_3D[_DANGER]
     # names can alias them (every existing call site flattens with no per-site edit).
     _btn_primary = (
@@ -373,7 +377,7 @@ def build_tokens(theme):
         # Danger (solid): a full red fill + glow — the heavyweight stop action
         # (Terminate → "Stop all services"), used sparingly.
         "BTN_DANGER_SOLID": (
-            f"bg-[{b['red_mid']}] hover:brightness-110 text-white "
+            f"bg-[{p['danger']}] hover:brightness-110 text-white "
             "rounded-[9px] min-h-[40px] font-semibold "
             f"shadow-[0_4px_14px_-4px_rgba({dr[0]},{dr[1]},{dr[2]},0.6)]"
         ),

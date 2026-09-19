@@ -87,7 +87,7 @@ def test_buttons_are_flat_deep_slate():
     # Danger: ghost (tint + border + red text); the alias points at it.
     assert toks["BTN_DANGER"] == toks["BTN_3D_DANGER"]
     assert "border" in toks["BTN_DANGER"] and "text-[#ef5350]" in toks["BTN_DANGER"]
-    # Solid danger (Terminate): full red fill from [buttons_3d].red_mid + glow.
+    # Solid danger (Terminate): full red fill from [palette].danger + glow.
     assert "#d33f3f" in toks["BTN_DANGER_SOLID"] and "text-white" in toks["BTN_DANGER_SOLID"]
 
 
@@ -123,13 +123,10 @@ def test_build_tokens_reflect_theme_values(tmp_path):
     p = tmp_path / "theme.toml"
     p.write_text(
         '[palette]\ncard_bg = "#222831"\nprimary = "#00aa55"\n'
-        '[buttons_3d]\nblue_top = "#123456"\n'
         '[semantic]\npositive = "#00ff00"\n', encoding="utf-8")
     toks = theme.build_tokens(theme.load_theme(p))
     assert "bg-[#222831]" in toks["CARD"]
     assert "bg-[#00aa55]" in toks["BTN_PRIMARY"]
-    # BTN_3D is now the flat primary alias, so it follows [palette].primary
-    # (not [buttons_3d].blue_top — the old 3D gradient is gone).
     assert "bg-[#00aa55]" in toks["BTN_3D"]
     assert "text-[#00ff00]" in toks["TXT_POS"]
     # the module-level tokens are build_tokens(THEME) — same generator.
@@ -333,3 +330,30 @@ def test_no_leg_card_rules_survive_the_card_layout():
     rules would match nothing, in either scope."""
     assert ".leg-card" not in theme.build_quasar_css(theme._DEFAULTS)
     assert ".leg-card" not in theme.build_calc_css(theme._DEFAULTS)
+
+
+# -- [buttons_3d] retired 2026-09-19: the solid danger fill is [palette].danger --
+
+
+def test_danger_is_a_palette_colour(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text('[palette]\ndanger = "#123456"\n', encoding="utf-8")
+    toks = theme.build_tokens(theme.load_theme(p))
+    assert "bg-[#123456]" in toks["BTN_DANGER_SOLID"]
+
+
+def test_a_saved_buttons_3d_red_mid_still_sets_danger(tmp_path):
+    """An override written before the retirement may still carry red_mid -
+    the one key of that section anything read. It keeps its colour."""
+    p = tmp_path / "theme.toml"
+    p.write_text('[buttons_3d]\nred_mid = "#654321"\n', encoding="utf-8")
+    t = theme.load_theme(p)
+    assert t["palette"]["danger"] == "#654321"
+    assert "buttons_3d" not in t
+
+
+def test_palette_danger_wins_over_the_retired_key(tmp_path):
+    p = tmp_path / "theme.toml"
+    p.write_text('[palette]\ndanger = "#111111"\n[buttons_3d]\nred_mid = "#222222"\n',
+                 encoding="utf-8")
+    assert theme.load_theme(p)["palette"]["danger"] == "#111111"
