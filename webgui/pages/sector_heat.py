@@ -202,16 +202,23 @@ def pcr_tone(v):
 
 # ── header strings ───────────────────────────────────────────────────────────
 def eyebrow(sector_at):
-    """``MARKET STRUCTURE · AUG 17, 2026 · 16:00 ET`` from the cache's stamp.
+    """``MARKET STRUCTURE · AUG 17, 2026`` from the cache's stamp.
 
     The stamp is written UTC by ``sentiment_svc``; the market it describes runs
-    on Eastern, so it is rendered there. Anything unparseable says so — a
-    made-up "now" on a cold cache is worse than an admitted gap."""
+    on Eastern, so the DATE is rendered there — it names the market's day, not
+    the reader's. Anything unparseable says so — a made-up "now" on a cold cache
+    is worse than an admitted gap.
+
+    ⚠ **No clock, since 2026-09-19.** This used to end ``· 16:00 ET``, the one
+    Eastern clock in an app whose every other stamp is Central, on a screen that
+    now carries the page kit's own ``Updated … CT`` stamp in its header. Two
+    freshness readings in two zones on one screen is exactly the drift the
+    consistency standard exists to stop, so the time moved to the header and
+    only the date stayed here."""
     stamp = _eastern(sector_at)
     if stamp is None:
         return "MARKET STRUCTURE · AWAITING DATA"
-    return (f"MARKET STRUCTURE · {stamp.strftime('%b %d, %Y').upper()} · "
-            f"{stamp.strftime('%H:%M')} ET")
+    return f"MARKET STRUCTURE · {stamp.strftime('%b %d, %Y').upper()}"
 
 
 def _eastern(iso):

@@ -246,10 +246,22 @@ def test_put_call_tints_amber_only_when_put_heavy():
 
 
 # ── header strings ───────────────────────────────────────────────────────────
-def test_eyebrow_renders_the_stamp_in_eastern_time():
-    # 2026-08-17T20:00:00Z is 16:00 ET (EDT, UTC-4).
+def test_eyebrow_renders_the_date_and_no_time_at_all():
+    """Re-aimed 2026-09-19 with the page-kit migration, which took the clock
+    out. The eyebrow used to end " · 16:00 ET" — the only Eastern clock in an
+    app whose every other stamp is Central, and a second freshness reading on a
+    screen whose header now carries the first. The header's Updated stamp owns
+    the time, in CT.
+
+    The DATE stays Eastern: it names the MARKET's day, which is what "market
+    structure as of" means. 2026-08-17T20:00:00Z is 16:00 ET (EDT, UTC-4);
+    2026-08-18T02:00:00Z is 22:00 ET the same day, and must still read AUG 17."""
     assert H.eyebrow("2026-08-17T20:00:00+00:00") == \
-        "MARKET STRUCTURE · AUG 17, 2026 · 16:00 ET"
+        "MARKET STRUCTURE · AUG 17, 2026"
+    assert H.eyebrow("2026-08-18T02:00:00+00:00") == \
+        "MARKET STRUCTURE · AUG 17, 2026"
+    for stamp in ("2026-08-17T20:00:00+00:00", "2026-08-18T02:00:00+00:00"):
+        assert ":" not in H.eyebrow(stamp) and " ET" not in H.eyebrow(stamp)
 
 
 def test_eyebrow_without_a_stamp_says_so_rather_than_inventing_a_time():
