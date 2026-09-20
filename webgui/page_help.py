@@ -876,8 +876,8 @@ Market Scanner, and since 2026-09-11 the once-daily **Income** board too.
   time is actually left.
 - **Reprice now** re-prices everything against fresh chains; you're alerted when
   a stop or target is hit.
-- Click a row to load it into the **detail panel** on the right, and to pick it
-  for **Close selected**.
+- Click a row to load it into the **detail panel** on the right; its **Expected
+  Move** and **Close signal** buttons sit at the foot of that panel.
 - **The footer** under the table sums the day: how many signals were captured and
   closed today, the **booked** P&L of today's closes, and the **open** P&L across
   every signal still running. Open P&L shows a dash, not $0.00, until the signals

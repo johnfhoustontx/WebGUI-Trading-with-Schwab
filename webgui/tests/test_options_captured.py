@@ -86,10 +86,11 @@ def test_current_value_rounded_to_two_decimals():
     assert captured.captured_rows([{"current_value": 0.234567}])[0]["current_value"] == 0.23
 
 
-def test_captured_columns_include_actions():
-    """The per-row action column (Calculator / Paper / Expected Move) is present."""
+def test_captured_columns_have_no_actions_column():
+    """The row's actions moved into the detail panel's footer (the 2026-09-19
+    standard), so the per-row icon column is gone."""
     fields = {c["field"] for c in captured.captured_columns()}
-    assert "actions" in fields
+    assert "actions" not in fields
 
 
 def test_synth_from_captured_is_em_payload_compatible():
@@ -422,7 +423,7 @@ def test_column_labels_say_what_the_cell_holds():
     labels = [c["label"] for c in captured.captured_columns()]
     assert labels == ["Action", "Symbol", "Strategy", "Style", "Opened",
                       "Expiry", "DTE at entry", "Entry", "Mark", "Max loss",
-                      "Open P&L", "Entry grade", ""]
+                      "Open P&L", "Entry grade"]
 
 
 def test_the_two_frozen_columns_say_they_are_frozen():
@@ -481,3 +482,34 @@ def test_the_captured_help_warns_that_two_columns_are_frozen():
     text = page_help.HELP_MD["/options/captured"].lower()
     assert "at entry" in text
     assert "capture" in text or "captured" in text
+
+
+# ── the page kit (the 2026-09-19 consistency standard) ───────────────────────
+def test_captured_row_actions_live_in_the_panel_footer():
+    src = inspect.getsource(captured.render)
+    assert "detail_panel.actions" in src and "Close signal" in src
+    assert "Select a signal first" not in src
+    assert 'kit.header("Captured Signals", view="options:captured")' in src
+
+
+def test_reload_and_reprice_say_different_things():
+    """The overlay said "Repricing…" for Reload too."""
+    src = inspect.getsource(captured.render)
+    assert 'busy.show("Refreshing the signals…")' in src
+    assert 'busy.show("Repricing…")' in src
+
+
+def test_the_selected_row_uses_the_kit_accent_not_its_own():
+    src = inspect.getsource(captured.render)
+    assert "border-[#42a5f5]" not in src
+    assert "kit.mark_selected" in src
+
+
+def test_the_captured_help_names_the_button_the_page_shows():
+    """"Close selected" became "Close signal" when the action moved into the
+    panel footer: the footer is only there while a signal IS selected, so the
+    word was naming a state rather than the action."""
+    import page_help
+    text = page_help.HELP_MD["/options/captured"]
+    assert "Close signal" in text
+    assert "Close selected" not in text

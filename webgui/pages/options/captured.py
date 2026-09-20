@@ -12,14 +12,18 @@ bus.
 
 A fetch-free version-poll ``ui.timer`` repaints the table when its bus cache
 version changes; a second watch on ``options:captured_flags`` surfaces stop/target
-hits via ``ui.notify`` when they land. The close dialog stays client-side (input
+hits as a toast when they land. The close dialog stays client-side (input
 collection only). Graceful-empty when the service is cold.
+
+Built on the page kit (``pages/ui_kit.py``, the 2026-09-19 consistency
+standard): the header line carries the Updated stamp, Refresh and Reprice now;
+the selected signal's buttons live in the detail panel's footer.
 """
 from datetime import datetime
 
 import bus_client
 from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
-from pages import busy as _busy
+from pages import ui_kit as kit
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -27,8 +31,8 @@ from pages.ui_guard import guard
 from . import detail, handoff
 from .rescue import AT_RISK_STATES as _AT_RISK_STATES
 from .rescue import heat_border_class, rescue_highlight, rescue_highlight
-from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN, BTN,
-                    BTN_3D_DANGER, BTN_PRIMARY, EYEBROW, LABEL)
+from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN, EYEBROW,
+                    LABEL, THEME)
 
 # rescue_state values that mark a signal at-risk (tested/critical). Captured
 # signals are advisory-only and the manage-cycle rescue overlay only tags paper
@@ -47,19 +51,12 @@ def rec_class(rec):
             "HOLD": BADGE_WARN}.get(rec, BADGE_MUTED)
 
 
-# Scoped to .captured-table so it never leaks into the rest of the app. Sticky
-# header (visible while the body scrolls), a bounded body height so the horizontal
-# scrollbar sits at the bottom of the table viewport — reachable without scrolling
-# past 100+ rows — and tight cell padding to compress the inter-column space.
-# #141a30 matches the app's dark theme (same as the calculator sticky header).
-CAPTURED_CSS = '''
-.captured-table .q-table__middle { max-height: 70vh; }
-.captured-table thead tr th {
-  position: sticky; top: 0; z-index: 2;
-  background-color: #141a30;
-}
-.captured-table td, .captured-table th { padding: 4px 8px; }
-'''
+# The page's own ``CAPTURED_CSS`` went with the 2026-09-19 page-kit migration:
+# the shell's app-wide ``TABLE_CSS`` already gives every table a sticky header
+# over a bounded scrolling body, and the kit's table carries the dense props.
+
+# Right-aligned columns (the kit aligns numbers right, words left).
+_NUMERIC = ("credit", "current_value", "max_loss", "unrealized_pnl")
 
 
 def pnl_color(value):
@@ -136,10 +133,11 @@ def captured_columns():
         ("current_value", "Mark"), ("max_loss", "Max loss"),
         ("unrealized_pnl", "Open P&L"), ("grade", "Entry grade"),
     ]
-    cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
+    # No ``actions`` column: the selected signal's buttons live in the detail
+    # panel's footer (the 2026-09-19 standard), so nothing acts on an unselected
+    # row and the icon column's width goes back to the data.
+    return [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
-    cols.append({"name": "actions", "label": "", "field": "actions", "align": "center"})
-    return cols
 
 
 def _captured_at(sig):
@@ -361,86 +359,82 @@ def synth_from_captured(row):
 
 
 def render():
-    """Captured Signals page: table (left) + shared detail panel (right), bus-fed."""
-    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
-    ui.add_css(CAPTURED_CSS)  # sticky header + bounded height + compact columns
-
+    """Captured Signals: header line, the signals table with its day footer,
+    and the shared detail panel whose footer closes the selected signal."""
     raw_by_id: dict = {}
     # sel_id: the signal the user clicked. There is no selection checkbox, so the
-    # clicked row IS the selection — it drives the detail panel, the Rec-cell
-    # highlight, and the "Close selected" action.
-    state = {"sel_id": None}
+    # clicked row IS the selection - it drives the detail panel and the actions
+    # in its footer. close_fields: the open Close dialog's inputs.
+    state = {"sel_id": None, "close_fields": None}
 
-    with ui.row().classes("w-full no-wrap gap-4 items-start"):
-        with ui.column().classes("flex-grow min-w-0"):
-            # Action buttons right-justified with the table's right edge; the
-            # row-count status renders BELOW the table, bottom-right, small.
-            with ui.row().classes("items-center gap-3 w-full justify-end"):
-                ui.button("Reload", icon="refresh", color=None,
-                          on_click=lambda: _reload()).props("no-caps").classes(BTN)
-                ui.button("Reprice now", icon="published_with_changes", color=None,
-                          on_click=lambda: _reprice()).props("no-caps").classes(BTN_PRIMARY)
-                ui.button("Close selected", icon="check_circle", color=None,
-                          on_click=lambda: _close()).props("no-caps").classes(BTN_3D_DANGER)
-            table_box = ui.element("div").classes("w-full")
-            with table_box:
-                table = ui.table(columns=captured_columns(), rows=[],
-                                 row_key="id").classes("w-full captured-table").props("dense")
-                # The day footer sits UNDER the table but inside its box, so the
-                # 70vh body scroll never carries it out of view — and so the
-                # reprice busy-overlay covers it too, since its figures are as
-                # stale as the marks above them while a reprice runs.
+    with kit.page():
+        head = kit.header("Captured Signals", view="options:captured")
+        with head.actions:
+            refresh_btn = kit.button("Refresh", kind="secondary", icon="refresh",
+                                     on_click=lambda: _reload())
+            reprice_btn = kit.button("Reprice now", kind="primary",
+                                     icon="published_with_changes",
+                                     on_click=lambda: _reprice())
+        status = kit.status_line()
+        with ui.row().classes("w-full no-wrap gap-4 items-start"):
+            box = kit.region("Refreshing the signals…", classes="flex-grow min-w-0")
+            with box.content:
+                table = kit.table(captured_columns(), numeric=_NUMERIC)
+                # The day footer sits UNDER the table but inside the region, so
+                # a reprice's spinner covers it too - its figures are as stale
+                # as the marks above them while a reprice runs.
                 foot = ui.row().classes(
-                    "w-full flex-wrap items-start gap-x-10 gap-y-2 "
-                    "px-2 pt-2 mt-1 border-t border-[#213152]")
-            status = ui.label("").classes("opacity-60 text-xs self-end")
-            # No selection checkbox: clicking a row selects it (detail panel +
-            # Close-selected) and the Rec cell shows a blue left-accent. The symbol
-            # cell keeps the at-risk rescue tint (tested/critical); plain otherwise.
-            table.add_slot('body-cell-symbol', r'''
-              <q-td :props="props">
-                <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
-                  {{ props.value }}
-                </span>
-                <span v-else>{{ props.value }}</span>
-              </q-td>
-            ''')
-            # Rec badge (first column) — a blue left-accent marks the selected row.
-            table.add_slot('body-cell-recommendation', r'''
-              <q-td :props="props"
-                    :class="props.row._selected ? 'border-l-4 border-[#42a5f5] bg-[#42a5f5]/[.13]' : ''">
-                <q-badge :class="props.row._rec_class" :label="props.value"/>
-              </q-td>
-            ''')
-            # Current price (live spread mark) shown to 2dp; numeric so it sorts.
-            table.add_slot('body-cell-current_value', r'''
-              <q-td :props="props">
-                {{ props.value == null ? '' : Number(props.value).toFixed(2) }}
-              </q-td>
-            ''')
-            # P&L colored green in profit / red in loss (value stays numeric to sort).
-            table.add_slot('body-cell-unrealized_pnl', r'''
-              <q-td :props="props">
-                <span :class="props.row._pnl_class + ' font-semibold'">
-                  {{ props.value == null ? '' : props.value }}
-                </span>
-              </q-td>
-            ''')
-        detail_panel = detail.render()
+                    "w-full flex-wrap items-start gap-x-10 gap-y-2 px-2 pt-2 mt-1 "
+                    f"border-t border-[{THEME['palette']['card_border']}]")
+            detail_panel = detail.render()
+
+    # No selection checkbox: clicking a row selects it (detail panel + its action
+    # footer) and the kit paints the row accent. The symbol cell keeps the
+    # at-risk rescue tint (tested/critical); plain otherwise.
+    table.add_slot('body-cell-symbol', r'''
+      <q-td :props="props">
+        <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
+          {{ props.value }}
+        </span>
+        <span v-else>{{ props.value }}</span>
+      </q-td>
+    ''')
+    # Rec badge (first column). The selected-row accent is the kit's, on the ROW.
+    table.add_slot('body-cell-recommendation', r'''
+      <q-td :props="props">
+        <q-badge :class="props.row._rec_class" :label="props.value"/>
+      </q-td>
+    ''')
+    # Current price (live spread mark) shown to 2dp; numeric so it sorts.
+    table.add_slot('body-cell-current_value', r'''
+      <q-td :props="props">
+        {{ props.value == null ? '' : Number(props.value).toFixed(2) }}
+      </q-td>
+    ''')
+    # P&L colored green in profit / red in loss (value stays numeric to sort).
+    table.add_slot('body-cell-unrealized_pnl', r'''
+      <q-td :props="props">
+        <span :class="props.row._pnl_class + ' font-semibold'">
+          {{ props.value == null ? '' : props.value }}
+        </span>
+      </q-td>
+    ''')
+
+    # The selected signal's actions, built ONCE: the footer shows only while a
+    # signal is shown, so nothing here can be pressed without one.
+    with detail_panel.actions:
+        kit.button("Expected Move", kind="secondary", icon="show_chart",
+                   on_click=lambda: _send_em())
+        kit.button("Close signal", kind="primary", icon="check_circle",
+                   on_click=lambda: _close())
+
+    # Built once at the page's own level and retitled per use: a dialog built
+    # inside a repainted container dies with its slot.
+    close_dlg = kit.confirm("Close signal", confirm_text="Close signal",
+                            on_confirm=lambda: _confirm_close())
 
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.
     seen = {"captured": None, "flags": None}
-
-    def _apply_selection():
-        """Stamp ``_selected`` on each row so the Rec cell highlights the row the
-        user clicked — the one ``Close selected`` will act on."""
-        sel = state.get("sel_id")
-        for row in table.rows:
-            row["_selected"] = (row.get("id") == sel)
-
-    # "Refresh marks (live)" reprices every captured signal against fresh chains —
-    # seconds of work, during which the table shows the OLD marks.
-    table_busy = _busy.build_busy(table_box, "Repricing…")
 
     # One handle per footer figure; the labels come from ``footer_cells`` itself
     # so the pure builder stays the single source of the footer's wording.
@@ -471,7 +465,9 @@ def render():
 
     def _populate(cap):
         """Paint the signals table + day footer from the cached captured view."""
-        table_busy.hide()
+        box.busy.hide()
+        kit.set_busy(refresh_btn, False)
+        kit.set_busy(reprice_btn, False)
         cap = cap or {}
         sigs = cap.get("signals") or []
         raw_by_id.clear()
@@ -482,28 +478,22 @@ def render():
         # Drop a stale selection (e.g. the signal we just closed is gone).
         if state.get("sel_id") not in raw_by_id:
             state["sel_id"] = None
-        _apply_selection()
+        kit.mark_selected(table.rows, state.get("sel_id"))
         table.update()
         _paint_footer(cap.get("day"), sigs)
-        status.text = f"{len(table.rows)} open signals." if cap else ""
+        n = len(table.rows)
+        status.text = f"{n} open signal{'s' if n != 1 else ''}" if cap else ""
 
     def _select(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
         sig = raw_by_id.get(row.get("id")) if isinstance(row, dict) else None
         if sig:
             state["sel_id"] = sig.get("signal_id")
-            _apply_selection()      # highlight the clicked row (Rec-cell accent)
+            kit.mark_selected(table.rows, state["sel_id"])
             table.update()
             detail_panel.update(synth_from_captured(sig))
 
     table.on("rowClick", _select)
-
-    # Per-row Expected Move button only (Calculator / Paper actions don't belong
-    # on the captured-signals table). ``synth_from_captured`` maps the raw captured
-    # signal to a signal-shaped dict (``type``/``expiration``/``*_strike``) that
-    # ``signal_to_em_payload`` understands.
-    handoff.add_expected_move_action(
-        table, lambda row: synth_from_captured(raw_by_id.get(row.get("id"))))
 
     def _selected_signal():
         """The raw signal dict the user is acting on (the clicked/highlighted row),
@@ -511,51 +501,54 @@ def render():
         sid = state.get("sel_id")
         return raw_by_id[sid] if sid and sid in raw_by_id else None
 
+    def _send_em():
+        # ``synth_from_captured`` maps the raw captured signal to a signal-shaped
+        # dict (``type``/``expiration``/``*_strike``) that ``signal_to_em_payload``
+        # understands.
+        sig = _selected_signal()
+        if sig:
+            handoff.send_to_expected_move(
+                handoff.signal_to_em_payload(synth_from_captured(sig)))
+
     @guard
     def _reload():
         bus_client.request("options", {"type": "captured_reload"})
-        table_busy.show()
-        ui.notify("Reloading captured signals…")
-        status.text = "Reloading…"
+        box.busy.show("Refreshing the signals…")
+        kit.set_busy(refresh_btn)
 
     @guard
     def _reprice():
         bus_client.request("options", {"type": "captured_reprice"})
-        table_busy.show()
-        ui.notify("Repricing open signals…")
-        status.text = "Repricing…"
+        box.busy.show("Repricing…")
+        kit.set_busy(reprice_btn)
 
     @guard
     def _close():
         sig = _selected_signal()
         if not sig:
-            ui.notify("Select a signal first.", type="warning")
             return
-        signal_id = sig.get("signal_id")
-        with ui.dialog() as dlg, ui.card():
-            ui.label(f"Close {sig.get('symbol')} {sig.get('strategy')}").classes("text-subtitle1")
-            # Pre-load the current price (live spread mark) as the exit value; 0.0
-            # when not yet repriced. The user can still override it.
-            exit_val = ui.number("Exit value (spread debit)",
-                                 value=exit_value_default(sig), format="%.2f")
-            reason = ui.input("Reason", value="MANUAL_CLOSE")
+        close_dlg.title.text = f"Close {sig.get('symbol', '')} {sig.get('strategy', '')}"
+        close_dlg.content.clear()
+        with close_dlg.content:
+            # The current mark, when repriced; the reader can still override it.
+            exit_val = kit.number_field("Exit value (spread debit)",
+                                        value=exit_value_default(sig), min=0,
+                                        format="%.2f", width="w-40")
+            reason = kit.text_field("Reason", value="MANUAL_CLOSE", width="w-40")
+        state["close_fields"] = (sig.get("signal_id"), exit_val, reason)
+        close_dlg.open()
 
-            def confirm():
-                bus_client.request("options", {
-                    "type": "captured_close",
-                    "args": {"signal_id": signal_id, "exit_val": float(exit_val.value),
-                             "reason": reason.value or "MANUAL_CLOSE"},
-                })
-                dlg.close()
-                ui.notify(
-                    f"Closing {sig.get('symbol', '')} — the list updates "
-                    f"when the engine confirms.", type="positive")
-                status.text = "Closing…"
-
-            with ui.row():
-                ui.button("Confirm", color=None, on_click=confirm).props("no-caps").classes(BTN_PRIMARY)
-                ui.button("Cancel", on_click=dlg.close).props("flat")
-        dlg.open()
+    def _confirm_close():
+        signal_id, exit_val, reason = state["close_fields"] or (None, None, None)
+        if not signal_id or not exit_val.validate():
+            return False
+        bus_client.request("options", {
+            "type": "captured_close",
+            "args": {"signal_id": signal_id, "exit_val": float(exit_val.value),
+                     "reason": reason.value or "MANUAL_CLOSE"},
+        })
+        kit.toast("info", "Closing the signal — the list updates when the engine "
+                          "confirms.")
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["captured"] = bus_client.read_version("options:captured")
@@ -566,7 +559,7 @@ def render():
     def _maybe_repaint():
         # Fetch-free: only re-read + repaint the table when its version changes
         # (the service bumps it after reload/reprice/close). Also watch the flags
-        # view and notify each stop/target hit via ui.notify when it lands.
+        # view and raise a toast for each stop/target hit when it lands.
         version = bus_client.read_version("options:captured")
         if version != seen["captured"]:
             seen["captured"] = version
@@ -577,7 +570,7 @@ def render():
             seen["flags"] = fv
             flags = (bus_client.read("options:captured_flags") or {}).get("flags") or []
             for f in flags:
-                ui.notify(f"{f.get('symbol')}: {f.get('code')} — consider closing",
-                          type="warning")
+                kit.toast("warn",
+                          f"{f.get('symbol')}: {f.get('code')} — consider closing")
 
     ui.timer(2.0, _maybe_repaint)
