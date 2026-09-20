@@ -554,8 +554,11 @@ related measures.
 **Controls:**
 
 - A **Symbol** dropdown (default `$SPX`; the list is the collected watchlist).
-- **Refresh now**, an **Explain** button, an **Analyze** button, and a **Next
-  refresh** countdown.
+- **Refresh**, an **Explain** button, an **Analyze** button and a **Briefings**
+  menu, all on the page's header line, plus a **Next refresh** countdown in the
+  strip under the charts. Explain, Analyze and Briefings' items each open their
+  result in a new browser tab; while one is building, its button spins and stays
+  disabled, so a second click cannot start the work twice.
 - A **view toggle** — seven sub-tabs, described below.
 
 **The seven views.** The first four share the same bars-plus-heat-map layout; the

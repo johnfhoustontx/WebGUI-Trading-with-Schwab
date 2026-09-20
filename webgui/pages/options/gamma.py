@@ -22,12 +22,14 @@ from zoneinfo import ZoneInfo
 import app_settings
 import page_help as _page_help
 from pages import busy as _busy
+from pages import copy as _copy  # the ONE copy (pages/copy.py)
+from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 from shared import market_calendar as _mc
 from shared import symbols as _symbols
 from . import flow_panels as _fx
 from .inputs import select_all_on_focus
-from .theme import BTN, BTN_PRIMARY, FLOW_KEYFRAMES_CSS, MUTED
+from .theme import FLOW_KEYFRAMES_CSS, MUTED
 
 # "Plasma" palette (see docs/plans/2026-08-15-gamma-plasma-palette-design.md): the
 # exposure field runs CYAN for call-heavy (positive net) and MAGENTA for put-heavy
@@ -1190,21 +1192,10 @@ def _set_figure(element, fig):
     element.update()
 
 
-# Scoped explain CSS (rules only). Injected via ui.add_css for the in-app dialog
-# (NiceGUI strips <style> from ui.html) and inlined into the downloadable doc.
-EXPLAIN_CSS = """
-.gx-explain{font-family:'Segoe UI',system-ui,sans-serif;color:#e6e6e6;line-height:1.55;max-width:920px;}
-.gx-explain .gx-title{font-size:1.55rem;font-weight:700;color:#ffffff;margin:.1em 0 .05em;}
-.gx-explain .gx-sub{opacity:.7;font-size:.9rem;margin:0 0 1.1em;}
-.gx-explain h2{font-size:1.15rem;color:#90caf9;margin:1.4em 0 .35em;
-  border-bottom:1px solid #3a3a3a;padding-bottom:5px;letter-spacing:.3px;}
-.gx-explain h3{font-size:1rem;color:#ffd54f;margin:1em 0 .25em;}
-.gx-explain p{font-size:.92rem;margin:.3em 0;}
-.gx-explain ul{margin:.3em 0 .7em 1.3em;padding:0;}
-.gx-explain li{font-size:.92rem;margin:.2em 0;}
-.gx-explain hr{border:0;border-top:1px solid #333;margin:1.1em 0;}
-.gx-explain .footer{opacity:.65;font-size:.82rem;font-style:italic;}
-"""
+# (``EXPLAIN_CSS`` lived here until 2026-09-20 and was DEAD: the in-app Explain
+# DIALOG is long gone, and ``/options/explain`` serves the payload's own HTML as
+# a standalone ``HTMLResponse`` — a separate document, with its own <style>, that
+# a ``ui.add_css`` on this page could never reach.)
 
 
 # The Flow view is drawn by ``flow_panels.divergence_panel`` (an SVG console
@@ -1973,6 +1964,25 @@ def snapshot_view(symbol=None) -> str:
     return f"options:gamma_pub:{str(symbol).strip().upper()}"
 
 
+def stamp_view(symbol=None, view=None) -> str:
+    """The cache view behind the header's "Updated" stamp.
+
+    The key this render actually DRAWS from — :func:`snapshot_view` for six of
+    the seven views. The seventh, a screen PINNED to Net Prem, pins no symbol,
+    so ``snapshot_view(None)`` would resolve to ``options:gamma``: the PRIVATE
+    page's shared slot. Stamping that on a public screen would report the age of
+    a key nothing on screen comes from, and make the public process read the
+    owner's snapshot to produce it. That render stamps the key it really reads.
+
+    ⚠ On the PRIVATE page the stamp is fixed at page build while the view picker
+    is not, so switching to Net Prem there leaves the gamma snapshot's age on
+    screen. Accepted: six of the seven views ARE the snapshot's, and the
+    alternative — ``kit.header`` takes one view — is no stamp on any of them.
+    """
+    return (snapshot_view(symbol) if reads_snapshot(view)
+            else "options:net_premium")
+
+
 def history_key(view, symbol=None) -> str:
     """Cache view holding one Gamma view's intraday history rows.
 
@@ -2028,6 +2038,32 @@ def history_dates(cached):
     return out
 
 
+# ── the two no-data lines ──────────────────────────────────────────────────
+# A PINNED (public) screen builds no Symbol box and no Refresh button — see
+# may_enqueue — so the private page's advice names two controls that are not
+# there. PURE, so the wording is testable without a browser.
+
+def no_snapshot_text(can_refresh: bool) -> str:
+    """Nothing cached for the symbol on screen.
+
+    On the private page that is something the reader can act on. On a published
+    screen it is simply the options feed not having written this session's key,
+    which is the app's ONE sentence for that (``pages/copy.py``)."""
+    return ("Fetch a symbol… (no snapshot yet)." if can_refresh
+            else _copy.WAITING_OPTIONS)
+
+
+def no_spot_text(symbol, can_refresh: bool) -> str:
+    """A snapshot with no usable underlying price (market closed, sparse chain).
+
+    The SYMBOL survives on both origins — which symbol has no price is the whole
+    content of the line; only the advice, which names a button, drops."""
+    base = f"No spot price for {symbol} yet (market closed or sparse data)"
+    if can_refresh:
+        return f"{base} — try Refresh during market hours."
+    return f"{base}."
+
+
 def render(symbol: str | None = None, view: str | None = None):
     """The Dealer Positioning page.
 
@@ -2041,11 +2077,11 @@ def render(symbol: str | None = None, view: str | None = None):
     import bus_client
     from nicegui import ui, run
 
-    ui.add_css(EXPLAIN_CSS)  # scoped styles for the Explain dialog (ui.html strips <style>)
     # The Flow/Net Prem console panels' ONE escape-hatch: a keyframes animation
     # cannot be an inline style, and those panels are raw ui.html fragments.
+    # ``[flow]`` survives the kit migration entirely — .fx-pulse is the live dot
+    # and .fx-panel's crosshair cursor IS the readout affordance.
     ui.add_css(FLOW_KEYFRAMES_CSS)
-    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
 
     # state["snap"] is the cached snapshot from the bus (None until first read).
     # ``fetching`` is an in-flight guard so a slow off-loop big-payload read
@@ -2077,6 +2113,9 @@ def render(symbol: str | None = None, view: str | None = None):
     # holds whatever the app last looked at (see snapshot_view). One renderer, two
     # data sources — so the drift risk sits in the data, not in the drawing.
     _snap_view = snapshot_view(symbol)
+    # ...and the key the header's Updated stamp reads, which is the same one
+    # except on the render that draws no snapshot at all — see stamp_view.
+    _stamp_view = stamp_view(symbol, view)
     # Whether this render may command the service at all. Resolved once, here, so
     # every enqueue site and every control that reaches one reads the same
     # answer — see may_enqueue.
@@ -2118,89 +2157,128 @@ def render(symbol: str | None = None, view: str | None = None):
         # ``view_toggle.value``, which is the pinned view and never moves.
         view_toggle = _PinnedView(_pinned_view)
 
-    with ui.row().classes("items-center gap-3 flex-wrap w-full"):
-        if _may_enqueue:
-            _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
-            symbol_in = select_all_on_focus(
-                ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
-                          with_input=True, label="Symbol").classes("w-40"))
-        else:
-            symbol_in = _PinnedSymbol(_DEFAULT_SYMBOL)
-        # Refresh now ENQUEUES a chain fetch, so a pinned (public) render does not
-        # build it — see may_enqueue. Hidden-vs-absent is not the distinction that
-        # matters (both are unreachable); absent is simply the honest one, and it
-        # is what the Explain/Analyze/History controls below do too.
-        fetch_btn = (ui.button("Refresh now", icon="refresh", color=None)
-                     .props("no-caps").classes(BTN_PRIMARY)) if _may_enqueue else None
-        # Overlay the intraday movement of the flip + walls on the heatmap. Off by
-        # default (it adds three lines to an already-dense chart); the choice is
-        # persisted so it survives navigation and restarts.
-        tracks_sw = ui.switch("Level movement",
-                              value=bool(app_settings.get("gamma_level_tracks")))
-        tracks_sw.props("dense").classes("text-xs")
-        tracks_sw.tooltip("Show where the gamma flip and the call/put walls sat "
-                          "through the session, not just now")
-        # Spot overlay style. Candles/OHLC are BUCKETED from the same 1-min spot
-        # samples the line draws (see ohlc_bars); the bar-size picker is hidden for
-        # the line, where it would mean nothing.
-        spot_style_sel = ui.select(
-            {"line": "Line", "candle": "Candles", "ohlc": "OHLC"},
-            value=app_settings.get("gamma_spot_style") or "line",
-            label="Spot").props("dense options-dense").classes("w-28")
-        spot_style_sel.tooltip("How to draw the spot price over the heatmap")
-        spot_int_sel = ui.select(
-            {1: "1 min", 5: "5 min", 15: "15 min"},
-            value=app_settings.get("gamma_spot_interval") or 5,
-            label="Bar").props("dense options-dense").classes("w-24")
-        spot_int_sel.tooltip("Bar size for candles / OHLC. Highs and lows are "
-                             "sampled once a minute, so wicks understate the true "
-                             "intra-minute range.")
-        # Explain / Analyze / Briefings push to the RIGHT of the frame (2026-07-11).
-        ui.space()
-        # Both ENQUEUE, and both cost the owner money — gamma_explain builds a
-        # standalone infographic, gamma_analyze is a PAID Claude call, once per
-        # click with no rate limit in front of it. A pinned (public) render does
-        # not build either; see may_enqueue.
-        explain_btn = (ui.button("Explain", icon="help", color=None)
-                       .props("no-caps").classes(BTN)) if _may_enqueue else None
-        analyze_btn = (ui.button("Analyze", icon="psychology", color=None)
-                       .props("no-caps").classes(BTN)) if _may_enqueue else None
-        # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
-        # premarket / ~18 min after open / midday / close, folded into a single dropdown
-        # to save a header row. Each item opens that slot's briefing in a new tab (the
-        # slot key is separate from the ad-hoc Analyze key, so these never auto-open). An
-        # item is **highlighted** only when its slot's data is from TODAY (CT); prior-day
-        # data (e.g. over the weekend) stays dim — see _sync_sched_btns. Clickable
-        # whenever data exists; disabled when a slot has never run.
-        _SCHED_HL = "bg-[#2563eb] text-white opacity-100"  # today's briefing is ready
-        _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
-        sched_btns = {}
-        _sched_titles = {}
-        # Briefings SENDS no command, so may_enqueue's rule did not reach it —
-        # but it is still a live control on a public screen, and a worse one than
-        # a dead button: its items navigate to /options/analyze, a route the live
-        # process does not serve, and what they open is the OWNER'S PAID Claude
-        # briefing. A pinned render does not build it.
-        #
-        # Leaving ``sched_btns`` empty is load-bearing, not incidental:
-        # ``_SCHED_VIEWS`` is derived from it, so the 2 s poll stops probing the
-        # four briefing versions and ``_sync_sched_btns`` loops over nothing.
-        briefings_btn = (ui.button("Briefings", icon="schedule", color=None)
-                         .props("no-caps").classes(BTN)) if _may_enqueue else None
-        if briefings_btn is not None:
-            with briefings_btn:
-                _briefings_menu = ui.menu()
-                with _briefings_menu:
-                    for _slot, _title in _SCHED_SLOTS:
-                        _mi = ui.menu_item(
-                            _title,
-                            on_click=lambda s=_slot: _shell.navigate_to(
-                                f"/options/analyze?slot={s}", new_tab=True))
-                        _mi.classes(f"text-[#cdd8ee] {_SCHED_DIM}")
-                        _mi.set_enabled(False)
-                        _mi.tooltip(f"{_title} $SPX/SPY/QQQ briefing — not generated yet today")
-                        sched_btns[_slot] = _mi
-                        _sched_titles[_slot] = _title
+    # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
+    # premarket / ~18 min after open / midday / close, folded into a single dropdown
+    # to save a header row. Each item opens that slot's briefing in a new tab (the
+    # slot key is separate from the ad-hoc Analyze key, so these never auto-open). An
+    # item is **highlighted** only when its slot's data is from TODAY (CT); prior-day
+    # data (e.g. over the weekend) stays dim — see _sync_sched_btns. Clickable
+    # whenever data exists; disabled when a slot has never run.
+    _SCHED_HL = "bg-[#2563eb] text-white opacity-100"  # today's briefing is ready
+    _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
+    sched_btns = {}
+    _sched_titles = {}
+
+    # The kit page column. Held in a name and re-entered (``with page_col:``)
+    # rather than wrapped around the whole of ``render`` in one block: the
+    # widget-building regions below are interleaved with the closures that
+    # repaint them, and those closures belong at render's own indent — a dozen
+    # tests slice them out of the source by name.
+    page_col = kit.page()
+    with page_col:
+        # ⚠ ``stale=False`` is a decision, not a default. The stamp reads the key
+        # this render DRAWS from (see stamp_view), and ``refresh_gamma_current``
+        # genuinely stops after the close — so ``alerts.stale_after`` would paint
+        # it amber 45 minutes after 15:20 CT every evening and all weekend: a true
+        # reading of the key's age and a false one about the page. Turning it on
+        # would mean adding the view to ``alerts.RTH_ONLY_VIEWS``, which moves the
+        # nav badge — a bigger decision than this migration.
+        head = kit.header("Dealer Positioning", view=_stamp_view, stale=False)
+        with head.actions:
+            # Explain and Analyze both ENQUEUE, and both cost the owner money —
+            # gamma_explain builds a standalone infographic, gamma_analyze is a
+            # PAID Claude call, once per click with no rate limit in front of it.
+            # A pinned (public) render builds neither; see may_enqueue. ABSENT,
+            # never merely disabled: a caption on a public screen is a control
+            # that reads as available.
+            #
+            # Each holds its own button while it works (kit.set_busy in the
+            # request, released in the matching _watch_*) — the design's rule for
+            # a button that starts work, and on Analyze the only thing standing
+            # between an impatient second click and a second paid call. The
+            # "opens in a new tab" forecast lives in the tooltip, where it is
+            # durable, rather than in a toast that says what a spinner says.
+            explain_btn = (kit.button(
+                "Explain", icon="help",
+                tooltip="Build the plain-English infographic for this symbol. It "
+                        "opens in a new tab when it is ready.")
+                if _may_enqueue else None)
+            analyze_btn = (kit.button(
+                "Analyze", icon="psychology",
+                tooltip="Ask Claude to read $SPX / SPY / QQQ dealer positioning. "
+                        "A paid call, once per click; the answer opens in a new "
+                        "tab after a few seconds.")
+                if _may_enqueue else None)
+            # Briefings SENDS no command, so may_enqueue's rule did not reach it —
+            # but it is still a live control on a public screen, and a worse one
+            # than a dead button: its items navigate to /options/analyze, a route
+            # the live process does not serve, and what they open is the OWNER'S
+            # PAID Claude briefing. A pinned render does not build it.
+            #
+            # Leaving ``sched_btns`` empty is load-bearing, not incidental:
+            # ``_SCHED_VIEWS`` is derived from it, so the 2 s poll stops probing
+            # the four briefing versions and ``_sync_sched_btns`` loops over
+            # nothing.
+            briefings_btn = (kit.button("Briefings", icon="schedule")
+                             if _may_enqueue else None)
+            if briefings_btn is not None:
+                with briefings_btn:
+                    _briefings_menu = ui.menu()
+                    with _briefings_menu:
+                        for _slot, _title in _SCHED_SLOTS:
+                            _mi = ui.menu_item(
+                                _title,
+                                on_click=lambda s=_slot: _shell.navigate_to(
+                                    f"/options/analyze?slot={s}", new_tab=True))
+                            _mi.classes(f"text-[#cdd8ee] {_SCHED_DIM}")
+                            _mi.set_enabled(False)
+                            _mi.tooltip(f"{_title} $SPX/SPY/QQQ briefing — "
+                                        "not generated yet today")
+                            sched_btns[_slot] = _mi
+                            _sched_titles[_slot] = _title
+            # PRIMARY, and built LAST so it sits rightmost — the kit's header
+            # rule. It ENQUEUES a chain fetch, so a pinned render does not build
+            # it either. ⚠ "Refresh now" retires here: the design names the
+            # two-word form as one of the spellings the one word replaces.
+            fetch_btn = (kit.button("Refresh", kind="primary", icon="refresh")
+                         if _may_enqueue else None)
+
+        # The symbol-scoped controls. A plain row rather than kit.control_bar():
+        # every one of them is hidden together on Net Prem (_sync_spot_controls),
+        # and a bordered card with nothing in it is worse than no card. The
+        # floating Quasar labels stay — they are what the may_enqueue proof reads
+        # a control's caption off.
+        with ui.row().classes("items-center gap-3 flex-wrap w-full"):
+            if _may_enqueue:
+                _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
+                symbol_in = select_all_on_focus(
+                    ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
+                              with_input=True, label="Symbol").classes("w-40"))
+            else:
+                symbol_in = _PinnedSymbol(_DEFAULT_SYMBOL)
+            # Overlay the intraday movement of the flip + walls on the heatmap. Off by
+            # default (it adds three lines to an already-dense chart); the choice is
+            # persisted so it survives navigation and restarts.
+            tracks_sw = ui.switch("Level movement",
+                                  value=bool(app_settings.get("gamma_level_tracks")))
+            tracks_sw.props("dense").classes("text-xs")
+            tracks_sw.tooltip("Show where the gamma flip and the call/put walls sat "
+                              "through the session, not just now")
+            # Spot overlay style. Candles/OHLC are BUCKETED from the same 1-min spot
+            # samples the line draws (see ohlc_bars); the bar-size picker is hidden for
+            # the line, where it would mean nothing.
+            spot_style_sel = ui.select(
+                {"line": "Line", "candle": "Candles", "ohlc": "OHLC"},
+                value=app_settings.get("gamma_spot_style") or "line",
+                label="Spot").props("dense options-dense").classes("w-28")
+            spot_style_sel.tooltip("How to draw the spot price over the heatmap")
+            spot_int_sel = ui.select(
+                {1: "1 min", 5: "5 min", 15: "15 min"},
+                value=app_settings.get("gamma_spot_interval") or 5,
+                label="Bar").props("dense options-dense").classes("w-24")
+            spot_int_sel.tooltip("Bar size for candles / OHLC. Highs and lows are "
+                                 "sampled once a minute, so wicks understate the true "
+                                 "intra-minute range.")
 
     # --- Net Prem controls (this view only) ---------------------------------
     # Shown/hidden as one block by _sync_np_controls, the same way the Bar-size
@@ -2223,60 +2301,67 @@ def render(symbol: str | None = None, view: str | None = None):
     if _np_mode0 not in NET_PREM_MODES:
         _np_mode0 = "dollars"
 
-    np_boxes: dict = {}          # symbol -> ui.checkbox (built once, all groups)
-    with ui.column().classes("w-full gap-1") as np_box:
-        with ui.row().classes("items-center gap-3 flex-wrap w-full"):
-            np_group_tabs = ui.tabs(value=_np_group0).classes("compact-subtabs").props(
-                "dense no-caps inline-label align=left")
-            with np_group_tabs:
+    with page_col:
+        np_boxes: dict = {}          # symbol -> ui.checkbox (built once, all groups)
+        with ui.column().classes("w-full gap-1") as np_box:
+            with ui.row().classes("items-center gap-3 flex-wrap w-full"):
+                np_group_tabs = ui.tabs(value=_np_group0).classes("compact-subtabs").props(
+                    "dense no-caps inline-label align=left")
+                with np_group_tabs:
+                    for _g in NET_PREM_GROUPS:
+                        _gtab = ui.tab(_g["key"], label=_g["label"])
+                        _gh = _page_help.subtab_help("/options/gamma", _g["key"])
+                        if _gh:
+                            with _gtab:
+                                ui.tooltip(_gh).props("delay=350 max-width=340px")
+                # The scale control now lives IN the Flow Field panel (its DOLLARS /
+                # SKEW % toggle). This select is kept, hidden, as the state HOLDER:
+                # every reader already goes through np_mode_sel.value and the
+                # persist-and-repaint path hangs off its on_value_change, so the
+                # toggle sets this and one code path still owns the change. Two
+                # VISIBLE controls for one setting would be the real problem.
+                np_mode_sel = ui.select(dict(NET_PREM_MODES), value=_np_mode0,
+                                        label="Scale").props(
+                    "dense options-dense").classes("w-36")
+                np_mode_sel.set_visibility(False)
+                ui.space()
+                np_count_lbl = ui.label("").classes(f"text-xs {MUTED}")
+                # ⚠ MEASURED, because the plan predicted otherwise: ``dense
+                # flat`` + the filled BTN token is NOT a contradiction — Quasar
+                # adds no background of its own when ``color`` is None, so
+                # ``flat`` never touched the Tailwind fill and both spellings
+                # render rgb(23,30,57). What the kit really changes here is
+                # ``dense``: padding 4px → 16px, so the three go 69/107/63 →
+                # 93/131/87 wide at an unchanged 34px tall, in a wrapping row
+                # with no overflow either way.
+                np_all_btn = kit.button(
+                    "Select all",
+                    tooltip="Tick every symbol in the group you are on. Other "
+                            "groups' selections are left alone — use \"Only this "
+                            "group\" to drop them.")
+                np_only_btn = kit.button(
+                    "Only this group",
+                    tooltip="Unplot everything outside the group tab you are on. "
+                            "The tab filters the tick-boxes, not the chart — so "
+                            "symbols ticked in another group keep plotting until "
+                            "you drop them here.")
+                np_clear_btn = kit.button("Clear all")
+            # One checkbox per symbol, all built up front and toggled by VISIBILITY
+            # per group — so the group tab filters what you SEE without touching what
+            # is plotted (tick $SPX on Indices, switch to Sectors, tick XLK: both plot).
+            with ui.row().classes("items-center gap-x-3 gap-y-0 flex-wrap w-full"):
                 for _g in NET_PREM_GROUPS:
-                    _gtab = ui.tab(_g["key"], label=_g["label"])
-                    _gh = _page_help.subtab_help("/options/gamma", _g["key"])
-                    if _gh:
-                        with _gtab:
-                            ui.tooltip(_gh).props("delay=350 max-width=340px")
-            # The scale control now lives IN the Flow Field panel (its DOLLARS /
-            # SKEW % toggle). This select is kept, hidden, as the state HOLDER:
-            # every reader already goes through np_mode_sel.value and the
-            # persist-and-repaint path hangs off its on_value_change, so the
-            # toggle sets this and one code path still owns the change. Two
-            # VISIBLE controls for one setting would be the real problem.
-            np_mode_sel = ui.select(dict(NET_PREM_MODES), value=_np_mode0,
-                                    label="Scale").props(
-                "dense options-dense").classes("w-36")
-            np_mode_sel.set_visibility(False)
-            ui.space()
-            np_count_lbl = ui.label("").classes(f"text-xs {MUTED}")
-            np_all_btn = ui.button("Select all", color=None).props(
-                "no-caps dense flat").classes(BTN)
-            np_all_btn.tooltip(
-                "Tick every symbol in the group you are on. Other groups' "
-                "selections are left alone — use \"Only this group\" to drop "
-                "them.")
-            np_only_btn = ui.button("Only this group", color=None).props(
-                "no-caps dense flat").classes(BTN)
-            np_only_btn.tooltip(
-                "Unplot everything outside the group tab you are on. The tab "
-                "filters the tick-boxes, not the chart — so symbols ticked in "
-                "another group keep plotting until you drop them here.")
-            np_clear_btn = ui.button("Clear all", color=None).props(
-                "no-caps dense flat").classes(BTN)
-        # One checkbox per symbol, all built up front and toggled by VISIBILITY
-        # per group — so the group tab filters what you SEE without touching what
-        # is plotted (tick $SPX on Indices, switch to Sectors, tick XLK: both plot).
-        with ui.row().classes("items-center gap-x-3 gap-y-0 flex-wrap w-full"):
-            for _g in NET_PREM_GROUPS:
-                for _sym in _g["symbols"]:
-                    _cb = ui.checkbox(_sym, value=_sym in _np_seed)
-                    # One fixed hex per symbol from a 28-entry map = a finite
-                    # palette, so an arbitrary-value class is Tailwind-first legal.
-                    _cb.props("dense").classes(
-                        f"text-xs text-[{net_prem_color(_sym)}]")
-                    np_boxes[_sym] = _cb
-        # The publisher-health line lives HERE rather than in the shared bottom
-        # strip: it is about the SERVICE, not the chart, it is view-specific, and
-        # the strip already merges three sources into one tiny overlay.
-        np_status_lbl = ui.label("").classes(f"text-xs {MUTED}")
+                    for _sym in _g["symbols"]:
+                        _cb = ui.checkbox(_sym, value=_sym in _np_seed)
+                        # One fixed hex per symbol from a 28-entry map = a finite
+                        # palette, so an arbitrary-value class is Tailwind-first legal.
+                        _cb.props("dense").classes(
+                            f"text-xs text-[{net_prem_color(_sym)}]")
+                        np_boxes[_sym] = _cb
+            # The publisher-health line lives HERE rather than in the shared bottom
+            # strip: it is about the SERVICE, not the chart, it is view-specific, and
+            # the strip already merges three sources into one tiny overlay.
+            np_status_lbl = ui.label("").classes(f"text-xs {MUTED}")
 
     state["netprem_sel"] = [s for s in net_prem_symbols() if s in _np_seed]
 
@@ -2301,93 +2386,101 @@ def render(symbol: str | None = None, view: str | None = None):
     def _set_summary(text):
         strip_state["summary"] = text or ""
         _repaint_strip()
-    # Persistent panels: the Highcharts elements are created ONCE and updated in
-    # place on every repaint (Highcharts diffs the new options) — rebuilding them
-    # each time would flash. Message labels are toggled via set_visibility. Column
-    # flex weights are set per-render from the fixed _STRIKE_HEAT_SPLIT (bars full
-    # width on Term).
-    # gap-0: bars + heatmap sit flush (no inter-panel gap). w-[calc(100%+1rem)] makes
-    # the row 1rem wider than the content box so it extends INTO (and fills) the content
-    # column's p-4 right padding — the heatmap's right edge then reaches the window edge.
-    # (A negative right margin does NOT widen a full-width flex item, so calc-width is
-    # used instead; the 1rem lands inside the parent's padding → never a horizontal scroll.)
-    chart_row = ui.row().classes(
-        "w-[calc(100%+1rem)] no-wrap gap-0 items-start relative gamma-xhair-row")
-    with chart_row:
-        chart_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
-        with chart_box:
-            # chart_plot switches kind (bar <-> Term heatmap). Highcharts'
-            # chart.update() leaks plotLines/colorAxis across a type switch, so the
-            # element lives in its own container and is RECREATED on kind-change
-            # (see _set_chart); same-kind repaints update in place (flicker-free).
-            chart_plot_box = ui.column().classes("w-full q-gutter-none")
-            with chart_plot_box:
-                state["chart_el"] = ui.highchart(_empty_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
-            # Seeded from the SAME figure the element was created with, so the
-            # first real paint can't spuriously recreate it.
-            state["chart_kind"] = chart_kind(_empty_fig())
-            # The Flow + Net Prem console panels. ONE persistent ui.html whose
-            # .content is swapped per repaint — the rings.py / regime_mix.py
-            # idiom. It lives inside chart_box because both views already run
-            # full width with the heatmap hidden (_apply_flex(term=True)).
-            panel_el = ui.html("").classes("w-full")
-            panel_el.set_visibility(False)
-            chart_msg = ui.label("Fetch a symbol… (no snapshot yet).") \
-                .classes("opacity-60 text-sm")
-        heatmap_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
-        with heatmap_box:
-            # Created with the heatmap init fig so the press-and-hold-tooltip load
-            # hook is installed at creation (load fires once); updated in place after.
-            heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
-            # 0-DTE hedge-pressure track, directly UNDER the heatmap and sharing its
-            # time categories. Its own element because pressure is in DOLLARS while
-            # the heatmap's y-axis is STRIKE (and is pixel-aligned to the bar chart),
-            # so it cannot share that axis. Hidden unless the symbol has a 0-DTE book.
-            hedge_plot = ui.highchart(hedge_figure([], [])).classes("w-full")
-            hedge_plot.set_visibility(False)
-            hedge_lbl = ui.label("").classes("opacity-70 text-[10px] text-right w-full")
-            hedge_lbl.set_visibility(False)
-            heat_msg = ui.label("").classes("opacity-60 text-sm")
 
-    # Tiny status strip BELOW the charts, right-aligned: the collector status WORD
-    # (colored) + the neutral detail (last/next scan + refresh countdown + per-view
-    # summary). Sits under the charts so it never collides with the time-axis labels.
-    with ui.row().classes("w-full justify-end items-baseline gap-2 text-[10px] "
-                          "leading-none opacity-90 -mt-1"):
-        status_lbl = ui.label("").classes("font-medium")
-        detail_lbl = ui.label("").classes("opacity-70")
+    with page_col:
+        # Persistent panels: the Highcharts elements are created ONCE and updated in
+        # place on every repaint (Highcharts diffs the new options) — rebuilding them
+        # each time would flash. Message labels are toggled via set_visibility. Column
+        # flex weights are set per-render from the fixed _STRIKE_HEAT_SPLIT (bars full
+        # width on Term).
+        # gap-0: bars + heatmap sit flush (no inter-panel gap). w-[calc(100%+1rem)] makes
+        # the row 1rem wider than the content box so it extends INTO (and fills) the content
+        # column's p-4 right padding — the heatmap's right edge then reaches the window edge.
+        # (A negative right margin does NOT widen a full-width flex item, so calc-width is
+        # used instead; the 1rem lands inside the parent's padding → never a horizontal scroll.)
+        chart_row = ui.row().classes(
+            "w-[calc(100%+1rem)] no-wrap gap-0 items-start relative gamma-xhair-row")
+        with chart_row:
+            chart_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
+            with chart_box:
+                # chart_plot switches kind (bar <-> Term heatmap). Highcharts'
+                # chart.update() leaks plotLines/colorAxis across a type switch, so the
+                # element lives in its own container and is RECREATED on kind-change
+                # (see _set_chart); same-kind repaints update in place (flicker-free).
+                chart_plot_box = ui.column().classes("w-full q-gutter-none")
+                with chart_plot_box:
+                    state["chart_el"] = ui.highchart(_empty_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
+                # Seeded from the SAME figure the element was created with, so the
+                # first real paint can't spuriously recreate it.
+                state["chart_kind"] = chart_kind(_empty_fig())
+                # The Flow + Net Prem console panels. ONE persistent ui.html whose
+                # .content is swapped per repaint — the rings.py / regime_mix.py
+                # idiom. It lives inside chart_box because both views already run
+                # full width with the heatmap hidden (_apply_flex(term=True)).
+                panel_el = ui.html("").classes("w-full")
+                panel_el.set_visibility(False)
+                # ⚠ The wording follows the ORIGIN, not the code path: a pinned
+                # public screen has no Symbol box and no Refresh button, so the
+                # private page's advice would name two controls that are not
+                # there. See no_snapshot_text / no_spot_text.
+                chart_msg = kit.empty(no_snapshot_text(_may_enqueue))
+            heatmap_box = ui.column().classes(f"min-w-0 {_INIT_FLEX}")
+            with heatmap_box:
+                # Created with the heatmap init fig so the press-and-hold-tooltip load
+                # hook is installed at creation (load fires once); updated in place after.
+                heat_plot = ui.highchart(_heat_init_fig(), extras=["heatmap", "coloraxis"]).classes("w-full")
+                # 0-DTE hedge-pressure track, directly UNDER the heatmap and sharing its
+                # time categories. Its own element because pressure is in DOLLARS while
+                # the heatmap's y-axis is STRIKE (and is pixel-aligned to the bar chart),
+                # so it cannot share that axis. Hidden unless the symbol has a 0-DTE book.
+                hedge_plot = ui.highchart(hedge_figure([], [])).classes("w-full")
+                hedge_plot.set_visibility(False)
+                hedge_lbl = ui.label("").classes("opacity-70 text-[10px] text-right w-full")
+                hedge_lbl.set_visibility(False)
+                heat_msg = kit.empty("")
 
-    # Long-form guide to the three 0-DTE projection overlays (outline bars, the
-    # Proj. flip line, the hedge-pressure panel) — collapsed, so it costs nothing
-    # until asked for. It lives ON the page rather than only in the nav hover
-    # tooltip because that tooltip is pointer-events:none and clips to the space
-    # under its nav item, which cuts a guide this long off mid-sentence with no way
-    # to scroll. Same text as the hover guide (one constant in page_help).
-    with ui.expansion("How to read the 0-DTE close projection") \
-            .classes("w-full text-xs opacity-80").props("dense"):
-        ui.markdown(_page_help.PROJECTION_HELP_MD).classes("text-xs text-left")
+        # Tiny status strip BELOW the charts, right-aligned: the collector status WORD
+        # (colored) + the neutral detail (last/next scan + refresh countdown + per-view
+        # summary). Sits under the charts so it never collides with the time-axis labels.
+        with ui.row().classes("w-full justify-end items-baseline gap-2 text-[10px] "
+                              "leading-none opacity-90 -mt-1"):
+            status_lbl = ui.label("").classes("font-medium")
+            detail_lbl = ui.label("").classes("opacity-70")
 
-    # History picker (BELOW the charts): browse past stored briefings. Pick a date
-    # (+ optional slot) and Open regenerates the report from the stored analysis (via
-    # the gamma_history command) and opens it in a new tab. Dates come from
-    # cache:options:gamma_briefings.
-    #
-    # Open ENQUEUES ``gamma_history`` (a server-side report build), so the whole
-    # row goes on a pinned (public) render — see may_enqueue. The Date and Slot
-    # pickers exist only to feed that one button, so leaving them would be a
-    # picker that picks nothing.
-    if _may_enqueue:
-        with ui.row().classes("items-center gap-2 flex-wrap"):
-            ui.label("History:").classes("opacity-60 text-sm")
-            hist_date = ui.select([], label="Date").props("dense options-dense").classes("w-40")
-            hist_slot = ui.select(
-                {"": "All slots", "premarket": "Premarket", "open": "Open",
-                 "midday": "Midday", "close": "EOD recap"}, value="") \
-                .props("dense options-dense").classes("w-32")
-            hist_open = ui.button("Open", icon="history").props("flat dense")
-            hist_hint = ui.label("").classes("opacity-50 text-xs")
-    else:
-        hist_date = hist_slot = hist_open = hist_hint = None
+        # Long-form guide to the three 0-DTE projection overlays (outline bars, the
+        # Proj. flip line, the hedge-pressure panel) — collapsed, so it costs nothing
+        # until asked for. It lives ON the page rather than only in the nav hover
+        # tooltip because that tooltip is pointer-events:none and clips to the space
+        # under its nav item, which cuts a guide this long off mid-sentence with no way
+        # to scroll. Same text as the hover guide (one constant in page_help).
+        with ui.expansion("How to read the 0-DTE close projection") \
+                .classes("w-full text-xs opacity-80").props("dense"):
+            ui.markdown(_page_help.PROJECTION_HELP_MD).classes("text-xs text-left")
+
+        # History picker (BELOW the charts): browse past stored briefings. Pick a date
+        # (+ optional slot) and Open regenerates the report from the stored analysis (via
+        # the gamma_history command) and opens it in a new tab. Dates come from
+        # cache:options:gamma_briefings.
+        #
+        # Open ENQUEUES ``gamma_history`` (a server-side report build), so the whole
+        # row goes on a pinned (public) render — see may_enqueue. The Date and Slot
+        # pickers exist only to feed that one button, so leaving them would be a
+        # picker that picks nothing.
+        if _may_enqueue:
+            with ui.row().classes("items-center gap-2 flex-wrap"):
+                ui.label("History:").classes("opacity-60 text-sm")
+                hist_date = ui.select([], label="Date").props("dense options-dense").classes("w-40")
+                hist_slot = ui.select(
+                    {"": "All slots", "premarket": "Premarket", "open": "Open",
+                     "midday": "Midday", "close": "EOD recap"}, value="") \
+                    .props("dense options-dense").classes("w-32")
+                hist_open = kit.button(
+                    "Open", icon="history",
+                    tooltip="Rebuild the stored briefing for the date on the "
+                            "left. It opens in a new tab when it is ready.")
+                hist_hint = ui.label("").classes("opacity-50 text-xs")
+        else:
+            hist_date = hist_slot = hist_open = hist_hint = None
 
     def _current_symbol():
         return (symbol_in.value or "").strip().upper()
@@ -2584,7 +2677,7 @@ def render(symbol: str | None = None, view: str | None = None):
             hedge_plot.set_visibility(False)
             hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
-            chart_msg.text = "Fetch a symbol… (no snapshot yet)."
+            chart_msg.text = no_snapshot_text(_may_enqueue)
             chart_msg.set_visibility(True)
             _set_summary("")
             return
@@ -2645,8 +2738,7 @@ def render(symbol: str | None = None, view: str | None = None):
             hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
             sym = snap.get("symbol") or _current_symbol()
-            chart_msg.text = (f"No spot price for {sym} yet "
-                              "(market closed or sparse data) — try Refresh during market hours.")
+            chart_msg.text = no_spot_text(sym, _may_enqueue)
             chart_msg.set_visibility(True)
             _set_summary("")
             return
@@ -2735,11 +2827,14 @@ def render(symbol: str | None = None, view: str | None = None):
             return
         sym = _current_symbol()
         if not sym:
-            ui.notify("Enter a symbol first.", type="warning")
+            # VALIDATION, so it belongs under the field that is wrong, not in a
+            # toast the reader has to trace back to a control.
+            kit.symbol_error(symbol_in, "Enter a symbol first.")
             return
+        kit.symbol_error(symbol_in, None)
         bus_client.request("options", {"type": "gamma_refresh", "args": {"symbol": sym}})
-        ui.notify(f"Refreshing {sym} — the panels update when the "
-                  f"new read lands.")
+        # No toast: the scrim over the chart row says "Loading SPY…" for exactly
+        # as long as the wait lasts, which a toast cannot.
         chart_busy.show(f"Loading {sym}…")
         state["countdown"] = 120
 
@@ -2871,10 +2966,15 @@ def render(symbol: str | None = None, view: str | None = None):
             return                        # see may_enqueue — no button either
         sym = _current_symbol()
         if not sym:
-            ui.notify("Enter a symbol first.", type="warning")
+            kit.symbol_error(symbol_in, "Enter a symbol first.")
             return
+        kit.symbol_error(symbol_in, None)
         bus_client.request("options", {"type": "gamma_explain", "args": {"symbol": sym}})
-        ui.notify("Building Explain infographic… opening in a new tab.")
+        # The button holds its own spinner until _watch_explain opens the tab (or
+        # the kit's backstop gives it back). Nothing on THIS page repaints, so the
+        # chart scrim would be the wrong wait, and a toast saying "building…" is
+        # what the design's toast rule sends to a spinner.
+        kit.set_busy(explain_btn)
 
     @guard
     def _watch_explain(version):
@@ -2893,6 +2993,7 @@ def render(symbol: str | None = None, view: str | None = None):
         if version is None or version == seen["explain"]:
             return
         seen["explain"] = version
+        kit.set_busy(explain_btn, False)
         _shell.navigate_to(f"/options/explain?v={version}", new_tab=True)
 
     @guard
@@ -2901,7 +3002,10 @@ def render(symbol: str | None = None, view: str | None = None):
             # gamma_analyze is a PAID Claude call — see may_enqueue.
             return
         bus_client.request("options", {"type": "gamma_analyze"})
-        ui.notify("Analyzing $SPX / SPY / QQQ… opens in a new tab (a few seconds).")
+        # ⚠ The one place on this page where a second click is real money: this
+        # is a PAID Claude call with no rate limit in front of it. Holding the
+        # button until the answer lands is the rate limit.
+        kit.set_busy(analyze_btn)
 
     @guard
     def _watch_analyze(version):
@@ -2914,6 +3018,7 @@ def render(symbol: str | None = None, view: str | None = None):
         if version is None or version == seen["analyze"]:
             return
         seen["analyze"] = version
+        kit.set_busy(analyze_btn, False)
         _shell.navigate_to(f"/options/analyze?v={version}", new_tab=True)
 
     def _refresh_history_dates(payload):
@@ -2932,11 +3037,14 @@ def render(symbol: str | None = None, view: str | None = None):
             return                        # see may_enqueue — no picker either
         d = hist_date.value
         if not d:
-            ui.notify("No stored briefings to view yet.", type="warning")
+            # An OUTCOME, not validation: nothing the reader typed is wrong —
+            # the service has stored no briefing to open. There is no field to
+            # put it under, so it is the page's one toast.
+            kit.toast("warn", "No stored briefings to view yet.")
             return
         bus_client.request("options", {"type": "gamma_history",
                                        "args": {"date": d, "slot": hist_slot.value or None}})
-        ui.notify("Building history report… opens in a new tab.")
+        kit.set_busy(hist_open)
 
     @guard
     def _watch_history(version):
@@ -2947,6 +3055,7 @@ def render(symbol: str | None = None, view: str | None = None):
         if version is None or version == seen.get("history"):
             return
         seen["history"] = version
+        kit.set_busy(hist_open, False)
         _shell.navigate_to(f"/options/gamma-history?v={version}", new_tab=True)
 
     if hist_open is not None:

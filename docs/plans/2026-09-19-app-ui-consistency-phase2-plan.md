@@ -77,8 +77,8 @@ anywhere, and the six controls bottom-align to the pixel.
 | `options/strategy_menu.py` | `button 2` | **`{"button": 2}`** | a cascading value picker standing in for `ui.select`; the kit has no such field |
 | `options/simulator.py` | `button 1, notify 1` | **`{"button": 1}`** | the three Days snap chips — a stepper beside a slider |
 | `options/expected_move.py` | `button 1, notify 1` | **deleted** | Draw is the Go button; the notify is validation |
-| `options/swing.py` | `button 7, table 1` | **`{"button": 2, "table": 1}`** | `_Segmented`'s pill and `_chip`'s filter chip; the table keeps server paging |
-| `options/gamma.py` | `button 8, notify 7` | **deleted** | five actions + a menu anchor all go to the kit |
+| `options/swing.py` | `button 7, table 1` | **`{"button": 2}`** | `_Segmented`'s pill and `_chip`'s filter chip; the table went through `kit.table(rows_number=)` after all, so it keeps server paging without a raw entry |
+| `options/gamma.py` | `button 8, notify 7` | **deleted** (done 2026-09-20) | five actions + a menu anchor all go to the kit |
 
 ---
 
@@ -247,6 +247,44 @@ The largest file in the phase, four public screens, and the one with a proof att
 - ⚠ **Touch none of the chart facts**: `HEAT_STOPS`' transparent zero stop, `interpolation: True`, the `colorAxis` that must be present at element creation, `_HEAT_PRESS_TOOLTIP_JS`'s **three** attachment sites, `_set_chart`'s recreate-on-kind-change, `uniform_strike_grid`, the constant nine-series count, and `_INIT_FLEX`/`_apply_flex` (the 40/60 split that keeps the two panels' strike axes pixel-aligned). `hedge_plot`/`hedge_lbl` mount hidden — `_reflow_charts` must still run **after** `set_visibility`.
 - ⚠ `test_busy_coverage.py:126` asserts the literal `"build_busy(" in gamma` and `"build_loading_overlay(" not in`. Update it to whichever spelling ships.
 - Empty states → `kit.empty`. ⚠ `"Fetch a symbol…"` is **wrong on a pinned public screen** — there is no symbol box there.
+
+**CORRECTED after doing it — five things this task settled:**
+
+1. ⚠ **`view=snapshot_view(symbol)` is wrong on ONE screen, and it is the one
+   that matters.** A pinned Net Prem screen pins no SYMBOL, so
+   `snapshot_view(None)` is `options:gamma` — the PRIVATE page's shared slot. The
+   header would have reported the age of a key that screen draws nothing from,
+   and made the public process read the owner's snapshot every 5 s to do it.
+   Shipped as a pure `gamma.stamp_view(symbol, view)` delegating to
+   `snapshot_view` + `reads_snapshot`, the two the 2 s poll already uses.
+   Accepted limit, written at the function: the private page's stamp is fixed at
+   build while its picker is not, so switching to Net Prem there leaves the
+   gamma snapshot's age on screen.
+2. ⚠ **"`dense flat` + `BTN` is a contradiction (flat kills the fill)" is FALSE**
+   — measured on both pages: Quasar adds no background of its own when `color`
+   is None, so `flat` never touched the Tailwind fill and both spellings render
+   `rgb(23,30,57)`. What the kit really changes is `dense`: padding 4px → 16px,
+   so the three go 69/107/63 → 93/131/87 wide at an unchanged 34px, with no
+   overflow either way. `kind="secondary"` is still right; the reason was wrong.
+3. **`ENQUEUEING_CONTROLS`: the label RETIRED and the set moved with it**, in one
+   commit. The design names "Refresh now" explicitly among the spellings the one
+   word replaces, so keeping it would have kept the one caption the standard
+   calls out. Both proofs still bite, and a new
+   `test_the_refresh_button_is_the_app_s_one_word` pins them in step.
+4. **`test_busy_coverage.py:126` needed no change**: the wait stays
+   `_busy.build_busy(chart_row, …)`. `kit.region` is for a block a repaint
+   REPLACES; this page updates its Highcharts in place and never clears the row,
+   so a region would be a wrapper and nothing more.
+5. ⚠ **`with kit.page():` cannot wrap render's body.** The widget regions are
+   interleaved with the closures that repaint them, and six tests slice those
+   closures out of the source by name at render's own indent. Shipped as
+   `page_col = kit.page()` re-entered three times — NiceGUI's slot stack allows
+   it (verified), and only the widget lines shift.
+6. **The three tab-opening toasts became `kit.set_busy`, not `kit.toast`.** The
+   kit's own rule is that waiting is a spinner's job; all three announce work
+   that has just started, nothing on this page repaints when they finish, and
+   Analyze is a PAID Claude call whose only rate limit is now the held button.
+   The "opens in a new tab" forecast moved to each button's tooltip.
 
 **Commit:** `feat(gamma): Dealer Positioning on the page kit`
 

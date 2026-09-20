@@ -1378,7 +1378,7 @@ def test_select_all_is_wired_to_the_button():
 
 
 def test_symbol_scoped_controls_hide_on_net_prem():
-    """Symbol / Refresh now / Level movement / Spot / Bar drive the
+    """Symbol / Refresh / Level movement / Spot / Bar drive the
     symbol-scoped views. Net Prem plots a fixed universe from its own cache key
     and has no spot overlay, so leaving them visible there is five dead knobs."""
     import inspect
@@ -2417,7 +2417,14 @@ def _control_labels(kids):
 
 
 # Every control whose handler reaches an enqueue, by the caption a visitor sees.
-ENQUEUEING_CONTROLS = {"Refresh now", "Explain", "Analyze", "Open", "Date",
+# ⚠ "Refresh now" became "Refresh" with the page-kit migration (2026-09-20) — the
+# design retires the two-word form by name. The rename and this set moved in the
+# SAME commit: leaving the old caption here would make
+# test_the_bare_page_builds_every_control_that_sends_a_command fail and
+# test_a_pinned_page_builds_no_control_that_sends_a_command pass vacuously, on a
+# caption nothing builds. test_the_refresh_button_is_the_app_s_one_word is the
+# guard that the two stay in step.
+ENQUEUEING_CONTROLS = {"Refresh", "Explain", "Analyze", "Open", "Date",
                        "Symbol"}
 
 
@@ -2783,3 +2790,180 @@ def test_an_unknown_view_coerces_to_the_default_instead_of_raising(monkeypatch):
     # really does render a different page. Without this, the assertion above
     # would also pass against a route that ignored the parameter entirely.
     assert shape(junk) != shape(netprem)
+
+
+# ── the page kit frame (2026-09-20) ────────────────────────────────────────
+# Phase 2 Task 7. The page gains the app's header line, button vocabulary,
+# toast vocabulary and empty style. Every chart fact below it — HEAT_STOPS'
+# transparent zero stop, ``interpolation``, the colorAxis present at element
+# creation, the press-and-hold tooltip's three attachment sites, ``_set_chart``'s
+# recreate-on-kind-change, ``uniform_strike_grid``, the nine-series count and the
+# 40/60 ``_INIT_FLEX`` split — is untouched, and the must-not-change guards at
+# the end of this block are green on BOTH sides of the migration by design.
+
+
+def test_the_gamma_frame_is_the_kit_and_names_the_page():
+    """Nothing on screen named this page: its own title went in the 2026-07-11
+    dead-space cleanup, so a reader met a symbol dropdown and seven subtabs.
+
+    ⚠ ``stale=False`` is the decision. ``refresh_gamma_current`` genuinely stops
+    after the close, so ``alerts.stale_after`` would paint the stamp amber 45
+    minutes after 15:20 CT every evening and all weekend — a true reading of the
+    key's age and a false one about the page."""
+    src = inspect.getsource(gamma.render)
+    assert "kit.page()" in src
+    assert 'kit.header("Dealer Positioning"' in src
+    assert "stale=False" in src
+
+
+def test_the_header_stamps_the_key_this_render_actually_draws_from():
+    """PURE. A pinned Net Prem screen pins no SYMBOL, so ``snapshot_view(None)``
+    is ``options:gamma`` — the PRIVATE page's shared slot. Stamping that on the
+    public Net Prem screen would report the age of a key nothing on screen comes
+    from, and make the public process read the owner's private slot to do it."""
+    assert gamma.stamp_view() == "options:gamma"
+    assert gamma.stamp_view("$SPX", "GEX") == "options:gamma_pub:$SPX"
+    assert gamma.stamp_view("SPY", "Flow") == "options:gamma_pub:SPY"
+    # The one render that draws no snapshot stamps the key it does draw.
+    assert gamma.stamp_view(None, "Net Prem") == "options:net_premium"
+
+
+def test_the_header_stamp_follows_the_page_s_own_view_resolution():
+    """Non-vacuity: the stamp is not a second answer to "which key?" — it is
+    ``snapshot_view`` and ``reads_snapshot``, the two the poll already uses, so
+    a pin that changes one cannot leave the stamp behind."""
+    for pins in [{}, *PUBLIC_PINS]:
+        sym, view = pins.get("symbol"), pins.get("view")
+        want = (gamma.snapshot_view(sym) if gamma.reads_snapshot(view)
+                else "options:net_premium")
+        assert gamma.stamp_view(sym, view) == want, pins
+    assert "stamp_view(symbol, view)" in inspect.getsource(gamma.render)
+
+
+def test_the_page_builds_no_button_and_raises_no_toast_of_its_own():
+    """The guard in ``test_ui_kit_guard.py`` is the tree-wide form; this is the
+    one that names the page, and it is what lets gamma.py's ALLOWED entry go."""
+    src = inspect.getsource(gamma)
+    assert "ui.button(" not in src
+    assert "ui.notify(" not in src
+    assert "kit.button(" in src
+
+
+def test_the_refresh_button_is_the_app_s_one_word():
+    """The design retires "Refresh now" by name. ``ENQUEUEING_CONTROLS`` moved
+    with it in the same commit, so the two proofs either side of this one keep
+    biting rather than going vacuous on a caption nothing builds."""
+    labels = _control_labels(_rendered())
+    assert "Refresh" in labels
+    assert "Refresh now" not in labels
+
+
+def _fn_body(src, name, until):
+    start = src.index(f"def {name}(")
+    body = src[start:]
+    return body[:body.index(until)]
+
+
+def test_the_three_tab_opening_actions_hold_their_button_until_the_tab_opens():
+    """Explain, Analyze and Open each build something server-side and then open
+    a NEW TAB seconds later; none had a wait of any kind, only a toast saying so.
+    ``gamma_analyze`` is a PAID Claude call with no rate limit in front of it, so
+    a second click is real money.
+
+    ⚠ Every ``kit.set_busy`` sits AFTER the ``if not _may_enqueue: return``
+    gate — as a first statement it would break both may_enqueue proofs, which
+    ``test_every_command_this_page_can_send_is_gated_on_the_pin`` still proves."""
+    src = inspect.getsource(gamma.render)
+    for req, watch, btn in (("_request_explain", "_watch_explain", "explain_btn"),
+                            ("_request_analyze", "_watch_analyze", "analyze_btn"),
+                            ("_open_history", "_watch_history", "hist_open")):
+        held = _fn_body(src, req, f"def {watch}(")
+        assert f"kit.set_busy({btn})" in held, f"{req} holds no button"
+        released = src[src.index(f"def {watch}("):]
+        assert f"kit.set_busy({btn}, False)" in released, \
+            f"{watch} never releases {btn}"
+
+
+def test_the_no_snapshot_line_names_no_control_a_public_screen_lacks():
+    """PURE. "Fetch a symbol…" is the private page's advice; a pinned public
+    screen has no symbol box to fetch with and no Refresh to press."""
+    private, public = gamma.no_snapshot_text(True), gamma.no_snapshot_text(False)
+    assert "Fetch" in private
+    for word in ("Fetch", "Refresh", "symbol"):
+        assert word.lower() not in public.lower(), public
+
+
+def test_the_no_spot_line_names_no_control_a_public_screen_lacks():
+    """PURE. Same rule, the other empty state — and the SYMBOL must survive in
+    both, because which symbol has no price is the whole content of the line."""
+    private = gamma.no_spot_text("SPY", True)
+    public = gamma.no_spot_text("SPY", False)
+    assert "SPY" in private and "SPY" in public
+    assert "Refresh" in private
+    assert "Refresh" not in public, public
+
+
+def test_the_empty_states_use_the_app_s_one_empty_style():
+    """Scoped to the TWO empty states, not to a class string: the "History:"
+    caption beside the date picker wears ``opacity-60 text-sm`` too and is a
+    field label, which the kit's empty style would centre across the page."""
+    src = inspect.getsource(gamma.render)
+    assert "kit.empty(no_snapshot_text(_may_enqueue))" in src   # the bar panel
+    assert 'kit.empty("")' in src                               # the heatmap panel
+    # ...and the wording itself moved out to the pure builders, so a literal
+    # here would be a third spelling of a line two origins word differently.
+    assert "Fetch a symbol" not in src
+    assert "No spot price for" not in src
+
+
+def test_the_explain_css_is_gone():
+    """DEAD, verified three ways: ``gx-explain`` and its children appeared only
+    inside the block that defined them with no dynamic ``f"gx-…"`` anywhere, the
+    service emits none of those classes, and ``/options/explain`` returns the
+    payload's own HTML as a standalone ``HTMLResponse`` — a separate document
+    ``ui.add_css`` could never reach."""
+    assert not hasattr(gamma, "EXPLAIN_CSS")
+    assert "gx-explain" not in inspect.getsource(gamma)
+
+
+# ── must-not-change: green on BOTH sides of the migration ──────────────────
+
+def test_the_flow_keyframes_css_stays():
+    """``[flow]`` survives entirely: ``.fx-pulse`` is the live dot and
+    ``.fx-panel``'s crosshair cursor IS the readout affordance, and both live
+    inside a raw SVG fragment no component ``.classes()`` can reach."""
+    assert "ui.add_css(FLOW_KEYFRAMES_CSS)" in inspect.getsource(gamma.render)
+
+
+def test_the_chart_row_keeps_the_crosshair_hook_and_its_deliberate_overflow():
+    """``gamma-xhair-row`` is the ONLY selector ``_CROSSHAIR_JS`` queries, so
+    dropping it kills the shared bar-to-heatmap crosshair silently, with no
+    error. ``relative`` is what the busy scrim anchors to, and
+    ``w-[calc(100%+1rem)]`` is a deliberate overflow into the content column's
+    padding so the heatmap's right edge reaches the window edge."""
+    src = inspect.getsource(gamma.render)
+    row = src[src.index("chart_row = ui.row()"):]
+    row = row[:row.index("with chart_row:")]
+    for token in ("gamma-xhair-row", "relative", "w-[calc(100%+1rem)]",
+                  "no-wrap", "gap-0", "items-start"):
+        assert token in row, row
+    assert ".gamma-xhair-row" in gamma._CROSSHAIR_JS
+
+
+def test_the_wait_stays_the_inline_scrim_on_the_chart_row():
+    """``kit.region`` is for a block a repaint REPLACES; this page updates its
+    Highcharts elements in place and never clears the row, so a region would be
+    a wrapper and nothing more. The scrim must cover the two chart panels."""
+    src = inspect.getsource(gamma.render)
+    assert "_busy.build_busy(chart_row" in src
+    assert "kit.region(" not in src
+
+
+def test_the_pinned_screens_still_build_no_enqueueing_control_through_the_kit():
+    """The gate restated against the kit: a ``kit.button`` built unconditionally
+    and merely DISABLED on a pinned render would satisfy every source check here
+    and still put the caption on a public screen."""
+    for pins in PUBLIC_PINS:
+        kids = _rendered(**pins)
+        assert not [e for e in kids if type(e).__name__ == "Button"
+                    and str(getattr(e, "text", "")) in ENQUEUEING_CONTROLS], pins
