@@ -15,9 +15,15 @@ from nicegui.elements.expansion import Expansion
 
 from pages import bullbear as B
 from pages import sentiment_bullbear as P
-from pages.rotation_view import NT, TONE
+from pages import ui_kit as kit
+from pages.options import theme
+from pages.rotation_view import TONE
 
 ROUTE = "/sentiment/bullbear"
+
+# The faint end of the app's text ladder — the colour ``kit.EYEBROW`` wears, and
+# what replaced the page-scoped ``NT["ghost"]`` when the neutral ladder went.
+FAINT = f"text-[{theme.THEME['palette']['icon']}]"
 
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
@@ -120,8 +126,17 @@ def test_the_page_imports_nothing_below_tier_one():
     # ``shell`` is the page-to-shell seam and is itself Tier 1 — it imports
     # nothing but ``nicegui`` and ``pages.ui_guard``, pinned by
     # ``test_shell_seam.test_the_shell_stays_a_leaf_module``.
+    # ``pages.ui_kit`` is the page kit and is itself Tier 1 — its own docstring
+    # states the allow-list it keeps (nicegui, the theme, busy, the Symbol-field
+    # helpers, bus_client and shell), which is why the public live process can
+    # render a page built from it. ``pages.options`` is the same theme module the
+    # narrower ``pages.options.theme`` entry beside it already names, reached by
+    # the import form the three sibling rotation screens use; it is narrower than
+    # the bare ``pages`` this set has always allowed. The intent is unchanged: no
+    # engine, no proxy, no ``sys.path`` glue.
     assert got <= {"datetime", "time", "bus_client", "nicegui", "pages", "shell",
-                   "pages.options.theme", "pages.rotation_view", "pages.ui_guard"}
+                   "pages.options", "pages.options.theme", "pages.rotation_view",
+                   "pages.ui_guard", "pages.ui_kit"}
 
 
 # ── the two clocks ───────────────────────────────────────────────────────────
@@ -311,15 +326,31 @@ def _grid(elements):
 
 
 def _scrim(elements):
-    """The wait scrim — the element ``build_busy`` hangs its spinner in."""
+    """The region's wait scrim — the element the kit hangs its spinner in.
+
+    It used to be "the first ``ui.spinner``", which is a test of BUILD ORDER
+    rather than of this page: the render now goes through ``kit.region``, and
+    the kit is free to put a spinner anywhere on the page. Counting first is
+    what makes taking the one safe rather than lucky — this page has exactly one
+    region, and if a second ever appears the helper says so instead of silently
+    answering about whichever was built first."""
+    spinners = [e for e in elements if isinstance(e, ui.spinner)]
+    assert len(spinners) == 1, \
+        f"expected the region's one spinner, found {len(spinners)}"
+    return spinners[0].parent_slot.parent
+
+
+def _button(elements, text):
+    """The button with exactly this label — named rather than positional, since
+    the kit puts Refresh in the header's action row and a page may hold more."""
     return next(e for e in elements
-                if isinstance(e, ui.spinner)).parent_slot.parent
+                if isinstance(e, ui.button) and str(e.text) == text)
 
 
 def _click_refresh(elements):
     """Press Refresh. NiceGUI wraps an ``on_click`` in a one-arg lambda taking
     the click args, so the stored handler is not the zero-arg one passed in."""
-    button = next(e for e in elements if isinstance(e, ui.button))
+    button = _button(elements, "Refresh")
     next(listener.handler for listener in button._event_listeners.values()
          if listener.type == "click")(None)
 
@@ -576,7 +607,12 @@ def test_the_quotes_line_turns_warning_when_the_call_failed_and_calm_again_after
     monkeypatch.setattr(bus_client, "read_version", lambda _v: 2)
     monkeypatch.setattr(bus_client, "read_full", lambda _v: (_payload(), 2))
     _timer(els).callback()
-    assert TONE["down"]["txt"] not in line._classes and NT["ghost"] in line._classes
+    # RE-AIMED, not weakened: the calm colour used to be the rotation family's
+    # own ``NT["ghost"]``, a rung of the warm-neutral ladder the page kit
+    # retired. It is now the app's faint text token — the colour every other
+    # status line on the app wears. The warning half is unchanged, because it is
+    # DATA: a failed quote call must still read red.
+    assert TONE["down"]["txt"] not in line._classes and FAINT in line._classes
 
 
 def test_the_subtitle_and_the_grid_appear_only_once_there_are_rows(monkeypatch):
@@ -627,3 +663,137 @@ def test_the_expiry_only_fires_for_a_refresh_that_was_actually_asked_for(monkeyp
     _timer(els).callback()
     assert _scrim(els).visible is False
     assert P.NOTHING_CHANGED not in _texts(els)
+
+
+# ── the Bull / Bear Map on the page kit (Phase 3, Task 4) ───────────────────
+def _kit_page_classes():
+    """The classes ``kit.page()`` puts on a page column, read off the KIT.
+
+    So the scope-class test below pins "the ``bullbear`` hook rides the kit's
+    page column" rather than a class string copied out of ``ui_kit`` and free to
+    drift from it."""
+    with ui.card():
+        return set(kit.page()._classes)
+
+
+def test_the_bullbear_frame_is_the_kit_and_carries_no_surface_of_its_own():
+    """``stale=True`` is deliberate and this page is the only one of the four
+    rotation-family screens that earns it: ``_bullbear_publish_loop`` republishes
+    every 30 s while the tape is open and every 5 min when it is closed
+    (``sentiment_svc/scheduler.bullbear_due``), so both of ``alerts.stale_after``'s
+    thresholds — 600 s in session, 45 min out of it — are honest."""
+    src = inspect.getsource(P)
+    assert "kit.page()" in src
+    assert 'kit.header("Bull / Bear Map", view=VIEW, stale=True)' in src
+    assert "kit.region(" in src
+    # The page-scoped ground, the two faces and the warm-neutral ladder are
+    # gone. Read off the NAMES the module binds and uses rather than the source
+    # text: ``"NT["`` is a substring of ``_ROW_INDENT[``, so a text ban would
+    # fail on a page that had already retired the ladder.
+    names = {n.id for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Name)}
+    names |= {a.asname or a.name for n in ast.walk(ast.parse(src))
+              if isinstance(n, ast.ImportFrom) for a in n.names}
+    for token in ("NT", "NB", "NE", "_T", "ROTATION_TOKENS",
+                  "ROTATION_FONT_HEAD_HTML"):
+        assert token not in names, f"{token} is a page-scoped surface value"
+    for key in ("RT_SANS", "RT_VOID_BG", "RT_MONO", "RT_PANEL_BG"):
+        assert key not in src, f"{key} is a page-scoped surface value"
+    # The ONE escape hatch STAYS: ``.q-item`` and ``.nicegui-expansion-content``
+    # are Quasar-internal DOM that ``.classes()`` cannot reach, and the block
+    # carries no colour, font or background. It is the documented exception, not
+    # a palette block.
+    assert "ui.add_css(_BULLBEAR_CSS)" in src
+
+
+def test_the_waiting_toast_is_gone_and_the_outcome_toast_is_a_kit_toast():
+    """Two toasts, two fates. "Refreshing — the page updates when the new read
+    lands" only repeated what the region's spinner already says, and the standard
+    keeps a toast for the OUTCOME of an action. ``NOTHING_CHANGED`` IS an
+    outcome — the refresh completed and changed nothing — so it survives, as one
+    of the kit's four kinds."""
+    src = inspect.getsource(P)
+    assert "ui.notify" not in src
+    assert "Refreshing — the page updates" not in src
+    assert 'kit.toast("info", NOTHING_CHANGED)' in src
+
+
+def test_refresh_is_a_header_action_rather_than_a_row_in_the_page_body(monkeypatch):
+    """The one page action this screen has — it commands the sentiment service —
+    so it belongs beside the Updated stamp, not in a headline row of the page's
+    own. Read off the DOM rather than the source: ``with head.actions:`` is in
+    the source whichever row the button actually lands in."""
+    els = _render(monkeypatch, _payload())
+    actions = _button(els, "Refresh").parent_slot.parent
+    title = _by_text(els, "Bull / Bear Map")
+    assert actions.parent_slot.parent is title.parent_slot.parent, \
+        "Refresh is not in the kit header's action row"
+
+
+def test_the_two_clocks_stay_in_the_body_as_one_status_line(monkeypatch):
+    """Neither clock is the page's own freshness, so neither is the header
+    stamp's job. ``scores_lbl`` dates last night's cascade and ``quotes_lbl`` the
+    live quote batch — two feeds that fail separately — and ``quotes_lbl``
+    recolours when the quote call raised, a state a stamp cannot express."""
+    els = _render(monkeypatch, _payload())
+    scores = _by_text(els, "Scores as of")
+    quotes = _by_text(els, "Quotes ")
+    assert scores.parent_slot is quotes.parent_slot, \
+        "the two clocks are one status-line row"
+    title = _by_text(els, "Bull / Bear Map")
+    assert scores.parent_slot.parent is not title.parent_slot.parent, \
+        "the clocks belong to the body; the header carries the stamp"
+    for cls in theme.EYEBROW.split():
+        assert cls in scores._classes, f"{cls}: not the kit's status line"
+
+
+def test_the_expansion_scope_class_rides_the_kit_page_column(monkeypatch):
+    """The trap in this migration. ``_BULLBEAR_CSS`` is scoped under
+    ``.bullbear``, so dropping the wrapper class along with the wrapper's surface
+    would take the expansion padding fix with it — every child row pushed out of
+    the column grid, with nothing in the source to say why."""
+    els = _render(monkeypatch, _payload())
+    scoped = [e for e in els if "bullbear" in getattr(e, "_classes", [])]
+    assert len(scoped) == 1, f"expected one scope element, found {len(scoped)}"
+    column = scoped[0]
+    assert set(column._classes) - {"bullbear"} == _kit_page_classes(), \
+        "the scope class must ride the kit page column, carrying no surface"
+    for panel in _panels(els).values():
+        node = panel
+        while node is not None and node is not column:
+            node = getattr(node.parent_slot, "parent", None)
+        assert node is column, "an expansion outside the scope the CSS covers"
+
+
+def test_the_scrim_still_survives_the_rebuild_that_clears_the_rows(monkeypatch):
+    """A must-not-change guard, and it passes before and after by design.
+
+    This page's spinner was the one of the four that was ALREADY right: the
+    scrim hung on ``scroll_box`` while ``_rebuild`` cleared ``rows_box``
+    underneath it, which is exactly the split ``kit.region`` formalises as
+    ``outer`` / ``content``. The migration had to PRESERVE that, and mounting the
+    whole grid — scroller included — inside ``region.content`` would have undone
+    it."""
+    import bus_client
+    els = _render(monkeypatch, _payload())
+    scrim = _scrim(els)
+    rescored = _payload(session_date="2026-08-20")
+    monkeypatch.setattr(bus_client, "read_version", lambda _v: 2)
+    monkeypatch.setattr(bus_client, "read_full", lambda _v: (rescored, 2))
+    _timer(els).callback()                  # → _paint → _rebuild → rows_box.clear()
+    assert scrim.id in ui.context.client.elements, \
+        "a tree rebuild deleted the wait scrim"
+
+
+def test_the_day_tones_the_breadth_hues_and_the_quadrant_chips_are_untouched():
+    """Charts keep their data colours: the half the kit may not reach. Passes
+    before and after by design — it is the guard on what must NOT change."""
+    for tone in ("up", "down", "flat"):
+        assert P._DAY_TXT[tone] == TONE[tone]["txt"], f"the {tone} day cell"
+    assert P._BREADTH_FILL[True] == TONE["down"]["fill"], "a thin breadth bar"
+    assert P._BREADTH_FILL[False] == TONE["up"]["fill"], "a broad breadth bar"
+    # A failed quote call is a STATE, not chrome, and keeps the risk-off hue.
+    assert P._QUOTES_TXT[False] == TONE["down"]["txt"]
+    # The quadrant map is reached exactly twice — a grid row and a count chip —
+    # and neither may grow a colour of its own.
+    src = inspect.getsource(P.render)
+    assert src.count("B.quadrant_class(") == 2

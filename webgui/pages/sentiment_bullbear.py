@@ -18,6 +18,28 @@ commensurable (CLAUDE.md: +0.37 "Risk-on" beside −1.52 "Risk-off", 2026-08-17)
 This page counts the rows on screen and stops; the payload carries ``regime`` and
 this module never reads it.
 See docs/plans/2026-08-19-bull-bear-map-design.md.
+
+**On the page kit since 2026-09-19** (the consistency standard,
+``docs/plans/2026-09-19-app-ui-consistency-design.md``): the header line carries
+the name and the Updated stamp, and ONE ``kit.region`` covers the grid a repaint
+replaces. The page's own ground, its two faces and the rotation family's
+warm-neutral ladder are gone; it wears the app surface like every other screen.
+
+⚠ **Three things the kit did NOT take, each for its own reason.** The two clocks
+stay in the BODY as the status line: neither is this page's freshness — one dates
+last night's cascade and the other the live quote batch, they fail separately,
+and ``quotes_lbl`` recolours when the quote call raised, which a stamp cannot
+express. ``ui.add_css(_BULLBEAR_CSS)`` stays, and so does the ``bullbear`` scope
+class on the kit's page column: that block is Quasar-internal expansion DOM with
+no colour, font or background in it — the documented escape hatch — and dropping
+the class as "chrome" would take the padding fix with it. And every ``TONE``
+tone, every breadth hue and ``bullbear.quadrant_class`` is DATA, untouched.
+
+⚠ **This page's wait scrim was already right, and the conversion preserved it.**
+``build_busy`` hung it on ``scroll_box`` while ``_rebuild`` cleared ``rows_box``
+underneath — which is precisely the ``outer`` / ``content`` split ``kit.region``
+formalises, so the scroller moves INSIDE ``region.content`` rather than becoming
+it. The sibling rotation screens each had the bug this page did not.
 """
 import datetime
 from time import monotonic
@@ -25,9 +47,9 @@ from time import monotonic
 import bus_client
 from nicegui import ui
 from pages import bullbear as B
-from pages import busy as _busy
-from pages.options.theme import ROTATION_FONT_HEAD_HTML, ROTATION_TOKENS as _T
-from pages.rotation_view import NB, NE, NT, TONE
+from pages import ui_kit as kit
+from pages.options import theme
+from pages.rotation_view import TONE
 from pages.ui_guard import guard
 
 VIEW = "sentiment:bullbear"
@@ -48,10 +70,16 @@ ORPHANS = "Not in a scored industry"
 # How long a Refresh may still be in flight. It has to be a clock, because on a
 # frozen tape there is no ack to wait for: ``handlers.publish_bullbear`` carries
 # the STORED ``quoted_at`` forward when only the stamp moved, so
-# ``cache_set(skip_unchanged=True)`` short-circuits and nothing on the bus moves
-# — not the version, not ``{key}:ts``. Sized for the round trip (consume the
-# command, one batched /quotes, publish) with room to spare, since dismissing
-# before the data can arrive would say "finished" while the work is still running.
+# ``cache_set(skip_unchanged=True)`` short-circuits and the VERSION does not
+# move — which is the only thing ``_maybe_repaint`` watches. ⚠ ``{key}:ts`` DOES
+# move: ``cache_set`` refreshes the freshness stamp on a skipped publish
+# deliberately, so a publisher whose data legitimately stops moving does not
+# look dead. So the header's Updated stamp advances on exactly the refresh this
+# clock has to dismiss by hand, and the two are saying different true things:
+# "confirmed current just now" and "nothing here changed". Sized for the round
+# trip (consume the command, one batched /quotes, publish) with room to spare,
+# since dismissing before the data can arrive would say "finished" while the
+# work is still running.
 REFRESH_WAIT_SEC = 8.0
 
 
@@ -172,14 +200,26 @@ GRID = ("grid grid-cols-[minmax(190px,2.4fr)_150px_92px_92px_88px"
         "_minmax(120px,1fr)] w-full items-center")
 MIN_W = "min-w-[880px]"
 
-_MONO = _T["RT_MONO"]
-_NUM = f"{_MONO} tabular-nums text-right pr-4 leading-none whitespace-nowrap"
-_CAPTION = (f"{_MONO} {NT['axis']} text-[9.5px] tracking-[.2em] uppercase "
+_P = theme.THEME["palette"]
+# The faint end of the app's text ladder — the colour ``kit.EYEBROW`` wears.
+_FAINT = f"text-[{_P['icon']}]"
+# Chart furniture, not data. A row hairline and the breadth groove draw a FRAME,
+# so they take app border tokens — and the column-header rule sits one step
+# brighter, on the button border, for the reason Task 1 gave the RRG's
+# crosshair: it marks a structural boundary, where a row hairline only separates
+# two rows of the same kind.
+_ROW_EDGE = f"border-[{_P['card_border']}]"
+_HEAD_RULE = f"border-[{_P['btn_border']}]"
+_TRACK = f"bg-[{_P['card_border']}]"
+
+# ``tabular-nums`` is what aligns the digits down a column; it is a numeric
+# variant of whatever face is in use, so the band stays aligned on the app font
+# now that the page-scoped mono face is gone.
+_NUM = "tabular-nums text-right pr-4 leading-none whitespace-nowrap"
+_CAPTION = (f"{_FAINT} text-[9.5px] tracking-[.2em] uppercase "
             "leading-none whitespace-nowrap")
 _CHIP = ("border rounded-full px-2.5 py-[3px] text-[10px] tracking-[.06em] "
          "leading-none whitespace-nowrap")
-_BTN = (f"{_MONO} {NT['caption']} border {NE['btn_edge']} bg-transparent "
-        "h-[30px] px-4 text-[10px] tracking-[.16em] leading-none")
 
 # Day-move tone: three static classes, swapped with ``.classes(remove=…)`` so a
 # reprice cannot stack two colours on one cell.
@@ -191,17 +231,24 @@ _DAY_TXT_ALL = " ".join(dict.fromkeys(_DAY_TXT.values()))
 _BREADTH_FILL = {True: TONE["down"]["fill"], False: TONE["up"]["fill"]}
 
 # The headline slot carries either the count or the reason there is none.
-_HEADLINE = {True: f"{NT['body']} text-[26px] font-semibold leading-tight",
-             False: f"{NT['caption']} text-[15px] leading-snug"}
+_HEADLINE = {True: f"{theme.LABEL} text-[26px] font-semibold leading-tight",
+             False: f"{theme.MUTED} text-[15px] leading-snug"}
 _HEADLINE_ALL = " ".join(dict.fromkeys(_HEADLINE.values()))
-_QUOTES_TXT = {True: NT["ghost"], False: TONE["down"]["txt"]}
+# ⚠ The FALSE half is DATA — a failed quote call must read red, not calm. The
+# true half is the app's faint text: ``kit.status_line`` already paints it, and
+# it is named here so the ``remove=`` set can take it off again.
+_QUOTES_TXT = {True: _FAINT, False: TONE["down"]["txt"]}
 _QUOTES_ALL = " ".join(dict.fromkeys(_QUOTES_TXT.values()))
 
 _ROW_H = {"sector": "h-[52px]", "industry": "h-[38px]", "stock": "h-[32px]"}
 _ROW_INDENT = {"sector": "pl-6", "industry": "pl-12", "stock": "pl-[76px]"}
-_NAME_TXT = {"sector": f"{NT['body']} text-[14px] font-semibold",
-             "industry": f"{NT['caption']} text-[12.5px]",
-             "stock": f"{NT['rail']} text-[12px]"}
+# Two text levels for three row kinds, because that is what the ladder it
+# replaces actually drew: ``caption`` (L 0.52) and ``rail`` (L 0.50) were one
+# fiftieth of a lightness step apart. The SIZE carries the third distinction,
+# 14 / 12.5 / 12px, exactly as it did before.
+_NAME_TXT = {"sector": f"{theme.LABEL} text-[14px] font-semibold",
+             "industry": f"{theme.MUTED} text-[12.5px]",
+             "stock": f"{theme.MUTED} text-[12px]"}
 
 # The ONE escape hatch (CLAUDE.md): Quasar-internal DOM ``.classes()`` cannot
 # reach. ``.q-item`` pads the expansion header 8/16px and
@@ -225,56 +272,65 @@ def render():
     state = {"payload": None, "ver": None, "days": {}, "cells": [], "sig": None,
              "refresh_until": None}
 
-    ui.add_head_html(ROTATION_FONT_HEAD_HTML)
+    # The ONE escape hatch, and the scope class it is written against. Both stay
+    # — see the module docstring: Quasar-internal expansion DOM, no colour.
     ui.add_css(_BULLBEAR_CSS)
 
     # ── chrome ──────────────────────────────────────────────────────────────
-    with ui.column().classes(
-            f"bullbear {_T['RT_SANS']} {_T['RT_VOID_BG']} w-full gap-0 pb-16 "
-            "rounded-lg overflow-hidden"):
-        with ui.column().classes("w-full gap-0 px-7 pt-6 pb-5"):
-            ui.label("BULL / BEAR MAP").classes(_CAPTION)
-            with ui.row().classes("items-center w-full no-wrap gap-4 mt-3"):
-                ui.label("Where the market is strong and weak").classes(
-                    f"{NT['body']} text-[29px] font-bold leading-tight "
-                    "tracking-[-0.01em]")
-                ui.space()
-                # Not drawn on the public live origin — see shell.may_enqueue.
-                if _may_enqueue:
-                    ui.button("Refresh", color=None,
-                              on_click=lambda: _request_refresh()) \
-                        .props("flat no-caps dense").classes(_BTN)
-            with ui.row().classes("items-center w-full no-wrap gap-4 mt-4"):
-                scores_lbl = ui.label("").classes(
-                    f"{_MONO} {NT['caption']} text-[11px] leading-none")
-                quotes_lbl = ui.label("").classes(
-                    f"{_MONO} text-[11px] leading-none {_QUOTES_TXT[True]}")
+    with kit.page().classes(add="bullbear"):
+        # No description line: "where the market is strong and weak, as a tree"
+        # is the opening of page_help.HELP_MD["/sentiment/bullbear"].
+        #
+        # stale=True — the only one of the four rotation-family screens that
+        # earns it. ``_bullbear_publish_loop`` republishes every 30 s while the
+        # tape is open and every 5 min when it is closed
+        # (``sentiment_svc.scheduler.bullbear_due``), so both of
+        # ``alerts.stale_after``'s thresholds are honest here.
+        head = kit.header("Bull / Bear Map", view=VIEW, stale=True)
+        # Not drawn on the public live origin — see shell.may_enqueue.
+        if _may_enqueue:
+            with head.actions:
+                kit.button("Refresh", kind="secondary", icon="refresh",
+                           on_click=lambda: _request_refresh())
 
-        with ui.column().classes("w-full gap-2.5 px-7 pb-6"):
+        # TWO clocks, and both stay in the body. Neither is this page's own
+        # freshness, which the header stamp answers: one dates last night's
+        # cascade, the other the live quote batch, they fail separately, and the
+        # quotes line recolours when the quote call raised — a state a stamp has
+        # no way to express.
+        with ui.row().classes("items-center w-full no-wrap gap-4"):
+            scores_lbl = kit.status_line()
+            quotes_lbl = kit.status_line()
+
+        with ui.column().classes("w-full gap-2.5"):
             headline_lbl = ui.label("").classes(_HEADLINE[True])
             sub_lbl = ui.label(
                 "Counted at sector level. Expand a sector for the industries "
                 "inside it, an industry for its stocks — each level counts "
-                "separately.").classes(f"{NT['ghost']} text-[12.5px] leading-snug")
+                "separately.").classes(f"{_FAINT} text-[12.5px] leading-snug")
             dist_box = ui.row().classes("flex-wrap gap-1.5 pt-1")
 
-        # The scrim mounts here, not on ``rows_box``, which ``_rebuild`` clears
-        # — taking the scrim with it. The floor height gives it somewhere to land
-        # on a cold cache, which is when Refresh gets pressed.
-        scroll_box = ui.element("div").classes(
-            "w-full overflow-x-auto px-7 min-h-[96px]")
-        with scroll_box:
-            grid_wrap = ui.column().classes(f"{MIN_W} w-full gap-0")
-            with grid_wrap:
-                with ui.element("div").classes(
-                        f"{GRID} h-[34px] border-b {NE['hair']}"):
-                    for text, align in (
-                            ("Sector · Industry · Stock", "pl-6"),
-                            ("Quadrant", ""), ("Trend", "text-right pr-4"),
-                            ("vs SPY", "text-right pr-4"),
-                            ("Today", "text-right pr-4"), ("Breadth", "")):
-                        ui.label(text).classes(f"{_CAPTION} {align}")
-                rows_box = ui.column().classes("w-full gap-0")
+        # The spinner lives on the region's OUTER element while ``_rebuild``
+        # clears ``rows_box`` well inside it — which is the split this page
+        # already had (``build_busy`` on ``scroll_box``, not on ``rows_box``)
+        # and the one ``kit.region`` formalises. The scroller goes INSIDE
+        # ``region.content``; making the region BE the scroller would undo it.
+        # The floor height a cold cache needs is the region's ``REGION_MIN_H``,
+        # reserved while the spinner is up and given back after.
+        grid = kit.region("Refreshing the map…")
+        with grid.content:
+            with ui.element("div").classes("w-full overflow-x-auto"):
+                grid_wrap = ui.column().classes(f"{MIN_W} w-full gap-0")
+                with grid_wrap:
+                    with ui.element("div").classes(
+                            f"{GRID} h-[34px] border-b {_HEAD_RULE}"):
+                        for text, align in (
+                                ("Sector · Industry · Stock", "pl-6"),
+                                ("Quadrant", ""), ("Trend", "text-right pr-4"),
+                                ("vs SPY", "text-right pr-4"),
+                                ("Today", "text-right pr-4"), ("Breadth", "")):
+                            ui.label(text).classes(f"{_CAPTION} {align}")
+                    rows_box = ui.column().classes("w-full gap-0")
 
         # Outside the scroller — a footnote sliding sideways is unreadable. The
         # window lengths (``scoring/momentum.TREND_WINDOW`` / ``RS_WINDOW``) are
@@ -284,10 +340,7 @@ def render():
             "closes, scaled by how well the line fits. vs SPY is the excess "
             "return over the benchmark. Both are scored once a night; only "
             "Today is live.").classes(
-                f"{NT['ghost']} text-[11.5px] leading-relaxed px-7 pt-4 "
-                "max-w-[820px]")
-
-    map_busy = _busy.build_busy(scroll_box, "Refreshing the map…")
+                f"{_FAINT} text-[11.5px] leading-relaxed max-w-[820px]")
 
     # ── row builders (one shape, three levels) ──────────────────────────────
     def _set_day(cell, key):
@@ -303,11 +356,11 @@ def render():
             # has no constituents, and a sector whose members were all unusable
             # has no reading; an empty groove would claim of both that nothing
             # confirms.
-            ui.label(B.NO_READING).classes(f"{_MONO} {NT['ghost']} text-[11px]")
+            ui.label(B.NO_READING).classes(f"{_FAINT} text-[11px]")
             return
         with ui.row().classes("items-center no-wrap gap-2.5 w-full pr-2"):
             with ui.element("div").classes(
-                    f"h-1.5 flex-1 min-w-0 {NB['track']} rounded-full "
+                    f"h-1.5 flex-1 min-w-0 {_TRACK} rounded-full "
                     "overflow-hidden"):
                 # The documented continuous-value exception: 0..100 is 101
                 # classes, so this one is runtime-built. Set once (breadth is
@@ -317,7 +370,7 @@ def render():
                     f"h-full rounded-full {_BREADTH_FILL[B.breadth_is_thin(share)]}"
                     f" w-[{width}%]")
             ui.label(f"{width}%").classes(
-                f"{_MONO} {NT['ghost']} text-[10px] tabular-nums w-9 text-right")
+                f"{_FAINT} text-[10px] tabular-nums w-9 text-right")
 
     def _mark_row(node, level, leaf):
         """One grid row. Returns its chevron, or None for a leaf."""
@@ -326,22 +379,22 @@ def render():
         quad = B.quadrant(trend, excess)
         with ui.element("div").classes(
                 f"{GRID} {_ROW_H[level]} {_ROW_INDENT[level]} pr-6 border-b "
-                f"{NE['hair']} hover:bg-white/[0.02]"):
+                f"{_ROW_EDGE} hover:bg-white/[0.02]"):
             with ui.row().classes("items-center no-wrap gap-2 min-w-0"):
                 if leaf:
                     ui.element("div").classes("w-4 shrink-0")
                 else:
                     chevron = ui.icon("chevron_right").classes(
-                        f"{NT['rail']} text-[16px] shrink-0")
+                        f"{theme.MUTED} text-[16px] shrink-0")
                 ui.label(str(node.get("label") or node.get("symbol") or "")) \
                     .classes(f"{_NAME_TXT[level]} leading-none truncate")
                 ui.label(str(node.get("symbol") or "")).classes(
-                    f"{_MONO} {NT['ghost']} text-[9.5px] tracking-[.08em] shrink-0")
+                    f"{_FAINT} text-[9.5px] tracking-[.08em] shrink-0")
             with ui.row().classes("items-center"):
                 ui.label(B.quadrant_label(quad)).classes(
                     f"{_CHIP} {B.quadrant_class(quad)}")
-            ui.label(as_percent(trend)).classes(f"{_NUM} {NT['body']} text-[12px]")
-            ui.label(as_percent(excess)).classes(f"{_NUM} {NT['caption']} text-[12px]")
+            ui.label(as_percent(trend)).classes(f"{_NUM} {theme.LABEL} text-[12px]")
+            ui.label(as_percent(excess)).classes(f"{_NUM} {theme.MUTED} text-[12px]")
             day = ui.label("").classes(f"{_NUM} text-[12px]")
             key = (level, node.get("symbol"))
             state["cells"].append((key, day))
@@ -351,8 +404,8 @@ def render():
 
     def _note(text, indent):
         ui.label(text).classes(
-            f"{_MONO} {NT['ghost']} text-[10px] tracking-[.14em] uppercase "
-            f"{indent} py-2.5 border-b {NE['hair']}")
+            f"{_FAINT} text-[10px] tracking-[.14em] uppercase "
+            f"{indent} py-2.5 border-b {_ROW_EDGE}")
 
     # ── lazy expansion ──────────────────────────────────────────────────────
     # Children build INSIDE the expand handler, so the default screen is eleven
@@ -432,14 +485,14 @@ def render():
                 with ui.row().classes(
                         f"{_CHIP} items-center gap-2 {B.quadrant_class(quad)}"):
                     ui.label(B.quadrant_label(quad))
-                    ui.label(str(count)).classes(f"{_MONO} font-semibold")
+                    ui.label(str(count)).classes("tabular-nums font-semibold")
         with rows_box:
             for node in sectors:
                 _sector_panel(node)
 
     def _paint():
         state["refresh_until"] = None
-        map_busy.hide()
+        grid.busy.hide()
         scores, quotes = clocks(state["payload"])
         scores_lbl.text = scores
         quotes_lbl.text = quotes
@@ -463,9 +516,10 @@ def render():
         if not _may_enqueue:
             return          # no button either — see shell.may_enqueue
         bus_client.request("sentiment", {"type": "refresh_bullbear"})
-        ui.notify("Refreshing — the page updates when the new read lands.")
+        # No toast: the region's spinner already says the page is waiting, and
+        # the standard keeps a toast for the OUTCOME of an action.
         state["refresh_until"] = monotonic() + REFRESH_WAIT_SEC
-        map_busy.show()
+        grid.busy.show()
 
     def _expire_refresh():
         """Lower the scrim once a Refresh can no longer be in flight.
@@ -478,8 +532,11 @@ def render():
         until = state["refresh_until"]
         if until is not None and monotonic() >= until:
             state["refresh_until"] = None
-            map_busy.hide()
-            ui.notify(NOTHING_CHANGED)
+            grid.busy.hide()
+            # This one IS an outcome — the refresh completed and changed
+            # nothing — so it survives as a toast where the "Refreshing…" one
+            # did not. ``info``: nothing went wrong, and nothing needs acting on.
+            kit.toast("info", NOTHING_CHANGED)
 
     @guard
     def _maybe_repaint():
