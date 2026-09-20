@@ -978,6 +978,11 @@ def render():
         adhoc["contracts"] = new
 
     def _adhoc_apply_chain(cc):
+        # Released FIRST, and in this function rather than on the happy path:
+        # a symbol with no chain still lands here (``cc`` may be None / empty),
+        # and anything below that raises must not leave Load spinning until the
+        # 30 s backstop.
+        kit.set_busy(adhoc_load_btn, False)
         cc = cc or {}
         adhoc["chain"] = cc.get("chain")
         if cc.get("price"):
@@ -1005,6 +1010,9 @@ def render():
         adhoc_status.text = f"Loading {sym} chain…"
         # Shares the Calculator's calc_chain cache (single-user, one page at a time).
         bus_client.request("options", {"type": "calc_load", "args": {"symbol": sym}})
+        # After the enqueue, never before the empty-symbol return above: nothing
+        # was sent there, so nothing would arrive to release it.
+        kit.set_busy(adhoc_load_btn)
 
     @guard_async
     async def _adhoc_poll_chain():

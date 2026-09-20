@@ -644,3 +644,44 @@ def test_the_adhoc_symbol_uses_the_one_symbol_field():
     import inspect
 
     assert "kit.symbol_field(" in inspect.getsource(rescue.render)
+def _render_nested_source(name):
+    """The source of ONE nested function inside ``rescue.render``.
+
+    They are closures over the page's widgets, so ``inspect.getsource`` cannot
+    reach them from outside - the render source is parsed and the named
+    ``FunctionDef`` handed back, which keeps these assertions scoped to the
+    function that must carry the behaviour rather than to the whole page."""
+    import ast
+    import inspect
+    import textwrap
+
+    src = textwrap.dedent(inspect.getsource(rescue.render))
+    tree = ast.parse(src)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return ast.get_source_segment(src, node)
+    raise AssertionError(f"rescue.render has no nested {name}()")
+
+
+def test_the_adhoc_load_button_spins_until_the_chain_lands():
+    """The standard: a button that starts work shows its own spinner and stays
+    disabled until the result lands. The release is in ``_adhoc_apply_chain``
+    because that runs for an EMPTY or failed chain too - a release on the happy
+    path alone would leave the button spinning on exactly the fetch that went
+    wrong."""
+    load = _render_nested_source("_adhoc_load")
+    apply_chain = _render_nested_source("_adhoc_apply_chain")
+    assert "kit.set_busy(adhoc_load_btn)" in load
+    assert "kit.set_busy(adhoc_load_btn, False)" in apply_chain
+
+
+def test_an_empty_symbol_never_leaves_the_load_button_spinning():
+    """The empty-symbol early return comes BEFORE the busy: nothing is enqueued,
+    so nothing would ever arrive to release it."""
+    load = _render_nested_source("_adhoc_load")
+    lines = load.splitlines()
+    assert any("kit.set_busy(adhoc_load_btn)" in ln for ln in lines)
+    ret = next(i for i, ln in enumerate(lines) if ln.strip() == "return")
+    busy = next(i for i, ln in enumerate(lines)
+                if "kit.set_busy(adhoc_load_btn)" in ln)
+    assert ret < busy, "the empty-symbol return must precede the busy"
