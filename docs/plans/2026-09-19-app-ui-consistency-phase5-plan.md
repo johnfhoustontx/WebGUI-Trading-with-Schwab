@@ -168,7 +168,17 @@ Add `portfolio.py` to `test_no_inline_style.py`. **Guard:** `portfolio.py` **del
 - **One `kit.region` fixes the deleted spinner.** Name the bug and the line (`monitor.clear()` at 698) in the commit body. **Prove it first**: measure that zero scrims survive a render on the pre-change page, as Phase 3 did for its five.
 - **The orphan `status` label goes**, replaced by `kit.set_busy` on the four action buttons, released in `_poll` when the version moves.
 - **Two `kit.confirm`s**, both already built at page level (665, 681) so neither is inside a cleared container. `danger=True` on both — Resume today re-arms an autonomous trader that halted *itself*. Cancel-then-confirm is already the order. ⚠ The two `ui.card()`s carry **no classes** — default Quasar cards, the unthemed-dialog case; `CONFIRM_CARD` fixes it. ⚠ **Fix the STOP body's stale latch sentence.**
-- **Five `kit.table(..., numeric=(...))`**, keeping `.add_slot("body-cell-pnl", _PNL_CELL_SLOT)`. Numeric sets: closed `("qty","pnl")`; postmortem `("trades","win_rate","pnl","avg")`; positions `("quantity","pnl")`; both scorecards `("trades","pnl","win_rate")`.
+- **Five `kit.table(..., numeric=(...))`**, keeping `.add_slot("body-cell-pnl", _PNL_CELL_SLOT)`.
+  Measured by AST, the columns carrying **no `align`** today — i.e. the ones Quasar renders
+  RIGHT and `kit.table` will render LEFT — are: closed `strategy, qty, pnl`; positions
+  `strategy, quantity, pnl, status`; both scorecards `trades, pnl, win_rate`; postmortem
+  `trades, win_rate, pnl, avg`.
+  ⚠ **Name only the genuinely numeric ones** — `("qty","pnl")`, `("quantity","pnl")`,
+  `("trades","pnl","win_rate")`, `("trades","win_rate","pnl","avg")`. **`strategy` and
+  `status` are text columns that are right-aligned today by accident** (nobody writes
+  `align` for a text column expecting right), and under the kit they move left, which is
+  how every other table in the app renders them. That is a deliberate fix — **name it in
+  the commit** so it is not read as a regression.
 - `DRIVER_CSS` cut to at most its `max-height` rule; the Quasar colour words (`text-amber-9`, `text-red-9`, `text-green-9`, `text-red-8`, `bg-[#E24B4A]`) and **28** `opacity-*` mutings to theme tokens; the five classless `ui.card()`s to `theme.CARD`.
 - `CONTROL_OFF_COLOR` `#888888` is a pure neutral → `MUTED`; `CONTROL_ACTIVE_COLOR` / `CONTROL_HALTED_COLOR` are a state reading on a filled pill → `BADGE_POS` / `BADGE_WARN`. ⚠ `test_driver_monitor.py:70-72` pins all three strings.
 - ⚠ `equity_chart` must stay present at page build (the ESM import-map gotcha) and never inside a region that gets cleared.
