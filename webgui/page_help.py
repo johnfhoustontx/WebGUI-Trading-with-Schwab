@@ -573,7 +573,7 @@ every change; the one button, **Rate my trade**, asks for a verdict.
 - **Type a ticker and press Enter** (or tab out). The chain loads, the strategy's
   legs land on real strikes, every leg is **priced from the chain** (its mark),
   and the volatility is worked out from those prices the way ThinkorSwim does.
-  **Refresh** re-pulls the same symbol for fresh quotes.
+  **Load** re-pulls the same symbol for fresh quotes.
 - **Strategy** — pick a template (single, vertical, **iron condor**,
   **butterfly**, **calendar/diagonal**, and under **Stock + options** the
   **covered call**, **protective put** and **collar**). The chips say whether it
@@ -629,7 +629,7 @@ every change; the one button, **Rate my trade**, asks for a verdict.
 - Loading a **different** symbol clears the cards and matrix; refreshing the same
   one keeps them. Widening strikes raises the credit you collect but also the max
   loss.
-- **Rate my trade** (under the legs, once every leg has a strike) grades the
+- **Rate my trade** (top right, once every leg has a strike) grades the
   trade the way the **Strategy Finder** grades what it finds, and opens a window
   with one word: **BUY** (grade Strong or Good, and the Go/No-Go checklist is
   clear), **CAUTION** (a good grade with cautions, or Marginal with a clear

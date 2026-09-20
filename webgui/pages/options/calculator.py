@@ -3,13 +3,14 @@
 The shared ENTRY PANEL on top (``entry_panel``: symbol bar, expiry strip, the
 chain grid beside the leg table), then a collapsed row of pricing assumptions,
 then six metric cards and the P&L matrix (``calc_spread_pnl``: price × eval-date
-pairs of $ and %). The palette is the page-scoped ``[calc]`` language
-(``.calc-v3``), not the app-wide dark navy.
+pairs of $ and %). The frame is ``pages/ui_kit.py``'s; the page keeps only the
+four ``[calc]`` SIGNAL colours its readings are encoded in (its near-black
+surface language retired 2026-09-20).
 
 Everything the screen shows beyond the service's own payload — the per-leg
-delta, the legs strip, the status pill, the matrix ``%`` column, the metric
-cards — is derived HERE by a pure function over payloads ``options_svc`` already
-caches.
+delta, the legs strip, the chain-status line, the matrix ``%`` column, the
+metric cards — is derived HERE by a pure function over payloads ``options_svc``
+already caches.
 
 This page holds **no engine call**: the symbol quote + option-chain fetch and the
 options-calculator math (the summary + the P&L grid) live in
@@ -32,20 +33,16 @@ unit-tested; ``render()`` wires the form + visuals.
 """
 import datetime as dt
 import math
-from types import SimpleNamespace
 
 from .inputs import select_all_on_focus, should_load
-# The page-scoped ``[calc]`` language (scope hook ``.calc-v3``) — this screen's
-# own near-black palette, deliberately NOT the app-wide dark navy the Simulator
-# and Trade share under ``.calc-v2``.
-from .theme import (THEME, CALC_CSS, CALC_KEYFRAMES_CSS, CALC_FONT_HEAD_HTML,
-                    CALC_MONO, CALC_PAGE, CALC_FRAME, CALC_CHIP,
-                    CALC_TILE, CALC_BTN, CALC_BTN_PRIMARY, CALC_STRATEGY_BTN,
-                    CALC_EYEBROW, CALC_BODY, CALC_MUTED, CALC_DIM,
-                    CALC_POS, CALC_NEG, CALC_ACCENT, CALC_WARN, CALC_STATE_TEXT,
-                    CALC_EDGE_POS, CALC_EDGE_NEG, CALC_EDGE_ACCENT, CALC_EDGE_WARN)
-# The Rate my trade dialog wears the navy the shared Trade detail panel is drawn in.
-from .theme import CARD as _NAVY_CARD, MUTED as _NAVY_MUTED
+# The page's four SIGNAL colours — all that is left of the ``[calc]`` language
+# (see theme.build_calc_tokens). Everything else the screen wears is the app's.
+from .theme import (CALC_POS, CALC_NEG, CALC_ACCENT, CALC_WARN, CALC_STATE_TEXT,
+                    CALC_EDGE_POS, CALC_EDGE_NEG, CALC_EDGE_ACCENT, CALC_EDGE_WARN,
+                    MATRIX_HEAD_BG, MATRIX_HEAD_RULE, MATRIX_ROW_RULE,
+                    MATRIX_LABEL_FG, MATRIX_VOID, MATRIX_PRICE_FG,
+                    MATRIX_EMPTY_FG as _MATRIX_EMPTY_FG)
+from . import theme as _t
 from . import page_state as _ps
 # The ONE position shared with the Simulator (replaces the copy buttons).
 from . import shared_position as _shared
@@ -410,15 +407,12 @@ _MATRIX_PROFIT_RGB = "45,212,167"       # #2dd4a7
 _MATRIX_LOSS_RGB = "251,95,124"         # #fb5f7c
 _MATRIX_PROFIT_FG = "#b8f5e4"
 _MATRIX_LOSS_FG = "#ffd0d9"
-_MATRIX_EMPTY_FG = "#6f8598"            # [calc] `dim` — a cell with no reading
 
 MATRIX_SPOT = "#f5b841"                 # the spot row, and the expiry heading
-MATRIX_HEAD_BG = "#080d13"              # the sticky header + price-column ground
-MATRIX_HEAD_RULE = "#22303e"            # under the header, and the outer frame
-MATRIX_ROW_RULE = "rgba(19,31,43,.7)"   # between price rows
-MATRIX_LABEL_FG = "#7189a0"             # a heading that is not the expiry
-MATRIX_VOID = "#05070a"                 # behind an untinted (missing) cell
-MATRIX_PRICE_FG = "#eaf2f9"             # the price ladder itself
+# …and the CHROME — the header ground and rules, the price ladder, the ground
+# behind an untinted cell and the text of one with no reading — comes from the
+# app palette (``theme.build_matrix_tokens``): it draws a FRAME, not a value,
+# and near-black literals would punch a hole in the app's navy card.
 
 # The alpha ramp: a floor, so the weakest cell still reads as tinted rather than
 # as no data; and a ceiling well under 1, so the figure printed ON the tint stays
@@ -499,19 +493,27 @@ def matrix_headers(eval_labels, basis=None):
 
 
 def chain_status_facts(loading, symbol, chain):
-    """The title-bar status pill + the ② SYMBOL frame's hint.
+    """The page's status line + the hint beside the Symbol field.
 
     ``{state, label, hint}`` where state is ``idle`` / ``loading`` / ``ready``.
     An EMPTY chain dict is ``idle``, not ``ready`` — a chain that arrived
     carrying nothing is not a loaded chain, and colouring the frame for it would
-    announce data the page does not have."""
+    announce data the page does not have.
+
+    ⚠ The ready hint is EMPTY on purpose. It used to read ``LIVE``, a static
+    liveness claim over a chain that may be minutes old — the one thing the
+    consistency standard's header rule forbids. Nothing here knows when the
+    chain was fetched: ``options:calc_chain`` is a request/response view the
+    page enqueues itself, and this function is pure over its three arguments.
+    The two readings that ARE measured still speak — the label names the symbol
+    and ``chain_line`` counts the strikes and expiries it got."""
     if loading:
         return {"state": "loading", "label": "LOADING CHAIN", "hint": "···"}
     if _has_contracts(chain):
         sym = (symbol or "").strip().upper()
         return {"state": "ready",
                 "label": f"CHAIN LOADED · {sym}" if sym else "CHAIN LOADED",
-                "hint": "LIVE"}
+                "hint": ""}
     return {"state": "idle", "label": "AWAITING SYMBOL", "hint": "NOT LOADED"}
 
 
@@ -815,93 +817,30 @@ _CENTER_SPOT_JS = """
 
 
 # ── the page's own class vocabulary ──────────────────────────────────────────
-# The [calc] token set covers the surfaces this screen shares with itself; the
-# handful below are one-off geometries of THIS page (a rule under the title, a
-# 2 px scan track, a dashed placeholder, the frames' label chip) that no other
-# screen has and that would only bloat the shared vocabulary. They are built
-# from the SAME ``config/theme.toml`` [calc] colours, so the page still follows
-# the palette knob-for-knob.
-_C = THEME["calc"]
-
-_TITLE_TEXT = f"text-[{_C['bright']}]"
-_TITLE_RULE = f"border-b border-b-[{_C['edge_idle']}]"
-_STRIP_GROUND = f"bg-[{_C['chip_bg']}] px-1.5"          # a chip row over the border
-_EMPTY_PANEL = (f"border border-dashed border-[{_C['edge_idle']}] "
-                f"bg-[{_C['frame_b']}] rounded-[3px]")
-
-# The P&L MATRIX frame's label chip — the design's muted cyan, a lighter step of
-# the [calc] `accent` family that the shared vocabulary has no knob for.
-_CHIP_ON = "text-[#8fc6d6]"
-
-# The title-bar status pill. It carries ONE colour class and paints its dot and
-# its border from it via `bg-current` / `border-current`, so the three parts can
-# never drift apart.
-_PILL_TEXT = {"ready": CALC_POS, "loading": CALC_WARN, "idle": CALC_MUTED}
-_PILL_SWAP = " ".join(dict.fromkeys(_PILL_TEXT.values()))
-
+# ⚠ Two maps, and both of them are a READING. The page's SURFACE vocabulary
+# — its ground, frames, tiles, chips, buttons, text ramp and mono face — retired
+# on 2026-09-20 with the ``[calc]`` language; what is left maps a finite state
+# onto a static class, the documented alternative to a runtime-built colour.
+#
 # tone -> class, for the ③ LEGS strip, the SPOT readout and the ① STRATEGY tag
 # chips. ``_TONE_SWAP`` is the whole set as one string, for the documented
 # ``.classes(remove=…, add=…)`` swap that stops repeated repaints stacking
 # conflicting text-[…] classes. It extends the theme's own ``CALC_STATE_TEXT``
-# rather than restating it, so it follows the [calc] config for free — ``muted``
-# is the one tone this page needs that the shared state set does not carry.
+# rather than restating it, so it follows the [calc] config for free — ``dim``
+# and ``muted`` are the two tones this page needs that the signal set does not
+# carry, and both are the app's MUTED: a reading the page does not have makes no
+# colour claim.
 _TONE_TEXT = {"pos": CALC_POS, "neg": CALC_NEG, "accent": CALC_ACCENT,
-              "warn": CALC_WARN, "dim": CALC_DIM, "muted": CALC_MUTED}
-_TONE_SWAP = " ".join(dict.fromkeys(CALC_STATE_TEXT.split() + [CALC_MUTED]))
+              "warn": CALC_WARN, "dim": _t.MUTED, "muted": _t.MUTED}
+_TONE_SWAP = " ".join(dict.fromkeys(CALC_STATE_TEXT.split() + [_t.MUTED]))
 
 # metric-card accent -> its left edge + its value colour. Every key of
-# ``METRIC_ACCENTS`` has an entry: a missing one would raise mid-render.
+# ``METRIC_ACCENTS`` has an entry: a missing one would raise mid-render. ``dim``
+# takes the card's own hairline colour, so a card with no reading is the only
+# one whose edge does not stand out from its border.
 _METRIC_EDGE = {"pos": CALC_EDGE_POS, "neg": CALC_EDGE_NEG,
                 "accent": CALC_EDGE_ACCENT, "warn": CALC_EDGE_WARN,
-                "dim": f"border-l-2 border-l-[{_C['dim']}]"}
-
-# The shared leg editor's palette, repainted in [calc]. The GEOMETRY is the
-# editor's; only the colours enter from here, which is how the Simulator keeps
-# the app-wide navy while mounting the same leg table.
-_LEG_TOKENS = {
-    "frame": f"border border-[{_C['edge_idle']}] rounded-[2px] bg-[{_C['frame_b']}]",
-    "eyebrow": (f"text-[8px] tracking-[.14em] text-[{_C['label']}] "
-                f"whitespace-nowrap truncate"),
-    "num": f"text-[10px] text-[{_C['label']}]",
-    "delta": f"text-[11px] text-[{_C['txt']}] whitespace-nowrap",
-    "remove": (f"text-[10px] text-[{_C['btn_txt']}] border "
-               f"border-[{_C['btn_edge']}] rounded-[2px]"),
-    "remove_off": (f"text-[10px] text-[{_C['off_txt']}] border "
-                   f"border-[{_C['off_edge']}] rounded-[2px] cursor-not-allowed"),
-    "add": (f"text-[9px] tracking-[.18em] text-[{_C['accent_txt']}] border "
-            f"border-dashed border-[{_C['btn_edge']}] rounded-[2px]"),
-    "reset": (f"text-[9px] tracking-[.18em] text-[{_C['muted']}] border "
-              f"border-[{_C['off_edge']}] rounded-[2px]"),
-    # the table layout's toggles, in the same long-cyan / short-green pair
-    "toggle": "text-[10px] tracking-[.12em] border rounded-[2px]",
-    "side_long": f"text-[{_C['accent']}] border-[{_C['accent']}]",
-    "side_short": f"text-[{_C['pos']}] border-[{_C['pos']}]",
-    "step": f"text-[12px] text-[{_C['btn_txt']}]",
-    "manual": f"text-[11px] text-[{_C['warn']}]",
-}
-
-# The shared entry panel, repainted in [calc] — same split as the legs above:
-# the panel owns the geometry, this page owns the colours.
-_PANEL_TOKENS = {
-    "frame": (f"border border-[{_C['edge']}] rounded-[3px] "
-              f"bg-gradient-to-b from-[{_C['frame_a']}] to-[{_C['frame_b']}]"),
-    "eyebrow": f"text-[9px] tracking-[.16em] text-[{_C['label']}] whitespace-nowrap",
-    "text": f"text-[11px] text-[{_C['txt']}]",
-    "muted": f"text-[10px] tracking-[.08em] text-[{_C['muted']}]",
-    "spot": f"text-[16px] font-medium text-[{_C['bright']}]",
-    "btn": (f"text-[10px] tracking-[.14em] text-[{_C['btn_txt']}] border "
-            f"border-[{_C['btn_edge']}] rounded-[2px] bg-[{_C['btn_bg']}]"),
-    "pill_on": f"text-[{_C['bright']}] border-[{_C['accent']}] bg-[{_C['tile_a']}]",
-    "pill_off": f"text-[{_C['muted']}] border-[{_C['edge_idle']}] bg-transparent",
-    "strike": f"text-[11px] font-semibold text-[{_C['soft']}] bg-[{_C['tile_b']}]",
-    "strike_atm": f"text-[11px] font-bold text-[{_C['warn']}] bg-[{_C['tile_a']}]",
-    "itm": "bg-[rgba(34,211,238,.07)]",
-    "cell": f"text-[11px] text-[{_C['txt']}] tabular-nums",
-    "pick": "cursor-pointer rounded-[2px] hover:bg-[rgba(34,211,238,.22)]",
-    "bid": f"text-[{_C['pos']}]",
-    "ask": f"text-[{_C['neg']}]",
-    "rule": f"border-b border-b-[{_C['edge_idle']}]",
-}
+                "dim": f"border-l-2 border-l-[{_t.THEME['palette']['card_border']}]"}
 
 #: Quiet time after the last edit before the page asks the service to price.
 RECALC_DELAY_SEC = 0.3
@@ -915,13 +854,13 @@ def _render_metrics(box, summary, legs, spot, max_dte):
     with box:
         for card in metric_cards(summary, legs, spot, max_dte):
             accent = card["accent"]
-            with ui.column().classes(f"{CALC_TILE} {_METRIC_EDGE[accent]} "
-                                     f"min-w-0 gap-1.5 px-3 pt-2.5 pb-3"):
-                ui.label(card["label"]).classes(CALC_EYEBROW)
+            with ui.column().classes(f"{_t.CARD} {_METRIC_EDGE[accent]} "
+                                     f"min-w-0 gap-1.5"):
+                ui.label(card["label"]).classes(_t.EYEBROW)
                 ui.label(card["value"]).classes(
                     f"text-[17px] font-bold truncate {_TONE_TEXT[accent]}")
                 ui.label(card["sub"]).classes(
-                    f"{CALC_DIM} text-[9px] leading-snug break-words")
+                    f"{_t.MUTED} text-[9px] leading-snug break-words")
 
 
 def matrix_html(eval_labels, pnl_data, spot, summary, legs=None):
@@ -984,11 +923,16 @@ def matrix_html(eval_labels, pnl_data, spot, summary, legs=None):
         tr = '<tr id="calc-spot-row">' if at_spot else "<tr>"
         trs.append(tr + "".join(tds) + "</tr>")
 
+    # ⚠ No ``font-family``: the table INHERITS the app face. It used to ask for
+    # 'JetBrains Mono' here, hardcoded and independent of the page's own
+    # ``add_head_html`` — so once that link went with the [calc] language the
+    # declaration would have asked for a face nobody loads and fallen back to
+    # whatever the browser substitutes. ``tabular-nums`` is what actually aligns
+    # the columns, and IBM Plex Sans' digit-width spread under it measured 0.000.
     return (f'<div id="calc-grid-scroll" style="max-height:480px;overflow:auto;'
             f'border:1px solid {MATRIX_HEAD_RULE};border-radius:3px;'
             f'background:{MATRIX_VOID};">'
             f'<table style="border-collapse:collapse;font-size:11px;'
-            f"font-family:'JetBrains Mono',ui-monospace,monospace;"
             f'font-variant-numeric:tabular-nums;">'
             f'<thead><tr>{"".join(ths)}</tr></thead>'
             f'<tbody>{"".join(trs)}</tbody></table></div>')
@@ -1035,6 +979,7 @@ def render():
 
     import bus_client
 
+    from pages import ui_kit as kit
     from pages.ui_guard import guard, guard_async
 
     from . import entry as _entry
@@ -1052,28 +997,22 @@ def render():
     from . import sim_view as _sim_view
     from . import strategy_table as _strategy_table
 
-    # This page's own language (.calc-v3), never the app-wide navy scope the
-    # Simulator and Trade share (see the module header for which that is).
-    # ``add_head_html`` during a page build is client-scoped, so the mono face is
-    # requested here and on no other route.
-    if CALC_FONT_HEAD_HTML:
-        ui.add_head_html(CALC_FONT_HEAD_HTML)
-    ui.add_css(CALC_CSS + CALC_KEYFRAMES_CSS)
+    # No page-scoped CSS and no font of its own: the page wears the app surface
+    # (``ns-app`` on the shell's content column, ``APP_FIELD_CSS`` app-wide), and
+    # every rule this page's own retired block carried - boxed q-fields, the
+    # Strategy trigger internals, the leg-table track sizes - is in that one.
 
     # Full-screen wait overlay shown while a user-initiated Load is in flight.
     wait = _overlay.build_loading_overlay()
 
-    # RATE MY TRADE (design 2026-09-16). Built HERE, at the page's root, because a
-    # ui.dialog deletes itself when the slot it was built in is cleared - and the
-    # leg table's container is cleared on every edit (see swing.py _open_paper).
-    with ui.dialog() as rating_dialog, \
-            ui.card().classes(f"{_NAVY_CARD} w-[480px] max-w-full gap-3"):
-        with ui.row().classes("w-full items-center justify-between no-wrap"):
-            ui.label("RATE MY TRADE").classes(
-                "text-[12px] font-bold tracking-[.16em] text-[#eaf0fb]")
-            ui.button(icon="close", color=None, on_click=rating_dialog.close) \
-                .props("flat round dense").classes("text-[#8794b4]")
-        rating_status = ui.label("").classes(f"rate-status text-sm {_NAVY_MUTED}")
+    # Rate my trade (design 2026-09-16). Built HERE, at the page's root and
+    # OUTSIDE kit.page(), because a ui.dialog deletes itself when the slot it was
+    # built in is cleared - and the leg table's container is cleared on every
+    # edit (see swing.py _open_paper).
+    rating = kit.info_dialog("Rate my trade", width="w-[480px]")
+    rating_dialog = rating.dialog
+    with rating.content:
+        rating_status = ui.label("").classes(f"rate-status text-sm {_t.MUTED}")
         rating_banner = ui.column().classes("rate-banner w-full gap-1")
         rating_panel = _detail.render(width=440)
 
@@ -1103,96 +1042,74 @@ def render():
         "rating_ver": None,    # last-seen calc_rating cache version
     }
 
-    # ── the numbered-frame helper ────────────────────────────────────────────
-    def _frame(chip_text, *, note=False, gap="gap-3"):
-        """A numbered frame: the label chip sits ON the border line.
-
-        Pure Tailwind — a ``relative`` frame plus an ``absolute -top-1.5`` chip
-        painted in the page's own ground, which is what interrupts the border
-        rather than a notch. The chip row is absolutely positioned, so it is not
-        a flex item and the frame's gap never applies to it."""
-        box = ui.column().classes(f"{CALC_FRAME} w-full min-w-0 {gap} px-3 pt-5 pb-3")
-        with box:
-            row = ui.row().classes("absolute -top-1.5 left-3 right-3 items-center "
-                                   "justify-between gap-2.5 min-w-0")
-            with row:
-                chip = ui.label(chip_text).classes(f"{CALC_CHIP} {_CHIP_ON} shrink-0")
-                note_lbl = None
-                if note:
-                    note_lbl = ui.label("").classes(
-                        f"{_STRIP_GROUND} {CALC_MUTED} text-[8px] tracking-[.16em] "
-                        f"whitespace-nowrap truncate min-w-0")
-        return SimpleNamespace(box=box, row=row, chip=chip, note=note_lbl)
-
     def _cell(caption, basis):
-        """A captioned ② SYMBOL cell — the eyebrow over its own control."""
+        """A captioned assumptions cell — the label ABOVE its control, like
+        ``kit.field``, plus the flex basis that keeps six of them on one row.
+
+        Not ``kit.field`` itself: that is a context manager, and this returns the
+        COLUMN so the caller's ``with`` re-enters the same slot; the captions
+        stay upper-case to match the entry panel's own directly above them."""
         col = ui.column().classes(f"gap-1 min-w-0 {basis}")
         with col:
-            ui.label(caption).classes(f"{CALC_EYEBROW} truncate")
+            ui.label(caption).classes(f"{_t.EYEBROW} truncate")
         return col
 
-    # ── the layout (page-scoped, .calc-v3) ───────────────────────────────────
+    # ── the layout ───────────────────────────────────────────────────────────
     # TOP   = the shared entry panel: symbol bar, expiry strip, and the chain grid
     #         BESIDE the leg table. Clicking a Bid sells, an Ask buys.
     # BELOW = the pricing assumptions (collapsed), then the six metric cards and
     #         the P&L matrix at full width.
-    with ui.column().classes(f"calc-v3 {CALC_PAGE} {CALC_MONO} w-full gap-[15px]"):
-        # TITLE BAR — the name, and the live chain-status pill.
-        with ui.row().classes(f"w-full items-center justify-between gap-2.5 "
-                              f"pb-2.5 {_TITLE_RULE}"):
-            ui.label("STRATEGY CALCULATOR").classes(
-                f"text-[14px] font-bold tracking-[.13em] {_TITLE_TEXT} whitespace-nowrap")
-            # ONE colour class on the pill; the dot and the border take it from
-            # `currentColor`, so the three parts cannot drift apart.
-            status_pill = ui.row().classes(
-                f"items-center gap-2 px-[11px] py-1 border border-current "
-                f"rounded-[2px] shrink-0 {_PILL_TEXT['idle']}")
-            with status_pill:
-                ui.element("div").classes(
-                    "w-1.5 h-1.5 rounded-full bg-current shrink-0 "
-                    "animate-[blip_1.6s_ease-in-out_infinite]")
-                status_lbl = ui.label("AWAITING SYMBOL").classes(
-                    "text-[9px] tracking-[.2em] whitespace-nowrap")
+    with kit.page():
+        # ⚠ No ``view=``: options:calc_chain / calc_result / calc_iv / calc_rating
+        # are REQUEST/RESPONSE views this page enqueues itself, so an "Updated"
+        # stamp on one would report how long ago the reader last pressed Load.
+        head = kit.header("Calculator")
+        with head.actions:
+            kit.button("Expected move", kind="secondary", icon="show_chart",
+                       on_click=lambda: send_to_em(),
+                       tooltip="Chart the expected move for these legs")
+            # Primary LAST, so the page's one main action sits rightmost.
+            rate_btn = kit.button("Rate my trade", kind="primary",
+                                  icon="verified",
+                                  on_click=lambda: rate_my_trade(),
+                                  tooltip="Grade these legs with the Strategy "
+                                          "Finder's scorer and checklist: Buy, "
+                                          "Caution or Pass")
+            rate_btn.set_enabled(False)
+        # What the old title bar's pulsing pill said, minus the pulse: the blip
+        # dot claimed a liveness the page cannot back, and the LOADING state is
+        # already covered by the full-screen overlay.
+        status_lbl = kit.status_line("AWAITING SYMBOL")
 
-        panel = entry_panel.build_entry_panel(
-            tokens=_PANEL_TOKENS, strategy_value="PCS",
-            strategy_btn_class=CALC_STRATEGY_BTN, strategy_menu_class="strat-menu-calc")
+        panel = entry_panel.build_entry_panel(tokens=None, strategy_value="PCS")
         symbol_in = panel.symbol_in
         strategy_sel = panel.strategy_sel
         spot_lbl = panel.spot_lbl
         leg_box = panel.legs_box
         with panel.bar_extra:
             hint_lbl = ui.label("").classes(
-                f"{CALC_MUTED} text-[9px] tracking-[.16em] whitespace-nowrap pb-1")
+                f"{_t.MUTED} text-[9px] tracking-[.16em] whitespace-nowrap pb-1")
             tags_box = ui.row().classes("flex-wrap gap-2 pb-1")
+        # The footer keeps the three READINGS and the one-line action note; the
+        # two ACTIONS that sat beside them are header actions now.
         with panel.legs_footer:
             with ui.row().classes("items-center gap-2 min-w-0 w-full no-wrap"):
                 legcount_lbl = ui.label("").classes(
-                    f"{CALC_MUTED} text-[9px] tracking-[.14em] whitespace-nowrap")
+                    f"{_t.MUTED} text-[9px] tracking-[.14em] whitespace-nowrap")
                 net_lbl = ui.label("").classes(
-                    f"{CALC_DIM} text-[9px] tracking-[.14em] whitespace-nowrap")
+                    f"{_t.MUTED} text-[9px] tracking-[.14em] whitespace-nowrap")
                 maxloss_lbl = ui.label("").classes(
                     f"{CALC_WARN} text-[9px] tracking-[.14em] truncate min-w-0")
-            with ui.row().classes("items-center gap-2 no-wrap"):
-                ui.button("EXPECTED MOVE", color=None, on_click=lambda: send_to_em()) \
-                    .props("no-caps unelevated").classes(f"{CALC_BTN} h-[30px] px-3") \
-                    .tooltip("Chart the expected move for these legs")
-                rate_btn = ui.button("RATE MY TRADE", color=None,
-                                     on_click=lambda: rate_my_trade()) \
-                    .props("no-caps unelevated").classes(f"{CALC_BTN} h-[30px] px-3")
-                rate_btn.tooltip("Grade these legs with the Strategy Finder's scorer "
-                                 "and checklist: Buy, Caution or Pass")
-                rate_btn.set_enabled(False)
             action_lbl = ui.label("").classes(
-                f"w-full {CALC_MUTED} text-[9px] tracking-[.14em]")
+                f"w-full {_t.MUTED} text-[9px] tracking-[.14em]")
 
         blurb_lbl = ui.label("").classes(
-            f"{CALC_BODY} text-[11px] leading-relaxed w-full")
+            f"{_t.MUTED} text-[11px] leading-relaxed w-full")
 
         # PRICING ASSUMPTIONS — rarely changed, so collapsed. The same widgets as
         # before under the same names, so persistence and do_calc are unchanged.
         with ui.expansion("PRICING ASSUMPTIONS").props("dense") \
-                .classes(f"w-full {CALC_MUTED} text-[10px] tracking-[.14em]"):
+                .classes(f"w-full {_t.MUTED} text-[10px] tracking-[.14em]"):
             with ui.row().classes("w-full items-end gap-2 flex-wrap pt-1"):
                 with _cell("PRICE", "flex-[1_1_88px] max-w-[132px]"):
                     price_in = ui.number(value=100.0, format="%.2f").classes("w-full")
@@ -1212,20 +1129,27 @@ def render():
                                             format="%.0f").classes("w-full") \
                         .tooltip("Strikes shown either side of spot in the P&L grid")
 
-        # The dashed placeholder, and the two panels it stands in for.
+        # The dashed placeholder, and the two panels it stands in for. Dashed
+        # rather than kit.empty: it names WHICH of the page's two waits this is
+        # and what to do about it, over two lines, where kit.empty is one line.
         empty_panel = ui.column().classes(
-            f"w-full items-center justify-center gap-2.5 min-h-[260px] "
-            f"{_EMPTY_PANEL}")
+            f"{_t.CARD} border-dashed w-full items-center justify-center "
+            f"gap-2.5 min-h-[260px]")
         with empty_panel:
             empty_lbl = ui.label("").classes(
-                f"{CALC_BODY} text-[12px] tracking-[.22em] whitespace-nowrap")
+                f"{_t.LABEL} text-[12px] tracking-[.22em] whitespace-nowrap")
             empty_hint = ui.label("").classes(
-                f"{CALC_DIM} text-[10px] leading-relaxed text-center max-w-[420px]")
+                f"{_t.MUTED} text-[10px] leading-relaxed text-center max-w-[420px]")
 
         metrics_box = ui.element("div").classes(
             "grid grid-cols-[repeat(auto-fit,minmax(148px,1fr))] gap-2.5 w-full")
-        matrix_frame = _frame("P&L MATRIX", note=True, gap="gap-0")
-        with matrix_frame.box:
+        matrix_box = ui.column().classes(f"{_t.CARD} w-full min-w-0 gap-2")
+        with matrix_box:
+            with ui.row().classes("w-full items-center gap-2 no-wrap"):
+                kit.section_title("P&L matrix")
+                ui.space()
+                matrix_note = ui.label("").classes(
+                    f"{_t.MUTED} text-[10px] tracking-[.14em] truncate min-w-0")
             grid_box = ui.column().classes("w-full min-w-0")
 
     # ── editable multi-leg editor (shared with the Simulator) ────────────────
@@ -1277,7 +1201,7 @@ def render():
         leg_box, strikes_for=_strikes_for, expiries_for=_expiries_for,
         show_premium=True, on_change=lambda: (_capture(), _sync_legs(), _poke()),
         spot_getter=lambda: float(price_in.value or 0),
-        layout="table", tokens=_LEG_TOKENS, delta_for=_delta_for,
+        layout="table", tokens=None, delta_for=_delta_for,
         price_for=_price_for,
         # D4: the Calculator is the ANALYSIS surface, so it is the one mount that
         # offers a SHARE leg — covered call / protective put / collar. The
@@ -1430,18 +1354,16 @@ def render():
         facts = results_panel_facts(status, bool(state.get("result")))
         empty_panel.set_visibility(facts is not None)
         metrics_box.set_visibility(facts is None)
-        matrix_frame.box.set_visibility(facts is None)
+        matrix_box.set_visibility(facts is None)
         if facts is not None:
             empty_lbl.text = facts["label"]
             empty_hint.text = facts["hint"]
 
     @guard
     def _sync_status():
-        """The title-bar pill, the panel's hint + status line and the spot."""
+        """The page's status line, the panel's hint + status line and the spot."""
         status = chain_status_facts(state.get("loading"), symbol_in.value,
                                     state.get("chain"))
-        phase = status["state"]
-        status_pill.classes(remove=_PILL_SWAP, add=_PILL_TEXT[phase])
         status_lbl.text = status["label"]
         hint_lbl.text = status["hint"]
         spot = state.get("spot")
@@ -1547,8 +1469,9 @@ def render():
         Mount-time auto-loads (restore / handoff) pass show_wait=False."""
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
-            ui.notify("Enter a symbol first.", type="warning")
+            kit.symbol_error(symbol_in, "Enter a symbol first.")
             return
+        kit.symbol_error(symbol_in, None)
         if show_wait and state.get("loading"):
             # Collapses the focusout-then-button-click double fire while a load is in
             # flight. (The Load button still force-reloads once loading clears — it
@@ -1735,8 +1658,9 @@ def render():
                                  else (loaded[0] if loaded else None))
             finally:
                 state["applying"] = False
+            # No toast beside it: the line above says the same thing, where
+            # the reader is already looking, and stays until it is superseded.
             panel.status_lbl.text = f"could not load strikes for {_entry.expiry_label(move)}"
-            ui.notify(f"Schwab returned no strikes for {move}.", type="warning")
         elif move and panel.is_loaded(move):
             state["pending_move"] = None
             editor.apply_expiry(move)       # fires on_change: capture, strip, poke
@@ -1798,7 +1722,7 @@ def render():
             fetch_iv()
             _poke()
         if cc.get("symbol") is not None and not exps:
-            ui.notify(f"{cc['symbol']}: no option expiries in the chain", type="warning")
+            kit.toast("warn", f"{cc['symbol']}: no option expiries in the chain")
 
     def _apply_result(result):
         state["result"] = result or None
@@ -1814,7 +1738,7 @@ def render():
         _render_metrics(metrics_box, summary, legs, spot, state.get("calc_dte"))
         _render_grid(grid_box, result.get("eval_labels") or [], pnl_data, spot,
                      summary, legs)
-        matrix_frame.note.text = matrix_note_text(pnl_data, matrix_basis(summary, legs))
+        matrix_note.text = matrix_note_text(pnl_data, matrix_basis(summary, legs))
         _sync_results()
 
     def _apply_iv(res):
@@ -1920,7 +1844,7 @@ def render():
                 ui.label(reason).classes("rate-reason text-xs text-[#cdd8ee]")
             ui.label("Graded with the Strategy Finder's scorer and Go/No-Go checklist. "
                      "The word combines the two; it is not fitted to past outcomes.") \
-                .classes(f"text-[10px] {_NAVY_MUTED}")
+                .classes(f"text-[10px] {_t.MUTED}")
         rating_panel.update(_strategy_table.detail_signal(row), candidate=candidate,
                             ctx=ctx)
 

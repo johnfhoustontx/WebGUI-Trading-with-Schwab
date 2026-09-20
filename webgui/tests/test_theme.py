@@ -328,9 +328,14 @@ def test_the_generic_boxed_input_is_left_alone():
 
 def test_no_leg_card_rules_survive_the_card_layout():
     """The two-line card leg layout was removed 2026-09-12; its compaction
-    rules would match nothing, in either scope."""
+    rules would match nothing.
+
+    ⚠ There is one scope to check now, not two: ``build_calc_css`` — the
+    Calculator's own ``.calc-v3`` block — retired with the ``[calc]`` surface
+    vocabulary on 2026-09-20, and every rule it carried lives in this builder
+    under the caller's scope."""
     assert ".leg-card" not in theme.build_quasar_css(theme._DEFAULTS)
-    assert ".leg-card" not in theme.build_calc_css(theme._DEFAULTS)
+    assert not hasattr(theme, "build_calc_css")
 
 
 # -- [buttons_3d] retired 2026-09-19: the solid danger fill is [palette].danger --

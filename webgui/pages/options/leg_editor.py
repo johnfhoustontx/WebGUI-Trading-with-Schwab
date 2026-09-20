@@ -22,10 +22,12 @@ Two layouts over that one model:
 (The 2026-09 two-line ``card`` layout was removed on 2026-09-12, once both of its
 pages had moved to ``table``.)
 
-The GEOMETRY is shared; the COLOURS are not. The Calculator paints the legs in
-the near-black ``CALC_*`` language while the Simulator keeps the app-wide dark
-navy — so the palette enters as the ``tokens`` argument and this module imports
-no page's theme constants.
+The GEOMETRY is shared; the COLOURS enter as the ``tokens`` argument, so this
+module imports no page's theme constants. ⚠ Every mount takes the defaults
+today: the Calculator's near-black ``CALC_*`` repaint was the one override and
+went on 2026-09-20 with the ``[calc]`` surface language. The seam stays because
+the DEFAULTS below are what it makes replaceable — and because every key left
+in it is a READING, not chrome.
 
 **Six of the ten buttons here are ACTIONS and go through ``pages/ui_kit.py``**
 (2026-09-20): both layouts' remove, both layouts' Add leg, Reset to template and
@@ -202,10 +204,10 @@ def coerce_choice(value, options):
 
 
 # ── the leg palette ──────────────────────────────────────────────────────────
-# Enters as an argument so the Calculator can pass its own near-black CALC_*
-# tokens while the Simulator keeps the app-wide dark navy — the two pages share
-# the GEOMETRY, not the colours. The defaults below are that dark navy, so a page
-# that passes nothing still looks like the rest of the app.
+# Enters as an argument so a page CAN repaint the legs — the two pages share the
+# GEOMETRY, not the colours. The defaults below are the app-wide dark navy, and
+# since 2026-09-20 every mount takes them: the Calculator's near-black CALC_*
+# repaint went with the [calc] surface language.
 # ⚠ ``side_long`` / ``side_short`` (long-cyan, short-green) and ``manual`` (the
 # typed-price amber) are READINGS, not chrome — they say what a leg IS. The four
 # button skins that used to sit here (``remove`` / ``remove_off`` / ``add`` /

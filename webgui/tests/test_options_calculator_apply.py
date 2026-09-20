@@ -143,9 +143,12 @@ def test_a_landed_chain_paints_the_legs_the_strip_and_the_pill(page):
     _drive(root, polls)
     texts = _texts(root)
 
-    # the status pill + the ② SYMBOL hint follow the chain
+    # the status line + the ② SYMBOL hint follow the chain. ⚠ The hint's old
+    # "LIVE" was a STATIC liveness claim over a chain that may be minutes old —
+    # the one thing the header spec forbids — so a loaded chain now says nothing
+    # there and lets the two readings that ARE measured speak.
     assert "CHAIN LOADED · SPY" in texts
-    assert "LIVE" in texts
+    assert "LIVE" not in texts
     assert "5 strikes · 1 expiries" in texts
 
     # the legs resolved onto the real ladder and read their delta off the chain
@@ -388,6 +391,28 @@ def test_reloading_the_same_symbol_keeps_the_result_on_screen(page):
     assert not [t for t in texts if t.startswith("AWAITING")]
 
 
+def test_the_header_names_the_page_and_the_status_line_carries_the_phase(page):
+    """Scoped to THIS render (the fixture builds one page into its own card).
+    The kit header carries the page name; the old title bar's ``STRATEGY
+    CALCULATOR`` and its pulsing status pill are gone, and the pill's LABEL —
+    the only part that said anything — is the status line under the header."""
+    root, _polls = page
+    texts = _texts(root)
+    assert "Calculator" in texts
+    assert "STRATEGY CALCULATOR" not in texts
+    assert "AWAITING SYMBOL" in texts
+
+
+def test_the_two_header_actions_are_the_only_page_actions(page):
+    """Expected move and Rate my trade moved out of the leg footer into the
+    header, and Rate my trade waits for a priced chain. The footer keeps its
+    three READINGS (count / net / max loss) and its one-line action note."""
+    root, _polls = page
+    texts = _texts(root)
+    assert "Expected move" in texts and "Rate my trade" in texts
+    assert "EXPECTED MOVE" not in texts and "RATE MY TRADE" not in texts
+
+
 def test_the_page_does_not_caption_the_strategy_picker_twice(page):
     # The picker's own "Strategy" caption is switched off: the panel's trigger
     # names the strategy it holds, and a caption over it is noise.
@@ -598,7 +623,7 @@ def test_the_calculator_opens_with_the_shared_position(monkeypatch, sent_command
 # ── Rate my trade (design 2026-09-16) ───────────────────────────────────────
 
 def _rate_button(root):
-    return [el for el in _walk(root) if getattr(el, "text", None) == "RATE MY TRADE"][0]
+    return [el for el in _walk(root) if getattr(el, "text", None) == "Rate my trade"][0]
 
 
 def _rating_dialog(root):
@@ -646,7 +671,7 @@ _RATED_ROW = {"symbol": "SPY", "type": "PCS", "family": "VERTICAL", "grade": "Go
 def _rate(root, polls, sent_commands):
     bus_client.bus().cache_set("cache:options:calc_chain", _chain_payload())
     _drive(root, polls)
-    _click(root, "RATE MY TRADE")
+    _click(root, "Rate my trade")
     return [c for c in sent_commands if c["type"] == "calc_rate"][-1]["args"]
 
 
@@ -673,7 +698,7 @@ def test_rate_sends_calc_rate_with_the_legs_and_their_shape(page, sent_commands)
 def test_a_second_click_while_rating_sends_nothing(page, sent_commands):
     root, polls = page
     _rate(root, polls, sent_commands)
-    _click(root, "RATE MY TRADE")
+    _click(root, "Rate my trade")
     assert len([c for c in sent_commands if c["type"] == "calc_rate"]) == 1
 
 
@@ -721,5 +746,5 @@ def test_no_answer_in_time_says_the_service_did_not_answer(page, sent_commands):
         timer.callback()
     assert any("did not answer" in t for t in _rating_texts(root))
     # and the button is free again
-    _click(root, "RATE MY TRADE")
+    _click(root, "Rate my trade")
     assert len([c for c in sent_commands if c["type"] == "calc_rate"]) == 2

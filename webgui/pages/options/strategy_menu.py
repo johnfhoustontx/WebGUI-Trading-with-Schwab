@@ -117,13 +117,15 @@ def build_strategy_menu(value="PCS", *, classes="", boxed=False,
                         exclude=None):
     """Mount a cascading Strategy picker and return its ui.select-compatible handle.
 
-    ``boxed=True`` renders an input-box-styled trigger (for the Calculator's dark
-    theme); the default keeps the outline-button look.
+    ``boxed=True`` renders an input-box-styled trigger, so the picker reads as
+    the FIELD it stands in for beside the entry panel's other controls; the
+    default keeps the outline-button look.
 
     ``btn_class`` / ``menu_class`` override the trigger skin and the class put on
-    every (body-teleported) popup — a page with its own palette passes both, e.g.
-    ``btn_class=theme.CALC_STRATEGY_BTN, menu_class="strat-menu-calc"``. Leaving
-    them ``None`` reproduces the ``boxed`` defaults exactly.
+    every (body-teleported) popup — for a page with a palette of its own. Leaving
+    them ``None`` reproduces the ``boxed`` defaults exactly, and ⚠ every mount
+    does today: the Calculator was the one caller of both and stopped being one
+    on 2026-09-20, when its ``[calc]`` surface language retired.
 
     ``caption=False`` drops the small "Strategy" label above the trigger, for a
     page whose own chrome already names the control.

@@ -555,7 +555,20 @@ def test_chain_status_facts_reports_the_three_phases():
 
     live = calc.chain_status_facts(loading=False, symbol="SPY", chain=_chain())
     assert live["label"] == "CHAIN LOADED · SPY"
-    assert live["hint"] == "LIVE" and live["state"] == "ready"
+    assert live["state"] == "ready"
+
+
+def test_a_loaded_chain_makes_no_liveness_claim():
+    """The ready hint used to read ``LIVE`` — a STATIC claim over a chain that
+    may be minutes old, which the consistency standard's header rule forbids
+    ("no static 'live' claims"). Nothing on this page knows when the chain was
+    fetched: ``calc_chain`` is a request/response view the page enqueues itself,
+    and ``chain_status_facts`` is pure over ``(loading, symbol, chain)``, so the
+    honest hint is none at all. What the page DOES know it still says — the
+    status line names the phase and the panel counts the strikes."""
+    live = calc.chain_status_facts(loading=False, symbol="SPY", chain=_chain())
+    assert live["hint"] == ""
+    assert "LIVE" not in live.values()
 
 
 def test_chain_status_facts_does_not_claim_ready_on_an_empty_chain():
@@ -1156,15 +1169,137 @@ def test_tag_tone_colours_only_the_cash_flow_chip():
 
 # ── the rebuilt screen ──────────────────────────────────────────────────────
 
-def test_render_wears_the_calc_v3_scope_and_not_the_shared_navy_one():
+def test_the_calculator_frame_is_the_kit_and_wears_no_scope_of_its_own():
+    """The successor to ``test_render_wears_the_calc_v3_scope…``.
+
+    ⚠ Rewritten rather than deleted: its first line was a PRESENCE assert
+    (``"calc-v3" in src``), so retiring the ``[calc]`` language would have made
+    it FAIL rather than quietly go vacuous. The positive form is what can still
+    fail — ``kit.page()`` and the exact header call — while the absences below
+    name the page-scoped values that went with the scope hook."""
     import inspect
     src = inspect.getsource(calc.render)
-    assert "calc-v3" in src
+    assert "kit.page()" in src
+    assert "calc-v3" not in src, "the page-scoped scope hook retired"
     assert "calc-v2" not in src, "the Calculator must not restyle the Simulator scope"
     assert "QUASAR_INTERNAL_CSS" not in src, "that block is scoped .calc-v2"
+    for token in ("CALC_PAGE", "CALC_MONO", "CALC_CSS", "CALC_KEYFRAMES_CSS",
+                  "CALC_FONT_HEAD_HTML", "CALC_STRATEGY_BTN", "strat-menu-calc",
+                  "add_head_html", "STRATEGY CALCULATOR"):
+        assert token not in src, f"{token} is a page-scoped surface value"
 
 
-def test_render_mounts_the_table_leg_editor_with_the_calc_palette():
+def test_the_header_names_the_page_and_stamps_nothing():
+    """``options:calc_chain`` / ``calc_result`` / ``calc_iv`` / ``calc_rating``
+    are REQUEST/RESPONSE views this page enqueues itself, so an "Updated" stamp
+    on one would report how long ago the reader last pressed Load — a freshness
+    claim about nothing. ``kit.header`` with no ``view=`` draws no stamp and
+    starts no poll."""
+    import inspect
+    src = inspect.getsource(calc.render)
+    assert 'kit.header("Calculator")' in src
+
+
+def test_the_two_actions_are_header_actions_with_the_primary_last():
+    """The standard: page actions right of the stamp, danger first and primary
+    last so the main action sits rightmost. Rate my trade is the page's one
+    primary action; Expected move hands off to another screen."""
+    import inspect
+    src = inspect.getsource(calc.render)
+    assert "with head.actions:" in src
+    em = src.index('kit.button("Expected move"')
+    rate = src.index('kit.button("Rate my trade"')
+    assert em < rate, "the primary action must be built last"
+    assert 'kind="primary"' in src[rate:rate + 240]
+    assert "rate_btn.set_enabled(False)" in src
+
+
+def test_the_rating_dialog_is_the_kits_and_still_lives_at_the_page_root():
+    """``kit.info_dialog`` replaces the hand-built dialog + its close ✕.
+
+    ⚠ It must still be built OUTSIDE ``kit.page()``'s column: a ui.dialog
+    deletes itself with the slot it was built in, and the leg table's container
+    is cleared on every edit (the swing.py precedent the old comment cites)."""
+    import inspect
+    src = inspect.getsource(calc.render)
+    assert 'kit.info_dialog("Rate my trade"' in src
+    assert "ui.dialog()" not in src
+    assert src.index("kit.info_dialog(") < src.index("with kit.page():")
+
+
+def test_the_page_raises_no_toast_of_its_own():
+    """Three ``ui.notify`` calls, three different answers. An empty Symbol is
+    VALIDATION and belongs under the field; "no strikes for <expiry>" was a
+    toast repeating the sentence the line above it already writes to the panel's
+    status line; "no option expiries in the chain" is a real OUTCOME and is the
+    one that stays, as a kit toast."""
+    import inspect
+    src = inspect.getsource(calc.render)
+    assert "ui.notify(" not in src
+    assert 'kit.symbol_error(symbol_in, "Enter a symbol first.")' in src
+    assert 'kit.toast("warn"' in src
+    assert "Schwab returned no strikes for" not in src, \
+        "the panel's status line already says it"
+
+
+def test_the_shared_widgets_mount_on_the_app_palette():
+    """``DEFAULT_LEG_TOKENS`` / ``DEFAULT_PANEL_TOKENS`` already carry every
+    ENCODING this page needs — bid-green, ask-red, the at-the-money amber, the
+    in-the-money wash, long-cyan / short-green and the typed-price amber — so
+    the near-black repaints are surface only and go with the rest."""
+    import inspect
+    src = inspect.getsource(calc.render)
+    assert src.count("tokens=None") == 2, "both shared widgets take the defaults"
+    assert not hasattr(calc, "_LEG_TOKENS"), "a palette nothing passes is dead"
+    assert not hasattr(calc, "_PANEL_TOKENS")
+
+
+def test_the_matrix_asks_for_no_font_the_app_does_not_load():
+    """The matrix hardcoded ``font-family:'JetBrains Mono',…`` INSIDE the raw
+    HTML, independently of ``CALC_MONO`` — so retiring the page's own
+    ``add_head_html`` would have left it asking for a face nobody links and
+    falling back to whatever the browser substitutes. It inherits the app face
+    instead; ``tabular-nums`` is what aligns the columns, and IBM Plex Sans'
+    digit-width spread under it was measured at 0.000."""
+    html = calc.matrix_html(["Now", "08/21"], _matrix_data(), 450.0,
+                            {"max_profit": 180.0})
+    assert html
+    assert "JetBrains" not in html and "font-family" not in html
+    assert "font-variant-numeric:tabular-nums" in html
+
+
+def test_the_matrix_signal_hues_are_untouched():
+    """The must-not-change half. These five are DATA — the profit/loss ramp, the
+    text tones printed on it and the spot amber — and they are byte-identical
+    before and after the migration, so this passes on both sides by design."""
+    assert calc._MATRIX_PROFIT_RGB == "45,212,167"
+    assert calc._MATRIX_LOSS_RGB == "251,95,124"
+    assert calc._MATRIX_PROFIT_FG == "#b8f5e4"
+    assert calc._MATRIX_LOSS_FG == "#ffd0d9"
+    assert calc.MATRIX_SPOT == "#f5b841"
+
+
+def test_the_matrix_chrome_follows_the_app_palette():
+    """The other half: the sticky header ground, its rule, the row rules, the
+    price ladder and a cell with no reading are FRAME, not data. They were
+    near-black literals mirroring ``[calc]``; on the app ground they have to be
+    the app's own card, border and text values or the table reads as a hole
+    punched in the page."""
+    from pages.options import theme
+    p = theme.THEME["palette"]
+    assert calc.MATRIX_HEAD_BG == p["card_bg"]
+    assert calc.MATRIX_HEAD_RULE == p["card_border"]
+    assert calc.MATRIX_LABEL_FG == p["muted"]
+    assert calc.MATRIX_PRICE_FG == p["title"]
+    assert calc.MATRIX_VOID == p["page_bg3"]
+    assert calc._MATRIX_EMPTY_FG == p["muted"]
+    assert p["card_border"] in calc.MATRIX_ROW_RULE
+
+
+def test_render_mounts_the_table_leg_editor_with_every_source_it_needs():
+    """Renamed from ``…_with_the_calc_palette``: the page passes no palette any
+    more (2026-09-20). What it does pass is what the table CANNOT draw without -
+    a strike source, a price source, a delta source, a floor and a reset."""
     import inspect
     src = inspect.getsource(calc.render)
     assert 'layout="table"' in src

@@ -232,25 +232,16 @@ _DEFAULTS = {
     "sectors": {
         "up": "#3FD98A", "dn": "#E8697B", "warn": "#E0A63C",
     },
-    # The Options Strategy Calculator's own language: a near-black ground with
-    # cyan/green/amber signal colours and a mono face, deliberately unlike the
-    # app-wide dark navy. Page-scoped (.calc-v3) — NOT surfaced in
+    # The Options Strategy Calculator's four SIGNAL colours — NOT surfaced in
     # Settings → Appearance, and not the app palette.
+    # ⚠ DATA ONLY since 2026-09-20: this was a whole page-scoped surface
+    # language (a near-black ground and glow, frame / tile / chip / button skins,
+    # a seven-step text ramp and a Google mono face) behind a `.calc-v3` scope
+    # hook. It retired with the page's migration onto pages/ui_kit.py. Each knob
+    # left encodes a READING — profit, loss, the primary signal, caution — that
+    # no app-wide token carries.
     "calc": {
-        "void": "#05070a", "glow": "#0b1a24",
-        "frame_a": "#0b1118", "frame_b": "#06090d",
-        "edge": "#26505c", "edge_idle": "#1d2937", "chip_bg": "#06080b",
-        "tile_a": "#0d141c", "tile_b": "#070b0f", "tile_edge": "#1d2937",
-        "input_bg": "#0a1219", "input_edge": "#2a3846",
-        "bright": "#eaf2f9", "txt": "#cfdae8", "soft": "#dce7f3",
-        "label": "#7189a0", "muted": "#8aa0b4", "body": "#93a8bb", "dim": "#6f8598",
-        "icon": "#4a6070", "icon_soft": "#5b7f8c",
         "pos": "#2dd4a7", "neg": "#fb5f7c", "accent": "#22d3ee", "warn": "#f5b841",
-        "accent_txt": "#c8f4fd",
-        "btn_bg": "#111b25", "btn_edge": "#3a5060", "btn_txt": "#d3e0ec",
-        "off_bg": "#101720", "off_edge": "#26313d", "off_txt": "#5c6d7e",
-        "font_url": ("https://fonts.googleapis.com/css2"
-                     "?family=JetBrains+Mono:wght@400;500;700&display=swap"),
     },
 }
 
@@ -1021,74 +1012,33 @@ def build_sector_tokens(theme):
     }
 
 
-# ── Options Strategy Calculator (/options/calculator) helpers ────────────────
-# Page-scoped like [flow] / [console] / [macro] / [sectors]. Like the first
-# three of those it needs an ``ui.add_css`` escape-hatch of its own
-# (``[sectors]`` needs none — a heat grid is nothing but colour and
-# measurement): this page mounts q-fields, the
-# leg editor and the teleported strategy popup, none of which component
-# ``.classes()`` can reach. Scope hook is ``.calc-v3`` — deliberately NOT
-# ``.calc-v2``, which is the app-wide dark-navy scope the Simulator and Trade
-# pages share.
+# ── Options Strategy Calculator (/options/calculator) DATA exports ────────
+# ⚠ This WAS a page-scoped surface language on the scale of [console] or
+# [macro] — a near-black ground, a mono face, frame / tile / chip / button skins
+# and an ``ui.add_css`` escape-hatch block scoped ``.calc-v3``. It retired on
+# 2026-09-20 when the Calculator moved onto ``pages/ui_kit.py``: every rule that
+# block carried (boxed q-fields, the Strategy trigger internals, the leg-table
+# track sizes) exists app-wide under ``.ns-app`` in ``build_quasar_css``, and the
+# teleported popup takes the shared ``.strat-menu-navy`` skin.
+#
+# What is left is DATA. The four hues below encode a READING — profit, loss, the
+# primary signal, caution — on the six metric cards, the legs strip and the
+# STRATEGY tag chips, and no app-wide token carries the cyan ``accent``.
 def build_calc_tokens(theme):
-    """Tailwind class-string vocabulary for the Strategy Calculator.
+    """The Calculator's four signal colours, as Tailwind text + left-edge classes.
 
-    Namespaced ``CALC_*`` so a calculator token can never be mistaken for one
-    of the app-wide dark-navy tokens — this page keeps its own near-black
-    ground. ⚠ Every ``[...]`` arbitrary value uses ``_`` for spaces: a Tailwind
-    arbitrary value containing a real space generates NO rule at all, silently.
+    Namespaced ``CALC_*`` so a calculator colour can never be mistaken for the
+    app-wide semantic set: these are the page's own five-tone accent vocabulary
+    (the fifth, "dim", is the app's MUTED — a card with no reading makes no
+    colour claim). ``CALC_STATE_TEXT`` is the whole set as ONE class string, for
+    ``.classes(remove=CALC_STATE_TEXT, add=CALC_POS)`` — so repeated repaints
+    can't stack conflicting ``text-[…]`` classes. It is derived here rather than
+    written down so it always follows the config, exactly as its app-wide sibling
+    ``STATE_TEXT_CLASSES`` does.
     """
     c = theme["calc"]
-    frame_bg = f"bg-[linear-gradient(180deg,{c['frame_a']},{c['frame_b']})]"
-    # The finite state palette behind the page's data-driven label colours,
-    # mapped from a known state onto a static class (the documented alternative
-    # to a runtime-built arbitrary value). CALC_STATE_TEXT is the whole set as
-    # ONE class string, for .classes(remove=CALC_STATE_TEXT, add=CALC_POS) — so
-    # repeated repaints can't stack conflicting text-[…] classes. It is derived
-    # here rather than written down so it always follows the config, exactly as
-    # its app-wide sibling STATE_TEXT_CLASSES does.
-    state_txt = [f"text-[{c[k]}]" for k in ("pos", "neg", "accent", "warn", "dim")]
+    state_txt = [f"text-[{c[k]}]" for k in ("pos", "neg", "accent", "warn")]
     return {
-        "CALC_MONO": "font-['JetBrains_Mono',ui-monospace,monospace]",
-        "CALC_PAGE": (
-            f"text-[{c['txt']}] tracking-[.02em] p-4 rounded-[3px] "
-            f"bg-[radial-gradient(1100px_560px_at_14%_-12%,"
-            f"{c['glow']}_0%,{c['void']}_62%)]"
-        ),
-        # The numbered frames. The label chip is positioned by the page
-        # (relative frame + absolute -top-1.5 chip) — CALC_CHIP is the chip skin.
-        "CALC_FRAME": f"relative rounded-[3px] border border-[{c['edge']}] {frame_bg}",
-        "CALC_FRAME_IDLE": f"relative rounded-[3px] border border-[{c['edge_idle']}] {frame_bg}",
-        "CALC_CHIP": (f"px-1.5 bg-[{c['chip_bg']}] text-[9px] tracking-[.2em] "
-                      f"font-bold whitespace-nowrap"),
-        "CALC_TILE": (f"rounded-[3px] border border-[{c['tile_edge']}] "
-                      f"bg-[linear-gradient(180deg,{c['tile_a']},{c['tile_b']})]"),
-        "CALC_INPUT": f"bg-[{c['input_bg']}] border border-[{c['input_edge']}] rounded-[2px]",
-        "CALC_BTN": (f"bg-[{c['btn_bg']}] border border-[{c['btn_edge']}] "
-                     f"text-[{c['btn_txt']}] rounded-[2px] text-[9px] tracking-[.16em]"),
-        # The accent expanded to a 22% fill via _alpha_hex, NOT a hand-written
-        # rgba: the fill, the border and the label all have to follow the one
-        # `accent` knob, or editing it moves the border and leaves the button
-        # half-recoloured — worse than no knob at all.
-        "CALC_BTN_PRIMARY": (f"bg-[{_alpha_hex(c['accent'], .22)}] "
-                             f"border border-[{c['accent']}] text-[{c['accent_txt']}] "
-                             f"rounded-[2px] text-[9px] tracking-[.16em]"),
-        "CALC_BTN_OFF": (f"bg-[{c['off_bg']}] border border-[{c['off_edge']}] "
-                         f"text-[{c['off_txt']}] rounded-[2px] text-[9px] tracking-[.16em] "
-                         f"cursor-not-allowed"),
-        # The Strategy picker's trigger. ``boxed=True`` otherwise paints the navy
-        # STRATEGY_BTN token onto it and build_calc_css sets no competing
-        # background, so the trigger would render navy on the near-black page —
-        # the page passes this as build_strategy_menu(..., btn_class=…).
-        "CALC_STRATEGY_BTN": (f"bg-[{c['input_bg']}] hover:border-[{c['accent']}] "
-                              f"border border-[{c['input_edge']}] text-[{c['soft']}] "
-                              f"rounded-[2px] font-normal"),
-        "CALC_EYEBROW": f"text-[8px] tracking-[.18em] text-[{c['label']}] whitespace-nowrap",
-        "CALC_VALUE": f"text-[{c['bright']}] font-medium",
-        "CALC_SOFT": f"text-[{c['soft']}]",
-        "CALC_BODY": f"text-[{c['body']}]",
-        "CALC_MUTED": f"text-[{c['muted']}]",
-        "CALC_DIM": state_txt[4],
         "CALC_POS": state_txt[0],
         "CALC_NEG": state_txt[1],
         "CALC_ACCENT": state_txt[2],
@@ -1101,73 +1051,34 @@ def build_calc_tokens(theme):
     }
 
 
-def build_calc_css(theme):
-    """Quasar-internal escape-hatch CSS for the Calculator, scoped ``.calc-v3``.
+def build_matrix_tokens(theme):
+    """The P&L matrix's CHROME, as raw CSS colours rather than classes.
 
-    Reaches only the DOM component ``.classes()`` cannot: the boxed q-field
-    control, and the body-mounted cascading strategy
-    popup (``.strat-menu-calc``, which is teleported OUT of the scope)."""
-    c = theme["calc"]
-    return f"""
-/* Boxed inputs — the design's flat dark field. */
-.calc-v3 .q-field__control{{
-  background:{c['input_bg']};border:1px solid {c['input_edge']};border-radius:2px;
-  padding:0 7px;min-height:30px;
-}}
-.calc-v3 .q-field__control:before,.calc-v3 .q-field__control:after{{border:0!important;}}
-.calc-v3 .q-field--focused .q-field__control{{border-color:{c['accent']};box-shadow:none;}}
-.calc-v3 .q-field__label{{color:{c['label']};font-size:8px;letter-spacing:.14em;}}
-.calc-v3 .q-field__native,.calc-v3 .q-field__native input,
-.calc-v3 .q-field__native span{{color:{c['soft']}!important;font-size:12px;}}
-.calc-v3 .q-field__append .q-icon,.calc-v3 .q-field__prepend .q-icon{{
-  color:{c['icon']};font-size:14px;
-}}
-/* Strategy picker trigger internals. */
-.calc-v3 .strategy-menu-btn .q-btn__content{{
-  justify-content:space-between;flex:1;text-transform:none;
-}}
-.calc-v3 .strategy-menu-btn .q-icon{{color:{c['icon_soft']};}}
-/* Leg table rows — dropdowns in narrow grid tracks: slim side padding and a
-   smaller dropdown arrow, so "Sep 14", "570" and "Mark" fit. Sizes only. */
-.calc-v3 .leg-trow .q-field__control{{padding:0 4px;}}
-.calc-v3 .leg-trow .q-field__append{{padding-left:0;}}
-.calc-v3 .leg-trow .q-field__append .q-icon{{font-size:12px;}}
-.calc-v3 .leg-strike .q-field__native{{justify-content:center;text-align:center;font-size:12px;}}
-/* Cascading strategy popup — teleported to <body>, so NOT under .calc-v3. */
-.strat-menu-calc.q-menu{{
-  background:{c['frame_a']}!important;border:1px solid {c['edge']};
-  box-shadow:0 10px 28px rgba(0,0,0,.6);border-radius:3px;
-}}
-.strat-menu-calc .q-item,.strat-menu-calc .q-item__section,
-.strat-menu-calc .q-item__label{{color:{c['soft']};}}
-.strat-menu-calc .q-item:hover,.strat-menu-calc .q-item--active,
-.strat-menu-calc .q-item.q-manuallyfocused{{background:{c['btn_bg']}!important;}}
-.strat-menu-calc .q-icon{{color:{c['icon_soft']};}}
-"""
+    The matrix is ONE raw ``ui.html`` fragment — a few hundred cells built with
+    ``.classes()`` would be a few hundred Vue elements — which is the repo's
+    documented out-of-scope case for the Tailwind-first rule, so these enter as
+    inline ``style=`` VALUES and cannot be tokens.
 
-
-CALC_KEYFRAMES_CSS = """
-@keyframes blip{0%,100%{opacity:1}50%{opacity:.25}}
-@keyframes scan{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
-"""
-
-
-def build_calc_font_head_html(theme):
-    """``<link>``s for the calculator's mono face, or "" when unset.
-
-    JetBrains Mono is what makes ``tabular-nums`` align the matrix columns
-    optically; the system fallback is a visible downgrade, not a neutral one."""
-    try:
-        url = str(theme["calc"].get("font_url", "")).strip()
-    except Exception:  # noqa: BLE001
-        return ""
-    if not url:
-        return ""
-    return (
-        '<link rel="preconnect" href="https://fonts.googleapis.com">'
-        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-        f'<link rel="stylesheet" href="{url}">'
-    )
+    Frame, not data: the sticky header's ground and the rule under it, the rules
+    between price rows, a heading that is not the expiry, the price ladder, the
+    ground behind an untinted cell, and the text of a cell with no reading. They
+    were near-black literals mirroring the retired ``[calc]`` surface keys; on
+    the app's navy card those would read as a hole punched in the page. The
+    profit / loss ramp and the spot amber stay in ``calculator.py``: a
+    data-driven colour map is the one category ``config/theme.toml``
+    deliberately keeps out of the palette."""
+    p = theme["palette"]
+    return {
+        "MATRIX_HEAD_BG": p["card_bg"],
+        "MATRIX_HEAD_RULE": p["card_border"],
+        # Fainter than the outer frame, so the ladder reads as rows inside one
+        # table rather than as a stack of boxes.
+        "MATRIX_ROW_RULE": _alpha_hex(p["card_border"], .55),
+        "MATRIX_LABEL_FG": p["muted"],
+        "MATRIX_VOID": p["page_bg3"],
+        "MATRIX_PRICE_FG": p["title"],
+        "MATRIX_EMPTY_FG": p["muted"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1251,25 +1162,8 @@ MACRO_CSS = build_macro_css(THEME)             # the ONE ui.add_css escape-hatch
 # ── Sector & Industry heat grid (/sentiment/sectors) DATA exports ────────────
 SECTOR_TOKENS = build_sector_tokens(THEME)     # the regime tone, text + dot
 
-# ── Options Strategy Calculator — page-scoped language (.calc-v3) ────────────
+# ── Options Strategy Calculator — the four signal colours it still owns ────
 _CALC_TOKENS = build_calc_tokens(THEME)
-CALC_MONO = _CALC_TOKENS["CALC_MONO"]
-CALC_PAGE = _CALC_TOKENS["CALC_PAGE"]
-CALC_FRAME = _CALC_TOKENS["CALC_FRAME"]
-CALC_FRAME_IDLE = _CALC_TOKENS["CALC_FRAME_IDLE"]
-CALC_CHIP = _CALC_TOKENS["CALC_CHIP"]
-CALC_TILE = _CALC_TOKENS["CALC_TILE"]
-CALC_INPUT = _CALC_TOKENS["CALC_INPUT"]
-CALC_BTN = _CALC_TOKENS["CALC_BTN"]
-CALC_BTN_PRIMARY = _CALC_TOKENS["CALC_BTN_PRIMARY"]
-CALC_BTN_OFF = _CALC_TOKENS["CALC_BTN_OFF"]
-CALC_STRATEGY_BTN = _CALC_TOKENS["CALC_STRATEGY_BTN"]
-CALC_EYEBROW = _CALC_TOKENS["CALC_EYEBROW"]
-CALC_VALUE = _CALC_TOKENS["CALC_VALUE"]
-CALC_SOFT = _CALC_TOKENS["CALC_SOFT"]
-CALC_BODY = _CALC_TOKENS["CALC_BODY"]
-CALC_MUTED = _CALC_TOKENS["CALC_MUTED"]
-CALC_DIM = _CALC_TOKENS["CALC_DIM"]
 CALC_POS = _CALC_TOKENS["CALC_POS"]
 CALC_NEG = _CALC_TOKENS["CALC_NEG"]
 CALC_ACCENT = _CALC_TOKENS["CALC_ACCENT"]
@@ -1279,5 +1173,13 @@ CALC_EDGE_POS = _CALC_TOKENS["CALC_EDGE_POS"]
 CALC_EDGE_NEG = _CALC_TOKENS["CALC_EDGE_NEG"]
 CALC_EDGE_ACCENT = _CALC_TOKENS["CALC_EDGE_ACCENT"]
 CALC_EDGE_WARN = _CALC_TOKENS["CALC_EDGE_WARN"]
-CALC_CSS = build_calc_css(THEME)
-CALC_FONT_HEAD_HTML = build_calc_font_head_html(THEME)
+
+# ── the P&L matrix's chrome — raw CSS values for a raw-HTML fragment ──────
+_MATRIX_TOKENS = build_matrix_tokens(THEME)
+MATRIX_HEAD_BG = _MATRIX_TOKENS["MATRIX_HEAD_BG"]
+MATRIX_HEAD_RULE = _MATRIX_TOKENS["MATRIX_HEAD_RULE"]
+MATRIX_ROW_RULE = _MATRIX_TOKENS["MATRIX_ROW_RULE"]
+MATRIX_LABEL_FG = _MATRIX_TOKENS["MATRIX_LABEL_FG"]
+MATRIX_VOID = _MATRIX_TOKENS["MATRIX_VOID"]
+MATRIX_PRICE_FG = _MATRIX_TOKENS["MATRIX_PRICE_FG"]
+MATRIX_EMPTY_FG = _MATRIX_TOKENS["MATRIX_EMPTY_FG"]

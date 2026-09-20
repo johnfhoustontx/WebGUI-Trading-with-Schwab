@@ -7,9 +7,10 @@ what a pick means (``on_pick``) and owns the leg editor mounted into
 ``legs_box``. Everything this module decides is in the pure ``chain_grid`` /
 ``entry`` modules; this one is widgets and wiring.
 
-Colours enter as ``tokens`` (see ``panel_tokens``) so the Calculator can paint
-the panel in its near-black ``[calc]`` language while the Simulator keeps the
-app-wide dark navy — the same split ``leg_editor.leg_tokens`` makes.
+Colours enter as ``tokens`` (see ``panel_tokens``) so a page CAN repaint the
+panel — the same split ``leg_editor.leg_tokens`` makes. ⚠ Every mount takes the
+app-wide dark-navy defaults today: the Calculator's near-black ``[calc]``
+repaint was the one override and went on 2026-09-20 with that language.
 
 **The panel's two ACTIONS go through ``pages/ui_kit.py``** (2026-09-20): Load
 (the page's refresh — a screen with a Symbol control bar has no header Refresh,

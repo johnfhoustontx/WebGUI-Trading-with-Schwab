@@ -70,34 +70,46 @@ def test_default_menu_and_button_classes_are_unchanged():
 
 
 def test_menu_class_override_reaches_every_popup():
-    """The Calculator's near-black page needs its own popup skin, and the popups
+    """A page with a palette of its own needs its own popup skin, and the popups
     are teleported to <body> — so the class has to be put on them here. A CSS
     rule for a class nothing carries is unreachable, and no CSS-string test can
-    see that."""
+    see that.
+
+    ⚠ The Calculator was the one caller and stopped being one on 2026-09-20,
+    when ``[calc]`` retired; the override stays a parameter of a SHARED widget,
+    so it is exercised here with an arbitrary class rather than a live one."""
     with ui.card():
         sm = SM.build_strategy_menu(value="PCS", boxed=True,
-                                    menu_class="strat-menu-calc")
+                                    menu_class="strat-menu-elsewhere")
     menus = _menus(sm.button)
     assert menus
     for menu in menus:
-        assert "strat-menu-calc" in menu.classes
+        assert "strat-menu-elsewhere" in menu.classes
         assert "strat-menu-navy" not in menu.classes
+
+
+#: An arbitrary trigger skin, not a live token: ``theme.CALC_STRATEGY_BTN`` was
+#: the only caller and went with the ``[calc]`` surface vocabulary. What is
+#: under test is that an override REPLACES the navy default rather than layering
+#: over it — a ``bg-``/``border-``/``text-`` pair would otherwise tie on
+#: specificity and let stylesheet order decide (the DESK_NEON_CSS trap).
+_OTHER_BTN = "bg-[#001122] border border-[#003344] text-[#005566] rounded-[2px]"
 
 
 def test_btn_class_override_replaces_the_navy_token():
     """``boxed=True`` otherwise paints the navy STRATEGY_BTN token straight onto
-    the trigger, and build_calc_css sets no competing background — so without
-    this the Calculator's trigger renders navy on a near-black page."""
+    the trigger, so a page whose own CSS sets no competing background would get
+    a navy trigger on its own ground."""
     from pages.options import theme
     with ui.card():
         sm = SM.build_strategy_menu(value="PCS", boxed=True,
-                                    btn_class=theme.CALC_STRATEGY_BTN)
+                                    btn_class=_OTHER_BTN)
     classes = sm.button.classes
     assert "strategy-menu-btn" in classes                 # scope hook retained
-    for tok in theme.CALC_STRATEGY_BTN.split():
+    for tok in _OTHER_BTN.split():
         assert tok in classes
     for tok in theme.STRATEGY_BTN.split():
-        if tok not in theme.CALC_STRATEGY_BTN.split():
+        if tok not in _OTHER_BTN.split():
             assert tok not in classes, f"navy token {tok} leaked through"
 
 

@@ -43,7 +43,6 @@ ALLOWED = {
     # drift the kit exists to stop. The page has no other control: it commands
     # nothing and polls on a timer.
     "market.py": {"button": 2},
-    "options/calculator.py": {"add_head_html": 1, "button": 3, "dialog": 1, "notify": 3},
     # The panel's collapse toggle, and it stays: it carries a floating flag
     # badge and a tooltip retitled on every toggle, which kit.icon_button does
     # not model. Not an action button - the panel's ACTIONS are the page's, and

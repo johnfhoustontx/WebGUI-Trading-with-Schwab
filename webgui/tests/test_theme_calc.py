@@ -1,4 +1,11 @@
-"""The page-scoped [calc] palette for the Options Strategy Calculator.
+"""The four DATA colours ``[calc]`` keeps, and the P&L matrix's chrome.
+
+⚠ ``[calc]`` used to be a whole page-scoped SURFACE language — a near-black
+ground, a mono face, five frame/tile/button skins and an ``ui.add_css``
+escape-hatch block scoped ``.calc-v3``. Phase 2 Task 3 retired all of it with
+the Calculator's migration onto ``pages/ui_kit.py``; what survives is the part
+no app-wide token carries: the profit / loss / caution / signal hues the six
+metric cards and the legs strip encode a READING in.
 
 Same contract as every other section builder: a missing/malformed section
 degrades to the built-in defaults and NEVER raises — styling must not be able
@@ -12,12 +19,21 @@ from pages.options import theme as T
 # on purpose: this is the guard that a token cannot silently disappear when the
 # builder is edited, which a ``len()`` check could not do.
 CALC_TOKEN_KEYS = (
+    "CALC_POS", "CALC_NEG", "CALC_ACCENT", "CALC_WARN", "CALC_STATE_TEXT",
+    "CALC_EDGE_POS", "CALC_EDGE_NEG", "CALC_EDGE_ACCENT", "CALC_EDGE_WARN",
+)
+
+#: The four knobs the section is now allowed to hold. Anything else is surface.
+CALC_DATA_KEYS = {"pos", "neg", "accent", "warn"}
+
+#: What the retirement deleted. Named one by one rather than as a prefix sweep:
+#: a prefix test would pass the day someone re-added one under a new name.
+RETIRED = (
     "CALC_MONO", "CALC_PAGE", "CALC_FRAME", "CALC_FRAME_IDLE", "CALC_CHIP",
     "CALC_TILE", "CALC_INPUT", "CALC_BTN", "CALC_BTN_PRIMARY", "CALC_BTN_OFF",
     "CALC_STRATEGY_BTN", "CALC_EYEBROW", "CALC_VALUE", "CALC_SOFT", "CALC_BODY",
-    "CALC_MUTED", "CALC_DIM", "CALC_POS", "CALC_NEG", "CALC_ACCENT", "CALC_WARN",
-    "CALC_EDGE_POS", "CALC_EDGE_NEG", "CALC_EDGE_ACCENT", "CALC_EDGE_WARN",
-    "CALC_STATE_TEXT",
+    "CALC_MUTED", "CALC_DIM", "CALC_CSS", "CALC_KEYFRAMES_CSS",
+    "CALC_FONT_HEAD_HTML", "build_calc_css", "build_calc_font_head_html",
 )
 
 
@@ -42,6 +58,41 @@ def test_calc_defaults_exist_and_are_all_strings():
         "load_theme only merges non-empty string values"
 
 
+def test_the_calc_section_holds_only_data_colours_now():
+    """The positive form: this FAILS if a surface knob comes back, where an
+    ``assert "void" not in …`` per retired key could only ever go vacuous.
+    A colour that encodes a VALUE stays; a colour that draws a FRAME does not,
+    and a font URL never did belong to a page."""
+    assert set(T._DEFAULTS["calc"]) == CALC_DATA_KEYS
+    assert set(T.THEME["calc"]) == CALC_DATA_KEYS
+
+
+def test_the_shipped_theme_toml_calc_section_holds_only_data_colours():
+    """The tracked file and the defaults have to agree in BOTH directions:
+    ``load_theme`` ignores a key that is not in ``_DEFAULTS``, so a surface knob
+    left in the TOML would be an operator control with no consumer at all — and
+    nothing else fails."""
+    from repo_paths import THEME_TOML
+    with open(THEME_TOML, "rb") as f:
+        shipped = tomllib.load(f)["calc"]
+    assert set(shipped) == CALC_DATA_KEYS
+    assert "font_url" not in shipped, "the page loads no font of its own"
+
+
+def test_the_page_scoped_calc_surface_vocabulary_is_gone():
+    """``build_calc_css`` was the Calculator's own ``ui.add_css`` block, scoped
+    ``.calc-v3``: boxed q-fields, the Strategy trigger internals, the leg-table
+    track sizes and the teleported ``.strat-menu-calc`` popup. Every rule in it
+    now exists app-wide under ``.ns-app`` (``build_quasar_css``), so the block
+    and its tokens go rather than being injected twice."""
+    for name in RETIRED:
+        assert not hasattr(T, name), f"theme.{name} is a retired surface value"
+    assert ".calc-v3" not in T.QUASAR_INTERNAL_CSS
+    assert ".strat-menu-calc" not in T.QUASAR_INTERNAL_CSS
+    assert ".ns-app .leg-trow" in T.APP_FIELD_CSS, \
+        "the leg-table rules the calc block carried must exist app-wide"
+
+
 def test_build_calc_tokens_returns_tailwind_class_strings():
     tk = T.build_calc_tokens(T._DEFAULTS)
     for key in CALC_TOKEN_KEYS:
@@ -53,12 +104,12 @@ def test_build_calc_tokens_returns_tailwind_class_strings():
 def test_calc_tokens_carry_the_configured_colours():
     tk = T.build_calc_tokens(_theme(pos="#001122"))
     assert "#001122" in tk["CALC_POS"]
+    assert "#001122" in tk["CALC_EDGE_POS"]
 
 
 def test_calc_tokens_hold_no_hardcoded_hex():
     """Every colour must come from the theme dict, or a knob is a dead knob —
-    a half-working knob (border follows, fill does not) is worse than none.
-    Alpha-suffixed forms of the repaint (``_alpha_hex``) are the same colour."""
+    a half-working knob (border follows, fill does not) is worse than none."""
     for key, val in T.build_calc_tokens(_repainted()).items():
         stray = [h for h in re.findall(r"#[0-9a-fA-F]{3,8}", val)
                  if not h.startswith("#123456")]
@@ -98,7 +149,7 @@ def test_calc_state_text_is_a_class_string_not_token_names():
     assert parts, "CALC_STATE_TEXT is empty"
     assert not any(p.startswith("CALC_") for p in parts), \
         "holds token NAMES; Element.classes(remove=) needs the classes themselves"
-    for name in ("CALC_POS", "CALC_NEG", "CALC_ACCENT", "CALC_WARN", "CALC_DIM"):
+    for name in ("CALC_POS", "CALC_NEG", "CALC_ACCENT", "CALC_WARN"):
         assert tk[name] in parts, f"{name} missing from the removable state set"
 
 
@@ -107,74 +158,12 @@ def test_calc_state_text_follows_the_config():
     assert "text-[#001122]" in tk["CALC_STATE_TEXT"].split()
 
 
-def test_build_calc_css_is_scoped_to_calc_v3_and_never_to_calc_v2():
-    css = T.build_calc_css(T._DEFAULTS)
-    assert ".calc-v3" in css
-    assert ".calc-v2" not in css, "must not restyle the Simulator/Trade scope"
-    # the teleported strategy popup is body-mounted, so it gets its own scope
-    assert ".strat-menu-calc" in css
-
-
-def test_calc_focus_clears_the_app_focus_glow():
-    """The Calculator sits under ``.ns-app`` too, whose focused-field rule adds
-    a box-shadow glow at the same specificity. The calc focus rule must clear it,
-    or every focused Calculator field wears the app's blue ring."""
-    css = T.build_calc_css(T._DEFAULTS)
-    m = re.search(r"\.calc-v3 \.q-field--focused \.q-field__control\{([^}]*)\}", css)
-    assert m, "the calc focus rule is missing"
-    assert "box-shadow:none" in m.group(1)
-
-
-def test_calc_css_carries_the_configured_colours():
-    css = T.build_calc_css(_theme(input_bg="#001122", icon="#003344",
-                                  icon_soft="#005566"))
-    for hexv in ("#001122", "#003344", "#005566"):
-        assert hexv in css, f"{hexv} never reached the CSS"
-
-
-def test_calc_css_holds_no_hardcoded_hex():
-    """The sibling builders (build_quasar_css / build_macro_css) contain not one
-    literal hex; a neutral black/white rgba wash is the accepted exception."""
-    stray = sorted({h for h in re.findall(r"#[0-9a-fA-F]{3,8}",
-                                          T.build_calc_css(_repainted()))
-                    if not h.startswith("#123456")})
-    assert not stray, f"hardcoded hex in build_calc_css: {stray}"
-
-
-def test_calc_keyframes_declare_the_two_animations():
-    assert "@keyframes blip" in T.CALC_KEYFRAMES_CSS
-    assert "@keyframes scan" in T.CALC_KEYFRAMES_CSS
-
-
-def test_calc_font_head_html_is_empty_when_unset():
-    assert T.build_calc_font_head_html(_theme(font_url="")) == ""
-
-
-def test_calc_font_head_html_links_the_configured_face():
-    html = T.build_calc_font_head_html(T._DEFAULTS)
-    assert T._DEFAULTS["calc"]["font_url"] in html
-    assert "fonts.gstatic.com" in html
-
-
 def test_load_theme_survives_a_malformed_calc_section(tmp_path):
     bad = tmp_path / "theme.toml"
-    bad.write_text('[calc]\npos = 12345\nvoid = ""\n', encoding="utf-8")
+    bad.write_text('[calc]\npos = 12345\nwarn = ""\n', encoding="utf-8")
     theme = T.load_theme(bad)
     assert theme["calc"]["pos"] == T._DEFAULTS["calc"]["pos"]
-    assert theme["calc"]["void"] == T._DEFAULTS["calc"]["void"]
-
-
-def test_shipped_toml_calc_section_matches_the_defaults():
-    """``load_theme`` ignores an unknown key BY DESIGN, so a typo in the shipped
-    config/theme.toml silently does nothing and nothing fails. This is the test
-    that fails instead."""
-    from repo_paths import THEME_TOML
-    with open(THEME_TOML, "rb") as f:
-        shipped = tomllib.load(f)["calc"]
-    unknown = sorted(set(shipped) - set(T._DEFAULTS["calc"]))
-    assert not unknown, f"[calc] keys in theme.toml that _DEFAULTS ignores: {unknown}"
-    missing = sorted(set(T._DEFAULTS["calc"]) - set(shipped))
-    assert not missing, f"[calc] knobs missing from theme.toml: {missing}"
+    assert theme["calc"]["warn"] == T._DEFAULTS["calc"]["warn"]
 
 
 def test_module_exports_every_calc_token():
@@ -186,6 +175,53 @@ def test_module_exports_every_calc_token():
         assert getattr(T, key) == val, f"theme.{key} is stale"
 
 
-def test_module_exports_the_calc_css_and_font():
-    for name in ("CALC_CSS", "CALC_FONT_HEAD_HTML", "CALC_KEYFRAMES_CSS"):
-        assert hasattr(T, name), f"theme.{name} not exported"
+# ── the P&L matrix's chrome ─────────────────────────────────────────────────
+# The matrix is ONE raw-HTML fragment (a few hundred cells as NiceGUI
+# components would be a few hundred Vue elements), so it needs VALUES, not
+# Tailwind classes — which is why these are plain CSS colours rather than
+# tokens. The ramp itself is not here: a data-driven colour map is the one
+# category config/theme.toml deliberately keeps out of the palette.
+MATRIX_TOKEN_KEYS = ("MATRIX_HEAD_BG", "MATRIX_HEAD_RULE", "MATRIX_ROW_RULE",
+                     "MATRIX_LABEL_FG", "MATRIX_VOID", "MATRIX_PRICE_FG",
+                     "MATRIX_EMPTY_FG")
+
+
+def test_build_matrix_tokens_returns_css_values_not_classes():
+    tk = T.build_matrix_tokens(T._DEFAULTS)
+    assert set(tk) == set(MATRIX_TOKEN_KEYS)
+    for key, val in tk.items():
+        assert isinstance(val, str) and val.strip(), key
+        assert not val.startswith(("text-", "bg-", "border-")), \
+            f"{key} is a Tailwind class; the matrix is raw HTML and needs a value"
+
+
+def test_matrix_chrome_follows_the_app_palette():
+    """It is FRAME, not data: the sticky header's ground and rule, the rules
+    between price rows, a heading that is not the expiry, the price ladder and
+    a cell with no reading. Near-black literals mirroring the retired ``[calc]``
+    would now punch a hole in the app's navy card."""
+    p = dict(T._DEFAULTS["palette"], card_bg="#001122", card_border="#003344",
+             muted="#005566", title="#007788", page_bg3="#009900")
+    tk = T.build_matrix_tokens(dict(T._DEFAULTS, palette=p))
+    assert tk["MATRIX_HEAD_BG"] == "#001122"
+    assert tk["MATRIX_HEAD_RULE"] == "#003344"
+    assert tk["MATRIX_LABEL_FG"] == "#005566"
+    assert tk["MATRIX_EMPTY_FG"] == "#005566"
+    assert tk["MATRIX_PRICE_FG"] == "#007788"
+    assert tk["MATRIX_VOID"] == "#009900"
+    assert "#003344" in tk["MATRIX_ROW_RULE"]
+
+
+def test_matrix_tokens_hold_no_hardcoded_hex():
+    p = {k: "#123456" for k in T._DEFAULTS["palette"]}
+    for key, val in T.build_matrix_tokens(dict(T._DEFAULTS, palette=p)).items():
+        stray = [h for h in re.findall(r"#[0-9a-fA-F]{3,8}", val)
+                 if not h.startswith("#123456")]
+        assert not stray, f"{key}: hardcoded hex {stray}"
+
+
+def test_module_exports_every_matrix_token():
+    tk = T.build_matrix_tokens(T.THEME)
+    for key, val in tk.items():
+        assert hasattr(T, key), f"theme.{key} not exported"
+        assert getattr(T, key) == val, f"theme.{key} is stale"
