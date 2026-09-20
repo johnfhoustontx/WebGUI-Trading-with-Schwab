@@ -29,7 +29,10 @@ import math
 
 from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
 from pages.oklch import oklch_hex
+from pages.options import theme as _theme
 from pages.rotation_view import QUAD_CHROMA, QUAD_HUE  # the shared palette
+
+_P = _theme.THEME["palette"]
 
 DASH = "—"
 MINUS = "−"      # U+2212, matching the mono face's figures
@@ -481,7 +484,7 @@ NEG_TXT = f"text-[{oklch_hex(0.80, 0.11, 22)}]"
 POS_BAR = f"bg-[{oklch_hex(0.70, 0.12, 158)}]"
 NEG_BAR = f"bg-[{oklch_hex(0.66, 0.15, 22)}]"
 ALIGN_ON = f"bg-[{oklch_hex(0.72, 0.13, 158)}]"
-ALIGN_OFF = f"bg-[{oklch_hex(0.24, 0.01, 90)}]"
+ALIGN_OFF = f"bg-[{_P['card_border']}]"
 # The aligned-name chips. Same shape as a QUAD_CLASSES entry so they go through
 # the page's one chip builder, on the align panel's own green rather than a
 # quadrant hue — an aligned name is not a fifth corner.
@@ -491,5 +494,5 @@ ALIGN_CLASSES = {
 }
 HILITE_TXT = f"text-[{oklch_hex(0.84, 0.11, 232)}]"
 LEVEL_FILL = f"bg-[{oklch_hex(0.68, 0.11, 232)}]"
-LEVEL_TRACK = f"bg-[{oklch_hex(0.26, 0.006, 90)}]"
-LEVEL_GROOVE = f"bg-[{oklch_hex(0.165, 0.006, 90)}]"
+LEVEL_TRACK = f"bg-[{_P['card_border']}]"
+LEVEL_GROOVE = f"bg-[{_P['card_bg']}]"

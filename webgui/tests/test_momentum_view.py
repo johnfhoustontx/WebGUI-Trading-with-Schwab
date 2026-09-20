@@ -476,3 +476,29 @@ def test_limits_state_what_the_page_cannot_do():
     joined = " ".join(t for _tag, t in V.LIMITS).lower()
     assert "16:20" in joined                 # the nightly cadence
     assert "earnings" in joined              # the event-risk blind spot
+
+
+# -- the neutral surfaces the ladder sweep missed -------------------------------
+def test_the_neutral_surfaces_are_the_apps_not_a_warm_near_black():
+    """Phase 3 retired the warm-neutral ladder, but THREE of its members lived in
+    ``momentum_view`` rather than in ``rotation_view`` and so survived the sweep by
+    their address rather than by their nature.
+
+    Chroma <= 0.01 at hue 90 IS that ladder: a panel ground, a bar track and an
+    unlit pip are surface and furniture, not readings. Measured in the harness
+    before this changed, the groove covered 566,000px of the page at 1.094:1
+    against the app gradient - a warm near-black card sitting directly under the
+    navy control bar, which is the inconsistency this whole phase exists to end."""
+    from pages.options import theme
+    P = theme.THEME["palette"]
+    assert V.LEVEL_GROOVE == f"bg-[{P['card_bg']}]"
+    assert V.LEVEL_TRACK == f"bg-[{P['card_border']}]"
+    assert V.ALIGN_OFF == f"bg-[{P['card_border']}]"
+
+
+def test_the_alignment_pip_keeps_its_green_because_that_one_is_a_reading():
+    """``ALIGN_ON`` is the pip that says a stock has its industry AND its sector
+    behind it. It is hue 158 at chroma 0.13 - the Leading quadrant's own green -
+    and it stays, which is what makes the OFF half above a fair swap."""
+    from pages.oklch import oklch_hex
+    assert V.ALIGN_ON == f"bg-[{oklch_hex(0.72, 0.13, 158)}]"

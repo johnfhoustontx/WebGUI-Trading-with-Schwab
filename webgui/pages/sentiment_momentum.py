@@ -250,7 +250,7 @@ _ALIGN_BODY = f"text-[{_ok(0.82, 0.02, 158)}]"
 _DISP_TXT = f"text-[{_ok(0.80, 0.13, 80)}]"
 _DISP_FILL = f"bg-[{_ok(0.52, 0.10, 80)}]"
 _DISP_MARK = f"bg-[{_ok(0.92, 0.08, 80)}]"
-_LIMIT_BG = f"bg-[{_ok(0.115, 0.006, 90)}]"
+_LIMIT_BG = f"bg-[{_P['input_bg']}]"
 _LIMIT_TAG = f"text-[{_ok(0.62, 0.09, 80)}]"
 # The ring on the currently-selected name chip. The app's SELECTION accent —
 # the colour ``kit``'s own selected table row wears (``build_surface_css`` and
@@ -765,9 +765,8 @@ def render(level="industry"):
         name = LEVEL_OPTIONS[lvl].lower()
         session = p.get("session_date")
         eyebrow_lbl.text = (
-            f"Markets → Trend & Sentiment → Momentum · "
-            f"session {session} · nightly 16:20 CT" if session else
-            "Markets → Trend & Sentiment → Momentum · awaiting data")
+            f"Session {session} · nightly 16:20 CT" if session else
+            "Awaiting data · recomputed nightly at 16:20 CT")
         quad_step.text = f"3 · Where the {len(rows)} {name} sit"
         rank_step.text = (
             f"5 · Rank over the last "
