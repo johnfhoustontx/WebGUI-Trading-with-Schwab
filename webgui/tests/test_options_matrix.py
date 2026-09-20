@@ -53,17 +53,6 @@ def test_matrix_rows_degraded_row_has_defaults():
     assert r["n_signals"] == 0
 
 
-def test_short_ts_converts_utc_to_central():
-    # 22:03 UTC on 2026-07-20 is CDT (UTC-5) → 5:03 PM Central, not 10:03 PM.
-    assert matrix._short_ts("2026-07-20T22:03:00+00:00") == "5:03 PM"
-    # a naive timestamp (no offset) is treated as UTC and still converted.
-    assert matrix._short_ts("2026-07-20T22:03:00") == "5:03 PM"
-    # winter date is CST (UTC-6): 22:03 UTC → 4:03 PM.
-    assert matrix._short_ts("2026-01-15T22:03:00+00:00") == "4:03 PM"
-    assert matrix._short_ts(None) == ""
-    assert matrix._short_ts("garbage") == ""
-
-
 def test_signal_summary_counts_by_signal():
     payload = {"rows": [
         {"signal": "buy"}, {"signal": "buy"}, {"signal": "sell"},
@@ -79,11 +68,30 @@ def test_signal_summary_empty_and_unknown_falls_to_neutral():
         == {"buy": 0, "neutral": 2, "sell": 0}
 
 
-def test_status_text_updated_clock_is_central():
+def test_status_text_leaves_the_clock_to_the_header():
+    """⚠ CHANGED 2026-09-19: this asserted ``"updated 5:03 PM" in text``.
+
+    The page kit's header carries an ``Updated`` stamp read from the view's own
+    ``:ts`` side key — the time the publisher last confirmed the view current —
+    and two clocks a few pixels apart, one from the payload and one from the
+    key, can disagree about one board. The status line is counts only now. The
+    Central-time conversion this guarded lives in ``ui_kit.freshness``, pinned
+    by ``test_ui_kit.py::test_freshness_reads_central_time``.
+    """
     text = matrix.status_text({"rows": [{}], "session_date": "2026-07-20",
                                "ts": "2026-07-20T22:03:00+00:00"})
-    assert "updated 5:03 PM" in text          # Central, not UTC 10:03 PM
+    assert "updated" not in text
+    # Vacuity guard: the line must still SAY something about the board.
     assert "session 2026-07-20" in text
+
+
+def test_the_board_is_a_scheduled_view_with_a_stale_stamp():
+    """``options:matrix`` is published on the autoscan cadence, so its age is a
+    real reading and the header stamp turns amber past the nav badge's own
+    threshold. An on-demand view would leave ``stale`` off."""
+    import inspect
+    src = inspect.getsource(matrix.render)
+    assert 'kit.header("Opportunity Board", view=VIEW, stale=True)' in src
 
 
 # --- ETH-eligible badge (E2) -------------------------------------------------

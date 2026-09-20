@@ -809,7 +809,8 @@ None of these can tell a **buy** from a **sell** — Schwab publishes no options
 tape — so read every row as "something large happened here", not as a direction.
 
 **Age** tells you whether this just happened or is this morning's news. Filter by
-type or symbol, and **click any row** to open Dealer Positioning for that symbol.
+type or symbol, and **click a symbol** (the dotted underline) to open Dealer
+Positioning for that symbol.
 
 Covers today only; the list resets overnight.
 """,

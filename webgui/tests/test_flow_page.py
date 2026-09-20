@@ -372,3 +372,21 @@ def test_the_flow_help_calls_the_alerts_what_the_screen_calls_them():
     for gone in ("**Crossover**", "**Unusual activity**", "**Gamma flip**",
                  "**Big delta**", "the **Share** column"):
         assert gone not in text, gone
+
+
+# ── the page kit (2026-09-19 consistency standard) ───────────────────────────
+
+def test_a_row_click_no_longer_navigates_the_symbol_is_the_link():
+    """The standard: a page without a detail panel links the SYMBOL cell and
+    leaves the row click alone."""
+    import inspect
+    from pages.options import flow
+    src = inspect.getsource(flow.render)
+    assert '"rowClick"' not in src
+    assert "GAMMA_EVENT" in src and "gamma_symbol_slot" in src
+
+
+def test_the_symbol_link_is_only_drawn_where_it_can_go():
+    from pages.options import flow
+    assert "@click" in flow.gamma_symbol_slot(True)
+    assert "@click" not in flow.gamma_symbol_slot(False)

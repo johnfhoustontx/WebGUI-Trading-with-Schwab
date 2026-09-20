@@ -9,6 +9,13 @@ lost alert. This is the durable view: today's alerts, newest first.
 Pure builders are module-level and NiceGUI-free for testing; ``render()`` mounts
 the table and version-polls the bus. Tier-1: imports ONLY ``nicegui`` +
 ``bus_client`` + ``pages.*`` helpers — no engine/service imports.
+
+Built on the page kit (``pages/ui_kit.py``, the 2026-09-19 consistency
+standard): the header line carries the title and the Updated stamp, the filters
+sit in a control bar, the status line carries counts only, and one region covers
+the table a publish replaces. ⚠ The stamp is NOT ``stale``-aware: this view is
+published when an alert fires, so a quiet tape leaves it legitimately old and
+calling that stale would report a working feed as broken.
 """
 from __future__ import annotations
 
@@ -16,10 +23,42 @@ import datetime as _dt
 from zoneinfo import ZoneInfo
 
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
+from shared.symbols import clean_symbol
 
 VIEW = "options:flow_alerts"
 
 _CT_TZ = ZoneInfo("America/Chicago")
+
+# ── the symbol opens that symbol's Dealer Positioning ───────────────────────
+# ⚠ The click moved from the ROW to the SYMBOL CELL (the 2026-09-19 standard: a
+# page with no detail panel links the cell that names the row, and leaves the
+# row click alone — a whole row that navigates gives a reader nowhere safe to
+# click). Mirrors ``matrix.py``'s dossier link, including the re-check in the
+# handler: the event carries whatever the browser sent.
+#
+# Drawn only where ``shell.can_navigate`` says the route exists. On the public
+# origin ``/options/gamma`` IS published (as ``/gamma``), so the link survives
+# there — exactly as the row click did — while an origin serving no Dealer
+# Positioning gets plain text instead of a link that leads nowhere.
+GAMMA_EVENT = "open_gamma"
+# No colour of its own — the cell keeps the table's text colour; the dotted
+# underline and the pointer are the affordance (matrix.DOSSIER_LINK_CLASS).
+_GAMMA_LINK_CLASS = ("cursor-pointer underline decoration-dotted underline-offset-4 "
+                     "hover:decoration-solid")
+
+
+def gamma_symbol_slot(linked):
+    """The symbol cell: a link to that symbol's Dealer Positioning where the
+    route exists, else plain text (the public screen). PURE."""
+    if not linked:
+        return '<q-td :props="props">{{ props.value }}</q-td>'
+    return (
+        '<q-td :props="props">'
+        f'<span class="{_GAMMA_LINK_CLASS}" '
+        f"@click.stop=\"() => $parent.$emit('{GAMMA_EVENT}', props.row.symbol)\">"
+        "{{ props.value }}<q-tooltip>Open Dealer Positioning</q-tooltip></span>"
+        "</q-td>")
+
 
 # The words a reader sees, keyed by the words the service sends. The KEYS are
 # the ``options_svc`` contract, the ``config/flow_alerts.toml`` section names and
@@ -311,49 +350,56 @@ def render():
     tick against the rows already on screen — so age stays live without churning
     the table."""
     import bus_client
+    import shell as _shell
     from nicegui import run, ui
 
-    from pages import busy as _busy
+    from pages import ui_kit as kit
     from pages.ui_guard import guard, guard_async
 
-    from .handoff import send_to_gamma
-    from .theme import CARD, EYEBROW, LABEL, PAGE, QUASAR_INTERNAL_CSS
+    from .handoff import GAMMA_ROUTE, send_to_gamma
 
-    ui.add_css(QUASAR_INTERNAL_CSS)
     state = {"version": None, "rows": [], "kinds": set(_KIND_LABEL), "symbol": None}
 
-    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
-        with ui.column().classes(f"{CARD} w-full gap-2"):
-            ui.label("Flow Alerts").classes(f"text-h6 {LABEL}")
-            ui.label("Today's options-flow alerts, newest first — click a row for "
-                     "dealer positioning").classes(EYEBROW)
+    # No description line: the standard keeps the body to the header, the
+    # filters, the status line and the table. What it said — today's alerts,
+    # newest first, and where a click goes — lives in the page help
+    # (``page_help.HELP_MD["/options/flow"]``).
+    linked = _shell.can_navigate(GAMMA_ROUTE)
+    with kit.page():
+        kit.header("Flow Alerts", view=VIEW)
+        with kit.control_bar():
+            kind_sel = kit.select_field("Alert type", dict(_KIND_LABEL),
+                                        value=list(_KIND_LABEL), multiple=True,
+                                        width="w-72").props("use-chips")
+            symbol_sel = kit.select_field("Symbol", ["All"], value="All", width="w-40")
+        status = kit.status_line(_copy.WAITING_OPTIONS)
+        # Today's alerts arrive as one payload; until it lands an empty table
+        # reads as "a quiet session" rather than "not loaded yet".
+        region = kit.region("Loading today's alerts…")
+        with region.content:
+            table = kit.table(flow_columns(), numeric=("share",))
+    table.add_slot("body-cell-symbol", gamma_symbol_slot(linked))
+    table.add_slot("body-cell-side", _TONE_SLOT)
+    table.add_slot("body-cell-text", _TONE_SLOT)
+    table.add_slot("body-cell-share", _SHARE_SLOT)
 
-            with ui.row().classes("items-center gap-3 flex-wrap pt-1"):
-                kind_sel = ui.select(
-                    dict(_KIND_LABEL), value=list(_KIND_LABEL), multiple=True,
-                    label="Alert type").classes("w-72").props(
-                        "dense outlined use-chips")
-                symbol_sel = ui.select(["All"], value="All", label="Symbol") \
-                    .classes("w-40").props("dense outlined")
+    @guard
+    def _open_gamma(e):
+        """The symbol cell's click. Re-checks the symbol — the event carries
+        whatever the browser sent, and the handed-off symbol reaches a chain
+        fetch and a Redis key name — then hands off through the seam, which is
+        a no-op on an origin that serves no Dealer Positioning."""
+        sym = clean_symbol(e.args) if isinstance(e.args, str) else None
+        if sym is not None:
+            send_to_gamma(sym)
 
-            status = ui.label(_copy.WAITING_OPTIONS).classes(EYEBROW)
-            table_box = ui.element("div").classes("w-full")
-            with table_box:
-                table = ui.table(columns=flow_columns(), rows=[], row_key="id",
-                                 pagination={"rowsPerPage": 0}) \
-                    .classes("w-full flow-table").props("dense")
-            table.add_slot("body-cell-side", _TONE_SLOT)
-            table.add_slot("body-cell-text", _TONE_SLOT)
-            table.add_slot("body-cell-share", _SHARE_SLOT)
-
-    # Today's alerts arrive as one payload; until it lands an empty table reads as
-    # "a quiet session" rather than "not loaded yet".
-    table_busy = _busy.build_busy(table_box, "Loading today's alerts…")
+    if linked:
+        table.on(GAMMA_EVENT, _open_gamma)
 
     def _apply_filters():
         table.rows = filter_rows(state["rows"], state["kinds"], state["symbol"])
         table.update()
-        table_busy.hide()
+        region.busy.hide()
 
     def _tick_age():
         now = _dt.datetime.now(tz=_CT_TZ)
@@ -385,14 +431,8 @@ def render():
         state["symbol"] = None if e.value in (None, "All") else e.value
         _apply_filters()
 
-    @guard
-    def _on_row_click(e):
-        row = e.args[1] if len(e.args) > 1 else None
-        send_to_gamma((row or {}).get("symbol"))
-
     kind_sel.on_value_change(_on_kind_change)
     symbol_sel.on_value_change(_on_symbol_change)
-    table.on("rowClick", _on_row_click)
 
     @guard_async
     async def _poll():
@@ -411,5 +451,5 @@ def render():
         state["version"] = version
         _paint(payload)
     else:
-        table_busy.show()
+        region.busy.show()
     ui.timer(2.0, _poll)

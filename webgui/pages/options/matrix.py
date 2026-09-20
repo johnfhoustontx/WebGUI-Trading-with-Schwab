@@ -4,23 +4,27 @@ Pure builders (columns/rows/color maps) are module-level and NiceGUI-free for
 testing. ``render()`` mounts the sortable table and version-polls the bus. This is
 a Tier-1 page: it imports ONLY ``nicegui`` + ``bus_client`` + ``pages.*`` helpers —
 no engine/service imports.
+
+Built on the page kit (``pages/ui_kit.py``, the 2026-09-19 consistency
+standard): the header line carries the title and the Updated stamp, the status
+line carries counts only, and one region covers the table a publish replaces.
+The stamp is ``stale``-aware here — the board is published on the autoscan
+cadence, so its age is a real reading rather than a number that says nothing.
 """
 from __future__ import annotations
 
-import datetime as _dt
 from urllib.parse import quote as _quote
-from zoneinfo import ZoneInfo
 
 import bus_client
 import shell as _shell
-from pages import busy as _busy
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
+from pages import ui_kit as kit
 from nicegui import run, ui
 
 from pages.ui_guard import guard, guard_async
 from shared.symbols import clean_symbol
 
-from .theme import CARD, EYEBROW, LABEL, PAGE, QUASAR_INTERNAL_CSS
+from .theme import EYEBROW
 
 VIEW = "options:matrix"
 
@@ -44,9 +48,6 @@ def dossier_route(raw):
     sym = clean_symbol(raw)
     return None if sym is None else f"{DOSSIER_ROUTE}?symbol={_quote(sym)}"
 
-# The payload ``ts`` is emitted in UTC by the service; the app shows trading times
-# in Central (America/Chicago), matching the rest of the UI.
-_CT_TZ = ZoneInfo("America/Chicago")
 
 _SIGNAL_CLASS = {
     "buy": "bg-emerald-600/80 text-white",
@@ -172,28 +173,18 @@ def matrix_rows(payload):
     return rows
 
 
-def _short_ts(iso):
-    """A UTC ISO timestamp -> short Central-time clock like '1:32 PM'; '' on None/failure.
-
-    The service emits ``ts`` in UTC (tz-aware); convert to Central before formatting so
-    the displayed 'updated' time matches the user's trading timezone. A naive timestamp
-    (no offset) is assumed to be UTC.
-    """
-    if not iso:
-        return ""
-    try:
-        dt = _dt.datetime.fromisoformat(iso)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=_dt.timezone.utc)
-        return dt.astimezone(_CT_TZ).strftime("%I:%M %p").lstrip("0")
-    except Exception:
-        return ""
-
-
 def status_text(payload):
-    """Status-bar text for a matrix payload: symbol count + session date + updated
-    clock, appending the ``error`` if the service degraded. Empty payload → the
-    waiting note."""
+    """Status-bar text for a matrix payload: symbol count + session date,
+    appending the ``error`` if the service degraded. Empty payload → the
+    waiting note.
+
+    ⚠ **No clock.** This line used to end "updated 5:03 PM" off the payload's
+    own ``ts``. The header's Updated stamp reads the view's ``:ts`` side key —
+    the time the publisher last confirmed the view current — so two clocks a
+    few pixels apart could disagree about one board. The header owns the time;
+    the ``_short_ts`` helper that formatted it went with the clock, and its
+    UTC→Central conversion now lives in ``ui_kit.freshness``.
+    """
     p = payload or {}
     if not p:
         return _copy.WAITING_OPTIONS
@@ -201,9 +192,6 @@ def status_text(payload):
     parts = [f"{n} symbol" + ("" if n == 1 else "s")]
     if p.get("session_date"):
         parts.append(f"session {p['session_date']}")
-    ts = _short_ts(p.get("ts"))
-    if ts:
-        parts.append(f"updated {ts}")
     text = " · ".join(parts)
     if p.get("error"):
         text += f" · {p['error']}"
@@ -296,44 +284,41 @@ def render():
     Graceful-empty: a cold service leaves the "Waiting…" status until the first
     publish.
     """
-    ui.add_css(QUASAR_INTERNAL_CSS)
-    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
-        with ui.column().classes(f"{CARD} w-full gap-2"):
-            ui.label("Opportunity Board").classes(f"text-h6 {LABEL}")
-            # Two things a reader does here: re-sort, and (private app only)
-            # click a symbol to open its dossier. Say only what works on THIS
-            # origin - the public screen has no dossier to open.
-            linked = _shell.can_navigate(DOSSIER_ROUTE)
-            ui.label("Every watchlist symbol on one row, ranked by how much is "
-                     "going on. Click any column to re-sort"
-                     + ("; click a symbol to open its dossier." if linked
-                        else ".")) \
-                .classes(EYEBROW)
+    # No description line: the standard keeps the body to the header, the status
+    # line and the table. What it said — one row per watchlist symbol ranked by
+    # how much is going on, that any column header re-sorts, and that a symbol
+    # opens its dossier — lives in the page help
+    # (``page_help.HELP_MD["/options/matrix"]``), which the public screen does
+    # not mount and so cannot promise a dossier this origin has no route for.
+    # The affordance itself stays origin-conditional: the linked cell is drawn
+    # only where ``/symbol`` exists, and it names itself in its own tooltip.
+    linked = _shell.can_navigate(DOSSIER_ROUTE)
+    with kit.page():
+        kit.header("Opportunity Board", view=VIEW, stale=True)
+        with ui.row().classes("w-full items-center gap-2 flex-wrap"):
+            status = kit.status_line(_copy.WAITING_OPTIONS)
+            ui.space()
             # Summary band: signal counts across the whole grid.
-            with ui.row().classes("items-center gap-2 flex-wrap pt-1"):
-                ui.label("Signals").classes(EYEBROW + " pr-1")
-                buy_chip = ui.label("Buy 0").classes(_SUM_BUY_CLASS)
-                neutral_chip = ui.label("Neutral 0").classes(_SUM_NEUTRAL_CLASS)
-                sell_chip = ui.label("Sell 0").classes(_SUM_SELL_CLASS)
-            status = ui.label(_copy.WAITING_OPTIONS).classes(EYEBROW)
-            table_box = ui.element("div").classes("w-full")
-            with table_box:
-                table = ui.table(columns=matrix_columns(), rows=[], row_key="symbol",
-                                 pagination={"rowsPerPage": 0}) \
-                    .classes("w-full matrix-table").props("dense")
-            table.add_slot("body-cell-symbol", symbol_slot(linked))
-            if linked:
-                table.on(DOSSIER_EVENT, _open_dossier)
-            table.add_slot("body-cell-signal_label", _SIGNAL_SLOT)
-            table.add_slot("body-cell-day_pct", _DAYPCT_SLOT)
-            table.add_slot("body-cell-trend", _TREND_SLOT)
-            table.add_slot("body-cell-call_accel_disp", _CALL_SLOT)
-            table.add_slot("body-cell-put_accel_disp", _PUT_SLOT)
-            table.add_slot("body-cell-gex_regime", _REGIME_SLOT)
-
-    # A read-only board: the only wait is the FIRST payload, and until it lands an
-    # empty grid is indistinguishable from "every symbol is quiet".
-    board_busy = _busy.build_busy(table_box, "Loading the board…")
+            ui.label("Signals").classes(EYEBROW + " pr-1")
+            buy_chip = ui.label("Buy 0").classes(_SUM_BUY_CLASS)
+            neutral_chip = ui.label("Neutral 0").classes(_SUM_NEUTRAL_CLASS)
+            sell_chip = ui.label("Sell 0").classes(_SUM_SELL_CLASS)
+        # A read-only board: the only wait is the FIRST payload, and until it
+        # lands an empty grid is indistinguishable from "every symbol is quiet".
+        board = kit.region("Loading the board…")
+        with board.content:
+            table = kit.table(matrix_columns(), row_key="symbol", numeric=(
+                "spot", "day_pct", "pc_ratio", "net_prem_m", "n_signals",
+                "n_alerts", "hotness"))
+    table.add_slot("body-cell-symbol", symbol_slot(linked))
+    if linked:
+        table.on(DOSSIER_EVENT, _open_dossier)
+    table.add_slot("body-cell-signal_label", _SIGNAL_SLOT)
+    table.add_slot("body-cell-day_pct", _DAYPCT_SLOT)
+    table.add_slot("body-cell-trend", _TREND_SLOT)
+    table.add_slot("body-cell-call_accel_disp", _CALL_SLOT)
+    table.add_slot("body-cell-put_accel_disp", _PUT_SLOT)
+    table.add_slot("body-cell-gex_regime", _REGIME_SLOT)
 
     state = {"version": None}
 
@@ -345,7 +330,7 @@ def render():
         neutral_chip.text = f"Neutral {summ['neutral']}"
         sell_chip.text = f"Sell {summ['sell']}"
         status.text = status_text(payload)
-        board_busy.hide()
+        board.busy.hide()
 
     @guard_async
     async def _poll():
@@ -363,5 +348,5 @@ def render():
         state["version"] = version
         _paint(payload)
     else:
-        board_busy.show()
+        board.busy.show()
     ui.timer(2.0, _poll)

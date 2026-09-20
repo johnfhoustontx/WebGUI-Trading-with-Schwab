@@ -423,8 +423,18 @@ def _matrix_table(monkeypatch, rows):
     table = tables[0]
     # Whether THIS render's own copy promises a dossier (the client is shared
     # across tests, so only elements this render added are read).
-    table.says_dossier = any("dossier" in (getattr(e, "text", "") or "")
-                             for e in new if isinstance(e, ui.label))
+    #
+    # ⚠ CHANGED 2026-09-19: this read the page's LABELS alone, and the label it
+    # found was the description sentence under the in-body title. The page-kit
+    # standard deletes that line from every page — the sentence now lives in
+    # ``page_help.HELP_MD["/options/matrix"]``, which only the private app
+    # mounts. So the promise the reader actually meets is the one in the linked
+    # cell's own tooltip ("Open the Symbol Dossier"), which is origin-
+    # conditional by construction rather than by a second ``if linked``. Both
+    # sources are read, so a page that reintroduces a sentence is covered too.
+    words = [getattr(e, "text", "") or "" for e in new if isinstance(e, ui.label)]
+    words += [s.template for s in table.slots.values() if s.template]
+    table.says_dossier = any("dossier" in w.lower() for w in words)
     return table
 
 
