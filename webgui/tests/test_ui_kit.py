@@ -802,3 +802,21 @@ def test_an_ephemeral_dialog_deletes_itself_but_a_reused_one_stays():
     kept.open()
     asyncio.run(kept.run())
     assert not kept.dialog.is_deleted
+
+
+# -- information dialog, section title -------------------------------------------
+def test_an_information_dialog_has_a_close_x_and_no_footer():
+    with ui.card():
+        d = kit.info_dialog("Trade analysis")
+    assert d.title.text == "Trade analysis"
+    buttons = [e for e in d.dialog.descendants() if isinstance(e, ui.button)]
+    assert len(buttons) == 1 and buttons[0]._props.get("icon") == "close"
+    d.open()
+    d.close()
+    assert d.dialog.value is False
+
+
+def test_section_title_is_the_one_heading_style():
+    with ui.card():
+        s = kit.section_title("Open positions")
+    assert s.text == "Open positions" and theme.LABEL in s.classes

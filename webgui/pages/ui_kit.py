@@ -653,3 +653,24 @@ def confirm(title, body="", *, confirm_text, on_confirm, danger=False,
     return SimpleNamespace(dialog=dlg, title=title_lbl, content=content, body=body_lbl,
                            actions=actions, cancel=cancel, confirm=ok, run=run_,
                            open=open_, close=dlg.close)
+
+
+# ── information dialog, section title ──────────────────────────────────────
+def info_dialog(title, *, width="w-[720px]"):
+    """An information dialog: a title, a close ✕ top-right, no footer (the
+    standard - a dialog that ASKS is ``confirm``). Put the body in
+    ``handle.content``; build it once and repaint the content per use."""
+    # ns-app on the card: a dialog is teleported outside the shell's column.
+    with ui.dialog() as dlg, ui.card().classes(f"ns-app {_t.CARD} {width} max-w-full gap-3"):
+        with ui.row().classes("w-full items-center no-wrap gap-2"):
+            title_lbl = ui.label(title).classes(f"text-subtitle1 font-semibold {_t.LABEL}")
+            ui.space()
+            icon_button("close", tooltip="Close", on_click=dlg.close)
+        content = ui.column().classes("w-full gap-3")
+    return SimpleNamespace(dialog=dlg, title=title_lbl, content=content,
+                           open=dlg.open, close=dlg.close)
+
+
+def section_title(text):
+    """A heading inside a page ("Open positions", "Analytics")."""
+    return ui.label(text).classes(f"text-subtitle2 font-semibold {_t.LABEL}")
