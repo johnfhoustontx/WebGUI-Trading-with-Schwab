@@ -33,7 +33,6 @@ ALLOWED = {
     "options/income.py": {"notify": 1, "table": 1},
     "options/leg_editor.py": {"button": 10},
     "options/matrix.py": {"table": 1},
-    "options/portfolio.py": {"button": 6, "dialog": 1, "notify": 3, "table": 2},
     "options/rescue.py": {"button": 5, "dialog": 1, "notify": 7, "table": 1},
     "options/scanner.py": {"button": 3, "dialog": 1, "notify": 2, "table": 1},
     "options/shares.py": {"table": 1},

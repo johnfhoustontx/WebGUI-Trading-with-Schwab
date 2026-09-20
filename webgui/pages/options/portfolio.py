@@ -12,10 +12,15 @@ The cross-app ``scoring`` collision guard is gone (the service process loads no
 sentiment code; the page does no engine call). A fetch-free version-poll
 ``ui.timer`` repaints when the bus cache version changes (graceful-empty when
 the service is cold / no account exists yet).
+
+Built on the page kit (``pages/ui_kit.py``, the 2026-09-19 consistency
+standard): the header line carries the Updated stamp and the page actions
+(Reset first, the primary manage cycle last), one region covers everything a
+refresh replaces, and Reset asks before it clears the book.
 """
 import bus_client
 from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
-from pages import busy as _busy
+from pages import ui_kit as kit
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -28,8 +33,8 @@ from pages import scorecard as _scorecard
 from .perf_charts import equity_curve_figure, excursion_text
 from .rescue import AT_RISK_STATES as _AT_RISK_STATES
 from .rescue import heat_border_class, rescue_highlight, rescue_highlight
-from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BTN, BTN_3D_DANGER,
-                    BTN_PRIMARY)
+from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, CARD, EYEBROW, LABEL,
+                    MUTED)
 
 # rescue_state values that mark a position at-risk. The options_svc manage cycle
 # tags THIS view (cache:options:paper_account) with rescue_state/heat via
@@ -211,72 +216,98 @@ def greeks_text(greeks) -> str:
 
 
 def render():
-    """Paper Portfolio page: account cards + positions + fills log (bus-fed)."""
-    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
-    # Action buttons right-justified with the tables (mirrors Captured Signals);
-    # the counts status renders BELOW the fills table, bottom-right, small.
-    with ui.row().classes("items-center gap-2 flex-wrap w-full justify-end"):
-        ui.button("Reload", icon="refresh", color=None, on_click=lambda: _reload()) \
-            .props("no-caps").classes(BTN)
-        ui.button("Run entry cycle", icon="login", color=None, on_click=lambda: _cycle("entry")) \
-            .props("no-caps").classes(BTN) \
-            .tooltip("Simulate auto-entry: scan open captured signals and open paper "
-                     "positions for the eligible ones (fills via the paper broker).")
-        ui.button("Run manage cycle", icon="manage_accounts", color=None, on_click=lambda: _cycle("manage")) \
-            .props("no-caps").classes(BTN_PRIMARY) \
-            .tooltip("Reprice open positions and auto-close any that hit their target/stop. "
-                     "Runs automatically every 5 min during market hours; this button forces "
-                     "an immediate run.")
-        ui.button("Reset", icon="restart_alt", color=None, on_click=lambda: _reset()) \
-            .props("no-caps").classes(BTN_3D_DANGER) \
-            .tooltip("Reset the paper account to a starting balance.")
+    """Paper Account: the header line's actions, the account cards, the open
+    positions and fills, and the book's own analytics (bus-fed)."""
+    with kit.page():
+        head = kit.header("Paper Account", view="options:paper_account")
+        with head.actions:
+            # Danger first, primary last: Reset clears the whole book, and the
+            # manage cycle is the one action this page is usually opened for.
+            kit.button("Reset", kind="danger", icon="restart_alt",
+                       tooltip="Reset the paper account to a starting balance.",
+                       on_click=lambda: _reset())
+            refresh_btn = kit.button("Refresh", kind="secondary", icon="refresh",
+                                     on_click=lambda: _reload())
+            entry_btn = kit.button(
+                "Run entry cycle", kind="secondary", icon="login",
+                tooltip="Scan open captured signals now and open paper positions "
+                        "for the eligible ones.",
+                on_click=lambda: _cycle("entry"))
+            # ⚠ HOURLY, and this tooltip claimed a five-minute cadence for
+            # months. The manual account rides
+            # ``options_svc.scheduler.paper_cycle_due`` — the top of each hour,
+            # 09:00-14:00 CT on trading days, with no 15:00 run; the 1-minute
+            # ``manage_due`` slot belongs to the isolated DRIVER account, not to
+            # this book. A tooltip that overstates a cadence is worse than none:
+            # it says a target hit at 09:15 is acted on within minutes, where it
+            # really waits for 10:00.
+            manage_btn = kit.button(
+                "Run manage cycle", kind="primary", icon="manage_accounts",
+                tooltip="Reprice open positions and close any that hit their target "
+                        "or stop. Runs automatically hourly, 09:00-14:00 CT on "
+                        "trading days; this runs it now.",
+                on_click=lambda: _cycle("manage"))
+        status = kit.status_line()
+        # Refresh / entry / manage / reset all round-trip through the service;
+        # one region covers everything the answer repaints.
+        account = kit.region("Refreshing the account…")
+        with account.content:
+            cards_box = ui.row().classes("gap-3 flex-wrap")
+            # The book's own track record (gap assessment C5) and its Greeks
+            # (C4), one line each: this page already carries the account cards,
+            # the positions and the fills, and the driver page's full card
+            # would bury them.
+            scorecard_label = ui.label("").classes(f"text-xs {MUTED}")
+            greeks_label = ui.label("").classes(f"text-xs {MUTED}")
+            kit.section_title("Open positions")
+            pos_table = kit.table(position_columns(), numeric=(
+                "quantity", "entry_credit", "current_value", "unrealized_pnl"))
+            kit.section_title("Fills log (last 100)")
+            ord_table = kit.table(order_columns(), row_key="order_id",
+                                  numeric=("quantity", "fill_price"))
 
-    account_box = ui.column().classes("w-full gap-0")
-    with account_box:
-        cards_box = ui.row().classes("gap-3 flex-wrap")
-        # The book's own track record (gap assessment C5). One line above the
-        # tables rather than the driver page's full card: this page already
-        # carries the account cards, the positions and the fills, and a second
-        # multi-table block would bury them.
-        scorecard_label = ui.label("").classes("text-xs opacity-70")
-        # Book-level risk (gap assessment C4) — one line beside the track record.
-        greeks_label = ui.label("").classes("text-xs opacity-70")
-        ui.label("Open positions").classes("text-subtitle1 mt-2")
-        pos_table = ui.table(columns=position_columns(), rows=[], row_key="id").classes("w-full")
-        # Symbol cell gets a colored left-border + faint tint when the position is
-        # at-risk (rescue_state tested/critical, from the manage-cycle overlay).
-        pos_table.add_slot('body-cell-symbol', r'''
-          <q-td :props="props">
-            <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
-              {{ props.value }}
-            </span>
-            <span v-else>{{ props.value }}</span>
-          </q-td>
-        ''')
-        ui.label("Fills log (last 100)").classes("text-subtitle1 mt-2")
-        ord_table = ui.table(columns=order_columns(), rows=[], row_key="order_id").classes("w-full")
-        # Side as a Deep Slate pill (SELL green / BUY red).
-        ord_table.add_slot('body-cell-side', r'''
-          <q-td :props="props">
-            <q-badge :class="props.row._side_class" :label="props.value"/>
-          </q-td>
-        ''')
-        with ui.row().classes("w-full justify-end"):
-            status = ui.label("").classes("opacity-60 text-xs")
+        # ── Analytics: realized equity curve + MAE/MFE (scanner-baseline) ────
+        # Same builders as the driver monitor, so this book (auto-trades every
+        # captured signal) reads directly against the driver book (Claude's
+        # selection) — the benchmark that shows whether the decider adds edge
+        # over the raw scanner.
+        kit.section_title("Analytics")
+        ui.label("Realized equity curve, and how far trades ran for and against "
+                 "before closing (MAE/MFE), for the manual (scanner-baseline) "
+                 "book. Compare with Claude Trades' Analytics.").classes(
+                     f"text-xs {MUTED}")
+        equity_chart = ui.highchart(equity_curve_figure([])).classes("w-full")
+        excursion_label = ui.label("").classes(f"text-xs {MUTED}")
+        analytics_empty = ui.label("No closed paper trades yet — analytics populate "
+                                   "as positions close.").classes(f"text-xs {MUTED}")
 
-    # ── Analytics: realized equity curve + MAE/MFE (scanner-baseline book) ────
-    # Same builders as the driver monitor, so this book (auto-trades every captured
-    # signal) reads directly against the driver book (Claude's selection) — the
-    # benchmark that shows whether the decider adds edge over the raw scanner.
-    ui.separator().classes("mt-3")
-    ui.label("Analytics").classes("text-subtitle1")
-    ui.label("Realized equity curve + how far trades ran for/against before closing "
-             "(MAE/MFE) for the manual (scanner-baseline) book. Compare against the "
-             "driver's Analytics on the Claude Driver page.").classes("text-xs opacity-50")
-    equity_chart = ui.highchart(equity_curve_figure([])).classes("w-full")
-    excursion_label = ui.label("").classes("text-xs opacity-60")
-    analytics_empty = ui.label("No closed paper trades yet — analytics populate as "
-                               "positions close.").classes("text-xs opacity-50")
+    # Symbol cell gets a colored left-border + faint tint when the position is
+    # at-risk (rescue_state tested/critical, from the manage-cycle overlay).
+    pos_table.add_slot('body-cell-symbol', r'''
+      <q-td :props="props">
+        <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
+          {{ props.value }}
+        </span>
+        <span v-else>{{ props.value }}</span>
+      </q-td>
+    ''')
+    # Side as a Deep Slate pill (SELL green / BUY red).
+    ord_table.add_slot('body-cell-side', r'''
+      <q-td :props="props">
+        <q-badge :class="props.row._side_class" :label="props.value"/>
+      </q-td>
+    ''')
+
+    # Built once at the page's own level: a dialog built inside a repainted
+    # container dies with its slot. The balance field lives in its content.
+    reset_dlg = kit.confirm("Reset the paper account?",
+                            "Every position and fill is cleared, and the account "
+                            "starts again at this balance.",
+                            confirm_text="Reset", danger=True,
+                            on_confirm=lambda: _confirm_reset())
+    with reset_dlg.content:
+        balance = kit.number_field("Starting balance", value=25000.0, min=1,
+                                   format="%.2f", width="w-40")
 
     @guard
     def _populate_analytics(a):
@@ -290,70 +321,60 @@ def render():
     # Last-seen bus cache versions for the fetch-free repaint timers.
     seen = {"version": None, "analytics": None}
 
-    # Refresh / manage / reset all round-trip through the service; until the new
-    # payload lands the cards and tables show the pre-action account.
-    account_busy = _busy.build_busy(account_box, "Refreshing the account…")
-
     def _populate(pa):
         """Paint the cards + tables from the cached paper-account view."""
-        account_busy.hide()
+        account.busy.hide()
+        for b in (refresh_btn, entry_btn, manage_btn):
+            kit.set_busy(b, False)
         pa = pa or {}
         snap = pa.get("snapshot")
         has_account = pa.get("has_account")
         cards_box.clear()
         with cards_box:
             if not pa or snap is None or has_account is False:
-                ui.label("No paper account yet — use Reset to initialize.") \
-                    .classes("opacity-70")
+                kit.empty("No paper account yet. Use Reset to start one.")
             else:
                 for label, value in account_cards(snap):
-                    with ui.card().classes("p-2 min-w-[110px]"):
-                        ui.label(label).classes("text-xs opacity-60")
-                        ui.label(value).classes("text-base font-bold")
+                    with ui.column().classes(f"{CARD} min-w-[110px] gap-0 py-2"):
+                        ui.label(label).classes(EYEBROW)
+                        ui.label(value).classes(f"text-base font-semibold {LABEL}")
         scorecard_label.text = scorecard_text(pa.get("perf"))
         greeks_label.text = greeks_text(pa.get("greeks"))
         pos_table.rows = position_rows(pa.get("positions"))
         ord_table.rows = order_rows(pa.get("orders"))
         pos_table.update()
         ord_table.update()
-        if not pa:
-            status.text = ""
-        else:
-            status.text = f"{len(pos_table.rows)} open positions, {len(ord_table.rows)} fills."
+        status.text = "" if not pa else (
+            f"{len(pos_table.rows)} open positions · {len(ord_table.rows)} fills")
 
     @guard
     def _reload():
         bus_client.request("options", {"type": "refresh_paper"})
-        account_busy.show()
-        ui.notify("Reloading paper account…")
-        status.text = "Reloading…"
+        # No toast: the spinner already says a refresh is running.
+        account.busy.show("Refreshing the account…")
+        kit.set_busy(refresh_btn)
 
     @guard
     def _cycle(kind):
         cmd = "paper_entry" if kind == "entry" else "paper_manage"
         bus_client.request("options", {"type": cmd})
-        ui.notify(f"Running {kind} cycle…")
-        status.text = f"Running {kind} cycle…"
+        kit.set_busy(manage_btn if kind == "manage" else entry_btn)
+        kit.toast("info", f"Running the {kind} cycle — the account updates when "
+                          "it finishes.")
 
     @guard
     def _reset():
-        with ui.dialog() as dlg, ui.card():
-            ui.label("Reset paper account?").classes("text-subtitle1")
-            bal = ui.number("Starting balance", value=25000.0, format="%.2f")
+        reset_dlg.open()
 
-            def confirm():
-                bus_client.request(
-                    "options",
-                    {"type": "paper_reset", "args": {"starting_balance": float(bal.value)}})
-                dlg.close()
-                ui.notify("Resetting the paper account — the book clears "
-                          "when the engine confirms.", type="positive")
-                status.text = "Resetting…"
-
-            with ui.row():
-                ui.button("Confirm", color=None, on_click=confirm).props("no-caps").classes(BTN_3D_DANGER)
-                ui.button("Cancel", on_click=dlg.close).props("flat")
-        dlg.open()
+    def _confirm_reset():
+        # A bad balance keeps the dialog open with its message under the field,
+        # rather than closing on a value the service would refuse.
+        if not balance.validate():
+            return False
+        bus_client.request("options", {"type": "paper_reset",
+                                       "args": {"starting_balance": float(balance.value)}})
+        kit.toast("info", "Resetting the paper account — the book clears when the "
+                          "engine confirms.")
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["version"] = bus_client.read_version("options:paper_account")

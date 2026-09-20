@@ -115,3 +115,22 @@ def test_side_badge_class():
     assert portfolio.side_badge_class("BUY_TO_CLOSE") == theme.BADGE_NEG
     assert portfolio.side_badge_class("") == theme.BADGE_MUTED
     assert portfolio.side_badge_class(None) == theme.BADGE_MUTED
+# -- The page kit (2026-09-19 consistency standard) --------------------------
+
+def test_the_account_is_built_from_the_kit():
+    src = inspect.getsource(portfolio.render)
+    assert 'kit.header("Paper Account", view="options:paper_account")' in src
+    assert "kit.section_title(\"Open positions\")" in src
+
+
+def test_reset_asks_first_and_is_danger():
+    src = inspect.getsource(portfolio.render)
+    assert 'confirm_text="Reset", danger=True' in src
+
+
+def test_the_manage_cycle_tooltip_says_hourly_not_every_five_minutes():
+    """options_svc.scheduler.paper_cycle_due runs the manual account hourly,
+    09:00-14:00 CT on trading days; the tooltip said every 5 min."""
+    src = inspect.getsource(portfolio.render)
+    assert "every 5 min" not in src
+    assert "hourly" in src
