@@ -22,7 +22,7 @@ from pages.ui_guard import guard_async
 # name the Desk panel and what makes it speak, in the Desk's own order.
 VOICE_SECTION_SWITCHES = (
     ("voice_board", "Opportunity Board — a symbol joins the board"),
-    ("voice_flow", "Live Flow Alerts — a new alert"),
+    ("voice_flow", "Flow Alerts — a new alert"),
     ("voice_positions", "Positions — a newly-opened position"),
 )
 

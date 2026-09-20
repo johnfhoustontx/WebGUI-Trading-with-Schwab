@@ -79,14 +79,14 @@ on · what am I holding.*
   read yet**, so every chip falls back to the three-month view and the strip says
   so under the count. A colour you see pre-open is **not** a statement about
   today.
-- **Dealer Positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
+- **Dealer positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
   **flip level** and how far price sits from it, the **ceiling** and **floor**
   (the call and put walls — the ceiling is coloured like its marker on the map,
   and it only caps price while price is below it), and net gamma exposure. The
   little bar shows where price sits **between the two**. Under *dealer mode*,
   *Long gamma · pins* means dealer hedging tends to **hold** price near those
   levels; *short gamma · runs* means it **amplifies** moves instead.
-- **Opportunity Board** — the hottest names right now, with what makes each one
+- **Opportunity board** — the hottest names right now, with what makes each one
   interesting, its at-the-money implied volatility and whether that is rising or
   falling, and a setup tag when one is active. The panel says how many it is
   showing.
@@ -95,7 +95,7 @@ on · what am I holding.*
   — not just the few rows listed beneath them. So "Buy 12" over six rows is not
   a contradiction: twelve names are rated Buy, and you are looking at the
   hottest handful of all of them.
-- **Live Flow Alerts** — the newest unusual-options events. Note these show
+- **Flow alerts** — the newest unusual-options events. Note these show
   **call or put**, never *bought* or *sold*: Schwab publishes no time-and-sales
   tape, so nobody can honestly say which side traded.
 - **Positions** — your open paper trades and Claude's, together, with the live
@@ -127,7 +127,7 @@ A. Joins the Opportunity Board, buy signal."* — unless it only dropped off in 
 last half hour, which keeps two names swapping places at the bottom from talking
 on every refresh.
 
-Each of the three — **Opportunity Board**, **Live Flow Alerts** and **Positions** —
+Each of the three — **Opportunity Board**, **Flow Alerts** and **Positions** —
 has its own switch on the **Settings** page, under the main *Enable spoken
 alerts* switch. A section switched off still glows; it just stays quiet.
 

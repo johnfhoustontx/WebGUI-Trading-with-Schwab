@@ -21,6 +21,17 @@ contradicts the page it links to is worse than no Desk.
 The arithmetic is module-level pure functions over plain dicts, so the whole
 screen is testable without a browser; ``render()`` at the foot is widgets and
 wiring only.
+
+**On the page kit since 2026-09-19** (the consistency standard,
+``docs/plans/2026-09-19-app-ui-consistency-design.md``): one header line
+carrying the name and the Updated stamp, the app's surface and the app's face.
+The page's own console ground, its two page-scoped Google fonts (the console's
+display face and its own JetBrains Mono) and the whole console text ladder are
+gone. Everything that encodes a READING stays byte-identical — the arrival
+glow, the quadrant fills, the wall hues, the band tones, the signed classes,
+the chips. ⚠ Two consequences are written down where they bite: the header
+stamp reads ``HEADER_VIEW``, and the width arithmetic below was all sized in a
+monospace this page no longer loads.
 """
 import json
 import logging
@@ -81,12 +92,16 @@ from pages.options import handoff as _handoff
 from pages.options import paper as _paper
 from pages.options.matrix import signal_class as _signal_class
 from pages.options.matrix import signal_summary as _signal_summary
-from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
-                                 CON_TXT_DIM, CON_TXT_FAINT, CON_TXT_MUTED,
-                                 CON_WARN, CONSOLE_CARD, CONSOLE_COLORS,
-                                 CONSOLE_DISPLAY, CONSOLE_DIVIDER,
-                                 CONSOLE_FONT_HEAD_HTML, CONSOLE_KEYFRAMES_CSS,
-                                 CONSOLE_PAGE, CONSOLE_RULE)
+# The CHROMATIC console tokens are READINGS and survive the console's surface
+# vocabulary - a band tone, an IV state, a flip side. Its neutral text ladder,
+# its ground, its card and its display face do not: a text step, a hairline and
+# a page ground are SURFACE wherever they live. ``CONSOLE_COLORS`` stays for the
+# raw hexes the chips and SVG markers take, and ``CONSOLE_KEYFRAMES_CSS`` for
+# the one element on this page that pulses (the feed-freshness dot).
+from pages.options.theme import (CARD, CON_ACCENT, CON_NEG, CON_POS, CON_WARN,
+                                 CONSOLE_COLORS, CONSOLE_KEYFRAMES_CSS, LABEL,
+                                 MUTED, THEME)
+from pages import ui_kit as kit
 # ``_TREND_SHORT`` is private only in the sense that /sentiment owns it. It is
 # the vocabulary the console's Trend pill prints, and the Desk shows the SAME
 # pill — copying the five words here is exactly the drift this page exists to
@@ -916,11 +931,11 @@ def regime_tone(reg):
     and ONLY when it committed one — a fixed green would paint "Retreating" as
     bullish. Shared by the strip tile and the summary chip."""
     if reg.get("unclear"):
-        return CON_TXT_MUTED
+        return MUTED
     direction = reg.get("direction")
     if direction:
         return CON_POS if direction > 0 else CON_NEG
-    return CON_TXT
+    return LABEL
 
 
 # ── the MARKET SUMMARY frame ─────────────────────────────────────────────────
@@ -1008,20 +1023,20 @@ def summary_facts(summary_view, composite_view, history_view, regime_view,
 
     def _chip(key, label, value, cls, tip):
         return {"key": key, "label": label, "value": value or _DASH,
-                "cls": cls if value else CON_TXT_MUTED,
+                "cls": cls if value else MUTED,
                 "tip": tip if value else ""}
 
     chips = [
         _chip("sentiment", "SENTIMENT",
-              None if total is None else f"{total:.2f}", CON_TXT, SENTIMENT_TIP),
-        _chip("trend", "TREND", trend_word, CON_TXT, trend_pill_tooltip(derived)),
+              None if total is None else f"{total:.2f}", LABEL, SENTIMENT_TIP),
+        _chip("trend", "TREND", trend_word, LABEL, trend_pill_tooltip(derived)),
         _chip("bias", "BIAS", _word_or_none(band["bias"]["value"]),
               band["bias"]["cls"], band["bias"]["tip"]),
         _chip("signal", "SIGNAL", _word_or_none(band["signal"]["value"]),
               band["signal"]["cls"], band["signal"]["tip"]),
         {"key": "regime", "label": "REGIME", "value": reg["word"],
          "cls": regime_tone(reg), "tip": reg["tip"]},
-        _chip("bullbear", "BULL / BEAR", bb_line or None, CON_TXT,
+        _chip("bullbear", "BULL / BEAR", bb_line or None, LABEL,
               bullbear_distribution(counts, live)),
     ]
 
@@ -1115,7 +1130,7 @@ _BAND_TILES = tuple((x["key"], x["label"], x["descriptor"])
 # … Strong Bear), so one shared tone would sooner or later paint a colour that
 # contradicts the word standing next to it.
 _BAND_TONE_CLASS = {"pos": CON_POS, "neg": CON_NEG, "warn": CON_WARN,
-                    "flat": CON_TXT_MUTED}
+                    "flat": MUTED}
 
 
 def signal_band_facts(derived):
@@ -1233,6 +1248,20 @@ def _hms(seconds):
 # never reach into it.
 _DASH = "—"
 _C = CONSOLE_COLORS                          # raw hexes, for chips and markers
+_P = THEME["palette"]
+
+# The APP's text ladder, brightest first. The console's six steps collapse onto
+# the app's four, because a text step is SURFACE wherever it lives - the
+# db39442 rule. What is NOT here is anything that encodes a reading: those keep
+# the chromatic console tokens (``CON_POS`` / ``CON_NEG`` / ``CON_WARN`` /
+# ``CON_ACCENT``) and the raw hexes in ``_C``.
+#
+# ``LABEL`` is a value or a headline; ``_DIM`` an eyebrow, a column label or a
+# qualifier that IS a reading; ``MUTED`` the faintest step the app has, and the
+# one every ABSENCE takes. Where the console drew a present/absent pair one
+# step apart, the pair survives as ``_DIM`` over ``MUTED``.
+_DIM = f"text-[{_P['icon']}]"
+_RULE = f"border-[{_P['card_border']}]"      # a card's hairline
 
 
 def fmt_price(v):
@@ -1468,8 +1497,12 @@ _SOURCE_CHIP = {PAPER_SOURCE: CHIP_ACCENT, CLAUDE_SOURCE: CHIP_WARN,
 # iv_state ∈ {spiking, collapsing, stable, na} (services/options_svc/matrix.py).
 # Deliberately NOT green/red: rising IV is neither good nor bad on its own — it
 # is good for a buyer and bad for a seller, and this page knows neither.
+# ``spiking`` and ``collapsing`` are the reading and keep the console's data
+# hues. ``stable`` is a reading too and takes the app's label step; ``na`` is no
+# reading at all and takes its muted one, so the present/absent pair the console
+# drew one step apart stays one step apart.
 _IV_STATE_CLASS = {"spiking": CON_WARN, "collapsing": CON_ACCENT,
-                   "stable": CON_TXT_MUTED, "na": CON_TXT_FAINT}
+                   "stable": _DIM, "na": MUTED}
 _SIDE_CLASS = {"above": CON_POS, "below": CON_NEG}
 
 
@@ -1486,11 +1519,11 @@ def source_chip_class(source):
 
 
 def iv_state_class(state):
-    return _IV_STATE_CLASS.get(state, CON_TXT_FAINT)
+    return _IV_STATE_CLASS.get(state, MUTED)
 
 
 def flip_side_class(side):
-    return _SIDE_CLASS.get(side, CON_TXT_MUTED)
+    return _SIDE_CLASS.get(side, MUTED)
 
 
 def signed_class(v):
@@ -1500,10 +1533,10 @@ def signed_class(v):
     must not read as a flat one."""
     f = _finite(v)
     if f is None:
-        return CON_TXT_MUTED
+        return MUTED
     if f > 0:
         return CON_POS
-    return CON_NEG if f < 0 else CON_TXT_MUTED
+    return CON_NEG if f < 0 else MUTED
 
 
 # ── the page ─────────────────────────────────────────────────────────────────
@@ -1543,28 +1576,45 @@ _REGION_VIEWS = {
                 "sentiment:regime", "sentiment:bullbear"),
 }
 
+# What the header's Updated stamp reads. The WIDEST-REACH view on the page —
+# it feeds the dealer panel AND the opportunity board — published round the
+# clock, and in neither ``alerts.STALE_OVERRIDES`` nor ``alerts.RTH_ONLY_VIEWS``,
+# which is what makes ``stale=True`` honest here.
+#
+# ⚠ Deliberately NOT ``options:gex_status``: the strip already prints that
+# view's age ("Live · 41s ago") beside the countdown, and a header stamp on it
+# would say the same thing twice. ⚠ Deliberately NOT ``market:summary``: it
+# publishes a handful of times a day and already carries its own provenance
+# line under MARKET SUMMARY.
+HEADER_VIEW = "options:matrix"
+
 POLL_SEC = 2.0
 CLOCK_SEC = 1.0
 
 # ── the reference design's own palette ───────────────────────────────────────
 # The supplied design carries a THREE-STEP text ladder — symbol, then spot, then
 # the flip level, each a shade softer than the last — and a green/red wall pair.
-# The `[console]` vocabulary has neither: `CON_TXT` is a single step, and the
-# console's positive/negative sit a shade off these two hues. So the reference
-# hexes are written out here as named constants rather than borrowed
-# approximations. They are constants, not interpolations, so the class set stays
-# finite exactly as the styling standard requires. Everything DATA-driven on this
-# page (a sign, a side, a state) still maps through the console tokens, which is
-# why those maps are untouched below.
+# They are constants, not interpolations, so the class set stays finite exactly
+# as the styling standard requires. Everything DATA-driven on this page (a sign,
+# a side, a state) maps through the chromatic tokens, not through these.
+#
+# ⚠ THE THREE PRICE STEPS SURVIVED THE 2026-09-19 SURFACE SWEEP, AND THE COLUMN
+# LABEL DID NOT. The test is NATURE, not file address (the ``momentum_view``
+# lesson): a neutral that belongs to another design system is surface wherever
+# it lives. These three sit INSIDE the app's own near-white range — its
+# ``title`` #eaf0fb and ``text`` #cdd8ee bracket all three, same cool navy
+# family — and they carry a reading ORDER the app's two steps cannot express,
+# so collapsing them would drop something documented with nothing to catch it.
 REF_TXT_STRONG = "text-[#eaf2f9]"      # the symbol — the brightest thing in a row
 REF_TXT = "text-[#dce7f3]"             # spot
 REF_TXT_SOFT = "text-[#cfdae8]"        # the gamma flip level
-# Column labels. The reference's own #3f5265 was drawn for 8px labels sitting
-# almost subliminally under the panel rule; at the 12px this page now sets (see
-# ``_HEAD``) that hex reads as a rendering fault rather than as restraint. This
-# is the reference's PANEL-TITLE colour, one step up the same ladder — bright
-# enough to read, still clearly below the data it labels.
-REF_HEAD_TXT = "text-[#5b7f8c]"
+# Column labels. This was #5b7f8c — a desaturated TEAL, the one member of the
+# ladder above in a different HUE from the app's, drawn for the reference's
+# near-black ground. A column label is furniture, so it takes the step every
+# other eyebrow in the app takes; that step is also BRIGHTER, which is the
+# readability the old constant's own comment was reaching for (its predecessor
+# #3f5265 was unreadable at this size, which is why it had already moved once).
+REF_HEAD_TXT = _DIM
 
 # ── the 10-second neon glow ──────────────────────────────────────────────────
 # ⚠ THE NON-OBVIOUS PART. ``_paint_positions`` calls ``pos_body.clear()`` and
@@ -2045,8 +2095,16 @@ window.__deskSpeak = function (urls, vol) {
 VOICE_UNLOCK_PHRASE = "Spoken alerts on."
 
 # The button's own caption, named so a test can find the control rather than
-# re-typing the string — a copy in a test cannot see a rename.
-VOICE_UNLOCK_LABEL = "ENABLE SPOKEN ALERTS"
+# re-typing the string — a copy in a test cannot see a rename. Sentence case,
+# verb first: the app's one button voice.
+VOICE_UNLOCK_LABEL = "Enable spoken alerts"
+
+# What the prompt around it SAYS. It names the condition the browser reported,
+# because the button alone ("Enable spoken alerts") reads as a setting the
+# reader forgot to turn on — which it is not: the setting is already on, and
+# the browser is refusing to play until the page has been clicked.
+VOICE_BLOCKED_NOTICE = ("Your browser is blocking the spoken alerts until you "
+                        "interact with this page.")
 
 # Once per PROCESS, not once per page build: the clip cache is on disk and
 # shared by every tab, so a second prewarm would re-walk a warm cache for
@@ -2182,28 +2240,27 @@ DESK_NEON_CSS = f"""
 {_NEON_STEPS_CSS}
 """
 
-# The reference design's BODY face. It is a monospace, which is the whole point
-# on a screen that is nine columns of numbers: JetBrains Mono's figures are
-# fixed-width by construction, so a price column stays a column without
-# `tabular-nums` having to rescue it, and a digit changing on the 2 s poll does
-# not shuffle the cell beside it.
+# ⚠ THE PAGE LOADED TWO FACES OF ITS OWN AND NOW LOADS NONE (2026-09-19). The
+# body face was JetBrains Mono — a monospace, argued for on a screen that is
+# nine columns of numbers — and the panel titles wore the console's Rajdhani.
+# Both were page-scoped Google-font links, which is exactly what the
+# consistency standard ends: the app has ONE face, and `[typography].numeric`
+# is where a tabular figure set belongs if the columns ever need one. Every
+# numeric cell here already carries `tabular-nums` of its own.
 #
-# Loaded and applied HERE, page-scoped, rather than through `config/theme.toml`:
-# `[console].font_url` is shared with /sentiment and the `[typography]` block is
-# app-wide, so moving either would repaint pages nobody asked to change. The
-# panel TITLES keep `CONSOLE_DISPLAY` (Rajdhani) — a display face over a data
-# face is the reference's own pairing, and a child's own font class beats the
-# wrapper's inherited one.
-DESK_FONT = "font-['JetBrains_Mono',ui-monospace,monospace]"
-DESK_FONT_HEAD_HTML = (
-    '<link rel="preconnect" href="https://fonts.googleapis.com">'
-    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-    '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?'
-    'family=JetBrains+Mono:wght@400;500;600&display=swap">'
-)
+# ⚠ Two width guards in ``test_desk.py`` were CALIBRATED on the monospace's
+# 0.6em advance — the verdict-tile fit and the column-label fit. Both still
+# pass, and both are now estimates against a proportional face rather than
+# measurements; they are flagged in their own docstrings and want a browser
+# re-measurement.
 
-_ROW_RULE = "border-[#0d151e]"         # the rule under a data row
-_HEAD_RULE = "border-[#121b26]"        # the (brighter) rule under the labels
+# ⚠ These were #0d151e and #121b26 — hairlines drawn for the console's
+# near-black ground (#05070b) and DARKER than the app's navy card (#101a30), so
+# on the new ground they would read as a smudge rather than as a rule. They take
+# the app's own two border steps, keeping the head rule's one-step-brighter
+# relationship — the same move the RRG crosshair made.
+_ROW_RULE = _RULE                              # the rule under a data row
+_HEAD_RULE = f"border-[{_P['btn_border']}]"    # the brighter rule under the labels
 
 # Column tracks, shared by each panel's head row and its data rows. They must be
 # the SAME string in both places — that identity is the only thing keeping the
@@ -2230,6 +2287,16 @@ _HEAD_RULE = "border-[#121b26]"        # the (brighter) rule under the labels
 # as well. See the note above `PANEL_SCROLL_CSS`.)
 _GAP = "gap-x-[8px] gap-y-0"
 
+# ⚠ **EVERY TRACK FLOOR BELOW WAS SIZED IN JETBRAINS MONO, WHICH THIS PAGE NO
+# LONGER LOADS** (see the note where that font was removed). A monospace's
+# 0.6em advance is what "46 characters is 276px at 10px" means, and the app's
+# face is proportional — so each of those arithmetic paragraphs is now an
+# ESTIMATE. None was changed: a proportional face is NARROWER than 0.6em/char
+# for mixed-case prose and WIDER for wide-tracked caps, so guessing in either
+# direction would be worse than saying so. The all-caps COLUMN LABELS are the
+# side at risk, and ``test_every_column_label_fits_the_track_it_stands_over``
+# carries the same flag. Re-measure in a browser before trusting a floor.
+#
 # ── the width budget every track floor below is spent against ────────────────
 # The page is read at a 1920px window, and the four panels are a FIXED 2x2 (see
 # the note in ``render``), so each panel gets exactly half of what is left after
@@ -2238,10 +2305,19 @@ _GAP = "gap-x-[8px] gap-y-0"
 # track below its ``minmax()`` floor, so a panel whose floors oversubscribe this
 # does not reflow, it CLIPS.
 #
-# ``DESK_CHROME_PX`` is the MEASURED non-panel width, and it decomposes exactly:
+# ``DESK_CHROME_PX`` is the MEASURED non-panel width, and it decomposed exactly:
 # 96px of padding chain (``q-page``'s content, the page's ``p-4`` and the panel
 # wrap's ``px-4``, 16px a side each) plus the icon rail's laid-out 68px. It is
 # written down rather than computed because there is nothing to compute it from.
+#
+# ⚠ **THE PAGE'S OWN ``p-4`` WENT WITH THE 2026-09-19 KIT MIGRATION** —
+# ``kit.page()`` carries no padding — so one 32px level of that chain no longer
+# exists and 164 now OVER-counts by that much. It is left standing rather than
+# adjusted on arithmetic: the figure is measured, not summed, and 132 has never
+# been put in front of a browser. The error is in the SAFE direction (the page
+# claims to need more room than it does, so it cannot claim to fit where it
+# does not), and every figure derived from it below inherits the same margin.
+# Re-measure before quoting any of them as tight.
 #
 # ⚠ **It describes the PRIVATE app only.** The public live screens have no nav
 # rail (``live_main`` registers no drawer), so their chrome is the 96px of
@@ -2520,12 +2596,11 @@ _HEAD = f"text-[10px] tracking-[.2em] {REF_HEAD_TXT}"
 # nowhere to go and must not be dressed as links (see ``_position_row``).
 _ROW_STATIC = f"items-center px-1 py-[11px] border-b {_ROW_RULE}"
 _ROW = f"{_ROW_STATIC} cursor-pointer"
-_VALUE = f"text-[13px] tabular-nums {CON_TXT}"
+_VALUE = f"text-[13px] tabular-nums {LABEL}"
 # The dealer panel's three price columns, one shade apart (see the ladder above).
 _V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
 _V_FLIP = f"text-[14px] tabular-nums {REF_TXT_SOFT}"
 _SUB = "text-[10px] tabular-nums"          # a cell's second line
-_PLACEHOLDER = f"text-[12px] {CON_TXT_MUTED} py-4"
 # A panel-level SENTENCE that shares the body with the grids — there are
 # exactly two (the dealer's stale-walls warning and the Positions summary), and
 # both state a fact about the whole panel rather than about a column. The body
@@ -2534,9 +2609,9 @@ _PLACEHOLDER = f"text-[12px] {CON_TXT_MUTED} py-4"
 # scrolled, so they pin instead. It costs nothing at rest: a sticky element in
 # an unscrolled container sits exactly where it laid out.
 #
-# ⚠ Deliberately NOT on ``_PLACEHOLDER``. A placeholder REPLACES the rows, so
-# that panel has no grid, no ``min-width`` and nothing to scroll — pinning it
-# would be a class that can never do anything, which reads as though it must.
+# ⚠ Deliberately NOT on ``kit.EMPTY``. A placeholder REPLACES the rows, so that
+# panel has no grid, no ``min-width`` and nothing to scroll — pinning it would
+# be a class that can never do anything, which reads as though it must.
 _PANEL_NOTE = "sticky left-0"
 
 # The service is cold vs the service is fine and has nothing to say. Rendering
@@ -2643,7 +2718,7 @@ _BB_QUAD = "text-[10px] leading-none tracking-[.1em] opacity-80 truncate"
 # red would be two colour languages on one 124px box — on two different clocks
 # (last night's cascade vs this morning's quote), which can legitimately
 # disagree and would then read as a rendering fault.
-_BB_DAY = f"text-[12px] leading-none tabular-nums shrink-0 {CON_TXT_MUTED}"
+_BB_DAY = f"text-[12px] leading-none tabular-nums shrink-0 {MUTED}"
 
 # The breadth groove. Two static classes: a move confirmed by too few of a
 # sector's constituents takes the negative hue, which is the whole qualifier the
@@ -2651,13 +2726,15 @@ _BB_DAY = f"text-[12px] leading-none tabular-nums shrink-0 {CON_TXT_MUTED}"
 # page's palette, and a strip that painted a thin move like a broad one would be
 # the softer of the two screens on exactly the point they share.
 _BB_FILL = {True: f"bg-[{_C['negative']}]", False: f"bg-[{_C['positive']}]"}
-_BB_TRACK = f"h-[3px] w-full rounded-full overflow-hidden bg-[{_C['line']}]/[0.35]"
+# The TRACK is furniture — the groove the fill moves in — and takes the app's
+# card border; only the FILL above encodes anything.
+_BB_TRACK = f"h-[3px] w-full rounded-full overflow-hidden bg-[{_P['card_border']}]"
 
 # A reactive text colour is repainted in place, so the previous one has to be
 # removed explicitly or the classes stack and the first colour painted wins
 # forever.
-_ALL_STATE_TEXT = " ".join(sorted({CON_POS, CON_NEG, CON_WARN, CON_TXT,
-                                   CON_TXT_MUTED}))
+_ALL_STATE_TEXT = " ".join(sorted({CON_POS, CON_NEG, CON_WARN, LABEL,
+                                   MUTED}))
 _ALL_DOT_BG = f"bg-[{_C['warning']}] bg-[{_C['positive']}] con-pulse"
 
 
@@ -2689,22 +2766,22 @@ _ALL_DOT_BG = f"bg-[{_C['warning']}] bg-[{_C['positive']}] con-pulse"
 # app-wide `[typography]` rule, so without it each of these lines would carry
 # ~50% of inherited leading and the strip would overshoot its height budget by
 # more than the type scale saved.
-_CARD_TITLE = (f"{CONSOLE_DISPLAY} text-[12px] leading-none font-bold "
-               f"tracking-[.16em] {CON_TXT}")
-_CARD_META = f"text-[8px] leading-none tracking-[.18em] {CON_TXT_DIM}"
+_CARD_TITLE = (f"text-[12px] leading-none font-bold "
+               f"tracking-[.16em] {LABEL}")
+_CARD_META = f"text-[8px] leading-none tracking-[.18em] {_DIM}"
 _CARD_HERO = "text-[46px] font-semibold leading-[.85] tracking-[-.02em]"
-_CARD_KICKER = f"text-[8px] leading-none tracking-[.24em] {CON_TXT_MUTED}"
+_CARD_KICKER = f"text-[8px] leading-none tracking-[.24em] {MUTED}"
 _CARD_DELTA = "text-[9px] leading-none whitespace-nowrap"
 _METER_LABEL = (f"w-[34px] shrink-0 text-[8px] leading-none tracking-[.18em] "
-                f"{CON_TXT_MUTED}")
+                f"{MUTED}")
 _METER_VALUE = "w-[24px] shrink-0 text-right text-[11px] leading-none font-medium"
-_RULER_MARK = f"text-[8px] leading-none {CON_TXT_FAINT}"
+_RULER_MARK = f"text-[8px] leading-none {MUTED}"
 
 # The strip's own vocabulary. Its eyebrows sit at 10px rather than the 13px the
 # panels' type ladder gives: a strip tile is one reading, so its label has no
 # column of numbers to compete with and does not need the panels' weight.
-_STRIP_EYEBROW = f"text-[10px] leading-none tracking-[.22em] {CON_TXT_DIM}"
-_STRIP_VALUE = f"text-[28px] leading-none tabular-nums {CON_TXT}"
+_STRIP_EYEBROW = f"text-[10px] leading-none tracking-[.22em] {_DIM}"
+_STRIP_VALUE = f"text-[28px] leading-none tabular-nums {LABEL}"
 # The THREE VERDICT TILES — BIAS, SIGNAL and MARKET REGIME — share ONE type
 # size and ONE width (by request, 2026-08-24). They are peers: a reader should
 # not have to work out which of them matters most from how big it is. One
@@ -2726,9 +2803,9 @@ _STRIP_WORD = "text-[24px] leading-none font-semibold whitespace-nowrap"
 _STRIP_VERDICT_W = "w-[180px]"
 # One footer size across the three as well, so their three lines sit on three
 # shared baselines. 11px carries "STRENGTH & MOMENTUM" in 143px of a 160px box.
-_STRIP_FOOT = f"text-[11px] leading-none mt-auto {CON_TXT_MUTED}"
+_STRIP_FOOT = f"text-[11px] leading-none mt-auto {MUTED}"
 _BAND_FOOT = f"{_STRIP_FOOT} tracking-[.08em] whitespace-nowrap"
-# Each strip tile is its own console card. The strip used to be ONE card holding
+# Each strip tile is its own card. The strip used to be ONE card holding
 # everything, which meant a card inside a card once the score cards arrived —
 # and, more practically, its own padding on top of theirs, which is height this
 # strip does not have.
@@ -2741,7 +2818,14 @@ _BAND_FOOT = f"{_STRIP_FOOT} tracking-[.08em] whitespace-nowrap"
 # ROW says `items-stretch`; each score card then fills its own holder with
 # `flex-1`, which works because a holder in a COLUMN flex container has a
 # definite main axis. `mt-auto` on a tile's last row depends on this too.
-_TILE = f"{CONSOLE_CARD} rounded-none px-[10px] py-[9px] gap-[6px]"
+# ⚠ NOT ``theme.CARD``. That token carries ``px-4 py-3.5 rounded-[12px]`` and
+# a strip tile needs ``px-[10px] py-[9px] rounded-none`` — two utilities for ONE
+# property at equal specificity, whose winner is decided by stylesheet order
+# rather than by anything written here (the ``.desk-neon`` tie, one floor down).
+# So the tile takes the app card's GROUND and BORDER directly, and keeps its own
+# geometry unopposed. The panel card below has no such conflict and takes CARD.
+_TILE = (f"bg-[{_P['card_bg']}] border border-[{_P['card_border']}] "
+         f"rounded-none px-[10px] py-[9px] gap-[6px]")
 
 
 def _compact_pill(hexv):
@@ -2786,14 +2870,14 @@ def _mount_ruler():
     with ui.row().classes("items-center gap-2 w-full flex-nowrap"):
         ui.element("div").classes("w-[34px] shrink-0")
         with ui.row().classes(
-                f"flex-1 justify-between border-t {CONSOLE_DIVIDER} pt-[3px]"):
+                f"flex-1 justify-between border-t {_RULE} pt-[3px]"):
             for mark in _K.RULER_MARKS:
                 ui.label(str(mark)).classes(_RULER_MARK)
         ui.element("div").classes("w-[24px] shrink-0")
 
 
 def _compact_card(title, arcs, pill_text, delta, pill_tip=""):
-    """One compact score card: head · hero · three meters, in a console frame.
+    """One compact score card: head · hero · three meters, in an app card.
 
     The hero and the meters sit SIDE BY SIDE, where the console stacks them.
     That is the whole height saving: stacked, the two blocks are ~39px and ~54px
@@ -2856,18 +2940,26 @@ def _compact_card(title, arcs, pill_text, delta, pill_tip=""):
 # anywhere else on the panel, so it stays — still interpolated, never written
 # down.
 PANEL_HEADS = {
-    "dealer": ("DEALER POSITIONING",
+    "dealer": ("Dealer positioning",
                "Above the flip, dealers damp moves; below it they feed them."),
-    "board": ("OPPORTUNITY BOARD",
+    "board": ("Opportunity board",
               f"The {BOARD_ROWS_N} hottest names right now — where to start "
               f"looking."),
+    # ⚠ "LIVE FLOW ALERTS" lost its first word when the titles were
+    # sentence-cased (2026-09-19), and the test that caught it was right to:
+    # ``test_render_with_nothing_published_prints_no_reading_it_did_not_read``
+    # forbids a live-feed CLAIM on a page whose views are cold, and this panel
+    # goes cold like every other. The use-line carries the recency honestly.
+    # The remaining words are the app's own name for this feed, as the rail and
+    # the Symbol Dossier's band both spell it.
+    #
     # Which side traded, never who initiated: Schwab publishes no
     # time-and-sales tape to this app, so nobody here can honestly say. The row
     # vocabulary has always been careful about this; now the panel says so.
-    "flow": ("LIVE FLOW ALERTS",
+    "flow": ("Flow alerts",
              f"The {FLOW_ROWS_N} newest unusual trades. Which side traded, not "
              f"who initiated."),
-    "positions": ("POSITIONS",
+    "positions": ("Positions",
                   "What you and Claude are holding, and what needs a decision."),
 }
 
@@ -2908,7 +3000,7 @@ POS_HEADS = ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
 
 
 def _panel(title, use_line=""):
-    """A console card with a titled head; returns the BODY container.
+    """An app card with a titled head; returns the BODY container.
 
     The head is built ONCE and the body is what each painter clears, so a
     repaint can neither duplicate the title nor strand a handle to it.
@@ -2925,19 +3017,19 @@ def _panel(title, use_line=""):
     the narrowest panel (Flow's floor is 508px); it also wears the small-caps
     ``.2em`` tracking, which is unreadable on prose.
     """
-    with ui.column().classes(f"{CONSOLE_CARD} w-full px-4 pt-4 pb-4 gap-2"):
-        with ui.column().classes(
-                f"w-full gap-1 border-b {CONSOLE_RULE} pb-2"):
+    # ``CARD``'s own px-4 py-3.5 replaces the page's px-4 pt-4 pb-4, so the
+    # HORIZONTAL padding — the half ``panel_scroll.PANEL_PAD_PX`` is spent
+    # against — is unchanged at 16px a side.
+    with ui.column().classes(f"{CARD} w-full gap-2"):
+        with ui.column().classes(f"w-full gap-1 border-b {_RULE} pb-2"):
             with ui.row().classes(
                     "items-baseline justify-between w-full gap-4"):
-                ui.label(title).classes(
-                    f"{CONSOLE_DISPLAY} text-[19px] font-bold "
-                    f"tracking-[.16em] {CON_TXT}")
+                kit.section_title(title)
                 head_slot = ui.row().classes(
                     "items-center gap-2 whitespace-nowrap shrink-0")
             if use_line:
                 ui.label(use_line).classes(
-                    f"text-[11px] leading-snug {CON_TXT_DIM}")
+                    f"text-[11px] leading-snug {MUTED}")
         # ⚠ The scroll container is the BODY, never the card above it. A panel
         # too narrow for its floors has to scroll SOMETHING, and everything
         # outside this element is what the reader would otherwise lose: put it
@@ -2988,15 +3080,12 @@ def render():
     ResizeObserver, and loses in-place updates the moment the stock module is
     loaded. Positioned divs and one shared SVG ring builder carry the graphics.
     """
-    if CONSOLE_FONT_HEAD_HTML:
-        ui.add_head_html(CONSOLE_FONT_HEAD_HTML)
-    # The reference's BODY face, loaded alongside the console's display face
-    # rather than instead of it — the panel titles still want Rajdhani.
-    ui.add_head_html(DESK_FONT_HEAD_HTML)
     # TWO ``ui.add_css`` calls, deliberately. The Tailwind-first standard allows
     # "a single documented block PER THEME", and these are two vocabularies, not
-    # one split in half: ``CONSOLE_KEYFRAMES_CSS`` is the shared console
-    # language (``/sentiment`` injects the same constant), while
+    # one split in half: ``CONSOLE_KEYFRAMES_CSS`` carries the ``pulseDot``
+    # keyframes, worn by the ONE pulsing element on this page (the
+    # feed-freshness dot beside the countdown — the reason the 2026-09-19 sweep
+    # kept this injection rather than deleting it with the console's surface);
     # ``DESK_NEON_CSS`` is this page's own arrival glow. Both qualify for the
     # hatch for the same reason — a keyframes animation cannot be a utility
     # class — and folding them into one call would only hide which is which.
@@ -3018,14 +3107,13 @@ def render():
     state = {"versions": {}, "data": {}, "glow_now": 0.0, "wall_now": None,
              **arrival_state()}
 
-    # ``DESK_FONT`` where the console pages carry ``CONSOLE_DISPLAY``: this page
-    # is nine columns of numbers, so the body face is the monospace and the
-    # display face is kept for the panel titles (``_panel``), which set it on
-    # themselves and so beat this inherited one. Both must NOT sit on this one
-    # element — two ``font-[…]`` utilities of equal specificity would leave the
-    # winner up to stylesheet order.
-    with ui.column().classes(
-            f"{CONSOLE_PAGE} {DESK_FONT} w-full gap-4 p-4"):
+    with kit.page():
+        # The page's ONE header line: the name, and the Updated stamp for
+        # ``HEADER_VIEW`` (see that constant for why it is the matrix and not
+        # the freshness view the strip already prints). No page ACTIONS: the
+        # Desk commands nothing — it reads eleven views on one batched poll.
+        kit.header("Desk", view=HEADER_VIEW, stale=True)
+
         # ── the autoplay unlock ──────────────────────────────────────────────
         # Browsers refuse audio until the document has been interacted with, and
         # the refusal is COMPLETELY SILENT — ``play()`` rejects and nothing
@@ -3049,13 +3137,20 @@ def render():
         # revealed button. Hidden is not absent. The handler refuses underneath
         # as well; a control that cannot work must not be drawn, and the thing
         # it cannot do must also refuse.
-        unlock_btn = None
+        #
+        # A NOTICE rather than a header action (2026-09-19): it answers ONE
+        # condition the browser reported, where a header action would imply a
+        # control that is always available. It is the NOTICE that hides and
+        # reveals, never the button alone — half a prompt is worse than none —
+        # and it drops ``w-full`` so it hugs its own words above the strip.
+        unlock_btn = unlock_note = None
         if app_settings.load().get("voice_enabled"):
-            unlock_btn = ui.button(VOICE_UNLOCK_LABEL, icon="volume_up",
-                                   color=None).props("no-caps dense").classes(
-                f"self-start text-[11px] tracking-[.14em] px-3 "
-                f"bg-[{_C['line']}]/[0.18] {CON_ACCENT}")
-            unlock_btn.set_visibility(False)
+            unlock_note = kit.notice(VOICE_BLOCKED_NOTICE, icon="volume_off")
+            unlock_note.classes(remove="w-full", add="self-start")
+            with unlock_note:
+                unlock_btn = kit.button(VOICE_UNLOCK_LABEL, kind="secondary",
+                                        icon="volume_up")
+            unlock_note.set_visibility(False)
 
         # ── top strip ────────────────────────────────────────────────────────
         # Deliberately carries NO QUOTE AT ALL. The Dealer Positioning panel
@@ -3098,7 +3193,7 @@ def render():
                         "w-[8px] h-[8px] rounded-full shrink-0")
                     fresh_lbl = ui.label(_DASH).classes(
                         f"text-[11px] leading-none tracking-[.1em] "
-                        f"{CON_TXT_MUTED}")
+                        f"{MUTED}")
             # Both score cards are REBUILT on repaint rather than updated cell
             # by cell — the console's own choice, and for the same reason: the
             # card carries no interactive state, and threading a dozen element
@@ -3127,7 +3222,7 @@ def render():
                     f"{_TILE} {_STRIP_VERDICT_W} shrink-0"):
                 ui.label("MARKET REGIME").classes(_STRIP_EYEBROW)
                 regime_lbl = ui.label(_DASH).classes(
-                    f"{_STRIP_WORD} {CON_TXT}")
+                    f"{_STRIP_WORD} {LABEL}")
                 regime_sub = ui.label("").classes(_STRIP_FOOT)
                 # The hover the regime word currently carries — "" at build.
                 regime_tip = {"text": ""}
@@ -3145,12 +3240,12 @@ def render():
                 # The count line, not a verdict — and it is the MAP's sentence,
                 # so the two screens cannot report different counts.
                 bb_headline = ui.label("").classes(
-                    f"text-[13px] leading-none {CON_TXT_MUTED}")
+                    f"text-[13px] leading-none {MUTED}")
                 # What it was sorted by. Dimmer than the count, because it
                 # qualifies that sentence rather than adding a second reading —
                 # and empty until there is something sorted to describe.
                 bb_caption = ui.label("").classes(
-                    f"text-[11px] leading-none {CON_TXT_DIM}")
+                    f"text-[11px] leading-none {MUTED}")
             bb_box = ui.row().classes("w-full items-stretch gap-2 flex-wrap")
 
         # The four panels sit in a 2x2 grid, reading left-to-right then down in
@@ -3247,9 +3342,9 @@ def render():
             with ui.row().classes("items-baseline w-full gap-4"):
                 ui.label("MARKET SUMMARY").classes(_STRIP_EYEBROW)
                 sum_asof = ui.label("").classes(
-                    f"text-[11px] leading-none {CON_TXT_DIM}")
+                    f"text-[11px] leading-none {MUTED}")
             sum_empty = ui.label(SUMMARY_EMPTY).classes(
-                f"text-[15px] leading-[1.5] {CON_TXT_MUTED}")
+                f"text-[15px] leading-[1.5] {MUTED}")
             # A fixed set of point rows, filled in place — never rebuilt, so a
             # repaint of the chips beside them costs no DOM churn.
             sum_points = []
@@ -3257,13 +3352,13 @@ def render():
                 for _ in range(SUMMARY_MAX_POINTS):
                     with ui.row().classes(
                             "items-baseline w-full gap-2 no-wrap") as _row:
-                        ui.label("•").classes(f"text-[15px] {CON_TXT_DIM}")
+                        ui.label("•").classes(f"text-[15px] {MUTED}")
                         _pt = ui.label("").classes(
-                            f"text-[15px] leading-[1.5] {CON_TXT}")
+                            f"text-[15px] leading-[1.5] {LABEL}")
                     _row.set_visibility(False)
                     sum_points.append((_row, _pt))
             sum_link = ui.link(SUMMARY_LINK, "#", new_tab=True).classes(
-                f"text-[12px] underline {CON_TXT_MUTED}")
+                f"text-[12px] underline {MUTED}")
             sum_link.set_visibility(False)
             sum_chips = []
             with ui.row().classes("items-baseline w-full gap-x-6 gap-y-1 flex-wrap"):
@@ -3271,7 +3366,7 @@ def render():
                     with ui.row().classes("items-baseline gap-2"):
                         ui.label(_label).classes(_STRIP_EYEBROW)
                         sum_chips.append(ui.label(_DASH).classes(
-                            f"text-[14px] {CON_TXT_MUTED}"))
+                            f"text-[14px] {MUTED}"))
         # The hover each chip currently carries — "" at build (cold chips).
         sum_tips = ["" for _ in sum_chips]
 
@@ -3404,7 +3499,7 @@ def render():
         bb_box.clear()
         with bb_box:
             if not chips:
-                ui.label(WAITING_BULLBEAR).classes(_PLACEHOLDER)
+                kit.empty(WAITING_BULLBEAR)
                 return
             for chip in chips:
                 _bullbear_chip(chip)
@@ -3461,11 +3556,11 @@ def render():
         fresh = freshness_facts(_view("options:gex_status"))
         with dealer_body:
             if matrix is None:
-                ui.label(WAITING_OPTIONS).classes(_PLACEHOLDER)
+                kit.empty(WAITING_OPTIONS)
                 return
             rows = dealer_rows(matrix, fresh["stale"])
             if not rows:
-                ui.label(EMPTY_DEALER).classes(_PLACEHOLDER)
+                kit.empty(EMPTY_DEALER)
                 return
             if fresh["stale"]:
                 # Say WHY the walls vanished. A silently wall-less row reads as
@@ -3507,7 +3602,7 @@ def render():
                 # No walls (or no placeable spot) is a missing READING, so it
                 # gets the same em-dash every other cell uses. An empty framed
                 # box would read as a widget that failed to draw.
-                _cell(_DASH, CON_TXT_MUTED)
+                _cell(_DASH, MUTED)
             else:
                 _structure_map(row["structure"])
             # Each wall in the same hue as its marker on the map, so the number
@@ -3526,7 +3621,7 @@ def render():
                 # broken widget rather than as an absent reading. Hence the
                 # dash-and-no-chip branch as well.
                 if row["regime_word"] == _NO_REGIME:
-                    ui.label(_NO_REGIME).classes(f"{_SUB} {CON_TXT_MUTED}")
+                    ui.label(_NO_REGIME).classes(f"{_SUB} {MUTED}")
                 else:
                     ui.label(row["regime_word"]).classes(
                         f"self-start {regime_chip_class(row['regime_word'])}")
@@ -3556,11 +3651,11 @@ def render():
         _paint_signal_counts(matrix)
         with board_body:
             if matrix is None:
-                ui.label(WAITING_OPTIONS).classes(_PLACEHOLDER)
+                kit.empty(WAITING_OPTIONS)
                 return
             rows = opportunity_rows(matrix)
             if not rows:
-                ui.label(EMPTY_BOARD).classes(_PLACEHOLDER)
+                kit.empty(EMPTY_BOARD)
                 return
             # Eight labels for eight tracks, ONE line per symbol. WHY and SETUP
             # were the two qualifiers riding under the symbol and the signal;
@@ -3603,7 +3698,7 @@ def render():
             # not the expected behaviour.
             ui.label(row["rationale"] or _DASH).classes(
                 f"{_SUB} min-w-0 truncate "
-                + (CON_TXT_MUTED if row["rationale"] else CON_TXT_FAINT))
+                + (_DIM if row["rationale"] else MUTED))
             # `items-baseline` so the 10px state word sits on the 13px value's
             # baseline rather than floating mid-cap.
             with ui.row().classes(
@@ -3631,11 +3726,11 @@ def render():
         view = _view("options:flow_alerts")
         with flow_body:
             if view is None:
-                ui.label(WAITING_OPTIONS).classes(_PLACEHOLDER)
+                kit.empty(WAITING_OPTIONS)
                 return
             rows = flow_rows(view)
             if not rows:
-                ui.label(EMPTY_FLOW).classes(_PLACEHOLDER)
+                kit.empty(EMPTY_FLOW)
                 return
             # Four labels for four tracks, ONE line per alert. Every other panel
             # here stacks a qualifier under its value because it is short of
@@ -3668,7 +3763,7 @@ def render():
                            state["glow_now"]))
         with el:
             ui.label(row["time"] or _DASH).classes(
-                f"text-[11px] tabular-nums {CON_TXT_MUTED}")
+                f"text-[11px] tabular-nums {MUTED}")
             # TIME alone does not name an alert — two can share a minute — so
             # the pin runs through the symbol (see ``_PIN_DEPTHS``).
             ui.label(row["symbol"]).classes(
@@ -3678,7 +3773,7 @@ def render():
             # minimum is its content, so without it a long detail line widens
             # the track past the panel instead of ellipsing inside it.
             ui.label(row["detail"] or row["text"] or _DASH).classes(
-                f"text-[11px] min-w-0 truncate {CON_TXT_MUTED}")
+                f"text-[11px] min-w-0 truncate {MUTED}")
             # ``_tone_class`` is stamped by the Flow Alerts page from its own
             # finite (type, side) map — borrowed here rather than re-derived,
             # and shared by the kind and the side it qualifies.
@@ -3694,7 +3789,7 @@ def render():
         with pos_body:
             if paper_view is None and driver_view is None \
                     and captured_view is None:
-                ui.label(WAITING_OPTIONS).classes(_PLACEHOLDER)
+                kit.empty(WAITING_OPTIONS)
                 return
             rows = position_rows(paper_view, driver_view, captured_view)
             # ⚠ The summary reads the FULL book; only the DRAW is capped. Moving
@@ -3704,9 +3799,9 @@ def render():
             shown = rows[:POSITION_ROWS_N]
             ui.label(summary_line(summary, len(shown))).classes(
                 f"text-[11px] tracking-[.16em] pb-2 {_PANEL_NOTE} "
-                + (CON_WARN if summary["at_risk"] else CON_TXT_MUTED))
+                + (CON_WARN if summary["at_risk"] else MUTED))
             if not rows:
-                ui.label(EMPTY_POSITIONS).classes(_PLACEHOLDER)
+                kit.empty(EMPTY_POSITIONS)
                 return
             # Ten labels for ten tracks, ONE line per row — the same move the
             # board and the flow feed just made, and here it is what pays for
@@ -3746,7 +3841,7 @@ def render():
                 f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
                 f"{_pin_cell_class(POS_GRID, 1)}")
             ui.label(strategy_label(row["strategy"])).classes(
-                f"text-[11px] min-w-0 truncate {CON_TXT_MUTED}")
+                f"text-[11px] min-w-0 truncate {MUTED}")
             _cell(expiry_text(row))
             # Both are per-share option prices (0.21 / 0.39), not position
             # dollars — the same numbers the paper ledger quotes.
@@ -3764,7 +3859,7 @@ def render():
             # box in the FLAG column reads as a verdict whatever is inside it.
             if row["flag"] == UNTAGGED_FLAG:
                 ui.label(UNTAGGED_FLAG).classes(
-                    f"self-start text-[11px] {CON_TXT_FAINT}")
+                    f"self-start text-[11px] {MUTED}")
             else:
                 ui.label(row["flag"]).classes(
                     f"self-start {flag_chip_class(row['flag'])}")
@@ -3885,10 +3980,10 @@ def render():
 
         ``ui.on`` is registered unconditionally, so this fires on any client
         that emits the event — including one a stranger types into a console.
-        With voice off there is no button, and nothing to reveal."""
-        if unlock_btn is None:
+        With voice off there is no prompt, and nothing to reveal."""
+        if unlock_note is None:
             return
-        unlock_btn.set_visibility(True)
+        unlock_note.set_visibility(True)
 
     @guard_async
     async def _unlock_voice(_e=None):
@@ -3909,8 +4004,8 @@ def render():
         settings = app_settings.load()
         if not settings.get("voice_enabled"):
             return
-        if unlock_btn is not None:
-            unlock_btn.set_visibility(False)
+        if unlock_note is not None:
+            unlock_note.set_visibility(False)
         url = await run.io_bound(_voice.ensure, VOICE_UNLOCK_PHRASE,
                                  settings.get("voice_name"))
         if url:

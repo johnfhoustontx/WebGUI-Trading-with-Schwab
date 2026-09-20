@@ -19,7 +19,12 @@ KIT = "ui_kit.py"
 
 ALLOWED = {
     "config_editor.py": {"button": 12, "dialog": 2, "notify": 10},
-    "desk.py": {"add_head_html": 3, "button": 1},
+    # The audio player and its queue, and it stays: ``DESK_VOICE_JS`` is a
+    # <script>, not a font - the same shape as options/detail.py's toggle. The
+    # two FONT links (the console's display face and the page's own JetBrains
+    # Mono) went with the kit migration, and the unlock button went through
+    # kit.notice + kit.button with them.
+    "desk.py": {"add_head_html": 1},
     "driver.py": {"button": 8, "dialog": 2, "notify": 1, "table": 5},
     "eod.py": {"button": 3, "notify": 2},
     "manuals.py": {"button": 1},

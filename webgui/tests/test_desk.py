@@ -1482,7 +1482,7 @@ def test_signal_band_facts_print_a_dash_for_a_cold_cache_never_neutral():
     for cold in (None, {}, "nonsense", {"bias": None, "signal": ""}):
         facts = d.signal_band_facts(cold)
         assert [f["value"] for f in facts] == [d._DASH, d._DASH]
-        assert all(f["cls"] == d.CON_TXT_MUTED for f in facts)
+        assert all(f["cls"] == d.MUTED for f in facts)
 
 
 def test_signal_band_facts_survive_a_word_the_producer_has_not_shipped_yet():
@@ -1531,11 +1531,11 @@ def test_regime_display_carries_the_regime_words_hover():
 
 
 def test_regime_tone_follows_the_committed_direction_only():
-    assert d.regime_tone({"unclear": True, "direction": 1}) == d.CON_TXT_MUTED
-    assert d.regime_tone({"unclear": False, "direction": 0}) == d.CON_TXT
+    assert d.regime_tone({"unclear": True, "direction": 1}) == d.MUTED
+    assert d.regime_tone({"unclear": False, "direction": 0}) == d.LABEL
     assert d.regime_tone({"unclear": False, "direction": 1}) == d.CON_POS
     assert d.regime_tone({"unclear": False, "direction": -1}) == d.CON_NEG
-    assert d.regime_tone({"unclear": True, "direction": -1}) == d.CON_TXT_MUTED
+    assert d.regime_tone({"unclear": True, "direction": -1}) == d.MUTED
 
 
 def test_render_hangs_the_regime_words_hover_on_the_strip(monkeypatch):
@@ -1681,7 +1681,7 @@ def test_cold_readings_dash_and_carry_no_hover(monkeypatch):
     for key in ("sentiment", "trend", "bias", "signal", "bullbear"):
         assert by[key]["value"] == d._DASH, key
         assert by[key]["tip"] == "", key
-        assert by[key]["cls"] == d.CON_TXT_MUTED, key
+        assert by[key]["cls"] == d.MUTED, key
     assert by["regime"]["value"] == "Unclear"      # the console's own cold word
 
 
@@ -1754,9 +1754,15 @@ _REGIME_WORDS = ("Balanced", "Whipsaw", "Stressed", "Trending", "Breakout",
                  "Rallying", "Firming", "Retreating", "Softening",
                  "Breakdown", "Unclear")
 
-# JetBrains Mono — the Desk's body face — advances 0.6em. Browser-measured on
-# the running page: "Strong Bear" (11 chars) is 126px at 19px, 159 at 24, 185
-# at 28, i.e. 0.6 x size x len to the pixel.
+# ⚠ MEASURED FOR A FACE THIS PAGE NO LONGER LOADS, AND DELIBERATELY UNCHANGED.
+# Until 2026-09-19 the Desk carried its own JetBrains Mono, which advances
+# 0.6em: browser-measured on the running page, "Strong Bear" (11 chars) was
+# 126px at 19px, 159 at 24 and 185 at 28, i.e. 0.6 x size x len to the pixel.
+# The kit migration dropped that page-scoped font, so the page stands on the
+# app's PROPORTIONAL face and this is now an ESTIMATE rather than a
+# measurement. It was kept rather than adjusted: lowering it would weaken the
+# guard on a number nobody has measured, and raising it would fail on one. It
+# wants a browser re-measurement.
 _MONO_ADVANCE = 0.6
 _TILE_PAD_PX = 20          # ``_TILE``'s px-[10px], both sides
 
@@ -2602,8 +2608,13 @@ def test_the_minimum_supported_window_above_the_grid_is_the_real_one():
 def test_every_column_label_fits_the_track_it_stands_over():
     """Three floors here are LABEL-bound rather than value-bound: a label on
     .2em tracking does not shrink with the data under it, and a clipped label
-    turns a column of numbers into an unlabelled column of numbers. JetBrains
-    Mono advances 0.6em, and CSS adds the .2em after every character."""
+    turns a column of numbers into an unlabelled column of numbers.
+
+    ⚠ The 0.8 is 0.6em of advance plus the .2em CSS adds after every character,
+    and the 0.6 was measured on the JetBrains Mono this page carried until
+    2026-09-19. See ``_MONO_ADVANCE``: it is an estimate against the app's
+    proportional face now, kept unchanged rather than guessed at, and it wants
+    a browser re-measurement."""
     per_char = _px(d._HEAD) * 0.8
     for grid, labels in _head_calls():
         floors = _floors(grid)
@@ -2668,8 +2679,10 @@ def test_every_panel_body_is_the_scroll_container_never_its_card():
     body_line = next(ln for ln in src.splitlines()
                      if ln.strip().startswith("body = "))
     assert "ns-panel-scroll" in body_line, "no panel body scrolls its own rows"
+    # ``CONSOLE_CARD`` became the app's ``CARD`` when the page moved onto the
+    # kit (2026-09-19); the rule belongs to the token, not to its old name.
     for line in src.splitlines():
-        if "CONSOLE_CARD" in line:
+        if "CARD" in line:
             assert "ns-panel-scroll" not in line, \
                 "the card scrolls, so the panel title scrolls away with it"
 
@@ -2817,8 +2830,10 @@ def test_a_panel_level_sentence_stays_put_while_its_columns_move():
         assert hits, f"{func} no longer builds {builder}"
         assert "_PANEL_NOTE" in min(hits, key=len), (func, min(hits, key=len))
     # ⚠ never on the placeholder: it REPLACES the rows, so that panel has no
-    # grid, no min-width and nothing to scroll.
-    assert "sticky" not in d._PLACEHOLDER
+    # grid, no min-width and nothing to scroll. ``_PLACEHOLDER`` became
+    # ``kit.EMPTY`` when the page moved onto the kit (2026-09-19).
+    from pages import ui_kit as kit
+    assert "sticky" not in kit.EMPTY
 
 # ── arrival detection ────────────────────────────────────────────────────────
 def test_new_ids_reports_only_rows_not_seen_before():
@@ -3555,11 +3570,18 @@ def test_render_mounts_the_desks_own_audio_element():
 
 
 def test_render_hides_the_unlock_prompt_until_the_browser_complains():
-    """A tab that was never going to need it must never show it."""
+    """A tab that was never going to need it must never show it.
+
+    ⚠ TWO deliberate changes from the 2026-09-19 kit migration, both named in
+    that commit. The label is sentence case ("ENABLE SPOKEN ALERTS" was the
+    console's small-caps voice, which no kit button speaks), and it is now the
+    ``kit.notice`` AROUND the button that hides rather than the button alone -
+    half a prompt on screen is worse than no prompt."""
     btn = [e for e in _rendered_elements()
-           if getattr(e, "text", None) == "ENABLE SPOKEN ALERTS"]
+           if getattr(e, "text", None) == "Enable spoken alerts"]
     assert len(btn) == 1
-    assert "hidden" in btn[0]._classes          # NiceGUI's display:none class
+    note = btn[0].parent_slot.parent
+    assert "hidden" in note._classes            # NiceGUI's display:none class
 
 
 def test_render_subscribes_to_the_blocked_autoplay_event():
@@ -3593,11 +3615,16 @@ def test_panel_heads_carry_every_panel_and_the_caps_stay_interpolated():
     The row caps must stay interpolated rather than written down: the old
     "HOTTEST {N}" subtitle existed in that shape precisely so a cap change could
     not leave a stale number standing on the panel.
+
+    ⚠ The titles were SMALL CAPS until 2026-09-19 and this line read
+    ``title == title.upper()``. They go through ``kit.section_title`` now, in
+    the app's sentence case, so the casing rule is RE-AIMED rather than
+    dropped: a title drifting back to caps still fails here.
     """
     heads = d.PANEL_HEADS
     assert set(heads) == {"dealer", "board", "flow", "positions"}
     for key, (title, use_line) in heads.items():
-        assert title == title.upper(), key
+        assert title == title.capitalize(), key
         assert use_line, key
     assert str(d.BOARD_ROWS_N) in heads["board"][1]
     assert str(d.FLOW_ROWS_N) in heads["flow"][1]
@@ -3969,3 +3996,218 @@ def test_the_flow_switch_also_stops_the_flow_clip_prewarm(monkeypatch):
     d._prewarm_clips({"options:matrix": {"rows": [{"symbol": "SPY"}]}})
     assert called == []
     assert d._PREWARMED["done"] is False
+
+
+# ── Task 9: the Desk on the page kit ─────────────────────────────────────────
+# The consistency standard, docs/plans/2026-09-19-app-ui-consistency-design.md.
+# Every test in this block was proved RED against the pre-migration page before
+# the migration was written - 11 of 17 - EXCEPT the SIX labelled
+# MUST-NOT-CHANGE, which pass on both sides by design: those pin the half of
+# this page the task may not touch.
+def test_the_desk_frame_is_the_kit_and_carries_no_surface_of_its_own():
+    """The landing page loses its own ground, its own body face and the whole
+    console text ladder it drew them on; the header line carries the name and
+    the Updated stamp. Nothing that encodes a READING moves."""
+    src = inspect.getsource(d.render)
+    assert "kit.page()" in src
+    assert 'kit.header("Desk", view=HEADER_VIEW, stale=True)' in src
+    module = _desk_src()
+    for token in ("CONSOLE_PAGE", "DESK_FONT", "CONSOLE_FONT_HEAD_HTML",
+                  "CONSOLE_DISPLAY", "CONSOLE_CARD", "CONSOLE_RULE",
+                  "CONSOLE_DIVIDER", "CON_TXT"):
+        assert token not in module, f"{token} is a console SURFACE value"
+
+
+def test_the_header_stamp_reads_the_matrix_not_a_view_the_page_already_prints():
+    """``options:matrix`` is the widest-reach view on the page - it feeds the
+    dealer panel AND the opportunity board - and it is published round the
+    clock, which is what makes a stamp on it say something at 03:00.
+
+    Deliberately NOT ``options:gex_status``: the strip already prints that
+    view's age as "Live - 41s ago", and a header stamp on it would say the same
+    thing twice. Deliberately NOT ``market:summary``: it publishes a handful of
+    times a day and already carries its own provenance line under MARKET
+    SUMMARY."""
+    import alerts
+    assert d.HEADER_VIEW == "options:matrix"
+    assert d.HEADER_VIEW in d.VIEWS
+    assert d.HEADER_VIEW != "options:gex_status"
+    assert d.HEADER_VIEW != "market:summary"
+    # What makes ``stale=True`` honest: the nav badge's own thresholds apply
+    # unchanged, because the matrix has no override and is not RTH-only.
+    assert d.HEADER_VIEW not in alerts.STALE_OVERRIDES
+    assert d.HEADER_VIEW not in alerts.RTH_ONLY_VIEWS
+
+
+def test_the_page_loads_no_font_of_its_own_and_keeps_only_the_voice_script():
+    """THREE ``ui.add_head_html`` calls become ONE, and the survivor is not a
+    font: it is the audio player and its queue (``DESK_VOICE_JS``), which is
+    why the guard's ALLOWED keeps an entry for this file."""
+    module = _desk_src()
+    assert module.count("ui.add_head_html(") == 1
+    assert 'ui.add_head_html(f"<script>{DESK_VOICE_JS}</script>")' \
+        in inspect.getsource(d.render)
+    assert "fonts.googleapis.com" not in module
+
+
+def test_the_pulse_keyframes_stay_because_the_freshness_dot_wears_them():
+    """MUST-NOT-CHANGE. Task 9 asked for a grep before deleting this injection,
+    and the grep says keep it: ONE element on this page wears ``con-pulse`` -
+    the feed-freshness dot beside the countdown - at two source sites, the
+    reactive ``remove=`` set and the ``add=`` that paints it live."""
+    assert "ui.add_css(CONSOLE_KEYFRAMES_CSS)" in inspect.getsource(d.render)
+    assert "con-pulse" in d._ALL_DOT_BG
+    assert _desk_src().count("con-pulse") == 2
+
+
+def test_the_neon_arrival_glow_is_injected_untouched():
+    """MUST-NOT-CHANGE. ``DESK_NEON_CSS`` encodes ARRIVAL in the page's data
+    hues; the block's own traps (the whole-second negative delay steps, the
+    longhands, no ``forwards``) are pinned above and must not move."""
+    assert "ui.add_css(DESK_NEON_CSS)" in inspect.getsource(d.render)
+
+
+def test_the_unlock_prompt_is_a_notice_above_the_strip_not_a_page_action():
+    """It is built HIDDEN and revealed only when the browser reports a blocked
+    autoplay, so it is a prompt about one condition rather than a control that
+    is always available - which is what a header action would imply. It is the
+    NOTICE that hides, not the button inside it: half a prompt is worse than
+    none."""
+    from pages import ui_kit as kit
+    btn = [e for e in _rendered_elements()
+           if getattr(e, "text", None) == d.VOICE_UNLOCK_LABEL]
+    assert len(btn) == 1
+    note = btn[0].parent_slot.parent
+    assert set(kit.NOTICE.split()) - {"w-full"} <= set(note._classes)
+    assert "self-start" in note._classes
+    assert "hidden" in note._classes        # NiceGUI's display:none class
+
+
+def test_the_unlock_label_is_sentence_case_like_every_other_button():
+    """The standard's button rule: sentence case, verb first. It was
+    "ENABLE SPOKEN ALERTS" - the console's small-caps voice, which no kit
+    button speaks."""
+    assert d.VOICE_UNLOCK_LABEL == "Enable spoken alerts"
+
+
+def test_the_voice_gate_is_the_setting_read_at_build_and_again_in_the_handler():
+    """MUST-NOT-CHANGE. The gate is ``voice_enabled``, never ``may_enqueue`` -
+    the Desk enqueues nothing. Both halves stay: the button is not BUILT with
+    voice off, and the handler refuses underneath, because ``ui.on`` is
+    registered on the client layout and a stranger can emit the blocked event
+    from a console."""
+    src = inspect.getsource(d.render)
+    assert 'app_settings.load().get("voice_enabled")' in src
+    unlock = src[src.index("async def _unlock_voice"):]
+    assert 'settings.get("voice_enabled")' in unlock
+    assert "may_enqueue" not in src
+
+
+def test_the_panel_heads_are_section_titles_in_sentence_case():
+    """Four panel titles through the kit's one heading, in the app's voice."""
+    assert "kit.section_title(" in inspect.getsource(d._panel)
+    for key, (title, _use) in d.PANEL_HEADS.items():
+        assert title == title.capitalize(), key
+
+
+def test_the_empty_panels_use_the_apps_one_empty_line():
+    """The kit's ``empty`` CENTRES its line where ``_PLACEHOLDER`` did not - a
+    real visual change on the four panels and the Bull/Bear strip, accepted
+    because it is the app's one empty style. Nine call sites, and the WORDS are
+    untouched (a cold feed and a quiet tape still read differently)."""
+    from pages import ui_kit as kit
+    assert not hasattr(d, "_PLACEHOLDER")
+    assert inspect.getsource(d.render).count("kit.empty(") == 9
+    assert "text-center" in kit.EMPTY
+
+
+def test_the_panel_card_and_the_strip_tile_stand_on_the_app_card():
+    """The TILE does NOT take ``theme.CARD``. That token carries ``px-4
+    py-3.5 rounded-[12px]`` and a strip tile needs ``px-[10px] py-[9px]
+    rounded-none`` - two utilities for ONE property at equal specificity, whose
+    winner is decided by stylesheet order. It takes the app card's GROUND and
+    BORDER directly instead, which keeps ``_TILE_PAD_PX`` true. The panel card
+    has no such conflict and takes the token."""
+    from pages.options import theme
+    P = theme.THEME["palette"]
+    assert "{CARD}" in inspect.getsource(d._panel)
+    assert f"bg-[{P['card_bg']}]" in d._TILE
+    assert f"border-[{P['card_border']}]" in d._TILE
+    assert "px-4" not in d._TILE and "py-3.5" not in d._TILE
+
+
+def test_the_row_rules_are_the_apps_borders_not_a_near_black_pair():
+    """The db39442 rule - by NATURE, not by file address. ``_ROW_RULE`` was
+    #0d151e, a hairline drawn for the console's near-black ground (#05070b)
+    and DARKER than the app's navy card (#101a30): on the new ground it would
+    read as a smudge rather than as a rule. The head rule keeps its
+    one-step-brighter relationship, now on the app's own two border steps -
+    the same move Task 1 made for the RRG crosshair."""
+    from pages.options import theme
+    P = theme.THEME["palette"]
+    assert d._ROW_RULE == f"border-[{P['card_border']}]"
+    assert d._HEAD_RULE == f"border-[{P['btn_border']}]"
+    assert d._ROW_RULE != d._HEAD_RULE
+
+
+def test_the_column_labels_take_the_apps_label_step_not_a_teal_one():
+    """``REF_HEAD_TXT`` was #5b7f8c - a desaturated TEAL drawn for the
+    reference's near-black ground, and the one member of this page's private
+    ladder in a different HUE from the app's. A column label is furniture, so
+    it takes the step every other eyebrow in the app takes - which is also
+    BRIGHTER, the readability its own comment was reaching for."""
+    from pages.options import theme
+    assert d.REF_HEAD_TXT == f"text-[{theme.THEME['palette']['icon']}]"
+
+
+def test_the_three_price_steps_survive_because_the_app_ladder_has_two():
+    """MUST-NOT-CHANGE. The dealer panel reads symbol > spot > flip level in
+    three near-white steps; the app vocabulary has two (title #eaf0fb, text
+    #cdd8ee) and they BRACKET all three. Unlike the teal column label above
+    these are the same cool navy family as the page, so they are not a second
+    design system - and collapsing them would drop a documented reading order
+    with nothing to catch it."""
+    assert d.REF_TXT_STRONG == "text-[#eaf2f9]"
+    assert d.REF_TXT == "text-[#dce7f3]"
+    assert d.REF_TXT_SOFT == "text-[#cfdae8]"
+
+
+def test_an_absent_reading_takes_the_apps_neutral_step_not_a_console_one():
+    """A text step is SURFACE wherever it lives. "Unclear", "flat", "no side",
+    "no sign" and "no IV state" are all the ABSENCE of a reading, so they take
+    the app's muted step; a directionless regime word is a plain value and
+    takes the app's brightest."""
+    from pages.options import theme
+    assert d.regime_tone({"unclear": True, "direction": 1}) == theme.MUTED
+    assert d.regime_tone({"unclear": False, "direction": 0}) == theme.LABEL
+    assert d._BAND_TONE_CLASS["flat"] == theme.MUTED
+    assert d.signed_class(None) == theme.MUTED
+    assert d.signed_class(0.0) == theme.MUTED
+    assert d.flip_side_class(None) == theme.MUTED
+    assert d.iv_state_class("nonsense") == theme.MUTED
+
+
+def test_the_chromatic_console_tokens_survive_because_each_is_a_reading():
+    """MUST-NOT-CHANGE. The chromatic console tokens are readings and stay:
+    the band tones, the IV state, the flip side."""
+    from pages.options import theme
+    assert d._BAND_TONE_CLASS["pos"] == theme.CON_POS
+    assert d._BAND_TONE_CLASS["neg"] == theme.CON_NEG
+    assert d._BAND_TONE_CLASS["warn"] == theme.CON_WARN
+    assert d._IV_STATE_CLASS["spiking"] == theme.CON_WARN
+    assert d._IV_STATE_CLASS["collapsing"] == theme.CON_ACCENT
+    assert d._SIDE_CLASS == {"above": theme.CON_POS, "below": theme.CON_NEG}
+
+
+def test_the_reactive_remove_set_covers_every_class_its_painters_apply():
+    """MUST-NOT-CHANGE, and the guard the ladder swap needed.
+
+    A repainted label STACKS classes unless the previous one is removed
+    explicitly, so the first colour painted wins forever. Derived from the
+    producers rather than restated beside them - the ``_SIGNED_CLASSES``
+    lesson from the Symbol Dossier."""
+    applied = set(d._BAND_TONE_CLASS.values())
+    applied |= {d.regime_tone({"unclear": u, "direction": s})
+                for u in (True, False) for s in (-1, 0, 1)}
+    applied |= {d.CON_WARN, d.CON_POS}          # the freshness label's pair
+    assert applied <= set(d._ALL_STATE_TEXT.split())
