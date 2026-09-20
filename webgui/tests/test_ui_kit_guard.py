@@ -31,7 +31,6 @@ ALLOWED = {
     "options/expected_move.py": {"button": 1, "notify": 1},
     "options/flow.py": {"table": 1},
     "options/gamma.py": {"button": 8, "notify": 7},
-    "options/handoff.py": {"button": 4, "dialog": 2, "notify": 12},
     "options/income.py": {"notify": 1, "table": 1},
     "options/leg_editor.py": {"button": 10},
     "options/matrix.py": {"table": 1},

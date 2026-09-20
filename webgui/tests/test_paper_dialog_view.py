@@ -1,12 +1,17 @@
 """The Paper dialog's decisions - PURE (``handoff.paper_dialog_view``).
 
-There is no NiceGUI user-simulation harness in these tests, so everything the
-dialog decides lives in one pure function and ``send_to_paper`` only paints it.
-Fixtures are in the shape the options service publishes at
+Everything the dialog decides lives in one pure function and ``send_to_paper``
+only paints it. Fixtures are in the shape the options service publishes at
 ``options:ledger_caps``; every expected number is worked by hand in a comment.
+The behaviour tests at the foot build the REAL dialog (``kit.confirm``) and
+drive its ``run`` coroutine, so they read the elements the reader sees rather
+than a hand-written stand-in for them.
 """
 import ast
+import asyncio
 import inspect
+
+from nicegui import ui
 
 from pages.options import book_fit, handoff
 from pages.options.theme import MUTED, TXT_NEG, TXT_POS
@@ -204,118 +209,34 @@ def test_sent_text_names_the_quantity():
     assert handoff.sent_text(3) == "Sent 3 contracts — the paper ledger answers in a moment."
 
 
-# --- the real send_to_paper under a fake ``ui`` ------------------------------
+# --- the real send_to_paper, driven through the kit's dialog -----------------
 
-class _El:
-    def __init__(self, *a, **k):
-        self.kw, self.args = k, a
-        self.value = k.get("value")
-        self._props = {"max": k.get("max")}
-        self.enabled = True
-        self.closed = False
-        self.handlers = []
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def classes(self, *a, **k):
-        return self
-
-    def props(self, *a, **k):
-        return self
-
-    def set_text(self, t):
-        self.text = t
-
-    def set_visibility(self, v):
-        self.visible = v
-
-    def clear(self):
-        pass
-
-    def update(self):
-        pass
-
-    def set_enabled(self, v):
-        self.enabled = v
-
-    def disable(self):
-        self.enabled = False
-
-    def enable(self):
-        self.enabled = True
-
-    def on_value_change(self, h):
-        self.handlers.append(h)
-        return self
-
-    def open(self):
-        pass
-
-    def close(self):
-        self.closed = True
-
-
-class _FakeUi:
-    def __init__(self):
-        self.buttons, self.notes, self.dialogs, self.numbers = {}, [], [], []
-        self.labels = []
-
-    def dialog(self):
-        d = _El()
-        self.dialogs.append(d)
-        return d
-
-    def card(self, *a, **k):
-        return _El()
-
-    column = row = card
-
-    def label(self, *a, **k):
-        el = _El(*a, **k)
-        self.labels.append(el)
-        return el
-
-    def number(self, *a, **k):
-        n = _El(*a, **k)
-        self.numbers.append(n)
-        return n
-
-    def button(self, text, **k):
-        b = _El(text, **k)
-        self.buttons[text] = b
-        return b
-
-    def notify(self, text, type=None):
-        self.notes.append((text, type))
-
-
-def _open_dialog(monkeypatch, request):
-    fake = _FakeUi()
-    monkeypatch.setattr(handoff, "ui", fake)
-    monkeypatch.setattr(handoff.bus_client, "read", lambda view: CAPS)
+def _open_dialog(monkeypatch, request, read=lambda view: CAPS):
+    """The real send_to_paper, with the bus and the toast stubbed."""
+    notes = []
+    monkeypatch.setattr(handoff.bus_client, "read", read)
     monkeypatch.setattr(handoff.bus_client, "request", request)
-    handoff.send_to_paper(SIG)
-    return fake
+    monkeypatch.setattr(handoff.kit, "toast", lambda kind, text: notes.append((text, kind)))
+    with ui.card():
+        dlg = handoff.send_to_paper(SIG)
+    return dlg, notes
+
+
+def _qty(dlg):
+    return next(e for e in dlg.content.descendants() if isinstance(e, ui.number))
 
 
 def test_a_second_click_sends_nothing(monkeypatch):
     sent = []
-    fake = _open_dialog(monkeypatch, lambda domain, cmd: sent.append((domain, cmd)))
-    create = fake.buttons["Create"]
-    fake.numbers[0].value = 2.0
-    confirm = create.kw["on_click"]
-    confirm()
-    confirm()                      # the queued double click
+    dlg, notes = _open_dialog(monkeypatch, lambda domain, cmd: sent.append((domain, cmd)))
+    _qty(dlg).value = 2.0
+    asyncio.run(dlg.run())
+    asyncio.run(dlg.run())         # the queued double click
     assert len(sent) == 1
     assert sent[0][1]["args"]["qty"] == 2
-    assert create.enabled is False
-    assert fake.notes == [("Sent 2 contracts — the paper ledger answers in a moment.",
-                           "info")]
-    assert fake.dialogs[0].closed is True
+    assert dlg.confirm.enabled is False
+    assert notes == [("Sent 2 contracts — the paper ledger answers in a moment.", "info")]
+    assert dlg.dialog.value is False
 
 
 def test_a_send_that_cannot_reach_the_bus_can_be_retried(monkeypatch):
@@ -325,28 +246,21 @@ def test_a_send_that_cannot_reach_the_bus_can_be_retried(monkeypatch):
         calls.append(cmd)
         raise ConnectionError("redis down")
 
-    fake = _open_dialog(monkeypatch, down)
-    create = fake.buttons["Create"]
-    confirm = create.kw["on_click"]
-    confirm()
-    assert fake.notes == [("Could not reach the options service — the trade was "
-                           "not sent.", "negative")]
-    assert create.enabled is True and fake.dialogs[0].closed is False
-    confirm()                      # the retry really runs again
+    dlg, notes = _open_dialog(monkeypatch, down)
+    asyncio.run(dlg.run())
+    assert notes == [("Could not reach the options service — the trade was "
+                      "not sent.", "error")]
+    assert dlg.confirm.enabled is True and dlg.dialog.value is True
+    asyncio.run(dlg.run())         # the retry really runs again
     assert len(calls) == 2
 
 
 def test_an_unreadable_caps_view_leaves_create_enabled(monkeypatch):
-    fake = _FakeUi()
-    monkeypatch.setattr(handoff, "ui", fake)
-
     def boom(view):
         raise ConnectionError("redis down")
 
-    monkeypatch.setattr(handoff.bus_client, "read", boom)
-    monkeypatch.setattr(handoff.bus_client, "request", lambda d, c: None)
-    handoff.send_to_paper(SIG)
-    assert fake.buttons["Create"].enabled is True
-    shown = [e.text for e in fake.labels
-             if getattr(e, "visible", False) and hasattr(e, "text")]
+    dlg, _notes = _open_dialog(monkeypatch, lambda d, c: None, read=boom)
+    assert dlg.confirm.enabled is True
+    shown = [e.text for e in dlg.content.descendants()
+             if isinstance(e, ui.label) and e.visible]
     assert book_fit.UNAVAILABLE in shown

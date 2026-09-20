@@ -17,8 +17,9 @@ import bus_client
 # somewhere else and most of them nowhere at all, so the route is RESOLVED
 # rather than emitted. In the private app the resolution is the identity.
 import shell as _shell
+from pages import ui_kit as kit
 
-from .theme import BTN_3D, MUTED, TXT_NEG, TXT_POS
+from .theme import MUTED, TXT_NEG, TXT_POS
 
 _pending = {"calculator": None, "expected_move": None, "swing": None,
             "calculator_legs": None, "gamma": None}
@@ -80,7 +81,7 @@ def take_pending_expected_move():
 def send_to_expected_move(payload):
     """Stash the payload and open the Expected Move page in a NEW browser tab."""
     if not payload or not payload.get("symbol"):
-        ui.notify("No symbol for expected move.", type="warning")
+        kit.toast("warn", "No symbol for expected move.")
         return
     set_pending_expected_move(payload)
     _shell.navigate_to("/options/expected-move", new_tab=True)
@@ -99,7 +100,7 @@ def take_pending_calculator():
 
 def send_to_calculator(signal):
     if not signal:
-        ui.notify("Select a signal first.", type="warning")
+        kit.toast("warn", "Select a signal first.")
         return
     set_pending_calculator(signal)
     _shell.navigate_to("/options/calculator")
@@ -120,7 +121,7 @@ def take_pending_calculator_legs():
 def send_to_calculator_legs(payload):
     """Stash a {symbol, legs} payload and open the Calculator page."""
     if not payload or not payload.get("symbol"):
-        ui.notify("No legs to copy.", type="warning")
+        kit.toast("warn", "No legs to copy.")
         return
     set_pending_calculator_legs(payload)
     _shell.navigate_to("/options/calculator")
@@ -157,7 +158,7 @@ def send_to_gamma(symbol):
     the visitor lands on the pinned board rather than on this symbol — the page
     says which symbol it is showing, and a 404 is the worse of the two."""
     if not symbol:
-        ui.notify("No symbol for dealer positioning.", type="warning")
+        kit.toast("warn", "No symbol for dealer positioning.")
         return
     if not _shell.can_navigate(GAMMA_ROUTE):
         return                      # nowhere to send it — and nothing stashed
@@ -188,7 +189,7 @@ def send_to_swing(symbol):
     the Send-to-Paper action. Wiring the plan straight to paper would mean
     inventing the strikes it declines to specify."""
     if not symbol:
-        ui.notify("No symbol for the Strategy Finder.", type="warning")
+        kit.toast("warn", "No symbol for the Strategy Finder.")
         return
     set_pending_swing(symbol)
     _shell.navigate_to("/options/swing")
@@ -282,6 +283,13 @@ def _continue_sentence(message):
     return message
 
 
+# ``paper_result_toast`` answers in Quasar's own vocabulary, because it is the
+# PURE decision and its tests pin those words; the kit speaks the page's four
+# kinds. One map between them, rather than rewording the pure function.
+_TOAST_KIND = {"positive": "ok", "warning": "warn", "negative": "error",
+               "info": "info"}
+
+
 def watch_paper_results():
     """Toast every ``paper_create`` answer on this page. ``watch_view`` seeds the
     version (an answer published before the page opened is not replayed) and
@@ -292,7 +300,7 @@ def watch_paper_results():
     def _on_change():
         toast = paper_result_toast(bus_client.read(PAPER_CREATE_VIEW))
         if toast:
-            ui.notify(toast[0], type=toast[1])
+            kit.toast(_TOAST_KIND.get(toast[1], "info"), toast[0])
 
     return watch_view(PAPER_CREATE_VIEW, _on_change, interval=PAPER_RESULT_POLL_SEC)
 
@@ -388,9 +396,10 @@ def sent_text(n):
 
 
 def send_to_paper(signal):
+    """Ask, then enqueue a ``paper_create``. Returns the dialog handle."""
     if not signal:
-        ui.notify("Select a signal first.", type="warning")
-        return
+        kit.toast("warn", "Select a signal first.")
+        return None
 
     # Read ONCE when the dialog opens: the preview recomputes on every quantity
     # change against this snapshot, and the service re-checks on the click. A
@@ -401,9 +410,13 @@ def send_to_paper(signal):
         caps = None
     state = {"view": paper_dialog_view(signal, caps, 1), "sent": False}
 
-    with ui.dialog() as dlg, ui.card().classes("min-w-[320px] gap-2"):
-        view = state["view"]
-        ui.label(view["title"]).classes("text-subtitle1")
+    view = state["view"]
+    # ephemeral: this dialog is built per click, so it removes itself on close
+    # rather than leaving one element behind in the page each time.
+    dlg = kit.confirm(view["title"], confirm_text="Create", ephemeral=True,
+                      on_confirm=lambda: confirm())
+    create = dlg.confirm
+    with dlg.content:
         risk = ui.label(view["risk_text"]).classes(f"text-sm {MUTED}")
         lines_box = ui.column().classes("gap-1 w-full")
         note = ui.label("").classes(f"text-xs {MUTED}")
@@ -411,74 +424,72 @@ def send_to_paper(signal):
         # it in red. ``block_text`` stays in the view for the tests; the refusal
         # toast uses the service's own ``message``, not this.
         fits = ui.label("").classes(f"text-xs {MUTED}")
-        qty = ui.number("Quantity", value=1, min=1, max=view["qty_max"])
+        # min only: the ceiling MOVES with the quantity (``qty_max`` is never
+        # below a typed quantity that fits), so ``paint`` writes it into
+        # ``_props["max"]`` rather than freezing it into the field's own check.
+        qty = kit.number_field("Quantity", value=1, min=1, integer=True)
 
-        def confirm():
-            # A latch, not just the button: a queued second click still runs
-            # after the first closes the dialog, and must not enqueue twice.
-            if state["sent"]:
-                return
-            # Re-check at click time: the button's enabled state is a display,
-            # never the gate.
-            current = paper_dialog_view(signal, caps, qty.value)
-            if not current["can_create"]:
-                return
-            n = int(qty.value)
-            state["sent"] = True
-            create.disable()
-            # Engine-free: enqueue a paper_create command for the options service
-            # to build + persist the trade (then refresh the Paper Trades ledger
-            # view). The signal dict is a plain dict of strings/numbers, so it is
-            # JSON-serializable onto the command stream.
-            try:
-                bus_client.request("options", {
-                    "type": "paper_create",
-                    "args": {"signal": signal, "qty": n},
-                })
-            except Exception:  # noqa: BLE001 - said on screen; the reader retries
-                state["sent"] = False
-                create.enable()
-                ui.notify(SEND_FAILED_TEXT, type="negative")
-                return
-            ui.notify(sent_text(n), type="info")
-            dlg.close()
+    def confirm():
+        # A latch, not just the button: a queued second click still runs
+        # after the first closes the dialog, and must not enqueue twice.
+        if state["sent"]:
+            return
+        # Re-check at click time: the button's enabled state is a display,
+        # never the gate.
+        current = paper_dialog_view(signal, caps, qty.value)
+        if not current["can_create"]:
+            return False              # keep the dialog open; the red line says why
+        n = int(qty.value)
+        state["sent"] = True
+        create.disable()
+        # Engine-free: enqueue a paper_create command for the options service
+        # to build + persist the trade (then refresh the Paper Trades ledger
+        # view). The signal dict is a plain dict of strings/numbers, so it is
+        # JSON-serializable onto the command stream.
+        try:
+            bus_client.request("options", {
+                "type": "paper_create",
+                "args": {"signal": signal, "qty": n},
+            })
+        except Exception:  # noqa: BLE001 - said on screen; the reader retries
+            state["sent"] = False
+            create.enable()
+            kit.toast("error", SEND_FAILED_TEXT)
+            return False
+        kit.toast("info", sent_text(n))
 
-        with ui.row():
-            create = ui.button("Create", color=None, on_click=confirm) \
-                .props("no-caps").classes(BTN_3D)
-            ui.button("Cancel", on_click=dlg.close).props("flat")
+    def paint(v):
+        risk.set_text(v["risk_text"])
+        risk.set_visibility(bool(v["risk_text"]))
+        lines_box.clear()
+        with lines_box:
+            for line in v["lines"]:
+                with ui.row().classes("gap-2 items-baseline no-wrap"):
+                    ui.label(line["label"]).classes(f"text-xs {MUTED} w-24 shrink-0")
+                    ui.label(line["text"]).classes(f"text-sm {line['class']}")
+        for el, key in ((note, "note"), (fits, "fits_text")):
+            el.set_text(v[key])
+            el.set_visibility(bool(v[key]))
+        # ``ui.number`` keeps ``max`` in ``_props``. Written straight to the
+        # prop + update(), NOT through the ``max`` setter: the setter also
+        # runs ``sanitize()``, which would clamp the value the reader just
+        # typed before the red line and "Up to N fit" could say why. The
+        # element's own blur handler still clamps to this max on leaving
+        # the field.
+        if qty._props.get("max") != v["qty_max"]:
+            qty._props["max"] = v["qty_max"]
+            qty.update()
+        if not state["sent"]:
+            create.set_enabled(v["can_create"])
 
-        def paint(v):
-            risk.set_text(v["risk_text"])
-            risk.set_visibility(bool(v["risk_text"]))
-            lines_box.clear()
-            with lines_box:
-                for line in v["lines"]:
-                    with ui.row().classes("gap-2 items-baseline no-wrap"):
-                        ui.label(line["label"]).classes(f"text-xs {MUTED} w-24 shrink-0")
-                        ui.label(line["text"]).classes(f"text-sm {line['class']}")
-            for el, key in ((note, "note"), (fits, "fits_text")):
-                el.set_text(v[key])
-                el.set_visibility(bool(v[key]))
-            # ``ui.number`` keeps ``max`` in ``_props``. Written straight to the
-            # prop + update(), NOT through the ``max`` setter: the setter also
-            # runs ``sanitize()``, which would clamp the value the reader just
-            # typed before the red line and "Up to N fit" could say why. The
-            # element's own blur handler still clamps to this max on leaving
-            # the field.
-            if qty._props.get("max") != v["qty_max"]:
-                qty._props["max"] = v["qty_max"]
-                qty.update()
-            if not state["sent"]:
-                create.set_enabled(v["can_create"])
+    def on_qty(e):
+        state["view"] = paper_dialog_view(signal, caps, e.value)
+        paint(state["view"])
 
-        def on_qty(e):
-            state["view"] = paper_dialog_view(signal, caps, e.value)
-            paint(state["view"])
-
-        qty.on_value_change(on_qty)
-        paint(view)
+    qty.on_value_change(on_qty)
+    paint(view)
     dlg.open()
+    return dlg
 
 
 # ── the Income board's open action ──────────────────────────────────────────
@@ -517,41 +528,45 @@ def open_in_paper_account(row):
     ``cache:options:income_open`` and the page shows it. Claiming a fill here
     would be the ``driver-executed-but-nothing-opened`` shape: reporting the
     enqueue as the outcome.
+
+    Returns the dialog handle.
     """
     if not row:
-        ui.notify("Select a row first.", type="warning")
-        return
+        kit.toast("warn", "Select a row first.")
+        return None
     if not income_openable(row):
-        ui.notify("Only a cash-secured put or a covered call can be opened into "
-                  "the paper account.", type="warning")
-        return
+        kit.toast("warn", "Only a cash-secured put or a covered call can be "
+                          "opened into the paper account.")
+        return None
     default_qty = 1
     try:
         default_qty = max(1, int(float(row.get("quantity") or 1)))
     except (TypeError, ValueError):
         default_qty = 1
 
-    with ui.dialog() as dlg, ui.card():
-        ui.label(f"Open {row.get('symbol')} "
-                 f"{'cash-secured put' if row.get('type') == 'SHORT_PUT' else 'covered call'} "
-                 f"{row.get('expiration', '')}").classes("text-subtitle1")
-        ui.label("This opens into the paper ACCOUNT — collateral is reserved and "
-                 "an assignment becomes shares.").classes("text-xs")
-        qty = ui.number("Contracts", value=default_qty, min=1, max=100)
+    kind = "cash-secured put" if row.get("type") == "SHORT_PUT" else "covered call"
+    # ephemeral: built per click, like the Paper dialog above.
+    dlg = kit.confirm(
+        f"Open {row.get('symbol')} {kind} {row.get('expiration', '')}",
+        "This opens into the paper account: collateral is reserved, and an "
+        "assignment becomes shares.",
+        confirm_text="Open", ephemeral=True, on_confirm=lambda: _open())
+    with dlg.content:
+        qty = kit.number_field("Contracts", value=default_qty, min=1, max=100,
+                               integer=True)
 
-        def confirm():
-            bus_client.request("options", {
-                "type": "income_open",
-                "args": {"row": row, "qty": int(qty.value or 1)},
-            })
-            ui.notify("Sent to the paper account — the result appears here in a "
-                      "moment.", type="positive")
-            dlg.close()
+    def _open():
+        if not qty.validate():
+            return False          # the field says what is wrong with the number
+        bus_client.request("options", {
+            "type": "income_open",
+            "args": {"row": row, "qty": int(qty.value or 1)},
+        })
+        kit.toast("info", "Sent to the paper account — the result appears here "
+                          "in a moment.")
 
-        with ui.row():
-            ui.button("Open", color=None, on_click=confirm).props("no-caps").classes(BTN_3D)
-            ui.button("Cancel", on_click=dlg.close).props("flat")
     dlg.open()
+    return dlg
 
 
 # One per-row action for the Income board: open into the paper account. Gated on
