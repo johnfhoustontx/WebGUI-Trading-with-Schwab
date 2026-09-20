@@ -295,3 +295,51 @@ def test_spread_uses_a_typographic_minus_to_match_the_mono_face():
 def test_eyebrow_names_the_benchmark_and_the_date():
     assert V.eyebrow("2026-08-17") == "RRG vs SPY · as of 2026-08-17"
     assert V.eyebrow(None) == "RRG vs SPY · awaiting data"
+
+
+# ── the warm-neutral ladder retires (Phase 3, Task 5) ───────────────────────
+def test_the_warm_neutral_ladder_is_gone():
+    """The rotation family's own grey ladder — ``NEUTRAL`` and its ``NT`` /
+    ``NB`` / ``NE`` Tailwind forms — retired with the last of the four screens
+    that wore it (RRG, Rotation, Bull/Bear, Momentum, in that order). Surface
+    and text roles are the app's tokens now; what encoded a VALUE stayed."""
+    for name in ("NEUTRAL", "NEUTRAL_HUE", "NT", "NB", "NE", "rgba"):
+        assert not hasattr(V, name), \
+            f"rotation_view.{name} is a retired page-scoped surface value"
+
+
+def test_no_page_still_reads_the_retired_ladder():
+    """The ladder could only go once every reader had stopped; this is the
+    check that nothing quietly imports it back."""
+    import ast
+    import pathlib
+    pages = pathlib.Path(V.__file__).resolve().parent
+    for f in sorted(pages.rglob("*.py")):
+        tree = ast.parse(f.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if (node.module or "").endswith("rotation_view"):
+                got = {a.name for a in node.names}
+                assert not got & {"NEUTRAL", "NT", "NB", "NE", "rgba"}, \
+                    f"{f.name} imports the retired ladder: {sorted(got)}"
+
+
+def test_the_flat_tone_keeps_its_own_neutral():
+    """⚠ The trap in retiring the ladder: ``TONE["flat"]`` was BUILT out of it,
+    so deleting the rungs first would have taken the third tone with them.
+
+    ``flat`` is DATA — it is what the board wears when the spread has no
+    direction, beside ``up`` and ``down`` — so it keeps a neutral of its own.
+    This passes before and after by design: it pins the shape, not the source."""
+    assert set(V.TONE) == {"up", "down", "flat"}
+    keys = set(V.TONE["up"])
+    assert set(V.TONE["flat"]) == keys, "the flat tone lost a role"
+    for role, value in V.TONE["flat"].items():
+        assert isinstance(value, str) and value.endswith("]"), \
+            f"TONE['flat'][{role!r}] is not a Tailwind class"
+        prefix = "text-[" if role in ("txt", "axis", "foot_pct", "foot_lbl") \
+            else ("border-[" if role == "foot_edge" else "bg-[")
+        assert value.startswith(prefix), \
+            f"TONE['flat'][{role!r}] changed kind: {value}"
+    assert V.TONE_TXT_CLASSES.count("text-[") == 3

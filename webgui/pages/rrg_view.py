@@ -36,8 +36,8 @@ import math
 
 from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
 from pages.oklch import oklch_hex
-from pages.rotation_view import (  # noqa: F401 — the shared palette, deliberately
-    NB, NE, NT, QUAD_CHROMA, QUAD_HUE, TONE, fmt_mom, fmt_spread,
+from pages.rotation_view import (  # the shared palette (data only)
+    QUAD_CHROMA, QUAD_HUE, TONE, fmt_mom, fmt_spread,
     regime_display, regime_sentence,
 )
 

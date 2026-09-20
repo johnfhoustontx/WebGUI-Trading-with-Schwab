@@ -256,18 +256,6 @@ _DEFAULTS = {
                      "?family=Instrument+Sans:wght@400;500;600;700"
                      "&family=JetBrains+Mono:wght@400;500;600&display=swap"),
     },
-    "rotation": {
-        # Only the two grounds and the faces. Every other colour on this board
-        # is a WARM-NEUTRAL LADDER at oklch(L 0.006-0.01 90) plus the four
-        # quadrant hues — both derived in ``pages/rotation_view.py``, because
-        # both are data/design ramps rather than palette knobs (the same call
-        # made for the [sectors] heat ramp).
-        "void": "#08090B",             # page ground
-        "panel": "#0B0C0E",            # quadrant panel fill, one step lighter
-        "font_url": ("https://fonts.googleapis.com/css2"
-                     "?family=Instrument+Sans:wght@400;500;600;700"
-                     "&family=JetBrains+Mono:wght@400;500;600&display=swap"),
-    },
     # The Options Strategy Calculator's own language: a near-black ground with
     # cyan/green/amber signal colours and a mono face, deliberately unlike the
     # app-wide dark navy. Page-scoped (.calc-v3) — NOT surfaced in
@@ -1131,46 +1119,11 @@ def build_sector_tokens(theme):
     }
 
 
-def build_rotation_tokens(theme):
-    """Tailwind class-string vocabulary for the Sector Rotation board.
-
-    Namespaced ``RT_*``. Only the two grounds and the two faces live here — the
-    warm-neutral ladder and the quadrant hues are derived in
-    ``pages/rotation_view.py``, so this stays the restyle surface and nothing
-    else."""
-    r = theme["rotation"]
-    return {
-        "RT_SANS": "font-['Instrument_Sans',system-ui,sans-serif]",
-        "RT_MONO": "font-['JetBrains_Mono',ui-monospace,monospace]",
-        "RT_VOID_BG": f"bg-[{r['void']}]",
-        "RT_PANEL_BG": f"bg-[{r['panel']}]",
-    }
-
-
-def build_rotation_font_head_html(theme):
-    """``<link>``s for the rotation board's two faces, or "" when unset.
-
-    Same pair as the Sector & Industry grid — the two screens are one design
-    family — but declared per page so either can be restyled without silently
-    changing the other."""
-    try:
-        url = str(theme["rotation"].get("font_url", "")).strip()
-    except Exception:  # noqa: BLE001
-        return ""
-    if not url:
-        return ""
-    return (
-        '<link rel="preconnect" href="https://fonts.googleapis.com">'
-        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-        f'<link rel="stylesheet" href="{url}">'
-    )
-
-
 # ── Options Strategy Calculator (/options/calculator) helpers ────────────────
-# Page-scoped like [flow] / [console] / [macro] / [sectors] / [rotation]. Like
-# the first three of those it needs an ``ui.add_css`` escape-hatch of its own
-# (``[sectors]`` and ``[rotation]`` need none — a heat grid and a diverging
-# gauge are nothing but colour and measurement): this page mounts q-fields, the
+# Page-scoped like [flow] / [console] / [macro] / [sectors]. Like the first
+# three of those it needs an ``ui.add_css`` escape-hatch of its own
+# (``[sectors]`` needs none — a heat grid is nothing but colour and
+# measurement): this page mounts q-fields, the
 # leg editor and the teleported strategy popup, none of which component
 # ``.classes()`` can reach. Scope hook is ``.calc-v3`` — deliberately NOT
 # ``.calc-v2``, which is the app-wide dark-navy scope the Simulator and Trade
@@ -1426,10 +1379,6 @@ MACRO_FONT_HEAD_HTML = build_macro_font_head_html(THEME)  # "" when no url
 # ── Sector & Industry heat grid (/sentiment/sectors) page-scoped exports ─────
 SECTOR_TOKENS = build_sector_tokens(THEME)     # Tailwind class-string vocabulary
 SECTOR_FONT_HEAD_HTML = build_sector_font_head_html(THEME)  # "" when no url
-
-# ── Sector Rotation board (/sentiment/rotation) page-scoped exports ──────────
-ROTATION_TOKENS = build_rotation_tokens(THEME)
-ROTATION_FONT_HEAD_HTML = build_rotation_font_head_html(THEME)  # "" when no url
 
 # ── Options Strategy Calculator — page-scoped language (.calc-v3) ────────────
 _CALC_TOKENS = build_calc_tokens(THEME)

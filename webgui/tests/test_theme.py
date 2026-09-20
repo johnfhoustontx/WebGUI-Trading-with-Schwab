@@ -516,3 +516,35 @@ def test_a_borderless_field_opts_out_of_the_box():
         want = rule.format(s=scope)
         assert want in css, scope
         assert css.index(want) > css.index(f"{scope} .q-field--focused .q-field__control{{"), scope
+
+
+# ── the [rotation] page-scoped surface retires (Phase 3, Task 5) ────────────
+def test_the_rotation_page_scoped_vocabulary_is_gone():
+    """``[rotation]`` held ``void``, ``panel`` and ``font_url`` and nothing
+    else — all three surface — so the whole section goes with the four screens
+    that wore it. What was never in the TOML stays where it is: the quadrant
+    hues and the tone accents are design ramps in ``pages/rotation_view.py``."""
+    for name in ("ROTATION_TOKENS", "ROTATION_FONT_HEAD_HTML",
+                 "build_rotation_tokens", "build_rotation_font_head_html"):
+        assert not hasattr(theme, name), f"theme.{name} is a retired surface value"
+    assert "rotation" not in theme._DEFAULTS, \
+        "a default section nothing reads is a knob that silently does nothing"
+    assert "rotation" not in theme.THEME
+
+
+def test_the_shipped_theme_toml_has_no_rotation_section():
+    """The tracked file and the defaults have to agree: a ``[rotation]`` left in
+    the TOML would be an operator knob with no consumer at all, since
+    ``load_theme`` ignores a section that is not in ``_DEFAULTS``."""
+    import repo_paths
+    text = repo_paths.THEME_TOML.read_text(encoding="utf-8")
+    assert "\n[rotation]" not in text
+
+
+def test_the_rotation_quadrant_hues_and_tones_survive_in_code():
+    """The must-not-change half: the four quadrant hues and the three tones are
+    data ramps, and the TOML never held them. Passes before and after."""
+    from pages import rotation_view as rv
+    assert set(rv.QUAD_HUE) == {"Leading", "Improving", "Weakening", "Lagging"}
+    assert set(rv.QUAD_CHROMA) == set(rv.QUAD_HUE)
+    assert set(rv.TONE) == {"up", "down", "flat"}

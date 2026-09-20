@@ -18,8 +18,12 @@ its RS-Momentum and a weight bar.
 
 **Why the palette is code and not ``config/theme.toml``.** The four quadrant
 hues are a data-driven cell map, the category CLAUDE.md excludes from the
-config-driven palette. The chrome — ground, panel, hairlines, greys — *is* in
-``[rotation]``.
+config-driven palette. ⚠ **There is no chrome here any more.** The ground, the
+panel fill, the hairlines and the warm-neutral grey ladder went on 2026-09-19,
+when the last of the four screens that wore them moved onto the page kit
+(``pages/ui_kit.py``) — and ``[rotation]`` was deleted from ``theme.toml`` with
+them, since ``void``, ``panel`` and ``font_url`` were all it held. What survives
+in this module is DATA only: the quadrant hues, the three tones and the prose.
 
 ⚠ **This palette is page-scoped and deliberately differs from the RRG tab's.**
 ``sentiment_rotation.quadrant_color`` (Leading green / Improving cyan /
@@ -85,59 +89,22 @@ def quad_classes(quadrant):
     return QUAD_CLASSES.get(quadrant, QUAD_CLASSES[FALLBACK_QUADRANT])
 
 
-# ── the warm-neutral ladder ──────────────────────────────────────────────────
-# Every non-quadrant colour on the board is one lightness step on a single warm
-# neutral — oklch(L, 0.006-0.01, 90). Keeping it as a ladder rather than a bag
-# of named greys is what makes the hierarchy legible: a label is dimmer than a
-# value because its L is lower, and that relationship is visible in the source.
-# The L values are the design's, verbatim.
-NEUTRAL_HUE = 90.0
-
-
-def _n(lightness, chroma=0.006):
-    return oklch_hex(lightness, chroma, NEUTRAL_HUE)
-
-
-# name → (lightness, chroma). Ordered dimmest-first so the ladder reads as one.
-_LADDER = {
-    "track": (0.17, 0.006),      # the gauge's unfilled groove
-    "note_rule": (0.20, 0.006),  # the footnote's top border
-    "btn_hover": (0.20, 0.006),  # Refresh hover fill
-    "hair": (0.22, 0.006),       # panel rings, chip bar troughs
-    "grid": (0.24, 0.006),       # the quadrant grid's gap colour
-    "btn_edge": (0.30, 0.006),   # Refresh border
-    "ghost": (0.42, 0.010),      # "vs", the segment-width caption, the footnote
-    "axis": (0.44, 0.010),       # gauge axis text, "RS-Mom", the zero tick
-    "of_index": (0.48, 0.010),   # "of index"
-    "rail": (0.50, 0.010),       # the RS axis rails, chip ETF codes
-    "caption": (0.52, 0.010),    # section captions, "threshold ±"
-    "blurb": (0.54, 0.010),      # quadrant descriptions
-    "label": (0.55, 0.010),      # mono field labels
-    "eyebrow": (0.56, 0.010),    # the page eyebrow
-    "note": (0.58, 0.010),       # the trigger sentence
-    "btn_hover_edge": (0.50, 0.010),
-    "body": (0.80, 0.006),       # the verdict sentence
-    "value": (0.88, 0.006),      # mono figures in the verdict strip
-    "txt": (0.93, 0.006),        # default page text, the Refresh label
-    "bright": (0.94, 0.006),     # segment percentages, quadrant weights
-}
-
-NEUTRAL = {k: _n(l, c) for k, (l, c) in _LADDER.items()}
-
-
-def rgba(name, alpha=1):
-    """A ladder colour as ``rgba(r,g,b,a)`` with NO spaces.
-
-    Needed for ``shadow-[…]``: a box-shadow arbitrary does not generate from a
-    hex (documented Tailwind-JIT gotcha), and a Tailwind arbitrary value cannot
-    contain a space."""
-    h = NEUTRAL[name].lstrip("#")
-    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
-    return f"rgba({r},{g},{b},{alpha})"
-# Tailwind class forms, built once — the same finite-vocabulary rule as above.
-NT = {k: f"text-[{v}]" for k, v in NEUTRAL.items()}
-NB = {k: f"bg-[{v}]" for k, v in NEUTRAL.items()}
-NE = {k: f"border-[{v}]" for k, v in NEUTRAL.items()}
+# ── the flat tone's own neutral ──────────────────────────────────────────────
+# ⚠ This is the LAST survivor of the warm-neutral ladder this module used to
+# export (``NEUTRAL`` / ``NT`` / ``NB`` / ``NE``, one lightness step per role at
+# oklch(L, 0.006-0.01, 90)). That ladder was page-scoped SURFACE, and it retired
+# on 2026-09-19 with the last of the four screens that wore it — RRG, Sector
+# Rotation, Bull/Bear and Momentum, all now on the app's own token vocabulary
+# (``pages/ui_kit.py``). ``TONE["flat"]`` was BUILT out of it and is DATA: it is
+# what the board wears when the spread has no direction, beside ``up`` and
+# ``down``. So it keeps the three steps it actually used, at the same hue and
+# chroma, as a neutral of its own — the values below are byte-identical to what
+# the ladder gave it.
+_FLAT_HUE = 90.0
+_FLAT_TXT = oklch_hex(0.93, 0.006, _FLAT_HUE)    # the figure and its footer
+_FLAT_MARK = oklch_hex(0.94, 0.006, _FLAT_HUE)   # the gauge's reading mark
+_FLAT_RAIL = oklch_hex(0.50, 0.010, _FLAT_HUE)   # the dot, the fill, the rule
+_FLAT_AXIS = oklch_hex(0.44, 0.010, _FLAT_HUE)   # ticks and axis text
 
 # The two semantic accents outside the quadrant set: the flow band's footers and
 # the gauge's triggers speak "out/in" and "risk-off/risk-on", which share the
@@ -162,10 +129,12 @@ TONE = {
            "foot_edge": f"border-[{oklch_hex(0.66, 0.13, 158)}]",
            "foot_pct": f"text-[{oklch_hex(0.80, 0.11, 158)}]",
            "foot_lbl": f"text-[{oklch_hex(0.64, 0.06, 158)}]"},
-    "flat": {"txt": NT["txt"], "dot": NB["rail"], "fill": NB["rail"],
-             "mark": NB["bright"], "tick": NB["axis"], "axis": NT["axis"],
-             "foot_edge": NE["rail"], "foot_pct": NT["txt"],
-             "foot_lbl": NT["axis"]},
+    "flat": {"txt": f"text-[{_FLAT_TXT}]", "dot": f"bg-[{_FLAT_RAIL}]",
+             "fill": f"bg-[{_FLAT_RAIL}]", "mark": f"bg-[{_FLAT_MARK}]",
+             "tick": f"bg-[{_FLAT_AXIS}]", "axis": f"text-[{_FLAT_AXIS}]",
+             "foot_edge": f"border-[{_FLAT_RAIL}]",
+             "foot_pct": f"text-[{_FLAT_TXT}]",
+             "foot_lbl": f"text-[{_FLAT_AXIS}]"},
 }
 TONE_TXT_CLASSES = " ".join(dict.fromkeys(t["txt"] for t in TONE.values()))
 

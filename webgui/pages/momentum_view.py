@@ -19,16 +19,17 @@ banner named the live state and left the reader to remember what the other two
 would have meant — but the whole reason this page exists is that momentum is
 only tradeable in some conditions, and that is a comparison.
 
-Palette and the warm-neutral ladder are imported from ``pages/rotation_view.py``
-— this is the fourth screen in that design family.
+The quadrant palette is imported from ``pages/rotation_view.py`` — this is the
+fourth screen in that design family. ⚠ The warm-neutral ladder that used to come
+with it is GONE: it was page-scoped surface, and it retired on 2026-09-19 when
+this page moved onto the page kit. Every colour still named here encodes a
+value.
 """
 import math
 
 from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
 from pages.oklch import oklch_hex
-from pages.rotation_view import (  # noqa: F401 — the shared palette
-    NB, NE, NT, QUAD_CHROMA, QUAD_HUE,
-)
+from pages.rotation_view import QUAD_CHROMA, QUAD_HUE  # the shared palette
 
 DASH = "—"
 MINUS = "−"      # U+2212, matching the mono face's figures
