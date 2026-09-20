@@ -299,19 +299,58 @@ def _descendants(root):
 
 
 def _find(card, cls, label):
+    """A control selected by the label sitting ABOVE it.
+
+    ⚠ Re-aimed 2026-09-20 with the page-kit migration, and deliberately not
+    weakened: ``kit.field`` puts a field's name in a sibling ``ui.label`` at the
+    top of a one-column wrapper and never writes Quasar's ``label`` prop, so the
+    old selector (``el._props.get("label") == label``) found nothing and all
+    seven call sites below raised. They still name the same four controls."""
+    from nicegui import ui as _ui
+
     for el in _descendants(card):
-        if isinstance(el, cls) and el._props.get("label") == label:
+        kids = getattr(getattr(el, "default_slot", None), "children", [])
+        if not any(isinstance(k, _ui.label) and k.text == label for k in kids):
+            continue
+        for k in kids:
+            if isinstance(k, cls):
+                return k
+    raise AssertionError(f"no {cls.__name__} under a {label!r} label in the built page")
+
+
+def _button(card, text):
+    """The page's button carrying ``text`` (the kit builds one per action)."""
+    from nicegui import ui as _ui
+
+    for el in _descendants(card):
+        if isinstance(el, _ui.button) and el.text == text:
             return el
-    raise AssertionError(f"no {cls.__name__} labeled {label!r} in the built page")
+    raise AssertionError(f"no button labelled {text!r} in the built page")
+
+
+def _scrim(card):
+    """The wait scrim ``pages/busy.py`` mounts over the chart — the element that
+    holds the spinner, selected by that rather than by position."""
+    from nicegui import ui as _ui
+
+    for el in _descendants(card):
+        kids = getattr(getattr(el, "default_slot", None), "children", [])
+        if any(isinstance(k, _ui.spinner) for k in kids):
+            return el
+    raise AssertionError("the page mounts no wait scrim")
 
 
 def _page_polls(callbacks):
-    """The PAGE's own timer callbacks, excluding the busy spinner's watchdog.
+    """The page's OWN coalesced cache poll, selected by name.
 
-    ``pages/busy.py`` mounts a 1s deadline watchdog per spinner; it is not a cache
-    poll and must not be mistaken for one when a test reaches for "the poll"."""
+    ⚠ Re-aimed 2026-09-20, and by name rather than by position on purpose. Two
+    timers the page does not own now sit alongside it: ``pages/busy.py``'s 1 s
+    deadline watchdog per spinner (which the old filter already excluded), and
+    ``kit.header``'s 5 s stamp poll — which is built FIRST, so "the first timer"
+    stopped being the page's. Neither is a cache poll, and neither may be
+    mistaken for one when a test reaches for "the poll"."""
     return [c for c in callbacks
-            if not getattr(c, "__qualname__", "").startswith("build_busy")]
+            if getattr(c, "__qualname__", "").rsplit(".", 1)[-1] == "_poll"]
 
 
 def _make_capturing_timer(sink):
@@ -572,7 +611,13 @@ def test_handoff_multileg_survives_chain_auto_select_strike(monkeypatch):
 def test_a_symbol_only_hand_off_loads_the_chain_without_a_warning(monkeypatch):
     """The Symbol Dossier hands over a symbol with no expiry. That must open
     the page on the symbol and load its expirations — not also try to draw and
-    toast "Symbol + expiry required." at a user who asked for nothing wrong."""
+    complain at a user who asked for nothing wrong.
+
+    ⚠ The complaint it names was the ``"Symbol + expiry required."`` toast, and
+    that toast is gone (2026-09-20 — Draw is simply held until both fields are
+    set). An assertion about its absence would now be vacuous, so this asserts
+    the stronger thing it always meant: the page says nothing at all. Green both
+    before and after."""
     from nicegui import ui
 
     import bus_client
@@ -592,4 +637,143 @@ def test_a_symbol_only_hand_off_loads_the_chain_without_a_warning(monkeypatch):
     kinds = [c[1].get("type") for c in calls]
     assert "em_chain" in kinds
     assert "expected_move" not in kinds
-    assert not [t for t in toasts if "expiry required" in t]
+    assert toasts == []
+
+
+# --- the page kit (2026-09-20) -------------------------------------------
+
+def test_the_frame_is_the_kit_and_the_page_finally_names_itself():
+    """Nothing on screen said what this page WAS: it carries no title of its own
+    and no tab strip sits above it, so a reader arriving from a hand-off saw a
+    control row and a chart. The kit header is the first thing that names it."""
+    import inspect
+
+    src = inspect.getsource(em.render)
+    assert "kit.page()" in src
+    assert ('kit.header("Expected Move", view="options:expected_move", stale=False)'
+            in src), "the header names the page and stamps the on-demand view"
+    assert "with kit.control_bar():" in src
+    assert "kit.status_line()" in src
+    # BTN_3D is the legacy alias the design retires.
+    assert "BTN_3D" not in inspect.getsource(em)
+
+
+def test_the_missing_field_toast_is_gone_because_draw_is_simply_held():
+    """"Symbol + expiry required." was FIELD VALIDATION delivered as an outcome
+    toast — and one caller already routed around it deliberately (the Symbol
+    Dossier's symbol-only hand-off). Holding Draw says the same thing before the
+    click instead of after it."""
+    import inspect
+
+    src = inspect.getsource(em)
+    # Both spellings: routing it through ``kit.toast`` instead would keep the
+    # very shape this replaces - validation announced after the click.
+    assert "ui.notify" not in src
+    assert "kit.toast(" not in src
+    assert "kit.gate(draw_btn, symbol_in, expiry_sel)" in inspect.getsource(em.render)
+
+
+def test_draw_is_held_until_both_a_symbol_and_an_expiry_are_set(monkeypatch):
+    """The behaviour the toast used to report after the fact."""
+    from nicegui import ui
+
+    import bus_client
+
+    bus_client.reset()
+    handoff.take_pending_expected_move()
+    monkeypatch.setattr(bus_client, "request", lambda domain, command: None)
+
+    with ui.card() as card:
+        em.render()
+
+    draw = _button(card, "Draw")
+    symbol_in = _find(card, ui.input, "Symbol")
+    expiry_sel = _find(card, ui.select, "Expiry")
+
+    assert not draw.enabled, "no expiry has been picked yet"
+
+    expiry_sel.options = em.expiry_options(["2026-09-18"])
+    expiry_sel.value = "2026-09-18"
+    assert draw.enabled, "symbol + expiry are both set"
+
+    symbol_in.value = ""
+    assert not draw.enabled, "an empty symbol holds it again"
+
+
+def test_a_chain_landing_mid_compute_leaves_the_compute_spinner_up(monkeypatch):
+    """Two independent fetches share ONE scrim over the chart: loading a
+    symbol's expirations, and computing the move. Until 2026-09-20 either
+    version bump called ``chart_busy.hide()`` outright, so a chain load landing
+    while a compute was still running took the compute's spinner down with it —
+    the page read as finished while it was still working."""
+    import nicegui.ui as ng_ui
+    from nicegui import ui
+
+    import bus_client
+
+    bus_client.reset()
+    handoff.take_pending_expected_move()
+    calls = []
+    monkeypatch.setattr(bus_client, "request",
+                        lambda domain, command: calls.append((domain, command)))
+    captured_callbacks = []
+    monkeypatch.setattr(ng_ui, "timer", _make_capturing_timer(captured_callbacks))
+
+    with ui.card() as card:
+        em.render()
+
+    poll = _page_polls(captured_callbacks)[0]
+    scrim = _scrim(card)
+    expiry_sel = _find(card, ui.select, "Expiry")
+
+    # render() loaded the chain, so the page is already waiting on expirations.
+    assert scrim.visible
+
+    # The user picks an expiry — a SECOND wait, the compute, starts under it.
+    expiry_sel.options = em.expiry_options(["2026-09-18"])
+    expiry_sel.value = "2026-09-18"
+    assert [c for c in calls if c[1].get("type") == "expected_move"]
+
+    # The CHAIN lands first.
+    bus_client.bus().cache_set("cache:options:em_chain", {
+        "symbol": "SPY", "api": "SPY", "spot": 550.0,
+        "expirations": ["2026-09-18"],
+        "strikes": {"2026-09-18": [545.0, 550.0]}, "error": None})
+    poll()
+    assert scrim.visible, "the compute is still running; its spinner must stay up"
+
+    # …and the compute landing takes it down — the non-vacuity half.
+    bus_client.bus().cache_set("cache:options:expected_move", {
+        "symbol": "SPY", "expiry": "2026-09-18", "spot": 550.0, "atm_iv": 0.2,
+        "candles": [], "em_upper": [], "em_lower": [], "legs": [], "error": None})
+    poll()
+    assert not scrim.visible, "nothing is outstanding any more"
+
+
+def test_the_charts_data_colours_and_leg_encoding_are_untouched():
+    """A must-not-change guard: green on both sides of the migration. The candle
+    up/down, the cone's two ends, the put/call hues and the short-solid /
+    long-dashed leg encoding are DATA."""
+    assert (em.UP_COLOR, em.DOWN_COLOR) == ("#26a69a", "#ef5350")
+    assert (em.EM_UP_COLOR, em.EM_DOWN_COLOR) == ("#66bb6a", "#ef5350")
+    assert (em.PUT_COLOR, em.CALL_COLOR) == ("#ef9a9a", "#90caf9")
+    lines = em.leg_lines([{"strike": 5.0, "option_type": "call", "side": "long"},
+                          {"strike": 4.0, "option_type": "put", "side": "short"}])
+    assert lines[0]["color"] == em.CALL_COLOR and lines[0]["dashStyle"] == "Dash"
+    assert lines[1]["color"] == em.PUT_COLOR and "dashStyle" not in lines[1]
+
+
+def test_the_stock_module_construction_survives_the_migration():
+    """A must-not-change guard: green on both sides. ``extras=["stock"]`` +
+    ``type="stockChart"`` + in-place ``update()`` is the combination CLAUDE.md's
+    blanket rule forbade and commit 4980539 measured and settled FOR THIS PAGE
+    (1 → 3 series, no throw). Nothing here may drift back."""
+    import inspect
+
+    src = inspect.getsource(em.render)
+    assert 'type="stockChart"' in src and 'extras=["stock"]' in src
+    fig = em.expected_move_figure(_payload())
+    assert fig["xAxis"]["ordinal"] is True
+    assert fig["rangeSelector"]["enabled"] is False
+    assert fig["navigator"]["enabled"] is False
+    assert fig["scrollbar"]["enabled"] is False

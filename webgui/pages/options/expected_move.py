@@ -7,11 +7,20 @@ computed in ``services/options_svc``. Pure figure builders are unit-tested.
 Reached via a new-browser-tab handoff (handoff.send_to_expected_move) from the
 Scanner / Paper / Captured / Calculator pages, or standalone from the nav.
 Chart is Highcharts candlestick (extras=["stock"], which also provides the axis
-crosshair label boxes)."""
+crosshair label boxes).
+
+**The frame is ``pages/ui_kit.py``'s (2026-09-20)** — and it is the first thing
+that has ever NAMED this page on screen: it carries no title of its own and no
+tab strip sits above it, so a reader arriving from a hand-off used to meet a
+control row and a chart. ⚠ The chart construction below is untouched and must
+stay so: ``extras=["stock"]`` + ``type="stockChart"`` + in-place ``update()`` is
+the combination CLAUDE.md's blanket rule forbade, measured and settled FOR THIS
+PAGE in commit 4980539 (1 → 3 series, no throw); and every colour in this module
+encodes a value."""
 
 import math
 
-from .theme import BTN_3D, MUTED
+from .theme import MUTED
 
 UP_COLOR = "#26a69a"
 DOWN_COLOR = "#ef5350"
@@ -226,19 +235,23 @@ def render():
     consumed once on load, its command enqueued immediately, and its chain
     loaded so the dropdowns populate. Standalone flow: the user types a symbol
     (chain loads on tab-out/Enter), picks an expiry (draws), and optionally
-    picks a strike + put/call (local repaint only)."""
+    picks a strike + put/call (local repaint only).
+
+    ⚠ One behaviour change with the 2026-09-20 kit migration: ``kit.symbol_field``
+    carries the app-wide ``enter_always=True``, so pressing **Enter** on an
+    UNCHANGED symbol now reloads its expirations where it used to do nothing.
+    That is the standard's intent — Enter is the reader pressing Load — and it
+    costs one ``em_chain`` command. Tab-out keeps its dedup either way."""
     from nicegui import ui
 
     import bus_client
 
     from pages import busy as _busy
+    from pages import ui_kit as kit
 
     from pages.ui_guard import guard
 
     from . import handoff
-    from .inputs import bind_symbol_load, select_all_on_focus
-
-    # No page title — the tab strip names the page (2026-07-11 cleanup).
 
     # "chain" holds the last-loaded ``cache:options:em_chain`` payload (expiries
     # + per-expiry strike ladders); "payload" holds the last expected-move result
@@ -264,28 +277,83 @@ def render():
              "drawn_symbol": None, "strike_touched": False,
              "strike_seeding": False, "preserve_handed_legs": False}
 
-    with ui.row().classes("items-end gap-3 flex-wrap"):
-        symbol_in = select_all_on_focus(ui.input("Symbol", value="SPY").classes("w-28"))
-        expiry_sel = ui.select({}, label="Expiry", with_input=True).classes("w-56")
-        strike_sel = ui.select({}, label="Strike (optional)",
-                               with_input=True, clearable=True).classes("w-40")
-        type_tog = ui.toggle(["put", "call"], value="put")
-        lookback_sel = ui.select(em_lookback_options(), value="auto",
-                                 label="Look-back").classes("w-40")
-        draw_btn = ui.button("Draw", icon="show_chart", color=None).props("no-caps").classes(BTN_3D)
-        status = ui.label("").classes("opacity-70 text-sm")
+    with kit.page():
+        # ⚠ ``stale=False``. ``options:expected_move`` is REQUEST/RESPONSE — the
+        # service publishes it only in answer to a Draw — so nothing is ever due
+        # and an age can never mean "behind". The stamp still answers the
+        # question this reader has: whether the cone on screen is the one the
+        # last Draw brought back. No page ACTION sits beside it — Draw, in the
+        # control bar under it, is this screen's one action.
+        kit.header("Expected Move", view="options:expected_move", stale=False)
 
-    summary_lbl = ui.label("").classes(f"text-sm {MUTED}")
+        with kit.control_bar():
+            symbol_in = kit.symbol_field(value="SPY", on_load=lambda: _load_chain())
+            expiry_sel = kit.select_field("Expiry", {}, with_input=True,
+                                          width="w-56")
+            strike_sel = kit.select_field("Strike (optional)", {}, with_input=True,
+                                          clearable=True, width="w-40")
+            # Stays a raw ``ui.toggle``: put/call is a two-state segmented
+            # picker over an ALREADY-loaded ladder, not a field with a value to
+            # type, and ``ui.toggle`` is not one of the controls the kit guards.
+            type_tog = ui.toggle(["put", "call"], value="put")
+            lookback_sel = kit.select_field("Look-back", em_lookback_options(),
+                                            value="auto", width="w-40")
+            # The page's Go button, already sitting right after the last field.
+            draw_btn = kit.button("Draw", kind="primary", icon="show_chart")
 
-    # stockChart gives an ordinal x-axis (collapses non-trading-day gaps); the
-    # stock module also provides candlestick + crosshair label boxes.
-    chart_box = ui.element("div").classes("w-full")
-    with chart_box:
-        chart = ui.highchart(expected_move_figure({}), type="stockChart",
-                             extras=["stock"]).classes("w-full")
-    # Both waits land here: loading a symbol's expirations, and computing the move
-    # itself. Until either returns the chart still shows the previous symbol.
-    chart_busy = _busy.build_busy(chart_box, "Loading…")
+        # ⚠ The two rules below are what make ``kit.gate`` BITE: it asks each
+        # field's OWN validation, and a field with none is always valid. They
+        # are deliberately SILENT (``without_auto_validation``) — a reader
+        # mid-retype of a ticker, or a symbol switch that drops the kept expiry
+        # out of the new chain, must not turn a field red. The held Draw button
+        # is the signal, which is the whole point of gating rather than
+        # toasting. ``error = None`` undoes the one ``validate()`` the
+        # ``validation`` setter runs as it is assigned.
+        for _f, _rule in ((symbol_in, {"Enter a symbol": lambda v: bool((v or "").strip())}),
+                          (expiry_sel, {"Pick an expiry": lambda v: bool(v)})):
+            _f.validation = _rule
+            _f.without_auto_validation()
+            _f.error = None
+
+        status = kit.status_line()
+        summary_lbl = ui.label("").classes(f"text-sm {MUTED}")
+
+        # stockChart gives an ordinal x-axis (collapses non-trading-day gaps); the
+        # stock module also provides candlestick + crosshair label boxes.
+        chart_box = ui.element("div").classes("w-full")
+        with chart_box:
+            chart = ui.highchart(expected_move_figure({}), type="stockChart",
+                                 extras=["stock"]).classes("w-full")
+        # Both waits land here: loading a symbol's expirations, and computing the
+        # move itself. Until either returns the chart still shows the previous
+        # symbol. Deliberately ``build_busy`` rather than ``kit.region``: nothing
+        # on this page CLEARS a container — the chart is one persistent element
+        # updated in place — so a region would be a layout wrapper with no job,
+        # and the spinner belongs on the chart box it covers.
+        chart_busy = _busy.build_busy(chart_box, "Loading…")
+
+    # ── the two waits share ONE scrim ────────────────────────────────────────
+    # Loading a symbol's expirations and computing the move are INDEPENDENT
+    # fetches that are routinely in flight together (picking an expiry while the
+    # chain for a new symbol is still coming), and both cover the chart. Until
+    # 2026-09-20 either one landing called ``chart_busy.hide()`` outright, so a
+    # chain load landing mid-compute took the compute's spinner down with it and
+    # the page read as finished while it was still working. ``waits`` names what
+    # is still outstanding; only the last one out turns the light off.
+    waits = set()
+
+    def _wait_start(key, msg):
+        waits.add(key)
+        chart_busy.show(msg)
+
+    def _wait_done(key):
+        waits.discard(key)
+        # ``visible()`` is the backstop's footprint: if busy.py's 30 s watchdog
+        # has already taken the scrim down, an outstanding claim is stale and
+        # would otherwise swallow the NEXT fetch's hide.
+        if not waits or not chart_busy.visible():
+            waits.clear()
+            chart_busy.hide()
 
     def _current_legs():
         """The leg list for the CURRENT strike/type selection (may be empty)."""
@@ -324,8 +392,13 @@ def render():
 
     @guard
     def _enqueue(payload):
+        # ⚠ A refusal, no longer a message. "Symbol + expiry required." was FIELD
+        # VALIDATION delivered as an outcome toast, and the Draw button is now
+        # simply held disabled until both are set (``kit.gate`` below), so there
+        # is nobody left to tell: every other caller here is internal and already
+        # knows it has both. The check stays so an internal caller can never
+        # enqueue a half-payload.
         if not payload or not payload.get("symbol") or not payload.get("expiry"):
-            ui.notify("Symbol + expiry required.", type="warning")
             return
         # Remember the query (sans look-back) so a look-back change can re-run it.
         state["last"] = {k: payload.get(k) for k in ("symbol", "expiry", "legs")}
@@ -337,7 +410,7 @@ def render():
         args = {**payload, "lookback": lookback_sel.value}
         bus_client.request("options", {"type": "expected_move", "args": args})
         status.text = f"Computing expected move for {payload['symbol']}…"
-        chart_busy.show(f"Computing expected move for {payload['symbol']}…")
+        _wait_start("compute", f"Computing expected move for {payload['symbol']}…")
 
     @guard
     def _draw():
@@ -367,7 +440,7 @@ def render():
             return
         bus_client.request("options", {"type": "em_chain", "args": {"symbol": sym}})
         status.text = f"Loading {sym} expirations…"
-        chart_busy.show(f"Loading {sym} expirations…")
+        _wait_start("chain", f"Loading {sym} expirations…")
 
     @guard
     def _strike_changed():
@@ -470,7 +543,9 @@ def render():
             _draw()
 
     draw_btn.on_click(_draw)
-    bind_symbol_load(symbol_in, _load_chain)          # Enter OR tab-out
+    # Held disabled until there is both a symbol and an expiry to draw. Wired
+    # BEFORE the hand-off block below, so a seeded expiry hands Draw back too.
+    kit.gate(draw_btn, symbol_in, expiry_sel)
     expiry_sel.on_value_change(lambda e: _expiry_changed())
     strike_sel.on_value_change(lambda e: _strike_changed())
     type_tog.on_value_change(lambda e: _strike_changed())
@@ -485,10 +560,10 @@ def render():
         if v["options:expected_move"] != state["ver"]:
             state["ver"] = v["options:expected_move"]
             _repaint(bus_client.read("options:expected_move"))
-            chart_busy.hide()
+            _wait_done("compute")
         if v["options:em_chain"] != state["chain_ver"]:
             _apply_chain(v["options:em_chain"])
-            chart_busy.hide()
+            _wait_done("chain")
 
     pending = handoff.take_pending_expected_move()
     if pending:
@@ -515,8 +590,10 @@ def render():
         state["ver"] = bus_client.read_version("options:expected_move")
         state["chain_ver"] = bus_client.read_version("options:em_chain")
         # A symbol-only hand-off (the Symbol Dossier's link) has nothing to
-        # draw yet: load its expirations and let the user pick one, rather than
-        # toasting "Symbol + expiry required." at them.
+        # draw yet: load its expirations and let the user pick one. This branch
+        # is older than the gate and was the evidence FOR it — it existed to
+        # route around a "Symbol + expiry required." toast fired at a reader who
+        # had asked for nothing wrong. Draw now simply stays held until the pick.
         if pending.get("expiry"):
             _enqueue(pending)
         _load_chain()

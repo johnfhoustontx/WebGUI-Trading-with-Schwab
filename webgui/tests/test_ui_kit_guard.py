@@ -55,7 +55,6 @@ ALLOWED = {
     # button_classes(...) - the drift the kit exists to stop. The panel's two
     # ACTIONS (Load, Columns) go through the kit.
     "options/entry_panel.py": {"button": 1},
-    "options/expected_move.py": {"button": 1, "notify": 1},
     "options/gamma.py": {"button": 8, "notify": 7},
     # The leg row's four one-click controls, and they stay: the SELL/BUY side
     # toggle, the two ‹ › strike steppers and the cycling CALL/PUT/STOCK picker.
