@@ -26,11 +26,28 @@ The GEOMETRY is shared; the COLOURS are not. The Calculator paints the legs in
 the near-black ``CALC_*`` language while the Simulator keeps the app-wide dark
 navy — so the palette enters as the ``tokens`` argument and this module imports
 no page's theme constants.
+
+**Six of the ten buttons here are ACTIONS and go through ``pages/ui_kit.py``**
+(2026-09-20): both layouts' remove, both layouts' Add leg, Reset to template and
+the typed-price reset. **Four are not buttons at all and stay raw** — the
+SELL/BUY side toggle, the two ‹ › strike steppers and the cycling CALL/PUT/STOCK
+picker. Each of those is a segmented or stepping control living in a ~40px table
+track, and each carries a per-leg READING (long-cyan / short-green) that the
+kit's four kinds cannot express; the reason is recorded in the guard's
+``ALLOWED``.
+
+⚠ **The ``row`` layout is rescue.py's screen.** It references ``tk`` nowhere, so
+repainting the palette cannot reach it — the only two places this module can
+change Rescue are its remove icon and its Add leg, and both are the kit. ``layout``
+must keep defaulting to ``"row"``: Rescue passes none, and a changed default
+would hand it the table layout with ``delta_for=None`` silently.
 """
 import math
 from types import SimpleNamespace
 
 from nicegui import ui
+
+from pages import ui_kit as kit
 
 from . import entry as _entry
 from . import strategies as S
@@ -189,15 +206,16 @@ def coerce_choice(value, options):
 # tokens while the Simulator keeps the app-wide dark navy — the two pages share
 # the GEOMETRY, not the colours. The defaults below are that dark navy, so a page
 # that passes nothing still looks like the rest of the app.
+# ⚠ ``side_long`` / ``side_short`` (long-cyan, short-green) and ``manual`` (the
+# typed-price amber) are READINGS, not chrome — they say what a leg IS. The four
+# button skins that used to sit here (``remove`` / ``remove_off`` / ``add`` /
+# ``reset``) went on 2026-09-20 with the buttons they painted: the kit paints
+# those now, and a token nothing reads is worse than no token.
 DEFAULT_LEG_TOKENS = {
     "frame": "border border-[#213152] rounded-[2px] bg-[rgba(9,14,20,.55)]",
     "eyebrow": "text-[8px] tracking-[.14em] text-[#7f8db0] whitespace-nowrap truncate",
     "num": "text-[10px] text-[#7189a0]",
     "delta": "text-[11px] text-[#cdd8ee] whitespace-nowrap",
-    "remove": "text-[10px] text-[#9db0c2] border border-[#3a4a5b] rounded-[2px]",
-    "remove_off": "text-[10px] text-[#4e5f70] border border-[#26313d] rounded-[2px] cursor-not-allowed",
-    "add": "text-[9px] tracking-[.18em] text-[#a7dceb] border border-dashed border-[#3a6070] rounded-[2px]",
-    "reset": "text-[9px] tracking-[.18em] text-[#8aa0b4] border border-[#2c3b4b] rounded-[2px]",
     # The one-click toggles (SIDE, TYPE, the strike steppers) and the
     # typed-price reset.
     "toggle": "text-[10px] tracking-[.12em] border rounded-[2px]",
@@ -306,8 +324,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     ``entry.should_refill``). ``tokens`` overrides its palette (see
     ``leg_tokens``), ``delta_for(leg)`` supplies the per-leg delta — omit it and
     the DELTA cell collapses, exactly as ``show_premium=False`` collapses PRICE —
-    ``min_legs`` floors the remove button and ``on_reset`` adds a RESET TO
-    TEMPLATE button beside ADD LEG. The handle gains ``place_pick`` and
+    ``min_legs`` floors the remove button and ``on_reset`` adds a "Reset to
+    template" button beside "Add leg". The handle gains ``place_pick`` and
     ``refill_prices`` for the page's grid clicks and chain loads. All of these
     are inert in row mode."""
     # A typo here would silently render the WRONG screen with nothing to see it:
@@ -500,31 +518,40 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
             if show_premium:
                 ui.number(lab("Premium"), value=leg.get("premium") or 0.0, format="%.2f") \
                     .classes("w-20").on_value_change(lambda e, i=i: _set_field(i, "premium", e.value))
-            ui.button(icon="delete", on_click=lambda e, i=i: _remove(i)) \
-                .props("flat dense round").classes("w-10").tooltip("Remove leg")
+            # One of the TWO places this module can change rescue.py's screen,
+            # and a genuine action: the kit owns what a remove looks like.
+            # ``w-10`` stays — the row header's trailing spacer is that wide.
+            kit.icon_button("delete", tooltip="Remove leg",
+                            on_click=lambda e, i=i: _remove(i)).classes("w-10")
         return sw
 
     def _remove_button(i):
         live = can_remove(len(state["legs"]), min_legs)
         floor = max(int(min_legs or 0), 0)
-        # The tooltip hangs off a WRAPPER, not the button: Quasar kills pointer
-        # events on a disabled q-btn, and the locked state is precisely when the
-        # explanation is worth reading.
+        locked_msg = f"At least {floor} leg{'' if floor == 1 else 's'} required"
+        # The WRAPPER survives the kit migration, and it is load-bearing: Quasar
+        # kills pointer events on a disabled q-btn, so the tooltip the kit mounts
+        # INSIDE the button cannot be read at exactly the moment the explanation
+        # is worth reading. The locked state therefore repeats it on the wrapper,
+        # where the pointer still lands.
         with ui.element("div").classes("shrink-0 self-end flex items-center"):
-            btn = ui.button("✕", on_click=lambda e, i=i: _remove(i), color=None) \
-                .props("flat dense no-caps") \
-                .classes(f"leg-remove px-1 min-h-0 {tk['remove'] if live else tk['remove_off']}")
+            btn = kit.icon_button("close",
+                                  tooltip="Remove leg" if live else locked_msg,
+                                  on_click=lambda e, i=i: _remove(i))
+            btn.classes("leg-remove")
             btn.set_enabled(live)
-            ui.tooltip("Remove leg" if live
-                       else f"At least {floor} leg{'' if floor == 1 else 's'} required")
+            if not live:
+                ui.tooltip(locked_msg).props("delay=350").classes("max-w-[340px]")
 
     def _table_footer():
         with ui.row().classes("items-center gap-2 no-wrap"):
-            ui.button("ADD LEG", on_click=lambda e: _add(), color=None) \
-                .props("flat dense no-caps").classes(f"{tk['add']} px-2")
+            kit.button("Add leg", kind="secondary", icon="add",
+                       on_click=lambda: _add())
             if on_reset is not None:
-                ui.button("RESET TO TEMPLATE", on_click=lambda e: on_reset(), color=None) \
-                    .props("flat dense no-caps").classes(f"{tk['reset']} px-2")
+                # QUIET: re-seeding the template is a way back, not the page's
+                # action — beside Add leg it must not read as one.
+                kit.button("Reset to template", kind="quiet",
+                           on_click=lambda: on_reset())
 
     def _table_head():
         grid = _TABLE_GRIDS[(bool(show_premium), delta_for is not None)]
@@ -595,10 +622,16 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 with ui.element("div").classes("flex items-center gap-0.5 min-w-0 no-wrap"):
                     pw = ui.number(value=leg.get("premium"), format="%.2f") \
                         .props("dense").classes("leg-price flex-1 min-w-0")
-                    rb = ui.button("↺", color=None, on_click=lambda e, i=i: _reset_price(i)) \
-                        .props("flat dense no-caps") \
-                        .classes(f"leg-price-reset {tk['manual']} px-0.5 min-h-0 min-w-0")
-                    rb.tooltip("Typed price - click to use the chain's price")
+                    rb = kit.icon_button(
+                        "restart_alt",
+                        tooltip="Typed price - click to use the chain's price",
+                        on_click=lambda e, i=i: _reset_price(i))
+                    # REPLACE, never add: the kit paints its icon buttons muted
+                    # and the amber is this row's "the price was typed" reading.
+                    # Both are one-class ``text-[#hex]`` arbitraries, so they tie
+                    # on specificity and stylesheet order alone would pick the
+                    # winner — the DESK_NEON_CSS trap, one property over.
+                    rb.classes(replace=f"leg-price-reset {tk['manual']} min-w-0")
                     rb.set_visibility(bool(leg.get("_manual_premium")) and not stock)
                     pw.on_value_change(lambda e, i=i, rb=rb: _set_price(i, e.value, rb))
                     if stock:
@@ -663,7 +696,10 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
             if table:
                 _table_footer()
             else:
-                ui.button("Add leg", icon="add", on_click=lambda e: _add()).props("flat dense")
+                # The SECOND of the two places this module can change
+                # rescue.py's screen, and the other genuine action.
+                kit.button("Add leg", kind="secondary", icon="add",
+                           on_click=lambda: _add())
 
     def _add():
         state["legs"].append({"option_type": "call", "side": "long", "strike": None,

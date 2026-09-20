@@ -102,6 +102,40 @@ Measured in the harness on the real `sim_meta` payload after the move: all six `
 
 ⚠ **Keep every hook class**: `leg-trow`, `leg-num`, `leg-side`, `leg-type`, `leg-strike-dn`, `leg-strike-up`, `leg-price-reset`, `leg-expiry`, `leg-strike`, `leg-price`, `leg-price-source`, `leg-thead`, `leg-remove`, `leg-row`, `leg-head`, `entry-expiry`, `entry-refresh`, `entry-columns`, `strategy-menu-btn`. Twelve test files select on them.
 
+**CORRECTED after doing it — four things this task settled:**
+
+1. **"`kit.icon_button` … keeping the wrapper" is a conflict the plan did not
+   resolve.** `kit.icon_button` REQUIRES a tooltip and builds it INSIDE the
+   button, which is the one place a *disabled* q-btn cannot deliver it — the
+   whole reason the wrapper exists. Shipped: the kit's tooltip carries the
+   state's sentence, and the LOCKED state repeats it on the wrapper, which is
+   then the only one that can fire. Live → one tooltip, inside. Locked → one
+   tooltip, outside.
+2. **The typed-price amber needs `classes(replace=…)`, not an added class.**
+   `kit.icon_button` paints `_t.MUTED`; both it and `tk['manual']` are
+   one-class `text-[#hex]` arbitraries, so they tie on specificity and
+   stylesheet order alone would pick the winner — the `DESK_NEON_CSS` trap.
+3. **Five tokens die with the buttons they painted** and are NOT data colours:
+   `DEFAULT_LEG_TOKENS`' `remove` / `remove_off` / `add` / `reset` and
+   `DEFAULT_PANEL_TOKENS`' `btn`. Leaving them would be the half-live defect
+   Task 3 of Phases 3 & 4 already names. Every encoding the plan lists is
+   untouched. `test_leg_editor.py:100` was re-aimed to match.
+4. ⚠ **`strategy_menu`'s caption is rendered by NOBODY**, and its own comment
+   claimed otherwise ("the Simulator and Rescue … are byte-identical"). Measured:
+   `entry_panel` passes `caption=False` for the Calculator AND the Simulator, and
+   `rescue.py` passes it too, inside `kit.field("Strategy")`. Moving the caption
+   onto `theme.EYEBROW` is therefore a zero-visual-impact correctness fix. The
+   comment and two test docstrings are corrected in place. **This narrows Task 3's
+   warning about `test_the_page_does_not_caption_the_strategy_picker_twice`: the
+   Calculator's caption is already off at the panel, so only adopting
+   `kit.field("Strategy")` around it can re-introduce the word.**
+
+**Label re-aims beyond the one the plan named** (`test_options_simulator.py:579`):
+`test_leg_editor.py` ×5 (the two footer labels ×4 sites, the `tk['remove']` state
+test, the token-coverage list), `test_options_simulator.py::test_simulator_legs_footer_offers_add_leg_and_no_reset`,
+and `test_options_calculator_apply.py:381` (`_click(root, "REFRESH")` → `"Load"`),
+which the plan had filed under Task 3.
+
 **Commit:** `feat(leg-editor, entry-panel): the shared leg widgets on the page kit`
 
 ---

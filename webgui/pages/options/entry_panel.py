@@ -10,6 +10,13 @@ what a pick means (``on_pick``) and owns the leg editor mounted into
 Colours enter as ``tokens`` (see ``panel_tokens``) so the Calculator can paint
 the panel in its near-black ``[calc]`` language while the Simulator keeps the
 app-wide dark navy — the same split ``leg_editor.leg_tokens`` makes.
+
+**The panel's two ACTIONS go through ``pages/ui_kit.py``** (2026-09-20): Load
+(the page's refresh — a screen with a Symbol control bar has no header Refresh,
+because its Load button IS the refresh) and Columns. **The expiry pill stays
+raw**: it is a segmented picker built once per listed expiration on every
+repaint, and its selected state is a class SWAP the kit's four button kinds
+cannot express. That reason is recorded in the guard's ``ALLOWED``.
 """
 import datetime as dt
 from types import SimpleNamespace
@@ -17,6 +24,7 @@ from types import SimpleNamespace
 from nicegui import ui
 
 import app_settings
+from pages import ui_kit as kit
 
 from . import chain_grid as cg
 from . import strategy_menu
@@ -30,7 +38,10 @@ DEFAULT_PANEL_TOKENS = {
     "muted": "text-[11px] text-[#7f8db0]",
     "spot": "text-[15px] font-semibold text-[#eaf0fb]",
     "ticker": "w-[110px]",
-    "btn": "text-[10px] tracking-[.12em] text-[#cdd8ee] border border-[#243353] rounded-[2px] bg-[#15213b]",
+    # ⚠ ``bid`` / ``ask`` / ``strike_atm`` / ``itm`` / ``pill_on`` / ``pill_off``
+    # are READINGS — bid-green, ask-red, the at-the-money amber, the in-the-money
+    # wash and the picker's selected state. The ``btn`` skin that used to sit here
+    # went on 2026-09-20 with the two buttons it painted; the kit paints those.
     "pill_on": "text-[#eaf0fb] border-[#3b82f6] bg-[#1b2950]",
     "pill_off": "text-[#8794b4] border-[#243353] bg-transparent",
     "strike": "text-[11px] font-semibold text-[#cdd8ee] bg-[#0c1426]",
@@ -153,17 +164,20 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
                 menu_class=strategy_menu_class)
             bar_extra = ui.row().classes("items-end gap-2 flex-wrap")
             ui.element("div").classes("flex-1")
-            refresh_btn = ui.button("REFRESH", color=None) \
-                .props("flat dense no-caps").classes(f"entry-refresh {tk['btn']} px-2") \
-                .tooltip("Re-pull the chain and quotes")
+            # "Load", not "Refresh": this panel IS the page's control bar, and
+            # the standard gives a screen with a Symbol field no header Refresh
+            # — its Load button is the refresh (rescue.py ships the same shape).
+            refresh_btn = kit.button("Load", kind="primary", icon="refresh",
+                                     tooltip="Re-pull the chain and quotes") \
+                .classes("entry-refresh")
             status_lbl = ui.label("").classes(f"entry-status {tk['muted']} truncate")
 
         # ── expiry strip ──────────────────────────────────────────────────
         with ui.row().classes("w-full items-center gap-2 no-wrap"):
             ui.label("EXPIRY").classes(f"{tk['eyebrow']} shrink-0")
             strip = ui.row().classes("entry-strip flex-1 min-w-0 gap-1 no-wrap overflow-x-auto")
-            cols_btn = ui.button("COLUMNS", color=None) \
-                .props("flat dense no-caps").classes(f"entry-columns {tk['btn']} px-2 shrink-0")
+            cols_btn = kit.button("Columns", kind="secondary", icon="view_column") \
+                .classes("entry-columns shrink-0")
             with cols_btn:
                 col_menu = ui.menu().props("auto-close=false")
 

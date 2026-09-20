@@ -116,8 +116,14 @@ def _texts(root):
 
 def test_the_strategy_caption_is_rendered_by_default():
     """The third override, and the third to default to today's behaviour: the
-    Simulator and Rescue have no other label for this control, so the caption
-    has to stay unless a page says otherwise."""
+    caption stays unless a page says otherwise.
+
+    ⚠ Its original reason - "the Simulator and Rescue have no other label for
+    this control" - was measured false on 2026-09-20: both pass
+    ``caption=False`` today (through the entry panel and through
+    ``kit.field("Strategy")`` respectively). The DEFAULT is still what this
+    test pins, because flipping it would silently strip the label from the
+    next caller that wants one."""
     with ui.card() as root:
         SM.build_strategy_menu(value="PCS")
     assert "Strategy" in _texts(root)
@@ -145,3 +151,41 @@ def test_the_class_default_matches_the_factory_default():
     with ui.card() as root:
         SM.StrategyMenu(value="PCS")
     assert "Strategy" in _texts(root)
+
+
+# ── the kit migration (Phase 2, Task 2) ──────────────────────────────────────
+
+def test_the_strategy_caption_wears_the_apps_field_label():
+    """It is a label above a field, and the standard says those look one way
+    everywhere.
+
+    ⚠ Measured while doing it: NO live mount draws this label. The entry panel
+    passes ``caption=False`` for both the Calculator and the Simulator, and
+    rescue.py mounts the picker inside ``kit.field("Strategy")`` and passes it
+    too. So this is the default a FUTURE caller gets, and pinning it to the
+    app's ``EYEBROW`` is what stops that caller arriving with a second spelling
+    of a field label - it was ``text-xs opacity-60``, which is neither."""
+    from pages.options import theme
+    with ui.card() as root:
+        SM.build_strategy_menu(value="PCS")
+    caps = [e for e in root.descendants() if getattr(e, "text", None) == "Strategy"]
+    assert len(caps) == 1
+    assert caps[0].classes == theme.EYEBROW.split()
+
+
+def test_the_two_triggers_stay_raw_buttons_on_purpose():
+    """MUST NOT CHANGE - passes on both sides, and is here so the guard's
+    ``{"button": 2}`` is a decision rather than an omission. This is a cascading
+    VALUE PICKER standing in for ``ui.select``: the kit has no such field, and
+    its four button kinds carry neither a current-value label nor a menu anchor.
+    Both spellings survive because ``boxed`` decides whether the Quasar outline
+    (which forces a transparent background page CSS cannot beat) is dropped."""
+    with ui.card():
+        boxed = SM.build_strategy_menu(value="PCS", boxed=True)
+        plain = SM.build_strategy_menu(value="PCS")
+    for sm in (boxed, plain):
+        assert isinstance(sm.button, ui.button)
+        assert sm.button._props.get("icon-right") == "arrow_drop_down"
+        assert sm.button.text == "Credit spread — put"
+    assert plain.button._props.get("outline") is True
+    assert boxed.button._props.get("outline") is None

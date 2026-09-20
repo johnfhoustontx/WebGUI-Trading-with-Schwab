@@ -6,13 +6,21 @@ write — assigning fires the change handlers, like a select) plus
 ``.on_value_change(handler)``. Both the Calculator and the Simulator mount it, so
 the picker never drifts. The hierarchy + display labels come from
 ``strategies.STRATEGY_MENU`` / ``strategy_label`` (the single source of truth).
+
+⚠ **Its trigger deliberately does NOT go through ``pages/ui_kit.py``** — it is a
+cascading VALUE PICKER standing in for ``ui.select``, and the kit has no such
+field: none of its four button kinds carries a current-value label or a menu
+anchor. Both spellings survive because ``boxed`` decides whether to drop the
+Quasar outline, which forces a transparent background page CSS cannot beat. The
+reason is recorded in the guard's ``ALLOWED``; the CAPTION, which is an ordinary
+field label, wears the app's ``EYEBROW`` like every other one (2026-09-20).
 """
 from types import SimpleNamespace
 
 from nicegui import ui
 
 from . import strategies as S
-from .theme import STRATEGY_BTN
+from .theme import EYEBROW, STRATEGY_BTN
 
 
 class StrategyMenu:
@@ -36,13 +44,18 @@ class StrategyMenu:
         menu_cls = ("strat-menu-navy" if boxed else "") if menu_class is None else menu_class
 
         with ui.column().classes("gap-0 " + classes):
-            # ``caption=False`` for a page that already names the control in its
-            # own chrome (the Calculator's ① STRATEGY frame chip), where the
-            # caption would say the word twice one line apart. Defaults to True,
-            # so the Simulator and Rescue — which have no other label for this
-            # control — are byte-identical.
+            # ``caption=False`` for a page that already names the control
+            # itself, where the caption would say the word twice one line apart.
+            # ⚠ Corrected 2026-09-20: this comment used to say the default was
+            # what "the Simulator and Rescue" rendered. Neither does — the
+            # entry panel passes ``caption=False`` for both the Calculator and
+            # the Simulator, and Rescue mounts the picker inside
+            # ``kit.field("Strategy")`` and passes it too. So NO live mount
+            # draws this label today; it is the default a future caller gets,
+            # and it wears the app's one field-label look so that caller cannot
+            # arrive with a second spelling of it.
             if caption:
-                ui.label("Strategy").classes("text-xs opacity-60")
+                ui.label("Strategy").classes(EYEBROW)
             # ``boxed`` (Calculator): drop the Quasar outline + color so a page can
             # style the button like its input boxes (the outline forces a transparent
             # background that page CSS can't override). Default keeps the outline look.

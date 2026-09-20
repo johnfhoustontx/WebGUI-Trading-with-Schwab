@@ -375,10 +375,12 @@ def test_loading_a_different_symbol_drops_the_previous_symbols_numbers(page):
 def test_reloading_the_same_symbol_keeps_the_result_on_screen(page):
     # A refresh, not a new subject — and the restore-on-navigation path does
     # exactly this, so wiping here would blank the screen on every return visit.
+    # The shared panel's button says "Load" since 2026-09-20 (a Symbol control
+    # bar's Load IS its refresh); the act it performs is unchanged.
     root, polls = page
     _calculate_spy(root, polls)
 
-    _click(root, "REFRESH")
+    _click(root, "Load")
     texts = _texts(root)
 
     assert "ENTRY CREDIT" in texts

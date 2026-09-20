@@ -9,11 +9,13 @@ call lowers its entry in the same commit - otherwise the list stops describing
 the code. An entry may outlive the migration only with a written reason (a
 control that is not an action button: a segmented picker, a leg-table toggle).
 
-⚠ FOUR entries are PERMANENT rather than pending, and each carries its reason
-above it: ``options/detail.py`` (Phase 1), and ``desk.py`` / ``market.py`` /
-``sentiment_momentum.py`` (Phases 3 & 4). Every other entry is a page no phase
-has migrated yet and is expected to fall to zero and be deleted. The nine
-screens Phases 3 & 4 covered left no entry at all except those three.
+⚠ SEVEN entries are PERMANENT rather than pending, and each carries its reason
+above it: ``options/detail.py`` (Phase 1), ``desk.py`` / ``market.py`` /
+``sentiment_momentum.py`` (Phases 3 & 4), and the three shared Options widgets
+``options/entry_panel.py`` / ``options/leg_editor.py`` /
+``options/strategy_menu.py`` (Phase 2). Every other entry is a page no phase has
+migrated yet and is expected to fall to zero and be deleted. The nine screens
+Phases 3 & 4 covered left no entry at all except those three.
 """
 import ast
 import collections
@@ -47,11 +49,29 @@ ALLOWED = {
     # not model. Not an action button - the panel's ACTIONS are the page's, and
     # they go through the kit into handle.actions.
     "options/detail.py": {"button": 1},
-    "options/entry_panel.py": {"button": 3},
+    # The expiry pill, and it stays: a SEGMENTED PICKER built once per listed
+    # expiration on every repaint, whose selected state is a class SWAP over
+    # pill_on / pill_off. kit.button's four kinds have no selected state, so
+    # routing it through them would mean a page-side swap over
+    # button_classes(...) - the drift the kit exists to stop. The panel's two
+    # ACTIONS (Load, Columns) go through the kit.
+    "options/entry_panel.py": {"button": 1},
     "options/expected_move.py": {"button": 1, "notify": 1},
     "options/gamma.py": {"button": 8, "notify": 7},
-    "options/leg_editor.py": {"button": 10},
+    # The leg row's four one-click controls, and they stay: the SELL/BUY side
+    # toggle, the two ‹ › strike steppers and the cycling CALL/PUT/STOCK picker.
+    # None is an action - each is a segmented or stepping control inside a
+    # ~40px table track, and all four carry a per-leg reading (long-cyan /
+    # short-green) the kit's kinds cannot express. The six ACTIONS - both
+    # layouts' remove and Add leg, Reset to template and the typed-price reset -
+    # go through the kit.
+    "options/leg_editor.py": {"button": 4},
     "options/simulator.py": {"button": 1, "notify": 1},
+    # The cascading Strategy trigger, boxed and plain, and it stays: a VALUE
+    # PICKER standing in for ui.select. The kit has no such field, and its
+    # button kinds carry neither a current-value label nor a menu anchor; the
+    # two spellings exist because ``boxed`` drops the Quasar outline, which
+    # forces a transparent background page CSS cannot beat.
     "options/strategy_menu.py": {"button": 2},
     "options/swing.py": {"button": 7, "table": 1},
     "portfolio.py": {"button": 1, "table": 3},

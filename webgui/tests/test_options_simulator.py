@@ -487,11 +487,14 @@ def test_simulator_floors_the_leg_count_at_one():
 
 def test_simulator_legs_footer_offers_add_leg_and_no_reset():
     """``on_reset`` stays None: the strategy picker already re-seeds the template
-    on every pick, so a RESET TO TEMPLATE button would be a second control for
-    the same act — a Calculator affordance, not one this page asked for."""
+    on every pick, so a "Reset to template" button would be a second control for
+    the same act — a Calculator affordance, not one this page asked for.
+
+    Both labels were sentence-cased on 2026-09-20 when the shared leg editor's
+    footer moved onto the page kit; the assertion is re-aimed, not relaxed."""
     labels = [b.text for b in _sim_buttons(_sim_container())]
-    assert "ADD LEG" in labels
-    assert "RESET TO TEMPLATE" not in labels
+    assert "Add leg" in labels
+    assert "Reset to template" not in labels
 
 
 def test_replay_pnl_panel_is_green_above_zero_and_red_below():
@@ -575,11 +578,17 @@ def _last_command(kind):
     return None
 
 
-def test_the_reload_button_says_refresh():
-    # The panel's REFRESH replaced "Load chain": Enter or tab-out on the ticker
-    # is the load, and this re-pulls the same symbol.
+def test_the_reload_button_says_load():
+    # The shared panel's one Go button replaced "Load chain": Enter or tab-out
+    # on the ticker is the load, and this re-pulls the same symbol.
+    #
+    # Renamed and re-aimed 2026-09-20 (was ..._says_refresh, asserting the
+    # upper-case "REFRESH"): a screen with a Symbol control bar carries no
+    # header Refresh, because its Load button IS the refresh - the shape
+    # rescue.py already ships. The behaviour it names is unchanged.
     labels = [b.text for b in _sim_buttons(_render_cold())]
-    assert "REFRESH" in labels
+    assert "Load" in labels
+    assert "REFRESH" not in labels
     assert "Load chain" not in labels and "Fetch snapshot" not in labels
 
 

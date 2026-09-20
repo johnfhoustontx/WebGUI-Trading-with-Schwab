@@ -253,3 +253,68 @@ def test_is_loaded_reports_whether_strikes_have_arrived(saved):
     panel.set_chain(_chain(), 571.0, expirations=_ALL)
     assert panel.is_loaded("2026-09-19") is True
     assert panel.is_loaded("2026-11-20") is False
+
+
+# ── the kit migration (Phase 2, Task 2) ──────────────────────────────────────
+# Two of the panel's three buttons are actions and go through ``pages/ui_kit``.
+# The third - the expiry pill - is a segmented picker rendered N times per
+# repaint, and stays raw with its reason in the guard's ALLOWED.
+
+
+def test_the_panels_go_button_says_load_and_is_the_pages_refresh(saved):
+    """A page with a Symbol control bar has no header Refresh, because its Load
+    button IS the refresh - ``rescue.py`` already ships exactly that shape. The
+    word changes from REFRESH; the behaviour (re-pull this symbol's chain and
+    quotes) does not, and both pages still wire it through ``panel.refresh_btn``."""
+    from pages.options import theme
+    panel, root = _panel()
+    btn = panel.refresh_btn
+    assert btn.text == "Load"
+    assert btn._props.get("icon") == "refresh"
+    assert "entry-refresh" in btn.classes
+    for tok in theme.BTN_PRIMARY.split():
+        assert tok in btn.classes
+    assert [e.text for e in btn.descendants() if isinstance(e, ui.tooltip)] == \
+        ["Re-pull the chain and quotes"]
+    assert btn in _all(root, "entry-refresh")
+
+
+def test_the_columns_button_is_a_kit_secondary_and_still_hosts_its_menu(saved):
+    """The column picker mounts as a CHILD of the trigger, so the kit button has
+    to keep working as the menu's anchor."""
+    from pages.options import theme
+    _, root = _panel()
+    btn = _all(root, "entry-columns")[0]
+    assert btn.text == "Columns"
+    assert btn._props.get("icon") == "view_column"
+    for tok in theme.BTN.split():
+        assert tok in btn.classes
+    assert [e for e in btn.descendants() if isinstance(e, ui.menu)], \
+        "the columns menu no longer hangs off its trigger"
+
+
+def test_the_expiry_pill_stays_raw_and_keeps_its_two_state_swap(saved):
+    """MUST NOT CHANGE - passes on both sides. A segmented picker, one per
+    listed expiration per repaint, whose selected state is a class SWAP; the
+    kit's four button kinds carry no selected state, so routing it through them
+    would mean a page-side swap over ``button_classes(...)`` - the exact drift
+    the kit exists to stop."""
+    panel, root = _panel()
+    panel.set_chain(_chain(), 571.0)
+    pills = _all(root, "entry-expiry")
+    on = EP.DEFAULT_PANEL_TOKENS["pill_on"].split()[0]
+    off = EP.DEFAULT_PANEL_TOKENS["pill_off"].split()[0]
+    assert [on in p._classes for p in pills] == [True, False]
+    assert [off in p._classes for p in pills] == [False, True]
+
+
+def test_the_panel_tokens_keep_every_encoding_and_lose_the_button_skin():
+    """bid-green, ask-red, the ATM amber, the ITM wash and the pill pair are
+    READINGS and are untouched. ``btn`` was the skin on the two controls the kit
+    now paints, and a token nothing reads is the half-live defect this phase
+    keeps finding."""
+    for reading in ("bid", "ask", "strike", "strike_atm", "itm", "cell", "pick",
+                    "pill_on", "pill_off", "rule", "frame", "eyebrow", "text",
+                    "muted", "spot", "ticker"):
+        assert reading in EP.DEFAULT_PANEL_TOKENS, reading
+    assert "btn" not in EP.DEFAULT_PANEL_TOKENS

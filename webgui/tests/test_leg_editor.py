@@ -99,9 +99,12 @@ from nicegui import ui
 
 def test_default_tokens_cover_every_key_the_table_renders():
     # A missing token key would raise mid-render, on a page that looks fine in
-    # every test that never mounts it.
-    for key in ("frame", "eyebrow", "num", "delta", "remove", "remove_off", "add",
-                "reset", "toggle", "side_long", "side_short", "step", "manual"):
+    # every test that never mounts it. Re-aimed 2026-09-20: ``remove`` /
+    # ``remove_off`` / ``add`` / ``reset`` are no longer rendered - the kit
+    # paints those four buttons - so requiring them here would keep four dead
+    # tokens alive. See test_the_leg_tokens_keep_every_encoding_*.
+    for key in ("frame", "eyebrow", "num", "delta",
+                "toggle", "side_long", "side_short", "step", "manual"):
         assert key in LE.DEFAULT_LEG_TOKENS
         assert isinstance(LE.DEFAULT_LEG_TOKENS[key], str)
 
@@ -270,15 +273,20 @@ def _remove_buttons(container):
 
 
 def test_table_remove_is_live_above_the_floor_and_locked_at_it():
-    tk = LE.leg_tokens()
+    # Re-aimed 2026-09-20: the two states used to be told apart by the ``remove``
+    # / ``remove_off`` token strings. The kit paints this button now, so the
+    # difference is Quasar's own disabled state plus the sentence the locked one
+    # offers - which is what a reader actually gets, and is asserted rather than
+    # a class name that only happened to differ.
     _, above = _table([_leg(), _leg()], min_legs=1)
     _, at = _table([_leg()], min_legs=1)
     live = _remove_buttons(above)
     assert len(live) == 2 and all(b.enabled for b in live)
-    assert tk["remove"].split()[0] in live[0]._classes
     locked = _remove_buttons(at)
     assert len(locked) == 1 and not locked[0].enabled
-    assert tk["remove_off"].split()[0] in locked[0]._classes
+    wrapper = locked[0].parent_slot.parent
+    assert [t.text for t in wrapper.default_slot.children
+            if isinstance(t, ui.tooltip)] == ["At least 1 leg required"]
 
 
 def test_table_remove_floor_defaults_to_one_leg():
@@ -291,25 +299,28 @@ def test_table_remove_honours_a_higher_floor():
     assert all(not b.enabled for b in _remove_buttons(at))
 
 
+# The footer's two labels were sentence-cased on 2026-09-20 when they became
+# kit buttons ("ADD LEG" -> "Add leg", "RESET TO TEMPLATE" -> "Reset to
+# template"): verb first, sentence case, one of the four kinds.
 def test_table_footer_offers_reset_only_when_a_handler_is_given():
     _, without = _table([_leg()])
     _, with_reset = _table([_leg()], on_reset=lambda: None)
-    assert "ADD LEG" in [b.text for b in _buttons(without)]
-    assert "RESET TO TEMPLATE" not in [b.text for b in _buttons(without)]
-    assert "RESET TO TEMPLATE" in [b.text for b in _buttons(with_reset)]
+    assert "Add leg" in [b.text for b in _buttons(without)]
+    assert "Reset to template" not in [b.text for b in _buttons(without)]
+    assert "Reset to template" in [b.text for b in _buttons(with_reset)]
 
 
 def test_table_reset_button_calls_the_handler():
     hits = []
     _, container = _table([_leg()], on_reset=lambda: hits.append(1))
-    btn = [b for b in _buttons(container) if b.text == "RESET TO TEMPLATE"][0]
+    btn = [b for b in _buttons(container) if b.text == "Reset to template"][0]
     _fire_click(btn)
     assert hits == [1]
 
 
 def test_table_add_leg_button_appends_a_leg():
     ed, container = _table([_leg()])
-    btn = [b for b in _buttons(container) if b.text == "ADD LEG"][0]
+    btn = [b for b in _buttons(container) if b.text == "Add leg"][0]
     _fire_click(btn)
     assert len(ed.get_legs()) == 2
 
@@ -317,7 +328,7 @@ def test_table_add_leg_button_appends_a_leg():
 def test_table_layout_renders_with_no_legs():
     ed, container = _table([])
     assert not _rows(container)
-    assert "ADD LEG" in [b.text for b in _buttons(container)]
+    assert "Add leg" in [b.text for b in _buttons(container)]
     assert ed.get_legs() == []
 
 
@@ -443,3 +454,139 @@ def test_table_tracks_match_the_cells_it_renders():
         assert _tracks(container) == want, (prem, delta)
         head = [e for e in container.descendants() if "leg-thead" in e._classes][0]
         assert len([e for e in head.descendants() if isinstance(e, ui.label)]) == len(want)
+
+
+# ── the kit migration (Phase 2, Task 2) ──────────────────────────────────────
+# Six of this widget's ten buttons are genuine ACTIONS and go through
+# ``pages/ui_kit.py``; four are not buttons at all - the SELL/BUY side toggle,
+# the two strike steppers and the cycling CALL/PUT/STOCK picker - and stay raw
+# with their reason written in the guard's ALLOWED.
+#
+# ⚠ Two of the six live in the ``row`` layout, which **rescue.py** mounts. They
+# are the ONLY two places this task may change that screen; everything else in
+# the row path is a frozen contract, and the tests below that say "must not
+# change" pass on both sides of the migration by design.
+
+
+def _row(legs, **kw):
+    """Mount a ROW-layout editor - the shape rescue.py mounts (no ``layout=``,
+    ``header=True``, no ``tokens=``)."""
+    kw.setdefault("strikes_for", lambda exp, otype: list(_STRIKES))
+    kw.setdefault("expiries_for", lambda: list(_EXPS))
+    kw.setdefault("show_premium", True)
+    kw.setdefault("header", True)
+    with ui.card() as container:
+        ed = LE.build_leg_editor(container, **kw)
+        ed.set_legs(legs)
+    return ed, container
+
+
+def _tips(el):
+    return [e for e in el.descendants() if isinstance(e, ui.tooltip)]
+
+
+def test_the_row_remove_is_a_kit_icon_button_carrying_its_own_tooltip():
+    """rescue.py's per-leg remove. An icon alone does not say what it does, so
+    ``kit.icon_button`` requires the tooltip and caps its width in a CLASS - a
+    prop there would be an inline style, which this app bans."""
+    _, container = _row([_leg(), _leg()])
+    removes = [b for b in _buttons(container) if b._props.get("icon") == "delete"]
+    assert len(removes) == 2
+    for b in removes:
+        assert b._props.get("round") and b._props.get("size") == "sm"
+        assert "w-10" in b.classes, "the row's trailing track keeps its width"
+        tips = _tips(b)
+        assert [t.text for t in tips] == ["Remove leg"]
+        assert "max-w-[340px]" in tips[0].classes
+
+
+def test_the_row_add_leg_is_a_kit_secondary_button():
+    """The other half of rescue.py's blast radius, and the reason it is worth
+    it: an unstyled flat button beside a page of kit buttons reads as a bug."""
+    from pages.options import theme
+    _, container = _row([_leg()])
+    add = [b for b in _buttons(container) if b.text == "Add leg"][0]
+    assert add._props.get("icon") == "add"
+    for tok in theme.BTN.split():
+        assert tok in add.classes
+
+
+def test_the_row_layout_still_answers_every_call_rescue_makes():
+    """MUST NOT CHANGE - passes on both sides. rescue.py calls exactly these six
+    handle methods, and ``header=True`` is what lets it render label-less inputs
+    under the row header's column captions."""
+    ed, container = _row([_leg()])
+    for name in ("get_legs", "set_legs", "apply_template", "apply_expiry",
+                 "is_dirty", "refresh_options"):
+        assert callable(getattr(ed, name)), name
+    heads = [e for e in container.descendants() if "leg-head" in e._classes]
+    assert heads, "the row header carries the column captions"
+    assert [e.text for e in heads[0].descendants() if isinstance(e, ui.label)] == \
+        ["Type", "Side", "Expiry", "Strike", "Qty", "Premium", ""]
+
+
+def test_the_table_footer_buttons_are_kit_buttons_in_sentence_case():
+    """Verb first, sentence case, one of the four kinds - and Reset is QUIET,
+    because re-seeding the template must not read as the page's action."""
+    from pages.options import theme
+    _, container = _table([_leg()], on_reset=lambda: None)
+    labels = [b.text for b in _buttons(container)]
+    assert "Add leg" in labels and "ADD LEG" not in labels
+    assert "Reset to template" in labels and "RESET TO TEMPLATE" not in labels
+    add = [b for b in _buttons(container) if b.text == "Add leg"][0]
+    reset = [b for b in _buttons(container) if b.text == "Reset to template"][0]
+    for tok in theme.BTN.split():
+        assert tok in add.classes
+    for tok in theme.BTN_QUIET.split():
+        assert tok in reset.classes
+
+
+def test_the_table_remove_is_a_kit_icon_button_and_keeps_its_wrapper():
+    """The ✕ goes through the kit, and the WRAPPER div survives with it: Quasar
+    kills pointer events on a disabled q-btn, so a tooltip mounted INSIDE the
+    button cannot be read at exactly the moment the explanation is worth
+    reading. The locked state therefore explains itself from the wrapper."""
+    _, at = _table([_leg()], min_legs=1)
+    btn = _remove_buttons(at)[0]
+    assert not btn.enabled
+    assert btn._props.get("round") and btn._props.get("size") == "sm"
+    assert "leg-remove" in btn.classes
+    wrapper = btn.parent_slot.parent
+    outer = [t for t in wrapper.default_slot.children if isinstance(t, ui.tooltip)]
+    assert [t.text for t in outer] == ["At least 1 leg required"]
+
+
+def test_the_table_remove_says_what_it_does_while_it_is_live():
+    _, above = _table([_leg(), _leg()], min_legs=1)
+    btn = _remove_buttons(above)[0]
+    assert btn.enabled
+    assert [t.text for t in _tips(btn)] == ["Remove leg"]
+
+
+def test_the_typed_price_reset_is_a_kit_icon_button_that_keeps_the_amber():
+    """The ↺ is an action and goes to the kit - but the amber IS the row's
+    "this price was typed" reading, so it REPLACES the kit's muted colour
+    rather than stacking on it: two one-class ``text-[#hex]`` arbitraries tie on
+    specificity, and stylesheet order alone would pick the winner."""
+    from pages.options import theme
+    _, container = _table([_leg()])
+    price = [e for e in container.descendants() if "leg-price" in e._classes][0]
+    price.value = 9.99
+    rb = [e for e in container.descendants() if "leg-price-reset" in e._classes][0]
+    assert rb._props.get("round") and rb._props.get("size") == "sm"
+    for tok in LE.leg_tokens()["manual"].split():
+        assert tok in rb.classes
+    assert theme.MUTED not in rb.classes
+
+
+def test_the_leg_tokens_keep_every_encoding_and_lose_the_button_chrome():
+    """``side_long`` / ``side_short`` (long-cyan, short-green) and ``manual``
+    (the typed-price amber) are READINGS and are untouched. ``remove`` /
+    ``remove_off`` / ``add`` / ``reset`` were button SKINS on the four controls
+    the kit now paints - a token nothing reads is the half-live defect this
+    phase keeps finding."""
+    for reading in ("side_long", "side_short", "manual", "toggle", "step",
+                    "frame", "eyebrow", "num", "delta"):
+        assert reading in LE.DEFAULT_LEG_TOKENS, reading
+    for chrome in ("remove", "remove_off", "add", "reset"):
+        assert chrome not in LE.DEFAULT_LEG_TOKENS, chrome
