@@ -57,7 +57,9 @@ Same as Phase 1. The worktree root is `D:\WebGUI Trading with Schwab\.claude\wor
 9. **Tests.** When an assertion pins behaviour this plan deliberately changes (a class string, a headline, a status clock), change it to the new behaviour and say so in the commit. Never delete one to reach green, and never weaken a guard.
 
 ---
-**The tiebreaker for anything the table does not name:** a colour that encodes a VALUE stays (a quadrant hue, a heat cell, a regime word, a tone dot, a bar fill). A colour that draws a FRAME stays only if nothing in the app vocabulary covers it — axis ticks, gridlines, crosshairs, grooves and tracks are chart furniture, not data, and take `theme` border/muted tokens.
+**The tiebreaker for anything the table does not name:** a colour that encodes a VALUE stays (a quadrant hue, a heat cell, a regime word, a tone dot, a bar fill). A colour that draws a FRAME stays only if nothing in the app vocabulary covers it — axis ticks, gridlines, crosshairs, grooves and tracks are chart furniture, not data, and take `theme` border/muted tokens. Named cases settled in Task 1: `NE['grid']` and `NB['hair']` (gridlines) take the card border, `NB['btn_hover_edge']` (the crosshair) takes the one-step-brighter button border because it marks the plot's single fixed reference at RS 100/100.
+
+**`theme.CARD` brings its own padding, and that is safe here.** Task 1 replaced `RT_PANEL_BG` with `CARD` on the RRG plot: every child of that box is absolutely positioned, and an absolute child resolves against the **padding** box, so the percentage geometry is preserved. It does round the corners to the app's card radius — a real but intentional-looking change. Expect the same wherever a `*_PANEL_BG` becomes `CARD`, and check the geometry claim holds for that page's children before assuming it.
 
 **Sequencing note — the ladder dies last.** `rotation_view`'s `NT`/`NB`/`NE` are imported by RRG, Rotation, Bull/Bear and Momentum. Each task stops *using* them; the ladder itself is deleted in Task 5, the last of the four. ⚠ `rotation_view.TONE["flat"]` is BUILT from that ladder, so Task 5 must give `TONE["flat"]` its own neutral rather than deleting the ladder out from under it.
 
@@ -176,6 +178,8 @@ Task 1's shape, one screen over. Page-specific:
 - **Region:** the spinner is on `quad_box` (185), which `_paint_quadrants` clears (261). Wrap the whole board body — `gauge_box`, `axis_box`, `band_box`, `foot_box` and `quad_box` are all replaced by a refresh — in ONE `kit.region("Refreshing rotation…")`, and let every existing `.clear()` keep working inside `region.content`.
 - **Chart furniture to app tokens:** `NB['track']` (the gauge groove, 203) and `NB['hair']` (the chip bar trough, 322, reached through `V.rgba('hair')` in `_PANEL` 42). **Data stays:** every `V.TONE[...]`, `_DOT_CLASSES` (50) and every `V.quad_classes(...)` key.
 - Tests: add the same four shapes as Task 1 (scrim survives, kit frame, no toast, data colours intact), renaming the assertions for this page. `test_render_graceful_empty` (38) must keep passing untouched.
+  ⚠ Two things Task 1 established about those four. **Only THREE go red on the old code** — the data-colours one is a must-not-change guard that passes before and after, so a green result there is correct, not a broken test. And Task 1's `_rrg_render` helper carries an unused `monkeypatch=None` parameter; **drop it when you copy the helper**.
+- `page_help` is conditional on every task from here: Task 1 needed no edit, because `HELP_MD["/sentiment/rrg"]` already opened with the headline sentence. Check before editing, and take `page_help.py` off the task's Files list if it turns out unchanged.
 
 **Commit:** `feat(rotation): Sector Rotation on the page kit; the board's spinner survives`
 
