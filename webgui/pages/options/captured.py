@@ -535,11 +535,17 @@ def render():
                                         value=exit_value_default(sig), min=0,
                                         format="%.2f", width="w-40")
             reason = kit.text_field("Reason", value="MANUAL_CLOSE", width="w-40")
-        state["close_fields"] = (sig.get("signal_id"), exit_val, reason)
+        # The symbol travels with the fields rather than being looked up again on
+        # confirm: the 2 s repaint can drop the row from ``raw_by_id`` while the
+        # dialog is open, and the toast must name the signal the dialog was
+        # opened for.
+        state["close_fields"] = (sig.get("signal_id"), sig.get("symbol", ""),
+                                 exit_val, reason)
         close_dlg.open()
 
     def _confirm_close():
-        signal_id, exit_val, reason = state["close_fields"] or (None, None, None)
+        signal_id, symbol, exit_val, reason = \
+            state["close_fields"] or (None, "", None, None)
         if not signal_id or not exit_val.validate():
             return False
         bus_client.request("options", {
@@ -547,7 +553,7 @@ def render():
             "args": {"signal_id": signal_id, "exit_val": float(exit_val.value),
                      "reason": reason.value or "MANUAL_CLOSE"},
         })
-        kit.toast("info", "Closing the signal — the list updates when the engine "
+        kit.toast("info", f"Closing {symbol} — the list updates when the engine "
                           "confirms.")
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).

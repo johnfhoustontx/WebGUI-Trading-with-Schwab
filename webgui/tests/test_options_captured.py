@@ -505,6 +505,14 @@ def test_the_selected_row_uses_the_kit_accent_not_its_own():
     assert "kit.mark_selected" in src
 
 
+def test_the_close_toast_names_the_symbol_it_is_closing():
+    """The symbol is the one thing that says WHICH signal is closing, and the
+    Paper Ledger's equivalent toast carries it. "Closing the signal" does not."""
+    src = inspect.getsource(captured.render)
+    assert 'f"Closing {symbol}' in src
+    assert "Closing the signal" not in src
+
+
 def test_the_captured_help_names_the_button_the_page_shows():
     """"Close selected" became "Close signal" when the action moved into the
     panel footer: the footer is only there while a signal IS selected, so the

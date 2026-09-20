@@ -15,6 +15,14 @@ spinner over the block a repaint replaces (that is the whole reason it exists),
 so a page migrated to the kit shows the same wait under a different spelling.
 Matching only the two original names would have failed every migrated page for
 having no spinner while it had one - the guard has to know the kit's name too.
+
+⚠ But the kit's name alone is NOT proof, where ``build_busy(`` was. A region is
+a layout primitive too - the block a repaint replaces - so as the migration
+proceeds nearly every page will contain one whether or not it waits on
+anything, and a mount-check would decay into a check that the page was
+migrated. The kit path therefore requires ``.busy.show(`` as well: mounting a
+spinner and never showing it is precisely the silent failure at the top of this
+docstring. See ``_shows_a_wait``.
 """
 import pathlib
 import re
@@ -56,6 +64,30 @@ def _page_files():
         yield p
 
 
+def _shows_a_wait(src):
+    """Whether a page's source mounts a wait indicator AND uses it.
+
+    The two original spellings are taken as proof on their own (that hole is
+    older than the kit). The KIT path needs both halves, because ``kit.region``
+    is a layout primitive as much as a spinner: as the migration proceeds nearly
+    every page will hold one whether or not it waits on anything, so a
+    mount-check would quietly stop discriminating. ``.busy.show(`` is the half
+    that only a page which actually waits has a reason to write.
+    """
+    if "build_busy(" in src or "build_loading_overlay(" in src:
+        return True
+    return "kit.region(" in src and ".busy.show(" in src
+
+
+def test_the_kit_path_needs_the_spinner_to_be_SHOWN():
+    """Non-vacuity, pinned rather than checked by hand: a page holding the
+    region and never showing it has no wait."""
+    assert _shows_a_wait("box = kit.region('…')\nbox.busy.show('Refreshing…')")
+    assert not _shows_a_wait("box = kit.region('…')          # never shown")
+    assert not _shows_a_wait("ui.column()")
+    assert _shows_a_wait("_busy.build_busy(box, '…')")       # the older spelling
+
+
 def test_every_page_that_enqueues_a_command_shows_a_wait():
     missing = []
     for p in _page_files():
@@ -64,9 +96,7 @@ def test_every_page_that_enqueues_a_command_shows_a_wait():
             continue
         if p.name in _EXEMPT:
             continue
-        has_wait = any(name in src for name in
-                       ("build_busy(", "build_loading_overlay(", "kit.region("))
-        if not has_wait:
+        if not _shows_a_wait(src):
             missing.append(p.relative_to(PAGES).as_posix())
     assert not missing, (
         "screens that enqueue a command but never show a wait: " + ", ".join(missing))

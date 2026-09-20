@@ -464,6 +464,17 @@ def test_the_ledger_help_calls_the_columns_what_the_screen_calls_them():
         assert gone not in text, gone
 
 
+def test_the_ledger_help_says_where_the_buttons_are_and_that_deleting_asks_first():
+    """Two facts the page changed under the reader on 2026-09-19: the row's
+    buttons moved into the detail panel, and both deletes now ask first - a new
+    step, and the one a reader meets by surprise."""
+    import page_help
+    text = page_help.HELP_MD["/options/paper"]
+    assert "detail panel" in text
+    for want in ("Expected Move", "confirm"):
+        assert want in text, want
+
+
 def test_the_ledger_help_explains_the_entry_sign():
     """The single most confusing thing on this page: a debit trade stores its
     debit as a NEGATIVE credit, so the Entry column goes negative on exactly the

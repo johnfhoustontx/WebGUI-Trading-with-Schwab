@@ -825,9 +825,14 @@ engine's positions live on **Paper Account**.
 - **Entry is positive for a credit and negative for a debit** — one column, and
   the sign tells you which. **P&L** is unrealised while a trade is open and
   realised once it is closed.
+- **Click a row** to load it into the **detail panel** on the right; its
+  **Delete**, **Expected Move**, **Analyze** and **Close trade** buttons sit at
+  the foot of that panel.
 - **Analyze** re-prices it now and shows current Greeks. **Close trade** records
-  an exit; **Delete** removes the row entirely. Both are sent to the engine, so
-  the ledger updates a moment later rather than instantly.
+  an exit; **Delete** removes the row entirely, and **Delete all closed** at the
+  top of the page clears every closed row at once. Both deletes ask you to
+  confirm first — a deleted row does not come back. All of them are sent to the
+  engine, so the ledger updates a moment later rather than instantly.
 - **Long options and debit spreads now close themselves** on two rules, checked
   **once an hour between 09:00 and 14:00 CT** (so a target reached at 09:15 is
   acted on at 10:00 — press **Run manage cycle** on Paper Account to check now):

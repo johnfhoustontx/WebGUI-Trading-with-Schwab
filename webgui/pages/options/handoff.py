@@ -626,26 +626,13 @@ def add_row_actions(table, get_signal):
     table.on("to_em", lambda e: send_to_expected_move(signal_to_em_payload(get_signal(e.args))))
 
 
-# Single per-row Expected Move action (for tables that only want this one button,
-# e.g. Paper Trades / Captured Signals — where Send-to-Calculator / Send-to-Paper
-# don't belong). Emits to_em with the row dict.
-_EM_ACTION_SLOT = """
-<q-td :props="props" auto-width>
-  <q-btn dense flat round size="sm" icon="show_chart" color="accent"
-         @click.stop="() => $parent.$emit('to_em', props.row)">
-    <q-tooltip>Expected Move</q-tooltip>
-  </q-btn>
-</q-td>
-"""
-
-
-def add_expected_move_action(table, get_signal):
-    """Add a per-row Expected Move button only (not the Calculator/Paper actions).
-
-    ``get_signal(row)`` maps a clicked display row to its raw engine signal."""
-    table.add_slot("body-cell-actions", _EM_ACTION_SLOT)
-    table.on("to_em", lambda e: send_to_expected_move(signal_to_em_payload(get_signal(e.args))))
-
+# The single per-row Expected Move action (``_EM_ACTION_SLOT`` /
+# ``add_expected_move_action``) lived here for the two tables that wanted that
+# button alone - Paper Trades and Captured Signals. Both moved Expected Move
+# into the detail panel's footer on 2026-09-19 (the row-actions column went with
+# it), leaving the helper with no callers, so it was deleted rather than left as
+# a slot nothing mounts. The multi-button slots below are still live: the Market
+# Scanner and the Strategy Finder mount them.
 
 # Per-row actions for the multi-strategy swing table: Calculator + Expected Move
 # for ALL rows; Paper trade ONLY when the row is a credit-creditable structure
