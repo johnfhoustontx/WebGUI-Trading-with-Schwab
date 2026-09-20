@@ -57,6 +57,16 @@ Each asserts a token name is ABSENT from a source; once the token is gone none c
 
 ⚠ Two of them will **FAIL rather than go vacuous**, because the line above the absence-assert is a presence-assert: `test_options_calculator.py:1162` (`assert "calc-v3" in src`) and `test_theme_calc.py:112` (`assert ".calc-v3" in css`). Rewrite both; do not delete them.
 
+⚠ **`kit.gate` does not bite on its own — measured in Task 5.** `field_valid`
+returns `True` for any field whose `validation` is `None`, and neither
+`kit.symbol_field` nor a plain `kit.select_field` sets one. So the bare
+`kit.gate(btn, a, b)` this plan names in two places would leave the button
+**permanently enabled**. Give each gated field a validation rule, and make it
+**silent** (`without_auto_validation()`, then clear `error`) so nothing paints red
+— the held button is the whole signal, which is what the design asks for.
+Verified in the harness on Expected Move: Draw disabled, no `.q-field--error`
+anywhere, and the six controls bottom-align to the pixel.
+
 ## What the guard should land on
 
 | file | now | after | reason for what stays |
