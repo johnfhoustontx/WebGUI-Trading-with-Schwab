@@ -288,3 +288,12 @@ def test_the_page_reads_the_paper_account_view_not_a_second_one():
     """The lots ride the existing account view. A second view would give one
     database two publish cadences."""
     assert shares.VIEW == "options:paper_account"
+
+
+# -- The page kit (2026-09-19 consistency standard) --------------------------
+
+def test_shares_is_built_from_the_kit():
+    import inspect
+    src = inspect.getsource(shares.render)
+    assert 'kit.header("Shares", view=VIEW)' in src
+    assert "calc-v2" not in src and "QUASAR_INTERNAL_CSS" not in src

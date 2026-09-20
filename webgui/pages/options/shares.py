@@ -22,21 +22,24 @@ column, or a 0.00 unrealized, would fabricate exactly the reading this page is
 opened for — so both cells render an em-dash and the column header names the
 reason. The builders DO read a ``mark`` off a lot if one is ever attached
 upstream, so filling those columns later is a service change with no page edit.
+
+Built on the page kit (``pages/ui_kit.py``, the 2026-09-19 consistency
+standard): the header line carries the title and the Updated stamp, the status
+line carries counts only, and one region covers the table a publish replaces.
 """
 from __future__ import annotations
 
 import bus_client
-from pages import busy as _busy
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
+from pages import ui_kit as kit
 from pages.view_watch import watch_view
-from nicegui import run, ui
+from nicegui import run
 
 from pages.ui_guard import guard_async
 
 from . import strategy_table as _st
-from .theme import (CARD, EYEBROW, LABEL, PAGE, QUASAR_INTERNAL_CSS,
-                    TXT_NEG, TXT_NEUTRAL, TXT_POS)
+from .theme import TXT_NEG, TXT_NEUTRAL, TXT_POS
 
 # The lots ride the EXISTING paper-account view. See the module docstring.
 VIEW = "options:paper_account"
@@ -299,32 +302,29 @@ def render():
     the engine, so there is nothing to press here — the page's whole job is to
     say what stock the book owns and whether a call is already written on it.
     """
-    ui.add_css(QUASAR_INTERNAL_CSS)
-    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
-        with ui.column().classes(f"{CARD} w-full gap-2"):
-            ui.label("Shares").classes(f"text-h6 {LABEL}")
-            ui.label("Stock the paper account holds — mostly put assignments, "
-                     "which is where covered calls come from. Shares are not "
-                     "repriced here, so Mark and Unrealized stay blank rather "
-                     "than showing a number nothing measured.").classes(EYEBROW)
-            status = ui.label(_copy.WAITING_OPTIONS).classes(EYEBROW)
-            table_box = ui.element("div").classes("w-full")
-            with table_box:
-                table = ui.table(columns=share_columns(), rows=[], row_key="id",
-                                 pagination={"rowsPerPage": 0}) \
-                    .classes("w-full").props("dense")
-            table.add_slot("body-cell-unrealized", _UNREALIZED_SLOT)
-
-    # Until the first payload lands, an empty grid is indistinguishable from an
-    # account that holds no stock — which is the normal state of this page.
-    board_busy = _busy.build_busy(table_box, "Loading the share inventory…")
+    # No description line: the standard keeps the body to the header, the status
+    # line and the table. What it said — that these are mostly put assignments,
+    # and that nothing here reprices a share, so Mark and Unrealized stay blank
+    # rather than showing a number nothing measured — lives in the page help
+    # (``page_help.HELP_MD["/options/shares"]``), and the Mark column's own
+    # header still names the reason at the cell.
+    with kit.page():
+        kit.header("Shares", view=VIEW)
+        status = kit.status_line(_copy.WAITING_OPTIONS)
+        # Until the first payload lands, an empty grid is indistinguishable from
+        # an account that holds no stock — the normal state of this page.
+        board = kit.region("Loading the share inventory…")
+        with board.content:
+            table = kit.table(share_columns(), numeric=(
+                "shares", "basis", "cost", "mark", "unrealized"))
+        table.add_slot("body-cell-unrealized", _UNREALIZED_SLOT)
 
     def _paint(payload):
         p = payload or {}
         table.rows = lot_rows(p.get("lots"), p.get("positions"))
         table.update()
         status.text = status_text(payload)
-        board_busy.hide()
+        board.busy.hide()
 
     @guard_async
     async def _reread():
@@ -335,7 +335,7 @@ def render():
     if payload:
         _paint(payload)
     else:
-        board_busy.show()
+        board.busy.show()
     # One line for the version-gated repaint idiom: seeds the current version, so
     # the first tick does not fire, and a cold view still fills in on first publish.
     watch_view(VIEW, _reread)

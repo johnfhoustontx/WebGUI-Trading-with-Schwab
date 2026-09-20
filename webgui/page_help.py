@@ -557,6 +557,9 @@ each morning. Three kinds of trade sit on one ranked board:
   2026-09-12 there was no floor here at all, and the board's top-ranked idea on
   the day it was added was a put spread at a Vol Rank of **0.1** — the cheapest
   premium the measurement can express.
+- **The board arrives ranked** by composite score, with an unscored row pinned
+  last — but every column header re-sorts it, so you can read it by return on
+  capital, by capital committed or by days to expiry instead.
 - Nothing here is traded automatically. The board is a shortlist; the button is
   yours to press.
 """,

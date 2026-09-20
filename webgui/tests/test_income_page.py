@@ -89,12 +89,19 @@ def test_failed_symbols_are_disclosed_not_swallowed():
     assert "2 symbols failed" in text
 
 
-def test_the_scan_time_is_shown_when_the_payload_carries_one():
-    """A once-daily view: without a stamp there is no way to tell this morning's
-    board from Friday's."""
+def test_the_scan_time_is_not_in_the_status_line_any_more():
+    """⚠ CHANGED 2026-09-19: this asserted ``"8:35" in text``.
+
+    The page kit's header carries an ``Updated`` stamp read from the view's own
+    ``:ts`` side key, and two clocks a few pixels apart - one from the payload,
+    one from the key - can disagree. The status line is counts only now; the
+    header owns the time. A once-daily board still says when it was taken.
+    """
     text = income.status_text({"candidates": [_PCS], "scanned_symbols": 1,
                                "ts": "2026-09-05T08:35:00-05:00"})
-    assert "8:35" in text
+    assert "8:35" not in text
+    # Vacuity guard: the line must still SAY something about the pass.
+    assert "1 candidate" in text
 
 
 def test_an_unparseable_stamp_is_dropped_rather_than_printed_raw():
@@ -518,3 +525,19 @@ def test_status_text_renders_a_payload_written_before_the_field_existed():
     line = income.status_text({"candidates": [{}], "scanned_symbols": 3})
     assert "too cheap" not in line
     assert "1 candidate across 3 symbols" in line
+
+
+# -- The page kit (2026-09-19 consistency standard) --------------------------
+
+def test_the_status_line_leaves_the_clock_to_the_header():
+    """The header's Updated stamp (the view's :ts) owns the time now."""
+    text = income.status_text({"candidates": [{}], "scanned_symbols": 3,
+                               "ts": "2026-09-18T13:52:00+00:00"})
+    assert "scanned" not in text
+
+
+def test_income_is_built_from_the_kit():
+    import inspect
+    src = inspect.getsource(income.render)
+    assert 'kit.header("Income Window", view=VIEW)' in src
+    assert "calc-v2" not in src and "QUASAR_INTERNAL_CSS" not in src

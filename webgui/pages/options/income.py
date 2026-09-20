@@ -26,36 +26,32 @@ the ``IncomeScan`` and ``ScanResult`` docstrings.
 ``net_credit`` is PER-CONTRACT (60.00); the single has only the latter. Putting a
 $0.60 row beside a $640 row on one board is exactly the mistake the per-share
 field invites, so this page reads ``net_credit`` everywhere.
+
+Built on the page kit (``pages/ui_kit.py``, the 2026-09-19 consistency
+standard): the header line carries the title and the Updated stamp, the status
+line carries counts only, and one region covers the table a publish replaces.
 """
 from __future__ import annotations
 
-import datetime as _dt
-from zoneinfo import ZoneInfo
-
 import bus_client
-from pages import busy as _busy
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
+from pages import ui_kit as kit
 from pages.view_watch import watch_view
-from nicegui import run, ui
+from nicegui import run
 
 from pages.ui_guard import guard_async
 
 from . import handoff as _handoff
 from . import scanner as _scanner
 from . import strategy_table as _st
-from .theme import CARD, EYEBROW, LABEL, PAGE, QUASAR_INTERNAL_CSS, TXT_NEUTRAL, TXT_POS
+from .theme import TXT_NEUTRAL, TXT_POS
 
 VIEW = "options:income"
 
 # The ANSWER to one Open click — a separate view from the board, written on
 # every outcome including a refusal. See ``handlers.CACHE_INCOME_OPEN``.
 OPEN_RESULT_VIEW = "options:income_open"
-
-# The service stamps ``ts`` in CENTRAL time (tz-aware), unlike the matrix view's
-# UTC — see publish_income. Parse the offset it carries rather than assuming
-# either, and only fall back to CT for a naive stamp.
-_CT_TZ = ZoneInfo("America/Chicago")
 
 
 # ── the side a reader picks on ──────────────────────────────────────────────
@@ -294,25 +290,8 @@ def open_result_display(payload):
             _OPEN_RESULT_TONE.get(status, "warning"))
 
 
-def _short_ts(iso) -> str:
-    """A tz-aware ISO stamp -> a short Central clock like '8:35 AM'; '' on failure.
-
-    An unparseable stamp yields '' rather than the raw string: the status line is
-    a sentence, and a stray ISO fragment in it reads as a fault.
-    """
-    if not iso:
-        return ""
-    try:
-        dt = _dt.datetime.fromisoformat(str(iso))
-    except (TypeError, ValueError):
-        return ""
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=_CT_TZ)
-    return dt.astimezone(_CT_TZ).strftime("%I:%M %p").lstrip("0")
-
-
 def status_text(payload) -> str:
-    """The status line — THREE states, not two.
+    """The status line — THREE states, not two. COUNTS ONLY.
 
     ⚠ ``WAITING_OPTIONS`` is for a feed that has published NOTHING. A pass that
     ran and found nothing is a healthy once-daily scan of a market with no
@@ -320,6 +299,12 @@ def status_text(payload) -> str:
     an outage. So the empty-board line names what was actually scanned, which is
     also the only way a reader can tell "23 symbols, none qualified" from "the
     watchlist failed to load".
+
+    ⚠ **No clock.** This line used to end "scanned 8:35 AM" off the payload's own
+    ``ts``. The header's Updated stamp reads the view's ``:ts`` side key — the
+    time the publisher last confirmed the view current — so two clocks a few
+    pixels apart could disagree about one board. The header owns the time; the
+    ``_short_ts`` helper that formatted it went with the sentence.
     """
     p = payload or {}
     if not p:
@@ -351,9 +336,6 @@ def status_text(payload) -> str:
     if vol_dropped:
         parts.append(f"{vol_dropped:.0f} too cheap to sell")
 
-    ts = _short_ts(p.get("ts"))
-    if ts:
-        parts.append(f"scanned {ts}")
     # A whole-watchlist outage would otherwise look exactly like a quiet tape.
     n_err = len(p.get("errors") or [])
     if n_err:
@@ -385,27 +367,23 @@ def render():
     The one action is per row: opening a cash-secured put or a covered call into
     the paper ACCOUNT, which is the only route this app has into a share lot.
     """
-    ui.add_css(QUASAR_INTERNAL_CSS)
-    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):
-        with ui.column().classes(f"{CARD} w-full gap-2"):
-            ui.label("Income Window").classes(f"text-h6 {LABEL}")
-            ui.label("Premium to sell 30 to 45 days out — put and call credit "
-                     "spreads plus cash-secured puts, ranked across the whole "
-                     "watchlist. Scanned once each morning. Click any column to "
-                     "re-sort; the wallet button on a cash-secured put or covered "
-                     "call opens it in the paper account.").classes(EYEBROW)
-            status = ui.label(_copy.WAITING_OPTIONS).classes(EYEBROW)
-            table_box = ui.element("div").classes("w-full")
-            with table_box:
-                table = ui.table(columns=income_columns(), rows=[], row_key="id",
-                                 pagination={"rowsPerPage": 0}) \
-                    .classes("w-full").props("dense")
-            table.add_slot("body-cell-earnings", _EARNINGS_SLOT)
-            table.add_slot("body-cell-score", _SCORE_SLOT)
-
-    # Until the first payload lands, an empty grid is indistinguishable from
-    # "nothing qualified today" — which is a real and common outcome here.
-    board_busy = _busy.build_busy(table_box, "Loading the board…")
+    # No description line: the standard keeps the body to the header, the status
+    # line and the board. What it said — what this window screens, that the scan
+    # is once a morning, and what the wallet button does — lives in the page
+    # help (``page_help.HELP_MD["/options/income"]``), where it can be read at
+    # length instead of skimmed once.
+    with kit.page():
+        kit.header("Income Window", view=VIEW)
+        status = kit.status_line(_copy.WAITING_OPTIONS)
+        # Until the first payload lands, an empty grid is indistinguishable from
+        # "nothing qualified today" — which is a real and common outcome here.
+        board = kit.region("Loading the board…")
+        with board.content:
+            table = kit.table(income_columns(), numeric=(
+                "dte", "credit", "capital", "roc", "yield_on_cost",
+                "total_return_if_called", "pop", "breakeven", "score"))
+        table.add_slot("body-cell-earnings", _EARNINGS_SLOT)
+        table.add_slot("body-cell-score", _SCORE_SLOT)
 
     # The display rows carry formatted strings; the service needs the numbers.
     # Rebuilt on every paint so a click can never send a candidate the board no
@@ -420,7 +398,7 @@ def render():
         table.rows = candidate_rows(candidates)
         table.update()
         status.text = status_text(payload)
-        board_busy.hide()
+        board.busy.hide()
 
     @guard_async
     async def _reread():
@@ -433,14 +411,18 @@ def render():
                                                       OPEN_RESULT_VIEW))
         if shown is not None:
             message, tone = shown
-            # Long enough to read a refusal that names two dollar amounts.
-            ui.notify(message, type=tone, timeout=8000, multi_line=True)
+            # The kit's four kinds, from the three Quasar types this page's
+            # outcome map already speaks. A refusal stays a WARNING — the kit
+            # gives warn and error the longer life a refusal naming two dollar
+            # amounts needs to be read.
+            kit.toast({"positive": "ok", "warning": "warn",
+                       "negative": "error"}.get(tone, "info"), message)
 
     payload = bus_client.read(VIEW)
     if payload:
         _paint(payload)
     else:
-        board_busy.show()
+        board.busy.show()
     # One line for the version-gated repaint idiom: seeds the current version, so
     # the first tick does not fire, and a cold view still fills in on first publish.
     watch_view(VIEW, _reread)
