@@ -1592,18 +1592,28 @@ rather than merely policed.
 Sentiment/Rotation chart palette), loaded once at webgui
 startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
 restyle without code changes; missing keys fall back to the built-in dark-navy defaults.
-See the "App theme — dark-navy 'dashboard'" section. **TWO sections are still page-scoped languages, NOT the app-wide palette and NOT
-surfaced in Settings → Appearance:** `[flow]` (the Options Flow console panels, the
-`/options/gamma` Flow + Net Prem subtabs only — builder `flow_colors` +
-`FLOW_KEYFRAMES_CSS`) and `[calc]` (the Options Strategy Calculator,
-`/options/calculator` only — scope hook **`.calc-v3`**, never `.calc-v2`, which is
-the shared dark-navy scope the Simulator and Trade wear). Each is injected via that
-page's ONE `ui.add_css` escape-hatch block.
+See the "App theme — dark-navy 'dashboard'" section. **ONE section is still a page-scoped language, NOT the app-wide palette and NOT
+surfaced in Settings → Appearance:** `[flow]` — the Options Flow console panels, the
+`/options/gamma` Flow + Net Prem subtabs only (builder `flow_colors` +
+`FLOW_KEYFRAMES_CSS`, injected via that page's ONE `ui.add_css` escape-hatch block).
+⚠ **It survives for a reason the others did not have:** both panels are built as ONE
+raw `ui.html` SVG fragment each, the documented out-of-scope case for the
+Tailwind-first rule — so even its `title` / `label` / `panel_*` / `grid` keys, which
+would read as surface anywhere else, are INSIDE the chart. `call` and `put` are also
+byte-identical to `gamma.POS_COLOR` / `NEG_COLOR`, so the plasma heatmap and the Flow
+panel read as one instrument across a subtab switch.
 
-**Three more sections survive as DATA ONLY** (2026-09-20, Phases 3 & 4 of the UI
+**FOUR more sections survive as DATA ONLY** (2026-09-20, Phases 2, 3 & 4 of the UI
 consistency work): `[console]` keeps its semantic set, the six `regime_*` hues and
 `accent` (the dial arc); `[sectors]` keeps `up` / `dn` / `warn`, the regime word and
-its dot; `[macro]` keeps the risk-on/off tile colours. Their background, text, button
+its dot; `[macro]` keeps the risk-on/off tile colours; and **`[calc]` went 33 keys to
+four** — `pos`, `neg`, `accent`, `warn` — losing `.calc-v3`, `build_calc_css`,
+`CALC_KEYFRAMES_CSS` and its JetBrains Mono link. ⚠ Nothing it encoded was lost:
+`leg_editor.DEFAULT_LEG_TOKENS` and `entry_panel.DEFAULT_PANEL_TOKENS` already carried
+bid-green, ask-red, ATM-amber, the ITM wash, long-cyan/short-green and the typed-price
+amber, and the P&L matrix ramp was never in the TOML at all. ⚠ `.calc-v2` is NOT the
+Calculator's and never was — it is the shared navy scope, and `trade.py` is its last
+user. Their background, text, button
 and font keys are gone, because `/sentiment`, `/desk`, `/symbol`, `/sentiment/sectors`
 and `/market` now wear the app surface and IBM Plex. **`[rotation]` is gone entirely**
 — `void`, `panel` and `font_url` were its only keys and all three were surface.

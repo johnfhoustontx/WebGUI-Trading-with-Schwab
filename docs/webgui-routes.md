@@ -658,6 +658,36 @@ over a symbol with no expiry; the page loads that symbol's expirations and waits
 a pick, where it used to try to draw and toast "Symbol + expiry required." Any
 caller handing over a symbol alone gets the same quiet chain load.
 
+## The 2026-09-20 kit migration — Phase 2, the Options tools
+
+The Calculator, the Simulator, the Strategy Finder, Expected Move and Dealer
+Positioning went onto `pages/ui_kit.py`, with the three shared widgets they mount
+(`entry_panel`, `leg_editor`, `strategy_menu`). **`[calc]` retired** — 33 keys to four
+data colours, taking `.calc-v3`, `build_calc_css` and the JetBrains Mono link with it —
+which leaves **`[flow]` as the only full page-scoped language in the app**, because its
+keys live inside a raw SVG chart fragment.
+
+⚠ **`kit.table` gained `rows_number=`.** The Strategy Finder pages **server-side**: a
+510-row answer is ~1.96 MB, so only 50 rows are sent, and `rowsNumber` is what puts
+Quasar in server mode. `rows_per_page` alone silently means CLIENT paging, so the kit
+now takes both and **raises** if asked for server paging without a page size.
+
+⚠ **Three bugs fixed on the way.** The Simulator's charts never reflowed when they
+first appeared (the reflow fired only on a tab change, not on the `set_visibility(True)`
+a landing result takes — and a chart that mounts hidden measures 0×0 and stays ~600px
+wide forever). Expected Move's chain load and compute raised the same scrim and either
+landing hid it. The leg table's remove button came out 24px in a 22px track.
+
+**Dealer Positioning keeps everything that makes it work**, and that is checkable
+rather than promised: an AST comparison shows every module-level definition except
+`render` byte-identical — `HEAT_STOPS`' transparent zero stop, `interpolation: True`,
+the `colorAxis` that must exist at element creation, `_HEAT_PRESS_TOOLTIP_JS`'s three
+attachment sites, `_set_chart`'s recreate-on-kind-change, `uniform_strike_grid`, the
+constant nine-series count and the 40/60 flex split. `gamma-xhair-row` survives — it is
+the ONLY selector `_CROSSHAIR_JS` queries, and dropping it would kill the shared
+crosshair silently. `EXPLAIN_CSS` was **deleted**: thirteen lines injected into every
+render, reaching nothing.
+
 ## The 2026-09-20 kit migration — the nine screens below
 
 Phases 3 & 4 of the UI consistency work put RRG, Sector Rotation, Sector & Industry,

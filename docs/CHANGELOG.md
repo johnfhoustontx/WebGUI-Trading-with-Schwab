@@ -4,7 +4,75 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-20 (**One look and one behaviour — Phases 3 & 4: Trend &
+**Last updated:** 2026-09-20 (**One look and one behaviour — Phase 2: the Options
+tools.**)
+
+- **Eight modules onto the page kit** — the Calculator, the Simulator, the Strategy
+  Finder, Expected Move and Dealer Positioning, plus the three shared widgets they
+  mount (`entry_panel`, `leg_editor`, `strategy_menu`). Every chart colour, payoff
+  ramp, heat stop, quadrant hue and greek encoding is untouched.
+- **`[calc]` retires**, the last page-scoped surface language but one: 33 keys down
+  to four data colours (`pos`, `neg`, `accent`, `warn`). `.calc-v3`,
+  `build_calc_css`, `CALC_KEYFRAMES_CSS` and the JetBrains Mono link all go, and
+  **`[flow]` is now the only full page-scoped language left** — its keys live inside
+  a raw SVG chart fragment, which is why it survives.
+- **Most of these "buttons" were never buttons.** Counted honestly, six of the
+  thirteen in `leg_editor` and `entry_panel` are actions; the rest are side toggles,
+  strike steppers, a cycling type picker and the expiry pills. With the Strategy
+  Finder's segmented pills and filter chips, and the Simulator's Days snaps, the
+  guard ends on **nine permanent exceptions, each with a written reason.**
+- **`kit.table` gained `rows_number=`**, and **raises** if asked for server paging
+  without a page size. The old signature was a trap rather than merely incomplete:
+  `rows_per_page` alone silently means CLIENT paging, so the Strategy Finder — whose
+  whole design is that a 510-row answer is ~1.96 MB and only 50 rows are sent —
+  would have had its server paging quietly undone. Verified live: the pager reads
+  *1-50 of 71* over 50 rendered rows, and paging through fetches genuinely different
+  content.
+- **The Strategy Finder's clicked row is finally marked.** It opened the detail
+  panel but never carried the selection accent every other board has.
+
+⚠ **Three bugs fixed on the way, each proven before the fix.**
+- **The Simulator's charts never reflowed when they first appeared.** `_reflow_charts`
+  fired only on a tab change, but the path a cold page actually takes is
+  `set_visibility(True)` when the first result lands — and that called nothing. A
+  `ui.highchart` that mounted hidden measures a 0x0 container and renders ~600px wide
+  forever. The reflow is now gated on the hidden→visible transition only (an ungated
+  one would queue a timer per slider drag) and deferred a tick so the browser has laid
+  the element out.
+- **Expected Move's two waits cancelled each other.** A chain load and a compute
+  raised the same scrim, and either landing hid it — so a chain arriving mid-compute
+  dropped the spinner early. Each fetch now claims the scrim and it only lowers when
+  nothing is outstanding.
+- **The leg table's remove button did not fit its track** after the kit migration —
+  24px in a 22px column, spilling 2px into its neighbour. The track gave way, not the
+  button.
+
+⚠ **`kit.gate` does not bite without a validation rule.** `field_valid` returns True
+for any field whose `validation` is `None`, and neither `kit.symbol_field` nor a plain
+`kit.select_field` sets one — so a bare `kit.gate(btn, a, b)` leaves the button
+permanently enabled: a gate that reads correctly and does nothing. Expected Move ships
+**silent** rules, so nothing paints red and the held button is the whole signal.
+
+⚠ **CLAUDE.md's stock-module rule was narrowed to what is measured.** It read "any
+element that repaints via `update()` can never load the stock module", while Expected
+Move has combined `extras=["stock"]`, `type="stockChart"` and in-place `update()` the
+whole time. Measured on the bundled Highcharts 12: `update()` neither throws nor drops
+series (1 → 3, candlestick plus both cone splines), and a plain chart built on that
+same page updated cleanly too. The same paragraph's own mechanism explains why — the
+patched `Chart.update` throws on a chart that LACKS the stock scaffolding, and a
+`stockChart` has it. **The gamma prohibition stands and is explicitly unmeasured:**
+its heatmap carries a `colorAxis`, that is the case that failed live, and the probe
+used neither.
+
+- **`EXPLAIN_CSS` deleted** — thirteen lines injected into every Dealer Positioning
+  render, reaching nothing. Verified three ways: the classes appear only inside the
+  block that defines them with no dynamic construction, the service never emits them,
+  and `/options/explain` is a standalone `HTMLResponse` that `ui.add_css` could never
+  have styled.
+- Design: `docs/plans/2026-09-19-app-ui-consistency-design.md`; plan:
+  `docs/plans/2026-09-19-app-ui-consistency-phase2-plan.md`.
+
+**Prior —** 2026-09-20 (**One look and one behaviour — Phases 3 & 4: Trend &
 Sentiment, the Desk, Symbol and the Macro Board.**)
 
 - **Nine screens onto the page kit** — RRG, Sector Rotation, Sector & Industry,
