@@ -20,15 +20,38 @@ SVG — and their builders were deleted with them.
 
 All the new arithmetic is pure in ``pages/momentum_view.py``; the leaderboard's
 own transforms stay here.
+
+**On the page kit since 2026-09-19** (the consistency standard,
+``docs/plans/2026-09-19-app-ui-consistency-design.md``): the header line carries
+the name and the Updated stamp, the level picker sits in a control bar, the
+eyebrow is the status line, and ONE ``kit.region`` covers the whole argument —
+every one of the five sections and the leaderboard is replaced together by a
+refresh or a level change. The page's own ground, its two faces and the
+rotation family's warm-neutral ladder are gone; it wears the app surface like
+every other screen. This is the LAST of the four rotation-family screens, so
+the shared ladder (``rotation_view.NEUTRAL`` / ``NT`` / ``NB`` / ``NE``) and the
+``[rotation]`` theme section retired with it.
+
+⚠ **Two things the kit did NOT take.** ``render(level=…)``'s signature is
+load-bearing — ``live_screens.py`` pins ``kwargs={"level": "industry"}`` for the
+published screen and the gallery capture drives ``?level=``. And ``_name_chip``
+stays a raw ``ui.button``: it is ONE call site producing on the order of the
+whole level's universe per repaint, and it is a selectable name chip — 10.5px,
+ring-on-select, ``max-w-full`` — not a page action, so it is recorded in the
+ui-kit guard's ``ALLOWED`` with that reason rather than forced through
+``kit.button``.
+
+⚠ **This page's wait scrim used to die on the build paint.** ``build_busy``
+mounted it inside ``quad_box`` and ``_paint_quadrants`` opens with
+``quad_box.clear()``, so the first ``_apply()`` deleted it and every later
+Refresh raised a scrim that no longer existed. ``kit.region`` keeps the spinner
+on ``outer`` and clears only ``content``.
 """
 import bus_client
-from pages import busy as _busy
 from pages import momentum_view as V
+from pages import ui_kit as kit
 from pages.oklch import oklch_hex as _ok
-from pages.options.theme import (
-    ROTATION_FONT_HEAD_HTML, ROTATION_TOKENS as _T,
-)
-from pages.rotation_view import NB, NE, NT
+from pages.options import theme
 from pages.view_watch import watch_view
 from pages.ui_guard import guard
 
@@ -197,10 +220,28 @@ def excluded_tooltip(excluded):
 
 
 # ── the redesigned page's shared style constants ────────────────────────────
+_P = theme.THEME["palette"]
+# The faint end of the app's text ladder — the colour ``kit.EYEBROW`` wears, and
+# what replaced the rotation family's dimmest ladder rungs when it retired.
+# ``tabular-nums`` is what aligns figures down a column, and it is a numeric
+# variant of whatever face is in use, so the page-scoped mono face is not
+# missed where a figure has to line up.
+_FAINT = f"text-[{_P['icon']}]"
+# Chart FURNITURE, not data: a panel hairline, the limits card's rule, the
+# dispersion groove and a quadrant bar's trough all draw a frame, so they take
+# the app's card border. Two things sit one step brighter, on the BUTTON
+# border, for the reason Task 1 of this migration gave the RRG's crosshair —
+# each marks a fixed reference rather than a scale: the component bar's centre
+# line (the universe average), and the edge of a control-like box (the "+N
+# more" expander, an alignment block that is OFF).
+_FRAME_EDGE = f"border-[{_P['card_border']}]"
+_TRACK = f"bg-[{_P['card_border']}]"
+_BTN_EDGE = f"border-[{_P['btn_border']}]"
+_ZERO_TICK = f"bg-[{_P['btn_border']}]"
+
 # The numbered step captions above each section. They carry the argument, so
 # they are one style and never restated inline.
-_MONO = _T["RT_MONO"]
-_STEP = (f"{_MONO} {NT['rail']} text-[10px] tracking-[.18em] uppercase "
+_STEP = (f"{theme.MUTED} text-[10px] tracking-[.18em] uppercase "
          "leading-none mb-3")
 _ALIGN_PANEL = f"bg-[{_ok(0.17, 0.035, 158)}]"
 _ALIGN_EDGE = f"border-[{_ok(0.34, 0.07, 158)}]"
@@ -211,9 +252,12 @@ _DISP_FILL = f"bg-[{_ok(0.52, 0.10, 80)}]"
 _DISP_MARK = f"bg-[{_ok(0.92, 0.08, 80)}]"
 _LIMIT_BG = f"bg-[{_ok(0.115, 0.006, 90)}]"
 _LIMIT_TAG = f"text-[{_ok(0.62, 0.09, 80)}]"
-# The ring on the currently-selected name chip. Near-white rather than a
-# quadrant hue: it has to read as "this one" against four different tints.
-_SEL_RING = f"ring-[{_ok(0.92, 0.006, 90)}]"
+# The ring on the currently-selected name chip. The app's SELECTION accent —
+# the colour ``kit``'s own selected table row wears (``build_surface_css`` and
+# its ``.kit-row-selected`` rule) — rather than a quadrant hue: it says "this
+# one" and nothing about the datum, and it has to read as that against four
+# different tints.
+_SEL_RING = f"ring-[{_P['focus']}]"
 
 
 def render(level="industry"):
@@ -236,158 +280,162 @@ def render(level="industry"):
     state = {"ver": None, "level": normalise_level(level), "payload": None,
              "selected": None}
 
-    ui.add_head_html(ROTATION_FONT_HEAD_HTML)
+    with kit.page():
+        # No description line: what this argument is and how to read it is the
+        # opening of page_help.HELP_MD["/sentiment/momentum"].
+        #
+        # stale=False although the view is on a SCHEDULE: ``[slots.momentum]
+        # at = "16:20"`` recomputes it ONCE A NIGHT, so ``alerts.stale_after``
+        # would paint the stamp amber every single day. A view that is not due
+        # to publish now has an age that says nothing.
+        head = kit.header("Momentum", view=VIEW, stale=False)
+        # Not drawn on the public live origin — see shell.may_enqueue: a
+        # refresh is eleven sector chains plus their histories per click,
+        # against the owner's Schwab budget.
+        if _may_enqueue:
+            with head.actions:
+                kit.button("Refresh", kind="secondary", icon="refresh",
+                           on_click=lambda: _request_refresh())
+        # The level picker COMMANDS NOTHING — it re-reads rows the service has
+        # already published — so it belongs in the control bar rather than
+        # beside Refresh, and it stays drawn on the public live origin where
+        # Refresh does not.
+        with kit.control_bar():
+            level_sel = kit.select_field(
+                "Level", LEVEL_OPTIONS, value=state["level"],
+                width="w-[132px]", on_change=lambda e: _set_level(e.value))
+        # Keeps its runtime text: that is the READING's session date and the
+        # cadence that produced it, not this page's own freshness, which the
+        # header stamp answers.
+        eyebrow_lbl = kit.status_line()
 
-    wrap = ui.column().classes(
-        f"{_T['RT_SANS']} {_T['RT_VOID_BG']} {NT['txt']} w-full gap-0 "
-        "px-7 pt-9 pb-14 rounded-lg overflow-hidden")
+        # ONE region over the whole argument. A refresh — and a level change —
+        # replaces all five sections AND the leaderboard, and the spinner now
+        # lives on the region's OUTER element, so none of the `.clear()` calls
+        # below can delete it. That was this page's bug from the 2026-08-17
+        # rebuild until now: `build_busy` mounted the scrim inside `quad_box`,
+        # and the build-time `_apply()` → `_paint_quadrants` → `quad_box.clear()`
+        # removed it, so Refresh never showed a spinner.
+        body = kit.region("Recomputing momentum…")
+        # The section rhythm below is the MARGINS', exactly as it was when this
+        # body was its own column, so the region's own row gap comes off rather
+        # than stacking on top of it.
+        body.content.classes(remove="gap-3", add="gap-0")
+        with body.content:
+            # ── 1 · is momentum worth trading today? ─────────────────────────
+            ui.label("1 · Is momentum worth trading today?").classes(_STEP)
+            regime_box = ui.row().classes("w-full flex-wrap gap-0.5 mb-0.5")
+            disp_box = ui.row().classes(
+                "items-center w-full flex-wrap gap-[26px] px-[22px] py-[18px] "
+                f"mb-9 {V.LEVEL_GROOVE} border {_FRAME_EDGE}")
 
-    with wrap:
-        # ── header ──────────────────────────────────────────────────────────
-        with ui.row().classes("items-end w-full no-wrap gap-7 mb-6"):
-            with ui.column().classes("gap-2 min-w-0"):
-                eyebrow_lbl = ui.label("").classes(
-                    f"{_MONO} {NT['eyebrow']} text-[10.5px] tracking-[.16em] "
-                    "uppercase leading-none")
-                ui.label("Momentum").classes(
-                    "text-[33px] font-semibold leading-none "
-                    "tracking-[-0.025em] whitespace-nowrap")
-            ui.space()
-            with ui.row().classes("items-center no-wrap gap-2"):
-                level_sel = ui.select(
-                    LEVEL_OPTIONS, value=state["level"],
-                    on_change=lambda e: _set_level(e.value)) \
-                    .props("outlined dense options-dense borderless") \
-                    .classes(f"{_MONO} momentum-level min-w-[132px]")
-                # Not drawn on the public live origin — see shell.may_enqueue.
-                # The level picker stays: it is pure page state.
-                if _may_enqueue:
-                    ui.button("Refresh", color=None,
-                              on_click=lambda: _request_refresh()) \
-                        .props("flat no-caps dense").classes(
-                            f"{_MONO} {NT['txt']} text-[11px] tracking-[.1em] "
-                            f"uppercase bg-transparent border {NE['btn_edge']} "
-                            f"px-4 h-[38px] leading-none "
-                            f"hover:{NB['btn_hover']}")
-
-        # ── 1 · is momentum worth trading today? ────────────────────────────
-        ui.label("1 · Is momentum worth trading today?").classes(_STEP)
-        regime_box = ui.row().classes("w-full flex-wrap gap-0.5 mb-0.5")
-        disp_box = ui.row().classes(
-            "items-center w-full flex-wrap gap-[26px] px-[22px] py-[18px] "
-            f"mb-9 {V.LEVEL_GROOVE} border {NE['hair']}")
-
-        # ── 2 · three levels ────────────────────────────────────────────────
-        ui.label("2 · Three levels, and where they agree").classes(_STEP)
-        with ui.row().classes("w-full flex-wrap gap-0.5 mb-9 items-stretch"):
-            with ui.column().classes(
-                    f"flex-[1_1_520px] min-w-[300px] px-6 pt-6 pb-[26px] gap-4 "
-                    f"{V.LEVEL_GROOVE} border {NE['hair']}"):
-                levels_box = ui.column().classes("w-full gap-4")
-                ui.label("Bright segment = names in the top quartile of their "
-                         "level · track width scales with universe size (√)") \
-                    .classes(f"{_MONO} {NT['axis']} text-[9.5px] "
-                             "tracking-[.12em] uppercase leading-[1.7] pt-0.5")
-            with ui.column().classes(
-                    f"flex-[1_1_300px] min-w-[280px] p-6 gap-3.5 "
-                    f"{_ALIGN_PANEL} border {_ALIGN_EDGE}"):
-                ui.label("Align · all three agree").classes(
-                    f"{_MONO} {_ALIGN_TITLE} text-[11px] tracking-[.18em] "
-                    "uppercase leading-none")
-                with ui.row().classes("items-center no-wrap gap-4"):
-                    with ui.row().classes("no-wrap gap-[3px]"):
-                        for _ in range(3):
-                            ui.element("div").classes(
-                                f"w-4 h-[26px] {V.ALIGN_ON}")
-                    align_lbl = ui.label("0").classes(
-                        f"{_MONO} {NT['bright']} text-[34px] font-medium "
-                        "leading-none tracking-[-0.03em]")
-                    ui.label("stocks whose industry and sector both confirm") \
-                        .classes(f"text-[13px] leading-[1.35] {_ALIGN_BODY}")
-                ui.label("The highest-conviction rows on the page — these are "
-                         "the ones to take to Trade Analyzer.").classes(
-                    f"text-[13.5px] leading-[1.5] {_ALIGN_BODY}")
-                # The names themselves, not just the count. Clicking one sends
-                # it to section 4 — and to the stock level, since that is the
-                # only level these rows exist on.
-                ui.label("By rank · click to decompose").classes(
-                    f"{_MONO} {NT['axis']} text-[9.5px] tracking-[.14em] "
-                    "uppercase")
-                aligned_box = ui.row().classes("flex-wrap gap-[5px] w-full")
-
-        # ── 3 · quadrants ───────────────────────────────────────────────────
-        quad_step = ui.label("").classes(_STEP)
-        quad_box = ui.element("div").classes(
-            "grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-0.5 "
-            "w-full mb-9")
-
-        # ── 4 · what a score is made of ─────────────────────────────────────
-        ui.label("4 · What a score is made of").classes(_STEP)
-        with ui.row().classes("w-full flex-wrap gap-0.5 mb-9 items-stretch"):
-            example_box = ui.column().classes(
-                f"flex-[0_1_300px] min-w-[260px] p-6 gap-3 "
-                f"{V.LEVEL_GROOVE} border {NE['hair']}")
-            with ui.column().classes(
-                    f"flex-[1_1_460px] min-w-[320px] px-[26px] pt-6 pb-[26px] "
-                    f"gap-3.5 {V.LEVEL_GROOVE} border {NE['hair']}"):
-                comp_box = ui.column().classes("w-full gap-3.5")
-                ui.label("Z-scores · centre line is the universe average") \
-                    .classes(f"{_MONO} {NT['axis']} text-[9.5px] "
-                             "tracking-[.12em] uppercase leading-[1.7]")
-
-        # ── 5 · rank over recent sessions ───────────────────────────────────
-        with ui.row().classes(
-                "items-baseline justify-between w-full flex-wrap gap-5 mb-3"):
-            rank_step = ui.label("").classes(_STEP + " mb-0")
-            ui.label("Steady climbers beat yesterday's jumpers").classes(
-                f"{_MONO} {NT['ghost']} text-[10px] tracking-[.12em] "
-                "uppercase leading-none")
-        with ui.column().classes(
-                f"w-full px-[26px] pt-[26px] pb-5 mb-9 gap-0 "
-                f"{V.LEVEL_GROOVE} border {NE['hair']}"):
-            with ui.row().classes("w-full no-wrap gap-3"):
-                rtick_box = ui.element("div").classes(
-                    "w-[34px] shrink-0 relative h-[250px]")
-                with ui.column().classes("flex-1 min-w-0 gap-0 pr-[52px]"):
-                    rank_plot = ui.element("div").classes(
-                        "relative h-[250px] w-full")
-                    rdate_box = ui.row().classes(
-                        "justify-between w-full no-wrap pt-2.5")
-            story_lbl = ui.label("").classes(
-                f"text-[13px] leading-[1.5] pt-3.5 {NT['body']}")
-
-        # ── the leaderboard, behind a toggle ────────────────────────────────
-        # Collapsed by default: the sections above are the orientation read, and
-        # a ranked table opens as the answer to a question you have already
-        # decided to ask.
-        board_exp = ui.expansion("Full leaderboard").classes(
-            f"w-full mb-9 {_MONO} {NT['caption']} text-[10px] "
-            f"tracking-[.18em] uppercase {V.LEVEL_GROOVE} border {NE['hair']} "
-            "momentum-board")
-        with board_exp:
-            # normal-case: the expander HEADER is uppercased, and text-transform is
-            # inherited — without this every table cell shouts.
-            board_box = ui.column().classes(
-                f"w-full gap-6 p-1 normal-case {_T['RT_SANS']}")
-
-        # ── limits + footnote ───────────────────────────────────────────────
-        with ui.element("div").classes(
-                "grid grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-0.5 "
-                "w-full"):
-            for tag, text in V.LIMITS:
+            # ── 2 · three levels ─────────────────────────────────────────────
+            ui.label("2 · Three levels, and where they agree").classes(_STEP)
+            with ui.row().classes("w-full flex-wrap gap-0.5 mb-9 items-stretch"):
                 with ui.column().classes(
-                        f"px-5 pt-[18px] pb-5 gap-2 {_LIMIT_BG} "
-                        f"border {NE['note_rule']}"):
-                    ui.label(tag).classes(
-                        f"{_MONO} {_LIMIT_TAG} text-[9.5px] tracking-[.16em] "
+                        f"flex-[1_1_520px] min-w-[300px] px-6 pt-6 pb-[26px] gap-4 "
+                        f"{V.LEVEL_GROOVE} border {_FRAME_EDGE}"):
+                    levels_box = ui.column().classes("w-full gap-4")
+                    ui.label("Bright segment = names in the top quartile of their "
+                             "level · track width scales with universe size (√)") \
+                        .classes(f"{_FAINT} text-[9.5px] "
+                                 "tracking-[.12em] uppercase leading-[1.7] pt-0.5")
+                with ui.column().classes(
+                        f"flex-[1_1_300px] min-w-[280px] p-6 gap-3.5 "
+                        f"{_ALIGN_PANEL} border {_ALIGN_EDGE}"):
+                    ui.label("Align · all three agree").classes(
+                        f"{_ALIGN_TITLE} text-[11px] tracking-[.18em] "
                         "uppercase leading-none")
-                    ui.label(text).classes(
-                        f"text-[13px] leading-[1.45] {NT['rail']}")
-        foot_lbl = ui.label("").classes(
-            f"{_MONO} {NT['ghost']} text-[9.5px] tracking-[.1em] uppercase "
-            "leading-[1.8] pt-5 w-full")
+                    with ui.row().classes("items-center no-wrap gap-4"):
+                        with ui.row().classes("no-wrap gap-[3px]"):
+                            for _ in range(3):
+                                ui.element("div").classes(
+                                    f"w-4 h-[26px] {V.ALIGN_ON}")
+                        align_lbl = ui.label("0").classes(
+                            f"{theme.LABEL} tabular-nums text-[34px] font-medium "
+                            "leading-none tracking-[-0.03em]")
+                        ui.label("stocks whose industry and sector both confirm") \
+                            .classes(f"text-[13px] leading-[1.35] {_ALIGN_BODY}")
+                    ui.label("The highest-conviction rows on the page — these are "
+                             "the ones to take to Trade Analyzer.").classes(
+                        f"text-[13.5px] leading-[1.5] {_ALIGN_BODY}")
+                    # The names themselves, not just the count. Clicking one sends
+                    # it to section 4 — and to the stock level, since that is the
+                    # only level these rows exist on.
+                    ui.label("By rank · click to decompose").classes(
+                        f"{_FAINT} text-[9.5px] tracking-[.14em] uppercase")
+                    aligned_box = ui.row().classes("flex-wrap gap-[5px] w-full")
 
-    mom_busy = _busy.build_busy(quad_box, "Recomputing momentum…")
+            # ── 3 · quadrants ────────────────────────────────────────────────
+            quad_step = ui.label("").classes(_STEP)
+            quad_box = ui.element("div").classes(
+                "grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-0.5 "
+                "w-full mb-9")
+
+            # ── 4 · what a score is made of ──────────────────────────────────
+            ui.label("4 · What a score is made of").classes(_STEP)
+            with ui.row().classes("w-full flex-wrap gap-0.5 mb-9 items-stretch"):
+                example_box = ui.column().classes(
+                    f"flex-[0_1_300px] min-w-[260px] p-6 gap-3 "
+                    f"{V.LEVEL_GROOVE} border {_FRAME_EDGE}")
+                with ui.column().classes(
+                        f"flex-[1_1_460px] min-w-[320px] px-[26px] pt-6 pb-[26px] "
+                        f"gap-3.5 {V.LEVEL_GROOVE} border {_FRAME_EDGE}"):
+                    comp_box = ui.column().classes("w-full gap-3.5")
+                    ui.label("Z-scores · centre line is the universe average") \
+                        .classes(f"{_FAINT} text-[9.5px] "
+                                 "tracking-[.12em] uppercase leading-[1.7]")
+
+            # ── 5 · rank over recent sessions ────────────────────────────────
+            with ui.row().classes(
+                    "items-baseline justify-between w-full flex-wrap gap-5 mb-3"):
+                rank_step = ui.label("").classes(_STEP + " mb-0")
+                ui.label("Steady climbers beat yesterday's jumpers").classes(
+                    f"{_FAINT} text-[10px] tracking-[.12em] "
+                    "uppercase leading-none")
+            with ui.column().classes(
+                    f"w-full px-[26px] pt-[26px] pb-5 mb-9 gap-0 "
+                    f"{V.LEVEL_GROOVE} border {_FRAME_EDGE}"):
+                with ui.row().classes("w-full no-wrap gap-3"):
+                    rtick_box = ui.element("div").classes(
+                        "w-[34px] shrink-0 relative h-[250px]")
+                    with ui.column().classes("flex-1 min-w-0 gap-0 pr-[52px]"):
+                        rank_plot = ui.element("div").classes(
+                            "relative h-[250px] w-full")
+                        rdate_box = ui.row().classes(
+                            "justify-between w-full no-wrap pt-2.5")
+                story_lbl = ui.label("").classes(
+                    f"text-[13px] leading-[1.5] pt-3.5 {theme.LABEL}")
+
+            # ── the leaderboard, behind a toggle ─────────────────────────────
+            # Collapsed by default: the sections above are the orientation read, and
+            # a ranked table opens as the answer to a question you have already
+            # decided to ask.
+            board_exp = ui.expansion("Full leaderboard").classes(
+                f"w-full mb-9 {theme.MUTED} text-[10px] tracking-[.18em] "
+                f"uppercase {V.LEVEL_GROOVE} border {_FRAME_EDGE}")
+            with board_exp:
+                # normal-case: the expander HEADER is uppercased, and text-transform is
+                # inherited — without this every table cell shouts.
+                board_box = ui.column().classes(
+                    "w-full gap-6 p-1 normal-case")
+
+            # ── limits + footnote ────────────────────────────────────────────
+            with ui.element("div").classes(
+                    "grid grid-cols-[repeat(auto-fit,minmax(230px,1fr))] gap-0.5 "
+                    "w-full"):
+                for tag, text in V.LIMITS:
+                    with ui.column().classes(
+                            f"px-5 pt-[18px] pb-5 gap-2 {_LIMIT_BG} "
+                            f"border {_FRAME_EDGE}"):
+                        ui.label(tag).classes(
+                            f"{_LIMIT_TAG} text-[9.5px] tracking-[.16em] "
+                            "uppercase leading-none")
+                        ui.label(text).classes(
+                            f"text-[13px] leading-[1.45] {theme.MUTED}")
+            foot_lbl = ui.label("").classes(
+                f"{_FAINT} text-[9.5px] tracking-[.1em] uppercase "
+                "leading-[1.8] pt-5 w-full")
 
     # ── painters ────────────────────────────────────────────────────────────
     def _paint_regime(regime):
@@ -400,7 +448,7 @@ def render(level="industry"):
                         ("flex-[1.35_1_300px] gap-2.5 border-2 "
                          f"{cls['panel']} {cls['edge']}" if on else
                          f"flex-[1_1_260px] gap-2 {V.LEVEL_GROOVE} border "
-                         f"{NE['hair']}")
+                         f"{_FRAME_EDGE}")
                         + " px-[22px] pt-5 pb-[22px] min-w-0"):
                     with ui.row().classes("items-center no-wrap gap-2.5"):
                         ui.element("div").classes(
@@ -408,17 +456,17 @@ def render(level="industry"):
                             ("w-2 h-2 " + cls["dim_dot"])
                             + " rounded-full shrink-0")
                         ui.label(card["title"]).classes(
-                            f"{_MONO} tracking-[.18em] uppercase leading-none "
+                            "tracking-[.18em] uppercase leading-none "
                             + (f"text-[13px] font-medium {cls['title']}" if on
                                else f"text-[12px] {cls['dim_title']}"))
                     ui.label(card["blurb"]).classes(
                         f"text-[16px] font-medium leading-[1.35] "
-                        f"{NT['bright']}" if on else
-                        f"text-[13px] leading-[1.45] {NT['blurb']}")
+                        f"{theme.LABEL}" if on else
+                        f"text-[13px] leading-[1.45] {theme.MUTED}")
                     ui.label(card["action"]).classes(
-                        f"{_MONO} tracking-[.1em] uppercase leading-none "
+                        "tracking-[.1em] uppercase leading-none "
                         + (f"text-[10.5px] {cls['action']}" if on
-                           else f"text-[10px] {NT['ghost']}"))
+                           else f"text-[10px] {_FAINT}"))
 
     def _paint_dispersion(regime):
         disp_box.clear()
@@ -426,19 +474,19 @@ def render(level="industry"):
         with disp_box:
             if not d:
                 ui.label("No dispersion reading published.").classes(
-                    f"text-[13px] {NT['blurb']}")
+                    f"text-[13px] {theme.MUTED}")
                 return
             with ui.column().classes("gap-[5px] shrink-0"):
                 ui.label("Dispersion").classes(
-                    f"{_MONO} {NT['label']} text-[10px] tracking-[.16em] "
+                    f"{theme.MUTED} text-[10px] tracking-[.16em] "
                     "uppercase leading-none")
                 ui.label(d["ordinal"]).classes(
-                    f"{_MONO} {_DISP_TXT} text-[26px] font-medium "
+                    f"{_DISP_TXT} tabular-nums text-[26px] font-medium "
                     "leading-none tracking-[-0.03em]")
             with ui.column().classes(
                     "flex-[1_1_300px] min-w-[220px] gap-[7px]"):
                 with ui.element("div").classes(
-                        f"relative h-3 w-full {NB['track']}"):
+                        f"relative h-3 w-full {_TRACK}"):
                     ui.element("div").classes(
                         f"absolute left-0 top-0 h-3 {_DISP_FILL} "
                         f"w-[{d['pct']:.1f}%]")
@@ -447,14 +495,14 @@ def render(level="industry"):
                         f"left-[{d['pct']:.1f}%]")
                 with ui.row().classes(
                         "justify-between w-full no-wrap "
-                        f"{_MONO} {NT['axis']} text-[9.5px] tracking-[.12em] "
+                        f"{_FAINT} text-[9.5px] tracking-[.12em] "
                         "uppercase"):
                     ui.label("0 · everything moves together")
                     ui.label("100 · wide spread")
             if d["sentence"]:
                 ui.label(d["sentence"]).classes(
                     f"flex-[1_1_260px] text-[13.5px] leading-[1.45] "
-                    f"{NT['body']}")
+                    f"{theme.LABEL}")
 
     def _paint_aligned(levels):
         aligned_box.clear()
@@ -464,7 +512,7 @@ def render(level="industry"):
             if not a["members"]:
                 ui.label("No stock has both its industry and its sector "
                          "behind it today.").classes(
-                    f"text-[12.5px] leading-[1.4] {NT['blurb']}")
+                    f"text-[12.5px] leading-[1.4] {theme.MUTED}")
                 return
             for m in a["members"]:
                 _name_chip(m, V.ALIGN_CLASSES, pick=_select_aligned)
@@ -478,7 +526,7 @@ def render(level="industry"):
                         "grid grid-cols-[96px_minmax(0,1fr)_130px] "
                         "items-center gap-[18px] w-full"):
                     ui.label(b["name"]).classes(
-                        f"{_MONO} {NT['rail']} text-[11px] tracking-[.14em] "
+                        f"{theme.MUTED} text-[11px] tracking-[.14em] "
                         "uppercase")
                     with ui.element("div").classes(
                             f"relative block h-5 w-full {V.LEVEL_GROOVE}"):
@@ -491,17 +539,27 @@ def render(level="industry"):
                     with ui.row().classes(
                             "items-baseline justify-end no-wrap gap-[7px]"):
                         ui.label(str(b["top"])).classes(
-                            f"{_MONO} {NT['bright']} text-[17px] font-medium")
+                            f"{theme.LABEL} tabular-nums text-[17px] "
+                            "font-medium")
                         ui.label(f"of {b['total']}").classes(
-                            f"{_MONO} {NT['rail']} text-[11px]")
+                            f"{theme.MUTED} tabular-nums text-[11px]")
 
     def _name_chip(member, cls, pick=None):
         """One clickable name. Clicking drives section 4 rather than navigating
         — the whole point is to decompose it without losing your place."""
         sel = member["symbol"] == state["selected"]
         act = pick or _select
+        # ⚠ A RAW ``ui.button``, with its reason recorded in the ui-kit
+        # guard's ALLOWED: this is ONE call site producing on the order of the
+        # whole level's universe per repaint, and it is a selectable name chip
+        # — not a page action. Through ``kit.button`` it would drop a
+        # full-size action button into a quadrant panel hundreds of times. Its
+        # fill and text stay the QUADRANT's (data); only the selection ring is
+        # an app token.
         btn = ui.button(member["label"], color=None,
-                        on_click=lambda _e=None, sym=member["symbol"]: act(sym))             .props("flat no-caps dense")             .classes(f"{_MONO} {cls['chip_txt']} {cls['chip']} text-[10.5px] "
+                        on_click=lambda _e=None, sym=member["symbol"]: act(sym)) \
+            .props("flat no-caps dense") \
+            .classes(f"{cls['chip_txt']} {cls['chip']} text-[10.5px] "
                      "tracking-[.06em] px-2.5 py-[5px] max-w-full normal-case "
                      "leading-none min-h-0"
                      + (f" ring-1 {_SEL_RING}" if sel else ""))
@@ -526,25 +584,25 @@ def render(level="industry"):
                                 f"w-[9px] h-[9px] rounded-full shrink-0 "
                                 f"{cls['dot']}")
                             ui.label(q["name"]).classes(
-                                f"{_MONO} {cls['title']} text-[12px] "
+                                f"{cls['title']} text-[12px] "
                                 "font-medium tracking-[.18em] uppercase "
                                 "leading-none")
                         with ui.row().classes("items-baseline no-wrap gap-[7px]"):
                             ui.label(str(q["count"])).classes(
-                                f"{_MONO} {NT['bright']} text-[24px] "
+                                f"{theme.LABEL} tabular-nums text-[24px] "
                                 "font-medium tracking-[-0.03em] leading-none")
                             ui.label(q["share"]).classes(
-                                f"{_MONO} {NT['of_index']} text-[10px] "
+                                f"{_FAINT} text-[10px] "
                                 "tracking-[.1em] uppercase leading-none")
                     with ui.element("div").classes(
-                            f"relative h-1 w-full mb-4 {NB['hair']}"):
+                            f"relative h-1 w-full mb-4 {_TRACK}"):
                         ui.element("div").classes(
                             f"absolute left-0 top-0 h-1 {cls['bar']} "
                             f"w-[{q['bar_pct']:.1f}%]")
                     ui.label(q["blurb"]).classes(
-                        f"text-[12.5px] leading-[1.4] mb-3.5 {NT['blurb']}")
+                        f"text-[12.5px] leading-[1.4] mb-3.5 {theme.MUTED}")
                     ui.label("Strongest by score").classes(
-                        f"{_MONO} {NT['axis']} text-[9.5px] tracking-[.14em] "
+                        f"{_FAINT} text-[9.5px] tracking-[.14em] "
                         "uppercase mb-2.5")
                     with ui.row().classes("flex-wrap gap-[5px] w-full"):
                         for m in q["names"]:
@@ -554,9 +612,9 @@ def render(level="industry"):
                         # is what this section is for, so the rest of the
                         # membership is one click away rather than absent.
                         with ui.expansion(f"+{q['more']} more").classes(
-                                f"w-full mt-2 {_MONO} {NT['caption']} "
+                                f"w-full mt-2 {theme.MUTED} "
                                 "text-[10px] tracking-[.1em] uppercase "
-                                f"border {NE['btn_edge']} momentum-more"):
+                                f"border {_BTN_EDGE}"):
                             with ui.row().classes(
                                     "flex-wrap gap-[5px] w-full p-1 normal-case"):
                                 for m in q["members"][len(q["names"]):]:
@@ -569,20 +627,21 @@ def render(level="industry"):
         with example_box:
             if not ex:
                 ui.label("No rows for this level.").classes(
-                    f"text-[13px] {NT['blurb']}")
+                    f"text-[13px] {theme.MUTED}")
                 return
             with ui.row().classes(
                     "items-baseline justify-between w-full no-wrap gap-3"):
                 ui.label(
                     ("Top ranked · " if ex["is_default"] else "Selected · ")
                     + (ex["sector"] or "—")).classes(
-                    f"{_MONO} {NT['caption']} text-[10px] tracking-[.16em] "
+                    f"{theme.MUTED} text-[10px] tracking-[.16em] "
                     "uppercase leading-none truncate")
                 if not ex["is_default"]:
-                    ui.button("Top ranked", color=None,
-                              on_click=lambda: _select(None))                         .props("flat no-caps dense").classes(
-                            f"{_MONO} {NT['rail']} text-[9px] tracking-[.12em] "
-                            "uppercase leading-none px-1.5 min-h-0 shrink-0")
+                    # Link-like: it resets the page's own selection and
+                    # commands nothing.
+                    kit.button("Top ranked", kind="quiet",
+                               on_click=lambda: _select(None)) \
+                        .classes("shrink-0")
             ui.label(ex["label"]).classes(
                 "text-[22px] font-semibold leading-[1.1] tracking-[-0.02em]")
             with ui.row().classes("items-baseline flex-wrap gap-[18px]"):
@@ -593,16 +652,16 @@ def render(level="industry"):
                                         else None)):
                     with ui.column().classes("gap-[3px]"):
                         ui.label(cap).classes(
-                            f"{_MONO} {NT['of_index']} text-[9.5px] "
+                            f"{_FAINT} text-[9.5px] "
                             "tracking-[.14em] uppercase leading-none")
                         ui.label(val).classes(
-                            f"{_MONO} text-[24px] font-medium leading-none "
-                            f"tracking-[-0.03em] {tone or NT['bright']}")
+                            "tabular-nums text-[24px] font-medium leading-none"
+                            f" tracking-[-0.03em] {tone or theme.LABEL}")
             with ui.row().classes("items-center no-wrap gap-2.5 pt-1 flex-wrap"):
                 if ex["quadrant"]:
                     qc = V.QUAD_CLASSES[ex["quadrant"]]
                     ui.label(ex["quadrant"]).classes(
-                        f"{_MONO} {qc['chip_txt']} {qc['chip']} text-[10px] "
+                        f"{qc['chip_txt']} {qc['chip']} text-[10px] "
                         "tracking-[.14em] uppercase px-2.5 py-[5px]")
                 if ex["align_blocks"]:
                     with ui.row().classes("items-center no-wrap gap-[3px]"):
@@ -610,26 +669,25 @@ def render(level="industry"):
                             ui.element("div").classes(
                                 f"w-[11px] h-[18px] "
                                 + (V.ALIGN_ON if on else
-                                   f"{V.ALIGN_OFF} border {NE['btn_edge']}"))
+                                   f"{V.ALIGN_OFF} border {_BTN_EDGE}"))
                     ui.label(ex["align_text"]).classes(
-                        f"{_MONO} {NT['of_index']} text-[9.5px] "
-                        "tracking-[.1em] uppercase")
+                        f"{_FAINT} text-[9.5px] tracking-[.1em] uppercase")
         with comp_box:
             for c in V.component_bars(ex["components"]):
                 with ui.element("div").classes(
                         "grid grid-cols-[74px_minmax(0,1fr)_46px] "
                         "items-center gap-4 w-full"):
                     ui.label(c["label"]).classes(
-                        f"{_MONO} {NT['value']} text-[10.5px] "
+                        f"{theme.LABEL} text-[10.5px] "
                         "tracking-[.12em] uppercase")
                     with ui.column().classes("gap-[5px] min-w-0 w-full"):
                         ui.label(c["meaning"]).classes(
-                            f"text-[12.5px] leading-[1.3] {NT['note']}")
+                            f"text-[12.5px] leading-[1.3] {theme.MUTED}")
                         with ui.element("div").classes(
-                                f"relative block h-[7px] w-full {NB['track']}"):
+                                f"relative block h-[7px] w-full {_TRACK}"):
                             ui.element("div").classes(
                                 f"absolute left-1/2 -top-0.5 w-px h-[11px] "
-                                f"{NB['btn_edge']}")
+                                f"{_ZERO_TICK}")
                             if c["width_pct"]:
                                 ui.element("div").classes(
                                     "absolute top-0 h-[7px] "
@@ -638,7 +696,7 @@ def render(level="industry"):
                                     + f" left-[{c['left_pct']:.1f}%] "
                                     f"w-[{c['width_pct']:.1f}%]")
                     ui.label(c["text"]).classes(
-                        f"{_MONO} text-[12.5px] text-right tabular-nums "
+                        "text-[12.5px] text-right tabular-nums "
                         + (V.POS_TXT if c["positive"] else V.NEG_TXT))
 
     def _paint_ranks(history):
@@ -650,7 +708,7 @@ def render(level="industry"):
         with rtick_box:
             for t in V.rank_ticks(ch):
                 ui.label(str(t["rank"])).classes(
-                    f"{_MONO} {NT['of_index']} text-[10px] absolute right-1.5 "
+                    f"{_FAINT} tabular-nums text-[10px] absolute right-1.5 "
                     f"-translate-y-1/2 top-[{t['y_pct']:.2f}%]")
         with rank_plot:
             svg = V.rank_svg(ch)
@@ -659,10 +717,10 @@ def render(level="industry"):
                     "absolute inset-0 w-full h-full pointer-events-none")
             for s in ch["series"]:
                 ui.label(s["symbol"]).classes(
-                    f"{_MONO} absolute left-full whitespace-nowrap "
+                    "absolute left-full whitespace-nowrap "
                     "translate-x-2 -translate-y-1/2 text-[10.5px] "
                     "tracking-[.06em] "
-                    + (V.HILITE_TXT if s["highlight"] else NT["caption"])
+                    + (V.HILITE_TXT if s["highlight"] else theme.MUTED)
                     + f" top-[{s['points'][-1][1]:.2f}%]")
         dates = ch["dates"]
         with rdate_box:
@@ -671,7 +729,7 @@ def render(level="industry"):
                                       if len(dates) > 2 else []) + [dates[-1]]
                 for d in marks:
                     ui.label(d).classes(
-                        f"{_MONO} {NT['axis']} text-[9.5px] tracking-[.1em]")
+                        f"{_FAINT} text-[9.5px] tracking-[.1em]")
 
     def _paint_board(rows, level, muted):
         board_box.clear()
@@ -682,10 +740,16 @@ def render(level="industry"):
                 if not data:
                     continue
                 ui.label(section_heading(title, level)).classes(
-                    f"{_MONO} {NT['caption']} text-[10px] tracking-[.18em] "
+                    f"{theme.MUTED} text-[10px] tracking-[.18em] "
                     "uppercase")
-                tbl = ui.table(columns=cols, rows=data, row_key="symbol")                     .classes("w-full momentum-table cursor-pointer"
-                             + (" opacity-50" if muted else ""))
+                # ⚠ Through the kit the leaderboard SORTS for the first
+                # time: ``table_columns`` defaults every data column
+                # ``sortable``. ``numeric=()`` is deliberate — each column
+                # already declares its own ``align``, which the kit keeps for
+                # anything it is not told is numeric.
+                tbl = kit.table(cols, rows=data, row_key="symbol", numeric=(),
+                                classes="w-full cursor-pointer"
+                                + (" opacity-50" if muted else ""))
                 # rowClick carries the clicked row in args[1]; `table.selected`
                 # is a different thing entirely and would lag a click behind.
                 tbl.on("rowClick",
@@ -693,7 +757,7 @@ def render(level="industry"):
 
     # ── apply ───────────────────────────────────────────────────────────────
     def _apply():
-        mom_busy.hide()
+        body.busy.hide()
         p = state["payload"] or {}
         lvl = state["level"]
         rows = rows_for(p, lvl)
@@ -760,8 +824,9 @@ def render(level="industry"):
         if not _may_enqueue:
             return          # no button either — see shell.may_enqueue
         bus_client.request("sentiment", {"type": "refresh_momentum"})
-        ui.notify("Recomputing — this one takes a moment.")
-        mom_busy.show()
+        # No toast: the region's spinner already says the page is waiting, and
+        # the standard keeps a toast for the OUTCOME of an action.
+        body.busy.show()
 
     _read()
     _apply()

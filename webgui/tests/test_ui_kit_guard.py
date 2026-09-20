@@ -39,7 +39,13 @@ ALLOWED = {
     "options/swing.py": {"button": 7, "table": 1},
     "portfolio.py": {"button": 1, "table": 3},
     "sentiment.py": {"add_head_html": 1, "button": 3, "notify": 1},
-    "sentiment_momentum.py": {"add_head_html": 1, "button": 3, "notify": 1, "table": 1},
+    # The per-member name chip, and it stays: ONE call site producing on the
+    # order of the whole level's universe per repaint, and a selectable name
+    # chip - 10.5px, ring-on-select, max-w-full - not a page action. Through
+    # kit.button it would drop a full-size action button into a quadrant panel
+    # hundreds of times. The page's ACTIONS (Refresh, Top ranked) go through
+    # the kit.
+    "sentiment_momentum.py": {"button": 1},
     "settings.py": {"button": 7, "dialog": 1, "notify": 1},
     "status.py": {"button": 3, "notify": 4},
     "symbol.py": {"add_head_html": 1, "button": 2},
