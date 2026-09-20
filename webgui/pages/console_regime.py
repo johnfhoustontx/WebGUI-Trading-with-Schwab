@@ -13,12 +13,13 @@ from pages import console_dial
 from pages import regime_mix as RM
 from pages.console_cards import pill_tooltip
 from pages.options import theme
-from pages.options.theme import (CONSOLE_CARD, CONSOLE_CELL, CONSOLE_DISPLAY,
-                                 CONSOLE_DIVIDER, CONSOLE_HAIRLINE, CON_TXT,
-                                 CON_TXT_DIM, CON_TXT_MUTED)
 
 _C = theme.CONSOLE_COLORS
-_CARD = f"{CONSOLE_CARD} rounded-none overflow-hidden w-full"
+# The APP's card since 2026-09-19 (the consistency standard): its ground, its
+# border, its 12px radius and its px-4 py-3.5, in place of the console's own
+# gradient card, square corners and 20-24px padding. Taken from ``console`` so
+# the three modules that draw this screen cannot drift apart.
+_CARD = f"{K.CARD} overflow-hidden w-full"
 
 # The share table's columns. Fixed name/spark/change cells with the bar flexing,
 # and the HEAD ROW USES THE SAME GRID as the data rows — that alignment is the
@@ -70,7 +71,7 @@ def regime_hex(key, share):
     carry the meaning."""
     if K._safe(share) is not None and K._safe(share) <= 0.0:
         return _C["regime_zero"]
-    return _C["regimes"].get(key, _C["muted"])
+    return _C["regimes"].get(key, K._ABSENT)
 
 
 def sparkline_svg(series, color, dashed=False, width=SPARK_W, height=SPARK_H):
@@ -106,9 +107,9 @@ def sparkline_svg(series, color, dashed=False, width=SPARK_W, height=SPARK_H):
 def change_text(row):
     """"+2.0pp" / "−8.4pp", or an em-dash for a band that never moved."""
     if not isinstance(row, dict):
-        return "—", _C["dim"]
+        return "—", K._ABSENT
     if row.get("flat"):
-        return "—", _C["dim"]
+        return "—", K._ABSENT
     change = K._safe(row.get("change")) or 0.0
     if change >= 0:
         return f"+{change * 100:.1f}pp", _C["positive"]
@@ -124,9 +125,9 @@ def render_dial_card(regime, points):
     _key, margin, tightest = RM.lead_margin(points)
     name = regime_name(r)
     runner = rows[1]["label"] if len(rows) > 1 else "—"
-    with ui.column().classes(f"{_CARD} px-[24px] pt-[22px] pb-[24px] gap-4"):
+    with ui.column().classes(f"{_CARD} gap-4"):
         ui.label("REGIME IDENTIFIED").classes(
-            f"text-[10px] tracking-[.26em] {CON_TXT_DIM}")
+            f"text-[10px] tracking-[.26em] {K.DIM}")
         dial = ui.html(console_dial.dial_svg(
             None if r.get("unclear") else r.get("confidence"), name,
             uid="regime")).classes("w-full max-w-[244px] self-center")
@@ -137,8 +138,8 @@ def render_dial_card(regime, points):
         # holding an open tooltip across a repaint.
         pill_tooltip(dial, RM.regime_picture(name))
         with ui.element("div").classes(
-                f"grid grid-cols-2 gap-px w-full {CONSOLE_HAIRLINE} "
-                f"border {CONSOLE_DIVIDER}"):
+                f"grid grid-cols-2 gap-px w-full {K.HAIRLINE} "
+                f"border {K.RULE}"):
             _stat("LEAD",
                   "—" if margin is None else f"+{margin * 100:.1f} pp",
                   f"over {runner}")
@@ -149,10 +150,10 @@ def render_dial_card(regime, points):
 
 def _stat(label, value, note):
     from nicegui import ui
-    with ui.column().classes(f"gap-1 px-3 py-[10px] {CONSOLE_CELL}"):
-        ui.label(label).classes(f"text-[9.5px] tracking-[.2em] {CON_TXT_DIM}")
-        ui.label(value).classes(f"text-[17px] {CON_TXT}")
-        ui.label(note).classes(f"text-[10px] {CON_TXT_MUTED}")
+    with ui.column().classes(f"gap-1 px-3 py-[10px] {K.CELL}"):
+        ui.label(label).classes(f"text-[9.5px] tracking-[.2em] {K.DIM}")
+        ui.label(value).classes(f"text-[17px] {K.TXT}")
+        ui.label(note).classes(f"text-[10px] {K.MUTED}")
 
 
 # --- 5.4 diagnostic tags ----------------------------------------------------
@@ -163,14 +164,14 @@ def render_tags_card(evidence_detail):
     not a guess made from the wording here."""
     from nicegui import ui
     tags = [t for t in (evidence_detail or []) if isinstance(t, dict)]
-    with ui.column().classes(f"{_CARD} px-[20px] pt-[18px] pb-[20px] gap-3"):
+    with ui.column().classes(f"{_CARD} gap-3"):
         with ui.row().classes("items-baseline justify-between w-full"):
             ui.label("DIAGNOSTIC TAGS").classes(
-                f"text-[10px] tracking-[.26em] {CON_TXT_DIM}")
+                f"text-[10px] tracking-[.26em] {K.DIM}")
             ui.label(f"{len(tags)} ACTIVE").classes(
                 f"text-[10px] text-[{_C['accent']}]")
         if not tags:
-            ui.label("No active tags").classes(f"text-[11.5px] {CON_TXT_MUTED}")
+            ui.label("No active tags").classes(f"text-[11.5px] {K.MUTED}")
             return
         with ui.row().classes("flex-wrap gap-2 w-full"):
             for tag in tags:
@@ -182,16 +183,16 @@ def render_share_table(points):
     """One row per regime, ranked, with share bar / sparkline / change."""
     from nicegui import ui
     rows = RM.rank_rows(points) if RM.session_points(points) else []
-    with ui.column().classes(f"{_CARD} px-[24px] pt-[20px] pb-2 gap-3"):
+    with ui.column().classes(f"{_CARD} gap-3"):
         with ui.column().classes(
-                f"gap-3 w-full border-b {CONSOLE_DIVIDER} pb-[10px]"):
+                f"gap-3 w-full border-b {K.RULE} pb-[10px]"):
             with ui.row().classes("items-baseline justify-between w-full"):
                 ui.label("REGIME SHARE").classes(
-                    f"{CONSOLE_DISPLAY} text-[20px] font-bold tracking-[.16em] "
-                    f"{CON_TXT}")
+                    f"text-[20px] font-bold tracking-[.16em] "
+                    f"{K.TXT}")
                 ui.label("BY SHARE · CHANGE VS OPEN").classes(
                     f"text-[10px] tracking-[.2em] whitespace-nowrap "
-                    f"{CON_TXT_DIM}")
+                    f"{K.DIM}")
             # Same grid as the data rows — that is what keeps the labels over
             # their columns.
             with ui.element("div").classes(GRID):
@@ -199,10 +200,10 @@ def render_share_table(points):
                 for text, extra in (("SHARE", ""), ("TODAY", ""),
                                     ("CHANGE", "text-right")):
                     ui.label(text).classes(
-                        f"text-[10px] tracking-[.2em] {CON_TXT_DIM} {extra}")
+                        f"text-[10px] tracking-[.2em] {K.DIM} {extra}")
         if not rows:
             ui.label("Waiting for regime…").classes(
-                f"text-[11.5px] {CON_TXT_MUTED} py-4")
+                f"text-[11.5px] {K.MUTED} py-4")
             return
         lead = rows[0]["now"]
         for row in rows:
@@ -214,17 +215,17 @@ def _share_row(row, lead):
     hexv = regime_hex(row["key"], row["now"])
     zero = K._safe(row["now"]) <= 0.0
     with ui.element("div").classes(
-            f"{GRID} py-[15px] border-b {CONSOLE_DIVIDER}"):
+            f"{GRID} py-[15px] border-b {K.RULE}"):
         with ui.row().classes("items-center gap-3"):
             ui.element("div").classes(
                 f"w-[8px] h-[26px] shrink-0 bg-[{hexv}] "
                 + ("" if zero else theme.console_glow(hexv, px=10, alpha=0.45)))
             with ui.column().classes("gap-[2px] min-w-0"):
                 ui.label(row["label"].upper()).classes(
-                    f"{CONSOLE_DISPLAY} text-[19px] font-semibold "
-                    f"tracking-[.1em] {CON_TXT}")
+                    f"text-[19px] font-semibold "
+                    f"tracking-[.1em] {K.TXT}")
                 ui.label(RM.regime_note(row)).classes(
-                    f"text-[9.5px] tracking-[.16em] {CON_TXT_DIM}")
+                    f"text-[9.5px] tracking-[.16em] {K.DIM}")
         with ui.row().classes("items-center gap-3 w-full"):
             ui.label(f"{row['now'] * 100:.1f}%").classes(
                 f"w-[74px] shrink-0 text-[20px] font-medium text-[{hexv}]")
@@ -252,17 +253,17 @@ def render_callouts(points):
         ("EMERGING", c["emerging"], _emerging_note(c["emerging"])),
     ]
     with ui.element("div").classes(
-            f"grid grid-cols-3 gap-px w-full {CONSOLE_HAIRLINE} "
-            f"border {CONSOLE_DIVIDER}"):
+            f"grid grid-cols-3 gap-px w-full {K.HAIRLINE} "
+            f"border {K.RULE}"):
         for kicker, row, note in items:
-            with ui.column().classes(f"gap-1 px-[18px] py-4 {CONSOLE_CELL}"):
+            with ui.column().classes(f"gap-1 px-[18px] py-4 {K.CELL}"):
                 ui.label(kicker).classes(
-                    f"text-[9.5px] tracking-[.22em] {CON_TXT_DIM}")
+                    f"text-[9.5px] tracking-[.22em] {K.DIM}")
                 ui.label((row["label"] if row else "—").upper()).classes(
-                    f"{CONSOLE_DISPLAY} text-[22px] font-bold tracking-[.12em] "
+                    f"text-[22px] font-bold tracking-[.12em] "
                     + (f"text-[{regime_hex(row['key'], row['now'])}]"
-                       if row else CON_TXT_MUTED))
-                ui.label(note).classes(f"text-[11px] {CON_TXT_MUTED}")
+                       if row else K.MUTED))
+                ui.label(note).classes(f"text-[11px] {K.MUTED}")
 
 
 def _dominant_note(points, row):

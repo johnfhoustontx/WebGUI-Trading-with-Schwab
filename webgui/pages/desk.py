@@ -1262,6 +1262,11 @@ _P = THEME["palette"]
 # step apart, the pair survives as ``_DIM`` over ``MUTED``.
 _DIM = f"text-[{_P['icon']}]"
 _RULE = f"border-[{_P['card_border']}]"      # a card's hairline
+# A row's hover wash. The console's one grey ``line`` was the last
+# member of that vocabulary on this page, and it was missed by the
+# 2026-09-19 sweep because it is spelled with single quotes: a hover is
+# an affordance, not a reading. Same 6% alpha, the app's neutral.
+_HOVER = _P["muted"]
 
 
 def fmt_price(v):
@@ -1454,7 +1459,12 @@ CHIP_NEG_STRONG = _chip(_C["negative"], fill=0.28, weight="font-semibold",
                         **_TIGHT)
 CHIP_WARN = _chip(_C["warning"], **_TIGHT)
 CHIP_ACCENT = _chip(_C["accent"], **_TIGHT)
-CHIP_MUTED = _chip(_C["muted"], **_TIGHT)
+# ``muted`` and ``label`` were the console's two dimmest TEXT steps and went
+# with the rest of its ladder on 2026-09-19 — a neutral is surface
+# wherever it lives (the db39442 rule). The four chromatic chips above are
+# readings and keep their console hues. The two app steps stay distinct,
+# which the source chip below depends on.
+CHIP_MUTED = _chip(_P["muted"], **_TIGHT)
 # The third book's chip, on the palette's dimmest readable step. Deliberately
 # the QUIETEST of the three rather than a third loud hue: captured signals are
 # advisory, they usually outnumber the two real books several times over, and a
@@ -1462,7 +1472,7 @@ CHIP_MUTED = _chip(_C["muted"], **_TIGHT)
 # look like the important one. It stays distinct from ``CHIP_MUTED``, which is
 # what an UNKNOWN source falls back to — those two must not collide, or a
 # malformed row would render as a captured signal.
-CHIP_LABEL = _chip(_C["label"], **_TIGHT)
+CHIP_LABEL = _chip(_P["icon"], **_TIGHT)
 
 # The board's setup tag. The tight tracking and padding of ``_TIGHT`` — it sits
 # in a 96px track — but explicitly NOT its ``wrap``: a board row is one line by
@@ -3584,7 +3594,7 @@ def render():
         # to fill the space.
         el = ui.element("div").classes(
             f"{DEALER_GRID} {_row_shell(DEALER_GRID)} {_ROW} "
-            f"hover:bg-[{_C['line']}]/[0.06]")
+            f"hover:bg-[{_HOVER}]/[0.06]")
         with el:
             ui.label(row["symbol"]).classes(
                 f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
@@ -3680,7 +3690,7 @@ def render():
         # ordering already carries the comparison the bar was drawing.
         el = ui.element("div").classes(
             f"{BOARD_GRID} {_row_shell(BOARD_GRID)} {_ROW} "
-            f"hover:bg-[{_C['line']}]/[0.06] "
+            f"hover:bg-[{_HOVER}]/[0.06] "
             + glow_classes(state["glow"].get(board_glow_key(row["symbol"])),
                            state["glow_now"]))
         with el:
@@ -3758,7 +3768,7 @@ def render():
         # paint's single clock — not a fresh ``monotonic()`` per row.
         el = ui.element("div").classes(
             f"{FLOW_GRID} {_row_shell(FLOW_GRID)} {_ROW} "
-            f"hover:bg-[{_C['line']}]/[0.06] "
+            f"hover:bg-[{_HOVER}]/[0.06] "
             + glow_classes(state["glow"].get(row.get("id")),
                            state["glow_now"]))
         with el:
@@ -3828,7 +3838,7 @@ def render():
         el = ui.element("div").classes(
             f"{POS_GRID} {_row_shell(POS_GRID)} "
             f"{_ROW if can_open else _ROW_STATIC} "
-            + (f"hover:bg-[{_C['line']}]/[0.06] " if can_open else "")
+            + (f"hover:bg-[{_HOVER}]/[0.06] " if can_open else "")
             + glow_classes(state["glow"].get(row.get("position_id")),
                            state["glow_now"]))
         with el:

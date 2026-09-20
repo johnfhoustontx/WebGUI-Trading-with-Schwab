@@ -221,3 +221,75 @@ def test_dial_reuses_the_rings_arc_geometry():
     from pages import rings
     d = rings._arc_path(D.CX, D.CY, D.R_TRACK, 0.0, 360.0 * 0.56)
     assert d and d in D.dial_svg(0.56, "X")
+
+
+# ------------------------------------- the app surface (2026-09-19) ---------
+def test_the_shared_surface_vocabulary_is_the_apps_own_palette():
+    """The console's ground, its one grey ``line`` and its six-step neutral
+    ladder retired with the consistency standard. These constants are what the
+    three console modules draw their cards, cells, rules, grooves and text
+    steps from, and every one of them must resolve to an APP palette value —
+    the thing a console token may still be is a READING.
+
+    They live here, in the module both card files already import, so a card in
+    ``console_cards`` cannot drift from a card in ``console_regime``."""
+    from pages.options import theme
+    P = theme.THEME["palette"]
+    assert C.CARD == theme.CARD
+    assert C.CELL == f"bg-[{P['card_bg']}]"
+    assert C.HAIRLINE == f"bg-[{P['card_border']}]"
+    assert C.RULE == f"border-[{P['card_border']}]"
+    assert C.RULE_STRONG == f"border-[{P['btn_border']}]"
+    assert C.TXT == theme.LABEL
+    assert C.MUTED == theme.MUTED
+    assert C.DIM == f"text-[{P['icon']}]"
+    assert C._ABSENT == P["muted"]
+
+
+def test_the_meter_track_is_the_app_groove_with_a_brighter_rule():
+    """A track is what a fill moves in; only the FILL encodes anything. The
+    card border is the groove and the button border its own rule, one step
+    brighter — the pairing ``momentum_view``'s LEVEL_TRACK / LEVEL_GROOVE and
+    the Desk's breadth track already use."""
+    from pages.options import theme
+    P = theme.THEME["palette"]
+    track = C.track_classes()
+    assert f"bg-[{P['card_border']}]" in track
+    assert f"border-[{P['btn_border']}]" in track
+    assert "#788ca0" not in track, "the console's own line colour is retired"
+
+
+def test_a_missing_reading_is_the_apps_muted_step_on_every_primitive():
+    """"No read" is an ABSENCE, and an absence is surface. All three primitives
+    that can report one must agree on the colour, or the same non-reading would
+    look different in the meter, the band and the signed row."""
+    from pages.options import theme
+    muted = theme.THEME["palette"]["muted"]
+    assert C.band_hex("muted") == muted
+    assert C.band_hex("nonsense") == muted
+    assert C.meter_row("DAY", None)["hex"] == muted
+    assert C.bipolar_geometry(None)["hex"] == muted
+    assert muted in C.NO_READ_HATCH
+
+
+def test_the_band_colours_and_the_glow_are_untouched():
+    """Charts keep their data colours: the half the sweep may not reach.
+    Passes before and after by design — a must-not-change guard."""
+    assert C.band_hex("positive") == "#35d68a"
+    assert C.band_hex("yellow") == "#d7d76a"
+    assert C.band_hex("olive") == "#b9cf6a"
+    assert C.band_hex("warning") == "#e0b74e"
+    assert C.band_hex("negative") == "#f2646b"
+    assert C.meter_row("DAY", 83)["glow"].startswith("shadow-[")
+
+
+def test_the_dial_keeps_its_accent_arc_and_loses_its_display_face():
+    """The ARC is the reading and stays on the console accent. The regime word
+    was drawn in Rajdhani over a near-black ground; the face retired with the
+    ground, so the dial emits no ``font-family`` of its own."""
+    from pages.options import theme
+    svg = D.dial_svg(0.56, "Whipsaw")
+    assert theme.CONSOLE_COLORS["accent"] in svg
+    assert "font-family" not in svg
+    assert theme.THEME["palette"]["title"] in svg     # the word
+    assert theme.THEME["palette"]["icon"] in svg      # the CONFIDENCE caption

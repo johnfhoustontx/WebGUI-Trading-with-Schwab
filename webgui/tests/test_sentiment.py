@@ -1118,3 +1118,56 @@ def test_the_value_palette_and_the_console_data_hues_are_untouched():
         assert getattr(_theme, name), name
     assert set(_theme.console_colors(_theme.THEME)["regimes"]) == {
         "mean_reversion", "trending", "breakout", "choppy", "crisis"}
+
+
+def _luma(hexv):
+    """Relative brightness of a #rrggbb, for asserting that two text steps
+    really are one step apart in the direction claimed."""
+    h = hexv.lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def test_the_console_footer_keeps_its_two_steps_in_the_right_order():
+    """THE ONE PLACE THE LADDER DOES NOT COLLAPSE THE WAY THE PAGES DID.
+
+    ``/desk``, ``/symbol`` and this page mapped the console's ``dim`` step onto
+    the app's faintest (``palette.icon``) and its ``faint`` step onto ``MUTED``,
+    which is BRIGHTER — harmless where the two never meet. The footer is where
+    they meet: the regime summary was ``dim`` and the disclaimer ``faint``, two
+    steps apart on purpose, and taking the mapping literally would have made
+    the boilerplate out-read the reading. So the pair keeps its direction."""
+    import inspect
+    from pages import console as K
+    from pages import console_page
+    from pages.options import theme as _theme
+    src = inspect.getsource(console_page._footer)
+    assert "{K.MUTED}" in src, "the summary is the brighter of the two"
+    assert "{K.DIM}" in src, "the disclaimer is the quieter of the two"
+    assert src.index("{K.MUTED}") < src.index("{K.DIM}")
+    # And it IS a real two-step pair: the app's muted step is lighter than its
+    # icon step, which is what makes the order above mean something.
+    P = _theme.THEME["palette"]
+    assert _luma(P["muted"]) > _luma(P["icon"])
+    # The rule above them is the app's one-step-brighter border, not the
+    # console's accent-tinted one.
+    assert "{K.RULE_STRONG}" in src and K.RULE_STRONG
+
+
+def test_the_console_modules_carry_no_page_scoped_surface_token():
+    """The four SHARED modules the console is built from — no page task touched
+    them, because ``console_cards`` and ``console_regime`` are drawn by BOTH
+    ``/sentiment`` and ``/desk``, so migrating either inside a page's task
+    would have silently restyled the other."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    retired = ("CONSOLE_PAGE", "CONSOLE_CARD", "CONSOLE_CELL",
+               "CONSOLE_HAIRLINE", "CONSOLE_TRACK", "CONSOLE_RULE",
+               "CONSOLE_DIVIDER", "CONSOLE_DISPLAY", "CON_TXT")
+    for name in ("console.py", "console_cards.py", "console_regime.py",
+                 "console_page.py", "console_dial.py"):
+        src = (root / name).read_text(encoding="utf-8")
+        body = "\n".join(l for l in src.splitlines()
+                         if not l.lstrip().startswith("#"))
+        for token in retired:
+            assert token not in body, f"{token} still lives in {name}"

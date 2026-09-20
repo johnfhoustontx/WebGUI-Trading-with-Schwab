@@ -16,21 +16,21 @@ Everything it needs arrives as plain data.
 """
 from pages import console as K
 from pages.options import theme
-from pages.options.theme import (CONSOLE_CARD, CONSOLE_CELL, CONSOLE_DISPLAY,
-                                 CONSOLE_DIVIDER, CONSOLE_HAIRLINE, CON_ACCENT,
-                                 CON_TXT, CON_TXT_DIM, CON_TXT_LABEL,
-                                 CON_TXT_MUTED, CON_TXT_SECONDARY)
+from pages.options.theme import CON_ACCENT
 
 _C = theme.CONSOLE_COLORS
 
-# Card chrome. Square corners are the point — `rounded-none` is explicit so a
-# global default can never soften them.
-CARD_SHELL = (f"{CONSOLE_CARD} rounded-none overflow-hidden p-[20px] "
-              f"pt-[20px] pb-[22px] gap-[18px] w-full h-full")
-HEAD_TITLE = f"{CONSOLE_DISPLAY} text-[19px] font-bold tracking-[.16em] {CON_TXT}"
-HEAD_META = f"text-[10px] tracking-[.18em] {CON_TXT_DIM}"
+# Card chrome. The console's own gradient card, its condensed display face and
+# its neutral text ladder retired with the 2026-09-19 consistency standard —
+# these are the APP's card and text steps, taken from ``console`` so the three
+# modules that draw this screen cannot drift. ``theme.CARD`` brings its own
+# px-4 py-3.5 and 12px radius, which replaces the handoff's 20px padding and
+# its square corners: the card is the app's card now, on every screen.
+CARD_SHELL = f"{K.CARD} overflow-hidden gap-[18px] w-full h-full"
+HEAD_TITLE = f"text-[19px] font-bold tracking-[.16em] {K.TXT}"
+HEAD_META = f"text-[10px] tracking-[.18em] {K.DIM}"
 HERO_VALUE = "text-[76px] font-semibold leading-[.85] tracking-[-.02em]"
-KICKER = f"text-[10px] tracking-[.28em] {CON_TXT_MUTED}"
+KICKER = f"text-[10px] tracking-[.28em] {K.MUTED}"
 LINK = f"text-[11px] tracking-[.22em] {CON_ACCENT}"
 
 
@@ -41,7 +41,7 @@ def hero_parts(value):
     bearish' rather than 'no reading'."""
     v = K._safe(value)
     if v is None:
-        return "—", _C["dim"]
+        return "—", K._ABSENT
     return f"{v:.0f}", K.band_hex(K.score_band(v))
 
 
@@ -71,13 +71,13 @@ def tone_hex(tone):
     paint a Neutral reading in the colours of Long/Bullish. Colouring by the
     tone the page already computes says something true instead."""
     return {"pos": _C["positive"], "neg": _C["negative"],
-            "warn": _C["warning"], "flat": _C["muted"]}.get(tone, _C["muted"])
+            "warn": _C["warning"], "flat": K._ABSENT}.get(tone, K._ABSENT)
 
 
 def cell_tint(hexv):
-    """A cell's background: near-black lifted a tenth toward its value colour —
-    derived, so a new tone cannot arrive without its tint."""
-    return K._mix("#080c11", hexv, 0.10)
+    """A cell's background: the app's card ground lifted a tenth toward its
+    value colour — derived, so a new tone cannot arrive without its tint."""
+    return K._mix(K._P["card_bg"], hexv, 0.10)
 
 
 DIVERGENCE_BAR_H = 30       # px at a full 10/10 component score
@@ -163,7 +163,7 @@ def _meters(arcs):
 
 def _link(text):
     from nicegui import ui
-    ui.label(text).classes(f"{LINK} border-t {CONSOLE_DIVIDER} pt-3 w-full")
+    ui.label(text).classes(f"{LINK} border-t {K.RULE} pt-3 w-full")
 
 
 # --- 4.1 Sentiment ----------------------------------------------------------
@@ -184,7 +184,7 @@ def render_sentiment_card(arcs, bias, total, confidence, picture=""):
         with ui.column().classes("mt-auto gap-[9px] w-full"):
             with ui.row().classes("items-baseline justify-between w-full"):
                 ui.label("MODEL CONFIDENCE").classes(
-                    f"text-[10px] tracking-[.22em] {CON_TXT_DIM}")
+                    f"text-[10px] tracking-[.22em] {K.DIM}")
                 ui.label("—" if conf is None else f"{conf * 100:.0f}%").classes(
                     f"text-[13px] text-[{hero_hex}]")
             K.mount_segmented(conf, hero_hex)
@@ -213,11 +213,13 @@ def render_trend_card(arcs, short_state, verdict, guidance, picture=""):
                         f"px-[14px] py-[12px]"):
                     if verdict:
                         ui.label(str(verdict).upper()).classes(
-                            f"{CONSOLE_DISPLAY} text-[19px] font-bold "
+                            f"text-[19px] font-bold "
                             f"tracking-[.1em] text-[{hero_hex}]")
                     if guidance:
+                        # Body copy you are meant to READ, so the app's bright
+                        # step — ``symbol.py``'s ``_LINE`` precedent.
                         ui.label(guidance).classes(
-                            f"text-[11.5px] leading-[1.55] {CON_TXT_SECONDARY}")
+                            f"text-[11.5px] leading-[1.55] {K.TXT}")
             _link("TREND DETAIL →")
 
 
@@ -237,24 +239,24 @@ def render_signals_card(rows, velocity_values, divergence_detail):
                    f"text-[10px] tracking-[.18em] {CON_ACCENT}")
         # The 1px gap IS the hairline grid — the handoff's own technique.
         with ui.element("div").classes(
-                f"grid grid-cols-2 gap-px w-full {CONSOLE_HAIRLINE} "
-                f"border {CONSOLE_DIVIDER}"):
+                f"grid grid-cols-2 gap-px w-full {K.HAIRLINE} "
+                f"border {K.RULE}"):
             for r in rows:
                 hexv = tone_hex(r.get("tone"))
                 with ui.column().classes(
                         f"gap-[6px] px-4 pt-4 pb-[14px] "
                         f"bg-[{cell_tint(hexv)}]"):
                     ui.label(str(r.get("label", ""))).classes(
-                        f"text-[9.5px] tracking-[.24em] {CON_TXT_LABEL}")
+                        f"text-[9.5px] tracking-[.24em] {K.DIM}")
                     pill_tooltip(ui.label(str(r.get("value", "—"))).classes(
-                        f"{CONSOLE_DISPLAY} text-[32px] font-bold "
+                        f"text-[32px] font-bold "
                         f"tracking-[.06em] text-[{hexv}]"), r.get("tip"))
                     ui.label(str(r.get("descriptor", ""))).classes(
-                        f"text-[9.5px] tracking-[.16em] {CON_TXT_MUTED}")
+                        f"text-[9.5px] tracking-[.16em] {K.MUTED}")
         vals = velocity_values if isinstance(velocity_values, dict) else {}
         with ui.column().classes("gap-3 w-full"):
             ui.label("RATE OF CHANGE · Z-SCORE").classes(
-                f"text-[10px] tracking-[.24em] {CON_TXT_DIM}")
+                f"text-[10px] tracking-[.24em] {K.DIM}")
             for label, key in (("3D ROC", "roc_3d"), ("5D ROC", "roc_5d"),
                                ("20D Z", "z_20d")):
                 K.mount_bipolar(label, K.bipolar_geometry(vals.get(key)))

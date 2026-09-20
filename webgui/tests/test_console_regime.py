@@ -135,3 +135,38 @@ def test_head_and_data_rows_share_one_grid_definition():
     thing to break if the two are spelled separately."""
     assert CR.GRID.count("grid-cols-") == 1
     assert "190px_1fr_132px_74px" in CR.GRID
+
+
+# -------------------------------------- the app surface (2026-09-19) --------
+def test_the_regime_cards_are_the_apps_card():
+    """The dial card, the tags card and the share table wore the console's own
+    gradient card with square corners and 20-24px padding. They are the app's
+    card now — ground, border, 12px radius and its px-4 py-3.5 — taken from
+    ``console`` so all three console modules agree."""
+    from pages import console as K
+    from pages.options import theme
+    assert CR._CARD.startswith(theme.CARD)
+    assert theme.CARD == K.CARD
+    assert "rounded-none" not in CR._CARD
+
+
+def test_the_regime_hues_are_untouched():
+    """Must-not-change: every regime colour and the dormant state are READINGS
+    and passed through the surface sweep unchanged."""
+    from pages.options import theme
+    C = theme.CONSOLE_COLORS
+    assert CR.regime_hex("trending", 0.4) == C["regimes"]["trending"]
+    assert CR.regime_hex("crisis", 0.4) == C["regimes"]["crisis"]
+    assert CR.regime_hex("breakout", 0.0) == C["regime_zero"]
+    assert CR.change_text({"change": 0.02})[1] == C["positive"]
+    assert CR.change_text({"change": -0.02})[1] == C["negative"]
+
+
+def test_an_unknown_regime_and_a_flat_band_take_the_apps_muted_step():
+    """The two absences on this block: a key with no hue of its own, and a band
+    that never moved. Neither is a reading, so neither keeps a console grey."""
+    from pages.options import theme
+    muted = theme.THEME["palette"]["muted"]
+    assert CR.regime_hex("nonsense", 0.4) == muted
+    assert CR.change_text({"flat": True})[1] == muted
+    assert CR.change_text(None)[1] == muted

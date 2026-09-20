@@ -8,6 +8,12 @@ only fall; and the list must match the code EXACTLY, so a page that drops a raw
 call lowers its entry in the same commit - otherwise the list stops describing
 the code. An entry may outlive the migration only with a written reason (a
 control that is not an action button: a segmented picker, a leg-table toggle).
+
+⚠ FOUR entries are PERMANENT rather than pending, and each carries its reason
+above it: ``options/detail.py`` (Phase 1), and ``desk.py`` / ``market.py`` /
+``sentiment_momentum.py`` (Phases 3 & 4). Every other entry is a page no phase
+has migrated yet and is expected to fall to zero and be deleted. The nine
+screens Phases 3 & 4 covered left no entry at all except those three.
 """
 import ast
 import collections

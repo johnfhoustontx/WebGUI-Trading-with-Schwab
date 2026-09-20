@@ -23,7 +23,12 @@ from pages.gauge import _esc
 from pages.options import theme
 from pages.rings import _arc_path, _id_token
 
+# The dial's ARC is the reading and keeps the console accent. Its rings, its
+# regime word, its caption and its no-reading em-dash are furniture, and take
+# the app's own steps since 2026-09-19 (the consistency standard) — a hairline
+# and a text step are surface wherever they live.
 _C = theme.CONSOLE_COLORS
+_P = theme.THEME["palette"]
 
 VIEWBOX = 244
 CX = CY = 122.0
@@ -98,7 +103,10 @@ def dial_svg(confidence, name, uid="regime", accent=None, display_font=None):
     """
     conf = _safe_confidence(confidence)
     accent = accent or _C["accent"]
-    fam = display_font or (theme.THEME["console"].get("font_family") or "")
+    # The console's condensed display face retired with its surface
+    # vocabulary; nothing sets ``display_font`` today, so the word is drawn
+    # in the app font the page already loads.
+    fam = display_font or ""
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'viewBox="0 0 {VIEWBOX} {VIEWBOX}" width="100%" '
@@ -122,18 +130,19 @@ def dial_svg(confidence, name, uid="regime", accent=None, display_font=None):
                              f'stroke-width="{STROKE}"/>')
     parts.append(_ring(R_INNER, _hairline(0.12), 1))
     parts.append(_text(CX, NAME_Y, _esc(str(name or "").upper()), NAME_SIZE,
-                       _C["text"], weight=700, spacing=NAME_TRACK,
+                       _P["title"], weight=700, spacing=NAME_TRACK,
                        family=fam or None))
     parts.append(_text(CX, VALUE_Y, "—" if conf is None else f"{conf * 100:.0f}%",
-                       VALUE_SIZE, accent if conf is not None else _C["dim"],
+                       VALUE_SIZE, accent if conf is not None else _P["muted"],
                        weight=600))
-    parts.append(_text(CX, CAPTION_Y, "CONFIDENCE", CAPTION_SIZE, _C["label"],
+    parts.append(_text(CX, CAPTION_Y, "CONFIDENCE", CAPTION_SIZE, _P["icon"],
                        spacing=2))
     parts.append("</svg>")
     return "".join(parts)
 
 
 def _hairline(alpha):
-    """The console's one line colour at an alpha. An SVG attribute takes a real
-    colour, not a Tailwind opacity modifier, so it is spelled out here."""
-    return theme._alpha_hex(_C["line"], alpha)
+    """The app's neutral at an alpha. An SVG attribute takes a real colour,
+    not a Tailwind opacity modifier, so it is spelled out here. The alphas
+    are the handoff's; only the base moved off the console's own ``line``."""
+    return theme._alpha_hex(_P["muted"], alpha)

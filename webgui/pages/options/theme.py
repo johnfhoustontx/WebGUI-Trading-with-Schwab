@@ -143,37 +143,21 @@ _DEFAULTS = {
         "hover_bg": "",   # menu item hover wash
         "title": "",      # the drawer caption ("WORKSPACE")
     },
-    # ── The Market Regime Console palette (/sentiment only) ──────────────────
-    # A hard-edge "console" language deliberately scoped to ONE page: square
-    # corners, near-black ground, teal accent, glow-only shadows. Source of
-    # truth: docs/design/2026-08-14-market-regime-console/README.md.
+    # ── The Market Regime Console DATA colours (/sentiment, /desk, /symbol) ──
+    # ⚠ DATA ONLY since 2026-09-19. This was a whole page language — near-black
+    # ground, gradient cards, square corners, one grey `line` at six opacities,
+    # a six-step text ramp and a condensed display face — and all of it retired
+    # with the consistency standard: those screens wear the app's own surface
+    # now. What is left is the half that encodes a READING, which is why the
+    # section survives at all.
     #
-    # Colors are HEX ONLY, like every other section — the spec quotes several as
-    # rgba(120,140,160,α), and the ALPHA lives in the token layer instead
-    # (Tailwind's `/[0.18]` modifier, verified to generate). That keeps this file
-    # editable by the Settings colour pickers' hex contract.
+    # Colors are HEX ONLY, like every other section.
     #
     # NOT surfaced in Settings → Appearance, for the same reason [brand] is not:
-    # that editor's sections are single-kind, and this one mixes colours with
-    # font text.
+    # that editor's sections are single-kind, and this one mixes a semantic set
+    # with a regime lookup.
     "console": {
-        # surfaces + lines
-        "page_bg": "#05070b",        # the page ground
-        "wash": "#0b1620",           # inner stop of the radial page wash
-        "card_from": "#0e161e",      # card gradient, 160deg, both stops at 95%
-        "card_to": "#070a0f",
-        "cell_bg": "#0a0e14",        # stat/readout cells inside a hairline grid
-        "line": "#788ca0",           # ONE base for every hairline/border/track;
-                                     # = the spec's rgba(120,140,160,·)
-        "accent": "#22e3d3",         # primary accent: dial arc, links, rules
-        # text ramp, lightest → faintest
-        "text_primary": "#e7edf3",
-        "text_secondary": "#a9bac7",
-        "text_muted": "#8fa1b0",
-        "text_label": "#6b7d8d",
-        "text_dim": "#5d6f7e",
-        "text_faint": "#4b5a67",
-        # data colours
+        "accent": "#22e3d3",         # the dial arc; the one reading-bearing hue
         "positive": "#35d68a",       # bullish / positive change / high scores
         "negative": "#f2646b",       # stressed / negative change / divergence
         "warning": "#e0b74e",        # caution, previous close, mid-low scores
@@ -189,14 +173,6 @@ _DEFAULTS = {
         "regime_breakout_zero": "#6a5c33",   # the dormant/0.0% muted state
         "regime_choppy": "#c3ccd6",
         "regime_crisis": "#f2646b",
-        # display face — condensed, for headings/names/hero numerals. Loaded
-        # separately from [typography] and [brand], the same way those two are
-        # separate from each other. "" loads nothing and falls back to the app
-        # font (measured 21% WIDER than Rajdhani, so letter-spaced headings
-        # reflow on swap — do not pack them to the Rajdhani metric).
-        "font_family": "Rajdhani",
-        "font_url": ("https://fonts.googleapis.com/css2"
-                     "?family=Rajdhani:wght@500;600;700&display=swap"),
     },
     # ── The Macro Board redesign palette (/market only) ──────────────────────
     # A dense notched "instrument" language scoped to ONE page. Source of truth:
@@ -229,9 +205,15 @@ _DEFAULTS = {
         "grid": "#78AAD2",       # gridlines (rendered at ~6% — a hair, not a rule)
     },
     "macro": {
-        "void": "#03060D", "panel": "#080D18", "tile": "#0A1020",
-        "grid": "#0E1728", "edge": "#182741", "edge_hi": "#26405F",
-        "txt": "#DCE8F8", "dim": "#6B7F9E", "faint": "#3D4F6B",
+        # ⚠ DATA ONLY since 2026-09-19 (the consistency standard). The board's
+        # own panel/grid/edge grounds, its dim/faint text steps, its radial
+        # wash stop and its three Google faces went with the page's surface.
+        # ``void`` and ``txt`` survive as REFERENCES rather than as paint: the
+        # legibility guard composites the tile heat over ``void`` and reads
+        # ``txt`` as the price step, which is how it proves the Skin-B ramp
+        # still clears 4.5:1 on the hottest tile.
+        "void": "#03060D", "tile": "#0A1020",
+        "txt": "#DCE8F8",
         # Skin-B (Heat Lattice) text ramp. The tile's heat fill reaches
         # rgba(0,229,160,.36) over the void, i.e. ~#015642 -- a background bright
         # enough that the dark `dim`/`faint` ramp above collapses onto it: the
@@ -241,20 +223,14 @@ _DEFAULTS = {
         # price > symbol > descriptor while clearing 4.5:1 on the hottest tile.
         "lattice_sym": "#C6D6EA", "lattice_desc": "#A9BFDA",
         "up": "#00E5A0", "dn": "#FF4D6D", "flat": "#5C6F8C", "cyan": "#35E0FF",
-        "wash_in": "#0A1830",
         "sat_ceiling": 0.45,
-        "font_url": ("https://fonts.googleapis.com/css2"
-                     "?family=Rajdhani:wght@500;600;700"
-                     "&family=Chakra+Petch:wght@600;700"
-                     "&family=IBM+Plex+Mono:wght@400;500;600&display=swap"),
     },
+    # ⚠ DATA ONLY since 2026-09-19, same sweep: the grid's near-black ground,
+    # its two border steps, its three-step grey ramp and its two Google faces
+    # went with the page's surface. The heat ramp was never here — it is the
+    # oklch cell map in ``pages/sector_heat.py``, which is data and untouched.
     "sectors": {
-        "void": "#080808", "edge": "#1A1A1A", "edge_hi": "#2C2C2C",
-        "txt": "#F2F2F2", "dim": "#8C8C8C", "faint": "#5A5A5A",
         "up": "#3FD98A", "dn": "#E8697B", "warn": "#E0A63C",
-        "font_url": ("https://fonts.googleapis.com/css2"
-                     "?family=Instrument+Sans:wght@400;500;600;700"
-                     "&family=JetBrains+Mono:wght@400;500;600&display=swap"),
     },
     # The Options Strategy Calculator's own language: a near-black ground with
     # cyan/green/amber signal colours and a mono face, deliberately unlike the
@@ -754,6 +730,11 @@ def build_brand_css(theme):
 # number scattered across builders. Applied as Tailwind's arbitrary opacity
 # modifier (`/[0.18]`), which was measured to generate — so these are the
 # spec's EXACT values, not the nearest step on Tailwind's core scale.
+# ⚠ NOT read by any Tier-1 page since 2026-09-19: the surface tokens these
+# alphas dressed retired with the consistency standard. It survives as the
+# stated mirror source for ``services/options_svc/market_console.py``, the
+# SEPARATE renderer behind the pushed snapshot image, which still draws the
+# console look and carries its own copy of this table.
 CONSOLE_ALPHA = {"hairline": 0.18, "border": 0.2, "track": 0.09,
                  "track_border": 0.14, "rule": 0.18, "card": 0.95}
 
@@ -777,47 +758,17 @@ def console_glow(value, px=16, alpha=0.45, spread=None):
 
 
 def build_console_tokens(theme):
-    """Tailwind token vocabulary for the console page.
+    """The console's four CHROMATIC text classes.
 
-    Every value is a class string applied with ``.classes(...)`` — the page is
-    Tailwind-first like the rest of the app, and the ONE ``ui.add_css`` it
-    injects carries only the ``pulseDot`` keyframes (an animation cannot be
-    expressed as a utility)."""
+    ⚠ This used to carry the whole console page vocabulary — a ground, a
+    gradient card, a cell, a hairline, a track, two rules, a condensed display
+    face and a six-step neutral text ladder. All of it retired on 2026-09-19
+    with the consistency standard: the screens that drew it wear the app's own
+    ``CARD`` / ``LABEL`` / ``MUTED`` / palette ``icon`` and card/button borders
+    now, because a card, a rule and a text step are SURFACE wherever they live.
+    What survives is the half that encodes a reading."""
     c = theme["console"]
-    a = CONSOLE_ALPHA
-    line = c["line"]
-    fam = str(c.get("font_family", "")).strip()
-    # Underscores are Tailwind's space escape; the stack was measured to resolve
-    # as `Rajdhani, "IBM Plex Sans", system-ui, sans-serif`.
-    display = (f"font-['{fam}',_'IBM_Plex_Sans',_system-ui,_sans-serif]"
-               if fam else "font-['IBM_Plex_Sans',_system-ui,_sans-serif]")
     return {
-        # surfaces
-        "CONSOLE_PAGE": (
-            f"bg-[{c['page_bg']}] "
-            f"bg-[radial-gradient(1200px_700px_at_22%_10%,{c['wash']},"
-            f"{c['page_bg']}_62%)]"),
-        "CONSOLE_CARD": (
-            f"bg-[linear-gradient(160deg,{_alpha_hex(c['card_from'], a['card'])},"
-            f"{_alpha_hex(c['card_to'], a['card'])})] "
-            f"border border-[{line}]/[{a['border']}]"),
-        "CONSOLE_CELL": f"bg-[{c['cell_bg']}]",
-        # A hairline GRID is `gap-px` over this background — the gap IS the rule,
-        # which is the handoff's own technique and avoids per-cell borders.
-        "CONSOLE_HAIRLINE": f"bg-[{line}]/[{a['hairline']}]",
-        "CONSOLE_TRACK": (f"bg-[{line}]/[{a['track']}] "
-                          f"border border-[{line}]/[{a['track_border']}]"),
-        "CONSOLE_RULE": f"border-[{c['accent']}]/[{a['rule']}]",
-        "CONSOLE_DIVIDER": f"border-[{line}]/[{a['border']}]",
-        # type
-        "CONSOLE_DISPLAY": display,
-        "CON_TXT": f"text-[{c['text_primary']}]",
-        "CON_TXT_SECONDARY": f"text-[{c['text_secondary']}]",
-        "CON_TXT_MUTED": f"text-[{c['text_muted']}]",
-        "CON_TXT_LABEL": f"text-[{c['text_label']}]",
-        "CON_TXT_DIM": f"text-[{c['text_dim']}]",
-        "CON_TXT_FAINT": f"text-[{c['text_faint']}]",
-        # data
         "CON_ACCENT": f"text-[{c['accent']}]",
         "CON_POS": f"text-[{c['positive']}]",
         "CON_NEG": f"text-[{c['negative']}]",
@@ -826,39 +777,23 @@ def build_console_tokens(theme):
 
 
 def console_colors(theme):
-    """The console's raw hexes, for the SVG builders (which take attributes, not
-    classes) and for per-regime lookups."""
+    """The console's raw DATA hexes, for the SVG builders (which take
+    attributes, not classes), the chip maps and the per-regime lookups.
+
+    ⚠ The neutrals it also used to expose — ``line``, ``cell``, ``text``,
+    ``muted``, ``label``, ``dim`` — went with the surface vocabulary in 2026-09.
+    Anything here is a reading; a groove, a hairline or a text step comes off
+    ``THEME["palette"]``."""
     c = theme["console"]
     return {
-        "accent": c["accent"], "line": c["line"], "cell": c["cell_bg"],
+        "accent": c["accent"],
         "positive": c["positive"], "negative": c["negative"],
         "warning": c["warning"], "olive": c["olive"], "yellow": c["yellow"],
-        "text": c["text_primary"], "muted": c["text_muted"],
-        "label": c["text_label"], "dim": c["text_dim"],
         "regimes": {k: c[f"regime_{k}"] for k in
                     ("mean_reversion", "trending", "breakout", "choppy",
                      "crisis")},
         "regime_zero": c["regime_breakout_zero"],
     }
-
-
-def build_console_font_head_html(theme):
-    """A ``<link>`` for the console DISPLAY font (``[console].font_url``), or "".
-
-    Separate from ``[typography]`` and ``[brand]`` for the same reason those two
-    are separate from each other: a condensed display face suits headings and
-    hero numerals, not the dense data tables the body font serves."""
-    try:
-        url = str(theme["console"].get("font_url", "")).strip()
-    except Exception:  # noqa: BLE001
-        return ""
-    if not url:
-        return ""
-    return (
-        '<link rel="preconnect" href="https://fonts.googleapis.com">'
-        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-        f'<link rel="stylesheet" href="{url}">'
-    )
 
 
 # The console's ONE escape-hatch rule. A keyframes animation genuinely cannot be
@@ -920,12 +855,15 @@ FLOW_KEYFRAMES_CSS = """
 # notches, keyframes, the radial background, and per-tile custom-prop washes —
 # exactly the four things the house rule names as un-expressible in Tailwind).
 def macro_colors(theme):
-    """The macro board's raw hexes + the saturation ceiling, for the page's
-    computed values (heat/wash alphas, direction colours, breadth bar)."""
+    """The macro board's raw DATA hexes + the saturation ceiling, for the
+    page's computed values (heat/wash alphas, direction colours, breadth bar).
+
+    ⚠ The surface half — ``panel``, ``grid``, ``edge``, ``edge_hi``, ``dim``,
+    ``faint``, ``wash_in`` — went on 2026-09-19 with the page's own ground and
+    faces (the consistency standard). ``void`` survives as what the tile heat
+    composites OVER when the legibility ramp is measured."""
     m = theme["macro"]
-    out = {k: m[k] for k in ("void", "panel", "tile", "grid", "edge", "edge_hi",
-                             "txt", "dim", "faint", "up", "dn", "flat", "cyan",
-                             "wash_in")}
+    out = {k: m[k] for k in ("void", "up", "dn", "flat", "cyan")}
     try:
         out["sat_ceiling"] = float(m.get("sat_ceiling", 0.45) or 0.45)
     except (TypeError, ValueError):
@@ -934,48 +872,19 @@ def macro_colors(theme):
 
 
 def build_macro_tokens(theme):
-    """Tailwind class-string vocabulary for the macro board (Tailwind-first).
+    """The macro board's three DIRECTION classes.
 
-    Layout/spacing/flex/colour stay in ``.classes(...)``; only clip-path,
-    keyframes, the radial page ground and the per-tile custom-prop washes live in
-    ``build_macro_css``. Fonts use the ``font-[...]`` arbitrary (underscores =
-    the Tailwind space escape)."""
+    ⚠ This carried the board's whole instrument language until 2026-09-19 —
+    three Google faces, a text ramp, a panel/tile/rail ground and two border
+    steps. All of it retired with the consistency standard; the page wears the
+    app surface and the app font, and what is left is the colour that says
+    which way a tile moved."""
     m = theme["macro"]
     return {
-        "MB_TITLE": "font-['Chakra_Petch',system-ui,sans-serif]",
-        "MB_SYM": "font-['Rajdhani',system-ui,sans-serif]",
-        "MB_MONO": "font-['IBM_Plex_Mono',ui-monospace,monospace]",
-        "MB_TXT": f"text-[{m['txt']}]",
-        "MB_DIM": f"text-[{m['dim']}]",
-        "MB_FAINT": f"text-[{m['faint']}]",
         "MB_UP": f"text-[{m['up']}]",
         "MB_DN": f"text-[{m['dn']}]",
         "MB_FLAT": f"text-[{m['flat']}]",
-        "MB_CYAN": f"text-[{m['cyan']}]",
-        "MB_PANEL_BG": f"bg-[{m['panel']}]",
-        "MB_TILE_BG": f"bg-[{m['tile']}]",
-        "MB_RAIL_BG": f"bg-[{m['panel']}]",
-        "MB_EDGE": f"border-[{m['edge']}]",
-        "MB_EDGE_HI": f"border-[{m['edge_hi']}]",
-        "MB_TRACK_BG": f"bg-[{m['grid']}]",
     }
-
-
-def build_macro_font_head_html(theme):
-    """``<link>``s for the macro board's three faces (``[macro].font_url``), or ""
-    — Chakra Petch (title) / Rajdhani (symbols) / IBM Plex Mono (numbers), tuned
-    to their tracking. Injected only on the /market page."""
-    try:
-        url = str(theme["macro"].get("font_url", "")).strip()
-    except Exception:  # noqa: BLE001
-        return ""
-    if not url:
-        return ""
-    return (
-        '<link rel="preconnect" href="https://fonts.googleapis.com">'
-        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-        f'<link rel="stylesheet" href="{url}">'
-    )
 
 
 def build_macro_css(theme):
@@ -1086,27 +995,22 @@ def build_nav_css(theme):
 # The heat ramp itself lives in ``pages/sector_heat.py``: it is a data-driven
 # cell map, the category CLAUDE.md excludes from the config-driven palette.
 def build_sector_tokens(theme):
-    """Tailwind class-string vocabulary for the sector heat grid.
+    """The heat grid's regime TONE, as text and as a dot.
 
-    Namespaced ``SC_*`` so a sector token can never be mistaken for one of the
-    app-wide dark-navy tokens — this page keeps its own near-black ground."""
+    ⚠ Namespaced ``SC_*`` because this page used to keep its own near-black
+    ground, two Google faces and a three-step grey ramp. Those retired on
+    2026-09-19 with the consistency standard — a ground, a face and a text step
+    are surface wherever they live — and the heat ramp itself was never here
+    (it is the oklch cell map in ``pages/sector_heat.py``). What is left is the
+    regime word's colour and the dot beside it."""
     s = theme["sectors"]
     return {
-        "SC_SANS": "font-['Instrument_Sans',system-ui,sans-serif]",
-        "SC_MONO": "font-['JetBrains_Mono',ui-monospace,monospace]",
-        "SC_VOID_BG": f"bg-[{s['void']}]",
-        "SC_TXT": f"text-[{s['txt']}]",
-        "SC_DIM": f"text-[{s['dim']}]",
-        "SC_FAINT": f"text-[{s['faint']}]",
         "SC_UP": f"text-[{s['up']}]",
         "SC_DN": f"text-[{s['dn']}]",
         "SC_WARN": f"text-[{s['warn']}]",
         "SC_WARN_BG": f"bg-[{s['warn']}]",
         "SC_UP_BG": f"bg-[{s['up']}]",
         "SC_DN_BG": f"bg-[{s['dn']}]",
-        "SC_DIM_BG": f"bg-[{s['dim']}]",
-        "SC_EDGE": f"border-[{s['edge']}]",
-        "SC_EDGE_HI": f"border-[{s['edge_hi']}]",
     }
 
 
@@ -1263,25 +1167,6 @@ def build_calc_font_head_html(theme):
     )
 
 
-def build_sector_font_head_html(theme):
-    """``<link>``s for the grid's two faces (``[sectors].font_url``), or "".
-
-    Instrument Sans for names, JetBrains Mono for every figure — the mono face
-    is what makes ``tabular-nums`` align digits optically down a column, so the
-    system fallback is a visible downgrade rather than a neutral one."""
-    try:
-        url = str(theme["sectors"].get("font_url", "")).strip()
-    except Exception:  # noqa: BLE001
-        return ""
-    if not url:
-        return ""
-    return (
-        '<link rel="preconnect" href="https://fonts.googleapis.com">'
-        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-        f'<link rel="stylesheet" href="{url}">'
-    )
-
-
 # ---------------------------------------------------------------------------
 # Module-level theme + tokens — loaded ONCE at import (restart the webgui after
 # editing config/theme.toml). All existing `.classes(CARD)` / `.classes(BTN_3D)`
@@ -1333,43 +1218,35 @@ BRAND_MARK = THEME["brand"]["mark"]            # "" = no logo image
 BRAND_CSS = build_brand_css(THEME)
 BRAND_FONT_HEAD_HTML = build_brand_font_head_html(THEME)  # "" when no font_url
 
-# ── Market Regime Console (/sentiment only) ─────────────────────────────────
-# Namespaced CONSOLE_*/CON_* so a console token can never be mistaken for one of
-# the app-wide dark-navy tokens above — the two palettes coexist deliberately.
+# ── Market Regime Console (/sentiment, /desk, /symbol) ──────────────────────
+# ⚠ WHAT IS LEFT HERE IS DATA. The console's SURFACE vocabulary retired on
+# 2026-09-19 with the consistency standard: the page ground, the gradient card,
+# the cell, the hairline, the track, the two rules, the condensed display face
+# and the whole six-step neutral TEXT ladder are gone, and so is the `<link>`
+# that loaded the face. Every screen that drew them now wears the app's own
+# `CARD` / `LABEL` / `MUTED` / palette `icon` and card/button borders.
+#
+# What a console token may still be is a READING: the four chromatic text
+# colours below, and the raw hexes the SVG builders and chip maps take.
 _CONSOLE_TOKENS = build_console_tokens(THEME)
-CONSOLE_PAGE = _CONSOLE_TOKENS["CONSOLE_PAGE"]
-CONSOLE_CARD = _CONSOLE_TOKENS["CONSOLE_CARD"]
-CONSOLE_CELL = _CONSOLE_TOKENS["CONSOLE_CELL"]
-CONSOLE_HAIRLINE = _CONSOLE_TOKENS["CONSOLE_HAIRLINE"]
-CONSOLE_TRACK = _CONSOLE_TOKENS["CONSOLE_TRACK"]
-CONSOLE_RULE = _CONSOLE_TOKENS["CONSOLE_RULE"]
-CONSOLE_DIVIDER = _CONSOLE_TOKENS["CONSOLE_DIVIDER"]
-CONSOLE_DISPLAY = _CONSOLE_TOKENS["CONSOLE_DISPLAY"]
-CON_TXT = _CONSOLE_TOKENS["CON_TXT"]
-CON_TXT_SECONDARY = _CONSOLE_TOKENS["CON_TXT_SECONDARY"]
-CON_TXT_MUTED = _CONSOLE_TOKENS["CON_TXT_MUTED"]
-CON_TXT_LABEL = _CONSOLE_TOKENS["CON_TXT_LABEL"]
-CON_TXT_DIM = _CONSOLE_TOKENS["CON_TXT_DIM"]
-CON_TXT_FAINT = _CONSOLE_TOKENS["CON_TXT_FAINT"]
 CON_ACCENT = _CONSOLE_TOKENS["CON_ACCENT"]
 CON_POS = _CONSOLE_TOKENS["CON_POS"]
 CON_NEG = _CONSOLE_TOKENS["CON_NEG"]
 CON_WARN = _CONSOLE_TOKENS["CON_WARN"]
 CONSOLE_COLORS = console_colors(THEME)         # raw hexes for the SVG builders
-CONSOLE_FONT_HEAD_HTML = build_console_font_head_html(THEME)  # "" when no url
 
 # ── Options Flow panels (/options/gamma Flow + Net Prem) ────────────────────
 FLOW_COLORS = flow_colors(THEME)               # raw hexes for the SVG builders
 
-# ── Macro Board (/market) page-scoped exports ────────────────────────────────
+# ── Macro Board (/market) page-scoped DATA exports ───────────────────────────
+# ⚠ The board's own three Google faces went on 2026-09-19 with its ground and
+# its text ramp: the page wears the app surface and the app font.
 MACRO_COLORS = macro_colors(THEME)             # raw hexes + sat_ceiling
-MACRO_TOKENS = build_macro_tokens(THEME)       # Tailwind class-string vocabulary
+MACRO_TOKENS = build_macro_tokens(THEME)       # the three direction classes
 MACRO_CSS = build_macro_css(THEME)             # the ONE ui.add_css escape-hatch
-MACRO_FONT_HEAD_HTML = build_macro_font_head_html(THEME)  # "" when no url
 
-# ── Sector & Industry heat grid (/sentiment/sectors) page-scoped exports ─────
-SECTOR_TOKENS = build_sector_tokens(THEME)     # Tailwind class-string vocabulary
-SECTOR_FONT_HEAD_HTML = build_sector_font_head_html(THEME)  # "" when no url
+# ── Sector & Industry heat grid (/sentiment/sectors) DATA exports ────────────
+SECTOR_TOKENS = build_sector_tokens(THEME)     # the regime tone, text + dot
 
 # ── Options Strategy Calculator — page-scoped language (.calc-v3) ────────────
 _CALC_TOKENS = build_calc_tokens(THEME)

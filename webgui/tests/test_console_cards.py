@@ -95,7 +95,61 @@ def test_pill_classes_are_spaceless_arbitraries():
         assert " " not in arb
 
 
-def test_card_shell_keeps_square_corners():
-    """Hard edges are the console's whole visual premise, so the reset is
-    explicit rather than inherited."""
-    assert "rounded-none" in CC.CARD_SHELL
+def test_card_shell_is_the_apps_card_not_a_console_one():
+    """RE-AIMED 2026-09-19, deliberately. It asserted ``rounded-none`` — the
+    console's hard edges were its own visual premise, and the consistency
+    standard retires that premise along with the gradient card it sat on: a
+    card on this screen is the same card as on every other. It still fires if a
+    bespoke ground, border or radius comes back, which is the half worth
+    keeping."""
+    from pages import console as K
+    from pages.options import theme
+    assert CC.CARD_SHELL.startswith(theme.CARD)
+    assert theme.CARD == K.CARD
+    assert "rounded-none" not in CC.CARD_SHELL
+
+
+def test_the_card_text_ladder_is_the_apps_three_steps():
+    """The console drew SIX neutral steps over a near-black ground; the app has
+    three, and the collapse follows the ROLE rather than the old step number —
+    a title is a value, a kicker is a label, a meta line is the quietest
+    furniture. Taken from ``console`` so the two card modules cannot drift."""
+    from pages import console as K
+    assert K.TXT in CC.HEAD_TITLE
+    assert K.DIM in CC.HEAD_META
+    assert K.MUTED in CC.KICKER
+    for cls in (CC.HEAD_TITLE, CC.HEAD_META, CC.KICKER):
+        assert "font-[" not in cls, "the condensed display face is retired"
+
+
+def test_the_cell_tint_lifts_the_apps_card_ground_not_a_near_black():
+    """A 2x2 cell is its value colour mixed a tenth into the ground BEHIND it.
+    The ground moved, so the base had to move with it — left at #080c11 the
+    tint would have been a near-black patch inside a navy card."""
+    from pages.options import theme
+    card_bg = theme.THEME["palette"]["card_bg"]
+    assert CC.cell_tint(card_bg) == card_bg          # no value, no lift
+    assert CC.cell_tint("#ffffff") != CC.cell_tint("#000000")
+    assert "#080c11" not in CC.cell_tint("#35d68a")
+
+
+def test_the_card_data_colours_are_untouched():
+    """Must-not-change, and it passes before and after by design: the hero
+    bands, the delta arrows and the three chromatic tones are READINGS."""
+    assert CC.hero_parts(73)[1] == "#35d68a"
+    assert CC.delta_parts(80, 60, "WEEK")[2] == "#35d68a"
+    assert CC.delta_parts(60, 80, "WEEK")[2] == "#e0b74e"
+    assert CC.tone_hex("pos") == "#35d68a"
+    assert CC.tone_hex("neg") == "#f2646b"
+    assert CC.tone_hex("warn") == "#e0b74e"
+
+
+def test_a_flat_tone_and_a_missing_hero_take_the_apps_muted_step():
+    """``flat`` is the ABSENCE of a direction and a missing hero is the absence
+    of a reading; neither is a colour that means something, so both take the
+    app's muted step rather than the console's own grey."""
+    from pages.options import theme
+    muted = theme.THEME["palette"]["muted"]
+    assert CC.tone_hex("flat") == muted
+    assert CC.tone_hex("nonsense") == muted
+    assert CC.hero_parts(None)[1] == muted

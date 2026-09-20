@@ -186,6 +186,23 @@ SUBTAB_CSS = f"""
 .compact-subtabs .q-tab__label {{ font-size: 12px; }}
 """
 
+
+# The pin backdrop's two grounds; see decision 4 in the block below.
+def _wash(base, over, alpha):
+    """``base`` lifted ``alpha`` of the way toward ``over``, as an OPAQUE hex.
+
+    The pin's backdrop covers the cells scrolling beneath it, so it cannot be
+    an 8-digit hex: a translucent backdrop would show the moving digits it
+    exists to hide."""
+    a = theme.hex_rgb(base, (0, 0, 0))
+    b = theme.hex_rgb(over, (255, 255, 255))
+    return "#%02x%02x%02x" % tuple(
+        int(round(a[i] + (b[i] - a[i]) * alpha)) for i in range(3))
+
+
+_PIN_BG = theme.THEME["palette"]["card_bg"]
+_PIN_HOVER = _wash(_PIN_BG, theme.THEME["palette"]["muted"], 0.06)
+
 # ── a dashboard panel that has run out of width ──────────────────────────────
 # ⚠ THIS REVERSES A POSITION `desk.py` HELD FROM 2026-08-20, AND THE POSITION IT
 # REVERSES WAS RIGHT. That note read: "`overflow-x-auto` is deliberately NOT the
@@ -232,16 +249,19 @@ SUBTAB_CSS = f"""
 #    every real cell auto-places one column to the right and the last one wraps
 #    to a second row (measured — the row grew from 57px to 73px).
 #
-# 4. THE COLOURS ARE FLAT, AND THAT IS A COMPROMISE. The panel is a 160deg
-#    gradient (`theme.CONSOLE_CARD`, both stops at 95% over the page wash), so no
-#    flat colour matches at every row. Sampled off a rendered panel, the ground
-#    behind the first column runs #0e161d at the top to #0a1117 at the foot;
-#    #0c131a is its middle, and the residual mismatch measured 0-4 levels per
-#    channel, invisible against the ~#0d151e row rule the panel already draws
-#    flat across the same gradient. #121920 is that ground under the row's own
-#    hover wash (`_C['line']` at 6%), measured 1-2 levels off the real hovered
-#    row: without it the pinned column stays dark while the rest of the row
-#    lights, which reads as the pin not belonging to the row.
+# 4. THE COLOURS ARE DERIVED, AND THEY STOPPED BEING A COMPROMISE IN 2026-09.
+#    They were two hexes SAMPLED off a rendered panel, because the panel was a
+#    160deg gradient (the old `theme.CONSOLE_CARD`, both stops at 95% over the
+#    page wash) that no flat colour could match at every row: #0c131a was that
+#    gradient's middle and #121920 was it under the row's 6% hover wash. The
+#    consistency standard (2026-09-19) put every Desk panel on `theme.CARD`, a
+#    FLAT ground — so the backdrop is now simply that ground, exactly, with no
+#    residual mismatch at all, and the hover is the same 6% wash computed over
+#    it rather than eyeballed. ⚠ Both must follow the panel: without the hover
+#    half the pinned column stays dark while the rest of the row lights, which
+#    reads as the pin not belonging to the row.
+#    ⚠ A sampled literal here could not follow a theme edit; `_PIN_BG` /
+#    `_PIN_HOVER` can, and `test_the_pin_backdrop_is_the_panel_ground` pins it.
 #
 # ⚠ `.cursor-pointer` gates the hover, and it is the right predicate rather than
 # a convenient one: in `desk.py` `_ROW` is `_ROW_STATIC` plus that class, and the
@@ -264,24 +284,24 @@ SUBTAB_CSS = f"""
 # column gap, or an 8px strip of moving digits shows beside the pinned column.
 # Pinned by `test_the_pin_backdrop_covers_the_column_gap`, since a literal here
 # cannot follow that constant on its own.
-PANEL_SCROLL_CSS = """
-.ns-panel-scroll { overflow-x: auto; overscroll-behavior-x: contain; }
+PANEL_SCROLL_CSS = f"""
+.ns-panel-scroll {{ overflow-x: auto; overscroll-behavior-x: contain; }}
 /* The identity cell rides above its own backdrop, which rides above the cells
    scrolling under both. */
-.ns-panel-row > :first-child { grid-area: 1 / 1; position: sticky; left: 0; z-index: 2; }
-.ns-panel-row::after {
+.ns-panel-row > :first-child {{ grid-area: 1 / 1; position: sticky; left: 0; z-index: 2; }}
+.ns-panel-row::after {{
   content: ""; grid-area: 1 / 1; align-self: stretch;
   position: sticky; left: 0; z-index: 1;
-  margin-right: -8px; background: #0c131a;
-}
-.ns-panel-row.cursor-pointer:hover::after { background: #121920; }
+  margin-right: -8px; background: {_PIN_BG};
+}}
+.ns-panel-row.cursor-pointer:hover::after {{ background: {_PIN_HOVER}; }}
 /* Three of the four Desk panels do not lead with the column that names the row
    (see `desk._PIN_DEPTHS`), so they pin their first TWO cells. The cell itself
    is transparent by design, so the backdrop has to widen with it or the moving
    digits show straight through the pinned symbol. `grid-column` alone: the rule
    above already placed the row, and the SECOND pinned cell places itself from
    the page, which is the only place its per-panel offset is known. */
-.ns-panel-row.ns-pin-2::after { grid-column: 1 / 3; }
+.ns-panel-row.ns-pin-2::after {{ grid-column: 1 / 3; }}
 """
 
 

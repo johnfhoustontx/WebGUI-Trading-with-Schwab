@@ -138,35 +138,24 @@ text      = "#98a1c0"          # menu item text + icons (inactive tone; active �
 hover_bg  = "rgba(107,134,255,0.08)"  # menu item hover wash
 title     = "#565f7d"          # the "WORKSPACE" drawer caption
 
-[console]                      # ── Market Regime Console (/sentiment ONLY) ──
-# A hard-edge "console" language, deliberately scoped to ONE page: square
-# corners, near-black ground, teal accent, glow-only shadows (no elevation).
+[console]                      # ── Market Regime Console DATA colours ──
+# The colours that encode a READING on /sentiment, /desk and /symbol: the dial
+# arc, the semantic set the meters and chips band on, and the five regime hues.
 # Source of truth: docs/design/2026-08-14-market-regime-console/README.md.
-# Plan + spike results: docs/plans/2026-08-14-sentiment-console-redesign-plan.md.
 #
-# Nothing else in the app reads these — every other page keeps the Deep Slate
-# palette above. This section is NOT shown in Settings → Appearance, for the
-# same reason [brand] is not: that editor's sections are single-kind, and this
-# one mixes colours with font text.
+# ⚠ DATA ONLY since 2026-09-19 (the app-consistency standard,
+# docs/plans/2026-09-19-app-ui-consistency-design.md). This section used to
+# carry a whole page language as well — page_bg, wash, card_from/card_to,
+# cell_bg, one grey `line` serving every hairline and meter track at six
+# opacities, a six-step text ramp, and a condensed Rajdhani display face. Every
+# one of those was SURFACE, and the three screens that drew them now wear the
+# app's own card, borders and text steps from [palette] above. Do not add a
+# surface key back here: a card, a rule or a text step belongs to the app.
 #
-# HEX ONLY, like every other section. The spec quotes several of these as
-# rgba(120,140,160,α); the ALPHA lives in the token layer instead (Tailwind's
-# `/[0.18]` modifier — measured to generate), so `line` below is ONE base
-# colour serving every hairline, border and meter track at its own opacity.
-page_bg     = "#05070b"        # the page ground
-wash        = "#0b1620"        # inner stop of the radial page wash
-card_from   = "#0e161e"        # card gradient (160deg); both stops rendered @95%
-card_to     = "#070a0f"
-cell_bg     = "#0a0e14"        # stat/readout cells inside a hairline grid
-line        = "#788ca0"        # every hairline / card border / meter track
-accent      = "#22e3d3"        # dial arc, links, header+footer rules
-# text ramp, lightest → faintest
-text_primary   = "#e7edf3"
-text_secondary = "#a9bac7"
-text_muted     = "#8fa1b0"
-text_label     = "#6b7d8d"
-text_dim       = "#5d6f7e"
-text_faint     = "#4b5a67"
+# HEX ONLY, like every other section. NOT shown in Settings → Appearance, for
+# the same reason [brand] is not: that editor's sections are single-kind, and
+# this one mixes a semantic set with a regime lookup.
+accent      = "#22e3d3"        # the dial arc — the one reading-bearing hue
 # data colours
 positive    = "#35d68a"        # bullish / positive change / high scores
 negative    = "#f2646b"        # stressed / negative change / divergence
@@ -182,12 +171,6 @@ regime_breakout       = "#f0b83c"
 regime_breakout_zero  = "#6a5c33"   # the dormant / 0.0% muted state
 regime_choppy         = "#c3ccd6"
 regime_crisis         = "#f2646b"
-# Condensed display face for headings, regime names and hero numerals, loaded
-# separately from [typography] and [brand]. "" loads nothing and falls back to
-# the app font — which measures 21% WIDER than Rajdhani, so letter-spaced
-# headings reflow when the webfont arrives (display=swap). Don't pack them tight.
-font_family = "Rajdhani"
-font_url    = "https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&display=swap"
 
 [flow]                         # ── Options Flow panels (/options/gamma ONLY) ─
 # The Premium Divergence (Flow view) + Flow Field (Net Prem view) redesign.
@@ -219,60 +202,49 @@ label      = "#AECDE8"         # every muted label, used at several alphas
 ice        = "#BEF8FF"         # chip rings, the cursor, the FLAT rule
 grid       = "#78AAD2"         # gridlines, rendered at ~6% — a hair, not a rule
 
-[macro]                        # ── Macro Board redesign (/market ONLY) ──────
-# A dense "instrument panel" language scoped to ONE page: notched (clip-path)
-# panels + tiles, near-black ground, magnitude-scaled heat wash, flash-on-change.
-# Source of truth: the approved macro-board redesign spec + reference prototype.
-# Like [console] + [brand], this is page-scoped and NOT shown in Settings →
-# Appearance (that editor's sections are single-kind; this mixes colours + font +
-# a tuning number). HEX ONLY; alphas live in the token layer (Tailwind `/[…]`).
-void    = "#03060D"            # page background base
-panel   = "#080D18"            # group panel fill
-tile    = "#0A1020"            # tile fill (Skin A)
-grid    = "#0E1728"            # inert bar/meter tracks
-edge    = "#182741"            # default borders
-edge_hi = "#26405F"            # emphasis borders
-txt     = "#DCE8F8"            # primary values
-dim     = "#6B7F9E"            # symbols, labels
-faint   = "#3D4F6B"            # descriptors, flat-tile accents
+[macro]                        # ── Macro Board DATA colours (/market ONLY) ──
+# What a tile's colour MEANS on the Macro Board: which way it moved, how far,
+# and the rail accent. Source of truth: the approved macro-board redesign spec.
+#
+# ⚠ DATA ONLY since 2026-09-19 (the app-consistency standard,
+# docs/plans/2026-09-19-app-ui-consistency-design.md). This section used to
+# carry the board's whole "instrument panel" language as well — a near-black
+# ground, panel and rail fills, inert meter tracks, two border steps, a
+# three-step text ramp, a radial wash stop and three Google faces. All of it
+# was SURFACE, and the page wears the app's own card, borders and font now.
+# Do not add a surface key back here.
+#
+# HEX ONLY. NOT shown in Settings → Appearance (that editor's sections are
+# single-kind; this mixes colours with a tuning number).
+tile    = "#0A1020"            # the un-heated tile, the Skin-B heat's fallback
 up      = "#00E5A0"            # positive / risk-on change
 dn      = "#FF4D6D"            # negative / risk-off change
 flat    = "#5C6F8C"            # zero change
 cyan    = "#35E0FF"            # rail accent, live indicator
-wash_in = "#0A1830"            # inner stop of the page radial gradient
 # Saturation ceiling (percent): the |%change| at which the heat wash maxes out.
 # The one number worth tuning per session volatility — lower it if flat days look
 # washed out, raise it if a busy tape saturates everything.
 sat_ceiling = 0.45
-# Three faces, loaded page-scoped (one combined request), matching the prototype:
-# Chakra Petch (board title), Rajdhani (ticker symbols), IBM Plex Mono (numbers).
-# Tracking values are tuned to these faces — system fallbacks reflow noticeably.
-font_url = "https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Chakra+Petch:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
 
-[sectors]                      # ── Sector & Industry heat grid (/sentiment/sectors ONLY)
-# A magnitude-forward heat grid: Day / Week / Month render as three adjacent
-# filled tiles flush right, forming one continuous colour band down the page.
-# Like [console] + [macro] + [brand] this is page-scoped and NOT shown in
-# Settings → Appearance (that editor's sections are single-kind; this mixes
-# colours with a font URL). HEX ONLY; alphas live in the token layer.
+[sectors]                      # ── Sector & Industry regime tone (/sentiment/sectors ONLY)
+# The three colours the REGIME word and its dot can take. HEX ONLY.
+#
+# ⚠ DATA ONLY since 2026-09-19 (the app-consistency standard). This section
+# used to carry the grid's own near-black ground, two border steps, a
+# three-step grey ramp and two Google faces; all four were surface and the page
+# wears the app's now. Measured before that change and worth not re-litigating:
+# the heat ramp's flat step sits at 1.025:1 against the new navy ground (1.24:1
+# for the strongest cell), so a flat cell still fades into the page exactly as
+# the design intends, and `tabular-nums` is live on IBM Plex Sans with a
+# digit-width spread of 0.000, so dropping the mono face cost no alignment.
 #
 # NOT here, on purpose: the green/red heat ramp itself. It is a data-driven cell
 # map (oklch L 0.175→0.300, C 0.022→0.110, hue 158 up / 22 down), the category
 # CLAUDE.md excludes from the config-driven palette alongside the gauge face and
 # the score/heat/P&L zone maps. It lives in webgui/pages/sector_heat.py.
-void    = "#080808"            # page ground — the flat end of the heat ramp
-edge    = "#1A1A1A"            # row hairlines
-edge_hi = "#2C2C2C"            # header rule, button outlines
-txt     = "#F2F2F2"            # sector names, the regime headline
-dim     = "#8C8C8C"            # ETF codes, put/call, button labels
-faint   = "#5A5A5A"            # column headers, rank lines, composition
 up      = "#3FD98A"            # risk-on regime word + dot
 dn      = "#E8697B"            # risk-off regime word + dot
 warn    = "#E0A63C"            # mixed regime, and put/call above 1.5
-# Two faces, loaded page-scoped in one request: Instrument Sans for names,
-# JetBrains Mono for every figure. The mono face is what makes tabular-nums
-# align digits down a column — a system fallback is a visible downgrade.
-font_url = "https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
 
 [calc]                         # ── Options Strategy Calculator (/options/calculator ONLY)
 # A near-black instrument ground with cyan / green / amber signal colours and a

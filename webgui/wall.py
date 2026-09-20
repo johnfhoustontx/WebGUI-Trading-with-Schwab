@@ -92,9 +92,12 @@ RELOAD_MS = 15 * 60 * 1000
 # sized and placed, so turning it on cannot move anything else.
 DISCLAIMER = ""
 
-# The console palette — the same hexes ``/desk`` paints with, read from the theme
-# rather than copied, so a `config/theme.toml` edit reaches the stream.
-_C = theme.CONSOLE_COLORS
+# The APP palette — the same hexes the three pages inside the iframes
+# paint with, read from the theme rather than copied, so a `config/theme.toml`
+# edit reaches the stream. It was the CONSOLE palette until 2026-09-19; that
+# vocabulary retired with the consistency standard, and this bar sits directly
+# against three pages that no longer wear a single token of it.
+_P = theme.THEME["palette"]
 
 # What gets injected INTO each panel, not applied to this page: the app shell is
 # navigation, and nobody watching a broadcast can click it. Measured on real
@@ -282,8 +285,9 @@ def document():
     """
     import main
 
-    css = _CSS.format(cell=_C["cell"], text=_C["text"], line=_C["line"],
-                      label=_C["label"], dim=_C["dim"], fade=FADE_MS)
+    css = _CSS.format(cell=_P["card_bg"], text=_P["title"],
+                      line=_P["muted"], label=_P["muted"], dim=_P["icon"],
+                      fade=FADE_MS)
     js = _JS.format(labels=json.dumps([p["label"] for p in PAGES]),
                     srcs=json.dumps([p["path"] for p in PAGES]),
                     dwell=DWELL_MS, fade=FADE_MS, reload=RELOAD_MS,

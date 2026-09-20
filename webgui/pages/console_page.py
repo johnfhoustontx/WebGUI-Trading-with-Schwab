@@ -23,18 +23,20 @@ the page's status line. ``as_of_parts`` did NOT: it was a SECOND freshness rule,
 with a 420 s threshold of its own, aging the same view differently from the nav
 badge's ``alerts.stale_after``.
 
-The page's own SURFACE went with it: ``SHELL`` no longer carries
-``CONSOLE_PAGE`` or the page padding, because the console now sits inside
-``kit.page()`` like every other screen. The cards, the dial, the share table and
-the callouts are untouched — they are the data.
+The page's own SURFACE went with it: ``SHELL`` carries neither a ground nor the
+page padding, because the console sits inside ``kit.page()`` like every other
+screen. The CARDS' surface followed in the same phase — see ``console`` for the
+app tokens all three console modules share — while the dial's arc, the share
+bars, the regime hues and the band colours are untouched, because they are the
+data.
 """
 import datetime as dt
 from zoneinfo import ZoneInfo
 
+from pages import console as K
 from pages import console_cards as CARDS
 from pages import console_regime as REG
 from pages import regime_mix as RM
-from pages.options.theme import CONSOLE_RULE, CON_TXT_DIM, CON_TXT_FAINT
 
 CT = ZoneInfo("America/Chicago")
 
@@ -132,11 +134,20 @@ def _evidence(regime):
 
 
 def _footer(points):
+    """The reading, and the boilerplate, one step apart.
+
+    ⚠ The ONE place the console's ladder does not collapse the way the three
+    pages that mount it collapsed theirs. They mapped the console's ``dim``
+    step onto the app's faintest and its ``faint`` step onto ``MUTED``, which
+    is one step brighter — harmless where the two never meet, and wrong HERE,
+    where the summary and the disclaimer sit in one row and were drawn two
+    steps apart on purpose. Flipping them would make the boilerplate out-read
+    the reading, so the pair keeps its original direction."""
     from nicegui import ui
     with ui.row().classes(
-            f"items-center justify-between w-full border-t {CONSOLE_RULE} "
+            f"items-center justify-between w-full border-t {K.RULE_STRONG} "
             f"pt-[14px] gap-4"):
         ui.label(footer_summary(points)).classes(
-            f"text-[10.5px] tracking-[.2em] {CON_TXT_DIM}")
+            f"text-[10.5px] tracking-[.2em] {K.MUTED}")
         ui.label("FOR INFORMATIONAL PURPOSES ONLY · NOT FINANCIAL ADVICE").classes(
-            f"text-[10.5px] tracking-[.2em] {CON_TXT_FAINT}")
+            f"text-[10.5px] tracking-[.2em] {K.DIM}")

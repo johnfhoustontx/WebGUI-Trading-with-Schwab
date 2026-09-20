@@ -10,6 +10,7 @@ These tests pin the seam as a leaf module both entrypoints can provide.
 """
 import ast
 import pathlib
+import re
 
 import shell
 
@@ -408,6 +409,36 @@ def test_a_two_cell_pin_gets_a_two_cell_backdrop():
     # ⚠ it must NOT restate the gap reach: one ``margin-right`` in the whole
     # sheet is what ``test_the_pin_backdrop_covers_the_column_gap`` reads.
     assert "margin-right" not in wide, wide
+
+
+def test_the_pin_backdrop_is_the_panel_ground_and_its_hover_the_same_wash():
+    """The backdrop hides the cells scrolling under the pinned column, so it has
+    to BE the panel's ground - visibly, not approximately.
+
+    It used to be two SAMPLED hexes (#0c131a and #121920), because the Desk's
+    panels were the console's 160deg gradient card and no flat colour matched at
+    every row. The 2026-09-19 consistency standard put them on ``theme.CARD``, a
+    flat ground, and the console's gradient card was deleted with the rest of
+    that vocabulary - so a sampled literal would now be a near-black patch
+    inside a navy card, and it could never follow a theme edit either.
+
+    The hover half is the non-obvious one: without it the pinned column stays
+    dark while the rest of the row lights, which reads as the pin not belonging
+    to the row. It is the SAME 6% wash ``desk._HOVER`` applies, computed over
+    the ground rather than eyeballed against it."""
+    import shell
+    from pages.options import theme
+    p = theme.THEME["palette"]
+    decls = _declarations(shell.PANEL_SCROLL_CSS)
+    backdrop = next(d for s, d in decls.items() if s.endswith(".ns-panel-row::after"))
+    hover = decls[".ns-panel-row.cursor-pointer:hover::after"]
+    assert f"background: {p['card_bg']}" in backdrop, backdrop
+    assert f"background: {shell._wash(p['card_bg'], p['muted'], 0.06)}" in hover, hover
+    # The hover really is a LIFT, not a repeat of the ground.
+    assert shell._PIN_HOVER != shell._PIN_BG
+    # And it must stay opaque: an 8-digit hex would let the moving digits through.
+    for rule in (backdrop, hover):
+        assert not re.search(r"#[0-9a-fA-F]{8}", rule), rule
 
 
 def test_table_and_subtab_chrome_follow_the_theme():

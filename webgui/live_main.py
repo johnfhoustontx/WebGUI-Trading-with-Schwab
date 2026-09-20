@@ -229,13 +229,12 @@ else:                                   # pragma: no cover - a broken checkout
 # process mounts no marquee.
 #
 # ⚠ Deliberately NOT ``theme.PAGE``. That token is a rounded, bordered, padded
-# radial-gradient panel, and ``_layout`` does not apply it — every one of the
-# fourteen pages already supplies its own top-level wrap and background
-# (``CONSOLE_PAGE`` on the Desk, ``kit.page()`` on the four rotation screens
-# since 2026-09-19, ``macro-board`` on the Macro Board, ``calc-v2 PAGE`` on the
-# Opportunity Board). Wrapping them again would draw a second frame around
-# each. A neutral container is what "cannot drift from the private page"
-# actually means here.
+# radial-gradient panel, and ``_layout`` does not apply it — ten of the fourteen
+# published pages supply their own top-level wrap and background, which since
+# the 2026-09-19 consistency standard is ``kit.page()`` on every one of them
+# (the four Dealer Positioning pins are the same module and draw none). Wrapping
+# them again would draw a second frame around each. A neutral container is what
+# "cannot drift from the private page" actually means here.
 _CONTENT = "ns-app w-full p-4 gap-3"
 
 # ── the public header ────────────────────────────────────────────────────────

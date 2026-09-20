@@ -4,7 +4,11 @@ Design: docs/design/2026-08-14-market-regime-console/README.md.
 Plan + measured spikes: docs/plans/2026-08-14-sentiment-console-redesign-plan.md.
 
 The handoff is 100% inline styles; this app bans them (``test_no_inline_style``),
-so every declaration here is a Tailwind class built from ``[console]`` tokens.
+so every declaration here is a Tailwind class. Its SURFACE half — the card, the
+cell, the hairline, the track and the text ladder — is the app's own vocabulary
+since 2026-09-19 (the consistency standard,
+``docs/plans/2026-09-19-app-ui-consistency-design.md``); only the colours that
+encode a READING still come off ``[console]``.
 Phase 0/2 spikes measured that the whole vocabulary this needs generates —
 glows, the three gradient families, arbitrary opacity, arbitrary grids, and a
 full font stack — so nothing here needs a CSS escape hatch. (The page's one
@@ -16,10 +20,41 @@ the meters cannot drift between the Sentiment and Trend cards.
 """
 from pages.fmt import clamp as _clamp  # the ONE copy (pages/fmt.py)
 from pages.options import theme
-from pages.options.theme import CONSOLE_ALPHA, console_glow
+from pages.options.theme import console_glow
 
 _C = theme.CONSOLE_COLORS
-_LINE = _C["line"]
+_P = theme.THEME["palette"]
+
+# ── the app's surface vocabulary ─────────────────────────────────────────────
+# The console's own ground, its neutral text ladder and its one ``line`` colour
+# retired with the 2026-09-19 consistency standard: a track, a hairline and a
+# text step are SURFACE wherever they live, and the console's were drawn for a
+# near-black page this app no longer has. Everything that encodes a READING —
+# the band colours, the regime hues, the positive/negative pair — is untouched
+# and still comes off ``[console]``.
+#
+# ``_TRACK_BG`` is the groove a fill moves in; ``_TRACK_EDGE`` is one step
+# brighter, for the groove's own rule and for a fixed reference line (the RRG
+# crosshair's precedent); ``_ABSENT`` is what every "no reading" wears.
+_TRACK_BG = _P["card_border"]
+_TRACK_EDGE = _P["btn_border"]
+_ABSENT = _P["muted"]
+
+# The three modules that draw the console — this one, ``console_cards`` and
+# ``console_regime`` — take their surface classes from HERE rather than each
+# reaching into the palette, so a card in one cannot drift from a card in the
+# next. They are the app's own tokens, mapped by ROLE exactly as the three
+# pages that mount this console mapped them (``desk.py``, ``symbol.py``,
+# ``sentiment.py``): a value or a line of body copy is ``TXT``; a label, an
+# eyebrow or an absence is ``MUTED``; the quietest furniture is ``DIM``.
+CARD = theme.CARD                              # ground · border · 12px · padding
+CELL = f"bg-[{_P['card_bg']}]"                 # a readout cell in a hairline grid
+HAIRLINE = f"bg-[{_P['card_border']}]"         # a gap-px grid: the GAP is the rule
+RULE = f"border-[{_P['card_border']}]"         # a divider
+RULE_STRONG = f"border-[{_TRACK_EDGE}]"        # one step brighter
+TXT = theme.LABEL
+MUTED = theme.MUTED
+DIM = f"text-[{_P['icon']}]"
 
 # --- scale ------------------------------------------------------------------
 # 0-100 score -> band colour. The five thresholds are FITTED to the handoff's
@@ -50,7 +85,7 @@ def band_hex(key):
     """Band key -> hex, for the fill gradient / marker / value text."""
     return {"positive": _C["positive"], "yellow": _C["yellow"],
             "olive": _C["olive"], "warning": _C["warning"],
-            "negative": _C["negative"], "muted": _C["dim"]}.get(key, _C["dim"])
+            "negative": _C["negative"], "muted": _ABSENT}.get(key, _ABSENT)
 
 
 def _safe(v):
@@ -104,7 +139,7 @@ def meter_row(label, value):
     v = _safe(value)
     if v is None:
         return {"label": str(label), "value": None, "text": "—",
-                "no_read": True, "band": "muted", "hex": _C["dim"],
+                "no_read": True, "band": "muted", "hex": _ABSENT,
                 "pct": 0.0, "fill": "", "marker": "", "glow": ""}
     v = _clamp(v, 0.0, 100.0)
     band = score_band(v)
@@ -124,14 +159,13 @@ def meter_row(label, value):
 # The "no read" hatch. A diagonal repeating gradient reads as "instrument absent"
 # rather than "value is zero", which a flat empty track would not.
 NO_READ_HATCH = (f"bg-[repeating-linear-gradient(135deg,"
-                 f"{theme._alpha_hex(_LINE, 0.10)}_0_6px,transparent_6px_12px)]")
+                 f"{theme._alpha_hex(_ABSENT, 0.10)}_0_6px,transparent_6px_12px)]")
 
 
 def track_classes():
     """The shared meter track (both timeframe and bipolar rows sit on it)."""
-    a = CONSOLE_ALPHA
-    return (f"relative bg-[{_LINE}]/[{a['track']}] "
-            f"border border-[{_LINE}]/[{a['track_border']}]")
+    return (f"relative bg-[{_TRACK_BG}] "
+            f"border border-[{_TRACK_EDGE}]")
 
 
 def width_class(pct):
@@ -182,7 +216,7 @@ def bipolar_geometry(value, scale=BIPOLAR_SCALE):
     reaches at most 50%), so it can be handed straight to ``width_class``."""
     v = _safe(value)
     if v is None:
-        return {"side": "none", "pct": 0.0, "text": "—", "hex": _C["dim"],
+        return {"side": "none", "pct": 0.0, "text": "—", "hex": _ABSENT,
                 "value": None}
     sc = _safe(scale) or BIPOLAR_SCALE
     if sc <= 0:
@@ -243,17 +277,16 @@ def _looks_numeric(token):
 def mount_timeframe_meter(row):
     """One timeframe row: label · track · value."""
     from nicegui import ui
-    from pages.options.theme import CON_TXT_MUTED, CON_TXT_DIM
 
     with ui.row().classes("items-center gap-3 w-full"):
         ui.label(row["label"]).classes(
-            f"w-[52px] shrink-0 text-[10px] tracking-[.2em] {CON_TXT_MUTED}")
+            f"w-[52px] shrink-0 text-[10px] tracking-[.2em] {MUTED}")
         with ui.element("div").classes(f"flex-1 h-[18px] {track_classes()}"):
             if row["no_read"]:
                 ui.element("div").classes(f"absolute inset-0 {NO_READ_HATCH}")
                 ui.label("NO READ").classes(
                     "absolute inset-0 flex items-center justify-center "
-                    f"text-[9.5px] tracking-[.22em] {CON_TXT_DIM}")
+                    f"text-[9.5px] tracking-[.22em] {DIM}")
             else:
                 ui.element("div").classes(
                     f"absolute left-0 top-0 bottom-0 {width_class(row['pct'])} "
@@ -270,14 +303,13 @@ def mount_ruler():
     """The 0/25/50/75/100 rule under a meter stack. Spacers match the meter
     row's label/value columns so the ticks line up with the track, not the row."""
     from nicegui import ui
-    from pages.options.theme import CON_TXT_FAINT, CONSOLE_DIVIDER
 
     with ui.row().classes("items-center gap-3 w-full"):
         ui.element("div").classes("w-[52px] shrink-0")
         with ui.row().classes(
-                f"flex-1 justify-between border-t {CONSOLE_DIVIDER} pt-[5px]"):
+                f"flex-1 justify-between border-t {RULE} pt-[5px]"):
             for mark in RULER_MARKS:
-                ui.label(str(mark)).classes(f"text-[9.5px] {CON_TXT_FAINT}")
+                ui.label(str(mark)).classes(f"text-[9.5px] {MUTED}")
         ui.element("div").classes("w-[34px] shrink-0")
 
 
@@ -287,7 +319,7 @@ def mount_segmented(confidence, hexv=None):
 
     hexv = hexv or _C["positive"]
     lit_cls = f"flex-1 h-full bg-[{hexv}] {console_glow(hexv, px=12, alpha=0.35)}"
-    dim_cls = f"flex-1 h-full bg-[{_LINE}]/[{CONSOLE_ALPHA['hairline']}]"
+    dim_cls = f"flex-1 h-full bg-[{_TRACK_BG}]"
     with ui.row().classes("gap-[3px] h-[10px] w-full items-stretch"):
         for lit in segmented_cells(confidence):
             ui.element("div").classes(lit_cls if lit else dim_cls)
@@ -296,16 +328,15 @@ def mount_segmented(confidence, hexv=None):
 def mount_bipolar(label, geom):
     """One signed ROC/z row: label · centred track · value."""
     from nicegui import ui
-    from pages.options.theme import CON_TXT_MUTED
 
     with ui.row().classes("items-center gap-3 w-full"):
         ui.label(label).classes(
-            f"w-[46px] shrink-0 text-[10px] {CON_TXT_MUTED}")
+            f"w-[46px] shrink-0 text-[10px] {MUTED}")
         with ui.element("div").classes(f"flex-1 h-[8px] {track_classes()}"):
             # The zero line first, so a fill never paints over the reference.
             ui.element("div").classes(
                 f"absolute left-1/2 w-px -top-[3px] -bottom-[3px] "
-                f"bg-[{_LINE}]/[0.5]")
+                f"bg-[{_TRACK_EDGE}]")
             if geom["side"] != "none" and geom["pct"] > 0:
                 edge = "left-1/2" if geom["side"] == "right" else "right-1/2"
                 ui.element("div").classes(
