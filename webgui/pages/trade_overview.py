@@ -44,7 +44,7 @@ def _build(state, refs):
     # One line, not a stacked block: the eyebrow, the sentence and both chips
     # are each short, and stacking them cost a third of the fold for four words.
     with ui.row().classes(f"{theme.CARD} w-full items-center gap-3 flex-wrap"):
-        with ui.label("MARKET STATE").classes(T.EYEBROW):
+        with ui.label("MARKET STATE").classes(sh.EYEBROW):
             sh.tip(th.help_for("market_state"))
         market = ui.label("").classes(f"text-[12.5px] {theme.LABEL} min-w-0")
         ui.element("div").classes("flex-1 min-w-[8px]")
@@ -62,7 +62,7 @@ def _build(state, refs):
                         sh.tip(th.help_for("position_panel"))
                     ui.label("1–8 weeks").classes(
                         f"text-[12px] {theme.MUTED}")
-                ui.label("validated factor model").classes(T.SUBTLE)
+                ui.label("validated factor model").classes(sh.SUBTLE)
 
             # ── the recommendation: what to DO ──────────────────────────
             # No eyebrow above the word. The card beside this one has none, and
@@ -84,14 +84,14 @@ def _build(state, refs):
                 rec_caveat = ui.row().classes(f"{T.CALLOUT} w-full")
 
             # ── the ranking, kept as information ────────────────────────
-            with ui.column().classes(f"w-full gap-[7px] pt-[13px] {T.RULE}"
+            with ui.column().classes(f"w-full gap-[7px] pt-[13px] {sh.RULE}"
                                      .replace("border-b", "border-t")):
                 with ui.row().classes("w-full items-baseline justify-between "
                                       "gap-3 flex-wrap"):
-                    with ui.label("RANKING").classes(T.EYEBROW):
+                    with ui.label("RANKING").classes(sh.EYEBROW):
                         sh.tip(th.help_for("band_rail"))
                     rank_line = ui.label("").classes(
-                        f"{T.MONO} text-[12px] {theme.MUTED}")
+                        f"text-[12px] {theme.MUTED}")
                     with rank_line:
                         sh.tip(th.help_for("band_stats"))
 
@@ -111,7 +111,7 @@ def _build(state, refs):
                     ui.label("model band")
                     ui.label("strongest band")
                 with rail:
-                    rail_tip = ui.tooltip("").classes(T.TOOLTIP)
+                    rail_tip = ui.tooltip("").classes(sh.TOOLTIP)
 
             side_cards = ui.element("div").classes(
                 "w-full grid grid-cols-2 gap-3")
@@ -124,7 +124,7 @@ def _build(state, refs):
                     with kit.section_title("Long Term"):
                         sh.tip(th.help_for("investor_panel"))
                     ui.label("months+").classes(f"text-[12px] {theme.MUTED}")
-                ui.label("fundamentals + relative strength").classes(T.SUBTLE)
+                ui.label("fundamentals + relative strength").classes(sh.SUBTLE)
 
             # Same three geometry constants as the Short Term headline, so the
             # two verdict words sit on one horizontal line.
@@ -139,7 +139,7 @@ def _build(state, refs):
                     with inv_conf:
                         sh.tip(th.help_for("investor_confidence"))
                     verdict_score = ui.label("").classes(
-                        f"{T.MONO} text-[13px] {theme.MUTED}")
+                        f"text-[13px] {theme.MUTED}")
             inv_bars = ui.column().classes("w-full gap-[9px]")
             inv_foot = ui.label("").classes(
                 f"text-[11px] leading-[1.5] {theme.MUTED} mt-auto pt-[3px]")
@@ -152,7 +152,7 @@ def _build(state, refs):
         dstats = ui.element("div").classes(
             "w-full grid gap-[14px] "
             "[grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]")
-    dealer_empty = ui.label("").classes(f"{T.NOTE} px-5 pb-4")
+    dealer_empty = ui.label("").classes(f"{sh.NOTE} px-5 pb-4")
 
     # ── peers ───────────────────────────────────────────────────────────────
     peer_panel = sh.panel("Where it sits among its peers",
@@ -236,7 +236,7 @@ def _build(state, refs):
                         "w-full grid items-center gap-3 "
                         "[grid-template-columns:minmax(96px,152px)_1fr_46px]"):
                     with ui.label(b["label"]).classes(
-                            f"{T.LABEL} leading-[1.35]"):
+                            f"text-[12px] {theme.MUTED} leading-[1.35]"):
                         sh.tip(th.factor_help(b["key"]))
                     if b["track_text"]:
                         # A zero-width bar and an empty value column would read
@@ -247,7 +247,7 @@ def _build(state, refs):
                         sh.centred_bar(b["left_pct"], b["width_pct"],
                                        b["bar_class"])
                     ui.label(b["value"]).classes(
-                        f"{T.MONO} text-[12.5px] text-right {b['value_class']}")
+                        f"text-[12.5px] text-right {b['value_class']}")
         inv_foot.text = (
             "Earnings trajectory scores from Alpha Vantage's quarterly "
             "surprise history — Schwab publishes none, so this component "
@@ -274,14 +274,14 @@ def _build(state, refs):
                         f"left-[{m['pos_pct']:.2f}%]"):
                     if m["emphasis"]:
                         ui.label(m["label"]).classes(
-                            f"{T.MONO} text-[11px] font-bold {m['text_class']} "
+                            f"text-[11px] font-bold {m['text_class']} "
                             "whitespace-nowrap")
                     ui.element("div").classes(
                         f"h-5 rounded-[2px] {'w-[3px]' if m['emphasis'] else 'w-[2px]'} "
                         + _mark_bg(m["kind"]))
                     if not m["emphasis"]:
                         ui.label(m["label"]).classes(
-                            f"{T.MONO} text-[11px] {m['text_class']} "
+                            f"text-[11px] {m['text_class']} "
                             "whitespace-nowrap")
         dstats.clear()
         with dstats:
@@ -291,10 +291,10 @@ def _build(state, refs):
                 with ui.column().classes(
                         f"gap-[6px] pl-3 border-l-2 {_FRAME_EDGE}"):
                     with ui.label(str(row.get("label", "")).upper()).classes(
-                            T.EYEBROW):
+                            sh.EYEBROW):
                         sh.tip(th.row_help(row.get("label")))
                     ui.label(str(row.get("value", "—"))).classes(
-                        f"{T.MONO} text-[16px] font-bold {theme.LABEL}")
+                        f"text-[16px] font-bold {theme.LABEL}")
 
         peers = a.get("peers") or {}
         ranked = peers.get("ranked") or []
@@ -359,28 +359,31 @@ def _side_card(side, clearance, gates):
         ui.label(word).classes(f"text-[14px] font-semibold {theme.LABEL}")
         detail = "; ".join(g for g in (gates or [])) or \
             "; ".join((clearance or {}).get("reasons") or []) or "No gates fired."
-        ui.label(detail).classes(f"{T.NOTE} {theme.MUTED}")
+        ui.label(detail).classes(sh.NOTE)
 
 
 def _peer_card(p, symbol):
     sym = (p.get("symbol") or "").upper()
     is_self = sym == (symbol or "").upper()
     pct = fmt.num(p.get("percentile"))
-    border = "border-[#3a3f7a] bg-[rgba(99,102,241,0.08)]" if is_self \
+    # "This is the one you are looking at" is a SELECTION, not a datum, and
+    # the app has one colour for it - the one ``ui_kit.table``'s own selected
+    # row wears. It was an indigo the app speaks nowhere else.
+    border = sh.SELECTED_BOX if is_self \
         else f"{_FRAME_EDGE} bg-[{_P['card_bg']}]"
     with ui.column().classes(f"gap-[9px] rounded-[10px] border px-[14px] "
                              f"py-[13px] {border}"):
         ui.label("THIS SYMBOL" if is_self else "PEER").classes(
-            f"{T.EYEBROW} " + ("text-[#818cf8]" if is_self else ""))
+            f"{sh.EYEBROW} " + (sh.SELECTED_TEXT if is_self else ""))
         with ui.row().classes("items-baseline gap-[9px]"):
             ui.label(sym).classes(
-                f"{T.MONO} text-[15px] font-bold "
-                + ("text-[#818cf8]" if is_self else theme.LABEL))
+                "text-[15px] font-bold "
+                + (sh.SELECTED_TEXT if is_self else theme.LABEL))
             ui.label(f"{int(pct)}th" if pct is not None else "—").classes(
-                f"{T.MONO} text-[12px] {theme.MUTED}")
+                f"text-[12px] {theme.MUTED}")
         with ui.element("div").classes(
                 f"h-[3px] w-full rounded-[2px] {_TRACK}"):
             ui.element("div").classes(
                 "h-[3px] rounded-[2px] "
-                + ("bg-[#818cf8]" if is_self else "bg-[#4a5b7d]")
+                + (sh.SELECTED_BAR if is_self else T.BAR_DIM)
                 + f" w-[{(pct if pct is not None else 0):.0f}%]")

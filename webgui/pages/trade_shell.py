@@ -1,8 +1,11 @@
 """The Signal Desk shell — header + control bar + page frame, shared by four screens.
 
 Widgets and wiring only; every value comes from ``trade_terminal`` (pure) and
-the frame from ``pages/ui_kit`` (the app's one look). ``terminal_theme`` still
-carries this family's DATA colours; its surfaces and faces are gone from here.
+the frame from ``pages/ui_kit`` (the app's one look). ``terminal_theme`` now
+carries this family's DATA colours and nothing else; its surface half retired
+on 2026-09-20, and the type GEOMETRY that went with it lives here, beside the
+family's other shared vocabulary (``panel``, ``tip``, ``centred_bar``) and
+wearing the app's palette.
 
 **The symbol is a draft until committed.** Typing edits a draft; Enter always
 requests, and tabbing or clicking out requests only a CHANGE — ``should_commit``
@@ -30,6 +33,56 @@ from pages.view_watch import watch_view
 
 VIEW = "trade:analysis"
 POLL_SEC = 2.0
+
+_P = _t.THEME["palette"]
+
+# ── the family's shared type geometry ───────────────────────────────────────
+# These carried ``terminal_theme``'s neutral ladder until 2026-09-20; the ladder
+# went and the app's palette took its place, so what is left is SIZE, WEIGHT,
+# TRACKING and LEADING. That much is genuinely this family's and stays local —
+# every migrated page keeps its own (``desk.py``'s strip vocabulary is the
+# precedent, and it takes the app's colour the same way). What must never be a
+# second language is the palette.
+#
+# The mapping, and it is the one Task 4 already applied by hand to Overview and
+# Evidence: the brightest rung (#cfdaee / #e6edf7 / #f2f6fc) is the app's title
+# tone, the four middle rungs (#a8b6cf / #8b9bb4 / #7d8db0 / #6b7b9c) all
+# collapse onto MUTED, and the bottom rung (#56678a, measured at 3.2:1 on the
+# app's card) onto the icon tone, which reads 4.1:1.
+_FAINT = f"text-[{_P['icon']}]"
+
+EYEBROW = (f"text-[9.5px] font-bold tracking-[0.14em] {_FAINT} "
+           "whitespace-nowrap")
+SUBTLE = f"text-[11px] {_FAINT}"
+NOTE = f"text-[11.5px] leading-[1.55] {_t.MUTED}"
+VALUE = f"text-[12.5px] {_t.LABEL} whitespace-nowrap"
+
+# Two weights, and they stay two. ``HAIRLINE`` divides body ROWS and takes the
+# app's own row divider — the faint white wash ``shell.TABLE_CSS`` paints under
+# every q-table row — rather than the #131d31 it had, which was DARKER than the
+# card it sat on and read as a smudge. ``RULE`` underlines a column HEAD and
+# takes the card border, the app's one structural edge.
+HAIRLINE = "border-b border-[rgba(255,255,255,.04)]"
+RULE = f"border-b border-[{_P['card_border']}]"
+
+# Per-tile hover explanations (`pages/trade_help`). `whitespace-pre-line` is
+# load-bearing: the texts are written as short paragraphs separated by blank
+# lines, and without it they collapse into one wall of prose. The only one of
+# these seven that carried no colour at all, so it MOVED rather than changed.
+TOOLTIP = ("max-w-[340px] whitespace-pre-line text-[11.5px] leading-[1.6] "
+           "text-left")
+
+# The app's SELECTION accent, and the one colour it has for "this is the one
+# you are looking at": the colour ``ui_kit.table``'s own selected row wears
+# (``theme.build_surface_css``'s ``.kit-row-selected`` — a 3px accent edge over
+# an 8% wash) and the one ``sentiment_momentum``'s selected chip ring took. It
+# replaced an indigo (#818cf8 / #3a3f7a / rgba(99,102,241,…)) the app speaks
+# nowhere else — and which Task 1 had just retired from the Symbol field.
+_FOCUS_RGB = _t.hex_rgb(_P["focus"], (107, 134, 255))
+SELECTED_TEXT = f"text-[{_P['focus']}]"
+SELECTED_BAR = f"bg-[{_P['focus']}]"
+SELECTED_BOX = (f"border-[{_P['focus']}] bg-[rgba({_FOCUS_RGB[0]},"
+                f"{_FOCUS_RGB[1]},{_FOCUS_RGB[2]},0.08)]")
 
 # How long a Signal Desk analysis usually takes, and the backstop that outlasts
 # it. MEASURED: a COIN analysis ran 96 s end to end on 2026-08-31, against
@@ -285,7 +338,7 @@ def tip(text):
     an empty tooltip still shows an empty box on hover, which reads as a bug.
     """
     if text:
-        ui.tooltip(text).classes(T.TOOLTIP)
+        ui.tooltip(text).classes(TOOLTIP)
 
 
 def panel(title=None, stamp=None, classes="", help=None):
@@ -294,19 +347,19 @@ def panel(title=None, stamp=None, classes="", help=None):
     ``help`` attaches a hover explanation to the TITLE rather than to the whole
     panel: a tooltip covering a panel would fire wherever the pointer rested
     inside it, including over the numbers it is trying to explain."""
-    col = ui.column().classes(f"{T.PANEL} w-full gap-4 {classes}")
+    col = ui.column().classes(f"{_t.CARD} w-full gap-4 {classes}")
     if title:
         with col:
             with ui.row().classes("w-full items-baseline justify-between "
                                   "gap-3 flex-wrap"):
                 # The app's one panel heading, so a Signal Desk panel reads
-                # like a panel anywhere else. It was ``T.PANEL_TITLE`` — a
-                # page-scoped face a step larger and bolder than every other
+                # like a panel anywhere else. It was the terminal theme's own
+                # panel-title face, a step larger and bolder than every other
                 # heading in the app.
                 with kit.section_title(title):
                     tip(help)
                 if stamp:
-                    ui.label(stamp).classes(T.SUBTLE)
+                    ui.label(stamp).classes(SUBTLE)
     return col
 
 
@@ -317,9 +370,13 @@ def centred_bar(left_pct, width_pct, bar_class, height="h-[7px]"):
     — the documented exception to the finite-palette rule, which binds COLOURS.
     The colour here is always one of the fixed `BAR_*` tokens."""
     with ui.element("div").classes(
-            f"relative {height} w-full rounded-[4px] bg-[#17223a]"):
+            f"relative {height} w-full rounded-[4px] "
+            f"bg-[{_P['card_border']}]"):
+        # The axis is chart FURNITURE, not data: it marks the scale's single
+        # fixed reference, so it takes the one-step-brighter button border -
+        # the same call Phase 3 made for the RRG crosshair.
         ui.element("div").classes(
-            "absolute top-0 bottom-0 w-px left-1/2 bg-[#29364f]")
+            f"absolute top-0 bottom-0 w-px left-1/2 bg-[{_P['btn_border']}]")
         ui.element("div").classes(
             f"absolute top-0 bottom-0 rounded-[4px] {bar_class} "
             f"left-[{left_pct:.2f}%] w-[{width_pct:.2f}%]")

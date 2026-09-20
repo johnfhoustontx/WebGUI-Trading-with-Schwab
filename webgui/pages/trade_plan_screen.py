@@ -18,8 +18,20 @@ from pages import trade_shell as sh
 from pages import trade_terminal as tt
 from pages import ui_kit as kit
 from pages.options import handoff
+from pages.options import theme
 from pages.trade import plan_headline, plan_rows
 from pages.ui_guard import guard
+
+_P = theme.THEME["palette"]
+# The app's neutral ladder, which replaced the rungs this page spelled out by
+# hand - the same collapse Task 4 made on Overview and Evidence, finished here
+# because the NAMED rungs those hexes sat beside (``terminal_theme``'s surface
+# half) retired on 2026-09-20 and leaving these would ship one family speaking
+# two greys. ``theme.LABEL`` is a reading, ``theme.MUTED`` what qualifies it,
+# ``_FAINT`` the dimmest captions, ``_FRAME_EDGE`` / ``_INSET`` the frames.
+_FAINT = f"text-[{_P['icon']}]"
+_FRAME_EDGE = f"border-[{_P['card_border']}]"
+_INSET = f"bg-[{_P['input_bg']}]"
 
 # The one row the design lifts out of the list, because it is the only field
 # nothing else in the app enforces.
@@ -62,11 +74,11 @@ def _build(state, refs):
         with no_trade:
             nt_head = ui.row().classes("items-center gap-[11px] flex-wrap")
             nt_summary = ui.element("div").classes(
-                "w-full rounded-[10px] border border-[#22304c] "
-                "bg-[rgba(15,23,40,0.7)] px-4 py-[14px]")
+                f"w-full rounded-[10px] border {_FRAME_EDGE} {_INSET} "
+                "px-4 py-[14px]")
             nt_conditions = ui.column().classes("w-full gap-3")
             nt_alt = ui.column().classes("w-full gap-[9px] pt-[15px] "
-                                         f"border-t border-[#1c2740]")
+                                         f"border-t {_FRAME_EDGE}")
 
     def _paint(a):
         plan = a.get("trade_plan") or {}
@@ -81,9 +93,9 @@ def _build(state, refs):
         with plan_head:
             with ui.row().classes("items-center gap-[11px] min-w-0"):
                 ui.element("div").classes(
-                    "w-[3px] h-[17px] rounded-[2px] bg-[#34d399]")
+                    f"w-[3px] h-[17px] rounded-[2px] {T.BAR_POS}")
                 ui.label(headline or "Plan").classes(
-                    "text-[17px] font-bold tracking-[-0.01em] text-[#f2f6fc]")
+                    f"text-[17px] font-bold tracking-[-0.01em] {theme.LABEL}")
                 if plan.get("action"):
                     ui.label(str(plan["action"]).upper()).classes(
                         f"{T.CHIP_BASE} {T.CHIP_POS} text-[10.5px] "
@@ -95,7 +107,7 @@ def _build(state, refs):
             pct = fmt.num(sm.get("percentile"))
             with ui.label(f"{rail['percentile']} band" if pct is not None
                           else "").classes(
-                    f"{T.MONO} text-[12.5px] text-[#7d8db0]"):
+                    f"text-[12.5px] {theme.MUTED}"):
                 sh.tip(rail["tip"])
 
         plan_body.clear()
@@ -108,21 +120,28 @@ def _build(state, refs):
                 value = str(row.get("value", ""))
                 note = row.get("note") or ""
                 key = label.strip().lower() == _KEY_LABEL.lower()
-                cls = "rounded-lg bg-[rgba(99,102,241,0.08)]" if key else ""
+                # The key row is a SELECTION - "this is the one that
+                # matters" - so it wears the app's selection accent, the
+                # colour ``ui_kit.table``'s own selected row wears, not an
+                # indigo the app speaks nowhere else.
+                cls = f"rounded-lg {sh.SELECTED_BOX}" if key else ""
                 with ui.element("div").classes(
                         f"w-full grid items-baseline gap-[14px] px-[10px] "
-                        f"py-[11px] {T.HAIRLINE} {cls} "
+                        f"py-[11px] {sh.HAIRLINE} {cls} "
                         "[grid-template-columns:108px_minmax(0,1fr)]"):
                     with ui.label(label.upper()).classes(
                             "text-[9.5px] font-bold tracking-[0.14em] "
-                            + ("text-[#818cf8]" if key else "text-[#56678a]")):
+                            + (sh.SELECTED_TEXT if key else _FAINT)):
                         sh.tip(th.row_help(label))
                     with ui.column().classes("gap-[5px] min-w-0"):
+                        # ``_looks_numeric`` used to pick a monospaced
+                        # face here; the app aligns figures with
+                        # ``font-variant-numeric: tabular-nums`` app-wide, so
+                        # a value needs no face of its own.
                         ui.label(value).classes(
-                            "text-[15px] font-medium text-[#e6edf7] "
-                            + (T.MONO if _looks_numeric(value) else ""))
+                            f"text-[15px] font-medium {theme.LABEL}")
                         if note:
-                            ui.label(note).classes(T.NOTE)
+                            ui.label(note).classes(sh.NOTE)
 
         actions.clear()
         with actions:
@@ -149,17 +168,17 @@ def _build(state, refs):
             cal.set_enabled(bool(sig))
         ui.label("The plan names a structure and a tenor, not strikes — the "
                  "Finder turns it into concrete legs you can paper-trade.") \
-            .classes(T.NOTE)
+            .classes(sh.NOTE)
 
         # ── the no-trade side ───────────────────────────────────────────────
         blocked_side = _blocked_side(clearance)
         nt_head.clear()
         with nt_head:
             ui.element("div").classes(
-                "w-[3px] h-[17px] rounded-[2px] bg-[#fbbf24]")
+                f"w-[3px] h-[17px] rounded-[2px] {T.BAR_WARN}")
             with ui.label("No trade" if not actionable else
                           f"{blocked_side.title()} side").classes(
-                    "text-[17px] font-bold tracking-[-0.01em] text-[#f2f6fc]"):
+                    f"text-[17px] font-bold tracking-[-0.01em] {theme.LABEL}"):
                 sh.tip(th.help_for("no_trade"))
             with ui.label(_badge(clearance, blocked_side)).classes(
                     f"{T.CHIP_BASE} {T.CHIP_WARN} text-[10.5px] "
@@ -171,26 +190,28 @@ def _build(state, refs):
         nt_summary.clear()
         with nt_summary:
             ui.label(_summary(plan, clearance, actionable)).classes(
-                "text-[14px] leading-[1.6] text-[#cfdaee]")
+                f"text-[14px] leading-[1.6] {theme.LABEL}")
 
         nt_conditions.clear()
         with nt_conditions:
-            ui.label("WHAT WOULD CHANGE IT").classes(T.EYEBROW)
+            ui.label("WHAT WOULD CHANGE IT").classes(sh.EYEBROW)
             for c in _conditions(plan, clearance, blocked_side):
                 with ui.element("div").classes(
                         "w-full grid items-start gap-3 "
                         "[grid-template-columns:22px_minmax(0,1fr)]"):
+                    # The chip vocabulary rather than a restatement of
+                    # its three values: this marker IS a warning state.
                     ui.label("–").classes(
-                        "flex items-center justify-center w-[22px] h-[22px] "
-                        "rounded-md border border-[#4a3c17] "
-                        "bg-[rgba(251,191,36,0.09)] text-[13px] text-[#fbbf24]")
+                        f"flex items-center justify-center w-[22px] h-[22px] "
+                        f"rounded-md border text-[13px] {T.CHIP_WARN}")
                     ui.label(c).classes(
-                        "text-[13.5px] font-semibold text-[#e6edf7]")
+                        f"text-[13.5px] font-semibold {theme.LABEL}")
 
         nt_alt.clear()
         with nt_alt:
-            ui.label("IF YOU WANT THE EXPOSURE ANYWAY").classes(T.EYEBROW)
-            ui.label(_alternative(clearance, blocked_side)).classes(T.BODY)
+            ui.label("IF YOU WANT THE EXPOSURE ANYWAY").classes(sh.EYEBROW)
+            ui.label(_alternative(clearance, blocked_side)).classes(
+                f"text-[13px] leading-[1.6] {theme.MUTED}")
 
     refs["paint"].append(_paint)
 
@@ -225,11 +246,6 @@ def _open_calculator(analysis):
         handoff.set_pending_calculator(sig)
         ui.navigate.to("/options/calculator")
     return _go
-
-
-def _looks_numeric(value):
-    s = str(value or "")
-    return any(ch.isdigit() for ch in s)
 
 
 def _blocked_side(clearance):

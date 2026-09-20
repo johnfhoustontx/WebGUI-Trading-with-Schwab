@@ -25,7 +25,9 @@ from pages.trade import (live_ic_decay_note, live_ic_line, live_ic_split_line,
 _P = theme.THEME["palette"]
 # The app's neutral ladder, which replaced the rungs this page used to spell
 # out by hand: ``theme.LABEL`` for a reading, ``theme.MUTED`` for what
-# qualifies it, ``_FAINT`` for the dimmest captions.
+# qualifies it, ``_FAINT`` for the dimmest captions. The NAMED rungs went the
+# same way on 2026-09-20 - ``sh.NOTE`` / ``sh.VALUE`` / ``sh.HAIRLINE`` /
+# ``sh.RULE`` are the family's geometry over those same app colours.
 _FAINT = f"text-[{_P['icon']}]"
 
 # ⚠ `w-full` is load-bearing. NiceGUI's column sets `align-items: flex-start`,
@@ -70,7 +72,7 @@ def _build(state, refs):
         table.clear()
         with table:
             with ui.element("div").classes(
-                    f"{_GRID} px-1 pb-[9px] {T.RULE} "
+                    f"{_GRID} px-1 pb-[9px] {sh.RULE} "
                     f"text-[9.5px] font-bold tracking-[0.14em] {_FAINT}"):
                 with ui.label("FACTOR"):
                     sh.tip(th.column_help("FACTOR"))
@@ -80,29 +82,29 @@ def _build(state, refs):
             if not rows:
                 ui.label("No validated model reading for this symbol — the "
                          "Short Term card is on its legacy heuristic.").classes(
-                    f"{T.NOTE} pt-3")
+                    f"{sh.NOTE} pt-3")
             for r in rows:
                 with ui.element("div").classes(
-                        f"{_GRID} px-1 py-[9px] {T.HAIRLINE}"):
+                        f"{_GRID} px-1 py-[9px] {sh.HAIRLINE}"):
                     with ui.label(r["name"]).classes(
                             f"text-[13px] font-medium {theme.LABEL} "
                             "truncate min-w-0"):
                         sh.tip(th.factor_help(r["key"]))
-                    ui.label(r["z"]).classes(f"{T.VALUE} text-right")
+                    ui.label(r["z"]).classes(f"{sh.VALUE} text-right")
                     ui.label(r["weight"]).classes(
-                        f"{T.MONO} text-[12.5px] text-right {r['weight_class']}")
+                        f"text-[12.5px] text-right {r['weight_class']}")
                     with ui.row().classes("items-center gap-[9px] min-w-0 w-full"):
                         sh.centred_bar(r["left_pct"], r["width_pct"],
                                        r["bar_class"], height="h-[9px]")
                         ui.label(r["contribution"]).classes(
-                            f"{T.MONO} text-[12.5px] whitespace-nowrap "
+                            f"text-[12.5px] whitespace-nowrap "
                             # The finite palette, not a restatement of its
                             # hexes: this is the same reading ``sign_text``
                             # gives, on the bar beside it.
                             + (T.POS if r["bar_class"] == T.BAR_POS
                                else T.NEG))
                     ui.label(r["ic"]).classes(
-                        f"{T.MONO} text-[12.5px] text-right {r['ic_class']}")
+                        f"text-[12.5px] text-right {r['ic_class']}")
             comp = tt.evidence_composite(sm)
             if comp is not None:
                 with ui.row().classes("w-full items-baseline justify-between "
@@ -111,7 +113,7 @@ def _build(state, refs):
                             f"text-[12.5px] {theme.MUTED}"):
                         sh.tip(th.help_for("composite"))
                     ui.label(f"{comp:+.3f}").classes(
-                        f"{T.MONO} text-[21px] font-bold "
+                        f"text-[21px] font-bold "
                         + T.sign_text(comp))
 
         meta = swing_model_meta(sm)
@@ -137,7 +139,7 @@ def _build(state, refs):
                                       "gap-[14px]"):
                     ui.label(label).classes(f"text-[12.5px] {theme.MUTED}")
                     ui.label(str(value)).classes(
-                        f"{T.MONO} text-[13px] {theme.LABEL} text-right")
+                        f"text-[13px] {theme.LABEL} text-right")
 
         # The exposure line is the loudest thing this model has to say about
         # itself, so it sits in the warning slot rather than in the list.
@@ -162,15 +164,15 @@ def _build(state, refs):
             for h in history:
                 with ui.element("div").classes(
                         f"w-full grid items-baseline gap-[14px] py-[9px] "
-                        f"{T.HAIRLINE} [grid-template-columns:1fr_auto_auto]"):
+                        f"{sh.HAIRLINE} [grid-template-columns:1fr_auto_auto]"):
                     ui.label(h.get("date") or "—").classes(
-                        f"{T.MONO} text-[12.5px] {theme.MUTED}")
+                        f"text-[12.5px] {theme.MUTED}")
                     pct = fmt.num(h.get("percentile"))
                     ui.label(f"{int(pct)}th" if pct is not None else "—").classes(
-                        f"{T.MONO} text-[12.5px] {theme.LABEL}")
+                        f"text-[12.5px] {theme.LABEL}")
                     res = fmt.num(h.get("result"))
                     ui.label("pending" if h.get("pending") else f"{res:+.2%}").classes(
-                        f"{T.MONO} text-[12.5px] min-w-[72px] text-right "
+                        f"text-[12.5px] min-w-[72px] text-right "
                         + (T.OFF if h.get("pending") else T.sign_text(res)))
 
     refs["paint"].append(_paint)

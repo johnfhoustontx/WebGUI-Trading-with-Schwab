@@ -62,8 +62,14 @@ def test_the_shell_frame_is_the_kit_and_carries_no_terminal_surface():
     src = inspect.getsource(sh.page)
     assert "kit.page()" in src
     assert 'kit.header(title, view=view, stale=False)' in src
-    for token in ("T.PAGE", "T.SHELL", "T.FONT_HTML", "add_head_html"):
-        assert token not in src, f"{token} is a page-scoped surface value"
+    assert "add_head_html" not in src
+    # Task 5 deleted those three from the module, so ``"T.PAGE" not in src``
+    # can no longer fail whatever this function does. The attribute check can
+    # — the positive form ``test_theme.py:541`` uses for ``[rotation]``.
+    from pages import terminal_theme as T
+    for name in ("PAGE", "SHELL", "FONT_HTML"):
+        assert not hasattr(T, name), \
+            f"terminal_theme.{name} is a page-scoped surface value"
 
 
 def test_the_stamp_defaults_to_the_analysis_and_a_screen_may_name_its_own():

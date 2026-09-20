@@ -1,54 +1,34 @@
-"""The Signal Desk terminal look — a Tailwind token vocabulary.
+"""The Signal Desk's DATA colours — a finite Tailwind palette.
 
-The design language for the Trade Analyzer's four screens (Overview, Evidence,
-Rank board, Trade plan). Tokens are Tailwind class strings applied with
-``.classes(...)``, per the repo's Tailwind-first standard — the source design
-was authored in inline styles, which `test_no_inline_style.py` forbids here.
+What a reading on the Trade Analyzer's four screens (Overview, Evidence, Rank
+Board, Trade Plan) is coloured BY: sign, state, chip and bar. Tokens are
+Tailwind class strings applied with ``.classes(...)``, per the repo's
+Tailwind-first standard — the source design was authored in inline styles,
+which `test_no_inline_style.py` forbids here.
 
-**Not config-driven, deliberately.** This is a page-scoped language with a fixed
-palette, the same category as `sector_heat`'s ramps and `rotation_view`'s
-quadrant hues: the numbers are chosen against each other, not knobs anyone would
-turn independently. The app-wide palette in `config/theme.toml` is unaffected.
-
-**Mono is reserved for numerics.** JetBrains Mono renders numbers and nothing
-else, so any monospaced text on screen IS a number — which is what makes a dense
-table scannable. Manrope carries every label and sentence. Use `MONO` only on
-values.
+**Not config-driven, deliberately.** These are a fixed encoding, the same
+category as `sector_heat`'s ramps and `rotation_view`'s quadrant hues: the
+numbers are chosen against each other, not knobs anyone would turn
+independently. The app-wide palette in `config/theme.toml` is unaffected.
 
 **One bar language.** The percentile rail, the investor factors and the factor
 contributions all read against a CENTRED axis, so a bar's meaning is the same
 wherever it appears: distance from the middle, coloured by side.
+
+⚠ **The SURFACE half retired on 2026-09-20** — ``FONT_HTML``, ``PAGE``,
+``SHELL``, ``PANEL``, ``MONO``, ``EYEBROW``, ``PANEL_TITLE``, ``SCREEN_TITLE``,
+``SUBTLE``, ``NOTE``, ``BODY``, ``LABEL``, ``VALUE``, ``HAIRLINE``, ``RULE``,
+``BTN_PRIMARY``, ``BTN_GHOST`` and ``TOOLTIP``. Between them they were a second
+ground, a second neutral ladder, a second type face, a second panel and a
+second button set, which is what made these four screens the app's seventh
+visual family. Their colours are the app's now (``pages.options.theme``); the
+type GEOMETRY they also carried lives on ``trade_shell``, which is where this
+family's other shared widget vocabulary already was. ``MONO`` was replaced by
+nothing: the app sets ``font-variant-numeric: tabular-nums`` on ``body``, so
+the columns it marked align on tabular figures rather than on a monospaced
+face — and its JetBrains Mono stopped loading with ``FONT_HTML``, so every
+numeric it marked had been falling back to the system mono anyway.
 """
-
-# (``FONT_HTML`` lived here until 2026-09-20. It loaded Manrope 400-800 and
-# JetBrains Mono 400/500/700 on every Signal Desk page build, two web fonts
-# beside the app's own IBM Plex. The app loads ONE font, app-wide, and a font
-# link is the one thing the ui-kit guard's docstring allows no reason for.)
-
-# ── ground + panels ─────────────────────────────────────────────────────────
-# PAGE mirrors the app-wide `theme.PAGE` STRUCTURALLY — a rounded, bordered
-# frame with the same 18/20/22 padding — so a Signal Desk screen sits in the
-# shell exactly like every other page. Only the palette differs. The first
-# version was a full-bleed `min-h-screen` wrapper with its own max-width, which
-# made these four screens the only ones in the app without the frame.
-PAGE = ("w-full rounded-[14px] border border-[#1c2740] p-[18px_20px_22px] "
-        "text-[#e6edf7] font-[Manrope,system-ui,sans-serif] "
-        "bg-[radial-gradient(130%_90%_at_50%_-20%,#101a2e_0%,#0b1220_55%,#080d17_100%)]")
-SHELL = "w-full flex flex-col gap-[18px]"
-
-PANEL = ("flex flex-col rounded-xl border border-[#1c2740] "
-         "bg-[linear-gradient(180deg,#0e1626,#0b1220)] px-5 pt-[19px] pb-5")
-
-# ── type ────────────────────────────────────────────────────────────────────
-MONO = "font-['JetBrains_Mono',ui-monospace,monospace]"
-EYEBROW = "text-[9.5px] font-bold tracking-[0.14em] text-[#56678a] whitespace-nowrap"
-PANEL_TITLE = "text-base font-bold tracking-[-0.01em] text-[#f2f6fc] whitespace-nowrap"
-SCREEN_TITLE = "text-[19px] font-extrabold tracking-[-0.015em] text-[#f2f6fc]"
-SUBTLE = "text-[11px] text-[#56678a]"
-NOTE = "text-[11.5px] leading-[1.55] text-[#7d8db0]"
-BODY = "text-[13px] leading-[1.6] text-[#a8b6cf]"
-LABEL = "text-[12px] text-[#a8b6cf]"
-VALUE = f"{MONO} text-[12.5px] text-[#cfdaee] whitespace-nowrap"
 
 # ── semantic colour, as a FINITE set ────────────────────────────────────────
 # Data-driven colour maps to one of these, never to a runtime-built class: the
@@ -57,11 +37,17 @@ POS = "text-[#34d399]"
 NEG = "text-[#f87171]"
 WARN = "text-[#fbbf24]"
 DIM = "text-[#7d8db0]"
+# "No reading" — deliberately the dimmest thing on the screen, and measured at
+# 2.7:1 on the app's card. It is a DATA colour (absence), not a muted label, so
+# it is not the neutral ladder's bottom rung and does not take the app's.
 OFF = "text-[#4a5b7d]"
 STATE_TEXT = f"{POS} {NEG} {WARN} {DIM} {OFF}"      # for .classes(remove=…)
 
 BAR_POS = "bg-[#34d399]"
 BAR_NEG = "bg-[#f87171]"
+# The Trade Plan's two card accents — a plan and a refusal — were the POS and
+# WARN hexes written out beside these. A bar is a bar; the set is finite.
+BAR_WARN = "bg-[#fbbf24]"
 BAR_DIM = "bg-[#4a5b7d]"
 
 # Chips: (border, background, text) as one class string per state.
@@ -77,25 +63,14 @@ CALLOUT = ("flex gap-[11px] rounded-[10px] border border-[#4a3c17] "
 CALLOUT_TEXT = "text-[12px] leading-[1.6] text-[#cbb98a]"
 
 # ── controls ────────────────────────────────────────────────────────────────
-BTN_PRIMARY = ("rounded-[9px] px-[22px] py-3 text-[13.5px] font-bold "
-               "normal-case bg-[#6366f1] text-white "
-               "shadow-[0_6px_20px_rgba(99,102,241,0.32)] hover:bg-[#7c7ff5]")
-BTN_GHOST = ("rounded-[9px] border border-[#2b3a57] px-[22px] py-3 "
-             "text-[13.5px] font-semibold normal-case bg-transparent "
-             "text-[#cfdaee] hover:border-[#4a5b7d] hover:text-[#f2f6fc]")
+# The Rank Board's Hide gated toggle, and the one control on these four screens
+# that ``kit.button`` cannot express: it carries a SELECTED STATE and a label
+# that changes with it ("Hide gated" ⇄ "Showing ungated only"), which none of
+# the kit's four kinds encode. It is the guard's one permanent Phase 5 entry.
 FILTER_ON = ("rounded-lg border border-[#3a4a72] bg-[#151f36] px-[14px] py-2 "
              "text-[12px] font-semibold normal-case text-[#e6edf7]")
 FILTER_OFF = ("rounded-lg border border-[#22304c] bg-transparent px-[14px] "
               "py-2 text-[12px] font-semibold normal-case text-[#7d8db0]")
-
-# Per-tile hover explanations (`pages/trade_help`). `whitespace-pre-line` is
-# load-bearing: the texts are written as short paragraphs separated by blank
-# lines, and without it they collapse into one wall of prose.
-TOOLTIP = ("max-w-[340px] whitespace-pre-line text-[11.5px] leading-[1.6] "
-           "text-left")
-
-HAIRLINE = "border-b border-[#131d31]"
-RULE = "border-b border-[#1c2740]"
 
 # Every table sits in this wrapper over a min-width grid, so columns scroll
 # rather than collide or clip — the design's rule, and the reason a 9-column

@@ -10,8 +10,8 @@ question is which side the model prefers today, and that is a comparison, so the
 two lists belong on one screen rather than one above the fold and one below.
 
 Every table sits in an `overflow-x: auto` wrapper over a `min-width` grid, so
-columns scroll rather than collide or clip at any width — nine columns of mono
-do not fit a narrow window, and clipping the gates column would hide exactly the
+columns scroll rather than collide or clip at any width — nine dense columns do
+not fit a narrow window, and clipping the gates column would hide exactly the
 thing the board exists to surface. That wrapper is what makes the two-up layout
 safe: a pane narrower than the table scrolls itself. It only works because the
 panel carries `min-w-0` — a grid item's default `min-width: auto` would refuse
@@ -35,8 +35,18 @@ from pages import trade_help as th
 from pages import trade_shell as sh
 from pages import trade_terminal as tt
 from pages import ui_kit as kit
+from pages.options import theme
 from pages.ui_guard import guard
 from pages.view_watch import watch_view
+
+_P = theme.THEME["palette"]
+# The app's neutral ladder, which replaced the rungs this page spelled out by
+# hand - the same collapse Task 4 made on Overview and Evidence, finished here
+# because the NAMED rungs those hexes sat beside (``terminal_theme``'s surface
+# half) retired on 2026-09-20 and leaving these would ship one family speaking
+# two greys. ``theme.LABEL`` is a reading, ``theme.MUTED`` what qualifies it,
+# ``_FAINT`` the dimmest captions - the column heads.
+_FAINT = f"text-[{_P['icon']}]"
 
 VIEW = "trade:rank_board"
 BOOK_VIEW = "trade:model_book"
@@ -52,9 +62,13 @@ REBUILD_TIMEOUT_SEC = sh.ANALYZE_TIMEOUT_SEC
 
 # Every fixed column is its MEASURED worst case plus ~10px, so the eight of
 # them plus a one-line GATES chip fit a half-width pane without scrolling. The
-# widths were taken from the rendered page in its own fonts (Manrope 12px /
-# JetBrains Mono 12.5px), not estimated — measured need, in order:
-# 46 38 45 56 30 40 96 89. Both wide columns are CLOSED vocabularies, which is
+# widths were taken from the rendered page, not estimated — measured need, in
+# order: 46 38 45 56 30 40 96 89. ⚠ That measurement was taken in Manrope 12px
+# and JetBrains Mono 12.5px, neither of which loads any more (2026-09-20): the
+# page wears IBM Plex Sans with the app's tabular figures. Re-measured against
+# it rather than assumed — no cell overflows its track and every column head
+# still sits on one 14px line, so the widths hold. A vocabulary that grows
+# needs them re-measured AGAIN, in IBM Plex this time. Both wide columns are CLOSED vocabularies, which is
 # what makes sizing them to content safe: DEALER's longest is `gamma_cascade`
 # (96px) out of six labels plus the page's own "not collected", and IV's is
 # `128 · collapsing` (89px) out of four states. A vocabulary that grows needs
@@ -322,21 +336,21 @@ def _build(state, refs):
         ui.space()
         filters = ui.row().classes("gap-2")
 
-    status = ui.label("").classes("text-[13px] text-[#fbbf24]")
+    status = ui.label("").classes(f"text-[13px] {T.WARN}")
     # The exposure warning is the app's one notice row. It is rebuilt rather
     # than retitled because ``kit.notice`` owns its own label — and it is the
     # loudest thing this board has to say about itself, so it must read as a
     # notice here exactly as it would anywhere else.
     exposure = ui.column().classes("w-full gap-2")
-    gates = ui.label("").classes(f"{T.NOTE}")
+    gates = ui.label("").classes(sh.NOTE)
 
     tables = ui.element("div").classes(f"w-full {_BOARD_GRID} gap-4")
 
     book_panel = sh.panel("Model paper book",
                           help=th.help_for("paper_book"))
     with book_panel:
-        book_summary = ui.label("").classes("text-[13px] text-[#cfdaee]")
-        ui.label(book_note()).classes(T.NOTE)
+        book_summary = ui.label("").classes(f"text-[13px] {theme.LABEL}")
+        ui.label(book_note()).classes(sh.NOTE)
         book_wrap = ui.column().classes("w-full gap-0")
 
     def _paint(_a=None):
@@ -370,7 +384,9 @@ def _build(state, refs):
         rows = board_rows(b)
         tables.clear()
         with tables:
-            for side, accent in (("long", "bg-[#34d399]"), ("short", "bg-[#f87171]")):
+            # The side accent IS the sign: the finite bar palette, not a
+            # restatement of two of its hexes.
+            for side, accent in (("long", T.BAR_POS), ("short", T.BAR_NEG)):
                 _table(b, side, accent, rows, state["hide_gated"])
 
         bk = state["book"] or {}
@@ -418,22 +434,21 @@ def _table(board, side, accent, rows, hide_gated):
         picked = [r for r in picked if r["gate"] == "clear"]
     metric_head = metric_cell(None, side)[0]
 
-    with ui.column().classes(f"{T.PANEL} w-full gap-[14px] min-w-0 pb-3"):
+    with ui.column().classes(f"{theme.CARD} w-full gap-[14px] min-w-0 pb-3"):
         with ui.row().classes("items-baseline gap-3 flex-wrap"):
             ui.element("div").classes(f"w-[3px] h-[15px] rounded-[2px] {accent}")
             ui.label(head["title"]).classes(
-                "text-[15px] font-bold tracking-[-0.01em] text-[#f2f6fc]")
+                f"text-[15px] font-bold tracking-[-0.01em] {theme.LABEL}")
         if head["note"]:
             with ui.row().classes(f"{T.CALLOUT} w-full"):
-                ui.label("⚠").classes("text-[13px] text-[#fbbf24]")
+                ui.label("⚠").classes(f"text-[13px] {T.WARN}")
                 ui.label(head["note"]).classes(T.CALLOUT_TEXT)
 
         with ui.element("div").classes(T.SCROLL_X):
             with ui.column().classes(f"{_TABLE_MIN} gap-0"):
                 with ui.element("div").classes(
-                        f"grid {_COLS} gap-x-3 px-[6px] pb-[9px] {T.RULE} "
-                        "text-[9.5px] font-bold tracking-[0.13em] "
-                        "text-[#56678a]"):
+                        f"grid {_COLS} gap-x-3 px-[6px] pb-[9px] {sh.RULE} "
+                        f"text-[9.5px] font-bold tracking-[0.13em] {_FAINT}"):
                     for i, h in enumerate(_HEAD):
                         label = metric_head if h is None else h
                         with ui.label(label).classes(
@@ -441,7 +456,7 @@ def _table(board, side, accent, rows, hide_gated):
                             sh.tip(th.column_help(label))
                 if not picked:
                     ui.label("No candidates on this side today.").classes(
-                        f"{T.NOTE} pt-3")
+                        f"{sh.NOTE} pt-3")
                 for r in picked:
                     _row(r, side)
 
@@ -449,22 +464,22 @@ def _table(board, side, accent, rows, hide_gated):
 def _row(r, side):
     with ui.element("div").classes(
             f"grid {_COLS} gap-x-3 items-center px-[6px] py-[11px] "
-            f"{T.HAIRLINE}"):
+            f"{sh.HAIRLINE}"):
         ui.label(r["symbol"]).classes(
-            f"{T.MONO} text-[13.5px] font-bold text-[#f2f6fc]")
-        ui.label(r["pctl"]).classes(f"{T.VALUE} text-right")
+            f"text-[13.5px] font-bold {theme.LABEL}")
+        ui.label(r["pctl"]).classes(f"{sh.VALUE} text-right")
         ui.label(r["score"]).classes(
-            f"{T.MONO} text-[12.5px] text-right {r['score_class']}")
+            f"text-[12.5px] text-right {r['score_class']}")
         ui.label(r["exp"]).classes(
-            f"{T.MONO} text-[12.5px] text-right {r['exp_class']}")
+            f"text-[12.5px] text-right {r['exp_class']}")
         ui.label(r["hit"]).classes(
-            f"{T.MONO} text-[12.5px] text-right text-[#8b9bb4]")
+            f"text-[12.5px] text-right {theme.MUTED}")
         ui.label(metric_cell(r, side)[1]).classes(
-            f"{T.MONO} text-[12.5px] text-right text-[#a8b6cf]")
+            f"text-[12.5px] text-right {theme.MUTED}")
         ui.label(r["dealer"]).classes(
             f"text-[12px] whitespace-nowrap {r['dealer_class']}")
         with ui.row().classes("items-baseline gap-[7px] min-w-0"):
-            ui.label(r["iv"]).classes(f"{T.MONO} text-[12.5px] text-[#cfdaee]")
+            ui.label(r["iv"]).classes(f"text-[12.5px] {theme.LABEL}")
             if r["iv_state"]:
                 ui.label("· " + r["iv_state"]).classes(
                     f"text-[11.5px] {r['iv_class']}")
@@ -480,25 +495,25 @@ def _book_table(rows):
     with ui.element("div").classes(T.SCROLL_X):
         with ui.column().classes("min-w-[520px] gap-0"):
             with ui.element("div").classes(
-                    f"grid {_BOOK_COLS} gap-x-3 px-[6px] pb-[9px] {T.RULE} "
-                    "text-[9.5px] font-bold tracking-[0.13em] text-[#56678a]"):
+                    f"grid {_BOOK_COLS} gap-x-3 px-[6px] pb-[9px] {sh.RULE} "
+                    f"text-[9.5px] font-bold tracking-[0.13em] {_FAINT}"):
                 for h in ("SYMBOL", "SIDE", "AS", "OPENED", "P&L", "STATUS"):
                     with ui.label(h):
                         sh.tip(th.column_help(h))
             if not rows:
                 ui.label("The book opens positions from the pools above.") \
-                    .classes(f"{T.NOTE} pt-3")
+                    .classes(f"{sh.NOTE} pt-3")
             for r in rows:
                 with ui.element("div").classes(
                         f"grid {_BOOK_COLS} gap-x-3 items-center px-[6px] "
-                        f"py-[9px] {T.HAIRLINE}"):
+                        f"py-[9px] {sh.HAIRLINE}"):
                     ui.label(r["symbol"]).classes(
-                        f"{T.MONO} text-[13px] font-bold text-[#f2f6fc]")
-                    ui.label(r["side"]).classes("text-[12px] text-[#a8b6cf]")
+                        f"text-[13px] font-bold {theme.LABEL}")
+                    ui.label(r["side"]).classes(f"text-[12px] {theme.MUTED}")
                     ui.label(r["expression"]).classes(
-                        "text-[12px] text-[#7d8db0]")
+                        f"text-[12px] {theme.MUTED}")
                     ui.label(r["opened_on"]).classes(
-                        f"{T.MONO} text-[12px] text-[#a8b6cf]")
+                        f"text-[12px] {theme.MUTED}")
                     ui.label(r["pnl"]).classes(
-                        f"{T.MONO} text-[12.5px] {r['pnl_class']}")
-                    ui.label(r["status"]).classes("text-[12px] text-[#7d8db0]")
+                        f"text-[12.5px] {r['pnl_class']}")
+                    ui.label(r["status"]).classes(f"text-[12px] {theme.MUTED}")
