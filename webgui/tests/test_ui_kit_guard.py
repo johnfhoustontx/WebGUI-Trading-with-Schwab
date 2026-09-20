@@ -41,7 +41,6 @@ ALLOWED = {
     "sentiment.py": {"add_head_html": 1, "button": 3, "notify": 1},
     "sentiment_bullbear.py": {"add_head_html": 1, "button": 1, "notify": 2},
     "sentiment_momentum.py": {"add_head_html": 1, "button": 3, "notify": 1, "table": 1},
-    "sentiment_rotation.py": {"add_head_html": 1, "button": 1, "notify": 1},
     "sentiment_sectors.py": {"add_head_html": 1, "button": 3, "notify": 1},
     "settings.py": {"button": 7, "dialog": 1, "notify": 1},
     "status.py": {"button": 3, "notify": 4},
