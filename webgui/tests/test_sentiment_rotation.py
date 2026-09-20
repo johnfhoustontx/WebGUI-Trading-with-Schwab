@@ -49,13 +49,21 @@ def test_render_graceful_empty():
 
 
 # ── the RRG on the page kit (Phase 3, Task 1) ────────────────────────────────
-def _rrg_render(monkeypatch=None):
-    """Render the RRG page in a slot context, as test_render_graceful_empty does."""
+def _rrg_render():
+    """Render the RRG page in a slot context and return ONLY the elements this
+    render built.
+
+    The auto-index client is shared by every test in the module, so a plain
+    ``elements.values()`` also hands back the spinner some OTHER page's kit
+    region left behind - and the scrim test below then passes whatever this
+    page did. Measured: with the pre-migration page restored, that spelling
+    still went green off ``test_render_graceful_empty``'s rotation render."""
     from nicegui import ui
     from pages import sentiment_rrg
+    before = set(ui.context.client.elements)
     with ui.card():
         sentiment_rrg.render()
-    return list(ui.context.client.elements.values())
+    return [e for i, e in ui.context.client.elements.items() if i not in before]
 
 
 def test_the_scrim_survives_the_repaint_that_used_to_delete_it():
