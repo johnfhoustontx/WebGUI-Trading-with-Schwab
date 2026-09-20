@@ -1007,9 +1007,21 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   loaded the heatmap did not draw **even with the spot overlay set to a plain line**.
   Disabling `navigator`/`scrollbar`/`rangeSelector` did NOT help, and neither did
   pre-seeding every series at element creation (the trick that DOES work for
-  `colorAxis`). **So: any element that repaints via `el.options = …; el.update()` can
-  never load the stock module** — which rules out the `candlestick`/`ohlc`/`flags`
-  series types on it. Draw bars from CORE series instead: a `columnrange` body +
+  `colorAxis`). **So: a PLAIN chart that repaints via `el.options = …;
+  el.update()` must not load the stock module** — which rules out the
+  `candlestick`/`ohlc`/`flags` series types on it. ⚠ **That sentence read "any
+  element … can never" until 2026-09-20, and it was broader than the truth** — the
+  same paragraph's own mechanism says the patched `Chart.update` throws *"on a chart
+  that lacks the stock scaffolding"*, and a `type="stockChart"` element HAS it.
+  Measured in the harness on the bundled Highcharts 12, on the Expected Move page
+  (`extras=["stock"]` + `type="stockChart"` + in-place `update()`, which the blanket
+  wording forbade): `update()` did **not** throw and all three series survived —
+  1 → 3, candlestick + two splines. A plain `Highcharts.chart` built on that same
+  page, with the stock module loaded, also updated cleanly 1 → 2 series. ⚠ **That
+  does NOT clear the gamma case**, which is the one that actually failed live: its
+  heatmap carries a `colorAxis` and the note below records that pre-seeding every
+  series did not rescue it. Treat the gamma prohibition as standing and unmeasured
+  until someone repeats this probe on a heatmap. Draw bars from CORE series instead: a `columnrange` body +
   an `errorbar` wick, each point carrying its own `color` (see
   `gamma.candle_points` — one series then holds both up and down bars). `columnrange`
   /`errorbar` need **no `extras` at all** (the `more` module auto-loads, same as
