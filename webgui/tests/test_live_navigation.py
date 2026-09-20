@@ -378,11 +378,14 @@ def test_the_private_desk_still_dresses_a_position_row_as_a_link(monkeypatch):
 
 def test_the_flow_tape_hands_off_to_the_published_gamma_screen(monkeypatch,
                                                                published):
-    """``/options/flow``'s row click is ``handoff.send_to_gamma``, which both
-    stashes the symbol and navigates. ⚠ The published Gamma screen PINS its
-    symbol, so the stash cannot be honoured there and the visitor lands on the
-    pinned board — the page says which symbol it is showing, and a 404 is the
-    worse of the two. Recorded here so the trade-off cannot change silently."""
+    """``/options/flow``'s SYMBOL CELL hands off through ``handoff.
+    send_to_gamma``, which both stashes the symbol and navigates. (⚠ It was the
+    ROW click until 2026-09-19; the page-kit standard links the cell that names
+    the row and leaves the row alone. The hand-off itself is unchanged, which is
+    why this test is.) ⚠ The published Gamma screen PINS its symbol, so the
+    stash cannot be honoured there and the visitor lands on the pinned board —
+    the page says which symbol it is showing, and a 404 is the worse of the
+    two. Recorded here so the trade-off cannot change silently."""
     from pages.options import handoff
 
     went = []
@@ -500,3 +503,82 @@ def test_the_published_board_draws_no_dossier_link(monkeypatch, published):
     shell = __import__("shell")
     shell.navigate_to(matrix.dossier_route("MU"))
     assert went == []
+
+
+# --- Flow Alerts opens a symbol's Dealer Positioning ------------------------
+# The twin of the board's dossier link, and it needs its own driving test for
+# the same reason: ``flow._open_gamma`` is the ONLY thing between a string the
+# browser emitted and a symbol that reaches a Schwab chain fetch and a Redis
+# key name (``cache:options:gamma_pub:<SYMBOL>``). A source grep over
+# ``render`` cannot see whether the re-check is wired, or whether it works.
+#
+# ⚠ Unlike ``/symbol``, ``/options/gamma`` IS published (as ``/gamma``), so
+# this link is drawn on BOTH origins - exactly as the row click was. The
+# origin-conditional half is pinned by ``test_flow_page.py``'s slot test.
+
+_FLOW_ALERT = {"type": "crossover", "side": "calls_over", "symbol": "SPY",
+               "ts": 1754750000, "call_prem": 1200000.0, "put_prem": 400000.0,
+               "id": "SPY|crossover|calls_over|1754750000",
+               "text": "SPY - call premium overtook puts"}
+
+
+def _flow_table(monkeypatch, alerts):
+    """Render the tape over ``alerts`` and return its table element."""
+    import bus_client
+    from nicegui import ui
+    from pages.options import flow
+
+    payload = {"date": "2026-09-19", "alerts": alerts}
+    monkeypatch.setattr(bus_client, "read_full", lambda v: (payload, 1))
+    monkeypatch.setattr(bus_client, "read", lambda v: payload)
+    monkeypatch.setattr(bus_client, "read_version", lambda v: 1)
+    before = set(ui.context.client.elements)
+    flow.render()
+    tables = [e for key, e in ui.context.client.elements.items()
+              if key not in before and isinstance(e, ui.table)]
+    assert len(tables) == 1
+    return tables[0]
+
+
+def _gamma_listeners(table):
+    from pages.options import flow
+    return [lst for lst in table._event_listeners.values()
+            if lst.type == flow.GAMMA_EVENT]
+
+
+def test_the_flow_tapes_symbol_opens_dealer_positioning(monkeypatch):
+    """⚠ THE ONE THAT PROTECTS THE FEATURE: the symbol cell is a link, the
+    handler is wired, and the click both stashes the symbol and navigates."""
+    from nicegui import ui
+    from pages.options import flow, handoff
+
+    table = _flow_table(monkeypatch, [_FLOW_ALERT])
+    assert table.slots["body-cell-symbol"].template == \
+        flow.gamma_symbol_slot(linked=True)
+
+    went = []
+    monkeypatch.setattr(ui.navigate, "to", lambda *a, **k: went.append(a[0]))
+    (listener,) = _gamma_listeners(table)
+    listener.handler(_Evt("SPY"))
+    assert went == ["/options/gamma"]
+    # ...and the destination page is told which symbol (one-shot, so reading it
+    # here also leaves no stash behind to hijack a later test's gamma build).
+    assert handoff.take_pending_gamma() == "SPY"
+
+
+def test_the_flow_tape_refuses_a_symbol_the_allow_list_refuses(monkeypatch):
+    """The handler re-checks, because the event carries whatever the browser
+    sent - and this symbol reaches a chain fetch and a Redis key name, not just
+    a URL. Nothing navigates and nothing is stashed."""
+    from nicegui import ui
+    from pages.options import handoff
+
+    table = _flow_table(monkeypatch, [_FLOW_ALERT])
+    went = []
+    monkeypatch.setattr(ui.navigate, "to", lambda *a, **k: went.append(a[0]))
+    (listener,) = _gamma_listeners(table)
+    for bad in ("SPY&x=1", "../settings", "SPY QQQ", "TOOLONGSYM", "<b>", "",
+                None, {"symbol": "SPY"}):
+        listener.handler(_Evt(bad))
+    assert went == []
+    assert handoff.take_pending_gamma() is None

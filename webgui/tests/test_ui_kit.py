@@ -34,6 +34,22 @@ def test_a_naive_stamp_is_utc_not_local():
         "Updated 10:42 AM CT"
 
 
+def test_a_winter_stamp_reads_central_STANDARD_time():
+    """⚠ THE ONE THAT NEEDS A JANUARY DATE, AND THE ONLY ONE THAT HAS ONE.
+
+    Every other fixture in this file is a September date, i.e. CDT (UTC-5). So
+    a ``CT`` replaced by a fixed ``-5`` offset satisfies the whole suite while
+    being wrong for four months of the year — measured: that swap passes all
+    5207 tests without this test, and fails only this one with it. In January
+    Central is CST (UTC-6), so 22:03 UTC is 4:03 PM, not the 5:03 PM a fixed
+    offset gives. The stamp is on every page and on both public origins, so the
+    failure would be an hour late everywhere, all winter, with nothing red.
+    """
+    jan = dt.datetime(2026, 1, 15, 22, 10, tzinfo=UTC)
+    assert kit.freshness("2026-01-15T22:03:00+00:00", jan) == \
+        ("Updated 4:03 PM CT", "fresh")
+
+
 def test_a_stamp_from_another_day_names_the_day():
     assert kit.freshness("2026-09-17T20:15:00+00:00", _utc(18, 15, 0)) == \
         ("Updated Sep 17 3:15 PM CT", "fresh")
