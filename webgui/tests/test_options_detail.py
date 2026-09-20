@@ -1188,3 +1188,41 @@ def test_a_raising_lookup_shows_the_gone_line_instead_of_propagating(monkeypatch
 def test_the_candidate_source_docstring_says_gone_is_terminal():
     doc = detail._Handle.set_candidate_source.__doc__
     assert "re-click" in doc and "terminal" in doc.lower()
+
+
+# -- the action footer: where a selected row's buttons live -------------------
+_FOOTER_SIG = {"symbol": "SPY", "type": "PCS", "expiration": "2026-10-17",
+               "short_strike": 560, "long_strike": 555, "credit": 1.42}
+
+
+def _panel():
+    from nicegui import ui
+
+    with ui.row():
+        return detail.render()
+
+
+def test_the_footer_is_hidden_until_a_row_is_shown():
+    h = _panel()
+    assert not h.actions.visible
+    h.update(_FOOTER_SIG)
+    assert h.actions.visible
+    h.clear()
+    assert not h.actions.visible
+
+
+def test_collapsing_hides_the_footer_and_expanding_restores_it():
+    h = _panel()
+    h.update(_FOOTER_SIG)
+    h.collapse()
+    assert not h.actions.visible
+    h.open()
+    assert h.actions.visible
+
+
+def test_the_footer_sits_below_the_body_and_right_aligns():
+    h = _panel()
+    col = h.actions.parent_slot.parent
+    kids = list(col.default_slot.children)
+    assert kids.index(h._body) < kids.index(h.actions)
+    assert "justify-end" in h.actions.classes

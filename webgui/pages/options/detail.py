@@ -42,7 +42,7 @@ from ..fmt import num
 from ..ui_guard import is_deleted_error
 from . import checks, checks_feed, ev, svg
 from .theme import (TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL,
-                    TILE_3D, CARD, EYEBROW, MUTED)
+                    TILE_3D, CARD, EYEBROW, MUTED, THEME)
 
 # Semantic state-color class tokens (Tailwind text-[...] arbitrary values). Names
 # kept (many refs) but the VALUES are now class strings applied via .classes().
@@ -902,7 +902,7 @@ def _greek(label, value, fmt="{:.3f}", color=None):
 
 class _Handle:
     def __init__(self, state, header, sig_title, sig_sub, gauge_el, gauge_caption,
-                 flag_box, flag_badge, body):
+                 flag_box, flag_badge, body, actions):
         self._state = state          # shared with the collapse toggle
         self._header = header        # persistent header (title + gauge + flags)
         self._sig_title = sig_title
@@ -912,6 +912,10 @@ class _Handle:
         self._flag_box = flag_box    # rebuilt per selection; empty when clean
         self._flag_badge = flag_badge  # floats on the toggle; survives collapse
         self._body = body            # cleared + rebuilt per selection
+        # The selected row's action footer. PUBLIC: a page builds its buttons
+        # into it ONCE (``with handle.actions:``) and they persist across
+        # selections - the body around them is what a repaint clears.
+        self.actions = actions
         # The checklist: the candidate it judges (None on a position page, or
         # before a selection), the box it paints into (top of the body), and a
         # sequence number that drops an off-loop read answering an older paint.
@@ -1057,6 +1061,7 @@ class _Handle:
         self._candidate, self._checks_box, self._checks_shown = None, None, None
         self._checks_seq += 1
         self._header.set_visibility(False)
+        self.actions.set_visibility(False)
         self._flag_box.clear()
         self._set_flag_badge(0)
         self._body.clear()
@@ -1074,6 +1079,7 @@ class _Handle:
         s = signal
         self._state["has_signal"] = True
         self._header.set_visibility(self._state["open"])
+        self.actions.set_visibility(self._state["open"])
         self._sig_title.text = _signal_title(s)
         self._sig_sub.text = " · ".join(
             x for x in (s.get("trade_type", ""), dte_text(s)) if x and x != "—")
@@ -1160,6 +1166,13 @@ def render(width: int = 360):
         body = ui.column().classes("w-full gap-2")
         with body:
             ui.label(_PLACEHOLDER).classes("opacity-60")
+        # The selected row's actions (the 2026-09-19 standard): danger leftmost
+        # (a caller adds ``mr-auto`` to it), primary rightmost. Pages build their
+        # buttons into it ONCE; it shows only while a row is shown and open.
+        actions = ui.row().classes(
+            "w-full items-center justify-end gap-2 flex-wrap pt-2 "
+            f"border-t border-[{THEME['palette']['card_border']}]")
+    actions.set_visibility(False)
 
     state = {"open": True, "has_signal": False}
 
@@ -1168,6 +1181,7 @@ def render(width: int = 360):
         title.visible = state["open"]
         body.visible = state["open"]
         header.visible = state["open"] and state["has_signal"]
+        actions.visible = state["open"] and state["has_signal"]
         if state["open"]:
             col.classes(remove="w-11", add=expanded_w)
             toggle_btn.props("icon=last_page")
@@ -1179,6 +1193,6 @@ def render(width: int = 360):
 
     toggle_btn.on_click(lambda: set_open(not state["open"]))
     handle = _Handle(state, header, sig_title, sig_sub, gauge_el, gauge_caption,
-                     flag_box, flag_badge, body)
+                     flag_box, flag_badge, body, actions)
     handle._set_open = set_open
     return handle
