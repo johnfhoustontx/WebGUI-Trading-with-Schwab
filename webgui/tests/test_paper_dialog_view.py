@@ -229,6 +229,10 @@ def _qty(dlg):
 def test_a_second_click_sends_nothing(monkeypatch):
     sent = []
     dlg, notes = _open_dialog(monkeypatch, lambda domain, cmd: sent.append((domain, cmd)))
+    # It really OPENED: without this, the closed-check below would also pass on a
+    # dialog that was never shown (a closed dialog and an unopened one both read
+    # value False), which is the one thing the old fake's `closed` flag caught.
+    assert dlg.dialog.value is True
     _qty(dlg).value = 2.0
     asyncio.run(dlg.run())
     asyncio.run(dlg.run())         # the queued double click
