@@ -862,3 +862,259 @@ def test_intraday_figures_render_in_central_time():
     assert "12:00" not in name            # NOT the UTC time-of-day
 
 
+# ── the Market Regime Console on the page kit (Phases 3 & 4, Task 6) ─────────
+# The page frame, the header line, the three buttons, the wait region and the
+# status line. The console's CARDS — their hues, their glows, their hairline
+# grids — are untouched: they are the data, and the kit takes only the chrome.
+
+
+def _buttons(card):
+    from nicegui import ui
+    return [e for e in card.descendants() if isinstance(e, ui.button)]
+
+
+def _button(card, text):
+    """The button with exactly this label. Named rather than positional: the
+    kit puts Refresh in the header's action row and this page holds three."""
+    found = [b for b in _buttons(card) if str(b.text) == text]
+    assert len(found) == 1, f"expected one {text} button, found {len(found)}"
+    return found[0]
+
+
+def _scrim(card):
+    """The region's wait scrim — the element the kit hangs its spinner in, and
+    the one that carries the shown/hidden state (``busy.build_busy`` calls
+    ``set_visibility`` on the scrim, not on the spinner inside it).
+
+    Counted rather than taken first, and scoped to THIS render.
+    ``ui.context.client.elements`` is the auto-index client the whole module
+    shares, so a page-wide search would hand back a spinner some earlier test's
+    render left behind and the assertions below would pass whatever this page
+    did. ``card.descendants()`` walks the live tree under one render only."""
+    from nicegui import ui
+    found = [e for e in card.descendants() if isinstance(e, ui.spinner)]
+    assert len(found) == 1, f"expected the region's one spinner, found {len(found)}"
+    return found[0].parent_slot.parent
+
+
+def _click(button):
+    """Fire a button's click handler. NiceGUI wraps an ``on_click`` in a one-arg
+    lambda taking the click args, so the stored handler is not the one passed."""
+    next(listener.handler for listener in button._event_listeners.values()
+         if listener.type == "click")(None)
+
+
+def _status_text(card):
+    """The page's one status line, by the classes ``kit.status_line`` wears.
+
+    Located by ROLE rather than by position, so moving it from the foot of the
+    page to under the header (which this migration does) cannot silently pick a
+    different label."""
+    from nicegui import ui
+    from pages.options import theme as _theme
+    wanted = set(_theme.EYEBROW.split())
+    found = [e.text for e in card.descendants()
+             if isinstance(e, ui.label) and wanted <= set(e._classes)
+             and "Proxy:" in (e.text or "")]
+    assert len(found) == 1, f"expected one status line, found {found}"
+    return found[0]
+
+
+def test_the_console_frame_is_the_kit_and_carries_no_surface_of_its_own():
+    """``stale=True`` is honest here: ``sentiment:composite`` republishes every
+    120 s in session (``sentiment_svc.scheduler.REFRESH_INTERVAL_SEC``) and the
+    view is in neither ``alerts.RTH_ONLY_VIEWS`` nor ``alerts.STALE_OVERRIDES``,
+    so the nav badge's own 600 s / 45 min thresholds are the right ones."""
+    import inspect
+    src = inspect.getsource(S)
+    assert "kit.page()" in src
+    assert 'kit.header("Sentiment", view=VIEW, stale=True)' in src
+    assert "kit.region(" in src
+    # The page's own display face and its page-scoped ground are gone.
+    for token in ("CONSOLE_FONT_HEAD_HTML", "CONSOLE_PAGE", "BTN_3D"):
+        assert token not in src, f"{token} is a page-scoped surface value"
+    # ONE view name, bound once and used by the header stamp, the cache read and
+    # the version poll, so a stamp cannot end up describing a different key from
+    # the one the page watches.
+    assert 'VIEW = "sentiment:composite"' in src
+    assert src.count('"sentiment:composite"') == 1, \
+        "the composite view is still spelled inline somewhere; use VIEW"
+
+
+def test_the_refresh_toast_is_gone_because_the_region_spinner_says_it():
+    """A toast reports the OUTCOME of an action; waiting is what a spinner is
+    for. This page's only toast said "Refreshing —", which is the spinner's own
+    sentence — and the spinner it duplicated did not even exist (below)."""
+    import inspect
+    src = inspect.getsource(S)
+    assert "ui.notify" not in src
+    assert "Refreshing — the page updates" not in src
+
+
+def test_the_wait_scrim_survives_the_build_repaint_that_used_to_delete_it():
+    """The bug this migration fixes, and it is load-bearing on this page.
+
+    ``build_busy`` mounted the scrim INSIDE ``console_root`` — the very
+    container ``console_page.apply`` opens by clearing. ``render()`` ends by
+    calling ``_apply()``, so the scrim was deleted before the page had finished
+    building, and every later Refresh raised one that no longer existed.
+    ``kit.region`` keeps the spinner on ``outer`` and clears only ``content``."""
+    bus_client.reset()
+    _seed_cache()
+    card = _render_card()
+    assert _scrim(card).visible is False, "the region starts at rest"
+
+
+def test_refresh_raises_a_spinner_that_used_to_be_a_deleted_element():
+    """The other half: the scrim has to be there when the reader asks for it."""
+    bus_client.reset()
+    _seed_cache()
+    card = _render_card()
+    _click(_button(card, "Refresh"))
+    assert _scrim(card).visible is True
+
+
+def test_refresh_is_a_header_action_rather_than_a_row_of_the_pages_own():
+    """The page's one command action, so it belongs beside the Updated stamp.
+    Read off the DOM, not the source: ``with head.actions:`` is in the source
+    whichever row the button actually lands in."""
+    from nicegui import ui
+    bus_client.reset()
+    _seed_cache()
+    card = _render_card()
+    actions = _button(card, "Refresh").parent_slot.parent
+    titles = [e for e in card.descendants()
+              if isinstance(e, ui.label) and e.text == "Sentiment"]
+    assert len(titles) == 1, f"expected the kit header title, found {len(titles)}"
+    assert actions.parent_slot.parent is titles[0].parent_slot.parent, \
+        "Refresh is not in the kit header's action row"
+
+
+def test_the_two_popup_triggers_are_quiet_kit_buttons_that_still_press_and_hold():
+    """Components and Trend Detail are labelled buttons with a hold gesture, not
+    page actions — so they take the kit's ``quiet`` kind and keep every one of
+    their three listeners. The labels are verbatim: ``_trend_detail_texts``
+    locates the popup by its button's text."""
+    from pages.options import theme as _theme
+    bus_client.reset()
+    _seed_cache()
+    card = _render_card()
+    for label in ("Components", "Trend Detail"):
+        btn = _button(card, label)
+        for cls in _theme.BTN_QUIET.split():
+            assert cls in btn._classes, f"{label}: not a quiet kit button ({cls})"
+        types = {listener.type for listener in btn._event_listeners.values()}
+        assert {"mousedown", "mouseup", "mouseleave"} <= types, \
+            f"{label}: lost its press-and-hold wiring"
+
+
+def test_the_status_line_drops_the_clock_the_header_stamp_owns():
+    """Rule 4: the page's own freshness lives in the header stamp and nowhere
+    else. What stays is what a stamp cannot say — which session the market is
+    in, when the next read is due, a second feed's provenance, and the proxy."""
+    bus_client.reset()
+    bus_client.bus().cache_set("cache:sentiment:composite", {
+        "live": _snap("2026-08-14", 7.2),
+        "composite_at": "2026-08-14T14:30:00+00:00", "proxy_up": True})
+    bus_client.bus().cache_set("cache:sentiment:sectors", {
+        "sector": {}, "sector_at": "2026-08-14T14:00:00+00:00"})
+    text = _status_text(_render_card())
+    assert "Updated" not in text, "the header stamp owns this page's freshness"
+    assert "Next ~" in text and "Sectors " in text and "Proxy: connected" in text
+    # The session word the stamp cannot carry — RTH vs EXT vs CLOSED.
+    assert "US EQUITIES" in text
+
+
+def test_the_status_clocks_are_central_and_say_so():
+    """``_fmt_time`` rendered naive MACHINE-LOCAL time with no zone label — right
+    on the Central prod box by accident, wrong anywhere else, and unreadable
+    either way. Every clock in this app is Central and names itself."""
+    # 14:30 UTC on an August day is 09:30 CDT.
+    assert S._ct_clock("2026-08-14T14:30:00+00:00") == "09:30"
+    assert S._ct_clock("2026-08-14T14:30:00+00:00", "%H:%M:%S") == "09:30:00"
+    assert S._ct_clock(None) == "" and S._ct_clock("nonsense") == ""
+    bus_client.reset()
+    bus_client.bus().cache_set("cache:sentiment:composite", {
+        "live": _snap("2026-08-14", 7.2),
+        "composite_at": "2026-08-14T14:30:00+00:00", "proxy_up": True})
+    text = _status_text(_render_card())
+    assert "Next ~09:32 CT" in text, text
+
+
+def test_the_console_header_chrome_is_gone_from_the_console_module():
+    """``console_page._header`` is the half of this migration that is not in
+    ``sentiment.py``: the console drew its own title, eyebrow, pulsing dot and
+    SESSION / DATA AS OF chips, all of which the kit header now carries."""
+    import inspect
+    from pages import console_page
+    assert not hasattr(console_page, "_header")
+    assert not hasattr(console_page, "_chip")
+    # A second freshness RULE in the tree is the thing to avoid, not merely an
+    # unused function: ``as_of_parts``'s 420 s threshold and the nav badge's
+    # ``alerts.stale_after`` would age the same view differently.
+    assert not hasattr(console_page, "as_of_parts")
+    assert not hasattr(console_page, "STALE_AFTER_SEC")
+    assert "CONSOLE_PAGE" not in console_page.SHELL
+    src = inspect.getsource(console_page)
+    assert "con-pulse" not in src, "the pulsing dot went with the header"
+    bus_client.reset()
+    _seed_cache()
+    texts = _label_texts(_render_card())
+    assert "MARKET REGIME CONSOLE" not in texts
+    assert "SENTIMENT · TREND · SIGNALS · REGIME SHARE" not in texts
+
+
+def test_the_pulse_keyframes_leave_this_page_but_stay_in_the_theme():
+    """``CONSOLE_KEYFRAMES_CSS`` animates the header dot, which is gone — so the
+    page stops injecting it. The CONSTANT stays: ``desk.py`` injects the same
+    block for its own ``con-pulse`` dots, and Task 9 decides its fate there."""
+    import inspect
+    import pathlib
+    from pages.options import theme as _theme
+    assert "CONSOLE_KEYFRAMES_CSS" not in inspect.getsource(S)
+    assert ".con-pulse" in _theme.CONSOLE_KEYFRAMES_CSS
+    desk = (pathlib.Path(__file__).resolve().parents[1]
+            / "pages" / "desk.py").read_text(encoding="utf-8")
+    assert "ui.add_css(CONSOLE_KEYFRAMES_CSS)" in desk
+    assert "con-pulse" in desk
+
+
+def test_session_label_still_names_all_three_states():
+    """A must-not-change guard — it passes before and after by design.
+
+    ``session_label`` says the one thing the Updated stamp cannot: which session
+    the market is in. It moves from a header chip to the status line and its
+    wording is untouched, so this pins the words rather than the placement. It
+    is also the first test this function has ever had."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    from pages import console_page
+    ct = ZoneInfo("America/Chicago")
+    # Dates AFTER ``[activation] extended_hours_from`` (2026-08-17), or every
+    # ETH branch is inert and the EXT case would read CLOSED for a reason that
+    # has nothing to do with this page.
+    assert console_page.session_label(
+        dt.datetime(2026, 8, 20, 10, 0, tzinfo=ct)) == "US EQUITIES · RTH"
+    assert console_page.session_label(          # GTH, 07:00 CT
+        dt.datetime(2026, 8, 20, 7, 0, tzinfo=ct)) == "US EQUITIES · EXT"
+    assert console_page.session_label(          # a Saturday
+        dt.datetime(2026, 8, 22, 10, 0, tzinfo=ct)) == "US EQUITIES · CLOSED"
+
+
+def test_the_value_palette_and_the_console_data_hues_are_untouched():
+    """Charts keep their data colours: the half the kit may not reach. Passes
+    before and after by design — it is the guard on what must NOT change."""
+    from pages.options import theme as _theme
+    charts = _theme.THEME["charts"]
+    assert (S.CLR_GREEN, S.CLR_RED, S.CLR_YELLOW) == (
+        charts["green"], charts["red"], charts["yellow"])
+    assert S.traffic_color(7.0) == S.CLR_GREEN
+    assert S.traffic_color(4.0) == S.CLR_RED
+    assert S.traffic_color(5.5) == S.CLR_YELLOW
+    assert S.sc_text_class(7) == S.TXT_G and S.sc_text_class(3) == S.TXT_R
+    # The console's own data vocabulary, which Task 10 keeps when the surface
+    # tokens retire.
+    for name in ("CON_POS", "CON_NEG", "CON_WARN"):
+        assert getattr(_theme, name), name
+    assert set(_theme.console_colors(_theme.THEME)["regimes"]) == {
+        "mean_reversion", "trending", "breakout", "choppy", "crisis"}

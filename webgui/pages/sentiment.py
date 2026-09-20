@@ -20,20 +20,47 @@ history figure, table/figure builders, …) are unit-tested. ``render()`` wires
 widgets, a Refresh button that enqueues a ``cmd:sentiment`` command, and a
 fetch-free version-poll ``ui.timer`` that repaints when the bus cache version
 changes.
+
+**On the page kit since 2026-09-19** (the consistency standard,
+``docs/plans/2026-09-19-app-ui-consistency-design.md``): the header line carries
+the name and the Updated stamp, the three buttons are kit buttons, and ONE
+``kit.region`` covers the console block a repaint replaces. The page's own
+display face, its page-scoped ground and the console's own header — title,
+eyebrow, pulsing dot, SESSION / DATA AS OF chips — are gone; see
+``console_page``, which changed with it. Every value colour stays: the page's
+five-colour ``CLR_*`` palette, the Highcharts zones and the console's regime
+hues are data.
+
+⚠ **This page's wait scrim never worked.** ``build_busy`` mounted it INSIDE
+``console_root``, the very container ``console_page.apply`` opens by clearing —
+and ``render()`` ends by calling ``_apply()``, so it was deleted before the page
+had finished building. Every Refresh after that raised a scrim that no longer
+existed. ``kit.region`` keeps the spinner on ``outer`` and clears only
+``content``, so Refresh shows a spinner here for the first time.
 """
 import math
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import bus_client
 from pages.fmt import float_or  # the ONE copy (pages/fmt.py)
 from pages.fmt import clamp as _clamp  # the ONE copy (pages/fmt.py)
-from pages import busy as _busy
 from pages import console_page
-from pages.options import theme
-from pages.options.theme import BTN_3D, THEME
+from pages import ui_kit as kit
+from pages.options.theme import THEME
 from pages.ui_guard import guard
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
+
+# ``pages.options.theme`` itself is no longer imported: the only two names this
+# page took from the module rather than through ``THEME`` were the console
+# DISPLAY font link and the ``con-pulse`` keyframes, and both went with the
+# console's own header. ``THEME["charts"]`` below is data and stays.
+
+# The page's primary view: what the header's Updated stamp reads, what
+# ``_read_cache`` pulls and what ``_maybe_repaint`` polls. Bound ONCE so a stamp
+# cannot end up describing a different key from the one the page watches.
+VIEW = "sentiment:composite"
+
 
 def _safe_float(v, default=0.0):
     return float_or(v, default)
@@ -682,16 +709,26 @@ def _parse_iso(value):
         return None
 
 
-def _fmt_time(value):
-    """ISO timestamp (or datetime) -> local 'HH:MM:SS', or '' on failure."""
-    dt = _parse_iso(value)
-    if dt is None:
+def _ct_clock(value, fmt="%H:%M"):
+    """ISO timestamp (or datetime) -> a CENTRAL-time clock, or '' on failure.
+
+    ⚠ This replaced a ``_fmt_time`` that converted to the HOST's local zone and
+    printed no zone label at all: right on the Central prod box by accident,
+    wrong on any other machine, and unreadable either way. Every clock in this
+    app is Central and names itself (``ui_kit.CT``), so the status line's two
+    remaining clocks do too.
+
+    A NAIVE stamp is read as UTC, the convention the bus writes and
+    ``ui_kit._parse_ts`` reads — not as host-local, which is what would make the
+    old bug reappear one layer down."""
+    stamp = _parse_iso(value)
+    if stamp is None:
         return ""
     try:
-        if dt.tzinfo is not None:
-            dt = dt.astimezone(tz=None).replace(tzinfo=None)
-        return dt.strftime("%H:%M:%S")
-    except Exception:  # noqa: BLE001
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return stamp.astimezone(_CT).strftime(fmt)
+    except Exception:  # noqa: BLE001 — a clock must never break the page.
         return ""
 
 
@@ -705,22 +742,11 @@ def render():
     import shell as _shell
     _may_enqueue = _shell.may_enqueue()
 
-    # Market Regime Console assets — scoped to THIS page, not the app shell.
-    # ``add_head_html`` during a page build is client-scoped, so the condensed
-    # display face is requested on /sentiment and nowhere else; every other page
-    # keeps the two fonts the shell already loads. "" when [console].font_url is
-    # blank, in which case the stack falls back to the app font.
-    if theme.CONSOLE_FONT_HEAD_HTML:
-        ui.add_head_html(theme.CONSOLE_FONT_HEAD_HTML)
-    # The console's ONE escape-hatch rule: a keyframes animation cannot be a
-    # utility class (same justification as the market ticker's marquee).
-    ui.add_css(theme.CONSOLE_KEYFRAMES_CSS)
-
     def _read_cache():
         """Pull the three sentiment cache views off the bus into ``state``.
         Graceful-empty: any missing view yields empty data (page renders a
         waiting placeholder rather than crashing)."""
-        composite = bus_client.read("sentiment:composite") or {}
+        composite = bus_client.read(VIEW) or {}
         history = bus_client.read("sentiment:history") or {}
         sectors = bus_client.read("sentiment:sectors") or {}
         state["live"] = composite.get("live")
@@ -757,74 +783,101 @@ def render():
         "comp_ver": None, "sec_ver": None, "regime_ver": None,
     }
     _read_cache()
-    state["comp_ver"] = bus_client.read_version("sentiment:composite")
+    state["comp_ver"] = bus_client.read_version(VIEW)
     state["sec_ver"] = bus_client.read_version("sentiment:sectors")
     state["regime_ver"] = bus_client.read_version("sentiment:regime")
 
-    # Top bar: "as of …" date + a small 3D refresh button, right-aligned. The
-    # section titles now live per-column (all the same h6 size) below.
-    with ui.row().classes("items-center w-full"):
-        ui.space()
+    with kit.page():
+        # No description line: page_help.HELP_MD["/sentiment"] already opens
+        # with what this screen is ("Sentiment — the simple version").
+        #
+        # stale=True, and it is honest: ``sentiment:composite`` republishes
+        # every 120 s in session (``sentiment_svc.scheduler.
+        # REFRESH_INTERVAL_SEC``) and the view is in neither
+        # ``alerts.RTH_ONLY_VIEWS`` nor ``alerts.STALE_OVERRIDES``, so the nav
+        # badge's own 600 s / 45 min thresholds are the right ones — and the
+        # stamp and the badge then agree by construction.
+        head = kit.header("Sentiment", view=VIEW, stale=True)
         # Not drawn on the public live origin — its only job is to enqueue a
         # sentiment refresh, which that process refuses. See shell.may_enqueue.
         if _may_enqueue:
-            ui.button("Refresh", icon="refresh", color=None,
-                      on_click=lambda: _request_refresh()).props(
-                "no-caps").classes(BTN_3D)
+            with head.actions:
+                kit.button("Refresh", kind="secondary", icon="refresh",
+                           on_click=lambda: _request_refresh())
 
-    # Per-tile reactive element handles (value label, card shell, hairline rule,
-    # end dot) — everything the tone recolor has to swap in place.
-    tile_lbls, tile_cards, tile_rules, tile_dots = {}, {}, {}, {}
+        # The status line, directly under the header (the standard's rule 4).
+        # It carries what the Updated stamp CANNOT: which session the market is
+        # in, when the next read is due, a second feed's provenance, and the
+        # proxy. This page's own freshness is the stamp's job and appears here
+        # no longer — see ``_render_status``.
+        status_lbl = kit.status_line(_copy.WAITING_SENTIMENT)
 
-    # ── Market Regime Console ────────────────────────────────────────────────
-    # The redesigned top of the page. Everything below it is unchanged and stays
-    # — the intraday graphs, the Components popup, the status bar and Refresh.
-    # One container, repainted by ``console_page.apply`` from ``_apply``.
-    console_root = console_page.render()
-    # Refresh refetches the composite (and, on the hour, ~24 sector calls).
-    console_busy = _busy.build_busy(console_root, "Refreshing sentiment…")
+        # ── Market Regime Console ───────────────────────────────────────────
+        # The redesigned top of the page. Everything below it is unchanged and
+        # stays — the intraday graphs and the Components popup. One container,
+        # repainted by ``console_page.apply`` from ``_apply``.
+        #
+        # ⚠ ``console_root`` goes INSIDE ``region.content``, and that is the
+        # whole point: ``console_page.apply`` opens with ``container.clear()``,
+        # so a scrim mounted on ``console_root`` (as ``build_busy`` did) was
+        # deleted by the build-time ``_apply()`` and every later Refresh raised
+        # one that no longer existed. The kit keeps the spinner on ``outer``.
+        # Refresh refetches the composite (and, on the hour, ~24 sector calls).
+        console_region = kit.region("Refreshing sentiment…")
+        with console_region.content:
+            console_root = console_page.render()
 
-    # The two press-and-hold popups the console's cards point at. Everything
-    # ELSE that used to sit here — the two Day/Week/Month rings, the 1x4 Signals
-    # stack, the velocity/divergence lines and the Market Regime expander — was
-    # REMOVED when the console landed, because the console renders all of it
-    # (meters for the rings, a 2x2 matrix for the tiles, signed meters for the
-    # velocity numbers, and the whole regime block). Keeping both would show
-    # every reading on this page twice.
-    #
-    # These two survive because the console has no room for them: the component
-    # breakdown is a 520px table and the trend detail is a per-horizon
-    # sub-score dump. They are what its "COMPONENTS →" and "TREND DETAIL →"
-    # captions refer to.
-    with ui.row().classes("w-full items-center gap-2 q-mt-sm"):
-        with ui.button("Components", icon="table_view").props("flat dense") as comp_btn:
-            with ui.menu().props("no-parent-event") as comp_menu:
-                comp_box = ui.column().classes("q-pa-md min-w-[520px]")
-        # Press-and-hold: shown while the mouse button is down, closed on release.
-        comp_btn.on("mousedown", lambda: comp_menu.open())
-        comp_btn.on("mouseup", lambda: comp_menu.close())
-        comp_btn.on("mouseleave", lambda: comp_menu.close())
-        with ui.button("Trend Detail", icon="insights").props("flat dense") as trend_btn:
-            with ui.menu().props("no-parent-event") as trend_menu:
-                trend_detail_box = ui.column().classes("q-pa-md text-sm min-w-[240px]")
-        trend_btn.on("mousedown", lambda: trend_menu.open())
-        trend_btn.on("mouseup", lambda: trend_menu.close())
-        trend_btn.on("mouseleave", lambda: trend_menu.close())
+        # The two press-and-hold popups the console's cards point at. Everything
+        # ELSE that used to sit here — the two Day/Week/Month rings, the 1x4
+        # Signals stack, the velocity/divergence lines and the Market Regime
+        # expander — was REMOVED when the console landed, because the console
+        # renders all of it (meters for the rings, a 2x2 matrix for the tiles,
+        # signed meters for the velocity numbers, and the whole regime block).
+        # Keeping both would show every reading on this page twice.
+        #
+        # These two survive because the console has no room for them: the
+        # component breakdown is a 520px table and the trend detail is a
+        # per-horizon sub-score dump. They are what its "COMPONENTS →" and
+        # "TREND DETAIL →" captions refer to.
+        #
+        # ``quiet`` rather than ``secondary``: they are labelled buttons with a
+        # hold gesture, not page actions — the page's one action is Refresh, in
+        # the header. ``kit.button`` returns the element, so ``with btn:`` still
+        # mounts the menu inside it and the labels stay verbatim.
+        with ui.row().classes("w-full items-center gap-2"):
+            with kit.button("Components", kind="quiet",
+                            icon="table_view") as comp_btn:
+                with ui.menu().props("no-parent-event") as comp_menu:
+                    comp_box = ui.column().classes("q-pa-md min-w-[520px]")
+            # Press-and-hold: shown while the mouse button is down, closed on
+            # release.
+            comp_btn.on("mousedown", lambda: comp_menu.open())
+            comp_btn.on("mouseup", lambda: comp_menu.close())
+            comp_btn.on("mouseleave", lambda: comp_menu.close())
+            with kit.button("Trend Detail", kind="quiet",
+                            icon="insights") as trend_btn:
+                with ui.menu().props("no-parent-event") as trend_menu:
+                    trend_detail_box = ui.column().classes(
+                        "q-pa-md text-sm min-w-[240px]")
+            trend_btn.on("mousedown", lambda: trend_menu.open())
+            trend_btn.on("mouseup", lambda: trend_menu.close())
+            trend_btn.on("mouseleave", lambda: trend_menu.close())
 
-    # Daily Sentiment & Trend — two value-colorized 2-min intraday series
-    # (rolling last 5 trading days), expanded by default. Replaces the old
-    # 30-Day History composite chart + rolling/velocity/divergence text.
-    with ui.expansion("Daily Sentiment & Trend", icon="show_chart",
-                      value=True).classes("w-full") as daily_exp:
-        ui.label("Daily Market Sentiment").classes("text-subtitle2 q-mt-sm")
-        # Plain chart (NOT a stockChart): a stockChart's chart.update() throws in the
-        # stock module on every in-place update, freezing an open page on the data it
-        # first rendered (the current day never appears) — see _intraday_figure.
-        sent_intraday_plot = ui.highchart(
-            build_sentiment_intraday_figure([])).classes("w-full")
-        ui.label("Daily Market Trend").classes("text-subtitle2 q-mt-md")
-        trend_intraday_plot = ui.highchart(
-            build_trend_intraday_figure([])).classes("w-full")
+        # Daily Sentiment & Trend — two value-colorized 2-min intraday series
+        # (rolling last 5 trading days), expanded by default. Replaces the old
+        # 30-Day History composite chart + rolling/velocity/divergence text.
+        with ui.expansion("Daily Sentiment & Trend", icon="show_chart",
+                          value=True).classes("w-full") as daily_exp:
+            ui.label("Daily Market Sentiment").classes("text-subtitle2 q-mt-sm")
+            # Plain chart (NOT a stockChart): a stockChart's chart.update()
+            # throws in the stock module on every in-place update, freezing an
+            # open page on the data it first rendered (the current day never
+            # appears) — see _intraday_figure.
+            sent_intraday_plot = ui.highchart(
+                build_sentiment_intraday_figure([])).classes("w-full")
+            ui.label("Daily Market Trend").classes("text-subtitle2 q-mt-md")
+            trend_intraday_plot = ui.highchart(
+                build_trend_intraday_figure([])).classes("w-full")
 
     # Reflow both charts when the expander opens (a chart built inside a collapsed
     # expander measures 0x0 — same fix as the Simulator's hidden tab panels). The
@@ -878,7 +931,7 @@ def render():
         return rotation_value, sector_value
 
     def _apply():
-        console_busy.hide()
+        console_region.busy.hide()
         live = state.get("live")
         snaps = state["snaps"]
         if not live and not snaps:
@@ -920,7 +973,6 @@ def render():
             "divergence_detail": derived.get("divergence_detail"),
             "regime": state.get("regime") or {},
             "regime_points": state.get("regime_points") or [],
-            "as_of": state.get("composite_at"),
         })
         rotation_value, sector_value = _comp_context()
         _render_components(latest, rotation_value, sector_value)
@@ -983,32 +1035,40 @@ def render():
         if not _may_enqueue:
             return          # no button either — see shell.may_enqueue
         bus_client.request("sentiment", {"type": "refresh"})
-        console_busy.show()
-        ui.notify("Refreshing — the page updates when the new read lands.")
+        console_region.busy.show()
+        # No toast: the region's spinner already says the page is waiting, and
+        # the standard keeps a toast for the OUTCOME of an action.
 
     from datetime import timedelta
+
     @guard
     def _render_status():
-        parts = []
+        """The one status line: what the header's Updated stamp cannot say.
+
+        ⚠ The page's own freshness left this line. It used to open with
+        ``Updated HH:MM:SS`` off ``composite_at``, which is precisely what the
+        kit header now reads off the same view's ``:ts`` side key — two
+        freshness readings on one screen, and the one here was in the HOST's
+        zone with no label. Everything that stayed answers a different
+        question: which session the market is in, when the next read is due,
+        when the SECTOR feed last published, and whether the proxy is up."""
+        parts = [console_page.session_label()]
         ca = _parse_iso(state.get("composite_at"))
         if ca:
-            parts.append(f"Updated {_fmt_time(ca)}")
-            parts.append(f"Next ~{_fmt_time(ca + timedelta(seconds=120))[:5]}")
-        sa = state.get("sector_at")
-        sa_str = _fmt_time(sa)
+            parts.append(f"Next ~{_ct_clock(ca + timedelta(seconds=120))} CT")
+        sa_str = _ct_clock(state.get("sector_at"), "%H:%M:%S")
         if sa_str:
-            parts.append(f"Sectors {sa_str}")
+            parts.append(f"Sectors {sa_str} CT")
         up = state.get("proxy_up")
         parts.append(f"Proxy: {'connected' if up else ('—' if up is None else 'down')}")
-        status_lbl.text = ("   ·   ".join(parts) if parts
-                           else _copy.WAITING_SENTIMENT)
+        status_lbl.text = "   ·   ".join(parts)
 
     @guard
     def _maybe_repaint():
         # Fetch-free: compare the bus cache versions to the last-painted ones and
         # only re-read + repaint on change. Mirrors the previous version-poll
         # pattern but tracks the Redis bus version instead of an in-process cache.
-        comp_ver = bus_client.read_version("sentiment:composite")
+        comp_ver = bus_client.read_version(VIEW)
         sec_ver = bus_client.read_version("sentiment:sectors")
         # The regime publishes on its OWN 5-min cadence (and can republish early
         # on a crisis attack), so it needs its own version probe.
@@ -1023,10 +1083,6 @@ def render():
         _apply()
         _refill_component_context()
         _render_status()
-
-    ui.separator().classes("q-my-sm")
-    status_lbl = ui.label(_copy.WAITING_SENTIMENT).classes(
-        "opacity-60 text-xs w-full")
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     _apply()

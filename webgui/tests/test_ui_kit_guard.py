@@ -38,7 +38,6 @@ ALLOWED = {
     "options/strategy_menu.py": {"button": 2},
     "options/swing.py": {"button": 7, "table": 1},
     "portfolio.py": {"button": 1, "table": 3},
-    "sentiment.py": {"add_head_html": 1, "button": 3, "notify": 1},
     # The per-member name chip, and it stays: ONE call site producing on the
     # order of the whole level's universe per repaint, and a selectable name
     # chip - 10.5px, ring-on-select, max-w-full - not a page action. Through

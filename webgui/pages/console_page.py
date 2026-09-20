@@ -1,5 +1,5 @@
-"""Assembly of the Market Regime Console — header, the three cards, the regime
-block, and the footer.
+"""Assembly of the Market Regime Console — the three cards, the regime block,
+and the footer.
 
 Design: docs/design/2026-08-14-market-regime-console/README.md.
 
@@ -11,6 +11,22 @@ it untouched. ``render()`` returns one container that ``apply()`` rebuilds — s
 Width: the handoff is a fixed 1440px canvas, which this app has no room for
 (icon rail + tab strip + ticker). The proportions are kept and capped instead,
 so it fills a wide monitor without clipping a narrow window.
+
+⚠ **The console has no header of its own since 2026-09-19** (the consistency
+standard, ``docs/plans/2026-09-19-app-ui-consistency-design.md``). It used to
+draw a ``MARKET REGIME CONSOLE`` title, a descriptor eyebrow, a pulsing accent
+dot and a SESSION / DATA AS OF chip pair; the page kit's header line carries the
+name and the Updated stamp for every screen in the app, so all of it went.
+:func:`session_label` survived the cut because it says the one thing a stamp
+cannot — which session the market is in — and ``sentiment.py`` now shows it on
+the page's status line. ``as_of_parts`` did NOT: it was a SECOND freshness rule,
+with a 420 s threshold of its own, aging the same view differently from the nav
+badge's ``alerts.stale_after``.
+
+The page's own SURFACE went with it: ``SHELL`` no longer carries
+``CONSOLE_PAGE`` or the page padding, because the console now sits inside
+``kit.page()`` like every other screen. The cards, the dial, the share table and
+the callouts are untouched — they are the data.
 """
 import datetime as dt
 from zoneinfo import ZoneInfo
@@ -18,21 +34,13 @@ from zoneinfo import ZoneInfo
 from pages import console_cards as CARDS
 from pages import console_regime as REG
 from pages import regime_mix as RM
-from pages.options import theme
-from pages.options.theme import (CONSOLE_DISPLAY, CONSOLE_DIVIDER, CONSOLE_PAGE,
-                                 CONSOLE_RULE, CON_TXT, CON_TXT_DIM,
-                                 CON_TXT_FAINT, CON_TXT_MUTED)
+from pages.options.theme import CONSOLE_RULE, CON_TXT_DIM, CON_TXT_FAINT
 
-_C = theme.CONSOLE_COLORS
 CT = ZoneInfo("America/Chicago")
 
 # Fluid to the handoff's canvas width, then capped (decision recorded in the
 # plan). Everything inside is proportional, so this is the only fixed number.
-SHELL = f"{CONSOLE_PAGE} w-full max-w-[1440px] p-[28px] gap-[22px]"
-
-# Past this the "DATA AS OF" chip flips to STALE. The composite publishes every
-# 120 s, so ~3 missed cycles is a real stall rather than a slow tick.
-STALE_AFTER_SEC = 420
+SHELL = "w-full max-w-[1440px] gap-[22px]"
 
 
 def session_label(now=None):
@@ -49,32 +57,6 @@ def session_label(now=None):
     except Exception:  # noqa: BLE001 — a chip must never break the page.
         return "US EQUITIES"
     return "US EQUITIES · CLOSED"
-
-
-def as_of_parts(composite_at, now=None):
-    """``(text, stale)`` for the DATA AS OF chip.
-
-    Stale is worth surfacing because every number on this page comes from one
-    cache: if it stops publishing, the console keeps rendering confidently from
-    the last snapshot, and nothing else on screen would say so."""
-    now = now or dt.datetime.now(dt.timezone.utc)
-    stamp = _parse_iso(composite_at)
-    if stamp is None:
-        return "NO DATA", True
-    age = (now - stamp).total_seconds()
-    local = stamp.astimezone(CT)
-    return (f"{local:%H:%M} CT · {'STALE' if age > STALE_AFTER_SEC else 'LIVE'}",
-            age > STALE_AFTER_SEC)
-
-
-def _parse_iso(value):
-    if not value:
-        return None
-    try:
-        d = dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return None
-    return d if d.tzinfo else d.replace(tzinfo=dt.timezone.utc)
 
 
 def footer_summary(points):
@@ -109,7 +91,8 @@ def apply(container, ctx):
     ctx = ctx or {}
     container.clear()
     with container:
-        _header(ctx)
+        # No header: the page kit's header line carries the name and the
+        # Updated stamp (see the module docstring).
         # 1fr 1fr 1.05fr, stretched so the three cards share a baseline.
         with ui.element("div").classes(
                 "grid grid-cols-[1fr_1fr_1.05fr] gap-5 w-full items-stretch"):
@@ -146,40 +129,6 @@ def _evidence(regime):
         return detail
     return [{"text": str(t), "regime": "", "severity": "info"}
             for t in (r.get("evidence") or [])]
-
-
-def _header(ctx):
-    from nicegui import ui
-    text, stale = as_of_parts(ctx.get("as_of"))
-    with ui.row().classes(
-            f"items-end justify-between w-full border-b {CONSOLE_RULE} pb-4"):
-        with ui.column().classes("gap-1"):
-            with ui.row().classes("items-center gap-3"):
-                ui.element("div").classes(
-                    f"w-[10px] h-[10px] rounded-full bg-[{_C['accent']}] "
-                    f"con-pulse {theme.console_glow(_C['accent'], px=12, alpha=0.9)}")
-                ui.label("MARKET REGIME CONSOLE").classes(
-                    f"{CONSOLE_DISPLAY} text-[30px] font-bold tracking-[.16em] "
-                    f"{CON_TXT}")
-            # pl-[24px] aligns the subtitle under the title, clearing the dot.
-            ui.label("SENTIMENT · TREND · SIGNALS · REGIME SHARE").classes(
-                f"pl-[24px] text-[11.5px] tracking-[.24em] {CON_TXT_MUTED}")
-        with ui.row().classes("items-center gap-[10px]"):
-            _chip("SESSION", session_label(), accent=False)
-            _chip("DATA AS OF", text, accent=not stale, warn=stale)
-
-
-def _chip(label, value, accent=True, warn=False):
-    from nicegui import ui
-    hexv = _C["warning"] if warn else (_C["accent"] if accent else _C["line"])
-    with ui.column().classes(
-            f"gap-[2px] px-[14px] py-[9px] border border-[{hexv}]/[0.35] "
-            f"bg-[{theme._alpha_hex(hexv, 0.08)}]"):
-        ui.label(label).classes(
-            f"text-[9.5px] tracking-[.22em] "
-            + (f"text-[{hexv}]" if (accent or warn) else CON_TXT_DIM))
-        ui.label(value).classes(
-            f"text-[13px] " + (f"text-[{hexv}]" if (accent or warn) else CON_TXT))
 
 
 def _footer(points):
