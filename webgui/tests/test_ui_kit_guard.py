@@ -65,7 +65,13 @@ ALLOWED = {
     # layouts' remove and Add leg, Reset to template and the typed-price reset -
     # go through the kit.
     "options/leg_editor.py": {"button": 4},
-    "options/simulator.py": {"button": 1, "notify": 1},
+    # The three Days snaps, and they stay: Now / Halfway / Expiry are a STEPPER
+    # for the slider they sit beside - each writes one value into ``dt_slider``
+    # and does nothing else - not actions the page takes, and rebuilt per snap
+    # on every range change. Through kit.button they would read as three page
+    # actions inside a slider row. The page's one ACTION is the entry panel's
+    # Load, which goes through the kit.
+    "options/simulator.py": {"button": 1},
     # The cascading Strategy trigger, boxed and plain, and it stays: a VALUE
     # PICKER standing in for ui.select. The kit has no such field, and its
     # button kinds carry neither a current-value label nor a menu anchor; the

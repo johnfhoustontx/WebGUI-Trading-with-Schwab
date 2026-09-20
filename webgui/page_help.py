@@ -689,7 +689,7 @@ accelerate price.
 
 Re-prices a **multi-leg** option position under different what-ifs (Black-Scholes).
 
-- **Type a ticker and press Enter** (or tab out; **Refresh** re-pulls it). Pick a
+- **Type a ticker and press Enter** (or tab out; **Load** re-pulls it). Pick a
   **Strategy** and its legs land on real strikes — singles, spreads, condors,
   butterflies, calendars.
 - **The chain** — the same grid as the Calculator: **click a Bid to SELL, an Ask

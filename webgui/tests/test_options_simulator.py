@@ -554,11 +554,16 @@ def _render_cold():
 
 
 def _fire(container, name):
+    """Fire a poll timer INSIDE its own parent slot, the way NiceGUI runs one
+    (``Timer._get_context``). Without the slot, anything the callback builds — a
+    once-timer, say — lands on the client's ROOT slot instead of on the page, so
+    a test looking at ``container.descendants()`` cannot see it."""
     from nicegui import ui
     timers = [e for e in container.descendants()
               if isinstance(e, ui.timer) and getattr(e.callback, "__name__", "") == name]
     assert timers, f"no {name} timer mounted"
-    timers[0].callback()
+    with timers[0].parent_slot:
+        timers[0].callback()
 
 
 def _texts(container, cls):
@@ -752,7 +757,10 @@ def test_a_stale_replay_for_other_legs_is_not_drawn():
     _fire(container, "_poll_replay")
     charts = [e for e in container.descendants() if isinstance(e, ui.highchart)]
     assert not charts[0].visible                     # the Replay chart
-    assert "Pricing this position…" in _texts(container, "opacity-70")
+    # Re-aimed 2026-09-20 from the raw ``opacity-70`` class the label used to
+    # carry: the three empty states are ``kit.empty`` now, so the page's own
+    # hook is what names WHICH of them this is. The behaviour is unchanged.
+    assert _texts(container, "sim-replay-empty") == ["Pricing this position…"]
 
 
 def test_the_calculators_position_names_its_strategy_and_raises_no_edited_chip():
@@ -966,3 +974,185 @@ def test_a_grid_click_on_a_matching_side_moves_that_leg_instead_of_adding_one():
     assert len(_leg_rows(container)) == 2
     legs = _last_command("sim_run")["args"]["legs"]
     assert [l["strike"] for l in legs if l["side"] == "long"] == [445.0]
+
+
+# ── the page kit, and the charts that mounted hidden (2026-09-20) ───────────
+# The frame is ``pages/ui_kit.py``'s now: one header line with the snapshot's
+# Updated stamp, the app surface, and the app's one empty line. The page keeps
+# its layout, its three tab panels IN THEIR BUILD ORDER, its payoff palette and
+# every ``sim-*`` hook.
+
+def _module_src():
+    import pathlib
+    return pathlib.Path(sim.__file__).read_text(encoding="utf-8")
+
+
+def _code_src():
+    """The page's CODE with its comments dropped, so a name mentioned in a
+    comment that explains why it is GONE does not read as a use of it."""
+    import ast
+    return ast.unparse(ast.parse(_module_src()))
+
+
+def _reflow_timers(container):
+    """The once-timers a reveal queues (``_queue_reflow``)."""
+    from nicegui import ui
+    return [e for e in container.descendants()
+            if isinstance(e, ui.timer)
+            and getattr(e.callback, "__name__", "") == "_reflow_charts"]
+
+
+def _charts(container):
+    """Replay first, What-if second — the BUILD order of the tab panels, which
+    the strip deliberately reverses. Do not reorder the panels."""
+    from nicegui import ui
+    return [e for e in container.descendants() if isinstance(e, ui.highchart)]
+
+
+def test_the_simulator_frame_is_the_kit_and_carries_no_surface_of_its_own():
+    """``stale=False`` is the decision worth pinning: all four ``sim_*`` views are
+    request/response, published only by a command handler, so nothing is due and
+    an age can never mean 'behind'."""
+    import inspect
+    src = inspect.getsource(sim.render)
+    assert "kit.page()" in src
+    assert 'kit.header("Simulator", view="options:sim_meta", stale=False)' in src
+    # The page-scoped escape hatch and its scope hook go: ``APP_FIELD_CSS`` is
+    # the identical block under ``.ns-app``, injected app-wide by BOTH
+    # entrypoints, so a per-page copy is a second one free to drift.
+    code = _code_src()
+    for token in ("QUASAR_INTERNAL_CSS", "calc-v2", "ui.add_css(", "PAGE"):
+        assert token not in code, f"{token} is a surface of the page's own"
+
+
+def test_an_empty_symbol_is_reported_under_the_field_not_in_a_toast():
+    """Validation, not an outcome — so it belongs where the reader is looking.
+    ``kit.symbol_error`` also forgets the load dedup, so the same ticker can be
+    retried from the field itself."""
+    container = _render_cold()
+    symbol = _hooked(container, "entry-ticker")[0]
+    symbol.value = ""
+    load = next(b for b in _sim_buttons(container) if b.text == "Load")
+    _fire_click_on(load)
+    assert symbol.error == "Enter a symbol first."
+    assert "ui.notify" not in _module_src()
+
+
+def test_a_named_symbol_clears_the_message_the_empty_one_left():
+    container = _render_cold()
+    symbol = _hooked(container, "entry-ticker")[0]
+    load = next(b for b in _sim_buttons(container) if b.text == "Load")
+    symbol.value = ""
+    _fire_click_on(load)
+    assert symbol.error
+    symbol.value = "TSLA"
+    _fire_click_on(load)
+    assert symbol.error is None
+
+
+def test_the_lookback_picker_is_a_labelled_field_not_a_floating_label():
+    """The standard's field rule: the label sits ABOVE the control, never
+    floating inside it and never as a placeholder."""
+    from nicegui import ui
+    container = _render_cold()
+    sel = next(e for e in container.descendants()
+               if isinstance(e, ui.select) and "w-44" in e._classes)
+    assert sel._props.get("label") is None, "the look-back label still floats"
+    assert "Look-back" in _labels(container)
+    assert set(sel.options) == set(sim.lookback_options())
+
+
+def test_the_three_empty_states_are_the_apps_one_empty_line():
+    from pages import ui_kit as kit
+    container = _render_cold()
+    for hook in ("sim-replay-empty", "sim-whatif-empty", "sim-shock-empty"):
+        el = next(e for e in container.descendants() if hook in e._classes)
+        for cls in kit.EMPTY.split():
+            assert cls in el._classes, f"{hook} is missing {cls}"
+        assert "opacity-70" not in el._classes
+
+
+def test_a_first_result_reflows_the_whatif_chart_it_just_revealed(monkeypatch):
+    """THE BUG. A ``ui.highchart`` measures its container ONCE at mount and
+    NiceGUI's element has no ResizeObserver, so a chart that mounted hidden
+    renders ~600px wide for the rest of the session. ``_reflow_charts`` fired
+    only on a TAB CLICK — but the path a cold page actually takes is the
+    ``set_visibility(True)`` in ``_render_figures`` when its first result lands,
+    and that called nothing at all."""
+    import bus_client
+    from nicegui import ui
+
+    container = _render_cold()
+    assert not _reflow_timers(container), \
+        "a cold page has revealed nothing, so it must queue no reflow"
+    bus_client.bus().cache_set("cache:options:sim_meta", _future_meta())
+    _fire(container, "_poll_meta")
+    legs = _last_command("sim_run")["args"]["legs"]
+    bus_client.bus().cache_set("cache:options:sim_result", {
+        "spot": 450.0, "symbol": "SPY", "legs": legs, "dt": 5.0, "mult": 1.5,
+        "whatif_rows": [{"S": 400.0, "theo_price": -500.0},
+                        {"S": 500.0, "theo_price": 0.0}],
+        "whatif_baseline": -120.0, "ivshock": None})
+    _fire(container, "_poll_result")
+
+    whatif = _charts(container)[1]
+    assert whatif.visible, "the What-if chart should be on screen"
+    timers = _reflow_timers(container)
+    assert timers, "the chart was revealed and nothing asked it to reflow"
+    js = []
+    monkeypatch.setattr(ui, "run_javascript", lambda code, *a, **k: js.append(code))
+    timers[-1].callback()
+    assert f"getElement({whatif.id})" in " ".join(js)
+
+
+def test_a_first_replay_trace_reflows_the_chart_it_just_revealed(monkeypatch):
+    """The History panel is the worse half of the same bug: it mounts inside an
+    INACTIVE tab panel, so it has measured 0×0 before any trace arrives."""
+    import bus_client
+    from nicegui import ui
+
+    container = _render_cold()
+    bus_client.bus().cache_set("cache:options:sim_meta", _future_meta())
+    _fire(container, "_poll_meta")
+    assert not _reflow_timers(container)
+    n = 6
+    bus_client.bus().cache_set("cache:options:sim_replay", {
+        "x": list(range(n)), "prices": [450.0 + i for i in range(n)],
+        "timestamps": [f"2026-08-24T09:{30 + i:02d}:00" for i in range(n)],
+        "pnl": [float(i) for i in range(n)], "value": [float(i) for i in range(n)],
+        "greeks": {"delta": [50.0] * n}, "sessions": [{"start": 0, "end": n}],
+        "units": "position", "resolution": "6 bars"})
+    _fire(container, "_poll_replay")
+
+    replay = _charts(container)[0]
+    assert replay.visible
+    timers = _reflow_timers(container)
+    assert timers, "the Replay chart was revealed and nothing reflowed it"
+    js = []
+    monkeypatch.setattr(ui, "run_javascript", lambda code, *a, **k: js.append(code))
+    timers[-1].callback()
+    assert f"getElement({replay.id})" in " ".join(js)
+
+
+def test_a_repaint_of_an_already_visible_chart_queues_no_second_reflow():
+    """The reflow is gated on the hidden→visible TRANSITION, and that gate is
+    the point: ``_render_figures`` runs on every slider step, so an ungated
+    reflow would queue a timer per step of a drag."""
+    import bus_client
+    container = _render_cold()
+    bus_client.bus().cache_set("cache:options:sim_meta", _future_meta())
+    _fire(container, "_poll_meta")
+    legs = _last_command("sim_run")["args"]["legs"]
+    result = {"spot": 450.0, "symbol": "SPY", "legs": legs, "dt": 5.0, "mult": 1.5,
+              "whatif_rows": [{"S": 400.0, "theo_price": -500.0},
+                              {"S": 500.0, "theo_price": 0.0}],
+              "whatif_baseline": -120.0, "ivshock": None}
+    bus_client.bus().cache_set("cache:options:sim_result", result)
+    _fire(container, "_poll_result")
+    first = len(_reflow_timers(container))
+    assert first == 1
+
+    bus_client.bus().cache_set("cache:options:sim_result", dict(result, dt=6.0))
+    _fire(container, "_poll_result")
+    assert len(_reflow_timers(container)) == first, \
+        "a repaint of a chart already on screen queued another reflow"

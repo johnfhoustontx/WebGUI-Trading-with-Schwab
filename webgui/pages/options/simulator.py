@@ -9,7 +9,7 @@ computed **sweep rows**.
 
 Interaction model:
 
-* **Enter / tab out / Refresh** on the shared entry panel's ticker → enqueue
+* **Enter / tab out / Load** on the shared entry panel's ticker → enqueue
   ``sim_fetch``; a version-poll on ``options:sim_meta`` populates the **leg
   table** (``pages.options.leg_editor``, ``layout="table"``) — its expiry and
   strike choices pull from the cached meta — and one on ``options:sim_chain``
@@ -36,6 +36,13 @@ discrete). The pure figure builders (``whatif_figure``/``replay_figure`` +
 tiles, the What-if readout line, the Days-slider range and snaps, the structure
 warnings, the IV-shock table, the Replay cursor line — comes from the PURE
 ``sim_view`` module. This file holds widgets and wiring only.
+
+**The frame is ``pages/ui_kit.py``'s (2026-09-20)** — one header line with the
+snapshot's Updated stamp, the app surface and the app's one empty line. The page
+injects no CSS and wears no scope class of its own. ⚠ Its two charts mount
+HIDDEN (one in an inactive tab panel, one until a result lands), so every path
+that reveals one goes through ``_show_chart`` and reflows it: see the comment
+above that function.
 """
 import bus_client
 import page_help as _page_help
@@ -44,10 +51,11 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from .inputs import select_all_on_focus, should_load
-# Shared dark-navy "dashboard" theme (same CSS the Calculator injects, so the two
-# pages never drift).
-from .theme import (QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, BTN, LABEL,
-                    MUTED, TXT_POS, TXT_NEG, TXT_WARN)
+# The app-wide dark-navy vocabulary. The page injects no CSS and wears no scope
+# class of its own: the boxed q-fields, the narrow leg-table tracks and the tab
+# chrome it needs are the SAME rules, shipped app-wide as ``theme.APP_FIELD_CSS``
+# under ``ns-app`` by both entrypoints (2026-09-20).
+from .theme import (CARD, EYEBROW, BTN, LABEL, MUTED, TXT_POS, TXT_NEG, TXT_WARN)
 from . import page_state as _ps
 # The ONE position shared with the Calculator (replaces the copy buttons).
 from . import shared_position as _shared
@@ -305,6 +313,7 @@ def render():
     position tiles + Replay / What-if / IV-shock tabs."""
     from nicegui import run
 
+    from pages import ui_kit as kit
     from pages.ui_guard import guard_async
 
     from . import entry as _entry
@@ -315,7 +324,10 @@ def render():
     from . import sim_view as sv
     from .chain_grid import leg_delta
 
-    ui.add_css(QUASAR_INTERNAL_CSS)
+    # No ``ui.add_css`` and no scope hook: every rule this page used to inject
+    # (``QUASAR_INTERNAL_CSS`` under ``.calc-v2``) is the identical block shipped
+    # app-wide as ``theme.APP_FIELD_CSS`` under ``.ns-app``, which both
+    # entrypoints put on the shell's content column.
 
     # Full-screen wait overlay shown while a user-initiated chain load is in flight.
     wait = _overlay.build_loading_overlay()
@@ -372,8 +384,14 @@ def render():
     tile_refs = {}      # tile key -> (label, value, sub) labels, built once
     shock_cells = []    # one (base, shock, change) label triple per IV-shock row
 
-    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-3"):
-        # No page title — the tab strip names the page (2026-07-11 cleanup).
+    with kit.page():
+        # ⚠ ``stale=False``. All four ``sim_*`` views are REQUEST/RESPONSE — a
+        # command handler is the only thing that publishes them, so nothing is
+        # ever due and an age can never mean "behind". The stamp still answers
+        # the question this page's reader has: whether the snapshot on screen is
+        # the one the last Load brought back. No page ACTION sits beside it —
+        # the entry panel's Load button is this screen's control bar.
+        kit.header("Simulator", view="options:sim_meta", stale=False)
 
         # The shared entry panel (2026-09-12): ticker, expiry strip, and the
         # chain grid BESIDE the leg table. The Simulator keeps the app-wide navy
@@ -417,14 +435,15 @@ def render():
             with ui.tab_panels(tabs, value=tab_whatif).classes("w-full flush-panels"):
                 with ui.tab_panel(tab_replay):
                     with ui.row().classes("items-center gap-4 w-full"):
-                        lookback_sel = ui.select(lookback_options(), value="auto",
-                                                 label="Look-back").classes("w-44")
+                        lookback_sel = kit.select_field(
+                            "Look-back", lookback_options(), value="auto",
+                            width="w-44")
                         scrub_slider = ui.slider(min=0, max=1, value=0).classes("w-80 sim-scrub")
                         scrub_lbl = ui.label("Drag the slider to step through time")
                     # Persistent chart built ONCE (present at first render for the ESM
                     # import map) and updated in place. Empty-state label toggled until
                     # the first replay trace arrives.
-                    replay_empty = ui.label("").classes("opacity-70")
+                    replay_empty = kit.empty("").classes("sim-replay-empty")
                     replay_chart = ui.highchart(replay_figure({}, None)).classes("w-full")
                 with ui.tab_panel(tab_whatif):
                     with ui.row().classes("items-center gap-4 w-full flex-wrap"):
@@ -441,7 +460,7 @@ def render():
                     # import map) and updated in place so slider changes ANIMATE instead
                     # of flickering through a clear()/recreate. Empty-state label toggled
                     # alongside until the first sweep result arrives.
-                    whatif_empty = ui.label("").classes("opacity-70")
+                    whatif_empty = kit.empty("").classes("sim-whatif-empty")
                     whatif_chart = ui.highchart(whatif_figure([], 0)).classes("w-full")
                 with ui.tab_panel(tab_ivshock):
                     with ui.row().classes("items-center gap-4 w-full"):
@@ -453,7 +472,7 @@ def render():
                     # drew as flat lines. Each row now reads at its own scale.
                     ivshock_head = ui.label("").classes(
                         f"sim-shock-head text-subtitle1 font-semibold {_TONE_CLASS['neutral']}")
-                    ivshock_empty = ui.label("").classes("opacity-70")
+                    ivshock_empty = kit.empty("").classes("sim-shock-empty")
                     with ui.element("div").classes(
                             "sim-shock-grid grid grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,1fr))] "
                             "gap-x-6 gap-y-2 w-full max-w-[760px] items-baseline") as ivshock_grid:
@@ -487,7 +506,9 @@ def render():
         return (state.get("meta") or {}).get("expiries") or []
 
     # ``layout="table"`` — the shared one-row-per-leg table, in the app-wide dark
-    # navy (NO ``tokens``: the near-black CALC_* language stays the Calculator's).
+    # navy. No ``tokens``, and since 2026-09-20 no mount passes any: the
+    # Calculator's near-black ``[calc]`` repaint was the one override and retired
+    # with that language, so ``DEFAULT_LEG_TOKENS`` is simply what the table is.
     # ``show_premium=False``: the simulator prices each leg off the chain's IV, so
     # a typed premium would be a lie. DELTA reads the grid's chain — the SAME
     # fetch the snapshot came from — and an em-dash until it lands, never a
@@ -609,6 +630,12 @@ def render():
         if float(dt_slider.value or 0) > r["max"]:
             dt_slider.value = r["max"]
         snap_row.clear()
+        # ⚠ These three stay RAW ``ui.button``s, and the reason is in the guard's
+        # ALLOWED beside the entry: they are a STEPPER for the slider they sit
+        # next to — Now / Halfway / Expiry write a value into ``dt_slider`` and
+        # nothing else — not actions the page takes. Through ``kit.button`` they
+        # would read as three page actions inside a slider row, and they are
+        # rebuilt once per snap on every range change.
         with snap_row:
             for label, days in r["snaps"]:
                 ui.button(label, color=None, on_click=lambda e, d=days: _snap_days(d)) \
@@ -626,6 +653,45 @@ def render():
         _paint_tiles()
         _render_figures()
         _render_replay()
+
+    # ── revealing a chart means reflowing it ─────────────────────────────────
+    @guard
+    def _reflow_charts():
+        # A ``ui.highchart`` measures its container ONCE, at mount, and NiceGUI's
+        # element has no ResizeObserver (``chart.update()`` does NOT resize). So a
+        # chart that mounted hidden — inside an inactive tab panel, or simply
+        # built with ``set_visibility(False)`` — measured 0×0 and renders at
+        # title height for the rest of the session unless something asks it to
+        # re-measure once it is really on screen.
+        for el in (replay_chart, whatif_chart):
+            ui.run_javascript(f"getElement({el.id})?.chart?.reflow()")
+
+    def _queue_reflow():
+        """Reflow AFTER the browser has laid the now-visible element out.
+
+        One tick's delay, the same shape ``gamma._reflow_charts`` uses: the panel
+        or the chart has only just been told to show, and reflowing a still-hidden
+        element just re-measures zero. ``once=True`` removes the timer from its
+        slot as soon as it has fired, so these do not accumulate."""
+        ui.timer(0.05, _reflow_charts, once=True)
+
+    # ⚠ Every path that REVEALS a chart has to go through ``_show_chart``, not
+    # only the tab strip. Until 2026-09-20 the reflow fired on ``tabs.
+    # on_value_change`` alone — but the path a COLD page takes is the
+    # ``set_visibility(True)`` below, when its first result or replay trace
+    # lands, and that called nothing: the What-if chart appeared collapsed and
+    # stayed that way until the reader happened to change tabs and come back.
+    #
+    # Gated on the hidden→visible TRANSITION, which is the load-bearing half:
+    # ``_render_figures`` runs on every slider step, so an ungated reflow would
+    # queue a timer per step of a drag.
+    _chart_shown = {"replay": None, "whatif": None}
+
+    def _show_chart(key, el, visible):
+        el.set_visibility(visible)
+        was, _chart_shown[key] = _chart_shown[key], visible
+        if visible and was is not True:
+            _queue_reflow()
 
     # ── render figures from the cached sweep result ──────────────────────────
     def _paint_empty_states():
@@ -663,11 +729,11 @@ def render():
         _render_ivshock(result)
         if not result:
             whatif_empty.set_visibility(True)
-            whatif_chart.set_visibility(False)
+            _show_chart("whatif", whatif_chart, False)
             readout_lbl.text = ""
             return
         whatif_empty.set_visibility(False)
-        whatif_chart.set_visibility(True)
+        _show_chart("whatif", whatif_chart, True)
 
         spot = result.get("spot")
         # ΔS is a CLIENT-SIDE overlay line only — no command, computed here.
@@ -709,11 +775,11 @@ def render():
             replay_empty.text = (tr or {}).get("error") or \
                 sv.empty_state_text(state.get("meta"), editor.get_legs())
             replay_empty.set_visibility(True)
-            replay_chart.set_visibility(False)
+            _show_chart("replay", replay_chart, False)
             scrub_lbl.text = "Drag the slider to step through time"
             return
         replay_empty.set_visibility(False)
-        replay_chart.set_visibility(True)
+        _show_chart("replay", replay_chart, True)
         n = len(tr["x"])
         cur = int(min(max(scrub_slider.value or 0, 0), n - 1))
         scrub_lbl.text = sv.replay_cursor_text(tr, cur) or "Drag the slider to step through time"
@@ -800,8 +866,11 @@ def render():
     def _request_fetch(show_wait=False):
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
-            ui.notify("Enter a symbol first.", type="warning")
+            # VALIDATION, not an outcome: it belongs under the field the reader
+            # is looking at, not in a toast at the other end of the page.
+            kit.symbol_error(symbol_in, "Enter a symbol first.")
             return
+        kit.symbol_error(symbol_in, None)
         if show_wait and state.get("loading"):
             # Collapses the focusout-then-button-click double fire while a load is in
             # flight. (The Load button still force-reloads once loading clears — it
@@ -866,18 +935,9 @@ def render():
     panel.on_expiry(_set_all_expiry)
     panel.on_pick(_add_pick)
 
-    @guard
-    def _reflow_charts():
-        # Charts created inside an inactive tab panel measure a hidden (0×0)
-        # container at mount, and NiceGUI's highchart never re-measures afterwards
-        # (one reflow at mount, no ResizeObserver). When a tab becomes visible, ask
-        # each chart to reflow so it picks up the now-real container width/height.
-        for el in (replay_chart, whatif_chart):
-            ui.run_javascript(f"getElement({el.id})?.chart?.reflow()")
-
     # Reflow after the newly-selected panel has actually become visible (+ persist
-    # the active tab).
-    tabs.on_value_change(lambda e: (ui.timer(0.05, _reflow_charts, once=True), _capture()))
+    # the active tab). The other caller is ``_show_chart``, above.
+    tabs.on_value_change(lambda e: (_queue_reflow(), _capture()))
 
     fetch_btn.on_click(lambda e: _request_fetch(show_wait=True))
     # Strategy pick → re-seed the editor from the template, then enqueue both runs.
