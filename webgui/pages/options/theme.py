@@ -980,56 +980,51 @@ def build_macro_font_head_html(theme):
 
 def build_macro_css(theme):
     """The macro board's ONE ``ui.add_css`` escape-hatch block, scoped under
-    ``.macro-board``. Carries exactly what Tailwind cannot express: the radial
-    page ground, clip-path notches (panels + tiles), the flash keyframes
-    (ignition bar + price flare, and the Skin-B bloom), the per-tile custom-prop
-    washes, and the sheared breadth bar / pulsing live dot. Colours come from
-    ``[macro]`` so the palette stays config-driven.
+    ``.macro-board``.
 
-    One colour pair is here rather than in ``.classes()`` and it is deliberate:
-    the Skin-B text ramp is scoped on the WRAPPER's skin class, and ``_set_skin``
-    swaps that class without rebuilding the 69 tiles -- so a Tailwind class on the
-    child cannot express "only when the lattice is on" without repainting every
-    tile on every toggle."""
-    m = theme["macro"]
+    **SPLIT on 2026-09-19** when the page moved onto the kit: what is left is
+    the DATA EFFECTS and nothing else — the flash keyframes (ignition bar, price
+    flare and the Skin-B bloom), the per-tile custom-prop wash and heat fill,
+    the lattice's legibility ramp, and the reduced-motion opt-out. The page
+    ground, the rail's face, the clip-path notches and the left accent bar were
+    this page's own surface and went with the rest of it; the app surface
+    carries the ground now.
+
+    ⚠ **``.mb-tile``'s ``position:relative`` / ``overflow:hidden`` is NOT the
+    notch it used to share a rule with.** ``.mb-ig`` is ``position:absolute``,
+    so deleting that rule wholesale as "the notch" would position the ignition
+    bar against the PAGE rather than the tile, and stop the flare's glow being
+    clipped to it.
+
+    ⚠ **``@keyframes mbpx`` ends on the app's title colour, and must.** It
+    declares no ``animation-fill-mode``, so at 100% the label reverts to its
+    class colour — the terminus and ``mb-px``'s resting class have to name the
+    same one, or the flare finishes with a one-frame snap.
+
+    Two rules are here rather than in ``.classes()`` and both are deliberate:
+    the Skin-B text ramp and the lattice's ground-less frame are scoped on the
+    WRAPPER's skin class, and ``_set_skin`` swaps that class without rebuilding
+    the 69 tiles -- so a Tailwind class on the child cannot express "only when
+    the lattice is on" without repainting every tile on every toggle. The
+    transparent frame is the lattice's identity rather than chrome: a
+    continuous field of tiles is what "Heat Lattice" means, and ``/macro`` is
+    published pinned to that skin (``live_screens.SCREENS``)."""
+    m, p = theme["macro"], theme["palette"]
     return f"""
-.macro-board{{
-  background:
-    radial-gradient(1400px 700px at 50% -12%, {m['wash_in']} 0%, transparent 62%),
-    {m['void']};
-}}
-/* notched top rail */
-.macro-board .mb-rail{{
-  clip-path:polygon(18px 0,100% 0,100% calc(100% - 18px),calc(100% - 18px) 100%,0 100%,0 18px);
-  background:linear-gradient(90deg,rgba(53,224,255,.07),transparent 42%),{m['panel']};
-}}
-/* notched group panels + left accent bar (per-panel --mb-acc) */
-.macro-board .mb-panel{{
-  position:relative;
-  clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px);
-}}
-.macro-board .mb-panel::before{{
-  content:"";position:absolute;left:0;top:0;width:2px;height:100%;
-  background:linear-gradient(180deg,var(--mb-acc,{m['cyan']}),transparent 78%);opacity:.9;
-}}
-/* notched tiles */
-.macro-board .mb-tile{{
-  position:relative;overflow:hidden;
-  clip-path:polygon(0 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%);
-}}
+/* the tile is the ignition bar's containing block, and clips the flare */
+.macro-board .mb-tile{{position:relative;overflow:hidden}}
 /* ignition bar + price flare — fire ONLY when .fl is (re)applied on change */
 .macro-board .mb-ig{{position:absolute;left:0;top:0;height:2px;width:100%;
   transform:scaleX(0);transform-origin:left;opacity:0;background:var(--c,{m['flat']})}}
 .macro-board .mb-tile.fl .mb-ig{{animation:mbig .95s cubic-bezier(.2,.7,.3,1)}}
 @keyframes mbig{{0%{{transform:scaleX(0);opacity:1}}30%{{transform:scaleX(1);opacity:1}}100%{{transform:scaleX(1);opacity:0}}}}
 .macro-board .mb-tile.fl .mb-px{{animation:mbpx .95s ease-out}}
-@keyframes mbpx{{0%{{color:var(--c,{m['flat']});text-shadow:0 0 14px var(--c,{m['flat']})}}100%{{color:{m['txt']};text-shadow:none}}}}
+@keyframes mbpx{{0%{{color:var(--c,{m['flat']});text-shadow:0 0 14px var(--c,{m['flat']})}}100%{{color:{p['title']};text-shadow:none}}}}
 /* Skin A — Instrument: subtle magnitude-scaled wash over the tile fill */
 .macro-board.macro-a .mb-tile{{background-image:linear-gradient(160deg,var(--wash,transparent),transparent 62%)}}
-/* Skin B — Heat Lattice: no panel chrome, continuous heat fill, bloom on change */
-.macro-board.macro-b .mb-panel{{background:transparent !important;border-color:transparent !important;clip-path:none}}
-.macro-board.macro-b .mb-panel::before{{width:100%;height:1px;background:linear-gradient(90deg,var(--mb-acc,{m['cyan']}),transparent 55%)}}
-.macro-board.macro-b .mb-tile{{clip-path:none;background:var(--heat,{m['tile']}) !important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.045)}}
+/* Skin B — Heat Lattice: no frame ground, continuous heat fill, bloom on change */
+.macro-board.macro-b .mb-panel{{background:transparent !important;border-color:transparent !important}}
+.macro-board.macro-b .mb-tile{{background:var(--heat,{m['tile']}) !important;box-shadow:inset 0 0 0 1px rgba(255,255,255,.045)}}
 .macro-board.macro-b .mb-tile.fl{{animation:mblat .95s ease-out}}
 @keyframes mblat{{0%{{box-shadow:inset 0 0 0 1px var(--c,{m['flat']}),0 0 22px -4px var(--c,{m['flat']})}}100%{{box-shadow:inset 0 0 0 1px rgba(255,255,255,.045),0 0 0 0 transparent}}}}
 .macro-board.macro-b .mb-ig{{display:none}}
@@ -1037,10 +1032,6 @@ def build_macro_css(theme):
    dim/faint ramp, so lift the symbol + descriptor here only. */
 .macro-board.macro-b .mb-tile .mb-sym{{color:{m['lattice_sym']}}}
 .macro-board.macro-b .mb-tile .mb-desc{{color:{m['lattice_desc']}}}
-/* breadth bar shear + pulsing live dot */
-.macro-board .mb-shear{{transform:skewX(-16deg)}}
-.macro-board .mb-dot{{animation:mbbp 2s ease-in-out infinite}}
-@keyframes mbbp{{0%,100%{{opacity:1;transform:scale(1)}}50%{{opacity:.3;transform:scale(.8)}}}}
 @media (prefers-reduced-motion:reduce){{.macro-board *{{animation:none !important}}}}
 """
 

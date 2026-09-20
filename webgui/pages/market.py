@@ -1,20 +1,34 @@
 """Market Dashboard page (/market) — Tier-1, engine-free. Macro Board redesign.
 
 Reads cache:market:dashboard (published by market_svc) and renders the "Macro
-Board": ~90 quote tiles in notched, accent-barred category panels under a top
-rail (title / live dot / clock / breadth meter / skin toggle). Repaints IN PLACE
-on the ~2 s version bump; only tiles whose displayed value actually changed
-flash (ignition bar + price flare). Two skins — A (Instrument, default) and B
-(Heat Lattice) — toggled by a segmented control and persisted in app_settings.
+Board": ~90 quote tiles in accent-ruled category frames under a control bar
+(breadth meter / skin toggle). Repaints IN PLACE on the ~2 s version bump; only
+tiles whose displayed value actually changed flash (ignition bar + price
+flare). Two skins — A (Instrument, default) and B (Heat Lattice) — toggled by a
+segmented control and persisted in app_settings.
 
 Design principle: spend the intensity budget only on tiles that changed. The
 flat majority stays recessed; colour/glow/motion are reserved for movers.
 
+**On the page kit since 2026-09-19** (the consistency standard,
+``docs/plans/2026-09-19-app-ui-consistency-design.md``): the header line carries
+the name and the Updated stamp, the breadth meter and the skin toggle sit in a
+control bar, and the page wears the app surface, face and text ladder like every
+other screen. Two claims went with the page's own top rail — a static
+"STREAMING" pill the page could not back, and a session clock that rendered
+naive machine-local ``%H:%M:%S``, the only clock in the app that was neither
+Central nor a data stamp. The header stamp says the true thing instead.
+
+⚠ **THE WRAPPER CLASSES ARE NOT CHROME.** Every rule in ``theme.MACRO_CSS`` is
+scoped under ``.macro-board`` / ``.macro-a|b``, so the ignition bar, the price
+flare, the magnitude wash, the heat fill and the lattice bloom ALL hang off
+them. They ride the kit's page column; dropping them as surface would kill
+every data effect at once.
+
 Tailwind-first per house rules: layout / spacing / colour tokens are Tailwind
-classes; the ONE ``ui.add_css`` block (``theme.MACRO_CSS``) carries only what
-Tailwind cannot express — clip-path notches, the flash keyframes, the radial
-page ground and the per-tile custom-prop washes. Colours come from
-``config/theme.toml [macro]``.
+classes; the ONE ``ui.add_css`` block (``theme.MACRO_CSS``) now carries the data
+effects only — the flash keyframes, the per-tile custom-prop wash and heat fill,
+and the lattice's legibility ramp.
 
 IMPORTANT — colour semantics: direction (up/down/flat) keys on the service's
 ``color_state``, NOT the raw sign of %change. This board is polarity-aware (VIX
@@ -24,16 +38,29 @@ colouring would break. Wash MAGNITUDE still scales with |%change|.
 import app_settings
 import bus_client
 from nicegui import run, ui
+from pages import ui_kit as kit
+from pages.options import theme
 from pages.options.theme import (
     MACRO_COLORS as _MC,
     MACRO_CSS,
-    MACRO_FONT_HEAD_HTML,
     MACRO_TOKENS as _T,
 )
 from pages.ui_guard import guard, guard_async
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 
 VIEW = "market:dashboard"
+
+_P = theme.THEME["palette"]
+# Surface, text and borders are the APP's now. What stays is every colour that
+# encodes a value — the polarity hues, the magnitude wash, the heat fill, the
+# category accents; what goes is every grey that drew this page's own ground,
+# because a ground, a text step and a border are surface wherever they live.
+_FRAME_BG = f"bg-[{_P['input_bg']}]"          # a category frame, above the page
+_FRAME_EDGE = f"border-[{_P['card_border']}]"
+_TILE_BG = f"bg-[{_P['card_bg']}]"            # a card on that frame
+_PRICE_TXT = f"text-[{_P['title']}]"          # ⚠ @keyframes mbpx ends here
+_SYM_TXT = f"text-[{_P['muted']}]"
+_FAINT_TXT = f"text-[{_P['icon']}]"           # the faintest step of the ladder
 
 # category → left-accent hex (from the reference prototype's G array, keyed by
 # the REAL market_svc category names). Pure presentation; cyan fallback.
@@ -131,10 +158,12 @@ def heat_class(direction, mag):
 
 
 def border_class(direction):
+    # up / dn are the polarity tints and are DATA; ``flat`` is the absence of a
+    # move, so it takes the app's card border rather than a grey of this page's.
     return {
         "up": "border-[rgba(0,229,160,0.26)]",
         "dn": "border-[rgba(255,77,109,0.26)]",
-        "flat": f"border-[{_MC['edge']}]",
+        "flat": f"border-[{_P['card_border']}]",
     }[direction]
 
 
@@ -286,64 +315,37 @@ def _reactive_classes(t):
 
 
 def render():
-    from datetime import datetime
-
-    ui.add_head_html(MACRO_FONT_HEAD_HTML)
     ui.add_css(MACRO_CSS)
 
     skin = "B" if str(app_settings.get("macro_skin") or "A").upper() == "B" else "A"
     state = {"version": None, "built": False, "tiles": {}, "skin": skin}
 
-    # ── shell ────────────────────────────────────────────────────────────────
-    wrap = ui.column().classes(
-        f"macro-board macro-{skin.lower()} w-full gap-[18px] pb-16")
+    # ── frame ────────────────────────────────────────────────────────────────
+    # ⚠ ``macro-board`` and the skin class ride the KIT's page column. They are
+    # not this page's surface: every rule in MACRO_CSS is scoped under them, so
+    # the ignition bar, the price flare, the magnitude wash, the heat fill and
+    # the lattice bloom all hang off these two class names.
+    wrap = kit.page().classes(f"macro-board macro-{skin.lower()} pb-16")
 
-    # ── rail typography (2026-08-16) ────────────────────────────────────────
-    # ONE label style and ONE value style for the whole rail. It previously ran
-    # five near-identical sizes (9 / 9.5 / 10 / 10.5 / 14px) across four different
-    # tracking values, which reads as inconsistent even though the family is the
-    # same everywhere but the wordmark.
+    # ── control-bar typography (2026-08-16) ─────────────────────────────────
+    # ONE label style and ONE value style. It previously ran five near-identical
+    # sizes (9 / 9.5 / 10 / 10.5 / 14px) across four different tracking values,
+    # which reads as inconsistent even though the family is one.
     #
     # ``leading-none`` on both is what makes the alignment work: with default
     # line-heights a 9.5px caption and a 15px number sit in boxes of different
-    # heights, so their baselines cannot line up between one stat block and the
-    # next however the flex container is aligned.
-    _LBL = (f"{_T['MB_MONO']} {_T['MB_FAINT']} text-[9.5px] tracking-[.18em] "
-            "leading-none whitespace-nowrap")
-    _VAL = f"{_T['MB_MONO']} text-[15px] leading-none tabular-nums"
+    # heights, so their baselines cannot line up.
+    #
+    # ``tabular-nums`` is what aligns the digits, and it is a numeric variant of
+    # whatever face is in use — so the counts stay aligned on the app font.
+    _LBL = (f"{_FAINT_TXT} text-[9.5px] tracking-[.18em] leading-none "
+            "whitespace-nowrap")
+    _VAL = "text-[15px] leading-none tabular-nums"
 
     with wrap:
-        # ---- top rail ----
-        # items-start, NOT items-center: the stat blocks have different row counts
-        # (the breadth meter carries a bar the clock does not), and centring blocks
-        # of unequal height is exactly what pushed their labels and values onto
-        # different lines. Top-aligned with identical label/value rows, every
-        # caption sits on one line and every value on the next.
-        with ui.row().classes(
-                f"mb-rail {_T['MB_EDGE']} border items-start gap-7 flex-wrap "
-                "w-full px-5 py-3.5"):
-            # brand + status, on their own baseline
-            with ui.row().classes("items-baseline gap-3 self-center"):
-                ui.label("MACRO BOARD").classes(
-                    f"{_T['MB_TITLE']} {_T['MB_TXT']} text-[17px] font-bold "
-                    "tracking-[.18em] leading-none")
-                ui.label("LIVE TAPE").classes(_LBL)
-                with ui.row().classes("items-center gap-2 ml-1"):
-                    ui.element("div").classes(
-                        f"mb-dot w-[7px] h-[7px] "
-                        f"{_T['MB_UP'].replace('text-', 'bg-')} "
-                        "shadow-[0_0_10px_#00E5A0]")
-                    ui.label("STREAMING").classes(
-                        f"{_T['MB_MONO']} {_T['MB_UP']} text-[9.5px] "
-                        "tracking-[.18em] leading-none whitespace-nowrap")
-            # session clock — label row then value row, same shape as the breadth
-            # block so the two align
-            with ui.column().classes("gap-[7px]"):
-                ui.label("SESSION").classes(_LBL)
-                clock_lbl = ui.label("—").classes(f"{_VAL} {_T['MB_TXT']}")
-            # breadth meter — same label row + value row, with the bar hanging
-            # BELOW the value. It used to sit between them, which offset this
-            # block's numbers a whole bar-height below the clock.
+        kit.header("Macro Board", view=VIEW, stale=True)
+        with kit.control_bar():
+            # breadth meter — a label row, a value row, then the bar
             with ui.column().classes("gap-[7px] min-w-[190px]"):
                 # The scope is not visible in the numbers, so it is on hover:
                 # the meter reads the equity frames only (see BREADTH_CATEGORIES).
@@ -355,26 +357,36 @@ def render():
                 with ui.row().classes("justify-between w-full gap-6"):
                     bup_lbl = ui.label("0").classes(f"{_VAL} {_T['MB_UP']}")
                     bdn_lbl = ui.label("0").classes(f"{_VAL} {_T['MB_DN']}")
-                with ui.row().classes("h-[7px] gap-[2px] w-full") as bbar:
+                with ui.row().classes("h-[7px] gap-[2px] w-full"):
                     bar_up = ui.element("div").classes(
-                        f"mb-shear {_T['MB_UP'].replace('text-', 'bg-')} "
+                        f"{_T['MB_UP'].replace('text-', 'bg-')} "
                         "flex-[1_1_0%] shadow-[0_0_8px_rgba(0,229,160,0.5)]")
                     bar_dn = ui.element("div").classes(
-                        f"mb-shear {_T['MB_DN'].replace('text-', 'bg-')} "
+                        f"{_T['MB_DN'].replace('text-', 'bg-')} "
                         "flex-[1_1_0%] shadow-[0_0_8px_rgba(255,77,109,0.5)]")
             ui.space()
-            # skin toggle (segmented)
-            with ui.row().classes(f"{_T['MB_EDGE']} border self-center") as seg:
-                btn_a = ui.button("INSTRUMENT", on_click=lambda: _set_skin("A")) \
+            # ⚠ TWO RAW ``ui.button``s, with their reason recorded in the ui-kit
+            # guard's ALLOWED: this is a SEGMENTED PICKER — mutually exclusive by
+            # construction, applied instantly with no Go — and ``kit.button``'s
+            # four kinds have no selected state, so expressing selection through
+            # the kit would mean a page-side class swap over ``button_classes``,
+            # the exact drift the kit exists to stop. Only the styling changed.
+            with ui.row().classes(f"{_FRAME_EDGE} border rounded-[9px] "
+                                  "overflow-hidden"):
+                btn_a = ui.button("Instrument", color=None,
+                                  on_click=lambda: _set_skin("A")) \
                     .props("flat no-caps dense").classes(
-                        f"{_T['MB_SYM']} text-[9.5px] tracking-[.18em] rounded-none")
-                btn_b = ui.button("HEAT LATTICE", on_click=lambda: _set_skin("B")) \
+                        "text-[11px] rounded-none min-h-[30px] px-3")
+                btn_b = ui.button("Heat lattice", color=None,
+                                  on_click=lambda: _set_skin("B")) \
                     .props("flat no-caps dense").classes(
-                        f"{_T['MB_SYM']} text-[9.5px] tracking-[.18em] rounded-none")
+                        "text-[11px] rounded-none min-h-[30px] px-3")
         board = ui.row().classes("flex-wrap gap-[13px] items-start w-full")
 
-    _SEG_ON = f"{_T['MB_CYAN']} bg-[rgba(53,224,255,0.13)]"
-    _SEG_OFF = _T["MB_DIM"]
+    # The selected half is the app's pressed-button fill and title text; the
+    # other half is muted body text on the same ground.
+    _SEG_ON = f"bg-[{_P['btn_hover']}] text-[{_P['title']}]"
+    _SEG_OFF = f"text-[{_P['muted']}]"
 
     def _paint_seg():
         on, off = _SEG_ON.split(), _SEG_OFF.split()
@@ -397,17 +409,22 @@ def render():
         with board:
             for cat in payload.get("categories", []):
                 name = cat.get("category", "")
+                # ``mb-panel`` STAYS: the lattice skin's own rule reaches the
+                # frame through it (see build_macro_css).
                 with ui.column().classes(
-                        f"mb-panel {_T['MB_PANEL_BG']} {_T['MB_EDGE']} border "
-                        f"[--mb-acc:{accent_of(name)}] px-[11px] pt-[10px] "
-                        "pb-[11px] gap-[9px]"):
+                        f"mb-panel {_FRAME_BG} {_FRAME_EDGE} border "
+                        "rounded-[12px] px-[11px] pt-[10px] pb-[11px] "
+                        "gap-[9px]"):
                     with ui.row().classes("items-center gap-[9px] w-full pl-[9px]"):
                         ui.label(name.upper()).classes(
-                            f"{_T['MB_MONO']} {_T['MB_DIM']} text-[9.5px] "
-                            "tracking-[.24em]")
+                            f"{_SYM_TXT} text-[9.5px] tracking-[.24em]")
+                        # The category's own hue, off the finite _ACCENT map.
+                        # It used to paint a clip-path-era bar down the frame's
+                        # left edge; that chrome went with the notches, and the
+                        # accent moved onto the rule the label row already draws.
                         ui.element("div").classes(
-                            f"flex-1 h-px bg-gradient-to-r from-[{_MC['edge']}] "
-                            "to-transparent")
+                            f"flex-1 h-px bg-gradient-to-r "
+                            f"from-[{accent_of(name)}] to-transparent")
                     with ui.row().classes("flex-wrap gap-[7px]"):
                         for i, t in enumerate(cat.get("tiles", [])):
                             _build_tile(t, i)
@@ -434,25 +451,28 @@ def render():
         # Fixed width + no grow/shrink is what makes them uniform; a frame now
         # sizes to a whole number of tiles instead of stretching them.
         container = ui.column().classes(
-            f"mb-tile {_T['MB_TILE_BG']} border {rc['border']} {rc['opacity']} "
+            f"mb-tile {_TILE_BG} border {rc['border']} {rc['opacity']} "
             f"{rc['cvar']} {rc['wash']} {rc['heat']} {oc} "
-            "w-[152px] shrink-0 grow-0 min-h-[96px] "
+            "rounded-[10px] w-[152px] shrink-0 grow-0 min-h-[96px] "
             "px-[11px] pt-[9px] pb-[8px] gap-0")
         with container:
             ui.element("div").classes("mb-ig")
             ui.label(t.get("display", "")).classes(
-                f"mb-sym {_T['MB_SYM']} {_T['MB_DIM']} text-[11px] font-bold "
-                "tracking-[.13em]")
+                f"mb-sym {_SYM_TXT} text-[11px] font-bold tracking-[.13em]")
+            # ⚠ ``mb-px``'s resting colour and ``@keyframes mbpx``'s 100% stop
+            # must name the SAME colour: the flare has no animation-fill-mode,
+            # so at 100% the label reverts to this class and any difference
+            # shows as a one-frame snap.
             px_lbl = ui.label(tx["last"]).classes(
-                f"mb-px {_T['MB_MONO']} {_T['MB_TXT']} text-[17px] font-medium "
+                f"mb-px {_PRICE_TXT} text-[17px] font-medium "
                 "tabular-nums mt-[3px] leading-tight")
             ch_lbl = ui.label(tx["change"]).classes(
-                f"{_T['MB_MONO']} {rc['chtext']} text-[10.5px] tabular-nums mt-[2px]")
+                f"{rc['chtext']} text-[10.5px] tabular-nums mt-[2px]")
             # `mb-desc` is the hook the Skin-B text ramp needs (see
             # `build_macro_css`): on the lattice this line carries the option
-            # skew over a bright heat fill, where `MB_FAINT` measured 1.08:1.
+            # skew over a bright heat fill, where the faint step measured 1.08:1.
             ex_lbl = ui.label(descriptor_line(t)).classes(
-                f"mb-desc {_T['MB_MONO']} {_T['MB_FAINT']} text-[10px] "
+                f"mb-desc {_FAINT_TXT} text-[10px] "
                 "tracking-[.05em] mt-[2px] truncate max-w-[128px]")
             ui.tooltip(t.get("description", ""))
         state["tiles"][t.get("display")] = {
@@ -519,10 +539,6 @@ def render():
             _build(payload)
             _paint_breadth(payload)
 
-    @guard
-    def _tick_clock():
-        clock_lbl.text = datetime.now().strftime("%H:%M:%S")
-
     @guard_async
     async def _poll():
         v = await run.io_bound(bus_client.read_version, VIEW)
@@ -534,13 +550,11 @@ def render():
             _paint(payload)
 
     _paint_seg()
-    _tick_clock()
     payload, version = bus_client.read_full(VIEW)
     if payload:
         state["version"] = version
         _paint(payload)
     else:
         with board:
-            ui.label(_copy.WAITING_MARKET).classes(_T["MB_DIM"])
-    ui.timer(1.0, _tick_clock)
+            kit.empty(_copy.WAITING_MARKET)
     ui.timer(2.0, _poll)

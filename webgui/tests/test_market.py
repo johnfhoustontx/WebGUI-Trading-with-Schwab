@@ -263,3 +263,218 @@ def test_render_flashes_only_changed_tiles_off_loop():
     assert "async def _poll" in src and "run.io_bound(bus_client.read" in src
     # skin persistence
     assert 'app_settings.set("macro_skin"' in src
+
+
+# ── the Macro Board on the page kit (Phases 3 & 4, Task 7) ───────────────────
+# THE TRAP IN THIS MIGRATION: every rule in ``MACRO_CSS`` is scoped under
+# ``.macro-board`` / ``.macro-a|b``, so the wrapper classes are what the DATA
+# effects hang off. Dropping them as "chrome" would kill the ignition bar, the
+# price flare, the magnitude wash, the heat fill and the lattice bloom at once.
+def _board_payload():
+    """A ``market:dashboard`` payload shaped like ``market_svc``'s output."""
+    return {"categories": [
+        {"category": "Volatility", "tiles": [
+            {"display": "VIX", "last": 16.13, "change": 0.4, "change_pct": 3.6,
+             "color_state": "risk_off_mild", "description": "CBOE VIX"}]},
+        {"category": "Broad-Market ETF", "tiles": [
+            {"display": "SPY", "last": 640.2, "change": 1.2, "change_pct": 0.19,
+             "color_state": "risk_on_mild", "description": "S&P 500 ETF"},
+            {"display": "QQQ", "last": 570.1, "change": -0.8, "change_pct": -0.14,
+             "color_state": "risk_off_mild", "description": "Nasdaq 100 ETF"}]},
+    ]}
+
+
+def _render_market(monkeypatch, payload=None):
+    """Build the page against the auto-index client and return ONLY the
+    elements THIS render built.
+
+    The auto-index client is shared by every test in the session, so a plain
+    ``elements.values()`` would also hand back controls another page's render
+    left behind, and these assertions would then pass whatever this page did
+    (rule 10 of the plan, paid for on Task 1)."""
+    import bus_client
+    from nicegui import ui
+    from pages import market as M
+    monkeypatch.setattr(bus_client, "read_full",
+                        lambda _v: (payload, 1) if payload else (None, None))
+    monkeypatch.setattr(bus_client, "read", lambda _v: payload)
+    monkeypatch.setattr(bus_client, "read_version",
+                        lambda _v: 1 if payload else None)
+    before = set(ui.context.client.elements)
+    with ui.card():
+        M.render()
+    return [e for i, e in ui.context.client.elements.items() if i not in before]
+
+
+def _classes(elements):
+    return [" ".join(getattr(e, "_classes", []) or []) for e in elements]
+
+
+def test_the_macro_frame_is_the_kit_and_carries_no_surface_of_its_own():
+    """The page loses its own ground, its three faces and its text ladder.
+
+    ``stale=True`` is honest here: ``market:dashboard`` is the scheduled view
+    ``status.py`` already marks ``True``, and it is the page's only view."""
+    import inspect
+    src = inspect.getsource(market.render)
+    assert "kit.page()" in src
+    assert 'kit.header("Macro Board", view=VIEW, stale=True)' in src
+    # A ground, a text step, a face and a border are surface WHEREVER they live
+    # — in the frame or in a module-level helper (the db39442 lesson).
+    whole = inspect.getsource(market)
+    for token in ("MACRO_FONT_HEAD_HTML", "MB_MONO", "MB_TITLE", "MB_SYM",
+                  "MB_TXT", "MB_DIM", "MB_FAINT", "MB_EDGE", "MB_PANEL_BG",
+                  "MB_TILE_BG", "MB_CYAN"):
+        assert token not in whole, f"{token} is a page-scoped surface value"
+
+
+def test_the_board_wrapper_still_carries_the_classes_the_effects_hang_off(
+        monkeypatch):
+    """THE TRAP, pinned. ``.macro-board`` and the skin class scope EVERY rule in
+    ``MACRO_CSS`` — the ignition bar, the price flare, the Skin-A magnitude
+    wash, the Skin-B heat fill and the lattice bloom. They are not chrome; they
+    are what the data effects hang off.
+
+    Passes before and after the migration by design — the guard on what must
+    NOT change, not a red-then-green test."""
+    els = _render_market(monkeypatch, _board_payload())
+    wrappers = [c for c in _classes(els) if "macro-board" in c]
+    assert wrappers, "the board wrapper lost .macro-board"
+    assert any("macro-a" in c or "macro-b" in c for c in wrappers), \
+        "the board wrapper lost its skin class"
+    joined = " ".join(_classes(els))
+    for hook in ("mb-tile", "mb-ig", "mb-px", "mb-sym", "mb-desc", "mb-panel"):
+        assert hook in joined, f"{hook} is a MACRO_CSS selector hook"
+
+
+def test_the_streaming_claim_and_the_naive_local_clock_are_gone(monkeypatch):
+    """Two honesty fixes the header makes for free. The static "STREAMING" pill
+    and its pulsing dot claimed a stream the page cannot back; the SESSION clock
+    rendered naive machine-local ``%H:%M:%S`` — the only clock in the app that
+    is neither Central nor a data stamp. The kit stamp says the true thing."""
+    import inspect
+    # ``render``'s own source, not the module's: the docstring NAMES what was
+    # removed and why, which is the record, not a claim on screen.
+    src = inspect.getsource(market.render)
+    for gone in ("STREAMING", "SESSION", "_tick_clock", "mb-dot",
+                 '"%H:%M:%S"'):
+        assert gone not in src, f"{gone} is a claim the page cannot back"
+    els = _render_market(monkeypatch, _board_payload())
+    texts = {str(getattr(e, "text", "")) for e in els}
+    assert "STREAMING" not in texts and "SESSION" not in texts
+    assert not any("mb-dot" in c for c in _classes(els))
+    assert inspect.getsource(market.render).count("ui.timer(") == 1, \
+        "the 1 s clock timer goes with the clock"
+
+
+def test_the_skin_toggle_is_a_control_bar_segmented_picker_that_persists(
+        monkeypatch):
+    """The two skin buttons stay RAW ``ui.button``s with a written reason in the
+    guard's ALLOWED — a segmented picker is mutually exclusive by construction
+    and ``kit.button``'s four kinds have no selected state. They move out of the
+    page's own rail into a ``kit.control_bar()``."""
+    import inspect
+    from nicegui import ui
+    src = inspect.getsource(market.render)
+    assert "kit.control_bar()" in src
+    assert 'app_settings.set("macro_skin"' in src   # the literal line 265 pins
+    els = _render_market(monkeypatch, _board_payload())
+    buttons = [e for e in els if isinstance(e, ui.button)]
+    assert len(buttons) == 2, f"expected the two skin buttons, got {buttons}"
+    assert buttons[0].parent_slot is buttons[1].parent_slot, \
+        "a segmented picker is one control, in one slot"
+    assert set(buttons[0]._classes) != set(buttons[1]._classes), \
+        "the selected half must be painted differently from the other"
+    assert not any("tracking-[.18em]" in " ".join(b._classes) for b in buttons), \
+        "the page's own tracked display face goes with the rest of it"
+
+
+def test_the_cold_cache_line_is_the_apps_one_empty_state():
+    import inspect
+    src = inspect.getsource(market.render)
+    assert "kit.empty(_copy.WAITING_MARKET)" in src
+
+
+def test_the_category_accent_moves_onto_the_label_rule_it_still_has():
+    """The clip-path-era left accent bar (``.mb-panel::before``) is chrome and
+    goes; the 14 category hues are the frame's identity and survive on the
+    hairline the label row already draws, so ``accent_of`` stays live rather
+    than becoming a pure function nothing calls."""
+    import inspect
+    src = inspect.getsource(market.render)
+    assert "accent_of(name)" in src
+    assert "--mb-acc" not in src, "the accent bar's custom property is dead"
+
+
+# ── the MACRO_CSS split: chrome out, data effects in ─────────────────────────
+def test_macro_css_keeps_every_data_effect():
+    from pages.options.theme import MACRO_CSS
+    for rule in ("@keyframes mbig",            # the ignition bar
+                 "@keyframes mbpx",            # the price flare
+                 "@keyframes mblat",           # the Skin-B bloom
+                 ".macro-board .mb-tile.fl .mb-ig{animation:mbig",
+                 ".macro-board .mb-tile.fl .mb-px{animation:mbpx",
+                 ".macro-board.macro-a .mb-tile{background-image:linear-gradient",
+                 "background:var(--heat,",     # the Skin-B heat fill
+                 ".macro-board.macro-b .mb-tile.fl{animation:mblat",
+                 "@media (prefers-reduced-motion:reduce)"):
+        assert rule in MACRO_CSS, f"{rule} is a data effect, not chrome"
+
+
+def test_macro_css_drops_the_chrome_the_app_surface_now_carries():
+    from pages.options.theme import MACRO_CSS
+    for gone in ("radial-gradient",      # the page ground
+                 "clip-path",            # the rail / panel / tile notches
+                 "mb-rail",              # the rail's own gradient face
+                 "::before",             # the left accent bar
+                 "mb-shear",             # the sheared breadth bar
+                 "mb-dot",               # the pulsing STREAMING dot
+                 "@keyframes mbbp"):
+        assert gone not in MACRO_CSS, f"{gone} is chrome the app surface carries"
+
+
+def test_the_tile_is_still_the_ignition_bars_containing_block():
+    """The SECOND trap, one rule over. ``.mb-tile``'s notch is chrome — but the
+    same rule carries ``position:relative`` and ``overflow:hidden``, and
+    ``.mb-ig`` is ``position:absolute``. Delete the whole rule as "the notch"
+    and the ignition bar positions against the PAGE instead of the tile, and the
+    price flare's glow is no longer clipped to it."""
+    from pages.options.theme import MACRO_CSS
+    assert ".macro-board .mb-tile{position:relative;overflow:hidden}" in MACRO_CSS
+    assert ".macro-board .mb-ig{position:absolute" in MACRO_CSS
+
+
+def test_skin_b_still_suppresses_the_ignition_bar_so_one_effect_fires():
+    """Must-not-change. ``.macro-b .mb-ig{display:none}`` is not chrome: it is
+    what routes a changed tile to the lattice bloom INSTEAD of the ignition bar.
+    Without it both fire on Heat Lattice."""
+    from pages.options.theme import MACRO_CSS
+    assert ".macro-board.macro-b .mb-ig{display:none}" in MACRO_CSS
+
+
+def test_the_lattice_panel_still_carries_no_ground_of_its_own():
+    """Must-not-change. ``/macro`` is the PUBLIC screen and it is pinned to skin
+    B (``live_screens.SCREENS``), so the lattice's continuous field of tiles is
+    what the public site shows. A transparent panel is that skin's identity, not
+    the notch chrome that used to sit around it."""
+    from pages.options.theme import MACRO_CSS
+    assert (".macro-board.macro-b .mb-panel{background:transparent !important;"
+            "border-color:transparent !important}") in MACRO_CSS
+
+
+def test_the_price_flare_ends_on_the_colour_the_price_actually_wears(monkeypatch):
+    """Must-not-change, and the reason ``MB_TXT`` could not simply be dropped.
+    ``@keyframes mbpx`` has no ``animation-fill-mode``, so at 100% the element
+    reverts to its class colour — which means the keyframe's terminus and the
+    price label's resting class must name the SAME colour, or the flare ends in
+    a one-frame snap."""
+    import re
+    from pages.options.theme import MACRO_CSS
+    end = re.search(r"@keyframes mbpx\{.*?100%\{color:(#[0-9A-Fa-f]{6})",
+                    MACRO_CSS)
+    assert end, "the price flare lost its terminus"
+    els = _render_market(monkeypatch, _board_payload())
+    price = next(e for e in els if "mb-px" in (getattr(e, "_classes", []) or []))
+    assert f"text-[{end.group(1)}]" in price._classes, (
+        f"the flare ends on {end.group(1)} but the price label wears "
+        f"{[c for c in price._classes if c.startswith('text-[#')]}")

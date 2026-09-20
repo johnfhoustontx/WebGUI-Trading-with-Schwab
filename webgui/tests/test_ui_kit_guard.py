@@ -23,7 +23,13 @@ ALLOWED = {
     "driver.py": {"button": 8, "dialog": 2, "notify": 1, "table": 5},
     "eod.py": {"button": 3, "notify": 2},
     "manuals.py": {"button": 1},
-    "market.py": {"add_head_html": 1, "button": 2},
+    # The Macro Board's skin toggle, and it stays: a SEGMENTED PICKER, mutually
+    # exclusive by construction and applied instantly with no Go. kit.button's
+    # four kinds have no selected state, so expressing selection through the kit
+    # would mean a page-side class swap over button_classes(...) - the exact
+    # drift the kit exists to stop. The page has no other control: it commands
+    # nothing and polls on a timer.
+    "market.py": {"button": 2},
     "options/calculator.py": {"add_head_html": 1, "button": 3, "dialog": 1, "notify": 3},
     # The panel's collapse toggle, and it stays: it carries a floating flag
     # badge and a tooltip retitled on every toggle, which kit.icon_button does
