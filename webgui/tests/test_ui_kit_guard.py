@@ -25,6 +25,10 @@ ALLOWED = {
     "manuals.py": {"button": 1},
     "market.py": {"add_head_html": 1, "button": 2},
     "options/calculator.py": {"add_head_html": 1, "button": 3, "dialog": 1, "notify": 3},
+    # The panel's collapse toggle, and it stays: it carries a floating flag
+    # badge and a tooltip retitled on every toggle, which kit.icon_button does
+    # not model. Not an action button - the panel's ACTIONS are the page's, and
+    # they go through the kit into handle.actions.
     "options/detail.py": {"button": 1},
     "options/entry_panel.py": {"button": 3},
     "options/expected_move.py": {"button": 1, "notify": 1},
