@@ -15,8 +15,22 @@ from pages import terminal_theme as T
 from pages import trade_help as th
 from pages import trade_shell as sh
 from pages import trade_terminal as tt
+from pages import ui_kit as kit
+from pages.options import theme
 from pages.trade import (dealer_rows, gate_rows, short_gate_rows,
                          swing_headline, verdict_text_class)
+
+_P = theme.THEME["palette"]
+# The app's neutral ladder, which replaced the eight rungs this page used to
+# spell out by hand. Two text tokens and one border: ``theme.LABEL`` for a
+# reading, ``theme.MUTED`` for what qualifies it, and ``_FAINT`` for the
+# dimmest captions - the colour ``kit.EYEBROW`` wears.
+# ``_FRAME_EDGE`` / ``_TRACK`` are chart FURNITURE, not data: the market-state
+# strip's hairline, the dealer ladder's axis and a peer bar's trough each draw
+# a frame, so they take the app's card border.
+_FAINT = f"text-[{_P['icon']}]"
+_FRAME_EDGE = f"border-[{_P['card_border']}]"
+_TRACK = f"bg-[{_P['card_border']}]"
 
 
 def render():
@@ -29,13 +43,10 @@ def _build(state, refs):
     # ── market state + gates ────────────────────────────────────────────────
     # One line, not a stacked block: the eyebrow, the sentence and both chips
     # are each short, and stacking them cost a third of the fold for four words.
-    with ui.row().classes("w-full items-center gap-3 flex-wrap rounded-[10px] "
-                          "border border-[#1c2740] "
-                          "bg-[linear-gradient(180deg,#0e1626,#0b1220)] "
-                          "px-[14px] py-2"):
+    with ui.row().classes(f"{theme.CARD} w-full items-center gap-3 flex-wrap"):
         with ui.label("MARKET STATE").classes(T.EYEBROW):
             sh.tip(th.help_for("market_state"))
-        market = ui.label("").classes("text-[12.5px] text-[#cfdaee] min-w-0")
+        market = ui.label("").classes(f"text-[12.5px] {theme.LABEL} min-w-0")
         ui.element("div").classes("flex-1 min-w-[8px]")
         chips = ui.row().classes("gap-[7px] flex-wrap")
 
@@ -47,9 +58,10 @@ def _build(state, refs):
         with sh.panel():
             with ui.row().classes("w-full items-baseline justify-between gap-3"):
                 with ui.row().classes("items-baseline gap-[10px]"):
-                    with ui.label("Short Term").classes(T.PANEL_TITLE):
+                    with kit.section_title("Short Term"):
                         sh.tip(th.help_for("position_panel"))
-                    ui.label("1–8 weeks").classes("text-[12px] text-[#6b7b9c]")
+                    ui.label("1–8 weeks").classes(
+                        f"text-[12px] {theme.MUTED}")
                 ui.label("validated factor model").classes(T.SUBTLE)
 
             # ── the recommendation: what to DO ──────────────────────────
@@ -68,7 +80,7 @@ def _build(state, refs):
                     with rec_conf:
                         sh.tip(th.help_for("confidence"))
                 rec_detail = ui.label("").classes(
-                    "text-[13px] leading-[1.6] text-[#cfdaee]")
+                    f"text-[13px] leading-[1.6] {theme.LABEL}")
                 rec_caveat = ui.row().classes(f"{T.CALLOUT} w-full")
 
             # ── the ranking, kept as information ────────────────────────
@@ -79,7 +91,7 @@ def _build(state, refs):
                     with ui.label("RANKING").classes(T.EYEBROW):
                         sh.tip(th.help_for("band_rail"))
                     rank_line = ui.label("").classes(
-                        f"{T.MONO} text-[12px] text-[#7d8db0]")
+                        f"{T.MONO} text-[12px] {theme.MUTED}")
                     with rank_line:
                         sh.tip(th.help_for("band_stats"))
 
@@ -91,8 +103,8 @@ def _build(state, refs):
                     marker = ui.element("div").classes(
                         "absolute -top-1 -bottom-1 w-[3px] rounded-[2px] "
                         "bg-white shadow-[0_0_10px_rgba(255,255,255,0.6)] left-1/2")
-                with ui.row().classes("w-full justify-between text-[10px] "
-                                      "text-[#56678a]"):
+                with ui.row().classes(
+                        f"w-full justify-between text-[10px] {_FAINT}"):
                     # Not "decile" — there are five bands, and they are cut from
                     # the model's own score history, not from today's names.
                     ui.label("weakest band")
@@ -103,15 +115,15 @@ def _build(state, refs):
 
             side_cards = ui.element("div").classes(
                 "w-full grid grid-cols-2 gap-3")
-            pos_foot = ui.label("").classes("text-[11px] leading-[1.5] "
-                                            "text-[#6b7b9c] mt-auto pt-[3px]")
+            pos_foot = ui.label("").classes(
+                f"text-[11px] leading-[1.5] {theme.MUTED} mt-auto pt-[3px]")
 
         with sh.panel():
             with ui.row().classes("w-full items-baseline justify-between gap-3"):
                 with ui.row().classes("items-baseline gap-[10px]"):
-                    with ui.label("Long Term").classes(T.PANEL_TITLE):
+                    with kit.section_title("Long Term"):
                         sh.tip(th.help_for("investor_panel"))
-                    ui.label("months+").classes("text-[12px] text-[#6b7b9c]")
+                    ui.label("months+").classes(f"text-[12px] {theme.MUTED}")
                 ui.label("fundamentals + relative strength").classes(T.SUBTLE)
 
             # Same three geometry constants as the Short Term headline, so the
@@ -127,10 +139,10 @@ def _build(state, refs):
                     with inv_conf:
                         sh.tip(th.help_for("investor_confidence"))
                     verdict_score = ui.label("").classes(
-                        f"{T.MONO} text-[13px] text-[#7d8db0]")
+                        f"{T.MONO} text-[13px] {theme.MUTED}")
             inv_bars = ui.column().classes("w-full gap-[9px]")
-            inv_foot = ui.label("").classes("text-[11px] leading-[1.5] "
-                                            "text-[#6b7b9c] mt-auto pt-[3px]")
+            inv_foot = ui.label("").classes(
+                f"text-[11px] leading-[1.5] {theme.MUTED} mt-auto pt-[3px]")
 
     # ── dealer ──────────────────────────────────────────────────────────────
     dealer_panel = sh.panel("Dealer positioning & volatility",
@@ -181,7 +193,7 @@ def _build(state, refs):
         rec_caveat.set_visibility(bool(rec["caveat"]))
         if rec["caveat"]:
             with rec_caveat:
-                ui.label("⚠").classes("text-[13px] text-[#fbbf24]")
+                ui.label("⚠").classes(f"text-[13px] {T.WARN}")
                 ui.label(rec["caveat"]).classes(T.CALLOUT_TEXT)
 
         rail_vals = tt.percentile_rail(sm)
@@ -254,7 +266,7 @@ def _build(state, refs):
         ladder.clear()
         with ladder:
             ui.element("div").classes(
-                "absolute left-0 right-0 top-[27px] h-px bg-[#22304c]")
+                f"absolute left-0 right-0 top-[27px] h-px {_TRACK}")
             for m in marks:
                 with ui.element("div").classes(
                         "absolute top-0 bottom-0 flex flex-col items-center "
@@ -277,12 +289,12 @@ def _build(state, refs):
             # level is simply absent from the list rather than present as None.
             for row in dealer_rows(a.get("dealer_context")):
                 with ui.column().classes(
-                        "gap-[6px] pl-3 border-l-2 border-[#22304c]"):
+                        f"gap-[6px] pl-3 border-l-2 {_FRAME_EDGE}"):
                     with ui.label(str(row.get("label", "")).upper()).classes(
                             T.EYEBROW):
                         sh.tip(th.row_help(row.get("label")))
                     ui.label(str(row.get("value", "—"))).classes(
-                        f"{T.MONO} text-[16px] font-bold text-[#cfdaee]")
+                        f"{T.MONO} text-[16px] font-bold {theme.LABEL}")
 
         peers = a.get("peers") or {}
         ranked = peers.get("ranked") or []
@@ -344,10 +356,10 @@ def _side_card(side, clearance, gates):
         # and a reader hovering the reasons wants the same explanation.
         sh.tip(th.clearance_help(side, state))
         ui.label(side).classes("text-[10px] font-extrabold tracking-[0.15em]")
-        ui.label(word).classes("text-[14px] font-semibold text-[#e6edf7]")
+        ui.label(word).classes(f"text-[14px] font-semibold {theme.LABEL}")
         detail = "; ".join(g for g in (gates or [])) or \
             "; ".join((clearance or {}).get("reasons") or []) or "No gates fired."
-        ui.label(detail).classes(f"{T.NOTE} text-[#8b9bb4]")
+        ui.label(detail).classes(f"{T.NOTE} {theme.MUTED}")
 
 
 def _peer_card(p, symbol):
@@ -355,7 +367,7 @@ def _peer_card(p, symbol):
     is_self = sym == (symbol or "").upper()
     pct = fmt.num(p.get("percentile"))
     border = "border-[#3a3f7a] bg-[rgba(99,102,241,0.08)]" if is_self \
-        else "border-[#22304c] bg-[rgba(15,23,40,0.5)]"
+        else f"{_FRAME_EDGE} bg-[{_P['card_bg']}]"
     with ui.column().classes(f"gap-[9px] rounded-[10px] border px-[14px] "
                              f"py-[13px] {border}"):
         ui.label("THIS SYMBOL" if is_self else "PEER").classes(
@@ -363,10 +375,11 @@ def _peer_card(p, symbol):
         with ui.row().classes("items-baseline gap-[9px]"):
             ui.label(sym).classes(
                 f"{T.MONO} text-[15px] font-bold "
-                + ("text-[#818cf8]" if is_self else "text-[#cfdaee]"))
+                + ("text-[#818cf8]" if is_self else theme.LABEL))
             ui.label(f"{int(pct)}th" if pct is not None else "—").classes(
-                f"{T.MONO} text-[12px] text-[#7d8db0]")
-        with ui.element("div").classes("h-[3px] w-full rounded-[2px] bg-[#17223a]"):
+                f"{T.MONO} text-[12px] {theme.MUTED}")
+        with ui.element("div").classes(
+                f"h-[3px] w-full rounded-[2px] {_TRACK}"):
             ui.element("div").classes(
                 "h-[3px] rounded-[2px] "
                 + ("bg-[#818cf8]" if is_self else "bg-[#4a5b7d]")

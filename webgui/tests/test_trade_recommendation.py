@@ -212,11 +212,16 @@ class TestTheRenameIsComplete:
                 / rel).read_text(encoding="utf-8")
 
     def test_the_overview_panels_carry_the_new_titles(self):
+        """Re-aimed 2026-09-20, not weakened: the two heads are built through
+        ``kit.section_title`` now, so ``ui.label("Short Term")`` no longer
+        appears anywhere. What this test protects is the WORDS — a rename that
+        stops halfway — and the negative half is STRONGER than it was: the old
+        names are forbidden as any quoted string rather than only as a label."""
         src = self._src("pages/trade_overview.py")
-        assert 'ui.label("Short Term")' in src
-        assert 'ui.label("Long Term")' in src
-        assert 'ui.label("Position")' not in src
-        assert 'ui.label("Investor")' not in src
+        assert 'kit.section_title("Short Term")' in src
+        assert 'kit.section_title("Long Term")' in src
+        assert '"Position"' not in src
+        assert '"Investor"' not in src
 
     def test_no_user_facing_string_still_says_the_old_card_names(self):
         """Engine keys (`position_verdict`, `investor_verdict`) and the dead

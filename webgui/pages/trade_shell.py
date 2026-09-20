@@ -299,7 +299,11 @@ def panel(title=None, stamp=None, classes="", help=None):
         with col:
             with ui.row().classes("w-full items-baseline justify-between "
                                   "gap-3 flex-wrap"):
-                with ui.label(title).classes(T.PANEL_TITLE):
+                # The app's one panel heading, so a Signal Desk panel reads
+                # like a panel anywhere else. It was ``T.PANEL_TITLE`` — a
+                # page-scoped face a step larger and bolder than every other
+                # heading in the app.
+                with kit.section_title(title):
                     tip(help)
                 if stamp:
                     ui.label(stamp).classes(T.SUBTLE)
