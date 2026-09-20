@@ -335,11 +335,25 @@ The landing page and the largest file in the app — but the smallest control su
 
 ### Task 10: The console vocabulary retires; guard, help text and config
 
-**Files:** Modify `webgui/pages/options/theme.py`, `config/theme.toml`, `webgui/page_help.py`, `webgui/tests/test_ui_kit_guard.py`; Test `webgui/tests/test_theme.py`, `webgui/tests/test_theme_console.py`
+**Files:** Modify `webgui/pages/console.py`, `webgui/pages/console_cards.py`, `webgui/pages/console_regime.py`, `webgui/pages/console_page.py`, `webgui/pages/options/theme.py`, `config/theme.toml`, `webgui/page_help.py`, `webgui/tests/test_ui_kit_guard.py`; Test `webgui/tests/test_console_cards.py`, `webgui/tests/test_console_regime.py`, `webgui/tests/test_theme.py`, `webgui/tests/test_theme_console.py`
 
-With Tasks 6, 8 and 9 done, nothing renders the console surface any more.
+⚠ **This task is bigger than its first draft said, and the correction is measured.** That draft claimed "with Tasks 6, 8 and 9 done, nothing renders the console surface any more" — **false**. Tasks 6, 8 and 9 stop the three PAGES using it, but the console's card interiors live in four SHARED modules that no page task touches. Counted after Task 6, on the migrated tree:
 
-- Delete from `theme.py`: `CONSOLE_PAGE`, `CONSOLE_CARD`, `CONSOLE_CELL`, `CONSOLE_HAIRLINE`, `CONSOLE_TRACK`, `CONSOLE_RULE`, `CONSOLE_DIVIDER`, `CONSOLE_DISPLAY`, `CON_TXT*`, `build_console_font_head_html` / `CONSOLE_FONT_HEAD_HTML`, and `CONSOLE_KEYFRAMES_CSS` **if** Task 9's grep found no `con-pulse`. Keep `CON_POS` / `CON_NEG` / `CON_WARN` and `console_colors()["regimes"]`.
+| file | console surface-token uses | covered by |
+|---|---|---|
+| `desk.py` | 66 | Task 9 |
+| `console_regime.py` | 35 | **this task** |
+| `symbol.py` | 29 | Task 8 |
+| `console_cards.py` | 25 | **this task** |
+| `console.py` | 10 | **this task** |
+| `console_page.py` | 7 (the footer, which Task 6 left alone) | **this task** |
+
+So **~77 uses in shared modules land here**, and deleting the tokens from `theme.py` before migrating them would break Sentiment, the Desk and Symbol at once. Migrate the four modules FIRST, confirm the token count reaches zero, and only then delete.
+
+They belong in this task rather than in a page task precisely because they are shared: `console_cards` and `console_regime` are drawn by BOTH `/sentiment` and `/desk`, so migrating them inside either page's task would silently restyle the other.
+
+- Migrate the four shared modules above to app tokens first (`CARD` for a card ground, `card_border` for a hairline, `LABEL` / `MUTED` / the palette `icon` for the three text levels), keeping every `CON_POS` / `CON_NEG` / `CON_WARN` and every regime hue.
+- Then delete from `theme.py`: `CONSOLE_PAGE`, `CONSOLE_CARD`, `CONSOLE_CELL`, `CONSOLE_HAIRLINE`, `CONSOLE_TRACK`, `CONSOLE_RULE`, `CONSOLE_DIVIDER`, `CONSOLE_DISPLAY`, `CON_TXT*`, `build_console_font_head_html` / `CONSOLE_FONT_HEAD_HTML`, and `CONSOLE_KEYFRAMES_CSS` **if** Task 9's grep found no `con-pulse`. Keep `CON_POS` / `CON_NEG` / `CON_WARN` and `console_colors()["regimes"]`.
 - Trim `[console]` in `config/theme.toml` to its data keys (`positive`, `negative`, `warning`, `olive`, `yellow`, the six `regime_*`). ⚠ `accent` is genuinely ambiguous — it drives the dial arc (data) **and** the header rules and chips (chrome). Keep it; it now has exactly one job.
 - Trim `[macro]` and `[sectors]` to their data keys per Tasks 3 and 7. `[rotation]` went in Task 5.
 - **The guard's `ALLOWED` must now read exactly:** `desk.py: {"add_head_html": 1}`, `market.py: {"button": 2}`, `sentiment_momentum.py: {"button": 1}` — each with its written reason above it — and **no entry at all** for `sentiment.py`, `sentiment_bullbear.py`, `sentiment_sectors.py`, `sentiment_rotation.py`, `sentiment_rrg.py` or `symbol.py`.
