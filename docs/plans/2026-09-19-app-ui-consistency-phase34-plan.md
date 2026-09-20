@@ -368,10 +368,11 @@ Every deliberately changed assertion from Tasks 1-10 must be named in the commit
 Seed the fake bus from the existing page tests' fixtures — never invented shapes. Add a temporary `ui-harness` entry to `.claude/launch.json` as in Phase 1, then revert it with `git checkout -- .claude/launch.json` and delete the seed file when done.
 
 1. **`sentiment_rrg`** (seed `sentiment:rotation`). The header reads `RRG` with an Updated stamp and Refresh on the right. The quadrant washes, the corner labels, the trail and the tone dots look exactly as they did. Click Refresh: **a spinner appears** — it never did before. **Stop here and show the operator before starting Task 2.**
-2. **`sentiment_rotation`**, **`sentiment_sectors`**, **`sentiment_bullbear`**, **`sentiment_momentum`**. Header, stamp, one status line, one button vocabulary. Sectors: the eyebrow shows a date and no time. Momentum: the leaderboard sorts when a header is clicked, and the name chips still read as chips.
-3. **`market`** (seed `market:dashboard`). No STREAMING dot, no local clock, an Updated stamp instead. Flip the skin: the tiles re-colour instantly and the heat ramp is intact.
-4. **`symbol`** (seed `options:matrix` + a dossier). The ticker field has a label; Enter re-navigates; Refresh spins and the overlay still covers the page.
-5. **`desk`** (seed all 11 views). Four panels, the neon arrival glow still fires on a new row, the empty states centre.
+2. ~~**`sentiment_sectors`** — settled in the harness on the real prod payload.~~ Two risks the implementer raised were **measured and closed**: the heat ramp's flat step sits at **1.025:1** contrast against the new navy ground (against 1.24:1 for the strongest cell), so a flat cell still fades into the page exactly as the design intends — the ramp did **not** need re-anchoring; and `tabular-nums` is live on IBM Plex Sans with a digit-width spread of **0.000**, so dropping `SC_MONO` did not cost the column alignment. Do not re-open either without a new measurement.
+3. **`sentiment_rotation`**, **`sentiment_bullbear`**, **`sentiment_momentum`**. Header, stamp, one status line, one button vocabulary. Sectors: the eyebrow shows a date and no time. Momentum: the leaderboard sorts when a header is clicked, and the name chips still read as chips.
+4. **`market`** (seed `market:dashboard`). No STREAMING dot, no local clock, an Updated stamp instead. Flip the skin: the tiles re-colour instantly and the heat ramp is intact.
+5. **`symbol`** (seed `options:matrix` + a dossier). The ticker field has a label; Enter re-navigates; Refresh spins and the overlay still covers the page.
+6. **`desk`** (seed all 11 views). Four panels, the neon arrival glow still fires on a new row, the empty states centre.
 
 Take one screenshot of the RRG and one of the Desk.
 
