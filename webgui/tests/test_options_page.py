@@ -245,10 +245,16 @@ def test_read_funnel_reads_the_funnel_view_and_the_live_scans_stamp():
 # — the render wiring —
 def test_render_builds_the_panel_and_reads_it_off_the_event_loop():
     src = inspect.getsource(options.render)
-    assert "ui.button(FUNNEL_TITLE" in src
+    # Both the button and the dialog are the kit's since the 2026-09-19 page-kit
+    # migration: ``kit.info_dialog`` carries the 720px card and its own close ✕,
+    # so the page no longer spells either out.
+    assert "kit.button(FUNNEL_TITLE" in src
     assert options.FUNNEL_TITLE == "Why no trade?"
-    assert "ui.dialog()" in src
-    assert "w-[720px] max-w-full" in src
+    assert "kit.info_dialog(FUNNEL_TITLE)" in src
+    # The three cards need the width they had; the kit's default carries it now.
+    from pages import ui_kit as kit
+    assert inspect.signature(kit.info_dialog).parameters["width"].default \
+        == "w-[720px]"
     # The Redis read goes off the loop, and only on OPEN - never at page build.
     assert "run.io_bound(_read_funnel)" in src
     assert "funnel_cards(" in src and "funnel_chips(" in src
@@ -259,8 +265,10 @@ def test_render_builds_the_panel_and_reads_it_off_the_event_loop():
 
 
 def test_render_puts_the_why_button_left_of_run_scan():
+    """Both live in the header's actions row now, and the kit adds buttons left
+    to right - so source order is still what puts Run scan rightmost."""
     src = inspect.getsource(options.render)
-    assert src.index("ui.button(FUNNEL_TITLE") < src.index('ui.button("Run scan"')
+    assert src.index("kit.button(FUNNEL_TITLE") < src.index('kit.button("Run scan"')
 
 
 def test_the_panel_builds_on_a_cold_bus_without_raising():

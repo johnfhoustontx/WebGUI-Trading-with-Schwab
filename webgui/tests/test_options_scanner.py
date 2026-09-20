@@ -383,10 +383,18 @@ def test_signal_columns_carry_a_dropped_column():
     assert "stale_since" in cols and cols["stale_since"]
 
 
-def test_row_class_prop_binds_the_stamped_field():
-    """The dimming is a ``.props()`` string no row test can reach, so a rename of
-    ``_row_class`` would silently kill it while every row test stayed green."""
-    assert "_row_class" in scanner._ROW_CLASS_PROP
+def test_the_row_class_fn_still_binds_the_stamped_field():
+    """The dimming is a table prop no row test can reach, so a rename of
+    ``_row_class`` would silently kill it while every row test stayed green.
+
+    The page's own ``_ROW_CLASS_PROP`` went with the 2026-09-19 page-kit
+    migration: ``kit.ROW_CLASS_FN`` composes this page's stale dimming with the
+    kit's selected-row accent, so the binding is pinned there now. Both halves,
+    because a fn that dropped ``_row_class`` for ``_selected`` would pass a
+    check for either one alone."""
+    from pages import ui_kit as kit
+    assert "_row_class" in kit.ROW_CLASS_FN
+    assert "_selected" in kit.ROW_CLASS_FN
 
 
 # ── a dropped signal is frozen at an hours-old price: never paper-tradeable ──
@@ -497,14 +505,23 @@ def test_directional_columns_lead_with_symbol():
     fields = [c["field"] for c in scanner.directional_columns()]
     assert fields[0] == "symbol"
     assert "stale_since" in fields
-    assert fields[-1] == "actions"
+    # No trailing ``actions`` column since the 2026-09-19 page-kit migration:
+    # the selected row's buttons live in the detail panel's footer, so nothing
+    # acts on an unselected row and the icon column's width goes to the data.
+    assert "actions" not in fields
 
 
 def test_directional_columns_reuse_the_shared_strategy_columns():
+    """Every DATA column of the shared list, and no restating of it.
+
+    ``actions`` is excluded on both sides: the Strategy Finder still carries its
+    per-row icon column, and this tab's went with the 2026-09-19 page-kit
+    migration - so the shared list cannot be a subset outright any more."""
     from pages.options import strategy_table
-    shared = {c["field"] for c in strategy_table.strategy_columns()}
+    shared = {c["field"] for c in strategy_table.strategy_columns()} - {"actions"}
     fields = {c["field"] for c in scanner.directional_columns()}
     assert shared <= fields
+    assert "actions" not in fields
 
 
 def test_directional_columns_have_no_premium_composite_columns():
@@ -576,11 +593,11 @@ def test_status_line_waiting_when_empty():
     assert scanner.status_line({}) == shared_copy.WAITING_OPTIONS
 
 
-def test_status_line_has_time_count_and_cadence():
+def test_status_line_has_count_and_cadence_and_leaves_the_clock_to_the_header():
     out = scanner.status_line({
         "signals_0dte": [{}], "signals_swing": [{}, {}],
         "timestamp": "2026-06-15T13:32:00-05:00"})
-    assert "Last scan 1:32" in out
+    assert "Last scan" not in out
     assert "3 live signals" in out
     assert "auto-scans every 15 min" in out
 
@@ -606,13 +623,24 @@ def test_status_line_includes_errors():
     assert "1 errors" in out
 
 
+def test_the_scanner_is_built_from_the_kit():
+    import inspect
+    src = inspect.getsource(scanner.render)
+    assert 'kit.header("Market Scanner", view="options:scan", stale=True)' in src
+    assert "detail_panel.actions" in src
+    assert "add_row_actions" not in src and "add_strategy_row_actions" not in src
+    assert "kit.info_dialog(FUNNEL_TITLE)" in src
+
+
 # ── column labels name the reading, not the field ────────────────────────────
 def test_credit_spread_column_labels_say_what_the_cell_holds():
     labels = [c["label"] for c in scanner.signal_columns()]
+    # The trailing "" was the ``actions`` column's blank header; it went with
+    # the 2026-09-19 page-kit migration (the buttons moved into the panel).
     assert labels == ["Symbol", "Strategy", "Expiry", "DTE", "Strikes",
                       "Credit", "Max loss", "R/R %", "PoP %", "Vol Rank",
                       "Score", "Grade", "Checks", "Seen since", "Score trend",
-                      "Dropped at", ""]
+                      "Dropped at"]
 
 
 def test_credit_STAYS_because_this_table_holds_no_debits():
@@ -744,7 +772,11 @@ def test_both_signal_tabs_carry_the_persistence_columns():
         # between them, which is what the positional insert actually did.
         i = names.index("seen_since")
         assert names[i:i + 3] == ["seen_since", "score_trend", "stale_since"]
-        assert names.index("stale_since") < names.index("actions")
+        # ``stale_since`` used to be pinned as sitting before ``actions``; that
+        # column went with the 2026-09-19 page-kit migration, so the trio now
+        # simply ends the table.
+        assert "actions" not in names
+        assert names[-1] == "stale_since"
 
 
 def test_the_persistence_column_labels_name_what_the_value_is():
@@ -818,7 +850,8 @@ def test_the_trend_slot_is_registered_on_all_three_tables():
     """``add_slot`` runs inside ``render()``, which no unit test reaches — so a
     table left off is invisible to every test here and surfaces only as one
     uncoloured tab in the browser. Pinned at SOURCE level, the same reflex as
-    ``test_row_class_prop_binds_the_stamped_field`` uses for ``_ROW_CLASS_PROP``.
+    ``test_the_row_class_fn_still_binds_the_stamped_field`` uses for the kit's
+    ``ROW_CLASS_FN``.
 
     Two registrations, not three: the 0-DTE and Swing tables share one loop."""
     import inspect

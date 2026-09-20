@@ -33,14 +33,21 @@ changes. The poll itself is fetch-free (cheap ``:ver`` ints, on-loop); the day
 union is ~4.5 MB by day's end, so BOTH payload reads — the deferred first paint
 and the on-change repaint — go through ``run.io_bound``, sharing one in-flight
 guard so they cannot stack (the ``gamma.py`` precedent).
+
+Built on the page kit (``pages/ui_kit.py``, the 2026-09-19 consistency
+standard): the header line carries the Updated stamp with Why no trade? and Run
+scan, the status line under it counts signals and drops the clock it used to
+open with, and the selected row's Calculator / Paper trade / Expected Move
+buttons live in the detail panel's footer instead of a per-row icon column.
+``SCAN_CSS`` stays — this table's column count still needs its compact padding.
 """
 import datetime as dt
 from zoneinfo import ZoneInfo
 
 import bus_client
 from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
-from pages import busy as _busy
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
+from pages import ui_kit as kit
 import page_help as _page_help
 from nicegui import run, ui
 
@@ -51,7 +58,7 @@ from . import persistence as _persistence
 from .checks_table import (  # re-exported: the scanner's names predate the move
     CHECKS_SLOT as _CHECKS_SLOT, ONLY_CLEAR_TIP as _ONLY_CLEAR_TIP, filtered_tab_label,
     only_clear, only_clear_empty_label, restamp, stamp_checks)
-from .theme import (BADGE_MUTED, BADGE_WARN, BTN_3D, CARD, EYEBROW, LABEL, MUTED,
+from .theme import (BADGE_MUTED, BADGE_WARN, CARD, EYEBROW, LABEL, MUTED,
                     TXT_NEG, TXT_NEUTRAL, TXT_POS, TXT_WARN)
 
 
@@ -127,9 +134,10 @@ def _checks_col():
     return _col("checks", "Checks", sortable=False)
 
 
-def _actions_col():
-    return {"name": "actions", "label": "", "field": "actions", "align": "center"}
-
+# The per-row ``actions`` column went with the 2026-09-19 page-kit migration:
+# Calculator / Paper trade / Expected Move act on the SELECTED row from the
+# detail panel's footer, so nothing acts on an unselected row and the icon
+# column's width goes back to the data.
 
 # When a signal dropped out of the live scan. Only ever populated on a stale row.
 # "Dropped at", not "Dropped": the cell holds ``stale_since``, a TIMESTAMP -
@@ -148,7 +156,7 @@ def signal_columns():
     """ui.table column defs for a credit-spread signal table (0-DTE / Swing).
 
     Short + Long are merged into one compact 'Strikes' column and the expiration
-    is shown MM/DD so the right-hand columns (Score/Grade/actions) fit."""
+    is shown MM/DD so the right-hand columns (Score/Grade) fit."""
     # WARNING: "Credit" is CORRECT here, and this is the one somebody will
     # "fix". The Paper Ledger and Captured Signals both had a wrong column of
     # that name, because those books mix credits and debits and a debit is
@@ -187,7 +195,7 @@ def signal_columns():
     # landed Checks inside the trio the moment these two arrived.
     cols.insert(next(i for i, c in enumerate(cols) if c["name"] == "seen_since"),
                 _checks_col())
-    return cols + [_actions_col()]
+    return cols
 
 
 def directional_columns():
@@ -215,7 +223,7 @@ def directional_columns():
     body = [c for c in shared if c["name"] != "actions"]
     return ([_col("symbol", "Symbol")] + body
             + [_checks_col(), _col(*_SEEN_COL), _col(*_TREND_COL),
-               _col(*_DROPPED_COL), _actions_col()])
+               _col(*_DROPPED_COL)])
 
 
 def signal_rows(signals):
@@ -590,10 +598,15 @@ def _short_time(iso):
 
 
 def status_line(results):
-    """Slim bottom status-bar text: last-scan time + signal count (+ errors).
+    """The status line under the header: signal count (+ errors) + the cadence.
 
     Reads the LIVE ``options:scan`` view, not the day union: this line is about the
-    last SCAN (its clock time, its errors), which the day envelope does not carry.
+    last SCAN (its count, its errors), which the day envelope does not carry.
+
+    **No clock.** It used to open "Last scan 1:32 PM"; the header's own Updated
+    stamp carries that time now, in Central and turning amber once a scan is
+    genuinely overdue, so printing it twice would be two answers to one
+    question - and only one of them knows what late looks like.
 
     The count says **live** deliberately. The tab headers carry the DAY's counts
     (hundreds by 3pm) while this sums the last scan (dozens), so a bare
@@ -605,11 +618,7 @@ def status_line(results):
     if not results:
         return _copy.WAITING_OPTIONS
     n = sum(len(results.get(key) or []) for key in DAY_LISTS)
-    parts = []
-    when = _short_time(results.get("timestamp"))
-    if when:
-        parts.append(f"Last scan {when}")
-    parts.append(f"{n} live signal" + ("" if n == 1 else "s"))
+    parts = [f"{n} live signal" + ("" if n == 1 else "s")]
     errs = results.get("errors") or []
     if errs:
         parts.append(f"{len(errs)} errors")
@@ -703,13 +712,10 @@ def _read_and_build():
 # exactly when a trader is looking. Page it.
 _TABLE_PAGINATION = {"rowsPerPage": 100}
 
-# A dropped-out row is dimmed via Quasar's `table-row-class-fn` (a Function prop →
-# NiceGUI's ':'-dynamic binding, evaluated as JS and assigned to the camelized
-# prop). It is the only per-row class hook QTable exposes short of overriding the
-# whole `body` slot, which would cost us the per-cell slots below. The class is a
-# fixed Tailwind utility off a finite state (Tailwind-first standard). Hoisted to a
-# constant so a test can pin the `_row_class` binding — see _SCORE_SLOT/_SYMBOL_SLOT.
-_ROW_CLASS_PROP = ':table-row-class-fn="row => row._row_class"'
+# A dropped-out row is dimmed via Quasar's `table-row-class-fn`. The page's own
+# ``_ROW_CLASS_PROP`` went with the 2026-09-19 page-kit migration: ``kit.table``
+# writes ``kit.ROW_CLASS_FN``, which COMPOSES this page's ``_row_class`` (the
+# stale dimming) with the kit's selected-row accent, so neither has to give way.
 
 # Composite-score chip (0-DTE / Swing only — a directional signal's Fit+Quality
 # score gets the same chip from the shared strategy columns).
@@ -867,42 +873,45 @@ def render():
     _shell.bind_breadcrumb_leaf(tabs, initial="0-DTE")
 
     def _table(columns):
-        return ui.table(columns=columns, rows=[], row_key="id",
-                        pagination=dict(_TABLE_PAGINATION)) \
-            .classes("w-full scan-table") \
-            .props(f"dense {_ROW_CLASS_PROP}")
+        t = kit.table(columns, rows_per_page=_TABLE_PAGINATION["rowsPerPage"],
+                      numeric=("dte", "credit", "max_loss", "rr_pct", "pop_pct",
+                               "iv_rank", "composite_score"),
+                      classes="w-full scan-table")
+        return t
 
-    with ui.row().classes("w-full no-wrap gap-4 items-start"):
-        with ui.column().classes("flex-grow min-w-0"):
-            # Run scan sits right-aligned with the table's right edge.
-            with ui.row().classes("w-full justify-end items-center gap-3"):
-                clear_toggle = ui.switch("Only clear", value=False)
-                with clear_toggle:
-                    ui.tooltip(_ONLY_CLEAR_TIP).props("delay=350")
-                # Flat, and left of Run scan: it explains the tables rather than
-                # changing them, so it must not read as the page's action.
-                why_btn = ui.button(FUNNEL_TITLE, icon="help_outline", color=None) \
-                    .props("no-caps flat dense").classes(f"text-xs {MUTED}")
-                scan_btn = ui.button("Run scan", icon="play_arrow", color=None) \
-                    .props("no-caps").classes(BTN_3D)
-            scan_panels = ui.tab_panels(tabs, value=tab_0dte).classes("w-full scan-panels")
-            with scan_panels:
-                with ui.tab_panel(tab_0dte):
-                    table_0dte = _table(signal_columns())
-                with ui.tab_panel(tab_swing):
-                    table_swing = _table(signal_columns())
-                with ui.tab_panel(tab_dir):
-                    table_dir = _table(directional_columns())
-            # Slim bottom status bar: last scan + counts + cadence, and — only when
-            # something is off — the day-union note (stale date / day cap).
-            status = ui.label("").classes("opacity-60 text-sm q-mt-sm")
-            day_msg = ui.label("").classes("text-sm text-[#ffa726]")
+    with kit.page():
+        head = kit.header("Market Scanner", view="options:scan", stale=True)
+        with head.actions:
+            # Quiet, and left of Run scan: it explains the tables rather than
+            # changing them, so it must not read as the page's action.
+            why_btn = kit.button(FUNNEL_TITLE, kind="quiet", icon="help_outline")
+            scan_btn = kit.button("Run scan", kind="primary", icon="play_arrow")
+        with ui.row().classes("w-full items-center gap-3"):
+            status = kit.status_line()
+            ui.space()
+            clear_toggle = ui.switch("Only clear", value=False)
+            with clear_toggle:
+                ui.tooltip(_ONLY_CLEAR_TIP).props("delay=350")
+        # Only when something is off: the day-union note (stale date / day cap).
+        # Named for the BOX, not ``day_note`` - that is the module's function.
+        day_note_box = ui.row().classes("w-full")
+        with ui.row().classes("w-full no-wrap gap-4 items-start"):
             # A rescan takes tens of seconds; the tables meanwhile show the
             # PREVIOUS scan, which is indistinguishable from a finished one.
-            scan_busy = _busy.build_busy(scan_panels, "Scanning…")
-        # Narrower detail panel here (vs the 360px default) so the compacted
-        # signal table has room to show all columns without horizontal scroll.
-        detail_panel = detail.render(width=290)
+            scan = kit.region("Scanning…", classes="flex-grow min-w-0")
+            with scan.content:
+                scan_panels = ui.tab_panels(tabs, value=tab_0dte).classes(
+                    "w-full scan-panels")
+                with scan_panels:
+                    with ui.tab_panel(tab_0dte):
+                        table_0dte = _table(signal_columns())
+                    with ui.tab_panel(tab_swing):
+                        table_swing = _table(signal_columns())
+                    with ui.tab_panel(tab_dir):
+                        table_dir = _table(directional_columns())
+            # Narrower than the 360px default so the compacted signal table has
+            # room to show all columns without horizontal scroll.
+            detail_panel = detail.render(width=290)
 
     by_id: dict = {}
     # Last-seen bus cache versions for the fetch-free repaint timer. (NEW-signal
@@ -938,6 +947,7 @@ def render():
         sig = _clicked(event)
         if sig:
             detail_panel.update(sig, candidate=_candidate(sig), ctx=checks_ctx["ctx"])
+            _remember(event, sig, False)
 
     def _select_dir(event):
         # The normalized multi-leg shape needs the shared adapter (net_credit →
@@ -947,6 +957,9 @@ def render():
         if sig:
             detail_panel.update(strategy_table.detail_signal(sig),
                                 candidate=_candidate(sig), ctx=checks_ctx["ctx"])
+            # The RAW signal, not the adapted one: the legs-aware Calculator and
+            # Paper paths read ``legs``, which the adapter does not carry.
+            _remember(event, sig, True)
 
     # The panel asks this for the open row on every refresh: the gate as the rows
     # now carry it, or None once a rebuild dropped the row (cap eviction, a new
@@ -962,17 +975,12 @@ def render():
 
     for _t in (table_0dte, table_swing):
         _t.on("rowClick", _select)
-        # per-row buttons: Send to Calculator / Send to Paper trade
-        handoff.add_row_actions(_t, lambda row: by_id.get(row.get("id")))
         _t.add_slot('body-cell-composite_score', _SCORE_SLOT)
         _t.add_slot('body-cell-symbol', _SYMBOL_SLOT)
         _t.add_slot('body-cell-checks', _CHECKS_SLOT)
         _t.add_slot('body-cell-score_trend', _TREND_SLOT)
 
     table_dir.on("rowClick", _select_dir)
-    # Legs-aware actions (the directional signal carries `legs`, not strikes), and
-    # `_allow_paper` gates the Paper button — a naked short is undefined risk.
-    handoff.add_strategy_row_actions(table_dir, lambda row: by_id.get(row.get("id")))
     # Every Paper click's answer - opened, or refused and why - becomes a toast.
     handoff.watch_paper_results()
     table_dir.add_slot('body-cell-symbol', _SYMBOL_SLOT)
@@ -999,6 +1007,52 @@ def render():
       </q-td>
     ''')
 
+    # The clicked row IS the selection: it drives the detail panel and the
+    # actions in its footer. ``multi`` records which tab it came from - a
+    # directional row is a normalized multi-leg signal and takes the legs-aware
+    # Calculator path; ``allow_paper`` is the gate ``stamp_stale`` settled.
+    sel = {"sig": None, "multi": False, "allow_paper": False, "id": None}
+
+    # Built ONCE: the footer is visible only while a signal is shown, so nothing
+    # here can be pressed with no selection and nothing prints "click a row
+    # first". Primary last, so Paper trade sits rightmost.
+    with detail_panel.actions:
+        kit.button("Expected Move", kind="secondary", icon="show_chart",
+                   on_click=lambda: _send_em())
+        kit.button("Calculator", kind="secondary", icon="calculate",
+                   on_click=lambda: _send_calc())
+        paper_btn = kit.button("Paper trade", kind="primary", icon="request_quote",
+                               on_click=lambda: _send_paper())
+
+    def _remember(event, sig, multi):
+        """Latch the clicked row as the selection and re-stamp the accent.
+
+        The Paper button HIDES rather than disables on a row that may not be
+        booked (a dropped signal frozen at an hours-old price, or a naked short
+        with undefined risk) - the same gate the per-row icon used, read off the
+        server's own painted row."""
+        row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
+        sel.update(sig=sig, multi=multi, id=(row or {}).get("id"),
+                   allow_paper=bool((row or {}).get("_allow_paper")))
+        paper_btn.set_visibility(sel["allow_paper"])
+        _paint_tables()                      # re-stamps _selected
+
+    @guard
+    def _send_em():
+        if sel["sig"]:
+            handoff.send_to_expected_move(handoff.signal_to_em_payload(sel["sig"]))
+
+    @guard
+    def _send_calc():
+        if sel["sig"]:
+            (handoff.send_signal_to_calculator if sel["multi"]
+             else handoff.send_to_calculator)(sel["sig"])
+
+    @guard
+    def _send_paper():
+        if sel["sig"] and sel["allow_paper"]:
+            handoff.send_to_paper(sel["sig"])
+
     def _populate(day_env, live, *, notify=True, acknowledge=False):
         """Build (heavy) + paint the tables. Sync convenience wrapper used for the
         instant empty paint; the async load paths build OFF the loop via
@@ -1016,6 +1070,7 @@ def render():
                 ("signals_directional", table_dir, tab_dir, "Directional")):
             full = painted[key]
             shown = only_clear(painted[key]) if filtering else full
+            kit.mark_selected(shown, sel["id"])
             empty = only_clear_empty_label(full, shown, filtering=filtering)
             # Written to _props directly: a props STRING would be re-parsed.
             if empty is None:
@@ -1064,13 +1119,17 @@ def render():
             checks_ctx["ctx"] = built["ctx"]
         _refresh_detail_checks()
 
-        scan_busy.hide()
+        scan.busy.hide()
+        kit.set_busy(scan_btn, False)
         status.text = status_line(live)
-        day_msg.text = day_note(built["day_env"], today)
-        day_msg.set_visibility(bool(day_msg.text))
+        day_note_box.clear()
+        note = day_note(built["day_env"], today)
+        if note:
+            with day_note_box:
+                kit.notice(note, icon="warning")
         if notify:
             for w in (live.get("warnings") or []):
-                ui.notify(w, type="warning")
+                kit.toast("warn", w)
 
     # ── "Why no trade?" ──────────────────────────────────────────────────────
     # Built at the PAGE's own level, never inside a container a repaint clears:
@@ -1078,16 +1137,17 @@ def render():
     # itself when that canary goes (the swing.py precedent).
     funnel_state = {"payload": {}, "scan_ts": None, "fetching": False}
 
-    with ui.dialog() as funnel_dlg, ui.card().classes("w-[720px] max-w-full gap-3"):
-        ui.label(FUNNEL_TITLE).classes(f"text-subtitle1 {LABEL}")
+    funnel = kit.info_dialog(FUNNEL_TITLE)
+    with funnel.content:
         ui.label(FUNNEL_LEAD).classes(f"text-xs {MUTED}")
         funnel_chips_box = ui.row().classes("gap-2 items-center flex-wrap")
-        funnel_sel = ui.select([], label="Symbol", with_input=True) \
-            .props("dense outlined options-dense").classes("w-56")
+        # The field's LABEL sits above its dropdown (the kit's one field shape),
+        # so a cold view has to hide the pair - hiding the select alone would
+        # leave a bare "Symbol" over nothing.
+        with ui.element("div") as funnel_sel_box:
+            funnel_sel = kit.select_field("Symbol", [], width="w-56", with_input=True)
         funnel_status = ui.label(FUNNEL_LOADING).classes(f"text-sm {MUTED}")
         funnel_box = ui.column().classes("w-full gap-3")
-        with ui.row().classes("w-full justify-end"):
-            ui.button("Close", on_click=funnel_dlg.close).props("flat no-caps")
 
     def _paint_funnel_cards():
         """Repaint the three cards from the STORED payload — no bus read, so
@@ -1119,7 +1179,7 @@ def render():
         symbols = funnel_symbols(funnel_state["payload"])
         funnel_sel.set_options(symbols,
                                value=funnel_seed(symbols, funnel_sel.value))
-        funnel_sel.set_visibility(bool(symbols))
+        funnel_sel_box.set_visibility(bool(symbols))
         funnel_chips_box.clear()
         with funnel_chips_box:
             for chip in funnel_chips(funnel_state["payload"]):
@@ -1135,7 +1195,7 @@ def render():
     async def _open_funnel():
         # Read on OPEN, never at page build — and OFF the loop, like every other
         # bus read here. Closing and reopening re-reads; picking a symbol does not.
-        funnel_dlg.open()
+        funnel.open()
         if funnel_state["fetching"]:
             return
         funnel_state["fetching"] = True
@@ -1155,9 +1215,11 @@ def render():
 
     @guard
     def _request_scan():
+        # No toast: the region's spinner and the button's own wait already say
+        # the scan is running, which is all a toast would have repeated.
         bus_client.request("options", {"type": "rescan"})
-        ui.notify("Scanning — results appear when the scan finishes.")
-        scan_busy.show()
+        scan.busy.show()
+        kit.set_busy(scan_btn)
 
     scan_btn.on_click(_request_scan)
 
