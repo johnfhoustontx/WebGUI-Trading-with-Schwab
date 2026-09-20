@@ -612,3 +612,35 @@ def test_the_rescue_help_calls_the_columns_what_the_screen_calls_them():
     text = page_help.HELP_MD["/options/rescue"]
     for gone in ("dispatches a (simulated) paper adjustment",):
         assert gone not in text, gone
+
+
+# ── the page kit (2026-09-19 consistency standard) ──────────────────────────
+def test_the_rescue_menu_spinner_is_not_inside_what_the_repaint_clears():
+    """board_busy was built INSIDE cards_col, and every row click cleared
+    cards_col before showing it - so the spinner was deleted on first use."""
+    import inspect
+
+    src = inspect.getsource(rescue.render)
+    assert "build_busy(cards_col" not in src
+    assert "build_busy(adhoc_cards_col" not in src
+    assert "advisory.busy" in src and "adhoc_advice.busy" in src
+
+
+def test_one_loading_indicator_not_two():
+    import inspect
+
+    src = inspect.getsource(rescue.render)
+    assert "ui.spinner(" not in src
+
+
+def test_apply_asks_with_cancel_first_via_the_kit():
+    import inspect
+
+    src = inspect.getsource(rescue.render)
+    assert "apply_dlg = kit.confirm(" in src
+
+
+def test_the_adhoc_symbol_uses_the_one_symbol_field():
+    import inspect
+
+    assert "kit.symbol_field(" in inspect.getsource(rescue.render)

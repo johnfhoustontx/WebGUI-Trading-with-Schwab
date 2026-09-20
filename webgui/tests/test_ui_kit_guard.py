@@ -30,7 +30,6 @@ ALLOWED = {
     "options/expected_move.py": {"button": 1, "notify": 1},
     "options/gamma.py": {"button": 8, "notify": 7},
     "options/leg_editor.py": {"button": 10},
-    "options/rescue.py": {"button": 5, "dialog": 1, "notify": 7, "table": 1},
     "options/simulator.py": {"button": 1, "notify": 1},
     "options/strategy_menu.py": {"button": 2},
     "options/swing.py": {"button": 7, "table": 1},

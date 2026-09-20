@@ -13,8 +13,8 @@ imported lazily inside ``render()`` only (mirrors ``expected_move.py`` /
 
 import page_help as _page_help
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
-from .inputs import bind_symbol_load, select_all_on_focus
-from .theme import BADGE_NEG, BADGE_POS, BADGE_WARN, BTN_3D
+from .theme import (BADGE_ACCENT, BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN,
+                    CARD, MUTED)
 
 # Heat zone colors (higher heat = closer to trouble): green → amber → orange →
 # red. Reuses the shared palette idiom from scanner.py / svg.py (#ef5350 red,
@@ -585,15 +585,9 @@ def _table_rows(rows):
     return out
 
 
-# Sticky table header: the at-risk board's own body scrolls (bounded height) while
-# the column headers stay pinned. Dark bg matches the Quasar dark card.
-_RESCUE_CSS = """
-.rescue-table .q-table__middle { max-height: 72vh; }
-.rescue-table thead tr th {
-  position: sticky; top: 0; z-index: 1;
-  background-color: #141a30;
-}
-"""
+# The page's own ``_RESCUE_CSS`` went with the 2026-09-19 page-kit migration:
+# the shell's app-wide ``TABLE_CSS`` already gives every table a sticky header
+# over a bounded scrolling body, and the kit's table carries the dense props.
 
 
 def render():
@@ -608,11 +602,18 @@ def render():
     ``rescue_adhoc``; its own version-poll on ``options:rescue:adhoc`` paints the
     (advisory-only) cards. The two tabs track their selection/advisory SEPARATELY so
     they never cross-wire. Mirrors ``calculator.py`` / ``simulator.py`` idioms
-    (``bus_client.request`` / ``read`` / ``read_version`` + ``@guard``)."""
+    (``bus_client.request`` / ``read`` / ``read_version`` + ``@guard``).
+
+    Built on the page kit (``pages/ui_kit.py``, the 2026-09-19 consistency
+    standard). ⚠ The rescue menu's spinner is the reason this page needed it:
+    each menu is ONE ``kit.region``, so the spinner lives on the region's outer
+    element and the repaint clears only ``region.content``. Before that both
+    spinners were built INSIDE the cards column a row click clears, so each was
+    deleted the first time it was used and the menu built in silence."""
     import bus_client
-    from pages import busy as _busy
     from nicegui import run, ui
 
+    from pages import ui_kit as kit
     from pages.ui_guard import guard, guard_async
 
     from .calculator import chain_expiries, chain_strikes
@@ -626,11 +627,9 @@ def render():
         engine can't advise on yet is selected/computed."""
         if code in RESCUE_ADHOC_SUPPORTED:
             return False
-        ui.notify(f"Rescue for '{strategy_label(code)}' is not available yet.",
-                  type="warning", timeout=4000)
+        kit.toast("warn",
+                  f"Rescue for '{strategy_label(code)}' is not available yet.")
         return True
-
-    ui.add_css(_RESCUE_CSS)
 
     # Page state (local closure, not module globals — built per request). Board and
     # ad-hoc keep independent selection + advisory tracking.
@@ -647,32 +646,27 @@ def render():
     adhoc: dict = {"chain": None, "spot": 0.0, "chain_ver": None,
                    "chain_fetching": False, "contracts": 1}
 
-    # No page title — the tab strip names the page (2026-07-11 cleanup).
-
-    # ── waiting-for-service placeholder ──────────────────────────────────────
-    waiting = ui.label(_copy.WAITING_OPTIONS).classes("opacity-70")
-
     # ── shared candidate-card rendering (per-container so each tab owns its own
     # cards column + advisory head; the board passes the confirm/apply factory,
     # the ad-hoc tab passes a no-op since its cards are all advisory-only) ──────
     def _render_one_card(container, card, apply_factory):
         with container:
-            with ui.card().classes("w-full"):
+            with ui.column().classes(f"{CARD} w-full gap-2"):
                 with ui.row().classes("items-center gap-3 w-full"):
                     ui.label(card["title"]).classes("text-subtitle1")
                     if card.get("score") is not None:
                         ui.badge(f"score {card['score']:g}"
                                  if isinstance(card["score"], (int, float))
-                                 else f"score {card['score']}").props("color=primary")
+                                 else f"score {card['score']}").classes(BADGE_ACCENT)
                     ui.space()
                     if card["apply_kind"] == "execute":
-                        ui.button("Apply", icon="play_arrow", color=None,
-                                  on_click=apply_factory(card)).props("no-caps").classes(BTN_3D)
+                        kit.button("Apply", kind="primary", icon="play_arrow",
+                                   on_click=apply_factory(card))
                     else:
                         # This marks a candidate the app will NOT execute for
                         # you, so it reads as the instruction it is.
                         ui.label("Manual — you place this one yourself") \
-                            .classes("opacity-70 text-sm")
+                            .classes(f"{MUTED} text-sm")
                 # Gross / commission / net cash line (cash_text colors); the
                 # locked-in P&L follows when the action realizes one (close/partial).
                 with ui.row().classes("items-center gap-4"):
@@ -687,7 +681,7 @@ def render():
                     for lbl, key in cells:
                         cell = card[key]
                         with ui.row().classes("items-center gap-1"):
-                            ui.label(f"{lbl}:").classes("opacity-70 text-sm")
+                            ui.label(f"{lbl}:").classes(f"{MUTED} text-sm")
                             ui.label(cell["text"]).classes(cell["class"])
                 if card["metrics"]:
                     with ui.row().classes("gap-4 flex-wrap"):
@@ -698,13 +692,13 @@ def render():
                         for leg in card["legs"]:
                             ui.label(leg).classes("text-sm font-mono")
                 for r in card["rationale"]:
-                    ui.label(f"• {r}").classes("text-sm opacity-80")
+                    ui.label(f"• {r}").classes(f"text-sm {MUTED}")
                 if card["context"]:
                     with ui.row().classes("gap-1 flex-wrap"):
                         for c in card["context"]:
-                            ui.badge(str(c)).props("outline color=grey")
+                            ui.badge(str(c)).classes(BADGE_MUTED)
                 for w in card["warnings"]:
-                    ui.badge(str(w)).props("color=red")
+                    ui.badge(str(w)).classes(BADGE_NEG)
 
     def _render_cards_into(container, head_label, advisory, apply_factory, empty_text):
         container.clear()
@@ -717,8 +711,7 @@ def render():
         raw_cands = advisory.get("candidates") or []
         if advisory.get("error") or not cards:
             with container:
-                ui.label(advisory.get("error") or "No rescue candidates available.") \
-                    .classes("opacity-70")
+                kit.empty(advisory.get("error") or "No rescue candidates available.")
             return
         for i, card in enumerate(cards):
             raw = raw_cands[i] if i < len(raw_cands) else {}
@@ -729,14 +722,14 @@ def render():
         if not res:
             return
         if res.get("ok"):
-            ui.notify("Rescue applied ✓", type="positive")
+            kit.toast("ok", "Rescue applied.")
         elif res.get("stale"):
             # The toast is where the full sentence belongs; the summary prefix
             # above stays short because a headline continues after it.
-            ui.notify("Prices moved — nothing was applied. Check the new "
-                      "numbers and try again.", type="warning")
+            kit.toast("warn", "Prices moved — nothing was applied. Check the "
+                              "new numbers and try again.")
         else:
-            ui.notify(f"Apply failed: {res.get('error') or 'unknown'}", type="negative")
+            kit.toast("error", f"Apply failed: {res.get('error') or 'unknown'}")
 
     def _noop_apply(_card):
         return lambda: None
@@ -765,131 +758,141 @@ def render():
         tabs, tab_board, tab_adhoc = _build_tabs()
     _shell.bind_breadcrumb_leaf(tabs, initial="At-Risk Board")   # default on tab_panels
 
-    with ui.tab_panels(tabs, value=tab_board).classes("w-full flush-panels"):
-        # ── BOARD PANEL: at-risk table (left) + advisory cards (right) ─────────
-        with ui.tab_panel(tab_board):
-            with ui.row().classes("w-full gap-4 no-wrap items-start") as board_body:
-                with ui.column().classes("min-w-0 grow-[3] shrink basis-0"):
-                    at_risk_tbl = ui.table(columns=at_risk_columns(), rows=[],
-                                           row_key="id").classes("w-full rescue-table").props("dense")
-                    # Color the heat cell by zone (scanner's composite_score idiom).
-                    at_risk_tbl.add_slot("body-cell-heat", r"""
-                      <q-td :props="props">
-                        <q-badge :class="props.row._heat_class"
-                                 :label="props.value ?? '—'"/>
-                      </q-td>
-                    """)
-                    # P&L + Δ short shown with exactly 2 decimals (kill float tails).
-                    at_risk_tbl.add_slot("body-cell-pnl", r"""
-                      <q-td :props="props" class="text-right">
-                        {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
-                      </q-td>
-                    """)
-                    at_risk_tbl.add_slot("body-cell-short_delta", r"""
-                      <q-td :props="props" class="text-right">
-                        {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
-                      </q-td>
-                    """)
-                    at_risk_empty = ui.label("No tested or critical positions right now.") \
-                        .classes("opacity-70")
-                # Right: the ranked rescue menu for the selected board position.
-                with ui.column().classes("min-w-0 grow-[2] shrink basis-0"):
-                    with ui.row().classes("items-center gap-3 w-full"):
-                        advisory_head = ui.label(
-                            "Select an at-risk position to see rescue options.") \
-                            .classes("text-subtitle1")
-                        advisory_spinner = ui.spinner(size="sm")
-                        advisory_spinner.set_visibility(False)
-                    # Persistent chart at first render (ESM import-map gotcha): a
-                    # minimal payoff placeholder on the DEFAULT-active tab so any
-                    # later dynamically-added chart resolves the ESM import map.
-                    payoff_chart = ui.highchart(_payoff_figure(None)).classes("w-full")
-                    payoff_chart.set_visibility(False)
-                    cards_col = ui.column().classes("w-full gap-3")
-                    # Computing an advisory reprices every leg against fresh
-                    # chains; until it lands the previous position's menu is
-                    # still on screen under the new selection.
-                    board_busy = _busy.build_busy(cards_col, "Building the rescue menu…")
+    with kit.page():
+        kit.header("Rescue")
+        # The board merges two views ON DEMAND and the menu is computed per
+        # click, so there is no one view whose publish time this page could
+        # stamp — the header carries the title alone.
+        waiting = kit.empty(_copy.WAITING_OPTIONS)
+        with ui.tab_panels(tabs, value=tab_board).classes("w-full flush-panels"):
+            # ── BOARD PANEL: at-risk table (left) + advisory cards (right) ─────
+            with ui.tab_panel(tab_board):
+                with ui.row().classes("w-full gap-4 no-wrap items-start") as board_body:
+                    with ui.column().classes("min-w-0 grow-[3] shrink basis-0"):
+                        at_risk_tbl = kit.table(
+                            at_risk_columns(),
+                            numeric=("short_delta", "pnl", "heat"))
+                        # Color the heat cell by zone (scanner's composite_score idiom).
+                        at_risk_tbl.add_slot("body-cell-heat", r"""
+                          <q-td :props="props">
+                            <q-badge :class="props.row._heat_class"
+                                     :label="props.value ?? '—'"/>
+                          </q-td>
+                        """)
+                        # P&L + Δ short shown with exactly 2 decimals (kill float tails).
+                        at_risk_tbl.add_slot("body-cell-pnl", r"""
+                          <q-td :props="props" class="text-right">
+                            {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
+                          </q-td>
+                        """)
+                        at_risk_tbl.add_slot("body-cell-short_delta", r"""
+                          <q-td :props="props" class="text-right">
+                            {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
+                          </q-td>
+                        """)
+                        at_risk_empty = kit.empty(
+                            "No tested or critical positions right now.")
+                    # Right: the ranked rescue menu for the selected board position.
+                    with ui.column().classes("min-w-0 grow-[2] shrink basis-0 gap-2"):
+                        advisory_head = kit.section_title(
+                            "Select an at-risk position to see rescue options.")
+                        # Persistent chart at first render (ESM import-map gotcha): a
+                        # minimal payoff placeholder on the DEFAULT-active tab so any
+                        # later dynamically-added chart resolves the ESM import map.
+                        payoff_chart = ui.highchart(_payoff_figure(None)).classes("w-full")
+                        payoff_chart.set_visibility(False)
+                        # Computing an advisory reprices every leg against fresh
+                        # chains; until it lands the previous position's menu is
+                        # still on screen under the new selection. The spinner
+                        # sits on the region's OUTER element, so clearing the
+                        # cards can never delete it (it used to, every click).
+                        advisory = kit.region("Building the rescue menu…")
+                        cards_col = advisory.content
 
-        # ── AD-HOC PANEL: Calculator-style leg editor (left) + advisory (right) ─
-        with ui.tab_panel(tab_adhoc):
-            with ui.row().classes("w-full gap-4 no-wrap items-start"):
-                with ui.column().classes("min-w-0 grow-[3] shrink basis-0 gap-3"):
-                    with ui.row().classes("items-end gap-3 flex-wrap"):
-                        # ⚠ The three STOCK structures are excluded: this form
-                        # BOOKS into the paper account, and that account cannot
-                        # hold shares inside ``paper_positions`` — they live in
-                        # ``equity_lots``, which is the whole reason that table
-                        # exists. A covered call submitted here would be stored
-                        # as a bare short call, the same defect shape as the
-                        # iron butterfly this form relabels an iron condor.
-                        adhoc_strat = build_strategy_menu(
-                            value="PCS", classes="w-52", boxed=True,
-                            exclude=_strategies.STOCK_STRATEGIES)
-                        adhoc_sym = select_all_on_focus(
-                            ui.input("Symbol").props("dense").classes("w-40"))
-                        adhoc_load_btn = ui.button("Load", icon="cloud_upload").props("no-caps")
-                    adhoc_status = ui.label(
-                        "Pick a strategy, load a symbol, then set the legs.") \
-                        .classes("text-sm opacity-70")
-                    with ui.row().classes("items-end gap-3 flex-wrap"):
-                        adhoc_exp_sel = ui.select([], label="Expiry").props("dense").classes("w-44")
-                        adhoc_contracts = ui.number("Contracts", value=1, min=1, max=100) \
-                            .props("dense").classes("w-28")
-                    # Legs card (header-table editor, shared with the Calculator).
-                    adhoc_leg_box = ui.column().classes("gap-2 w-full")
-                    adhoc_compute_btn = ui.button("Compute rescue options",
-                                                  color=None).props("no-caps").classes(BTN_3D)
-                # Right: the ranked (advisory-only) rescue menu for the ad-hoc trade.
-                with ui.column().classes("min-w-0 grow-[2] shrink basis-0"):
-                    with ui.row().classes("items-center gap-3 w-full"):
-                        adhoc_head = ui.label(
-                            "Define a trade and compute rescue options.") \
-                            .classes("text-subtitle1")
-                        adhoc_spinner = ui.spinner(size="sm")
-                        adhoc_spinner.set_visibility(False)
-                    adhoc_cards_col = ui.column().classes("w-full gap-3")
-                    adhoc_busy = _busy.build_busy(adhoc_cards_col, "Building the rescue menu…")
+            # ── AD-HOC PANEL: Calculator-style leg editor (left) + advisory ────
+            with ui.tab_panel(tab_adhoc):
+                with ui.row().classes("w-full gap-4 no-wrap items-start"):
+                    with ui.column().classes("min-w-0 grow-[3] shrink basis-0 gap-3"):
+                        with kit.control_bar():
+                            # ⚠ The three STOCK structures are excluded: this form
+                            # BOOKS into the paper account, and that account cannot
+                            # hold shares inside ``paper_positions`` — they live in
+                            # ``equity_lots``, which is the whole reason that table
+                            # exists. A covered call submitted here would be stored
+                            # as a bare short call, the same defect shape as the
+                            # iron butterfly this form relabels an iron condor.
+                            with kit.field("Strategy"):
+                                adhoc_strat = build_strategy_menu(
+                                    value="PCS", classes="w-52", boxed=True,
+                                    caption=False,
+                                    exclude=_strategies.STOCK_STRATEGIES)
+                            adhoc_sym = kit.symbol_field(on_load=lambda: _adhoc_load(),
+                                                         width="w-40")
+                            adhoc_load_btn = kit.button("Load", kind="primary",
+                                                        icon="cloud_upload",
+                                                        on_click=lambda: _adhoc_load())
+                            adhoc_exp_sel = kit.select_field("Expiry", [], width="w-44")
+                            adhoc_contracts = kit.number_field("Contracts", value=1,
+                                                               min=1, max=100,
+                                                               integer=True)
+                        adhoc_status = kit.status_line(
+                            "Pick a strategy, load a symbol, then set the legs.")
+                        # Legs card (header-table editor, shared with the Calculator).
+                        adhoc_leg_box = ui.column().classes("gap-2 w-full")
+                        adhoc_compute_btn = kit.button("Compute rescue options",
+                                                       kind="primary", icon="healing")
+                    # Right: the ranked (advisory-only) rescue menu for the ad-hoc trade.
+                    with ui.column().classes("min-w-0 grow-[2] shrink basis-0 gap-2"):
+                        adhoc_head = kit.section_title(
+                            "Define a trade and compute rescue options.")
+                        adhoc_advice = kit.region("Building the rescue menu…")
+                        adhoc_cards_col = adhoc_advice.content
 
     # ── at-risk board ────────────────────────────────────────────────────────
     def _render_at_risk():
         rows = at_risk_rows(state["paper"], state["captured"])
         state["rows_by_id"] = {r["id"]: r for r in rows}
         at_risk_tbl.rows = _table_rows(rows)
+        # Re-stamp: a 2 s repaint rebuilds every row dict, so the accent on the
+        # position whose menu is on screen has to be put back each time.
+        kit.mark_selected(at_risk_tbl.rows, state["board_id"])
         at_risk_tbl.update()
         at_risk_empty.set_visibility(not rows)
 
-    def _confirm_apply(candidate):
+    # Built ONCE at the page's own level and retitled per candidate: a dialog
+    # built inside a repainted container dies with its slot (the swing.py
+    # precedent), and this one is built from a card the next poll replaces.
+    apply_dlg = kit.confirm(
+        "Apply this rescue?",
+        # The single most reassuring fact on the page, and it was
+        # implementation-speak.
+        "This adjusts your paper position. No real money, and no live order is placed.",
+        confirm_text="Apply", on_confirm=lambda: _confirm_apply())
+    pending = {"candidate": None}
+
+    def _confirm_apply_factory(candidate):
         @guard
-        def _do():
-            with ui.dialog() as dlg, ui.card():
-                ui.label(f"Apply rescue: {candidate.get('title') or 'this action'}?")
-                # The single most reassuring fact on the page, and it was
-                # implementation-speak.
-                ui.label("This adjusts your paper position. No real money, and "
-                         "no live order is placed.") \
-                    .classes("opacity-70 text-sm")
-                with ui.row().classes("justify-end gap-2 w-full"):
-                    ui.button("Cancel", on_click=dlg.close).props("flat")
+        def _open():
+            pending["candidate"] = candidate
+            apply_dlg.title.text = \
+                f"Apply rescue: {candidate.get('title') or 'this action'}?"
+            apply_dlg.open()
+        return _open
 
-                    @guard
-                    def _go():
-                        dlg.close()
-                        adv = state["board_advisory"] or {}
-                        cand = candidate.get("_raw") or {}
-                        bus_client.request("options", {"type": "rescue_apply", "args": {
-                            "position_id": adv.get("position_id") or state["board_id"],
-                            "candidate": cand}})
-                        ui.notify("Applying rescue…")
-                        advisory_spinner.set_visibility(True)
-
-                    ui.button("Apply", color=None, on_click=_go).props("no-caps").classes(BTN_3D)
-            dlg.open()
-        return _do
+    def _confirm_apply():
+        candidate = pending["candidate"]
+        if not candidate:
+            return
+        adv = state["board_advisory"] or {}
+        bus_client.request("options", {"type": "rescue_apply", "args": {
+            "position_id": adv.get("position_id") or state["board_id"],
+            "candidate": candidate.get("_raw") or {}}})
+        kit.toast("info", "Applying the rescue — the result appears here.")
+        advisory.busy.show("Applying…")
 
     def _render_board_cards():
         _render_cards_into(cards_col, advisory_head, state["board_advisory"],
-                           _confirm_apply,
+                           _confirm_apply_factory,
                            "Select an at-risk position to see rescue options.")
 
     @guard
@@ -902,14 +905,16 @@ def render():
         src = state["rows_by_id"].get(rid, {})
         state["board_id"] = rid
         state["board_source"] = src.get("source")
+        kit.mark_selected(at_risk_tbl.rows, rid)
+        at_risk_tbl.update()
         advisory_head.text = f"Computing rescue options for {src.get('symbol') or rid}…"
-        advisory_spinner.set_visibility(True)
-        board_busy.hide()
+        # Clear the PREVIOUS position's menu, then spin. The spinner is on the
+        # region's outer element, so the clear cannot reach it.
         cards_col.clear()
+        advisory.busy.show()
         # Enqueue the rescue command — args shape matches handlers'
         # command.args["position_id"]. ``source`` routes paper vs captured
         # (captured → advisory-only menu, no Apply).
-        board_busy.show()
         bus_client.request("options", {"type": "rescue",
                                        "args": {"position_id": rid,
                                                 "source": state["board_source"] or "paper"}})
@@ -995,7 +1000,7 @@ def render():
     def _adhoc_load():
         sym = (adhoc_sym.value or "").strip().upper()
         if not sym:
-            ui.notify("Enter a symbol first.", type="warning")
+            kit.toast("warn", "Enter a symbol first.")
             return
         adhoc_status.text = f"Loading {sym} chain…"
         # Shares the Calculator's calc_chain cache (single-user, one page at a time).
@@ -1025,7 +1030,7 @@ def render():
             return
         spec = adhoc_spec_from_legs(adhoc_sym.value, adhoc_editor.get_legs())
         if spec.get("error"):
-            ui.notify(spec["error"], type="warning")
+            kit.toast("warn", spec["error"])
             return
         state["adhoc_selected"] = True
         state["adhoc_advisory"] = None
@@ -1033,16 +1038,13 @@ def render():
         # flash; the poll renders only when the fresh publish bumps it.
         state["adhoc_advisory_ver"] = bus_client.read_version("options:rescue:adhoc")
         adhoc_head.text = f"Computing rescue options for {spec['symbol']}…"
-        adhoc_spinner.set_visibility(True)
-        adhoc_busy.hide()
         adhoc_cards_col.clear()
-        adhoc_busy.show()
+        adhoc_advice.busy.show()
         bus_client.request("options", {"type": "rescue_adhoc", "args": {"spec": spec}})
 
-    adhoc_load_btn.on_click(_adhoc_load)
-    # Enter OR tab/click-out of the Symbol field loads the chain (mirrors the Load
-    # button), deduped so tabbing through an unchanged symbol won't re-fetch.
-    bind_symbol_load(adhoc_sym, _adhoc_load)
+    # The Load button and the Symbol field are already wired where they are
+    # built: ``kit.symbol_field`` owns the one Symbol behaviour (Enter always
+    # loads, tab-out loads only a CHANGED symbol).
     adhoc_compute_btn.on_click(_adhoc_compute)
     adhoc_strat.on_value_change(_adhoc_on_strategy)
     adhoc_exp_sel.on_value_change(lambda e: _adhoc_on_expiry())
@@ -1083,7 +1085,7 @@ def render():
         state["board_advisory_ver"] = ver
         adv = bus_client.read(f"options:rescue:{rid}")
         state["board_advisory"] = adv or None
-        advisory_spinner.set_visibility(False)
+        advisory.busy.hide()
         _render_board_cards()
         _notify_apply_result(adv)
 
@@ -1097,7 +1099,7 @@ def render():
         state["adhoc_advisory_ver"] = ver
         adv = bus_client.read("options:rescue:adhoc")
         state["adhoc_advisory"] = adv or None
-        adhoc_spinner.set_visibility(False)
+        adhoc_advice.busy.hide()
         _render_cards_into(adhoc_cards_col, adhoc_head, state["adhoc_advisory"],
                            _noop_apply, "Define a trade and compute rescue options.")
         _notify_apply_result(adv)
