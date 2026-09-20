@@ -645,6 +645,30 @@ def test_showing_every_row_hides_the_records_per_page_footer():
     assert paged._props["pagination"] == {"rowsPerPage": 25}
 
 
+def test_a_table_that_holds_rows_back_asks_quasar_for_server_paging():
+    """``rowsNumber`` is the key that puts Quasar in SERVER mode, where a page or
+    sort click emits ``request`` and the page answers with that page's rows.
+
+    ``rows_per_page`` on its own is CLIENT-side paging over the rows already
+    sent, which silently defeats a page that deliberately holds rows back: the
+    Strategy Finder ships 50 rows of up to ~510 because the whole list is
+    ~1.96 MB against ~190 KB for a page."""
+    with ui.card():
+        t = kit.table([{"name": "a", "label": "A", "field": "a"}], [],
+                      rows_per_page=50, rows_number=0)
+    assert t._props["pagination"] == {"sortBy": None, "descending": False,
+                                      "page": 1, "rowsPerPage": 50, "rowsNumber": 0}
+    assert t._props.get("hide-pagination") is False
+
+
+def test_server_paging_without_a_page_size_raises_rather_than_shipping_everything():
+    """``rowsNumber`` with no page size is server mode that sends every row - the
+    one thing asking for server mode means to avoid. A typo raises here, as it
+    does for a page width or a button kind."""
+    with ui.card(), pytest.raises(ValueError):
+        kit.table([{"name": "a", "label": "A", "field": "a"}], [], rows_number=10)
+
+
 def test_a_tooltip_caps_its_width_with_a_class_not_a_prop():
     """`max-width=340px` as a PROP lands as an inline style, which the app's
     Tailwind-only standard bans (tests/test_no_inline_style.py)."""

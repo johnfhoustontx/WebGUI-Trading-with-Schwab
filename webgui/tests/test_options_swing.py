@@ -178,6 +178,16 @@ def _buttons(card):
     return {getattr(b, "text", ""): b for b in _widgets(card, ui.button)}
 
 
+def _scan_bar(card):
+    """The row the scan controls sit in, named through the Symbol field rather
+    than by class: the field's column, then its parent. So every assertion below
+    is about WHERE a control is, not about which classes the frame happens to
+    write this month."""
+    from nicegui import ui
+    symbol = _widgets(card, ui.input)[0]
+    return symbol.parent_slot.parent.parent_slot.parent
+
+
 def _click(element, card):
     from nicegui.events import GenericEventArguments
     (listener,) = [l for l in element._event_listeners.values()
@@ -219,11 +229,18 @@ def test_the_scan_bar_uses_pill_groups_not_quasar_toggles():
 
 def test_scan_bar_groups_share_one_label_style():
     """Symbol, Expiry and Risk style each carry the same EYEBROW label above the
-    control, rather than a q-field floating label beside a bare toggle."""
+    control, rather than a q-field floating label beside a bare toggle.
+
+    ⚠ Re-aimed from the whole page to the scan BAR (2026-09-20). It read
+    "the first three eyebrows anywhere in the render", and the kit's status line
+    - the same EYEBROW class, built above the bar - stopped that being the bar's
+    three. The bar is what the assertion always meant, so scoping it is the
+    stronger form, not a weaker one."""
     from nicegui import ui
+    from pages.options import theme
     card = _render_page()
-    eyebrows = [e.text for e in _widgets(card, ui.label)
-                if swing.EYEBROW.split()[0] in e._classes]
+    eyebrows = [e.text for e in _scan_bar(card).descendants()
+                if isinstance(e, ui.label) and theme.EYEBROW.split()[0] in e._classes]
     assert eyebrows[:3] == ["Symbol", "Expiry", "Risk style"]
     symbol = _widgets(card, ui.input)[0]
     assert "label" not in symbol.props
@@ -1196,7 +1213,10 @@ def test_a_chooser_answer_draws_one_card_of_four_buttons():
     assert list(buttons) == ["Next 30 days · 23 · ~17 s", _NEXT_90,
                              "Monthlies only · 0", _ALL_CHAIN]
     for text, b in buttons.items():
-        assert set(swing.BTN.split()) <= set(b._classes) and "no-caps" in b.props
+        # theme.BTN, not swing.BTN: the page stopped importing the token when
+        # the picks became kit.button(kind="secondary") - same value, one owner.
+        from pages.options import theme
+        assert set(theme.BTN.split()) <= set(b._classes) and "no-caps" in b.props
         assert ("disable" in b.props) is (text == "Monthlies only · 0"), text
     assert not [e for e in only.descendants() if "animate-pulse" in e._classes]
     # No chips, an empty list that names the choice, and a summary that asks.
@@ -1234,7 +1254,12 @@ def test_a_chosen_scan_lands_with_the_scanned_line_and_change(monkeypatch):
     assert {r["id"] for r in table.rows} == {"fly", "sp"}
     assert "2 ideas · Scanned 35 of 56 expirations · Next 90 days" in _summary_labels(card)
     (change,) = _change_buttons(card)
-    assert "flat" in change.props and "no-caps" in change.props
+    # ⚠ Was `"flat" in change.props`: the page's own CHANGE_LINK (a flat,
+    # focus-blue, underline-on-hover link) retired on 2026-09-20 for the kit's
+    # QUIET kind, whose own docstring names "Change" as the control it is for.
+    assert "no-caps" in change.props
+    from pages.options import theme
+    assert set(theme.BTN_QUIET.split()) <= set(change._classes)
 
 
 def test_the_pick_is_remembered_for_that_symbol_and_not_for_another(monkeypatch):
@@ -1364,10 +1389,22 @@ def test_the_ask_that_preceded_a_pick_never_ends_the_pick_s_wait(monkeypatch):
 
 
 def test_change_carries_an_accessible_name_and_a_keyboard_focus_mark():
+    """⚠ The MARK changed on 2026-09-20 and this assertion follows it.
+    Change was a bare link carrying its own ``focus-visible:underline``; it is
+    now the kit's QUIET button, so its keyboard mark is Quasar's own
+    ``q-focus-helper`` - the same one every other button in the app shows. What
+    has to stay true is that this page does not take that helper away: the one
+    rule in FINDER_CSS that switches it off is scoped to the Advanced
+    expansion's header, where a full-width grey slab was the problem."""
+    from nicegui import ui
     card = _render_page(_chosen({**_ASK_PARAMS, "expiry_choice": "next_90"}))
     (change,) = _change_buttons(card)
     assert change.props.get("aria-label") == "Change which expirations to scan"
-    assert "focus-visible:underline" in change._classes
+    assert isinstance(change, ui.button)          # a QBtn, so it has the helper
+    for rule in swing.FINDER_CSS.splitlines():
+        if "q-focus-helper" in rule:
+            assert rule.startswith(".finder-advanced ")
+    assert "finder-advanced" not in change._classes
 
 
 def test_an_empty_pick_says_so_and_offers_change(monkeypatch):
@@ -1944,3 +1981,234 @@ def test_a_new_answer_without_the_open_row_says_it_left_and_gives_no_verdict(fre
     _run_checks_tick(card)
     labels = _finder_panel_labels(card)
     assert detail.GONE_FINDER_TEXT in labels and "Paper book" not in labels
+
+
+# ── the page kit (Phase 2, Task 6 — 2026-09-20) ─────────────────────────────
+# Every render test below reads only ITS OWN render: ``_render_page`` builds the
+# page inside a fresh ``ui.card()`` and the helpers walk that card's
+# descendants, never ``ui.context.client.elements`` — which is the auto-index
+# client the whole test module shares, and would hand back whatever another
+# page's kit region left behind.
+
+
+def test_the_finder_frame_is_the_page_kit_and_names_the_page():
+    """Nothing on screen named this page: the tab strip above it carries the
+    Options group's children, and the Finder's own title went in the 2026-07-11
+    dead-space cleanup."""
+    src = inspect.getsource(swing.render)
+    assert "kit.page()" in src
+    assert 'kit.header("Strategy Finder", view=SWING_VIEW, stale=False)' in src
+    # The legacy primary alias and the page's own link styling go with it.
+    assert "BTN_3D" not in inspect.getsource(swing)
+    assert not hasattr(swing, "CHANGE_LINK")
+
+
+def test_the_scan_bar_is_the_kit_control_bar():
+    from pages.options import theme
+    card = _render_page()
+    bar = _scan_bar(card)
+    assert set(theme.CARD.split()) <= set(bar._classes)
+    assert "items-end" in bar._classes and "flex-wrap" in bar._classes
+
+
+def test_the_advanced_fields_stay_inside_the_scan_card():
+    """A full-width child of the wrapping control bar takes a line of its own, so
+    Advanced keeps the card it has always been folded into rather than becoming a
+    second panel under it."""
+    from nicegui import ui
+    card = _render_page()
+    (adv,) = _widgets(card, ui.expansion)
+    assert "w-full" in adv._classes
+    assert adv in list(_scan_bar(card).descendants())
+
+
+def test_scan_is_the_pages_primary_kit_button():
+    from pages.options import theme
+    card = _render_page()
+    scan = _buttons(card)["Scan"]
+    assert set(theme.BTN_PRIMARY.split()) <= set(scan._classes)
+    assert "unelevated" in scan.props and "no-caps" in scan.props
+    assert scan.props.get("icon") == "search"
+    # The hand-set 40px height goes: the bar is ``items-end``, so every control
+    # sits on one baseline whatever its height, and the Go button is the app's
+    # size rather than the pill boxes'.
+    assert "h-10" not in scan._classes and "px-4" not in scan._classes
+
+
+def test_the_status_line_sits_under_the_header_not_inside_the_scan_bar(monkeypatch):
+    from nicegui import ui
+    from pages.options import theme
+    card = _render_page()
+    monkeypatch.setattr(bus_client, "request", lambda *a, **k: None)
+    _click(_buttons(card)["Scan"], card)
+    _fire_scan_timeout(card)
+    (status,) = [e for e in _widgets(card, ui.label) if e.text == swing.SCAN_SLOW]
+    assert theme.EYEBROW.split()[0] in status._classes
+    assert status not in list(_scan_bar(card).descendants())
+
+
+def test_the_before_any_scan_line_is_the_apps_one_empty_state():
+    from nicegui import ui
+    from pages import ui_kit as kit
+    card = _render_page()
+    (line,) = [e for e in _widgets(card, ui.label) if e.text == swing.EMPTY_PROMPT]
+    assert set(kit.EMPTY.split()) <= set(line._classes)
+
+
+def test_a_card_action_is_a_kit_button_that_does_not_also_select_the_card():
+    """``click.stop`` is load-bearing and ``kit.button`` wires a PLAIN click, so
+    the handler is attached to the returned element instead of passed in."""
+    from pages.options import theme
+    card = _render_page(_PAYLOAD)
+    for text, icon in (("Calculator", "calculate"), ("Paper", "request_quote")):
+        b = _buttons(card)[text]
+        assert set(theme.BTN.split()) <= set(b._classes), text
+        assert "unelevated" in b.props and "no-caps" in b.props, text
+        assert b.props.get("icon") == icon
+        (listener,) = list(b._event_listeners.values())
+        assert listener.type == "click.stop", text
+
+
+def test_the_chooser_picks_are_kit_buttons_and_an_empty_choice_is_disabled():
+    from pages.options import theme
+    card = _render_page(_ASK)
+    picks = _chooser_buttons(card)
+    assert len(picks) == 4
+    for text, b in picks.items():
+        assert set(theme.BTN.split()) <= set(b._classes), text
+        assert "unelevated" in b.props and "no-caps" in b.props, text
+    disabled = [t for t, b in picks.items() if b.props.get("disable")]
+    assert disabled == ["Monthlies only · 0"]         # zero expirations to scan
+
+
+def test_a_clicked_row_carries_the_selected_accent():
+    """The one real gap the kit closes here: the row click opened the detail
+    panel and left the list with nothing marked, so a reader reading the panel
+    had lost which row it was about."""
+    from pages import ui_kit as kit
+    card = _render_page(_PAYLOAD)
+    table = _table(card)
+    assert table._props[":table-row-class-fn"] == kit.ROW_CLASS_FN
+    _row_click(card, "fly")
+    assert {r["id"]: r["_selected"] for r in table.rows} == {"fly": True, "sp": False}
+    _row_click(card, "sp")
+    assert {r["id"]: r["_selected"] for r in table.rows} == {"fly": False, "sp": True}
+
+
+def test_the_mark_follows_the_page_and_a_new_scan_clears_it(monkeypatch):
+    card = _render_page({**_PAYLOAD, "signals": _many(120)})
+    table = _table(card)
+    page3 = {"sortBy": None, "descending": False, "page": 3, "rowsPerPage": 50}
+    _request_page(card, page3)
+    picked = table.rows[0]["id"]
+    _row_click(card, picked)
+    assert [r["id"] for r in table.rows if r["_selected"]] == [picked]
+    _request_page(card, {**page3, "page": 1})
+    assert not any(r["_selected"] for r in table.rows)   # not on this page
+    _request_page(card, page3)
+    assert [r["id"] for r in table.rows if r["_selected"]] == [picked]
+    # A new scan is a new list; nothing under it is the row that was selected.
+    _scan(card, monkeypatch, "msft")
+    _publish({**_PAYLOAD, "symbol": "MSFT", "signals": _many(120)})
+    _fire_poll(card)
+    assert not any(r["_selected"] for r in table.rows)
+
+
+def test_a_card_click_marks_the_row_the_card_stands_for():
+    card = _render_page(_PAYLOAD)
+    table = _table(card)
+    (grid,) = [e for e in card.descendants() if "grid" in e._classes]
+    _click(next(iter(grid.default_slot.children)), card)
+    assert [r["id"] for r in table.rows if r["_selected"]] == ["fly"]
+
+
+def test_the_ranked_list_still_pages_server_side():
+    """MUST NOT CHANGE — green before and after the kit migration.
+    ``rowsNumber`` is the key that puts Quasar in server mode; without it a page
+    or sort click would page CLIENT-side over the rows already sent, which is
+    exactly what ``PAGE_SIZE`` exists to prevent (a 510-row answer is ~1.96 MB
+    against ~190 KB for a page)."""
+    card = _render_page({**_PAYLOAD, "signals": _many(120)})
+    table = _table(card)
+    assert table.pagination["rowsNumber"] == 120
+    assert table.pagination["rowsPerPage"] == swing.PAGE_SIZE
+    assert table.props["rows-per-page-options"] == [swing.PAGE_SIZE]
+    assert table.props.get("hide-pagination") is False
+
+
+def test_an_empty_list_is_already_in_server_mode():
+    """MUST NOT CHANGE - green before and after. A cold page has to be in server
+    mode BEFORE its first answer: Quasar reads the mode off the pagination it is
+    given, so a page click on a client-mode table would never ask the page for
+    its rows. Its own test because one fake bus serves a whole test - a second
+    render inside this one would still see the first payload."""
+    table = _table(_render_page())
+    assert table.pagination["rowsNumber"] == 0
+    assert set(table.pagination) == {"sortBy", "descending", "page",
+                                     "rowsPerPage", "rowsNumber"}
+
+
+def test_the_empty_label_is_still_written_straight_to_props():
+    """MUST NOT CHANGE — green before and after. ``kit.table`` does not model a
+    no-data label, and a props STRING would be re-parsed, so a quote typed into
+    the Symbol box would break it (the sibling quote test). The direct write has
+    to survive the migration."""
+    src = inspect.getsource(swing.render)
+    assert 'table._props["no-data-label"] = text' in src
+    assert "no-data-label=" not in src
+
+
+def test_the_pill_and_the_filter_chip_are_the_only_raw_buttons_left():
+    """The two the guard's ALLOWED keeps, each with its reason written there: the
+    segmented pill's selected state is a class SWAP (SEG_ON / SEG_OFF) and the
+    strategy chip's is a tone swap (BADGE_ACCENT / BADGE_MUTED). ``kit.button``'s
+    four kinds carry no selected state, so routing either through it would mean a
+    page-side swap over ``button_classes(...)`` — the drift the kit exists to
+    stop. The pills also carry ``font-normal``, which ``kit.button`` never emits
+    and ``test_the_scan_bar_uses_pill_groups_not_quasar_toggles`` pins."""
+    import ast
+    calls = [n for n in ast.walk(ast.parse(inspect.getsource(swing)))
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and isinstance(n.func.value, ast.Name) and n.func.value.id == "ui"
+             and n.func.attr == "button"]
+    assert len(calls) == 2
+
+
+def test_the_wait_stays_build_busy_with_the_scans_own_ceiling():
+    """MUST NOT CHANGE — green before and after, and the reason ``kit.region`` is
+    not used here. The kit's backstop is 30 s and it has no ``elapsed_label``: a
+    whole-chain $SPX scan measured 40 s live, and the running count
+    (test_the_counter_names_the_current_request_s_symbol) is this page's answer
+    to "a static message for ninety seconds is indistinguishable from a hang"."""
+    src = inspect.getsource(swing.render)
+    assert "_busy.build_busy(" in src and "kit.region(" not in src
+    assert "elapsed_label=" in src
+    assert swing.SCAN_TIMEOUT_SEC == 180
+
+
+def test_the_split_bars_encodings_are_untouched():
+    """MUST NOT CHANGE — green before and after. The risk/reward bar's two fills
+    are the app's P/L red and green and the tick marks its zero point: all three
+    encode a value, not a frame."""
+    assert swing._LOSS_FILL == "bg-[#f87171]"
+    assert swing._PROFIT_FILL == "bg-[#34d399]"
+    assert swing.SPLIT_TICK.startswith("w-[2px] h-3 shrink-0 bg-[")
+
+
+def test_the_finder_css_survives_because_both_rules_are_load_bearing():
+    """MUST NOT CHANGE — green before and after. ``max-height:none`` uncaps this
+    list from the app-wide 65vh, and the focus-helper rule kills a full-width
+    grey slab on the Advanced header that no prop turns off."""
+    assert ".finder-table .q-table__middle { max-height: none; }" in swing.FINDER_CSS
+    assert ".finder-advanced .q-focus-helper { display: none; }" in swing.FINDER_CSS
+
+
+def test_the_never_cleared_list_box_still_hosts_the_dialog_and_the_timeout():
+    """MUST NOT CHANGE — green before and after. A ui.dialog and a ui.timer are
+    both built in their SENDER's slot, and a chooser pick's sender is cleared
+    away with the grid it sat in; ``list_box`` is the one container this page
+    never clears."""
+    src = inspect.getsource(swing.render)
+    # Three: the list itself, the Paper dialog, and the scan-timeout timer.
+    assert src.count("with list_box:") == 3
+    assert "list_box.clear()" not in src

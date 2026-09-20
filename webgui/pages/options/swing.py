@@ -36,6 +36,12 @@ event loop (``run.io_bound``) and is cached: a list the page rebuilds on the loo
 re-stamp re-reads it when a ``checks_feed.REFRESH_VIEWS`` version moves, when a
 new answer lands, and every ``TABLE_REFRESH_SEC`` if the Opportunity Board has
 moved. A re-stamp NEVER re-scans: a scan is a paid Schwab fetch.
+
+**The frame is ``pages/ui_kit.py``'s (2026-09-20)** — the header line that first
+names this page on screen, one control bar, one button vocabulary and the app's
+selected-row accent. Two controls stay raw with their reasons at the call site:
+the segmented pill (``_Segmented``) and the strategy filter chip (``_chip``),
+both of which carry a SELECTED state the kit's four button kinds do not model.
 """
 from contextlib import contextmanager
 
@@ -44,6 +50,7 @@ from nicegui import run, ui
 
 from pages import busy as _busy
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
+from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 
 from . import checks_feed, detail, handoff, strategy_table
@@ -51,8 +58,8 @@ from . import checks_table as ct
 from . import finder_view as fv
 from .inputs import bind_symbol_load, mark_symbol_loaded, select_all_on_focus
 from .scanner import score_zone_class
-from .theme import (BADGE_ACCENT, BADGE_MUTED, BADGE_WARN, BTN, BTN_3D, CARD, EYEBROW,
-                    LABEL, MUTED, THEME, TXT_NEG, TXT_POS)
+from .theme import (BADGE_ACCENT, BADGE_MUTED, BADGE_WARN, CARD, LABEL, MUTED,
+                    THEME, TXT_NEG, TXT_POS)
 
 SWING_VIEW = "options:swing"
 # How often the page looks for a re-stamp it has been asked for. The tick itself
@@ -121,11 +128,6 @@ _FIELD_PROPS = "dense outlined"
 # ``w-24`` leaves ~57px. DTE min matches so the pair lines up.
 DTE_BOX = "w-24"
 
-# The summary strip's Change control reads as a link, not a button: flat, no
-# fill, the focus blue, underlined on hover and on keyboard focus.
-CHANGE_LINK = (f"text-sm text-[{_PALETTE['focus']}] hover:underline focus-visible:underline "
-               "font-normal px-1 min-h-0")
-
 
 class _Segmented:
     """A row of pill buttons, at most one active; ``value`` None = none active.
@@ -133,6 +135,14 @@ class _Segmented:
     Replaces ``ui.toggle``, whose QBtnToggle internals (bold white labels, a solid
     Quasar-colour active block) no prop can restyle to the chips' look. Setting
     ``value`` from code repaints only; a click repaints and calls ``on_change``.
+
+    ⚠ The pill stays a RAW ``ui.button`` (the guard's ``ALLOWED`` carries the
+    reason): its whole job is a SELECTED state, expressed as a class swap
+    between ``SEG_ON`` and ``SEG_OFF``, and ``kit.button``'s four kinds carry no
+    such state - routing it through them would mean a page-side swap over
+    ``button_classes(...)``, the drift the kit exists to stop. ``font-normal``
+    is a second reason: the kit never emits it, and it is what keeps a pill
+    reading as a chip rather than as a button.
     """
 
     def __init__(self, options, value, on_change):
@@ -425,7 +435,6 @@ _GRADE_SLOT = r'''
 
 def render():
     """The Strategy Finder: scan bar, summary, chips, top picks, ranked list."""
-    # No page title - the tab strip names the page (2026-07-11 dead-space cleanup).
     ui.add_css(FINDER_CSS)
     sync = {"on": False}        # True while code writes linked controls
     # Read the cached result BEFORE the scan bar is built: the Symbol box starts
@@ -439,53 +448,63 @@ def render():
     start = fv.scan_controls_from(cached)
     start_risk = fv.risk_toggle_value(*(start[k] for k in fv.BAND_KEYS))
 
-    with ui.column().classes("w-full gap-3"):
+    with kit.page():
+        # ⚠ ``stale=False``. ``options:swing`` is REQUEST/RESPONSE - the service
+        # publishes it only in answer to a ``swing_scan`` - so nothing is ever
+        # due and an age can never mean "behind". The stamp still answers this
+        # reader's question: whether the ideas on screen are the ones the last
+        # Scan brought back. No page ACTION sits beside it - Scan, in the control
+        # bar below, is this screen's one action.
+        kit.header("Strategy Finder", view=SWING_VIEW, stale=False)
+        # The page's one status sentence, under the header rather than wedged
+        # into the scan bar: its only text is SCAN_SLOW, two sentences long,
+        # which used to wrap the bar it sat in.
+        status = kit.status_line()
         # 1 - Scan bar. One bottom-aligned row that wraps: every group carries the
-        # same EYEBROW label above a 40px-tall control (dense outlined inputs and
-        # the pill boxes share that height), so the labels and the controls each
-        # sit on one line. Scan is last.
-        with ui.column().classes(f"{CARD} w-full gap-1"):
-            with ui.row().classes("w-full items-end gap-x-5 gap-y-3 flex-wrap"):
-                with ui.column().classes("gap-1"):
-                    ui.label("Symbol").classes(EYEBROW)
-                    symbol_in = select_all_on_focus(
-                        ui.input(value=initial_symbol(cached))
-                        .props(f"{_FIELD_PROPS} autofocus aria-label=Symbol")
-                        .classes("w-28"))
-                with ui.column().classes("gap-1"):
-                    ui.label("Expiry").classes(EYEBROW)
-                    with ui.row().classes("items-center gap-2 flex-wrap"):
-                        expiry_seg = _Segmented(
-                            [label for label, _lo, _hi in fv.EXPIRY_PRESETS],
-                            fv.expiry_preset_for(start["dte_min"], start["dte_max"]),
-                            lambda v: _on_expiry_choice(v))
-                        dte_min = ui.number(value=start["dte_min"], min=0) \
-                            .props(f'{_FIELD_PROPS} aria-label="DTE min"') \
-                            .classes(DTE_BOX)
-                        ui.label("to").classes(f"text-xs {MUTED}")
-                        # Blank is no upper limit (the All and 1 yr+ presets).
-                        dte_max = ui.number(value=start["dte_max"], min=1,
-                                            placeholder="no limit") \
-                            .props(f'{_FIELD_PROPS} aria-label="DTE max"') \
-                            .classes(DTE_BOX)
-                        ui.label("days").classes(f"text-xs {MUTED}")
-                with ui.column().classes("gap-1"):
-                    ui.label("Risk style").classes(EYEBROW)
-                    with ui.row().classes("items-center gap-2 no-wrap"):
-                        risk_seg = _Segmented(list(fv.RISK_STYLES), start_risk,
-                                              lambda v: _on_risk_choice(v))
-                        # Read-only: shown when the Advanced fields match no style.
-                        # It is never an option, so it can never be "chosen".
-                        custom_badge = ui.label(fv.RISK_CUSTOM) \
-                            .classes(f"{BADGE_MUTED} {_PILL}")
-                        custom_badge.set_visibility(start_risk is None)
-                scan_btn = ui.button("Scan", icon="search", color=None) \
-                    .props("no-caps").classes(f"{BTN_3D} h-10 px-4")
-                status = ui.label("").classes(f"text-sm {MUTED} self-center")
+        # same label above a 40px-tall control (dense outlined inputs and the
+        # pill boxes share that height), so the labels and the controls each sit
+        # on one line. Scan is last - and being ``items-end``, the row bottom-
+        # aligns it whatever its height, so it is the app's button size rather
+        # than the pills' 40px.
+        with kit.control_bar():
+            with kit.field("Symbol"):
+                symbol_in = select_all_on_focus(
+                    ui.input(value=initial_symbol(cached))
+                    .props(f"{_FIELD_PROPS} autofocus aria-label=Symbol")
+                    .classes("w-28"))
+            with kit.field("Expiry"):
+                with ui.row().classes("items-center gap-2 flex-wrap"):
+                    expiry_seg = _Segmented(
+                        [label for label, _lo, _hi in fv.EXPIRY_PRESETS],
+                        fv.expiry_preset_for(start["dte_min"], start["dte_max"]),
+                        lambda v: _on_expiry_choice(v))
+                    dte_min = ui.number(value=start["dte_min"], min=0) \
+                        .props(f'{_FIELD_PROPS} aria-label="DTE min"') \
+                        .classes(DTE_BOX)
+                    ui.label("to").classes(f"text-xs {MUTED}")
+                    # Blank is no upper limit (the All and 1 yr+ presets).
+                    dte_max = ui.number(value=start["dte_max"], min=1,
+                                        placeholder="no limit") \
+                        .props(f'{_FIELD_PROPS} aria-label="DTE max"') \
+                        .classes(DTE_BOX)
+                    ui.label("days").classes(f"text-xs {MUTED}")
+            with kit.field("Risk style"):
+                with ui.row().classes("items-center gap-2 no-wrap"):
+                    risk_seg = _Segmented(list(fv.RISK_STYLES), start_risk,
+                                          lambda v: _on_risk_choice(v))
+                    # Read-only: shown when the Advanced fields match no style.
+                    # It is never an option, so it can never be "chosen".
+                    custom_badge = ui.label(fv.RISK_CUSTOM) \
+                        .classes(f"{BADGE_MUTED} {_PILL}")
+                    custom_badge.set_visibility(start_risk is None)
+            scan_btn = kit.button("Scan", kind="primary", icon="search")
             # Collapsed and deliberately quiet: a small muted header, no hover slab
-            # (FINDER_CSS). The delta bands govern every SHORT leg the Finder sells
-            # (the credit spreads, the naked short put/call, the short strangle and
-            # the covered call or collar call); the credit floor is the spreads' alone.
+            # (FINDER_CSS). ``w-full`` keeps it INSIDE the scan card - a full-width
+            # child of the wrapping control bar takes a line of its own, rather
+            # than becoming a second panel under it. The delta bands govern every
+            # SHORT leg the Finder sells (the credit spreads, the naked short
+            # put/call, the short strangle and the covered call or collar call);
+            # the credit floor is the spreads' alone.
             with ui.expansion("Advanced — delta bands and credit floor") \
                     .classes("finder-advanced w-full") \
                     .props(f'dense header-class="px-1 min-h-[32px] text-xs '
@@ -518,15 +537,16 @@ def render():
         with ui.row().classes("w-full no-wrap gap-4 items-start"):
             list_box = ui.column().classes("flex-grow min-w-0 gap-2 min-h-[120px]")
             with list_box:
-                empty_line = ui.label(EMPTY_PROMPT).classes(f"text-sm {MUTED}")
-                # Server-side paging (PAGE_SIZE): ``rowsNumber`` is what puts
-                # Quasar in server mode, where a page or sort click emits
-                # ``request`` and the page answers with that page's rows.
-                table = ui.table(columns=fv.finder_columns(), rows=[], row_key="id",
-                                 pagination={"sortBy": None, "descending": False,
-                                             "page": 1, "rowsPerPage": PAGE_SIZE,
-                                             "rowsNumber": 0}) \
-                    .classes("finder-table w-full")
+                empty_line = kit.empty(EMPTY_PROMPT)
+                # ⚠ ``rows_number`` is what keeps Quasar in SERVER mode, where a
+                # page or sort click emits ``request`` and the page answers with
+                # that page's rows; ``rows_per_page`` alone would page
+                # CLIENT-side over the rows already sent, which is exactly what
+                # PAGE_SIZE exists to prevent. No ``numeric=``: the money
+                # columns are deliberately left-aligned (finder_columns).
+                table = kit.table(fv.finder_columns(), rows=[], row_key="id",
+                                  rows_per_page=PAGE_SIZE, rows_number=0,
+                                  classes="finder-table w-full")
                 table._props["rows-per-page-options"] = [PAGE_SIZE]
             detail_panel = detail.render()
     # The list keeps its width until there is something to show.
@@ -544,10 +564,13 @@ def render():
     # only its clear rows while "Only clear" is on. sigs: all_rows' signals, in
     # row order. gen: bumped by every new list, so a re-stamp that read against
     # an older one is dropped. no_data: the empty-table line before Only clear.
+    # sel_id: the signal the detail panel is describing, so the list can mark
+    # the row it came from (kit.mark_selected). It is the SIGNAL's id, not the
+    # visible row's, because a top-pick card selects the same signal.
     state = {"payload": None, "symbol": None, "active": None, "version": None,
              "scanning": None, "scan_seq": 0, "scan_request": None, "rows": [],
              "all_rows": [], "sigs": [], "gen": 0, "no_data": None,
-             "row_signal": {}, "choice_by_symbol": {}}
+             "row_signal": {}, "choice_by_symbol": {}, "sel_id": None}
     # The checklist: ctx is the last context read (None until the first), memo
     # the stamps made against it, seen the refresh views' versions it answers,
     # matrix the board version it was read at. due asks the tick for a re-stamp;
@@ -635,6 +658,12 @@ def render():
     def _select_signal(sig):
         if not sig:
             return
+        # Mark the row the panel is now describing. A top-pick CARD lands here
+        # too, and marks the list row the same signal built - the panel is about
+        # one signal however it was reached.
+        state["sel_id"] = sig.get("id")
+        kit.mark_selected(table.rows, state["sel_id"])
+        table.update()
         # Every selection opens the panel: a click that updated a collapsed panel
         # invisibly would read as a click that did nothing.
         detail_panel.open()
@@ -677,6 +706,10 @@ def render():
         with _table_batch():
             table.rows = with_shapes(page, lambda r: state["row_signal"].get(id(r)))
             table.pagination = pagination
+            # The page's rows are fresh copies, so the accent is re-stamped on
+            # each one - the mark follows the reader through pages, sorts, chip
+            # clicks and re-stamps rather than living on one list of dicts.
+            kit.mark_selected(table.rows, state["sel_id"])
 
     def _write_no_data():
         # Written to _props directly: a props STRING would be re-parsed, and a
@@ -772,10 +805,13 @@ def render():
                 f"text-sm {MUTED} ml-auto")
             # Beside the "Scanned N of M" part it explains - and only when the
             # answer still carries choices to reopen, or Change would open nothing.
+            # QUIET is the kit kind written for exactly this control: its own
+            # docstring names "Change" as the small link beside a reading that
+            # must not read as the page's action.
             if facts["can_change"] and _change_facts(payload) is not None:
-                ui.button("Change", color=None) \
-                    .props('flat dense no-caps aria-label="Change which expirations to scan"') \
-                    .classes(CHANGE_LINK).on("click", lambda _e: _reopen_chooser())
+                kit.button("Change", kind="quiet",
+                           on_click=lambda: _reopen_chooser()) \
+                    .props('aria-label="Change which expirations to scan"')
 
     def _change_facts(payload):
         """The chooser card an applied choice can reopen: the answer's own
@@ -796,6 +832,11 @@ def render():
         _paint_results()
 
     def _chip(label, code):
+        # ⚠ A RAW ui.button (the guard's ALLOWED carries the reason): a filter
+        # chip's whole job is a SELECTED state, here a tone swap between
+        # BADGE_ACCENT and BADGE_MUTED, and kit.button's four kinds carry no such
+        # state. It is also built once per strategy group on every repaint, and
+        # a row of full-size action buttons is not what a filter row is.
         tone = BADGE_ACCENT if fv.chip_is_active(state["active"], code) else BADGE_MUTED
         ui.button(label, color=None).props("no-caps dense unelevated") \
             .classes(f"{tone} {_CHIP}").on("click", lambda _e, c=code: _on_chip(c))
@@ -858,13 +899,14 @@ def render():
                     .classes(f"text-xs {MUTED}")
             ui.label(c["cost"]).classes(f"text-sm {LABEL}")
             with ui.row().classes("gap-2 no-wrap"):
-                # click.stop: a button press is not also a card selection.
-                ui.button("Calculator", icon="calculate", color=None) \
-                    .props("no-caps dense").classes(BTN) \
+                # ⚠ click.stop is load-bearing - a button press is not also a
+                # card selection - and kit.button wires a PLAIN click, so the
+                # handler goes onto the returned element rather than into
+                # on_click.
+                kit.button("Calculator", kind="secondary", icon="calculate") \
                     .on("click.stop", lambda _e, s=sig: handoff.send_signal_to_calculator(s))
                 if c["allow_paper"]:
-                    ui.button("Paper", icon="request_quote", color=None) \
-                        .props("no-caps dense").classes(BTN) \
+                    kit.button("Paper", kind="secondary", icon="request_quote") \
                         .on("click.stop", lambda _e, s=sig: _open_paper(s))
 
     @guard
@@ -893,8 +935,7 @@ def render():
                 ui.label(facts["prompt"]).classes(f"text-sm {MUTED}")
                 with ui.row().classes("items-center gap-2 flex-wrap"):
                     for b in facts["buttons"]:
-                        btn = ui.button(b["text"], color=None).props("no-caps") \
-                            .classes(BTN)
+                        btn = kit.button(b["text"], kind="secondary")
                         if b["enabled"]:
                             btn.on("click", lambda _e, k=b["key"]: _on_pick(symbol, k))
                         else:
@@ -974,6 +1015,11 @@ def render():
         for s in signals:
             if s.get("id"):
                 by_id[s["id"]] = s
+        # A mark on a row this answer no longer holds would sit on whichever row
+        # happened to take its place, so the accent follows the panel: the
+        # GONE_FINDER_TEXT branch below says the same thing in words.
+        if state["sel_id"] not in by_id:
+            state["sel_id"] = None
         # New signals: the stamps made for the last ones no longer apply, and the
         # answer is re-stamped against a fresh context read, off the loop.
         checks["memo"] = {}
@@ -1026,8 +1072,9 @@ def render():
         state["scanning"] = seq
         state["scan_request"] = params
         status.text = ""
-        # The panel described a row of the previous scan.
+        # The panel described a row of the previous scan, and so did the accent.
         detail_panel.clear()
+        state["sel_id"] = None
         # The old cards and rows belong to the previous scan (maybe another
         # symbol), so they go - rather than reading as this scan's result.
         summary_box.set_visibility(False)

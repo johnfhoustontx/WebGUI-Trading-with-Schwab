@@ -551,16 +551,41 @@ def mark_selected(rows, row_id, *, key="id"):
     return rows
 
 
+def _pagination(rows_per_page, rows_number):
+    """Quasar's ``pagination`` v-model. PURE.
+
+    ⚠ ``rows_number`` is the key that puts Quasar in SERVER mode, and nothing
+    else does: with it, a page or sort click emits ``request`` and the page
+    answers with that page's rows; without it Quasar pages CLIENT-side over the
+    rows it was already given. So a page that deliberately holds rows back must
+    pass BOTH, and server mode with no page size would send every row - the one
+    thing asking for it means to avoid - so that combination raises rather than
+    quietly doing the opposite of what was asked."""
+    if rows_number is None:
+        return {"rowsPerPage": rows_per_page} if rows_per_page else None
+    if not rows_per_page:
+        raise ValueError("rows_number is server-side paging and needs a "
+                         "rows_per_page to page BY; rows_per_page=0 sends every row")
+    return {"sortBy": None, "descending": False, "page": 1,
+            "rowsPerPage": rows_per_page, "rowsNumber": rows_number}
+
+
 def table(columns, rows=None, *, row_key="id", numeric=(), rows_per_page=0,
-          classes="w-full"):
+          rows_number=None, classes="w-full"):
     """The one table: dense, flat, sticky header (the app-wide ``TABLE_CSS``),
     numbers right-aligned, sortable columns, and the selected row drawn from
     ``_selected`` (``mark_selected``). ``rows_per_page=0`` shows every row - and
     hides the "Records per page" footer with it, which otherwise sits under a
-    table that has no pages."""
+    table that has no pages.
+
+    ``rows_number`` is the WHOLE list's length and switches to SERVER-side
+    paging (see :func:`_pagination`): the page then answers the table's
+    ``request`` event with that page's rows and a fresh ``rowsNumber``. Only a
+    page whose full list is too big to ship needs it - the Strategy Finder sends
+    50 rows of up to ~510, ~190 KB against ~1.96 MB."""
     t = ui.table(columns=table_columns(columns, numeric=numeric),
                  rows=list(rows or []), row_key=row_key,
-                 pagination={"rowsPerPage": rows_per_page} if rows_per_page else None) \
+                 pagination=_pagination(rows_per_page, rows_number)) \
         .classes(classes).props(TABLE_PROPS)
     # Written to _props directly: a props STRING would be re-parsed and mangle
     # the quotes inside the arrow function (the scanner.py precedent).

@@ -9,13 +9,15 @@ call lowers its entry in the same commit - otherwise the list stops describing
 the code. An entry may outlive the migration only with a written reason (a
 control that is not an action button: a segmented picker, a leg-table toggle).
 
-⚠ SEVEN entries are PERMANENT rather than pending, and each carries its reason
+⚠ NINE entries are PERMANENT rather than pending, and each carries its reason
 above it: ``options/detail.py`` (Phase 1), ``desk.py`` / ``market.py`` /
-``sentiment_momentum.py`` (Phases 3 & 4), and the three shared Options widgets
-``options/entry_panel.py`` / ``options/leg_editor.py`` /
-``options/strategy_menu.py`` (Phase 2). Every other entry is a page no phase has
-migrated yet and is expected to fall to zero and be deleted. The nine screens
-Phases 3 & 4 covered left no entry at all except those three.
+``sentiment_momentum.py`` (Phases 3 & 4), and five from Phase 2 - the three
+shared Options widgets ``options/entry_panel.py`` / ``options/leg_editor.py`` /
+``options/strategy_menu.py``, plus ``options/simulator.py`` and
+``options/swing.py``. Every other entry is a page no phase has migrated yet and
+is expected to fall to zero and be deleted. The nine screens Phases 3 & 4
+covered left no entry at all except those three. (The count read SEVEN and
+omitted ``options/simulator.py`` until 2026-09-20; corrected in place.)
 """
 import ast
 import collections
@@ -77,7 +79,17 @@ ALLOWED = {
     # two spellings exist because ``boxed`` drops the Quasar outline, which
     # forces a transparent background page CSS cannot beat.
     "options/strategy_menu.py": {"button": 2},
-    "options/swing.py": {"button": 7, "table": 1},
+    # The segmented pill and the strategy filter chip, and they stay: each is a
+    # SELECTED state - the pill swaps SEG_ON / SEG_OFF, the chip swaps
+    # BADGE_ACCENT / BADGE_MUTED - and kit.button's four kinds have no such
+    # state, so either through the kit would mean a page-side swap over
+    # button_classes(...), the drift the kit exists to stop. The pills also
+    # carry font-normal, which kit.button never emits. The page's four ACTIONS
+    # (Scan, Change, the cards' Calculator / Paper and the chooser's picks) go
+    # through the kit, and so does the ranked list: kit.table's rows_number=
+    # keeps its server paging, which rowsPerPage alone would silently turn into
+    # client paging over the 50 rows already sent.
+    "options/swing.py": {"button": 2},
     "portfolio.py": {"button": 1, "table": 3},
     # The per-member name chip, and it stays: ONE call site producing on the
     # order of the whole level's universe per repaint, and a selectable name
