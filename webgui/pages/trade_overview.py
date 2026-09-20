@@ -20,7 +20,7 @@ from pages.trade import (dealer_rows, gate_rows, short_gate_rows,
 
 
 def render():
-    sh.page(_build)
+    sh.page(_build, "Overview")
 
 
 def _build(state, refs):

@@ -30,7 +30,7 @@ _GRID = ("grid w-full items-center gap-x-3 "
 
 
 def render():
-    sh.page(_build)
+    sh.page(_build, "Evidence")
 
 
 def _build(state, refs):

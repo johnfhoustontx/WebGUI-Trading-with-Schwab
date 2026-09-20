@@ -20,16 +20,10 @@ contributions all read against a CENTRED axis, so a bar's meaning is the same
 wherever it appears: distance from the middle, coloured by side.
 """
 
-# Google Fonts is the one font host the app's CSP admits. Injected per page via
-# ``ui.add_head_html``; both faces carry real fallbacks so a blocked request
-# degrades to the system stack rather than to nothing.
-FONT_HTML = (
-    '<link rel="preconnect" href="https://fonts.googleapis.com">'
-    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
-    '<link rel="stylesheet" href="https://fonts.googleapis.com/css2'
-    '?family=Manrope:wght@400;500;600;700;800'
-    '&family=JetBrains+Mono:wght@400;500;700&display=swap">'
-)
+# (``FONT_HTML`` lived here until 2026-09-20. It loaded Manrope 400-800 and
+# JetBrains Mono 400/500/700 on every Signal Desk page build, two web fonts
+# beside the app's own IBM Plex. The app loads ONE font, app-wide, and a font
+# link is the one thing the ui-kit guard's docstring allows no reason for.)
 
 # ── ground + panels ─────────────────────────────────────────────────────────
 # PAGE mirrors the app-wide `theme.PAGE` STRUCTURALLY — a rounded, bordered

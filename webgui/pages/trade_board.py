@@ -278,7 +278,7 @@ def meta_line(board):
 
 
 def render():
-    sh.page(_build)
+    sh.page(_build, "Rank Board")
 
 
 def _build(state, refs):
@@ -288,7 +288,10 @@ def _build(state, refs):
 
     with ui.row().classes("w-full items-end justify-between gap-4 flex-wrap"):
         with ui.column().classes("gap-1"):
-            ui.label("Rank board").classes(T.SCREEN_TITLE)
+            # (The screen's own "Rank board" headline went on 2026-09-20: the
+            # shell's kit header names the screen, in the NAV's spelling, so a
+            # second one here was a doubled title. Task 2 moves ``meta`` and
+            # the filters out of this row.)
             meta = ui.label("").classes("text-[11.5px] text-[#6b7b9c]")
         filters = ui.row().classes("gap-[9px]")
 

@@ -103,7 +103,6 @@ ALLOWED = {
     "trade.py": {"button": 3, "table": 2},
     "trade_board.py": {"button": 2},
     "trade_plan_screen.py": {"button": 2, "notify": 1},
-    "trade_shell.py": {"add_head_html": 1, "button": 1},
 }
 
 

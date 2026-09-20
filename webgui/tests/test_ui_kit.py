@@ -595,6 +595,21 @@ def test_the_region_backstop_releases_the_reserved_height_too():
     assert kit.REGION_MIN_H not in r.outer.classes
 
 
+def test_a_region_can_count_a_long_wait_up_rather_than_holding_one_sentence():
+    """``busy.build_busy``'s own parameter, passed through. A wait long enough
+    that one static sentence reads as a hang needs the counter — busy.py's
+    docstring names the measured 96s Signal Desk analysis as the case — and
+    without it here that page would have had to keep the older spelling."""
+    with ui.card():
+        r = kit.region("Analyzing…", timeout=600,
+                       elapsed_label=lambda sec: f"Analyzing… {int(sec)}s")
+    r.busy.show()
+    r.busy.timer.callback()             # what the 1s watchdog actually runs
+    assert r.busy.element.visible, "600s is nowhere near the backstop"
+    assert r.busy.label.text.startswith("Analyzing… ")
+    assert r.busy.label.text != "Analyzing…"
+
+
 def test_empty_state_is_one_muted_line():
     with ui.card():
         e = kit.empty("Nothing traded yet today")

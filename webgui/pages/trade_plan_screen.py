@@ -26,11 +26,12 @@ _KEY_LABEL = "Time stop"
 
 
 def render():
-    sh.page(_build)
+    sh.page(_build, "Trade Plan")
 
 
 def _build(state, refs):
-    ui.label("Trade plan").classes(T.SCREEN_TITLE)
+    # (The screen's own "Trade plan" headline went on 2026-09-20: the shell's
+    # kit header names the screen, in the NAV's spelling.)
 
     with ui.element("div").classes(
             "w-full grid gap-4 items-start "

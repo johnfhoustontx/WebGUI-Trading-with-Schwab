@@ -474,7 +474,8 @@ def gate(go, *fields):
 REGION_MIN_H = "min-h-[120px]"
 
 
-def region(text="Loading…", *, classes="w-full", timeout=_busy.BUSY_TIMEOUT_SEC):
+def region(text="Loading…", *, classes="w-full", timeout=_busy.BUSY_TIMEOUT_SEC,
+           elapsed_label=None):
     """A block whose contents a repaint replaces. Repaint ``content`` (clear and
     rebuild it); the spinner lives on ``outer``, so a clear can never delete it
     - the bug five pages had. ``busy.show()`` on first load and every refresh.
@@ -484,11 +485,19 @@ def region(text="Loading…", *, classes="w-full", timeout=_busy.BUSY_TIMEOUT_SE
     ``timeout`` is the backstop that hides it if the data never lands, and it
     releases the height too. Raise ``timeout`` for a region backing a
     legitimately slow fetch - a backstop that fires while the work is still
-    running says "finished" when nothing is."""
+    running says "finished" when nothing is.
+
+    ``elapsed_label(seconds)`` rewrites the message on the backstop's existing
+    1 s tick, for a wait long enough that one sentence stops being a wait and
+    starts being a hang. It is ``busy.build_busy``'s own parameter, passed
+    straight through: the Signal Desk's analyze is the case it was written for
+    (measured 96 s), and without it here that page would have had to keep the
+    older spelling to keep its counter."""
     outer = ui.element("div").classes(classes)
     with outer:
         content = ui.column().classes("w-full gap-3")
-    spin = _busy.build_busy(outer, text, timeout=timeout)
+    spin = _busy.build_busy(outer, text, timeout=timeout,
+                            elapsed_label=elapsed_label)
 
     def show(msg=None):
         outer.classes(add=REGION_MIN_H)
