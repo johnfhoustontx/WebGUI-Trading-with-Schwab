@@ -78,7 +78,9 @@ Each asserts a token name is ABSENT from a source; once the token is gone none c
 
 `.calc-v3 .leg-trow .q-field__native{font-size:11px}` (`theme.py:1130-1131`) is **size-only and has no `.ns-app` equivalent**. Its comment says the narrow tracks need it so "Mark" and a four-digit strike fit. Move it into `build_quasar_css` under `{scope}`.
 
-⚠ **This changes the Simulator and Rescue too** — both mount `.leg-trow` — toward consistency, but visibly. **Ship it alone** so that reflow is inspectable by itself, before anything else in this phase moves. Check all three in the harness before Task 2.
+⚠ **CORRECTED after doing it: this reaches the Simulator, NOT Rescue.** The rule targets `.leg-trow`, which `leg_editor` emits only at line 542 — inside `_table_body`, the **table** path. Rescue mounts `layout="row"` and gets `.leg-row`, a different hook. So the blast radius is the Calculator (which already had the rule under `.calc-v3`, same value) and the **Simulator**, which gains it.
+
+Measured in the harness on the real `sim_meta` payload after the move: all six `.leg-trow .q-field__native` fields at **11px**, **zero** clipped, and `.leg-row` absent from the page — the confirmation that Rescue's hook is not involved. Shipping it alone was still right; the reason was narrower than stated.
 
 **Commit:** `refactor(theme): the leg-table font size becomes app-wide`
 

@@ -445,6 +445,13 @@ def build_quasar_css(theme, scope=".calc-v2"):
 {scope} .leg-trow .q-field__append .q-icon{{font-size:12px;}}
 /* Centered strike value in the leg table. */
 {scope} .leg-strike .q-field__native{{justify-content:center;text-align:center;}}
+/* ...and 11px text in the row's fields, AFTER the strike rule so it wins the
+   tie (both are one class plus an element, so source order decides), because
+   "Mark" and a four-digit strike do not fit their tracks at the default size.
+   App-wide since 2026-09-20: the Calculator, the Simulator and Rescue all
+   mount these narrow tracks, so one rule serves all three. */
+{scope} .leg-trow .q-field__native,{scope} .leg-trow .q-field__native input,
+{scope} .leg-trow .q-field__native span{{font-size:11px;}}
 /* Tabs (Simulator) — light labels, accent indicator, transparent panels so the
    dark-transparent Highcharts panels sit on the page gradient. */
 {scope} .q-tabs{{color:{p['icon']};}}
@@ -1126,10 +1133,6 @@ def build_calc_css(theme):
 .calc-v3 .leg-trow .q-field__append{{padding-left:0;}}
 .calc-v3 .leg-trow .q-field__append .q-icon{{font-size:12px;}}
 .calc-v3 .leg-strike .q-field__native{{justify-content:center;text-align:center;font-size:12px;}}
-/* ...and 11px text in the row's fields (after the strike rule, which it must
-   override), so "Mark" and a four-digit strike fit their tracks. */
-.calc-v3 .leg-trow .q-field__native,.calc-v3 .leg-trow .q-field__native input,
-.calc-v3 .leg-trow .q-field__native span{{font-size:11px;}}
 /* Cascading strategy popup — teleported to <body>, so NOT under .calc-v3. */
 .strat-menu-calc.q-menu{{
   background:{c['frame_a']}!important;border:1px solid {c['edge']};

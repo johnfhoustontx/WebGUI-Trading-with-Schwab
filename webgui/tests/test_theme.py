@@ -548,3 +548,30 @@ def test_the_rotation_quadrant_hues_and_tones_survive_in_code():
     assert set(rv.QUAD_HUE) == {"Leading", "Improving", "Weakening", "Lagging"}
     assert set(rv.QUAD_CHROMA) == set(rv.QUAD_HUE)
     assert set(rv.TONE) == {"up", "down", "flat"}
+
+
+# -- the leg-table text size is app-wide, not the Calculator's ------------------
+def test_the_leg_row_text_size_is_app_wide_and_orders_after_the_strike_rule():
+    """The 11px leg-row text lived only under ``.calc-v3``. It is SIZE ONLY, and
+    the Simulator and Rescue mount the same narrow ``.leg-trow`` tracks, so it
+    belongs in the app-wide block: without it "Mark" and a four-digit strike do
+    not fit their columns.
+
+    ⚠ It must come AFTER ``.leg-strike .q-field__native``. Both are one class
+    deep plus an element, so the specificity ties and the winner is decided by
+    source order alone - the same trap CLAUDE.md records for DESK_NEON_CSS."""
+    css = theme.QUASAR_INTERNAL_CSS
+    assert ".leg-trow .q-field__native" in css
+    assert "font-size:11px" in css
+    strike = css.index(".leg-strike .q-field__native")
+    eleven = css.index("font-size:11px")
+    assert strike < eleven, "the 11px rule must follow the strike rule it overrides"
+
+
+def test_the_app_wide_leg_rules_cover_every_page_that_mounts_a_leg_table():
+    """Calculator, Simulator and Rescue all mount ``.leg-trow`` or ``.leg-row``.
+    The rules are emitted under the caller's scope, so one injection serves all
+    three - which is why this moved out of the Calculator's own block."""
+    css = theme.build_quasar_css(theme.THEME, scope=".ns-app")
+    for hook in (".ns-app .leg-trow", ".ns-app .leg-row", ".ns-app .leg-head"):
+        assert hook in css, f"{hook} is not reached by the app-wide block"
