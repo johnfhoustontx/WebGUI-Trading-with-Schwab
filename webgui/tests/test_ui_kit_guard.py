@@ -109,7 +109,6 @@ ALLOWED = {
     # over button_classes(...), the drift the kit exists to stop. The board's
     # one ACTION, Rebuild, goes through the kit into the header's actions row.
     "trade_board.py": {"button": 1},
-    "trade_plan_screen.py": {"button": 2, "notify": 1},
 }
 
 

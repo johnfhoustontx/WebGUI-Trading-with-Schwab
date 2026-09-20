@@ -16,6 +16,7 @@ from pages import terminal_theme as T
 from pages import trade_help as th
 from pages import trade_shell as sh
 from pages import trade_terminal as tt
+from pages import ui_kit as kit
 from pages.options import handoff
 from pages.trade import plan_headline, plan_rows
 from pages.ui_guard import guard
@@ -23,6 +24,20 @@ from pages.ui_guard import guard
 # The one row the design lifts out of the list, because it is the only field
 # nothing else in the app enforces.
 _KEY_LABEL = "Time stop"
+
+# Why Open in calculator is live, and why it is not. The page KNOWS before the
+# click which of the two it is — ``calculator_handoff`` returning None IS the
+# refusal — so it says so on the control rather than toasting after the click.
+# ⚠ The disabled one is not optional: a dead button with no explanation is
+# worse than the toast it replaces, and ``kit.gate`` cannot cover this (it
+# reads ``field.validation``, and a button is not a field).
+_CALC_TIP = ("Opens the Calculator on this symbol with the plan's structure "
+             "pre-selected. The chain fills in the legs — the plan names no "
+             "strikes, and neither does this.")
+_CALC_NO_STRUCTURE_TIP = (
+    "This plan names no options structure, so there is nothing for the "
+    "Calculator to model. Find strikes opens the Strategy Finder, which "
+    "builds the structures itself.")
 
 
 def render():
@@ -116,10 +131,22 @@ def _build(state, refs):
             # design's "Send to paper trade" is not wireable from here without
             # inventing them — the Strategy Finder is where a structure becomes
             # concrete legs, and ITS rows already carry the paper action.
-            ui.button("Find strikes", color=None).props("no-caps") \
-                .classes(T.BTN_PRIMARY).on_click(_find_strikes(a))
-            ui.button("Open in calculator", color=None).props("no-caps") \
-                .classes(T.BTN_GHOST).on_click(_open_calculator(a))
+            # ⚠ They stay INSIDE the plan card rather than moving to
+            # ``head.actions``: the card hides itself when there is no plan,
+            # and a header action is a promise the page always offers it.
+            kit.button("Find strikes", kind="primary",
+                       on_click=_find_strikes(a),
+                       tooltip=("Opens the Strategy Finder on this symbol. It "
+                                "returns concrete multi-leg candidates, and "
+                                "its rows carry Send to paper trade."))
+            # Re-decided on every paint, because the plan changes under the
+            # page with every analysis.
+            sig = tt.calculator_handoff(a)
+            cal = kit.button(
+                "Open in calculator", kind="secondary",
+                on_click=_open_calculator(a),
+                tooltip=_CALC_TIP if sig else _CALC_NO_STRUCTURE_TIP)
+            cal.set_enabled(bool(sig))
         ui.label("The plan names a structure and a tenor, not strikes — the "
                  "Finder turns it into concrete legs you can paper-trade.") \
             .classes(T.NOTE)
@@ -182,13 +209,18 @@ def _find_strikes(analysis):
 
 
 def _open_calculator(analysis):
-    """Pre-select the plan's structure and symbol in the Calculator."""
+    """Pre-select the plan's structure and symbol in the Calculator.
+
+    ⚠ No toast on the empty case any more. A plan with no structure is a
+    refusal the page can see before the click, so ``_paint`` disables the
+    button and its tooltip carries the reason; a toast AFTER the click told
+    the reader something the button could have told them instead. The check
+    survives as a silent no-op because the analysis can move under an open
+    page between the paint and the click."""
     @guard
     def _go():
         sig = tt.calculator_handoff(analysis)
         if not sig:
-            ui.notify("This plan has no options structure to model.",
-                      type="warning")
             return
         handoff.set_pending_calculator(sig)
         ui.navigate.to("/options/calculator")
