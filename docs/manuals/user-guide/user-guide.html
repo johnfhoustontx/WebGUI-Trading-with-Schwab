@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-19</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-20</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -87,7 +87,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#the-interface">The Interface</a><ul>
-<li><a href="#layout">Layout</a></li>
+<li><a href="#layout">Layout</a><ul>
+<li><a href="#what-every-data-screen-looks-like">What every data screen looks like</a></li>
+</ul>
+</li>
 <li><a href="#navigation-groups">Navigation groups</a></li>
 <li><a href="#alert-badges-and-chimes">Alert badges and chimes</a></li>
 <li><a href="#getting-help-on-any-page">Getting help on any page</a></li>
@@ -361,6 +364,30 @@ left running — it is a <em>system</em> service the app's own units cannot reac
   <em>Getting help on any page</em> below).</li>
 <li>The <strong>page content</strong> in the main area.</li>
 </ul>
+<h3 id="what-every-data-screen-looks-like">What every data screen looks like</h3>
+<p>The screens that show market data share one layout, so you can read a page you
+have never opened before:</p>
+<ul>
+<li><strong>One title line.</strong> The page name on the left; on the right, when the page was
+  last known to be current, and then its buttons. The main action — Run scan,
+  Load, Find trades — is always the rightmost one.</li>
+<li><strong>The "Updated" time is not a clock.</strong> It is the moment the service behind the
+  page last confirmed that reading was current, always in <strong>Central time</strong>. A
+  page that has published nothing says <em>Waiting for data</em> rather than inventing a
+  time, and the pages that are meant to update on a schedule turn the stamp
+  <strong>amber</strong> when they fall behind. A page that only updates when you ask it to
+  never claims to be stale, because its age says nothing.</li>
+<li><strong>A line of counts</strong> under the title — how many rows, which session, what the
+  headline reading is.</li>
+<li><strong>One spinner.</strong> When you press Refresh the area that is about to change dims
+  and shows what it is doing. It stays until the new reading lands.</li>
+<li><strong>Anything destructive asks first</strong>, in a dialog where Cancel comes before the
+  red button.</li>
+<li><strong>Messages tell you the outcome</strong>, not that a request was sent — the spinner
+  already says that.</li>
+</ul>
+<p>Charts, heat maps, gauges and every colour that carries a <em>reading</em> are
+unchanged by this: green still means what it meant, and a hot tile is still hot.</p>
 <h2 id="navigation-groups">Navigation groups</h2>
 <p>The left edge is a narrow <strong>icon rail</strong> that widens when you hover it. Clicking a
 <strong>group</strong> opens its first page and shows that group's pages as a <strong>tab strip</strong>

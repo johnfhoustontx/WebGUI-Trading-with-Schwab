@@ -1580,33 +1580,51 @@ rather than merely policed.
 Sentiment/Rotation chart palette), loaded once at webgui
 startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
 restyle without code changes; missing keys fall back to the built-in dark-navy defaults.
-See the "App theme — dark-navy 'dashboard'" section. **Six sections are page-scoped
-languages, NOT the app-wide palette and NOT surfaced in Settings → Appearance:**
-`[flow]` (the Options Flow console panels, the `/options/gamma` Flow + Net Prem
-subtabs only — builder `flow_colors` + `FLOW_KEYFRAMES_CSS`),
-`[console]` (Market Regime Console on `/sentiment`, **and the Desk** since
-2026-08-18 — the two share the vocabulary rather than the Desk growing a `[desk]`
-section of its own), `[macro]` (the Macro Board
-redesign, `/market` only), `[sectors]` (the Sector & Industry heat grid,
-`/sentiment/sectors` only), `[rotation]` (the rotation-flavoured screens —
-`/sentiment/rotation`, `/sentiment/rrg`, `/sentiment/momentum` and
-`/sentiment/bullbear`, which share `ROTATION_TOKENS` + `rotation_view`'s
-`NT`/`NE`/`NB`/`TONE` rather than each growing a section of its own) and `[calc]`
-(the Options Strategy Calculator,
+See the "App theme — dark-navy 'dashboard'" section. **TWO sections are still page-scoped languages, NOT the app-wide palette and NOT
+surfaced in Settings → Appearance:** `[flow]` (the Options Flow console panels, the
+`/options/gamma` Flow + Net Prem subtabs only — builder `flow_colors` +
+`FLOW_KEYFRAMES_CSS`) and `[calc]` (the Options Strategy Calculator,
 `/options/calculator` only — scope hook **`.calc-v3`**, never `.calc-v2`, which is
-the shared dark-navy scope the Simulator and Trade wear). Each has matching
-`theme.py` builders (`build_console_*` / `build_macro_*` / `build_sector_*` /
-`build_rotation_*` / `build_calc_*`); `[flow]`, `[console]`, `[macro]` and `[calc]`
-are injected via that page's ONE `ui.add_css` escape-hatch block.
-**`[sectors]` and `[rotation]` are the two that prove the rule holds** — a heat
-grid and a diverging gauge are nothing but colour and measurement, and both need
-**no `ui.add_css` at all**, only tokens and a font `<link>`. Their colour ramps
-are deliberately NOT config-driven: both are data-driven cell maps (the category
-excluded above, alongside the gauge face and the score/heat/P&L zone maps),
-living in `webgui/pages/sector_heat.py` and `webgui/pages/rotation_view.py`.
+the shared dark-navy scope the Simulator and Trade wear). Each is injected via that
+page's ONE `ui.add_css` escape-hatch block.
+
+**Three more sections survive as DATA ONLY** (2026-09-20, Phases 3 & 4 of the UI
+consistency work): `[console]` keeps its semantic set, the six `regime_*` hues and
+`accent` (the dial arc); `[sectors]` keeps `up` / `dn` / `warn`, the regime word and
+its dot; `[macro]` keeps the risk-on/off tile colours. Their background, text, button
+and font keys are gone, because `/sentiment`, `/desk`, `/symbol`, `/sentiment/sectors`
+and `/market` now wear the app surface and IBM Plex. **`[rotation]` is gone entirely**
+— `void`, `panel` and `font_url` were its only keys and all three were surface.
+
+⚠ **The neutral ladder those screens shared went with it.** `rotation_view.NEUTRAL`
+→ `NT` / `NB` / `NE` was a warm-neutral lightness ladder carrying text, edge and
+background roles across RRG, Rotation, Bull/Bear and Momentum. It was load-bearing on
+four screens with **no guard of its own**, and no test anywhere pinned it. What
+survives in `rotation_view` is data — `QUAD_HUE` / `QUAD_CHROMA` and `TONE` — and note
+**`TONE["flat"]` had to be given its own neutral first**, because it was built out of
+the ladder and would have died with it.
+
+⚠ **A neutral is SURFACE wherever it lives, and three of them survived the first
+sweep by their ADDRESS rather than their nature.** `LEVEL_GROOVE`, `LEVEL_TRACK` and
+`ALIGN_OFF` sat in `momentum_view` rather than `rotation_view`; measured in the
+harness, the groove covered 566,000px of the Momentum page at 1.094:1 against the app
+gradient — a warm near-black card directly under a navy control bar. The rule that
+settles it: **chroma ≤ 0.01 at hue 90 is that ladder whatever file it sits in.** The
+same test then caught `_ROW_RULE` / `_HEAD_RULE` on the Desk (hairlines *darker* than
+the app's card, which read as smudges), `MB_FAINT` / `MB_PANEL_BG` / `MB_TILE_BG` on
+the Macro Board, and two sites the greps had missed because they were spelled with
+single quotes — the Desk's row hover washes and `shell.PANEL_SCROLL_CSS`, whose hexes
+had been sampled off the console's gradient card.
+
+Their colour ramps are deliberately NOT config-driven: both are data-driven cell maps
+(the category excluded above, alongside the gauge face and the score/heat/P&L zone
+maps), living in `webgui/pages/sector_heat.py` and `webgui/pages/rotation_view.py`.
 `webgui/pages/oklch.py` holds the oklch→sRGB conversion both use — both supplied
-designs were authored in oklch, and both sit at the dark end of the range where
-an sRGB interpolation visibly bunches the low steps.
+designs were authored in oklch, and both sit at the dark end of the range where an
+sRGB interpolation visibly bunches the low steps. ⚠ The heat ramp's flat step was
+chosen to sit one hair above the OLD `#080808` ground; measured against the app navy
+on 2026-09-20 it reads **1.025:1** (the strongest cell 1.24:1), so it still fades into
+the page and was deliberately left un-re-anchored.
 
 **There is now ONE quadrant palette** — `rotation_view.QUAD_HUE`/`QUAD_CHROMA`
 (Leading 158 / Improving 232 blue / Weakening 80 olive / Lagging 22), imported by

@@ -168,6 +168,16 @@ Three things are worth knowing before you trust a screen:
   bearish). **IC** = iron condor (both, neutral).
 - Scores are **0–100 with higher meaning better**. The sentiment composite runs
   **0–10**: high means calm, supportive conditions and low means stress.
+- **Every data screen carries the same furniture**: the page name on the left of
+  one title line, and on the right the time that reading was last confirmed
+  current, then the page's buttons with the main action rightmost. A line of
+  counts sits under it.
+- **"Updated 10:42 AM CT" is not a clock.** It is when the service behind the
+  page last confirmed the reading, so a page can sit at the same stamp all
+  weekend and be perfectly healthy. A page that has published nothing says
+  *Waiting for data* instead of inventing a time. Only the pages that publish on
+  a **schedule** ever turn the stamp amber; a page you refresh by hand is never
+  called stale, because its age tells you nothing.
 
 ---
 

@@ -4,7 +4,88 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-19 (**One look and one behaviour — Phase 0: the page kit.**)
+**Last updated:** 2026-09-20 (**One look and one behaviour — Phases 3 & 4: Trend &
+Sentiment, the Desk, Symbol and the Macro Board.**)
+
+- **Nine screens onto the page kit** — RRG, Sector Rotation, Sector & Industry,
+  Bull / Bear Map, Momentum, the Market Regime Console, the Macro Board, the
+  Symbol Dossier and the Desk. Each gets the app surface and font, one header
+  line (title · Updated stamp in CT · actions), one status line, one button
+  vocabulary, one loading region and one toast vocabulary. Every chart, heat
+  ramp, quadrant hue, regime colour, tone dot and macro tile colour is untouched.
+- **FIVE wait spinners had never once been seen**, each mounted inside the very
+  container its own repaint clears, so the scrim was deleted on the first paint
+  and every Refresh since called `show()` on a dead element: RRG, Sector
+  Rotation, Sector & Industry, the Regime Console and Momentum. Measured on each
+  pre-change page before the fix — *zero* spinners survive a render — not
+  inferred. On Sector & Industry it was worse than the others: its repaint also
+  runs on sort, expand and collapse, so the scrim died on every interaction.
+  Bull / Bear was the one page that had it right, and its `scroll_box` /
+  `rows_box` split is the pattern `kit.region` formalises.
+- **Two claims the Macro Board could not back are gone**: a static `STREAMING`
+  pill with a pulsing dot, and a `SESSION` clock rendering naive machine-local
+  `%H:%M:%S` — the only clock in the app that was neither Central nor a data
+  stamp. The header's `Updated … CT` says the true thing instead.
+- **Sector & Industry's stamp moved from Eastern to Central**, where every other
+  stamp in the app already was. `sector_heat.eyebrow` keeps the market's date and
+  drops the clock.
+- **A second freshness rule retired.** `console_page.as_of_parts()` carried its
+  own 420-second staleness threshold, aging `sentiment:composite` differently
+  from the nav badge's `alerts.stale_after`. There is one rule now.
+- **The rotation neutral ladder and the console surface vocabulary retire.**
+  `rotation_view`'s `NEUTRAL`/`NT`/`NB`/`NE`, `ROTATION_TOKENS`, the `[rotation]`
+  section of `config/theme.toml`, and the console's `CONSOLE_*` surface tokens
+  all go; `[console]`, `[sectors]` and `[macro]` keep only their data keys.
+  Instrument Sans, JetBrains Mono and Rajdhani stop loading.
+- **Momentum's leaderboard sorts** for the first time, and its level picker is a
+  labelled field.
+- **Two redundancies the harness caught, not the tests**: Momentum's status line
+  opened with `Markets → Trend & Sentiment → Momentum`, repeating the shell
+  breadcrumb *and* the header title one line above it; and the Symbol Dossier
+  labelled its ticker field `Symbol` directly under the page title `Symbol`.
+- **Guard:** `ALLOWED` ends at four entries, each with a written reason — the
+  Desk's `DESK_VOICE_JS` `<script>`, the Macro Board's segmented skin picker,
+  Momentum's selectable name chips, and the Trade panel's collapse toggle from
+  Phase 1.
+- Design: `docs/plans/2026-09-19-app-ui-consistency-design.md`; plan:
+  `docs/plans/2026-09-19-app-ui-consistency-phase34-plan.md`.
+
+⚠ **Three things measured rather than assumed, because each looked like a
+regression and was not.** The sector heat ramp's flat step reads **1.025:1**
+against the new navy ground (the strongest cell 1.24:1), so a flat cell still
+fades into the page and the ramp needed no re-anchoring. `tabular-nums` is live
+on IBM Plex Sans at a **0.000** digit-width spread, so dropping the mono faces
+cost no column alignment. And the Desk's all-caps column labels measure **0.806**
+em per character against a guard that assumes 0.8 — still true; the nine text
+overflows on that page all truncate cleanly and were *wider* in the old mono
+face (172px against 144px for "Information Technology"), so the proportional face
+truncates less, not more.
+
+⚠ **`desk.DESK_CHROME_PX = 164` now over-counts by 32px** — `kit.page()` carries
+no padding where the page's own `p-4` used to. Measured in the harness: 64px of
+non-rail chrome against the 96px it claims. It is left as it stands because it
+fails safe (a smaller assumed panel budget makes the fit tests stricter than
+reality) and pinning the real figure needs the private app with its nav rail; the
+reason is recorded beside the constant.
+
+**Prior —** 2026-09-20 (**One look and one behaviour — Phase 1: the Options
+boards.**) Nine table-and-list screens onto the page kit — Market Scanner, Paper
+Ledger, Captured Signals, Paper Account, Shares, Income Window, Opportunity
+Board, Flow Alerts and Rescue. Each gets the header line with its Updated stamp,
+a status line of counts, one table style and one loading region; every row action
+moved into the detail panel's footer (danger left, primary right) and the per-row
+icon column went. Bugs fixed on the way, each proven before the fix: **Rescue's
+loading spinner was destroyed on the first click**, so the rescue menu built in
+silence for tens of seconds; **the Paper Ledger's two Delete buttons destroyed
+data with no confirmation**; Captured Signals' spinner said "Repricing…" when you
+pressed Reload; the Paper Account claimed a 5-minute manage cycle that is hourly;
+and Flow Alerts' help told you to click a row, which no longer does anything —
+the symbol is the link. ⚠ With every test fixture dated in September, the Updated
+stamp would have read an hour late all winter and nothing would have gone red;
+that is now pinned by a test that fails under a fixed offset. Plan:
+`docs/plans/2026-09-19-app-ui-consistency-phase1-plan.md`.
+
+**Prior —** 2026-09-19 (**One look and one behaviour — Phase 0: the page kit.**)
 
 - **`webgui/pages/ui_kit.py`**, the pieces every screen will be built from: the
   header line (title, an Updated stamp in CT from the view's `:ts` key, page

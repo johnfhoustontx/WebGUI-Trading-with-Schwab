@@ -219,6 +219,32 @@ Every page shares the same frame:
   *Getting help on any page* below).
 - The **page content** in the main area.
 
+### What every data screen looks like
+
+The screens that show market data share one layout, so you can read a page you
+have never opened before:
+
+- **One title line.** The page name on the left; on the right, when the page was
+  last known to be current, and then its buttons. The main action — Run scan,
+  Load, Find trades — is always the rightmost one.
+- **The "Updated" time is not a clock.** It is the moment the service behind the
+  page last confirmed that reading was current, always in **Central time**. A
+  page that has published nothing says *Waiting for data* rather than inventing a
+  time, and the pages that are meant to update on a schedule turn the stamp
+  **amber** when they fall behind. A page that only updates when you ask it to
+  never claims to be stale, because its age says nothing.
+- **A line of counts** under the title — how many rows, which session, what the
+  headline reading is.
+- **One spinner.** When you press Refresh the area that is about to change dims
+  and shows what it is doing. It stays until the new reading lands.
+- **Anything destructive asks first**, in a dialog where Cancel comes before the
+  red button.
+- **Messages tell you the outcome**, not that a request was sent — the spinner
+  already says that.
+
+Charts, heat maps, gauges and every colour that carries a *reading* are
+unchanged by this: green still means what it meant, and a hot tile is still hot.
+
 ## Navigation groups
 
 The left edge is a narrow **icon rail** that widens when you hover it. Clicking a

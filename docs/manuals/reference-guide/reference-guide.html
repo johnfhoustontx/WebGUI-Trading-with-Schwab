@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-19</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-20</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -663,6 +663,16 @@ Send it to <strong>Paper Ledger</strong> (your own book) or let the engine work 
   bearish). <strong>IC</strong> = iron condor (both, neutral).</li>
 <li>Scores are <strong>0–100 with higher meaning better</strong>. The sentiment composite runs
   <strong>0–10</strong>: high means calm, supportive conditions and low means stress.</li>
+<li><strong>Every data screen carries the same furniture</strong>: the page name on the left of
+  one title line, and on the right the time that reading was last confirmed
+  current, then the page's buttons with the main action rightmost. A line of
+  counts sits under it.</li>
+<li><strong>"Updated 10:42 AM CT" is not a clock.</strong> It is when the service behind the
+  page last confirmed the reading, so a page can sit at the same stamp all
+  weekend and be perfectly healthy. A page that has published nothing says
+  <em>Waiting for data</em> instead of inventing a time. Only the pages that publish on
+  a <strong>schedule</strong> ever turn the stamp amber; a page you refresh by hand is never
+  called stale, because its age tells you nothing.</li>
 </ul>
 <hr />
 <h2 id="desk">Desk</h2>
