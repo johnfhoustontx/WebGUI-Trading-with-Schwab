@@ -339,8 +339,10 @@ def test_merge_detail_none_or_empty_returns_base_copy():
     assert paper.merge_detail({"a": 1}, {}) == {"a": 1}
 
 
-def test_paper_columns_include_actions():
-    assert "actions" in {c["field"] for c in paper.paper_columns()}
+def test_paper_columns_have_no_actions_column():
+    """The row's actions moved into the detail panel's footer (the 2026-09-19
+    standard), so the per-row icon column is gone."""
+    assert "actions" not in {c["field"] for c in paper.paper_columns()}
 
 
 def test_synth_from_trade_is_em_payload_compatible():
@@ -402,7 +404,7 @@ def test_vega_sign_round_trips_through_storage():
 def test_column_labels_say_what_the_cell_holds():
     labels = [c["label"] for c in paper.paper_columns()]
     assert labels == ["Symbol", "Strategy", "Strikes", "Expiry", "Contracts",
-                      "Entry", "Max loss", "P&L", "Status", "Opened", ""]
+                      "Entry", "Max loss", "P&L", "Status", "Opened"]
 
 
 def test_the_entry_column_is_not_called_Credit():
@@ -487,4 +489,49 @@ def test_a_butterfly_rows_breakeven_renders_both_values():
     for stored in ("96.0 / 104.0", "96.0, 104.0"):
         s = paper.synth_from_trade({"symbol": "XYZ", "breakeven": stored})
         assert detail.breakeven_text(s["breakeven"]) == "$96.00 / $104.00", stored
+
+
+# ── the page kit (the 2026-09-19 consistency standard) ───────────────────────
+import ast  # noqa: E402
+
+
+def test_ledger_status_counts_trades_and_open():
+    assert paper.ledger_status([]) == ""
+    assert paper.ledger_status([{"status": "OPEN"}]) == "1 trade · 1 open"
+    assert paper.ledger_status([{"status": "OPEN"}, {"status": "CLOSED"},
+                                {"status": "EXPIRED"}]) == "3 trades · 1 open"
+
+
+def _enclosing_functions_of_requests(fn, command):
+    """Names of the functions inside ``fn`` that enqueue ``command``."""
+    tree = ast.parse(inspect.getsource(fn))
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            for call in ast.walk(node):
+                if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                        and call.func.attr == "request"
+                        and f"'{command}'" in ast.unparse(call)):
+                    out.add(node.name)
+    return out - {fn.__name__}
+
+
+def test_every_delete_runs_only_after_a_confirm():
+    """Delete and Delete all closed used to fire on the click."""
+    for cmd in ("paper_delete", "paper_delete_closed"):
+        owners = _enclosing_functions_of_requests(paper.render, cmd)
+        assert owners and all(n.startswith("_confirm") for n in owners), (cmd, owners)
+
+
+def test_row_actions_live_in_the_panel_footer():
+    src = inspect.getsource(paper.render)
+    assert "detail_panel.actions" in src
+    assert "Click a trade row first" not in src
+    assert "q-mt-md" not in src            # the old button row under the table
+
+
+def test_the_page_is_built_from_the_kit():
+    src = inspect.getsource(paper.render)
+    assert 'kit.header("Paper Ledger", view="options:paper_trades")' in src
+    assert "PAPER_CSS" not in src
 

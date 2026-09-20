@@ -9,6 +9,12 @@ So this is a coverage guard rather than a behaviour test. A page that enqueues a
 service command must mount SOME wait indicator: the inline spinner
 (``pages/busy.py``) for a panel refresh, or the full-screen overlay
 (``pages/options/overlay.py``) where loading invalidates the whole page.
+
+⚠ ``kit.region(...)`` counts as the inline one: it BUILDS a ``busy.build_busy``
+spinner over the block a repaint replaces (that is the whole reason it exists),
+so a page migrated to the kit shows the same wait under a different spelling.
+Matching only the two original names would have failed every migrated page for
+having no spinner while it had one - the guard has to know the kit's name too.
 """
 import pathlib
 import re
@@ -58,7 +64,8 @@ def test_every_page_that_enqueues_a_command_shows_a_wait():
             continue
         if p.name in _EXEMPT:
             continue
-        has_wait = ("build_busy(" in src) or ("build_loading_overlay(" in src)
+        has_wait = any(name in src for name in
+                       ("build_busy(", "build_loading_overlay(", "kit.region("))
         if not has_wait:
             missing.append(p.relative_to(PAGES).as_posix())
     assert not missing, (

@@ -10,13 +10,17 @@ This page only **reads** that payload and formats it, and enqueues commands
 ``paper_analyze``) onto the Redis bus.
 
 A fetch-free version-poll ``ui.timer`` repaints the ledger when its bus cache
-version changes; a second watch on ``options:paper_analyze`` surfaces the analyze
-result via ``ui.notify`` when it lands. Dialogs (the close debit input) stay
-client-side (input collection only). Graceful-empty when the service is cold.
+version changes; a second watch on ``options:paper_analyze`` fills the Analyze
+dialog when its result lands. Graceful-empty when the service is cold.
+
+Built on the page kit (``pages/ui_kit.py``, the 2026-09-19 consistency
+standard): the header line carries the Updated stamp and the page actions, the
+selected trade's buttons live in the detail panel's footer, and every delete
+asks first. Dialogs stay client-side (input collection only).
 """
 import bus_client
 from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
-from pages import busy as _busy
+from pages import ui_kit as kit
 from nicegui import ui
 
 from pages.ui_guard import guard
@@ -24,24 +28,19 @@ from pages.ui_guard import guard
 from . import detail, handoff
 from .rescue import AT_RISK_STATES as _AT_RISK_STATES
 from .rescue import heat_border_class, rescue_highlight, rescue_highlight
-from .theme import BADGE_ACCENT, BADGE_MUTED, BTN, BTN_3D_DANGER, BTN_PRIMARY
+from .theme import BADGE_ACCENT, BADGE_MUTED, MUTED
 
 # rescue_state values that mark a trade at-risk (tested/critical). The manage-cycle
 # rescue overlay tags the paper *account* positions view; the paper-trades ledger
 # this page renders carries no rescue_state in the common case, so this highlight
 # is a safe no-op unless a trade row is explicitly flagged.
-# Paper-ledger styling (injected via ui.add_css — ui.html strips <style>):
-#  • compact rows to match the Scanner table (dense + tight padding);
-#  • fixed header with a scrollable body (sticky thead + bounded scroll area).
-# Action buttons use the shared flat Deep Slate tokens: BTN (secondary Reload/
-# Close), BTN_PRIMARY (Analyze), BTN_3D_DANGER (ghost-danger Delete).
-PAPER_CSS = """
-.paper-table td, .paper-table th { padding: 2px 6px; font-size: 13px; }
-.paper-table .q-table__middle { max-height: 62vh; }
-.paper-table thead tr th {
-  position: sticky; top: 0; z-index: 2; background: #141a30;
-}
-"""
+#
+# The page's own ``PAPER_CSS`` went with the 2026-09-19 page-kit migration: the
+# shell's app-wide ``TABLE_CSS`` already gives every table a sticky header over a
+# bounded scrolling body, and the kit's table carries the dense/flat props.
+
+# Right-aligned columns (the kit aligns numbers right, words left).
+_NUMERIC = ("quantity", "entry_credit_total", "max_loss_total", "pnl")
 
 
 def paper_columns():
@@ -73,10 +72,11 @@ def paper_columns():
         ("max_loss_total", "Max loss"), ("pnl", "P&L"),
         ("status", "Status"), ("entry_time", "Opened"),
     ]
-    cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
+    # No ``actions`` column: the selected trade's buttons live in the detail
+    # panel's footer (the 2026-09-19 standard), so nothing acts on an unselected
+    # row and the icon column's width goes back to the data.
+    return [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
-    cols.append({"name": "actions", "label": "", "field": "actions", "align": "center"})
-    return cols
 
 
 # P&L cell colors (green profit / red loss / grey flat-or-unknown).
@@ -207,6 +207,17 @@ def paper_rows(trades):
     # with no time sort last). The columns stay click-sortable from here.
     rows.sort(key=lambda r: r.get("entry_time") or "", reverse=True)
     return rows
+
+
+def ledger_status(trades):
+    """The status line: how many trades, how many open. PURE. Blank for no
+    trades - the empty table says that."""
+    trades = trades or []
+    if not trades:
+        return ""
+    n = len(trades)
+    open_n = sum(1 for t in trades if str(t.get("status") or "").upper() == "OPEN")
+    return f"{n} trade{'s' if n != 1 else ''} · {open_n} open"
 
 
 def _num(v):
@@ -345,76 +356,92 @@ def merge_detail(base, detail):
 
 
 def render():
-    """Paper Trades page: ledger table (left) + shared detail panel (right), bus-fed."""
-    ui.add_css(PAPER_CSS)
-    # No page title — the tab strip names the page (2026-07-11 dead-space cleanup).
-
+    """Paper Ledger: the header line, the ledger and the shared detail panel,
+    whose footer carries the selected trade's actions (bus-fed)."""
     raw_by_id: dict = {}
-    # sel_id: selected trade (set by row click — no checkbox); live: {trade_id:
-    # live-analyze detail} overlay cache. analyze_popup_for: trade_id awaiting the
-    # Analyze-button popup (row-click analyses update the panel silently).
-    state = {"sel_id": None, "live": {}, "analyze_popup_for": None}
+    # sel_id: the clicked trade; live: {trade_id: live-analyze detail};
+    # analyze_popup_for: the trade whose Analyze BUTTON result pops the dialog;
+    # close_field: the exit-price field of the open Close dialog.
+    state = {"sel_id": None, "live": {}, "analyze_popup_for": None,
+             "close_field": None}
 
-    ledger_row = ui.row().classes("w-full no-wrap gap-4 items-start")
-    with ledger_row:
-        with ui.column().classes("flex-grow min-w-0"):
-            # No selection checkbox — clicking a row selects it (drives the detail
-            # panel + the action buttons below). dense + .paper-table = Scanner-like
-            # compact rows with a fixed header over a scrolling body. The row-count
-            # status renders BELOW the table, bottom-right, small (see after table).
-            table = ui.table(columns=paper_columns(), rows=[], row_key="id") \
-                .classes("w-full paper-table").props("dense")
-            status = ui.label("").classes("opacity-60 text-xs self-end")
-            # Symbol cell gets a colored left-border + faint tint when the row is
-            # at-risk (rescue_state tested/critical). Plain cell otherwise.
-            table.add_slot('body-cell-symbol', r'''
-              <q-td :props="props">
-                <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
-                  {{ props.value }}
-                </span>
-                <span v-else>{{ props.value }}</span>
-              </q-td>
-            ''')
-            # Credit / Risk show 2 decimals (numeric value kept for sorting).
-            for _f in ("entry_credit_total", "max_loss_total"):
-                table.add_slot(f'body-cell-{_f}', r'''
-                  <q-td :props="props" class="text-right">
-                    {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
-                  </q-td>
-                ''')
-            # P&L: 2 decimals, signed, green/red/grey (class from _pnl_class).
-            table.add_slot('body-cell-pnl', r'''
-              <q-td :props="props" class="text-right">
-                <span v-if="props.value == null">—</span>
-                <span v-else :class="props.row._pnl_class + ' font-semibold'">
-                  {{ (props.value >= 0 ? '+' : '') + Number(props.value).toFixed(2) }}
-                </span>
-              </q-td>
-            ''')
-            # Status as a Deep Slate pill (OPEN blue-accent / closed grey).
-            table.add_slot('body-cell-status', r'''
-              <q-td :props="props">
-                <q-badge :class="props.row._status_class" :label="props.value"/>
-              </q-td>
-            ''')
-            # Action buttons live BELOW the table (solid 3D). color=None drops
-            # Quasar's bg-primary so the .pt-btn gradient (blue) / .pt-danger (red)
-            # actually paint — WITHOUT it, bg-primary wins and every button reads
-            # solid blue (which is why Delete didn't look red).
-            with ui.row().classes("items-center gap-3 flex-wrap q-mt-md"):
-                ui.button("Reload", icon="refresh", color=None,
-                          on_click=lambda: _reload()).props("no-caps").classes(BTN)
-                # "Close trade", not "Close": the Analyze dialog carries its
-                # own Close button, which dismisses it.
-                ui.button("Close trade", icon="check_circle", color=None,
-                          on_click=lambda: _close()).props("no-caps").classes(BTN)
-                ui.button("Analyze", icon="biotech", color=None,
-                          on_click=lambda: _analyze()).props("no-caps").classes(BTN_PRIMARY)
-                ui.button("Delete", icon="delete", color=None,
-                          on_click=lambda: _delete()).props("no-caps").classes(BTN_3D_DANGER)
-                ui.button("Delete all closed", icon="delete_sweep", color=None,
-                          on_click=lambda: _delete_closed()).props("no-caps").classes(BTN_3D_DANGER)
-        detail_panel = detail.render()
+    with kit.page():
+        head = kit.header("Paper Ledger", view="options:paper_trades")
+        with head.actions:
+            kit.button("Delete all closed", kind="danger", icon="delete_sweep",
+                       on_click=lambda: delete_closed_dlg.open())
+            refresh_btn = kit.button("Refresh", kind="secondary", icon="refresh",
+                                     on_click=lambda: _reload())
+        status = kit.status_line()
+        with ui.row().classes("w-full no-wrap gap-4 items-start"):
+            ledger = kit.region("Refreshing the ledger…", classes="flex-grow min-w-0")
+            with ledger.content:
+                # No selection checkbox — clicking a row selects it, which drives
+                # the detail panel and the action footer inside it.
+                table = kit.table(paper_columns(), numeric=_NUMERIC)
+            detail_panel = detail.render()
+
+    # Symbol cell gets a colored left-border + faint tint when the row is
+    # at-risk (rescue_state tested/critical). Plain cell otherwise.
+    table.add_slot('body-cell-symbol', r'''
+      <q-td :props="props">
+        <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
+          {{ props.value }}
+        </span>
+        <span v-else>{{ props.value }}</span>
+      </q-td>
+    ''')
+    # Credit / Risk show 2 decimals (numeric value kept for sorting).
+    for _f in ("entry_credit_total", "max_loss_total"):
+        table.add_slot(f'body-cell-{_f}', r'''
+          <q-td :props="props" class="text-right">
+            {{ props.value == null ? '—' : Number(props.value).toFixed(2) }}
+          </q-td>
+        ''')
+    # P&L: 2 decimals, signed, green/red/grey (class from _pnl_class).
+    table.add_slot('body-cell-pnl', r'''
+      <q-td :props="props" class="text-right">
+        <span v-if="props.value == null">—</span>
+        <span v-else :class="props.row._pnl_class + ' font-semibold'">
+          {{ (props.value >= 0 ? '+' : '') + Number(props.value).toFixed(2) }}
+        </span>
+      </q-td>
+    ''')
+    # Status as a Deep Slate pill (OPEN blue-accent / closed grey).
+    table.add_slot('body-cell-status', r'''
+      <q-td :props="props">
+        <q-badge :class="props.row._status_class" :label="props.value"/>
+      </q-td>
+    ''')
+
+    # The selected trade's actions: danger leftmost, primary rightmost. Built
+    # ONCE - the footer shows only while a row is shown, so nothing here can be
+    # pressed with no selection and no button prints "click a row first".
+    with detail_panel.actions:
+        kit.button("Delete", kind="danger", icon="delete",
+                   on_click=lambda: _delete()).classes("mr-auto")
+        kit.button("Expected Move", kind="secondary", icon="show_chart",
+                   on_click=lambda: _send_em())
+        analyze_btn = kit.button("Analyze", kind="secondary", icon="biotech",
+                                 on_click=lambda: _analyze())
+        # "Close trade", not "Close": a dialog's own Close dismisses the dialog.
+        kit.button("Close trade", kind="primary", icon="check_circle",
+                   on_click=lambda: _close())
+
+    # Built once at the page's own level and retitled per use: a dialog built
+    # inside a repainted container dies with its slot.
+    close_dlg = kit.confirm("Close trade", confirm_text="Close trade",
+                            on_confirm=lambda: _confirm_close())
+    delete_dlg = kit.confirm("Delete this trade?", "It leaves the ledger for good.",
+                             confirm_text="Delete", danger=True,
+                             on_confirm=lambda: _confirm_delete())
+    delete_closed_dlg = kit.confirm(
+        "Delete every closed trade?",
+        "Their realized P&L leaves the ledger, and the deployment cap's equity "
+        "moves with it.",
+        confirm_text="Delete all closed", danger=True,
+        on_confirm=lambda: _confirm_delete_closed())
+    analyze_dlg = kit.info_dialog("Trade analysis", width="min-w-[360px] max-w-[460px]")
 
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.
     seen = {"trades": None, "analyze": None}
@@ -431,17 +458,14 @@ def render():
 
     @guard
     def _request_analyze(trade_id, symbol=""):
+        # No status line: the panel repaints when the result lands.
         bus_client.request("options",
                            {"type": "paper_analyze", "args": {"trade_id": trade_id}})
-        status.text = f"Analyzing {symbol} live…" if symbol else "Analyzing live…"
-
-    # Reload / manage / delete all round-trip through the service; until the new
-    # payload lands the table still shows the pre-action state.
-    ledger_busy = _busy.build_busy(ledger_row, "Refreshing the ledger…")
 
     def _populate(pt):
         """Paint the ledger table from the cached paper-trades view."""
-        ledger_busy.hide()
+        ledger.busy.hide()
+        kit.set_busy(refresh_btn, False)
         pt = pt or {}
         trades = pt.get("trades") or []
         raw_by_id.clear()
@@ -449,6 +473,7 @@ def render():
             if t.get("trade_id"):
                 raw_by_id[t["trade_id"]] = t
         table.rows = paper_rows(trades)
+        kit.mark_selected(table.rows, state.get("sel_id"))
         table.update()
         # Keep the open detail panel in sync with the freshly-cached trades
         # (preserving any live-analyze overlay for the selected trade).
@@ -457,112 +482,106 @@ def render():
             _render_detail(raw_by_id[sel])
         elif sel:
             detail_panel.clear()  # selected trade no longer present
-        if not pt:
-            status.text = ""
-        else:
-            status.text = f"{len(table.rows)} trades."
+        status.text = ledger_status(trades)
 
     def _select(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
         t = raw_by_id.get(row.get("id")) if isinstance(row, dict) else None
         if t:
             state["sel_id"] = t.get("trade_id")
+            kit.mark_selected(table.rows, state["sel_id"])
+            table.update()
             _render_detail(t)                     # instant stored-data view
             _request_analyze(t.get("trade_id"), t.get("symbol", ""))  # live overlay
 
     table.on("rowClick", _select)
-    # Per-row Expected Move button only (Calculator / Paper actions don't belong
-    # on a paper-trade ledger). ``synth_from_trade`` maps the raw paper trade to a
-    # signal-shaped dict (``type``/``expiration``/``*_strike``) that
-    # ``signal_to_em_payload`` understands.
-    handoff.add_expected_move_action(
-        table, lambda row: synth_from_trade(raw_by_id.get(row.get("id"))))
 
     def _selected_trade():
-        # Selection is driven by row click (no checkbox) → state["sel_id"].
-        sid = state.get("sel_id")
-        if not sid or sid not in raw_by_id:
-            ui.notify("Click a trade row first.", type="warning")
-            return None
-        return raw_by_id.get(sid)
+        """The clicked trade, or None. Silent: the action footer is only visible
+        while a row is shown, so 'click a row first' is unreachable."""
+        return raw_by_id.get(state.get("sel_id"))
+
+    def _send_em():
+        t = _selected_trade()
+        if t:
+            handoff.send_to_expected_move(
+                handoff.signal_to_em_payload(synth_from_trade(t)))
 
     @guard
     def _reload():
         bus_client.request("options", {"type": "paper_reload"})
-        ledger_busy.show()
-        ui.notify("Reloading paper trades…")
-        status.text = "Reloading…"
+        ledger.busy.show("Refreshing the ledger…")
+        kit.set_busy(refresh_btn)
 
     @guard
     def _close():
         t = _selected_trade()
         if not t:
             return
-        with ui.dialog() as dlg, ui.card():
-            ui.label(f"Close {t.get('symbol')} {t.get('strategy')}").classes("text-subtitle1")
-            debit = ui.number(close_prompt_label(t), value=0.0, format="%.2f")
+        close_dlg.title.text = f"Close {t.get('symbol', '')} {t.get('strategy', '')}"
+        close_dlg.content.clear()
+        with close_dlg.content:
+            state["close_field"] = kit.number_field(
+                close_prompt_label(t), value=0.0, min=0, format="%.2f", width="w-40")
+        close_dlg.open()
 
-            def confirm():
-                bus_client.request("options", {
-                    "type": "paper_close",
-                    "args": {"trade_id": t.get("trade_id"), "debit": float(debit.value)},
-                })
-                dlg.close()
-                ui.notify(
-                    f"Closing {t.get('symbol', '')} — the ledger updates "
-                    f"when the engine confirms.", type="positive")
-                status.text = "Closing…"
-
-            with ui.row():
-                ui.button("Confirm", color=None, on_click=confirm).props("no-caps").classes(BTN_PRIMARY)
-                ui.button("Cancel", on_click=dlg.close).props("flat")
-        dlg.open()
+    def _confirm_close():
+        t, field = _selected_trade(), state["close_field"]
+        if not t or field is None or not field.validate():
+            return False
+        bus_client.request("options", {
+            "type": "paper_close",
+            "args": {"trade_id": t.get("trade_id"), "debit": float(field.value)},
+        })
+        kit.toast("info", f"Closing {t.get('symbol', '')} — the ledger updates "
+                          "when the engine confirms.")
 
     @guard
     def _delete():
         t = _selected_trade()
         if not t:
             return
-        bus_client.request("options",
-                           {"type": "paper_delete", "args": {"trade_id": t.get("trade_id")}})
-        ui.notify(f"Deleting {t.get('symbol', '')} — the row clears "
-                  f"when the engine confirms.", type="positive")
-        status.text = "Deleting…"
+        delete_dlg.title.text = f"Delete the {t.get('symbol', '')} {t.get('strategy', '')}?"
+        delete_dlg.open()
 
-    @guard
-    def _delete_closed():
+    def _confirm_delete():
+        t = _selected_trade()
+        if not t:
+            return
+        bus_client.request("options", {"type": "paper_delete",
+                                       "args": {"trade_id": t.get("trade_id")}})
+        kit.toast("info", f"Deleting {t.get('symbol', '')} — the row clears when "
+                          "the engine confirms.")
+
+    def _confirm_delete_closed():
         bus_client.request("options", {"type": "paper_delete_closed"})
-        ui.notify("Deleting every closed trade — the ledger updates "
-                  "when the engine confirms.", type="positive")
-        status.text = "Deleting closed…"
+        kit.toast("info", "Deleting every closed trade — the ledger updates when "
+                          "the engine confirms.")
 
     def _show_analyze_popup(res):
-        """Descriptive Analyze dialog (verdict + rationale + metrics + close X) —
-        replaces the old one-word toast."""
+        """Fill the page's information dialog with the Analyze verdict (verdict +
+        rationale + metrics), rather than building one dialog per result."""
         res = res or {}
         action = res.get("action", "—")
-        with ui.dialog() as dlg, ui.card().classes("min-w-[360px] max-w-[460px] gap-2"):
-            with ui.row().classes("items-center justify-between w-full no-wrap"):
-                ui.label(f"{res.get('symbol', '')} · Trade Analysis") \
-                    .classes("text-subtitle1 font-bold")
-                ui.button(icon="close", on_click=dlg.close).props("flat round dense")
+        analyze_dlg.title.text = f"{res.get('symbol', '')} · Trade analysis"
+        analyze_dlg.content.clear()
+        with analyze_dlg.content:
             ui.label(action).classes(
-                f"text-weight-bold q-px-sm q-py-xs rounded-borders "
-                f"{verdict_class(action)} text-[#111] w-fit")
+                f"text-weight-bold px-2 py-1 rounded-[6px] {verdict_class(action)} "
+                "text-[#111] w-fit")
             if res.get("rationale"):
                 ui.label(res["rationale"]).classes("text-sm")
             if res.get("note"):
-                ui.label(res["note"]).classes("text-sm opacity-70")
+                ui.label(res["note"]).classes(f"text-sm {MUTED}")
             rows = analyze_popup_rows(res)
             if rows:
-                with ui.column().classes("w-full gap-1 q-mt-sm"):
+                with ui.column().classes("w-full gap-1 pt-2"):
                     for label, text, color in rows:
                         with ui.row().classes("justify-between w-full no-wrap"):
-                            ui.label(label).classes("opacity-70 text-sm")
+                            ui.label(label).classes(f"text-sm {MUTED}")
                             ui.label(text).classes(
                                 f"text-sm text-weight-medium text-[{color}]")
-            ui.button("Close", on_click=dlg.close).props("flat").classes("self-end")
-        dlg.open()
+        analyze_dlg.open()
 
     @guard
     def _analyze():
@@ -574,8 +593,7 @@ def render():
         state["analyze_popup_for"] = t.get("trade_id")
         bus_client.request("options",
                            {"type": "paper_analyze", "args": {"trade_id": t.get("trade_id")}})
-        ui.notify(f"Analyzing {t.get('symbol')}…")
-        status.text = "Analyzing…"
+        kit.set_busy(analyze_btn)
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["trades"] = bus_client.read_version("options:paper_trades")
@@ -602,12 +620,12 @@ def render():
             # Re-render with the live overlay if it's for the selected trade.
             if tid and tid == state.get("sel_id") and tid in raw_by_id:
                 _render_detail(raw_by_id[tid])
-            status.text = f"{len(table.rows)} trades." if table.rows else ""
             # If this result was triggered by the Analyze BUTTON, pop the
             # descriptive dialog (verdict + rationale + metrics). Row-click
             # analyses update the detail panel silently (no popup).
             if tid and tid == state.get("analyze_popup_for"):
                 state["analyze_popup_for"] = None
+                kit.set_busy(analyze_btn, False)
                 _show_analyze_popup(res)
 
     ui.timer(2.0, _maybe_repaint)
