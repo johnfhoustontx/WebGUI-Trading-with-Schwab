@@ -838,7 +838,7 @@ def render(symbol=None):
         # header line.
         with ui.column().classes(f"{CARD} w-full gap-2"):
             with ui.row().classes("w-full items-center gap-x-4 gap-y-2 flex-wrap"):
-                inp = kit.symbol_field(value=sym or raw, on_load=_open_typed)
+                inp = kit.symbol_field(label="Ticker", value=sym or raw, on_load=_open_typed)
                 ui.label(sym or _DASH).classes(
                     f"text-[26px] font-bold tracking-[.06em] leading-none "
                     f"{LABEL}")

@@ -1741,3 +1741,16 @@ def test_the_data_colours_are_untouched():
         assert name in _SRC, f"{name} is a data colour and must survive"
     assert _desk.signed_class(1.0) == _theme.CON_POS
     assert _bb.quadrant_class("leading")
+
+
+def test_the_field_is_labelled_ticker_because_the_page_is_already_called_symbol():
+    """``kit.symbol_field`` defaults its label to "Symbol", which every other page
+    that mounts one wants - none of them is NAMED Symbol. Here the kit header
+    already says it one line above, so the default stacked the same word twice
+    (seen in the harness on /symbol?symbol=SPY). "Ticker" is what the field said
+    as a placeholder before the migration, so this restores the old wording in
+    the place the standard puts it."""
+    import inspect
+    src = inspect.getsource(sp.render)
+    assert 'kit.symbol_field(' in src
+    assert 'label="Ticker"' in src, "the field must not repeat the page title"
