@@ -23,6 +23,21 @@ ResizeObserver traps outright.
 
 Private only: it enqueues commands, which the public process refuses, so it is
 NOT in ``live_screens.SCREENS``.
+
+**On the page kit since 2026-09-19** (the consistency standard,
+``docs/plans/2026-09-19-app-ui-consistency-design.md``): the header line carries
+the name and the Updated stamp, the ticker field has a LABEL rather than a
+placeholder standing in for one, and the two controls are kit buttons. The
+page's own console ground, its condensed display face and its whole neutral
+text ladder are gone; every colour that encodes a READING stays — the coverage
+chip's tones, the IV-vs-HV band, the signed day change, the Bull/Bear quadrant,
+the composite-score band, the stale-row dimming and the Vol Rank bar.
+
+⚠ **The stamp reads ``options:matrix``, NOT this symbol's dossier.** A dossier
+is written once and never republished, and a SCANNED symbol has no dossier at
+all, so a stamp on ``cache:options:dossier:<SYMBOL>`` would read "Waiting for
+data" on exactly the names this page covers best. The per-symbol chip
+(``SCANNED HH:MM`` / ``FETCHED HH:MM``) answers that other question and stays.
 """
 import datetime as _dt
 import logging
@@ -37,6 +52,7 @@ from pages import bullbear as _bb
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages import desk as _desk
 from pages import symbol_facts as sf
+from pages import ui_kit as kit
 from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
 from pages.structure import (flip_read, regime_word, structure_map,
                              structure_positions, walls_trustworthy)
@@ -45,13 +61,12 @@ from pages.options.paper import dte_from_expiration
 from pages.options import persistence as _persistence
 from pages.options import scanner as _scanner
 from pages.options import svg as _svg
-from pages.options.inputs import bind_symbol_load, select_all_on_focus
 from pages.options.overlay import LOAD_TIMEOUT_SEC, build_loading_overlay
-from pages.options.theme import (CON_ACCENT, CON_NEG, CON_POS, CON_TXT,
-                                 CON_TXT_DIM, CON_TXT_MUTED, CON_WARN,
-                                 CONSOLE_CARD, CONSOLE_DISPLAY,
-                                 CONSOLE_FONT_HEAD_HTML, CONSOLE_PAGE,
-                                 CONSOLE_RULE)
+# The four CHROMATIC console tokens are READINGS — a coverage state, an
+# IV-vs-HV band — and they survive the console's surface vocabulary. Its
+# neutral text ladder does not: a text step is surface wherever it lives.
+from pages.options.theme import (CARD, CON_ACCENT, CON_NEG, CON_POS, CON_WARN,
+                                 LABEL, MUTED, THEME)
 from pages.ui_guard import guard, guard_async
 from shared.symbols import clean_symbol
 
@@ -177,6 +192,14 @@ VIEWS = ("options:matrix", "options:scan_funnel", "options:scan_day",
          "options:driver_paper_account", "options:captured",
          "sentiment:regime", "sentiment:bullbear")
 
+# What the header's Updated stamp reads. ⚠ NOT this symbol's dossier: that key
+# is written ONCE per look-up and never republished, and a scanned symbol has
+# no dossier at all — a stamp on it would read "Waiting for data" on exactly
+# the names this page covers best. The matrix is what most of the bands lean
+# on, and it is published on a schedule, which is what makes ``stale=True``
+# honest. The per-symbol chip answers the other question.
+HEADER_VIEW = "options:matrix"
+
 # Stands in for this page's ``options:dossier:<SYMBOL>`` in ``REGION_VIEWS``.
 DOSSIER = "options:dossier"
 
@@ -240,9 +263,11 @@ def today_ct():
 
 
 # ── the header chip ─────────────────────────────────────────────────────────
-# A finite set of tones, each a fixed console class (the Tailwind-first rule).
+# A finite set of tones, each a fixed class (the Tailwind-first rule). The four
+# chromatic ones are the coverage STATE and are data; ``muted`` is the absence
+# of one, so it takes the app's muted text rather than a console grey.
 CHIP_TONES = {"pos": CON_POS, "accent": CON_ACCENT, "warn": CON_WARN,
-              "neg": CON_NEG, "muted": CON_TXT_MUTED}
+              "neg": CON_NEG, "muted": MUTED}
 
 
 def _hhmm(stamp):
@@ -535,9 +560,11 @@ def structure_band(facts, freshness=LIVE, source=None, fetched_at=None):
             or withheld}
 
 
-# The IV-vs-HV band word -> a fixed console class.
-_BAND_CLASS = {"high": CON_WARN, "low": CON_ACCENT, "mid": CON_TXT,
-               "na": CON_TXT_MUTED}
+# The IV-vs-HV band word -> a fixed class. ``high`` and ``low`` are the reading
+# and keep the console's data hues; ``mid`` (neither) and ``na`` (no reading)
+# are text steps and take the app's.
+_BAND_CLASS = {"high": CON_WARN, "low": CON_ACCENT, "mid": LABEL,
+               "na": MUTED}
 
 
 def volatility_band(facts):
@@ -559,7 +586,7 @@ def volatility_band(facts):
     atm = _num(f.get("atm_iv"))
     em = sf.expected_move(f.get("spot"), atm if atm is not None else iv)
     return {"iv_rank": _num(f.get("iv_rank")), "band": ratio["band"],
-            "band_class": _BAND_CLASS.get(ratio["band"], CON_TXT_MUTED),
+            "band_class": _BAND_CLASS.get(ratio["band"], MUTED),
             "iv_hv_text": text, "atm_iv": atm, "iv_state": f.get("iv_state"),
             "em_day": em["day"], "em_week": em["week"]}
 
@@ -618,7 +645,7 @@ def _display_rows(key, signals, setups):
             "score_class": r.get("_score_class", ""),
             "seen_since": r.get("seen_since", _DASH),
             "score_trend": r.get("score_trend", _DASH),
-            "trend_class": r.get("_trend_class", CON_TXT_MUTED),
+            "trend_class": r.get("_trend_class", MUTED),
             "stale": bool(r.get("_stale")),
             "stale_since": r.get("stale_since", ""),
             "spark": _persistence.score_sparkline(scores),
@@ -722,24 +749,36 @@ def position_band(symbol, books):
 
 
 # ── widgets ─────────────────────────────────────────────────────────────────
-_TITLE = (f"{CONSOLE_DISPLAY} text-[15px] font-bold tracking-[.16em] "
-          f"leading-none {CON_TXT}")
-_LINK = (f"text-[12px] tracking-[.06em] cursor-pointer {CON_ACCENT} "
+# The app's own ladder, brightest first. The console's went with its ground: a
+# text step, a hairline and a link are SURFACE wherever they live. What is not
+# here is every colour that encodes a reading — those sit in ``CHIP_TONES``,
+# ``_BAND_CLASS`` and the builders the owning pages already export.
+_P = THEME["palette"]
+_FAINT = f"text-[{_P['icon']}]"                  # a chip's own label
+_RULE = f"border-[{_P['card_border']}]"          # a band's hairline, a row's
+# The app's one link colour — ``pages/options/swing.py``'s precedent.
+_LINK = (f"text-[12px] tracking-[.06em] cursor-pointer text-[{_P['focus']}] "
          f"hover:underline self-start")
-_LINE = f"text-[13px] leading-snug {CON_TXT}"
-_SUB = f"text-[11px] leading-snug {CON_TXT_DIM}"
-_EMPTY = f"text-[12px] {CON_TXT_MUTED} py-2"
-_CHIP = "text-[11px] tracking-[.14em] px-2 py-[2px] rounded-[2px] border"
-_ROW = f"w-full items-center gap-x-3 gap-y-1 flex-wrap py-[6px] border-b {CONSOLE_RULE}"
+_LINE = f"text-[13px] leading-snug {LABEL}"
+_SUB = f"text-[11px] leading-snug {MUTED}"
+_CHIP = "text-[11px] tracking-[.14em] px-2 py-[2px] rounded-[6px] border"
+_ROW = f"w-full items-center gap-x-3 gap-y-1 flex-wrap py-[6px] border-b {_RULE}"
+
+# The classes ``_desk.signed_class`` can return, derived from the function
+# rather than restated beside it. A day change is DATA and the Desk owns its
+# colours, so a literal ``remove=`` set here would silently stop clearing the
+# old class the moment that page's own palette moves.
+_SIGNED_CLASSES = " ".join(sorted({_desk.signed_class(v)
+                                   for v in (1.0, -1.0, None)}))
 
 
 def _band(title, links=()):
-    """A console card with a title; returns the body column the painter clears.
+    """A card with a section title; returns the body column the painter clears.
 
     ``links`` is ``((label, handler, route), ...)``; a link is drawn only when
     this process can navigate to ``route``."""
-    with ui.column().classes(f"{CONSOLE_CARD} w-full min-w-0 px-4 py-3 gap-2"):
-        ui.label(title).classes(f"{_TITLE} border-b {CONSOLE_RULE} pb-2 w-full")
+    with ui.column().classes(f"{CARD} w-full min-w-0 gap-2"):
+        kit.section_title(title).classes(f"w-full border-b {_RULE} pb-2")
         body = ui.column().classes("w-full min-w-0 gap-1")
         if links:
             with ui.row().classes("gap-4 flex-wrap pt-1"):
@@ -772,67 +811,84 @@ def render(symbol=None):
              "queued": False, "current": False, "current_timer": None,
              "scan_day_memo": {}}
 
-    if CONSOLE_FONT_HEAD_HTML:
-        ui.add_head_html(CONSOLE_FONT_HEAD_HTML)
     overlay = build_loading_overlay()
 
-    with ui.column().classes(f"{CONSOLE_PAGE} w-full gap-4 p-4") as page_col:
-        # ── header ───────────────────────────────────────────────────────────
-        with ui.column().classes(f"{CONSOLE_CARD} w-full px-4 py-3 gap-2"):
+    @guard
+    def _open_typed():
+        # Defined before the frame because ``kit.symbol_field`` takes the load
+        # handler at BUILD time. ``inp`` is bound below and read here only when
+        # the reader presses Enter or tabs out, which is long after.
+        text = str(inp.value or "").strip()
+        if text:
+            _shell.navigate_to(f"{ROUTE}?symbol={_quote(text)}")
+
+    with kit.page() as page_col:
+        # ⚠ ``HEADER_VIEW``, never ``own_view``. A dossier is written once and
+        # never republished, and a scanned symbol has none at all, so a stamp on
+        # this symbol's own key would read "Waiting for data" on the names this
+        # page covers best. ``options:matrix`` is what most bands lean on, it is
+        # published round the clock, and it is in neither
+        # ``alerts.RTH_ONLY_VIEWS`` nor ``alerts.STALE_OVERRIDES`` — so
+        # ``stale=True`` ages it on the thresholds the nav badge already uses.
+        kit.header("Symbol", view=HEADER_VIEW, stale=True)
+
+        # ── header card: the page's SUBJECT ──────────────────────────────────
+        # The ticker, its price and its coverage are not page chrome; they are
+        # what this screen is about, so they keep their own row under the
+        # header line.
+        with ui.column().classes(f"{CARD} w-full gap-2"):
             with ui.row().classes("w-full items-center gap-x-4 gap-y-2 flex-wrap"):
-                inp = ui.input(placeholder="Ticker", value=sym or raw).props(
-                    "dense outlined dark").classes("w-[140px]")
-                select_all_on_focus(inp)
+                inp = kit.symbol_field(value=sym or raw, on_load=_open_typed)
                 ui.label(sym or _DASH).classes(
-                    f"{CONSOLE_DISPLAY} text-[26px] font-bold tracking-[.06em] "
-                    f"leading-none {CON_TXT}")
+                    f"text-[26px] font-bold tracking-[.06em] leading-none "
+                    f"{LABEL}")
                 spot_lbl = ui.label(_DASH).classes(
-                    f"text-[20px] tabular-nums leading-none {CON_TXT}")
+                    f"text-[20px] tabular-nums leading-none {LABEL}")
                 day_lbl = ui.label("").classes(
                     "text-[14px] tabular-nums leading-none")
                 chip_lbl = ui.label("").classes(_CHIP)
                 ui.element("div").classes("grow")
                 # ONE flex item, never two: the header row wraps, and on a
                 # phone two separate buttons can split across lines and strand
-                # Refresh at the left edge under the price.
+                # Refresh at the left edge under the price. Refresh is page
+                # state; Find trades is the page's one main action — the only
+                # control that takes the reader somewhere to act — so it is the
+                # primary and sits rightmost.
                 with ui.row().classes("items-center gap-1 no-wrap"):
-                    finder_btn = ui.button(FIND_TRADES_LABEL, icon="search",
-                                           color=None).props(
-                        "no-caps dense flat").classes(
-                        f"text-[12px] tracking-[.1em] px-3 {CON_ACCENT}")
+                    refresh_btn = kit.button("Refresh", kind="secondary",
+                                             icon="refresh")
+                    finder_btn = kit.button(FIND_TRADES_LABEL, kind="primary",
+                                            icon="search")
                     finder_btn.set_visibility(False)  # until a quote is known
-                    refresh_btn = ui.button("Refresh", icon="refresh",
-                                            color=None).props(
-                        "no-caps dense flat").classes(
-                        f"text-[12px] tracking-[.1em] px-3 {CON_ACCENT}")
-            msg_lbl = ui.label("").classes(_SUB)
+            # The one status line: what the coverage chip means in a sentence.
+            msg_lbl = kit.status_line()
 
         # ── bands ────────────────────────────────────────────────────────────
         with ui.element("div").classes(
                 "grid grid-cols-1 lg:grid-cols-2 gap-4 w-full"):
-            struct_body = _band("STRUCTURE")
+            struct_body = _band("Structure")
             # Filled by _paint_structure once coverage is KNOWN — the link is
             # drawn only for a collected symbol (gamma_link_allowed), so a
             # dead link is never on screen, not even for the first paint.
             with struct_body.parent_slot.parent:
                 gamma_slot = ui.row().classes("gap-4 flex-wrap pt-1")
-            vol_body = _band("VOLATILITY", (
+            vol_body = _band("Volatility", (
                 # The stash carries the symbol, as send_to_gamma does above; a
                 # bare navigate opened Expected Move on whatever it last showed.
                 ("Expected Move",
                  lambda *_: _handoff.send_to_expected_move({"symbol": sym}),
                  "/options/expected-move"),))
-        ctx_body = _band("CONTEXT", (
+        ctx_body = _band("Context", (
             ("Bull / Bear Map", _go_route("/sentiment/bullbear"),
              "/sentiment/bullbear"),))
         with ui.element("div").classes(
                 "grid grid-cols-1 lg:grid-cols-2 gap-4 w-full"):
-            sig_body = _band("TODAY'S SIGNALS", (
+            sig_body = _band("Today's signals", (
                 ("Market Scanner", _go_route("/options/scanner"),
                  "/options/scanner"),))
-            flow_body = _band("FLOW ALERTS", (
+            flow_body = _band("Flow alerts", (
                 ("Flow Alerts", _go_route("/options/flow"), "/options/flow"),))
-        pos_body = _band("YOUR POSITION", (
+        pos_body = _band("Your position", (
             ("Paper Ledger", _go_route("/options/paper"), "/options/paper"),
             ("Rescue", _go_route("/options/rescue"), "/options/rescue")))
 
@@ -874,7 +930,7 @@ def render(symbol=None):
         spot_lbl.text = _desk.fmt_price(facts["spot"])
         day_lbl.text = (_desk.fmt_signed_pct(facts["day_pct"])
                         if facts["day_pct"] is not None else "")
-        day_lbl.classes(remove=f"{CON_POS} {CON_NEG} {CON_TXT_MUTED}",
+        day_lbl.classes(remove=_SIGNED_CLASSES,
                         add=_desk.signed_class(facts["day_pct"]))
         chip_lbl.text = chip["label"]
         chip_lbl.classes(remove=" ".join(set(CHIP_TONES.values())),
@@ -886,8 +942,8 @@ def render(symbol=None):
 
     def _absent(body, empty_line):
         with body:
-            ui.label(absence_message(sym, _chip(), _feed_cold(),
-                                     empty_line)).classes(_EMPTY)
+            kit.empty(absence_message(sym, _chip(), _feed_cold(),
+                                      empty_line))
 
     def _finder_ok():
         return (finder_allowed(sym, _coverage(),
@@ -1026,25 +1082,25 @@ def render(symbol=None):
         band = signal_band(sym, _d(SCAN_DAY), today_ct())
         with sig_body:
             if not band["rows"]:
-                ui.label(band["message"]).classes(_EMPTY)
+                kit.empty(band["message"])
                 return
             for s in band["setups"]:
                 ui.label(f"{s['what']} · {s['detail']}").classes(_SUB)
             for r in band["rows"]:
                 row_cls = f"{_ROW} {_scanner.STALE_ROW_CLASS}" if r["stale"] else _ROW
                 with ui.row().classes(row_cls):
-                    ui.label(r["list"]).classes(f"{_CHIP} {CON_TXT_DIM}")
+                    ui.label(r["list"]).classes(f"{_CHIP} {_FAINT}")
                     ui.label(f"{r['what']} {r['strikes']}".strip()).classes(_LINE)
                     ui.label(_desk.expiry_text(r)).classes(f"{_SUB} tabular-nums")
                     if r["score"] is not None:
                         ui.label(f"{r['score']:.0f}").classes(
-                            f"text-[12px] px-2 rounded {CON_TXT} tabular-nums "
+                            f"text-[12px] px-2 rounded {LABEL} tabular-nums "
                             f"{r['score_class']}")
                     ui.label(r["seen_since"]).classes(f"{_SUB} tabular-nums")
                     ui.label(r["score_trend"]).classes(
                         f"text-[12px] tabular-nums {r['trend_class']}")
                     if r["spark"]:
-                        ui.html(r["spark"]).classes(CON_ACCENT)
+                        ui.html(r["spark"]).classes(f"text-[{_P['focus']}]")
                     if r["stale"]:
                         ui.label(f"dropped {r['stale_since']}".strip()).classes(_SUB)
 
@@ -1056,7 +1112,7 @@ def render(symbol=None):
         band = flow_band(sym, _d("options:flow_alerts"))
         with flow_body:
             if not band["rows"]:
-                ui.label(band["message"]).classes(_EMPTY)
+                kit.empty(band["message"])
                 return
             for r in band["rows"]:
                 with ui.row().classes(_ROW):
@@ -1072,11 +1128,11 @@ def render(symbol=None):
         band = position_band(sym, {v: _d(v) for v in _BOOK_VIEWS})
         with pos_body:
             if not band["rows"]:
-                ui.label(band["message"]).classes(_EMPTY)
+                kit.empty(band["message"])
                 return
             for r in band["rows"]:
                 with ui.row().classes(_ROW):
-                    ui.label(r["book_label"]).classes(f"{_CHIP} {CON_TXT_DIM}")
+                    ui.label(r["book_label"]).classes(f"{_CHIP} {_FAINT}")
                     ui.label(f"{r['strategy']} {r['strikes']}").classes(_LINE)
                     ui.label(r["expiry"]).classes(f"{_SUB} tabular-nums")
                     if r["quantity"] is not None:
@@ -1092,12 +1148,25 @@ def render(symbol=None):
                 "signals": _paint_signals, "flow": _paint_flow,
                 "positions": _paint_positions}
 
+    def _release_refresh():
+        """Give Refresh back, then re-apply the page's own rule.
+
+        Called from THREE places, because the answer to a Refresh does not
+        arrive in the click coroutine: it lands on the bus in ``_paint``, or it
+        never lands and ``_fetch_timeout`` is the backstop. ``_on_refresh``'s
+        ``finally`` covers only the case where nothing was sent.
+        ``kit.set_busy(btn, False)`` ENABLES, so the page's own "nothing to
+        refresh without a symbol" rule is re-applied after it."""
+        kit.set_busy(refresh_btn, False)
+        refresh_btn.set_enabled(sym is not None)
+
     def _paint(payloads, regions=None):
         state["data"].update(payloads)
         if own_view in payloads and payloads[own_view] is not None \
                 and state["pending"]:
             state["pending"] = False
             overlay.hide()
+            _release_refresh()
         todo = regions if regions is not None else regions_for(
             set(payloads), sym)
         for region in REGION_VIEWS:            # a stable paint order
@@ -1166,16 +1235,12 @@ def render(symbol=None):
             state["pending"] = False
             state["queued"] = True
             overlay.hide()
+            _release_refresh()
             _paint({}, regions=set(REGION_VIEWS))
 
     # ── handlers ─────────────────────────────────────────────────────────────
-    @guard
-    def _open_typed():
-        text = str(inp.value or "").strip()
-        if text:
-            _shell.navigate_to(f"{ROUTE}?symbol={_quote(text)}")
-
-    bind_symbol_load(inp, _open_typed)
+    # ``_open_typed`` is defined above the frame: ``kit.symbol_field`` takes it
+    # at build time and wires Enter and tab-out itself.
 
     @guard_async
     async def _on_refresh():
@@ -1185,7 +1250,10 @@ def render(symbol=None):
         if state["refreshing"] or state["pending"] or not state["seeded"]:
             return
         state["refreshing"] = True
-        refresh_btn.set_enabled(False)
+        # The button carries its own spinner from here. It is NOT released in
+        # the ``finally`` when a fetch went out: that answer arrives over the
+        # bus, so the release belongs to ``_paint`` and to the 30 s backstop.
+        kit.set_busy(refresh_btn)
         try:
             pairs, written_at = await run.io_bound(_read_for_refresh)
             _seed(pairs)
@@ -1198,7 +1266,10 @@ def render(symbol=None):
             _enqueue_fetch("refresh")
         finally:
             state["refreshing"] = False
-            refresh_btn.set_enabled(sym is not None)
+            if not state["pending"]:
+                # Nothing was sent (a scanned symbol, or one the service would
+                # drop as a duplicate): there is nothing to wait for.
+                _release_refresh()
 
     def _read_for_refresh():
         written_at = bus_client.read_meta(own_view)[1] if own_view else None

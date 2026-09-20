@@ -1485,3 +1485,259 @@ def test_find_trades_and_refresh_are_one_unit_in_the_header(world):
     parent = finder.parent_slot.parent
     assert refresh.parent_slot.parent is parent
     assert "no-wrap" in parent.classes
+
+
+# ── the Symbol Dossier on the page kit (Phases 3 & 4, Task 8) ──────────────
+# The page frame, the header line and its Updated stamp, the labelled ticker
+# field, the two kit buttons and Refresh's own spinner. Every colour that
+# encodes a READING is untouched and pinned at the foot of this block — the
+# coverage chip's tones, the signed day change, the quadrant chip, the Vol Rank
+# bar and the stale-row dimming.
+#
+# Every rendered assertion here runs off ``_built``, which diffs the client's
+# element map around ONE render and returns only what that render added. The
+# map is the auto-index client the whole module shares, so a page-wide search
+# would hand back an element an earlier test's render left behind and these
+# would pass whatever this page did.
+
+
+def _kit_inputs(elements):
+    from nicegui import ui
+    return [e for e in elements if isinstance(e, ui.input)]
+
+
+def _listener(element, event):
+    return next(li.handler for li in element._event_listeners.values()
+                if li.type == event)
+
+
+def _timers_at(elements, interval):
+    from nicegui.elements.timer import Timer
+    return [e for e in elements
+            if isinstance(e, Timer) and e.interval == interval]
+
+
+def _labelled(elements, text):
+    return [e for e in elements if (getattr(e, "text", "") or "") == text]
+
+
+def _refresh_button(elements):
+    (btn,) = [e for e in elements if hasattr(e, "_symbol_refresh")]
+    return btn
+
+
+def _patch_stamp_bus(monkeypatch, read_meta):
+    """``kit.header``'s poll reads off the loop; give it a synchronous one."""
+    from pages import ui_kit as kit
+
+    async def io_bound(fn, *a, **kw):
+        return fn(*a, **kw)
+    monkeypatch.setattr(kit.run, "io_bound", io_bound)
+    monkeypatch.setattr(kit.bus_client, "read_meta", read_meta)
+
+
+def test_the_dossier_frame_is_the_kit_and_carries_no_surface_of_its_own():
+    src = _function_source("render")
+    assert "kit.page()" in src
+    assert 'kit.header("Symbol", view=HEADER_VIEW, stale=True)' in src
+    # The console's ground, its display face and its accent rules are gone.
+    for token in ("CONSOLE_PAGE", "CONSOLE_CARD", "CONSOLE_DISPLAY",
+                  "CONSOLE_FONT_HEAD_HTML", "CONSOLE_RULE"):
+        assert token not in _SRC, f"{token} is a page-scoped surface value"
+    # ...and so is every step of its text ladder. A text step is surface
+    # wherever it lives; the four CHROMATIC console tokens pinned at the foot
+    # of this block are readings and stay.
+    assert "CON_TXT" not in _SRC
+
+
+def test_the_page_loads_no_font_of_its_own():
+    """The app face is the app's, injected once by both entrypoints."""
+    assert "add_head_html" not in _SRC
+
+
+def test_the_header_stamp_reads_the_matrix_never_this_symbols_dossier(
+        world, monkeypatch):
+    """⚠ NOT ``own_view``. A dossier is written ONCE and never republished, and
+    a SCANNED symbol has no dossier at all — so a stamp on
+    ``options:dossier:<SYMBOL>`` would read "Waiting for data" on exactly the
+    names this page covers best. ``options:matrix`` is what most of the bands
+    lean on, it is published round the clock, and it is in neither
+    ``alerts.RTH_ONLY_VIEWS`` nor ``alerts.STALE_OVERRIDES`` — so ``stale=True``
+    ages it on the same thresholds the nav badge uses."""
+    import datetime as dt
+
+    from pages import ui_kit as kit
+    assert sp.HEADER_VIEW == "options:matrix"
+    assert sp.dossier_view("MU") != sp.HEADER_VIEW
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    seen = []
+    _patch_stamp_bus(monkeypatch, lambda v: seen.append(v) or (
+        (1, now) if v == sp.HEADER_VIEW else None))
+    elements = _render_page("MU")             # scanned: it owns no dossier
+    (poll,) = _timers_at(elements, 5.0)       # the kit header's stamp poll
+    _run(poll.callback())
+    assert seen == [sp.HEADER_VIEW]
+    texts = _texts(elements)
+    assert kit.WAITING_TEXT not in texts
+    assert any(t.startswith("Updated ") for t in texts), texts
+
+
+def test_the_per_symbol_chip_still_answers_its_own_question(world):
+    """The header stamp says when the MATRIX was last written; the chip says
+    how THIS symbol is covered and when. Two different questions, so the chip
+    survives the header."""
+    assert "SCANNED" in _render_texts("mu")
+
+
+def test_the_ticker_field_carries_a_label_not_a_placeholder(world):
+    """The standard's field rule: a label above, never a placeholder standing
+    in for one — a placeholder disappears the moment anything is typed."""
+    src = _function_source("render")
+    assert "kit.symbol_field(" in src
+    assert 'placeholder="Ticker"' not in _SRC
+    elements = _render_page("MU")
+    (inp,) = _kit_inputs(elements)
+    assert not inp._props.get("placeholder")
+    assert _labelled(elements, "Symbol"), "the field has no label above it"
+
+
+def test_enter_on_an_unchanged_ticker_re_navigates(world, monkeypatch):
+    """A BEHAVIOUR CHANGE, not a port. ``kit.symbol_field`` passes
+    ``enter_always=True``; the page's own ``bind_symbol_load`` defaulted to
+    ``False``, so Enter on a ticker that had not changed did nothing at all —
+    and since ``_open_typed`` NAVIGATES rather than loading in place, "nothing
+    at all" is indistinguishable from a page that has hung. Enter is the reader
+    pressing Load."""
+    from nicegui import ui
+    went = []
+    monkeypatch.setattr(ui.navigate, "to", lambda *a, **k: went.append(a[0]))
+    elements = _render_page("MU")
+    (inp,) = _kit_inputs(elements)
+    enter = _listener(inp, "keydown.enter")
+    enter(None)
+    enter(None)
+    assert went == ["/symbol?symbol=MU", "/symbol?symbol=MU"]
+
+
+def test_find_trades_and_refresh_are_kit_buttons(world):
+    """One button vocabulary. Find trades is the page's one main action — the
+    only control that takes the reader somewhere to act, and it is drawn only
+    once a quote is known; Refresh is page state."""
+    from pages import ui_kit as kit
+    elements = _render_page("MU")
+    (finder,) = _finder_buttons(elements)
+    refresh = _refresh_button(elements)
+    assert set(kit.button_classes("primary").split()) <= set(finder.classes)
+    assert set(kit.button_classes("secondary").split()) <= set(refresh.classes)
+
+
+def test_refresh_spins_until_the_fetch_lands_not_until_the_click_returns(
+        world):
+    """The answer to a Refresh arrives over the BUS, in ``_paint`` — not in the
+    click coroutine. Releasing the button in ``_on_refresh``'s ``finally``
+    alone would un-spin it while the fetch is still in flight, which reads as
+    "done" over a page that has not changed."""
+    from nicegui import ui
+    data, sent = world
+    before = set(ui.context.client.elements)
+    elements = _render_page("XYZQ")
+    for timer in _timeout_timers(before):     # let the navigation fetch lapse
+        timer.callback()
+    sent.clear()
+    btn = _refresh_button(elements)
+    _run(btn._symbol_refresh())
+    assert len(sent) == 1
+    assert btn._props.get("loading") is True and not btn.enabled
+    # the dossier lands on the next poll
+    data["options:dossier:XYZQ"] = {"symbol": "XYZQ", "error": None,
+                                    "fetched_at": "2026-09-18T14:32:00",
+                                    "spot": 12.5}
+    _run(_poll_callback(elements)())
+    assert not btn._props.get("loading")
+    assert btn.enabled
+
+
+def test_a_refresh_that_sends_nothing_gives_the_button_straight_back(world):
+    """Inside the service's dedup window no fetch is sent, so there is nothing
+    to wait for — a button left spinning there would never be released."""
+    data, sent = world
+    data["options:dossier:XYZQ"] = {"symbol": "XYZQ", "error": None,
+                                    "fetched_at": _ago_ct(10), "spot": 12.5}
+    elements = _render_page("XYZQ")
+    sent.clear()
+    btn = _refresh_button(elements)
+    _run(btn._symbol_refresh())
+    assert sent == []
+    assert not btn._props.get("loading")
+    assert btn.enabled
+
+
+def test_the_backstop_gives_refresh_back_when_the_fetch_never_lands(world):
+    """The 30 s ``LOAD_TIMEOUT_SEC`` timer drops the overlay; it must drop the
+    button's spinner with it, or Refresh is dead for the rest of the session."""
+    from nicegui import ui
+    data, sent = world
+    before = set(ui.context.client.elements)
+    elements = _render_page("XYZQ")
+    for timer in _timeout_timers(before):
+        timer.callback()
+    sent.clear()
+    btn = _refresh_button(elements)
+    _run(btn._symbol_refresh())
+    assert btn._props.get("loading") is True
+    for timer in _timeout_timers(before):
+        timer.callback()
+    assert not btn._props.get("loading")
+    assert btn.enabled
+
+
+def test_refresh_stays_disabled_without_a_symbol(world):
+    """The page's own rule survives the release: ``kit.set_busy(btn, False)``
+    ENABLES, and a bare ``/symbol`` has nothing to refresh."""
+    elements = _render_page(None)
+    assert not _refresh_button(elements).enabled
+
+
+def test_the_band_titles_are_sentence_case_section_titles(world):
+    texts = _render_texts("MU")
+    for shouted, said in (("STRUCTURE", "Structure"),
+                          ("VOLATILITY", "Volatility"),
+                          ("CONTEXT", "Context"),
+                          ("TODAY'S SIGNALS", "Today's signals"),
+                          ("FLOW ALERTS", "Flow alerts"),
+                          ("YOUR POSITION", "Your position")):
+        assert said in texts, said
+        assert shouted not in texts, shouted
+
+
+def test_an_empty_band_uses_the_apps_one_empty_state(world):
+    """``kit.empty`` CENTRES its line, which ``_EMPTY`` did not — a real visual
+    change on every band that has nothing to say, and the app's one style."""
+    from nicegui import ui
+    from pages import ui_kit as kit
+    elements = _render_page("XYZQ")
+    wanted = set(kit.EMPTY.split())
+    lines = [e for e in elements if isinstance(e, ui.label)
+             and wanted <= set(e._classes)]
+    assert lines, "no band drew the kit's empty line"
+    assert any("No open position in XYZQ." == (e.text or "") for e in lines)
+
+
+def test_the_data_colours_are_untouched():
+    """The half that must NOT change. A colour that encodes a READING stays
+    wherever it lives: the coverage chip's four chromatic tones, the signed day
+    change, the flip side, the Bull/Bear quadrant, the composite-score band,
+    the scanner's stale-row dimming and the Vol Rank gradient bar."""
+    from pages import bullbear as _bb
+    from pages import desk as _desk
+    from pages.options import theme as _theme
+    assert set(sp.CHIP_TONES.values()) >= {
+        _theme.CON_POS, _theme.CON_NEG, _theme.CON_WARN, _theme.CON_ACCENT}
+    assert sp._BAND_CLASS["high"] == _theme.CON_WARN
+    assert sp._BAND_CLASS["low"] == _theme.CON_ACCENT
+    for name in ("_desk.signed_class", "_desk.flip_side_class",
+                 "_bb.quadrant_class", "r['score_class']",
+                 "_scanner.STALE_ROW_CLASS", "_svg.gradient_bar_svg"):
+        assert name in _SRC, f"{name} is a data colour and must survive"
+    assert _desk.signed_class(1.0) == _theme.CON_POS
+    assert _bb.quadrant_class("leading")

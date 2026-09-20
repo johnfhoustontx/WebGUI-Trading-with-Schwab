@@ -53,7 +53,6 @@ ALLOWED = {
     "sentiment_momentum.py": {"button": 1},
     "settings.py": {"button": 7, "dialog": 1, "notify": 1},
     "status.py": {"button": 3, "notify": 4},
-    "symbol.py": {"add_head_html": 1, "button": 2},
     "terminate.py": {"button": 3, "dialog": 1, "notify": 1},
     "trade.py": {"button": 3, "table": 2},
     "trade_board.py": {"button": 2},
