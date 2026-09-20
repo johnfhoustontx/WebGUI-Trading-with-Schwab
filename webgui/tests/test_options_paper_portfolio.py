@@ -134,3 +134,30 @@ def test_the_manage_cycle_tooltip_says_hourly_not_every_five_minutes():
     src = inspect.getsource(portfolio.render)
     assert "every 5 min" not in src
     assert "hourly" in src
+
+
+def test_every_action_shows_the_wait_it_started():
+    """Reset enqueued ``paper_reset`` and only toasted, so the book sat
+    unchanged with nothing on screen saying why. All four actions now show the
+    region's spinner and hold their own button until the answer lands."""
+    src = inspect.getsource(portfolio.render)
+    for msg in ('account.busy.show("Refreshing the account…")',
+                'account.busy.show("Resetting the account…")',
+                'account.busy.show(f"Running the {kind} cycle…")'):
+        assert msg in src, msg
+    # Each action holds ITS OWN button. The two cycles share one handler, so
+    # that choice is one expression rather than two call sites.
+    assert "kit.set_busy(refresh_btn)" in src
+    assert "kit.set_busy(reset_btn)" in src
+    assert 'kit.set_busy(manage_btn if kind == "manage" else entry_btn)' in src
+    # ...and all four are released together on the repaint that answers them.
+    assert "(refresh_btn, entry_btn, manage_btn, reset_btn)" in src
+
+
+def test_no_action_toasts_what_its_own_spinner_already_says():
+    """The retired shape: "Running the entry cycle — the account updates when
+    it finishes" beside a spinner saying exactly that. Waiting is a spinner;
+    a toast reports an OUTCOME."""
+    src = inspect.getsource(portfolio.render)
+    assert "kit.toast(" not in src
+    assert "updates when it finishes" not in src

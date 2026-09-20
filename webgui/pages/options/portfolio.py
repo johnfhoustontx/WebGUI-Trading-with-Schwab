@@ -32,7 +32,11 @@ from pages.ui_guard import guard
 from pages import scorecard as _scorecard
 from .perf_charts import equity_curve_figure, excursion_text
 from .rescue import AT_RISK_STATES as _AT_RISK_STATES
-from .rescue import heat_border_class, rescue_highlight, rescue_highlight
+# ``rescue_highlight`` was named TWICE on this line. ``heat_border_class`` is
+# not called here and stays anyway: it is a deliberate re-export, and
+# ``test_options_paper_portfolio`` reads it off this module to check that a row's
+# tint IS the shared heat border rather than a second palette.
+from .rescue import heat_border_class, rescue_highlight
 from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, CARD, EYEBROW, LABEL,
                     MUTED)
 
@@ -223,9 +227,10 @@ def render():
         with head.actions:
             # Danger first, primary last: Reset clears the whole book, and the
             # manage cycle is the one action this page is usually opened for.
-            kit.button("Reset", kind="danger", icon="restart_alt",
-                       tooltip="Reset the paper account to a starting balance.",
-                       on_click=lambda: _reset())
+            reset_btn = kit.button(
+                "Reset", kind="danger", icon="restart_alt",
+                tooltip="Reset the paper account to a starting balance.",
+                on_click=lambda: _reset())
             refresh_btn = kit.button("Refresh", kind="secondary", icon="refresh",
                                      on_click=lambda: _reload())
             entry_btn = kit.button(
@@ -324,7 +329,7 @@ def render():
     def _populate(pa):
         """Paint the cards + tables from the cached paper-account view."""
         account.busy.hide()
-        for b in (refresh_btn, entry_btn, manage_btn):
+        for b in (refresh_btn, entry_btn, manage_btn, reset_btn):
             kit.set_busy(b, False)
         pa = pa or {}
         snap = pa.get("snapshot")
@@ -347,10 +352,14 @@ def render():
         status.text = "" if not pa else (
             f"{len(pos_table.rows)} open positions · {len(ord_table.rows)} fills")
 
+    # All four actions wait the same way, and none of them toasts: the region's
+    # spinner already names what is running, and the button that started it
+    # stays disabled until ``_populate`` releases it. A toast reports an
+    # OUTCOME, so a sentence promising the account will repaint once the work
+    # is done says only what the spinner beside it is already saying.
     @guard
     def _reload():
         bus_client.request("options", {"type": "refresh_paper"})
-        # No toast: the spinner already says a refresh is running.
         account.busy.show("Refreshing the account…")
         kit.set_busy(refresh_btn)
 
@@ -358,9 +367,8 @@ def render():
     def _cycle(kind):
         cmd = "paper_entry" if kind == "entry" else "paper_manage"
         bus_client.request("options", {"type": cmd})
+        account.busy.show(f"Running the {kind} cycle…")
         kit.set_busy(manage_btn if kind == "manage" else entry_btn)
-        kit.toast("info", f"Running the {kind} cycle — the account updates when "
-                          "it finishes.")
 
     @guard
     def _reset():
@@ -373,8 +381,8 @@ def render():
             return False
         bus_client.request("options", {"type": "paper_reset",
                                        "args": {"starting_balance": float(balance.value)}})
-        kit.toast("info", "Resetting the paper account — the book clears when the "
-                          "engine confirms.")
+        account.busy.show("Resetting the account…")
+        kit.set_busy(reset_btn)
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["version"] = bus_client.read_version("options:paper_account")

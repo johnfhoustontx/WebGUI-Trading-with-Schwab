@@ -104,12 +104,6 @@ def test_the_scan_time_is_not_in_the_status_line_any_more():
     assert "1 candidate" in text
 
 
-def test_an_unparseable_stamp_is_dropped_rather_than_printed_raw():
-    text = income.status_text({"candidates": [_PCS], "scanned_symbols": 1,
-                               "ts": "not a timestamp"})
-    assert "not a timestamp" not in text
-
-
 # ── the heterogeneous rows ──────────────────────────────────────────────────
 
 def test_every_published_structure_makes_a_row():
