@@ -61,9 +61,25 @@ def test_the_shell_frame_is_the_kit_and_carries_no_terminal_surface():
     face are gone from it."""
     src = inspect.getsource(sh.page)
     assert "kit.page()" in src
-    assert 'kit.header(title, view=VIEW, stale=False)' in src
+    assert 'kit.header(title, view=view, stale=False)' in src
     for token in ("T.PAGE", "T.SHELL", "T.FONT_HTML", "add_head_html"):
         assert token not in src, f"{token} is a page-scoped surface value"
+
+
+def test_the_stamp_defaults_to_the_analysis_and_a_screen_may_name_its_own():
+    """Three of the four screens show the symbol analysis, so that is the
+    default. The Rank Board shows a universe-wide board published under its own
+    key, and a stamp naming the analysis there would time the command bar
+    rather than the thing on screen."""
+    assert inspect.signature(sh.page).parameters["view"].default == sh.VIEW
+
+
+def test_the_shell_hands_the_header_to_the_screen():
+    """A screen's own page ACTION belongs in the one actions row. Without this
+    the Rank Board's Rebuild had nowhere to go but a container its repaint
+    clears — which deleted the button and the backstop timer ``kit.set_busy``
+    mounts in its parent slot."""
+    assert '"head": head' in inspect.getsource(sh.page)
 
 
 def test_the_signal_desk_fonts_stop_loading():

@@ -85,7 +85,7 @@ def request(symbol):
     return sym
 
 
-def page(build, title):
+def page(build, title, view=VIEW):
     """Render one Signal Desk screen under the app's page frame.
 
     ``title`` is the screen's own name, and it is the NAV's word — the rail, the
@@ -93,10 +93,18 @@ def page(build, title):
     all before: the shell drew the family name and nothing else, so a reader met
     a symbol box and a wall of panels.
 
+    ``view`` is what the header's Updated stamp times, and it DEFAULTS to the
+    analysis because that is what three of the four screens show. The Rank
+    Board is the exception: its content is a universe-wide board published
+    under its own key, and a stamp naming the symbol analysis would time the
+    command bar rather than the thing on screen.
+
     ``build(state, refs)`` is called once inside the frame to lay the screen
-    out, and ``refs["paint"]`` collects repaint callbacks the shell fires when
-    the analysis cache moves — so a screen never wires its own poller and the
-    four cannot fall out of step."""
+    out; ``refs["paint"]`` collects repaint callbacks the shell fires when the
+    analysis cache moves — so a screen never wires its own poller and the four
+    cannot fall out of step — and ``refs["head"]`` is the header handle, so a
+    screen's own page ACTION lands in the one actions row rather than in a
+    container its repaint clears."""
     state = {"analysis": read_analysis()}
     state["draft"] = (state["analysis"].get("symbol") or "AAPL").upper()
     painters = []
@@ -110,7 +118,7 @@ def page(build, title):
         # amber would be a claim the service cannot back. The stamp still
         # answers this reader's question — whether what is on screen is the
         # answer to the last symbol they committed.
-        head = kit.header(title, view=VIEW, stale=False)
+        head = kit.header(title, view=view, stale=False)
         _command_bar(state, painters, head)
         # The wait covers the RESULTS only. ``build_busy(shell, …)`` scrimmed
         # the whole page column, so committing a symbol greyed out the Symbol
@@ -120,7 +128,7 @@ def page(build, title):
             "Analyzing…", timeout=ANALYZE_TIMEOUT_SEC,
             elapsed_label=lambda sec: analyzing_label(state.get("draft"), sec))
         with results.content:
-            build(state, {"paint": painters})
+            build(state, {"paint": painters, "head": head})
     state["wait"] = results
 
     def _repaint():

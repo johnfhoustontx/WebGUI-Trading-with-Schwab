@@ -256,3 +256,113 @@ def test_the_book_discloses_that_it_trades_the_underlying():
     where the numbers are — otherwise the P&L reads as options P&L."""
     note = trade_board.book_note().lower()
     assert "underlying" in note or "stock" in note
+
+
+# ── The Rank Board on the page kit (Phase 5, Task 2) ─────────────────────────
+# The board's own frame is the shell's (Task 1). What is this screen's to get
+# right is the three controls it owns: the meta line, the exposure warning and
+# Rebuild — and Rebuild is the one with a bug in it, because ``kit.set_busy``
+# mounts a backstop timer in the button's parent slot, and the button lived in
+# the ``filters`` row that ``_paint`` clears on every repaint.
+import inspect
+import pathlib
+
+from nicegui import ui
+
+from pages import ui_kit as kit
+from pages.options import theme as _t
+
+
+def _src():
+    return (pathlib.Path(__file__).resolve().parents[1] / "pages"
+            / "trade_board.py").read_text(encoding="utf-8")
+
+
+def _render():
+    """Render the Rank Board and return ONLY the elements IT built.
+
+    ``ui.context.client.elements`` is the auto-index client the whole module
+    shares, so a plain ``elements.values()`` also hands back widgets another
+    test's render left behind — and an assertion about "the buttons on this
+    page" then passes off someone else's page (the Phase 3 Task 1
+    measurement). Diffing the ids around the render is what scopes it."""
+    before = set(ui.context.client.elements)
+    with ui.card():
+        trade_board.render()
+    return [e for i, e in ui.context.client.elements.items() if i not in before]
+
+
+def _buttons(els):
+    return {e.text: e for e in els if isinstance(e, ui.button)}
+
+
+class TestTheBoardsControlsAreTheKits:
+    def test_rebuild_sits_with_the_page_actions_not_in_the_repainted_filter_row(self):
+        """The bug. ``kit.set_busy`` creates the button's backstop timer with
+        ``with btn.parent_slot:``, so a button living in a container ``_paint``
+        clears loses both itself and its timer on the next repaint — and the
+        repaint fires while the rebuild it started is still running. Moving it
+        into the header's actions is what makes the spinner safe."""
+        els = _render()
+        btns = _buttons(els)
+        assert "Rebuild" in btns, "the board still offers a Rebuild"
+        actions = btns["Rebuild"].parent_slot.parent
+        assert btns["Deep Dive"].parent_slot.parent is actions, \
+            "Rebuild belongs in the header actions beside the report buttons"
+        assert btns["Hide gated"].parent_slot.parent is not actions, \
+            "the filter toggle stays on the board, where it acts"
+
+    def test_rebuild_is_the_boards_one_primary_action(self):
+        els = _render()
+        assert _t.BTN_PRIMARY in " ".join(_buttons(els)["Rebuild"].classes)
+
+    def test_rebuild_holds_its_own_spinner_until_the_board_moves(self):
+        """It takes a minute or two (its own tooltip says so) and it enqueues
+        TWO commands. Without a held button the click reads as nothing having
+        happened, and a second click buys a second full rebuild."""
+        src = _src()
+        assert "kit.set_busy(" in src
+        els = _render()
+        rebuild = _buttons(els)["Rebuild"]
+        kit.set_busy(rebuild)
+        assert not rebuild.enabled and "loading" in rebuild.props
+
+    def test_the_dead_shell_spinner_handle_is_gone(self):
+        """``state["spinner"]`` was the pre-kit shell's handle. Task 1 renamed
+        it to ``state["wait"]``, so ``state.get("spinner")`` has been ``None``
+        ever since and Rebuild showed no wait at all — a silent regression that
+        looked exactly like the code that used to work."""
+        assert 'state.get("spinner")' not in _src()
+
+    def test_the_meta_line_is_the_kit_s_status_line(self, monkeypatch):
+        monkeypatch.setattr(trade_board.bus_client, "read",
+                            lambda v: _BOARD if v == trade_board.VIEW else {})
+        els = _render()
+        lines = [e for e in els if isinstance(e, ui.label)
+                 and " ".join(e.classes) == _t.EYEBROW]
+        assert any("20 names" in (e.text or "") for e in lines), \
+            "the board's meta line is the kit's status line"
+
+    def test_the_exposure_warning_is_the_kit_s_notice(self, monkeypatch):
+        """The loudest thing this board has to say about itself — that the top
+        of the ordering is the high-beta end — was a bare amber sentence. It is
+        the app's one notice row now, so it reads as a notice everywhere."""
+        monkeypatch.setattr(trade_board.bus_client, "read",
+                            lambda v: _BOARD if v == trade_board.VIEW else {})
+        els = _render()
+        assert any(kit.NOTICE in " ".join(e.classes) for e in els), \
+            "the exposure line is not the kit's notice"
+
+    def test_the_board_builds_exactly_one_raw_button_and_it_is_the_toggle(self):
+        """Hide gated is deliberately NOT a kit button: it carries a selected
+        state AND a label that changes with it, and ``kit.button``'s four kinds
+        express neither. The guard's ALLOWED entry carries the same reason."""
+        src = _src()
+        assert src.count("ui.button(") == 1
+        assert "Showing ungated only" in src and "T.FILTER_ON" in src
+
+    def test_the_board_stamp_reads_the_boards_OWN_view(self):
+        """The shell's header defaults to ``trade:analysis`` — the symbol read
+        that fills the command bar. On this screen the content IS the board, so
+        a stamp naming the analysis would time the wrong thing."""
+        assert "view=VIEW" in inspect.getsource(trade_board.render)

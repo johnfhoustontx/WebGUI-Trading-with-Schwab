@@ -9,15 +9,16 @@ call lowers its entry in the same commit - otherwise the list stops describing
 the code. An entry may outlive the migration only with a written reason (a
 control that is not an action button: a segmented picker, a leg-table toggle).
 
-⚠ NINE entries are PERMANENT rather than pending, and each carries its reason
+⚠ TEN entries are PERMANENT rather than pending, and each carries its reason
 above it: ``options/detail.py`` (Phase 1), ``desk.py`` / ``market.py`` /
-``sentiment_momentum.py`` (Phases 3 & 4), and five from Phase 2 - the three
+``sentiment_momentum.py`` (Phases 3 & 4), five from Phase 2 - the three
 shared Options widgets ``options/entry_panel.py`` / ``options/leg_editor.py`` /
 ``options/strategy_menu.py``, plus ``options/simulator.py`` and
-``options/swing.py``. Every other entry is a page no phase has migrated yet and
-is expected to fall to zero and be deleted. The nine screens Phases 3 & 4
-covered left no entry at all except those three. (The count read SEVEN and
-omitted ``options/simulator.py`` until 2026-09-20; corrected in place.)
+``options/swing.py`` - and ``trade_board.py`` from Phase 5. Every other entry is
+a page no phase has migrated yet and is expected to fall to zero and be deleted.
+The nine screens Phases 3 & 4 covered left no entry at all except those three.
+(The count read SEVEN and omitted ``options/simulator.py`` until 2026-09-20;
+corrected in place.)
 """
 import ast
 import collections
@@ -101,7 +102,13 @@ ALLOWED = {
     "status.py": {"button": 3, "notify": 4},
     "terminate.py": {"button": 3, "dialog": 1, "notify": 1},
     "trade.py": {"button": 3, "table": 2},
-    "trade_board.py": {"button": 2},
+    # The Hide gated toggle, and it stays: it carries a SELECTED state (a
+    # FILTER_ON / FILTER_OFF class swap) AND a label that changes with it
+    # ("Hide gated" ⇄ "Showing ungated only"), and kit.button's four kinds
+    # express neither - so routing it through them would mean a page-side swap
+    # over button_classes(...), the drift the kit exists to stop. The board's
+    # one ACTION, Rebuild, goes through the kit into the header's actions row.
+    "trade_board.py": {"button": 1},
     "trade_plan_screen.py": {"button": 2, "notify": 1},
 }
 

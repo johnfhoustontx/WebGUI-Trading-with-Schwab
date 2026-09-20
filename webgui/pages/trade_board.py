@@ -34,12 +34,21 @@ from pages import terminal_theme as T
 from pages import trade_help as th
 from pages import trade_shell as sh
 from pages import trade_terminal as tt
+from pages import ui_kit as kit
 from pages.ui_guard import guard
 from pages.view_watch import watch_view
 
 VIEW = "trade:rank_board"
 BOOK_VIEW = "trade:model_book"
 POLL_SEC = 5.0
+
+# The Rebuild button's backstop. A rebuild re-scores the whole universe from
+# fresh price history — its own tooltip says "a minute or two" — against
+# ``kit.BUSY_TIMEOUT_SEC``'s 30 s, which was sized for the Simulator's ~19 s
+# fetch. A backstop that fires while the work is still running hands the button
+# back mid-rebuild and invites the second click it exists to prevent; the same
+# reasoning, and the same number, as the shell's ANALYZE_TIMEOUT_SEC.
+REBUILD_TIMEOUT_SEC = sh.ANALYZE_TIMEOUT_SEC
 
 # Every fixed column is its MEASURED worst case plus ~10px, so the eight of
 # them plus a one-line GATES chip fit a half-width pane without scrolling. The
@@ -278,7 +287,15 @@ def meta_line(board):
 
 
 def render():
-    sh.page(_build, "Rank Board")
+    # ⚠ The header's stamp names THIS view, not the shell's default
+    # ``trade:analysis``. Three of the four Signal Desk screens show the symbol
+    # analysis; this one shows a universe-wide board published under its own
+    # key, so timing the analysis would time the command bar rather than the
+    # thing on screen. ``stale=False`` for the same reason the shell gives:
+    # ``services/trade_svc/app.py`` is "on-demand only — there is no
+    # scheduler", so every trade view is request/response and an age says
+    # nothing about whether the board is behind.
+    sh.page(_build, "Rank Board", view=VIEW)
 
 
 def _build(state, refs):
@@ -286,19 +303,31 @@ def _build(state, refs):
     state["book"] = bus_client.read(BOOK_VIEW) or {}
     state["hide_gated"] = False
 
-    with ui.row().classes("w-full items-end justify-between gap-4 flex-wrap"):
-        with ui.column().classes("gap-1"):
-            # (The screen's own "Rank board" headline went on 2026-09-20: the
-            # shell's kit header names the screen, in the NAV's spelling, so a
-            # second one here was a doubled title. Task 2 moves ``meta`` and
-            # the filters out of this row.)
-            meta = ui.label("").classes("text-[11.5px] text-[#6b7b9c]")
-        filters = ui.row().classes("gap-[9px]")
+    # Rebuild is a PAGE action and lives in the header's actions row, beside
+    # the two report buttons. It is not merely tidier: ``kit.set_busy`` mounts
+    # the button's backstop timer with ``with btn.parent_slot:``, and the
+    # ``filters`` row it used to sit in is cleared on every ``_paint`` — so the
+    # button and its timer were deleted by the very repaint the rebuild causes.
+    with refs["head"].actions:
+        rebuild_btn = kit.button("Rebuild", kind="primary", icon="refresh",
+                                 on_click=lambda: _rebuild())
+        with rebuild_btn:
+            sh.tip(th.help_for("rebuild"))
+
+    with ui.row().classes("w-full items-center gap-3 flex-wrap"):
+        # (The screen's own "Rank board" headline went on 2026-09-20: the
+        # shell's kit header names the screen, in the NAV's spelling, so a
+        # second one here was a doubled title.)
+        meta = kit.status_line()
+        ui.space()
+        filters = ui.row().classes("gap-2")
 
     status = ui.label("").classes("text-[13px] text-[#fbbf24]")
-    exposure = ui.label("").classes(f"{T.CALLOUT_TEXT} text-[12px]")
-    with exposure:
-        sh.tip(th.help_for("exposure_note"))
+    # The exposure warning is the app's one notice row. It is rebuilt rather
+    # than retitled because ``kit.notice`` owns its own label — and it is the
+    # loudest thing this board has to say about itself, so it must read as a
+    # notice here exactly as it would anywhere else.
+    exposure = ui.column().classes("w-full gap-2")
     gates = ui.label("").classes(f"{T.NOTE}")
 
     tables = ui.element("div").classes(f"w-full {_BOARD_GRID} gap-4")
@@ -315,21 +344,28 @@ def _build(state, refs):
         meta.text = meta_line(b)
         status.text = status_note(b)
         status.set_visibility(bool(status.text))
-        exposure.text = board_exposure_note(b)
-        exposure.set_visibility(bool(exposure.text))
+        exposure.clear()
+        note = board_exposure_note(b)
+        if note:
+            with exposure, kit.notice(note, icon="warning"):
+                sh.tip(th.help_for("exposure_note"))
         gates.text = gates_note(b)
 
         filters.clear()
         with filters:
+            # ⚠ NOT a kit button, and the guard's ALLOWED entry carries the
+            # same reason: this control has a SELECTED state (FILTER_ON /
+            # FILTER_OFF) and a label that changes with it. ``kit.button``'s
+            # four kinds express neither, so routing it through them would mean
+            # a page-side class swap over ``button_classes(...)`` — the drift
+            # the kit exists to stop. The page's one ACTION, Rebuild, goes
+            # through the kit into the header.
             on = state["hide_gated"]
             with ui.button("Hide gated" if not on else "Showing ungated only",
                            color=None).props("no-caps") \
                     .classes(T.FILTER_ON if on else T.FILTER_OFF) \
                     .on_click(_toggle_gated):
                 sh.tip(th.help_for("hide_gated"))
-            with ui.button("Rebuild", color=None).props("no-caps") \
-                    .classes(T.FILTER_OFF).on_click(_rebuild):
-                sh.tip(th.help_for("rebuild"))
 
         rows = board_rows(b)
         tables.clear()
@@ -350,11 +386,13 @@ def _build(state, refs):
 
     @guard
     def _rebuild():
-        # The wait is the SHELL's — all four screens share one frame, and a
-        # second spinner would fight it. See test_busy_coverage's exemption.
-        sp = state.get("spinner")
-        if sp:
-            sp.show("Rebuilding the board…")
+        # The button holds its OWN spinner until the board moves. A rebuild
+        # fetches history for every name in the universe — its tooltip says a
+        # minute or two — so without a held button the click reads as nothing
+        # having happened, and a second one buys a second full rebuild.
+        # ⚠ Not the shell's scrim: that one is the symbol analyze's, and it
+        # would grey out the board the reader is rebuilding.
+        kit.set_busy(rebuild_btn, timeout=REBUILD_TIMEOUT_SEC)
         bus_client.request("trade", {"type": "rank_board", "args": {}})
         # The book follows the board, so one click advances both rather than
         # leaving the book a tick behind whatever it is reporting on.
@@ -364,6 +402,7 @@ def _build(state, refs):
     def _on_board():
         state["board"] = bus_client.read(VIEW) or {}
         state["book"] = bus_client.read(BOOK_VIEW) or {}
+        kit.set_busy(rebuild_btn, False)
         _paint()
 
     refs["paint"].append(_paint)

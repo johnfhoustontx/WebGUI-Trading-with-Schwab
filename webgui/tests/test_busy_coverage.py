@@ -48,10 +48,6 @@ _EXEMPT = {
     "eod.py": "Generate writes files and links to them; no in-page repaint",
     # Already has its own spinner + re-entrancy guard on the sweep (predates this).
     "status.py": "the Refresh button owns a spinner of its own",
-    # The four Signal Desk screens share ONE frame, and the shell owns its
-    # spinner; a per-screen one would fight it. `trade_shell.py` is where the
-    # wait actually lives, and it is not exempt.
-    "trade_board.py": "the shared Signal Desk shell owns the wait",
 }
 
 
@@ -68,13 +64,23 @@ def _shows_a_wait(src):
     """Whether a page's source mounts a wait indicator AND uses it.
 
     The two original spellings are taken as proof on their own (that hole is
-    older than the kit). The KIT path needs both halves, because ``kit.region``
-    is a layout primitive as much as a spinner: as the migration proceeds nearly
-    every page will hold one whether or not it waits on anything, so a
-    mount-check would quietly stop discriminating. ``.busy.show(`` is the half
-    that only a page which actually waits has a reason to write.
+    older than the kit). The KIT REGION path needs both halves, because
+    ``kit.region`` is a layout primitive as much as a spinner: as the migration
+    proceeds nearly every page will hold one whether or not it waits on
+    anything, so a mount-check would quietly stop discriminating.
+    ``.busy.show(`` is the half that only a page which actually waits has a
+    reason to write.
+
+    ⚠ ``kit.set_busy(`` is the THIRD spelling and needs no second half: unlike
+    a region, it is not a layout primitive and has no meaning except "hold this
+    button and spin it". It is the right wait for a page whose command does not
+    replace a block — the Rank Board's Rebuild re-scores the universe behind a
+    board that stays readable meanwhile — and counting it is what let that
+    page's exemption be DELETED rather than reworded.
     """
     if "build_busy(" in src or "build_loading_overlay(" in src:
+        return True
+    if "kit.set_busy(" in src:
         return True
     return "kit.region(" in src and ".busy.show(" in src
 
@@ -86,6 +92,7 @@ def test_the_kit_path_needs_the_spinner_to_be_SHOWN():
     assert not _shows_a_wait("box = kit.region('…')          # never shown")
     assert not _shows_a_wait("ui.column()")
     assert _shows_a_wait("_busy.build_busy(box, '…')")       # the older spelling
+    assert _shows_a_wait("kit.set_busy(rebuild)")            # the button's own
 
 
 def test_every_page_that_enqueues_a_command_shows_a_wait():
