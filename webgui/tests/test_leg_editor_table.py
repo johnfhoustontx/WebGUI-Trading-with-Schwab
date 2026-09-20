@@ -408,3 +408,18 @@ def test_place_pick_on_a_page_with_no_price_column_moves_the_leg_unpriced():
     ed, _ = _table([_leg(premium=2.5)], show_premium=False, price_for=None)
     ed.place_pick(_pick("short", "put", 575.0))
     assert ed.get_legs() == [dict(_leg(), strike=575.0, premium=None)]
+
+
+def test_the_remove_track_fits_the_kit_icon_button():
+    """Measured in the harness after the kit migration: the remove button came
+    out **24x24** inside a **22px** grid track and spilled 2px into its
+    neighbour. The old button was a `dense flat` with `px-1 min-h-0`, which let
+    it shrink to the glyph; `kit.icon_button` is `flat round dense size=sm`, and
+    a Quasar round button has a fixed 24px box that no padding class reduces.
+
+    So the TRACK gives way, not the button - the kit's size is the standard and
+    this is one page's column budget. Pinned here because a 2px spill is exactly
+    the kind of thing that reads as 'slightly off' and never gets diagnosed."""
+    for grid in LE._TABLE_GRIDS.values():
+        assert "_22px]" not in grid, "22px cannot hold the kit's 24px round icon"
+        assert "_24px]" in grid, f"the remove track must be 24px: {grid}"

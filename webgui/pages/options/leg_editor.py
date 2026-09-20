@@ -241,10 +241,10 @@ _TABLE_TAIL = "gap-x-1 items-center w-full min-w-0"
 _TABLE_HEAD = "grid-cols-[16px_40px_36px_minmax(0,1.15fr)_minmax(0,1.25fr)_40px"
 _TABLE_GRIDS = {
     # (show_premium, show_delta) -> the track list
-    (True, True): f"grid {_TABLE_HEAD}_50px_minmax(0,0.9fr)_38px_22px] {_TABLE_TAIL}",
-    (True, False): f"grid {_TABLE_HEAD}_50px_minmax(0,0.9fr)_22px] {_TABLE_TAIL}",
-    (False, True): f"grid {_TABLE_HEAD}_38px_22px] {_TABLE_TAIL}",
-    (False, False): f"grid {_TABLE_HEAD}_22px] {_TABLE_TAIL}",
+    (True, True): f"grid {_TABLE_HEAD}_50px_minmax(0,0.9fr)_38px_24px] {_TABLE_TAIL}",
+    (True, False): f"grid {_TABLE_HEAD}_50px_minmax(0,0.9fr)_24px] {_TABLE_TAIL}",
+    (False, True): f"grid {_TABLE_HEAD}_38px_24px] {_TABLE_TAIL}",
+    (False, False): f"grid {_TABLE_HEAD}_24px] {_TABLE_TAIL}",
 }
 
 

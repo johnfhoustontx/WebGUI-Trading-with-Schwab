@@ -450,7 +450,9 @@ def test_table_tracks_match_the_cells_it_renders():
         if delta:
             kw["delta_for"] = d
         _, container = _table([_leg()], **kw)
-        want = _BASE + (_PRICE if prem else []) + (["38px"] if delta else []) + ["22px"]
+        # 24px, not 22: the kit's round icon button has a fixed 24px box, and
+        # measured in the harness it spilled 2px out of the old track.
+        want = _BASE + (_PRICE if prem else []) + (["38px"] if delta else []) + ["24px"]
         assert _tracks(container) == want, (prem, delta)
         head = [e for e in container.descendants() if "leg-thead" in e._classes][0]
         assert len([e for e in head.descendants() if isinstance(e, ui.label)]) == len(want)
