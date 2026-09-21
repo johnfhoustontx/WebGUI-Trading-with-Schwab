@@ -28,9 +28,13 @@ widget inside the app's cookie scope -- and because a public origin separated
 from the trading UI by a path filter is a filter someone has to keep getting
 right, where an origin is not.
 
-**No ``rate_limit``, decided.** Caddy's rate limiter is in no prebuilt binary; it
-needs an ``xcaddy`` build and a manual rebuild on every future Caddy release,
-with no apt security updates. This runs stock Caddy from the official repo.
+**``rate_limit`` on the PUBLIC host only, and OFF unless ``config/edge.toml``
+turns it on (2026-09-21).** Caddy's rate limiter is in no prebuilt apt binary;
+it needs a custom build and a manual re-download on every Caddy release, with
+no apt security updates for that binary. That cost was declined while the only
+public thing was a static site; the public Strategy Finder made the public host
+a place a visitor can make the box do work, so the switch now exists. Off, this
+file is byte-identical to what it emitted before the switch existed.
 
 ⚠ **That decision covers the APP block only, and the difference matters.** On
 ``APP_HOST`` throttling lives in the app, where ``LockoutState`` refuses before
@@ -40,9 +44,9 @@ to key and no form to reject, and its origin is therefore **unthrottled**.
 Measured: one plain anonymous GET retains ~619 KB of NiceGUI ``Client`` for
 ~70 s, and nothing bounds the arrival rate. What is in place is a **blast-radius
 cap, not a limit**: ``MemoryHigh``/``MemoryMax`` on the ``webgui_live`` unit, so
-a flood takes the public screens down alone. The rate itself is open --
-``docs/plans/2026-09-07-public-live-screens-design.md`` records it under
-"Deliberately not built", and this is the file the fix would land in.
+a flood takes the public screens down alone. The rate itself is bounded only
+when ``config/edge.toml`` turns the page-load limit on (below; runbook section
+"Edge rate limit"), which needs the custom Caddy build.
 """
 import argparse
 import pathlib
@@ -50,8 +54,19 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from repo_paths import (APP_HOST, ENV_NAME, LIVE_HOST,  # noqa: E402
+from repo_paths import (APP_HOST, EDGE_TOML, ENV_NAME, LIVE_HOST,  # noqa: E402
                         NICEGUI_LIVE_PORT, NICEGUI_PORT, SITE_HOST, SITE_ROOT)
+from shared.config_toml import toml_loader  # noqa: E402
+
+EDGE_DEFAULTS = {"live_rate_limit": {"enabled": False, "events": 30,
+                                     "window_sec": 60, "ipv6_prefix": 64}}
+load_edge, reset_edge = toml_loader(EDGE_TOML, EDGE_DEFAULTS, label="edge.toml")
+
+# The requests that do NOT count toward the limit: NiceGUI's own versioned
+# assets and its websocket/long-poll transport, and the bundled /static tree. A
+# page load fetches dozens of those (measured on /finder: 11 under /_nicegui plus
+# the favicon); only the page itself creates a session.
+RATE_LIMIT_EXEMPT = ("/_nicegui/*", "/_nicegui_ws/*", "/static/*", "/favicon.ico")
 
 # One year, the shortest value browsers will preload. EVERY block sends it: the
 # app because its session cookie must never travel in clear, the public site
@@ -76,6 +91,47 @@ FONT_MAX_AGE = 2592000          # 30 days
 # repository. Named here rather than buried in main() so the tests can assert
 # the path and moving it is one edit.
 CADDY_CONFIG = "/etc/caddy/Caddyfile"
+
+
+def live_rate_limit():
+    """The public host's rate limit as ``{events, window_sec, ipv6_prefix}``, or
+    ``None`` when off. Any value that is not a positive whole number (a bool
+    included) turns the whole limit OFF rather than emitting a directive Caddy
+    would reject at reload."""
+    cfg = (load_edge() or {}).get("live_rate_limit") or {}
+    if cfg.get("enabled") is not True:
+        return None
+    out = {}
+    for key, lo, hi in (("events", 1, 100000), ("window_sec", 1, 86400),
+                        ("ipv6_prefix", 1, 128)):
+        v = cfg.get(key, EDGE_DEFAULTS["live_rate_limit"][key])
+        if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+            return None
+        out[key] = v
+    return out
+
+
+def _rate_limit_lines(rl):
+    """The ``rate_limit`` block for the public host, or ``""`` when off."""
+    if rl is None:
+        return ""
+    exempt = " ".join(RATE_LIMIT_EXEMPT)
+    return f"""
+    # Page loads per visitor (config/edge.toml). Needs a Caddy built with
+    # github.com/mholt/caddy-ratelimit; the stock binary rejects this at
+    # `caddy validate`, which leaves the running config in place.
+    rate_limit {{
+        zone live_pages {{
+            match {{
+                not path {exempt}
+            }}
+            key {{remote_host}}
+            events {rl['events']}
+            window {rl['window_sec']}s
+            ipv6_prefix {rl['ipv6_prefix']}
+        }}
+    }}
+"""
 
 
 def _refuse_outside_prod():
@@ -264,7 +320,7 @@ def _live_block():
     encode zstd gzip
 
     header Strict-Transport-Security "{HSTS}"
-
+{_rate_limit_lines(live_rate_limit())}
     # Public to READ, not to ARCHIVE. Without this the origin 404s here, which
     # crawlers read as crawl-everything -- see the docstring for why that is
     # the one default worth overriding.

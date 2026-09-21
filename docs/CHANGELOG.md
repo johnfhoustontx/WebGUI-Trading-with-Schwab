@@ -4,7 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**Public Strategy Finder, Phase 3: a shorter
+**Last updated:** 2026-09-21 (**Public Strategy Finder, Phase 4: a page-load
+limit for the public host, built OFF.**)
+
+- **`config/edge.toml` `[live_rate_limit]`**: 30 page loads a minute per
+  visitor, IPv6 grouped by /64, emitted into the `live.` block only. NiceGUI's
+  assets, its websocket, `/static` and the favicon are exempt (measured on
+  `/finder`: 11 requests under `/_nicegui` plus the favicon per load), so a
+  normal visit is one load. Off, the Caddyfile is byte-identical to before
+  (pinned). A bad value turns the limit off rather than emitting a directive
+  Caddy would reject.
+- **Not installed.** It needs a Caddy built with
+  `github.com/mholt/caddy-ratelimit`; the box runs the stock apt 2.11.4, has
+  no Go toolchain and no passwordless sudo. The runbook's new "Edge rate
+  limit" section has the install (Caddy's documented `dpkg-divert` route, no
+  Go), the switch, a `robots.txt` probe and rollback. The standing cost is
+  stated there: the custom binary gets no apt security updates.
+- Settings → Configuration gains **Public site rate limit**.
+
+---
+
+**Prior — 2026-09-21** (**Public Strategy Finder, Phase 3: a shorter
 result, a morning warm-up, and your own view of public usage.**)
 
 - **Row cap.** A public result keeps the best 5 ideas of each strategy type

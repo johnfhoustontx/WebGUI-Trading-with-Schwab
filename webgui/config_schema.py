@@ -649,6 +649,34 @@ _FINDER_PUBLIC = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Public edge — config/edge.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read by deploy/caddy/generate_caddyfile.py only. No service restart applies it:
+# the Caddyfile has to be regenerated and Caddy reloaded, as root (see caution).
+_EDGE = ConfigFile(
+    name="edge.toml", title="Public site rate limit", icon="speed",
+    summary="How many pages one visitor may load on the public site per window.",
+    restart=(),
+    caution="Needs a Caddy built with the rate-limit module. Saving here changes "
+            "nothing until the Caddyfile is regenerated and Caddy reloaded, as "
+            "root - see the runbook's Edge rate limit section.",
+    sections=(
+        Section("Page loads per visitor", "Counts pages only, not the images, "
+                "scripts and live connection each page uses.", (
+            Field("live_rate_limit.enabled", "Limit page loads", "", kind="bool"),
+            Field("live_rate_limit.events", "Pages allowed", "", kind="int",
+                  min=1, max=100000, step=1),
+            Field("live_rate_limit.window_sec", "Per", "", kind="int", unit="s",
+                  min=1, max=86400, step=10),
+            Field("live_rate_limit.ipv6_prefix", "Group IPv6 visitors by",
+                  "Prefix bits. One IPv6 visitor can use a whole /64, so smaller "
+                  "numbers group more loosely.", kind="int", unit="bits", min=1,
+                  max=128, step=1),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Commissions — config/commissions.toml
 # ─────────────────────────────────────────────────────────────────────────────
 _COMMISSIONS = ConfigFile(
@@ -688,7 +716,7 @@ _ENVS = ConfigFile(name="environments.toml", title="Environments", icon="dns",
                    editable=False, editor="readonly")
 
 FILES = (_SCANNER, _TRADE_MGMT, _DRIVER, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
-         _FINDER_PUBLIC, _COMMISSIONS, _PORTS, _ENVS)
+         _FINDER_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 

@@ -78,6 +78,11 @@ SECTORS_TOML = REPO_ROOT / "config" / "sectors.toml"
 # options_svc (the worker) and the public live process. Edit + restart both.
 FINDER_PUBLIC_TOML = REPO_ROOT / "config" / "finder_public.toml"
 
+# The public edge (Caddy): the rate limit on live.neuralstrike.co. Read by
+# deploy/caddy/generate_caddyfile.py only; a change needs the Caddyfile
+# regenerated and Caddy reloaded, as root.
+EDGE_TOML = REPO_ROOT / "config" / "edge.toml"
+
 # Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
 # manual paper_account.db so the driver's book is fully isolated (zero schema change;
 # every paper_account_db/paper_engine fn already takes db_path).

@@ -478,3 +478,79 @@ def test_the_generated_config_is_pure_ascii(cfg):
         "non-ASCII in a generated system config: "
         + "; ".join(f"line {i}: {line.encode('ascii', 'replace').decode()}"
                     for i, line in offenders))
+
+
+# --- the public host's rate limit (config/edge.toml) -------------------------
+
+def _blocks(text):
+    """``{hostname: block text}`` for each top-level site block."""
+    out, host, depth, buf = {}, None, 0, []
+    for line in text.splitlines():
+        if depth == 0 and line.rstrip().endswith("{") and not line.startswith(("#", " ")):
+            # "neuralstrike.co, www.neuralstrike.co {" - key on the first name.
+            host, buf = line.split("{")[0].split(",")[0].strip(), []
+        if host:
+            buf.append(line)
+        depth += line.count("{") - line.count("}")
+        if host and depth == 0:
+            out[host] = "\n".join(buf)
+            host = None
+    return out
+
+
+def _with_edge(monkeypatch, **cfg):
+    monkeypatch.setattr(caddy, "load_edge", lambda: {"live_rate_limit": cfg})
+
+
+def test_the_limit_ships_off_and_the_file_says_so():
+    import tomllib
+    shipped = tomllib.loads((pathlib.Path(repo_paths.EDGE_TOML)).read_text("utf-8"))
+    assert shipped["live_rate_limit"]["enabled"] is False
+    assert shipped["live_rate_limit"] == {**caddy.EDGE_DEFAULTS["live_rate_limit"]}
+
+
+def test_off_emits_no_rate_limit_anywhere(monkeypatch):
+    _with_edge(monkeypatch, enabled=False, events=30, window_sec=60, ipv6_prefix=64)
+    assert "rate_limit" not in caddy.render()
+
+
+def test_on_limits_the_public_host_only(monkeypatch):
+    _with_edge(monkeypatch, enabled=True, events=30, window_sec=60, ipv6_prefix=64)
+    blocks = _blocks(caddy.render())
+    live = blocks[repo_paths.LIVE_HOST]
+    assert "rate_limit {" in live
+    assert "events 30" in live and "window 60s" in live and "ipv6_prefix 64" in live
+    assert "key {remote_host}" in live
+    for host in (repo_paths.APP_HOST, repo_paths.SITE_HOST):
+        assert "rate_limit" not in blocks[host], host
+
+
+def test_nicegui_assets_and_the_socket_never_count(monkeypatch):
+    """A page load fetches dozens of these; counting them would throttle one
+    ordinary visit. Only the page itself allocates a session."""
+    _with_edge(monkeypatch, enabled=True, events=30, window_sec=60, ipv6_prefix=64)
+    live = _blocks(caddy.render())[repo_paths.LIVE_HOST]
+    assert "not path /_nicegui/* /_nicegui_ws/* /static/* /favicon.ico" in live
+
+
+def test_the_limit_sits_before_the_proxy(monkeypatch):
+    _with_edge(monkeypatch, enabled=True, events=30, window_sec=60, ipv6_prefix=64)
+    live = _blocks(caddy.render())[repo_paths.LIVE_HOST]
+    assert live.index("rate_limit") < live.index("reverse_proxy")
+
+
+@pytest.mark.parametrize("bad", [
+    {"events": 0}, {"events": -5}, {"events": "30"}, {"events": True},
+    {"window_sec": 0}, {"ipv6_prefix": 200}, {"ipv6_prefix": 1.5},
+])
+def test_a_bad_value_turns_the_limit_off_rather_than_breaking_the_reload(
+        monkeypatch, bad):
+    cfg = {"enabled": True, "events": 30, "window_sec": 60, "ipv6_prefix": 64, **bad}
+    _with_edge(monkeypatch, **cfg)
+    assert caddy.live_rate_limit() is None
+    assert "rate_limit" not in caddy.render()
+
+
+def test_enabled_must_be_a_real_true(monkeypatch):
+    _with_edge(monkeypatch, enabled="yes", events=30, window_sec=60, ipv6_prefix=64)
+    assert caddy.live_rate_limit() is None

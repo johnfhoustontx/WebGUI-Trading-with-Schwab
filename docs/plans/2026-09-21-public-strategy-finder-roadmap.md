@@ -275,6 +275,10 @@ without its ledger line.
 
 ### Phase 4 (optional): an edge rate limit
 
+**Built off, 2026-09-21.** `config/edge.toml` emits the limit for the public
+host when turned on; installing the module-bearing Caddy is a root step in the
+runbook's "Edge rate limit" section, not yet taken.
+
 Caddy has no rate limit today; that needs an `xcaddy` build with the
 rate-limit module. It would stop a flood at the edge rather than in the
 public process. The daily budget already bounds the Schwab cost without it.

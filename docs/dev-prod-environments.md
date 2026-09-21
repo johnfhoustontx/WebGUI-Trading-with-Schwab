@@ -311,7 +311,7 @@ This is now ENFORCED rather than requested: `--install` arms timers only in a
 prod checkout, so a dev install writes all of them and enables none. Arming one
 by hand still works if you genuinely want it.
 
-**9. Verify.** On `http://127.0.0.1:9500` (tunnelled — see §8) the tab title is
+**9. Verify.** On `http://127.0.0.1:9500` (tunnelled — see §9) the tab title is
 prefixed `DEV ·` and the header carries a **DEV** chip; prod's is bare. Then
 confirm the four suppressions are **enforced**, not merely configured — read
 them from the enforcement points rather than from the profile, since the profile
@@ -570,7 +570,62 @@ its environment, because only the *units* have an `EnvironmentFile`.
 
 ---
 
-## 8. Gotchas
+## 8. Edge rate limit (public site)
+
+`config/edge.toml` `[live_rate_limit]` limits how many PAGES one visitor may
+load on `live.neuralstrike.co` (default 30 a minute, IPv6 grouped by /64).
+NiceGUI's own assets, its websocket, `/static` and the favicon do not count.
+It ships **off**, because the stock apt Caddy cannot parse the directive: it
+needs a build with `github.com/mholt/caddy-ratelimit`.
+
+⚠ **The standing cost, and the reason it is off by default.** A custom binary
+gets **no apt security updates**. `apt upgrade` keeps upgrading the packaged
+binary, but the diversion below means the one Caddy actually runs stays the
+custom one until you download a new build. Check after every Caddy release:
+`caddy version` against `apt policy caddy`.
+
+**1. Install the custom build beside the packaged one** (Caddy's own documented
+route for custom builds on Debian/Ubuntu; no Go toolchain needed). The build
+comes from Caddy's official build server:
+
+```bash
+cd /tmp && curl -fL -o caddy.custom "https://caddyserver.com/api/download?os=linux&arch=amd64&p=github.com%2Fmholt%2Fcaddy-ratelimit"
+chmod +x caddy.custom && ./caddy.custom list-modules | grep rate_limit
+sudo dpkg-divert --divert /usr/bin/caddy.default --rename /usr/bin/caddy
+sudo mv /tmp/caddy.custom /usr/bin/caddy.custom
+sudo update-alternatives --install /usr/bin/caddy caddy /usr/bin/caddy.default 10
+sudo update-alternatives --install /usr/bin/caddy caddy /usr/bin/caddy.custom 50
+sudo systemctl restart caddy && caddy list-modules | grep rate_limit
+```
+
+The `list-modules` line must print `http.handlers.rate_limit` before and after.
+
+**2. Turn it on** — Settings → Configuration → Public site rate limit →
+*Limit page loads*, which writes `config/local/edge.toml`. Then regenerate and
+reload; `caddy validate` failing leaves the running config untouched:
+
+```bash
+cd /home/administrator/dev
+sudo .venv/bin/python -m deploy.caddy.generate_caddyfile --install
+sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+```
+
+**3. Verify from a workstation.** `robots.txt` is limited like a page but
+creates no NiceGUI session, so it is the cheap probe. With the default 30 a
+minute, expect 30 × 200 and then 429s:
+
+```bash
+for i in $(seq 35); do curl -s -o /dev/null -w "%{http_code}\n" https://live.neuralstrike.co/robots.txt; done | sort | uniq -c
+```
+
+⚠ Your own browsing from the same address counts too. Loading a screen, then
+flipping through all 21 in a minute, is under the default.
+
+**Rollback:** turn the switch off in Settings, regenerate and reload as in
+step 2, then `sudo update-alternatives --set caddy /usr/bin/caddy.default &&
+sudo systemctl restart caddy`.
+
+## 9. Gotchas
 
 - **Dev's Terminate stops only dev**, structurally rather than by a filter:
   `systemctl --user --no-block stop trading-dev.target` reaches exactly the units
@@ -639,7 +694,7 @@ its environment, because only the *units* have an `EnvironmentFile`.
 
 ---
 
-## 9. Where the behaviour lives
+## 10. Where the behaviour lives
 
 | Concern | File |
 |---|---|

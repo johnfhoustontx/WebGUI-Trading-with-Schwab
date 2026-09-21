@@ -1889,7 +1889,9 @@ after ~70 s. The cap does not stop a flood; it decides **who dies** in one: the
 public screens alone, back on `Restart=on-failure`, instead of the OOM killer
 choosing among the services, the trading UI and Redis. ⚠ **Never add it to the
 other units as a drive-by** — they are not internet-facing and a wrong value
-kills the stack. The request rate itself is still open; see the design doc.
+kills the stack. The request rate is bounded only when `config/edge.toml`
+turns Caddy's page-load limit on — off by default, because it needs a custom
+Caddy build with no apt security updates (runbook "Edge rate limit").
 
 ⚠ **`--user`, never system units.** That is what lets the Status page restart its
 own siblings with no polkit rule and no sudoers entry; a system-unit equivalent

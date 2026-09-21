@@ -258,7 +258,10 @@ the config. `nicegui_live` therefore goes through the same `+ off` as `nicegui`.
   fourteen page instances with fourteen websockets, multiplied by every
   concurrent visitor.
 - **A timestamp on the grid.** See above.
-- **Rate limiting — STILL OPEN, and now measured (2026-09-07).** Not designed
+- **Rate limiting — BUILT OFF BY DEFAULT (2026-09-21): `config/edge.toml`
+  emits a page-load `rate_limit` for this host when turned on; it needs the
+  custom Caddy build in the runbook's "Edge rate limit" section. The original
+  note follows.** Measured 2026-09-07: Not designed
   in, and the original line here stopped at that, which read as though nobody
   had looked. What is known: 20 plain unauthenticated `GET /desk` requests
   create 20 NiceGUI `Client` objects retaining **~619 KB each** against an empty

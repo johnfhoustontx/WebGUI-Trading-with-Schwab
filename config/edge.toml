@@ -1,0 +1,25 @@
+# The public edge (Caddy) - read by deploy/caddy/generate_caddyfile.py.
+#
+# ⚠ A change here does NOTHING until the Caddyfile is regenerated and Caddy is
+# reloaded, as root:
+#   sudo .venv/bin/python -m deploy.caddy.generate_caddyfile --install
+#   sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+# `caddy validate` failing leaves the running Caddy untouched, so a bad value
+# (or enabling this on a Caddy without the module) never takes the sites down.
+
+[live_rate_limit]
+# Page loads per visitor on live.neuralstrike.co. Each anonymous page load holds
+# ~619 KB in the public process for ~70 s, and nothing else bounds how fast they
+# arrive. OFF by default, because it needs a Caddy BUILT WITH the rate-limit
+# module (github.com/mholt/caddy-ratelimit): the stock apt binary cannot parse
+# the directive. See docs/dev-prod-environments.md "Edge rate limit" for the
+# build, and for its standing cost - a custom binary gets no apt security
+# updates and must be re-downloaded on every Caddy release.
+enabled = false
+# Page loads one visitor may make per window. NiceGUI's own assets, its
+# websocket and /static do not count - only the loads that create a session.
+events = 30
+window_sec = 60
+# IPv6 visitors are grouped by this many prefix bits: one client can rotate
+# through a whole /64, so per-address counting would be no limit at all.
+ipv6_prefix = 64
