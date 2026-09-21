@@ -1,7 +1,7 @@
 # Strategy Finder on the public live screens: roadmap
 
 **Date:** 2026-09-21
-**Status:** proposed, not built. Two product decisions (§1) gate everything after Phase 0.
+**Status:** Phase 0 in progress. D1, D3 and D4 decided 2026-09-21; D2 (Schwab data terms) is open.
 **Ask:** publish the Strategy Finder (`/options/swing`) on `live.neuralstrike.co`.
 A visitor types **one thing, a symbol**, and gets the Finder's results for it
 under the app's standard filters. Every other control is fixed.
@@ -31,39 +31,42 @@ at all. The Finder breaks that shape in three ways:
    an enqueue is refused at two layers, and removing either one is a change to
    the security model.
 
-So the roadmap below keeps the read-only model intact for as long as possible.
-It moves to on-demand scans only as an explicit, separately-gated step.
+Decision D3 (any symbol a visitor types) makes point 3 unavoidable: the public
+origin has to be able to ask for a scan. The roadmap therefore opens ONE
+narrow write path, a single stream carrying a single validated field, and
+keeps every other layer of the read-only model as it is.
 
 ---
 
-## 1. Decisions needed before building (owner's call)
+## 1. Decisions
 
-| # | Question | Why it matters | Recommendation |
+| # | Question | Decision (2026-09-21) | What it means for the build |
 |---|---|---|---|
-| D1 | Publish **named trade ideas** (a specific spread on a specific stock, with a score and a grade)? | The existing screens publish market structure and signals; this publishes "sell this 30-delta put spread on X". That is a different kind of public statement. | Decide explicitly. If yes, carry the site's existing paper-only framing into the page header. |
-| D2 | Schwab market-data terms for **republishing raw option quotes** (bid/ask/mark per leg) | The Finder's rows carry per-leg prices. The Gamma screens publish derived aggregates; this would republish quotes. | Check the Schwab API terms before Phase 2. If raw quotes may not be shown, the public table drops the per-leg price columns and keeps derived fields (credit %, PoP, score). |
-| D3 | **Which symbols**: a curated list, or anything a visitor types? | Sets the cost model and the whole architecture (§3 vs §4). | Start curated (Phases 1–3). Treat free-text on-demand as a separate decision (Phase 4). |
-| D4 | **Undefined-risk structures** in public output? | On 09-14 SPY's top-ranked rows were 1–2 year **short straddles** (scores 83/82/78, "Strong"). That ranking is unmeasured against outcomes, and it is the first thing a visitor would see. | Exclude undefined-risk rows from the public output (per row, see §2) and cap DTE. |
+| D1 | Publish **named trade ideas** (a specific structure on a specific stock, with a score and a grade)? | **Yes.** | The page shows ranked candidates as the private Finder does. The header states the filters and the scan time. No disclaimer banner is added, matching the published market reports; the site footer already says paper only. |
+| D2 | Schwab market-data terms for **republishing quotes** | **Open.** Owner to read the agreement (first read under Phase 0 progress). | Per-leg bid/ask/mark columns sit behind one config switch, `show_leg_quotes`, off until D2 is settled. Derived fields (credit %, max loss, PoP, score) show regardless. The same question applies to the Macro Board already live. |
+| D3 | **Which symbols**? | **Anything a visitor types.** | On-demand scans are the core of the design (Phase 1), not an optional extra. |
+| D4 | **Undefined-risk structures** in public output? | **Don't hide them.** | No per-row filter. Every row states its risk plainly: the page's existing "∞" max-loss cell, and an "Unlimited loss" chip on those rows. |
 
 ---
 
-## 2. What "the filtering criteria" become
+## 2. The fixed filters
 
-The visitor edits nothing but the symbol, so the public scan is **one pinned
-parameter set**, defined once in config (the standing configurable-by-default
-rule) and catalogued in `webgui/config_schema.py`:
+The visitor edits nothing but the symbol, so every public scan runs **one pinned
+parameter set**, defined once in `config/finder_public.toml` (the standing
+configurable-by-default rule) and catalogued in `webgui/config_schema.py`:
 
-| Parameter | Private default (`_SWING_DEFAULTS`) | Public pin (proposed) | Reason |
+| Parameter | Private default (`_SWING_DEFAULTS`) | Public pin | Reason |
 |---|---|---|---|
-| `dte_min` / `dte_max` | 0 / None (whole chain) | **0 / 90** | A whole chain triggers the >30-expiration chooser, which needs a click. It also costs 26–40 s, and the long-dated short straddles live in it (D4). |
-| `expiry_choice` | None (ask) | **"Next 90 days"** | Never answer with the chooser: the public page has no buttons to pick one. |
+| `dte_min` / `dte_max` | 0 / None (whole chain) | **0 / 90** | Cost and the chooser, now that D4 no longer argues for it. A whole chain costs 26–40 s, and past 30 expirations the scan answers with a chooser that needs a click the public page cannot offer. Tunable in config; widening it trades scan time for coverage. Side effect: the 1–2 year short straddles that topped SPY on 09-14 are outside this window. |
+| `expiry_choice` | None (ask) | `ask_if_large=False` | Never answer with the chooser. |
 | `put_d_min/max`, `call_d_min/max` | −0.20/−0.10, 0.10/0.20 | same | Already the app's standard. |
 | `min_cr_fraction` | 0.10 | same | Same. |
-| `families` | None (all seven) | None, **plus a per-row defined-risk filter** | D4. ⚠ A family filter cannot do this: the build groups mix both kinds (STRADDLE builds long AND short straddles, DIRECTIONAL builds naked `SHORT_PUT`/`SHORT_CALL` beside long options). Drop rows by their own risk, publish-side, and count them as `undefined_risk_hidden`, never folded into `filtered_out`. The same reason `vol_filtered` is its own field. |
-| `earnings_mode` | `"flag"` (tag, keep) | same | A public row open through a report must show the flag. |
+| `families` | None (all seven) | None | D4: nothing hidden. |
+| `earnings_mode` | `"flag"` (tag, keep) | same | A row open through a report shows the flag. |
 
-`test_cross_tier_mirrors.py` already pins the private defaults across tiers;
-the public pin gets the same treatment in Phase 1.
+`test_cross_tier_mirrors.py` pins the private defaults across tiers; the public
+pin gets the same treatment, so the page's "standard filters" line cannot drift
+from what the service ran.
 
 ---
 
@@ -71,12 +74,9 @@ the public pin gets the same treatment in Phase 1.
 
 ### Phase 0: groundwork (no public change)
 
-- Resolve D1–D4.
-- Measure the scan at the Phase 1 pin (0–90 DTE, defined risk) on a handful of
-  symbols **during RTH**. The 09-14 numbers were for the whole chain, and the
-  estimate here is roughly half. Record wall time, `/chains` calls and payload
-  size per symbol.
-- Decide the curated list size from that measurement (§5 has the arithmetic).
+- Resolve D1–D4. (D2 is still open; it gates only the quote columns.)
+- Measure the pinned scan **during RTH**: wall time, proxy calls, rows and
+  payload per symbol. This sizes the daily budget and the queue (§5).
 
 #### Phase 0 progress (2026-09-21)
 
@@ -107,142 +107,156 @@ the public pin gets the same treatment in Phase 1.
   should read the agreement itself. Derived-versus-raw is the question to take
   to it.
 
-### Phase 1: scheduled public scans (Tier 2 only)
+### Phase 1: the request path and the worker (Tier 2 + Redis ACL)
 
-Follow the Gamma precedent: **the service publishes, per symbol, on a schedule;
-the public page only reads.**
+The one change to the public origin's security model, built and tested before
+any page exists.
 
-- New `config/finder_public.toml` (+ catalogue entries): the symbol list, the
-  pinned parameters from §2, and the schedule.
-- New `[slots.finder_public]` in `config/sessions.toml`, e.g. twice a day
-  (after the open settles, ~09:05 CT, and midday), placed **off the quarter
-  hours**. Each 15-minute mark belongs to the autoscan. Before choosing the
-  minute, read the proxy access log for that time, as the 2026-09-16 rule
-  requires.
-- A new **scheduler branch** in `options_svc/scheduler.py`, **not a
-  `cmd:options` command**. It runs through `launch_branches`, so it delays
-  only itself and never queues ahead of a paper create or a Calculator load.
-  It loops the list calling `compute.swing_scan` with the public pin.
-- Publish each result to **`cache:options:swing_pub:<SYMBOL>`** plus an event
-  (the `gamma_pub_key` pattern). Never write the private `cache:options:swing`
-  slot. Validate `<SYMBOL>` through `shared.symbols.clean_symbol`.
-- A `cache:options:swing_pub_index` view: the published symbols, the time each
-  was last scanned and its row count. The page uses it for its symbol list and
-  "last scanned" line.
-- Per-symbol guard via `_degrade.degraded`: one symbol's failure costs only
-  that symbol.
-- Tests: the scheduled branch never enqueues on `cmd:options`, no undefined-risk row reaches a published key, the published
-  key per symbol, the index view, the pin mirrors the TOML, and an unmapped
-  symbol is refused.
+- **A dedicated stream `cmd:finder_public`.** The live ACL user gains write
+  permission on **that key only**, using a Redis 7 write selector
+  (`%W~cmd:finder_public`), so it still cannot write `cmd:options` or any cache
+  key, and still has no `+publish`. (A public process that can publish can
+  spoof repaint events to the private app.) The box runs Redis 7.0.15 (checked
+  2026-09-21), and selectors arrived in 7.0.
+- **`bus_client.set_read_only(True)` stays.** A new, separate function,
+  `bus_client.request_public_scan(symbol)`, is the only enqueue this origin can
+  make. It validates with `shared.symbols.clean_symbol`, writes `{symbol, ts}`
+  and nothing else, and uses `XADD ... MAXLEN ~ N` so the stream cannot grow
+  without bound. Tests pin that `request()` still refuses everything and that
+  the new function cannot target another stream.
+- **A separate consumer in options_svc**, its own thread, never the
+  `cmd:options` consumer, so a 40 s scan cannot block a paper create or a
+  Calculator load. One scan at a time.
+- **Replay guard.** Consumer groups created at id 0 replay the whole backlog.
+  That is the documented incident that burned a day's API budget. Entries older
+  than a few minutes are acknowledged and dropped unscanned, reusing the
+  `_is_stale_side_effect` age gate.
+- **Refusals before the full scan**, in this order, each published as an
+  outcome the page can word:
+  1. the symbol fails `clean_symbol`: refused, no Schwab call;
+  2. a fresh result exists (`swing_pub:<SYM>` younger than the TTL, e.g. 15
+     minutes): served from cache, no Schwab call;
+  3. the same symbol was requested in the last 60 s: deduplicated (the
+     dossier's rule);
+  4. outside the scan window (market hours by default; the 07:20 smoke run
+     showed pre-market scans return nothing usable): refused, and the last
+     cached result stays on screen;
+  5. the daily scan budget is spent: refused;
+  6. the symbol has no option expirations (one `/expirationchain` call):
+     "no options listed".
+- **Results** go to `cache:options:swing_pub:<SYMBOL>` with a TTL, plus
+  `cache:options:finder_public_status`: the queue length, the scans used and
+  left today, and the last outcome per symbol. The public page reads only
+  these.
+- **Observability.** The worker's degrades appear in `/health`, as every
+  service's do. Its daily scan count appears beside the Schwab call counts in
+  Settings, so public usage is visible in the private app.
+- **Tests.** The ACL grant in the runbook; the only public write; the replay
+  guard; each refusal in order; that the worker never touches `cmd:options` or
+  `cache:options:swing`; and a Redis-driven end-to-end check on prod with the
+  live ACL user before any page ships.
 
-**Exit:** after a trading day, `swing_pub:*` keys exist for every listed
-symbol, and the GEX poll logged no `still running` skips at the scan minutes.
+**Exit:** on prod, the live ACL user can add to `cmd:finder_public` and is
+refused on `cmd:options` and every `cache:` key. A request for SPY during the
+session produces `swing_pub:SPY`. A request for a nonsense symbol spends no
+Schwab call.
 
-### Phase 2: the pinned public page (Tier 1)
+### Phase 2: the public page (Tier 1)
 
-- `swing.render(symbol=None, public=False)`: an optional keyword like
+- `swing.render(public=False)`: an optional keyword like
   `gamma.render(symbol=, view=)`, defaulting to today's behaviour so the private
   route is unchanged.
 - With `public=True`:
-  - **Symbol field only.** It is a `ui.select` with `with_input` over
-    `swing_pub_index`, so a visitor can type to filter but can only land on a
-    published symbol. It changes which `swing_pub:<SYM>` key the page reads; it
-    sends nothing. (A free-text box that accepts an unlisted symbol belongs to
-    Phase 4.)
-  - **Not built**: the DTE, delta and min-credit inputs; Scan; the
-    expiry-choice buttons; **Paper**; **Calculator**; the per-row
-    Expected Move hand-off. Apply the rule the Gamma screens follow: a
-    control that cannot work is not drawn.
-  - A `may_enqueue(public)` predicate gating every `bus_client.request` site in
-    the module, plus an AST test that walks the source and proves every enqueue
-    site is gated. This is the `gamma.may_enqueue` pattern.
-  - Header line: "Scanned 09:05 CT · next 12:35 CT · standard filters (0–90
-    days, defined risk)". The visitor needs to know the results are a schedule,
-    not a live scan.
-  - The checklist chips read `options:matrix` etc. These are shared views and
-    are safe. The **Paper book** line reads the owner's `ledger_caps`: drop it
-    in public mode, since it describes the owner's book.
+  - **A symbol field and one button.** Enter or Scan calls
+    `request_public_scan` and nothing else. The page then watches
+    `swing_pub:<SYM>` and `finder_public_status`. While it waits it shows the
+    queue position, then the answer: results, or the refusal in words.
+  - **Not built**: the DTE, delta and min-credit inputs; the expiry-choice
+    buttons; **Paper**; **Calculator**; the Expected Move hand-off. Apply the
+    rule the Gamma screens follow: a control that cannot work is not drawn.
+  - `may_enqueue(public)` gates every other `bus_client.request` site in the
+    module, with an AST test proving every enqueue site is gated. This is the
+    `gamma.may_enqueue` pattern.
+  - Header: the symbol, "Scanned 10:42 CT", and the fixed filters in words.
+  - Every row with unlimited loss is labelled (D4). Quote columns follow
+    `show_leg_quotes` (D2).
+  - Checklist chips that read shared views stay. The **Paper book** line reads
+    the owner's `ledger_caps` and is dropped in public mode.
 - `live_screens.py`: `Screen("finder", "/finder", "Strategy Finder",
-  "options.swing", "/options/swing", kwargs={"public": True})`. A new tile goes
-  in `deploy/site/live.html`, and the capture tool picks it up automatically.
-- Verify with `tools/ui_harness.py` over prod's real `swing_pub:*` payloads,
-  as this session did for the Gamma boards.
+  "options.swing", "/options/swing", kwargs={"public": True})`, plus a tile in
+  `deploy/site/live.html`. The thumbnail capture shows whatever the page draws
+  with no symbol typed, e.g. the last cached SPY result.
+- Verify with `tools/ui_harness.py`, then live over `live.neuralstrike.co`.
 
-**Exit:** `/finder` serves over the live origin. `bus_client`'s read-only
-refusal counter stays at zero across a walk of every symbol, which is the proof
-that nothing tries to enqueue.
+**Exit:** a visitor on `/finder` types a symbol and gets results or a worded
+refusal. The read-only refusal counter for everything except the one allowed
+write stays at zero.
 
-### Phase 3: polish and guardrails
+### Phase 3: abuse limits and polish
 
-- Empty and stale states: "not scanned yet today", and after hours "Last
-  session's scan; index open interest reads zero after hours". Use the
-  existing wording in `pages/copy.py`.
-- A row cap for the public table (e.g. the best 5 per strategy type) so the
-  page reads as a short list, not a 160-row dump.
-- A manual page (User Guide, "The public live screens") and a
-  `page_help.py` entry. Plus docs: `webgui-routes.md`, CLAUDE.md's public-screen
-  section, the CHANGELOG.
+- **Per-visitor limit** in the public process: a few scans per client per
+  hour, keyed on the last `X-Forwarded-For` hop Caddy stamps. Held in memory
+  only: no IP address is written to Redis or to disk. A restart resets it,
+  which is acceptable because the daily budget is the hard limit.
+- **Row cap** for the public table (e.g. the best 5 per strategy type), for
+  readability and for `webgui_live`'s 1 GB memory cap.
+- **Warm cache (optional).** Pre-scan a short list, e.g. yesterday's most
+  requested symbols plus SPY, QQQ and IWM, shortly after the open, so the
+  common symbols answer instantly.
+- Empty, stale and after-hours wording in `pages/copy.py`; a User Guide
+  section; a `page_help.py` entry; docs in `webgui-routes.md`, CLAUDE.md's
+  public-screen section and the CHANGELOG.
 
-### Phase 4 (optional, separately decided): on-demand scans for any symbol
+### Phase 4 (optional): an edge rate limit
 
-This is the only phase that changes the public origin's security model. Build
-it only if Phases 1–3 prove the demand. The minimum safe shape:
-
-- **A dedicated stream `cmd:finder_public`.** Give the live ACL user
-  `+xadd` on **that key only**. It must never cover `cmd:options` and never
-  `+publish` (a public process that can publish can spoof repaint events to the
-  private app). Update `bus_client.set_read_only` to allow exactly that one
-  command type, and pin both with tests.
-- **A separate consumer** in options_svc, not the `cmd:options` consumer, so a
-  40 s scan never blocks the owner's commands. One scan at a time.
-- **Refusals before any Schwab call:** `clean_symbol`; the symbol must be
-  optionable (reuse the dossier's quote leg); a per-symbol **dedup** (a result
-  younger than the TTL is served from cache, as the dossier's 15-minute TTL and
-  60 s dedup do); a **queue-depth cap** (refuse, don't queue, past N pending);
-  and a **daily budget** of on-demand scans in config, with the refusal shown
-  to the visitor.
-- **Per-client limiting** cannot be trusted inside NiceGUI alone. It keys on
-  the last `X-Forwarded-For` hop Caddy stamps (the `X-Edge 1` rule). The edge
-  has no rate limit today (that needs an `xcaddy` build).
-- Results go to the same `swing_pub:<SYM>` keys with a short TTL, so the
-  Phase 2 page renders them unchanged.
+Caddy has no rate limit today; that needs an `xcaddy` build with the
+rate-limit module. It would stop a flood at the edge rather than in the
+public process. The daily budget already bounds the Schwab cost without it.
 
 ---
 
-## 4. Risks carried into every phase
+## 4. Risks
 
-- **Load on the proxy.** Each scan fetches chains 4 expiries at a time through
-  the proxy's shared 5 req/s. A burst at the wrong minute pushes the 1-minute
-  GEX poll past its slot, and the heatmap loses that minute. Mitigation:
-  off-quarter-hour slots, measured before scheduling.
-- **Memory on the public process.** `webgui_live` is capped at 1 GB, and each
-  anonymous GET holds ~619 KB for ~70 s. A Finder payload of ~130–320 KB per
-  render adds to that. Keep the public row cap (Phase 3).
-- **Scoring credibility.** The long-dated short-straddle ranking (D4) is an
-  open, unmeasured question. The public pin avoids it but does not answer it.
-- **Staleness is the honest cost of Phases 1–3.** Results are as old as the
-  last slot, and the header has to say so.
+- **The public origin can now write.** One stream, one validated field, a
+  bounded length, enforced by the Redis server rather than by this process.
+  The worst an attacker can do is spend the day's public scan budget. That
+  denies other visitors, not the owner: separate stream, separate worker,
+  separate budget.
+- **Load on the proxy.** One worker, at about 6 calls per ~11 s (the smoke
+  run), is roughly 0.5 requests a second against the headroom in §5. If the
+  session run shows GEX skips, pause the worker during the autoscan minutes
+  (:00–:03, :15–:18, …) and let the queue wait.
+- **Scoring credibility.** Under D4, undefined-risk rows show, and their
+  ranking has never been measured against outcomes. The 90-day cap keeps out
+  the long-dated short straddles seen on 09-14, but short strangles, straddles
+  and naked calls inside 90 days rank alongside spreads.
+- **Memory on the public process.** Capped at 1 GB, with each anonymous GET
+  holding ~619 KB for ~70 s. Keep the row cap.
+- **Schwab terms (D2).** Open, and wider than this feature.
 
-## 5. Cost arithmetic (to confirm in Phase 0)
+## 5. Cost arithmetic (confirm with the Phase 0 run)
 
-- **Time:** with N symbols at ~12 s each (estimated for the 0–90 DTE pin,
-  roughly half the whole-chain figures), 20 symbols is ~4 minutes per pass on a
-  scheduler branch that blocks nothing but itself.
-- **Schwab calls:** one expiration-list call plus ceil(expiries ÷ 8) chain
-  runs. At ~12 expiries in 90 days that is ~3 calls per symbol. 20 symbols × 2
-  passes ≈ 120 calls/day, against a budget running 68–76k/day. Negligible.
-- **Redis:** 20 keys × ~150 KB, written twice a day.
+- **Per scan** (smoke run, IWM, pre-market): 11.1 s, 6 proxy calls.
+- **Throughput:** one worker at ~11 s a scan does ~5 scans a minute at most. A
+  visitor behind four others waits about a minute, which is why the page shows
+  the queue position.
+- **Budget:** 200 scans a day is ~1,200 Schwab calls, against the 68–76k a day
+  the stack already uses. Set in config; the right number comes from the
+  session measurement and real demand.
+- **Proxy headroom:** 130–155 requests a minute in quiet minutes against a
+  ceiling of 300, but only ~16 to spare at the autoscan peak (284).
 
-## 6. Files touched (Phases 1–3)
+## 6. Files touched
 
 | File | Change |
 |---|---|
-| `config/finder_public.toml` *(new)* | symbol list, pinned parameters |
-| `config/sessions.toml` | `[slots.finder_public]` |
+| `config/finder_public.toml` *(new)* | pin, TTL, dedup window, scan window, daily budget, per-visitor limit, `show_leg_quotes` |
 | `webgui/config_schema.py` | catalogue the new keys |
-| `services/options_svc/scheduler.py` | the scheduled branch |
-| `services/options_svc/handlers.py` | `swing_pub_key`, `publish_finder_public`, the index view |
-| `webgui/pages/options/swing.py` | `render(symbol=, public=)`, `may_enqueue`, public mode |
+| `docs/dev-prod-environments.md` | the ACL change for the live user |
+| `webgui/bus_client.py` | `request_public_scan`, the one allowed write |
+| `services/options_svc/` | the `cmd:finder_public` consumer, the refusals, `swing_pub_key`, the status view |
+| `webgui/pages/options/swing.py` | `render(public=)`, `may_enqueue`, public mode |
+| `webgui/live_main.py` | the per-visitor limit |
 | `webgui/live_screens.py` · `deploy/site/live.html` | the screen and its tile |
 | `shared/tests/test_cross_tier_mirrors.py` | public pin ↔ page mirror |
 | docs | User Guide, `page_help.py`, `webgui-routes.md`, CLAUDE.md, CHANGELOG |
