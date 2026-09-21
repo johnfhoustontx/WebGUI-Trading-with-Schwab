@@ -1383,13 +1383,16 @@ The General tab controls the alert chimes, notifications and the ticker.
     "/manuals": """
 **User Manuals — the simple version**
 
-Links to the full documentation (each opens in a new tab).
+Links to the full documentation. Each manual opens in a new browser tab, and a
+Word (.docx) copy of each one sits beside the HTML under `docs/manuals/`.
 
 - **User Guide** — how to use everything.
 - **Reference Guide** — what each tab and sub-tab is *for*, why it matters and when
   to open it. Start with its one-page summary.
 - **Technical Reference** — the math behind every number.
 - **API / Developer Reference** — for developers extending the app.
+- **Options Glossary** — plain-English definitions of the words the other four
+  assume you already know.
 """,
     "/terminate": """
 **Stop All Services — the simple version**

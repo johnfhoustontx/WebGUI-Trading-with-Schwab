@@ -8,10 +8,15 @@ browser tab via the ``/manuals/file`` route registered in ``main.py``.
 keep new manuals in sync here. ``file`` is relative to ``docs/manuals/`` and is a
 whitelist key (the route refuses anything not in this dict), so there is no path
 traversal.
+
+The page itself is the kit's form width: a header line and one card per manual,
+with no description sentence of its own — ``page_help["/manuals"]`` carries that,
+including the Word (.docx) copies the HTML links do not mention.
 """
 from nicegui import ui
 
-from pages.options.theme import BTN_3D
+from pages import ui_kit as kit
+from pages.options import theme
 
 # slug -> {title, desc, icon, file}. `file` is relative to docs/manuals/.
 MANUALS = {
@@ -60,18 +65,34 @@ def _open(slug: str) -> None:
 
 
 def render():
-    ui.label("User Manuals").classes("text-h5")
-    ui.label("Online documentation for the app. Each manual opens in a new browser "
-             "tab. Word (.docx) copies live alongside the HTML under "
-             "docs/manuals/.").classes("opacity-70 text-sm")
+    """One card per manual, each opening its own HTML in a new browser tab.
 
-    with ui.column().classes("w-full max-w-2xl gap-3"):
+    The card IS the row: a second wrapper would only add a frame the kit's card
+    token already draws. ``min-w-0`` on the text column is what lets a long
+    description wrap instead of pushing Open off the right edge.
+
+    ⚠ The button needs ``shrink-0`` beside it. A Quasar button's own content row
+    WRAPS, so its min-content width is one word - and a flex item may shrink to
+    min-content. Measured here: against the growing text column the button came
+    out 52.8px wide inside, with the icon stacked ABOVE the label on all five
+    cards. The kit's buttons normally sit in ``head.actions``, where nothing
+    grows against them, so this is the first page to meet it.
+
+    The row WRAPS below ``sm``, the same decision (and the same reason) as
+    ``appearance.py``'s editor/preview split: at phone width a no-wrap row left
+    the description nine words tall in a column two inches wide, because the
+    icon and the button were taking their space off the top. Open drops to its
+    own line instead, ``ml-auto`` keeping it on the right."""
+    with kit.page(width="form"):
+        kit.header("User Manuals")
         for slug, m in MANUALS.items():
-            with ui.card().classes("w-full"):
-                with ui.row().classes("items-center gap-3 w-full no-wrap"):
-                    ui.icon(m["icon"]).classes("text-3xl opacity-80")
-                    with ui.column().classes("gap-0 grow"):
-                        ui.label(m["title"]).classes("text-subtitle1 font-bold")
-                        ui.label(m["desc"]).classes("opacity-70 text-sm")
-                    ui.button("Open", icon="open_in_new", color=None,
-                              on_click=lambda _, s=slug: _open(s)).props("no-caps").classes(BTN_3D)
+            with ui.row().classes(f"{theme.CARD} w-full items-center gap-3 "
+                                  "flex-wrap sm:flex-nowrap"):
+                ui.icon(m["icon"]).classes(f"text-3xl {theme.MUTED}")
+                with ui.column().classes("gap-0 grow min-w-0"):
+                    ui.label(m["title"]).classes(
+                        f"text-subtitle1 font-semibold {theme.LABEL}")
+                    ui.label(m["desc"]).classes(f"text-sm {theme.MUTED}")
+                kit.button("Open", kind="secondary", icon="open_in_new",
+                           on_click=lambda _e, s=slug: _open(s)) \
+                    .classes("shrink-0 ml-auto")
