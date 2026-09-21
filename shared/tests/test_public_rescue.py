@@ -298,3 +298,28 @@ def test_strikes_are_read_on_the_right_side():
 
 def test_a_huge_integer_is_refused_not_raised():
     assert pr.clean_spec(_pcs(short_strike=10 ** 400), TODAY) is None
+
+
+# ── how far out an expiration may be ───────────────────────────────────────
+
+def test_an_expiration_three_years_out_is_the_last_accepted():
+    last = TODAY + dt.timedelta(days=pr.MAX_EXPIRY_DAYS)
+    assert pr.MAX_EXPIRY_DAYS == 3 * 365
+    assert pr.clean_expiry(last.isoformat(), TODAY) == last.isoformat()
+    assert pr.clean_expiry((last + dt.timedelta(days=1)).isoformat(), TODAY) is None
+
+
+@pytest.mark.parametrize("far", ["9999-12-31", "2099-07-31", "2030-01-01"])
+def test_an_expiration_past_any_listing_is_refused(far):
+    assert pr.clean_expiry(far, TODAY) is None
+
+
+def test_a_leap_expiration_two_and_a_half_years_out_is_accepted():
+    """Listed equity and index LEAPS run to about 2.5 years."""
+    leap = (TODAY + dt.timedelta(days=int(2.5 * 365))).isoformat()
+    assert pr.clean_expiry(leap, TODAY) == leap
+
+
+def test_the_far_limit_is_measured_from_today_by_default():
+    far = (dt.date.today() + dt.timedelta(days=pr.MAX_EXPIRY_DAYS + 1)).isoformat()
+    assert pr.clean_expiry(far) is None

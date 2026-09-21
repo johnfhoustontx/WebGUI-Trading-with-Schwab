@@ -102,6 +102,11 @@ MAX_CREDIT = 100_000.0
 # Expirations older than this are refused: a trade already expired has nothing
 # to rescue. Later ones are left to the listed-expiration check in the worker.
 _PAST_GRACE_DAYS = 1
+# Expirations further out than this are refused before anything is written.
+# Listed equity and index options (LEAPS included) run to about 2.5 years, so
+# three years clears every real listing; without it ``9999-12-31`` was a valid
+# expiry, a visitor-chosen string reaching a cache key and a date computation.
+MAX_EXPIRY_DAYS = 3 * 365
 _KEY_LEN = 24
 _FLAT_STRIKES = ("short_strike", "long_strike", "call_short", "call_long")
 
@@ -138,7 +143,8 @@ def _qty(v):
 
 
 def clean_expiry(raw, today=None):
-    """An ISO date ``YYYY-MM-DD`` that is not already past, or None."""
+    """An ISO date ``YYYY-MM-DD`` that is not already past and at most
+    ``MAX_EXPIRY_DAYS`` after ``today``, or None."""
     if not isinstance(raw, str) or len(raw.strip()) != 10:
         return None
     try:
@@ -147,6 +153,8 @@ def clean_expiry(raw, today=None):
         return None
     today = today or _dt.date.today()
     if day < today - _dt.timedelta(days=_PAST_GRACE_DAYS):
+        return None
+    if day > today + _dt.timedelta(days=MAX_EXPIRY_DAYS):
         return None
     return day.isoformat()
 
