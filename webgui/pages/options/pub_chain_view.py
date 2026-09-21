@@ -140,3 +140,33 @@ def quotes_as_of(ladder) -> str | None:
         return None
     when = when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
     return f"Quotes as of {when.astimezone(CT):%H:%M} CT"
+
+
+# ── the Simulator's snapshot meta ───────────────────────────────────────────
+# The public Simulator reads the metadata of ITS snapshot (the result of a
+# ``sim_snapshot`` / ``sim_expiry`` request, ``tools_public._public_meta``), not
+# the public chain: ``{"symbol", "spot", "n_contracts", "expiries": [...loaded],
+# "strikes": {expiry: {"call": [...], "put": [...]}}, "expirations": [...listed]}``.
+# ``expirations`` is present only on the lazy path; without it (the eager
+# fallback) the loaded expirations are all there is. ``ladder_strikes`` reads
+# its ``strikes`` map unchanged.
+
+def snapshot_loaded(meta) -> list:
+    """The snapshot's expirations whose strikes are held, in its order."""
+    exps = (meta or {}).get("expiries") if isinstance(meta, dict) else None
+    strikes = (meta or {}).get("strikes") if isinstance(meta, dict) else None
+    strikes = strikes if isinstance(strikes, dict) else {}
+    if not isinstance(exps, list):
+        return []
+    return [e for e in exps if isinstance(e, str) and e in strikes]
+
+
+def snapshot_listed(meta) -> list:
+    """Every expiration the symbol lists, or the loaded ones when the snapshot
+    carries no list."""
+    exps = (meta or {}).get("expirations") if isinstance(meta, dict) else None
+    if isinstance(exps, list):
+        listed = [e for e in exps if isinstance(e, str)]
+        if listed:
+            return listed
+    return snapshot_loaded(meta)

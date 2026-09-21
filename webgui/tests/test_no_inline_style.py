@@ -25,7 +25,7 @@ def test_options_helpers_have_no_inline_style():
 # Phase 3a signal-table screens: no `.style(` AND no `:style=` (slot bindings).
 PHASE_3A_FILES = ["scanner.py", "swing.py", "captured.py", "paper.py",
                   "portfolio.py", "rescue.py", "finder_live.py", "rescue_live.py",
-                  "calc_live.py", "pub_chain_view.py"]
+                  "calc_live.py", "pub_chain_view.py", "sim_live.py"]
 
 
 def test_phase3a_pages_have_no_inline_style():
