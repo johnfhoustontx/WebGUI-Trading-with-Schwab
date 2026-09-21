@@ -207,9 +207,11 @@ naming the variable.
 ⚠ **`.env.live` is in the backup and in `.gitignore`** — both as their own
 line, because neither `.env` entry matches this name.
 
-**4c. The live ACL user's ONE write (public Strategy Finder).** The `live`
-user is read-only except for one Redis 7 selector: it may `XADD` on
-`cmd:finder_public` and on no other key. That stream carries a visitor's
+**4c. The live ACL user's FIRST write (public Strategy Finder).** The `live`
+user is read-only except for its Redis 7 selectors, one per public stream, each
+allowing `XADD` on that one key and nothing else. This first one is for
+`cmd:finder_public`. Steps 4c, 4d, 4e and 4f are applied in that order, and all
+four before the promote that ships the pages using them. That stream carries a visitor's
 request to scan one symbol (`shared/public_scan.py`); options_svc answers it on
 a consumer loop of its own. Add the selector, then persist it:
 
@@ -287,6 +289,66 @@ these two lines to its list, and expect the first `ALLOWED`, the second
 Remove the probe entry afterwards with `XDEL` as the admin user, as in 4c.
 Without this selector the public Rescue page's Load and Compute both fail with
 `NOPERM`, which the page words as "The request could not be sent".
+
+**4e. The live ACL user's THIRD write (public Calculator and Simulator,
+Schwab-spending requests).** ⚠ **Not yet applied on prod.** Since 2026-09-21
+the `live` user needs a selector for `cmd:tools_public`: a visitor's request for
+a symbol's chain, one more expiration, a trade rating, or a Simulator snapshot
+and its expirations (`shared/public_tools.py`, which validates every field
+before anything is written). options_svc answers it on a fourth consumer loop
+(`services/options_svc/tools_public.py`). Apply it after 4d:
+
+```bash
+cd /home/administrator/dev && set -a && . ./.env && set +a
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli ACL SETUSER live '(%W~cmd:tools_public +xadd)'
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli CONFIG REWRITE
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli ACL GETUSER live
+```
+
+`ACL GETUSER` must now list **three** selectors. Verify with the 4c probe, adding
+these two lines to its list (beside 4d's), and expect the first `ALLOWED`, the
+second `NOPERM`, and every existing line unchanged:
+
+```python
+    ("XADD cmd:tools_public (allowed)", lambda: r.xadd("cmd:tools_public", {"probe": "1"})),
+    ("XRANGE cmd:tools_public", lambda: r.xrange("cmd:tools_public")),
+```
+
+Remove the probe entry afterwards with `XDEL` as the admin user, as in 4c.
+Without this selector the public Calculator's Load and Rate my trade, and the
+public Simulator's snapshot load, all fail with `NOPERM`, which both pages word
+as "The request could not be sent".
+
+**4f. The live ACL user's FOURTH write (public Calculator and Simulator,
+pricing).** ⚠ **Not yet applied on prod.** The same pages put their pricing
+requests - reprice a position, imply one contract's volatility, run a Simulator
+what-if sweep - on a stream of their own, `cmd:tools_public_math`, so a
+snapshot fetch never stalls the reprice every edit triggers. These spend no
+Schwab call, but they are still a write, so they need their own selector.
+Apply it after 4e:
+
+```bash
+cd /home/administrator/dev && set -a && . ./.env && set +a
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli ACL SETUSER live '(%W~cmd:tools_public_math +xadd)'
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli CONFIG REWRITE
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli ACL GETUSER live
+```
+
+`ACL GETUSER` must now list **four** selectors: the Finder's, Rescue's and the
+two above. Verify with the 4c probe, adding these two lines, and expect the
+first `ALLOWED`, the second `NOPERM`, and every existing line unchanged:
+
+```python
+    ("XADD cmd:tools_public_math (allowed)", lambda: r.xadd("cmd:tools_public_math", {"probe": "1"})),
+    ("XRANGE cmd:tools_public_math", lambda: r.xrange("cmd:tools_public_math")),
+```
+
+Remove the probe entry afterwards with `XDEL` as the admin user, as in 4c.
+Without this selector a loaded chain never prices: every edit on the public
+Calculator, and every slider move on the public Simulator, fails with `NOPERM`,
+which both pages word as "The request could not be sent". As in 4c, a probe
+entry left on either stream has no `data` field, so options_svc dead-letters it
+to `<stream>:dead` on its next read, where it is harmless.
 
 **5. Carry the gitignored artifacts.** Most arrive with the snapshot in §4 —
 including `Top 20.xlsx` and the sentiment bridge — so the only hand-copy is the

@@ -126,6 +126,11 @@ name, request builder, result keys and config - `shared.symbols` +
 `shared.public_rescue` (since 2026-09-21; the public Rescue form's stream,
 request builders, field validators, result keys and config - the same import
 set, pinned by `shared/tests/test_public_rescue.py`) ·
+`shared.public_tools` (since 2026-09-21; the public Calculator and Simulator's
+two streams, request builders, validators, result keys and config - pinned by
+`shared/tests/test_public_tools.py`, and imported by `bus_client`, `live_main`
+(the tab-storage age) and the pages `public_handoff`, `calc_live` and
+`sim_live`) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
@@ -370,12 +375,12 @@ Routes:
 | `/options/paper` | Paper Ledger — ledger table + shared detail panel; open trades repriced for live unrealized P&L on the manage tick. [Detail](docs/webgui-routes.md) | built |
 | `/options/captured` | Captured Signals — newest capture first, with a day footer (opened/closed today · booked P&L · open P&L). [Detail](docs/webgui-routes.md) | built |
 | `/options/portfolio` | Paper Account (the engine’s paper account) | built |
-| `/options/calculator` | Calculator — the shared **entry panel** (ticker · strategy · expiry strip · chain grid beside the leg table) over collapsed pricing assumptions, six metric cards + the P&L matrix, in its own `[calc]` palette. **No action buttons**: a landed chain prices the legs and implies IV, and every edit re-prices after a 0.3 s debounce. ⚠ A grid click MOVES the leg on that side and type (adding one only when none matches) and prices at the MARK whichever side (Bid sells, Ask buys); each row's Bid / Mark / Ask dropdown re-prices it. **RATE MY TRADE** grades the legs with the Strategy Finder's scorer + checklist (`calc_rate` → `cache:options:calc_rating`) into BUY / CAUTION / PASS over the shared Trade detail panel. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
+| `/options/calculator` | Calculator — the shared **entry panel** (ticker · strategy · expiry strip · chain grid beside the leg table) over collapsed pricing assumptions, six metric cards + the P&L matrix, in its own `[calc]` palette. **No action buttons**: a landed chain prices the legs and implies IV, and every edit re-prices after a 0.3 s debounce. ⚠ A grid click MOVES the leg on that side and type (adding one only when none matches) and prices at the MARK whichever side (Bid sells, Ask buys); each row's Bid / Mark / Ask dropdown re-prices it. **RATE MY TRADE** grades the legs with the Strategy Finder's scorer + checklist (`calc_rate` → `cache:options:calc_rating`) into BUY / CAUTION / PASS over the shared Trade detail panel. Persists UI state across navigation. A public copy runs at `/calculator` (`calc_live`; quotes hidden while the switch is off). [Detail](docs/webgui-routes.md) | built |
 | `/options/swing` | Strategy Finder — single-symbol scan over seven build groups (directional · spreads · iron condors · straddles & strangles · butterflies & condors · calendars & diagonals · stock + options) ranked on one 0–100 Fit+Quality score, built on **every listed expiry** in the range — the whole chain by default (*All*, `dte_max: null`). ⚠ A range holding **more than 30 expirations asks first**: the service fetches no chain and answers with four `expiry_choice`s — Next 30 days · Next 90 days · Monthlies only (Schwab type `S`) · Everything — remembered per symbol while the page is open; a choice builds only its expirations, but the IV / expected move stay the whole chain's. The Income Window never asks. Sub-50 and Weak candidates are cut service-side, then only the **best 25 of each strategy type** are kept (the rest counted as `not_shown`) and the list pages 50 rows at a time server-side. A trade open through an earnings report is **flagged, not dropped**. ⚠ Paper only for the credit spreads, iron condors and `shared.structures.LEDGER_DEBIT`; straddles/strangles stay analysis only (D1). [Detail](docs/webgui-routes.md) | built |
 | `/options/income` | Income Window — the 30–45 DTE premium board (put + call credit spreads, cash-secured puts, covered calls against held lots), jointly ranked across the whole watchlist. Tier-1 reader of `cache:options:income`, published **once daily** from `[slots.income]`. ⚠ Rows are **heterogeneous** (an adapted spread carries both the flat and the normalized shape, a `SHORT_PUT` only the normalized) — read a field both carry, and read the per-CONTRACT `net_credit`, never the per-share `credit`. [Detail](docs/webgui-routes.md) | built |
 | `/options/shares` | Shares — the paper account's equity lots (put assignment converts a cash-secured put into stock at the strike). A second **reader** of `cache:options:paper_account`, not a second book. ⚠ No live equity mark exists anywhere in this app, so Mark/Unrealized are an em-dash on every row; a covering call is matched per **symbol**, not per lot. [Detail](docs/webgui-routes.md) | built |
 | `/options/gamma` | Dealer Positioning — GEX/Charm/DEX/Vanna bars + intraday heatmap, flip/walls, the Flow and Net Prem console panels, Term structure, and the Claude briefing (Analyze). [Detail](docs/webgui-routes.md) | built |
-| `/options/simulator` | Simulator — **Price & Time · Volatility · History** tabs (that order, since 2026-09-12) under the same entry panel, over ONE position shared with the Calculator (`shared_position`; no copy buttons). Its grid reads **`cache:options:sim_chain`**, published by `sim_fetch` from the SAME `/chains` call as the snapshot and written before `sim_meta`; leg strikes still come from `sim_meta`, since the engine prices only contracts in its snapshot. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
+| `/options/simulator` | Simulator — **Price & Time · Volatility · History** tabs (that order, since 2026-09-12) under the same entry panel, over ONE position shared with the Calculator (`shared_position`; no copy buttons). Its grid reads **`cache:options:sim_chain`**, published by `sim_fetch` from the SAME `/chains` call as the snapshot and written before `sim_meta`; leg strikes still come from `sim_meta`, since the engine prices only contracts in its snapshot. Persists UI state across navigation. A public copy runs at `/simulator` (`sim_live`; Price & Time only). [Detail](docs/webgui-routes.md) | built |
 | `/options/expected-move` | Expected Move — 6-month candles + a forward ATM-IV expected-move cone to expiry, with leg strike lines. ⚠ its IV and move deliberately do **not** match ThinkorSwim. [Detail](docs/webgui-routes.md) | built |
 | `/options/rescue` | Rescue — at-risk credit spreads → a ranked, commission-aware adjustment menu; execute cards apply behind a stale-price guard. Its ad-hoc form alone is also the public `/rescue` screen (see "The public live screens"). | built |
 | `/sentiment` | Sentiment — the Market Regime Console (header · Sentiment/Trend/Signals cards · regime block · footer) over two concentric Day/Week/Month rings, plus the intraday graphs. [Detail](docs/webgui-routes.md) | built |
@@ -685,7 +690,7 @@ still logs in full.
 
 ## The public live screens — a SECOND Tier-1 process
 
-`webgui/live_main.py` serves **twenty-two screens, unauthenticated, to
+`webgui/live_main.py` serves **twenty-four screens, unauthenticated, to
 anyone** on `nicegui_live` (prod :8501, dev :9501) behind `LIVE_HOST`
 (`live.neuralstrike.co`). It renders the **real page modules the app renders**, so a
 published screen cannot drift from the private one. The published set and every pin
@@ -732,15 +737,16 @@ screens refuse at the page as well: `gamma.may_enqueue(symbol, view)` gates ever
 enqueue site (a *total* proof, pinned by an AST walk over the source) **and** no
 control that reaches one is built. Both, not either.
 
-⚠ **Since 2026-09-21 the origin has exactly TWO write paths, and neither is a
+⚠ **Since 2026-09-21 the origin has exactly THREE write paths, and none is a
 hole in layer 2.** `test_bus_client.py` pins the set of writing functions to
-`request` plus the three below. The first:
+`request` plus the five public writers below. The first:
 `bus_client.request_public_scan(symbol)` puts `{"symbol": <SYMBOL>}`
 on `cmd:finder_public` for the public Strategy Finder; `request()` stays refused
 for every domain, that stream's included. The function takes one argument, runs
 it through `clean_symbol`, and chooses neither the stream nor the command type
-(an AST test pins all three). Layer 1 agrees: the `live` ACL user's only write
-is a Redis 7 selector, `(%W~cmd:finder_public +xadd)` (runbook §2 step 4c).
+(an AST test pins all three). Layer 1 agrees: the `live` ACL user writes only
+through Redis 7 selectors, one XADD-only selector per public stream - this one
+`(%W~cmd:finder_public +xadd)` (runbook §2 step 4c).
 options_svc answers on a consumer loop of its own
 (`make_app(extra_consumers=...)`, `services/options_svc/finder_public.py`), so a
 visitor's scan never queues with the owner's commands, and every refusal —
@@ -782,7 +788,39 @@ built, and every private enqueue in `rescue.py` opens with `_may_enqueue`, as
 `test_live_commands.py` requires of any published module. Blueprint:
 [`docs/plans/2026-09-21-public-rescue-adhoc-roadmap.md`](docs/plans/2026-09-21-public-rescue-adhoc-roadmap.md).
 
-⚠ **The published route set is the twenty-two screens PLUS exactly one non-page
+**The third path is the public Calculator and Simulator's** (`/calculator`,
+`/simulator`): `bus_client.request_public_tool` on `cmd:tools_public` (what
+spends Schwab calls: a chain, one more expiration, a rating, a Simulator
+snapshot) and `request_public_math` on `cmd:tools_public_math` (pricing over
+data already held: reprice, implied volatility, a what-if sweep), each read by
+its own loop in `services/options_svc/tools_public.py` behind its own ACL
+selector (runbook §2 steps 4e, 4f). ⚠ **Two streams because a snapshot fetch
+must never stall the reprice every edit triggers.** ⚠ **Redis is readable by
+the public process, so a quote written there is a quote published**:
+`public_chain` HOLDS the quoted chain in the worker's memory and writes
+`cache:options:pub_chain:<SYMBOL>` stripped to expirations and strikes, with a
+four-field quote block only while `public_scan.show_leg_quotes` is on. That one
+key per symbol is shared with Rescue's strikes list, so the three tools share
+one fetch. ⚠ **A rated row's legs are rebuilt from an ALLOW-list**
+(`tools_public.LEG_KEYS`), never a deny-list, and while quotes are off a rating
+with an unpriced option leg is refused `price_needed` - otherwise the engine
+priced it at the chain's mark and the row revealed that quote (a review caught
+exactly that). ⚠ **Derived values can still be worked back toward quotes** - the
+implied-volatility percentage, the sweep's model prices, some scores - an open
+owner decision beside D2. **One daily budget** covers Rescue, the Calculator and
+the Simulator (`public_budget`, the limit in `rescue_public.toml [budget]`); a
+`threading.Lock` suffices only because every public worker is a thread in the
+one options_svc process. The public Simulator's snapshots live in their own
+`compute.SimStore` (`tools_public.PUBLIC_SIM`), never the owner's
+`_SIM_SNAPSHOTS`, and an extension is copy-on-write. The Calculator hands its
+position to the Simulator through NiceGUI **tab storage**
+(`pages/options/public_handoff.py`): the Calculator only writes, the Simulator
+only reads, nothing outlives `handoff_keep_min`, and the private pages'
+`shared_position` / `page_state` / `app_settings` are refused because each is
+ONE store every visitor would share. Design:
+[`docs/plans/2026-09-21-public-calculator-simulator-design.md`](docs/plans/2026-09-21-public-calculator-simulator-design.md).
+
+⚠ **The published route set is the twenty-four screens PLUS exactly one non-page
 route: `/static` (2026-09-09).** Every screen now carries a slim header — the
 brand lockup, a hairline, the screen name, and **no navigation of any kind** —
 and `[brand].mark` is a file under `/static`, which this process serves from its

@@ -1,7 +1,7 @@
 # Calculator and Simulator on the public live screens: design
 
 **Date:** 2026-09-21
-**Status:** Approved (brainstormed with the owner the same day). Not built.
+**Status:** Approved (brainstormed with the owner the same day). Built 2026-09-21; not promoted.
 **Ask:** publish the Calculator and the Simulator on `live.neuralstrike.co`,
 beside the Strategy Finder and the Rescue form, linked from the site's Tools
 menu. The owner's private pages stay as they are.

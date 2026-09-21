@@ -1002,7 +1002,7 @@ Market Dashboard — **"Macro Board" visual redesign (2026-08-15, presentation-o
 
 ## Public live screens (`live.neuralstrike.co`) — 2026-09-07
 
-Twenty-two routes (fourteen from 2026-09-07; six more Dealer Positioning views, the public Strategy Finder and the public Rescue form on 2026-09-21) served by a **second NiceGUI process**,
+Twenty-four routes (fourteen from 2026-09-07; six more Dealer Positioning views, the public Strategy Finder, the public Rescue form, and the public Calculator and Simulator on 2026-09-21) served by a **second NiceGUI process**,
 `webgui/live_main.py` on `nicegui_live` (prod :8501, dev :9501), unauthenticated to
 anyone. **They render the same page modules the private routes render** — each pin is
 an optional keyword on the real `render()` — the precedent is
@@ -1039,6 +1039,8 @@ in [`plans/2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-li
 | `/term` | `options.gamma.render(symbol="$SPX", view="Term")` (`/options/gamma`) | `$SPX` · Term — the collector gathers a term grid for `$SPX` alone |
 | `/finder` | `options.swing.render(public=True)` → `options.finder_live` (`/options/swing`) | ⚠ **writes**: a visitor's Scan puts one symbol on `cmd:finder_public`; filters pinned in `config/finder_public.toml` |
 | `/rescue` | `options.rescue.render(public=True)` → `options.rescue_live` (`/options/rescue`) | ⚠ **writes**: Load and Compute put a validated strikes request or trade on `cmd:rescue_public`. The ad-hoc form only - never the owner's at-risk board. Titled "Rescue my Sh*tty trade" |
+| `/calculator` | `options.calculator.render(public=True)` → `options.calc_live` (`/options/calculator`) | ⚠ **writes**: Load, an extra expiration and Rate my trade go on `cmd:tools_public`; every price edit and the implied-volatility estimate on `cmd:tools_public_math`. While the quotes switch is off: no chain grid, no price source, no delta, and the checklist's cost-to-trade line greys out. Open in Simulator hands the position over through tab storage |
+| `/simulator` | `options.simulator.render(public=True)` → `options.sim_live` (`/options/simulator`) | ⚠ **writes**: a snapshot load goes on `cmd:tools_public`; each what-if sweep on `cmd:tools_public_math`. Price & Time only, without the Delta and Theta tiles; seeds from the Calculator's hand-off. Snapshots live in their own store, never the owner's |
 
 `BIG10` is a symbol inside the `indices` group in `config/symbols.toml`, not a group
 of its own.

@@ -2,7 +2,7 @@
 
 A visitor loads a symbol, builds a position in the leg table, and sees how its
 value moves with the underlying price and the days ahead: the what-if chart,
-the six position tiles and the readout line. Reached through
+the four position tiles (Delta and Theta are left out, below) and the readout line. Reached through
 ``simulator.render(public=True)``, which hands off here before the private page
 builds anything. Design:
 docs/plans/2026-09-21-public-calculator-simulator-design.md, section 3.

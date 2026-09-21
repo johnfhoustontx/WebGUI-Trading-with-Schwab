@@ -4,7 +4,70 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**The public Rescue form, "Rescue my Sh\*tty
+**Last updated:** 2026-09-21 (**The public Calculator and Simulator, at
+`/calculator` and `/simulator` - built, NOT promoted, their Redis permissions
+are not applied, and the snapshot and rating costs are unmeasured.**)
+
+- **What shipped.** The twenty-third and twenty-fourth public screens. The
+  **Calculator**: load a symbol, build legs on its real strikes, type each
+  leg's price, and get the six metric cards, the profit-and-loss matrix, an
+  implied-volatility estimate and **Rate my trade** (the Strategy Finder's
+  scorer and checklist, without the paper-book line). The **Simulator**: the
+  Price & Time view only, four tiles (Delta and Theta left out: the public
+  sweep carries no greeks), seeded from the Calculator through NiceGUI tab
+  storage. `calculator.render(public=True)` / `simulator.render(public=True)`
+  hand off to `pages/options/calc_live.py` / `sim_live.py` before the private
+  page builds anything; every private enqueue in both is gated.
+- **The third public write path.** `shared/public_tools.py` (streams,
+  builders, validators, keys, config in `config/tools_public.toml`, catalogued
+  in Settings → Configuration), two functions in `bus_client`
+  (`request_public_tool`, `request_public_math`), and
+  `services/options_svc/tools_public.py` reading **two streams on two loops**:
+  `cmd:tools_public` for what spends Schwab calls (chain, expiration, rating,
+  snapshot) and `cmd:tools_public_math` for pricing over data already held, so
+  a snapshot fetch never stalls a reprice.
+- **Quotes stay in the worker.** `services/options_svc/public_chain.py` holds
+  the quoted chain in memory and publishes `cache:options:pub_chain:<SYMBOL>`
+  with expirations and strikes only, plus bid, ask, mark and delta while
+  **Show per-leg bid and ask** is on. The public Simulator's snapshots live in
+  their own `compute.SimStore` (`tools_public.PUBLIC_SIM`), never the owner's,
+  and an extension is copy-on-write.
+- **Three defects the reviews caught, fixed before promoting.** (1) **Rate my
+  trade leaked quotes**: a rated row's legs were built from the chain and
+  carried each contract's mark, bid, ask, greeks, volume and open interest.
+  Legs are now rebuilt from an allow-list, the theta/vega/gamma sums are
+  never published, a rating with an unpriced option leg is refused
+  `price_needed` while quotes are off, and a rating built under the other
+  switch state is recomputed. (2) **Routes that drained the budget**: unknown
+  strategy codes made distinct cache and throttle keys for one trade (now
+  folded to CUSTOM), an expiration had no upper bound (now three years), a
+  snapshot load could repeat per symbol (now deduplicated, capped, and an
+  empty answer remembered), and a rating spent before checking its strikes
+  were listed. (3) **Stale answers painted over newer ones**: a late price,
+  rating or implied-volatility answer could replace what the visitor had
+  since changed; each now paints only for the request the page still wants.
+- **Rescue changes that ship in the same promote.** Rescue's strikes list is
+  now the shared `pub_chain` key (it was `rescue_pub_ladder`), so the three
+  tools share one Schwab fetch per symbol; and Rescue's separate daily
+  compute and strikes budgets became **one daily budget of 600** for all
+  three tools (`services/options_svc/public_budget.py`, the limit in
+  `config/rescue_public.toml [budget]`).
+- **Also:** the Calculator's Open in Simulator is drawn only where the origin
+  serves the Simulator (`shell.can_navigate`), and the site's Tools menu and
+  the live grid link both pages.
+- **Before promoting:** runbook §2 steps **4d → 4e → 4f**, in that order (4c
+  is already applied). Without 4e and 4f every public Calculator and Simulator
+  request fails with `NOPERM`; without 4d, Rescue's does.
+- **Open owner decisions.** D2, the Schwab quote terms, still decides the
+  quotes switch. **Derived values** - the implied-volatility percentage, the
+  sweep's model prices, some scores - can be worked back toward quotes even
+  with the switch off. **Spot is published regardless of the switch.** And the
+  **public Strategy Finder may put raw quotes into Redis** in its results; it
+  deserves the same allow-list audit Rate my trade got.
+
+---
+
+**Prior — 2026-09-21** (**The public Rescue form, "Rescue my Sh\*tty
 trade", at `/rescue` - built and verified in a local harness, NOT promoted, and
 its Redis permission is not applied.**)
 

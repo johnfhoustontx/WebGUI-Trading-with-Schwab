@@ -144,17 +144,18 @@ skips the sign-in, which is what the wall display uses.
 
 ## The public live screens
 
-Twenty-two of the app's screens are also published **without any sign-in** on
+Twenty-four of the app's screens are also published **without any sign-in** on
 a second address, `https://live.neuralstrike.co` — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &
 Industry, Sector Rotation, RRG, Momentum, Net Prem, the two Premium Divergence
 screens, and eight Dealer Positioning boards: Gamma for $SPX, SPY and QQQ, and
-Charm, DEX, Vanna and Term Structure for $SPX, the **Strategy Finder**, and the
-Rescue ad-hoc form, published as **Rescue my Sh\*tty trade**.
+Charm, DEX, Vanna and Term Structure for $SPX, the **Strategy Finder**, the
+Rescue ad-hoc form (published as **Rescue my Sh\*tty trade**), the
+**Calculator** and the **Simulator**.
 Each one shows the same scrolling market-summary ticker along the bottom that
 your own app does.
 
-The public Strategy Finder is the one screen a visitor can act on: they type a
+The public Strategy Finder is one of four screens a visitor can act on: they type a
 symbol and press Scan, and it ranks strategies for that symbol with one fixed
 set of filters (expirations up to 90 days, short legs between 10 and 20 delta,
 a credit of at least 10% of a spread's width). They cannot change the filters,
@@ -167,7 +168,7 @@ so the page opens on a fresh result. Every limit is in
 **Settings → Configuration → Public Strategy Finder**, and **Settings →
 General → API usage** shows how many public scans have been used today.
 
-The public Rescue form is the other screen a visitor can act on. It is the
+The public Rescue form is the second screen a visitor can act on. It is the
 **Ad-hoc Trade** tab of your own Rescue page and nothing else: your at-risk
 board is never shown there. A visitor loads a symbol, lays out a trade they
 hold elsewhere, types the price they received or paid for each leg, and
@@ -175,15 +176,47 @@ presses Compute to get the same ranked repair menu you would see. Every card
 is advisory; there is no Apply. The expiration and strike lists carry no
 prices, and the cards show each leg without its fill price unless **Show
 per-leg bid and ask** is on in the Public Strategy Finder settings. It runs
-08:40–15:00 CT on trading days, with 200 rescues and 400 symbol loads a day for
-all visitors together and 20 rescues an hour for each visitor. The same trade
+08:40–15:00 CT on trading days, within one daily budget of 600 Schwab-spending
+requests shared by all visitors of the Rescue form, the Calculator and the
+Simulator together, and 20 rescues an hour for each visitor. The same trade
 asked for again within 5 minutes shows the earlier answer, and the same
 strikes can be computed only 3 times in those 5 minutes whatever prices are
 typed. No list of visitors' requests is kept, but each answer is held for 30
-minutes. Every limit is in **Settings → Configuration → Public Rescue form**.
+minutes. Every limit is in **Settings → Configuration → Public Rescue form**,
+the shared daily budget under its **Budget** heading.
+
+The public **Calculator** is the third. A visitor loads a symbol, picks a
+strategy and an expiration, builds the legs on that symbol's real strikes and
+types the price of each leg; the page then prices the position with the same
+six metric cards and profit-and-loss matrix your own Calculator draws, and
+estimates the implied volatility. **Rate my trade** grades the legs with the
+Strategy Finder's scorer and checklist, without the paper-book line, since the
+visitor has no book here. While **Show per-leg bid and ask** is off (the
+default) the page shows no chain grid, no price source (Bid / Mark / Ask), no
+delta, and the checklist's cost-to-trade line stays grey, because each of those
+would show a quote; the visitor's own typed prices drive everything, and a
+rating with an unpriced option leg is refused until they type one. **Open in
+Simulator** carries the position across to the public Simulator in the same
+browser tab.
+
+The public **Simulator** is the fourth, and shows the **Price & Time** view
+only: the what-if chart of how the position's value moves with the underlying
+price and the days ahead, and four position tiles — Delta and Theta are left
+out, since they would publish the position's greeks. It opens on the position
+the Calculator handed over, or a visitor can load a symbol and build one.
+Nothing is kept between visits: the hand-off lives in that browser tab only,
+for up to an hour.
+
+Both run their chain loads, extra expirations, ratings and Simulator snapshots
+08:40–15:00 CT on trading days, inside the shared daily budget above, and each
+visitor may make 60 of those an hour. Pricing a loaded position spends no
+Schwab call, runs at any time and allows 600 an hour. Their limits are in
+**Settings → Configuration → Public Calculator and Simulator**; the daily
+budget is under **Public Rescue form → Budget**, because it is one allowance
+behind all three.
 
 `https://neuralstrike.co/live.html` is a thumbnail menu of them, and the site's
-**Tools** menu links the two screens a visitor can act on.
+**Tools** menu links the four screens a visitor can act on.
 
 Three things to know:
 
@@ -192,9 +225,10 @@ Three things to know:
   Anyone with the address can read them. That is a deliberate choice — the book
   is paper only — but it is worth knowing before you show someone the link.
 - **They are a separate program.** Nothing anyone does there can reach your own
-  app: it holds no login and can write only two things — a request for a public
-  Strategy Finder scan, and a request from the public Rescue form — which the
-  options service answers separately from your own work. Its
+  app: it holds no login and can write only three kinds of thing — a request
+  for a public Strategy Finder scan, a request from the public Rescue form, and
+  a request from the public Calculator or Simulator — which the options service
+  answers separately from your own work. Its
   health has its own card on **System Status**; a red one means the public site
   is down and your own screens are unaffected.
 - **To stop publishing**, use **Stop All Services** — it stops both web apps —
