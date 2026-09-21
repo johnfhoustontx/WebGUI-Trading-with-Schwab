@@ -423,3 +423,44 @@ def test_the_remove_track_fits_the_kit_icon_button():
     for grid in LE._TABLE_GRIDS.values():
         assert "_22px]" not in grid, "22px cannot hold the kit's 24px round icon"
         assert "_24px]" in grid, f"the remove track must be 24px: {grid}"
+
+
+# ── typed prices with no price source (the public Calculator, 2026-09-21) ───
+
+def test_a_price_column_with_no_source_has_no_bid_mark_ask_select():
+    ed, container = _table([_leg(premium=None)], price_for=None,
+                          price_sources=False)
+    assert _all(container, "leg-price-source") == []
+    assert len(_all(container, "leg-price")) == 1
+    head = [e.text for e in _all(container, "leg-thead")[0].descendants()
+            if isinstance(e, ui.label)]
+    assert "PRICE" in head
+
+
+def test_a_typed_price_with_no_source_is_kept_and_offers_no_reset():
+    ed, container = _table([_leg(premium=None)], price_for=None,
+                          price_sources=False)
+    _hook(container, "leg-price").value = 1.25
+    assert ed.get_legs()[0]["premium"] == 1.25
+    assert not _hook(container, "leg-price-reset").visible
+    _hook(container, "leg-strike").value = 575.0         # a move keeps what was typed
+    assert ed.get_legs()[0]["premium"] == 1.25
+    assert not _hook(container, "leg-price-reset").visible
+
+
+def test_the_typed_price_grids_keep_the_table_invariants():
+    assert len(set(LE._TABLE_GRIDS_TYPED.values())) == 2
+    for grid in LE._TABLE_GRIDS_TYPED.values():
+        for arb in re.findall(r"\[[^\]]*\]", grid):
+            assert " " not in arb, grid
+        assert "_24px]" in grid and "_50px_" not in grid, grid
+    for delta in (None, lambda leg: 0.5):
+        _, container = _table([_leg(premium=None)], price_for=None,
+                              price_sources=False, delta_for=delta)
+        head = _hook(container, "leg-thead")
+        row = _hook(container, "leg-trow")
+        grid = [c for c in head._classes if c.startswith("grid-cols-")]
+        assert grid == [c for c in row._classes if c.startswith("grid-cols-")]
+        tracks = grid[0].count("_") + 1
+        assert len(list(head.default_slot.children)) == tracks
+        assert len(list(row.default_slot.children)) == tracks

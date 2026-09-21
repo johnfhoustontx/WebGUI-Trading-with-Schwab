@@ -318,3 +318,40 @@ def test_the_panel_tokens_keep_every_encoding_and_lose_the_button_skin():
                     "muted", "spot", "ticker"):
         assert reading in EP.DEFAULT_PANEL_TOKENS, reading
     assert "btn" not in EP.DEFAULT_PANEL_TOKENS
+
+
+# ── the public Calculator's panel: no grid, stacked (2026-09-21) ────────────
+
+def test_grid_false_builds_no_chain_grid_and_no_columns_picker(saved):
+    panel, root = _panel(grid=False)
+    for cls in ("entry-grid", "entry-gridbody", "entry-columns", "entry-empty"):
+        assert _all(root, cls) == [], cls
+    # the strip still lists every expiration and the legs box is still there
+    panel.set_chain(_chain(), 575.0)
+    assert len(_all(root, "entry-expiry")) == 2
+    assert _all(root, "entry-legs")
+
+
+def test_the_default_panel_still_builds_the_grid(saved):
+    _, root = _panel()
+    for cls in ("entry-grid", "entry-gridbody", "entry-columns"):
+        assert len(_all(root, cls)) == 1, cls
+
+
+def test_stack_lets_the_legs_column_shrink_to_a_phone(saved):
+    _, root = _panel(stack=True)
+    legs = _all(root, "entry-legs")[0]
+    assert "min-w-[430px]" not in legs._classes and "min-w-0" in legs._classes
+    _, root = _panel()
+    assert "min-w-[430px]" in _all(root, "entry-legs")[0]._classes
+
+
+def test_fixed_columns_draw_only_those_and_build_no_picker(saved):
+    saved[EP.SETTINGS_KEY] = ["gamma", "openInterest", "bid", "ask"]
+    panel, root = _panel(columns=["delta", "mark", "bid", "ask"], stack=True)
+    assert _all(root, "entry-columns") == []
+    panel.set_chain(_chain(), 575.0)
+    heads = [e.text for e in _all(root, "entry-ghead")[0].descendants()
+             if isinstance(e, ui.label)]
+    assert "Gamma" not in heads and "OI" not in heads
+    assert {"Delta", "Mark", "Bid", "Ask"} <= set(heads)

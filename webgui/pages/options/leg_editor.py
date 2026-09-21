@@ -248,6 +248,13 @@ _TABLE_GRIDS = {
     (False, True): f"grid {_TABLE_HEAD}_38px_24px] {_TABLE_TAIL}",
     (False, False): f"grid {_TABLE_HEAD}_24px] {_TABLE_TAIL}",
 }
+# A typed price with no source to choose (``price_sources=False``): the PRICE
+# FROM track is dropped, not left empty - on a phone its 50px is the room the
+# three dropdowns need. Keyed on show_delta.
+_TABLE_GRIDS_TYPED = {
+    True: f"grid {_TABLE_HEAD}_minmax(0,0.9fr)_38px_24px] {_TABLE_TAIL}",
+    False: f"grid {_TABLE_HEAD}_minmax(0,0.9fr)_24px] {_TABLE_TAIL}",
+}
 
 
 def _strike_text(strike):
@@ -315,7 +322,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                      on_change=lambda: None, spot_getter=lambda: 0.0, header=False,
                      layout="row", tokens=None, delta_for=None, min_legs=1,
                      on_reset=None, allow_stock=False, price_for=None,
-                     listed_expiries_for=None, on_expiry_needed=None):
+                     listed_expiries_for=None, on_expiry_needed=None,
+                     price_sources=True):
     """Mount the editor into ``container``. Returns a handle with
     get_legs() / set_legs(legs) / apply_template(name) / is_dirty().
 
@@ -338,7 +346,12 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     the ladder is fetched - ``on_expiry_needed(expiry)`` is the page's cue to
     fetch it - and snaps onto the ladder when the page calls
     ``refresh_options``. Omit both and the dropdown lists the loaded set, as
-    before."""
+    before.
+
+    ``price_sources=False`` (table layout) is a price column the visitor TYPES
+    into and nothing fills: no Bid / Mark / Ask select and no typed-price reset,
+    since there is no quote to reset to - the public Calculator while its quotes
+    switch is off. Pass it with ``price_for=None``."""
     # A typo here would silently render the WRONG screen with nothing to see it:
     # both layouts are valid renders of the same state, so neither the page nor
     # any test would report a failure.
@@ -510,7 +523,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         leg["premium"] = value
         leg["_manual_premium"] = True
         state["dirty"] = True
-        reset_btn.set_visibility(not _is_stock(leg))
+        # No source means nothing to reset TO: the button would do nothing.
+        reset_btn.set_visibility(not _is_stock(leg) and price_sources)
         on_change()
 
     def _reset_price(i):
@@ -576,10 +590,16 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 kit.button("Reset to template", kind="quiet",
                            on_click=lambda: on_reset())
 
+    def _table_grid():
+        if show_premium and not price_sources:
+            return _TABLE_GRIDS_TYPED[delta_for is not None]
+        return _TABLE_GRIDS[(bool(show_premium), delta_for is not None)]
+
     def _table_head():
-        grid = _TABLE_GRIDS[(bool(show_premium), delta_for is not None)]
+        grid = _table_grid()
         caps = ["#", "SIDE", "QTY", "EXPIRY", "STRIKE", "TYPE"]
-        caps += ["PRICE", ""] if show_premium else []
+        if show_premium:
+            caps += ["PRICE", ""] if price_sources else ["PRICE"]
         caps += ["DELTA"] if delta_for is not None else []
         with ui.element("div").classes(f"leg-thead {grid} px-1.5"):
             for cap in caps + [""]:
@@ -588,7 +608,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     def _table_body(i, leg, exps, e_val, s_opts, s_val, _lab):
         stock = _is_stock(leg)
         short = leg.get("side") == "short"
-        grid = _TABLE_GRIDS[(bool(show_premium), delta_for is not None)]
+        grid = _table_grid()
         with ui.element("div").classes(f"leg-trow {grid} {tk['frame']} px-1.5 py-1"):
             ui.label(f"{i + 1}").classes(f"leg-num {tk['num']}")
             ui.button("SELL" if short else "BUY", color=None,
@@ -633,7 +653,9 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                       on_click=lambda e, i=i: _cycle_type(i)) \
                 .props("flat dense no-caps") \
                 .classes(f"leg-type {tk['toggle']} {tk['step']} w-full min-h-0 px-0")
-            if show_premium:
+            # Typed prices only (``price_sources=False``): no Bid / Mark / Ask
+            # select at all, and its track is gone from the grid.
+            if show_premium and price_sources:
                 src = ui.select(dict(_entry.PRICE_SOURCES),
                                 value=_entry.price_source(leg.get("_price_source"))) \
                     .props("dense options-dense").classes("leg-price-source w-full min-w-0")
@@ -642,6 +664,7 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 src.on_value_change(lambda e, i=i: _set_source(i, e.value))
                 # Shares cost spot: there is no bid/ask side to choose.
                 src.set_visibility(not stock)
+            if show_premium:
                 with ui.element("div").classes("flex items-center gap-0.5 min-w-0 no-wrap"):
                     pw = ui.number(value=leg.get("premium"), format="%.2f") \
                         .props("dense").classes("leg-price flex-1 min-w-0")
@@ -655,7 +678,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                     # on specificity and stylesheet order alone would pick the
                     # winner — the DESK_NEON_CSS trap, one property over.
                     rb.classes(replace=f"leg-price-reset {tk['manual']} min-w-0")
-                    rb.set_visibility(bool(leg.get("_manual_premium")) and not stock)
+                    rb.set_visibility(bool(leg.get("_manual_premium")) and not stock
+                                      and price_sources)
                     pw.on_value_change(lambda e, i=i, rb=rb: _set_price(i, e.value, rb))
                     if stock:
                         pw.tooltip("Price paid per share")

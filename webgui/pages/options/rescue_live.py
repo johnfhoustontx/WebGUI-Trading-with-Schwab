@@ -46,6 +46,9 @@ from pages.ui_guard import guard, guard_async
 
 from . import leg_editor
 from . import strategies as _strategies
+# The public chain's readers, shared with the public Calculator.
+from .pub_chain_view import (ladder_strikes, listed_expirations,
+                             loaded_expirations)
 from .rescue import (RESCUE_ADHOC_SUPPORTED, adhoc_spec_from_legs,
                      candidate_card_rows, render_candidate_card, summary_line)
 from .strategies import strategy_label
@@ -70,35 +73,6 @@ LOAD_PROMPT = "Load a symbol to see its expirations and strikes."
 
 LADDERS = visitor_limit.Limiter(pr.ladders_per_hour)
 COMPUTES = visitor_limit.Limiter(pr.computes_per_hour)
-
-
-# ── pure: the strikes list ───────────────────────────────────────────────────
-
-def listed_expirations(ladder) -> list:
-    """Every expiration the symbol lists."""
-    exps = (ladder or {}).get("expirations")
-    return [e for e in exps if isinstance(e, str)] if isinstance(exps, list) else []
-
-
-def loaded_expirations(ladder) -> list:
-    """The listed expirations whose strikes are here, in listing order."""
-    strikes = (ladder or {}).get("strikes")
-    strikes = strikes if isinstance(strikes, dict) else {}
-    return [e for e in listed_expirations(ladder) if e in strikes]
-
-
-def ladder_strikes(ladder, expiry, otype) -> list:
-    """Strikes for one expiration and side; the union across loaded expirations
-    when no expiration is set yet (the editor asks before a template has one)."""
-    strikes = (ladder or {}).get("strikes")
-    strikes = strikes if isinstance(strikes, dict) else {}
-    side = "put" if str(otype or "").lower() == "put" else "call"
-    if expiry:
-        return list((strikes.get(expiry) or {}).get(side) or [])
-    out = set()
-    for per in strikes.values():
-        out.update((per or {}).get(side) or [])
-    return sorted(out)
 
 
 # ── pure: what the page says ─────────────────────────────────────────────────

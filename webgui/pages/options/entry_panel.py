@@ -133,7 +133,7 @@ def saved_columns():
 
 def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=None,
                       strategy_btn_class=None, strategy_menu_class=None,
-                      today=None):
+                      today=None, grid=True, stack=False, columns=None):
     """Mount the panel at the current slot and return its handle.
 
     Handle: ``symbol_in``, ``spot_lbl``, ``status_lbl``, ``refresh_btn``,
@@ -141,10 +141,20 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
     ``legs_footer``; ``set_chain(chain, spot, expiry=None)`` → the selected
     expiry; ``selected_expiry()``; ``set_expiry(expiry)`` (programmatic — fires
     nothing); ``on_expiry(cb)`` with ``cb(expiry)``; ``on_pick(cb)`` with
-    ``cb(column, option_type, strike, expiry)``."""
+    ``cb(column, option_type, strike, expiry)``.
+
+    ``grid=False`` builds NO chain grid and no Columns picker: the public
+    Calculator while its quotes switch is off, whose published chain carries
+    strikes and no quotes. ``stack=True`` stacks the grid above the legs below
+    ``xl`` and lets the legs column shrink, for a page read on a phone.
+    ``columns`` FIXES the grid's columns and builds no Columns picker - for a
+    chain that carries only some fields, where the operator's saved choice
+    would draw columns of dashes. All three default to the private pages'
+    layout."""
     tk = panel_tokens(tokens)
     state = {"chain": None, "spot": None, "expiry": None, "expirations": None,
-             "columns": saved_columns(), "today": today}
+             "columns": (saved_columns() if columns is None
+                         else cg.parse_columns(columns)), "today": today}
     listeners = {"expiry": [], "pick": []}
 
     with ui.column().classes(f"entry-panel {tk['frame']} w-full gap-2 p-3"):
@@ -177,28 +187,44 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
         with ui.row().classes("w-full items-center gap-2 no-wrap"):
             ui.label("EXPIRY").classes(f"{tk['eyebrow']} shrink-0")
             strip = ui.row().classes("entry-strip flex-1 min-w-0 gap-1 no-wrap overflow-x-auto")
-            cols_btn = kit.button("Columns", kind="secondary", icon="view_column") \
-                .classes("entry-columns shrink-0")
-            with cols_btn:
-                col_menu = ui.menu().props("auto-close=false")
+            col_menu = None
+            if grid and columns is None:
+                cols_btn = kit.button("Columns", kind="secondary", icon="view_column") \
+                    .classes("entry-columns shrink-0")
+                with cols_btn:
+                    col_menu = ui.menu().props("auto-close=false")
 
         # ── the chain grid beside the legs ────────────────────────────────
-        with ui.row().classes("w-full items-start gap-3 no-wrap"):
-            with ui.column().classes("entry-grid flex-[1.4_1_0%] min-w-0 gap-0.5"):
-                grid_title = ui.label("CHAIN").classes(tk["eyebrow"])
-                # The header reserves the same scrollbar gutter as the body, so
-                # its columns line up with the scrolling rows under it.
-                grid_head = ui.element("div").classes(
-                    "w-full overflow-y-hidden [scrollbar-gutter:stable]")
-                grid_hint = ui.label("CALLS · click Bid to sell, Ask to buy · PUTS") \
-                    .classes(f"{tk['muted']} text-[9px] text-center w-full")
-                grid_empty = ui.label("Load a symbol to see its chain.") \
-                    .classes(f"entry-empty {tk['muted']} py-4")
-                grid_body = ui.html("").classes(
-                    f"entry-gridbody relative w-full {GRID_BODY_H} overflow-y-auto "
-                    "[scrollbar-gutter:stable]")
-                grid_body.on("click", lambda e: _on_grid_click(e), js_handler=_PICK_JS)
-            with ui.column().classes("entry-legs flex-1 min-w-[430px] gap-2"):
+        # ``stack``: the grid above the legs below ``xl``, and a legs column
+        # free to shrink - the private pages' 430px floor would push a phone's
+        # page sideways.
+        row_cls = ("w-full items-start gap-3 flex flex-col xl:flex-row"
+                   if stack else "w-full items-start gap-3 no-wrap")
+        grid_cls = ("entry-grid w-full xl:flex-[1.4_1_0%] min-w-0 gap-0.5" if stack
+                    else "entry-grid flex-[1.4_1_0%] min-w-0 gap-0.5")
+        legs_cls = ("entry-legs w-full xl:flex-1 min-w-0 gap-2" if stack
+                    else "entry-legs flex-1 min-w-[430px] gap-2")
+        grid_title = grid_head = grid_hint = grid_empty = grid_body = None
+        # A plain div when stacked: ``ui.row``'s own flex-direction would win
+        # over a Tailwind ``flex-col`` (the rescue_live layout does the same).
+        with (ui.element("div") if stack else ui.row()).classes(row_cls):
+            if grid:
+                with ui.column().classes(grid_cls):
+                    grid_title = ui.label("CHAIN").classes(tk["eyebrow"])
+                    # The header reserves the same scrollbar gutter as the body,
+                    # so its columns line up with the scrolling rows under it.
+                    grid_head = ui.element("div").classes(
+                        "w-full overflow-y-hidden [scrollbar-gutter:stable]")
+                    grid_hint = ui.label("CALLS · click Bid to sell, Ask to buy · PUTS") \
+                        .classes(f"{tk['muted']} text-[9px] text-center w-full")
+                    grid_empty = ui.label("Load a symbol to see its chain.") \
+                        .classes(f"entry-empty {tk['muted']} py-4")
+                    grid_body = ui.html("").classes(
+                        f"entry-gridbody relative w-full {GRID_BODY_H} overflow-y-auto "
+                        "[scrollbar-gutter:stable]")
+                    grid_body.on("click", lambda e: _on_grid_click(e),
+                                 js_handler=_PICK_JS)
+            with ui.column().classes(legs_cls):
                 ui.label("LEGS").classes(tk["eyebrow"])
                 legs_box = ui.column().classes("w-full min-w-0 gap-1")
                 legs_footer = ui.row().classes("w-full items-center gap-2 flex-wrap")
@@ -248,6 +274,8 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
                     .classes(remove=swap, add=tk["pill_on" if on else "pill_off"])
 
     def _paint_columns_menu():
+        if col_menu is None:
+            return
         col_menu.clear()
         with col_menu, ui.column().classes("gap-0 p-2"):
             for key, label in cg.GRID_COLUMNS.items():
@@ -265,6 +293,8 @@ def build_entry_panel(*, tokens=None, strategy_value="PCS", strategy_exclude=Non
         _paint_grid()
 
     def _paint_grid():
+        if not grid:
+            return
         chain, expiry = state["chain"], state["expiry"]
         call_cols, put_cols = side_columns(state["columns"])
         track = _GRID_TRACKS[len(put_cols)]
