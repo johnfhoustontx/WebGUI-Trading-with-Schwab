@@ -53,3 +53,324 @@ def test_market_busy_is_true_mid_session_and_false_on_a_weekend():
     ct = ZoneInfo("America/Chicago")
     assert ce.market_busy(datetime(2026, 9, 16, 10, 0, tzinfo=ct))
     assert not ce.market_busy(datetime(2026, 9, 19, 10, 0, tzinfo=ct))
+
+
+# ── Phase 6, Task 9: Configuration on the page kit ──────────────────────────
+# The render tests below drive the page the way the browser does - a control's
+# own value change, a button's own click listener, a dialog's own confirm - and
+# every one of them was proved red against the pre-migration page first.
+def _render(monkeypatch, pending=()):
+    """The Configuration tab, rendered with the shared pending set replaced.
+
+    Scoped to its OWN render: every assertion reads ``host.descendants()``, not
+    the auto-index client the whole module shares (rule 10). Dialogs are the one
+    exception - they live on the client LAYOUT - so ``_dialog_with`` takes the
+    most recent match instead."""
+    from nicegui import ui
+    monkeypatch.setattr(ce, "_PENDING", set(pending))
+    monkeypatch.setattr(ce.store, "recent_changes", lambda limit=25: [])
+    with ui.card() as host:
+        ce.render()
+    return host
+
+
+def _texts(host):
+    return [getattr(e, "text", None) for e in host.descendants()]
+
+
+def _buttons(host):
+    from nicegui import ui
+    return [b for b in host.descendants() if isinstance(b, ui.button)]
+
+
+def _named(host, text):
+    """⚠ A LIST, never a dict keyed by text: this page has two different
+    "Restart now" buttons - the banner's and the restart dialog's."""
+    return [b for b in _buttons(host) if b.text == text]
+
+
+def _fire(el, kind, args=None):
+    """Fire an element's OWN registered listeners - what the browser would send."""
+    from nicegui import helpers
+    from nicegui.events import GenericEventArguments
+    e = GenericEventArguments(sender=el, client=el.client, args=args)
+    fired = [h(e) if helpers.expects_arguments(h) else h()
+             for li in list(el._event_listeners.values())
+             for h in [li.handler]
+             if li.type.split(".")[0] == kind and h is not None]
+    assert fired, f"no {kind} listener to fire"
+
+
+def _click(host, text):
+    btn = _named(host, text)
+    assert btn, f"no {text!r} button on the page"
+    _fire(btn[-1], "click")
+    return btn[-1]
+
+
+def _dialogs():
+    from nicegui import context, ui
+    return [d for d in context.client.layout.descendants() if isinstance(d, ui.dialog)]
+
+
+def _dialog_with(confirm_text):
+    """The most recently built dialog whose confirm button says ``confirm_text``."""
+    from nicegui import ui
+    found = [d for d in _dialogs()
+             if any(isinstance(e, ui.button) and e.text == confirm_text
+                    for e in d.descendants())]
+    assert found, f"no dialog confirming with {confirm_text!r}"
+    return found[-1]
+
+
+def _dialog_body(dlg):
+    """kit.confirm's one-sentence body label (``text-sm``, under the title)."""
+    from nicegui import ui
+    found = [e for e in dlg.descendants()
+             if isinstance(e, ui.label) and "text-sm" in e.classes]
+    assert found, "the dialog has no kit.confirm body label"
+    return found[0]
+
+
+def _confirm(dlg):
+    """Run a confirm dialog's action (the test_appearance.py recipe verbatim):
+    its ``run`` is a COROUTINE function that nicegui would only DEFER here, so
+    drive the dialog's own keydown.enter listener inside a slot context."""
+    import asyncio
+    (run_,) = [li.handler for li in dlg._event_listeners.values()
+               if li.type == "keydown.enter"]
+
+    async def _drive(slot):
+        with slot:
+            await run_(None)
+
+    asyncio.run(_drive(dlg.parent_slot))
+
+
+def _said(monkeypatch):
+    """Everything the page reports, in order: ``(kind, text)``. Both spellings,
+    so a stray ``ui.notify`` is caught rather than missed."""
+    seen = []
+    monkeypatch.setattr(ce.ui, "notify",
+                        lambda msg="", **kw: seen.append((kw.get("type"), msg)))
+    monkeypatch.setattr(ce.kit, "toast", lambda kind, text: seen.append((kind, text)))
+    return seen
+
+
+_FOOTER_RE = __import__("re").compile(
+    r"^(All changes saved|\d+ unsaved change|\d+ value)")
+
+
+def _footer_status(host):
+    """The footer's one status line. ⚠ Anchored on a COUNT: the left
+    navigation's per-file chip carries an "unsaved changes" TOOLTIP, and a
+    substring match picks that up as a second footer."""
+    return [t for t in _texts(host) if t and _FOOTER_RE.match(t)]
+
+
+def _edit_a_number(host):
+    """Change one numeric setting to a value the schema accepts, the way the
+    browser's own value-change event would. Tries each number in turn and keeps
+    the first whose new value the page counts as an edit, so this does not rest
+    on which file happens to be first."""
+    from nicegui import ui
+    for n in [e for e in host.descendants() if isinstance(e, ui.number)]:
+        if not isinstance(n.value, (int, float)) or isinstance(n.value, bool):
+            continue
+        was = n.value
+        n.value = was + (n._props.get("step") or 1)
+        if _footer_status(host) == ["1 unsaved change"]:
+            return n
+        n.value = was                      # put it back and try the next one
+    raise AssertionError("no numeric setting could be edited")
+
+
+def test_the_configuration_tab_carries_the_kit_header_and_no_second_description(
+        monkeypatch):
+    """The page's own paragraph moved to page_help - the hover guide already
+    explains the tab, and the standard's header line is title + actions only."""
+    host = _render(monkeypatch)
+    texts = _texts(host)
+    assert "Configuration" in texts
+    assert not [t for t in texts
+                if t and t.startswith("Every setting the trading services read")]
+
+
+def test_the_footer_buttons_survive_an_edit(monkeypatch):
+    """They are MUTATED, never rebuilt - the appearance.py rule, and this page
+    still had the bug it was written for. A rebuild on a field's change
+    swallowed the very click that caused it: mousedown, blur, repaint, and by
+    mouseup the button the reader pressed is gone from the page."""
+    host = _render(monkeypatch)
+    before = {t: _named(host, t)[-1] for t in ("Save changes", "Discard")}
+    _edit_a_number(host)
+    for name, was in before.items():
+        assert _named(host, name)[-1] is was, f"{name} was rebuilt"
+
+
+def test_the_footer_follows_the_counts(monkeypatch):
+    host = _render(monkeypatch)
+    save = _named(host, "Save changes")[-1]
+    discard = _named(host, "Discard")[-1]
+    assert _footer_status(host) == ["All changes saved"]
+    assert save.enabled is False and discard.enabled is False
+
+    _edit_a_number(host)
+    assert _footer_status(host) == ["1 unsaved change"]
+    assert save.enabled is True and discard.enabled is True
+
+    _click(host, "Discard")
+    assert _footer_status(host) == ["All changes saved"]
+    assert save.enabled is False and discard.enabled is False
+
+
+def test_save_writes_through_config_store_and_nothing_else(monkeypatch):
+    """The ``config/local/`` write path is guarded below the page by
+    shared/tests/test_config_overrides.py::test_the_tracked_file_is_never_written.
+    This is the page-level half: Save reaches ``store.save`` with the overrides
+    it built, and the page writes no file of its own - a tracked config file
+    written from here would dirty the prod checkout, which ``tools/promote.sh``
+    refuses."""
+    import inspect
+    host = _render(monkeypatch)
+    said = _said(monkeypatch)
+    saved = []
+    monkeypatch.setattr(ce.store, "save",
+                        lambda name, over, changes=(): saved.append(
+                            (name, over, list(changes))))
+    _edit_a_number(host)
+    _click(host, "Save changes")
+    assert len(saved) == 1, saved
+    name, over, changes = saved[0]
+    assert name.endswith(".toml") and over and len(changes) == 1
+    assert said and said[-1][0] == "ok", said
+    src = inspect.getsource(ce)
+    for writer in ("write_text(", "json.dump", "mkdir("):
+        assert writer not in src, f"the page writes on its own: {writer}"
+
+
+def test_a_missing_sector_pick_is_reported_under_the_field_not_in_a_toast(
+        monkeypatch):
+    """Both fields are two inches from the button, and the standard shows
+    validation inline."""
+    from nicegui import ui
+    host = _render(monkeypatch)
+    said = _said(monkeypatch)
+    cfg = next(c for c in ce.cs.EDITABLE if c.editor == "sectors")
+    _click_nav(host, cfg.title)
+    _click(host, "Add")
+    assert said == [], f"it still reports in a toast: {said}"
+    errs = [e.error for e in host.descendants()
+            if isinstance(e, (ui.input, ui.select)) and e.error]
+    assert errs, "nothing was said under either field"
+
+
+def _click_nav(host, title):
+    """Pick a category from the left navigation, the way a click on its row
+    would."""
+    from nicegui import ui
+    rows = [e for e in host.descendants()
+            if isinstance(e, ui.row)
+            and any(getattr(c, "text", None) == title for c in e.descendants())
+            and any(li.type.split(".")[0] == "click"
+                    for li in e._event_listeners.values())]
+    assert rows, f"no navigation row for {title!r}"
+    _fire(rows[-1], "click")
+
+
+def test_a_cross_check_failure_is_one_toast_not_one_per_problem(monkeypatch):
+    """``cross_check`` returns a SENTENCE PER CLASH and sessions.toml can raise
+    nine at once - nine stacked 8-second errors competing for the same corner.
+    One error carries every one of them instead; nothing is dropped."""
+    host = _render(monkeypatch)
+    said = _said(monkeypatch)
+    monkeypatch.setattr(ce.store, "save", lambda *a, **k: None)
+    monkeypatch.setattr(ce.cs, "cross_check",
+                        lambda name, values: ["first clash.", "second clash.",
+                                              "third clash."])
+    _edit_a_number(host)
+    _click(host, "Save changes")
+    assert len(said) == 1, said
+    kind, text = said[0]
+    assert kind == "error"
+    for p in ("first clash.", "second clash.", "third clash."):
+        assert p in text
+
+
+def test_the_restart_dialog_holds_its_own_confirm_and_reports_once_per_outcome(
+        monkeypatch):
+    """"Restarting…" is gone: ``dlg.close()`` ran before it, so there was no
+    element left to spin. The dialog stays open with its confirm spinning
+    instead - which is also what stops a second click firing a second restart -
+    and the per-unit loop becomes at most two toasts, one for what came back
+    and one for what did not."""
+    from nicegui import ui
+    host = _render(monkeypatch, pending={ce.cs.OPTIONS, ce.cs.TIMERS})
+    said = _said(monkeypatch)
+    seen = {}
+    _click(host, "Restart now")                      # the banner's
+    dlg = _dialog_with("Restart now")
+    confirm = [b for b in dlg.descendants()
+               if isinstance(b, ui.button) and b.text == "Restart now"][-1]
+
+    def _restart(units):
+        seen["busy"] = confirm._props.get("loading")
+        seen["units"] = list(units)
+        return [(units[0], True, ""), (units[1], False, "unit not found")]
+
+    monkeypatch.setattr(ce, "_restart_units", _restart)
+    _confirm(dlg)
+    assert seen.get("busy") is True, "the confirm never spun"
+    assert not confirm._props.get("loading"), "the spinner was left running"
+    assert [k for k, _t in said] == ["ok", "error"], said
+    assert "unit not found" in said[-1][1]
+    assert not any("Restarting" in t and t.endswith("…") for _k, t in said)
+
+
+def test_the_reset_dialog_is_destructive_and_asks_cancel_first(monkeypatch):
+    """Reset writes ``{}`` - every override in that file goes - and it was a
+    quiet grey link beside a primary-blue confirm."""
+    from nicegui import ui
+    host = _render(monkeypatch)
+    said = _said(monkeypatch)
+    monkeypatch.setattr(ce.store, "save", lambda *a, **k: None)
+    reset = [b for b in _buttons(host) if b.text == "Reset to shipped values"]
+    assert reset, "no per-file Reset on the page"
+    assert "border" in " ".join(reset[-1].classes), "Reset is not the danger kind"
+    _fire(reset[-1], "click")
+    dlg = _dialog_with("Reset")
+    labels = [b.text for b in dlg.descendants() if isinstance(b, ui.button)]
+    assert labels == ["Cancel", "Reset"], labels
+    assert _dialog_body(dlg).text, "the destructive dialog says only its title"
+    _confirm(dlg)
+    assert said and said[-1][0] == "ok", said
+
+
+def test_the_ladder_rung_remove_button_says_what_it_does():
+    """``kit.icon_button`` requires a tooltip: an icon alone does not say what
+    it does, and this one DELETES a rung of the profit-lock ladder."""
+    from nicegui import ui
+    fld = ce.cs.Field("trail.ladders.ratchet", "Ratchet", kind="ladder")
+    with ui.card() as host:
+        ce._build_control({}, fld, [[50, 0], [75, 25]], lambda _raw: None)
+    icons = [b for b in host.descendants()
+             if isinstance(b, ui.button) and not b.text]
+    assert icons, "no remove button on a ladder rung"
+    for b in icons:
+        assert [t for t in b.descendants() if isinstance(t, ui.tooltip)], \
+            "a ladder rung's remove button has no tooltip"
+
+
+def test_the_pending_set_and_the_webgui_restart_keep_their_names():
+    """``pages/appearance.py`` reads and writes ``_PENDING`` in three places and
+    calls ``_restart_webgui()``; tests/test_appearance.py monkeypatches
+    ``_PENDING`` in four. They are a de-facto public API between the two
+    Settings tabs, so they keep their names, their module and the set type."""
+    import inspect
+
+    from pages import appearance
+    assert isinstance(ce._PENDING, set)
+    assert callable(ce._restart_webgui)
+    src = inspect.getsource(appearance)
+    assert "config_editor._PENDING" in src
+    assert "config_editor._restart_webgui()" in src

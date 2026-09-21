@@ -29,7 +29,6 @@ PAGES = pathlib.Path(__file__).resolve().parents[1] / "pages"
 KIT = "ui_kit.py"
 
 ALLOWED = {
-    "config_editor.py": {"button": 12, "dialog": 2, "notify": 10},
     # The audio player and its queue, and it stays: ``DESK_VOICE_JS`` is a
     # <script>, not a font - the same shape as options/detail.py's toggle. The
     # two FONT links (the console's display face and the page's own JetBrains

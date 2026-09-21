@@ -1368,8 +1368,11 @@ web GUI restart. **Configuration**
 holds every trading setting — scanner floors, exit rules, the driver's risk
 limits, flow alerts, market hours and schedules, symbols, the sector map and
 commissions — each with a plain-English explanation. Changes are saved as
-overrides on top of the shipped values (Reset always goes back), and **Save**
-offers to restart the services that read them.
+overrides on top of the shipped values, so **Reset to shipped values** always
+takes you back and an app update never overwrites what you set; that Reset
+clears the whole file, so it asks first. **Save** offers to restart the
+services that read them, and that dialog stays up — with its button spinning —
+until every one has answered.
 
 The General tab controls the alert chimes, notifications and the ticker.
 

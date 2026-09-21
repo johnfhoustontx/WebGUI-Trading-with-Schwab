@@ -18,6 +18,10 @@ When it takes effect
     restart). Scheduled timers are regenerated instead of restarted. Restarting
     the options service while the gamma collector runs costs collection minutes,
     so the dialog says so during market hours.
+
+⚠ ``_PENDING`` and ``_restart_webgui`` are a de-facto public API between the two
+Settings tabs: ``pages/appearance.py`` reads and writes the set in three places
+and calls the restart. They keep their names, their module and the set type.
 """
 from __future__ import annotations
 
@@ -31,16 +35,27 @@ from nicegui import run, ui
 
 import config_schema as cs
 import config_store as store
-from pages.options.theme import BTN, BTN_PRIMARY, CARD, EYEBROW, LABEL, MUTED
+from pages import ui_kit as kit
+from pages.options.theme import (BADGE_ACCENT, BADGE_MUTED, BADGE_WARN, CARD,
+                                 EYEBROW, LABEL, MUTED, THEME, TXT_NEG,
+                                 TXT_POS, TXT_WARN)
 from pages.ui_guard import guard, guard_async
 
 # Saved-but-not-yet-restarted units, shared across page loads of this process.
 _PENDING: set = set()
 
-_CHIP = "text-[11px] px-2 py-[1px] rounded-full whitespace-nowrap"
-_CHIP_UNSAVED = f"{_CHIP} bg-amber-500/20 text-amber-300"
-_CHIP_CHANGED = f"{_CHIP} bg-sky-500/20 text-sky-300"
-_ROW = "w-full items-start gap-3 py-2 border-b border-[#1d2942] last:border-b-0"
+_P = THEME["palette"]
+_CHIP = "text-[11px] px-2 py-[1px] whitespace-nowrap"
+_CHIP_UNSAVED = f"{_CHIP} {BADGE_WARN}"
+_CHIP_CHANGED = f"{_CHIP} {BADGE_ACCENT}"
+_CHIP_COUNT = f"{_CHIP} {BADGE_MUTED}"
+_ROW = (f"w-full items-start gap-3 py-2 border-b "
+        f"border-[{_P['card_border']}] last:border-b-0")
+# A unit restart is a subprocess with its own 60 s (120 s for the timers)
+# ceiling, and the dialog now waits for ALL of them - so the confirm's spinner
+# needs a backstop longer than the kit's 30 s default, or it would report
+# "finished" while systemctl is still working.
+RESTART_TIMEOUT_SEC = 300.0
 
 
 # ── pure helpers (unit-tested) ───────────────────────────────────────────────
@@ -175,28 +190,39 @@ def render():
     for f in cs.FILES:
         _load(f.name)
 
-    # ── header ──────────────────────────────────────────────────────────────
-    with ui.column().classes("w-full gap-1"):
-        ui.label("Configuration").classes(f"text-h6 {LABEL}")
-        ui.label("Every setting the trading services read from config/*.toml, in "
-                 "plain words. Your changes are saved as overrides on top of the "
-                 "shipped values, so Reset always takes you back, and updates to "
-                 "the app never overwrite them.").classes(f"text-sm {MUTED}")
+    # ── frame ───────────────────────────────────────────────────────────────
+    with kit.page() as page_col:
+        # No description line: the tab's hover guide (page_help.subtab_help)
+        # already says what this screen is for, and the header line is the
+        # title plus the page's actions.
+        kit.header("Configuration")
 
-    pending_box = ui.row().classes("w-full")
-    with ui.row().classes("w-full items-center gap-3"):
-        search = ui.input(placeholder="Search every setting — e.g. \"delta\", "
-                                      "\"take profit\", \"VIX\"") \
-            .props("dense outlined clearable").classes("w-full max-w-xl")
-        search.props('prepend-icon="search"')
+        pending_box = ui.row().classes("w-full")
+        with kit.control_bar():
+            search = kit.text_field(
+                "Search", placeholder="delta, take profit, VIX",
+                width="w-[520px] max-w-full")
+            search.props("clearable").props('prepend-icon="search"')
 
-    with ui.row().classes("w-full items-start gap-4 no-wrap"):
-        nav = ui.column().classes("w-60 shrink-0 gap-1")
-        body = ui.column().classes("grow min-w-0 gap-4")
+        with ui.row().classes("w-full items-start gap-4 no-wrap"):
+            nav = ui.column().classes("w-60 shrink-0 gap-1")
+            body = ui.column().classes("grow min-w-0 gap-4")
 
-    footer = ui.row().classes(
-        "w-full items-center gap-3 sticky bottom-0 z-10 bg-[#0c1424] "
-        "border-t border-[#213152] px-4 py-2 rounded-t-lg")
+        footer = ui.row().classes(
+            f"w-full items-center gap-3 sticky bottom-0 z-10 bg-[{_P['page_bg2']}] "
+            f"border-t border-[{_P['card_border']}] px-4 py-2 rounded-t-lg")
+        # Built ONCE and mutated (_paint_footer). Rebuilding them swallowed the
+        # click that caused a field's change: mousedown → change → repaint → the
+        # button the reader pressed no longer exists when mouseup lands. This is
+        # the bug pages/appearance.py already carries a note about, still live
+        # on this page until the kit migration.
+        with footer:
+            f_icon = ui.icon("check_circle").classes(TXT_POS)
+            f_status = ui.label("").classes(f"text-sm grow {MUTED}")
+            discard = kit.button("Discard", kind="secondary",
+                                 on_click=lambda: _discard())
+            save = kit.button("Save changes", kind="primary", icon="save",
+                              on_click=lambda: _save())
 
     # ── pending-restart banner ──────────────────────────────────────────────
     def _paint_pending():
@@ -205,14 +231,10 @@ def render():
             return
         names = ", ".join(cs.RESTART_LABELS.get(u, u) for u in sorted(_PENDING))
         with pending_box:
-            with ui.row().classes("w-full items-center gap-3 rounded-lg px-3 py-2 "
-                                  "bg-amber-500/10 border border-amber-500/30"):
-                ui.icon("restart_alt").classes("text-amber-300")
-                ui.label(f"Saved changes are waiting for a restart: {names}.") \
-                    .classes("text-sm text-amber-200 grow")
-                ui.button("Restart now", color=None,
-                          on_click=lambda: _restart_dialog(sorted(_PENDING))) \
-                    .props("no-caps dense").classes(BTN_PRIMARY)
+            with kit.notice(f"Saved changes are waiting for a restart: {names}.",
+                            icon="restart_alt"):
+                kit.button("Restart now", kind="primary", icon="restart_alt",
+                           on_click=lambda: _restart_dialog(sorted(_PENDING)))
 
     # ── field rows ──────────────────────────────────────────────────────────
     def _value(name, path):
@@ -242,18 +264,15 @@ def render():
             with box:
                 err = state["errors"].get((name, path))
                 if err:
-                    ui.label(err).classes("text-xs text-rose-300")
+                    ui.label(err).classes(f"text-xs {TXT_NEG}")
                     return
                 if path in state["edits"].get(name, {}):
                     ui.label("Unsaved").classes(_CHIP_UNSAVED)
                 if v != shipped_v:
                     ui.label(f"Shipped: {display_value(shipped_v, shipped_v, fld)}") \
                         .classes(_CHIP_CHANGED)
-                    ui.button(icon="restore", color=None,
-                              on_click=lambda: _reset_field()) \
-                        .props("flat dense round size=sm") \
-                        .classes("text-sky-300") \
-                        .tooltip("Back to the shipped value")
+                    kit.icon_button("restore", tooltip="Back to the shipped value",
+                                    on_click=lambda: _reset_field())
 
         def _changed(raw):
             try:
@@ -295,22 +314,19 @@ def render():
         f = state["files"][cfg.name]
         with ui.column().classes("w-full gap-1"):
             with ui.row().classes("items-center gap-2"):
-                ui.icon(cfg.icon).classes("text-xl text-[#8794b4]")
-                ui.label(cfg.title).classes(f"text-subtitle1 font-bold {LABEL}")
+                ui.icon(cfg.icon).classes(f"text-xl text-[{_P['icon']}]")
+                ui.label(cfg.title).classes(f"text-subtitle1 font-semibold {LABEL}")
                 ui.label(f"config/{cfg.name}").classes(f"text-xs {MUTED}")
             ui.label(cfg.summary).classes(f"text-sm {MUTED}")
             if cfg.caution:
-                with ui.row().classes("items-start gap-2 rounded-md px-3 py-2 "
-                                      "bg-amber-500/10 border border-amber-500/25"):
-                    ui.icon("warning_amber").classes("text-amber-300")
-                    ui.label(cfg.caution).classes("text-xs text-amber-100")
+                kit.notice(cfg.caution, icon="warning_amber")
             if cfg.restart:
                 ui.label("Takes effect after restarting: " + ", ".join(
                     cs.RESTART_LABELS[u] for u in cfg.restart)) \
                     .classes(f"text-xs {MUTED}")
         if not f["shipped"]:
             ui.label(f"config/{cfg.name} could not be read.").classes(
-                "text-rose-300 text-sm")
+                f"text-sm {TXT_NEG}")
             return
         if cfg.editor == "readonly":
             _paint_readonly(cfg)
@@ -329,9 +345,15 @@ def render():
                 for path, fld, label in rows:
                     _field_row(cfg, fld, path, _group_label(f, fld, path, label))
         with ui.row().classes("w-full justify-end"):
-            ui.button(f"Reset all of {cfg.title} to shipped values", icon="restore",
-                      color=None, on_click=lambda c=cfg: _confirm_reset(c)) \
-                .props("no-caps flat dense").classes("text-[#8794b4]")
+            # DESTRUCTIVE: it writes {} and every override in this file goes.
+            # It was a quiet grey link beside a primary-blue confirm.
+            # ⚠ shrink-0, and the file's name left off: a q-btn's content row
+            # WRAPS, so its min-content is one word - "Reset all of Trade
+            # selection to shipped values" measured 92px wide and 178px TALL in
+            # a 593px window, a column of stacked words. The confirm it opens
+            # still names the file, and the category's title is directly above.
+            kit.button("Reset to shipped values", kind="danger", icon="restore",
+                       on_click=lambda c=cfg: _confirm_reset(c)).classes("shrink-0")
 
     def _paint_readonly(cfg):
         f = state["files"][cfg.name]
@@ -358,32 +380,33 @@ def render():
                 counts[_value(name, p)] = counts.get(_value(name, p), 0) + 1
             with ui.row().classes("w-full gap-1 flex-wrap"):
                 for s in cs.SECTORS:
-                    ui.label(f"{s} · {counts.get(s, 0)}").classes(
-                        f"{_CHIP} bg-[#15213b] text-[#cdd8ee]")
-            with ui.row().classes("w-full items-center gap-2"):
-                flt = ui.input(placeholder="Find a symbol or a sector") \
-                    .props("dense outlined clearable").classes("w-72")
-                ui.label("·").classes(MUTED)
-                new_sym = ui.input(placeholder="New symbol").props(
-                    "dense outlined").classes("w-32")
-                new_sec = ui.select(list(cs.SECTORS), value=None,
-                                    label="Sector").props("dense outlined") \
-                    .classes("w-56")
+                    ui.label(f"{s} · {counts.get(s, 0)}").classes(_CHIP_COUNT)
 
-                def _add():
-                    sym = (new_sym.value or "").strip().upper()
-                    if not sym or not new_sec.value:
-                        ui.notify("Type a symbol and pick its sector.", type="warning")
-                        return
-                    _set(name, ("sectors", sym), new_sec.value)
-                    new_sym.value = ""
-                    flt.value = sym
-                    _paint_footer()
-                    _paint_nav()
-                    rows_box.refresh()
+            def _add():
+                """Say what is missing UNDER the field that is missing it: both
+                are two inches from this button, and the standard shows
+                validation inline rather than in a toast."""
+                sym = (new_sym.value or "").strip().upper()
+                new_sym.error = None if sym else "Type a symbol"
+                new_sec.error = None if new_sec.value else "Pick a sector"
+                if not sym or not new_sec.value:
+                    return
+                _set(name, ("sectors", sym), new_sec.value)
+                new_sym.value = ""
+                flt.value = sym
+                _paint_footer()
+                _paint_nav()
+                rows_box.refresh()
 
-                ui.button("Add", icon="add", color=None, on_click=_add) \
-                    .props("no-caps dense").classes(BTN)
+            with ui.row().classes("w-full items-end gap-3 flex-wrap"):
+                flt = kit.text_field("Find", placeholder="NVDA or Energy",
+                                     width="w-56")
+                flt.props("clearable")
+                new_sym = kit.text_field("New symbol", placeholder="NVDA",
+                                         width="w-32")
+                new_sec = kit.select_field("Sector", list(cs.SECTORS), value=None,
+                                           width="w-56")
+                kit.button("Add", kind="secondary", icon="add", on_click=_add)
 
             @ui.refreshable
             def rows_box():
@@ -426,7 +449,7 @@ def render():
                 for sec, path, fld, label in rows:
                     _field_row(cfg, fld, path, f"{sec.title} › {label}")
         if not hits:
-            ui.label(f"No setting matches “{q}”.").classes(f"text-sm {MUTED}")
+            kit.empty(f"No setting matches “{q}”.")
 
     # ── left navigation ─────────────────────────────────────────────────────
     def _paint_nav():
@@ -444,11 +467,11 @@ def render():
                                   if f["base"].get(p) != v)
                     cls = ("w-full items-center gap-2 px-3 py-2 rounded-lg "
                            "cursor-pointer no-wrap ")
-                    cls += ("bg-[#1b2950] text-[#eaf0fb]" if active
-                            else "hover:bg-[#15213b] text-[#cdd8ee]")
+                    cls += (f"bg-[{_P['btn_hover']}] text-[{_P['title']}]" if active
+                            else f"hover:bg-[{_P['btn_bg']}] text-[{_P['text']}]")
                     with ui.row().classes(cls).on(
                             "click", lambda c=cfg: _select(c.name)):
-                        ui.icon(cfg.icon).classes("text-lg text-[#8794b4]")
+                        ui.icon(cfg.icon).classes(f"text-lg text-[{_P['icon']}]")
                         ui.label(cfg.title).classes("text-sm grow")
                         if unsaved:
                             ui.label(str(unsaved)).classes(_CHIP_UNSAVED) \
@@ -488,44 +511,44 @@ def render():
                     .classes(f"text-xs {MUTED}")
 
     # ── footer: unsaved count + Save / Discard ──────────────────────────────
+    _FOOTER_CLASSES = " ".join((TXT_NEG, TXT_WARN, TXT_POS, MUTED))
+
     def _paint_footer():
-        footer.clear()
+        """MUTATE the footer - never rebuild it. See the note where it is built.
+
+        Save stays the PRIMARY kind and is disabled rather than restyled: the
+        Appearance tab's footer already works that way, and two Settings tabs
+        whose Save looks different while meaning the same thing is exactly what
+        this migration removes."""
         n = sum(len(v) for v in state["edits"].values())
         errs = len(state["errors"])
-        with footer:
-            if errs:
-                ui.icon("error_outline").classes("text-rose-300")
-                ui.label(f"{errs} value{'s' if errs != 1 else ''} to fix before "
-                         "saving").classes("text-sm text-rose-200 grow")
-            elif n:
-                ui.icon("edit_note").classes("text-amber-300")
-                ui.label(f"{n} unsaved change{'s' if n != 1 else ''}").classes(
-                    "text-sm text-amber-100 grow")
-            else:
-                ui.icon("check_circle").classes("text-emerald-300")
-                ui.label("All changes saved").classes(f"text-sm {MUTED} grow")
-            # A disabled primary button still reads as clickable in this theme
-            # (Quasar's dimming is only 0.6), so Save wears the plain secondary
-            # style until there is something to save.
-            off_discard = not (n or errs)
-            off_save = (not n) or bool(errs)
-            ui.button("Discard", color=None, on_click=_discard) \
-                .props(f"no-caps {'disable' if off_discard else ''}").classes(BTN)
-            ui.button("Save changes", icon="save", color=None, on_click=_save) \
-                .props(f"no-caps {'disable' if off_save else ''}") \
-                .classes(BTN if off_save else BTN_PRIMARY)
+        if errs:
+            icon, cls = "error_outline", TXT_NEG
+            text = f"{errs} value{'s' if errs != 1 else ''} to fix before saving"
+        elif n:
+            icon, cls = "edit_note", TXT_WARN
+            text = f"{n} unsaved change{'s' if n != 1 else ''}"
+        else:
+            icon, cls, text = "check_circle", TXT_POS, "All changes saved"
+        f_icon.name = icon
+        # a finite class set, removed then added: the repo's reactive-colour rule
+        f_icon.classes(remove=_FOOTER_CLASSES, add=cls)
+        f_status.text = text
+        f_status.classes(remove=_FOOTER_CLASSES, add=MUTED if not (n or errs) else cls)
+        discard.set_enabled(bool(n or errs))
+        save.set_enabled(bool(n) and not errs)
 
     @guard
     def _discard():
         state["edits"].clear()
         state["errors"].clear()
         _paint_all()
-        ui.notify("Unsaved changes discarded.")
+        kit.toast("info", "Unsaved changes discarded.")
 
     @guard
     def _save():
         if state["errors"]:
-            ui.notify("Fix the highlighted values first.", type="warning")
+            kit.toast("warn", "Fix the highlighted values first.")
             return
         problems = []
         for name, eds in state["edits"].items():
@@ -534,8 +557,12 @@ def render():
             f = state["files"][name]
             problems += cs.cross_check(name, {**f["values"], **eds})
         if problems:
-            for p in problems:
-                ui.notify(p, type="negative", multi_line=True)
+            # ONE error, not one per clash. cross_check returns a sentence per
+            # clash and sessions.toml can raise NINE at once - nine 8-second
+            # toasts stacked in the same corner, each hiding the one under it.
+            # Joined instead: nothing is dropped, and kit.toast turns it
+            # multi-line on its own past 80 characters.
+            kit.toast("error", " ".join(problems))
             return
         units: list = []
         saved = 0
@@ -550,7 +577,7 @@ def render():
             try:
                 store.save(name, over, changes=changes)
             except Exception as exc:  # noqa: BLE001 - shown, nothing half-written
-                ui.notify(f"Could not save {cfg.title}: {exc}", type="negative")
+                kit.toast("error", f"Could not save {cfg.title}: {exc}")
                 return
             for u in restart_targets(cfg, eds):
                 if u not in units:
@@ -560,88 +587,105 @@ def render():
         state["edits"].clear()
         _PENDING.update(units)
         _paint_all()
-        ui.notify(f"Saved {saved} change{'s' if saved != 1 else ''}.",
-                  type="positive")
+        kit.toast("ok", f"Saved {saved} change{'s' if saved != 1 else ''}.")
         if units:
             _restart_dialog(units)
 
     # ── restart dialog ──────────────────────────────────────────────────────
     def _restart_dialog(units):
-        with ui.dialog() as dlg, ui.card().classes(f"{CARD} min-w-[420px] gap-3"):
-            ui.label("Apply the changes").classes(f"text-subtitle1 font-bold {LABEL}")
-            ui.label("These read their settings when they start, so they need a "
-                     "restart:").classes(f"text-sm {MUTED}")
-            picks = {}
+        """Ask, then hold the dialog open while the restarts run.
+
+        ⚠ Built inside ``page_col`` — the page's OWN column — and ephemeral.
+        The old one was built in whatever slot the click ran under, which for
+        the banner's button is ``pending_box``, and ``_go`` called
+        ``_paint_pending()`` while it was still running: that CLEARS the box and
+        takes the dialog with it.
+
+        The wait lives on the dialog's own confirm rather than on the page,
+        because the page behind it is a list of settings with nothing to spin —
+        and a held confirm is also what stops a second click firing a second
+        restart of the same units."""
+        picks = {}
+
+        @guard_async
+        async def _go():
+            chosen = [u for u, cb in picks.items() if cb.value]
+            if not chosen:
+                return               # nothing ticked: close, and do nothing
+            kit.set_busy(dlg.confirm, timeout=RESTART_TIMEOUT_SEC)
+            try:
+                results = await run.io_bound(_restart_units, chosen)
+            finally:
+                kit.set_busy(dlg.confirm, False)
+            # At most TWO toasts, never one per unit: three units failing used
+            # to mean three 8-second errors stacked on each other. The unit
+            # names and the failure text are all still here.
+            done, failed = [], []
+            for u, ok, msg in results:
+                label = cs.RESTART_LABELS.get(u, u)
+                if ok:
+                    _PENDING.discard(u)
+                    done.append(label)
+                else:
+                    failed.append(f"{label} — {msg}" if msg else label)
+            if done:
+                kit.toast("ok", "Restarted: " + ", ".join(done) + ".")
+            if failed:
+                kit.toast("error", "Could not restart: " + "; ".join(failed))
+            _paint_pending()
+            if cs.WEBGUI in chosen:
+                _PENDING.discard(cs.WEBGUI)
+                kit.toast("warn", "Restarting the web app — this page reloads in "
+                                  "a few seconds.")
+                _restart_webgui()
+
+        with page_col:
+            dlg = kit.confirm(
+                "Apply the changes?",
+                "These read their settings when they start, so they need a "
+                "restart.", confirm_text="Restart now", on_confirm=_go,
+                ephemeral=True)
+        with dlg.content:
             for u in units:
                 picks[u] = ui.checkbox(cs.RESTART_LABELS.get(u, u), value=True)
             if market_busy() and any(u != cs.TIMERS for u in units):
-                with ui.row().classes("items-start gap-2 rounded-md px-3 py-2 "
-                                      "bg-amber-500/10 border border-amber-500/25"):
-                    ui.icon("warning_amber").classes("text-amber-300")
-                    ui.label("The market is open. Restarting the options service "
-                             "now loses a minute or two of gamma collection; after "
-                             "the close is safer.").classes("text-xs text-amber-100")
-            with ui.row().classes("w-full justify-end gap-2"):
-                ui.button("Later", color=None, on_click=dlg.close) \
-                    .props("no-caps").classes(BTN)
-
-                @guard_async
-                async def _go():
-                    chosen = [u for u, cb in picks.items() if cb.value]
-                    dlg.close()
-                    if not chosen:
-                        return
-                    ui.notify("Restarting…")
-                    results = await run.io_bound(_restart_units, chosen)
-                    for u, ok, msg in results:
-                        if ok:
-                            _PENDING.discard(u)
-                        ui.notify(f"{cs.RESTART_LABELS.get(u, u)}: "
-                                  f"{'done' if ok else 'failed — ' + msg}",
-                                  type="positive" if ok else "negative",
-                                  multi_line=True)
-                    _paint_pending()
-                    if cs.WEBGUI in chosen:
-                        _PENDING.discard(cs.WEBGUI)
-                        ui.notify("Restarting the web app — this page reloads in "
-                                  "a few seconds.", type="warning")
-                        _restart_webgui()
-
-                ui.button("Restart now", icon="restart_alt", color=None,
-                          on_click=_go).props("no-caps").classes(BTN_PRIMARY)
+                kit.notice("The market is open. Restarting the options service "
+                           "now loses a minute or two of gamma collection; "
+                           "after the close is safer.", icon="warning_amber")
         dlg.open()
 
     def _confirm_reset(cfg):
-        with ui.dialog() as dlg, ui.card().classes(f"{CARD} gap-3"):
-            ui.label(f"Put every {cfg.title} setting back to its shipped value?") \
-                .classes(LABEL)
-            with ui.row().classes("w-full justify-end gap-2"):
-                ui.button("Cancel", color=None, on_click=dlg.close) \
-                    .props("no-caps").classes(BTN)
+        @guard
+        def _do():
+            f = state["files"][cfg.name]
+            changed = [p for p, v in f["values"].items()
+                       if f["base"].get(p) != v]
+            try:
+                store.save(cfg.name, {}, changes=[
+                    (" › ".join(p), f["values"].get(p), f["base"].get(p))
+                    for p in changed])
+            except Exception as exc:  # noqa: BLE001 - shown; the override stands
+                kit.toast("error", f"Could not reset {cfg.title}: {exc}")
+                return
+            state["edits"].pop(cfg.name, None)
+            for k in [k for k in state["errors"] if k[0] == cfg.name]:
+                state["errors"].pop(k)
+            _load(cfg.name)
+            units = restart_targets(cfg, changed) if changed else []
+            _PENDING.update(units)
+            _paint_all()
+            kit.toast("ok", f"{cfg.title} is back to the shipped values.")
+            if units:
+                _restart_dialog(units)
 
-                @guard
-                def _do():
-                    dlg.close()
-                    f = state["files"][cfg.name]
-                    changed = [p for p, v in f["values"].items()
-                               if f["base"].get(p) != v]
-                    store.save(cfg.name, {}, changes=[
-                        (" › ".join(p), f["values"].get(p), f["base"].get(p))
-                        for p in changed])
-                    state["edits"].pop(cfg.name, None)
-                    for k in [k for k in state["errors"] if k[0] == cfg.name]:
-                        state["errors"].pop(k)
-                    _load(cfg.name)
-                    units = restart_targets(cfg, changed) if changed else []
-                    _PENDING.update(units)
-                    _paint_all()
-                    ui.notify(f"{cfg.title} is back to the shipped values.",
-                              type="positive")
-                    if units:
-                        _restart_dialog(units)
-
-                ui.button("Reset", color=None, on_click=_do) \
-                    .props("no-caps").classes(BTN_PRIMARY)
+        # Ephemeral and in the page's own column, for the reason _restart_dialog
+        # records: _do repaints the very containers this used to be built in.
+        with page_col:
+            dlg = kit.confirm(
+                f"Put every {cfg.title} setting back to its shipped value?",
+                "Every override you saved for this file is removed. It takes "
+                "effect when the services that read it restart.",
+                confirm_text="Reset", danger=True, on_confirm=_do, ephemeral=True)
         dlg.open()
 
     def _paint_all():
@@ -669,7 +713,14 @@ def _apply_to_control(control, fld, value):
 
 
 def _build_control(control, fld, value, on_change, *, optional=False):
-    """One editor widget for ``fld``; ``on_change(raw)`` receives the typed value."""
+    """One editor widget for ``fld``; ``on_change(raw)`` receives the typed value.
+
+    ⚠ Deliberately NOT moved onto the kit's field builders. Its row layout is
+    the page's own - a fixed label column, a growing control, a status column -
+    and its numbers keep ``min``/``max`` OFF the widget so ``config_schema.parse``
+    can say WHY a value is refused instead of Quasar silently clamping it. Only
+    the two BUTTONS in the ladder editor go through the kit, because an icon
+    with no tooltip does not say what it does - and that one deletes a rung."""
     shown = cs.to_display(fld, value)
     k = fld.kind
     num_props = "dense outlined"
@@ -780,14 +831,13 @@ def _build_control(control, fld, value, on_change, *, optional=False):
                             rungs.pop(i)
                             _paint()
                             _emit()
-                        ui.button(icon="close", color=None, on_click=_rm) \
-                            .props("flat dense round size=sm").classes("text-[#8794b4]")
-                ui.button("Add a rung", icon="add", color=None,
-                          on_click=lambda: (rungs.append(
-                              [(rungs[-1][0] + 10) if rungs else 50,
-                               (rungs[-1][1] + 10) if rungs else 0]),
-                              _paint(), _emit())) \
-                    .props("flat dense no-caps").classes("text-[#8794b4]")
+                        kit.icon_button("close", tooltip="Remove this rung",
+                                        on_click=_rm)
+                kit.button("Add a rung", kind="quiet", icon="add",
+                           on_click=lambda: (rungs.append(
+                               [(rungs[-1][0] + 10) if rungs else 50,
+                                (rungs[-1][1] + 10) if rungs else 0]),
+                               _paint(), _emit()))
 
         def _set_ladder(v):
             rungs[:] = [list(r) for r in (v or [])]
