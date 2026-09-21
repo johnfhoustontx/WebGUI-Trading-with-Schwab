@@ -314,7 +314,8 @@ def delta_text(delta):
 def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                      on_change=lambda: None, spot_getter=lambda: 0.0, header=False,
                      layout="row", tokens=None, delta_for=None, min_legs=1,
-                     on_reset=None, allow_stock=False, price_for=None):
+                     on_reset=None, allow_stock=False, price_for=None,
+                     listed_expiries_for=None, on_expiry_needed=None):
     """Mount the editor into ``container``. Returns a handle with
     get_legs() / set_legs(legs) / apply_template(name) / is_dirty().
 
@@ -329,7 +330,15 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
     ``min_legs`` floors the remove button and ``on_reset`` adds a "Reset to
     template" button beside "Add leg". The handle gains ``place_pick`` and
     ``refill_prices`` for the page's grid clicks and chain loads. All of these
-    are inert in row mode."""
+    are inert in row mode.
+
+    ``listed_expiries_for()`` widens every leg's Expiry dropdown to the symbol's
+    WHOLE expiration list, where ``expiries_for()`` is only the expirations whose
+    strikes are loaded. A leg picked onto an unloaded one keeps its strike while
+    the ladder is fetched - ``on_expiry_needed(expiry)`` is the page's cue to
+    fetch it - and snaps onto the ladder when the page calls
+    ``refresh_options``. Omit both and the dropdown lists the loaded set, as
+    before."""
     # A typo here would silently render the WRONG screen with nothing to see it:
     # both layouts are valid renders of the same state, so neither the page nor
     # any test would report a failure.
@@ -346,6 +355,9 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
         leg = state["legs"][i]
         leg[field] = value
         state["dirty"] = True
+        pending = field == "expiry" and _awaiting_ladder(value)
+        if pending and on_expiry_needed is not None:
+            on_expiry_needed(value)
         if table:
             if field in ("option_type", "expiry"):
                 _snap_strike(leg)
@@ -353,9 +365,18 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 _refill(leg)
             if field in ("side", "strike", "expiry", "option_type"):
                 _render()
+        elif pending:
+            # No ladder to sync against yet: _render keeps the strike on screen
+            # until the page's refresh_options brings one.
+            _render()
         elif field in ("option_type", "expiry"):
             _sync_row_strikes(i)
         on_change()
+
+    def _awaiting_ladder(expiry):
+        """A listed expiry whose strikes have not arrived yet."""
+        return (listed_expiries_for is not None and expiry is not None
+                and expiry not in (expiries_for() or []))
 
     def _refill(leg):
         """Price ``leg`` off the chain at its chosen source. A share leg, a typed
@@ -646,7 +667,8 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
 
     def _render():
         container.clear()
-        exps = expiries_for() or []
+        exps = ((listed_expiries_for() if listed_expiries_for is not None
+                 else None) or expiries_for() or [])
         # ``header`` mode (row layout): the field labels move to a single header
         # row and each leg renders label-less inputs — a clean table. Default off.
         # The table layout carries its own header, so ``header`` is inert there.
@@ -683,6 +705,11 @@ def build_leg_editor(container, *, strikes_for, expiries_for, show_premium,
                 e_val = None if _is_stock(leg) else coerce_choice(leg.get("expiry"), exps)
                 leg["expiry"] = e_val
                 s_opts = strikes_for(e_val, leg.get("option_type")) or []
+                if (not s_opts and _awaiting_ladder(e_val)
+                        and leg.get("strike") is not None):
+                    # Its ladder is still loading: keep the strike the user
+                    # had, as the select's one option, rather than clear it.
+                    s_opts = [leg["strike"]]
                 s_val = coerce_strike(leg.get("strike"), s_opts)
                 leg["strike"] = s_val
                 sw = body(i, leg, exps, e_val, s_opts, s_val, lab)

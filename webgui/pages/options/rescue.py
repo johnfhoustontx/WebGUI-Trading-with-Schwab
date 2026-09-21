@@ -951,10 +951,23 @@ def render():
         falls back to the old fixed-window chain, which lists nothing)."""
         return list(adhoc.get("expirations") or _adhoc_expiries_for())
 
+    def _adhoc_fetch_leg_expiry(expiry):
+        """One leg was picked onto an expiry whose strikes are not here. Fetch
+        them; the leg keeps its strike meanwhile and snaps onto the ladder in
+        ``_adhoc_merge_chain``. Only that leg moves - the top dropdown's pick
+        moves them all."""
+        bus_client.request("options", {"type": "calc_load_expiry", "args": {
+            "symbol": adhoc.get("chain_symbol") or _adhoc_sym(),
+            "expiry": expiry}})
+        adhoc_status.text = f"Loading strikes for {expiry}…"
+
     adhoc_editor = leg_editor.build_leg_editor(
         adhoc_leg_box, strikes_for=_adhoc_strikes_for, expiries_for=_adhoc_expiries_for,
         show_premium=True, header=True,
-        spot_getter=lambda: float(adhoc.get("spot") or 0.0))
+        spot_getter=lambda: float(adhoc.get("spot") or 0.0),
+        # Every leg's dropdown lists every expiration, as the top one does.
+        listed_expiries_for=_adhoc_listed_expiries,
+        on_expiry_needed=_adhoc_fetch_leg_expiry)
 
     def _adhoc_scale_qty(factor):
         """Multiply every leg's qty by ``factor`` (ratio-preserving), like the
@@ -1051,6 +1064,18 @@ def render():
             _adhoc_set_expiry(on or (loaded[0] if loaded else None))
             adhoc_editor.refresh_options()
             adhoc_status.text = f"Could not load strikes for {move}."
+            return
+        added = cc.get("added")
+        if added and cc.get("failed"):
+            # A single leg's pick whose ladder is never coming: back onto an
+            # expiry that has one, before its placeholder strike is priced.
+            legs = adhoc_editor.get_legs()
+            if loaded and any(leg.get("expiry") == added for leg in legs):
+                for leg in legs:
+                    if leg.get("expiry") == added:
+                        leg["expiry"] = loaded[0]
+                adhoc_editor.set_legs(legs)
+            adhoc_status.text = f"Could not load strikes for {added}."
             return
         if move and move in loaded:
             adhoc["pending_move"] = None

@@ -333,3 +333,80 @@ def test_applying_a_chain_does_not_refetch_the_expiry_it_selects(page, sent):
     bus_client.bus().cache_set("cache:options:calc_chain", _lazy_payload())
     _drive(root, poll)
     assert not [c for c in sent if c["type"] == "calc_load_expiry"]
+
+
+# ── a LEG's own expiry dropdown ─────────────────────────────────────────────
+
+def _leg_expiry_selects(root):
+    """Every leg row's Expiry select: the selects holding expiry dates, less the
+    form's top dropdown."""
+    top = _expiry_select(root)
+
+    def ordered(el):                 # document order, so index i is leg i
+        yield el
+        for slot in getattr(el, "slots", {}).values():
+            for child in slot.children:
+                yield from ordered(child)
+    return [el for el in ordered(root)
+            if isinstance(el, ui.select) and el is not top
+            and _NEAR in list(el.options)]
+
+
+def _set_leg_expiry(root, index, value):
+    with root:
+        _leg_expiry_selects(root)[index].value = value
+
+
+def test_each_leg_expiry_dropdown_offers_every_listed_expiration(page):
+    root, poll = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _lazy_payload())
+    _drive(root, poll)
+    selects = _leg_expiry_selects(root)
+    assert selects, "no leg expiry dropdowns found"
+    for sel in selects:
+        assert list(sel.options) == _LISTED, (
+            "a leg's dropdown shows only the expiries whose strikes arrived")
+
+
+def test_an_unloaded_leg_pick_is_fetched_and_the_leg_lands_on_its_ladder(page, sent):
+    root, poll = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _lazy_payload())
+    _drive(root, poll)
+    before = _editor(root).get_legs()
+    _set_leg_expiry(root, 0, _FAR)
+
+    req = [c for c in sent if c["type"] == "calc_load_expiry"]
+    assert req and req[-1]["args"] == {"symbol": "SPY", "expiry": _FAR}
+    legs = _editor(root).get_legs()
+    assert legs[0]["expiry"] == _FAR, "the pick snapped back to a loaded expiry"
+    assert legs[0]["strike"] == before[0]["strike"], (
+        "the leg's strike was wiped while its ladder was loading")
+    assert [l["expiry"] for l in legs[1:]] == [l["expiry"] for l in before[1:]], (
+        "a single leg's pick moved the other legs")
+
+    bus_client.bus().cache_set("cache:options:calc_chain", _merged_far())
+    _drive(root, poll)
+    legs = _editor(root).get_legs()
+    assert legs[0]["expiry"] == _FAR
+    assert legs[0]["strike"] in _STRIKES
+
+
+def test_a_loaded_leg_pick_fetches_nothing(page, sent):
+    root, poll = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _lazy_payload())
+    _drive(root, poll)
+    sent.clear()
+    _set_leg_expiry(root, 0, _MID)
+    assert not [c for c in sent if c["type"] == "calc_load_expiry"]
+    assert _editor(root).get_legs()[0]["expiry"] == _MID
+
+
+def test_a_failed_leg_fetch_puts_the_leg_back_on_a_loaded_expiry(page):
+    root, poll = page
+    bus_client.bus().cache_set("cache:options:calc_chain", _lazy_payload())
+    _drive(root, poll)
+    _set_leg_expiry(root, 0, _FAR)
+    bus_client.bus().cache_set("cache:options:calc_chain", _merged_far(failed=True))
+    _drive(root, poll)
+    assert f"Could not load strikes for {_FAR}" in _joined(root)
+    assert _editor(root).get_legs()[0]["expiry"] in (_NEAR, _MID)
