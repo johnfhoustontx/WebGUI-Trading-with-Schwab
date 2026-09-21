@@ -1,11 +1,12 @@
 """Shared **dark-navy "dashboard" theme** for the app pages (Tier-1).
 
 The theme is expressed as **Tailwind design tokens** (reusable ``.classes()``
-utility strings encoding the palette) plus a slim **``QUASAR_INTERNAL_CSS``**
+utility strings encoding the palette) plus a slim **``APP_FIELD_CSS``**
 escape-hatch for the Quasar/Highcharts-internal DOM that component ``.classes()``
 strings can't reach (the boxed ``q-field`` control, the leg-table cells, the
-``q-tab`` chrome, and the body-mounted ``.strat-menu-navy`` popup), scoped under
-the historical ``.calc-v2`` scope hook.
+``q-tab`` chrome, and the body-mounted ``.strat-menu-navy`` popup). Both
+entrypoints inject it once, under the ``ns-app`` content column, so **no page
+adds a scope class or an ``add_css`` of its own**.
 
 **Every color comes from ``config/theme.toml``** (``repo_paths.THEME_TOML``) —
 edit that file + restart the webgui to restyle the app WITHOUT touching code.
@@ -15,19 +16,18 @@ gauge (``pages/gauge.py``) and the Sentiment/Rotation chart palette
 (``pages/sentiment.py``) read the same ``THEME`` dict, so the whole look moves
 together.
 
-Apply to a ``.calc-v2`` page (a NEW page builds from ``pages/ui_kit.py`` instead,
-and needs no scope class for boxed fields)::
+Apply the tokens directly (a NEW page builds its controls from
+``pages/ui_kit.py``, which wraps all of this)::
 
-    from pages.options.theme import QUASAR_INTERNAL_CSS, PAGE, CARD, EYEBROW, BTN_PRIMARY
-    ui.add_css(QUASAR_INTERNAL_CSS)
-    with ui.column().classes(f"calc-v2 {PAGE} w-full gap-4"):   # .calc-v2 = scope hook
+    from pages.options.theme import PAGE, CARD, EYEBROW, LABEL, BTN_PRIMARY
+    with ui.column().classes(f"{PAGE} w-full gap-4"):
         ui.label("Title").classes(f"text-h6 {LABEL}")
         with ui.column().classes(f"{CARD} w-full gap-3"):       # bordered navy panel
             ui.input("Symbol")                                   # auto-boxed (q-field)
             ui.button("Go", color=None).props("no-caps").classes(BTN_PRIMARY)
 
-Inputs / selects / tabs inside ``.calc-v2`` are auto-restyled by
-``QUASAR_INTERNAL_CSS``; **buttons need ``color=None``** (drops Quasar's
+Inputs / selects / tabs are auto-restyled app-wide by
+``APP_FIELD_CSS``; **buttons need ``color=None``** (drops Quasar's
 ``bg-primary``) + a ``BTN`` / ``BTN_PRIMARY`` token. Token vocabulary: ``PAGE``
 (navy gradient page wrap), ``CARD`` (bordered navy panel), ``EYEBROW`` (muted
 label), ``LABEL`` / ``MUTED`` (text), ``BTN`` / ``BTN_PRIMARY`` (buttons),
@@ -35,13 +35,18 @@ label), ``LABEL`` / ``MUTED`` (text), ``BTN`` / ``BTN_PRIMARY`` (buttons),
 ``strategy-menu-btn`` scope hook via ``strategy_menu.build_strategy_menu(
 boxed=True)``), ``TXT_*`` (semantic state text colors), ``BTN_QUIET`` (text-only),
 ``BTN_3D*`` (legacy aliases), ``TILE_3D`` (metric tiles). The CSS-only hooks
-``QUASAR_INTERNAL_CSS`` styles: ``.calc-v2`` (scope), ``.strat-menu-navy`` (the
-teleported Strategy popup — GLOBAL, mounts on ``<body>`` outside ``.calc-v2``),
-``.leg-head`` / ``.leg-row`` / ``.leg-strike`` (leg-table chrome). The **full
-palette reference** lives in ``config/theme.toml`` (every knob, commented) and
-the root ``CLAUDE.md`` "App theme — dark-navy 'dashboard'" section. Since
-2026-09-19 pages build their controls through ``pages/ui_kit.py``, and the
-boxed-field rules also ship app-wide as ``APP_FIELD_CSS`` under ``.ns-app``.
+``APP_FIELD_CSS`` styles: ``.strat-menu-navy`` (the teleported Strategy popup —
+GLOBAL, since it mounts on ``<body>`` outside the scope) and ``.leg-head`` /
+``.leg-row`` / ``.leg-strike`` (leg-table chrome). The **full palette
+reference** lives in ``config/theme.toml`` (every knob, commented) and the root
+``CLAUDE.md`` "App theme — dark-navy 'dashboard'" section.
+
+⚠ ``QUASAR_INTERNAL_CSS`` — the same block under a ``.calc-v2`` scope, injected
+a second time by the three pages that wrapped themselves in that class — went
+on 2026-09-20 with the last of those pages (``pages/trade.py``'s unrouted
+``render``). ``build_quasar_css``'s ``scope`` has no default any more for the
+same reason: the one it had named an element the app no longer builds, so a
+forgotten argument would have produced a block matching nothing at all.
 """
 import pathlib
 import sys
@@ -387,14 +392,19 @@ def build_tokens(theme):
     }
 
 
-def build_quasar_css(theme, scope=".calc-v2"):
+def build_quasar_css(theme, *, scope):
     """The Quasar-internal / teleported escape-hatch CSS from a theme dict.
 
     These rules style the Quasar-internal DOM that component ``.classes()``
     strings can't reach: the boxed q-field control (incl. the leg-table
     variants), the q-tab chrome, and the body-mounted ``.strat-menu-navy``
-    popup. Scoped under ``scope`` (``.calc-v2`` for the pages that still wrap
-    themselves; ``.ns-app`` app-wide)."""
+    popup.
+
+    ⚠ ``scope`` is REQUIRED. It defaulted to ``.calc-v2`` while three pages
+    wrapped themselves in that class; none does since 2026-09-20, so a default
+    would hand a forgetful caller a block whose every scoped rule matches
+    nothing — a failure with no symptom. Today the one caller is
+    ``APP_FIELD_CSS`` at ``.ns-app``, which both entrypoints inject."""
     p = theme["palette"]
     focus_rgb = hex_rgb(p["focus"], (59, 130, 246))
     return f"""
@@ -1114,9 +1124,10 @@ BADGE_NEG = _TOKENS["BADGE_NEG"]
 BADGE_ACCENT = _TOKENS["BADGE_ACCENT"]
 BADGE_MUTED = _TOKENS["BADGE_MUTED"]
 
-QUASAR_INTERNAL_CSS = build_quasar_css(THEME)
 # The same rules for EVERY page: both entrypoints put ``ns-app`` on their content
-# column and inject this, so a page no longer needs a scope class of its own.
+# column and inject this, so a page needs neither a scope class nor an add_css of
+# its own. (``QUASAR_INTERNAL_CSS`` was this block again under ``.calc-v2``; it
+# went with that scope's last element on 2026-09-20.)
 APP_FIELD_CSS = build_quasar_css(THEME, scope=".ns-app")
 SURFACE_CSS = build_surface_css(THEME)       # injected by BOTH entrypoints
 QUASAR_COLORS = build_quasar_colors(THEME)   # ui.colors(**QUASAR_COLORS) in both

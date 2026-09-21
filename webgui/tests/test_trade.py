@@ -1,9 +1,15 @@
-"""Tests for the Trade page pure display builders + render API.
+"""Tests for the Trade family's pure display builders.
 
-The engine orchestration lives in ``services/trade_svc/compute``; this page is a
-Tier-3 reader, so only its pure transforms (verdict coloring, momentum/breakdown/
-alignment rows) and the ``render`` callable are exercised here.
+The engine orchestration lives in ``services/trade_svc/compute``; ``pages/trade``
+is now a LIBRARY of pure transforms (verdict colouring, momentum/breakdown/
+alignment rows, the swing-model lines, the plan and dealer rows) read by the four
+Signal Desk screens. Its own ``render`` — which nothing ever routed — was deleted
+on 2026-09-20; see ``TestTheModuleIsPureNow``.
 """
+import inspect
+
+import pytest
+
 from pages import trade
 
 
@@ -101,8 +107,73 @@ def test_fundamentals_rows_empty():
     assert trade.fundamentals_rows(None) == []
 
 
-def test_render_is_callable():
-    assert callable(trade.render)
+class TestTheModuleIsPureNow:
+    """``render`` is DELETED (2026-09-20). Nothing routed it: ``main.py`` sends
+    ``/trade`` to ``trade_overview``, and the only reference to ``trade.render``
+    anywhere in the repo was the ``assert callable(trade.render)`` that used to
+    stand here. What the module is FOR is its pure helpers, and those are live —
+    sixteen names across five siblings, every one used at least twice."""
+
+    IMPORTED_BY_SIBLINGS = (
+        # trade_shell
+        "should_open_tab",
+        # trade_terminal
+        "humanize_factor",
+        # trade_overview
+        "dealer_rows", "gate_rows", "short_gate_rows", "swing_headline",
+        "verdict_text_class",
+        # trade_evidence
+        "live_ic_decay_note", "live_ic_line", "live_ic_split_line",
+        "model_staleness", "swing_exposure_note", "swing_model_meta",
+        "swing_regime_note",
+        # trade_plan_screen
+        "plan_headline", "plan_rows",
+    )
+
+    def test_the_unrouted_render_is_gone(self):
+        assert not hasattr(trade, "render"), \
+            "pages/trade.py renders again — nothing routes it"
+        for name in ("_BREAKDOWN_COLS", "_SWING_COLS"):
+            assert not hasattr(trade, name), f"{name} was render's alone"
+
+    def test_the_route_that_would_have_reached_it_goes_to_the_overview(self):
+        """Non-vacuity: the delete is only safe while ``/trade`` is somebody
+        else's. If the route came back to this module the assertion above would
+        be forbidding the very thing the app needed."""
+        import pathlib
+        src = (pathlib.Path(__file__).resolve().parents[1]
+               / "main.py").read_text(encoding="utf-8")
+        i = src.index('@_page("/trade")')
+        assert "trade_overview" in src[i:i + 320]
+        assert "trade.render" not in src
+
+    @pytest.mark.parametrize("name", IMPORTED_BY_SIBLINGS)
+    def test_every_name_a_sibling_imports_survives(self, name):
+        assert callable(getattr(trade, name))
+
+    def test_the_module_builds_nothing(self):
+        """No widget, no bus, no CSS: the render-only imports go with it, and
+        that is what makes this a pure module rather than a page with its
+        render commented out. Read by AST, not by grep — the farewell comment
+        at the foot of the file NAMES the things it retired, and a text search
+        cannot tell a name from a mention."""
+        import ast
+        tree = ast.parse(inspect.getsource(trade))
+        imported = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(a.name for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                imported.add(f"{'.' * node.level}{node.module or ''}")
+                imported.update(a.name for a in node.names)
+        # ``pages.fmt`` (the app's numeric vocabulary) and ``model_staleness``'s
+        # function-local ``datetime``. Nothing else: no nicegui, no bus, no
+        # theme, no busy.
+        assert imported == {"pages", "fmt", "datetime"}, sorted(imported)
+        used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+        for gone in ("ui", "bus_client", "_busy", "time",
+                     "select_all_on_focus", "QUASAR_INTERNAL_CSS", "guard"):
+            assert gone not in used, f"trade.py still uses {gone!r}"
 
 
 def test_seed_symbol():

@@ -1,4 +1,8 @@
 """Guard tests for the Tailwind design-token vocabulary (Phase 0)."""
+import pathlib
+
+import pytest
+
 from pages.options import theme
 
 TOKENS = ["PAGE", "CARD", "EYEBROW", "LABEL", "MUTED", "BTN", "BTN_PRIMARY", "STRATEGY_BTN"]
@@ -27,16 +31,60 @@ def test_card_token_encodes_navy_palette():
     assert "#101a30" in card and "#213152" in card
 
 
+def _code_strings(path):
+    """Every string CONSTANT in a module except its docstrings. PURE.
+
+    A class name reaches the DOM through ``.classes("…")``, i.e. a string
+    constant; a comment or a docstring recording that a class retired reaches
+    nothing. Grepping the source text cannot tell the two apart."""
+    import ast
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    docs = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                             ast.AsyncFunctionDef)):
+            body = getattr(node, "body", None) or []
+            if body and isinstance(body[0], ast.Expr) and \
+                    isinstance(body[0].value, ast.Constant) and \
+                    isinstance(body[0].value.value, str):
+                docs.add(id(body[0].value))
+    return [n.value for n in ast.walk(tree)
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and id(n) not in docs]
+
+
 def test_dashboard_css_removed():
-    # Phase 4 deleted DASHBOARD_CSS after its last consumer (the Trade page) flipped
-    # to tokens. The Quasar-internal rules now live ONLY in QUASAR_INTERNAL_CSS.
+    # Phase 4 deleted DASHBOARD_CSS after its last consumer (the Trade page)
+    # flipped to tokens. The Quasar-internal rules live in the app-wide block.
     assert not hasattr(theme, "DASHBOARD_CSS")
-    assert ".q-field__control" in theme.QUASAR_INTERNAL_CSS
-    assert ".strat-menu-navy" in theme.QUASAR_INTERNAL_CSS
+    assert ".q-field__control" in theme.APP_FIELD_CSS
+    assert ".strat-menu-navy" in theme.APP_FIELD_CSS
 
 
-def test_quasar_internal_css_is_internal_only():
-    css = theme.QUASAR_INTERNAL_CSS
+def test_the_page_scoped_quasar_block_is_gone():
+    """``QUASAR_INTERNAL_CSS`` was ``build_quasar_css(THEME)`` at its
+    ``.calc-v2`` default — byte-identical to ``APP_FIELD_CSS`` apart from the
+    scope, and injected a second time by the three pages that wrapped
+    themselves in that class. ``pages/trade.py`` was the last of them and the
+    last element carrying ``calc-v2``; both entrypoints inject the app-wide
+    block on the ``ns-app`` content column, so every rule survives.
+
+    The positive form, and it can fail: an ``assert "QUASAR_INTERNAL_CSS" not
+    in src`` over a page cannot, because a page that used it would not import
+    at all."""
+    assert not hasattr(theme, "QUASAR_INTERNAL_CSS")
+    # Nothing may quietly re-apply the scope: the class has no rules left to
+    # match. Checked over the STRING CONSTANTS a page builds classes from, not
+    # over the source text — two modules record the retirement in a comment or
+    # a docstring, and that history is worth keeping.
+    pages = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    for path in sorted(pages.rglob("*.py")):
+        for text in _code_strings(path):
+            assert "calc-v2" not in text, f"{path.name}: {text[:60]}"
+
+
+def test_the_app_wide_block_is_internal_only():
+    css = theme.APP_FIELD_CSS
     # MUST contain the Quasar-internal rules component classes can't reach.
     assert ".q-field__control" in css
     assert ".strat-menu-navy" in css
@@ -136,7 +184,7 @@ def test_build_tokens_reflect_theme_values(tmp_path):
 def test_quasar_internal_css_reflects_theme(tmp_path):
     p = tmp_path / "theme.toml"
     p.write_text('[palette]\ninput_bg = "#31363f"\n', encoding="utf-8")
-    css = theme.build_quasar_css(theme.load_theme(p))
+    css = theme.build_quasar_css(theme.load_theme(p), scope=".ns-app")
     assert "#31363f" in css
     assert ".q-field__control" in css and ".strat-menu-navy" in css
 
@@ -321,8 +369,9 @@ def _decls(css, selector):
 def test_the_generic_boxed_input_is_left_alone():
     """The generic boxed input keeps its height — the Simulator
     (symbol, look-back, the Trade page) keeps the 40px boxed input."""
-    body = " ".join(_decls(theme.build_quasar_css(theme._DEFAULTS),
-                           ".calc-v2 .q-field__control")).replace(" ", "")
+    body = " ".join(_decls(theme.build_quasar_css(theme._DEFAULTS,
+                                                  scope=".ns-app"),
+                           ".ns-app .q-field__control")).replace(" ", "")
     assert "min-height:40px" in body
 
 
@@ -334,7 +383,8 @@ def test_no_leg_card_rules_survive_the_card_layout():
     Calculator's own ``.calc-v3`` block — retired with the ``[calc]`` surface
     vocabulary on 2026-09-20, and every rule it carried lives in this builder
     under the caller's scope."""
-    assert ".leg-card" not in theme.build_quasar_css(theme._DEFAULTS)
+    assert ".leg-card" not in theme.build_quasar_css(theme._DEFAULTS,
+                                                    scope=".ns-app")
     assert not hasattr(theme, "build_calc_css")
 
 
@@ -373,12 +423,20 @@ def test_quiet_button_is_text_only():
     assert "border" not in q
 
 
-def test_quasar_css_scope_is_a_parameter():
+def test_quasar_css_scope_is_a_required_parameter():
+    """It defaulted to ``.calc-v2`` while three pages wrapped themselves in that
+    class. None does now, so a default would be a block whose every scoped rule
+    matches nothing — the quietest possible failure. The caller says."""
     t = theme.load_theme("Z:/nope.toml")
+    with pytest.raises(TypeError):
+        theme.build_quasar_css(t)
     app = theme.build_quasar_css(t, scope=".ns-app")
     assert ".ns-app .q-field__control{" in app
     assert ".calc-v2" not in app
-    assert ".calc-v2 .q-field__control{" in theme.build_quasar_css(t)   # default unchanged
+    # Still a parameter: another scope emits the same rules under that name.
+    other = theme.build_quasar_css(t, scope=".x-scope")
+    assert ".x-scope .q-field__control{" in other
+    assert other.replace(".x-scope", ".ns-app") == app
     assert ".strat-menu-navy.q-menu{" in app       # the teleported popup stays global
 
 
@@ -516,8 +574,11 @@ def test_a_borderless_field_opts_out_of_the_box():
     rule = ("{s} .q-field--borderless .q-field__control"
             "{{background:transparent;border:0;padding:0;box-shadow:none;}}")
     t = theme.load_theme("Z:/nope.toml")
-    for scope, css in ((".ns-app", theme.build_quasar_css(t, scope=".ns-app")),
-                       (".calc-v2", theme.QUASAR_INTERNAL_CSS)):
+    # ⚠ This iterated ``(".calc-v2", theme.QUASAR_INTERNAL_CSS)`` too. That
+    # block retired with the scope's last element (2026-09-20), and the pair
+    # only ever proved the SAME rule twice, since the two were one call to
+    # ``build_quasar_css`` under two scopes.
+    for scope, css in ((".ns-app", theme.build_quasar_css(t, scope=".ns-app")),):
         want = rule.format(s=scope)
         assert want in css, scope
         assert css.index(want) > css.index(f"{scope} .q-field--focused .q-field__control{{"), scope
@@ -565,7 +626,7 @@ def test_the_leg_row_text_size_is_app_wide_and_orders_after_the_strike_rule():
     ⚠ It must come AFTER ``.leg-strike .q-field__native``. Both are one class
     deep plus an element, so the specificity ties and the winner is decided by
     source order alone - the same trap CLAUDE.md records for DESK_NEON_CSS."""
-    css = theme.QUASAR_INTERNAL_CSS
+    css = theme.APP_FIELD_CSS
     assert ".leg-trow .q-field__native" in css
     assert "font-size:11px" in css
     strike = css.index(".leg-strike .q-field__native")

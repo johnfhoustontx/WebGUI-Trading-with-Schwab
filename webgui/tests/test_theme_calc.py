@@ -87,8 +87,8 @@ def test_the_page_scoped_calc_surface_vocabulary_is_gone():
     and its tokens go rather than being injected twice."""
     for name in RETIRED:
         assert not hasattr(T, name), f"theme.{name} is a retired surface value"
-    assert ".calc-v3" not in T.QUASAR_INTERNAL_CSS
-    assert ".strat-menu-calc" not in T.QUASAR_INTERNAL_CSS
+    assert ".calc-v3" not in T.APP_FIELD_CSS
+    assert ".strat-menu-calc" not in T.APP_FIELD_CSS
     assert ".ns-app .leg-trow" in T.APP_FIELD_CSS, \
         "the leg-table rules the calc block carried must exist app-wide"
 

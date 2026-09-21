@@ -117,18 +117,27 @@ def test_guides_do_not_describe_removed_features():
 
 def test_trade_guide_matches_the_cards_the_page_renders():
     """The specific drift that prompted this: the guide promised a card the page
-    stopped rendering in 2026-06."""
+    stopped rendering in 2026-06.
+
+    ⚠ It read ``pages/trade.py``, which has rendered nothing since 2026-09-20 —
+    ``/trade`` routes to ``trade_overview``, and the four Signal Desk screens
+    draw the family. A grep over a module with no ``render`` could not fail
+    whatever the guide said, so it reads the screens that do."""
     import pathlib
 
     import page_help
-    src = (pathlib.Path(__file__).resolve().parents[1]
-           / "pages" / "trade.py").read_text(encoding="utf-8")
-    # Look for the BUILDERS, not the word: the only "Markov" left in trade.py is
-    # the comment recording why the card went, which is worth keeping.
-    rendered = [name for name in ("markov_band_chip(", "markov_metric_rows(",
-                                  "markov_drift_row(", "markov_forecast_figure(")
-                if name in src]
-    assert not rendered, f"trade.py renders a Markov card again ({rendered}) — update the guide"
+    pages = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    # Look for the BUILDERS, not the word: a comment recording why the card
+    # went is worth keeping.
+    builders = ("markov_band_chip(", "markov_metric_rows(",
+                "markov_drift_row(", "markov_forecast_figure(")
+    for screen in ("trade_overview", "trade_evidence", "trade_board",
+                   "trade_plan_screen", "trade_shell", "trade_terminal",
+                   "trade"):
+        src = (pages / f"{screen}.py").read_text(encoding="utf-8")
+        rendered = [name for name in builders if name in src]
+        assert not rendered, \
+            f"{screen}.py renders a Markov card again ({rendered}) — update the guide"
     assert "Markov" not in page_help.HELP_MD["/trade"]
 
 

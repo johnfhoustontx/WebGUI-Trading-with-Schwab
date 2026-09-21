@@ -86,9 +86,12 @@ def test_options_matrix_page_has_no_inline_style():
 
 
 # Phase 4: the Trade page (the last DASHBOARD_CSS consumer) on Tailwind tokens +
-# palette-maps. Verdict/bias/markov dynamic colors became `text-[…]`/`bg-[…]`
-# classes (reactive verdict-card sites swap via .classes(remove=…, add=…)), so the
-# page carries no `.style(` and no Vue `:style=` slot binding.
+# palette-maps. Verdict/bias dynamic colors became `text-[…]`/`bg-[…]` classes
+# (reactive verdict-card sites swapped via .classes(remove=…, add=…)), so the
+# page carried no `.style(` and no Vue `:style=` slot binding.
+# ⚠ That page's `render` was deleted on 2026-09-20 — nothing routed it — and the
+# module is now the family's pure builder library. The guard stays: it is what
+# stops a widget coming back here with a `.style(` attached.
 def test_trade_page_has_no_inline_style():
     base = pathlib.Path(__file__).resolve().parents[1] / "pages"
     src = (base / "trade.py").read_text(encoding="utf-8")

@@ -101,7 +101,6 @@ ALLOWED = {
     "settings.py": {"button": 7, "dialog": 1, "notify": 1},
     "status.py": {"button": 3, "notify": 4},
     "terminate.py": {"button": 3, "dialog": 1, "notify": 1},
-    "trade.py": {"button": 3, "table": 2},
     # The Hide gated toggle, and it stays: it carries a SELECTED state (a
     # FILTER_ON / FILTER_OFF class swap) AND a label that changes with it
     # ("Hide gated" ⇄ "Showing ungated only"), and kit.button's four kinds
