@@ -14,10 +14,6 @@ same on both origins. What they do NOT get: the tab strip, the Volatility tab
 (no multiplier, no IV-shock table), History (no replay), the Calculator
 hand-offs, and any restoring of an earlier visit.
 
-⚠ The tiles' Delta and Theta read the IV-shock base row, which the public
-sweep does not publish (``tools_public._math_sweep`` keeps the what-if half
-only). They show their em-dash, the page's honest "not computed".
-
 The rules, and where each lives:
 
 * **Every write goes through the two public request functions.** The page
@@ -90,6 +86,12 @@ _TONE_REMOVE = _sim._TONE_REMOVE
 _TILE = _sim._TILE
 _TILE_VALUE = _sim._TILE_VALUE
 
+#: Tiles this page does not draw. Delta and Theta read the greeks, and the
+#: public sweep carries none (``tools_public._math_sweep`` keeps the what-if
+#: half only): publishing them is delta exposure the owner has not approved.
+#: ``sim_view.position_tiles`` stays six for the private page.
+_OMIT = {"delta", "theta"}
+
 
 # ── pure ─────────────────────────────────────────────────────────────────────
 
@@ -102,6 +104,21 @@ def intro_text(window) -> str:
 
 def _is_stock(leg):
     return str((leg or {}).get("option_type") or "").lower() == "stock"
+
+
+def public_tiles(legs, result):
+    """``sim_view.position_tiles`` without the ``_OMIT`` tiles - used by the
+    build AND every repaint, so the two cannot disagree about which exist."""
+    return [t for t in sv.position_tiles(legs, result) if t["key"] not in _OMIT]
+
+
+def missing_expiries(legs, meta):
+    """The OPTION legs' expirations the snapshot holds no strikes for, nearest
+    first. A sweep over one would be refused ``off_ladder``."""
+    loaded = set(snapshot_loaded(meta))
+    return sorted({str(leg["expiry"]) for leg in legs or []
+                   if not _is_stock(leg) and leg.get("expiry")
+                   and str(leg["expiry"]) not in loaded})
 
 
 def split_seed(legs):
@@ -241,8 +258,8 @@ def render():
         with ui.column().classes(f"{_t.CARD} w-full gap-2"):
             ui.label("Position").classes(_t.EYEBROW)
             with ui.element("div").classes(
-                    "grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-2 w-full"):
-                for tile in sv.position_tiles([], None):
+                    "grid grid-cols-2 md:grid-cols-4 gap-2 w-full"):
+                for tile in public_tiles([], None):
                     with ui.column().classes(f"sim-tile {_TILE} gap-0.5"):
                         t_lbl = ui.label(tile["label"]).classes(_t.EYEBROW)
                         t_val = ui.label(tile["value"]).classes(
@@ -387,13 +404,23 @@ def render():
         dt_lbl.text = f"Time passed: {sv.days_text(dt_slider.value)}"
         legs = editor.get_legs()
         result = _for_screen()
-        for tile in sv.position_tiles(legs, result):
+        for tile in public_tiles(legs, result):
             lbl, val, sub = tile_refs[tile["key"]]
             lbl.text, val.text, sub.text = tile["label"], tile["value"], tile["sub"]
             _set_tone(val, tile["tone"])
         if not result:
-            whatif_empty.text = (sv.empty_state_text(state["meta"], legs)
-                                 if state["meta"] is not None else LOAD_PROMPT)
+            # Listed but not held: its strikes are on their way (or can be).
+            waiting = ([e for e in missing_expiries(legs, state["meta"])
+                        if e in snapshot_listed(state["meta"])]
+                       if state["meta"] is not None else [])
+            if state["meta"] is None:
+                whatif_empty.text = LOAD_PROMPT
+            elif waiting:
+                whatif_empty.text = ("Loading strikes for "
+                                     + ", ".join(map(_entry.expiry_label, waiting))
+                                     + "…")
+            else:
+                whatif_empty.text = sv.empty_state_text(state["meta"], legs)
             whatif_empty.set_visibility(True)
             _show_chart(False)
             readout_lbl.text = ""
@@ -478,9 +505,11 @@ def render():
         kit.symbol_error(panel.symbol_in, None)
         legs = editor.get_legs()
         # The legs stay when they are the visitor's own for this symbol: edited
-        # on its snapshot, or a Calculator position whose snapshot never came.
+        # on its snapshot, or the Calculator position they arrived with - landed
+        # or not (``_set_legs`` leaves the editor unedited, so ``is_dirty`` alone
+        # would lay the template over it).
         mine = ((symbol == state["symbol"] and editor.is_dirty())
-                or (state["meta"] is None and symbol == state["seeded"]))
+                or symbol == state["seeded"])
         keep = legs if mine and legs else None
         _snapshot(symbol, leg_expiries(keep) if keep else None, keep_legs=keep)
 
@@ -493,12 +522,21 @@ def render():
     async def _on_snapshot(symbol, key):
         kit.set_busy(panel.refresh_btn, False)
         meta = await run.io_bound(bus_client.read, pt.result_view(key))
+        legs_to_keep = state["pending_legs"]
         if state["loading"] != symbol:
             return                          # another symbol was asked for since
         state["loading"] = None
+        state["pending_legs"] = None
         if not isinstance(meta, dict) or not snapshot_loaded(meta):
-            status.text = outcome_text("no_options")
+            # An answer with nothing to read (its result expired, a reload that
+            # came back empty) is not "no options": the service says that as an
+            # outcome. What is on screen stays.
+            status.text = (outcome_text("no_options")
+                           if isinstance(meta, dict) and state["symbol"] != symbol
+                           else NO_ANSWER)
             return
+        if symbol != state["seeded"]:
+            state["seeded"] = None          # another symbol: that position is gone
         same = state["symbol"] == symbol
         state["meta"], state["ladder"], state["symbol"] = meta, meta, symbol
         state["pending_move"] = None
@@ -509,8 +547,7 @@ def render():
         listed = snapshot_listed(meta)
         panel.set_chain(None, spot if isinstance(spot, (int, float)) else None,
                         expirations=listed)
-        pending = state["pending_legs"]
-        state["pending_legs"] = None
+        pending = legs_to_keep
         if pending:
             _set_legs(pending)
         elif same and editor.is_dirty():
@@ -523,6 +560,9 @@ def render():
                        if len(loaded) < len(listed)
                        else f"{symbol} spot {spot_txt}: {len(listed)} expirations.")
         _after_legs()
+        for expiry in missing_expiries(editor.get_legs(), meta):
+            if expiry in listed:
+                _fetch_expiry(expiry, move_all=False)
 
     # ---- one more expiration
 
@@ -615,8 +655,11 @@ def render():
     def _sweep():
         if not state["engaged"] or state["meta"] is None or state["loading"]:
             return
-        req = sweep_request(state["symbol"], editor.get_legs(), dt_slider.value,
-                            _days_max())
+        legs = editor.get_legs()
+        if missing_expiries(legs, state["meta"]):
+            _repaint()                      # "Loading strikes for ..." - no request
+            return
+        req = sweep_request(state["symbol"], legs, dt_slider.value, _days_max())
         if req is None:
             _repaint()                      # the empty line says what is missing
             return

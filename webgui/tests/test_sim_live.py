@@ -294,10 +294,59 @@ def test_a_seeded_tab_sends_one_snapshot_with_its_expirations(page):
     assert [(l["option_type"], l["strike"], l["expiry"]) for l in shown] == \
         [(l["option_type"], l["strike"], l["expiry"]) for l in legs]
     assert _all(root, "entry-ticker")[0].value == "QQQ"
-    # ...and the legs survive the snapshot landing
-    _land_snapshot(root, cmds[0], _meta(loaded=(NEAR, MID, FAR), symbol="QQQ"))
+    # ...and the legs survive the snapshot landing. The landed snapshot holds
+    # exactly the two expirations asked for - what the service returns for this
+    # request. (It held all three until the 2026-09-21 review: an unrealistic
+    # fixture, corrected here, not a weakened assertion.)
+    _land_snapshot(root, cmds[0], _meta(loaded=(NEAR, MID), symbol="QQQ"))
     assert [(l["strike"], l["expiry"]) for l in _editor().get_legs()] == \
         [(l["strike"], l["expiry"]) for l in legs]
+
+
+def test_a_seeded_third_expiration_is_fetched_before_any_sweep(page):
+    legs = [{"option_type": "put", "side": "short", "qty": 1, "strike": 500.0,
+             "expiry": MID, "premium": 1.5},
+            {"option_type": "put", "side": "long", "qty": 1, "strike": 495.0,
+             "expiry": NEAR, "premium": 0.5},
+            {"option_type": "call", "side": "long", "qty": 1, "strike": 510.0,
+             "expiry": FAR, "premium": 0.5}]
+    _SEED["value"] = ("SPY", legs)
+    root = page()
+    _run(root, "_seed_from_handoff")
+    _land_snapshot(root, _tools()[0], _meta(loaded=(NEAR, MID)))
+    fetches = _tools()
+    assert [c.args for c in fetches] == [{"kind": "sim_expiry", "symbol": "SPY",
+                                          "expiry": FAR}]
+    _run(root, "_sweep_tick")
+    assert _math("sweep") == []                  # FAR is not held: off_ladder
+    _result(_key(fetches[0]), _meta(loaded=(NEAR, MID, FAR)))
+    _answer(_key(fetches[0]), "done")
+    _run(root, "_poll")
+    cmd = _swept(root)
+    assert {l["expiry"] for l in cmd.args["legs"]} == {NEAR, MID, FAR}
+    assert [(l["strike"], l["expiry"]) for l in _editor().get_legs()] == \
+        [(l["strike"], l["expiry"]) for l in legs]
+
+
+def test_load_after_a_landed_seed_keeps_the_visitors_position(page):
+    legs = [{"option_type": "put", "side": "short", "qty": 1, "strike": 505.0,
+             "expiry": NEAR, "premium": 1.5},
+            {"option_type": "call", "side": "short", "qty": 2, "strike": 495.0,
+             "expiry": NEAR, "premium": 0.5}]
+    _SEED["value"] = ("SPY", legs)
+    root = page()
+    _run(root, "_seed_from_handoff")
+    _land_snapshot(root, _tools()[0])
+    before = _editor().get_legs()
+    _click(root, "Load")
+    cmds = _tools()
+    assert [c.args for c in cmds] == [{"kind": "sim_snapshot", "symbol": "SPY",
+                                       "expiries": [NEAR]}]
+    _land_snapshot(root, cmds[0])
+    after = _editor().get_legs()
+    shape = [(l["option_type"], l["side"], l["strike"], l["qty"]) for l in before]
+    assert shape == [("put", "short", 505.0, 1), ("call", "short", 495.0, 2)]
+    assert [(l["option_type"], l["side"], l["strike"], l["qty"]) for l in after] == shape
 
 
 def test_arriving_with_a_position_counts_as_the_visitors_action(page):
@@ -319,6 +368,24 @@ def test_a_seeded_strike_the_snapshot_does_not_list_snaps_onto_its_ladder(page):
     assert _editor().get_legs()[0]["strike"] == 497.0      # shown as it came
     _land_snapshot(root, _tools()[0])
     assert _editor().get_legs()[0]["strike"] in STRIKES    # on the real ladder
+
+
+def test_the_seed_is_forgotten_once_another_symbol_loads(page):
+    _SEED["value"] = ("SPY", [{"option_type": "put", "side": "short", "qty": 1,
+                               "strike": 505.0, "expiry": NEAR, "premium": 1.0}])
+    root = page()
+    _run(root, "_seed_from_handoff")
+    _land_snapshot(root, _tools()[0])
+    field = _all(root, "entry-ticker")[0]
+    with root:
+        field.value = "QQQ"
+    _click(root, "Load")
+    _land_snapshot(root, _tools()[0])               # QQQ, on its template
+    with root:
+        field.value = "SPY"
+    _click(root, "Load")
+    # QQQ's template legs are not "the SPY position": a plain load, no legs kept
+    assert [c.args for c in _tools()] == [{"kind": "sim_snapshot", "symbol": "SPY"}]
 
 
 def test_a_seeded_share_leg_is_dropped_and_said(page):
@@ -466,6 +533,38 @@ def test_a_sweep_result_draws_the_chart_and_the_tiles(page):
     text = _joined(root)
     assert "Entry credit" in text
     assert _all(root, "sim-readout")[0].text.startswith("At 502.00")
+
+
+def test_no_delta_or_theta_tile_is_drawn(page):
+    """The public sweep carries no greeks (owner decision), so the two tiles
+    that read them are omitted rather than shown as a permanent dash."""
+    root = _loaded(page)
+    _land_sweep(root, _swept(root))
+    tiles = _all(root, "sim-tile")
+    assert len(tiles) == 4
+    labels = [t.text for tile in tiles for t in _walk(tile)
+              if isinstance(getattr(t, "text", None), str)]
+    assert not [x for x in labels if x.startswith(("Delta", "Theta"))]
+    assert "Entry credit" in labels
+
+
+def test_a_reload_with_an_empty_result_keeps_what_is_on_screen(page):
+    root = _loaded(page)
+    _land_sweep(root, _swept(root))
+    legs = _editor().get_legs()
+    with root:
+        _slider(root, "sim-days").value = 2          # a new sweep...
+    _answer(_key(_swept(root)), "load_first")        # ...finds the snapshot gone
+    _run(root, "_poll")
+    reload = _tools()
+    assert len(reload) == 1
+    _answer(_key(reload[0]), "done")                 # ...but no result to read
+    _run(root, "_poll")
+    text = _joined(root)
+    assert pt.OUTCOME_TEXT["no_options"] not in text
+    assert sim_live.NO_ANSWER in text
+    assert _editor().get_legs() == legs
+    assert _chart(root).visible
 
 
 def test_the_chart_exists_at_build_with_an_explicit_height(page):
@@ -622,6 +721,44 @@ def test_the_page_module_names_no_owner_view():
                  "_SIM_SNAPSHOTS", "_LAST_SIM", "shared_position", "page_state",
                  "cmd:options"):
         assert view not in text, view
+
+
+# What the page may reach for in the private page modules it borrows from. An
+# equality, so a NEW attribute (say ``_sim._capture``, the owner's single-user
+# store writer) fails here until someone decides it is safe on the public origin.
+_PRIVATE_ATTRS = {
+    "_sim": {"_TILE", "_TILE_VALUE", "_TONE_CLASS", "_TONE_REMOVE",
+             "whatif_figure", "whatif_pnl"},
+    "_calc_live": {"BAD_SYMBOL", "MATH", "NO_ANSWER", "REQUEST_FAILED", "TOOLS",
+                   "_visitor", "_wait_sec", "_when", "_window", "answer_state",
+                   "limit_text", "outcome_text"},
+    "_entry": {"Debounce", "expiry_label"},
+    "public_handoff": {"read"},
+    "leg_editor": {"build_leg_editor", "legs_ready"},
+    "entry_panel": {"build_entry_panel"},
+    "strategies": {"STOCK_STRATEGIES"},
+    "sv": {"days_range", "days_text", "empty_state_text", "position_tiles",
+           "result_matches", "structure_warnings", "template_for",
+           "whatif_readout"},
+}
+
+
+def _private_attrs(tree):
+    used = {name: set() for name in _PRIVATE_ATTRS}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) \
+                and n.value.id in used:
+            used[n.value.id].add(n.attr)
+    return used
+
+
+def test_the_page_reaches_only_allow_listed_private_attributes():
+    assert _private_attrs(_tree()) == _PRIVATE_ATTRS
+
+
+def test_the_private_attribute_walk_bites():
+    src = SRC.read_text(encoding="utf-8") + "\n_sim._capture()\n"
+    assert _private_attrs(ast.parse(src))["_sim"] != _PRIVATE_ATTRS["_sim"]
 
 
 _ALLOWED_IMPORTS = {"nicegui", "bus_client", "visitor_limit", "shared.public_tools",
