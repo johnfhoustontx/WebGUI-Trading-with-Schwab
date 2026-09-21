@@ -40,50 +40,118 @@ ARCHIVE_ROOT = Path(__file__).resolve().parents[1] / "data" / "eod"
 _CT = ZoneInfo("America/Chicago")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-# Scoped to .eod-report so the in-app add_css does not leak into the rest of the app.
-EOD_CSS = """
-.eod-report { font-family: -apple-system, Segoe UI, Roboto, sans-serif; color: #e8e8e8; }
-.eod-report h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
-.eod-report h2 { font-size: 1.05rem; margin: 1.2rem 0 .4rem; opacity: .85;
-                 border-bottom: 1px solid rgba(255,255,255,.12); padding-bottom: .2rem; }
-.eod-report .meta { opacity: .6; font-size: .8rem; margin-bottom: .6rem; }
-.eod-report table { border-collapse: collapse; width: 100%; font-size: .82rem; margin: .3rem 0; }
-.eod-report th, .eod-report td { text-align: left; padding: 4px 8px;
-                 border-bottom: 1px solid rgba(255,255,255,.08); }
-.eod-report th { opacity: .7; font-weight: 600; }
-.eod-report .tiles { display: flex; flex-wrap: wrap; gap: .6rem; margin: .4rem 0; }
-.eod-report .tile { background: rgba(255,255,255,.05); border-radius: 10px;
-                 padding: .5rem .8rem; min-width: 120px;
-                 box-shadow: inset 0 1px 0 0 rgba(255,255,255,.08),
-                             0 3px 0 0 rgba(0,0,0,.30), 0 6px 14px rgba(0,0,0,.42); }
-.eod-report .tile .k { font-size: .72rem; opacity: .6; }
-.eod-report .tile .v { font-size: 1.1rem; font-weight: 700; }
-.eod-report .pos { color: #4caf50; } .eod-report .neg { color: #ef5350; }
-.eod-report .none { opacity: .5; font-style: italic; }
-.eod-report .summary-line { margin: .3rem 0; }
-.eod-report a { color: #64b5f6; }
-.eod-report .eod-toc { margin: .4rem 0 .8rem; font-size: .85rem; opacity: .85; }
-.eod-report .eod-toc a { margin-right: .2rem; }
-.eod-report details.eod-sec { margin: .5rem 0; border: 1px solid rgba(255,255,255,.10);
-    border-radius: 10px; padding: .2rem .7rem; background: rgba(255,255,255,.03); }
-.eod-report details.eod-sec > summary { cursor: pointer; font-size: 1.0rem;
-    font-weight: 600; padding: .35rem 0; opacity: .9; }
-.eod-report details.eod-sec[open] > summary { border-bottom: 1px solid rgba(255,255,255,.08);
-    margin-bottom: .3rem; }
-.eod-report .book-now { opacity: .8; font-size: .82rem; margin: .25rem 0 .4rem; }
+# The system stack used when [typography].family is empty (= keep the app
+# default). Named rather than inlined so the fallback is one thing, not two.
+_SYSTEM_FONT = "-apple-system, system-ui, Roboto, sans-serif"
+
+
+def build_eod_css(theme_values) -> str:
+    """The report's stylesheet, in the app's own colours. PURE.
+
+    ⚠ TWO destinations, and that is why this stays raw CSS instead of becoming
+    kit tokens: ``ui.add_css`` in both frames (this page's one documented
+    escape hatch) and :func:`wrap_document` into the standalone
+    ``summary.html`` / ``detail.html`` that ``/eod/file`` serves — RAW
+    documents, with no NiceGUI, no Tailwind and no app stylesheet behind them.
+    The design says those "take the navy background, IBM Plex and the button
+    look in their own inline CSS", so this is RECOLOURED, not deleted and not
+    routed through the kit.
+
+    Every colour comes from ``theme`` — which is also what makes the exported
+    document follow Settings → Appearance. What was here instead: Segoe UI, a
+    ``#e8e8e8`` text tier, six ``opacity:`` dims, four
+    ``rgba(255,255,255,…)`` hairlines and washes, a ``#64b5f6`` link, and
+    ``.pos``/``.neg`` at ``#4caf50``/``#ef5350`` — a FOURTH green/red pair
+    beside the three the design already counted. ``_pn_class`` returns ``""``
+    for zero, which already matches "muted for zero", and is untouched.
+
+    ⚠ Every rule must keep its ``.eod-report`` prefix: this is injected
+    APP-WIDE by ``ui.add_css``, so an unscoped rule would restyle every other
+    page in the app.
+
+    ⚠ The tile's colour sits on ``.tile``, NOT on ``.tile .v`` — a specificity
+    trap that a first draft walked straight into and a screenshot did not show.
+    ``.eod-report .tile .v`` is THREE classes and out-specifies
+    ``.eod-report .neg``, which is two, so the two P&L tiles rendered title
+    white while still reading as red to the eye; measured,
+    ``getComputedStyle(".v.neg").color`` was ``rgb(238,241,246)``. On ``.tile``
+    an unsigned value INHERITS the title colour while a signed one is claimed
+    by the directly-matching ``.pos`` / ``.neg`` rule, since a rule that
+    matches an element always beats one it merely inherits.
+    """
+    p = theme_values["palette"]
+    s = theme_values["semantic"]
+    font = (theme_values["typography"].get("family") or "").strip() or _SYSTEM_FONT
+    return f"""
+.eod-report {{ font-family: {font}; color: {p['text']}; }}
+.eod-report h1 {{ font-size: 1.4rem; margin: 0 0 .25rem; color: {p['title']}; }}
+.eod-report h2 {{ font-size: 1.05rem; margin: 1.2rem 0 .4rem; color: {p['title']};
+                 border-bottom: 1px solid {p['card_border']}; padding-bottom: .2rem; }}
+.eod-report h3, .eod-report h4 {{ color: {p['title']}; }}
+.eod-report .meta {{ color: {p['muted']}; font-size: .8rem; margin-bottom: .6rem; }}
+.eod-report table {{ border-collapse: collapse; width: 100%; font-size: .82rem; margin: .3rem 0; }}
+.eod-report th, .eod-report td {{ text-align: left; padding: 4px 8px;
+                 border-bottom: 1px solid {p['card_border']}; }}
+.eod-report th {{ color: {p['icon']}; font-weight: 600; }}
+.eod-report .tiles {{ display: flex; flex-wrap: wrap; gap: .6rem; margin: .4rem 0; }}
+.eod-report .tile {{ background: {p['card_bg']}; border: 1px solid {p['card_border']};
+                 border-radius: 12px; padding: .5rem .8rem; min-width: 120px;
+                 color: {p['title']}; }}
+.eod-report .tile .k {{ font-size: .72rem; color: {p['icon']}; }}
+.eod-report .tile .v {{ font-size: 1.1rem; font-weight: 700; }}
+.eod-report .pos {{ color: {s['positive']}; }}
+.eod-report .neg {{ color: {s['negative']}; }}
+.eod-report .none {{ color: {p['muted']}; font-style: italic; }}
+.eod-report .summary-line {{ margin: .3rem 0; }}
+.eod-report a {{ color: {p['primary']}; }}
+.eod-report .eod-toc {{ margin: .4rem 0 .8rem; font-size: .85rem; color: {p['muted']}; }}
+.eod-report .eod-toc a {{ margin-right: .2rem; }}
+.eod-report details.eod-sec {{ margin: .5rem 0; border: 1px solid {p['card_border']};
+    border-radius: 12px; padding: .2rem .7rem; background: {p['card_bg']}; }}
+.eod-report details.eod-sec > summary {{ cursor: pointer; font-size: 1.0rem;
+    font-weight: 600; padding: .35rem 0; color: {p['title']}; }}
+.eod-report details.eod-sec[open] > summary {{ border-bottom: 1px solid {p['card_border']};
+    margin-bottom: .3rem; }}
+.eod-report .book-now {{ color: {p['muted']}; font-size: .82rem; margin: .25rem 0 .4rem; }}
+.eod-report .book-note {{ color: {p['muted']}; font-size: .78rem; margin: .25rem 0 .1rem; }}
 """
+
+
+# Scoped to .eod-report so the in-app add_css does not leak into the rest of the
+# app. Resolved once at import, like every other theme-derived constant: the
+# theme itself is read once at webgui startup.
+EOD_CSS = build_eod_css(theme.THEME)
+
+# The exported document's ground — the same three-stop radial ``build_surface_css``
+# paints on ``<body>`` for every page. A body background is propagated to the
+# canvas when ``<html>`` has none, so a short report still fills the window.
+_P = theme.THEME["palette"]
+DOC_BODY_BG = (f"radial-gradient(130% 90% at 50% -20%,{_P['page_bg1']} 0%,"
+               f"{_P['page_bg2']} 55%,{_P['page_bg3']} 100%) fixed")
 
 
 # ----------------------------------------------------------------------------- #
 # Document wrapper + formatting helpers
 # ----------------------------------------------------------------------------- #
 def wrap_document(fragment: str, css: str, title: str) -> str:
-    """Wrap a report fragment + CSS into a self-contained HTML document for export."""
+    """Wrap a report fragment + CSS into a standalone HTML document for export.
+
+    ⚠ It carries the app's web-font ``<link>`` as well as the CSS. This document
+    is served by ``/eod/file`` with no app stylesheet behind it, so without the
+    link the ``font-family`` would name a face the document never loads and fall
+    back to the same system stack it used to hard-code — "IBM Plex" would be a
+    claim the file does not keep. The cost is that the font (and only the font)
+    comes off the network: opened with no connection, the document still renders
+    in the stack's own fallback. ``theme.FONT_HEAD_HTML`` is ``""`` when no web
+    font is configured, so this follows the config rather than pinning a URL.
+    """
     return (
         "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-        f"<title>{escape(title)}</title><style>{css}</style></head>"
-        f"<body style=\"background:#1e1e1e;margin:0;padding:1.2rem\">{fragment}</body></html>"
+        f"<title>{escape(title)}</title>{theme.FONT_HEAD_HTML}"
+        f"<style>{css}</style></head>"
+        f"<body style=\"background:{DOC_BODY_BG};margin:0;padding:1.2rem\">"
+        f"{fragment}</body></html>"
     )
 
 

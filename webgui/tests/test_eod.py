@@ -897,3 +897,149 @@ def test_the_open_file_buttons_disclose_that_generate_writes_the_file(monkeypatc
         tips = [e for e in btn.descendants() if isinstance(e, ui.tooltip)]
         assert tips, f"{text} has no tooltip"
         assert "Generate" in tips[0].text, f"{text} does not say what writes it"
+
+
+# --- Task 5: the report's CSS takes the app's colours -----------------------
+# ⚠ EOD_CSS has TWO destinations: ``ui.add_css`` in both frames (this page's one
+# documented escape hatch) and ``wrap_document`` into the standalone
+# summary.html / detail.html that ``/eod/file`` serves - raw documents with no
+# NiceGUI, no Tailwind and no app stylesheet. So it is RECOLOURED, not deleted
+# and not routed through the kit, exactly as the design says.
+import re as _re
+
+_HEX = _re.compile(r"#[0-9a-fA-F]{3,8}\b")
+
+
+def _sentinel_theme():
+    """A theme whose every colour is a unique sentinel, so a value that did NOT
+    come from the theme is visible by inspection."""
+    import copy
+
+    from pages.options import theme
+    t = copy.deepcopy(theme._DEFAULTS)
+    n = [0]
+
+    def _next():
+        n[0] += 1
+        return f"#{n[0]:02x}00ff"
+
+    for section in ("palette", "semantic"):
+        for key in t[section]:
+            t[section][key] = _next()
+    t["typography"]["family"] = "'Sentinel Sans', sans-serif"
+    return t
+
+
+def test_every_colour_in_the_report_css_comes_from_the_theme():
+    """The point of the recolour. Built over a theme whose every colour is a
+    sentinel, the stylesheet may contain NO other hex - so a green, a grey or a
+    link blue left behind in the string shows up here rather than on screen."""
+    t = _sentinel_theme()
+    css = eod.build_eod_css(t)
+    allowed = set(t["palette"].values()) | set(t["semantic"].values())
+    strays = {h for h in _HEX.findall(css) if h not in allowed}
+    assert not strays, f"colours that are not the theme's: {sorted(strays)}"
+    assert "'Sentinel Sans', sans-serif" in css, "the font is not the app's"
+
+
+def test_the_pos_and_neg_classes_are_the_apps_SEMANTIC_pair():
+    """They were #4caf50 / #ef5350 - a FOURTH green/red pair beside the three
+    the design already counted. ``_pn_class`` returning "" for zero already
+    matches "muted for zero" and is untouched."""
+    t = _sentinel_theme()
+    css = eod.build_eod_css(t)
+    assert t["semantic"]["positive"] in css
+    assert t["semantic"]["negative"] in css
+    for retired in ("#4caf50", "#ef5350", "#64b5f6", "#e8e8e8"):
+        assert retired not in css, f"{retired} survived the recolour"
+    assert eod._pn_class(0) == "", "zero must stay uncoloured"
+
+
+def test_the_report_css_dims_with_colours_not_with_opacity():
+    """Six ``opacity:`` dims and four ``rgba(255,255,255,...)`` washes carried
+    the text ladder and every hairline. They are palette values now, which is
+    what lets the whole document follow Settings -> Appearance."""
+    css = eod.build_eod_css(_sentinel_theme())
+    assert "opacity:" not in css
+    assert "rgba(255,255,255" not in css
+    assert "Segoe UI" not in css
+
+
+def test_the_tile_lost_the_retired_3d_button_look():
+    """Its three-layer inset/drop ``box-shadow`` WAS the 3D button treatment the
+    standard retires. A tile is a card: the card ground and a hairline."""
+    t = _sentinel_theme()
+    css = eod.build_eod_css(t)
+    assert "box-shadow" not in css
+    tile = [ln for ln in css.splitlines() if ".tile {" in ln or ".tile{" in ln]
+    assert tile, "the .tile rule went missing"
+    block = css.split(".eod-report .tile {", 1)[1].split("}", 1)[0]
+    assert t["palette"]["card_bg"] in block
+    assert t["palette"]["card_border"] in block
+
+
+def test_the_css_is_still_scoped_to_the_report():
+    """⚠ A must-not-change guard. ``ui.add_css`` injects this APP-WIDE in both
+    frames, so a rule that lost its ``.eod-report`` prefix would restyle every
+    other page. Green on both sides of the recolour, deliberately."""
+    css = eod.EOD_CSS
+    rules = [ln.strip() for ln in css.splitlines()
+             if ln.strip() and not ln.startswith((" ", "\t")) and "{" in ln]
+    assert rules, "no rules found to check"
+    for rule in rules:
+        assert rule.startswith(".eod-report"), f"unscoped rule: {rule}"
+
+
+def test_the_exported_document_stands_on_the_apps_ground():
+    """``wrap_document``'s ``<body style="background:#1e1e1e">`` was a flat grey
+    under a navy app. It takes the same three-stop radial the shell paints."""
+    from pages.options import theme
+    doc = eod.wrap_document("<p>hi</p>", ".x{}", "T")
+    assert "#1e1e1e" not in doc
+    for key in ("page_bg1", "page_bg2", "page_bg3"):
+        assert theme.THEME["palette"][key] in doc, key
+
+
+def test_the_exported_document_carries_the_app_font_link():
+    """It is served by ``/eod/file`` with no app stylesheet, so without this the
+    ``font-family`` names a face the document never loads and it falls back to
+    the same system face it used to hard-code. ``theme.FONT_HEAD_HTML`` is ""
+    when no web font is configured, so this follows the config rather than
+    pinning a URL."""
+    from pages.options import theme
+    doc = eod.wrap_document("<p>hi</p>", ".x{}", "T")
+    assert theme.FONT_HEAD_HTML
+    assert theme.FONT_HEAD_HTML in doc
+    assert doc.index(theme.FONT_HEAD_HTML) < doc.index("<style>")
+
+
+def test_the_module_constant_is_built_from_the_running_theme():
+    from pages.options import theme
+    assert eod.EOD_CSS == eod.build_eod_css(theme.THEME)
+
+
+def test_a_signed_tile_value_keeps_its_profit_or_loss_colour():
+    """⚠ The specificity trap, caught by MEASURING rather than by looking.
+
+    A first draft of the recolour put ``color`` on ``.eod-report .tile .v`` -
+    THREE classes, which out-specifies the two-class ``.eod-report .neg`` - so
+    the two P&L tiles rendered title white while the screenshot still read as
+    red to the eye (measured live: ``getComputedStyle(".v.neg").color`` was
+    ``rgb(238,241,246)``). The colour sits on ``.tile`` instead: an unsigned
+    value INHERITS it, and a signed one is claimed by the directly-matching
+    .pos/.neg rule, because a rule that matches an element always beats one it
+    merely inherits."""
+    t = _sentinel_theme()
+    css = eod.build_eod_css(t)
+    value_rule = css.split(".eod-report .tile .v {", 1)[1].split("}", 1)[0]
+    assert "color" not in value_rule, (
+        ".tile .v is three classes and would out-specify .eod-report .neg")
+    tile_rule = css.split(".eod-report .tile {", 1)[1].split("}", 1)[0]
+    assert t["palette"]["title"] in tile_rule, "the tile lost its text colour"
+    # And the fragment really does put both classes on the same element, which
+    # is what makes the collision reachable at all.
+    snap = dict(SAMPLE)
+    snap["paper_account"] = {"has_account": True,
+                             "snapshot": {"session_pnl": -70.0}}
+    html = eod.summary_fragment(snap, "/eod/detail")
+    assert 'class="v neg"' in html, "the tile no longer carries both classes"
