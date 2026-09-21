@@ -235,7 +235,7 @@ else:                                   # pragma: no cover - a broken checkout
     log.warning("no static directory at %s: the public header will render the "
                 "wordmark without its mark", _STATIC_DIR)
 
-# ── tab storage lives an hour ────────────────────────────────────────────────
+# ── how long a tab's storage lives ───────────────────────────────────────────
 # The public Calculator hands its position to the public Simulator through
 # ``app.storage.tab`` (``pages/options/public_handoff.py``), per browser tab and
 # in this process's memory. NiceGUI's default keeps a tab's store for 30 DAYS
@@ -244,8 +244,11 @@ else:                                   # pragma: no cover - a broken checkout
 # unauthenticated origin every anonymous tab would hold its dict for a month -
 # memory growth this process's MemoryMax would eventually answer by dying. An
 # hour covers a visit; nothing here is meant to outlive one.
-_TAB_STORAGE_MAX_AGE_SEC = 60 * 60   # one hour
-nicegui_app.storage.max_tab_storage_age = _TAB_STORAGE_MAX_AGE_SEC
+# ``[visitor] handoff_keep_min`` in config/tools_public.toml, read ONCE here, so
+# a change needs a restart of this process.
+from shared import public_tools  # noqa: E402 - stdlib, config and validators only
+
+nicegui_app.storage.max_tab_storage_age = public_tools.handoff_keep_min() * 60
 
 # The private app's content container, ``pb-10`` included: that padding clears
 # the fixed market-summary marquee, which this process mounts too (2026-09-21).

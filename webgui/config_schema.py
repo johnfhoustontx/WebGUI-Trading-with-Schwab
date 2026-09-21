@@ -763,6 +763,14 @@ _TOOLS_PUBLIC = ConfigFile(
             Field("visitor.math_per_hour", "Pricing requests per visitor per hour",
                   "The Calculator reprices on every edit, so this is generous.",
                   kind="int", min=1, max=10000, step=10),
+            Field("visitor.handoff_keep_min",
+                  "Keep a tab's Calculator position for",
+                  "How long a browser tab keeps the position the Calculator "
+                  "hands to the Simulator, after it last changed. Held in the "
+                  "public site's memory only. Read when the public site "
+                  "starts, so a change needs a restart of the public site "
+                  "(webgui_live on the System Status page).",
+                  kind="int", unit="min", min=1, max=1440, step=5),
         )),
     ),
 )

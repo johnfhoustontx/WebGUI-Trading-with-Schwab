@@ -449,6 +449,11 @@ DEFAULTS = {
         # but still costs the service CPU, so its cap is far higher.
         "tools_per_hour": 60,
         "math_per_hour": 600,
+        # Minutes the public site keeps the Calculator -> Simulator hand-off in
+        # a browser tab's storage (webgui/pages/options/public_handoff.py). Read
+        # ONCE at startup by webgui/live_main.py, into NiceGUI's
+        # ``max_tab_storage_age``, so a change needs a restart of that process.
+        "handoff_keep_min": 60,
     },
 }
 # ⚠ The daily Schwab budget is deliberately NOT here: it is one budget shared
@@ -480,3 +485,9 @@ def tools_per_hour() -> int:
 
 def math_per_hour() -> int:
     return _num("visitor", "math_per_hour", minimum=1)
+
+
+def handoff_keep_min() -> int:
+    """Minutes a tab keeps the hand-off; a bad, non-finite or sub-1 value is
+    the default hour."""
+    return _num("visitor", "handoff_keep_min", minimum=1)

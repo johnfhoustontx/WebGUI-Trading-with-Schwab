@@ -41,3 +41,8 @@ chain_hold_limit = 16
 tools_per_hour = 60
 # Repricing, implied volatility and sweeps: arithmetic only, no Schwab call.
 math_per_hour = 600
+# Minutes the public site keeps the position the Calculator hands to the
+# Simulator, per browser tab, after the tab last changed it. In the public
+# process's memory only; nothing survives a visit. Read once when the public
+# site starts, so a change needs a restart of webgui_live.
+handoff_keep_min = 60

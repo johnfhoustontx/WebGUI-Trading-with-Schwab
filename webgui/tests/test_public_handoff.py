@@ -1,7 +1,6 @@
 """The public Calculator -> Simulator hand-off over NiceGUI tab storage."""
 import datetime as dt
 import pathlib
-import re
 
 import pytest
 
@@ -105,15 +104,36 @@ def test_read_with_no_client_returns_none_and_does_not_raise():
 
 
 def test_write_with_no_client_is_a_silent_no_op():
-    ph.write(ph.position_payload("SPY", _legs()))
+    ph.write("SPY", _legs())
 
 
 def test_write_then_read_over_a_tab_store(monkeypatch):
     store = {}
     monkeypatch.setattr(ph, "_tab", lambda: store)
-    ph.write(ph.position_payload("SPY", _legs()))
+    ph.write("SPY", _legs())
     assert set(store) == {ph.KEY}
     assert ph.read() == ("SPY", _legs())
+
+
+def test_write_of_what_read_returned_round_trips(monkeypatch):
+    """``write(*read())`` stores the same position back: the two are shaped
+    alike, and a leg with no price survives the trip."""
+    store = {}
+    monkeypatch.setattr(ph, "_tab", lambda: store)
+    unpriced = _leg()
+    del unpriced["premium"]
+    ph.write("spy", [unpriced, *_legs()])
+    first = ph.read()
+    ph.write(*first)
+    assert ph.read() == first
+    assert first[1][0]["premium"] is None
+
+
+def test_write_stores_the_normalized_payload(monkeypatch):
+    store = {}
+    monkeypatch.setattr(ph, "_tab", lambda: store)
+    ph.write(" spy ", [{**_leg(), "junk": 1}])
+    assert store[ph.KEY] == {"symbol": "SPY", "legs": [_leg()]}
 
 
 def test_read_revalidates_what_is_stored(monkeypatch):
@@ -129,28 +149,65 @@ def test_read_revalidates_what_is_stored(monkeypatch):
 def test_write_refuses_a_malformed_payload_and_leaves_nothing(monkeypatch):
     store = {}
     monkeypatch.setattr(ph, "_tab", lambda: store)
-    ph.write({"symbol": "SPY", "legs": [_leg(strike=float("nan"))]})
-    ph.write(None)
+    ph.write("SPY", [_leg(strike=float("nan"))])
+    ph.write("../x", _legs())
+    ph.write("SPY", None)
     assert store == {}
 
 
-def test_a_store_that_raises_is_a_silent_no_op(monkeypatch):
+@pytest.mark.parametrize("exc", [
+    RuntimeError("app.storage.tab can only be used with a client connection"),
+    AssertionError("tab storage for x should be created before accessing it"),
+])
+def test_a_store_that_raises_is_a_silent_no_op(monkeypatch, exc):
+    """Both of NiceGUI 3.13's failures: no socket connection yet
+    (RuntimeError) and a tab whose storage was pruned (AssertionError)."""
     def _boom():
-        raise RuntimeError("app.storage.tab can only be used with a client connection")
+        raise exc
     monkeypatch.setattr(ph, "_tab", _boom)
-    ph.write(ph.position_payload("SPY", _legs()))
+    ph.write("SPY", _legs())
     assert ph.read() is None
 
 
 # ── the tab-storage age on the public process ───────────────────────────────
 
-def test_live_main_caps_tab_storage_at_one_hour_before_it_runs():
-    src = (pathlib.Path(__file__).resolve().parents[1] / "live_main.py").read_text(
-        encoding="utf-8")
-    # NiceGUI 3.13: ``Storage.max_tab_storage_age`` (nicegui/storage.py),
-    # read by ``prune_tab_storage`` (nicegui/app/app.py) every 10 s.
-    m = re.search(r"^nicegui_app\.storage\.max_tab_storage_age = "
-                  r"_TAB_STORAGE_MAX_AGE_SEC$", src, re.MULTILINE)
-    assert m, "live_main must set app.storage.max_tab_storage_age"
-    assert re.search(r"^_TAB_STORAGE_MAX_AGE_SEC = 60 \* 60 ", src, re.MULTILINE)
-    assert m.start() < src.index("ui.run(")
+def _tab_age_assignments():
+    """Every module-level ``<x>.storage.max_tab_storage_age = <expr>`` in
+    live_main, and the index of the ``if __name__`` block that runs the app."""
+    import ast
+    tree = ast.parse((pathlib.Path(__file__).resolve().parents[1] / "live_main.py")
+                     .read_text(encoding="utf-8"))
+    sets = [(i, n) for i, n in enumerate(tree.body) if isinstance(n, ast.Assign)
+            and any(ast.unparse(t).endswith("storage.max_tab_storage_age")
+                    for t in n.targets)]
+    run_at = next(i for i, n in enumerate(tree.body) if isinstance(n, ast.If)
+                  and "ui.run(" in ast.unparse(n))
+    return sets, run_at
+
+
+def test_live_main_sets_tab_storage_age_from_config_before_it_runs():
+    """The age EVALUATED, not pattern-matched: the right-hand side is run
+    against the real ``shared.public_tools`` (defaults under pytest), so a
+    ``* 60 * 24`` - a day - or a hard-coded number fails."""
+    import ast
+    from shared import public_tools
+    sets, run_at = _tab_age_assignments()
+    assert len(sets) == 1, "live_main must set max_tab_storage_age exactly once"
+    idx, node = sets[0]
+    assert ast.unparse(node.targets[0]) == "nicegui_app.storage.max_tab_storage_age"
+    assert idx < run_at
+    value = eval(compile(ast.Expression(node.value), "live_main", "eval"),
+                 {"__builtins__": {}, "public_tools": public_tools})
+    assert value == 60 * 60                        # the shipped hour, in seconds
+    assert "handoff_keep_min()" in ast.unparse(node.value)
+
+
+def test_the_tab_storage_age_follows_the_config(monkeypatch):
+    """Tuning the TOML moves the age: the value is not a constant in disguise."""
+    import ast
+    from shared import public_tools
+    monkeypatch.setattr(public_tools, "load",
+                        lambda: {"visitor": {"handoff_keep_min": 5}})
+    (_, node), = _tab_age_assignments()[0]
+    assert eval(compile(ast.Expression(node.value), "live_main", "eval"),
+                {"__builtins__": {}, "public_tools": public_tools}) == 300

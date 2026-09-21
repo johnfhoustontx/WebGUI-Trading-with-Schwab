@@ -14,14 +14,15 @@ would be one store shared by every visitor, so one visitor's legs would appear
 on the next visitor's Simulator (and ``app_settings`` is frozen there anyway).
 Tab storage is keyed by NiceGUI's per-tab id, so it is per visitor, per tab.
 
-⚠ How ``app.storage.tab`` behaves in NiceGUI 3.13: it RAISES ``RuntimeError``
-until the page's socket connection is up (``Storage.tab`` checks
-``client.has_socket_connection``), and outside any page it raises too. So
-:func:`read` returns None - and :func:`write` does nothing - during a page's
-synchronous build; a page that wants the seed must ``await
-ui.context.client.connected()`` first. Both swallow every failure, because a
-lost hand-off costs a visitor re-typing a symbol and a traceback costs a
-journal line per anonymous visit.
+⚠ How ``app.storage.tab`` behaves in NiceGUI 3.13 (``Storage.tab``,
+nicegui/storage.py): it RAISES in two ways. ``RuntimeError`` until the page's
+socket connection is up (and outside any page); ``AssertionError`` when the
+tab's storage does not exist - not created yet, or already pruned once it
+outlived ``max_tab_storage_age``. So :func:`read` returns None - and
+:func:`write` does nothing - during a page's synchronous build; a page that
+wants the seed must ``await ui.context.client.connected()`` first. Both swallow
+ANY exception rather than those two, because a lost hand-off costs a visitor
+re-typing a symbol and a traceback costs a journal line per anonymous visit.
 
 What is stored is re-validated on the way OUT as well as on the way in - the
 same leg cleaner the public request builders use
@@ -71,16 +72,16 @@ def _tab():
     return app.storage.tab
 
 
-def write(payload) -> None:
-    """Store a position for this browser tab. A malformed payload, no client,
-    or tab storage not ready is a silent no-op."""
-    clean = seed_from(payload)
-    if clean is None:
+def write(symbol, legs) -> None:
+    """Store a position for this browser tab, built and normalized by
+    :func:`position_payload`, so ``write(*read())`` round-trips. An invalid
+    position, no client, or tab storage not ready is a silent no-op."""
+    payload = position_payload(symbol, legs)
+    if payload is None:
         return
-    symbol, legs = clean
     try:
-        _tab()[KEY] = {"symbol": symbol, "legs": legs}
-    except Exception:     # no client / not connected yet / tab storage not created
+        _tab()[KEY] = payload
+    except Exception:     # not connected (RuntimeError) / no tab store (AssertionError)
         return
 
 
@@ -89,6 +90,6 @@ def read():
     including when there is no client or tab storage is not ready."""
     try:
         stored = _tab().get(KEY)
-    except Exception:     # no client / not connected yet / tab storage not created
+    except Exception:     # not connected (RuntimeError) / no tab store (AssertionError)
         return None
     return seed_from(stored)

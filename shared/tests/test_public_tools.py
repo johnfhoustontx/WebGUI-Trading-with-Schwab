@@ -437,3 +437,21 @@ def test_a_known_code_is_kept():
 def test_price_needed_is_a_worded_outcome():
     assert "price_needed" in pt.OUTCOMES
     assert pt.OUTCOME_TEXT["price_needed"]
+
+
+# ── the tab hand-off's age (read once by webgui/live_main.py) ───────────────
+
+def test_the_handoff_keeps_an_hour_by_default():
+    assert pt.DEFAULTS["visitor"]["handoff_keep_min"] == 60
+    assert pt.handoff_keep_min() == 60
+
+
+def test_the_handoff_age_reads_a_good_value(monkeypatch):
+    monkeypatch.setattr(pt, "load", lambda: {"visitor": {"handoff_keep_min": 15}})
+    assert pt.handoff_keep_min() == 15
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), True, 0, -5, "60"])
+def test_a_bad_handoff_age_falls_back_to_the_hour(monkeypatch, bad):
+    monkeypatch.setattr(pt, "load", lambda: {"visitor": {"handoff_keep_min": bad}})
+    assert pt.handoff_keep_min() == 60
