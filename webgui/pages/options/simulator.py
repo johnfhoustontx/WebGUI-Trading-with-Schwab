@@ -308,9 +308,26 @@ def replay_figure(trace, cursor=None):
     }
 
 
-def render():
+def render(public=False):
     """Simulator page: the shared entry panel (chain grid + leg table) +
-    position tiles + Replay / What-if / IV-shock tabs."""
+    position tiles + Replay / What-if / IV-shock tabs.
+
+    ``public=True`` is the PUBLIC site's Simulator, a different page
+    (``sim_live``), answered through the public tools streams. It returns
+    before this page builds anything, so the owner's ``sim_*`` commands and the
+    single-user ``shared_position`` / ``page_state`` stores never exist on the
+    public origin. The public screen names this module so
+    ``live_screens.private_route`` stays true. Every function that enqueues
+    opens with ``if not _may_enqueue: return``."""
+    if public:
+        from . import sim_live
+        return sim_live.render()
+    # The private page on the public origin would be a bug: nothing routes it
+    # there (the public screen passes public=True). The gate is the belt the
+    # live-commands guard asks every published module for, beside the braces
+    # of never building the page at all - the swing.py precedent.
+    import shell as _shell_gate
+    _may_enqueue = _shell_gate.may_enqueue()
     from nicegui import run
 
     from pages import ui_kit as kit
@@ -817,6 +834,8 @@ def render():
     @guard
     def _enqueue_run():
         """Enqueue a sim_run immediately (used for discrete strategy/leg edits)."""
+        if not _may_enqueue:
+            return          # the public origin uses sim_live only
         if state.get("restoring"):
             return
         params = _current_params()
@@ -829,6 +848,8 @@ def render():
         """Enqueue a sim_replay — fires on discrete strategy/leg edits + look-back
         changes (not the dt/mult sliders), since the replay trace depends only on
         the legs + the look-back window."""
+        if not _may_enqueue:
+            return          # the public origin uses sim_live only
         if state.get("restoring"):
             return
         if not state.get("meta") or not _legs_payload():
@@ -857,6 +878,8 @@ def render():
 
     @guard
     def _flush_pending():
+        if not _may_enqueue:
+            return          # the public origin uses sim_live only
         if state["pending"] is not None:
             bus_client.request("options", {"type": "sim_run", "args": state["pending"]})
             state["pending"] = None
@@ -864,6 +887,8 @@ def render():
     # ── load ─────────────────────────────────────────────────────────────────
     @guard
     def _request_fetch(show_wait=False):
+        if not _may_enqueue:
+            return          # the public origin uses sim_live only
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
             # VALIDATION, not an outcome: it belongs under the field the reader
@@ -914,6 +939,8 @@ def render():
 
         An expiry the snapshot does not hold yet is fetched first
         (``sim_fetch_expiry``); the legs move when its meta lands."""
+        if not _may_enqueue:
+            return          # the public origin uses sim_live only
         if not expiry or state.get("restoring"):
             return
         if expiry not in _expiries_for():

@@ -965,14 +965,31 @@ def strikes_window(strikes, spot, n):
     return below + above
 
 
-def render():
+def render(public=False):
     """Build the Calculator page: the shared entry panel, the pricing
     assumptions, then the six metric cards and the P&L matrix.
+
+    ``public=True`` is the PUBLIC site's Calculator, a different page
+    (``calc_live``), answered through the public tools streams. It returns
+    before this page builds anything, so the owner's bus commands, the
+    single-user ``shared_position`` / ``page_state`` stores and the Paper
+    hand-off never exist on the public origin. The public screen names this
+    module so ``live_screens.private_route`` stays true.
 
     No engine call here — a load enqueues ``calc_load`` and the recalculation
     debounce enqueues ``calc_compute``; version-polls on the cache views paint the
     grid, the legs and the metrics/matrix. Leg prices and the IV fallback run the
-    pure chain readers LOCALLY on the cached chain dict."""
+    pure chain readers LOCALLY on the cached chain dict. Every function that
+    enqueues opens with ``if not _may_enqueue: return``."""
+    if public:
+        from . import calc_live
+        return calc_live.render()
+    # The private page on the public origin would be a bug: nothing routes it
+    # there (the public screen passes public=True). The gate is the belt the
+    # live-commands guard asks every published module for, beside the braces
+    # of never building the page at all - the swing.py precedent.
+    import shell as _shell_gate
+    _may_enqueue = _shell_gate.may_enqueue()
     import time
 
     from nicegui import ui, run
@@ -1413,6 +1430,8 @@ def render():
 
         An expiry whose strikes have not been fetched yet is requested first
         (``calc_load_expiry``); the legs move when it lands, in ``_merge_chain``."""
+        if not _may_enqueue:
+            return          # the public origin uses calc_live only
         if state.get("restoring") or state.get("applying"):
             return
         if not panel.is_loaded(expiry):
@@ -1467,6 +1486,8 @@ def render():
         ``show_wait`` (user-initiated: Load button / symbol tab-out / Enter) shows the
         centered wait overlay until the chain arrives (or a safety timeout).
         Mount-time auto-loads (restore / handoff) pass show_wait=False."""
+        if not _may_enqueue:
+            return          # the public origin uses calc_live only
         sym = (symbol_in.value or "").strip().upper()
         if not sym:
             kit.symbol_error(symbol_in, "Enter a symbol first.")
@@ -1521,6 +1542,8 @@ def render():
 
         Runs automatically after every chain load, so it is SILENT: with nothing
         to imply from, the IV field simply keeps its value."""
+        if not _may_enqueue:
+            return          # the public origin uses calc_live only
         sym = (symbol_in.value or "").strip().upper()
         exp_value = panel.selected_expiry()
         if not sym or not exp_value or not price_in.value:
@@ -1576,6 +1599,8 @@ def render():
         leg). When the user has edited the legs (``editor.is_dirty()``) the summary
         routes through the generic numeric path (``strategy="CUSTOM"``); otherwise
         the selected strategy code drives the analytic path where supported."""
+        if not _may_enqueue:
+            return          # the public origin uses calc_live only
         legs = editor.get_legs()
         if not leg_editor.legs_ready(legs):
             return
@@ -1802,6 +1827,8 @@ def render():
     def rate_my_trade():
         """Ask the service to grade the legs on screen, and open the dialog.
         A click while a rating is pending does nothing."""
+        if not _may_enqueue:
+            return          # the public origin uses calc_live only
         if state.get("rating_id"):
             return
         legs = editor.get_legs()
