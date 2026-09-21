@@ -765,10 +765,18 @@ unusable one (a NaN, an infinity, a bool, a past expiration) - on the page
 before sending, and again in the worker. Three differences from the Finder,
 each deliberate: the strikes list carries **no quotes** (bid/ask/mark are
 dropped before the write); results are keyed by a **hash of the normalized
-trade**, so identical trades share one compute and no key names a trade; and
-**nothing records who asked for what** - the status view holds counts only,
-and every request gets its own answer key the page polls, so there is no
-Finder-style `last` map listing visitors' trades. `rescue.render(public=True)`
+trade**, so identical trades share one compute and no key NAME spells a trade;
+and **no list of requests is kept** - the status view holds counts only, and
+every request gets its own answer key the page polls, so there is no
+Finder-style `last` map. ⚠ That is not "nothing is stored": each result holds
+its trade for `result_keep_min` (30 min), readable by any Redis read
+credential including the public process's, and the hash is unsalted. A
+failed compute is answered `error` and never cached (the engine returns
+`{"error": "<ExcType>: ..."}` rather than raising, and that text is not for a
+stranger's screen); a failed strikes fetch is remembered nowhere; each strike
+must be on the listed ladder; and one trade STRUCTURE (the trade less its
+prices) runs at most `structure_runs` times per reuse window, since every
+typed price is otherwise a fresh compute against the shared budget. `rescue.render(public=True)`
 hands off to `pages/options/rescue_live.py` before the owner's at-risk board is
 built, and every private enqueue in `rescue.py` opens with `_may_enqueue`, as
 `test_live_commands.py` requires of any published module. Blueprint:

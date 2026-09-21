@@ -15,6 +15,10 @@ result_ttl_min = 5
 ladder_ttl_min = 60
 # Seconds after a request's last run during which the same request is not re-run.
 dedup_sec = 60
+# Runs of one trade structure (the trade less its prices and size) allowed per
+# result_ttl_min. Each price typed is a new trade to the cache, so without this
+# one structure could be rerun for every price a visitor tries.
+structure_runs = 3
 # Seconds a request may wait in the queue before it is dropped. This is also
 # the replay guard: a backlog replayed at startup is older.
 max_wait_sec = 120

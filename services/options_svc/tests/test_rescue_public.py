@@ -51,13 +51,19 @@ def schwab(monkeypatch):
                                     "label": "Close now"}],
                     "apply_result": {"ok": True}}
         fetch_fails = False
+        load_fails = False          # Schwab did not answer at all
 
     def load(symbol, lazy=False, expiries=None):
         calls.append(("load", symbol, tuple(expiries or ())))
+        if Stub.load_fails:
+            return {"symbol": symbol, "api": symbol, "price": None, "chain": None}
+        if not Stub.expirations:
+            # Schwab ANSWERED: an empty chain, no expirations. A real "none".
+            return {"symbol": symbol, "api": symbol, "price": None,
+                    "chain": {"callExpDateMap": {}, "putExpDateMap": {}}}
         loaded = [NEAR, MID] + [e for e in (expiries or []) if e in Stub.expirations]
         return {"symbol": symbol, "api": symbol, "price": 502.37,
-                "expirations": list(Stub.expirations),
-                "chain": _chain(loaded) if Stub.expirations else None}
+                "expirations": list(Stub.expirations), "chain": _chain(loaded)}
 
     def fetch(api, runs):
         calls.append(("fetch", api, tuple(tuple(r) for r in runs)))
@@ -289,12 +295,28 @@ def test_the_status_view_holds_counts_and_nothing_about_requests(bus, schwab):
     assert "SPY" not in repr(status) and "500" not in repr(status)
 
 
-def test_a_crash_in_the_worker_never_raises_and_clears_busy(bus, schwab, monkeypatch):
-    monkeypatch.setattr(rp, "_handle_compute",
-                        lambda *a: (_ for _ in ()).throw(RuntimeError("x")))
+def test_a_crash_after_busy_is_set_never_raises_and_clears_busy(bus, schwab, monkeypatch):
+    """Raises from INSIDE the run, after ``busy`` is written - the one place a
+    leftover ``busy`` could come from."""
+    seen = []
+
+    def boom(bus_, status):
+        seen.append(dict(status.get("busy") or {}))
+        raise RuntimeError("x")
+    real_write = rp._write_status
+    monkeypatch.setattr(rp, "_count_structure",
+                        lambda key: boom(bus, _status(bus) or {}))
     rp.handle(bus, _compute_cmd())          # must not raise
-    status = _status(bus)
-    assert status is None or status.get("busy") is None
+    assert seen and seen[0].get("kind") == "compute", "busy was never set"
+    assert _status(bus)["busy"] is None
+    assert real_write is rp._write_status
+
+
+def test_a_redis_error_reading_the_status_never_escapes(bus, schwab, monkeypatch):
+    def broken(*a, **k):
+        raise ConnectionError("redis down")
+    monkeypatch.setattr(rp, "_read_status", broken)
+    rp.handle(bus, _compute_cmd())          # must not raise
 
 
 def test_the_worker_is_registered_on_its_own_stream():
@@ -302,3 +324,84 @@ def test_the_worker_is_registered_on_its_own_stream():
     import inspect
     src = inspect.getsource(app_mod)
     assert "(public_rescue.STREAM, rescue_public.handle)" in src
+
+
+# ── from the 2026-09-21 review ──────────────────────────────────────────────
+
+def test_an_engine_error_is_answered_error_and_never_cached_or_shown(bus, schwab):
+    """``compute_rescue_adhoc`` never raises: a failure comes back as
+    ``{"error": "<ExcType>: <message>"}``. That must not be stored as a result
+    the next visitor is served, nor its text shown."""
+    schwab.advisory = {"error": "ConnectionError: HTTPConnectionPool(host='127.0.0.1')"}
+    rp.handle(bus, _compute_cmd())
+    assert _answer(bus, _key()) == "error"
+    assert bus.cache_get(pr.cache_key(pr.result_view(_key()))) is None
+
+
+def test_a_failed_load_is_an_error_and_remembers_nothing(bus, schwab):
+    schwab.load_fails = True
+    rp.handle(bus, _ladder_cmd())
+    assert _answer(bus, pr.ladder_key("SPY")) == "error"
+    assert _ladder(bus) is None, "a failed fetch was stored as a verdict"
+
+
+def test_a_failed_reload_keeps_the_list_already_held(bus, schwab, monkeypatch):
+    rp.handle(bus, _ladder_cmd())
+    held = _ladder(bus)
+    schwab.load_fails = True
+    later = OPEN + dt.timedelta(hours=2)          # the held list is now stale
+    schwab.now = later
+    rp.reset_memory()
+    rp.handle(bus, _ladder_cmd(now=later))
+    assert _answer(bus, pr.ladder_key("SPY")) == "error"
+    assert _ladder(bus) == held
+
+
+def test_a_stale_no_options_verdict_does_not_refuse_a_compute(bus, schwab):
+    schwab.expirations = []
+    rp.handle(bus, _ladder_cmd("SPY"))
+    assert _ladder(bus)["no_options"] is True
+    schwab.expirations = list(LISTED)
+    later = OPEN + dt.timedelta(hours=2)
+    schwab.now = later
+    schwab.calls.clear()
+    rp.handle(bus, _compute_cmd(now=later))
+    assert _answer(bus, _key()) == "done"
+
+
+def test_a_stale_list_reload_asks_again_for_every_expiration_it_had(bus, schwab):
+    rp.handle(bus, _ladder_cmd())
+    rp.handle(bus, _ladder_cmd(expiry=FAR))
+    later = OPEN + dt.timedelta(hours=2)
+    schwab.now = later
+    rp.reset_memory()
+    schwab.calls.clear()
+    rp.handle(bus, _ladder_cmd(expiry="2026-10-16", now=later))
+    kind, _sym, wanted = schwab.calls[0]
+    assert kind == "load" and {NEAR, MID, FAR, "2026-10-16"} <= set(wanted)
+    assert {NEAR, MID, FAR, "2026-10-16"} <= set(_ladder(bus)["strikes"])
+
+
+def test_a_strike_not_on_the_list_is_refused_with_no_call(bus, schwab):
+    rp.handle(bus, _ladder_cmd())
+    schwab.calls.clear()
+    spec = _spec(short_strike=500.01)
+    rp.handle(bus, _compute_cmd(spec))
+    assert schwab.calls == []
+    assert _answer(bus, _key(spec)) == "off_ladder"
+
+
+def test_one_structure_cannot_be_rerun_for_every_price(bus, schwab):
+    """Each typed price is a new trade to the cache and the dedup; the
+    structure cap is what stops one trade spending the shared budget."""
+    limit = pr.limits()["structure_runs"]
+    for i in range(limit):
+        rp.handle(bus, _compute_cmd(_spec(entry_credit=1.0 + i / 100)))
+    schwab.calls.clear()
+    spec = _spec(entry_credit=2.5)
+    rp.handle(bus, _compute_cmd(spec))
+    assert schwab.calls == []
+    assert _answer(bus, _key(spec)) == "throttled"
+    other = _spec(short_strike=505.0, long_strike=500.0)
+    rp.handle(bus, _compute_cmd(other))
+    assert _answer(bus, _key(other)) == "done", "the cap bled onto another trade"

@@ -21,8 +21,17 @@ its Redis permission is not applied.**)
   refusal (invalid, expired, cached, not listed, no options, duplicate,
   closed, over budget) is decided before any Schwab call.
 - **Differs from the Finder on purpose:** the strikes list carries no quotes;
-  results are keyed by a hash of the normalized trade; nothing records which
-  trades visitors entered (counts only, plus a per-request answer key).
+  results are keyed by a hash of the normalized trade; no LIST of requests is
+  kept (counts only, plus a per-request answer key). Each result still holds
+  its trade for 30 minutes, readable by the public process's Redis user.
+- **Independent review, same day** (no critical findings), fixed before
+  promoting: a failed compute was answered "done", cached, and its raw
+  exception text shown to the public; a failed strikes fetch was stored as
+  "no listed options" for up to three hours; one trade could be rerun for
+  every price typed (now capped per structure, and every strike must be on
+  the listed ladder); a refused per-leg fetch left the leg on an expiration
+  with no strikes; a stale list reload dropped expirations loaded earlier;
+  `handle` could raise on a Redis error; the privacy claim was overstated.
 - **Budgets unmeasured.** 200 rescues and 400 strikes loads a day, 20 and 60
   an hour per visitor (`config/rescue_public.toml`), set from an estimated 3-6
   Schwab calls a rescue. Blueprint Phase 0 (measure on prod during the session)

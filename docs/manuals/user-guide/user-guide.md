@@ -177,9 +177,10 @@ prices, and the cards show each leg without its fill price unless **Show
 per-leg bid and ask** is on in the Public Strategy Finder settings. It runs
 08:40–15:00 CT on trading days, with 200 rescues and 400 symbol loads a day for
 all visitors together and 20 rescues an hour for each visitor. The same trade
-asked for again within 5 minutes shows the earlier answer. Nothing records
-which trades visitors entered. Every limit is in **Settings → Configuration →
-Public Rescue form**.
+asked for again within 5 minutes shows the earlier answer, and the same
+strikes can be computed only 3 times in those 5 minutes whatever prices are
+typed. No list of visitors' requests is kept, but each answer is held for 30
+minutes. Every limit is in **Settings → Configuration → Public Rescue form**.
 
 `https://neuralstrike.co/live.html` is a thumbnail menu of them, and the site's
 **Tools** menu links the two screens a visitor can act on.

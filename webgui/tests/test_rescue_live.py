@@ -227,12 +227,22 @@ def test_the_public_page_builds_no_owner_board_and_reads_no_owner_key(monkeypatc
 
 
 def test_the_page_module_enqueues_only_through_the_public_requests():
+    """Every call whose name says it writes - ``request*``, ``enqueue*``,
+    ``cache_set``, ``publish`` - on ANY receiver, and no ``from bus_client
+    import`` that would hide a write behind a bare name."""
     tree = ast.parse(SRC.read_text(encoding="utf-8"))
-    calls = {ast.unparse(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)
-             and ast.unparse(n.func).startswith("bus_client.")}
-    writes = {c for c in calls if c.startswith("bus_client.request")}
-    assert writes == {"bus_client.request_public_ladder",
-                      "bus_client.request_public_rescue"}
+    writes = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+            name = n.func.attr
+            if name.startswith(("request", "enqueue")) or name in ("cache_set",
+                                                                    "publish"):
+                writes.add(ast.unparse(n.func))
+    # ``pr.request_key`` is named like a write but only hashes a command.
+    assert writes - {"pr.request_key"} == {"bus_client.request_public_ladder",
+                                          "bus_client.request_public_rescue"}
+    assert not [n for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)
+                and (n.module or "").split(".")[-1] == "bus_client"]
 
 
 def test_the_page_module_names_no_owner_view():
@@ -365,3 +375,27 @@ def test_a_refused_compute_says_why(page):
     _answer(key, "budget")
     _run(page, "_poll")
     assert pr.OUTCOME_TEXT["budget"] in _joined(page)
+
+
+
+def test_a_leg_fetch_over_the_limit_puts_the_leg_back(page, monkeypatch):
+    _loaded(page)
+    _sent()
+    monkeypatch.setattr(rescue_live.LADDERS, "allow", lambda key: False)
+    with page:
+        _leg_expiry_selects(page)[0].value = FAR
+    assert _sent() == []
+    assert _editor().get_legs()[0]["expiry"] in (NEAR, MID), \
+        "the leg stayed on an expiration with no strikes"
+    assert "limit" in _joined(page)
+
+
+def test_an_engine_error_is_worded_never_shown_raw(page):
+    _priced(page)
+    _click(page, "Compute rescue options")
+    key = pr.spec_key(_sent()[0].args["spec"])
+    _answer(key, "error")
+    _run(page, "_poll")
+    text = _joined(page)
+    assert pr.OUTCOME_TEXT["error"] in text
+    assert "ConnectionError" not in text

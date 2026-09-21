@@ -345,14 +345,24 @@ def render():
         if move_all:
             state["pending_move"] = expiry
         status.text = f"Loading strikes for {expiry}…"
-        _send("ladder", pr.ladder_key(symbol, expiry),
-              lambda: bus_client.request_public_ladder(symbol, expiry),
-              lambda outcome: _on_expiry_loaded(symbol, expiry, outcome),
-              lambda outcome: _expiry_refused(expiry, outcome))
+        sent = _send("ladder", pr.ladder_key(symbol, expiry),
+                     lambda: bus_client.request_public_ladder(symbol, expiry),
+                     lambda outcome: _on_expiry_loaded(symbol, expiry, outcome),
+                     lambda outcome: _expiry_refused(expiry, outcome))
+        if not sent:
+            # Over the hourly limit, or the request could not be written: the
+            # strikes are not coming, so the leg must not stay parked on an
+            # expiration it has no strikes for. ``_send`` already said why.
+            said = status.text
+            _expiry_refused(expiry, None)
+            status.text = said
 
     async def _on_expiry_loaded(symbol, expiry, outcome):
         ladder = await run.io_bound(bus_client.read, pr.ladder_view(symbol))
-        if not ladder or state["symbol"] != symbol:
+        if state["symbol"] != symbol:
+            return                          # another symbol loaded meanwhile
+        if not ladder:
+            _expiry_refused(expiry, "error")
             return
         state["ladder"] = ladder
         if expiry not in loaded_expirations(ladder):

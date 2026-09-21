@@ -727,6 +727,10 @@ _RESCUE_PUBLIC = ConfigFile(
                   kind="int", unit="min", min=1, max=480, step=5),
             Field("limits.dedup_sec", "Ignore a repeat request for", "",
                   kind="int", unit="s", min=0, max=3600, step=5),
+            Field("limits.structure_runs", "Runs of one trade per reuse window",
+                  "The same strikes and expiration with different prices. "
+                  "Stops one trade being rerun for every price typed.",
+                  kind="int", min=1, max=50, step=1),
             Field("limits.max_wait_sec", "Drop a request that waited", "",
                   kind="int", unit="s", min=10, max=3600, step=10),
             Field("limits.daily_budget", "Rescues per day",

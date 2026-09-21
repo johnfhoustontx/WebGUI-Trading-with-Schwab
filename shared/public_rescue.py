@@ -105,7 +105,10 @@ def _finite(v, *, lo=None, hi=None):
     int and would read as 1.0."""
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
-    f = float(v)
+    try:
+        f = float(v)
+    except OverflowError:            # an int too large for a float
+        return None
     if not math.isfinite(f):
         return None
     if lo is not None and not f > lo:
@@ -209,8 +212,45 @@ def _hash(*parts) -> str:
 
 def spec_key(spec) -> str:
     """The result key of a NORMALIZED trade. Content-addressed: the same trade
-    always hashes the same, and the key reveals nothing about it."""
+    always hashes the same.
+
+    ⚠ The hash keeps the trade out of the key NAME, nothing more. The result
+    stored under it holds the whole position for ``result_keep_min``, readable
+    by anything holding a Redis read credential - the public process included.
+    And it is unsalted: a visitor who enters an exact trade and is served a
+    cached answer learns someone entered it in the last few minutes."""
     return _hash("compute", spec)
+
+
+def structure_key(spec) -> str:
+    """The trade LESS its prices and size: symbol, strategy, expiration and
+    strikes. Every price a visitor types is a different trade to the cache, so
+    the worker caps runs per structure on this key instead."""
+    return _hash("structure", {k: v for k, v in spec.items()
+                               if k not in ("entry_credit", "quantity")})
+
+
+def spec_strikes(spec):
+    """``[(side, strike), ...]`` for every strike the trade names, side being
+    ``"call"`` or ``"put"``."""
+    strategy = spec.get("strategy")
+    if "legs" in spec:
+        return [(leg["right"].lower(), leg["strike"]) for leg in spec["legs"]]
+    if strategy == "IC":
+        return [("put", spec["short_strike"]), ("put", spec["long_strike"]),
+                ("call", spec["call_short"]), ("call", spec["call_long"])]
+    side = "call" if strategy in ("CCS", "LONG_CALL", "NAKED_CALL",
+                                  "VERT_CALL_DEBIT") else "put"
+    return [(side, spec[k]) for k in ("short_strike", "long_strike") if k in spec]
+
+
+def strikes_on_ladder(spec, ladder) -> bool:
+    """Whether every strike the trade names is listed, on its side, in
+    ``ladder`` (``{"call": [...], "put": [...]}`` for the trade's expiration).
+    Bounds what a request can ask for to strikes that exist, rather than any
+    positive number a visitor can type."""
+    listed = {side: set(ladder.get(side) or []) for side in ("call", "put")}
+    return all(strike in listed[side] for side, strike in spec_strikes(spec))
 
 
 def ladder_key(symbol, expiry=None) -> str:
@@ -266,16 +306,19 @@ def request_key(command) -> str | None:
 
 # How a request ended. "done" and "cached" carry a result; every other code is
 # a refusal, and each is decided before any Schwab call except "error".
-OUTCOMES = ("done", "cached", "duplicate", "closed", "budget", "not_listed",
-            "no_options", "expired", "invalid", "error")
+OUTCOMES = ("done", "cached", "duplicate", "throttled", "closed", "budget",
+            "not_listed", "off_ladder", "no_options", "expired", "invalid", "error")
 
 OUTCOME_TEXT = {
     "done": "Rescue options computed just now.",
     "cached": "Showing rescue options computed in the last few minutes.",
     "duplicate": "This was just asked for. Try again in a minute.",
+    "throttled": ("This trade was just computed several times with other prices. "
+                  "Try again in a few minutes."),
     "closed": "Rescue runs while the market is open.",
     "budget": "Today's public rescues are used up. They reset tomorrow.",
     "not_listed": "That expiration is not listed for this symbol.",
+    "off_ladder": "A strike in this trade is not listed for that expiration.",
     "no_options": "No listed options were found for this symbol.",
     "expired": "The request waited too long in the queue. Please try again.",
     "invalid": "That trade could not be read. Check the legs and try again.",
@@ -295,6 +338,10 @@ DEFAULTS = {
         "ladder_ttl_min": 60,
         # The same request inside this many seconds of its last run is not re-run.
         "dedup_sec": 60,
+        # Runs of one trade STRUCTURE (the trade less its prices and size) per
+        # ``result_ttl_min``. Each price typed is a new trade to the cache, so
+        # without this one structure could be rerun for every price.
+        "structure_runs": 3,
         # A request older than this is dropped unrun: it covers a replayed
         # backlog and a queue that has fallen behind.
         "max_wait_sec": 120,

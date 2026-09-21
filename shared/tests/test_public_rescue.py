@@ -248,3 +248,31 @@ def test_public_rescue_imports_only_config_and_the_symbol_allow_list():
     stray = {m for m in new if m not in EXPECTED and m.split(".")[0] != "tzdata"}
     assert not stray, sorted(stray)
     assert {"shared.public_rescue", "shared.symbols"} <= new
+
+
+# ── structure and strikes (from the 2026-09-21 review) ─────────────────────
+
+def test_the_structure_key_ignores_price_and_size_only():
+    a = pr.clean_spec(_pcs(), TODAY)
+    assert pr.structure_key(a) == pr.structure_key(
+        pr.clean_spec(_pcs(entry_credit=3.0, quantity=7), TODAY))
+    assert pr.structure_key(a) != pr.structure_key(
+        pr.clean_spec(_pcs(short_strike=505.0), TODAY))
+
+
+def test_strikes_are_read_on_the_right_side():
+    ic = pr.clean_spec(_pcs(strategy="IC", call_short=510.0, call_long=515.0), TODAY)
+    assert pr.spec_strikes(ic) == [("put", 500.0), ("put", 495.0),
+                                   ("call", 510.0), ("call", 515.0)]
+    ccs = pr.clean_spec(_pcs(strategy="CCS", short_strike=510.0,
+                             long_strike=515.0), TODAY)
+    assert {s for s, _ in pr.spec_strikes(ccs)} == {"call"}
+    ladder = {"call": [510.0, 515.0], "put": [495.0, 500.0]}
+    assert pr.strikes_on_ladder(ic, ladder)
+    assert not pr.strikes_on_ladder(ic, {"call": [510.0], "put": [495.0, 500.0]})
+    assert not pr.strikes_on_ladder(ccs, {"put": [510.0, 515.0]}), \
+        "a call strike was matched against the put list"
+
+
+def test_a_huge_integer_is_refused_not_raised():
+    assert pr.clean_spec(_pcs(short_strike=10 ** 400), TODAY) is None
