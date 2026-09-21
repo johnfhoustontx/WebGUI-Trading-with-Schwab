@@ -18,8 +18,14 @@ you whether everything is up:
 Below the component checks it shows a **data-freshness** table: for each domain
 it reads the representative cache view's version + timestamp, so you can tell a
 service is not just *up* but actively *publishing* (a service can answer
-``/health`` while its scheduler is wedged). Heavy/blocking probes run off-thread
-via ``nicegui.run.io_bound``; the page auto-refreshes and has a manual Refresh.
+``/health`` while its scheduler is wedged). BOTH blocking halves — the component
+sweep and the seven freshness probes — run off-thread via
+``nicegui.run.io_bound``; the page auto-refreshes and has a manual Refresh.
+
+Since the Phase 6 kit migration the frame is ``pages/ui_kit.py``: one header
+line, two regions (the cards and the freshness table, each with its own wait),
+and the palette in place of the page's own colours. ⚠ The header's stamp is
+driven BY HAND — see the note in :func:`render`.
 
 The pure builders (status wording/colors, overall rollup, age formatting,
 target/freshness layout) are unit-tested in ``webgui/tests/test_status.py``; the
@@ -27,6 +33,7 @@ network/redis probes are thin and verified by screenshot.
 """
 import datetime as _dt
 import subprocess
+import time as _time
 
 import requests
 from nicegui import run, ui
@@ -34,7 +41,9 @@ from nicegui import run, ui
 import alerts
 import bus_client
 import proxy
-from pages.options.theme import BTN_3D
+from pages import ui_kit as kit
+from pages.options import theme
+from pages.ui_guard import guard, guard_async
 from repo_paths import (
     ENV_NAME,
     IS_DEV,
@@ -60,6 +69,11 @@ _HTTP_TIMEOUT = 2.5
 # the VIEWER's browser, which is why it is PROXY_PUBLIC_URL (the tailnet address)
 # and not PROXY_URL, where 127.0.0.1 would mean the viewer's own device.
 AUTH_URL = f"{PROXY_PUBLIC_URL}/auth"
+
+# The freshness table's row rule. The palette's own hairline, not Tailwind's
+# ``border-gray-700``: a warm grey rule on a navy page reads as a smudge, and a
+# neutral is SURFACE wherever it lives.
+_CARD_BORDER = theme.THEME["palette"]["card_border"]
 
 # A domain's published cache is considered "stale" past this age (services that
 # publish on a timer should refresh well inside this). Trade is on-demand, so its
@@ -421,43 +435,83 @@ def _sweep():
     return [_probe_one(t, proxy_health=health) for t in component_targets()]
 
 
+def _freshness_rows():
+    """The published-data table's rows: seven ``read_meta`` probes → seven
+    :func:`freshness_row` dicts. BLOCKING — runs off the event loop.
+
+    Separated from the painting for exactly that reason. ``_sweep`` has always
+    crossed ``run.io_bound`` and this half never did, so every 15 s tick, in
+    every open tab, seven blocking bus reads ran on the loop.
+    """
+    now = _dt.datetime.now(_dt.timezone.utc)
+    rows = []
+    for label, view, scheduled in _FRESHNESS:
+        ver, ts = bus_client.read_meta(view)
+        rows.append(freshness_row(label, view, ver, ts, now, scheduled))
+    return rows
+
+
 # ── render ───────────────────────────────────────────────────────────────────
+# A restart is followed by a re-sweep sooner than the 15s auto-refresh, and the
+# wait on the components region is held until that sweep lands.
+_RESTART_RESWEEP_SEC = 7.0
+# The auto-refresh cadence, and the first tick that fills the page.
+_AUTO_REFRESH_SEC = 15.0
+_FIRST_SWEEP_SEC = 0.1
+
+
 def render():
-    ui.label("System Status").classes("text-h5")
-    ui.label("Live health of every tier — Redis backbone, schwab-proxy, the "
-             "six domain services, this app, and the public live screens "
-             "beside it.").classes("opacity-70 text-sm")
+    """The health board: one header line with a hand-driven stamp, the overall
+    verdict, a card per component, then the published-data freshness table."""
+    state = {"results": [], "busy": False, "hold_until": 0.0}
 
-    state = {"results": [], "checked_at": None, "busy": False}
+    with kit.page():
+        head = kit.header("System Status")
+        # ⚠ THE STAMP IS DRIVEN BY HAND, and the kit is deliberately NOT edited.
+        # kit.header binds its stamp to a bus view's ``:ts`` side key — the time
+        # a publisher last confirmed that view current. This page has no such
+        # view: its freshness is a PROBE, and nothing publishes "the stack was
+        # last swept at". So the header is built with no ``view=`` (which is
+        # also what keeps it from registering a poll timer that would have
+        # nothing to read), the stamp is shown once here, and ``_refresh`` sets
+        # it from the sweep's own clock through the same public ``set_stamp``.
+        # Putting this ``set_visibility`` inside ``kit.set_stamp`` was
+        # considered and rejected: a kit edit inside a page phase changes every
+        # migrated page's behaviour for one page's benefit.
+        head.stamp.set_visibility(True)
+        head.set_stamp(None)     # "Waiting for data", never a made-up time
+        with head.actions:
+            refresh_btn = kit.button("Refresh", kind="secondary", icon="refresh")
+        banner = ui.row().classes("w-full")
+        region = kit.region("Checking components…")
+        comps = region.content
+        kit.section_title("Published data freshness")
+        fresh = kit.region("Reading the published views…")
 
-    banner = ui.row().classes("w-full")
-    with ui.row().classes("items-center gap-3"):
-        refresh_btn = ui.button("Refresh", icon="refresh", color=None).props("no-caps").classes(BTN_3D)
-        spinner = ui.spinner(size="sm")
-        spinner.set_visibility(False)
-        checked_lbl = ui.label("").classes("text-sm opacity-60")
+    def _paint_banner(ov):
+        """The one-line verdict.
 
-    comps = ui.column().classes("w-full gap-2")
-
-    ui.separator()
-    ui.label("Published data freshness").classes("text-subtitle1 font-bold mt-2")
-    ui.label("Each domain's latest cache write — confirms a service is not just "
-             "up but actively publishing.").classes("opacity-70 text-sm")
-    fresh_box = ui.column().classes("w-full")
+        The three raw Quasar fills (``bg-green-2`` / ``bg-red-2`` /
+        ``bg-grey-3`` — the last use of that palette anywhere in the app) are
+        gone. A component DOWN is the kit's one attention band, which is what a
+        notice is for; all-up and still-checking are a plain line in the
+        palette's own positive and muted colours, because a full-width band
+        across the page for "nothing is wrong" is noise.
+        """
+        banner.clear()
+        with banner:
+            if ov["color"] == "negative":
+                kit.notice(ov["text"], icon="warning")
+                return
+            cls = theme.TXT_POS if ov["all_up"] else theme.MUTED
+            with ui.row().classes("w-full items-center gap-2"):
+                ui.icon("check_circle" if ov["all_up"]
+                        else "hourglass_empty").classes(cls)
+                ui.label(ov["text"]).classes(f"text-sm font-medium {cls}")
 
     def _paint_components():
         results = state["results"]
-        banner.clear()
-        ov = overall_status(results)
-        with banner:
-            cls = {"positive": "bg-green-2 text-green-10",
-                   "negative": "bg-red-2 text-red-10",
-                   "grey": "bg-grey-3 text-grey-9"}[ov["color"]]
-            with ui.row().classes(
-                    f"w-full {cls} rounded p-3 items-center gap-2"):
-                ui.icon("check_circle" if ov["all_up"] else (
-                    "warning" if ov["color"] == "negative" else "hourglass_empty"))
-                ui.label(ov["text"]).classes("font-bold")
+        _paint_banner(overall_status(results))
 
         comps.clear()
         # The Schwab Authorization probe renders MERGED into the proxy card (one
@@ -476,109 +530,127 @@ def render():
                 if merged_auth is not None and up and merged_auth.get("up") is False:
                     icon_up = False
                 with ui.card().classes("w-full"):
-                    with ui.row().classes("items-center gap-3 w-full no-wrap"):
+                    # ⚠ The row WRAPS. It used to be ``no-wrap`` around a fixed
+                    # 280px button slot, which cannot fit a 375px phone — and
+                    # the failure is a card that scrolls sideways rather than
+                    # anything that looks broken. The buttons still line up in
+                    # one column, and never depended on that width: the label
+                    # column grows, so the slot is flush right on every card and
+                    # Restart — always last — sits in the same place on each.
+                    with ui.row().classes("items-center gap-3 w-full flex-wrap"):
                         ui.icon(status_icon(icon_up)).props(
                             f"color={status_color(icon_up)}").classes("text-2xl")
-                        # Labels grow; the status column hugs its content; the
-                        # button slot is a FIXED width with right-justified
-                        # buttons, so every card's buttons line up in one column.
-                        with ui.column().classes("gap-0 flex-1 min-w-0"):
-                            ui.label(r["label"]).classes("font-medium")
+                        with ui.column().classes("gap-0 grow min-w-[180px]"):
+                            ui.label(r["label"]).classes(
+                                f"font-medium {theme.LABEL}")
                             ui.label(f"{r['tier']} · {r['url']}").classes(
-                                "text-xs opacity-60")
+                                f"text-xs {theme.MUTED}")
                         with ui.column().classes("gap-0 items-end shrink-0"):
                             ui.badge(status_word(up)).props(
                                 f"color={status_color(up)}")
                             ui.label(r.get("detail", "")).classes(
-                                "text-xs opacity-60")
+                                f"text-xs {theme.MUTED}")
                             if merged_auth is not None:
                                 ui.label(f"Auth: {merged_auth.get('detail', '')}") \
                                     .classes("text-xs " + (
-                                        "text-negative" if merged_auth.get("up") is False
-                                        else "opacity-60"))
-                        with ui.row().classes(
-                                "shrink-0 w-[280px] justify-end items-center "
-                                "gap-2 no-wrap"):
+                                        theme.TXT_NEG
+                                        if merged_auth.get("up") is False
+                                        else theme.MUTED))
+                        with ui.row().classes("shrink-0 min-w-[120px] justify-end "
+                                              "items-center gap-2 flex-wrap"):
                             if merged_auth is not None and merged_auth.get("up") is not None:
-                                ui.button(
+                                kit.button(
                                     "Re-authorize" if merged_auth.get("up") else "Authorize",
-                                    icon="login", color=None,
-                                    on_click=lambda: ui.navigate.to(AUTH_URL, new_tab=True)) \
-                                    .props("no-caps").classes(BTN_3D)
+                                    kind="secondary", icon="login",
+                                    on_click=lambda: ui.navigate.to(AUTH_URL, new_tab=True))
                             if restart_spec(r) is not None:
-                                ui.button("Restart", icon="restart_alt", color=None,
-                                          on_click=lambda t=r: _restart_clicked(t)) \
-                                    .props("no-caps").classes(BTN_3D)
+                                kit.button("Restart", kind="danger",
+                                           icon="restart_alt",
+                                           on_click=lambda t=r: _restart_clicked(t))
 
-    def _paint_freshness():
-        now = _dt.datetime.now(_dt.timezone.utc)
-        fresh_box.clear()
-        with fresh_box:
-            rows = []
-            for label, view, scheduled in _FRESHNESS:
-                ver, ts = bus_client.read_meta(view)
-                rows.append((freshness_row(label, view, ver, ts, now, scheduled),
-                             scheduled))
-            with ui.element("div").classes("w-full"):
-                for row, _scheduled in rows:
-                    with ui.row().classes("items-center gap-3 w-full no-wrap "
-                                          "py-1 border-b border-gray-700"):
-                        ok = row["present"] and not row["stale"]
-                        color = "positive" if ok else (
-                            "grey" if not row["present"] else "warning")
-                        ui.icon("circle").props(f"color={color}").classes("text-xs")
-                        ui.label(row["label"]).classes("font-medium min-w-[220px]")
-                        ui.label(row["view"]).classes(
-                            "text-xs opacity-60 min-w-[200px]")
-                        ui.label(f"v{row['version']}").classes(
-                            "text-xs opacity-70 min-w-[60px]")
-                        age = row["age"] + (" · STALE" if row["stale"] else "")
-                        ui.label(age).classes(
-                            "text-sm " + ("text-orange" if row["stale"] else
-                                          "opacity-80"))
+    def _paint_freshness(rows):
+        """Draw rows ALREADY READ (see :func:`_freshness_rows`)."""
+        fresh.content.clear()
+        with fresh.content:
+            for row in rows:
+                with ui.row().classes(
+                        f"items-center gap-3 w-full flex-wrap py-1 "
+                        f"border-b border-[{_CARD_BORDER}] last:border-b-0"):
+                    ok = row["present"] and not row["stale"]
+                    color = "positive" if ok else (
+                        "grey" if not row["present"] else "warning")
+                    ui.icon("circle").props(f"color={color}").classes("text-xs")
+                    ui.label(row["label"]).classes(
+                        f"font-medium min-w-[220px] {theme.LABEL}")
+                    ui.label(row["view"]).classes(
+                        f"text-xs min-w-[200px] {theme.MUTED}")
+                    ui.label(f"v{row['version']}").classes(
+                        f"text-xs min-w-[60px] {theme.MUTED}")
+                    age = row["age"] + (" · STALE" if row["stale"] else "")
+                    ui.label(age).classes(
+                        "text-sm " + (theme.TXT_WARN if row["stale"]
+                                      else theme.MUTED))
 
+    @guard
     def _restart_clicked(target):
         try:
             ok = _do_restart(target)
         except Exception as exc:  # noqa: BLE001 — surface, never crash the page.
-            ui.notify(f"Couldn't restart {target['label']}: {exc}", type="negative")
+            kit.toast("error", f"Couldn't restart {target['label']}: {exc}")
             return
         if not ok:
-            ui.notify(f"{target['label']} can't be restarted from here.",
-                      type="warning")
+            # ⚠ UNREACHABLE from the UI: the Restart button is only built where
+            # ``restart_spec(target)`` is not None, which is exactly what
+            # ``_do_restart`` re-checks. Kept deliberately — it is the one
+            # branch that would otherwise report a restart that never happened.
+            kit.toast("warn", f"{target['label']} can't be restarted from here.")
             return
         if target.get("kind") == "self":
-            # Restarting the web app kills THIS page — no point re-sweeping it.
-            ui.notify("Restarting the web app — this page will disconnect. "
-                      "Reload in a few seconds.", type="warning", timeout=10000)
+            # Restarting the web app kills THIS page — no point re-sweeping it,
+            # and no point spinning a wait that can never be dismissed.
+            kit.toast("warn", "Restarting the web app — this page will "
+                              "disconnect. Reload in a few seconds.")
             return
-        ui.notify(f"Restarting {target['label']}… it should come back online "
-                  "within ~15s.", type="warning", timeout=8000)
-        # Re-sweep a bit sooner than the 15s auto-refresh to reflect the change.
-        ui.timer(7.0, _refresh, once=True)
+        # ⚠ The wait goes on the REGION, never on the Restart button:
+        # ``_paint_components`` rebuilds every card every 15 s and would take
+        # the button's busy timer with it, mid-wait. ``hold_until`` is what
+        # stops the auto-refresh — which can land a second after the click —
+        # taking the spinner down eight seconds into a fifteen-second wait.
+        region.busy.show(f"Restarting {target['label']}… it should come back "
+                         "online within ~15s.")
+        state["hold_until"] = _time.monotonic() + _RESTART_RESWEEP_SEC
+        ui.timer(_RESTART_RESWEEP_SEC, _refresh, once=True)
 
+    @guard_async
     async def _refresh():
         if state["busy"]:
             return
         state["busy"] = True
-        spinner.set_visibility(True)
-        refresh_btn.disable()
+        kit.set_busy(refresh_btn)
         try:
-            state["results"] = await run.io_bound(_sweep)
-            state["checked_at"] = _dt.datetime.now()
-            checked_lbl.text = "Last checked " + state["checked_at"].strftime(
-                "%H:%M:%S")
+            # ``or []`` / ``or ()``: run.io_bound answers None once the app is
+            # stopping, and an empty board is the honest reading of that.
+            state["results"] = await run.io_bound(_sweep) or []
             _paint_components()
-            _paint_freshness()
+            _paint_freshness(await run.io_bound(_freshness_rows) or ())
+            # LAST, and only on a sweep that completed: a stamp that advanced
+            # after a failed probe would report a health check that never
+            # happened. A raise leaves the previous time standing and ageing.
+            head.set_stamp(_dt.datetime.now(_dt.timezone.utc).isoformat())
         finally:
-            spinner.set_visibility(False)
-            refresh_btn.enable()
+            kit.set_busy(refresh_btn, False)
+            fresh.busy.hide()
+            if _time.monotonic() >= state["hold_until"]:
+                region.busy.hide()
             state["busy"] = False
 
     refresh_btn.on_click(_refresh)
 
-    # Paint placeholders immediately, kick the first real sweep, then auto-refresh.
-    _paint_components()
-    _paint_freshness()
-    ui.timer(0.1, _refresh, once=True)
-    ui.timer(15.0, _refresh)
+    # The first sweep's wait, then the sweep, then the auto-refresh. Both
+    # regions spin until the first one lands; after that the board stays
+    # readable and only Refresh's own button spins.
+    _paint_components()          # the "Checking components…" verdict
+    region.busy.show()
+    fresh.busy.show()
+    ui.timer(_FIRST_SWEEP_SEC, _refresh, once=True)
+    ui.timer(_AUTO_REFRESH_SEC, _refresh)

@@ -1338,13 +1338,17 @@ An end-of-day summary of the day's options activity and Claude Trades (the auton
     "/status": """
 **System Status — the simple version**
 
-Shows whether each part of the app is alive.
+Shows whether each part of the app is alive. **Updated** in the corner is when
+the last check ran — the page re-checks itself every 15 seconds, and
+**Refresh** does it now.
 
 - **Green/red cards** — Redis, the Schwab gateway, your Schwab login, the six
   services, this web app, and the public live screens beside it. The live
   screens are a separate app on their own address: if that card is red the
   public site is down, and nothing about your own screens is affected.
-- **Data freshness** — flags data that's gone stale. A view is only judged when
+- **Data freshness** — confirms each service is not just *up* but actively
+  publishing: a service can answer a health check with its scheduler wedged.
+  It flags data that's gone stale. A view is only judged when
   its publisher is actually due to run: the **scanner** only scans during the
   session, so overnight and at weekends its age is left alone rather than
   reported as a fault. Everything that publishes round the clock is still checked

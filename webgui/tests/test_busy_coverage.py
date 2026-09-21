@@ -45,8 +45,6 @@ _EXEMPT = {
     # not a repaint of the page you are looking at.
     "terminate.py": "the page intentionally goes unresponsive after confirm",
     "manuals.py": "serves a static file in a new tab",
-    # Already has its own spinner + re-entrancy guard on the sweep (predates this).
-    "status.py": "the Refresh button owns a spinner of its own",
 }
 
 

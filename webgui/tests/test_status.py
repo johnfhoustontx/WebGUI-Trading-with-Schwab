@@ -411,17 +411,29 @@ def test_auth_is_not_restartable():
     assert status.restart_spec(auth_target) is None
 
 
-def test_render_merges_auth_into_proxy_card_with_aligned_buttons():
-    # The Schwab Authorization probe renders merged into the schwab-proxy card
-    # (Authorize + Restart side by side); every card puts its buttons in the
-    # same fixed-width right-justified slot so they align in one column.
+def test_render_merges_auth_into_proxy_card(monkeypatch):
+    """The Schwab Authorization probe renders MERGED into the schwab-proxy card
+    (Authorize + Restart side by side) rather than as a card of its own.
+
+    ⚠ RE-AIMED for the Phase 6 kit migration, not weakened. The old version
+    presence-asserted ``w-[280px]`` and ``justify-end`` in the source; the fixed
+    280px slot went with the migration (inside a ``no-wrap`` row it overflowed a
+    375px phone), so the layout half moved to
+    ``test_every_cards_buttons_line_up_in_one_column``, which asks the RENDERED
+    page instead of grepping for a class literal."""
     import inspect
 
     src = inspect.getsource(status.render)
     assert "merged into the schwab-proxy card" in src
-    assert "w-[280px]" in src and "justify-end" in src
-    # No stray ml-auto button placement remains (the old drift-prone layout).
-    assert "ml-auto {BTN_3D}" not in src
+    host = _render_status(monkeypatch)
+    _run_timer(host, "_refresh")
+    cards = _cards(host)
+    labels = [t for c in cards for t in _texts(c)]
+    assert "Schwab Authorization (OAuth)" not in labels, \
+        "the auth probe grew a card of its own"
+    assert any("Auth: authorized" in str(t) for t in labels), \
+        "the auth detail is nowhere on the page"
+    assert len(cards) == len([r for r in _SWEEP if r["kind"] != "auth"])
 
 
 # --- degrade counts surfaced from /health ------------------------------------
@@ -558,3 +570,440 @@ def test_the_live_probe_reports_down_when_nothing_answers(monkeypatch):
                              "url": "http://127.0.0.1:8501"})
     assert out["up"] is False
     assert "unreachable" in out["detail"]
+
+
+# ── Phase 6, Task 6: the frame, the stamp and the toasts ─────────────────────
+# ⚠ Every test above this line is against the PURE builders and touches no
+# widget. None of them changed, and none of them may: ``status_word`` /
+# ``status_color`` / ``status_icon`` / ``restart_spec`` / ``restart_command``
+# are the page's behaviour, and this migration is presentation.
+import inspect
+
+from pages import ui_kit as kit
+from pages.options import theme
+
+# One of each KIND the page can draw, including the auth probe that merges into
+# the proxy card.
+_SWEEP = [
+    {"key": "memurai", "label": "Memurai (Redis backbone)", "tier": "Tier 3",
+     "kind": "memurai", "url": "redis://127.0.0.1:6379", "up": True,
+     "detail": "PING ok"},
+    {"key": "proxy", "owned": True, "label": "schwab-proxy (market data / auth)",
+     "tier": "Tier 1", "kind": "proxy", "url": "http://127.0.0.1:8100",
+     "up": True, "detail": "healthy"},
+    {"key": "schwab_auth", "label": "Schwab Authorization (OAuth)",
+     "tier": "Tier 1", "kind": "auth", "url": "http://127.0.0.1:8100/auth",
+     "up": True, "detail": "authorized — token valid"},
+    {"key": "options", "label": "options_svc (scan / gamma / paper)",
+     "tier": "Tier 2", "kind": "service", "url": "http://127.0.0.1:8211",
+     "up": True, "detail": "healthy"},
+    {"key": "webgui", "label": "webgui (this app)", "tier": "Tier 1",
+     "kind": "self", "url": "http://127.0.0.1:8500", "up": True,
+     "detail": "serving this page"},
+]
+# The one restartable component, for the tests that need exactly one Restart
+# button on the page.
+_ONE_SERVICE = [_SWEEP[3]]
+
+
+def _fresh_meta():
+    return (7, _dt.datetime.now(_dt.timezone.utc).isoformat())
+
+
+def _render_status(monkeypatch, results=None, meta=None):
+    """Render the page over a pinned sweep and pinned bus metadata."""
+    from nicegui import ui
+    rows = list(results if results is not None else _SWEEP)
+    monkeypatch.setattr(status, "_sweep", lambda: [dict(r) for r in rows])
+    monkeypatch.setattr(status.bus_client, "read_meta",
+                        lambda _view: meta or _fresh_meta())
+    with ui.card() as host:
+        status.render()
+    return host
+
+
+def _texts(el):
+    return [getattr(e, "text", None) for e in el.descendants()]
+
+
+def _labels(el):
+    from nicegui import ui
+    return [e for e in el.descendants() if isinstance(e, ui.label)]
+
+
+def _buttons(el):
+    from nicegui import ui
+    return [b for b in el.descendants() if isinstance(b, ui.button)]
+
+
+def _cards(host):
+    from nicegui import ui
+    return [c for c in host.descendants() if isinstance(c, ui.card)
+            and c is not host]
+
+
+def _fire(el, kind, args=None):
+    """Fire an element's OWN registered listener - what the browser would send."""
+    from nicegui.events import GenericEventArguments
+    fired = [li.handler(GenericEventArguments(sender=el, client=el.client, args=args))
+             for li in list(el._event_listeners.values())
+             if li.type.split(".")[0] == kind and li.handler is not None]
+    assert fired, f"no {kind} listener to fire"
+
+
+def _click(host, text):
+    btn = [b for b in _buttons(host) if b.text == text]
+    assert btn, f"no {text!r} button on the page"
+    _fire(btn[-1], "click")
+
+
+def _restart(host):
+    """Press Restart. Task 7 puts a confirm dialog behind it; every caller goes
+    through here so that change lands in ONE place."""
+    _click(host, "Restart")
+
+
+def _timer(host, name):
+    from nicegui import ui
+    found = [e for e in host.descendants()
+             if isinstance(e, ui.timer)
+             and getattr(e.callback, "__name__", "") == name]
+    assert found, f"no ui.timer registered for {name}()"
+    return found[-1]
+
+
+def _run_timer(host, name):
+    """Drive a page's timer the way the browser's first tick would."""
+    import asyncio
+    t = _timer(host, name)
+
+    async def _drive():
+        with t.parent_slot:
+            result = t.callback()
+            if inspect.isawaitable(result):
+                await result
+
+    asyncio.run(_drive())
+
+
+def _said(monkeypatch):
+    """Everything the page reports, in order: ``(kind, text)``. Both spellings,
+    so a stray ``ui.notify`` is caught rather than missed."""
+    seen = []
+    monkeypatch.setattr(status.ui, "notify",
+                        lambda msg="", **kw: seen.append((kw.get("type"), msg)))
+    monkeypatch.setattr(kit, "toast", lambda kind, text: seen.append((kind, text)))
+    return seen
+
+
+def _scrims(host):
+    """Each ``kit.region``'s spinner scrim - the element whose visibility
+    ``show()``/``hide()`` toggles.
+
+    ⚠ Identified by the scrim's OWN classes, not merely as "the spinner's
+    parent". The pre-migration page had a bare ``ui.spinner`` sitting in a row
+    whose ``.visible`` is always True, so a parent-of-the-spinner helper made
+    every "is the wait on screen" assertion pass vacuously - caught by proving
+    these tests red against the old page (rule 10), which is the whole reason
+    that step exists."""
+    from nicegui import ui
+    out = []
+    for s in host.descendants():
+        if not isinstance(s, ui.spinner):
+            continue
+        parent = s.parent_slot.parent
+        assert {"absolute", "inset-0"} <= set(parent.classes), \
+            "a spinner that is not a region scrim: its visibility is nobody's wait"
+        out.append(parent)
+    return out
+
+
+def test_the_frame_is_the_kit_and_carries_no_chrome_of_its_own():
+    src = inspect.getsource(status.render)
+    assert "kit.page()" in src
+    assert 'kit.header("System Status")' in src
+    assert 'kit.section_title("Published data freshness")' in src
+    # ⚠ The three raw Quasar fills are NOT grepped for here - the page's own
+    # prose names them while explaining why they went, which is the manuals.py
+    # lesson. They are asked of the RENDERED page instead, in
+    # ``test_the_banner_drops_the_raw_quasar_palette``, which is the stronger
+    # question anyway.
+    for token in ("text-h5", "text-subtitle1 font-bold", "opacity-",
+                  "ui.notify(", "ui.spinner(", "ui.separator(", "BTN_3D",
+                  "text-orange", "text-negative"):
+        assert token not in src, f"{token} is the page building its own chrome"
+    assert "BTN_3D" not in inspect.getsource(status), "the module still imports it"
+
+
+def test_the_page_description_moved_to_the_hover_help():
+    """The standard gives a page ONE header line and no description line - the
+    hover help already explains it. Checked against ``page_help`` so the
+    sentence is not simply deleted."""
+    import page_help
+    help_text = page_help.HELP_MD["/status"]
+    assert "public live screens" in help_text
+    assert "publishing" in help_text, \
+        "the freshness table's own sentence landed nowhere"
+    src = inspect.getsource(status.render)
+    assert "Live health of every tier" not in src
+    assert "actively publishing" not in src
+
+
+def test_the_naive_machine_local_clock_is_gone():
+    """``state["checked_at"] = datetime.now()`` rendered ``%H:%M:%S`` with no
+    zone - the only clock in the app that was neither Central nor a data stamp.
+    The header's own stamp replaces it, in CT like every other one."""
+    src = inspect.getsource(status.render)
+    for gone in ("%H:%M:%S", "Last checked", "checked_at", "checked_lbl"):
+        assert gone not in src, f"{gone} survived"
+
+
+def test_the_header_stamp_is_hand_driven_and_reads_the_sweeps_own_clock(monkeypatch):
+    """``kit.header``'s stamp is bound to a bus view's ``:ts`` side key, and
+    this page's freshness is a PROBE - no view publishes "the stack was last
+    swept at". So the page shows the stamp itself and sets it from the sweep.
+
+    Before the first sweep it must say ``Waiting for data``, never a made-up
+    time; afterwards ``Updated <clock> CT``."""
+    host = _render_status(monkeypatch)
+    waiting = [lbl for lbl in _labels(host) if lbl.text == kit.WAITING_TEXT]
+    assert waiting, "the stamp is hidden or absent before the first sweep"
+    assert waiting[0].visible, "the hand-driven stamp was never made visible"
+    _run_timer(host, "_refresh")
+    stamped = [str(t) for t in _texts(host) if str(t).startswith("Updated ")]
+    assert stamped, f"no stamp after the sweep: {_texts(host)}"
+    assert stamped[0].endswith(" CT")
+    assert kit.WAITING_TEXT not in _texts(host)
+
+
+def test_the_kit_itself_is_not_edited_for_this_page():
+    """Decision 1 of the phase plan. ``kit.set_stamp`` must still leave
+    visibility alone, or every migrated page's hidden stamp would start
+    showing to buy this one page a convenience."""
+    assert "stamp.set_visibility(view is not None)" in inspect.getsource(kit.header)
+    set_stamp = inspect.getsource(kit).split("def set_stamp(", 1)[1] \
+        .split("@guard_async", 1)[0]
+    assert "set_visibility" not in set_stamp
+
+
+def test_a_failed_sweep_leaves_the_last_good_stamp_alone(monkeypatch):
+    """A stamp that advanced on a sweep that never completed would report a
+    health check that did not happen."""
+    host = _render_status(monkeypatch)
+    _run_timer(host, "_refresh")
+    first = [str(t) for t in _texts(host) if str(t).startswith("Updated ")][0]
+
+    def _boom():
+        raise OSError("bus down")
+
+    monkeypatch.setattr(status, "_sweep", _boom)
+    try:
+        _run_timer(host, "_refresh")
+    except OSError:
+        pass
+    after = [str(t) for t in _texts(host) if str(t).startswith("Updated ")]
+    assert after and after[0] == first
+
+
+def test_the_components_sit_in_a_region_whose_spinner_a_repaint_cannot_delete(
+        monkeypatch):
+    """⚠ This page never had the cleared-container spinner bug the other five
+    had: its spinner was already a SIBLING of both cleared containers, which is
+    the one thing it got right. ``kit.region`` keeps that property - the scrim
+    lives on ``outer`` and only ``content`` is cleared - so this pins what was
+    already true rather than claiming a fix.
+
+    What IS new is that BOTH blocks a repaint replaces have one: the component
+    cards and the freshness table are cleared and rebuilt on every sweep, and
+    only the cards had any wait over them before."""
+    host = _render_status(monkeypatch)
+    before = _scrims(host)
+    assert len(before) == 2, \
+        f"expected a region over each repainted block, found {len(before)}"
+    _run_timer(host, "_refresh")
+    assert len(_scrims(host)) == 2, "a repaint deleted a region's spinner"
+
+
+def test_refresh_holds_its_own_button_while_the_sweep_runs(monkeypatch):
+    """``kit.set_busy`` replaces the hand-rolled disable()/enable() pair and the
+    bare ``ui.spinner`` beside the button: one spelling, and a backstop that
+    releases it if the answer never comes."""
+    host = _render_status(monkeypatch)
+    btn = [b for b in _buttons(host) if b.text == "Refresh"][0]
+    seen = {}
+
+    def _slow():
+        seen["enabled"] = btn.enabled
+        seen["loading"] = "loading" in btn._props
+        return [dict(r) for r in _SWEEP]
+
+    monkeypatch.setattr(status, "_sweep", _slow)
+    _run_timer(host, "_refresh")
+    assert seen["enabled"] is False, "the sweep ran with Refresh still clickable"
+    assert seen["loading"] is True, "Refresh never showed its own spinner"
+    assert btn.enabled is True, "Refresh was left disabled"
+
+
+def test_the_freshness_probes_run_off_the_event_loop(monkeypatch):
+    """Seven blocking ``read_meta`` calls, every 15 s, per open tab. ``_sweep``
+    already crossed ``run.io_bound``; these did not. Asserts the THREAD, not
+    the spelling."""
+    import threading
+    where = []
+
+    def _meta(_view):
+        where.append(threading.current_thread())
+        return _fresh_meta()
+
+    host = _render_status(monkeypatch)
+    monkeypatch.setattr(status.bus_client, "read_meta", _meta)
+    assert not where, "the freshness table was read on the event loop at build"
+    _run_timer(host, "_refresh")
+    assert where, "the freshness table was never read"
+    assert all(t is not threading.main_thread() for t in where), \
+        "read_meta still runs on the event loop"
+    assert len(where) == len(status._FRESHNESS)
+
+
+def test_the_freshness_table_wears_the_apps_own_colours(monkeypatch):
+    """``text-orange`` and the ``opacity-*`` mutings were the page's own
+    vocabulary; the palette's warning and muted tokens are the app's."""
+    stale = (7, (_dt.datetime.now(_dt.timezone.utc)
+                 - _dt.timedelta(days=30)).isoformat())
+    host = _render_status(monkeypatch, meta=stale)
+    _run_timer(host, "_refresh")
+    assert any("STALE" in str(lbl.text) and theme.TXT_WARN in " ".join(lbl.classes)
+               for lbl in _labels(host)), "a stale row is not amber"
+    classes = [" ".join(lbl.classes) for lbl in _labels(host)]
+    assert not [c for c in classes if "text-orange" in c or "opacity-" in c]
+
+
+def test_the_banner_drops_the_raw_quasar_palette(monkeypatch):
+    """``bg-green-2 text-green-10`` / ``bg-red-2`` / ``bg-grey-3`` was the only
+    place in the app using Quasar's own palette. All up is a green line; a
+    component down is the kit's one attention band."""
+    host = _render_status(monkeypatch)
+    _run_timer(host, "_refresh")
+    classes = " ".join(" ".join(e.classes) for e in host.descendants())
+    for banned in ("bg-green-2", "text-green-10", "bg-red-2", "text-red-10",
+                   "bg-grey-3", "text-grey-9"):
+        assert banned not in classes, banned
+    assert any(theme.TXT_POS in " ".join(lbl.classes)
+               and "operational" in str(lbl.text) for lbl in _labels(host)), \
+        "the all-up verdict is not drawn in the palette's positive colour"
+
+    down = [dict(r) for r in _SWEEP]
+    down[3] = dict(down[3], up=False, detail="HTTP 502")
+    host = _render_status(monkeypatch, results=down)
+    _run_timer(host, "_refresh")
+    notices = [e for e in host.descendants()
+               if set(kit.NOTICE.split()) <= set(e.classes)]
+    assert notices, "a component down draws no notice band"
+    assert any("1 component down" in str(t) for t in _texts(notices[0]))
+
+
+def test_the_restart_wait_shows_on_the_region_and_never_as_a_toast(monkeypatch):
+    """A toast reports an OUTCOME. "Restarting … ~15s" is work STARTED, which
+    is a spinner.
+
+    ⚠ On the REGION, not ``kit.set_busy`` on the Restart button:
+    ``_paint_components`` rebuilds every card every 15 s and would take the
+    button's busy timer with it, mid-wait."""
+    host = _render_status(monkeypatch, results=_ONE_SERVICE)
+    _run_timer(host, "_refresh")
+    said = _said(monkeypatch)
+    monkeypatch.setattr(status, "_do_restart", lambda _t: True)
+    _restart(host)
+    assert not said, f"the restart reported through a toast: {said}"
+    scrims = [s for s in _scrims(host) if s.visible]
+    assert scrims, "nothing on screen says the restart is running"
+    messages = [str(t) for s in scrims for t in _texts(s)]
+    assert any("Restarting" in m for m in messages), messages
+
+
+def test_the_restart_spinner_survives_the_15s_auto_refresh(monkeypatch):
+    """The auto-refresh can land a second after the click. Hiding the spinner
+    there would take the wait off the screen eight seconds into a
+    fifteen-second one."""
+    host = _render_status(monkeypatch, results=_ONE_SERVICE)
+    _run_timer(host, "_refresh")
+    _said(monkeypatch)
+    monkeypatch.setattr(status, "_do_restart", lambda _t: True)
+    _restart(host)
+    _run_timer(host, "_refresh")
+    assert [s for s in _scrims(host) if s.visible], \
+        "the auto-refresh took the restart wait off the screen"
+
+
+def test_every_restart_outcome_is_a_kit_toast_with_the_right_kind(monkeypatch):
+    """Three outcomes: a spawn that raised, a target that cannot be restarted,
+    and the web app restarting itself (which kills this page)."""
+    said = _said(monkeypatch)
+
+    host = _render_status(monkeypatch, results=_ONE_SERVICE)
+    _run_timer(host, "_refresh")
+
+    def _boom(_t):
+        raise OSError("systemctl: no such unit")
+
+    monkeypatch.setattr(status, "_do_restart", _boom)
+    _restart(host)
+    assert said[-1][0] == "error" and "no such unit" in said[-1][1]
+
+    # ⚠ UNREACHABLE from the UI - the Restart button is only built where
+    # ``restart_spec(target)`` is not None, so ``_do_restart`` cannot answer
+    # False under it. Kept defensively and driven here, because it is the one
+    # branch that would otherwise report a restart that never happened.
+    monkeypatch.setattr(status, "_do_restart", lambda _t: False)
+    _restart(host)
+    assert said[-1][0] == "warn" and "can't be restarted" in said[-1][1]
+
+    host = _render_status(monkeypatch, results=[_SWEEP[4]])
+    _run_timer(host, "_refresh")
+    monkeypatch.setattr(status, "_do_restart", lambda _t: True)
+    _restart(host)
+    assert said[-1][0] == "warn" and "disconnect" in said[-1][1]
+    assert not [s for s in _scrims(host) if s.visible], \
+        "the page that is about to die shows a wait that will never end"
+
+
+def test_every_cards_buttons_line_up_in_one_column(monkeypatch):
+    """The layout half of the auth-merge test, asked of the RENDERED page.
+
+    Right edges align because the button slot is LAST, right-justified and does
+    not shrink, while the label column grows to push it flush right - not
+    because of any one width literal. ⚠ The old fixed ``w-[280px]`` slot inside
+    a ``no-wrap`` row overflowed a 375px phone, which is why the literal went."""
+    host = _render_status(monkeypatch)
+    _run_timer(host, "_refresh")
+    slots = 0
+    for card in _cards(host):
+        buttons = _buttons(card)
+        if not buttons:
+            continue
+        slot = buttons[-1].parent_slot.parent
+        assert "justify-end" in slot.classes, slot.classes
+        assert "shrink-0" in slot.classes, slot.classes
+        assert buttons[-1].text == "Restart", \
+            "Restart is not the rightmost button, so it moves card to card"
+        slots += 1
+    assert slots >= 2, "too few button slots to be checking alignment at all"
+
+
+def test_the_card_row_can_wrap_so_it_fits_a_phone(monkeypatch):
+    """375px. A ``no-wrap`` row holding an icon, a growing label column, a
+    status column and a fixed 280px button slot cannot fit one, and the failure
+    is a horizontally scrolling card rather than anything that looks broken."""
+    host = _render_status(monkeypatch)
+    _run_timer(host, "_refresh")
+    checked = 0
+    for card in _cards(host):
+        buttons = _buttons(card)
+        if not buttons:
+            continue
+        row = buttons[-1].parent_slot.parent.parent_slot.parent
+        assert "no-wrap" not in row.classes, \
+            "the card's own row still refuses to wrap"
+        assert "flex-wrap" in row.classes
+        checked += 1
+    assert checked >= 2
