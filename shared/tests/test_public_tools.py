@@ -305,3 +305,15 @@ def test_structure_key_of_a_non_mapping_is_none():
 
 def test_the_chain_view_is_the_one_shared_public_chain_key():
     assert pt.chain_view("spy") == "options:pub_chain:SPY"
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
+def test_a_non_finite_config_value_falls_back_never_raises(monkeypatch, bad):
+    """TOML accepts ``nan`` and ``inf``; ``int()`` of either raises, and that
+    on every request would leave every visitor unanswered."""
+    monkeypatch.setattr(pt, "load", lambda: {
+        "limits": {k: bad for k in pt.DEFAULTS["limits"]},
+        "visitor": {k: bad for k in pt.DEFAULTS["visitor"]}})
+    assert pt.limits() == pt.DEFAULTS["limits"]
+    assert pt.tools_per_hour() == pt.DEFAULTS["visitor"]["tools_per_hour"]
+    assert pt.math_per_hour() == pt.DEFAULTS["visitor"]["math_per_hour"]

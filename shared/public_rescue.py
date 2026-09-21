@@ -382,6 +382,8 @@ def _num(section, key, *, minimum):
     raw = (load().get(section) or {}).get(key, default)
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return default
+    if not math.isfinite(raw):      # TOML accepts nan/inf; int() of them raises
+        return default
     value = type(default)(raw)
     return value if value >= minimum else default
 

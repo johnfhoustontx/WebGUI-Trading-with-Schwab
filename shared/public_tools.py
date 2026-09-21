@@ -40,6 +40,8 @@ ticker allow-list and the Rescue validators only.
 
 Missing file / bad TOML / bad value -> the built-in defaults, never a raise.
 """
+import math
+
 from repo_paths import TOOLS_PUBLIC_TOML
 from shared import public_rescue as _pr
 from shared.config_toml import toml_loader
@@ -367,6 +369,8 @@ def _num(section, key, *, minimum):
     default = DEFAULTS[section][key]
     raw = (load().get(section) or {}).get(key, default)
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return default
+    if not math.isfinite(raw):      # TOML accepts nan/inf; int() of them raises
         return default
     value = type(default)(raw)
     return value if value >= minimum else default

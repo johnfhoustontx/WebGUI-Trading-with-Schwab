@@ -90,3 +90,16 @@ def test_a_corrupt_stored_payload_is_a_fresh_day(stored):
     assert pb.spend(bus, "chain", 1, NOW) is True
     assert pb.status(bus, NOW) == {"date": "2026-09-21", "spent": 1,
                                    "by_kind": {"chain": 1}}
+
+
+def test_a_utc_now_counts_on_the_ct_day():
+    """23:30 UTC and 01:30 UTC next day are both 21 Sep in CT (18:30, 20:30):
+    a caller passing UTC must not start a new day at 19:00 CT."""
+    bus = _bus()
+    utc = dt.timezone.utc
+    first = dt.datetime(2026, 9, 21, 23, 30, tzinfo=utc)
+    second = dt.datetime(2026, 9, 22, 1, 30, tzinfo=utc)
+    assert pb.spend(bus, "chain", 5, first) is True
+    assert pb.spend(bus, "chain", 5, second) is True
+    st = pb.status(bus, second)
+    assert st["date"] == "2026-09-21" and st["spent"] == 2

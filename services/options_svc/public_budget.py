@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import math
 import threading
+from zoneinfo import ZoneInfo
 
 BUDGET_KEY = "cache:options:public_budget"
 # The key outlives its day briefly so Settings can read yesterday's total just
@@ -34,6 +35,7 @@ BUDGET_KEY = "cache:options:public_budget"
 KEEP_SEC = 2 * 24 * 3600
 
 _LOCK = threading.Lock()
+CT = ZoneInfo("America/Chicago")
 
 
 def _fresh(today: str) -> dict:
@@ -47,7 +49,9 @@ def _is_count(v) -> bool:
 def _read(bus, now) -> dict:
     """Today's record. A missing, corrupt or older record reads as a fresh day,
     never a raise: a garbled key must not stop the public tools for the day."""
-    today = now.date().isoformat()
+    # The CT day whatever zone ``now`` arrives in: a UTC ``now`` would
+    # otherwise start the new day at 19:00 CT.
+    today = now.astimezone(CT).date().isoformat()
     env = bus.cache_get(BUDGET_KEY)
     raw = env.payload if env is not None else None
     if (not isinstance(raw, dict) or raw.get("date") != today

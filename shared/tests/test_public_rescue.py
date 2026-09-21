@@ -234,7 +234,8 @@ def test_there_is_one_shared_budget_and_no_per_tool_budgets():
     assert "ladder_budget" not in pr.DEFAULTS["limits"]
 
 
-@pytest.mark.parametrize("bad", [True, 0, -1, "lots", None])
+@pytest.mark.parametrize("bad", [True, 0, -1, "lots", None, float("nan"),
+                                 float("inf"), -float("inf")])
 def test_the_budget_falls_back_on_a_bad_value(monkeypatch, bad):
     monkeypatch.setattr(pr, "load", lambda: {"budget": {"daily_budget": bad}})
     assert pr.budget() == pr.DEFAULTS["budget"]["daily_budget"]
