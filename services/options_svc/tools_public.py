@@ -268,18 +268,34 @@ def _publish(bus, key, payload, ttl_sec) -> None:
     bus.publish(pt.event(view), {"version": version})
 
 
-def _stamped(bus, key, payload, now, lim) -> None:
-    """A result carrying ``computed_at``, kept ``result_keep_min``."""
-    _publish(bus, key, {**payload, "public": True, "computed_at": now.isoformat()},
+def _stamped(bus, key, payload, now, lim, quotes=None) -> None:
+    """A result carrying ``computed_at`` and the quotes switch it was built
+    under (``quotes``; read now when not given), kept ``result_keep_min``."""
+    if quotes is None:
+        quotes = public_scan.show_leg_quotes()
+    _publish(bus, key, {**payload, "public": True, "computed_at": now.isoformat(),
+                        "quotes": bool(quotes)},
              lim["result_keep_min"] * 60)
 
 
-def _fresh_result(bus, key, now, ttl_min) -> bool:
+def _fresh_result(bus, key, now, ttl_min, quotes=None) -> bool:
+    """Whether a result younger than ``ttl_min`` exists. With ``quotes`` given,
+    a result built under the OTHER switch state is not fresh: the request key
+    ignores the switch, so a rating computed with quotes on would otherwise be
+    served, bid/ask/delta and all, after the switch went off."""
     env = bus.cache_get(pt.cache_key(pt.result_view(key)))
     if env is None or not isinstance(env.payload, dict):
         return False
+    if quotes is not None and env.payload.get("quotes") is not bool(quotes):
+        return False
     age = public_chain.age_s(env.payload.get("computed_at"), now)
     return age is not None and 0 <= age < ttl_min * 60
+
+
+def _public_meta(meta):
+    """Simulator snapshot metadata with its spot at the 2 decimals the public
+    chain key publishes (``public_chain._spot``)."""
+    return {**meta, "spot": public_chain._spot(meta.get("spot"))}
 
 
 def _is_engine_error(out) -> bool:
@@ -443,7 +459,7 @@ def _tools_rate(bus, command, now, lim, key, args) -> str:
     if not quotes_on and any(not (leg["premium"] > 0)
                              for leg in _option_legs(args["legs"])):
         return "price_needed"
-    if _fresh_result(bus, key, now, lim["rate_ttl_min"]):
+    if _fresh_result(bus, key, now, lim["rate_ttl_min"], quotes=quotes_on):
         return "cached"
     if held is None:
         return "load_first"
@@ -468,7 +484,7 @@ def _tools_rate(bus, command, now, lim, key, args) -> str:
                      error if error else out)
             return "error", _rate_text(error)
         _stamped(bus, key, {"row": public_row(out["row"], args["legs"], quotes_on)},
-                 now, lim)
+                 now, lim, quotes=quotes_on)
         return "done"
     except Exception:  # noqa: BLE001 - one visitor's request must not kill the loop
         _degrade.degraded("options.tools_public_rate", detail=symbol)
@@ -483,8 +499,8 @@ def _tools_sim_snapshot(bus, command, now, lim, key, args) -> str:
     if held is not None:
         # ⚠ Never re-fetch a held symbol: that would replace another visitor's
         # snapshot and drop the expirations they added. The ttl retires it.
-        _stamped(bus, key, dict(compute._sim_meta(held),
-                                expirations=PUBLIC_SIM.expirations_of(symbol)),
+        _stamped(bus, key, _public_meta(dict(
+            compute._sim_meta(held), expirations=PUBLIC_SIM.expirations_of(symbol))),
                  now, lim)
         return "cached"
     chain = public_chain.published(bus, symbol) or {}
@@ -523,7 +539,7 @@ def _tools_sim_snapshot(bus, command, now, lim, key, args) -> str:
                 _remember_no_snapshot(symbol)
                 return "no_options"
             return "error"
-        _stamped(bus, key, meta, now, lim)
+        _stamped(bus, key, _public_meta(meta), now, lim)
         return "done"
     except Exception:  # noqa: BLE001 - one visitor's request must not kill the loop
         _degrade.degraded("options.tools_public_snapshot", detail=symbol)
@@ -538,8 +554,8 @@ def _tools_sim_expiry(bus, command, now, lim, key, args) -> str:
     if snap is None:
         return "load_first"
     if expiry in compute.expiries_of(snap):
-        _stamped(bus, key, dict(compute._sim_meta(snap),
-                                expirations=PUBLIC_SIM.expirations_of(symbol)),
+        _stamped(bus, key, _public_meta(dict(
+            compute._sim_meta(snap), expirations=PUBLIC_SIM.expirations_of(symbol))),
                  now, lim)
         return "cached"
     # With no expiration list (the eager fallback) nothing can be added.
@@ -554,7 +570,7 @@ def _tools_sim_expiry(bus, command, now, lim, key, args) -> str:
         if meta is None:
             return "load_first"            # evicted or replaced mid-fetch
         meta.pop("chain", None)
-        _stamped(bus, key, meta, now, lim)
+        _stamped(bus, key, _public_meta(meta), now, lim)
         return "done"
     except Exception:  # noqa: BLE001 - one visitor's request must not kill the loop
         _degrade.degraded("options.tools_public_sim_expiry", detail=symbol)

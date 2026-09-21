@@ -976,8 +976,8 @@ def _all_numbers(v):
                                             if isinstance(x, (int, float))}
 
 
-def _real_rate_row(bus, legs):
-    cmd = _rate_cmd(legs=legs)
+def _real_rate_row(bus, legs, structure="PCS"):
+    cmd = _rate_cmd(legs=legs, structure=structure)
     tp.handle_tools(bus, cmd)
     assert _answer(bus, cmd) == "done", _answer(bus, cmd)
     return _result(bus, cmd)
@@ -1015,12 +1015,7 @@ def test_with_quotes_on_the_allowed_quote_fields_may_appear(bus, real_rate, monk
         assert k not in row
 
 
-def test_the_rated_rows_top_level_keys_are_all_accounted_for(bus, real_rate, monkeypatch):
-    """A new key the engine starts emitting must be a decision: published as a
-    derived value, or added to the worker's drop lists. This fails until it is."""
-    _quotes(monkeypatch, False)
-    row = _real_rate_row(bus, _calc_legs(premium=(1.37, 0.58)))["row"]
-    known = {"id", "symbol", "type", "family", "strategy_label", "bias", "legs",
+_KNOWN_ROW = {"id", "symbol", "type", "family", "strategy_label", "bias", "legs",
              "expiration", "dte", "pop_pct", "underlying_price", "timestamp",
              "net_debit", "net_credit", "max_profit", "max_loss", "breakevens",
              "unbounded", "unbounded_profit", "unbounded_loss", "capital",
@@ -1029,7 +1024,70 @@ def test_the_rated_rows_top_level_keys_are_all_accounted_for(bus, real_rate, mon
              "vol_gate_blocks", "iv_rank", "daily_em", "structure_known",
              "em_to_expiry", "vol_floor", "earnings_status", "earnings_date",
              "iv_rank_known"}
-    assert set(row) <= known, set(row) - known
+# The nested dicts the row publishes, by path, with their EXACT key sets.
+_KNOWN_NESTED = {
+    "factor_scores": {"fit_dir", "fit_vol", "q_be", "q_liq", "q_pop", "q_rr"},
+}
+_KNOWN_RESULT = {"row", "public", "computed_at", "quotes"}
+
+
+def _leg(t, side, k, p):
+    return {"option_type": t, "side": side, "qty": 1, "premium": p, "strike": k,
+            "expiry": NEAR}
+
+
+_STRUCTURES = {
+    "PCS": _calc_legs(premium=(1.37, 0.58)),
+    "LONG_CALL": [_leg("call", "long", 505.0, 1.21)],
+    "IC": [_leg("put", "long", 495.0, 0.41), _leg("put", "short", 500.0, 0.93),
+           _leg("call", "short", 500.0, 0.97), _leg("call", "long", 505.0, 0.44)],
+    "COVERED_CALL": [{"option_type": "stock", "side": "long", "qty": 1,
+                      "premium": 0.0}, _leg("call", "short", 505.0, 1.52)],
+}
+
+
+def _nested_violations(result):
+    """Every dict or list in the published result at a path this test does not
+    know, or a known dict whose keys differ. Lists may hold only scalars,
+    except ``legs``, whose dicts must stay inside the leg allow-list."""
+    bad = []
+    if set(result) != _KNOWN_RESULT:
+        bad.append(("result", set(result) ^ _KNOWN_RESULT))
+    row = result["row"]
+    if not set(row) <= _KNOWN_ROW:
+        bad.append(("row", set(row) - _KNOWN_ROW))
+    for key, value in row.items():
+        if key == "legs":
+            for leg in value:
+                if not isinstance(leg, dict) or not set(leg) <= set(tp.LEG_KEYS):
+                    bad.append(("legs[]", leg))
+                elif any(isinstance(v, (dict, list)) for v in leg.values()):
+                    bad.append(("legs[] nested", leg))
+        elif isinstance(value, dict):
+            if key not in _KNOWN_NESTED or set(value) != _KNOWN_NESTED[key]:
+                bad.append((key, set(value) ^ _KNOWN_NESTED.get(key, set())))
+            elif any(isinstance(v, (dict, list)) for v in value.values()):
+                bad.append((f"{key} nested", value))
+        elif isinstance(value, list):
+            if any(isinstance(v, (dict, list)) for v in value):
+                bad.append((f"{key}[]", value))
+    return bad
+
+
+@pytest.mark.parametrize("structure", sorted(_STRUCTURES))
+def test_the_rated_rows_field_sets_are_all_accounted_for(bus, real_rate, monkeypatch,
+                                                         structure):
+    """A new key the engine starts emitting - at the top of the row OR inside a
+    nested dict such as ``factor_scores`` - must be a decision: published as a
+    derived value, or added to the worker's drop lists. This fails until it is.
+    (Renamed from ``..._top_level_keys_...`` when the nested pin was added; its
+    top-level assertion is kept as the first two lines below.)"""
+    _quotes(monkeypatch, False)
+    result = _real_rate_row(bus, _STRUCTURES[structure], structure)
+    row = result["row"]
+    assert set(row) <= _KNOWN_ROW, set(row) - _KNOWN_ROW
+    assert row["type"] == structure, row["type"]
+    assert _nested_violations(result) == []
 
 
 def test_with_quotes_off_a_rating_without_the_visitors_prices_is_refused(
@@ -1208,3 +1266,53 @@ def test_a_sweep_past_the_longest_leg_is_invalid(bus, schwab):
     assert _answer(bus, bad) is None
     assert _status(bus)["invalid_today"] == 1
     assert len([c for c in schwab.calls if c[0] == "sim_run"]) == 1
+
+
+# ── the 2026-09-21 re-review ────────────────────────────────────────────────
+
+def test_a_rating_built_with_quotes_on_is_not_served_after_they_go_off(
+        bus, real_rate, monkeypatch):
+    _quotes(monkeypatch, True)
+    cmd = _rate_cmd(legs=_calc_legs(premium=(1.37, 0.58)))
+    tp.handle_tools(bus, cmd)
+    first = _result(bus, cmd)
+    assert first["quotes"] is True and "bid" in first["row"]["legs"][0]
+    _quotes(monkeypatch, False)
+    tp.reset_memory(keep_chains=True)               # past the dedup memory
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "done", "the quoted rating was served cached"
+    again = _result(bus, cmd)
+    assert again["quotes"] is False
+    for leg in again["row"]["legs"]:
+        assert set(leg) <= set(tp.LEG_KEYS)
+    assert "net_delta" not in again["row"]
+
+
+def test_a_rating_under_the_same_switch_state_is_still_cached(
+        bus, real_rate, monkeypatch):
+    _quotes(monkeypatch, False)
+    cmd = _rate_cmd(legs=_calc_legs(premium=(1.37, 0.58)))
+    tp.handle_tools(bus, cmd)
+    tp.reset_memory(keep_chains=True)
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "cached"
+
+
+def test_snapshot_meta_spot_is_rounded_like_the_public_chain(bus, schwab, monkeypatch):
+    def snapshot(symbol, lazy, expiries):
+        snap = _snap(symbol)
+        snap.spot = 502.371849
+        return snap, list(LISTED), {}
+    monkeypatch.setattr(compute, "_fetch_sim_snapshot", snapshot)
+    cmd = _tool(kind="sim_snapshot", symbol="SPY")
+    tp.handle_tools(bus, cmd)
+    assert _result(bus, cmd)["spot"] == 502.37
+    cached = _tool(kind="sim_snapshot", symbol="SPY", expiries=[FAR])
+    tp.handle_tools(bus, cached)
+    assert _answer(bus, cached) == "cached" and _result(bus, cached)["spot"] == 502.37
+    added = _tool(kind="sim_expiry", symbol="SPY", expiry=FAR)
+    tp.handle_tools(bus, added)
+    assert _answer(bus, added) == "done" and _result(bus, added)["spot"] == 502.37
+    held = _tool(kind="sim_expiry", symbol="SPY", expiry=MID)
+    tp.handle_tools(bus, held)
+    assert _answer(bus, held) == "cached" and _result(bus, held)["spot"] == 502.37
