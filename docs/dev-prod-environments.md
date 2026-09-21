@@ -227,20 +227,37 @@ persist step. Read its output rather than redirecting it: an unpersisted user
 vanishes on the next Redis restart. ⚠ Pass the password through
 `REDISCLI_AUTH`, never `--pass`, which puts it in the process list.
 
-**Verify both directions as the `live` user** (its URL is in `.env.live`):
+**Verify both directions as the `live` user.** Read its URL from `.env.live`
+inside Python, so the password never reaches a command line or the process
+list (`redis-cli -u` would put it there):
 
 ```bash
-redis-cli -u "$REDIS_LIVE_URL" XADD cmd:finder_public '*' probe 1   # an id
-redis-cli -u "$REDIS_LIVE_URL" XADD cmd:options '*' probe 1         # NOPERM
-redis-cli -u "$REDIS_LIVE_URL" SET cache:options:x 1                # NOPERM
-redis-cli -u "$REDIS_LIVE_URL" PUBLISH events:options:scan x        # NOPERM
-redis-cli -u "$REDIS_LIVE_URL" XRANGE cmd:finder_public - +         # NOPERM
+cd /home/administrator/dev && set -a && . ./.env.live && set +a && .venv/bin/python - <<"PY"
+import os, redis
+r = redis.Redis.from_url(os.environ["REDIS_LIVE_URL"], decode_responses=True)
+for label, fn in [
+    ("XADD cmd:finder_public (allowed)", lambda: r.xadd("cmd:finder_public", {"probe": "1"})),
+    ("XADD cmd:options", lambda: r.xadd("cmd:options", {"probe": "1"})),
+    ("SET cache:options:x", lambda: r.set("cache:options:x", 1)),
+    ("PUBLISH events:options:scan", lambda: r.publish("events:options:scan", "x")),
+    ("XRANGE cmd:finder_public", lambda: r.xrange("cmd:finder_public")),
+    ("DEL cmd:finder_public", lambda: r.delete("cmd:finder_public")),
+]:
+    try:
+        print("ALLOWED", label, fn())
+    except redis.exceptions.NoPermissionError:
+        print("NOPERM ", label)
+PY
 ```
 
-The probe entry the first line writes has no `data` field, so options_svc
+**Applied on prod 2026-09-21 07:58 CT and verified:** the one `XADD` allowed;
+`XADD cmd:options`, `XADD` on a lookalike key, `SET`, `PUBLISH`, `XRANGE`,
+`XTRIM`, `DEL` and `KEYS` all `NOPERM`; `PING` and cache reads unchanged. The
+probe entry was removed afterwards with `XDEL` as the admin user.
+
+A probe entry has no `data` field, so if it is not removed options_svc
 dead-letters it to `cmd:finder_public:dead` on its next read, where it is
-harmless. ⚠ `redis-cli -u` puts the URL, password included, in the process
-list for the second it runs: do it from your own shell, not a logged job.
+harmless.
 Without this selector every public scan request fails with `NOPERM`, which the
 public page words as an error rather than a permissions problem.
 
