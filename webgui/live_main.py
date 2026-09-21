@@ -235,6 +235,18 @@ else:                                   # pragma: no cover - a broken checkout
     log.warning("no static directory at %s: the public header will render the "
                 "wordmark without its mark", _STATIC_DIR)
 
+# ── tab storage lives an hour ────────────────────────────────────────────────
+# The public Calculator hands its position to the public Simulator through
+# ``app.storage.tab`` (``pages/options/public_handoff.py``), per browser tab and
+# in this process's memory. NiceGUI's default keeps a tab's store for 30 DAYS
+# after its last change (``Storage.max_tab_storage_age``, nicegui/storage.py;
+# pruned every 10 s by ``prune_tab_storage``, nicegui/app/app.py). On an
+# unauthenticated origin every anonymous tab would hold its dict for a month -
+# memory growth this process's MemoryMax would eventually answer by dying. An
+# hour covers a visit; nothing here is meant to outlive one.
+_TAB_STORAGE_MAX_AGE_SEC = 60 * 60   # one hour
+nicegui_app.storage.max_tab_storage_age = _TAB_STORAGE_MAX_AGE_SEC
+
 # The private app's content container, ``pb-10`` included: that padding clears
 # the fixed market-summary marquee, which this process mounts too (2026-09-21).
 #

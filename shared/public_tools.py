@@ -160,9 +160,15 @@ def _clean_code(raw):
     return code.upper()
 
 
-def _clean_calc_leg(raw, today):
+def _clean_calc_leg(raw, today, *, allow_missing_premium=False):
     """One Calculator leg, normalized to exactly the six keys of the app's
     leg dict, or None.
+
+    ``allow_missing_premium`` keeps a leg whose ``premium`` is absent or None,
+    with ``premium`` None in the result - for the tab hand-off
+    (``webgui/pages/options/public_handoff.py``), whose legs may not be priced
+    yet. A premium that is PRESENT but unusable (NaN, negative, a bool, a
+    string) is still refused. Every request builder leaves it off.
 
     ⚠ A share leg's ``qty`` counts 100-share LOTS, like an option's contracts,
     and its ``strike`` and ``expiry`` are forced to None whatever was sent: a
@@ -177,9 +183,11 @@ def _clean_calc_leg(raw, today):
     # always sends one, and 0.0 is a real price (a worthless option). It is the
     # per-share price paid or received - the SIDE carries the sign - so a
     # negative one is refused.
-    premium = _in_range(raw.get("premium"), 0.0, MAX_PREMIUM)
+    raw_premium = raw.get("premium")
+    premium = _in_range(raw_premium, 0.0, MAX_PREMIUM)
+    unpriced_ok = allow_missing_premium and raw_premium is None
     if option_type not in ("call", "put", "stock") or side not in ("long", "short") \
-            or qty is None or premium is None:
+            or qty is None or (premium is None and not unpriced_ok):
         return None
     if option_type == "stock":
         strike = expiry = None

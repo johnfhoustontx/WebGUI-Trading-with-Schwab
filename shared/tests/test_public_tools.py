@@ -232,6 +232,31 @@ def test_a_calc_leg_without_a_premium_is_refused():
     assert pt.math_command(_price(legs=_legs(premium=None)), TODAY) is None
 
 
+def test_allow_missing_premium_keeps_a_leg_with_no_price_as_none():
+    """The tab hand-off carries legs the Calculator may not have priced yet,
+    so it asks the cleaner to keep them; the price stays None, never 0.0."""
+    leg = _legs()[0]
+    del leg["premium"]
+    got = pt._clean_calc_leg(leg, TODAY, allow_missing_premium=True)
+    assert got == {"option_type": "put", "side": "short", "qty": 1,
+                   "premium": None, "strike": 500.0, "expiry": EXP}
+    assert pt._clean_calc_leg({**leg, "premium": None}, TODAY,
+                              allow_missing_premium=True)["premium"] is None
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -0.01, True, "1.2"])
+def test_allow_missing_premium_still_refuses_an_unusable_one(bad):
+    """Missing is allowed; WRONG is not."""
+    leg = {**_legs()[0], "premium": bad}
+    assert pt._clean_calc_leg(leg, TODAY, allow_missing_premium=True) is None
+
+
+def test_a_missing_premium_is_still_refused_by_default():
+    leg = _legs()[0]
+    del leg["premium"]
+    assert pt._clean_calc_leg(leg, TODAY) is None
+
+
 def test_a_share_legs_strike_and_expiry_are_forced_to_none():
     legs = [{"option_type": "stock", "side": "long", "qty": 1, "premium": 500.0,
              "strike": float("nan"), "expiry": "garbage"}]
