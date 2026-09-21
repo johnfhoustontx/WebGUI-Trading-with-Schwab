@@ -156,6 +156,11 @@ call; the `live` user is refused on `cmd:options`.
   "/options/rescue", kwargs={"public": True})`, and a tile on
   `deploy/site/live.html`. The thumbnail shows the empty form with a SPY put
   spread template, not a result.
+- **Site navigation:** Rescue already sits in the site nav's **Tools** menu
+  as "Coming soon" (shipped 2026-09-21), beside Strategy Finder and the
+  Calculator. Publishing the screen turns that entry into a link to
+  `/rescue` in all four navs; `deploy/tests/test_site.py` fails until it
+  does. Nothing is added to the top-level nav.
 - Verify in the local harness first, then live.
 
 ### Phase 3: polish and documentation

@@ -1159,3 +1159,67 @@ def test_the_published_reports_are_never_committed():
 
 def test_the_report_is_in_the_sitemap():
     assert "https://neuralstrike.co/report.html" in _text("sitemap.txt")
+
+
+# --- F. the Tools menu ------------------------------------------------------
+# The interactive public screens live behind ONE nav item, so adding a tool
+# never adds a word to the home nav. Keyed by live-screen SLUG: a tool is a
+# link exactly when live_screens publishes it, and a "Coming soon" entry
+# otherwise -- never a link to a route that does not exist yet.
+
+TOOLS = (("finder", "Strategy Finder"), ("rescue", "Rescue"),
+         ("calculator", "Calculator"))
+
+# The pages whose navs carry destination links. glossary.html is a leaf's nav
+# by design (see the gallery/live test above), so it has no Tools menu.
+TOOLS_PAGES = ("index.html", "live.html", "gallery.html", "report.html")
+
+
+def _nav(name):
+    m = re.search(r"<nav\b.*?</nav>", _markup(name), re.S)
+    assert m, f"{name} has no <nav>"
+    return m.group(0)
+
+
+def _tools_menu(name):
+    menus = re.findall(r'<details class="ns-menu">.*?</details>', _nav(name), re.S)
+    assert len(menus) == 1, f"{name}: expected one Tools menu in the nav, found {len(menus)}"
+    return menus[0]
+
+
+def test_every_linking_nav_has_one_tools_menu():
+    for name in TOOLS_PAGES:
+        menu = _tools_menu(name)
+        assert re.search(r"<summary[^>]*>\s*Tools\b", menu), f"{name}: menu not labelled Tools"
+
+
+def test_the_tools_live_only_inside_the_menu():
+    """The point of the menu: the home nav gains ONE item, not three."""
+    for name in TOOLS_PAGES:
+        outside = _nav(name).replace(_tools_menu(name), "")
+        for _, title in TOOLS:
+            assert title not in outside, f"{name}: {title} is a top-level nav item"
+
+
+def test_a_tool_is_a_link_exactly_when_it_is_published():
+    routes = {s.slug: s.route for s in _live_screens().SCREENS}
+    for name in TOOLS_PAGES:
+        menu = _tools_menu(name)
+        for slug, title in TOOLS:
+            if slug in routes:
+                href = f"https://{repo_paths.LIVE_HOST}{routes[slug]}"
+                assert re.search(rf'<a class="ns-menu-item" href="{re.escape(href)}"'
+                                 rf'>\s*<span class="ns-menu-title">{title}</span>',
+                                 menu), f"{name}: {title} is published but not linked to {href}"
+            else:
+                item = re.search(rf'<span class="ns-menu-item ns-menu-soon"'
+                                 rf'>\s*<span class="ns-menu-title">{title}</span>'
+                                 rf'.*?Coming soon', menu, re.S)
+                assert item, f"{name}: unpublished {title} is not a 'Coming soon' entry"
+
+
+def test_the_tools_menu_needs_no_script():
+    """live.html runs no script (test above), so the menu is a native
+    <details>: it opens and closes with no JavaScript on any page."""
+    for name in TOOLS_PAGES:
+        assert "<script" not in _tools_menu(name)

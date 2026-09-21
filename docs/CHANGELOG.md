@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**Public Strategy Finder, Phase 4: a page-load
+**Last updated:** 2026-09-21 (**Site nav: a Tools menu for the interactive
+public screens.**)
+
+- **One nav item, not three.** `index.html`, `live.html`, `gallery.html` and
+  `report.html` gain a **Tools** dropdown holding Strategy Finder, Rescue and
+  Calculator, so each new public tool joins the menu without adding a word to
+  the home nav. `glossary.html` keeps its leaf nav.
+- **A native `<details>`, no script**, because `live.html` runs none. Below
+  700px the panel hangs off the whole nav (full width less the gutter);
+  hung off Tools it ran off the left of a 375px screen.
+- **Rescue and Calculator show as "Coming soon", not links.**
+  `deploy/tests/test_site.py` keys each entry by live-screen slug: a tool must
+  be a link exactly when `webgui/live_screens.py` publishes it, so publishing
+  either screen fails the suite until its menu entry becomes a link.
+
+---
+
+**Prior — 2026-09-21** (**Public Strategy Finder, Phase 4: a page-load
 limit for the public host, built OFF.**)
 
 - **`config/edge.toml` `[live_rate_limit]`**: 30 page loads a minute per

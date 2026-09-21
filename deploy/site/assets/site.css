@@ -173,6 +173,83 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 }
 .ns-navlink:hover { color: var(--color-accent); text-decoration: none; }
 
+/* The Tools menu: every interactive public screen behind ONE nav item, so a
+ * new tool never adds a word to the home nav. A native <details>, because
+ * live.html runs no script: it opens and closes on a click or a tap, and on
+ * Enter or Space from the keyboard, with nothing to load. */
+.ns-menu { position: relative; }
+.ns-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ns-menu > summary::-webkit-details-marker { display: none; }
+.ns-menu > summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 0.15s ease;
+}
+.ns-menu[open] > summary { color: var(--color-accent); }
+.ns-menu[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
+.ns-menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 12px);
+  z-index: 20;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-md);
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.6);
+}
+.ns-menu-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+}
+a.ns-menu-item:hover {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  text-decoration: none;
+}
+.ns-menu-title { font-size: 13.5px; font-weight: 600; }
+.ns-menu-desc {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+/* Not yet published: visible, so the menu says what is coming, but not a link. */
+.ns-menu-soon { cursor: default; }
+.ns-menu-soon .ns-menu-title { color: color-mix(in srgb, var(--color-text) 55%, transparent); }
+/* On a phone the nav wraps and Tools lands mid-row, so a panel hung off its
+ * right edge ran off the LEFT of a 375px screen (measured: left -108px). Below
+ * the wrap point the panel hangs off the whole nav instead, full width less
+ * the page gutter. The sticky nav is already a positioned box; the others
+ * become one here. */
+@media (max-width: 700px) {
+  .ns-nav:not(.ns-nav-sticky) { position: relative; }
+  .ns-menu { position: static; }
+  .ns-menu-panel {
+    left: 16px;
+    right: 16px;
+    top: calc(100% - 4px);
+    width: auto;
+    max-width: none;
+  }
+}
+
 .ns-crumb {
   font-size: 13px;
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
