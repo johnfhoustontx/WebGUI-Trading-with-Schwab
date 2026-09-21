@@ -36,7 +36,6 @@ ALLOWED = {
     # Mono) went with the kit migration, and the unlock button went through
     # kit.notice + kit.button with them.
     "desk.py": {"add_head_html": 1},
-    "driver.py": {"button": 8, "dialog": 2, "notify": 1, "table": 5},
     "eod.py": {"button": 3, "notify": 2},
     "manuals.py": {"button": 1},
     # The Macro Board's skin toggle, and it stays: a SEGMENTED PICKER, mutually

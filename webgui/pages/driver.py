@@ -1,4 +1,4 @@
-"""Driver page (Tier-3 reader) — autonomous monitor + STOP + realized performance.
+"""Driver page (Tier-3 reader) — autonomous monitor + Stop + realized performance.
 
 This page holds **no engine call**. The autonomous Claude decision layer, order
 execution, and performance aggregation all live in ``services/driver_svc`` /
@@ -12,13 +12,13 @@ newest-first per-checkpoint decision log) and ``cache:driver:control``
   the master switch. Enable clears a MANUAL stop and a stale (prior-day) halt,
   but leaves a same-day RISK halt latched; **Resume today**
   (``args={"clear_halt": true}``) is the deliberate override for that.
-* **STOP** (kill-switch, confirm-gated) → ``{"type":"stop"}`` — latches ``halted``
+* **Stop** (kill-switch, confirm-gated) → ``{"type":"stop"}`` — latches ``halted``
   so no further checkpoints run until the next-day re-arm.
 * **Run now** → ``{"type":"cycle"}`` — fire one decision checkpoint immediately.
 
 **Performance.** The driver's realized track record from its isolated paper account
 (``cache:options:driver_paper_account['closed_positions']`` — closed credit spreads
-with real realized P&L, updated every 5-min manage cycle); **Refresh** forces an
+with real realized P&L, updated every 1-min manage cycle); **Refresh** forces an
 immediate reprice/republish via ``{"type":"driver_paper_manage"}`` on ``cmd:options``.
 
 A version-poll on ``driver:autonomous`` / ``driver:control`` /
@@ -32,9 +32,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import bus_client
-from pages import busy as _busy
 from nicegui import run, ui
 
+from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 # The scorecard's PURE render vocabulary, shared with the Paper Account page since
 # 2026-09-12 (gap assessment C5). Imported by NAME so ``driver.<fn>`` still
@@ -45,7 +45,14 @@ from pages.scorecard import (  # noqa: F401
     percent as _pct, pnl_class, pnl_color, scorecard_exit_reason_rows,
     scorecard_headline_chips, scorecard_quality_chips, scorecard_strategy_rows,
     scorecard_symbol_rows)
-from pages.options.theme import BTN, BTN_DANGER, BTN_PRIMARY
+from pages.options import theme as _t
+
+# The bus view the header's Updated stamp reads. ⚠ NOT ``driver:autonomous``:
+# that one is published only WHILE a cycle runs, so its age would freeze between
+# cycles and the stamp would report a stalled page. The driver's paper account is
+# the widest-reach view this page draws from — the day P&L, the open positions,
+# the closed trades and the summary all come out of it.
+STAMP_VIEW = "options:driver_paper_account"
 
 # Decision-log / cycle timestamps are stored in UTC; show the user's Central time.
 _CENTRAL = ZoneInfo("America/Chicago")
@@ -78,9 +85,10 @@ def _money(v):
 
 
 # P&L cell colors (green profit / red loss / grey flat-or-unknown) — so a value is
-# read by COLOR, not by hunting for a +/- sign. These hexes equal the theme
-# TXT_POS/TXT_NEG/TXT_NEUTRAL tokens, but are kept LOCAL because driver.py has no
-# theme.py dependency (it's not an options-section page).
+# read by COLOR, not by hunting for a +/- sign. They live in pages/scorecard.py,
+# shared with the Paper Account page, and Phase 1 of the UI-consistency work
+# deliberately did NOT fold them into the theme's TXT_POS/TXT_NEG: the P&L
+# palette is one decision across four pages, not this page's to take.
 
 
 def current_day_decisions(decisions, today_ct=None):
@@ -109,7 +117,7 @@ def current_day_decisions(decisions, today_ct=None):
 # ── driver realized-performance table (from the isolated paper account's CLOSED
 # trades) ────────────────────────────────────────────────────────────────────────
 # The driver's ACTUAL closed options credit spreads with real realized P&L, read from
-# ``cache:options:driver_paper_account['closed_positions']`` — updated every 5-min
+# ``cache:options:driver_paper_account['closed_positions']`` — updated every 1-min
 # manage cycle (timely), so realized results appear as positions close.
 _EXIT_REASON_LABELS = {
     "TARGET_HIT": "Target hit", "MONEY_STOP": "Money stop", "DELTA_STOP": "Delta stop",
@@ -128,6 +136,11 @@ def _when_text(ts):
     """Compact 'YYYY-MM-DD HH:MM' from a stored ISO ts (already CT), else the date / '—'.
 
     Used for BOTH the entry (``entry_ts``) and exit (``exit_ts``) stamps.
+
+    ⚠ It SLICES the string — no conversion, no zone label — so "already CT" is an
+    assumption this function makes and never checks. It feeds the Opened/Closed
+    columns of two tables. Flagged rather than changed: the format only becomes
+    safe to touch after reading ``paper_account_db``'s writer.
     """
     s = str(ts or "")
     if len(s) >= 16 and s[10:11] == "T":
@@ -227,16 +240,26 @@ _CLOSED_COLS = [
     {"name": "reason", "label": "Exit reason", "field": "reason", "align": "left"},
     {"name": "pnl", "label": "Realized P&L", "field": "pnl"},
 ]
+# ⚠ Quasar's own column default is RIGHT and the kit's is LEFT, so every column
+# NOT named here moves left on the kit migration. That is the point for
+# ``strategy``: it is a text column that has been right-aligned by accident, and
+# nobody writes ``align`` for a text column expecting right. ``pnl`` must stay
+# named — ``_PNL_CELL_SLOT`` hardcodes ``text-right`` on the cell, so dropping it
+# here would leave the header and the body disagreeing.
+_CLOSED_NUMERIC = ("qty", "pnl")
 
 
 # ── autonomous monitor: pure builders (Phase 7) ──────────────────────────────
 # The repurposed page reads ``cache:driver:autonomous`` (AutonomousState) +
 # ``cache:driver:control`` (DriverControl) and surfaces: day-P&L-vs-target
 # progress, the control state, the open driver positions, and the per-checkpoint
-# decision log. Control colors for the master-switch state.
-CONTROL_OFF_COLOR = "#888888"       # disabled — autonomous off
-CONTROL_ACTIVE_COLOR = "#1D9E75"    # enabled, running
-CONTROL_HALTED_COLOR = "#BA7517"    # latched halt (banked / loss cap / VIX / STOP)
+# decision log. The master-switch state renders as a filled pill, and its three
+# fills are the app's own semantic badge tokens: the old ``#888888`` was a pure
+# neutral, and "running" / "latched halt" are a STATE reading, which is exactly
+# what BADGE_POS / BADGE_WARN encode everywhere else in the app.
+CONTROL_OFF_BADGE = _t.BADGE_MUTED      # disabled — autonomous off
+CONTROL_ACTIVE_BADGE = _t.BADGE_POS     # enabled, running
+CONTROL_HALTED_BADGE = _t.BADGE_WARN    # latched halt (banked / loss cap / VIX / Stop)
 
 # How many ~2s version-poll ticks to hold the optimistic toggle before giving up:
 # if the enable/disable command never lands (e.g. driver_svc down), revert + warn.
@@ -293,19 +316,19 @@ def control_state_label(control):
     return "ACTIVE — autonomous running"
 
 
-def control_state_color(control):
-    """Hex color matching :func:`control_state_label` (off/active/halted)."""
+def control_badge_class(control):
+    """The badge token matching :func:`control_state_label` (off/active/halted).
+
+    One function rather than the old colour-plus-class pair: ``control_state_color``
+    existed only to be interpolated into ``bg-[…]``, and a theme badge already
+    carries its fill, its foreground and its radius together.
+    """
     control = control or {}
     if not control.get("enabled"):
-        return CONTROL_OFF_COLOR
+        return CONTROL_OFF_BADGE
     if control.get("halted"):
-        return CONTROL_HALTED_COLOR
-    return CONTROL_ACTIVE_COLOR
-
-
-def control_bg_class(control):
-    """Tailwind bg arbitrary-value class for the control state (mirrors :func:`control_state_color`)."""
-    return f"bg-[{control_state_color(control)}]"
+        return CONTROL_HALTED_BADGE
+    return CONTROL_ACTIVE_BADGE
 
 
 # R7 — stand-down reason observability. The decider tags each decision with WHY it
@@ -429,7 +452,8 @@ def position_rows(positions):
             "expiration": p.get("expiration", "") or "—",
             "opened": _when_text(p.get("entry_ts")),
             "pnl": _money(p.get("unrealized_pnl")),
-            "_pnl_color": pnl_color(p.get("unrealized_pnl")),
+            # ⚠ No ``_pnl_color``: it was written into every row and read by no
+            # renderer — ``_PNL_CELL_SLOT`` binds ``_pnl_class``.
             "_pnl_class": pnl_class(p.get("unrealized_pnl")),
             "status": p.get("status", ""),
         })
@@ -441,7 +465,7 @@ def paper_summary(paper_view):
 
     The autonomous loop executes into the DRIVER's own isolated paper account (via
     the ``driver_paper_create`` command), so THIS is the real, live P&L of its book
-    — it moves as the options service reprices the driver account (every ~5 min) and
+    — it moves as the options service reprices the driver account (every minute) and
     is correct whether or not the autonomous decision loop is enabled. The monitor
     reads it directly rather than the autonomy-gated ``cache:driver:autonomous``
     snapshot (which is only published while a cycle runs).
@@ -463,7 +487,7 @@ def paper_summary(paper_view):
 
 # ── performance scorecard: pure builders (cache:options:driver_paper_perf) ───
 # The scorecard renders the driver paper account's standalone performance from
-# ``cache:options:driver_paper_perf`` (published every 5-min driver manage tick —
+# ``cache:options:driver_paper_perf`` (published every 1-min driver manage tick —
 # more live than ``AutonomousState.perf``, which only updates per 30-min cycle).
 # All builders are defensive: an unpublished view → ``{}`` → an empty/placeholder
 # card, never a raise. ``profit_factor`` ``None`` (no losses yet) renders as "—".
@@ -503,6 +527,10 @@ _POSITION_COLS = [
     {"name": "pnl", "label": "Open P&L", "field": "pnl"},
     {"name": "status", "label": "Status", "field": "status"},
 ]
+# ⚠ ``strategy`` AND ``status`` are text and are deliberately absent — both were
+# right-aligned only because Quasar defaults that way for a column with no
+# ``align``. Under the kit they take the app's left, like every other text cell.
+_POSITION_NUMERIC = ("quantity", "pnl")
 
 # Performance-scorecard breakdown tables (P&L by symbol / by strategy).
 _SCORE_SYMBOL_COLS = [
@@ -517,6 +545,9 @@ _SCORE_STRATEGY_COLS = [
     {"name": "pnl", "label": "P&L", "field": "pnl"},
     {"name": "win_rate", "label": "Win %", "field": "win_rate"},
 ]
+# Both breakdowns carry the same three numbers; the first column (Symbol /
+# Strategy) is the name they are grouped by.
+_SCORE_NUMERIC = ("trades", "pnl", "win_rate")
 
 
 # ── performance analytics: equity curve + posture post-mortem + MAE/MFE ───────
@@ -538,6 +569,7 @@ _POSTMORTEM_COLS = [
     {"name": "pnl", "label": "Realized", "field": "pnl"},
     {"name": "avg", "label": "Avg/trade", "field": "avg"},
 ]
+_POSTMORTEM_NUMERIC = ("trades", "win_rate", "pnl", "avg")
 
 
 def postmortem_rows(pm):
@@ -571,14 +603,31 @@ def postmortem_headline(pm):
             f"edge {_signed_dollar(edge.get('avg_delta'))}/trade")
 
 
-# Driver-table styling: fixed (sticky) header over a scrolling body, so the column
-# headers stay visible as the trade list scrolls; colored P&L is via body-cell slots.
+# A SHORTER scroll box than the app default, and nothing else. The sticky header
+# this block used to declare is redundant with ``shell.TABLE_CSS`` — which is
+# app-wide and already does sticky thead, row dividers and the 11px/600 eyebrow
+# head — and it FOUGHT it, pinning a hardcoded ``#141a30`` over the theme's own
+# inset tone. All that is left is the one rule the app does not have an opinion
+# about: five tables stacked on one page, each capped so the page still scrolls.
 DRIVER_CSS = """
 .driver-table .q-table__middle { max-height: 52vh; }
-.driver-table thead tr th {
-  position: sticky; top: 0; z-index: 2; background: #141a30;
-}
 """
+
+# ⚠ The STOP body used to end "Enable re-arms it (clears the halt)". That is true
+# of THIS halt — a manual stop — and false of a halt the driver sets itself, and
+# the difference is the entire reason the Resume today button exists (see
+# ``is_risk_halt``). It now says which is which.
+STOP_BODY = (
+    "Latches the kill-switch for the rest of today — no new trades will be "
+    "opened. Open positions keep auto-managing. This is a manual stop, so "
+    "Enable clears it; a halt the driver sets itself (loss cap, banked target, "
+    "VIX ceiling) stays latched until Resume today clears it."
+)
+RESUME_BODY = (
+    "The driver halted ITSELF today (loss cap, banked target, or the VIX "
+    "ceiling). Enable re-arms it for the next session but leaves the halt in "
+    "place; this clears it and lets it open trades again TODAY."
+)
 
 # A body-cell slot that paints the P&L value in its row's _pnl_class (the JIT
 # generates the runtime ``text-[#hex]`` utility from the stamped class string).
@@ -592,12 +641,8 @@ _PNL_CELL_SLOT = r'''
 
 
 def render():
-    """Driver page: autonomous monitor + STOP + realized performance."""
+    """Driver page: autonomous monitor + Stop + realized performance."""
     ui.add_css(DRIVER_CSS)
-    ui.label("Claude Driver").classes("text-h5")
-    ui.label("Autonomous PAPER options trader (Claude decides, code-enforced "
-             "guardrails). This page MONITORS what it does and lets you STOP it. "
-             "Paper only — nothing is sent to Schwab.").classes("text-xs opacity-60")
 
     state = {
         "auto": None, "auto_ver": None, "ctrl": None, "ctrl_ver": None,
@@ -607,45 +652,94 @@ def render():
         "pending_enabled": None, "pending_ticks": 0,
     }
 
-    # ── Autonomous monitor + override ─────────────────────────────────────────
-    monitor = ui.column().classes("w-full gap-3")
-    # A cycle runs the decider (a Claude call) and a manage reprices the book;
-    # both take seconds during which the monitor shows the previous state.
-    monitor_busy = _busy.build_busy(monitor, "Running…")
-    # Busy-message line for the monitor's autonomous actions (enable/disable/stop/
-    # cycle) + the performance Refresh below.
-    status = ui.label("").classes("opacity-70 text-sm")
+    # The kit page column. Held in a name and RE-ENTERED (``with page_col:``)
+    # rather than wrapped around the whole of ``render``: the closures below sit
+    # at render's own indent and three source-grep tests read them there - the
+    # poll's pipelined ``read_versions`` and its ``run.io_bound``, and the
+    # monitor's ``read("options:driver_paper_account")``. The gamma precedent.
+    page_col = kit.page()
+    with page_col:
+        # ⚠ ``stale=False`` is a DECISION, not a default. This view's publisher
+        # is ``manage_due``, gated on a trading day AND the 08:00-15:15 CT
+        # window, and it is in neither ``alerts.STALE_OVERRIDES`` nor
+        # ``alerts.RTH_ONLY_VIEWS`` - so ``stale=True`` would paint the stamp
+        # amber every evening and all weekend: a true reading of the key's age
+        # and a false one about the page.
+        head = kit.header("Claude Trades", view=STAMP_VIEW, stale=False)
+        with head.actions:
+            # ⚠ ALL FOUR ACTIONS LIVE HERE, not in the monitor card where three
+            # of them used to. ``kit.set_busy`` creates a button's backstop
+            # timer with ``with btn.parent_slot:``, and ``_render_monitor``
+            # clears ``monitor`` on every version move - so a held button inside
+            # it would be deleted by the very repaint its own command causes.
+            # They are actions on the whole page, which is where the standard
+            # puts them anyway; danger first, primary last.
+            stop_btn = kit.button("Stop", kind="danger", icon="stop",
+                                  tooltip="Latch the kill-switch for the rest "
+                                          "of today. Open positions keep "
+                                          "auto-managing.")
+            # Built ONCE and shown by state, rather than built only when the
+            # condition holds: out of the cleared container there is no repaint
+            # to rebuild it on.
+            resume_btn = kit.button("Resume today", kind="secondary",
+                                    icon="lock_open",
+                                    tooltip="Clear a halt the driver set itself "
+                                            "and let it trade again today.")
+            resume_btn.set_visibility(False)
+            perf_btn = kit.button("Refresh", kind="secondary", icon="refresh",
+                                  tooltip="Reprice the driver book now, rather "
+                                          "than at the next 1-min manage tick.")
+            run_btn = kit.button("Run now", kind="primary", icon="bolt",
+                                 tooltip="Fire one decision checkpoint "
+                                         "immediately.")
+        _actions = (stop_btn, resume_btn, perf_btn, run_btn)
 
-    ui.separator()
-    with ui.row().classes("items-center gap-3 flex-wrap"):
-        ui.label("Performance").classes("text-h6")
-        perf_btn = ui.button("Refresh", icon="refresh", color=None) \
-            .props("no-caps dense").classes(BTN)
-    ui.label("The driver's closed trades and realized P&L from its isolated paper "
-             "account — updates every 5-min manage cycle as positions close.") \
-        .classes("text-xs opacity-50")
-    perf_summary = ui.label("").classes("text-sm opacity-80")
-    perf_table = ui.table(columns=_CLOSED_COLS, rows=[], row_key="cid") \
-        .classes("w-full driver-table").props("dense")
-    perf_table.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
+        # ── Autonomous monitor + override ─────────────────────────────────────
+        # A cycle runs the decider (a Claude call) and a manage reprices the
+        # book; both take seconds during which the monitor shows the previous
+        # state. ⚠ THE SCRIM LIVES ON THE REGION'S OUTER ELEMENT. It used to be
+        # ``build_busy(monitor, ...)`` - mounted INSIDE the container
+        # ``_render_monitor`` opens by clearing - so the build-time paint
+        # deleted it and every ``show()`` since reached a deleted element.
+        mon = kit.region("Running…")
+        monitor = mon.content
 
-    # ── Performance analytics: equity curve + posture post-mortem + MAE/MFE ────
-    # Persistent elements (the Highcharts element must exist at first render — the
-    # ESM import-map gotcha — and is updated in place, never rebuilt).
-    ui.separator()
-    ui.label("Analytics").classes("text-h6")
-    ui.label("Realized equity curve, whether trading WITH or AGAINST the tape paid "
-             "(posture at entry vs outcome), and how far trades ran for/against before "
-             "closing (MAE/MFE) — the driver book's self-diagnostics.") \
-        .classes("text-xs opacity-50")
-    equity_chart = ui.highchart(equity_curve_figure([])).classes("w-full")
-    analytics_headline = ui.label("").classes("text-sm opacity-80")
-    postmortem_table = ui.table(columns=_POSTMORTEM_COLS, rows=[], row_key="stance") \
-        .classes("w-full driver-table").props("dense")
-    postmortem_table.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
-    excursion_label = ui.label("").classes("text-xs opacity-60")
-    analytics_empty = ui.label("No closed driver trades yet — analytics populate as "
-                               "positions close.").classes("text-xs opacity-50")
+        @guard
+        def _release_actions():
+            for b in _actions:
+                kit.set_busy(b, False)
+
+        # ── Performance ───────────────────────────────────────────────────────
+        with ui.card().classes(f"{_t.CARD} w-full gap-2"):
+            kit.section_title("Performance")
+            ui.label("The driver's closed trades and realized P&L from its "
+                     "isolated paper account — updates every 1-min manage cycle "
+                     "as positions close.").classes(f"text-xs {_t.MUTED}")
+            perf_summary = kit.status_line()
+            perf_table = kit.table(_CLOSED_COLS, row_key="cid",
+                                   numeric=_CLOSED_NUMERIC,
+                                   classes="w-full driver-table")
+            perf_table.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
+
+        # ── Performance analytics: equity curve + posture post-mortem + MAE/MFE
+        # Persistent elements (the Highcharts element must exist at first render
+        # — the ESM import-map gotcha — and is updated in place, never rebuilt,
+        # so it also sits OUTSIDE the region above).
+        with ui.card().classes(f"{_t.CARD} w-full gap-2"):
+            kit.section_title("Analytics")
+            ui.label("Realized equity curve, whether trading WITH or AGAINST the "
+                     "tape paid (posture at entry vs outcome), and how far trades "
+                     "ran for/against before closing (MAE/MFE) — the driver "
+                     "book's self-diagnostics.").classes(f"text-xs {_t.MUTED}")
+            equity_chart = ui.highchart(equity_curve_figure([])).classes("w-full")
+            analytics_headline = kit.status_line()
+            postmortem_table = kit.table(_POSTMORTEM_COLS, row_key="stance",
+                                         numeric=_POSTMORTEM_NUMERIC,
+                                         classes="w-full driver-table")
+            postmortem_table.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
+            excursion_label = ui.label("").classes(f"text-xs {_t.MUTED}")
+            analytics_empty = kit.empty("No closed driver trades yet — analytics "
+                                        "populate as positions close.")
 
     @guard
     def _render_analytics():
@@ -661,40 +755,26 @@ def render():
         has_data = bool(curve) or bool(postmortem_table.rows) or bool(excursion_label.text)
         analytics_empty.set_visibility(not has_data)
 
-    # ── confirm dialog for STOP (latch the kill-switch) ───────────────────────
-    with ui.dialog() as stop_dialog, ui.card():
-        ui.label("STOP the autonomous driver?").classes("text-subtitle1")
-        ui.label("Latches the kill-switch for the rest of today — no new trades "
-                 "will be opened. Open positions keep auto-managing. Enable "
-                 "re-arms it (clears the halt).").classes("text-xs opacity-70")
-        with ui.row().classes("justify-end gap-2 w-full"):
-            ui.button("Cancel", on_click=stop_dialog.close).props("flat")
-            ui.button("STOP", color=None,
-                      on_click=lambda: (_do("stop", "Stopping…"),
-                                        stop_dialog.close())).props("no-caps").classes(BTN_DANGER)
-
-    # ── confirm dialog for OVERRIDING a same-day RISK halt ────────────────────
-    # A halt the driver set itself (daily loss cap / banked target / VIX) is NOT
-    # cleared by the Enable toggle any more - a routine re-arm, or a replayed
-    # ``enable`` command, used to wipe "stop the bleed for the day" silently. The
-    # capability is kept, but it now takes this deliberate act.
-    with ui.dialog() as resume_dialog, ui.card():
-        ui.label("Resume trading after a risk halt?").classes("text-subtitle1")
-        ui.label("The driver halted ITSELF today (loss cap, banked target, or the "
-                 "VIX ceiling). Enable re-arms it for the next session but leaves "
-                 "the halt in place; this clears it and lets it open trades again "
-                 "TODAY.").classes("text-xs opacity-70")
-        with ui.row().classes("justify-end gap-2 w-full"):
-            ui.button("Cancel", on_click=resume_dialog.close).props("flat")
-            ui.button("Resume today", color=None,
-                      on_click=lambda: (_do("enable", "Clearing halt…",
-                                            clear_halt=True),
-                                        resume_dialog.close())
-                      ).props("no-caps").classes(BTN_DANGER)
+    # ── the two confirm dialogs ───────────────────────────────────────────────
+    # Both are built at the page's own level, so neither sits in a container a
+    # repaint clears; both are ``danger`` - Resume today re-arms an autonomous
+    # trader that halted ITSELF, which is as consequential as the stop it undoes.
+    stop_confirm = kit.confirm(
+        "Stop the autonomous driver?", STOP_BODY, confirm_text="Stop",
+        danger=True, on_confirm=lambda: _do("stop", "Stopping the driver…",
+                                            btn=stop_btn))
+    resume_confirm = kit.confirm(
+        "Resume trading after a risk halt?", RESUME_BODY,
+        confirm_text="Resume today", danger=True,
+        on_confirm=lambda: _do("enable", "Clearing the halt…", btn=resume_btn,
+                               clear_halt=True))
+    stop_btn.on_click(stop_confirm.open)
+    resume_btn.on_click(resume_confirm.open)
 
     # ── autonomous monitor render (rebuilt in place from cache:driver:*) ───────
     def _render_monitor():
-        monitor_busy.hide()
+        mon.busy.hide()
+        _release_actions()
         monitor.clear()
         auto = state["auto"] or {}
         ctrl = state["ctrl"] or {}
@@ -711,6 +791,10 @@ def render():
         enabled, state["pending_enabled"] = resolve_switch_state(
             state["pending_enabled"], bool(ctrl_view.get("enabled")))
         halted = bool(ctrl_view.get("halted"))
+        # Only for a halt the DRIVER set itself: Enable no longer clears one of
+        # those, so Resume today is the way back in today. The button lives in
+        # the header now, so its CONDITION is its visibility.
+        resume_btn.set_visibility(is_risk_halt(ctrl_view))
         # Day P&L = the LIVE paper-account session P&L (the truthful source — the
         # driver trades into the paper account, so it moves as the options service
         # reprices, whether or not the autonomous loop is enabled). Fall back to the
@@ -719,43 +803,35 @@ def render():
         target = auto.get("target", 500.0)
 
         with monitor:
-            with ui.card().classes("w-full gap-3"):
-                # State banner + master controls.
+            with ui.card().classes(f"{_t.CARD} w-full gap-3"):
+                # State banner + the master switch (the page's four ACTIONS are
+                # in the header line; this one control stays here because it is
+                # rebuilt per repaint on purpose - writing ``sw.value`` from the
+                # repaint would re-enter ``_on_toggle``, which is exactly what
+                # ``resolve_switch_state`` exists to avoid).
                 with ui.row().classes("items-center gap-3 flex-wrap w-full"):
                     ui.label(control_state_label(ctrl_view)) \
-                        .classes("text-weight-bold text-white px-3 py-1 rounded "
-                                 + control_bg_class(ctrl_view))
+                        .classes("text-weight-bold px-3 py-1 "
+                                 + control_badge_class(ctrl_view))
                     if auto.get("date"):
-                        ui.label(auto["date"]).classes("opacity-60 text-sm")
+                        ui.label(auto["date"]).classes(f"text-sm {_t.MUTED}")
                     if auto.get("last_cycle_ts"):
                         ui.label(f"last cycle {to_central(auto['last_cycle_ts'])}") \
-                            .classes("opacity-50 text-xs")
+                            .classes(f"text-xs {_t.MUTED}")
                     ui.space()
                     # Enable/Disable master toggle (re-arms a prior halt on enable).
                     sw = ui.switch("Autonomous", value=enabled,
                                    on_change=_on_toggle)
                     sw.props("color=positive")
-                    ui.button("Run now", icon="bolt", color=None,
-                              on_click=lambda: _do("cycle", "Running a checkpoint…")) \
-                        .props("no-caps").classes(BTN_PRIMARY)
-                    ui.button("STOP", icon="stop", color=None,
-                              on_click=stop_dialog.open) \
-                        .props("no-caps").classes(f"{BTN_DANGER} text-weight-bold")
-                    # Only for a halt the DRIVER set itself: Enable no longer
-                    # clears one of those, so this is the way back in today.
-                    if is_risk_halt(ctrl_view):
-                        ui.button("Resume today", icon="lock_open", color=None,
-                                  on_click=resume_dialog.open) \
-                            .props("no-caps").classes(BTN)
 
                 # Day-P&L-vs-target progress.
                 with ui.row().classes("items-center gap-3 w-full"):
-                    ui.label("Day P&L").classes("text-xs opacity-60")
+                    ui.label("Day P&L").classes(_t.EYEBROW)
                     ui.linear_progress(value=target_progress(day_pnl, target),
                                        show_value=False, size="18px") \
                         .classes("flex-1").props("rounded")
                     ui.label(target_text(day_pnl, target)) \
-                        .classes("text-sm text-weight-medium")
+                        .classes(f"text-sm text-weight-medium {_t.LABEL}")
                 # Live paper-account P&L summary (the truthful, always-current numbers).
                 if psum["has_account"]:
                     with ui.row().classes("items-center gap-4 flex-wrap"):
@@ -764,53 +840,50 @@ def render():
                                          ("Open P&L", _money(psum["open_unrealized"])),
                                          ("Equity", _money(psum["equity"])),
                                          ("Open", str(psum["open_count"]))):
-                            with ui.column().classes("gap-0"):
-                                ui.label(lbl).classes("text-xs opacity-60")
-                                ui.label(val).classes("text-sm text-weight-medium")
+                            _chip(lbl, val)
                 if halted and ctrl_view.get("reason"):
                     ui.label(f"Halt: {ctrl_view['reason']}") \
-                        .classes("text-xs text-amber-9")
+                        .classes(f"text-xs {_t.TXT_WARN}")
 
             # Open positions — the LIVE paper account (where the driver trades),
             # falling back to the autonomous snapshot only if the paper account
             # isn't cached yet.
             positions = (paper.get("positions") if psum["has_account"]
                          else auto.get("positions")) or []
-            with ui.card().classes("w-full gap-2"):
-                ui.label(f"Open positions ({len(positions)})") \
-                    .classes("text-subtitle2 opacity-70")
+            with ui.card().classes(f"{_t.CARD} w-full gap-2"):
+                kit.section_title(f"Open positions ({len(positions)})")
                 if positions:
-                    pos_tbl = ui.table(columns=_POSITION_COLS, rows=position_rows(positions),
-                                       row_key="position_id").classes("w-full driver-table").props("dense")
+                    pos_tbl = kit.table(_POSITION_COLS, position_rows(positions),
+                                        row_key="position_id",
+                                        numeric=_POSITION_NUMERIC,
+                                        classes="w-full driver-table")
                     pos_tbl.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
                 else:
-                    ui.label("No open positions.").classes("text-xs opacity-50")
+                    kit.empty("No open positions.")
 
             # Decision log (per-checkpoint thesis + executed/rejected + halt) —
             # TODAY's checkpoints only (the full history isn't useful day-to-day).
             log = decision_log_rows(current_day_decisions(auto.get("decisions")))
-            with ui.card().classes("w-full gap-2"):
-                ui.label(f"Decision log — today ({len(log)})") \
-                    .classes("text-subtitle2 opacity-70")
+            with ui.card().classes(f"{_t.CARD} w-full gap-2"):
+                kit.section_title(f"Decision log — today ({len(log)})")
                 if not log:
-                    ui.label("No checkpoints today — enable autonomy or click "
-                             "“Run now”.").classes("text-xs opacity-50")
+                    kit.empty("No checkpoints today — enable autonomy or click "
+                              "“Run now”.")
                 for row in log:
                     _decision_card(row)
 
             # Performance scorecard — the driver account's standalone track record
-            # (cache:options:driver_paper_perf, refreshed every 5-min manage tick).
+            # (cache:options:driver_paper_perf, refreshed every 1-min manage tick).
             _scorecard_card(state["dperf"] or {})
 
     def _decision_card(row):
         halted = row.get("halted")
-        cls = "w-full gap-1"
-        with ui.card().classes(cls):
+        with ui.card().classes(f"{_t.CARD} w-full gap-1"):
             with ui.row().classes("items-center gap-2 flex-wrap"):
-                ui.label(to_central(row.get("ts", ""))).classes("text-xs opacity-50")
+                ui.label(to_central(row.get("ts", ""))).classes(f"text-xs {_t.MUTED}")
                 if row.get("stand_down"):
                     ui.label("STAND DOWN").classes("text-xs text-weight-bold "
-                                                   "text-amber-9")
+                                                   + _t.TXT_WARN)
                     # R7: an OPS-INCIDENT stand-down (no_key/api_error/parse_error)
                     # gets a distinct red chip so a broken key isn't mistaken for
                     # weeks of "cautious model behavior". A model stand-down / legacy
@@ -818,47 +891,47 @@ def render():
                     incident = stand_down_reason_label(row.get("reason"))
                     if incident:
                         ui.label(incident).classes(
-                            "text-xs text-weight-bold text-white px-2 rounded "
-                            "bg-[#E24B4A]").tooltip(
+                            f"text-xs text-weight-bold px-2 {_t.BADGE_NEG}").tooltip(
                             "Stand-down was caused by an operational failure, not a "
                             "model decision — check the driver service / API key.")
                 if halted:
-                    ui.label("HALTED").classes("text-xs text-weight-bold text-red-9")
+                    ui.label("HALTED").classes("text-xs text-weight-bold "
+                                               + _t.TXT_NEG)
             if row.get("thesis"):
-                ui.label(row["thesis"]).classes("text-sm")
-            ui.label(decision_summary(row)).classes("text-xs opacity-80")
+                ui.label(row["thesis"]).classes(f"text-sm {_t.LABEL}")
+            ui.label(decision_summary(row)).classes(f"text-xs {_t.LABEL}")
             for ex in row.get("executed") or []:
                 rat = ex.get("rationale")
                 line = (f"✓ {ex.get('symbol', '?')} ×{ex.get('qty', '?')}"
                         + (f" — {rat}" if rat else ""))
-                ui.label(line).classes("text-xs text-green-9")
+                ui.label(line).classes(f"text-xs {_t.TXT_POS}")
             for rj in row.get("rejected") or []:
                 ui.label(f"✗ {rj.get('id', '?')} — {rj.get('reason', '')}") \
-                    .classes("text-xs text-red-8 opacity-80")
+                    .classes(f"text-xs {_t.TXT_NEG}")
             shadow = shadow_gate_line(row)
             if shadow:
                 ui.label(f"👁 {shadow}").classes(
-                    "text-xs text-weight-medium text-amber-9").tooltip(
+                    f"text-xs text-weight-medium {_t.TXT_WARN}").tooltip(
                     "Directional gate is in log-only shadow mode — this trade fired but a "
                     "LIVE gate would have blocked it as wrong-side for the tape. Evidence "
                     "for enabling settings.DIRECTIONAL_GATE_ENABLED.")
             if halted and row.get("halt_reason"):
-                ui.label(row["halt_reason"]).classes("text-xs text-amber-9")
+                ui.label(row["halt_reason"]).classes(f"text-xs {_t.TXT_WARN}")
 
     def _chip(label, value):
         with ui.column().classes("gap-0"):
-            ui.label(label).classes("text-xs opacity-60")
-            ui.label(value).classes("text-sm text-weight-medium")
+            ui.label(label).classes(_t.EYEBROW)
+            ui.label(value).classes(f"text-sm text-weight-medium {_t.LABEL}")
 
     def _scorecard_card(perf):
         # Plain-widget card (no Highcharts) → safe to rebuild in place each repaint.
-        with ui.card().classes("w-full gap-2"):
-            ui.label("Performance scorecard").classes("text-subtitle2 opacity-70")
+        with ui.card().classes(f"{_t.CARD} w-full gap-2"):
+            kit.section_title("Performance scorecard")
             ui.label("The driver account's standalone track record (isolated paper "
-                     "book; updates every ~5 min as it reprices).") \
-                .classes("text-xs opacity-50")
+                     "book; updates every minute as it reprices).") \
+                .classes(f"text-xs {_t.MUTED}")
             if not perf or not perf.get("total_trades"):
-                ui.label("No driver trades recorded yet.").classes("text-xs opacity-50")
+                kit.empty("No driver trades recorded yet.")
                 return
             # Headline metrics.
             with ui.row().classes("items-center gap-5 flex-wrap"):
@@ -870,22 +943,24 @@ def render():
                     _chip(lbl, val)
             bw = best_worst_text(perf)
             if bw:
-                ui.label(bw).classes("text-xs opacity-70")
+                ui.label(bw).classes(f"text-xs {_t.MUTED}")
             # Breakdown tables (P&L by symbol / by strategy).
             with ui.row().classes("w-full gap-4 items-start flex-wrap"):
                 sym_rows = scorecard_symbol_rows(perf)
                 if sym_rows:
                     with ui.column().classes("gap-1 flex-1 min-w-[260px]"):
-                        ui.label("P&L by symbol").classes("text-xs opacity-60")
-                        st = ui.table(columns=_SCORE_SYMBOL_COLS, rows=sym_rows,
-                                      row_key="symbol").classes("w-full driver-table").props("dense")
+                        ui.label("P&L by symbol").classes(_t.EYEBROW)
+                        st = kit.table(_SCORE_SYMBOL_COLS, sym_rows,
+                                       row_key="symbol", numeric=_SCORE_NUMERIC,
+                                       classes="w-full driver-table")
                         st.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
                 strat_rows = scorecard_strategy_rows(perf)
                 if strat_rows:
                     with ui.column().classes("gap-1 flex-1 min-w-[260px]"):
-                        ui.label("P&L by strategy").classes("text-xs opacity-60")
-                        st = ui.table(columns=_SCORE_STRATEGY_COLS, rows=strat_rows,
-                                      row_key="strategy").classes("w-full driver-table").props("dense")
+                        ui.label("P&L by strategy").classes(_t.EYEBROW)
+                        st = kit.table(_SCORE_STRATEGY_COLS, strat_rows,
+                                       row_key="strategy", numeric=_SCORE_NUMERIC,
+                                       classes="w-full driver-table")
                         st.add_slot("body-cell-pnl", _PNL_CELL_SLOT)
 
     def _render_perf():
@@ -900,10 +975,16 @@ def render():
 
     # ── command enqueue ───────────────────────────────────────────────────────
     @guard
-    def _do(cmd, busy_msg, **args):
+    def _do(cmd, busy_msg, btn=None, **args):
+        # The wait is the region scrim plus the button's own spinner, both
+        # released by the repaint the command causes. The old ``status`` label
+        # was written here and at the Refresh below, and NEVER RESET - those two
+        # were its only writes, so "Stopping…" stayed on screen for the rest of
+        # the session.
         bus_client.request("driver", {"type": cmd, "args": args})
-        monitor_busy.show()
-        status.text = busy_msg
+        mon.busy.show(busy_msg)
+        if btn is not None:
+            kit.set_busy(btn)
 
     @guard
     def _on_toggle(e):
@@ -914,19 +995,20 @@ def render():
         state["pending_enabled"] = bool(e.value)
         state["pending_ticks"] = 0
         if e.value:
-            _do("enable", "Enabling autonomous driver…")
+            _do("enable", "Enabling autonomous trading…")
         else:
-            _do("disable", "Disabling autonomous driver…")
+            _do("disable", "Disabling autonomous trading…")
 
     @guard
     def _refresh_perf():
         # Force an immediate driver-account reprice + republish (options_svc) so the
-        # closed-trade table refreshes now, not at the next 5-min manage tick.
+        # closed-trade table refreshes now, not at the next 1-min manage tick.
         bus_client.request("options", {"type": "driver_paper_manage"})
-        monitor_busy.show("Repricing the driver book…")
-        status.text = "Refreshing performance…"
+        mon.busy.show("Repricing the driver book…")
+        kit.set_busy(perf_btn)
 
     perf_btn.on_click(_refresh_perf)
+    run_btn.on_click(lambda: _do("cycle", "Running a checkpoint…", btn=run_btn))
 
     # ── version-poll repaint (fetch-free) ─────────────────────────────────────
     _POLL_VIEWS = ["driver:autonomous", "driver:control",
@@ -959,6 +1041,8 @@ def render():
             state["dperf_ver"] = dpv
             (state["auto"], state["ctrl"], state["paper"],
              state["dperf"]) = await run.io_bound(_read_monitor_payloads)
+            # The version moving IS the answer landing: the scrim comes down and
+            # every held action button is handed back (_render_monitor).
             _render_monitor()
             _render_perf()          # the closed-trade table lives in the driver account
         if dav != state["analytics_ver"]:
@@ -975,8 +1059,8 @@ def render():
             if state["pending_ticks"] >= _PENDING_TIMEOUT_TICKS:
                 state["pending_enabled"] = None
                 state["pending_ticks"] = 0
-                ui.notify("Enable/Disable didn't take — is driver_svc running?",
-                          type="warning")
+                kit.toast("warn",
+                          "Enable/Disable didn't take — is driver_svc running?")
                 _render_monitor()
 
     # Initial paint (graceful-empty when the service is cold / nothing cached).

@@ -1213,7 +1213,9 @@ An autonomous **paper** options trader: Claude picks and sizes defined-risk cred
 spreads, code-enforced guardrails cap the risk. Nothing goes to a live account.
 
 - **Enable / Disable** — turn the autonomous trader on or off.
-- **STOP** — halt new trades for the rest of the day (open positions keep managing).
+- **Stop** — halt new trades for the rest of the day (open positions keep managing).
+  It is a manual stop, so **Enable** clears it; a halt the driver sets ITSELF
+  (loss cap, banked target, VIX ceiling) needs **Resume today**.
 - **Run now** — fire one decision checkpoint immediately.
 - **Day P&L** progresses toward the day's target. That target is **not fixed**: the
   base is $500, ratcheted against the month-to-date pace — up to $1,000 when behind,

@@ -143,9 +143,14 @@ def test_current_day_decisions_keeps_only_today():
     assert "today-early" not in theses
 
 
-def test_position_rows_carry_pnl_color():
+def test_position_rows_carry_the_colour_the_SLOT_reads():
+    """Re-aimed 2026-09-20. This pinned ``_pnl_color``, a hex written into every
+    position row and read by NO renderer — ``_PNL_CELL_SLOT`` binds
+    ``_pnl_class``. Half-live is the thing to remove, so the row drops the hex
+    and this asserts the key that is actually rendered."""
     rows = driver.position_rows([{"position_id": "p1", "unrealized_pnl": -12.0}])
-    assert rows[0]["_pnl_color"] == "#ef5350"
+    assert "_pnl_color" not in rows[0]
+    assert rows[0]["_pnl_class"] == "text-[#ef5350]"
 
 
 def test_pnl_slot_binds_pnl_class():

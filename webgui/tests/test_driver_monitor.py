@@ -57,19 +57,27 @@ def test_control_label_none_is_disabled():
     assert "disabled" in driver.control_state_label(None).lower()
 
 
-# ── control_state_color ──────────────────────────────────────────────────────
-def test_control_state_color_distinguishes_states():
-    off = driver.control_state_color({"enabled": False, "halted": False})
-    on = driver.control_state_color({"enabled": True, "halted": False})
-    halted = driver.control_state_color({"enabled": True, "halted": True})
+# ── control_badge_class ──────────────────────────────────────────────────────
+# Re-aimed 2026-09-20: ``control_state_color`` and ``control_bg_class`` were a
+# pair (a hex, then that hex interpolated into ``bg-[…]``) and are now one
+# function returning the theme's own badge token, which carries the fill, the
+# foreground and the radius together. Both tests keep the invariant they had.
+def test_control_badge_distinguishes_states():
+    off = driver.control_badge_class({"enabled": False, "halted": False})
+    on = driver.control_badge_class({"enabled": True, "halted": False})
+    halted = driver.control_badge_class({"enabled": True, "halted": True})
     assert off and on and halted
     assert on != off and halted != on   # three visually distinct states
 
 
-def test_control_bg_class_maps_states():
-    assert driver.control_bg_class({"enabled": False, "halted": False}) == "bg-[#888888]"
-    assert driver.control_bg_class({"enabled": True, "halted": False}) == "bg-[#1D9E75]"
-    assert driver.control_bg_class({"enabled": True, "halted": True}) == "bg-[#BA7517]"
+def test_control_badge_class_maps_states():
+    from pages.options import theme as _theme
+    assert driver.control_badge_class(
+        {"enabled": False, "halted": False}) == _theme.BADGE_MUTED
+    assert driver.control_badge_class(
+        {"enabled": True, "halted": False}) == _theme.BADGE_POS
+    assert driver.control_badge_class(
+        {"enabled": True, "halted": True}) == _theme.BADGE_WARN
 
 
 # ── decision_log_rows ────────────────────────────────────────────────────────
@@ -463,3 +471,325 @@ def test_page_imports_no_engine_or_services():
     # No engine/proxy objects leaked into the page module namespace.
     for attr in ("proxy", "compute", "handlers"):
         assert not hasattr(driver, attr), f"driver.py exposes engine attr {attr!r}"
+
+
+# ── Claude Trades on the page kit (Phase 5, Task 8) ──────────────────────────
+# The page named itself "Claude Driver" while the rail said Claude Trades; its
+# four action buttons lived inside the container every repaint clears; its only
+# wait was a scrim that the FIRST paint deleted; and its status label was
+# written twice and never reset, so "Stopping…" stayed on screen for the rest of
+# the session.
+import inspect as _inspect
+import pathlib as _pathlib
+
+from nicegui import ui as _ui
+
+from pages import ui_kit as kit
+from pages.options import theme as _t
+
+_ACTIONS = ("Stop", "Resume today", "Refresh", "Run now")
+
+
+def _driver_src():
+    return (_pathlib.Path(__file__).resolve().parents[1] / "pages"
+            / "driver.py").read_text(encoding="utf-8")
+
+
+def _driver_render():
+    """Render Claude Trades and return ONLY the elements IT built.
+
+    ``ui.context.client.elements`` is the auto-index client the whole module
+    shares, so a plain ``elements.values()`` also hands back widgets another
+    test's render left behind — and a scrim assertion then passes off someone
+    else's page (the Phase 3 Task 1 measurement). Diffing the ids around the
+    render is what scopes it, and it is the whole reason this test can see the
+    bug below."""
+    before = set(_ui.context.client.elements)
+    with _ui.card():
+        driver.render()
+    return [e for i, e in _ui.context.client.elements.items() if i not in before]
+
+
+def _driver_ancestors(el):
+    out = []
+    slot = getattr(el, "parent_slot", None)
+    while slot is not None:
+        out.append(slot.parent)
+        slot = getattr(slot.parent, "parent_slot", None)
+    return out
+
+
+def _driver_buttons(els):
+    return {e.text: e for e in els if isinstance(e, _ui.button)}
+
+
+def _driver_actions(els):
+    """The buttons in the HEADER's actions row, keyed by label.
+
+    Scoped rather than keyed off every button on the page: each confirm dialog
+    carries a button with the SAME caption as the action that opens it ("Stop",
+    "Resume today"), so a flat text->element map silently keeps the dialog's,
+    and an assertion about "the page's Stop button" then reads the confirm's."""
+    actions = _driver_buttons(els)["Run now"].parent_slot.parent
+    return {e.text: e for e in els
+            if isinstance(e, _ui.button) and e.parent_slot.parent is actions}
+
+
+def test_the_scrim_survives_the_repaint_that_used_to_delete_it():
+    """THE BUG, and it had been live since the monitor was written.
+
+    ``monitor_busy = _busy.build_busy(monitor, "Running…")`` mounted the scrim
+    INSIDE ``monitor`` (driver.py:614) and ``_render_monitor`` opens with
+    ``monitor.clear()`` (driver.py:698), first run at 993 — so the build-time
+    paint deleted it, and every ``monitor_busy.show()`` at 905 and 926 since has
+    reached a deleted element. Measured on the pre-change page: ZERO spinners
+    survived a render, against portfolio.py's one on the same probe.
+    ``kit.region`` keeps the spinner on ``outer`` and clears only ``content``."""
+    els = _driver_render()
+    assert any(isinstance(e, _ui.spinner) for e in els), \
+        "the monitor's scrim was deleted by the build-time repaint"
+
+
+class TestTheDriverFrameIsTheKits:
+    def test_the_title_is_the_navs_word_and_the_blurb_is_gone(self):
+        src = _inspect.getsource(driver.render)
+        assert "kit.page()" in src
+        assert 'kit.header("Claude Trades", view=STAMP_VIEW, stale=False)' in src
+        assert "Claude Driver" not in src
+        assert "Autonomous PAPER options trader" not in src
+
+    def test_the_stamp_reads_the_book_not_the_cycle(self):
+        """⚠ NOT ``driver:autonomous``: that view is published only WHILE a
+        cycle runs, so its stamp would freeze between cycles. The paper account
+        is the widest-reach view this page reads."""
+        assert driver.STAMP_VIEW == "options:driver_paper_account"
+
+    def test_the_stamp_never_goes_amber_outside_the_session(self):
+        """``stale=False`` is a decision: the publisher is ``manage_due``, gated
+        on a trading day AND 08:00–15:15 CT, with no ``STALE_OVERRIDES`` entry
+        and no ``RTH_ONLY_VIEWS`` membership — so ``stale=True`` would paint the
+        stamp amber every evening and all weekend."""
+        import alerts
+        assert driver.STAMP_VIEW not in alerts.RTH_ONLY_VIEWS
+        assert driver.STAMP_VIEW not in alerts.STALE_OVERRIDES
+        assert "stale=False" in _inspect.getsource(driver.render)
+
+    def test_the_page_column_is_re_entered_so_the_source_greps_still_bite(self):
+        """``with kit.page():`` around the whole of ``render`` would re-indent
+        the poll and its reads; ``test_poll_pipelines_versions_and_reads_off_loop``
+        and ``test_monitor_reads_driver_paper_account_not_manual`` read them at
+        render's own indent. The gamma precedent (95adc5d)."""
+        src = _inspect.getsource(driver.render)
+        assert "page_col = kit.page()" in src
+        assert "with page_col:" in src
+
+
+class TestTheDriverActionsSurviveTheRepaint:
+    def test_the_four_actions_sit_in_the_header_not_in_the_cleared_monitor(self):
+        """``kit.set_busy`` creates a button's backstop timer with
+        ``with btn.parent_slot:``, and ``_render_monitor`` clears ``monitor`` on
+        every version move — so a held button inside it loses itself AND its
+        timer to the repaint its own command causes. They are page actions, so
+        the header's one actions row is where they belong (the Rank Board
+        precedent)."""
+        els = _driver_render()
+        actions_by_name = _driver_actions(els)
+        for name in _ACTIONS:
+            assert name in actions_by_name, \
+                f"{name} is not in the header's actions row"
+        actions = _driver_buttons(els)["Run now"].parent_slot.parent
+        title = next(e for e in els
+                     if isinstance(e, _ui.label) and e.text == "Claude Trades")
+        assert actions.parent_slot.parent in _driver_ancestors(title)
+        # ...and the container they used to live in really is still cleared.
+        assert "monitor.clear()" in _inspect.getsource(driver.render)
+
+    def test_run_now_is_the_one_primary_and_stop_is_the_one_danger(self):
+        btns = _driver_actions(_driver_render())
+        assert _t.BTN_PRIMARY in " ".join(btns["Run now"].classes)
+        assert _t.BTN_DANGER in " ".join(btns["Stop"].classes)
+        for secondary in ("Refresh", "Resume today"):
+            assert _t.BTN in " ".join(btns[secondary].classes)
+
+    def test_each_action_holds_its_own_spinner(self):
+        assert "kit.set_busy(" in _driver_src()
+        btns = _driver_actions(_driver_render())
+        for name in _ACTIONS:
+            kit.set_busy(btns[name])
+            assert not btns[name].enabled and "loading" in btns[name].props
+
+    def test_the_orphan_status_label_is_gone(self):
+        """It was written at 906 ("Stopping…") and 927 ("Repricing…") and never
+        reset — those were its only two writes, so the word stayed on screen for
+        the rest of the session."""
+        src = _driver_src()
+        assert "status.text" not in src
+        assert '"Repricing…"' not in src
+
+    def test_resume_today_is_hidden_until_the_driver_halts_ITSELF(self):
+        """It used to be built only under ``is_risk_halt``; out of the cleared
+        container it is built once and its VISIBILITY carries the condition.
+        Losing that would offer a halt override on a page with no halt."""
+        import bus_client
+        bus_client.reset()
+        assert _driver_actions(_driver_render())["Resume today"].visible is False
+        bus_client.bus().cache_set("cache:driver:control", {
+            "enabled": True, "halted": True, "reason": "daily loss cap"})
+        assert _driver_actions(_driver_render())["Resume today"].visible is True
+        bus_client.reset()
+
+
+class TestTheDriverDialogsAreTheKits:
+    def test_both_confirms_are_the_kits_and_both_are_danger(self):
+        """Resume today re-arms an autonomous trader that halted ITSELF, so it
+        is as destructive as the stop it undoes. Both cards also carried NO
+        classes — default Quasar cards, the unthemed-dialog case."""
+        src = _driver_src()
+        assert src.count("kit.confirm(") == 2
+        assert "ui.dialog(" not in src
+        els = _driver_render()
+        cards = [e for e in els if isinstance(e, _ui.card)
+                 and kit.CONFIRM_CARD in " ".join(e.classes)]
+        assert len(cards) == 2
+
+    def test_the_stop_body_says_WHICH_halt_enable_clears(self):
+        """It read "Enable re-arms it (clears the halt)" — true of this manual
+        stop and false of a risk halt, which is the entire reason the Resume
+        today button exists one line below (``is_risk_halt``)."""
+        body = driver.STOP_BODY
+        assert "(clears the halt)" not in body
+        assert "Resume today" in body, "it must name the way back from a risk halt"
+        assert "itself" in body.lower(), "and say whose halt that is"
+
+
+class TestTheDriverTablesAreTheKits:
+    def test_the_five_tables_are_the_kits_and_keep_their_pnl_slot(self):
+        src = _driver_src()
+        assert "ui.table(" not in src
+        assert src.count("kit.table(") == 5
+        assert src.count('add_slot("body-cell-pnl", _PNL_CELL_SLOT)') == 5
+
+    def test_the_numbers_are_right_and_the_two_text_columns_move_LEFT(self):
+        """⚠ ``strategy`` and ``status`` carry no ``align`` today, so Quasar
+        renders them RIGHT — nobody writes ``align`` for a text column expecting
+        that. Under the kit they move left, which is how every other text column
+        in the app draws. A deliberate fix, not a regression."""
+        cases = [(driver._CLOSED_COLS, driver._CLOSED_NUMERIC),
+                 (driver._POSITION_COLS, driver._POSITION_NUMERIC),
+                 (driver._SCORE_SYMBOL_COLS, driver._SCORE_NUMERIC),
+                 (driver._SCORE_STRATEGY_COLS, driver._SCORE_NUMERIC),
+                 (driver._POSTMORTEM_COLS, driver._POSTMORTEM_NUMERIC)]
+        for cols, numeric in cases:
+            for c in kit.table_columns(cols, numeric=numeric):
+                want = "right" if c["name"] in numeric else "left"
+                assert c["align"] == want, c["name"]
+                assert c["sortable"] is True, c["name"]
+        for cols, numeric in cases[:2]:
+            assert "strategy" not in numeric
+        assert "status" not in driver._POSITION_NUMERIC
+
+    def test_the_numeric_sets_are_the_measured_ones(self):
+        assert driver._CLOSED_NUMERIC == ("qty", "pnl")
+        assert driver._POSITION_NUMERIC == ("quantity", "pnl")
+        assert driver._SCORE_NUMERIC == ("trades", "pnl", "win_rate")
+        assert driver._POSTMORTEM_NUMERIC == ("trades", "win_rate", "pnl", "avg")
+
+    def test_the_pnl_body_slot_and_its_header_now_agree(self):
+        """``_PNL_CELL_SLOT`` hardcodes ``text-right`` on the ``q-td``. With
+        ``pnl`` named numeric on all five tables the header is right too; naming
+        it nowhere would have left the two disagreeing visibly, with no test
+        able to see it."""
+        assert 'class="text-right"' in driver._PNL_CELL_SLOT
+        for cols, numeric in ((driver._CLOSED_COLS, driver._CLOSED_NUMERIC),
+                              (driver._POSITION_COLS, driver._POSITION_NUMERIC),
+                              (driver._SCORE_SYMBOL_COLS, driver._SCORE_NUMERIC),
+                              (driver._POSTMORTEM_COLS, driver._POSTMORTEM_NUMERIC)):
+            assert "pnl" in numeric
+
+    def test_the_css_keeps_only_the_scroll_height(self):
+        """Its sticky-thead half duplicated — and fought, with a hardcoded hex —
+        ``shell.TABLE_CSS``, which is app-wide and already does sticky thead,
+        row dividers and the 11px/600 head."""
+        css = driver.DRIVER_CSS
+        assert "max-height" in css
+        assert "sticky" not in css and "#141a30" not in css
+
+
+class TestTheDriverColoursAreTheAppsTokens:
+    def test_no_quasar_colour_word_and_no_opacity_muting_is_left(self):
+        """28 ``opacity-*`` mutings and five Quasar colour words, replaced by
+        the theme's own text tokens — so a theme edit reaches this page."""
+        src = _driver_src()
+        for word in ("text-amber-9", "text-red-9", "text-green-9", "text-red-8",
+                     "bg-[#E24B4A]"):
+            assert word not in src, word
+        assert "opacity-" not in src
+
+    def test_the_control_badge_is_the_theme_s_state_fills(self):
+        """⚠ ``#888888`` is a pure neutral and the other two are a STATE reading
+        on a filled pill. ``control_state_color`` goes with them — it existed
+        only to build this class."""
+        assert driver.control_badge_class({"enabled": False}) == _t.BADGE_MUTED
+        assert driver.control_badge_class(
+            {"enabled": True, "halted": False}) == _t.BADGE_POS
+        assert driver.control_badge_class(
+            {"enabled": True, "halted": True}) == _t.BADGE_WARN
+
+    def test_the_three_control_states_stay_visually_distinct(self):
+        """Re-aimed from ``test_control_state_color_distinguishes_states``,
+        which pinned the same invariant on the hex the tokens replace."""
+        seen = {driver.control_badge_class(c) for c in (
+            {"enabled": False, "halted": False},
+            {"enabled": True, "halted": False},
+            {"enabled": True, "halted": True})}
+        assert len(seen) == 3
+
+    def test_every_card_wears_the_app_card_token(self):
+        """Five classless ``ui.card()``s — stock Quasar cards on a navy page."""
+        import re
+        calls = re.findall(r"ui\.card\(\)(?:\.classes\(([^)]*)\))?", _driver_src())
+        assert len(calls) >= 5, "the page still builds its panels as cards"
+        for cls in calls:
+            assert cls and "_t.CARD" in cls, cls
+
+
+def test_the_equity_chart_is_built_once_and_never_inside_the_region():
+    """The ESM import-map gotcha: a ui.highchart added dynamically on a page
+    with no chart at first render fails to resolve ``nicegui-highcharts``. It
+    must exist at page build AND sit outside anything a repaint clears."""
+    els = _driver_render()
+    charts = [e for e in els if type(e).__name__ == "Highchart"]
+    assert len(charts) == 1
+    spinner = next(e for e in els if isinstance(e, _ui.spinner))
+    region_outer = spinner.parent_slot.parent
+    assert region_outer not in _driver_ancestors(charts[0])
+
+
+def test_the_page_tells_the_operator_the_REAL_manage_cadence():
+    """``options_svc/scheduler.py`` has been ``_MANAGE_INTERVAL_MIN = 1`` since
+    2026-07-16; the page said 5-min in four places on screen and four more in
+    its own comments."""
+    src = _driver_src()
+    assert "5-min" not in src and "~5 min" not in src
+    assert "1-min manage cycle" in src
+
+
+def test_position_rows_no_longer_carry_a_colour_nothing_reads():
+    """Re-aimed from ``test_position_rows_carry_pnl_color``. ``_pnl_color`` was
+    written into every position row and read by no renderer — ``_PNL_CELL_SLOT``
+    binds ``_pnl_class``. Half-live is the thing to remove, not to keep."""
+    rows = driver.position_rows([{"position_id": "p1", "unrealized_pnl": -12.0}])
+    assert "_pnl_color" not in rows[0]
+    assert rows[0]["_pnl_class"] == driver.pnl_class(-12.0)
+
+
+def test_the_kill_switch_is_sentence_case_like_every_other_button():
+    """The standard is sentence case for every label; ``page_help`` names the
+    control, so it moves in the same commit or the help stops matching."""
+    src = _driver_src()
+    assert '"STOP"' not in src
+    help_src = (_pathlib.Path(__file__).resolve().parents[1]
+                / "page_help.py").read_text(encoding="utf-8")
+    driver_help = help_src[help_src.index('"/driver":'):]
+    driver_help = driver_help[:driver_help.index('"/market":')]
+    assert "**Stop**" in driver_help and "**STOP**" not in driver_help

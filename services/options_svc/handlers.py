@@ -1385,14 +1385,15 @@ def refresh_driver_paper(bus) -> None:
 
 
 def run_driver_manage_and_refresh(bus) -> None:
-    """5-min driver-account manage tick: reprice + auto-close the driver's open
+    """1-min driver-account manage tick: reprice + auto-close the driver's open
     positions (``compute.run_driver_manage_cycle`` — no-op-safe if the driver
     account doesn't exist yet) then republish both driver views.
 
     The driver analog of ``run_manage_and_refresh`` — shared by the
-    ``driver_paper_manage`` command and the scheduler's 5-min manage tick so both
-    run identical logic. No rescue summary piggyback (that is the manual book's
-    nav badge)."""
+    ``driver_paper_manage`` command and the scheduler's 1-min manage tick so both
+    run identical logic (``scheduler._MANAGE_INTERVAL_MIN``, raised from 5 min on
+    2026-07-16 so stops react within the minute). No rescue summary piggyback
+    (that is the manual book's nav badge)."""
     compute.run_driver_manage_cycle()
     refresh_driver_paper(bus)
 

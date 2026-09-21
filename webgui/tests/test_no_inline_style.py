@@ -204,10 +204,11 @@ def test_utility_pages_have_no_inline_style():
 
 # Phase 5's own screens. ⚠ ``PHASE_3A_FILES``' "portfolio.py" is
 # ``pages/options/portfolio.py`` — the Paper Account board — so the TOP-LEVEL
-# Portfolio page has never been covered here. It is clean today; it joins the
-# guard so it stays that way now that its tables and its one button come from
-# the kit.
-PHASE_5_FILES = ["portfolio.py"]
+# Portfolio page has never been covered here, and neither had Claude Trades or
+# the scorecard vocabulary it shares with the Paper Account page. All three are
+# clean today; they join the guard so they stay that way now that their tables,
+# buttons and dialogs come from the kit.
+PHASE_5_FILES = ["portfolio.py", "driver.py", "scorecard.py"]
 
 
 def test_phase5_pages_have_no_inline_style():
