@@ -43,7 +43,7 @@ It moves to on-demand scans only as an explicit, separately-gated step.
 | D1 | Publish **named trade ideas** (a specific spread on a specific stock, with a score and a grade)? | The existing screens publish market structure and signals; this publishes "sell this 30-delta put spread on X". That is a different kind of public statement. | Decide explicitly. If yes, carry the site's existing paper-only framing into the page header. |
 | D2 | Schwab market-data terms for **republishing raw option quotes** (bid/ask/mark per leg) | The Finder's rows carry per-leg prices. The Gamma screens publish derived aggregates; this would republish quotes. | Check the Schwab API terms before Phase 2. If raw quotes may not be shown, the public table drops the per-leg price columns and keeps derived fields (credit %, PoP, score). |
 | D3 | **Which symbols**: a curated list, or anything a visitor types? | Sets the cost model and the whole architecture (§3 vs §4). | Start curated (Phases 1–3). Treat free-text on-demand as a separate decision (Phase 4). |
-| D4 | **Undefined-risk structures** in public output? | On 09-14 SPY's top-ranked rows were 1–2 year **short straddles** (scores 83/82/78, "Strong"). That ranking is unmeasured against outcomes, and it is the first thing a visitor would see. | Exclude undefined-risk families from the public scan and cap DTE (see Phase 1). |
+| D4 | **Undefined-risk structures** in public output? | On 09-14 SPY's top-ranked rows were 1–2 year **short straddles** (scores 83/82/78, "Strong"). That ranking is unmeasured against outcomes, and it is the first thing a visitor would see. | Exclude undefined-risk rows from the public output (per row, see §2) and cap DTE. |
 
 ---
 
