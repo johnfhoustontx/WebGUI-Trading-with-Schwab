@@ -1,0 +1,43 @@
+# The public Calculator and Simulator on live.neuralstrike.co (design:
+# docs/plans/2026-09-21-public-calculator-simulator-design.md).
+#
+# A visitor builds a position; options_svc loads the chain and prices it. Every
+# value here is read by shared/public_tools.py. Edit + restart options_svc and
+# webgui_live.
+#
+# The daily Schwab budget is NOT here: it is shared with the public Rescue form.
+
+[limits]
+# Minutes a priced result is reused for the same request. Short, because a
+# price is only as good as the chain under it.
+result_ttl_min = 5
+# Minutes a trade rating is reused for the same trade.
+rate_ttl_min = 15
+# Seconds after a request's last run during which the same request is not re-run.
+dedup_sec = 60
+# Ratings of one trade structure (the trade less its prices and size) allowed
+# per rate_ttl_min. Each price typed is a new trade to the cache, so without
+# this one structure could be re-rated for every price a visitor tries.
+structure_runs = 3
+# Seconds a request may wait in the queue before it is dropped. This is also
+# the replay guard: a backlog replayed at startup is older.
+max_wait_sec = 120
+# Minutes each kind of key lives. Visitors choose the symbols and the trades,
+# so the keys must expire or they would accumulate without limit.
+result_keep_min = 30
+answer_keep_min = 15
+# Simulator snapshots held at once across all visitors. Each is a whole chain
+# in the service's memory, so this bounds what it holds.
+snapshot_limit = 8
+# Minutes a Simulator snapshot is kept before it must be fetched again.
+snapshot_ttl_min = 15
+# Public chains held at once across all visitors, shared with Rescue's strikes.
+chain_hold_limit = 16
+
+[visitor]
+# Requests one visitor may make an hour. Counted in the public process by
+# address, in memory only - no address is written anywhere.
+# Chain loads, expirations, ratings and snapshots: these spend Schwab calls.
+tools_per_hour = 60
+# Repricing, implied volatility and sweeps: arithmetic only, no Schwab call.
+math_per_hour = 600

@@ -83,6 +83,11 @@ FINDER_PUBLIC_TOML = REPO_ROOT / "config" / "finder_public.toml"
 # public live process. Edit + restart both.
 RESCUE_PUBLIC_TOML = REPO_ROOT / "config" / "rescue_public.toml"
 
+# The public Calculator and Simulator: their reuse windows, caps and per-visitor
+# limits. Read by shared/public_tools.py from both options_svc (the worker) and
+# the public live process. Edit + restart both.
+TOOLS_PUBLIC_TOML = REPO_ROOT / "config" / "tools_public.toml"
+
 # The public edge (Caddy): the rate limit on live.neuralstrike.co. Read by
 # deploy/caddy/generate_caddyfile.py only; a change needs the Caddyfile
 # regenerated and Caddy reloaded, as root.
