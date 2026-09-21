@@ -706,6 +706,64 @@ _COMMISSIONS = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Public Calculator and Simulator — config/tools_public.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read per request by options_svc and the public site, through the mtime-cached
+# loader, so a saved change applies to the next request with no restart. The
+# daily Schwab budget these requests spend is the shared one in
+# rescue_public.toml's [budget].
+_TOOLS_PUBLIC = ConfigFile(
+    name="tools_public.toml", title="Public Calculator and Simulator",
+    icon="calculate",
+    summary="The Calculator and Simulator on the public site: how results are "
+            "reused, how much is held in memory, and how much one visitor may "
+            "ask for.",
+    restart=(),
+    caution="Loading a chain, a Simulator snapshot or a trade rating spends "
+            "Schwab calls from the shared daily public budget (Public Rescue "
+            "form → Budget). Pricing spends none.",
+    sections=(
+        Section("Reuse and waiting", "", (
+            Field("limits.result_ttl_min", "Reuse a pricing result for", "",
+                  kind="int", unit="min", min=1, max=60, step=1),
+            Field("limits.rate_ttl_min", "Reuse a trade rating for", "",
+                  kind="int", unit="min", min=1, max=240, step=1),
+            Field("limits.dedup_sec", "Ignore a repeat request for", "",
+                  kind="int", unit="s", min=0, max=3600, step=5),
+            Field("limits.structure_runs", "Ratings of one trade per reuse window",
+                  "The same strikes with different prices. Stops one trade being "
+                  "rated again for every price typed.",
+                  kind="int", min=1, max=50, step=1),
+            Field("limits.max_wait_sec", "Drop a request that waited", "",
+                  kind="int", unit="s", min=10, max=3600, step=10),
+            Field("limits.result_keep_min", "Keep a result for", "",
+                  kind="int", unit="min", min=1, max=1440, step=5),
+            Field("limits.answer_keep_min", "Keep a request's answer for", "",
+                  kind="int", unit="min", min=1, max=240, step=1),
+        )),
+        Section("Held in memory", "What the options service keeps between "
+                "visitors' requests.", (
+            Field("limits.snapshot_limit", "Simulator snapshots held",
+                  "One per symbol, shared by every visitor on it.",
+                  kind="int", min=1, max=64, step=1),
+            Field("limits.snapshot_ttl_min", "Keep a Simulator snapshot for", "",
+                  kind="int", unit="min", min=1, max=240, step=1),
+            Field("limits.chain_hold_limit", "Quoted chains held",
+                  "Used to rate trades and estimate volatility; never published "
+                  "while quotes are off.",
+                  kind="int", min=1, max=128, step=1),
+        )),
+        Section("Visitors", "Counted by address in memory; no address is stored.", (
+            Field("visitor.tools_per_hour", "Loads and ratings per visitor per hour",
+                  "", kind="int", min=1, max=1000, step=1),
+            Field("visitor.math_per_hour", "Pricing requests per visitor per hour",
+                  "The Calculator reprices on every edit, so this is generous.",
+                  kind="int", min=1, max=10000, step=10),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public Rescue form — config/rescue_public.toml
 # ─────────────────────────────────────────────────────────────────────────────
 # Read per request by options_svc and the public site, through the mtime-cached
@@ -771,7 +829,7 @@ _ENVS = ConfigFile(name="environments.toml", title="Environments", icon="dns",
                    editable=False, editor="readonly")
 
 FILES = (_SCANNER, _TRADE_MGMT, _DRIVER, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 
