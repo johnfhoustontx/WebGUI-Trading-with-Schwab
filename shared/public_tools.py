@@ -40,10 +40,10 @@ ticker allow-list and the Rescue validators only.
 
 Missing file / bad TOML / bad value -> the built-in defaults, never a raise.
 """
-
 from repo_paths import TOOLS_PUBLIC_TOML
 from shared import public_rescue as _pr
 from shared.config_toml import toml_loader
+from shared.symbols import clean_symbol
 
 # ── the streams and the keys ─────────────────────────────────────────────────
 
@@ -83,6 +83,224 @@ def cache_key(view) -> str:
 
 def event(view) -> str:
     return f"events:{view}"
+
+
+# ── validation ───────────────────────────────────────────────────────────────
+
+MAX_LEGS = 8
+MAX_STRIKE = 1_000_000.0
+MAX_SPOT = 1_000_000.0
+# A per-share price past this is not an option or share price.
+MAX_PREMIUM = 100_000.0
+MAX_IV = 5.0                  # 500% annualised: past any listed option's IV
+MAX_RATE = 0.20
+MAX_IVADJ = 1.0
+NUM_STRIKES = (5, 60)         # rows in the Calculator's P&L matrix
+MAX_SWEEP_DAYS = 366.0
+MAX_CODE_LEN = 32
+_CODE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+
+
+def _in_range(v, lo, hi):
+    """A finite float in the CLOSED range [lo, hi], or None. ``_pr._finite``'s
+    lower bound is exclusive, which is right for a strike and wrong for a rate
+    or an IV adjustment, where 0 is a real and common value."""
+    f = _pr._finite(v)
+    return f if f is not None and lo <= f <= hi else None
+
+
+def _whole(v, lo, hi):
+    """A whole number in [lo, hi], or None. ``24.0`` is 24; ``24.5`` is refused."""
+    f = _pr._finite(v)
+    if f is None or f != int(f):
+        return None
+    n = int(f)
+    return n if lo <= n <= hi else None
+
+
+def _clean_code(raw):
+    """A strategy or structure code - ``PCS``, ``COVERED_CALL`` - or None.
+    Only letters and underscores, so the code can name nothing but a code."""
+    if not isinstance(raw, str):
+        return None
+    code = raw.strip().upper()
+    if not 1 <= len(code) <= MAX_CODE_LEN or not set(code) <= _CODE_CHARS:
+        return None
+    return code
+
+
+def _clean_calc_leg(raw, today):
+    """One Calculator leg, normalized to exactly the six keys of the app's
+    leg dict, or None.
+
+    ⚠ A share leg's ``qty`` counts 100-share LOTS, like an option's contracts,
+    and its ``strike`` and ``expiry`` are forced to None whatever was sent: a
+    stale expiry on a share leg moves the pricing horizon (CLAUDE.md, "A STOCK
+    leg is 100-share LOTS")."""
+    if not isinstance(raw, dict):
+        return None
+    option_type = str(raw.get("option_type") or "").strip().lower()
+    side = str(raw.get("side") or "").strip().lower()
+    qty = _pr._qty(raw.get("qty"))
+    # A missing premium refuses the leg rather than reading as 0: the page
+    # always sends one, and 0.0 is a real price (a worthless option).
+    premium = _pr._finite(raw.get("premium"))
+    if option_type not in ("call", "put", "stock") or side not in ("long", "short") \
+            or qty is None or premium is None or abs(premium) > MAX_PREMIUM:
+        return None
+    if option_type == "stock":
+        strike = expiry = None
+    else:
+        strike = _pr._finite(raw.get("strike"), lo=0.0, hi=MAX_STRIKE)
+        expiry = _pr.clean_expiry(raw.get("expiry"), today)
+        if strike is None or expiry is None:
+            return None
+    return {"option_type": option_type, "side": side, "qty": qty,
+            "premium": premium, "strike": strike, "expiry": expiry}
+
+
+def _clean_sim_leg(raw, today):
+    """One Simulator leg - the ``kind``/``strike``/``expiry``/``side``/``qty``
+    shape its engines price - or None. Options only: the Simulator's engines
+    have no share concept."""
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("kind") or "").strip().lower()
+    side = str(raw.get("side") or "").strip().lower()
+    strike = _pr._finite(raw.get("strike"), lo=0.0, hi=MAX_STRIKE)
+    expiry = _pr.clean_expiry(raw.get("expiry"), today)
+    qty = _pr._qty(raw.get("qty"))
+    if kind not in ("call", "put") or side not in ("long", "short") \
+            or strike is None or expiry is None or qty is None:
+        return None
+    return {"kind": kind, "strike": strike, "expiry": expiry, "side": side,
+            "qty": qty}
+
+
+def _clean_legs(raw, clean_one, today):
+    if not isinstance(raw, list) or not 1 <= len(raw) <= MAX_LEGS:
+        return None
+    out = [clean_one(leg, today) for leg in raw]
+    return None if any(leg is None for leg in out) else out
+
+
+def _math_args(raw, today):
+    kind = raw.get("kind")
+    symbol = clean_symbol(raw.get("symbol"))
+    if symbol is None:
+        return None
+    if kind == "price":
+        # ⚠ No ``price_rows``: the worker derives the matrix's price axis
+        # itself, so a visitor cannot ask for an arbitrarily large grid.
+        args = {
+            "kind": kind, "symbol": symbol,
+            "strategy": _clean_code(raw.get("strategy")),
+            "spot": _pr._finite(raw.get("spot"), lo=0.0, hi=MAX_SPOT),
+            "iv": _pr._finite(raw.get("iv"), lo=0.0, hi=MAX_IV),
+            "rate": _in_range(raw.get("rate"), 0.0, MAX_RATE),
+            "ivadj": _in_range(raw.get("ivadj"), -MAX_IVADJ, MAX_IVADJ),
+            "qty": _pr._qty(raw.get("qty")),
+            "expiry": _pr.clean_expiry(raw.get("expiry"), today),
+            "legs": _clean_legs(raw.get("legs"), _clean_calc_leg, today),
+            "num_strikes": _whole(raw.get("num_strikes"), *NUM_STRIKES),
+        }
+    elif kind == "iv":
+        # No mark: the worker reads it off the chain it holds, so the IV it
+        # implies is from a real quote rather than a number a visitor typed.
+        option_type = str(raw.get("option_type") or "").strip().lower()
+        args = {
+            "kind": kind, "symbol": symbol,
+            "expiry": _pr.clean_expiry(raw.get("expiry"), today),
+            "strike": _pr._finite(raw.get("strike"), lo=0.0, hi=MAX_STRIKE),
+            "option_type": option_type if option_type in ("call", "put") else None,
+        }
+    elif kind == "sweep":
+        args = {
+            "kind": kind, "symbol": symbol,
+            "dt": _in_range(raw.get("dt"), 0.0, MAX_SWEEP_DAYS),
+            "legs": _clean_legs(raw.get("legs"), _clean_sim_leg, today),
+        }
+    else:
+        return None
+    return None if any(v is None for v in args.values()) else args
+
+
+def _tools_args(raw, today):
+    kind = raw.get("kind")
+    symbol = clean_symbol(raw.get("symbol"))
+    if symbol is None:
+        return None
+    args = {"kind": kind, "symbol": symbol}
+    if kind in ("chain", "sim_snapshot"):
+        return args
+    if kind in ("expiry", "sim_expiry"):
+        args["expiry"] = _pr.clean_expiry(raw.get("expiry"), today)
+    elif kind == "rate":
+        args["structure"] = _clean_code(raw.get("structure"))
+        args["legs"] = _clean_legs(raw.get("legs"), _clean_calc_leg, today)
+    else:
+        return None
+    return None if any(v is None for v in args.values()) else args
+
+
+def math_command(raw, today=None):
+    """The command for a pricing request on ``MATH_STREAM``, or None. A tools
+    kind is refused here: each kind lives on exactly one stream."""
+    if not isinstance(raw, dict) or raw.get("kind") not in MATH_KINDS:
+        return None
+    args = _math_args(raw, today)
+    return None if args is None else {"type": MATH_TYPE, "args": args}
+
+
+def tools_command(raw, today=None):
+    """The command for a Schwab-spending request on ``TOOLS_STREAM``, or None.
+    A math kind is refused here."""
+    if not isinstance(raw, dict) or raw.get("kind") not in TOOLS_KINDS:
+        return None
+    args = _tools_args(raw, today)
+    return None if args is None else {"type": TOOLS_TYPE, "args": args}
+
+
+# Rescue's hash, so ``is_key`` below recognises both forms' keys alike.
+_hash = _pr._hash
+
+
+def _stream_tag(command):
+    """``"tools"`` or ``"math"`` for a command shaped as a builder builds one,
+    else None."""
+    if not isinstance(command, dict) or not isinstance(command.get("args"), dict):
+        return None
+    kind = command["args"].get("kind")
+    if command.get("type") == TOOLS_TYPE and kind in TOOLS_KINDS:
+        return "tools"
+    if command.get("type") == MATH_TYPE and kind in MATH_KINDS:
+        return "math"
+    return None
+
+
+def request_key(command) -> str | None:
+    """The key a command's result and answer are written under, or None for a
+    command neither builder would produce. Content-addressed over the
+    NORMALIZED args, so two visitors making the same request share one run.
+
+    ⚠ The hash keeps the request out of the key NAME, nothing more: the result
+    under it is readable by anything holding a Redis read credential, and it is
+    unsalted (see ``public_rescue.spec_key``)."""
+    tag = _stream_tag(command)
+    return None if tag is None else _hash(tag, command["args"])
+
+
+def structure_key(args) -> str:
+    """A rating request LESS its prices and sizes: every leg's ``premium`` and
+    ``qty`` removed. Each price typed is a new request to the cache, so the
+    worker caps ratings per structure on this key instead."""
+    legs = [{k: v for k, v in leg.items() if k not in ("premium", "qty")}
+            for leg in (args.get("legs") or [])]
+    return _hash("structure", {**args, "legs": legs})
+
+
+def is_key(raw) -> bool:
+    return _pr.is_key(raw)
 
 
 # ── the config ───────────────────────────────────────────────────────────────
