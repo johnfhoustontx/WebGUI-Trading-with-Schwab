@@ -74,13 +74,19 @@ def _tab():
 
 def write(symbol, legs) -> None:
     """Store a position for this browser tab, built and normalized by
-    :func:`position_payload`, so ``write(*read())`` round-trips. An invalid
-    position, no client, or tab storage not ready is a silent no-op."""
+    :func:`position_payload`, so ``write(*read())`` round-trips.
+
+    ⚠ A position that cannot be stored - a leg with no strike picked yet, a bad
+    symbol - CLEARS what is stored rather than being skipped: skipped, the tab
+    would keep the last complete position and Open in Simulator would seed one
+    the visitor has since changed. No client, or tab storage not ready, is a
+    silent no-op."""
     payload = position_payload(symbol, legs)
-    if payload is None:
-        return
     try:
-        _tab()[KEY] = payload
+        if payload is None:
+            _tab().pop(KEY, None)
+        else:
+            _tab()[KEY] = payload
     except Exception:     # not connected (RuntimeError) / no tab store (AssertionError)
         return
 

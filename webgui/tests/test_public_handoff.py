@@ -155,6 +155,35 @@ def test_write_refuses_a_malformed_payload_and_leaves_nothing(monkeypatch):
     assert store == {}
 
 
+@pytest.mark.parametrize("unwritable", [
+    [_leg(strike=None)],                    # a leg with no strike picked yet
+    [_leg(), _leg(side="long", strike=None)],
+    [_leg(strike=float("nan"))],
+])
+def test_an_unwritable_position_clears_the_previous_one(monkeypatch, unwritable):
+    """Skipping the write would leave the LAST complete position in the tab,
+    and Open in Simulator would then seed a position the visitor has since
+    changed. Nothing is better than something stale."""
+    store = {}
+    monkeypatch.setattr(ph, "_tab", lambda: store)
+    ph.write("SPY", _legs())
+    assert ph.read() == ("SPY", _legs())
+    ph.write("SPY", unwritable)
+    assert ph.KEY not in store and ph.read() is None
+
+
+def test_an_invalid_symbol_clears_the_previous_position(monkeypatch):
+    store = {}
+    monkeypatch.setattr(ph, "_tab", lambda: store)
+    ph.write("SPY", _legs())
+    ph.write("../x", _legs())
+    assert ph.KEY not in store
+
+
+def test_clearing_with_no_client_is_a_silent_no_op():
+    ph.write("SPY", [_leg(strike=None)])
+
+
 @pytest.mark.parametrize("exc", [
     RuntimeError("app.storage.tab can only be used with a client connection"),
     AssertionError("tab storage for x should be created before accessing it"),
