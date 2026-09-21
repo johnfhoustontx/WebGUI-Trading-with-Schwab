@@ -123,6 +123,9 @@ files and write the operator's `config/local/` overrides) ·
 name, request builder, result keys and config - `shared.symbols` +
 `shared.config_toml` and nothing else, pinned by
 `shared/tests/test_public_scan.py`) ·
+`shared.public_rescue` (since 2026-09-21; the public Rescue form's stream,
+request builders, field validators, result keys and config - the same import
+set, pinned by `shared/tests/test_public_rescue.py`) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
@@ -374,7 +377,7 @@ Routes:
 | `/options/gamma` | Dealer Positioning — GEX/Charm/DEX/Vanna bars + intraday heatmap, flip/walls, the Flow and Net Prem console panels, Term structure, and the Claude briefing (Analyze). [Detail](docs/webgui-routes.md) | built |
 | `/options/simulator` | Simulator — **Price & Time · Volatility · History** tabs (that order, since 2026-09-12) under the same entry panel, over ONE position shared with the Calculator (`shared_position`; no copy buttons). Its grid reads **`cache:options:sim_chain`**, published by `sim_fetch` from the SAME `/chains` call as the snapshot and written before `sim_meta`; leg strikes still come from `sim_meta`, since the engine prices only contracts in its snapshot. Persists UI state across navigation. [Detail](docs/webgui-routes.md) | built |
 | `/options/expected-move` | Expected Move — 6-month candles + a forward ATM-IV expected-move cone to expiry, with leg strike lines. ⚠ its IV and move deliberately do **not** match ThinkorSwim. [Detail](docs/webgui-routes.md) | built |
-| `/options/rescue` | Rescue — at-risk credit spreads → a ranked, commission-aware adjustment menu; execute cards apply behind a stale-price guard. | built |
+| `/options/rescue` | Rescue — at-risk credit spreads → a ranked, commission-aware adjustment menu; execute cards apply behind a stale-price guard. Its ad-hoc form alone is also the public `/rescue` screen (see "The public live screens"). | built |
 | `/sentiment` | Sentiment — the Market Regime Console (header · Sentiment/Trend/Signals cards · regime block · footer) over two concentric Day/Week/Month rings, plus the intraday graphs. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/bullbear` | Bull / Bear Map — a lazily-expanding sector → industry → stock tree showing absolute trend and relative strength vs SPY as **separate** marks (never blended) plus a live day-move, with participation as a third breadth axis beside the quadrant. ⚠ **Falling · Leading is the trap** a relative-only screen calls a buy. Headline is quadrant **counts**, never a regime verdict; `payload["regime"]` is never read. Reader of `cache:sentiment:bullbear`. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/sectors` | Sector & Industry — a magnitude-forward **heat grid**: Day/Week/Month as three flush filled tiles, intensity normalised **per column** on that column's own p90, plus P/C and expandable industries. Sortable; RRG dropped. Reader of `cache:sentiment:sectors`. [Detail](docs/webgui-routes.md) | built |
@@ -682,7 +685,7 @@ still logs in full.
 
 ## The public live screens — a SECOND Tier-1 process
 
-`webgui/live_main.py` serves **twenty-one screens, unauthenticated, to
+`webgui/live_main.py` serves **twenty-two screens, unauthenticated, to
 anyone** on `nicegui_live` (prod :8501, dev :9501) behind `LIVE_HOST`
 (`live.neuralstrike.co`). It renders the **real page modules the app renders**, so a
 published screen cannot drift from the private one. The published set and every pin
@@ -729,8 +732,10 @@ screens refuse at the page as well: `gamma.may_enqueue(symbol, view)` gates ever
 enqueue site (a *total* proof, pinned by an AST walk over the source) **and** no
 control that reaches one is built. Both, not either.
 
-⚠ **Since 2026-09-21 the origin has exactly ONE write, and it is not a hole in
-layer 2.** `bus_client.request_public_scan(symbol)` puts `{"symbol": <SYMBOL>}`
+⚠ **Since 2026-09-21 the origin has exactly TWO write paths, and neither is a
+hole in layer 2.** `test_bus_client.py` pins the set of writing functions to
+`request` plus the three below. The first:
+`bus_client.request_public_scan(symbol)` puts `{"symbol": <SYMBOL>}`
 on `cmd:finder_public` for the public Strategy Finder; `request()` stays refused
 for every domain, that stream's included. The function takes one argument, runs
 it through `clean_symbol`, and chooses neither the stream nor the command type
@@ -749,7 +754,27 @@ only its own symbol's entry of the status view, and draws no owner control.
 Roadmap:
 [`docs/plans/2026-09-21-public-strategy-finder-roadmap.md`](docs/plans/2026-09-21-public-strategy-finder-roadmap.md).
 
-⚠ **The published route set is the twenty-one screens PLUS exactly one non-page
+**The second path is the public Rescue form's** (`/rescue`):
+`bus_client.request_public_ladder(symbol, expiry=None)` and
+`request_public_rescue(spec)` on `cmd:rescue_public`, answered by
+`services/options_svc/rescue_public.py` on a third consumer loop, behind a
+second ACL selector (runbook §2 step 4d). ⚠ **The visitor controls a whole
+trade here, not one string**, so `shared.public_rescue.clean_spec` keeps only
+the fields `compute_rescue_adhoc` reads and refuses the trade outright on any
+unusable one (a NaN, an infinity, a bool, a past expiration) - on the page
+before sending, and again in the worker. Three differences from the Finder,
+each deliberate: the strikes list carries **no quotes** (bid/ask/mark are
+dropped before the write); results are keyed by a **hash of the normalized
+trade**, so identical trades share one compute and no key names a trade; and
+**nothing records who asked for what** - the status view holds counts only,
+and every request gets its own answer key the page polls, so there is no
+Finder-style `last` map listing visitors' trades. `rescue.render(public=True)`
+hands off to `pages/options/rescue_live.py` before the owner's at-risk board is
+built, and every private enqueue in `rescue.py` opens with `_may_enqueue`, as
+`test_live_commands.py` requires of any published module. Blueprint:
+[`docs/plans/2026-09-21-public-rescue-adhoc-roadmap.md`](docs/plans/2026-09-21-public-rescue-adhoc-roadmap.md).
+
+⚠ **The published route set is the twenty-two screens PLUS exactly one non-page
 route: `/static` (2026-09-09).** Every screen now carries a slim header — the
 brand lockup, a hairline, the screen name, and **no navigation of any kind** —
 and `[brand].mark` is a file under `/static`, which this process serves from its

@@ -1,7 +1,10 @@
 # Rescue ad-hoc form on the public live screens: blueprint
 
 **Date:** 2026-09-21
-**Status:** Proposal. Nothing built. Decisions D0–D4 are open.
+**Status:** Phases 1-3 BUILT 2026-09-21, taking the recommendation for each of
+D0-D4; verified in a local harness, not promoted. **Phase 0 (measurement) has
+not run**, so the budgets in `config/rescue_public.toml` rest on the estimate
+below. The live ACL selector (runbook §2 step 4d) is not applied.
 **Ask:** publish Rescue's **ad-hoc trade form** on `live.neuralstrike.co`. A
 visitor describes a trade they hold elsewhere and gets the ranked,
 commission-aware list of repairs the private page shows.

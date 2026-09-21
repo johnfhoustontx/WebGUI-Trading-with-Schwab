@@ -245,8 +245,12 @@ _CANDIDATE_METRICS = (
 )
 
 
-def _leg_text(leg):
-    """'SELL PUT 500 @1.20' from an est_fill_legs entry (defensive)."""
+def _leg_text(leg, with_price=True):
+    """'SELL PUT 500 @1.20' from an est_fill_legs entry (defensive).
+
+    ``with_price=False`` drops the ``@1.20``: a per-leg fill is worked off that
+    leg's own bid and ask, so the public page shows it only when republishing
+    quotes is switched on (``public_scan.show_leg_quotes``)."""
     side = (leg.get("side") or "").upper()
     right = (leg.get("right") or "").upper()
     strike = leg.get("strike")
@@ -254,12 +258,12 @@ def _leg_text(leg):
     price = leg.get("price")
     parts = [p for p in (side, right, strike_s) if p]
     text = " ".join(parts)
-    if isinstance(price, (int, float)):
+    if with_price and isinstance(price, (int, float)):
         text = f"{text} @{price:.2f}"
     return text
 
 
-def candidate_card_rows(advisory):
+def candidate_card_rows(advisory, leg_prices=True):
     """One display dict per ranked candidate in the advisory (already ordered).
 
     Each: {title, apply_kind, gross_text, commission_text, net_text,
@@ -297,7 +301,7 @@ def candidate_card_rows(advisory):
             "net_text": cash_text(cand.get("net_cash")),
             "realized_text": cash_text(realized) if realized is not None else None,
             "metrics": metrics,
-            "legs": [_leg_text(l) for l in cand.get("est_fill_legs") or []],
+            "legs": [_leg_text(l, leg_prices) for l in cand.get("est_fill_legs") or []],
             "rationale": list(cand.get("rationale") or []),
             "context": list(cand.get("context") or []),
             "warnings": list(cand.get("warnings") or []),
@@ -590,8 +594,75 @@ def _table_rows(rows):
 # over a bounded scrolling body, and the kit's table carries the dense props.
 
 
-def render():
+def render_candidate_card(container, card, apply_factory=None):
+    """One ranked candidate, drawn into ``container``. Shared by the private
+    page's two tabs and the public Rescue form (``rescue_live``), so a menu
+    reads the same on both origins. ``apply_factory`` is consulted only for an
+    ``execute`` card; the public form's cards are all advisory."""
+    from nicegui import ui
+
+    from pages import ui_kit as kit
+
+    with container:
+        with ui.column().classes(f"{CARD} w-full gap-2"):
+            with ui.row().classes("items-center gap-3 w-full"):
+                ui.label(card["title"]).classes("text-subtitle1")
+                if card.get("score") is not None:
+                    ui.badge(f"score {card['score']:g}"
+                             if isinstance(card["score"], (int, float))
+                             else f"score {card['score']}").classes(BADGE_ACCENT)
+                ui.space()
+                if card["apply_kind"] == "execute":
+                    kit.button("Apply", kind="primary", icon="play_arrow",
+                               on_click=apply_factory(card))
+                else:
+                    # This marks a candidate the app will NOT execute for
+                    # you, so it reads as the instruction it is.
+                    ui.label("Manual — you place this one yourself") \
+                        .classes(f"{MUTED} text-sm")
+            # Gross / commission / net cash line (cash_text colors); the
+            # locked-in P&L follows when the action realizes one (close/partial).
+            with ui.row().classes("items-center gap-4"):
+                # Gross and Net stay: sitting either side of Commission in
+                # one money row makes the pairing self-evident. "Comm" was a
+                # casual shortening with no such excuse.
+                cells = [("Gross", "gross_text"),
+                         ("Commission", "commission_text"),
+                         ("Net", "net_text")]
+                if card.get("realized_text"):
+                    cells.append(("Realized P&L", "realized_text"))
+                for lbl, key in cells:
+                    cell = card[key]
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label(f"{lbl}:").classes(f"{MUTED} text-sm")
+                        ui.label(cell["text"]).classes(cell["class"])
+            if card["metrics"]:
+                with ui.row().classes("gap-4 flex-wrap"):
+                    for m in card["metrics"]:
+                        ui.label(m).classes("text-sm")
+            if card["legs"]:
+                with ui.column().classes("gap-0"):
+                    for leg in card["legs"]:
+                        ui.label(leg).classes("text-sm font-mono")
+            for r in card["rationale"]:
+                ui.label(f"• {r}").classes(f"text-sm {MUTED}")
+            if card["context"]:
+                with ui.row().classes("gap-1 flex-wrap"):
+                    for c in card["context"]:
+                        ui.badge(str(c)).classes(BADGE_MUTED)
+            for w in card["warnings"]:
+                ui.badge(str(w)).classes(BADGE_NEG)
+
+
+def render(public=False):
     """Render the Rescue page (NiceGUI) — two tabs.
+
+    ``public=True`` is the PUBLIC site's Rescue form, a different page
+    (``rescue_live``): the ad-hoc form alone, answered through the public
+    request stream. It returns before this page builds anything, so the owner's
+    at-risk board, its reads of the paper book and every Apply control never
+    exist on the public origin. The public screen names this module so
+    ``live_screens.private_route`` stays true.
 
     Tier-3 reader. **At-Risk Board** version-polls ``options:paper_account`` +
     ``options:captured`` for the board, enqueues a ``rescue`` command on row-click,
@@ -610,6 +681,15 @@ def render():
     element and the repaint clears only ``region.content``. Before that both
     spinners were built INSIDE the cards column a row click clears, so each was
     deleted the first time it was used and the menu built in silence."""
+    if public:
+        from . import rescue_live
+        return rescue_live.render()
+    # The private page on the public origin would be a bug: nothing routes it
+    # there (the public screen passes public=True). The gate is the belt the
+    # live-commands guard asks every published module for, beside the braces
+    # of never building the page at all - the swing.py precedent.
+    import shell as _shell_gate
+    _may_enqueue = _shell_gate.may_enqueue()
     import bus_client
     from nicegui import run, ui
 
@@ -655,57 +735,6 @@ def render():
     # ── shared candidate-card rendering (per-container so each tab owns its own
     # cards column + advisory head; the board passes the confirm/apply factory,
     # the ad-hoc tab passes a no-op since its cards are all advisory-only) ──────
-    def _render_one_card(container, card, apply_factory):
-        with container:
-            with ui.column().classes(f"{CARD} w-full gap-2"):
-                with ui.row().classes("items-center gap-3 w-full"):
-                    ui.label(card["title"]).classes("text-subtitle1")
-                    if card.get("score") is not None:
-                        ui.badge(f"score {card['score']:g}"
-                                 if isinstance(card["score"], (int, float))
-                                 else f"score {card['score']}").classes(BADGE_ACCENT)
-                    ui.space()
-                    if card["apply_kind"] == "execute":
-                        kit.button("Apply", kind="primary", icon="play_arrow",
-                                   on_click=apply_factory(card))
-                    else:
-                        # This marks a candidate the app will NOT execute for
-                        # you, so it reads as the instruction it is.
-                        ui.label("Manual — you place this one yourself") \
-                            .classes(f"{MUTED} text-sm")
-                # Gross / commission / net cash line (cash_text colors); the
-                # locked-in P&L follows when the action realizes one (close/partial).
-                with ui.row().classes("items-center gap-4"):
-                    # Gross and Net stay: sitting either side of Commission in
-                    # one money row makes the pairing self-evident. "Comm" was a
-                    # casual shortening with no such excuse.
-                    cells = [("Gross", "gross_text"),
-                             ("Commission", "commission_text"),
-                             ("Net", "net_text")]
-                    if card.get("realized_text"):
-                        cells.append(("Realized P&L", "realized_text"))
-                    for lbl, key in cells:
-                        cell = card[key]
-                        with ui.row().classes("items-center gap-1"):
-                            ui.label(f"{lbl}:").classes(f"{MUTED} text-sm")
-                            ui.label(cell["text"]).classes(cell["class"])
-                if card["metrics"]:
-                    with ui.row().classes("gap-4 flex-wrap"):
-                        for m in card["metrics"]:
-                            ui.label(m).classes("text-sm")
-                if card["legs"]:
-                    with ui.column().classes("gap-0"):
-                        for leg in card["legs"]:
-                            ui.label(leg).classes("text-sm font-mono")
-                for r in card["rationale"]:
-                    ui.label(f"• {r}").classes(f"text-sm {MUTED}")
-                if card["context"]:
-                    with ui.row().classes("gap-1 flex-wrap"):
-                        for c in card["context"]:
-                            ui.badge(str(c)).classes(BADGE_MUTED)
-                for w in card["warnings"]:
-                    ui.badge(str(w)).classes(BADGE_NEG)
-
     def _render_cards_into(container, head_label, advisory, apply_factory, empty_text):
         container.clear()
         if not advisory:
@@ -721,7 +750,7 @@ def render():
             return
         for i, card in enumerate(cards):
             raw = raw_cands[i] if i < len(raw_cands) else {}
-            _render_one_card(container, {**card, "_raw": raw}, apply_factory)
+            render_candidate_card(container, {**card, "_raw": raw}, apply_factory)
 
     def _notify_apply_result(adv):
         res = (adv or {}).get("apply_result")
@@ -886,6 +915,8 @@ def render():
         return _open
 
     def _confirm_apply():
+        if not _may_enqueue:
+            return          # the public origin uses rescue_live only
         candidate = pending["candidate"]
         if not candidate:
             return
@@ -903,6 +934,8 @@ def render():
 
     @guard
     def _select(event):
+        if not _may_enqueue:
+            return          # the public origin uses rescue_live only
         row = (event.args[1] if isinstance(event.args, list) and len(event.args) > 1
                else event.args)
         if not isinstance(row, dict):
@@ -956,6 +989,8 @@ def render():
         them; the leg keeps its strike meanwhile and snaps onto the ladder in
         ``_adhoc_merge_chain``. Only that leg moves - the top dropdown's pick
         moves them all."""
+        if not _may_enqueue:
+            return          # the public origin uses rescue_live only
         bus_client.request("options", {"type": "calc_load_expiry", "args": {
             "symbol": adhoc.get("chain_symbol") or _adhoc_sym(),
             "expiry": expiry}})
@@ -1010,6 +1045,8 @@ def render():
         """An expiry pick moves every leg there. One whose strikes are not here
         yet is fetched first (``calc_load_expiry``); the legs move when it lands,
         in ``_adhoc_merge_chain``."""
+        if not _may_enqueue:
+            return          # the public origin uses rescue_live only
         if adhoc.get("applying"):
             return
         expiry = adhoc_exp_sel.value
@@ -1135,6 +1172,8 @@ def render():
 
     @guard
     def _adhoc_load():
+        if not _may_enqueue:
+            return          # the public origin uses rescue_live only
         sym = _adhoc_sym()
         if not sym:
             kit.toast("warn", "Enter a symbol first.")
@@ -1174,6 +1213,8 @@ def render():
     def _adhoc_compute():
         # Gate on the selected strategy first: an unsupported one pops the
         # "not available yet" message instead of a confusing structure error.
+        if not _may_enqueue:
+            return          # the public origin uses rescue_live only
         if _adhoc_unsupported(adhoc_strat.value):
             return
         spec = adhoc_spec_from_legs(adhoc_sym.value, adhoc_editor.get_legs())
@@ -1265,9 +1306,14 @@ def render():
     # Opening the page with an empty board → recompute captured marks ("Refresh
     # Marks") so freshly-CUT signals surface. The version-poll repaints when the
     # repriced captured view lands. Fires once on load, not on every poll.
-    if not _absent and not at_risk_tbl.rows:
+    def _refresh_captured():
+        if not _may_enqueue:
+            return          # never on the public origin, which draws no board
         bus_client.request("options", {"type": "captured_reprice"})
         at_risk_empty.text = "No at-risk positions yet — refreshing captured marks…"
+
+    if not _absent and not at_risk_tbl.rows:
+        _refresh_captured()
 
     ui.timer(2.0, _poll_boards)
     ui.timer(2.0, _poll_board_advisory)

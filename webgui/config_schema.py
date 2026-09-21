@@ -480,6 +480,9 @@ _SESSIONS = ConfigFile(
         _window("finder_public", "Public Strategy Finder scans",
                 "When the public site will scan a symbol a visitor types. "
                 "Outside it the page shows the last scan.", ()),
+        _window("rescue_public", "Public Rescue form",
+                "When the public site will load strikes and compute rescue "
+                "options. Outside it the form says when it opens.", ()),
         Section("Driver entry window",
                 "When the autonomous driver may open trades. EASTERN time.", (
             Field("windows.driver_entry.start", "Starts (ET)", "", kind="time"),
@@ -703,6 +706,52 @@ _COMMISSIONS = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Public Rescue form — config/rescue_public.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read per request by options_svc and the public site, through the mtime-cached
+# loader, so a saved change applies to the next request with no restart.
+_RESCUE_PUBLIC = ConfigFile(
+    name="rescue_public.toml", title="Public Rescue form", icon="healing",
+    summary="The Rescue form on the public site: how results are reused, the "
+            "daily limits, and how much one visitor may ask for.",
+    restart=(),
+    caution="Each public rescue reprices the trade and fetches its roll "
+            "candidates from Schwab. The daily limits cap that spend across "
+            "every visitor.",
+    sections=(
+        Section("Limits", "", (
+            Field("limits.result_ttl_min", "Reuse a rescue menu for",
+                  "For the same trade. Short, because the menu reprices live.",
+                  kind="int", unit="min", min=1, max=60, step=1),
+            Field("limits.ladder_ttl_min", "Reuse a symbol's strikes for", "",
+                  kind="int", unit="min", min=1, max=480, step=5),
+            Field("limits.dedup_sec", "Ignore a repeat request for", "",
+                  kind="int", unit="s", min=0, max=3600, step=5),
+            Field("limits.max_wait_sec", "Drop a request that waited", "",
+                  kind="int", unit="s", min=10, max=3600, step=10),
+            Field("limits.daily_budget", "Rescues per day",
+                  "Across all visitors together.", kind="int", min=1,
+                  max=5000, step=10),
+            Field("limits.ladder_budget", "Strike loads per day",
+                  "Across all visitors together.", kind="int", min=1,
+                  max=10000, step=10),
+            Field("limits.result_keep_min", "Keep a rescue menu for", "",
+                  kind="int", unit="min", min=1, max=1440, step=5),
+            Field("limits.ladder_keep_min", "Keep a symbol's strikes for", "",
+                  kind="int", unit="min", min=1, max=1440, step=5),
+            Field("limits.answer_keep_min", "Keep a request's answer for", "",
+                  kind="int", unit="min", min=1, max=240, step=1),
+        )),
+        Section("Visitors", "Counted by address in memory; no address is stored.", (
+            Field("visitor.computes_per_hour", "Rescues per visitor per hour", "",
+                  kind="int", min=1, max=500, step=1),
+            Field("visitor.ladders_per_hour", "Strike loads per visitor per hour",
+                  "", kind="int", min=1, max=1000, step=1),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # System (read-only) — ports + environments
 # ─────────────────────────────────────────────────────────────────────────────
 _READONLY_NOTE = ("Shown for reference. Changing a port or an environment profile "
@@ -716,7 +765,7 @@ _ENVS = ConfigFile(name="environments.toml", title="Environments", icon="dns",
                    editable=False, editor="readonly")
 
 FILES = (_SCANNER, _TRADE_MGMT, _DRIVER, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
-         _FINDER_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 

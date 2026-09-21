@@ -263,6 +263,47 @@ def request_public_scan(raw_symbol) -> str:
     return bus().enqueue_command(public_scan.STREAM, command)
 
 
+def request_public_ladder(raw_symbol, raw_expiry=None) -> str:
+    """Ask for a symbol's strikes list for the public Rescue form; returns the
+    message id. ``raw_expiry`` asks for one more expiration's strikes.
+
+    One of the public origin's permitted writes, beside
+    :func:`request_public_scan` and :func:`request_public_rescue`, and for the
+    same reason NOT a path through :func:`request`: it writes exactly the command
+    ``shared.public_rescue.ladder_command`` builds from the two strings, on
+    ``cmd:rescue_public``, and takes no stream or command type from its caller.
+    The live Redis ACL user may XADD there and nowhere else but the Finder's
+    stream (docs/dev-prod-environments.md).
+
+    Raises ``ValueError`` for a symbol or expiration the validator refuses,
+    before anything is written. The service re-validates what it reads.
+    """
+    from shared import public_rescue  # Tier-1 allow-listed: config + validator only
+    command = public_rescue.ladder_command(raw_symbol, raw_expiry)
+    if command is None:
+        raise ValueError(f"not a loadable symbol/expiry: {raw_symbol!r} {raw_expiry!r}")
+    return bus().enqueue_command(public_rescue.STREAM, command)
+
+
+def request_public_rescue(raw_spec) -> str:
+    """Ask for the rescue menu of one trade a public visitor describes; returns
+    the message id.
+
+    The trade goes through ``shared.public_rescue.compute_command``, which keeps
+    only the fields the rescue engine reads and refuses the whole trade if any
+    of them is unusable, so what is written is never the visitor's dict itself.
+    Same boundary as :func:`request_public_ladder`.
+
+    Raises ``ValueError`` for a trade the validator refuses, before anything is
+    written.
+    """
+    from shared import public_rescue  # Tier-1 allow-listed: config + validator only
+    command = public_rescue.compute_command(raw_spec)
+    if command is None:
+        raise ValueError("not a trade the public Rescue form can read")
+    return bus().enqueue_command(public_rescue.STREAM, command)
+
+
 class EventListener:
     """Background daemon thread that fans an events channel out to a callback.
 

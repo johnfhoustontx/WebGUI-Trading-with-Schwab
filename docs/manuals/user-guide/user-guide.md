@@ -144,12 +144,13 @@ skips the sign-in, which is what the wall display uses.
 
 ## The public live screens
 
-Twenty-one of the app's screens are also published **without any sign-in** on
+Twenty-two of the app's screens are also published **without any sign-in** on
 a second address, `https://live.neuralstrike.co` — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &
 Industry, Sector Rotation, RRG, Momentum, Net Prem, the two Premium Divergence
 screens, and eight Dealer Positioning boards: Gamma for $SPX, SPY and QQQ, and
-Charm, DEX, Vanna and Term Structure for $SPX, and the **Strategy Finder**.
+Charm, DEX, Vanna and Term Structure for $SPX, the **Strategy Finder**, and the
+Rescue ad-hoc form, published as **Rescue my Sh\*tty trade**.
 Each one shows the same scrolling market-summary ticker along the bottom that
 your own app does.
 
@@ -164,8 +165,24 @@ visitors together and 10 an hour for each visitor. A result shows the best 5
 ideas of each strategy type. SPY and QQQ are scanned automatically at 09:08 CT
 so the page opens on a fresh result. Every limit is in
 **Settings → Configuration → Public Strategy Finder**, and **Settings →
-General → API usage** shows how many public scans have been used today. `https://neuralstrike.co/live.html` is a thumbnail menu of
-them.
+General → API usage** shows how many public scans have been used today.
+
+The public Rescue form is the other screen a visitor can act on. It is the
+**Ad-hoc Trade** tab of your own Rescue page and nothing else: your at-risk
+board is never shown there. A visitor loads a symbol, lays out a trade they
+hold elsewhere, types the price they received or paid for each leg, and
+presses Compute to get the same ranked repair menu you would see. Every card
+is advisory; there is no Apply. The expiration and strike lists carry no
+prices, and the cards show each leg without its fill price unless **Show
+per-leg bid and ask** is on in the Public Strategy Finder settings. It runs
+08:40–15:00 CT on trading days, with 200 rescues and 400 symbol loads a day for
+all visitors together and 20 rescues an hour for each visitor. The same trade
+asked for again within 5 minutes shows the earlier answer. Nothing records
+which trades visitors entered. Every limit is in **Settings → Configuration →
+Public Rescue form**.
+
+`https://neuralstrike.co/live.html` is a thumbnail menu of them, and the site's
+**Tools** menu links the two screens a visitor can act on.
 
 Three things to know:
 
@@ -174,9 +191,9 @@ Three things to know:
   Anyone with the address can read them. That is a deliberate choice — the book
   is paper only — but it is worth knowing before you show someone the link.
 - **They are a separate program.** Nothing anyone does there can reach your own
-  app: it holds no login and can write only one thing — a request for a public
-  Strategy Finder scan, which the options service answers separately from your
-  own work. Its
+  app: it holds no login and can write only two things — a request for a public
+  Strategy Finder scan, and a request from the public Rescue form — which the
+  options service answers separately from your own work. Its
   health has its own card on **System Status**; a red one means the public site
   is down and your own screens are unaffected.
 - **To stop publishing**, use **Stop All Services** — it stops both web apps —

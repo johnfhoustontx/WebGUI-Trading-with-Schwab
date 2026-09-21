@@ -1,4 +1,4 @@
-"""The twenty-one screens published on the public live origin.
+"""The twenty-two screens published on the public live origin.
 
 PURE DATA -- no NiceGUI import -- so the route registration, the thumbnail
 capture script and the static grid on neuralstrike.co all read one source and
@@ -98,6 +98,14 @@ SCREENS = (
     # Roadmap: docs/plans/2026-09-21-public-strategy-finder-roadmap.md.
     Screen("finder", "/finder", "Strategy Finder", "options.swing",
            "/options/swing", kwargs={"public": True}),
+    # The SECOND screen that writes: a visitor's strikes loads and rescue
+    # requests go on cmd:rescue_public (bus_client.request_public_ladder /
+    # request_public_rescue; the live ACL user's second write selector).
+    # ``public=True`` hands off to pages/options/rescue_live.py before the
+    # private page builds its at-risk board, which reads the owner's paper book.
+    # Blueprint: docs/plans/2026-09-21-public-rescue-adhoc-roadmap.md.
+    Screen("rescue", "/rescue", "Rescue my Sh*tty trade", "options.rescue",
+           "/options/rescue", kwargs={"public": True}),
 )
 
 

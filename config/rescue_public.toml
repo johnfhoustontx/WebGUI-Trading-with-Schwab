@@ -1,0 +1,37 @@
+# The public Rescue form on live.neuralstrike.co (blueprint:
+# docs/plans/2026-09-21-public-rescue-adhoc-roadmap.md).
+#
+# A visitor describes a trade they hold elsewhere; options_svc answers with the
+# ranked rescue menu. Every value here is read by shared/public_rescue.py.
+# Edit + restart options_svc and webgui_live.
+#
+# The window is [windows.rescue_public] in config/sessions.toml.
+
+[limits]
+# Minutes a rescue menu is reused for the same trade. Short, because the menu
+# reprices the trade live and the market moves.
+result_ttl_min = 5
+# Minutes a symbol's strikes list is reused. Strikes rarely change intraday.
+ladder_ttl_min = 60
+# Seconds after a request's last run during which the same request is not re-run.
+dedup_sec = 60
+# Seconds a request may wait in the queue before it is dropped. This is also
+# the replay guard: a backlog replayed at startup is older.
+max_wait_sec = 120
+# Rescue computes per trading day across ALL visitors. Each reprices the trade
+# and fetches its roll candidates: an estimated 3-6 Schwab calls, unmeasured.
+daily_budget = 200
+# Strikes-list loads per trading day across all visitors. A first load is
+# about 3 Schwab calls; each extra expiration is one.
+ladder_budget = 400
+# Minutes each kind of key lives. Visitors choose the symbols and the trades,
+# so the keys must expire or they would accumulate without limit.
+result_keep_min = 30
+ladder_keep_min = 180
+answer_keep_min = 15
+
+[visitor]
+# Requests one visitor may make an hour. Counted in the public process by
+# address, in memory only - no address is written anywhere.
+computes_per_hour = 20
+ladders_per_hour = 60

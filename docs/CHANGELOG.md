@@ -4,7 +4,42 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**Site nav: a Tools menu for the interactive
+**Last updated:** 2026-09-21 (**The public Rescue form, "Rescue my Sh\*tty
+trade", at `/rescue` - built and verified in a local harness, NOT promoted, and
+its Redis permission is not applied.**)
+
+- **What it is.** The private Rescue page's Ad-hoc Trade tab, alone, as the
+  twenty-second public screen. A visitor loads a symbol, lays out a trade they
+  hold elsewhere, types each leg's entry price, and gets the same ranked,
+  advisory-only repair menu. The owner's at-risk board is never built on the
+  public origin (`rescue.render(public=True)` hands off to
+  `pages/options/rescue_live.py` first).
+- **The second public write path.** `shared/public_rescue.py` (stream
+  `cmd:rescue_public`, validators, keys, config), two functions in
+  `bus_client` (`request_public_ladder`, `request_public_rescue`), and
+  `services/options_svc/rescue_public.py` on a third consumer loop. Every
+  refusal (invalid, expired, cached, not listed, no options, duplicate,
+  closed, over budget) is decided before any Schwab call.
+- **Differs from the Finder on purpose:** the strikes list carries no quotes;
+  results are keyed by a hash of the normalized trade; nothing records which
+  trades visitors entered (counts only, plus a per-request answer key).
+- **Budgets unmeasured.** 200 rescues and 400 strikes loads a day, 20 and 60
+  an hour per visitor (`config/rescue_public.toml`), set from an estimated 3-6
+  Schwab calls a rescue. Blueprint Phase 0 (measure on prod during the session)
+  has not run.
+- **Also:** the private page's card renderer moved to module level
+  (`rescue.render_candidate_card`) so both pages draw the same card; every
+  private enqueue in `rescue.py` now opens with `_may_enqueue`, as
+  `test_live_commands.py` requires of a published module; the site's Tools menu
+  links `/rescue`, and the live grid gained its tile. `live.html` said
+  "Fourteen screens ... read-only ... no controls", untrue since the Finder;
+  corrected.
+- **Before it works on prod:** runbook §2 step 4d (the `live` user's second
+  ACL selector). Without it Load and Compute fail with `NOPERM`.
+
+---
+
+**Prior — 2026-09-21** (**Site nav: a Tools menu for the interactive
 public screens.**)
 
 - **One nav item, not three.** `index.html`, `live.html`, `gallery.html` and

@@ -78,6 +78,11 @@ SECTORS_TOML = REPO_ROOT / "config" / "sectors.toml"
 # options_svc (the worker) and the public live process. Edit + restart both.
 FINDER_PUBLIC_TOML = REPO_ROOT / "config" / "finder_public.toml"
 
+# The public Rescue form: its budgets, reuse windows and per-visitor limits.
+# Read by shared/public_rescue.py from both options_svc (the worker) and the
+# public live process. Edit + restart both.
+RESCUE_PUBLIC_TOML = REPO_ROOT / "config" / "rescue_public.toml"
+
 # The public edge (Caddy): the rate limit on live.neuralstrike.co. Read by
 # deploy/caddy/generate_caddyfile.py only; a change needs the Caddyfile
 # regenerated and Caddy reloaded, as root.

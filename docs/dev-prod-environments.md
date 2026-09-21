@@ -261,6 +261,33 @@ harmless.
 Without this selector every public scan request fails with `NOPERM`, which the
 public page words as an error rather than a permissions problem.
 
+**4d. The live ACL user's SECOND write (public Rescue form).** ⚠ **Not yet
+applied on prod.** Since 2026-09-21 the `live` user needs one more selector,
+for `cmd:rescue_public`: a visitor's request for a symbol's strikes, or for the
+rescue menu of one trade (`shared/public_rescue.py`, which validates every
+field before anything is written). options_svc answers it on a third consumer
+loop. A second `(...)` ADDS a selector; it does not replace the Finder's:
+
+```bash
+cd /home/administrator/dev && set -a && . ./.env && set +a
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli ACL SETUSER live '(%W~cmd:rescue_public +xadd)'
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli CONFIG REWRITE
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli ACL GETUSER live
+```
+
+`ACL GETUSER` must now list **two** selectors. Verify with the 4c probe, adding
+these two lines to its list, and expect the first `ALLOWED`, the second
+`NOPERM`, and every existing line unchanged:
+
+```python
+    ("XADD cmd:rescue_public (allowed)", lambda: r.xadd("cmd:rescue_public", {"probe": "1"})),
+    ("XRANGE cmd:rescue_public", lambda: r.xrange("cmd:rescue_public")),
+```
+
+Remove the probe entry afterwards with `XDEL` as the admin user, as in 4c.
+Without this selector the public Rescue page's Load and Compute both fail with
+`NOPERM`, which the page words as "The request could not be sent".
+
 **5. Carry the gitignored artifacts.** Most arrive with the snapshot in §4 —
 including `Top 20.xlsx` and the sentiment bridge — so the only hand-copy is the
 one store no tool knows about:

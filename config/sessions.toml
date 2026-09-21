@@ -98,6 +98,15 @@ end   = "15:50"
 start = "08:40"
 end   = "15:00"
 
+[windows.rescue_public]
+# When the public Rescue form (live.neuralstrike.co/rescue) will load strikes
+# and compute a rescue menu. Outside it the form still builds and says when it
+# opens. Off hours the menu would reprice against stale marks and a stale
+# underlying, so it would look confident and be wrong. The day's total is
+# capped by [limits] in config/rescue_public.toml.
+start = "08:40"
+end   = "15:00"
+
 [windows.driver_entry]
 # Autonomous driver entry window, in ET (not CT) — matches the existing
 # constant it replaces. Skips the open's first ~15 min and takes no new

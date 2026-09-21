@@ -444,3 +444,111 @@ def test_the_public_request_takes_one_argument_and_writes_one_place():
               and ast.unparse(n.targets[0]) == "command"]
     assert [ast.unparse(b.value) for b in builds] == [
         "public_scan.request_command(raw_symbol)"]
+
+
+# ── the public Rescue form's two writes ─────────────────────────────────────
+
+import datetime as _dt
+
+_EXP = (_dt.date.today() + _dt.timedelta(days=30)).isoformat()
+
+
+def _rescue_stream_commands():
+    from shared import public_rescue
+    return bus_client.bus().consume_commands(
+        public_rescue.STREAM, group="g", consumer="c", block_ms=50)
+
+
+def _pcs(**over):
+    spec = {"symbol": "spy", "strategy": "PCS", "short_strike": 500.0,
+            "long_strike": 495.0, "expiration": _EXP, "quantity": 1,
+            "entry_credit": 1.2}
+    spec.update(over)
+    return spec
+
+
+def test_public_rescue_requests_are_allowed_on_a_read_only_process():
+    from shared import public_rescue
+    bus_client.set_read_only(True)
+    assert bus_client.request_public_ladder(" spy ")
+    assert bus_client.request_public_ladder("SPY", _EXP)
+    assert bus_client.request_public_rescue(_pcs(position_id=9))
+    cmds = [c for _id, c in _rescue_stream_commands()]
+    assert [c.type for c in cmds] == [public_rescue.LADDER_TYPE,
+                                      public_rescue.LADDER_TYPE,
+                                      public_rescue.COMPUTE_TYPE]
+    assert cmds[0].args == {"symbol": "SPY"}
+    assert cmds[1].args == {"symbol": "SPY", "expiry": _EXP}
+    assert "position_id" not in cmds[2].args["spec"]      # normalized, not the raw dict
+    assert cmds[2].args["spec"]["symbol"] == "SPY"
+
+
+def test_public_rescue_requests_never_reach_the_options_stream():
+    bus_client.request_public_ladder("SPY")
+    bus_client.request_public_rescue(_pcs())
+    assert bus_client.bus().consume_commands(
+        "cmd:options", group="g", consumer="c", block_ms=50) == []
+
+
+@pytest.mark.parametrize("call", [
+    lambda: bus_client.request_public_ladder("../x"),
+    lambda: bus_client.request_public_ladder("SPY", "tomorrow"),
+    lambda: bus_client.request_public_rescue(_pcs(short_strike=float("nan"))),
+    lambda: bus_client.request_public_rescue(_pcs(strategy="COVERED_CALL")),
+    lambda: bus_client.request_public_rescue("not a dict"),
+])
+def test_an_invalid_public_rescue_request_writes_nothing(call):
+    bus_client.set_read_only(True)
+    with pytest.raises(ValueError):
+        call()
+    assert _rescue_stream_commands() == []
+
+
+def test_the_generic_request_path_stays_refused_for_the_rescue_stream():
+    bus_client.set_read_only(True)
+    with pytest.raises(PermissionError):
+        bus_client.request("rescue_public", {"type": "public_rescue",
+                                             "args": {"spec": _pcs()}})
+    assert _rescue_stream_commands() == []
+
+
+@pytest.mark.parametrize("fn, params, builder", [
+    ("request_public_ladder", ["raw_symbol", "raw_expiry"],
+     "public_rescue.ladder_command(raw_symbol, raw_expiry)"),
+    ("request_public_rescue", ["raw_spec"],
+     "public_rescue.compute_command(raw_spec)"),
+])
+def test_each_public_rescue_request_writes_one_command_to_one_place(fn, params, builder):
+    """The caller controls the fields; never the stream, the command type, or
+    anything written besides what the validator built."""
+    import ast
+    import inspect
+    import textwrap
+    node = ast.parse(textwrap.dedent(inspect.getsource(
+        getattr(bus_client, fn)))).body[0]
+    assert [a.arg for a in node.args.args + node.args.kwonlyargs] == params
+    assert not node.args.vararg and not node.args.kwarg
+    writes = [n for n in ast.walk(node) if isinstance(n, ast.Call)
+              and getattr(n.func, "attr", None) == "enqueue_command"]
+    assert len(writes) == 1
+    stream, command = writes[0].args
+    assert ast.unparse(stream) == "public_rescue.STREAM"
+    assert ast.unparse(command) == "command"
+    builds = [n for n in ast.walk(node) if isinstance(n, ast.Assign)
+              and ast.unparse(n.targets[0]) == "command"]
+    assert [ast.unparse(b.value) for b in builds] == [builder]
+
+
+def test_the_public_origin_has_exactly_three_write_functions():
+    """Every bus_client function that enqueues, other than ``request`` (which a
+    read-only process refuses), is a public write. Adding a fourth must be a
+    decision, made here."""
+    import ast
+    import inspect
+    tree = ast.parse(inspect.getsource(bus_client))
+    writers = sorted(
+        f.name for f in tree.body if isinstance(f, ast.FunctionDef)
+        and any(isinstance(n, ast.Call) and getattr(n.func, "attr", None)
+                == "enqueue_command" for n in ast.walk(f)))
+    assert writers == ["request", "request_public_ladder", "request_public_rescue",
+                       "request_public_scan"]

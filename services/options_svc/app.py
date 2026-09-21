@@ -7,6 +7,8 @@ Assembles the shared scaffold with this domain's scheduler + command handler:
 * command handler ``handlers.handle_command`` — ``rescan`` → full rescan.
 * ``finder_public.handle`` on ``cmd:finder_public`` — the public site's
   Strategy Finder requests, on a consumer loop of their own.
+* ``rescue_public.handle`` on ``cmd:rescue_public`` — the public site's Rescue
+  form (strikes lists and rescue menus), on another loop of its own.
 
 Importable without side effects; only starts uvicorn under ``__main__`` on the
 ``options`` service port (8211) from ``repo_paths.SERVICE_PORTS``.
@@ -21,8 +23,9 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from services._scaffold import make_app  # noqa: E402
-from services.options_svc import finder_public, handlers, scheduler  # noqa: E402
-from shared import public_scan  # noqa: E402
+from services.options_svc import (  # noqa: E402
+    finder_public, handlers, rescue_public, scheduler)
+from shared import public_rescue, public_scan  # noqa: E402
 
 app = make_app(
     "options",
@@ -30,7 +33,10 @@ app = make_app(
     command_handler=handlers.handle_command,
     # The public Strategy Finder's requests, on their OWN stream and loop, so a
     # visitor's scan never queues ahead of (or behind) the owner's commands.
-    extra_consumers=((public_scan.STREAM, finder_public.handle),),
+    # The Rescue form's requests get a third loop, so a slow rescue never holds
+    # up a Finder scan and neither ever waits on the owner.
+    extra_consumers=((public_scan.STREAM, finder_public.handle),
+                     (public_rescue.STREAM, rescue_public.handle)),
 )
 
 

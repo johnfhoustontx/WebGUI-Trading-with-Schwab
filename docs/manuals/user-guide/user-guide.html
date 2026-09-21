@@ -301,12 +301,13 @@ not ask again for a while; a new browser, or a private window, always will.</p>
 <p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> still works there and
 skips the sign-in, which is what the wall display uses.</p>
 <h2 id="the-public-live-screens">The public live screens</h2>
-<p>Twenty-one of the app's screens are also published <strong>without any sign-in</strong> on
+<p>Twenty-two of the app's screens are also published <strong>without any sign-in</strong> on
 a second address, <code>https://live.neuralstrike.co</code> — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &amp;
 Industry, Sector Rotation, RRG, Momentum, Net Prem, the two Premium Divergence
 screens, and eight Dealer Positioning boards: Gamma for $SPX, SPY and QQQ, and
-Charm, DEX, Vanna and Term Structure for $SPX, and the <strong>Strategy Finder</strong>.
+Charm, DEX, Vanna and Term Structure for $SPX, the <strong>Strategy Finder</strong>, and the
+Rescue ad-hoc form, published as <strong>Rescue my Sh*tty trade</strong>.
 Each one shows the same scrolling market-summary ticker along the bottom that
 your own app does.</p>
 <p>The public Strategy Finder is the one screen a visitor can act on: they type a
@@ -320,8 +321,22 @@ visitors together and 10 an hour for each visitor. A result shows the best 5
 ideas of each strategy type. SPY and QQQ are scanned automatically at 09:08 CT
 so the page opens on a fresh result. Every limit is in
 <strong>Settings → Configuration → Public Strategy Finder</strong>, and <strong>Settings →
-General → API usage</strong> shows how many public scans have been used today. <code>https://neuralstrike.co/live.html</code> is a thumbnail menu of
-them.</p>
+General → API usage</strong> shows how many public scans have been used today.</p>
+<p>The public Rescue form is the other screen a visitor can act on. It is the
+<strong>Ad-hoc Trade</strong> tab of your own Rescue page and nothing else: your at-risk
+board is never shown there. A visitor loads a symbol, lays out a trade they
+hold elsewhere, types the price they received or paid for each leg, and
+presses Compute to get the same ranked repair menu you would see. Every card
+is advisory; there is no Apply. The expiration and strike lists carry no
+prices, and the cards show each leg without its fill price unless <strong>Show
+per-leg bid and ask</strong> is on in the Public Strategy Finder settings. It runs
+08:40–15:00 CT on trading days, with 200 rescues and 400 symbol loads a day for
+all visitors together and 20 rescues an hour for each visitor. The same trade
+asked for again within 5 minutes shows the earlier answer. Nothing records
+which trades visitors entered. Every limit is in <strong>Settings → Configuration →
+Public Rescue form</strong>.</p>
+<p><code>https://neuralstrike.co/live.html</code> is a thumbnail menu of them, and the site's
+<strong>Tools</strong> menu links the two screens a visitor can act on.</p>
 <p>Three things to know:</p>
 <ul>
 <li><strong>They are not redacted.</strong> The Desk shows your open paper and driver positions,
@@ -329,9 +344,9 @@ them.</p>
   Anyone with the address can read them. That is a deliberate choice — the book
   is paper only — but it is worth knowing before you show someone the link.</li>
 <li><strong>They are a separate program.</strong> Nothing anyone does there can reach your own
-  app: it holds no login and can write only one thing — a request for a public
-  Strategy Finder scan, which the options service answers separately from your
-  own work. Its
+  app: it holds no login and can write only two things — a request for a public
+  Strategy Finder scan, and a request from the public Rescue form — which the
+  options service answers separately from your own work. Its
   health has its own card on <strong>System Status</strong>; a red one means the public site
   is down and your own screens are unaffected.</li>
 <li><strong>To stop publishing</strong>, use <strong>Stop All Services</strong> — it stops both web apps —

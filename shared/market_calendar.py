@@ -252,6 +252,11 @@ _DEFAULTS = {
         # minutes of the session (pre-open marks fail the quality cut, measured
         # 2026-09-21) and closes at the regular close.
         "finder_public": {"start": "08:40", "end": "15:00"},
+        # The public Rescue form. Held separate from ``finder_public`` so one
+        # public surface cannot move because the other was retimed. Opens after
+        # the first minutes of the session for the same reason: the rescue menu
+        # reprices the trade live, and pre-open marks are stale.
+        "rescue_public": {"start": "08:40", "end": "15:00"},
         # ``end_exclusive`` lives here, not only in the TOML, so a missing or
         # corrupt file still degrades to the SAFE behavior: falling back to
         # inclusive would silently re-open the 15:30 ET entry slot.
