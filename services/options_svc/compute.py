@@ -21,7 +21,8 @@ import logging
 import math
 import sys
 import threading
-from typing import NamedTuple
+import time
+from typing import Callable, NamedTuple
 from zoneinfo import ZoneInfo
 
 from repo_paths import DRIVER_PAPER_DB, ENV_FLAGS, OPTIONS_SCANNER
@@ -8499,14 +8500,6 @@ def reset_sim_snapshots() -> None:
     _SIM_SNAPSHOTS.clear()
 
 
-def _stash_sim_snapshot(symbol, snap) -> None:
-    """Cache ``snap`` under ``symbol``, evicting the oldest past the cap."""
-    _SIM_SNAPSHOTS.pop(symbol, None)          # re-insert so it counts as newest
-    _SIM_SNAPSHOTS[symbol] = snap
-    while len(_SIM_SNAPSHOTS) > SIM_SNAPSHOT_LIMIT:
-        gone = next(iter(_SIM_SNAPSHOTS))
-        _SIM_SNAPSHOTS.pop(gone)
-        _SIM_EXPIRATIONS.pop(gone, None)
 
 # Equity/index option contract multiplier (shares per contract). The simulator
 # engine prices in per-share × qty units; ×100 converts the What-if curve to a
@@ -8579,18 +8572,125 @@ def _sim_meta(snap):
 _SIM_EXPIRATIONS: dict = {}
 
 
-def sim_fetch_expiry(symbol, expiry):
+class SimStore:
+    """Where Simulator snapshots live: symbol -> ChainSnapshot, plus each
+    symbol's every-listed-expiration list, bounded and optionally expiring.
+
+    WHY a store and not the two module dicts: the public website runs the
+    Simulator too, and a visitor's ``sim_fetch`` written into ``_SIM_SNAPSHOTS``
+    would REPLACE the owner's snapshot for that symbol mid-analysis. The public
+    load brings different lazily-loaded expirations, so an owner's leg on an
+    expiration missing from it would silently stop pricing. ``PRIVATE_SIM``
+    wraps the owner's existing dicts; the public side builds its own store.
+
+    ``snapshots`` holds the snapshot OBJECTS themselves (existing code and tests
+    read ``_SIM_SNAPSHOTS[symbol]`` directly); load times live in a side dict.
+    Insertion order is age order and a ``put`` re-inserts, so the symbol being
+    simulated is never the one evicted. Evicting a snapshot drops its
+    expiration list with it.
+
+    ⚠ ``limit`` may be an int OR a zero-argument callable. ``PRIVATE_SIM`` passes
+    a callable reading ``SIM_SNAPSHOT_LIMIT`` at put time, which is exactly how
+    ``_stash_sim_snapshot`` read the module constant before this class existed.
+
+    ⚠ Thread-safe by one lock around every dict touch: the public store is read
+    by one consumer thread and written by another. The lock guards the
+    DICTIONARIES only. A snapshot handed out by ``get`` is shared, and
+    ``sim_fetch_expiry`` extends its ``contracts`` list in place.
+    """
+
+    def __init__(self, snapshots=None, expirations=None,
+                 limit: "int | Callable[[], int]" = 4,
+                 ttl_sec: "float | None" = None):
+        self.snapshots: dict = {} if snapshots is None else snapshots
+        self.expirations: dict = {} if expirations is None else expirations
+        self.limit = limit
+        self.ttl_sec = ttl_sec
+        self._mono: "Callable[[], float]" = time.monotonic
+        self._loaded: dict = {}
+        self._lock = threading.Lock()
+
+    def _limit(self) -> int:
+        return int(self.limit() if callable(self.limit) else self.limit)
+
+    def _drop(self, symbol) -> None:
+        self.snapshots.pop(symbol, None)
+        self._loaded.pop(symbol, None)
+        self.expirations.pop(symbol, None)
+
+    def get(self, symbol):
+        """The snapshot for ``symbol``, or None when absent or older than
+        ``ttl_sec`` (an expired entry is removed, expiration list and all).
+        A snapshot with no recorded load time (placed straight into the dict,
+        as tests do) is treated as fresh."""
+        with self._lock:
+            snap = self.snapshots.get(symbol)
+            if snap is None:
+                return None
+            loaded = self._loaded.get(symbol)
+            if (self.ttl_sec is not None and loaded is not None
+                    and self._mono() - loaded > self.ttl_sec):
+                self._drop(symbol)
+                return None
+            return snap
+
+    def put(self, symbol, snap) -> None:
+        """Store ``snap`` as the newest entry, evicting the oldest past the cap."""
+        with self._lock:
+            self.snapshots.pop(symbol, None)   # re-insert so it counts as newest
+            self.snapshots[symbol] = snap
+            self._loaded[symbol] = self._mono()
+            limit = self._limit()
+            while len(self.snapshots) > limit:
+                self._drop(next(iter(self.snapshots)))
+
+    def expirations_of(self, symbol):
+        with self._lock:
+            return self.expirations.get(symbol)
+
+    def set_expirations(self, symbol, exps) -> None:
+        with self._lock:
+            self.expirations[symbol] = exps
+
+    def drop_expirations(self, symbol) -> None:
+        with self._lock:
+            self.expirations.pop(symbol, None)
+
+    def clear(self) -> None:
+        with self._lock:
+            self.snapshots.clear()
+            self.expirations.clear()
+            self._loaded.clear()
+
+
+# The owner's store: the SAME dict objects as ``_SIM_SNAPSHOTS`` /
+# ``_SIM_EXPIRATIONS`` (not copies), so every caller and test that touches those
+# names directly keeps working. No expiry — the owner's snapshot stays until it is
+# evicted by the cap or replaced by a re-fetch.
+PRIVATE_SIM = SimStore(snapshots=_SIM_SNAPSHOTS, expirations=_SIM_EXPIRATIONS,
+                       limit=lambda: SIM_SNAPSHOT_LIMIT, ttl_sec=None)
+
+
+def _stash_sim_snapshot(symbol, snap) -> None:
+    """Cache ``snap`` under ``symbol`` in the owner's store, evicting the oldest
+    past the cap. (Kept as a thin wrapper: callers and tests use this name.)"""
+    PRIVATE_SIM.put(symbol, snap)
+
+
+def sim_fetch_expiry(symbol, expiry, store=None):
     """Add ONE expiry's contracts to the stashed Simulator snapshot.
 
     Returns meta (the loaded expiries, now including ``expiry``) + ``chain`` —
     the thinned chain for THAT expiry only, which the handler merges into the
     cached ``sim_chain`` — marked ``added``. None when there is no snapshot for
     the symbol or the expiry is not listed. No price-history call: the snapshot
-    already holds it."""
+    already holds it. ``store`` (default ``PRIVATE_SIM``) is where the snapshot
+    and its expiration list are read — and the snapshot extended."""
     from options_simulator import data as sdata
 
-    snap = _SIM_SNAPSHOTS.get(symbol)
-    exps = _SIM_EXPIRATIONS.get(symbol) or []
+    store = PRIVATE_SIM if store is None else store
+    snap = store.get(symbol)
+    exps = store.expirations_of(symbol) or []
     if snap is None or expiry not in exps:
         return None
     if expiry in expiries_of(snap):
@@ -8605,12 +8705,12 @@ def sim_fetch_expiry(symbol, expiry):
                 chain=thin_calc_chain(raw.get("chain")), added=expiry)
 
 
-def sim_fetch(symbol: str, lazy=False, expiries=None) -> dict:
+def sim_fetch(symbol: str, lazy=False, expiries=None, store=None) -> dict:
     """Fetch the ChainSnapshot for ``symbol``, stash it in-process, return meta.
 
     The whole snapshot is a Python object (price-history series + ContractRow
     list) and is NOT JSON-serializable as a unit, so it stays in
-    ``_SIM_SNAPSHOTS`` keyed by symbol. We return only the page-selector metadata
+    a ``SimStore`` (default ``PRIVATE_SIM``) keyed by symbol. We return only the page-selector metadata
     the GUI needs to populate its expiry/strike dropdowns: spot, contract count,
     the sorted expiries, and a nested ``strikes`` map (expiry → {call, put}).
     Computing the full nested strike map up front (vs. a per-(expiry,kind)
@@ -8626,7 +8726,26 @@ def sim_fetch(symbol: str, lazy=False, expiries=None) -> dict:
     fetches contracts for ``initial_expiries(…, expiries)`` only — price history
     once, on the first run — the Calculator's shape; ``sim_fetch_expiry`` adds
     the rest. Without a usable expiration list it falls back to the eager
-    +90-day fetch."""
+    +90-day fetch.
+
+    ``store`` (default ``PRIVATE_SIM``) receives the snapshot and expiration
+    list; the network half is ``_fetch_sim_snapshot``."""
+    store = PRIVATE_SIM if store is None else store
+    snap, exps, thin = _fetch_sim_snapshot(symbol, lazy, expiries)
+    store.put(symbol, snap)
+    if exps is not None:
+        store.set_expirations(symbol, exps)
+        return dict(_sim_meta(snap), expirations=exps, chain=thin)
+    store.drop_expirations(symbol)
+    return dict(_sim_meta(snap), chain=thin)
+
+
+def _fetch_sim_snapshot(symbol, lazy, expiries):
+    """The network half of ``sim_fetch``: ``(snap, expirations_or_None, thin_chain)``.
+
+    ``expirations`` is the every-listed-expiration list on the lazy path and None
+    on the eager +90-day fallback — the caller stores the first and DROPS any
+    stale list on the second, as ``sim_fetch`` always did. Stores nothing."""
     from options_simulator import data as sdata
 
     client = _proxy.schwab_py_client
@@ -8646,20 +8765,16 @@ def sim_fetch(symbol: str, lazy=False, expiries=None) -> dict:
                 else:
                     snap.contracts.extend(part.contracts)
                 thin = merge_chains(thin, thin_calc_chain(raw.get("chain")))
-            _stash_sim_snapshot(symbol, snap)
-            _SIM_EXPIRATIONS[symbol] = exps
-            return dict(_sim_meta(snap), expirations=exps, chain=thin)
+            return snap, exps, thin
 
     raw = {}
     snap = sdata.fetch_snapshot(client, symbol,
                                 on_chain=lambda c: raw.update(chain=c))
-    _stash_sim_snapshot(symbol, snap)
-    _SIM_EXPIRATIONS.pop(symbol, None)
-    return dict(_sim_meta(snap), chain=thin_calc_chain(raw.get("chain")))
+    return snap, None, thin_calc_chain(raw.get("chain"))
 
 
 def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
-            dt=5.0, mult=1.5, legs=None) -> dict:
+            dt=5.0, mult=1.5, legs=None, store=None) -> dict:
     """Compute What-if + IV-shock for a position (single OR multi-leg) → JSON-safe.
 
     ``legs`` (preferred) is a list of {kind, strike, expiry, side, qty}; when
@@ -8667,12 +8782,14 @@ def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
     one-leg list (back-compat). The What-if sweep advances each leg by ``dt``
     ELAPSED days from now (per-leg decay → calendars are correct); IV-shock + the
     engine already price each leg at its own expiry. Missing snapshot/contract →
-    {} (page prompts a re-fetch / selection)."""
+    {} (page prompts a re-fetch / selection). ``store`` (default
+    ``PRIVATE_SIM``) is the only place the snapshot is looked up — a public
+    store never falls back to the owner's."""
     from options_simulator import engine as seng
     import numpy as np
     import datetime as _dt
 
-    snap = _SIM_SNAPSHOTS.get(symbol)
+    snap = (PRIVATE_SIM if store is None else store).get(symbol)
     if snap is None:
         return {}
 
