@@ -159,6 +159,12 @@ def page(monkeypatch):
         return handle
 
     monkeypatch.setattr(leg_editor, "build_leg_editor", _capture)
+    # A chain carrying a quotes block was published while the switch was ON, so
+    # that is the state the page runs under here; the switch-off tests at the
+    # bottom set it off. (The shipped default is off, which these tests used to
+    # ignore because the page read only the payload.)
+    from shared import public_scan
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: True)
     with ui.card() as root:
         calculator.render(public=True)
     return root
@@ -886,3 +892,56 @@ def test_the_leg_table_scrolls_inside_its_own_box_on_a_phone(page):
     assert "overflow-x-auto" in scroller._classes
     assert "w-full" in scroller._classes and "min-w-0" in scroller._classes
     assert pub_chain_view.LEG_TABLE_MIN == "min-w-[560px] sm:min-w-0"
+
+
+# ── the quotes switch decides, not the payload ──────────────────────────────
+# A ``pub_chain`` key written while the switch was on keeps its quotes block
+# until the next request for that symbol rewrites it or it expires
+# (``ladder_keep_min``) - and a page load reads SPY's key with no request at
+# all. So the page must check the switch itself.
+
+def _switch(monkeypatch, on):
+    from shared import public_scan
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: on)
+
+
+def _no_quoted_ui(root):
+    assert _all(root, "entry-gridbody") == []
+    assert _all(root, "leg-price-source") == []
+    assert _all(root, "leg-delta") == []
+    assert "Quotes as of" not in _joined(root)
+    kw = _HANDLES["editor_kw"]
+    assert kw["price_for"] is None and kw["delta_for"] is None
+    # nothing downstream can reach the stale block either
+    assert all(not l.get("premium") for l in _editor().get_legs())
+
+
+def test_switch_off_hides_a_quoted_chain_landed_by_load(page, monkeypatch):
+    _switch(monkeypatch, False)
+    _loaded(page, quotes=True)
+    _no_quoted_ui(page)
+
+
+def test_switch_off_hides_a_quoted_default_chain_on_a_page_load(page, monkeypatch):
+    _switch(monkeypatch, False)
+    _publish_chain(_chain(quotes=True))
+    _run(page, "_load_default")
+    _no_quoted_ui(page)
+    assert _all(page, "calc-results-note")[0].text == calc_live.TYPE_PRICES_PROMPT
+
+
+def test_switch_off_strips_the_quotes_block_the_page_holds():
+    quoted = _chain(quotes=True)
+    held = calc_live.page_chain(quoted, False)
+    assert "quotes" not in held and pub_chain_view.grid_chain(held) is None
+    assert held["strikes"] == quoted["strikes"] and "quotes" in quoted  # a copy
+    assert calc_live.page_chain(quoted, True) is quoted
+
+
+def test_switch_on_still_draws_a_quoted_default_chain(page, monkeypatch):
+    _switch(monkeypatch, True)
+    _publish_chain(_chain(quotes=True))
+    _run(page, "_load_default")
+    assert len(_all(page, "entry-gridbody")) == 1
+    assert _all(page, "leg-price-source") and _all(page, "leg-delta")
+    assert "Quotes as of" in _joined(page)

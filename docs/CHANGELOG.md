@@ -53,6 +53,12 @@ are not applied, and the snapshot and rating costs are unmeasured.**)
   allow-list, `S` and `theo_price` (`tools_public.SWEEP_ROW_FIELDS`), tested
   over the real `sim_run`. The test's fake row had an invented shape with no
   greeks in it, which is why nothing caught it.
+  **Turning the quotes switch off did not stop the public Calculator
+  drawing quotes**: the page decided from the payload alone, and a
+  `pub_chain` key written while the switch was on keeps its quotes block for
+  up to `ladder_keep_min` (180 minutes) - a page load reads SPY's key with no
+  request to reconcile it. The page now checks the switch too and strips the
+  block from what it holds (`calc_live.page_chain`).
 - **Rescue changes that ship in the same promote.** Rescue's strikes list is
   now the shared `pub_chain` key (it was `rescue_pub_ladder`), so the three
   tools share one Schwab fetch per symbol; and Rescue's separate daily

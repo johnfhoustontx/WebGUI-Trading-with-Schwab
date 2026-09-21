@@ -350,6 +350,16 @@ which both pages word as "The request could not be sent". As in 4c, a probe
 entry left on either stream has no `data` field, so options_svc dead-letters it
 to `<stream>:dead` on its next read, where it is harmless.
 
+**What the quotes switch does once these are applied.** Settings →
+Configuration → **Show per-leg bid and ask** (`show_leg_quotes` in
+`config/finder_public.toml`) is read by the pages on every chain they land, so
+turning it off stops the public Calculator drawing quotes at once: no chain
+grid, no Bid / Mark / Ask select, no delta column, no "Quotes as of" stamp.
+Redis keys written while it was on (`cache:options:pub_chain:<SYMBOL>`) keep
+their quotes block until the next request for that symbol rewrites them, or
+until they expire (`ladder_keep_min` in `config/rescue_public.toml`). The public process can read those keys,
+but no page draws them.
+
 **5. Carry the gitignored artifacts.** Most arrive with the snapshot in §4 —
 including `Top 20.xlsx` and the sentiment bridge — so the only hand-copy is the
 one store no tool knows about:

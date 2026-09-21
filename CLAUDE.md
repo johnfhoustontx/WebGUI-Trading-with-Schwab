@@ -799,8 +799,12 @@ must never stall the reprice every edit triggers.** ⚠ **Redis is readable by
 the public process, so a quote written there is a quote published**:
 `public_chain` HOLDS the quoted chain in the worker's memory and writes
 `cache:options:pub_chain:<SYMBOL>` stripped to expirations and strikes, with a
-four-field quote block only while `public_scan.show_leg_quotes` is on. That one
-key per symbol is shared with Rescue's strikes list, so the three tools share
+four-field quote block only while `public_scan.show_leg_quotes` is on. ⚠
+Turning the switch off stops the pages drawing quotes at once (`calc_live.page_chain`
+strips the block from what the page holds), but keys written while it was on keep
+their quotes block until the next request for that symbol rewrites them or they
+expire (`ladder_keep_min`): the public process can read them, no page draws them.
+That one key per symbol is shared with Rescue's strikes list, so the three tools share
 one fetch. ⚠ **A rated row's legs are rebuilt from an ALLOW-list**
 (`tools_public.LEG_KEYS`), never a deny-list, and while quotes are off a rating
 with an unpriced option leg is refused `price_needed` - otherwise the engine

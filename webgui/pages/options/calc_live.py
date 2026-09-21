@@ -20,6 +20,11 @@ a position reads the same on both origins. What they do NOT get:
   chain grid, no Bid / Mark / Ask select and no delta column, and the visitor
   types each leg's price. With the switch on, the published chain carries a
   small quotes block and the grid, the price source and the delta come back.
+  ⚠ The page checks the switch ITSELF (``page_chain``), not only the payload:
+  a key written while it was on keeps its quotes block until the next request
+  for that symbol rewrites it or it expires, and a page load reads SPY's key
+  with no request at all. Switched off, the block is stripped before anything
+  on the page can read it.
 
 Three rules, and where each lives:
 
@@ -45,6 +50,7 @@ import bus_client
 import shell as _shell
 import visitor_limit
 from nicegui import context, run, ui
+from shared import public_scan
 from shared import public_tools as pt
 from shared.symbols import clean_symbol
 
@@ -69,6 +75,25 @@ from .pub_chain_view import (LEG_SCROLL, LEG_TABLE_MIN, grid_chain, has_quotes,
                              quotes_as_of)
 
 log = logging.getLogger(__name__)
+
+
+def page_chain(chain, quotes_on):
+    """``chain`` as the page may hold it: with the quotes switch off, WITHOUT
+    its quotes block, whatever the payload carried. A ``pub_chain`` key written
+    while the switch was on keeps that block until the next request for the
+    symbol rewrites it (``public_chain.reconcile``) or it expires
+    (``ladder_keep_min``), so the payload alone cannot say whether quotes may
+    be drawn. Stripped here, the grid, ``price_for`` and ``delta_for`` have
+    nothing to read."""
+    if quotes_on or not isinstance(chain, dict) or "quotes" not in chain:
+        return chain
+    return {k: v for k, v in chain.items() if k != "quotes"}
+
+
+def _held_chain(chain):
+    """``page_chain`` under the switch as it stands NOW (read per chain landed:
+    Settings saves it with no restart)."""
+    return page_chain(chain, public_scan.show_leg_quotes())
 
 TITLE = "Calculator"
 SIMULATOR_ROUTE = "/options/simulator"   # the PRIVATE route; shell maps it
@@ -549,6 +574,7 @@ def render():
         _apply_chain(chain)
 
     def _apply_chain(chain):
+        chain = _held_chain(chain)
         quotes = has_quotes(chain)
         same = state["symbol"] == chain.get("symbol")
         if not same:
@@ -622,6 +648,7 @@ def render():
         if not chain or expiry not in loaded_expirations(chain):
             _expiry_refused(expiry, outcome if outcome != "done" else "error")
             return
+        chain = _held_chain(chain)
         state["chain"], state["grid"] = chain, grid_chain(chain)
         panel = _panel()
         panel.set_chain(state["grid"], _num(chain.get("spot")),
