@@ -289,3 +289,16 @@ def test_the_ttl_may_be_a_callable_read_on_each_get():
     assert store.get("SPY") is snap, "the ttl was read once, not per get"
     ttl[0] = 5.0
     assert store.get("SPY") is None
+
+
+def test_discard_if_drops_only_the_snapshot_it_was_given():
+    store = _public()
+    old, new = _snap("SPY"), _snap("SPY")
+    store.put("SPY", old)
+    store.set_expirations("SPY", ["2026-10-16"])
+    store.put("SPY", new)
+    assert store.discard_if("SPY", old) is False
+    assert store.get("SPY") is new
+    assert store.discard_if("SPY", new) is True
+    assert store.get("SPY") is None and store.expirations_of("SPY") is None
+    assert store.discard_if("QQQ", new) is False

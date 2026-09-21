@@ -9,6 +9,11 @@ Assembles the shared scaffold with this domain's scheduler + command handler:
   Strategy Finder requests, on a consumer loop of their own.
 * ``rescue_public.handle`` on ``cmd:rescue_public`` — the public site's Rescue
   form (strikes lists and rescue menus), on another loop of its own.
+* ``tools_public.handle_tools`` on ``cmd:tools_public`` — the public Calculator
+  and Simulator's Schwab-spending requests (chain, expiration, rating, snapshot).
+* ``tools_public.handle_math`` on ``cmd:tools_public_math`` — their pure pricing
+  (reprice, implied volatility, what-if sweep), on a loop of its own so a
+  snapshot fetch never stalls the reprice a visitor's every edit triggers.
 
 Importable without side effects; only starts uvicorn under ``__main__`` on the
 ``options`` service port (8211) from ``repo_paths.SERVICE_PORTS``.
@@ -24,8 +29,8 @@ if str(_REPO_ROOT) not in sys.path:
 
 from services._scaffold import make_app  # noqa: E402
 from services.options_svc import (  # noqa: E402
-    finder_public, handlers, rescue_public, scheduler)
-from shared import public_rescue, public_scan  # noqa: E402
+    finder_public, handlers, rescue_public, scheduler, tools_public)
+from shared import public_rescue, public_scan, public_tools  # noqa: E402
 
 app = make_app(
     "options",
@@ -34,9 +39,13 @@ app = make_app(
     # The public Strategy Finder's requests, on their OWN stream and loop, so a
     # visitor's scan never queues ahead of (or behind) the owner's commands.
     # The Rescue form's requests get a third loop, so a slow rescue never holds
-    # up a Finder scan and neither ever waits on the owner.
+    # up a Finder scan and neither ever waits on the owner. The public
+    # Calculator/Simulator get two more: Schwab-spending tools, and pure math
+    # that must never queue behind a snapshot fetch.
     extra_consumers=((public_scan.STREAM, finder_public.handle),
-                     (public_rescue.STREAM, rescue_public.handle)),
+                     (public_rescue.STREAM, rescue_public.handle),
+                     (public_tools.TOOLS_STREAM, tools_public.handle_tools),
+                     (public_tools.MATH_STREAM, tools_public.handle_math)),
 )
 
 

@@ -8667,6 +8667,16 @@ class SimStore:
             self.snapshots[symbol] = new
             return True
 
+    def discard_if(self, symbol, old) -> bool:
+        """Drop ``symbol`` (snapshot, load time, expiration list) only if the
+        store still holds ``old`` - so a caller discarding a snapshot it just
+        found unusable cannot remove a newer one put meanwhile."""
+        with self._lock:
+            if old is None or self.snapshots.get(symbol) is not old:
+                return False
+            self._drop(symbol)
+            return True
+
     def expirations_of(self, symbol):
         with self._lock:
             return self.expirations.get(symbol)
