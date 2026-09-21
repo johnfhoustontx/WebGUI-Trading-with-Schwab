@@ -599,7 +599,7 @@ right now?</em>) and <strong>Symbol</strong> (<em>tell me everything about this 
 </tbody>
 </table>
 <p>At the very bottom of the menu sit the machine-level controls — <strong>System Status</strong>,
-<strong>Settings</strong>, a red <strong>Stop All Services</strong> button, and <strong>Sign out</strong> last of all. They
+<strong>Settings</strong>, a red-outlined <strong>Stop All Services</strong> button, and <strong>Sign out</strong> last of all. They
 are separated deliberately: none of them is a step in a trading workflow. Sign out
 takes the bottom slot on purpose, because on a phone the bottom edge is the easiest
 thing to hit and it is the one control down there that costs nothing to press by
@@ -5466,7 +5466,10 @@ reconcile to each other. That is correct.</p>
 scanner, captured and driver tables. Both views use a jump-link table of contents and
 collapsible sections that work in the exported file as well as in the app.</p>
 <p><strong>Generate</strong> snapshots the current caches into standalone <code>summary.html</code> and
-<code>detail.html</code> under <code>webgui/data/eod/&lt;date&gt;/</code>. The <strong>Archive</strong> list reopens any past day.</p>
+<code>detail.html</code> under <code>webgui/data/eod/&lt;date&gt;/</code>. It is <strong>confirm-gated</strong> — the dialog
+names the date it replaces — and it <strong>refuses a cold cache</strong>: if every options cache
+reads back empty it writes nothing and says so, rather than replacing a real report
+with a complete-looking empty one. The <strong>Archive</strong> list reopens any past day.</p>
 <p><strong>It also runs by itself at 15:15 CT on every trading day</strong> — the same snapshot, from the
 same builders, fifteen minutes after the cash close and after the day's expiries have
 settled. The button is for an extra snapshot or for recovering a day the machine missed.</p>
@@ -5486,9 +5489,11 @@ and commissions are not in these numbers, so treat every figure as optimistic.</
 <li><strong>Generate</strong> captures the caches <em>at the moment you press it</em>. Generating mid-session
   archives a partial day — and it overwrites that date's files, including the 15:15
   automatic run's.</li>
-<li>The automatic run <strong>writes nothing</strong> if every cache it reads is empty, so a stopped
-  stack leaves the existing report alone rather than replacing it with a page of
-  "No data" notes. A day it could not run is simply a day with no archived file; the
+<li><strong>Neither the automatic run nor the Generate button</strong> writes anything if every
+  cache it reads is empty, so a stopped stack leaves the existing report alone rather
+  than replacing it with a page of empty notes. (The button did not make that check
+  until 2026-09-20, and one click against a stopped stack destroyed that day's
+  report.) A day it could not run is simply a day with no archived file; the
   caches are still live, so pressing <strong>Generate</strong> recovers it until they reset overnight.</li>
 </ul>
 <h3 id="related-pages_28">Related pages</h3>
@@ -5601,9 +5606,15 @@ merely running but actually <em>publishing</em>.</p>
 </tr>
 </tbody>
 </table>
-<p>Each card shows online/offline, a health message, and a <strong>Restart</strong> button that
-relaunches the component windowless. The proxy card additionally shows <strong>Schwab auth</strong>
-status with a <strong>Re-authorize</strong> button.</p>
+<p>Each card shows online/offline, a health message, and a <strong>Restart</strong> button
+(<code>systemctl --user restart</code>) that stops the component and starts it again. <strong>Every
+Restart is confirm-gated</strong>, and the dialog's wording depends on which one: restarting
+<strong>the web app itself</strong> disconnects the page you clicked from, and restarting the
+<strong>Schwab gateway during market hours</strong> takes market data away from the whole stack for
+those seconds — every other card gets the plain "back in about fifteen seconds"
+wording. Redis carries no Restart at all: it is a <em>system</em> unit a user-scoped
+<code>systemctl</code> cannot reach. The proxy card additionally shows <strong>Schwab auth</strong> status with
+a <strong>Re-authorize</strong> button.</p>
 <p><strong>Published data freshness</strong> is the more informative half. It lists each domain's latest
 cache write with a version number and an age. <strong>A service can be "online" and still not
 be publishing</strong> — this table is what catches that.</p>
@@ -5685,7 +5696,9 @@ restarting the options service costs gamma-collection minutes.</p>
 driver's decision maker and Gamma Analyze among them — for today,
 the last 7 days and the last 30 days.</p>
 <p><strong>Maintenance.</strong> <strong>Vacuum GEX history DB</strong> compacts the intraday options database, with
-an optional purge-first switch, and reports the before-and-after size.</p>
+an optional purge-first switch, and reports the before-and-after size. The confirm
+<strong>names whether that switch is armed</strong> — with it on, every saved GEX session but the
+last five is deleted before the compaction runs.</p>
 <h3 id="why-it-matters_25">Why it matters</h3>
 <p><strong>API usage is the section to actually look at.</strong> The app makes on the order of tens of
 thousands of Schwab calls per day, dominated by the 1-minute gamma collection and the
@@ -5706,7 +5719,7 @@ number before that happens. The Claude counter does the same for money.</p>
 <a href="#captured-signals">Captured Signals</a>.</p>
 <hr />
 <h2 id="stop-all-services">Stop All Services</h2>
-<p><em>Menu: bottom of the rail, the red button · Route <code>/terminate</code></em></p>
+<p><em>Menu: bottom of the rail, the red-outlined button · Route <code>/terminate</code></em></p>
 <p>A confirm-gated stop of the entire local stack — the gateway, all six services, the
 web app itself, and the public live screens on <code>live.neuralstrike.co</code>, which go dark
 with it. <strong>Redis is deliberately left running</strong>, because it is a <em>system</em> service
@@ -5715,9 +5728,12 @@ this app does not own.</p>
 program serving it.</p>
 <p>Restart with <code>systemctl --user start trading-prod.target</code>.</p>
 <p><strong>The confirmation is a step-up, not just a click.</strong> The dialog asks for the current
-6-digit code from your authenticator app, and the stop runs only when that code
-verifies. A wrong, missing or already-spent code refuses the stop and says which it
-was — you are already signed in, so there is nothing to be coy about. The code is
+6-digit code from your authenticator app — press <strong>Enter</strong> in that box or click
+<strong>Stop everything</strong> — and the stop runs only when that code verifies. A wrong,
+missing or already-spent code refuses the stop, says which it was (you are already
+signed in, so there is nothing to be coy about) and <strong>leaves the dialog open</strong>, so
+you can wait for the next code and try again; a dialog that closed on a refusal
+would read as "done". The code is
 recorded as used against the same counter the sign-in form checks, so one code
 cannot do both jobs.</p>
 <p>Why this control and no other: the app is reachable from the internet behind a single

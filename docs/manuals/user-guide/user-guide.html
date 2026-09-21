@@ -2643,7 +2643,12 @@ recover a day the machine was off for. Weekends and market holidays are skipped.
 <ul>
 <li><strong>Generate</strong> snapshots the current data into standalone <code>summary.html</code> and
   <code>detail.html</code> archived by date under <code>webgui/data/eod/&lt;date&gt;/</code>. Pressing it after
-  the automatic run replaces that day's files with a fresh snapshot.</li>
+  the automatic run replaces that day's files with a fresh snapshot, so <strong>it asks
+  first</strong> and the question names the date it is about to replace.</li>
+<li><strong>It refuses to overwrite a real report with an empty one.</strong> If the stack is
+  stopped when you press Generate, every cache reads back empty and the report
+  would be a complete-looking document of "No captured signals." notes. Nothing is
+  written, and an amber message says so. Start the stack and press it again.</li>
 <li><strong>Open summary file</strong> / <strong>Open detail file</strong> open those archived files in a new
   browser tab.</li>
 <li>The <strong>Archive</strong> list reopens any past date.</li>
@@ -2685,7 +2690,13 @@ in a trading workflow, which is why they sit apart.</p>
 <li>A <strong>data-freshness</strong> table showing each domain's latest cache write and its age.
   This is the more informative half: a service can be <em>online</em> and still not be
   publishing, and only this table shows that.</li>
-<li>Every component has a <strong>Restart</strong> button, which relaunches it windowless.</li>
+<li>Every component has a <strong>Restart</strong> button, which stops that component and starts
+  it again — back within about fifteen seconds. <strong>It asks first</strong>, and the question
+  says what <em>that</em> restart costs: restarting <strong>this web app</strong> disconnects the page
+  you are looking at and you will need to reload it, and restarting the <strong>Schwab
+  gateway</strong> while the market is open takes market data away from every service in
+  the stack for those seconds. Redis has no Restart button — it is a system service
+  this app does not own.</li>
 <li><strong>Refresh</strong> re-checks on demand; the board also re-checks on its own.</li>
 </ul>
 <blockquote>
@@ -2804,7 +2815,10 @@ day).</p>
   gateway) and to <strong>Claude</strong> (counted at each call site), for today, the last 7 days
   and the last 30.</li>
 <li><strong>Maintenance</strong> — <strong>Vacuum GEX history DB</strong> compacts the intraday options
-  database and reports the before-and-after size.</li>
+  database and reports the before-and-after size. It asks first, and <strong>the question
+  tells you whether the purge switch above it is on</strong> — with it on, every saved
+  session but the last five is deleted before the compaction. The button shows a
+  spinner while it runs, and the tool's own output lands underneath it.</li>
 </ul>
 <blockquote>
 <p>Clicking <strong>Test sound</strong> — or <strong>Test voice</strong> — also unlocks browser audio for the
@@ -2825,14 +2839,17 @@ refuses to run while the collector is active.</p>
 <p><strong>User Manuals</strong> is no longer nested under Settings — it is a tab in the <strong>More</strong>
 group, next to EOD Report.</p>
 <h2 id="stop-all-services">Stop All Services</h2>
-<p><strong>Route:</strong> <code>/terminate</code> — the red button at the foot of the rail.</p>
-<p>A guarded "stop the whole local stack" page. The red <strong>Stop all services</strong> button
-(behind a confirmation) stops the gateway, the six services, the web app <strong>and the
-public live screens</strong> — the public site goes dark with it.</p>
+<p><strong>Route:</strong> <code>/terminate</code> — the red-outlined button at the foot of the rail.</p>
+<p>A guarded "stop the whole local stack" page. The <strong>Stop all services</strong> button — a
+red outline, matching the rail — opens a confirmation; the solid red button is the
+<strong>Stop everything</strong> inside it, which is where the decision is actually made.
+Confirming stops the gateway, the six services, the web app <strong>and the public live
+screens</strong> — the public site goes dark with it.</p>
 <p><strong>The confirmation asks for your authenticator code.</strong> Type the current 6-digit
-code from your authenticator app into the dialog and press <strong>Stop everything</strong>. A
-wrong, missing, or already-used code refuses the stop and says so — nothing is
-stopped, and you can wait for the next code and try again. A code you spend here
+code from your authenticator app into the dialog and press <strong>Stop everything</strong> — or
+just press <strong>Enter</strong> in the code box. A wrong, missing, or already-used code refuses
+the stop and says so, <strong>leaving the dialog open</strong> so you can wait for the next code
+and try again — nothing is stopped. A code you spend here
 cannot then be used to sign in (and vice versa), so if you have just signed in,
 wait for the next one.</p>
 <blockquote>

@@ -381,9 +381,9 @@ Routes:
 | `/driver` | Claude Trades — monitor + override for the autonomous Claude decision layer, trading defined-risk spreads into its **own isolated paper book**. Paper only. [Detail](docs/webgui-routes.md) | built |
 | `/settings` | Settings — three sub-tabs. **General**: alert/ticker preferences, Schwab + Claude API call counts, and maintenance actions. **Appearance** (2026-09-19): every colour and font in eight groups that follow the design standard rather than the TOML's sections, over a live preview, saved as a `config/local/theme.toml` override. **Configuration** (2026-09-19): every `config/*.toml` setting by purpose, from the `webgui/config_schema.py` catalogue, saved as `config/local/` overrides, with a restart offer. [Detail](docs/webgui-routes.md) | built |
 | `/portfolio` | Portfolio — Holdings / Sectors / Performance over the portfolio model, with live-streaming P&L via the service’s SSE consumer. | built |
-| `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` and `driver:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. [Detail](docs/webgui-routes.md) | built |
+| `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` and `driver:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. ⚠ It **confirms, and refuses a cold cache** (2026-09-20): `write_archive` overwrites per DATE and every builder degrades to an empty note, so an unchecked click while the stack is stopped replaced the day's real report with a complete-looking empty one — `has_data` gates the button as it already gated `tools/generate_eod_report.py`. [Detail](docs/webgui-routes.md) | built |
 | `/market` | Market Dashboard — live grid of ~48 macro tickers in framed category panels, coloured by semantic risk-on/off. Reader of `cache:market:dashboard`. [Detail](docs/webgui-routes.md) | built |
-| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the six services / webgui / **`webgui_live`** (a `peer` card: an HTTP liveness probe on the public screens, deliberately OUT of the 2 s health fan-out, so a dead public origin never badges the rail or chimes), plus cache freshness; per-component Restart via `systemctl --user`. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
+| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the six services / webgui / **`webgui_live`** (a `peer` card: an HTTP liveness probe on the public screens, deliberately OUT of the 2 s health fan-out, so a dead public origin never badges the rail or chimes), plus cache freshness; per-component Restart via `systemctl --user`, **confirm-gated since 2026-09-20** — nine of the eleven cards carry one, including this web app and the proxy, and the dialog names what THAT restart costs. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
 | `/terminate` | Stop All Services — confirm-gated `systemctl --user --no-block stop trading-<env>.target`. ⚠ Since 2026-09-07 that stops **both** web apps, so the public live screens go dark too. Redis survives structurally: it is a system unit the user target cannot reach. | built |
 
 The `pages/options/` subpackage shares `detail.py` (collapsible Trade detail panel, reused by all signal
@@ -457,7 +457,7 @@ in the stash would silently re-hijack the gamma dropdown on the page's next buil
 never drifts; `boxed=True` styles the trigger for the navy theme), and
 **`theme.py`** (the shared dark-navy **"dashboard" theme** — now a vocabulary of
 **Tailwind design-token constants** (`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/
-`BTN_PRIMARY`/`STRATEGY_BTN`/`TXT_*`/`BTN_3D*`) applied via `.classes(CARD)`, plus the
+`BTN_PRIMARY`/`STRATEGY_BTN`/`TXT_*`/`TILE_3D`) applied via `.classes(CARD)`, plus the
 single **`APP_FIELD_CSS`** block — `build_quasar_css(THEME, scope=".ns-app")`, injected
 **app-wide by both entrypoints** — for the Quasar-internal DOM no `.classes()` can
 reach: filled navy input boxes, compact `.leg-*` cells, dark transparent tabs and the
@@ -572,7 +572,10 @@ injected a SECOND time by the three pages that wore that class — measured on 2
   column and inject `theme.APP_FIELD_CSS` + `theme.SURFACE_CSS`, so a page adds no
   scope class. `tests/test_ui_kit_guard.py` fails when a page builds a raw
   `ui.button` / `ui.dialog` / `ui.notify` / `ui.table` or loads its own font; its
-  `ALLOWED` ratchet names the pages not yet migrated. The standard is
+  `ALLOWED` ratchet is **exactly TEN written exceptions** since 2026-09-20 —
+  **every page in the app is migrated**, so an entry there is a control that is not
+  an action button (a segmented picker, a stepper, a selected-state toggle), never a
+  page waiting its turn. The standard is
   [the design doc](docs/plans/2026-09-19-app-ui-consistency-design.md).
   Reactive (repainted-in-place) label colors swap via `.classes(remove=<finite set>, add=…)`
   so repeated repaints don't stack conflicting `text-[…]` classes.
@@ -582,8 +585,10 @@ injected a SECOND time by the three pages that wore that class — measured on 2
   trigger box (applied alongside the `strategy-menu-btn` scope hook via
   `strategy_menu.build_strategy_menu(..., boxed=True)`) · `TXT_POS/TXT_WARN/TXT_NEG/TXT_NEUTRAL`
   semantic state text colors (+ `STATE_TEXT_CLASSES` for the reactive `remove=`) · `BTN_QUIET`
-  text-only button · `BTN_3D` / `BTN_3D_DANGER` legacy aliases of `BTN_PRIMARY` / `BTN_DANGER`,
-  removed once no page uses them. **CSS-only hooks** (all in `APP_FIELD_CSS`, scoped under
+  text-only button · `TILE_3D` metric tile (a 12px radius and a hairline — flat since
+  Deep Slate, so the "3D" in the name is legacy). ⚠ `BTN_3D` / `BTN_3D_DANGER`, the
+  aliases of `BTN_PRIMARY` / `BTN_DANGER` kept so the flattening needed no per-site
+  edit, were **deleted 2026-09-20** once no page used them. **CSS-only hooks** (all in `APP_FIELD_CSS`, scoped under
   `.ns-app` except the popup — both entrypoints put that class on the content column, so a
   page adds no scope of its own): `.strat-menu-navy` the teleported Strategy-menu popup
   (**GLOBAL** — Quasar menus mount on `<body>`, outside the scope) · `.leg-head` /

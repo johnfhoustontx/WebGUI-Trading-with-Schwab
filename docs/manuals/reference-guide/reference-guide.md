@@ -98,7 +98,7 @@ right now?*) and **Symbol** (*tell me everything about this one ticker*).
 | ▸ User Manuals | You want this guide and the other three. |
 
 At the very bottom of the menu sit the machine-level controls — **System Status**,
-**Settings**, a red **Stop All Services** button, and **Sign out** last of all. They
+**Settings**, a red-outlined **Stop All Services** button, and **Sign out** last of all. They
 are separated deliberately: none of them is a step in a trading workflow. Sign out
 takes the bottom slot on purpose, because on a phone the bottom edge is the easiest
 thing to hit and it is the one control down there that costs nothing to press by
@@ -3912,7 +3912,10 @@ scanner, captured and driver tables. Both views use a jump-link table of content
 collapsible sections that work in the exported file as well as in the app.
 
 **Generate** snapshots the current caches into standalone `summary.html` and
-`detail.html` under `webgui/data/eod/<date>/`. The **Archive** list reopens any past day.
+`detail.html` under `webgui/data/eod/<date>/`. It is **confirm-gated** — the dialog
+names the date it replaces — and it **refuses a cold cache**: if every options cache
+reads back empty it writes nothing and says so, rather than replacing a real report
+with a complete-looking empty one. The **Archive** list reopens any past day.
 
 **It also runs by itself at 15:15 CT on every trading day** — the same snapshot, from the
 same builders, fifteen minutes after the cash close and after the day's expiries have
@@ -3938,9 +3941,11 @@ and commissions are not in these numbers, so treat every figure as optimistic.
 - **Generate** captures the caches *at the moment you press it*. Generating mid-session
   archives a partial day — and it overwrites that date's files, including the 15:15
   automatic run's.
-- The automatic run **writes nothing** if every cache it reads is empty, so a stopped
-  stack leaves the existing report alone rather than replacing it with a page of
-  "No data" notes. A day it could not run is simply a day with no archived file; the
+- **Neither the automatic run nor the Generate button** writes anything if every
+  cache it reads is empty, so a stopped stack leaves the existing report alone rather
+  than replacing it with a page of empty notes. (The button did not make that check
+  until 2026-09-20, and one click against a stopped stack destroyed that day's
+  report.) A day it could not run is simply a day with no archived file; the
   caches are still live, so pressing **Generate** recovers it until they reset overnight.
 
 ### Related pages
@@ -3999,9 +4004,15 @@ merely running but actually *publishing*.
 | webgui (this app) | 1 | 8500 |
 | webgui_live (public live screens) | 1 | 8501 |
 
-Each card shows online/offline, a health message, and a **Restart** button that
-relaunches the component windowless. The proxy card additionally shows **Schwab auth**
-status with a **Re-authorize** button.
+Each card shows online/offline, a health message, and a **Restart** button
+(`systemctl --user restart`) that stops the component and starts it again. **Every
+Restart is confirm-gated**, and the dialog's wording depends on which one: restarting
+**the web app itself** disconnects the page you clicked from, and restarting the
+**Schwab gateway during market hours** takes market data away from the whole stack for
+those seconds — every other card gets the plain "back in about fifteen seconds"
+wording. Redis carries no Restart at all: it is a *system* unit a user-scoped
+`systemctl` cannot reach. The proxy card additionally shows **Schwab auth** status with
+a **Re-authorize** button.
 
 **Published data freshness** is the more informative half. It lists each domain's latest
 cache write with a version number and an age. **A service can be "online" and still not
@@ -4104,7 +4115,9 @@ driver's decision maker and Gamma Analyze among them — for today,
 the last 7 days and the last 30 days.
 
 **Maintenance.** **Vacuum GEX history DB** compacts the intraday options database, with
-an optional purge-first switch, and reports the before-and-after size.
+an optional purge-first switch, and reports the before-and-after size. The confirm
+**names whether that switch is armed** — with it on, every saved GEX session but the
+last five is deleted before the compaction runs.
 
 ### Why it matters
 
@@ -4133,7 +4146,7 @@ number before that happens. The Claude counter does the same for money.
 
 ## Stop All Services
 
-*Menu: bottom of the rail, the red button · Route `/terminate`*
+*Menu: bottom of the rail, the red-outlined button · Route `/terminate`*
 
 A confirm-gated stop of the entire local stack — the gateway, all six services, the
 web app itself, and the public live screens on `live.neuralstrike.co`, which go dark
@@ -4146,9 +4159,12 @@ program serving it.
 Restart with `systemctl --user start trading-prod.target`.
 
 **The confirmation is a step-up, not just a click.** The dialog asks for the current
-6-digit code from your authenticator app, and the stop runs only when that code
-verifies. A wrong, missing or already-spent code refuses the stop and says which it
-was — you are already signed in, so there is nothing to be coy about. The code is
+6-digit code from your authenticator app — press **Enter** in that box or click
+**Stop everything** — and the stop runs only when that code verifies. A wrong,
+missing or already-spent code refuses the stop, says which it was (you are already
+signed in, so there is nothing to be coy about) and **leaves the dialog open**, so
+you can wait for the next code and try again; a dialog that closed on a refusal
+would read as "done". The code is
 recorded as used against the same counter the sign-in form checks, so one code
 cannot do both jobs.
 

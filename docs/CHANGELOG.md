@@ -4,7 +4,218 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-20 (**One look and one behaviour — Phase 5: the Signal
+**Last updated:** 2026-09-20 (**One look and one behaviour — Phase 6: the system
+pages, and the app's destructive controls get one confirm vocabulary. THE
+MIGRATION IS COMPLETE.**)
+
+- **Six pages onto the page kit** — User Manuals, Stop All Services, the EOD
+  Report (both frames), System Status, Settings → General and Settings →
+  Configuration. **That is every page in the app.** `test_ui_kit_guard`'s
+  `ALLOWED` no longer holds a single pending entry: it is exactly **ten written
+  exceptions**, each a control that is not an action button, and its module
+  docstring stopped calling the list "pages no phase has migrated yet".
+  `BTN_3D` / `BTN_3D_DANGER` — the legacy aliases kept through the Deep Slate
+  flattening so no call site had to change — are **deleted**, their last three
+  users having gone through `kit.button`. ⚠ `TILE_3D` is **not** a third dead
+  alias: `options/detail.py` still mounts it, and it is its own token rather
+  than an alias of anything.
+- **The styling was the small half.** Between them these six pages stop the whole
+  stack, restart nine of eleven components, overwrite the day's saved report,
+  wipe a config file back to shipped values and VACUUM a database — and three of
+  those five asked nothing at all before this phase.
+
+⚠ **Four defects, each proven before the fix.**
+- **EOD's Generate destroyed the day's real report.** It called `generate()` with
+  no snapshot and no `has_data` check, while `write_archive` overwrites
+  `<root>/<date>/summary.html` in place and every builder in the module degrades
+  to an empty note — so one click while the stack was stopped replaced the real
+  report, atomically and silently. `has_data`'s own docstring says *"callers that
+  are not a person clicking Generate check this first"* and
+  `tools/generate_eod_report.py` does; the button went straight past it. Driven
+  live against a cold cache and a tmp archive holding a sentinel: the click left
+  **a 12 KB standalone document** in its place. ⚠ And the replacement reads MORE
+  like a real report than the plan assumed — the empty branches say *"No captured
+  signals." / "No paper trades."*, never the literal "No data".
+- **Configuration's footer swallowed the click that reached it.** `_paint_footer`
+  cleared and rebuilt the footer on every edit — mousedown, the field's change,
+  the repaint, and by mouseup the button the reader pressed is gone — so a Save
+  or Discard clicked straight after editing a value did nothing. This is the
+  exact note `pages/appearance.py` has carried since Phase 0, one tab over.
+  Measured before the fix: **`AssertionError: Save changes was rebuilt`**; after,
+  in a real browser, the same DOM node changes icon, colour and text and is still
+  the same element.
+- **Status stamped a naive machine-local `%H:%M:%S`** — the last clock in the app
+  rendering the host's wall time rather than Central, and the header's
+  `Updated 4:16 PM CT` replaced it. It now reads **"Waiting for data"** before
+  the first sweep instead of a made-up time, and is set LAST and only on a sweep
+  that completed: one that advanced after a failed probe would report a health
+  check that never happened.
+- **The VACUUM dialog never said whether the purge was armed.** The switch above
+  the button arms `--purge`, which **deletes every saved GEX session but the last
+  five**, and the dialog spoke only of the database lock. `vacuum_body(purge)` now
+  names it — by KEEPING the lock sentence rather than replacing it, since both are
+  true — and reads the same switch `vacuum_command(purge)` does, so the two cannot
+  drift.
+
+⚠ **Nine of the eleven Status components could be restarted with no confirmation
+at all**, including **this web app** — which kills the page you clicked from — and
+the **proxy**, whose restart takes market data away from every service in the
+stack. They all ask now, through one `kit.confirm(danger=True)` built once at page
+level and retitled per click (not inside `comps`, which is cleared and rebuilt
+every 15 s). **The body is not one sentence for all nine**: a `self` restart names
+the disconnect, and a `proxy` restart *while the market is live* names the
+stack-wide outage. That market-hours test is **Settings → Configuration's own
+`market_busy`, imported rather than restated**, so it cannot drift from the warning
+that tab already shows for the same reason; it never raises, and an unreadable
+calendar degrades to False rather than putting a market-hours warning on a dialog
+at midnight.
+
+**The TOTP stop needed no guard exception, and that is the useful finding.** The
+two things that looked missing from `kit.confirm` were both already in it: an input
+field (`handle.content`, the documented column between body and buttons) and a
+second factor that can **refuse** (`on_confirm` returning `False` keeps the dialog
+open — which is exactly the load-bearing rule that closing on a refusal would read
+as *done*). `terminate.py`'s guard entry is deleted outright. **Enter now confirms**
+from the 6-digit field, where it did nothing before — and the value-sync race was
+**checked, not assumed**: driven three ways against a running page (a trusted key
+press, a zero-delay synthetic keydown in the same JS turn as the value write, and a
+mouse click), `_go` got the full six digits every time. `ui.input` has no debounce,
+and the model update and the dialog's emit travel the same websocket in order.
+
+**What an operator will notice.**
+- **Stop all services is a red OUTLINE, not solid red.** Solid red appears only
+  *inside* a confirm now, and the rail has always drawn this route as a danger
+  outline. The solid red is still there, on **Stop everything** inside the dialog,
+  which is where the decision is made.
+- **The Status health banner's red band is gone.** `bg-green-2` / `bg-red-2` /
+  `bg-grey-3` was the last use of Quasar's own palette anywhere in the app. A
+  component DOWN is the kit's one attention band (`kit.notice`, which is
+  amber-only); all-up and still-checking are a plain line. **Red now lives where
+  the detail is — on the offline cards below.**
+- **User Manuals and Stop All Services widen** from `max-w-2xl` (672px) to the
+  kit's form width, `max-w-3xl` (768px) — the same column the three Settings tabs
+  use. The Settings tabs themselves are all **full width**: peers in one page whose
+  content column must not jump when you switch tabs.
+- **Both EOD frames gain a title** (*EOD Report* / *EOD Report — Detail*). Neither
+  had one; `main.py` supplied it as the browser title only, and the page opened
+  straight onto a button row.
+- **Minimum score to alert stopped clamping silently.** `min`/`max` on a `ui.number`
+  make Quasar's own blur `sanitize` rewrite what was typed with nothing said;
+  `kit.number_field` keeps them off the widget and reports *"At most 100"*.
+- **The change log names its zone.** `config_store.save` stamped a naive
+  `datetime.now()` and the Recent changes row rendered the first 16 characters of
+  it, so the operator read `2026-09-20 14:03` with no zone anywhere on the line. It
+  is an aware Central stamp now, labelled `CT`. ⚠ The rows already in
+  `changes.jsonl` are naive and are **not relabelled**: they were written by the
+  host clock, which on this box IS Central, so they read correctly beside the new
+  ones — but nothing recorded that, and a label the data cannot back is worse than
+  no label. Written at the function, since the next reader of a mixed list will ask.
+
+⚠ **Guard tests that read as protection and were not.** Phase 5 found four
+absence-greps that could not fail; this phase found more of the same shape, and
+proving each new test red first is what surfaced them.
+- **Two "is the wait on screen" tests passed before their page had migrated**,
+  because the helper identified a spinner by *its parent being visible* — always
+  true on the old page, where the spinner was a bare `ui.spinner` beside the
+  button. The helper now identifies a region scrim by its own classes.
+- **Six per-page `"BTN_3D" not in getsource(<page>)` greps were vacuous by
+  deletion.** Each pinned the name in ONE module, and once the token is gone,
+  writing it is a `NameError` anyway. They are replaced by two tests that can
+  fail: the names are absent from the module and from `build_tokens`, and a walk
+  over the whole `pages` tree finds the name nowhere — **including in comments,
+  which is where the last two references actually were**, and which is what the
+  tree walk caught (`options/scanner.py` still claimed *"The 3D 'Run scan' button
+  uses the shared BTN_3D token"*, two phases after that button became a
+  `kit.button`).
+- **Two `test_busy_coverage` exemptions were deleted rather than re-worded**
+  (`eod.py`, `status.py`): that guard only bites a page containing
+  `bus_client.request(`, and neither page has one, so both entries were already
+  inert. The `eod.py` entry's stated reason — *"no in-page repaint"* — was also
+  factually wrong, since `_on_generate` calls `_repaint()`. `terminate.py`'s
+  exemption is kept **verbatim**: that page intentionally goes unresponsive after
+  confirm, and no spinner was added.
+
+⚠ **Measured rather than assumed, because each would otherwise have shipped
+wrong.**
+- **The EOD stylesheet's specificity trap.** The first draft put `color` on
+  `.eod-report .tile .v` — three classes, which out-specifies the two-class
+  `.eod-report .neg` — and both P&L tiles rendered title-white while still
+  reading as red to the eye. `getComputedStyle` said `rgb(238,241,246)`. The colour
+  sits on `.tile` instead, so an unsigned value INHERITS it and a signed one is
+  claimed by the directly-matching rule. This is CLAUDE.md's own rail-colour
+  lesson in a different spelling, and it is pinned by a test now.
+- **Three labelled actions do not fit a phone, and `head.actions` does not save
+  you.** Its row is `no-wrap` and a Quasar button's own content row wraps, so a
+  button's min-content width is one word: at 375px all three EOD actions
+  compressed to ~100px with the icon stacked above a three-line label. The same
+  finding one row up is why every card's Open button on User Manuals needs
+  `shrink-0`.
+- **The fixed 280px button slot on the Status cards had to go.** Inside a no-wrap
+  row holding an icon, a growing label column, a status column and that slot, a
+  card cannot fit a 375px phone — and it fails by scrolling sideways rather than
+  by looking broken.
+- **A dialog opened in a backgrounded automation tab sticks at
+  `q-transition--scale-enter-from`**, because `requestAnimationFrame` never fires
+  and Vue never removes the enter class — so the card measures 0×0 with the
+  backdrop up, and reads exactly like a dialog that failed to open. That is
+  CLAUDE.md's frozen-transition trap in a shape it does not list, and it cost an
+  hour.
+- **A refused connect to a closed localhost port takes 2.05 s on Windows**, so a
+  harness sweep with the whole stack down runs 16.2 s — longer than the page's own
+  15 s auto-refresh, which makes Refresh read permanently busy there. On Linux a
+  refused connect returns immediately, so it is a harness artifact, not prod.
+
+**Two copy corrections, both loops that could stack.** Configuration's per-unit
+restart results became **at most two toasts** (one naming what came back, one
+naming what did not, with its message) instead of one 8-second error per unit; and
+`cross_check`'s problems became **one** error carrying all of them, because
+`sessions.toml` alone can raise nine at once. No unit name and no failure text is
+lost. *"Type a symbol and pick its sector."* became **inline validation on the two
+fields**, which are two inches from the button.
+
+⚠ **Left alone deliberately, and all three are pre-existing.** The Sector map
+editor has **no Reset button** — `_paint_category` returns into `_paint_sectors`
+first, so giving it one is a behaviour change, not a restyle. **Configuration is
+desktop-only below ~600px.** And the EOD report's widest table forces
+`.eod-report` to 504px, so **at 375px the page scrolls sideways**, in the app and
+in the exported documents alike; making that table responsive is a layout change
+to a raw document and was not smuggled into a recolour commit.
+
+- **`EOD_CSS` became `build_eod_css(theme)`** — every colour and the font read off
+  `theme.THEME`, so the report follows Settings → Appearance like every other
+  screen, in the app frames AND in the standalone `summary.html` / `detail.html`
+  that `/eod/file` serves. Those are raw documents with no NiceGUI, no Tailwind and
+  no app stylesheet behind them, so they are **recoloured, not deleted and not
+  routed through the kit** — and they carry the font `<link>`, or `font-family`
+  would name a face the file never loads. Verified by opening the generated files
+  over HTTP, not by reading the string. ⚠ `.pos` / `.neg` were a **fourth**
+  green/red pair (`#4caf50` / `#ef5350`) beside the design's three.
+- ⚠ **The plan and the brief were wrong about the ownership copy, and following
+  them would have broken a guard.** Both said
+  `test_copy_states_that_stopping_the_proxy_is_ownership_conditional` finds three
+  copies of *"only in the environment that owns it"* and that compressing the
+  dialog body leaves two. Measured against HEAD it finds **two** — the module
+  docstring's copy is wrapped across a newline, so the literal has never matched
+  it — and compressing would have left one. The body therefore stays **verbatim**,
+  which is the better answer anyway: it is the only ownership statement the
+  operator sees at the moment of confirming. ⚠ And that test reads the SOURCE, so
+  the phrase must sit on one source line; the first rewrite split it and the count
+  went to 1 with the words on screen completely unchanged.
+- **Also on the way:** `page_help["/manuals"]` listed **four** manuals while
+  `MANUALS` has carried five since the Options Glossary shipped — so the one manual
+  whose whole job is explaining the words the other four assume was the one the
+  hover help did not mention. The ladder rung's remove button gained the tooltip
+  `kit.icon_button` requires; it **deletes a rung of the profit-lock ladder** and
+  said nothing at all. Eight bus reads (both EOD frames) and seven `read_meta`
+  probes (Status's freshness table, every 15 s in every open tab) left the event
+  loop. And Configuration's *"Restarting…"* notify is **deleted**: it was written
+  after `dlg.close()`, so there was no element left to spin — the dialog stays up
+  with a spinner on its own confirm and closes when the results land, which is also
+  what stops a second click firing a second restart.
+- Design: `docs/plans/2026-09-19-app-ui-consistency-design.md`; plan:
+  `docs/plans/2026-09-19-app-ui-consistency-phase6-plan.md`.
+
+**Prior —** 2026-09-20 (**One look and one behaviour — Phase 5: the Signal
 Desk, Claude Trades and Portfolio.**)
 
 - **Six screens onto the page kit** — Overview, Evidence, Rank Board and Trade Plan

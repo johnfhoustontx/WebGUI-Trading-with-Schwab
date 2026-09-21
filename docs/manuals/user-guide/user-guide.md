@@ -2233,7 +2233,12 @@ recover a day the machine was off for. Weekends and market holidays are skipped.
 
 - **Generate** snapshots the current data into standalone `summary.html` and
   `detail.html` archived by date under `webgui/data/eod/<date>/`. Pressing it after
-  the automatic run replaces that day's files with a fresh snapshot.
+  the automatic run replaces that day's files with a fresh snapshot, so **it asks
+  first** and the question names the date it is about to replace.
+- **It refuses to overwrite a real report with an empty one.** If the stack is
+  stopped when you press Generate, every cache reads back empty and the report
+  would be a complete-looking document of "No captured signals." notes. Nothing is
+  written, and an amber message says so. Start the stack and press it again.
 - **Open summary file** / **Open detail file** open those archived files in a new
   browser tab.
 - The **Archive** list reopens any past date.
@@ -2282,7 +2287,13 @@ A health board for the whole stack.
 - A **data-freshness** table showing each domain's latest cache write and its age.
   This is the more informative half: a service can be *online* and still not be
   publishing, and only this table shows that.
-- Every component has a **Restart** button, which relaunches it windowless.
+- Every component has a **Restart** button, which stops that component and starts
+  it again — back within about fifteen seconds. **It asks first**, and the question
+  says what *that* restart costs: restarting **this web app** disconnects the page
+  you are looking at and you will need to reload it, and restarting the **Schwab
+  gateway** while the market is open takes market data away from every service in
+  the stack for those seconds. Redis has no Restart button — it is a system service
+  this app does not own.
 - **Refresh** re-checks on demand; the board also re-checks on its own.
 
 > **`token_expired: true` on the gateway is routine** — it refreshes itself. Only a
@@ -2372,7 +2383,10 @@ Preferences, all saved on your machine:
   gateway) and to **Claude** (counted at each call site), for today, the last 7 days
   and the last 30.
 - **Maintenance** — **Vacuum GEX history DB** compacts the intraday options
-  database and reports the before-and-after size.
+  database and reports the before-and-after size. It asks first, and **the question
+  tells you whether the purge switch above it is on** — with it on, every saved
+  session but the last five is deleted before the compaction. The button shows a
+  spinner while it runs, and the tool's own output lands underneath it.
 
 > Clicking **Test sound** — or **Test voice** — also unlocks browser audio for the
 > session. Browsers block sound until you interact with the page, and they do it
@@ -2397,16 +2411,19 @@ group, next to EOD Report.
 
 ## Stop All Services
 
-**Route:** `/terminate` — the red button at the foot of the rail.
+**Route:** `/terminate` — the red-outlined button at the foot of the rail.
 
-A guarded "stop the whole local stack" page. The red **Stop all services** button
-(behind a confirmation) stops the gateway, the six services, the web app **and the
-public live screens** — the public site goes dark with it.
+A guarded "stop the whole local stack" page. The **Stop all services** button — a
+red outline, matching the rail — opens a confirmation; the solid red button is the
+**Stop everything** inside it, which is where the decision is actually made.
+Confirming stops the gateway, the six services, the web app **and the public live
+screens** — the public site goes dark with it.
 
 **The confirmation asks for your authenticator code.** Type the current 6-digit
-code from your authenticator app into the dialog and press **Stop everything**. A
-wrong, missing, or already-used code refuses the stop and says so — nothing is
-stopped, and you can wait for the next code and try again. A code you spend here
+code from your authenticator app into the dialog and press **Stop everything** — or
+just press **Enter** in the code box. A wrong, missing, or already-used code refuses
+the stop and says so, **leaving the dialog open** so you can wait for the next code
+and try again — nothing is stopped. A code you spend here
 cannot then be used to sign in (and vice versa), so if you have just signed in,
 wait for the next one.
 

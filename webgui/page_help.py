@@ -1332,8 +1332,12 @@ An end-of-day summary of the day's options activity and Claude Trades (the auton
 - **It saves itself at 3:15 pm CT** every trading day, a quarter of an hour after
   the close. You don't have to be here, and you don't have to press anything.
 - **Generate** saves a dated HTML snapshot you can reopen later — use it for an
-  extra snapshot, or to catch up a day the machine was off for. It replaces that
-  day's saved files.
+  extra snapshot, or to catch up a day the machine was off for. It **replaces that
+  day's saved files**, so it asks first and names the date.
+- **It will not overwrite a real report with an empty one.** If the stack is
+  stopped when you press Generate, every cache reads back empty — the report
+  would be a full-looking document of "No captured signals." notes — so nothing
+  is written and it says so. Start the stack and press it again.
 """,
     "/status": """
 **System Status — the simple version**
