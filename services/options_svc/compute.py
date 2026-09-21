@@ -8250,9 +8250,10 @@ def calc_load_symbol(symbol, lazy=False, expiries=None) -> dict:
 
     ``lazy=True`` (the Calculator, 2026-09-12) adds ``expirations`` — every
     listed expiry — and fetches strikes only for ``initial_expiries(…,
-    expiries)``; ``calc_load_expiry`` adds the rest on demand. Without a usable
-    expiration list it falls back to the eager fetch below. Rescue does not pass
-    ``lazy`` and keeps the eager fetch unchanged.
+    expiries)``; ``calc_load_expiry`` adds the rest on demand. Both the
+    Calculator and Rescue's ad-hoc form load this way. Without a usable
+    expiration list it falls back to the eager fetch below, which is the only
+    thing that still takes it.
 
     Mirrors the page's ``_load_symbol_data`` + ``load_symbol``: map the symbol to
     its Schwab API form ($SPX for SPX), pull the quote (lastPrice) and the

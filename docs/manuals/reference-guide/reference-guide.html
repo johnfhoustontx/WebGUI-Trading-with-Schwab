@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-20</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-21</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -4469,7 +4469,12 @@ risk profile.</p>
 market has moved since the candidate was priced, the app refuses rather than applying at
 a price that no longer exists.</p>
 <p><strong>Ad-hoc Trade</strong> lets you evaluate a position you enter manually rather than one from
-the books.</p>
+the books. Loading a symbol there lists <strong>every expiration the symbol has</strong>, not just the
+next couple of months (from 2026-09-20) — a repair is usually a roll <em>out in time</em>, so the
+expiry you want is often past the old window. The strikes for the nearest two expirations
+arrive with the load and the rest are fetched when you pick one, which takes a second;
+the line under the form says how many are here so far. That is also why it is a list and
+not a single fetch: one request for a whole SPY or $SPX chain times out.</p>
 <p><strong>A cash-secured put or covered call gets a different menu</strong> (from 2026-09-11): buy to
 close, roll away and out for a credit — down for a put, up for a call — buy a
 further-OTM option to define the risk on a put, and <strong>let it assign</strong> / <strong>let the shares

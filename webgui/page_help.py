@@ -760,6 +760,11 @@ spreads, and the Income board's cash-secured puts and covered calls.
   away and out for a credit, define the risk, or **let it assign / let the shares
   go** — doing nothing and taking the stock, which for the wheel is the plan
   rather than a failure. Every row there is advisory; none has an Apply button.
+- **Ad-hoc Trade offers every expiration the symbol has**, not just the next
+  couple of months — a repair is usually a roll *out in time*. Strikes for the
+  nearest two come with the symbol; pick any other expiry and its strikes are
+  fetched then, which takes a second. The line under the form says how many are
+  loaded so far.
 - **Apply** adjusts your paper position. No real money, and no live order is
   placed. The board refreshes itself as positions are re-priced.
 - **Not every option has an Apply button.** One marked *Manual* is a trade you
