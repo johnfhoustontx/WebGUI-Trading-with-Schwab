@@ -134,7 +134,9 @@ def test_the_store_expires_after_its_ttl():
     assert "SPY" not in store.snapshots
 
 
-def test_the_store_survives_concurrent_put_and_get():
+def test_concurrent_put_and_get_smoke_test():
+    """A SMOKE test only: under the GIL each dict operation is atomic, so this
+    cannot detect a missing lock. It catches a crash or a broken bound."""
     store = _public(limit=4, ttl=None)
     errors, peak = [], [0]
 
@@ -158,3 +160,118 @@ def test_the_store_survives_concurrent_put_and_get():
     assert errors == []
     assert len(store.snapshots) <= 4
     assert peak[0] <= 4
+
+
+# ── review fixes ─────────────────────────────────────────────────────────────
+
+def _patch_fetch(monkeypatch, during=None):
+    """A fake options_simulator.data whose fetch_snapshot returns ONE expiry's
+    contracts and runs ``during()`` mid-call (to simulate another visitor)."""
+    def fetch_snapshot(client, symbol, expiry=None, with_history=True, on_chain=None, **kw):
+        if during is not None:
+            during()
+        if on_chain is not None:
+            on_chain(None)
+        return _snap(symbol, (str(expiry),))
+
+    fake = types.ModuleType("options_simulator.data")
+    fake.fetch_snapshot = fetch_snapshot
+    pkg = types.ModuleType("options_simulator")
+    pkg.data = fake
+    monkeypatch.setitem(sys.modules, "options_simulator", pkg)
+    monkeypatch.setitem(sys.modules, "options_simulator.data", fake)
+
+
+def test_an_extend_whose_snapshot_was_evicted_mid_fetch_returns_none(monkeypatch):
+    store = _public(limit=1)
+    old = _snap("SPY", ("2026-09-25",))
+    store.put("SPY", old)
+    store.set_expirations("SPY", ["2026-09-25", "2026-10-02"])
+    _patch_fetch(monkeypatch, during=lambda: store.put("QQQ", _snap("QQQ")))
+
+    assert compute.sim_fetch_expiry("SPY", "2026-10-02", store=store) is None
+    assert "SPY" not in store.snapshots            # nothing resurrected
+    assert store.expirations_of("SPY") is None
+    assert len(old.contracts) == 2                 # the orphan was not extended
+
+
+def test_an_extend_whose_snapshot_was_replaced_mid_fetch_returns_none(monkeypatch):
+    store = _public()
+    old, newer = _snap("SPY", ("2026-09-25",)), _snap("SPY", ("2026-09-25",))
+    store.put("SPY", old)
+    store.set_expirations("SPY", ["2026-09-25", "2026-10-02"])
+    _patch_fetch(monkeypatch, during=lambda: store.put("SPY", newer))
+
+    assert compute.sim_fetch_expiry("SPY", "2026-10-02", store=store) is None
+    assert store.get("SPY") is newer
+    assert len(newer.contracts) == 2
+
+
+def test_a_successful_extend_stores_a_new_object_and_leaves_the_old_alone(monkeypatch):
+    store = _public()
+    old = _snap("SPY", ("2026-09-25",))
+    old_list = old.contracts
+    store.put("SPY", old)
+    store.set_expirations("SPY", ["2026-09-25", "2026-10-02"])
+    _patch_fetch(monkeypatch)
+
+    meta = compute.sim_fetch_expiry("SPY", "2026-10-02", store=store)
+    new = store.get("SPY")
+    assert meta["added"] == "2026-10-02"
+    assert meta["expiries"] == ["2026-09-25", "2026-10-02"]
+    assert new is not old
+    assert len(new.contracts) == 4
+    assert old.contracts is old_list and len(old_list) == 2
+
+
+def test_an_extend_keeps_the_owners_eviction_order(monkeypatch):
+    compute.reset_sim_snapshots()
+    try:
+        for sym in ("A", "B", "C"):
+            compute._stash_sim_snapshot(sym, _snap(sym, ("2026-09-25",)))
+        compute._SIM_EXPIRATIONS["A"] = ["2026-09-25", "2026-10-02"]
+        _patch_fetch(monkeypatch)
+        assert compute.sim_fetch_expiry("A", "2026-10-02") is not None
+        assert list(compute._SIM_SNAPSHOTS) == ["A", "B", "C"]   # A still oldest
+    finally:
+        compute.reset_sim_snapshots()
+
+
+def test_the_private_limit_is_read_when_a_snapshot_is_stored(monkeypatch):
+    compute.reset_sim_snapshots()
+    monkeypatch.setattr(compute, "SIM_SNAPSHOT_LIMIT", 2)
+    try:
+        for sym in ("A", "B", "C"):
+            compute._stash_sim_snapshot(sym, _snap(sym))
+        assert list(compute._SIM_SNAPSHOTS) == ["B", "C"]
+    finally:
+        compute.reset_sim_snapshots()
+
+
+def test_the_eager_fallback_drops_a_stale_expiration_list(monkeypatch):
+    store = _public()
+    results = iter([(_snap("SPY"), ["2026-10-16"], {}), (_snap("SPY"), None, {})])
+    monkeypatch.setattr(compute, "_fetch_sim_snapshot",
+                        lambda symbol, lazy, expiries: next(results))
+    compute.sim_fetch("SPY", lazy=True, store=store)
+    assert store.expirations_of("SPY") == ["2026-10-16"]
+    meta = compute.sim_fetch("SPY", lazy=True, store=store)
+    assert store.expirations_of("SPY") is None
+    assert "expirations" not in meta
+
+
+def test_reset_clears_the_private_load_times_but_keeps_the_dict_objects():
+    snaps, exps = compute._SIM_SNAPSHOTS, compute._SIM_EXPIRATIONS
+    compute._stash_sim_snapshot("A", _snap("A"))
+    compute.reset_sim_snapshots()
+    assert compute.PRIVATE_SIM._loaded == {}
+    assert compute._SIM_SNAPSHOTS is snaps and compute._SIM_EXPIRATIONS is exps
+    assert compute.PRIVATE_SIM.snapshots is snaps
+
+
+def test_the_clock_is_a_constructor_argument():
+    clock = _Clock()
+    store = compute.SimStore(limit=4, ttl_sec=10.0, clock=clock)
+    store.put("SPY", _snap("SPY"))
+    clock.t += 11
+    assert store.get("SPY") is None

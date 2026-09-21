@@ -8496,9 +8496,10 @@ _SIM_SNAPSHOTS: dict = {}
 
 
 def reset_sim_snapshots() -> None:
-    """Drop every cached simulator snapshot (test helper / manual reset)."""
-    _SIM_SNAPSHOTS.clear()
-
+    """Drop every cached simulator snapshot, its expiration list and its load
+    time (test helper / manual reset). Clears the dicts IN PLACE, so
+    ``PRIVATE_SIM`` keeps wrapping the same ``_SIM_SNAPSHOTS`` object."""
+    PRIVATE_SIM.clear()
 
 
 # Equity/index option contract multiplier (shares per contract). The simulator
@@ -8595,18 +8596,20 @@ class SimStore:
 
     ⚠ Thread-safe by one lock around every dict touch: the public store is read
     by one consumer thread and written by another. The lock guards the
-    DICTIONARIES only. A snapshot handed out by ``get`` is shared, and
-    ``sim_fetch_expiry`` extends its ``contracts`` list in place.
+    DICTIONARIES only, so a snapshot handed out by ``get`` must be treated as
+    read-only: ``sim_fetch_expiry`` never extends one in place, it builds a copy
+    and swaps it in with ``replace_if``.
     """
 
     def __init__(self, snapshots=None, expirations=None,
                  limit: "int | Callable[[], int]" = 4,
-                 ttl_sec: "float | None" = None):
+                 ttl_sec: "float | None" = None,
+                 clock: "Callable[[], float] | None" = None):
         self.snapshots: dict = {} if snapshots is None else snapshots
         self.expirations: dict = {} if expirations is None else expirations
         self.limit = limit
         self.ttl_sec = ttl_sec
-        self._mono: "Callable[[], float]" = time.monotonic
+        self._mono: "Callable[[], float]" = time.monotonic if clock is None else clock
         self._loaded: dict = {}
         self._lock = threading.Lock()
 
@@ -8643,6 +8646,20 @@ class SimStore:
             limit = self._limit()
             while len(self.snapshots) > limit:
                 self._drop(next(iter(self.snapshots)))
+
+    def replace_if(self, symbol, old, new) -> bool:
+        """Swap ``new`` in for ``symbol`` only if the store still holds ``old``.
+
+        A compare-and-swap for a change built OUTSIDE the lock (``sim_fetch_expiry``
+        spends seconds on the network between ``get`` and here): if another put
+        evicted or replaced the symbol meanwhile, or it expired, nothing is
+        written and the caller learns it lost the race. Same key, so its
+        insertion order (eviction age) and load time are unchanged."""
+        with self._lock:
+            if self.snapshots.get(symbol) is not old:
+                return False
+            self.snapshots[symbol] = new
+            return True
 
     def expirations_of(self, symbol):
         with self._lock:
@@ -8685,7 +8702,14 @@ def sim_fetch_expiry(symbol, expiry, store=None):
     cached ``sim_chain`` — marked ``added``. None when there is no snapshot for
     the symbol or the expiry is not listed. No price-history call: the snapshot
     already holds it. ``store`` (default ``PRIVATE_SIM``) is where the snapshot
-    and its expiration list are read — and the snapshot extended."""
+    and its expiration list are read.
+
+    ⚠ Copy-on-write, never extended in place: the fetch takes seconds, and in
+    that time another put can evict or replace the symbol (or its ttl can pass).
+    Extending the object we read would land the contracts on an orphan while
+    still reporting ``added``. So a shallow copy with a NEW contracts list is
+    swapped in with ``replace_if``; if the store no longer holds what we read,
+    nothing is written and this returns None (the page re-fetches)."""
     from options_simulator import data as sdata
 
     store = PRIVATE_SIM if store is None else store
@@ -8700,8 +8724,12 @@ def sim_fetch_expiry(symbol, expiry, store=None):
                                  expiry=_dt.date.fromisoformat(expiry),
                                  with_history=False,
                                  on_chain=lambda c: raw.update(chain=c))
-    snap.contracts.extend(c for c in extra.contracts if str(c.expiry) == expiry)
-    return dict(_sim_meta(snap), expirations=exps,
+    new = copy.copy(snap)
+    new.contracts = list(snap.contracts) + [
+        c for c in extra.contracts if str(c.expiry) == expiry]
+    if not store.replace_if(symbol, snap, new):
+        return None
+    return dict(_sim_meta(new), expirations=exps,
                 chain=thin_calc_chain(raw.get("chain")), added=expiry)
 
 
