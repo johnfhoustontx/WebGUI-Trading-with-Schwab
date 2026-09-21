@@ -72,6 +72,19 @@ def test_a_visitor_gets_ten_scans_an_hour():
     assert ps.scans_per_hour() == 10
 
 
+def test_a_public_result_keeps_five_of_each_type():
+    assert ps.rows_per_type() == 5
+
+
+def test_the_warm_list_is_cleaned_and_deduplicated(monkeypatch):
+    assert ps.warm_symbols() == ["SPY", "QQQ"]
+    monkeypatch.setattr(ps, "load", lambda: {"warm": {"symbols": [
+        "spy", "SPY", "bad; key", "$spx", 7]}})
+    assert ps.warm_symbols() == ["SPY", "$SPX"]
+    monkeypatch.setattr(ps, "load", lambda: {"warm": {"symbols": "SPY"}})
+    assert ps.warm_symbols() == ["SPY", "QQQ"]
+
+
 def test_leg_quotes_ship_off_until_d2_is_settled():
     assert ps.show_leg_quotes() is False
 

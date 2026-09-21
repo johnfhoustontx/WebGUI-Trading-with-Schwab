@@ -51,3 +51,13 @@ scans_per_hour = 10
 # Per-leg bid/ask/mark on the public page. Off until Schwab's market-data
 # redistribution terms are settled (roadmap decision D2).
 show_leg_quotes = false
+# The best N ideas of each strategy type a public result keeps (the private
+# Finder keeps 25). The rest are counted as "not shown".
+rows_per_type = 5
+
+[warm]
+# Scanned each morning at [slots.finder_public] warm (config/sessions.toml),
+# through the same worker, window and budget as a visitor's request, so the
+# page's default symbol (SPY) has a fresh result. Each is one scan of the
+# daily budget; an empty list turns the warm-up off.
+symbols = ["SPY", "QQQ"]

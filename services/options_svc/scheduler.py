@@ -18,7 +18,7 @@ import logging
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, handlers
+from services.options_svc import compute, finder_public, handlers
 from shared import market_calendar as mc
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
@@ -358,6 +358,31 @@ _INCOME_SLOTS = {k: (t.hour, t.minute)
 _INCOME_GRACE_MIN = mc.slot_grace_min("income")
 
 
+# The public Strategy Finder's morning warm-up ([slots.finder_public]): queues
+# the [warm] symbols from config/finder_public.toml onto cmd:finder_public, so
+# the page's default symbol has a fresh result. Queued, not scanned here: the
+# worker applies the same window, budget and cache rules as to a visitor.
+_FINDER_WARM_SLOTS = {k: (t.hour, t.minute)
+                      for k, t in mc.slot_times("finder_public").items()}
+_FINDER_WARM_GRACE_MIN = mc.slot_grace_min("finder_public")
+
+
+def finder_warm_due(now, ran_slots):
+    """Name of the public-Finder warm-up slot due now, or None. Once per trading
+    day inside the grace window; mirrors ``income_slot_due``."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _FINDER_WARM_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_FINDER_WARM_GRACE_MIN):
+            return name
+    return None
+
+
 def income_slot_due(now, ran_slots):
     """Name of the income-scan slot due now, or None.
 
@@ -563,6 +588,7 @@ async def loop(bus):
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
     action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
     income_ran = set()  # (date, slot) of fired income-window scans (see income_slot_due)
+    finder_warm_ran = set()  # (date, slot) of fired public-Finder warm-ups
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
     trade_idea_ran = set()  # (date, slot) of fired hourly trade-idea posts (see trade_idea_due)
@@ -898,6 +924,27 @@ async def loop(bus):
 
         if inc_slot:
             branches.append(("income", _income_branch()))
+
+        # Public Strategy Finder warm-up - queues a few requests on
+        # cmd:finder_public and returns; the scans themselves run on that
+        # stream's own consumer loop. Latched before it runs, like income.
+        try:
+            warm_slot = finder_warm_due(now, finder_warm_ran)
+            if warm_slot:
+                finder_warm_ran.add((now.date().isoformat(), warm_slot))
+        except Exception:
+            log.exception("finder_warm_due gate degraded")
+            warm_slot = None
+
+        async def _finder_warm_branch():
+            try:
+                n = await loop_.run_in_executor(None, finder_public.warm, bus)
+                log.info("public Strategy Finder warm-up queued %d symbol(s)", n)
+            except Exception:
+                log.exception("finder warm-up branch degraded")
+
+        if warm_slot:
+            branches.append(("finder_warm", _finder_warm_branch()))
 
         # Nightly realized-outcome calibration -> cache:options:calibration, the
         # EV the Trade detail panel shows. The session is latched BEFORE the

@@ -48,6 +48,13 @@ def test_the_scanned_stamp_is_central_time():
     assert fl.scanned_at_text({}) is None
 
 
+def test_the_load_line_is_silent_while_scans_run_and_says_when_they_resume():
+    win = {"start": "08:40", "end": "15:00"}
+    assert fl.load_line(True, win) == ""
+    line = fl.load_line(False, win)
+    assert "08:40" in line and "15:00" in line and "paused" in line
+
+
 def test_the_answer_line_words_every_outcome():
     for code in ps.OUTCOMES:
         assert fl.answer_line(code, _status()).strip()

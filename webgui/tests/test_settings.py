@@ -413,3 +413,20 @@ def test_vacuum_command_adds_the_purge_flag_only_when_asked():
     assert plain[-1].endswith("vacuum_gex.py") and "--purge" not in plain
     assert armed[-1] == "--purge" and armed[:-1] == plain
     assert cwd
+
+
+# ── the public Strategy Finder's usage row ──────────────────────────────────
+
+def test_public_scan_rows_read_the_budget_and_nothing_else():
+    from pages import settings
+    rows = settings.public_scan_rows({"scans_today": 12, "daily_budget": 200,
+                                      "invalid_today": 3,
+                                      "last": {"NVDA": {"outcome": "scanned"}}})
+    assert rows == [("Scans today", "12 of 200"), ("Refused as not a symbol", "3")]
+    assert "NVDA" not in repr(rows)            # never which symbols were asked
+
+
+def test_public_scan_rows_with_nothing_read_show_dashes_not_zero():
+    from pages import settings
+    assert settings.public_scan_rows(None) == [("Scans today", "—"),
+                                               ("Refused as not a symbol", "—")]

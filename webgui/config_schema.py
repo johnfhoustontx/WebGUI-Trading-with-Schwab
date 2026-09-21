@@ -502,6 +502,12 @@ _SESSIONS = ConfigFile(
                   kind="int", unit="min", min=1, max=120, step=1),
             Field("slots.action_alert.*", "", "", kind="time"),
         ), restart=(OPTIONS,)),
+        Section("Public Strategy Finder warm-up",
+                "Queues the warm-up symbols through the public scan worker.", (
+            Field("slots.finder_public.grace_min", "Fire if late by at most", "",
+                  kind="int", unit="min", min=1, max=120, step=1),
+            Field("slots.finder_public.*", "", "", kind="time"),
+        ), restart=(OPTIONS,)),
         Section("Income scan", "The once-a-day 30–45 day scan.", (
             Field("slots.income.grace_min", "Fire if late by at most", "",
                   kind="int", unit="min", min=1, max=120, step=1),
@@ -630,7 +636,15 @@ _FINDER_PUBLIC = ConfigFile(
             Field("display.show_leg_quotes", "Show per-leg bid and ask",
                   "Off until Schwab's terms on republishing quotes are settled.",
                   kind="bool"),
+            Field("display.rows_per_type", "Ideas kept per strategy type",
+                  "The rest are counted as not shown.", kind="int", min=1,
+                  max=25, step=1),
         )),
+        Section("Morning warm-up", "Scanned once each morning so the page's "
+                "default symbol has a fresh result. Each uses one scan of the "
+                "daily limit.", (
+            Field("warm.symbols", "Symbols", "", kind="symbols"),
+        ), restart=(OPTIONS,)),
     ),
 )
 

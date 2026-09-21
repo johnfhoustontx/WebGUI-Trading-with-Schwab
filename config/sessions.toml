@@ -133,6 +133,14 @@ morning = "10:00"
 midday  = "13:00"
 close   = "15:00"     # pre-close sweep
 
+[slots.finder_public]
+# The public Strategy Finder's morning warm-up: queues [warm] symbols from
+# config/finder_public.toml through the same worker a visitor's request uses.
+# 09:08, not earlier: on 2026-09-18 the GEX poll skipped at 08:31, 08:53 (the
+# income scan's minute), 09:31 and 09:45, and 09:04-09:12 was clean.
+grace_min = 20
+warm = "09:08"
+
 [slots.income]
 # The 30-45 DTE income scan (two-sided credit spreads + cash-secured puts).
 # ONE pass a day by design: a 35-DTE candidate does not meaningfully re-rank

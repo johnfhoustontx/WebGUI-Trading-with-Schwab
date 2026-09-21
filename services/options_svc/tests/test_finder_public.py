@@ -243,7 +243,11 @@ def test_the_worker_writes_only_its_own_keys():
     targets = {ast.unparse(n.args[0]) for n in ast.walk(tree)
                if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "cache_set"}
     assert targets == {"public_scan.STATUS_KEY", "public_scan.result_key(symbol)"}
-    assert "enqueue_command" not in pathlib.Path(fp.__file__).read_text(encoding="utf-8")
+    # Its one enqueue is the morning warm-up, onto its OWN stream only.
+    enqueues = [ast.unparse(n.args[0]) for n in ast.walk(tree)
+                if isinstance(n, ast.Call)
+                and getattr(n.func, "attr", None) == "enqueue_command"]
+    assert enqueues == ["public_scan.STREAM"]
 
 
 # ── review follow-ups (2026-09-21) ──────────────────────────────────────────
@@ -358,3 +362,48 @@ def test_public_failures_are_counted_apart_from_the_owners(bus, monkeypatch):
     monkeypatch.setattr(fp, "_now", lambda: OPEN)
     fp.handle(bus, _cmd("SPY"))
     assert seen["area"] == "options.finder_public"
+
+
+# ── Phase 3: the row cap and the warm-up ────────────────────────────────────
+
+def _sig(typ, score):
+    return {"type": typ, "composite_score": score, "id": f"{typ}-{score}"}
+
+
+def test_a_public_result_keeps_the_best_n_of_each_type(bus, scans, monkeypatch):
+    scans.answer = {"signals": [_sig("PCS", s) for s in (50, 90, 70, 60)]
+                    + [_sig("IC", 55)], "spot": 500.0, "not_shown": 3}
+    monkeypatch.setattr(ps, "rows_per_type", lambda: 2)
+    fp.handle(bus, _cmd("SPY"))
+    p = bus.cache_get(ps.result_key("SPY")).payload
+    assert sorted((s["type"], s["composite_score"]) for s in p["signals"]) == [
+        ("IC", 55), ("PCS", 70), ("PCS", 90)]
+    assert p["not_shown"] == 3 + 2          # the service's own count, plus ours
+
+
+def test_the_trim_is_the_services_own_per_type_ranking():
+    from services.options_svc import compute
+    sigs = [_sig("PCS", s) for s in (50, 90, None, 70)]
+    kept, dropped = compute._keep_best_per_type(sigs, 2)
+    trimmed = fp.trim_for_public({"signals": sigs}, 2)
+    assert trimmed["signals"] == kept and trimmed["not_shown"] == dropped
+
+
+def test_the_warm_up_queues_its_symbols_on_the_public_stream_only(bus, monkeypatch):
+    monkeypatch.setattr(ps, "warm_symbols", lambda: ["SPY", "QQQ"])
+    assert fp.warm(bus) == 2
+    cmds = bus.consume_commands(ps.STREAM, "g", "c", block_ms=None)
+    assert [c.args["symbol"] for _i, c in cmds] == ["SPY", "QQQ"]
+    assert bus._r.xlen("cmd:options") == 0
+
+
+def test_a_warm_request_meets_the_same_rules_as_a_visitor(bus, scans, monkeypatch):
+    """Queued, not scanned directly: outside the window it is refused like any
+    other request, and spends nothing."""
+    monkeypatch.setattr(ps, "warm_symbols", lambda: ["SPY"])
+    fp.warm(bus)
+    evening = dt.datetime(2026, 9, 21, 18, 0, tzinfo=CT)
+    monkeypatch.setattr(fp, "_now", lambda: evening)
+    for _i, cmd in bus.consume_commands(ps.STREAM, "g", "c", block_ms=None):
+        fp.handle(bus, cmd.model_copy(update={"ts": evening.isoformat()}))
+    assert scans.calls == [] and _last(bus, "SPY") == "closed"

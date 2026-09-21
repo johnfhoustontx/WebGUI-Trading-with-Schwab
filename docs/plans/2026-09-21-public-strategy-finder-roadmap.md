@@ -265,6 +265,14 @@ write stays at zero.
   section; a `page_help.py` entry; docs in `webgui-routes.md`, CLAUDE.md's
   public-screen section and the CHANGELOG.
 
+#### Phase 3 progress (2026-09-21)
+
+Built and tested: the row cap (`rows_per_type`, trimmed at write), the 09:08
+warm-up through the worker, the Settings usage row, and the closed-hours line.
+The User Guide section landed with Phase 2. Still open: a `page_help.py` entry
+(the public origin draws no help control today), and the Trade detail panel
+without its ledger line.
+
 ### Phase 4 (optional): an edge rate limit
 
 Caddy has no rate limit today; that needs an `xcaddy` build with the

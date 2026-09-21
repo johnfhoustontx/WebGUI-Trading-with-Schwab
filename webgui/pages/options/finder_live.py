@@ -107,6 +107,15 @@ def scanned_at_text(payload):
     return None if when is None else f"Scanned {when.astimezone(CT):%H:%M} CT"
 
 
+def load_line(open_now, window) -> str:
+    """What the status line says before the visitor asks for anything: nothing
+    while scans run, and when they resume while they do not."""
+    if open_now:
+        return ""
+    return (f"Scans are paused. They run {window['start']}–{window['end']} CT on "
+            "trading days; until then you can look at the last scan, if there is one.")
+
+
 def answer_line(outcome, status) -> str:
     """The line under the symbol box once the request is answered. When is in
     the summary strip ("Scanned 10:42 CT"), beside the result it dates."""
@@ -172,7 +181,7 @@ def render():
                                          on_load=lambda: _request())
             scan_btn = kit.button("Scan", kind="primary", icon="search",
                                   on_click=lambda: _request())
-        status_line = kit.status_line()
+        status_line = kit.status_line(load_line(_open_now(), _window()))
         summary_box = ui.row().classes(f"{CARD} w-full items-center gap-3 flex-wrap")
         summary_box.set_visibility(False)
         chips_row = ui.row().classes("w-full items-center gap-2 flex-wrap")
@@ -345,6 +354,14 @@ def _window():
         return {"start": start.strftime("%H:%M"), "end": end.strftime("%H:%M")}
     except Exception:  # noqa: BLE001 - the words, not the gate; the service decides
         return {"start": "08:40", "end": "15:00"}
+
+
+def _open_now() -> bool:
+    try:
+        from shared import market_calendar
+        return market_calendar.in_window("finder_public", dt.datetime.now(CT))
+    except Exception:  # noqa: BLE001 - the words, not the gate; the service decides
+        return True
 
 
 def _wait_sec():

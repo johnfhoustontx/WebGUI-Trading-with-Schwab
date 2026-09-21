@@ -160,8 +160,11 @@ a credit of at least 10% of a spread's width). They cannot change the filters,
 open a paper trade or use the Calculator. Scans run from 08:40 to 15:00 CT on
 trading days; a repeat request within 15 minutes shows the earlier result
 instead of scanning again. There is a limit of 200 public scans a day for all
-visitors together and 10 an hour for each visitor. Every limit is in
-**Settings → Configuration → Public Strategy Finder**. `https://neuralstrike.co/live.html` is a thumbnail menu of
+visitors together and 10 an hour for each visitor. A result shows the best 5
+ideas of each strategy type. SPY and QQQ are scanned automatically at 09:08 CT
+so the page opens on a fresh result. Every limit is in
+**Settings → Configuration → Public Strategy Finder**, and **Settings →
+General → API usage** shows how many public scans have been used today. `https://neuralstrike.co/live.html` is a thumbnail menu of
 them.
 
 Three things to know:

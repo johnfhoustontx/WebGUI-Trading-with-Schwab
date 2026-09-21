@@ -4,7 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**Public Strategy Finder, Phase 2: the page at
+**Last updated:** 2026-09-21 (**Public Strategy Finder, Phase 3: a shorter
+result, a morning warm-up, and your own view of public usage.**)
+
+- **Row cap.** A public result keeps the best 5 ideas of each strategy type
+  (`[display] rows_per_type`), trimmed when the worker WRITES it, so every
+  visitor downloads less. It reuses `compute._keep_best_per_type`, so the
+  public list is the top of the private one; the trimmed rows join
+  `not_shown`.
+- **Morning warm-up.** `[slots.finder_public] warm = "09:08"` queues
+  `[warm] symbols` (SPY, QQQ) on `cmd:finder_public`, through the same
+  worker, window, budget and cache as a visitor's request, so the page's
+  default symbol has a fresh result. 09:08 because 09:04–09:12 was clean on
+  2026-09-18 while 08:53 already costs a GEX minute to the income scan.
+- **Settings → General → API usage** gains a Public Strategy Finder row:
+  scans today against the daily limit, and requests refused as not a symbol.
+  It never lists which symbols the public searched.
+- **Closed hours.** Before a visitor asks, the page says when scans resume
+  instead of saying nothing.
+
+---
+
+**Prior — 2026-09-21** (**Public Strategy Finder, Phase 2: the page at
 `/finder`. Twenty-one public screens.**)
 
 - **`pages/options/finder_live.py`**: symbol box, one Scan button, and the

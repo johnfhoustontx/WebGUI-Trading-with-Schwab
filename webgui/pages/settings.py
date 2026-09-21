@@ -90,6 +90,24 @@ def api_stats_rows(stats):
             ("Last 30 days", _fmt("last_30_days"))]
 
 
+def public_scan_rows(status):
+    """(label, value-text) rows for the public Strategy Finder's usage - pure.
+
+    ``status`` is ``cache:options:finder_public_status`` or None (nothing asked
+    yet today, or the service is down). Deliberately NOT the per-symbol map it
+    also carries: which symbols the public searched is not needed here."""
+    st = status if isinstance(status, dict) else {}
+
+    def _int(k):
+        v = st.get(k)
+        return v if isinstance(v, int) and not isinstance(v, bool) else None
+
+    used, budget, invalid = _int("scans_today"), _int("daily_budget"), _int("invalid_today")
+    return [("Scans today", "—" if used is None else
+             (f"{used:,} of {budget:,}" if budget is not None else f"{used:,}")),
+            ("Refused as not a symbol", "—" if invalid is None else f"{invalid:,}")]
+
+
 # ── Maintenance: VACUUM the intraday GEX history database ───────────────────
 # The dialog's sentences are module constants so a test can pin what the
 # question says without copying prose, and so the two halves cannot drift.
@@ -364,6 +382,19 @@ def _render_general():
                             f"text-[20px] font-semibold {theme.LABEL}")
             claude_since = ui.label("").classes(f"text-xs {theme.MUTED}")
 
+            # The public site's Strategy Finder: each scan is ~6-12 Schwab calls,
+            # already inside the Schwab counts above; this says how many of
+            # them the public asked for, against the day's limit.
+            ui.label("Public Strategy Finder").classes(
+                f"text-xs font-semibold {theme.LABEL} mt-2")
+            public_lbls = {}
+            with ui.row().classes("gap-6"):
+                for label, val in public_scan_rows(None):
+                    with ui.column().classes("gap-0"):
+                        ui.label(label).classes(theme.EYEBROW)
+                        public_lbls[label] = ui.label(val).classes(
+                            f"text-[20px] font-semibold {theme.LABEL}")
+
             def _read_claude_stats():
                 try:
                     from shared import anthropic_counter
@@ -383,6 +414,10 @@ def _render_general():
                 cstats = await run.io_bound(_read_claude_stats)
                 for label, val in api_stats_rows(cstats):
                     claude_lbls[label].text = val
+                from shared import public_scan as _ps
+                pstatus = await run.io_bound(bus_client.read, _ps.STATUS_VIEW)
+                for label, val in public_scan_rows(pstatus):
+                    public_lbls[label].text = val
                 claude_since.text = (f"Counting since {cstats['since']}."
                                      if cstats and cstats.get("since")
                                      else "No counts yet — restart the services "

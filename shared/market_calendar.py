@@ -273,6 +273,7 @@ _DEFAULTS = {
         # ``analyze``/``action_alert`` -- and because a second daily pass, if it
         # is ever wanted, is then one line rather than a reshaped table.
         "income": {"grace_min": 20, "morning": "08:52"},
+        "finder_public": {"grace_min": 20, "warm": "09:08"},
         # The delta-notional flow-alert instrumentation -- the ONLY measurement
         # of the [big_delta]/UOA thresholds, and a day it misses cannot be
         # recovered (the closing chain is gone, the alert channel resets

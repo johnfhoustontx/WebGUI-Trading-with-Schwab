@@ -152,6 +152,34 @@ def _outcome_of(payload) -> str:
     return "scanned"
 
 
+def trim_for_public(payload, rows_per_type):
+    """The payload with only the best ``rows_per_type`` ideas of each strategy
+    type, the rest added to ``not_shown`` (the page's "N lower-scoring ideas
+    not shown"). The same ranking as the service's own per-type limit
+    (``compute._keep_best_per_type``), so the public list is the top of the
+    private one, never a different cut."""
+    from services.options_svc import compute
+    signals = [s for s in (payload.get("signals") or []) if s]
+    kept, dropped = compute._keep_best_per_type(signals, rows_per_type)
+    return {**payload, "signals": kept,
+            "not_shown": (payload.get("not_shown") or 0) + dropped}
+
+
+def warm(bus) -> int:
+    """Queue the morning warm-up symbols on the public stream; return how many.
+
+    Through the stream, not a direct scan, so each one meets the same window,
+    budget, cache and dedup rules as a visitor's request - a warm-up can never
+    spend what a visitor could not."""
+    n = 0
+    for symbol in public_scan.warm_symbols():
+        command = public_scan.request_command(symbol)
+        if command is not None:
+            bus.enqueue_command(public_scan.STREAM, command)
+            n += 1
+    return n
+
+
 def handle(bus, command) -> None:
     """Answer one ``cmd:finder_public`` request. Never raises."""
     now = _now()
@@ -216,6 +244,7 @@ def _scan_and_publish(bus, symbol, now, lim) -> str:
                                           degrade_area="options.finder_public")
         outcome = _outcome_of(payload)
         if outcome == "scanned":
+            payload = trim_for_public(payload, public_scan.rows_per_type())
             payload = {**payload, "public": True, "scanned_at": now.isoformat()}
             version = bus.cache_set(public_scan.result_key(symbol), payload,
                                     ttl=lim["result_keep_hours"] * 3600)

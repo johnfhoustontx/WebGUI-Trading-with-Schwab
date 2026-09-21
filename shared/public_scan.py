@@ -122,6 +122,16 @@ DEFAULTS = {
         # Per-leg bid/ask/mark on the public page. OFF until the owner settles
         # Schwab's market-data terms (roadmap decision D2).
         "show_leg_quotes": False,
+        # The best N ideas of each strategy type a public result keeps. Trimmed
+        # when the result is WRITTEN, so every visitor downloads less; the rest
+        # are counted as "not shown". The private Finder keeps 25.
+        "rows_per_type": 5,
+    },
+    "warm": {
+        # Scanned once each morning at [slots.finder_public] warm, through the
+        # same worker and refusals as a visitor's request, so the page's default
+        # symbol has a fresh result. Each costs one scan of the daily budget.
+        "symbols": ["SPY", "QQQ"],
     },
 }
 
@@ -154,6 +164,25 @@ def limits() -> dict:
 
 def scans_per_hour() -> int:
     return _num("visitor", "scans_per_hour", minimum=1)
+
+
+def rows_per_type() -> int:
+    return _num("display", "rows_per_type", minimum=1)
+
+
+def warm_symbols() -> list:
+    """The morning warm-up list, every entry through the ticker allow-list.
+    A bad entry is dropped, never sent; a missing or malformed list is the
+    default."""
+    raw = (load().get("warm") or {}).get("symbols", DEFAULTS["warm"]["symbols"])
+    if not isinstance(raw, list):
+        raw = DEFAULTS["warm"]["symbols"]
+    out = []
+    for item in raw:
+        sym = clean_symbol(item)
+        if sym and sym not in out:
+            out.append(sym)
+    return out
 
 
 def show_leg_quotes() -> bool:
