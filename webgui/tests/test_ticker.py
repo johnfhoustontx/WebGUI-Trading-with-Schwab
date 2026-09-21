@@ -1,91 +1,58 @@
+import inspect
+
 from pages import ticker
 
 
-def _dash():
-    return {"categories": [
-        {"category": "Volatility", "tiles": [
-            {"display": "VIX", "last": 16.9, "change_pct": 4.8, "color_state": "risk_off_strong"},
-            {"display": "SKEW", "last": 150.0, "change_pct": 2.8, "color_state": "risk_off_strong"}]},
-        {"category": "Cash Index", "tiles": [
-            {"display": "SPX", "last": 7482.0, "change_pct": -0.3, "color_state": "risk_off_mild"},
-            {"display": "NDX", "last": 29252.0, "change_pct": 0.3, "color_state": "risk_on_mild"}]},
-        {"category": "Sector SPDR", "tiles": [
-            {"display": "XLK", "last": 181.0, "change_pct": 1.4, "color_state": "risk_on_strong"},
-            {"display": "XLB", "last": 50.0, "change_pct": -2.6, "color_state": "risk_off_strong"}]},
-        {"category": "Top 10", "tiles": [
-            {"display": "BIG10", "basket": True, "avg_pct": 0.25, "breadth_text": "8/10 up",
-             "change_pct": 0.25, "color_state": "risk_on_mild"},
-            {"display": "NVDA", "last": 201.0, "change_pct": -0.85, "color_state": "risk_off_mild"}]},
-    ]}
+def _summary():
+    return {"headline": "Bulls hold 7,480 into the close",
+            "highlights": ["Breadth narrows as megacaps carry the tape",
+                           "  VIX   drifts   higher  ",
+                           "Dealers long gamma above 7,450"],
+            "slot": "close", "slot_label": "Market close",
+            "report_date": "2026-09-18", "as_of": "16:20 CT",
+            "report_url": "https://neuralstrike.co/report.html"}
 
 
-def _sent():
-    return {"live": {"composite": {"total_score": "3.9", "bias": "Cautious"},
-                     "sector_pcr": 1.34,
-                     "breadth": {"interpretation": "A/D 0.41:1 - weak"}},
-            "derived": {"trend": {"score": 42.7, "label": "Neutral"}}}
+def test_report_items_headline_then_highlights_then_stamp():
+    items = ticker.report_items(_summary())
+    assert [i["kind"] for i in items] == [
+        "headline", "highlight", "highlight", "highlight", "stamp"]
+    assert items[0]["text"] == "Bulls hold 7,480 into the close"
+    assert items[2]["text"] == "VIX drifts higher"          # whitespace squashed
+    assert items[-1]["text"] == "Market close report · 2026-09-18 · 16:20 CT"
 
 
-def test_ticker_items_composes_expected_items():
-    items = ticker.ticker_items(_dash(), _sent())
-    texts = " | ".join(i["text"] for i in items)
-    assert "Cautious" in texts and "3.9" in texts
-    assert "Neutral" in texts and "42.7" in texts
-    assert "VIX" in texts and "SKEW" in texts
-    assert "SPX" in texts and "NDX" in texts
-    assert "1.34" in texts  # put/call
-    # every item carries a known tone
-    assert all(i["tone"] in {"risk_on", "risk_off", "neutral", "warn"} for i in items)
+def test_report_items_drops_a_highlight_that_repeats_the_headline():
+    # A report with no sections falls back to its headline as the one highlight.
+    s = {"headline": "Quiet tape", "highlights": ["Quiet tape"]}
+    assert [i["text"] for i in ticker.report_items(s)] == ["Quiet tape"]
 
 
-def test_ticker_includes_big10_composite():
-    items = ticker.ticker_items(_dash(), _sent())
-    mag = [i for i in items if i["text"].startswith("BIG10")]
-    assert len(mag) == 1
-    # ticker uses 1-decimal %, consistent with the other items (e.g. "SPX -0.3%")
-    assert "+0.2%" in mag[0]["text"] and "8/10 up" in mag[0]["text"]
-    assert mag[0]["tone"] == "risk_on"
+def test_report_items_never_invents_a_line():
+    for empty in (None, {}, [], "x", {"headline": "", "highlights": []},
+                  {"slot_label": "Market close", "as_of": "16:20 CT"},
+                  {"highlights": "not a list"}):
+        assert ticker.report_items(empty) == []
 
 
-def test_item_class_maps_every_tone_to_fixed_class():
-    for tone in ("risk_on", "risk_off", "neutral", "warn"):
-        assert isinstance(ticker.item_class(tone), str) and ticker.item_class(tone)
-    assert ticker.item_class("bogus") == ticker.item_class("neutral")
+def test_report_items_highlights_without_a_headline_still_render():
+    items = ticker.report_items({"highlights": ["Oil bid", None, "  "]})
+    assert [(i["text"], i["kind"]) for i in items] == [("Oil bid", "highlight")]
 
 
-def test_ticker_items_empty_caches_safe():
-    assert ticker.ticker_items(None, None) == []
-    assert ticker.ticker_items({}, {}) == []
+def test_item_class_maps_every_kind_to_fixed_class():
+    for kind in ("headline", "highlight", "stamp"):
+        assert ticker.item_class(kind)
+    assert ticker.item_class("bogus") == ticker.item_class("highlight")
 
 
-def test_ticker_items_dashboard_only_and_sentiment_only_safe():
-    # Dashboard-only (no sentiment) → tile-derived items, no raise.
-    dash_items = ticker.ticker_items(_dash(), None)
-    assert dash_items and all(i["tone"] in {"risk_on", "risk_off", "neutral", "warn"}
-                              for i in dash_items)
-    assert "VIX" in " ".join(i["text"] for i in dash_items)
-    # Sentiment-only (no dashboard) → sentiment/trend/breadth items, no raise.
-    sent_items = ticker.ticker_items(None, _sent())
-    texts = " ".join(i["text"] for i in sent_items)
-    assert "Cautious" in texts and "Neutral" in texts and "1.34" in texts
-
-
-def test_put_call_tone_flips_around_one():
-    hi = ticker.ticker_items(None, {"live": {"sector_pcr": 1.34}})
-    assert any(i["text"].startswith("P/C") and i["tone"] == "risk_off" for i in hi)
-    lo = ticker.ticker_items(None, {"live": {"sector_pcr": 0.72}})
-    assert any(i["text"].startswith("P/C") and i["tone"] == "risk_on" for i in lo)
-
-
-def test_movers_section_caps_at_four():
-    dash = {"categories": [{"category": "Sector SPDR", "tiles": [
-        {"display": f"S{n}", "change_pct": float(n), "color_state": "risk_on_mild"}
-        for n in range(1, 8)]}]}  # 7 sector tiles
-    items = ticker.ticker_items(dash, None)
-    # Only the mover items exist here (no sentiment/vol/index); at most 4.
-    assert len(items) == 4
-    # And they are the largest-|change| movers (S7..S4).
-    assert {i["text"].split()[0] for i in items} == {"S7", "S6", "S5", "S4"}
+def test_ticker_reads_only_the_market_report():
+    """The bar quotes the published report and nothing else: no view fed by
+    Schwab polling (dashboard, sentiment composite) may come back."""
+    src = inspect.getsource(ticker)
+    assert ticker.VIEW == "market:summary"
+    for view in ("market:dashboard", "sentiment:composite"):
+        assert f'"{view}"' not in src
 
 
 def test_speed_class_maps_numbers_to_finite_buckets():
@@ -107,11 +74,10 @@ def test_speed_class_used_in_ticker_css():
         assert f".{cls}" in ticker._TICKER_CSS
 
 
-def test_poll_reads_payloads_off_the_event_loop():
-    """The ticker runs on EVERY page; its 4s poll must not deserialize the 3
-    payloads (dashboard+composite+summary) on the event loop. The poll is async
-    and routes _read through run.io_bound."""
-    import inspect
+def test_poll_reads_off_the_event_loop():
+    """The ticker runs on EVERY page; its 4s poll routes its Redis reads through
+    run.io_bound."""
     src = inspect.getsource(ticker.render_ticker)
     assert "async def _poll" in src
     assert "run.io_bound(_read)" in src
+    assert "run.io_bound(bus_client.read_version" in src

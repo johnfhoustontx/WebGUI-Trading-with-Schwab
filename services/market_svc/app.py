@@ -1,8 +1,9 @@
 """Runnable market dashboard service (port 8215).
 
 A scheduler polls the proxy for ~48 macro symbols and publishes
-cache:market:dashboard, plus a change-driven Claude verdict for the ticker and
-the Desk's Market Summary frame. The command consumer is wired but has no
+cache:market:dashboard, plus cache:market:summary — the latest published market
+report's headline and highlights, read off disk with no API call — for the
+ticker and the Desk's Market Summary frame. The command consumer is wired but has no
 command types of its own today — the page is a pure reader. Importable without
 side effects; starts uvicorn only under __main__.
 """

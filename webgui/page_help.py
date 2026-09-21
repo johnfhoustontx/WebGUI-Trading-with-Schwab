@@ -1388,8 +1388,10 @@ The General tab controls the alert chimes, notifications and the ticker.
 - **Audio alert / sound / volume** — what plays when new signals appear.
 - **Market-hours only / minimum score** — when the app is allowed to bother you.
 - **Ticker** — the scrolling market-summary bar at the bottom of every page.
-  It leads with the latest market report's headline. Switching it off only
-  hides the bar.
+  It scrolls the latest market report — its headline, its highlights, then
+  which report they came from — and changes only when a new report is
+  published. It makes no Schwab or Claude call. Switching it off only hides
+  the bar.
 - **API usage** — how many calls the app made to Schwab (counted at the
   gateway) and to the Claude API (counted at each call site), today / this
   week / this month. The four automatic gamma briefings run on the Claude

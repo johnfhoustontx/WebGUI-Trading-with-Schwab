@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-20 (**One look and one behaviour — Phase 6: the system
+**Last updated:** 2026-09-21 (**The Market Summary Ticker quotes the market
+report and nothing else.**)
+
+- The bottom marquee (`webgui/pages/ticker.py`) now scrolls only
+  `cache:market:summary`: the latest published report's headline, its section
+  highlights, then the report's own stamp ("Market close report · 2026-09-18 ·
+  16:20 CT"). It used to lead with the headline and then pad itself with live
+  items built from `cache:market:dashboard` and `cache:sentiment:composite` —
+  both fed by Schwab polling — so the bar now has no API call behind anything
+  it shows, and it repaints only when a new report is published (one `:ver`
+  probe per 4 s instead of three). Those live readings still live on the
+  Market Dashboard and the Desk; market_svc's quote poll is unchanged because
+  they need it.
+- With no report published the bar says *No market report published yet*
+  rather than inventing a line. `ticker_items` and its tone map are deleted
+  with their tests; `report_items` is the new pure builder. Help text in
+  `page_help.py` updated.
+
+**Prior —** 2026-09-20 (**One look and one behaviour — Phase 6: the system
 pages, and the app's destructive controls get one confirm vocabulary. THE
 MIGRATION IS COMPLETE.**)
 
