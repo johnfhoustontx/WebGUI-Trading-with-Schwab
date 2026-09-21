@@ -716,8 +716,8 @@ _RESCUE_PUBLIC = ConfigFile(
             "daily limits, and how much one visitor may ask for.",
     restart=(),
     caution="Each public rescue reprices the trade and fetches its roll "
-            "candidates from Schwab. The daily limits cap that spend across "
-            "every visitor.",
+            "candidates from Schwab. The daily public budget caps that spend "
+            "across every visitor and every public tool.",
     sections=(
         Section("Limits", "", (
             Field("limits.result_ttl_min", "Reuse a rescue menu for",
@@ -733,12 +733,6 @@ _RESCUE_PUBLIC = ConfigFile(
                   kind="int", min=1, max=50, step=1),
             Field("limits.max_wait_sec", "Drop a request that waited", "",
                   kind="int", unit="s", min=10, max=3600, step=10),
-            Field("limits.daily_budget", "Rescues per day",
-                  "Across all visitors together.", kind="int", min=1,
-                  max=5000, step=10),
-            Field("limits.ladder_budget", "Strike loads per day",
-                  "Across all visitors together.", kind="int", min=1,
-                  max=10000, step=10),
             Field("limits.result_keep_min", "Keep a rescue menu for", "",
                   kind="int", unit="min", min=1, max=1440, step=5),
             Field("limits.ladder_keep_min", "Keep a symbol's strikes for", "",
@@ -751,6 +745,14 @@ _RESCUE_PUBLIC = ConfigFile(
                   kind="int", min=1, max=500, step=1),
             Field("visitor.ladders_per_hour", "Strike loads per visitor per hour",
                   "", kind="int", min=1, max=1000, step=1),
+        )),
+        Section("Budget", "One Schwab allowance behind every public tool, so "
+                          "one daily budget shared by all of them.", (
+            Field("budget.daily_budget", "Daily public budget",
+                  "Requests that reach Schwab per trading day, across the Rescue "
+                  "form, the Calculator and the Simulator and every visitor "
+                  "together. A request refused for any other reason never counts.",
+                  kind="int", min=1, max=20000, step=10),
         )),
     ),
 )

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from services.options_svc import compute
+from services.options_svc import public_budget
 from services.options_svc import rescue_public as rp
 from shared import public_rescue as pr
 from shared.bus import Bus
@@ -185,14 +186,42 @@ def test_a_symbol_with_no_options_is_remembered(bus, schwab):
     assert _answer(bus, pr.ladder_key("ZZZZ", NEAR)) == "no_options"
 
 
-def test_the_ladder_budget_is_its_own(bus, schwab, monkeypatch):
-    monkeypatch.setattr(pr, "load", lambda: {"limits": {"ladder_budget": 1}})
+# The budget is now ONE daily count shared by every public worker
+# (``public_budget``), replacing Rescue's separate ladder and compute budgets.
+
+def test_ladders_spend_the_shared_budget_a_compute_then_finds_it_spent(
+        bus, schwab, monkeypatch):
+    monkeypatch.setattr(pr, "budget", lambda: 2)
     rp.handle(bus, _ladder_cmd("SPY"))
-    schwab.calls.clear()
     rp.handle(bus, _ladder_cmd("QQQ"))
+    assert _status(bus)["budget_left"] == 0
+    schwab.calls.clear()
+    rp.handle(bus, _compute_cmd())
     assert schwab.calls == []
-    assert _answer(bus, pr.ladder_key("QQQ")) == "budget"
-    assert _status(bus)["computes_left"] == pr.DEFAULTS["limits"]["daily_budget"]
+    assert _answer(bus, _key()) == "budget"
+    rp.handle(bus, _ladder_cmd("IWM"))
+    assert schwab.calls == []
+    assert _answer(bus, pr.ladder_key("IWM")) == "budget"
+    spent = public_budget.status(bus, OPEN)
+    assert spent["spent"] == 2 and spent["by_kind"] == {"chain": 2}
+
+
+def test_a_request_refused_earlier_never_spends(bus, schwab, monkeypatch):
+    monkeypatch.setattr(pr, "budget", lambda: 10)
+    rp.handle(bus, _compute_cmd())
+    rp.handle(bus, _ladder_cmd("SPY"))
+    assert public_budget.status(bus, OPEN)["spent"] == 2
+    rp.handle(bus, _compute_cmd())
+    assert _answer(bus, _key()) == "cached"
+    rp.handle(bus, _ladder_cmd("SPY"))
+    assert _answer(bus, pr.ladder_key("SPY")) == "cached"
+    rp.handle(bus, _compute_cmd(age_s=10_000))
+    assert _answer(bus, _key()) == "expired"
+    schwab.now = CLOSED
+    rp.handle(bus, _ladder_cmd("QQQ", now=CLOSED))
+    assert _answer(bus, pr.ladder_key("QQQ")) == "closed"
+    assert public_budget.status(bus, OPEN)["spent"] == 2
+    assert _status(bus)["budget_left"] == 8
 
 
 # ── the rescue menu ─────────────────────────────────────────────────────────
@@ -238,17 +267,6 @@ def test_a_compute_on_an_unlisted_expiration_is_refused_from_the_list(bus, schwa
     rp.handle(bus, _compute_cmd(spec))
     assert schwab.calls == []
     assert _answer(bus, _key(spec)) == "not_listed"
-
-
-def test_the_compute_budget(bus, schwab, monkeypatch):
-    monkeypatch.setattr(pr, "load", lambda: {"limits": {"daily_budget": 1}})
-    rp.handle(bus, _compute_cmd())
-    schwab.calls.clear()
-    other = _spec(entry_credit=1.3)
-    rp.handle(bus, _compute_cmd(other))
-    assert schwab.calls == []
-    assert _answer(bus, _key(other)) == "budget"
-    assert _status(bus)["computes_left"] == 0
 
 
 # ── refusals shared by both ─────────────────────────────────────────────────

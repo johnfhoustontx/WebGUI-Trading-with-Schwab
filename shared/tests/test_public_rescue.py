@@ -215,13 +215,34 @@ def test_the_shipped_file_matches_the_defaults():
 
 
 def test_limits_fall_back_on_bad_values(monkeypatch):
-    monkeypatch.setattr(pr, "load", lambda: {"limits": {"daily_budget": True,
+    # ``limits.daily_budget`` moved to ``budget.daily_budget`` (one budget shared
+    # by every public worker), so the boolean fallback is exercised on another
+    # limit here and on the budget in the test below.
+    monkeypatch.setattr(pr, "load", lambda: {"limits": {"result_ttl_min": True,
                                                         "dedup_sec": 0,
                                                         "max_wait_sec": -3}})
     lim = pr.limits()
-    assert lim["daily_budget"] == pr.DEFAULTS["limits"]["daily_budget"]
+    assert lim["result_ttl_min"] == pr.DEFAULTS["limits"]["result_ttl_min"]
     assert lim["dedup_sec"] == 0
     assert lim["max_wait_sec"] == pr.DEFAULTS["limits"]["max_wait_sec"]
+
+
+def test_there_is_one_shared_budget_and_no_per_tool_budgets():
+    assert pr.DEFAULTS["budget"] == {"daily_budget": 600}
+    assert pr.budget() == 600
+    assert "daily_budget" not in pr.DEFAULTS["limits"]
+    assert "ladder_budget" not in pr.DEFAULTS["limits"]
+
+
+@pytest.mark.parametrize("bad", [True, 0, -1, "lots", None])
+def test_the_budget_falls_back_on_a_bad_value(monkeypatch, bad):
+    monkeypatch.setattr(pr, "load", lambda: {"budget": {"daily_budget": bad}})
+    assert pr.budget() == pr.DEFAULTS["budget"]["daily_budget"]
+
+
+def test_the_budget_reads_the_file(monkeypatch):
+    monkeypatch.setattr(pr, "load", lambda: {"budget": {"daily_budget": 42}})
+    assert pr.budget() == 42
 
 
 # ── Tier 1 may import it ────────────────────────────────────────────────────

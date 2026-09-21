@@ -30,7 +30,11 @@ its own answer. The refusals run in this order, all before any Schwab call:
 4. ``not_listed`` / ``no_options``  answered from a strikes list already held;
 5. ``duplicate``  the same request ran under ``dedup_sec`` ago;
 6. ``closed``     outside ``[windows.rescue_public]``;
-7. ``budget``     the day's compute or strikes budget is spent.
+7. ``budget``     the day's ONE public budget is spent. Checked LAST, by
+                  ``public_budget.spend``, at the point where the Schwab work
+                  would start - so a request refused above never spends it.
+                  The budget is shared with the public Calculator and
+                  Simulator: one Schwab allowance, one count.
 
 ⚠ **No LIST of visitors' requests is kept.** The status view holds counts only
 (the Finder's status map lists every symbol anyone searched, and a list of
@@ -54,6 +58,7 @@ from zoneinfo import ZoneInfo
 
 from services import _degrade
 from services.options_svc import compute
+from services.options_svc import public_budget
 from shared import market_calendar
 from shared import public_rescue as pr
 from shared.symbols import clean_symbol
@@ -158,12 +163,11 @@ def _read_status(bus, now) -> dict:
     return status
 
 
-def _write_status(bus, status) -> None:
-    lim = pr.limits()
-    status["daily_budget"] = lim["daily_budget"]
-    status["computes_left"] = max(0, lim["daily_budget"] - status["computes_today"])
-    status["ladder_budget"] = lim["ladder_budget"]
-    status["ladders_left"] = max(0, lim["ladder_budget"] - status["ladders_today"])
+def _write_status(bus, status, now=None) -> None:
+    # ``computes_today`` / ``ladders_today`` stay Rescue's own counts for
+    # Settings; what is LEFT is the one budget every public worker shares.
+    spent = public_budget.status(bus, now or _now())["spent"]
+    status["budget_left"] = max(0, pr.budget() - spent)
     start, end = market_calendar.window_bounds(WINDOW)
     status["window"] = {"start": start.strftime("%H:%M"),
                         "end": end.strftime("%H:%M"), "tz": "CT"}
@@ -260,7 +264,7 @@ def _handle_ladder(bus, command, now, lim, status) -> None:
     expiry = pr.clean_expiry(raw_expiry, now.date()) if raw_expiry is not None else None
     if symbol is None or (raw_expiry is not None and expiry is None):
         status["invalid_today"] += 1
-        _write_status(bus, status)
+        _write_status(bus, status, now)
         return
     key = pr.ladder_key(symbol, expiry)
     view = pr.ladder_view(symbol)
@@ -280,17 +284,19 @@ def _handle_ladder(bus, command, now, lim, status) -> None:
         outcome = "duplicate"
     elif not market_calendar.in_window(WINDOW, now):
         outcome = "closed"
-    elif status["ladders_today"] >= lim["ladder_budget"]:
-        outcome = "budget"
     else:
         outcome = None
+    # The LAST gate, where the Schwab work would start: nothing refused above
+    # ever spends the shared budget.
+    if outcome is None and not public_budget.spend(bus, "chain", pr.budget(), now):
+        outcome = "budget"
     if outcome is not None:
         _answer(bus, key, outcome, now)
         return
 
     status["ladders_today"] += 1
     status["busy"] = {"kind": "ladder", "since": now.isoformat()}
-    _write_status(bus, status)
+    _write_status(bus, status, now)
     _mark_ran(key)
     try:
         ladder, outcome = _load_ladder(symbol, expiry, existing, now, fresh=fresh)
@@ -326,7 +332,7 @@ def _handle_compute(bus, command, now, lim, status) -> None:
     spec = pr.clean_spec(args.get("spec"), now.date())
     if spec is None:
         status["invalid_today"] += 1
-        _write_status(bus, status)
+        _write_status(bus, status, now)
         return
     key = pr.spec_key(spec)
     view = pr.result_view(key)
@@ -357,17 +363,20 @@ def _handle_compute(bus, command, now, lim, status) -> None:
         outcome = "throttled"
     elif not market_calendar.in_window(WINDOW, now):
         outcome = "closed"
-    elif status["computes_today"] >= lim["daily_budget"]:
-        outcome = "budget"
     else:
         outcome = None
+    # The LAST gate, where the Schwab work would start: nothing refused above
+    # ever spends the shared budget.
+    if outcome is None and not public_budget.spend(bus, "rescue_compute",
+                                                   pr.budget(), now):
+        outcome = "budget"
     if outcome is not None:
         _answer(bus, key, outcome, now)
         return
 
     status["computes_today"] += 1
     status["busy"] = {"kind": "compute", "since": now.isoformat()}
-    _write_status(bus, status)
+    _write_status(bus, status, now)
     _mark_ran(key)
     _count_structure(structure)
     try:
@@ -409,7 +418,7 @@ def handle(bus, command) -> None:
         latest = _read_status(bus, now)
         if latest.get("busy") is not None:
             latest["busy"] = None
-            _write_status(bus, latest)
+            _write_status(bus, latest, now)
     except Exception:  # noqa: BLE001 - a Redis error here must not escape either
         _degrade.degraded("options.rescue_public_status")
 
@@ -425,4 +434,4 @@ def _dispatch(bus, command, now) -> None:
     else:
         status["invalid_today"] += 1
         log.info("public rescue refused: unknown request type %r", kind)
-        _write_status(bus, status)
+        _write_status(bus, status, now)

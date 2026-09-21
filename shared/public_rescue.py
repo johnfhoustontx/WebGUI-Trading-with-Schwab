@@ -351,10 +351,6 @@ DEFAULTS = {
         # A request older than this is dropped unrun: it covers a replayed
         # backlog and a queue that has fallen behind.
         "max_wait_sec": 120,
-        # Rescue computes per trading day, all visitors together.
-        "daily_budget": 200,
-        # Strikes-list loads per trading day, all visitors together.
-        "ladder_budget": 400,
         # How long each kind of key lives. Visitors choose the symbols and the
         # trades, so every key must expire or the count grows without limit.
         "result_keep_min": 30,
@@ -367,6 +363,13 @@ DEFAULTS = {
         # stop ONE visitor filling the queue for everyone.
         "computes_per_hour": 20,
         "ladders_per_hour": 60,
+    },
+    "budget": {
+        # Schwab-spending public requests per trading day across the Rescue
+        # form, the Calculator and the Simulator TOGETHER - one Schwab
+        # allowance, so one budget (services/options_svc/public_budget.py).
+        # A request refused for any other reason never counts against it.
+        "daily_budget": 600,
     },
 }
 
@@ -394,3 +397,8 @@ def computes_per_hour() -> int:
 
 def ladders_per_hour() -> int:
     return _num("visitor", "ladders_per_hour", minimum=1)
+
+
+def budget() -> int:
+    """The ONE daily budget every public worker spends from."""
+    return _num("budget", "daily_budget", minimum=1)

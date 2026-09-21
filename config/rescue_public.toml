@@ -22,12 +22,6 @@ structure_runs = 3
 # Seconds a request may wait in the queue before it is dropped. This is also
 # the replay guard: a backlog replayed at startup is older.
 max_wait_sec = 120
-# Rescue computes per trading day across ALL visitors. Each reprices the trade
-# and fetches its roll candidates: an estimated 3-6 Schwab calls, unmeasured.
-daily_budget = 200
-# Strikes-list loads per trading day across all visitors. A first load is
-# about 3 Schwab calls; each extra expiration is one.
-ladder_budget = 400
 # Minutes each kind of key lives. Visitors choose the symbols and the trades,
 # so the keys must expire or they would accumulate without limit.
 result_keep_min = 30
@@ -39,3 +33,11 @@ answer_keep_min = 15
 # address, in memory only - no address is written anywhere.
 computes_per_hour = 20
 ladders_per_hour = 60
+
+[budget]
+# Schwab-spending public requests per trading day, across ALL visitors of the
+# Rescue form, the Calculator and the Simulator together: one Schwab allowance,
+# so one budget. A rescue compute is an estimated 3-6 Schwab calls (unmeasured);
+# a first strikes load about 3, each extra expiration one. A request refused
+# for any other reason (cached, duplicate, closed, ...) never counts.
+daily_budget = 600
