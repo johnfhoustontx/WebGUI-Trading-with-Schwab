@@ -643,8 +643,14 @@ def render():
         "adhoc_advisory": None, "adhoc_advisory_ver": None,
     }
     # Ad-hoc chain sub-state (shares the Calculator's calc_chain cache).
+    # ``expirations`` is every expiry the SYMBOL lists; ``chain`` holds only the
+    # ones whose strikes have arrived. ``pending_move`` is the expiry the user
+    # picked while its strikes were still being fetched; ``applying`` suppresses
+    # the change handler while the page sets the dropdown itself.
     adhoc: dict = {"chain": None, "spot": 0.0, "chain_ver": None,
-                   "chain_fetching": False, "contracts": 1}
+                   "chain_fetching": False, "contracts": 1,
+                   "expirations": None, "chain_symbol": None,
+                   "pending_move": None, "applying": False}
 
     # ── shared candidate-card rendering (per-container so each tab owns its own
     # cards column + advisory head; the board passes the confirm/apply factory,
@@ -933,7 +939,17 @@ def render():
         return sorted(out)
 
     def _adhoc_expiries_for():
+        """Expiries whose STRIKES are here — the per-leg dropdowns and every
+        strike ladder read this. Never the listed set: a leg parked on an expiry
+        with no ladder has nothing to snap to."""
         return chain_expiries(adhoc.get("chain") or {})
+
+    def _adhoc_listed_expiries():
+        """Every expiration the symbol lists — what the top Expiry dropdown
+        offers. Falls back to the loaded set for a payload that carries no
+        ``expirations`` (a symbol whose expiration list could not be fetched
+        falls back to the old fixed-window chain, which lists nothing)."""
+        return list(adhoc.get("expirations") or _adhoc_expiries_for())
 
     adhoc_editor = leg_editor.build_leg_editor(
         adhoc_leg_box, strikes_for=_adhoc_strikes_for, expiries_for=_adhoc_expiries_for,
@@ -965,9 +981,36 @@ def render():
         _adhoc_seed_template()
         _adhoc_unsupported(adhoc_strat.value)   # gentle heads-up on select
 
+    def _adhoc_set_expiry(value):
+        """Set the Expiry dropdown from CODE, firing nothing. Assignment runs
+        NiceGUI's change handlers, and this page's would enqueue a fetch for the
+        expiry the load just brought — on every load."""
+        adhoc["applying"] = True
+        try:
+            adhoc_exp_sel.value = value
+        finally:
+            adhoc["applying"] = False
+        adhoc_exp_sel.update()
+
     @guard
     def _adhoc_on_expiry():
-        adhoc_editor.apply_expiry(adhoc_exp_sel.value)
+        """An expiry pick moves every leg there. One whose strikes are not here
+        yet is fetched first (``calc_load_expiry``); the legs move when it lands,
+        in ``_adhoc_merge_chain``."""
+        if adhoc.get("applying"):
+            return
+        expiry = adhoc_exp_sel.value
+        if not expiry:
+            return
+        if expiry not in _adhoc_expiries_for():
+            adhoc["pending_move"] = expiry
+            bus_client.request("options", {"type": "calc_load_expiry", "args": {
+                "symbol": adhoc.get("chain_symbol") or _adhoc_sym(),
+                "expiry": expiry}})
+            adhoc_status.text = f"Loading strikes for {expiry}…"
+            return
+        adhoc["pending_move"] = None
+        adhoc_editor.apply_expiry(expiry)
 
     @guard
     def _adhoc_on_contracts():
@@ -977,6 +1020,45 @@ def render():
             _adhoc_scale_qty(new / old)
         adhoc["contracts"] = new
 
+    def _adhoc_chain_line():
+        """The status line: how much of the chain is here. It says the rest load
+        on demand only while that is TRUE — a line that keeps promising more
+        after everything has arrived is the reason a strike will not snap where
+        the reader expects, and it would be pointing at the wrong thing."""
+        listed, loaded = _adhoc_listed_expiries(), _adhoc_expiries_for()
+        if not listed:
+            return "No chain data for that symbol."
+        if len(loaded) < len(listed):
+            return (f"Chain loaded — {len(listed)} expirations, strikes for "
+                    f"{len(loaded)} so far; the rest load when you pick one.")
+        return f"Chain loaded — {len(listed)} expirations."
+
+    def _adhoc_merge_chain(cc):
+        """One more expiry's strikes arrived (``calc_load_expiry``). Nothing is
+        re-seeded — the structure the user built survives a merge — and the
+        pending pick moves the legs only once its ladder is really here."""
+        adhoc["chain"] = cc.get("chain")
+        adhoc["expirations"] = cc.get("expirations") or adhoc.get("expirations")
+        move = adhoc.get("pending_move")
+        loaded = _adhoc_expiries_for()
+        if move and move == cc.get("added") and cc.get("failed"):
+            adhoc["pending_move"] = None
+            # Back to an expiry that HAS a ladder, so the form stops offering
+            # strikes that are not coming. No toast beside it: the line below
+            # says the same thing where the reader is already looking.
+            on = next((leg.get("expiry") for leg in adhoc_editor.get_legs()
+                       if leg.get("expiry") in loaded), None)
+            _adhoc_set_expiry(on or (loaded[0] if loaded else None))
+            adhoc_editor.refresh_options()
+            adhoc_status.text = f"Could not load strikes for {move}."
+            return
+        if move and move in loaded:
+            adhoc["pending_move"] = None
+            adhoc_editor.apply_expiry(move)
+        else:
+            adhoc_editor.refresh_options()
+        adhoc_status.text = _adhoc_chain_line()
+
     def _adhoc_apply_chain(cc):
         # Released FIRST, and in this function rather than on the happy path:
         # a symbol with no chain still lands here (``cc`` may be None / empty),
@@ -984,32 +1066,65 @@ def render():
         # 30 s backstop.
         kit.set_busy(adhoc_load_btn, False)
         cc = cc or {}
+        # A merge carries ``added`` and the WHOLE payload; it must not reset the
+        # selection or re-seed the legs. Symbol-checked, because this cache is
+        # shared with the Calculator and a merge there is not ours.
+        if (cc.get("added") and adhoc.get("chain") is not None
+                and str(cc.get("symbol") or "").upper()
+                == str(adhoc.get("chain_symbol") or "").upper()):
+            _adhoc_merge_chain(cc)
+            return
+        adhoc["pending_move"] = None
+        adhoc["chain_symbol"] = cc.get("symbol")
         adhoc["chain"] = cc.get("chain")
+        adhoc["expirations"] = cc.get("expirations")
         if cc.get("price"):
             adhoc["spot"] = round(cc["price"], 2)
-        exps = chain_expiries(adhoc.get("chain") or {})
-        adhoc_exp_sel.options = exps
-        if exps and adhoc_exp_sel.value not in exps:
-            adhoc_exp_sel.value = exps[0]
-        adhoc_exp_sel.update()
+        listed = _adhoc_listed_expiries()
+        adhoc_exp_sel.options = listed
+        if listed and adhoc_exp_sel.value not in listed:
+            # The nearest listed expiry is always one the lazy load brought, so
+            # this selection never needs a fetch of its own.
+            _adhoc_set_expiry(listed[0])
+        else:
+            adhoc_exp_sel.update()
         # Re-seed the legs against the real chain so strikes snap to the ladder —
         # unless the user has manually edited them (then just refresh dropdowns).
         if not adhoc_editor.is_dirty():
             _adhoc_seed_template()
         else:
             adhoc_editor.refresh_options()
-        adhoc_status.text = (f"Chain loaded — {len(exps)} expirations."
-                             if exps else "No chain data for that symbol.")
+        adhoc_status.text = _adhoc_chain_line()
+
+    def _adhoc_sym():
+        return (adhoc_sym.value or "").strip().upper()
+
+    def _adhoc_wanted_expiries():
+        """Expiries the load must bring WITH it: the one selected now and the
+        ones the legs sit on. Either missing would coerce a strike away before
+        the form could ask for it."""
+        out = {adhoc_exp_sel.value}
+        for leg in adhoc_editor.get_legs():
+            out.add(leg.get("expiry"))
+        return sorted(str(e) for e in out if e)
 
     @guard
     def _adhoc_load():
-        sym = (adhoc_sym.value or "").strip().upper()
+        sym = _adhoc_sym()
         if not sym:
             kit.toast("warn", "Enter a symbol first.")
             return
         adhoc_status.text = f"Loading {sym} chain…"
-        # Shares the Calculator's calc_chain cache (single-user, one page at a time).
-        bus_client.request("options", {"type": "calc_load", "args": {"symbol": sym}})
+        # Shares the Calculator's calc_chain cache (single-user, one page at a
+        # time). ``lazy``: the payload lists EVERY expiration the symbol has, and
+        # the Expiry dropdown offers all of them — the eager today→+60d fetch
+        # this replaced offered a handful, and rolling out in time is what this
+        # form is for. Strikes come for the nearest two plus the ones already in
+        # use; the rest are fetched one per pick. It is also the only shape a big
+        # chain survives: ONE whole-chain /chains call times out at the proxy's
+        # 30 s for SPY, and $SPX's 60 days does not fit a single request.
+        bus_client.request("options", {"type": "calc_load", "args": {
+            "symbol": sym, "lazy": True, "expiries": _adhoc_wanted_expiries()}})
         # After the enqueue, never before the empty-symbol return above: nothing
         # was sent there, so nothing would arrive to release it.
         kit.set_busy(adhoc_load_btn)

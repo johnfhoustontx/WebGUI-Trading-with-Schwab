@@ -3043,7 +3043,12 @@ market has moved since the candidate was priced, the app refuses rather than app
 a price that no longer exists.
 
 **Ad-hoc Trade** lets you evaluate a position you enter manually rather than one from
-the books.
+the books. Loading a symbol there lists **every expiration the symbol has**, not just the
+next couple of months (from 2026-09-20) — a repair is usually a roll *out in time*, so the
+expiry you want is often past the old window. The strikes for the nearest two expirations
+arrive with the load and the rest are fetched when you pick one, which takes a second;
+the line under the form says how many are here so far. That is also why it is a list and
+not a single fetch: one request for a whole SPY or $SPX chain times out.
 
 **A cash-secured put or covered call gets a different menu** (from 2026-09-11): buy to
 close, roll away and out for a credit — down for a put, up for a call — buy a

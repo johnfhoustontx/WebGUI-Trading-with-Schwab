@@ -3033,7 +3033,9 @@ def handle_command(bus, command) -> None:
         bus.publish(EVENT_SIM_REPLAY, {"version": version})
     elif command.type == "calc_load":
         a = command.args or {}
-        # Only the Calculator asks for a lazy load; Rescue's eager call is unchanged.
+        # Both the Calculator and Rescue's ad-hoc form ask for a lazy load: every
+        # listed expiration, strikes for the nearest two. The eager branch below
+        # survives for a symbol whose expiration list cannot be fetched.
         lazy = {"lazy": True, "expiries": a.get("expiries")} if a.get("lazy") else {}
         cc = compute.calc_load_symbol(a.get("symbol", "SPY"), **lazy)
         version = bus.cache_set(CACHE_CALC_CHAIN, cc)

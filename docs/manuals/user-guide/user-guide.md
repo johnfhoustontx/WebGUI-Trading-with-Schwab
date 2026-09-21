@@ -1591,7 +1591,7 @@ of concrete ways to fix it, with the commission-adjusted cash and risk of each.
 | Sub-tab | What it does |
 |---------|--------------|
 | **At-Risk Board** | The default. Scans your paper and captured positions and lists the ones in trouble. |
-| **Ad-hoc Trade** | Enter a position **by hand** and get the same ranked repair menu for it — use this to evaluate a spread the app is not tracking. |
+| **Ad-hoc Trade** | Enter a position **by hand** and get the same ranked repair menu for it — use this to evaluate a spread the app is not tracking. The Expiry list holds **every expiration the symbol has**, so you can price a roll well out in time; strikes for an expiry past the first two load when you pick it. |
 
 **The at-risk table** (top of the page) lists every paper position and captured
 signal the system has flagged as **tested** or **critical**, heat-colored and sorted
