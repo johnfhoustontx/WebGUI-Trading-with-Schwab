@@ -239,6 +239,30 @@ def request(domain: str, command: dict) -> str:
     return bus().enqueue_command(f"cmd:{domain}", command)
 
 
+def request_public_scan(raw_symbol) -> str:
+    """Ask for a public Strategy Finder scan of one symbol; returns the message id.
+
+    **The one enqueue the public live origin may make, and deliberately NOT a
+    path through** :func:`request`. That function stays refused on a read-only
+    process, for every domain including this one; this function is allowed
+    there because it can write exactly one thing: ``{"symbol": <SYMBOL>}``,
+    validated by ``shared.symbols.clean_symbol``, on ``cmd:finder_public``. It
+    takes no stream name and no command type from its caller, so a visitor's
+    string cannot choose where it lands.
+
+    The Redis server enforces the same boundary: the live ACL user may XADD on
+    ``cmd:finder_public`` and nowhere else (docs/dev-prod-environments.md).
+
+    Raises ``ValueError`` for a symbol the allow-list refuses, before anything
+    is written. The service still re-validates what it reads.
+    """
+    from shared import public_scan  # Tier-1 allow-listed: config + validator only
+    command = public_scan.request_command(raw_symbol)
+    if command is None:
+        raise ValueError(f"not a scannable symbol: {raw_symbol!r}")
+    return bus().enqueue_command(public_scan.STREAM, command)
+
+
 class EventListener:
     """Background daemon thread that fans an events channel out to a callback.
 

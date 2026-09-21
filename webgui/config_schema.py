@@ -477,6 +477,9 @@ _SESSIONS = ConfigFile(
         _window("stream", "Public video stream", "", (TIMERS,)),
         _window("live_capture", "Public screenshot captures",
                 "Keep this after the stream ends: the capture is CPU-heavy.", ()),
+        _window("finder_public", "Public Strategy Finder scans",
+                "When the public site will scan a symbol a visitor types. "
+                "Outside it the page shows the last scan.", ()),
         Section("Driver entry window",
                 "When the autonomous driver may open trades. EASTERN time.", (
             Field("windows.driver_entry.start", "Starts (ET)", "", kind="time"),
@@ -571,6 +574,62 @@ _SECTORS = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Public Strategy Finder — config/finder_public.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read per request by options_svc and the public site, through the mtime-cached
+# loader, so a saved change applies to the next scan with no restart.
+_FINDER_PUBLIC = ConfigFile(
+    name="finder_public.toml", title="Public Strategy Finder", icon="travel_explore",
+    summary="The Strategy Finder on the public site: the fixed filters every "
+            "visitor's scan runs, how results are reused, and the daily limit.",
+    restart=(),
+    caution="Each public scan costs about six Schwab calls. The daily limit is "
+            "the cap on that spend across every visitor.",
+    sections=(
+        Section("Filters", "The one filter set every public scan uses. Visitors "
+                "cannot change these.", (
+            Field("scan.dte_min", "Shortest expiration", "", kind="int",
+                  unit="days", min=0, max=365, step=1),
+            Field("scan.dte_max", "Longest expiration",
+                  "Longer ranges make each scan slower, especially for symbols "
+                  "with daily expirations.", kind="int",
+                  unit="days", min=1, max=730, step=1),
+            Field("scan.put_d_min", "Put short-leg delta, low", "", min=-1,
+                  max=0, step=0.01),
+            Field("scan.put_d_max", "Put short-leg delta, high", "", min=-1,
+                  max=0, step=0.01),
+            Field("scan.call_d_min", "Call short-leg delta, low", "", min=0,
+                  max=1, step=0.01),
+            Field("scan.call_d_max", "Call short-leg delta, high", "", min=0,
+                  max=1, step=0.01),
+            _pct("scan.min_cr_fraction", "Minimum credit",
+                 "As a share of the spread width."),
+        )),
+        Section("Limits", "", (
+            Field("limits.result_ttl_min", "Reuse a result for", "", kind="int",
+                  unit="min", min=1, max=240, step=1),
+            Field("limits.dedup_sec", "Ignore a repeat request for", "",
+                  kind="int", unit="s", min=0, max=3600, step=5),
+            Field("limits.negative_ttl_min", "Remember a symbol with no options for",
+                  "Stops repeated requests for made-up tickers from using up the "
+                  "daily limit.", kind="int", unit="min", min=1, max=1440, step=10),
+            Field("limits.max_wait_sec", "Drop a request that waited", "",
+                  kind="int", unit="s", min=10, max=3600, step=10),
+            Field("limits.daily_budget", "Scans per day",
+                  "Across all visitors together.", kind="int", min=1,
+                  max=5000, step=10),
+            Field("limits.result_keep_hours", "Keep a symbol's result for", "",
+                  kind="int", unit="h", min=1, max=168, step=1),
+        )),
+        Section("Display", "", (
+            Field("display.show_leg_quotes", "Show per-leg bid and ask",
+                  "Off until Schwab's terms on republishing quotes are settled.",
+                  kind="bool"),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Commissions — config/commissions.toml
 # ─────────────────────────────────────────────────────────────────────────────
 _COMMISSIONS = ConfigFile(
@@ -610,7 +669,7 @@ _ENVS = ConfigFile(name="environments.toml", title="Environments", icon="dns",
                    editable=False, editor="readonly")
 
 FILES = (_SCANNER, _TRADE_MGMT, _DRIVER, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
-         _COMMISSIONS, _PORTS, _ENVS)
+         _FINDER_PUBLIC, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 

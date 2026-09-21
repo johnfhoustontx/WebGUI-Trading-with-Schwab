@@ -208,7 +208,13 @@ async def _supervise_scheduler(
 
 
 async def _consume_loop(domain, bus, command_handler, poll_block_ms) -> None:
-    """Drain ``cmd:{domain}`` forever, dispatching each command to the handler.
+    """Drain the domain's own ``cmd:{domain}`` stream (see :func:`_consume_stream`)."""
+    await _consume_stream(f"cmd:{domain}", f"{domain}-svc", bus, command_handler,
+                          poll_block_ms)
+
+
+async def _consume_stream(stream, group, bus, command_handler, poll_block_ms) -> None:
+    """Drain ``stream`` forever, dispatching each command to the handler.
 
     Each iteration is wrapped so a bad command (or a transient bus error) can
     never kill the loop. Both the blocking ``consume_commands`` AND each
@@ -221,9 +227,10 @@ async def _consume_loop(domain, bus, command_handler, poll_block_ms) -> None:
     then ack'd, so it is neither silently lost nor blindly re-executed. On
     startup any entries stranded in the PEL by a previously-crashed consumer are
     drained to the same dead-letter list (for human review, NOT re-run).
+
+    One loop per stream, so each stream is serial on its own and independent of
+    every other: a slow handler on one never delays a command on another.
     """
-    stream = f"cmd:{domain}"
-    group = f"{domain}-svc"
     loop = asyncio.get_event_loop()
 
     # Recover a prior crash's un-acked PEL (off the event loop; never raises).
@@ -304,6 +311,7 @@ def make_app(
     poll_block_ms: int = 1000,
     scheduler_restart_backoff_s: float = 3.0,
     scheduler_max_restarts: int = 10,
+    extra_consumers: tuple = (),
 ) -> FastAPI:
     """Build the domain FastAPI app (see module docstring).
 
@@ -312,6 +320,11 @@ def make_app(
     * ``scheduler_restart_backoff_s`` — pause before restarting a died scheduler.
     * ``scheduler_max_restarts`` — cap on rapid restarts before giving up (then
       ``/health`` reports ``scheduler_alive: false``).
+    * ``extra_consumers`` — ``((stream, handler), ...)``: more command streams,
+      each drained by its OWN loop with its own consumer group
+      (``{domain}-svc``). A stream with its own loop cannot be delayed by the
+      domain stream's handlers, nor delay them - the reason the public
+      Strategy Finder's scans are not on ``cmd:options``.
     """
     the_bus = bus  # resolved lazily in lifespan if None (honors pytest fake selection).
 
@@ -347,6 +360,13 @@ def make_app(
             tasks.append(
                 asyncio.create_task(
                     _consume_loop(domain, b, command_handler, poll_block_ms)
+                )
+            )
+        for stream, handler in extra_consumers:
+            tasks.append(
+                asyncio.create_task(
+                    _consume_stream(stream, f"{domain}-svc", b, handler,
+                                    poll_block_ms)
                 )
             )
         try:

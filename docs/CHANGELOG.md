@@ -4,7 +4,43 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**Six more Dealer Positioning boards and the market
+**Last updated:** 2026-09-21 (**Public Strategy Finder, Phase 1: the one write
+the public origin may make, and the worker that answers it. No page yet.**)
+
+- **`shared/public_scan.py`**: the stream (`cmd:finder_public`), the request
+  builder (one symbol through `clean_symbol`, nothing else), the per-symbol
+  result keys, the outcome codes and their words, and the loader for the new
+  `config/finder_public.toml` (the pinned filters, reuse and dedup windows, the
+  daily budget, `show_leg_quotes` off for D2). On the Tier-1 allow-list; its
+  import set is pinned.
+- **`bus_client.request_public_scan(symbol)`**: allowed on a read-only
+  process, while `request()` stays refused for every domain including this
+  stream. One parameter; it chooses neither the stream nor the command type.
+- **`make_app(extra_consumers=...)`**: more command streams, each on its own
+  loop. A test blocks the domain handler and proves the extra stream still
+  drains.
+- **`services/options_svc/finder_public.py`**: refusals in order (invalid,
+  expired/replayed, cached, duplicate, closed, budget), all before any Schwab
+  call; then `handlers.finder_payload` with `ask_if_large=False`. Only a real
+  result is written, with a 24 h TTL, so a failed rescan keeps the good one.
+  `cache:options:finder_public_status` carries the budget, busy symbol and a
+  bounded per-symbol outcome map.
+- **`handlers.finder_payload`** is the private `swing_scan`'s scan-and-stamp
+  body, extracted unchanged; `swing_scan` still writes `cache:options:swing`.
+- **`[windows.finder_public]`** 08:40–15:00 CT: pre-market scans returned no
+  rows at 07:20.
+- **Reviewed independently before commit.** No critical findings. Fixed:
+  a no-options symbol is remembered for 240 min (junk tickers could otherwise
+  spend the budget a minute at a time), `busy` expires, a future-dated request
+  is refused, public failures count under their own `/health` area, and the
+  cost comments stop claiming the 90-day cap avoids the expiry chooser.
+- **Not yet live:** the ACL selector (runbook §2 step 4c) must be applied on
+  prod, and nothing enqueues until the Phase 2 page exists. The per-visitor
+  limit moved into Phase 2 on review.
+
+---
+
+**Prior — 2026-09-21** (**Six more Dealer Positioning boards and the market
 ticker on the public live screens — twenty screens, up from fourteen.**)
 
 - **Six pinned `options.gamma` screens**: `/gamma/spy` and `/gamma/qqq` (GEX),

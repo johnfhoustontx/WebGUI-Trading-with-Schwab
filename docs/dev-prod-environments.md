@@ -207,6 +207,43 @@ naming the variable.
 ⚠ **`.env.live` is in the backup and in `.gitignore`** — both as their own
 line, because neither `.env` entry matches this name.
 
+**4c. The live ACL user's ONE write (public Strategy Finder).** The `live`
+user is read-only except for one Redis 7 selector: it may `XADD` on
+`cmd:finder_public` and on no other key. That stream carries a visitor's
+request to scan one symbol (`shared/public_scan.py`); options_svc answers it on
+a consumer loop of its own. Add the selector, then persist it:
+
+```bash
+cd /home/administrator/dev && set -a && . ./.env && set +a
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli ACL SETUSER live '(%W~cmd:finder_public +xadd)'
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli CONFIG REWRITE
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli ACL GETUSER live
+```
+
+`%W~` is a WRITE-only key selector: the user cannot read that stream, and the
+selector's `+xadd` applies to that key alone. ⚠ `ACL SAVE` does not work on this
+box (no `aclfile`; users live in `redis.conf`), so `CONFIG REWRITE` is the
+persist step. Read its output rather than redirecting it: an unpersisted user
+vanishes on the next Redis restart. ⚠ Pass the password through
+`REDISCLI_AUTH`, never `--pass`, which puts it in the process list.
+
+**Verify both directions as the `live` user** (its URL is in `.env.live`):
+
+```bash
+redis-cli -u "$REDIS_LIVE_URL" XADD cmd:finder_public '*' probe 1   # an id
+redis-cli -u "$REDIS_LIVE_URL" XADD cmd:options '*' probe 1         # NOPERM
+redis-cli -u "$REDIS_LIVE_URL" SET cache:options:x 1                # NOPERM
+redis-cli -u "$REDIS_LIVE_URL" PUBLISH events:options:scan x        # NOPERM
+redis-cli -u "$REDIS_LIVE_URL" XRANGE cmd:finder_public - +         # NOPERM
+```
+
+The probe entry the first line writes has no `data` field, so options_svc
+dead-letters it to `cmd:finder_public:dead` on its next read, where it is
+harmless. ⚠ `redis-cli -u` puts the URL, password included, in the process
+list for the second it runs: do it from your own shell, not a logged job.
+Without this selector every public scan request fails with `NOPERM`, which the
+public page words as an error rather than a permissions problem.
+
 **5. Carry the gitignored artifacts.** Most arrive with the snapshot in §4 —
 including `Top 20.xlsx` and the sentiment bridge — so the only hand-copy is the
 one store no tool knows about:

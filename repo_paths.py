@@ -73,6 +73,11 @@ SYMBOLS_TOML = REPO_ROOT / "config" / "symbols.toml"
 # protection. Edit + restart options_svc.
 SECTORS_TOML = REPO_ROOT / "config" / "sectors.toml"
 
+# The public Strategy Finder: the pinned scan filters, the per-symbol reuse and
+# dedup windows, the daily scan budget. Read by shared/public_scan.py from both
+# options_svc (the worker) and the public live process. Edit + restart both.
+FINDER_PUBLIC_TOML = REPO_ROOT / "config" / "finder_public.toml"
+
 # Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
 # manual paper_account.db so the driver's book is fully isolated (zero schema change;
 # every paper_account_db/paper_engine fn already takes db_path).

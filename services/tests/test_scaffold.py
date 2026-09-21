@@ -523,3 +523,70 @@ def test_every_service_loop_beats_inside_its_while_loop(svc):
              and c.func.attr == "tick"
              and isinstance(c.func.value, ast.Name) and c.func.value.id == "_heartbeat"]
     assert beats, f"{svc}.scheduler.loop has no _heartbeat.tick() inside a while loop"
+
+
+# ── extra consumers: a second stream with its own loop ──────────────────────
+
+def _wait_for(pred, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if pred():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_an_extra_stream_is_consumed_by_its_own_handler():
+    bus = Bus(fake=True)
+    domain_seen, extra_seen = [], []
+    app = make_app("extrax", command_handler=lambda b, c: domain_seen.append(c.type),
+                   extra_consumers=(("cmd:extrax_public",
+                                     lambda b, c: extra_seen.append(c.type)),),
+                   bus=bus, poll_block_ms=50)
+    bus.enqueue_command("cmd:extrax_public", {"type": "public_scan", "args": {}})
+    bus.enqueue_command("cmd:extrax", {"type": "rescan", "args": {}})
+    with TestClient(app):
+        assert _wait_for(lambda: extra_seen and domain_seen)
+    assert extra_seen == ["public_scan"]      # never handed to the domain handler
+    assert domain_seen == ["rescan"]          # and the reverse
+
+
+def test_a_blocked_domain_handler_does_not_hold_up_the_extra_stream():
+    """THE POINT OF A SECOND CONSUMER: a 40 s public scan must never queue
+    ahead of a paper create, and a slow owner command must never stall the
+    public queue. Each stream has its own loop."""
+    import threading
+    bus = Bus(fake=True)
+    release = threading.Event()
+    extra_seen = []
+
+    def slow_domain(b, c):
+        release.wait(5.0)
+
+    app = make_app("blockx", command_handler=slow_domain,
+                   extra_consumers=(("cmd:blockx_public",
+                                     lambda b, c: extra_seen.append(c.type)),),
+                   bus=bus, poll_block_ms=50)
+    bus.enqueue_command("cmd:blockx", {"type": "grind", "args": {}})
+    bus.enqueue_command("cmd:blockx_public", {"type": "public_scan", "args": {}})
+    try:
+        with TestClient(app):
+            assert _wait_for(lambda: extra_seen, timeout=2.0), \
+                "the extra stream waited behind the domain handler"
+            release.set()
+    finally:
+        release.set()
+
+
+def test_an_extra_stream_handler_that_raises_is_dead_lettered_on_its_own_stream():
+    bus = Bus(fake=True)
+
+    def boom(b, c):
+        raise RuntimeError("bad public command")
+
+    app = make_app("deadx", extra_consumers=(("cmd:deadx_public", boom),),
+                   bus=bus, poll_block_ms=50)
+    bus.enqueue_command("cmd:deadx_public", {"type": "public_scan", "args": {}})
+    with TestClient(app):
+        assert _wait_for(lambda: bus._r.llen("cmd:deadx_public:dead") == 1)
+    assert bus._r.llen("cmd:deadx:dead") == 0

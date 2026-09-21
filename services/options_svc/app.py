@@ -5,6 +5,8 @@ Assembles the shared scaffold with this domain's scheduler + command handler:
 * scheduler ``scheduler.loop`` — 15-min auto-scan within 08:00–15:15 CT on
   trading days (checks the slot every 30 s).
 * command handler ``handlers.handle_command`` — ``rescan`` → full rescan.
+* ``finder_public.handle`` on ``cmd:finder_public`` — the public site's
+  Strategy Finder requests, on a consumer loop of their own.
 
 Importable without side effects; only starts uvicorn under ``__main__`` on the
 ``options`` service port (8211) from ``repo_paths.SERVICE_PORTS``.
@@ -19,12 +21,16 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from services._scaffold import make_app  # noqa: E402
-from services.options_svc import handlers, scheduler  # noqa: E402
+from services.options_svc import finder_public, handlers, scheduler  # noqa: E402
+from shared import public_scan  # noqa: E402
 
 app = make_app(
     "options",
     scheduler=scheduler.loop,
     command_handler=handlers.handle_command,
+    # The public Strategy Finder's requests, on their OWN stream and loop, so a
+    # visitor's scan never queues ahead of (or behind) the owner's commands.
+    extra_consumers=((public_scan.STREAM, finder_public.handle),),
 )
 
 

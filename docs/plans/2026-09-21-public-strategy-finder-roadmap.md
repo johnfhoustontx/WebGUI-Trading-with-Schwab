@@ -156,6 +156,38 @@ any page exists.
   `cache:options:swing`; and a Redis-driven end-to-end check on prod with the
   live ACL user before any page ships.
 
+#### Phase 1 progress (2026-09-21)
+
+Built and tested; not yet exercised on prod.
+
+- `shared/public_scan.py` + `config/finder_public.toml` (+ Settings catalogue),
+  `[windows.finder_public]` 08:40–15:00 CT.
+- `bus_client.request_public_scan`: the one allowed write, AST-pinned.
+- `make_app(extra_consumers=...)` and `services/options_svc/finder_public.py`,
+  wired in `options_svc/app.py`.
+- `handlers.finder_payload`, extracted from `swing_scan` unchanged.
+- Runbook §2 step 4c: the ACL selector and its two-way verification.
+- **Deferred to Phase 2:** the daily scan count beside the Schwab counts in
+  Settings (the status view already carries it), and the queue position (the
+  status view carries the busy symbol; a position needs the page to exist).
+- **Independent review, same day.** No critical findings; the ACL scoping,
+  the one write path and the unchanged private refactor held. Fixed before
+  commit:
+  - a symbol found to have no options is remembered for `negative_ttl_min`
+    (240) instead of the 60 s dedup, so junk tickers cannot spend the budget
+    one minute at a time;
+  - `busy` records when it started and is dropped after 10 minutes or at the
+    day's rollover, so a crash mid-scan cannot leave it set;
+  - a request stamped more than 30 s in the future is refused as expired;
+  - public scan failures count under `options.finder_public_*` in `/health`,
+    not the owner's `options.swing_*`;
+  - a failure writing the result after a good scan is an `error` that still
+    clears `busy`;
+  - the cost comments no longer claim the 90-day cap avoids the expiry
+    chooser: daily-expiry names (SPY, QQQ, $SPX) scan all ~60 expirations.
+  Carried into Phase 2 (below): the per-visitor limit, what the status view
+  may show, and repaint churn.
+
 **Exit:** on prod, the live ACL user can add to `cmd:finder_public` and is
 refused on `cmd:options` and every `cache:` key. A request for SPY during the
 session produces `swing_pub:SPY`. A request for a nonsense symbol spends no
@@ -163,6 +195,18 @@ Schwab call.
 
 ### Phase 2: the public page (Tier 1)
 
+- **The per-visitor limit ships WITH the input box** (moved from Phase 3 on
+  review). Dedup is per symbol and any well-formed ticker is accepted, so
+  without it one visitor can still fill the queue: at 15–25 s a scan for a
+  daily-expiry name, 8–10 queued symbols push every later request past the
+  180 s wait limit.
+- **The status view is public data; the page must not show its `last` map.**
+  It lists every symbol anyone searched. The page reads only its own symbol's
+  entry, plus the budget, window and busy flag.
+- **Repaint churn.** Every refusal rewrites the status view and publishes an
+  event, so every open public page repaints once per request anywhere. The page
+  should repaint only when its own symbol's entry, the budget or the busy flag
+  changed.
 - `swing.render(public=False)`: an optional keyword like
   `gamma.render(symbol=, view=)`, defaulting to today's behaviour so the private
   route is unchanged.
@@ -194,10 +238,9 @@ write stays at zero.
 
 ### Phase 3: abuse limits and polish
 
-- **Per-visitor limit** in the public process: a few scans per client per
-  hour, keyed on the last `X-Forwarded-For` hop Caddy stamps. Held in memory
-  only: no IP address is written to Redis or to disk. A restart resets it,
-  which is acceptable because the daily budget is the hard limit.
+- **Per-visitor limit**: moved to Phase 2. A few scans per client per hour,
+  keyed on the last `X-Forwarded-For` hop Caddy stamps, held in memory only (no
+  IP address is written to Redis or to disk).
 - **Row cap** for the public table (e.g. the best 5 per strategy type), for
   readability and for `webgui_live`'s 1 GB memory cap.
 - **Warm cache (optional).** Pre-scan a short list, e.g. yesterday's most
@@ -222,8 +265,15 @@ public process. The daily budget already bounds the Schwab cost without it.
   The worst an attacker can do is spend the day's public scan budget. That
   denies other visitors, not the owner: separate stream, separate worker,
   separate budget.
-- **Load on the proxy.** One worker, at about 6 calls per ~11 s (the smoke
-  run), is roughly 0.5 requests a second against the headroom in §5. If the
+- **Dev reaches prod's proxy.** Command handlers are not suppressed in a dev
+  environment, so a request to dev's public origin would scan through prod's
+  proxy. Dev's public origin is not fronted by the edge, so only a local
+  request can reach it; the budget still bounds it.
+- **Load on the proxy.** Private and public Finder scans can now run at the
+  same time, on separate threads, where before every Finder scan was serial on
+  `cmd:options`. One public worker, at about 6 calls per ~11 s (the smoke run;
+  10–12 for daily-expiry names), is roughly 0.5–1 requests a second against the
+  headroom in §5. If the
   session run shows GEX skips, pause the worker during the autoscan minutes
   (:00–:03, :15–:18, …) and let the queue wait.
 - **Scoring credibility.** Under D4, undefined-risk rows show, and their

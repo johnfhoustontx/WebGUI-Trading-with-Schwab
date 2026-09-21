@@ -119,6 +119,10 @@ service enforces, so it imports the one cap module rather than a Tier-1 copy, an
 `shared.config_toml` (since 2026-09-19; stdlib-only — `tomllib`/`os`/`json`/`re`
 — used by `config_store.py` behind Settings → Configuration to read the shipped
 files and write the operator's `config/local/` overrides) ·
+`shared.public_scan` (since 2026-09-21; the public Strategy Finder's stream
+name, request builder, result keys and config - `shared.symbols` +
+`shared.config_toml` and nothing else, pinned by
+`shared/tests/test_public_scan.py`) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
@@ -724,6 +728,21 @@ Sign-out, because those routes **do not exist in the process**. The pinned gamma
 screens refuse at the page as well: `gamma.may_enqueue(symbol, view)` gates every
 enqueue site (a *total* proof, pinned by an AST walk over the source) **and** no
 control that reaches one is built. Both, not either.
+
+⚠ **Since 2026-09-21 the origin has exactly ONE write, and it is not a hole in
+layer 2.** `bus_client.request_public_scan(symbol)` puts `{"symbol": <SYMBOL>}`
+on `cmd:finder_public` for the public Strategy Finder; `request()` stays refused
+for every domain, that stream's included. The function takes one argument, runs
+it through `clean_symbol`, and chooses neither the stream nor the command type
+(an AST test pins all three). Layer 1 agrees: the `live` ACL user's only write
+is a Redis 7 selector, `(%W~cmd:finder_public +xadd)` (runbook §2 step 4c).
+options_svc answers on a consumer loop of its own
+(`make_app(extra_consumers=...)`, `services/options_svc/finder_public.py`), so a
+visitor's scan never queues with the owner's commands, and every refusal —
+invalid, expired, cached, duplicate, closed, over budget — is decided before
+any Schwab call. Result keys are per symbol and EXPIRE, because visitors choose
+the symbols. Roadmap:
+[`docs/plans/2026-09-21-public-strategy-finder-roadmap.md`](docs/plans/2026-09-21-public-strategy-finder-roadmap.md).
 
 ⚠ **The published route set is the twenty screens PLUS exactly one non-page
 route: `/static` (2026-09-09).** Every screen now carries a slim header — the

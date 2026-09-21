@@ -1,0 +1,47 @@
+# The public Strategy Finder on live.neuralstrike.co (roadmap:
+# docs/plans/2026-09-21-public-strategy-finder-roadmap.md).
+#
+# A visitor types a symbol; options_svc scans it with the ONE filter set below
+# and publishes the result. Every value here is read by shared/public_scan.py.
+# Edit + restart options_svc (and webgui_live for [display]).
+#
+# The scan window is [windows.finder_public] in config/sessions.toml, with the
+# app's other windows.
+
+[scan]
+# The filters every public scan runs. The deltas and the credit floor are the
+# private Strategy Finder's own defaults. The 90-day cap is about COST: a whole
+# chain takes 26-40 s. Public scans never stop to ask which expirations to load
+# (the public page has nothing to click), so a name with DAILY expirations
+# (SPY, QQQ, $SPX) scans every one of its ~60 inside 90 days - measure before
+# widening this.
+dte_min = 0
+dte_max = 90
+put_d_min = -0.2
+put_d_max = -0.1
+call_d_min = 0.1
+call_d_max = 0.2
+min_cr_fraction = 0.1
+
+[limits]
+# Minutes a result is reused instead of scanning the symbol again.
+result_ttl_min = 15
+# Seconds after a symbol's last scan during which it is not re-run.
+dedup_sec = 60
+# Minutes a symbol found to have no listed options is not re-run. Without it,
+# one visitor typing junk tickers could spend the day's budget.
+negative_ttl_min = 240
+# Seconds a request may wait in the queue before it is dropped unscanned.
+# This is also the replay guard: a backlog replayed at startup is older.
+max_wait_sec = 180
+# Scans per trading day across ALL visitors. Each costs ~6 Schwab calls,
+# more for a name with daily expirations.
+daily_budget = 200
+# Hours a symbol's result is kept. Visitors choose the symbols, so the keys
+# must expire or they would accumulate without limit.
+result_keep_hours = 24
+
+[display]
+# Per-leg bid/ask/mark on the public page. Off until Schwab's market-data
+# redistribution terms are settled (roadmap decision D2).
+show_leg_quotes = false

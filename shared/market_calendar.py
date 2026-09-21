@@ -248,6 +248,10 @@ _DEFAULTS = {
         # ``collection``: they happen to share bounds today, and one public
         # surface must not move because another one was retimed.
         "live_capture": {"start": "08:00", "end": "15:20"},
+        # The public Strategy Finder's on-demand scans. Opens after the first
+        # minutes of the session (pre-open marks fail the quality cut, measured
+        # 2026-09-21) and closes at the regular close.
+        "finder_public": {"start": "08:40", "end": "15:00"},
         # ``end_exclusive`` lives here, not only in the TOML, so a missing or
         # corrupt file still degrades to the SAFE behavior: falling back to
         # inclusive would silently re-open the 15:30 ET entry slot.

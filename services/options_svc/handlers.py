@@ -834,6 +834,27 @@ def swing_scan(bus, args: dict) -> None:
     ``remove_closed_from_captured`` / ``refresh_gamma_current``)."""
     args = args or {}
     params = {k: args.get(k, default) for k, default in _SWING_DEFAULTS.items()}
+    payload = finder_payload(bus, params, echo_args=args, ask_if_large=True)
+    version = bus.cache_set(CACHE_SWING, payload)
+    bus.publish(EVENT_SWING, {"version": version})
+
+
+def finder_payload(bus, params: dict, *, echo_args, ask_if_large: bool,
+                   degrade_area: str = "options.swing") -> dict:
+    """Run one Strategy Finder scan and build the payload the page renders.
+
+    Shared by the private page's ``swing_scan`` (``ask_if_large=True``: a large
+    chain answers with the expiry choices) and the public site's worker
+    (``public_scan.handle``, ``ask_if_large=False``: the public page has no
+    buttons to pick a choice). Writes NOTHING - each caller decides where the
+    payload goes, which is what keeps a public scan out of the owner's
+    ``cache:options:swing`` slot.
+
+    ``params`` holds every ``_SWING_DEFAULTS`` key. ``echo_args`` is published as
+    ``params`` for the page to display, exactly as the command sent it.
+    ``degrade_area`` prefixes the two degrade counters, so a public scan's
+    failures are counted apart from the owner's in ``/health``.
+    """
     market_state = _market_state(bus)
     # The earnings gate (gap assessment A5). ``swing_scan`` has gated per signal
     # since the 0-DTE-bucket fix and ``income_scan`` supplied a date, but this
@@ -844,7 +865,7 @@ def swing_scan(bus, args: dict) -> None:
     try:
         status, earnings_date = compute.scan_earnings(params["symbol"])
     except Exception:  # noqa: BLE001 — see above.
-        _degrade.degraded("options.swing_earnings")
+        _degrade.degraded(f"{degrade_area}_earnings")
         status, earnings_date = "not_listed", None
     # The Strategy Finder's whole-chain scan: every listed expiry, a report TAGGED
     # rather than dropped, and the best FINDER_PER_TYPE_LIMIT of each strategy type
@@ -861,9 +882,9 @@ def swing_scan(bus, args: dict) -> None:
                                    per_type_limit=compute.FINDER_PER_TYPE_LIMIT,
                                    # More than LARGE_CHAIN_EXPIRIES in range and
                                    # no expiry_choice: answer with the choices.
-                                   ask_if_large=True)
+                                   ask_if_large=ask_if_large)
     except Exception as exc:  # noqa: BLE001 — see above.
-        _degrade.degraded("options.swing_scan", detail=params["symbol"])
+        _degrade.degraded(f"{degrade_area}_scan", detail=params["symbol"])
         result = {"signals": [], "view": {}, "spot": None, "expiries_failed": None,
                   "needs_choice": False, "choices": None, "expiry_choice": None,
                   "error": type(exc).__name__}
@@ -911,11 +932,10 @@ def swing_scan(bus, args: dict) -> None:
                "expirations_scanned": result.get("expirations_scanned"),
                "choices": result.get("choices"),
                "expiry_choice": result.get("expiry_choice"),
-               "symbol": params["symbol"], "params": args}
+               "symbol": params["symbol"], "params": echo_args}
     if result.get("error"):
         payload["error"] = result["error"]
-    version = bus.cache_set(CACHE_SWING, payload)
-    bus.publish(EVENT_SWING, {"version": version})
+    return payload
 
 
 # ── the 30-45 DTE income window ─────────────────────────────────────────────

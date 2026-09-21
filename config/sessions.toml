@@ -86,6 +86,18 @@ end   = "15:20"   # 16:20 ET
 start = "15:25"
 end   = "15:50"
 
+[windows.finder_public]
+# When the public Strategy Finder (live.neuralstrike.co/finder) will run a scan
+# a visitor asks for. Outside it the page shows the last scan, if any.
+# Starts ten minutes after the open: at 07:20 on 2026-09-21 a pre-market scan
+# returned no rows (overnight marks fail the quality cut). Ends at the close,
+# 15:00 CT: after it marks stop moving and index open interest reads zero
+# (see [windows.collection]). Each scan is ~6 Schwab calls (more for names
+# with daily expirations);
+# the day's total is capped by [limits] daily_budget in config/finder_public.toml.
+start = "08:40"
+end   = "15:00"
+
 [windows.driver_entry]
 # Autonomous driver entry window, in ET (not CT) — matches the existing
 # constant it replaces. Skips the open's first ~15 min and takes no new

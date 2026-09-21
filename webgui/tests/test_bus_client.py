@@ -376,3 +376,71 @@ def test_reset_leaves_the_process_configuration_alone():
     bus_client.reset()
     assert bus_client.is_read_only() is True
     assert bus_client._url == "redis://live:secret@127.0.0.1:6379/0"
+
+
+# ── the public Strategy Finder's one write ──────────────────────────────────
+
+def _public_stream_commands():
+    from shared import public_scan
+    return bus_client.bus().consume_commands(
+        public_scan.STREAM, group="g", consumer="c", block_ms=50)
+
+
+def test_a_public_scan_request_is_allowed_on_a_read_only_process():
+    """The ONE enqueue the public origin may make. It must work with the
+    read-only flag on, which is the only state that process is ever in."""
+    from shared import public_scan
+    bus_client.set_read_only(True)
+    msg_id = bus_client.request_public_scan(" spy ")
+    assert msg_id
+    cmds = _public_stream_commands()
+    assert len(cmds) == 1
+    assert cmds[0][1].type == public_scan.COMMAND_TYPE
+    assert cmds[0][1].args == {"symbol": "SPY"}
+
+
+def test_a_public_scan_request_never_reaches_the_options_stream():
+    bus_client.request_public_scan("SPY")
+    assert bus_client.bus().consume_commands(
+        "cmd:options", group="g", consumer="c", block_ms=50) == []
+
+
+@pytest.mark.parametrize("bad", ["", None, "spy; flushall", "../x", "TOOLONGSYM"])
+def test_an_invalid_symbol_is_refused_before_anything_is_written(bad):
+    bus_client.set_read_only(True)
+    with pytest.raises(ValueError):
+        bus_client.request_public_scan(bad)
+    assert _public_stream_commands() == []
+
+
+def test_the_generic_request_path_stays_refused_for_the_public_stream():
+    """The new function must not turn ``request`` into a loophole: the domain
+    spelling of the same stream is still refused on a read-only process."""
+    bus_client.set_read_only(True)
+    with pytest.raises(PermissionError):
+        bus_client.request("finder_public", {"type": "public_scan",
+                                             "args": {"symbol": "SPY"}})
+    assert _public_stream_commands() == []
+
+
+def test_the_public_request_takes_one_argument_and_writes_one_place():
+    """A visitor controls one string. The function must take nothing else from
+    its caller (no stream, no type, no extra args), and its only write must be
+    the command ``request_command`` built, onto ``public_scan.STREAM``."""
+    import ast
+    import inspect
+    import textwrap
+    fn = ast.parse(textwrap.dedent(inspect.getsource(
+        bus_client.request_public_scan))).body[0]
+    params = [a.arg for a in fn.args.args + fn.args.kwonlyargs]
+    assert params == ["raw_symbol"] and not fn.args.vararg and not fn.args.kwarg
+    writes = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+              and getattr(n.func, "attr", None) == "enqueue_command"]
+    assert len(writes) == 1
+    stream, command = writes[0].args
+    assert ast.unparse(stream) == "public_scan.STREAM"
+    assert ast.unparse(command) == "command"
+    builds = [n for n in ast.walk(fn) if isinstance(n, ast.Assign)
+              and ast.unparse(n.targets[0]) == "command"]
+    assert [ast.unparse(b.value) for b in builds] == [
+        "public_scan.request_command(raw_symbol)"]
