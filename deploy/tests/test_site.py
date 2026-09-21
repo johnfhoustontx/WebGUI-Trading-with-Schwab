@@ -1167,7 +1167,7 @@ def test_the_report_is_in_the_sitemap():
 # link exactly when live_screens publishes it, and a "Coming soon" entry
 # otherwise -- never a link to a route that does not exist yet.
 
-TOOLS = (("finder", "Strategy Finder"), ("rescue", "Rescue"),
+TOOLS = (("finder", "Strategy Finder"), ("rescue", "Rescue my Sh*tty trade"),
          ("calculator", "Calculator"))
 
 # The pages whose navs carry destination links. glossary.html is a leaf's nav
@@ -1209,11 +1209,11 @@ def test_a_tool_is_a_link_exactly_when_it_is_published():
             if slug in routes:
                 href = f"https://{repo_paths.LIVE_HOST}{routes[slug]}"
                 assert re.search(rf'<a class="ns-menu-item" href="{re.escape(href)}"'
-                                 rf'>\s*<span class="ns-menu-title">{title}</span>',
+                                 rf'>\s*<span class="ns-menu-title">{re.escape(title)}</span>',
                                  menu), f"{name}: {title} is published but not linked to {href}"
             else:
                 item = re.search(rf'<span class="ns-menu-item ns-menu-soon"'
-                                 rf'>\s*<span class="ns-menu-title">{title}</span>'
+                                 rf'>\s*<span class="ns-menu-title">{re.escape(title)}</span>'
                                  rf'.*?Coming soon', menu, re.S)
                 assert item, f"{name}: unpublished {title} is not a 'Coming soon' entry"
 
