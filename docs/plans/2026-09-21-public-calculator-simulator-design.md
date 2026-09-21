@@ -129,8 +129,11 @@ The live grid gains two tiles.
   stays.
 - **Every field is validated before it is written and again in the worker**:
   symbol, expirations, strikes on the listed ladder, quantities, prices,
-  volatility 0-500%, days ahead 0 to the longest leg, share legs priced only at
-  the held spot. A NaN, infinity or boolean refuses the request.
+  volatility 0-500%, days ahead 0 to the longest leg. A share leg keeps a
+  positive typed price as the visitor's own cost basis; only a share leg priced
+  0 is filled with the held spot (the private `calculator.fill_stock_premiums`
+  rule, `tools_public._fill_share_premiums`). A NaN, infinity or boolean
+  refuses the request.
 - A snapshot evicted since the page loaded answers **load first**; the page
   offers Load again.
 - From the Rescue review, from the start: a held list counts only within its
