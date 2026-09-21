@@ -378,3 +378,37 @@ def test_the_symbol_locks_do_not_accumulate(schwab, in_window):
                           spend=lambda: True, start=lambda: None, area="test")
     assert run(None) == "cached"
     assert pc._SYMBOL_LOCKS == {}
+
+
+# ── after hours: a list loaded before the open is not served once it opens ──
+
+def _request(bus, now):
+    return pc.ladder_request(bus, "SPY", None, age=0.0, now=now, max_wait_sec=60,
+                             window="tools_public", recently=lambda: False,
+                             spend=lambda: True, start=lambda: None, area="test")
+
+
+def _loads(schwab):
+    return [c for c in schwab.calls if c[0] == "load"]
+
+
+def test_a_list_loaded_before_the_open_is_reloaded_once_it_opens(schwab):
+    bus = Bus(fake=True)
+    before = dt.datetime(2026, 9, 21, 8, 30, tzinfo=CT)     # window opens 08:40
+    assert _request(bus, before) == "done"                  # after_hours allows it
+    assert _request(bus, before + dt.timedelta(minutes=15)) == "done"
+    assert len(_loads(schwab)) == 2
+
+
+def test_a_list_loaded_inside_the_window_stays_cached(schwab):
+    bus = Bus(fake=True)
+    assert _request(bus, OPEN) == "done"
+    assert _request(bus, OPEN + dt.timedelta(minutes=15)) == "cached"
+    assert len(_loads(schwab)) == 1
+
+
+def test_a_list_loaded_after_the_close_stays_cached_after_the_close(schwab):
+    bus = Bus(fake=True)
+    late = dt.datetime(2026, 9, 21, 16, 0, tzinfo=CT)
+    assert _request(bus, late) == "done"
+    assert _request(bus, late + dt.timedelta(minutes=15)) == "cached"

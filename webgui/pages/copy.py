@@ -39,3 +39,12 @@ WAITING_OPTIONS = "No data yet — the options feed hasn't published this sessio
 WAITING_SENTIMENT = ("No data yet — the sentiment feed hasn't published "
                      "this session.")
 WAITING_MARKET = "No data yet — the market feed hasn't published this session."
+
+# Outside the live-price window the public Rescue, Calculator and Simulator
+# still run (``after_hours`` in config/sessions.toml), on whatever Schwab
+# returns after the close. One wording on all three screens, so a visitor reads
+# the same caveat wherever they are.
+AFTER_HOURS_PRICES = ("The market is closed. Bid, ask and mark prices after the "
+                      "close may be stale or incorrect, so results built from "
+                      "them may be off. Prices are live {start}–{end} CT on "
+                      "trading days.")

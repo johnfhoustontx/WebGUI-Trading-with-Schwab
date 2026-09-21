@@ -76,7 +76,10 @@ design reuses their shape and the fixes the Rescue review forced.
 - Rate My Trade on the public page drops the checklist's **Paper book** line
   (it reads the owner's ledger), as the Finder does.
 - Tools requests run in a new `[windows.tools_public]` (market hours). Math
-  requests run any time against data already held.
+  requests run any time against data already held. **Amended 2026-09-21
+  (owner):** with `after_hours = true` tools requests run outside the window
+  too, and the pages warn that bid, ask and mark may be stale; the same for
+  Rescue's window.
 
 ## 3. Pages and hand-off
 

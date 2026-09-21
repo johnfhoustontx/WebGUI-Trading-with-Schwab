@@ -731,7 +731,7 @@ _PRIVATE_ATTRS = {
     "_sim": {"_TILE", "_TILE_VALUE", "_TONE_CLASS", "_TONE_REMOVE",
              "whatif_figure", "whatif_pnl"},
     "_calc_live": {"BAD_SYMBOL", "MATH", "NO_ANSWER", "REQUEST_FAILED", "TOOLS",
-                   "_visitor", "_wait_sec", "_when", "_window", "answer_state",
+                   "WINDOW", "_visitor", "_wait_sec", "_when", "_window", "answer_state",
                    "limit_text", "outcome_text"},
     "_entry": {"Debounce", "expiry_label"},
     "public_handoff": {"read"},

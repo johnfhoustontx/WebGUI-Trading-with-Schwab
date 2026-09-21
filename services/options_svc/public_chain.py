@@ -335,6 +335,17 @@ def age_s(iso, now) -> float | None:
     return (now - when).total_seconds()
 
 
+def _when(iso):
+    """An ISO stamp as an aware datetime (a naive one is UTC), or None."""
+    try:
+        when = dt.datetime.fromisoformat(str(iso)) if iso else None
+    except ValueError:
+        return None
+    if when is not None and when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    return when
+
+
 def published(bus, symbol):
     """The published public chain payload for ``symbol``, or None."""
     env = bus.cache_get(pr.cache_key(pr.ladder_view(symbol)))
@@ -390,6 +401,11 @@ def _ladder_request(bus, symbol, expiry, *, age, now, max_wait_sec, window,
     fresh = held_s is not None and 0 <= held_s < lim["ladder_ttl_min"] * 60
     if fresh and not existing.get("no_options") and held(symbol) is None:
         fresh = False
+    # A list loaded after hours carries stale marks: once the live window
+    # opens it is reloaded rather than served for the rest of its TTL.
+    if fresh and market_calendar.opened_since(
+            window, _when((existing or {}).get("loaded_at")), now):
+        fresh = False
     if age is not None and (age > max_wait_sec or age < -FUTURE_SKEW_SEC):
         outcome = "expired"
     elif fresh and existing.get("no_options"):
@@ -400,7 +416,7 @@ def _ladder_request(bus, symbol, expiry, *, age, now, max_wait_sec, window,
         outcome = "cached"
     elif recently():
         outcome = "duplicate"
-    elif not market_calendar.in_window(window, now):
+    elif not market_calendar.open_for(window, now):
         outcome = "closed"
     else:
         outcome = None

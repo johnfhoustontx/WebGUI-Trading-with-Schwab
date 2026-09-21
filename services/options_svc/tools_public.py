@@ -32,7 +32,8 @@ Tools refusals, in order, all before any Schwab call:
 5. ``duplicate`` the same request ran under ``dedup_sec`` ago;
 6. ``throttled`` (rate only) one trade structure over ``structure_runs`` per
                  ``rate_ttl_min``, whatever prices were typed;
-7. ``closed``    outside ``[windows.tools_public]``;
+7. ``closed``    outside ``[windows.tools_public]``, unless it allows
+   ``after_hours``;
 8. ``budget``    the ONE public budget (shared with Rescue) is spent. Checked
                  LAST by ``public_budget.spend``, where the Schwab work starts.
 
@@ -429,7 +430,7 @@ def _gate(bus, key, now, lim, spend_kind):
     """Refusals 5, 7 and 8 - duplicate, closed, budget - or None when due."""
     if _ran_recently(key, lim["dedup_sec"]):
         return "duplicate"
-    if not market_calendar.in_window(WINDOW, now):
+    if not market_calendar.open_for(WINDOW, now):
         return "closed"
     if not _spend(bus, spend_kind, now):
         return "budget"

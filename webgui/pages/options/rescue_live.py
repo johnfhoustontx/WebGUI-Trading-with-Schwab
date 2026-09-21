@@ -44,6 +44,7 @@ from shared.symbols import clean_symbol
 from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 
+from . import after_hours as _after_hours
 from . import leg_editor
 from . import strategies as _strategies
 # The public chain's readers, shared with the public Calculator.
@@ -74,14 +75,19 @@ LOAD_PROMPT = "Load a symbol to see its expirations and strikes."
 LADDERS = visitor_limit.Limiter(pr.ladders_per_hour)
 COMPUTES = visitor_limit.Limiter(pr.computes_per_hour)
 
+#: The sessions.toml window this page's prices are live in.
+WINDOW = "rescue_public"
+
 
 # ── pure: what the page says ─────────────────────────────────────────────────
 
-def intro_text(window) -> str:
+def intro_text(window, after_hours=False) -> str:
+    when = (f"Prices are live {window['start']}–{window['end']} CT on trading "
+            "days." if after_hours else
+            f"Rescues run {window['start']}–{window['end']} CT on trading days.")
     return ("Describe a trade you hold and get a ranked list of ways to repair "
             "it: roll it, widen it, close it, or leave it. The trade is priced "
-            "against the live market; nothing is placed anywhere. Rescues run "
-            f"{window['start']}–{window['end']} CT on trading days.")
+            f"against the market; nothing is placed anywhere. {when}")
 
 
 def closed_line(open_now, window) -> str:
@@ -143,7 +149,9 @@ def render():
 
     with kit.page():
         kit.header(TITLE)
-        ui.label(intro_text(window)).classes(f"text-sm {MUTED}")
+        ui.label(intro_text(window, _after_hours.state(WINDOW)[1])).classes(
+            f"text-sm {MUTED}")
+        _after_hours.mount(WINDOW, window)
         # Stacked below ``xl``, side by side from it: the public screens
         # are read on phones, where the private page's fixed two columns would
         # squeeze the leg table to nothing.
@@ -457,7 +465,7 @@ def render():
 def _window():
     try:
         from shared import market_calendar
-        start, end = market_calendar.window_bounds("rescue_public")
+        start, end = market_calendar.window_bounds(WINDOW)
         return {"start": start.strftime("%H:%M"), "end": end.strftime("%H:%M")}
     except Exception:  # noqa: BLE001 - the words, not the gate; the service decides
         return {"start": "08:40", "end": "15:00"}
@@ -466,7 +474,9 @@ def _window():
 def _open_now() -> bool:
     try:
         from shared import market_calendar
-        return market_calendar.in_window("rescue_public", dt.datetime.now(CT))
+        # Open after hours too when the window allows it: the page then warns
+        # about stale prices (``after_hours.mount``) instead of saying paused.
+        return market_calendar.open_for(WINDOW, dt.datetime.now(CT))
     except Exception:  # noqa: BLE001 - the words, not the gate; the service decides
         return True
 

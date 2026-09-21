@@ -44,6 +44,7 @@ from shared.symbols import clean_symbol
 from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 
+from . import after_hours as _after_hours
 from . import calc_live as _calc_live
 from . import entry as _entry
 from . import entry_panel
@@ -98,11 +99,13 @@ _OMIT = {"delta", "theta"}
 
 # ── pure ─────────────────────────────────────────────────────────────────────
 
-def intro_text(window) -> str:
+def intro_text(window, after_hours=False) -> str:
+    when = (f"Prices are live {window['start']}–{window['end']} CT on trading "
+            "days." if after_hours else
+            f"Loading runs {window['start']}–{window['end']} CT on trading days.")
     return ("See how an options position's value changes with the underlying price "
-            "and the days ahead, priced from the live option chain. Nothing is "
-            f"placed anywhere. Loading runs {window['start']}–{window['end']} CT on "
-            "trading days.")
+            "and the days ahead, priced from the option chain. Nothing is placed "
+            f"anywhere. {when}")
 
 
 def _is_stock(leg):
@@ -244,7 +247,9 @@ def render():
 
     with kit.page():
         kit.header(TITLE)
-        ui.label(intro_text(window)).classes(f"text-sm {_t.MUTED}")
+        ui.label(intro_text(window, _after_hours.state(_calc_live.WINDOW)[1])
+                 ).classes(f"text-sm {_t.MUTED}")
+        _after_hours.mount(_calc_live.WINDOW, window)
         status = kit.status_line(LOAD_PROMPT)
         # ⚠ No chain grid: the Simulator prices each leg off the snapshot's IV
         # and never shows a quote. The three share structures are excluded, as

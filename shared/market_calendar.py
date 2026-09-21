@@ -256,13 +256,13 @@ _DEFAULTS = {
         # public surface cannot move because the other was retimed. Opens after
         # the first minutes of the session for the same reason: the rescue menu
         # reprices the trade live, and pre-open marks are stale.
-        "rescue_public": {"start": "08:40", "end": "15:00"},
+        "rescue_public": {"start": "08:40", "end": "15:00", "after_hours": True},
         # The public Calculator and Simulator's Schwab-spending requests (a
         # chain, one more expiration, a trade rating, a Simulator snapshot).
         # Held separate from ``rescue_public`` for the same reason that one is
         # separate from ``finder_public``. Pricing requests are not gated: they
         # spend no Schwab call and run on whatever is already held.
-        "tools_public": {"start": "08:40", "end": "15:00"},
+        "tools_public": {"start": "08:40", "end": "15:00", "after_hours": True},
         # ``end_exclusive`` lives here, not only in the TOML, so a missing or
         # corrupt file still degrades to the SAFE behavior: falling back to
         # inclusive would silently re-open the 15:30 ET entry slot.
@@ -679,6 +679,35 @@ def in_window(name: str, now) -> bool:
     if win.get("end_exclusive") is True:
         return start <= t < end
     return start <= t <= end
+
+
+def after_hours_allowed(name: str) -> bool:
+    """Whether window ``name`` still lets its work run OUTSIDE its bounds.
+
+    For the public tools the window means "prices are live", not "allowed":
+    with ``after_hours = true`` a request outside it still runs, and the page
+    warns that bid, ask and mark may be stale. Only a literal ``true`` counts,
+    so a typo keeps the stricter behaviour.
+    """
+    return _window(name).get("after_hours") is True
+
+
+def open_for(name: str, now) -> bool:
+    """True when work gated on window ``name`` may run at ``now``: inside the
+    window, or at any time when the window allows after-hours work."""
+    return in_window(name, now) or after_hours_allowed(name)
+
+
+def opened_since(name: str, then, now) -> bool:
+    """True when ``now`` is inside window ``name`` and ``then`` was not.
+
+    A result built outside the live window (stale after-hours marks) must not
+    be served as fresh once the window opens and live prices exist. A
+    ``then`` of None never counts as crossing.
+    """
+    if then is None:
+        return False
+    return in_window(name, now) and not in_window(name, then)
 
 
 def session_flip_time() -> time:

@@ -700,3 +700,37 @@ def test_every_slot_name_read_in_the_tree_has_a_builtin_default():
     assert not missing, (
         f"slot names read with no _DEFAULTS['slots'] entry: {missing}. "
         "Add the default in shared/market_calendar.py; the TOML only overrides.")
+
+
+# ── after-hours public tools ────────────────────────────────────────────────
+
+def test_after_hours_needs_a_literal_true(monkeypatch):
+    for raw, want in ((True, True), (False, False), ("true", False), (1, False)):
+        monkeypatch.setattr(mc, "_window",
+                            lambda name, raw=raw: {"after_hours": raw})
+        assert mc.after_hours_allowed("tools_public") is want
+
+
+def test_open_for_is_the_window_or_after_hours(monkeypatch):
+    late = dt.datetime(2026, 9, 21, 16, 30, tzinfo=mc.CT)
+    monkeypatch.setattr(mc, "after_hours_allowed", lambda n: False)
+    assert mc.open_for("tools_public", late) is False
+    monkeypatch.setattr(mc, "after_hours_allowed", lambda n: True)
+    assert mc.open_for("tools_public", late) is True
+
+
+def test_opened_since_only_when_now_is_live_and_then_was_not():
+    ct = mc.CT
+    pre = dt.datetime(2026, 9, 21, 8, 30, tzinfo=ct)
+    live = dt.datetime(2026, 9, 21, 9, 0, tzinfo=ct)
+    late = dt.datetime(2026, 9, 21, 16, 0, tzinfo=ct)
+    assert mc.opened_since("tools_public", pre, live) is True
+    assert mc.opened_since("tools_public", live, live) is False
+    assert mc.opened_since("tools_public", late, late) is False
+    assert mc.opened_since("tools_public", None, live) is False
+
+
+def test_the_after_hours_default_matches_the_file():
+    for name in ("rescue_public", "tools_public"):
+        assert mc._DEFAULTS["windows"][name]["after_hours"] is True
+        assert mc.after_hours_allowed(name) is True

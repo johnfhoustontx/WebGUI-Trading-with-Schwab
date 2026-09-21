@@ -426,11 +426,18 @@ _FLOW = ConfigFile(
 _ALL_SVC = (OPTIONS, SENTIMENT, DRIVER, MARKET, WEBGUI)
 
 
-def _window(name, title, help, restart, *, tz_note=""):
+def _window(name, title, help, restart, *, tz_note="", extra=()):
     return Section(title, help + tz_note, (
         Field(f"windows.{name}.start", "Starts", "", kind="time"),
         Field(f"windows.{name}.end", "Ends", "", kind="time"),
-    ), restart=restart)
+    ) + tuple(extra), restart=restart)
+
+
+def _after_hours(name, what):
+    return Field(f"windows.{name}.after_hours", "Also run outside these hours",
+                 f"On: {what} still run outside the hours, and the page warns "
+                 "that bid, ask and mark may be stale or wrong. Off: they are "
+                 "refused until the hours open.", kind="bool")
 
 
 _SESSIONS = ConfigFile(
@@ -481,12 +488,14 @@ _SESSIONS = ConfigFile(
                 "When the public site will scan a symbol a visitor types. "
                 "Outside it the page shows the last scan.", ()),
         _window("rescue_public", "Public Rescue form",
-                "When the public site will load strikes and compute rescue "
-                "options. Outside it the form says when it opens.", ()),
+                "When the public site loads strikes and computes rescue options "
+                "against live prices.", (),
+                extra=(_after_hours("rescue_public", "rescues"),)),
         _window("tools_public", "Public Calculator and Simulator",
-                "When the public site will load a chain, rate a trade or load a "
-                "Simulator snapshot. Pricing a loaded position works at any "
-                "time.", ()),
+                "When the public site loads a chain, rates a trade or loads a "
+                "Simulator snapshot against live prices. Pricing a loaded "
+                "position works at any time.", (),
+                extra=(_after_hours("tools_public", "those requests"),)),
         Section("Driver entry window",
                 "When the autonomous driver may open trades. EASTERN time.", (
             Field("windows.driver_entry.start", "Starts (ET)", "", kind="time"),

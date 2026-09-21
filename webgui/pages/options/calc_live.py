@@ -57,6 +57,7 @@ from shared.symbols import clean_symbol
 from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 
+from . import after_hours as _after_hours
 from . import calculator as _calc
 from . import checks as _checks
 from . import checks_feed as _checks_feed
@@ -75,6 +76,9 @@ from .pub_chain_view import (LEG_SCROLL, LEG_TABLE_MIN, grid_chain, has_quotes,
                              quotes_as_of)
 
 log = logging.getLogger(__name__)
+
+#: The sessions.toml window this page's prices are live in.
+WINDOW = "tools_public"
 
 
 def page_chain(chain, quotes_on):
@@ -131,10 +135,13 @@ _NUM_STRIKES_DEFAULT = 24
 
 # ── pure: what the page says ─────────────────────────────────────────────────
 
-def intro_text(window) -> str:
-    return ("Build an options position, price it against the live market and see "
-            "its P&L across prices and dates. Nothing is placed anywhere. Loading "
-            f"and rating run {window['start']}–{window['end']} CT on trading days.")
+def intro_text(window, after_hours=False) -> str:
+    when = (f"Prices are live {window['start']}–{window['end']} CT on trading "
+            "days." if after_hours else
+            f"Loading and rating run {window['start']}–{window['end']} CT on "
+            "trading days.")
+    return ("Build an options position, price it against the market and see its "
+            f"P&L across prices and dates. Nothing is placed anywhere. {when}")
 
 
 def limit_text(kind) -> str:
@@ -314,7 +321,9 @@ def render():
                                   on_click=lambda: _rate(),
                                   tooltip="Grade these legs with the Strategy "
                                           "Finder's scorer and checklist")
-        ui.label(intro_text(window)).classes(f"text-sm {_t.MUTED}")
+        ui.label(intro_text(window, _after_hours.state(WINDOW)[1])).classes(
+            f"text-sm {_t.MUTED}")
+        _after_hours.mount(WINDOW, window)
         status = kit.status_line(LOAD_PROMPT)
         quotes_lbl = ui.label("").classes(f"calc-quotes-stamp text-xs {_t.MUTED}")
         panel_box = ui.column().classes("w-full min-w-0 gap-2")
@@ -930,7 +939,7 @@ def render():
 def _window():
     try:
         from shared import market_calendar
-        start, end = market_calendar.window_bounds("tools_public")
+        start, end = market_calendar.window_bounds(WINDOW)
         return {"start": start.strftime("%H:%M"), "end": end.strftime("%H:%M")}
     except Exception:  # noqa: BLE001 - the words, not the gate; the service decides
         return dict(DEFAULT_WINDOW)

@@ -13,6 +13,7 @@ import pytest
 from services.options_svc import compute
 from services.options_svc import public_budget
 from services.options_svc import rescue_public as rp
+from shared import market_calendar
 from shared import public_rescue as pr
 from shared.bus import Bus
 from shared.bus.client import reset_fake_bus
@@ -206,7 +207,14 @@ def test_ladders_spend_the_shared_budget_a_compute_then_finds_it_spent(
     assert spent["spent"] == 2 and spent["by_kind"] == {"chain": 2}
 
 
+def _after_hours(monkeypatch, on):
+    """Set whether the window lets work run outside its hours (sessions.toml
+    ``after_hours``), without touching the file."""
+    monkeypatch.setattr(market_calendar, "after_hours_allowed", lambda name: on)
+
+
 def test_a_request_refused_earlier_never_spends(bus, schwab, monkeypatch):
+    _after_hours(monkeypatch, False)
     monkeypatch.setattr(pr, "budget", lambda: 10)
     rp.handle(bus, _compute_cmd())
     rp.handle(bus, _ladder_cmd("SPY"))
@@ -275,11 +283,31 @@ def test_a_compute_on_an_unlisted_expiration_is_refused_from_the_list(bus, schwa
     (lambda **k: _ladder_cmd(**k), lambda: pr.ladder_key("SPY")),
     (lambda **k: _compute_cmd(**k), lambda: _key()),
 ])
-def test_outside_the_window_nothing_runs(bus, schwab, make, key):
+def test_outside_the_window_nothing_runs(bus, schwab, monkeypatch, make, key):
+    _after_hours(monkeypatch, False)
     schwab.now = CLOSED
     rp.handle(bus, make(now=CLOSED))
     assert schwab.calls == []
     assert _answer(bus, key()) == "closed"
+
+
+@pytest.mark.parametrize("make, key, call", [
+    (lambda **k: _ladder_cmd(**k), lambda: pr.ladder_key("SPY"), "load"),
+    (lambda **k: _compute_cmd(**k), lambda: _key(), "compute"),
+])
+def test_after_hours_allowed_runs_outside_the_window(bus, schwab, monkeypatch,
+                                                     make, key, call):
+    _after_hours(monkeypatch, True)
+    schwab.now = CLOSED
+    rp.handle(bus, make(now=CLOSED))
+    assert _answer(bus, key()) == "done"
+    assert [c[0] for c in schwab.calls] == [call]
+
+
+def test_the_shipped_config_runs_rescue_after_hours():
+    """The owner's decision (2026-09-21): after the close Rescue still runs and
+    the page warns about stale prices, rather than refusing."""
+    assert market_calendar.after_hours_allowed(rp.WINDOW) is True
 
 
 @pytest.mark.parametrize("age", [10_000, -3600])

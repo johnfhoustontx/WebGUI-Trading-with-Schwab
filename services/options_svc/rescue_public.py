@@ -29,7 +29,8 @@ its own answer. The refusals run in this order, all before any Schwab call:
 3. ``cached``     a fresh result for exactly this request exists;
 4. ``not_listed`` / ``no_options``  answered from a strikes list already held;
 5. ``duplicate``  the same request ran under ``dedup_sec`` ago;
-6. ``closed``     outside ``[windows.rescue_public]``;
+6. ``closed``     outside ``[windows.rescue_public]``, unless it allows
+   ``after_hours``;
 7. ``budget``     the day's ONE public budget is spent. Checked LAST, by
                   ``public_budget.spend``, at the point where the Schwab work
                   would start - so a request refused above never spends it.
@@ -263,7 +264,7 @@ def _handle_compute(bus, command, now, lim, status) -> None:
     elif _structure_busy(structure, lim["structure_runs"],
                          lim["result_ttl_min"] * 60):
         outcome = "throttled"
-    elif not market_calendar.in_window(WINDOW, now):
+    elif not market_calendar.open_for(WINDOW, now):
         outcome = "closed"
     else:
         outcome = None

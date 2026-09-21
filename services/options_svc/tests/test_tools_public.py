@@ -21,6 +21,7 @@ from services.options_svc import public_chain
 from services.options_svc import rate_trade
 from services.options_svc import rescue_public as rp
 from services.options_svc import tools_public as tp
+from shared import market_calendar
 from shared import public_rescue as pr
 from shared import public_tools as pt
 from shared.bus import Bus
@@ -310,7 +311,8 @@ def test_an_old_or_future_tools_request_expires_unrun(bus, schwab, args, age):
     dict(kind="chain", symbol="SPY"),
     dict(kind="sim_snapshot", symbol="SPY"),
 ])
-def test_outside_the_window_nothing_runs(bus, schwab, args):
+def test_outside_the_window_nothing_runs(bus, schwab, monkeypatch, args):
+    _after_hours(monkeypatch, False)
     schwab.now = CLOSED
     cmd = _tool(now=CLOSED, **args)
     tp.handle_tools(bus, cmd)
@@ -318,7 +320,8 @@ def test_outside_the_window_nothing_runs(bus, schwab, args):
     assert _schwab_calls(schwab) == [] and _spent(bus) == 0
 
 
-def test_a_rate_outside_the_window_is_closed(bus, schwab):
+def test_a_rate_outside_the_window_is_closed(bus, schwab, monkeypatch):
+    _after_hours(monkeypatch, False)
     _load_chain(bus)
     schwab.calls.clear()
     schwab.now = CLOSED
@@ -327,6 +330,27 @@ def test_a_rate_outside_the_window_is_closed(bus, schwab):
     tp.handle_tools(bus, cmd)
     assert _answer(bus, cmd) == "closed"
     assert _schwab_calls(schwab) == [] and _spent(bus) == 1
+
+
+def _after_hours(monkeypatch, on):
+    monkeypatch.setattr(market_calendar, "after_hours_allowed", lambda name: on)
+
+
+@pytest.mark.parametrize("args", [
+    dict(kind="chain", symbol="SPY"),
+    dict(kind="sim_snapshot", symbol="SPY"),
+])
+def test_after_hours_allowed_runs_outside_the_window(bus, schwab, monkeypatch, args):
+    _after_hours(monkeypatch, True)
+    schwab.now = CLOSED
+    cmd = _tool(now=CLOSED, **args)
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "done"
+    assert _schwab_calls(schwab) and _spent(bus) == 1
+
+
+def test_the_shipped_config_runs_the_tools_after_hours():
+    assert market_calendar.after_hours_allowed(tp.WINDOW) is True
 
 
 @pytest.mark.parametrize("args", _every_tools_request())

@@ -814,7 +814,12 @@ implied-volatility percentage, the sweep's model prices, some scores - an open
 owner decision beside D2. **One daily budget** covers Rescue, the Calculator and
 the Simulator (`public_budget`, the limit in `rescue_public.toml [budget]`); a
 `threading.Lock` suffices only because every public worker is a thread in the
-one options_svc process. The public Simulator's snapshots live in their own
+one options_svc process. ⚠ **The two tools windows (`[windows.rescue_public]`,
+`[windows.tools_public]`) mean "prices are live", not "allowed"**: with
+`after_hours = true` the workers gate on `market_calendar.open_for`, run at any
+hour and the pages warn that bid, ask and mark may be stale
+(`pages/options/after_hours.py`); a chain loaded before the open is reloaded
+once the window opens (`market_calendar.opened_since`). The public Simulator's snapshots live in their own
 `compute.SimStore` (`tools_public.PUBLIC_SIM`), never the owner's
 `_SIM_SNAPSHOTS`, and an extension is copy-on-write. The Calculator hands its
 position to the Simulator through NiceGUI **tab storage**

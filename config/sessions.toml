@@ -99,22 +99,27 @@ start = "08:40"
 end   = "15:00"
 
 [windows.rescue_public]
-# When the public Rescue form (live.neuralstrike.co/rescue) will load strikes
-# and compute a rescue menu. Outside it the form still builds and says when it
-# opens. Off hours the menu would reprice against stale marks and a stale
-# underlying, so it would look confident and be wrong. The day's total is
-# capped by [limits] in config/rescue_public.toml.
+# When the public Rescue form (live.neuralstrike.co/rescue) prices against LIVE
+# marks. Off hours the menu reprices against stale marks and a stale
+# underlying, so it can look confident and be wrong. The day's total is capped
+# by [limits] in config/rescue_public.toml.
 start = "08:40"
 end   = "15:00"
+# true: Rescue also runs outside these hours, and the page warns that bid, ask
+# and mark may be stale or wrong. false: refused outside them ("closed").
+after_hours = true
 
 [windows.tools_public]
 # When the public Calculator and Simulator (live.neuralstrike.co/calculator,
-# /simulator) will load a chain, one more expiration, a trade rating or a
-# Simulator snapshot - the requests that spend Schwab calls. Pricing a position
-# already loaded runs at any time: it spends none. The day's total is capped by
-# the shared [budget] in config/rescue_public.toml.
+# /simulator) load a chain, one more expiration, a trade rating or a Simulator
+# snapshot against LIVE marks - the requests that spend Schwab calls. Pricing a
+# position already loaded runs at any time: it spends none. The day's total is
+# capped by the shared [budget] in config/rescue_public.toml.
 start = "08:40"
 end   = "15:00"
+# true: those requests also run outside these hours, and both pages warn that
+# bid, ask and mark may be stale or wrong. false: refused outside them.
+after_hours = true
 
 [windows.driver_entry]
 # Autonomous driver entry window, in ET (not CT) — matches the existing

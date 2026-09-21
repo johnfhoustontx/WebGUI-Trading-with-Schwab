@@ -4,7 +4,34 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**The public Calculator and Simulator, at
+**Last updated:** 2026-09-21 (**The public Rescue, Calculator and Simulator run
+after the close, with a stale-price warning** - owner's decision the same
+evening, after the promote that put all three live.)
+
+- **What changed.** Outside `[windows.rescue_public]` / `[windows.tools_public]`
+  (08:40-15:00 CT on trading days) the three public tools used to answer
+  `closed`. Each window now carries `after_hours = true`: requests run at any
+  hour, and the window means "prices are live". The pages show one warning
+  outside it (`pages/copy.AFTER_HOURS_PRICES`, mounted by
+  `pages/options/after_hours.py` and re-checked each minute) saying bid, ask
+  and mark may be stale or incorrect, and each intro names the live hours.
+- **The gate.** `shared.market_calendar.open_for(name, now)` (the window, or
+  after hours when allowed) replaces `in_window` at the three `closed` checks:
+  Rescue's compute, the tools worker's `_gate`, and
+  `public_chain.ladder_request`. `after_hours_allowed` counts only a literal
+  `true`, so a typo keeps the stricter behaviour. Catalogued in Settings ->
+  Configuration as "Also run outside these hours".
+- **A pre-open chain is not served after the open.** `market_calendar.opened_since`
+  marks a published chain loaded outside the window stale once the window
+  opens, so an 08:30 load is reloaded at 08:45 instead of serving pre-open
+  marks for the rest of its 60-minute life. ⚠ Not applied to Rescue results,
+  ratings or Simulator snapshots: their 15-minute lives can still carry a
+  pre-open answer a few minutes into the session.
+- **Cost.** After-hours requests spend the same shared daily budget (600).
+
+---
+
+**Prior —** 2026-09-21 (**The public Calculator and Simulator, at
 `/calculator` and `/simulator` - built, NOT promoted, their Redis permissions
 are not applied, and the snapshot and rating costs are unmeasured.**)
 
