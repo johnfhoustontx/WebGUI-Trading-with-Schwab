@@ -198,6 +198,16 @@ from pages import ticker                             # noqa: E402
 # ``shell``, which must stay a leaf module.
 shell.publish(live_screens.PUBLIC_ROUTES)
 
+# NiceGUI's benign "parent slot of the element has been deleted" record - a
+# timer meeting a disconnect (CLAUDE.md, ``ui_guard``) - dropped here as main.py
+# drops it. This is the process with the MOST disconnects, every anonymous
+# visitor closing a tab, so without it this journal is the noisiest place that
+# traceback appears. After all five layers above, not up with the imports: it
+# touches no page, but nothing from ``pages`` belongs above the refusals.
+from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
+
+install_deleted_slot_log_filter()
+
 _STATIC_DIR = shell._STATIC_DIR
 
 # ── the ONE non-page route this process serves ───────────────────────────────
@@ -337,8 +347,9 @@ def _render(screen) -> None:
         with ui.column().classes(_CONTENT):
             module.render(**screen.kwargs)
     # The market-summary marquee, as ``main._layout`` mounts it on every page.
-    # A pure READER — the three caches it polls (``ticker.VIEWS``) are shared
-    # market views, never the owner's book, and it enqueues nothing — so it is
+    # A pure READER — the one view it polls (``ticker.VIEW``, the published
+    # market report's summary) is never the owner's book, and it enqueues
+    # nothing — so it is
     # the same component on both origins rather than a public copy. It honours
     # ``ticker_enabled`` / ``ticker_speed``, which the frozen store answers from
     # DEFAULTS (on, 60 s). ``ui.footer`` is fixed-position, so its DOM order

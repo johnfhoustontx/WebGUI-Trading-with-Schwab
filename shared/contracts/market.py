@@ -27,8 +27,8 @@ class MarketSummary(_Base):
     The highlights of the latest published NeuralStrike market report, which
     market_svc reads off ``deploy/site/reports/latest.html`` whenever the
     report is replaced (``services/market_svc/report_summary.py``) — no Claude
-    call of its own. It feeds the Desk's MARKET SUMMARY frame and leads the
-    webgui ticker with ``headline``. Defensive: no report yet means an empty
+    call of its own. It feeds the Desk's MARKET SUMMARY frame and is the whole
+    of the webgui ticker (headline, highlights, then the report's stamp). Defensive: no report yet means an empty
     payload, and both surfaces stay quiet rather than inventing a line.
     """
 

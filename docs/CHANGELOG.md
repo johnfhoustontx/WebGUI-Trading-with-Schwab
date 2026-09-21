@@ -18,7 +18,8 @@ ticker on the public live screens — twenty screens, up from fourteen.**)
   call: the three symbols' chains were already collected and stashed.
 - **The market-summary marquee** now mounts on every public screen
   (`live_main._render` → `ticker.render_ticker`), with `pb-10` restored on the
-  content column. It reads three shared caches and enqueues nothing.
+  content column. Since the entry below it reads only `cache:market:summary`
+  and enqueues nothing.
 - **Tests changed, and why.** The cross-tier pairing test refused two screens
   sharing a symbol; it now refuses two sharing a symbol AND view, since five
   `$SPX` boards read one snapshot. `test_the_flow_screens_pay_for_no_history_at_all`
@@ -33,7 +34,25 @@ ticker on the public live screens — twenty screens, up from fourteen.**)
 
 ---
 
-**Prior — 2026-09-20** (**One look and one behaviour — Phase 6: the system
+**Prior — 2026-09-21** (**The Market Summary Ticker quotes the market
+report and nothing else.**)
+
+- The bottom marquee (`webgui/pages/ticker.py`) now scrolls only
+  `cache:market:summary`: the latest published report's headline, its section
+  highlights, then the report's own stamp ("Market close report · 2026-09-18 ·
+  16:20 CT"). It used to lead with the headline and then pad itself with live
+  items built from `cache:market:dashboard` and `cache:sentiment:composite` —
+  both fed by Schwab polling — so the bar now has no API call behind anything
+  it shows, and it repaints only when a new report is published (one `:ver`
+  probe per 4 s instead of three). Those live readings still live on the
+  Market Dashboard and the Desk; market_svc's quote poll is unchanged because
+  they need it.
+- With no report published the bar says *No market report published yet*
+  rather than inventing a line. `ticker_items` and its tone map are deleted
+  with their tests; `report_items` is the new pure builder. Help text in
+  `page_help.py` updated.
+
+**Prior —** 2026-09-20 (**One look and one behaviour — Phase 6: the system
 pages, and the app's destructive controls get one confirm vocabulary. THE
 MIGRATION IS COMPLETE.**)
 

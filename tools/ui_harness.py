@@ -11,17 +11,79 @@ entrypoints give it - but with no nav rail or header.
     python tools/ui_harness.py symbol --seed seed.json --kwargs '{"symbol": "SPY"}'
 
 Not a test and never for prod: with a fake Bus no command is executed.
+
+It serves LOOPBACK only, and refuses a port something already answers on - a
+taken port otherwise fails to bind silently and you read the other server's
+page. Stop a harness when you are done with it; they do not stop themselves.
 """
 import argparse
 import importlib
 import json
 import pathlib
+import socket
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 for _p in (str(ROOT), str(ROOT / "webgui")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+# Loopback, never 0.0.0.0 (CLAUDE.md). ``ui.run`` with no host resolves to EVERY
+# interface outside native mode - which is what each leftover harness bound.
+HOST = "127.0.0.1"
+
+# How long to wait for an answer. A real loopback listener accepts in ~1 ms, so
+# this is a ~300x margin. It is bounded at all because on Windows a REFUSED
+# connect is not immediate (measured 2.05 s unbounded), and refused is the
+# common case - the port is free. On Linux a refusal returns at once.
+PROBE_TIMEOUT_SEC = 0.3
+
+
+def port_taken(port, host=HOST, timeout=PROBE_TIMEOUT_SEC):
+    """Whether something already ANSWERS on ``host:port``.
+
+    A connect, not a bind - and that difference is the whole point. Every
+    harness before this bound ``0.0.0.0``, and on Windows binding ``127.0.0.1``
+    on a port a wildcard listener holds SUCCEEDS (measured 2026-09-20). So a
+    bind-probe reports a leftover's port as FREE, ``ui.run``'s own bind then
+    fails quietly, the old server keeps answering, and you read its page.
+    Asking whether anything answers cannot be fooled that way.
+
+    Only a completed connect means taken. A refusal, a timeout or any other
+    socket error means nothing is serving there.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.settimeout(timeout)
+    try:
+        s.connect((host, port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+
+def preflight_port(port):
+    """Refuse, loudly, a port something already answers on.
+
+    The alternative is silent: NiceGUI's bind fails, the OLD server keeps
+    serving, and the page you open is that one. Measured 2026-09-20 - four
+    leftover harnesses held 9593-9596 for two hours, serving code from before
+    four later commits, and an agent measured one of them as its own page.
+    """
+    if port_taken(port):
+        raise SystemExit(
+            f"ui_harness: port {port} is already answering on {HOST}. Something "
+            f"is serving there - often a harness left running earlier - and "
+            f"starting here would fail to bind SILENTLY, so you would be reading "
+            f"that server's page, not this one. Stop it, or pass another --port.")
+
+
+def run_kwargs(args):
+    """``ui.run``'s arguments. Split out so the bind address is testable
+    without starting a server."""
+    return {"host": HOST, "port": args.port, "dark": True, "reload": False,
+            "show": False, "title": "ui harness"}
 
 
 def parse_args(argv=None):
@@ -52,6 +114,13 @@ def parse_args(argv=None):
 
 def main(argv=None):
     args = parse_args(argv)
+    preflight_port(args.port)
+    # The benign "parent slot of the element has been deleted" race - a timer
+    # meeting a disconnect - that main.py filters (CLAUDE.md, ``ui_guard``). A
+    # separate entrypoint must install it itself, or the harness prints a
+    # traceback the running app deliberately swallows.
+    from pages.ui_guard import install_deleted_slot_log_filter
+    install_deleted_slot_log_filter()
 
     import bus_client
     from shared.bus import Bus
@@ -80,7 +149,7 @@ def main(argv=None):
         with ui.column().classes("ns-app w-full p-4 gap-3 pb-10"):
             importlib.import_module(f"pages.{args.page}").render(**args.render_kwargs)
 
-    ui.run(port=args.port, dark=True, reload=False, show=False, title="ui harness")
+    ui.run(**run_kwargs(args))
 
 
 if __name__ == "__main__":

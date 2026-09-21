@@ -783,9 +783,9 @@ from the operator's workstation by tooling that lives outside this repo
 the directory). ⚠ The frame's `reports/latest.html` name is the contract with that tool.
 ⚠ **So is its MARKUP, since 2026-09-16**: `market_svc/report_summary.py` reads that
 file to publish `cache:market:summary` — the Desk's MARKET SUMMARY highlights and the
-ticker's lead — from `div.slotchip`, the `h1` and each section `h2`. A renderer change
+WHOLE bottom ticker (since 2026-09-21 it shows nothing else) — from `div.slotchip`, the `h1` and each section `h2`. A renderer change
 that renames those publishes nothing (the last good summary stays, with one WARNING),
-so the Desk goes quietly stale rather than wrong. No Claude call sits behind the
+so the Desk and the ticker go quietly stale rather than wrong. No Claude call sits behind the
 summary any more.
 **`deploy/site/assets/shots/*.webp` — the marketing gallery — is the same, with THREE
 TRACKED EXCEPTIONS** (`image16/17/18`). Those name a Simulator view that lives in page

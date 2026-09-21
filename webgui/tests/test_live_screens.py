@@ -134,7 +134,7 @@ PUBLIC_UNSAFE_DEFAULTS = {
 #   * read only by pages this origin does not publish (``pages/settings.py``);
 #   * ``ticker_enabled`` / ``ticker_speed`` -- the marquee IS mounted here since
 #     2026-09-21, and both keys only choose whether and how fast to draw it. It
-#     reads three shared market caches and enqueues nothing; the headline it
+#     reads only ``cache:market:summary`` and enqueues nothing; everything it
 #     shows is quoted from the published market report, not a Claude call
 #     (market_svc stopped calling Claude for it on 2026-09-16);
 #   * or read by a published page purely to CHOOSE WHAT TO DRAW

@@ -1064,8 +1064,8 @@ the views listed in `handlers.PUBLISHED_GAMMA_HISTORY_VIEWS` — since 2026-09-2
 for `$SPX` and GEX for SPY and QQQ. `test_cross_tier_mirrors.py` holds the two in step.
 
 **Every screen carries the market-summary marquee (2026-09-21)** — `pages/ticker.render_ticker`,
-the same fixed footer `main._layout` mounts. It reads `market:dashboard`,
-`sentiment:composite` and `market:summary` and enqueues nothing; `ticker_enabled` /
+the same fixed footer `main._layout` mounts. It reads only `market:summary`
+(the published market report) and enqueues nothing; `ticker_enabled` /
 `ticker_speed` come from the frozen store's DEFAULTS.
 
 **Every screen carries a slim brand header (2026-09-09).** The brand reached these
