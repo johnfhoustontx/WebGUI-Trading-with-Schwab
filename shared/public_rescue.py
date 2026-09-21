@@ -53,8 +53,14 @@ STATUS_EVENT = "events:options:rescue_public_status"
 
 
 def ladder_view(symbol) -> str:
-    """The cache VIEW (Tier-1 spelling) holding one symbol's strikes list."""
-    return f"options:rescue_pub_ladder:{str(symbol).strip().upper()}"
+    """The cache VIEW (Tier-1 spelling) of the ONE public chain key per symbol.
+
+    Shared by the public Rescue form, the Calculator and the Simulator
+    (``shared.public_tools.chain_view`` returns this same view), so visitors on
+    any of the three share one fetch per symbol. It carries expirations and
+    strikes always, and quotes only while ``public_scan.show_leg_quotes()`` is
+    on - never otherwise (decision D1)."""
+    return f"options:pub_chain:{str(symbol).strip().upper()}"
 
 
 def result_view(key) -> str:

@@ -110,9 +110,11 @@ The same three reasons the Finder gave, plus one of its own:
   6. the day's budget is spent: refused;
   7. the expiration is not listed for the symbol: refused.
 - **Results:**
-  - `cache:options:rescue_pub_ladder:<SYMBOL>`: expirations plus strikes for
-    the expirations fetched so far, merged per expiration, 60-minute expiry.
-    Keyed by symbol and shared by every visitor on that symbol.
+  - `cache:options:pub_chain:<SYMBOL>` (was `rescue_pub_ladder:<SYMBOL>` until
+    2026-09-21, when it became the one public chain key the Calculator and
+    Simulator share): expirations plus strikes for the expirations fetched so
+    far, merged per expiration, 60-minute expiry. Keyed by symbol and shared by
+    every visitor on that symbol.
   - `cache:options:rescue_pub:<spec_key>`: the advisory, 10-minute expiry.
   - `cache:options:rescue_public_status`: budget used and left, window open,
     busy. **No per-spec or per-symbol history.** The Finder's review found its

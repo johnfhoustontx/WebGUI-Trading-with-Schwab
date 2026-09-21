@@ -32,7 +32,7 @@ def test_the_stream_is_its_own_and_never_the_owners():
 def test_result_keys_are_never_the_private_slot():
     key = pr.spec_key(pr.clean_spec(_pcs(), TODAY))
     assert pr.cache_key(pr.result_view(key)) != "cache:options:rescue:adhoc"
-    assert pr.cache_key(pr.ladder_view("spy")) == "cache:options:rescue_pub_ladder:SPY"
+    assert pr.cache_key(pr.ladder_view("spy")) == "cache:options:pub_chain:SPY"
 
 
 # ── clean_spec ──────────────────────────────────────────────────────────────

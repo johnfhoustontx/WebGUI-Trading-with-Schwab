@@ -301,3 +301,7 @@ def test_request_key_renormalizes_a_hand_built_command():
 def test_structure_key_of_a_non_mapping_is_none():
     assert pt.structure_key(None) is None
     assert pt.structure_key("x") is None
+
+
+def test_the_chain_view_is_the_one_shared_public_chain_key():
+    assert pt.chain_view("spy") == "options:pub_chain:SPY"

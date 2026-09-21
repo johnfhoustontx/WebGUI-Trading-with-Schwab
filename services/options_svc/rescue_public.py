@@ -9,7 +9,7 @@ queues ahead of the owner's commands on ``cmd:options`` or the Finder's scans.
 
 Two requests (``shared.public_rescue``):
 
-* **ladder** -> ``cache:options:rescue_pub_ladder:<SYMBOL>``: expirations and
+* **ladder** -> ``cache:options:pub_chain:<SYMBOL>``: expirations and
   each expiration's strikes. The chain is fetched by the Calculator's own lazy
   loader and every quote is thrown away before anything is written - the
   public form publishes no bid, ask or mark (decision D1).
