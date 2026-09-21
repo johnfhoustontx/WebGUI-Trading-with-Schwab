@@ -16,20 +16,21 @@ _EXPECTED_DISPLAYS = {
     "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
     "TLT", "HYG", "LQD",
     "GDLC", "VCX",
+    "GLD", "SLV", "COPX",
     "MCHI", "EWJ", "EWY", "INDA", "EWT", "EWZ", "EWA", "EWU", "EWW", "EWC",
 }
 
 
 def test_every_csv_symbol_is_mapped():
-    # 70 tiles: base 55 + the Top 10 frame (a BIG10 composite + 10 constituents:
+    # 73 tiles: base 55 + the Top 10 frame (a BIG10 composite + 10 constituents:
     # the Mag-7 + AVGO/PLTR/AMD) + the Net Prem external tile + the $MGTN index tile
     # (CBOE Magnificent Ten, added 2026-07-21) + USO (added 2026-08-12) + IYT
-    # (added 2026-09-11).
+    # (added 2026-09-11) + the Metals frame GLD/SLV/COPX (added 2026-09-21).
     # (base 55 = $PCALL+$PCSP→ONE put/call tile; HYG-LQD dropped; $ADD/$ADSPD dropped;
     # XLB added; +10 country ETFs.)
-    assert len(S.SYMBOL_MAP) == 70
+    assert len(S.SYMBOL_MAP) == 73
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 70
+    assert len(_EXPECTED_DISPLAYS) == 73
     assert {t["display"] for t in S.SYMBOL_MAP} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in S.SYMBOL_MAP:
@@ -43,7 +44,7 @@ def test_categories_cover_the_expected_set_in_frame_order():
         "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
         "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Top 10",
         "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
-        "Fixed Income / Credit ETF", "Crypto / Alternatives", "Countries",
+        "Fixed Income / Credit ETF", "Crypto / Alternatives", "Metals", "Countries",
     ]
     # every mapped tile's category is in the order list
     assert {t["category"] for t in S.SYMBOL_MAP} <= set(S.CATEGORY_ORDER)

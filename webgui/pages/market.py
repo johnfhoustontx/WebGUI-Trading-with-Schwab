@@ -78,6 +78,7 @@ _ACCENT = {
     "Factor / Momentum ETF": "#FFB627",
     "Fixed Income / Credit ETF": "#6E82A3",
     "Crypto / Alternatives": "#FF3DCB",
+    "Metals": "#FFB627",
     "Countries": "#35E0FF",
 }
 
