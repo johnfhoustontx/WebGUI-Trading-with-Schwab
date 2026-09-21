@@ -53,7 +53,8 @@ from . import sim_view as sv
 from . import simulator as _sim
 from . import strategies
 from . import theme as _t
-from .pub_chain_view import ladder_strikes, snapshot_listed, snapshot_loaded
+from .pub_chain_view import (LEG_SCROLL, LEG_TABLE_MIN, ladder_strikes,
+                             snapshot_listed, snapshot_loaded)
 
 log = logging.getLogger(__name__)
 
@@ -296,8 +297,12 @@ def render():
     def _strikes_for(expiry, otype):
         return ladder_strikes(state["ladder"], expiry, otype)
 
+    # On a phone the table keeps a readable width and scrolls inside its own
+    # box rather than squeezing its dropdowns (pub_chain_view.LEG_TABLE_MIN).
+    with panel.legs_box, ui.element("div").classes(LEG_SCROLL):
+        leg_table = ui.column().classes(f"{LEG_TABLE_MIN} w-full gap-1")
     editor = leg_editor.build_leg_editor(
-        panel.legs_box, strikes_for=_strikes_for,
+        leg_table, strikes_for=_strikes_for,
         expiries_for=lambda: snapshot_loaded(state["ladder"]),
         listed_expiries_for=lambda: snapshot_listed(state["ladder"]),
         on_expiry_needed=lambda e: _fetch_expiry(e, move_all=False),

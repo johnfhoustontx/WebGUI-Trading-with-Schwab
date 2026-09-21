@@ -64,8 +64,9 @@ from . import sim_view as _sim_view
 from . import strategy_table as _strategy_table
 from . import theme as _t
 from .chain_grid import extract_price, leg_delta
-from .pub_chain_view import (grid_chain, has_quotes, ladder_strikes,
-                             listed_expirations, loaded_expirations, quotes_as_of)
+from .pub_chain_view import (LEG_SCROLL, LEG_TABLE_MIN, grid_chain, has_quotes,
+                             ladder_strikes, listed_expirations, loaded_expirations,
+                             quotes_as_of)
 
 log = logging.getLogger(__name__)
 
@@ -360,8 +361,12 @@ def render():
         if not quotes:
             with panel.legs_footer:
                 ui.label(TYPED_PRICE_NOTE).classes(f"text-xs {_t.MUTED}")
+        # On a phone the table keeps a readable width and scrolls inside its own
+        # box rather than squeezing its dropdowns (pub_chain_view.LEG_TABLE_MIN).
+        with panel.legs_box, ui.element("div").classes(LEG_SCROLL):
+            leg_table = ui.column().classes(f"{LEG_TABLE_MIN} w-full gap-1")
         editor = leg_editor.build_leg_editor(
-            panel.legs_box, strikes_for=_strikes_for,
+            leg_table, strikes_for=_strikes_for,
             expiries_for=lambda: loaded_expirations(state["chain"]),
             listed_expiries_for=lambda: listed_expirations(state["chain"]),
             on_expiry_needed=lambda e: _fetch_expiry(e, move_all=False),

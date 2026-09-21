@@ -22,6 +22,29 @@ from zoneinfo import ZoneInfo
 CT = ZoneInfo("America/Chicago")
 
 
+# ── the leg table on a phone ────────────────────────────────────────────────
+# Class strings, not reading, but shared by the two public pages that mount the
+# leg editor (calc_live, sim_live), so they cannot drift.
+#
+# Measured at 375px (2026-09-21): the table's fr tracks were squeezed until the
+# expiry select was 30-44px and the strike select 13-28px. Below ``sm`` the
+# table therefore keeps a MINIMUM width and scrolls sideways inside its own box
+# (rescue_live's pattern), so the page itself never scrolls sideways; from
+# ``sm`` up the minimum is dropped and the desktop layout is unchanged.
+#
+# The width, from ``leg_editor._TABLE_HEAD`` / ``_TABLE_GRIDS``: the fixed
+# tracks (16 # + 40 side + 36 qty + 40 type + 24 remove = 156px) and 4px gaps
+# (up to 9 = 36px), plus with quotes on the 50px price source and the 38px
+# delta; the rest is the fr tracks - expiry 1.15fr, strike 1.25fr, price 0.9fr.
+# The strike track also holds the two ~15px steppers, so a >= 64px strike
+# SELECT needs ~95px of track: 1fr ~ 76px. The widest table (the Calculator
+# with quotes on) is then 156 + 36 + 88 + 3.3 * 76 + 12 padding ~ 543px, so
+# 560px leaves every column readable on every variant.
+LEG_TABLE_MIN = "min-w-[560px] sm:min-w-0"
+#: The box the table scrolls inside.
+LEG_SCROLL = "w-full min-w-0 overflow-x-auto"
+
+
 # ── the strikes list ────────────────────────────────────────────────────────
 
 def listed_expirations(ladder) -> list:

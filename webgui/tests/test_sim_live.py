@@ -158,6 +158,7 @@ def page(monkeypatch):
         handle = real(*a, **kw)
         _HANDLES["editor"] = handle
         _HANDLES["editor_kw"] = kw
+        _HANDLES["editor_box"] = a[0] if a else kw.get("container")
         return handle
 
     monkeypatch.setattr(leg_editor, "build_leg_editor", _capture)
@@ -782,3 +783,20 @@ def test_the_page_imports_only_the_tier1_allow_list():
             ok = (mod in _ALLOWED_IMPORTS or mod.split(".")[0] in _STDLIB
                   or mod == "pages" or mod.startswith("pages."))
             assert ok, f"sim_live imports {mod}"
+
+
+
+# ── phone width (2026-09-21 browser walk-through) ───────────────────────────
+
+def test_the_leg_table_scrolls_inside_its_own_box_on_a_phone(page):
+    """At 375px the table's dropdowns were squeezed to 13-44px. Below ``sm`` the
+    table keeps a readable minimum width and scrolls sideways inside a box of
+    its own - rescue_live's pattern - so the PAGE never scrolls sideways; from
+    ``sm`` up the minimum is dropped and desktop is unchanged."""
+    from pages.options import pub_chain_view
+    box = _HANDLES["editor_box"]
+    assert "min-w-[560px]" in box._classes and "sm:min-w-0" in box._classes
+    scroller = box.parent_slot.parent
+    assert "overflow-x-auto" in scroller._classes
+    assert "w-full" in scroller._classes and "min-w-0" in scroller._classes
+    assert pub_chain_view.LEG_TABLE_MIN == "min-w-[560px] sm:min-w-0"
