@@ -92,7 +92,7 @@ def summarize(symbol, result, wall_s, calls, top=5) -> dict:
     """One symbol's measurement out of a ``compute.swing_scan`` result."""
     signals = list(result.get("signals") or [])
     by_group = collections.Counter(str(s.get("group") or "?") for s in signals)
-    ranked = sorted(signals, key=lambda s: -(s.get("score") or 0))
+    ranked = sorted(signals, key=lambda s: -(s.get("composite_score") or 0))
     return {
         "symbol": symbol,
         "wall_s": round(wall_s, 2),
@@ -112,7 +112,7 @@ def summarize(symbol, result, wall_s, calls, top=5) -> dict:
         "error": result.get("error"),
         "payload_bytes": len(json.dumps(signals, default=str)),
         "top": [{"type": s.get("type"), "expiration": s.get("expiration"),
-                 "dte": s.get("dte"), "score": s.get("score"),
+                 "dte": s.get("dte"), "score": s.get("composite_score"),
                  "unbounded_loss": loss_unbounded(s)} for s in ranked[:top]],
     }
 

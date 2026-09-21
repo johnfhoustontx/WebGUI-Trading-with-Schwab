@@ -8,7 +8,12 @@ _SRC = pathlib.Path(m.__file__).read_text(encoding="utf-8")
 
 
 def _row(**kw):
-    base = {"type": "PCS", "group": "VERTICAL", "score": 60, "dte": 30,
+    """The Finder's real field name is ``composite_score``. The first version of
+    this tool read ``score``, so its top-rows section sorted on nothing - the
+    2026-09-21 09:05 run printed ``score: None`` on every row."""
+    if "score" in kw:
+        kw["composite_score"] = kw.pop("score")
+    base = {"type": "PCS", "group": "VERTICAL", "composite_score": 60, "dte": 30,
             "expiration": "2026-10-16", "unbounded": False, "max_profit": 100.0}
     return {**base, **kw}
 

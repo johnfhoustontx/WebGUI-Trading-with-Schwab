@@ -184,7 +184,9 @@ Built and tested; not yet exercised on prod.
   - a failure writing the result after a good scan is an `error` that still
     clears `busy`;
   - the cost comments no longer claim the 90-day cap avoids the expiry
-    chooser: daily-expiry names (SPY, QQQ, $SPX) scan all ~60 expirations.
+    chooser: every expiration in range is scanned. (This bullet first said
+    ~60 for daily-expiry names; measured at 09:05, SPY and QQQ scan 18 and
+    $SPX 35.)
   Carried into Phase 2 (below): the per-visitor limit, what the status view
   may show, and repaint churn.
 
@@ -298,9 +300,8 @@ public process. The daily budget already bounds the Schwab cost without it.
   request can reach it; the budget still bounds it.
 - **Load on the proxy.** Private and public Finder scans can now run at the
   same time, on separate threads, where before every Finder scan was serial on
-  `cmd:options`. One public worker, at about 6 calls per ~11 s (the smoke run;
-  10–12 for daily-expiry names), is roughly 0.5–1 requests a second against the
-  headroom in §5. If the
+  `cmd:options`. One public worker makes 5–8 calls per scan (measured, §5) at
+  about 11 s a scan, roughly 0.5 requests a second against the headroom in §5. If the
   session run shows GEX skips, pause the worker during the autoscan minutes
   (:00–:03, :15–:18, …) and let the queue wait.
 - **Scoring credibility.** Under D4, undefined-risk rows show, and their
@@ -311,7 +312,44 @@ public process. The daily budget already bounds the Schwab cost without it.
   holding ~619 KB for ~70 s. Keep the row cap.
 - **Schwab terms (D2).** Open, and wider than this feature.
 
-## 5. Cost arithmetic (confirm with the Phase 0 run)
+## 5. Cost arithmetic
+
+**Measured on prod, 2026-09-21 09:05 CT** (`tools/measure_finder_public.py`,
+the public pin, during the session):
+
+| Symbol | Wall | Calls | Expirations | Rows | Unlimited loss | Payload |
+|---|---|---|---|---|---|---|
+| SPY | 10.1 s | 6 | 18 | 90 | 0 | 158 KB |
+| QQQ | 8.7 s | 6 | 18 | 67 | 0 | 117 KB |
+| $SPX | 36.0 s | 8 | 35 | 47 | 0 | 84 KB |
+| IWM | 10.3 s | 6 | 17 | 81 | 7 | 147 KB |
+| NVDA | 5.9 s | 5 | 13 | 80 | 0 | 141 KB |
+| AAPL | 4.3 s | 5 | 13 | 62 | 6 | 113 KB |
+| MSFT | 10.9 s | 5 | 13 | 17 | 0 | 30 KB |
+| AMD | 10.3 s | 5 | 13 | 42 | 3 | 79 KB |
+| TSLA | 9.8 s | 5 | 13 | 96 | 9 | 178 KB |
+| META | 6.7 s | 5 | 13 | 29 | 2 | 53 KB |
+| **Total** | **113 s** | **56** | | **611** | **27** | **1.1 MB** |
+
+- **Per scan: 11.3 s and 5.6 calls on average**; $SPX is the outlier at 36 s.
+  No short puts in any result.
+- **Proxy load while it ran:** 166 and 186 requests a minute at 09:05–09:06
+  against Friday's 155 and 136 at the same minutes, far under the 300 ceiling.
+  **No GEX minute was skipped during the run** (the day's one skip, at 09:01,
+  was the autoscan's, before it started).
+- **The daily budget of 200** is about 1,100 Schwab calls and about 38 minutes
+  of worker time, against a stack already making 68–76k calls a day. It could
+  go higher on cost; it is the queue that binds first.
+- **The queue:** one worker at ~11 s clears ten distinct symbols in about two
+  minutes, inside the 180 s wait limit, so the per-visitor limit (10 an hour)
+  is what keeps one visitor from filling it.
+- **Payloads before the five-per-type trim** ran 30–178 KB; the SPY result the
+  worker stored at 08:57 kept 48 rows and held back 37.
+- ⚠ The first version of the tool read a `score` field that does not exist
+  (the Finder's is `composite_score`), so that run's "top rows" were unranked
+  and are not reported here. Fixed.
+
+The estimates this section held before the run:
 
 - **Per scan** (smoke run, IWM, pre-market): 11.1 s, 6 proxy calls.
 - **Throughput:** one worker at ~11 s a scan does ~5 scans a minute at most. A

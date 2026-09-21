@@ -84,7 +84,8 @@ DEFAULTS = {
     # The one filter set every public scan runs (roadmap §2). The deltas and
     # the credit floor are the private page's own defaults. The 90-day cap
     # bounds cost: a public scan never stops to ask which expirations to load,
-    # so a daily-expiry name (SPY, QQQ, $SPX) scans all of its ~60 in range.
+    # so it scans every one in range - measured 13-18 for most names and 35 for
+    # $SPX (36 s) on 2026-09-21.
     "scan": {
         "dte_min": 0,
         "dte_max": 90,

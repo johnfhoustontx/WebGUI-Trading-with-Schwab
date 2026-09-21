@@ -12,9 +12,9 @@
 # The filters every public scan runs. The deltas and the credit floor are the
 # private Strategy Finder's own defaults. The 90-day cap is about COST: a whole
 # chain takes 26-40 s. Public scans never stop to ask which expirations to load
-# (the public page has nothing to click), so a name with DAILY expirations
-# (SPY, QQQ, $SPX) scans every one of its ~60 inside 90 days - measure before
-# widening this.
+# (the public page has nothing to click), so every listed expiration in range
+# is scanned. Measured 2026-09-21: 13 for most stocks, 18 for SPY and QQQ, 35
+# for $SPX (36 s) - measure again before widening this.
 dte_min = 0
 dte_max = 90
 put_d_min = -0.2
