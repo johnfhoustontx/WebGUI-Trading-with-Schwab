@@ -98,7 +98,8 @@ def _first_statement(fn):
 
 
 def _guarded(fn) -> bool:
-    """True when ``fn`` opens with ``if not _may_enqueue: return``.
+    """True when ``fn`` opens with ``if not _may_enqueue: return`` - and the
+    branch holds nothing but that ``return``.
 
     A first-statement early return is a TOTAL proof: it covers the button, a
     timer, a hand-off path and any closure that reaches the function, which no
@@ -109,7 +110,9 @@ def _guarded(fn) -> bool:
             and isinstance(stmt.test.op, ast.Not)
             and isinstance(stmt.test.operand, ast.Name)
             and stmt.test.operand.id == "_may_enqueue"
-            and isinstance(stmt.body[-1], ast.Return))
+            # EXACTLY one ``return``: a branch that only ENDS in one could send
+            # the command first and still pass.
+            and len(stmt.body) == 1 and isinstance(stmt.body[0], ast.Return))
 
 
 # --- the enumeration --------------------------------------------------------
@@ -221,3 +224,33 @@ def test_the_published_render_keeps_the_controls_that_are_not_commands(published
     state and are the only way to read the industries under a sector."""
     texts = _button_texts(_screen("sectors"))
     assert "Expand all" in texts and "Collapse" in texts
+
+
+# --- the gate check itself --------------------------------------------------
+
+def _fn(src):
+    return ast.parse(src).body[0]
+
+
+def test_the_gate_check_accepts_the_bare_early_return():
+    assert _guarded(_fn(
+        'def f():\n    """doc"""\n    if not _may_enqueue:\n        return\n'
+        '    bus_client.request("options", {})\n'))
+
+
+def test_the_gate_check_rejects_a_command_inside_the_gate_branch():
+    """A branch that ENDS in return but sends first is not a gate - it is the
+    one command the public origin would still send."""
+    assert not _guarded(_fn(
+        'def f():\n    if not _may_enqueue:\n'
+        '        bus_client.request("options", {})\n        return\n'))
+
+
+@pytest.mark.parametrize("src", [
+    'def f():\n    if not _may_enqueue:\n        x = 1\n        return\n',
+    'def f():\n    if not _may_enqueue:\n        return\n    else:\n        pass\n',
+    'def f():\n    if _may_enqueue:\n        return\n',
+    'def f():\n    x = 1\n    if not _may_enqueue:\n        return\n',
+])
+def test_the_gate_check_rejects_anything_but_the_exact_shape(src):
+    assert not _guarded(_fn(src))
