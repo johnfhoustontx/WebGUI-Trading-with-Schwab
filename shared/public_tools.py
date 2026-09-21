@@ -98,7 +98,7 @@ MAX_IVADJ = 1.0
 NUM_STRIKES = (5, 60)         # rows in the Calculator's P&L matrix
 MAX_SWEEP_DAYS = 366.0
 MAX_CODE_LEN = 32
-_CODE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+_CODE_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_")
 
 
 def _in_range(v, lo, hi):
@@ -120,13 +120,17 @@ def _whole(v, lo, hi):
 
 def _clean_code(raw):
     """A strategy or structure code - ``PCS``, ``COVERED_CALL`` - or None.
-    Only letters and underscores, so the code can name nothing but a code."""
+    Only ASCII letters and underscores, so the code can name nothing but a code.
+
+    ⚠ The characters are checked BEFORE upper-casing: ``"ß".upper()`` is
+    ``"SS"``, so a check after it would let non-ASCII input through as a
+    different, valid-looking code."""
     if not isinstance(raw, str):
         return None
-    code = raw.strip().upper()
+    code = raw.strip()
     if not 1 <= len(code) <= MAX_CODE_LEN or not set(code) <= _CODE_CHARS:
         return None
-    return code
+    return code.upper()
 
 
 def _clean_calc_leg(raw, today):
@@ -143,10 +147,12 @@ def _clean_calc_leg(raw, today):
     side = str(raw.get("side") or "").strip().lower()
     qty = _pr._qty(raw.get("qty"))
     # A missing premium refuses the leg rather than reading as 0: the page
-    # always sends one, and 0.0 is a real price (a worthless option).
-    premium = _pr._finite(raw.get("premium"))
+    # always sends one, and 0.0 is a real price (a worthless option). It is the
+    # per-share price paid or received - the SIDE carries the sign - so a
+    # negative one is refused.
+    premium = _in_range(raw.get("premium"), 0.0, MAX_PREMIUM)
     if option_type not in ("call", "put", "stock") or side not in ("long", "short") \
-            or qty is None or premium is None or abs(premium) > MAX_PREMIUM:
+            or qty is None or premium is None:
         return None
     if option_type == "stock":
         strike = expiry = None
@@ -278,22 +284,34 @@ def _stream_tag(command):
     return None
 
 
-def request_key(command) -> str | None:
+def request_key(command, today=None) -> str | None:
     """The key a command's result and answer are written under, or None for a
-    command neither builder would produce. Content-addressed over the
-    NORMALIZED args, so two visitors making the same request share one run.
+    command neither builder would produce.
+
+    The args are RE-NORMALIZED through the builder for the command's type
+    before hashing, as ``public_rescue.request_key`` does: a hand-built command
+    carrying a junk key or an unnormalized value (``" spy "``) hashes to the
+    same key as the properly built one, and args that fail validation get no
+    key at all. Two visitors making the same request share one run.
 
     ⚠ The hash keeps the request out of the key NAME, nothing more: the result
     under it is readable by anything holding a Redis read credential, and it is
     unsalted (see ``public_rescue.spec_key``)."""
     tag = _stream_tag(command)
-    return None if tag is None else _hash(tag, command["args"])
+    if tag is None:
+        return None
+    build = tools_command if tag == "tools" else math_command
+    clean = build(command["args"], today)
+    return None if clean is None else _hash(tag, clean["args"])
 
 
-def structure_key(args) -> str:
+def structure_key(args) -> str | None:
     """A rating request LESS its prices and sizes: every leg's ``premium`` and
     ``qty`` removed. Each price typed is a new request to the cache, so the
-    worker caps ratings per structure on this key instead."""
+    worker caps ratings per structure on this key instead. None for anything
+    that is not a mapping."""
+    if not isinstance(args, dict):
+        return None
     legs = [{k: v for k, v in leg.items() if k not in ("premium", "qty")}
             for leg in (args.get("legs") or [])]
     return _hash("structure", {**args, "legs": legs})

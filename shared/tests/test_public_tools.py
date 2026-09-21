@@ -177,3 +177,127 @@ def test_a_non_finite_count_is_refused_not_raised(field, bad):
     # ``int(nan)`` raising inside the builder.
     assert pt.math_command(_price(**{field: bad}), TODAY) is None
     assert pt.math_command(_price(legs=_legs(qty=bad)), TODAY) is None
+
+
+# ── review findings (2026-09-21) ────────────────────────────────────────────
+
+@pytest.mark.parametrize("field, edge", [
+    ("rate", 0), ("rate", 0.20), ("ivadj", -1), ("ivadj", 1), ("iv", 5.0),
+    ("spot", 1e6),
+])
+def test_a_price_field_at_its_edge_is_accepted(field, edge):
+    assert pt.math_command(_price(**{field: edge}), TODAY)["args"][field] == edge
+
+
+@pytest.mark.parametrize("premium", [0.0, 100000.0])
+def test_a_premium_at_its_edge_is_accepted(premium):
+    args = pt.math_command(_price(legs=_legs(premium=premium)), TODAY)["args"]
+    assert args["legs"][0]["premium"] == premium
+
+
+@pytest.mark.parametrize("premium", [100000.01, -0.01])
+def test_a_premium_past_its_edge_is_refused(premium):
+    assert pt.math_command(_price(legs=_legs(premium=premium)), TODAY) is None
+
+
+def _sweep(**over):
+    req = {"kind": "sweep", "symbol": "SPY", "dt": 5.0,
+           "legs": [{"kind": "put", "strike": 500.0, "expiry": EXP,
+                     "side": "short", "qty": 1}]}
+    req.update(over)
+    return req
+
+
+@pytest.mark.parametrize("dt", [0, 366])
+def test_a_sweep_horizon_at_its_edge_is_accepted(dt):
+    assert pt.math_command(_sweep(dt=dt), TODAY)["args"]["dt"] == dt
+
+
+def test_a_sweep_horizon_past_its_edge_is_refused():
+    assert pt.math_command(_sweep(dt=366.0001), TODAY) is None
+
+
+@pytest.mark.parametrize("leg", [
+    {"kind": "stock"}, {"strike": float("nan")}, {"qty": 0},
+])
+def test_an_unusable_sim_leg_refuses_the_sweep(leg):
+    legs = [{**_sweep()["legs"][0], **leg}]
+    assert pt.math_command(_sweep(legs=legs), TODAY) is None
+
+
+def test_a_calc_leg_without_a_premium_is_refused():
+    missing = _legs()
+    del missing[0]["premium"]
+    assert pt.math_command(_price(legs=missing), TODAY) is None
+    assert pt.math_command(_price(legs=_legs(premium=None)), TODAY) is None
+
+
+def test_a_share_legs_strike_and_expiry_are_forced_to_none():
+    legs = [{"option_type": "stock", "side": "long", "qty": 1, "premium": 500.0,
+             "strike": float("nan"), "expiry": "garbage"}]
+    leg = pt.math_command(_price(strategy="COVERED_CALL", legs=legs),
+                          TODAY)["args"]["legs"][0]
+    assert leg["strike"] is None and leg["expiry"] is None
+
+
+@pytest.mark.parametrize("raw, want", [
+    ("PCS;X", None), ("pcs", "PCS"), ("ß", None), ("covered_call", "COVERED_CALL"),
+])
+def test_codes(raw, want):
+    cmd = pt.math_command(_price(strategy=raw), TODAY)
+    assert (cmd["args"]["strategy"] if cmd else None) == want
+
+
+def test_num_strikes_must_be_whole():
+    assert pt.math_command(_price(num_strikes=24.5), TODAY) is None
+
+
+def test_an_iv_request_drops_a_mark():
+    cmd = pt.math_command({"kind": "iv", "symbol": "SPY", "expiry": EXP,
+                           "strike": 500.0, "option_type": "put", "mark": 9.9},
+                          TODAY)
+    assert "mark" not in cmd["args"]
+
+
+@pytest.mark.parametrize("over", [{"structure": "P C S"}, {"structure": None},
+                                  {"legs": _legs(strike=float("nan"))}])
+def test_a_rate_request_with_a_bad_structure_or_leg_is_refused(over):
+    raw = {"kind": "rate", "symbol": "SPY", "structure": "PCS", "legs": _legs()}
+    raw.update(over)
+    assert pt.tools_command(raw, TODAY) is None
+
+
+def test_limits_fall_back_on_bad_values(monkeypatch):
+    monkeypatch.setattr(pt, "load", lambda: {
+        "limits": {"result_ttl_min": True, "dedup_sec": 0, "max_wait_sec": -3},
+        "visitor": {"tools_per_hour": True, "math_per_hour": 0}})
+    lim = pt.limits()
+    assert lim["result_ttl_min"] == pt.DEFAULTS["limits"]["result_ttl_min"]
+    assert lim["dedup_sec"] == 0
+    assert lim["max_wait_sec"] == pt.DEFAULTS["limits"]["max_wait_sec"]
+    assert pt.tools_per_hour() == pt.DEFAULTS["visitor"]["tools_per_hour"]
+    assert pt.math_per_hour() == pt.DEFAULTS["visitor"]["math_per_hour"]
+
+
+def test_visitor_limits_read_a_good_value(monkeypatch):
+    monkeypatch.setattr(pt, "load", lambda: {
+        "visitor": {"tools_per_hour": 7, "math_per_hour": 70}})
+    assert (pt.tools_per_hour(), pt.math_per_hour()) == (7, 70)
+
+
+def test_request_key_renormalizes_a_hand_built_command():
+    built = pt.math_command(_price(), TODAY)
+    want = pt.request_key(built, TODAY)
+    junk = {"type": pt.MATH_TYPE, "args": {**built["args"], "junk": 1}}
+    loose = {"type": pt.MATH_TYPE, "args": {**built["args"], "symbol": " spy "}}
+    assert pt.request_key(junk, TODAY) == want
+    assert pt.request_key(loose, TODAY) == want
+    bad = {"type": pt.MATH_TYPE, "args": {**built["args"], "spot": float("nan")}}
+    assert pt.request_key(bad, TODAY) is None
+    chain = pt.tools_command({"kind": "chain", "symbol": "SPY"})
+    assert pt.request_key({**chain, "type": pt.MATH_TYPE}, TODAY) is None
+
+
+def test_structure_key_of_a_non_mapping_is_none():
+    assert pt.structure_key(None) is None
+    assert pt.structure_key("x") is None
