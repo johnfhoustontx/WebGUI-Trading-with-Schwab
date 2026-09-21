@@ -78,6 +78,35 @@ the public pin gets the same treatment in Phase 1.
   size per symbol.
 - Decide the curated list size from that measurement (§5 has the arithmetic).
 
+#### Phase 0 progress (2026-09-21)
+
+- **Tool:** `tools/measure_finder_public.py` runs the real `compute.swing_scan`
+  with the §2 pin and records wall time, proxy calls by endpoint, rows,
+  unbounded-loss rows, short-put rows, payload size and the top of the ranking.
+  It calls compute, never the handler, so it writes no cache key (pinned by
+  `tools/tests/test_measure_finder_public.py`).
+- **Smoke run, 07:20 CT, pre-market:** IWM took 11.1 s and 6 proxy calls
+  (3 `/chains`, 1 `/quote`, 1 `/pricehistory`, 1 `/passthrough`) over 17
+  expirations, and produced 0 rows. Pre-market marks fail the quality cut, so
+  row counts need the session run.
+- **Session run:** scheduled on the box for 09:05 CT (a transient
+  `finder-phase0-measure` timer) over SPY, QQQ, $SPX, IWM, NVDA, AAPL, MSFT,
+  AMD, TSLA and META. Output goes to `/tmp/finder_phase0/run-0905.{json,log}`.
+- **Proxy baseline, 2026-09-18:** 130–155 requests a minute in the quiet
+  minutes, 284 at the autoscan (the ceiling is 300). The GEX poll skipped at
+  08:31, 08:53, 09:31, 09:45 and 09:51–52, and none at 09:04–09:12, which is
+  why 09:05 is the test minute.
+- **D2, first read (not legal advice):** secondary summaries of Schwab's
+  Online Services Agreement say a client "will not redistribute or facilitate
+  the redistribution of Market Information" to anyone Schwab has not
+  authorized, and the Brokerage Account Agreement limits market data to
+  personal, non-commercial use. Schwab's own page could not be fetched to
+  confirm the wording. ⚠ **If that reading holds, it bears on screens already
+  published**, not only the Finder: the Macro Board shows raw last prices and
+  changes, while the Gamma boards show derived exposure figures. The owner
+  should read the agreement itself. Derived-versus-raw is the question to take
+  to it.
+
 ### Phase 1: scheduled public scans (Tier 2 only)
 
 Follow the Gamma precedent: **the service publishes, per symbol, on a schedule;
