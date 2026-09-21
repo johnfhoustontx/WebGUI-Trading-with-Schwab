@@ -32,6 +32,11 @@ class Screen:
     private_route: str   # where the PRIVATE app serves this same page
     kwargs: dict = field(default_factory=dict)   # pins passed to render()
     settings: dict = field(default_factory=dict)  # app_settings pins for this screen
+    # Drawn as a picture tile on neuralstrike.co/live.html (and so captured by
+    # tools/capture_live_shots.py). False for the interactive tools: a capture
+    # of an empty form sells nothing, so they are reached from the site's
+    # Tools menu only (removed from the grid 2026-09-21 at the owner's ask).
+    tile: bool = True
 
 
 _NETPREM = {"gamma_netprem_group": "indices",
@@ -97,7 +102,7 @@ SCREENS = (
     # to pages/options/finder_live.py before the private Finder builds anything.
     # Roadmap: docs/plans/2026-09-21-public-strategy-finder-roadmap.md.
     Screen("finder", "/finder", "Strategy Finder", "options.swing",
-           "/options/swing", kwargs={"public": True}),
+           "/options/swing", kwargs={"public": True}, tile=False),
     # The SECOND screen that writes: a visitor's strikes loads and rescue
     # requests go on cmd:rescue_public (bus_client.request_public_ladder /
     # request_public_rescue; the live ACL user's second write selector).
@@ -105,7 +110,7 @@ SCREENS = (
     # private page builds its at-risk board, which reads the owner's paper book.
     # Blueprint: docs/plans/2026-09-21-public-rescue-adhoc-roadmap.md.
     Screen("rescue", "/rescue", "Rescue my Sh*tty trade", "options.rescue",
-           "/options/rescue", kwargs={"public": True}),
+           "/options/rescue", kwargs={"public": True}, tile=False),
     # The THIRD and FOURTH screens that write, and the two share their streams:
     # a visitor's chain and expiration loads go on cmd:tools_public, and the
     # pricing (the Calculator's P&L and implied IV, the Simulator's sweep) on
@@ -118,9 +123,9 @@ SCREENS = (
     # visitor per browser tab.
     # Blueprint: docs/plans/2026-09-21-public-calculator-simulator-design.md.
     Screen("calculator", "/calculator", "Calculator", "options.calculator",
-           "/options/calculator", kwargs={"public": True}),
+           "/options/calculator", kwargs={"public": True}, tile=False),
     Screen("simulator", "/simulator", "Simulator", "options.simulator",
-           "/options/simulator", kwargs={"public": True}),
+           "/options/simulator", kwargs={"public": True}, tile=False),
 )
 
 

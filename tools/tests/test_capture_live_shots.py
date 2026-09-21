@@ -47,7 +47,7 @@ def _live_screens():
 def test_it_captures_every_published_screen():
     """One source: the capture list IS live_screens.SCREENS, so a screen added
     to the site cannot be missing a thumbnail."""
-    screens = _live_screens().SCREENS
+    screens = [s for s in _live_screens().SCREENS if s.tile]
     targets = c.targets()
     assert len(targets) == len(screens)
     for screen, (url, out) in zip(screens, targets):

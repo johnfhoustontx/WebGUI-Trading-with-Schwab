@@ -111,7 +111,7 @@ def targets():
     gets captured, and from where, is in its return value.
     """
     return [(f"{repo_paths.NICEGUI_LIVE_URL}{s.route}", OUT_DIR / f"{s.slug}.webp")
-            for s in _live_screens().SCREENS]
+            for s in _live_screens().SCREENS if s.tile]
 
 
 def _in_window():

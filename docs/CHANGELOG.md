@@ -4,7 +4,18 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**The public Rescue, Calculator and Simulator run
+**Last updated:** 2026-09-21 (**The four interactive tools leave the Live
+Screens grid** - owner's ask.)
+
+- **What changed.** Strategy Finder, Rescue my Sh\*tty trade, Calculator and
+  Simulator no longer draw a tile on `neuralstrike.co/live.html`: a capture of
+  an empty form made a blank tile. They stay published and linked from the
+  site's Tools menu. `Screen.tile` (default True) in `webgui/live_screens.py`
+  is False for the four; the grid tests and `tools/capture_live_shots.py`
+  read only tiled screens, and a new test pins the untiled set to the Tools
+  menu's.
+
+**Prior — 2026-09-21** (**The public Rescue, Calculator and Simulator run
 after the close, with a stale-price warning** - owner's decision the same
 evening, after the promote that put all three live.)
 

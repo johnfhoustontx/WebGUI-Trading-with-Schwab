@@ -776,6 +776,20 @@ def _live_screens():
     return mod
 
 
+def _tiled():
+    """The published screens drawn as tiles. The interactive tools are
+    published but untiled (``Screen.tile``) -- the Tools menu reaches them."""
+    return [s for s in _live_screens().SCREENS if s.tile]
+
+
+def test_the_interactive_tools_are_not_tiled():
+    """Removed from the grid 2026-09-21: an empty form makes a blank tile."""
+    untiled = {s.slug for s in _live_screens().SCREENS if not s.tile}
+    assert untiled == {slug for slug, _ in TOOLS}
+    for slug in untiled:
+        assert f"live/{slug}.webp" not in _markup("live.html")
+
+
 def test_the_live_grid_offers_every_published_screen():
     """The grid and the live app read ONE source, so a screen cannot be
     published without a tile or tiled without being published.
@@ -795,7 +809,7 @@ def test_the_live_grid_offers_every_published_screen():
     captions = {_html.unescape(c) for c in
                 re.findall(r'<span class="ns-live-cap">([^<]+)</span>',
                            _markup("live.html"))}
-    for s in _live_screens().SCREENS:
+    for s in _tiled():
         assert f"{s.slug}.webp" in text, f"no tile for {s.slug}"
         assert s.title in captions, f"no caption for {s.title}"
 
@@ -804,7 +818,7 @@ def test_the_grid_tiles_nothing_the_app_does_not_publish():
     """The other direction, which a link-checker never covers: a tile left
     behind after a screen was unpublished points at a route that 404s, and the
     picture beside it keeps the old capture until someone deletes the file."""
-    slugs = {s.slug for s in _live_screens().SCREENS}
+    slugs = {s.slug for s in _tiled()}
     tiled = set(re.findall(r'src="live/([^"]+)\.webp"', _markup("live.html")))
     assert tiled == slugs, (
         f"tiled but not published: {sorted(tiled - slugs)}; "
@@ -817,7 +831,7 @@ def test_every_tile_links_to_its_own_route_on_the_live_origin():
     markup = _markup("live.html")
     tiles = re.findall(r'<a class="ns-live-tile" href="([^"]+)"[^>]*>\s*'
                        r'<img src="live/([^"]+)\.webp"', markup)
-    by_slug = {s.slug: s.route for s in _live_screens().SCREENS}
+    by_slug = {s.slug: s.route for s in _tiled()}
     assert len(tiles) == len(by_slug), f"{len(tiles)} tiles parsed"
     for href, slug in tiles:
         assert href == f"https://{repo_paths.LIVE_HOST}{by_slug[slug]}", (href, slug)
