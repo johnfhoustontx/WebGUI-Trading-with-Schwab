@@ -202,6 +202,22 @@ def test_utility_pages_have_no_inline_style():
         assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
 
 
+# Phase 5's own screens. ⚠ ``PHASE_3A_FILES``' "portfolio.py" is
+# ``pages/options/portfolio.py`` — the Paper Account board — so the TOP-LEVEL
+# Portfolio page has never been covered here. It is clean today; it joins the
+# guard so it stays that way now that its tables and its one button come from
+# the kit.
+PHASE_5_FILES = ["portfolio.py"]
+
+
+def test_phase5_pages_have_no_inline_style():
+    base = pathlib.Path(__file__).resolve().parents[1] / "pages"
+    for fn in PHASE_5_FILES:
+        src = (base / fn).read_text(encoding="utf-8")
+        assert ".style(" not in src, f"{fn} still uses .style()"
+        assert ":style=" not in src, f"{fn} still uses a Vue :style= slot binding"
+
+
 # The page kit and the Appearance tab (2026-09-19 consistency work): the kit is
 # what every page's controls are built from, so a .style() there would spread
 # to every screen at once.

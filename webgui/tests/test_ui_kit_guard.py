@@ -90,7 +90,6 @@ ALLOWED = {
     # keeps its server paging, which rowsPerPage alone would silently turn into
     # client paging over the 50 rows already sent.
     "options/swing.py": {"button": 2},
-    "portfolio.py": {"button": 1, "table": 3},
     # The per-member name chip, and it stays: ONE call site producing on the
     # order of the whole level's universe per repaint, and a selectable name
     # chip - 10.5px, ring-on-select, max-w-full - not a page action. Through
