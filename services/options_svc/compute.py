@@ -8593,6 +8593,8 @@ class SimStore:
     ⚠ ``limit`` may be an int OR a zero-argument callable. ``PRIVATE_SIM`` passes
     a callable reading ``SIM_SNAPSHOT_LIMIT`` at put time, which is exactly how
     ``_stash_sim_snapshot`` read the module constant before this class existed.
+    ``ttl_sec`` may be a callable too, read on each ``get``: the public store's
+    life is a Settings value saved with no restart.
 
     ⚠ Thread-safe by one lock around every dict touch: the public store is read
     by one consumer thread and written by another. The lock guards the
@@ -8603,7 +8605,7 @@ class SimStore:
 
     def __init__(self, snapshots=None, expirations=None,
                  limit: "int | Callable[[], int]" = 4,
-                 ttl_sec: "float | None" = None,
+                 ttl_sec: "float | Callable[[], float] | None" = None,
                  clock: "Callable[[], float] | None" = None):
         self.snapshots: dict = {} if snapshots is None else snapshots
         self.expirations: dict = {} if expirations is None else expirations
@@ -8615,6 +8617,9 @@ class SimStore:
 
     def _limit(self) -> int:
         return int(self.limit() if callable(self.limit) else self.limit)
+
+    def _ttl(self) -> "float | None":
+        return self.ttl_sec() if callable(self.ttl_sec) else self.ttl_sec
 
     def _drop(self, symbol) -> None:
         self.snapshots.pop(symbol, None)
@@ -8631,8 +8636,9 @@ class SimStore:
             if snap is None:
                 return None
             loaded = self._loaded.get(symbol)
-            if (self.ttl_sec is not None and loaded is not None
-                    and self._mono() - loaded > self.ttl_sec):
+            ttl = self._ttl()
+            if (ttl is not None and loaded is not None
+                    and self._mono() - loaded > ttl):
                 self._drop(symbol)
                 return None
             return snap

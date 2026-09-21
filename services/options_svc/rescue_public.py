@@ -135,15 +135,7 @@ def _count_structure(key) -> None:
 
 
 def _age_s(iso, now) -> float | None:
-    if not iso:
-        return None
-    try:
-        when = dt.datetime.fromisoformat(str(iso))
-    except ValueError:
-        return None
-    if when.tzinfo is None:
-        when = when.replace(tzinfo=dt.timezone.utc)
-    return (now - when).total_seconds()
+    return public_chain.age_s(iso, now)
 
 
 # ── the status view: counts only ─────────────────────────────────────────────
@@ -190,20 +182,9 @@ def _payload(bus, view):
 
 
 # ── the strikes list ─────────────────────────────────────────────────────────
-# Loading, holding and stripping the chain live in ``public_chain``: the public
-# Calculator and Simulator share the same key and the same held chain.
-
-def _reconcile(bus, symbol, existing, lim) -> None:
-    """Bring a cached list into line with the quotes switch, with no Schwab call
-    and no budget: the answer stays ``cached``. A failure is a degrade, never a
-    lost answer."""
-    try:
-        fixed = public_chain.reconcile(existing, symbol)
-        if fixed is not None:
-            public_chain.publish(bus, symbol, fixed, lim["ladder_keep_min"])
-    except Exception:  # noqa: BLE001 - the visitor still gets their answer
-        _degrade.degraded("options.rescue_public_reconcile", detail=symbol)
-
+# The gate, the load and the publish live in ``public_chain.ladder_request``:
+# the public Calculator's ``chain`` / ``expiry`` requests are the same request
+# against the same key.
 
 def _handle_ladder(bus, command, now, lim, status) -> None:
     args = getattr(command, "args", None) or {}
@@ -215,55 +196,19 @@ def _handle_ladder(bus, command, now, lim, status) -> None:
         _write_status(bus, status, now)
         return
     key = pr.ladder_key(symbol, expiry)
-    view = pr.ladder_view(symbol)
-    existing = _payload(bus, view)
-    age = _age_s(getattr(command, "ts", None), now)
-    held = _age_s((existing or {}).get("loaded_at"), now)
-    fresh = held is not None and 0 <= held < lim["ladder_ttl_min"] * 60
-    # ⚠ A list is only fresh while its quoted chain is still HELD. After a
-    # restart or an eviction Redis keeps a fresh ``loaded_at`` while this
-    # process holds nothing, and every request would be answered ``cached``
-    # with nothing ever reloading the chain the Calculator's math needs. A
-    # ``no_options`` verdict holds no chain by design, so it stays exempt -
-    # otherwise every junk ticker would spend a load per request.
-    if fresh and not existing.get("no_options") and public_chain.held(symbol) is None:
-        fresh = False
-    if age is not None and (age > lim["max_wait_sec"] or age < -FUTURE_SKEW_SEC):
-        outcome = "expired"
-    elif fresh and existing.get("no_options"):
-        outcome = "no_options"
-    elif fresh and expiry and expiry not in (existing.get("expirations") or []):
-        outcome = "not_listed"
-    elif fresh and (expiry is None or expiry in (existing.get("strikes") or {})):
-        outcome = "cached"
-    elif _ran_recently(key, lim["dedup_sec"]):
-        outcome = "duplicate"
-    elif not market_calendar.in_window(WINDOW, now):
-        outcome = "closed"
-    else:
-        outcome = None
-    # The LAST gate, where the Schwab work would start: nothing refused above
-    # ever spends the shared budget.
-    if outcome is None and not public_budget.spend(bus, "chain", pr.budget(), now):
-        outcome = "budget"
-    if outcome == "cached":
-        _reconcile(bus, symbol, existing, lim)
-    if outcome is not None:
-        _answer(bus, key, outcome, now)
-        return
 
-    status["ladders_today"] += 1
-    status["busy"] = {"kind": "ladder", "since": now.isoformat()}
-    _write_status(bus, status, now)
-    _mark_ran(key)
-    try:
-        ladder, outcome = public_chain.load(symbol, expiry, existing, now,
-                                            fresh=fresh)
-        if ladder is not None:
-            public_chain.publish(bus, symbol, ladder, lim["ladder_keep_min"])
-    except Exception:  # noqa: BLE001 - one visitor's request must not kill the loop
-        _degrade.degraded("options.rescue_public_ladder", detail=symbol)
-        outcome = "error"
+    def start():
+        status["ladders_today"] += 1
+        status["busy"] = {"kind": "ladder", "since": now.isoformat()}
+        _write_status(bus, status, now)
+        _mark_ran(key)
+
+    outcome = public_chain.ladder_request(
+        bus, symbol, expiry, age=_age_s(getattr(command, "ts", None), now),
+        now=now, max_wait_sec=lim["max_wait_sec"], window=WINDOW,
+        recently=lambda: _ran_recently(key, lim["dedup_sec"]),
+        spend=lambda: public_budget.spend(bus, "chain", pr.budget(), now),
+        start=start, area="options.rescue_public")
     _answer(bus, key, outcome, now)
 
 

@@ -41,11 +41,14 @@ expiration it had strikes for.
 from __future__ import annotations
 
 import collections
+import datetime as dt
 import math
 import threading
 import time
 
+from services import _degrade
 from services.options_svc import compute
+from shared import market_calendar
 from shared import public_rescue as pr
 from shared import public_scan
 from shared import public_tools
@@ -274,3 +277,99 @@ def publish(bus, symbol, payload, keep_min):
     version = bus.cache_set(pr.cache_key(view), payload, ttl=keep_min * 60)
     bus.publish(pr.event(view), {"version": version})
     return version
+
+
+# ── one strikes-list request, decided and run ───────────────────────────────
+# The Rescue form's ``ladder`` request and the Calculator's ``chain`` / ``expiry``
+# requests are the SAME request against the same key, so the gate and the load
+# live here once. Each caller keeps its own answer key, dedup memory, window,
+# status counts and budget label, passed in as callbacks.
+
+FUTURE_SKEW_SEC = 30
+
+
+def age_s(iso, now) -> float | None:
+    """Seconds since an ISO stamp (a naive one is UTC), or None if unreadable."""
+    if not iso:
+        return None
+    try:
+        when = dt.datetime.fromisoformat(str(iso))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    return (now - when).total_seconds()
+
+
+def published(bus, symbol):
+    """The published public chain payload for ``symbol``, or None."""
+    env = bus.cache_get(pr.cache_key(pr.ladder_view(symbol)))
+    return env.payload if env is not None and isinstance(env.payload, dict) else None
+
+
+def _reconcile_published(bus, symbol, existing, keep_min, area) -> None:
+    """Bring a cached list into line with the quotes switch, with no Schwab call
+    and no budget: the answer stays ``cached``. A failure is a degrade, never a
+    lost answer."""
+    try:
+        fixed = reconcile(existing, symbol)
+        if fixed is not None:
+            publish(bus, symbol, fixed, keep_min)
+    except Exception:  # noqa: BLE001 - the visitor still gets their answer
+        _degrade.degraded(f"{area}_reconcile", detail=symbol)
+
+
+def ladder_request(bus, symbol, expiry, *, age, now, max_wait_sec, window,
+                   recently, spend, start, area) -> str:
+    """Decide one strikes-list request and, when it is due, load and publish;
+    return its outcome. The caller writes the answer.
+
+    Refusals, in order, all before any Schwab call: ``expired`` (``age`` past
+    ``max_wait_sec`` or in the future), ``no_options`` / ``not_listed`` /
+    ``cached`` from a list already published, ``duplicate`` (``recently()``),
+    ``closed`` (outside ``window``), and ``budget`` - ``spend()`` is the LAST
+    gate, so a request refused above never spends it. ``start()`` runs just
+    before the Schwab work (status counts, busy, dedup memory).
+
+    ⚠ A list is only fresh while its quoted chain is still HELD. After a restart
+    or an eviction Redis keeps a fresh ``loaded_at`` while this process holds
+    nothing, and every request would be answered ``cached`` with nothing ever
+    reloading the chain the Calculator's math needs. A ``no_options`` verdict
+    holds no chain by design, so it stays exempt - otherwise every junk ticker
+    would spend a load per request."""
+    lim = pr.limits()
+    existing = published(bus, symbol)
+    held_s = age_s((existing or {}).get("loaded_at"), now)
+    fresh = held_s is not None and 0 <= held_s < lim["ladder_ttl_min"] * 60
+    if fresh and not existing.get("no_options") and held(symbol) is None:
+        fresh = False
+    if age is not None and (age > max_wait_sec or age < -FUTURE_SKEW_SEC):
+        outcome = "expired"
+    elif fresh and existing.get("no_options"):
+        outcome = "no_options"
+    elif fresh and expiry and expiry not in (existing.get("expirations") or []):
+        outcome = "not_listed"
+    elif fresh and (expiry is None or expiry in (existing.get("strikes") or {})):
+        outcome = "cached"
+    elif recently():
+        outcome = "duplicate"
+    elif not market_calendar.in_window(window, now):
+        outcome = "closed"
+    else:
+        outcome = None
+    if outcome is None and not spend():
+        outcome = "budget"
+    if outcome == "cached":
+        _reconcile_published(bus, symbol, existing, lim["ladder_keep_min"], area)
+    if outcome is not None:
+        return outcome
+
+    start()
+    try:
+        ladder, outcome = load(symbol, expiry, existing, now, fresh=fresh)
+        if ladder is not None:
+            publish(bus, symbol, ladder, lim["ladder_keep_min"])
+    except Exception:  # noqa: BLE001 - one visitor's request must not kill the loop
+        _degrade.degraded(f"{area}_ladder", detail=symbol)
+        outcome = "error"
+    return outcome

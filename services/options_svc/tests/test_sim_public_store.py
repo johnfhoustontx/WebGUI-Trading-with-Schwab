@@ -275,3 +275,17 @@ def test_the_clock_is_a_constructor_argument():
     store.put("SPY", _snap("SPY"))
     clock.t += 11
     assert store.get("SPY") is None
+
+
+def test_the_ttl_may_be_a_callable_read_on_each_get():
+    """The public store's life comes from ``tools_public.toml``, which Settings
+    saves with no restart - so it is read when a snapshot is looked up."""
+    clock, ttl = _Clock(), [10.0]
+    store = compute.SimStore(limit=4, ttl_sec=lambda: ttl[0], clock=clock)
+    snap = _snap("SPY")
+    store.put("SPY", snap)
+    clock.t += 11
+    ttl[0] = 60.0
+    assert store.get("SPY") is snap, "the ttl was read once, not per get"
+    ttl[0] = 5.0
+    assert store.get("SPY") is None
