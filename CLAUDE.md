@@ -377,7 +377,7 @@ Routes:
 | `/sentiment/rotation` | Sector Rotation — verdict strip (regime · **diverging spread gauge** on a −3…+3 scale with both ±threshold triggers · the spread and how far past its trigger it sits), a **weight-proportional flow band**, and four quadrant panels. Quadrant map table + rotating-from/into lists retired. Cached, manual Refresh only. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/rrg` | RRG — **hand-drawn** relative-rotation plot (markers over an SVG trail layer, quadrant washes, fixed crosshair); **marker AREA = S&P weight**, trail = the **last 5 readings** resampled along a Catmull-Rom spline and labelled with the **sector name**. Domain is computed + symmetric about 100. Cached, manual Refresh only. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/momentum` | Momentum — a **numbered argument** (regime trio + dispersion · three levels + alignment · quadrant counts · one decomposed example · rank over recent sessions), with the ranked leaderboard behind a **collapsed expander**. Scatter + ribbon dropped. Recomputed **once nightly** (16:20 CT), not on the tick. [Detail](docs/webgui-routes.md) | built |
-| `/trade` | Trade Analyzer — on-demand Position (1–8wk) + Investor verdicts; Position runs the backtested IC-weighted factor model. Deep Dive and AI Query open separate reports. [Detail](docs/webgui-routes.md) | built |
+| `/trade` · `/trade/evidence` · `/trade/board` · `/trade/plan` | Trade Analyzer — **four Signal Desk screens over ONE shared frame** (`pages/trade_shell.py`): **Overview** (the on-demand **Short Term** 1–8wk + **Long Term** months+ verdicts — Short Term runs the backtested IC-weighted factor model), **Evidence**, **Rank Board** (the universe-wide board, its own `trade:rank_board` view) and **Trade Plan**. Deep Dive and AI Query open separate reports. ⚠ The card names are **Short Term / Long Term**; "Position" and "Investor" survive only as ENGINE KEYS, and `test_trade_recommendation.py` fails on either as prose. ⚠ `pages/trade.py` is a **library, not a page** — its `render()` was deleted 2026-09-20 because no route ever reached it; the four screens above are what `main.py` routes. [Detail](docs/webgui-routes.md) | built |
 | `/driver` | Claude Trades — monitor + override for the autonomous Claude decision layer, trading defined-risk spreads into its **own isolated paper book**. Paper only. [Detail](docs/webgui-routes.md) | built |
 | `/settings` | Settings — three sub-tabs. **General**: alert/ticker preferences, Schwab + Claude API call counts, and maintenance actions. **Appearance** (2026-09-19): every colour and font in eight groups that follow the design standard rather than the TOML's sections, over a live preview, saved as a `config/local/theme.toml` override. **Configuration** (2026-09-19): every `config/*.toml` setting by purpose, from the `webgui/config_schema.py` catalogue, saved as `config/local/` overrides, with a restart offer. [Detail](docs/webgui-routes.md) | built |
 | `/portfolio` | Portfolio — Holdings / Sectors / Performance over the portfolio model, with live-streaming P&L via the service’s SSE consumer. | built |
@@ -458,11 +458,16 @@ never drifts; `boxed=True` styles the trigger for the navy theme), and
 **`theme.py`** (the shared dark-navy **"dashboard" theme** — now a vocabulary of
 **Tailwind design-token constants** (`PAGE`/`CARD`/`EYEBROW`/`LABEL`/`MUTED`/`BTN`/
 `BTN_PRIMARY`/`STRATEGY_BTN`/`TXT_*`/`BTN_3D*`) applied via `.classes(CARD)`, plus the
-slim **`QUASAR_INTERNAL_CSS`** escape-hatch the Calculator/Simulator/Trade inject for the
-Quasar-internal DOM scoped under the `.calc-v2`/`.strategy-menu-btn`/`.leg-*` hooks
-(filled navy input boxes, compact leg cells, dark transparent tabs, the teleported
-`strat-menu-navy` popup); the legacy `DASHBOARD_CSS` string was **deleted in the
-Tailwind-first migration** — see the "App theme — dark-navy" canonical section below), and
+single **`APP_FIELD_CSS`** block — `build_quasar_css(THEME, scope=".ns-app")`, injected
+**app-wide by both entrypoints** — for the Quasar-internal DOM no `.classes()` can
+reach: filled navy input boxes, compact `.leg-*` cells, dark transparent tabs and the
+teleported `strat-menu-navy` popup. ⚠ **`build_quasar_css`'s `scope` is a REQUIRED
+argument** (2026-09-20): it used to default to `.calc-v2`, and with that class gone a
+forgotten argument would emit a whole block scoped to an element the app never builds
+— a failure with no symptom at all. The legacy `DASHBOARD_CSS` string was **deleted in
+the Tailwind-first migration**, and the second copy of this block —
+`QUASAR_INTERNAL_CSS` under `.calc-v2` — went with `pages/trade.py`'s unrouted
+`render` on 2026-09-20 — see the "App theme — dark-navy" canonical section below), and
 **`page_state.py`** (the shared PURE persistence helpers — `snapshot` /
 `merge_restore` / `pick_seed` — both pages use to restore their full UI state across
 navigation via a single-user module snapshot; see the route table). Options design + plan: [`docs/plans/2026-06-14-options-section-expansion-design.md`](docs/plans/2026-06-14-options-section-expansion-design.md)
@@ -488,14 +493,17 @@ layer via `ui.html` (`rrg_view.tail_svg`, `momentum_view.rank_svg`) — read the
 **App theme — dark-navy "dashboard" (Tailwind-first; the canonical reference).**
 The shared dark-navy look (**app-wide since 2026-09-19** — both entrypoints put
 `ns-app` on the content column and inject `SURFACE_CSS` + `APP_FIELD_CSS`, so a page
-needs no scope class of its own; `.calc-v2` survives as the Simulator/Trade hook for
-the leg-table and popup chrome) is now a set of **Tailwind design-token constants** in
-**`webgui/pages/options/theme.py`** applied via `.classes(CARD)` etc., plus a slim
-**`QUASAR_INTERNAL_CSS`** escape-hatch (the only `ui.add_css` a page injects) for the
-Quasar/Highcharts-internal DOM that component `.classes()` can't reach (`q-field__control`,
-the `leg-*` cells, the `q-tab*` chrome, the teleported `.strat-menu-navy` popup). The
-**Calculator**, **Simulator**, and **Trade** pages all use this. **`DASHBOARD_CSS` is
-deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This section +
+needs **no scope class of its own at all**) is now a set of **Tailwind design-token
+constants** in **`webgui/pages/options/theme.py`** applied via `.classes(CARD)` etc.,
+plus the one **`APP_FIELD_CSS`** block for the Quasar/Highcharts-internal DOM that
+component `.classes()` can't reach (`q-field__control`, the `leg-*` cells, the `q-tab*`
+chrome, the teleported `.strat-menu-navy` popup). ⚠ **There is no page-scoped copy of
+that block any more.** `QUASAR_INTERNAL_CSS` was the same rules under `.calc-v2`,
+injected a SECOND time by the three pages that wore that class — measured on 2026-09-20,
+`APP_FIELD_CSS.replace(".calc-v2", ".ns-app")` matched it exactly — and both went with
+`pages/trade.py`'s unrouted `render`, the last element in the app carrying the class.
+**`DASHBOARD_CSS` is deleted** (Phase 4) and `theme.py` is now tokens +
+`APP_FIELD_CSS` / `SURFACE_CSS` / `TYPOGRAPHY_CSS` / `NAV_THEME_CSS`. **This section +
 `theme.py` are the single source — look here to apply or change the theme.**
 - **App identity — `[brand]` in `config/theme.toml` (2026-07-27).** The app NAME and the
   header lockup are config, not code: `name_a`/`name_b` (the wordmark's two halves, so
@@ -575,11 +583,12 @@ deleted** (Phase 4) — `theme.py` = tokens + `QUASAR_INTERNAL_CSS`. **This sect
   `strategy_menu.build_strategy_menu(..., boxed=True)`) · `TXT_POS/TXT_WARN/TXT_NEG/TXT_NEUTRAL`
   semantic state text colors (+ `STATE_TEXT_CLASSES` for the reactive `remove=`) · `BTN_QUIET`
   text-only button · `BTN_3D` / `BTN_3D_DANGER` legacy aliases of `BTN_PRIMARY` / `BTN_DANGER`,
-  removed once no page uses them. **CSS-only hooks** (`QUASAR_INTERNAL_CSS`, scoped under
-  `.calc-v2` except the popup): `.calc-v2` scope hook (the page itself uses the `PAGE` token for
-  the gradient) · `.strat-menu-navy` the teleported Strategy-menu popup (**GLOBAL** — Quasar
-  menus mount on `<body>`, outside `.calc-v2`) · `.leg-head` / `.leg-row` / `.leg-strike`
-  leg-table cells (`leg_editor.build_leg_editor(..., header=True)`).
+  removed once no page uses them. **CSS-only hooks** (all in `APP_FIELD_CSS`, scoped under
+  `.ns-app` except the popup — both entrypoints put that class on the content column, so a
+  page adds no scope of its own): `.strat-menu-navy` the teleported Strategy-menu popup
+  (**GLOBAL** — Quasar menus mount on `<body>`, outside the scope) · `.leg-head` /
+  `.leg-row` / `.leg-strike` leg-table cells
+  (`leg_editor.build_leg_editor(..., header=True)`).
 - **Palette** (hex → role): page bg `#16243f→#0c1424→#0a0f1c` (radial) / border `#1d2942`
   · card `#101a30` / border `#213152` · input box `#0c1426` / border `#243353` / focus
   ring `#3b82f6` · input text `#e7edf8` · base text `#cdd8ee` · muted label `#7f8db0` ·
@@ -637,10 +646,14 @@ The phase-by-phase (P0–P8) log is in [docs/CHANGELOG.md](docs/CHANGELOG.md); t
 [`docs/plans/2026-06-28-tailwind-first-ui-migration-design.md`](docs/plans/2026-06-28-tailwind-first-ui-migration-design.md).
 The only inline styling that
 remains is the **documented out-of-scope set**: Highcharts option dicts (chart config), raw
-`ui.html()` HTML-string fragments + their CSS (`EOD_CSS`/`EXPLAIN_CSS`/the Gamma Analyze infographic
-/ the EOD export docs), and Quasar `color=` props. The ONE escape hatch is per-page **Quasar-internal**
-`ui.add_css` (`QUASAR_INTERNAL_CSS` field/tab/menu internals; `_NAV_CSS`; the table-internal
-`SCAN_CSS`/`PAPER_CSS`/`CAPTURED_CSS`/`_RESCUE_CSS`/`DRIVER_CSS` sticky-thead/`.q-table__middle`).
+`ui.html()` HTML-string fragments + their CSS (`EOD_CSS` / the Gamma Analyze infographic /
+the EOD export docs), and Quasar `color=` props. The escape hatch is **Quasar-internal**
+`ui.add_css` — `theme.APP_FIELD_CSS` (field/tab/menu internals, injected ONCE app-wide by
+both entrypoints, not per page), `_NAV_CSS`, and the handful of page blocks that style a
+widget the page itself mounts (`SCAN_CSS`, `FINDER_CSS`, `MACRO_CSS`, `_TICKER_CSS`,
+`_BULLBEAR_CSS`, `EOD_CSS`, the two keyframe blocks, and `DRIVER_CSS` — cut to its one
+`max-height` rule on 2026-09-20, since its sticky-thead half duplicated and fought
+`shell.TABLE_CSS`).
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
 `guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
 the owning client/slot has been deleted (browser tab navigated away / closed /
@@ -1611,9 +1624,10 @@ four** — `pos`, `neg`, `accent`, `warn` — losing `.calc-v3`, `build_calc_css
 `CALC_KEYFRAMES_CSS` and its JetBrains Mono link. ⚠ Nothing it encoded was lost:
 `leg_editor.DEFAULT_LEG_TOKENS` and `entry_panel.DEFAULT_PANEL_TOKENS` already carried
 bid-green, ask-red, ATM-amber, the ITM wash, long-cyan/short-green and the typed-price
-amber, and the P&L matrix ramp was never in the TOML at all. ⚠ `.calc-v2` is NOT the
-Calculator's and never was — it is the shared navy scope, and `trade.py` is its last
-user. Their background, text, button
+amber, and the P&L matrix ramp was never in the TOML at all. ⚠ `.calc-v2` was never the
+Calculator's either — it was the shared navy scope — and it is **gone** as of
+2026-09-20: `pages/trade.py`'s unrouted `render` held the last element wearing it, and
+the class died with that function. Their background, text, button
 and font keys are gone, because `/sentiment`, `/desk`, `/symbol`, `/sentiment/sectors`
 and `/market` now wear the app surface and IBM Plex. **`[rotation]` is gone entirely**
 — `void`, `panel` and `font_url` were its only keys and all three were surface.

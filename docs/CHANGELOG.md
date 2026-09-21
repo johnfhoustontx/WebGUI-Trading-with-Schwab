@@ -4,7 +4,135 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-20 (**One look and one behaviour — Phase 2: the Options
+**Last updated:** 2026-09-20 (**One look and one behaviour — Phase 5: the Signal
+Desk, Claude Trades and Portfolio.**)
+
+- **Six screens onto the page kit** — Overview, Evidence, Rank Board and Trade Plan
+  (all four through the one shared `trade_shell.page` frame), Claude Trades and
+  Portfolio. Each gets the app surface and font, one header line (title · Updated
+  stamp in CT · actions), one status line, one button vocabulary, one loading region
+  and one toast vocabulary. Every chart, P&L colour, grade ramp and quadrant hue is
+  untouched. This was the last of the *feature* screens; Phase 6 takes the system pages.
+- **`pages/trade.py` was 1,142 lines of which 419 were a `render` no route has ever
+  reached** — `main.py` sends `/trade` to `trade_overview`, and the other three to
+  their own modules. The only reference left anywhere was a test asserting the
+  function was callable. It is 671 lines now and it is a **library**: sixteen pure
+  names five siblings import, every one kept and parametrised by name so a future
+  trim cannot take one silently.
+- **`.calc-v2` and `QUASAR_INTERNAL_CSS` retire with it.** That page held the last
+  element in the app wearing the class. The claim that the block was redundant was
+  **verified, not taken**: `APP_FIELD_CSS.replace(".calc-v2", ".ns-app")` matched it
+  exactly, so the pages injecting it were injecting the app-wide block a second time.
+  ⚠ **`build_quasar_css`'s `scope` is now a required argument** — leaving `.calc-v2`
+  as the default would have left a builder whose every rule matched an element the
+  app no longer creates, which is a failure with no symptom at all.
+- **`terminal_theme` keeps only what colours a VALUE.** Eighteen tokens go — a second
+  ground, a second neutral ladder, a second type face, a second panel and a second
+  button set, which between them were the whole reason these four screens were the
+  app's seventh visual family. The data half (POS/NEG/WARN/DIM/OFF, the bars, chips,
+  callouts and the Rank Board toggle's selected state) is untouched and now has a test
+  file of its own, which it never had. Manrope and JetBrains Mono stop loading.
+
+⚠ **Six bugs fixed on the way, each proven before the fix.**
+- **Claude Trades' wait scrim had never once been seen** — the sixth instance of the
+  bug the design predicted five of. `build_busy` mounted it *inside* `monitor`, and
+  `_render_monitor` opens with `monitor.clear()`, so the first paint deleted it and
+  every `show()` since reached a dead element. Measured on the pre-change page: **zero
+  spinners survived a render**, against Portfolio's one on the identical probe.
+- **Claude Trades' status label was an orphan.** It was written twice — "Stopping…"
+  and "Repricing…" — and never reset, so the word stayed on screen for the rest of
+  the session. Each action now holds its own spinner over a region scrim carrying the
+  message the label used to.
+- **The Signal Desk gave up after 30 seconds on a measured 96-second analysis.** The
+  300-second backstop existed, written for the page nothing routes, while all four
+  reachable screens ran the default.
+- **The Signal Desk's wait covered the whole screen, including the Symbol box** the
+  reader had just typed into. It is a region over the results now — measured, the
+  scrim's top sits below the field's bottom.
+- **The symbol box's `blur` listener never fired.** NiceGUI attaches it to the
+  q-input *root*, where `blur` does not bubble, so clicking away committed nothing and
+  only Tab worked. `kit.symbol_field` uses `focusout`, which does.
+- **Rank Board's Rebuild had lost its wait to a key rename one commit earlier in this
+  same phase** — `_rebuild` read `state["spinner"]` where Task 1 had written
+  `state["wait"]`, so the button looked inert through a rebuild its own tooltip says
+  takes a minute or two. It could not simply be given one where it stood: `set_busy`
+  mounts the backstop timer in the button's own slot, and Rebuild lived in the row
+  `_paint` clears. As a page action in the header it survives the repaint — verified
+  live: click Rebuild, then Hide gated, and it is still disabled and still spinning.
+
+**What an operator will notice.** `strategy` and `status` move LEFT on the Claude
+Trades tables — they carried no `align`, so Quasar rendered them right, which nobody
+writes for a text column on purpose; this is a deliberate fix, not a regression, and
+the positions table's header now reads `LLLRLLLRL` matching its body cell for cell.
+**Every column on all eight tables is sortable** for the first time (the
+Momentum-leaderboard precedent). **Three Claude Trades actions move into the header**
+beside Refresh — Stop, Resume today and Run now — which is what makes a wait on them
+possible at all, since all three lived in the container their own command's repaint
+clears. And three pages stop calling themselves something the rail does not:
+**"Claude Driver" → Claude Trades**, **"Portfolio Analyzer" → Portfolio**, **"Rank
+board" → Rank Board**; Overview and Evidence gain a title they have never had.
+
+⚠ **Measured rather than assumed, because each would otherwise have shipped wrong.**
+Four of Portfolio's sixteen "numeric" columns are **letter grades** — Return, Capital,
+Risk and Entry render one character through `grade_letter` — so they stay left, while
+`composite` ("3.4 (A)") goes right and its decimal points still line up. The Rank
+Board's nine column widths were measured in Manrope and JetBrains Mono; re-checked in
+IBM Plex at 12.5px the digit-width spread is **0.000**, no cell overflows its track and
+every head still sits on one line, so `MONO` was replaced by nothing. And the Trade
+Plan's disabled Open in calculator really does open its tooltip — a Quasar disabled
+button keeps `pointer-events: auto`, which the whole change turns on.
+
+⚠ **Follow-up: `portfolio:positions`' staleness cannot be settled on this page.**
+Every Phase 5 header ships `stale=False`, and two of the three reasons are ordinary
+(the trade service is on-demand with no scheduler; the driver book's publisher is
+gated on a trading day and 08:00–15:15 CT). The third is not: **`webgui/alerts.py`
+measures this view's off-hours cadence twice and the two disagree** — line 116 says
+*620 s against a 600 s threshold* on a Sunday, "which means it flaps in and out of
+stale"; line 146 says *23 s (2 s loop)* on **that same Sunday**. A stamp that may go
+amber nightly on a healthy stack is worse than no stamp, so the header carries none
+until the nav badge's own threshold settles which reading is right. That is a
+nav-badge decision, not a page one.
+
+⚠ **Post-promote: the marketing gallery's three Stock Evaluation shots are stale.**
+`image20/21/22` (`/trade`, `/trade/evidence`, `/trade/plan`) still show the pre-kit
+Signal Desk — Manrope and JetBrains Mono, the "Signal desk" lockup, and no screen
+title. The routes are unchanged and `test_gallery_routes` passes; the files are
+gitignored and regenerate, unlike the three tracked Simulator images, so this is a
+capture run on the prod box — `tools/capture_gallery_shots.py` mints a session cookie
+from the 0600 `auth_store` and cannot run anywhere else.
+
+- **Also corrected on the way:** Claude Trades told the operator a **5-minute manage
+  cycle** in four places on screen and four more in comments, where
+  `_MANAGE_INTERVAL_MIN` has been 1 since 2026-07-16 (fixed on screen, in the module
+  docstring and in `handlers.run_driver_manage_and_refresh`'s); and the STOP dialog's
+  body said *"Enable re-arms it (clears the halt)"*, which is true of the manual stop
+  that dialog takes and false of a halt the driver sets itself — the distinction that
+  is the entire reason the Resume today button sits one line below it.
+- **`_pnl_color` is deleted rather than wired** — written into every position row and
+  read by no renderer, since the cell slot binds `_pnl_class`. ⚠ `scorecard`'s
+  breakdown writes the same dead key for the Paper Account page; left alone, because
+  reaching into a shared Phase-1 module is its own decision.
+- **Three source-grep tests could not fail and one manual had a hole.** Each of the
+  four asserted a *substring* was missing, which pins a spelling: `'options:paper_account"'`
+  only worked because of the trailing quote, `"read_version("` missed a spaced paren,
+  `"from services import"` missed `from services.options_svc import`, and the banned
+  `PNL_GREEN, PNL_RED, PNL_NEUTRAL =` missed the lone stray its own docstring
+  describes. All four read the tree now. And `test_every_nav_route_has_a_guide`
+  re-listed the nav lists **by hand** and had fallen two behind, so `/trade/evidence`,
+  `/trade/board` and `/trade/plan` — measured, the only three nav routes in the app
+  without a guide — served the generic default help. It reads `main._NAV_LABEL` now,
+  and the three guides are written.
+- **Guard:** five entries deleted (`trade.py`, `trade_shell.py`,
+  `trade_plan_screen.py`, `portfolio.py`, `driver.py`), one added — `trade_board.py`'s
+  **Hide gated**, which carries both a selected state and a label that changes with it,
+  and `kit.button`'s four kinds express neither. **Ten permanent entries.**
+  `driver.py`, `scorecard.py` and the top-level `portfolio.py` join
+  `test_no_inline_style`; none of the three was covered before (that guard's
+  `"portfolio.py"` entry is `pages/options/portfolio.py`, the Paper Account board).
+- Design: `docs/plans/2026-09-19-app-ui-consistency-design.md`; plan:
+  `docs/plans/2026-09-19-app-ui-consistency-phase5-plan.md`.
+
+**Prior —** 2026-09-20 (**One look and one behaviour — Phase 2: the Options
 tools.**)
 
 - **Eight modules onto the page kit** — the Calculator, the Simulator, the Strategy
