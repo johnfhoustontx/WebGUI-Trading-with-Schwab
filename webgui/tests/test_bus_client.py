@@ -539,9 +539,9 @@ def test_each_public_rescue_request_writes_one_command_to_one_place(fn, params, 
     assert [ast.unparse(b.value) for b in builds] == [builder]
 
 
-def test_the_public_origin_has_exactly_three_write_functions():
+def test_the_public_origin_has_exactly_five_write_functions():
     """Every bus_client function that enqueues, other than ``request`` (which a
-    read-only process refuses), is a public write. Adding a fourth must be a
+    read-only process refuses), is a public write. Adding a sixth must be a
     decision, made here."""
     import ast
     import inspect
@@ -550,5 +550,141 @@ def test_the_public_origin_has_exactly_three_write_functions():
         f.name for f in tree.body if isinstance(f, ast.FunctionDef)
         and any(isinstance(n, ast.Call) and getattr(n.func, "attr", None)
                 == "enqueue_command" for n in ast.walk(f)))
-    assert writers == ["request", "request_public_ladder", "request_public_rescue",
-                       "request_public_scan"]
+    assert writers == ["request", "request_public_ladder", "request_public_math",
+                       "request_public_rescue", "request_public_scan",
+                       "request_public_tool"]
+
+
+# ── the public Calculator and Simulator's two writes ───────────────────────
+
+def _tools_stream_commands(stream):
+    return bus_client.bus().consume_commands(
+        stream, group="g", consumer="c", block_ms=50)
+
+
+def _calc_leg(**over):
+    leg = {"option_type": "put", "side": "short", "strike": 500.0,
+           "expiry": _EXP, "qty": 1, "premium": 1.2}
+    leg.update(over)
+    return leg
+
+
+def _price_request(**over):
+    req = {"kind": "price", "symbol": " spy ", "strategy": "PCS",
+           "spot": 505.0, "iv": 0.2, "rate": 0.045, "ivadj": 0.0, "qty": 1,
+           "expiry": _EXP, "num_strikes": 20,
+           "legs": [_calc_leg(), _calc_leg(side="long", strike=495.0,
+                                           premium=0.6)]}
+    req.update(over)
+    return req
+
+
+def test_public_tool_and_math_requests_are_allowed_on_a_read_only_process():
+    from shared import public_tools
+    bus_client.set_read_only(True)
+    assert bus_client.request_public_tool({"kind": "chain", "symbol": " spy "})
+    assert bus_client.request_public_math(_price_request())
+    tools = [c for _id, c in _tools_stream_commands(public_tools.TOOLS_STREAM)]
+    maths = [c for _id, c in _tools_stream_commands(public_tools.MATH_STREAM)]
+    assert [c.type for c in tools] == [public_tools.TOOLS_TYPE]
+    assert [c.type for c in maths] == [public_tools.MATH_TYPE]
+
+
+def test_each_public_tools_request_writes_exactly_the_builders_command():
+    from shared import public_tools
+    raw_tool = {"kind": "expiry", "symbol": "spy", "expiry": _EXP, "junk": 1}
+    raw_math = _price_request(junk="x")
+    bus_client.request_public_tool(raw_tool)
+    bus_client.request_public_math(raw_math)
+    tools = [c for _id, c in _tools_stream_commands(public_tools.TOOLS_STREAM)]
+    maths = [c for _id, c in _tools_stream_commands(public_tools.MATH_STREAM)]
+    want_tool = public_tools.tools_command(raw_tool)
+    want_math = public_tools.math_command(raw_math)
+    assert len(tools) == 1 and len(maths) == 1
+    assert (tools[0].type, tools[0].args) == (want_tool["type"], want_tool["args"])
+    assert (maths[0].type, maths[0].args) == (want_math["type"], want_math["args"])
+    assert "junk" not in tools[0].args and "junk" not in maths[0].args
+
+
+def test_each_kind_lives_on_its_own_stream_only():
+    """A math kind handed to the tools writer (or the reverse) is refused, not
+    re-routed."""
+    from shared import public_tools
+    with pytest.raises(ValueError):
+        bus_client.request_public_tool(_price_request())
+    with pytest.raises(ValueError):
+        bus_client.request_public_math({"kind": "chain", "symbol": "SPY"})
+    assert _tools_stream_commands(public_tools.TOOLS_STREAM) == []
+    assert _tools_stream_commands(public_tools.MATH_STREAM) == []
+
+
+@pytest.mark.parametrize("call", [
+    lambda: bus_client.request_public_tool({"kind": "chain", "symbol": "../x"}),
+    lambda: bus_client.request_public_tool({"kind": "expiry", "symbol": "SPY",
+                                            "expiry": "tomorrow"}),
+    lambda: bus_client.request_public_tool("not a dict"),
+    lambda: bus_client.request_public_math(
+        _price_request(legs=[_calc_leg(strike=float("nan"))])),
+    lambda: bus_client.request_public_math(_price_request(spot=True)),
+    lambda: bus_client.request_public_math(None),
+])
+def test_an_invalid_public_tools_request_writes_nothing(call):
+    from shared import public_tools
+    bus_client.set_read_only(True)
+    with pytest.raises(ValueError):
+        call()
+    assert _tools_stream_commands(public_tools.TOOLS_STREAM) == []
+    assert _tools_stream_commands(public_tools.MATH_STREAM) == []
+
+
+def test_public_tools_requests_never_reach_the_options_stream():
+    bus_client.request_public_tool({"kind": "chain", "symbol": "SPY"})
+    bus_client.request_public_math(_price_request())
+    assert bus_client.bus().consume_commands(
+        "cmd:options", group="g", consumer="c", block_ms=50) == []
+
+
+@pytest.mark.parametrize("domain", ["tools_public", "tools_public_math"])
+def test_the_generic_request_path_stays_refused_for_the_tools_streams(domain):
+    from shared import public_tools
+    bus_client.set_read_only(True)
+    with pytest.raises(PermissionError):
+        bus_client.request(domain, {"type": "public_tool",
+                                    "args": {"kind": "chain", "symbol": "SPY"}})
+    assert _tools_stream_commands(public_tools.TOOLS_STREAM) == []
+    assert _tools_stream_commands(public_tools.MATH_STREAM) == []
+
+
+@pytest.mark.parametrize("fn, stream, builder", [
+    ("request_public_tool", "public_tools.TOOLS_STREAM",
+     "public_tools.tools_command(raw_request)"),
+    ("request_public_math", "public_tools.MATH_STREAM",
+     "public_tools.math_command(raw_request)"),
+])
+def test_each_public_tools_request_writes_one_command_to_one_place(fn, stream, builder):
+    """The caller controls the request's fields; never the stream, the command
+    type, or anything written besides what the builder returned."""
+    import ast
+    import inspect
+    import textwrap
+    node = ast.parse(textwrap.dedent(inspect.getsource(
+        getattr(bus_client, fn)))).body[0]
+    assert [a.arg for a in node.args.args + node.args.kwonlyargs] == ["raw_request"]
+    assert not node.args.vararg and not node.args.kwarg
+    writes = [n for n in ast.walk(node) if isinstance(n, ast.Call)
+              and getattr(n.func, "attr", None) == "enqueue_command"]
+    assert len(writes) == 1
+    assert not writes[0].keywords
+    got_stream, command = writes[0].args
+    assert ast.unparse(got_stream) == stream
+    assert ast.unparse(command) == "command"
+    # Every binding of ``command``, in any spelling, must be the builder's call.
+    def _targets(n):
+        if isinstance(n, ast.Assign):
+            return n.targets
+        if isinstance(n, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+            return [n.target]
+        return []
+    builds = [n for n in ast.walk(node)
+              if any(ast.unparse(t) == "command" for t in _targets(n))]
+    assert [ast.unparse(b.value) for b in builds] == [builder]

@@ -304,6 +304,51 @@ def request_public_rescue(raw_spec) -> str:
     return bus().enqueue_command(public_rescue.STREAM, command)
 
 
+def request_public_tool(raw_request) -> str:
+    """Ask for one public Calculator or Simulator request that SPENDS Schwab
+    calls - a chain, one more expiration, a trade rating, a Simulator snapshot
+    or its expirations; returns the message id.
+
+    One of the public origin's permitted writes, beside
+    :func:`request_public_scan`, the two Rescue writes and
+    :func:`request_public_math`, and for the same reason NOT a path through
+    :func:`request`: it writes exactly the command
+    ``shared.public_tools.tools_command`` builds from the visitor's dict, on
+    ``cmd:tools_public``, and takes no stream or command type from its caller.
+    The builder keeps only the fields the worker reads and refuses the whole
+    request if any is unusable, so what is written is never the visitor's dict
+    itself. The live Redis ACL user may XADD there (docs/dev-prod-environments.md).
+
+    Raises ``ValueError`` for a request the builder refuses, before anything is
+    written. The service re-validates what it reads.
+    """
+    from shared import public_tools  # Tier-1 allow-listed: config + validators only
+    command = public_tools.tools_command(raw_request)
+    if command is None:
+        raise ValueError("not a request the public tools can read")
+    return bus().enqueue_command(public_tools.TOOLS_STREAM, command)
+
+
+def request_public_math(raw_request) -> str:
+    """Ask for one public Calculator or Simulator PRICING request - reprice a
+    position, imply one contract's volatility, run a what-if sweep - over data
+    the service already holds; returns the message id.
+
+    Same boundary as :func:`request_public_tool`, on its own stream
+    (``cmd:tools_public_math``) so a reprice never queues behind a snapshot
+    fetch. It writes exactly the command ``shared.public_tools.math_command``
+    builds; a Schwab-spending kind is refused here rather than re-routed.
+
+    Raises ``ValueError`` for a request the builder refuses, before anything is
+    written.
+    """
+    from shared import public_tools  # Tier-1 allow-listed: config + validators only
+    command = public_tools.math_command(raw_request)
+    if command is None:
+        raise ValueError("not a pricing request the public tools can read")
+    return bus().enqueue_command(public_tools.MATH_STREAM, command)
+
+
 class EventListener:
     """Background daemon thread that fans an events channel out to a callback.
 
