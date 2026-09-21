@@ -11,8 +11,8 @@ Two requests (``shared.public_rescue``):
 
 * **ladder** -> ``cache:options:pub_chain:<SYMBOL>``: expirations and
   each expiration's strikes. The chain is fetched by the Calculator's own lazy
-  loader and every quote is thrown away before anything is written - the
-  public form publishes no bid, ask or mark (decision D1).
+  loader and HELD in this process (``public_chain``); what is written carries
+  no bid, ask or mark unless the one quotes switch is on (decision D1).
 * **compute** -> ``cache:options:rescue_pub:<hash of the trade>``: the private
   form's own ``compute_rescue_adhoc``, advisory-only, never an Apply.
 
@@ -51,7 +51,6 @@ from __future__ import annotations
 import collections
 import datetime as dt
 import logging
-import math
 import threading
 import time
 from zoneinfo import ZoneInfo
@@ -59,6 +58,7 @@ from zoneinfo import ZoneInfo
 from services import _degrade
 from services.options_svc import compute
 from services.options_svc import public_budget
+from services.options_svc import public_chain
 from shared import market_calendar
 from shared import public_rescue as pr
 from shared.symbols import clean_symbol
@@ -92,10 +92,11 @@ def _mono() -> float:
 
 
 def reset_memory() -> None:
-    """Forget the dedup memory (tests)."""
+    """Forget the dedup memory, and the chains ``public_chain`` holds (tests)."""
     with _RECENT_LOCK:
         _RECENT.clear()
         _RUNS.clear()
+    public_chain.reset()
 
 
 def _ran_recently(key, within_sec) -> bool:
@@ -189,73 +190,8 @@ def _payload(bus, view):
 
 
 # ── the strikes list ─────────────────────────────────────────────────────────
-
-def strikes_from_chain(chain) -> dict:
-    """``{expiry: {"call": [strikes], "put": [strikes]}}`` from a thinned chain.
-    Strikes only: every quote field is left behind."""
-    out: dict = {}
-    for map_key, right in (("callExpDateMap", "call"), ("putExpDateMap", "put")):
-        for exp_key, strikes in ((chain or {}).get(map_key) or {}).items():
-            exp = str(exp_key).split(":")[0]
-            ladder = out.setdefault(exp, {"call": [], "put": []})
-            for s in (strikes or {}):
-                try:
-                    ladder[right].append(float(s))
-                except (TypeError, ValueError):
-                    continue
-    for ladder in out.values():
-        for right in ("call", "put"):
-            ladder[right] = sorted(set(ladder[right]))
-    return out
-
-
-def _spot(price):
-    try:
-        f = float(price)
-    except (TypeError, ValueError):
-        return None
-    return round(f, 2) if math.isfinite(f) and f > 0 else None
-
-
-def _load_ladder(symbol, expiry, existing, now, *, fresh):
-    """Fetch what the request needs; return ``(ladder or None, outcome)``.
-    ``None`` means write nothing: a list already held stays as it was.
-
-    * One more expiration on a FRESH list is merged into it and keeps the list's
-      own ``loaded_at``: the EXPIRATIONS came from that first load, so a merge
-      must not make them look newer than they are.
-    * A STALE list is reloaded, asking again for every expiration it had
-      strikes for, so a leg already sitting on one does not lose its strikes.
-    * ⚠ ``no_options`` only when Schwab ANSWERED and listed nothing. A fetch
-      that failed is an ``error`` and is remembered nowhere: stored as "no
-      options", one proxy hiccup would tell every visitor for an hour that SPY
-      has no options."""
-    held = existing if isinstance(existing, dict) and not existing.get("no_options") else None
-    if (fresh and held and expiry and held.get("api")
-            and expiry in (held.get("expirations") or [])):
-        extra = compute._fetch_thin_runs(held["api"], [[expiry]])
-        if extra is None:
-            return None, "error"
-        strikes = dict(held.get("strikes") or {})
-        strikes.update(strikes_from_chain(extra))
-        return {**held, "strikes": strikes}, "done"
-    stamp = now.isoformat()
-    wanted = ([expiry] if expiry else []) + sorted((held or {}).get("strikes") or {})
-    cc = compute.calc_load_symbol(symbol, lazy=True, expiries=wanted or None)
-    chain = cc.get("chain")
-    strikes = strikes_from_chain(chain)
-    expirations = list(cc.get("expirations") or sorted(strikes))
-    if not strikes:
-        if not isinstance(chain, dict) or expirations:
-            return None, "error"        # a fetch failed; say so, remember nothing
-        return {"symbol": symbol, "no_options": True, "loaded_at": stamp}, "no_options"
-    ladder = {"symbol": symbol, "api": cc.get("api") or symbol,
-              "spot": _spot(cc.get("price")), "expirations": expirations,
-              "strikes": strikes, "loaded_at": stamp}
-    if expiry and expiry not in expirations:
-        return ladder, "not_listed"
-    return ladder, "done"
-
+# Loading, holding and stripping the chain live in ``public_chain``: the public
+# Calculator and Simulator share the same key and the same held chain.
 
 def _handle_ladder(bus, command, now, lim, status) -> None:
     args = getattr(command, "args", None) or {}
@@ -299,11 +235,10 @@ def _handle_ladder(bus, command, now, lim, status) -> None:
     _write_status(bus, status, now)
     _mark_ran(key)
     try:
-        ladder, outcome = _load_ladder(symbol, expiry, existing, now, fresh=fresh)
+        ladder, outcome = public_chain.load(symbol, expiry, existing, now,
+                                            fresh=fresh)
         if ladder is not None:
-            version = bus.cache_set(pr.cache_key(view), ladder,
-                                    ttl=lim["ladder_keep_min"] * 60)
-            bus.publish(pr.event(view), {"version": version})
+            public_chain.publish(bus, symbol, ladder, lim["ladder_keep_min"])
     except Exception:  # noqa: BLE001 - one visitor's request must not kill the loop
         _degrade.degraded("options.rescue_public_ladder", detail=symbol)
         outcome = "error"
