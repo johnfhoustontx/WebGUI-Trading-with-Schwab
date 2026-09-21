@@ -56,12 +56,38 @@ def test_the_palette_moved_VERBATIM():
 
 def test_the_driver_page_no_longer_DEFINES_the_builders():
     """A second definition would shadow the import and diverge silently — which is
-    exactly what a stray ``PNL_GREEN = ...`` did on the first attempt at this."""
+    exactly what a stray ``PNL_GREEN = ...`` did on the first attempt at this.
+
+    ⚠ Re-aimed 2026-09-20, not weakened. This read ``inspect.getsource(driver)``
+    for three exact spellings — ``"def pnl_color("``, ``"PNL_GREEN, PNL_RED,
+    PNL_NEUTRAL ="`` — so it pinned a FORMATTING rather than the fact: a single
+    ``PNL_GREEN = "#66bb6a"`` on its own line, which is the stray that actually
+    happened, walked straight past all three. It reads the module-level BINDINGS
+    out of the tree now, so any assignment, ``def`` or ``class`` that shadows one
+    of these names fails however it is written. Imports are excluded — binding
+    them by importing them is the whole point.
+    """
+    import ast
     import inspect
-    src = inspect.getsource(driver)
-    for banned in ("def scorecard_headline_chips", "def pnl_color(",
-                   "PNL_GREEN, PNL_RED, PNL_NEUTRAL ="):
-        assert banned not in src, banned
+
+    bound = set()
+    for node in ast.parse(inspect.getsource(driver)).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                items = (target.elts if isinstance(target, (ast.Tuple, ast.List))
+                         else [target])
+                bound |= {t.id for t in items if isinstance(t, ast.Name)}
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            if isinstance(node.target, ast.Name):
+                bound.add(node.target.id)
+    for name in ("PNL_GREEN", "PNL_RED", "PNL_NEUTRAL", "pnl_color", "pnl_class",
+                 "best_worst_text", "scorecard_headline_chips",
+                 "scorecard_quality_chips", "scorecard_symbol_rows",
+                 "scorecard_strategy_rows", "scorecard_exit_reason_rows"):
+        assert name not in bound, \
+            f"driver.py defines {name} itself — it must only import it"
 
 
 # ── the new exit-reason axis ────────────────────────────────────────────────

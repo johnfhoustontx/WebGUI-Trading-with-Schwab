@@ -1195,6 +1195,75 @@ press Enter.
 - **Deep Dive** opens a full technical + fundamental + options report in a new tab;
   **AI Query** opens a written second opinion. Both need pop-ups allowed.
 """,
+    # The three Signal Desk screens below /trade. They had NO guide of their own
+    # until 2026-09-20 — the coverage test re-listed the nav lists by hand and
+    # never named ``TRADE_CHILDREN``, so all three quietly served the generic
+    # default. The test reads ``main._NAV_LABEL`` now, which is the registry the
+    # shell itself derives from, so a new route cannot hide the same way.
+    "/trade/evidence": """
+**Evidence — the simple version**
+
+**Why** the Short Term read says what it says, and **how often it has been right.**
+Same symbol as Overview — the command bar is shared.
+
+- **Why — validated factors** — each factor the model uses, scored against *today's
+  other stocks* rather than against its own past. The bar runs either side of zero:
+  right is a pull toward Buy, left toward Sell. The **weighted composite** at the
+  foot is the sum the ranking is built from.
+- **IC** beside each factor is how well that factor has predicted the next few
+  weeks, historically. Near zero means it is carrying almost nothing today.
+- **Model track record** is about the **model**, over the whole universe. If its
+  live reading has drifted from the backtest, the warning says so — take the
+  recommendation smaller, not differently.
+- **This name's history** is the last five reads on *this* symbol and what followed.
+  ⚠ Five rows is an anecdote, never a statistic — that is why it shows the rows
+  and refuses to score them.
+""",
+    "/trade/board": """
+**Rank Board — the simple version**
+
+The whole universe ranked, both sides at once, with the safety checks showing.
+This is the one Signal Desk screen that is **not** about the symbol in the box.
+
+- **Two tables side by side** — the model's preferred longs and its preferred
+  shorts. They sit together because the board's question is which side it prefers
+  *today*, and that is a comparison.
+- **GATES** is the column to read. A name can rank top of the list and still be
+  gated — earnings inside the horizon, a market filter, a liquidity floor. A gated
+  name is a ranking, not a trade.
+- **Hide gated** collapses the board to what is actually actionable; the button
+  then reads *Showing ungated only* so you can see which mode you are in.
+- **The amber line** says how much of the ranking weight sits on volatility
+  factors. When it is high the top of the ordering is the high-beta end of the
+  universe — the board is partly ranking the market, not the companies.
+- **A bottom-ranked name in a rising market is predicted to LAG the index**, which
+  is not the same as predicted to fall. The short table says so above itself.
+- **Model paper book** below the tables follows the board's own picks, so the
+  ranking has a record rather than only an opinion.
+- **Rebuild** re-fetches history for every name in the universe and re-ranks. It
+  takes a minute or two and the button spins until it lands; nothing else on the
+  page is blocked meanwhile.
+""",
+    "/trade/plan": """
+**Trade Plan — the simple version**
+
+The cleared read turned into something you could actually place — structure, legs,
+entry zone, stop, target, time stop and the events inside it.
+
+- **The time stop is the highlighted row.** It is the model's own horizon: past it
+  the read has expired whatever the price has done, and holding on is a different
+  trade from the one the plan states.
+- **The no-trade card is not an error.** When a side is blocked it says **what
+  would change it** — which is a research finding — and, under *if you want the
+  exposure anyway*, how to express the view without pretending the model cleared
+  it. Both cards are always drawn.
+- **Find strikes** hands the symbol and the horizon to the Strategy Finder, which
+  builds the structures itself. It stays available even when the plan names none —
+  that is exactly when it is most useful.
+- **Open in calculator** loads the plan's own legs into the Calculator. It is
+  **disabled, with the reason on hover**, when the plan has no options structure to
+  model — a plan for shares has no legs to send.
+""",
     "/portfolio": """
 **Portfolio — the simple version**
 

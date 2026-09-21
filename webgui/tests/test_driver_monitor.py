@@ -429,45 +429,129 @@ def test_render_monitor_shows_scorecard_from_driver_perf():
         driver.render()  # must not raise; the scorecard paints from the perf view
 
 
+def _render_tree():
+    """``render``'s own body as an AST.
+
+    ⚠ These three tests used to read ``inspect.getsource(driver.render)`` as TEXT
+    and assert a substring was absent, which pins a SPELLING rather than a fact:
+    ``'options:paper_account"' not in src`` only worked because of the trailing
+    quote (the driver's own view ends in the same nine characters), and
+    ``"read_version(" not in src`` would miss ``read_version (x)``. Worse, an
+    absence-of-text assertion over a page that no longer holds the thing cannot
+    fail at all. Reading the tree lets each one assert what the page DOES — which
+    views it names, which bus call it makes, what it imports — so re-introducing
+    the mistake in any spelling turns it red.
+    """
+    import ast
+    import inspect
+
+    return ast.parse(inspect.getsource(driver.render).lstrip())
+
+
+def _names_used(tree):
+    """Every bare and dotted name USED in ``tree``.
+
+    ⚠ Not just callees: ``run.io_bound(bus_client.read_versions, views)`` hands
+    the reader over as a value, so a callee-only walk would not see it.
+    """
+    import ast
+
+    out = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute):
+            out.add(node.attr)
+        elif isinstance(node, ast.Name):
+            out.add(node.id)
+    return out
+
+
+def _assigned_list(tree, name):
+    """The string members of ``name = [...]`` inside ``tree``."""
+    import ast
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, (ast.List, ast.Tuple)):
+            targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+            if name in targets:
+                return {e.value for e in node.value.elts
+                        if isinstance(e, ast.Constant) and isinstance(e.value, str)}
+    return set()
+
+
+def _string_args(tree, callee):
+    """The flat string arguments of every ``callee(...)`` call, list args included
+    (``read_versions([...])`` passes its views inside one list)."""
+    import ast
+
+    out = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        fn = node.func
+        name = fn.attr if isinstance(fn, ast.Attribute) else getattr(fn, "id", None)
+        if name != callee:
+            continue
+        for arg in node.args:
+            items = arg.elts if isinstance(arg, (ast.List, ast.Tuple)) else [arg]
+            for item in items:
+                if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                    out.add(item.value)
+    return out
+
+
 def test_monitor_reads_driver_paper_account_not_manual():
     """3-tier re-point: the monitor's live-P&L source is the DRIVER paper account
     (cache:options:driver_paper_account), NOT the user's manual paper_account — so
     the day-P&L bar / summary / positions reflect the driver's own isolated book."""
-    import inspect
-
-    src = inspect.getsource(driver.render)
-    assert 'read("options:driver_paper_account")' in src
-    assert '"options:driver_paper_account"' in src   # version-gated on that view
-    # The monitor path must no longer read the manual account.
-    assert 'options:paper_account"' not in src
+    tree = _render_tree()
+    read = _string_args(tree, "read")
+    polled = _assigned_list(tree, "_POLL_VIEWS")
+    assert "options:driver_paper_account" in read          # the payload read
+    assert "options:driver_paper_account" in polled        # version-gated on it
+    # The monitor path must not read the manual account under ANY spelling — the
+    # view name is compared as a whole string, not searched for in the source.
+    assert "options:paper_account" not in (read | polled)
 
 
 def test_poll_pipelines_versions_and_reads_off_loop():
     """The 2s driver poll must batch its version probes into ONE pipelined
     read_versions call (was 5 sequential read_version round-trips) and read the
     changed payloads OFF the event loop."""
-    import inspect
+    import ast
 
-    src = inspect.getsource(driver.render)
-    assert "async def _poll" in src
-    assert "read_versions(" in src
-    assert "run.io_bound" in src
-    # No single-view read_version round-trips left in the poll body.
-    assert "read_version(" not in src
+    tree = _render_tree()
+    used = _names_used(tree)
+    assert any(isinstance(n, ast.AsyncFunctionDef) and n.name == "_poll"
+               for n in ast.walk(tree))
+    assert "read_versions" in used and "io_bound" in used
+    assert len(_assigned_list(tree, "_POLL_VIEWS")) > 1, \
+        "the batched probe has to carry more than one view to be batching anything"
+    # ⚠ Singular ``read_version`` is the five-round-trip regression. It stays
+    # absent even though the header's Updated stamp needs a version: the kit
+    # calls ``bus_client.read_meta`` inside ui_kit.py, not on this page.
+    assert "read_version" not in used
 
 
 def test_page_imports_no_engine_or_services():
     """3-tier rule: the Tier-3 page must not import engine / services / proxy code.
 
-    Guards the import *statements* (prose in the module docstring naturally names
-    ``services/driver_svc`` — that's documentation, not a dependency).
+    Reads the import STATEMENTS out of the tree — prose in the module docstring
+    naturally names ``services/driver_svc``, and that is documentation, not a
+    dependency. ⚠ The root package is what is compared, so the submodule
+    spellings the old substring test missed (``import services.options_svc``,
+    ``from proxy.client import x``) are caught too.
     """
+    import ast
     import inspect
 
-    src = inspect.getsource(driver)
-    for forbidden in ("import services", "from services import",
-                      "import proxy", "from proxy import"):
-        assert forbidden not in src, f"driver.py must not contain `{forbidden}`"
+    roots = set()
+    for node in ast.walk(ast.parse(inspect.getsource(driver))):
+        if isinstance(node, ast.Import):
+            roots |= {a.name.split(".")[0] for a in node.names}
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            roots.add(node.module.split(".")[0])
+    for forbidden in ("services", "proxy"):
+        assert forbidden not in roots, f"driver.py must not import `{forbidden}`"
     # No engine/proxy objects leaked into the page module namespace.
     for attr in ("proxy", "compute", "handlers"):
         assert not hasattr(driver, attr), f"driver.py exposes engine attr {attr!r}"

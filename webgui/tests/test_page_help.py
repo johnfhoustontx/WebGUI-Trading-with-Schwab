@@ -6,18 +6,19 @@ import page_help
 
 def test_every_nav_route_has_a_guide():
     """Each registered page route should have its own help guide (not the default),
-    so a new page isn't silently shipped without one."""
+    so a new page isn't silently shipped without one.
+
+    ⚠ Re-aimed 2026-09-20. This used to re-list the nav lists BY HAND and it had
+    fallen two behind — ``STRATEGY_TOOLS_CHILDREN`` and ``TRADE_CHILDREN`` were
+    never named, so the three Signal Desk sub-screens served the generic default
+    help for months and the test that exists to catch exactly that could not see
+    them. It reads ``main._NAV_LABEL`` now: the single registry the shell derives
+    every page's own tab title from, so a route the menu can reach is a route this
+    test checks, and a ninth list cannot be forgotten.
+    """
     import main
 
-    routes = {p for p, _, _ in main.OPTIONS_CHILDREN}
-    routes |= {p for p, _, _ in main.OPTIONS_RAIL}
-    routes |= {p for p, _, _ in main.SENTIMENT_CHILDREN}
-    routes |= {p for p, _, _ in main.FLAT_NAV}
-    routes |= {p for p, _, _ in main.MORE_CHILDREN}
-    routes |= {p for p, _, _ in main.SETTINGS_CHILDREN}
-    routes |= {p for p, _, _ in main.SYSTEM_RAIL}
-
-    missing = [r for r in routes if r not in page_help.HELP_MD]
+    missing = [r for r in main._NAV_LABEL if r not in page_help.HELP_MD]
     assert not missing, f"routes without an idiot's guide: {sorted(missing)}"
 
 
