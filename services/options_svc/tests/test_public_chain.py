@@ -221,3 +221,51 @@ def test_publish_writes_the_shared_chain_key_with_a_ttl(schwab):
     assert env.payload == payload
     ttl = bus._r.ttl(pr.cache_key(pr.ladder_view("SPY")))
     assert 0 < ttl <= 180 * 60
+
+
+# ── from the Task 5 review ──────────────────────────────────────────────────
+
+def test_switch_on_at_load_then_off_at_merge_publishes_no_quotes(schwab, monkeypatch):
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: True)
+    first = _first()
+    assert "quotes" in first
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: False)
+    payload, outcome = pc.load("SPY", FAR, first, OPEN, fresh=True)
+    assert outcome == "done"
+    assert "quotes" not in payload
+    for quote in QUOTE_FIELDS:
+        assert quote not in repr(payload)
+
+
+def test_a_merge_keeps_the_held_chain_age(schwab):
+    ttl = pr.limits()["ladder_ttl_min"] * 60
+    first = _first()
+    Clock.t += ttl - 10
+    payload, outcome = pc.load("SPY", FAR, first, OPEN, fresh=True)
+    assert outcome == "done" and pc.held("SPY") is not None
+    Clock.t += 20                          # past the ttl from the ORIGINAL load
+    assert pc.held("SPY") is None, "a merge made the held chain look newer"
+
+
+def test_reconcile_strips_or_rebuilds_the_quotes_block(schwab, monkeypatch):
+    first = _first()                                   # switch off: no quotes
+    assert pc.reconcile(first, "SPY") is None          # already consistent
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: True)
+    rebuilt = pc.reconcile(first, "SPY")
+    assert rebuilt["quotes"][NEAR]["put"]["500.0"]["mark"] == 1.1
+    assert pc.reconcile(rebuilt, "SPY") is None
+    pc.reset()
+    assert pc.reconcile(first, "SPY") is None, "no held chain: nothing to build from"
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: False)
+    stripped = pc.reconcile(rebuilt, "SPY")
+    assert "quotes" not in stripped and stripped["strikes"] == first["strikes"]
+    assert pc.reconcile({"symbol": "ZZZZ", "no_options": True}, "ZZZZ") is None
+    assert pc.reconcile(None, "SPY") is None
+
+
+def test_a_non_finite_strike_key_is_skipped():
+    row = [{"bid": 1.0, "ask": 1.1, "mark": 1.05, "delta": -0.2}]
+    chain = {"putExpDateMap": {"2026-10-02:9": {
+        "nan": row, "1e400": row, "-inf": row, "500.0": row}}}
+    assert pc.strikes_from_chain(chain)["2026-10-02"]["put"] == [500.0]
+    assert list(pc.quotes_from_chain(chain)["2026-10-02"]["put"]) == ["500.0"]

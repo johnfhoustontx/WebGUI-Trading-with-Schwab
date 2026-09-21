@@ -14,7 +14,12 @@ written carries expirations and strikes only. Only while
 ``public_scan.show_leg_quotes()`` - the ONE quotes switch, off by default - is
 on does the published copy also carry a small ``quotes`` block, four fields per
 contract (bid, ask, mark, delta), each a finite float or None. The switch is
-read at WRITE time, so flipping it needs no restart and no fresh load.
+read at WRITE time, and ``reconcile`` brings an already-published key into line
+with it with no Schwab call. ⚠ So flipping it takes effect per symbol, on the
+NEXT request for that symbol: that request rewrites the key (block stripped, or
+rebuilt from the held chain). A key nobody asks for keeps the block it was
+written with until its TTL (``ladder_keep_min``) expires it - turning the switch
+off does not reach into Redis by itself.
 
 ⚠ **Memory, not Redis, means a restart forgets every held chain** while the
 published strikes list may still be fresh. A merge needs a held chain to merge
@@ -90,7 +95,12 @@ def _held_entry(symbol):
 def held(symbol):
     """The quoted chain held for ``symbol``, or None when absent or older than
     ``ladder_ttl_min``. ⚠ Never write what this returns to Redis: it carries
-    every quote field."""
+    every quote field.
+
+    ⚠ This is the STORED object, not a copy, and it is shared across the
+    consumer threads - callers must not mutate it (build a new dict, as
+    ``load``'s merge does). It is deliberately not deep-copied: a whole chain
+    per read would cost more than the rule does."""
     entry = _held_entry(symbol)
     return entry[1] if entry is not None else None
 
@@ -102,6 +112,16 @@ def _maps(chain):
         yield right, ((chain or {}).get(map_key) or {})
 
 
+def _strike_key(s):
+    """A chain's strike KEY as a finite float, or None. ``float`` parses
+    ``"nan"`` and turns ``"1e400"`` into inf, so parsing alone is not enough."""
+    try:
+        f = float(s)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return f if math.isfinite(f) else None
+
+
 def strikes_from_chain(chain) -> dict:
     """``{expiry: {"call": [strikes], "put": [strikes]}}`` from a thinned chain.
     Strikes only: every quote field is left behind."""
@@ -111,10 +131,9 @@ def strikes_from_chain(chain) -> dict:
             exp = str(exp_key).split(":")[0]
             ladder = out.setdefault(exp, {"call": [], "put": []})
             for s in (strikes or {}):
-                try:
-                    ladder[right].append(float(s))
-                except (TypeError, ValueError):
-                    continue
+                strike = _strike_key(s)
+                if strike is not None:
+                    ladder[right].append(strike)
     for ladder in out.values():
         for right in ("call", "put"):
             ladder[right] = sorted(set(ladder[right]))
@@ -135,10 +154,10 @@ def quotes_from_chain(chain) -> dict:
             exp = str(exp_key).split(":")[0]
             side: dict = {}
             for s, rows in (strikes or {}).items():
-                try:
-                    strike = str(float(s))
-                except (TypeError, ValueError):
+                f = _strike_key(s)
+                if f is None:
                     continue
+                strike = str(f)
                 row = rows[0] if isinstance(rows, list) and rows else None
                 if not isinstance(row, dict):
                     continue
@@ -220,6 +239,32 @@ def _strip(payload):
     """A published payload less its quotes block, so a merge rebuilds it from
     the held chain (or leaves it out, if the switch is now off)."""
     return {k: v for k, v in payload.items() if k != "quotes"}
+
+
+def reconcile(existing, symbol):
+    """``existing`` (a published payload) brought into line with the quotes
+    switch as it reads NOW, or None when it already is.
+
+    * a ``quotes`` block while the switch is off -> the payload without it;
+    * no block while the switch is on and a chain is held -> the block rebuilt
+      from the held chain;
+    * no block, switch on, nothing held -> None: there is nothing to build from
+      without a Schwab call, and a caller that needs one decides that itself.
+
+    Costs no Schwab call, so a caller serving a cached payload can run it on
+    every hit. A ``no_options`` verdict carries no quotes either way."""
+    if not isinstance(existing, dict) or existing.get("no_options"):
+        return None
+    on = public_scan.show_leg_quotes()
+    has = "quotes" in existing
+    if has and not on:
+        return _strip(existing)
+    if on and not has:
+        cc = held(symbol)
+        if cc is None:
+            return None
+        return {**existing, "quotes": quotes_from_chain(cc.get("chain"))}
+    return None
 
 
 def publish(bus, symbol, payload, keep_min):

@@ -423,3 +423,67 @@ def test_one_structure_cannot_be_rerun_for_every_price(bus, schwab):
     other = _spec(short_strike=505.0, long_strike=500.0)
     rp.handle(bus, _compute_cmd(other))
     assert _answer(bus, _key(other)) == "done", "the cap bled onto another trade"
+
+
+# ── from the Task 5 review: the held chain and the quotes switch ────────────
+
+def _quotes_on(monkeypatch, on):
+    from shared import public_scan
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: on)
+
+
+def _version(bus, symbol="SPY"):
+    return bus.cache_version(pr.cache_key(pr.ladder_view(symbol)))
+
+
+def test_switch_turned_off_strips_the_quotes_on_the_next_cached_request(
+        bus, schwab, monkeypatch):
+    _quotes_on(monkeypatch, True)
+    rp.handle(bus, _ladder_cmd())
+    assert "quotes" in _ladder(bus)
+    _quotes_on(monkeypatch, False)
+    schwab.calls.clear()
+    rp.handle(bus, _ladder_cmd())
+    assert schwab.calls == []
+    assert _answer(bus, pr.ladder_key("SPY")) == "cached"
+    assert "quotes" not in _ladder(bus)
+    for quote in ("bid", "ask", "mark", "delta"):
+        assert quote not in repr(_ladder(bus))
+    assert public_budget.status(bus, OPEN)["spent"] == 1
+
+
+def test_switch_turned_on_adds_quotes_from_the_held_chain_on_a_cached_request(
+        bus, schwab, monkeypatch):
+    _quotes_on(monkeypatch, False)
+    rp.handle(bus, _ladder_cmd())
+    assert "quotes" not in _ladder(bus)
+    _quotes_on(monkeypatch, True)
+    schwab.calls.clear()
+    rp.handle(bus, _ladder_cmd())
+    assert schwab.calls == []
+    assert _answer(bus, pr.ladder_key("SPY")) == "cached"
+    assert _ladder(bus)["quotes"][NEAR]["put"]["500.0"]["bid"] == 1.0
+    assert public_budget.status(bus, OPEN)["spent"] == 1
+
+
+@pytest.mark.parametrize("on", [False, True])
+def test_a_consistent_cached_list_is_not_republished(bus, schwab, monkeypatch, on):
+    _quotes_on(monkeypatch, on)
+    rp.handle(bus, _ladder_cmd())
+    before = _version(bus)
+    rp.handle(bus, _ladder_cmd())
+    assert _answer(bus, pr.ladder_key("SPY")) == "cached"
+    assert _version(bus) == before
+
+
+def test_a_fresh_list_with_no_held_chain_is_reloaded(bus, schwab):
+    from services.options_svc import public_chain
+    rp.handle(bus, _ladder_cmd())
+    public_chain.reset()                          # the service restarted
+    rp.reset_memory()
+    schwab.calls.clear()
+    rp.handle(bus, _ladder_cmd())
+    assert [c[0] for c in schwab.calls] == ["load"]
+    assert _answer(bus, pr.ladder_key("SPY")) == "done"
+    assert public_chain.held("SPY") is not None
+    assert public_budget.status(bus, OPEN)["spent"] == 2

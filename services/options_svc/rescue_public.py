@@ -193,6 +193,18 @@ def _payload(bus, view):
 # Loading, holding and stripping the chain live in ``public_chain``: the public
 # Calculator and Simulator share the same key and the same held chain.
 
+def _reconcile(bus, symbol, existing, lim) -> None:
+    """Bring a cached list into line with the quotes switch, with no Schwab call
+    and no budget: the answer stays ``cached``. A failure is a degrade, never a
+    lost answer."""
+    try:
+        fixed = public_chain.reconcile(existing, symbol)
+        if fixed is not None:
+            public_chain.publish(bus, symbol, fixed, lim["ladder_keep_min"])
+    except Exception:  # noqa: BLE001 - the visitor still gets their answer
+        _degrade.degraded("options.rescue_public_reconcile", detail=symbol)
+
+
 def _handle_ladder(bus, command, now, lim, status) -> None:
     args = getattr(command, "args", None) or {}
     symbol = clean_symbol(args.get("symbol"))
@@ -208,6 +220,14 @@ def _handle_ladder(bus, command, now, lim, status) -> None:
     age = _age_s(getattr(command, "ts", None), now)
     held = _age_s((existing or {}).get("loaded_at"), now)
     fresh = held is not None and 0 <= held < lim["ladder_ttl_min"] * 60
+    # ⚠ A list is only fresh while its quoted chain is still HELD. After a
+    # restart or an eviction Redis keeps a fresh ``loaded_at`` while this
+    # process holds nothing, and every request would be answered ``cached``
+    # with nothing ever reloading the chain the Calculator's math needs. A
+    # ``no_options`` verdict holds no chain by design, so it stays exempt -
+    # otherwise every junk ticker would spend a load per request.
+    if fresh and not existing.get("no_options") and public_chain.held(symbol) is None:
+        fresh = False
     if age is not None and (age > lim["max_wait_sec"] or age < -FUTURE_SKEW_SEC):
         outcome = "expired"
     elif fresh and existing.get("no_options"):
@@ -226,6 +246,8 @@ def _handle_ladder(bus, command, now, lim, status) -> None:
     # ever spends the shared budget.
     if outcome is None and not public_budget.spend(bus, "chain", pr.budget(), now):
         outcome = "budget"
+    if outcome == "cached":
+        _reconcile(bus, symbol, existing, lim)
     if outcome is not None:
         _answer(bus, key, outcome, now)
         return
