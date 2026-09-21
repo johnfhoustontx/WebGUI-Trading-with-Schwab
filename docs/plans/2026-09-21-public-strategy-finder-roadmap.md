@@ -232,6 +232,21 @@ Schwab call.
   with no symbol typed, e.g. the last cached SPY result.
 - Verify with `tools/ui_harness.py`, then live over `live.neuralstrike.co`.
 
+#### Phase 2 progress (2026-09-21)
+
+Built, tested and walked in a local harness; not yet promoted.
+
+- The page is `pages/options/finder_live.py`, reached through
+  `swing.render(public=True)`. A separate module rather than a flag threaded
+  through the private page's ~1,200 lines: every owner control there would
+  have needed its own gate. What the visitor SEES still comes from the private
+  page's builders, so the two cannot drift in content.
+- The per-visitor limit, the own-symbol-only status read and the
+  poll-only-while-waiting rule are in, each pinned by a test.
+- **Not in Phase 2:** the Trade detail panel (its checklist reads the owner's
+  ledger; it could return without that line), and the daily scan count in
+  Settings.
+
 **Exit:** a visitor on `/finder` types a symbol and gets results or a worded
 refusal. The read-only refusal counter for everything except the one allowed
 write stays at zero.

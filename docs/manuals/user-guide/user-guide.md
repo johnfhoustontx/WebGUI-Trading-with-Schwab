@@ -144,13 +144,24 @@ skips the sign-in, which is what the wall display uses.
 
 ## The public live screens
 
-Twenty of the app's screens are also published **read-only and without any
-sign-in** on a second address, `https://live.neuralstrike.co` — the Desk,
+Twenty-one of the app's screens are also published **without any sign-in** on
+a second address, `https://live.neuralstrike.co` — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &
 Industry, Sector Rotation, RRG, Momentum, Net Prem, the two Premium Divergence
 screens, and eight Dealer Positioning boards: Gamma for $SPX, SPY and QQQ, and
-Charm, DEX, Vanna and Term Structure for $SPX. Each one shows the same scrolling
-market-summary ticker along the bottom that your own app does. `https://neuralstrike.co/live.html` is a thumbnail menu of
+Charm, DEX, Vanna and Term Structure for $SPX, and the **Strategy Finder**.
+Each one shows the same scrolling market-summary ticker along the bottom that
+your own app does.
+
+The public Strategy Finder is the one screen a visitor can act on: they type a
+symbol and press Scan, and it ranks strategies for that symbol with one fixed
+set of filters (expirations up to 90 days, short legs between 10 and 20 delta,
+a credit of at least 10% of a spread's width). They cannot change the filters,
+open a paper trade or use the Calculator. Scans run from 08:40 to 15:00 CT on
+trading days; a repeat request within 15 minutes shows the earlier result
+instead of scanning again. There is a limit of 200 public scans a day for all
+visitors together and 10 an hour for each visitor. Every limit is in
+**Settings → Configuration → Public Strategy Finder**. `https://neuralstrike.co/live.html` is a thumbnail menu of
 them.
 
 Three things to know:
@@ -160,7 +171,9 @@ Three things to know:
   Anyone with the address can read them. That is a deliberate choice — the book
   is paper only — but it is worth knowing before you show someone the link.
 - **They are a separate program.** Nothing anyone does there can reach your own
-  app: it holds no login, sends no commands, and cannot write anything. Its
+  app: it holds no login and can write only one thing — a request for a public
+  Strategy Finder scan, which the options service answers separately from your
+  own work. Its
   health has its own card on **System Status**; a red one means the public site
   is down and your own screens are unaffected.
 - **To stop publishing**, use **Stop All Services** — it stops both web apps —

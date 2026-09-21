@@ -301,13 +301,23 @@ not ask again for a while; a new browser, or a private window, always will.</p>
 <p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> still works there and
 skips the sign-in, which is what the wall display uses.</p>
 <h2 id="the-public-live-screens">The public live screens</h2>
-<p>Twenty of the app's screens are also published <strong>read-only and without any
-sign-in</strong> on a second address, <code>https://live.neuralstrike.co</code> — the Desk,
+<p>Twenty-one of the app's screens are also published <strong>without any sign-in</strong> on
+a second address, <code>https://live.neuralstrike.co</code> — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &amp;
 Industry, Sector Rotation, RRG, Momentum, Net Prem, the two Premium Divergence
 screens, and eight Dealer Positioning boards: Gamma for $SPX, SPY and QQQ, and
-Charm, DEX, Vanna and Term Structure for $SPX. Each one shows the same scrolling
-market-summary ticker along the bottom that your own app does. <code>https://neuralstrike.co/live.html</code> is a thumbnail menu of
+Charm, DEX, Vanna and Term Structure for $SPX, and the <strong>Strategy Finder</strong>.
+Each one shows the same scrolling market-summary ticker along the bottom that
+your own app does.</p>
+<p>The public Strategy Finder is the one screen a visitor can act on: they type a
+symbol and press Scan, and it ranks strategies for that symbol with one fixed
+set of filters (expirations up to 90 days, short legs between 10 and 20 delta,
+a credit of at least 10% of a spread's width). They cannot change the filters,
+open a paper trade or use the Calculator. Scans run from 08:40 to 15:00 CT on
+trading days; a repeat request within 15 minutes shows the earlier result
+instead of scanning again. There is a limit of 200 public scans a day for all
+visitors together and 10 an hour for each visitor. Every limit is in
+<strong>Settings → Configuration → Public Strategy Finder</strong>. <code>https://neuralstrike.co/live.html</code> is a thumbnail menu of
 them.</p>
 <p>Three things to know:</p>
 <ul>
@@ -316,7 +326,9 @@ them.</p>
   Anyone with the address can read them. That is a deliberate choice — the book
   is paper only — but it is worth knowing before you show someone the link.</li>
 <li><strong>They are a separate program.</strong> Nothing anyone does there can reach your own
-  app: it holds no login, sends no commands, and cannot write anything. Its
+  app: it holds no login and can write only one thing — a request for a public
+  Strategy Finder scan, which the options service answers separately from your
+  own work. Its
   health has its own card on <strong>System Status</strong>; a red one means the public site
   is down and your own screens are unaffected.</li>
 <li><strong>To stop publishing</strong>, use <strong>Stop All Services</strong> — it stops both web apps —

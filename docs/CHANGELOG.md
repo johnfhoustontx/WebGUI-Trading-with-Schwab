@@ -4,7 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**Public Strategy Finder, Phase 1: the one write
+**Last updated:** 2026-09-21 (**Public Strategy Finder, Phase 2: the page at
+`/finder`. Twenty-one public screens.**)
+
+- **`pages/options/finder_live.py`**: symbol box, one Scan button, and the
+  result drawn by the private page's own builders (summary, chips, top-pick
+  card body, ranked-list rows). No filters, no Paper, no Calculator, no
+  Expected Move, no Trade detail panel and no Checks column (its Paper book line
+  reads the owner's ledger). `swing.render(public=True)` hands off to it before
+  the private page builds anything, which keeps `private_route` true.
+- **`swing.split_bar` / `pick_card_body` / `strategy_chip`**: lifted out of
+  `render()`'s closures so both pages draw identical cards; the private page
+  adds only its actions. `swing.py`'s raw-button count is unchanged at two.
+- **`webgui/visitor_limit.py`**: 10 requests per visitor per hour
+  (`[visitor] scans_per_hour`), counted in memory by the edge-aware address;
+  nothing stored. Moved into Phase 2 on the Phase 1 review.
+- The page reads only its own symbol's entry of the status view, never the map
+  of everyone's searches, and polls only while its own request is waiting.
+- **`swing._request_scan` gained the `_may_enqueue` gate**, because
+  `options.swing` is now a published module and the live-commands guard
+  requires it of every enqueue site there.
+- **Verified in a local harness** running the real public process and the real
+  worker on one fake bus (only the Schwab scan stubbed): Scan → "Scanning SPY…"
+  → the answer; a repeat served from cache; a junk ticker worded "no listed
+  options"; an invalid string refused at the field. The harness caught two
+  wording faults, both fixed: "Showing…" printed twice for a cached answer, and
+  a no-options answer left the previous symbol's ideas on screen.
+
+---
+
+**Prior — 2026-09-21** (**Public Strategy Finder, Phase 1: the one write
 the public origin may make, and the worker that answers it. No page yet.**)
 
 - **`shared/public_scan.py`**: the stream (`cmd:finder_public`), the request

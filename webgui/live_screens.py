@@ -1,4 +1,4 @@
-"""The twenty screens published on the public live origin.
+"""The twenty-one screens published on the public live origin.
 
 PURE DATA -- no NiceGUI import -- so the route registration, the thumbnail
 capture script and the static grid on neuralstrike.co all read one source and
@@ -91,6 +91,13 @@ SCREENS = (
            kwargs={"symbol": "$SPX", "view": "Vanna"}),
     Screen("term", "/term", "Term Structure", "options.gamma", "/options/gamma",
            kwargs={"symbol": "$SPX", "view": "Term"}),
+    # ⚠ THE ONE SCREEN THAT WRITES. A visitor's Scan puts one validated symbol
+    # on cmd:finder_public (bus_client.request_public_scan; the live ACL user's
+    # only write selector) and options_svc answers it. ``public=True`` hands off
+    # to pages/options/finder_live.py before the private Finder builds anything.
+    # Roadmap: docs/plans/2026-09-21-public-strategy-finder-roadmap.md.
+    Screen("finder", "/finder", "Strategy Finder", "options.swing",
+           "/options/swing", kwargs={"public": True}),
 )
 
 

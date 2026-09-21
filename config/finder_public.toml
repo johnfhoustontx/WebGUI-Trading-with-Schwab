@@ -41,6 +41,12 @@ daily_budget = 200
 # must expire or they would accumulate without limit.
 result_keep_hours = 24
 
+[visitor]
+# Scan requests one visitor may make an hour. Counted in the public process by
+# address, in memory only - no address is written anywhere. The daily budget
+# above caps cost; this stops one visitor filling the queue for everyone.
+scans_per_hour = 10
+
 [display]
 # Per-leg bid/ask/mark on the public page. Off until Schwab's market-data
 # redistribution terms are settled (roadmap decision D2).

@@ -621,6 +621,11 @@ _FINDER_PUBLIC = ConfigFile(
             Field("limits.result_keep_hours", "Keep a symbol's result for", "",
                   kind="int", unit="h", min=1, max=168, step=1),
         )),
+        Section("Visitors", "", (
+            Field("visitor.scans_per_hour", "Scans per visitor per hour",
+                  "Counted by address in memory; no address is stored.",
+                  kind="int", min=1, max=200, step=1),
+        )),
         Section("Display", "", (
             Field("display.show_leg_quotes", "Show per-leg bid and ask",
                   "Off until Schwab's terms on republishing quotes are settled.",

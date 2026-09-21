@@ -433,8 +433,91 @@ _GRADE_SLOT = r'''
 '''
 
 
-def render():
-    """The Strategy Finder: scan bar, summary, chips, top picks, ranked list."""
+# ------------------------------------------------------------------ cards
+# Module-level so the PUBLIC Strategy Finder (finder_live.py) draws the same card
+# and bar: a top pick must read identically on both origins. Each page adds
+# only its own actions around the body.
+
+def split_bar(rr):
+    """The risk/reward bar under a top-pick card.
+
+    Loss grows leftwards from the centre tick, profit rightwards, both scaled to
+    the larger of the two (finder_view.risk_reward_bar). The tick makes the zero
+    point explicit, so an empty left half reads as "little risk" rather than as a
+    gap."""
+    with ui.element("div").classes("flex flex-nowrap items-center w-full h-3"):
+        with ui.element("div").classes(
+                "flex flex-nowrap justify-end flex-1 h-2 rounded-l overflow-hidden "
+                "bg-white/5"):
+            ui.element("div").classes(f"h-full {_LOSS_FILL} {rr['loss_class']}")
+        ui.element("div").classes(SPLIT_TICK)
+        with ui.element("div").classes(
+                "flex flex-nowrap flex-1 h-2 rounded-r overflow-hidden bg-white/5"):
+            ui.element("div").classes(f"h-full {_PROFIT_FILL} {rr['profit_class']}")
+    with ui.row().classes("w-full justify-between no-wrap"):
+        ui.label(f"Max loss {rr['loss_label']}").classes(f"text-xs {TXT_NEG}")
+        ui.label(f"Max profit {rr['profit_label']}").classes(f"text-xs {TXT_POS}")
+
+
+def strategy_chip(label, *, active, on_click):
+    """One strategy filter chip. Shared with the public Strategy Finder.
+
+    ⚠ A RAW ui.button (the guard's ALLOWED carries the reason): a filter chip's
+    whole job is a SELECTED state, here a tone swap between BADGE_ACCENT and
+    BADGE_MUTED, and kit.button's four kinds carry no such state. It is also
+    built once per strategy group on every repaint, and a row of full-size
+    action buttons is not what a filter row is."""
+    tone = BADGE_ACCENT if active else BADGE_MUTED
+    return ui.button(label, color=None).props("no-caps dense unelevated") \
+        .classes(f"{tone} {_CHIP}").on("click", lambda _e: on_click())
+
+
+def pick_card_body(c):
+    """A top-pick card's contents from :func:`card_view` facts, inside a card the
+    caller has opened. No actions: the caller adds its own, or none."""
+    with ui.row().classes("w-full items-start justify-between no-wrap gap-2"):
+        ui.label(c["title"]).classes(f"text-sm font-bold {LABEL}")
+        with ui.row().classes("items-center gap-1 no-wrap shrink-0"):
+            ui.label(c["score_text"]).classes(
+                f"{c['score_class']} text-[#111] text-xs font-bold rounded px-1.5")
+            if c["grade"]:
+                ui.label(c["grade"]).classes(f"text-xs {c['grade_class']}")
+    with ui.row().classes("items-center gap-2 flex-wrap"):
+        ui.label(c["expiry"]).classes(f"text-xs {MUTED}")
+        if c["earnings"]:
+            ui.label(c["earnings"]).classes(f"{BADGE_WARN} {_PILL}")
+    ui.label(c["legs"]).classes("text-xs")
+    if c["payoff_svg"]:
+        ui.html(c["payoff_svg"]).classes("self-center max-w-full overflow-hidden")
+    if c["rr"]:
+        split_bar(c["rr"])
+    if c["pop"]:
+        with ui.element("div").classes(
+                "w-full h-1.5 rounded overflow-hidden bg-white/5"):
+            ui.element("div").classes(f"h-full {c['pop']['class']} {c['pop_fill']}")
+        ui.label(f"{c['pop']['label']} probability of profit") \
+            .classes(f"text-xs {MUTED}")
+    ui.label(c["cost"]).classes(f"text-sm {LABEL}")
+
+
+def render(public=False):
+    """The Strategy Finder: scan bar, summary, chips, top picks, ranked list.
+
+    ``public=True`` is the PUBLIC site's Strategy Finder, a different page
+    (``finder_live``): a symbol box, one Scan button, and results read from the
+    per-symbol public keys. It returns before this page builds anything, so no
+    control below - Scan with its own filters, Paper, Calculator, the expiry
+    chooser, the owner's checklist - exists on the public origin. The public
+    screen names this module so ``live_screens.private_route`` stays true."""
+    if public:
+        from . import finder_live
+        return finder_live.render()
+    # The private page on the public origin would be a bug: nothing routes it
+    # there (the public screen passes public=True). The gate is the belt the
+    # live-commands guard asks every published module for, beside the braces
+    # of never building the page at all.
+    import shell as _shell
+    _may_enqueue = _shell.may_enqueue()
     ui.add_css(FINDER_CSS)
     sync = {"on": False}        # True while code writes linked controls
     # Read the cached result BEFORE the scan bar is built: the Symbol box starts
@@ -832,14 +915,8 @@ def render():
         _paint_results()
 
     def _chip(label, code):
-        # ⚠ A RAW ui.button (the guard's ALLOWED carries the reason): a filter
-        # chip's whole job is a SELECTED state, here a tone swap between
-        # BADGE_ACCENT and BADGE_MUTED, and kit.button's four kinds carry no such
-        # state. It is also built once per strategy group on every repaint, and
-        # a row of full-size action buttons is not what a filter row is.
-        tone = BADGE_ACCENT if fv.chip_is_active(state["active"], code) else BADGE_MUTED
-        ui.button(label, color=None).props("no-caps dense unelevated") \
-            .classes(f"{tone} {_CHIP}").on("click", lambda _e, c=code: _on_chip(c))
+        strategy_chip(label, active=fv.chip_is_active(state["active"], code),
+                      on_click=lambda c=code: _on_chip(c))
 
     def _paint_chips(signals):
         chips_row.clear()
@@ -851,53 +928,13 @@ def render():
             for code, label, n in counts:
                 _chip(f"{label} {n}", code)
 
-    def _split_bar(rr):
-        # Loss grows leftwards from the centre tick, profit rightwards, both scaled
-        # to the larger of the two (finder_view.risk_reward_bar). The tick makes
-        # the zero point explicit, so an empty left half reads as "little risk"
-        # rather than as a gap.
-        with ui.element("div").classes("flex flex-nowrap items-center w-full h-3"):
-            with ui.element("div").classes(
-                    "flex flex-nowrap justify-end flex-1 h-2 rounded-l overflow-hidden "
-                    "bg-white/5"):
-                ui.element("div").classes(f"h-full {_LOSS_FILL} {rr['loss_class']}")
-            ui.element("div").classes(SPLIT_TICK)
-            with ui.element("div").classes(
-                    "flex flex-nowrap flex-1 h-2 rounded-r overflow-hidden bg-white/5"):
-                ui.element("div").classes(f"h-full {_PROFIT_FILL} {rr['profit_class']}")
-        with ui.row().classes("w-full justify-between no-wrap"):
-            ui.label(f"Max loss {rr['loss_label']}").classes(f"text-xs {TXT_NEG}")
-            ui.label(f"Max profit {rr['profit_label']}").classes(f"text-xs {TXT_POS}")
-
     def _pick_card(sig):
         c = card_view(sig)
         card = ui.column().classes(
             f"{CARD} w-full gap-2 cursor-pointer hover:border-[#3b82f6]")
         card.on("click", lambda _e, s=sig: _select_signal(s))
         with card:
-            with ui.row().classes("w-full items-start justify-between no-wrap gap-2"):
-                ui.label(c["title"]).classes(f"text-sm font-bold {LABEL}")
-                with ui.row().classes("items-center gap-1 no-wrap shrink-0"):
-                    ui.label(c["score_text"]).classes(
-                        f"{c['score_class']} text-[#111] text-xs font-bold rounded px-1.5")
-                    if c["grade"]:
-                        ui.label(c["grade"]).classes(f"text-xs {c['grade_class']}")
-            with ui.row().classes("items-center gap-2 flex-wrap"):
-                ui.label(c["expiry"]).classes(f"text-xs {MUTED}")
-                if c["earnings"]:
-                    ui.label(c["earnings"]).classes(f"{BADGE_WARN} {_PILL}")
-            ui.label(c["legs"]).classes("text-xs")
-            if c["payoff_svg"]:
-                ui.html(c["payoff_svg"]).classes("self-center max-w-full overflow-hidden")
-            if c["rr"]:
-                _split_bar(c["rr"])
-            if c["pop"]:
-                with ui.element("div").classes(
-                        "w-full h-1.5 rounded overflow-hidden bg-white/5"):
-                    ui.element("div").classes(f"h-full {c['pop']['class']} {c['pop_fill']}")
-                ui.label(f"{c['pop']['label']} probability of profit") \
-                    .classes(f"text-xs {MUTED}")
-            ui.label(c["cost"]).classes(f"text-sm {LABEL}")
+            pick_card_body(c)
             with ui.row().classes("gap-2 no-wrap"):
                 # ⚠ click.stop is load-bearing - a button press is not also a
                 # card selection - and kit.button wires a PLAIN click, so the
@@ -1053,6 +1090,8 @@ def render():
 
     @guard
     def _request_scan():
+        if not _may_enqueue:
+            return          # the public origin scans through finder_live only
         sym = (symbol_in.value or "").strip().upper()
         params = scan_params(symbol_in.value, dte_min.value, dte_max.value, _bands(),
                              mincr.value,

@@ -682,7 +682,7 @@ still logs in full.
 
 ## The public live screens — a SECOND Tier-1 process
 
-`webgui/live_main.py` serves **twenty READ-ONLY screens, unauthenticated, to
+`webgui/live_main.py` serves **twenty-one screens, unauthenticated, to
 anyone** on `nicegui_live` (prod :8501, dev :9501) behind `LIVE_HOST`
 (`live.neuralstrike.co`). It renders the **real page modules the app renders**, so a
 published screen cannot drift from the private one. The published set and every pin
@@ -741,10 +741,15 @@ options_svc answers on a consumer loop of its own
 visitor's scan never queues with the owner's commands, and every refusal —
 invalid, expired, cached, duplicate, closed, over budget — is decided before
 any Schwab call. Result keys are per symbol and EXPIRE, because visitors choose
-the symbols. Roadmap:
+the symbols. The page is `/finder` (`swing.render(public=True)` hands off to
+`pages/options/finder_live.py` before the private page builds anything); it
+counts each visitor's requests in memory (`webgui/visitor_limit.py`, a copy of
+`main._client_ip`'s edge rule — the public process cannot import `main`), reads
+only its own symbol's entry of the status view, and draws no owner control.
+Roadmap:
 [`docs/plans/2026-09-21-public-strategy-finder-roadmap.md`](docs/plans/2026-09-21-public-strategy-finder-roadmap.md).
 
-⚠ **The published route set is the twenty screens PLUS exactly one non-page
+⚠ **The published route set is the twenty-one screens PLUS exactly one non-page
 route: `/static` (2026-09-09).** Every screen now carries a slim header — the
 brand lockup, a hairline, the screen name, and **no navigation of any kind** —
 and `[brand].mark` is a file under `/static`, which this process serves from its

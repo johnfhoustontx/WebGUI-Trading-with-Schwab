@@ -112,6 +112,12 @@ DEFAULTS = {
         # without an expiry the key count would grow without limit.
         "result_keep_hours": 24,
     },
+    "visitor": {
+        # Scan requests one visitor may make an hour, counted in the public
+        # process by address and never stored. The daily budget is the hard
+        # cap on cost; this stops ONE visitor filling the queue for everyone.
+        "scans_per_hour": 10,
+    },
     "display": {
         # Per-leg bid/ask/mark on the public page. OFF until the owner settles
         # Schwab's market-data terms (roadmap decision D2).
@@ -144,6 +150,10 @@ def scan_pin() -> dict:
 def limits() -> dict:
     return {k: _num("limits", k, minimum=1 if k != "dedup_sec" else 0)
             for k in DEFAULTS["limits"]}
+
+
+def scans_per_hour() -> int:
+    return _num("visitor", "scans_per_hour", minimum=1)
 
 
 def show_leg_quotes() -> bool:

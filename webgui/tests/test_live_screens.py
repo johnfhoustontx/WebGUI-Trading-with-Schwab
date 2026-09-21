@@ -14,9 +14,9 @@ FORBIDDEN = {"/terminate", "/settings", "/status", "/driver", "/manuals",
 _LIVE_SCREENS = pathlib.Path(__file__).resolve().parents[1] / "live_screens.py"
 
 
-def test_there_are_exactly_twenty_screens():
+def test_there_are_exactly_twenty_one_screens():
     import live_screens
-    assert len(live_screens.SCREENS) == 20
+    assert len(live_screens.SCREENS) == 21
 
 
 def test_no_screen_publishes_a_control_surface():

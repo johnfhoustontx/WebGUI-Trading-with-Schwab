@@ -68,6 +68,10 @@ def test_limits_have_the_shipped_values():
                    "result_keep_hours": 24}
 
 
+def test_a_visitor_gets_ten_scans_an_hour():
+    assert ps.scans_per_hour() == 10
+
+
 def test_leg_quotes_ship_off_until_d2_is_settled():
     assert ps.show_leg_quotes() is False
 

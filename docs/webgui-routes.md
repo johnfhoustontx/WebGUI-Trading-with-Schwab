@@ -1002,7 +1002,7 @@ Market Dashboard — **"Macro Board" visual redesign (2026-08-15, presentation-o
 
 ## Public live screens (`live.neuralstrike.co`) — 2026-09-07
 
-Twenty READ-ONLY routes (fourteen from 2026-09-07, six more Dealer Positioning views on 2026-09-21) served by a **second NiceGUI process**,
+Twenty-one routes (fourteen from 2026-09-07; six more Dealer Positioning views and the public Strategy Finder on 2026-09-21) served by a **second NiceGUI process**,
 `webgui/live_main.py` on `nicegui_live` (prod :8501, dev :9501), unauthenticated to
 anyone. **They render the same page modules the private routes render** — each pin is
 an optional keyword on the real `render()` — the precedent is
@@ -1037,6 +1037,7 @@ in [`plans/2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-li
 | `/dex` | `options.gamma.render(symbol="$SPX", view="DEX")` (`/options/gamma`) | `$SPX` · DEX |
 | `/vanna` | `options.gamma.render(symbol="$SPX", view="Vanna")` (`/options/gamma`) | `$SPX` · Vanna |
 | `/term` | `options.gamma.render(symbol="$SPX", view="Term")` (`/options/gamma`) | `$SPX` · Term — the collector gathers a term grid for `$SPX` alone |
+| `/finder` | `options.swing.render(public=True)` → `options.finder_live` (`/options/swing`) | ⚠ **the one screen that writes**: a visitor's Scan puts one symbol on `cmd:finder_public`; filters pinned in `config/finder_public.toml` |
 
 `BIG10` is a symbol inside the `indices` group in `config/symbols.toml`, not a group
 of its own.
