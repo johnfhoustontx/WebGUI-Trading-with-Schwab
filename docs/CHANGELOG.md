@@ -59,6 +59,11 @@ are not applied, and the snapshot and rating costs are unmeasured.**)
   up to `ladder_keep_min` (180 minutes) - a page load reads SPY's key with no
   request to reconcile it. The page now checks the switch too and strips the
   block from what it holds (`calc_live.page_chain`).
+  **Rescue and the tools worker could overwrite each other's chain merges**:
+  both call `public_chain.ladder_request` on their own threads, so two
+  merges on one symbol within a second could leave the held chain and the
+  published list disagreeing about an expiration, and two identical requests
+  could each spend the budget. It is now serialized per symbol.
 - **Rescue changes that ship in the same promote.** Rescue's strikes list is
   now the shared `pub_chain` key (it was `rescue_pub_ladder`), so the three
   tools share one Schwab fetch per symbol; and Rescue's separate daily

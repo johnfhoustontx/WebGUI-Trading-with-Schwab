@@ -41,6 +41,7 @@ expiration it had strikes for.
 from __future__ import annotations
 
 import collections
+import contextlib
 import datetime as dt
 import math
 import threading
@@ -287,6 +288,39 @@ def publish(bus, symbol, payload, keep_min):
 
 FUTURE_SKEW_SEC = 30
 
+# symbol -> [lock, number of requests holding or waiting on it]. ⚠ Rescue's
+# worker and the tools worker call ``ladder_request`` on two threads. Unlocked,
+# two merges on one symbol each merge into the chain they READ and the second
+# to finish wins: the held chain and the published list can then disagree about
+# an expiration (it answers ``cached`` while the math on it answers
+# ``off_ladder`` until ``ladder_ttl`` passes), two identical requests each spend
+# the budget, and ``_reconcile_published`` can republish a payload read before
+# the other thread's write. A lock PER SYMBOL, so one symbol's Schwab fetch
+# never stalls another's. An entry lives only while a request holds or waits on
+# it, so visitors choosing symbols cannot grow the dict.
+# Lock order: a symbol's lock is taken first and only here; ``_HELD_LOCK`` and
+# ``public_budget``'s lock are taken inside it and never call back out, so the
+# order is always symbol -> held / budget and cannot deadlock.
+_SYMBOL_LOCKS: dict = {}
+_SYMBOL_LOCKS_GUARD = threading.Lock()
+
+
+@contextlib.contextmanager
+def _symbol_lock(symbol):
+    key = str(symbol).strip().upper()
+    with _SYMBOL_LOCKS_GUARD:
+        entry = _SYMBOL_LOCKS.setdefault(key, [threading.Lock(), 0])
+        entry[1] += 1
+    entry[0].acquire()
+    try:
+        yield
+    finally:
+        entry[0].release()
+        with _SYMBOL_LOCKS_GUARD:
+            entry[1] -= 1
+            if entry[1] == 0:
+                _SYMBOL_LOCKS.pop(key, None)
+
 
 def age_s(iso, now) -> float | None:
     """Seconds since an ISO stamp (a naive one is UTC), or None if unreadable."""
@@ -324,6 +358,10 @@ def ladder_request(bus, symbol, expiry, *, age, now, max_wait_sec, window,
     """Decide one strikes-list request and, when it is due, load and publish;
     return its outcome. The caller writes the answer.
 
+    Serialized per symbol (``_symbol_lock``): the freshness read, the load, the
+    hold and the publish run as one step, so a second request for the symbol
+    decides against what the first one wrote.
+
     Refusals, in order, all before any Schwab call: ``expired`` (``age`` past
     ``max_wait_sec`` or in the future), ``no_options`` / ``not_listed`` /
     ``cached`` from a list already published, ``duplicate`` (``recently()``),
@@ -337,6 +375,15 @@ def ladder_request(bus, symbol, expiry, *, age, now, max_wait_sec, window,
     reloading the chain the Calculator's math needs. A ``no_options`` verdict
     holds no chain by design, so it stays exempt - otherwise every junk ticker
     would spend a load per request."""
+    with _symbol_lock(symbol):
+        return _ladder_request(bus, symbol, expiry, age=age, now=now,
+                               max_wait_sec=max_wait_sec, window=window,
+                               recently=recently, spend=spend, start=start,
+                               area=area)
+
+
+def _ladder_request(bus, symbol, expiry, *, age, now, max_wait_sec, window,
+                    recently, spend, start, area) -> str:
     lim = pr.limits()
     existing = published(bus, symbol)
     held_s = age_s((existing or {}).get("loaded_at"), now)

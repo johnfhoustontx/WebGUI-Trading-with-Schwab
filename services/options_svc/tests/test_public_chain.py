@@ -269,3 +269,112 @@ def test_a_non_finite_strike_key_is_skipped():
         "nan": row, "1e400": row, "-inf": row, "500.0": row}}}
     assert pc.strikes_from_chain(chain)["2026-10-02"]["put"] == [500.0]
     assert list(pc.quotes_from_chain(chain)["2026-10-02"]["put"]) == ["500.0"]
+
+
+# ── two consumer threads on one symbol ──────────────────────────────────────
+# Rescue's worker and the tools worker each call ``ladder_request`` on their own
+# thread. Without a per-symbol lock, two merges on one symbol within a second
+# each merge into the chain they READ, and the second to finish wins: an
+# expiration the published list names can be missing from the held chain (it
+# then answers ``cached`` while the math on it answers ``off_ladder``), and two
+# identical requests can each spend the budget.
+
+import threading  # noqa: E402
+
+X = "2026-10-16"
+Y = FAR
+
+
+def _caller(bus, spent, label):
+    """One worker's callbacks: its OWN dedup memory, as Rescue and the tools
+    worker each have, so dedup cannot hide a race between them."""
+    ran = set()
+
+    def run(expiry):
+        return pc.ladder_request(
+            bus, "SPY", expiry, age=0.0, now=OPEN, max_wait_sec=60,
+            window="tools_public", recently=lambda: expiry in ran,
+            spend=lambda: spent.append(label) or True,
+            start=lambda: ran.add(expiry), area=f"test.{label}")
+    return run
+
+
+def _published_expiries(bus):
+    return set((pc.published(bus, "SPY") or {}).get("strikes") or {})
+
+
+def _blocking_fetch(monkeypatch, schwab, block_on):
+    """The one-expiration fetch for ``block_on`` waits until released, so the
+    other thread is dispatched while it is in flight."""
+    started, release = threading.Event(), threading.Event()
+    real = compute._fetch_thin_runs
+
+    def fetch(api, runs):
+        if runs[0] == [block_on]:
+            started.set()
+            assert release.wait(5), "never released"
+        return real(api, runs)
+    monkeypatch.setattr(compute, "_fetch_thin_runs", fetch)
+    return started, release
+
+
+@pytest.fixture
+def in_window(monkeypatch):
+    monkeypatch.setattr(pc.market_calendar, "in_window", lambda window, now: True)
+
+
+def _race(first, second, started, release):
+    a = threading.Thread(target=first)
+    a.start()
+    assert started.wait(5)
+    b = threading.Thread(target=second)
+    b.start()
+    # Unserialized, the second request runs to the end while the first is held;
+    # serialized, it waits on the symbol's lock. Either way, release after.
+    b.join(0.5)
+    release.set()
+    a.join(5)
+    b.join(5)
+    assert not a.is_alive() and not b.is_alive()
+
+
+def test_two_different_merges_on_one_symbol_both_land_held_and_published(
+        schwab, monkeypatch, in_window):
+    bus = Bus(fake=True)
+    spent = []
+    rescue, tools = _caller(bus, spent, "rescue"), _caller(bus, spent, "tools")
+    assert tools(None) == "done"                       # the list, NEAR and MID
+    started, release = _blocking_fetch(monkeypatch, schwab, X)
+    out = {}
+    _race(lambda: out.__setitem__("x", rescue(X)),
+          lambda: out.__setitem__("y", tools(Y)), started, release)
+    assert out == {"x": "done", "y": "done"}
+    assert _held_expiries() == {NEAR, MID, X, Y}
+    assert _published_expiries(bus) == _held_expiries()
+
+
+def test_two_identical_requests_on_two_workers_spend_the_budget_once(
+        schwab, monkeypatch, in_window):
+    bus = Bus(fake=True)
+    spent = []
+    rescue, tools = _caller(bus, spent, "rescue"), _caller(bus, spent, "tools")
+    assert tools(None) == "done"
+    spent.clear()
+    started, release = _blocking_fetch(monkeypatch, schwab, X)
+    out = {}
+    _race(lambda: out.__setitem__("a", rescue(X)),
+          lambda: out.__setitem__("b", tools(X)), started, release)
+    assert out == {"a": "done", "b": "cached"}
+    assert spent == ["rescue"]
+    assert [c for c in schwab.calls if c[0] == "fetch"] == [("fetch", "SPY", ((X,),))]
+
+
+def test_the_symbol_locks_do_not_accumulate(schwab, in_window):
+    bus = Bus(fake=True)
+    run = _caller(bus, [], "tools")
+    for sym in ("SPY", "QQQ", "IWM"):
+        pc.ladder_request(bus, sym, None, age=0.0, now=OPEN, max_wait_sec=60,
+                          window="tools_public", recently=lambda: False,
+                          spend=lambda: True, start=lambda: None, area="test")
+    assert run(None) == "cached"
+    assert pc._SYMBOL_LOCKS == {}
