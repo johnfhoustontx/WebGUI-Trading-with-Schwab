@@ -94,7 +94,6 @@ ALLOWED = {
     # hundreds of times. The page's ACTIONS (Refresh, Top ranked) go through
     # the kit.
     "sentiment_momentum.py": {"button": 1},
-    "settings.py": {"button": 7, "dialog": 1, "notify": 1},
     # The Hide gated toggle, and it stays: it carries a SELECTED state (a
     # FILTER_ON / FILTER_OFF class swap) AND a label that changes with it
     # ("Hide gated" ⇄ "Showing ungated only"), and kit.button's four kinds

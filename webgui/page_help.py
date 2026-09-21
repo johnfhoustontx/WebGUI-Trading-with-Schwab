@@ -1384,7 +1384,10 @@ The General tab controls the alert chimes, notifications and the ticker.
   subscription instead, so they only appear here on a day one falls back to
   the API.
 - **Maintenance** — **Vacuum GEX history DB** shrinks the intraday options
-  database on disk (run it after hours; it locks the file for minutes).
+  database on disk (run it after hours; it locks the file for minutes). It
+  **asks first**, and the question says whether the *purge* switch above it is
+  on — with it on, every saved session but the last five is deleted. The button
+  spins while it runs and the tool's own output lands under it.
 - **Test sound** also unlocks browser audio (browsers block it until you click
   something). The **User Manuals** are a tab under **More**, not here.
 """,
