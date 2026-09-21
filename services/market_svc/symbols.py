@@ -27,7 +27,7 @@ CATEGORY_ORDER = [
     "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
     "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Top 10",
     "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
-    "Fixed Income / Credit ETF", "Crypto / Alternatives", "Countries",
+    "Fixed Income / Credit ETF", "Crypto / Alternatives", "Metals", "Countries",
 ]
 
 # Frames rendered as a LEADERBOARD: their tiles are emitted ranked by day
@@ -180,6 +180,10 @@ SYMBOL_MAP = [
     # Crypto / Alternatives
     _q("GDLC", "GDLC", "Grayscale CoinDesk Crypto 5 ETF", "Crypto / Alternatives"),
     _q("VCX", "VCX", "Fundrise Innovation Fund (private venture)", "Crypto / Alternatives"),
+    # Metals (gold, silver, copper miners; literal up=green)
+    _q("GLD", "GLD", "SPDR Gold Shares (gold bullion)", "Metals"),
+    _q("SLV", "SLV", "iShares Silver Trust (silver bullion)", "Metals"),
+    _q("COPX", "COPX", "Global X Copper Miners ETF", "Metals"),
     # Countries (single-country iShares MSCI ETFs; literal up=green)
     _q("MCHI", "MCHI", "China — iShares MSCI China ETF", _CTY),
     _q("EWJ", "EWJ", "Japan — iShares MSCI Japan ETF", _CTY),
