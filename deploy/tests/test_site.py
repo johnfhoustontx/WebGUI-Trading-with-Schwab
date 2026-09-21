@@ -1167,8 +1167,9 @@ def test_the_report_is_in_the_sitemap():
 # link exactly when live_screens publishes it, and a "Coming soon" entry
 # otherwise -- never a link to a route that does not exist yet.
 
+# ("simulator", "Simulator") joined on 2026-09-21 with its public screen.
 TOOLS = (("finder", "Strategy Finder"), ("rescue", "Rescue my Sh*tty trade"),
-         ("calculator", "Calculator"))
+         ("calculator", "Calculator"), ("simulator", "Simulator"))
 
 # The pages whose navs carry destination links. glossary.html is a leaf's nav
 # by design (see the gallery/live test above), so it has no Tools menu.

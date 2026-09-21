@@ -487,7 +487,15 @@ def test_open_in_simulator_writes_the_hand_off_and_navigates(page, monkeypatch):
     monkeypatch.setattr(ui.navigate, "to", lambda target, *a, **k: went.append(target))
     _priced(page)
     writes.clear()
-    _click(page, "Open in Simulator")
+    # The page navigates through shell.navigate_to, which resolves the private
+    # route to the public one only in a published process - as live_main is.
+    import live_screens
+    import shell
+    shell.publish(live_screens.PUBLIC_ROUTES)
+    try:
+        _click(page, "Open in Simulator")
+    finally:
+        shell.unpublish()
     assert went == ["/simulator"]
     assert writes and writes[-1][0] == "SPY" and writes[-1][1] == _editor().get_legs()
 
@@ -575,7 +583,12 @@ def test_the_page_module_names_no_owner_view():
 
 _ALLOWED_IMPORTS = {"nicegui", "bus_client", "visitor_limit", "shared.public_tools",
                     "shared.public_rescue", "shared.public_scan", "shared.symbols",
-                    "shared.market_calendar", "shared"}
+                    "shared.market_calendar", "shared",
+                    # webgui/shell.py, the Tier-1 page seam (no engine, no bus):
+                    # Open in Simulator navigates through shell.navigate_to, the
+                    # only navigation tests/test_live_navigation.py allows on a
+                    # published page. Added 2026-09-21 when the page was published.
+                    "shell"}
 _STDLIB = {"__future__", "datetime", "logging", "math", "time", "zoneinfo"}
 
 

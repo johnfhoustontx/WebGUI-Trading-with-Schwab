@@ -14,9 +14,11 @@ FORBIDDEN = {"/terminate", "/settings", "/status", "/driver", "/manuals",
 _LIVE_SCREENS = pathlib.Path(__file__).resolve().parents[1] / "live_screens.py"
 
 
-def test_there_are_exactly_twenty_two_screens():
+def test_there_are_exactly_twenty_four_screens():
+    # 22 -> 24 on 2026-09-21: the public Calculator and Simulator, published
+    # deliberately (each is a write surface, gated in test_live_commands.py).
     import live_screens
-    assert len(live_screens.SCREENS) == 22
+    assert len(live_screens.SCREENS) == 24
 
 
 def test_no_screen_publishes_a_control_surface():

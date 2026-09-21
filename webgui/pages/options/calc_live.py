@@ -42,6 +42,7 @@ import logging
 import time
 
 import bus_client
+import shell as _shell
 import visitor_limit
 from nicegui import context, run, ui
 from shared import public_tools as pt
@@ -465,7 +466,10 @@ def render():
         symbol = state["symbol"] or clean_symbol(_panel().symbol_in.value)
         if symbol:
             public_handoff.write(symbol, _editor().get_legs())
-        ui.navigate.to("/simulator")
+        # Through the seam, naming the PRIVATE route: the public origin serves
+        # the Simulator at /simulator (live_screens.PUBLIC_ROUTES), and a bare
+        # ui.navigate.to is refused by tests/test_live_navigation.py.
+        _shell.navigate_to("/options/simulator")
 
     # ------------------------------------------------------------- requests
 

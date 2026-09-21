@@ -1,4 +1,4 @@
-"""The twenty-two screens published on the public live origin.
+"""The twenty-four screens published on the public live origin.
 
 PURE DATA -- no NiceGUI import -- so the route registration, the thumbnail
 capture script and the static grid on neuralstrike.co all read one source and
@@ -106,6 +106,21 @@ SCREENS = (
     # Blueprint: docs/plans/2026-09-21-public-rescue-adhoc-roadmap.md.
     Screen("rescue", "/rescue", "Rescue my Sh*tty trade", "options.rescue",
            "/options/rescue", kwargs={"public": True}),
+    # The THIRD and FOURTH screens that write, and the two share their streams:
+    # a visitor's chain and expiration loads go on cmd:tools_public, and the
+    # pricing (the Calculator's P&L and implied IV, the Simulator's sweep) on
+    # cmd:tools_public_math (bus_client.request_public_tool / request_public_math;
+    # the live ACL user's tools and math write selectors). ``public=True``
+    # hands off to pages/options/calc_live.py / sim_live.py before the private
+    # page builds anything, so the owner's calc_* / sim_* commands and the
+    # single-user shared_position / page_state stores never exist here; the
+    # two hand a position across through TAB storage (public_handoff), one
+    # visitor per browser tab.
+    # Blueprint: docs/plans/2026-09-21-public-calculator-simulator-design.md.
+    Screen("calculator", "/calculator", "Calculator", "options.calculator",
+           "/options/calculator", kwargs={"public": True}),
+    Screen("simulator", "/simulator", "Simulator", "options.simulator",
+           "/options/simulator", kwargs={"public": True}),
 )
 
 
