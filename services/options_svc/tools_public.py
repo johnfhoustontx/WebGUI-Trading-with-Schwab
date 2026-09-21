@@ -66,6 +66,7 @@ from services.options_svc import public_chain
 from services.options_svc import rate_trade
 from shared import market_calendar
 from shared import public_rescue as pr
+from shared import public_scan
 from shared import public_tools as pt
 
 log = logging.getLogger(__name__)
@@ -91,6 +92,40 @@ PUBLIC_SIM = compute.SimStore(
 # carries neither, so the line cannot be drawn from what this worker publishes.
 PAPER_BOOK_STAMPS = ("ledger_risk_basis", "ledger_risk_per_contract")
 
+# ⚠ A rated row's legs are built from the CHAIN (``strategy_scanner._leg_from``
+# via ``rate_trade.finder_legs``): each carries the contract's mark, bid, ask,
+# greeks, IV, volume and open interest. Written to Redis, that is a quote
+# published (decision D1). So a public leg is rebuilt from this ALLOW-list -
+# never a deny-list, so a quote field added to ``_leg_from`` later cannot leak.
+# ``mark`` is the visitor's own price (``rate_trade`` prices a leg at the
+# page's premium when it is positive, and ``price_needed`` refuses a rating
+# without one while quotes are off) or, for a share leg, the published spot.
+LEG_KEYS = ("kind", "side", "strike", "expiration", "qty", "mark")
+# With the quotes switch on, exactly the fields ``public_chain`` publishes.
+LEG_QUOTE_KEYS = ("bid", "ask", "delta")
+# Row-level values computed from the chain's per-leg quotes rather than from
+# the visitor's prices. The theta/vega/gamma sums are never published (the
+# switch covers bid/ask/mark/delta only); the net delta and the bid-ask
+# friction only while quotes are on. ⚠ With them gone the page's checklist
+# "Cost to trade" line (friction) greys out while quotes are off, and so does
+# anything reading a leg's open interest or width: accepted, a grey line says
+# "not checked", which is true.
+ROW_NEVER = ("net_theta", "net_vega", "net_gamma")
+ROW_QUOTED = ("net_delta", "friction_pct")
+
+# The code-written sentences ``rate_trade.rate`` returns, safe to show a
+# visitor. Anything else - its exception branch names the exception class -
+# is shown as the generic ``error`` text. An allow-list of PREFIXES, so a new
+# exception-derived message cannot slip through.
+RATE_SENTENCES = (
+    "Load the chain first",
+    "The loaded chain is for ",
+    "The chain carries no underlying price",
+    "Build a trade first",
+    "Every leg needs a strike and an expiration",
+    "No quote for the ",
+)
+
 _RECENT: "collections.OrderedDict[str, float]" = collections.OrderedDict()
 _RUNS: "collections.OrderedDict[str, collections.deque]" = collections.OrderedDict()
 _RECENT_LOCK = threading.Lock()
@@ -113,6 +148,7 @@ def reset_memory(*, keep_chains=False, keep_snapshots=False) -> None:
     with _RECENT_LOCK:
         _RECENT.clear()
         _RUNS.clear()
+        _NO_SNAPSHOT.clear()
     if not keep_chains:
         public_chain.reset()
     if not keep_snapshots:
@@ -214,10 +250,14 @@ def _clear_busy(bus, now) -> None:
 
 # ── answers and results ──────────────────────────────────────────────────────
 
-def _answer(bus, key, outcome, now) -> None:
+def _answer(bus, key, outcome, now, text=None) -> None:
+    """The answer; ``text`` is a code-written sentence for an ``error`` a
+    visitor can act on (never an exception message)."""
     view = pt.answer_view(key)
-    version = bus.cache_set(pt.cache_key(view), {"outcome": outcome,
-                                                 "at": now.isoformat()},
+    answer = {"outcome": outcome, "at": now.isoformat()}
+    if text:
+        answer["error_text"] = text
+    version = bus.cache_set(pt.cache_key(view), answer,
                             ttl=pt.limits()["answer_keep_min"] * 60)
     bus.publish(pt.event(view), {"version": version})
 
@@ -305,16 +345,57 @@ def _option_legs(legs):
     return [leg for leg in legs if leg.get("option_type") in ("call", "put")]
 
 
-def public_row(row):
-    """A rated row less the Paper book stamps."""
-    return {k: v for k, v in row.items() if k not in PAPER_BOOK_STAMPS}
+def public_row(row, page_legs, quotes_on):
+    """A rated row fit to publish: no Paper book stamps, legs rebuilt from
+    ``LEG_KEYS`` (plus ``LEG_QUOTE_KEYS`` while quotes are on), and no row
+    value computed from quotes the switch does not publish.
+
+    While quotes are off an option leg's ``mark`` is set from the visitor's own
+    premium (``page_legs``, same order), not trusted from the engine."""
+    drop = set(PAPER_BOOK_STAMPS) | set(ROW_NEVER)
+    if not quotes_on:
+        drop |= set(ROW_QUOTED)
+    out = {k: v for k, v in row.items() if k not in drop and k != "legs"}
+    if "underlying_price" in out:
+        # The spot the public chain key already publishes, at its precision.
+        out["underlying_price"] = public_chain._spot(out["underlying_price"])
+    keys = LEG_KEYS + (LEG_QUOTE_KEYS if quotes_on else ())
+    legs = row.get("legs") if isinstance(row.get("legs"), list) else []
+    aligned = len(legs) == len(page_legs or [])
+    public_legs = []
+    for i, leg in enumerate(legs):
+        if not isinstance(leg, dict):
+            continue
+        clean = {k: leg[k] for k in keys if k in leg}
+        if not quotes_on and leg.get("kind") in ("call", "put"):
+            if aligned:
+                clean["mark"] = page_legs[i].get("premium")
+            else:
+                clean.pop("mark", None)
+        public_legs.append(clean)
+    out["legs"] = public_legs
+    return out
 
 
-def _sim_meta(snap):
-    """A snapshot's page metadata - expirations, strikes, spot - never a chain."""
-    meta = compute._sim_meta(snap)
-    meta.pop("chain", None)
-    return meta
+def _rate_text(error):
+    """The visitor-safe sentence for a rating error, or None."""
+    if isinstance(error, str) and error.startswith(RATE_SENTENCES):
+        return error
+    return None
+
+
+def _ladder_ok(held, legs):
+    """``not_listed`` for an option leg's expiration the chain does not list,
+    ``off_ladder`` for a strike not on the held chain, else None."""
+    listed = (held or {}).get("expirations") or []
+    options = _option_legs(legs)
+    if listed and any(leg["expiry"] not in listed for leg in options):
+        return "not_listed"
+    strikes = public_chain.strikes_from_chain((held or {}).get("chain"))
+    if not all(_on_ladder(strikes, leg["expiry"], leg["option_type"], leg["strike"])
+               for leg in options):
+        return "off_ladder"
+    return None
 
 
 # ── tools requests ───────────────────────────────────────────────────────────
@@ -353,15 +434,22 @@ def _tools_rate(bus, command, now, lim, key, args) -> str:
     symbol = args["symbol"]
     held = public_chain.held(symbol)
     structure = pt.structure_key(args)
-    listed = (held or {}).get("expirations") or []
+    quotes_on = public_scan.show_leg_quotes()
     if _expired(command, now, lim):
         return "expired"
+    # ⚠ While quotes are off a visitor rates THEIR prices: an option leg with
+    # no positive premium would be priced at the chain's own mark, and the row
+    # (its entry, max profit and breakevens) would then reveal that quote.
+    if not quotes_on and any(not (leg["premium"] > 0)
+                             for leg in _option_legs(args["legs"])):
+        return "price_needed"
     if _fresh_result(bus, key, now, lim["rate_ttl_min"]):
         return "cached"
     if held is None:
         return "load_first"
-    if listed and any(leg["expiry"] not in listed for leg in _option_legs(args["legs"])):
-        return "not_listed"
+    refused = _ladder_ok(held, args["legs"])
+    if refused is not None:
+        return refused
     if _ran_recently(key, lim["dedup_sec"]):
         return "duplicate"
     if _structure_busy(structure, lim["structure_runs"], lim["rate_ttl_min"] * 60):
@@ -375,10 +463,12 @@ def _tools_rate(bus, command, now, lim, key, args) -> str:
         out = rate_trade.rate(symbol, args["structure"], args["legs"], held,
                               market_state=handlers._market_state(bus))
         if _is_engine_error(out) or not isinstance(out.get("row"), dict):
+            error = out.get("error") if isinstance(out, dict) else None
             log.info("public rating for %s produced no row: %s", symbol,
-                     out.get("error") if isinstance(out, dict) else out)
-            return "error"
-        _stamped(bus, key, {"row": public_row(out["row"])}, now, lim)
+                     error if error else out)
+            return "error", _rate_text(error)
+        _stamped(bus, key, {"row": public_row(out["row"], args["legs"], quotes_on)},
+                 now, lim)
         return "done"
     except Exception:  # noqa: BLE001 - one visitor's request must not kill the loop
         _degrade.degraded("options.tools_public_rate", detail=symbol)
@@ -393,7 +483,7 @@ def _tools_sim_snapshot(bus, command, now, lim, key, args) -> str:
     if held is not None:
         # ⚠ Never re-fetch a held symbol: that would replace another visitor's
         # snapshot and drop the expirations they added. The ttl retires it.
-        _stamped(bus, key, dict(_sim_meta(held),
+        _stamped(bus, key, dict(compute._sim_meta(held),
                                 expirations=PUBLIC_SIM.expirations_of(symbol)),
                  now, lim)
         return "cached"
@@ -402,20 +492,36 @@ def _tools_sim_snapshot(bus, command, now, lim, key, args) -> str:
     if chain.get("no_options") and age is not None \
             and 0 <= age < pr.limits()["ladder_ttl_min"] * 60:
         return "no_options"
+    if _no_snapshot(symbol):
+        return "no_options"
+    # ⚠ Keyed on the SYMBOL, not the request: the expirations list is the
+    # visitor's to vary, so a request key would let each variant re-fetch.
+    sym_key = f"sim:{symbol}"
+    if _ran_recently(sym_key, lim["dedup_sec"]):
+        return "duplicate"
+    # The design's per-symbol load cap: ``structure_runs`` loads per
+    # ``snapshot_ttl_min``, however the snapshot came to be gone.
+    if _structure_busy(sym_key, lim["structure_runs"], lim["snapshot_ttl_min"] * 60):
+        return "throttled"
     outcome = _gate(bus, key, now, lim, "sim_snapshot")
     if outcome is not None:
         return outcome
     _start(bus, now, key, "sim_snapshot")
+    _mark_ran(sym_key)
+    _count_structure(sym_key)
     try:
         meta = compute.sim_fetch(symbol, lazy=True, expiries=args.get("expiries"),
                                  store=PUBLIC_SIM)
-        if isinstance(meta, dict):
-            meta.pop("chain", None)        # discarded: never published
+        # The thinned chain is discarded: never published.
+        thin = meta.pop("chain", None) if isinstance(meta, dict) else None
         if not isinstance(meta, dict) or not meta.get("n_contracts"):
             # An empty snapshot held would answer every later request
             # ``cached`` with nothing to price; drop exactly the one we put.
             PUBLIC_SIM.discard_if(symbol, PUBLIC_SIM.get(symbol))
             log.info("public snapshot for %s came back empty", symbol)
+            if _answered_empty(meta, thin):
+                _remember_no_snapshot(symbol)
+                return "no_options"
             return "error"
         _stamped(bus, key, meta, now, lim)
         return "done"
@@ -432,7 +538,7 @@ def _tools_sim_expiry(bus, command, now, lim, key, args) -> str:
     if snap is None:
         return "load_first"
     if expiry in compute.expiries_of(snap):
-        _stamped(bus, key, dict(_sim_meta(snap),
+        _stamped(bus, key, dict(compute._sim_meta(snap),
                                 expirations=PUBLIC_SIM.expirations_of(symbol)),
                  now, lim)
         return "cached"
@@ -455,6 +561,36 @@ def _tools_sim_expiry(bus, command, now, lim, key, args) -> str:
         return "error"
 
 
+# Symbols Schwab ANSWERED with no options for, held on the chain's own clock
+# (``ladder_ttl_min``) - public_chain's "no options" rule, for the snapshot path.
+_NO_SNAPSHOT: "collections.OrderedDict[str, float]" = collections.OrderedDict()
+
+
+def _answered_empty(meta, thin) -> bool:
+    """Whether an empty snapshot means Schwab answered "no options" rather than
+    failed. Only the eager path can tell: with no expiration list the chain
+    came straight back from ONE call, so an empty expiry map is an answer. The
+    lazy path merges runs onto an empty chain, where empty can mean failed."""
+    if not isinstance(meta, dict) or "expirations" in meta or not isinstance(thin, dict):
+        return False
+    return not any((thin.get(k) or {}) for k in ("callExpDateMap", "putExpDateMap"))
+
+
+def _remember_no_snapshot(symbol) -> None:
+    with _RECENT_LOCK:
+        _NO_SNAPSHOT.pop(symbol, None)
+        _NO_SNAPSHOT[symbol] = _mono()
+        while len(_NO_SNAPSHOT) > DEDUP_KEEP:
+            _NO_SNAPSHOT.popitem(last=False)
+
+
+def _no_snapshot(symbol) -> bool:
+    hold = pr.limits()["ladder_ttl_min"] * 60
+    with _RECENT_LOCK:
+        at = _NO_SNAPSHOT.get(symbol)
+    return at is not None and _mono() - at < hold
+
+
 _TOOLS = {"chain": _tools_chain, "expiry": _tools_chain, "rate": _tools_rate,
           "sim_snapshot": _tools_sim_snapshot, "sim_expiry": _tools_sim_expiry}
 
@@ -471,12 +607,14 @@ def _dispatch_tools(bus, command, now) -> None:
                  getattr(command, "type", None))
         return
     args = clean["args"]
-    outcome = _TOOLS[args["kind"]](bus, command, now, lim, key, args)
+    outcome, text = _TOOLS[args["kind"]](bus, command, now, lim, key, args), None
+    if isinstance(outcome, tuple):
+        outcome, text = outcome
     if outcome == "budget":
         # The budget is shared: Rescue may have spent it, so this view's
         # ``budget_left`` is refreshed here rather than left reading stale.
         _bump(bus, now)
-    _answer(bus, key, outcome, now)
+    _answer(bus, key, outcome, now, text)
 
 
 def handle_tools(bus, command) -> None:
@@ -504,11 +642,11 @@ def _math_price(bus, now, lim, key, args) -> str:
     if _fresh_result(bus, key, now, lim["result_ttl_min"]):
         return "cached"
     strikes = public_chain.strikes_from_chain(held.get("chain"))
-    legs = args["legs"]
-    options = _option_legs(legs)
+    options = _option_legs(args["legs"])
     if not all(_on_ladder(strikes, leg["expiry"], leg["option_type"], leg["strike"])
                for leg in options):
         return "off_ladder"
+    legs = _fill_share_premiums(args["legs"], held.get("price"))
     # The matrix's price axis, derived here: the ±N strikes of the FRONT leg's
     # expiration (the horizon calc_compute prices to), calls and puts together.
     front = min((leg["expiry"] for leg in options), default=args["expiry"])
@@ -519,13 +657,30 @@ def _math_price(bus, now, lim, key, args) -> str:
     out = compute.calc_compute(
         strategy=args["strategy"], spot=args["spot"], iv=args["iv"],
         rate=args["rate"], ivadj=args["ivadj"], qty=args["qty"],
-        expiry=args["expiry"], legs=[dict(leg) for leg in legs],
+        expiry=args["expiry"], legs=legs,
         num_strikes=args["num_strikes"], price_rows=rows or None)
     if _is_engine_error(out):
         log.info("public price for %s produced no result", args["symbol"])
         return "error"
     _stamped(bus, key, out, now, lim)
     return "done"
+
+
+def _fill_share_premiums(legs, spot):
+    """``calculator.fill_stock_premiums``'s rule: a SHARE leg priced 0 is priced
+    at spot (what the shares cost now); a positive typed basis is the visitor's
+    own cost and is kept. An unusable spot leaves the leg alone."""
+    usable = _finite(spot)
+    if usable is not None and usable <= 0:
+        usable = None
+    out = []
+    for leg in legs:
+        leg = dict(leg)
+        if leg.get("option_type") == "stock" and usable is not None \
+                and not _finite(leg.get("premium")):
+            leg["premium"] = usable
+        out.append(leg)
+    return out
 
 
 def _math_iv(bus, now, lim, key, args) -> str:
@@ -536,6 +691,10 @@ def _math_iv(bus, now, lim, key, args) -> str:
     # only ``result_ttl_min`` and its presence is what "fresh" means.
     if bus.cache_get(pt.cache_key(pt.result_view(key))) is not None:
         return "cached"
+    refused = _ladder_ok(held, [{"option_type": args["option_type"],
+                                 "expiry": args["expiry"], "strike": args["strike"]}])
+    if refused is not None:
+        return refused
     spot = _finite(held.get("price"))
     mark = mark_from_chain(held.get("chain"), args["option_type"], args["expiry"],
                            args["strike"])
@@ -574,6 +733,11 @@ def _math_sweep(bus, now, lim, key, args) -> str:
     return "done"
 
 
+def _longest_days(legs, today) -> int:
+    """Calendar days from ``today`` to the latest leg expiry."""
+    return max((dt.date.fromisoformat(leg["expiry"]) - today).days for leg in legs)
+
+
 _MATH = {"price": _math_price, "iv": _math_iv, "sweep": _math_sweep}
 
 
@@ -587,6 +751,12 @@ def _dispatch_math(bus, command, now) -> None:
         _bump(bus, now, "invalid_today")
         return
     args = clean["args"]
+    if args["kind"] == "sweep" and args["dt"] > _longest_days(args["legs"], today) + 1:
+        # Days ahead past every leg's expiry prices nothing real. Refused, not
+        # clamped: the page's slider stops at the longest leg, so only a
+        # hand-built request gets here.
+        _bump(bus, now, "invalid_today")
+        return
     if _expired(command, now, lim):
         _answer(bus, key, "expired", now)
         return

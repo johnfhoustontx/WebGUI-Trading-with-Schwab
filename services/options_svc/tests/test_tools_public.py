@@ -27,6 +27,9 @@ from shared.bus import Bus
 from shared.bus.client import reset_fake_bus
 from shared.contracts.envelope import Command
 
+# The REAL rating engine, captured before any fixture stubs it.
+_REAL_RATE = rate_trade.rate
+
 CT = ZoneInfo("America/Chicago")
 OPEN = dt.datetime(2026, 9, 21, 10, 0, tzinfo=CT)        # a Monday, in session
 CLOSED = dt.datetime(2026, 9, 21, 16, 30, tzinfo=CT)
@@ -674,8 +677,16 @@ def test_iv_reads_the_mark_off_the_held_chain_and_publishes_only_the_iv(bus, sch
 
 
 def test_iv_with_no_mark_is_an_error_with_nothing_published(bus, schwab):
+    # Setup changed on the 2026-09-21 review: a strike NOT on the chain (700,
+    # the old setup) now answers off_ladder; "no mark" is a listed strike whose
+    # row carries no usable price.
     _load_chain(bus)
-    cmd = _iv_cmd(strike=700.0)
+    cc = public_chain.held("SPY")
+    chain = {"putExpDateMap": {f"{NEAR}:9": {"500.0": [{"mark": None, "bid": None,
+                                                        "ask": None}]}},
+             "callExpDateMap": {}}
+    public_chain.hold("SPY", {**cc, "chain": chain})
+    cmd = _iv_cmd(strike=500.0)
     tp.handle_math(bus, cmd)
     assert _answer(bus, cmd) == "error"
     assert _result(bus, cmd) is None
@@ -907,3 +918,293 @@ def test_the_worker_never_names_the_owners_snapshots_or_slots():
                   "_stash_sim_snapshot", "cache:options:calc_chain",
                   "cache:options:calc_rating", "cache:options:sim_meta"):
         assert not any(owner in u for u in used), owner
+
+
+# ── the 2026-09-21 review ───────────────────────────────────────────────────
+
+# Quote values no visitor typed, distinct per strike so a leak cannot hide.
+_Q = {495.0: dict(bid=1.0137, ask=1.2291, mark=1.1713, delta=-0.3127,
+                  theta=-0.0317, vega=0.0719, gamma=0.0131, volatility=21.77,
+                  totalVolume=98765, openInterest=65432),
+      500.0: dict(bid=2.0411, ask=2.3389, mark=2.1953, delta=-0.4481,
+                  theta=-0.0457, vega=0.0853, gamma=0.0177, volatility=23.19,
+                  totalVolume=87654, openInterest=54321),
+      505.0: dict(bid=3.1123, ask=3.5567, mark=3.3347, delta=-0.5563,
+                  theta=-0.0521, vega=0.0911, gamma=0.0193, volatility=24.43,
+                  totalVolume=76543, openInterest=43219)}
+_QUOTE_KEYS = ("bid", "ask", "mark", "delta", "theta", "vega", "gamma", "iv",
+               "volatility", "volume", "totalVolume", "oi", "openInterest")
+
+
+def _quoted_chain():
+    maps = {f"{NEAR}:11": {f"{k:.1f}": [dict(v)] for k, v in _Q.items()}}
+    return {"callExpDateMap": maps, "putExpDateMap": maps}
+
+
+@pytest.fixture
+def real_rate(schwab, monkeypatch):
+    """The REAL ``rate_trade.rate`` / ``finder_legs`` / ``_assemble`` /
+    scoring over a synthetic QUOTED chain; only its Schwab reads are stubbed
+    (price history, IV analysis, earnings)."""
+    monkeypatch.setattr(rate_trade, "rate", _REAL_RATE)
+    monkeypatch.setattr(rate_trade.se, "fetch_price_history", lambda c, a: None)
+    monkeypatch.setattr(rate_trade, "run_iv_analysis",
+                        lambda *a, **k: {"iv_rank": 44.0})
+    monkeypatch.setattr(compute, "scan_earnings", lambda s: ("not_listed", None))
+    public_chain.hold("SPY", {"symbol": "SPY", "api": "SPY", "price": 502.37,
+                              "expirations": list(LISTED), "chain": _quoted_chain()})
+
+
+def _quotes(monkeypatch, on):
+    from shared import public_scan
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: on)
+
+
+def _walk(v):
+    if isinstance(v, dict):
+        for k, x in v.items():
+            yield k, x
+            yield from _walk(x)
+    elif isinstance(v, list):
+        for x in v:
+            yield from _walk(x)
+
+
+def _all_numbers(v):
+    return {x for _, x in _walk(v) if isinstance(x, (int, float))
+            and not isinstance(x, bool)} | {x for x in (v if isinstance(v, list) else [])
+                                            if isinstance(x, (int, float))}
+
+
+def _real_rate_row(bus, legs):
+    cmd = _rate_cmd(legs=legs)
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "done", _answer(bus, cmd)
+    return _result(bus, cmd)
+
+
+def test_with_quotes_off_no_quote_key_or_chain_value_reaches_the_row(
+        bus, real_rate, monkeypatch):
+    _quotes(monkeypatch, False)
+    result = _real_rate_row(bus, _calc_legs(premium=(1.37, 0.58)))
+    row = result["row"]
+    assert row["type"] == "PCS" and row["composite_score"] is not None
+    for leg in row["legs"]:
+        assert set(leg) <= set(tp.LEG_KEYS), leg
+        for q in _QUOTE_KEYS:
+            if q != "mark":
+                assert q not in leg, q
+    assert [leg["mark"] for leg in row["legs"]] == [1.37, 0.58]
+    for k in ("net_delta", "net_theta", "net_vega", "net_gamma", "friction_pct"):
+        assert k not in row, k
+    chain_values = {float(x) for v in _Q.values() for x in v.values()}
+    leaked = {float(x) for x in _all_numbers(result)} & chain_values
+    assert not leaked, leaked
+
+
+def test_with_quotes_on_the_allowed_quote_fields_may_appear(bus, real_rate, monkeypatch):
+    _quotes(monkeypatch, True)
+    row = _real_rate_row(bus, _calc_legs(premium=(1.37, 0.58)))["row"]
+    short = row["legs"][0]
+    assert short["bid"] == _Q[500.0]["bid"] and short["delta"] == _Q[500.0]["delta"]
+    assert set(short) <= set(tp.LEG_KEYS) | set(tp.LEG_QUOTE_KEYS)
+    for q in ("theta", "vega", "gamma", "iv", "volume", "oi"):
+        assert q not in short
+    assert "net_delta" in row
+    for k in ("net_theta", "net_vega", "net_gamma"):
+        assert k not in row
+
+
+def test_the_rated_rows_top_level_keys_are_all_accounted_for(bus, real_rate, monkeypatch):
+    """A new key the engine starts emitting must be a decision: published as a
+    derived value, or added to the worker's drop lists. This fails until it is."""
+    _quotes(monkeypatch, False)
+    row = _real_rate_row(bus, _calc_legs(premium=(1.37, 0.58)))["row"]
+    known = {"id", "symbol", "type", "family", "strategy_label", "bias", "legs",
+             "expiration", "dte", "pop_pct", "underlying_price", "timestamp",
+             "net_debit", "net_credit", "max_profit", "max_loss", "breakevens",
+             "unbounded", "unbounded_profit", "unbounded_loss", "capital",
+             "commission", "rr", "fit_score", "quality_score", "composite_score",
+             "grade", "grade_reason", "factor_scores", "state_tilt",
+             "vol_gate_blocks", "iv_rank", "daily_em", "structure_known",
+             "em_to_expiry", "vol_floor", "earnings_status", "earnings_date",
+             "iv_rank_known"}
+    assert set(row) <= known, set(row) - known
+
+
+def test_with_quotes_off_a_rating_without_the_visitors_prices_is_refused(
+        bus, real_rate, monkeypatch):
+    _quotes(monkeypatch, False)
+    schwab_calls = []
+    monkeypatch.setattr(rate_trade, "rate",
+                        lambda *a, **k: schwab_calls.append(a) or {"row": {}})
+    cmd = _rate_cmd(legs=_calc_legs(premium=(0.0, 0.58)))
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "price_needed"
+    assert schwab_calls == [] and _spent(bus) == 0
+
+
+def test_with_quotes_on_a_zero_premium_rates_at_the_chains_mark(
+        bus, real_rate, monkeypatch):
+    _quotes(monkeypatch, True)
+    row = _real_rate_row(bus, _calc_legs(premium=(0.0, 0.58)))["row"]
+    assert row["legs"][0]["mark"] == _Q[500.0]["mark"]
+
+
+def test_a_share_leg_at_zero_is_not_price_needed(bus, real_rate, monkeypatch):
+    _quotes(monkeypatch, False)
+    legs = [{"option_type": "stock", "side": "long", "qty": 1, "premium": 0.0},
+            {"option_type": "call", "side": "short", "qty": 1, "premium": 1.5,
+             "strike": 505.0, "expiry": NEAR}]
+    row = _real_rate_row(bus, legs)["row"]
+    assert row["legs"][0]["mark"] == 502.37          # the published spot
+
+
+def test_a_rate_with_a_strike_off_the_held_chain_spends_nothing(bus, schwab):
+    _load_chain(bus)
+    schwab.calls.clear()
+    cmd = _rate_cmd(legs=_calc_legs(short=500.5))
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "off_ladder"
+    assert _schwab_calls(schwab) == [] and _spent(bus) == 1
+    # and it cost no structure run
+    for i in range(pt.limits()["structure_runs"]):
+        ok = _rate_cmd(legs=_calc_legs(premium=(1.0 + i / 100, 0.5)))
+        tp.handle_tools(bus, ok)
+        assert _answer(bus, ok) == "done"
+
+
+def test_a_code_written_rating_error_is_shown_and_an_exception_is_not(bus, schwab):
+    _load_chain(bus)
+    sentence = "No quote for the 500 put expiring Oct 2 - reload the chain."
+    schwab.rating = {"row": None, "error": sentence}
+    cmd = _rate_cmd()
+    tp.handle_tools(bus, cmd)
+    env = bus.cache_get(pt.cache_key(pt.answer_view(_key(cmd))))
+    assert env.payload == {**env.payload, "outcome": "error", "error_text": sentence}
+    assert _result(bus, cmd) is None
+    schwab.rating = {"row": None,
+                     "error": "The rating could not be computed (ConnectionError)."}
+    other = _rate_cmd(legs=_calc_legs(premium=(1.3, 0.6)))
+    tp.handle_tools(bus, other)
+    env = bus.cache_get(pt.cache_key(pt.answer_view(_key(other))))
+    assert env.payload["outcome"] == "error" and "error_text" not in env.payload
+    assert "ConnectionError" not in repr(env.payload)
+
+
+class _Mono:
+    def __init__(self):
+        self.t = 10_000.0
+
+    def __call__(self):
+        return self.t
+
+
+def test_a_failed_snapshot_is_remembered_by_symbol_whatever_the_expirations(
+        bus, schwab):
+    schwab.snapshot_empty = True
+    tp.handle_tools(bus, _tool(kind="sim_snapshot", symbol="SPY", expiries=[MID]))
+    schwab.calls.clear()
+    cmd = _tool(kind="sim_snapshot", symbol="SPY", expiries=[FAR])
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "duplicate"
+    assert _schwab_calls(schwab) == [] and _spent(bus) == 1
+
+
+def test_a_symbol_schwab_answered_empty_is_remembered_past_the_dedup(
+        bus, schwab, monkeypatch):
+    clock = _Mono()
+    monkeypatch.setattr(tp, "_mono", clock)
+
+    def none(symbol, lazy, expiries):
+        schwab.calls.append(("snapshot", symbol, lazy, tuple(expiries or ())))
+        return (types.SimpleNamespace(symbol=symbol, spot=None, contracts=[]), None,
+                {"putExpDateMap": {}, "callExpDateMap": {}})
+    monkeypatch.setattr(compute, "_fetch_sim_snapshot", none)
+    cmd = _tool(kind="sim_snapshot", symbol="ZZZZ")
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "no_options"
+    clock.t += pt.limits()["dedup_sec"] + 5
+    schwab.calls.clear()
+    again = _tool(kind="sim_snapshot", symbol="ZZZZ", expiries=[NEAR])
+    tp.handle_tools(bus, again)
+    assert _answer(bus, again) == "no_options"
+    assert _schwab_calls(schwab) == [] and _spent(bus) == 1
+
+
+def test_a_lazy_empty_snapshot_is_an_error_not_a_verdict(bus, schwab, monkeypatch):
+    clock = _Mono()
+    monkeypatch.setattr(tp, "_mono", clock)
+    schwab.snapshot_empty = True               # lazy path: expirations were listed
+    cmd = _tool(kind="sim_snapshot", symbol="SPY")
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "error"
+    clock.t += pt.limits()["dedup_sec"] + 5
+    schwab.snapshot_empty = False
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "done"
+
+
+def test_snapshot_loads_are_capped_per_symbol(bus, schwab, monkeypatch):
+    clock = _Mono()
+    monkeypatch.setattr(tp, "_mono", clock)
+    lim = pt.limits()
+    for i in range(lim["structure_runs"]):
+        cmd = _tool(kind="sim_snapshot", symbol="SPY",
+                    expiries=[LISTED[i % len(LISTED)]])
+        tp.handle_tools(bus, cmd)
+        assert _answer(bus, cmd) == "done"
+        tp.PUBLIC_SIM.clear()                  # evicted by other symbols
+        clock.t += lim["dedup_sec"] + 1
+    schwab.calls.clear()
+    cmd = _tool(kind="sim_snapshot", symbol="SPY", expiries=[FAR])
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "throttled"
+    assert _schwab_calls(schwab) == []
+    other = _tool(kind="sim_snapshot", symbol="QQQ")
+    tp.handle_tools(bus, other)
+    assert _answer(bus, other) == "done", "the cap bled onto another symbol"
+    clock.t += lim["snapshot_ttl_min"] * 60
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "done"
+
+
+def test_iv_on_an_expiration_or_strike_not_held(bus, schwab):
+    _load_chain(bus)
+    cmd = _iv_cmd(expiry="2026-10-05")
+    tp.handle_math(bus, cmd)
+    assert _answer(bus, cmd) == "not_listed"
+    cmd = _iv_cmd(strike=700.0)
+    tp.handle_math(bus, cmd)
+    assert _answer(bus, cmd) == "off_ladder"
+    assert not [c for c in schwab.calls if c[0] == "calc_iv"]
+
+
+def _stock_price_legs(premium):
+    return [{"option_type": "stock", "side": "long", "qty": 1, "premium": premium},
+            {"option_type": "call", "side": "short", "qty": 1, "premium": 1.1,
+             "strike": 505.0, "expiry": NEAR}]
+
+
+@pytest.mark.parametrize("premium, want", [(0.0, 502.37), (480.25, 480.25)])
+def test_a_share_leg_at_zero_is_priced_at_the_held_spot(bus, schwab, premium, want):
+    _load_chain(bus)
+    cmd = _math(**_price_args(strategy="COVERED_CALL",
+                              legs=_stock_price_legs(premium)))
+    tp.handle_math(bus, cmd)
+    assert _answer(bus, cmd) == "done"
+    (kw,) = [c[1] for c in schwab.calls if c[0] == "calc_compute"]
+    assert kw["legs"][0]["premium"] == want
+
+
+def test_a_sweep_past_the_longest_leg_is_invalid(bus, schwab):
+    _load_snapshot(bus)
+    days = (dt.date.fromisoformat(NEAR) - OPEN.date()).days
+    ok = _sweep_cmd(dt=float(days + 1))
+    tp.handle_math(bus, ok)
+    assert _answer(bus, ok) == "done"
+    bad = _sweep_cmd(dt=float(days + 2))
+    tp.handle_math(bus, bad)
+    assert _answer(bus, bad) is None
+    assert _status(bus)["invalid_today"] == 1
+    assert len([c for c in schwab.calls if c[0] == "sim_run"]) == 1
