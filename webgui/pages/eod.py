@@ -25,8 +25,10 @@ from zoneinfo import ZoneInfo
 import bus_client
 from nicegui import ui
 
+from pages import ui_kit as kit
 from pages.fmt import float_or  # the ONE copy (pages/fmt.py)
 from pages.options.theme import BTN, BTN_PRIMARY
+from pages.ui_guard import guard
 
 def _num(v, default=None):
     return float_or(v, default)
@@ -707,8 +709,15 @@ def has_data(snap: dict) -> bool:
     so a stopped stack or a bus that answered nothing renders a full report of
     "No data" notes that looks exactly like a real one. The archive is written
     per DATE and overwrites in place, so a second run against a cold cache would
-    replace the day's real report with that. Callers that are not a person
-    clicking Generate check this first (``tools/generate_eod_report.py``).
+    replace the day's real report with that.
+
+    ⚠ EVERY caller checks this first. The scheduled run always did
+    (``tools/generate_eod_report.py``, which prints a REFUSED line and exits 1);
+    the page's Generate button did NOT until 2026-09-20 — it called
+    :func:`generate` with no snapshot at all — so one click while the stack was
+    stopped silently destroyed that day's report. The gate is deliberately not
+    inside :func:`generate`: the tool's ``--allow-empty`` is a real escape and a
+    gate one layer down would take it away.
     """
     return any(bool(snap.get(k)) for k in _CACHE_VIEWS)
 
@@ -734,6 +743,24 @@ def generate(snap: dict | None = None) -> dict:
 # ----------------------------------------------------------------------------- #
 # Thin page functions (logic lives in the tested builders above)
 # ----------------------------------------------------------------------------- #
+# Generate is a DESTRUCTIVE action: the archive holds one copy per date and
+# ``write_archive`` replaces it in place, so it confirms like every other
+# destructive control in the app.
+GENERATE_TITLE = "Replace the saved report for today?"
+GENERATE_BODY = ("Generate rebuilds today's saved report from the live caches "
+                 "and replaces the summary and detail files already in the "
+                 "archive. The archive keeps one copy per date.")
+
+# ⚠ The refusal NAMES what was missing. Every builder in this module degrades
+# to a "no data" note, so an all-empty snapshot renders a complete-looking
+# report - and writing that over the day's real one is the thing ``has_data``
+# was written to stop.
+COLD_CACHE_REFUSAL = (
+    "Nothing was written: every options cache read came back empty, so the "
+    "report would have said no data on every line. Today's saved files are "
+    "untouched. Start the stack and try again.")
+
+
 def render() -> None:
     """Summary page: action bar + archive list + in-app summary fragment."""
     ui.add_css(EOD_CSS)
@@ -747,7 +774,7 @@ def render() -> None:
         with container:
             with ui.row().classes("items-center gap-2"):
                 ui.button("Generate", icon="play_arrow", color=None,
-                          on_click=_on_generate).props("no-caps").classes(BTN_PRIMARY)
+                          on_click=_open_generate).props("no-caps").classes(BTN_PRIMARY)
                 ui.button("Open summary file", icon="open_in_new", color=None,
                           on_click=lambda: _open_file("summary")).props("no-caps").classes(BTN)
                 ui.button("Open detail file", icon="open_in_new", color=None,
@@ -760,13 +787,51 @@ def render() -> None:
                         ui.link(d, f"/eod/file?date={d}&which=summary").props("target=_blank")
             ui.html(summary_fragment(read_snapshot(), "/eod/detail"))
 
-    def _on_generate() -> None:
+    def _generate_now() -> None:
+        """Snapshot, CHECK it, then archive — in that order, on ONE read.
+
+        ``has_data`` is the gate ``tools/generate_eod_report.py`` has always run
+        and this button never did: it called ``generate()`` with no snapshot at
+        all, so a click while the stack was stopped replaced the day's real
+        report with an all-"no data" document that looks exactly like a real
+        one. Reading the snapshot HERE is also what keeps the bytes examined and
+        the bytes written the same bytes — a second read inside ``generate``
+        would mean the gate passed on one snapshot and the archive got another.
+
+        A refusal CLOSES the dialog and reports through a warn toast. That is
+        the opposite of ``terminate.py``'s refused code, deliberately: there the
+        reader can fix it in the dialog by typing a better one, and here they
+        cannot — the only thing a still-open dialog would offer is a Generate
+        that refuses identically. The toast opens by saying nothing was written.
+        """
+        snap = read_snapshot()
+        if not has_data(snap):
+            kit.toast("warn", COLD_CACHE_REFUSAL)
+            return
         try:
-            out = generate()
+            out = generate(snap)
             ui.notify(f"EOD report generated for {out['date']}", type="positive")
         except Exception as e:  # defensive: never crash the page
             ui.notify(f"Generate failed: {e}", type="negative")
         _repaint()
+
+    @guard
+    def _open_generate() -> None:
+        """Name the date whose files are about to be replaced.
+
+        Set at OPEN time rather than at build: this dialog is built once and the
+        page can outlive a midnight rollover, and a confirm naming yesterday
+        while it replaces today is worse than one naming no date at all."""
+        gen_dlg.body.text = (
+            f"Generate rebuilds the saved report for {_ct_today()} from the "
+            f"live caches and replaces the summary and detail files already in "
+            f"the archive. The archive keeps one copy per date.")
+        gen_dlg.open()
+
+    # Built at render()'s OWN level, never inside ``container``: ``_repaint``
+    # clears that, and a dialog deletes itself with its slot.
+    gen_dlg = kit.confirm(GENERATE_TITLE, GENERATE_BODY, confirm_text="Generate",
+                          danger=True, on_confirm=_generate_now)
 
     _repaint()
 

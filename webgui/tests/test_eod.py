@@ -514,3 +514,165 @@ def test_generate_still_reads_for_itself_when_given_nothing(tmp_path, monkeypatc
     monkeypatch.setattr(eod, "read_snapshot", lambda: dict(SAMPLE))
     out = eod.generate()
     assert (tmp_path / out["date"] / "detail.html").is_file()
+
+
+# --- Task 3: Generate confirms, and refuses a cold cache --------------------
+# ⚠ Driven through the real ``render()``, never by calling ``generate()``. The
+# gate these pin is a consumer-side guard, and this repo's own lesson is that a
+# consumer-side guard proves nothing until a test drives it from the PRODUCER:
+# ``has_data`` was written, documented and tested from both sides above while
+# the button went straight past it for months.
+COLD_SNAP = {"date": "2026-09-18", "generated_at": "2026-09-18 16:05 CT"}
+COLD_SNAP.update({k: {} for k in eod._CACHE_VIEWS})
+
+
+def _render_eod(monkeypatch, tmp_path, snap):
+    """Render the EOD summary page over a pinned snapshot and a tmp archive."""
+    from nicegui import ui
+    monkeypatch.setattr(eod, "ARCHIVE_ROOT", tmp_path)
+    monkeypatch.setattr(eod, "read_snapshot", lambda: dict(snap))
+    with ui.card() as host:
+        eod.render()
+    return host
+
+
+def _said(monkeypatch):
+    """Everything the page reports, in order: ``(kind, text)``.
+
+    Both spellings, because Task 3 adds the kit's toast while the two outcome
+    notifies are still ``ui.notify`` - and the kit is patched on its OWN module,
+    so this works whichever name ``eod`` reaches it by."""
+    from pages import ui_kit
+    seen = []
+    monkeypatch.setattr(eod.ui, "notify",
+                        lambda msg="", **kw: seen.append((kw.get("type"), msg)))
+    monkeypatch.setattr(ui_kit, "toast", lambda kind, text: seen.append((kind, text)))
+    return seen
+
+
+def _fire(el, kind, args=None):
+    """Fire an element's OWN registered listener - what the browser would send."""
+    from nicegui.events import GenericEventArguments
+    fired = [li.handler(GenericEventArguments(sender=el, client=el.client, args=args))
+             for li in list(el._event_listeners.values())
+             if li.type.split(".")[0] == kind and li.handler is not None]
+    assert fired, f"no {kind} listener to fire"
+
+
+def _click(host, text):
+    from nicegui import ui
+    btn = [b for b in host.descendants()
+           if isinstance(b, ui.button) and b.text == text]
+    assert btn, f"no {text!r} button on the page"
+    _fire(btn[-1], "click")
+
+
+def _dialog_with(confirm_text):
+    """The most recently built dialog whose confirm button says ``confirm_text``.
+
+    ⚠ Scoped by RECENCY rather than by the page: a dialog lives on the client
+    LAYOUT (NiceGUI 3.x), which the whole test module shares, so ``[-1]`` is
+    what keeps a test reading its own render instead of an earlier one's."""
+    from nicegui import context, ui
+    found = [d for d in context.client.layout.descendants()
+             if isinstance(d, ui.dialog)
+             and any(isinstance(e, ui.button) and e.text == confirm_text
+                     for e in d.descendants())]
+    assert found, f"no confirm dialog offering {confirm_text!r}"
+    return found[-1]
+
+
+def _confirm(dlg):
+    """Run a confirm dialog's action (the test_appearance.py recipe verbatim):
+    its ``run`` is a COROUTINE function that nicegui would only DEFER here, so
+    drive the dialog's own keydown.enter listener inside a slot context."""
+    import asyncio
+    (run_,) = [li.handler for li in dlg._event_listeners.values()
+               if li.type == "keydown.enter"]
+
+    async def _drive(slot):
+        with slot:
+            await run_(None)
+
+    asyncio.run(_drive(dlg.parent_slot))
+
+
+def test_generate_asks_before_it_replaces_the_days_saved_files(monkeypatch, tmp_path):
+    """The archive holds ONE copy per date and ``write_archive`` overwrites it
+    in place, so Generate is destructive and confirms like every other
+    destructive action in the app."""
+    said = _said(monkeypatch)
+    host = _render_eod(monkeypatch, tmp_path, SAMPLE)
+    _click(host, "Generate")
+    assert list(tmp_path.iterdir()) == [], "Generate wrote before anyone confirmed"
+    assert said == [], "and it reported an outcome nobody asked for"
+    _confirm(_dialog_with("Generate"))
+    assert (tmp_path / SAMPLE["date"] / "summary.html").is_file()
+    assert (tmp_path / SAMPLE["date"] / "detail.html").is_file()
+
+
+def test_a_confirmed_generate_over_a_cold_cache_writes_nothing(monkeypatch, tmp_path):
+    """The defect. Every builder here is defensive, so an all-empty snapshot
+    renders a complete-looking report of "No data" notes - and the archive is
+    keyed by date and overwrites in place, so one click replaced the day's real
+    report with that."""
+    said = _said(monkeypatch)
+    host = _render_eod(monkeypatch, tmp_path, COLD_SNAP)
+    _click(host, "Generate")
+    _confirm(_dialog_with("Generate"))
+    assert list(tmp_path.iterdir()) == [], "a cold cache was archived anyway"
+    assert said, "the refusal said nothing at all"
+    assert said[-1][0] == "warn"
+    assert "empty" in said[-1][1].lower()
+
+
+def test_a_cold_generate_leaves_the_days_REAL_report_on_disk(monkeypatch, tmp_path):
+    """What the refusal actually protects: the file already there."""
+    day = tmp_path / COLD_SNAP["date"]
+    day.mkdir()
+    (day / "summary.html").write_text("<the real one/>", encoding="utf-8")
+    (day / "detail.html").write_text("<the real detail/>", encoding="utf-8")
+    _said(monkeypatch)
+    host = _render_eod(monkeypatch, tmp_path, COLD_SNAP)
+    _click(host, "Generate")
+    _confirm(_dialog_with("Generate"))
+    assert (day / "summary.html").read_text(encoding="utf-8") == "<the real one/>"
+    assert (day / "detail.html").read_text(encoding="utf-8") == "<the real detail/>"
+
+
+def test_the_button_archives_the_snapshot_it_CHECKED(monkeypatch, tmp_path):
+    """One read feeds both the gate and the write. A second read inside
+    ``generate`` would mean the bytes examined were not the bytes archived -
+    exactly why ``generate`` takes a snapshot at all."""
+    _said(monkeypatch)
+    got = []
+    real_generate = eod.generate
+
+    def _spy(snap=None):
+        got.append(snap)
+        return real_generate(snap)
+
+    host = _render_eod(monkeypatch, tmp_path, SAMPLE)
+    monkeypatch.setattr(eod, "generate", _spy)
+    _click(host, "Generate")
+    _confirm(_dialog_with("Generate"))
+    assert got, "Generate never reached generate()"
+    assert got[0] is not None, \
+        "the button handed generate() nothing, so it re-read the caches for itself"
+    assert eod.has_data(got[0]) is True
+
+
+def test_a_failed_generate_still_reports_and_does_not_crash_the_page(monkeypatch,
+                                                                     tmp_path):
+    """The defensive branch survives the gate: a write that raises is an error
+    toast, never a traceback on the page."""
+    said = _said(monkeypatch)
+    host = _render_eod(monkeypatch, tmp_path, SAMPLE)
+
+    def _boom(_root, _date, _s, _d):
+        raise OSError("the archive directory is read-only")
+
+    monkeypatch.setattr(eod, "write_archive", _boom)
+    _click(host, "Generate")
+    _confirm(_dialog_with("Generate"))
+    assert said and "read-only" in said[-1][1]
