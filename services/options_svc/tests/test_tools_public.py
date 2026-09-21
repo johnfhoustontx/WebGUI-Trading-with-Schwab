@@ -80,8 +80,16 @@ def schwab(monkeypatch):
         iv_result = {"iv": 23.45, "strike": 500.0, "option_type": "put",
                      "mark": 1.1, "T": 0.03, "error": None}
         sweep_result = {"spot": 502.37, "symbol": "SPY", "legs": [], "dt": 5.0,
-                        "mult": 1.5, "whatif_rows": [{"underlying": 500.0,
-                                                      "theo_price": 110.0}],
+                        # The REAL row shape (``WhatIfEngine.sweep`` via
+                        # ``aggregate_position``): price, value AND the five
+                        # greeks. This fake once invented ``{"underlying",
+                        # "theo_price"}``, a shape nothing produces, which hid
+                        # that the worker published the greeks whole.
+                        "mult": 1.5, "whatif_rows": [{"S": 500.0,
+                                                      "theo_price": 110.0,
+                                                      "delta": -12.0, "gamma": 1.5,
+                                                      "theta": 4.2, "vega": -8.0,
+                                                      "rho": -0.3}],
                         "whatif_baseline": 100.0,
                         "ivshock": {"base": {"value": 1.0}, "shock": {"value": 2.0}}}
 
@@ -754,7 +762,8 @@ def test_sweep_publishes_the_what_if_half_only(bus, schwab):
     assert call[3] is tp.PUBLIC_SIM
     result = _result(bus, cmd)
     assert "ivshock" not in result and "shock" not in repr(result)
-    assert result["whatif_rows"] and result["whatif_baseline"] == 100.0
+    assert result["whatif_rows"] == [{"S": 500.0, "theo_price": 110.0}]
+    assert result["whatif_baseline"] == 100.0
     assert result["spot"] == 502.37 and result["dt"] == 5.0
     assert result["legs"] == _sim_legs()
 
@@ -774,6 +783,48 @@ def test_an_empty_sweep_is_load_first(bus, schwab, monkeypatch):
     tp.handle_math(bus, cmd)
     assert _answer(bus, cmd) == "load_first"
     assert _result(bus, cmd) is None
+
+
+# The chart is the only reader of a published sweep row: ``simulator.whatif_pnl``
+# reads ``S`` and ``theo_price`` and nothing else.
+_GREEKS = ("delta", "gamma", "theta", "vega", "rho")
+
+
+def _real_snapshot(symbol="SPY"):
+    """A small REAL ``ChainSnapshot`` - the engine's own ``ContractRow``s, one
+    expiry, three strikes a side, a mild skew - so the sweep below runs through
+    ``WhatIfEngine.sweep`` and ``aggregate_position`` exactly as in production."""
+    from options_simulator.engine import ChainSnapshot, ContractRow
+    expiry = dt.date.fromisoformat(NEAR)
+    rows = []
+    for strike, iv in ((495.0, 0.24), (500.0, 0.22), (505.0, 0.21)):
+        for kind in ("call", "put"):
+            rows.append(ContractRow(strike=strike, kind=kind, bid=1.0, ask=1.2,
+                                    mid=1.1, iv=iv, expiry=expiry))
+    return ChainSnapshot(spot=502.37, as_of=OPEN.replace(tzinfo=None), r=0.045,
+                         symbol=symbol, contracts=rows)
+
+
+def test_the_real_sweep_publishes_price_and_value_only(bus, monkeypatch):
+    """No ``schwab`` fixture: ``compute.sim_run`` is the REAL engine, which gives
+    every row the position's delta, gamma, theta, vega and rho. Published, that
+    is the delta at every price - spot included - that the page's ``_OMIT``
+    promises nobody is shown."""
+    monkeypatch.setattr(tp, "_now", lambda: OPEN)
+    tp.PUBLIC_SIM.put("SPY", _real_snapshot())
+    cmd = _sweep_cmd()
+    tp.handle_math(bus, cmd)
+    assert _answer(bus, cmd) == "done"
+    result = _result(bus, cmd)
+    rows = result["whatif_rows"]
+    assert len(rows) > 10
+    assert all(set(r) == {"S", "theo_price"} for r in rows), rows[0]
+    assert all(isinstance(r["S"], float) and isinstance(r["theo_price"], float)
+               for r in rows)
+    text = repr(result)
+    for name in _GREEKS:
+        assert f"'{name}'" not in text, name
+    assert result["whatif_baseline"] is not None
 
 
 # ── math spends nothing ─────────────────────────────────────────────────────

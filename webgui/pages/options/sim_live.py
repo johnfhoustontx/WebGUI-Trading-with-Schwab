@@ -88,8 +88,10 @@ _TILE = _sim._TILE
 _TILE_VALUE = _sim._TILE_VALUE
 
 #: Tiles this page does not draw. Delta and Theta read the greeks, and the
-#: public sweep carries none (``tools_public._math_sweep`` keeps the what-if
-#: half only): publishing them is delta exposure the owner has not approved.
+#: public sweep carries none: ``tools_public._math_sweep`` keeps the what-if
+#: half only, and cuts each of its rows to price and value
+#: (``SWEEP_ROW_FIELDS``) - the engine's rows carry all five greeks. Publishing
+#: them is delta exposure the owner has not approved.
 #: ``sim_view.position_tiles`` stays six for the private page.
 _OMIT = {"delta", "theta"}
 

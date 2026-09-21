@@ -46,6 +46,13 @@ are not applied, and the snapshot and rating costs are unmeasured.**)
   were listed. (3) **Stale answers painted over newer ones**: a late price,
   rating or implied-volatility answer could replace what the visitor had
   since changed; each now paints only for the request the page still wants.
+- **Fixed after the final whole-branch review.** **The public sweep
+  published the greeks**: the engine gives every what-if row the position's
+  delta, gamma, theta, vega and rho, and the worker copied the rows whole, so
+  the "carries no greeks" above was untrue until each row was cut to an
+  allow-list, `S` and `theo_price` (`tools_public.SWEEP_ROW_FIELDS`), tested
+  over the real `sim_run`. The test's fake row had an invented shape with no
+  greeks in it, which is why nothing caught it.
 - **Rescue changes that ship in the same promote.** Rescue's strikes list is
   now the shared `pub_chain` key (it was `rescue_pub_ladder`), so the three
   tools share one Schwab fetch per symbol; and Rescue's separate daily

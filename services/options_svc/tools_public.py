@@ -726,6 +726,22 @@ def _math_iv(bus, now, lim, key, args) -> str:
     return "done"
 
 
+#: What a published what-if row keeps - an ALLOW-list, so a column the engine
+#: gains later stays unpublished until someone adds it here. The chart is the
+#: only reader (``simulator.whatif_pnl``: ``S`` and ``theo_price``); the greeks
+#: the engine also returns are the delta exposure the page's ``_OMIT`` leaves out.
+SWEEP_ROW_FIELDS = ("S", "theo_price")
+
+
+def public_sweep_rows(rows) -> list:
+    """``rows`` cut to ``SWEEP_ROW_FIELDS``; a row missing either is dropped."""
+    out = []
+    for row in rows or []:
+        if isinstance(row, dict) and all(f in row for f in SWEEP_ROW_FIELDS):
+            out.append({f: row[f] for f in SWEEP_ROW_FIELDS})
+    return out
+
+
 def _math_sweep(bus, now, lim, key, args) -> str:
     symbol = args["symbol"]
     snap = PUBLIC_SIM.get(symbol)
@@ -743,9 +759,12 @@ def _math_sweep(bus, now, lim, key, args) -> str:
     if _is_engine_error(out):
         return "error"
     # The what-if half only: the Volatility tab (``ivshock``) is not published.
-    _stamped(bus, key, {k: out.get(k) for k in
-                        ("whatif_rows", "whatif_baseline", "spot", "legs", "dt")},
-             now, lim)
+    # ⚠ And each what-if row is cut to ``SWEEP_ROW_FIELDS``: the engine gives
+    # every row the position's delta, gamma, theta, vega and rho, so copied
+    # whole the result would publish the delta at every price, spot included.
+    payload = {k: out.get(k) for k in ("whatif_baseline", "spot", "legs", "dt")}
+    payload["whatif_rows"] = public_sweep_rows(out.get("whatif_rows"))
+    _stamped(bus, key, payload, now, lim)
     return "done"
 
 
