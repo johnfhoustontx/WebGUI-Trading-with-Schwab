@@ -286,10 +286,21 @@ def test_the_stop_is_reachable_only_through_the_code_check():
 def test_the_dialog_still_carries_its_warnings_and_a_way_out():
     """The step-up is an ADDITION. Everything the page already said about what a
     stop costs -- including that it kills the page you are looking at -- and the
-    way to back out of it both survive."""
+    way to back out of it both survive.
+
+    ⚠ RE-AIMED for the Phase 6 kit migration, NOT weakened. The ``"Cancel"``
+    half used to read this module's source, and ``kit.confirm`` owns that
+    literal now: it builds Cancel and then the confirm, in that order, for every
+    dialog in the app. So the way out is asserted where it now lives -- the
+    handle the page holds -- and ``test_the_dialogs_way_out_comes_before_the_stop``
+    below checks the rendered order as well, which the source grep never did."""
     src = inspect.getsource(terminate.render)
     assert "This also stops THIS web app" in src
-    assert "Cancel" in src
+    assert "kit.confirm(" in src
+    from nicegui import ui
+    with ui.card():
+        handle = kit.confirm("t", confirm_text="go", on_confirm=lambda: None)
+    assert hasattr(handle, "cancel") and handle.cancel.text == "Cancel"
 
 
 # --- the step-up's own throttle (2026-09-06) ---------------------------------
@@ -356,3 +367,233 @@ def test_a_broken_store_is_not_counted_as_an_attempt(creds, monkeypatch):
     broken["yes"] = False
     ok, msg = terminate.verify_stop_code(_code(), now=T0)
     assert ok is True, "our own failure must not throttle the operator"
+
+
+# --- the Phase 6 kit migration (2026-09-20) ----------------------------------
+#
+# The page is the kit's form column, and the hand-built dialog is one
+# ``kit.confirm(danger=True)``: the 6-digit input, its instruction line and the
+# refusal message live in ``handle.content``, and ``_go`` returns ``False`` on a
+# refusal, which is what keeps the dialog OPEN.
+#
+# ⚠ Every test above this line drives ``verify_stop_code`` directly and touches
+# no widget. None of them changed, and none of them may: they are the step-up's
+# behaviour, and this migration is presentation.
+from pages import ui_kit as kit
+from pages.options import theme
+
+
+def _dialogs():
+    """Dialogs live on the client LAYOUT (NiceGUI 3.x), not in the page slot."""
+    from nicegui import context, ui
+    return [e for e in context.client.layout.descendants() if isinstance(e, ui.dialog)]
+
+
+def _render():
+    """Render the page and hand back ``(host, dialog)`` -- the dialog THIS render
+    built, not whichever one another test module left on the shared auto-index
+    client (the Phase 3 rule-10 lesson)."""
+    from nicegui import ui
+    before = {id(d) for d in _dialogs()}
+    with ui.card() as host:
+        terminate.render()
+    new = [d for d in _dialogs() if id(d) not in before]
+    assert len(new) == 1, f"render() built {len(new)} dialogs, expected 1"
+    return host, new[0]
+
+
+def _buttons(el):
+    from nicegui import ui
+    return [b for b in el.descendants() if isinstance(b, ui.button)]
+
+
+def _labels(el):
+    from nicegui import ui
+    return [lbl for lbl in el.descendants() if isinstance(lbl, ui.label)]
+
+
+def _fire(el, kind, args=None):
+    from nicegui.events import GenericEventArguments
+    fired = [li.handler(GenericEventArguments(sender=el, client=el.client, args=args))
+             for li in list(el._event_listeners.values())
+             if li.type.split(".")[0] == kind and li.handler is not None]
+    assert fired, f"no {kind} listener to fire"
+
+
+def _confirm(dlg):
+    """Run a confirm dialog's action -- the recipe from test_appearance.py. Its
+    ``run`` is a COROUTINE function and nicegui would only DEFER it here (no
+    running app loop), so drive the dialog's own keydown.enter listener, which
+    ``kit.confirm`` registers as ``run`` itself, inside a slot context (a slot
+    stack is per asyncio TASK)."""
+    import asyncio
+    (run_,) = [li.handler for li in dlg._event_listeners.values()
+               if li.type == "keydown.enter"]
+
+    async def _drive(slot):
+        with slot:
+            await run_(None)
+
+    asyncio.run(_drive(dlg.parent_slot))
+
+
+def test_the_frame_is_the_kit_and_carries_no_surface_of_its_own():
+    src = inspect.getsource(terminate.render)
+    assert 'kit.page(width="form")' in src
+    assert 'kit.header("Stop All Services")' in src
+    for token in ("text-h5", "max-w-2xl", "opacity-", "ui.dialog(", "ui.notify(",
+                  "ui.button("):
+        assert token not in src, f"{token} is the page building its own chrome"
+
+
+def test_the_page_button_is_a_danger_OUTLINE_and_the_confirm_is_the_solid_one():
+    """The standard: solid red appears ONLY inside a confirm dialog. The page
+    button was solid red and is now the outline -- which is also what the rail
+    already draws for this route (``_nav_danger_link``)."""
+    host, dlg = _render()
+    (page_btn,) = [b for b in _buttons(host) if b.text == "Stop all services"]
+    assert set(theme.BTN_DANGER.split()) <= set(page_btn.classes)
+    assert set(theme.BTN_DANGER_SOLID.split()) - set(page_btn.classes), \
+        "the page button is still the solid red one"
+    (confirm_btn,) = [b for b in _buttons(dlg) if b.text == "Stop everything"]
+    assert set(theme.BTN_DANGER_SOLID.split()) <= set(confirm_btn.classes)
+
+
+def test_the_dialogs_way_out_comes_before_the_stop():
+    """Cancel then confirm, the app's one order. The old dialog already had it;
+    this pins it now that the kit owns the row."""
+    _host, dlg = _render()
+    texts = [b.text for b in _buttons(dlg)]
+    assert texts == ["Cancel", "Stop everything"], texts
+
+
+def test_the_dialog_wears_the_kits_confirm_card():
+    from nicegui import ui
+    _host, dlg = _render()
+    (card,) = [e for e in dlg.descendants() if isinstance(e, ui.card)]
+    assert set(kit.CONFIRM_CARD.split()) <= set(card.classes)
+
+
+def test_the_code_field_and_its_message_live_in_the_dialog():
+    """``handle.content`` is the kit's own column between the body and the
+    buttons -- the documented place for a confirm's inputs.
+
+    ⚠ A must-not-change guard: green on both sides of the migration. The four
+    props were already right, and each is load-bearing -- ``one-time-code`` is
+    what makes a phone offer the code from its own notification, and
+    ``inputmode=numeric`` gets the digit pad. Moving the field into a kit
+    dialog must not drop any of them."""
+    from nicegui import ui
+    _host, dlg = _render()
+    (code,) = [e for e in dlg.descendants() if isinstance(e, ui.input)]
+    for prop in ("autofocus", "inputmode", "maxlength", "autocomplete"):
+        assert prop in code._props, prop
+    assert str(code._props["maxlength"]) == "6"
+    assert code._props["autocomplete"] == "one-time-code"
+    texts = [lbl.text for lbl in _labels(dlg)]
+    assert any("6-digit code" in (t or "") for t in texts)
+
+
+def test_enter_confirms_from_inside_the_dialog():
+    """``CONFIRM_ENTER_JS`` excludes only TEXTAREA, so Enter in the 6-digit
+    field submits. It did nothing at all on the hand-built dialog."""
+    _host, dlg = _render()
+    assert [li for li in dlg._event_listeners.values()
+            if li.type == "keydown.enter"], "Enter does not reach the confirm"
+
+
+def test_a_refused_code_keeps_the_dialog_open_and_stops_nothing(monkeypatch):
+    """The load-bearing half of the migration. Closing on a refusal would read
+    as "done", which is the one thing that must never be ambiguous here -- and
+    ``kit.confirm`` keeps the dialog open exactly when ``on_confirm`` returns
+    ``False``."""
+    from nicegui import ui
+    spawned = []
+    monkeypatch.setattr(terminate, "_spawn_stop", lambda: spawned.append(1))
+    monkeypatch.setattr(terminate, "verify_stop_code",
+                        lambda code, **kw: (False, terminate.CODE_REJECTED))
+    _host, dlg = _render()
+    (code,) = [e for e in dlg.descendants() if isinstance(e, ui.input)]
+    code.value = "000000"
+    dlg.open()
+    _confirm(dlg)
+
+    assert not spawned, "a refused code reached the stop"
+    assert dlg.value is True, "the dialog closed on a refusal"
+    (problem,) = [lbl for lbl in _labels(dlg)
+                  if lbl.text == terminate.CODE_REJECTED]
+    assert problem.visible
+    assert code.value == "", "the refused code was left in the field"
+
+
+def test_a_refused_code_can_be_retried_without_reloading_the_page(monkeypatch):
+    """``kit.confirm``'s re-entrancy guard resets ``st["done"]`` on each open, so
+    a second attempt inside one opening is not swallowed. The hand-built dialog
+    had no guard at all, so this is new behaviour and had to be checked rather
+    than assumed."""
+    from nicegui import ui
+    tries = []
+    monkeypatch.setattr(terminate, "_spawn_stop", lambda: None)
+
+    def _verify(code, **_kw):
+        tries.append(code)
+        return False, terminate.CODE_REJECTED
+
+    monkeypatch.setattr(terminate, "verify_stop_code", _verify)
+    _host, dlg = _render()
+    (code,) = [e for e in dlg.descendants() if isinstance(e, ui.input)]
+    dlg.open()
+    code.value = "111111"
+    _confirm(dlg)
+    code.value = "222222"
+    _confirm(dlg)
+    assert tries == ["111111", "222222"], tries
+
+
+def test_reopening_clears_the_last_refusal(monkeypatch):
+    """A stale red sentence over a fresh empty field reads as a refusal of the
+    code you have not typed yet."""
+    from nicegui import ui
+    monkeypatch.setattr(terminate, "_spawn_stop", lambda: None)
+    monkeypatch.setattr(terminate, "verify_stop_code",
+                        lambda code, **kw: (False, terminate.CODE_REJECTED))
+    host, dlg = _render()
+    (code,) = [e for e in dlg.descendants() if isinstance(e, ui.input)]
+    code.value = "000000"
+    dlg.open()
+    _confirm(dlg)
+    (problem,) = [lbl for lbl in _labels(dlg)
+                  if lbl.text == terminate.CODE_REJECTED]
+    assert problem.visible
+    _fire([b for b in _buttons(host) if b.text == "Stop all services"][0], "click")
+    assert not problem.visible, "the previous refusal was still on screen"
+
+
+def test_a_valid_code_stops_the_stack_and_says_the_page_is_about_to_die(monkeypatch):
+    from nicegui import ui
+    spawned, said = [], []
+    monkeypatch.setattr(terminate, "_spawn_stop", lambda: spawned.append(1))
+    monkeypatch.setattr(terminate, "verify_stop_code", lambda code, **kw: (True, ""))
+    monkeypatch.setattr(terminate.kit, "toast",
+                        lambda kind, text: said.append((kind, text)))
+    _host, dlg = _render()
+    (code,) = [e for e in dlg.descendants() if isinstance(e, ui.input)]
+    code.value = "123456"
+    dlg.open()
+    _confirm(dlg)
+
+    assert spawned == [1]
+    assert dlg.value is False, "the dialog stayed open after an authorized stop"
+    assert said and said[-1][0] == "warn"
+    assert "stop responding" in said[-1][1]
+
+
+def test_the_page_builds_no_control_of_its_own():
+    """The guard's ``terminate.py`` entry ({"button": 3, "dialog": 1,
+    "notify": 1}) is deleted in the same commit; this is its page-level half.
+    No written exception was needed: the two things that looked missing from
+    ``kit.confirm`` -- an input field and a second factor that can refuse --
+    are both already in it (``handle.content`` and a ``False`` return)."""
+    src = inspect.getsource(terminate)
+    for banned in ("ui.button(", "ui.dialog(", "ui.notify("):
+        assert banned not in src, banned

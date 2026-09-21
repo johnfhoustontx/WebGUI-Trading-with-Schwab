@@ -26,6 +26,11 @@ rather than in a kill-list filter, but the copy still has to say so, or a dev
 operator either avoids a button they are entitled to press or mistrusts the
 result when the proxy survives.
 
+Since the Phase 6 kit migration the confirm is one ``kit.confirm(danger=True)``.
+The 6-digit input, its instruction line and the refusal message live in the
+kit's own ``handle.content`` column, and ``_go`` returns ``False`` on a refusal
+— which is exactly how ``kit.confirm`` is told to keep the dialog open.
+
 Honors the 3-tier rule: imports only ``nicegui`` + stdlib + ``repo_paths`` (host
 process control, not an app engine) + the webgui's own ``auth``/``auth_store``.
 ``stop_command`` and ``verify_stop_code`` are the testable surface; ``render`` is
@@ -40,7 +45,8 @@ from nicegui import ui
 
 import auth
 import auth_store
-from pages.options.theme import BTN_DANGER_SOLID, MUTED, TXT_NEG
+from pages import ui_kit as kit
+from pages.options import theme
 from pages.ui_guard import guard
 from repo_paths import ENV_NAME, REPO_ROOT
 
@@ -171,64 +177,97 @@ def _spawn_stop():
 
 
 def render():
-    ui.label("Stop All Services").classes("text-h5")
+    """The page: what a stop costs, then one danger button behind one
+    ``kit.confirm`` carrying the TOTP step-up.
 
-    with ui.card().classes("w-full max-w-2xl"):
-        with ui.row().classes("items-center gap-2"):
-            ui.icon("warning").classes("text-orange text-2xl")
-            ui.label("Stop all local services").classes("text-subtitle1 font-bold")
-        ui.label(
-            "Stops all six domain services, this web app and the public live "
-            "screens beside it. Redis (the bus backbone) keeps "
-            "running — it is a system service, not part of this target.").classes(
-                "opacity-80")
-        ui.label(
-            "The schwab-proxy is stopped only in the environment that owns it — "
-            "a dev checkout borrows prod's and leaves it up.").classes(
-                "opacity-80")
-        ui.label(
-            "⚠ This also stops THIS web app — the page will stop responding right "
-            "after you confirm. That's expected. Re-launch with "
-            f"`systemctl --user start {STOP_TARGET}`.").classes("text-orange text-sm")
+    ⚠ The page button is the danger OUTLINE, not the solid red it used to be.
+    Solid red appears only INSIDE a confirm dialog (the app's standard), and the
+    rail already draws this route that way (``main._nav_danger_link``).
+    """
+    with kit.page(width="form"):
+        kit.header("Stop All Services")
+        with ui.column().classes(f"{theme.CARD} w-full gap-2"):
+            with ui.row().classes("items-center gap-2"):
+                ui.icon("warning").classes(f"text-2xl {theme.TXT_WARN}")
+                ui.label("Stop all local services").classes(
+                    f"text-subtitle1 font-semibold {theme.LABEL}")
+            ui.label(
+                "Stops all six domain services, this web app and the public live "
+                "screens beside it. Redis (the bus backbone) keeps "
+                "running — it is a system service, not part of this target."
+            ).classes(f"text-sm {theme.MUTED}")
+            ui.label(
+                "The schwab-proxy is stopped only in the environment that owns it — "
+                "a dev checkout borrows prod's and leaves it up."
+            ).classes(f"text-sm {theme.MUTED}")
+            ui.label(
+                "⚠ This also stops THIS web app — the page will stop responding right "
+                "after you confirm. That's expected. Re-launch with "
+                f"`systemctl --user start {STOP_TARGET}`."
+            ).classes(f"text-sm {theme.TXT_WARN}")
+            kit.button("Stop all services", kind="danger",
+                       icon="power_settings_new",
+                       on_click=lambda: _open()).classes("self-start mt-1")
 
-        with ui.dialog() as dlg, ui.card():
-            ui.label("Stop all services now?").classes("text-subtitle1 font-bold")
-            ui.label("All six domain services, this web app and the public "
-                     "live screens will be terminated. The schwab-proxy stops "
-                     "only in the environment that owns it; Redis stays "
-                     "up.").classes(
-                         "opacity-80")
-            ui.label("Confirm with the 6-digit code from your authenticator "
-                     "app.").classes(f"text-sm {MUTED}")
-            # autocomplete=one-time-code is what makes a phone offer the code
-            # from its own notification; inputmode=numeric gets the digit pad.
-            code_input = (ui.input("Authenticator code")
-                          .props("autofocus inputmode=numeric maxlength=6 "
-                                 "autocomplete=one-time-code")
-                          .classes("w-48"))
-            problem = ui.label("").classes(f"text-sm {TXT_NEG}")
-            problem.set_visibility(False)
+    def _go():
+        """The confirm's action. ``False`` keeps the dialog OPEN.
 
-            with ui.row().classes("justify-end gap-2 w-full"):
-                ui.button("Cancel", on_click=dlg.close).props("flat")
+        Closing it on a refusal would read as "done", which is the one thing
+        that must never be ambiguous about a control like this — and returning
+        ``False`` is precisely how ``kit.confirm`` is asked for that. The kit
+        closes the dialog itself on anything else, so there is no ``close()``
+        here; a page that closed it as well would race the kit's own.
+        """
+        ok, message = verify_stop_code(code_input.value)
+        if not ok:
+            problem.set_text(message)
+            problem.set_visibility(True)
+            code_input.value = ""
+            return False
+        _spawn_stop()
+        kit.toast("warn", "Terminating all services… this page will stop "
+                          "responding shortly.")
+        return True
 
-                @guard
-                def _go():
-                    ok, message = verify_stop_code(code_input.value)
-                    if not ok:
-                        # The dialog STAYS OPEN: closing it on a refusal would
-                        # read as "done", which is the one thing that must never
-                        # be ambiguous about a control like this.
-                        problem.set_text(message)
-                        problem.set_visibility(True)
-                        code_input.value = ""
-                        return
-                    dlg.close()
-                    _spawn_stop()
-                    ui.notify("Terminating all services… this page will stop "
-                              "responding shortly.", type="warning", timeout=10000)
+    # Built ONCE at render()'s own level, and deliberately NOT ephemeral: a
+    # refused code has to leave this dialog standing and reopenable.
+    # ⚠ AFTER ``_go``: test_terminate.py splits render()'s source on
+    # ``verify_stop_code(`` and asserts nothing reaches ``_spawn_stop`` before
+    # it, which is the wiring guard that the code check cannot be skipped.
+    #
+    # ⚠ The body is the old dialog's, VERBATIM - two sentences where the kit's
+    # confirms are usually one, and it stays that way. It carries the only
+    # ownership statement the operator sees at the MOMENT of confirming, and
+    # test_copy_states_that_stopping_the_proxy_is_ownership_conditional counts
+    # that promise across the module: it finds TWO sites, not three, because the
+    # docstring's own copy is wrapped across a newline and the literal has never
+    # matched it. This is one of the two. That test reads the SOURCE, so the
+    # phrase has to sit on ONE source line - a wrap between "owns" and "it"
+    # breaks it exactly as the docstring's does.
+    stop_dlg = kit.confirm(
+        "Stop all services now?",
+        "All six domain services, this web app and the public live screens will "
+        "be terminated. The schwab-proxy stops "
+        "only in the environment that owns it; Redis stays up.",
+        confirm_text="Stop everything", danger=True, on_confirm=_go)
+    with stop_dlg.content:
+        ui.label("Confirm with the 6-digit code from your authenticator "
+                 "app.").classes(f"text-sm {theme.MUTED}")
+        # autocomplete=one-time-code is what makes a phone offer the code
+        # from its own notification; inputmode=numeric gets the digit pad.
+        code_input = (ui.input("Authenticator code")
+                      .props("autofocus inputmode=numeric maxlength=6 "
+                             "autocomplete=one-time-code")
+                      .classes("w-48"))
+        problem = ui.label("").classes(f"text-sm {theme.TXT_NEG}")
+        problem.set_visibility(False)
 
-                ui.button("Stop everything", color=None, on_click=_go).props("no-caps").classes(BTN_DANGER_SOLID)
-
-        ui.button("Stop all services", icon="power_settings_new", color=None,
-                  on_click=dlg.open).props("no-caps").classes(BTN_DANGER_SOLID)
+    @guard
+    def _open():
+        """Open it CLEAN. The kit resets its own re-entrancy latch on each open,
+        but the refusal message and the emptied field are this page's, and a
+        stale red sentence over a blank box reads as a refusal of the code you
+        have not typed yet."""
+        problem.set_visibility(False)
+        code_input.value = ""
+        stop_dlg.open()
