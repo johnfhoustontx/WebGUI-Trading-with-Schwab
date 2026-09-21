@@ -38,7 +38,7 @@ def test_the_frame_is_the_kit_and_carries_no_surface_of_its_own():
     assert 'kit.page(width="form")' in src
     assert 'kit.header("User Manuals")' in src
     # The page's own headline, width cap and opacity dimming are the kit's now.
-    for token in ("text-h5", "max-w-2xl", "opacity-", "BTN_3D"):
+    for token in ("text-h5", "max-w-2xl", "opacity-"):
         assert token not in src, f"{token} is the page styling itself"
 
 

@@ -9,16 +9,18 @@ call lowers its entry in the same commit - otherwise the list stops describing
 the code. An entry may outlive the migration only with a written reason (a
 control that is not an action button: a segmented picker, a leg-table toggle).
 
-⚠ TEN entries are PERMANENT rather than pending, and each carries its reason
-above it: ``options/detail.py`` (Phase 1), ``desk.py`` / ``market.py`` /
-``sentiment_momentum.py`` (Phases 3 & 4), five from Phase 2 - the three
-shared Options widgets ``options/entry_panel.py`` / ``options/leg_editor.py`` /
+⚠ SINCE PHASE 6 THERE IS NO PENDING ENTRY LEFT. Every page in the app has been
+migrated, so ALLOWED is exactly TEN written exceptions - each one a control that
+is not an action button, with its reason above it: ``options/detail.py``
+(Phase 1), ``desk.py`` / ``market.py`` / ``sentiment_momentum.py``
+(Phases 3 & 4), five from Phase 2 - the three shared Options widgets
+``options/entry_panel.py`` / ``options/leg_editor.py`` /
 ``options/strategy_menu.py``, plus ``options/simulator.py`` and
-``options/swing.py`` - and ``trade_board.py`` from Phase 5. Every other entry is
-a page no phase has migrated yet and is expected to fall to zero and be deleted.
-The nine screens Phases 3 & 4 covered left no entry at all except those three.
+``options/swing.py`` - and ``trade_board.py`` from Phase 5. So a file appearing
+in ALLOWED from here on is not a page waiting its turn: either it is one of
+these ten, or the list has stopped describing the code.
 (The count read SEVEN and omitted ``options/simulator.py`` until 2026-09-20;
-corrected in place.)
+corrected in place, as this paragraph was.)
 """
 import ast
 import collections
@@ -142,3 +144,20 @@ def test_the_kit_really_builds_what_it_guards():
     src = (PAGES / KIT).read_text(encoding="utf-8")
     for attr in ("button", "dialog", "notify", "table"):
         assert f"ui.{attr}(" in src, f"ui_kit no longer builds ui.{attr}"
+
+
+def test_allowed_is_exactly_the_ten_written_exceptions():
+    """The docstring's claim, made falsifiable - a MUST-NOT-CHANGE guard, green
+    before and after Phase 6, because what it pins was already true the moment
+    the last page migrated.
+
+    Since Phase 6 there is no pending entry left, so ALLOWED is exactly the ten
+    permanents and every one of them is named, with a reason, in the paragraph
+    above. An eleventh added without writing its reason there fails here rather
+    than quietly re-opening the ratchet as a list of pages waiting their turn.
+    """
+    doc = __doc__ or ""
+    assert len(ALLOWED) == 10, sorted(ALLOWED)
+    for f in ALLOWED:
+        assert f"``{f}``" in doc, \
+            f"{f} is in ALLOWED with no written reason in the module docstring"

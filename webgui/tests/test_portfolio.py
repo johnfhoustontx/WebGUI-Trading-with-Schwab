@@ -178,7 +178,6 @@ class TestThePortfolioFrameIsTheKits:
         src = _src()
         assert "ui.button(" not in src
         assert "ui.table(" not in src
-        assert "BTN_3D" not in src
 
 
 class TestThePortfolioTablesAreTheKits:

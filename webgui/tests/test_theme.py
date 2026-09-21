@@ -115,7 +115,7 @@ def test_state_color_tokens_preserve_exact_hex():
 
 
 BTN_TOKENS = ["BTN", "BTN_PRIMARY", "BTN_DANGER", "BTN_DANGER_SOLID",
-              "BTN_3D", "BTN_3D_DANGER", "BTN_QUIET"]
+              "BTN_QUIET"]
 
 
 def test_button_tokens_are_class_strings():
@@ -128,12 +128,12 @@ def test_buttons_are_flat_deep_slate():
     # The Deep Slate redesign flattened the buttons: no 3D gradient/lip/press, just
     # solid/tinted fills. Primary = blue accent + dark text + a soft glow.
     toks = theme.build_tokens(theme.load_theme("Z:/nope.toml"))
-    assert "linear-gradient" not in toks["BTN_3D"]      # flattened
-    assert "active:translate-y" not in toks["BTN_3D"]
-    assert toks["BTN_PRIMARY"] == toks["BTN_3D"]        # legacy alias → flat primary
+    # These two asserts rode on the retired BTN_3D alias, which WAS the primary;
+    # they ask the primary itself now, which is what they always measured.
+    assert "linear-gradient" not in toks["BTN_PRIMARY"]      # flattened
+    assert "active:translate-y" not in toks["BTN_PRIMARY"]
     assert "text-[#0b1024]" in toks["BTN_PRIMARY"] and "shadow-[0_4px_14px" in toks["BTN_PRIMARY"]
-    # Danger: ghost (tint + border + red text); the alias points at it.
-    assert toks["BTN_DANGER"] == toks["BTN_3D_DANGER"]
+    # Danger: ghost (tint + border + red text).
     assert "border" in toks["BTN_DANGER"] and "text-[#ef5350]" in toks["BTN_DANGER"]
     # Solid danger (Terminate): full red fill from [palette].danger + glow.
     assert "#d33f3f" in toks["BTN_DANGER_SOLID"] and "text-white" in toks["BTN_DANGER_SOLID"]
@@ -175,7 +175,6 @@ def test_build_tokens_reflect_theme_values(tmp_path):
     toks = theme.build_tokens(theme.load_theme(p))
     assert "bg-[#222831]" in toks["CARD"]
     assert "bg-[#00aa55]" in toks["BTN_PRIMARY"]
-    assert "bg-[#00aa55]" in toks["BTN_3D"]
     assert "text-[#00ff00]" in toks["TXT_POS"]
     # the module-level tokens are build_tokens(THEME) — same generator.
     assert theme.CARD == theme.build_tokens(theme.THEME)["CARD"]
@@ -641,3 +640,32 @@ def test_the_app_wide_leg_rules_cover_every_page_that_mounts_a_leg_table():
     css = theme.build_quasar_css(theme.THEME, scope=".ns-app")
     for hook in (".ns-app .leg-trow", ".ns-app .leg-row", ".ns-app .leg-head"):
         assert hook in css, f"{hook} is not reached by the app-wide block"
+
+
+# ── the legacy 3D button aliases retire (Phase 6, Task 11) ──────────────────
+def test_the_legacy_3d_button_aliases_are_gone():
+    """``BTN_3D`` / ``BTN_3D_DANGER`` were kept through the Deep Slate
+    flattening as ALIASES of ``BTN_PRIMARY`` / ``BTN_DANGER``, so that every
+    existing call site flattened with no per-site edit. Phase 6 took the last
+    three users (``status.py``, ``settings.py``, ``manuals.py``) onto
+    ``kit.button``, so the names go: an alias nobody uses is a second spelling
+    of a token, free to be given a different value by someone who does not
+    know it is the same button."""
+    for name in ("BTN_3D", "BTN_3D_DANGER"):
+        assert not hasattr(theme, name), f"theme.{name} is a retired alias"
+        assert name not in theme.build_tokens(theme.THEME), \
+            f"build_tokens still emits {name}"
+
+
+def test_no_page_still_names_the_retired_aliases():
+    """⚠ The POSITIVE form of the six per-page ``"BTN_3D" not in src`` greps,
+    which this replaces. Each of those pinned a name in ONE module and could
+    only ever fail there; once the token is deleted, writing it is a NameError
+    anyway, so they assert nothing. This reads the whole tree - including
+    COMMENTS, which is where the last two references actually were - so a page
+    reintroducing the alias fails here rather than in whichever page test
+    happened to list it."""
+    pages = pathlib.Path(theme.__file__).resolve().parents[1]
+    hits = sorted(f.relative_to(pages).as_posix() for f in pages.rglob("*.py")
+                  if "BTN_3D" in f.read_text(encoding="utf-8"))
+    assert not hits, f"these still name the retired alias: {hits}"

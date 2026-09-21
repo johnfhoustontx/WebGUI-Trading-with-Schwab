@@ -654,8 +654,6 @@ def test_the_frame_is_the_kit_and_the_page_finally_names_itself():
             in src), "the header names the page and stamps the on-demand view"
     assert "with kit.control_bar():" in src
     assert "kit.status_line()" in src
-    # BTN_3D is the legacy alias the design retires.
-    assert "BTN_3D" not in inspect.getsource(em)
 
 
 def test_the_missing_field_toast_is_gone_because_draw_is_simply_held():

@@ -1998,8 +1998,7 @@ def test_the_finder_frame_is_the_page_kit_and_names_the_page():
     src = inspect.getsource(swing.render)
     assert "kit.page()" in src
     assert 'kit.header("Strategy Finder", view=SWING_VIEW, stale=False)' in src
-    # The legacy primary alias and the page's own link styling go with it.
-    assert "BTN_3D" not in inspect.getsource(swing)
+    # The page's own link styling goes with it.
     assert not hasattr(swing, "CHANGE_LINK")
 
 

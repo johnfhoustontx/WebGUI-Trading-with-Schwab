@@ -34,7 +34,8 @@ label), ``LABEL`` / ``MUTED`` (text), ``BTN`` / ``BTN_PRIMARY`` (buttons),
 ``STRATEGY_BTN`` (boxed Strategy trigger box, applied alongside the
 ``strategy-menu-btn`` scope hook via ``strategy_menu.build_strategy_menu(
 boxed=True)``), ``TXT_*`` (semantic state text colors), ``BTN_QUIET`` (text-only),
-``BTN_3D*`` (legacy aliases), ``TILE_3D`` (metric tiles). The CSS-only hooks
+``TILE_3D`` (metric tiles - flat since Deep Slate, the name is legacy). The
+CSS-only hooks
 ``APP_FIELD_CSS`` styles: ``.strat-menu-navy`` (the teleported Strategy popup —
 GLOBAL, since it mounts on ``<body>`` outside the scope) and ``.leg-head`` /
 ``.leg-row`` / ``.leg-strike`` (leg-table chrome). The **full palette
@@ -306,18 +307,6 @@ def build_tokens(theme):
     state_txt = [f"text-[{s[k]}]" for k in ("positive", "warning", "negative", "neutral")]
     pr = hex_rgb(p["primary"], (107, 134, 255))       # primary glow rgb
     dr = hex_rgb(p["danger"], (211, 63, 63))          # solid-danger glow rgb
-    # Flat "Deep Slate" buttons — built as locals so the legacy BTN_3D[_DANGER]
-    # names can alias them (every existing call site flattens with no per-site edit).
-    _btn_primary = (
-        f"bg-[{p['primary']}] hover:brightness-110 text-[#0b1024] "
-        "rounded-[9px] min-h-[34px] font-semibold "
-        f"shadow-[0_4px_14px_-4px_rgba({pr[0]},{pr[1]},{pr[2]},0.6)]"
-    )
-    _btn_danger = (
-        f"bg-[{s['negative']}]/[.13] hover:bg-[{s['negative']}]/20 "
-        f"text-[{s['negative']}] border border-[{s['negative']}]/40 "
-        "rounded-[9px] min-h-[34px] font-medium"
-    )
     return {
         "PAGE": (
             f"rounded-[14px] border border-[{p['page_border']}] "
@@ -342,10 +331,18 @@ def build_tokens(theme):
             f"border border-[{p['btn_border']}] rounded-[9px] min-h-[34px] font-medium"
         ),
         # Primary: solid blue accent + dark navy text + a soft accent glow.
-        "BTN_PRIMARY": _btn_primary,
+        "BTN_PRIMARY": (
+            f"bg-[{p['primary']}] hover:brightness-110 text-[#0b1024] "
+            "rounded-[9px] min-h-[34px] font-semibold "
+            f"shadow-[0_4px_14px_-4px_rgba({pr[0]},{pr[1]},{pr[2]},0.6)]"
+        ),
         # Danger (ghost/outlined): faint red tint + red border + red text — the
         # in-table destructive style (Delete / Delete all closed / Reset).
-        "BTN_DANGER": _btn_danger,
+        "BTN_DANGER": (
+            f"bg-[{s['negative']}]/[.13] hover:bg-[{s['negative']}]/20 "
+            f"text-[{s['negative']}] border border-[{s['negative']}]/40 "
+            "rounded-[9px] min-h-[34px] font-medium"
+        ),
         # Danger (solid): a full red fill + glow — the heavyweight stop action
         # (Terminate → "Stop all services"), used sparingly.
         "BTN_DANGER_SOLID": (
@@ -362,11 +359,6 @@ def build_tokens(theme):
             f"border border-[{p['input_border']}] text-[{p['input_text']}] "
             f"rounded-[8px] min-h-[34px] font-normal"
         ),
-        # BTN_3D / BTN_3D_DANGER — LEGACY names kept as aliases so every existing
-        # .classes(BTN_3D[_DANGER]) call site flattens to the Deep Slate look with
-        # no per-site edit. BTN_3D → the flat primary; BTN_3D_DANGER → ghost danger.
-        "BTN_3D": _btn_primary,
-        "BTN_3D_DANGER": _btn_danger,
         # Flat metric TILE (Deep Slate) — a hairline border + 12px radius, NO bevel
         # or drop shadow. Additive (no background), so it layers over each tile's
         # own bg/color without flattening it. Name kept (legacy call sites) though
@@ -1093,8 +1085,8 @@ def build_matrix_tokens(theme):
 
 # ---------------------------------------------------------------------------
 # Module-level theme + tokens — loaded ONCE at import (restart the webgui after
-# editing config/theme.toml). All existing `.classes(CARD)` / `.classes(BTN_3D)`
-# call sites are unchanged; they now carry the configured palette.
+# editing config/theme.toml). Every `.classes(CARD)` / `.classes(BTN_PRIMARY)`
+# call site carries the configured palette.
 # ---------------------------------------------------------------------------
 THEME = load_theme()
 _TOKENS = build_tokens(THEME)
@@ -1110,8 +1102,6 @@ BTN_DANGER = _TOKENS["BTN_DANGER"]
 BTN_DANGER_SOLID = _TOKENS["BTN_DANGER_SOLID"]
 BTN_QUIET = _TOKENS["BTN_QUIET"]
 STRATEGY_BTN = _TOKENS["STRATEGY_BTN"]
-BTN_3D = _TOKENS["BTN_3D"]
-BTN_3D_DANGER = _TOKENS["BTN_3D_DANGER"]
 TILE_3D = _TOKENS["TILE_3D"]
 TXT_POS = _TOKENS["TXT_POS"]
 TXT_WARN = _TOKENS["TXT_WARN"]

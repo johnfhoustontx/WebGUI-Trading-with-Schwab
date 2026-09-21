@@ -639,8 +639,7 @@ TAB_0DTE_COLOR, TAB_SWING_COLOR, TAB_DIR_COLOR = "#ffa726", "#42a5f5", "#ab47bc"
 # .scan-table so it never leaks to other tables. The per-tab accent TEXT color is
 # applied as a Tailwind class on each ui.tab; only the Quasar-internal tab chrome
 # (text-transform/weight, hidden indicator, the active-underline box-shadow which
-# can't be reached via .classes()) stays here. The 3D "Run scan" button uses the
-# shared BTN_3D token.
+# can't be reached via .classes()) stays here. Run scan is a kit.button.
 SCAN_CSS = '''
 .scan-table td, .scan-table th { padding: 2px 4px; }
 .scan-tabs .q-tab { font-weight: 600; }

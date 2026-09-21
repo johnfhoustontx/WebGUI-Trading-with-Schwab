@@ -731,10 +731,9 @@ def test_the_frame_is_the_kit_and_carries_no_chrome_of_its_own():
     # ``test_the_banner_drops_the_raw_quasar_palette``, which is the stronger
     # question anyway.
     for token in ("text-h5", "text-subtitle1 font-bold", "opacity-",
-                  "ui.notify(", "ui.spinner(", "ui.separator(", "BTN_3D",
+                  "ui.notify(", "ui.spinner(", "ui.separator(",
                   "text-orange", "text-negative"):
         assert token not in src, f"{token} is the page building its own chrome"
-    assert "BTN_3D" not in inspect.getsource(status), "the module still imports it"
 
 
 def test_the_page_description_moved_to_the_hover_help():

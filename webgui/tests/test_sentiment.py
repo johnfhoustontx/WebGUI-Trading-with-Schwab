@@ -931,7 +931,7 @@ def test_the_console_frame_is_the_kit_and_carries_no_surface_of_its_own():
     assert 'kit.header("Sentiment", view=VIEW, stale=True)' in src
     assert "kit.region(" in src
     # The page's own display face and its page-scoped ground are gone.
-    for token in ("CONSOLE_FONT_HEAD_HTML", "CONSOLE_PAGE", "BTN_3D"):
+    for token in ("CONSOLE_FONT_HEAD_HTML", "CONSOLE_PAGE"):
         assert token not in src, f"{token} is a page-scoped surface value"
     # ONE view name, bound once and used by the header stamp, the cache read and
     # the version poll, so a stamp cannot end up describing a different key from
