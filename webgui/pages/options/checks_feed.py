@@ -71,15 +71,21 @@ def _index_board(board):
     return out
 
 
-def read_context():
+def read_context(caps=True):
     """Every view as it is, and None when it is cold - never an empty stand-in:
     ``checks`` marks a None input as a missing view, which keeps the summary out
     of "Clear" (an empty dict would let it read Clear with a check missing).
 
+    ``caps=False`` does not READ the owner's ledger caps at all and passes None:
+    for a caller that draws no Paper book line (the public Calculator's rating,
+    whose candidates carry ``_allow_paper`` False, so ``checks._book`` never
+    reads them). Every private caller takes the default.
+
     **Blocking** (four locked Redis reads): call it through ``run.io_bound``,
     never on the event loop."""
     return {"matrix": _index_board(_gated(MATRIX_VIEW)), "regime": _gated(REGIME_VIEW),
-            "calibration": _gated(CALIBRATION_VIEW), "caps": _gated(CAPS_VIEW)}
+            "calibration": _gated(CALIBRATION_VIEW),
+            "caps": _gated(CAPS_VIEW) if caps else None}
 
 
 def checks_for(row, ctx):

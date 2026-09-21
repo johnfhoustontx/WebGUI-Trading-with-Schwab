@@ -85,6 +85,8 @@ LOAD_PROMPT = "Load a symbol to build a position on its real strikes."
 TYPED_PRICE_NOTE = ("Price is what you paid (long) or received (short), per share. "
                     "Share legs left at 0 are priced at the current share price.")
 PICK_STRIKES = "Pick a strike for every option leg to see it priced."
+TYPE_PRICES_PROMPT = "Type a price for each leg to see the P&L."
+EDIT_PROMPT = "Change any leg or assumption to see the P&L."
 DEFAULT_WINDOW = {"start": "08:40", "end": "15:00"}
 
 #: The grid's columns with quotes on: exactly the four fields the published
@@ -111,8 +113,8 @@ def limit_text(kind) -> str:
     if kind == "math":
         return (f"You have reached the limit of {pt.math_per_hour()} price updates "
                 "an hour. Please try again later.")
-    return (f"You have reached the limit of {pt.tools_per_hour()} symbol loads "
-            "and ratings an hour. Please try again later.")
+    return (f"You have reached the limit of {pt.tools_per_hour()} symbol and "
+            "expiration loads, and ratings, an hour. Please try again later.")
 
 
 def outcome_text(outcome) -> str:
@@ -223,13 +225,9 @@ def rating_context():
 
     ``checks_feed.read_context`` also reads ``options:ledger_caps`` - the owner's
     paper book - for the Paper book line. A public rating draws no such line,
-    so this reads the three market views only and passes ``caps`` None.
+    so it asks with ``caps=False``: the three market views only, caps None.
     **Blocking**: call it through ``run.io_bound``."""
-    feed = _checks_feed
-    return {"matrix": feed._index_board(feed._gated(feed.MATRIX_VIEW)),
-            "regime": feed._gated(feed.REGIME_VIEW),
-            "calibration": feed._gated(feed.CALIBRATION_VIEW),
-            "caps": None}
+    return _checks_feed.read_context(caps=False)
 
 
 # ── the page ─────────────────────────────────────────────────────────────────
@@ -254,6 +252,8 @@ def render():
         "price_key": None,      # the newest price request sent
         "shown_key": None,      # the price request whose result is on screen
         "iv_target": None,      # the contract the IV was last implied from
+        "iv_manual": False,     # the visitor typed the IV: never overwrite it
+        "rating_key": None,     # the newest rating request sent
         # False until the visitor's first action: a page load - a crawler, a
         # visit from the Tools menu - must send nothing at all, not even a
         # price or an implied volatility for a chain someone else loaded.
@@ -292,6 +292,7 @@ def render():
             with ui.row().classes("w-full items-end gap-2 flex-wrap pt-1"):
                 price_in = kit.number_field("Price", value=100.0, width="w-28")
                 iv_in = kit.number_field("IV %", value=20.0, width="w-28")
+                iv_in.classes("calc-iv")
                 rate_in = kit.number_field("Rate %", value=4.5, width="w-28")
                 ivchg_in = kit.number_field("IV change %", value=0.0, width="w-28")
                 contracts_in = kit.number_field("Contracts", value=1, min=1,
@@ -364,7 +365,7 @@ def render():
             delta_for=(lambda leg: leg_delta(state["grid"], leg)) if quotes else None,
             price_for=_price_for if quotes else None,
             price_sources=quotes, allow_stock=True, min_legs=1,
-            on_reset=lambda: _seed())
+            on_reset=lambda: _engage(_seed))
         refs["panel"], refs["editor"] = panel, editor
         panel.refresh_btn.on_click(lambda: _load())
         panel.symbol_in.on("keydown.enter", lambda e: _load())
@@ -536,6 +537,8 @@ def render():
     def _apply_chain(chain):
         quotes = has_quotes(chain)
         same = state["symbol"] == chain.get("symbol")
+        if not same:
+            state["iv_manual"] = False      # a typed IV belonged to the old symbol
         state["chain"], state["symbol"] = chain, chain.get("symbol")
         state["grid"] = grid_chain(chain)
         state["iv_target"] = None
@@ -558,6 +561,8 @@ def render():
             _after_legs()
         else:
             _seed()
+        if not state["engaged"]:
+            results_note.text = EDIT_PROMPT if quotes else TYPE_PRICES_PROMPT
         loaded = loaded_expirations(chain)
         status.text = (f"{state['symbol']}: {len(listed)} expirations, strikes for "
                        f"{len(loaded)} so far; the rest load when you pick one."
@@ -640,25 +645,38 @@ def render():
     # ---- implied volatility
 
     def _maybe_iv():
-        if state["chain"] is None or not state["engaged"]:
+        if state["chain"] is None or not state["engaged"] or state["iv_manual"]:
             return
         target = iv_target(_editor().get_legs(), _num(price_in.value))
         if target is None or target == state["iv_target"]:
             return
         option_type, strike, expiry = target
-        req = {"kind": "iv", "symbol": state["symbol"], "option_type": option_type,
+        symbol = state["symbol"]
+        req = {"kind": "iv", "symbol": symbol, "option_type": option_type,
                "strike": strike, "expiry": expiry}
         command = pt.math_command(req)
         if command is None:
             return
-        state["iv_target"] = target
         key = pt.request_key(command)
-        _send("math", key, lambda: bus_client.request_public_math(req),
-              lambda outcome, _a: _on_iv(key),
-              lambda outcome, _a: None, note=results_note)
+        # The target is recorded only once the request is on its way, and
+        # forgotten when it is refused or times out, so the next edit retries.
+        if _send("math", key, lambda: bus_client.request_public_math(req),
+                 lambda outcome, _a: _on_iv(key, symbol, target),
+                 lambda outcome, _a: _iv_failed(target), note=results_note):
+            state["iv_target"] = target
 
-    async def _on_iv(key):
+    def _iv_failed(target):
+        if state["iv_target"] == target:
+            state["iv_target"] = None
+
+    async def _on_iv(key, symbol, target):
         res = await run.io_bound(bus_client.read, pt.result_view(key))
+        # An answer for another symbol or another contract than the one the IV
+        # is now implied from - or one arriving after the visitor typed an IV -
+        # must not land in the field.
+        if state["symbol"] != symbol or state["iv_target"] != target \
+                or state["iv_manual"]:
+            return
         iv = _num((res or {}).get("iv"))
         if iv is not None and iv > 0:
             _set_quietly(iv_in, round(iv, 1))
@@ -693,9 +711,16 @@ def render():
                                  else outcome_text(why))
             return
         key = pt.request_key(pt.math_command(req))
-        if key == state["shown_key"] or key in state["pending"]:
-            return                     # on screen already, or on its way
+        # Recorded BEFORE the early returns: after an edit and back, the
+        # position on screen is this one, so an answer to the edit that is
+        # still on its way must not paint over it.
         state["price_key"] = key
+        if key == state["shown_key"]:
+            results_note.text = ""     # its result is already on screen
+            return
+        if key in state["pending"]:
+            results_note.text = "Pricing…"
+            return
         spot = req["spot"]
         sent_legs = legs
         if _send("math", key, lambda: bus_client.request_public_math(req),
@@ -740,38 +765,59 @@ def render():
         if not leg_editor.legs_ready(legs):
             status.text = PICK_STRIKES
             return
-        sent = request_legs(legs) if not state["quotes"] else \
-            [dict(l, premium=l["premium"] if _usable(l.get("premium")) else 0.0,
-                  qty=int(l.get("qty", 1) or 1)) for l in legs]
+        if state["quotes"]:
+            sent = [dict(l, premium=l["premium"] if _usable(l.get("premium")) else 0.0,
+                         qty=int(l.get("qty", 1) or 1)) for l in legs]
+        elif any(not _is_stock(l) and not (_usable(l.get("premium"))
+                                           and l["premium"] > 0) for l in legs):
+            # Quotes off: the service rates the visitor's OWN prices and refuses
+            # an option leg priced at 0 (price_needed). Said here, so no request
+            # is spent learning it.
+            sent = None
+        else:
+            sent = request_legs(legs)
         rating_banner.clear()
         rating_panel.clear()
         if sent is None:
+            state["rating_key"] = None
             rating_status.text = outcome_text("price_needed")
             rating.open()
             return
         req = {"kind": "rate", "symbol": state["symbol"],
                "structure": _sim_view.template_for(legs) or "CUSTOM", "legs": sent}
         command = pt.tools_command(req)
+        key = pt.request_key(command) if command else None
+        # The newest rating is the only one the dialog shows: a slower answer
+        # to an earlier trade must not paint over it.
+        state["rating_key"] = key
         rating_status.text = "Rating…"
         rating.open()
-        _send("tools", pt.request_key(command) if command else None,
-              lambda: bus_client.request_public_tool(req),
-              lambda outcome, _a: _on_rating(pt.request_key(command)),
-              _rating_refused, note=rating_status)
+        _send("tools", key, lambda: bus_client.request_public_tool(req),
+              lambda outcome, _a: _on_rating(key),
+              lambda outcome, answer: _rating_refused(key, outcome, answer),
+              note=rating_status)
 
-    def _rating_refused(outcome, answer):
+    def _rating_refused(key, outcome, answer):
+        if key != state["rating_key"]:
+            return
         text = (answer or {}).get("error_text")
         rating_status.text = text if isinstance(text, str) and text else (
             outcome_text(outcome) if outcome else NO_ANSWER)
 
     async def _on_rating(key):
+        if key != state["rating_key"]:
+            return
         payload = await run.io_bound(bus_client.read, pt.result_view(key))
+        if key != state["rating_key"]:
+            return
         row = (payload or {}).get("row") if isinstance(payload, dict) else None
         if not isinstance(row, dict):
             rating_status.text = "The trade could not be rated."
             return
         rating_status.text = "Checking…"
         ctx = await run.io_bound(rating_context)
+        if key != state["rating_key"]:
+            return
         # allow_paper False: the Paper book line is ABSENT, not greyed.
         candidate = _detail.checklist_candidate(row, False)
         items = _checks_feed.checks_for(candidate, ctx)
@@ -822,6 +868,9 @@ def render():
     for w in (price_in, iv_in, rate_in, ivchg_in, nstrikes_in):
         w.on_value_change(lambda e: None if state["applying"]
                           else _engage(recalc.poke, time.monotonic()))
+    # A typed IV is the visitor's own assumption: no implied value replaces it.
+    iv_in.on_value_change(lambda e: None if state["applying"]
+                          else state.__setitem__("iv_manual", True))
 
     ui.timer(POLL_SEC, _poll)
     ui.timer(0.1, _recalc_tick)

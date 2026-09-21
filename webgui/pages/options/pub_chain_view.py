@@ -107,6 +107,23 @@ def grid_chain(ladder) -> dict | None:
                 rows[str(f)] = [{k: _finite(q.get(k)) for k in _QUOTE_FIELDS}]
             if rows:
                 out[map_key][f"{expiry}:0"] = rows
+    # An expiration whose strikes are here but which carries no quotes block (a
+    # chain published before the switch went on, then merged) is drawn with
+    # its strikes and empty quotes, so the grid shows dashes - never a
+    # "Loading strikes" line waiting for quotes that are not coming.
+    strikes = ladder.get("strikes") if isinstance(ladder.get("strikes"), dict) else {}
+    empty = {k: None for k in _QUOTE_FIELDS}
+    for expiry, sides in strikes.items():
+        if not isinstance(expiry, str) or not isinstance(sides, dict):
+            continue
+        for right, map_key in _MAPS:
+            have = out[map_key].setdefault(f"{expiry}:0", {})
+            for s in sides.get(right) or []:
+                f = _strike(s)
+                if f is not None and str(f) not in have:
+                    have[str(f)] = [dict(empty)]
+            if not have:
+                out[map_key].pop(f"{expiry}:0")
     return out if any(out.values()) else None
 
 

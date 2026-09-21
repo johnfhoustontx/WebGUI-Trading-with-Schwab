@@ -465,6 +465,17 @@ def test_the_rating_context_never_reads_the_owners_ledger_caps(monkeypatch):
     ctx = calc_live.rating_context()
     assert ctx["caps"] is None
     assert "options:ledger_caps" not in reads
+    assert reads, "the context read no market view at all"
+
+
+def test_the_rating_context_goes_through_the_public_checks_feed_option():
+    tree = ast.parse(SRC.read_text(encoding="utf-8"))
+    attrs = {ast.unparse(n) for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    assert not {a for a in attrs if "._gated" in a or "._index_board" in a}
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+             and ast.unparse(n.func).endswith("read_context")]
+    assert calls and all(any(k.arg == "caps" and ast.unparse(k.value) == "False"
+                             for k in c.keywords) for c in calls)
 
 
 # ── the hand-off ────────────────────────────────────────────────────────────
@@ -497,11 +508,46 @@ def test_every_leg_change_and_load_writes_the_hand_off(page, monkeypatch):
 
 # ── source-level ────────────────────────────────────────────────────────────
 
+def _reads_the_hand_off(tree):
+    """Whether a module's source reads the hand-off: a ``*handoff*.read(...)``
+    call, or ``read`` (or anything but ``write``) imported from
+    ``public_handoff`` under any name, or the module imported under an alias
+    that would hide the call from the first check."""
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call):
+            name = ast.unparse(n.func)
+            if "public_handoff." in name and not name.endswith(".write"):
+                return True
+        if isinstance(n, ast.ImportFrom):
+            if "public_handoff" in (n.module or ""):
+                if any(a.name != "write" for a in n.names):
+                    return True
+            for a in n.names:
+                if a.name == "public_handoff" and a.asname not in (None, "public_handoff"):
+                    return True
+        if isinstance(n, ast.Import):
+            for a in n.names:
+                if "public_handoff" in a.name and a.asname:
+                    return True
+    return False
+
+
 def test_the_page_never_reads_the_hand_off():
     tree = ast.parse(SRC.read_text(encoding="utf-8"))
     calls = {ast.unparse(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
     assert "public_handoff.write" in calls
-    assert not any(c.endswith(".read") and "handoff" in c for c in calls)
+    assert not _reads_the_hand_off(tree)
+
+
+@pytest.mark.parametrize("src", [
+    "from .public_handoff import read\nread()\n",
+    "from .public_handoff import read as r\nr()\n",
+    "from pages.options.public_handoff import read as r\n",
+    "from . import public_handoff as ph\nph.read()\n",
+    "from . import public_handoff\npublic_handoff.read()\n",
+])
+def test_the_hand_off_check_bites(src):
+    assert _reads_the_hand_off(ast.parse(src))
 
 
 def test_the_page_module_enqueues_only_through_the_public_requests():
@@ -550,3 +596,230 @@ def test_the_page_imports_only_the_tier1_allow_list():
             ok = (mod in _ALLOWED_IMPORTS or mod.split(".")[0] in _STDLIB
                   or mod == "pages" or mod.startswith("pages."))
             assert ok, f"calc_live imports {mod}"
+
+
+# ── review fixes (2026-09-21) ───────────────────────────────────────────────
+
+def test_a_quotes_on_default_chain_sends_nothing_on_a_page_load(page):
+    _publish_chain(_chain(quotes=True))
+    _run(page, "_load_default")
+    _run(page, "_recalc_tick")
+    _run(page, "_poll")
+    assert _tools() == [] and _math() == []
+    assert all(l["premium"] == 1.1 for l in _editor().get_legs())
+
+
+def test_a_default_chain_says_what_to_do_next(page):
+    _publish_chain(_chain())
+    _run(page, "_load_default")
+    note = _all(page, "calc-results-note")[0].text
+    assert note == calc_live.TYPE_PRICES_PROMPT
+
+
+def test_reset_to_template_as_a_first_action_engages_and_prices(page):
+    _publish_chain(_chain(quotes=True))
+    _run(page, "_load_default")
+    _click(page, "Reset to template")
+    _run(page, "_recalc_tick")
+    assert len(_math("price")) == 1
+
+
+def test_a_visitor_over_the_tools_limit_sends_nothing(page, monkeypatch):
+    monkeypatch.setattr(calc_live.TOOLS, "allow", lambda key: False)
+    _click(page, "Load")
+    assert _tools() == []
+    assert calc_live.limit_text("tools") in _joined(page)
+    assert "expiration" in calc_live.limit_text("tools")
+
+
+def _record_metrics(monkeypatch):
+    painted = []
+    real = calculator._render_metrics
+
+    def _rec(box, summary, *a):
+        painted.append(summary)
+        return real(box, summary, *a)
+    monkeypatch.setattr(calculator, "_render_metrics", _rec)
+    return painted
+
+
+def _land_price(page, key, tag):
+    _result(key, {"summary": {"tag": tag}, "eval_labels": ["09/22"],
+                  "pnl_data": [{"price": 500.0, "pnl": [1.0]}]})
+    _answer(key, "done")
+    _run(page, "_poll")
+
+
+def test_reverting_to_a_pending_position_never_paints_the_edit(page, monkeypatch):
+    painted = _record_metrics(monkeypatch)
+    _priced(page)
+    _run(page, "_recalc_tick")
+    key_a = _key(_math("price")[0])
+    with page:
+        _editor().apply_expiry(MID)                    # edit to B
+    _run(page, "_recalc_tick")
+    key_b = _key(_math("price")[0])
+    assert key_b != key_a
+    with page:
+        _editor().apply_expiry(NEAR)                   # back to A, still pending
+    _run(page, "_recalc_tick")
+    assert _math("price") == []
+    _land_price(page, key_b, "B")
+    assert {"tag": "B"} not in painted, "B's result painted over position A"
+    _land_price(page, key_a, "A")
+    assert painted[-1] == {"tag": "A"}
+
+
+def test_reverting_to_the_shown_position_never_paints_the_edit(page, monkeypatch):
+    painted = _record_metrics(monkeypatch)
+    _priced(page)
+    _run(page, "_recalc_tick")
+    key_a = _key(_math("price")[0])
+    _land_price(page, key_a, "A")
+    assert painted == [{"tag": "A"}]
+    with page:
+        _editor().apply_expiry(MID)
+    _run(page, "_recalc_tick")
+    key_b = _key(_math("price")[0])
+    with page:
+        _editor().apply_expiry(NEAR)                   # back to the shown A
+    _run(page, "_recalc_tick")
+    assert _math("price") == []
+    _land_price(page, key_b, "B")
+    assert painted == [{"tag": "A"}], "B's result painted over the shown A"
+    assert _all(page, "calc-results-note")[0].text != "Pricing…"
+
+
+def _rate_key(page):
+    _click(page, "Rate my trade")
+    return _key([c for c in _tools() if c.args.get("kind") == "rate"][0])
+
+
+def test_a_late_rating_for_an_older_trade_does_not_paint(page):
+    _priced(page)
+    key_a = _rate_key(page)
+    with page:
+        _editor().apply_expiry(MID)
+    key_b = _rate_key(page)
+    assert key_a != key_b
+    _result(key_b, {"row": {**_row(), "grade": "Marginal", "composite_score": 55}})
+    _answer(key_b, "done")
+    _run(page, "_poll")
+    assert "Marginal · 55" in _rating_texts(page)
+    _result(key_a, {"row": {**_row(), "grade": "Strong", "composite_score": 90}})
+    _answer(key_a, "done")
+    _run(page, "_poll")
+    text = _rating_texts(page)
+    assert "Strong · 90" not in text and "Marginal · 55" in text
+
+
+def test_a_late_refusal_for_an_older_rating_does_not_overwrite(page):
+    _priced(page)
+    key_a = _rate_key(page)
+    with page:
+        _editor().apply_expiry(MID)
+    key_b = _rate_key(page)
+    _result(key_b, {"row": _row()})
+    _answer(key_b, "done")
+    _run(page, "_poll")
+    _answer(key_a, "budget")
+    _run(page, "_poll")
+    assert pt.OUTCOME_TEXT["budget"] not in _rating_texts(page)
+
+
+def test_quotes_off_rating_with_a_zero_price_is_blocked_on_the_page(page):
+    _priced(page)
+    legs = _editor().get_legs()
+    legs[0]["premium"] = 0.0
+    with page:
+        _editor().set_legs(legs)
+    _click(page, "Rate my trade")
+    assert [c for c in _tools() if c.args.get("kind") == "rate"] == []
+    assert pt.OUTCOME_TEXT["price_needed"] in _rating_texts(page)
+
+
+def _iv_field(page):
+    found = [el for el in _walk(page) if isinstance(el, ui.number)
+             and "calc-iv" in getattr(el, "_classes", [])]
+    assert len(found) == 1
+    return found[0]
+
+
+def test_an_iv_answer_for_a_contract_no_longer_current_is_ignored(page):
+    _loaded(page)
+    key_1 = _key(_math("iv")[0])
+    with page:
+        _editor().apply_expiry(MID)                    # the nearest leg moves
+    ivs = _math("iv")
+    assert len(ivs) == 1 and ivs[0].args["expiry"] == MID
+    _result(key_1, {"iv": 31.0})
+    _answer(key_1, "done")
+    _run(page, "_poll")
+    assert _iv_field(page).value != pytest.approx(31.0)
+
+
+def test_a_typed_iv_is_never_overwritten_by_an_implied_one(page):
+    _loaded(page)
+    key_1 = _key(_math("iv")[0])
+    with page:
+        _iv_field(page).value = 33.0                   # the visitor types one
+    _result(key_1, {"iv": 31.0})
+    _answer(key_1, "done")
+    _run(page, "_poll")
+    assert _iv_field(page).value == pytest.approx(33.0)
+    with page:
+        _editor().apply_expiry(MID)                    # a new nearest contract
+    assert _math("iv") == []                           # and no re-implying
+
+
+def test_a_refused_iv_request_is_retried_on_the_next_edit(page, monkeypatch):
+    monkeypatch.setattr(calc_live.MATH, "allow", lambda key: False)
+    _loaded(page)
+    assert _math("iv") == []
+    monkeypatch.setattr(calc_live.MATH, "allow", lambda key: True)
+    with page:
+        _editor().apply_expiry(NEAR)                   # same contract, an edit
+    assert len(_math("iv")) == 1
+
+
+def test_a_timed_out_iv_request_is_retried(page, monkeypatch):
+    _loaded(page)
+    assert len(_math("iv")) == 1
+    monkeypatch.setattr(calc_live, "_wait_sec", lambda: -1)
+    _run(page, "_poll")                                # no answer: it times out
+    monkeypatch.setattr(calc_live, "_wait_sec", lambda: 600)
+    with page:
+        _editor().apply_expiry(NEAR)
+    assert len(_math("iv")) == 1
+
+
+def test_an_expiration_with_strikes_and_no_quotes_is_shown_not_loading():
+    from pages.options import chain_grid as cg
+    chain = _chain(quotes=True)
+    chain["quotes"].pop(MID)                           # strikes, no quotes block
+    out = pub_chain_view.grid_chain(chain)
+    assert cg.chain_expiries(out) == [NEAR, MID]
+    rows = cg.chain_grid_rows(out, MID, 502.0)["rows"]
+    assert [r["strike"] for r in rows] == STRIKES
+    assert all(r["call"]["bid"] is None and r["put"]["mark"] is None for r in rows)
+    assert cg.extract_price(out, "call", 500.0, MID, "mark") is None
+    # no strikes list: only what the quotes block carries
+    assert pub_chain_view.grid_chain({"quotes": chain["quotes"]}) is not None
+
+
+def test_the_page_draws_an_unquoted_expiration_s_strikes(page):
+    _click(page, "Load")
+    cmd = _tools()[0]
+    chain = _chain(quotes=True)
+    chain["quotes"].pop(MID)
+    _publish_chain(chain)
+    _answer(_key(cmd), "done")
+    _run(page, "_poll")
+    body = _all(page, "entry-gridbody")[0]
+    pills = _all(page, "entry-expiry")
+    with page:
+        for listener in list(pills[1]._event_listeners.values()):
+            if listener.type == "click":
+                listener.handler(None)
+    assert "Loading strikes" not in _joined(page)
+    assert body.visible and 'data-strike="500' in body.content

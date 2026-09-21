@@ -166,3 +166,23 @@ def test_each_view_has_its_own_lock():
     from pages.options import checks_feed
     assert set(checks_feed._locks) == set(checks_feed._memos)
     assert len({id(lock) for lock in checks_feed._locks.values()}) == len(checks_feed._locks)
+
+
+def test_read_context_without_caps_never_reads_the_ledger_caps(monkeypatch):
+    """The public Calculator's rating draws no Paper book line, so it asks for
+    the context WITHOUT the owner's ledger caps: that view is not even read."""
+    _fresh()
+    bus = Bus(fake=True)
+    monkeypatch.setattr(bus_client, "_bus", bus)
+    bus.cache_set("cache:options:matrix", {"rows": [{"symbol": "ORCL", "spot": 110.0}]})
+    bus.cache_set("cache:options:ledger_caps", {"limits": {}})
+    reads = []
+    real = bus_client.read_gated
+    monkeypatch.setattr(bus_client, "read_gated",
+                        lambda view, memo: (reads.append(view), real(view, memo))[1])
+    ctx = checks_feed.read_context(caps=False)
+    assert ctx["caps"] is None and ctx["matrix"]["ORCL"]["spot"] == 110.0
+    assert checks_feed.CAPS_VIEW not in reads
+    reads.clear()
+    assert checks_feed.read_context()["caps"] == {"limits": {}}   # the default reads it
+    assert checks_feed.CAPS_VIEW in reads
