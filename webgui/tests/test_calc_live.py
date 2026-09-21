@@ -500,6 +500,38 @@ def test_open_in_simulator_writes_the_hand_off_and_navigates(page, monkeypatch):
     assert writes and writes[-1][0] == "SPY" and writes[-1][1] == _editor().get_legs()
 
 
+def _buttons_built_under(routes):
+    """The labels of the buttons the page draws in a process publishing
+    ``routes`` - the published state is set BEFORE render, as live_main does."""
+    import shell
+    shell.publish(routes)
+    try:
+        with ui.card() as root:
+            calculator.render(public=True)
+    finally:
+        shell.unpublish()
+    return [getattr(el, "text", "") for el in _walk(root) if isinstance(el, ui.button)]
+
+
+def test_open_in_simulator_is_absent_when_the_simulator_is_not_published(monkeypatch):
+    monkeypatch.setattr(ui, "notify", lambda *a, **k: None)
+    bus_client.reset()
+    import live_screens
+    routes = {k: v for k, v in live_screens.PUBLIC_ROUTES.items()
+              if k != "/options/simulator"}
+    labels = _buttons_built_under(routes)
+    assert "Rate my trade" in labels          # the page did build its header
+    assert "Open in Simulator" not in labels
+
+
+def test_open_in_simulator_is_drawn_when_the_simulator_is_published(monkeypatch):
+    monkeypatch.setattr(ui, "notify", lambda *a, **k: None)
+    bus_client.reset()
+    import live_screens
+    assert "/options/simulator" in live_screens.PUBLIC_ROUTES
+    assert "Open in Simulator" in _buttons_built_under(live_screens.PUBLIC_ROUTES)
+
+
 def test_every_leg_change_and_load_writes_the_hand_off(page, monkeypatch):
     from pages.options import public_handoff
     writes = []

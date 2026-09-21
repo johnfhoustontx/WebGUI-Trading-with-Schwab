@@ -70,6 +70,7 @@ from .pub_chain_view import (grid_chain, has_quotes, ladder_strikes,
 log = logging.getLogger(__name__)
 
 TITLE = "Calculator"
+SIMULATOR_ROUTE = "/options/simulator"   # the PRIVATE route; shell maps it
 DEFAULT_SYMBOL = "SPY"
 DEFAULT_STRATEGY = "PCS"
 POLL_SEC = 1.0
@@ -276,9 +277,13 @@ def render():
     with kit.page():
         head = kit.header(TITLE)
         with head.actions:
-            kit.button("Open in Simulator", kind="secondary", icon="open_in_new",
-                       on_click=lambda: _open_simulator(),
-                       tooltip="Open this position in the Simulator")
+            # Drawn only where this origin serves the Simulator (the same
+            # shell.can_navigate guard the Opportunity Board puts on its symbol
+            # link): a button that leads nowhere reads as broken, not absent.
+            if _shell.can_navigate(SIMULATOR_ROUTE):
+                kit.button("Open in Simulator", kind="secondary", icon="open_in_new",
+                           on_click=lambda: _open_simulator(),
+                           tooltip="Open this position in the Simulator")
             rate_btn = kit.button("Rate my trade", kind="primary", icon="verified",
                                   on_click=lambda: _rate(),
                                   tooltip="Grade these legs with the Strategy "
@@ -469,7 +474,7 @@ def render():
         # Through the seam, naming the PRIVATE route: the public origin serves
         # the Simulator at /simulator (live_screens.PUBLIC_ROUTES), and a bare
         # ui.navigate.to is refused by tests/test_live_navigation.py.
-        _shell.navigate_to("/options/simulator")
+        _shell.navigate_to(SIMULATOR_ROUTE)
 
     # ------------------------------------------------------------- requests
 
