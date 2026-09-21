@@ -17,10 +17,14 @@ import json
 import os
 import tomllib
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from repo_paths import REPO_ROOT
 from shared import config_toml
 
+# Every clock the operator reads in this app is Central and says so, and the
+# change log is written on a server whose zone is not the reader's business.
+CT = ZoneInfo("America/Chicago")
 CONFIG_DIR = Path(REPO_ROOT) / "config"
 CHANGE_LOG = CONFIG_DIR / config_toml.LOCAL_DIRNAME / "changes.jsonl"
 _HEADER = ("Written by Settings -> Configuration. Only values that differ from\n"
@@ -117,12 +121,17 @@ def load(name):
 
 
 def save(name, overrides, *, changes=()):
-    """Write the override file and append each change to the change log."""
+    """Write the override file and append each change to the change log.
+
+    ⚠ ``at`` is an AWARE Central stamp (``...T14:03:22-05:00``). It was a
+    naive ``datetime.now()`` until 2026-09-20, so the log already holds rows with
+    no zone at all; ``pages/config_editor.change_stamp`` is the reader that
+    tolerates both, and it deliberately does not relabel the old ones."""
     config_toml.write_overrides(config_path(name), overrides,
                                 header=_HEADER.format(name=name))
     if changes:
         CHANGE_LOG.parent.mkdir(parents=True, exist_ok=True)
-        stamp = _dt.datetime.now().isoformat(timespec="seconds")
+        stamp = _dt.datetime.now(CT).isoformat(timespec="seconds")
         with open(CHANGE_LOG, "a", encoding="utf-8") as fh:
             for key, old, new in changes:
                 fh.write(json.dumps({"at": stamp, "file": name, "key": key,

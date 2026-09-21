@@ -214,3 +214,27 @@ def test_save_writes_the_override_and_logs_the_change(tmp_path, monkeypatch):
     assert store.overridden_count("driver.toml") == 1
     log = store.recent_changes()
     assert log[0]["key"] == "risk › cap" and log[0]["to"] == 2000.0
+
+
+def test_the_change_log_stamp_is_central_time_and_carries_its_offset(
+        tmp_path, monkeypatch):
+    """⚠ This is the STORED format, so the assertion is on the file, not on a
+    rendered string: from here on every row's ``at`` is an AWARE Central stamp,
+    which is the only thing that lets a reader name the zone. The naive rows
+    already in ``changes.jsonl`` are handled at the reading end - see
+    ``config_editor.change_stamp``."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    monkeypatch.setenv("TRADING_CONFIG_OVERRIDES_IN_TESTS", "1")
+    (tmp_path / "driver.toml").write_text("[risk]\ncap = 3000.0\n", encoding="utf-8")
+    monkeypatch.setattr(store, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(store, "CHANGE_LOG", tmp_path / "local" / "changes.jsonl")
+    store.save("driver.toml", {"risk": {"cap": 2000.0}},
+               changes=[("risk › cap", 3000.0, 2000.0)])
+    at = store.recent_changes()[0]["at"]
+    when = datetime.fromisoformat(at)
+    assert when.utcoffset() is not None, f"{at!r} carries no zone"
+    # the offset IS Central's for that instant - not UTC, and not whatever the
+    # host happens to be set to.
+    assert when.utcoffset() == when.astimezone(
+        ZoneInfo("America/Chicago")).utcoffset()

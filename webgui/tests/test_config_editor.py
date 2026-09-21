@@ -374,3 +374,53 @@ def test_the_pending_set_and_the_webgui_restart_keep_their_names():
     src = inspect.getsource(appearance)
     assert "config_editor._PENDING" in src
     assert "config_editor._restart_webgui()" in src
+
+
+# ── Phase 6, Task 10: the change-log clock ──────────────────────────────────
+def test_a_stamped_change_names_its_zone():
+    """An aware row is rendered in Central and SAYS so. The project convention is
+    Central everywhere with the zone named; this row was the last clock in the
+    app carrying neither."""
+    ct = ZoneInfo("America/Chicago")
+    assert ce.change_stamp(
+        datetime(2026, 9, 20, 14, 3, 22, tzinfo=ct).isoformat(
+            timespec="seconds")) == "2026-09-20 14:03 CT"
+
+
+def test_a_stamp_written_in_another_zone_is_converted_not_relabelled():
+    """The reader converts. A UTC stamp is 14:03Z -> 09:03 CT on a September
+    day, and the row must not print 14:03 with a CT label on it."""
+    from datetime import timezone
+    assert ce.change_stamp(
+        datetime(2026, 9, 20, 14, 3, 22, tzinfo=timezone.utc).isoformat(
+            timespec="seconds")) == "2026-09-20 09:03 CT"
+
+
+def test_a_naive_legacy_row_still_reads_and_is_never_labelled_ct():
+    """⚠ ``changes.jsonl`` already holds rows stamped ``datetime.now()`` with no
+    zone. They were written by the HOST clock - which on this box is Central, so
+    they sort and read correctly beside the new ones - but nothing recorded that,
+    so the row may not claim it. It renders exactly as it always did."""
+    assert ce.change_stamp("2026-09-20T14:03:22") == "2026-09-20 14:03"
+
+
+def test_an_unreadable_stamp_renders_as_nothing_rather_than_raising():
+    for bad in ("", None, "sometime", "2026-13-45T99:99"):
+        assert ce.change_stamp(bad) == ""
+
+
+def test_the_recent_changes_row_carries_the_zone(monkeypatch):
+    """Driven through ``render()``: the expansion's row is where the operator
+    actually reads the clock, and a pure helper nothing calls proves nothing."""
+    from nicegui import ui
+    ct = ZoneInfo("America/Chicago")
+    rows = [{"at": datetime(2026, 9, 20, 14, 3, 22, tzinfo=ct).isoformat(
+        timespec="seconds"), "file": "driver.toml", "key": "risk › cap",
+        "from": 3000.0, "to": 2000.0}]
+    monkeypatch.setattr(ce, "_PENDING", set())
+    monkeypatch.setattr(ce.store, "recent_changes", lambda limit=25: rows)
+    with ui.card() as host:
+        ce.render()
+    line = [t for t in _texts(host) if t and "risk › cap" in t]
+    assert line, "the change row is not on the page"
+    assert line[0].startswith("2026-09-20 14:03 CT · ")

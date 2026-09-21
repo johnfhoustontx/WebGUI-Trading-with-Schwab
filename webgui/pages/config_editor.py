@@ -56,6 +56,7 @@ _ROW = (f"w-full items-start gap-3 py-2 border-b "
 # needs a backstop longer than the kit's 30 s default, or it would report
 # "finished" while systemctl is still working.
 RESTART_TIMEOUT_SEC = 300.0
+CT = ZoneInfo("America/Chicago")
 
 
 # ── pure helpers (unit-tested) ───────────────────────────────────────────────
@@ -118,10 +119,31 @@ def market_busy(now=None):
     """True while a service restart would cost live work (collection / RTH)."""
     try:
         from shared import market_calendar as mc
-        now = now or datetime.now(ZoneInfo("America/Chicago"))
+        now = now or datetime.now(CT)
         return bool(mc.is_regular_hours(now) or mc.in_collection_window(now))
     except Exception:  # noqa: BLE001 - a warning, never a blocker
         return False
+
+
+def change_stamp(at):
+    """The change log's clock, rendered for the Recent changes list. PURE.
+
+    ⚠ TWO STORED FORMATS, and the difference is not cosmetic. ``config_store``
+    has written an AWARE Central stamp since 2026-09-20, which is converted and
+    LABELLED ``CT`` here however it was zoned. Every row older than that carries
+    a naive ``datetime.now()``: it was the HOST clock, and this box's host clock
+    IS Central - so those rows sort and read correctly beside the new ones - but
+    nothing recorded that, so they render exactly as they always did and are
+    never given a ``CT`` they cannot back. An unreadable stamp is "", never an
+    exception: one malformed line must not take the whole expansion down.
+    """
+    try:
+        when = datetime.fromisoformat(str(at or ""))
+    except (TypeError, ValueError):
+        return ""
+    if when.tzinfo is None:
+        return when.strftime("%Y-%m-%d %H:%M")
+    return when.astimezone(CT).strftime("%Y-%m-%d %H:%M") + " CT"
 
 
 def _group_label(f, fld, path, label):
@@ -506,7 +528,7 @@ def render():
             for e in entries:
                 cfg = cs.BY_NAME.get(e.get("file"))
                 title = cfg.title if cfg else e.get("file")
-                ui.label(f"{e.get('at', '')[:16].replace('T', ' ')} · {title} · "
+                ui.label(f"{change_stamp(e.get('at'))} · {title} · "
                          f"{e.get('key')}: {e.get('from')} → {e.get('to')}") \
                     .classes(f"text-xs {MUTED}")
 
