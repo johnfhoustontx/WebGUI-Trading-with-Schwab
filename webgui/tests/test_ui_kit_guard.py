@@ -36,7 +36,6 @@ ALLOWED = {
     # Mono) went with the kit migration, and the unlock button went through
     # kit.notice + kit.button with them.
     "desk.py": {"add_head_html": 1},
-    "eod.py": {"button": 3, "notify": 2},
     # The Macro Board's skin toggle, and it stays: a SEGMENTED PICKER, mutually
     # exclusive by construction and applied instantly with no Go. kit.button's
     # four kinds have no selected state, so expressing selection through the kit

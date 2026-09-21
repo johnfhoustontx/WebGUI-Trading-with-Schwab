@@ -676,3 +676,224 @@ def test_a_failed_generate_still_reports_and_does_not_crash_the_page(monkeypatch
     _click(host, "Generate")
     _confirm(_dialog_with("Generate"))
     assert said and "read-only" in said[-1][1]
+
+
+# --- Task 4: both frames on the kit -----------------------------------------
+# ⚠ ``render_detail`` is a SECOND render() in this module, so every frame
+# assertion here is made twice.
+def _src(fn):
+    import inspect
+    return inspect.getsource(fn)
+
+
+def _timer(host, name):
+    """The page's ``ui.timer`` whose callback is ``name`` (``functools.wraps``
+    keeps the name through ``guard_async``)."""
+    from nicegui import ui
+    found = [e for e in host.descendants()
+             if isinstance(e, ui.timer)
+             and getattr(e.callback, "__name__", "") == name]
+    assert found, f"no ui.timer registered for {name}()"
+    return found[-1]
+
+
+def _run_timer(host, name):
+    """Drive a page's once-timer the way the browser's first tick would."""
+    import asyncio
+    import inspect
+    t = _timer(host, name)
+
+    async def _drive():
+        with t.parent_slot:
+            result = t.callback()
+            if inspect.isawaitable(result):
+                await result
+
+    asyncio.run(_drive())
+
+
+def _scrim(host):
+    """``kit.region``'s spinner scrim - the spinner's own parent element."""
+    from nicegui import ui
+    spinners = [e for e in host.descendants() if isinstance(e, ui.spinner)]
+    assert spinners, "the page mounted no region spinner"
+    return spinners[-1].parent_slot.parent
+
+
+def _htmls(host):
+    from nicegui import ui
+    return [e for e in host.descendants() if isinstance(e, ui.html)]
+
+
+def test_both_frames_wear_the_kit_page_and_name_themselves():
+    """Neither frame had a title at all - ``main.py`` supplied one as the
+    browser title and the breadcrumb, and the page itself opened on a button
+    row. The standard gives every page one header line."""
+    for fn, title in ((eod.render, "EOD Report"),
+                      (eod.render_detail, "EOD Report — Detail")):
+        src = _src(fn)
+        assert "kit.page()" in src, fn.__name__
+        assert f'kit.header("{title}")' in src, fn.__name__
+
+
+def test_neither_frame_claims_a_freshness_stamp_over_eight_views(monkeypatch,
+                                                                 tmp_path):
+    """The page reads EIGHT cache views, so a stamp on one would name the age
+    of a key that is only part of what is on screen. The fragment's own
+    "Generated ... CT" meta line is this page's real freshness, and it stays.
+
+    ⚠ Asked of the RENDERED page, not of the source: a source grep for
+    ``view=`` fails on the docstring that EXPLAINS why there is no view, which
+    is the manuals.py lesson - the page's own prose is free to describe the
+    page. What is checked is the kit's stamp label: hidden, and never carrying
+    a time."""
+    from nicegui import ui
+
+    from pages import ui_kit
+    _said(monkeypatch)
+    monkeypatch.setattr(eod, "ARCHIVE_ROOT", tmp_path)
+    monkeypatch.setattr(eod, "read_snapshot", lambda: dict(SAMPLE))
+    for build in (eod.render, eod.render_detail):
+        with ui.card() as host:
+            build()
+        texts = [str(getattr(e, "text", "")) for e in host.descendants()]
+        assert ui_kit.WAITING_TEXT not in texts, build.__name__
+        assert not [t for t in texts if t.startswith("Updated ")], build.__name__
+        hidden = [e for e in host.descendants()
+                  if isinstance(e, ui.label) and e.text == "" and not e.visible]
+        assert hidden, f"{build.__name__}: kit.header's stamp is not hidden"
+    assert len(eod._CACHE_VIEWS) == 8, "the eight views this reasoning rests on"
+
+
+def test_the_module_builds_no_button_dialog_notify_or_table_of_its_own():
+    """The page-level half of deleting ``eod.py``'s guard entry."""
+    import inspect
+    src = inspect.getsource(eod)
+    for call in ("ui.button(", "ui.dialog(", "ui.notify(", "ui.table("):
+        assert call not in src, f"{call} should go through pages/ui_kit.py"
+
+
+def test_the_summary_frame_paints_its_fragment_off_the_event_loop(monkeypatch,
+                                                                  tmp_path):
+    """``read_snapshot`` is eight sequential bus reads and ran on the loop at
+    page build. It now crosses ``run.io_bound``, so this asserts the THREAD it
+    ran on, not the spelling."""
+    import threading
+    _said(monkeypatch)
+    where = []
+    monkeypatch.setattr(eod, "ARCHIVE_ROOT", tmp_path)
+    monkeypatch.setattr(
+        eod, "read_snapshot",
+        lambda: where.append(threading.current_thread()) or dict(SAMPLE))
+    from nicegui import ui
+    with ui.card() as host:
+        eod.render()
+    assert not _htmls(host), "the fragment was built on the event loop"
+    _run_timer(host, "_repaint")
+    assert where and where[0] is not threading.main_thread(), \
+        "read_snapshot still ran on the event loop"
+    drawn = "".join(h.content for h in _htmls(host))
+    assert 'class="meta"' in drawn and "Generated" in drawn, "the meta line went"
+    assert "EOD Summary" in drawn
+
+
+def test_the_detail_frame_paints_its_fragment_off_the_event_loop(monkeypatch,
+                                                                 tmp_path):
+    import threading
+    where = []
+    monkeypatch.setattr(eod, "ARCHIVE_ROOT", tmp_path)
+    monkeypatch.setattr(
+        eod, "read_snapshot",
+        lambda: where.append(threading.current_thread()) or dict(SAMPLE))
+    from nicegui import ui
+    with ui.card() as host:
+        eod.render_detail()
+    assert not _htmls(host)
+    _run_timer(host, "_repaint_detail")
+    assert where and where[0] is not threading.main_thread()
+    drawn = "".join(h.content for h in _htmls(host))
+    assert "EOD Detailed Report" in drawn
+    assert 'class="meta"' in drawn
+
+
+def test_generate_runs_off_the_loop_behind_the_REGION_spinner(monkeypatch,
+                                                              tmp_path):
+    """The wait goes on the REGION, never on the Generate button. Read from
+    INSIDE generate(), so it measures what the reader sees while the two
+    documents are being built and written."""
+    import threading
+    _said(monkeypatch)
+    host = _render_eod(monkeypatch, tmp_path, SAMPLE)
+    scrim = _scrim(host)
+    from nicegui import ui
+    msg = [e for e in scrim.descendants() if isinstance(e, ui.label)][0]
+    seen = {}
+    real_generate = eod.generate
+
+    def _spy(snap=None):
+        seen["visible"] = scrim.visible
+        seen["message"] = msg.text
+        seen["thread"] = threading.current_thread()
+        return real_generate(snap)
+
+    monkeypatch.setattr(eod, "generate", _spy)
+    _click(host, "Generate")
+    _confirm(_dialog_with("Generate"))
+    assert seen["visible"] is True, "the report was built with no wait on screen"
+    assert "Generating" in seen["message"]
+    assert seen["thread"] is not threading.main_thread()
+    assert scrim.visible is False, "the spinner was left running"
+
+
+def test_the_spinner_is_mounted_where_a_repaint_cannot_delete_it(monkeypatch,
+                                                                 tmp_path):
+    """``kit.region`` keeps the scrim on ``outer`` and clears only ``content``,
+    so it is still there after the paint that replaces the fragment."""
+    from nicegui import ui
+    _said(monkeypatch)
+    host = _render_eod(monkeypatch, tmp_path, SAMPLE)
+    _run_timer(host, "_repaint")
+    assert any(isinstance(e, ui.spinner) for e in host.descendants()), \
+        "the region's spinner was deleted by the repaint"
+
+
+def test_every_outcome_is_a_kit_toast_with_the_right_kind(monkeypatch, tmp_path):
+    """Three outcomes, three kinds: written / refused / failed."""
+    said = _said(monkeypatch)
+    host = _render_eod(monkeypatch, tmp_path, SAMPLE)
+    _click(host, "Generate")
+    _confirm(_dialog_with("Generate"))
+    assert said[-1][0] == "ok" and SAMPLE["date"] in said[-1][1]
+
+    host = _render_eod(monkeypatch, tmp_path / "cold", COLD_SNAP)
+    _click(host, "Generate")
+    _confirm(_dialog_with("Generate"))
+    assert said[-1][0] == "warn"
+
+    host = _render_eod(monkeypatch, tmp_path / "boom", SAMPLE)
+
+    def _boom(_root, _date, _s, _d):
+        raise OSError("the archive directory is read-only")
+
+    monkeypatch.setattr(eod, "write_archive", _boom)
+    _click(host, "Generate")
+    _confirm(_dialog_with("Generate"))
+    assert said[-1][0] == "error" and "read-only" in said[-1][1]
+
+
+def test_the_open_file_buttons_disclose_that_generate_writes_the_file(monkeypatch,
+                                                                     tmp_path):
+    """They link to TODAY's archived file, which does not exist until Generate
+    has run - the route already answers "click Generate first" in the tab it
+    opens. The dependency is disclosed in a tooltip rather than by disabling
+    the button: nothing is lost by clicking, and a disabled button would need a
+    per-paint ``is_file()`` check that could disagree with the route's own."""
+    from nicegui import ui
+    _said(monkeypatch)
+    host = _render_eod(monkeypatch, tmp_path, SAMPLE)
+    for text in ("Open summary file", "Open detail file"):
+        btn = [b for b in host.descendants()
+               if isinstance(b, ui.button) and b.text == text][-1]
+        tips = [e for e in btn.descendants() if isinstance(e, ui.tooltip)]
+        assert tips, f"{text} has no tooltip"
+        assert "Generate" in tips[0].text, f"{text} does not say what writes it"

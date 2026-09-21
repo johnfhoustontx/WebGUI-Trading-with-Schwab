@@ -23,12 +23,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import bus_client
-from nicegui import ui
+from nicegui import run, ui
 
 from pages import ui_kit as kit
 from pages.fmt import float_or  # the ONE copy (pages/fmt.py)
-from pages.options.theme import BTN, BTN_PRIMARY
-from pages.ui_guard import guard
+from pages.options import theme
+from pages.ui_guard import guard, guard_async
 
 def _num(v, default=None):
     return float_or(v, default)
@@ -760,34 +760,96 @@ COLD_CACHE_REFUSAL = (
     "report would have said no data on every line. Today's saved files are "
     "untouched. Start the stack and try again.")
 
+# ⚠ These two open TODAY's ARCHIVED file, which does not exist until Generate
+# has written it — ``main._serve_eod_file`` answers "No report for that date —
+# click Generate first." in the new tab it opens. The dependency is disclosed
+# HERE, in a tooltip, rather than by disabling the button: nothing is lost by
+# clicking (the page you are on is untouched, and the archive list below
+# already shows which dates exist), and a disabled button would need a
+# per-paint ``is_file()`` check — a second source of truth about the archive,
+# free to disagree with the route's own.
+OPEN_SUMMARY_TIP = ("Opens today's archived summary.html in a new browser tab. "
+                    "Generate writes it.")
+OPEN_DETAIL_TIP = ("Opens today's archived detail.html in a new browser tab. "
+                   "Generate writes it.")
+
+# The message over the region while the two documents are built and written.
+GENERATING_TEXT = "Generating the report…"
+READING_TEXT = "Reading the caches…"
+
 
 def render() -> None:
-    """Summary page: action bar + archive list + in-app summary fragment."""
+    """Summary page: one header line, then a region holding the archive list
+    and the in-app summary fragment.
+
+    ⚠ NO ``view=`` and no freshness stamp. This page reads EIGHT cache views
+    (``_CACHE_VIEWS``), so a stamp on any one of them would name the age of a
+    key that is only part of what is on screen. The fragment's own
+    "Generated … CT" meta line is this page's real freshness, and it stays.
+
+    The three page actions live in ``head.actions`` — primary last, so Generate
+    is rightmost — which also takes them OUT of the block a repaint replaces.
+    """
     ui.add_css(EOD_CSS)
-    container = ui.column().classes("w-full gap-2")
 
     def _open_file(which: str) -> None:
         ui.navigate.to(f"/eod/file?date={_ct_today()}&which={which}", new_tab=True)
 
-    def _repaint() -> None:
-        container.clear()
-        with container:
-            with ui.row().classes("items-center gap-2"):
-                ui.button("Generate", icon="play_arrow", color=None,
-                          on_click=_open_generate).props("no-caps").classes(BTN_PRIMARY)
-                ui.button("Open summary file", icon="open_in_new", color=None,
-                          on_click=lambda: _open_file("summary")).props("no-caps").classes(BTN)
-                ui.button("Open detail file", icon="open_in_new", color=None,
-                          on_click=lambda: _open_file("detail")).props("no-caps").classes(BTN)
+    with kit.page():
+        head = kit.header("EOD Report")
+        # ⚠ THREE labelled actions do not fit a phone, and the failure is silent.
+        # kit.header's actions row is ``no-wrap`` and a Quasar button's own
+        # content row WRAPS, so a button's min-content width is one word: at
+        # 375px all three compressed to ~100px with the icon stacked ABOVE a
+        # three-line label - the manuals.py finding, one row over, and the first
+        # time it has bitten inside ``head.actions``. Letting the ROW wrap and
+        # pinning each button to its own width is the same fix for the same
+        # reason: this app is used from a phone.
+        head.actions.classes(remove="no-wrap", add="flex-wrap justify-end")
+        with head.actions:
+            kit.button("Open summary file", kind="secondary", icon="open_in_new",
+                       tooltip=OPEN_SUMMARY_TIP,
+                       on_click=lambda: _open_file("summary")).classes("shrink-0")
+            kit.button("Open detail file", kind="secondary", icon="open_in_new",
+                       tooltip=OPEN_DETAIL_TIP,
+                       on_click=lambda: _open_file("detail")).classes("shrink-0")
+            kit.button("Generate", kind="primary", icon="play_arrow",
+                       on_click=lambda: _open_generate()).classes("shrink-0")
+        region = kit.region(READING_TEXT)
+
+    def _paint(snap: dict) -> None:
+        """Draw the archive list and the summary fragment from a snapshot ALREADY
+        IN HAND. It takes one rather than reading one, so the document on screen
+        after a Generate is the document that was archived."""
+        region.content.clear()
+        with region.content:
             dates = archive_dates(ARCHIVE_ROOT)
             if dates:
                 with ui.row().classes("items-center gap-2 flex-wrap"):
-                    ui.label("Archive:").classes("opacity-60")
+                    ui.label("Archive").classes(theme.EYEBROW)
                     for d in dates:
-                        ui.link(d, f"/eod/file?date={d}&which=summary").props("target=_blank")
-            ui.html(summary_fragment(read_snapshot(), "/eod/detail"))
+                        ui.link(d, f"/eod/file?date={d}&which=summary") \
+                            .props("target=_blank")
+            ui.html(summary_fragment(snap, "/eod/detail"))
 
-    def _generate_now() -> None:
+    @guard_async
+    async def _repaint() -> None:
+        """The first paint. ``read_snapshot`` is EIGHT sequential bus reads and
+        ran on the event loop at page build; it crosses ``run.io_bound`` now, so
+        the frame appears immediately with the region's spinner over it.
+
+        ``or {}`` because ``run.io_bound`` answers ``None`` once the app is
+        stopping — and every builder in this module is defensive about an empty
+        snapshot anyway, so that degrades to the "no data" page rather than to a
+        traceback on the way out."""
+        region.busy.show()
+        try:
+            _paint(await run.io_bound(read_snapshot) or {})
+        finally:
+            region.busy.hide()
+
+    @guard_async
+    async def _generate_now() -> None:
         """Snapshot, CHECK it, then archive — in that order, on ONE read.
 
         ``has_data`` is the gate ``tools/generate_eod_report.py`` has always run
@@ -803,17 +865,30 @@ def render() -> None:
         reader can fix it in the dialog by typing a better one, and here they
         cannot — the only thing a still-open dialog would offer is a Generate
         that refuses identically. The toast opens by saying nothing was written.
+
+        ⚠ The wait shows on the REGION, not on the Generate button. The block
+        this replaces is the fragment, and ``kit.set_busy`` is not needed to
+        stop a second run: ``kit.confirm`` holds its own re-entrancy latch for
+        as long as this coroutine is awaited, and its dialog is modal until it
+        returns.
         """
-        snap = read_snapshot()
-        if not has_data(snap):
-            kit.toast("warn", COLD_CACHE_REFUSAL)
-            return
+        region.busy.show(GENERATING_TEXT)
         try:
-            out = generate(snap)
-            ui.notify(f"EOD report generated for {out['date']}", type="positive")
-        except Exception as e:  # defensive: never crash the page
-            ui.notify(f"Generate failed: {e}", type="negative")
-        _repaint()
+            snap = await run.io_bound(read_snapshot) or {}
+            if not has_data(snap):
+                kit.toast("warn", COLD_CACHE_REFUSAL)
+                return                 # nothing written, so nothing to repaint
+            await run.io_bound(generate, snap)
+            # ``generate`` writes ``snap["date"]``, so reading the date back off
+            # the snapshot reports the date that was written by construction -
+            # and keeps the message out of io_bound's returns-None-while-
+            # stopping path.
+            kit.toast("ok", f"EOD report generated for {snap['date']}.")
+            _paint(snap)
+        except Exception as e:  # noqa: BLE001 - defensive: never crash the page
+            kit.toast("error", f"Generate failed: {e}")
+        finally:
+            region.busy.hide()
 
     @guard
     def _open_generate() -> None:
@@ -828,15 +903,35 @@ def render() -> None:
             f"the archive. The archive keeps one copy per date.")
         gen_dlg.open()
 
-    # Built at render()'s OWN level, never inside ``container``: ``_repaint``
-    # clears that, and a dialog deletes itself with its slot.
+    # Built at render()'s OWN level, never inside the region's ``content``:
+    # ``_paint`` clears that, and a dialog deletes itself with its slot.
     gen_dlg = kit.confirm(GENERATE_TITLE, GENERATE_BODY, confirm_text="Generate",
                           danger=True, on_confirm=_generate_now)
 
-    _repaint()
+    ui.timer(0.1, _repaint, once=True)
 
 
 def render_detail() -> None:
-    """Detailed page: in-app detail fragment from live caches."""
+    """Detailed page: the in-app detail fragment from live caches.
+
+    ⚠ The SECOND ``render()`` in this module, and easy to miss. Same frame and
+    the same reasons: no ``view=`` and no stamp over eight views, the fragment's
+    own meta line is the freshness, and the eight-read snapshot crosses
+    ``run.io_bound`` instead of holding up the page build."""
     ui.add_css(EOD_CSS)
-    ui.html(detail_fragment(read_snapshot()))
+    with kit.page():
+        kit.header("EOD Report — Detail")
+        region = kit.region(READING_TEXT)
+
+    @guard_async
+    async def _repaint_detail() -> None:
+        region.busy.show()
+        try:
+            snap = await run.io_bound(read_snapshot) or {}
+            region.content.clear()
+            with region.content:
+                ui.html(detail_fragment(snap))
+        finally:
+            region.busy.hide()
+
+    ui.timer(0.1, _repaint_detail, once=True)
