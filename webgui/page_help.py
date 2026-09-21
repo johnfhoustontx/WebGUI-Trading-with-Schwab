@@ -1353,7 +1353,11 @@ the last check ran — the page re-checks itself every 15 seconds, and
   session, so overnight and at weekends its age is left alone rather than
   reported as a fault. Everything that publishes round the clock is still checked
   round the clock, with a longer allowance outside market hours.
-- **Restart** brings an offline piece back; **Authorize** re-logs into Schwab.
+- **Restart** brings an offline piece back, and **asks first** — the question
+  says what that particular restart costs. Restarting *this web app* disconnects
+  the page you are looking at, and restarting the *Schwab gateway* while the
+  market is open takes market data away from every service for a few seconds.
+- **Authorize** re-logs into Schwab.
 """,
     "/settings": """
 **Settings — the simple version**

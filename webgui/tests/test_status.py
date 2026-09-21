@@ -658,9 +658,11 @@ def _click(host, text):
 
 
 def _restart(host):
-    """Press Restart. Task 7 puts a confirm dialog behind it; every caller goes
-    through here so that change lands in ONE place."""
+    """Press Restart and confirm it. Task 7 put a confirm dialog behind every
+    Restart; every caller goes through here, so that change landed in ONE
+    place rather than in nine assertions."""
     _click(host, "Restart")
+    _confirm(_dialog_with("Restart now"))
 
 
 def _timer(host, name):
@@ -1007,3 +1009,196 @@ def test_the_card_row_can_wrap_so_it_fits_a_phone(monkeypatch):
         assert "flex-wrap" in row.classes
         checked += 1
     assert checked >= 2
+
+
+# ── Phase 6, Task 7: Restart gets a confirm ──────────────────────────────────
+# Nine of eleven components are restartable — the six services, the proxy only
+# when this checkout owns it, this web app and the public live screens — and
+# every one of them bounces a live process. ⚠ ``restart_spec``'s ten tests and
+# ``restart_command``'s five are PURE and untouched: if one of them breaks,
+# behaviour changed, not presentation.
+def _dialogs():
+    """Dialogs live on the client LAYOUT (NiceGUI 3.x), not in the page slot."""
+    from nicegui import context, ui
+    return [e for e in context.client.layout.descendants()
+            if isinstance(e, ui.dialog)]
+
+
+def _dialog_with(confirm_text):
+    """The most recently built dialog offering ``confirm_text``.
+
+    ⚠ Scoped by RECENCY: the client layout is shared by the whole test module,
+    so ``[-1]`` is what keeps a test reading its own render."""
+    from nicegui import ui
+    found = [d for d in _dialogs()
+             if any(isinstance(e, ui.button) and e.text == confirm_text
+                    for e in d.descendants())]
+    assert found, f"no confirm dialog offering {confirm_text!r}"
+    return found[-1]
+
+
+def _confirm(dlg):
+    """Run a confirm dialog's action (the test_appearance.py recipe verbatim):
+    its ``run`` is a COROUTINE function that nicegui would only DEFER here, so
+    drive the dialog's own keydown.enter listener inside a slot context."""
+    import asyncio
+    (run_,) = [li.handler for li in dlg._event_listeners.values()
+               if li.type == "keydown.enter"]
+
+    async def _drive(slot):
+        with slot:
+            await run_(None)
+
+    asyncio.run(_drive(dlg.parent_slot))
+
+
+def test_restart_body_names_what_each_restart_costs():
+    """PURE. Three sentences, and the two special ones are special for a
+    reason: restarting THIS web app takes the page down with it, and
+    restarting the proxy while the market is live takes market data away from
+    every service at once."""
+    svc = {"kind": "service", "key": "options", "label": "options_svc"}
+    assert status.restart_body(svc) == status.RESTART_BODY
+    assert status.restart_body(svc, market_busy=True) == status.RESTART_BODY
+
+    web = {"kind": "self", "key": "webgui", "label": "webgui (this app)"}
+    assert status.restart_body(web) == status.RESTART_SELF_BODY
+    assert status.restart_body(web, market_busy=True) == status.RESTART_SELF_BODY
+
+    prox = {"kind": "proxy", "key": "proxy", "label": "schwab-proxy"}
+    assert status.restart_body(prox) == status.RESTART_BODY
+    assert status.restart_body(prox, market_busy=True) == \
+        status.RESTART_PROXY_BUSY_BODY
+    assert len({status.RESTART_BODY, status.RESTART_SELF_BODY,
+                status.RESTART_PROXY_BUSY_BODY}) == 3, "a sentence was copied"
+
+
+def test_the_market_hours_warning_is_the_configuration_tabs_own_predicate():
+    """Borrowed rather than restated: ``market_busy`` is "a restart now costs
+    live work" — regular hours OR the gamma collection window — and a second
+    copy here would be free to drift from the one Settings already shows."""
+    src = inspect.getsource(status)
+    assert "market_busy" in src
+    assert "is_regular_hours" not in src, "a second copy of the predicate"
+    from pages import config_editor
+    assert callable(config_editor.market_busy)
+
+
+def test_a_restart_asks_before_it_bounces_anything(monkeypatch):
+    """Every destructive action confirms. Nothing pinned that a Restart did
+    NOT, so adding this breaks nothing — and nine of eleven cards carry one."""
+    spawned = []
+    host = _render_status(monkeypatch, results=_ONE_SERVICE)
+    _run_timer(host, "_refresh")
+    monkeypatch.setattr(status, "_do_restart", lambda t: spawned.append(t) or True)
+    _click(host, "Restart")
+    assert not spawned, "Restart bounced the service before anyone confirmed"
+    _confirm(_dialog_with("Restart now"))
+    assert spawned and spawned[0]["key"] == "options"
+
+
+def test_cancelling_a_restart_bounces_nothing(monkeypatch):
+    from nicegui import ui
+    spawned = []
+    host = _render_status(monkeypatch, results=_ONE_SERVICE)
+    _run_timer(host, "_refresh")
+    monkeypatch.setattr(status, "_do_restart", lambda t: spawned.append(t) or True)
+    _click(host, "Restart")
+    dlg = _dialog_with("Restart now")
+    (cancel,) = [b for b in dlg.descendants()
+                 if isinstance(b, ui.button) and b.text == "Cancel"]
+    _fire(cancel, "click")
+    assert not spawned
+
+
+def test_the_dialogs_way_out_comes_before_the_restart(monkeypatch):
+    """Cancel then confirm, the app's one order, and the solid red is INSIDE
+    the dialog while the card's own button is the outline."""
+    host = _render_status(monkeypatch, results=_ONE_SERVICE)
+    _run_timer(host, "_refresh")
+    _click(host, "Restart")
+    dlg = _dialog_with("Restart now")
+    assert [b.text for b in _buttons(dlg)] == ["Cancel", "Restart now"]
+    (go,) = [b for b in _buttons(dlg) if b.text == "Restart now"]
+    assert set(theme.BTN_DANGER_SOLID.split()) <= set(go.classes)
+    (card_btn,) = [b for b in _buttons(host) if b.text == "Restart"]
+    assert set(theme.BTN_DANGER.split()) <= set(card_btn.classes)
+    assert set(theme.BTN_DANGER_SOLID.split()) - set(card_btn.classes), \
+        "the card's button is the solid red one"
+
+
+def test_one_dialog_is_built_at_page_level_and_retitled_per_click(monkeypatch):
+    """⚠ NOT inside ``comps``: that column is cleared and rebuilt every 15 s,
+    and a dialog deletes itself with its slot. Built once and retitled is also
+    what stops one being left behind in the page on every click."""
+    before = {id(d) for d in _dialogs()}
+    host = _render_status(monkeypatch)
+    new = [d for d in _dialogs() if id(d) not in before]
+    assert len(new) == 1, f"render() built {len(new)} dialogs, expected 1"
+    dlg = new[0]
+    _run_timer(host, "_refresh")
+    _run_timer(host, "_refresh")          # two repaints of the card column
+    assert len([d for d in _dialogs() if id(d) not in before]) == 1, \
+        "a repaint deleted or duplicated the confirm dialog"
+
+    def _title():
+        found = [str(e.text) for e in _labels(dlg)
+                 if str(e.text).startswith("Restart ")]
+        assert found, "the dialog carries no title naming what it restarts"
+        return found[0]
+
+    titles = []
+    for btn in [b for b in _buttons(host) if b.text == "Restart"][:2]:
+        _fire(btn, "click")
+        titles.append(_title())
+    assert len(titles) == 2 and len(set(titles)) == 2, \
+        f"the dialog was not retitled per click: {titles}"
+    for t in titles:
+        assert t.endswith("?")
+
+
+def test_restarting_the_web_app_says_the_page_will_disconnect(monkeypatch):
+    """The one restart that takes the page you clicked from down with it."""
+    host = _render_status(monkeypatch, results=[_SWEEP[4]])
+    _run_timer(host, "_refresh")
+    _click(host, "Restart")
+    dlg = _dialog_with("Restart now")
+    assert status.RESTART_SELF_BODY in [str(e.text) for e in _labels(dlg)]
+    assert "disconnect" in status.RESTART_SELF_BODY
+
+
+def test_restarting_the_proxy_while_the_market_is_live_names_the_cost(monkeypatch):
+    """Every service reads market data through the proxy, so this one restart
+    is the whole stack's outage — and the dialog says so only when it is true."""
+    proxy_card = [dict(r) for r in _SWEEP if r["kind"] in ("proxy", "auth")]
+    monkeypatch.setattr(status, "_market_busy", lambda: True)
+    host = _render_status(monkeypatch, results=proxy_card)
+    _run_timer(host, "_refresh")
+    _click(host, "Restart")
+    assert status.RESTART_PROXY_BUSY_BODY in \
+        [str(e.text) for e in _labels(_dialog_with("Restart now"))]
+
+    monkeypatch.setattr(status, "_market_busy", lambda: False)
+    host = _render_status(monkeypatch, results=proxy_card)
+    _run_timer(host, "_refresh")
+    _click(host, "Restart")
+    assert status.RESTART_BODY in \
+        [str(e.text) for e in _labels(_dialog_with("Restart now"))]
+
+
+def test_the_confirm_is_a_gate_in_front_of_the_handler_not_a_rewrite(monkeypatch):
+    """The three toasts and the region wait are still exactly what lands behind
+    it, and a reported failure closes the dialog rather than leaving a second
+    Restart sitting under the reader's cursor."""
+    said = _said(monkeypatch)
+    host = _render_status(monkeypatch, results=_ONE_SERVICE)
+    _run_timer(host, "_refresh")
+
+    def _boom(_t):
+        raise OSError("systemctl: no such unit")
+
+    monkeypatch.setattr(status, "_do_restart", _boom)
+    _restart(host)
+    assert said[-1][0] == "error" and "no such unit" in said[-1][1]
+    assert not _dialog_with("Restart now").value, \
+        "the dialog stayed open over a reported failure"

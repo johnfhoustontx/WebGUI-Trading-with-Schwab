@@ -350,6 +350,56 @@ def _do_restart(target):
     return True
 
 
+# ── the restart confirm ──────────────────────────────────────────────────────
+# Nine of the eleven cards carry a Restart, and every one of them bounces a live
+# process on this box: the six services, the proxy when this checkout owns it,
+# the PUBLIC live screens, and this web app itself. Two of those nine cost more
+# than the component they name, so the dialog says which one you are about to
+# pay. The sentences are module constants rather than literals inside render()
+# so a test can pin them without copying prose.
+RESTART_CONFIRM = "Restart now"
+RESTART_BODY = ("It stops and starts again, and should be back online within "
+                "about 15 seconds.")
+RESTART_SELF_BODY = ("This web app restarts. The page you are looking at "
+                     "disconnects and needs a reload in a few seconds.")
+RESTART_PROXY_BUSY_BODY = (
+    "The market is open. Every service reads market data through the proxy, so "
+    "the whole stack loses it for about 15 seconds — after the close is safer.")
+
+
+def restart_body(target, market_busy=False):
+    """The one sentence the Restart confirm shows for ``target``. PURE.
+
+    ``market_busy`` is "a restart now costs live work" — see :func:`_market_busy`
+    — and only the PROXY reads it: it is the one component every service depends
+    on, so restarting it mid-session is a stack-wide market-data outage rather
+    than one card going amber. Restarting the web app is special for the other
+    reason: it takes the page that asked down with it.
+    """
+    kind = target.get("kind")
+    if kind == "self":
+        return RESTART_SELF_BODY
+    if kind == "proxy" and market_busy:
+        return RESTART_PROXY_BUSY_BODY
+    return RESTART_BODY
+
+
+def _market_busy():
+    """Whether a restart now costs live work — regular hours OR the gamma
+    collection window.
+
+    Settings → Configuration's own predicate, IMPORTED rather than restated: a
+    second copy here would be free to drift from the warning that tab already
+    shows for the same reason. Imported lazily, so this page carries no
+    module-level dependency on a Settings tab. It never raises — an unreadable
+    calendar degrades to False, which is right: an unknown session must not put
+    a market-hours warning on a dialog at midnight, and the base sentence still
+    names the outage.
+    """
+    from pages.config_editor import market_busy
+    return market_busy()
+
+
 # ── network / redis probes (thin, screenshot-verified) ───────────────────────
 def service_detail(body) -> str:
     """The detail line for a healthy service card, given its ``/health`` JSON.
@@ -463,7 +513,8 @@ _FIRST_SWEEP_SEC = 0.1
 def render():
     """The health board: one header line with a hand-driven stamp, the overall
     verdict, a card per component, then the published-data freshness table."""
-    state = {"results": [], "busy": False, "hold_until": 0.0}
+    state = {"results": [], "busy": False, "hold_until": 0.0,
+             "restart_target": None}
 
     with kit.page():
         head = kit.header("System Status")
@@ -593,6 +644,23 @@ def render():
 
     @guard
     def _restart_clicked(target):
+        """Ask first. Every Restart on this page bounces a live process, and
+        two of them cost more than the card they sit on — see
+        :func:`restart_body`. The dialog is RETITLED here rather than rebuilt:
+        one dialog, built at this function's own level, is what keeps it out of
+        ``comps`` (cleared every 15 s, and a dialog deletes itself with its
+        slot) and stops one being left behind in the page on every click."""
+        state["restart_target"] = target
+        restart_dlg.title.text = f"Restart {target['label']}?"
+        restart_dlg.body.text = restart_body(target, market_busy=_market_busy())
+        restart_dlg.open()
+
+    def _restart_confirmed():
+        """The confirmed restart. Returning anything but ``False`` closes the
+        dialog, which is right for all four outcomes here: each is reported by
+        a toast or a spinner, and none of them is something a second press of
+        the same button would answer differently."""
+        target = state["restart_target"]
         try:
             ok = _do_restart(target)
         except Exception as exc:  # noqa: BLE001 — surface, never crash the page.
@@ -620,6 +688,12 @@ def render():
                          "online within ~15s.")
         state["hold_until"] = _time.monotonic() + _RESTART_RESWEEP_SEC
         ui.timer(_RESTART_RESWEEP_SEC, _refresh, once=True)
+
+    # Built ONCE, at render()'s own level, and deliberately not ephemeral: the
+    # same dialog serves all nine restartable cards, retitled per click. AFTER
+    # ``_restart_confirmed``, so the name is bound when the kit calls it.
+    restart_dlg = kit.confirm("Restart?", "", confirm_text=RESTART_CONFIRM,
+                              danger=True, on_confirm=_restart_confirmed)
 
     @guard_async
     async def _refresh():
