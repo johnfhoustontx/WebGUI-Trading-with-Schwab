@@ -533,6 +533,17 @@ def test_the_rating_map_covers_every_calculator_template():
                                  "stale": mapped - templates}
 
 
+def test_the_public_tools_codes_are_the_ones_the_rating_map_knows():
+    """``shared.public_tools`` folds every unknown strategy or structure code to
+    CUSTOM, so PCSA and PCSB cannot be two cache keys for one rating. It cannot
+    import ``rate_trade``, so its tuple is compared with the map here. (The map
+    is itself pinned to the Calculator's templates above.)"""
+    codes = set(_const("shared/public_tools.py", "STRUCTURE_CODES"))
+    mapped = _dict_literal_keys("services/options_svc/rate_trade.py", "CALC_TO_SCORER")
+    assert codes == mapped | {"CUSTOM"}, {"missing": mapped - codes,
+                                          "stale": codes - mapped - {"CUSTOM"}}
+
+
 # ── IV vs HV bands: the Symbol Dossier and the strategy scorer ──────────────
 # ``strategy_scoring.infer_market_view`` falls back to the IV/HV ratio when
 # iv_rank is missing, with BARE LITERALS (``iv_hv >= 1.2`` -> "high",

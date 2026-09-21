@@ -323,7 +323,9 @@ def test_a_non_finite_config_value_falls_back_never_raises(monkeypatch, bad):
 
 def test_outcomes_are_rescues_plus_load_first():
     from shared import public_rescue
-    assert pt.OUTCOMES == public_rescue.OUTCOMES + ("load_first",)
+    # ``price_needed`` joined on the 2026-09-21 review (a rating at the
+    # chain's own marks would publish them).
+    assert pt.OUTCOMES == public_rescue.OUTCOMES + ("load_first", "price_needed")
     assert set(pt.OUTCOME_TEXT) == set(pt.OUTCOMES)
     assert pt.OUTCOME_TEXT["load_first"] == "Load the symbol first."
     for code, text in pt.OUTCOME_TEXT.items():
@@ -331,9 +333,14 @@ def test_outcomes_are_rescues_plus_load_first():
 
 
 def test_a_snapshot_request_may_carry_its_legs_expirations():
+    # Two raw entries at most since the review's cap, so the de-duplication is
+    # shown on a repeated pair (it was a three-entry list before the cap).
     cmd = pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY",
-                            "expiries": [EXP, "2026-10-02", EXP]}, TODAY)
-    assert cmd["args"]["expiries"] == ["2026-10-02", EXP], "not de-duplicated"
+                            "expiries": [EXP, EXP]}, TODAY)
+    assert cmd["args"]["expiries"] == [EXP], "not de-duplicated"
+    cmd = pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY",
+                            "expiries": [EXP, "2026-10-02"]}, TODAY)
+    assert cmd["args"]["expiries"] == ["2026-10-02", EXP], "not sorted"
 
 
 def test_a_snapshot_request_without_expirations_is_unchanged():
@@ -362,14 +369,46 @@ def test_a_bad_expirations_list_refuses_the_snapshot_request(bad):
                              "expiries": bad}, TODAY) is None
 
 
-def test_eight_expirations_are_accepted():
-    exps = [f"2026-10-{d:02d}" for d in range(1, 9)]
+def test_two_expirations_are_accepted_and_three_are_not():
+    """Capped at two (2026-09-21 review): each expiration is Schwab work the
+    visitor chooses, and a reloading page needs its legs' expirations only."""
+    exps = ["2026-10-01", "2026-10-02"]
     cmd = pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY",
                             "expiries": exps}, TODAY)
     assert cmd["args"]["expiries"] == exps
+    assert pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY",
+                             "expiries": exps + ["2026-10-03"]}, TODAY) is None
 
 
 def test_only_a_snapshot_request_carries_expirations():
     cmd = pt.tools_command({"kind": "chain", "symbol": "SPY",
                             "expiries": [EXP]}, TODAY)
     assert cmd["args"] == {"kind": "chain", "symbol": "SPY"}
+
+
+# ── the 2026-09-21 review: codes the engines know, the rest are CUSTOM ──────
+
+def test_an_unknown_code_is_custom_so_it_cannot_split_the_cache():
+    a = pt.tools_command({"kind": "rate", "symbol": "SPY", "structure": "PCSA",
+                          "legs": _legs()}, TODAY)
+    b = pt.tools_command({"kind": "rate", "symbol": "SPY", "structure": "PCSB",
+                          "legs": _legs()}, TODAY)
+    assert a["args"]["structure"] == b["args"]["structure"] == "CUSTOM"
+    assert pt.request_key(a, TODAY) == pt.request_key(b, TODAY)
+    assert pt.structure_key(a["args"]) == pt.structure_key(b["args"])
+    p1 = pt.math_command(_price(strategy="ZZZ"), TODAY)
+    p2 = pt.math_command(_price(strategy="QQQQ"), TODAY)
+    assert p1["args"]["strategy"] == "CUSTOM"
+    assert pt.request_key(p1, TODAY) == pt.request_key(p2, TODAY)
+
+
+def test_a_known_code_is_kept():
+    for code in ("PCS", "IC", "COVERED_CALL", "CUSTOM"):
+        cmd = pt.math_command(_price(strategy=code.lower()), TODAY)
+        assert cmd["args"]["strategy"] == code
+    assert "CUSTOM" in pt.STRUCTURE_CODES
+
+
+def test_price_needed_is_a_worded_outcome():
+    assert "price_needed" in pt.OUTCOMES
+    assert pt.OUTCOME_TEXT["price_needed"]

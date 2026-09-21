@@ -120,6 +120,31 @@ def _whole(v, lo, hi):
     return n if lo <= n <= hi else None
 
 
+# The strategy/structure codes the engines know: ``rate_trade.CALC_TO_SCORER``'s
+# keys, which ``shared/tests/test_cross_tier_mirrors.py`` pins to both that map
+# and the Calculator's templates (this module cannot import either). Any other
+# code is folded to ``CUSTOM`` - the engines treat an unknown code as CUSTOM
+# anyway, and leaving it would make PCSA, PCSB, ... distinct cache, dedup and
+# structure-cap keys for one and the same rating.
+STRUCTURE_CODES = (
+    "LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT", "PCS", "CCS",
+    "VERT_CALL_DEBIT", "VERT_PUT_DEBIT", "LONG_STRADDLE", "SHORT_STRADDLE",
+    "LONG_STRANGLE", "SHORT_STRANGLE", "IC", "CONDOR_CALL", "CONDOR_PUT",
+    "BUTTERFLY_CALL", "BUTTERFLY_PUT", "IRON_BUTTERFLY", "CALENDAR_CALL",
+    "CALENDAR_PUT", "DIAGONAL_CALL", "DIAGONAL_PUT", "COVERED_CALL",
+    "PROTECTIVE_PUT", "COLLAR", "CUSTOM",
+)
+
+
+def _known_code(raw):
+    """``_clean_code``, then an unknown code folded to ``CUSTOM``. None only for
+    something that is not a code at all."""
+    code = _clean_code(raw)
+    if code is None:
+        return None
+    return code if code in STRUCTURE_CODES else "CUSTOM"
+
+
 def _clean_code(raw):
     """A strategy or structure code - ``PCS``, ``COVERED_CALL`` - or None.
     Only ASCII letters and underscores, so the code can name nothing but a code.
@@ -202,7 +227,7 @@ def _math_args(raw, today):
         # itself, so a visitor cannot ask for an arbitrarily large grid.
         args = {
             "kind": kind, "symbol": symbol,
-            "strategy": _clean_code(raw.get("strategy")),
+            "strategy": _known_code(raw.get("strategy")),
             "spot": _pr._finite(raw.get("spot"), lo=0.0, hi=MAX_SPOT),
             "iv": _pr._finite(raw.get("iv"), lo=0.0, hi=MAX_IV),
             "rate": _in_range(raw.get("rate"), 0.0, MAX_RATE),
@@ -233,7 +258,9 @@ def _math_args(raw, today):
     return None if any(v is None for v in args.values()) else args
 
 
-MAX_SNAPSHOT_EXPIRIES = 8
+# A reloading page needs its legs' expirations and no more; each one is Schwab
+# work the visitor chooses, so two is the cap.
+MAX_SNAPSHOT_EXPIRIES = 2
 
 
 def _clean_expiries(raw, today):
@@ -272,7 +299,7 @@ def _tools_args(raw, today):
     if kind in ("expiry", "sim_expiry"):
         args["expiry"] = _pr.clean_expiry(raw.get("expiry"), today)
     elif kind == "rate":
-        args["structure"] = _clean_code(raw.get("structure"))
+        args["structure"] = _known_code(raw.get("structure"))
         args["legs"] = _clean_legs(raw.get("legs"), _clean_calc_leg, today)
     else:
         return None
@@ -299,8 +326,11 @@ def tools_command(raw, today=None):
 
 # How a request ended: Rescue's codes plus ``load_first``, a request that needs
 # a chain or a Simulator snapshot this service no longer holds (a restart, an
-# eviction, or one never loaded). "done" and "cached" carry a result.
-OUTCOMES = _pr.OUTCOMES + ("load_first",)
+# eviction, or one never loaded), and ``price_needed``, a rating whose option
+# legs carry no price of the visitor's own while quotes are off (the rating
+# would otherwise be priced at the chain's marks). "done" and "cached" carry a
+# result.
+OUTCOMES = _pr.OUTCOMES + ("load_first", "price_needed")
 
 # Worded for these tools, not copied from Rescue's: its sentences name the
 # rescue menu ("Rescue runs while the market is open"), which would be wrong on
@@ -320,6 +350,7 @@ OUTCOME_TEXT = {
     "invalid": "That request could not be read. Check the legs and try again.",
     "error": "The request failed. Please try again later.",
     "load_first": "Load the symbol first.",
+    "price_needed": "Type a price for every option leg first.",
 }
 
 
