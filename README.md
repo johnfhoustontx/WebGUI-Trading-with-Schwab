@@ -104,7 +104,7 @@ Lint locally: `uvx ruff check .` (config in `ruff.toml`); install hooks with `pr
 
 | Path | Role |
 |---|---|
-| `webgui/` | Tier-1 NiceGUI app (:8500), plus `live_main.py` — the fourteen public read-only screens on their own origin (:8501) |
+| `webgui/` | Tier-1 NiceGUI app (:8500), plus `live_main.py` — the twenty public read-only screens on their own origin (:8501) |
 | `services/` | Tier-2 domain services + shared `_scaffold.py` |
 | `shared/` | `bus/` (Redis wrapper), `contracts/` (Pydantic payloads), `analysis_lib/` |
 | `schwab-proxy/` | Schwab API gateway / token manager (:8100) |

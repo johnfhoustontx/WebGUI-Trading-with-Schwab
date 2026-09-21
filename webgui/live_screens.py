@@ -1,4 +1,4 @@
-"""The fourteen screens published on the public live origin.
+"""The twenty screens published on the public live origin.
 
 PURE DATA -- no NiceGUI import -- so the route registration, the thumbnail
 capture script and the static grid on neuralstrike.co all read one source and
@@ -58,7 +58,7 @@ SCREENS = (
     Screen("rrg", "/rrg", "RRG", "sentiment_rrg", "/sentiment/rrg"),
     Screen("momentum", "/momentum", "Momentum", "sentiment_momentum",
            "/sentiment/momentum", kwargs={"level": "industry"}),
-    # ⚠ THE FOUR GAMMA SCREENS ALL NAME /options/gamma, AND THIS ONE IS FIRST.
+    # ⚠ THE TEN GAMMA SCREENS ALL NAME /options/gamma, AND THIS ONE IS FIRST.
     # ``PUBLIC_ROUTES`` keeps the first, so a Dealer Positioning click-through
     # lands here rather than on Net Prem or a Premium Divergence board — see
     # the note on ``_public_routes`` below.
@@ -72,6 +72,25 @@ SCREENS = (
     Screen("premium-divergence-qqq", "/premium-divergence/qqq",
            "Premium Divergence · QQQ", "options.gamma", "/options/gamma",
            kwargs={"symbol": "QQQ", "view": "Flow"}),
+    # The remaining Dealer Positioning views, each pinned. ⚠ Every heatmap view
+    # pinned here (GEX, Charm, DEX, Vanna) costs a published history key that
+    # options_svc rewrites every minute -- ``PUBLISHED_GAMMA_HISTORY_VIEWS`` in
+    # handlers.py must list it, or the screen draws an empty heatmap forever.
+    # ``shared/tests/test_cross_tier_mirrors.py`` holds the two in step. Term is
+    # drawn from the MAIN payload and needs no history; it pins $SPX because the
+    # collector gathers the term grid for $SPX alone (gex_collector.TERM_SYMBOL).
+    Screen("gamma-spy", "/gamma/spy", "Gamma · SPY", "options.gamma",
+           "/options/gamma", kwargs={"symbol": "SPY", "view": "GEX"}),
+    Screen("gamma-qqq", "/gamma/qqq", "Gamma · QQQ", "options.gamma",
+           "/options/gamma", kwargs={"symbol": "QQQ", "view": "GEX"}),
+    Screen("charm", "/charm", "Charm", "options.gamma", "/options/gamma",
+           kwargs={"symbol": "$SPX", "view": "Charm"}),
+    Screen("dex", "/dex", "DEX", "options.gamma", "/options/gamma",
+           kwargs={"symbol": "$SPX", "view": "DEX"}),
+    Screen("vanna", "/vanna", "Vanna", "options.gamma", "/options/gamma",
+           kwargs={"symbol": "$SPX", "view": "Vanna"}),
+    Screen("term", "/term", "Term Structure", "options.gamma", "/options/gamma",
+           kwargs={"symbol": "$SPX", "view": "Term"}),
 )
 
 
@@ -90,7 +109,7 @@ def _public_routes() -> dict:
     pointing at one must not be drawn as a link rather than be given a
     stand-in. Nothing here ever resolves to the private app's own host.
 
-    ⚠ FIRST WINS, and that is the one place this table's ORDER matters: four
+    ⚠ FIRST WINS, and that is the one place this table's ORDER matters: ten
     screens render ``options.gamma`` under different pins, and a click asking
     for Dealer Positioning means the plain Gamma board, not Net Prem. Asserted
     in the tests rather than left to be discovered."""

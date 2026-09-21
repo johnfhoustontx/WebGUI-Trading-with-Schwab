@@ -471,5 +471,7 @@ def test_both_content_columns_carry_the_app_scope():
     webgui = pathlib.Path(__file__).resolve().parents[1]
     assert 'classes("ns-app w-full p-4 gap-3 pb-10")' in \
         (webgui / "main.py").read_text(encoding="utf-8")
-    assert '_CONTENT = "ns-app w-full p-4 gap-3"' in \
+    # pb-10 on both: each origin mounts the fixed market-summary marquee, and
+    # the padding is what keeps it off the last content row.
+    assert '_CONTENT = "ns-app w-full p-4 gap-3 pb-10"' in \
         (webgui / "live_main.py").read_text(encoding="utf-8")

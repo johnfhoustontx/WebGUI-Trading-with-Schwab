@@ -144,11 +144,13 @@ skips the sign-in, which is what the wall display uses.
 
 ## The public live screens
 
-Fourteen of the app's screens are also published **read-only and without any
+Twenty of the app's screens are also published **read-only and without any
 sign-in** on a second address, `https://live.neuralstrike.co` — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &
-Industry, Sector Rotation, RRG, Momentum, Gamma, Net Prem and the two Premium
-Divergence screens. `https://neuralstrike.co/live.html` is a thumbnail menu of
+Industry, Sector Rotation, RRG, Momentum, Net Prem, the two Premium Divergence
+screens, and eight Dealer Positioning boards: Gamma for $SPX, SPY and QQQ, and
+Charm, DEX, Vanna and Term Structure for $SPX. Each one shows the same scrolling
+market-summary ticker along the bottom that your own app does. `https://neuralstrike.co/live.html` is a thumbnail menu of
 them.
 
 Three things to know:
@@ -166,8 +168,8 @@ Three things to know:
   on the machine, which leaves the rest of the stack alone.
 
 The thumbnails on the menu page are refreshed on a **15-minute timer**, on trading
-days between 08:00 and 15:20 Central — so a slightly old-looking tile is normal,
-and outside those hours expected. The screen behind it is always live.
+days between 15:25 and 15:50 Central, so each tile shows the end of the session
+rather than the moment you open the menu. The screen behind it is always live.
 
 ## What runs behind the scenes
 

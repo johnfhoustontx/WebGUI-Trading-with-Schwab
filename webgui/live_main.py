@@ -1,6 +1,6 @@
 """The PUBLIC read-only screens: a second NiceGUI process on its own origin.
 
-Serves the fourteen screens in ``live_screens.SCREENS`` at ``live.neuralstrike.co``,
+Serves the twenty screens in ``live_screens.SCREENS`` at ``live.neuralstrike.co``,
 unauthenticated, to anyone. It renders the REAL page modules — the same ones the
 app renders — so a published screen cannot drift from the private one.
 ``webgui/wall.py`` makes the same argument at length.
@@ -12,7 +12,7 @@ correct. The seam the pages need lives in ``shell.py``; every page reaches the
 shell through it. ``tests/test_live_main.py`` pins the absence twice — at source
 level here, and by running this file ALONE in a fresh interpreter and asserting
 both that ``main`` never entered ``sys.modules`` and that the only routes served
-are the published fourteen. The second is the one that can see a TRANSITIVE
+are the published screens. The second is the one that can see a TRANSITIVE
 import, which is how such a thing would actually arrive.
 
 Read-only is enforced at four layers, of which this file installs three:
@@ -180,6 +180,7 @@ import shell                                          # noqa: E402
 from nicegui import app as nicegui_app                # noqa: E402
 from nicegui import ui                                # noqa: E402
 from pages.options import theme                       # noqa: E402
+from pages import ticker                             # noqa: E402
 
 # Layer 5, and the only one a PAGE can act on: this process says which origin it
 # is, so a page can decline to draw a control that cannot work here. The pages
@@ -200,7 +201,7 @@ shell.publish(live_screens.PUBLIC_ROUTES)
 _STATIC_DIR = shell._STATIC_DIR
 
 # ── the ONE non-page route this process serves ───────────────────────────────
-# ⚠ A DELIBERATE ADDITION TO "the fourteen routes and nothing else", and it is
+# ⚠ A DELIBERATE ADDITION TO "the published routes and nothing else", and it is
 # published to the internet like everything else here.
 #
 # The header's brand mark is ``[brand].mark`` — a URL under ``/static`` — and
@@ -214,7 +215,7 @@ _STATIC_DIR = shell._STATIC_DIR
 # credentials and no data under it; ``webgui/data`` is a different tree and is
 # NOT mounted, which is also why ``/voice`` does not exist in this process.
 # ``tests/test_live_main.py`` pins both halves: that this is the only route
-# beyond the published fourteen, and that nothing but bundled assets lives here.
+# beyond the published screens, and that nothing but bundled assets lives here.
 #
 # Guarded on ``is_dir()`` exactly as ``main.py``'s mount is: a checkout without
 # the directory must degrade to a wordmark, not fail to start over chrome.
@@ -224,18 +225,17 @@ else:                                   # pragma: no cover - a broken checkout
     log.warning("no static directory at %s: the public header will render the "
                 "wordmark without its mark", _STATIC_DIR)
 
-# The private app's content container, minus its ``pb-10``. That padding exists
-# solely to clear the fixed market-summary marquee ``_layout`` mounts, and this
-# process mounts no marquee.
+# The private app's content container, ``pb-10`` included: that padding clears
+# the fixed market-summary marquee, which this process mounts too (2026-09-21).
 #
 # ⚠ Deliberately NOT ``theme.PAGE``. That token is a rounded, bordered, padded
-# radial-gradient panel, and ``_layout`` does not apply it — ten of the fourteen
+# radial-gradient panel, and ``_layout`` does not apply it — the non-Gamma
 # published pages supply their own top-level wrap and background, which since
 # the 2026-09-19 consistency standard is ``kit.page()`` on every one of them
-# (the four Dealer Positioning pins are the same module and draw none). Wrapping
+# (the ten Dealer Positioning pins are the same module and draw none). Wrapping
 # them again would draw a second frame around each. A neutral container is what
 # "cannot drift from the private page" actually means here.
-_CONTENT = "ns-app w-full p-4 gap-3"
+_CONTENT = "ns-app w-full p-4 gap-3 pb-10"
 
 # ── the public header ────────────────────────────────────────────────────────
 # The brand reached these screens through the browser TAB TITLE alone, which is
@@ -336,6 +336,14 @@ def _render(screen) -> None:
         _header(screen)
         with ui.column().classes(_CONTENT):
             module.render(**screen.kwargs)
+    # The market-summary marquee, as ``main._layout`` mounts it on every page.
+    # A pure READER — the three caches it polls (``ticker.VIEWS``) are shared
+    # market views, never the owner's book, and it enqueues nothing — so it is
+    # the same component on both origins rather than a public copy. It honours
+    # ``ticker_enabled`` / ``ticker_speed``, which the frozen store answers from
+    # DEFAULTS (on, 60 s). ``ui.footer`` is fixed-position, so its DOM order
+    # does not matter; ``_CONTENT``'s ``pb-10`` keeps it off the last row.
+    ticker.render_ticker(screen.route)
 
 
 def _register(screen):
@@ -343,7 +351,7 @@ def _register(screen):
 
     ⚠ ``screen`` is bound by THIS FUNCTION'S PARAMETER, which is what makes each
     route render its own screen. A closure over the ``for`` variable below would
-    make all fourteen render the LAST one — a bug that reads as "the site works"
+    make every route render the LAST one — a bug that reads as "the site works"
     until you open a second tile.
 
     ⚠ And the binding is done here rather than as a ``def _page(_s=screen)``
@@ -357,7 +365,7 @@ def _register(screen):
     # a dozen tabs and the colour is how they tell them apart; a public site
     # wants one mark. And a per-page favicon is not free: NiceGUI registers a
     # ``<route>/favicon.ico`` route for each, which on the SHARED global app
-    # object means fourteen more paths that the private app's auth sweep would
+    # object means one more path per screen that the private app's auth sweep would
     # then be enumerating on this process's behalf. ``ui.run(favicon=…)`` below
     # is the fallback ``get_favicon_url`` reads when a page declares none.
     @ui.page(screen.route, title=f"{screen.title} · {theme.BRAND_NAME}")

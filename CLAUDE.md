@@ -678,7 +678,7 @@ still logs in full.
 
 ## The public live screens — a SECOND Tier-1 process
 
-`webgui/live_main.py` serves **fourteen READ-ONLY screens, unauthenticated, to
+`webgui/live_main.py` serves **twenty READ-ONLY screens, unauthenticated, to
 anyone** on `nicegui_live` (prod :8501, dev :9501) behind `LIVE_HOST`
 (`live.neuralstrike.co`). It renders the **real page modules the app renders**, so a
 published screen cannot drift from the private one. The published set and every pin
@@ -725,7 +725,7 @@ screens refuse at the page as well: `gamma.may_enqueue(symbol, view)` gates ever
 enqueue site (a *total* proof, pinned by an AST walk over the source) **and** no
 control that reaches one is built. Both, not either.
 
-⚠ **The published route set is the fourteen screens PLUS exactly one non-page
+⚠ **The published route set is the twenty screens PLUS exactly one non-page
 route: `/static` (2026-09-09).** Every screen now carries a slim header — the
 brand lockup, a hairline, the screen name, and **no navigation of any kind** —
 and `[brand].mark` is a file under `/static`, which this process serves from its
@@ -769,7 +769,9 @@ by whatever the private app last looked at. The published screens therefore read
 **`cache:options:gamma_pub:<SYMBOL>`** (+ `gamma_pub_hist_<SYMBOL>_<view>`), written
 additively for `handlers.PUBLISHED_GAMMA_SYMBOLS` off chains the collector already
 pays for. ⚠ Only the views listed in `PUBLISHED_GAMMA_HISTORY_VIEWS` get a history
-key — un-pinning a public screen's view without adding it there draws an **empty
+key, each a ~1 MB grid rewritten every minute, so a newly pinned heatmap view is a
+write-bandwidth cost rather than a free screen. Un-pinning a public screen's view
+without adding it there draws an **empty
 heatmap, silently**, because a missing history key reads as "no history yet".
 
 ⚠ **`deploy/site/live/*.webp` is generated, gitignored state under `SITE_ROOT`** — the

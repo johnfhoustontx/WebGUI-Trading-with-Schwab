@@ -4,7 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-20 (**One look and one behaviour — Phase 6: the system
+**Last updated:** 2026-09-21 (**Six more Dealer Positioning boards and the market
+ticker on the public live screens — twenty screens, up from fourteen.**)
+
+- **Six pinned `options.gamma` screens**: `/gamma/spy` and `/gamma/qqq` (GEX),
+  and `/charm`, `/dex`, `/vanna`, `/term` for `$SPX`. Term pins `$SPX` because
+  `gex_collector.TERM_SYMBOL` is the only term grid collected. No new page code:
+  each is a `Screen` row, and the existing `may_enqueue` / picker gates cover them.
+- **`PUBLISHED_GAMMA_HISTORY_VIEWS` widens** to all four views for `$SPX` and
+  GEX for SPY and QQQ — six published history keys per minute where there was
+  one, each ~1 MB by the close. This is write bandwidth on localhost Redis
+  (each key is overwritten, so memory holds only the latest). No new Schwab
+  call: the three symbols' chains were already collected and stashed.
+- **The market-summary marquee** now mounts on every public screen
+  (`live_main._render` → `ticker.render_ticker`), with `pb-10` restored on the
+  content column. It reads three shared caches and enqueues nothing.
+- **Tests changed, and why.** The cross-tier pairing test refused two screens
+  sharing a symbol; it now refuses two sharing a symbol AND view, since five
+  `$SPX` boards read one snapshot. `test_the_flow_screens_pay_for_no_history_at_all`
+  became `test_spy_pays_for_its_gex_history_and_no_other`. `test_shell_seam`
+  pinned the live column's classes WITHOUT `pb-10`; it now pins them with it.
+- **Verified** by running `live_main` locally on a fake bus seeded with prod's
+  real `gamma_pub:*` and history caches at 06:55 CT: Charm, DEX, Vanna and Term
+  drew full bars and heatmaps; SPY/QQQ GEX drew bars with "no intraday snapshots
+  yet" — correct until options_svc publishes their history after promotion.
+- The User Guide's thumbnail window read 08:00–15:20 CT; `[windows.live_capture]`
+  has been 15:25–15:50 since 2026-09-08. Corrected.
+
+---
+
+**Prior — 2026-09-20** (**One look and one behaviour — Phase 6: the system
 pages, and the app's destructive controls get one confirm vocabulary. THE
 MIGRATION IS COMPLETE.**)
 

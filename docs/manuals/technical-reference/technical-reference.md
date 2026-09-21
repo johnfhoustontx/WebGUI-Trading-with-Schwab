@@ -271,7 +271,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | driver_svc | 8214 | Autonomous decision layer (Claude + pure-code guardrails). |
 | market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). |
 | webgui | 8500 | The web UI. |
-| webgui_live | 8501 | The fourteen public read-only screens, on their own origin. |
+| webgui_live | 8501 | The twenty public read-only screens, on their own origin. |
 
 Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 

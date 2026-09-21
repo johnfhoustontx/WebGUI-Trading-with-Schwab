@@ -1002,7 +1002,7 @@ Market Dashboard — **"Macro Board" visual redesign (2026-08-15, presentation-o
 
 ## Public live screens (`live.neuralstrike.co`) — 2026-09-07
 
-Fourteen READ-ONLY routes served by a **second NiceGUI process**,
+Twenty READ-ONLY routes (fourteen from 2026-09-07, six more Dealer Positioning views on 2026-09-21) served by a **second NiceGUI process**,
 `webgui/live_main.py` on `nicegui_live` (prod :8501, dev :9501), unauthenticated to
 anyone. **They render the same page modules the private routes render** — each pin is
 an optional keyword on the real `render()` — the precedent is
@@ -1031,6 +1031,12 @@ in [`plans/2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-li
 | `/net-premium` | `options.gamma.render(view="Net Prem")` (`/options/gamma`) | group `indices`, symbols `SPY QQQ BIG10`, mode `dollars` (settings pins) |
 | `/premium-divergence/spy` | `options.gamma.render(symbol="SPY", view="Flow")` (`/options/gamma`) | SPY · Flow |
 | `/premium-divergence/qqq` | `options.gamma.render(symbol="QQQ", view="Flow")` (`/options/gamma`) | QQQ · Flow |
+| `/gamma/spy` | `options.gamma.render(symbol="SPY", view="GEX")` (`/options/gamma`) | SPY · GEX |
+| `/gamma/qqq` | `options.gamma.render(symbol="QQQ", view="GEX")` (`/options/gamma`) | QQQ · GEX |
+| `/charm` | `options.gamma.render(symbol="$SPX", view="Charm")` (`/options/gamma`) | `$SPX` · Charm |
+| `/dex` | `options.gamma.render(symbol="$SPX", view="DEX")` (`/options/gamma`) | `$SPX` · DEX |
+| `/vanna` | `options.gamma.render(symbol="$SPX", view="Vanna")` (`/options/gamma`) | `$SPX` · Vanna |
+| `/term` | `options.gamma.render(symbol="$SPX", view="Term")` (`/options/gamma`) | `$SPX` · Term — the collector gathers a term grid for `$SPX` alone |
 
 `BIG10` is a symbol inside the `indices` group in `config/symbols.toml`, not a group
 of its own.
@@ -1048,11 +1054,19 @@ moves, and the version still moves because the OWNER can click Explain on the pr
 app — left wired, one private click would pop a tab in every anonymous visitor's
 browser, pointed at a route this process does not serve.
 
-The four gamma screens read **`cache:options:gamma_pub:<SYMBOL>`**, never
+Every symbol-pinned gamma screen reads **`cache:options:gamma_pub:<SYMBOL>`**, never
 `cache:options:gamma` — that key is a sticky, symbol-agnostic single slot whose symbol
 follows whatever the private app last looked at (see CLAUDE.md). `/net-premium` is the
 exception and needs no per-symbol key: `cache:options:net_premium` is multi-symbol and
-symbol-independent by construction.
+symbol-independent by construction. ⚠ Each heatmap view a screen pins (GEX, Charm, DEX,
+Vanna) needs its `gamma_pub_hist_<SYMBOL>_<view>` key, which options_svc writes only for
+the views listed in `handlers.PUBLISHED_GAMMA_HISTORY_VIEWS` — since 2026-09-21 all four
+for `$SPX` and GEX for SPY and QQQ. `test_cross_tier_mirrors.py` holds the two in step.
+
+**Every screen carries the market-summary marquee (2026-09-21)** — `pages/ticker.render_ticker`,
+the same fixed footer `main._layout` mounts. It reads `market:dashboard`,
+`sentiment:composite` and `market:summary` and enqueues nothing; `ticker_enabled` /
+`ticker_speed` come from the frozen store's DEFAULTS.
 
 **Every screen carries a slim brand header (2026-09-09).** The brand reached these
 screens through the browser TAB TITLE alone, which is invisible on the YouTube wall

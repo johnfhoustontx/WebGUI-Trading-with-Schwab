@@ -324,26 +324,29 @@ def gamma_history_key(view: str) -> str:
 # the view picker is not built on a pinned page (see
 # webgui/pages/options/gamma.py's ``shows_view_picker``) — so:
 #
-#   $SPX  pins GEX   → draws the intraday heatmap, which IS the history rows
-#   SPY   pins Flow  → the Flow branch of ``_render_view`` draws from the MAIN
-#   QQQ   pins Flow    payload's ``flow`` + ``prem_ladder`` and returns before it
-#                      ever reads the per-view history cache
+#   $SPX  pins GEX, Charm, DEX, Vanna → one heatmap screen per view, each
+#                      drawing its own history rows; its Term screen draws the
+#                      MAIN payload's ``term`` grid and needs none
+#   SPY   pins GEX + Flow  → the GEX screen draws history; the Flow branch of
+#   QQQ   pins GEX + Flow    ``_render_view`` draws from the MAIN payload's
+#                            ``flow`` + ``prem_ladder`` and needs none
 #
 # The histories exist for the screens that DRAW them; a screen that draws none
 # must not pay for one. Measured through this publish path on a close-of-session
 # shape, publishing all four views for all three symbols took the tick's gamma
 # writes to ~4x the private page's own — a multiplication of exactly the cost the
 # 2026-08-20 history split was written to remove, on a store that has already
-# needed a manual ~1 GB VACUUM.
+# needed a manual ~1 GB VACUUM. The six listed here (2026-09-21) are ~2.5x: each
+# is a key REWRITTEN every minute, so the cost is write bandwidth, not memory.
 #
 # ⚠ Un-pinning a public screen's view (rendering the picker on it again) means
 # adding that symbol's views back HERE, or the screen shows an empty heatmap on
 # every view but the one it used to pin — silently, since a missing key reads as
 # "no history yet".
 PUBLISHED_GAMMA_HISTORY_VIEWS = {
-    "$SPX": ("GEX",),
-    "SPY": (),
-    "QQQ": (),
+    "$SPX": ("GEX", "Charm", "DEX", "Vanna"),
+    "SPY": ("GEX",),
+    "QQQ": ("GEX",),
 }
 
 # The published symbols ARE that table's keys — one list, so a symbol cannot be

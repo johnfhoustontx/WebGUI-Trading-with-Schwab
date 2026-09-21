@@ -14,9 +14,9 @@ FORBIDDEN = {"/terminate", "/settings", "/status", "/driver", "/manuals",
 _LIVE_SCREENS = pathlib.Path(__file__).resolve().parents[1] / "live_screens.py"
 
 
-def test_there_are_exactly_fourteen_screens():
+def test_there_are_exactly_twenty_screens():
     import live_screens
-    assert len(live_screens.SCREENS) == 14
+    assert len(live_screens.SCREENS) == 20
 
 
 def test_no_screen_publishes_a_control_surface():
@@ -131,10 +131,12 @@ PUBLIC_UNSAFE_DEFAULTS = {
 }
 
 # Reviewed and safe as they stand. The reasoning, grouped:
-#   * read only by pages this origin does not publish (``pages/settings.py``,
-#     ``pages/ticker.py``) -- and the marquee in particular is mounted by
-#     ``main._layout``, which this process does not run, so ``ticker_enabled``
-#     never reaches the ~20-minute paid Claude verdict here;
+#   * read only by pages this origin does not publish (``pages/settings.py``);
+#   * ``ticker_enabled`` / ``ticker_speed`` -- the marquee IS mounted here since
+#     2026-09-21, and both keys only choose whether and how fast to draw it. It
+#     reads three shared market caches and enqueues nothing; the headline it
+#     shows is quoted from the published market report, not a Claude call
+#     (market_svc stopped calling Claude for it on 2026-09-16);
 #   * or read by a published page purely to CHOOSE WHAT TO DRAW
 #     (``macro_skin``, the three ``gamma_*`` display knobs,
 #     ``alert_market_hours_only`` as a gate, the remaining ``voice_*`` keys

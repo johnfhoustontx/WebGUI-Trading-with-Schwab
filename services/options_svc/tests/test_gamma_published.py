@@ -312,10 +312,10 @@ def test_the_stash_holds_every_captured_symbol_at_once(symbol):
 # --- history is published only for the views a screen actually DRAWS --------
 # Each published screen renders exactly its pinned view (the view picker is not
 # built on a pinned page), so:
-#   $SPX pins GEX  -> draws the intraday heatmap, which IS the history
-#   SPY/QQQ pin Flow -> the Flow branch reads snap["flow"] + snap["prem_ladder"]
-#                       from the MAIN payload and returns before it ever touches
-#                       the per-view history cache
+#   $SPX pins all four heatmap views (+ Term, from the main payload)
+#   SPY/QQQ pin GEX (history) and Flow -> the Flow branch reads snap["flow"] +
+#                       snap["prem_ladder"] from the MAIN payload and returns
+#                       before it ever touches the per-view history cache
 # Twelve history keys is a ~4x multiplication of exactly the cost the 2026-08-20
 # history split was written to remove.
 
@@ -339,8 +339,9 @@ def test_only_the_views_a_screen_draws_get_a_published_history(monkeypatch):
         assert got == want, f"{symbol} published {got}, screens draw {want}"
 
 
-def test_the_flow_screens_pay_for_no_history_at_all(monkeypatch):
-    """SPY and QQQ pin Flow, which is drawn entirely from the main payload."""
+def test_spy_pays_for_its_gex_history_and_no_other(monkeypatch):
+    """SPY's screens are GEX (a heatmap, drawn from history) and Flow (drawn
+    entirely from the main payload), so exactly one history key is written."""
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers.compute, "gamma_snapshot",
                         lambda s, chain=None: _snap(s))
@@ -348,8 +349,9 @@ def test_the_flow_screens_pay_for_no_history_at_all(monkeypatch):
     handlers.refresh_gamma_published(bus, "SPY")
 
     assert _pub(bus, "SPY")["symbol"] == "SPY"          # the screen still draws
-    for view in handlers.GAMMA_HISTORY_VIEWS:
-        assert bus.cache_get(handlers.gamma_pub_history_key("SPY", view)) is None
+    written = {v for v in handlers.GAMMA_HISTORY_VIEWS
+               if bus.cache_get(handlers.gamma_pub_history_key("SPY", v))}
+    assert written == {"GEX"}
 
 
 def test_the_private_page_still_gets_every_view_history(monkeypatch):

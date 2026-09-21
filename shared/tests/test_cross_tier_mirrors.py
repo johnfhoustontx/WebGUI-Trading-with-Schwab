@@ -344,8 +344,12 @@ def test_options_svc_publishes_exactly_the_symbols_the_live_screens_pin():
         pytest.skip(f"{LIVE_SCREENS} not written yet - the pairing engages when "
                     "it lands; the literal pin above holds until then")
     screens = _gamma_screen_symbols(LIVE_SCREENS)
-    assert len(screens) == len(set(screens)), (
-        f"two live screens pin the same gamma symbol: {screens}")
+    # Several screens may share a symbol (the $SPX GEX, Charm, DEX, Vanna and
+    # Term boards all read ONE per-symbol snapshot); two screens pinning the
+    # same symbol AND view would be the same page published twice.
+    pins = [p for p in _gamma_screen_pins(LIVE_SCREENS) if p[0]]
+    assert len(pins) == len(set(pins)), (
+        f"two live screens pin the same gamma symbol and view: {pins}")
     assert set(screens) == set(_published_gamma_symbols()), (
         "a live screen names a gamma symbol options_svc does not publish (it "
         "would poll a key nobody writes and stay empty), or options_svc pays to "
