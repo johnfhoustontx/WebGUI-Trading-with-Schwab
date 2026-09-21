@@ -197,6 +197,16 @@ from pages.options import theme                       # noqa: E402
 # ``shell``, which must stay a leaf module.
 shell.publish(live_screens.PUBLIC_ROUTES)
 
+# NiceGUI's benign "parent slot of the element has been deleted" record - a
+# timer meeting a disconnect (CLAUDE.md, ``ui_guard``) - dropped here as main.py
+# drops it. This is the process with the MOST disconnects, every anonymous
+# visitor closing a tab, so without it this journal is the noisiest place that
+# traceback appears. After all five layers above, not up with the imports: it
+# touches no page, but nothing from ``pages`` belongs above the refusals.
+from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
+
+install_deleted_slot_log_filter()
+
 _STATIC_DIR = shell._STATIC_DIR
 
 # ── the ONE non-page route this process serves ───────────────────────────────

@@ -859,3 +859,77 @@ def test_a_real_prod_process_serves_once_the_acl_user_is_given():
     out = _serve(f"redis://live:pw@127.0.0.1:6379/{repo_paths.REDIS_DB}")
     assert out.returncode == 0, out.stderr
     assert "SERVED" in out.stdout, out.stdout
+
+
+
+# ── the disconnect-race log filter ──────────────────────────────────────────
+
+def test_a_real_public_process_filters_the_disconnect_race():
+    """The public screens drop NiceGUI's benign "parent slot of the element has
+    been deleted" record, as the private app does.
+
+    It is a timer meeting a disconnect (CLAUDE.md, ``ui_guard``), and this is the
+    process with the MOST disconnects - every anonymous visitor closing a tab -
+    so without the filter its journal is the noisiest place that traceback
+    appears. ``main.py`` installs it; this is a separate entrypoint and has to
+    install it itself.
+
+    ⚠ A FRESH interpreter, for the reason the route test above gives: main.py
+    installs this filter at MODULE level, and every test process has imported
+    main for its own reasons - so in-process the filter is already on the logger
+    and this would pass whether live_main installed it or not. The probe also
+    reports whether ``main`` was imported, because if it had been, main could be
+    the one that installed it.
+    """
+    probe = (
+        "import importlib.util, logging, sys;"
+        "spec = importlib.util.spec_from_file_location('live_main', sys.argv[1]);"
+        "m = importlib.util.module_from_spec(spec); sys.modules['live_main'] = m;"
+        "spec.loader.exec_module(m);"
+        "print('main' in sys.modules);"
+        "print(sorted(type(f).__name__ for f in logging.getLogger('nicegui').filters))"
+    )
+    out = subprocess.run([sys.executable, "-c", probe, str(_LIVE_MAIN)],
+                         capture_output=True, text=True, timeout=180,
+                         cwd=str(_LIVE_MAIN.parent.parent), env=_child_env())
+    assert out.returncode == 0, f"the public entrypoint did not import: {out.stderr}"
+    imported_main, filters = out.stdout.strip().splitlines()[-2:]
+    assert imported_main == "False", "main was imported, so it could have installed it"
+    assert "_DeletedSlotFilter" in ast.literal_eval(filters), (
+        "the public process does not filter the disconnect race - every visitor "
+        "closing a tab can write a full traceback to its journal")
+
+
+def test_the_filter_is_installed_after_every_refusal():
+    """The filter touches no page, but nothing from ``pages`` belongs above the
+    read-only layers - this file's docstring is explicit that the import order
+    is load-bearing, and warns against tidying it into one block at the top.
+
+    ⚠ Compared by AST statement line, NOT by text position: the module docstring
+    names ``app_settings.freeze(...)`` on its own, far above any code, so a
+    ``src.index(...)`` comparison would pass no matter where the install went.
+    """
+    tree = ast.parse(_LIVE_MAIN.read_text(encoding="utf-8"))
+
+    def _call_line(dotted):
+        for node in tree.body:
+            if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+                f = node.value.func
+                name = (f"{f.value.id}.{f.attr}"
+                        if isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
+                        else getattr(f, "id", None))
+                if name == dotted:
+                    return node.lineno
+        return None
+
+    imports = [n.lineno for n in tree.body
+               if isinstance(n, ast.ImportFrom) and n.module == "pages.ui_guard"]
+    freeze = _call_line("app_settings.freeze")
+    publish = _call_line("shell.publish")
+    install = _call_line("install_deleted_slot_log_filter")
+    assert freeze and publish, "the read-only layers moved - re-read this test"
+    assert imports, "live_main never imports the filter"
+    assert install, "live_main never installs the filter"
+    last_layer = max(freeze, publish)
+    assert min(imports) > last_layer and install > last_layer, (
+        "the filter arrives before the read-only layers are in place")
