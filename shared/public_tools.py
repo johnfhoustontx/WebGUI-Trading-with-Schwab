@@ -233,13 +233,41 @@ def _math_args(raw, today):
     return None if any(v is None for v in args.values()) else args
 
 
+MAX_SNAPSHOT_EXPIRIES = 8
+
+
+def _clean_expiries(raw, today):
+    """A snapshot request's OPTIONAL expirations, sorted and de-duplicated, or
+    ``()`` for none, or None when any entry is unusable (the whole request is
+    then refused). ``[]`` and an absent list are the same request."""
+    if raw is None:
+        return ()
+    if not isinstance(raw, list) or len(raw) > MAX_SNAPSHOT_EXPIRIES:
+        return None
+    out = [_pr.clean_expiry(e, today) for e in raw]
+    if any(e is None for e in out):
+        return None
+    return tuple(sorted(set(out)))
+
+
 def _tools_args(raw, today):
     kind = raw.get("kind")
     symbol = clean_symbol(raw.get("symbol"))
     if symbol is None:
         return None
     args = {"kind": kind, "symbol": symbol}
-    if kind in ("chain", "sim_snapshot"):
+    if kind == "chain":
+        return args
+    if kind == "sim_snapshot":
+        # When a public snapshot has expired, the page asks for a new one with
+        # its legs' expirations, so they come back with the load rather than
+        # one Schwab fetch each. Omitted when empty, so a bare request keeps
+        # the key it always had.
+        exps = _clean_expiries(raw.get("expiries"), today)
+        if exps is None:
+            return None
+        if exps:
+            args["expiries"] = list(exps)
         return args
     if kind in ("expiry", "sim_expiry"):
         args["expiry"] = _pr.clean_expiry(raw.get("expiry"), today)
@@ -267,6 +295,32 @@ def tools_command(raw, today=None):
         return None
     args = _tools_args(raw, today)
     return None if args is None else {"type": TOOLS_TYPE, "args": args}
+
+
+# How a request ended: Rescue's codes plus ``load_first``, a request that needs
+# a chain or a Simulator snapshot this service no longer holds (a restart, an
+# eviction, or one never loaded). "done" and "cached" carry a result.
+OUTCOMES = _pr.OUTCOMES + ("load_first",)
+
+# Worded for these tools, not copied from Rescue's: its sentences name the
+# rescue menu ("Rescue runs while the market is open"), which would be wrong on
+# the Calculator. The CODES are Rescue's, so a page can share the handling.
+OUTCOME_TEXT = {
+    "done": "Done just now.",
+    "cached": "Showing a result from the last few minutes.",
+    "duplicate": "This was just asked for. Try again in a minute.",
+    "throttled": ("This trade was just rated several times with other prices. "
+                  "Try again in a few minutes."),
+    "closed": "Loading and rating run while the market is open.",
+    "budget": "Today's public loads are used up. They reset tomorrow.",
+    "not_listed": "That expiration is not listed for this symbol.",
+    "off_ladder": "A strike in this trade is not listed for that expiration.",
+    "no_options": "No listed options were found for this symbol.",
+    "expired": "The request waited too long in the queue. Please try again.",
+    "invalid": "That request could not be read. Check the legs and try again.",
+    "error": "The request failed. Please try again later.",
+    "load_first": "Load the symbol first.",
+}
 
 
 # Rescue's hash, so ``is_key`` below recognises both forms' keys alike.

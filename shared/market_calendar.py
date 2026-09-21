@@ -257,6 +257,12 @@ _DEFAULTS = {
         # the first minutes of the session for the same reason: the rescue menu
         # reprices the trade live, and pre-open marks are stale.
         "rescue_public": {"start": "08:40", "end": "15:00"},
+        # The public Calculator and Simulator's Schwab-spending requests (a
+        # chain, one more expiration, a trade rating, a Simulator snapshot).
+        # Held separate from ``rescue_public`` for the same reason that one is
+        # separate from ``finder_public``. Pricing requests are not gated: they
+        # spend no Schwab call and run on whatever is already held.
+        "tools_public": {"start": "08:40", "end": "15:00"},
         # ``end_exclusive`` lives here, not only in the TOML, so a missing or
         # corrupt file still degrades to the SAFE behavior: falling back to
         # inclusive would silently re-open the 15:30 ET entry slot.

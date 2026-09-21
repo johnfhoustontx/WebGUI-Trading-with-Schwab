@@ -483,6 +483,10 @@ _SESSIONS = ConfigFile(
         _window("rescue_public", "Public Rescue form",
                 "When the public site will load strikes and compute rescue "
                 "options. Outside it the form says when it opens.", ()),
+        _window("tools_public", "Public Calculator and Simulator",
+                "When the public site will load a chain, rate a trade or load a "
+                "Simulator snapshot. Pricing a loaded position works at any "
+                "time.", ()),
         Section("Driver entry window",
                 "When the autonomous driver may open trades. EASTERN time.", (
             Field("windows.driver_entry.start", "Starts (ET)", "", kind="time"),

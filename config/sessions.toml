@@ -107,6 +107,15 @@ end   = "15:00"
 start = "08:40"
 end   = "15:00"
 
+[windows.tools_public]
+# When the public Calculator and Simulator (live.neuralstrike.co/calculator,
+# /simulator) will load a chain, one more expiration, a trade rating or a
+# Simulator snapshot - the requests that spend Schwab calls. Pricing a position
+# already loaded runs at any time: it spends none. The day's total is capped by
+# the shared [budget] in config/rescue_public.toml.
+start = "08:40"
+end   = "15:00"
+
 [windows.driver_entry]
 # Autonomous driver entry window, in ET (not CT) — matches the existing
 # constant it replaces. Skips the open's first ~15 min and takes no new

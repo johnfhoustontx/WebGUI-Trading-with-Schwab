@@ -317,3 +317,59 @@ def test_a_non_finite_config_value_falls_back_never_raises(monkeypatch, bad):
     assert pt.limits() == pt.DEFAULTS["limits"]
     assert pt.tools_per_hour() == pt.DEFAULTS["visitor"]["tools_per_hour"]
     assert pt.math_per_hour() == pt.DEFAULTS["visitor"]["math_per_hour"]
+
+
+# ── Task 7: the worker's outcomes, and a snapshot's expirations ─────────────
+
+def test_outcomes_are_rescues_plus_load_first():
+    from shared import public_rescue
+    assert pt.OUTCOMES == public_rescue.OUTCOMES + ("load_first",)
+    assert set(pt.OUTCOME_TEXT) == set(pt.OUTCOMES)
+    assert pt.OUTCOME_TEXT["load_first"] == "Load the symbol first."
+    for code, text in pt.OUTCOME_TEXT.items():
+        assert text and "rescue" not in text.lower(), code
+
+
+def test_a_snapshot_request_may_carry_its_legs_expirations():
+    cmd = pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY",
+                            "expiries": [EXP, "2026-10-02", EXP]}, TODAY)
+    assert cmd["args"]["expiries"] == ["2026-10-02", EXP], "not de-duplicated"
+
+
+def test_a_snapshot_request_without_expirations_is_unchanged():
+    bare = pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY"}, TODAY)
+    empty = pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY",
+                              "expiries": []}, TODAY)
+    assert bare["args"] == empty["args"] == {"kind": "sim_snapshot", "symbol": "SPY"}
+    assert pt.request_key(bare, TODAY) == pt.request_key(empty, TODAY)
+
+
+def test_expiration_order_does_not_change_a_snapshot_requests_key():
+    a = pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY",
+                          "expiries": [EXP, "2026-10-02"]}, TODAY)
+    b = pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY",
+                          "expiries": ["2026-10-02", EXP]}, TODAY)
+    assert pt.request_key(a, TODAY) == pt.request_key(b, TODAY)
+
+
+@pytest.mark.parametrize("bad", [
+    ["soon"], [EXP, None], [EXP, 20261016], "2026-10-16", {"a": EXP}, 7, True,
+    ["2026-09-01"],                                   # already past
+    [f"2026-10-{d:02d}" for d in range(1, 10)],       # nine entries
+])
+def test_a_bad_expirations_list_refuses_the_snapshot_request(bad):
+    assert pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY",
+                             "expiries": bad}, TODAY) is None
+
+
+def test_eight_expirations_are_accepted():
+    exps = [f"2026-10-{d:02d}" for d in range(1, 9)]
+    cmd = pt.tools_command({"kind": "sim_snapshot", "symbol": "SPY",
+                            "expiries": exps}, TODAY)
+    assert cmd["args"]["expiries"] == exps
+
+
+def test_only_a_snapshot_request_carries_expirations():
+    cmd = pt.tools_command({"kind": "chain", "symbol": "SPY",
+                            "expiries": [EXP]}, TODAY)
+    assert cmd["args"] == {"kind": "chain", "symbol": "SPY"}
