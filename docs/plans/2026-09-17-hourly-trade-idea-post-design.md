@@ -57,5 +57,6 @@ A failed save never blocks the post.
 
 ## Not done
 
-- No X/Twitter post; the existing X channel is separate and still off.
+- ~~No X/Twitter post~~ — since 2026-09-22 the card also posts to X after
+  Discord and Telegram; see `2026-09-22-x-posting-design.md`.
 - A long put's "max profit" is the stock-to-zero figure (true, and large).

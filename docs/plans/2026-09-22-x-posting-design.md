@@ -1,6 +1,6 @@
 # X posting — market reports, hourly trade ideas, ad-hoc marketing — design
 
-**Date:** 2026-09-22 · **Status:** approved, not built
+**Date:** 2026-09-22 · **Status:** built (off and dry until keys are set)
 
 ## Ask
 
@@ -31,7 +31,7 @@ each carrying popular hashtags so the posts surface in similar feeds.
   context via `requests-oauthlib` (already locked as tweepy's dependency).
   **Verify the upload endpoint with a real account before enabling.**
 - Never raises. Every attempt — including dry runs and refusals — is logged to
-  `cache:x:log` (last 100) and appended to `x_posts.jsonl` on disk.
+  `cache:options:x_log` (last 100) and appended to `x_posts.jsonl` on disk.
 - Config: an `x` block in `notifications.json` — `enabled`, `dry_run`,
   credentials, `daily_cap` (default 15; the free tier is ~17/24 h — check the
   account's tier), `kinds.<kind>.enabled`, `hashtags.<kind>`, `max_tags`. The old
@@ -52,19 +52,23 @@ imports tweepy or calls the X API.
   marketing `#options #trading`. `max_tags` default 4, counting cashtags.
 - Tags are de-duplicated case-insensitively and normalised to a leading `#`/`$`.
 
-## 3. Market reports (`market_svc`)
+## 3. Market reports (`market_svc` detects, `options_svc` posts)
+
+Changed while planning: market_svc only enqueues `x_post_report` on `cmd:options`;
+options_svc renders the card (reusing `trade_idea_card`'s canvas) and posts, so
+every X post leaves from one process.
 
 - The scheduler already watches `report_summary.report_stamp`. A new stamp also
   triggers a post: `report_card.py` draws the card (verdict `h1`, slot chip, up to
   4 section `h2`s) with `card_kit`-style Pillow drawing, then `x_post.post`.
-- Dedup: the posted stamp is remembered in Redis (`cache:x:report_posted`), so a
-  restart cannot repost. A report whose `as_of` is older than
-  `report_max_age_min` (45) when first seen is skipped and logged.
+- Dedup: the posted stamp is remembered in Redis (`cache:options:x_reports`), so a
+  restart cannot repost. A report whose `latest.html` mtime is older than
+  `report_max_age_min` (45), or unknown, is skipped and remembered.
 
 ## 4. Hourly trade ideas (`options_svc`)
 
 - `run_trade_idea` already renders the PNG. After the Discord/Telegram sends it
-  calls `x_post.post(trade_idea.x_caption(idea), png, kind="trade_idea")`,
+  calls `x_post.post(trade_idea.x_text(idea, ...), png, kind="trade_idea")`,
   wrapped so an X failure can never affect the other sends. The outcome is added
   to the `cache:options:trade_idea` result as `x`.
 
@@ -75,7 +79,7 @@ imports tweepy or calls the X API.
   shots, converted to PNG), a preview, and a confirm-gated **Post**.
 - Tier 1 never calls X: Post enqueues `{"type": "x_post", ...}` on `cmd:options`
   (image as base64, size-capped) and the page reads the outcome from
-  `cache:x:log`. `x_post` is replay-guarded like the other side-effectful
+  `cache:options:x_log`. `x_post` is replay-guarded like the other side-effectful
   commands (`_is_stale_side_effect`).
 - The page lists recent posts from all three sources with status, link and
   reason. It is **not** a public live screen.
@@ -86,3 +90,10 @@ Text fitting, hashtag assembly/cap, the daily cap, report dedup and staleness,
 the report card over a fixture `latest.html`, the trade-idea path with an X
 client that errors and one that raises. First prod run is `dry_run: true`; read
 the log for a day, then enable.
+
+## Not done
+
+- Picking a gallery or live screenshot on `/x` (upload covers it).
+- The `/x` page's count assumes `max_tags` 4: the page cannot read
+  `notifications.json`, which holds secrets.
+- No live post yet: the v2 media upload's form fields are unverified.

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-18</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -598,6 +598,16 @@ skip-unchanged).</p>
 <td><code>paper_analyze</code></td>
 <td><code>{trade_id}</code></td>
 <td><code>cache:options:paper_analyze</code></td>
+</tr>
+<tr>
+<td><code>x_post</code></td>
+<td><code>{text, tags[], link, image_b64?}</code> — an ad-hoc marketing post from the <code>/x</code> page. The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded</td>
+<td><code>cache:options:x_log</code></td>
+</tr>
+<tr>
+<td><code>x_post_report</code></td>
+<td><code>{report, mtime}</code> — enqueued by market_svc when the published market report changes; <code>report</code> is the <code>cache:market:summary</code> payload, <code>mtime</code> the epoch seconds of <code>latest.html</code>. Posted once per report (<code>report_date</code>, <code>slot</code>, <code>as_of</code>, <code>headline</code>); a report older than <code>x.report_max_age_min</code> (45), or of unknown age, is skipped. Replay-guarded</td>
+<td><code>cache:options:x_log</code> + <code>cache:options:x_reports</code></td>
 </tr>
 <tr>
 <td><code>captured_reload</code></td>
@@ -1246,6 +1256,9 @@ cache:options:gamma_analyze_premarket | _midday | _close    (per-slot auto brief
 cache:options:gamma_regime_state
 cache:options:market_snapshot  events:options:market_snapshot
 cache:options:trade_idea                                    (hourly post: last result + today's posted set)
+cache:options:x_log                                         (every X post attempt, newest first, last 100)
+cache:options:x_count                                       (X posts made today, CT day - the daily cap)
+cache:options:x_reports                                     (market reports already posted to X)
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
 cache:options:calc_rating      events:options:calc_rating   (Rate my trade)

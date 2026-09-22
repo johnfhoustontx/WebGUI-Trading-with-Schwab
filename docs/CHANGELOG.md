@@ -4,7 +4,34 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-22 (**Public Gamma page, Phases 2 and 3: the page, and
+**Last updated:** 2026-09-22 (**X posting: market reports, hourly trade ideas,
+ad-hoc marketing**. Ships OFF and dry until OAuth keys are set.)
+
+- **One path to X.** `shared/notify/x_post.py`: v2 media upload + v2 create post
+  over `requests-oauthlib` (OAuth 1.0a). Gates `x.enabled`, per-`kinds`,
+  `dry_run`, credentials, `daily_cap` (15, CT day); every attempt logged to
+  `cache:options:x_log` and `options-scanner/data/x_posts.jsonl`. Never raises.
+  A post X did not confirm is `unknown` and counted, never reposted. Credentials
+  never reach the log (an exception is logged by type name only).
+- **Text and hashtags.** `shared/x_text.py` (stdlib, Tier-1 allowed): X's
+  weighted length (links 23, emoji/CJK 2), hashtags per kind from
+  `x.hashtags.*` plus derived cashtags (`$NVDA`, `$SPY $QQQ` on reports,
+  `#0DTE` inside a day), capped by `x.max_tags` (4). Tags drop before the body.
+- **Reports.** market_svc enqueues `x_post_report` when the published report
+  changes; options_svc renders `report_card.py` and posts it once per report
+  (`cache:options:x_reports`), skipping one over 45 min old.
+- **Trade ideas.** `run_trade_idea` posts the same card to X after Discord and
+  Telegram; an X failure never costs the private post (`result["x"]`).
+- **Ad-hoc.** The `/x` page (More → Post to X): text, link, hashtags, image, a
+  live 280 count and preview, confirm, and the log of every post.
+- **Removed.** The per-signal tweepy poster (`notify_twitter` and friends) and
+  the `tweepy` dependency; `requests-oauthlib` is now declared directly. Keys in
+  the old `twitter` block carry over to `x`; `X_*` (or `TWITTER_*`) env wins.
+- ⚠ **Unverified until the first live post:** the v2 media upload's form
+  fields. Turn on with `dry_run: true` first. Design + plan:
+  `docs/plans/2026-09-22-x-posting-{design,plan}.md`.
+
+**Prior — 2026-09-22** (**Public Gamma page, Phases 2 and 3: the page, and
 one screen instead of nine**.)
 
 - **The page.** `gamma.render(public=True)` at `live.neuralstrike.co/gamma`: the

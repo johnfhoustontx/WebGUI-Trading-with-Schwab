@@ -135,6 +135,9 @@ two streams, request builders, validators, result keys and config - pinned by
 stream, request builder, status and dropdown-list keys and hot-set config -
 `shared.symbols` + `shared.config_toml` only, pinned by
 `shared/tests/test_public_gamma.py`) ·
+`shared.x_text` (since 2026-09-22; X's weighted length, hashtags and
+fitting a post into 280 - stdlib only, pinned by `shared/tests/test_x_text.py`,
+so the `/x` page's live count is the service's own computation) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
@@ -397,6 +400,7 @@ Routes:
 | `/driver` | Claude Trades — monitor + override for the autonomous Claude decision layer, trading defined-risk spreads into its **own isolated paper book**. Paper only. [Detail](docs/webgui-routes.md) | built |
 | `/settings` | Settings — three sub-tabs. **General**: alert/ticker preferences, Schwab + Claude API call counts, and maintenance actions. **Appearance** (2026-09-19): every colour and font in eight groups that follow the design standard rather than the TOML's sections, over a live preview, saved as a `config/local/theme.toml` override. **Configuration** (2026-09-19): every `config/*.toml` setting by purpose, from the `webgui/config_schema.py` catalogue, saved as `config/local/` overrides, with a restart offer. [Detail](docs/webgui-routes.md) | built |
 | `/portfolio` | Portfolio — Holdings / Sectors / Performance over the portfolio model, with live-streaming P&L via the service’s SSE consumer. | built |
+| `/x` | **Post to X** (More tab, private only) — compose an ad-hoc marketing post (text, link, hashtags, optional image) with a live 280 count, confirm, and enqueue `x_post` on `cmd:options`; below it, the log of EVERY X post (reports, hourly trade ideas, ad-hoc) from `cache:options:x_log`, with why any was refused. The page never talks to X. [Design](docs/plans/2026-09-22-x-posting-design.md) | built |
 | `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` and `driver:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. ⚠ It **confirms, and refuses a cold cache** (2026-09-20): `write_archive` overwrites per DATE and every builder degrades to an empty note, so an unchecked click while the stack is stopped replaced the day's real report with a complete-looking empty one — `has_data` gates the button as it already gated `tools/generate_eod_report.py`. [Detail](docs/webgui-routes.md) | built |
 | `/market` | Market Dashboard — live grid of ~48 macro tickers in framed category panels, coloured by semantic risk-on/off. Reader of `cache:market:dashboard`. [Detail](docs/webgui-routes.md) | built |
 | `/status` | System Status — health board probing Redis / proxy / Schwab auth / the six services / webgui / **`webgui_live`** (a `peer` card: an HTTP liveness probe on the public screens, deliberately OUT of the 2 s health fan-out, so a dead public origin never badges the rail or chimes), plus cache freshness; per-component Restart via `systemctl --user`, **confirm-gated since 2026-09-20** — nine of the eleven cards carry one, including this web app and the proxy, and the dialog names what THAT restart costs. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
@@ -2126,10 +2130,22 @@ the code already has, so a suppressed dev cannot take a code path prod never tak
 
 | Flag | Enforced in | Effect |
 |---|---|---|
-| `allow_notifications` | `shared/notify/channels.py:load_config` | recursively zeroes **every** `enabled` key, LAST so it also overrides the `NOTIFY_ENABLED`/`TWITTER_ENABLED` env escapes — kills Telegram, Discord, Fi-SMS, the public **X/Twitter** poster and the sentiment state-transition alert in one stroke. `options_svc/push_notify.load_config` delegates here, so this is the single chokepoint |
+| `allow_notifications` | `shared/notify/channels.py:load_config` | recursively zeroes **every** `enabled` key, LAST so it also overrides the `NOTIFY_ENABLED`/`X_ENABLED` env escapes — kills Telegram, Discord, Fi-SMS, **X** (and each of its `kinds`) and the sentiment state-transition alert in one stroke. `options_svc/push_notify.load_config` delegates here, so this is the single chokepoint |
 | `allow_claude` | the two client factories — `options_svc/compute.py`, `driver_svc/decider.py` — return `None` | falls into the existing *no-API-key* path: the briefing renders its explanatory page, the decider stands down (market_svc makes no Claude call since 2026-09-16 — its summary quotes the published market report) |
 | `schedulers` | `services/_scaffold.py:_schedulers_enabled` (consumed by `make_app`) | all six services stop collecting and polling; **command handlers still run**, so the UI stays fully usable off the snapshot |
 | `autonomous_trading` | `driver_svc/handlers.py:run_autonomous_cycle` early-returns | belt-and-braces: `cycle` is also a *command* and the arm state lives in Redis, so the scheduler skip alone would not stop a snapshot that carried `cache:driver:control` enabled |
+
+**X has ONE posting path (2026-09-22).** Every post — market reports, hourly
+trade ideas, the `/x` page's ad-hoc posts — goes through
+`shared/notify/x_post.post`, called only from `options_svc` (market_svc enqueues
+`x_post_report` rather than posting). Nothing else imports tweepy or calls the X
+API; `test_push_notify.py::test_nothing_but_x_post_talks_to_x` pins it. That one
+function owns the gates (`x.enabled`, per-`kinds`, `dry_run`, credentials,
+`daily_cap`) and the log (`cache:options:x_log`, `x_posts.jsonl`), so a new
+source cannot forget one. ⚠ A post whose create call fails without a confirmation
+is recorded `unknown` and COUNTED — it may be live, and reposting is the worse
+failure. ⚠ `x_post` and `x_post_report` are replay-guarded: a fresh consumer
+group must not re-post a stream's history in public.
 
 **Escape hatch:** `set TRADING_ENABLE_SCHEDULERS=1` before launching turns
 schedulers on for that session — the one dev case that genuinely needs collection
@@ -2286,7 +2302,7 @@ both directions (audited 2026-08-29).** `requirements.lock` is what prod
 installs, so the test that matters is: *every package declared in
 `requirements.txt` appears in the lock, and nothing else does.*
 
-- **Missing.** `tweepy` — a declared runtime dep (the X/Twitter push channel) —
+- **Missing.** `tweepy` — then a declared runtime dep (the old X/Twitter push channel, retired 2026-09-22) —
   was absent from the lock **along with both of its own deps** (`oauthlib`,
   `requests-oauthlib`). Confirmed live: **prod's venv did not have it**. The
   import in `options_svc/push_notify.py` is lazy, and `twitter.enabled` is unset,

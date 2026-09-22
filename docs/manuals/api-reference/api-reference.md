@@ -243,6 +243,8 @@ skip-unchanged).
 | `paper_delete` | `{trade_id}` | `cache:options:paper_trades` |
 | `paper_delete_closed` | — | `cache:options:paper_trades` |
 | `paper_analyze` | `{trade_id}` | `cache:options:paper_analyze` |
+| `x_post` | `{text, tags[], link, image_b64?}` — an ad-hoc marketing post from the `/x` page. The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded | `cache:options:x_log` |
+| `x_post_report` | `{report, mtime}` — enqueued by market_svc when the published market report changes; `report` is the `cache:market:summary` payload, `mtime` the epoch seconds of `latest.html`. Posted once per report (`report_date`, `slot`, `as_of`, `headline`); a report older than `x.report_max_age_min` (45), or of unknown age, is skipped. Replay-guarded | `cache:options:x_log` + `cache:options:x_reports` |
 | `captured_reload` | — | `cache:options:captured` |
 | `captured_reprice` | — | `cache:options:captured` + `cache:options:captured_flags` |
 | `captured_close` | `{signal_id, exit_val, reason}` | `cache:options:captured` |
@@ -591,6 +593,9 @@ cache:options:gamma_analyze_premarket | _midday | _close    (per-slot auto brief
 cache:options:gamma_regime_state
 cache:options:market_snapshot  events:options:market_snapshot
 cache:options:trade_idea                                    (hourly post: last result + today's posted set)
+cache:options:x_log                                         (every X post attempt, newest first, last 100)
+cache:options:x_count                                       (X posts made today, CT day - the daily cap)
+cache:options:x_reports                                     (market reports already posted to X)
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
 cache:options:calc_rating      events:options:calc_rating   (Rate my trade)
