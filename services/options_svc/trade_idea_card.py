@@ -131,12 +131,14 @@ def _mark(c, x, y, size):
            BRAND_TITLE, 6.2 * k)
 
 
-def _header(c, now):
+def _header(c, now, label="TRADE IDEA"):
+    """The lockup, a right-aligned ``<label> · <date> · <time> CT`` eyebrow and the
+    rule under both. ``label`` lets the market report card share it."""
     _mark(c, PAD, 30, 34)
     x = PAD + 46
     x += c.text(x, 38, "NEURAL", 17, "extrabold", BRAND_TITLE, spacing=2.4) + 2.4
     c.text(x, 38, "STRIKE", 17, "extrabold", BRAND_ACCENT, spacing=2.4)
-    right = f"TRADE IDEA  ·  {now:%a %b} {now.day}  ·  {now:%H:%M} CT".upper()
+    right = f"{label}  ·  {now:%a %b} {now.day}  ·  {now:%H:%M} CT".upper()
     c.text(WIDTH - PAD - c.width(right, 13, "semibold", 1.6), 41, right, 13, "semibold",
            K.EYEBROW, spacing=1.6)
     c.line([(PAD, 86), (WIDTH - PAD, 86)], K.EDGE, 1)
