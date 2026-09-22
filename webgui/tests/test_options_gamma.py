@@ -2138,7 +2138,12 @@ def test_render_reads_the_resolved_view_not_the_shared_key_literal():
         "render still reads the shared symbol-agnostic key by name; a pinned "
         "symbol would render whatever the private app last selected")
     assert "snapshot_view(symbol)" in src
-    assert "history_key(view, symbol)" in src or "history_key(v, symbol)" in src
+    # Since the public Gamma page (2026-09-22) the history symbol is resolved by
+    # _hsym(): the PIN on a pinned or private render, the symbol on screen on
+    # the public one. Both halves are asserted, so a render that dropped the
+    # pin again would still fail here.
+    assert "history_key(view, _hsym())" in src
+    assert "return _current_symbol() if _public else symbol" in src
 
 
 # ── a PINNED page shows only its pinned view, and drives no fetches ─────────

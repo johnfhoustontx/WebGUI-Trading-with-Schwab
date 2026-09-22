@@ -127,7 +127,28 @@ def send_to_calculator_legs(payload):
     _shell.navigate_to("/options/calculator")
 
 
+# On the PUBLIC origin the Dealer Positioning hand-off is per browser TAB
+# (NiceGUI tab storage), not the module stash above: that stash is one value
+# shared by every visitor, so one visitor's click on the public Flow Alerts
+# screen would move the next visitor's Gamma page. Tab storage raises until the
+# socket is up and when the tab's storage is gone; either way the hand-off is
+# simply lost, which costs a visitor one pick.
+_TAB_GAMMA = "gamma_symbol"
+
+
+def _tab():
+    from nicegui import app
+    return app.storage.tab
+
+
 def set_pending_gamma(symbol):
+    if _shell.is_public():
+        from shared.symbols import clean_symbol
+        try:
+            _tab()[_TAB_GAMMA] = clean_symbol(symbol)
+        except Exception:  # noqa: BLE001 - see _TAB_GAMMA
+            pass
+        return
     _pending["gamma"] = symbol
 
 
@@ -136,6 +157,12 @@ def take_pending_gamma():
 
     One-shot matters: a symbol left in the stash would silently re-hijack the
     gamma dropdown the next time that page is built."""
+    if _shell.is_public():
+        from shared.symbols import clean_symbol
+        try:
+            return clean_symbol(_tab().pop(_TAB_GAMMA, None))
+        except Exception:  # noqa: BLE001 - see _TAB_GAMMA
+            return None
     s = _pending.get("gamma")
     _pending["gamma"] = None
     return s

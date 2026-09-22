@@ -16,16 +16,20 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 ``heatmap_matrix`` sorts strikes) require float keys — so the page re-floats them
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
+import datetime as _dt
+import logging
 import math
 from zoneinfo import ZoneInfo
 
 import app_settings
 import page_help as _page_help
+import visitor_limit
 from pages import busy as _busy
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 from shared import market_calendar as _mc
+from shared import public_gamma as _pg  # Tier-1 allow-listed: config + validator
 from shared import symbols as _symbols
 from . import flow_panels as _fx
 from .inputs import select_all_on_focus
@@ -1763,7 +1767,7 @@ def shows_view_picker(view) -> bool:
     return view is None
 
 
-def may_enqueue(symbol, view) -> bool:
+def may_enqueue(symbol, view, public=False) -> bool:
     """Whether this render may put ANY command on ``cmd:options``.
 
     This page can send four, and every one of them spends something the owner
@@ -1787,8 +1791,12 @@ def may_enqueue(symbol, view) -> bool:
     not either.
 
     The screens stay current regardless: options_svc republishes the per-symbol
-    keys on its own collection cadence, and the page's version-poll repaints."""
-    return symbol is None and view is None
+    keys on its own collection cadence, and the page's version-poll repaints.
+
+    ``public=True`` is the public Gamma page (live.neuralstrike.co/gamma): no
+    pin at all, and still no command -- its one write is
+    ``bus_client.request_public_gamma``, on a stream of its own."""
+    return not public and symbol is None and view is None
 
 
 def reads_snapshot(view) -> bool:
@@ -1829,14 +1837,20 @@ _POLL_REPORTS = ("options:gamma_explain", "options:gamma_analyze",
                  "options:gamma_briefings", "options:gamma_history")
 
 
-def polled_views(symbol, view) -> list[str]:
+def polled_views(symbol, view, public=False) -> list[str]:
     """Every cache view this render's 2 s version-poll probes.
 
     Pure, and the single source for the poll — so what a PUBLIC screen reaches
     into the owner's cache for is one readable list rather than an argument
     spread across a function body. A pinned screen probes a strict subset: no
     report views (it builds none of their controls) and, on Net Prem, not even a
-    gamma snapshot (see :func:`reads_snapshot`)."""
+    gamma snapshot (see :func:`reads_snapshot`).
+
+    The PUBLIC page (``public=True``, ``symbol`` = the one on screen) probes
+    the collector status, the hot-set status and that symbol's published
+    snapshot, and nothing else: it has no Net Prem view and no reports."""
+    if public:
+        return ["options:gex_status", _pg.STATUS_VIEW, snapshot_view(symbol)]
     out = list(_POLL_ALWAYS)
     if reads_snapshot(view):
         out.append(snapshot_view(symbol))
@@ -2064,7 +2078,96 @@ def no_spot_text(symbol, can_refresh: bool) -> str:
     return f"{base}."
 
 
-def render(symbol: str | None = None, view: str | None = None):
+# ── the PUBLIC mode (live.neuralstrike.co/gamma) ───────────────────────────
+# One page for every symbol on the dropdown list, instead of one pinned screen
+# per symbol. A pick asks options_svc to keep the symbol live
+# (``bus_client.request_public_gamma``; the service's hot set), and the page
+# reads that symbol's published keys -- the same ``options:gamma_pub:<SYM>``
+# family the pinned screens read. Roadmap:
+# docs/plans/2026-09-21-public-gamma-any-symbol-roadmap.md, Phase 2.
+
+# No Term (decision D6: its wider chain costs Schwab calls a hot symbol must
+# not), and no Net Prem (decision D3: it stays a screen of its own).
+PUBLIC_VIEW_ORDER = ["GEX", "Charm", "DEX", "Vanna", "Flow"]
+
+PUBLIC_SENDING = "Asking for live updates…"
+PUBLIC_NOT_ANSWERING = ("Live updates are not answering right now. Showing the "
+                        "last data if there is any.")
+PUBLIC_SEND_FAILED = ("The request could not be sent. Showing the last data if "
+                      "there is any.")
+PUBLIC_LIMITED = ("Too many symbol changes from here this hour. Symbols that "
+                  "are already live still update.")
+# Seconds a request may go unanswered before the page stops saying "asking".
+PUBLIC_ANSWER_SEC = 20
+# An outcome stamped this long BEFORE the request still answers it (host skew).
+_PUBLIC_SKEW_SEC = 5
+
+LIMITER = visitor_limit.Limiter(_pg.picks_per_hour)
+log = logging.getLogger(__name__)
+
+
+def view_order(public=False) -> list[str]:
+    """The subtabs this render offers."""
+    return list(PUBLIC_VIEW_ORDER if public else _VIEW_ORDER)
+
+
+def _parse_iso(iso):
+    try:
+        when = _dt.datetime.fromisoformat(str(iso))
+    except (TypeError, ValueError):
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=_dt.timezone.utc)
+
+
+def public_status_text(symbol, status, sent_at, now, has_snap, *,
+                       limited=False, failed=False) -> str:
+    """The public page's one line about the symbol on screen. PURE.
+
+    ``status`` is ``cache:options:gamma_public_status`` (or None); ``sent_at``
+    when this page last asked for ``symbol`` (or None). An outcome in
+    ``status["last"]`` older than the request answers an EARLIER request, so it
+    is ignored -- "full" from ten minutes ago says nothing about a slot now."""
+    status = status if isinstance(status, dict) else {}
+    sym = str(symbol or "").strip().upper()
+
+    def _names(key):
+        raw = status.get(key)
+        return {str(s).upper() for s in raw} if isinstance(raw, list) else set()
+
+    live = bool(sym) and sym in (_names("permanent") | _names("hot"))
+    last = status.get("last")
+    rec = last.get(sym) if isinstance(last, dict) and sym else None
+    rec = rec if isinstance(rec, dict) else {}
+    outcome = rec.get("outcome")
+    at = _parse_iso(rec.get("at"))
+    if sent_at is None or at is None or \
+            (at - sent_at).total_seconds() < -_PUBLIC_SKEW_SEC:
+        outcome = None
+    if failed and not live:
+        return PUBLIC_SEND_FAILED
+    if limited and not live:
+        return PUBLIC_LIMITED
+    if outcome in ("full", "closed"):
+        return _pg.OUTCOME_TEXT[outcome]
+    if live:
+        return _pg.OUTCOME_TEXT["live" if has_snap else "added"]
+    if outcome == "added":
+        return _pg.OUTCOME_TEXT["added"]
+    if sent_at is not None and (now - sent_at).total_seconds() < PUBLIC_ANSWER_SEC:
+        return PUBLIC_SENDING
+    return PUBLIC_NOT_ANSWERING
+
+
+def _visitor():
+    try:
+        from nicegui import context
+        return visitor_limit.client_key(context.client.request)
+    except Exception:  # noqa: BLE001 - no request is one bucket, not a crash
+        return "unknown"
+
+
+def render(symbol: str | None = None, view: str | None = None,
+           public: bool = False):
     """The Dealer Positioning page.
 
     ``symbol`` and ``view`` are PINS used by the public live screens (Gamma is
@@ -2073,7 +2176,11 @@ def render(symbol: str | None = None, view: str | None = None):
     the view opens on GEX and the symbol comes from the handoff stash or the
     cached snapshot. Pinning the REAL render rather than writing a second
     read-only one means there is one implementation, so the published screen
-    cannot drift from the private page."""
+    cannot drift from the private page.
+
+    ``public=True`` is the public Gamma page: the dropdown and the subtabs, over
+    the published keys of whichever symbol a visitor picks, and no command. See
+    ``PUBLIC_VIEW_ORDER`` and :func:`public_status_text`."""
     import bus_client
     from nicegui import ui, run
 
@@ -2119,7 +2226,15 @@ def render(symbol: str | None = None, view: str | None = None):
     # Whether this render may command the service at all. Resolved once, here, so
     # every enqueue site and every control that reaches one reads the same
     # answer — see may_enqueue.
-    _may_enqueue = may_enqueue(symbol, view)
+    _may_enqueue = may_enqueue(symbol, view, public)
+    # The public Gamma page: a real dropdown and real subtabs, over the
+    # PUBLISHED key of whichever symbol is on screen (see _sv), and no command.
+    _public = bool(public)
+    # The visitor's hot-set bookkeeping: when this page last asked for the
+    # symbol on screen, the service's status view, and whether the ask was
+    # refused before it left (the per-visitor limit) or failed to send.
+    pub = {"sent_at": None, "status": None, "limited": False, "failed": False}
+    _visitor_key = _visitor() if _public else None
     # Whether this render reads a gamma snapshot at all — see reads_snapshot.
     # Both flags are resolved HERE so every read site and every control asks the
     # same question once.
@@ -2129,7 +2244,7 @@ def render(symbol: str | None = None, view: str | None = None):
         tabs = ui.tabs(value=_pinned_view).classes("compact-subtabs").props(
             "dense no-caps inline-label align=left")
         with tabs:
-            for v in _VIEW_ORDER:
+            for v in view_order(_public):
                 tab = ui.tab(v, label=_view_label(v))
                 _h = _page_help.subtab_help("/options/gamma", v)
                 if _h:
@@ -2183,7 +2298,11 @@ def render(symbol: str | None = None, view: str | None = None):
         # reading of the key's age and a false one about the page. Turning it on
         # would mean adding the view to ``alerts.RTH_ONLY_VIEWS``, which moves the
         # nav badge — a bigger decision than this migration.
-        head = kit.header("Dealer Positioning", view=_stamp_view, stale=False)
+        # The public page's stamp follows the symbol on screen, so it is driven
+        # by _public_stamp below; a fixed view here would stamp $SPX's key (or,
+        # with no symbol at all, the private page's shared slot).
+        head = kit.header("Dealer Positioning",
+                          view=None if _public else _stamp_view, stale=False)
         with head.actions:
             # Explain and Analyze both ENQUEUE, and both cost the owner money —
             # gamma_explain builds a standalone infographic, gamma_analyze is a
@@ -2254,6 +2373,14 @@ def render(symbol: str | None = None, view: str | None = None):
                 symbol_in = select_all_on_focus(
                     ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
                               with_input=True, label="Symbol").classes("w-40"))
+            elif _public:
+                # The dropdown's list is the one options_svc publishes FOR this
+                # page (never the private key); typing filters it, and nothing
+                # outside it can be chosen. The service re-checks every pick.
+                _sym_opts = symbol_options(bus_client.read(_pg.SYMBOLS_VIEW))
+                symbol_in = select_all_on_focus(
+                    ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
+                              with_input=True, label="Symbol").classes("w-40"))
             else:
                 symbol_in = _PinnedSymbol(_DEFAULT_SYMBOL)
             # Overlay the intraday movement of the flip + walls on the heatmap. Off by
@@ -2279,6 +2406,10 @@ def render(symbol: str | None = None, view: str | None = None):
             spot_int_sel.tooltip("Bar size for candles / OHLC. Highs and lows are "
                                  "sampled once a minute, so wicks understate the true "
                                  "intra-minute range.")
+            # The public page's line about the symbol on screen: live, loading,
+            # every slot taken, or outside market hours (public_status_text).
+            pub_line = (ui.label("").classes(f"text-xs {MUTED}")
+                        if _public else None)
 
     # --- Net Prem controls (this view only) ---------------------------------
     # Shown/hidden as one block by _sync_np_controls, the same way the Bar-size
@@ -2485,6 +2616,16 @@ def render(symbol: str | None = None, view: str | None = None):
     def _current_symbol():
         return (symbol_in.value or "").strip().upper()
 
+    def _sv():
+        """The snapshot view this render reads NOW: on the public page, the
+        published key of the symbol on screen; elsewhere the fixed one."""
+        return snapshot_view(_current_symbol()) if _public else _snap_view
+
+    def _hsym():
+        """The symbol whose published history keys to read (None = the private
+        page's shared ones)."""
+        return _current_symbol() if _public else symbol
+
     # Track the current flex class per box so each reset removes the previous
     # arbitrary class (else two flex-[…] classes stack). Seeded with _INIT_FLEX —
     # the same constant the boxes above were created with (can't drift).
@@ -2677,7 +2818,8 @@ def render(symbol: str | None = None, view: str | None = None):
             hedge_plot.set_visibility(False)
             hedge_lbl.set_visibility(False)
             heat_msg.set_visibility(False)
-            chart_msg.text = no_snapshot_text(_may_enqueue)
+            chart_msg.text = (_public_text() if _public
+                              else no_snapshot_text(_may_enqueue))
             chart_msg.set_visibility(True)
             _set_summary("")
             return
@@ -2867,6 +3009,8 @@ def render(symbol: str | None = None, view: str | None = None):
             state["countdown"] = 120
         strip_state["countdown"] = state["countdown"] if _may_enqueue else None
         _repaint_strip()
+        if _public:
+            _paint_public_line()      # "asking…" ages into its answer by the clock
         if view_toggle.value == "Net Prem":
             # Staleness is a clock function — see _paint_np_status.
             _paint_np_status()
@@ -2887,7 +3031,7 @@ def render(symbol: str | None = None, view: str | None = None):
         seen["gamma"] = version
         state["fetching"] = True
         try:
-            snap = await run.io_bound(bus_client.read, _snap_view) or None
+            snap = await run.io_bound(bus_client.read, _sv()) or None
         finally:
             state["fetching"] = False
         # Only adopt a snapshot for the symbol currently selected — a foreign
@@ -2916,7 +3060,7 @@ def render(symbol: str | None = None, view: str | None = None):
             return
         state["hist_fetching"] = True
         try:
-            payload = await run.io_bound(bus_client.read, history_key(view, symbol))
+            payload = await run.io_bound(bus_client.read, history_key(view, _hsym()))
         finally:
             state["hist_fetching"] = False
         state.setdefault("hist", {})[view] = history_rows(
@@ -3112,6 +3256,17 @@ def render(symbol: str | None = None, view: str | None = None):
         # The probe LIST is polled_views(...) — pure, and a strict subset on a
         # pinned render. The dispatch below reads the same two flags, so a key
         # this indexes and that list omits is a KeyError, not a silent read.
+        if _public:
+            # The probe list follows the symbol on screen.
+            probe = polled_views(_current_symbol(), None, public=True)
+            v = bus_client.read_versions(probe)
+            await _maybe_repaint(v[_sv()])
+            _maybe_repaint_status(v["options:gex_status"])
+            if v[_pg.STATUS_VIEW] != seen.get("pub_status"):
+                seen["pub_status"] = v[_pg.STATUS_VIEW]
+                pub["status"] = bus_client.read(_pg.STATUS_VIEW)
+                _paint_public_line()
+            return
         v = bus_client.read_versions(_poll_views)
         if _reads_snap:
             await _maybe_repaint(v[_snap_view])
@@ -3142,6 +3297,84 @@ def render(symbol: str | None = None, view: str | None = None):
         # Selecting a symbol switches to it immediately (no need to click Refresh
         # now) and keeps the cache in lockstep with the dropdown.
         _request_refresh()
+
+    # ── the public page's pick, renewal, line and stamp ──
+    def _public_text():
+        return public_status_text(
+            _current_symbol(), pub["status"], pub["sent_at"],
+            _dt.datetime.now(_dt.timezone.utc), bool(state.get("snap")),
+            limited=pub["limited"], failed=pub["failed"])
+
+    def _paint_public_line():
+        if pub_line is not None:
+            pub_line.text = _public_text()
+            if not state.get("snap") and chart_msg.visible:
+                chart_msg.text = pub_line.text
+
+    def _ask_public(sym):
+        """Send the one public write for ``sym``; record how it went."""
+        if not _public:
+            return
+        try:
+            bus_client.request_public_gamma(sym)
+            pub["sent_at"] = _dt.datetime.now(_dt.timezone.utc)
+            pub["failed"] = False
+        except Exception:  # noqa: BLE001 - worded for the visitor, logged for us
+            log.warning("public gamma request for %s failed", sym, exc_info=True)
+            pub["failed"] = True
+
+    @guard_async
+    async def _public_switch(sym, *, counted=True):
+        """Show ``sym``: ask for it live (a pick counts against this visitor's
+        hourly limit; the first load does too), then draw whatever its
+        published keys hold now. The version-poll takes it from there."""
+        if not _public or not sym:
+            return
+        state.update(snap=None, hist={})
+        seen["gamma"] = None
+        pub.update(limited=False, failed=False, sent_at=None)
+        if counted and not LIMITER.allow(_visitor_key):
+            pub["limited"] = True
+        else:
+            _ask_public(sym)
+        chart_busy.show(f"Loading {sym}…")
+        try:
+            ver = await run.io_bound(bus_client.read_version, _sv())
+            if ver is None:
+                _render_view()          # nothing published yet: the line says why
+            else:
+                await _maybe_repaint(ver)
+        finally:
+            chart_busy.hide()
+        _paint_public_line()
+
+    @guard_async
+    async def _on_public_pick(e):
+        sym = _current_symbol()
+        if sym and sym in (symbol_in.options or []):
+            await _public_switch(sym)
+
+    @guard
+    def _public_renew():
+        """Keep the symbol on screen live while this page is open. Not counted
+        against the visitor's limit; skipped when the pick itself was refused
+        by it, so the limit cannot be walked around by waiting."""
+        if not _public or pub["limited"]:
+            return
+        sym = _current_symbol()
+        if not sym:
+            return
+        try:
+            bus_client.request_public_gamma(sym)
+        except Exception:  # noqa: BLE001
+            log.warning("public gamma renewal for %s failed", sym, exc_info=True)
+
+    @guard_async
+    async def _public_stamp():
+        """The header's Updated stamp, for the key of the symbol on screen."""
+        meta = await run.io_bound(bus_client.read_meta, _sv())
+        head.stamp.set_visibility(True)
+        head.set_stamp(meta[1] if meta else None)
 
     # Each of these three is None on a pinned render (see may_enqueue), so the
     # wiring is conditional for the same reason the build is.
@@ -3320,10 +3553,14 @@ def render(symbol: str | None = None, view: str | None = None):
     # Seed the same views the 2 s poll will probe, and no others: a version
     # seeded for a key nobody polls is dead weight, and on a public screen it is
     # a read of the owner's cache that changes nothing on the page.
-    if _reads_snap:
+    if _reads_snap and not _public:
         seen["gamma"] = bus_client.read_version(_snap_view)
     seen["status"] = bus_client.read_version("options:gex_status")
-    seen["netprem"] = bus_client.read_version("options:net_premium")
+    if not _public:
+        seen["netprem"] = bus_client.read_version("options:net_premium")
+    else:
+        seen["pub_status"] = bus_client.read_version(_pg.STATUS_VIEW)
+        pub["status"] = bus_client.read(_pg.STATUS_VIEW)
     if _may_enqueue:
         seen["explain"] = bus_client.read_version("options:gamma_explain")
         seen["analyze"] = bus_client.read_version("options:gamma_analyze")
@@ -3335,6 +3572,22 @@ def render(symbol: str | None = None, view: str | None = None):
         # Split from the block above rather than folded into it, so the private
         # page's build order is byte-for-byte what it was.
         _refresh_history_dates(bus_client.read("options:gamma_briefings"))
+
+    @guard_async
+    async def _initial_load_public():
+        """The public page's first paint: the symbol handed over from the Flow
+        Alerts screen (this TAB's, see handoff), if the list offers it, else
+        $SPX; then the same switch a pick runs."""
+        try:
+            await ui.context.client.connected()
+        except Exception:  # noqa: BLE001 - no socket: no hand-off, still a page
+            pass
+        from .handoff import take_pending_gamma
+        handed = take_pending_gamma()
+        sym = handed if handed in (symbol_in.options or []) else _DEFAULT_SYMBOL
+        _set_symbol(sym)
+        symbol_in.on_value_change(_on_public_pick)
+        await _public_switch(sym)
 
     @guard_async
     async def _initial_load():
@@ -3380,7 +3633,11 @@ def render(symbol: str | None = None, view: str | None = None):
             _request_refresh()
 
     _render_view()                       # instant empty/placeholder paint
-    ui.timer(0.05, _initial_load, once=True)  # big snapshot read off-loop
+    ui.timer(0.05, _initial_load_public if _public else _initial_load,
+             once=True)                  # big snapshot read off-loop
+    if _public:
+        ui.timer(_pg.renew_min() * 60.0, _public_renew)   # keep it live while open
+        ui.timer(5.0, _public_stamp)                       # the header stamp
 
     ui.timer(1.0, _tick)                 # countdown display (no fetch)
     ui.timer(2.0, _poll)                 # one coalesced version-poll for all 4 views
