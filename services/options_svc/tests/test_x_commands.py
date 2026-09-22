@@ -219,3 +219,8 @@ def test_a_stale_x_post_report_logs_nothing(env):
     handlers.handle_command(env["bus"], Command(
         type="x_post_report", args={"report": REPORT, "mtime": time.time()}, ts=old))
     assert env["bus"].cache_get(x_post.LOG_KEY) is None
+
+
+def test_conftest_keeps_the_jsonl_out_of_the_checkout():
+    import repo_paths
+    assert x_post.X_POSTS_LOG != repo_paths.X_POSTS_LOG

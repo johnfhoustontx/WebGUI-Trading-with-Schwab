@@ -104,6 +104,15 @@ def _in_memory_gex_db(monkeypatch):
                             raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _x_posts_log_in_tmp(tmp_path, monkeypatch):
+    """Every X attempt (a trade idea, a report, a /x post) appends to
+    ``x_posts.jsonl``; a test that forgot its own patch would write into the
+    checkout's real log. Per-test patches still win (they run later)."""
+    from shared.notify import x_post
+    monkeypatch.setattr(x_post, "X_POSTS_LOG", tmp_path / "x_posts.jsonl")
+
+
 class _NoExpirationList:
     """A non-200 proxy response: ``option_expirations`` reads it as ``[]``."""
     status_code = 503
