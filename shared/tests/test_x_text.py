@@ -78,3 +78,39 @@ def test_x_text_imports_nothing_but_the_stdlib():
     third_party = {m for m in new - ours
                    if m.split(".")[0] not in sys.stdlib_module_names}
     assert not third_party, sorted(third_party)
+
+
+# ── Review fixes: count links X's way, never over-promise the limit ─────────
+
+def test_a_bare_domain_counts_as_a_link():
+    assert xt.weighted_len("Visit neuralstrike.co") == 6 + 23
+
+
+def test_trailing_punctuation_is_not_part_of_the_link():
+    assert xt.weighted_len("go to https://x.co.") == 6 + 23 + 1
+    assert xt.weighted_len("(https://x.co)") == 1 + 23 + 1
+
+
+def test_the_scheme_is_matched_case_insensitively():
+    assert xt.weighted_len("HTTPS://A.CO") == 23
+
+
+def test_a_www_link_counts_as_a_link():
+    assert xt.weighted_len("www.a.co") == 23
+
+
+def test_a_word_ending_a_sentence_is_not_a_link():
+    assert xt.weighted_len("end. Next") == 9
+
+
+def test_a_long_body_with_a_short_link_and_no_tags_fits():
+    assert xt.weighted_len(xt.fit_text("y" * 400, "https://a.co", [])) <= 280
+
+
+def test_an_empty_body_is_omitted_like_an_empty_link():
+    assert xt.fit_text("   ", "https://a.co", ["#a"]) == "https://a.co\n#a"
+
+
+def test_max_tags_none_means_the_default_four():
+    tags = xt.hashtags([], ["a", "b", "c", "d", "e"], max_tags=None)
+    assert tags == ["#a", "#b", "#c", "#d"]
