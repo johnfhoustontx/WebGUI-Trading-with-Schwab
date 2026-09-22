@@ -37,6 +37,10 @@ class Screen:
     # of an empty form sells nothing, so they are reached from the site's
     # Tools menu only (removed from the grid 2026-09-21 at the owner's ask).
     tile: bool = True
+    # The slug of the tile this screen is linked from instead, as a small
+    # text link under that tile's caption (implies ``tile=False``). The four
+    # extra $SPX Dealer Positioning views hang off the $SPX Gamma tile.
+    parent: str = ""
 
 
 _NETPREM = {"gamma_netprem_group": "indices",
@@ -67,7 +71,7 @@ SCREENS = (
     # ``PUBLIC_ROUTES`` keeps the first, so a Dealer Positioning click-through
     # lands here rather than on Net Prem or a Premium Divergence board — see
     # the note on ``_public_routes`` below.
-    Screen("gamma", "/gamma", "Gamma", "options.gamma", "/options/gamma",
+    Screen("gamma", "/gamma", "Gamma · $SPX", "options.gamma", "/options/gamma",
            kwargs={"symbol": "$SPX", "view": "GEX"}),
     Screen("net-premium", "/net-premium", "Net Prem", "options.gamma",
            "/options/gamma", kwargs={"view": "Net Prem"}, settings=_NETPREM),
@@ -89,13 +93,17 @@ SCREENS = (
     Screen("gamma-qqq", "/gamma/qqq", "Gamma · QQQ", "options.gamma",
            "/options/gamma", kwargs={"symbol": "QQQ", "view": "GEX"}),
     Screen("charm", "/charm", "Charm", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "$SPX", "view": "Charm"}),
+           kwargs={"symbol": "$SPX", "view": "Charm"}, tile=False,
+           parent="gamma"),
     Screen("dex", "/dex", "DEX", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "$SPX", "view": "DEX"}),
+           kwargs={"symbol": "$SPX", "view": "DEX"}, tile=False,
+           parent="gamma"),
     Screen("vanna", "/vanna", "Vanna", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "$SPX", "view": "Vanna"}),
+           kwargs={"symbol": "$SPX", "view": "Vanna"}, tile=False,
+           parent="gamma"),
     Screen("term", "/term", "Term Structure", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "$SPX", "view": "Term"}),
+           kwargs={"symbol": "$SPX", "view": "Term"}, tile=False,
+           parent="gamma"),
     # ⚠ THE ONE SCREEN THAT WRITES. A visitor's Scan puts one validated symbol
     # on cmd:finder_public (bus_client.request_public_scan; the live ACL user's
     # only write selector) and options_svc answers it. ``public=True`` hands off

@@ -698,7 +698,8 @@ are pure data in **`webgui/live_screens.py`** (`SCREENS` · `SETTINGS_PINS` ·
 `PUBLIC_PINS`), read by the route registration, `tools/capture_live_shots.py` and the
 static grid on `neuralstrike.co/live.html` alike — so **adding a `Screen` publishes a
 route**. `Screen.tile = False` (the four interactive tools) publishes the route but
-draws no grid tile and takes no capture; the site's Tools menu reaches them. Per-screen detail: [docs/webgui-routes.md](docs/webgui-routes.md); design +
+draws no grid tile and takes no capture; the site's Tools menu reaches them. `Screen.parent`
+(the four extra $SPX Gamma views) draws a small link under that parent's tile instead. Per-screen detail: [docs/webgui-routes.md](docs/webgui-routes.md); design +
 plan: [`docs/plans/2026-09-07-public-live-screens-{design,plan}.md`](docs/plans/2026-09-07-public-live-screens-design.md).
 
 ⚠ **NO page may `import main`, and neither may `live_main`.** `main.py`'s module body

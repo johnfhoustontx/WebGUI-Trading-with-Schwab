@@ -784,10 +784,38 @@ def _tiled():
 
 def test_the_interactive_tools_are_not_tiled():
     """Removed from the grid 2026-09-21: an empty form makes a blank tile."""
-    untiled = {s.slug for s in _live_screens().SCREENS if not s.tile}
+    screens = _live_screens().SCREENS
+    untiled = {s.slug for s in screens if not s.tile and not s.parent}
     assert untiled == {slug for slug, _ in TOOLS}
-    for slug in untiled:
-        assert f"live/{slug}.webp" not in _markup("live.html")
+    for s in screens:
+        if not s.tile:
+            assert f"live/{s.slug}.webp" not in _markup("live.html"), s.slug
+
+
+def test_a_sub_view_is_a_link_under_its_parent_tile_and_nowhere_else():
+    """Screen.parent draws a small link inside the parent tile's group, so a
+    sub-view is one click from the picture it belongs to."""
+    import html as _html
+
+    markup = _markup("live.html")
+    screens = _live_screens().SCREENS
+    by_slug = {s.slug: s for s in screens}
+    groups = re.findall(r'<div class="ns-live-group">(.*?)</div>', markup, re.S)
+    parents = {s.parent for s in screens if s.parent}
+    assert len(groups) == len(parents), f"{len(groups)} groups for {parents}"
+    for group in groups:
+        head = re.search(r'<a class="ns-live-tile" href="[^"]+"[^>]*>\s*'
+                         r'<img src="live/([^"]+)\.webp"', group)
+        assert head, "a group with no tile"
+        parent = head.group(1)
+        assert by_slug[parent].tile, parent
+        sub = re.search(r'<nav class="ns-live-sub"[^>]*>(.*?)</nav>', group, re.S)
+        links = [(h, _html.unescape(t)) for h, t in
+                 re.findall(r'<a href="([^"]+)">([^<]+)</a>', sub.group(1))]
+        want = [(f"https://{repo_paths.LIVE_HOST}{s.route}", s.title)
+                for s in screens if s.parent == parent]
+        assert links == want, (parent, links)
+        assert not any(s.tile for s in screens if s.parent == parent)
 
 
 def test_the_live_grid_offers_every_published_screen():
@@ -812,6 +840,9 @@ def test_the_live_grid_offers_every_published_screen():
     for s in _tiled():
         assert f"{s.slug}.webp" in text, f"no tile for {s.slug}"
         assert s.title in captions, f"no caption for {s.title}"
+    for s in _live_screens().SCREENS:
+        if s.parent:            # a sub-view: a link, not a tile
+            assert f'<a href="https://{repo_paths.LIVE_HOST}{s.route}">' in text, s.slug
 
 
 def test_the_grid_tiles_nothing_the_app_does_not_publish():

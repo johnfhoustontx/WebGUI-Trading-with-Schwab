@@ -4,7 +4,16 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**The four interactive tools leave the Live
+**Last updated:** 2026-09-21 (**Charm, DEX, Vanna and Term Structure become
+links under the $SPX Gamma tile** - owner's ask.)
+
+- **What changed.** The four $SPX Dealer Positioning views lost their own tiles on
+  `live.html` and sit as small links under the Gamma tile, now captioned
+  "Gamma · $SPX" beside the SPY and QQQ ones. They are $SPX-only, so they hang
+  off the $SPX tile. `Screen.parent` in `webgui/live_screens.py` names the tile a
+  view is linked from; the grid is 16 tiles.
+
+**Prior — 2026-09-21** (**The four interactive tools leave the Live
 Screens grid** - owner's ask.)
 
 - **What changed.** Strategy Finder, Rescue my Sh\*tty trade, Calculator and
