@@ -3,6 +3,8 @@ import pathlib
 import subprocess
 import sys
 
+import pytest
+
 from shared import x_text as xt
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -114,3 +116,15 @@ def test_an_empty_body_is_omitted_like_an_empty_link():
 def test_max_tags_none_means_the_default_four():
     tags = xt.hashtags([], ["a", "b", "c", "d", "e"], max_tags=None)
     assert tags == ["#a", "#b", "#c", "#d"]
+
+
+# --- max_tags_from: the one reader of x.max_tags ------------------------------
+
+@pytest.mark.parametrize("raw,want", [
+    (None, xt.DEFAULT_MAX_TAGS), ("four", xt.DEFAULT_MAX_TAGS),
+    (True, xt.DEFAULT_MAX_TAGS), (False, xt.DEFAULT_MAX_TAGS),
+    ([3], xt.DEFAULT_MAX_TAGS), (float("nan"), xt.DEFAULT_MAX_TAGS),
+    (2, 2), ("3", 3), (0, 0), (-1, 0), (2.9, 2),
+])
+def test_max_tags_from(raw, want):
+    assert xt.max_tags_from(raw) == want

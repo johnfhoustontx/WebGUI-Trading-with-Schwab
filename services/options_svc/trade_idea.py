@@ -366,7 +366,7 @@ def x_text(idea, x_cfg, *, today):
     tags_cfg = x_cfg.get("hashtags")
     configured = tags_cfg.get("trade_idea") if isinstance(tags_cfg, dict) else None
     tags = xt.hashtags(derived, configured if isinstance(configured, list) else None,
-                       max_tags=x_cfg.get("max_tags"))
+                       max_tags=xt.max_tags_from(x_cfg.get("max_tags")))
     return xt.fit_text(caption(idea), x_cfg.get("link") or "", tags)
 
 

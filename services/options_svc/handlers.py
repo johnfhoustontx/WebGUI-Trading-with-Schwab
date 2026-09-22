@@ -2899,17 +2899,6 @@ def _x_config():
     return cfg, (x if isinstance(x, dict) else {})
 
 
-def _x_max_tags(x):
-    """``max_tags`` as an int, or None (= x_text's default) when malformed."""
-    raw = x.get("max_tags")
-    if raw is None or isinstance(raw, bool):
-        return None
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
-
-
 def _x_configured_tags(x, kind):
     tags = x.get("hashtags")
     tags = tags.get(kind) if isinstance(tags, dict) else None
@@ -2979,7 +2968,7 @@ def run_x_post_report(bus, args, now=None):
             _remember_report(bus, ident, done)
             return None
         tags = x_text.hashtags(_REPORT_TAGS, _x_configured_tags(x, "report"),
-                               max_tags=_x_max_tags(x))
+                               max_tags=x_text.max_tags_from(x.get("max_tags")))
         label = str(report.get("slot_label") or "").strip() or "Market report"
         link = str(report.get("report_url") or "").strip() or str(x.get("link") or "")
         text = x_text.fit_text(f"{label}: {str(report['headline']).strip()}", link, tags)
@@ -3007,7 +2996,7 @@ def run_x_post(bus, args, now=None):
         tags = x_text.hashtags(
             [], [t for t in raw_tags if isinstance(t, str)]
             if isinstance(raw_tags, list) else [],
-            max_tags=_x_max_tags(x))
+            max_tags=x_text.max_tags_from(x.get("max_tags")))
         text = x_text.fit_text(str(args.get("text") or ""),
                                str(args.get("link") or ""), tags)
         png = None

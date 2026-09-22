@@ -410,6 +410,14 @@ def test_x_text_survives_a_malformed_config():
     assert "$SPY" in out
 
 
+@pytest.mark.parametrize("raw", ["four", True, [4], None])
+def test_x_text_a_malformed_max_tags_falls_back_to_the_default(raw):
+    idea = T.normalize(pcs())
+    out = T.x_text(idea, {"max_tags": raw, "hashtags": {"trade_idea": ["#options"]}},
+                   today=dt.date(2026, 9, 17))
+    assert "$SPY" in out and "#options" in out
+
+
 @pytest.fixture
 def idea_ready(monkeypatch):
     monkeypatch.setattr(push_notify, "trade_idea_config", lambda config=None: {"enabled": True})

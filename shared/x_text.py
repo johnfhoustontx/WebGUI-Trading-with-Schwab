@@ -58,19 +58,31 @@ def _norm_tag(raw):
     return f"#{word}" if word and _TAG_OK.match(word) else None
 
 
+def max_tags_from(value):
+    """``x.max_tags`` as a tag count - the ONE reader of that setting. A missing,
+    malformed or bool value (a TOML typo, ``true``) is the default, never an
+    exception; a negative one is 0."""
+    if value is None or isinstance(value, bool):
+        return DEFAULT_MAX_TAGS
+    try:
+        n = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return DEFAULT_MAX_TAGS
+    return max(0, n)
+
+
 def hashtags(derived, configured, *, max_tags=DEFAULT_MAX_TAGS):
     """Derived tags first (a trade's own cashtag matters most), then configured,
     normalised, de-duplicated case-insensitively, at most ``max_tags``
-    (``None`` means the default, not zero)."""
-    if max_tags is None:
-        max_tags = DEFAULT_MAX_TAGS
+    (read through ``max_tags_from``: ``None`` means the default, not zero)."""
+    max_tags = max_tags_from(max_tags)
     out, seen = [], set()
     for raw in list(derived or []) + list(configured or []):
         tag = _norm_tag(raw)
         if tag and tag.lower() not in seen:
             seen.add(tag.lower())
             out.append(tag)
-    return out[:max(0, int(max_tags))]
+    return out[:max_tags]
 
 
 def _assemble(body, link, tags):
