@@ -450,12 +450,19 @@ from shared.notify import channels
 print('schedulers  :', _scaffold._schedulers_enabled())
 print('claude      :', r.ENV_FLAGS['allow_claude'])
 print('autonomous  :', r.ENV_FLAGS['autonomous_trading'])
-print('notify cfg  :', channels.load_config())"
+def flags(d, path=''):
+    for k, v in (d.items() if isinstance(d, dict) else ()):
+        if k == 'enabled': print('notify      :', path or '(root)', v)
+        else: flags(v, path + '.' + k if path else k)
+flags(channels.load_config())"
 ```
 
-All four must be false, and every `enabled` in the notification config must be
+All four must be false, and every `enabled` flag the last lines print must be
 false — `load_config` zeroes them recursively and **last**, so it overrides the
-`NOTIFY_ENABLED`/`TWITTER_ENABLED` env escapes too.
+`NOTIFY_ENABLED`/`X_ENABLED` env escapes too. ⚠ It prints the `enabled` flags
+only, never the whole config: that dict carries the Telegram bot token, the
+Discord webhook, the SMS app password and the four X OAuth credentials, and this
+check's output tends to get pasted into a chat or a log.
 
 ⚠ **`/health` will not answer this question, and it looks as though it does.**
 `scheduler_alive` is `true` on a dev service: it means "the restart budget is

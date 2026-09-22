@@ -2741,7 +2741,9 @@ made there.</p>
 <li>The <strong>counter</strong> shows the length the way X counts it: a link always counts
   as 23 characters and an emoji as 2. It turns <strong>red</strong> when the post is too long,
   and the service will then drop hashtags from the end first and only then cut
-  the text. The <strong>Preview</strong> underneath is exactly what will be sent.</li>
+  the text. The <strong>Preview</strong> underneath is exactly what will be sent — unless
+  <code>x.max_tags</code> is set to something other than 4, since the page previews four
+  hashtags at most.</li>
 <li><strong>Image</strong> attaches one PNG or JPEG of up to 5 MB; <strong>Remove image</strong> takes it off.</li>
 <li><strong>Post</strong> asks you to confirm, then hands the post to the options service, which
   sends it. The result appears in the log a moment later.</li>
@@ -2753,8 +2755,11 @@ made there.</p>
 <p><strong>X is off, and dry, until you set it up.</strong> Nothing reaches X until the <code>x</code>
 block in <code>shared/notifications.json</code> has its keys filled in and <code>enabled</code> is on.
 While <code>x.dry_run</code> is on, every post is logged as <em>Dry run</em> and nothing is sent.
-The default hashtags for each kind of post live in <code>x.hashtags</code>, <code>max_tags</code> caps
-how many any post carries, and <code>daily_cap</code> limits how many go out in a day.</p>
+The default hashtags for the market reports and the trade ideas live in
+<code>x.hashtags</code>; this page's own defaults (<code>#options #trading</code> and the
+neuralstrike.co link) are built into the page, and it does not read
+<code>x.hashtags.marketing</code>. <code>max_tags</code> caps how many hashtags any post carries, and
+<code>daily_cap</code> limits how many posts go out in a day.</p>
 </blockquote>
 <h2 id="user-manuals">User Manuals</h2>
 <p><strong>Route:</strong> <code>/manuals</code> — a tab in the <strong>More</strong> group, alongside EOD Report. (It used

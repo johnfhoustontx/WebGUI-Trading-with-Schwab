@@ -2338,7 +2338,9 @@ made there.
 - The **counter** shows the length the way X counts it: a link always counts
   as 23 characters and an emoji as 2. It turns **red** when the post is too long,
   and the service will then drop hashtags from the end first and only then cut
-  the text. The **Preview** underneath is exactly what will be sent.
+  the text. The **Preview** underneath is exactly what will be sent — unless
+  `x.max_tags` is set to something other than 4, since the page previews four
+  hashtags at most.
 - **Image** attaches one PNG or JPEG of up to 5 MB; **Remove image** takes it off.
 - **Post** asks you to confirm, then hands the post to the options service, which
   sends it. The result appears in the log a moment later.
@@ -2349,8 +2351,11 @@ made there.
 > **X is off, and dry, until you set it up.** Nothing reaches X until the `x`
 > block in `shared/notifications.json` has its keys filled in and `enabled` is on.
 > While `x.dry_run` is on, every post is logged as *Dry run* and nothing is sent.
-> The default hashtags for each kind of post live in `x.hashtags`, `max_tags` caps
-> how many any post carries, and `daily_cap` limits how many go out in a day.
+> The default hashtags for the market reports and the trade ideas live in
+> `x.hashtags`; this page's own defaults (`#options #trading` and the
+> neuralstrike.co link) are built into the page, and it does not read
+> `x.hashtags.marketing`. `max_tags` caps how many hashtags any post carries, and
+> `daily_cap` limits how many posts go out in a day.
 
 ## User Manuals
 

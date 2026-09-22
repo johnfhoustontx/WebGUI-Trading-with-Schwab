@@ -1354,7 +1354,8 @@ posted there.
   counter shows the length the way X counts it (a link is always 23, an emoji
   2). It turns **red** when the post is too long — the service will then drop
   hashtags from the end first, and only then cut the text. The **Preview** is
-  exactly what will be sent.
+  exactly what will be sent, unless `x.max_tags` is set to something other
+  than 4 (the page previews four hashtags at most).
 - **Image** — optionally attach one PNG or JPEG of up to 5 MB.
 - **Post** asks first, then hands the post to the options service, which sends
   it. The result lands in the log below a moment later.
@@ -1362,8 +1363,10 @@ posted there.
   block in `shared/notifications.json` has its keys filled in and is enabled;
   while `x.dry_run` is on, every post is logged as *Dry run* and nothing is
   sent.
-- **Hashtag defaults** for each kind of post live in `x.hashtags.*` there, and
-  `max_tags` caps how many any post carries. A **daily cap** (`daily_cap`)
+- **Hashtag defaults** for the market reports and trade ideas live in
+  `x.hashtags.*` there. This page's own defaults (`#options #trading` and the
+  neuralstrike.co link) are built in; it does not read `x.hashtags.marketing`.
+  `max_tags` caps how many hashtags any post carries. A **daily cap** (`daily_cap`)
   limits how many posts go out per day; past it a post is refused.
 - **Recent posts** logs every post the app makes to X — market reports, the
   hourly trade ideas and posts from this page — with a link to each one that
