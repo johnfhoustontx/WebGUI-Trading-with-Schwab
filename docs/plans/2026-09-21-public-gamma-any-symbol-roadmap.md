@@ -131,6 +131,28 @@ and gain the rest through a lease.
   - the navigation tests (`PUBLIC_ROUTES["/options/gamma"]`);
   - CLAUDE.md, webgui-routes and the user guide.
 
+### Phase 0 result (2026-09-22 09:20 CT, in session)
+The live GEX branch: median 26.8 s, max 31.8 s over 10 minutes, no skipped
+slot. Seven unpublished symbols built without Term: 0.03 s warm, 0.1-0.2 s
+cold, zero extra Schwab calls, ~0.7 MB of Redis writes each at that hour
+(growing toward ~4 MB by the close as the history fills). Time is not the
+limit - the formula allows hundreds; Redis write volume is. The cap stays 8.
+
+### Phase 4 - prove on prod (DONE 2026-09-22)
+Shipped 2026-09-21 ~22:11 CT (`d1c2ef9`, then `494c12d`). In session on
+2026-09-22: NVDA picked on live.neuralstrike.co/gamma at 09:41:10 ("added",
+after that minute's tick had started, so it waited), published by the 09:42
+tick at 09:42:36 with all four views, spot 227.88 and a 30-minute TTL; the page
+went "Live". NVDA's 7-day chain was fetched once a minute before and after the
+pick - no extra Schwab call. Per-stage timing: the collect is 26-29 s; $SPX,
+SPY and QQQ publish 0.1-0.4 s each; NVDA added 0.1-0.3 s. Three ticks at 43-47 s
+coincided with the 09:45 autoscan, not the hot symbol. No skipped slot.
+
+Unrelated, seen during the check: from 09:32 CT Schwab answered every $SPX
+option-chain request with 404 Not Found (SPY and $NDX fine; every parameter
+variant failed), so $SPX showed "No spot price" on both the private and
+public pages until Schwab recovered.
+
 ### Phase 4 - prove on prod
 Check four things:
 - the tick time with a full hot set;
