@@ -12,7 +12,7 @@ Nine `live_screens.SCREENS` entries become ONE `/gamma` screen: `gamma`
 screen** (`/net-premium`, unchanged, symbol-independent).
 
 The page keeps the app's symbol dropdown and view tabs: GEX · Charm · DEX ·
-Vanna · Flow · Term. No Net Prem tab (owner's decision).
+Vanna · Flow. No Net Prem tab and **no Term tab** (owner's decisions).
 
 ## Decisions (owner, 2026-09-21)
 
@@ -22,7 +22,8 @@ Vanna · Flow · Term. No Net Prem tab (owner's decision).
 | D2 | Cap and lease left to engineering: default 8 hot symbols and a 15-minute lease, set by the Phase 0 measurement. Both go in config. |
 | D3 | Net Prem stays a separate screen. |
 | D4 | **No deep links.** The live origin keeps taking no query parameters; the symbol and view live in page state only. |
-| D5 | The old routes REDIRECT to `/gamma`, opening on that route's symbol and view. |
+| D5 | The old routes REDIRECT to `/gamma`, opening on that route's symbol and view. `/term` opens on $SPX GEX. |
+| D6 | **No Term view at all** on the public page, so a hot symbol makes no extra Schwab call. The hot path builds without `_term_chain` (a `with_term=False` on `gamma_snapshot`). |
 
 **D1 detail, settled 2026-09-21:** the dropdown offers the app's own list,
 `symbols.toml` `[collection]` PLUS the `Top 20.xlsx` watchlist (92 on prod once
@@ -44,19 +45,19 @@ adds the symbol to a HOT SET, which the minute tick publishes like the three
 permanent names until its lease runs out. Schwab cost is close to zero: the
 collector already fetches every symbol's chain each minute
 (`compute.collect_gex_snapshots`) and only has to KEEP the chain for hot
-symbols (the capture set, `handlers.py:1803`). The one extra cost is Term:
-`_term_chain` may fetch up to three wider chains for a symbol that has no daily
-expirations. So for hot symbols, Term refreshes every 5 minutes instead of
-every minute.
+symbols (the capture set, `handlers.py:1803`). With Term dropped (D6) a
+hot symbol costs NO extra Schwab call.
 
 ## Phases
 
 ### Phase 0 - measure (ships nothing)
-Measure on prod during regular trading hours, for about 5 unpublished symbols
-(one of them without daily expirations):
+`tools/measure_gamma_public.py`, scheduled on the box for 2026-09-22 09:20 CT
+(a one-off `systemd-run --user` timer; output in `~/phase0/`). It measures, for
+seven unpublished symbols built without Term (D6):
 - the wall time of `gamma_snapshot` plus the four history payloads;
 - the bytes written;
-- the extra Schwab calls Term makes.
+- the live branch's own duration today, over 10 minutes (it already overruns
+  its minute 4-9 times a day).
 
 Output: the largest hot-set cap that still lets `refresh_gamma_current` finish
 well inside its minute.
@@ -64,7 +65,7 @@ well inside its minute.
 ### Phase 1 - service
 - `shared/public_gamma.py`: the stream name, command type, key helpers and
   config accessors. The config lives in `config/gamma_public.toml`: cap, lease
-  minutes, daily budget and Term interval.
+  minutes and daily budget.
 - A consumer, `services/options_svc/gamma_public.py`, wired in through
   `make_app(extra_consumers=)`. It validates the symbol against the dropdown
   list, drops duplicates, checks the budget and renews the lease. Its refusals
@@ -83,6 +84,7 @@ well inside its minute.
   calls a gated `bus_client.request_public_gamma` and reads that symbol's
   published keys. While the page is open it keeps re-requesting, which renews
   the lease.
+- Drop the Term tab in public mode, and build hot symbols with `with_term=False`.
 - Split the gate into `shows_picker`, `may_request_public` and `may_enqueue`
   (private). Explain, Analyze, Briefings, Refresh and the history row stay
   absent. `test_live_commands` still covers every caller of `.request(`.
