@@ -408,3 +408,33 @@ def test_unknown_image_bytes_are_refused_before_any_network_call(bus, monkeypatc
     e = _entry0(bus)
     assert e["status"] == "refused" and e["reason"] == "unsupported image type"
     assert x_post.posted_today(bus, NOW) == 0
+
+
+# --- two threads post (the scheduler's trade idea and the command consumer) ---
+
+def test_two_concurrent_posters_cannot_both_pass_the_cap(bus, monkeypatch):
+    import threading
+    import time
+
+    class SlowSession(FakeSession):
+        def post(self, url, **kw):
+            time.sleep(0.2)
+            return super().post(url, **kw)
+
+    monkeypatch.setattr(x_post, "_session", lambda c: SlowSession())
+    results = []
+
+    def _go(text):
+        results.append(x_post.post(bus, text, None, kind="marketing", now=NOW,
+                                   config=_cfg(daily_cap=1)))
+
+    threads = [threading.Thread(target=_go, args=(t,)) for t in ("a", "b")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+    assert sorted(bool(r["ok"]) for r in results) == [False, True]
+    assert [r["error"] for r in results if not r["ok"]] == ["daily cap (1) reached"]
+    assert x_post.posted_today(bus, NOW) == 1
+    statuses = sorted(e["status"] for e in bus.cache_get(x_post.LOG_KEY).payload["posts"])
+    assert statuses == ["posted", "refused"]

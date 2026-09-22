@@ -9,12 +9,17 @@ against a live account until the first real post; ``dry_run`` exists for that.
 Every attempt is appended to ``cache:options:x_log`` (the /x page reads it) and to
 ``x_posts.jsonl`` on disk. **Never raises**: a refusal or a failure comes back as
 ``{"ok": False, "error": ...}``. The daily cap counts real posts only, per CT day.
-⚠ The cap is read-then-written, not atomic — safe because options_svc is the only
-caller and runs one command consumer; a second posting process needs a lock.
+⚠ The cap is read-then-written, not atomic in Redis. TWO threads in options_svc
+call ``post`` - the scheduler's trade idea (a thread-pool worker) and the command
+consumer (``x_post`` / ``x_post_report``) - so a module-level ``_LOCK`` serialises
+every post from the cap check through the count write and the log line, and every
+``record_refusal``. That covers one process only: a second posting PROCESS would
+need a Redis-side lock.
 """
 import datetime as _dt
 import json
 import logging
+import threading
 from zoneinfo import ZoneInfo
 
 from repo_paths import X_POSTS_LOG
@@ -33,6 +38,9 @@ _CT = ZoneInfo("America/Chicago")
 _TIMEOUT = 30
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _JPEG_MAGIC = b"\xff\xd8\xff"
+# Serialises every post and every log write in this process. Re-entrant because
+# post() writes its log line through _record while holding it.
+_LOCK = threading.RLock()
 
 
 def _session(creds):
@@ -84,6 +92,11 @@ def _kind_enabled(x, kind):
 
 
 def _record(bus, entry):
+    with _LOCK:   # re-entered from post(); an RLock
+        _record_locked(bus, entry)
+
+
+def _record_locked(bus, entry):
     try:
         env = bus.cache_get(LOG_KEY)
         p = env.payload if env is not None else None
@@ -189,7 +202,16 @@ def post(bus, text, png=None, *, kind, now=None, config=None, meta=None):
     confirmed it: the entry is logged ``unknown``, it COUNTS toward the daily cap
     (fail closed - better one post short than one over), and ``ok`` is False so a
     caller does not treat it as done. A caller must not blindly retry it: the post
-    may be live."""
+    may be live.
+
+    Held under ``_LOCK`` from the gates through the count write and the log line,
+    network call included: posts are rare, and serialising them is exactly what
+    the read-then-write cap needs."""
+    with _LOCK:
+        return _post(bus, text, png, kind=kind, now=now, config=config, meta=meta)
+
+
+def _post(bus, text, png, *, kind, now, config, meta):
     result = {"ok": False, "id": None, "url": None, "error": None, "dry_run": False,
               "unknown": False}
     try:

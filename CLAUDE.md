@@ -2145,7 +2145,11 @@ function owns the gates (`x.enabled`, per-`kinds`, `dry_run`, credentials,
 source cannot forget one. ⚠ A post whose create call fails without a confirmation
 is recorded `unknown` and COUNTED — it may be live, and reposting is the worse
 failure. ⚠ `x_post` and `x_post_report` are replay-guarded: a fresh consumer
-group must not re-post a stream's history in public.
+group must not re-post a stream's history in public. ⚠ **Two threads call it** —
+the scheduler's trade idea (a pool worker) and the command consumer — and the
+daily cap is read-then-written, so a module `RLock` serialises every post (network
+call included) and every log write. It covers ONE process; a second posting
+process would need a Redis-side lock.
 
 **Escape hatch:** `set TRADING_ENABLE_SCHEDULERS=1` before launching turns
 schedulers on for that session — the one dev case that genuinely needs collection
