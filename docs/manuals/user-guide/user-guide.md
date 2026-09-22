@@ -2326,6 +2326,32 @@ recover a day the machine was off for. Weekends and market holidays are skipped.
 > collected are bucketed by **entry** date. They answer different questions and will
 > not reconcile to each other — that is correct, not a bug.
 
+## Post to X
+
+**Route:** `/x`.
+
+Write a one-off post for the app's X account, and see every post the app has
+made there.
+
+- **Post** is the text of the post. **Link** and **Hashtags** go on the lines
+  under it, the way every post from the app is laid out.
+- The **counter** shows the length the way X counts it: a link always counts
+  as 23 characters and an emoji as 2. It turns **red** when the post is too long,
+  and the service will then drop hashtags from the end first and only then cut
+  the text. The **Preview** underneath is exactly what will be sent.
+- **Image** attaches one PNG or JPEG of up to 5 MB; **Remove image** takes it off.
+- **Post** asks you to confirm, then hands the post to the options service, which
+  sends it. The result appears in the log a moment later.
+- **Recent posts** lists every post the app makes to X — the market reports, the
+  hourly trade ideas and posts from this page — with a link to each one that went
+  out, or the reason it did not (refused, failed, over the daily cap).
+
+> **X is off, and dry, until you set it up.** Nothing reaches X until the `x`
+> block in `shared/notifications.json` has its keys filled in and `enabled` is on.
+> While `x.dry_run` is on, every post is logged as *Dry run* and nothing is sent.
+> The default hashtags for each kind of post live in `x.hashtags`, `max_tags` caps
+> how many any post carries, and `daily_cap` limits how many go out in a day.
+
 ## User Manuals
 
 **Route:** `/manuals` — a tab in the **More** group, alongside EOD Report. (It used

@@ -3960,6 +3960,65 @@ and commissions are not in these numbers, so treat every figure as optimistic.
 
 ---
 
+## Post to X
+
+*Menu: ACCOUNT → More → Post to X · Route `/x`*
+
+### What it is
+
+A composer for one-off marketing posts on the app's X account, above a log of every
+post the app has made there — the scheduled market reports and hourly trade ideas as
+well as what you write here.
+
+### Where the data comes from
+
+The page writes nothing to X itself. **Post** sends an `x_post` command to the options
+service, which fits the text, attaches the image and posts it. Every attempt from any
+source is recorded to the `options:x_log` cache (the newest 100), which is what the log
+table reads.
+
+### Reading the screen
+
+**Post**, **Link** and **Hashtags** make up the post: the text, then a blank line, then
+the link and the hashtags on the lines beneath it. The **counter** measures it the way
+X does — a link is 23 characters and an emoji or other wide character 2 — and turns red
+when the post as written is over 280. The **Preview** is the fitted post: hashtags drop
+from the end first, and only then is the text cut with an ellipsis. The link always
+survives. An optional **Image** (PNG or JPEG, up to 5 MB) travels with the post.
+
+**Recent posts** shows, per post, when it was attempted, its source (*Market report*,
+*Trade idea* or *Marketing*), its status and the link to the post — or, where nothing
+went out, the reason.
+
+| Status | Meaning |
+|---|---|
+| **Posted** | It is on X; the last column links to it. |
+| **Dry run** | `x.dry_run` is on, so it was logged and not sent. |
+| **Refused** | The app declined to send it — X is disabled, that kind of post is switched off, the daily cap is reached, or the image was unusable. |
+| **Failed** | X answered with an error. |
+| **Unknown** | The request left, but no answer said whether it landed. |
+
+### Why it matters
+
+It is the one place that shows what the app has said in public. A report or trade idea
+that did not go out is listed with the reason, rather than simply not appearing.
+
+### Caveats and gotchas
+
+- **Off and dry until configured.** Nothing reaches X until the `x` block in
+  `shared/notifications.json` holds the account's keys and is enabled; while
+  `x.dry_run` is on every post is logged as *Dry run*. The default hashtags for each kind
+  of post live in `x.hashtags`, `max_tags` caps how many any post carries, and
+  `daily_cap` limits how many posts go out per day across all sources.
+- **A post is public.** The confirm dialog shows the exact text before anything is sent.
+- This page exists only in the private app; the public live screens have no way to post.
+
+### Related pages
+
+[EOD Report](#eod-report) · [Settings](#settings).
+
+---
+
 ## User Manuals
 
 *Menu: ACCOUNT → More → User Manuals · Route `/manuals`*

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-21</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -144,6 +144,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#account-what-do-i-own">ACCOUNT — what do I own?</a><ul>
 <li><a href="#portfolio">Portfolio</a></li>
 <li><a href="#eod-report">EOD Report</a></li>
+<li><a href="#post-to-x">Post to X</a></li>
 <li><a href="#user-manuals">User Manuals</a></li>
 </ul>
 </li>
@@ -2729,6 +2730,31 @@ recover a day the machine was off for. Weekends and market holidays are skipped.
 <p>Realized P&amp;L is bucketed by <strong>exit</strong> date, while opened trades and credit
 collected are bucketed by <strong>entry</strong> date. They answer different questions and will
 not reconcile to each other — that is correct, not a bug.</p>
+</blockquote>
+<h2 id="post-to-x">Post to X</h2>
+<p><strong>Route:</strong> <code>/x</code>.</p>
+<p>Write a one-off post for the app's X account, and see every post the app has
+made there.</p>
+<ul>
+<li><strong>Post</strong> is the text of the post. <strong>Link</strong> and <strong>Hashtags</strong> go on the lines
+  under it, the way every post from the app is laid out.</li>
+<li>The <strong>counter</strong> shows the length the way X counts it: a link always counts
+  as 23 characters and an emoji as 2. It turns <strong>red</strong> when the post is too long,
+  and the service will then drop hashtags from the end first and only then cut
+  the text. The <strong>Preview</strong> underneath is exactly what will be sent.</li>
+<li><strong>Image</strong> attaches one PNG or JPEG of up to 5 MB; <strong>Remove image</strong> takes it off.</li>
+<li><strong>Post</strong> asks you to confirm, then hands the post to the options service, which
+  sends it. The result appears in the log a moment later.</li>
+<li><strong>Recent posts</strong> lists every post the app makes to X — the market reports, the
+  hourly trade ideas and posts from this page — with a link to each one that went
+  out, or the reason it did not (refused, failed, over the daily cap).</li>
+</ul>
+<blockquote>
+<p><strong>X is off, and dry, until you set it up.</strong> Nothing reaches X until the <code>x</code>
+block in <code>shared/notifications.json</code> has its keys filled in and <code>enabled</code> is on.
+While <code>x.dry_run</code> is on, every post is logged as <em>Dry run</em> and nothing is sent.
+The default hashtags for each kind of post live in <code>x.hashtags</code>, <code>max_tags</code> caps
+how many any post carries, and <code>daily_cap</code> limits how many go out in a day.</p>
 </blockquote>
 <h2 id="user-manuals">User Manuals</h2>
 <p><strong>Route:</strong> <code>/manuals</code> — a tab in the <strong>More</strong> group, alongside EOD Report. (It used

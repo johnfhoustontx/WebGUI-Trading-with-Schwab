@@ -21,7 +21,7 @@ def test_shell_registers_all_pages():
         "/sentiment/momentum",
         "/trade", "/trade/evidence", "/trade/board", "/trade/plan",
         "/portfolio", "/driver", "/settings",
-        "/eod", "/eod/detail", "/status", "/manuals", "/terminate",
+        "/eod", "/eod/detail", "/x", "/status", "/manuals", "/terminate",
         "/market", "/desk", "/symbol",
     )
     for path in expected:

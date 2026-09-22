@@ -1344,6 +1344,31 @@ An end-of-day summary of the day's options activity and Claude Trades (the auton
   would be a full-looking document of "No captured signals." notes — so nothing
   is written and it says so. Start the stack and press it again.
 """,
+    "/x": """
+**Post to X — the simple version**
+
+Write a one-off post for the app's X account, and see everything the app has
+posted there.
+
+- **Post** is the text; **Link** and **Hashtags** go on the lines under it. The
+  counter shows the length the way X counts it (a link is always 23, an emoji
+  2). It turns **red** when the post is too long — the service will then drop
+  hashtags from the end first, and only then cut the text. The **Preview** is
+  exactly what will be sent.
+- **Image** — optionally attach one PNG or JPEG of up to 5 MB.
+- **Post** asks first, then hands the post to the options service, which sends
+  it. The result lands in the log below a moment later.
+- **X is off, and dry, until you set it up.** Nothing reaches X until the `x`
+  block in `shared/notifications.json` has its keys filled in and is enabled;
+  while `x.dry_run` is on, every post is logged as *Dry run* and nothing is
+  sent.
+- **Hashtag defaults** for each kind of post live in `x.hashtags.*` there, and
+  `max_tags` caps how many any post carries. A **daily cap** (`daily_cap`)
+  limits how many posts go out per day; past it a post is refused.
+- **Recent posts** logs every post the app makes to X — market reports, the
+  hourly trade ideas and posts from this page — with a link to each one that
+  went out, or the reason it did not (refused, failed, over the daily cap).
+""",
     "/status": """
 **System Status — the simple version**
 

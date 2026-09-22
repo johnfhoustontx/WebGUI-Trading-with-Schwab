@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-21</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -378,24 +378,33 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#related-pages_28">Related pages</a></li>
 </ul>
 </li>
-<li><a href="#user-manuals">User Manuals</a></li>
-</ul>
-</li>
-<li><a href="#system">SYSTEM</a><ul>
-<li><a href="#system-status">System Status</a><ul>
+<li><a href="#post-to-x">Post to X</a><ul>
 <li><a href="#what-it-is_30">What it is</a></li>
+<li><a href="#where-the-data-comes-from_29">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_28">Reading the screen</a></li>
 <li><a href="#why-it-matters_24">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_14">Caveats and gotchas</a></li>
 <li><a href="#related-pages_29">Related pages</a></li>
 </ul>
 </li>
-<li><a href="#settings">Settings</a><ul>
+<li><a href="#user-manuals">User Manuals</a></li>
+</ul>
+</li>
+<li><a href="#system">SYSTEM</a><ul>
+<li><a href="#system-status">System Status</a><ul>
 <li><a href="#what-it-is_31">What it is</a></li>
 <li><a href="#reading-the-screen_29">Reading the screen</a></li>
 <li><a href="#why-it-matters_25">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_15">Caveats and gotchas</a></li>
 <li><a href="#related-pages_30">Related pages</a></li>
+</ul>
+</li>
+<li><a href="#settings">Settings</a><ul>
+<li><a href="#what-it-is_32">What it is</a></li>
+<li><a href="#reading-the-screen_30">Reading the screen</a></li>
+<li><a href="#why-it-matters_26">Why it matters</a></li>
+<li><a href="#caveats-and-gotchas_16">Caveats and gotchas</a></li>
+<li><a href="#related-pages_31">Related pages</a></li>
 </ul>
 </li>
 <li><a href="#stop-all-services">Stop All Services</a></li>
@@ -5505,6 +5514,73 @@ and commissions are not in these numbers, so treat every figure as optimistic.</
 <p><a href="#paper-ledger">Paper Ledger</a> · <a href="#paper-account">Paper Account</a> ·
 <a href="#claude-trades">Claude Trades</a>.</p>
 <hr />
+<h2 id="post-to-x">Post to X</h2>
+<p><em>Menu: ACCOUNT → More → Post to X · Route <code>/x</code></em></p>
+<h3 id="what-it-is_30">What it is</h3>
+<p>A composer for one-off marketing posts on the app's X account, above a log of every
+post the app has made there — the scheduled market reports and hourly trade ideas as
+well as what you write here.</p>
+<h3 id="where-the-data-comes-from_29">Where the data comes from</h3>
+<p>The page writes nothing to X itself. <strong>Post</strong> sends an <code>x_post</code> command to the options
+service, which fits the text, attaches the image and posts it. Every attempt from any
+source is recorded to the <code>options:x_log</code> cache (the newest 100), which is what the log
+table reads.</p>
+<h3 id="reading-the-screen_28">Reading the screen</h3>
+<p><strong>Post</strong>, <strong>Link</strong> and <strong>Hashtags</strong> make up the post: the text, then a blank line, then
+the link and the hashtags on the lines beneath it. The <strong>counter</strong> measures it the way
+X does — a link is 23 characters and an emoji or other wide character 2 — and turns red
+when the post as written is over 280. The <strong>Preview</strong> is the fitted post: hashtags drop
+from the end first, and only then is the text cut with an ellipsis. The link always
+survives. An optional <strong>Image</strong> (PNG or JPEG, up to 5 MB) travels with the post.</p>
+<p><strong>Recent posts</strong> shows, per post, when it was attempted, its source (<em>Market report</em>,
+<em>Trade idea</em> or <em>Marketing</em>), its status and the link to the post — or, where nothing
+went out, the reason.</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Posted</strong></td>
+<td>It is on X; the last column links to it.</td>
+</tr>
+<tr>
+<td><strong>Dry run</strong></td>
+<td><code>x.dry_run</code> is on, so it was logged and not sent.</td>
+</tr>
+<tr>
+<td><strong>Refused</strong></td>
+<td>The app declined to send it — X is disabled, that kind of post is switched off, the daily cap is reached, or the image was unusable.</td>
+</tr>
+<tr>
+<td><strong>Failed</strong></td>
+<td>X answered with an error.</td>
+</tr>
+<tr>
+<td><strong>Unknown</strong></td>
+<td>The request left, but no answer said whether it landed.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="why-it-matters_24">Why it matters</h3>
+<p>It is the one place that shows what the app has said in public. A report or trade idea
+that did not go out is listed with the reason, rather than simply not appearing.</p>
+<h3 id="caveats-and-gotchas_14">Caveats and gotchas</h3>
+<ul>
+<li><strong>Off and dry until configured.</strong> Nothing reaches X until the <code>x</code> block in
+  <code>shared/notifications.json</code> holds the account's keys and is enabled; while
+  <code>x.dry_run</code> is on every post is logged as <em>Dry run</em>. The default hashtags for each kind
+  of post live in <code>x.hashtags</code>, <code>max_tags</code> caps how many any post carries, and
+  <code>daily_cap</code> limits how many posts go out per day across all sources.</li>
+<li><strong>A post is public.</strong> The confirm dialog shows the exact text before anything is sent.</li>
+<li>This page exists only in the private app; the public live screens have no way to post.</li>
+</ul>
+<h3 id="related-pages_29">Related pages</h3>
+<p><a href="#eod-report">EOD Report</a> · <a href="#settings">Settings</a>.</p>
+<hr />
 <h2 id="user-manuals">User Manuals</h2>
 <p><em>Menu: ACCOUNT → More → User Manuals · Route <code>/manuals</code></em></p>
 <p>Links to the five manuals, each opening in a new tab:</p>
@@ -5545,10 +5621,10 @@ and commissions are not in these numbers, so treat every figure as optimistic.</
 a trading workflow, which is exactly why they are separated.</p>
 <h2 id="system-status">System Status</h2>
 <p><em>Menu: bottom of the rail · Route <code>/status</code></em></p>
-<h3 id="what-it-is_30">What it is</h3>
+<h3 id="what-it-is_31">What it is</h3>
 <p>A live health board for every part of the stack, plus a check that each service is not
 merely running but actually <em>publishing</em>.</p>
-<h3 id="reading-the-screen_28">Reading the screen</h3>
+<h3 id="reading-the-screen_29">Reading the screen</h3>
 <p><strong>Component cards</strong> — one per process:</p>
 <table>
 <thead>
@@ -5629,14 +5705,14 @@ scans during the session, so overnight and at weekends its age is left alone rat
 than reported as a fault. Views that publish around the clock are checked around the
 clock, with a longer allowance outside market hours.</p>
 </blockquote>
-<h3 id="why-it-matters_24">Why it matters</h3>
+<h3 id="why-it-matters_25">Why it matters</h3>
 <p>Almost every "this page is broken" symptom in this app is a service that has stopped
 publishing. Reloading the browser cannot fix that. This page turns a five-minute
 investigation into a five-second one: find the stale row, restart that service.</p>
 <p><strong>The order matters when restarting.</strong> Redis first, then the proxy, then services, then
 the web app. A service restarted while the proxy is down will start and then fail to
 fetch anything.</p>
-<h3 id="caveats-and-gotchas_14">Caveats and gotchas</h3>
+<h3 id="caveats-and-gotchas_15">Caveats and gotchas</h3>
 <ul>
 <li>The Schwab <strong>refresh</strong> token is the fatal one. <code>token_expired: true</code> on the proxy is
   routine — it auto-refreshes. A missing or expired <em>refresh</em> token needs
@@ -5644,15 +5720,15 @@ fetch anything.</p>
 <li>The page header text says "the five domain services" while six are listed; there are
   six.</li>
 </ul>
-<h3 id="related-pages_29">Related pages</h3>
+<h3 id="related-pages_30">Related pages</h3>
 <p><a href="#settings">Settings</a> (API call counts) · <a href="#stop-all-services">Stop All Services</a>.</p>
 <hr />
 <h2 id="settings">Settings</h2>
 <p><em>Menu: bottom of the rail · Route <code>/settings</code></em></p>
-<h3 id="what-it-is_31">What it is</h3>
+<h3 id="what-it-is_32">What it is</h3>
 <p>Every preference in the app, plus two things that are genuinely useful rather than
 cosmetic: <strong>API usage</strong> and <strong>Maintenance</strong>.</p>
-<h3 id="reading-the-screen_29">Reading the screen</h3>
+<h3 id="reading-the-screen_30">Reading the screen</h3>
 <p><strong>Scanner alerts.</strong> Enable the chime, pick the sound and volume, restrict alerts to
 market hours, and set a <strong>minimum score to alert</strong> — the most useful knob here, because
 it is what stops the app interrupting you for mediocre signals.</p>
@@ -5704,14 +5780,14 @@ the last 7 days and the last 30 days.</p>
 an optional purge-first switch, and reports the before-and-after size. The confirm
 <strong>names whether that switch is armed</strong> — with it on, every saved GEX session but the
 last five is deleted before the compaction runs.</p>
-<h3 id="why-it-matters_25">Why it matters</h3>
+<h3 id="why-it-matters_26">Why it matters</h3>
 <p><strong>API usage is the section to actually look at.</strong> The app makes on the order of tens of
 thousands of Schwab calls per day, dominated by the 1-minute gamma collection and the
 market dashboard's ~3-second polling. Schwab rate-limits, and a stack that trips the
 limit degrades in ways that look like unrelated bugs. This page tells you the real
 number before that happens. The Claude counter does the same for money.</p>
 <p><strong>Minimum score to alert</strong> is the difference between an app that helps and one you mute.</p>
-<h3 id="caveats-and-gotchas_15">Caveats and gotchas</h3>
+<h3 id="caveats-and-gotchas_16">Caveats and gotchas</h3>
 <ul>
 <li>Counters are <strong>forward-only</strong> and start when the relevant process restarts — they are
   not historical.</li>
@@ -5719,7 +5795,7 @@ number before that happens. The Claude counter does the same for money.</p>
   the collector is active.</li>
 <li>Appearance changes need the web GUI to restart <em>and</em> a hard browser refresh.</li>
 </ul>
-<h3 id="related-pages_30">Related pages</h3>
+<h3 id="related-pages_31">Related pages</h3>
 <p><a href="#system-status">System Status</a> · <a href="#flow-alerts">Flow Alerts</a> ·
 <a href="#captured-signals">Captured Signals</a>.</p>
 <hr />

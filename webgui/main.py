@@ -664,6 +664,7 @@ FLAT_NAV = [
 # of EOD Report — the old indented sub-group is retired. (route, label, icon)
 MORE_CHILDREN = [
     ("/eod", "EOD Report", "summarize"),
+    ("/x", "Post to X", "campaign"),
 ]
 
 # Sub-menu items that used to nest under the Settings entry; Settings is now a
@@ -952,6 +953,7 @@ _TAB_COLOR = {
     "/portfolio": "#9ccc65",             # Portfolio — light green
     "/driver": "#ff7043",                # Driver — deep orange
     "/eod": "#78909c",                   # EOD Report — blue grey
+    "/x": "#1d9bf0",                     # Post to X — X blue
     "/status": "#d4e157",                # System Status — lime
     "/settings": "#90a4ae",              # Settings — blue grey light
     "/terminate": "#b71c1c",             # Stop All Services — dark red
@@ -2494,6 +2496,13 @@ def eod_detail_page() -> None:
     with _layout("/eod", "EOD Report — Detail"):
         from pages import eod
         eod.render_detail()
+
+
+@_page("/x")
+def x_page() -> None:
+    with _layout("/x", "Post to X"):
+        from pages import x_post
+        x_post.render()
 
 
 @_page("/market")
