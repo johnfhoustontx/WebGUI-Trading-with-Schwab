@@ -24,11 +24,10 @@ Vanna · Flow · Term. No Net Prem tab (owner's decision).
 | D4 | **No deep links.** The live origin keeps taking no query parameters; the symbol and view live in page state only. |
 | D5 | The old routes REDIRECT to `/gamma`, opening on that route's symbol and view. |
 
-**Still open (D1 detail): which list the dropdown offers.** The app's list
-(`cache:options:gamma_symbols`) is `symbols.toml` `[collection]` PLUS the
-gitignored `Top 20.xlsx` watchlist, 92 symbols on prod once $VIX is dropped.
-Publishing it publishes the owner's watchlist. The other option is the 27
-`symbols.toml` names only. Either way the accessor reads a config switch.
+**D1 detail, settled 2026-09-21:** the dropdown offers the app's own list,
+`symbols.toml` `[collection]` PLUS the `Top 20.xlsx` watchlist (92 on prod once
+$VIX is dropped). The owner accepted that this publishes the watchlist. The
+public dropdown still reads a PUBLISHED copy of the list, not the private key.
 
 ## The one real obstacle
 
@@ -65,7 +64,7 @@ well inside its minute.
 ### Phase 1 - service
 - `shared/public_gamma.py`: the stream name, command type, key helpers and
   config accessors. The config lives in `config/gamma_public.toml`: cap, lease
-  minutes, daily budget, symbol-list switch and Term interval.
+  minutes, daily budget and Term interval.
 - A consumer, `services/options_svc/gamma_public.py`, wired in through
   `make_app(extra_consumers=)`. It validates the symbol against the dropdown
   list, drops duplicates, checks the budget and renews the lease. Its refusals
@@ -73,8 +72,9 @@ well inside its minute.
 - The minute tick publishes `PUBLISHED_GAMMA_SYMBOLS | hot set`, and the
   collector keeps the chains of hot symbols. Hot-symbol keys get a TTL; the
   three permanent symbols keep none.
-- A published list key for the dropdown. If D1 settles on the 27 names, the
-  public page must not read the private list.
+- A published list key for the dropdown: the same list as the app's
+  (`compute.gamma_symbol_options`), written beside it, so the public page
+  validates against what it shows.
 - ACL: add `(%W~cmd:gamma_public +xadd)` to the `live` user, then run
   `CONFIG REWRITE`.
 
