@@ -103,6 +103,13 @@ DEFAULTS = {
         # a queue that has fallen behind.
         "max_wait_sec": 120,
     },
+    "visitor": {
+        # Symbol changes one visitor may send an hour, counted in the public
+        # process by address and never stored. Renewals of the symbol on screen
+        # are not counted. It stops ONE visitor cycling through the list and
+        # holding every live slot.
+        "picks_per_hour": 30,
+    },
 }
 
 load, reset_cache = toml_loader(GAMMA_PUBLIC_TOML, DEFAULTS,
@@ -134,3 +141,7 @@ def renew_min() -> int:
 
 def max_wait_sec() -> int:
     return _num("limits", "max_wait_sec", minimum=10)
+
+
+def picks_per_hour() -> int:
+    return _num("visitor", "picks_per_hour", minimum=1)

@@ -30,3 +30,8 @@ renew_min = 5
 [limits]
 # Seconds after which a queued request is dropped instead of answered.
 max_wait_sec = 120
+
+[visitor]
+# Symbol changes one visitor may send an hour (counted by address in memory,
+# never stored). Renewing the symbol on screen does not count.
+picks_per_hour = 30

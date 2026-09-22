@@ -134,6 +134,23 @@ def test_the_private_symbol_being_hot_is_built_once(bus, builds):
     assert bus.cache_get(handlers.CACHE_GAMMA).payload["symbol"] == "AMD"
 
 
+def test_an_expired_lease_stops_the_private_refresh_writing_public_keys(
+        bus, builds, monkeypatch):
+    """Ticks stop at the window's end, so the last tick's hot set would read as
+    hot all night. The private page's own refresh of a once-picked symbol must
+    not keep its public keys alive after the lease ran out."""
+    _grant(bus, "AMD")
+    _tick(bus, kept=("AMD",))
+    assert gamma_public.tick_symbols() == ("AMD",)
+    late = OPEN + dt.timedelta(minutes=pg.hot()["lease_min"] + 1)
+    monkeypatch.setattr(gamma_public, "_now", lambda: late)
+    assert gamma_public.tick_symbols() == ()
+    bus._r.delete(handlers.gamma_pub_key("AMD"))
+    handlers.refresh_gamma(bus, "AMD")                 # the owner's gamma_refresh
+    assert bus.cache_get(handlers.gamma_pub_key("AMD")) is None
+    assert bus.cache_get(handlers.CACHE_GAMMA).payload["symbol"] == "AMD"
+
+
 # ── a permanent symbol ──────────────────────────────────────────────────────
 
 def test_a_lease_on_spy_adds_its_missing_views_with_a_ttl(bus, builds):

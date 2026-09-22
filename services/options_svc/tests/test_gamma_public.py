@@ -153,9 +153,28 @@ def test_a_lease_running_out_updates_the_page_at_the_next_tick(bus):
     assert _status(bus)["hot"] == []
 
 
+def test_the_page_can_read_its_own_outcome(bus, monkeypatch):
+    """full and closed change no lease, so without a per-symbol record the page
+    could not tell them from a request still in flight."""
+    monkeypatch.setattr(pg, "hot", lambda: {"cap": 1, "lease_min": 15, "keep_min": 30})
+    gp.handle(bus, _cmd("NVDA"))
+    gp.handle(bus, _cmd("AAPL"))
+    last = _status(bus)["last"]
+    assert last["NVDA"]["outcome"] == "added"
+    assert last["AAPL"]["outcome"] == "full"
+    assert last["AAPL"]["at"] == OPEN.isoformat()
+
+
+def test_an_off_list_symbol_is_never_recorded(bus):
+    gp.handle(bus, _cmd("NVDA"))
+    gp.handle(bus, _cmd("ZZZZ"))
+    assert set(_status(bus)["last"]) == {"NVDA"}
+
+
 def test_the_hot_set_names_only_dropdown_symbols(bus):
     """The status view is public. Only symbols from the public list can reach it,
     so it never shows a string a visitor typed."""
     for raw in ("NVDA", "NOT_A_TICKER", "ZZZZ", "AAPL"):
         gp.handle(bus, _cmd(raw))
     assert set(_status(bus)["hot"]) <= set(LIST)
+    assert set(_status(bus)["last"]) <= set(LIST)

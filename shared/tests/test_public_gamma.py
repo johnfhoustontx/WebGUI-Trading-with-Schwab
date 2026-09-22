@@ -56,6 +56,7 @@ def test_the_shipped_values():
     assert pg.hot() == {"cap": 8, "lease_min": 15, "keep_min": 30}
     assert pg.renew_min() == 5
     assert pg.max_wait_sec() == 120
+    assert pg.picks_per_hour() == 30
 
 
 def test_the_page_renews_before_the_lease_runs_out():

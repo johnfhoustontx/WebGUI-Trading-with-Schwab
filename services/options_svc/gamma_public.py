@@ -57,6 +57,10 @@ FUTURE_SKEW_SEC = 30
 _LOCK = threading.Lock()
 _LEASES: dict = {}          # SYMBOL -> lease end (aware datetime), grant order
 _TICK: tuple = ()           # the hot set the current tick captured
+# Each dropdown symbol's latest outcome, for the page: {SYMBOL: {outcome, at}}.
+# Bounded by the dropdown list (an off-list symbol is ``invalid`` and never
+# recorded), and it names only symbols from that public list.
+_LAST: dict = {}
 
 
 def _now() -> dt.datetime:
@@ -69,6 +73,7 @@ def reset() -> None:
     global _TICK
     with _LOCK:
         _LEASES.clear()
+        _LAST.clear()
         _TICK = ()
 
 
@@ -111,9 +116,20 @@ def begin_tick(bus=None, now=None) -> tuple:
     return snapshot
 
 
-def tick_symbols() -> tuple:
-    """The hot set ``begin_tick`` captured for the running tick."""
-    return _TICK
+def tick_symbols(now=None) -> tuple:
+    """The hot set ``begin_tick`` captured for the running tick, less any
+    symbol whose lease has since run out.
+
+    The filter is what keeps a hot symbol's keys expiring. ``_TICK`` is only
+    re-taken by a tick, and ticks stop at the window's end, so unfiltered it
+    would name the last tick's symbols all night. The private page's own
+    ``gamma_refresh`` reaches ``_gamma_pub_targets`` at any hour, so a symbol
+    parked there and once picked by a visitor would have its public keys
+    rewritten, TTL renewed, until morning (review of fb882da, 2026-09-21)."""
+    now = now or _now()
+    with _LOCK:
+        _prune(now)
+        return tuple(s for s in _TICK if s in _LEASES)
 
 
 def allowed_symbols(bus) -> frozenset:
@@ -148,6 +164,7 @@ def _write_status(bus, now) -> None:
     permanent = sorted(_permanent())
     with _LOCK:
         leased = list(_LEASES)
+        last = {s: dict(r) for s, r in _LAST.items()}
     start, end = market_calendar.window_bounds(WINDOW)
     status = {
         "permanent": permanent,
@@ -155,6 +172,7 @@ def _write_status(bus, now) -> None:
         "cap": cfg["cap"],
         "slots_used": sum(1 for s in leased if s not in permanent),
         "renew_min": public_gamma.renew_min(),
+        "last": last,
         "window": {"start": start.strftime("%H:%M"), "end": end.strftime("%H:%M"),
                    "tz": "CT"},
         "updated": now.isoformat(),
@@ -200,9 +218,18 @@ def handle(bus, command) -> None:
         log.exception("gamma_public request degraded")
         return
     log.info("public gamma %s: %s", symbol, outcome)
-    # Written when the set changes, and once when the view is missing (a fresh
-    # start), so a page never waits on a status nobody has written.
-    if outcome == "added" or not _status_exists(bus):
+    changed = False
+    if outcome != "invalid":
+        # Recorded per dropdown symbol, so a page can word ITS request: "full"
+        # and "closed" leave the hot set untouched and would otherwise be
+        # invisible. A renewal (live after live) changes nothing to write.
+        with _LOCK:
+            prev = (_LAST.get(symbol) or {}).get("outcome")
+            _LAST[symbol] = {"outcome": outcome, "at": now.isoformat()}
+        changed = prev != outcome
+    # Written when anything a page reads changed, and once when the view is
+    # missing (a fresh start), so a page never waits on a status nobody wrote.
+    if changed or outcome == "added" or not _status_exists(bus):
         try:
             _write_status(bus, now)
         except Exception:  # noqa: BLE001

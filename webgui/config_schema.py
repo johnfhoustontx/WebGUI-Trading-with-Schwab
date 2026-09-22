@@ -698,6 +698,11 @@ _GAMMA_PUBLIC = ConfigFile(
             Field("limits.max_wait_sec", "Drop a request that waited", "",
                   kind="int", unit="s", min=10, max=3600, step=10),
         )),
+        Section("Visitors", "", (
+            Field("visitor.picks_per_hour", "Symbol changes per visitor per hour",
+                  "Counted by address in memory; no address is stored.",
+                  kind="int", min=1, max=500, step=1),
+        )),
     ),
 )
 
