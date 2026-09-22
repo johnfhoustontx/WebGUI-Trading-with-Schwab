@@ -70,6 +70,10 @@ def _daily_cap(x):
 
 
 def _kind_enabled(x, kind):
+    """``KINDS`` is the allow-list: a kind outside it is refused whatever the
+    config says, so a hand-edited ``kinds`` block cannot invent a post type."""
+    if kind not in KINDS:
+        return False
     kinds = x.get("kinds")
     if not isinstance(kinds, dict):
         return False
@@ -110,34 +114,78 @@ def record_refusal(bus, kind, text, reason, *, now=None, image=False):
         log.warning("x refusal log failed", exc_info=True)
 
 
-def _check(resp, what):
+class _XHttpError(RuntimeError):
+    """X answered with an HTTP error: a DEFINITE refusal. Our own message (status +
+    the start of X's body) is safe to log verbatim."""
+
+
+class _Unconfirmed(Exception):
+    """The create call may have reached X, but no confirmation came back."""
+
+
+def _sanitized(what, exc):
+    """A loggable reason. Only our own ``_XHttpError`` keeps its message; any other
+    exception's text can carry secrets (oauthlib echoes the offending credential in
+    its ValueError), so it is reduced to the exception's type name."""
+    if isinstance(exc, _XHttpError):
+        return str(exc)[:300]
+    return f"{what} failed ({type(exc).__name__})"
+
+
+def _valid_creds(x):
+    creds = {k: x.get(k) for k in _CREDS}
+    if all(isinstance(v, str) and v.strip() for v in creds.values()):
+        return creds
+    return None
+
+
+def _upload(s, png):
+    resp = s.post(f"{API}/media/upload",
+                  files={"media": ("card.png", png, "image/png")},
+                  data={"media_category": "tweet_image", "media_type": "image/png"},
+                  timeout=_TIMEOUT)
     if resp.status_code >= 300:
-        raise RuntimeError(f"{what} HTTP {resp.status_code}: {str(resp.text)[:200]}")
-    return resp.json()
+        raise _XHttpError(f"media upload HTTP {resp.status_code}: {str(resp.text)[:200]}")
+    return str(resp.json()["data"]["id"])
 
 
-def _send(creds, text, png):
-    s = _session(creds)
-    body = {"text": text}
-    if png:
-        up = _check(s.post(f"{API}/media/upload",
-                           files={"media": ("card.png", png, "image/png")},
-                           data={"media_category": "tweet_image", "media_type": "image/png"},
-                           timeout=_TIMEOUT), "media upload")
-        body["media"] = {"media_ids": [str(up["data"]["id"])]}
-    out = _check(s.post(f"{API}/tweets", json=body, timeout=_TIMEOUT), "create post")
-    return str(out["data"]["id"])
+def _create(s, body):
+    """The id of the new post, or ``None`` when X confirmed (2xx) without one.
+    Raises ``_XHttpError`` on an HTTP error, ``_Unconfirmed`` when the call may
+    have landed but the answer was lost or unreadable."""
+    try:
+        resp = s.post(f"{API}/tweets", json=body, timeout=_TIMEOUT)
+    except Exception as exc:  # noqa: BLE001 -- timeout/reset: it may have landed
+        raise _Unconfirmed(type(exc).__name__) from None
+    if resp.status_code >= 300:
+        raise _XHttpError(f"create post HTTP {resp.status_code}: {str(resp.text)[:200]}")
+    try:
+        out = resp.json()
+    except Exception as exc:  # noqa: BLE001 -- a 2xx we cannot read
+        raise _Unconfirmed(type(exc).__name__) from None
+    data = out.get("data") if isinstance(out, dict) else None
+    post_id = data.get("id") if isinstance(data, dict) else None
+    return str(post_id) if post_id not in (None, "") else None
 
 
 def post(bus, text, png=None, *, kind, now=None, config=None, meta=None):
     """Post ``text`` (+ optional PNG bytes) to X. Returns
-    ``{"ok", "id", "url", "error", "dry_run"}``; never raises."""
-    result = {"ok": False, "id": None, "url": None, "error": None, "dry_run": False}
+    ``{"ok", "id", "url", "error", "dry_run", "unknown"}``; never raises.
+
+    ``unknown`` is True when the create call may have reached X but no answer
+    confirmed it: the entry is logged ``unknown``, it COUNTS toward the daily cap
+    (fail closed - better one post short than one over), and ``ok`` is False so a
+    caller does not treat it as done. A caller must not blindly retry it: the post
+    may be live."""
+    result = {"ok": False, "id": None, "url": None, "error": None, "dry_run": False,
+              "unknown": False}
     try:
+        # A naive ``now`` is read as HOST-LOCAL time by ``astimezone`` (for the
+        # CT day) and stamped as given in the log; pass an aware datetime.
         now = now or _dt.datetime.now(_CT)
         entry = _entry(now, kind, text, png, meta)
-    except Exception as exc:  # noqa: BLE001 -- e.g. a naive ``now``-less clock fault
-        result["error"] = str(exc)[:300]
+    except Exception:  # noqa: BLE001 -- a ``now`` without ``isoformat``
+        result["error"] = "bad timestamp"
         return result
 
     def _done(status, reason=None):
@@ -161,23 +209,48 @@ def post(bus, text, png=None, *, kind, now=None, config=None, meta=None):
         if x.get("dry_run"):
             result.update(ok=True, dry_run=True)
             return _done("dry_run")
-        creds = {k: x.get(k) for k in _CREDS}
-        if not all(creds.values()):
+        creds = _valid_creds(x)
+        if creds is None:
             return _done("refused", "no credentials")
         cap = _daily_cap(x)
         count = posted_today(bus, now)
         if cap and count >= cap:
             return _done("refused", f"daily cap ({cap}) reached")
-        post_id = _send(creds, text, png)
-        entry["id"] = post_id
-        entry["url"] = f"https://x.com/i/web/status/{post_id}"
-        result.update(ok=True, id=post_id, url=entry["url"])
+    except Exception as exc:  # noqa: BLE001 -- never raises, by contract
+        # Nothing was sent yet; these are config/bus faults, never credentials.
+        log.warning("x %s post refused by a fault: %s", kind, exc)
+        return _done("failed", str(exc)[:300])
+
+    def _count():
         try:
             bus.cache_set(COUNT_KEY, {"day": _day(now), "count": count + 1})
-        except Exception:  # noqa: BLE001 -- the post IS live; do not report it failed
+        except Exception:  # noqa: BLE001 -- the post may be live; keep its status
             log.warning("x daily count write failed", exc_info=True)
-        return _done("posted")
-    except Exception as exc:  # noqa: BLE001 -- never raises, by contract
-        log.warning("x %s post failed: %s", kind, exc)
-        result.update(ok=False, id=None, url=None, dry_run=False)
-        return _done("failed", str(exc)[:300])
+
+    # Everything below touches credentials or X: no raw exception text is logged.
+    try:
+        s = _session(creds)
+        body = {"text": text}
+        if png:
+            body["media"] = {"media_ids": [_upload(s, png)]}
+    except Exception as exc:  # noqa: BLE001 -- nothing was posted
+        reason = _sanitized("media upload" if png else "session", exc)
+        log.warning("x %s post failed: %s", kind, reason)
+        return _done("failed", reason)
+    try:
+        post_id = _create(s, body)
+    except _Unconfirmed as exc:
+        reason = f"sent; X did not confirm ({exc})"
+        log.warning("x %s post unconfirmed: %s", kind, reason)
+        _count()
+        result["unknown"] = True
+        return _done("unknown", reason)
+    except Exception as exc:  # noqa: BLE001 -- an HTTP refusal: nothing posted
+        reason = _sanitized("create post", exc)
+        log.warning("x %s post failed: %s", kind, reason)
+        return _done("failed", reason)
+    entry["id"] = post_id
+    entry["url"] = f"https://x.com/i/web/status/{post_id}" if post_id else None
+    result.update(ok=True, id=post_id, url=entry["url"])
+    _count()
+    return _done("posted")

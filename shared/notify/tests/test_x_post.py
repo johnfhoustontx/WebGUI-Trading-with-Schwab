@@ -56,6 +56,10 @@ def test_posts_text_and_image_and_logs(bus, monkeypatch):
     out = x_post.post(bus, "hello", b"PNG", kind="marketing", now=NOW, config=_cfg())
     assert out["ok"] and out["id"] == "99" and out["url"].endswith("/99")
     assert s.calls[0][0].endswith("/2/media/upload")
+    up = s.calls[0][1]
+    assert up["files"]["media"] == ("card.png", b"PNG", "image/png")
+    assert up["data"]["media_category"] == "tweet_image"
+    assert s.calls[1][0].endswith("/2/tweets")
     assert s.calls[1][1]["json"] == {"text": "hello", "media": {"media_ids": ["m1"]}}
     log = bus.cache_get(x_post.LOG_KEY).payload["posts"]
     assert log[0]["kind"] == "marketing" and log[0]["status"] == "posted"
@@ -93,7 +97,10 @@ def test_the_daily_cap_refuses_the_third_post(bus, monkeypatch):
 def test_a_network_error_never_raises(bus, monkeypatch):
     monkeypatch.setattr(x_post, "_session", lambda c: FakeSession(fail=OSError("down")))
     out = x_post.post(bus, "a", b"P", kind="marketing", now=NOW, config=_cfg())
-    assert not out["ok"] and "down" in out["error"]
+    # The upload failed, so nothing was sent: a definite failure, not counted.
+    # Its reason names the exception type only - a raw message can carry secrets.
+    assert not out["ok"] and "OSError" in out["error"] and "down" not in out["error"]
+    assert bus.cache_get(x_post.LOG_KEY).payload["posts"][0]["status"] == "failed"
     assert x_post.posted_today(bus, NOW) == 0
 
 
@@ -195,3 +202,176 @@ def test_a_broken_bus_never_raises(monkeypatch):
     monkeypatch.setattr(x_post, "_session", lambda c: FakeSession())
     out = x_post.post(Broken(), "a", None, kind="marketing", now=NOW, config=_cfg())
     assert not out["ok"] and "redis gone" in out["error"]
+
+
+# --- secrets stay out of the log ---------------------------------------------
+
+def _logged(bus, jsonl):
+    return (json.dumps(bus.cache_get(x_post.LOG_KEY).payload)
+            + jsonl.read_text(encoding="utf-8"))
+
+
+def test_a_non_string_credential_is_refused_and_never_logged(bus, monkeypatch, _jsonl):
+    monkeypatch.setattr(x_post, "_session", lambda c: pytest.fail("no network"))
+    out = x_post.post(bus, "hi", None, kind="report", now=NOW,
+                      config=_cfg(api_secret=12345678))
+    assert not out["ok"] and out["error"] == "no credentials"
+    assert "12345678" not in _logged(bus, _jsonl)
+
+
+def test_a_whitespace_credential_is_refused(bus, monkeypatch):
+    monkeypatch.setattr(x_post, "_session", lambda c: pytest.fail("no network"))
+    out = x_post.post(bus, "hi", None, kind="report", now=NOW,
+                      config=_cfg(access_token="   "))
+    assert out["error"] == "no credentials"
+
+
+def test_a_foreign_exception_message_is_never_logged(bus, monkeypatch, _jsonl):
+    monkeypatch.setattr(x_post, "_session",
+                        lambda c: FakeSession(fail=ValueError("secret-abc")))
+    out = x_post.post(bus, "hi", b"P", kind="marketing", now=NOW, config=_cfg())
+    assert not out["ok"] and "ValueError" in out["error"]
+    assert "secret-abc" not in out["error"]
+    assert "secret-abc" not in _logged(bus, _jsonl)
+
+
+def test_a_session_that_cannot_be_built_is_never_logged(bus, monkeypatch, _jsonl):
+    def boom(c):
+        raise ValueError("Only unicode objects are escapable. Got secret-abc")
+    monkeypatch.setattr(x_post, "_session", boom)
+    out = x_post.post(bus, "hi", None, kind="marketing", now=NOW, config=_cfg())
+    assert not out["ok"] and "secret-abc" not in _logged(bus, _jsonl)
+    assert x_post.posted_today(bus, NOW) == 0
+
+
+# --- an unconfirmed post fails closed ----------------------------------------
+
+class _Resp:
+    def __init__(self, status, body=None, bad_json=False, text=""):
+        self.status_code, self._b, self._bad, self.text = status, body, bad_json, text
+
+    def json(self):
+        if self._bad:
+            raise ValueError("not json")
+        return self._b
+
+
+class ScriptedSession:
+    """``upload`` / ``create``: a response to return, or an exception to raise."""
+
+    def __init__(self, upload=None, create=None):
+        self.upload = upload if upload is not None else _Resp(200, {"data": {"id": "m1"}})
+        self.create = create
+        self.calls = []
+
+    def post(self, url, **kw):
+        self.calls.append(url)
+        r = self.upload if url.endswith("/media/upload") else self.create
+        if isinstance(r, BaseException):
+            raise r
+        return r
+
+
+def _entry0(bus):
+    return bus.cache_get(x_post.LOG_KEY).payload["posts"][0]
+
+
+def test_a_create_timeout_is_unknown_and_counted(bus, monkeypatch):
+    import requests
+    s = ScriptedSession(create=requests.Timeout("read timed out token=zzz"))
+    monkeypatch.setattr(x_post, "_session", lambda c: s)
+    out = x_post.post(bus, "hi", b"P", kind="marketing", now=NOW, config=_cfg())
+    assert not out["ok"] and out["unknown"] is True
+    assert out["error"] == "sent; X did not confirm (Timeout)"
+    e = _entry0(bus)
+    assert e["status"] == "unknown" and e["reason"] == "sent; X did not confirm (Timeout)"
+    assert x_post.posted_today(bus, NOW) == 1
+
+
+def test_a_create_connection_error_is_unknown_and_counted(bus, monkeypatch):
+    import requests
+    s = ScriptedSession(create=requests.ConnectionError("reset"))
+    monkeypatch.setattr(x_post, "_session", lambda c: s)
+    out = x_post.post(bus, "hi", None, kind="marketing", now=NOW, config=_cfg())
+    assert out["unknown"] is True and _entry0(bus)["status"] == "unknown"
+    assert x_post.posted_today(bus, NOW) == 1
+
+
+def test_a_non_json_2xx_create_is_unknown_and_counted(bus, monkeypatch):
+    s = ScriptedSession(create=_Resp(201, bad_json=True, text="<html>"))
+    monkeypatch.setattr(x_post, "_session", lambda c: s)
+    out = x_post.post(bus, "hi", None, kind="marketing", now=NOW, config=_cfg())
+    assert not out["ok"] and out["unknown"] is True
+    assert x_post.posted_today(bus, NOW) == 1
+
+
+def test_a_2xx_create_with_no_id_is_posted_without_an_id(bus, monkeypatch):
+    s = ScriptedSession(create=_Resp(201, {"data": {}}))
+    monkeypatch.setattr(x_post, "_session", lambda c: s)
+    out = x_post.post(bus, "hi", None, kind="marketing", now=NOW, config=_cfg())
+    assert out["ok"] and out["id"] is None and out["url"] is None
+    assert not out.get("unknown")
+    e = _entry0(bus)
+    assert e["status"] == "posted" and e["id"] is None and e["url"] is None
+    assert x_post.posted_today(bus, NOW) == 1
+
+
+def test_a_create_403_is_failed_and_not_counted(bus, monkeypatch):
+    s = ScriptedSession(create=_Resp(403, {"detail": "forbidden"}, text="forbidden"))
+    monkeypatch.setattr(x_post, "_session", lambda c: s)
+    out = x_post.post(bus, "hi", b"P", kind="marketing", now=NOW, config=_cfg())
+    assert not out["ok"] and not out.get("unknown") and "403" in out["error"]
+    assert _entry0(bus)["status"] == "failed"
+    assert x_post.posted_today(bus, NOW) == 0
+
+
+def test_an_upload_failure_is_failed_and_never_creates(bus, monkeypatch):
+    s = ScriptedSession(upload=_Resp(500, text="oops"), create=_Resp(201, {"data": {"id": "9"}}))
+    monkeypatch.setattr(x_post, "_session", lambda c: s)
+    out = x_post.post(bus, "hi", b"P", kind="marketing", now=NOW, config=_cfg())
+    assert not out["ok"] and not out.get("unknown") and "500" in out["error"]
+    assert _entry0(bus)["status"] == "failed"
+    assert s.calls == [f"{x_post.API}/media/upload"]
+    assert x_post.posted_today(bus, NOW) == 0
+
+
+# --- the kind allow-list -----------------------------------------------------
+
+def test_a_kind_outside_KINDS_is_refused_even_when_enabled(bus, monkeypatch):
+    monkeypatch.setattr(x_post, "_session", lambda c: pytest.fail("no network"))
+    out = x_post.post(bus, "hi", None, kind="spam", now=NOW,
+                      config=_cfg(kinds={"spam": {"enabled": True}}))
+    assert not out["ok"] and out["error"] == "spam disabled"
+
+
+# --- gate order --------------------------------------------------------------
+
+def test_a_dry_run_needs_no_credentials(bus, monkeypatch):
+    monkeypatch.setattr(x_post, "_session", lambda c: pytest.fail("no network"))
+    out = x_post.post(bus, "hi", None, kind="report", now=NOW,
+                      config=_cfg(dry_run=True, api_key="", access_secret=""))
+    assert out["ok"] and out["dry_run"]
+
+
+def test_a_dry_run_ignores_a_reached_cap_and_counts_nothing(bus, monkeypatch):
+    monkeypatch.setattr(x_post, "_session", lambda c: pytest.fail("no network"))
+    bus.cache_set(x_post.COUNT_KEY, {"day": NOW.date().isoformat(), "count": 2})
+    out = x_post.post(bus, "hi", None, kind="report", now=NOW, config=_cfg(dry_run=True))
+    assert out["ok"] and out["dry_run"]
+    assert x_post.posted_today(bus, NOW) == 2
+
+
+def test_a_failed_count_write_after_a_post_still_reports_posted(bus, monkeypatch):
+    class CountFails:
+        def cache_get(self, key):
+            return bus.cache_get(key)
+
+        def cache_set(self, key, payload, **kw):
+            if key == x_post.COUNT_KEY:
+                raise RuntimeError("redis hiccup")
+            return bus.cache_set(key, payload, **kw)
+
+    monkeypatch.setattr(x_post, "_session", lambda c: FakeSession())
+    out = x_post.post(CountFails(), "hi", None, kind="marketing", now=NOW, config=_cfg())
+    assert out["ok"] and out["id"] == "99"
+    assert _entry0(bus)["status"] == "posted"
