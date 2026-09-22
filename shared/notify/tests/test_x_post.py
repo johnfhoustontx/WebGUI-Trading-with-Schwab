@@ -9,6 +9,9 @@ from shared.notify import x_post
 
 CT = ZoneInfo("America/Chicago")
 NOW = dt.datetime(2026, 9, 22, 10, 0, tzinfo=CT)
+# Real magic prefixes: x_post refuses bytes that are neither PNG nor JPEG.
+PNG = b"\x89PNG\r\n\x1a\n" + b"x"
+JPEG = b"\xff\xd8\xff" + b"x"
 CREDS = {"api_key": "k", "api_secret": "s", "access_token": "t", "access_secret": "a"}
 
 
@@ -53,11 +56,11 @@ def bus():
 def test_posts_text_and_image_and_logs(bus, monkeypatch):
     s = FakeSession()
     monkeypatch.setattr(x_post, "_session", lambda creds: s)
-    out = x_post.post(bus, "hello", b"PNG", kind="marketing", now=NOW, config=_cfg())
+    out = x_post.post(bus, "hello", PNG, kind="marketing", now=NOW, config=_cfg())
     assert out["ok"] and out["id"] == "99" and out["url"].endswith("/99")
     assert s.calls[0][0].endswith("/2/media/upload")
     up = s.calls[0][1]
-    assert up["files"]["media"] == ("card.png", b"PNG", "image/png")
+    assert up["files"]["media"] == ("card.png", PNG, "image/png")
     assert up["data"]["media_category"] == "tweet_image"
     assert s.calls[1][0].endswith("/2/tweets")
     assert s.calls[1][1]["json"] == {"text": "hello", "media": {"media_ids": ["m1"]}}
@@ -96,7 +99,7 @@ def test_the_daily_cap_refuses_the_third_post(bus, monkeypatch):
 
 def test_a_network_error_never_raises(bus, monkeypatch):
     monkeypatch.setattr(x_post, "_session", lambda c: FakeSession(fail=OSError("down")))
-    out = x_post.post(bus, "a", b"P", kind="marketing", now=NOW, config=_cfg())
+    out = x_post.post(bus, "a", PNG, kind="marketing", now=NOW, config=_cfg())
     # The upload failed, so nothing was sent: a definite failure, not counted.
     # Its reason names the exception type only - a raw message can carry secrets.
     assert not out["ok"] and "OSError" in out["error"] and "down" not in out["error"]
@@ -152,7 +155,7 @@ def test_an_empty_post_is_refused_before_any_network_call(bus, monkeypatch):
 def test_an_image_alone_is_not_an_empty_post(bus, monkeypatch):
     s = FakeSession()
     monkeypatch.setattr(x_post, "_session", lambda c: s)
-    out = x_post.post(bus, "", b"PNG", kind="marketing", now=NOW, config=_cfg())
+    out = x_post.post(bus, "", PNG, kind="marketing", now=NOW, config=_cfg())
     assert out["ok"]
 
 
@@ -229,7 +232,7 @@ def test_a_whitespace_credential_is_refused(bus, monkeypatch):
 def test_a_foreign_exception_message_is_never_logged(bus, monkeypatch, _jsonl):
     monkeypatch.setattr(x_post, "_session",
                         lambda c: FakeSession(fail=ValueError("secret-abc")))
-    out = x_post.post(bus, "hi", b"P", kind="marketing", now=NOW, config=_cfg())
+    out = x_post.post(bus, "hi", PNG, kind="marketing", now=NOW, config=_cfg())
     assert not out["ok"] and "ValueError" in out["error"]
     assert "secret-abc" not in out["error"]
     assert "secret-abc" not in _logged(bus, _jsonl)
@@ -280,7 +283,7 @@ def test_a_create_timeout_is_unknown_and_counted(bus, monkeypatch):
     import requests
     s = ScriptedSession(create=requests.Timeout("read timed out token=zzz"))
     monkeypatch.setattr(x_post, "_session", lambda c: s)
-    out = x_post.post(bus, "hi", b"P", kind="marketing", now=NOW, config=_cfg())
+    out = x_post.post(bus, "hi", PNG, kind="marketing", now=NOW, config=_cfg())
     assert not out["ok"] and out["unknown"] is True
     assert out["error"] == "sent; X did not confirm (Timeout)"
     e = _entry0(bus)
@@ -319,7 +322,7 @@ def test_a_2xx_create_with_no_id_is_posted_without_an_id(bus, monkeypatch):
 def test_a_create_403_is_failed_and_not_counted(bus, monkeypatch):
     s = ScriptedSession(create=_Resp(403, {"detail": "forbidden"}, text="forbidden"))
     monkeypatch.setattr(x_post, "_session", lambda c: s)
-    out = x_post.post(bus, "hi", b"P", kind="marketing", now=NOW, config=_cfg())
+    out = x_post.post(bus, "hi", PNG, kind="marketing", now=NOW, config=_cfg())
     assert not out["ok"] and not out.get("unknown") and "403" in out["error"]
     assert _entry0(bus)["status"] == "failed"
     assert x_post.posted_today(bus, NOW) == 0
@@ -328,7 +331,7 @@ def test_a_create_403_is_failed_and_not_counted(bus, monkeypatch):
 def test_an_upload_failure_is_failed_and_never_creates(bus, monkeypatch):
     s = ScriptedSession(upload=_Resp(500, text="oops"), create=_Resp(201, {"data": {"id": "9"}}))
     monkeypatch.setattr(x_post, "_session", lambda c: s)
-    out = x_post.post(bus, "hi", b"P", kind="marketing", now=NOW, config=_cfg())
+    out = x_post.post(bus, "hi", PNG, kind="marketing", now=NOW, config=_cfg())
     assert not out["ok"] and not out.get("unknown") and "500" in out["error"]
     assert _entry0(bus)["status"] == "failed"
     assert s.calls == [f"{x_post.API}/media/upload"]
@@ -375,3 +378,33 @@ def test_a_failed_count_write_after_a_post_still_reports_posted(bus, monkeypatch
     out = x_post.post(CountFails(), "hi", None, kind="marketing", now=NOW, config=_cfg())
     assert out["ok"] and out["id"] == "99"
     assert _entry0(bus)["status"] == "posted"
+
+
+# --- the image type is read from its bytes -----------------------------------
+
+def test_a_jpeg_is_uploaded_as_a_jpeg(bus, monkeypatch):
+    s = FakeSession()
+    monkeypatch.setattr(x_post, "_session", lambda c: s)
+    out = x_post.post(bus, "hi", JPEG, kind="marketing", now=NOW, config=_cfg())
+    assert out["ok"]
+    up = s.calls[0][1]
+    assert up["files"]["media"] == ("card.jpg", JPEG, "image/jpeg")
+    assert up["data"]["media_type"] == "image/jpeg"
+
+
+def test_a_png_is_uploaded_as_a_png(bus, monkeypatch):
+    s = FakeSession()
+    monkeypatch.setattr(x_post, "_session", lambda c: s)
+    x_post.post(bus, "hi", PNG, kind="marketing", now=NOW, config=_cfg())
+    assert s.calls[0][1]["data"]["media_type"] == "image/png"
+
+
+@pytest.mark.parametrize("dry", [False, True])
+def test_unknown_image_bytes_are_refused_before_any_network_call(bus, monkeypatch, dry):
+    monkeypatch.setattr(x_post, "_session", lambda c: pytest.fail("no network"))
+    out = x_post.post(bus, "hi", b"GIF89a-not-allowed", kind="marketing", now=NOW,
+                      config=_cfg(dry_run=dry))
+    assert not out["ok"] and out["error"] == "unsupported image type"
+    e = _entry0(bus)
+    assert e["status"] == "refused" and e["reason"] == "unsupported image type"
+    assert x_post.posted_today(bus, NOW) == 0

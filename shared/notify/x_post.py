@@ -31,6 +31,8 @@ DEFAULT_DAILY_CAP = 15   # mirrors channels._DEFAULTS["x"]["daily_cap"]
 _CREDS = ("api_key", "api_secret", "access_token", "access_secret")
 _CT = ZoneInfo("America/Chicago")
 _TIMEOUT = 30
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_JPEG_MAGIC = b"\xff\xd8\xff"
 
 
 def _session(creds):
@@ -139,10 +141,21 @@ def _valid_creds(x):
     return None
 
 
+def _image_type(data):
+    """``(filename, mime)`` from the image's magic bytes, or None when it is
+    neither PNG nor JPEG - the only two the /x page and the cards produce."""
+    if data[:8] == _PNG_MAGIC:
+        return "card.png", "image/png"
+    if data[:3] == _JPEG_MAGIC:
+        return "card.jpg", "image/jpeg"
+    return None
+
+
 def _upload(s, png):
+    name, mime = _image_type(png)
     resp = s.post(f"{API}/media/upload",
-                  files={"media": ("card.png", png, "image/png")},
-                  data={"media_category": "tweet_image", "media_type": "image/png"},
+                  files={"media": (name, png, mime)},
+                  data={"media_category": "tweet_image", "media_type": mime},
                   timeout=_TIMEOUT)
     if resp.status_code >= 300:
         raise _XHttpError(f"media upload HTTP {resp.status_code}: {str(resp.text)[:200]}")
@@ -169,7 +182,7 @@ def _create(s, body):
 
 
 def post(bus, text, png=None, *, kind, now=None, config=None, meta=None):
-    """Post ``text`` (+ optional PNG bytes) to X. Returns
+    """Post ``text`` (+ optional PNG or JPEG bytes) to X. Returns
     ``{"ok", "id", "url", "error", "dry_run", "unknown"}``; never raises.
 
     ``unknown`` is True when the create call may have reached X but no answer
@@ -206,6 +219,9 @@ def post(bus, text, png=None, *, kind, now=None, config=None, meta=None):
             return _done("refused", f"{kind} disabled")
         if not png and not str(text or "").strip():
             return _done("refused", "empty post")
+        # Before the dry run, so a dry run validates everything but the network.
+        if png and _image_type(bytes(png)) is None:
+            return _done("refused", "unsupported image type")
         if x.get("dry_run"):
             result.update(ok=True, dry_run=True)
             return _done("dry_run")
