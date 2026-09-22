@@ -638,14 +638,24 @@ def trade_idea_config(config: dict | None = None) -> dict:
     return block
 
 
+def trade_idea_png(idea: dict, *, now, config: dict | None = None):
+    """The trade idea card, rendered once so every channel posts the same image.
+    None when the render fails (the renderer never raises)."""
+    block = trade_idea_config(config or load_config())
+    return trade_idea_card.render_trade_idea_png(
+        idea, now=now, footer=str(block.get("footer") or ""))
+
+
 def send_trade_idea(idea: dict, *, now, config: dict | None = None,
-                    archive_dir=None) -> bool:
+                    archive_dir=None, png: bytes | None = None) -> bool:
     """Push one trade idea as a branded PNG to Telegram + Discord. Never raises.
 
     Returns True if a send was attempted. On a render failure it falls back to
     the text caption, never to silence -- the same rule as the snapshot. No SMS:
     an image cannot ride SMS. With ``archive_dir``, the posted card and caption are
-    also kept on disk (``trade_idea.archive``) for posting to social media by hand."""
+    also kept on disk (``trade_idea.archive``) for posting to social media by hand.
+    ``png`` is a card already rendered by ``trade_idea_png`` (so X gets the same
+    image); None renders it here."""
     cfg = config or load_config()
     block = trade_idea_config(cfg)
     if not block or not idea:
@@ -653,8 +663,9 @@ def send_trade_idea(idea: dict, *, now, config: dict | None = None,
     caption = trade_idea.caption(idea)
     tok, chat = telegram_target(cfg, "trade_idea")
     webhook = discord_target(cfg, "trade_idea")
-    png = trade_idea_card.render_trade_idea_png(
-        idea, now=now, footer=str(block.get("footer") or ""))
+    if not png:
+        png = trade_idea_card.render_trade_idea_png(
+            idea, now=now, footer=str(block.get("footer") or ""))
     if not png:
         log.warning("trade idea %s: render failed - pushing text only", idea.get("id"))
         send_telegram(tok, chat, _html.escape(caption))

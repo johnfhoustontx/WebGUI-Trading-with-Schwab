@@ -303,7 +303,12 @@ def pushes(monkeypatch):
     sent = []
     monkeypatch.setattr(push_notify, "trade_idea_config", lambda config=None: {"enabled": True})
     monkeypatch.setattr(push_notify, "send_trade_idea",
-                        lambda idea, now, config=None, archive_dir=None: sent.append(idea["id"]) or True)
+                        lambda idea, now, config=None, archive_dir=None, png=None:
+                        sent.append(idea["id"]) or True)
+    monkeypatch.setattr(push_notify, "trade_idea_png", lambda idea, **kw: b"PNG")
+    # X is its own concern (tests below); here it must never reach the real
+    # config or the on-disk x_posts.jsonl.
+    monkeypatch.setattr(handlers.x_post, "post", lambda *a, **k: {"ok": True})
     return sent
 
 
@@ -368,3 +373,109 @@ def test_a_slot_fires_once_within_grace_and_never_on_a_holiday():
     assert scheduler.trade_idea_due(at, ran) is None
     assert scheduler.trade_idea_due(dt.datetime(2026, 9, 17, 10, 50, tzinfo=_CT), set()) is None
     assert scheduler.trade_idea_due(dt.datetime(2026, 12, 25, 10, 36, tzinfo=_CT), set()) is None
+
+
+# ── X: the text, and the post after the private channels ───────────────────
+def test_x_text_carries_the_cashtag_and_fits():
+    from shared import x_text as xt
+    idea = T.normalize(pcs())
+    cfg = {"link": "https://neuralstrike.co", "max_tags": 4,
+           "hashtags": {"trade_idea": ["#options", "#optionstrading", "#trading"]}}
+    out = T.x_text(idea, cfg, today=dt.date(2026, 9, 22))
+    assert "$SPY" in out.splitlines()[-1]
+    assert "https://neuralstrike.co" in out
+    assert "#options" in out
+    assert xt.weighted_len(out) <= 280
+
+
+def test_x_text_adds_0dte_only_inside_a_day():
+    idea = T.normalize(pcs())
+    cfg = {"max_tags": 5, "hashtags": {"trade_idea": []}}
+    exp = dt.date.fromisoformat(idea["expiration"][:10])
+    assert "#0DTE" in T.x_text(idea, cfg, today=exp - dt.timedelta(days=1))
+    assert "#0DTE" not in T.x_text(idea, cfg, today=exp - dt.timedelta(days=5))
+
+
+def test_x_text_an_index_symbol_is_one_cashtag_never_doubled():
+    idea = T.normalize(pcs(symbol="$SPX"))
+    out = T.x_text(idea, {"max_tags": 4, "hashtags": {"trade_idea": ["#options"]}},
+                   today=dt.date(2026, 9, 17))
+    assert "$$SPX" not in out
+    assert out.splitlines()[-1].split().count("$SPX") == 1
+
+
+def test_x_text_survives_a_malformed_config():
+    idea = T.normalize(pcs())
+    out = T.x_text(idea, {"hashtags": ["#oops"], "max_tags": 4}, today=dt.date(2026, 9, 17))
+    assert "$SPY" in out
+
+
+@pytest.fixture
+def idea_ready(monkeypatch):
+    monkeypatch.setattr(push_notify, "trade_idea_config", lambda config=None: {"enabled": True})
+    return _Bus({"cache:options:scan": _scan()})
+
+
+def test_an_x_failure_still_posts_to_discord_and_telegram(idea_ready, monkeypatch):
+    sent = []
+    monkeypatch.setattr(push_notify, "send_trade_idea",
+                        lambda idea, **kw: sent.append(kw.get("png")) or True)
+    monkeypatch.setattr(push_notify, "trade_idea_png", lambda idea, **kw: b"PNG")
+
+    def boom(*a, **k):
+        raise RuntimeError("x down")
+    monkeypatch.setattr(handlers.x_post, "post", boom)
+    res = handlers.run_trade_idea(idea_ready, "h1035", now=NOW)
+    assert res["status"] == "posted" and sent == [b"PNG"]
+    assert res["x"]["ok"] is False
+
+
+def test_the_x_post_gets_the_same_png(idea_ready, monkeypatch):
+    got = {}
+    monkeypatch.setattr(push_notify, "send_trade_idea", lambda idea, **kw: True)
+    monkeypatch.setattr(push_notify, "trade_idea_png", lambda idea, **kw: b"PNG")
+    monkeypatch.setattr(handlers.x_post, "post",
+                        lambda bus, text, png, **kw: got.update(png=png, kind=kw["kind"])
+                        or {"ok": True})
+    handlers.run_trade_idea(idea_ready, "h1035", now=NOW)
+    assert got == {"png": b"PNG", "kind": "trade_idea"}
+
+
+def test_a_failed_private_send_never_reaches_x(idea_ready, monkeypatch):
+    called = []
+    monkeypatch.setattr(push_notify, "send_trade_idea", lambda idea, **kw: False)
+    monkeypatch.setattr(push_notify, "trade_idea_png", lambda idea, **kw: b"PNG")
+    monkeypatch.setattr(handlers.x_post, "post", lambda *a, **k: called.append(1))
+    res = handlers.run_trade_idea(idea_ready, "h1035", now=NOW)
+    assert res["reason"] == "send failed" and called == [] and "x" not in res
+
+
+def test_send_uses_a_supplied_png_instead_of_rendering(monkeypatch):
+    got = []
+    monkeypatch.setattr(push_notify.trade_idea_card, "render_trade_idea_png",
+                        lambda *a, **k: pytest.fail("rendered twice"))
+    monkeypatch.setattr(push_notify, "send_telegram_photo", lambda tok, chat, name, png, cap: got.append(png))
+    monkeypatch.setattr(push_notify, "send_discord_file", lambda hook, name, png, cap, content_type: got.append(png))
+    png = b"\x89PNG-supplied"
+    assert push_notify.send_trade_idea(T.normalize(pcs()), now=NOW, config=_cfg(), png=png) is True
+    assert got == [png, png]
+
+
+def test_the_trade_idea_dry_runs_to_the_x_log_end_to_end(monkeypatch, tmp_path):
+    from shared.notify import x_post
+    cfg = _cfg()
+    cfg["x"] = {"enabled": True, "dry_run": True, "link": "https://neuralstrike.co",
+                "max_tags": 4, "hashtags": {"trade_idea": ["#options"]},
+                "kinds": {"trade_idea": {"enabled": True}}}
+    monkeypatch.setattr(push_notify, "load_config", lambda: cfg)
+    monkeypatch.setattr(x_post, "X_POSTS_LOG", tmp_path / "x_posts.jsonl")
+    monkeypatch.setattr(push_notify, "send_trade_idea", lambda idea, **kw: True)
+    bus = _Bus({"cache:options:scan": _scan()})
+    res = handlers.run_trade_idea(bus, "h1035", now=NOW)
+    assert res["status"] == "posted"
+    assert res["x"]["ok"] is True and res["x"]["dry_run"] is True
+    entry = bus.caches[x_post.LOG_KEY]["posts"][0]
+    assert entry["status"] == "dry_run" and entry["kind"] == "trade_idea"
+    assert f"${res['idea']['symbol'].lstrip('$')}" in entry["text"]
+    assert entry["image"] is True
+    assert (tmp_path / "x_posts.jsonl").exists()

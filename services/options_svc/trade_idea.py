@@ -353,6 +353,23 @@ def caption(idea):
     return "Trade idea: " + " · ".join(bits)
 
 
+def x_text(idea, x_cfg, *, today):
+    """The trade idea for X: the caption, the link, and capped tags led by the
+    symbol's cashtag (plus #0DTE when it expires within a day). A malformed
+    ``x_cfg`` degrades to no configured tags, never to an exception."""
+    from shared import x_text as xt
+    x_cfg = x_cfg if isinstance(x_cfg, dict) else {}
+    derived = [f"${str(idea.get('symbol') or '').lstrip('$')}"]
+    dte = days_to_expiry(idea.get("expiration"), today)
+    if dte is not None and dte <= 1:
+        derived.append("#0DTE")
+    tags_cfg = x_cfg.get("hashtags")
+    configured = tags_cfg.get("trade_idea") if isinstance(tags_cfg, dict) else None
+    tags = xt.hashtags(derived, configured if isinstance(configured, list) else None,
+                       max_tags=x_cfg.get("max_tags"))
+    return xt.fit_text(caption(idea), x_cfg.get("link") or "", tags)
+
+
 def filename(idea, now):
     safe = "".join(c if c.isalnum() else "-" for c in str(idea.get("symbol") or "trade"))
     return f"trade-idea-{now:%Y-%m-%d-%H%M}-{safe}.png"

@@ -29,6 +29,7 @@ from services.options_svc import push_notify
 from services.options_svc import rate_trade
 from shared import market_calendar as mc
 from shared import public_gamma
+from shared.notify import x_post
 from shared.notify.channels import _today_ct
 from shared.symbols import clean_symbol
 from shared.contracts.options import (IncomeScan, MatrixSnapshot,
@@ -2613,18 +2614,38 @@ def run_trade_idea(bus, slot, now=None) -> dict:
         result["reason"] = "nothing eligible"
         return _finish()
     result["idea"] = idea
+    png = None
     try:
         from repo_paths import TRADE_IDEAS_DIR
-        sent = push_notify.send_trade_idea(idea, now=now, archive_dir=TRADE_IDEAS_DIR)
+        png = push_notify.trade_idea_png(idea, now=now)
+        sent = push_notify.send_trade_idea(idea, now=now, archive_dir=TRADE_IDEAS_DIR,
+                                           png=png)
     except Exception:  # noqa: BLE001 -- the primitives never raise; belt and braces
         _degrade.degraded("options.run_trade_idea.send")
         sent = False
     if sent:
         result["status"] = "posted"
         result["posted"] = trade_idea.next_posted(posted, idea, today)
+        result["x"] = _post_trade_idea_x(bus, idea, png, now)
     else:
         result["reason"] = "send failed"
     return _finish()
+
+
+def _post_trade_idea_x(bus, idea, png, now) -> dict:
+    """X after the private sends; a failure here is recorded, never raised.
+
+    Returns ``x_post.post``'s result dict (JSON-safe) for ``cache:options:trade_idea``."""
+    from services.options_svc import trade_idea
+    try:
+        cfg = push_notify.load_config()
+        text = trade_idea.x_text(idea, cfg.get("x") or {}, today=now.date())
+        out = x_post.post(bus, text, png, kind="trade_idea", now=now, config=cfg,
+                          meta={"symbol": idea.get("symbol"), "id": idea.get("id")})
+        return out if isinstance(out, dict) else {"ok": False, "error": "no result"}
+    except Exception as exc:  # noqa: BLE001 -- X must never cost the private post
+        _degrade.degraded("options.run_trade_idea.x")
+        return {"ok": False, "error": type(exc).__name__}
 
 
 def run_eod_summary(bus, slot=None) -> None:
