@@ -13,6 +13,8 @@ GUI's two tabs (0-DTE / Swing) both read from it — there is no scan/swing spli
 
 Kept synchronous: the scaffold's consumer loop handles sync handlers.
 """
+import base64
+import binascii
 import datetime as _dt
 import logging
 import threading
@@ -27,8 +29,11 @@ from services.options_svc import push_notify
 # Rate my trade (design 2026-09-16): the Calculator's legs graded by the
 # Strategy Finder's own scorer.
 from services.options_svc import rate_trade
+# X (design 2026-09-22): the image card posted with each market report.
+from services.options_svc import report_card
 from shared import market_calendar as mc
 from shared import public_gamma
+from shared import x_text
 from shared.notify import x_post
 from shared.notify.channels import _today_ct
 from shared.symbols import clean_symbol
@@ -145,7 +150,10 @@ def _is_stale_open(command) -> bool:
 # chains, earnings) answering a dialog nobody has open.
 # ``dossier``     -> 4-5 Schwab calls per queued lookup, for a page that has long
 #                   since moved on.
-_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "calc_rate", "dossier")
+# ``x_post`` / ``x_post_report`` -> a PUBLIC post on X: a replayed stream must
+#                   never re-post (the report dedup covers reports only).
+_REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "calc_rate", "dossier",
+                   "x_post", "x_post_report")
 
 
 def _market_state(bus):
@@ -2875,6 +2883,162 @@ def run_income_open(bus, command) -> None:
         refresh_paper_account(bus)
 
 
+# --- X: the published market report, and ad-hoc marketing posts -------------
+X_REPORTS_KEY = "cache:options:x_reports"
+X_REPORTS_KEEP = 50
+_X_IMAGE_MAX = 5 * 1024 * 1024
+_REPORT_TAGS = ("$SPY", "$QQQ")
+_REPORT_MAX_AGE_DEFAULT = 45
+
+
+def _x_config():
+    """(the full notifications config, its ``x`` block) - both always dicts."""
+    cfg = push_notify.load_config()
+    cfg = cfg if isinstance(cfg, dict) else {}
+    x = cfg.get("x")
+    return cfg, (x if isinstance(x, dict) else {})
+
+
+def _x_max_tags(x):
+    """``max_tags`` as an int, or None (= x_text's default) when malformed."""
+    raw = x.get("max_tags")
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _x_configured_tags(x, kind):
+    tags = x.get("hashtags")
+    tags = tags.get(kind) if isinstance(tags, dict) else None
+    return [t for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
+
+
+def _report_identity(report):
+    return "|".join(str(report.get(k) or "")
+                    for k in ("report_date", "slot", "as_of", "headline"))
+
+
+def _report_max_age_min(x):
+    """``report_max_age_min``; malformed or non-positive -> the 45-min default."""
+    raw = x.get("report_max_age_min", _REPORT_MAX_AGE_DEFAULT)
+    if isinstance(raw, bool):
+        return _REPORT_MAX_AGE_DEFAULT
+    try:
+        val = float(raw)
+    except (TypeError, ValueError):
+        return _REPORT_MAX_AGE_DEFAULT
+    return val if val > 0 else _REPORT_MAX_AGE_DEFAULT
+
+
+def _posted_reports(bus):
+    env = bus.cache_get(X_REPORTS_KEY)
+    p = env.payload if env is not None else None
+    posted = p.get("posted") if isinstance(p, dict) else None
+    return [str(i) for i in posted] if isinstance(posted, list) else []
+
+
+def _remember_report(bus, ident, done):
+    bus.cache_set(X_REPORTS_KEY, {"posted": ([ident] + done)[:X_REPORTS_KEEP]})
+
+
+def run_x_post_report(bus, args, now=None):
+    """Post one published market report to X, once. Never raises.
+
+    market_svc enqueues this whenever the published report file changes - and
+    once on every market_svc restart - so a report is identified by its date,
+    slot, as-of and headline and handled at most once. A report older than
+    ``report_max_age_min`` (by the file's ``mtime``) is skipped AND remembered;
+    so is one of unknown age (fail closed: it may be yesterday's). A dry run
+    counts as done, and so does an UNCONFIRMED post (it may already be live);
+    only a definite failure is retried by the next command. Returns
+    ``x_post.post``'s result, or None when nothing was attempted."""
+    try:
+        args = args if isinstance(args, dict) else {}
+        report = args.get("report")
+        if not isinstance(report, dict) or not str(report.get("headline") or "").strip():
+            log.info("x report: no headline; nothing to post")
+            return None
+        cfg, x = _x_config()
+        done = _posted_reports(bus)
+        ident = _report_identity(report)
+        if ident in done:
+            log.info("x report: %s already handled", ident)
+            return None
+        try:
+            age_min = (time.time() - float(args.get("mtime"))) / 60.0
+        except (TypeError, ValueError):
+            age_min = None
+        max_age = _report_max_age_min(x)
+        # ``not (<=)`` so a NaN age is stale too.
+        if age_min is None or not (age_min <= max_age):
+            log.info("x report: skipping %s (age %s min, max %s)", ident,
+                     "unknown" if age_min is None else f"{age_min:.0f}", max_age)
+            _remember_report(bus, ident, done)
+            return None
+        tags = x_text.hashtags(_REPORT_TAGS, _x_configured_tags(x, "report"),
+                               max_tags=_x_max_tags(x))
+        label = str(report.get("slot_label") or "").strip() or "Market report"
+        link = str(report.get("report_url") or "").strip() or str(x.get("link") or "")
+        text = x_text.fit_text(f"{label}: {str(report['headline']).strip()}", link, tags)
+        png = report_card.render_report_png(report, now=now)
+        out = x_post.post(bus, text, png, kind="report", config=cfg, now=now,
+                          meta={"report": ident})
+        if out.get("ok") or out.get("unknown"):
+            _remember_report(bus, ident, done)
+        return out
+    except Exception:
+        _degrade.degraded("options.x_post_report")
+        return None
+
+
+def run_x_post(bus, args, now=None):
+    """One ad-hoc marketing post from the /x page. Never raises.
+
+    ``image_b64`` (optional) must be strict base64 decoding to at most 5 MB; a
+    bad or oversized image is refused and logged - the post is never sent
+    without the image the author attached."""
+    try:
+        args = args if isinstance(args, dict) else {}
+        cfg, x = _x_config()
+        raw_tags = args.get("tags")
+        tags = x_text.hashtags(
+            [], [t for t in raw_tags if isinstance(t, str)]
+            if isinstance(raw_tags, list) else [],
+            max_tags=_x_max_tags(x))
+        text = x_text.fit_text(str(args.get("text") or ""),
+                               str(args.get("link") or ""), tags)
+        png = None
+        b64 = args.get("image_b64")
+        if b64:
+            if not isinstance(b64, str):
+                x_post.record_refusal(bus, "marketing", text, "image did not decode",
+                                      now=now, image=True)
+                return None
+            b64 = b64.strip()
+            # Cheap guard BEFORE decoding: every 4 characters carry 3 bytes.
+            if len(b64) * 3 // 4 - b64[-2:].count("=") > _X_IMAGE_MAX:
+                x_post.record_refusal(bus, "marketing", text, "image over 5 MB",
+                                      now=now, image=True)
+                return None
+            try:
+                png = base64.b64decode(b64, validate=True)
+            except (binascii.Error, ValueError):
+                x_post.record_refusal(bus, "marketing", text, "image did not decode",
+                                      now=now, image=True)
+                return None
+            if len(png) > _X_IMAGE_MAX:
+                x_post.record_refusal(bus, "marketing", text, "image over 5 MB",
+                                      now=now, image=True)
+                return None
+        return x_post.post(bus, text, png or None, kind="marketing", config=cfg, now=now)
+    except Exception:
+        _degrade.degraded("options.x_post")
+        return None
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
     ``swing_scan`` → on-demand parameterized swing scan;
@@ -2939,7 +3103,11 @@ def handle_command(bus, command) -> None:
     → step the position along the underlying's recent path, cache the six-panel
     trace + publish; ``gamma_history`` (args symbol, date) → build the standalone
     intraday history report, cache the HTML + publish; ``calibration_refresh`` →
-    rebuild the realized-outcome calibration from signals.db + publish; else no-op.
+    rebuild the realized-outcome calibration from signals.db + publish;
+    ``x_post_report`` (args report, mtime) → post a published market report to X
+    with its image card, once per report and only while fresh (replay-guarded);
+    ``x_post`` (args text/link/tags/image_b64) → one ad-hoc marketing post to X
+    (replay-guarded); else no-op.
 
     ⚠ This list IS the API the GUI codes against, and prose drifts:
     ``gamma_history``/``rescue_adhoc``/``sim_replay`` were implemented and missing
@@ -3243,6 +3411,14 @@ def handle_command(bus, command) -> None:
         payload = dossier.build_dossier(symbol)
         bus.cache_set(dossier_key(symbol), payload,
                       event=dossier_event(symbol), ttl=DOSSIER_TTL_SEC)
+    elif command.type == "x_post" or command.type == "x_post_report":
+        # Public posts on X. Replay-guarded (see _REPLAY_GUARDED).
+        if _is_stale_side_effect(command):
+            log.warning("REJECTED stale %s: a replayed command must not re-post to X",
+                        command.type)
+            return
+        (run_x_post_report if command.type == "x_post_report" else run_x_post)(
+            bus, command.args or {})
     elif command.type == "expected_move":
         a = command.args or {}
         res = compute.compute_expected_move(
