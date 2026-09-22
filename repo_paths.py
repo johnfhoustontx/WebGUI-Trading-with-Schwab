@@ -112,6 +112,8 @@ GAMMA_BRIEFING_DB = OPTIONS_SCANNER / "data" / "gamma_briefings.db"
 # "NeuralStrike social pull" task copies them into D:\NeuralStrike Reports.
 # Gitignored with the rest of options-scanner/data/.
 TRADE_IDEAS_DIR = OPTIONS_SCANNER / "data" / "trade_ideas"
+# Every X post attempt (posted / dry run / refused / failed), one JSON line each.
+X_POSTS_LOG = OPTIONS_SCANNER / "data" / "x_posts.jsonl"
 
 # Intraday 2-min sentiment + trend series for the /sentiment "Daily Sentiment &
 # Trend" graphs. Rolling last 5 trading days; written by sentiment_svc each refresh.
