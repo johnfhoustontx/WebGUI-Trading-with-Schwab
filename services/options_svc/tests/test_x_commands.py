@@ -204,3 +204,18 @@ def test_the_real_poster_logs_a_dry_run_report_with_its_card(monkeypatch, tmp_pa
     assert entry["image"] is True
     assert REPORT["headline"] in entry["text"]
     assert (tmp_path / "x_posts.jsonl").exists()
+
+
+def test_a_stale_x_post_leaves_a_refusal_in_the_log(env):
+    old = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=2)).isoformat()
+    handlers.handle_command(env["bus"], Command(type="x_post", args={"text": "Hi"}, ts=old))
+    [entry] = _log(env["bus"])
+    assert entry["status"] == "refused" and entry["reason"] == "expired in the queue"
+    assert entry["kind"] == "marketing" and entry["text"] == "Hi"
+
+
+def test_a_stale_x_post_report_logs_nothing(env):
+    old = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(hours=2)).isoformat()
+    handlers.handle_command(env["bus"], Command(
+        type="x_post_report", args={"report": REPORT, "mtime": time.time()}, ts=old))
+    assert env["bus"].cache_get(x_post.LOG_KEY) is None

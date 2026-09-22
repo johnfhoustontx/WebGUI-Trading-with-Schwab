@@ -3416,7 +3416,15 @@ def handle_command(bus, command) -> None:
         if _is_stale_side_effect(command):
             log.warning("REJECTED stale %s: a replayed command must not re-post to X",
                         command.type)
+            if command.type == "x_post":
+                # The /x page is watching its log; a silent drop reads as a hang.
+                x_post.record_refusal(
+                    bus, "marketing", str((command.args or {}).get("text") or ""),
+                    "expired in the queue")
             return
+        # ``x_post`` carries its image as base64 in the command itself, so it stays
+        # in cmd:options until the stream trims (~1000 commands) - acceptable at a
+        # handful of posts a day.
         (run_x_post_report if command.type == "x_post_report" else run_x_post)(
             bus, command.args or {})
     elif command.type == "expected_move":

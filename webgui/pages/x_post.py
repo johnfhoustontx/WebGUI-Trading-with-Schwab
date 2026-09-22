@@ -123,7 +123,8 @@ def log_rows(payload):
 
 def command(text, tags, link, image):
     """The ``cmd:options`` command for one post. PURE. The image travels as
-    base64 only when there is one."""
+    base64 only when there is one - and so stays in ``cmd:options`` until the
+    stream trims (~1000 commands), which is acceptable at a few posts a day."""
     args = {"text": text, "tags": list(tags), "link": link}
     if image:
         args["image_b64"] = base64.b64encode(image).decode("ascii")
