@@ -508,14 +508,14 @@ def test_defaults_routes_is_empty(tmp_path, monkeypatch):
 
 def test_env_suppression_disables_every_channel(tmp_path, monkeypatch):
     """In a suppressed environment NO channel may be enabled — including
-    twitter, whose gate is independent of the master `enabled` switch and which
+    x, whose gate is independent of the master `enabled` switch and which
     posts PUBLICLY. Walks the whole config so a channel added later is covered."""
     cfg_file = tmp_path / "notifications.json"
     cfg_file.write_text(json.dumps({
         "enabled": True,
         "telegram": {"bot_token": "t", "chat_id": 1},
         "discord": {"webhook_url": "https://example.invalid/hook"},
-        "twitter": {"enabled": True, "dry_run": False},
+        "x": {"enabled": True, "dry_run": False},
         "market_snapshot": {"enabled": True},
     }), encoding="utf-8")
     monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", False)
@@ -537,11 +537,11 @@ def test_env_permissive_leaves_config_untouched(tmp_path, monkeypatch):
     """Prod (and any checkout without a marker) is unaffected."""
     cfg_file = tmp_path / "notifications.json"
     cfg_file.write_text(json.dumps({"enabled": True,
-                                    "twitter": {"enabled": True}}), encoding="utf-8")
+                                    "x": {"enabled": True}}), encoding="utf-8")
     monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", True)
     cfg = ch.load_config(cfg_file)
     assert cfg["enabled"] is True
-    assert cfg["twitter"]["enabled"] is True
+    assert cfg["x"]["enabled"] is True
 
 
 def test_env_suppression_beats_the_notify_enabled_env_var(tmp_path, monkeypatch):
@@ -552,11 +552,11 @@ def test_env_suppression_beats_the_notify_enabled_env_var(tmp_path, monkeypatch)
     cfg_file = tmp_path / "notifications.json"
     cfg_file.write_text(json.dumps({"enabled": False}), encoding="utf-8")
     monkeypatch.setenv("NOTIFY_ENABLED", "1")
-    monkeypatch.setenv("TWITTER_ENABLED", "1")
+    monkeypatch.setenv("X_ENABLED", "1")
     monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", False)
     cfg = ch.load_config(cfg_file)
     assert cfg["enabled"] is False
-    assert cfg["twitter"]["enabled"] is False
+    assert cfg["x"]["enabled"] is False
 
 
 def test_routes_block_from_file_merges_into_config(tmp_path, monkeypatch):
@@ -574,3 +574,97 @@ def test_routes_block_from_file_merges_into_config(tmp_path, monkeypatch):
     assert ch.telegram_target(cfg, "signals") == ("BOT", 99)
     assert ch.discord_target(cfg, "eod_summary") == "GLOBAL"
     assert ch.telegram_target(cfg, "eod_summary") == ("BOT", 7)
+
+
+# ── the `x` block (X posting: reports, trade ideas, marketing) ───────────────
+_X_ENV = [f"{pre}_{k}" for pre in ("X", "TWITTER")
+          for k in ("API_KEY", "API_SECRET", "ACCESS_TOKEN", "ACCESS_SECRET",
+                    "ENABLED")]
+
+
+def _clear_x_env(monkeypatch):
+    for name in _X_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+
+def test_x_block_defaults_ship_off_and_dry(tmp_path, monkeypatch):
+    _clear_x_env(monkeypatch)
+    p = tmp_path / "n.json"
+    p.write_text("{}")
+    cfg = ch.load_config(p)
+    x = cfg["x"]
+    assert x["enabled"] is False and x["dry_run"] is True
+    assert x["daily_cap"] == 15 and x["max_tags"] == 4
+    assert set(x["kinds"]) == {"report", "trade_idea", "marketing"}
+    assert x["hashtags"]["trade_idea"] == ["#options", "#optionstrading", "#trading"]
+
+
+def test_x_kinds_ship_on_in_a_permissive_environment(tmp_path, monkeypatch):
+    _clear_x_env(monkeypatch)
+    monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", True)
+    p = tmp_path / "n.json"
+    p.write_text("{}")
+    x = ch.load_config(p)["x"]
+    assert x["enabled"] is False
+    assert all(k["enabled"] is True for k in x["kinds"].values())
+
+
+def test_x_credentials_fall_back_to_the_old_twitter_block(tmp_path, monkeypatch):
+    _clear_x_env(monkeypatch)
+    p = tmp_path / "n.json"
+    p.write_text('{"twitter": {"api_key": "k", "api_secret": "s", '
+                 '"access_token": "t", "access_secret": "a"}}')
+    x = ch.load_config(p)["x"]
+    assert (x["api_key"], x["api_secret"], x["access_token"], x["access_secret"]) \
+        == ("k", "s", "t", "a")
+
+
+def test_x_file_key_wins_over_the_twitter_fallback(tmp_path, monkeypatch):
+    _clear_x_env(monkeypatch)
+    p = tmp_path / "n.json"
+    p.write_text('{"x": {"api_key": "new"}, "twitter": {"api_key": "old"}}')
+    assert ch.load_config(p)["x"]["api_key"] == "new"
+
+
+def test_x_env_credentials_win(tmp_path, monkeypatch):
+    _clear_x_env(monkeypatch)
+    p = tmp_path / "n.json"
+    p.write_text('{"x": {"api_key": "file"}}')
+    monkeypatch.setenv("X_API_KEY", "env")
+    assert ch.load_config(p)["x"]["api_key"] == "env"
+
+
+def test_x_old_twitter_env_name_still_works(tmp_path, monkeypatch):
+    _clear_x_env(monkeypatch)
+    p = tmp_path / "n.json"
+    p.write_text('{"x": {"api_key": "file"}}')
+    monkeypatch.setenv("TWITTER_API_KEY", "oldenv")
+    assert ch.load_config(p)["x"]["api_key"] == "oldenv"
+
+
+def test_x_enabled_env_turns_x_on(tmp_path, monkeypatch):
+    _clear_x_env(monkeypatch)
+    monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", True)
+    p = tmp_path / "n.json"
+    p.write_text("{}")
+    monkeypatch.setenv("X_ENABLED", "1")
+    assert ch.load_config(p)["x"]["enabled"] is True
+
+
+def test_a_malformed_x_block_degrades_to_the_defaults(tmp_path, monkeypatch):
+    _clear_x_env(monkeypatch)
+    p = tmp_path / "n.json"
+    p.write_text('{"x": 5, "twitter": {"api_key": "k"}}')
+    x = ch.load_config(p)["x"]
+    assert isinstance(x, dict)
+    assert x["dry_run"] is True and x["api_key"] == "k"
+
+
+def test_a_suppressed_environment_turns_x_off(tmp_path, monkeypatch):
+    _clear_x_env(monkeypatch)
+    p = tmp_path / "n.json"
+    p.write_text('{"x": {"enabled": true}}')
+    monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", False)
+    cfg = ch.load_config(p)
+    assert cfg["x"]["enabled"] is False
+    assert all(k["enabled"] is False for k in cfg["x"]["kinds"].values())

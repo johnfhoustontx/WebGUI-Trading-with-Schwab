@@ -39,7 +39,7 @@ _DEFAULTS = {
     # slots only). `slots` subsets which of the four push, so thinning the cadence
     # needs no code change. `webhook_url` is a DEDICATED Discord webhook (falls back
     # to discord.webhook_url when blank) so briefings stay out of the signal feed.
-    # Ships OFF, like `twitter` below: with `enabled` on and no dedicated webhook
+    # Ships OFF, like `x` below: with `enabled` on and no dedicated webhook
     # set, an install that has only configured the SIGNAL webhook would silently
     # start dropping four briefings a day into the signal channel — the very thing
     # the dedicated webhook exists to prevent. Opt in explicitly.
@@ -48,20 +48,26 @@ _DEFAULTS = {
         "slots": ["premarket", "open", "midday", "close"],
         "webhook_url": "",
     },
-    # X/Twitter public post channel (options scanner signals only). OFF by
-    # default; ships with dry_run ON so it formats+logs without posting until you
-    # add OAuth 1.0a keys AND flip enabled + dry_run. min_score is the PUBLIC
-    # gate (independent of the top-level min_score); daily_cap guards the
-    # free-tier monthly write cap. hashtags/discord_url/extra_text/disclaimer are
-    # the static footer.
-    "twitter": {
+    # X (Twitter): the ONE public posting channel (shared/notify/x_post.py). Ships
+    # OFF and dry: nothing posts until OAuth 1.0a keys are set AND enabled + dry_run
+    # are flipped. `daily_cap` guards X's per-user allowance (~17/24h on the free
+    # tier); `kinds` switch each source off without touching the others;
+    # `hashtags` are per kind, `max_tags` caps the total (derived cashtags count).
+    "x": {
         "enabled": False,
         "dry_run": True,
-        "min_score": 70,
-        "daily_cap": 40,
+        "daily_cap": 15,
+        "max_tags": 4,
+        "link": "https://neuralstrike.co",
+        "report_max_age_min": 45,
         "api_key": "", "api_secret": "", "access_token": "", "access_secret": "",
-        "hashtags": [], "discord_url": "", "extra_text": "",
-        "disclaimer": "Not advice. Paper/educational.",
+        "kinds": {"report": {"enabled": True}, "trade_idea": {"enabled": True},
+                  "marketing": {"enabled": True}},
+        "hashtags": {
+            "report": ["#stocks", "#StockMarket", "#trading"],
+            "trade_idea": ["#options", "#optionstrading", "#trading"],
+            "marketing": ["#options", "#trading"],
+        },
     },
     # The hourly trade-idea image (options_svc, [slots.trade_idea]). ON by default:
     # it posts to the `trade_idea` route, else the global Discord webhook and
@@ -91,7 +97,7 @@ def _copy_containers(v):
     """Deep-copy the containers in a default value (dicts AND lists).
 
     A shallow `dict(v)` leaves nested lists shared, so a caller filtering e.g.
-    gamma_briefing.slots or twitter.hashtags in place would poison _DEFAULTS for
+    gamma_briefing.slots or x.hashtags in place would poison _DEFAULTS for
     the rest of the process."""
     if isinstance(v, dict):
         return {k: _copy_containers(x) for k, x in v.items()}
@@ -119,12 +125,18 @@ def load_config(path=None) -> dict:
     """
     cfg = _deep_merge(_DEFAULTS, {})
     src = path if path is not None else _CONFIG_PATH
+    raw_twitter = None
     try:
         raw = json.loads(src.read_text())
         if isinstance(raw, dict):
             cfg = _deep_merge(cfg, raw)
+            raw_twitter = raw.get("twitter")
     except Exception:
         pass
+    # A hand-edited non-dict `x` (e.g. `"x": 5`) replaces the default outright in
+    # the merge; fall back to the defaults so every reader can index it.
+    if not isinstance(cfg.get("x"), dict):
+        cfg["x"] = _copy_containers(_DEFAULTS["x"])
     # Env overrides (win over file).
     if os.environ.get("TELEGRAM_BOT_TOKEN"):
         cfg["telegram"]["bot_token"] = os.environ["TELEGRAM_BOT_TOKEN"]
@@ -147,21 +159,22 @@ def load_config(path=None) -> dict:
     # every other secret here (enabled/slots stay file-only; they aren't secrets).
     if os.environ.get("GAMMA_BRIEFING_WEBHOOK_URL"):
         cfg["gamma_briefing"]["webhook_url"] = os.environ["GAMMA_BRIEFING_WEBHOOK_URL"]
-    # Twitter/X OAuth 1.0a keys (env wins over file), so secrets can stay out of
-    # the config file.
-    for env_name, key in (("TWITTER_API_KEY", "api_key"),
-                          ("TWITTER_API_SECRET", "api_secret"),
-                          ("TWITTER_ACCESS_TOKEN", "access_token"),
-                          ("TWITTER_ACCESS_SECRET", "access_secret")):
-        if os.environ.get(env_name):
-            cfg["twitter"][key] = os.environ[env_name]
-    if os.environ.get("TWITTER_ENABLED"):
-        cfg["twitter"]["enabled"] = os.environ["TWITTER_ENABLED"].lower() not in ("0", "false", "no")
+    # X OAuth 1.0a keys: the old `twitter` block is a fallback (keys saved before
+    # 2026-09-22 carry over), and X_* / TWITTER_* env win over both files.
+    old = raw_twitter if isinstance(raw_twitter, dict) else {}
+    for key in ("api_key", "api_secret", "access_token", "access_secret"):
+        if not cfg["x"].get(key) and old.get(key):
+            cfg["x"][key] = old[key]
+        env = os.environ.get(f"X_{key.upper()}") or os.environ.get(f"TWITTER_{key.upper()}")
+        if env:
+            cfg["x"][key] = env
+    if os.environ.get("X_ENABLED"):
+        cfg["x"]["enabled"] = os.environ["X_ENABLED"].lower() not in ("0", "false", "no")
     # Environment gate — a non-prod checkout never talks to a real channel.
-    # LAST, so it also overrides the NOTIFY_ENABLED/TWITTER_ENABLED env escapes.
-    # Every `enabled` flag is zeroed, not just the master one: the X/Twitter
-    # poster has its OWN gate that does not consult the master switch, and it is
-    # the one channel that PUBLISHES. Recursive so a channel added later is
+    # LAST, so it also overrides the NOTIFY_ENABLED/X_ENABLED env escapes.
+    # Every `enabled` flag is zeroed, not just the master one: the X poster (and
+    # each of its `kinds`) has its OWN gate that does not consult the master
+    # switch, and it is the one channel that PUBLISHES. Recursive so a channel added later is
     # covered without anyone remembering to come back here.
     if not ENV_FLAGS.get("allow_notifications", True):
         _disable_all(cfg)

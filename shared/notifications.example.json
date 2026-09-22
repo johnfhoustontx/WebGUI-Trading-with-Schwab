@@ -29,23 +29,27 @@
     ],
     "webhook_url": ""
   },
-  "twitter": {
+  "x": {
     "enabled": false,
     "dry_run": true,
-    "min_score": 70,
-    "daily_cap": 40,
+    "daily_cap": 15,
+    "max_tags": 4,
+    "link": "https://neuralstrike.co",
+    "report_max_age_min": 45,
     "api_key": "",
     "api_secret": "",
     "access_token": "",
     "access_secret": "",
-    "hashtags": [
-      "#options",
-      "#0DTE",
-      "#SPX"
-    ],
-    "discord_url": "",
-    "extra_text": "",
-    "disclaimer": "Not advice. Paper/educational."
+    "kinds": {
+      "report": {"enabled": true},
+      "trade_idea": {"enabled": true},
+      "marketing": {"enabled": true}
+    },
+    "hashtags": {
+      "report": ["#stocks", "#StockMarket", "#trading"],
+      "trade_idea": ["#options", "#optionstrading", "#trading"],
+      "marketing": ["#options", "#trading"]
+    }
   },
   "market_snapshot": {
     "enabled": true
