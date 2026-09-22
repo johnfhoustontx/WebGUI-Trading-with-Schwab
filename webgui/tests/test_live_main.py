@@ -137,6 +137,24 @@ def test_it_registers_every_published_screen_and_nothing_else():
     assert new == expected, f"unexpected: {new - expected}; missing: {expected - new}"
 
 
+def test_each_retired_route_redirects_permanently_to_its_target():
+    """Called on the endpoint itself: in this suite the private app's auth gate
+    is mounted on the SAME global app, so a request would meet the login first.
+    The real process's route set is pinned by the subprocess test below."""
+    import live_main    # noqa: F401 -- importing registers the redirects
+    import live_screens
+    from nicegui import app
+
+    by_path = {getattr(r, "path", None): r for r in app.routes}
+    for old, new in live_screens.RETIRED_ROUTES.items():
+        route = by_path.get(old)
+        assert route is not None, f"{old} is not registered"
+        assert set(getattr(route, "methods", ())) >= {"GET"}
+        resp = route.endpoint()
+        assert resp.status_code == 308, old
+        assert resp.headers["location"] == new, old
+
+
 def test_it_registers_no_control_surface():
     """Non-vacuity for the test above: name the routes that would be a disaster.
 
@@ -247,7 +265,8 @@ def test_a_real_public_process_holds_no_route_of_the_apps():
         "/terminate included, is now registered in the public process")
 
     import live_screens
-    published = {s.route for s in live_screens.SCREENS} | ASSET_ROUTES
+    published = ({s.route for s in live_screens.SCREENS} | ASSET_ROUTES
+                 | set(live_screens.RETIRED_ROUTES))
     # NiceGUI's own machinery (``/_nicegui/<ver>/...``, the websocket mount) is
     # the framework, not this app's surface. Everything else must be published.
     served = {p for p in ast.literal_eval(routes) if not p.startswith("/_nicegui")}

@@ -14,11 +14,21 @@ FORBIDDEN = {"/terminate", "/settings", "/status", "/driver", "/manuals",
 _LIVE_SCREENS = pathlib.Path(__file__).resolve().parents[1] / "live_screens.py"
 
 
-def test_there_are_exactly_twenty_four_screens():
+def test_there_are_exactly_sixteen_screens():
     # 22 -> 24 on 2026-09-21: the public Calculator and Simulator, published
     # deliberately (each is a write surface, gated in test_live_commands.py).
+    # 24 -> 16 on 2026-09-22: nine pinned Gamma screens became ONE public Gamma
+    # page with a dropdown; their routes redirect (RETIRED_ROUTES).
     import live_screens
-    assert len(live_screens.SCREENS) == 24
+    assert len(live_screens.SCREENS) == 16
+
+
+def test_the_retired_routes_redirect_to_a_published_screen_and_are_not_one():
+    import live_screens
+    routes = {s.route for s in live_screens.SCREENS}
+    assert set(live_screens.RETIRED_ROUTES).isdisjoint(routes)
+    assert set(live_screens.RETIRED_ROUTES.values()) <= routes
+    assert set(live_screens.RETIRED_ROUTES) & FORBIDDEN == set()
 
 
 def test_no_screen_publishes_a_control_surface():
@@ -263,8 +273,18 @@ def test_no_gamma_screen_reads_the_private_snapshot_slot():
     import live_screens
     from pages.options import gamma
 
+    publics = [s for s in live_screens.SCREENS
+               if s.module == "options.gamma" and s.kwargs.get("public")]
+    assert [s.route for s in publics] == ["/gamma"]
+    # The public Gamma page pins no symbol either, but reads the PUBLISHED key
+    # of whichever symbol is on screen -- never the private slot.
+    # tests/test_gamma_public_page.py drives that through the real render.
+    for sym in ("$SPX", "NVDA"):
+        assert gamma.snapshot_view(None) not in gamma.polled_views(
+            sym, None, public=True)
     for s in live_screens.SCREENS:
-        if s.module != "options.gamma" or s.kwargs.get("symbol"):
+        if (s.module != "options.gamma" or s.kwargs.get("symbol")
+                or s.kwargs.get("public")):
             continue
         assert not gamma.reads_snapshot(s.kwargs.get("view")), (
             f"{s.slug} pins no symbol, so it would read "

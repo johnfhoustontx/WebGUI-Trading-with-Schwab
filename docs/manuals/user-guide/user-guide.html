@@ -301,14 +301,22 @@ not ask again for a while; a new browser, or a private window, always will.</p>
 <p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> still works there and
 skips the sign-in, which is what the wall display uses.</p>
 <h2 id="the-public-live-screens">The public live screens</h2>
-<p>Twenty-four of the app's screens are also published <strong>without any sign-in</strong> on
+<p>Sixteen of the app's screens are also published <strong>without any sign-in</strong> on
 a second address, <code>https://live.neuralstrike.co</code> — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &amp;
-Industry, Sector Rotation, RRG, Momentum, Net Prem, the two Premium Divergence
-screens, and eight Dealer Positioning boards: Gamma for $SPX, SPY and QQQ, and
-Charm, DEX, Vanna and Term Structure for $SPX, the <strong>Strategy Finder</strong>, the
-Rescue ad-hoc form (published as <strong>Rescue my Sh*tty trade</strong>), the
-<strong>Calculator</strong> and the <strong>Simulator</strong>.
+Industry, Sector Rotation, RRG, Momentum, Net Prem, <strong>Gamma</strong>, the <strong>Strategy
+Finder</strong>, the Rescue ad-hoc form (published as <strong>Rescue my Sh*tty trade</strong>), the
+<strong>Calculator</strong> and the <strong>Simulator</strong>.</p>
+<p>The public <strong>Gamma</strong> page is Dealer Positioning with its symbol dropdown: a
+visitor picks any symbol your collector gathers (the <code>symbols.toml</code> lists plus
+your Top 20 list) and switches between Gamma, Charm, Delta, Vanna and Flow.
+There is no Term tab and no Net Prem tab (Net Prem is its own screen). $SPX, SPY
+and QQQ are always live; any other symbol goes live when a visitor picks it and
+stays live while someone watches it, up to 8 at once (Settings → Configuration
+→ Public Gamma page). Picking a symbol costs no Schwab call: it reuses the chain
+the collector already downloads every minute. The addresses of the old pinned
+Gamma screens (<code>/charm</code>, <code>/gamma/spy</code>, <code>/premium-divergence/spy</code> and so on) now
+open this page.
 Each one shows the same scrolling market-summary ticker along the bottom that
 your own app does.</p>
 <p>The public Strategy Finder is one of four screens a visitor can act on: they type a

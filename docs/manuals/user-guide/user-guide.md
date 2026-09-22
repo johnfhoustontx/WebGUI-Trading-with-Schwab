@@ -144,14 +144,23 @@ skips the sign-in, which is what the wall display uses.
 
 ## The public live screens
 
-Twenty-four of the app's screens are also published **without any sign-in** on
+Sixteen of the app's screens are also published **without any sign-in** on
 a second address, `https://live.neuralstrike.co` — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &
-Industry, Sector Rotation, RRG, Momentum, Net Prem, the two Premium Divergence
-screens, and eight Dealer Positioning boards: Gamma for $SPX, SPY and QQQ, and
-Charm, DEX, Vanna and Term Structure for $SPX, the **Strategy Finder**, the
-Rescue ad-hoc form (published as **Rescue my Sh\*tty trade**), the
+Industry, Sector Rotation, RRG, Momentum, Net Prem, **Gamma**, the **Strategy
+Finder**, the Rescue ad-hoc form (published as **Rescue my Sh\*tty trade**), the
 **Calculator** and the **Simulator**.
+
+The public **Gamma** page is Dealer Positioning with its symbol dropdown: a
+visitor picks any symbol your collector gathers (the `symbols.toml` lists plus
+your Top 20 list) and switches between Gamma, Charm, Delta, Vanna and Flow.
+There is no Term tab and no Net Prem tab (Net Prem is its own screen). $SPX, SPY
+and QQQ are always live; any other symbol goes live when a visitor picks it and
+stays live while someone watches it, up to 8 at once (Settings → Configuration
+→ Public Gamma page). Picking a symbol costs no Schwab call: it reuses the chain
+the collector already downloads every minute. The addresses of the old pinned
+Gamma screens (`/charm`, `/gamma/spy`, `/premium-divergence/spy` and so on) now
+open this page.
 Each one shows the same scrolling market-summary ticker along the bottom that
 your own app does.
 

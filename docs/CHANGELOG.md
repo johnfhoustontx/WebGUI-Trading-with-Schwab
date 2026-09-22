@@ -4,7 +4,23 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-22 (**Public Gamma page, Phase 1: the hot set** - the
+**Last updated:** 2026-09-22 (**Public Gamma page, Phases 2 and 3: the page, and
+one screen instead of nine**.)
+
+- **The page.** `gamma.render(public=True)` at `live.neuralstrike.co/gamma`: the
+  app's symbol dropdown over the published list (`symbols.toml` + Top 20), and
+  the GEX · Charm · DEX · Vanna · Flow subtabs (no Term, no Net Prem). It reads
+  `options:gamma_pub:<SYM>` for the symbol on screen and never a private key. A
+  pick sends `request_public_gamma` (30 changes per visitor per hour; renewals
+  free); a line under the dropdown says live, loading, full, closed or not
+  answering. The Flow Alerts hand-off is per browser tab on the public origin.
+- **One screen instead of nine.** $SPX/SPY/QQQ Gamma, $SPX Charm, DEX, Vanna and
+  Term, and Premium Divergence SPY/QQQ are gone; their routes 308 to `/gamma`
+  (`live_screens.RETIRED_ROUTES`). Sixteen screens; the grid has one Gamma tile.
+- **Review fix (Phase 1).** An expired lease no longer lets the private page's
+  own refresh keep a once-picked symbol's public keys alive overnight.
+
+**Prior — 2026-09-22** (**Public Gamma page, Phase 1: the hot set** - the
 service side of any-symbol public Gamma. Not shipped; nothing public changes
 until Phase 2's page and the ACL selector.)
 

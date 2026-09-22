@@ -1027,16 +1027,8 @@ in [`plans/2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-li
 | `/rotation` | `sentiment_rotation.render()` (`/sentiment/rotation`) | — |
 | `/rrg` | `sentiment_rrg.render()` (`/sentiment/rrg`) | — |
 | `/momentum` | `sentiment_momentum.render(level="industry")` (`/sentiment/momentum`) | Industries |
-| `/gamma` | `options.gamma.render(symbol="$SPX", view="GEX")` (`/options/gamma`) | `$SPX` · GEX |
+| `/gamma` | `options.gamma.render(public=True)` (`/options/gamma`) | ⚠ **writes**: the dropdown (the published list, `cache:options:gamma_pub_symbols`) and the GEX · Charm · DEX · Vanna · Flow subtabs, over `options:gamma_pub:<SYM>` for the symbol on screen. A pick puts that symbol on `cmd:gamma_public` (no Schwab call: options_svc keeps it live on the minute tick while leased). No Term, no Net Prem |
 | `/net-premium` | `options.gamma.render(view="Net Prem")` (`/options/gamma`) | group `indices`, symbols `SPY QQQ BIG10`, mode `dollars` (settings pins) |
-| `/premium-divergence/spy` | `options.gamma.render(symbol="SPY", view="Flow")` (`/options/gamma`) | SPY · Flow |
-| `/premium-divergence/qqq` | `options.gamma.render(symbol="QQQ", view="Flow")` (`/options/gamma`) | QQQ · Flow |
-| `/gamma/spy` | `options.gamma.render(symbol="SPY", view="GEX")` (`/options/gamma`) | SPY · GEX |
-| `/gamma/qqq` | `options.gamma.render(symbol="QQQ", view="GEX")` (`/options/gamma`) | QQQ · GEX |
-| `/charm` | `options.gamma.render(symbol="$SPX", view="Charm")` (`/options/gamma`) | `$SPX` · Charm |
-| `/dex` | `options.gamma.render(symbol="$SPX", view="DEX")` (`/options/gamma`) | `$SPX` · DEX |
-| `/vanna` | `options.gamma.render(symbol="$SPX", view="Vanna")` (`/options/gamma`) | `$SPX` · Vanna |
-| `/term` | `options.gamma.render(symbol="$SPX", view="Term")` (`/options/gamma`) | `$SPX` · Term — the collector gathers a term grid for `$SPX` alone |
 | `/finder` | `options.swing.render(public=True)` → `options.finder_live` (`/options/swing`) | ⚠ **writes**: a visitor's Scan puts one symbol on `cmd:finder_public`; filters pinned in `config/finder_public.toml` |
 | `/rescue` | `options.rescue.render(public=True)` → `options.rescue_live` (`/options/rescue`) | ⚠ **writes**: Load and Compute put a validated strikes request or trade on `cmd:rescue_public`. The ad-hoc form only - never the owner's at-risk board. Titled "Rescue my Sh*tty trade" |
 | `/calculator` | `options.calculator.render(public=True)` → `options.calc_live` (`/options/calculator`) | ⚠ **writes**: Load, an extra expiration and Rate my trade go on `cmd:tools_public`; every price edit and the implied-volatility estimate on `cmd:tools_public_math`. While the quotes switch is off: no chain grid, no price source, no delta, and the checklist's cost-to-trade line greys out. Open in Simulator hands the position over through tab storage |
@@ -1044,6 +1036,12 @@ in [`plans/2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-li
 
 `BIG10` is a symbol inside the `indices` group in `config/symbols.toml`, not a group
 of its own.
+
+**Retired routes (2026-09-22).** `/gamma/spy`, `/gamma/qqq`, `/charm`, `/dex`,
+`/vanna`, `/term`, `/premium-divergence/spy` and `/premium-divergence/qqq` were
+pinned screens; each is now a 308 redirect to `/gamma` (`live_screens.RETIRED_ROUTES`,
+registered by `live_main`), opening on $SPX GEX. No symbol or view rides the
+redirect: that would be a deep link, which the public page does not take.
 
 **A pinned gamma screen differs from the private page in three visible ways, all
 deliberate.** It **draws no view picker** — `gamma.shows_view_picker(view)` gates the

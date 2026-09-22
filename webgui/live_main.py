@@ -404,6 +404,25 @@ for _screen in live_screens.SCREENS:
     _register(_screen)
 
 
+def _register_retired(route, target):
+    """A permanent redirect from a route an earlier screen table published.
+
+    A plain FastAPI route, not a page: it renders nothing and opens no socket.
+    It takes NO parameter, for the reason ``_register`` gives, and the target is
+    a fixed path from ``live_screens.RETIRED_ROUTES``, never anything from the
+    request."""
+    from fastapi.responses import RedirectResponse
+
+    @nicegui_app.get(route, include_in_schema=False)
+    def _moved() -> RedirectResponse:
+        return RedirectResponse(target, status_code=308)
+    return _moved
+
+
+for _old, _new in live_screens.RETIRED_ROUTES.items():
+    _register_retired(_old, _new)
+
+
 if __name__ in {"__main__", "__mp_main__"}:
     # ⚠ BEFORE ui.run, and this ordering is the point: a check that runs after
     # the server is listening has already served the first anonymous request

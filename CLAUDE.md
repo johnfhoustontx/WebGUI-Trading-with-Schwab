@@ -694,7 +694,7 @@ still logs in full.
 
 ## The public live screens — a SECOND Tier-1 process
 
-`webgui/live_main.py` serves **twenty-four screens, unauthenticated, to
+`webgui/live_main.py` serves **sixteen screens, unauthenticated, to
 anyone** on `nicegui_live` (prod :8501, dev :9501) behind `LIVE_HOST`
 (`live.neuralstrike.co`). It renders the **real page modules the app renders**, so a
 published screen cannot drift from the private one. The published set and every pin
@@ -835,8 +835,10 @@ only reads, nothing outlives `handoff_keep_min`, and the private pages'
 ONE store every visitor would share. Design:
 [`docs/plans/2026-09-21-public-calculator-simulator-design.md`](docs/plans/2026-09-21-public-calculator-simulator-design.md).
 
-⚠ **The published route set is the twenty-four screens PLUS exactly one non-page
-route: `/static` (2026-09-09).** Every screen now carries a slim header — the
+⚠ **The published route set is the sixteen screens, the eight 308 redirects in
+`live_screens.RETIRED_ROUTES` (the pinned Gamma screens retired 2026-09-22, each
+now a redirect to `/gamma`), PLUS exactly one non-page route: `/static`
+(2026-09-09).** Every screen now carries a slim header — the
 brand lockup, a hairline, the screen name, and **no navigation of any kind** —
 and `[brand].mark` is a file under `/static`, which this process serves from its
 OWN ASGI app: measured before the mount, `:8500/static/img/neuralstrike-mark.svg`

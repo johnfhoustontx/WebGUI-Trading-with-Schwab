@@ -345,6 +345,13 @@ def gamma_history_key(view: str) -> str:
 # adding that symbol's views back HERE, or the screen shows an empty heatmap on
 # every view but the one it used to pin — silently, since a missing key reads as
 # "no history yet".
+# Since 2026-09-22 the public screens are ONE Gamma page with a dropdown and
+# the four heatmap subtabs, not a screen per (symbol, view). It opens on $SPX,
+# before any visitor has leased anything, so $SPX publishes every view that page
+# offers, permanently. SPY and QQQ keep the GEX history their old screens drew,
+# so they still show a session off-hours; a visitor watching one gets its other
+# views as TTL'd keys through the lease (see the note below this table).
+# shared/tests/test_cross_tier_mirrors.py pins $SPX to the page's views.
 PUBLISHED_GAMMA_HISTORY_VIEWS = {
     "$SPX": ("GEX", "Charm", "DEX", "Vanna"),
     "SPY": ("GEX",),

@@ -88,7 +88,15 @@ dropdown symbols. Shipping needs the ACL selector (dev-prod-environments §4g).
 - ACL: add `(%W~cmd:gamma_public +xadd)` to the `live` user, then run
   `CONFIG REWRITE`.
 
-### Phase 2 - page (`webgui/pages/options/gamma.py`)
+### Phase 2 - page (`webgui/pages/options/gamma.py`) (BUILT 2026-09-21)
+Built as below. Additions: a per-visitor limit on symbol CHANGES
+(`[visitor] picks_per_hour`, 30; renewals are free), a line under the
+dropdown worded from the service's per-symbol outcome (`status["last"]`),
+and the header stamp driven from the symbol on screen. Verified on a local
+harness with real prod payloads: $SPX drew, picking NVDA went "Loading" ->
+"Live" when the simulated tick published it, Charm and Flow drew, no
+horizontal scroll at 375 px.
+
 - `render(public=True)` builds the dropdown and the view tabs. A symbol change
   calls a gated `bus_client.request_public_gamma` and reads that symbol's
   published keys. While the page is open it keeps re-requesting, which renews
@@ -104,7 +112,13 @@ dropdown symbols. Shipping needs the ACL selector (dev-prod-environments §4g).
 - Show a "loading SYMBOL, first draw in about a minute" state for a cold symbol,
   and a refusal line for each outcome.
 
-### Phase 3 - screens, site, tests
+### Phase 3 - screens, site, tests (BUILT 2026-09-21)
+Built as below, except the redirects carry NO state: each retired route is a
+plain 308 to `/gamma`, opening on $SPX GEX. Carrying the old route's view
+would be a deep link (D4). `PUBLISHED_GAMMA_HISTORY_VIEWS` is unchanged:
+$SPX keeps all four views (the page's default symbol), SPY and QQQ keep GEX
+and gain the rest through a lease.
+
 - One `Screen("gamma", "/gamma", ..., kwargs={"public": True})`, plus redirects
   from the eight retired routes. A redirect route may seed the page state on the
   server side (it is not a query parameter), so `/charm` opens on $SPX Charm.

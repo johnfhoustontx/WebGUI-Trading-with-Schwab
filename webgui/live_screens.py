@@ -1,4 +1,4 @@
-"""The twenty-four screens published on the public live origin.
+"""The sixteen screens published on the public live origin.
 
 PURE DATA -- no NiceGUI import -- so the route registration, the thumbnail
 capture script and the static grid on neuralstrike.co all read one source and
@@ -67,43 +67,25 @@ SCREENS = (
     Screen("rrg", "/rrg", "RRG", "sentiment_rrg", "/sentiment/rrg"),
     Screen("momentum", "/momentum", "Momentum", "sentiment_momentum",
            "/sentiment/momentum", kwargs={"level": "industry"}),
-    # ⚠ THE TEN GAMMA SCREENS ALL NAME /options/gamma, AND THIS ONE IS FIRST.
+    # ⚠ THE TWO GAMMA SCREENS BOTH NAME /options/gamma, AND THIS ONE IS FIRST.
     # ``PUBLIC_ROUTES`` keeps the first, so a Dealer Positioning click-through
-    # lands here rather than on Net Prem or a Premium Divergence board — see
-    # the note on ``_public_routes`` below.
-    Screen("gamma", "/gamma", "Gamma · $SPX", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "$SPX", "view": "GEX"}),
+    # (the Flow Alerts tape) lands here rather than on Net Prem -- see the note
+    # on ``_public_routes`` below.
+    #
+    # The PUBLIC GAMMA PAGE (2026-09-22): the app's dropdown over every symbol
+    # options_svc collects, and its subtabs less Term and Net Prem. It replaced
+    # nine pinned screens ($SPX GEX, SPY and QQQ GEX, $SPX Charm, DEX, Vanna and
+    # Term, Premium Divergence on SPY and QQQ); their routes REDIRECT here
+    # (``RETIRED_ROUTES``). It WRITES: a pick asks options_svc to keep the
+    # symbol live (``bus_client.request_public_gamma`` on cmd:gamma_public, the
+    # live ACL user's fifth write selector), which costs no Schwab call. Roadmap:
+    # docs/plans/2026-09-21-public-gamma-any-symbol-roadmap.md.
+    Screen("gamma", "/gamma", "Gamma", "options.gamma", "/options/gamma",
+           kwargs={"public": True}),
+    # Net Prem stays a screen of its own (decision D3): symbol-INDEPENDENT, so
+    # the dropdown would mean nothing on it.
     Screen("net-premium", "/net-premium", "Net Prem", "options.gamma",
            "/options/gamma", kwargs={"view": "Net Prem"}, settings=_NETPREM),
-    Screen("premium-divergence-spy", "/premium-divergence/spy",
-           "Premium Divergence · SPY", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "SPY", "view": "Flow"}),
-    Screen("premium-divergence-qqq", "/premium-divergence/qqq",
-           "Premium Divergence · QQQ", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "QQQ", "view": "Flow"}),
-    # The remaining Dealer Positioning views, each pinned. ⚠ Every heatmap view
-    # pinned here (GEX, Charm, DEX, Vanna) costs a published history key that
-    # options_svc rewrites every minute -- ``PUBLISHED_GAMMA_HISTORY_VIEWS`` in
-    # handlers.py must list it, or the screen draws an empty heatmap forever.
-    # ``shared/tests/test_cross_tier_mirrors.py`` holds the two in step. Term is
-    # drawn from the MAIN payload and needs no history; it pins $SPX because the
-    # collector gathers the term grid for $SPX alone (gex_collector.TERM_SYMBOL).
-    Screen("gamma-spy", "/gamma/spy", "Gamma · SPY", "options.gamma",
-           "/options/gamma", kwargs={"symbol": "SPY", "view": "GEX"}),
-    Screen("gamma-qqq", "/gamma/qqq", "Gamma · QQQ", "options.gamma",
-           "/options/gamma", kwargs={"symbol": "QQQ", "view": "GEX"}),
-    Screen("charm", "/charm", "Charm", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "$SPX", "view": "Charm"}, tile=False,
-           parent="gamma"),
-    Screen("dex", "/dex", "DEX", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "$SPX", "view": "DEX"}, tile=False,
-           parent="gamma"),
-    Screen("vanna", "/vanna", "Vanna", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "$SPX", "view": "Vanna"}, tile=False,
-           parent="gamma"),
-    Screen("term", "/term", "Term Structure", "options.gamma", "/options/gamma",
-           kwargs={"symbol": "$SPX", "view": "Term"}, tile=False,
-           parent="gamma"),
     # ⚠ THE ONE SCREEN THAT WRITES. A visitor's Scan puts one validated symbol
     # on cmd:finder_public (bus_client.request_public_scan; the live ACL user's
     # only write selector) and options_svc answers it. ``public=True`` hands off
@@ -136,6 +118,24 @@ SCREENS = (
            "/options/simulator", kwargs={"public": True}, tile=False),
 )
 
+
+# Routes an earlier screen table published, and where each now REDIRECTS (a 308,
+# registered by ``live_main``). Links to them were shared -- the tiles, the
+# YouTube wall description, anyone's bookmarks -- so they must not 404. No state
+# rides the redirect: carrying the old route's symbol or view would be a deep
+# link, which the public Gamma page does not take (decision D4), so each opens
+# on $SPX GEX. Pure data, like the table above; ``tests/test_live_main.py``
+# pins the route set to screens + these + the static mount.
+RETIRED_ROUTES = {
+    "/gamma/spy": "/gamma",
+    "/gamma/qqq": "/gamma",
+    "/charm": "/gamma",
+    "/dex": "/gamma",
+    "/vanna": "/gamma",
+    "/term": "/gamma",
+    "/premium-divergence/spy": "/gamma",
+    "/premium-divergence/qqq": "/gamma",
+}
 
 def _public_routes() -> dict:
     """``{private route: the route THIS origin serves that page at}``.
