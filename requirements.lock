@@ -103,7 +103,6 @@ tabulate==0.10.0
 tinycss2==1.5.1
 tomli==2.4.1
 tomli_w==1.2.0
-tweepy==4.17.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 tzdata==2026.2
