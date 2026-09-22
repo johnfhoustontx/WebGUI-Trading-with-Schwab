@@ -4,7 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-21 (**Charm, DEX, Vanna and Term Structure become
+**Last updated:** 2026-09-22 (**Public Gamma page, Phase 1: the hot set** - the
+service side of any-symbol public Gamma. Not shipped; nothing public changes
+until Phase 2's page and the ACL selector.)
+
+- **What it is.** A visitor's pick will go on `cmd:gamma_public`
+  (`bus_client.request_public_gamma`). options_svc (`services/options_svc/
+  gamma_public.py`) holds a 15-minute lease per symbol, renewed by the page, up
+  to `[hot] cap` (8) symbols beyond $SPX, SPY and QQQ. The 1-minute GEX tick
+  publishes hot symbols into the existing `cache:options:gamma_pub:<SYM>` keys,
+  with a TTL.
+- **Zero Schwab calls, by construction.** The tick takes its hot set once,
+  before the collect, so their chains are kept; a hot-only symbol is built only
+  from a kept chain and with `gamma_snapshot(..., with_term=False)` (the public
+  page has no Term view, decision D6). A symbol granted mid-tick waits a minute.
+- **Config.** `config/gamma_public.toml` (Settings → Public Gamma page) and
+  `[windows.gamma_public]` 08:00-15:20 CT. The dropdown list is republished for
+  the public page as `cache:options:gamma_pub_symbols`.
+- **Measured first.** `tools/measure_gamma_public.py`: without Term a warm build
+  took 0.1-0.2 s and wrote about 4 MB, against 0.6-1.5 s with it (after hours,
+  2026-09-21). The in-session run at 09:20 CT 2026-09-22 sets the cap.
+
+**Prior — 2026-09-21** (**Charm, DEX, Vanna and Term Structure become
 links under the $SPX Gamma tile** - owner's ask.)
 
 - **What changed.** The four $SPX Dealer Positioning views lost their own tiles on

@@ -11,6 +11,8 @@ Assembles the shared scaffold with this domain's scheduler + command handler:
   form (strikes lists and rescue menus), on another loop of its own.
 * ``tools_public.handle_tools`` on ``cmd:tools_public`` — the public Calculator
   and Simulator's Schwab-spending requests (chain, expiration, rating, snapshot).
+* ``gamma_public.handle`` on ``cmd:gamma_public`` — the public Gamma page's
+  requests to keep a symbol live (the hot set; no Schwab call).
 * ``tools_public.handle_math`` on ``cmd:tools_public_math`` — their pure pricing
   (reprice, implied volatility, what-if sweep), on a loop of its own so a
   snapshot fetch never stalls the reprice a visitor's every edit triggers.
@@ -29,8 +31,9 @@ if str(_REPO_ROOT) not in sys.path:
 
 from services._scaffold import make_app  # noqa: E402
 from services.options_svc import (  # noqa: E402
-    finder_public, handlers, rescue_public, scheduler, tools_public)
-from shared import public_rescue, public_scan, public_tools  # noqa: E402
+    finder_public, gamma_public, handlers, rescue_public, scheduler, tools_public)
+from shared import (  # noqa: E402
+    public_gamma, public_rescue, public_scan, public_tools)
 
 app = make_app(
     "options",
@@ -45,7 +48,8 @@ app = make_app(
     extra_consumers=((public_scan.STREAM, finder_public.handle),
                      (public_rescue.STREAM, rescue_public.handle),
                      (public_tools.TOOLS_STREAM, tools_public.handle_tools),
-                     (public_tools.MATH_STREAM, tools_public.handle_math)),
+                     (public_tools.MATH_STREAM, tools_public.handle_math),
+                     (public_gamma.STREAM, gamma_public.handle)),
 )
 
 

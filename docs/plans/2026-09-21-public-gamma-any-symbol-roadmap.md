@@ -62,7 +62,16 @@ seven unpublished symbols built without Term (D6):
 Output: the largest hot-set cap that still lets `refresh_gamma_current` finish
 well inside its minute.
 
-### Phase 1 - service
+### Phase 1 - service (BUILT 2026-09-21, not yet shipped)
+Built as below, with one refinement: the tick takes its hot set ONCE, before
+the collect (`gamma_public.begin_tick`), and a hot-only symbol is built only
+from a chain that collect kept (`handlers.refresh_gamma_hot`). A symbol granted
+mid-tick waits one minute rather than costing a Schwab fetch. No daily budget:
+nothing here spends Schwab calls, and the cap bounds the CPU and Redis cost. A
+lease on $SPX, SPY or QQQ takes no slot but adds their missing history views
+(SPY and QQQ publish GEX only), as TTL'd keys. The status view names only
+dropdown symbols. Shipping needs the ACL selector (dev-prod-environments §4g).
+
 - `shared/public_gamma.py`: the stream name, command type, key helpers and
   config accessors. The config lives in `config/gamma_public.toml`: cap, lease
   minutes and daily budget.

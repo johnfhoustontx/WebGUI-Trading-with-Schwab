@@ -22,11 +22,13 @@ from services.options_svc import compute
 # Symbol Dossier (design 2026-09-17): one ticker's on-demand fetch.
 from services.options_svc import dossier
 from services.options_svc import flow_alerts
+from services.options_svc import gamma_public
 from services.options_svc import push_notify
 # Rate my trade (design 2026-09-16): the Calculator's legs graded by the
 # Strategy Finder's own scorer.
 from services.options_svc import rate_trade
 from shared import market_calendar as mc
+from shared import public_gamma
 from shared.notify.channels import _today_ct
 from shared.symbols import clean_symbol
 from shared.contracts.options import (IncomeScan, MatrixSnapshot,
@@ -355,6 +357,13 @@ PUBLISHED_GAMMA_SYMBOLS = tuple(PUBLISHED_GAMMA_HISTORY_VIEWS)
 _PUBLISHED_GAMMA_BY_UPPER = {s.upper(): frozenset(v)
                           for s, v in PUBLISHED_GAMMA_HISTORY_VIEWS.items()}
 
+
+# The public Gamma page's HOT symbols (visitor-picked, leased; see
+# services/options_svc/gamma_public.py) publish into these SAME per-symbol keys,
+# so the page reads one key family for every symbol. A hot symbol's keys carry a
+# TTL (config/gamma_public.toml [hot] keep_min) because visitors choose them; the
+# three above carry none. A lease on one of the three adds the history views
+# this table leaves out, as TTL'd keys, for as long as it is held.
 
 def is_published_gamma_symbol(symbol) -> bool:
     """Whether a public live screen reads ``symbol``'s own gamma snapshot."""
@@ -1651,7 +1660,26 @@ def refresh_gamma_published(bus, symbol) -> None:
     The private page's shared key is deliberately untouched: a public screen must
     never move the symbol under the app someone is trading from."""
     _publish_gamma(bus, _gamma_snapshot_or_empty(symbol), symbol,
-                   targets=(_gamma_pub_target(symbol),))
+                   targets=_gamma_pub_targets(symbol))
+
+
+def refresh_gamma_hot(bus, symbol) -> bool:
+    """Publish one HOT symbol of the public Gamma page; return whether it did.
+
+    Built ONLY from the chain this tick's collect kept for it, and without Term
+    (the public page has none): a hot symbol must cost no Schwab call. With no
+    kept chain -- the collect failed for it, or it was granted after the tick
+    took its hot set -- it is skipped this minute, never fetched."""
+    chain = compute._take_tick_chain(symbol)
+    if chain is None:
+        log.info("public gamma %s: no kept chain this tick; skipped", symbol)
+        return False
+    snap = compute.gamma_snapshot(symbol, chain=chain, with_term=False)
+    if snap is None:
+        snap = {"symbol": symbol, "spot": None, "dte": None, "views": {},
+                "term": {}}
+    _publish_gamma(bus, snap, symbol, targets=_gamma_pub_targets(symbol))
+    return True
 
 
 def _gamma_snapshot_or_empty(symbol) -> dict:
@@ -1679,13 +1707,43 @@ def _gamma_pub_target(symbol):
             published_gamma_history_views(symbol))
 
 
+def _gamma_hot_ttl() -> int:
+    return public_gamma.hot()["keep_min"] * 60
+
+
+def _gamma_pub_targets(symbol, hot=None):
+    """Every PUBLIC destination of one symbol's snapshot.
+
+    A permanent symbol ($SPX, SPY, QQQ) gets its published key with the views
+    PUBLISHED_GAMMA_HISTORY_VIEWS lists. A hot symbol (``hot``, default the
+    running tick's hot set) gets the public page's views, TTL'd: all of them
+    plus the main key for a visitor-picked symbol, only the missing views for a
+    permanent one."""
+    if hot is None:
+        hot = gamma_public.tick_symbols()
+    sym = str(symbol).strip().upper()
+    out = []
+    permanent = is_published_gamma_symbol(sym)
+    if permanent:
+        out.append(_gamma_pub_target(symbol))
+    if sym in {str(h).strip().upper() for h in hot}:
+        views = frozenset(public_gamma.HISTORY_VIEWS)
+        history = (lambda view: gamma_pub_history_key(sym, view))
+        if permanent:
+            extra = views - published_gamma_history_views(sym)
+            if extra:
+                out.append((None, None, history, extra, _gamma_hot_ttl()))
+        else:
+            out.append((gamma_pub_key(sym), gamma_pub_event(sym), history, views,
+                        _gamma_hot_ttl()))
+    return tuple(out)
+
+
 def _gamma_targets(symbol):
     """Where a snapshot computed FOR THE PRIVATE PAGE should land: its shared key,
-    plus the symbol's published key when a public screen names that symbol."""
-    out = [_GAMMA_PRIVATE_TARGET]
-    if is_published_gamma_symbol(symbol):
-        out.append(_gamma_pub_target(symbol))
-    return tuple(out)
+    plus the symbol's published keys when a public screen names that symbol or
+    the public Gamma page holds it hot."""
+    return (_GAMMA_PRIVATE_TARGET,) + _gamma_pub_targets(symbol)
 
 
 def _publish_gamma(bus, snap, symbol, *, targets) -> None:
@@ -1717,14 +1775,21 @@ def _publish_gamma(bus, snap, symbol, *, targets) -> None:
             entry = views.get(view)
             rows = entry.pop("history", None) if isinstance(entry, dict) else None
             rows_by_view[view] = rows or []
-    for main_key, event_key, history_key, wanted in targets:
+    for target in targets:
+        main_key, event_key, history_key, wanted = target[:4]
+        # A fifth element is a TTL for every key the target writes (the public
+        # Gamma page's hot symbols). A main key of None writes history only: a
+        # lease on a permanent symbol adds views, never a second main write.
+        ttl = target[4] if len(target) > 4 else None
         for view, rows in rows_by_view.items():
             if wanted is not None and view not in wanted:
                 continue      # no screen draws it — see PUBLISHED_GAMMA_HISTORY_VIEWS
             bus.cache_set(history_key(view),
                           {"symbol": symbol, "view": view, "rows": rows},
-                          skip_unchanged=True)
-        version = bus.cache_set(main_key, snap)
+                          skip_unchanged=True, ttl=ttl)
+        if main_key is None:
+            continue
+        version = bus.cache_set(main_key, snap, ttl=ttl)
         bus.publish(event_key, {"version": version})
 
 
@@ -1771,6 +1836,17 @@ def refresh_gamma_current(bus) -> None:
             refresh_gamma_published(bus, symbol)
         except Exception:
             _degrade.degraded("options.refresh_gamma_published", detail=symbol)
+    # The public Gamma page's hot symbols -- the set this tick's collect
+    # captured chains for (gamma_public.begin_tick), so each is built from a
+    # kept chain. The current and permanent ones were written above.
+    for symbol in gamma_public.tick_symbols():
+        if (symbol.upper() == str(current).strip().upper()
+                or is_published_gamma_symbol(symbol)):
+            continue
+        try:
+            refresh_gamma_hot(bus, symbol)
+        except Exception:
+            _degrade.degraded("options.refresh_gamma_hot", detail=symbol)
 
 
 def collect_gex_history(bus=None) -> None:
@@ -1799,9 +1875,21 @@ def collect_gex_history(bus=None) -> None:
     The three PUBLISHED symbols ride the same capture for the same reason: they
     are all in ``config/symbols.toml`` ``[collection] base``, so the poll fetches
     their chains anyway and the published snapshots cost no Schwab call. Leaving
-    one out of the capture set would cost it ~440 /chains a day."""
-    capture = ({_current_gamma_symbol(bus)} | set(PUBLISHED_GAMMA_SYMBOLS)
-               if bus is not None else None)
+    one out of the capture set would cost it ~440 /chains a day.
+
+    The public Gamma page's HOT symbols join the capture set too, taken ONCE
+    here (``gamma_public.begin_tick``) so the refresh that follows builds exactly
+    the symbols whose chains were kept -- every dropdown symbol is in the
+    collection, so that also costs no Schwab call."""
+    capture = None
+    if bus is not None:
+        try:
+            hot = set(gamma_public.begin_tick(bus))
+        except Exception:
+            log.exception("gamma_public begin_tick degraded")
+            hot = set()
+        capture = ({_current_gamma_symbol(bus)} | set(PUBLISHED_GAMMA_SYMBOLS)
+                   | hot)
     compute.collect_gex_snapshots(capture_symbols=capture)
     if bus is not None:
         try:
@@ -2571,6 +2659,11 @@ def publish_gamma_symbols(bus) -> None:
     data = {"symbols": compute.gamma_symbol_options()}
     version = bus.cache_set(CACHE_GAMMA_SYMBOLS, data)
     bus.publish(EVENT_GAMMA_SYMBOLS, {"version": version})
+    # The same list for the public Gamma page, in a key written FOR it: the
+    # public process never reads the private page's key, and the hot-set worker
+    # validates a visitor's pick against exactly what the page offers.
+    version = bus.cache_set(public_gamma.SYMBOLS_KEY, data)
+    bus.publish(public_gamma.SYMBOLS_EVENT, {"version": version})
 
 
 def run_rescue(bus, position_id, source: str = "paper") -> None:

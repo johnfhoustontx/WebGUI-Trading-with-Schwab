@@ -86,6 +86,15 @@ end   = "15:20"   # 16:20 ET
 start = "15:25"
 end   = "15:50"
 
+[windows.gamma_public]
+# When the public Gamma page (live.neuralstrike.co/gamma) keeps a visitor's
+# symbol live. The bounds are [windows.collection]'s, because a hot symbol is
+# only published by the collection tick; held SEPARATE for the reason
+# [windows.stream] gives. Outside it, $SPX, SPY and QQQ show their last
+# session and other symbols are not offered live.
+start = "08:00"
+end   = "15:20"
+
 [windows.finder_public]
 # When the public Strategy Finder (live.neuralstrike.co/finder) will run a scan
 # a visitor asks for. Outside it the page shows the last scan, if any.

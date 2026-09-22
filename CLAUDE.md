@@ -131,6 +131,10 @@ two streams, request builders, validators, result keys and config - pinned by
 `shared/tests/test_public_tools.py`, and imported by `bus_client`, `live_main`
 (the tab-storage age) and the pages `public_handoff`, `calc_live` and
 `sim_live`) ·
+`shared.public_gamma` (since 2026-09-22; the public Gamma page's
+stream, request builder, status and dropdown-list keys and hot-set config -
+`shared.symbols` + `shared.config_toml` only, pinned by
+`shared/tests/test_public_gamma.py`) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the

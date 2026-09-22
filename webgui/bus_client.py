@@ -349,6 +349,29 @@ def request_public_math(raw_request) -> str:
     return bus().enqueue_command(public_tools.MATH_STREAM, command)
 
 
+def request_public_gamma(raw_symbol) -> str:
+    """Ask options_svc to keep one symbol LIVE on the public Gamma page;
+    returns the message id. The page calls it when a visitor picks a symbol,
+    and again every ``renew_min`` while the page stays open.
+
+    One of the public origin's permitted writes, and for the same reason as
+    :func:`request_public_scan` NOT a path through :func:`request`: it writes
+    exactly ``{"symbol": <SYMBOL>}``, validated by ``shared.symbols.clean_symbol``,
+    on ``cmd:gamma_public``, and takes no stream or command type from its
+    caller. The live Redis ACL user may XADD there (docs/dev-prod-environments.md).
+    It costs no Schwab call: the service only leases the symbol for the
+    collection tick, which already fetches its chain.
+
+    Raises ``ValueError`` for a string the allow-list refuses, before anything
+    is written. The service re-validates, against the dropdown's list.
+    """
+    from shared import public_gamma  # Tier-1 allow-listed: config + validator only
+    command = public_gamma.request_command(raw_symbol)
+    if command is None:
+        raise ValueError(f"not a symbol the Gamma page offers: {raw_symbol!r}")
+    return bus().enqueue_command(public_gamma.STREAM, command)
+
+
 class EventListener:
     """Background daemon thread that fans an events channel out to a callback.
 

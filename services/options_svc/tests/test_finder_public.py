@@ -234,14 +234,16 @@ def test_the_service_consumes_the_public_stream_on_its_own_loop():
     call = next(n for n in ast.walk(tree) if isinstance(n, ast.Call)
                 and getattr(n.func, "id", None) == "make_app")
     kw = {k.arg: ast.unparse(k.value) for k in call.keywords}
-    # Exactly four public streams, each on its own loop; another is a decision
+    # Exactly five public streams, each on its own loop; another is a decision
     # to make here. The Rescue form's arrived 2026-09-21, and the same day the
     # public Calculator/Simulator's two (Schwab-spending tools, and pure math
-    # on a loop of its own so a snapshot fetch never stalls a reprice).
+    # on a loop of its own so a snapshot fetch never stalls a reprice). The
+    # public Gamma page's hot-set requests joined 2026-09-22 (no Schwab call).
     assert kw["extra_consumers"] == ("((public_scan.STREAM, finder_public.handle), "
                                      "(public_rescue.STREAM, rescue_public.handle), "
                                      "(public_tools.TOOLS_STREAM, tools_public.handle_tools), "
-                                     "(public_tools.MATH_STREAM, tools_public.handle_math))")
+                                     "(public_tools.MATH_STREAM, tools_public.handle_math), "
+                                     "(public_gamma.STREAM, gamma_public.handle))")
 
 
 def test_the_worker_writes_only_its_own_keys():

@@ -2019,6 +2019,23 @@ def test_rescue_advisories_use_light_gex_context():
         assert "gamma_snapshot(symbol)" not in src
 
 
+def test_gamma_snapshot_without_term_never_widens_the_chain(monkeypatch):
+    """The public Gamma page's hot symbols build with with_term=False: the
+    Term grid's wider chain fetch is the one Schwab call they would otherwise
+    cost. RECORDED rather than raised -- the Term compute sits in a try/except,
+    so a raising stub would be swallowed and this would pass either way."""
+    _patch_gamma(monkeypatch, history=[(1, 2, 3, 4, 5, 6, {5400.0: {"net": 1}})])
+    asked = []
+    monkeypatch.setattr(compute, "_term_chain",
+                        lambda symbol, chain, *a, **k: asked.append(symbol) or chain)
+    snap = compute.gamma_snapshot("$SPX", with_term=False)
+    assert asked == []
+    assert snap["term"] == {}
+    assert set(snap["views"]) == {"GEX", "Charm", "DEX", "Vanna"}
+    compute.gamma_snapshot("$SPX")
+    assert asked == ["$SPX"]            # the default still builds Term
+
+
 def test_gamma_snapshot_builds_views_and_term(monkeypatch):
     _patch_gamma(monkeypatch, history=[(1, 2, 3, 4, 5, 6, {5400.0: {"net": 1}})])
 

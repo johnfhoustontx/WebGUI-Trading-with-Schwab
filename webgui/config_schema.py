@@ -484,6 +484,10 @@ _SESSIONS = ConfigFile(
         _window("stream", "Public video stream", "", (TIMERS,)),
         _window("live_capture", "Public screenshot captures",
                 "Keep this after the stream ends: the capture is CPU-heavy.", ()),
+        _window("gamma_public", "Public Gamma live symbols",
+                "When the public Gamma page keeps a visitor's symbol live. "
+                "Keep it inside the GEX collection window: only collection "
+                "updates a live symbol.", ()),
         _window("finder_public", "Public Strategy Finder scans",
                 "When the public site will scan a symbol a visitor types. "
                 "Outside it the page shows the last scan.", ()),
@@ -661,6 +665,39 @@ _FINDER_PUBLIC = ConfigFile(
                 "daily limit.", (
             Field("warm.symbols", "Symbols", "", kind="symbols"),
         ), restart=(OPTIONS,)),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Public Gamma page — config/gamma_public.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read per request by options_svc and the public site through the mtime-cached
+# loader, so a saved change applies with no restart.
+_GAMMA_PUBLIC = ConfigFile(
+    name="gamma_public.toml", title="Public Gamma page", icon="stacked_line_chart",
+    summary="The Gamma page on the public site: how many visitor-picked symbols "
+            "are kept live at once, and for how long.",
+    restart=(),
+    caution="Each live symbol adds one snapshot to the one-minute GEX update, "
+            "which already runs past its minute a few times a day. It costs no "
+            "Schwab call.",
+    sections=(
+        Section("Live symbols", "Beyond $SPX, SPY and QQQ, which are always live.", (
+            Field("hot.cap", "Symbols live at once", "0 turns this off.",
+                  kind="int", min=0, max=40, step=1),
+            Field("hot.lease_min", "Keep a symbol live for",
+                  "After the last visitor asked for it.", kind="int",
+                  unit="min", min=1, max=240, step=1),
+            Field("hot.keep_min", "Keep its data after that for", "",
+                  kind="int", unit="min", min=1, max=1440, step=5),
+        )),
+        Section("Page", "", (
+            Field("page.renew_min", "An open page renews its symbol every",
+                  "Keep this shorter than the time a symbol stays live.",
+                  kind="int", unit="min", min=1, max=60, step=1),
+            Field("limits.max_wait_sec", "Drop a request that waited", "",
+                  kind="int", unit="s", min=10, max=3600, step=10),
+        )),
     ),
 )
 
@@ -850,7 +887,7 @@ _ENVS = ConfigFile(name="environments.toml", title="Environments", icon="dns",
                    editable=False, editor="readonly")
 
 FILES = (_SCANNER, _TRADE_MGMT, _DRIVER, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 

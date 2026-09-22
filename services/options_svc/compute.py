@@ -4570,7 +4570,9 @@ def reset_gamma_history_memo():
 # A one-slot stash would serve the first and send the rest back to Schwab for a
 # chain the process had just thrown away: ~440 /chains calls per symbol per day,
 # against a budget already running 68–76k. The map is bounded by the capture set
-# (four symbols at most) and cleared at the start of each collect.
+# (the private page's symbol, the three published ones, and since 2026-09-22 the
+# public Gamma page's hot set, capped by config/gamma_public.toml [hot] cap) and
+# cleared at the start of each collect.
 TICK_CHAIN_TTL_SEC = 45
 _TICK_CHAINS: dict = {}          # symbol -> (monotonic stash time, chain)
 _TICK_CHAIN_LOCK = threading.Lock()
@@ -4727,7 +4729,7 @@ def _history_rows_incremental(gh, conn, symbol, vstr, session_date):
         return list(ent["rows"])
 
 
-def gamma_snapshot(symbol: str, chain=None) -> dict | None:
+def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | None:
     """Fetch + compute the full Gamma snapshot for ``symbol``.
 
     ``chain`` — an optional already-fetched chain dict (same tick). When omitted,
@@ -4741,6 +4743,11 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
              "data": <per-strike dict>, "summary": {...}, "walls": [...],
              "flip": <float|None>, "history": [<rows>], ["hedge": {...}]}},
          "term": <term_grid>}
+
+    ``with_term=False`` skips the Term grid (``term`` is ``{}``): no wider
+    chain fetch, which for a weekly or monthly name is up to three extra Schwab
+    calls. The public Gamma page's hot symbols build this way -- it has no Term
+    view (roadmap decision D6).
 
     Returns None if the chain fetch fails or GammaEngine can't compute — the
     handler caches a graceful-empty view in that case. Per-view sub-failures are
@@ -4922,7 +4929,8 @@ def gamma_snapshot(symbol: str, chain=None) -> dict | None:
         # The Term view wants the next 5 expirations regardless of the symbol's
         # expiration cadence; widen the chain beyond the nearest-expiry GEX window
         # only when the base chain doesn't already cover them (see _term_chain).
-        term = eng.compute_term_grid(_term_chain(symbol, chain))
+        term = (eng.compute_term_grid(_term_chain(symbol, chain))
+                if with_term else {})
     except Exception:
         term = {}
 

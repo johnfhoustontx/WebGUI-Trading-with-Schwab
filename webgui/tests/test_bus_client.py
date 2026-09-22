@@ -539,9 +539,9 @@ def test_each_public_rescue_request_writes_one_command_to_one_place(fn, params, 
     assert [ast.unparse(b.value) for b in builds] == [builder]
 
 
-def test_the_public_origin_has_exactly_five_write_functions():
+def test_the_public_origin_has_exactly_six_write_functions():
     """Every bus_client function that enqueues, other than ``request`` (which a
-    read-only process refuses), is a public write. Adding a sixth must be a
+    read-only process refuses), is a public write. Adding a seventh must be a
     decision, made here."""
     import ast
     import inspect
@@ -550,9 +550,51 @@ def test_the_public_origin_has_exactly_five_write_functions():
         f.name for f in tree.body if isinstance(f, ast.FunctionDef)
         and any(isinstance(n, ast.Call) and getattr(n.func, "attr", None)
                 == "enqueue_command" for n in ast.walk(f)))
-    assert writers == ["request", "request_public_ladder", "request_public_math",
-                       "request_public_rescue", "request_public_scan",
-                       "request_public_tool"]
+    assert writers == ["request", "request_public_gamma", "request_public_ladder",
+                       "request_public_math", "request_public_rescue",
+                       "request_public_scan", "request_public_tool"]
+
+
+# ── the public Gamma page's one write ───────────────────────────────────────
+
+def _gamma_stream_commands():
+    from shared import public_gamma
+    return bus_client.bus().consume_commands(
+        public_gamma.STREAM, group="g", consumer="c", block_ms=50)
+
+
+def test_a_public_gamma_request_is_allowed_on_a_read_only_process():
+    from shared import public_gamma
+    bus_client.set_read_only(True)
+    assert bus_client.request_public_gamma(" nvda ")
+    cmds = _gamma_stream_commands()
+    assert len(cmds) == 1
+    assert cmds[0][1].type == public_gamma.COMMAND_TYPE
+    assert cmds[0][1].args == {"symbol": "NVDA"}
+    assert bus_client.bus().consume_commands(
+        "cmd:options", group="g", consumer="c", block_ms=50) == []
+
+
+@pytest.mark.parametrize("bad", ["", None, "spy; flushall", "../x", "TOOLONGSYM"])
+def test_an_invalid_gamma_symbol_is_refused_before_anything_is_written(bad):
+    bus_client.set_read_only(True)
+    with pytest.raises(ValueError):
+        bus_client.request_public_gamma(bad)
+    assert _gamma_stream_commands() == []
+
+
+def test_the_gamma_request_takes_one_argument_and_writes_one_place():
+    import ast
+    import inspect
+    import textwrap
+    fn = ast.parse(textwrap.dedent(inspect.getsource(
+        bus_client.request_public_gamma))).body[0]
+    params = [a.arg for a in fn.args.args + fn.args.kwonlyargs]
+    assert params == ["raw_symbol"] and not fn.args.vararg and not fn.args.kwarg
+    writes = [n for n in ast.walk(fn) if isinstance(n, ast.Call)
+              and getattr(n.func, "attr", None) == "enqueue_command"]
+    assert len(writes) == 1
+    assert ast.unparse(writes[0].args[0]) == "public_gamma.STREAM"
 
 
 # ── the public Calculator and Simulator's two writes ───────────────────────

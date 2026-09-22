@@ -77,6 +77,9 @@ SECTORS_TOML = REPO_ROOT / "config" / "sectors.toml"
 # dedup windows, the daily scan budget. Read by shared/public_scan.py from both
 # options_svc (the worker) and the public live process. Edit + restart both.
 FINDER_PUBLIC_TOML = REPO_ROOT / "config" / "finder_public.toml"
+# The public Gamma page's hot set (visitor-picked symbols kept live). Read by
+# shared/public_gamma.py from both options_svc (the worker) and the public site.
+GAMMA_PUBLIC_TOML = REPO_ROOT / "config" / "gamma_public.toml"
 
 # The public Rescue form: its budgets, reuse windows and per-visitor limits.
 # Read by shared/public_rescue.py from both options_svc (the worker) and the

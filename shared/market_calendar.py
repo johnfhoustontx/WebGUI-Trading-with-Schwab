@@ -252,6 +252,12 @@ _DEFAULTS = {
         # minutes of the session (pre-open marks fail the quality cut, measured
         # 2026-09-21) and closes at the regular close.
         "finder_public": {"start": "08:40", "end": "15:00"},
+        # The public Gamma page's hot symbols: when a visitor's pick is kept
+        # live. The bounds are [windows.collection]'s, because a hot symbol is
+        # only ever published by the collection tick, but held SEPARATE for the
+        # reason ``stream`` is: widening collection must not silently extend a
+        # public surface.
+        "gamma_public": {"start": "08:00", "end": "15:20"},
         # The public Rescue form. Held separate from ``finder_public`` so one
         # public surface cannot move because the other was retimed. Opens after
         # the first minutes of the session for the same reason: the rescue menu

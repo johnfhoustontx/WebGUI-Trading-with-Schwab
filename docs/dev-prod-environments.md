@@ -350,6 +350,32 @@ which both pages word as "The request could not be sent". As in 4c, a probe
 entry left on either stream has no `data` field, so options_svc dead-letters it
 to `<stream>:dead` on its next read, where it is harmless.
 
+**4g. The live ACL user's FIFTH write (public Gamma page, live symbols).**
+⚠ **Not yet applied on prod.** A visitor's pick on the public Gamma page puts one
+dropdown symbol on `cmd:gamma_public` (`bus_client.request_public_gamma`), and
+options_svc keeps it live on the 1-minute GEX tick (`services/options_svc/
+gamma_public.py`). It spends no Schwab call, but it is a write, so it needs its
+own selector:
+
+```bash
+cd /home/administrator/dev && set -a && . ./.env && set +a
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli ACL SETUSER live '(%W~cmd:gamma_public +xadd)'
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli CONFIG REWRITE
+REDISCLI_AUTH="$MEMURAI_PASSWORD" redis-cli ACL GETUSER live
+```
+
+`ACL GETUSER` must now list **five** selectors. Verify with the 4c probe, adding
+these two lines, and expect `ALLOWED` then `NOPERM`:
+
+```python
+    ("XADD cmd:gamma_public (allowed)", lambda: r.xadd("cmd:gamma_public", {"probe": "1"})),
+    ("XRANGE cmd:gamma_public", lambda: r.xrange("cmd:gamma_public")),
+```
+
+Remove the probe entry afterwards with `XDEL`, as in 4c. Without this selector
+the public Gamma page still draws $SPX, SPY and QQQ, but no other symbol ever
+goes live.
+
 **What the quotes switch does once these are applied.** Settings →
 Configuration → **Show per-leg bid and ask** (`show_leg_quotes` in
 `config/finder_public.toml`) is read by the pages on every chain they land, so

@@ -1,0 +1,32 @@
+# The public Gamma page on live.neuralstrike.co (roadmap:
+# docs/plans/2026-09-21-public-gamma-any-symbol-roadmap.md).
+#
+# A visitor picks a symbol from the dropdown; options_svc keeps it LIVE (a "hot"
+# symbol, published every minute like $SPX, SPY and QQQ) until nobody is
+# watching it. Every value here is read by shared/public_gamma.py, per request,
+# so a saved change applies with no restart.
+#
+# A hot symbol costs no Schwab call: it is built from the chain the GEX
+# collector already fetched this minute, and the public page has no Term view.
+# Its cost is CPU and Redis writes on the 1-minute GEX branch, which already
+# overruns its minute a few times a day.
+#
+# The lease window is [windows.gamma_public] in config/sessions.toml.
+
+[hot]
+# Symbols kept live at once beyond $SPX, SPY and QQQ. 0 turns hot symbols off.
+# Each costs one snapshot build and about 4 MB of Redis writes a minute; set it
+# from tools/measure_gamma_public.py, not by feel.
+cap = 8
+# Minutes one request keeps a symbol live.
+lease_min = 15
+# Minutes a hot symbol's keys outlive its last update.
+keep_min = 30
+
+[page]
+# How often an open page renews its symbol. Keep it under lease_min.
+renew_min = 5
+
+[limits]
+# Seconds after which a queued request is dropped instead of answered.
+max_wait_sec = 120
