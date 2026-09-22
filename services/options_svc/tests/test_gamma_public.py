@@ -165,6 +165,32 @@ def test_the_page_can_read_its_own_outcome(bus, monkeypatch):
     assert last["AAPL"]["at"] == OPEN.isoformat()
 
 
+def test_a_repeated_refusal_is_restamped_for_the_page_that_asked(bus, monkeypatch):
+    """The page trusts only a record at least as new as its own request. A
+    second "closed" must carry the second request's time, or a page loaded
+    after hours reads the first as stale and says "live" (prod, 2026-09-21)."""
+    evening = OPEN.replace(hour=19)
+    later = evening + dt.timedelta(minutes=5)
+    for now in (evening, later):
+        monkeypatch.setattr(gp, "_now", lambda now=now: now)
+        gp.handle(bus, _cmd("SPY", now=now))
+    assert _status(bus)["last"]["SPY"] == {"outcome": "closed",
+                                           "at": later.isoformat()}
+
+
+def _status_version(bus):
+    return int(bus._r.get(f"{pg.STATUS_KEY}:ver") or 0)
+
+
+def test_only_a_renewal_after_a_renewal_writes_nothing(bus):
+    gp.handle(bus, _cmd("NVDA"))                     # added: written
+    after_add = _status_version(bus)
+    gp.handle(bus, _cmd("NVDA"))                     # live after added: written
+    assert _status_version(bus) == after_add + 1
+    gp.handle(bus, _cmd("NVDA"))                     # live after live: skipped
+    assert _status_version(bus) == after_add + 1
+
+
 def test_an_off_list_symbol_is_never_recorded(bus):
     gp.handle(bus, _cmd("NVDA"))
     gp.handle(bus, _cmd("ZZZZ"))

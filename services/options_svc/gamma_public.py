@@ -222,11 +222,16 @@ def handle(bus, command) -> None:
     if outcome != "invalid":
         # Recorded per dropdown symbol, so a page can word ITS request: "full"
         # and "closed" leave the hot set untouched and would otherwise be
-        # invisible. A renewal (live after live) changes nothing to write.
+        # invisible. Written with a FRESH stamp every time, not only when the
+        # outcome changes: the page trusts only a record at least as new as its
+        # own request, so a second "closed" left unwritten kept the first's
+        # stamp and the page fell back to "live" after hours (seen on prod,
+        # 2026-09-21 22:12). Only a renewal (live after live) is skipped - it
+        # is the frequent one, and it changes nothing a page words.
         with _LOCK:
             prev = (_LAST.get(symbol) or {}).get("outcome")
             _LAST[symbol] = {"outcome": outcome, "at": now.isoformat()}
-        changed = prev != outcome
+        changed = not (outcome == "live" and prev == "live")
     # Written when anything a page reads changed, and once when the view is
     # missing (a fresh start), so a page never waits on a status nobody wrote.
     if changed or outcome == "added" or not _status_exists(bus):
