@@ -13,6 +13,11 @@ published market report (``report_summary.report_stamp``) and republishes
 ``cache:market:summary`` only when the report was replaced. No Claude call —
 the change-driven Claude sentence this loop used to write was retired
 2026-09-16 in favour of the report's own highlights.
+
+Each newly published report is also handed to options_svc for X
+(``x_post_report`` on ``cmd:options``). A service restart re-enqueues the
+current report; options_svc's report-identity dedup and 45-minute age gate
+make that a no-op.
 """
 import asyncio
 import datetime as _dt
@@ -75,7 +80,14 @@ def refresh_summary(bus, last_stamp, reports_dir=None):
 
     A report that does not parse publishes nothing, so the last good summary
     stays, and its stamp IS remembered: the same bytes would fail the same way,
-    and re-reading them every 3 s would log a warning every 3 s."""
+    and re-reading them every 3 s would log a warning every 3 s.
+
+    Each newly published report is also handed to options_svc
+    (``x_post_report`` on ``cmd:options``, with latest.html's mtime) to post
+    to X. That hand-off is optional: a failed enqueue logs a warning and the
+    summary still stands. ``last_stamp`` starts at None on every service
+    start, so a restart re-enqueues the current report; options_svc's
+    report-identity dedup and 45-minute age gate make that a no-op."""
     kw = {} if reports_dir is None else {"reports_dir": reports_dir}
     stamp = report_summary.report_stamp(**kw)
     if stamp is None or stamp == last_stamp:
@@ -84,6 +96,12 @@ def refresh_summary(bus, last_stamp, reports_dir=None):
     if payload is None:
         return stamp
     handlers.publish_summary(bus, payload)
+    try:
+        mtime = (reports_dir or report_summary.REPORTS_DIR).joinpath("latest.html").stat().st_mtime
+        bus.enqueue_command("cmd:options", {"type": "x_post_report",
+                                            "args": {"report": payload, "mtime": mtime}})
+    except Exception:  # noqa: BLE001 -- the X post is optional; the summary is not
+        _log.warning("x report enqueue failed", exc_info=True)
     return stamp
 
 

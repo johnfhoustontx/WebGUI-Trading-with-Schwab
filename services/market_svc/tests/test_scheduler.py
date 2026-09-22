@@ -134,3 +134,53 @@ def test_poll_interval_throttles_deep_weekend():
     # Sunday evening after the futures reopen: back to the normal off-hours pace.
     sun_pm = dt.datetime(2026, 7, 19, 18, 0, tzinfo=sch._CT)
     assert sch.poll_interval(sun_pm) == sch.OFFHOURS_INTERVAL_SEC
+
+
+def _x_commands(bus):
+    """Every x_post_report command enqueued on cmd:options, decoded."""
+    from shared.contracts.envelope import Command
+    out = []
+    for _id, fields in bus._r.xrange("cmd:options"):
+        cmd = Command.from_json(fields["data"])
+        if cmd.type == "x_post_report":
+            out.append(cmd)
+    return out
+
+
+def test_a_new_report_is_handed_to_options_svc_for_x(tmp_path):
+    import os
+    from shared.bus import Bus
+    bus = Bus()
+    _write_report(tmp_path)
+    stamp = sch.refresh_summary(bus, None, reports_dir=tmp_path)
+    cmds = _x_commands(bus)
+    assert len(cmds) == 1
+    args = cmds[0].args
+    assert args["report"]["headline"] == "A rotation, not a rout"
+    assert isinstance(args["mtime"], float)
+    assert args["mtime"] == os.stat(tmp_path / "latest.html").st_mtime
+    # The same report, seen again, is not handed over twice.
+    assert sch.refresh_summary(bus, stamp, reports_dir=tmp_path) == stamp
+    assert len(_x_commands(bus)) == 1
+
+
+def test_an_unparseable_report_is_not_handed_to_x(tmp_path):
+    from shared.bus import Bus
+    bus = Bus()
+    _write_report(tmp_path, html="<html><body>half a page")
+    assert sch.refresh_summary(bus, None, reports_dir=tmp_path) is not None
+    assert _x_commands(bus) == []
+
+
+def test_an_x_enqueue_failure_still_publishes_the_summary(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    from services.market_svc import handlers
+    bus = Bus()
+    _write_report(tmp_path)
+
+    def boom(*a, **k):
+        raise RuntimeError("redis down")
+    monkeypatch.setattr(bus, "enqueue_command", boom)
+    stamp = sch.refresh_summary(bus, None, reports_dir=tmp_path)
+    assert stamp is not None
+    assert bus.cache_get(handlers.CACHE_SUMMARY).payload["headline"] == "A rotation, not a rout"
