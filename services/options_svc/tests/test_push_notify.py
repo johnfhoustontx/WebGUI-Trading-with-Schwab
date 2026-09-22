@@ -1277,12 +1277,17 @@ def test_nothing_but_x_post_talks_to_x():
     """Every X post goes through shared/notify/x_post.py."""
     import pathlib
     root = pathlib.Path(__file__).resolve().parents[3]
-    hits = []
+    hits, scanned = [], set()
     for base in ("services", "shared", "webgui", "tools"):
         for p in (root / base).rglob("*.py"):
-            if "tests" in p.parts or p.name == "x_post.py":
+            rel = p.relative_to(root).as_posix()
+            # Only the poster itself is exempt - by PATH, since the /x page shares
+            # its file name.
+            if "tests" in p.parts or rel == "shared/notify/x_post.py":
                 continue
+            scanned.add(rel)
             src = p.read_text(encoding="utf-8", errors="ignore")
             if "import tweepy" in src or "api.x.com" in src or "api.twitter.com" in src:
-                hits.append(str(p.relative_to(root)))
+                hits.append(rel)
     assert hits == []
+    assert "webgui/pages/x_post.py" in scanned
