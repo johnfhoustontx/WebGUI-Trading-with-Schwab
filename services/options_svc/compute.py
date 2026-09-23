@@ -753,9 +753,13 @@ def _scan_result(*, signals=None, view=None, filtered_out=0, vol_filtered=0,
                  not_shown=0, expiries_failed, spot, chain_missing=False,
                  no_expiries_in_range=False, needs_choice=False,
                  expiration_count=None, expirations_scanned=None, choices=None,
-                 expiry_choice=None):
+                 expiry_choice=None, credit_spreads=None):
     """The one shape every ``swing_scan`` return takes, early empties included,
-    so a key added for one path cannot be missing from another. Pure."""
+    so a key added for one path cannot be missing from another. Pure.
+
+    ``credit_spreads`` is :func:`credit_spread_summary` of the scan's credit-spread
+    pass, or None when that pass did not run (the families left it out, or the
+    scan ended before building anything)."""
     return {"signals": [] if signals is None else signals,
             "view": {} if view is None else view,
             "filtered_out": filtered_out, "vol_filtered": vol_filtered,
@@ -764,7 +768,55 @@ def _scan_result(*, signals=None, view=None, filtered_out=0, vol_filtered=0,
             "no_expiries_in_range": no_expiries_in_range,
             "needs_choice": needs_choice, "expiration_count": expiration_count,
             "expirations_scanned": expirations_scanned, "choices": choices,
-            "expiry_choice": expiry_choice}
+            "expiry_choice": expiry_choice, "credit_spreads": credit_spreads}
+
+
+# The width-search stages (scanner_engine.WIDTH_STAGES) and the strike-level
+# rejections, folded into the few reasons a reader can act on. Anything not named
+# here lands in "other", so a stage added to the engine is still counted.
+_CREDIT_REASONS = {
+    "credit_floor": "credit_floor",
+    "edge_floor": "edge_floor",
+    "em_fail": "outside_move",
+    "liq_fail_short": "illiquid",
+    "long_leg_illiquid": "illiquid",
+    "over_trade_cap": "over_cap",
+    "no_contracts": "over_cap",
+}
+
+
+def credit_spread_summary(funnel):
+    """The Strategy Finder's credit-spread reject tally, compact enough to publish.
+
+    ``funnel`` is the dict ``scanner_engine.screen_spreads`` filled. Returns
+    ``{"strikes", "built", "reasons"}``: short strikes inside the delta band, the
+    spreads a width was found for, and ``{reason: count}`` for the strikes that
+    produced nothing, with zero counts left out. None for a missing funnel. Pure.
+
+    These rejections happen BEFORE scoring, so neither ``filtered_out`` nor
+    ``vol_filtered`` can see them: without this an empty credit-spread list reads
+    as a bug rather than a decision.
+    """
+    if not isinstance(funnel, dict):
+        return None
+    reasons = {}
+
+    def add(key, n):
+        try:
+            n = int(n or 0)
+        except (TypeError, ValueError):
+            return
+        if n > 0:
+            name = _CREDIT_REASONS.get(key, "other")
+            reasons[name] = reasons.get(name, 0) + n
+
+    for key in ("em_fail", "liq_fail_short", "mark_fail", "delta_ceiling"):
+        add(key, funnel.get(key))
+    for key, n in dict(funnel.get("width_reasons") or {}).items():
+        add(key, n)
+    return {"strikes": int(funnel.get("delta_pass") or 0),
+            "built": int(funnel.get("width_found") or 0),
+            "reasons": reasons}
 
 
 class _FetchPlan(NamedTuple):
@@ -1099,7 +1151,11 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
     # Credit spreads feed BOTH the VERTICAL credit set AND the NEUTRAL iron condors,
     # so compute screen_spreads if EITHER family is requested.
     spreads = []
+    credit_funnel = None
     if {"VERTICAL", "NEUTRAL"} & fams:
+        import config_paper
+
+        credit_funnel = {}
         spreads = list(se.screen_spreads(chain, symbol, dte_min, hi, put_d_min,
                                          put_d_max, call_d_min, call_d_max,
                                          min_cr_fraction, trade_type, spot=spot,
@@ -1108,7 +1164,14 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                                          # flag mode the tag is added below.
                                          earnings_date=(earnings_date
                                                         if earnings_mode == "drop"
-                                                        else None)))
+                                                        else None),
+                                         # Both callers (the Strategy Finder and
+                                         # the Income Window) book into the Paper
+                                         # LEDGER, so the width search sizes
+                                         # against that book's cap - read at call
+                                         # time - not the Account's default.
+                                         max_risk_dollars=config_paper.LEDGER_MAX_RISK_PER_TRADE,
+                                         funnel=credit_funnel))
     if every_expiry:
         signals = _build_every_expiry(ssn, chain, symbol, spot, atm_iv, dte_min, hi,
                                       fams, bands, spreads)
@@ -1270,7 +1333,9 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         _attach_payoff_curves(ssn, signals, spot, atm_iv)
     result = _scan_result(signals=signals, view=view, filtered_out=filtered_out,
                           vol_filtered=vol_filtered, not_shown=not_shown,
-                          expiries_failed=expiries_failed, spot=spot, **plan.answer())
+                          expiries_failed=expiries_failed, spot=spot,
+                          credit_spreads=credit_spread_summary(credit_funnel),
+                          **plan.answer())
     if return_chain:
         # Handed back IN MEMORY so a second screen over the SAME symbol (the
         # covered-call one, see publish_income) can reuse this chain instead of

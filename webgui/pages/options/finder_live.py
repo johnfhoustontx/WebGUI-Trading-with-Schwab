@@ -234,6 +234,11 @@ def render():
             stamp = scanned_at_text(payload)
             counts = facts["counts"] + (f" · {stamp}" if stamp else "")
             ui.label(counts).classes(f"text-sm {MUTED} ml-auto")
+            # Credit spreads are refused before scoring, so the counts above
+            # cannot say why none appear; this line does. Its own row (w-full).
+            note = fv.credit_spread_note(payload)
+            if note:
+                ui.label(note).classes(f"w-full text-xs {MUTED}")
 
     @guard
     def _on_chip(code):

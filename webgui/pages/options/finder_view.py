@@ -702,6 +702,58 @@ def summary_facts(payload):
             "can_change": can_change}
 
 
+# The credit-spread reasons the service publishes (compute.credit_spread_summary),
+# in the reader's words. An unknown key still counts, as "other reasons".
+_CREDIT_REASON_WORDS = {
+    "credit_floor": "credit below the minimum",
+    "edge_floor": "credit too small for the short strike's delta",
+    "outside_move": "outside the expected-move window",
+    "illiquid": "not liquid enough",
+    "over_cap": "one contract over the per-trade loss cap",
+    "other": "other reasons",
+}
+_CREDIT_TYPES = ("PCS", "CCS", "IC")
+
+
+def credit_spread_note(payload):
+    """Why the list holds no credit spreads, or None when there is nothing to say.
+
+    Credit spreads (and the iron condors built from them) are rejected BEFORE
+    scoring - by the minimum credit, the edge floor, the expected-move window,
+    liquidity and the per-trade cap - so the quality-bar and too-cheap counts can
+    never report them, and an empty credit list read as a bug. The service
+    publishes the tally as ``credit_spreads``; this words it.
+
+    None when: no tally (a payload from before the field, a failed scan, or a scan
+    whose families left credit spreads out), the list already shows one, or the
+    answer is the large-chain chooser. Reasons are listed largest first.
+    """
+    p = payload or {}
+    tally = p.get("credit_spreads")
+    if not isinstance(tally, dict) or p.get("error") or chooser_facts(p) is not None:
+        return None
+    if any((s or {}).get("type") in _CREDIT_TYPES for s in (p.get("signals") or [])):
+        return None
+    strikes = _whole_count(tally.get("strikes"))
+    built = _whole_count(tally.get("built"))
+    if strikes is None or built is None:
+        return None
+    if strikes == 0:
+        return "Credit spreads: no short strike sits in the delta band."
+    if built:
+        n = f"{built:,} credit spread" + ("" if built == 1 else "s")
+        return f"Credit spreads: {n} built, none cleared the volatility floor or quality bar."
+    reasons = []
+    raw = tally.get("reasons") if isinstance(tally.get("reasons"), dict) else {}
+    for key, count in sorted(raw.items(), key=lambda kv: -(_whole_count(kv[1]) or 0)):
+        n = _whole_count(count)
+        if n:
+            reasons.append(f"{n:,} {_CREDIT_REASON_WORDS.get(key, 'other reasons')}")
+    head = (f"Credit spreads: none of {strikes:,} short strike"
+            f"{'' if strikes == 1 else 's'} in the delta band made a spread")
+    return f"{head} — {', '.join(reasons)}." if reasons else f"{head}."
+
+
 # The head of the "Scanned N of M · <choice>" part - shared by the builder and
 # only_clear_counts, which must keep that part last.
 SCANNED_HEAD = "Scanned "

@@ -104,7 +104,10 @@ def income_seams(monkeypatch):
                                put_d=(put_d_min, put_d_max),
                                call_d=(call_d_min, call_d_max),
                                min_cr=min_cr, spot=spot,
-                               earnings_date=earnings_date)
+                               earnings_date=earnings_date, kw=kw)
+        if isinstance(kw.get("funnel"), dict):
+            kw["funnel"].update({"delta_pass": 9, "width_found": 2, "em_fail": 1,
+                                 "width_reasons": {"edge_floor": 4, "credit_floor": 2}})
         common = {"symbol": symbol, "expiration": _EXP, "underlying_price": 540.0}
         # BOTH sides, so the two-sidedness assertion is real rather than a
         # statement about a one-sided stub.

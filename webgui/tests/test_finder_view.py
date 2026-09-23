@@ -1,6 +1,8 @@
 """Pure view model for the redesigned Strategy Finder (``finder_view.py``)."""
 import datetime
 
+import pytest
+
 from pages.options import finder_view as fv
 
 
@@ -1264,3 +1266,54 @@ def test_only_clear_counts_under_a_chip_count_the_chosen_strategies_not_the_scan
         "40 ideas · 2 below the quality bar · 3 of the 20 in the chosen strategies shown · "
         "17 hidden by Only clear")
     assert fv.only_clear_counts(base, 20, 20, filtering=True, chip_filtered=True) == base
+
+
+# ── credit_spread_note: why the list holds no credit spreads ─────────────────
+
+def _credit(tally, signals=(), **extra):
+    return {"symbol": "SPY", "signals": list(signals), "credit_spreads": tally, **extra}
+
+
+def test_credit_note_names_every_reason_largest_first():
+    tally = {"strikes": 209, "built": 0,
+             "reasons": {"outside_move": 49, "credit_floor": 82, "edge_floor": 63,
+                         "illiquid": 15}}
+    assert fv.credit_spread_note(_credit(tally)) == (
+        "Credit spreads: none of 209 short strikes in the delta band made a spread"
+        " — 82 credit below the minimum, 63 credit too small for the short strike's"
+        " delta, 49 outside the expected-move window, 15 not liquid enough.")
+
+
+def test_credit_note_is_silent_when_the_list_already_shows_one():
+    tally = {"strikes": 9, "built": 0, "reasons": {"edge_floor": 9}}
+    for kind in ("PCS", "CCS", "IC"):
+        assert fv.credit_spread_note(_credit(tally, [{"type": kind}])) is None
+    # A non-credit row does not silence it.
+    assert fv.credit_spread_note(_credit(tally, [{"type": "LONG_CALL"}])) is not None
+
+
+def test_credit_note_when_no_strike_sits_in_the_band():
+    assert fv.credit_spread_note(_credit({"strikes": 0, "built": 0, "reasons": {}})) == \
+        "Credit spreads: no short strike sits in the delta band."
+
+
+def test_credit_note_when_spreads_were_built_but_later_cut():
+    assert fv.credit_spread_note(_credit({"strikes": 5, "built": 1, "reasons": {}})) == \
+        "Credit spreads: 1 credit spread built, none cleared the volatility floor or quality bar."
+
+
+def test_an_unknown_reason_is_still_counted_and_zero_counts_dropped():
+    note = fv.credit_spread_note(_credit({"strikes": 4, "built": 0,
+                                          "reasons": {"new_stage": 3, "edge_floor": 0}}))
+    assert note.endswith("— 3 other reasons.")
+
+
+@pytest.mark.parametrize("payload", [
+    {"symbol": "SPY", "signals": []},                                   # no field
+    _credit(None),
+    _credit("junk"),
+    _credit({"strikes": "lots", "built": 0}),                           # unread count
+    _credit({"strikes": 3, "built": 0, "reasons": {}}, error="TypeError"),
+])
+def test_credit_note_says_nothing_it_did_not_read(payload):
+    assert fv.credit_spread_note(payload) is None

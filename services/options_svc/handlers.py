@@ -957,6 +957,9 @@ def finder_payload(bus, params: dict, *, echo_args, ask_if_large: bool,
                "expirations_scanned": result.get("expirations_scanned"),
                "choices": result.get("choices"),
                "expiry_choice": result.get("expiry_choice"),
+               # Why credit spreads were not built: rejections BEFORE scoring,
+               # which filtered_out and vol_filtered cannot see. Counts only.
+               "credit_spreads": result.get("credit_spreads"),
                "symbol": params["symbol"], "params": echo_args}
     if result.get("error"):
         payload["error"] = result["error"]

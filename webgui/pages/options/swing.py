@@ -895,6 +895,11 @@ def render(public=False):
                 kit.button("Change", kind="quiet",
                            on_click=lambda: _reopen_chooser()) \
                     .props('aria-label="Change which expirations to scan"')
+            # Credit spreads are refused before scoring, so the counts above
+            # cannot say why none appear; this line does. Its own row (w-full).
+            note = fv.credit_spread_note(payload)
+            if note:
+                ui.label(note).classes(f"w-full text-xs {MUTED}")
 
     def _change_facts(payload):
         """The chooser card an applied choice can reopen: the answer's own

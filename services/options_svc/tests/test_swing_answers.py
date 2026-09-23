@@ -170,3 +170,25 @@ def test_a_raising_scan_is_recorded_as_a_degrade_with_its_traceback(monkeypatch,
     records = [r for r in caplog.records if "options.swing_scan" in r.getMessage()]
     assert records and records[-1].levelno == logging.WARNING
     assert records[-1].exc_info and records[-1].exc_info[0] is TypeError
+
+
+def test_the_handler_publishes_the_credit_spread_tally(monkeypatch):
+    tally = {"strikes": 209, "built": 0, "reasons": {"edge_floor": 63}}
+    monkeypatch.setattr(compute, "scan_earnings", lambda s: ("not_listed", None))
+    monkeypatch.setattr(compute, "swing_scan", lambda **k: {
+        "signals": [], "view": {}, "spot": 1.0, "expiries_failed": 0,
+        "credit_spreads": tally})
+    bus = Bus(fake=True)
+    handlers.swing_scan(bus, {"symbol": "SPY"})
+    assert bus.cache_get(handlers.CACHE_SWING).payload["credit_spreads"] == tally
+
+
+def test_a_failed_scan_publishes_no_credit_spread_tally(monkeypatch):
+    monkeypatch.setattr(compute, "scan_earnings", lambda s: ("not_listed", None))
+
+    def boom(**k):
+        raise TypeError("x")
+    monkeypatch.setattr(compute, "swing_scan", boom)
+    bus = Bus(fake=True)
+    handlers.swing_scan(bus, {"symbol": "SPY"})
+    assert bus.cache_get(handlers.CACHE_SWING).payload["credit_spreads"] is None

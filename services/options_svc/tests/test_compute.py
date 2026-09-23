@@ -167,7 +167,8 @@ def test_swing_scan_multistrategy_pipeline(monkeypatch, unfiltered_swing):
     # function it doubles breaks on every future thread-through.
     def _screen(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                 call_d_min, call_d_max, min_cr, kind, spot=None,
-                daily_expected_move=None, earnings_date=None):
+                daily_expected_move=None, earnings_date=None,
+                max_risk_dollars=None, funnel=None):
         calls["screen"] = dict(min_cr=min_cr, kind=kind, spot=spot,
                                dem=daily_expected_move,
                                earnings_date=earnings_date)
