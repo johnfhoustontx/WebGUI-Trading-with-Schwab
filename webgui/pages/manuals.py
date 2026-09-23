@@ -23,7 +23,7 @@ MANUALS = {
     "user-guide": {
         "title": "User Guide",
         "desc": "How to operate every page of the app — scanning, paper trading, "
-                "sentiment, portfolio, the driver, reports, and troubleshooting.",
+                "sentiment, portfolio, reports, and troubleshooting.",
         "icon": "menu_book",
         "file": "user-guide/user-guide.html",
     },

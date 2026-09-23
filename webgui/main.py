@@ -222,7 +222,7 @@ def explain_html(payload):
 # get this wrong.
 #
 # ⚠ No ``domain=``. A ``Domain=neuralstrike.co`` cookie is sent to that host and
-# EVERY subdomain, so the session that arms the trading driver would travel to
+# EVERY subdomain, so the owner's session would travel to
 # the public marketing page and its third-party YouTube and Discord embeds on
 # every page view. Host-only is what makes the separate hostname a boundary at
 # all; ``set_cookie`` omits the attribute when ``domain`` is None, and a test
@@ -260,8 +260,8 @@ def _client_ip(request: Request) -> str:
     arrives from 127.0.0.1, so keying the per-client lockout on the peer would
     file the whole internet under one address -- and the per-client penalty
     ramps to 900 s where the global one is deliberately 60 s. Any bot spraying
-    the advertised hostname would lock the owner out of the UI that arms the
-    driver and stops the stack, which is exactly the denial of service the
+    the advertised hostname would lock the owner out of the UI that trades the
+    paper books and stops the stack, which is exactly the denial of service the
     design's short global penalty exists to avoid.
 
     So when -- and only when -- the request carries ``X-Edge``, the LAST entry
@@ -656,7 +656,6 @@ FLAT_NAV = [
     # step you tab into from the Scanner.
     ("/options/swing", "Strategy Finder", "swap_vert"),
     ("/portfolio", "Portfolio", "account_balance"),
-    ("/driver", "Claude Trades", "smart_toy"),
 ]
 
 # "More" is a menu GROUP for reports / documentation. Its tab strip is
@@ -776,7 +775,6 @@ NAV_SECTIONS = [
         _sec_group("Options"),
         _sec_page("/options/swing"),      # Strategy Finder
         _sec_group("Trade Analyzer"),
-        _sec_page("/driver"),             # Claude Trades
     ]),
     ("ACCOUNT", [
         _sec_page("/portfolio"),
@@ -951,7 +949,6 @@ _TAB_COLOR = {
     "/market": "#00bfa5",                # Market Dashboard — teal-green
     "/trade": "#26c6da",                 # Trade — cyan
     "/portfolio": "#9ccc65",             # Portfolio — light green
-    "/driver": "#ff7043",                # Driver — deep orange
     "/eod": "#78909c",                   # EOD Report — blue grey
     "/x": "#1d9bf0",                     # Post to X — X blue
     "/status": "#d4e157",                # System Status — lime
@@ -985,7 +982,7 @@ def _favicon_ink(color: str) -> str:
     actually contrasts more, measured, not guessed.
 
     ⚠ THIS WAS A LUMINANCE THRESHOLD AND THE THRESHOLD WAS WRONG. At `> 140` the
-    route palette had two failures — `/driver` `#ff7043` at 2.50:1 and
+    route palette had two failures — `/driver` (since removed) `#ff7043` at 2.50:1 and
     `/options/portfolio` `#26a69a` at 2.73:1, both mid-tones handed the light ink
     when the dark one read better. Retuning to 110 fixed those two and would have
     stayed right only until the next route was added: a threshold encodes a guess
@@ -1114,16 +1111,10 @@ _STATUS_CARD: dict = {"tone": "unknown", "title": "Data feed unknown",
                       "detail": "no probe yet", "count": 0}
 _status_refs: dict = {}
 
-# Static, non-numeric badges on rail items (route -> short label). Distinct from
-# _NAV_BADGES, which is live watcher state: these never change, so they are not
-# registered for the 2s tick to update.
-_NAV_PILLS = {"/driver": "AI"}
-
-
 # ── Health / staleness surfacing (R4b / R8) ──────────────────────────────────
 # Representative SCHEDULED cache views (mirrors the scheduled rows of
 # status.py:_FRESHNESS) — a view older than alerts.STALE_AFTER_SEC means the
-# owning service is up-but-wedged (or gone). On-demand views (trade/driver) are
+# owning service is up-but-wedged (or gone). On-demand views (trade) are
 # excluded: they're expected to be old.
 _HEALTH_VIEWS = [
     "sentiment:composite",
@@ -1424,10 +1415,6 @@ _NAV_CSS = """
    text-[#ff8f92] on the link cannot win against an !important. */
 .nav-drawer .nav-danger .nav-icon,
 .nav-drawer .nav-danger .nav-label { color: #ff8f92 !important; }
-/* The static AI pill, for the third instance of the same problem: on the ACTIVE
-   row, `.nav-drawer .nav-active .nav-label` (3 classes) beat the pill's 1-class
-   Tailwind colour, so the pill turned white on exactly the one row it is on. */
-.nav-drawer .nav-pill { color: #4da3ff !important; }
 /* Compact tab strip (the sub-menu tabs under the header): Deep Slate PILL tabs in
    a raised rounded container — no folder baseline. The active pill is a soft navy
    tint; inactive are plain. Quasar-internal (q-tab). */
@@ -1775,21 +1762,9 @@ def _nav_link(path: str, label: str, icon: str, active: str) -> None:
         with ui.row().classes("items-center gap-3 w-full no-wrap"):
             rail_dot = _nav_icon(icon, n)
             ui.label(label).classes("nav-label")
-            pill = _NAV_PILLS.get(path)
-            if pill:
-                # A fixed marker (e.g. "AI"), not watcher state — so it is built
-                # once and never registered for the tick. .nav-label rides the
-                # existing fade, which is what keeps it out of the 68px rail;
-                # .nav-pill carries the colour, because .nav-label's own active
-                # rule would otherwise repaint it white on the active row.
-                ui.label(pill).classes(
-                    "nav-label nav-pill ml-auto font-mono text-[10px] "
-                    "leading-none px-[6px] py-[2px] rounded-[5px] "
-                    "bg-[#4da3ff]/[0.14]")
             # ml-auto pushes the open-state dot to the row's right edge, clear of
             # the label — mt-[1px] centres it optically against the cap height.
-            open_dot = _alert_dot(n, rail=False).classes(
-                "ml-auto mt-[1px]" if not pill else "")
+            open_dot = _alert_dot(n, rail=False).classes("ml-auto mt-[1px]")
             _alert_refs[path] = (rail_dot, open_dot)
 
 
@@ -2475,13 +2450,6 @@ def portfolio_page() -> None:
     with _layout("/portfolio", "Portfolio"):
         from pages import portfolio
         portfolio.render()
-
-
-@_page("/driver")
-def driver_page() -> None:
-    with _layout("/driver", "Claude Trades"):
-        from pages import driver
-        driver.render()
 
 
 @_page("/eod")

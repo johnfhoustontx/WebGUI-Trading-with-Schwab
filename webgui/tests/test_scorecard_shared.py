@@ -2,10 +2,8 @@
 
 Design: docs/plans/2026-09-12-manual-scorecard-design.md.
 
-Two pages draw the same scorecard now — Claude Trades and Paper Account — so the
-PURE builders moved out of ``pages/driver.py`` into ``pages/scorecard.py``. The
-manual book is the one that trades every captured signal, and it had no track
-record on screen at all.
+The formatters live in ``pages/scorecard.py``. The manual book is the one that
+trades every captured signal, and it had no track record on screen at all.
 
 ⚠ `by_exit_reason` is the new axis, and it is not decoration: replaying the
 profit-lock ladder turned up that `MANUAL_CLOSE` accounts for **+$50,102** of the
@@ -15,7 +13,7 @@ strategy, that is invisible; split by how a trade ENDED, it is the first row.
 """
 import pytest
 
-from pages import driver, scorecard
+from pages import scorecard
 
 
 def _perf():
@@ -35,94 +33,7 @@ def _perf():
     }
 
 
-# ── the move kept the driver page working ───────────────────────────────────
-
-def test_the_driver_page_still_exposes_every_builder():
-    """Imported by NAME, so ``driver.<fn>`` resolves for the page body and the 25
-    existing assertions in test_driver_monitor.py."""
-    for name in ("scorecard_headline_chips", "scorecard_quality_chips",
-                 "scorecard_symbol_rows", "scorecard_strategy_rows",
-                 "best_worst_text", "pnl_color", "pnl_class"):
-        assert getattr(driver, name) is getattr(scorecard, name), name
-
-
-def test_the_palette_moved_VERBATIM():
-    """⚠ The one thing a shared module can quietly break. These are the driver
-    page's own hexes, not the Simulator's payoff green/red."""
-    assert (scorecard.PNL_GREEN, scorecard.PNL_RED, scorecard.PNL_NEUTRAL) == \
-        ("#66bb6a", "#ef5350", "#bdbdbd")
-    assert driver.PNL_GREEN == scorecard.PNL_GREEN
-
-
-def test_the_driver_page_no_longer_DEFINES_the_builders():
-    """A second definition would shadow the import and diverge silently — which is
-    exactly what a stray ``PNL_GREEN = ...`` did on the first attempt at this.
-
-    ⚠ Re-aimed 2026-09-20, not weakened. This read ``inspect.getsource(driver)``
-    for three exact spellings — ``"def pnl_color("``, ``"PNL_GREEN, PNL_RED,
-    PNL_NEUTRAL ="`` — so it pinned a FORMATTING rather than the fact: a single
-    ``PNL_GREEN = "#66bb6a"`` on its own line, which is the stray that actually
-    happened, walked straight past all three. It reads the module-level BINDINGS
-    out of the tree now, so any assignment, ``def`` or ``class`` that shadows one
-    of these names fails however it is written. Imports are excluded — binding
-    them by importing them is the whole point.
-    """
-    import ast
-    import inspect
-
-    bound = set()
-    for node in ast.parse(inspect.getsource(driver)).body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            bound.add(node.name)
-        elif isinstance(node, ast.Assign):
-            for target in node.targets:
-                items = (target.elts if isinstance(target, (ast.Tuple, ast.List))
-                         else [target])
-                bound |= {t.id for t in items if isinstance(t, ast.Name)}
-        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
-            if isinstance(node.target, ast.Name):
-                bound.add(node.target.id)
-    for name in ("PNL_GREEN", "PNL_RED", "PNL_NEUTRAL", "pnl_color", "pnl_class",
-                 "best_worst_text", "scorecard_headline_chips",
-                 "scorecard_quality_chips", "scorecard_symbol_rows",
-                 "scorecard_strategy_rows", "scorecard_exit_reason_rows"):
-        assert name not in bound, \
-            f"driver.py defines {name} itself — it must only import it"
-
-
-# ── the new exit-reason axis ────────────────────────────────────────────────
-
-def test_exit_reason_rows_render_like_the_other_breakdowns():
-    rows = scorecard.scorecard_exit_reason_rows(_perf())
-    assert [r["exit_reason"] for r in rows] == ["MANUAL_CLOSE", "MONEY_STOP"]
-    assert rows[0]["pnl"] == "+$500.00"
-    assert rows[1]["pnl"] == "-$80.00"
-    assert rows[0]["win_rate"] == "100.0%"
-
-
-def test_exit_reason_rows_are_empty_when_the_payload_predates_the_field():
-    """Redis persists these views across a restart, and the driver's scorecard is
-    read from a cache that may have been written before this field existed."""
-    p = _perf()
-    p.pop("by_exit_reason")
-    assert scorecard.scorecard_exit_reason_rows(p) == []
-    assert scorecard.scorecard_exit_reason_rows({}) == []
-    assert scorecard.scorecard_exit_reason_rows(None) == []
-
-
-def test_a_missing_exit_reason_renders_as_a_question_mark_not_blank():
-    rows = scorecard.scorecard_exit_reason_rows(
-        {"by_exit_reason": [{"trades": 1, "pnl": 5.0, "win_rate": 1.0}]})
-    assert rows[0]["exit_reason"] == "?"
-
-
 # ── the formatters ──────────────────────────────────────────────────────────
-
-def test_zero_and_unknown_pnl_are_neither_green_nor_red():
-    """A fresh account must read as flat, not as a loss."""
-    for v in (0, 0.0, None, "x", [], True):
-        assert scorecard.pnl_color(v) == scorecard.PNL_NEUTRAL, v
-
 
 def test_money_renders_an_explicit_sign_except_at_zero():
     assert scorecard.money(120.5) == "+$120.50"
@@ -131,26 +42,11 @@ def test_money_renders_an_explicit_sign_except_at_zero():
     assert scorecard.money(None) == "$0.00"
 
 
-def test_a_profit_factor_of_None_is_an_em_dash_not_zero():
-    """None means "no losses yet"; 0.00 would read as "no edge"."""
-    chips = dict(scorecard.scorecard_quality_chips({**_perf(), "profit_factor": None}))
-    assert chips["Profit factor"] == "—"
-
-
-def test_best_worst_is_empty_when_nothing_has_closed():
-    assert scorecard.best_worst_text({"total_trades": 2}) == ""
-
-
-def test_best_worst_reads_both_ends():
-    assert scorecard.best_worst_text(_perf()) == \
-        "Best MU +$300.00 · Worst ORCL -$80.00"
-
-
 # ── the Paper Account page's own scorecard (C5) ─────────────────────────────
 
 def test_the_paper_account_page_builds_a_scorecard_line():
     """A one-line summary the page can render above the tables, from the SAME
-    scorecard dict the driver page draws. Its subject is the manual book, which
+    scorecard dict ``book_perf`` builds. Its subject is the manual book, which
     had no track record on screen at all."""
     from pages.options import portfolio
     line = portfolio.scorecard_text(_perf())

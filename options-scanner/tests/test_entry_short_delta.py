@@ -142,8 +142,8 @@ def test_a_signal_with_no_delta_records_nothing_rather_than_zero(tmp_path):
 def test_the_manage_cycle_hands_the_entry_delta_to_the_rule_engine(tmp_path, monkeypatch):
     """The discriminating test. ``entry_short_delta`` was already threaded into
     the ctx - but only inside the LIFECYCLE branch, and lifecycle is off by
-    default for the manual book and always off for the driver. So the column
-    alone would have changed nothing for either book that actually trades."""
+    default for the manual book. So the column alone would have changed
+    nothing for the book that actually trades."""
     db = _account(tmp_path)
     pe.run_entry_cycle(None, _TODAY, [_sig(entry_short_delta=0.22)],
                        _FakeBroker(0.40), db)

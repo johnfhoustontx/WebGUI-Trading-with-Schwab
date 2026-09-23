@@ -17,7 +17,6 @@ owns_proxy = true
 allow_claude = true
 allow_notifications = true
 schedulers = true
-autonomous_trading = true
 
 [dev]
 port_offset = 1000
@@ -27,7 +26,6 @@ owns_proxy = false
 allow_claude = false
 allow_notifications = false
 schedulers = false
-autonomous_trading = false
 """
 
 
@@ -171,7 +169,7 @@ def test_pytest_forces_suppression_but_keeps_prod_ports(tmp_path):
     assert flags["allow_claude"] is False
     assert flags["allow_notifications"] is False
     assert flags["schedulers"] is False
-    assert flags["autonomous_trading"] is False
+    assert "autonomous_trading" not in flags   # removed with the driver, 2026-09-22
 
 
 def test_pytest_detection_is_the_default(tmp_path):
@@ -200,7 +198,7 @@ def test_port_derivation_prod():
     Note what this does and does not establish: the table here is synthetic, so
     this pins the transform, not the shipped numbers. Byte-identity of the exported
     constants against the pre-environment repo is guarded by
-    tests/test_repo_paths_ports.py, which asserts the literal 8210-8214 and a
+    tests/test_repo_paths_ports.py, which asserts the literal 8210-8213 and a
     MEMURAI_URL ending "/0".
     """
     ports = {"proxy": 8100, "nicegui": 8500, "nicegui_live": 8501, "memurai": 6379,
@@ -338,8 +336,7 @@ def test_shipped_dev_profile_suppresses_and_offsets():
     """The shipped file's VALUES, not just its shape: dev must emit nothing and
     move off prod's ports, prod must stay fully permissive."""
     profiles = _shipped_profiles()
-    emitting = ("allow_claude", "allow_notifications", "schedulers",
-                "autonomous_trading")
+    emitting = ("allow_claude", "allow_notifications", "schedulers")
     assert all(profiles["prod"][k] is True for k in emitting)
     assert not any(profiles["dev"][k] for k in emitting)
     assert profiles["dev"]["port_offset"] > 0

@@ -14,7 +14,7 @@ def _iso(seconds_ago):
 def test_component_targets_covers_every_tier():
     keys = [t["key"] for t in status.component_targets()]
     for expected in ("memurai", "proxy", "sentiment", "options", "portfolio",
-                     "trade", "driver", "market", "webgui"):
+                     "trade", "market", "webgui"):
         assert expected in keys, f"{expected} missing from {keys}"
 
 
@@ -284,11 +284,12 @@ def test_everything_else_stays_restartable_in_prod(monkeypatch):
     restartable = {t["key"] for t in status.component_targets()
                    if status.restart_spec(t) is not None}
     assert restartable == {"proxy", "sentiment", "options", "portfolio",
-                           "trade", "driver", "market", "webgui", "webgui_live"}
+                           "trade", "market", "webgui", "webgui_live"}
+    assert "driver" not in {t["key"] for t in status.component_targets()}
 
 
 def test_dev_can_still_restart_everything_it_owns(monkeypatch):
-    # The guards must not over-fire. Dev owns its six services (offset ports)
+    # The guards must not over-fire. Dev owns its five services (offset ports)
     # and its own web GUI; leaving an operator unable to restart ANYTHING would
     # be a worse outcome than the cross-environment hazard being fixed.
     monkeypatch.setattr(status, "IS_DEV", True)
@@ -301,7 +302,7 @@ def test_dev_can_still_restart_everything_it_owns(monkeypatch):
     # screens share nothing: dev binds its own offset port and runs its own
     # process, so this button reaches only this checkout.
     assert restartable == {"sentiment", "options", "portfolio", "trade",
-                           "driver", "market", "webgui", "webgui_live"}
+                           "market", "webgui", "webgui_live"}
 
 
 # --- restart_command ----------------------------------------------------------
@@ -1085,7 +1086,7 @@ def test_the_market_hours_warning_is_the_configuration_tabs_own_predicate():
 
 def test_a_restart_asks_before_it_bounces_anything(monkeypatch):
     """Every destructive action confirms. Nothing pinned that a Restart did
-    NOT, so adding this breaks nothing — and nine of eleven cards carry one."""
+    NOT, so adding this breaks nothing — and eight of ten cards carry one."""
     spawned = []
     host = _render_status(monkeypatch, results=_ONE_SERVICE)
     _run_timer(host, "_refresh")

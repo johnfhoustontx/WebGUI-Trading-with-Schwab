@@ -39,13 +39,6 @@ FLOW_ALERTS_TOML = REPO_ROOT / "config" / "flow_alerts.toml"
 # to change a window.
 SESSIONS_TOML = REPO_ROOT / "config" / "sessions.toml"
 
-# The autonomous driver's risk envelope (daily target band, per-trade + daily risk
-# caps, VIX ceiling, loss halt). Read by shared/driver_limits.py, which BOTH
-# driver_svc.settings and options_svc.compute use - they cannot import each other,
-# and the per-trade cap has to agree on both sides or the driver approves a size
-# the paper sizer then zeroes. Edit + restart both services.
-DRIVER_TOML = REPO_ROOT / "config" / "driver.toml"
-
 # The two paper books' per-trade loss caps: the automatic Account's (which also
 # sizes the scanner's width search) and the Paper Ledger's (what the Paper button
 # books into). Read by shared/paper_limits.py through options-scanner/
@@ -101,11 +94,6 @@ TOOLS_PUBLIC_TOML = REPO_ROOT / "config" / "tools_public.toml"
 # deploy/caddy/generate_caddyfile.py only; a change needs the Caddyfile
 # regenerated and Caddy reloaded, as root.
 EDGE_TOML = REPO_ROOT / "config" / "edge.toml"
-
-# Dedicated paper-account DB for the autonomous Driver — a SEPARATE file from the
-# manual paper_account.db so the driver's book is fully isolated (zero schema change;
-# every paper_account_db/paper_engine fn already takes db_path).
-DRIVER_PAPER_DB = OPTIONS_SCANNER / "data" / "paper_account_driver.db"
 
 # History of Gamma Analyze briefings (the 4×/day Auto briefings + ad-hoc/manual runs).
 # Stores the STRUCTURED analysis payload (the source of truth) per (date, slot); the
@@ -164,7 +152,7 @@ IV_HISTORY_DB = TRADE_SVC_DATA / "iv_history.db"
 # historical output is unrecoverable after the fact (artifact, cross-section and
 # gates all move), so this is written from Phase 1 onward.
 REC_JOURNAL_DB = TRADE_SVC_DATA / "rec_journal.db"
-# The model's own paper book (Phase 6) - isolated from the driver's.
+# The model's own paper book (Phase 6) - isolated from the other paper books.
 MODEL_BOOK_DB = TRADE_SVC_DATA / "model_book.db"
 
 # Point-in-time fundamentals. Live-parsed ratios describe TODAY, so validating
@@ -207,7 +195,6 @@ _ENV_DEFAULTS = {
     "allow_claude": True,
     "allow_notifications": True,
     "schedulers": True,
-    "autonomous_trading": True,
 }
 
 
@@ -325,7 +312,7 @@ def _resolve_env(root, under_pytest=None):
         flags.update(port_offset=0, proxy_port=None, redis_db=0, owns_proxy=True,
                      proxy_host="127.0.0.1",
                      allow_claude=False, allow_notifications=False,
-                     schedulers=False, autonomous_trading=False)
+                     schedulers=False)
     return name, flags, peer
 
 

@@ -16,7 +16,7 @@ DEFAULTS = {"risk": {"cap": 100.0, "halt": 50.0}, "enabled": True}
 @pytest.fixture
 def files(tmp_path, monkeypatch):
     monkeypatch.setenv("TRADING_CONFIG_OVERRIDES_IN_TESTS", "1")
-    base = tmp_path / "driver.toml"
+    base = tmp_path / "paper.toml"
     base.write_text("[risk]\ncap = 200.0\n", encoding="utf-8")
     return base
 

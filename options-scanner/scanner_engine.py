@@ -51,23 +51,22 @@ log = logging.getLogger("scanner")
 # Round-trip Schwab commission (config/commissions.toml) folded into ADDITIVE
 # net-of-fee economics on each signal. The gross credit/max_loss/rr_pct stay
 # untouched (they feed the tuned composite score + sort + paper BP sizing +
-# webgui display); the autonomous driver's model menu reads the net_* fields so
-# its perceived edge is net-of-commission. See the 2026-07-01 calc-accuracy
-# remediation in the root CLAUDE.md.
+# webgui display); the net_* fields beside them carry the net-of-commission
+# edge. See the 2026-07-01 calc-accuracy remediation in the root CLAUDE.md.
 from commissions import round_trip_commission
 import config_paper as _config_paper
 
 # Per-trade risk budget the WIDTH SEARCH sizes against (gap assessment A6).
 #
 # ⚠ It defaulted to a phantom $100,000 account at 5% - a $5,000 budget - while the
-# manual paper book caps one trade at $250, so the E[PnL] race was decided for a
-# book 20x the real one and routinely picked a width whose single contract the
+# manual paper book capped one trade at $250, so the E[PnL] race was decided for
+# a book 20x the real one and routinely picked a width whose single contract the
 # engine then refused. Measured on the live book 2026-09-11: 169 of 773 paper
 # orders (21.9%) rejected RISK_TOO_HIGH across 35 dates, 75 of them MU.
 #
 # The MANUAL book's cap is the default because run_full_scan's captured signals
-# feed that entry cycle. The driver's cap is 12x larger, so a width chosen for
-# $250 stays openable there - the conservative direction.
+# feed that entry cycle. It is config/paper.toml's max_risk_per_trade ($750
+# since 2026-09-22).
 DEFAULT_MAX_RISK_DOLLARS = _config_paper.MAX_RISK_PER_TRADE
 
 _CONTRACT_MULT = 100.0                       # shares per option contract

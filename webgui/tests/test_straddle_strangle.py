@@ -5,9 +5,9 @@ Design: docs/plans/2026-09-12-straddle-strangle-design.md.
 Four templates on the shared leg model, so the Calculator and the Simulator can
 price and chart them. ⚠ **The two SHORT ones are undefined-risk structures**, and
 the gap assessment's own "Don't" list is explicit: *"Don't open undefined-risk
-structures in paper or the driver. That means naked calls, short straddles and
+structures in paper. That means naked calls, short straddles and
 short strangles."* So they are buildable and chartable and must remain unreachable
-by any scanner, any paper book and the driver — which these tests pin, because a
+by any scanner and any paper book — which these tests pin, because a
 template quietly appearing in an allowlist is exactly how that rule would be lost.
 """
 import pytest
@@ -103,14 +103,6 @@ def test_the_long_ones_are_NOT_tagged_undefined_risk():
 
 
 # ── analysis only: the rule that must not be lost ───────────────────────────
-
-def test_none_of_the_four_is_in_the_DRIVER_allowlist():
-    """⚠ ``shared.driver_policy.ALLOWED`` is the driver's structure allowlist. A
-    straddle appearing there would let the autonomous layer sell naked premium."""
-    from shared.driver_policy import ALLOWED
-    for code in FOUR:
-        assert code not in ALLOWED, code
-
 
 def test_none_of_the_four_is_a_structure_the_taxonomy_treats_as_tradeable():
     """``shared.structures`` is what the paper engine, the repricer and Rescue key

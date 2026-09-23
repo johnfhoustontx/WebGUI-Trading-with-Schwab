@@ -154,8 +154,6 @@ SUBTABS_AND_SCREENS = [
     ("System Status", "Restart button", "Restart"),
     ("Settings", "Appearance editor", "Appearance"),
     ("Settings", "Vacuum action", "Vacuum"),
-    ("Claude Trades", "STOP control", "STOP"),
-    ("Claude Trades", "Run now control", "Run now"),
     ("Paper Account", "Reset dialog", "Reset"),
     ("Captured Signals", "Refresh marks", "Refresh marks"),
 ]

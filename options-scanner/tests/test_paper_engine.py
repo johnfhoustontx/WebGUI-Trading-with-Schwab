@@ -400,7 +400,7 @@ def test_manage_cycle_passes_per_contract_pnl_to_recommender(tmp_path, monkeypat
 
 def test_manage_cycle_takes_profit_at_50pct_unmocked(tmp_path, monkeypatch):
     """The manage cycle closes a +50% winner using the REAL recommend() — the
-    manual/driver paper books must TAKE_PROFIT at +50%, not arm-and-hold.
+    manual paper book must TAKE_PROFIT at +50%, not arm-and-hold.
 
     Regression guard: the captured-autoclose lifecycle rework reworked the SHARED
     recommend() so +50% returns HOLD for every caller. This cycle passes a minimal

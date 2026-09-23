@@ -7,8 +7,8 @@ you whether everything is up:
 * **Tier 3 — Memurai** (Redis backbone, :6379) via a ``PING``.
 * **Tier 1 — schwab-proxy** (:8100) via its ``/health`` (also surfaces whether a
   Schwab token is loaded).
-* **Tier 2 — the six domain services** (sentiment/options/portfolio/trade/driver/
-  market, :8210–8215) via each service's ``/health`` probe.
+* **Tier 2 — the five domain services** (sentiment/options/portfolio/trade/
+  market, :8210–8213 and :8215) via each service's ``/health`` probe.
 * **Tier 1 — webgui** itself (it's serving this page, so it's up by definition).
 * **Tier 1 — webgui_live**, the PUBLIC read-only screens: a peer process on its
   own port and origin, probed over HTTP. Down, it is named here and nowhere
@@ -88,7 +88,6 @@ _FRESHNESS = [
     ("Options · Gamma collector", "options:gex_status", True),
     ("Portfolio", "portfolio:positions", True),
     ("Trade (on-demand)", "trade:analysis", False),
-    ("Driver (on-demand)", "driver:autonomous", False),
     ("Market Dashboard", "market:dashboard", True),
 ]
 
@@ -122,7 +121,6 @@ def component_targets():
         "options": "options_svc (scan / gamma / paper)",
         "portfolio": "portfolio_svc (holdings + live P&L)",
         "trade": "trade_svc (on-demand analysis)",
-        "driver": "driver_svc (autonomous trader)",
         "market": "market_svc (macro-ticker dashboard)",
     }
     for domain, label in svc_labels.items():
@@ -351,9 +349,9 @@ def _do_restart(target):
 
 
 # ── the restart confirm ──────────────────────────────────────────────────────
-# Nine of the eleven cards carry a Restart, and every one of them bounces a live
-# process on this box: the six services, the proxy when this checkout owns it,
-# the PUBLIC live screens, and this web app itself. Two of those nine cost more
+# Eight of the ten cards carry a Restart, and every one of them bounces a live
+# process on this box: the five services, the proxy when this checkout owns it,
+# the PUBLIC live screens, and this web app itself. Two of those eight cost more
 # than the component they name, so the dialog says which one you are about to
 # pay. The sentences are module constants rather than literals inside render()
 # so a test can pin them without copying prose.

@@ -25,7 +25,7 @@ import time
 from typing import Callable, NamedTuple
 from zoneinfo import ZoneInfo
 
-from repo_paths import DRIVER_PAPER_DB, ENV_FLAGS, OPTIONS_SCANNER
+from repo_paths import ENV_FLAGS, OPTIONS_SCANNER
 
 log = logging.getLogger(__name__)
 
@@ -50,9 +50,7 @@ from scanner_engine import run_full_scan  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
 
 from services import _degrade  # noqa: E402
-from shared import driver_limits as _driver_limits  # noqa: E402
 from shared import scanner_config as _scanner_config  # noqa: E402
-from shared import driver_policy as _driver_policy  # noqa: E402
 from shared import vol_gate as _vol_gate  # noqa: E402
 from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
@@ -71,8 +69,8 @@ def run_scan() -> dict:
 # ── Day-persistent scan union ───────────────────────────────────────────────
 # The Scanner table shows the DAY's signals, not just the last scan's. This is
 # published to its own key (cache:options:scan_day); cache:options:scan keeps
-# its live-only semantics because the autonomous driver reads it and must never
-# be offered a signal that no longer qualifies.
+# its live-only semantics: it is the latest scan, and a signal that no longer
+# qualifies must not be offered from it.
 
 _DAY_LISTS = ("signals_0dte", "signals_swing", "signals_directional")
 
@@ -81,8 +79,8 @@ _DAY_LISTS = ("signals_0dte", "signals_swing", "signals_directional")
 # own intra-scan scoring (scoring.norm_gex_proximity / norm_dex_proximity read them
 # during the scan, before anything is cached). They are ~11% of a signal's ~800 B;
 # dead weight in cache:options:scan, but the day union multiplies them by the day's
-# scan count. NOT stripped from cache:options:scan — the driver reads that key and
-# it is deliberately out of scope here.
+# scan count. NOT stripped from cache:options:scan, which is deliberately out of
+# scope here.
 _DAY_STRIP = ("gex_walls", "dex_walls")
 
 # Per-list backstop. Sized from measured numbers, not a round guess:
@@ -2012,9 +2010,8 @@ def open_income_position(row, qty: int = 1) -> dict:
 
     ⚠ **The opening credit is NOT credited to cash here**, and that is not an
     omission. This book realizes an option's credit at CLOSE, through
-    ``paper_engine._close`` → ``realize_pnl``; ``run_entry_cycle`` and
-    ``open_driver_position`` both open the same way. Crediting it at open would
-    double it at settlement.
+    ``paper_engine._close`` → ``realize_pnl``; ``run_entry_cycle`` opens the
+    same way. Crediting it at open would double it at settlement.
     """
     import datetime as dt
 
@@ -2049,8 +2046,7 @@ def open_income_position(row, qty: int = 1) -> dict:
                            "There is no paper account yet — open one on the Paper "
                            "Account page before trading into it.", symbol=symbol)
         # A STALE (prior-day) drawdown halt clears on the session roll; a
-        # SAME-day halt is preserved. Same call, same reason, as the driver's
-        # open path two functions down.
+        # SAME-day halt is preserved.
         paper_account_db.roll_session_if_needed(None, dt.date.today().isoformat())
         if paper_account_db.get_account(None)["halted"]:
             return _reject("halted",
@@ -2244,142 +2240,7 @@ def paper_account_view() -> dict:
     }
 
 
-# ── Isolated driver paper account (DRIVER_PAPER_DB) ──────────────────────────
-# The autonomous Driver trades into a SEPARATE DB file so its book, P&L, and
-# $500/halt logic are fully isolated from the user's manual paper account. The
-# paper_engine/paper_account_db machinery is already db_path-parameterized, so
-# these wrappers just thread ``DRIVER_PAPER_DB`` (kept as a module global so the
-# tests can monkeypatch it onto a tmp DB without touching the real account).
-
-
-def ensure_driver_account(starting_balance: float = 25000.0) -> None:
-    """Seed the dedicated driver paper account if absent (idempotent). Must run
-    before the first open/manage — the engine indexes get_account()['halted']."""
-    import datetime as dt
-
-    import paper_account_db
-
-    paper_account_db.ensure_account(DRIVER_PAPER_DB, starting_balance=starting_balance,
-                                    session_date=dt.date.today().isoformat())
-
-
-def has_driver_account() -> bool:
-    """True if the driver account row has been seeded (False on any failure)."""
-    import paper_account_db
-
-    try:
-        return paper_account_db.get_account(DRIVER_PAPER_DB) is not None
-    except Exception:
-        return False
-
-
-def driver_shared_reads():
-    """One read of the driver book's FULL positions + account snapshot, shared by
-    ``driver_account_view`` / ``driver_account_perf`` / ``driver_analytics`` so the
-    5-min refresh reads the (tiny) DB ONCE instead of three times. Defensive →
-    ``([], None)`` on failure."""
-    import paper_account_db
-    import paper_engine
-
-    try:
-        positions = paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
-    except Exception:
-        positions = []
-    try:
-        snapshot = paper_engine.account_snapshot(DRIVER_PAPER_DB)
-    except Exception:
-        snapshot = None
-    return positions, snapshot
-
-
-# Rows published for the driver's closed-trade table. `orders` has been capped at
-# 100 all along; this list had NO bound and carried every closed trade ever --
-# measured 160 rows / 158 KB of a 224 KB payload, growing ~1 KB per trade forever
-# and re-serialized on every 5-min refresh (2026-08-20).
-#
-# The cap is on the ROW LIST only. The page's summary line is a LIFETIME count /
-# win-rate / realized total, so truncating rows without exact aggregates would
-# silently misreport the driver's track record -- `closed_totals` is therefore
-# computed over EVERY closed row, and carries `truncated` so the table can say so
-# rather than quietly showing a partial history.
-DRIVER_CLOSED_LIMIT = 400
-
-
-def _closed_totals(closed) -> dict:
-    """Exact lifetime aggregates over ALL closed rows (never the capped slice).
-
-    Counts only rows with a numeric ``realized_pnl``, matching the page's
-    ``closed_summary_text`` -- an unpriced row is not a win, not a loss, and not
-    part of the count.
-    """
-    priced = [c for c in (closed or [])
-              if isinstance(c, dict) and isinstance(c.get("realized_pnl"), (int, float))
-              and not isinstance(c.get("realized_pnl"), bool)]
-    wins = sum(1 for c in priced if c["realized_pnl"] > 0)
-    losses = sum(1 for c in priced if c["realized_pnl"] < 0)
-    return {"count": len(priced), "wins": wins, "losses": losses,
-            "realized": round(sum(c["realized_pnl"] for c in priced), 2),
-            "truncated": len(closed or []) > DRIVER_CLOSED_LIMIT}
-
-
-def driver_account_view(all_positions=None, snapshot=None) -> dict:
-    """Driver account snapshot + open positions (mirrors ``paper_account_view`` on
-    the DRIVER db). No rescue overlay (that reads the manual account). Each
-    sub-read is defensively guarded so a partial failure still returns a view.
-
-    ``all_positions``/``snapshot`` — pass the shared driver_shared_reads() result
-    to avoid re-fetching them (the 5-min refresh injects both); when omitted they
-    are fetched here so standalone callers still work."""
-    import paper_account_db
-    import paper_engine
-
-    if snapshot is None:
-        try:
-            snapshot = paper_engine.account_snapshot(DRIVER_PAPER_DB)
-        except Exception:
-            snapshot = None
-    try:
-        positions = paper_account_db.fetch_open_positions(DRIVER_PAPER_DB)
-    except Exception:
-        positions = []
-    try:
-        orders = paper_account_db.fetch_orders(DRIVER_PAPER_DB, limit=100, status="FILLED")
-    except Exception:
-        orders = []
-    try:
-        if all_positions is None:
-            all_positions = paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
-        closed_all = [p for p in all_positions
-                      if (p.get("status") or "").upper() != "OPEN"]
-        closed_totals = _closed_totals(closed_all)
-        closed_positions = closed_all[:DRIVER_CLOSED_LIMIT]
-    except Exception:
-        closed_positions, closed_totals = [], _closed_totals([])
-    return {"snapshot": snapshot, "positions": positions, "orders": orders,
-            "closed_positions": closed_positions, "closed_totals": closed_totals,
-            "has_account": has_driver_account()}
-
-
-def driver_account_perf(positions=None, snapshot=None) -> dict:
-    """Performance scorecard over the driver account (driver_perf.build_scorecard).
-    Defensive → an empty scorecard on any failure. ``positions``/``snapshot`` may
-    be injected (see driver_shared_reads) to avoid a re-fetch."""
-    import paper_account_db
-    import paper_engine
-
-    from services.options_svc import driver_perf
-
-    if positions is None:
-        try:
-            positions = paper_account_db.fetch_all_positions(DRIVER_PAPER_DB)
-        except Exception:
-            positions = []
-    if snapshot is None:
-        try:
-            snapshot = paper_engine.account_snapshot(DRIVER_PAPER_DB)
-        except Exception:
-            snapshot = {}
-    return driver_perf.build_scorecard(positions, snapshot or {})
+# ── Paper account performance ────────────────────────────────────────────────
 
 
 #: The four Greeks the book reports. Ordered as a reader wants them: direction
@@ -2435,15 +2296,13 @@ def book_greeks(positions) -> dict:
 def manual_account_perf(positions=None, snapshot=None) -> dict:
     """Performance scorecard over the MANUAL paper account (gap assessment C5).
 
-    The mirror of :func:`driver_account_perf` on the default DB — the book that
-    auto-trades every captured signal, and which had **no track record on screen
-    at all**: no win rate, no profit factor, no breakdown. ``build_scorecard`` is
+    The book that auto-trades every captured signal, and which had **no track
+    record on screen at all** before this: no win rate, no profit factor, no breakdown. ``build_scorecard`` is
     already pure over ``(positions, snapshot)``, so this is the accessor rather
     than a second implementation.
 
     ``db_path=None`` IS the manual account throughout this engine, the same
-    convention ``manual_analytics`` and ``paper_account_view`` use. ⚠ Scoring the
-    wrong file would silently report the driver's −46.6% record as this book's.
+    convention ``manual_analytics`` and ``paper_account_view`` use.
 
     ``positions``/``snapshot`` may be injected by a caller that has already read
     the book. Defensive → an empty scorecard on any failure: it feeds a page card,
@@ -2452,7 +2311,7 @@ def manual_account_perf(positions=None, snapshot=None) -> dict:
     import paper_account_db
     import paper_engine
 
-    from services.options_svc import driver_perf
+    from services.options_svc import book_perf
 
     if positions is None:
         try:
@@ -2465,10 +2324,10 @@ def manual_account_perf(positions=None, snapshot=None) -> dict:
         except Exception:
             snapshot = {}
     try:
-        return driver_perf.build_scorecard(positions, snapshot or {})
+        return book_perf.build_scorecard(positions, snapshot or {})
     except Exception:  # noqa: BLE001 - see the docstring.
         _degrade.degraded("options.manual_account_perf")
-        return driver_perf.build_scorecard([], {})
+        return book_perf.build_scorecard([], {})
 
 
 def _book_analytics(db_path, *, starting_balance=25000.0, positions=None) -> dict:
@@ -2489,17 +2348,10 @@ def _book_analytics(db_path, *, starting_balance=25000.0, positions=None) -> dic
     return perf_analytics.build_analytics(positions, starting_balance=starting_balance)
 
 
-def driver_analytics(positions=None) -> dict:
-    """Performance analytics over the DRIVER account (see ``_book_analytics``).
-    ``positions`` may be injected (see driver_shared_reads) to avoid a re-fetch."""
-    return _book_analytics(DRIVER_PAPER_DB, positions=positions)
-
-
 def manual_analytics() -> dict:
     """Performance analytics over the MANUAL paper account (default DB). The scanner-
-    baseline book: it auto-trades every captured signal, so its equity curve / MAE-MFE
-    are the benchmark to compare the driver (Claude's selection) against. The posture
-    post-mortem is naturally empty here (manual opens carry no entry_context)."""
+    baseline book: it auto-trades every captured signal. The posture post-mortem is
+    naturally empty here (manual opens carry no entry_context)."""
     return _book_analytics(None)
 
 
@@ -2544,9 +2396,8 @@ def _eod_book_summary(snapshot, all_positions, *, has_account, today, label) -> 
 def collect_eod_summary(now_ct=None) -> dict:
     """Assemble the end-of-day per-book P&L summary for the scheduled post-close push.
 
-    Reports the two ENGINE paper books the auto-manage cycles actually trade — the
-    user's MANUAL account (default DB) and the isolated DRIVER account
-    (``DRIVER_PAPER_DB``) — each via ``_eod_book_summary``. Book state is read AS-IS at
+    Reports the ENGINE paper book the auto-manage cycle trades — the user's MANUAL
+    account (default DB) — via ``_eod_book_summary``, under ``books``. Book state is read AS-IS at
     call time (no manage cycle is forced first), so a 0-DTE that expired but hasn't yet
     been settled still contributes its unrealized to ``day_pnl``. Defensive: a per-book
     read failure yields that book's empty (no-account) summary; never raises. ``now_ct``
@@ -2578,280 +2429,9 @@ def collect_eod_summary(now_ct=None) -> dict:
 
     return {
         "date": today,
-        "books": {"manual": _book(None, "Manual"),
-                  "driver": _book(DRIVER_PAPER_DB, "Driver")},
+        "books": {"manual": _book(None, "Manual")},
         "generated_at": now_ct.isoformat(),
     }
-
-
-# The driver account's per-trade risk cap for the PAPER SIZER on the open path.
-# Kept SEPARATE from the manual account's ``config_paper.MAX_RISK_PER_TRADE`` ($250)
-# so raising the driver's cap never changes the user's manual paper trades. It funds
-# liquid index/large-cap spreads ($SPX ~$700-1,150/contract, MU ~$400) that a $250
-# cap sized to 0 — the reason $SPX/MU picks logged "Executed" but never opened.
-#
-# Sourced from config/driver.toml via shared.driver_limits, which is also where
-# ``driver_svc.settings.PER_TRADE_MAX_RISK`` (the GUARDRAIL's cap) comes from. The
-# two must agree or the driver approves a quantity the sizer then zeroes to
-# RISK_TOO_HIGH — a quiet failure whose only symptom is a log line saying
-# "Executed" with nothing opened. They used to be two literals and a comment
-# asking future editors to keep them in step.
-_DRIVER_MAX_RISK_PER_TRADE = _driver_limits.per_trade_max_risk()
-
-
-def _driver_equity():
-    """The driver book's live equity, or ``None``.
-
-    ⚠ **``None``, never 0, for a missing reading.** A zero denominator would
-    refuse every trade forever, which reads as a broken driver rather than as a
-    cap — the documented "never treat a missing reading as zero" rule, and the
-    same choice ``paper_concentration`` makes about its own equity argument.
-
-    Fully guarded: this runs on the open path, which must never raise.
-    """
-    import paper_engine
-    try:
-        snap = paper_engine.account_snapshot(DRIVER_PAPER_DB) or {}
-        eq = snap.get("equity")
-    except Exception:  # noqa: BLE001 — see the docstring.
-        _degrade.degraded("options.driver_equity")
-        return None
-    if isinstance(eq, bool) or not isinstance(eq, (int, float)):
-        return None
-    return float(eq) if math.isfinite(float(eq)) and eq > 0 else None
-
-
-def _driver_risk_limits():
-    """The driver's risk envelope resolved against live equity (B8).
-
-    ``min(dollars, pct x equity)`` via ``shared.driver_limits.scale_to_equity``, so
-    a drawn-down book tightens and a grown one never loosens. Measured on the live
-    book: at $13,347 equity the $3,000 per-trade cap (documented "~12% of the
-    book") was 22.5% and the $12,000 budget ("~half the book") was 89.9%.
-
-    ⚠ Read at CALL time, not bound at import — the whole point is that it follows
-    the book, and ``driver_svc``'s decision path scales the same way against the
-    same quantity. If only one side scaled, the driver would approve a trade the
-    sizer then zeroes, which is the documented "Executed but nothing opened"
-    symptom whose only trace is a log line.
-    """
-    return _driver_limits.scale_to_equity(_driver_limits.risk(), _driver_equity())
-
-
-def _driver_per_trade_cap():
-    """The per-trade risk cap the fill re-sizer uses, resolved against equity."""
-    try:
-        return float(_driver_risk_limits()["per_trade_max_risk"])
-    except Exception:  # noqa: BLE001 — never lose an open over a config read.
-        return float(_DRIVER_MAX_RISK_PER_TRADE)
-
-
-# Reject reasons for the OPEN-path guardrail re-check. Named constants because the
-# /driver decision log renders them and the tests assert on them.
-REJECT_NOT_ALLOWED = "structure not in allowlist / no defined risk"
-REJECT_MAX_CONCURRENT = "max concurrent driver positions reached"
-REJECT_RISK_BUDGET = "daily risk budget exhausted (open positions)"
-
-
-def _driver_open_positions():
-    """Open rows in the driver's paper book.
-
-    ⚠ **This called a function that does not exist** — ``list_open_positions``
-    for ``fetch_open_positions`` — from some point before 2026-08-12 until
-    2026-09-11. The ``except`` below swallowed the ``AttributeError``, so both
-    capacity gates measured an always-empty book and neither could refuse
-    anything. Measured on prod: the degrade had fired 50 times in 30 days. The
-    driver's book happened to stay small, so nothing was breached and the only
-    symptom was a counter.
-
-    The docstring that shipped with the bug is why it survived: it argued that
-    ``[]`` "is the same thing an empty book means", which is true of a read
-    failure and completely false of a typo. A guard whose degrade path is
-    indistinguishable from its success path cannot be audited by reading it —
-    ``tests/test_driver_open_capacity_binds.py`` drives the gate through a real
-    book instead, and its AST guard checks every lazily-imported engine
-    attribute in this file, because a lazy import turns a misspelling into a
-    runtime error inside whichever broad ``except`` wraps the call.
-
-    Still defensive: a genuine read failure must not hard-fail an open, and the
-    per-trade cap and buying-power checks still apply downstream.
-    """
-    try:
-        import paper_account_db   # lazy, as everywhere else on this path
-        return paper_account_db.fetch_open_positions(DRIVER_PAPER_DB) or []
-    except Exception:
-        _degrade.degraded("options._driver_open_positions")
-        return []
-
-
-def _driver_open_capacity_reason(signal, qty):
-    """A reject reason if opening this trade would breach the BOOK-level caps, else None.
-
-    This is the open path's own copy of the two capacity rules, measured against
-    the book rather than against one cycle:
-
-    * ``max_concurrent`` - the decision path counts slots across a cycle, so a
-      direct enqueue skipped it entirely.
-    * ``daily_risk_budget`` - the decision path resets the budget every 30-min
-      checkpoint and never subtracts risk already deployed, so the true aggregate
-      cap was ``max_concurrent x per_trade_max_risk`` (~2x the documented "half
-      the book"). Counting the OPEN positions makes the budget mean its name.
-    """
-    limits = _driver_risk_limits()
-    open_rows = _driver_open_positions()
-    if len(open_rows) >= int(limits["max_concurrent"]):
-        return REJECT_MAX_CONCURRENT
-    deployed = _driver_policy.open_risk_dollars(open_rows)
-    incoming = (_driver_policy.max_loss_dollars(signal) or 0.0) * max(1, int(qty or 1))
-    if deployed + incoming > float(limits["daily_risk_budget"]):
-        return REJECT_RISK_BUDGET
-    return None
-
-
-def open_driver_position(signal: dict, qty: int, broker=None, context=None) -> dict:
-    """Open ONE driver position into ``DRIVER_PAPER_DB`` at ``min(clamped qty,
-    fill-sized)``.
-
-    ``context`` (optional) is the decision context at open — the directional posture,
-    the market_read summary, and whether the shadow gate would have blocked this trade —
-    stamped onto the position's ``entry_context`` (JSON) so a later post-mortem can
-    correlate the entry regime to the realized outcome. A ``None``/non-dict context stores
-    NULL (exactly as before).
-
-    Adapts the per-signal open block of ``paper_engine.run_entry_cycle``
-    (size → submit → **re-size off the actual fill** → guard → reserve BP →
-    insert) for a single guardrail-approved signal, threading ``DRIVER_PAPER_DB``.
-
-    Qty reconciliation (load-bearing): the driver brings a guardrail-CLAMPED
-    ``qty``; the engine independently re-sizes off the ACTUAL fill credit
-    (``size_contracts(fill, width)``). We open at ``min(int(qty), sized)`` — the
-    clamp is a CEILING the engine can only size *down* from, never up.
-
-    Returns ``{"status": "opened"|"rejected"|"error", ...}``. NEVER raises — the
-    whole body is guarded so a bad signal/broker degrades to an error result.
-    The order row is recorded via ``paper_engine._record_order`` (the same path
-    the manual entry cycle uses) so ``entry_order_id`` links to the position.
-    """
-    import datetime as dt
-
-    import config_paper
-    import paper_account_db
-    import paper_broker
-    import paper_engine
-    import paper_sizing
-
-    broker = broker or paper_broker            # module exposes submit_order(order, client)
-    try:
-        # Normalize the signal shape. The driver feeds RAW scanner signals
-        # (cache:options:scan), which key structure under ``type``, credit under
-        # ``credit``, and id under ``id`` — but this engine path (lifted from the
-        # captured-DB entry cycle) reads ``strategy``/``entry_credit``/``signal_id``.
-        # Without this map every driver open KeyError'd on 'signal_id' and silently
-        # degraded to status=error, so NOTHING ever landed in the driver account
-        # (the decision log showed "executed" — only the ENQUEUE — but no position).
-        signal = dict(signal)
-        signal.setdefault("signal_id", signal.get("id"))
-        signal.setdefault("strategy", signal.get("type"))
-        signal.setdefault("entry_credit", signal.get("credit"))
-        signal.setdefault("dte_at_entry", signal.get("dte", 0))
-        # The short leg's delta at open (gap assessment B6). A raw scan row keys
-        # it ``short_delta``; the engine path reads ``entry_short_delta``, and the
-        # delta-drift stop measures against it. Absent leaves None, which means
-        # "not recorded" and falls back to the absolute ceiling - never 0.0,
-        # which would make the drift rule fire at 0.12 on an unmoved position.
-        signal.setdefault("entry_short_delta", signal.get("short_delta"))
-        ensure_driver_account()
-        # Clear a STALE (prior-day) drawdown halt before checking it: a new session
-        # un-halts + resets the daily counters. Idempotent (no-op if already today),
-        # and a SAME-day halt (banked $500 / hit the loss cap today) is preserved.
-        # Matters only for a manual open before the 5-min manage tick rolls the session.
-        paper_account_db.roll_session_if_needed(DRIVER_PAPER_DB, dt.date.today().isoformat())
-        if paper_account_db.get_account(DRIVER_PAPER_DB)["halted"]:
-            return {"status": "rejected", "reason": "halted"}
-        # ── Re-check the envelope HERE, not just on the decision path ──────────
-        # driver_svc/guardrails runs the full cycle-level pass, but it is a
-        # DIFFERENT SERVICE and this function is reachable on its own: the
-        # ``driver_paper_create`` command is just a Redis stream entry, and a
-        # replay (consumer groups start at id 0) or any local process can enqueue
-        # one. Everything below is a property of the SIGNAL or the BOOK, so it can
-        # be re-derived here; cycle-only concepts (max trades per cycle, the
-        # model's stand-down) are deliberately NOT re-checked - they are
-        # meaningless for a single open.
-        if not _driver_policy.is_allowed(signal):
-            return {"status": "rejected", "reason": REJECT_NOT_ALLOWED}
-        capacity = _driver_open_capacity_reason(signal, qty)
-        if capacity:
-            return {"status": "rejected", "reason": capacity}
-        q = int(qty)   # the guardrail-clamped request (a CEILING — see the re-size below)
-        order = {"signal_id": signal["signal_id"], "symbol": signal["symbol"],
-                 "side": "SELL_TO_OPEN", "strategy": signal["strategy"],
-                 "short_strike": signal["short_strike"], "long_strike": signal["long_strike"],
-                 "call_short": signal.get("call_short"), "call_long": signal.get("call_long"),
-                 "expiration": signal["expiration"], "quantity": q,
-                 "limit_price": signal["entry_credit"], "legs": []}
-        resp = broker.submit_order(order, _proxy.schwab_py_client)
-        if resp.get("status") != "FILLED":
-            return {"status": "rejected", "reason": resp.get("status")}
-        fill = resp["price"]
-        # Reject garbage opening-auction fills (a real credit spread never fills
-        # at a near-zero / negative net credit).
-        if fill < config_paper.MIN_FILL_CREDIT:
-            return {"status": "rejected", "reason": "LOW_CREDIT"}
-        # Re-size on the ACTUAL fill credit (keeps realized risk within the cap).
-        sized, max_loss_per = paper_sizing.size_contracts(
-            fill, signal["width"],
-            # The driver's cap, not the manual $250 — and resolved against live
-            # equity (B8), so a drawn-down book sizes down with it.
-            max_risk=_driver_per_trade_cap())
-        open_qty = min(q, sized)               # the guardrail clamp is a CEILING
-        if max_loss_per <= 0 or open_qty < 1:
-            return {"status": "rejected", "reason": "RISK_TOO_HIGH"}
-        max_loss_total = round(max_loss_per * open_qty, 2)
-        if max_loss_total > paper_account_db.get_account(DRIVER_PAPER_DB)["cash"]:
-            return {"status": "rejected", "reason": "INSUFFICIENT_BUYING_POWER"}
-        order["quantity"] = open_qty           # persist the re-sized qty actually opened
-        oid = paper_engine._record_order(DRIVER_PAPER_DB, order, resp)
-        paper_account_db.reserve_buying_power(DRIVER_PAPER_DB, max_loss_total)
-        paper_account_db.insert_position(DRIVER_PAPER_DB, {
-            "signal_id": signal["signal_id"], "symbol": signal["symbol"],
-            "strategy": signal["strategy"], "short_strike": signal["short_strike"],
-            "long_strike": signal["long_strike"], "call_short": signal.get("call_short"),
-            "call_long": signal.get("call_long"), "width": signal["width"],
-            "expiration": signal["expiration"], "dte_at_entry": signal.get("dte_at_entry", 0),
-            "quantity": open_qty, "entry_credit": fill, "entry_order_id": oid,
-            "entry_short_delta": signal.get("entry_short_delta"),
-            "max_loss_per": max_loss_per, "max_loss_total": max_loss_total,
-            "entry_ts": resp["enteredTime"],
-            "entry_context": _json.dumps(context) if isinstance(context, dict) else None})
-        return {"status": "opened", "symbol": signal["symbol"], "qty": open_qty,
-                "entry_credit": fill, "max_loss_total": max_loss_total}
-    except Exception as exc:  # noqa: BLE001
-        _degrade.degraded("options.open_driver_position")
-        return {"status": "error", "error": str(exc)}
-
-
-def run_driver_manage_cycle() -> None:
-    """Reprice + auto-close the DRIVER account's open positions
-    (``paper_engine.run_manage_cycle`` on ``DRIVER_PAPER_DB``). No-op-safe if the
-    driver account doesn't exist yet (gated on ``has_driver_account``).
-
-    The driver's isolated book is intentionally EXCLUDED from the manual paper
-    account's opt-in break-even lifecycle — ``lifecycle=False`` is passed
-    explicitly (never reads ``handlers.manual_paper_lifecycle_enabled``, the
-    Settings toggle), so the driver always keeps today's plain TAKE_PROFIT-at-
-    +50% regardless of what the manual account is configured to do."""
-    import datetime as dt
-
-    import paper_engine
-
-    if not has_driver_account():
-        return
-    try:
-        paper_engine.run_manage_cycle(_proxy.schwab_py_client, dt.date.today().isoformat(),
-                                      db_path=DRIVER_PAPER_DB, lifecycle=False)
-    except Exception:  # noqa: BLE001 — a reprice/proxy failure must not propagate out of
-        # the wrapper (the 5-min tick retries; matches the driver wrappers).
-        log.exception("driver manage cycle degraded (retries on next tick)")
 
 
 def run_entry_cycle() -> None:
@@ -2914,28 +2494,23 @@ def has_paper_account() -> bool:
 
 
 def reconcile_paper_buying_power() -> dict:
-    """R6: reconcile ``buying_power_reserved`` against open positions for BOTH the
-    manual paper account (default DB) AND the isolated driver account
-    (``DRIVER_PAPER_DB``).
+    """R6: reconcile ``buying_power_reserved`` against open positions for the
+    manual paper account (default DB).
 
     Opening a position is a non-atomic 3-commit sequence (record_order →
     reserve_buying_power → insert_position); a crash between the reserve and the
-    insert orphans reserved BP against no position, which corrupts the driver's
-    halt/loss-cap math. Called once at service startup to self-heal any drift left
+    insert orphans reserved BP against no position, which corrupts the halt/
+    drawdown math. Called once at service startup to self-heal any drift left
     by a prior crash. Idempotent + defensive — ``reconcile_buying_power`` never
-    raises and is a no-op when the book is consistent. Returns the per-book
-    corrected drift (0.0 = clean / absent) for logging/observability."""
+    raises and is a no-op when the book is consistent. Returns the corrected drift
+    under ``manual`` (0.0 = clean / absent) for logging/observability."""
     import paper_account_db
 
-    out = {"manual": 0.0, "driver": 0.0}
+    out = {"manual": 0.0}
     try:
         out["manual"] = paper_account_db.reconcile_buying_power(None)  # default DB
     except Exception:  # noqa: BLE001 — startup self-heal must never crash the loop.
         log.exception("manual BP reconcile degraded")
-    try:
-        out["driver"] = paper_account_db.reconcile_buying_power(DRIVER_PAPER_DB)
-    except Exception:  # noqa: BLE001
-        log.exception("driver BP reconcile degraded")
     return out
 
 
@@ -3368,8 +2943,7 @@ def expire_ledger_trades(now_ct=None) -> int:
     Defensive per-trade (a bad trade never aborts the pass); returns the count
     settled. ⚠ Runs on the manual account's **HOURLY** cycle (``paper_cycle_due``,
     09:00-14:00 CT, six times a trading day) plus the "Run manage cycle" button —
-    NOT on a 5-minute tick, which this docstring claimed for months. The 1-min
-    ``manage_due`` slot belongs to the isolated DRIVER account.
+    NOT on a 5-minute tick, which this docstring claimed for months.
     ``now_ct`` defaults to the live CT clock; inject it for deterministic tests."""
     import datetime as _dt
     from zoneinfo import ZoneInfo
@@ -3907,7 +3481,7 @@ def _captured_be_level(row) -> float:
 def run_captured_manage_cycle() -> dict:
     """Reprice → arm break-even → auto-close the OPEN captured signals (paper-only).
 
-    Mirrors the driver/paper manage pattern; fully defensive (a per-signal failure
+    Mirrors the paper manage pattern; fully defensive (a per-signal failure
     is skipped, never fatal). For each OPEN captured signal:
       1. Reprice via ``signal_repricer.reprice_swing`` (stale/failed reprice is
          skipped — never close on bad data — EXCEPT an expired signal, which
@@ -6758,8 +6332,7 @@ _ANALYZE_CSS = """
 
 def _anthropic_api_key():
     """Anthropic API key, or ``None`` (never raises). ``ANTHROPIC_API_KEY`` env →
-    gitignored ``shared/anthropic_key.txt`` — same resolution order driver_svc uses
-    (kept local so options_svc doesn't import driver_svc)."""
+    gitignored ``shared/anthropic_key.txt``."""
     import os
     key = os.environ.get("ANTHROPIC_API_KEY")
     if key:

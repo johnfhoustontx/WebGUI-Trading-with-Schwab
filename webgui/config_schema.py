@@ -33,7 +33,6 @@ from dataclasses import dataclass
 # "regenerate the scheduled timers" (deploy.systemd.generate_units --install).
 OPTIONS = "options_svc"
 SENTIMENT = "sentiment_svc"
-DRIVER = "driver_svc"
 MARKET = "market_svc"
 TRADE = "trade_svc"
 WEBGUI = "webgui"
@@ -42,7 +41,6 @@ TIMERS = "timers"
 RESTART_LABELS = {
     OPTIONS: "Options service",
     SENTIMENT: "Sentiment service",
-    DRIVER: "Driver service",
     MARKET: "Market service",
     TRADE: "Trade service",
     WEBGUI: "Web app (this page reloads)",
@@ -220,7 +218,7 @@ _TRADE_MGMT = ConfigFile(
                 "below overrides them.", (
             _pct("stops.tp_frac", "Take profit at",
                  "Percent of the credit captured. Captured signals arm a break-even "
-                 "stop here; the manual book and the driver close outright.",
+                 "stop here; the manual book closes outright.",
                  lo=5, hi=100, step=5),
             Field("stops.stop_mult", "Stop loss at",
                   "Cut when the loss reaches this multiple of the credit received.",
@@ -299,62 +297,6 @@ _TRADE_MGMT = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Autonomous driver — config/driver.toml
-# ─────────────────────────────────────────────────────────────────────────────
-_DRIVER = ConfigFile(
-    name="driver.toml", title="Autonomous driver", icon="smart_toy",
-    summary="The risk envelope for Claude's own paper book: daily targets, how much "
-            "it may risk, and how often it decides.",
-    restart=(DRIVER, OPTIONS),
-    sections=(
-        Section("Daily profit target",
-                "When the day 'banks' and stops opening trades. The live target "
-                "moves between the floor and cap with the month's pace.", (
-            Field("targets.daily_target", "Base daily target", "", kind="money",
-                  min=0, max=100000, step=50),
-            Field("targets.target_cap", "Highest target", "", kind="money",
-                  min=0, max=100000, step=50),
-            Field("targets.target_floor", "Lowest target", "", kind="money",
-                  min=0, max=100000, step=50),
-        )),
-        Section("Risk limits",
-                "Each dollar cap is also limited to a percent of live equity; the "
-                "smaller of the two applies.", (
-            Field("risk.per_trade_max_risk", "Maximum loss on one trade",
-                  "Below about $1,900 the driver can no longer open $SPX spreads.",
-                  kind="money", min=0, max=100000, step=100),
-            _pct("risk.per_trade_max_risk_pct", "…and at most this % of equity",
-                 "0 turns the percent cap off.", hi=100, step=1),
-            Field("risk.daily_risk_budget", "Total open risk allowed",
-                  "Sum of the maximum losses of all open driver positions.",
-                  kind="money", min=0, max=1000000, step=500),
-            _pct("risk.daily_risk_budget_pct", "…and at most this % of equity",
-                 "0 turns the percent cap off.", hi=100, step=1),
-            Field("risk.max_concurrent", "Open positions at most", "",
-                  kind="int", min=0, max=100, step=1),
-            Field("risk.max_trades_per_cycle", "New trades per checkpoint", "",
-                  kind="int", min=0, max=50, step=1),
-            Field("risk.vix_max", "No new trades above VIX", "", kind="float",
-                  min=0, max=100, step=0.5),
-            Field("risk.daily_loss_halt", "Halt new trades after a day's loss of",
-                  "Management and exits continue.", kind="money", min=0,
-                  max=100000, step=50),
-        )),
-        Section("Decisions", "", (
-            Field("decision.menu_top_n", "Signals shown to Claude",
-                  "How many top-scored signals each decision sees.", kind="int",
-                  min=1, max=100, step=1),
-            Field("decision.checkpoint_min", "Decision interval",
-                  "Minutes between intraday re-evaluations.", kind="int",
-                  unit="min", min=5, max=240, step=5),
-            Field("decision.max_tokens", "Answer length limit",
-                  "Maximum tokens per decision. Each decision is a paid Claude call.",
-                  kind="int", min=256, max=16000, step=100),
-        )),
-    ),
-)
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Flow alerts — config/flow_alerts.toml
 # ─────────────────────────────────────────────────────────────────────────────
 _FLOW = ConfigFile(
@@ -423,7 +365,7 @@ _FLOW = ConfigFile(
 # ─────────────────────────────────────────────────────────────────────────────
 # Market hours & schedules — config/sessions.toml
 # ─────────────────────────────────────────────────────────────────────────────
-_ALL_SVC = (OPTIONS, SENTIMENT, DRIVER, MARKET, WEBGUI)
+_ALL_SVC = (OPTIONS, SENTIMENT, MARKET, WEBGUI)
 
 
 def _window(name, title, help, restart, *, tz_note="", extra=()):
@@ -500,16 +442,6 @@ _SESSIONS = ConfigFile(
                 "Simulator snapshot against live prices. Pricing a loaded "
                 "position works at any time.", (),
                 extra=(_after_hours("tools_public", "those requests"),)),
-        Section("Driver entry window",
-                "When the autonomous driver may open trades. EASTERN time.", (
-            Field("windows.driver_entry.start", "Starts (ET)", "", kind="time"),
-            Field("windows.driver_entry.end", "Ends (ET)", "", kind="time"),
-            Field("windows.driver_entry.tz", "Time zone of these two times",
-                  "", kind="choice",
-                  choices=("America/New_York", "America/Chicago")),
-            Field("windows.driver_entry.end_exclusive", "End minute excluded",
-                  "On = no entries during the end minute itself.", kind="bool"),
-        ), restart=(DRIVER,)),
         Section("Claude briefings (paid)",
                 "Scheduled Dealer Positioning briefings. Each one is a paid call.", (
             Field("slots.analyze.grace_min", "Fire if late by at most", "",
@@ -913,7 +845,7 @@ _PAPER = ConfigFile(
     ),
 )
 
-FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _DRIVER, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
+FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
@@ -1095,16 +1027,9 @@ def cross_check(name, values):
     """Sentences for combinations that each pass alone but not together."""
     g = lambda *p: values.get(tuple(p))  # noqa: E731
     errs = []
-    if name == "driver.toml":
-        lo, base, hi = g("targets", "target_floor"), g("targets", "daily_target"), \
-            g("targets", "target_cap")
-        if None not in (lo, base, hi) and not (lo <= base <= hi):
-            errs.append("The daily target must sit between the lowest and highest "
-                        "target.")
     if name == "sessions.toml":
         pairs = [(("windows", w, "start"), ("windows", w, "end"))
-                 for w in ("scan", "market_snapshot", "stream", "live_capture",
-                           "driver_entry")]
+                 for w in ("scan", "market_snapshot", "stream", "live_capture")]
         pairs += [(("sessions", s, "start"), ("sessions", s, "end"))
                   for s in ("gth", "regular", "curb")]
         pairs.append((("windows", "collection", "start"),

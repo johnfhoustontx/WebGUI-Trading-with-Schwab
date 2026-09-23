@@ -282,7 +282,7 @@ def book_summary_line(book):
 
 def book_note():
     """What the book is, and the one thing about it that could mislead."""
-    return ("Paper only, isolated from the driver's book. It trades the "
+    return ("Paper only, isolated from the other paper books. It trades the "
             "UNDERLYING rather than the options structure the Trade Plan "
             "suggests — a spread's theta and vega would swamp the question of "
             "whether the ranking works. A relative short is held as a pair "

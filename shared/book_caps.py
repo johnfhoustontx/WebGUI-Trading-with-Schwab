@@ -11,7 +11,7 @@ Four callers share this module and must never disagree:
   ``max_loss_total`` through ``booked_risk``, the one rounding rule the preview
   and the service's candidate stamp use too.
 
-Pure: ``math`` and ``shared.driver_policy.open_risk_dollars`` (itself math-only).
+Pure: ``math`` only.
 Sectors arrive RESOLVED on every row as ``sector``, so this module never reads
 config, and Tier 1 may import it.
 
@@ -47,7 +47,34 @@ expirations are strings or None, so no production call reaches any of these.
 """
 import math
 
-from shared.driver_policy import open_risk_dollars
+
+def open_risk_dollars(positions) -> float:
+    """Total max-loss dollars deployed across ``positions`` (open book rows).
+
+    Rows come from ``paper_account_db`` / the Ledger, which store the
+    per-contract dollar ``max_loss`` already multiplied out as
+    ``max_loss_total``, alongside ``quantity``. A row whose numbers are missing
+    or non-finite contributes 0 rather than poisoning the sum with NaN - the
+    caller compares this against a cap, and a NaN total would make every ``>``
+    comparison False and silently disable the cap.
+    """
+    total = 0.0
+    for p in positions or ():
+        if not isinstance(p, dict):
+            continue
+        try:
+            ml = float(p.get("max_loss_total") or 0.0)
+            if math.isfinite(ml) and ml > 0:
+                total += ml
+                continue
+            per = float(p.get("max_loss") or 0.0)
+            qty = float(p.get("quantity") or 0.0)
+            if math.isfinite(per) and math.isfinite(qty):
+                total += max(0.0, per * qty)
+        except (TypeError, ValueError):
+            continue
+    return round(total, 2)
+
 
 TRADE_RISK_CAP = "TRADE_RISK_CAP"
 DEPLOYMENT_CAP = "DEPLOYMENT_CAP"

@@ -29,7 +29,7 @@ CACHE_RANK_BOARD = "cache:trade:rank_board"
 EVENT_RANK_BOARD = "events:trade:rank_board"
 
 # The model's own paper book (Phase 6): what following the board would have
-# done. Isolated from the driver's book, and paper only.
+# done. Isolated from the other paper books, and paper only.
 CACHE_MODEL_BOOK = "cache:trade:model_book"
 EVENT_MODEL_BOOK = "events:trade:model_book"
 

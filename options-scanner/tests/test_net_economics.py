@@ -3,8 +3,8 @@
 The flat scanner's gross ``credit``/``max_loss``/``rr_pct`` feed the tuned
 composite score, the sort, paper BP sizing, and the webgui display, so they are
 left UNTOUCHED. ``_attach_net_economics`` adds ADDITIVE net-of-commission fields
-(``commission``/``net_credit``/``net_max_loss``/``net_rr_pct``) that the autonomous
-driver's model menu consumes, so the driver's perceived edge is net-of-fees.
+(``commission``/``net_credit``/``net_max_loss``/``net_rr_pct``) that carry the
+net-of-fees edge.
 """
 import sys
 import pathlib

@@ -1,7 +1,6 @@
 """Per-day counter of Anthropic (Claude) API calls — cross-tier shared store.
 
-Three separate processes call Claude (the driver decider, options_svc's Gamma
-Analyze, market_svc's ticker summary), so the counter lives in ``shared/`` and
+More than one process calls Claude, so the counter lives in ``shared/`` and
 each caller records into one SQLite file (``shared/data/anthropic_call_counts.db``,
 short WAL transactions — safe across processes). ``record()`` is hooked
 immediately before each ``messages.create``, so no-key / stand-down paths that

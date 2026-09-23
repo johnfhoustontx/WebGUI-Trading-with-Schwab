@@ -20,7 +20,7 @@ from shared.bus import Bus
 from shared.contracts.envelope import Command
 # Importing the service package first runs its module-top sys.path glue
 # (OPTIONS_SCANNER → sys.path), so ``signal_db`` / ``signal_repricer`` resolve when
-# imported INSIDE the test (the same idiom as the driver-paper e2e).
+# imported INSIDE the test.
 from services.options_svc import handlers  # noqa: F401
 from services.options_svc import compute  # noqa: F401
 

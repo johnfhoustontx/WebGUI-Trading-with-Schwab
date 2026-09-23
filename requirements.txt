@@ -49,9 +49,8 @@ openpyxl                  # sentiment-dashboard: reads Sectors_Industries_ETFs.x
 
 # --- Windows desktop notifications (O, S) ---
 
-# --- LLM decision layer (NEW: autonomous driver) ---
-anthropic==0.112.0        # pinned (was >=0.40) — Anthropic SDK — Claude tool-use call in driver_svc.decider
-                          # (imported lazily inside decider so the suite needs no install)
+# --- Claude API (Gamma Analyze and the other Claude calls in options_svc) ---
+anthropic==0.112.0        # pinned (was >=0.40) — Anthropic SDK
 
 # --- Web GUI (NEW: this repo's NiceGUI front-end) ---
 nicegui[highcharts]>=2.0.0   # single multi-page web UI replacing the old Dash/React/Tk UIs.

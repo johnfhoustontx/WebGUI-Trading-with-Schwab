@@ -4,9 +4,7 @@
 sets across the five Tier-2 services, the webgui and ``options-scanner``
 (``scanner.py`` and ``scanner_engine.py``) now read from this module, and every
 one of them calls ``is_holiday``/``is_trading_day`` rather than testing
-membership against a bounded set. One site remains outside it deliberately:
-``claude-driver/config.py`` is exempt (legacy; its consumers were removed
-2026-07-08).
+membership against a bounded set.
 
 **The session vocabulary now ships here too (Phase B, tasks B1-B2).** That is:
 the ``Session`` enum (``CLOSED``/``GTH``/``REGULAR``/``CURB`` -- Cboe's own
@@ -269,11 +267,6 @@ _DEFAULTS = {
         # separate from ``finder_public``. Pricing requests are not gated: they
         # spend no Schwab call and run on whatever is already held.
         "tools_public": {"start": "08:40", "end": "15:00", "after_hours": True},
-        # ``end_exclusive`` lives here, not only in the TOML, so a missing or
-        # corrupt file still degrades to the SAFE behavior: falling back to
-        # inclusive would silently re-open the 15:30 ET entry slot.
-        "driver_entry": {"tz": "America/New_York", "start": "09:45",
-                         "end": "15:30", "end_exclusive": True},
     },
     # Scheduled SLOT times: named clock marks a service fires once per day at,
     # with a grace window so a missed tick or a mid-window start still fires.
@@ -592,8 +585,8 @@ def _window(name: str) -> dict:
 
 
 def _window_tz(win: dict):
-    """A window's own timezone, defaulting to CT. Only ``driver_entry`` sets
-    one (it is specified in ET, matching the constant it replaces)."""
+    """A window's own timezone (``tz``), defaulting to CT. No shipped window
+    sets one today; the mechanism is kept for a window specified in ET."""
     name = win.get("tz")
     if not name:
         return CT
@@ -663,13 +656,8 @@ def in_window(name: str, now) -> bool:
     ``end_exclusive = true``, in which case the close is exclusive
     (``start <= t < end``).
 
-    Only ``driver_entry`` declares it: ``driver_svc``'s gate is
-    ``hm < start or hm >= end``, so the whole 15:30 ET minute is OUTSIDE the
-    window. That is what enforces "no new entries in the last 30 min before the
-    close" -- inclusive there would open a 16th checkpoint slot at 15:30, firing
-    a Claude call and possibly a position inside the no-entry zone. The flag
-    makes that a property of the window, so the migration is a straight swap
-    with nothing to special-case.
+    No shipped window declares it today; it exists for a window whose last minute
+    must be OUTSIDE it (a gate written ``hm < start or hm >= end``).
 
     Note the asymmetry with ``in_collection_window``, whose stop is likewise
     exclusive -- the two mirror different existing predicates and are NOT

@@ -22,9 +22,7 @@ class ScanResult(_Base):
     * **Different score.** options-scanner's ``scoring.py`` is a premium
       seller's model and structurally cannot score a long call, so these are
       scored by ``strategy_scoring`` (Fit+Quality). Keeping them separate means
-      their scores are never ranked against the premium composites; it also
-      leaves the autonomous driver (which reads ``signals_0dte +
-      signals_swing``) blind to them by construction.
+      their scores are never ranked against the premium composites.
     * **Different SHAPE.** These carry the ``strategy_scanner`` normalized
       shape: a ``legs`` list (not flat ``short_strike``/``long_strike``),
       per-contract dollars (×100, not per-share), ``rr`` (a ratio, not
@@ -203,7 +201,7 @@ class ScanFunnel(_Base):
     Its OWN view, for two reasons. The ``ScanResult`` projection would DROP it
     (that contract does not declare the field, and a top-level key a contract
     does not declare is a key the pages lose), and every scan reader — the
-    Scanner page, the day union, the autonomous driver — would otherwise pay for
+    Scanner page, the day union — would otherwise pay for
     bytes it never shows, which is the documented "a cropped payload is not a
     BOUNDED payload" lesson taken one step earlier.
 

@@ -46,7 +46,7 @@ from services._parallel import parallel_map
 log = logging.getLogger(__name__)
 
 # ── R5: stale trade-opening command gate ────────────────────────────────────
-# A trade-OPENING command (``driver_paper_create`` / ``paper_create``) consumed
+# A trade-OPENING command (``paper_create``) consumed
 # long after it was enqueued (e.g. the service was down for hours and the stream
 # replays it on restart) would open on STALE economics — corrupting the measured
 # book. We reject any opening command whose enqueue ``ts`` is older than this.
@@ -54,18 +54,6 @@ log = logging.getLogger(__name__)
 # Missing ts (a legacy command serialized before the field existed) → treated as
 # fresh (never reject a legacy command). See shared/contracts/envelope.Command.ts.
 STALE_OPEN_MAX_AGE_SEC = 180  # 3 minutes
-
-# ── R1: surfaced per-trade open results ──────────────────────────────────────
-# ``compute.open_driver_position`` never raises and returns
-# {"status": "opened"|"rejected"|"error", ...}. Historically the handler THREW
-# THE RESULT AWAY, so a signal-shape drift / broker rejection / MIN_FILL_CREDIT
-# reject showed "executed" in the decision log while the account stayed empty
-# (the [[driver-feeds-raw-scanner-signal-shape]] incident). We now capture every
-# open outcome into this rolling list (single-user, single-process service) and
-# surface it on the driver account view so the /driver page shows opened/rejected/
-# error PER trade, not just "enqueued". Also holds R5 stale-reject records.
-_LAST_OPEN_RESULTS: list[dict] = []
-_MAX_OPEN_RESULTS = 25
 
 # ``paper_adjust`` (the rescue-apply primitives) lives in options-scanner and
 # transitively pulls in ``paper_engine`` → ``scoring``. Importing it at module top
@@ -88,21 +76,6 @@ def _paper_adjust():
         import paper_adjust as _pa
         paper_adjust = _pa
     return paper_adjust
-
-def _record_open_result(result: dict) -> None:
-    """Append one open outcome (R1) to the rolling surfaced-results list.
-
-    Stamps a ``ts`` if absent so the /driver page can order/age them. Trims to the
-    last ``_MAX_OPEN_RESULTS`` (newest last). Pure list bookkeeping — never raises."""
-    try:
-        rec = dict(result or {})
-        rec.setdefault("ts", _dt.datetime.now(_dt.timezone.utc).isoformat())
-        _LAST_OPEN_RESULTS.append(rec)
-        if len(_LAST_OPEN_RESULTS) > _MAX_OPEN_RESULTS:
-            del _LAST_OPEN_RESULTS[:-_MAX_OPEN_RESULTS]
-    except Exception:  # noqa: BLE001 — surfacing must never break the open path.
-        log.exception("recording open result degraded")
-
 
 def _command_age_seconds(command) -> float | None:
     """Age of ``command`` in seconds from its enqueue ``ts``, or None when the ts
@@ -181,8 +154,8 @@ CACHE_SCAN = "cache:options:scan"
 EVENT_SCAN = "events:options:scan"
 
 # The day's accumulated signal union — read by the Scanner page ONLY. Deliberately
-# a SEPARATE key from CACHE_SCAN: the autonomous driver reads CACHE_SCAN and must
-# never be offered a signal that no longer qualifies, so that key stays live-only.
+# a SEPARATE key from CACHE_SCAN, which stays live-only: it is the latest scan, and
+# a signal that no longer qualifies must not be offered from it.
 CACHE_SCAN_DAY = "cache:options:scan_day"
 EVENT_SCAN_DAY = "events:options:scan_day"
 
@@ -247,8 +220,8 @@ _LEDGER_CAPS_LOCK = threading.Lock()
 
 CACHE_PAPER = "cache:options:paper_account"
 EVENT_PAPER = "events:options:paper_account"
-# Manual (scanner-baseline) book performance analytics — the benchmark to compare the
-# driver's Claude-selected book against (equity curve + MAE/MFE; no posture post-mortem).
+# Manual (scanner-baseline) book performance analytics (equity curve + MAE/MFE; no
+# posture post-mortem).
 CACHE_PAPER_ANALYTICS = "cache:options:paper_analytics"
 EVENT_PAPER_ANALYTICS = "events:options:paper_analytics"
 
@@ -274,7 +247,7 @@ CACHE_AUTOCLOSE_ENABLED = "cache:options:autoclose_enabled"
 
 # MANUAL paper account's opt-in break-even lifecycle toggle — the INVERSE
 # default of CACHE_AUTOCLOSE_ENABLED (default OFF; only an explicit True
-# enables). The DRIVER's isolated account never reads this key.
+# enables).
 CACHE_MANUAL_PAPER_LIFECYCLE = "cache:options:manual_paper_lifecycle"
 
 # Date-scoped seen-sets for server-side phone push (Telegram/Discord/Fi-SMS).
@@ -602,18 +575,6 @@ CACHE_RESCUE_SUMMARY = "cache:options:rescue_summary"
 EVENT_RESCUE = "events:options:rescue"
 EVENT_RESCUE_SUMMARY = "events:options:rescue_summary"
 
-# Isolated driver paper account (a SEPARATE DB from the manual paper_account.db —
-# see compute.DRIVER_PAPER_DB). Two views: the account snapshot + open positions,
-# and the standalone performance scorecard. The autonomous Driver enqueues
-# ``driver_paper_create`` and the /driver page reads these views.
-CACHE_DRIVER_PAPER = "cache:options:driver_paper_account"
-EVENT_DRIVER_PAPER = "events:options:driver_paper_account"
-CACHE_DRIVER_PERF = "cache:options:driver_paper_perf"
-EVENT_DRIVER_PERF = "events:options:driver_paper_perf"
-# Driver-book performance ANALYTICS (equity curve + posture post-mortem + MAE/MFE).
-CACHE_DRIVER_ANALYTICS = "cache:options:driver_paper_analytics"
-EVENT_DRIVER_ANALYTICS = "events:options:driver_paper_analytics"
-
 # Defaults for a key the command omits: the Strategy Finder's UNTOUCHED scan
 # (webgui/pages/options/finder_view.py - DEFAULT_DTE "All", the Balanced risk
 # bands, DEFAULT_MIN_CREDIT_PCT), so a partial command runs the scan the page
@@ -728,8 +689,8 @@ def rescan(bus) -> None:
     bus.publish(EVENT_SCAN, {"version": version})
 
     # Day-persistent union for the Scanner page. A SEPARATE key on purpose:
-    # cache:options:scan stays live-only because the autonomous driver reads it
-    # and must never be offered a signal that no longer qualifies. Best-effort —
+    # cache:options:scan stays live-only - it is the latest scan, and a signal that
+    # no longer qualifies must not be offered from it. Best-effort —
     # a merge failure must not break the live publish above.
     try:
         # CT, via the SAME helper push_notify uses below — rescan would otherwise
@@ -1336,8 +1297,7 @@ def run_manage_and_refresh(bus) -> None:
     OFF) into ``compute.run_manage_cycle(lifecycle=...)`` — this is the ONE
     chokepoint both the manual button and the scheduler pass through, so the
     manual paper account's opt-in break-even lifecycle needs no separate wiring
-    at either call site. The DRIVER's isolated account is untouched here (see
-    ``run_driver_manage_and_refresh``, which never reads this flag)."""
+    at either call site."""
     if compute.has_paper_account():
         compute.run_manage_cycle(lifecycle=manual_paper_lifecycle_enabled(bus))
     # Apply the LEDGER's pre-expiry exit rules to its DEBIT positions (D3 — the
@@ -1386,67 +1346,13 @@ def run_paper_entry_and_manage(bus) -> None:
     manage reuses ``run_manage_and_refresh`` (which itself guards on an account
     and republishes the paper account + ledger + rescue-summary views). Shared by
     the scheduler's hourly ``paper_cycle_due`` tick (09:00–14:00 CT) — this is the
-    manual account's cadence; the isolated DRIVER account stays on the 1-min
-    ``manage_due`` slot."""
+    manual account's cadence."""
     if compute.has_paper_account():
         try:
             compute.run_entry_cycle()
         except Exception:
             log.exception("hourly paper entry cycle degraded (manage still runs)")
     run_manage_and_refresh(bus)
-
-
-def refresh_driver_paper(bus) -> None:
-    """Publish the isolated driver paper account view + its performance scorecard.
-
-    Two views — the account snapshot/positions (``cache:options:driver_paper_account``)
-    and the standalone scorecard (``cache:options:driver_paper_perf``) — each on its
-    own change event. The /driver monitor reads them to show the driver's OWN book
-    (day-P&L, open positions) and how it's performing.
-
-    Deliberately does NOT apply the rescue overlay (``_apply_rescue_overlay`` /
-    ``compute.assess_open_positions``): that overlay reads the MANUAL paper account,
-    so tagging the driver's rows with it would attach heat/state from the wrong
-    book. Both ``compute.driver_account_view`` and ``compute.driver_account_perf``
-    are already fully defensive (degrade, never raise).
-
-    R1: the view carries ``last_open_results`` — the rolling per-trade open
-    outcomes (opened/rejected/error, with reason) — so the /driver decision log
-    can show WHY a driver open didn't land, instead of a bare "enqueued"."""
-    # Read the driver book's full positions + snapshot ONCE, shared by all three
-    # views below (was 3× fetch_all_positions + 2× account_snapshot per refresh).
-    positions, snapshot = compute.driver_shared_reads()
-    acct = compute.driver_account_view(all_positions=positions, snapshot=snapshot)
-    if isinstance(acct, dict):
-        # Surface a COPY so a later append can't mutate the cached snapshot.
-        acct["last_open_results"] = list(_LAST_OPEN_RESULTS)
-    va = bus.cache_set(CACHE_DRIVER_PAPER, acct)
-    bus.publish(EVENT_DRIVER_PAPER, {"version": va})
-    perf = compute.driver_account_perf(positions=positions, snapshot=snapshot)
-    vp = bus.cache_set(CACHE_DRIVER_PERF, perf)
-    bus.publish(EVENT_DRIVER_PERF, {"version": vp})
-    # Performance analytics (equity curve / posture post-mortem / MAE-MFE). Defensive —
-    # a bad payload can't block the account/perf republish above.
-    try:
-        analytics = compute.driver_analytics(positions=positions)
-        va2 = bus.cache_set(CACHE_DRIVER_ANALYTICS, analytics)
-        bus.publish(EVENT_DRIVER_ANALYTICS, {"version": va2})
-    except Exception:
-        log.exception("driver analytics publish degraded")
-
-
-def run_driver_manage_and_refresh(bus) -> None:
-    """1-min driver-account manage tick: reprice + auto-close the driver's open
-    positions (``compute.run_driver_manage_cycle`` — no-op-safe if the driver
-    account doesn't exist yet) then republish both driver views.
-
-    The driver analog of ``run_manage_and_refresh`` — shared by the
-    ``driver_paper_manage`` command and the scheduler's 1-min manage tick so both
-    run identical logic (``scheduler._MANAGE_INTERVAL_MIN``, raised from 5 min on
-    2026-07-16 so stops react within the minute). No rescue summary piggyback
-    (that is the manual book's nav badge)."""
-    compute.run_driver_manage_cycle()
-    refresh_driver_paper(bus)
 
 
 def refresh_paper_trades(bus, reprice: bool = True) -> None:
@@ -1594,9 +1500,7 @@ def manual_paper_lifecycle_enabled(bus) -> bool:
     Defaults **False** on a missing / unreadable key — the INVERSE of
     ``autoclose_enabled`` — so only an EXPLICIT ``{"enabled": True}`` (from the
     Settings toggle write-through) opts in; a wiped Memurai reverts to today's
-    plain TAKE_PROFIT-at-+50%. The DRIVER's isolated account never reads this
-    flag (see ``compute.run_driver_manage_cycle``, which always passes
-    ``lifecycle=False``)."""
+    plain TAKE_PROFIT-at-+50%."""
     try:
         env = bus.cache_get(CACHE_MANUAL_PAPER_LIFECYCLE)
         if env is None:
@@ -2852,7 +2756,7 @@ def run_income_open(bus, command) -> None:
     """Open one Income-board candidate into the manual paper ACCOUNT.
 
     ``income_open`` is a trade-OPENING command, so it takes ``_is_stale_open`` —
-    the same gate ``paper_create`` and ``driver_paper_create`` take, for the same
+    the same gate ``paper_create`` takes, for the same
     reason and on the same budget. A consumer group created at id ``0`` replays
     the whole backlog, and this one MUTATES the book: it reserves collateral and
     writes a position. ``_is_stale_side_effect`` would work identically, but it
@@ -3044,11 +2948,7 @@ def handle_command(bus, command) -> None:
     paper trade from a signal then refresh the ledger; ``paper_reload`` → re-read
     the trade ledger;
     ``paper_close``/``paper_delete``/``paper_delete_closed`` → run the lifecycle
-    action then refresh the ledger; ``driver_paper_create`` (args signal, qty) →
-    open ONE guardrail-approved signal into the ISOLATED driver account then
-    republish the driver views; ``driver_paper_manage`` → reprice/auto-close the
-    driver account then republish; ``driver_paper_reset`` → (re)seed the driver
-    account then republish; ``paper_analyze`` → analyze the selected
+    action then refresh the ledger; ``paper_analyze`` → analyze the selected
     trade, cache the result + publish; ``captured_reload`` → re-read open signals;
     ``captured_reprice`` → reprice all open signals, cache the repriced list +
     flags (two views) + publish both; ``captured_close`` → manually close a signal
@@ -3056,8 +2956,7 @@ def handle_command(bus, command) -> None:
     → arm break-even → auto-close) then republish the open + closed views;
     ``set_autoclose`` (args enabled) → write the auto-close master toggle;
     ``set_manual_paper_lifecycle`` (args enabled) → write the MANUAL paper
-    account's opt-in break-even-lifecycle toggle (default OFF; the DRIVER
-    account never reads it);
+    account's opt-in break-even-lifecycle toggle (default OFF);
     ``gamma_refresh`` (args symbol, default ``$SPX``) → recompute the
     Gamma snapshot; ``gamma_explain`` (args symbol) → build the Explain body, cache
     + publish; ``gamma_analyze`` → build the bundled SPX/SPY/QQQ prompt, cache +
@@ -3130,50 +3029,6 @@ def handle_command(bus, command) -> None:
     elif command.type == "paper_reset":
         compute.reset_paper_account(float(command.args.get("starting_balance", 25000.0)))
         refresh_paper_account(bus)
-    elif command.type == "driver_paper_create":
-        # Open ONE guardrail-approved signal into the ISOLATED driver account
-        # (a separate DB from the manual paper account), then republish the driver
-        # views. ``open_driver_position`` lazily seeds the account + is defensive.
-        signal = command.args.get("signal") or {}
-        sym = signal.get("symbol") or signal.get("id")
-        # R5: refuse a trade-opening command consumed long after enqueue (stale
-        # economics on a service-restart replay). Surfaced via the R1 results list.
-        if _is_stale_open(command):
-            age = _command_age_seconds(command)
-            log.warning(
-                "REJECTED stale driver_paper_create for %s: age %.0fs > %ds "
-                "(enqueue ts=%s) — not opening on stale economics",
-                sym, age or -1, STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
-            _record_open_result({"status": "rejected", "reason": "stale_command",
-                                 "symbol": sym, "age_sec": round(age or 0, 1),
-                                 "source": "driver"})
-            refresh_driver_paper(bus)
-        else:
-            # R1: capture the outcome — ``open_driver_position`` NEVER raises and
-            # returns {"status": "opened"|"rejected"|"error", ...}. Log + surface
-            # any non-opened outcome so a silent shape-drift / broker / low-credit
-            # reject can't masquerade as an executed trade in the decision log.
-            result = compute.open_driver_position(
-                signal, int(command.args.get("qty", 1)),
-                context=command.args.get("context")) or {}
-            result.setdefault("symbol", sym)
-            result.setdefault("source", "driver")
-            status = result.get("status")
-            if status != "opened":
-                log.warning(
-                    "driver open did NOT land for %s: status=%s reason=%s error=%s",
-                    sym, status, result.get("reason"), result.get("error"))
-            else:
-                log.info("driver opened %s qty=%s credit=%s",
-                         sym, result.get("qty"), result.get("entry_credit"))
-            _record_open_result(result)
-            refresh_driver_paper(bus)
-    elif command.type == "driver_paper_manage":
-        run_driver_manage_and_refresh(bus)
-    elif command.type == "driver_paper_reset":
-        compute.ensure_driver_account(
-            float(command.args.get("starting_balance", 25000.0)))
-        refresh_driver_paper(bus)
     elif command.type == "paper_create":
         # R5: refuse a stale manual paper-open (a restart replay would open on
         # stale economics). Surfaced via the R1 results list + logged; the ledger
@@ -3186,9 +3041,6 @@ def handle_command(bus, command) -> None:
                 "REJECTED stale paper_create for %s: age %.0fs > %ds (enqueue ts=%s)",
                 sig.get("symbol"), age or -1, STALE_OPEN_MAX_AGE_SEC,
                 getattr(command, "ts", None))
-            _record_open_result({"status": "rejected", "reason": "stale_command",
-                                 "symbol": sig.get("symbol"),
-                                 "age_sec": round(age or 0, 1), "source": "manual"})
             _publish_paper_create(bus, {"status": "stale", "symbol": sig.get("symbol"),
                                         "type": sig.get("type"),
                                         "expiration": sig.get("expiration"),
@@ -3262,7 +3114,7 @@ def handle_command(bus, command) -> None:
     elif command.type == "set_manual_paper_lifecycle":
         # Settings toggle write-through: gate the MANUAL paper account's opt-in
         # break-even lifecycle. Defaults False — only an explicit enable turns it
-        # on; the DRIVER account is never affected.
+        # on.
         enabled = bool((command.args or {}).get("enabled", False))
         bus.cache_set(CACHE_MANUAL_PAPER_LIFECYCLE, {"enabled": enabled})
     elif command.type == "gamma_refresh":

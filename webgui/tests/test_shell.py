@@ -20,7 +20,7 @@ def test_shell_registers_all_pages():
         "/sentiment", "/sentiment/bullbear", "/sentiment/sectors", "/sentiment/rotation", "/sentiment/rrg",
         "/sentiment/momentum",
         "/trade", "/trade/evidence", "/trade/board", "/trade/plan",
-        "/portfolio", "/driver", "/settings",
+        "/portfolio", "/settings",
         "/eod", "/eod/detail", "/x", "/status", "/manuals", "/terminate",
         "/market", "/desk", "/symbol",
     )
@@ -105,7 +105,6 @@ def test_group_children_maps_routes_to_their_group():
     # inside the other.
     assert main._group_children("/trade") == main.TRADE_CHILDREN
     assert main._group_children("/trade/board") == main.TRADE_CHILDREN
-    assert main._group_children("/driver") is None                  # flat page — no strip
     # Strategy Finder left the Options strip for its own rail row (2026-09-13).
     assert main._group_children("/options/swing") is None
     # Rail pages are standalone: promoted OUT of the Options tab strip.
@@ -461,7 +460,6 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
         "Strategy", "Trade Analyzer", "Overview"]
     assert main.breadcrumb_trail("/trade/board") == [
         "Strategy", "Trade Analyzer", "Rank Board"]
-    assert main.breadcrumb_trail("/driver") == ["Strategy", "Claude Trades"]
     assert main.breadcrumb_trail("/options/swing") == ["Strategy", "Strategy Finder"]
     assert main.breadcrumb_trail("/portfolio") == ["Account", "Portfolio"]
     # The bottom-pinned block is not a NAV_SECTIONS caption, so it names its own.
@@ -594,16 +592,16 @@ def test_drawer_icons_are_present_and_distinct():
     """The drawer is a 68px icon rail (hover-to-expand) whose collapsed state shows
     ONLY icons (_NAV_CSS fades the labels to opacity:0) — so each drawer item needs
     a non-empty, distinct icon. ``_nav_link``/``_nav_group_link`` render the
-    ``icon`` arg; the dot is retired. Scope is the 17 drawer items (the 13
+    ``icon`` arg; the dot is retired. Scope is the 16 drawer items (the 12
     NAV_SECTIONS entries — the pinned landing block's Desk and Symbol, plus the
-    11 workflow ones — + the 4 SYSTEM_RAIL rows at the foot); child-page icons
+    10 workflow ones — + the 4 SYSTEM_RAIL rows at the foot); child-page icons
     are not rail affordances (the tab strip renders labels only)."""
     from collections import Counter
 
     items = _drawer_items()
     # Pinned count: all()/set-length are vacuously true on an empty list, so this
     # is the non-vacuity guard. A legitimate new drawer item should bump it.
-    assert len(items) == 17, f"expected 17 drawer items, got {len(items)}: {items}"
+    assert len(items) == 16, f"expected 16 drawer items, got {len(items)}: {items}"
     assert not [l for l, i in items if not i], \
         f"drawer items with no icon: {[l for l, i in items if not i]}"
     dupes = {i: [l for l, x in items if x == i]
@@ -1419,7 +1417,7 @@ def test_strategy_finder_is_a_rail_row_between_options_and_trade_analyzer():
     caption, entries = next(s for s in main.NAV_SECTIONS if s[0] == "STRATEGY")
     names = [e[1] if e[0] == "group" else e[2] for e in entries]
     assert names == ["Strategy Tools", "Options", "Strategy Finder",
-                     "Trade Analyzer", "Claude Trades"]
+                     "Trade Analyzer"]
     assert entries[2] == main._sec_page("/options/swing")
     assert not [r for r, _l, _i in main.OPTIONS_CHILDREN if r == "/options/swing"]
 
@@ -1437,7 +1435,7 @@ def test_nav_section_captions_and_their_derived_counts():
     import main
     assert [c for c, _e in main.NAV_SECTIONS] == [
         None, "MARKETS", "STRATEGY", "ACCOUNT"]
-    assert [len(e) for _c, e in main.NAV_SECTIONS] == [2, 4, 5, 2]
+    assert [len(e) for _c, e in main.NAV_SECTIONS] == [2, 4, 4, 2]
     # The renderer takes the count as an argument; the drawer passes len(entries).
     src = inspect.getsource(main._layout)
     assert "_nav_section_header(caption, len(entries), first=(_i == 0))" in src
@@ -2026,7 +2024,7 @@ def test_probe_records_the_latency_of_services_that_answered(monkeypatch):
         "a refused/timed-out probe must not be counted into the mean"
 
 
-# ── Collapsed-rail section dividers + the static AI pill ────────────────────
+# ── Collapsed-rail section dividers ────────────────────
 def test_section_captions_swap_for_hairlines_in_the_collapsed_rail():
     """A caption is unreadable at 68px, so .nav-sep is the exact INVERSE of the
     .nav-title fade — visible by default, hidden under the same three 'drawer is
@@ -2079,55 +2077,27 @@ def test_status_count_presence_is_a_class_not_set_visibility():
     assert "nav-status-count-on" in inspect.getsource(main._apply_status_card)
 
 
-def test_claude_trades_carries_a_static_ai_pill_that_the_watcher_never_touches():
-    """The AI marker is a fixed label, not watcher state, so it must NOT be
-    registered in _alert_refs — the 2s tick would otherwise blank it on the first
-    pass (there is no _NAV_BADGES entry to write back)."""
-    from nicegui import ui
-
-    import main
-    assert main._NAV_PILLS == {"/driver": "AI"}
-    main._NAV_BADGES.clear()
-    main._alert_refs.clear()
-    with ui.card():
-        main._nav_link("/driver", "Claude Trades", "smart_toy", "/")
-
-    rail_dot, _open = main._alert_refs["/driver"]
-    labels = [c for c in _nav_wrapper_of(rail_dot).parent_slot.parent
-              .default_slot.children if isinstance(c, ui.label)]
-    assert [l.text for l in labels] == ["Claude Trades", "AI"]
-    # The pill rides the label fade, which is what keeps it out of the 68px rail,
-    # but takes its COLOUR from .nav-pill — see the specificity test below.
-    assert "nav-label" in labels[1].classes and "nav-pill" in labels[1].classes
-
-
 def test_rail_colours_outspecify_the_menu_text_and_active_overrides():
-    """Three colours in the rail have to WIN a specificity fight, and all three
+    """Colours in the rail have to WIN a specificity fight, and they all
     lost when first written — caught in a live browser, not by any test here.
 
     ``theme.build_nav_css`` emits ``.nav-drawer a{color:<[menu].text>!important}``
     and ``_NAV_CSS`` itself emits ``.nav-drawer .nav-active .nav-label`` (3
     classes). A Tailwind ``text-[#…]`` utility is ONE class with no !important, so
-    it loses to both: the danger button rendered in menu grey rather than rose,
-    and the AI pill turned white on the one row it ever appears on — the active
-    one. Measured: rgb(152,161,192) and rgb(238,241,246) where rose and blue were
-    intended.
+    it loses to both: the danger button rendered in menu grey rather than rose
+    (measured rgb(152,161,192)). The rail's AI pill had the same fault, and went
+    with the Claude Trades page on 2026-09-22.
 
     The fix is a rule per case, each !important and at least 3 classes. This test
     pins the SHAPE, since the failure is invisible to a DOM-free assertion."""
-    import inspect
     import re
 
     import main
     css = main._NAV_CSS
     for sel in (".nav-drawer .nav-danger .nav-icon",
-                ".nav-drawer .nav-danger .nav-label",
-                ".nav-drawer .nav-pill"):
+                ".nav-drawer .nav-danger .nav-label"):
         assert sel in css, f"{sel} has no colour rule and will inherit menu grey"
     # Each of those rules must carry !important — without it the [menu].text
     # override wins regardless of class count.
-    for block in re.findall(r"\.nav-drawer \.nav-(?:danger|pill)[^{]*\{([^}]*)\}", css):
+    for block in re.findall(r"\.nav-drawer \.nav-danger[^{]*\{([^}]*)\}", css):
         assert "!important" in block, f"rule loses to [menu].text: {{{block}}}"
-    # And the pill must NOT be coloured by a Tailwind utility any more, or the
-    # active-row regression silently returns.
-    assert "text-[#4da3ff]" not in inspect.getsource(main._nav_link)

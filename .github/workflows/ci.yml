@@ -157,9 +157,6 @@ jobs:
           - name: trade_svc
             dir: "."
             cmd: python -m pytest services/trade_svc -q
-          - name: driver_svc
-            dir: "."
-            cmd: python -m pytest services/driver_svc -q
           - name: market_svc
             dir: "."
             cmd: python -m pytest services/market_svc -q

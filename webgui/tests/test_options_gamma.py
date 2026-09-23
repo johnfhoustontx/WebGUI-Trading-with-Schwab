@@ -1721,8 +1721,8 @@ def test_chart_kind_is_total_over_junk():
         gamma.chart_kind(junk)
 
 
-# --- closure-bound wiring (guarded by source inspection, as test_driver_monitor
-# --- does: these live inside render()'s closure and cannot be called directly).
+# --- closure-bound wiring (guarded by source inspection: these live inside
+# --- render()'s closure and cannot be called directly).
 
 def test_tick_refreshes_the_net_prem_status_line():
     """Staleness is a CLOCK function, but np_status_lbl was only recomputed on a

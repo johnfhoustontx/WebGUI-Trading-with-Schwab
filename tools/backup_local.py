@@ -3,7 +3,8 @@
 
 WHY THIS EXISTS. The E:-drive robocopy routine died with the Windows box. After
 the 2026-08-29 cutover the VPS is the ONLY live copy of the trading record:
-``paper_account.db`` and ``paper_account_driver.db`` are the books,
+``paper_account.db`` is the book (and ``paper_account_driver.db`` the removed
+autonomous driver's history),
 ``signals.db`` is what the model said and when, and ``gex_history.db`` is ~1.5 GB
 of intraday dealer positioning that cannot be re-fetched at any price -- Schwab
 serves no history for it. Losing them is not a restore-from-upstream situation;

@@ -23,7 +23,7 @@ its meaning:
   edge lands in ONE lockout bucket, and the per-client backoff (which ramps to
   900 s, where the global one is deliberately 60 s) silently becomes global. A
   bot spraying the advertised hostname would lock the owner out of the UI that
-  arms the trading driver and stops the stack.
+  runs the paper books and stops the stack.
 """
 import pathlib
 import re

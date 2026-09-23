@@ -12,7 +12,7 @@ import pytest
 
 import paper_concentration as pc
 from shared import sectors as _sectors
-from shared.driver_policy import open_risk_dollars
+from shared.book_caps import open_risk_dollars
 
 
 def _frozen_group_of(symbol, sector_of=None):

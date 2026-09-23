@@ -294,7 +294,7 @@ def verify_token(token: str | None, key: str, *, kind: str, epoch: int,
 # quarter of an hour is not an attack scenario, it is a Tuesday. A global
 # penalty as long as the per-client one therefore hands any bored stranger a
 # one-command lockout of the owner, from the owner's own machine, out of the UI
-# that arms their trading driver and stops their stack.
+# that runs their paper books and stops their stack.
 #
 # The counter still has to exist, because its job is NOT brute-force prevention
 # -- the per-client backoff does that -- it is RESOURCE protection, and the

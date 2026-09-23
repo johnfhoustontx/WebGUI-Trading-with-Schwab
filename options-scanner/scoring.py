@@ -355,9 +355,9 @@ def calc_composite_score(signal, iv_data=None, technicals=None,
     # (the factor's stated 0-point) scored 9.1 at 1 DTE and 50.0 at 30 DTE, and
     # its usable spread across a realistic strike range collapsed from 75 points
     # at 30 DTE to 18 at 1 DTE. Within one DTE bucket the bias is monotone, so
-    # RANKING there was preserved -- but driver_svc.build_packet merges
-    # signals_0dte + signals_swing into ONE composite-ranked menu, so the live
-    # decider was comparing across horizons on a biased score.
+    # RANKING there was preserved -- but the (since removed) autonomous driver
+    # merged signals_0dte + signals_swing into ONE composite-ranked menu, so it
+    # compared across horizons on a biased score.
     #
     # IV preference mirrors the strike window: the expiration's OWN ATM IV
     # (stamped as `expiry_iv` by screen_spreads) first, then the symbol-level

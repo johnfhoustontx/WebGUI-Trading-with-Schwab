@@ -6,5 +6,5 @@ def test_new_ports_exposed():
     assert rp.SERVICE_PORTS["options"] == 8211
     assert rp.SERVICE_PORTS["portfolio"] == 8212
     assert rp.SERVICE_PORTS["trade"] == 8213
-    assert rp.SERVICE_PORTS["driver"] == 8214
+    assert "driver" not in rp.SERVICE_PORTS   # removed 2026-09-22; 8214 is free
     assert rp.SERVICE_URLS["sentiment"] == "http://127.0.0.1:8210"

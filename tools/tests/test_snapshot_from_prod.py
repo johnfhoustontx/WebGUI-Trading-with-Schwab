@@ -55,7 +55,6 @@ def test_plan_includes_every_documented_store(tmp_path):
     # 0-byte options-scanner/data/gex_history.db on disk that is NOT the store.
     assert "options-scanner/gex_history.db" in rels
     assert "options-scanner/data/paper_account.db" in rels
-    assert "options-scanner/data/paper_account_driver.db" in rels
     assert "sentiment-dashboard/data/momentum.db" in rels
     assert "services/trade_svc/data/iv_history.db" in rels
     # Without the watchlist the scanner degrades to base symbols and the
@@ -274,84 +273,6 @@ def test_redis_copy_flushes_the_destination_first():
     dst.set("stale:key", b"x")
     snap.copy_redis(src, dst)
     assert not dst.exists("stale:key"), "the destination DB is flushed first"
-
-
-def test_redis_copy_disarms_the_driver_control_key():
-    """A snapshot taken while the autonomous driver was ARMED must not arm dev.
-
-    The live value is a CacheEnvelope ({version, ts, payload}), not the bare
-    control dict — writing the bare shape would break DriverControl's reader.
-    """
-    src, dst = _fake_pair()
-    armed = {"version": 32, "ts": "2026-08-03T01:28:27+00:00",
-             "payload": {"enabled": True, "halted": False, "reason": None,
-                         "halted_date": None, "timestamp": None}}
-    src.set("cache:driver:control", json.dumps(armed).encode())
-    snap.copy_redis(src, dst)
-
-    got = json.loads(dst.get("cache:driver:control"))
-    assert got["payload"]["enabled"] is False
-    # The envelope must stay parseable by the real contract, or read_control
-    # raises inside driver_svc instead of reading "off".
-    from shared.contracts.envelope import CacheEnvelope
-    env = CacheEnvelope.from_json(dst.get("cache:driver:control"))
-    assert env.payload["enabled"] is False
-    assert env.version == 32, "the version must stay in lockstep with :ver"
-
-
-def test_redis_copy_writes_a_disabled_control_key_even_when_prod_has_none():
-    src, dst = _fake_pair()
-    src.set("cache:options:scan", b"payload")
-    snap.copy_redis(src, dst)
-    from shared.contracts.envelope import CacheEnvelope
-    env = CacheEnvelope.from_json(dst.get("cache:driver:control"))
-    assert env.payload["enabled"] is False
-
-
-def test_redis_copy_disarms_even_an_unparseable_control_value():
-    src, dst = _fake_pair()
-    src.set("cache:driver:control", b"not json at all")
-    snap.copy_redis(src, dst)
-    from shared.contracts.envelope import CacheEnvelope
-    env = CacheEnvelope.from_json(dst.get("cache:driver:control"))
-    assert env.payload["enabled"] is False
-
-
-@pytest.mark.parametrize("broken", [
-    {"version": None, "ts": "2026-08-03T01:28:27+00:00"},
-    {"version": 32, "ts": None},
-    {"version": None, "ts": None},
-    {"version": True, "ts": "2026-08-03T01:28:27+00:00"},   # bool is an int subclass
-    {"ts": "2026-08-03T01:28:27+00:00"},                     # version absent
-    {"version": 32},                                          # ts absent
-])
-def test_redis_copy_repairs_a_malformed_control_envelope(broken):
-    """A null version/ts must be REPLACED, not passed through.
-
-    ``setdefault`` does not fire on a key present with value ``None``, so the
-    envelope would reach CacheEnvelope with a null required field and be
-    rejected — leaving driver_svc.read_control RAISING rather than reading
-    "off". This is the one function whose whole job is a disarmed dev.
-    """
-    src, dst = _fake_pair()
-    env = dict(broken)
-    env["payload"] = {"enabled": True, "halted": False}
-    src.set("cache:driver:control", json.dumps(env).encode())
-
-    snap.copy_redis(src, dst)
-
-    written = dst.get("cache:driver:control")
-    # Assert on the BYTES this function writes, not only on what survives the
-    # contract: pydantic coerces a JSON `true` version to 1, so a downstream-only
-    # assertion cannot tell a repaired envelope from an unrepaired one. Caught by
-    # mutation testing (removing the bool carve-out changed nothing observable).
-    fields = json.loads(written)
-    assert type(fields["version"]) is int, "version must be written as a real int"
-    assert type(fields["ts"]) is str, "ts must be written as a real string"
-
-    from shared.contracts.envelope import CacheEnvelope
-    got = CacheEnvelope.from_json(written)
-    assert got.payload["enabled"] is False
 
 
 #############################################

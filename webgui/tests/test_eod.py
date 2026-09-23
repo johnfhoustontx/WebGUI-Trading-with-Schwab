@@ -11,9 +11,6 @@ SAMPLE = {
                               "unrealized_pnl": 42.0}]},
     "paper_trades": {"trades": []},
     "paper_account": {"has_account": False, "snapshot": None},
-    "driver_paper_account": {"has_account": False, "snapshot": None,
-                             "positions": [], "closed_positions": []},
-    "driver_paper_perf": {"total_trades": 0, "realized_pnl": 0.0, "win_rate": None},
 }
 
 
@@ -89,8 +86,9 @@ def test_detail_fragment_includes_all_sections_and_date():
     html = eod.detail_fragment(SAMPLE)
     assert 'class="eod-report"' in html
     assert "2026-06-18" in html
-    for heading in ("Captured Signals", "Paper Trades", "Scanner Signals", "Driver"):
+    for heading in ("Captured Signals", "Paper Trades", "Scanner Signals"):
         assert heading in html
+    assert "Driver" not in html   # the autonomous driver was removed 2026-09-22
     assert "AAPL" in html and "$SPX" in html
 
 
@@ -99,7 +97,7 @@ def test_summary_fragment_tiles_and_detail_link():
     assert 'class="eod-report"' in html
     assert 'href="/eod/detail"' in html
     assert "Scanner signals" in html and "Captured signals" in html
-    assert "Driver win rate" in html  # driver scorecard tile surfaced
+    assert "Driver" not in html   # no driver tiles since 2026-09-22
 
 
 def test_summary_fragment_link_target_is_parameterized():
@@ -183,7 +181,7 @@ def test_generate_writes_standalone_docs_with_relative_link(tmp_path, monkeypatc
 
 
 # --- Task 2: normalize_trades ------------------------------------------------
-def test_normalize_trades_ledger_and_driver():
+def test_normalize_trades_ledger():
     led = eod.normalize_trades([{
         "symbol": "AMD", "strategy": "PCS", "trade_type": "SWING", "status": "OPEN",
         "entry_time": "2026-06-27T10:00:00+00:00", "exit_time": None,
@@ -193,16 +191,6 @@ def test_normalize_trades_ledger_and_driver():
         "symbol": "AMD", "strategy": "PCS", "trade_type": "SWING", "status": "OPEN",
         "entry_date": "2026-06-27", "exit_date": None, "realized_pnl": None,
         "credit": 120.0}
-    drv = eod.normalize_trades([{
-        "symbol": "SPY", "strategy": "CCS", "status": "CLOSED",
-        "entry_ts": "2026-06-26T14:00:00", "exit_ts": "2026-06-27T15:00:00",
-        "realized_pnl": 42.0, "entry_credit": 1.5, "quantity": 2,
-    }], kind="driver")
-    assert drv[0]["entry_date"] == "2026-06-26"
-    assert drv[0]["exit_date"] == "2026-06-27"
-    assert drv[0]["realized_pnl"] == 42.0
-    assert drv[0]["trade_type"] is None            # driver positions carry no horizon
-    assert drv[0]["credit"] == 300.0               # 1.5 * qty 2 * 100
 
 
 # --- Task 3: period_buckets --------------------------------------------------
@@ -290,10 +278,11 @@ def test_breakdown_table_html_renders():
 
 
 # --- Task 6: rewired read_snapshot + summary/detail fragments ----------------
-def test_read_snapshot_includes_driver_views(monkeypatch):
+def test_read_snapshot_reads_no_driver_views(monkeypatch):
     monkeypatch.setattr(eod.bus_client, "read", lambda k: {"_k": k})
     snap = eod.read_snapshot()
-    assert "driver_paper_account" in snap and "driver_paper_perf" in snap
+    assert "paper_account" in snap
+    assert not any(k.startswith("driver") for k in snap)
 
 
 def test_summary_fragment_has_performance_and_toc():
@@ -304,13 +293,11 @@ def test_summary_fragment_has_performance_and_toc():
             {"symbol": "AMD", "strategy": "PCS", "trade_type": "SWING", "status": "OPEN",
              "entry_time": "2026-06-27T10:00:00", "exit_time": None,
              "realized_pnl": None, "entry_credit_total": 120.0}]},
-        "driver_paper_account": {"has_account": True, "snapshot": {"equity": 25000.0},
-                                 "positions": [], "closed_positions": []},
     }
     html = eod.summary_fragment(snap, "/eod/detail", today=_dt.date(2026, 6, 27))
     assert "Performance" in html and "Daily" in html
     assert "eod-toc" in html
-    assert "Manual paper" in html and "Driver" in html   # both books labelled
+    assert "Manual paper" in html and "Captured signals" in html   # books labelled
 
 
 def test_detail_fragment_has_breakdowns():
@@ -319,9 +306,7 @@ def test_detail_fragment_has_breakdowns():
             "paper_trades": {"trades": [
                 {"symbol": "AMD", "strategy": "PCS", "trade_type": "SWING",
                  "status": "OPEN", "entry_time": "2026-06-27T10:00:00",
-                 "realized_pnl": None, "entry_credit_total": 120.0}]},
-            "driver_paper_account": {"has_account": True, "snapshot": {},
-                                     "positions": [], "closed_positions": []}}
+                 "realized_pnl": None, "entry_credit_total": 120.0}]}}
     html = eod.detail_fragment(snap, today=_dt.date(2026, 6, 27))
     assert "By strategy" in html and "By 0-DTE / Swing" in html and "By status" in html
     assert "<details" in html
@@ -407,10 +392,10 @@ def test_normalize_trades_reads_the_captured_shape():
     assert rows[0]["trade_type"] == "0DTE"
 
 
-def test_captured_is_the_third_book():
+def test_captured_is_the_second_book():
     snap = {"captured_perf": {"rows": [_CAP_ROW]}}
     assert [label for label, _n, _s in eod._books(snap)] == [
-        "Manual paper", "Driver", "Captured signals"]
+        "Manual paper", "Captured signals"]
 
 
 def test_the_captured_book_reuses_the_shared_period_buckets():
@@ -736,9 +721,9 @@ def test_both_frames_wear_the_kit_page_and_name_themselves():
         assert f'kit.header("{title}")' in src, fn.__name__
 
 
-def test_neither_frame_claims_a_freshness_stamp_over_eight_views(monkeypatch,
+def test_neither_frame_claims_a_freshness_stamp_over_six_views(monkeypatch,
                                                                  tmp_path):
-    """The page reads EIGHT cache views, so a stamp on one would name the age
+    """The page reads SIX cache views, so a stamp on one would name the age
     of a key that is only part of what is on screen. The fragment's own
     "Generated ... CT" meta line is this page's real freshness, and it stays.
 
@@ -762,7 +747,7 @@ def test_neither_frame_claims_a_freshness_stamp_over_eight_views(monkeypatch,
         hidden = [e for e in host.descendants()
                   if isinstance(e, ui.label) and e.text == "" and not e.visible]
         assert hidden, f"{build.__name__}: kit.header's stamp is not hidden"
-    assert len(eod._CACHE_VIEWS) == 8, "the eight views this reasoning rests on"
+    assert len(eod._CACHE_VIEWS) == 6, "the six views this reasoning rests on"
 
 
 def test_the_module_builds_no_button_dialog_notify_or_table_of_its_own():
@@ -775,7 +760,7 @@ def test_the_module_builds_no_button_dialog_notify_or_table_of_its_own():
 
 def test_the_summary_frame_paints_its_fragment_off_the_event_loop(monkeypatch,
                                                                   tmp_path):
-    """``read_snapshot`` is eight sequential bus reads and ran on the loop at
+    """``read_snapshot`` is six sequential bus reads and ran on the loop at
     page build. It now crosses ``run.io_bound``, so this asserts the THREAD it
     ran on, not the spelling."""
     import threading

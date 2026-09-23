@@ -69,7 +69,6 @@ SQLITE_STORES = [
     "options-scanner/data/trades.db",
     "options-scanner/data/signals.db",
     "options-scanner/data/paper_account.db",
-    "options-scanner/data/paper_account_driver.db",
     "options-scanner/data/gamma_briefings.db",
     "options-scanner/data/daily_trade_log.db",
     "sentiment-dashboard/data/sentiment_intraday.db",
@@ -88,14 +87,11 @@ FILE_STORES = [
 
 # ``cmd:`` covers both the command STREAMS and the ``cmd:*:dead`` dead-letter
 # lists. Neither is a published view: a stream is a queue dev would drain and
-# EXECUTE on startup (a stranded driver_paper_create or rescue_apply would
+# EXECUTE on startup (a stranded paper_create or rescue_apply would
 # double-open a position), and the dead-letter list is prod's ops backlog, which
 # Bus.drain_pending surfaces for review — inheriting it would put prod's
 # incidents in front of a dev reader as if they were dev's.
 REDIS_EXCLUDE_PREFIXES = ("cmd:",)
-
-DRIVER_CONTROL_KEY = "cache:driver:control"
-
 
 @dataclasses.dataclass(frozen=True)
 class Item:
@@ -250,45 +246,6 @@ def copy_file(src, dst):
     shutil.copy2(src, dst)
 
 
-def _disabled_control_envelope(raw):
-    """Prod's control value with ``enabled`` forced false, envelope intact.
-
-    ``cache:driver:control`` is stored as a ``CacheEnvelope``
-    (``{version, ts, payload}``), NOT the bare control dict — writing the bare
-    shape would make ``CacheEnvelope.from_json`` raise inside
-    ``driver_svc.handlers.read_control``. The envelope's ``version`` is preserved
-    so it stays in lockstep with the ``:ver`` side key copied alongside it.
-    Anything unparseable degrades to a minimal valid disabled envelope.
-
-    The ``version``/``ts`` repairs are isinstance checks, NOT ``setdefault``:
-    ``setdefault`` does not fire on a key that is present with value ``None``,
-    so a ``{"version": null}`` envelope would pass through here and then be
-    REJECTED by ``CacheEnvelope`` (both fields are required and typed) — leaving
-    ``read_control`` raising instead of reading "off". Unreachable while prod's
-    ``cache_set`` always writes an int, and it fails closed, but this function's
-    entire job is to guarantee dev comes up disarmed, so it should not depend on
-    the source being well-formed.
-    """
-    disabled = {"enabled": False, "halted": False, "reason": None,
-                "halted_date": None, "timestamp": None}
-    try:
-        env = json.loads(raw) if raw else None
-        if not isinstance(env, dict) or not isinstance(env.get("payload"), dict):
-            raise ValueError("not a cache envelope")
-        payload = dict(env["payload"])
-        payload["enabled"] = False
-        env = dict(env)
-        env["payload"] = payload
-        # bool is an int subclass; a JSON `true` here is not a usable version.
-        if not isinstance(env.get("version"), int) or isinstance(env.get("version"), bool):
-            env["version"] = 1
-        if not isinstance(env.get("ts"), str):
-            env["ts"] = "1970-01-01T00:00:00+00:00"
-    except Exception:  # noqa: BLE001 — absent, non-JSON, or a foreign shape.
-        env = {"version": 1, "ts": "1970-01-01T00:00:00+00:00", "payload": disabled}
-    return json.dumps(env).encode()
-
-
 def redis_connect_kwargs(db):
     """Connection kwargs for one logical DB on the shared Redis server.
 
@@ -313,33 +270,22 @@ def copy_redis(src, dst):
     """DUMP/RESTORE every key from prod's DB into dev's, preserving type + TTL.
 
     DUMP/RESTORE rather than GET/SET so a non-string value (a stream, hash or
-    list) survives as itself. Two deliberate departures from a straight copy:
-
-    * ``cmd:*`` is skipped — see ``REDIS_EXCLUDE_PREFIXES``;
-    * ``cache:driver:control`` is rewritten disabled, so a snapshot taken while
-      the autonomous driver was armed cannot arm it in dev. (Task 6 added an
-      independent guard in ``driver_svc``; two defences is the right number for
-      something that trades.) It is written by hand rather than restored and
-      then overwritten, so prod's armed value is never even transiently present.
+    list) survives as itself. One deliberate departure from a straight copy:
+    ``cmd:*`` is skipped — see ``REDIS_EXCLUDE_PREFIXES``.
 
     The caller is responsible for having checked that ``src`` and ``dst`` are
     different logical DBs — this flushes ``dst`` first.
     """
     dst.flushdb()
-    control_raw = None
     for key in src.scan_iter(match="*", count=500):
         name = key.decode() if isinstance(key, bytes) else str(key)
         if name.startswith(REDIS_EXCLUDE_PREFIXES):
-            continue
-        if name == DRIVER_CONTROL_KEY:
-            control_raw = src.get(key)
             continue
         payload = src.dump(key)
         if payload is None:                      # expired between scan and dump
             continue
         pttl = src.pttl(key)
         dst.restore(key, pttl if pttl and pttl > 0 else 0, payload, replace=True)
-    dst.set(DRIVER_CONTROL_KEY, _disabled_control_envelope(control_raw))
 
 
 # ------------------------------------------------------------------- peer read

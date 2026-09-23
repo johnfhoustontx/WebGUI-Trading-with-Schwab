@@ -270,7 +270,8 @@ def test_the_spinner_survives_the_build_repaint():
     """MUST-NOT-CHANGE, green on both sides of this migration and measured
     before it: portfolio mounted ``build_busy`` on ``panels`` and ``_repaint``
     only sets ``.rows``, so its scrim was never deleted — 1 surviving spinner,
-    against driver.py's 0 on the same probe. ``kit.region`` keeps that property
+    against the Claude Trades page's 0 on the same probe (that page was
+    removed 2026-09-22). ``kit.region`` keeps that property
     by construction: the spinner lives on ``outer`` and only ``content`` is
     ever cleared."""
     els = _render()

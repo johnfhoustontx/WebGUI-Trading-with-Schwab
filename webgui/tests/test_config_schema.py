@@ -156,9 +156,6 @@ def test_exact_entries_win_over_wildcards():
 
 
 def test_cross_checks_catch_combinations():
-    assert cs.cross_check("driver.toml", {("targets", "target_floor"): 600.0,
-                                          ("targets", "daily_target"): 500.0,
-                                          ("targets", "target_cap"): 1000.0})
     assert cs.cross_check("sessions.toml", {("windows", "scan", "start"): "15:00",
                                             ("windows", "scan", "end"): "08:00"})
     assert not cs.cross_check("sessions.toml", {("windows", "scan", "start"): "08:00",
@@ -203,15 +200,15 @@ def test_an_unset_optional_is_not_written():
 
 def test_save_writes_the_override_and_logs_the_change(tmp_path, monkeypatch):
     monkeypatch.setenv("TRADING_CONFIG_OVERRIDES_IN_TESTS", "1")
-    (tmp_path / "driver.toml").write_text("[risk]\ncap = 3000.0\n", encoding="utf-8")
+    (tmp_path / "paper.toml").write_text("[risk]\ncap = 3000.0\n", encoding="utf-8")
     monkeypatch.setattr(store, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(store, "CHANGE_LOG", tmp_path / "local" / "changes.jsonl")
-    store.save("driver.toml", {"risk": {"cap": 2000.0}},
+    store.save("paper.toml", {"risk": {"cap": 2000.0}},
                changes=[("risk › cap", 3000.0, 2000.0)])
-    shipped, over = store.load("driver.toml")
+    shipped, over = store.load("paper.toml")
     assert shipped == {"risk": {"cap": 3000.0}}
     assert over == {"risk": {"cap": 2000.0}}
-    assert store.overridden_count("driver.toml") == 1
+    assert store.overridden_count("paper.toml") == 1
     log = store.recent_changes()
     assert log[0]["key"] == "risk › cap" and log[0]["to"] == 2000.0
 
@@ -226,10 +223,10 @@ def test_the_change_log_stamp_is_central_time_and_carries_its_offset(
     from datetime import datetime
     from zoneinfo import ZoneInfo
     monkeypatch.setenv("TRADING_CONFIG_OVERRIDES_IN_TESTS", "1")
-    (tmp_path / "driver.toml").write_text("[risk]\ncap = 3000.0\n", encoding="utf-8")
+    (tmp_path / "paper.toml").write_text("[risk]\ncap = 3000.0\n", encoding="utf-8")
     monkeypatch.setattr(store, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(store, "CHANGE_LOG", tmp_path / "local" / "changes.jsonl")
-    store.save("driver.toml", {"risk": {"cap": 2000.0}},
+    store.save("paper.toml", {"risk": {"cap": 2000.0}},
                changes=[("risk › cap", 3000.0, 2000.0)])
     at = store.recent_changes()[0]["at"]
     when = datetime.fromisoformat(at)

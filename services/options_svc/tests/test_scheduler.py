@@ -81,46 +81,6 @@ def test_gex_due_juneteenth():
     assert scheduler.gex_due(_ct(2027, 6, 18, 9, 0), None)[0] is False
 
 
-# ── manage_due (paper auto-manage cadence) ──────────────────────────────────
-def test_manage_due_first_tick_in_window():
-    due, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), None)
-    assert due is True and slot is not None
-
-
-def test_manage_due_not_repeated_within_same_minute():
-    _, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), None)
-    due2, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), slot)   # same 1-min slot
-    assert due2 is False and slot2 == slot
-
-
-def test_manage_due_fires_every_minute():
-    """The driver auto-manage reprices the P&L every minute within market hours."""
-    _, slot = scheduler.manage_due(_ct(2026, 6, 15, 9, 0), None)
-    due, slot2 = scheduler.manage_due(_ct(2026, 6, 15, 9, 1), slot)    # next minute → fires
-    assert due is True and slot2 != slot
-
-
-def test_manage_due_before_market_open():
-    due, _ = scheduler.manage_due(_ct(2026, 6, 15, 7, 30), None)
-    assert due is False
-
-
-def test_manage_due_after_market_close():
-    due, _ = scheduler.manage_due(_ct(2026, 6, 15, 15, 30), None)
-    assert due is False
-
-
-def test_manage_due_weekend():
-    # 2026-06-13 is a Saturday.
-    due, _ = scheduler.manage_due(_ct(2026, 6, 13, 9, 0), None)
-    assert due is False
-
-
-def test_manage_due_holiday():
-    due, _ = scheduler.manage_due(_ct(2026, 7, 3, 9, 0), None)
-    assert due is False
-
-
 # ── captured_manage_due (captured auto-manage cadence, 5-min) ────────────────
 def test_captured_manage_due_first_tick_in_window():
     due, slot = scheduler.captured_manage_due(_ct(2026, 6, 15, 9, 0), None)
@@ -347,19 +307,6 @@ def test_session_flip_is_not_vacuously_independent_of_collection():
     assert scheduler.active_session_date(now) == dt.date(2026, 8, 14)
 
 
-# ── Driver-account manage tick wiring (Phase 5 / Task 5.1) ──────────────────
-# The driver's ISOLATED paper account reprices on the SAME 5-min manage cadence
-# as the manual account (it reuses the ``manage_due`` gate — no new cadence). The
-# loop() is an infinite coroutine so it can't be unit-driven; assert (a) the
-# wiring target exists + is callable, and (b) the loop source runs the driver
-# tick inside its OWN try/except so a driver-side failure can't skip the manual
-# refresh or kill the loop.
-def test_driver_manage_handler_is_wired():
-    from services.options_svc import handlers
-
-    assert callable(handlers.run_driver_manage_and_refresh)
-
-
 def test_loop_refreshes_gamma_after_collection():
     import inspect
 
@@ -369,17 +316,6 @@ def test_loop_refreshes_gamma_after_collection():
     assert "refresh_gamma_current" in src
     seg = src.split("collect_gex_history", 1)[1]
     assert "refresh_gamma_current" in seg
-
-
-def test_loop_runs_driver_manage_on_5min_slot():
-    import inspect
-
-    src = inspect.getsource(scheduler.loop)
-    # The DRIVER manage+refresh is invoked on the 5-min manage_due slot, under its
-    # own guarded block. The MANUAL account is NOT managed on this slot anymore.
-    mdue = src.split("m_due, m_slot = manage_due", 1)[1].split("paper_cycle_due", 1)[0]
-    assert "run_driver_manage_and_refresh" in mdue
-    assert "run_manage_and_refresh" not in mdue   # manual moved off the 5-min slot
 
 
 def test_loop_runs_manual_paper_cycle_hourly():

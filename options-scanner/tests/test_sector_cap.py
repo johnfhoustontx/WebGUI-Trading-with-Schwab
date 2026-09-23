@@ -102,7 +102,7 @@ def test_the_candidates_own_risk_counts_toward_the_sector_cap():
 
 def test_a_non_finite_row_is_dropped_rather_than_poisoning_the_sector_sum():
     """The documented pins-the-bound trap: a NaN total makes every ``>`` False and
-    switches the ceiling off. Summed through ``driver_policy.open_risk_dollars``
+    switches the ceiling off. Summed through ``book_caps.open_risk_dollars``
     for exactly this reason, like the symbol sum above it."""
     book = [_pos("MU", float("nan")), _pos("INTC", 1400.0)]
     assert _reject(book, "AMAT", risk=250.0,
@@ -113,7 +113,7 @@ def test_a_non_finite_row_is_dropped_rather_than_poisoning_the_sector_sum():
 
 def test_index_names_are_capped_TOGETHER():
     """Measured at 0.799 mean pairwise correlation - the second-tightest group in
-    the universe. Nine index positions is one market bet; the driver held nine."""
+    the universe. Nine index positions is one market bet."""
     book = [_pos("SPY"), _pos("SPY"), _pos("QQQ")]
     assert _reject(book, "QQQ", max_positions_per_sector=3) == pc.SECTOR_POSITION_CAP
 

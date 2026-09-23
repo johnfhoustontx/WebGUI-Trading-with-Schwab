@@ -1,7 +1,7 @@
 """Settings -> Configuration: every ``config/*.toml`` setting, editable in the app.
 
-What the operator sees is organised by PURPOSE (Trade selection, Exits, the
-driver, Flow alerts, Market hours, Symbols, the Sector map, Commissions), not by
+What the operator sees is organised by PURPOSE (Trade selection, Paper books, Exits,
+Flow alerts, Market hours, Symbols, the Sector map, Commissions), not by
 file; ``config_schema`` supplies every label, help sentence, unit and bound, and
 this module only draws it.
 

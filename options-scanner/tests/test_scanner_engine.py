@@ -2100,7 +2100,7 @@ class TestDirectionalSignals:
             "rather than its own 7-DTE window")
 
     def test_directional_never_leaks_into_the_credit_lists(self, fake_client):
-        """The driver reads signals_0dte + signals_swing. Directional must not be there."""
+        """signals_0dte + signals_swing are the credit lists. Directional must not be there."""
         results = scanner_engine.run_full_scan(fake_client, symbols=self.SYMBOLS)
         credit = results["signals_0dte"] + results["signals_swing"]
         # Non-vacuity: an empty credit list would pass the loop below for free.
@@ -2707,8 +2707,7 @@ class TestWidthSearchSizesAgainstTheRealBook:
 
     def test_the_scan_defaults_to_the_MANUAL_books_cap(self):
         """``run_full_scan``'s captured signals feed the manual entry cycle, whose
-        cap is the one that was being violated. The driver's cap is 12x larger, so
-        a width chosen for $250 stays openable there — the conservative direction."""
+        cap is the one that was being violated."""
         import config_paper
         import scanner_engine as se
 

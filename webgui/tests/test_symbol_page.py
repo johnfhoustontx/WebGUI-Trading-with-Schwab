@@ -132,11 +132,11 @@ def test_the_enqueue_helper_is_called_only_on_navigation_and_refresh():
 
 # ── the poll's view set ────────────────────────────────────────────────────
 
-def test_the_poll_reads_the_eleven_shared_views_plus_this_symbols_dossier():
+def test_the_poll_reads_the_ten_shared_views_plus_this_symbols_dossier():
     views = sp.poll_views("MU")
     assert views[:len(sp.VIEWS)] == sp.VIEWS
     assert views[-1] == "options:dossier:MU"
-    assert len(sp.VIEWS) == 11              # ten + gex_status (wall freshness)
+    assert len(sp.VIEWS) == 10              # nine + gex_status (wall freshness)
 
 
 def test_a_rejected_symbol_polls_no_dossier_view():
@@ -461,7 +461,6 @@ def _world():
              "long_strike": 170.0, "expiration": "2026-10-16",
              "quantity": 1, "unrealized_pnl": 22.0, "rescue_state": "ok"}]},
         "options:paper_trades": {"trades": []},
-        "options:driver_paper_account": {"positions": []},
         "options:captured": {"signals": []},
         "sentiment:regime": {"label": "Rallying", "committed_label": "trending",
                              "confidence": 0.8, "direction": 1},

@@ -14,7 +14,7 @@ per-app UIs (Dash / React / Tk) with one Python web app served on **:8500**.
 | `tests/`        | Smoke tests (pages import + register without a live proxy).       |
 
 Pages: Options (`/`), Sentiment (`/sentiment`), Trade (`/trade`),
-Portfolio (`/portfolio`), Driver (`/driver`).
+Portfolio (`/portfolio`).
 
 ## Running
 

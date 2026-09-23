@@ -3,7 +3,7 @@
 Consumer groups are created at id ``0``, so the FIRST consume against a stream
 holding a backlog delivers the whole history - the documented incident where a
 first launch "burned a day's API budget in one go". The service already refuses a
-stale ``driver_paper_create``/``paper_create`` via ``_is_stale_open``, but two
+stale ``paper_create`` via ``_is_stale_open``, but two
 side-effectful commands were ungated:
 
 * ``rescue_apply``  -> mutates the paper book. Its only guards are "is the

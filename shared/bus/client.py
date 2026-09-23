@@ -301,7 +301,7 @@ class Bus:
         A command handler that raises, or a stream entry that fails to decode,
         is routed here (rather than silently lost) so a human can inspect/replay
         it. We deliberately do NOT auto-re-execute — a stranded trade-opening
-        command (e.g. ``driver_paper_create`` / ``rescue_apply``) re-run could
+        command (e.g. ``paper_create`` / ``rescue_apply``) re-run could
         double-open a position. Stores the raw XADD fields verbatim + why.
         """
         record = {

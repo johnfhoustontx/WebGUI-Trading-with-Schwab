@@ -3,7 +3,7 @@ did not produce a Market Scanner signal.
 
 Its OWN view, not another field on ``cache:options:scan``: the ``ScanResult``
 projection would drop it, and every scan reader — the Scanner page, the day
-union, the autonomous driver — would otherwise pay for bytes it never shows.
+union — would otherwise pay for bytes it never shows.
 
 The invariant these tests exist for is that a funnel fault can never cost the
 scan. It is published AFTER the scan and the day union, inside its own guard,

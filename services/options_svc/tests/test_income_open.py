@@ -225,8 +225,7 @@ def test_an_opened_covered_call_can_actually_be_called_away(paper_db):
 
 def test_a_covered_call_with_no_lot_is_refused(paper_db):
     """No shares, no covered call. Reserving nothing against nothing would be an
-    undefined-risk naked short call in the book, which is the one structure
-    ``driver_policy``'s allowlist refuses on principle."""
+    undefined-risk naked short call in the book."""
     result = compute.open_income_position(_cc_row(), qty=1)
 
     assert result["status"] == "rejected"

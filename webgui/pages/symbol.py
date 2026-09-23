@@ -3,7 +3,7 @@ band to the page that owns that fact.
 
 Design: ``docs/plans/2026-09-17-symbol-dossier-design.md``.
 
-Tier-1 reader. It polls eleven shared cache views plus this symbol's own
+Tier-1 reader. It polls ten shared cache views plus this symbol's own
 ``cache:options:dossier:<SYMBOL>`` on ONE batched ``read_versions`` every two
 seconds (``VIEWS`` / ``REGION_VIEWS``, the Desk's shape), and repaints only the
 bands whose views moved. Every number comes from ``pages/symbol_facts.py`` or a
@@ -189,7 +189,7 @@ def dossier_view(raw):
 VIEWS = ("options:matrix", "options:scan_funnel", "options:scan_day",
          "options:gex_status",
          "options:flow_alerts", "options:paper_account", "options:paper_trades",
-         "options:driver_paper_account", "options:captured",
+         "options:captured",
          "sentiment:regime", "sentiment:bullbear")
 
 # What the header's Updated stamp reads. ⚠ NOT this symbol's dossier: that key
@@ -228,7 +228,8 @@ REGION_VIEWS = {
 POLL_SEC = 2.0
 
 # The first read runs OFF the event loop, on a one-shot timer this soon after
-# the page builds. Measured 2026-09-18: the seed read of all twelve views
+# the page builds. Measured 2026-09-18: the seed read of all twelve views (then;
+# eleven since the driver book was removed)
 # against a 3.98 MB day union takes a median 37.6 ms (fakeredis, real
 # bus_client path), nearly all of it JSON parse — past the ~20 ms a render may
 # block the loop every other tab shares.
@@ -712,15 +713,15 @@ def flow_band(symbol, flow_env):
 
 
 # Which books the manage cycle's rescue overlay tags (the Desk's ``BOOKS``):
-# the automated paper account and the driver. The ledger and the captured tape
-# are never inspected, so their rows print an em-dash, not "OK".
-_RESCUE_BOOKS = ("account", "driver")
+# the automated paper account. The ledger and the captured tape are never
+# inspected, so their rows print an em-dash, not "OK".
+_RESCUE_BOOKS = ("account",)
 _BOOK_LABEL = {"account": "PAPER ACCOUNT", "ledger": "LEDGER",
-               "driver": "CLAUDE", "captured": "CAPTURED"}
+               "captured": "CAPTURED"}
 
 
 def position_band(symbol, books):
-    """Open rows in the symbol across all four books, or the absence line."""
+    """Open rows in the symbol across all three books, or the absence line."""
     sym = clean_symbol(symbol)
     books = books if isinstance(books, dict) else {}
     if all(books.get(v) is None for v in _BOOK_VIEWS):

@@ -232,8 +232,7 @@ def dealer_regime(spot, flip, iv_state, trend_state, mins_to_close,
       'neutral'        - positive/negative gamma, no setup active
       'na'             - spot/flip unavailable
 
-    Context/label only -- it never sizes or places a trade (mirrors the driver's
-    ``market_read``). Precedence is by urgency: the negative-gamma cascade wins,
+    Context/label only -- it never sizes or places a trade. Precedence is by urgency: the negative-gamma cascade wins,
     then the vol-crush, then the pin, then the grind. ``mins_to_close`` is minutes
     until the 4pm-ET cash close (None off-hours -> the time-gated setups can't
     fire). ``wall_dist_pct`` = |spot - nearest big net-delta strike| / spot * 100

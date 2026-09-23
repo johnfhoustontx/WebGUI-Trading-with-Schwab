@@ -18,8 +18,8 @@ Two cache views are read, and the split is deliberate:
   truncated?}``. **``date`` is a GATE, not decoration** — see ``day_is_today``.
 * ``options:scan`` — the LIVE, last-scan-only view (``ScanResult.model_dump()``),
   read ONLY for the bottom status bar's scan timestamp / errors / warnings, which
-  the day union does not carry. It stays live-only because the autonomous driver
-  reads it and must never be offered a signal that no longer qualifies.
+  the day union does not carry. It stays live-only: it is the latest scan, and a
+  signal that no longer qualifies must not be offered from it.
 
 The pure display transforms (``signal_columns``, ``signal_rows``,
 ``directional_columns``, ``directional_rows``, ``stamp_stale``,

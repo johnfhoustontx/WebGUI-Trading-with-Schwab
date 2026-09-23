@@ -295,7 +295,7 @@ def recommend(ctx):
          (``ctx["lifecycle"]`` — captured signals, via ``build_mark``) ARM
          break-even and HOLD ("break-even armed"), riding to full credit under the
          break-even stop; the caller persists ``be_armed``. NON-lifecycle callers
-         (the manual-paper + driver manage cycles, via
+         (the manual-paper manage cycle, via
          ``paper_engine.run_manage_cycle``) TAKE_PROFIT (``TARGET_HIT``) — the
          pre-lifecycle behavior, so the captured-autoclose rework never changes how
          those separate books exit.
@@ -381,10 +381,10 @@ def recommend(ctx):
     # Rule 5: +50% credit captured, not yet armed. LIFECYCLE callers (captured
     # signals, via build_mark, which sets ctx["lifecycle"]) ARM break-even and HOLD,
     # riding the trade to full credit under the break-even stop. NON-lifecycle
-    # callers — the manual paper account AND the driver's isolated account, both via
-    # paper_engine.run_manage_cycle with a minimal ctx — keep the pre-lifecycle
-    # TAKE_PROFIT: the captured-autoclose rework is scoped to captured signals and
-    # must not change how those separate books exit (they have their own managers).
+    # callers — the manual paper account, via paper_engine.run_manage_cycle with a
+    # minimal ctx — keep the pre-lifecycle TAKE_PROFIT: the captured-autoclose
+    # rework is scoped to captured signals and must not change how that separate
+    # book exits (it has its own manager).
     if pnl >= tp_frac * credit_total and not ctx.get("be_armed"):
         if ctx.get("lifecycle"):
             return {"action": "HOLD",
@@ -538,7 +538,7 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
         # Lifecycle inputs (threaded from the row + reprice + caller's be_level).
         # build_mark is the captured-signal path, so it opts INTO the lifecycle:
         # +50% arms break-even (HOLD) rather than the non-lifecycle TAKE_PROFIT that
-        # the manual-paper / driver manage cycles keep.
+        # the manual-paper manage cycle keeps.
         "lifecycle": True,
         "be_armed": bool(signal_row.get("be_armed")),
         "be_level": be_level,

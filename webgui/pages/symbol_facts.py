@@ -65,7 +65,7 @@ IV_HV_LOW = 0.9
 _EM_DAYS = {"day": 1, "week": 7}
 _DAYS_PER_YEAR = 365
 
-# ── the four books ──────────────────────────────────────────────────────────
+# ── the three books ──────────────────────────────────────────────────────────
 # (tag, view, list key). The ledger is included here where the Desk leaves it
 # out: the Desk totals a live P&L and the ledger carries no live mark, but a
 # dossier's question is "do I hold anything in this name" — and a Paper-button
@@ -73,7 +73,6 @@ _DAYS_PER_YEAR = 365
 BOOK_VIEWS = (
     ("account", "options:paper_account", "positions"),
     ("ledger", "options:paper_trades", "trades"),
-    ("driver", "options:driver_paper_account", "positions"),
     ("captured", "options:captured", "signals"),
 )
 
@@ -223,7 +222,7 @@ def merge_facts(cached, fetched):
 
 
 def position_rows(symbol, books):
-    """Open rows in ``symbol`` from all four books, each tagged with ``book``.
+    """Open rows in ``symbol`` from all three books, each tagged with ``book``.
 
     ``books`` maps a view name (``BOOK_VIEWS``) to its payload. Open means the
     Desk's rule (``desk._is_open``: not CLOSED / EXPIRED, a missing status is

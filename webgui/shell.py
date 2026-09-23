@@ -151,7 +151,7 @@ _P = theme.THEME["palette"]
 # Global table chrome (app-wide standard): EVERY data table gets a fixed (sticky)
 # header over a bounded, scrolling body, so the column headers stay visible as a long
 # table scrolls. Injected once per page by each entrypoint. Per-page table CSS
-# (.paper-table / .captured-table / .driver-table) may still set its own max-height —
+# (.paper-table / .captured-table) may still set its own max-height —
 # its more-specific selector + later injection win over this baseline.
 TABLE_CSS = f"""
 .q-table__middle {{ max-height: 65vh; }}

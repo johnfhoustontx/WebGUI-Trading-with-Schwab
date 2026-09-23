@@ -4,7 +4,7 @@ The Strategy Finder builds them for comparison; nothing can open one.
 Design: docs/plans/2026-09-12-straddle-strangle-design.md.
 
 The gap assessment's "Don't" list is explicit: *"Don't open undefined-risk
-structures in paper or the driver. That means naked calls, short straddles and
+structures in paper. That means naked calls, short straddles and
 short strangles."* The templates are buildable on the Calculator and the
 Simulator; these are the guarantees that they cannot leak into anything that
 trades.
@@ -96,12 +96,6 @@ def test_the_taxonomy_does_not_classify_one_as_tradeable():
         assert not structures.is_single_leg(code), code
         assert not structures.is_covered_call(code), code
         assert not structures.is_short_put(code), code
-
-
-def test_none_is_in_the_drivers_structure_allowlist():
-    from shared.driver_policy import ALLOWED
-    for code in FOUR:
-        assert code not in ALLOWED, code
 
 
 def test_none_has_an_exit_rule_table():

@@ -10,7 +10,7 @@ rebuild periodically — or immediately when the GUI "Refresh" command set the
 
 The blocking ``loop`` + ``_stream_worker`` own their sleep/SSE cadence and run
 the BLOCKING handlers in the default executor so the event loop stays responsive
-(the same shape as the driver loop). The pure decision helper ``rebuild_due`` and
+(the same shape as the other services' loops). The pure decision helper ``rebuild_due`` and
 the tick application ``apply_tick_to_state`` are unit-tested; the loop is wired
 into the scaffold as ``make_app(scheduler=loop)``.
 """

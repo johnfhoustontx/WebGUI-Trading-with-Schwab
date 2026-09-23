@@ -390,19 +390,17 @@ def _sig(sid, **over):
     return s
 
 
-def test_position_rows_merges_both_accounts_with_a_source_chip():
-    rows = d.position_rows({"positions": [_pos("p1")]},
-                           {"positions": [_pos("c1")]})
-    assert [r["source"] for r in rows] == ["PAPER", "CLAUDE"]
-    assert [r["position_id"] for r in rows] == ["p1", "c1"]
+def test_position_rows_tags_paper_rows_with_their_source_chip():
+    rows = d.position_rows({"positions": [_pos("p1"), _pos("p2")]})
+    assert [r["source"] for r in rows] == ["PAPER", "PAPER"]
+    assert [r["position_id"] for r in rows] == ["p1", "p2"]
 
 
 # ── the captured book ────────────────────────────────────────────────────────
-def test_position_rows_merges_the_captured_book_as_a_third_source():
+def test_position_rows_merges_the_captured_book_as_a_second_source():
     rows = d.position_rows({"positions": [_pos("p1")]},
-                           {"positions": [_pos("c1")]},
                            {"signals": [_sig("s1")]})
-    assert sorted(r["source"] for r in rows) == ["CAPTURED", "CLAUDE", "PAPER"]
+    assert sorted(r["source"] for r in rows) == ["CAPTURED", "PAPER"]
     cap = [r for r in rows if r["source"] == "CAPTURED"][0]
     assert cap["position_id"] == "s1"          # signal_id, not position_id
 
@@ -411,19 +409,19 @@ def test_position_rows_reads_the_captured_payloads_own_list_key():
     """``cache:options:captured`` publishes ``signals``, NOT ``positions``. A
     shared "positions" lookup would find nothing and the book would vanish from
     the panel with no error anywhere."""
-    assert d.position_rows(None, None, {"signals": [_sig("s1")]}) != []
-    assert d.position_rows(None, None, {"positions": [_sig("s1")]}) == []
+    assert d.position_rows(None, {"signals": [_sig("s1")]}) != []
+    assert d.position_rows(None, {"positions": [_sig("s1")]}) == []
 
 
 def test_captured_rows_have_no_quantity_rather_than_a_default_of_one():
     """A captured signal was never sized. Printing 1 would state a position
     size this app does not have — and would look exactly like a real
     one-contract position, including inside any total built off the column."""
-    row = d.position_rows(None, None, {"signals": [_sig("s1")]})[0]
+    row = d.position_rows(None, {"signals": [_sig("s1")]})[0]
     assert row["quantity"] is None
     # Even if a stray quantity turns up in the payload, an unsized book must not
     # start reporting one.
-    stray = d.position_rows(None, None, {"signals": [_sig("s", quantity=4)]})[0]
+    stray = d.position_rows(None, {"signals": [_sig("s", quantity=4)]})[0]
     assert stray["quantity"] is None
 
 
@@ -431,14 +429,13 @@ def test_captured_rows_flag_is_an_em_dash_not_an_assertion_of_health():
     """The rescue overlay only tags the paper account, so a captured signal has
     no ``rescue_state``. Falling through to the "OK" default would print a clean
     bill of health nobody issued."""
-    row = d.position_rows(None, None, {"signals": [_sig("s1")]})[0]
+    row = d.position_rows(None, {"signals": [_sig("s1")]})[0]
     assert row["flag"] == d.UNTAGGED_FLAG == "—"
     assert row["flag"] != d._DEFAULT_FLAG
     assert row["rescue_state"] is None and row["heat"] is None
     # And it is not merely a lookup miss: the same missing state inside a TAGGED
     # book still means healthy.
-    paper = d.position_rows({"positions": [_pos("p", rescue_state=None)]},
-                            None)[0]
+    paper = d.position_rows({"positions": [_pos("p", rescue_state=None)]})[0]
     assert paper["flag"] == "OK"
 
 
@@ -450,7 +447,7 @@ def test_position_flag_needs_to_be_told_which_kind_of_missing_it_is():
 
 
 def test_captured_rows_carry_the_three_money_fields():
-    row = d.position_rows(None, None, {"signals": [_sig("s1")]})[0]
+    row = d.position_rows(None, {"signals": [_sig("s1")]})[0]
     assert row["entry_credit"] == 1.59
     assert row["current_value"] == 0.5
     assert row["unrealized_pnl"] == 109.0
@@ -462,7 +459,7 @@ def test_captured_rows_use_the_live_dte_not_the_entry_day_snapshot():
     found. Printing it would give every captured row a stale, too-large number
     while the paper rows beside it counted down."""
     from pages.options import paper
-    row = d.position_rows(None, None,
+    row = d.position_rows(None,
                           {"signals": [_sig("s1", expiration="2026-09-19",
                                             dte_at_entry=99)]})[0]
     assert row["dte"] == paper._dte_from_expiration("2026-09-19")
@@ -471,28 +468,28 @@ def test_captured_rows_use_the_live_dte_not_the_entry_day_snapshot():
 def test_captured_rows_exclude_closed_signals():
     view = {"signals": [_sig("open"), _sig("shut", status="CLOSED"),
                         _sig("gone", status="EXPIRED")]}
-    assert [r["position_id"] for r in d.position_rows(None, None, view)] == \
+    assert [r["position_id"] for r in d.position_rows(None, view)] == \
         ["open"]
 
 
 def test_position_rows_still_works_without_a_captured_view():
-    """The third argument is optional, so nothing that reads the two paper books
-    alone had to change."""
-    assert d.position_rows({"positions": [_pos("p")]}, None)[0]["source"] == \
+    """The captured argument is optional, so a caller reading the paper book
+    alone need pass nothing else."""
+    assert d.position_rows({"positions": [_pos("p")]})[0]["source"] == \
         "PAPER"
-    assert d.position_rows(None, None, None) == []
-    assert d.position_rows(None, None, {"signals": "nonsense"}) == []
+    assert d.position_rows(None, None) == []
+    assert d.position_rows(None, {"signals": "nonsense"}) == []
 
 
 def test_every_book_has_a_chip_and_a_page_to_open():
     """A book with no route would strand its rows on the Desk, and a book
     sharing another's chip would make a merged row unreadable."""
     sources = [b["source"] for b in d.BOOKS]
-    assert sources == ["PAPER", "CLAUDE", "CAPTURED"]
+    assert sources == ["PAPER", "CAPTURED"]
     assert set(d.POSITION_ROUTES) == set(sources)
-    assert len({d.source_chip_class(s) for s in sources}) == 3
+    assert len({d.source_chip_class(s) for s in sources}) == 2
     # An unknown source must not borrow a real book's chip — otherwise a
-    # malformed row would render as one of the three.
+    # malformed row would render as one of the two.
     assert d.source_chip_class("nonsense") not in \
         {d.source_chip_class(s) for s in sources}
 
@@ -515,7 +512,7 @@ def test_position_rows_sorts_the_at_risk_states_above_everything_else():
         _pos("watch", rescue_state="watch", expiration="2026-08-21"),
         _pos("tested", rescue_state="tested", expiration="2026-12-31"),
         _pos("rescue", rescue_state="critical", expiration="2026-12-31"),
-    ]}, None)
+    ]})
     assert [r["position_id"] for r in rows][:2] == ["rescue", "tested"]
     # WATCH is a heads-up, not trouble — it does not jump the queue.
     assert [r["position_id"] for r in rows][2:] == ["calm", "watch"]
@@ -527,7 +524,7 @@ def test_position_rows_puts_held_trades_above_advisory_signals():
     signal, and a panel titled POSITIONS showed no positions at all. Money at
     risk outranks a suggestion nobody acted on."""
     rows = d.position_rows(
-        {"positions": [_pos("held", expiration="2027-01-15")]}, None,
+        {"positions": [_pos("held", expiration="2027-01-15")]},
         {"signals": [_sig(f"s{i}", expiration="2026-08-20") for i in range(5)]})
     assert rows[0]["position_id"] == "held"
     assert all(r["source"] == "CAPTURED" for r in rows[1:])
@@ -536,13 +533,13 @@ def test_position_rows_puts_held_trades_above_advisory_signals():
 def test_urgency_outranks_the_held_tier():
     """The held tier sits BELOW at-risk, never above it: a tested captured
     signal would still lead a calm paper position. (Today that ordering is
-    unreachable from real data — see the test below — so this pins it on the two
-    books that DO carry states, where an inverted key order would show up as a
+    unreachable from real data — see the test below — so this pins it on the
+    book that DOES carry states, where an inverted key order would show up as a
     calm row leading a tested one.)"""
     rows = d.position_rows(
         {"positions": [_pos("calm", rescue_state="ok",
-                            expiration="2026-08-20")]},
-        {"positions": [_pos("tested", rescue_state="tested",
+                            expiration="2026-08-20"),
+                       _pos("tested", rescue_state="tested",
                             expiration="2027-01-15")]})
     assert [r["position_id"] for r in rows] == ["tested", "calm"]
 
@@ -554,7 +551,7 @@ def test_an_untagged_book_can_never_enter_the_urgency_tier():
     on a state it refuses to display would be arguing with itself."""
     rows = d.position_rows(
         {"positions": [_pos("calm", rescue_state="ok",
-                            expiration="2026-08-20")]}, None,
+                            expiration="2026-08-20")]},
         {"signals": [_sig("stray", rescue_state="critical",
                           expiration="2026-08-19")]})
     assert rows[0]["position_id"] == "calm"     # held, calm tier
@@ -570,7 +567,7 @@ def test_position_rows_breaks_ties_on_the_nearest_expiry():
         _pos("far", expiration="2027-01-15", unrealized_pnl=-500.0),
         _pos("near", expiration="2026-08-20", unrealized_pnl=-5.0),
         _pos("mid", expiration="2026-10-16", unrealized_pnl=-50.0),
-    ]}, None)
+    ]})
     assert [r["position_id"] for r in rows] == ["near", "mid", "far"]
 
 
@@ -579,7 +576,7 @@ def test_position_rows_sorts_an_unreadable_expiry_last_not_first():
     rows = d.position_rows({"positions": [
         _pos("junk", expiration="soon"),
         _pos("dated", expiration="2027-01-15"),
-    ]}, None)
+    ]})
     assert [r["position_id"] for r in rows] == ["dated", "junk"]
 
 
@@ -590,7 +587,7 @@ def test_the_cap_never_hides_a_trade_in_trouble():
                             for i in range(30)]}
     paper = {"positions": [_pos("hot", rescue_state="critical",
                                 expiration="2027-06-18")]}
-    rows = d.position_rows(paper, None, captured)
+    rows = d.position_rows(paper, captured)
     assert len(rows) == 31
     visible = rows[:d.POSITION_ROWS_N]
     assert visible[0]["position_id"] == "hot"
@@ -610,7 +607,7 @@ def test_positions_summary_totals_the_whole_book_not_the_visible_slice():
              unrealized_pnl=-100.0) for i in range(n_risk)]}
     captured = {"signals": [_sig(f"s{i}", expiration="2026-08-20",
                                  unrealized_pnl=10.0) for i in range(30)]}
-    rows = d.position_rows(paper, None, captured)
+    rows = d.position_rows(paper, captured)
     total = n_risk + 30
     assert len(rows) == total > d.POSITION_ROWS_N
 
@@ -630,39 +627,36 @@ def test_positions_summary_totals_the_whole_book_not_the_visible_slice():
 def test_position_rows_excludes_closed_positions():
     view = {"positions": [_pos("open"), _pos("shut", status="CLOSED"),
                           _pos("gone", status="EXPIRED")]}
-    assert [r["position_id"] for r in d.position_rows(view, None)] == ["open"]
+    assert [r["position_id"] for r in d.position_rows(view)] == ["open"]
 
 
 def test_position_rows_maps_the_rescue_state_to_a_flag():
     flags = {"ok": "OK", "watch": "WATCH", "tested": "AT RISK",
              "critical": "RESCUE"}
     for state, word in flags.items():
-        row = d.position_rows({"positions": [_pos("p", rescue_state=state)]},
-                              None)[0]
+        row = d.position_rows({"positions": [_pos("p", rescue_state=state)]})[0]
         assert row["flag"] == word, state
     # An unknown / missing state falls back to the healthy word rather than
     # inventing an alarm.
-    assert d.position_rows({"positions": [_pos("p", rescue_state=None)]},
-                           None)[0]["flag"] == "OK"
+    assert d.position_rows({"positions": [_pos("p", rescue_state=None)]})[0]["flag"] == "OK"
 
 
 def test_position_rows_dte_uses_the_paper_pages_own_helper():
     """Same helper, same answer — the Desk must not carry a second calendar."""
     from pages.options import paper
-    row = d.position_rows({"positions": [_pos("p", expiration="2026-09-19")]},
-                          None)[0]
+    row = d.position_rows({"positions": [_pos("p", expiration="2026-09-19")]})[0]
     assert row["dte"] == paper._dte_from_expiration("2026-09-19")
 
 
 def test_position_rows_dte_is_none_for_an_unparseable_expiration():
-    row = d.position_rows({"positions": [_pos("p", expiration="soon")]}, None)[0]
+    row = d.position_rows({"positions": [_pos("p", expiration="soon")]})[0]
     assert row["dte"] is None
 
 
 def test_position_rows_is_empty_for_missing_views():
-    assert d.position_rows(None, None) == []
+    assert d.position_rows(None) == []
     assert d.position_rows({}, {}) == []
-    assert d.position_rows({"positions": "nonsense"}, None) == []
+    assert d.position_rows({"positions": "nonsense"}) == []
 
 
 def test_positions_summary_counts_open_unrealized_and_at_risk():
@@ -671,7 +665,7 @@ def test_positions_summary_counts_open_unrealized_and_at_risk():
         _pos("b", unrealized_pnl=-40.0, rescue_state="watch"),
         _pos("c", unrealized_pnl=25.5, rescue_state="tested"),
         _pos("d", unrealized_pnl=-5.5, rescue_state="critical"),
-    ]}, None)
+    ]})
     s = d.positions_summary(rows)
     assert s["open"] == 4
     assert abs(s["unrealized"] - 90.0) < 1e-9
@@ -690,7 +684,7 @@ def test_positions_summary_skips_a_non_finite_pnl_rather_than_poisoning_the_tota
     rows = d.position_rows({"positions": [
         _pos("a", unrealized_pnl=50.0),
         _pos("b", unrealized_pnl=float("nan")),
-    ]}, None)
+    ]})
     assert d.positions_summary(rows)["unrealized"] == 50.0
 
 
@@ -915,7 +909,7 @@ def test_every_class_map_covers_its_whole_finite_domain_distinctly():
     flags = list(d.POSITION_FLAGS.values())
     assert len(set(d.flag_chip_class(f) for f in flags)) == len(set(flags))
     assert d.source_chip_class(d.PAPER_SOURCE) != \
-        d.source_chip_class(d.CLAUDE_SOURCE)
+        d.source_chip_class(d.CAPTURED_SOURCE)
     ivs = ("spiking", "collapsing", "stable", "na")
     assert len(set(d.iv_state_class(s) for s in ivs)) == len(ivs)
 
@@ -1978,7 +1972,6 @@ def _full_payloads():
         "options:flow_alerts": {"alerts": [_alert(1)]},
         "options:paper_account": {"positions": [_pos("p1",
                                                      rescue_state="tested")]},
-        "options:driver_paper_account": {"positions": []},
     }
 
 
@@ -3189,7 +3182,7 @@ def test_a_new_position_speaks_its_contract_from_the_raw_payload():
     s = d.arrival_state()
     s["first"] = False
     said = d.fold_position_arrivals(
-        s, d.position_rows({"positions": [raw]}, None), now=1.0)
+        s, d.position_rows({"positions": [raw]}), now=1.0)
     assert said == ("S P Y. New position, put credit spread. "
                     "6 hundred, 5 95, 9 - 17, entry 1 dollar 35 credit.")
 

@@ -35,13 +35,12 @@ def _const(rel_path, name):
 # --- the five market-regime display words -----------------------------------
 # Renamed 2026-08-14 (Mean Reversion -> Balanced, Choppy -> Whipsaw, Volatile ->
 # Stressed) while the internal KEYS stayed - they are the RegimeState contract,
-# the regime_intraday DB columns and the driver packet. Root CLAUDE.md says
-# "keep them in step" across four tiers; one rename in one tier used to drift
+# the regime_intraday DB columns. Root CLAUDE.md says
+# "keep them in step" across the tiers; one rename in one tier used to drift
 # silently until a user noticed a screen disagreeing with another.
 
 REGIME_SOURCE = "sentiment-dashboard/scoring/market_regime.py"
 REGIME_MIRRORS = [
-    ("services/driver_svc/compute.py", "_REGIME_LABELS"),
     ("services/options_svc/market_console.py", "REGIME_LABELS"),
     ("webgui/pages/regime_mix.py", "REGIME_LABELS"),
 ]
@@ -59,7 +58,7 @@ def test_regime_display_words_agree_across_every_tier():
 
 def test_the_regime_keys_are_the_documented_five():
     """Non-vacuity, and a guard on the OTHER half: the keys are a contract
-    (RegimeState, the regime_intraday columns, the driver packet), so a key
+    (RegimeState, the regime_intraday columns), so a key
     change is a migration, not a rename."""
     assert set(_const(REGIME_SOURCE, "REGIME_DISPLAY")) == {
         "mean_reversion", "trending", "breakout", "choppy", "crisis"}

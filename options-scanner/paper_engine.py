@@ -388,7 +388,7 @@ def net_realized_pnl(gross, pos, qty, *, expired):
     opening commission (a spread that expires is not actively closed), i.e. half
     the round-trip. Folding the whole lifecycle fee into the realized figure at
     close makes both the stored position row AND account cash net-of-fees (``_close``
-    writes both from this one value), so the driver scorecard reflects true P&L.
+    writes both from this one value), so the scorecard reflects true P&L.
     Defensive: any failure returns ``gross`` unchanged — commission math must never
     break a close.
     """
@@ -695,7 +695,7 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
     live CT clock; inject it for deterministic tests.
 
     ``lifecycle`` (default False — today's plain TAKE_PROFIT-at-+50% behavior,
-    used by both the manual paper account and the driver's isolated account)
+    the manual paper account's default)
     opts THIS call into the captured-style break-even lifecycle: the first time
     a position's pnl reaches +50% of credit it ARMS break-even (persisted via
     ``paper_account_db.set_be_armed``) and HOLDs instead of closing, riding
@@ -795,9 +795,9 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
         # only the lifecycle branch supplies.
         #
         # ``entry_short_delta`` belongs there for the same reason, and sat in the
-        # LIFECYCLE branch alone until 2026-09-11 — where neither book that
-        # trades could reach it, since lifecycle is off by default for the manual
-        # account and always off for the driver. So the delta stop always used
+        # LIFECYCLE branch alone until 2026-09-11 — where the book that trades
+        # could not reach it, since lifecycle is off by default for the manual
+        # account. So the delta stop always used
         # the absolute ceiling: too tight for a rich short, far too loose for a
         # cheap one. None still means "not recorded" and keeps that fallback,
         # which is every position opened before the column existed.
@@ -816,9 +816,8 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
             # has taken both of these since it was written and NOTHING ever passed
             # them, so the ratchet was inert whatever the TOML said.
             #
-            # LIFECYCLE ONLY, deliberately: the driver passes ``lifecycle=False``
-            # and the manual book's toggle defaults off, so neither book that
-            # trades today reaches this — flipping that toggle is a separate,
+            # LIFECYCLE ONLY, deliberately: the manual book's toggle defaults
+            # off, so the book that trades today does not reach this — flipping that toggle is a separate,
             # measured operator decision (see the design doc's finding 2).
             #
             # A missing peak or a zero credit yields None, and

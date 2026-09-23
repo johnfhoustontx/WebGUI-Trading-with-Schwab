@@ -35,10 +35,10 @@ def test_compute_no_scoring_guard():
     assert not hasattr(compute, "options_scoring")
 
 
-# ── R6: reconcile buying power for both books ────────────────────────────────
-def test_reconcile_paper_buying_power_both_books(monkeypatch):
-    """``reconcile_paper_buying_power`` reconciles BOTH the manual (default DB)
-    and the driver (DRIVER_PAPER_DB) accounts, returning the per-book drift."""
+# ── R6: reconcile buying power ───────────────────────────────────────────────
+def test_reconcile_paper_buying_power_manual_book(monkeypatch):
+    """``reconcile_paper_buying_power`` reconciles the manual (default DB) account
+    and returns its drift under ``manual``."""
     import paper_account_db
 
     seen = []
@@ -51,13 +51,12 @@ def test_reconcile_paper_buying_power_both_books(monkeypatch):
 
     out = compute.reconcile_paper_buying_power()
 
-    assert out == {"manual": 200.0, "driver": 50.0}
-    # None (default DB) for manual, DRIVER_PAPER_DB for the driver book.
-    assert None in seen and compute.DRIVER_PAPER_DB in seen
+    assert out == {"manual": 200.0}
+    assert seen == [None]   # the default DB only
 
 
 def test_reconcile_paper_buying_power_defensive(monkeypatch, caplog):
-    """A reconcile failure on one book is logged + degrades to 0.0, never raises."""
+    """A reconcile failure is logged + degrades to 0.0, never raises."""
     import paper_account_db
 
     def _boom(db_path):
@@ -68,7 +67,7 @@ def test_reconcile_paper_buying_power_defensive(monkeypatch, caplog):
     with caplog.at_level("ERROR"):
         out = compute.reconcile_paper_buying_power()
 
-    assert out == {"manual": 0.0, "driver": 0.0}
+    assert out == {"manual": 0.0}
     assert any("reconcile degraded" in r.message for r in caplog.records)
 
 
@@ -1239,12 +1238,12 @@ def test_eod_book_summary_pure_counts_closed_today():
 
 def test_eod_book_summary_no_account_defensive():
     b = compute._eod_book_summary(None, None, has_account=False,
-                                  today="2026-07-13", label="Driver")
+                                  today="2026-07-13", label="Manual")
     assert b["has_account"] is False and b["day_pnl"] is None
     assert b["closed_today"] == 0 and b["realized_today"] == 0.0 and b["open_count"] == 0
 
 
-def test_collect_eod_summary_two_books(monkeypatch):
+def test_collect_eod_summary_reports_the_manual_book(monkeypatch):
     import datetime as _dt
     import sys as _sys
     import types as _types
@@ -1258,10 +1257,10 @@ def test_collect_eod_summary_two_books(monkeypatch):
     monkeypatch.setitem(_sys.modules, "paper_engine", _types.SimpleNamespace(
         account_snapshot=lambda p=None: snap))
     out = compute.collect_eod_summary(now_ct=now_ct)
-    assert out["date"] == "2026-07-13" and set(out["books"]) == {"manual", "driver"}
+    assert out["date"] == "2026-07-13" and set(out["books"]) == {"manual"}
     assert out["books"]["manual"]["day_pnl"] == 50.0
     assert out["books"]["manual"]["closed_today"] == 1
-    assert out["books"]["driver"]["has_account"] is True
+    assert out["books"]["manual"]["has_account"] is True
 
 
 def test_collect_eod_summary_defensive_on_read_failure(monkeypatch):
@@ -1281,7 +1280,7 @@ def test_collect_eod_summary_defensive_on_read_failure(monkeypatch):
         account_snapshot=_boom))
     out = compute.collect_eod_summary(now_ct=now_ct)   # must not raise
     assert out["books"]["manual"]["has_account"] is False
-    assert out["books"]["driver"]["day_pnl"] is None
+    assert out["books"]["manual"]["day_pnl"] is None
 
 
 def test_analyze_paper_note_none_on_success(monkeypatch):

@@ -418,41 +418,10 @@ def test_window_bounds_reads_start_and_end():
     assert mc.window_bounds("collection") == (dt.time(8, 0), dt.time(15, 20))
 
 
-def test_driver_entry_window_is_evaluated_in_eastern_time():
-    """driver_entry carries its own tz; 09:45 ET == 08:45 CT."""
-    assert mc.in_window("driver_entry", _ct(2026, 8, 17, 8, 45)) is True
-    assert mc.in_window("driver_entry", _ct(2026, 8, 17, 8, 44)) is False
-    assert mc.in_window("driver_entry", _ct(2026, 8, 17, 14, 29)) is True
-    assert mc.in_window("driver_entry", _ct(2026, 8, 17, 14, 31)) is False
-
-
-def test_driver_entry_end_is_exclusive():
-    """15:29 ET is in, the whole 15:30 ET minute is OUT -- matching
-    ``driver_svc``'s ``hm >= RTH_END`` gate, which keeps the last 30 min before
-    the close free of NEW entries. Inclusive here would open a 16th checkpoint
-    slot at 15:30 ET."""
-    assert mc.in_window("driver_entry", _et(2026, 8, 17, 15, 29)) is True
-    assert mc.in_window("driver_entry", _et(2026, 8, 17, 15, 30)) is False
-    assert mc.in_window("driver_entry", _et(2026, 8, 17, 15, 31)) is False
-
-
 def test_end_exclusive_does_not_leak_to_other_windows():
     """A window WITHOUT the flag keeps the default INCLUSIVE close."""
     assert mc.in_window("scan", _ct(2026, 8, 17, 15, 15)) is True
     assert mc.in_window("market_snapshot", _ct(2026, 8, 17, 15, 0)) is True
-
-
-def test_driver_entry_end_exclusive_survives_a_partial_user_toml(
-        monkeypatch, tmp_path):
-    """``end_exclusive`` lives in ``_DEFAULTS``, so a config that overrides only
-    ``start`` -- or omits the window entirely -- cannot silently lose
-    exclusivity and re-open the 15:30 ET slot."""
-    _write_cfg(monkeypatch, tmp_path,
-               '[windows.driver_entry]\ntz = "America/New_York"\n'
-               'start = "09:45"\n')
-    assert mc.window_bounds("driver_entry") == (dt.time(9, 45), dt.time(15, 30))
-    assert mc.in_window("driver_entry", _et(2026, 8, 17, 15, 29)) is True
-    assert mc.in_window("driver_entry", _et(2026, 8, 17, 15, 30)) is False
 
 
 def test_collection_window_ineligible_symbol_starts_at_0800():
@@ -734,3 +703,41 @@ def test_the_after_hours_default_matches_the_file():
     for name in ("rescue_public", "tools_public"):
         assert mc._DEFAULTS["windows"][name]["after_hours"] is True
         assert mc.after_hours_allowed(name) is True
+
+
+# ── a window with its own tz and an exclusive end ────────────────────────────
+# No shipped window sets ``tz`` or ``end_exclusive`` today (the autonomous
+# driver's entry window did, and went with it on 2026-09-22), so the mechanism is
+# tested on a synthetic window added to the built-in defaults.
+_PROBE = {"tz": "America/New_York", "start": "09:45", "end": "15:30",
+          "end_exclusive": True}
+
+
+@pytest.fixture
+def probe_window(monkeypatch):
+    monkeypatch.setitem(mc._DEFAULTS["windows"], "probe", dict(_PROBE))
+
+
+def test_a_window_with_its_own_tz_is_evaluated_in_that_zone(probe_window):
+    """09:45 ET == 08:45 CT."""
+    assert mc.in_window("probe", _ct(2026, 8, 17, 8, 45)) is True
+    assert mc.in_window("probe", _ct(2026, 8, 17, 8, 44)) is False
+    assert mc.in_window("probe", _ct(2026, 8, 17, 14, 29)) is True
+    assert mc.in_window("probe", _ct(2026, 8, 17, 14, 31)) is False
+
+
+def test_end_exclusive_puts_the_whole_end_minute_outside(probe_window):
+    """15:29 ET is in, the whole 15:30 ET minute is OUT."""
+    assert mc.in_window("probe", _et(2026, 8, 17, 15, 29)) is True
+    assert mc.in_window("probe", _et(2026, 8, 17, 15, 30)) is False
+    assert mc.in_window("probe", _et(2026, 8, 17, 15, 31)) is False
+
+
+def test_end_exclusive_survives_a_partial_user_toml(probe_window, monkeypatch,
+                                                    tmp_path):
+    """A flag in ``_DEFAULTS`` survives a config that overrides only ``start``."""
+    _write_cfg(monkeypatch, tmp_path,
+               '[windows.probe]\ntz = "America/New_York"\nstart = "09:45"\n')
+    assert mc.window_bounds("probe") == (dt.time(9, 45), dt.time(15, 30))
+    assert mc.in_window("probe", _et(2026, 8, 17, 15, 29)) is True
+    assert mc.in_window("probe", _et(2026, 8, 17, 15, 30)) is False

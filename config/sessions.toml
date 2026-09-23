@@ -130,18 +130,6 @@ end   = "15:00"
 # bid, ask and mark may be stale or wrong. false: refused outside them.
 after_hours = true
 
-[windows.driver_entry]
-# Autonomous driver entry window, in ET (not CT) — matches the existing
-# constant it replaces. Skips the open's first ~15 min and takes no new
-# entries in the last 30 min before the close.
-tz    = "America/New_York"
-start = "09:45"
-end   = "15:30"
-# The legacy predicate is `hm < start or hm >= end` -- the END IS EXCLUSIVE, so
-# the whole 15:30 ET minute is outside the window. That enforces "no new entries
-# in the last 30 min before the close", so it must not drift to inclusive.
-end_exclusive = true
-
 # -- Scheduled slots (a named clock mark a service fires at, once per day) ---
 # Each slot fires ONCE per trading day, within `grace_min` minutes of its target,
 # so a missed 30 s tick or a mid-window service start still fires it - but a
@@ -226,8 +214,7 @@ h1435 = "14:35"
 #
 # 15:15 CT is chosen against the rest of the post-close order, not for tidiness:
 #   15:00  regular close; [slots.action_alert] close sweep
-#   15:10  the EOD push (options_svc eod_summary_due) -- the driver's manage
-#          cycle has settled the day's expiries by here
+#   15:10  the EOD push (options_svc eod_summary_due)
 #   15:15  THIS, and [slots.analyze] close, and the last [windows.scan] slot
 #   15:20  collection stops
 #   15:25  live_capture

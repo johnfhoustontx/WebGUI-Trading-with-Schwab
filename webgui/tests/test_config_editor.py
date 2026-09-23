@@ -40,7 +40,7 @@ def test_display_value_speaks_units():
 def test_restart_targets_follow_section_and_field_overrides():
     cfg = cs.BY_NAME["sessions.toml"]
     assert ce.restart_targets(cfg, [("slots", "eod_report", "at")]) == [cs.TIMERS]
-    assert ce.restart_targets(cfg, [("windows", "driver_entry", "start")]) == [cs.DRIVER]
+    assert ce.restart_targets(cfg, [("slots", "action_alert", "grace_min")]) == [cs.OPTIONS]
 
 
 def test_search_needs_every_word_somewhere():
@@ -415,7 +415,7 @@ def test_the_recent_changes_row_carries_the_zone(monkeypatch):
     from nicegui import ui
     ct = ZoneInfo("America/Chicago")
     rows = [{"at": datetime(2026, 9, 20, 14, 3, 22, tzinfo=ct).isoformat(
-        timespec="seconds"), "file": "driver.toml", "key": "risk › cap",
+        timespec="seconds"), "file": "paper.toml", "key": "risk › cap",
         "from": 3000.0, "to": 2000.0}]
     monkeypatch.setattr(ce, "_PENDING", set())
     monkeypatch.setattr(ce.store, "recent_changes", lambda limit=25: rows)

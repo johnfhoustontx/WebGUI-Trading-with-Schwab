@@ -209,12 +209,12 @@ def test_refresh_paper_account_caches_and_publishes(monkeypatch):
 
 def test_refresh_paper_account_publishes_analytics(monkeypatch):
     """The manual-book analytics view (equity curve / MAE-MFE) is published alongside
-    the account view — the scanner-baseline benchmark against the driver book."""
+    the account view."""
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers.compute, "paper_account_view", _fake_paper_view)
     monkeypatch.setattr(handlers.compute, "manual_analytics",
                         lambda: {"equity_curve": [{"date": "d", "equity": 24900.0}],
-                                 "postmortem": {}, "excursions": {"n": 0}})
+                                 "excursions": {"n": 0}})
     handlers.refresh_paper_account(bus)
     env = bus.cache_get("cache:options:paper_analytics")
     assert env is not None and env.payload["equity_curve"][0]["equity"] == 24900.0
@@ -404,8 +404,7 @@ def test_run_eod_summary_pushes_and_caches(monkeypatch):
     """run_eod_summary collects the per-book summary, pushes it, and caches the run."""
     bus = Bus(fake=True)
     summary = {"date": "2026-07-13",
-               "books": {"manual": {"has_account": True, "day_pnl": 120.0},
-                         "driver": {"has_account": True, "day_pnl": -30.0}}}
+               "books": {"manual": {"has_account": True, "day_pnl": 120.0}}}
     calls = {}
     monkeypatch.setattr(handlers.compute, "collect_eod_summary", lambda: summary)
     monkeypatch.setattr(handlers.push_notify, "send_eod_summary",
@@ -415,7 +414,7 @@ def test_run_eod_summary_pushes_and_caches(monkeypatch):
 
     env = bus.cache_get("cache:options:eod_summary")
     assert env is not None
-    assert env.payload["slot"] == "close" and env.payload["books"] == 2
+    assert env.payload["slot"] == "close" and env.payload["books"] == 1
     assert env.payload["sent"] is True and env.payload["summary"] == summary
     assert calls["sent"] == summary
 
@@ -1716,9 +1715,8 @@ def test_captured_reprice_calls_notify(monkeypatch):
 
 
 # ── Day-persistent scan union (cache:options:scan_day) ──────────────────────
-# A SEPARATE key on purpose: cache:options:scan stays live-only because the
-# autonomous driver reads it and must never be offered a signal that no longer
-# qualifies.
+# A SEPARATE key on purpose: cache:options:scan stays live-only - it is the
+# latest scan, and a signal that no longer qualifies must not be offered from it.
 
 def _scan_with(sigs):
     return {"signals_0dte": sigs, "signals_swing": [], "signals_directional": [],
@@ -1747,8 +1745,8 @@ def test_rescan_publishes_the_day_union(monkeypatch):
 def test_rescan_day_union_accumulates_across_scans(monkeypatch):
     """The load-bearing separation: the live key is REPLACED, the day key ACCUMULATES.
 
-    If the union ever landed on cache:options:scan, the autonomous driver would
-    be offered "a" -- a signal that no longer qualifies. That is the regression
+    If the union ever landed on cache:options:scan, a reader of the latest scan
+    would be offered "a" -- a signal that no longer qualifies. That is the regression
     this test exists to catch.
     """
     bus = Bus(fake=True)

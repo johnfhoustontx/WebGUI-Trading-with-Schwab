@@ -1,10 +1,10 @@
-"""C5: the manual paper book gets the scorecard the driver already had.
+"""C5: the manual paper book gets a scorecard.
 
 Design: docs/plans/2026-09-12-manual-scorecard-design.md.
 
 The manual account is the book that auto-trades every captured signal, and it had
 **no track record on screen at all** — no win rate, no profit factor, no
-breakdown. ``driver_perf.build_scorecard`` is already pure over
+breakdown. ``book_perf.build_scorecard`` is already pure over
 ``(positions, snapshot)``, so the only missing pieces were an accessor for the
 default DB and a new breakdown axis.
 
@@ -16,7 +16,7 @@ split only by symbol and strategy cannot show that.
 """
 import pytest
 
-from services.options_svc import compute, driver_perf
+from services.options_svc import compute, book_perf
 
 
 def _pos(symbol="MU", strategy="PCS", pnl=100.0, reason="MANUAL_CLOSE",
@@ -28,7 +28,7 @@ def _pos(symbol="MU", strategy="PCS", pnl=100.0, reason="MANUAL_CLOSE",
 # ── the new breakdown axis ──────────────────────────────────────────────────
 
 def test_the_scorecard_breaks_pnl_down_by_exit_reason():
-    card = driver_perf.build_scorecard(
+    card = book_perf.build_scorecard(
         [_pos(pnl=500.0, reason="MANUAL_CLOSE"),
          _pos(pnl=-80.0, reason="MONEY_STOP"),
          _pos(pnl=-40.0, reason="MONEY_STOP")], {})
@@ -40,7 +40,7 @@ def test_the_scorecard_breaks_pnl_down_by_exit_reason():
 
 
 def test_exit_reason_rows_sort_by_pnl_like_the_other_breakdowns():
-    card = driver_perf.build_scorecard(
+    card = book_perf.build_scorecard(
         [_pos(pnl=-80.0, reason="MONEY_STOP"),
          _pos(pnl=500.0, reason="MANUAL_CLOSE")], {})
     assert [r["exit_reason"] for r in card["by_exit_reason"]] == \
@@ -48,21 +48,21 @@ def test_exit_reason_rows_sort_by_pnl_like_the_other_breakdowns():
 
 
 def test_a_missing_exit_reason_buckets_as_a_question_mark():
-    card = driver_perf.build_scorecard([_pos(reason=None)], {})
+    card = book_perf.build_scorecard([_pos(reason=None)], {})
     assert card["by_exit_reason"][0]["exit_reason"] == "?"
 
 
 def test_OPEN_positions_are_excluded_from_every_breakdown():
     """The breakdowns are a record of what HAPPENED; an open position has no
     exit reason and no realized P&L to attribute."""
-    card = driver_perf.build_scorecard(
+    card = book_perf.build_scorecard(
         [_pos(status="OPEN", pnl=None, reason=None), _pos(pnl=10.0)], {})
     assert sum(r["trades"] for r in card["by_exit_reason"]) == 1
     assert card["open"] == 1 and card["closed"] == 1
 
 
 def test_the_existing_breakdowns_are_untouched():
-    card = driver_perf.build_scorecard([_pos(symbol="MU", strategy="PCS")], {})
+    card = book_perf.build_scorecard([_pos(symbol="MU", strategy="PCS")], {})
     assert card["by_symbol"][0]["symbol"] == "MU"
     assert card["by_strategy"][0]["strategy"] == "PCS"
 
@@ -91,9 +91,8 @@ def test_manual_account_perf_scores_the_DEFAULT_book(monkeypatch):
     assert card["open_unrealized"] == pytest.approx(-5.0)
 
 
-def test_manual_account_perf_is_NOT_the_driver_book(monkeypatch):
-    """The two books are separate files; scoring the wrong one would silently
-    report the driver's −46.6% record as the manual account's."""
+def test_manual_account_perf_reads_the_default_db(monkeypatch):
+    """``db_path=None`` IS the manual account; the scorecard must read that file."""
     import paper_account_db
     import paper_engine
     monkeypatch.setattr(paper_engine, "account_snapshot", lambda *a, **k: {})
@@ -102,7 +101,6 @@ def test_manual_account_perf_is_NOT_the_driver_book(monkeypatch):
                         lambda db_path=None, *a, **k: calls.append(db_path) or [])
     compute.manual_account_perf()
     assert calls == [None]
-    assert compute.DRIVER_PAPER_DB not in calls
 
 
 def test_manual_account_perf_degrades_to_an_empty_card(monkeypatch):

@@ -12,7 +12,7 @@ Two sub-problems, two answers:
   The map is DERIVED from ``live_screens.SCREENS`` — each Screen names both the
   route the private app serves it at and the route this origin publishes it at,
   so the two cannot disagree and there is no second table to maintain.
-* a route that is deliberately NOT published — ``/options/paper``, ``/driver``,
+* a route that is deliberately NOT published — ``/options/paper``,
   ``/options/captured`` — has nowhere to go, so the control is not drawn as
   clickable and the handler refuses. No public stand-in is invented for it, and
   nothing links to ``app.neuralstrike.co``: the site must never advertise the
@@ -115,7 +115,7 @@ def test_the_private_process_resolves_every_route_to_itself():
     published or not — stays navigable."""
     import shell
     for route in ("/options/matrix", "/options/flow", "/sentiment/bullbear",
-                  "/options/paper", "/driver", "/options/captured",
+                  "/options/paper", "/options/captured",
                   "/options/gamma", "/sentiment"):
         assert shell.route_for(route) == route
         assert shell.can_navigate(route) is True
@@ -131,10 +131,10 @@ def test_the_published_process_remaps_what_it_serves(published):
 
 
 def test_the_published_process_refuses_a_route_it_does_not_serve(published):
-    """Deliberately unpublished — a paper ledger, the autonomous driver's book
-    and the captured-signal tape are the owner's positions."""
+    """Deliberately unpublished — a paper ledger and the captured-signal tape
+    are the owner's positions."""
     import shell
-    for route in ("/options/paper", "/driver", "/options/captured",
+    for route in ("/options/paper", "/options/captured",
                   "/settings", "/terminate"):
         assert shell.route_for(route) is None
         assert shell.can_navigate(route) is False
@@ -285,8 +285,6 @@ def _seed_desk(monkeypatch):
 
     data = {
         "options:paper_account": {"positions": [_pos("p1", desk.PAPER_SOURCE)]},
-        "options:driver_paper_account": {
-            "positions": [_pos("d1", desk.CLAUDE_SOURCE)]},
         "options:captured": {"signals": [{"signal_id": "c1",
                                           "source": desk.CAPTURED_SOURCE,
                                           "symbol": "QQQ", "status": "OPEN"}]},
@@ -331,7 +329,7 @@ def test_the_private_desk_navigates_exactly_where_it_always_did(monkeypatch):
     assert "/options/flow" in went                  # a Flow row
     assert "/sentiment/bullbear" in went            # the Bull/Bear strip
     assert "/options/gamma" in went                 # a dealer row
-    assert {"/options/paper", "/driver", "/options/captured"} <= set(went)
+    assert {"/options/paper", "/options/captured"} <= set(went)
 
 
 def test_the_published_desk_navigates_only_where_this_origin_serves(
@@ -348,7 +346,7 @@ def test_the_published_desk_navigates_only_where_this_origin_serves(
 
 def test_the_published_desk_draws_no_clickable_position_row(monkeypatch,
                                                             published):
-    """The paper ledger, the driver's book and the captured tape are the
+    """The paper ledger and the captured tape are the
     OWNER'S positions and are deliberately unpublished, so those rows have
     nowhere to go. They are drawn — the panel is the point — but they are not
     dressed as a link and they wire no handler."""

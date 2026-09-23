@@ -13,10 +13,8 @@ than imported from its service module. The service modules already read their
 holiday set from ``shared.market_calendar``, so importing them would make this
 partly circular; transcribed literals keep the oracle independent.
 
-This gate found two REAL divergences. One is now CLOSED: ``driver_entry``'s end
-was inclusive here and exclusive in ``driver_svc``, so the window now declares
-``end_exclusive = true`` and the two agree at every minute (see
-``test_driver_entry_window_matches_legacy_at_every_minute``). The other is still
+This gate found two REAL divergences. One was closed and its window later
+removed with the autonomous driver (2026-09-22). The other is still
 open and pinned explicitly rather than glossed (``test_sentiment_rth_...``):
 sentiment's exclusivity will be handled locally during its migration.
 
@@ -133,19 +131,6 @@ def _legacy_market_snapshot_slots():
             m -= 60
             h += 1
     return out
-
-
-def _legacy_driver_entry(now):
-    """driver_svc/scheduler.py ``checkpoint_due`` entry gate -- 09:45-15:30 ET.
-
-    ``if hm < RTH_START or hm >= RTH_END: return (False, ...)`` -- so the end is
-    EXCLUSIVE, and on ``(hour, minute)`` tuples, meaning the whole 15:30 minute
-    is out.
-    """
-    if not _legacy_is_trading_day(now.date()):
-        return False
-    hm = (now.hour, now.minute)
-    return (9, 45) <= hm < (15, 30)
 
 
 def _legacy_alerts_in_market_hours(now):
@@ -295,60 +280,6 @@ def test_every_legacy_market_snapshot_slot_falls_inside_the_named_window():
 
 
 # ---------------------------------------------------------------------------
-# 6. driver_entry -- 09:45-15:30 ET
-# ---------------------------------------------------------------------------
-
-
-def test_driver_entry_window_matches_legacy_at_every_minute():
-    """**Divergence found by this gate, and now CLOSED.**
-
-    ``checkpoint_due`` excludes its end (``hm >= RTH_END`` → not due) while
-    ``in_window`` was INCLUSIVE at both ends, so the two disagreed on exactly the
-    15:30 ET stamp of every trading day. A naive migration would have opened a
-    16th entry slot at 15:30 -- a Claude call and possibly a position inside the
-    "no new entries into the close" zone the constant exists to enforce.
-
-    The fix made exclusivity a DECLARATIVE property of the window
-    (``end_exclusive = true`` in ``config/sessions.toml``, with the same key in
-    ``_DEFAULTS`` so a missing or corrupt file still degrades to the safe
-    behavior). ``driver_svc``'s migration is now a straight swap, and there are
-    NO remaining exclusions here: the sweep must be empty.
-    """
-    divergent = set()
-    for day in DAYS:
-        for now in _minutes(day, tz=ET):
-            if mc.in_window("driver_entry", now) != _legacy_driver_entry(now):
-                divergent.add((now.date(), now.time()))
-    assert divergent == set()
-
-
-def test_driver_entry_boundary_minutes_agree_and_are_not_vacuous():
-    """Keeps the sweep above from passing trivially (two predicates that are
-    always False would also "agree"): the window must genuinely be open at 15:29
-    ET and shut for the whole 15:30 minute, in BOTH implementations."""
-    day = dt.date(2026, 8, 17)
-    for hh, mm, expected in ((9, 44, False), (9, 45, True),
-                             (15, 29, True), (15, 30, False)):
-        now = dt.datetime(day.year, day.month, day.day, hh, mm, tzinfo=ET)
-        assert mc.in_window("driver_entry", now) is expected, (hh, mm)
-        assert _legacy_driver_entry(now) is expected, (hh, mm)
-
-
-def test_driver_entry_is_evaluated_in_eastern_time_not_central():
-    """The window carries ``tz = "America/New_York"``, so a CT-aware datetime is
-    converted rather than compared in CT. 09:00 CT is 10:00 ET -- inside the
-    window -- while the numerically-equal 09:00 ET is not."""
-    assert mc.in_window("driver_entry",
-                        dt.datetime(2026, 8, 17, 9, 0, tzinfo=CT)) is True
-    assert mc.in_window("driver_entry",
-                        dt.datetime(2026, 8, 17, 9, 0, tzinfo=ET)) is False
-    # Same instant expressed two ways must give the same answer.
-    et_now = dt.datetime(2026, 8, 17, 10, 0, tzinfo=ET)
-    assert mc.in_window("driver_entry", et_now) is \
-        mc.in_window("driver_entry", et_now.astimezone(CT))
-
-
-# ---------------------------------------------------------------------------
 # 7. The sentiment_svc one-minute divergence
 # ---------------------------------------------------------------------------
 
@@ -403,7 +334,6 @@ def test_config_windows_still_match_the_legacy_constants():
     assert mc.window_bounds("scan") == (dt.time(8, 0), dt.time(15, 15))
     assert mc.window_bounds("collection") == (dt.time(8, 0), dt.time(15, 20))
     assert mc.window_bounds("market_snapshot") == (dt.time(8, 30), dt.time(15, 0))
-    assert mc.window_bounds("driver_entry") == (dt.time(9, 45), dt.time(15, 30))
     # session_flip is a single time, not a span (options_svc ``_GEX_START``,
     # the active_session_date flip).
     assert mc.session_flip_time() == dt.time(8, 0)

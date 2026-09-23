@@ -1,8 +1,7 @@
 """Shared PURE builders for paper-book performance analytics charts.
 
-Used by BOTH the driver monitor (``pages/driver.py`` — Claude's selected book) and the
-Paper Portfolio page (``pages/options/portfolio.py`` — the scanner-baseline book) so the
-equity curve renders identically and the two books can be read side by side. No I/O — each
+Used by the Paper Portfolio page (``pages/options/portfolio.py`` — the scanner-baseline
+book). No I/O — each
 takes the ``perf_analytics``-shaped payload and returns a Highcharts option dict / string.
 """
 

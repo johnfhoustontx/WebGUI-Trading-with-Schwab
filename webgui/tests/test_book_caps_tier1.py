@@ -3,7 +3,7 @@
 The rule is a pinned import set, not a deny-list: importing shared.book_caps
 may load nothing outside EXPECTED, so any new import - forbidden or merely
 unreviewed - fails here and has to be argued for. It must also really load
-shared.book_caps and shared.driver_policy, so the probe cannot pass vacuously.
+shared.book_caps, so the probe cannot pass vacuously.
 `math` may legitimately be ABSENT from what the import loads: an interpreter
 can preload it at startup (a stdlib module some CPython builds import during
 site setup), and then it is already in sys.modules before the probe runs.
@@ -22,8 +22,8 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 # CLAUDE.md's allow-list sentence for shared.book_caps change together.
 # `math` is allowed but not required: an interpreter that preloads it at
 # startup loads it before the probe's snapshot, so it never shows up as new.
-EXPECTED = {"math", "shared", "shared.book_caps", "shared.driver_policy"}
-REQUIRED = {"shared.book_caps", "shared.driver_policy"}
+EXPECTED = {"math", "shared", "shared.book_caps"}
+REQUIRED = {"shared.book_caps"}
 
 PROBE = r"""
 import sys

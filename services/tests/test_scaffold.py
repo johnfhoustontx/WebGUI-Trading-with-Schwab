@@ -175,7 +175,7 @@ def test_startup_drains_stranded_pel_to_dead_letter():
     seen = []
 
     # Simulate a prior crashed consumer: read (into group "drainx-svc") without ack.
-    bus.enqueue_command("cmd:drainx", {"type": "driver_paper_create", "args": {}})
+    bus.enqueue_command("cmd:drainx", {"type": "paper_create", "args": {}})
     read = bus.consume_commands(
         "cmd:drainx", group="drainx-svc", consumer="c1", block_ms=50
     )
@@ -195,7 +195,7 @@ def test_startup_drains_stranded_pel_to_dead_letter():
     # stranded entry went to dead-letter and was NOT handed to the handler
     dead = bus._r.lrange("cmd:drainx:dead", 0, -1)
     assert len(dead) == 1
-    assert "driver_paper_create" in json.loads(dead[0])["fields"]["data"]
+    assert "paper_create" in json.loads(dead[0])["fields"]["data"]
     assert seen == []  # never auto-re-executed
     assert bus._r.xpending("cmd:drainx", "drainx-svc")["pending"] == 0
 
@@ -505,7 +505,7 @@ def test_suppressed_environment_reports_neither(monkeypatch):
         assert body["scheduler_last_tick_age_s"] is None
 
 
-@pytest.mark.parametrize("svc", ["options_svc", "sentiment_svc", "driver_svc",
+@pytest.mark.parametrize("svc", ["options_svc", "sentiment_svc",
                                  "market_svc", "portfolio_svc"])
 def test_every_service_loop_beats_inside_its_while_loop(svc):
     """A beat outside the loop body would report one tick at startup and then a

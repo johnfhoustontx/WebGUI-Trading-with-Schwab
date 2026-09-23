@@ -1,6 +1,6 @@
 """EOD Report — pure builders + thin render().
 
-Reads the already-published Redis caches (``options:*`` and ``driver:*``) and
+Reads the already-published Redis caches (``options:*``) and
 builds a Summary and a Detailed end-of-day report as an HTML *fragment* + a
 shared CSS string (one source of truth for both the in-app view and the exported
 standalone ``.html`` files). Mirrors the ``gamma.py`` Explain pattern: NiceGUI's
@@ -321,15 +321,15 @@ def _date_of(ts):
 def normalize_trades(raw, *, kind):
     """Map a book's raw trade dicts into one uniform shape:
     {symbol, strategy, trade_type, status, entry_date, exit_date, realized_pnl, credit}.
-    ``kind`` = 'ledger' (manual paper_trades) | 'driver' (driver positions)
-    | 'captured' (scanner signals tracked to a close)."""
+    ``kind`` = 'ledger' (manual paper_trades) | 'captured' (scanner signals
+    tracked to a close)."""
     out = []
     for t in raw or []:
         t = t or {}
         if kind == "captured":
             # A captured row carries the signal's OWN timestamp names, so this
             # branch only points ``_date_of`` at them - the same job it does for
-            # the other two books, not a second date parser.
+            # the ledger, not a second date parser.
             #
             # The credit arrives already multiplied: ``compute.captured_perf_rows``
             # puts it on the ONE-CONTRACT basis that ``realized_pnl`` uses, since
@@ -338,12 +338,6 @@ def normalize_trades(raw, *, kind):
             entry, exit_ = "first_seen_ts", "close_ts"
             credit = _num(t.get("entry_credit_total"))
             trade_type = t.get("trade_type")
-        elif kind == "driver":
-            entry, exit_ = "entry_ts", "exit_ts"
-            qty = _num(t.get("quantity"), 1) or 1
-            per = _num(t.get("entry_credit"))
-            credit = round(per * qty * 100, 2) if per is not None else None
-            trade_type = t.get("trade_type")  # normally absent on driver positions
         else:
             entry, exit_ = "entry_time", "exit_time"
             credit = _num(t.get("entry_credit_total"))
@@ -509,20 +503,16 @@ def breakdown_table_html(rows):
 def _books(snap):
     """[(label, norm_trades, now_snapshot)] for each book.
 
-    Three of them: the two paper books, plus the captured signals scored from
+    Two of them: the manual paper book, plus the captured signals scored from
     2026-09-01. Captured passes ``None`` for the snapshot because it has no
     account behind it - it is a TRACKING book, and ``_book_now_line`` already
     renders nothing for an absent snapshot rather than inventing an equity."""
     snap = snap or {}
     led = normalize_trades((snap.get("paper_trades") or {}).get("trades"), kind="ledger")
-    dacc = snap.get("driver_paper_account") or {}
-    drv_raw = list(dacc.get("positions") or []) + list(dacc.get("closed_positions") or [])
-    drv = normalize_trades(drv_raw, kind="driver")
     cap = normalize_trades((snap.get("captured_perf") or {}).get("rows"),
                            kind="captured")
     return [
         ("Manual paper", led, (snap.get("paper_account") or {}).get("snapshot")),
-        ("Driver", drv, dacc.get("snapshot")),
         ("Captured signals", cap, None),
     ]
 
@@ -560,7 +550,7 @@ def _book_slug(label):
 
 
 def _performance_block(snap, today):
-    """One ``<details>`` performance section per book (manual + driver).
+    """One ``<details>`` performance section per book (manual + captured).
 
     Returns ``(toc_entries, sections_html)`` so callers can both link to and
     render the per-book performance — identical in the summary and the detail."""
@@ -596,10 +586,6 @@ def detail_fragment(snap: dict, today=None) -> str:
             brk_parts.append(breakdown_table_html(breakdown_rows(norm, key)))
     breakdowns_html = "".join(brk_parts)
 
-    # The driver's realized trades + performance are surfaced per-book (the "Driver"
-    # book) inside the Performance + Breakdowns sections, sourced from
-    # cache:options:driver_paper_account — so there is no separate legacy driver
-    # section (the old morning-agent approvals/performance views are gone).
     nav = toc([
         ("performance", "Performance"),
         ("breakdowns", "Breakdowns"),
@@ -652,21 +638,11 @@ def summary_fragment(snap: dict, detail_href: str, today=None) -> str:
     n_paper = _count(snap.get("paper_trades") or {}, "trades")
     acct = (snap.get("paper_account") or {}).get("snapshot") or {}
     session_pnl = acct.get("session_pnl")
-    # Driver at-a-glance from its isolated paper account's scorecard
-    # (cache:options:driver_paper_perf) — the legacy morning-agent grade/status
-    # approvals are gone.
-    dperf = snap.get("driver_paper_perf") or {}
-    d_realized = dperf.get("realized_pnl")
-    d_win = _num(dperf.get("win_rate"))
-    d_win_txt = f"{d_win * 100:.0f}%" if d_win is not None else "—"
     tiles = "".join([
         _tile("Paper session P&L", _money(session_pnl), _pn_class(session_pnl)),
         _tile("Scanner signals", n_scan),
         _tile("Captured signals", n_cap),
         _tile("Paper trades", n_paper),
-        _tile("Driver realized P&L", _money(d_realized), _pn_class(d_realized)),
-        _tile("Driver win rate", d_win_txt),
-        _tile("Driver trades", int(_num(dperf.get("total_trades"), 0))),
     ])
     perf_toc, perf_html = _performance_block(snap, today)
     nav = toc(perf_toc + [("captured-closed", "Captured closed")])
@@ -699,8 +675,6 @@ _CACHE_VIEWS = {
     "captured_perf": "options:captured_perf",
     "paper_trades": "options:paper_trades",
     "paper_account": "options:paper_account",
-    "driver_paper_account": "options:driver_paper_account",
-    "driver_paper_perf": "options:driver_paper_perf",
 }
 
 
@@ -850,7 +824,7 @@ def render() -> None:
     """Summary page: one header line, then a region holding the archive list
     and the in-app summary fragment.
 
-    ⚠ NO ``view=`` and no freshness stamp. This page reads EIGHT cache views
+    ⚠ NO ``view=`` and no freshness stamp. This page reads SIX cache views
     (``_CACHE_VIEWS``), so a stamp on any one of them would name the age of a
     key that is only part of what is on screen. The fragment's own
     "Generated … CT" meta line is this page's real freshness, and it stays.
@@ -902,7 +876,7 @@ def render() -> None:
 
     @guard_async
     async def _repaint() -> None:
-        """The first paint. ``read_snapshot`` is EIGHT sequential bus reads and
+        """The first paint. ``read_snapshot`` is SIX sequential bus reads and
         ran on the event loop at page build; it crosses ``run.io_bound`` now, so
         the frame appears immediately with the region's spinner over it.
 
@@ -983,8 +957,8 @@ def render_detail() -> None:
     """Detailed page: the in-app detail fragment from live caches.
 
     ⚠ The SECOND ``render()`` in this module, and easy to miss. Same frame and
-    the same reasons: no ``view=`` and no stamp over eight views, the fragment's
-    own meta line is the freshness, and the eight-read snapshot crosses
+    the same reasons: no ``view=`` and no stamp over six views, the fragment's
+    own meta line is the freshness, and the six-read snapshot crosses
     ``run.io_bound`` instead of holding up the page build."""
     ui.add_css(EOD_CSS)
     with kit.page():

@@ -41,9 +41,9 @@ def test_read_returns_payload_or_none():
 
 
 def test_read_full_returns_payload_and_version():
-    assert bus_client.read_full("driver:autonomous") == (None, None)
-    bus_client.bus().cache_set("cache:driver:autonomous", {"enabled": True})
-    assert bus_client.read_full("driver:autonomous") == ({"enabled": True}, 1)
+    assert bus_client.read_full("trade:analysis") == (None, None)
+    bus_client.bus().cache_set("cache:trade:analysis", {"enabled": True})
+    assert bus_client.read_full("trade:analysis") == ({"enabled": True}, 1)
 
 
 def test_read_versions_batches_views():

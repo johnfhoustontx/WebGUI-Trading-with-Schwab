@@ -242,7 +242,7 @@ def test_drain_pending_moves_stranded_entries_to_dead_letter():
     """A prior consumer's un-acked PEL entry is drained to dead-letter, not re-run."""
     b = Bus(fake=True)
     # First consumer reads a command then "crashes" without acking.
-    b.enqueue_command("cmd:strand", {"type": "driver_paper_create", "args": {}})
+    b.enqueue_command("cmd:strand", {"type": "paper_create", "args": {}})
     read = b.consume_commands("cmd:strand", group="g", consumer="dead-c", block_ms=50)
     assert len(read) == 1  # now pending, un-acked
 
@@ -251,7 +251,7 @@ def test_drain_pending_moves_stranded_entries_to_dead_letter():
     dead = b._r.lrange("cmd:strand:dead", 0, -1)
     assert len(dead) == 1
     rec = json.loads(dead[0])
-    assert "driver_paper_create" in rec["fields"]["data"]
+    assert "paper_create" in rec["fields"]["data"]
     assert rec["reason"].startswith("stranded")
     # PEL is now empty — nothing stuck, nothing auto-re-executed.
     assert b._r.xpending("cmd:strand", "g")["pending"] == 0

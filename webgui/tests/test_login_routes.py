@@ -136,7 +136,7 @@ def test_cookies_are_host_only_secure_httponly_and_lax(client):
     """Host-only is the one that matters and the one most easily lost.
 
     A ``Domain=`` cookie is sent to neuralstrike.co and EVERY subdomain,
-    forever -- so the session that arms the trading driver would travel to the
+    forever -- so the owner's session would travel to the
     public marketing page, alongside its YouTube and Discord embeds, on every
     page view. One attribute undoes the whole origin split.
     """

@@ -574,10 +574,10 @@ def norm_liquidity_ticks(bid, ask, mark):
         large fraction of a small premium.
 
     Deliberately NOT a change to ``scoring.norm_liquidity``: that function is
-    shared with the flat scanner's ``calc_composite_score``, which the autonomous
-    driver sizes (paper) trades from — recalibrating it there would silently
-    shift driver ranking. Keeping this local confines the fix to the Swing
-    Scanner.
+    shared with the flat scanner's ``calc_composite_score``, which the Market
+    Scanner and the captured-signal book rank by — recalibrating it there would
+    silently shift that ranking. Keeping this local confines the fix to the
+    Swing Scanner.
 
     Missing bid/ask/mark -> 50.0 (neutral), matching norm_liquidity's contract
     so absent data never false-fails the gate.

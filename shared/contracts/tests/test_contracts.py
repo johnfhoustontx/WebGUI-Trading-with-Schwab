@@ -32,7 +32,7 @@ def test_command_stamps_ts_at_construction():
 def test_command_ts_survives_roundtrip():
     """Decoding preserves the ORIGINAL ts — the factory does NOT re-stamp it on
     ``from_json`` (so the age check measures enqueue→dequeue, not decode time)."""
-    cmd = Command(type="driver_paper_create", args={"qty": 1})
+    cmd = Command(type="paper_create", args={"qty": 1})
     original_ts = cmd.ts
     back = Command.from_json(cmd.to_json())
     assert back.ts == original_ts

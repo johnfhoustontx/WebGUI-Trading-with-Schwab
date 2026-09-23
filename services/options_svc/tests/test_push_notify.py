@@ -112,9 +112,6 @@ _EOD = {
         "manual": {"label": "Manual", "has_account": True, "day_pnl": 120.0,
                    "equity": 25120.0, "open_count": 3, "halted": False,
                    "closed_today": 3, "wins": 2, "losses": 1, "realized_today": 180.0},
-        "driver": {"label": "Driver", "has_account": True, "day_pnl": -90.0,
-                   "equity": 24910.0, "open_count": 1, "halted": True,
-                   "closed_today": 1, "wins": 0, "losses": 1, "realized_today": -90.0},
     },
 }
 
@@ -122,7 +119,9 @@ _EOD = {
 def test_eod_book_line_formats_signs_and_halt():
     m = pn.eod_book_line(_EOD["books"]["manual"])
     assert "Manual" in m and "+$120 day" in m and "2-1 closed (+$180)" in m and "3 open" in m
-    d = pn.eod_book_line(_EOD["books"]["driver"])
+    d = pn.eod_book_line({"label": "Manual", "day_pnl": -90.0, "open_count": 1,
+                          "closed_today": 1, "wins": 0, "losses": 1,
+                          "realized_today": -90.0, "halted": True})
     assert "-$90 day" in d and "[HALTED]" in d
 
 
@@ -132,21 +131,27 @@ def test_eod_book_line_tolerates_none_pnl():
 
 
 def test_eod_book_count_counts_seeded():
-    assert pn.eod_book_count(_EOD) == 2
+    assert pn.eod_book_count(_EOD) == 1
     assert pn.eod_book_count({"books": {"manual": {"has_account": False}}}) == 0
     assert pn.eod_book_count({}) == 0
 
 
 def test_eod_summary_text_one_line_per_seeded_book():
     txt = pn.eod_summary_text(_EOD)
-    assert "2026-07-13" in txt and "Manual:" in txt and "Driver:" in txt
+    assert "2026-07-13" in txt and "Manual:" in txt
 
 
 def test_eod_summary_text_skips_unseeded_book():
-    one = {"date": "d", "books": {"manual": _EOD["books"]["manual"],
-                                  "driver": {"has_account": False}}}
-    txt = pn.eod_summary_text(one)
-    assert "Manual:" in txt and "Driver:" not in txt
+    txt = pn.eod_summary_text({"date": "d", "books": {"manual": {"has_account": False}}})
+    assert "Manual:" not in txt and "No paper books active." in txt
+
+
+def test_eod_summary_ignores_a_book_it_does_not_know():
+    # A summary written before the driver book was removed may still carry it.
+    stale = {"date": "d", "books": {**_EOD["books"],
+                                    "driver": {"label": "Driver", "has_account": True}}}
+    assert "Driver:" not in pn.eod_summary_text(stale)
+    assert pn.eod_book_count(stale) == 1
 
 
 def test_eod_summary_embed_color_by_total():

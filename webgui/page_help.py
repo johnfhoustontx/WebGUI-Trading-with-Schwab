@@ -1285,24 +1285,6 @@ Your **real** Schwab holdings, with context.
 - **Performance** — letter grades per position; click one for advice.
 - P&L streams live; **Refresh** rebuilds the grades.
 """,
-    "/driver": """
-**Claude Trades — the simple version**
-
-An autonomous **paper** options trader: Claude picks and sizes defined-risk credit
-spreads, code-enforced guardrails cap the risk. Nothing goes to a live account.
-
-- **Enable / Disable** — turn the autonomous trader on or off.
-- **Stop** — halt new trades for the rest of the day (open positions keep managing).
-  It is a manual stop, so **Enable** clears it; a halt the driver sets ITSELF
-  (loss cap, banked target, VIX ceiling) needs **Resume today**.
-- **Run now** — fire one decision checkpoint immediately.
-- **Day P&L** progresses toward the day's target. That target is **not fixed**: the
-  base is $500, ratcheted against the month-to-date pace — up to $1,000 when behind,
-  down to $250 when ahead — so the number in the tile moves day to day. A $1,500
-  daily loss halts new entries. The decision log shows what it did and why.
-- **Performance** — the driver's closed trades and realized P&L (win rate, profit
-  factor, P&L by symbol/strategy). **Refresh** reprices now.
-""",
     "/market": """
 **Market Dashboard — the simple version**
 
@@ -1336,9 +1318,9 @@ A live grid of macro tickers, grouped into framed panels by category.
     "/eod": """
 **EOD Report — the simple version**
 
-An end-of-day summary of the day's options activity and Claude Trades (the autonomous driver).
+An end-of-day summary of the day's options activity and paper trading.
 
-- **Summary tiles** plus per-section tables (scanner, captured, paper, driver).
+- **Summary tiles** plus per-section tables (scanner, captured, paper).
 - **It saves itself at 3:15 pm CT** every trading day, a quarter of an hour after
   the close. You don't have to be here, and you don't have to press anything.
 - **Generate** saves a dated HTML snapshot you can reopen later — use it for an
@@ -1407,8 +1389,8 @@ the last check ran — the page re-checks itself every 15 seconds, and
 Three tabs. **General** holds the app's own preferences (below). **Appearance**
 sets every colour and font, with a live preview; a saved change shows after a
 web GUI restart. **Configuration**
-holds every trading setting — scanner floors, exit rules, the driver's risk
-limits, flow alerts, market hours and schedules, symbols, the sector map and
+holds every trading setting — scanner floors, the paper books' per-trade
+caps, exit rules, flow alerts, market hours and schedules, symbols, the sector map and
 commissions — each with a plain-English explanation. Changes are saved as
 overrides on top of the shipped values, so **Reset to shipped values** always
 takes you back and an app update never overwrites what you set; that Reset
@@ -1472,8 +1454,7 @@ Ends this browser's session and returns you to the sign-in page.
 - It also forgets a **trusted device**, so the next sign-in asks for your
   authenticator code again — which is the point on a borrowed or shared machine.
 - It signs out THIS browser only. Other devices stay signed in.
-- Nothing running is affected: the services, the collectors and the driver all
-  carry on. Signing out is not stopping anything.
+- Nothing running is affected: the services and the collectors all carry on. Signing out is not stopping anything.
 """,
 }
 
@@ -1522,8 +1503,8 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
                    "API usage and maintenance.",
         "Appearance": "Every colour and font in the app, with a live preview. "
                       "Saved changes show after a web GUI restart.",
-        "Configuration": "Every trading setting — scanner floors, exit rules, the "
-                         "driver's risk limits, flow alerts, schedules, symbols, "
+        "Configuration": "Every trading setting — scanner floors, per-trade caps, "
+                         "exit rules, flow alerts, schedules, symbols, "
                          "the sector map and commissions — with plain-English help.",
     },
     "/options/gamma": {  # Dealer Positioning — the analytics lenses

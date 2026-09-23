@@ -147,7 +147,7 @@ def _public_routes() -> dict:
     one a typo would hide in until a visitor hit a 404.
 
     A private route that no screen names is simply ABSENT, which is the answer
-    a caller needs: ``/options/paper``, ``/driver`` and ``/options/captured``
+    a caller needs: ``/options/paper`` and ``/options/captured``
     are the owner's positions and are deliberately unpublished, so a control
     pointing at one must not be drawn as a link rather than be given a
     stand-in. Nothing here ever resolves to the private app's own host.

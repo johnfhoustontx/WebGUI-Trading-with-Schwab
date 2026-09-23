@@ -355,7 +355,7 @@ def _app_block():
     the app degrades to the peer and the per-client backoff, which ramps to
     900 s where the global one is deliberately 60 s, silently becomes GLOBAL: a
     bot spraying the advertised hostname would lock the owner out of the UI that
-    arms the trading driver and stops the stack.
+    runs the paper books and stops the stack.
 
     Two rules follow, both pinned by test:
 

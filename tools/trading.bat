@@ -144,7 +144,7 @@ echo     logs [service]     follow the journal (Ctrl-C to stop)
 echo     tunnel             forward 8500 and 8100 to this PC
 echo     shell              plain SSH session
 echo.
-echo   service is one of: sentiment options portfolio trade driver market
+echo   service is one of: sentiment options portfolio trade market
 echo                      webgui proxy backup
 echo.
 echo   Examples:

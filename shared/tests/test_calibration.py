@@ -98,7 +98,7 @@ class TestBucketStats:
 
     def test_a_scratch_counts_against_the_win_rate_and_is_reported_separately(self):
         """A zero-P&L close is neither a win nor a loss. It must dilute the win
-        rate (driver_perf.build_scorecard already treats it that way) and it must
+        rate (book_perf.build_scorecard already treats it that way) and it must
         be VISIBLE, because a bucket that is half scratches is not a bucket whose
         win rate means anything."""
         s = C.bucket_stats([_row(50.0), _row(-100.0), _row(0.0)])

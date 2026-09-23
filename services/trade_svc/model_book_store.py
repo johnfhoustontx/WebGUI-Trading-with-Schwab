@@ -1,4 +1,4 @@
-"""Storage for the model paper book. Isolated, like the driver's own book.
+"""Storage for the model paper book, isolated from the other paper books.
 
 One row per position. ``(symbol, opened_on)`` is the key, so the same name
 re-entering on a later day is a new position while a repeated tick on the same

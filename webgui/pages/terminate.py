@@ -1,7 +1,7 @@
 """Stop All Services page (``/terminate``) — stop the whole local stack from the web GUI.
 
 A deliberately guarded action: a single red button behind a confirm dialog that
-stops this environment's systemd target (the six domain services, this web app
+stops this environment's systemd target (the five domain services, this web app
 and the PUBLIC live screens beside it, and the schwab-proxy only in the
 environment that owns it; Redis is left running). Because it stops the web app
 too, the page goes unresponsive right after you confirm — by design.
@@ -14,10 +14,10 @@ anything.
 Since 2026-09-06 the confirm dialog also demands a fresh TOTP code. The app is
 served on the public internet, so this control sits behind exactly one session
 cookie — and a stolen cookie or an unlocked phone would cost the rest of the
-trading day: the GEX slots for the session, a live stream dropped mid-broadcast,
-the driver stood down. The step-up is deliberately ONLY here. Adding it to the
-driver's arm switch or to rescue-apply would train the code out of meaning
-anything; one destructive control, one prompt.
+trading day: the GEX slots for the session and a live stream dropped
+mid-broadcast. The step-up is deliberately ONLY here. Adding it to rescue-apply
+would train the code out of meaning anything; one destructive control, one
+prompt.
 
 The proxy caveat is not cosmetic, and systemd expresses it better than the old
 batch did: dev borrows prod's proxy on :8100, so a dev checkout simply has no

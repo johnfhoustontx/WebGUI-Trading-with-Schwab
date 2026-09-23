@@ -1,8 +1,8 @@
-"""PURE performance scorecard over the driver paper account's positions.
+"""PURE performance scorecard over a paper book's positions.
 
 No I/O, no engine import — given the positions list (paper_account_db.fetch_all_positions)
-and the account snapshot, it computes the 'how good is the autonomous module' metrics
-the /driver page renders. Defensive: sparse/None rows are tolerated, never raise."""
+and the account snapshot, it computes the track-record metrics the Paper Account page
+renders. Defensive: sparse/None rows are tolerated, never raise."""
 
 
 def _num(v):

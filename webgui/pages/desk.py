@@ -2,7 +2,7 @@
 every other page, so the morning read is a single glance rather than a tour.
 
 Tier-1 reader: it consumes ``cache:options:matrix``, ``cache:options:paper_account``,
-``cache:options:driver_paper_account``, ``cache:options:captured``,
+``cache:options:captured``,
 ``cache:options:flow_alerts``, ``cache:options:gex_status``,
 ``cache:sentiment:regime`` and ``cache:sentiment:bullbear`` and renders them.
 No engine imports, no Schwab calls, no arithmetic of its own. Every one of them is polled in the SINGLE batched
@@ -345,7 +345,7 @@ def flow_rows(flow_view, limit=FLOW_ROWS_N):
     return _flow.alert_rows(flow_view)[:max(0, int(limit))]
 
 
-# ── open positions (all three books) ─────────────────────────────────────────
+# ── open positions (both books) ─────────────────────────────────────────
 # rescue_state → the flag word the card prints. WATCH is deliberately a separate
 # word from AT RISK: it means "keep an eye on it", and folding it in would blunt
 # the only word on this card meant to make the reader do something.
@@ -366,10 +366,11 @@ UNTAGGED_FLAG = "—"
 # pair ``paper._AT_RISK_STATES`` highlights.
 AT_RISK_STATES = ("tested", "critical")
 
-# The three books the panel merges, and the chip each one's rows wear. Three
-# separate ledgers with three separate P&Ls, so a row that did not say which it
-# came from would be unactionable.
-PAPER_SOURCE, CLAUDE_SOURCE, CAPTURED_SOURCE = "PAPER", "CLAUDE", "CAPTURED"
+# The two books the panel merges, and the chip each one's rows wear. Separate
+# ledgers with separate P&Ls, so a row that did not say which it came from would
+# be unactionable. (A third, the autonomous driver's CLAUDE book, was removed
+# 2026-09-22.)
+PAPER_SOURCE, CAPTURED_SOURCE = "PAPER", "CAPTURED"
 
 # What each book's payload looks like, as DATA rather than as three near-copies
 # of the same loop. The three differ in more than their chip word, and every one
@@ -392,8 +393,6 @@ PAPER_SOURCE, CLAUDE_SOURCE, CAPTURED_SOURCE = "PAPER", "CLAUDE", "CAPTURED"
 BOOKS = (
     {"source": PAPER_SOURCE, "list_key": "positions", "id_key": "position_id",
      "rescue": True, "held": True},
-    {"source": CLAUDE_SOURCE, "list_key": "positions", "id_key": "position_id",
-     "rescue": True, "held": True},
     {"source": CAPTURED_SOURCE, "list_key": "signals", "id_key": "signal_id",
      "rescue": False, "held": False},
 )
@@ -404,10 +403,10 @@ BOOKS = (
 #
 # ⚠ These are the PRIVATE app's routes, and every route on this page is: a page
 # names the address it has always known and asks ``shell.route_for`` where that
-# lives in this process. The public origin publishes NONE of these three — the
-# paper ledger, the driver's own book and the captured tape are the owner's
-# positions — so there the rows draw without a click and without the pointer.
-POSITION_ROUTES = {PAPER_SOURCE: "/options/paper", CLAUDE_SOURCE: "/driver",
+# lives in this process. The public origin publishes NEITHER — the paper ledger
+# and the captured tape are the owner's positions — so there the rows draw
+# without a click and without the pointer.
+POSITION_ROUTES = {PAPER_SOURCE: "/options/paper",
                    CAPTURED_SOURCE: "/options/captured"}
 
 # The other four click-through targets, named for the same reason: the string
@@ -418,7 +417,7 @@ FLOW_ROUTE = "/options/flow"
 
 # The ledger closes a trade as CLOSED or EXPIRED; a row with no status at all is
 # treated as open, matching ``paper_adjust``'s own default. The captured-signals
-# store uses the same two words, so all three books share one rule.
+# store uses the same two words, so both books share one rule.
 _CLOSED_STATUSES = ("CLOSED", "EXPIRED")
 
 # How many rows the panel actually draws — see ``POSITION_ROWS_N``. The pure
@@ -440,8 +439,8 @@ _CALM = 2                       # everything else, including an untagged book
 #    signals at 2 DTE against 3 paper positions at 9 DTE meant every visible row
 #    was a captured signal, and a panel titled POSITIONS showed no positions at
 #    all. Money at risk outranks a suggestion nobody acted on. This sits BELOW
-#    urgency, never above it — a tested paper spread and a tested driver spread
-#    still lead the panel — and it only ever reorders the calm tier, since the
+#    urgency, never above it — a tested paper spread still leads the panel —
+#    and it only ever reorders the calm tier, since the
 #    advisory book carries no rescue state to be urgent with.
 _HELD_FIRST, _ADVISORY_LAST = 0, 1
 
@@ -553,13 +552,13 @@ def strikes_text(p):
     return "—"
 
 
-def position_rows(paper_view, driver_view, captured_view=None):
-    """Open rows from ALL THREE books, each tagged with its source, most
-    actionable first.
+def position_rows(paper_view, captured_view=None):
+    """Open rows from BOTH books, each tagged with its source, most actionable
+    first.
 
-    Reads the *account* views for the two paper books, not the paper ledger: the
+    Reads the paper *account* view, not the paper ledger: the
     ledger carries no live mark, so an unrealized P&L taken from it would be
-    entry-time arithmetic wearing a live label. Captured signals are the third
+    entry-time arithmetic wearing a live label. Captured signals are the second
     book — advisory rather than held, which is why they carry neither a size nor
     a rescue verdict (see ``BOOKS``).
 
@@ -569,7 +568,7 @@ def position_rows(paper_view, driver_view, captured_view=None):
     visible slice would understate both.
     """
     out = []
-    for view, book in zip((paper_view, driver_view, captured_view), BOOKS):
+    for view, book in zip((paper_view, captured_view), BOOKS):
         entries = ((view or {}).get(book["list_key"])
                    if isinstance(view, dict) else None)
         if not isinstance(entries, list):
@@ -1498,11 +1497,10 @@ _REGIME_CHIP = {"LONG GAMMA · PINS": _chip(_C["positive"], wrap=True, fill=None
 _FLAG_CHIP = {"OK": CHIP_POS, "WATCH": CHIP_WARN, "AT RISK": CHIP_NEG,
               "RESCUE": CHIP_NEG_STRONG}
 
-# The book a row came from. Three books, three P&Ls — the chip is what makes a
+# The book a row came from. Two books, two P&Ls — the chip is what makes a
 # merged row actionable, and it is also what says whether the row is a HELD
 # trade or an advisory signal.
-_SOURCE_CHIP = {PAPER_SOURCE: CHIP_ACCENT, CLAUDE_SOURCE: CHIP_WARN,
-                CAPTURED_SOURCE: CHIP_LABEL}
+_SOURCE_CHIP = {PAPER_SOURCE: CHIP_ACCENT, CAPTURED_SOURCE: CHIP_LABEL}
 
 # iv_state ∈ {spiking, collapsing, stable, na} (services/options_svc/matrix.py).
 # Deliberately NOT green/red: rising IV is neither good nor bad on its own — it
@@ -1559,8 +1557,7 @@ def signed_class(v):
 # a timer of its own.
 VIEWS = ("sentiment:regime", "sentiment:composite",
          "sentiment:history", "options:gex_status", "options:matrix",
-         "options:flow_alerts", "options:paper_account",
-         "options:driver_paper_account", "options:captured",
+         "options:flow_alerts", "options:paper_account", "options:captured",
          "sentiment:bullbear", "market:summary")
 
 # Which views each region depends on. A repaint touches only the regions whose
@@ -1577,8 +1574,7 @@ _REGION_VIEWS = {
     # 2 s header bump rebuilding eleven chips is pure churn.
     "bullbear": ("sentiment:bullbear",),
     "flow": ("options:flow_alerts",),
-    "positions": ("options:paper_account", "options:driver_paper_account",
-                  "options:captured"),
+    "positions": ("options:paper_account", "options:captured"),
     # The sentence (market_svc, on change) and the five views its live chips
     # read. Chips and sentence update IN PLACE, so a repaint here costs nothing
     # visible when only a day-move ticked.
@@ -1790,7 +1786,7 @@ def fold_flow_arrivals(state, rows, now):
 
 
 def fold_position_arrivals(state, rows, now):
-    """The same, across the three books — plus the SILENT flag-change glow.
+    """The same, across both books — plus the SILENT flag-change glow.
 
     A flag moving (OK -> AT RISK -> RESCUE) glows amber but never speaks: a
     position already in the book changing state is not something that was absent
@@ -2467,8 +2463,8 @@ FLOW_GRID = ("grid grid-cols-[54px_minmax(70px,1fr)_minmax(192px,4fr)_"
 #   STRIKES 126px "24000.0/23950.0" — an index strike pair, 117px. An equity
 #                pair ("1200.0/1195.0") is not the worst case.
 #   QTY     36px "125" at 13px is 23.4px; the label is the binding half.
-#   UNREAL  94px "-$12,345.00" is 85.8px. The driver's own max_loss_total runs
-#                to four figures, so five-figure P&L is a real row, not a
+#   UNREAL  94px "-$12,345.00" is 85.8px. A max_loss_total can run to four
+#                figures, so five-figure P&L is a real row, not a
 #                hypothetical one.
 #   FLAG    60px "AT RISK" at chip metrics — the same no-fold rule as BOOK.
 #
@@ -2647,7 +2643,7 @@ EMPTY_DEALER = ("No dealer positioning yet — these levels appear once the "
                 "gamma feed publishes.")
 EMPTY_BOARD = "Nothing ranked yet — the board fills once the scanner runs."
 EMPTY_FLOW = "Nothing unusual has traded yet today."
-EMPTY_POSITIONS = "Nothing open — no paper or Claude trades running."
+EMPTY_POSITIONS = "Nothing open — no paper trades running."
 
 
 def stale_walls_note(label):
@@ -2945,7 +2941,7 @@ def _compact_card(title, arcs, pill_text, delta, pill_tip=""):
 # landing page.
 #
 # Two facts that used to stand here are gone, and one survived. ``$SPX · SPY ·
-# $NDX · QQQ`` and ``PAPER · CLAUDE · CAPTURED`` are literally the SYMBOL and
+# $NDX · QQQ`` and ``PAPER · CAPTURED`` are literally the SYMBOL and
 # BOOK columns underneath them, printed row by row. The SORT ORDER is not
 # anywhere else on the panel, so it stays — still interpolated, never written
 # down.
@@ -2970,7 +2966,7 @@ PANEL_HEADS = {
              f"The {FLOW_ROWS_N} newest unusual trades. Which side traded, not "
              f"who initiated."),
     "positions": ("Positions",
-                  "What you and Claude are holding, and what needs a decision."),
+                  "What you are holding, and what needs a decision."),
 }
 
 # One label per grid track, hoisted for the same reason as the heads above: the
@@ -3794,14 +3790,12 @@ def render():
     def _paint_positions():
         pos_body.clear()
         paper_view = _view("options:paper_account")
-        driver_view = _view("options:driver_paper_account")
         captured_view = _view("options:captured")
         with pos_body:
-            if paper_view is None and driver_view is None \
-                    and captured_view is None:
+            if paper_view is None and captured_view is None:
                 kit.empty(WAITING_OPTIONS)
                 return
-            rows = position_rows(paper_view, driver_view, captured_view)
+            rows = position_rows(paper_view, captured_view)
             # ⚠ The summary reads the FULL book; only the DRAW is capped. Moving
             # this line below the slice would make the panel report the P&L and
             # the at-risk count of whatever happened to fit on screen.
@@ -3845,7 +3839,7 @@ def render():
             ui.label(row["source"]).classes(
                 f"self-start {source_chip_class(row['source'])}")
             # ⚠ The BOOK badge is this row's first cell, so the stylesheet pins
-            # THAT — and a pinned PAPER/DRIVER chip beside ten scrolling
+            # THAT — and a pinned PAPER/CAPTURED chip beside ten scrolling
             # numbers names nothing. The symbol pins with it (``_PIN_DEPTHS``).
             ui.label(row["symbol"]).classes(
                 f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
@@ -3919,7 +3913,6 @@ def render():
 
     def _detect_positions(now):
         rows = position_rows(_view("options:paper_account"),
-                             _view("options:driver_paper_account"),
                              _view("options:captured"))
         return fold_position_arrivals(state, rows, now)
 

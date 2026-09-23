@@ -95,8 +95,8 @@ def test_the_peak_is_this_cycles_mfe_not_the_stale_row_value(monkeypatch, tmp_pa
 
 
 def test_a_NON_lifecycle_cycle_supplies_no_ladder(monkeypatch, tmp_path):
-    """The driver passes ``lifecycle=False`` and the manual book defaults off, so
-    the ratchet must not reach either until the lifecycle is enabled."""
+    """The manual book's lifecycle defaults off, so the ratchet must not reach
+    it until the lifecycle is enabled."""
     seen = {}
 
     def _spy(ctx):

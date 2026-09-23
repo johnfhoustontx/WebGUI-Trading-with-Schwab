@@ -306,12 +306,12 @@ def send_flow_alert(a, *, config: dict | None = None) -> bool:
 
 
 # ── Scheduled end-of-day summary (post-close push, ~15:10 CT) ────────────────
-# A once-daily push summarizing the day's result per paper book (manual + driver):
+# A once-daily push summarizing the day's result per paper book (the manual account):
 # day P&L, today's closed W-L + realized, open count, and halt flag. Unlike the action
 # digest there is NO "skip if empty" — the day's P&L is the point — but it does skip
 # when no paper book is seeded at all (no "no books" spam). Book state is read as-is at
 # call time (see compute.collect_eod_summary).
-_EOD_BOOK_ORDER = ("manual", "driver")
+_EOD_BOOK_ORDER = ("manual",)
 _D_RED = 0xE74C3C
 
 

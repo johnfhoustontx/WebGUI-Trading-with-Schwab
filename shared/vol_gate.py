@@ -37,8 +37,7 @@ IV_TOO_HIGH = "IV_TOO_HIGH"
 def _finite(value):
     """A real number, or ``None``. Rejects ``bool`` and every non-finite float.
 
-    The same contract as ``webgui/pages/fmt.num`` and
-    ``shared.driver_policy``'s own coercion, and it is strict here for the
+    The same contract as ``webgui/pages/fmt.num``, and it is strict here for the
     documented reason: this value is about to reach a ``<`` comparison, and a NaN
     makes every comparison False — which switches a bound silently OFF rather
     than raising. ``bool`` is excluded because ``float(True)`` is 1.0 and would

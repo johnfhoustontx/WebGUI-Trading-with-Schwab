@@ -13,7 +13,7 @@
   routine, which died with the Windows prod stack.
 
   WHAT IS IRREPLACEABLE, and why this is not routine hygiene:
-    paper_account.db / paper_account_driver.db  the books
+    paper_account.db / paper_account_driver.db  the books (driver: history only)
     signals.db                                  what the model said, and when
     gex_history.db                              ~1.5 GB of intraday dealer
                                                 positioning that CANNOT be

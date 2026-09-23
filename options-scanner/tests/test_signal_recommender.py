@@ -24,7 +24,7 @@ def test_arms_at_50pct_does_not_close():
 
 
 def test_non_lifecycle_takes_profit_at_50pct():
-    # NON-lifecycle callers (the manual paper + driver manage cycles, which pass a
+    # NON-lifecycle callers (the manual paper manage cycle, which passes a
     # minimal ctx with no "lifecycle" key) keep the pre-lifecycle behavior: +50%
     # credit → TAKE_PROFIT / TARGET_HIT. Regression guard — the captured-autoclose
     # lifecycle rework silently stopped both paper books taking profit at +50%.

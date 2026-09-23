@@ -93,7 +93,7 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     parent_position_id INTEGER,
     mae REAL,               -- max adverse excursion (most-negative position-level unrealized $ seen)
     mfe REAL,               -- max favorable excursion (most-positive position-level unrealized $ seen)
-    entry_context TEXT,     -- JSON: decision context at open (driver posture/market_read); NULL for manual
+    entry_context TEXT,     -- JSON decision context at open; written only by the removed autonomous driver, NULL otherwise
     be_armed INTEGER DEFAULT 0  -- opt-in manual-paper lifecycle: 1 once +50% credit has armed break-even
 );
 CREATE INDEX IF NOT EXISTS idx_positions_status ON paper_positions(status);
@@ -257,9 +257,9 @@ def reconcile_buying_power(db_path):
     Why (R6): opening a position is a 3-commit sequence — record_order →
     reserve_buying_power → insert_position — that is NOT atomic. A crash BETWEEN
     reserve and insert leaves buying power reserved against no position, so the
-    driver's halt/loss-cap math (which reads reserved/equity) runs on a corrupted
-    book. Rewriting the sequence into one transaction is too invasive; instead we
-    reconcile at service startup for BOTH the manual and the driver account.
+    halt/drawdown math (which reads reserved/equity) runs on a corrupted book.
+    Rewriting the sequence into one transaction is too invasive; instead we
+    reconcile at service startup.
 
     Idempotent + defensive: a no-op when reserved already equals the open-position
     total (within a rounding tolerance); returns the corrected drift amount (0.0 on

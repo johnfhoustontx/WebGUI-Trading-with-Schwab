@@ -24,7 +24,6 @@ owns_proxy         = true
 allow_claude       = true
 allow_notifications = true
 schedulers         = true
-autonomous_trading = true
 
 [dev]
 # Services 9210-9215, webgui 9500. The proxy is NOT offset: dev borrows prod's
@@ -42,4 +41,3 @@ owns_proxy         = false
 allow_claude       = false
 allow_notifications = false
 schedulers         = false
-autonomous_trading = false

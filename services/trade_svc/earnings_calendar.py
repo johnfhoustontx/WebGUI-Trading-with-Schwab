@@ -73,7 +73,7 @@ def api_key():
     """The Alpha Vantage key, or None. Never raises.
 
     Order: ``ALPHAVANTAGE_API_KEY`` env var → gitignored
-    ``shared/alphavantage_key.txt``. Mirrors ``driver_svc.api_keys``."""
+    ``shared/alphavantage_key.txt``."""
     key = os.environ.get(_ENV_VAR)
     if key and key.strip():
         return key.strip()

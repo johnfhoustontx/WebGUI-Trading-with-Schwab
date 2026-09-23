@@ -1,9 +1,9 @@
-"""Tests for the PURE driver performance scorecard (driver_perf.build_scorecard).
+"""Tests for the PURE paper-book performance scorecard (book_perf.build_scorecard).
 
 No I/O, no engine import — exercised with plain position dicts + an account
 snapshot dict. Covers empty / mixed open-closed / all-wins (profit_factor None) /
 by-symbol + by-strategy breakdowns / sparse-or-None rows."""
-from services.options_svc import driver_perf as dp
+from services.options_svc import book_perf as dp
 
 
 def _closed(symbol, strategy, pnl):

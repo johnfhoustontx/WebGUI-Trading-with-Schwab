@@ -51,7 +51,7 @@ SECTORS = frozenset({
     # ⚠ Broad-market names are a bucket, NOT an exemption, and that is measured:
     # SPY / QQQ / DIA / IWM correlate 0.799 pairwise — the second-tightest group
     # in the universe after Energy (0.846). Nine simultaneous index positions is
-    # one market bet; the driver book held nine, for $15,018.
+    # one market bet; one paper book once held nine, for $15,018.
     "INDEX",
 })
 

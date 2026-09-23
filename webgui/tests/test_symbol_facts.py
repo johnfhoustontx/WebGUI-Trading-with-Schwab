@@ -328,9 +328,6 @@ def _books():
             {"trade_id": 10, "symbol": "mu", "strategy": "LONG_CALL", "status": "OPEN"},
             {"trade_id": 11, "symbol": "MU", "strategy": "PCS", "status": "EXPIRED"},
         ]},
-        "options:driver_paper_account": {"positions": [
-            {"position_id": 20, "symbol": "MU", "strategy": "IC"},   # no status → open
-        ]},
         "options:captured": {"signals": [
             {"signal_id": 30, "symbol": "MU", "strategy": "PCS", "status": "open"},
             {"signal_id": 31, "symbol": "MU", "strategy": "PCS", "status": "closed"},
@@ -338,11 +335,11 @@ def _books():
     }
 
 
-def test_position_rows_open_rows_from_all_four_books_tagged():
+def test_position_rows_open_rows_from_all_three_books_tagged():
     rows = sf.position_rows(" mu ", _books())
     assert [(r["book"], r.get("position_id") or r.get("trade_id")
              or r.get("signal_id")) for r in rows] == [
-        ("account", 1), ("ledger", 10), ("driver", 20), ("captured", 30)]
+        ("account", 1), ("ledger", 10), ("captured", 30)]
 
 
 def test_position_rows_drops_closed_and_expired():
@@ -359,7 +356,6 @@ def test_position_rows_does_not_mutate_the_payload():
 
 @pytest.mark.parametrize("books", [None, {}, "junk", {
     "options:paper_account": None, "options:paper_trades": {"trades": None},
-    "options:driver_paper_account": "junk",
     "options:captured": {"signals": ["junk", None]}}])
 def test_position_rows_missing_books_are_empty(books):
     assert sf.position_rows("MU", books) == []

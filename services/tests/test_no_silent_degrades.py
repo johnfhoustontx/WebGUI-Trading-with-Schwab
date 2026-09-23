@@ -83,8 +83,9 @@ def test_the_scan_actually_reaches_the_code():
     assert seen > 30, f"only walked {seen} service modules - is the root wrong?"
 
 
-@pytest.mark.parametrize("domain", ["options_svc", "sentiment_svc", "driver_svc"])
+@pytest.mark.parametrize("domain", ["options_svc", "sentiment_svc"])
 def test_the_domains_that_were_fixed_import_the_helper(domain):
-    """Cheap canary: these three carried the worst offenders."""
+    """Cheap canary: these carried the worst offenders (driver_svc, the third,
+    was removed 2026-09-22)."""
     src = (SERVICES / domain / "compute.py").read_text(encoding="utf-8")
     assert "from services import _degrade" in src

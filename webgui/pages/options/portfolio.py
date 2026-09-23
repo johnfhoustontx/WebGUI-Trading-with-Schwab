@@ -161,8 +161,7 @@ def scorecard_text(perf) -> str:
 
     ⚠ **An undefined profit factor is omitted, not printed.** ``None`` means "no
     losses yet" (gross win / gross loss is undefined), and an em-dash mid-sentence
-    reads as a rendering fault; the driver page shows "—" because there it is a
-    labelled chip, where the absence is legible.
+    reads as a rendering fault.
     """
     p = perf or {}
     closed = p.get("closed") or 0
@@ -241,9 +240,7 @@ def render():
             # ⚠ HOURLY, and this tooltip claimed a five-minute cadence for
             # months. The manual account rides
             # ``options_svc.scheduler.paper_cycle_due`` — the top of each hour,
-            # 09:00-14:00 CT on trading days, with no 15:00 run; the 1-minute
-            # ``manage_due`` slot belongs to the isolated DRIVER account, not to
-            # this book. A tooltip that overstates a cadence is worse than none:
+            # 09:00-14:00 CT on trading days, with no 15:00 run. A tooltip that overstates a cadence is worse than none:
             # it says a target hit at 09:15 is acted on within minutes, where it
             # really waits for 10:00.
             manage_btn = kit.button(
@@ -260,8 +257,8 @@ def render():
             cards_box = ui.row().classes("gap-3 flex-wrap")
             # The book's own track record (gap assessment C5) and its Greeks
             # (C4), one line each: this page already carries the account cards,
-            # the positions and the fills, and the driver page's full card
-            # would bury them.
+            # the positions and the fills, and a full scorecard card would
+            # bury them.
             scorecard_label = ui.label("").classes(f"text-xs {MUTED}")
             greeks_label = ui.label("").classes(f"text-xs {MUTED}")
             kit.section_title("Open positions")
@@ -272,14 +269,10 @@ def render():
                                   numeric=("quantity", "fill_price"))
 
         # ── Analytics: realized equity curve + MAE/MFE (scanner-baseline) ────
-        # Same builders as the driver monitor, so this book (auto-trades every
-        # captured signal) reads directly against the driver book (Claude's
-        # selection) — the benchmark that shows whether the decider adds edge
-        # over the raw scanner.
         kit.section_title("Analytics")
         ui.label("Realized equity curve, and how far trades ran for and against "
                  "before closing (MAE/MFE), for the manual (scanner-baseline) "
-                 "book. Compare with Claude Trades' Analytics.").classes(
+                 "book.").classes(
                      f"text-xs {MUTED}")
         equity_chart = ui.highchart(equity_curve_figure([])).classes("w-full")
         excursion_label = ui.label("").classes(f"text-xs {MUTED}")

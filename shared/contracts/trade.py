@@ -129,7 +129,7 @@ class RankBoard(_Base):
 class ModelBook(_Base):
     """The model's own paper book — ``trade_svc.compute.run_model_book``.
 
-    Paper only, and isolated from the driver's book: this one exists to give the
+    Paper only, and isolated from the other paper books: this one exists to give the
     swing model a track record without anyone placing its trades.
 
     ⚠ It trades the UNDERLYING rather than the Trade Plan's options structure, a

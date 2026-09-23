@@ -121,7 +121,7 @@ GATE_OFF_HOURS = {"alert_enabled": True, "alert_market_hours_only": False}
 
 def test_unhealthy_keys_namespaces_stale_and_down():
     fresh = {"options:scan": True, "sentiment:composite": False}
-    health = {"options": False, "trade": True, "driver": None}
+    health = {"options": False, "trade": True, "market": None}
     keys = alerts.unhealthy_keys(fresh, health)
     # stale view + down service; healthy view, up service, and None-health excluded
     assert keys == {"stale:options:scan", "down:options"}

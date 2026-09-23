@@ -16,7 +16,7 @@ REM
 REM  WHY A TUNNEL AND NOT A URL. Both services bind 127.0.0.1 on the VPS and
 REM  have NO AUTHENTICATION OF ANY KIND. That is correct for a desk-side app and
 REM  it is the whole problem on a server: the GUI can open paper positions, apply
-REM  rescue adjustments, arm the autonomous driver and stop the entire stack, and
+REM  rescue adjustments and stop the entire stack, and
 REM  the proxy holds the Schwab credentials. The tunnel gives you both while they
 REM  stay bound to loopback at each end, authenticated by your SSH key.
 REM

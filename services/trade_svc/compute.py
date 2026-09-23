@@ -1051,8 +1051,7 @@ _REGIME_KEY = "cache:sentiment:regime"
 def _read_regime():
     """The sentiment service's committed market-regime payload, or None.
 
-    Tier-2 reading another domain's Tier-3 cache view — allowed, and the same
-    thing `driver_svc` does for its market context. Never raises: a sentiment
+    Tier-2 reading another domain's Tier-3 cache view — allowed. Never raises: a sentiment
     outage costs the clearance its nuance, not the user their analysis, and
     :func:`market_filter.direction_clearance` treats a missing regime exactly
     as it treats a stale one (conservatively)."""
@@ -1128,8 +1127,7 @@ def _read_matrix_row(symbol):
     """``(row, payload_ts)`` for ``symbol`` from the options matrix, or
     ``(None, None)``.
 
-    Tier-2 reading another domain's Tier-3 cache view — the same thing
-    `driver_svc` does for its market context. Never raises."""
+    Tier-2 reading another domain's Tier-3 cache view. Never raises."""
     try:
         env = _bus().cache_get(_MATRIX_KEY)
         payload = env.payload if env else None

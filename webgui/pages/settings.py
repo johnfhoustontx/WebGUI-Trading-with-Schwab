@@ -62,7 +62,7 @@ def apply_manual_paper_lifecycle(value) -> None:
     """Persist the MANUAL paper account's break-even-lifecycle opt-in AND tell
     options_svc to gate it — an inert, opt-in placeholder (flag default OFF)
     mirroring ``apply_captured_autoclose``, but for the manual paper book instead
-    of captured signals; the DRIVER's isolated account never reads this flag.
+    of captured signals.
     Best-effort: the setting persists even with the bus down (the service
     defaults OFF on a missing key and re-syncs at webgui startup)."""
     enabled = bool(value)
@@ -321,8 +321,7 @@ def _render_general():
             ui.label("Opt the MANUAL paper account into the same lifecycle: arm "
                      "break-even at +50% credit instead of taking profit immediately, "
                      "then ride toward full credit protected by a break-even stop. "
-                     "Off (default) keeps today's plain take-profit at +50%. The "
-                     "Driver's isolated account is never affected by this toggle."
+                     "Off (default) keeps today's plain take-profit at +50%."
                      ).classes(f"text-sm {theme.MUTED}")
             mplsw = ui.switch("Manual paper: break-even lifecycle (experimental)",
                               value=s.get("manual_paper_lifecycle_enabled", False))
@@ -355,8 +354,8 @@ def _render_general():
             kit.section_title("API usage")
             ui.label("Outbound Schwab API calls counted at the proxy per actual HTTP "
                      "request (market data + trading, including retries), and Claude "
-                     "(Anthropic) API calls counted at each call site (driver decider, "
-                     "Gamma Analyze). The scheduled gamma briefings "
+                     "(Anthropic) API calls counted at each call site (Gamma "
+                     "Analyze). The scheduled gamma briefings "
                      "run on the Claude subscription and count here only when one "
                      "falls back to the API. Counts accumulate going "
                      "forward.").classes(f"text-sm {theme.MUTED}")
@@ -421,7 +420,7 @@ def _render_general():
                 claude_since.text = (f"Counting since {cstats['since']}."
                                      if cstats and cstats.get("since")
                                      else "No counts yet — restart the services "
-                                          "(driver / options / market) if they "
+                                          "(options / market) if they "
                                           "predate the counter.")
 
             # This card's OWN refresh, not the page's: it re-reads two counters

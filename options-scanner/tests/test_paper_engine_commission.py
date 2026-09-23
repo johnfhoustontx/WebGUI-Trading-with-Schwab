@@ -2,8 +2,7 @@
 
 A managed close (BUY_TO_CLOSE) pays commission on the open AND the close
 (round-trip); an OTM expiration pays only the opening commission. This makes the
-driver's performance scorecard (and the manual paper account) reflect net-of-fees
-realized P&L. See the 2026-07-01 calc-accuracy remediation.
+manual paper account reflect net-of-fees realized P&L. See the 2026-07-01 calc-accuracy remediation.
 """
 import sys
 import pathlib

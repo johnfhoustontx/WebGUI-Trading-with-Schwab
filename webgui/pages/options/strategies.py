@@ -51,8 +51,8 @@ STRATEGY_TEMPLATES = {
     "VERT_CALL_DEBIT": [_leg("call", "long", 1, "atm"), _leg("call", "short", 1, "otm_up_1")],
     # straddles / strangles (gap assessment D1) - ANALYSIS ONLY. The two SHORT
     # ones are UNDEFINED RISK and the playbook's "Don't" list names them
-    # explicitly, so they must stay unreachable by any scanner, paper book or the
-    # driver. A straddle is both rights at ONE strike; a strangle straddles spot
+    # explicitly, so they must stay unreachable by any scanner or paper book.
+    # A straddle is both rights at ONE strike; a strangle straddles spot
     # with two, so it costs less and needs a bigger move.
     "LONG_STRADDLE":  [_leg("call", "long", 1, "atm"),
                        _leg("put", "long", 1, "atm")],

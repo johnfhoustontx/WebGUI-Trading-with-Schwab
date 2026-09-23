@@ -4,8 +4,8 @@ between the put wall and the call wall, as percentages along the bar.
 Shared by the Desk (``/desk``) and the Symbol Dossier. It lived in
 ``pages/desk.py`` until a second page needed it; a page reaching into another
 PAGE module for its arithmetic is the wrong shape, and this follows the
-``pages/scorecard.py`` precedent (moved out of ``pages/driver.py`` on
-2026-09-12 for the same reason). ``desk`` re-exports ``structure_positions``,
+``pages/scorecard.py`` precedent (moved out of a page module on 2026-09-12
+for the same reason). ``desk`` re-exports ``structure_positions``,
 so ``desk.structure_positions`` still resolves for its existing tests.
 
 Everything here is PURE (no bus reads, never raises) except ``structure_map``,
