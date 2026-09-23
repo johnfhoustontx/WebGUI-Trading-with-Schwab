@@ -2657,11 +2657,14 @@ refusal. Three decisions in it are load-bearing:
   whose entry cycle sized the trade first), so **any non-Account caller must refuse
   a non-positive or non-finite risk BEFORE calling `evaluate`** — or a trade with
   no readable max loss passes every risk rung.
-- **Per-trade limits differ by book on purpose.** `LEDGER_MAX_RISK_PER_TRADE` is
-  $750; the Account's `MAX_RISK_PER_TRADE` stays $250, because that constant also
-  sizes the scanner's widths (`DEFAULT_MAX_RISK_DOLLARS`), and at $250 most of the
-  Directional tab's long options could not be opened by hand. The six concentration
-  caps are the Account's. Ledger equity for the deployment cap is
+- **Per-trade limits are two keys, one per book, both $750 since 2026-09-22**
+  (`config/paper.toml` via `shared/paper_limits.py`, surfaced as module constants
+  by `config_paper`). `MAX_RISK_PER_TRADE` is the Account's and also sizes the
+  Market Scanner's widths (`DEFAULT_MAX_RISK_DOLLARS`); `LEDGER_MAX_RISK_PER_TRADE`
+  is the Ledger's and sizes the Strategy Finder's and Income Window's credit
+  spreads, because `swing_scan` passes it to `screen_spreads` at call time — their
+  trades book into the Ledger. At $750 one maximum-size trade fills its symbol's
+  $750 risk cap in either book. The six concentration caps are the Account's. Ledger equity for the deployment cap is
   `STARTING_BALANCE` + realized P&L of its closed trades — it moves on a close,
   never on a mark.
 
@@ -3061,7 +3064,7 @@ never did — the page's help already claimed they did.
 ## The width search sizes against the REAL book, and the scan reads the calendar
 
 **`scanner_engine.DEFAULT_MAX_RISK_DOLLARS` is `config_paper.MAX_RISK_PER_TRADE`
-($250).** `select_best_width` defaulted to a phantom `account_size=100000,
+($750 since 2026-09-22; $250 when the figures below were measured).** `select_best_width` defaulted to a phantom `account_size=100000,
 max_risk_pct=0.05` — a $5,000 per-trade budget — so the E[PnL] race that picks a
 width was decided for a book **20× the real one**, and it routinely chose a width
 whose single contract the entry cycle then refused. ⚠ Measured on the live book
@@ -3075,13 +3078,13 @@ existing `contracts <= 0 → continue` guard then drops a width nothing can size
 so ~92% of those rejections stop being emitted at all rather than being emitted
 and refused.
 
-⚠ **The honest consequence: a $250 per-trade cap excludes high-priced underlyings
-with wide strike increments entirely.** MU's narrowest available width is $5 =
-$425, so no width is affordable and the scan now emits nothing for it. That is the
-truth made visible (no signal) instead of invisible (a rejection buried in the
-fills log) — and raising `MAX_RISK_PER_TRADE` is the operator's decision, not the
-scanner's. The **driver's** cap is 12× larger, so a width chosen for $250 stays
-openable there: the conservative direction.
+⚠ **The honest consequence: a per-trade cap excludes high-priced underlyings
+whose narrowest width costs more than it.** At the old $250, MU's $5 width ($425)
+was unaffordable and the scan emitted nothing for it; the operator raised the cap
+to $750 on 2026-09-22, which readmits that case but not, say, a 25-wide ALAB
+($2,044). That is the truth made visible (no signal) instead of invisible (a
+rejection buried in the fills log). The **driver's** cap is larger still, so a
+width chosen for the Account stays openable there: the conservative direction.
 
 **`compute.scan_earnings` is the one earnings lookup every scan uses.**
 `swing_scan` has gated per signal since the 0-DTE-bucket fix and `income_scan`
@@ -3619,12 +3622,12 @@ one, a missing or zero percentage, a non-numeric ceiling. A fraction of an unkno
 cannot be enforced and a zero denominator would refuse every trade forever, which
 reads as a broken driver rather than as a cap.
 
-⚠ **The manual book deliberately did NOT change.** $250 per trade is 1.03% of
-$24,184 and `MAX_SESSION_DRAWDOWN` $2,500 is 10.3% — both within a whisker of
-intent — and B3 already made its book-level ceiling a percentage. And
-`MAX_RISK_PER_TRADE` must stay flat while `scanner_engine.DEFAULT_MAX_RISK_DOLLARS`
-is wired to that exact constant: floating one and not the other would re-open the
-21.9%-of-orders `RISK_TOO_HIGH` problem A6 closed, from the other end. The
+⚠ **The manual book is not equity-scaled.** Its per-trade cap is a flat dollar
+figure ($750 since 2026-09-22, about 3% of the book) and B3 already made its
+book-level ceiling a percentage. And `MAX_RISK_PER_TRADE` must stay flat while
+`scanner_engine.DEFAULT_MAX_RISK_DOLLARS` is wired to that exact constant:
+floating one and not the other would re-open the 21.9%-of-orders `RISK_TOO_HIGH`
+problem A6 closed, from the other end. The
 driver's sizing **appetite** is still an open operator decision; this only makes
 the config honest.
 

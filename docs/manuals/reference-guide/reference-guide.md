@@ -2748,9 +2748,10 @@ limit at all — the quantity you typed was the quantity booked.
 | Whole ledger | open max loss at most **20%** of equity — $25,000 plus the realized P&L of closed trades |
 
 The last four rows are the [Paper Account](#paper-account)'s own six concentration limits.
-The per-trade limit is not: the engine's is **$250**, which also decides how wide the
-scanner builds its spreads, and at $250 most of the Directional tab's long options
-could not be opened by hand at all.
+The per-trade limit is set separately for each book, and both are **$750** (Settings →
+Configuration → Paper books). The ledger's figure is also the budget the Strategy
+Finder and Income Window size credit spreads against; the Paper Account's decides how
+wide the Market Scanner builds its spreads.
 
 **The Paper trade box previews the same check before you send.** Under the trade's
 *Risk $X per contract* it shows one line per limit for the quantity typed — green
@@ -2857,7 +2858,7 @@ stops the day.
 
 | Limit | Default | Refuses |
 |---|---|---|
-| Risk per trade | $250 | A spread whose single contract already exceeds the cap |
+| Risk per trade | $750 | A spread whose single contract already exceeds the cap |
 | **Positions in one symbol** | **3** | A fourth open position in the same underlying |
 | **Risk in one symbol** | **$750** | An entry that would push one name's summed max loss past the cap |
 | **Positions in one sector** | **5** | A sixth open position in the same sector; the index products ($SPX, SPY, QQQ, $NDX, DIA, IWM) count as one group |
@@ -3336,6 +3337,14 @@ situations that would otherwise look identical. The **too cheap to sell** count 
 different reason: trades that would sell premium, dropped because this symbol's
 volatility is historically low (trades that buy premium are kept).
 
+**Why no credit spreads.** Put and call credit spreads (and the iron condors built from
+them) are turned down *before* they are scored — by the minimum credit, by requiring the
+credit to beat the short strike's delta, by the expected-move window, by liquidity and by
+the per-trade loss cap — so neither count above can see them. When the list shows none,
+a second line under the count says why, for example
+*Credit spreads: none of 209 short strikes in the delta band made a spread — 82 credit below the minimum, 63 credit too small for the short strike's delta, 49 outside the expected-move window.*
+On a low-volatility tape this is the usual answer, and it is a decision, not a fault.
+
 - **Lower-scoring ideas not shown** — a whole chain can produce hundreds of ideas, so
   after the quality bar the Finder keeps the **best 25 of each strategy** (the 25
   highest-scoring bull call spreads across every expiration, say) and counts the rest.
@@ -3767,8 +3776,8 @@ This is the part worth understanding, because it is what makes the design defens
 4. the clamped order is enqueued to the paper book.
 
 Step 3 cannot be argued with by the model. Per-trade risk is evaluated in **per-contract
-dollars**, and the driver's own book carries a higher per-trade cap ($1,500) than the
-manual account ($250).
+dollars**, and the driver's own book carries a higher per-trade cap than the manual
+account ($750).
 
 ### Why it matters
 

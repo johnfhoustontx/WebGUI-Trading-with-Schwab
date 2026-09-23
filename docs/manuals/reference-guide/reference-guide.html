@@ -4116,9 +4116,10 @@ limit at all — the quantity you typed was the quantity booked.</p>
 </tbody>
 </table>
 <p>The last four rows are the <a href="#paper-account">Paper Account</a>'s own six concentration limits.
-The per-trade limit is not: the engine's is <strong>$250</strong>, which also decides how wide the
-scanner builds its spreads, and at $250 most of the Directional tab's long options
-could not be opened by hand at all.</p>
+The per-trade limit is set separately for each book, and both are <strong>$750</strong> (Settings →
+Configuration → Paper books). The ledger's figure is also the budget the Strategy
+Finder and Income Window size credit spreads against; the Paper Account's decides how
+wide the Market Scanner builds its spreads.</p>
 <p><strong>The Paper trade box previews the same check before you send.</strong> Under the trade's
 <em>Risk $X per contract</em> it shows one line per limit for the quantity typed — green
 when it fits (<em>Position 2 of 3 in ORCL</em>), red when it breaks (<em>Risks $950, over the
@@ -4227,7 +4228,7 @@ stops the day.</p>
 <tbody>
 <tr>
 <td>Risk per trade</td>
-<td>$250</td>
+<td>$750</td>
 <td>A spread whose single contract already exceeds the cap</td>
 </tr>
 <tr>
@@ -4853,6 +4854,13 @@ things and rejected them all"</em> from <em>"the scan found nothing"</em> — tw
 situations that would otherwise look identical. The <strong>too cheap to sell</strong> count is a
 different reason: trades that would sell premium, dropped because this symbol's
 volatility is historically low (trades that buy premium are kept).</p>
+<p><strong>Why no credit spreads.</strong> Put and call credit spreads (and the iron condors built from
+them) are turned down <em>before</em> they are scored — by the minimum credit, by requiring the
+credit to beat the short strike's delta, by the expected-move window, by liquidity and by
+the per-trade loss cap — so neither count above can see them. When the list shows none,
+a second line under the count says why, for example
+<em>Credit spreads: none of 209 short strikes in the delta band made a spread — 82 credit below the minimum, 63 credit too small for the short strike's delta, 49 outside the expected-move window.</em>
+On a low-volatility tape this is the usual answer, and it is a decision, not a fault.</p>
 <ul>
 <li><strong>Lower-scoring ideas not shown</strong> — a whole chain can produce hundreds of ideas, so
   after the quality bar the Finder keeps the <strong>best 25 of each strategy</strong> (the 25
@@ -5309,8 +5317,8 @@ stop</em>, <em>Time stop</em>, <em>Money stop</em>.</p>
 <li>the clamped order is enqueued to the paper book.</li>
 </ol>
 <p>Step 3 cannot be argued with by the model. Per-trade risk is evaluated in <strong>per-contract
-dollars</strong>, and the driver's own book carries a higher per-trade cap ($1,500) than the
-manual account ($250).</p>
+dollars</strong>, and the driver's own book carries a higher per-trade cap than the manual
+account ($750).</p>
 <h3 id="why-it-matters_21">Why it matters</h3>
 <p>As a research instrument this is the most interesting thing in the app: an unbiased,
 fully-logged record of what a rules-plus-model system does with the app's own signals.

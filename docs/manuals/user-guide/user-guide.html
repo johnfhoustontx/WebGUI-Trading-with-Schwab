@@ -1814,7 +1814,7 @@ again.</p>
 <p>⚠ Equity counts your closed trades' realized P&amp;L, so <strong>Delete all closed</strong> also
 changes the 20% limit. A $750 trade by itself uses the whole $750 allowance for its
 symbol. The limits apply to this ledger only — the Paper Account's automatic
-engine has its own, with a $250 per-trade limit.</p>
+engine has its own, also with a $750 per-trade limit.</p>
 <p><strong>Automatic exits (long options, debit spreads, butterflies and condors only).</strong> Checked <strong>hourly,
 09:00–14:00 CT</strong> on the same run as the paper account — so a target reached at
 09:15 is acted on at 10:00, or immediately if you press <strong>Run manage cycle</strong> on
@@ -2174,7 +2174,10 @@ for $SPX.</em></p>
   ideas</em>; the cut and not-shown counts are left out when they are zero. When part
   of the chain could not be fetched the line adds <em>2 expirations could not be
   loaded</em> — the ideas shown come from the rest of the chain. When the scan itself
-  failed, the whole line reads <strong>Scan failed</strong>.</li>
+  failed, the whole line reads <strong>Scan failed</strong>;</li>
+<li>when the list holds <strong>no credit spreads</strong>, a line under the count saying why —
+  for example <em>Credit spreads: none of 209 short strikes in the delta band made a spread — 82 credit below the minimum, 63 credit too small for the short strike's delta, 49 outside the expected-move window.</em> Those spreads are turned down before scoring, so
+  the counts above cannot show them.</li>
 </ul>
 <p><strong>Strategy chips</strong></p>
 <p>One chip per strategy group, each with how many ideas it holds, plus <strong>All</strong>.</p>

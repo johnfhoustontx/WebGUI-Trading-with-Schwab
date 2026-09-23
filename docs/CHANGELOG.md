@@ -4,7 +4,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-22 (**X posting: market reports, hourly trade ideas,
+**Last updated:** 2026-09-22 (**Strategy Finder credit spreads: the per-trade cap and
+the reason line**. [Design](plans/2026-09-22-finder-credit-spreads-design.md).)
+
+- **Per-trade caps are config, both $750.** `config/paper.toml` via
+  `shared/paper_limits.py`; `config_paper.MAX_RISK_PER_TRADE` was $250. Settings →
+  Configuration → Paper books.
+- **Finder + Income Window size credit spreads against the Ledger's cap**
+  (`swing_scan` → `screen_spreads(max_risk_dollars=LEDGER_MAX_RISK_PER_TRADE)`).
+- **"Why no credit spreads" line** on the private and public Finder:
+  `credit_spreads` tally on `cache:options:swing`, worded by
+  `finder_view.credit_spread_note`.
+- **Edge floor measured, not changed**: 917 closed signals, mean R rises with the
+  credit-over-delta margin (+0.10 at 0.02–0.05 to +0.67 at ≥0.10); nothing below
+  the floor was ever recorded. `EDGE_MARGIN` stays 0.02.
+
+**Prior —** 2026-09-22 (**X posting: market reports, hourly trade ideas,
 ad-hoc marketing**. Ships OFF and dry until OAuth keys are set.)
 
 - **One path to X.** `shared/notify/x_post.py`: v2 media upload + v2 create post

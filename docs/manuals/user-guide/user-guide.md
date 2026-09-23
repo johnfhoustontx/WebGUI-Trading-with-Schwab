@@ -1567,7 +1567,7 @@ A second or so after you press **Create** in the quantity box, a message answers
 ⚠ Equity counts your closed trades' realized P&L, so **Delete all closed** also
 changes the 20% limit. A $750 trade by itself uses the whole $750 allowance for its
 symbol. The limits apply to this ledger only — the Paper Account's automatic
-engine has its own, with a $250 per-trade limit.
+engine has its own, also with a $750 per-trade limit.
 
 **Automatic exits (long options, debit spreads, butterflies and condors only).** Checked **hourly,
 09:00–14:00 CT** on the same run as the paper account — so a target reached at
@@ -1858,7 +1858,10 @@ After every scan — an empty one included — one strip names:
   ideas*; the cut and not-shown counts are left out when they are zero. When part
   of the chain could not be fetched the line adds *2 expirations could not be
   loaded* — the ideas shown come from the rest of the chain. When the scan itself
-  failed, the whole line reads **Scan failed**.
+  failed, the whole line reads **Scan failed**;
+- when the list holds **no credit spreads**, a line under the count saying why —
+  for example *Credit spreads: none of 209 short strikes in the delta band made a spread — 82 credit below the minimum, 63 credit too small for the short strike's delta, 49 outside the expected-move window.* Those spreads are turned down before scoring, so
+  the counts above cannot show them.
 
 **Strategy chips**
 

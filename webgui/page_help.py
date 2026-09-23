@@ -366,6 +366,11 @@ four top picks, and the full ranked list.
   chain came back, nothing is listed up to your DTE max, or nothing could be built
   in the range. A scan that failed names the symbol only: *The scan for SPY
   failed. Check System Status and scan again.*
+- **No credit spreads?** A line under the count says why: put and call credit
+  spreads are turned down before scoring — credit below the minimum, credit too
+  small for the short strike's delta, outside the expected-move window, not
+  liquid enough, or one contract over the per-trade loss cap — so the quality-bar
+  and too-cheap counts cannot see them.
 - **Earnings.** A trade still open when the company reports is **kept and
   tagged** — *Earnings Nov 19* (with the year when it falls in another one) — as
   a warning badge on its card and a small tag after its name in the list. The
