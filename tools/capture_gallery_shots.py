@@ -109,9 +109,10 @@ AUTH_STORE = auth_store.DEFAULT_PATH
 # outside looks identical to the app being down.
 SESSION_COOKIE = auth_middleware.SESSION_COOKIE
 
-# The PRIVATE app on loopback. Not ``APP_HOST``: that path goes through DNS, TLS
-# and Caddy, and Caddy sets ``X-Edge``, which is the header the kiosk exemption
-# reads. Loopback is also the only place this app is bound.
+# The PRIVATE app on loopback -- which is the only place this app is bound, so
+# ``APP_HOST`` would mean a round trip out through DNS, TLS and Caddy to come
+# straight back. The session cookie minted below is what authenticates, on
+# either path.
 APP_URL = repo_paths.NICEGUI_URL
 
 # Where ``gallery.html`` already points its ``<img src>``. The stems come from
@@ -372,8 +373,8 @@ def cookie_bootstrap(token):
 def find_chrome():
     """The browser binary, or ``None``.
 
-    The same resolution ``tools/capture_live_shots.py`` and ``stream_wall.sh``
-    do: one browser, three names depending on how it was installed.
+    The same resolution ``tools/capture_live_shots.py`` does: one browser, three
+    names depending on how it was installed.
     """
     for name in ("google-chrome", "chromium-browser", "chromium", "chrome"):
         found = shutil.which(name)

@@ -31,7 +31,6 @@ import auth_store
 import live_screens
 import login_page
 import main
-import wall
 
 # ⚠ The public live screens are NOT this app's routes.
 #
@@ -88,10 +87,10 @@ def _all_routes():
     """Every concrete path registered on the real app.
 
     Parameterised paths (``/static/{path:path}``) are skipped: there is no one
-    URL to request, and the prefix they serve is covered by the gate's
-    ``WALL_PREFIXES`` tests in ``test_auth_middleware.py``. Mounts are NOT
-    skipped -- ``/_nicegui_ws`` is a concrete path and an ungated websocket
-    mount is exactly the thing this file exists to notice.
+    URL to request, and ``test_auth_middleware.py`` drives a concrete asset path
+    through the gate instead. Mounts are NOT skipped -- ``/_nicegui_ws`` is a
+    concrete path and an ungated websocket mount is exactly the thing this file
+    exists to notice.
     """
     return {p for r in main.app.routes
             if (p := getattr(r, "path", None)) and "{" not in p}
@@ -101,10 +100,10 @@ def _gated_routes():
     """``_all_routes()`` minus the public live screens -- see the note above.
 
     A SEPARATE function rather than a subtraction inside ``_all_routes``,
-    because two of that helper's three callers ask a different question. The
-    wall mirror asks "is this path served at all", and the live routes ARE
-    served in this process -- filtering them there broke that test the first
-    time this exclusion was written.
+    because the other caller asks a different question.
+    ``test_the_gate_opens_nothing_this_app_does_not_serve`` asks "is this path
+    served at all", and the live routes ARE served in this process -- filtering
+    them there broke that test the first time this exclusion was written.
     """
     return _all_routes() - _LIVE_ROUTES
 
@@ -134,11 +133,10 @@ def configured_credentials(tmp_path, monkeypatch):
 def client_unauthenticated(configured_credentials):
     """A stranger: through the edge, with no cookies of any kind.
 
-    Two things make it a stranger rather than the kiosk, and both matter.
-    ``TestClient``'s default peer is the literal string ``"testclient"``, which
-    is not loopback -- and the ``X-Edge`` header says the request came through
-    Caddy, which the kiosk's never does. Either alone closes the wall
-    exemption; both together mean a pass here can only be a real one.
+    ``TestClient``'s default peer is the literal string ``"testclient"`` and the
+    ``X-Edge`` header says the request came through Caddy -- the shape a visitor
+    on the internet actually presents. Neither is what makes it a stranger: the
+    gate reads the session cookie and nothing else, and this client has none.
 
     ``raise_server_exceptions=False`` so a handler that blows up is recorded as
     a 500 -- an offence, since 500 is not a refusal -- instead of aborting the
@@ -308,27 +306,6 @@ def test_the_login_page_is_reachable_and_is_a_plain_form(client_unauthenticated)
     assert r.status_code == 200
     assert "<form" in r.text and 'method="post"' in r.text
     assert "_nicegui" not in r.text
-
-
-# --- the wall mirror --------------------------------------------------------
-
-def test_wall_paths_mirror_what_the_wall_actually_frames():
-    """``WALL_PATHS`` is a hand-copied mirror of ``wall.PAGES``, and nothing
-    else notices when the two drift.
-
-    Both directions are failures, and neither is loud on its own. Rotate a new
-    dashboard into the wall and forget this set, and that panel renders a
-    redirect to the login form -- on a public YouTube broadcast, discovered by
-    viewers. Drop a page from the wall and leave it here, and a route stays
-    reachable unauthenticated from the box for no reason anyone remembers.
-    """
-    framed = {wall.PAGE_ROUTE} | {p["path"] for p in wall.PAGES}
-    assert set(auth_middleware.WALL_PATHS) == framed
-
-
-def test_every_framed_wall_page_is_a_route_the_app_serves():
-    """A wall panel pointed at a path nothing registers is a 404 on camera."""
-    assert {p["path"] for p in wall.PAGES} <= _all_routes()
 
 
 # --- the third token kind must not be a session ----------------------------

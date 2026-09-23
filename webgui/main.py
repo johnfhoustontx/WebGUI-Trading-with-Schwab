@@ -35,7 +35,6 @@ import bus_client  # noqa: E402
 import login_page  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
-import wall  # noqa: E402
 from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
 from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
@@ -59,10 +58,10 @@ from shell import (PANEL_SCROLL_CSS, SUBTAB_CSS, TABLE_CSS,  # noqa: E402
 
 # The brand lockup builders, likewise: `live_main.py` draws the same lockup in
 # the public screens' header and cannot import this module. Re-exported because
-# `wall.py` and the tests have called `main.brand_lockup_html` since it was
-# written. `_STATIC_DIR` comes from there too -- it is the tree the mark is
-# resolved against AND the one mounted at /static below, and two constants for
-# one directory would drift.
+# the tests have called `main.brand_lockup_html` since it was written.
+# `_STATIC_DIR` comes from there too -- it is the tree the mark is resolved
+# against AND the one mounted at /static below, and two constants for one
+# directory would drift.
 from shell import (_STATIC_DIR, brand_lockup_html,  # noqa: F401,E402
                    brand_mark_src)
 
@@ -109,15 +108,14 @@ except OSError:
 # wiring, which is precisely the bug class this repo keeps paying for (a guard
 # green against a shape the producer never emits).
 #
-# ⚠ AND IT MUST BE IDEMPOTENT. ``wall.py`` does ``import main`` lazily inside its
-# route handler (main registers that route, so a module-scope import would be a
-# cycle), and because this script runs as ``__main__`` in production that import
-# re-executes this file as a SECOND module object -- after NiceGUI has started.
-# Starlette's
+# ⚠ AND IT MUST BE IDEMPOTENT. In production this script runs as ``__main__``,
+# so anything that later does ``import main`` -- a test, a tool, or a module
+# doing it lazily inside a handler to dodge an import cycle -- re-executes this
+# file as a SECOND module object, after NiceGUI has started. Starlette's
 # ``add_middleware`` raises ``RuntimeError`` once the middleware stack is built,
 # so an unguarded call here would not merely double the gate: it would 500 every
-# page that lazily imports ``main``. The flag lives on ``app``, which is the one
-# NiceGUI singleton both module objects share.
+# page on the way through. The flag lives on ``app``, which is the one NiceGUI
+# singleton both module objects share.
 _AUTH_GATE_FLAG = "_neuralstrike_auth_gate_installed"
 
 
@@ -222,9 +220,9 @@ def explain_html(payload):
 # get this wrong.
 #
 # ⚠ No ``domain=``. A ``Domain=neuralstrike.co`` cookie is sent to that host and
-# EVERY subdomain, so the owner's session would travel to
-# the public marketing page and its third-party YouTube and Discord embeds on
-# every page view. Host-only is what makes the separate hostname a boundary at
+# EVERY subdomain, so the session that signs into this app would travel to the
+# public marketing page and to any third-party embed it ever carries, on every
+# page view. Host-only is what makes the separate hostname a boundary at
 # all; ``set_cookie`` omits the attribute when ``domain`` is None, and a test
 # pins that it stays absent.
 _COOKIE_KW = dict(path="/", httponly=True, secure=True, samesite="lax")
@@ -525,25 +523,6 @@ def _serve_eod_file(date: str, which: str = "summary"):
             "<h1>No report for that date — click Generate first.</h1>",
             status_code=404)
     return HTMLResponse(path.read_text(encoding="utf-8"))
-
-
-# ── The wall display (/wall) ──────────────────────────────────────────────────
-# A raw route rather than a ``@ui.page``: this document carries no NiceGUI
-# runtime of its own. It is a static shell around three iframes onto the
-# real pages, opened once in the morning by a kiosk Chrome on the capture host
-# and left for nine hours — a fourth live client with a websocket and a reconnect
-# story would be machinery serving an interaction that never happens.
-#
-# It is deliberately ABSENT from ``NAV_SECTIONS`` / ``_NAV_LABEL``: those
-# describe places a person navigates to, and this is a display target for a
-# camera. Listing it would put a rail row in front of every user for a screen
-# that only makes sense full-bleed on a 1920x1080 framebuffer, and would need a
-# second ``_LANDING_ROUTES`` exemption in ``test_shell.py`` for a page that
-# renders no ``_layout`` at all.
-@app.get(wall.PAGE_ROUTE)
-def _serve_wall():
-    """The rotating wall document — self-contained, so its own <style> applies."""
-    return HTMLResponse(wall.document())
 
 
 @app.get("/manuals/file")
@@ -2509,11 +2488,12 @@ def terminate_page() -> None:
 
 
 if __name__ in {"__main__", "__mp_main__"}:
-    # Lifecycle handlers register HERE, not at module scope: `wall.py` does
-    # `import main` lazily inside its route handler, and
-    # because this script runs as __main__ that re-executes this file as a second
-    # module object AFTER NiceGUI has started — where app.on_startup() raises and
-    # 500s the page. Inside this guard it runs once, before ui.run().
+    # Lifecycle handlers register HERE, not at module scope: this script runs as
+    # __main__ in production, so anything that later does `import main` — a
+    # test, a tool, or a module doing it lazily inside a handler to dodge an
+    # import cycle — re-executes this file as a second module object AFTER
+    # NiceGUI has started, where app.on_startup() raises and 500s the page.
+    # Inside this guard it runs once, before ui.run().
     app.on_startup(sync_captured_autoclose_setting)
     app.on_startup(sync_manual_paper_lifecycle_setting)
 

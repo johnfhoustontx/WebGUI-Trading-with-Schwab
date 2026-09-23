@@ -1,8 +1,8 @@
 """``tools/capture_live_shots.py`` -- the thumbnails behind the public grid.
 
-The same problem ``test_stream_wall.py`` has: the part that actually renders is
-a headless Chrome subprocess pointed at a running live process, and there is
-nothing there a unit test can execute. So the script is written as a PURE target
+The part that actually renders is a headless Chrome subprocess pointed at a
+running live process, and there is nothing there a unit test can execute. So the
+script is written as a PURE target
 list, a PURE window gate and a thin subprocess call, and what is pinned here is
 every decision that would otherwise fail silently and only in public --
 
@@ -79,7 +79,7 @@ def test_it_writes_into_the_directory_the_grid_reads():
 def test_outside_the_window_it_stands_down_with_exit_zero(monkeypatch):
     """A holiday is a normal outcome. A non-zero exit would restart-storm into
     StartLimitBurst and leave the unit `failed`, a state someone has to clear by
-    hand -- the same reasoning tools/stream_wall.sh records."""
+    hand."""
     monkeypatch.setattr(c, "_in_window", lambda: False)
     assert c.main() == 0
 
@@ -138,7 +138,7 @@ def test_a_missing_browser_is_a_failure_not_a_silent_success(monkeypatch):
     own: every screen would fail identically, forever, and the grid would go
     stale behind a green timer. The capture unit is a Type=oneshot with NO
     Restart=, so a non-zero exit shows up in `systemctl --user --failed`
-    instead of storming -- which is exactly the difference from stream_wall.sh.
+    instead of storming -- which is exactly the difference from standing down.
     """
     monkeypatch.setattr(c, "_in_window", lambda: True)
     monkeypatch.setattr(c, "find_chrome", lambda: None)
@@ -187,7 +187,7 @@ def test_an_empty_render_is_refused_rather_than_published(tmp_path, monkeypatch)
 
 # --- the browser -------------------------------------------------------------
 
-def test_it_looks_for_the_same_browsers_the_stream_script_does(monkeypatch):
+def test_it_looks_for_the_browser_under_every_name_it_installs_as(monkeypatch):
     """One box, one browser, installed as a .deb, a distro package or a snap --
     which decides the name. `chrome` is added for a non-Linux host, where this
     script is run by hand and never by the timer."""

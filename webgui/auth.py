@@ -32,9 +32,9 @@ log = logging.getLogger(__name__)
 #
 # Argon2 is expensive on purpose, and on a PUBLIC endpoint that is also an
 # amplifier: ten concurrent POSTs at the default would take ~640 MB and all four
-# cores. Measured on the prod box, stream hours leave ~1.7 idle cores and there is
-# NO SWAP, so a spike does not degrade -- it gets OOM-killed, and the visible
-# symptom is the public YouTube broadcast dropping frames.
+# cores. Measured on the prod box, a trading session leaves ~1.7 idle cores and
+# there is NO SWAP, so a spike does not degrade -- it gets OOM-killed, and what
+# dies is whatever the kernel picks, not the thing that caused it.
 #
 # 19 MiB / t=2 / p=1 is OWASP's floor and remains far beyond what one strong
 # single-user password needs. Do not "restore the defaults" without also reading
@@ -360,8 +360,8 @@ class LockoutState:
 
     The GLOBAL counter is not redundant with the per-address one. A per-IP
     threshold is not a throttle against anyone holding a /64, and the resource
-    being protected -- ~1.7 free cores and no swap during stream hours -- is
-    global, not per-client. Its PENALTY is short, for the reason given above.
+    being protected -- ~1.7 free cores and no swap during a trading session --
+    is global, not per-client. Its PENALTY is short, for the reason given above.
 
     ``locked_until`` reads at most ``MAX_TRACKED_FAILURES + GLOBAL_THRESHOLD``
     timestamps and allocates nothing that outlives the call, so it is cheap

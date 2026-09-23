@@ -201,13 +201,6 @@ def test_the_edge_header_is_the_one_the_app_reads(cfg):
 
 
 # --- the app block -----------------------------------------------------------
-def test_the_wall_is_refused_at_the_edge(cfg):
-    """The wall authenticates by being loopback with no edge header. Refusing it
-    here means the edge never even offers the route to the internet."""
-    app = _block(cfg, repo_paths.APP_HOST)
-    assert re.search(r"handle /wall\*\s*\{\s*respond 404\s*\}", app)
-
-
 def test_the_port_comes_from_repo_paths_not_a_literal(cfg, monkeypatch):
     assert f"127.0.0.1:{repo_paths.NICEGUI_PORT}" in cfg
     monkeypatch.setattr(caddy, "NICEGUI_PORT", 9500)

@@ -423,9 +423,9 @@ _SESSIONS = ConfigFile(
         ), restart=(OPTIONS, WEBGUI)),
         _window("market_snapshot", "Market snapshot pushes", "",
                 (OPTIONS, SENTIMENT)),
-        _window("stream", "Public video stream", "", (TIMERS,)),
         _window("live_capture", "Public screenshot captures",
-                "Keep this after the stream ends: the capture is CPU-heavy.", ()),
+                "Keep this after the close: the capture is CPU-heavy and must "
+                "not compete with the collection tick.", ()),
         _window("gamma_public", "Public Gamma live symbols",
                 "When the public Gamma page keeps a visitor's symbol live. "
                 "Keep it inside the GEX collection window: only collection "
@@ -1029,7 +1029,7 @@ def cross_check(name, values):
     errs = []
     if name == "sessions.toml":
         pairs = [(("windows", w, "start"), ("windows", w, "end"))
-                 for w in ("scan", "market_snapshot", "stream", "live_capture")]
+                 for w in ("scan", "market_snapshot", "live_capture")]
         pairs += [(("sessions", s, "start"), ("sessions", s, "end"))
                   for s in ("gth", "regular", "curb")]
         pairs.append((("windows", "collection", "start"),

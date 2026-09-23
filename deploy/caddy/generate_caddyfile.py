@@ -304,10 +304,6 @@ def _live_block():
       forbid ``SITE_HOST`` -- a different origin -- from ever embedding a
       screen, closing a door the design lists under "deliberately not built"
       rather than "never".
-    * **``handle /wall* { respond 404 }``.** The wall route does not exist in
-      this process at all; ``live_main`` registers the fourteen screens and
-      nothing else. A 404 handler for a path FastAPI already 404s is a rule
-      that reads as a control and is decoration.
 
     **Nothing about websockets, and that is not an omission.** Caddy v2's
     ``reverse_proxy`` proxies an ``Upgrade`` natively; the app block sets no
@@ -365,9 +361,11 @@ def _app_block():
       reading the tail safe -- a client-supplied prefix can lengthen the list but
       cannot change its tail.
 
-    The header also does a second job: ``auth_middleware._is_kiosk`` refuses any
-    request that carries it, so a request through the edge cannot claim to be
-    the on-box wall browser.
+    The header also does a second job: ``main._client_ip`` reads the LAST
+    ``X-Forwarded-For`` hop only when this stamp is present, so the login
+    throttle buckets real visitors instead of lumping every request behind the
+    edge into one loopback bucket. The auth gate itself does NOT read it -- it
+    decides on the session cookie and nothing else.
     """
     return f"""{APP_HOST} {{
     encode zstd gzip
@@ -376,13 +374,6 @@ def _app_block():
         Strict-Transport-Security "{HSTS}"
         # The public one-pager is a separate origin and must not frame this.
         Content-Security-Policy "frame-ancestors 'self'"
-    }}
-
-    # The wall never leaves the box. The kiosk reaches it on loopback, where it
-    # authenticates by being loopback WITHOUT the edge header -- so the route has
-    # no business being offered here at all.
-    handle /wall* {{
-        respond 404
     }}
 
     handle {{

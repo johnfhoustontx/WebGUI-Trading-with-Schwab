@@ -63,9 +63,9 @@ def _env_file():
 
     ``ANTHROPIC_API_KEY``, ``TELEGRAM_BOT_TOKEN``, ``PROXY_SHARED_SECRET``,
     ``SMS_SMTP_APP_PASSWORD``, ``DISCORD_WEBHOOK_URL``, ``MEMURAI_PASSWORD``,
-    ``GAMMA_BRIEFING_WEBHOOK_URL``. ``STREAM_ENV_FILE`` is the counter-example
-    to keeping a secret here, and the difference is OWNERSHIP -- the RTMP key
-    belongs to the operator, not to the checkout, so it lives outside it.
+    ``GAMMA_BRIEFING_WEBHOOK_URL``. A secret belongs here when it belongs to the
+    CHECKOUT; one owned by the operator rather than by this tree would live
+    outside it, in its own 0600 file named by its own constant.
 
     ⚠ **The public live unit does NOT load this file** -- see
     :func:`_live_env_file`. That is the one exception, and it is about BLAST
@@ -125,13 +125,6 @@ BACKUP_TIMEOUT_SEC = 7200
 # report that still looks like a report.
 FLOW_DELTA_TIMEOUT_SEC = 1800
 
-# The operator's 0600 file holding RTMP_URL -- the YouTube stream key. It lives
-# OUTSIDE the checkout on purpose: a key in the repo is a key in every clone, in
-# every backup archive, and one `git add -A` from being public. Named here as a
-# constant rather than buried in a template so the tests can assert the exact
-# path the unit loads, and so moving it is one edit.
-STREAM_ENV_FILE = "/etc/neuralstrike-stream/env"
-
 # ── The public process's memory cap ──────────────────────────────────────────
 # ⚠ ONLY the public unit carries these, and that is deliberate. The other eight
 # are not internet-facing and a wrong value there kills the trading stack.
@@ -187,11 +180,11 @@ LIVE_CAPTURE_TIMEOUT_SLACK_SEC = 60
 GALLERY_CAPTURE_TIMEOUT_SLACK_SEC = 60
 
 # One core's worth of the box, expressed the way systemd expresses it: 100% is
-# ONE CPU, not the whole machine. The prod box has 4, already carrying ffmpeg and
-# two Chromes for the wall stream, so this leaves three for the stack while the
-# capture runs. It makes the job SLOWER, which is free -- TimeoutStartSec is
-# derived and sits far above the throttled run -- and the point is bounding the
-# peak, not finishing early. See _gallery_capture_units for the measurement.
+# ONE CPU, not the whole machine. The prod box has 4, so this leaves three for
+# the stack while the capture runs. It makes the job SLOWER, which is free --
+# TimeoutStartSec is derived and sits far above the throttled run -- and the
+# point is bounding the peak, not finishing early. See _gallery_capture_units
+# for the measurement.
 #
 # The one coupling to keep in view: throttling also eats into each shot's OWN
 # ceiling (capture_gallery_shots.SHOT_TIMEOUT_SEC, 60s per render, enforced by
@@ -400,137 +393,6 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-backup.timer": tmr}
 
 
-def _stream_window_seconds():
-    """Length of ``[windows.stream]`` in seconds, derived -- never typed.
-
-    The unit and ``config/sessions.toml`` cannot disagree about when the
-    broadcast ends, which is the same reason ports live in one file. Both bounds
-    are wall-clock times on the same day, so this is minute arithmetic and not a
-    timedelta: there is no date to subtract, and no DST transition inside a
-    single trading session.
-    """
-    start, end = window_bounds("stream")
-    return (end.hour * 60 + end.minute - start.hour * 60 - start.minute) * 60
-
-
-def _stream_units():
-    """The public YouTube wall stream: a service the TIMER owns, plus its timer.
-
-    **PartOf the target but deliberately NOT WantedBy it.** Every other unit is
-    ``WantedBy`` the target, so ``systemctl start trading-<env>.target`` brings
-    it up -- which is exactly what a promote does, at whatever hour someone
-    promotes. A broadcast must not start that way. ``PartOf`` without
-    ``WantedBy`` gives precisely the asymmetry wanted: stopping the stack stops
-    the stream, starting the stack does not start it. The ``[Install]`` section
-    therefore belongs on the TIMER (``WantedBy=timers.target``) and the service
-    has none at all -- it is not a thing you enable, it is a thing the timer
-    starts.
-
-    **Requires= the web GUI, not merely After=.** The other units only order
-    themselves after the proxy, because the UI renders a proxy-down banner and
-    stays usable. A stream with no web GUI has no such degrade path: it is nine
-    hours of a connection-refused page on a public channel.
-
-    **No ExecStartPre.** ``tools/stream_wall.sh`` already calls
-    ``tools/wait_http.py`` itself -- it has to, since it reads the port and the
-    wall route out of Python in the same breath. A probe here would be a second
-    copy of the timeout, free to disagree with the first.
-
-    **RuntimeMaxSec, not a second timer.** The broadcast has to stop at the
-    window's close. A stop-timer could do it, but then the thing that ends the
-    stream is a separate unit that can fail to fire, be disabled, or be missed
-    over a reboot -- and its failure mode is a public stream of frozen overnight
-    numbers, unnoticed until a viewer says so. ``RuntimeMaxSec`` is enforced by
-    the same manager that started the process, so it cannot be missed.
-
-    ⚠ **The unit bounces once at the close, and that is accepted, not
-    overlooked.** When ``RuntimeMaxSec`` expires systemd terminates the unit with
-    result ``timeout``, which ``Restart=on-failure`` does restart. The restarted
-    script runs its own ``in_window`` gate, finds itself outside the window,
-    prints the stand-down line and exits **0** -- so systemd sees success and the
-    unit goes inactive. One wasted spawn, well inside ``StartLimitBurst``.
-    ``SuccessExitStatus`` does NOT prevent it: a RuntimeMaxSec kill sets the
-    failure *result* to ``timeout`` regardless of exit status, so nothing about
-    exit-code interpretation reaches it. Preventing the bounce would mean
-    dropping ``Restart=on-failure``, which is the entire recovery mechanism for
-    the mid-session case the script's Xvfb/Chrome watchdog exists to trigger.
-    A daily one-spawn bounce is a much cheaper price than a black stream nobody
-    restarts.
-
-    ⚠ **Known limit: a mid-session restart resets the RuntimeMaxSec clock.** The
-    cap is per invocation, so a crash-and-restart at 14:00 would run until 21:20
-    rather than 15:20. The window gate only runs at startup, so nothing else
-    stops it. Not fixed here -- it needs either a stop-timer or a window
-    re-check inside the script's watchdog loop, and the script is out of scope
-    for this change.
-    """
-    runtime = _stream_window_seconds()
-    start, _end = window_bounds("stream")
-    webgui = unit_name("webgui")
-
-    svc = f"""[Unit]
-Description=NeuralStrike {ENV_NAME} - wall stream (YouTube)
-# PartOf, so stopping the stack stops the broadcast -- but NO [Install]
-# WantedBy the target, so starting the stack does NOT start one. The timer owns
-# when this runs; see this function's docstring.
-PartOf={target_name()}
-# Requires, not just After: unlike the services, a stream with no web GUI has
-# no degraded mode -- it is a connection-refused page on a public channel.
-Requires={webgui}
-After={webgui}
-# A crash-looping unit is retried this many times in this window, then left
-# down and logged.
-# NOTE: these belong in [Unit]; systemd moved them there in v229
-# and silently ignores them in [Service].
-StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
-StartLimitBurst={START_LIMIT_BURST}
-
-[Service]
-Type=simple
-WorkingDirectory={_workdir()}
-Environment=PYTHONUNBUFFERED=1
-Environment=TZ=America/Chicago
-# TWO environment files, NEITHER with a leading '-'. The repo's .env for the
-# stack's own secrets; the operator's file for RTMP_URL. A missing file must
-# fail the unit loudly rather than encode nine hours into nowhere -- the same
-# rule the services follow, for the same reason.
-EnvironmentFile={_env_file()}
-EnvironmentFile={STREAM_ENV_FILE}
-# Stop at the window's close, enforced by the manager that started us rather
-# than by a second timer that could fail to fire. Derived from
-# config/sessions.toml [windows.stream]; never a literal.
-RuntimeMaxSec={runtime}
-# No ExecStartPre: the script calls tools/wait_http.py itself.
-ExecStart={_workdir()}/tools/stream_wall.sh
-Restart=on-failure
-RestartSec={RESTART_SEC}
-"""
-
-    tmr = f"""[Unit]
-Description=NeuralStrike {ENV_NAME} - wall stream timer
-
-[Timer]
-# The window's OWN start time (the host TZ is America/Chicago, so this is
-# already CT). Mon..Fri because the exchange is shut at the weekend.
-#
-# Market holidays are NOT filtered, and here that is fine: the script's own
-# in_window() gate covers them, standing down with exit 0. This is the OPPOSITE
-# of the backup timer's choice, deliberately -- there, an unfiltered holiday
-# run wastes a retention slot, so erring towards running is right. Here, an
-# unfiltered holiday run would put frozen numbers in front of an audience, so
-# the gate that CAN see the calendar has to be the one that decides.
-OnCalendar=Mon..Fri *-*-* {start.hour:02d}:{start.minute:02d}:00
-# Deliberately NO Persistent=true (the backup timer has it). A missed backup is
-# still worth taking late; a missed broadcast window is simply gone, and a
-# catch-up would start a public stream at whatever hour the box came back.
-
-[Install]
-WantedBy=timers.target
-"""
-    return {f"trading-{ENV_NAME}-stream.service": svc,
-            f"trading-{ENV_NAME}-stream.timer": tmr}
-
-
 def _live_capture_timeout_seconds():
     """The unit's ``TimeoutStartSec``, DERIVED from the script's own budget.
 
@@ -558,9 +420,9 @@ def _live_capture_units():
     for the ordinary reasons -- outside the window it stands down with exit 0,
     and one unreachable screen is logged rather than raised.
 
-    **Not ``PartOf`` the target and not ``WantedBy`` it.** Like the backup and
-    the stream, this is not a member of the fleet; the timer decides when it
-    runs, so the ``[Install]`` section belongs there.
+    **Not ``PartOf`` the target and not ``WantedBy`` it.** Like the backup, this
+    is not a member of the fleet; the timer decides when it runs, so the
+    ``[Install]`` section belongs there.
 
     **No ``After=`` on the live web GUI either**, though it is the thing being
     photographed. Ordering matters only at boot, and a capture that lands before
@@ -602,9 +464,9 @@ Description=NeuralStrike {ENV_NAME} - live screen thumbnail timer
 [Timer]
 # Every {LIVE_CAPTURE_INTERVAL_MIN} minutes, all day. The DAYS and HOURS are not
 # filtered here on purpose: the script gates on [windows.live_capture] via the
-# market calendar, which is the only thing that can see a holiday -- the same
-# division of labour the stream timer uses. A stand-down is a sub-second
-# interpreter start.
+# market calendar, which is the only thing that can see a holiday. systemd has
+# none, so the gate that CAN see one is the gate that decides. A stand-down is a
+# sub-second interpreter start.
 OnCalendar=*:0/{LIVE_CAPTURE_INTERVAL_MIN}
 # Deliberately NOT Persistent=true. A missed capture is worthless later: the
 # next one is at most {LIVE_CAPTURE_INTERVAL_MIN} minutes away and shows the
@@ -721,9 +583,9 @@ def _gallery_capture_units():
     unit skip its env file unnoticed. ``webgui_live``'s ``.env.live`` split is
     the shape to copy if that reduction is ever actually wanted.
 
-    ⚠ **``Mon..Fri`` filters weekends and NOT holidays.** The stream and live
-    capture timers deliberately push that decision down to their scripts,
-    because only the market calendar can see Thanksgiving -- but
+    ⚠ **``Mon..Fri`` filters weekends and NOT holidays.** The live-capture timer
+    deliberately pushes that decision down to its script, because only the
+    market calendar can see Thanksgiving -- but
     ``capture_gallery_shots.py`` has no window or trading-day gate at all today.
     So on a holiday this fires and republishes the gallery from a flat tape.
     That is a stale-looking gallery, not a broken one, and the honest fix is a
@@ -774,8 +636,8 @@ Description=NeuralStrike {ENV_NAME} - marketing gallery recapture timer
 # Derived from [slots.gallery_capture] in config/sessions.toml -- the unit and
 # the config cannot disagree about when the gallery is refreshed.
 # NOTE: Mon..Fri excludes weekends only. systemd has no market calendar, and unlike
-# the stream and live-capture scripts this tool carries no trading-day gate, so
-# a holiday firing republishes a flat tape. See _gallery_capture_units.
+# the live-capture script this tool carries no trading-day gate, so a holiday
+# firing republishes a flat tape. See _gallery_capture_units.
 OnCalendar=Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00
 # Deliberately NOT Persistent=true. A missed day is a day of slightly older
 # pictures; a catch-up run would recapture at whatever hour the box came back
@@ -831,8 +693,8 @@ def _eod_report_units():
     minutes later will not fix, and the button is always there.
 
     NOTE ``Mon..Fri`` filters weekends and NOT holidays -- the script's own
-    ``is_trading_day`` gate does that, the division of labour the stream and
-    live-capture timers use.
+    ``is_trading_day`` gate does that, the division of labour the live-capture
+    timer uses.
     """
     at = slot_times("eod_report")["at"]
 
@@ -920,8 +782,9 @@ def _flow_delta_units():
     **Calls the Python directly, not tools/run_flow_delta_instrumentation.sh.**
     The wrapper exists for a MANUAL run, where sourcing .env and appending to
     logs/ are its whole job; under systemd the EnvironmentFile and the journal do
-    both. Running the shell script would be the stream unit's exception without
-    the stream unit's reason (Xvfb, Chrome and ffmpeg around the Python).
+    both. A unit that ran the shell script would be pointing systemd at a second
+    copy of what it already does -- every other unit here runs the venv Python
+    directly, and this one has no reason to be the exception.
 
     **No Restart=.** The tool gates on `is_trading_day` and exits 0 on a holiday,
     so a firing is not a run. A genuine failure is a proxy or Redis that a retry
@@ -984,7 +847,6 @@ def render_all():
     out = {unit_name(c): _service_text(c, p, s) for c, p, s in components()}
     out[target_name()] = _target_text()
     out.update(_backup_units())
-    out.update(_stream_units())
     out.update(_live_capture_units())
     out.update(_gallery_capture_units())
     out.update(_eod_report_units())
@@ -1057,13 +919,13 @@ def activate(runner=None):
     no-op, so a normal promote re-evaluates nothing. On a fresh box or after
     downtime the only timers that catch up are those that asked to
     (`Persistent=true`: backup, flow-delta), which is what that setting is for.
-    The stream and gallery timers set it false precisely so they cannot, and this
-    does not override them.
+    The gallery and live-capture timers set it false precisely so they cannot,
+    and this does not override them.
 
     **PROD ONLY.** Dev generates the same timers and must not arm them: its
     stores are a disposable copy of prod's, so `trading-dev-backup.timer` is
-    deliberately left disabled, and the stream/gallery/live-capture timers drive
-    PUBLIC surfaces that a second checkout must never publish to. Dev still gets
+    deliberately left disabled, and the gallery/live-capture timers drive PUBLIC
+    surfaces that a second checkout must never publish to. Dev still gets
     the files, so arming one by hand stays a one-liner.
 
     Returns ``[(unit, status)]``. Never raises -- a promote must not fail because

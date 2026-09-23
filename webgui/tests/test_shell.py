@@ -552,11 +552,12 @@ def test_sync_manual_paper_lifecycle_setting_registered_inside_the_main_guard():
 
 
 def test_reimporting_main_after_startup_does_not_raise():
-    """`wall.py` does `import main` lazily inside its route handler. The entry
-    script runs as __main__, so that re-executes main.py as a
-    SECOND module object — after NiceGUI has started. Any module-level
-    `app.on_startup()` raises RuntimeError there and 500s every page, so lifecycle
-    registration must live inside the __main__ guard.
+    """The entry script runs as __main__, so anything that later does
+    `import main` — a test, a tool, or a module doing it lazily inside a handler
+    to dodge an import cycle — re-executes main.py as a SECOND module object,
+    after NiceGUI has started. Any module-level `app.on_startup()` raises
+    RuntimeError there and 500s every page, so lifecycle registration must live
+    inside the __main__ guard.
     """
     import importlib.util
     import pathlib

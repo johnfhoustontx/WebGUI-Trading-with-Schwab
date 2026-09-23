@@ -88,8 +88,8 @@ def _regenerated_shot_refs():
 
     ⚠ Imported inside the function. ``capture_gallery_shots`` APPENDS
     ``webgui/`` to ``sys.path`` to reach the credential modules it mints a
-    cookie with, and ``webgui/`` holds top-level ``main``, ``proxy``, ``auth``
-    and ``wall``. Appending is the safe end (see that module's own note, and
+    cookie with, and ``webgui/`` holds top-level ``main``, ``proxy`` and
+    ``auth``. Appending is the safe end (see that module's own note, and
     ``_live_screens`` below for why an insert would not be), and
     ``tools/tests`` already pays exactly this cost in the same pytest session --
     so this changes nothing about the session, while a hand-written list of
@@ -754,8 +754,8 @@ def test_the_glossary_is_listed_as_a_manual_too():
 def _live_screens():
     """``webgui/live_screens.py``, loaded BY PATH rather than by import.
 
-    ``webgui/`` holds top-level modules named ``main``, ``proxy``, ``auth`` and
-    ``wall``. Putting that directory on ``sys.path`` -- what the obvious
+    ``webgui/`` holds top-level modules named ``main``, ``proxy`` and ``auth``.
+    Putting that directory on ``sys.path`` -- what the obvious
     ``sys.path.insert`` would do -- does it for the whole pytest session, since
     ``tests deploy tools/tests`` run in one command, and any of those names can
     then shadow a same-named module another suite imports. Loading one file by

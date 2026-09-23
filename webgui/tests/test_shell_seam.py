@@ -181,9 +181,9 @@ def test_the_brand_builders_live_in_the_shell():
     """Same seam, same reason as ``play_alert`` and ``TABLE_CSS``.
 
     The public live screens carried no branding at all until 2026-09-09 -- the
-    app name reached them only through the browser TAB TITLE, which is invisible
-    on the YouTube wall stream and on a kiosk. Giving them a header meant the
-    lockup builders had to be reachable from a process that may never
+    app name reached them only through the browser TAB TITLE, which a stranger
+    opening a published screen full-bleed never reads. Giving them a header meant
+    the lockup builders had to be reachable from a process that may never
     ``import main``.
 
     ⚠ ``__module__``, not merely ``hasattr``. The failure this guards against is
@@ -200,9 +200,9 @@ def test_the_brand_builders_live_in_the_shell():
 
 
 def test_main_re_exports_the_brand_builders():
-    """``main.brand_lockup_html`` has been reached for since the header was
-    built, and ``wall.py`` still calls it by that name. The move keeps it bound
-    to the very same function."""
+    """``main.brand_lockup_html`` has been reached for by that name since the
+    header was built. The move to the seam keeps it bound to the very same
+    function."""
     import main
     import shell
     assert main.brand_lockup_html is shell.brand_lockup_html

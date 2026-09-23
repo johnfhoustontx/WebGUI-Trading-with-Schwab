@@ -136,9 +136,9 @@ def test_cookies_are_host_only_secure_httponly_and_lax(client):
     """Host-only is the one that matters and the one most easily lost.
 
     A ``Domain=`` cookie is sent to neuralstrike.co and EVERY subdomain,
-    forever -- so the owner's session would travel to the
-    public marketing page, alongside its YouTube and Discord embeds, on every
-    page view. One attribute undoes the whole origin split.
+    forever -- so the session that signs into this app would travel to the
+    public marketing page, alongside any third-party embed it ever carries, on
+    every page view. One attribute undoes the whole origin split.
     """
     r = _post(client, remember=True)
     assert r.status_code == 303
@@ -394,12 +394,12 @@ def test_the_gate_is_mounted_on_the_app_that_ships(client):
 
 
 def test_installing_the_gate_again_is_a_no_op_rather_than_a_500(client):
-    """⚠ THE TRAP THIS GUARDS. ``wall.py`` does ``import main`` lazily inside its
-    route handler, and because ``main.py`` runs as ``__main__`` in production that
-    re-executes the file as a second module object -- AFTER NiceGUI has started.
-    Starlette's ``add_middleware`` raises once the middleware stack is built, so
-    an unguarded module-scope call would 500 every page that does the lazy
-    import.
+    """⚠ THE TRAP THIS GUARDS. ``main.py`` runs as ``__main__`` in production, so
+    anything that later does ``import main`` -- a test, a tool, or a module doing
+    it lazily inside a handler to dodge an import cycle -- re-executes the file
+    as a second module object, AFTER NiceGUI has started. Starlette's
+    ``add_middleware`` raises once the middleware stack is built, so an unguarded
+    module-scope call would 500 every page on the way through.
     Exactly the hazard the ``app.on_startup`` calls are already inside the
     ``__main__`` guard for.
 

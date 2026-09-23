@@ -30,8 +30,8 @@ what makes the whole file testable without a server, and it is why the route
 wiring lives in ``main.py`` instead.
 
 **This is a standalone HTML document, deliberately outside the Tailwind-first
-standard** -- the same documented out-of-scope category as the EOD reports, the
-Gamma Explain infographics and ``/wall``. The palette is hand-written here
+standard** -- the same documented out-of-scope category as the EOD reports and
+the Gamma Explain infographics. The palette is hand-written here
 rather than read from ``theme.py`` on purpose: the login page must render for
 somebody who is not yet authenticated, on a page that pulls in no NiceGUI
 runtime, and adding a config read to that path buys nothing but a way for it to

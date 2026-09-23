@@ -238,13 +238,11 @@ _DEFAULTS = {
         "collection": {"start": "08:00", "eth_start": "06:30", "stop": "15:20"},
         "session_flip": {"at": "08:00"},
         "market_snapshot": {"start": "08:30", "end": "15:00"},
-        # Held separate from ``collection`` even though the bounds match, so
-        # widening collection can never silently extend a public broadcast.
-        "stream": {"start": "08:00", "end": "15:20"},
-        # The thumbnail captures behind the public live grid. Separate from
-        # ``stream`` for the same reason ``stream`` is separate from
-        # ``collection``: they happen to share bounds today, and one public
-        # surface must not move because another one was retimed.
+        # The thumbnail captures behind the public live grid. Held separate from
+        # ``collection`` even though the bounds match here: they happen to share
+        # bounds, and widening collection must never silently extend a public
+        # surface. (The shipped ``config/sessions.toml`` moves this window
+        # post-close; these defaults are only what a missing file falls back to.)
         "live_capture": {"start": "08:00", "end": "15:20"},
         # The public Strategy Finder's on-demand scans. Opens after the first
         # minutes of the session (pre-open marks fail the quality cut, measured
@@ -253,8 +251,8 @@ _DEFAULTS = {
         # The public Gamma page's hot symbols: when a visitor's pick is kept
         # live. The bounds are [windows.collection]'s, because a hot symbol is
         # only ever published by the collection tick, but held SEPARATE for the
-        # reason ``stream`` is: widening collection must not silently extend a
-        # public surface.
+        # reason ``live_capture`` is: widening collection must not silently
+        # extend a public surface.
         "gamma_public": {"start": "08:00", "end": "15:20"},
         # The public Rescue form. Held separate from ``finder_public`` so one
         # public surface cannot move because the other was retimed. Opens after

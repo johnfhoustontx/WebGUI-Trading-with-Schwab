@@ -65,8 +65,8 @@ def test_copy_states_that_stopping_the_proxy_is_ownership_conditional():
 # --- TOTP step-up ------------------------------------------------------------
 # Stopping the stack is reachable from the public internet behind ONE session
 # cookie, and it costs a trading day: the GEX slots for the rest of the session,
-# and a live YouTube stream mid-broadcast. So the confirm
-# dialog asks for a fresh authenticator code as well.
+# the public screens dark, every scheduled job missed. So the confirm dialog
+# asks for a fresh authenticator code as well.
 #
 # Like the sibling auth suites, every test here passes ``now=`` explicitly and
 # never patches a clock, so nothing depends on which side of a 30 s TOTP window

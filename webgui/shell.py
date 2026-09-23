@@ -309,8 +309,8 @@ PANEL_SCROLL_CSS = f"""
 # Same seam, same reason as the CSS above: `main.py` puts it in the app header,
 # `live_main.py` puts it in the public screens' header, and that process may
 # never import this one. It lived in main.py until 2026-09-09, which is why the
-# fourteen published screens carried the app name in the browser TAB TITLE and
-# nowhere on the page -- invisible on the YouTube wall stream and on a kiosk.
+# published screens carried the app name in the browser TAB TITLE and nowhere on
+# the page -- which is not what a stranger reads.
 #
 # ⚠ This is what made `shell.py` stop being import-free (see
 # `test_the_shell_stays_a_leaf_module`, which records the decision): a lockup

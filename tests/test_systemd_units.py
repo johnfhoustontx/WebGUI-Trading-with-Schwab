@@ -207,8 +207,7 @@ def test_the_environment_file_has_no_leading_dash():
     stack comes up MUTE: allow_claude falls into its no-API-key path, the
     notification channels no-op, the bus fails to authenticate. A unit that
     refuses to start is recoverable in seconds; one running without its secrets
-    looks healthy for a day. The stream is the same shape one level out: a
-    missing key file means ffmpeg encodes nine hours into nowhere.
+    looks healthy for a day.
 
     Checked over ALL of a unit's environment files, not just the last."""
     for name, text in units.render_all().items():
@@ -239,16 +238,15 @@ def test_units_run_from_this_checkout_with_its_own_venv(rendered):
     """Derived from REPO_ROOT, never a literal home directory. The plan first
     hardcoded /home/john; the account turned out to be `administrator`.
 
-    ⚠ Widened from "every ExecStart starts with the venv python" when the wall
-    stream arrived, because that unit runs a SHELL SCRIPT
-    (tools/stream_wall.sh -- it needs Xvfb, Chrome and ffmpeg around the Python,
-    not just Python). The invariant that actually mattered was never "the first
-    word is python": it was that a unit runs THIS checkout's code with THIS
-    checkout's interpreter, and can never be satisfied by whatever happens to be
-    on PATH. Both halves are still asserted -- the executable lives inside the
-    checkout, and any unit that names an interpreter names the checkout's venv.
-    The script resolves `$ROOT/.venv/bin/python` from its own location for the
-    same reason."""
+    ⚠ Widened from "every ExecStart starts with the venv python" when a unit
+    first ran a SHELL SCRIPT rather than the interpreter directly. The invariant
+    that actually mattered was never "the first word is python": it was that a
+    unit runs THIS checkout's code with THIS checkout's interpreter, and can
+    never be satisfied by whatever happens to be on PATH. Both halves are still
+    asserted -- the executable lives inside the checkout, and any unit that
+    names an interpreter names the checkout's venv. It stays widened on purpose:
+    narrowing it back would have to be undone the next time a unit wraps the
+    Python in a script."""
     venv_python = str(POSIX_ROOT / ".venv" / "bin" / "python")
     for name, cp in rendered.items():
         if not name.endswith(".service"):
@@ -401,98 +399,27 @@ def test_the_backup_has_a_timeout_long_enough_to_finish(rendered):
     assert int(svc["Service"]["TimeoutStartSec"]) >= 1800
 
 
-# --- the wall stream, which is a TIMER-owned member of the stack -------------
-def test_stream_units_are_generated():
-    units_ = units.render_all()
-    assert f"trading-{ENV_NAME}-stream.service" in units_
-    assert f"trading-{ENV_NAME}-stream.timer" in units_
-
-
 def test_storm_cap_is_in_the_unit_section_not_the_service_section():
     """systemd moved StartLimit* to [Unit] in v229 and SILENTLY IGNORES them in
     [Service] -- the cap would look configured and not exist.
 
-    Split on the section HEADER (a whole line), not the bare substring: the unit
-    carries a comment saying these must not go in [Service], and a substring
-    split cuts the file in the middle of that comment -- failing the test for
+    Checked on EVERY generated service, not one sample: the directive is written
+    by each template separately, so one template drifting is exactly the failure
+    a single-unit check would miss.
+
+    Split on the section HEADER (a whole line), not the bare substring: the units
+    carry a comment saying these must not go in [Service], and a substring split
+    cuts the file in the middle of that comment -- failing the test for
     documenting the very rule it checks."""
-    svc = units.render_all()[f"trading-{ENV_NAME}-stream.service"]
-    unit_section, service_section = svc.split("\n[Service]\n")
-    assert "StartLimitBurst=" in unit_section
-    assert "StartLimitBurst=" not in service_section
-
-
-def test_stream_stops_with_the_stack_but_does_not_start_with_it():
-    """PartOf so a stack stop takes it down; NOT WantedBy the target, because
-    the timer owns when it runs -- otherwise `systemctl start target` would
-    start a broadcast at any hour."""
-    svc = units.render_all()[f"trading-{ENV_NAME}-stream.service"]
-    assert f"PartOf={units.target_name()}" in svc
-    assert f"WantedBy={units.target_name()}" not in svc
-
-
-def test_the_target_does_not_pull_the_stream_up():
-    """The other half of the asymmetry, asserted where it can actually be
-    broken: PartOf is on the service, but a stray Wants= on the TARGET would
-    start a broadcast on every `systemctl start trading-<env>.target` -- which
-    is what a promote does, at whatever hour the promote happens."""
-    assert f"trading-{ENV_NAME}-stream.service" not in stack_services()
-
-
-def test_runtime_cap_matches_the_configured_window():
-    """Derived, never typed: the unit and config cannot disagree about when the
-    broadcast ends."""
-    from shared import market_calendar as mc
-    start, end = mc.window_bounds("stream")
-    expected = (end.hour * 60 + end.minute - start.hour * 60 - start.minute) * 60
-    svc = units.render_all()[f"trading-{ENV_NAME}-stream.service"]
-    assert f"RuntimeMaxSec={expected}" in svc
-
-
-def test_timer_fires_at_the_window_start_on_weekdays():
-    from shared import market_calendar as mc
-    start, _ = mc.window_bounds("stream")
-    text = units.render_all()[f"trading-{ENV_NAME}-stream.timer"]
-    schedule = _directives(text, "OnCalendar")
-    # Exactly one: a second OnCalendar= is a second start, and a second start
-    # inside the window is a second encoder pushing to the same RTMP key.
-    assert schedule == [f"Mon..Fri *-*-* {start.hour:02d}:{start.minute:02d}:00"], schedule
-
-
-def test_the_stream_key_file_must_exist_for_the_unit_to_start():
-    """No leading '-': a missing key must fail the unit loudly rather than
-    encode nine hours into nowhere."""
-    svc = units.render_all()[f"trading-{ENV_NAME}-stream.service"]
-    assert f"EnvironmentFile={units.STREAM_ENV_FILE}" in svc
-    assert f"EnvironmentFile=-{units.STREAM_ENV_FILE}" not in svc
-
-
-def test_the_stream_requires_the_webgui_and_does_not_duplicate_its_wait(rendered):
-    """Unlike every other unit, which only orders itself AFTER the proxy because
-    the UI degrades gracefully without it, a stream with no web GUI is nine
-    hours of a connection-refused page on a public channel. It genuinely
-    Requires= it.
-
-    And it carries NO ExecStartPre: tools/stream_wall.sh already calls
-    tools/wait_http.py itself, because it needs the port and the wall route out
-    of Python anyway. A second probe in the unit would be a second copy of the
-    timeout, free to disagree with the first."""
-    cp = rendered[f"trading-{ENV_NAME}-stream.service"]
-    webgui = units.unit_name("webgui")
-    assert cp["Unit"]["Requires"] == webgui
-    assert cp["Unit"]["After"] == webgui
-    assert "ExecStartPre" not in cp["Service"]
-
-
-def test_the_stream_timer_does_not_catch_up_after_downtime(rendered):
-    """The deliberate opposite of the backup timer. A missed backup is still
-    worth taking late; a missed BROADCAST WINDOW is gone. Persistent=true would
-    run a missed 08:00 occurrence at the next boot -- starting a public stream
-    at whatever time of day the box came back, which the script's own window
-    gate would then stand down from anyway, one spawn later."""
-    tmr = rendered[f"trading-{ENV_NAME}-stream.timer"]
-    assert "Persistent" not in tmr["Timer"]
-    assert tmr["Install"]["WantedBy"] == "timers.target"
+    checked = 0
+    for name, svc in units.render_all().items():
+        if not name.endswith(".service") or "StartLimitBurst=" not in svc:
+            continue
+        unit_section, service_section = svc.split("\n[Service]\n")
+        assert "StartLimitBurst=" in unit_section, name
+        assert "StartLimitBurst=" not in service_section, name
+        checked += 1
+    assert checked, "no unit carries a storm cap -- this test is vacuous"
 
 
 # --- the public live screens: a PEER of the trading UI, not a child ----------
@@ -517,7 +444,7 @@ def test_the_live_unit_runs_the_live_entrypoint():
 def test_the_live_unit_comes_up_and_down_with_the_stack():
     """WantedBy the target so a promote brings the public screens back, PartOf
     it so a stop takes them down. It is a member of the fleet -- unlike the
-    stream, which the TIMER owns."""
+    backup and capture jobs, which their TIMERS own."""
     assert units.unit_name("webgui_live") in stack_services()
 
 
@@ -700,8 +627,8 @@ def test_the_capture_runs_every_fifteen_minutes_without_catching_up(rendered):
 
 
 def test_the_capture_timer_does_not_filter_the_days_the_script_gates_on():
-    """The division of labour the stream timer already uses: systemd has no
-    market calendar, so the gate that CAN see a holiday is the one that decides.
+    """The division of labour every timer here uses: systemd has no market
+    calendar, so the gate that CAN see a holiday is the one that decides.
     A Mon..Fri here would be a second, driftable copy of half of it."""
     text = units.render_all()[f"trading-{ENV_NAME}-live-capture.timer"]
     schedule = [line.split("=", 1)[1] for line in text.splitlines()
@@ -1027,7 +954,7 @@ def test_the_eod_report_does_not_catch_up_after_downtime(rendered):
 def test_the_eod_timer_does_not_filter_the_days_the_script_gates_on():
     """Mon..Fri excludes weekends; holidays are the script's job, because only
     the market calendar can see Thanksgiving. The same division of labour the
-    stream and live-capture timers use."""
+    live-capture timer uses."""
     text = units.render_all()[f"trading-{ENV_NAME}-eod-report.timer"]
     schedule = _directives(text, "OnCalendar")
     assert schedule, "the eod-report timer has no OnCalendar at all"
@@ -1185,9 +1112,9 @@ def test_an_already_armed_timer_is_reported_as_such_not_as_newly_enabled():
 def test_dev_never_arms_a_schedule(monkeypatch):
     """Dev generates the same timers and must not run them: its stores are a
     disposable copy of prod's (so trading-dev-backup.timer is deliberately
-    disabled), and stream/gallery/live-capture drive PUBLIC surfaces a second
-    checkout must never publish to. IS_DEV is a by-value import, so it is
-    patched on the module that consumed it."""
+    disabled), and gallery/live-capture drive PUBLIC surfaces a second checkout
+    must never publish to. IS_DEV is a by-value import, so it is patched on the
+    module that consumed it."""
     monkeypatch.setattr(units, "IS_DEV", True)
     run = _fake_systemctl()
     statuses = dict(units.activate(runner=run))

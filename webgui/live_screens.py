@@ -120,8 +120,8 @@ SCREENS = (
 
 
 # Routes an earlier screen table published, and where each now REDIRECTS (a 308,
-# registered by ``live_main``). Links to them were shared -- the tiles, the
-# YouTube wall description, anyone's bookmarks -- so they must not 404. No state
+# registered by ``live_main``). Links to them were shared -- the tiles, anyone's
+# bookmarks -- so they must not 404. No state
 # rides the redirect: carrying the old route's symbol or view would be a deep
 # link, which the public Gamma page does not take (decision D4), so each opens
 # on $SPX GEX. Pure data, like the table above; ``tests/test_live_main.py``

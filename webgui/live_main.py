@@ -3,7 +3,6 @@
 Serves the twenty screens in ``live_screens.SCREENS`` at ``live.neuralstrike.co``,
 unauthenticated, to anyone. It renders the REAL page modules — the same ones the
 app renders — so a published screen cannot drift from the private one.
-``webgui/wall.py`` makes the same argument at length.
 
 ⚠ THIS MODULE MUST NEVER ``import main``. main.py's body registers every
 ``@_page`` route, so importing it here would publish ``/terminate`` (Stop All
@@ -264,8 +263,8 @@ _CONTENT = "ns-app w-full p-4 gap-3 pb-10"
 
 # ── the public header ────────────────────────────────────────────────────────
 # The brand reached these screens through the browser TAB TITLE alone, which is
-# invisible on the YouTube wall stream and on a kiosk — so a stranger opening a
-# published screen saw a dense trading board with nothing saying whose it is.
+# not what a stranger reads — so someone opening a published screen saw a dense
+# trading board with nothing saying whose it is.
 #
 # It is the app header's LEFT half and nothing else: the lockup, a hairline, the
 # screen's name. ⚠ NO NAVIGATION OF ANY KIND, and not because there is nothing
@@ -289,8 +288,8 @@ _SCREEN_NAME = shell._CRUMB_LEAF
 # a breadcrumb and a market pill. These screens are dense by design and this
 # header is pure identity, so it must not cost a row of data: 32px keeps the SVG
 # legible across a room while holding the whole band to ~40px — about 4% of a
-# 1080p wall display, and it is the page's first element rather than a fixed
-# bar, so nothing is pushed off the bottom that was not already there.
+# 1080p screen, and it is the page's first element rather than a fixed bar, so
+# nothing is pushed off the bottom that was not already there.
 # (Measured in a real browser at this size: band 41px, mark 32x32.)
 #
 # ⚠ The app's `.brand-mark` hairline (`_NAV_CSS`, "so the logo doesn't float on

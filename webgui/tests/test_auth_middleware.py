@@ -5,11 +5,12 @@ does -- this repo has paid for that lesson more than once (see CLAUDE.md on the
 signal_band and ADX incidents). So every test here goes through ``TestClient``:
 a real scope, real headers, a real cookie jar, and a real peer address.
 
-THE PEER ADDRESS IS SET EXPLICITLY, and that is the single most important line
-of setup in the file. ``TestClient``'s default peer is the literal string
-``("testclient", 50000)``, which is NOT loopback -- so a fixture that leaves it
-alone would exercise the "remote client" branch while reading as though it
-tested the kiosk. Every fixture below names the peer it means.
+THE PEER ADDRESS IS SET EXPLICITLY, and it stays that way on purpose. The gate
+no longer reads it at all -- the rule is a valid session cookie and nothing else
+-- and that is precisely what several tests here assert: a loopback peer with no
+edge header, the most privileged-looking shape a request can have on this box,
+is refused exactly like a stranger. A fixture that left ``TestClient``'s default
+literal ``("testclient", 50000)`` in place could not state that.
 """
 import pytest
 from fastapi import FastAPI
@@ -35,10 +36,6 @@ def _app(**gate_kwargs):
     def desk():
         return PlainTextResponse("desk")
 
-    @app.get("/wall")
-    def wall():
-        return PlainTextResponse("wall")
-
     @app.get("/login")
     def login():
         return PlainTextResponse("login")
@@ -63,7 +60,9 @@ def _client(app, peer=LOOPBACK_PEER):
 
 @pytest.fixture
 def client():
-    """The kiosk's view: a loopback peer, exactly like Chrome on the box."""
+    """A loopback peer -- a process on the box itself, the most trusted-looking
+    origin there is. It buys nothing: the gate reads the cookie and nothing
+    else, and the tests below say so."""
     return _client(_app(session_key=lambda: KEY, epoch=lambda: 1))
 
 
@@ -218,47 +217,41 @@ def test_a_form_token_is_not_a_session(client):
     assert r.status_code == 303
 
 
-# --- the wall exemption: BOTH conditions, and the negatives that matter -----
+# --- loopback is not a credential -------------------------------------------
 
-def test_the_kiosk_reaches_the_wall_from_loopback_without_the_edge_header(client):
-    r = client.get("/wall")
-    assert r.status_code == 200
+def test_a_loopback_request_with_no_edge_header_is_still_refused(client):
+    """The most trusted-looking shape a request can have on this box: it came
+    from a process on the machine and did not pass through Caddy. It is refused,
+    because the gate reads the cookie and nothing else.
 
-
-def test_the_kiosk_reaches_the_iframed_pages_too(client):
-    """/wall's three iframes are the real /desk, /market and /sentiment/momentum."""
-    assert client.get("/desk").status_code == 200
-
-
-def test_the_wall_is_refused_when_the_request_came_through_the_edge(client):
-    """Condition 2. Caddy 404s /wall, but the app must not depend on that."""
-    r = client.get("/wall", headers=_edge(), follow_redirects=False)
-    assert r.status_code == 303
-
-
-def test_the_wall_is_refused_from_a_non_loopback_peer(remote_client):
-    """Condition 1. If the bind is ever widened, the exemption must not be a
-    bypass -- an outside client's peer address is its own IP, so it can never
-    take this branch however its headers are shaped."""
-    r = remote_client.get("/wall", follow_redirects=False)
-    assert r.status_code == 303
-
-
-def test_a_path_outside_the_wall_set_is_gated_even_for_the_kiosk(client):
-    """Condition 3. The exemption is scoped to what the wall actually renders;
-    loopback alone is not a licence to reach the whole app unauthenticated.
-
-    /settings can rotate credentials and /terminate stops the stack, so "any
-    local process may do anything" is exactly the grant not to hand out.
+    This used to be an EXEMPTION -- an on-box kiosk browser was admitted to a
+    fixed set of paths, on exactly these two conditions. The page it served is
+    gone and so is the branch. Anything reintroducing it has to fail this test
+    first, which is the point of asserting the negative rather than deleting the
+    case with the feature.
     """
+    assert client.get("/desk", follow_redirects=False).status_code == 303
+
+
+def test_a_loopback_request_cannot_reach_the_dangerous_pages_either(client):
+    """/settings can rotate the credentials and /terminate stops the stack, so
+    "any local process may do anything" is exactly the grant not to hand out."""
     r = client.get("/settings", follow_redirects=False)
     assert r.status_code == 303
 
 
-def test_a_wall_prefix_is_matched_as_a_prefix_not_a_substring(client):
-    """``/evil/static/x`` contains "/static/" but does not start with it."""
-    r = client.get("/evil/static/x", follow_redirects=False)
-    assert r.status_code == 303
+def test_a_static_asset_is_gated_like_every_other_path(client):
+    """``/static/`` used to be an open PREFIX, because the kiosk's iframes were
+    real NiceGUI pages needing the runtime and the bundled assets. Nothing is
+    open by prefix now: the login form is plain HTML that pulls in no NiceGUI
+    runtime and no asset from this tree, so the only reader of ``/static`` is a
+    signed-in one.
+
+    (303 from the gate, not 404 from the app -- this test app registers no
+    ``/static`` mount, and the distinction is the whole point.)
+    """
+    assert client.get("/static/sounds/chime.wav",
+                      follow_redirects=False).status_code == 303
 
 
 # --- default deny -----------------------------------------------------------
@@ -282,10 +275,14 @@ def test_an_app_with_no_credentials_configured_refuses_a_valid_looking_cookie(
     assert r.status_code == 303, "an unconfigured app must refuse, not admit"
 
 
-def test_an_app_with_no_credentials_configured_refuses_the_kiosk_path_too(
+def test_an_app_with_no_credentials_configured_refuses_a_loopback_caller_too(
         client_no_creds):
-    """Not even the wall. An unconfigured app has no notion of who anyone is."""
-    assert client_no_creds.get("/wall", follow_redirects=False).status_code == 303
+    """The claim in the gate is that "an unconfigured app serves nothing" is
+    TOTAL, so it has to hold for the request shape that used to be exempt: from
+    the box, not through the edge. An unconfigured app has no notion of who
+    anyone is, and that includes anyone local."""
+    assert client_no_creds.get("/desk",
+                               follow_redirects=False).status_code == 303
 
 
 def test_a_corrupt_credentials_file_refuses_rather_than_500(
@@ -343,8 +340,8 @@ def _location(path: str, query: bytes = b"", *, peer=REMOTE_PEER,
     """Run one unauthenticated GET through the gate and read ``Location:``.
 
     ``peer``/``edge`` default to the ordinary outside caller. They are arguments
-    so the kiosk's own scope -- loopback, no ``X-Edge`` -- can be driven too,
-    which is the only way to reach the wall exemption from a hand-built scope.
+    so the on-box scope -- loopback, no ``X-Edge`` -- can be driven too, which is
+    the shape the gate must refuse identically and once did not.
     """
     import asyncio
 
@@ -419,7 +416,9 @@ def test_an_unauthenticated_websocket_is_closed(client):
             pass
 
 
-def test_a_websocket_from_a_non_loopback_peer_is_closed(remote_client):
+def test_an_unauthenticated_websocket_from_a_remote_peer_is_closed(remote_client):
+    """No edge header either -- so neither the peer nor the absence of the edge
+    marker buys anything. The socket is decided by the cookie, like the rest."""
     with pytest.raises(WebSocketDisconnect):
         with remote_client.websocket_connect(WS_PATH):
             pass
@@ -431,11 +430,15 @@ def test_an_authenticated_websocket_connects(client):
         assert ws.receive_text() == "open"
 
 
-def test_the_kiosk_websocket_connects(client):
-    """The wall's iframes are real NiceGUI pages, so the exemption has to cover
-    the socket they run on -- otherwise the three panels render once and freeze."""
-    with client.websocket_connect(WS_PATH) as ws:
-        assert ws.receive_text() == "open"
+def test_an_unauthenticated_loopback_websocket_is_closed(client):
+    """The exact inverse of the exemption that used to live here: a loopback
+    socket with no edge header was admitted, because the kiosk's iframes were
+    real NiceGUI pages that would otherwise render once and freeze. There is no
+    kiosk, so there is no reason to open the socket that carries every
+    interaction in the app to any local process."""
+    with pytest.raises(WebSocketDisconnect):
+        with client.websocket_connect(WS_PATH):
+            pass
 
 
 def test_the_websocket_close_code_is_policy_violation(client):
@@ -473,34 +476,23 @@ def test_an_unknown_scope_type_is_passed_through():
     assert seen == ["something_new"]
 
 
-# --- the wall prefixes are a scope, not a substring test --------------------
+# --- a traversal path is refused like anything else --------------------------
 
 @pytest.mark.parametrize("path", [
     "/static/../settings",
     "/static/../../etc/passwd",
     "/_nicegui_ws/../terminate",
 ])
-def test_a_dot_dot_segment_never_takes_the_kiosk_exemption(path):
-    """``scope["path"]`` is percent-decoded but NOT normalised.
+def test_a_dot_dot_segment_reaches_nothing(path):
+    """``scope["path"]`` is percent-decoded but NOT normalised, so these really
+    do start with ``/static/`` and ``/_nicegui_ws/``.
 
-    So ``/static/../settings`` really does start with ``/static/`` and would
-    take the prefix branch of condition 3. Not exploitable today -- the router
-    matches the same unnormalised path, so it reaches ``StaticFiles``, which
-    refuses traversal itself -- but that leaves this module's scoping claim
-    resting on two other components' behaviour. The exemption says "the paths
-    the wall renders"; a path with a ``..`` segment is not one of them.
+    That used to matter a great deal: those were open PREFIXES for the kiosk,
+    and a ``..`` segment would have taken the prefix branch. Now nothing is open
+    by prefix, so this is no longer load-bearing -- it is kept because it is the
+    test that would notice a prefix exemption coming back without one.
 
     Driven through a hand-built scope: no HTTP client will send this, because
     URL resolution folds ``..`` before the request line is written.
     """
     assert _location(path, peer=LOOPBACK_PEER, edge=False).startswith("/login")
-
-
-def test_the_kiosk_still_reaches_an_ordinary_static_asset(client):
-    """The negative above must not have cost the thing it is scoping.
-
-    A real asset path has no ``..`` segment, so the kiosk's iframes still load
-    their CSS and sounds. (404 from the app, not 303 from the gate: this test
-    app registers no ``/static`` mount, and the distinction is the whole point.)
-    """
-    assert client.get("/static/sounds/chime.wav").status_code == 404

@@ -26,7 +26,6 @@ no sqlite, no Schwab call.
 from __future__ import annotations
 
 import http.cookies
-import ipaddress
 import logging
 import urllib.parse
 
@@ -40,6 +39,12 @@ log = logging.getLogger("webgui.auth")
 # that replacement is what makes the header trustworthy as a "this came from
 # outside" marker. Read it as evidence of the edge, never as evidence of a
 # client's identity.
+#
+# NOT read by the gate: the decision below turns on a session cookie and nothing
+# else. It lives here because it is one name shared by everything that has to
+# agree about it -- ``main._client_ip`` (which buckets login attempts by the
+# forwarded peer only when the edge stamped the request), ``visitor_limit``, and
+# the generated Caddyfile, whose test pins this constant.
 EDGE_HEADER = "x-edge"
 
 SESSION_COOKIE = "ns_session"
@@ -63,13 +68,6 @@ REMEMBER_COOKIE = "ns_device"
 # because a browser requests it alongside the login page and a redirect there
 # is noise, not protection.
 OPEN_PATHS = frozenset({"/login", "/favicon.ico"})
-
-# The kiosk surface. ``/wall`` frames the three real pages, and those pages need
-# NiceGUI's runtime and static assets to work at all.
-WALL_PATHS = frozenset({"/wall", "/desk", "/market", "/sentiment/momentum"})
-WALL_PREFIXES = ("/_nicegui/", "/_nicegui_ws/", "/static/")
-
-LOOPBACK = frozenset({"127.0.0.1", "::1"})
 
 # RFC 6455 1008: the connection is refused on policy grounds. Not 1000 (normal
 # closure), which would tell a client its socket ended cleanly and invite the
@@ -125,31 +123,6 @@ def default_epoch() -> int | None:
 # ---------------------------------------------------------------------------
 # Scope reading.
 
-def _is_loopback(host: object) -> bool:
-    """True only for an address the kernel could not have routed off the box.
-
-    Parsed rather than string-matched so ``::ffff:127.0.0.1`` and the rest of
-    ``127.0.0.0/8`` (systemd-resolved sits on 127.0.0.53) are recognised. An
-    unparseable value -- ``TestClient``'s default literal ``"testclient"``, or a
-    unix-socket peer -- is NOT loopback: unknown means refused.
-    """
-    if not isinstance(host, str):
-        return False
-    try:
-        addr = ipaddress.ip_address(host)
-    except ValueError:
-        return host in LOOPBACK
-    mapped = getattr(addr, "ipv4_mapped", None)
-    return (mapped or addr).is_loopback
-
-
-def _peer(scope) -> str | None:
-    client = scope.get("client")
-    if isinstance(client, (tuple, list)) and client:
-        return client[0]
-    return None
-
-
 def _header(scope, name: str) -> str | None:
     """First value of a header, decoded. ASGI gives lowercase byte names."""
     wanted = name.lower().encode("latin-1")
@@ -183,18 +156,24 @@ def _cookie(scope, name: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 class AuthGate:
-    """Refuse every request that is not the owner or the kiosk.
+    """Refuse every request that is not the owner.
 
     The decision, in order -- and the order is the specification, not an
     implementation detail::
 
-        scope is neither http nor websocket   -> pass (lifespan MUST pass, or
-                                                 the app never boots)
-        path in OPEN_PATHS                    -> pass
-        no usable credentials                 -> REFUSE, before anything below
-        the kiosk exemption, all 3 conditions -> pass
-        a valid SESSION cookie                -> pass
+        scope is neither http nor websocket  -> pass (lifespan MUST pass, or
+                                                the app never boots)
+        path in OPEN_PATHS                   -> pass
+        no usable credentials                -> REFUSE
+        a valid SESSION cookie               -> pass
         otherwise -> http: 303 /login?next=...  |  websocket: close 1008
+
+    There is NO exception to that -- not for a loopback peer, not for a request
+    that did not come through the edge, not for a static asset. The rule used to
+    carry one (an on-box kiosk browser was let through to a fixed set of paths),
+    and an exception on a security boundary is a thing to remember rather than a
+    thing that holds. It went with the page it existed for; do not reintroduce
+    one without a reason that outweighs making this list total again.
     """
 
     def __init__(self, app, *, session_key=default_session_key,
@@ -225,62 +204,19 @@ class AuthGate:
             return True
 
         key, epoch = self._session_key(), self._epoch()
-        # DEFAULT DENY, and note WHERE it sits: ahead of the kiosk exemption,
-        # not only ahead of the cookie check. None means no credentials are
-        # configured, or the file is corrupt. The friendly bug is to read that
-        # as "nothing to check" and pass -- on a public hostname that is an open
-        # door that looks exactly like the app working. An empty key is refused
-        # for the same reason with one extra step: it is a usable HMAC key that
-        # anyone else can use too.
+        # DEFAULT DENY. None means no credentials are configured, or the file is
+        # corrupt. The friendly bug is to read that as "nothing to check" and
+        # pass -- on a public hostname that is an open door that looks exactly
+        # like the app working. An empty key is refused for the same reason with
+        # one extra step: it is a usable HMAC key that anyone else can use too.
         #
-        # Putting it above the kiosk branch makes "an unconfigured app serves
-        # nothing" TOTAL. The tempting alternative -- let the kiosk through,
-        # since its exemption never rested on a credential -- would be a rule
-        # with one exception, and an exception on a security boundary is a thing
-        # to remember rather than a thing that holds. The cost is that the wall
-        # is blank until setup, which is the correct thing for it to be.
+        # "An unconfigured app serves nothing" is TOTAL, and nothing below may
+        # make it conditional. The cost is that a fresh install serves only the
+        # login form until setup, which is the correct thing for it to do.
         if not key or epoch is None:
             return False
 
-        if self._is_kiosk(scope, path):
-            return True
         return self._has_session(scope, key, epoch)
-
-    @staticmethod
-    def _is_kiosk(scope, path: str) -> bool:
-        """ALL THREE conditions, and each one alone would be a bypass.
-
-        1. The peer is loopback. The kiosk Chrome runs ON the box. If the bind
-           is ever widened by accident, or a port forwarded, an outside client
-           presents its own address here and can never reach this branch.
-        2. No ``X-Edge`` header. Caddy sets it with ``header_up``, which
-           replaces whatever the client sent -- so a request that came through
-           the edge cannot claim to be the kiosk. This is the converse of (1)
-           and covers the case (1) cannot: a proxy on the box IS loopback.
-        3. The path is one the wall actually renders. Loopback is not a licence
-           to reach the whole app: ``/settings`` can rotate the credentials and
-           ``/terminate`` stops the stack, so the grant is scoped to the three
-           framed pages and the runtime they need.
-
-        ⚠ A ``..`` SEGMENT DISQUALIFIES THE PATH ENTIRELY, before condition 3 is
-        asked. ``scope["path"]`` is percent-decoded but NOT normalised, so
-        ``/static/../settings`` -- and its ``%2e%2e`` and ``..%2f`` spellings --
-        genuinely starts with ``/static/`` and would take the prefix branch. It
-        is not exploitable today (the router matches the same unnormalised path,
-        so it lands on ``StaticFiles``, which refuses traversal itself), but
-        that leaves this module's scoping claim resting on two other
-        components' behaviour. Condition 3 says the grant is scoped to what the
-        wall renders; this is what makes that sentence true here rather than
-        true by luck. Nothing legitimate is refused -- a browser folds ``..``
-        during URL resolution, before the request line is written.
-        """
-        if not _is_loopback(_peer(scope)):
-            return False
-        if _header(scope, EDGE_HEADER) is not None:
-            return False
-        if ".." in path.split("/"):
-            return False
-        return path in WALL_PATHS or path.startswith(WALL_PREFIXES)
 
     @staticmethod
     def _has_session(scope, key: str, epoch: int) -> bool:

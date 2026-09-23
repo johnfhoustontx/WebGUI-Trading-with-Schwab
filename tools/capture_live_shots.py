@@ -6,10 +6,9 @@ one visitor opening the grid would otherwise spin up fourteen NiceGUI sessions
 against the live process, and a page that is only ever navigation would cost
 more than the screens it points at. So a timer takes a picture instead.
 
-Headless Chrome renders each route offscreen -- no Xvfb, unlike
-``tools/stream_wall.sh``, because ``--headless --screenshot`` needs no display
--- and the result is encoded to ``deploy/site/live/<slug>.webp``, inside the
-directory Caddy serves.
+Headless Chrome renders each route offscreen -- no display server of any kind,
+because ``--headless --screenshot`` needs none -- and the result is encoded to
+``deploy/site/live/<slug>.webp``, inside the directory Caddy serves.
 
 Three decisions are worth knowing before editing:
 
@@ -24,9 +23,10 @@ Three decisions are worth knowing before editing:
 
 * **Standing down is exit 0; a missing browser is exit 1.** Outside
   ``[windows.live_capture]`` there is nothing to photograph and nothing wrong,
-  which is the reasoning ``stream_wall.sh`` records. A host with no browser is
-  the opposite: every screen fails identically, forever, and the grid goes stale
-  behind a green timer. The unit is a ``Type=oneshot`` with no ``Restart=``, so
+  and a non-zero exit would restart-storm into ``StartLimitBurst`` and leave the
+  unit ``failed`` -- a state someone has to clear by hand. A host with no
+  browser is the opposite: every screen fails identically, forever, and the grid
+  goes stale behind a green timer. The unit is a ``Type=oneshot`` with no ``Restart=``, so
   that exit surfaces in ``systemctl --user --failed`` rather than storming.
 
 Run it by hand with ``--force`` to capture outside the window.
@@ -128,8 +128,7 @@ def find_chrome():
     """The browser binary, or ``None``.
 
     Three names because the same browser answers to all of them depending on how
-    it was installed (.deb, distro package, snap) -- the resolution
-    ``tools/stream_wall.sh`` already does. ``chrome`` is appended for a
+    it was installed (.deb, distro package, snap). ``chrome`` is appended for a
     non-Linux host, where this script is only ever run by hand.
     """
     for name in ("google-chrome", "chromium-browser", "chromium", "chrome"):
@@ -154,9 +153,9 @@ def _chrome_argv(chrome, url, png, profile):
         "--hide-scrollbars",
         f"--window-size={VIEWPORT_WIDTH},{VIEWPORT_HEIGHT}",
         "--force-device-scale-factor=1",
-        # A FRESH profile per run, for stream_wall.sh's reason: a --user-data-dir
-        # that was not shut down cleanly makes Chrome open a restore-pages
-        # bubble, and here that bubble would be IN the picture.
+        # A FRESH profile per run: a --user-data-dir that was not shut down
+        # cleanly makes Chrome open a restore-pages bubble, and here that bubble
+        # would be IN the picture.
         f"--user-data-dir={profile}",
         "--no-first-run",
         "--no-default-browser-check",

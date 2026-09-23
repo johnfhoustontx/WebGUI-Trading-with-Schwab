@@ -494,9 +494,9 @@ def test_the_public_render_injects_the_page_level_css(monkeypatch):
 
 # --- the public header: whose screen a stranger is looking at ----------------
 # The brand was in the browser TAB TITLE and nowhere on the page -- and a tab
-# title is invisible on the YouTube wall stream and on a kiosk, so the fourteen
-# published screens read as a dense trading board belonging to nobody. These
-# pin the header that fixes that, and the three things it must never become.
+# title is not what a stranger reads, so the published screens read as a dense
+# trading board belonging to nobody. These pin the header that fixes that, and
+# the three things it must never become.
 
 def test_every_published_screen_carries_the_brand(monkeypatch):
     """⚠ Asserted against the BUILDER's own output, never the word

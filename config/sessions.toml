@@ -51,19 +51,10 @@ at = "08:00"
 start = "08:30"
 end   = "15:00"
 
-[windows.stream]
-# The public YouTube wall stream. The bounds match [windows.collection] on
-# purpose -- the broadcast should be live exactly when the dashboards have
-# moving data, because a stream of frozen overnight numbers is worse than no
-# stream. But it is held SEPARATE, like session_flip is: widening collection
-# must not silently extend a public broadcast.
-start = "08:00"   # 09:00 ET
-end   = "15:20"   # 16:20 ET
-
 [windows.live_capture]
 # Thumbnail captures for the public grid on neuralstrike.co/live.html.
-# Held SEPARATE from [windows.collection] for the reason [windows.stream] gives:
-# widening collection must not silently extend a public surface.
+# Held SEPARATE from [windows.collection], like session_flip is: widening
+# collection must not silently extend a public surface.
 #
 # POST-CLOSE ONLY, and that is the whole point (2026-09-08). Each run drives a
 # headless Chrome over all fourteen screens: ~1.7 CPU-minutes in ~90s of wall
@@ -73,11 +64,10 @@ end   = "15:20"   # 16:20 ET
 # throughout -- and it cost a GEX collection minute on every quarter hour:
 # 08:00, 08:15, 08:30, 08:45 and 09:00 each dropped the minute after.
 #
-# Starting after [windows.stream] end (15:20) is load-bearing, not tidiness:
-# the broadcast's ffmpeg + Xvfb + Chrome hold ~1.57 cores while it runs, so a
-# capture inside the stream window competes with the largest consumer on the
-# box. Ending before the 16:20 momentum cascade keeps it clear of the nightly
-# recompute for the same reason.
+# Starting after the close is load-bearing, not tidiness: the capture is the
+# heaviest CPU consumer on this box while it runs, so it must not compete with
+# the collection tick. Ending before the 16:20 momentum cascade keeps it clear
+# of the nightly recompute for the same reason.
 #
 # Two fires (15:30 and 15:45), not one: the second is the retry if the first
 # times out, and after the close the screens no longer change, so the pair
@@ -89,9 +79,9 @@ end   = "15:50"
 [windows.gamma_public]
 # When the public Gamma page (live.neuralstrike.co/gamma) keeps a visitor's
 # symbol live. The bounds are [windows.collection]'s, because a hot symbol is
-# only published by the collection tick; held SEPARATE for the reason
-# [windows.stream] gives. Outside it, $SPX, SPY and QQQ show their last
-# session and other symbols are not offered live.
+# only published by the collection tick; held SEPARATE because widening
+# collection must not silently extend a public surface. Outside it, $SPX, SPY
+# and QQQ show their last session and other symbols are not offered live.
 start = "08:00"
 end   = "15:20"
 
