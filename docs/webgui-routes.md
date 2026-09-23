@@ -1071,9 +1071,8 @@ the same fixed footer `main._layout` mounts. It reads only `market:summary`
 `ticker_speed` come from the frozen store's DEFAULTS.
 
 **Every screen carries a slim brand header (2026-09-09).** The brand reached these
-screens through the browser TAB TITLE alone, which is invisible on the YouTube wall
-stream and on a kiosk — so a stranger opening one saw a dense trading board belonging
-to nobody. `live_main._header(screen)` draws the app header's LEFT half and nothing
+screens through the browser TAB TITLE alone, which is not what a stranger reads — so
+someone opening one saw a dense trading board belonging to nobody. `live_main._header(screen)` draws the app header's LEFT half and nothing
 else: `shell.brand_lockup_html()` (mark + two-tone wordmark), a hairline, and
 `screen.title`, over a `border-b` band about 40px tall. The mark is sized 32px here
 rather than the app's 44px — `LIVE_HEADER_CSS`, this entrypoint's one `ui.add_css`,

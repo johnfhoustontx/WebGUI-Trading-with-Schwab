@@ -35,9 +35,8 @@ adjust paper positions, **stop the entire stack**
 - **TOTP** with a ±1 window drift tolerance and **replay refusal**: the accepted
   counter is persisted, and `counter <= last_counter` is rejected. `pyotp.verify`
   alone would accept the same code repeatedly for up to 90 seconds.
-- **Default-deny at the gate**, above the wall exemption. An unconfigured or
-  corrupt credentials file refuses everything — including the wall — rather than
-  reading "no password set" as "nothing to check".
+- **Default-deny at the gate.** An unconfigured or corrupt credentials file
+  refuses everything rather than reading "no password set" as "nothing to check".
 - **Three token kinds** (session / remember-device / login-form), none
   interchangeable. The remember-device cookie authorises **nothing** on its own;
   its only power is letting the next sign-in skip the TOTP prompt.
@@ -47,10 +46,14 @@ adjust paper positions, **stop the entire stack**
   bumps an epoch that invalidates every outstanding token. **There are no recovery
   codes** — a lost authenticator means SSH to the box and re-enrolling.
 
-⚠ **`/wall` never leaves the box.** Caddy 404s it, and the app exempts it only
-when the peer is loopback **and** the request carries no `X-Edge` header **and**
-the path is one the wall actually frames. All three, so a widened bind cannot turn
-the exemption into a bypass.
+⚠ **The gate has NO exception, and that is worth keeping.** A valid session
+cookie is the only thing that admits a request — a loopback peer buys nothing, a
+request that did not come through the edge buys nothing, and `/static` and
+`/_nicegui*` are gated like every other path. It carried one exemption until
+2026-09-23 (an on-box kiosk browser, on three simultaneous conditions), and that
+went with the `/wall` page it existed for. An exception on this boundary is a
+thing to remember rather than a thing that holds; do not add one back without a
+reason that outweighs losing that.
 
 ## Secret handling
 

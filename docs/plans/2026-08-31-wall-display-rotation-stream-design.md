@@ -1,5 +1,7 @@
 # Wall display rotation → YouTube live stream — design
 
+**Status:** retired 2026-09-23 — the stream and the /wall page were removed.
+
 **Date:** 2026-08-31
 **Status:** approved, not yet implemented
 **Scope:** a new `/wall` webgui route, a headless capture/encode pipeline on the

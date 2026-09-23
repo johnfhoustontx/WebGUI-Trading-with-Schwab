@@ -1,5 +1,7 @@
 # Wall Display Rotation → YouTube Stream — Implementation Plan
 
+**Status:** retired 2026-09-23 — the stream and the /wall page were removed.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Stream three existing dashboards (`/desk`, `/market`, `/sentiment/momentum`), rotating every 15 seconds, to a public YouTube live stream during market hours.

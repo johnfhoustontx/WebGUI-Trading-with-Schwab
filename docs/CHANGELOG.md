@@ -4,7 +4,45 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-22 (**Claude Trades removed completely** — the page, the
+**Last updated:** 2026-09-23 (**The public YouTube wall stream and the `/wall`
+page are removed** — the owner's decision: the stream is not needed.)
+
+- **The pipeline.** `tools/stream_wall.sh` (Xvfb + kiosk Chrome + ffmpeg to
+  YouTube's RTMP ingest) and its tests; `_stream_units` / `_stream_window_seconds`
+  / `STREAM_ENV_FILE` in `deploy/systemd/generate_units.py` and the unit tests
+  that pinned them; `[windows.stream]` in `config/sessions.toml`, its default in
+  `shared/market_calendar.py`, and its Settings → Configuration entry.
+- **The page.** `webgui/wall.py`, its raw `@app.get` route and its tests. The
+  Caddyfile's `handle /wall* { respond 404 }` block went with it — it refused a
+  route that no longer exists.
+- ⚠ **The auth gate has no exception any more, and that is the part worth
+  knowing.** `auth_middleware` admitted the on-box kiosk unauthenticated when
+  three conditions held at once (loopback peer, no `X-Edge` header, a path in
+  `WALL_PATHS` / `WALL_PREFIXES`). `_is_kiosk`, `_is_loopback`, `_peer` and
+  `LOOPBACK` are gone; the rule is now open paths pass, no credentials
+  configured denies, otherwise a valid session cookie — nothing else.
+  `EDGE_HEADER` stays, because `main._client_ip` buckets the login throttle on
+  it. The kiosk tests were replaced by their inverses rather than deleted, so a
+  reintroduced exemption fails a test: a loopback request with no edge header is
+  refused, so is a loopback websocket, so is a `/static/` asset, and an
+  unconfigured app refuses a loopback caller too.
+- **Comments that explained themselves by pointing at the stream** were
+  rewritten to stand on their own — `[windows.live_capture]`'s real reason is
+  that the capture is CPU-heavy and must stay clear of the collection tick, and
+  `main.py`'s idempotent-gate and `__main__`-guard notes now name the general
+  case (anything that does `import main` re-executes the file as a second module
+  object) rather than `wall.py`, which was the only such site in the app.
+- ⚠ **Installed units are NOT auto-pruned.** `generate_units --install` writes
+  and arms what `render_all()` returns and removes nothing, so
+  `trading-prod-stream.{service,timer}` survive on the box until they are
+  stopped, disabled and deleted by hand — which the operator did directly on the
+  box, because a promote alone would have left an armed timer for a script that
+  no longer exists. `/etc/neuralstrike-stream/env` (the RTMP key) sits outside
+  the checkout and is the operator's to remove too.
+- `docs/stream-announcement-copy.md` deleted. The 2026-08-31 design and plan
+  docs are kept as history with a retired status line.
+
+**Prior —** 2026-09-22 (**Claude Trades removed completely** — the page, the
 autonomous `driver_svc`, its paper book and config. [Design](plans/2026-09-22-remove-claude-trades-design.md).)
 
 - **Disarmed first** on prod (it was armed; 0 open positions, $12,794 equity), then removed.

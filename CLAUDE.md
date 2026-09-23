@@ -1944,8 +1944,8 @@ already-armed timer reports `already enabled` and nothing changes.
 **Only the target is still yours to enable**, because that is the deliberate act
 of making this checkout the one that starts at boot (with
 `loginctl enable-linger`). **Dev arms nothing** — it generates the same timers,
-but its stores are a disposable copy of prod's and stream/gallery/live-capture
-drive public surfaces a second checkout must never publish to.
+but its stores are a disposable copy of prod's and gallery/live-capture drive
+public surfaces a second checkout must never publish to.
 
 | What it replaces | Directive |
 |---|---|
@@ -2009,8 +2009,12 @@ sockets, not the unit state. `tools/promote.sh` does both.
 **`https://app.neuralstrike.co`** — Caddy (a *system* unit, since it needs :443)
 terminates TLS and reverse-proxies to the app, which **still binds `127.0.0.1`**.
 Behind it sits a password + TOTP login: `webgui/auth_middleware.py` default-denies
-every `http` and `websocket` scope except `/login` and `/favicon.ico`, plus a
-three-condition loopback exemption for the wall kiosk. Design + plan:
+every `http` and `websocket` scope except `/login` and `/favicon.ico`. ⚠ **That
+list has no other exception, and the rule is total** — a loopback peer buys
+nothing, neither does the absence of the `X-Edge` header, and `/static` and
+`/_nicegui*` are gated like every other path. It carried a three-condition
+loopback exemption for the wall kiosk until 2026-09-23; that went with the page.
+Design + plan:
 [`docs/plans/2026-09-06-webgui-credentialing-{design,plan}.md`](docs/plans/2026-09-06-webgui-credentialing-design.md).
 
 **`https://live.neuralstrike.co`** is the same shape with the login taken out: a
