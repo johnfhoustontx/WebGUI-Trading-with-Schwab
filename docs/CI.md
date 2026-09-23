@@ -54,7 +54,7 @@ per suite** (`fail-fast: false`, so one red suite doesn't cancel the others):
 |-------|-----------|---------|
 | `shared/bus`, `shared/contracts` | repo root | `python -m pytest shared/bus` (etc.) |
 | `services/tests` (scaffold) | repo root | `python -m pytest services/tests` |
-| `services/{sentiment,options,portfolio,trade,driver,market}_svc` | repo root | `python -m pytest services/<name>` |
+| `services/{sentiment,options,portfolio,trade,market}_svc` | repo root | `python -m pytest services/<name>` |
 | `webgui` | **inside** `webgui/` | `python -m pytest` |
 | `schwab-proxy` | **inside** `schwab-proxy/` | `python -m pytest tests` |
 | `options-scanner` *(soft)* | **inside** `options-scanner/` | `python -m pytest tests` (+ deselections) |

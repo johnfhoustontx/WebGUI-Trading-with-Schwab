@@ -2,8 +2,7 @@
 
 A self-contained **NiceGUI web app** for a personal Schwab options-trading stack:
 GEX/options scanning, dealer-gamma analytics, a multi-strategy calculator/simulator,
-market-sentiment scoring, a trade analyzer, portfolio analytics, and an autonomous
-(paper) trade "driver" backed by Claude. Single-user, localhost, Linux (Ubuntu
+market-sentiment scoring, a trade analyzer, and portfolio analytics. Single-user, localhost, Linux (Ubuntu
 24.04 LTS) under systemd user units.
 
 > **Working with the code?** Read [`CLAUDE.md`](CLAUDE.md) first — it is the living
@@ -20,7 +19,7 @@ TIER 1  webgui/ (NiceGUI, :8500)            render-only; reads Redis, enqueues c
    ▲ cache read / subscribe   │ commands
 TIER 3  Redis (:6379)                       cache:{domain}:{view} + events pub/sub + cmd:{domain} streams
    ▲ publish                  │ consume     shared/contracts (typed payloads) + shared/bus (redis wrapper)
-TIER 2  services/{domain}_svc (:8210–8214)  FastAPI; own scheduler + command consumer; call the proxy
+TIER 2  services/{domain}_svc (:8210–13,15) FastAPI; own scheduler + command consumer; call the proxy
    │
 schwab-proxy (:8100)                        owns Schwab auth/tokens + market data — START FIRST
 ```
@@ -41,7 +40,7 @@ never hard-code ports/paths.
   (PEP 668 marks it externally-managed).
 - **Redis** on `:6379`, with `requirepass` set (the bus reads `MEMURAI_PASSWORD`).
 - A Schwab developer app + OAuth tokens (see `shared/*.example.*` templates).
-- An `ANTHROPIC_API_KEY` (env or `shared/anthropic_key.txt`) for the driver + Gamma Analyze.
+- An `ANTHROPIC_API_KEY` (env or `shared/anthropic_key.txt`) for Gamma Analyze and the scheduled briefings.
 
 ## Setup
 
@@ -83,7 +82,7 @@ SSH tunnel (`tools/open_webgui.ps1` from a Windows workstation forwards `:8500`
 and `:8100`), never by exposing the port.
 
 Manual order, for debugging one component: Redis → `schwab-proxy/schwab_proxy.py`
-→ `services/*_svc/app.py` (×6) → `webgui/main.py`. `webgui/live_main.py` reads Redis
+→ `services/*_svc/app.py` (×5) → `webgui/main.py`. `webgui/live_main.py` reads Redis
 and nothing else, so it orders after nothing.
 
 ## Testing

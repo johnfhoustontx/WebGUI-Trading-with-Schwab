@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-22 (**Strategy Finder credit spreads: the per-trade cap and
+**Last updated:** 2026-09-22 (**Claude Trades removed completely** — the page, the
+autonomous `driver_svc`, its paper book and config. [Design](plans/2026-09-22-remove-claude-trades-design.md).)
+
+- **Disarmed first** on prod (it was armed; 0 open positions, $12,794 equity), then removed.
+- **Gone:** `services/driver_svc`, port 8214, `config/driver.toml`,
+  `[windows.driver_entry]`, the `autonomous_trading` env flag, `shared/driver_limits.py`,
+  `shared/driver_policy.py` (`open_risk_dollars` → `shared/book_caps.py`),
+  `shared/contracts/driver.py`, the options_svc driver book (views, commands, 1-min
+  manage tick, EOD-push book), `perf_analytics.posture_postmortem`, the `/driver`
+  page + AI pill, the CLAUDE book on the Desk / Symbol / EOD / Status, and two
+  Settings → Configuration sections.
+- **Renamed:** `options_svc/driver_perf.py` → `book_perf.py` (the manual scorecard).
+- **Kept:** the driver's history DB on disk (still backed up), the `entry_context`
+  column, the `anthropic` dependency (Gamma Analyze).
+- ⚠ **Prod:** `generate_units --install` never deletes a unit, so the stale
+  `trading-prod-driver_svc.service` is removed by hand after the promote.
+
+**Prior —** 2026-09-22 (**Strategy Finder credit spreads: the per-trade cap and
 the reason line**. [Design](plans/2026-09-22-finder-credit-spreads-design.md).)
 
 - **Per-trade caps are config, both $750.** `config/paper.toml` via

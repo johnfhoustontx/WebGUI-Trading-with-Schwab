@@ -24,7 +24,7 @@ password + TOTP login is, and the two are layered deliberately.
 ## The web GUI login (2026-09-06)
 
 What a session can do, which sets the bar: read the full paper book, open and
-adjust paper positions, **arm the autonomous driver**, **stop the entire stack**
+adjust paper positions, **stop the entire stack**
 (`/terminate`), and spend the Claude API budget. Real orders stay out of reach —
 `PAPER_TRADE` is a module constant not settable over HTTP.
 
@@ -55,7 +55,7 @@ the exemption into a bypass.
 ## Secret handling
 
 - Real secrets live in `shared/` and are **all gitignored** (`appsettings.json`, `tokens.json`,
-  `anthropic_key.txt`, `driver_model.txt`, `sentiment_bridge.json`, `schwab-proxy/proxy_tokens.json`).
+  `anthropic_key.txt`, `sentiment_bridge.json`, `schwab-proxy/proxy_tokens.json`).
   Only `*.example.*` templates are committed. Verified: no real secret has ever been committed.
 - Secrets are **plaintext on disk** with default user ACLs — any process in your session can
   read them (inherent to a local token cache). Consider tightening the token-file ACL to your
@@ -86,13 +86,6 @@ the exemption into a bypass.
   audited clean while **prod still carried pip 24.0 with six advisories**, purely because the
   two venvs were created at different times and nothing pinned it. Audit **both** environments
   — a clean dev tells you nothing about prod.
-
-## The autonomous driver
-
-The Claude decision layer is **paper-only** (`config.PAPER_TRADE = True`, a module constant not
-settable over HTTP) and never sizes its own risk — `services/driver_svc/guardrails.py` is the
-code-authoritative safety core (defined-risk allowlist, quantity clamp, halt states). The model
-can only pick from menu ids the scanner already produced.
 
 ## Reporting
 

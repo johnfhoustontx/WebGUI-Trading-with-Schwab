@@ -19,7 +19,6 @@ From this one interface you can:
 - **Read the market's mood** through a sentiment composite, Day/Week/Month trend
   rings, a market-regime console, and a sector-rotation map.
 - **Review** your live brokerage portfolio and an end-of-day report.
-- **Watch** an autonomous paper trader pick and size defined-risk spreads.
 
 > **This is a single-user application.** It runs on your own machine and talks
 > to Schwab through a local gateway. Reaching it from anywhere else goes through
@@ -77,7 +76,7 @@ The app reads market data and your positions from Schwab, so you need:
 ## Nice-to-have (optional)
 
 - **An Anthropic (Claude) API key** — only needed for the AI features: the Gamma
-  **Analyze**/**Explain** infographics and the autonomous **Claude Trades** driver.
+  **Analyze**/**Explain** infographics.
   Set it as the `ANTHROPIC_API_KEY` environment variable
   (or in a `shared/anthropic_key.txt` file). Without it, those features simply stay
   quiet — nothing else is affected, and the auto-trader safely stands down.
@@ -94,7 +93,7 @@ The app reads market data and your positions from Schwab, so you need:
 ## Ports the app uses
 
 The app runs entirely on your own machine and needs these local ports free:
-**6379** (Redis), **8100** (Schwab gateway), **8210–8215** (the six services),
+**6379** (Redis), **8100** (Schwab gateway), **8210–8213** and **8215** (the five services),
 **8500** (the web app) and **8501** (the public live screens). If another program
 is already using one of them, the matching piece won't start.
 
@@ -109,7 +108,7 @@ all together with one of the launcher scripts in the project root:
 
 | Command | What it does |
 |----------|--------------|
-| `systemctl --user start trading-prod.target` | Starts the gateway, the six domain services, the web app and the public live screens. |
+| `systemctl --user start trading-prod.target` | Starts the gateway, the five domain services, the web app and the public live screens. |
 | `systemctl --user list-units 'trading-prod*'` | Shows what is running. |
 | `journalctl --user -u trading-prod-options_svc -f` | Follows one service's log. |
 
@@ -229,7 +228,7 @@ behind all three.
 
 Three things to know:
 
-- **They are not redacted.** The Desk shows your open paper and driver positions,
+- **They are not redacted.** The Desk shows your open paper positions and captured signals,
   the Opportunity Board ranks signals, and Flow Alerts carries live alerts.
   Anyone with the address can read them. That is a deliberate choice — the book
   is paper only — but it is worth knowing before you show someone the link.
@@ -255,7 +254,7 @@ You don't interact with these directly, but it helps to know they exist:
 - **Schwab gateway (proxy)** — handles the Schwab connection and market data.
   Everything else depends on it. **It must be running first** (the launcher
   handles ordering for you).
-- **Six domain services** — Sentiment, Options, Portfolio, Trade, Driver, and
+- **Five domain services** — Sentiment, Options, Portfolio, Trade and
   Market. Each one powers its matching page(s).
 - **The public live screens** — a second, read-only copy of the web app serving
   `live.neuralstrike.co`. See *The public live screens* above.
@@ -279,7 +278,7 @@ launcher, or restart the specific service from the **System Status** page.
 Use **Stop All Services** at the foot of the rail — it asks for your
 authenticator code before it will do anything — or run
 `systemctl --user stop trading-prod.target`. This stops the
-gateway, the six services, the web app **and the public live screens** — so the
+gateway, the five services, the web app **and the public live screens** — so the
 public site goes dark until you start the stack again. (Redis is intentionally
 left running — it is a *system* service the app's own units cannot reach.)
 
@@ -352,7 +351,8 @@ and **Symbol** (one screen about one ticker).
 | **Options** (group) | Market Scanner · Income · Expected Move · Captured Signals · Paper Ledger · Paper Account · Shares · Rescue |
 | **Strategy Finder** (standalone) | — |
 | **Trade Analyzer** (group) | Analyze · Rank Board |
-| **Claude Trades** (standalone) | — |
+
+The autonomous Claude paper trader (*Claude Trades*) was removed on 2026-09-22.
 
 **ACCOUNT — what do I own?**
 
@@ -388,11 +388,10 @@ signals appear it can:
 - Play a **chime** (a bundled sound), and optionally
 - Fire a **desktop notification**.
 
-It also shows red **count badges** on three nav items:
+It also shows red **count badges** on two nav items:
 
 - **Scanner** — number of brand-new signals.
 - **Captured Signals** — new captures.
-- **Claude Trades** — new autonomous-driver activity.
 
 Opening that page clears its badge. A **group's** rail badge is the sum of its
 children's badges, so a count on the collapsed rail still tells you which section
@@ -452,7 +451,7 @@ structure · what should I act on · what am I holding.*
 | **Dealer Positioning** | One row each for **$SPX, SPY, QQQ, $NDX** — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip |
 | **Opportunity Board** | The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
 | **Live Flow Alerts** | The five newest unusual-options events |
-| **Positions** | Your paper trades and Claude's together, with live marks and an **OK / Watch / At risk / Rescue** flag |
+| **Positions** | Your paper trades and captured signals together, with live marks and an **OK / Watch / At risk / Rescue** flag |
 | **Market Summary** | Up to five highlights from the latest published market report, with which report they came from and a link to the full report, over six live chips (Sentiment, Trend, Bias, Signal, Regime, Bull/Bear) — full width, at the bottom |
 
 **Hover Bias, Signal or the market regime word** and a sentence explains what it
@@ -460,7 +459,7 @@ means and, for Bias, what position size it implies.
 
 **Clicking any row** opens the page it came from, already set to that symbol — a
 dealer row opens Dealer Positioning on that symbol, a position opens the Paper
-Ledger or Claude Trades.
+Ledger or Captured Signals.
 
 **Nothing on this page can place or change a trade.** It reads and links only.
 
@@ -557,7 +556,7 @@ to the page that owns those facts:
 | **Volatility** | **Vol Rank** as a bar, **IV vs HV** with its word (*high* at 1.2× or more, *low* at 0.9× or less, otherwise *mid*), ATM implied vol and whether it is rising or falling, and the one-standard-deviation **expected move** for a day and a week | Expected Move |
 | **Context** | The market regime word, the name's sector and industry, its quadrant on the Bull / Bear map and its rank there (with last session's rank), and the next **earnings** date with how many days away it is | Bull / Bear Map |
 | **Today** | Two columns. **Signals**: this name's rows from today's Market Scanner, each with the time it was first seen and how many scans it has survived, its score trend, and a small line of the score across the day — plus one line per setup, such as *Live since 09:15 · 1 gap*. **Flow alerts**: this name's alerts, newest first | Market Scanner · Flow Alerts |
-| **Your position** | Anything open in this name in the paper account, the paper ledger, Claude's book or captured signals, with the rescue flag where the book carries one | Paper Ledger · Rescue |
+| **Your position** | Anything open in this name in the paper account, the paper ledger or captured signals, with the rescue flag where the book carries one | Paper Ledger · Rescue |
 
 **The chip beside the price says where the numbers came from:**
 
@@ -986,8 +985,7 @@ stocks.
 # STRATEGY — what should I trade?
 
 **Strategy Tools** model legs you bring; the **Options** group works through
-signals the app finds; **Trade Analyzer** judges a single stock; **Claude Trades**
-watches the autonomous trader.
+signals the app finds; and **Trade Analyzer** judges a single stock.
 
 ## Calculator
 
@@ -1611,8 +1609,7 @@ The account view for the automated paper-trading engine.
 
 > The entry and manage cycles also run automatically **at the top of each hour,
 > 09:00–14:00 CT** on trading days — there is no 15:00 run. So a target hit at 09:15
-> is acted on at 10:00 unless you press **Run manage cycle** yourself. (The
-> autonomous driver's separate account re-prices every minute; this one does not.)
+> is acted on at 10:00 unless you press **Run manage cycle** yourself.
 
 ## Shares
 
@@ -2185,7 +2182,7 @@ Two details worth knowing before reading its P&L:
   versus the index, so that is what the book measures; holding it outright would
   be recording the market's direction instead.
 
-It is paper only, and separate from the Claude Trades book.
+It is paper only, and separate from the other paper books.
 
 ---
 
@@ -2202,55 +2199,6 @@ The right card is the other half, and it is always shown. It states plainly why
 there is no trade (or why one side is refused), lists **what would change it**, and
 tells you **how to express the view anyway** if you want the exposure - usually as a
 pair against SPY, since relative return is what the model actually predicts.
-
----
-
-## Claude Trades
-
-**Route:** `/driver`.
-
-An **autonomous paper options trader**. Claude selects and sizes defined-risk credit
-spreads from the scanner's output, and code-enforced guardrails cap the risk.
-Everything is **paper** — nothing is ever sent to a live brokerage account.
-
-> The old **order-approval queue** — where a morning agent proposed trades for you
-> to APPROVE or SKIP — was removed in July 2026. This page is now purely a monitor
-> with a stop button.
-
-**Controls:**
-
-- **Autonomous** — enable or disable the trader.
-- **Run now** — fire one decision checkpoint immediately.
-- **STOP** (confirm-gated) — halt new entries for the rest of the day. Open
-  positions continue to be managed and closed.
-
-**What you see:**
-
-- **Tiles** — Day P&L against the day's target, Session P&L, Realized, Open P&L,
-  Equity, and the open-position count.
-- **Open positions** and a **decision log** (newest first, in CT) recording each
-  checkpoint's reasoning and a one-line market-context summary.
-- A **Performance scorecard** — trades, win rate, realized and total P&L, average
-  win and loss, **profit factor**, best and worst trade, plus P&L broken down by
-  symbol and by strategy.
-- A **Performance** view listing closed trades with their exit reason (*Target hit*,
-  *Delta stop*, *Time stop*, *Money stop*).
-
-**When it runs:** every 30 minutes within an entry window of
-**09:45–15:30 ET**. The first quarter-hour after the open is skipped
-so the structure is readable, and no *new* entries are taken in the last half hour.
-Open positions are re-priced every minute during market hours regardless.
-
-> **The daily target is not fixed.** The base is $500, ratcheted against the
-> month-to-date pace — as high as $1,000 when behind, as low as $250 when ahead. A
-> $1,500 daily loss halts new entries outright.
-
-> **"Executed" in the decision log means the order was enqueued, not filled.** A
-> trade can be logged as executed and then rejected by the risk guardrails; the real
-> outcome is in the account view.
-
-> **Enabling autonomy spends Claude API credit** on every checkpoint. The running
-> count is on the Settings page.
 
 ---
 
@@ -2294,14 +2242,14 @@ P&L streams live tick-by-tick; press **Refresh** to rebuild sectors and grades.
 
 **Route:** `/eod` (with a `/eod/detail` drill-down).
 
-An end-of-day rollup of the day's Options activity and Claude Trades.
+An end-of-day rollup of the day's Options activity.
 
 **Two views**, reached by the link at the foot of the summary:
 
 | View | Route | Contents |
 |------|-------|----------|
-| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper, the driver, and captured-closed. |
-| **Detailed** | `/eod/detail` | The same performance plus breakdowns by **strategy** (PCS / CCS / IC), by **0-DTE vs swing**, and by **status** (open / closed / expired), then the full trade, scanner, captured and driver tables. |
+| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper and captured signals (counted at one contract per signal). |
+| **Detailed** | `/eod/detail` | The same performance plus breakdowns by **strategy** (PCS / CCS / IC), by **0-DTE vs swing**, and by **status** (open / closed / expired), then the full trade, scanner and captured tables. |
 
 Both views use a jump-link table of contents, and every section is collapsible —
 which keeps working in the exported file as well as in the app.
@@ -2392,7 +2340,7 @@ A health board for the whole stack.
 
 - An **overall banner** — green (all up), red (naming what's down), or grey
   (checking).
-- A **component grid** — Redis, the Schwab gateway, the six services, the web app
+- A **component grid** — Redis, the Schwab gateway, the five services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the **Schwab auth** state.
 - A **Re-authorize** button on the gateway card opens Schwab's OAuth login in a new
@@ -2431,7 +2379,7 @@ a file on the server — in one place, grouped by what they do:
 |---|---|
 | **Trade selection** | Volatility (IV rank) floors and ceilings, minimum credit, directional and single-option rules, the score a signal needs to be recorded |
 | **Exits & trade management** | Take profit, stop loss, time and delta stops, the profit-lock ladder, per-structure rules, Rescue board warnings |
-| **Autonomous driver** | Daily targets, risk limits, the loss halt, decision cadence |
+| **Paper books** | The largest loss one trade may carry in each paper book |
 | **Flow alerts** | Each detector's thresholds, and which alerts reach your phone |
 | **Market hours & schedules** | Session times, operating windows, and the time of every scheduled job (briefings, digests, reports) |
 | **Symbols & watchlists** | What the gamma collector polls, the BIG10 basket, the Net Prem groups |
@@ -2485,7 +2433,6 @@ Preferences, all saved on your machine:
   auto-close on the exit rules). Off leaves them advisory.
 - **Manual paper: break-even lifecycle (experimental)** — opts the manual paper
   account into that same lifecycle instead of taking profit at +50% immediately.
-  The autonomous driver's account is never affected by this toggle.
 - **Show the ticker** — the scrolling bar at the bottom of every page, with a
   speed setting. It only shows or hides the marquee — see the note below.
 - **Appearance** is its own tab now (**Settings → Appearance**): every colour and
@@ -2529,7 +2476,7 @@ group, next to EOD Report.
 A guarded "stop the whole local stack" page. The **Stop all services** button — a
 red outline, matching the rail — opens a confirmation; the solid red button is the
 **Stop everything** inside it, which is where the decision is actually made.
-Confirming stops the gateway, the six services, the web app **and the public live
+Confirming stops the gateway, the five services, the web app **and the public live
 screens** — the public site goes dark with it.
 
 **The confirmation asks for your authenticator code.** Type the current 6-digit
@@ -2556,8 +2503,8 @@ which is the point on a borrowed or shared machine.
 
 - It signs out **this browser only**. Other devices you are signed in on stay
   signed in.
-- Nothing running is affected. The services, the collectors, the scheduled scans
-  and the autonomous driver all carry on. Signing out is not stopping anything —
+- Nothing running is affected. The services, the collectors and the scheduled scans
+  all carry on. Signing out is not stopping anything —
   that is the page above it.
 
 It sits at the very bottom of the rail deliberately: on a phone the bottom edge is
@@ -2588,7 +2535,7 @@ minimum score.
 
 **The Status page flags data as STALE.**
 A scheduled view hasn't updated recently — usually because its service stopped.
-Restart that service. On-demand views (Trade, Driver) are never flagged stale.
+Restart that service. On-demand views (Trade) are never flagged stale.
 
 **Schwab Authorization shows as not authorized / expired.**
 Open **System Status → Schwab Authorization → Authorize** to re-run the OAuth

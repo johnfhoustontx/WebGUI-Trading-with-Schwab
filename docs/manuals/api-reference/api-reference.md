@@ -38,9 +38,8 @@ keys that feed it. Menu order matches the rail.
 | **Paper Account** | `options_svc` | `cache:options:paper_account`, `:paper_analytics` |
 | **Rescue** | `options_svc` | `cache:options:rescue:<position_id>`, `:rescue_summary` |
 | **Trade Analyzer** | `trade_svc` :8213 | `cache:trade:analysis`, `:deepdive`, `:deepdive_query` |
-| **Claude Trades** | `driver_svc` :8214 decides, `options_svc` executes | `cache:driver:autonomous`, `:control`, `cache:options:driver_paper_account`, `:driver_paper_perf` |
 | **Portfolio** | `portfolio_svc` :8212 | `cache:portfolio:positions` |
-| **EOD Report** | none — pure Tier-1 reader | aggregates the `options:*` and `driver:*` keys |
+| **EOD Report** | none — pure Tier-1 reader | aggregates the `options:*` keys |
 | **System Status** | none — probes `/health` directly | reads every domain's `:ver` / `:ts` side keys |
 
 ---
@@ -180,8 +179,6 @@ a contract (listed in *Cache Key Index*).
 | `ScanResult` | `options.py` | `cache:options:scan` | `signals_0dte[]`, `signals_swing[]`, `vix_term_structure{}`, `timestamp`, `errors[]`, `warnings[]` |
 | `TradeAnalysis` | `trade.py` | `cache:trade:analysis` | `symbol`, `description`, `price`, `volume`, `bias`, `ema_alignment{}`, `momentum{}`, `volume_profile{}`, `sector{}`, `position_verdict{}`, `investor_verdict{}`, `fundamentals{}`, `fundamentals_available`, `markov{}` (optional), `swing_model{}` (optional), `timestamp`, `errors[]` |
 | `PortfolioModel` | `portfolio.py` | `cache:portfolio:positions` | `holdings_rows[]`, `sector_rows[]`, `performance_rows[]`, `suggestions{}`, `proxy_up`, `streaming`, `errors[]`, `timestamp` |
-| `DriverControl` | `driver.py` | `cache:driver:control` | `enabled`, `halted`, `reason`, `halted_date` (ISO date the latch was set, so it re-arms next day), `timestamp` |
-| `AutonomousState` | `driver.py` | `cache:driver:autonomous` | `date`, `enabled`, `halted`, `halt_reason`, `day_pnl`, `target`, `positions[]`, `decisions[]` (newest-first checkpoint log), `perf{}`, `last_cycle_ts`, `error`, `timestamp` |
 | `MarketDashboard` | `market.py` | `cache:market:dashboard` | `categories[]` (ordered frames of display-ready tiles), `proxy_up`, `errors[]` |
 | `MarketSummary` | `market.py` | `cache:market:summary` | `headline` (the latest published market report's verdict title), `highlights` (its section headlines in report order, at most 5; the headline alone when the report has no sections), `slot` (`premarket` / `open` / `first_hour` / `midday` / `close`), `slot_label` (the report's own name for the slot, e.g. "Market close"), `report_date` (`YYYY-MM-DD`), `as_of` (the report's own time stamp, e.g. "16:20 CT"), `report_url` (`https://<SITE_HOST>/report.html`). Empty until a report has been published. |
 | `CompositeSnapshot` | `sentiment.py` | (validation only) | `total: float`, `bias: str`, `components{}` |
@@ -222,8 +219,7 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 **Entry:** `services/options_svc/app.py`. **Scheduler:** auto-scan (15-min slots,
 08:00–15:15 CT), GEX collection (1-min slots, 08:00–15:20 CT; from 06:30 for
 ETH-eligible symbols), Paper Portfolio entry + manage (hourly at the top of the
-hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), driver paper
-auto-manage (1-min slots, 08:00–15:15 CT), captured-signal auto-manage (5-min
+hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), captured-signal auto-manage (5-min
 slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
 skip-unchanged).
 
@@ -400,54 +396,6 @@ live scorer's primary z-score basis), the `calibration` bands
 `n_folds`. A markdown research report is written alongside (`SWING_MODEL_REPORT`).
 Re-running the fit (e.g. after a regime shift) is the supported maintenance path.
 
-## Driver service — :8214
-
-**Entry:** `services/driver_svc/app.py`. **Scheduler:** polls the run gate every
-30 s; fires a checkpoint every 30 minutes inside the entry window
-**09:45–15:30 ET**. The open-bell slot is deliberately skipped, so the first
-fire-able slot is 09:45 and the last entry decision is the 15:00 slot.
-
-> **The order-approval queue was removed in July 2026.** `ApprovalState`,
-> `PerfReport`, `cache:driver:approvals`, `cache:driver:performance` and the
-> `approve` / `skip` commands no longer exist. The service is now an autonomous
-> decision layer whose output is a **command enqueued on `cmd:options`**, and the
-> page is a monitor with a kill switch.
-
-**The cycle.** `build_packet` → `decider.decide` (Claude, forced tool call) →
-`guardrails.apply_guardrails` → `driver_paper_create` on `cmd:options`.
-
-`apply_guardrails` is **pure code** and is the reason the design is defensible: it
-clamps position size and halts on the banked daily target, the daily loss cap, or a
-VIX threshold. **The model never sizes its own risk.** Risk is evaluated in
-*per-contract* dollars (`CONTRACT_MULTIPLIER = 100`) — an earlier version compared
-the scanner's per-share `max_loss` against a per-contract cap, a 100× mismatch that
-silently rejected every index trade.
-
-**Key settings** (`services/driver_svc/settings.py`):
-
-| Constant | Value | Meaning |
-|---|---|---|
-| `DAILY_TARGET` | `500.0` | Base bank-the-day threshold ($ net day P&L). |
-| `TARGET_CAP` | `1000.0` | Maximum ratcheted daily target (2× base) when behind the MTD pace. |
-| `TARGET_FLOOR` | `250.0` | Minimum daily target when ahead of the MTD pace. |
-| `DAILY_LOSS_HALT` | `1500.0` | Daily loss that halts new entries. |
-
-**Commands (`cmd:driver`):**
-
-| Type | Args | Effect |
-|------|------|--------|
-| `cycle` | — | Run one decision checkpoint now (packet → decide → guardrails → enqueue). |
-| `enable` | — | Set `cache:driver:control.enabled = true`. |
-| `disable` | — | Clear the enable flag; the scheduler stops opening new positions. |
-| `stop` | — | Latch `halted` for the rest of the day (`halted_date` re-arms it next session). Management and exits continue. |
-
-> **The arm state lives in Redis, not in the process.** Disabling the scheduler
-> alone would not stop a restored snapshot that carried `cache:driver:control`
-> enabled, which is why `run_autonomous_cycle` also checks the environment's
-> `autonomous_trading` flag directly.
-
----
-
 ## Market service — :8215
 
 **Entry:** `services/market_svc/app.py`. Publishes the macro-ticker board that backs
@@ -599,9 +547,6 @@ cache:options:x_reports                                     (market reports alre
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
 cache:options:calc_rating      events:options:calc_rating   (Rate my trade)
-cache:options:driver_paper_account    events:options:driver_paper_account
-cache:options:driver_paper_perf       events:options:driver_paper_perf
-cache:options:driver_paper_analytics  events:options:driver_paper_analytics
 cache:options:paper_analytics  events:options:paper_analytics
 cache:options:captured_closed  events:options:captured_closed
 cache:options:action_alert     events:options:action_alert
@@ -623,7 +568,7 @@ cache:options:rescue_summary   events:options:rescue_summary
 cmd:options
 ```
 
-**Trade / Portfolio / Driver / Market:**
+**Trade / Portfolio / Market:**
 
 ```
 cache:trade:analysis           events:trade:analysis          (TradeAnalysis)
@@ -631,18 +576,10 @@ cache:trade:deepdive           events:trade:deepdive
 cache:trade:deepdive_query     events:trade:deepdive_query
 cache:trade:markov_prior       cache:trade:universe_factors
 cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
-cache:driver:control           events:driver:control          (DriverControl)
-cache:driver:autonomous        events:driver:autonomous       (AutonomousState)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
-cmd:trade   cmd:portfolio   cmd:driver   cmd:market
+cmd:trade   cmd:portfolio   cmd:market
 ```
-
-> **`cache:driver:approvals` and `cache:driver:performance` no longer exist** — they
-> belonged to the order-approval queue removed in July 2026. The driver's realized
-> performance now lives in its isolated paper book under
-> `cache:options:driver_paper_account` and `:driver_paper_perf`, published by
-> `options_svc` rather than `driver_svc`.
 
 ---
 
@@ -720,7 +657,6 @@ hard-code ports or `D:\` paths.
 | options_svc | 8211 | `SERVICE_PORTS["options"]` |
 | portfolio_svc | 8212 | `SERVICE_PORTS["portfolio"]` |
 | trade_svc | 8213 | `SERVICE_PORTS["trade"]` |
-| driver_svc | 8214 | `SERVICE_PORTS["driver"]` |
 | market_svc | 8215 | `SERVICE_PORTS["market"]` |
 | webgui (NiceGUI) | 8500 | `NICEGUI_PORT` / `NICEGUI_URL` |
 | webgui_live (public screens) | 8501 | `NICEGUI_LIVE_PORT` / `NICEGUI_LIVE_URL` |
@@ -735,7 +671,7 @@ resolves the identity and every port consumer follows it with no edit of its own
 
 | | prod | dev |
 |---|---|---|
-| `[services]` ports | 8210–8215 | **9210–9215** (`port_offset`) |
+| `[services]` ports | 8210–8213, 8215 | **9210–9213, 9215** (`port_offset`) |
 | webgui | 8500 | **9500** |
 | webgui_live | 8501 | **9501** |
 | Redis | Redis db **0** | Redis db **1** |

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-21</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -279,10 +279,6 @@ would mean writing the same formulas out four times and letting the copies drift
 <td><em>Trade Analyzer</em> · <em>Technical Indicators</em></td>
 </tr>
 <tr>
-<td><strong>Claude Trades</strong></td>
-<td>Its risk clamping is pure code, not a formula — see the <em>API / Developer Reference</em>, <strong>Driver service</strong></td>
-</tr>
-<tr>
 <td><strong>Portfolio</strong></td>
 <td><em>Portfolio Analytics</em></td>
 </tr>
@@ -367,7 +363,7 @@ regenerating the lock that way silently drops the pins and quietly reopens the g
 </tr>
 <tr>
 <td><code>fastapi==0.137.0</code>, <code>uvicorn==0.49.0</code>, <code>starlette==1.3.1</code></td>
-<td>The proxy + the six domain services.</td>
+<td>The proxy + the five domain services.</td>
 </tr>
 <tr>
 <td><code>redis==8.0.0</code></td>
@@ -392,10 +388,6 @@ regenerating the lock that way silently drops the pins and quietly reopens the g
 <tr>
 <td><code>openpyxl</code></td>
 <td>Reads the sector/watchlist workbooks.</td>
-</tr>
-<tr>
-<td><code>apscheduler==3.10.4</code></td>
-<td>Driver scheduling.</td>
 </tr>
 <tr>
 <td><code>anthropic==0.112.0</code></td>
@@ -424,7 +416,7 @@ Highcharts license. This is a licensing prerequisite, not a technical one.</p>
 <tbody>
 <tr>
 <td><strong>Redis running on <code>:6379</code></strong></td>
-<td><code>sudo systemctl enable --now redis-server</code>. It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.</strong> It is a <strong>system</strong> unit, so a <code>systemctl --user</code> stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter.</td>
+<td><code>sudo systemctl enable --now redis-server</code>. It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the five services can publish and every page shows a "Waiting for … service" placeholder.</strong> It is a <strong>system</strong> unit, so a <code>systemctl --user</code> stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter.</td>
 <td>Required</td>
 </tr>
 <tr>
@@ -486,7 +478,7 @@ page surfaces this as its own card.</p>
 <tbody>
 <tr>
 <td><strong><code>ANTHROPIC_API_KEY</code></strong></td>
-<td>Resolution order: the <strong>env var</strong> first, then a gitignored <strong><code>shared/anthropic_key.txt</code></strong>. Powers the Driver's Claude decision layer, the Gamma <strong>Analyze</strong>/<strong>Explain</strong> infographics, and the <strong>fallback</strong> for the 4×/day auto-briefings.</td>
+<td>Resolution order: the <strong>env var</strong> first, then a gitignored <strong><code>shared/anthropic_key.txt</code></strong>. Powers the Gamma <strong>Analyze</strong>/<strong>Explain</strong> infographics and the <strong>fallback</strong> for the 4×/day auto-briefings.</td>
 <td>Optional</td>
 </tr>
 <tr>
@@ -496,8 +488,7 @@ page surfaces this as its own card.</p>
 </tr>
 </tbody>
 </table>
-<p>Without a key those features <strong>degrade safely</strong> — most importantly the autonomous
-driver <strong>stands down rather than trading blind</strong>, and the Gamma infographics render
+<p>Without a key those features <strong>degrade safely</strong> — the Gamma infographics render
 a readable "no key" page.</p>
 <p>The <strong>Settings → API usage</strong> Claude count is a count of calls <strong>billed to the API
 key</strong>. A briefing call that ran on the subscription is not counted; one that fell
@@ -568,11 +559,6 @@ automatically and start empty.</p>
 <td>Required</td>
 </tr>
 <tr>
-<td>8214</td>
-<td>driver_svc</td>
-<td>Required</td>
-</tr>
-<tr>
 <td>8215</td>
 <td>market_svc</td>
 <td>Required</td>
@@ -609,14 +595,10 @@ were removed in September 2026 — nothing in the stack talks to those processes
 <td><strong>Proxy hardening</strong></td>
 <td><code>PROXY_SHARED_SECRET</code> (guards the trading endpoints; enforced only when set) and <code>PROXY_CORS_ORIGINS</code> (overrides the local allowlist). See <code>docs/SECURITY.md</code>.</td>
 </tr>
-<tr>
-<td><strong>Driver model override</strong></td>
-<td><code>DRIVER_MODEL</code> env var → gitignored <code>shared/driver_model.txt</code> (defaults to the built-in model id).</td>
-</tr>
 </tbody>
 </table>
 <h2 id="startup-order">Startup order</h2>
-<p>The dependency chain is strict: <strong>Redis → schwab-proxy → the six services → webgui.</strong>
+<p>The dependency chain is strict: <strong>Redis → schwab-proxy → the five services → webgui.</strong>
 Services wait on the proxy because every one of them resolves market data through it.
 <code>webgui_live</code> sits outside that chain: it reads Redis and nothing else — no proxy
 call, no Schwab call, no service call — so it is ordered after nothing in the target.</p>
@@ -630,11 +612,11 @@ call, no Schwab call, no service call — so it is ordered after nothing in the 
 <tbody>
 <tr>
 <td><code>systemctl --user start trading-prod.target</code></td>
-<td>Proxy + 6 services + webgui + webgui_live. Also starts at boot.</td>
+<td>Proxy + 5 services + webgui + webgui_live. Also starts at boot.</td>
 </tr>
 <tr>
 <td><code>systemctl --user stop trading-prod.target</code></td>
-<td>Stops all ten, the public live screens included. <strong>Redis survives</strong> — it is a system unit this cannot reach.</td>
+<td>Stops all nine, the public live screens included. <strong>Redis survives</strong> — it is a system unit this cannot reach.</td>
 </tr>
 <tr>
 <td><code>systemctl --user restart trading-prod-options_svc</code></td>
@@ -651,17 +633,17 @@ call, no Schwab call, no service call — so it is ordered after nothing in the 
 </tbody>
 </table>
 <blockquote>
-<p>The nine processes must stay <strong>separate OS processes</strong>. Merging services into one
+<p>The eight processes must stay <strong>separate OS processes</strong>. Merging services into one
 Python process would re-introduce the top-level module-name collisions
 (<code>config</code> / <code>scoring</code> / <code>notifier</code> / <code>src</code>) that the 3-tier split exists to prevent.</p>
 </blockquote>
 <h2 id="verifying-the-install">Verifying the install</h2>
 <ol>
 <li>Open <strong><code>http://127.0.0.1:8500/status</code></strong> — the System Status page probes Redis,
-   the proxy, Schwab authorization, all six services, the webgui and the public
+   the proxy, Schwab authorization, all five services, the webgui and the public
    live screens, plus a data-freshness table.</li>
 <li>Or probe directly: <code>GET http://127.0.0.1:8100/health</code> and
-   <code>GET http://127.0.0.1:82{10..15}/health</code> (each returns <code>{"domain": …, "up": true}</code>).</li>
+   <code>GET http://127.0.0.1:82{10..13}/health</code> and <code>:8215/health</code> (each returns <code>{"domain": …, "up": true}</code>).</li>
 <li>Run the tests <strong>one folder at a time</strong> (never <code>pytest services</code> across all of
    them — that re-triggers the module-name collisions):</li>
 </ol>
@@ -694,7 +676,7 @@ TIER 3  STORE+COMM  Redis (:6379): cache:{domain}:{view}, events:{domain}:{view}
                     payloads) + shared/bus (redis wrapper).
    ▲ publish                               │ consume
 TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
-                    trade/driver/market). Each imports only its engines, owns its
+                    trade/market). Each imports only its engines, owns its
                     scheduler + command consumer, validates + caches + publishes.
                     Calls schwab-proxy (:8100) for market data.
 </code></pre>
@@ -739,11 +721,6 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <td>On-demand single-symbol analysis + deep dive.</td>
 </tr>
 <tr>
-<td>driver_svc</td>
-<td>8214</td>
-<td>Autonomous decision layer (Claude + pure-code guardrails).</td>
-</tr>
-<tr>
 <td>market_svc</td>
 <td>8215</td>
 <td>Live macro-ticker Market Dashboard (~3 s RTH poll).</td>
@@ -763,16 +740,12 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <p>Ports come from <code>config/ports.toml</code> via <code>repo_paths.py</code> — never hard-coded.</p>
 <blockquote>
 <p><strong>These are the <em>prod</em> profile.</strong> A <strong>dev</strong> checkout offsets the <code>[services]</code>
-ports to 9210–9215 and the web GUI to 9500, uses Redis <strong>db 1</strong> instead of db 0,
+ports to 9210–9213 and 9215 and the web GUI to 9500, uses Redis <strong>db 1</strong> instead of db 0,
 and starts <strong>no proxy of its own</strong> — it borrows prod's on 8100, because the Schwab
 OAuth refresh token is a single rotating credential that two proxies would
 invalidate for each other. Identity comes from the gitignored
 <code>config/env.local.toml</code>; a missing marker resolves to prod. See
 <code>docs/dev-prod-environments.md</code>.</p>
-<p><strong><code>driver_svc</code> no longer runs a morning order-approval pipeline.</strong> That queue and
-its <code>claude-driver</code> engine were removed in July 2026. The service now runs
-autonomous checkpoints whose output is a command on <code>cmd:options</code>; the risk
-clamping is pure code in <code>guardrails.py</code>, never the model.</p>
 </blockquote>
 <h2 id="data-flow-one-request">Data flow (one request)</h2>
 <ol>
@@ -820,7 +793,7 @@ clamping is pure code in <code>guardrails.py</code>, never the model.</p>
 </tr>
 <tr>
 <td><code>services/</code></td>
-<td>The six Tier-2 domain services.</td>
+<td>The five Tier-2 domain services.</td>
 </tr>
 <tr>
 <td><code>webgui/</code></td>
@@ -1158,7 +1131,7 @@ five-member simplex — every regime holds a <em>share</em> of the current tape,
 "label" is simply the largest share.</p>
 <p><strong>Display names versus internal keys.</strong> The names were changed for display in
 August 2026; <strong>the keys were not</strong>, because they are the <code>RegimeState</code> contract,
-the <code>regime_intraday</code> DB columns and the driver packet.</p>
+and the <code>regime_intraday</code> DB columns.</p>
 <table>
 <thead>
 <tr>
@@ -1195,9 +1168,8 @@ the <code>regime_intraday</code> DB columns and the driver packet.</p>
 </tr>
 </tbody>
 </table>
-<p><code>REGIME_DISPLAY</code> in that module is the source. The mapping is <strong>duplicated in four
-tiers</strong> (<code>webgui/pages/sentiment.py</code>, <code>driver_svc/compute.py</code>,
-<code>options_svc/market_snapshot.py</code>) because none of those may import the package —
+<p><code>REGIME_DISPLAY</code> in that module is the source. The mapping is <strong>duplicated</strong> in
+<code>webgui/pages/sentiment.py</code> and <code>options_svc/market_snapshot.py</code> because none of those may import the package —
 Tier 1 takes no engine imports, and the services would hit the documented
 cross-app <code>scoring</code> name collision. Keep them in step.</p>
 <h3 id="the-direction-axis">The direction axis</h3>
@@ -2992,7 +2964,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>options_svc</td>
-<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>driver</strong> paper auto-manage every <strong>1 min</strong> (<code>_MANAGE_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00, no 15:00 run</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged).</td>
+<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00, no 15:00 run</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged).</td>
 </tr>
 <tr>
 <td>portfolio_svc</td>
@@ -3001,10 +2973,6 @@ the source; this table is a summary of them.</p>
 <tr>
 <td>trade_svc</td>
 <td>On-demand only (no scheduler).</td>
-</tr>
-<tr>
-<td>driver_svc</td>
-<td>Run gate polled every <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>); checkpoints every <strong>30 min</strong> (<code>CHECKPOINT_MIN</code>, from <code>config/driver.toml</code>) inside the <strong>09:45–15:30 ET</strong> entry window (<code>checkpoint_due</code>) — the open-bell slot is deliberately skipped, so the first fire-able slot is 09:45 and the last entry decision is the 15:00 slot.</td>
 </tr>
 <tr>
 <td>market_svc</td>
@@ -3044,11 +3012,6 @@ exclude weekends.</p>
 </tbody>
 </table>
 <blockquote>
-<p><strong>Two cadences are easy to state wrongly, because they used to be the same
-number.</strong> The <strong>driver's</strong> isolated paper account re-prices every <strong>1 minute</strong>
-(raised from 5 in July 2026 so its stops react within the minute and the −$1,500
-loss-halt read stays fresh). The <strong>manual</strong> paper account moved the other way, to
-an <strong>hourly</strong> top-of-the-hour cycle. They are different books on different clocks.</p>
 <p><strong>The GEX collection interval is 1 minute, not 2.</strong> The serial per-symbol chain
 fetch was measured dropping roughly 37% of its slots; fetching in a small pool
 (<code>POLL_FETCH_WORKERS = 6</code>) and launching scheduler branches as keyed background

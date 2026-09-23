@@ -347,29 +347,28 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#related-pages_25">Related pages</a></li>
 </ul>
 </li>
-<li><a href="#claude-trades">Claude Trades</a><ul>
-<li><a href="#what-it-is_27">What it is</a></li>
-<li><a href="#where-the-data-comes-from_26">Where the data comes from</a></li>
-<li><a href="#reading-the-screen_25">Reading the screen</a></li>
-<li><a href="#how-the-guardrails-work">How the guardrails work</a></li>
-<li><a href="#why-it-matters_21">Why it matters</a></li>
-<li><a href="#caveats-and-gotchas_12">Caveats and gotchas</a></li>
-<li><a href="#related-pages_26">Related pages</a></li>
-</ul>
-</li>
 </ul>
 </li>
 <li><a href="#account">ACCOUNT</a><ul>
 <li><a href="#portfolio">Portfolio</a><ul>
+<li><a href="#what-it-is_27">What it is</a></li>
+<li><a href="#where-the-data-comes-from_26">Where the data comes from</a></li>
+<li><a href="#reading-the-screen_25">Reading the screen</a></li>
+<li><a href="#why-it-matters_21">Why it matters</a></li>
+<li><a href="#when-to-use-it_19">When to use it</a></li>
+<li><a href="#related-pages_26">Related pages</a></li>
+</ul>
+</li>
+<li><a href="#eod-report">EOD Report</a><ul>
 <li><a href="#what-it-is_28">What it is</a></li>
 <li><a href="#where-the-data-comes-from_27">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_26">Reading the screen</a></li>
 <li><a href="#why-it-matters_22">Why it matters</a></li>
-<li><a href="#when-to-use-it_19">When to use it</a></li>
+<li><a href="#caveats-and-gotchas_12">Caveats and gotchas</a></li>
 <li><a href="#related-pages_27">Related pages</a></li>
 </ul>
 </li>
-<li><a href="#eod-report">EOD Report</a><ul>
+<li><a href="#post-to-x">Post to X</a><ul>
 <li><a href="#what-it-is_29">What it is</a></li>
 <li><a href="#where-the-data-comes-from_28">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_27">Reading the screen</a></li>
@@ -378,33 +377,24 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#related-pages_28">Related pages</a></li>
 </ul>
 </li>
-<li><a href="#post-to-x">Post to X</a><ul>
+<li><a href="#user-manuals">User Manuals</a></li>
+</ul>
+</li>
+<li><a href="#system">SYSTEM</a><ul>
+<li><a href="#system-status">System Status</a><ul>
 <li><a href="#what-it-is_30">What it is</a></li>
-<li><a href="#where-the-data-comes-from_29">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_28">Reading the screen</a></li>
 <li><a href="#why-it-matters_24">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_14">Caveats and gotchas</a></li>
 <li><a href="#related-pages_29">Related pages</a></li>
 </ul>
 </li>
-<li><a href="#user-manuals">User Manuals</a></li>
-</ul>
-</li>
-<li><a href="#system">SYSTEM</a><ul>
-<li><a href="#system-status">System Status</a><ul>
+<li><a href="#settings">Settings</a><ul>
 <li><a href="#what-it-is_31">What it is</a></li>
 <li><a href="#reading-the-screen_29">Reading the screen</a></li>
 <li><a href="#why-it-matters_25">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_15">Caveats and gotchas</a></li>
 <li><a href="#related-pages_30">Related pages</a></li>
-</ul>
-</li>
-<li><a href="#settings">Settings</a><ul>
-<li><a href="#what-it-is_32">What it is</a></li>
-<li><a href="#reading-the-screen_30">Reading the screen</a></li>
-<li><a href="#why-it-matters_26">Why it matters</a></li>
-<li><a href="#caveats-and-gotchas_16">Caveats and gotchas</a></li>
-<li><a href="#related-pages_31">Related pages</a></li>
 </ul>
 </li>
 <li><a href="#stop-all-services">Stop All Services</a></li>
@@ -463,7 +453,7 @@ explained in plain language under <a href="#dealer-positioning">Dealer Positioni
 </tr>
 <tr>
 <td><strong>The services</strong></td>
-<td>Six background programs (ports 8210–8215), one per subject area: sentiment, options, portfolio, trade, driver, market.</td>
+<td>Five background programs (ports 8210–8213 and 8215), one per subject area: sentiment, options, portfolio, trade, market.</td>
 <td>They do the work — scanning, scoring, collecting — whether or not a browser is open.</td>
 </tr>
 <tr>
@@ -578,12 +568,9 @@ right now?</em>) and <strong>Symbol</strong> (<em>tell me everything about this 
 <td><strong>Trade Analyzer</strong></td>
 <td>You want a Buy/Hold/Sell read on one stock, or a ranked shortlist to pick one from.</td>
 </tr>
-<tr>
-<td><strong>Claude Trades</strong></td>
-<td>You want to watch (or stop) the autonomous paper trader.</td>
-</tr>
 </tbody>
 </table>
+<p>The autonomous Claude paper trader (<em>Claude Trades</em>) was removed on 2026-09-22.</p>
 <h3 id="account-what-do-i-own-and-how-did-i-do">ACCOUNT — <em>what do I own, and how did I do?</em></h3>
 <table>
 <thead>
@@ -635,8 +622,7 @@ your short strike sits outside the expected range.</p>
 Send it to <strong>Paper Ledger</strong> (your own book) or let the engine work in <strong>Paper Account</strong>.
 <strong>Captured Signals</strong> tracks anything you bookmark without committing to it.</p>
 <p><strong>Managing.</strong>
-<strong>Rescue</strong> flags credit spreads that have gone against you and ranks the repairs.
-<strong>Claude Trades</strong> shows what the autonomous trader did, with a STOP button.</p>
+<strong>Rescue</strong> flags credit spreads that have gone against you and ranks the repairs.</p>
 <p><strong>After the close.</strong>
 <strong>EOD Report</strong> aggregates every book. <strong>Portfolio</strong> shows the real account.</p>
 <h2 id="what-the-numbers-are-and-are-not">What the numbers are, and are not</h2>
@@ -755,7 +741,7 @@ activity, gamma flip, large delta.</p>
 time-and-sales tape, so no one can honestly say which side initiated. Any product
 that tells you "$3.9M of calls were <strong>bought</strong>" is inferring it, usually from the
 bid/ask side, and that inference is often wrong.</p>
-<p><strong>Positions.</strong> Your paper trades and Claude's, merged, open only: source, strikes,
+<p><strong>Positions.</strong> Your paper trades and your captured signals, merged, open only: source, strikes,
 days to expiration, size, entry, live mark, unrealized profit or loss, and a flag —
 <strong>OK</strong>, <strong>Watch</strong>, <strong>At risk</strong>, <strong>Rescue</strong>. The header totals open trades,
 unrealized P&amp;L, and how many need attention. <em>At risk</em> and <em>Rescue</em> are the two
@@ -872,7 +858,7 @@ disagree with the page it links to.</p>
 <p>When a name comes up — in a flow alert, on the Opportunity Board, in the news — and
 you want the whole picture before deciding whether it deserves a closer look. It is
 also the quickest way to check "do I already hold something in this?" before opening
-a new trade, because the position band searches all four books at once.</p>
+a new trade, because the position band searches all three books at once.</p>
 <h3 id="the-bands">The bands</h3>
 <table>
 <thead>
@@ -2103,8 +2089,7 @@ can genuinely change within a session — the share table shows that happening.<
   fear during a rally is exactly the divergence the panel is designed to surface.</li>
 </ul>
 <h3 id="related-pages_5">Related pages</h3>
-<p><a href="#market-dashboard">Market Dashboard</a> · <a href="#sector-rotation">Sector Rotation</a> ·
-<a href="#claude-trades">Claude Trades</a> (the autonomous trader reads this page's output).</p>
+<p><a href="#market-dashboard">Market Dashboard</a> · <a href="#sector-rotation">Sector Rotation</a>.</p>
 <hr />
 <h2 id="bull-bear-map">Bull / Bear Map</h2>
 <p><em>Menu: MARKETS → Trend &amp; Sentiment → Bull / Bear Map · Route <code>/sentiment/bullbear</code></em></p>
@@ -2671,8 +2656,7 @@ because <em>suppressed</em> is a genuine stand-aside signal.</p>
 <h1 id="strategy">STRATEGY</h1>
 <p>This section turns market conditions into specific trades. It has a deliberate shape:
 <strong>Strategy Tools</strong> model legs <em>you</em> bring, the <strong>Options</strong> group works through signals
-the app <em>finds</em>, <strong>Trade Analyzer</strong> judges a single stock, and <strong>Claude Trades</strong> watches
-the automated trader.</p>
+the app <em>finds</em>, and <strong>Trade Analyzer</strong> judges a single stock.</p>
 <h2 id="calculator">Calculator</h2>
 <p><em>Menu: STRATEGY → Strategy Tools → Calculator · Route <code>/options/calculator</code></em></p>
 <h3 id="what-it-is_12">What it is</h3>
@@ -3953,7 +3937,7 @@ P&amp;L. No real money.</p>
 spreads here now <strong>close themselves</strong> on two rules (see <em>Automatic exits</em> below).
 Credit spreads are still tracked only, and every row remains closable by hand at
 any time.</p>
-<p><strong>This is one of three separate paper books</strong>, and confusing them is the most common
+<p><strong>This is one of two separate paper books</strong>, and confusing them is the most common
 source of "why does this number not match" in the app:</p>
 <table>
 <thead>
@@ -3973,11 +3957,6 @@ source of "why does this number not match" in the app:</p>
 <td><strong>Paper Account</strong></td>
 <td><a href="#paper-account">Paper Account</a></td>
 <td>The automated engine</td>
-</tr>
-<tr>
-<td><strong>Driver account</strong></td>
-<td><a href="#claude-trades">Claude Trades</a></td>
-<td>The autonomous Claude trader</td>
 </tr>
 </tbody>
 </table>
@@ -4176,8 +4155,8 @@ hand closes that gap at no cost.</p>
 <p><em>Menu: STRATEGY → Options → Paper Account · Route <code>/options/portfolio</code></em></p>
 <h3 id="what-it-is_19">What it is</h3>
 <p>The account behind the <strong>automated</strong> paper-trading engine — the one that opens and
-closes positions on its own from captured signals. Distinct from both the hand-kept
-<a href="#paper-ledger">Paper Ledger</a> and the <a href="#claude-trades">Claude Trades</a> driver book.</p>
+closes positions on its own from captured signals. Distinct from the hand-kept
+<a href="#paper-ledger">Paper Ledger</a>.</p>
 <h3 id="where-the-data-comes-from_18">Where the data comes from</h3>
 <table>
 <thead>
@@ -4314,7 +4293,7 @@ rules, or subtracts it. That is an uncomfortable comparison and a genuinely usef
 </ul>
 <h3 id="related-pages_18">Related pages</h3>
 <p><a href="#paper-ledger">Paper Ledger</a> · <a href="#captured-signals">Captured Signals</a> (the entry source)
-· <a href="#claude-trades">Claude Trades</a> · <a href="#eod-report">EOD Report</a>.</p>
+· <a href="#eod-report">EOD Report</a>.</p>
 <hr />
 <h2 id="shares">Shares</h2>
 <p><em>Menu: STRATEGY → Options → Shares · Route <code>/options/shares</code></em></p>
@@ -5189,7 +5168,7 @@ stop, and splits its reporting by side.</p>
 </tr>
 <tr>
 <td>Scope</td>
-<td><strong>Paper only</strong>, and isolated from the Claude Trades book</td>
+<td><strong>Paper only</strong>, and isolated from the other paper books</td>
 </tr>
 </tbody>
 </table>
@@ -5250,112 +5229,14 @@ the expression the prediction actually supports.</p>
 <h3 id="related-pages_25">Related pages</h3>
 <p><a href="#overview">Overview</a> · <a href="#evidence">Evidence</a> · <a href="#rank-board">Rank Board</a>.</p>
 <hr />
-<h2 id="claude-trades">Claude Trades</h2>
-<p><em>Menu: STRATEGY → Claude Trades · Route <code>/driver</code></em></p>
-<h3 id="what-it-is_27">What it is</h3>
-<p>An <strong>autonomous paper options trader</strong>. Claude selects and sizes defined-risk credit
-spreads from the scanner's output; code-enforced guardrails cap the risk. This page
-monitors it and can stop it.</p>
-<p><strong>Nothing is ever sent to Schwab.</strong> It trades its own isolated paper book.</p>
-<h3 id="where-the-data-comes-from_26">Where the data comes from</h3>
-<table>
-<thead>
-<tr>
-<th></th>
-<th></th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Service</td>
-<td><code>driver_svc</code> (:8214) decides; <code>options_svc</code> (:8211) executes into the isolated book</td>
-</tr>
-<tr>
-<td>Cache keys</td>
-<td><code>cache:driver:autonomous</code>, <code>:control</code>, <code>cache:options:driver_paper_account</code>, <code>:driver_paper_perf</code></td>
-</tr>
-<tr>
-<td>Checkpoints</td>
-<td>Every 30 minutes within the entry window <strong>09:45–15:30 ET</strong>. The open-bell slot is deliberately skipped, so the first is 09:45</td>
-</tr>
-<tr>
-<td>Re-pricing</td>
-<td>Open positions re-priced <strong>every minute</strong> during market hours</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Why the entry window is shaped that way.</strong> The first ~15 minutes after the open are
-skipped so the post-open structure is readable, and no <em>new</em> entries are taken in the
-last 30 minutes before the close. Management and exits are unaffected.</p>
-<h3 id="reading-the-screen_25">Reading the screen</h3>
-<p><strong>Status row:</strong> whether autonomy is ACTIVE, the last cycle time, and three controls —
-<strong>Autonomous</strong> (enable/disable), <strong>Run now</strong> (one immediate checkpoint) and a
-confirm-gated <strong>STOP</strong> (halts new trades for the day; open positions keep managing).</p>
-<p><strong>Tiles:</strong> Day P&amp;L against the day's target · Session P&amp;L · Realized · Open P&amp;L ·
-Equity · Open count.</p>
-<blockquote>
-<p><strong>The daily target is dynamic.</strong> The base is <strong>$500</strong>, but it ratchets against the
-month-to-date pace — up to a <strong>$1,000</strong> cap when behind, down to a <strong>$250</strong> floor when
-ahead. So the number in the tile changes day to day. A <strong>−$1,500</strong> daily loss halts new
-entries outright.</p>
-</blockquote>
-<p><strong>Open positions</strong> and a <strong>decision log</strong> (newest first, in CT) showing each checkpoint's
-reasoning, including a one-line market-context summary.</p>
-<p><strong>Performance scorecard:</strong> trades, open, closed, <strong>win rate</strong>, realized, open P&amp;L, total
-P&amp;L, <strong>average win</strong>, <strong>average loss</strong>, <strong>profit factor</strong>, best and worst trade, plus
-breakdowns of <strong>P&amp;L by symbol</strong> and <strong>by strategy</strong>.</p>
-<p><strong>Performance view:</strong> the closed-trade list with exit reasons — <em>Target hit</em>, <em>Delta
-stop</em>, <em>Time stop</em>, <em>Money stop</em>.</p>
-<h3 id="how-the-guardrails-work">How the guardrails work</h3>
-<p>This is the part worth understanding, because it is what makes the design defensible:
-<strong>the model never sizes its own risk.</strong> The cycle is</p>
-<ol>
-<li><code>build_packet</code> — assemble market context, candidates and account state;</li>
-<li><code>decider.decide</code> — Claude picks a candidate and proposes a size;</li>
-<li><code>guardrails.apply_guardrails</code> — <strong>pure code</strong> clamps the size and halts on the banked
-   target, the loss cap, or a VIX threshold;</li>
-<li>the clamped order is enqueued to the paper book.</li>
-</ol>
-<p>Step 3 cannot be argued with by the model. Per-trade risk is evaluated in <strong>per-contract
-dollars</strong>, and the driver's own book carries a higher per-trade cap than the manual
-account ($750).</p>
-<h3 id="why-it-matters_21">Why it matters</h3>
-<p>As a research instrument this is the most interesting thing in the app: an unbiased,
-fully-logged record of what a rules-plus-model system does with the app's own signals.
-The decision log tells you <em>why</em> each trade was taken, which no human trading journal
-manages consistently.</p>
-<p><strong>Be clear-eyed about the results.</strong> At the time of writing this book's record is
-<strong>negative</strong>: 151 closed trades, a <strong>45% win rate</strong>, a <strong>profit factor of 0.57</strong>, an
-average win of <strong>+$165</strong> against an average loss of <strong>−$236</strong>, and realized P&amp;L of
-about <strong>−$8,300</strong>. Put credit spreads account for essentially all of the loss while call
-credit spreads are roughly flat.</p>
-<p>That shape — winning less than half the time while losing more per loss than you make
-per win — is the classic failure mode for premium selling: the wins are capped at the
-credit while the losses run to the width. It is <em>the</em> thing this page exists to make
-visible, and it is a strong argument for treating the driver as an experiment rather
-than a strategy.</p>
-<h3 id="caveats-and-gotchas_12">Caveats and gotchas</h3>
-<ul>
-<li><strong>"Executed" in the decision log means the order was enqueued, not filled.</strong> The true
-  outcome is in the account view's open results. A trade can be logged as executed and
-  then rejected for risk.</li>
-<li>Analytics are <strong>forward-only</strong> — the equity curve is complete, but posture and
-  MAE/MFE statistics only accrue on trades opened after those were added.</li>
-<li>Enabling autonomy costs Claude API calls per checkpoint. <a href="#settings">Settings</a> shows
-  the running count.</li>
-</ul>
-<h3 id="related-pages_26">Related pages</h3>
-<p><a href="#market-scanner">Market Scanner</a> (its candidate source) · <a href="#sentiment">Sentiment</a> ·
-<a href="#paper-account">Paper Account</a> · <a href="#eod-report">EOD Report</a>.</p>
-<hr />
 <h1 id="account">ACCOUNT</h1>
 <p>Two entries: your real holdings, and the day's results.</p>
 <h2 id="portfolio">Portfolio</h2>
 <p><em>Menu: ACCOUNT → Portfolio · Route <code>/portfolio</code></em></p>
-<h3 id="what-it-is_28">What it is</h3>
+<h3 id="what-it-is_27">What it is</h3>
 <p>Your <strong>real</strong> Schwab holdings — the only place in the app where real money appears. It
 is strictly read-only; no action on this page can affect your account.</p>
-<h3 id="where-the-data-comes-from_27">Where the data comes from</h3>
+<h3 id="where-the-data-comes-from_26">Where the data comes from</h3>
 <table>
 <thead>
 <tr>
@@ -5378,7 +5259,7 @@ is strictly read-only; no action on this page can affect your account.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="reading-the-screen_26">Reading the screen</h3>
+<h3 id="reading-the-screen_25">Reading the screen</h3>
 <p><strong>Three subtabs: Holdings · Sectors · Performance.</strong></p>
 <p><strong>Holdings</strong> — one row per position:</p>
 <table>
@@ -5423,7 +5304,7 @@ is strictly read-only; no action on this page can affect your account.</p>
 under-weight. <strong>Performance</strong> grades each position and offers per-position commentary.</p>
 <p><strong>Status indicators</strong> at the top show whether the proxy is up and whether the price
 stream is live.</p>
-<h3 id="why-it-matters_22">Why it matters</h3>
+<h3 id="why-it-matters_21">Why it matters</h3>
 <p><strong>VS SECTOR is the column to read.</strong> A position up 8% in a sector up 15% is a <em>losing</em>
 position in the only sense that matters — you would have done better owning the sector
 ETF. Absolute P&amp;L cannot show you that; this can, over three horizons at once.</p>
@@ -5437,23 +5318,23 @@ show <em>Unknown</em> and no relative strength.</p>
 <h3 id="when-to-use-it_19">When to use it</h3>
 <p>Daily for the P&L; weekly for the Sectors and Performance tabs, which is where the
 useful decisions are.</p>
-<h3 id="related-pages_27">Related pages</h3>
+<h3 id="related-pages_26">Related pages</h3>
 <p><a href="#sector-industry">Sector &amp; Industry</a> (context for the RS column) ·
 <a href="#overview">Overview</a> (a verdict on any holding).</p>
 <hr />
 <h2 id="eod-report">EOD Report</h2>
 <p><em>Menu: ACCOUNT → More → EOD Report · Routes <code>/eod</code> and <code>/eod/detail</code></em></p>
-<h3 id="what-it-is_29">What it is</h3>
+<h3 id="what-it-is_28">What it is</h3>
 <p>The day's scoreboard, aggregating every book in the app into one document — and archiving
 it as a standalone file you can reopen later.</p>
-<h3 id="where-the-data-comes-from_28">Where the data comes from</h3>
-<p>Purely a reader. It aggregates the <code>options:*</code> and <code>driver:*</code> caches; it computes nothing
+<h3 id="where-the-data-comes-from_27">Where the data comes from</h3>
+<p>Purely a reader. It aggregates the <code>options:*</code> caches; it computes nothing
 of its own and calls no external service.</p>
-<h3 id="reading-the-screen_27">Reading the screen</h3>
-<p><strong>Summary tiles:</strong> paper session P&amp;L · scanner signals · captured signals · paper trades
-· driver realized P&amp;L · driver win rate · driver trades.</p>
-<p><strong>Performance blocks, one per book</strong> — <em>Manual paper</em>, <em>Driver</em>, and <em>Captured closed</em> —
-each with equity, session P&amp;L, open unrealized and open count, then a table:</p>
+<h3 id="reading-the-screen_26">Reading the screen</h3>
+<p><strong>Summary tiles:</strong> paper session P&amp;L · scanner signals · captured signals · paper trades.</p>
+<p><strong>Performance blocks, one per book</strong> — <em>Manual paper</em> and <em>Captured signals</em>. The manual
+book leads with equity, session P&amp;L, open unrealized and open count; the captured book
+has no account behind it, and its figures assume one contract per signal. Then a table:</p>
 <table>
 <thead>
 <tr>
@@ -5485,7 +5366,7 @@ reconcile to each other. That is correct.</p>
 </blockquote>
 <p><strong>Detailed</strong> (<code>/eod/detail</code>) adds breakdowns by <strong>strategy</strong> (PCS / CCS / IC), by
 <strong>0-DTE versus swing</strong>, and by <strong>status</strong> (open / closed / expired), plus the full trade,
-scanner, captured and driver tables. Both views use a jump-link table of contents and
+scanner and captured tables. Both views use a jump-link table of contents and
 collapsible sections that work in the exported file as well as in the app.</p>
 <p><strong>Generate</strong> snapshots the current caches into standalone <code>summary.html</code> and
 <code>detail.html</code> under <code>webgui/data/eod/&lt;date&gt;/</code>. It is <strong>confirm-gated</strong> — the dialog
@@ -5495,16 +5376,15 @@ with a complete-looking empty one. The <strong>Archive</strong> list reopens any
 <p><strong>It also runs by itself at 15:15 CT on every trading day</strong> — the same snapshot, from the
 same builders, fifteen minutes after the cash close and after the day's expiries have
 settled. The button is for an extra snapshot or for recovering a day the machine missed.</p>
-<h3 id="why-it-matters_23">Why it matters</h3>
+<h3 id="why-it-matters_22">Why it matters</h3>
 <p>The per-period tables are where a strategy's real shape appears. A book can show a
 healthy daily number for weeks and still be losing month to date, because the losses
 cluster. Weekly and MTD side by side make that visible immediately.</p>
-<p>Splitting <strong>by strategy</strong> is the single most valuable breakdown here — it is how the
-driver's PCS-versus-CCS asymmetry became apparent, and the same analysis on your own
-book will usually show one structure carrying all the damage.</p>
+<p>Splitting <strong>by strategy</strong> is the single most valuable breakdown here — on most books it
+will show one structure carrying all the damage.</p>
 <p><strong>Where it is weak.</strong> It aggregates paper books priced at the mark. Real fills, slippage
 and commissions are not in these numbers, so treat every figure as optimistic.</p>
-<h3 id="caveats-and-gotchas_13">Caveats and gotchas</h3>
+<h3 id="caveats-and-gotchas_12">Caveats and gotchas</h3>
 <ul>
 <li>Realized P&amp;L reads <code>$0</code> or <code>—</code> until trades actually close. That is by design, not a
   failure.</li>
@@ -5518,22 +5398,21 @@ and commissions are not in these numbers, so treat every figure as optimistic.</
   report.) A day it could not run is simply a day with no archived file; the
   caches are still live, so pressing <strong>Generate</strong> recovers it until they reset overnight.</li>
 </ul>
-<h3 id="related-pages_28">Related pages</h3>
-<p><a href="#paper-ledger">Paper Ledger</a> · <a href="#paper-account">Paper Account</a> ·
-<a href="#claude-trades">Claude Trades</a>.</p>
+<h3 id="related-pages_27">Related pages</h3>
+<p><a href="#paper-ledger">Paper Ledger</a> · <a href="#paper-account">Paper Account</a>.</p>
 <hr />
 <h2 id="post-to-x">Post to X</h2>
 <p><em>Menu: ACCOUNT → More → Post to X · Route <code>/x</code></em></p>
-<h3 id="what-it-is_30">What it is</h3>
+<h3 id="what-it-is_29">What it is</h3>
 <p>A composer for one-off marketing posts on the app's X account, above a log of every
 post the app has made there — the scheduled market reports and hourly trade ideas as
 well as what you write here.</p>
-<h3 id="where-the-data-comes-from_29">Where the data comes from</h3>
+<h3 id="where-the-data-comes-from_28">Where the data comes from</h3>
 <p>The page writes nothing to X itself. <strong>Post</strong> sends an <code>x_post</code> command to the options
 service, which fits the text, attaches the image and posts it. Every attempt from any
 source is recorded to the <code>options:x_log</code> cache (the newest 100), which is what the log
 table reads.</p>
-<h3 id="reading-the-screen_28">Reading the screen</h3>
+<h3 id="reading-the-screen_27">Reading the screen</h3>
 <p><strong>Post</strong>, <strong>Link</strong> and <strong>Hashtags</strong> make up the post: the text, then a blank line, then
 the link and the hashtags on the lines beneath it. The <strong>counter</strong> measures it the way
 X does — a link is 23 characters and an emoji or other wide character 2 — and turns red
@@ -5573,10 +5452,10 @@ went out, the reason.</p>
 </tr>
 </tbody>
 </table>
-<h3 id="why-it-matters_24">Why it matters</h3>
+<h3 id="why-it-matters_23">Why it matters</h3>
 <p>It is the one place that shows what the app has said in public. A report or trade idea
 that did not go out is listed with the reason, rather than simply not appearing.</p>
-<h3 id="caveats-and-gotchas_14">Caveats and gotchas</h3>
+<h3 id="caveats-and-gotchas_13">Caveats and gotchas</h3>
 <ul>
 <li><strong>Off and dry until configured.</strong> Nothing reaches X until the <code>x</code> block in
   <code>shared/notifications.json</code> holds the account's keys and is enabled; while
@@ -5586,7 +5465,7 @@ that did not go out is listed with the reason, rather than simply not appearing.
 <li><strong>A post is public.</strong> The confirm dialog shows the exact text before anything is sent.</li>
 <li>This page exists only in the private app; the public live screens have no way to post.</li>
 </ul>
-<h3 id="related-pages_29">Related pages</h3>
+<h3 id="related-pages_28">Related pages</h3>
 <p><a href="#eod-report">EOD Report</a> · <a href="#settings">Settings</a>.</p>
 <hr />
 <h2 id="user-manuals">User Manuals</h2>
@@ -5629,10 +5508,10 @@ that did not go out is listed with the reason, rather than simply not appearing.
 a trading workflow, which is exactly why they are separated.</p>
 <h2 id="system-status">System Status</h2>
 <p><em>Menu: bottom of the rail · Route <code>/status</code></em></p>
-<h3 id="what-it-is_31">What it is</h3>
+<h3 id="what-it-is_30">What it is</h3>
 <p>A live health board for every part of the stack, plus a check that each service is not
 merely running but actually <em>publishing</em>.</p>
-<h3 id="reading-the-screen_29">Reading the screen</h3>
+<h3 id="reading-the-screen_28">Reading the screen</h3>
 <p><strong>Component cards</strong> — one per process:</p>
 <table>
 <thead>
@@ -5674,11 +5553,6 @@ merely running but actually <em>publishing</em>.</p>
 <td>8213</td>
 </tr>
 <tr>
-<td>driver_svc</td>
-<td>2</td>
-<td>8214</td>
-</tr>
-<tr>
 <td>market_svc</td>
 <td>2</td>
 <td>8215</td>
@@ -5713,30 +5587,28 @@ scans during the session, so overnight and at weekends its age is left alone rat
 than reported as a fault. Views that publish around the clock are checked around the
 clock, with a longer allowance outside market hours.</p>
 </blockquote>
-<h3 id="why-it-matters_25">Why it matters</h3>
+<h3 id="why-it-matters_24">Why it matters</h3>
 <p>Almost every "this page is broken" symptom in this app is a service that has stopped
 publishing. Reloading the browser cannot fix that. This page turns a five-minute
 investigation into a five-second one: find the stale row, restart that service.</p>
 <p><strong>The order matters when restarting.</strong> Redis first, then the proxy, then services, then
 the web app. A service restarted while the proxy is down will start and then fail to
 fetch anything.</p>
-<h3 id="caveats-and-gotchas_15">Caveats and gotchas</h3>
+<h3 id="caveats-and-gotchas_14">Caveats and gotchas</h3>
 <ul>
 <li>The Schwab <strong>refresh</strong> token is the fatal one. <code>token_expired: true</code> on the proxy is
   routine — it auto-refreshes. A missing or expired <em>refresh</em> token needs
   <strong>Re-authorize</strong>.</li>
-<li>The page header text says "the five domain services" while six are listed; there are
-  six.</li>
 </ul>
-<h3 id="related-pages_30">Related pages</h3>
+<h3 id="related-pages_29">Related pages</h3>
 <p><a href="#settings">Settings</a> (API call counts) · <a href="#stop-all-services">Stop All Services</a>.</p>
 <hr />
 <h2 id="settings">Settings</h2>
 <p><em>Menu: bottom of the rail · Route <code>/settings</code></em></p>
-<h3 id="what-it-is_32">What it is</h3>
+<h3 id="what-it-is_31">What it is</h3>
 <p>Every preference in the app, plus two things that are genuinely useful rather than
 cosmetic: <strong>API usage</strong> and <strong>Maintenance</strong>.</p>
-<h3 id="reading-the-screen_30">Reading the screen</h3>
+<h3 id="reading-the-screen_29">Reading the screen</h3>
 <p><strong>Scanner alerts.</strong> Enable the chime, pick the sound and volume, restrict alerts to
 market hours, and set a <strong>minimum score to alert</strong> — the most useful knob here, because
 it is what stops the app interrupting you for mediocre signals.</p>
@@ -5758,8 +5630,7 @@ exit rules. Off leaves them advisory.</p>
 <p><strong>Manual paper: break-even lifecycle (experimental).</strong> Opts the manual paper account into
 the same lifecycle: arm break-even at +50% of credit instead of taking profit
 immediately, then ride toward full credit protected by a break-even stop. Off (the
-default) keeps the plain take-profit at +50%. The driver's isolated account is never
-affected by this toggle.</p>
+default) keeps the plain take-profit at +50%.</p>
 <p><strong>Show the ticker.</strong> The scrolling marquee at the bottom of every page, led by the
 latest published market report's headline. <strong>Turning it off only hides the
 marquee</strong> — the report summary behind it also feeds the Desk's Market Summary frame,
@@ -5772,7 +5643,7 @@ override in <code>config/local/theme.toml</code> (the shipped <code>config/theme
 edited) and <strong>Restart now</strong> applies it to every screen; <strong>Reset to shipped values</strong>
 (confirm-gated) removes the override.</p>
 <p><strong>Configuration tab.</strong> Every trading setting the services read from <code>config/*.toml</code>
-— scanner floors, exit rules, the driver's risk envelope, flow-alert thresholds,
+— scanner floors, exit rules, the paper books' per-trade loss caps, flow-alert thresholds,
 session windows and scheduled-job times, symbol lists, the sector map and
 commissions — grouped by purpose, each with a plain-English explanation, its unit and
 its allowed range. Open it when you want to tune how the app trades or alerts
@@ -5781,21 +5652,20 @@ restores the shipped value and updates never overwrite yours), and <strong>Save<
 restart the services the change affects — during market hours it warns that
 restarting the options service costs gamma-collection minutes.</p>
 <p><strong>API usage.</strong> Outbound <strong>Schwab</strong> calls counted at the gateway per actual HTTP request
-(including retries), and <strong>Claude (Anthropic)</strong> calls counted at each call site — the
-driver's decision maker and Gamma Analyze among them — for today,
+(including retries), and <strong>Claude (Anthropic)</strong> calls counted at each call site — Gamma Analyze among them — for today,
 the last 7 days and the last 30 days.</p>
 <p><strong>Maintenance.</strong> <strong>Vacuum GEX history DB</strong> compacts the intraday options database, with
 an optional purge-first switch, and reports the before-and-after size. The confirm
 <strong>names whether that switch is armed</strong> — with it on, every saved GEX session but the
 last five is deleted before the compaction runs.</p>
-<h3 id="why-it-matters_26">Why it matters</h3>
+<h3 id="why-it-matters_25">Why it matters</h3>
 <p><strong>API usage is the section to actually look at.</strong> The app makes on the order of tens of
 thousands of Schwab calls per day, dominated by the 1-minute gamma collection and the
 market dashboard's ~3-second polling. Schwab rate-limits, and a stack that trips the
 limit degrades in ways that look like unrelated bugs. This page tells you the real
 number before that happens. The Claude counter does the same for money.</p>
 <p><strong>Minimum score to alert</strong> is the difference between an app that helps and one you mute.</p>
-<h3 id="caveats-and-gotchas_16">Caveats and gotchas</h3>
+<h3 id="caveats-and-gotchas_15">Caveats and gotchas</h3>
 <ul>
 <li>Counters are <strong>forward-only</strong> and start when the relevant process restarts — they are
   not historical.</li>
@@ -5803,13 +5673,13 @@ number before that happens. The Claude counter does the same for money.</p>
   the collector is active.</li>
 <li>Appearance changes need the web GUI to restart <em>and</em> a hard browser refresh.</li>
 </ul>
-<h3 id="related-pages_31">Related pages</h3>
+<h3 id="related-pages_30">Related pages</h3>
 <p><a href="#system-status">System Status</a> · <a href="#flow-alerts">Flow Alerts</a> ·
 <a href="#captured-signals">Captured Signals</a>.</p>
 <hr />
 <h2 id="stop-all-services">Stop All Services</h2>
 <p><em>Menu: bottom of the rail, the red-outlined button · Route <code>/terminate</code></em></p>
-<p>A confirm-gated stop of the entire local stack — the gateway, all six services, the
+<p>A confirm-gated stop of the entire local stack — the gateway, all five services, the
 web app itself, and the public live screens on <code>live.neuralstrike.co</code>, which go dark
 with it. <strong>Redis is deliberately left running</strong>, because it is a <em>system</em> service
 this app does not own.</p>
@@ -5827,9 +5697,8 @@ recorded as used against the same counter the sign-in form checks, so one code
 cannot do both jobs.</p>
 <p>Why this control and no other: the app is reachable from the internet behind a single
 session cookie, and a stolen cookie or an unlocked phone would cost the rest of the
-trading day — the session's options collection, a live stream dropped mid-broadcast,
-the driver stood down. The arm switch on Claude Trades and Rescue's <strong>Apply</strong> are
-deliberately <em>not</em> gated this way; a code demanded everywhere is a code nobody reads.</p>
+trading day — the session's options collection and a live stream dropped mid-broadcast.
+Rescue's <strong>Apply</strong> is deliberately <em>not</em> gated this way; a code demanded everywhere is a code nobody reads.</p>
 <p>It is rendered as a danger-outlined button, and <strong>Sign out</strong> sits below it — on a
 phone the bottom edge is the easiest target, so the harmless control takes that slot
 and an overshoot costs a re-login rather than a trading day.</p>
@@ -5844,7 +5713,7 @@ leave a device that still skips the second factor.</p>
 <p>It signs out this browser only. The tokens are stateless by design, so there is no
 "sign out everywhere" button here — other devices stay signed in until their own
 tokens expire.</p>
-<p><strong>It stops nothing.</strong> Services, collectors, scheduled scans and the autonomous driver
+<p><strong>It stops nothing.</strong> Services, collectors and scheduled scans
 all keep running; signing out only ends your view of them. The page directly above it
 in the rail is the one that stops things.</p>
 <hr />
@@ -5877,10 +5746,6 @@ in the rail is the one that stops things.</p>
 <tr>
 <td><strong>Rescue</strong></td>
 <td><strong>At-Risk Board</strong> · <strong>Ad-hoc Trade</strong></td>
-</tr>
-<tr>
-<td><strong>Claude Trades</strong></td>
-<td>Monitor (default) · <strong>Performance</strong> (closed trades and realized P&amp;L)</td>
 </tr>
 <tr>
 <td><strong>EOD Report</strong></td>
@@ -5921,12 +5786,6 @@ in the rail is the one that stops things.</p>
 <td><strong>1 min</strong></td>
 <td>08:00–15:20</td>
 <td>~90 symbols; five series each. A poll that overruns its minute skips the next one</td>
-</tr>
-<tr>
-<td>Driver paper re-pricing</td>
-<td><strong>1 min</strong></td>
-<td>08:00–15:15</td>
-<td>Keeps stops reacting within the minute</td>
 </tr>
 <tr>
 <td>Flow-alert detection</td>
@@ -5999,12 +5858,6 @@ in the rail is the one that stops things.</p>
 <td><strong>once daily</strong></td>
 <td>08:52</td>
 <td>After the 08:45 scan finishes</td>
-</tr>
-<tr>
-<td>Driver checkpoints</td>
-<td><strong>30 min</strong></td>
-<td>09:45–15:30 ET</td>
-<td>First fire-able slot 09:45; the open-bell slot is skipped</td>
 </tr>
 <tr>
 <td>Gamma Analyze briefings</td>

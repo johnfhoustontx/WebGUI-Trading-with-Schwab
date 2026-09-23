@@ -44,7 +44,6 @@ Use this map to get from a screen to its numbers. Menu order matches the rail.
 | **Captured Signals** · **Paper Ledger** · **Paper Account** | *Options Scoring* (entry quality) · *Rescue Tested Trades* (the management rules) |
 | **Rescue** | *Rescue Tested Trades* |
 | **Trade Analyzer** | *Trade Analyzer* · *Technical Indicators* |
-| **Claude Trades** | Its risk clamping is pure code, not a formula — see the *API / Developer Reference*, **Driver service** |
 | **Portfolio** | *Portfolio Analytics* |
 | **EOD Report** | Aggregation only; it computes nothing of its own |
 
@@ -95,14 +94,13 @@ Load-bearing runtime packages:
 | Package | Role |
 |---------|------|
 | `nicegui[highcharts]>=2.0.0` | The web GUI and every chart/gauge. |
-| `fastapi==0.137.0`, `uvicorn==0.49.0`, `starlette==1.3.1` | The proxy + the six domain services. |
+| `fastapi==0.137.0`, `uvicorn==0.49.0`, `starlette==1.3.1` | The proxy + the five domain services. |
 | `redis==8.0.0` | Client for the Redis backbone. `fakeredis>=2.20` backs the tests (no live server needed). |
 | `pydantic>=2.0` | The typed cross-tier contracts. |
 | `schwab-py==1.5.1` | Schwab auth / market data / streaming. |
 | `requests==2.34.2`, `httpx==0.28.1` | HTTP clients. |
 | `pandas>=2.0`, `numpy>=1.24`, `scipy` | Analytics; `scipy.stats.norm` powers Black-Scholes. |
 | `openpyxl` | Reads the sector/watchlist workbooks. |
-| `apscheduler==3.10.4` | Driver scheduling. |
 | `anthropic==0.112.0` | Claude tool-use calls (imported lazily — the suite runs without it configured). |
 | `matplotlib`, `Pillow`, `yfinance` | Charts/imaging, optional fallback data. Notifications are Telegram / Discord / SMS-over-SMTP / X — all HTTP or SMTP, no OS hooks. |
 
@@ -114,7 +112,7 @@ Load-bearing runtime packages:
 
 | Requirement | Detail | Status |
 |-------------|--------|--------|
-| **Redis running on `:6379`** | `sudo systemctl enable --now redis-server`. It is the Tier-3 cache, pub/sub, and command bus — **without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.** It is a **system** unit, so a `systemctl --user` stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter. | Required |
+| **Redis running on `:6379`** | `sudo systemctl enable --now redis-server`. It is the Tier-3 cache, pub/sub, and command bus — **without it none of the five services can publish and every page shows a "Waiting for … service" placeholder.** It is a **system** unit, so a `systemctl --user` stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter. | Required |
 | `MEMURAI_PASSWORD` | Optional AUTH. Unset = no AUTH (the default, unchanged behavior). | Optional |
 
 ## Schwab API credentials
@@ -138,11 +136,10 @@ The proxy owns all Schwab authentication; no other process holds credentials.
 
 | Requirement | Detail | Status |
 |-------------|--------|--------|
-| **`ANTHROPIC_API_KEY`** | Resolution order: the **env var** first, then a gitignored **`shared/anthropic_key.txt`**. Powers the Driver's Claude decision layer, the Gamma **Analyze**/**Explain** infographics, and the **fallback** for the 4×/day auto-briefings. | Optional |
+| **`ANTHROPIC_API_KEY`** | Resolution order: the **env var** first, then a gitignored **`shared/anthropic_key.txt`**. Powers the Gamma **Analyze**/**Explain** infographics and the **fallback** for the 4×/day auto-briefings. | Optional |
 | **Claude Code CLI + subscription token** | The 4×/day auto-briefings (both phases — news research and the analysis) run on the **Claude subscription** through `claude -p` instead of the API key, via `services/options_svc/claude_cli.py`. Needs the CLI at **`CLAUDE_CLI_PATH`** (default `~/.local/bin/claude`) and a 600 file at **`CLAUDE_CLI_TOKEN_FILE`** (default `~/.config/neuralstrike/claude.env`) holding `CLAUDE_CODE_OAUTH_TOKEN=…` from `claude setup-token`. **`BRIEFING_ENGINE=api`** in options_svc's environment switches it off. If either is missing the briefings use the API key exactly as before; if a CLI run fails, that one call is repeated on the API key. The ad-hoc **Analyze** button stays on the API key. | Optional |
 
-Without a key those features **degrade safely** — most importantly the autonomous
-driver **stands down rather than trading blind**, and the Gamma infographics render
+Without a key those features **degrade safely** — the Gamma infographics render
 a readable "no key" page.
 
 The **Settings → API usage** Claude count is a count of calls **billed to the API
@@ -171,7 +168,6 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | 8211 | options_svc | Required |
 | 8212 | portfolio_svc | Required |
 | 8213 | trade_svc | Required |
-| 8214 | driver_svc | Required |
 | 8215 | market_svc | Required |
 | 8500 | webgui (NiceGUI) | Required |
 | 8501 | webgui_live — the PUBLIC read-only screens, a second NiceGUI process | Required |
@@ -186,34 +182,33 @@ were removed in September 2026 — nothing in the stack talks to those processes
 |---------|-------------|
 | **Push notifications** | Gitignored `shared/notifications.json` (template: `shared/notifications.example.json`). Telegram needs a bot token + chat id; Discord needs a channel webhook URL; Google Fi SMS needs your 10-digit Fi number plus a Gmail **App Password**. Each channel self-gates — missing creds are a silent no-op. Env vars override file values. |
 | **Proxy hardening** | `PROXY_SHARED_SECRET` (guards the trading endpoints; enforced only when set) and `PROXY_CORS_ORIGINS` (overrides the local allowlist). See `docs/SECURITY.md`. |
-| **Driver model override** | `DRIVER_MODEL` env var → gitignored `shared/driver_model.txt` (defaults to the built-in model id). |
 
 ## Startup order
 
-The dependency chain is strict: **Redis → schwab-proxy → the six services → webgui.**
+The dependency chain is strict: **Redis → schwab-proxy → the five services → webgui.**
 Services wait on the proxy because every one of them resolves market data through it.
 `webgui_live` sits outside that chain: it reads Redis and nothing else — no proxy
 call, no Schwab call, no service call — so it is ordered after nothing in the target.
 
 | Launcher | Behavior |
 |----------|----------|
-| `systemctl --user start trading-prod.target` | Proxy + 6 services + webgui + webgui_live. Also starts at boot. |
-| `systemctl --user stop trading-prod.target` | Stops all ten, the public live screens included. **Redis survives** — it is a system unit this cannot reach. |
+| `systemctl --user start trading-prod.target` | Proxy + 5 services + webgui + webgui_live. Also starts at boot. |
+| `systemctl --user stop trading-prod.target` | Stops all nine, the public live screens included. **Redis survives** — it is a system unit this cannot reach. |
 | `systemctl --user restart trading-prod-options_svc` | One component. This is exactly what the Status page's Restart button runs. |
 | `journalctl --user -u trading-prod-webgui -f` | Logs. Replaces the `logs/*.out.log` redirection. |
 | `.venv/bin/python -m deploy.systemd.generate_units --install` | Regenerate the units after a port, path or identity change. Also reloads systemd and **arms every timer it wrote** — a written `.timer` that nothing enables never fires. Dev arms nothing, by design. |
 
-> The nine processes must stay **separate OS processes**. Merging services into one
+> The eight processes must stay **separate OS processes**. Merging services into one
 > Python process would re-introduce the top-level module-name collisions
 > (`config` / `scoring` / `notifier` / `src`) that the 3-tier split exists to prevent.
 
 ## Verifying the install
 
 1. Open **`http://127.0.0.1:8500/status`** — the System Status page probes Redis,
-   the proxy, Schwab authorization, all six services, the webgui and the public
+   the proxy, Schwab authorization, all five services, the webgui and the public
    live screens, plus a data-freshness table.
 2. Or probe directly: `GET http://127.0.0.1:8100/health` and
-   `GET http://127.0.0.1:82{10..15}/health` (each returns `{"domain": …, "up": true}`).
+   `GET http://127.0.0.1:82{10..13}/health` and `:8215/health` (each returns `{"domain": …, "up": true}`).
 3. Run the tests **one folder at a time** (never `pytest services` across all of
    them — that re-triggers the module-name collisions):
 
@@ -253,7 +248,7 @@ TIER 3  STORE+COMM  Redis (:6379): cache:{domain}:{view}, events:{domain}:{view}
                     payloads) + shared/bus (redis wrapper).
    ▲ publish                               │ consume
 TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
-                    trade/driver/market). Each imports only its engines, owns its
+                    trade/market). Each imports only its engines, owns its
                     scheduler + command consumer, validates + caches + publishes.
                     Calls schwab-proxy (:8100) for market data.
 ```
@@ -268,7 +263,6 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | options_svc | 8211 | Scans, paper trading, gamma collection, flow alerts, calculator, simulator, expected move, rescue. |
 | portfolio_svc | 8212 | Holdings, sectors, performance, live P&L stream. |
 | trade_svc | 8213 | On-demand single-symbol analysis + deep dive. |
-| driver_svc | 8214 | Autonomous decision layer (Claude + pure-code guardrails). |
 | market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). |
 | webgui | 8500 | The web UI. |
 | webgui_live | 8501 | The twenty-one public screens, on their own origin. |
@@ -276,17 +270,12 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 
 > **These are the *prod* profile.** A **dev** checkout offsets the `[services]`
-> ports to 9210–9215 and the web GUI to 9500, uses Redis **db 1** instead of db 0,
+> ports to 9210–9213 and 9215 and the web GUI to 9500, uses Redis **db 1** instead of db 0,
 > and starts **no proxy of its own** — it borrows prod's on 8100, because the Schwab
 > OAuth refresh token is a single rotating credential that two proxies would
 > invalidate for each other. Identity comes from the gitignored
 > `config/env.local.toml`; a missing marker resolves to prod. See
 > `docs/dev-prod-environments.md`.
-
-> **`driver_svc` no longer runs a morning order-approval pipeline.** That queue and
-> its `claude-driver` engine were removed in July 2026. The service now runs
-> autonomous checkpoints whose output is a command on `cmd:options`; the risk
-> clamping is pure code in `guardrails.py`, never the model.
 
 ## Data flow (one request)
 
@@ -309,7 +298,7 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | `trade-analyzer/` | `src/analysis` — recommendation, scoring, fundamentals, sector. |
 | `portfolio-analyzer/` | `src/` — sector breakdown, comparisons, evaluation. |
 | `shared/` | `analysis_lib/` (technical, market data), `contracts/`, `bus/`. |
-| `services/` | The six Tier-2 domain services. |
+| `services/` | The five Tier-2 domain services. |
 | `webgui/` | The NiceGUI front end. |
 
 ## Scoring conventions (shared idioms)
@@ -700,7 +689,7 @@ five-member simplex — every regime holds a *share* of the current tape, and th
 
 **Display names versus internal keys.** The names were changed for display in
 August 2026; **the keys were not**, because they are the `RegimeState` contract,
-the `regime_intraday` DB columns and the driver packet.
+and the `regime_intraday` DB columns.
 
 | Key (contract, DB, logs) | Displayed as | Why the name changed |
 |---|---|---|
@@ -710,9 +699,8 @@ the `regime_intraday` DB columns and the driver packet.
 | `choppy` | **Whipsaw** | Same "not trending" axis as Balanced; what distinguishes it is *energy* (high ATR with low ADX, failed breaks, two-sided wicks). Balanced/Whipsaw carries that contrast; Mean-Reversion/Choppy did not. |
 | `crisis` | **Stressed** | `VIX_STRESS_LO` is 22 and the fast-attack fires near VIX 30 — stress, not crisis. "Volatile" was also rejected: it equally describes breakout and whipsaw days. |
 
-`REGIME_DISPLAY` in that module is the source. The mapping is **duplicated in four
-tiers** (`webgui/pages/sentiment.py`, `driver_svc/compute.py`,
-`options_svc/market_snapshot.py`) because none of those may import the package —
+`REGIME_DISPLAY` in that module is the source. The mapping is **duplicated** in
+`webgui/pages/sentiment.py` and `options_svc/market_snapshot.py` because none of those may import the package —
 Tier 1 takes no engine imports, and the services would hit the documented
 cross-app `scoring` name collision. Keep them in step.
 
@@ -2055,10 +2043,9 @@ the source; this table is a summary of them.
 | Service | Cadence |
 |---------|---------|
 | sentiment_svc | Composite refresh every **120 s** (`REFRESH_INTERVAL_SEC`), throttled to one refresh per **15 min** off-hours (`_OFFHOURS_INTERVAL_MIN`); directional trend recompute every **900 s** (`TREND_INTERVAL_SEC`); market-regime recompute every **5 min** (`REGIME_INTERVAL_MIN`); order-flow publish every **30 s** (`ORDER_FLOW_PUBLISH_SEC`); **momentum cascade once nightly at 16:20** (`momentum_due`); rotation at startup / on demand. |
-| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **driver** paper auto-manage every **1 min** (`_MANAGE_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00, no 15:00 run** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged). |
+| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00, no 15:00 run** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged). |
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
 | trade_svc | On-demand only (no scheduler). |
-| driver_svc | Run gate polled every **30 s** (`POLL_INTERVAL_SEC`); checkpoints every **30 min** (`CHECKPOINT_MIN`, from `config/driver.toml`) inside the **09:45–15:30 ET** entry window (`checkpoint_due`) — the open-bell slot is deliberately skipped, so the first fire-able slot is 09:45 and the last entry decision is the 15:00 slot. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 
 Three once-a-day jobs are **not** on any service's loop — they are systemd timers,
@@ -2072,12 +2059,6 @@ exclude weekends.
 | EOD report archive | **15:15** (`[slots.eod_report]`) | Writes `webgui/data/eod/<date>/summary.html` + `detail.html` — the `/eod` **Generate** button, unattended. Reads Redis only: no Schwab call, no Claude call. Writes nothing if every cache read was empty. |
 | Marketing gallery recapture | **09:07** (`[slots.gallery_capture]`) | Re-photographs the private app for the public gallery. |
 | Flow-delta instrumentation | **16:00** (`[slots.flow_delta]`) | The only measurement of the `[big_delta]` / UOA thresholds. |
-
-> **Two cadences are easy to state wrongly, because they used to be the same
-> number.** The **driver's** isolated paper account re-prices every **1 minute**
-> (raised from 5 in July 2026 so its stops react within the minute and the −$1,500
-> loss-halt read stays fresh). The **manual** paper account moved the other way, to
-> an **hourly** top-of-the-hour cycle. They are different books on different clocks.
 
 > **The GEX collection interval is 1 minute, not 2.** The serial per-symbol chain
 > fetch was measured dropping roughly 37% of its slots; fetching in a small pool

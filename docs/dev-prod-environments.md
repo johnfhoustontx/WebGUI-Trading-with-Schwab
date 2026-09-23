@@ -18,13 +18,13 @@ box, along with the twelve `.bat` launchers.
 | Folder | `/home/administrator/prod` | `/home/administrator/dev` |
 | Git | pinned to `main` | feature branches |
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — starts none |
-| sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
+| sentiment / options / portfolio / trade / market | 8210–8213, 8215 | 9210–9213, 9215 |
 | webgui | `:8500` | `:9500` |
 | webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (one server, `:6379`) | **db 0** | **db 1** |
 | SQLite, `logs/`, `webgui/data` | its own | its own |
-| Schedulers · Claude · notifications · autonomous driver | live | **off** |
-| Units | `trading-prod.target` — **9** units | `trading-dev.target` — **8** (no proxy) |
+| Schedulers · Claude · notifications | live | **off** |
+| Units | `trading-prod.target` — **8** units | `trading-dev.target` — **7** (no proxy) |
 | Start / stop | `systemctl --user start trading-prod.target` | `systemctl --user start trading-dev.target` |
 | Nightly backup timer | **enabled** | **not enabled** — its data is a disposable snapshot of prod |
 | Secrets in `.env` | `MEMURAI_PASSWORD` | `MEMURAI_PASSWORD` only |
@@ -472,7 +472,7 @@ because the task never started. On prod it is time since the scheduler last
 started, so a large value is normal. **`scheduler_last_tick_age_s`** (since
 2026-09-16) is the real heartbeat: seconds since the loop last went round, also
 `null` in dev. On prod it should stay under the loop's own interval (30 s for
-options and driver, 120 s for sentiment, a few seconds for market and portfolio);
+options, 120 s for sentiment, a few seconds for market and portfolio);
 a value climbing past that means the loop has stalled without crashing, which
 `scheduler_alive` cannot see.
 ## 3. Daily dev loop
@@ -550,13 +550,11 @@ Five structural guards, each of which will just refuse:
   is copied, not where it is used, so running under the system python fails
   cleanly instead of after ~1.5 GB has landed.
 
-Two things it deliberately does **not** carry over:
+One thing it deliberately does **not** carry over:
 
 - **`cmd:*`** — the command streams and their `cmd:*:dead` lists. A stream is a
   queue dev would drain and *execute* on startup; a stranded
-  `driver_paper_create` or `rescue_apply` would double-open a position.
-- **`cache:driver:control` armed** — it is rewritten to disabled on copy, so a
-  snapshot taken while the driver was armed **can never arm dev's**.
+  `paper_create` or `rescue_apply` would double-open a position.
 
 ---
 
@@ -674,18 +672,13 @@ started with no proxy present at all.
 The Status page hides the Redis restart button in dev for exactly this reason —
 if you restart it from prod, dev goes with it.
 
-**4. `options_svc`'s `driver_paper_create` command handler is not env-guarded.**
-The producer is (`driver_svc.handlers.run_autonomous_cycle` early-returns), and
-the snapshot excludes `cmd:*`, so nothing can reach it today. Worst case is a fake
-trade in dev's own paper book, which prod never sees.
-
-**5. Dev's own behaviour cannot be verified by the test suite.** Under pytest,
+**4. Dev's own behaviour cannot be verified by the test suite.** Under pytest,
 `repo_paths` pins identity *and* topology to prod, so every `IS_DEV=True` branch
 is only ever exercised via monkeypatch. Confirming that dev really withholds the
 proxy and Redis restart buttons, and shows the `DEV` chip, is a **manual check
 with the app running**.
 
-**6. Both halves of the snapshot have now run for real** (2026-08-29, standing
+**5. Both halves of the snapshot have now run for real** (2026-08-29, standing
 dev up on the VPS). The file half moved **1,542 MB across 14 stores** — the
 1.52 GB `gex_history.db` included — in about 13 s, with prod live and writing
 throughout. It had never run before that day: the old dev checkout *was* the
@@ -765,10 +758,6 @@ sudo systemctl restart caddy`.
   `owns_proxy` is false. Redis survives either way — it is a *system* unit a
   `--user` stop cannot reach even in principle, which is also why the Status
   page's Redis card is read-only in **both** environments.
-- **A snapshot can never arm dev's autonomous driver** — two independent defences:
-  the snapshot rewrites `cache:driver:control` disabled, and
-  `run_autonomous_cycle` early-returns on the profile flag before it reads
-  anything.
 - **`.sh` files must be LF**, the exact inverse of the rule that used to live here
   for `.bat`. A shell script with CRLF does not mis-parse — it does not run at
   all: the kernel reads `#!/usr/bin/env bash` plus a stray CR as a request for an
@@ -834,9 +823,8 @@ sudo systemctl restart caddy`.
 | Profiles | `config/environments.toml` |
 | Marker | `config/env.local.toml` (gitignored), template `config/env.local.example.toml` |
 | Notification gate | `shared/notify/channels.py:load_config` |
-| Claude gate | `options_svc/compute.py`, `market_svc/compute.py`, `driver_svc/decider.py` — the three client factories |
+| Claude gate | `options_svc/compute.py`, `market_svc/compute.py` — the client factories |
 | Scheduler gate | `services/_scaffold.py:_schedulers_enabled` / `make_app` |
-| Autonomous gate | `driver_svc/handlers.py:run_autonomous_cycle` |
 | Cross-env kill safety | `PartOf=` in the generated units — plus the absence of a dev proxy unit |
 | Restart-button safety | `webgui/pages/status.py` |
 | Dev chip / tab title | `webgui/main.py` |

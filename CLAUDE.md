@@ -82,8 +82,7 @@ schwab-proxy (:8100)  ──HTTP──>  webgui NiceGUI app (:8500)
    owns Schwab auth/                   ├─ Options  page  → options-scanner engines
    tokens + market data               ├─ Sentiment page → sentiment-dashboard scoring
                                        ├─ Trade    page  → trade-analyzer src/analysis
-                                       ├─ Portfolio page → portfolio-analyzer src (live)
-                                       └─ Driver   page  → driver_svc (autonomous paper book)
+                                       └─ Portfolio page → portfolio-analyzer src (live)
         │
    shared/analysis_lib  ← shared library (technical, sector_analysis, config)
 ```
@@ -94,8 +93,9 @@ client and market data through `http://127.0.0.1:8100`.
 ## 3-tier architecture (approved 2026-06-15 — migration COMPLETE)
 
 The monorepo was re-tiered (strangler-fig) into three **physically separate** tiers over a
-**Redis backbone**. **All six domains are migrated** — sentiment, options,
-portfolio, trade, driver, market — and every page reads Redis. The shape:
+**Redis backbone**. **All five domains are migrated** — sentiment, options,
+portfolio, trade, market — and every page reads Redis (a sixth, the autonomous
+driver, was removed 2026-09-22). The shape:
 
 **The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
 153 non-test `webgui/**/*.py`, extended 2026-08-21, and again 2026-08-25, and 2026-09-15):
@@ -109,8 +109,7 @@ and neither may grow a regex of its own) ·
 takes only `bucket_key` from it, so the DB's `scanner_type` '0DTE' and the
 page's `trade_type` '0-DTE' cannot key differently — exactly the cross-tier
 mirror `test_cross_tier_mirrors.py` exists to prevent) ·
-`shared.book_caps` (since 2026-09-15; pure — `math` plus
-`shared.driver_policy.open_risk_dollars`, itself math-only; the Paper
+`shared.book_caps` (since 2026-09-15; pure — `math` only; the Paper
 dialog's preview (`pages/options/book_fit.py`) — and, through it, the
 checklist's Paper book line (`pages/options/checks.py`, which also takes
 `book_caps.describe` for the blocked wording) — evaluates the SAME rungs the
@@ -183,7 +182,7 @@ TIER 3 STORE+COMM  Redis (:6379): cache:{domain}:{view} (replaces _CACHE/_LAST_R
                    payloads = the API) + shared/bus/ (redis-py wrapper, fakeredis under pytest).
                    On-disk DBs unchanged. sentiment_bridge.json kept as dual-write shim.
         ▲ publish                          │ consume
-TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfolio/driver):
+TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfolio/market):
                    each imports ONLY its engines, owns its scheduler/auto-scan + command
                    consumer, validates+caches+publishes. Separate processes ⇒ the scoring/
                    notifier sys.path collision class CANNOT occur (options_scoring() guard is
@@ -191,7 +190,7 @@ TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfo
 ```
 
 **Unit order: Redis → proxy → services → webgui**, expressed as `Requires=`/`After=`.** Ports: `memurai=6379` plus one
-per service (8210–8215). One shim survives by decision — `sentiment_bridge.json` is still
+per service (8210–8213, 8215; 8214 was the removed driver's). One shim survives by decision — `sentiment_bridge.json` is still
 dual-written for `regime_filter`; retiring it (making `regime_filter` read Redis) is the last
 open migration item. Full design:
 [3-tier design doc](docs/plans/2026-06-15-three-tier-architecture-design.md).
@@ -220,9 +219,9 @@ open migration item. Full design:
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
 2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
 the drawer FOOT 2026-08-12**; **grouped into CAPTIONED SECTIONS 2026-08-16**):
-the left drawer holds **17 items** — a top-pinned **Desk** and **Symbol** in a
+the left drawer holds **16 items** — a top-pinned **Desk** and **Symbol** in a
 **caption-less leading `NAV_SECTIONS` block** (Desk 2026-08-18, Symbol 2026-09-17:
-the two entry points, *what is happening* and *tell me about X*), 11 in three captioned
+the two entry points, *what is happening* and *tell me about X*), 10 in three captioned
 sections, plus a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**,
 **Settings**, **Stop All Services**, **Sign out**) — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
@@ -247,7 +246,7 @@ Sentiment group** (it was a flat item until 2026-07-27), and since
 `NAV_SECTIONS` is a list of `(caption, entries)` — a **caption-less leading block**
 (Desk · Symbol) · **MARKETS** (Dealer
 Positioning · Opportunity Board · Flow Alerts · Trend & Sentiment) · **STRATEGY**
-(Strategy Tools · Options · Strategy Finder · Trade Analyzer · Claude Trades) · **ACCOUNT**
+(Strategy Tools · Options · Strategy Finder · Trade Analyzer) · **ACCOUNT**
 (Portfolio · More) — where an entry is either a GROUP (`_nav_group_link`) or a
 standalone rail page (`_nav_link`). **A caption of `None` means render NO header
 at all** — not an empty one — and the drawer loop skips `_nav_section_header` for
@@ -374,7 +373,7 @@ Routes:
 | Route | Page | Status |
 |-------|------|--------|
 | `/` | **Redirect to `/desk`** (2026-08-18; was `/market` from 2026-08-16, and the Market Scanner before that). A redirect, not a second render — the shell keys the active nav item and breadcrumb off the route, so a page at two URLs would highlight nothing. | built |
-| `/desk` | **Desk — the HOME page.** Single-screen aggregate: regime + Day/Week/Month sentiment & trend rings · dealer positioning for `$SPX`/`SPY`/`QQQ`/`$NDX` (spot, flip, walls, net GEX, structure bar) · top-5 Opportunity · newest-5 Flow · merged paper+driver Positions with rescue flags. Tier-1 reader of **10 views** on ONE batched 2 s `read_versions`. Read-only + click-through. **No Highcharts** (deliberate). [Design](docs/plans/2026-08-18-desk-home-dashboard-design.md) | built |
+| `/desk` | **Desk — the HOME page.** Single-screen aggregate: regime + Day/Week/Month sentiment & trend rings · dealer positioning for `$SPX`/`SPY`/`QQQ`/`$NDX` (spot, flip, walls, net GEX, structure bar) · top-5 Opportunity · newest-5 Flow · merged paper + captured Positions with rescue flags. Tier-1 reader of **10 views** on ONE batched 2 s `read_versions`. Read-only + click-through. **No Highcharts** (deliberate). [Design](docs/plans/2026-08-18-desk-home-dashboard-design.md) | built |
 | `/symbol` | **Symbol Dossier** — one screen per ticker (`?symbol=` — linkable, and allow-listed through `shared.symbols.clean_symbol` before it names anything): structure · volatility (Vol Rank, IV vs HV, expected move) · context · today's signals with age + score trend · flow · open positions in every book, each band linking out to the page that owns it. Reads 11 shared views + its own `cache:options:dossier:<SYMBOL>` on ONE batched 2 s `read_versions`. **Cache wins**: the paid on-demand `dossier` command (4–5 Schwab calls, 15-min TTL, a 60-s service-side dedup) only FILLS gaps, and is enqueued on navigation or Refresh for a symbol the scanner does not cover — never by the poll. **Private only** (it enqueues, so it is not a public live screen). No Highcharts. [Detail](docs/webgui-routes.md) | built |
 | `/options/scanner` | Options · Market Scanner — 0-DTE / Swing / Directional subtabs. Reads **`cache:options:scan_day`** (the day union), not `scan`, so dropped signals stay dimmed + frozen to EOD. ⚠ Each row's `setup_key` (`SYMBOL|TYPE|EXPIRATION`, strikes excluded) is a LOOKUP into the envelope's `setups` persistence map, **never a row key** — row identity stays `id` — and a setup whose start was not observed carries `age_unknown`, never a `first_seen` stamped `now`. [Detail](docs/webgui-routes.md) | built |
 | `/options/matrix` | Opportunity Board — one sortable row per watchlist symbol, default-sorted by Hotness. Tier-1 reader of `cache:options:matrix`. The symbol cell opens its `/symbol` dossier — drawn only where `shell.can_navigate` says the route exists, so the public `/opportunity` copy stays plain text. **Rows gained `call_wall`/`put_wall`/`net_gex`/`atm_iv`/`iv_state`/`dealer_regime` on 2026-08-18** (for the Desk; additive, no contract change — `MatrixSnapshot` validates only `rows: list[dict]`). All degrade to `None`/`"na"`, **never `0`** — the off-hours case turns on that distinction. [Detail](docs/webgui-routes.md) | built |
@@ -397,13 +396,12 @@ Routes:
 | `/sentiment/rrg` | RRG — **hand-drawn** relative-rotation plot (markers over an SVG trail layer, quadrant washes, fixed crosshair); **marker AREA = S&P weight**, trail = the **last 5 readings** resampled along a Catmull-Rom spline and labelled with the **sector name**. Domain is computed + symmetric about 100. Cached, manual Refresh only. [Detail](docs/webgui-routes.md) | built |
 | `/sentiment/momentum` | Momentum — a **numbered argument** (regime trio + dispersion · three levels + alignment · quadrant counts · one decomposed example · rank over recent sessions), with the ranked leaderboard behind a **collapsed expander**. Scatter + ribbon dropped. Recomputed **once nightly** (16:20 CT), not on the tick. [Detail](docs/webgui-routes.md) | built |
 | `/trade` · `/trade/evidence` · `/trade/board` · `/trade/plan` | Trade Analyzer — **four Signal Desk screens over ONE shared frame** (`pages/trade_shell.py`): **Overview** (the on-demand **Short Term** 1–8wk + **Long Term** months+ verdicts — Short Term runs the backtested IC-weighted factor model), **Evidence**, **Rank Board** (the universe-wide board, its own `trade:rank_board` view) and **Trade Plan**. Deep Dive and AI Query open separate reports. ⚠ The card names are **Short Term / Long Term**; "Position" and "Investor" survive only as ENGINE KEYS, and `test_trade_recommendation.py` fails on either as prose. ⚠ `pages/trade.py` is a **library, not a page** — its `render()` was deleted 2026-09-20 because no route ever reached it; the four screens above are what `main.py` routes. [Detail](docs/webgui-routes.md) | built |
-| `/driver` | Claude Trades — monitor + override for the autonomous Claude decision layer, trading defined-risk spreads into its **own isolated paper book**. Paper only. [Detail](docs/webgui-routes.md) | built |
 | `/settings` | Settings — three sub-tabs. **General**: alert/ticker preferences, Schwab + Claude API call counts, and maintenance actions. **Appearance** (2026-09-19): every colour and font in eight groups that follow the design standard rather than the TOML's sections, over a live preview, saved as a `config/local/theme.toml` override. **Configuration** (2026-09-19): every `config/*.toml` setting by purpose, from the `webgui/config_schema.py` catalogue, saved as `config/local/` overrides, with a restart offer. [Detail](docs/webgui-routes.md) | built |
 | `/portfolio` | Portfolio — Holdings / Sectors / Performance over the portfolio model, with live-streaming P&L via the service’s SSE consumer. | built |
 | `/x` | **Post to X** (More tab, private only) — compose an ad-hoc marketing post (text, link, hashtags, optional image) with a live 280 count, confirm, and enqueue `x_post` on `cmd:options`; below it, the log of EVERY X post (reports, hourly trade ideas, ad-hoc) from `cache:options:x_log`, with why any was refused. The page never talks to X. [Design](docs/plans/2026-09-22-x-posting-design.md) | built |
-| `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` and `driver:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. ⚠ It **confirms, and refuses a cold cache** (2026-09-20): `write_archive` overwrites per DATE and every builder degrades to an empty note, so an unchecked click while the stack is stopped replaced the day's real report with a complete-looking empty one — `has_data` gates the button as it already gated `tools/generate_eod_report.py`. [Detail](docs/webgui-routes.md) | built |
+| `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. ⚠ It **confirms, and refuses a cold cache** (2026-09-20): `write_archive` overwrites per DATE and every builder degrades to an empty note, so an unchecked click while the stack is stopped replaced the day's real report with a complete-looking empty one — `has_data` gates the button as it already gated `tools/generate_eod_report.py`. [Detail](docs/webgui-routes.md) | built |
 | `/market` | Market Dashboard — live grid of ~48 macro tickers in framed category panels, coloured by semantic risk-on/off. Reader of `cache:market:dashboard`. [Detail](docs/webgui-routes.md) | built |
-| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the six services / webgui / **`webgui_live`** (a `peer` card: an HTTP liveness probe on the public screens, deliberately OUT of the 2 s health fan-out, so a dead public origin never badges the rail or chimes), plus cache freshness; per-component Restart via `systemctl --user`, **confirm-gated since 2026-09-20** — nine of the eleven cards carry one, including this web app and the proxy, and the dialog names what THAT restart costs. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
+| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the five services / webgui / **`webgui_live`** (a `peer` card: an HTTP liveness probe on the public screens, deliberately OUT of the 2 s health fan-out, so a dead public origin never badges the rail or chimes), plus cache freshness; per-component Restart via `systemctl --user`, **confirm-gated since 2026-09-20** — eight of the ten cards carry one, including this web app and the proxy, and the dialog names what THAT restart costs. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
 | `/terminate` | Stop All Services — confirm-gated `systemctl --user --no-block stop trading-<env>.target`. ⚠ Since 2026-09-07 that stops **both** web apps, so the public live screens go dark too. Redis survives structurally: it is a system unit the user target cannot reach. | built |
 
 The `pages/options/` subpackage shares `detail.py` (collapsible Trade detail panel, reused by all signal
@@ -676,9 +674,7 @@ the EOD export docs), and Quasar `color=` props. The escape hatch is **Quasar-in
 `ui.add_css` — `theme.APP_FIELD_CSS` (field/tab/menu internals, injected ONCE app-wide by
 both entrypoints, not per page), `_NAV_CSS`, and the handful of page blocks that style a
 widget the page itself mounts (`SCAN_CSS`, `FINDER_CSS`, `MACRO_CSS`, `_TICKER_CSS`,
-`_BULLBEAR_CSS`, `EOD_CSS`, the two keyframe blocks, and `DRIVER_CSS` — cut to its one
-`max-height` rule on 2026-09-20, since its sticky-thead half duplicated and fought
-`shell.TABLE_CSS`).
+`_BULLBEAR_CSS`, `EOD_CSS` and the two keyframe blocks).
 **`pages/ui_guard.py` (cross-cutting, load-bearing — used by ~15 pages).** Provides
 `guard` / `guard_async` decorators that make a NiceGUI callback a clean no-op when
 the owning client/slot has been deleted (browser tab navigated away / closed /
@@ -960,20 +956,20 @@ can go whenever their files are next touched.
 > broke `scanner_engine.run_full_scan`'s lazy `from scoring import …`. Mitigation:
 > `pages/options/engines.py` `options_scoring()` context manager pins the options
 > `scoring` for the duration of an options engine call and restores after — used
-> in `scanner.py`/`swing.py`. When wiring Trade/Portfolio/Driver, watch for the
+> in `scanner.py`/`swing.py`. When wiring a new service, watch for the
 > same trap (e.g. `notifier`); prefer importing engine deps eagerly at module
 > load (binds the name once) and/or wrap lazy engine calls similarly.
 
 > **Stdlib collisions via the script-launch path (IMPORTANT, bitten us 2026-06-24).**
 > A service's OWN dir lands on `sys.path` when its `app.py` runs **as a script**
 > (`python services/<svc>/app.py`), so a module there named after a **Python stdlib
-> module** shadows it process-wide. `services/driver_svc/secrets.py` (an API-key
-> resolver) shadowed the stdlib `secrets`, so starlette's `from secrets import
-> token_hex` (pulled in by FastAPI) crashed `driver_svc` **on launch** — but NOT in
-> tests (pytest runs from the repo root, a different `sys.path`, so the suite was
-> green while the service couldn't start). Fixed by renaming it to `api_keys.py`;
-> `driver_svc/tests/test_api_keys.py::test_no_module_shadows_stdlib` now guards every
-> service module name against `sys.stdlib_module_names`. **Rule:** never name a
+> module** shadows it process-wide. The (since removed) `driver_svc` once had a
+> `secrets.py` API-key resolver that shadowed the stdlib `secrets`, so starlette's
+> `from secrets import token_hex` (pulled in by FastAPI) crashed it **on launch** —
+> but NOT in tests (pytest runs from the repo root, a different `sys.path`, so the
+> suite was green while the service couldn't start). ⚠ The guard that checked every
+> service module name against `sys.stdlib_module_names` lived in that service's
+> tests and went with it on 2026-09-22. **Rule:** never name a
 > service module after a stdlib module (`secrets`/`token`/`types`/`queue`/`select`/…).
 
 **Structure for testability.** Keep pure transforms/figure-builders as
@@ -1486,8 +1482,8 @@ independent reads agree.
 **Market Regime — display names + the direction axis (2026-08-14).** The five
 regimes were renamed **for display only** and gained a direction word. **The
 internal KEYS are unchanged** (`mean_reversion`/`trending`/`breakout`/`choppy`/
-`crisis`) — they are the `RegimeState` contract, the `regime_intraday` DB
-columns, and the driver packet, so renaming them would be a migration with no
+`crisis`) — they are the `RegimeState` contract and the `regime_intraday` DB
+columns, so renaming them would be a migration with no
 user-visible benefit. Only the words moved:
 
 | key | was | now | why |
@@ -1529,9 +1525,9 @@ direction belongs on the headline + transition line only. (2) The headline
 it were bullish. The label is also **re-derived page-side** from
 `(committed_label, direction)` rather than echoing the payload's `label`, so a
 held sample can't outlive a rename — but an `unclear` sample short-circuits to
-"Unclear" regardless of the held key. The words are **duplicated in four tiers**
-(`scoring/market_regime.REGIME_DISPLAY` is the source; `webgui/pages/sentiment.py`,
-`driver_svc/compute.py` and `options_svc/market_snapshot.py` mirror it) because
+"Unclear" regardless of the held key. The words are **duplicated across tiers**
+(`scoring/market_regime.REGIME_DISPLAY` is the source; `webgui/pages/sentiment.py`
+and `options_svc/market_snapshot.py` mirror it) because
 none of those may import that package — Tier-1 takes no engine imports and the
 services would hit the documented cross-app `scoring` collision. Keep them in
 step. The push snapshot's transition line also stopped rendering RAW KEYS
@@ -1562,7 +1558,6 @@ sentiment = 8210
 options   = 8211
 portfolio = 8212
 trade     = 8213
-driver    = 8214
 market    = 8215
 ```
 
@@ -1656,7 +1651,6 @@ relocates it.
 
 | file | holds | read by |
 |---|---|---|
-| **`config/driver.toml`** | the autonomous driver's risk envelope — target band, per-trade + daily risk caps, VIX ceiling, loss halt, decision budget | `driver_svc.settings` (guardrails) **and** `options_svc.compute` (the paper sizer's cap) |
 | **`config/trade_mgmt.toml`** | stop/target rules — TP fraction, stop multiple, delta drift + hard ceiling, cut-DTE, the trail ladders, plus `[structures.*]`, the PER-STRUCTURE overlay on all of them | `options-scanner/signal_recommender.py` (auto-manage) **and** `options_svc/rescue.py` (the at-risk board) |
 | **`config/scanner.toml`** | selection floors — IV-rank minimums, per-VIX-regime credit floors, directional delta band, score cutoffs | `scanner_engine.py`, `signal_recorder.py`, `options_svc/compute.py` |
 | **`config/symbols.toml`** | the traded universe — GEX collection list, Net-Prem display groups, the BIG10 basket | `gex_collector.py`, `options_svc/net_premium.py`, `market_svc/symbols.py`, **and Tier-1 `webgui/pages/options/gamma.py`** |
@@ -1807,19 +1801,17 @@ the extended-hours activation date** (2026-08-02). All times are **CT** (ET and 
 shift together for DST, so the values are stable year-round). It holds
 `[activation] extended_hours_from` (**2026-08-17** — every ETH branch is inert
 before it, so a Cboe slip is a one-line edit), the three sessions
-(`[sessions.gth|regular|curb]`), five named operating windows
-(`[windows.scan|collection|session_flip|market_snapshot|driver_entry]`, each
-optionally carrying its own `tz` and `end_exclusive`), and
+(`[sessions.gth|regular|curb]`), the named operating windows
+(`[windows.scan|collection|session_flip|market_snapshot|…]`, each
+optionally carrying its own `tz` and `end_exclusive` — no shipped window sets
+either since the driver's `driver_entry` went, 2026-09-22), and
 `[alerts] fire_in_extended_hours`. Loaded by
 **`shared/market_calendar.py:load_config()`** (mtime-cached, mirroring
 `flow_alerts.load_thresholds`; a malformed file degrades to built-in defaults for
 bad **values and bad shapes** and never raises). **Edit + restart the affected
-service.** Two knobs are load-bearing and easy to get wrong:
+service.** One knob is load-bearing and easy to get wrong:
 `[windows.session_flip].at` is held SEPARATE from `collection.start` so widening
-GTH collection can't silently move the Gamma display flip, and
-`[windows.driver_entry].end_exclusive` matches the driver's legacy `hm >= RTH_END`
-gate — flipping it to inclusive re-opens a checkpoint slot at 15:30 ET inside the
-no-new-entries window. See the 2026-08-02 "Last updated" entry.
+GTH collection can't silently move the Gamma display flip. See the 2026-08-02 "Last updated" entry.
 
 **`webgui/pages/fmt.py` is the shared numeric vocabulary** — `num` (strict: a real
 reading or None, rejecting NaN AND bool, since `float(True)` is 1.0), `float_or`
@@ -1908,8 +1900,8 @@ gitignored. **Never commit real keys, tokens, or account numbers.**
 
 ## Running
 
-**The stack is ten `systemd --user` units on a Linux host** — the target, the
-proxy, the six services, the web app, and `webgui_live`, the public read-only
+**The stack is nine `systemd --user` units on a Linux host** — the target, the
+proxy, the five services, the web app, and `webgui_live`, the public read-only
 screens (2026-09-07). There are no
 launcher scripts: the twelve `.bat` files, `tools/stop_all.py`, `watchdog.py` and
 both `check_stack_*` helpers were deleted in the 2026-08-29 migration, because
@@ -2047,14 +2039,14 @@ stack:
 .venv/bin/python services/options_svc/app.py     # :8211
 ```
 
-Same order as the units: Redis, then the proxy on :8100, then the six services
-(8210–8215), then `webgui/main.py` on :8500. Everything reads market data through
+Same order as the units: Redis, then the proxy on :8100, then the five services
+(8210–8213, 8215), then `webgui/main.py` on :8500. Everything reads market data through
 the proxy, so it starts first. `webgui/live_main.py` on :8501 orders after nothing
 in the target — it reads Redis (a *system* unit) and nothing else.
 
 > **3-tier note:** Once a domain is migrated, the web GUI no longer computes
 > anything for it — its **service must be running** (and Redis up) or the page
-> shows a "Waiting for … service" placeholder. **All six domains are migrated**;
+> shows a "Waiting for … service" placeholder. **All five domains are migrated**;
 > every page reads Redis, and the webgui imports no app engines, so the
 > documented `scoring`/`notifier` cross-app collision can no longer occur. The
 > exact allow-list (and why the familiar "+ `shared.contracts`" shorthand is
@@ -2087,13 +2079,13 @@ Rationale: [design](docs/plans/2026-08-08-dev-prod-environments-design.md).
 |---|---|---|
 | Folder | `/home/administrator/dev` ⚠ (not `…/prod` — see above) | — none exists today |
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — runs no proxy unit |
-| sentiment / options / portfolio / trade / driver / market | 8210–8215 | 9210–9215 |
+| sentiment / options / portfolio / trade / market | 8210–8213, 8215 | 9210–9213, 9215 |
 | webgui | `:8500` | `:9500` |
 | webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (`:6379`) | **db 0** | **db 1** |
 | SQLite, `logs/`, `webgui/data` | its own | its own |
-| Schedulers · Claude · notifications · autonomous driver | live | **off** |
-| Units | `trading-prod.target` (10 units) | `trading-dev.target` (9 — no proxy, but it DOES get `webgui_live`) |
+| Schedulers · Claude · notifications | live | **off** |
+| Units | `trading-prod.target` (9 units) | `trading-dev.target` (8 — no proxy, but it DOES get `webgui_live`) |
 
 Prod's ports are byte-identical to the pre-environment numbers, so prod is a
 relocation, not a reconfiguration. Dev borrows prod's proxy because the Schwab
@@ -2125,15 +2117,14 @@ disagree with the checkout it runs. `[services]` in
 `ports.toml` is offset automatically; a **top-level** port is not, which is
 correct for a process this repo does not start and a bug for one it does.
 
-**The four suppressions, and where each is enforced** — each reuses a degrade path
+**The three suppressions, and where each is enforced** — each reuses a degrade path
 the code already has, so a suppressed dev cannot take a code path prod never takes:
 
 | Flag | Enforced in | Effect |
 |---|---|---|
 | `allow_notifications` | `shared/notify/channels.py:load_config` | recursively zeroes **every** `enabled` key, LAST so it also overrides the `NOTIFY_ENABLED`/`X_ENABLED` env escapes — kills Telegram, Discord, Fi-SMS, **X** (and each of its `kinds`) and the sentiment state-transition alert in one stroke. `options_svc/push_notify.load_config` delegates here, so this is the single chokepoint |
-| `allow_claude` | the two client factories — `options_svc/compute.py`, `driver_svc/decider.py` — return `None` | falls into the existing *no-API-key* path: the briefing renders its explanatory page, the decider stands down (market_svc makes no Claude call since 2026-09-16 — its summary quotes the published market report) |
-| `schedulers` | `services/_scaffold.py:_schedulers_enabled` (consumed by `make_app`) | all six services stop collecting and polling; **command handlers still run**, so the UI stays fully usable off the snapshot |
-| `autonomous_trading` | `driver_svc/handlers.py:run_autonomous_cycle` early-returns | belt-and-braces: `cycle` is also a *command* and the arm state lives in Redis, so the scheduler skip alone would not stop a snapshot that carried `cache:driver:control` enabled |
+| `allow_claude` | the client factory in `options_svc/compute.py` returns `None` | falls into the existing *no-API-key* path: the briefing renders its explanatory page (market_svc makes no Claude call since 2026-09-16 — its summary quotes the published market report) |
+| `schedulers` | `services/_scaffold.py:_schedulers_enabled` (consumed by `make_app`) | all five services stop collecting and polling; **command handlers still run**, so the UI stays fully usable off the snapshot |
 
 **X has ONE posting path (2026-09-22).** Every post — market reports, hourly
 trade ideas, the `/x` page's ad-hoc posts — goes through
@@ -2256,7 +2247,7 @@ CRLF one (see `.gitattributes`) and the fact that `is-active` is not proof the
 ports are free.
 
 **Both environments DID run simultaneously, verified live 2026-08-29** — prod on
-8100/8210-8215/8500, dev on 9210-9215/9500 with all four suppressions enforced
+8100/8210-8215/8500, dev on 9210-9215/9500 with all four suppressions (then) enforced
 (not merely configured), one shared Redis, and dev holding **no proxy of its
 own** and **no Schwab credentials on disk** (only `schwab_proxy.py` reads them).
 ⚠ **That was the server suspended on 2026-08-30, and the arrangement did not
@@ -2276,8 +2267,7 @@ a test enforces it). See the runbook.
 prod's SQLite stores (online-backup API — **prod keeps running**) and `DUMP`s db 0
 into db 1. It hard-refuses unless `ENV_NAME == "dev"`, refuses when the two Redis
 DBs resolve equal, and refuses while dev is up. It **excludes `cmd:*`** (a stream
-is a queue dev would drain and EXECUTE) and **rewrites `cache:driver:control`
-disabled**. **Promotion is explicit:** merge to `main` and push, then run
+is a queue dev would drain and EXECUTE). **Promotion is explicit:** merge to `main` and push, then run
 `tools/promote.sh` in the prod checkout — which refuses unless `ENV_NAME`
 resolves to `prod` (the FOLDER NAME is not the test, and today's is `dev`),
 dirty-tree guard *before* stopping anything, `git pull --ff-only`, reinstall only
@@ -2335,8 +2325,7 @@ hand, verifying each with `Required-by:`.
 
 **Known limits (not defects) are listed in the runbook** — chiefly that dev is
 *quiet at rest, not incapable* (command handlers are ungated, so clicking Run scan
-in dev still reaches Schwab through prod's proxy), and that `options_svc`'s `driver_paper_create`
-handler is not env-guarded (its producer is, and the snapshot excludes `cmd:*`).
+in dev still reaches Schwab through prod's proxy).
 
 ## Test infrastructure (2026-08-21)
 
@@ -2406,7 +2395,7 @@ ignore.
 **Three cross-tier mirrors are now pinned by test, not discipline**
 (`shared/tests/test_cross_tier_mirrors.py`, which AST-parses the files and
 imports nothing, so it cannot itself trigger the `scoring` collision):
-- the five **regime display words**, duplicated in `driver_svc/compute.py`,
+- the five **regime display words**, duplicated in
   `options_svc/market_console.py` and `webgui/pages/regime_mix.py` because those
   tiers cannot import the source. (`sentiment_svc` correctly delegates to
   `market_regime.regime_label` — a test records that it must not grow a fourth
@@ -2443,56 +2432,6 @@ hand someone the wrong one silently. A test records that.
 the failing SET, not the count" stops being something you have to remember to ask
 for. `-rfs` was considered and rejected: the suites carry a couple of permanent
 `importorskip`s, and printing those every run trains people to ignore the summary.
-
-## The driver's risk envelope is enforced on BOTH paths
-
-**`shared/driver_policy.py` is the single allowlist**, and two different services
-enforce it independently:
-
-| path | module | enforces |
-|---|---|---|
-| **decision** | `driver_svc/guardrails.apply_guardrails` | the full cycle pass — halt, stand-down, budget across trades, slots, per-cycle cap, directional gate, one-per-symbol |
-| **open** | `options_svc.compute.open_driver_position` | re-checks what is a property of the SIGNAL or the BOOK — structure allowlist, defined risk, `max_concurrent`, deployed risk vs `daily_risk_budget` |
-
-⚠ **The second one is not redundant, and removing it re-opens a real hole.** The
-open path is reached by the `driver_paper_create` command on `cmd:options` — a
-Redis stream entry. Consumer groups are created at id `0`, so a fresh group
-**replays the backlog** (the documented "burned a day's API budget" incident),
-and Redis is reachable by any local process, so one can enqueue a command. Until
-2026-08-29 that path checked only the halt flag, per-trade sizing, min fill and
-buying power: an arbitrary structure with no defined risk could be opened into
-the $25k paper book, and the book could grow past `max_concurrent` without limit,
-because the guardrails live in a service `options_svc` **cannot import**.
-
-⚠ **That second layer was INERT for at least a month, and the guard's own
-docstring is why nobody noticed (fixed 2026-09-11).** `_driver_open_positions`
-called `paper_account_db.list_open_positions` — a function that does not exist —
-and its `except Exception -> []` swallowed the `AttributeError`, so both
-book-level gates measured an always-empty book: `max_concurrent` could never
-refuse, and `daily_risk_budget` could never see risk already deployed. It
-*spoke* (50 degrades in 30 days on prod) and nothing read the counter. The
-docstring argued `[]` "is the same thing an empty book means" — true of a read
-failure, false of a typo, and the reason reading the code could not catch it.
-**The lesson generalises: `compute.py` lazy-imports `paper_account_db`,
-`paper_engine` and `signal_db` inside ~40 functions, so a misspelled attribute
-is not a startup error but a silent degrade on one path, and `pyrightconfig.json`
-deliberately does not cover this file.** `test_driver_open_capacity_binds.py`
-drives the gates through a real book and AST-walks the source for every
-`<module>.<attr>` on those three names.
-
-**Cycle-only concepts are deliberately NOT re-checked at the open path** —
-`max_trades_per_cycle` and the model's stand-down are meaningless for a single
-open, and the VIX ceiling needs the decision-time market read. The halt flag
-already covers the "stop trading now" case.
-
-**`daily_risk_budget` now means what its name says.** `apply_guardrails` resets
-it to the full amount every 30-minute checkpoint and never subtracts risk already
-deployed, so the true aggregate cap was `max_concurrent × per_trade_max_risk`
-(~$25k, roughly **2×** the documented "half the book"). The open path measures
-against the OPEN POSITIONS, so the ceiling is real. ⚠ `driver_policy.open_risk_dollars`
-drops a non-finite row rather than summing it: a NaN total makes every `>`
-comparison False and silently switches the cap OFF — the pins-the-bound class one
-layer up.
 
 ## An equity lot is cash CONVERTED, never a buying-power reservation
 
@@ -2577,7 +2516,7 @@ of this book and the auto entry cycle then stops opening spreads — correctly (
 cash really is committed) but invisibly, since the entry cycle's concentration
 breach leaves no UI trace. Check the journal before assuming the engine is stuck.
 
-The risk sum goes through **`shared.driver_policy.open_risk_dollars`** rather
+The risk sum goes through **`shared.book_caps.open_risk_dollars`** rather
 than a local `sum(...)` — a NaN total makes every `>` False and silently
 switches the ceiling off, the documented pins-the-bound trap.
 
@@ -2585,7 +2524,7 @@ switches the ceiling off, the documented pins-the-bound trap.
 `MAX_RISK_PER_SECTOR` $1,500, grouped by `config/sectors.toml` through
 `shared/sectors.py`). Four DIFFERENT semiconductors at the full symbol cap breach
 nothing above it, and that is the correlated book the playbook warns about.
-Measured before it was built: the **driver's** book once held **$21,531 across 15
+Measured before it was built: the (since removed) **driver's** book once held **$21,531 across 15
 Information Technology positions — 86% of a $25,000 account in one sector** — and
 $15,018 across nine INDEX positions; the manual book peaked at $3,569 across 19
 IT positions. A $1,500 cap would have bound on 20 of 46 manual trading days and
@@ -2623,12 +2562,7 @@ unrelated names into one — and `paper_engine._log_capped` prints the bucket, s
 injected into `concentration_reject` (defaulting to the real map) so the decision
 stays pure; a lookup that RAISES degrades to "no grouping", never to a refusal.
 
-⚠ **The DRIVER's book is not covered, and its numbers are the worse ones.** It
-opens through `compute.open_driver_position`, which re-checks structure, defined
-risk, `max_concurrent` and `daily_risk_budget` — not `concentration_reject`, which
-lives in a module `driver_svc` policy cannot reach. Extending the cap there is a
-change to a second service's envelope with its own measurement. Design:
-[the B4 doc](docs/plans/2026-09-12-sector-cap-design.md).
+Design: [the B4 doc](docs/plans/2026-09-12-sector-cap-design.md).
 
 ## The Paper Ledger is capped, and there is one cap module
 
@@ -2638,8 +2572,8 @@ expiry positions — over plain rows, and reports **every** rung (`used`, `after
 `cap`, `binds`, `skipped`) rather than only the first breach, plus `first_breach`,
 `max_quantity` and `describe` (the sentence both the Paper toast and the Paper
 dialog's preview lines show). It imports
-only `math` and `shared.driver_policy`, which is what puts it on the Tier-1
-allow-list. The Account's `concentration_reject` is an adapter over it, and
+only `math` (`open_risk_dollars` lives in it), which is what puts it on the
+Tier-1 allow-list. The Account's `concentration_reject` is an adapter over it, and
 `options-scanner/tests/test_book_caps_equivalence.py` holds a frozen copy of the
 pre-module function and proves identical decisions over generated books — **edit
 the rungs in `book_caps`, never in the adapter.**
@@ -2790,16 +2724,14 @@ column did not exist until 2026-09-11 — so every paper position fell to
 `delta_abs_fallback` (0.35), which is **too tight** for a short sold rich (a
 0.30-delta spread opens 0.05 from its own stop) and **far too loose** for one
 sold cheap (a 0.10-delta short has to more than triple before the stop notices,
-where the drift rule acts at 0.22). It is recorded by all three producers that
-open a position — the captured-signal entry cycle, `open_driver_position` (which
-maps the raw scan row's `short_delta` in the same `setdefault` block that already
-normalises `id`/`type`/`credit`), and `apply_roll`, which takes the CANDIDATE's
+where the drift rule acts at 0.22). It is recorded by both producers that
+open a position — the captured-signal entry cycle and `apply_roll`, which takes the CANDIDATE's
 `new_short_delta` because a roll is a new entry at a new strike. ⚠ **`None` means
 "not recorded" and keeps the fallback — never write `0.0`**, which would make the
 drift rule fire at 0.12 on a position that has not moved. And
 `run_manage_cycle` puts it in the **base** ctx: it sat in the lifecycle branch
-alone, which neither book that trades ever takes (the manual account's toggle
-defaults off and the driver passes `lifecycle=False` explicitly), so the column
+alone, which the book that trades never takes (the manual account's toggle
+defaults off), so the column
 alone would have changed nothing.
 
 The profit target stays the global **0.50** for these two. TradingBlock's ~90% /
@@ -3083,8 +3015,7 @@ whose narrowest width costs more than it.** At the old $250, MU's $5 width ($425
 was unaffordable and the scan emitted nothing for it; the operator raised the cap
 to $750 on 2026-09-22, which readmits that case but not, say, a 25-wide ALAB
 ($2,044). That is the truth made visible (no signal) instead of invisible (a
-rejection buried in the fills log). The **driver's** cap is larger still, so a
-width chosen for the Account stays openable there: the conservative direction.
+rejection buried in the fills log).
 
 **`compute.scan_earnings` is the one earnings lookup every scan uses.**
 `swing_scan` has gated per signal since the 0-DTE-bucket fix and `income_scan`
@@ -3138,31 +3069,12 @@ Every figure in that block is re-runnable: `python tools/sweep_naked_capeff.py`
 call and no DB. **Quote its numbers with their parameters** — they move with the
 strike ladder, and this block has shipped stale ones twice.
 
-## The halt latch, and what a replayed command may re-do
-
-**A halt the driver set ITSELF is not cleared by a routine re-arm.** `enable`
-used to do `set_control(enabled=True, halted=False, reason=None)`
-unconditionally. The distinction that matters is **what caused the halt**, not
-when:
-
-| halt | cleared by `enable`? |
-|---|---|
-| **manual STOP** (`MANUAL_STOP_REASON`) | **yes** — the user's own switch, and the /driver STOP dialog promises exactly this |
-| **stale** (prior-day, or no `halted_date`) | **yes** — this is the documented "re-arm next day" |
-| **same-day RISK halt** (loss cap / banked target / VIX) | **no** — `enable` arms the driver for the next session and leaves the latch |
-
-The override survives, but has to be deliberate: `{"type":"enable", "args":
-{"clear_halt": true}}`, surfaced as the confirm-gated **Resume today** button
-that the /driver page shows only when `driver.is_risk_halt(control)`. ⚠
-`halted_date` had been in the `DriverControl` contract from the start, documented
-as "re-arm next day", and was **written but never read** — so a halt never
-expired on its own either. A halt with no date is treated as stale, so a control
-written before the field was populated cannot become permanently unclearable.
+## What a replayed command may re-do
 
 **Two side-effectful commands are replay-guarded.** Consumer groups are created
 at id `0`, so a fresh group re-delivers the whole backlog — the documented
 incident where a first launch "burned a day's API budget in one go". The service
-already refused a stale `driver_paper_create`; `rescue_apply` (which MUTATES the
+already refused a stale `paper_create`; `rescue_apply` (which MUTATES the
 paper book, and whose own is-it-open + 15%-drift guards a fast replay passes) and
 `gamma_analyze` (a PAID Claude call) now share the same
 `STALE_OPEN_MAX_AGE_SEC` gate via `_is_stale_side_effect`.
@@ -3293,8 +3205,7 @@ expiration day must book the target it reached, and `should_settle` fires from
 
 ⚠ **That cycle is HOURLY (`paper_cycle_due`, 09:00–14:00 CT — six times a trading
 day), not 5-minute**, and `expire_ledger_trades`' own docstring claimed 5-minute
-for months. The 1-minute `manage_due` slot belongs to the isolated DRIVER
-account. Six checks a day is the honest resolution of these rules — a target
+for months. Six checks a day is the honest resolution of these rules — a target
 reached at 09:15 is acted on at 10:00 — and the pass rides that cadence rather
 than adding a seventh scheduler slot, because the rules are day-scale (a +50%
 target, a 21-DTE exit) and not intraday.
@@ -3427,25 +3338,19 @@ which is the same shape as C3, and it is recorded as a follow-up rather than
 guessed at. Design:
 [the C4 doc](docs/plans/2026-09-12-book-greeks-design.md).
 
-## The scorecard is shared, and it breaks P&L down by how a trade ENDED
+## The manual book's scorecard, and the P&L-by-exit-reason axis
 
-**`webgui/pages/scorecard.py`** holds the PURE render builders both books' cards
-draw — moved out of `pages/driver.py` on 2026-09-12 when the manual account got a
-scorecard of its own (gap assessment C5). A second page reaching into the driver
-PAGE for its view vocabulary is the wrong shape; same reasoning as `pages/fmt.py`
-and `pages/copy.py`. `driver.py` imports them **by name**, so
-`driver.scorecard_headline_chips` still resolves for its page body and the 25
-existing assertions in `test_driver_monitor.py`.
+**`services/options_svc/book_perf.build_scorecard`** is pure over `(positions, snapshot)`
+(it was `driver_perf` until the Claude Trades page it was written for was removed,
+2026-09-22). **`webgui/pages/scorecard.py`** holds the two formatters the Paper
+Account page's one-line track record uses, `money` and `percent` — the chips, tables
+and best/worst line went with that page.
 
-⚠ **Two silent shadowing bugs were caught in that one move**, and both are the
-class a shared module is supposed to end: `driver.py` re-assigned
-`PNL_GREEN, PNL_RED, PNL_NEUTRAL` **after** the new import, so the local values
-won while `scorecard.py`'s first draft quietly held the Simulator's payoff
-green/red; and `portfolio.py` already has its own **unsigned** `_money` (the
+⚠ **When moving a formatter into a shared module, grep the destination for the name
+you are importing.** `portfolio.py` already has its own **unsigned** `_money` (the
 account-card formatter — "Equity $24,184.20"), so `money as _money` was shadowed
-by it and the new track record printed realized P&L **without a sign**. The page
-imports the module, not the name. **When moving a formatter into a shared module,
-grep the destination for the name you are importing.**
+by it and the track record printed realized P&L **without a sign**. The page
+imports the module, not the name.
 
 **`compute.manual_account_perf()`** is the manual book's scorecard —
 `build_scorecard` was already pure over `(positions, snapshot)`, so this is an
@@ -3456,7 +3361,8 @@ scorecard could disagree about the same account. ⚠ It reads the FULL history
 itself — the view's `positions` is the OPEN set, and a scorecard over open rows
 alone would report a win rate of zero forever.
 
-⚠ **`build_scorecard` gained `by_exit_reason`, and that axis is the point.**
+⚠ **`build_scorecard` has `by_exit_reason`, and that axis is the point** — though
+since 2026-09-22 no page draws it (the breakdown tables were on Claude Trades).
 Measured while replaying the ladder: `MANUAL_CLOSE` accounts for **+$50,102** of
 the captured book's reported P&L against **+$11,664** for every other reason
 combined, with **130 of 388** of its rows booking exactly `entry_credit × 100` —
@@ -3470,9 +3376,7 @@ where the book is read.
 same shape as the app's other empty states: it is **blank until something has
 CLOSED** (a fresh book reading "0.0% win" says it *loses*, not that it has no
 record), and an **undefined profit factor is omitted, not printed** — `None` means
-"no losses yet", and an em-dash mid-sentence reads as a rendering fault. The
-driver page shows "—" because there it is a labelled chip, where the absence is
-legible.
+"no losses yet", and an em-dash mid-sentence reads as a rendering fault.
 
 **`manual_analytics()` IS consumed** — `handlers` publishes it to `cache:options:paper_analytics`, and the Paper Account page's equity curve and excursion (MAE/MFE) panel read it. This file said otherwise until 2026-09-19. And C5's **trade-plan
 snapshot did not ship**: "the rules in force at entry" is now a much larger object
@@ -3590,47 +3494,6 @@ series matures: `iv_rank()` reports `samples` and `sufficient` against
 unmeasured change this audit keeps catching. Design:
 [the C3 doc](docs/plans/2026-09-12-iv-history-capture-design.md).
 
-## A dollar risk cap stops meaning its own comment once equity moves
-
-**`shared/driver_limits.scale_to_equity(limits, equity)`** resolves the driver's
-two dollar caps as **`min(dollars, pct × equity)`** — so a drawn-down book
-tightens and a grown one can **never** loosen. That asymmetry is the whole safety
-argument: restoring a stale percentage is allowed, raising appetite is a decision.
-
-⚠ **Why it exists, measured on the live book 2026-09-12.** The driver is down
-46.6% from $25,000 to **$13,347**, and its two caps now say the opposite of their
-own comments: `per_trade_max_risk` $3,000 (*"~12% of the book"*) is **22.5%**, and
-`daily_risk_budget` $12,000 (*"~half the book"*) is **89.9%**. Nothing was
-mis-set; the numbers stopped meaning what they were chosen to mean. The shipped
-`per_trade_max_risk_pct = 0.12` / `daily_risk_budget_pct = 0.48` are exactly those
-comments' stated intent — at $25,000 they reproduce the dollar figures — so this
-restores intent rather than retuning appetite. Effective caps today: **$1,602 per
-trade, $6,406 of open risk**. `0` turns either off.
-
-⚠ **Scaled on BOTH driver paths, and that is not belt-and-braces.**
-`driver_svc/handlers` scales `settings.limits()` before the cycle and
-`options_svc.compute._driver_risk_limits()` scales again at the open path. If only
-the decision side scaled, the driver would approve a trade the sizer then zeroes —
-the documented *"Executed but nothing opened"* failure whose only trace is a log
-line. Both read the live `equity` off the same account snapshot.
-`_DRIVER_MAX_RISK_PER_TRADE` survives only as the fallback; the sizer now calls
-`_driver_per_trade_cap()` at **call** time, since a module constant bound at
-import can never follow a book.
-
-**Every absence leaves the dollar cap alone** — no equity, a zero or non-finite
-one, a missing or zero percentage, a non-numeric ceiling. A fraction of an unknown
-cannot be enforced and a zero denominator would refuse every trade forever, which
-reads as a broken driver rather than as a cap.
-
-⚠ **The manual book is not equity-scaled.** Its per-trade cap is a flat dollar
-figure ($750 since 2026-09-22, about 3% of the book) and B3 already made its
-book-level ceiling a percentage. And `MAX_RISK_PER_TRADE` must stay flat while
-`scanner_engine.DEFAULT_MAX_RISK_DOLLARS` is wired to that exact constant:
-floating one and not the other would re-open the 21.9%-of-orders `RISK_TOO_HIGH`
-problem A6 closed, from the other end. The
-driver's sizing **appetite** is still an open operator decision; this only makes
-the config honest.
-
 ## An open position's Rescue read knows about earnings and about a pin
 
 Two **modifiers** on `rescue.assess_position_risk`, beside the GEX and regime ones
@@ -3676,7 +3539,7 @@ test that does not exist. Design:
 through `claude -p` with `CLAUDE_CODE_OAUTH_TOKEN` rather than the API key, falling back
 per call to the key. It implements `client.messages.create`, so a briefing's prompts,
 parsing and rendering are identical on either path. Everything else that calls Claude
-(Analyze button, Desk summary, driver) is still on the key. Design:
+(the Analyze button) is still on the key. Design:
 [the doc](docs/plans/2026-09-14-briefings-on-claude-subscription-design.md).
 
 ⚠ **Claude Code prefers `ANTHROPIC_API_KEY` whenever it is set**, so a CLI call from a
@@ -3820,11 +3683,9 @@ real levers if a page feels sluggish or a service churns CPU/network. Audited
   (deserializes the composite only when it changes, not every 2 s).
 - **sentiment_svc:** the state-transition phone push fires **outside `_TREND_LOCK`**
   (was holding it ~25 s on a flip day) and `sector_pc_delta` **closes its connection**
-  (was leaking ~26 handles/day). **driver_svc** reads the composite **once per cycle**
-  (shared by the market-state + magnitude readers).
-- **webgui:** ticker / market / driver poll payloads now read **off the event loop**
-  (`run.io_bound`), the driver poll **pipelines** its 5 version probes into one
-  `read_versions`, the scanner builds its ~5,238 display rows **off the loop**
+  (was leaking ~26 handles/day).
+- **webgui:** ticker / market poll payloads now read **off the event loop**
+  (`run.io_bound`), the scanner builds its ~5,238 display rows **off the loop**
   (`_read_and_build` → `_apply_populate`), and page-build reads `options:scan` **once**
   per navigation (shared by `_recompute_badges` + `_acknowledge`, was 2-3×).
 
@@ -3846,7 +3707,7 @@ you actually need the payload). `Bus.cache_set(key, payload, event=…, skip_unc
 doesn't repaint), and (b) pipelines `SET`+`PUBLISH` into one round-trip when `event`
 is given. The `SET` can't fold into the `INCR` (the envelope still embeds the version
 for `cache_get`). options_svc header + gex_status use `skip_unchanged`; other periodic
-republishers (sentiment 120 s, portfolio per-tick, driver perf) still bump
+republishers (sentiment 120 s, portfolio per-tick) still bump
 unconditionally — opt them in the same way if they prove chatty.
 
 **Every service shares the proxy's 5 req/s, so a scheduled chain burst must stay
@@ -3915,14 +3776,7 @@ panel's chain grid, and the same thinned chain is now also published as
 `cache:options:sim_chain`; the resulting size (~1.3 MB estimated) is unmeasured on prod. Fields were cut rather than strikes —
 the leg builder legitimately offers far wings, so the strike ladder stays whole.
 
-**Two more unbounded-growth fixes from the same audit.** `driver_account_view`
-published **every closed trade ever** (160 rows / 158 KB of a 224 KB payload,
-+~1 KB per trade forever) while `orders` beside it had had a `limit=100` all
-along. The rows are now capped at `DRIVER_CLOSED_LIMIT` — but the page's summary
-line is a **lifetime** count / win-rate / realized total, so capping alone would
-have silently misreported the driver's track record: `closed_totals` is computed
-over **every** closed row and carries `truncated`, which the summary line
-discloses ("showing the most recent N"). And `publish_bullbear` full-deserialized
+**One more unbounded-growth fix from the same audit.** `publish_bullbear` full-deserialized
 the 304 KB momentum payload (a **nightly** view) plus its own 190 KB output on
 every ~30 s tick; both are now version-gated memos (`handlers.reset_bullbear_memos`),
 taking the tick from three full deserializes to one. ⚠ That last one cannot reach
@@ -3933,7 +3787,6 @@ decide whether to skip.
 - The app-wide 2 s watcher now runs its blocking bus reads **off the event loop**
   (`main._tick` is async → `run.io_bound(_watcher_compute)`); `_watcher_compute`
   reads `options:scan` **once** and passes it to `_recompute_badges(scan)` (no double
-  read), reads the driver badge via `bus_client.read_full` (payload+version in one
   read), and uses the **in-memory-cached** `app_settings.load()` (no per-tick disk
   read; invalidated on `set()`). Badge/chime UI work happens back on the UI thread
   after the await.
@@ -4048,7 +3901,6 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 .venv/bin/python -m pytest services/options_svc    # 1216
 .venv/bin/python -m pytest services/portfolio_svc  # 32
 .venv/bin/python -m pytest services/trade_svc      # 77
-.venv/bin/python -m pytest services/driver_svc     # 239
 .venv/bin/python -m pytest services/market_svc     # 77
 .venv/bin/python -m pytest shared/bus              # 25
 .venv/bin/python -m pytest shared/contracts        # 49 (no app-dir imports — safe together)
@@ -4062,8 +3914,8 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 put charm, the CT/ET time basis, the VIX blend, the NaN guards) added tests to five
 suites. **The five this file previously
 flagged as *unverified — measure your own baseline* (portfolio_svc, trade_svc,
-driver_svc, `shared/bus`, `shared/contracts`) were all measured that day and had
-drifted far from their written values (driver_svc 162 → 239, `shared/bus` 15 → 25),
+the since-removed driver_svc, `shared/bus`, `shared/contracts`) were all measured
+that day and had drifted far from their written values (`shared/bus` 15 → 25),
 which is exactly what an unverified number does. `market_svc`, `shared/tests`,
 `tests` and `tools/tests` were never listed here at all.
 
@@ -4167,8 +4019,7 @@ None. The ML prediction servers (MES 8000 / MNQ 8001 / ES 8004 / NQ 8005) and th
 options analytics service on 8200 are separate processes this repo no longer
 calls: the claude-driver scripts that did were removed 2026-09-11, and the
 `claude-driver/` folder, its `config.py` and those ports' `config/ports.toml`
-entries (plus `approval` and `dashboard_frontend`) went on 2026-09-19. The
-driver's daily-loss halt now comes only from `config/driver.toml`.
+entries (plus `approval` and `dashboard_frontend`) went on 2026-09-19.
 
 ## Design / plan docs
 

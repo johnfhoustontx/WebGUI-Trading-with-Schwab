@@ -92,7 +92,6 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#options-service-8211">Options service — :8211</a></li>
 <li><a href="#portfolio-service-8212">Portfolio service — :8212</a></li>
 <li><a href="#trade-service-8213">Trade service — :8213</a></li>
-<li><a href="#driver-service-8214">Driver service — :8214</a></li>
 <li><a href="#market-service-8215">Market service — :8215</a></li>
 </ul>
 </li>
@@ -229,11 +228,6 @@ keys that feed it. Menu order matches the rail.</p>
 <td><code>cache:trade:analysis</code>, <code>:deepdive</code>, <code>:deepdive_query</code></td>
 </tr>
 <tr>
-<td><strong>Claude Trades</strong></td>
-<td><code>driver_svc</code> :8214 decides, <code>options_svc</code> executes</td>
-<td><code>cache:driver:autonomous</code>, <code>:control</code>, <code>cache:options:driver_paper_account</code>, <code>:driver_paper_perf</code></td>
-</tr>
-<tr>
 <td><strong>Portfolio</strong></td>
 <td><code>portfolio_svc</code> :8212</td>
 <td><code>cache:portfolio:positions</code></td>
@@ -241,7 +235,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>EOD Report</strong></td>
 <td>none — pure Tier-1 reader</td>
-<td>aggregates the <code>options:*</code> and <code>driver:*</code> keys</td>
+<td>aggregates the <code>options:*</code> keys</td>
 </tr>
 <tr>
 <td><strong>System Status</strong></td>
@@ -416,18 +410,6 @@ a contract (listed in <em>Cache Key Index</em>).</p>
 <td><code>holdings_rows[]</code>, <code>sector_rows[]</code>, <code>performance_rows[]</code>, <code>suggestions{}</code>, <code>proxy_up</code>, <code>streaming</code>, <code>errors[]</code>, <code>timestamp</code></td>
 </tr>
 <tr>
-<td><code>DriverControl</code></td>
-<td><code>driver.py</code></td>
-<td><code>cache:driver:control</code></td>
-<td><code>enabled</code>, <code>halted</code>, <code>reason</code>, <code>halted_date</code> (ISO date the latch was set, so it re-arms next day), <code>timestamp</code></td>
-</tr>
-<tr>
-<td><code>AutonomousState</code></td>
-<td><code>driver.py</code></td>
-<td><code>cache:driver:autonomous</code></td>
-<td><code>date</code>, <code>enabled</code>, <code>halted</code>, <code>halt_reason</code>, <code>day_pnl</code>, <code>target</code>, <code>positions[]</code>, <code>decisions[]</code> (newest-first checkpoint log), <code>perf{}</code>, <code>last_cycle_ts</code>, <code>error</code>, <code>timestamp</code></td>
-</tr>
-<tr>
 <td><code>MarketDashboard</code></td>
 <td><code>market.py</code></td>
 <td><code>cache:market:dashboard</code></td>
@@ -525,8 +507,7 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 <p><strong>Entry:</strong> <code>services/options_svc/app.py</code>. <strong>Scheduler:</strong> auto-scan (15-min slots,
 08:00–15:15 CT), GEX collection (1-min slots, 08:00–15:20 CT; from 06:30 for
 ETH-eligible symbols), Paper Portfolio entry + manage (hourly at the top of the
-hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), driver paper
-auto-manage (1-min slots, 08:00–15:15 CT), captured-signal auto-manage (5-min
+hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), captured-signal auto-manage (5-min
 slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
 skip-unchanged).</p>
 <p><strong>Commands (<code>cmd:options</code>):</strong></p>
@@ -931,97 +912,6 @@ live scorer's primary z-score basis), the <code>calibration</code> bands
 (<code>{band, score_lo, score_hi, mean_fwd, hit_rate, n}</code>), and <code>oos_ic</code>/<code>oos_ic_by_fold</code>/
 <code>n_folds</code>. A markdown research report is written alongside (<code>SWING_MODEL_REPORT</code>).
 Re-running the fit (e.g. after a regime shift) is the supported maintenance path.</p>
-<h2 id="driver-service-8214">Driver service — :8214</h2>
-<p><strong>Entry:</strong> <code>services/driver_svc/app.py</code>. <strong>Scheduler:</strong> polls the run gate every
-30 s; fires a checkpoint every 30 minutes inside the entry window
-<strong>09:45–15:30 ET</strong>. The open-bell slot is deliberately skipped, so the first
-fire-able slot is 09:45 and the last entry decision is the 15:00 slot.</p>
-<blockquote>
-<p><strong>The order-approval queue was removed in July 2026.</strong> <code>ApprovalState</code>,
-<code>PerfReport</code>, <code>cache:driver:approvals</code>, <code>cache:driver:performance</code> and the
-<code>approve</code> / <code>skip</code> commands no longer exist. The service is now an autonomous
-decision layer whose output is a <strong>command enqueued on <code>cmd:options</code></strong>, and the
-page is a monitor with a kill switch.</p>
-</blockquote>
-<p><strong>The cycle.</strong> <code>build_packet</code> → <code>decider.decide</code> (Claude, forced tool call) →
-<code>guardrails.apply_guardrails</code> → <code>driver_paper_create</code> on <code>cmd:options</code>.</p>
-<p><code>apply_guardrails</code> is <strong>pure code</strong> and is the reason the design is defensible: it
-clamps position size and halts on the banked daily target, the daily loss cap, or a
-VIX threshold. <strong>The model never sizes its own risk.</strong> Risk is evaluated in
-<em>per-contract</em> dollars (<code>CONTRACT_MULTIPLIER = 100</code>) — an earlier version compared
-the scanner's per-share <code>max_loss</code> against a per-contract cap, a 100× mismatch that
-silently rejected every index trade.</p>
-<p><strong>Key settings</strong> (<code>services/driver_svc/settings.py</code>):</p>
-<table>
-<thead>
-<tr>
-<th>Constant</th>
-<th>Value</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>DAILY_TARGET</code></td>
-<td><code>500.0</code></td>
-<td>Base bank-the-day threshold ($ net day P&amp;L).</td>
-</tr>
-<tr>
-<td><code>TARGET_CAP</code></td>
-<td><code>1000.0</code></td>
-<td>Maximum ratcheted daily target (2× base) when behind the MTD pace.</td>
-</tr>
-<tr>
-<td><code>TARGET_FLOOR</code></td>
-<td><code>250.0</code></td>
-<td>Minimum daily target when ahead of the MTD pace.</td>
-</tr>
-<tr>
-<td><code>DAILY_LOSS_HALT</code></td>
-<td><code>1500.0</code></td>
-<td>Daily loss that halts new entries.</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Commands (<code>cmd:driver</code>):</strong></p>
-<table>
-<thead>
-<tr>
-<th>Type</th>
-<th>Args</th>
-<th>Effect</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>cycle</code></td>
-<td>—</td>
-<td>Run one decision checkpoint now (packet → decide → guardrails → enqueue).</td>
-</tr>
-<tr>
-<td><code>enable</code></td>
-<td>—</td>
-<td>Set <code>cache:driver:control.enabled = true</code>.</td>
-</tr>
-<tr>
-<td><code>disable</code></td>
-<td>—</td>
-<td>Clear the enable flag; the scheduler stops opening new positions.</td>
-</tr>
-<tr>
-<td><code>stop</code></td>
-<td>—</td>
-<td>Latch <code>halted</code> for the rest of the day (<code>halted_date</code> re-arms it next session). Management and exits continue.</td>
-</tr>
-</tbody>
-</table>
-<blockquote>
-<p><strong>The arm state lives in Redis, not in the process.</strong> Disabling the scheduler
-alone would not stop a restored snapshot that carried <code>cache:driver:control</code>
-enabled, which is why <code>run_autonomous_cycle</code> also checks the environment's
-<code>autonomous_trading</code> flag directly.</p>
-</blockquote>
-<hr />
 <h2 id="market-service-8215">Market service — :8215</h2>
 <p><strong>Entry:</strong> <code>services/market_svc/app.py</code>. Publishes the macro-ticker board that backs
 <code>/market</code> and the market summary that feeds both the bottom ticker and the Desk's
@@ -1262,9 +1152,6 @@ cache:options:x_reports                                     (market reports alre
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
 cache:options:calc_rating      events:options:calc_rating   (Rate my trade)
-cache:options:driver_paper_account    events:options:driver_paper_account
-cache:options:driver_paper_perf       events:options:driver_paper_perf
-cache:options:driver_paper_analytics  events:options:driver_paper_analytics
 cache:options:paper_analytics  events:options:paper_analytics
 cache:options:captured_closed  events:options:captured_closed
 cache:options:action_alert     events:options:action_alert
@@ -1285,25 +1172,16 @@ cache:options:rescue:&lt;position_id&gt;   events:options:rescue:&lt;position_id
 cache:options:rescue_summary   events:options:rescue_summary
 cmd:options
 </code></pre>
-<p><strong>Trade / Portfolio / Driver / Market:</strong></p>
+<p><strong>Trade / Portfolio / Market:</strong></p>
 <pre><code>cache:trade:analysis           events:trade:analysis          (TradeAnalysis)
 cache:trade:deepdive           events:trade:deepdive
 cache:trade:deepdive_query     events:trade:deepdive_query
 cache:trade:markov_prior       cache:trade:universe_factors
 cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
-cache:driver:control           events:driver:control          (DriverControl)
-cache:driver:autonomous        events:driver:autonomous       (AutonomousState)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
-cmd:trade   cmd:portfolio   cmd:driver   cmd:market
+cmd:trade   cmd:portfolio   cmd:market
 </code></pre>
-<blockquote>
-<p><strong><code>cache:driver:approvals</code> and <code>cache:driver:performance</code> no longer exist</strong> — they
-belonged to the order-approval queue removed in July 2026. The driver's realized
-performance now lives in its isolated paper book under
-<code>cache:options:driver_paper_account</code> and <code>:driver_paper_perf</code>, published by
-<code>options_svc</code> rather than <code>driver_svc</code>.</p>
-</blockquote>
 <hr />
 <h1 id="service-scaffold">Service Scaffold</h1>
 <p><strong>File:</strong> <code>services/_scaffold.py</code>. Each service is one call:</p>
@@ -1400,11 +1278,6 @@ hard-code ports or <code>D:\</code> paths.</p>
 <td><code>SERVICE_PORTS["trade"]</code></td>
 </tr>
 <tr>
-<td>driver_svc</td>
-<td>8214</td>
-<td><code>SERVICE_PORTS["driver"]</code></td>
-</tr>
-<tr>
 <td>market_svc</td>
 <td>8215</td>
 <td><code>SERVICE_PORTS["market"]</code></td>
@@ -1439,8 +1312,8 @@ resolves the identity and every port consumer follows it with no edit of its own
 <tbody>
 <tr>
 <td><code>[services]</code> ports</td>
-<td>8210–8215</td>
-<td><strong>9210–9215</strong> (<code>port_offset</code>)</td>
+<td>8210–8213, 8215</td>
+<td><strong>9210–9213, 9215</strong> (<code>port_offset</code>)</td>
 </tr>
 <tr>
 <td>webgui</td>

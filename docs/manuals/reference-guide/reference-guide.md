@@ -43,7 +43,7 @@ Three layers, running as separate programs on your machine:
 | Layer | What it is | Why you care |
 |---|---|---|
 | **The gateway** | `schwab-proxy` on port 8100. Holds your Schwab login and fetches all market data. | If this is down, nothing has fresh data. Start it first. |
-| **The services** | Six background programs (ports 8210–8215), one per subject area: sentiment, options, portfolio, trade, driver, market. | They do the work — scanning, scoring, collecting — whether or not a browser is open. |
+| **The services** | Five background programs (ports 8210–8213 and 8215), one per subject area: sentiment, options, portfolio, trade, market. | They do the work — scanning, scoring, collecting — whether or not a browser is open. |
 | **The web app** | What you look at, on port 8500. | It **only displays**. It never calculates anything itself. |
 
 Between them sits a small in-memory database (Redis).
@@ -87,7 +87,8 @@ right now?*) and **Symbol** (*tell me everything about this one ticker*).
 | ▸ Rescue | You have a credit spread going wrong and want ranked repair options. |
 | **Strategy Finder** | You have one symbol and want the best structure for it. |
 | **Trade Analyzer** | You want a Buy/Hold/Sell read on one stock, or a ranked shortlist to pick one from. |
-| **Claude Trades** | You want to watch (or stop) the autonomous paper trader. |
+
+The autonomous Claude paper trader (*Claude Trades*) was removed on 2026-09-22.
 
 ### ACCOUNT — *what do I own, and how did I do?*
 
@@ -133,7 +134,6 @@ Send it to **Paper Ledger** (your own book) or let the engine work in **Paper Ac
 
 **Managing.**
 **Rescue** flags credit spreads that have gone against you and ranks the repairs.
-**Claude Trades** shows what the autonomous trader did, with a STOP button.
 
 **After the close.**
 **EOD Report** aggregates every book. **Portfolio** shows the real account.
@@ -271,7 +271,7 @@ time-and-sales tape, so no one can honestly say which side initiated. Any produc
 that tells you "$3.9M of calls were **bought**" is inferring it, usually from the
 bid/ask side, and that inference is often wrong.
 
-**Positions.** Your paper trades and Claude's, merged, open only: source, strikes,
+**Positions.** Your paper trades and your captured signals, merged, open only: source, strikes,
 days to expiration, size, entry, live mark, unrealized profit or loss, and a flag —
 **OK**, **Watch**, **At risk**, **Rescue**. The header totals open trades,
 unrealized P&L, and how many need attention. *At risk* and *Rescue* are the two
@@ -403,7 +403,7 @@ disagree with the page it links to.
 When a name comes up — in a flow alert, on the Opportunity Board, in the news — and
 you want the whole picture before deciding whether it deserves a closer look. It is
 also the quickest way to check "do I already hold something in this?" before opening
-a new trade, because the position band searches all four books at once.
+a new trade, because the position band searches all three books at once.
 
 ### The bands
 
@@ -1205,8 +1205,7 @@ can genuinely change within a session — the share table shows that happening.
 
 ### Related pages
 
-[Market Dashboard](#market-dashboard) · [Sector Rotation](#sector-rotation) ·
-[Claude Trades](#claude-trades) (the autonomous trader reads this page's output).
+[Market Dashboard](#market-dashboard) · [Sector Rotation](#sector-rotation).
 
 ---
 
@@ -1692,8 +1691,7 @@ because *suppressed* is a genuine stand-aside signal.
 
 This section turns market conditions into specific trades. It has a deliberate shape:
 **Strategy Tools** model legs *you* bring, the **Options** group works through signals
-the app *finds*, **Trade Analyzer** judges a single stock, and **Claude Trades** watches
-the automated trader.
+the app *finds*, and **Trade Analyzer** judges a single stock.
 
 ## Calculator
 
@@ -2653,14 +2651,13 @@ spreads here now **close themselves** on two rules (see *Automatic exits* below)
 Credit spreads are still tracked only, and every row remains closable by hand at
 any time.
 
-**This is one of three separate paper books**, and confusing them is the most common
+**This is one of two separate paper books**, and confusing them is the most common
 source of "why does this number not match" in the app:
 
 | Book | Page | Who trades it |
 |---|---|---|
 | **Paper Ledger** | this page | **You** — you open every row. Long options and debit spreads then exit automatically |
 | **Paper Account** | [Paper Account](#paper-account) | The automated engine |
-| **Driver account** | [Claude Trades](#claude-trades) | The autonomous Claude trader |
 
 They are fully isolated. Nothing crosses between them.
 
@@ -2823,8 +2820,8 @@ Whenever you would have taken a trade but did not.
 ### What it is
 
 The account behind the **automated** paper-trading engine — the one that opens and
-closes positions on its own from captured signals. Distinct from both the hand-kept
-[Paper Ledger](#paper-ledger) and the [Claude Trades](#claude-trades) driver book.
+closes positions on its own from captured signals. Distinct from the hand-kept
+[Paper Ledger](#paper-ledger).
 
 ### Where the data comes from
 
@@ -2920,7 +2917,7 @@ The fills log is also the best available audit trail when a position behaves une
 ### Related pages
 
 [Paper Ledger](#paper-ledger) · [Captured Signals](#captured-signals) (the entry source)
-· [Claude Trades](#claude-trades) · [EOD Report](#eod-report).
+· [EOD Report](#eod-report).
 
 ---
 
@@ -3652,7 +3649,7 @@ stop, and splits its reporting by side.
 |---|---|
 | Service | `trade_svc`, `cache:trade:model_book`, store `model_book.db` |
 | Trigger | The board's **Rebuild** advances it; otherwise it follows the board |
-| Scope | **Paper only**, and isolated from the Claude Trades book |
+| Scope | **Paper only**, and isolated from the other paper books |
 
 ⚠ Two things about what it measures. It trades the **underlying**, not the
 options structure the plan suggests — a spread's theta and vega would swamp the
@@ -3712,106 +3709,6 @@ After Overview and Evidence, when you have decided the read is worth acting on.
 ### Related pages
 
 [Overview](#overview) · [Evidence](#evidence) · [Rank Board](#rank-board).
-
----
-
-## Claude Trades
-
-*Menu: STRATEGY → Claude Trades · Route `/driver`*
-
-### What it is
-
-An **autonomous paper options trader**. Claude selects and sizes defined-risk credit
-spreads from the scanner's output; code-enforced guardrails cap the risk. This page
-monitors it and can stop it.
-
-**Nothing is ever sent to Schwab.** It trades its own isolated paper book.
-
-### Where the data comes from
-
-| | |
-|---|---|
-| Service | `driver_svc` (:8214) decides; `options_svc` (:8211) executes into the isolated book |
-| Cache keys | `cache:driver:autonomous`, `:control`, `cache:options:driver_paper_account`, `:driver_paper_perf` |
-| Checkpoints | Every 30 minutes within the entry window **09:45–15:30 ET**. The open-bell slot is deliberately skipped, so the first is 09:45 |
-| Re-pricing | Open positions re-priced **every minute** during market hours |
-
-**Why the entry window is shaped that way.** The first ~15 minutes after the open are
-skipped so the post-open structure is readable, and no *new* entries are taken in the
-last 30 minutes before the close. Management and exits are unaffected.
-
-### Reading the screen
-
-**Status row:** whether autonomy is ACTIVE, the last cycle time, and three controls —
-**Autonomous** (enable/disable), **Run now** (one immediate checkpoint) and a
-confirm-gated **STOP** (halts new trades for the day; open positions keep managing).
-
-**Tiles:** Day P&L against the day's target · Session P&L · Realized · Open P&L ·
-Equity · Open count.
-
-> **The daily target is dynamic.** The base is **$500**, but it ratchets against the
-> month-to-date pace — up to a **$1,000** cap when behind, down to a **$250** floor when
-> ahead. So the number in the tile changes day to day. A **−$1,500** daily loss halts new
-> entries outright.
-
-**Open positions** and a **decision log** (newest first, in CT) showing each checkpoint's
-reasoning, including a one-line market-context summary.
-
-**Performance scorecard:** trades, open, closed, **win rate**, realized, open P&L, total
-P&L, **average win**, **average loss**, **profit factor**, best and worst trade, plus
-breakdowns of **P&L by symbol** and **by strategy**.
-
-**Performance view:** the closed-trade list with exit reasons — *Target hit*, *Delta
-stop*, *Time stop*, *Money stop*.
-
-### How the guardrails work
-
-This is the part worth understanding, because it is what makes the design defensible:
-**the model never sizes its own risk.** The cycle is
-
-1. `build_packet` — assemble market context, candidates and account state;
-2. `decider.decide` — Claude picks a candidate and proposes a size;
-3. `guardrails.apply_guardrails` — **pure code** clamps the size and halts on the banked
-   target, the loss cap, or a VIX threshold;
-4. the clamped order is enqueued to the paper book.
-
-Step 3 cannot be argued with by the model. Per-trade risk is evaluated in **per-contract
-dollars**, and the driver's own book carries a higher per-trade cap than the manual
-account ($750).
-
-### Why it matters
-
-As a research instrument this is the most interesting thing in the app: an unbiased,
-fully-logged record of what a rules-plus-model system does with the app's own signals.
-The decision log tells you *why* each trade was taken, which no human trading journal
-manages consistently.
-
-**Be clear-eyed about the results.** At the time of writing this book's record is
-**negative**: 151 closed trades, a **45% win rate**, a **profit factor of 0.57**, an
-average win of **+$165** against an average loss of **−$236**, and realized P&L of
-about **−$8,300**. Put credit spreads account for essentially all of the loss while call
-credit spreads are roughly flat.
-
-That shape — winning less than half the time while losing more per loss than you make
-per win — is the classic failure mode for premium selling: the wins are capped at the
-credit while the losses run to the width. It is *the* thing this page exists to make
-visible, and it is a strong argument for treating the driver as an experiment rather
-than a strategy.
-
-### Caveats and gotchas
-
-- **"Executed" in the decision log means the order was enqueued, not filled.** The true
-  outcome is in the account view's open results. A trade can be logged as executed and
-  then rejected for risk.
-- Analytics are **forward-only** — the equity curve is complete, but posture and
-  MAE/MFE statistics only accrue on trades opened after those were added.
-- Enabling autonomy costs Claude API calls per checkpoint. [Settings](#settings) shows
-  the running count.
-
-### Related pages
-
-[Market Scanner](#market-scanner) (its candidate source) · [Sentiment](#sentiment) ·
-[Paper Account](#paper-account) · [EOD Report](#eod-report).
 
 ---
 
@@ -3896,16 +3793,16 @@ it as a standalone file you can reopen later.
 
 ### Where the data comes from
 
-Purely a reader. It aggregates the `options:*` and `driver:*` caches; it computes nothing
+Purely a reader. It aggregates the `options:*` caches; it computes nothing
 of its own and calls no external service.
 
 ### Reading the screen
 
-**Summary tiles:** paper session P&L · scanner signals · captured signals · paper trades
-· driver realized P&L · driver win rate · driver trades.
+**Summary tiles:** paper session P&L · scanner signals · captured signals · paper trades.
 
-**Performance blocks, one per book** — *Manual paper*, *Driver*, and *Captured closed* —
-each with equity, session P&L, open unrealized and open count, then a table:
+**Performance blocks, one per book** — *Manual paper* and *Captured signals*. The manual
+book leads with equity, session P&L, open unrealized and open count; the captured book
+has no account behind it, and its figures assume one contract per signal. Then a table:
 
 | Period | What it covers |
 |---|---|
@@ -3922,7 +3819,7 @@ credit collected.
 
 **Detailed** (`/eod/detail`) adds breakdowns by **strategy** (PCS / CCS / IC), by
 **0-DTE versus swing**, and by **status** (open / closed / expired), plus the full trade,
-scanner, captured and driver tables. Both views use a jump-link table of contents and
+scanner and captured tables. Both views use a jump-link table of contents and
 collapsible sections that work in the exported file as well as in the app.
 
 **Generate** snapshots the current caches into standalone `summary.html` and
@@ -3941,9 +3838,8 @@ The per-period tables are where a strategy's real shape appears. A book can show
 healthy daily number for weeks and still be losing month to date, because the losses
 cluster. Weekly and MTD side by side make that visible immediately.
 
-Splitting **by strategy** is the single most valuable breakdown here — it is how the
-driver's PCS-versus-CCS asymmetry became apparent, and the same analysis on your own
-book will usually show one structure carrying all the damage.
+Splitting **by strategy** is the single most valuable breakdown here — on most books it
+will show one structure carrying all the damage.
 
 **Where it is weak.** It aggregates paper books priced at the mark. Real fills, slippage
 and commissions are not in these numbers, so treat every figure as optimistic.
@@ -3964,8 +3860,7 @@ and commissions are not in these numbers, so treat every figure as optimistic.
 
 ### Related pages
 
-[Paper Ledger](#paper-ledger) · [Paper Account](#paper-account) ·
-[Claude Trades](#claude-trades).
+[Paper Ledger](#paper-ledger) · [Paper Account](#paper-account).
 
 ---
 
@@ -4072,7 +3967,6 @@ merely running but actually *publishing*.
 | options_svc | 2 | 8211 |
 | portfolio_svc | 2 | 8212 |
 | trade_svc | 2 | 8213 |
-| driver_svc | 2 | 8214 |
 | market_svc | 2 | 8215 |
 | webgui (this app) | 1 | 8500 |
 | webgui_live (public live screens) | 1 | 8501 |
@@ -4111,8 +4005,6 @@ fetch anything.
 - The Schwab **refresh** token is the fatal one. `token_expired: true` on the proxy is
   routine — it auto-refreshes. A missing or expired *refresh* token needs
   **Re-authorize**.
-- The page header text says "the five domain services" while six are listed; there are
-  six.
 
 ### Related pages
 
@@ -4156,8 +4048,7 @@ exit rules. Off leaves them advisory.
 **Manual paper: break-even lifecycle (experimental).** Opts the manual paper account into
 the same lifecycle: arm break-even at +50% of credit instead of taking profit
 immediately, then ride toward full credit protected by a break-even stop. Off (the
-default) keeps the plain take-profit at +50%. The driver's isolated account is never
-affected by this toggle.
+default) keeps the plain take-profit at +50%.
 
 **Show the ticker.** The scrolling marquee at the bottom of every page, led by the
 latest published market report's headline. **Turning it off only hides the
@@ -4173,7 +4064,7 @@ edited) and **Restart now** applies it to every screen; **Reset to shipped value
 (confirm-gated) removes the override.
 
 **Configuration tab.** Every trading setting the services read from `config/*.toml`
-— scanner floors, exit rules, the driver's risk envelope, flow-alert thresholds,
+— scanner floors, exit rules, the paper books' per-trade loss caps, flow-alert thresholds,
 session windows and scheduled-job times, symbol lists, the sector map and
 commissions — grouped by purpose, each with a plain-English explanation, its unit and
 its allowed range. Open it when you want to tune how the app trades or alerts
@@ -4183,8 +4074,7 @@ restart the services the change affects — during market hours it warns that
 restarting the options service costs gamma-collection minutes.
 
 **API usage.** Outbound **Schwab** calls counted at the gateway per actual HTTP request
-(including retries), and **Claude (Anthropic)** calls counted at each call site — the
-driver's decision maker and Gamma Analyze among them — for today,
+(including retries), and **Claude (Anthropic)** calls counted at each call site — Gamma Analyze among them — for today,
 the last 7 days and the last 30 days.
 
 **Maintenance.** **Vacuum GEX history DB** compacts the intraday options database, with
@@ -4221,7 +4111,7 @@ number before that happens. The Claude counter does the same for money.
 
 *Menu: bottom of the rail, the red-outlined button · Route `/terminate`*
 
-A confirm-gated stop of the entire local stack — the gateway, all six services, the
+A confirm-gated stop of the entire local stack — the gateway, all five services, the
 web app itself, and the public live screens on `live.neuralstrike.co`, which go dark
 with it. **Redis is deliberately left running**, because it is a *system* service
 this app does not own.
@@ -4243,9 +4133,8 @@ cannot do both jobs.
 
 Why this control and no other: the app is reachable from the internet behind a single
 session cookie, and a stolen cookie or an unlocked phone would cost the rest of the
-trading day — the session's options collection, a live stream dropped mid-broadcast,
-the driver stood down. The arm switch on Claude Trades and Rescue's **Apply** are
-deliberately *not* gated this way; a code demanded everywhere is a code nobody reads.
+trading day — the session's options collection and a live stream dropped mid-broadcast.
+Rescue's **Apply** is deliberately *not* gated this way; a code demanded everywhere is a code nobody reads.
 
 It is rendered as a danger-outlined button, and **Sign out** sits below it — on a
 phone the bottom edge is the easiest target, so the harmless control takes that slot
@@ -4267,7 +4156,7 @@ It signs out this browser only. The tokens are stateless by design, so there is 
 "sign out everywhere" button here — other devices stay signed in until their own
 tokens expire.
 
-**It stops nothing.** Services, collectors, scheduled scans and the autonomous driver
+**It stops nothing.** Services, collectors and scheduled scans
 all keep running; signing out only ends your view of them. The page directly above it
 in the rail is the one that stops things.
 
@@ -4284,7 +4173,6 @@ Pages carrying their own subtab row, and what each subtab does.
 | **Simulator** | **Price & Time** (price and time sliders) · **Volatility** (volatility multiplier) · **History** (real historical path) |
 | **Portfolio** | **Holdings** · **Sectors** (weights vs S&P) · **Performance** (graded positions) |
 | **Rescue** | **At-Risk Board** · **Ad-hoc Trade** |
-| **Claude Trades** | Monitor (default) · **Performance** (closed trades and realized P&L) |
 | **EOD Report** | **Summary** · **Detailed** (`/eod/detail`) |
 | **Settings** | **General** · **Appearance** (Surfaces · Text · Fields · Buttons · Status colours · Charts · Type · Menu) · **Configuration** |
 
@@ -4297,7 +4185,6 @@ What updates when. All times US Central.
 | Market Dashboard | **3 s** | Regular hours | 15 s off-hours; 60 s at weekends |
 | Portfolio P&L | **2 s** | Streaming | Full rebuild every 10 min (hourly off-hours) |
 | Gamma collection | **1 min** | 08:00–15:20 | ~90 symbols; five series each. A poll that overruns its minute skips the next one |
-| Driver paper re-pricing | **1 min** | 08:00–15:15 | Keeps stops reacting within the minute |
 | Flow-alert detection | **1 min** | With the gamma collection | |
 | Opportunity Board | **1 min** | With the gamma collection | Spot/Day % overlaid on the ~30 s header tick |
 | Sentiment composite | **2 min** | Market hours | 15 min off-hours |
@@ -4310,7 +4197,6 @@ What updates when. All times US Central.
 | Manual Paper Account cycle | **hourly** | 09:00–14:00 | No 15:00 run |
 | Sector & industry refresh (P/C, trends) | **hourly** | 08:38–14:38 | At :38, clear of the scanner's :30 and :45 runs |
 | Income Window board | **once daily** | 08:52 | After the 08:45 scan finishes |
-| Driver checkpoints | **30 min** | 09:45–15:30 ET | First fire-able slot 09:45; the open-bell slot is skipped |
 | Gamma Analyze briefings | **4× daily** | Premarket · ~18 min after open · midday · close | |
 | Momentum cascade | **nightly** | 16:20 | Daily bars change once a day |
 | Sector Rotation / RRG | **manual** | | Cached; press Refresh |

@@ -137,7 +137,6 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#trade-plan">Trade Plan</a></li>
-<li><a href="#claude-trades">Claude Trades</a></li>
 <li><a href="#cross-page-actions">Cross-page actions</a></li>
 </ul>
 </li>
@@ -179,7 +178,6 @@ and dashboard tools with one web app you open in your browser at
 <li><strong>Read the market's mood</strong> through a sentiment composite, Day/Week/Month trend
   rings, a market-regime console, and a sector-rotation map.</li>
 <li><strong>Review</strong> your live brokerage portfolio and an end-of-day report.</li>
-<li><strong>Watch</strong> an autonomous paper trader pick and size defined-risk spreads.</li>
 </ul>
 <blockquote>
 <p><strong>This is a single-user application.</strong> It runs on your own machine and talks
@@ -233,7 +231,7 @@ just click <strong>Authorize</strong> again.</p>
 <h2 id="nice-to-have-optional">Nice-to-have (optional)</h2>
 <ul>
 <li><strong>An Anthropic (Claude) API key</strong> — only needed for the AI features: the Gamma
-  <strong>Analyze</strong>/<strong>Explain</strong> infographics and the autonomous <strong>Claude Trades</strong> driver.
+  <strong>Analyze</strong>/<strong>Explain</strong> infographics.
   Set it as the <code>ANTHROPIC_API_KEY</code> environment variable
   (or in a <code>shared/anthropic_key.txt</code> file). Without it, those features simply stay
   quiet — nothing else is affected, and the auto-trader safely stands down.</li>
@@ -249,7 +247,7 @@ just click <strong>Authorize</strong> again.</p>
 </ul>
 <h2 id="ports-the-app-uses">Ports the app uses</h2>
 <p>The app runs entirely on your own machine and needs these local ports free:
-<strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8215</strong> (the six services),
+<strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8213</strong> and <strong>8215</strong> (the five services),
 <strong>8500</strong> (the web app) and <strong>8501</strong> (the public live screens). If another program
 is already using one of them, the matching piece won't start.</p>
 <hr />
@@ -267,7 +265,7 @@ all together with one of the launcher scripts in the project root:</p>
 <tbody>
 <tr>
 <td><code>systemctl --user start trading-prod.target</code></td>
-<td>Starts the gateway, the six domain services, the web app and the public live screens.</td>
+<td>Starts the gateway, the five domain services, the web app and the public live screens.</td>
 </tr>
 <tr>
 <td><code>systemctl --user list-units 'trading-prod*'</code></td>
@@ -379,7 +377,7 @@ behind all three.</p>
 <strong>Tools</strong> menu links the four screens a visitor can act on.</p>
 <p>Three things to know:</p>
 <ul>
-<li><strong>They are not redacted.</strong> The Desk shows your open paper and driver positions,
+<li><strong>They are not redacted.</strong> The Desk shows your open paper positions and captured signals,
   the Opportunity Board ranks signals, and Flow Alerts carries live alerts.
   Anyone with the address can read them. That is a deliberate choice — the book
   is paper only — but it is worth knowing before you show someone the link.</li>
@@ -403,7 +401,7 @@ rather than the moment you open the menu. The screen behind it is always live.</
 <li><strong>Schwab gateway (proxy)</strong> — handles the Schwab connection and market data.
   Everything else depends on it. <strong>It must be running first</strong> (the launcher
   handles ordering for you).</li>
-<li><strong>Six domain services</strong> — Sentiment, Options, Portfolio, Trade, Driver, and
+<li><strong>Five domain services</strong> — Sentiment, Options, Portfolio, Trade and
   Market. Each one powers its matching page(s).</li>
 <li><strong>The public live screens</strong> — a second, read-only copy of the web app serving
   <code>live.neuralstrike.co</code>. See <em>The public live screens</em> above.</li>
@@ -422,7 +420,7 @@ launcher, or restart the specific service from the <strong>System Status</strong
 <p>Use <strong>Stop All Services</strong> at the foot of the rail — it asks for your
 authenticator code before it will do anything — or run
 <code>systemctl --user stop trading-prod.target</code>. This stops the
-gateway, the six services, the web app <strong>and the public live screens</strong> — so the
+gateway, the five services, the web app <strong>and the public live screens</strong> — so the
 public site goes dark until you start the stack again. (Redis is intentionally
 left running — it is a <em>system</em> service the app's own units cannot reach.)</p>
 <hr />
@@ -521,12 +519,9 @@ and <strong>Symbol</strong> (one screen about one ticker).</p>
 <td><strong>Trade Analyzer</strong> (group)</td>
 <td>Analyze · Rank Board</td>
 </tr>
-<tr>
-<td><strong>Claude Trades</strong> (standalone)</td>
-<td>—</td>
-</tr>
 </tbody>
 </table>
+<p>The autonomous Claude paper trader (<em>Claude Trades</em>) was removed on 2026-09-22.</p>
 <p><strong>ACCOUNT — what do I own?</strong></p>
 <table>
 <thead>
@@ -570,11 +565,10 @@ signals appear it can:</p>
 <li>Play a <strong>chime</strong> (a bundled sound), and optionally</li>
 <li>Fire a <strong>desktop notification</strong>.</li>
 </ul>
-<p>It also shows red <strong>count badges</strong> on three nav items:</p>
+<p>It also shows red <strong>count badges</strong> on two nav items:</p>
 <ul>
 <li><strong>Scanner</strong> — number of brand-new signals.</li>
 <li><strong>Captured Signals</strong> — new captures.</li>
-<li><strong>Claude Trades</strong> — new autonomous-driver activity.</li>
 </ul>
 <p>Opening that page clears its badge. A <strong>group's</strong> rail badge is the sum of its
 children's badges, so a count on the collapsed rail still tells you which section
@@ -647,7 +641,7 @@ structure · what should I act on · what am I holding.</em></p>
 </tr>
 <tr>
 <td><strong>Positions</strong></td>
-<td>Your paper trades and Claude's together, with live marks and an <strong>OK / Watch / At risk / Rescue</strong> flag</td>
+<td>Your paper trades and captured signals together, with live marks and an <strong>OK / Watch / At risk / Rescue</strong> flag</td>
 </tr>
 <tr>
 <td><strong>Market Summary</strong></td>
@@ -659,7 +653,7 @@ structure · what should I act on · what am I holding.</em></p>
 means and, for Bias, what position size it implies.</p>
 <p><strong>Clicking any row</strong> opens the page it came from, already set to that symbol — a
 dealer row opens Dealer Positioning on that symbol, a position opens the Paper
-Ledger or Claude Trades.</p>
+Ledger or Captured Signals.</p>
 <p><strong>Nothing on this page can place or change a trade.</strong> It reads and links only.</p>
 <p><strong>It announces arrivals out loud.</strong> When a new flow alert or a newly-opened position
 appears, the Desk speaks it and the row itself <strong>glows for ten seconds</strong>, so your eye
@@ -770,7 +764,7 @@ to the page that owns those facts:</p>
 </tr>
 <tr>
 <td><strong>Your position</strong></td>
-<td>Anything open in this name in the paper account, the paper ledger, Claude's book or captured signals, with the rescue flag where the book carries one</td>
+<td>Anything open in this name in the paper account, the paper ledger or captured signals, with the rescue flag where the book carries one</td>
 <td>Paper Ledger · Rescue</td>
 </tr>
 </tbody>
@@ -1207,8 +1201,7 @@ stocks.</p>
 <hr />
 <h1 id="strategy-what-should-i-trade">STRATEGY — what should I trade?</h1>
 <p><strong>Strategy Tools</strong> model legs you bring; the <strong>Options</strong> group works through
-signals the app finds; <strong>Trade Analyzer</strong> judges a single stock; <strong>Claude Trades</strong>
-watches the autonomous trader.</p>
+signals the app finds; and <strong>Trade Analyzer</strong> judges a single stock.</p>
 <h2 id="calculator">Calculator</h2>
 <p><strong>Route:</strong> <code>/options/calculator</code>.</p>
 <p>An options P&amp;L calculator for <strong>any multi-leg structure</strong>, with a price/time matrix.
@@ -1857,8 +1850,7 @@ something to measure.</p>
 <blockquote>
 <p>The entry and manage cycles also run automatically <strong>at the top of each hour,
 09:00–14:00 CT</strong> on trading days — there is no 15:00 run. So a target hit at 09:15
-is acted on at 10:00 unless you press <strong>Run manage cycle</strong> yourself. (The
-autonomous driver's separate account re-prices every minute; this one does not.)</p>
+is acted on at 10:00 unless you press <strong>Run manage cycle</strong> yourself.</p>
 </blockquote>
 <h2 id="shares">Shares</h2>
 <p><strong>Route:</strong> <code>/options/shares</code>.</p>
@@ -2580,7 +2572,7 @@ sides.</p>
   versus the index, so that is what the book measures; holding it outright would
   be recording the market's direction instead.</li>
 </ul>
-<p>It is paper only, and separate from the Claude Trades book.</p>
+<p>It is paper only, and separate from the other paper books.</p>
 <hr />
 <h2 id="trade-plan">Trade Plan</h2>
 <p><strong>Route:</strong> <code>/trade/plan</code>.</p>
@@ -2592,50 +2584,6 @@ enforces it - past that date the read is unmodelled.</p>
 there is no trade (or why one side is refused), lists <strong>what would change it</strong>, and
 tells you <strong>how to express the view anyway</strong> if you want the exposure - usually as a
 pair against SPY, since relative return is what the model actually predicts.</p>
-<hr />
-<h2 id="claude-trades">Claude Trades</h2>
-<p><strong>Route:</strong> <code>/driver</code>.</p>
-<p>An <strong>autonomous paper options trader</strong>. Claude selects and sizes defined-risk credit
-spreads from the scanner's output, and code-enforced guardrails cap the risk.
-Everything is <strong>paper</strong> — nothing is ever sent to a live brokerage account.</p>
-<blockquote>
-<p>The old <strong>order-approval queue</strong> — where a morning agent proposed trades for you
-to APPROVE or SKIP — was removed in July 2026. This page is now purely a monitor
-with a stop button.</p>
-</blockquote>
-<p><strong>Controls:</strong></p>
-<ul>
-<li><strong>Autonomous</strong> — enable or disable the trader.</li>
-<li><strong>Run now</strong> — fire one decision checkpoint immediately.</li>
-<li><strong>STOP</strong> (confirm-gated) — halt new entries for the rest of the day. Open
-  positions continue to be managed and closed.</li>
-</ul>
-<p><strong>What you see:</strong></p>
-<ul>
-<li><strong>Tiles</strong> — Day P&amp;L against the day's target, Session P&amp;L, Realized, Open P&amp;L,
-  Equity, and the open-position count.</li>
-<li><strong>Open positions</strong> and a <strong>decision log</strong> (newest first, in CT) recording each
-  checkpoint's reasoning and a one-line market-context summary.</li>
-<li>A <strong>Performance scorecard</strong> — trades, win rate, realized and total P&amp;L, average
-  win and loss, <strong>profit factor</strong>, best and worst trade, plus P&amp;L broken down by
-  symbol and by strategy.</li>
-<li>A <strong>Performance</strong> view listing closed trades with their exit reason (<em>Target hit</em>,
-  <em>Delta stop</em>, <em>Time stop</em>, <em>Money stop</em>).</li>
-</ul>
-<p><strong>When it runs:</strong> every 30 minutes within an entry window of
-<strong>09:45–15:30 ET</strong>. The first quarter-hour after the open is skipped
-so the structure is readable, and no <em>new</em> entries are taken in the last half hour.
-Open positions are re-priced every minute during market hours regardless.</p>
-<blockquote>
-<p><strong>The daily target is not fixed.</strong> The base is $500, ratcheted against the
-month-to-date pace — as high as $1,000 when behind, as low as $250 when ahead. A
-$1,500 daily loss halts new entries outright.</p>
-<p><strong>"Executed" in the decision log means the order was enqueued, not filled.</strong> A
-trade can be logged as executed and then rejected by the risk guardrails; the real
-outcome is in the account view.</p>
-<p><strong>Enabling autonomy spends Claude API credit</strong> on every checkpoint. The running
-count is on the Settings page.</p>
-</blockquote>
 <hr />
 <h2 id="cross-page-actions">Cross-page actions</h2>
 <p>Three buttons appear on signal rows across the Options section:</p>
@@ -2686,7 +2634,7 @@ count is on the Settings page.</p>
 <hr />
 <h2 id="eod-report">EOD Report</h2>
 <p><strong>Route:</strong> <code>/eod</code> (with a <code>/eod/detail</code> drill-down).</p>
-<p>An end-of-day rollup of the day's Options activity and Claude Trades.</p>
+<p>An end-of-day rollup of the day's Options activity.</p>
 <p><strong>Two views</strong>, reached by the link at the foot of the summary:</p>
 <table>
 <thead>
@@ -2700,12 +2648,12 @@ count is on the Settings page.</p>
 <tr>
 <td><strong>Summary</strong></td>
 <td><code>/eod</code></td>
-<td>Headline tiles plus a Daily / Weekly (WTD) / MTD performance block <strong>per book</strong> — manual paper, the driver, and captured-closed.</td>
+<td>Headline tiles plus a Daily / Weekly (WTD) / MTD performance block <strong>per book</strong> — manual paper and captured signals (counted at one contract per signal).</td>
 </tr>
 <tr>
 <td><strong>Detailed</strong></td>
 <td><code>/eod/detail</code></td>
-<td>The same performance plus breakdowns by <strong>strategy</strong> (PCS / CCS / IC), by <strong>0-DTE vs swing</strong>, and by <strong>status</strong> (open / closed / expired), then the full trade, scanner, captured and driver tables.</td>
+<td>The same performance plus breakdowns by <strong>strategy</strong> (PCS / CCS / IC), by <strong>0-DTE vs swing</strong>, and by <strong>status</strong> (open / closed / expired), then the full trade, scanner and captured tables.</td>
 </tr>
 </tbody>
 </table>
@@ -2788,7 +2736,7 @@ in a trading workflow, which is why they sit apart.</p>
 <ul>
 <li>An <strong>overall banner</strong> — green (all up), red (naming what's down), or grey
   (checking).</li>
-<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the six services, the web app
+<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the five services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the <strong>Schwab auth</strong> state.</li>
 <li>A <strong>Re-authorize</strong> button on the gateway card opens Schwab's OAuth login in a new
@@ -2836,8 +2784,8 @@ a file on the server — in one place, grouped by what they do:</p>
 <td>Take profit, stop loss, time and delta stops, the profit-lock ladder, per-structure rules, Rescue board warnings</td>
 </tr>
 <tr>
-<td><strong>Autonomous driver</strong></td>
-<td>Daily targets, risk limits, the loss halt, decision cadence</td>
+<td><strong>Paper books</strong></td>
+<td>The largest loss one trade may carry in each paper book</td>
 </tr>
 <tr>
 <td><strong>Flow alerts</strong></td>
@@ -2909,8 +2857,7 @@ day).</p>
   managed (break-even stop after +50%, deferred delta cuts on recoverable trades,
   auto-close on the exit rules). Off leaves them advisory.</li>
 <li><strong>Manual paper: break-even lifecycle (experimental)</strong> — opts the manual paper
-  account into that same lifecycle instead of taking profit at +50% immediately.
-  The autonomous driver's account is never affected by this toggle.</li>
+  account into that same lifecycle instead of taking profit at +50% immediately.</li>
 <li><strong>Show the ticker</strong> — the scrolling bar at the bottom of every page, with a
   speed setting. It only shows or hides the marquee — see the note below.</li>
 <li><strong>Appearance</strong> is its own tab now (<strong>Settings → Appearance</strong>): every colour and
@@ -2949,7 +2896,7 @@ group, next to EOD Report.</p>
 <p>A guarded "stop the whole local stack" page. The <strong>Stop all services</strong> button — a
 red outline, matching the rail — opens a confirmation; the solid red button is the
 <strong>Stop everything</strong> inside it, which is where the decision is actually made.
-Confirming stops the gateway, the six services, the web app <strong>and the public live
+Confirming stops the gateway, the five services, the web app <strong>and the public live
 screens</strong> — the public site goes dark with it.</p>
 <p><strong>The confirmation asks for your authenticator code.</strong> Type the current 6-digit
 code from your authenticator app into the dialog and press <strong>Stop everything</strong> — or
@@ -2972,8 +2919,8 @@ which is the point on a borrowed or shared machine.</p>
 <ul>
 <li>It signs out <strong>this browser only</strong>. Other devices you are signed in on stay
   signed in.</li>
-<li>Nothing running is affected. The services, the collectors, the scheduled scans
-  and the autonomous driver all carry on. Signing out is not stopping anything —
+<li>Nothing running is affected. The services, the collectors and the scheduled scans
+  all carry on. Signing out is not stopping anything —
   that is the page above it.</li>
 </ul>
 <p>It sits at the very bottom of the rail deliberately: on a phone the bottom edge is
@@ -2997,7 +2944,7 @@ volume is up, and (if enabled) that you're within market hours and above the
 minimum score.</p>
 <p><strong>The Status page flags data as STALE.</strong>
 A scheduled view hasn't updated recently — usually because its service stopped.
-Restart that service. On-demand views (Trade, Driver) are never flagged stale.</p>
+Restart that service. On-demand views (Trade) are never flagged stale.</p>
 <p><strong>Schwab Authorization shows as not authorized / expired.</strong>
 Open <strong>System Status → Schwab Authorization → Authorize</strong> to re-run the OAuth
 login in a new tab.</p>
