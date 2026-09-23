@@ -1,0 +1,20 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/paper.toml — the paper books' PER-TRADE loss caps
+#
+#   Edit a value here (or in Settings -> Configuration), restart options_svc.
+#   Anything you delete falls back to the built-in default in
+#   shared/paper_limits.py. A zero, negative or non-number value also falls back:
+#   a cap of zero would refuse every trade.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[risk]
+# The automatic Paper Account's largest loss on one trade. ALSO the budget the
+# scanner's width search sizes against: a width whose one contract would lose
+# more than this is never emitted, so lowering it hides wide spreads on
+# high-priced names. Was $250 until 2026-09-22.
+max_risk_per_trade = 750.0
+
+# The Paper Ledger's largest loss on one trade — the book the Paper button opens
+# into. The Strategy Finder and the Income Window size their credit spreads
+# against this cap, since that is where their trades are booked.
+ledger_max_risk_per_trade = 750.0

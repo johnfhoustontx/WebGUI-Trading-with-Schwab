@@ -61,10 +61,12 @@ def test_a_non_finite_realized_pnl_is_dropped_not_summed(ledger, monkeypatch):
     assert state["realized_pnl"] == pytest.approx(20.0)
 
 
-def test_the_ledger_has_its_own_750_per_trade_limit_and_the_account_keeps_250():
+def test_both_books_ship_a_750_per_trade_limit():
+    # The Account's was $250 until 2026-09-22 (operator decision); they stay two
+    # constants because they are two books. Values come from config/paper.toml.
     import config_paper
     assert config_paper.LEDGER_MAX_RISK_PER_TRADE == 750.0
-    assert config_paper.MAX_RISK_PER_TRADE == 250.0
+    assert config_paper.MAX_RISK_PER_TRADE == 750.0
 
 
 def test_limits_follow_the_ledger_constant_at_call_time(ledger, monkeypatch):

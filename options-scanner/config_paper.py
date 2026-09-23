@@ -22,13 +22,27 @@ PAPER_MODE = True   # gates ALL order submission; flip False to disarm entirely
 #############################################
 
 STARTING_BALANCE     = 25_000.0
-MAX_RISK_PER_TRADE   = 250.0
-# The Paper LEDGER's own per-trade limit (the book the webgui Paper button opens
-# into). Separate from MAX_RISK_PER_TRADE, which sizes the automatic Account and
-# the scanner's width search: at $250 about two thirds of Directional long
-# options could not be opened by hand (measured on prod 2026-09-15); at $750
-# about a fifth. Operator decision, 2026-09-15.
-LEDGER_MAX_RISK_PER_TRADE = 750.0
+# The two per-trade caps come from config/paper.toml (shared/paper_limits.py),
+# resolved once at import - edit the file, restart options_svc.
+#
+# MAX_RISK_PER_TRADE sizes the automatic Account AND the scanner's width search
+# (scanner_engine.DEFAULT_MAX_RISK_DOLLARS). $250 until 2026-09-22, when the
+# operator set it to $750 to match the Ledger.
+#
+# LEDGER_MAX_RISK_PER_TRADE is the Paper LEDGER's own limit (the book the webgui
+# Paper button opens into): at $250 about two thirds of Directional long options
+# could not be opened by hand (measured on prod 2026-09-15); at $750 about a
+# fifth. Operator decision, 2026-09-15.
+import pathlib as _pathlib
+import sys as _sys
+
+_ROOT = str(_pathlib.Path(__file__).resolve().parents[1])
+if _ROOT not in _sys.path:
+    _sys.path.insert(0, _ROOT)
+from shared import paper_limits as _paper_limits  # noqa: E402
+
+MAX_RISK_PER_TRADE   = _paper_limits.max_risk_per_trade()
+LEDGER_MAX_RISK_PER_TRADE = _paper_limits.ledger_max_risk_per_trade()
 MAX_SESSION_DRAWDOWN = 2_500.0
 
 #############################################

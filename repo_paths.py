@@ -46,6 +46,12 @@ SESSIONS_TOML = REPO_ROOT / "config" / "sessions.toml"
 # the paper sizer then zeroes. Edit + restart both services.
 DRIVER_TOML = REPO_ROOT / "config" / "driver.toml"
 
+# The two paper books' per-trade loss caps: the automatic Account's (which also
+# sizes the scanner's width search) and the Paper Ledger's (what the Paper button
+# books into). Read by shared/paper_limits.py through options-scanner/
+# config_paper.py. Edit + restart options_svc.
+PAPER_TOML = REPO_ROOT / "config" / "paper.toml"
+
 # Trade-management stop/target rules (take-profit fraction, stop multiple, delta
 # drift + hard ceiling, cut-DTE, the trail ladders). Read by shared/trade_mgmt.py,
 # which BOTH options-scanner/signal_recommender.py (the auto-manage cycle) and

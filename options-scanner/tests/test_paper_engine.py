@@ -1,8 +1,21 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import pytest
+
 import paper_engine as pe
 import paper_account_db as pdb
+
+
+@pytest.fixture(autouse=True)
+def _pin_the_250_per_trade_cap(monkeypatch):
+    """These scenarios were sized around a $250 per-trade cap (the Account's until
+    2026-09-22): the contract counts, the risk-too-high refusal and how many
+    positions fit under the $750 symbol cap all follow from it. Pinned so they
+    keep testing the MECHANISM whatever config/paper.toml ships;
+    paper_sizing reads the constant at call time."""
+    import config_paper
+    monkeypatch.setattr(config_paper, "MAX_RISK_PER_TRADE", 250.0)
 
 _CT = ZoneInfo("America/Chicago")
 

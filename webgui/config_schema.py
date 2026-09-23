@@ -891,7 +891,29 @@ _ENVS = ConfigFile(name="environments.toml", title="Environments", icon="dns",
                    summary=_READONLY_NOTE, restart=(), sections=(),
                    editable=False, editor="readonly")
 
-FILES = (_SCANNER, _TRADE_MGMT, _DRIVER, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
+# ─────────────────────────────────────────────────────────────────────────────
+# Paper books — config/paper.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_PAPER = ConfigFile(
+    name="paper.toml", title="Paper books", icon="account_balance_wallet",
+    summary="The largest loss one trade may carry in each of your two paper books.",
+    restart=(OPTIONS,),
+    caution="The Account's cap also decides which spread widths the scanner "
+            "offers: a width whose one contract would lose more is never shown.",
+    sections=(
+        Section("Per-trade loss caps", "The most one trade may lose, in dollars.", (
+            Field("risk.max_risk_per_trade", "Paper Account (automatic trades)",
+                  "Also the budget the Market Scanner sizes spread widths against.",
+                  kind="money", min=1, max=100000, step=50),
+            Field("risk.ledger_max_risk_per_trade", "Paper Ledger (the Paper button)",
+                  "Also the budget the Strategy Finder and Income Window size "
+                  "credit spreads against, since their trades land here.",
+                  kind="money", min=1, max=100000, step=50),
+        )),
+    ),
+)
+
+FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _DRIVER, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
