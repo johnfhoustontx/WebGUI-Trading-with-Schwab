@@ -4,7 +4,29 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-23 (**The public YouTube wall stream and the `/wall`
+**Last updated:** 2026-09-25 (**`tools/pull_backups.ps1` fixed — it could not
+run, and its prune would have deleted the offsite decryption key.**)
+
+- **Dead host.** The default was `vps-ts`, the suspended original server. It is
+  now an ordered list, `vps2-ts` then `vps2`: the tailnet route refused TCP on
+  2026-09-25 while Tailscale still listed the node as up, and the pull only
+  worked over the public IP. Losing Tailscale must not mean losing the backup.
+- ⚠ **The prune counted every folder in the destination.** `E:\TradingBackups`
+  also holds `_keys`, the age identity that decrypts the offsite archives. It
+  sorts last, so once more than `-Keep` folders existed it was the first thing
+  deleted. Listing, pulling, counting and pruning now all match
+  `backup_local.py`'s exact `<env>_YYYY-MM-DD_HHMM` naming; tested against a
+  scratch destination holding `_keys`, a stray folder, a `.partial` and a
+  `dev_` generation — only the two oldest real generations went.
+- **Verify, then rename.** It used to rename the `.partial` first and only then
+  count databases. It now compares every file's size against the VPS's own
+  manifest and runs `pragma quick_check` on every database; a failure leaves the
+  `.partial` in place, which nothing counts or prunes.
+- **`-Fresh`** runs `trading-<env>-backup.service` on the VPS first, so the pull
+  includes today. Native `ssh`/`scp` calls run with the error preference relaxed,
+  because under PowerShell 5.1 a stderr line with `Stop` aborts the script.
+
+**Prior —** 2026-09-23 (**The public YouTube wall stream and the `/wall`
 page are removed** — the owner's decision: the stream is not needed.)
 
 - **The pipeline.** `tools/stream_wall.sh` (Xvfb + kiosk Chrome + ffmpeg to
