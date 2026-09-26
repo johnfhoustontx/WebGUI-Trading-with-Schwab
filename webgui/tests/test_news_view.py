@@ -591,3 +591,95 @@ def test_a_junk_event_time_falls_back_to_its_date():
     assert nv.calendar_groups({"events": [ev]}, now=NOW)[0]["tiles"][0]["when"] == "Wed Oct 28"
     ev = {"title": "No date at all"}
     assert nv.calendar_groups({"events": [ev]}, now=NOW)[0]["tiles"][0]["when"] == ""
+
+
+# ---- review fixes: junk settings, bootstrap fail-closed, blank and past tiles -
+
+@pytest.mark.parametrize("settings", [
+    {"actual_fresh_h": 1e12}, {"release_watch_min": 1e308},
+    {"actual_fresh_h": 8761}, {"release_watch_min": 10081},
+    {"actual_fresh_h": 0}, {"release_watch_min": -5},
+    {"actual_fresh_h": float("inf")}, {"release_watch_min": float("nan")},
+])
+def test_junk_settings_fall_back_to_the_defaults_and_never_raise(settings):
+    now = RELEASE_AT + dt.timedelta(minutes=9)
+    s = nv.indicator_state(IND_BOOTSTRAP, now=now, cfg=settings)
+    assert s["state"] == "awaiting"            # the default 60-minute watch window
+    p = {"data": [IND_BOOTSTRAP], "settings": settings}
+    ind = nv.calendar_groups(p, now=now)[2]["tiles"][0]["indicators"][0]
+    assert ind["state"] == "awaiting"
+    later = nv.indicator_state(IND_WITH_NEW_OBS, now=RELEASE_AT + dt.timedelta(hours=25), cfg=settings)
+    assert later["state"] == "upcoming"         # the default 24-hour freshness
+
+
+def test_settings_at_the_bounds_are_honoured():
+    now = RELEASE_AT + dt.timedelta(hours=100)
+    s = nv.indicator_state(IND_WITH_NEW_OBS, now=now, cfg={"actual_fresh_h": 8760})
+    assert s["state"] == "released"
+    s = nv.indicator_state(IND_BOOTSTRAP, now=RELEASE_AT + dt.timedelta(minutes=9),
+                           cfg={"release_watch_min": 10080, "actual_fresh_h": 24})
+    assert s["state"] == "awaiting"
+
+
+@pytest.mark.parametrize("boot", ["missing", "true", "false", None, 1.0, [1]])
+def test_an_unclear_bootstrap_flag_is_not_a_fresh_actual(boot):
+    latest = dict(IND_BOOTSTRAP["latest"])
+    if boot == "missing":
+        latest.pop("bootstrap")
+    else:
+        latest["bootstrap"] = boot
+    ind = {**IND_BOOTSTRAP, "latest": latest}
+    s = nv.indicator_state(ind, now=RELEASE_AT + dt.timedelta(minutes=3), cfg=CALCFG)
+    assert s["state"] == "awaiting" and s["actual"] == "—"
+
+
+@pytest.mark.parametrize("boot", [False, 0])
+def test_only_an_explicit_false_bootstrap_is_a_fresh_actual(boot):
+    latest = {**IND_BOOTSTRAP["latest"], "bootstrap": boot}
+    ind = {**IND_BOOTSTRAP, "latest": latest}
+    s = nv.indicator_state(ind, now=RELEASE_AT + dt.timedelta(minutes=3), cfg=CALCFG)
+    assert (s["state"], s["actual"]) == ("released", "+0.4% m/m")
+
+
+def test_blank_tiles_are_skipped():
+    p = {"events": [{**EVENT, "title": ""}, {**EVENT, "title": None}, {**EVENT, "title": "  "},
+                    EVENT],
+         "dividends": [{**DIVIDEND, "symbol": None}, {**DIVIDEND, "symbol": "$$$$$$$$$$"},
+                       {**DIVIDEND, "ex_date": None}, {**DIVIDEND, "ex_date": "garbage"},
+                       DIVIDEND],
+         "ipos": [{"date": "2026-10-02"}, {"symbol": "", "company": " ", "date": "2026-10-02"},
+                  {**IPO, "date": None}, {**IPO, "date": "garbage"}, IPO],
+         "data": [{**IND, "tile": "", "label": ""}, {**IND, "tile": None, "label": None}, IND]}
+    gs = nv.calendar_groups(p, now=NOW)
+    assert [t["title"] for t in gs[0]["tiles"]] == ["FOMC statement"]
+    assert [t["title"] for t in gs[1]["tiles"]] == ["JPM dividend", "ACME · Acme Corp IPO"]
+    assert [t["title"] for t in gs[2]["tiles"]] == ["CPI"]
+
+
+def test_an_ipo_with_only_a_symbol_is_kept():
+    t = nv.calendar_groups({"ipos": [{"symbol": "ACME", "date": "2026-10-02"}]}, now=NOW)[1]["tiles"]
+    assert [x["title"] for x in t] == ["ACME IPO"]
+
+
+def test_past_calendar_items_are_dropped():
+    # NOW is Fri Sep 25, 20:00 CT
+    past_at = {**EVENT, "title": "Past", "at": "2026-09-26T00:30:00+00:00", "date": "2026-09-25"}
+    later_today = {**EVENT, "title": "Later", "at": "2026-09-26T01:30:00+00:00", "date": "2026-09-25"}
+    past_date = {**DATE_ONLY_EVENT, "title": "Yesterday", "date": "2026-09-24"}
+    today_date = {**DATE_ONLY_EVENT, "title": "Today", "date": "2026-09-25"}
+    p = {"events": [past_at, later_today, past_date, today_date],
+         "dividends": [{**DIVIDEND, "symbol": "OLD", "ex_date": "2026-09-24"},
+                       {**DIVIDEND, "symbol": "NOW", "ex_date": "2026-09-25"}],
+         "ipos": [{**IPO, "symbol": "GONE", "date": "2026-09-24"},
+                  {**IPO, "symbol": "TODAY", "date": "2026-09-25"}]}
+    gs = nv.calendar_groups(p, now=NOW)
+    assert [t["title"] for t in gs[0]["tiles"]] == ["Later", "Today"]
+    assert [t["title"] for t in gs[1]["tiles"]] == ["NOW dividend", "TODAY · Acme Corp IPO"]
+
+
+def test_past_items_use_the_central_date_of_a_naive_now():
+    naive_now = dt.datetime(2026, 9, 25, 20, 0)      # Central wall clock == NOW
+    p = {"events": [{**DATE_ONLY_EVENT, "date": "2026-09-24"}],
+         "dividends": [{**DIVIDEND, "ex_date": "2026-09-25"}]}
+    gs = nv.calendar_groups(p, now=naive_now)
+    assert gs[0]["tiles"] == [] and len(gs[1]["tiles"]) == 1

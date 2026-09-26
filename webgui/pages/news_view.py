@@ -369,9 +369,26 @@ _NOTE_STALE = "Source unavailable \u2014 showing the last good reading"
 _NOTE_NEVER = "Not published yet"
 
 
-def _setting(cfg, key, default):
+# The largest setting a timedelta is ever built from: a week of watch window,
+# a year of freshness. Anything past these (or not finite and positive) is junk
+# in the payload and reads as the default - never an OverflowError.
+_MAX_WATCH_MIN = 10080.0
+_MAX_FRESH_H = 8760.0
+
+
+def _setting(cfg, key, default, hi):
     v = _finite(cfg.get(key)) if isinstance(cfg, dict) else None
-    return v if v is not None and v >= 0 else default
+    return v if v is not None and 0 < v <= hi else default
+
+
+def _explicitly_not_bootstrap(flag):
+    """Only an explicit ``False`` (or a plain int ``0``) says an observation is
+    NOT a first fill. A missing key, ``"true"``, ``None`` or anything else is
+    treated as bootstrap: an unclear flag must not promote a first-fill value
+    to a fresh Actual."""
+    if flag is False:
+        return True
+    return type(flag) is int and flag == 0
 
 
 def _weekday_day(d):
@@ -435,8 +452,9 @@ def indicator_state(ind, now, cfg) -> dict:
     the release) is treated as the last release, and the next is unknown."""
     ind = ind if isinstance(ind, dict) else {}
     now = _aware(now)
-    watch = dt.timedelta(minutes=_setting(cfg, "release_watch_min", _DEFAULT_WATCH_MIN))
-    fresh = dt.timedelta(hours=_setting(cfg, "actual_fresh_h", _DEFAULT_FRESH_H))
+    watch = dt.timedelta(minutes=_setting(cfg, "release_watch_min", _DEFAULT_WATCH_MIN,
+                                          _MAX_WATCH_MIN))
+    fresh = dt.timedelta(hours=_setting(cfg, "actual_fresh_h", _DEFAULT_FRESH_H, _MAX_FRESH_H))
     unit = _str(ind.get("unit"))
     latest, prior = _obs(ind, "latest"), _obs(ind, "prior")
     latest_txt = fmt_indicator(latest.get("value"), unit)
@@ -453,7 +471,7 @@ def indicator_state(ind, now, cfg) -> dict:
     state, actual, shown_prior = "upcoming", DASH, latest_txt
     if last is not None and now - last <= fresh:
         seen = _dt(latest.get("first_seen"))
-        boot = latest.get("bootstrap") is True or latest.get("bootstrap") == 1
+        boot = not _explicitly_not_bootstrap(latest.get("bootstrap"))
         after = seen is not None and seen >= last
         if after and (not boot or now - last > watch):
             state, actual, shown_prior = "released", latest_txt, prior_txt
@@ -481,14 +499,36 @@ def _list(payload, key):
     return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
 
 
-def _event_tile(ev):
-    return {"title": _str(ev.get("title")).strip(),
-            "when": _when_text(ev.get("at"), ev.get("date")), "lines": []}
+def _today_ct(now):
+    try:
+        return _aware(now).astimezone(_CT).date()
+    except (ValueError, OverflowError, AttributeError, TypeError):
+        return None
 
 
-def _dividend_tile(d):
+def _event_tile(ev, now, today):
+    """``None`` for an event with no title, or one already past: by its
+    instant when it has one, else by its Central date."""
+    title = _str(ev.get("title")).strip()
+    if not title:
+        return None
+    when = _dt(ev.get("at"))
+    if when is not None:
+        if when < _aware(now):
+            return None
+    else:
+        d = _date(ev.get("date"))
+        if d is not None and today is not None and d < today:
+            return None
+    return {"title": title, "when": _when_text(ev.get("at"), ev.get("date")), "lines": []}
+
+
+def _dividend_tile(d, today):
+    """``None`` without a symbol or an ex-date, or once the ex-date is past."""
     sym = clean_symbol(d["symbol"]) if isinstance(d.get("symbol"), str) else None
     ex = _date(d.get("ex_date"))
+    if not sym or ex is None or (today is not None and ex < today):
+        return None
     pay = _date(d.get("pay_date"))
     amount = _finite(d.get("amount"))
     lines = []
@@ -500,9 +540,14 @@ def _dividend_tile(d):
             "when": f"Ex-div {_weekday_day(ex)}" if ex else "", "lines": lines}
 
 
-def _ipo_tile(i):
+def _ipo_tile(i, today):
+    """``None`` with neither a symbol nor a company, with no date, or once the
+    date is past."""
     sym = clean_symbol(i["symbol"]) if isinstance(i.get("symbol"), str) else None
     company = _str(i.get("company")).strip()
+    day = _date(i.get("date"))
+    if not (sym or company) or day is None or (today is not None and day < today):
+        return None
     name = " \u00b7 ".join(x for x in (sym, company) if x)
     lines = []
     price = _finite(i.get("price"))
@@ -522,6 +567,8 @@ def _data_tiles(data, now, cfg):
     tiles, by_title = [], {}
     for ind in data:
         title = _str(ind.get("tile")).strip() or _str(ind.get("label")).strip()
+        if not title:
+            continue
         state = indicator_state(ind, now, cfg)
         tile = by_title.get(title)
         if tile is None:
@@ -545,14 +592,22 @@ def calendar_groups(payload, *, now) -> list:
     "empty"}``. A tile is ``{"title", "when", "lines"}`` (a data tile adds
     ``indicators``, each an ``indicator_state``). ``note`` greys a group whose
     sources all failed; ``empty`` is the plain sentence for a group with no
-    tiles (``None`` otherwise)."""
+    tiles (``None`` otherwise).
+
+    A tile with nothing to say is skipped (an event with no title, a dividend
+    with no symbol or ex-date, an IPO with no name or date, a data item with no
+    tile or label), and so is anything already past ``now`` - an event by its
+    instant, else by its Central date; a dividend or IPO by its Central date."""
     cfg = payload.get("settings") if isinstance(payload, dict) else None
     raw_sources = payload.get("sources") if isinstance(payload, dict) else None
     sources = raw_sources if isinstance(raw_sources, dict) else {}
+    today = _today_ct(now)
+    events = [_event_tile(e, now, today) for e in _list(payload, "events")]
+    others = ([_dividend_tile(d, today) for d in _list(payload, "dividends")]
+              + [_ipo_tile(i, today) for i in _list(payload, "ipos")])
     tile_sets = (
-        [_event_tile(e) for e in _list(payload, "events")],
-        [_dividend_tile(d) for d in _list(payload, "dividends")]
-        + [_ipo_tile(i) for i in _list(payload, "ipos")],
+        [t for t in events if t is not None],
+        [t for t in others if t is not None],
         _data_tiles(_list(payload, "data"), now, cfg),
     )
     return [{"title": title, "tiles": tiles, "note": _group_note(sources, names),
