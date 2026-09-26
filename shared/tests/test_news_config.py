@@ -17,6 +17,22 @@ def test_defaults_are_the_real_values():
     assert cfg["trending"]["window_h"] == 6
 
 
+def test_defaults_match_the_shipped_file():
+    """The built-in DEFAULTS and the tracked TOML are two copies of the same
+    values; pin them together so an edit to one cannot silently drift."""
+    with open(nc.NEWS_TOML, "rb") as fh:
+        shipped = tomllib.load(fh)
+    assert nc.DEFAULTS["collector"] == shipped["collector"]
+    assert nc.DEFAULTS["trending"] == shipped["trending"]
+
+
+def test_feeds_returns_exactly_the_shipped_enabled_feeds_in_order():
+    """Non-vacuous: the shape test above passes on an empty list."""
+    expected = [f["name"] for f in _shipped_feeds() if f.get("enabled", True)]
+    assert expected
+    assert [f["name"] for f in nc.feeds()] == expected
+
+
 def test_every_shipped_feed_has_a_name_kind_and_flags():
     for feed in nc.feeds():
         assert feed["name"] and feed["kind"] in nc.KINDS, feed
@@ -55,6 +71,63 @@ def test_feeds_does_not_mutate_the_loaded_config(monkeypatch):
     monkeypatch.setattr(nc, "load", lambda: raw)
     nc.feeds()
     assert raw == {"feeds": [{"name": "B", "kind": "rss", "url": "y"}]}
+
+
+# ── malformed config fails closed, and says so ─────────────────────────────
+
+def test_feeds_written_as_a_table_fall_back_to_none_with_a_warning(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {
+        "feeds": {"name": "A", "kind": "rss", "url": "x"}})
+    with caplog.at_level("WARNING", logger=nc.__name__):
+        assert nc.feeds() == []
+    assert "not a list" in caplog.text
+
+
+def test_extras_as_a_bare_string_is_not_split_into_letters(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {"tickers": {"extras": "NVDA"}})
+    monkeypatch.setattr(nc._symbols, "collection_base", lambda: ["SPY"])
+    with caplog.at_level("WARNING", logger=nc.__name__):
+        assert nc.ticker_set() == ["SPY"]
+    assert "not a list" in caplog.text
+
+
+def test_a_non_bool_public_fails_closed(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {"feeds": [
+        {"name": "A", "kind": "rss", "url": "x", "public": "false"},
+        {"name": "B", "kind": "rss", "url": "y", "public": 1},
+        {"name": "C", "kind": "rss", "url": "z", "public": True}]})
+    with caplog.at_level("WARNING", logger=nc.__name__):
+        got = {f["name"]: f["public"] for f in nc.feeds()}
+    assert got == {"A": False, "B": False, "C": True}
+    assert "'A'" in caplog.text and "'B'" in caplog.text
+
+
+def test_a_non_bool_enabled_is_treated_as_disabled(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {"feeds": [
+        {"name": "A", "kind": "rss", "url": "x", "enabled": "true"},
+        {"name": "B", "kind": "rss", "url": "y", "enabled": 1},
+        {"name": "C", "kind": "rss", "url": "z"}]})
+    with caplog.at_level("WARNING", logger=nc.__name__):
+        assert [f["name"] for f in nc.feeds()] == ["C"]
+    assert "'A'" in caplog.text and "'B'" in caplog.text
+
+
+def test_an_empty_feed_list_leaves_a_warning(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {"feeds": []})
+    with caplog.at_level("WARNING", logger=nc.__name__):
+        assert nc.feeds() == []
+    assert "no enabled feeds" in caplog.text
+
+
+def test_a_duplicate_feed_name_keeps_the_first(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {"feeds": [
+        {"name": "A", "kind": "rss", "url": "first"},
+        {"name": "B", "kind": "rss", "url": "y"},
+        {"name": "A", "kind": "rss", "url": "second"}]})
+    with caplog.at_level("WARNING", logger=nc.__name__):
+        got = nc.feeds()
+    assert [(f["name"], f["url"]) for f in got] == [("A", "first"), ("B", "y")]
+    assert "duplicate" in caplog.text
 
 
 # ── the shipped file ────────────────────────────────────────────────────────
@@ -98,7 +171,7 @@ ALLOWED_DIRECT = {"copy", "logging", "repo_paths", "shared", "shared.symbols",
                   "shared.config_toml"}
 
 EXPECTED = {"repo_paths", "shared", "shared.config_toml", "shared.news_config",
-            "shared.symbols", "tzdata"}
+            "shared.symbols"}
 
 PROBE = r"""
 import sys
