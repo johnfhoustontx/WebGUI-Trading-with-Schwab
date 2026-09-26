@@ -271,7 +271,8 @@ the four panels; the public live Desk renders it too.
 Design: [`2026-09-10-desk-market-summary-design.md`](plans/2026-09-10-desk-market-summary-design.md).
 
 **The headlines strip (2026-09-26).** Full width under the four panels (a fifth cell
-in the 2×2 grid would leave a hole): the `DESK_LIMIT` (5) newest items of the news feed,
+in the 2×2 grid would leave a hole): the `DESK_LIMIT` (5) newest items of the news feed
+(headlines only — the SEC items live in `news:sec` since v2, which the Desk does not read),
 one line each — time (CT) · source badge(s) · the headline, which opens the ORIGINAL
 article in a new tab. Rows come from `desk.news_rows` over `pages/news_view.py`, the same
 builder `/news` and the Symbol band use; an untitled item is skipped, and a URL that is
@@ -381,7 +382,7 @@ covered by the calendar*, never *none scheduled*.
 `live_screens.SCREENS`. Links in: the Opportunity Board's symbol cell.
 
 **In the news (2026-09-26).** A band between *Flow alerts* and *Your position*: the
-`SYMBOL_LIMIT` (8) newest items of `cache:news:feed` **tagged** with this ticker
+`SYMBOL_LIMIT` (8) newest items of `cache:news:feed` + `cache:news:sec` **tagged** with this ticker
 (`symbol.news_band` over `news_view.for_symbol`; untitled items are dropped BEFORE the
 cap, or they would use up the band's rows). Each row: time (CT) · source · the headline,
 linking to the article in a new tab under the same http(s)-only rule as the Desk. Three
@@ -391,8 +392,9 @@ clean (`NEWS_NO_SYMBOL`), and *No headlines for MU in the feed.* The band's link
 (a cashtag or a bracketed ticker in the text, EDGAR's own filer, or a Yahoo per-ticker
 fetch) and, for headlines, limited to the ticker set (an EDGAR filing carries its filer's
 ticker either way), so a story that only names the company is never
-here. `news:feed` joins the page's one batched `read_versions`; the page is private, so
-it has no public-key swap.
+here. `news:feed` and `news:sec` join the page's one batched `read_versions` and are
+merged newest first (the band is cold only when BOTH are); the page is private, so it
+has no public-key swap.
 
 ## Trade detail panel — Expected Move on captured signals (2026-08-25)
 
@@ -577,47 +579,96 @@ Flow Alerts (**NEW 2026-08-09** — a **main-menu (left-rail) item under the Opt
 
 ## `/news`
 
-**Market News (NEW 2026-09-26)** — a standalone rail page under **MARKETS**, after Flow
-Alerts (`main.OPTIONS_RAIL`, like the three market-wide reads above it). The newest
-headlines, SEC filings and insider buys, newest first. Tier-1 reader of
-**`cache:news:feed`** (`pages/news.py`; every fact from the pure `pages/news_view.py`),
-published by **`news_svc`** (:8216). Design + plan:
-[`plans/2026-09-25-news-feed-design.md`](plans/2026-09-25-news-feed-design.md).
+**Market News (NEW 2026-09-26; v2 the same day)** — a standalone rail page under
+**MARKETS**, after Flow Alerts (`main.OPTIONS_RAIL`, like the three market-wide reads
+above it). Three regions, each its own view and its own `watch_view`
+(`pages/news.py`; every fact from the pure `pages/news_view.py`), all published by
+**`news_svc`** (:8216): the **headlines** (`cache:news:feed`) in the left column, the
+**SEC / EDGAR** panel (`cache:news:sec`) top right, the **calendar** tiles
+(`cache:news:calendar`) bottom right. At `lg` the right column's two panels are each
+half the viewport tall and scroll on their own; below `lg` the three stack in that
+DOM order at natural height. Designs + plans:
+[`plans/2026-09-25-news-feed-design.md`](plans/2026-09-25-news-feed-design.md),
+[`plans/2026-09-26-news-v2-design.md`](plans/2026-09-26-news-v2-design.md).
 
-- **Rows** (`news.draw_rows`, shared with the public copy): time — CENTRAL, with the date
-  when the item is not from today (CT) · a chip per ticker, linking to
-  `/symbol?symbol=` where `shell.route_for("/symbol")` exists · the headline, a
-  new-tab link to the original (`news_view.safe_href`: http/https with a host, else plain
-  text) · a badge per source · a muted second line: the feed's teaser (dropped when it
-  only repeats the headline, or the headline plus a short publisher tail), else
-  `news_view.detail_line` for a filing. ⚠ Titles, teasers and detail lines are
-  third-party text and reach the page only through `ui.label` / `ui.link`; a source-level
-  test pins that the module calls `ui.html` nowhere.
-- **Filters** run page-side over rows already read: **Sources** (none = all), a
-  **Ticker** field (300 ms debounce, `clean_symbol` both sides — a string that does not
-  clean matches NOTHING), **Watchlist only** (`news_config.ticker_set()`: the GEX
-  collection list + `[tickers] extras`). `PAGE_SIZE` 60 rows, then **Show more**. The
-  status line carries counts only.
+- **Headline rows** (`news.draw_rows`, shared with the public copy) are ONE line each,
+  nothing wraps: time — CENTRAL, with the date when the item is not from today (CT) ·
+  the **impact pill** (H / M / L, a fixed class map `news_view.BAND_CLASSES`; an
+  unscored row keeps the empty slot and never reads "low") whose hover is
+  `news_view.reason_text` — the rules that scored it in words · at most
+  `MAX_ROW_TICKERS` (2) ticker chips, the rest collapsed into a **`+N`** chip with the
+  full list on hover · the headline, truncated with an ellipsis, a new-tab link to the
+  original (`news_view.safe_href`: http/https with a host, else plain text), its hover
+  the teaser · a badge per source. **Phone:** the row is `overflow-hidden`, and the
+  source badges are the first thing to go (`hidden sm:inline-flex`), so the headline
+  keeps its width. ⚠ Titles, teasers and detail lines are third-party text and reach
+  the page only through `ui.label` / `ui.link`; a source-level test pins that the
+  module calls `ui.html` nowhere.
+- **Impact** is computed by the service, not the page (`services/news_svc/impact.py`,
+  `[impact]` in `config/news.toml`, editable in Settings → Configuration → Market news
+  → Impact…): keyword tiers (each tier counts once), the best feed's points, +1 when
+  two or more feeds carried it, +2 when tagged with a followed ticker, Form 4 size
+  bands (+1 officer / director), and filing points by exact form (−1 for a filing on
+  no followed ticker). Score ≥ `high_at` (6) is High, ≥ `med_at` (3) Med, else Low.
+  A High older than `stale_after_h` (24 h) is **published as Med** with a `stale`
+  reason — capped at publish, never stored capped. ⚠ The pill hover words that cap
+  "older than a day" whatever `stale_after_h` says.
+- **The SEC / EDGAR panel** (`news.draw_sec_rows`): a sticky column header —
+  **Date/Time · Symbol · Headline/Details** — then one line per `news_view.sec_rows`
+  row: the symbol (the first tagged ticker, else the filer's own), the pill, the title
+  and, after a dot, `news_view.detail_line` (a Form 4's purchases · total · date, or
+  "Form S-3"). A title links **only** to an `https` address on `sec.gov`
+  (`news_view.sec_href`); anything else is plain text. `SEC_PAGE_SIZE` 40, then Show
+  more. The headline filters do not apply to it.
+- **The calendar** (`news.draw_calendar` over `news_view.calendar_groups`) is three
+  groups of tiles, in order: **Economic news/Calendar** (Fed events and the
+  `extra_releases` from the BLS/BEA schedules; an event already past is dropped),
+  **Dividend / IPO** (watchlist ex-dividend dates and Nasdaq IPOs; the producer owns
+  their windows), **Economic data (CPI, PPI etc)** (one tile per `tile` name — CPI,
+  PPI, Jobs, PCE, GDP, Retail sales, Jobless claims — each indicator an *Actual ·
+  Prior* line and the tile's *Next* release). Times are Central. An indicator is
+  decided page-side by `indicator_state`, because it is a function of `now`: within
+  `actual_fresh_h` of its release it is **released** (the new value landed — first
+  seen at or after the release; a first-fill `bootstrap` value only once the watch
+  window has passed) or **awaiting** (*Awaiting the release*, Actual —); otherwise
+  **upcoming** (Actual —, Prior = the latest value). No future date reads *Next date
+  not yet published*, never a guess. A group whose every source is `stale` / `never`
+  carries a muted note; an empty group says so in its own sentence.
+- **Filters** run page-side over the headline rows already read: **Sources** (none =
+  all), a **Ticker** field (300 ms debounce, `clean_symbol` both sides — a string that
+  does not clean matches NOTHING), **Watchlist only** (`news_config.ticker_set()`: the
+  GEX collection list + `[tickers] extras`), and **Impact** (All / High / High + Med —
+  an unbanded row never passes a band filter). `PAGE_SIZE` 60 rows, then **Show
+  more**. The status line carries counts only.
 - **Trending**: the top 12 tickers by item count within `[trending] window_h` (6 h, read
   through `news.trending_window_h`, which falls back to 6 on a junk value). ⚠
   `yahoo_ticker` items are skipped — each carries the ticker it was FETCHED for, so
   counting them made every polled name trend. A chip toggles the ticker filter.
 - **Refresh** enqueues `news_refresh` on `cmd:news` — built only where
-  `shell.may_enqueue()`, and the handler re-checks. The button spins until the next
-  `news:status` publish (every poll ends with one, even a poll that changed nothing and
-  so left the `skip_unchanged` feed view alone), with a `REFRESH_TIMEOUT_SEC` (240 s)
-  backstop, since one poll walks every Yahoo ticker and the paced SEC requests.
-- **Repaint** is `view_watch.watch_view("news:feed", ...)` with an async re-read — which
-  is why `watch_view` now returns its callback's result for NiceGUI's timer to await.
-  The header's Updated stamp is the key's `:ts` side key and is not `stale`-aware: the
-  cadence moves 5 → 60 min across the week, so an old stamp on a Sunday is not a fault.
-- **Empty states** are three: never published (`copy.WAITING_NEWS`, shared with the Desk
-  strip and the Symbol band), published but empty (`EMPTY_FEED`), filters exclude
-  everything (`NO_MATCH`).
+  `shell.may_enqueue()`, and the handler re-checks. The service re-checks the calendar
+  (only sources whose own cadence is due — a click never forces one early) and then
+  polls every feed. The button spins until the next `news:status` publish (every feed
+  poll ends with one), with a `REFRESH_TIMEOUT_SEC` (240 s) backstop.
+- **Repaint** is `view_watch.watch_view` per view with an async re-read, plus a
+  `REPAINT_SEC` (60 s) redraw from the payloads already held — stamps drop their date
+  at midnight and calendar events pass while a tab sits open, and the views republish
+  only on a CONTENT change. The header's Updated stamp is the feed key's `:ts` side key
+  and is not `stale`-aware.
+- **Empty states**: never published (`copy.WAITING_NEWS`, shared with the Desk strip
+  and the Symbol band; `SEC_WAITING`, `CAL_WAITING` for the other two), published but
+  empty (`EMPTY_FEED`, `SEC_EMPTY`), filters exclude everything (`NO_MATCH`).
+
+**The public copy** (`live.neuralstrike.co/news`, `pages/news_live.py`) draws the same
+three regions with the same painters (`linked=False`: a ticker filters the headline
+list rather than opening a dossier), reads `feed_public`, `sec_public` and
+`calendar_public` and nothing else, and has no Refresh and no Watchlist only. Its
+impact is RE-SCORED from the public row against the collection list, and its calendar
+dividends are cut to the collection list — so no `[tickers] extras` name leaks.
 
 Not built from the design: the rail badge counting unseen items (`SEEN_KEY` is written on
-each visit, read by nothing yet), and a status line naming a failing feed —
-`cache:news:status` is read only to release Refresh.
+each visit, read by nothing yet), and a status line naming a failing feed or calendar
+source — `cache:news:status` is read only to release Refresh, and
+`cache:news:calendar_status` by no page at all (read it with `redis-cli`).
 
 ## `/options/captured`
 

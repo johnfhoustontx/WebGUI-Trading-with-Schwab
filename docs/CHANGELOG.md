@@ -4,7 +4,57 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-26 (**Market News — a sixth service, `news_svc`, and
+**Last updated:** 2026-09-26 (**Market News v2 — an impact rank on every item, the
+SEC / EDGAR items in their own panel, and an economic calendar; `trade_svc` gains a
+scheduler for a daily dividend pull.** Branch `claude/extract-news-from-x-bdb6ae-ryosve`,
+`6370b73`..`c95be6c` plus this docs commit; design + plan
+`docs/plans/2026-09-26-news-v2-{design,plan}.md`.)
+
+- **Impact.** `services/news_svc/impact.py`, pure: keyword tiers (each counts once),
+  the best feed's points, +1 for two or more feeds, +2 for a followed ticker, Form 4
+  size bands (+1 officer / director), filing points by exact form (−1 untracked).
+  ≥ 6 High, ≥ 3 Med, else Low. Stored with a fingerprint of (config, ticker set) and
+  re-scored when either moves; a High older than `stale_after_h` (24 h) is published
+  as Med with a `stale` reason, never stored capped. `[impact]` in `config/news.toml`,
+  catalogued in Settings → Configuration → Market news (five *Impact* sections).
+- **The public views are RE-SCORED, not copied** (`783b239`): each public row is
+  scored from itself — public `sources` and `tickers` only — against the collection
+  list, never `[tickers] extras`, so neither a private feed nor an extra can surface
+  in a public reason.
+- **Five item views, split at the producer**: `feed` / `feed_public` (headlines),
+  `sec` / `sec_public` (Form 4s and offerings), `status`. The Desk strip reads
+  headlines only; the Symbol band merges `feed` + `sec`.
+- **The economic calendar** (`econ_calendar.py` fetches and stores, `econ.py` builds):
+  the Fed's `calendar.json`, the BLS and BEA ICS schedules, FRED's release calendar
+  and observations (the API with `FRED_API_KEY` from the stack `.env`, else the
+  key-free `fredgraph.csv`; the key redacted from every error), Nasdaq's IPO calendar,
+  and the dividends store. Each source has its own User-Agent (BLS 403s a browser one,
+  FRED resets a bare Chrome one from a datacenter, Nasdaq needs Chrome), its own
+  cadence, and fails alone, keeping its last good result. A release watch polls a due
+  series every 2 min for an hour. Views `calendar`, `calendar_public` (dividends cut to
+  the collection list — BUILT, not filtered) and the private `calendar_status`.
+- **Dividends** (`services/trade_svc/dividends.py`, `scheduler.py`): once a trading day
+  at or after 06:40 CT, one proxy `/quotes` passthrough call per followed symbol into
+  `shared/dividends.py`'s store; `dividends_refresh` on `cmd:trade` forces it,
+  age-gated at 180 s against replay. `news_svc` opens the store read-only and never
+  calls the proxy.
+- **Scheduler branches** (`81e5bcc`): `feeds`, `calendar` and `watch` launch as keyed
+  tasks every 30 s tick, so a slow feed poll never holds a release watch back;
+  `news_refresh` re-checks the calendar, then polls the feeds.
+- **The page** (`/news` and the public copy): three regions — single-line headlines
+  (impact pill with its reasons on hover, ≤ 2 tickers + `+N`, source badges hidden on a
+  phone), the SEC panel (Date/Time · Symbol · Headline/Details, links to sec.gov only),
+  and calendar tiles in three groups (*Economic news/Calendar*, *Dividend / IPO*,
+  *Economic data (CPI, PPI etc)*), Awaiting vs Released decided page-side, times in
+  CT. An Impact filter joins Sources / Ticker / Watchlist only.
+- **Docs**: CLAUDE.md, `webgui-routes.md`, `page_help.py`, the four manuals,
+  `dev-prod-environments.md` (the `FRED_API_KEY` row and the User-Agent facts).
+- **Not done / open.** Live verification (plan Task 22) — the Schwab dividend field
+  names, the calendar sources from prod's IP, the first CPI morning — has not run.
+  `cache:news:calendar_status` is read by no page. The impact pill's hover words the
+  cap "older than a day" whatever `stale_after_h` says.
+
+**Prior —** 2026-09-26 (**Market News — a sixth service, `news_svc`, and
 four readers: `/news`, the Desk's headlines strip, the Symbol page's *In the news*
 band, and a public `/news` on `live.neuralstrike.co`.** Branch
 `claude/extract-news-from-x-bdb6ae-ryosve`, `2748923`..`e813a46`; design + plan

@@ -466,7 +466,7 @@ the ticker, not that nothing happened. Headlines open the article in a new tab.
 
 | | |
 |---|---|
-| Views | `options:matrix`, `options:scan_funnel`, `options:scan_day`, `options:gex_status` (whether the walls are current), `options:flow_alerts`, the four paper books, `sentiment:regime`, `sentiment:bullbear`, `news:feed` — one batched poll every 2 s |
+| Views | `options:matrix`, `options:scan_funnel`, `options:scan_day`, `options:gex_status` (whether the walls are current), `options:flow_alerts`, the four paper books, `sentiment:regime`, `sentiment:bullbear`, `news:feed`, `news:sec` — one batched poll every 2 s |
 | On-demand | `cmd:options` → `dossier` → `cache:options:dossier:<SYMBOL>`, kept 15 minutes |
 | Cost | Nothing for a scanned symbol. **4–5 Schwab calls** per on-demand look-up |
 
@@ -937,27 +937,47 @@ you already follow is worth more than a strong alert on a name you have never tr
 
 ### What it is
 
-One list of the newest market headlines, SEC filings and insider buys, newest first,
-each tagged with the tickers it names. It answers *"is there news on this?"* without
-leaving the app.
+Three panels on one screen: the newest market **headlines** (each ranked High, Med or
+Low and tagged with the tickers it names), the **SEC / EDGAR** filings and insider
+buys, and the **economic calendar** — Fed events, dividends and IPOs, and the latest
+and next values of the reports that move the market. It answers *"is there news on
+this, and what is scheduled?"* without leaving the app.
 
 ### Where the data comes from
 
 | | |
 |---|---|
-| Service | `news_svc` (:8216), `cache:news:feed` |
-| Sources | Public RSS feeds (MarketWatch, CNBC, Benzinga, the press-release wires and others), Yahoo Finance per-ticker headlines, and **SEC EDGAR** — Form 4 insider purchases and share-offering filings. The list is `config/news.toml [[feeds]]`. |
-| Refresh | Every **5 minutes** in regular hours, **15** off-hours, **60** at weekends and holidays |
-| Retention | The newest 300 items are published; the store keeps 7 days |
-| Settings | **Settings → Configuration → Market news** — poll intervals, extra tickers, the Trending window, and each feed's **Enabled** / **Show on the public site** switch. The feed list itself is read-only there; feeds are added in `config/news.toml` |
+| Service | `news_svc` (:8216): `cache:news:feed` (headlines), `cache:news:sec` (the SEC panel), `cache:news:calendar` (the tiles) |
+| Sources | Public RSS feeds (MarketWatch, CNBC, Benzinga, the press-release wires and others), Yahoo Finance per-ticker headlines, and **SEC EDGAR** — Form 4 insider purchases and share-offering filings. The list is `config/news.toml [[feeds]]`. The calendar reads the **Federal Reserve**'s calendar, the **BLS** and **BEA** release schedules, **FRED** (release dates and the values), **Nasdaq**'s IPO calendar, and a dividends store the **trade service** fills once a day. |
+| Refresh | Headlines every **5 minutes** in regular hours, **15** off-hours, **60** at weekends and holidays. The calendar on its own cadence: Fed events hourly, the release schedules twice a day, IPOs every 4 hours, the values every 4 hours — and every **2 minutes** for up to an hour after a report is due |
+| Retention | The newest 300 headlines and 100 SEC items are published; the store keeps 7 days |
+| Settings | **Settings → Configuration → Market news** — poll intervals, extra tickers, the Trending window, each feed's **Enabled** / **Show on the public site** switch, the **Impact** rules, and the **Calendar** (sources, Fed events, IPOs, dividends, indicators). The feed list itself is read-only there; feeds are added in `config/news.toml` |
 
 ### Reading the screen
 
-**Each row.** The publish time in **Central time** (an item from an earlier day shows
-its date too) · the **tickers** it names · the **headline**, a link to the publisher's
-own page · a grey **badge** per feed that carried it · and a muted second line with the
-feed's summary, or for a filing what was filed (insider buys: how many purchases, their
-total value and the transaction date).
+**Each headline** is one line: the publish time in **Central time** (an item from an
+earlier day shows its date too) · the **impact** letter · up to two **tickers** (a
+**+N** chip holds the rest, listed on hover) · the **headline**, a link to the
+publisher's own page, with its summary on hover · a grey **badge** per feed that
+carried it. On a phone the badges give way first.
+
+**Impact.** A fixed set of rules gives every item points, and the points cut into
+three ranks — **High** at 6 or more, **Med** at 3 or more, **Low** below:
+
+| Rule | Points (shipped) |
+|---|---|
+| A keyword tier matched in the headline (each tier counts once) | tier 1 (FOMC, CPI, payrolls, merger, bankruptcy, trading halt, guidance cut …) **+5** · tier 2 (downgrade, earnings, PPI, GDP, tariff, lawsuit, offering …) **+3** · tier 3 (outlook, analyst, rally, selloff …) **+1** |
+| The best feed that carried it | Federal Reserve **+3**, Truth Social **+2**, WSJ **+1**, ZeroHedge **−1**, others 0 |
+| Two or more feeds carried it | **+1** |
+| Tagged with a ticker you follow | **+2** |
+| An insider buy (Form 4), by total dollars | $250K **+1** · $1M **+3** · $10M **+6**, and **+1** more when an officer or director bought |
+| An offering filing, by exact form | 424B5 **+3** · S-3 **+2** · S-1 **+1** · S-3ASR **+1** · on no followed ticker **−1** |
+
+A High more than **24 hours** old (`stale_after_h`) is shown as **Med**. Hover the
+letter to read the rules that scored an item. Every number above is editable in
+**Settings → Configuration → Market news → Impact** and the four *Impact* sections
+after it. On the public site the rank is worked out again from the public row, so a
+private feed or a ticker only you follow never adds to it there.
 
 **Tickers.** A row is tagged only when the headline **names a ticker explicitly** — a
 cashtag (`$NVDA`) or an exchange bracket (`(NASDAQ: NVDA)`), and then only for a ticker
@@ -974,29 +994,53 @@ per-ticker items are left out: each carries the ticker it was fetched for, so co
 them would make every polled name trend on polling alone. Click one to filter to it;
 click it again to clear.
 
-**Filters.** **Sources** (none chosen means every source), **Ticker**, and
+**Filters.** **Sources** (none chosen means every source), **Ticker**,
 **Watchlist only** — the symbols the app collects gamma for plus the feed config's
-extras. Filters run instantly on rows already loaded.
+extras — and **Impact** (All, High, High + Med). Filters run instantly on the
+headlines already loaded; they do not filter the SEC panel.
 
-**Refresh** asks the service to poll every feed now; the button spins until that
-poll finishes (usually a few minutes) and new items land as it does.
+**SEC / EDGAR.** Columns **Date/Time · Symbol · Headline/Details**: an insider buy
+reads how many purchases, their total and the transaction date; an offering its form.
+A title links only to the filing on sec.gov.
+
+**Calendar.** Three groups of tiles, all times Central:
+
+| Group | What is in it |
+|---|---|
+| **Economic news/Calendar** | FOMC meetings, the Beige Book, Board speeches and testimony (speeches 14 days ahead, the rest 45), plus the `extra_releases` from the BLS / BEA schedules (JOLTS, the Employment Cost Index) |
+| **Dividend / IPO** | Ex-dividend date, amount a share and pay date for every ticker you follow (30 days ahead, 3 back); IPOs of at least $100M — upcoming with their range, priced ones for 7 days with their price |
+| **Economic data (CPI, PPI etc)** | One tile per report — CPI, PPI, Jobs, PCE, GDP, Retail sales, Jobless claims — each indicator an **Actual · Prior** line, and the tile's **Next** release date and time |
+
+An indicator is **released** once its new value has arrived after the scheduled
+release (it stays that way for `actual_fresh_h`, 24 h), **awaiting** while the release
+has passed and the value has not landed (*Awaiting the release*, Actual shown as —),
+and otherwise **upcoming** — Actual —, Prior the latest value. No future date on the
+agencies' schedules reads *Next date not yet published*; the app never guesses one. A
+muted note on a group means every source behind it failed and it is showing the last
+good reading.
+
+**Refresh** asks the service to re-check the calendar (only the sources that are due)
+and poll every feed now; the button spins until that poll finishes (usually a few
+minutes) and new items land as it does.
 
 ### Why it matters
 
 Price moves have causes, and a gamma wall or an unusual-volume alert reads differently
-once you know an offering was filed or an insider bought that morning. Having the
-headline beside the symbol saves the tab-switch.
+once you know an offering was filed, an insider bought that morning, or CPI is out at
+07:30. Having the headline and the calendar beside the symbol saves the tab-switch.
 
 ### When to use it
 
-Before placing a trade on a name, and when a symbol shows up on
-[Flow Alerts](#flow-alerts) or the [Opportunity Board](#opportunity-board) for no
-visible reason.
+Before placing a trade on a name, first thing in the morning for what is scheduled, and
+when a symbol shows up on [Flow Alerts](#flow-alerts) or the
+[Opportunity Board](#opportunity-board) for no visible reason.
 
 ### Caveats and gotchas
 
 - **A missing tag is not missing news.** A story that never writes the ticker is not
   tagged, so a Ticker filter will not find it.
+- **Impact is a rule count, not a judgement.** A keyword in a headline scores whether
+  or not the story is about the market ("rate cut" in a mortgage ad counts).
 - Headlines are third-party text and are shown as written — the app does not verify
   them.
 - Feeds publish on their own schedules; a quiet list at the weekend is normal.
@@ -1004,6 +1048,9 @@ visible reason.
   day is one row with both badges; one feed repeating a headline is merged only
   within `[dedupe] same_feed_merge_h` (6 hours), so a daily column keeps a row per
   day. SEC filings are never merged this way — their headlines are templated.
+- **A calendar value is FRED's**, derived the way the tile says (month-on-month %,
+  change in thousands, level). It may differ in the last digit from the agency's own
+  release text.
 
 ### On the public site
 
@@ -1011,8 +1058,10 @@ visible reason.
 Refresh, no Watchlist only, and a ticker is a filter chip rather than a link (the
 public site has no Symbol page). It lists only feeds whose **public** switch is on,
 decided again at every poll, so switching a feed off removes its stories from the
-public page within one poll. `?symbol=NVDA` opens it filtered to one ticker. It
-writes nothing, so a visitor cannot make the service fetch.
+public page within one poll. Its impact ranks are worked out from the public rows, and
+its dividends cover the gamma collection list only — a ticker in `[tickers] extras`
+never appears there. `?symbol=NVDA` opens it filtered to one ticker. It writes
+nothing, so a visitor cannot make the service fetch.
 
 ### Related pages
 

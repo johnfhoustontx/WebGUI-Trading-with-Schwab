@@ -165,7 +165,27 @@ User-Agent is a silent wrong value rather than an error.
 | `ALPHAVANTAGE_API_KEY` | `trade_svc` earnings calendar/history | absent = the earnings gate stays quiet, logged at INFO |
 | `EDGAR_USER_AGENT` | `trade_svc` EDGAR fundamentals | **not a key** — SEC issues none. A contact string their fair-access policy asks for; without one they answer **403** |
 | `ANTHROPIC_API_KEY` | the three Claude client factories | prod only; dev omits it beside `allow_claude = false` |
+| `FRED_API_KEY` | `news_svc` economic calendar (`econ_calendar`, read from the process environment at call time) | **optional.** Present: the calendar's values come from the FRED API. Absent or empty: from the key-free `fredgraph.csv` download, with the same result. It is a query parameter, so every error that could carry it is redacted before it is logged or stored. **Never in config, never in `.env.live`** — the public process reads no calendar source |
 | `TRADING_ENABLE_SCHEDULERS` | `_scaffold` | the §5 escape hatch, and only ever temporary |
+
+Adding the FRED key to prod (mode stays 600; restart only the news service):
+
+```bash
+cd /home/administrator/dev && umask 077 && printf 'FRED_API_KEY=%s\n' '<key>' >> .env \
+  && ! grep -q FRED_API_KEY .env.live && systemctl --user restart trading-prod-news_svc
+```
+
+Then `journalctl --user -u trading-prod-news_svc --since -10min | grep -c api_key`
+must print **0**.
+
+**The calendar's User-Agents are per source, and not interchangeable** — each is
+`user_agent` in its `[calendar.sources.<name>]` table (`""` = `[collector]
+feed_user_agent`, the repo's contact-bearing string). **BLS answers 403 to a browser
+User-Agent** and **FRED resets a bare Chrome one from a datacenter IP**, so both keep
+the repo UA; **Nasdaq refuses the repo UA** and gets a Chrome string plus
+`Accept: application/json`. Measured from a different datacenter than prod's; a
+source reading `error` in `cache:news:calendar_status` after a promote is the first
+thing to check from prod's own IP.
 
 ⚠ **`.env` is in the backup** (`backup_local.EXTRA_FILES`) — it was not until
 2026-08-31, which meant a restore produced a stack that could not start, from an
@@ -207,17 +227,19 @@ naming the variable.
 ⚠ **`.env.live` is in the backup and in `.gitignore`** — both as their own
 line, because neither `.env` entry matches this name.
 
-**The public Market News screen (`/news`, 2026-09-26) needs NO ACL change.**
+**The public Market News screen (`/news`, 2026-09-26; its SEC panel and calendar
+the same day) needs NO ACL change.**
 The `live` user's key pattern is `~cache:*` (its grant, as recorded in
 [the public-screens verification](plans/2026-09-07-public-live-screens-verification.md)
 Phase 2: `~cache:* resetchannels &events:* -@all +@connection +@read
 +@transaction … +subscribe +psubscribe -keys`), which already covers
-`cache:news:feed_public`. ⚠ **It equally covers `cache:news:feed`, the PRIVATE
-feed, and no ACL can take that back:** Redis key patterns only grant, so a
+`cache:news:feed_public`, `cache:news:sec_public` and `cache:news:calendar_public`.
+⚠ **It equally covers `cache:news:feed`, `:sec`, `:calendar` and
+`:calendar_status` — the PRIVATE views — and no ACL can take that back:** Redis key patterns only grant, so a
 wildcard cannot exclude one key beneath it, and adding a `%R~cache:news:*`
 selector would grant nothing new and exclude nothing. What keeps the private
-feed off the public origin is **code** — the Desk's `bus_key` and
-`webgui/pages/news_live.py` read only `news_view.VIEW_PUBLIC` in this process —
+views off the public origin is **code** — the Desk's `bus_key` and
+`webgui/pages/news_live.py` read only the three public views in this process —
 pinned by `webgui/tests/test_news_live.py` and the Desk's public-key tests. The
 screen writes nothing, so it needs no write selector either.
 

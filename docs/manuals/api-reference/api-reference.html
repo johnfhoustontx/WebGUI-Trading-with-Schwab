@@ -136,7 +136,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Symbol</strong></td>
 <td><code>options_svc</code> (+ <code>sentiment_svc</code> for context)</td>
-<td><code>cache:options:matrix</code>, <code>:scan_funnel</code>, <code>:scan_day</code>, <code>:gex_status</code>, <code>:flow_alerts</code>, the four paper books, <code>cache:sentiment:regime</code>, <code>:bullbear</code>, <code>cache:news:feed</code>; <code>cache:options:dossier:&lt;SYMBOL&gt;</code> via the <code>dossier</code> command</td>
+<td><code>cache:options:matrix</code>, <code>:scan_funnel</code>, <code>:scan_day</code>, <code>:gex_status</code>, <code>:flow_alerts</code>, the four paper books, <code>cache:sentiment:regime</code>, <code>:bullbear</code>, <code>cache:news:feed</code>, <code>:sec</code>; <code>cache:options:dossier:&lt;SYMBOL&gt;</code> via the <code>dossier</code> command</td>
 </tr>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
@@ -156,7 +156,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Market News</strong></td>
 <td><code>news_svc</code> :8216</td>
-<td><code>cache:news:feed</code>, <code>:status</code> (the public copy reads <code>:feed_public</code>); also the Desk's headlines strip and the Symbol page's news band</td>
+<td><code>cache:news:feed</code>, <code>:sec</code>, <code>:calendar</code>, <code>:status</code> (the public copy reads <code>:feed_public</code>, <code>:sec_public</code>, <code>:calendar_public</code>); also the Desk's headlines strip (<code>:feed</code>) and the Symbol page's news band (<code>:feed</code> + <code>:sec</code>)</td>
 </tr>
 <tr>
 <td><strong>Market Dashboard</strong></td>
@@ -810,7 +810,11 @@ every 10 min or on a queued refresh.</p>
 <p><strong>Published view:</strong> <code>cache:portfolio:positions</code> / <code>events:portfolio:positions</code> →
 the <code>PortfolioModel</code> contract.</p>
 <h2 id="trade-service-8213">Trade service — :8213</h2>
-<p><strong>Entry:</strong> <code>services/trade_svc/app.py</code>. <strong>Scheduler:</strong> none (on-demand only).</p>
+<p><strong>Entry:</strong> <code>services/trade_svc/app.py</code>. <strong>Scheduler:</strong> <code>services/trade_svc/scheduler.py</code>,
+one job — the watchlist dividend pull (<code>dividends.refresh</code>), once a trading day at or
+after <code>[calendar.dividends] refresh_at</code> (06:40 CT) in <code>config/news.toml</code>, one proxy
+<code>/quotes</code> passthrough call per followed symbol, into <code>services/trade_svc/data/dividends.db</code>
+(<code>shared/dividends.py</code>). Gated by the environment's <code>schedulers</code> flag.</p>
 <p><strong>Commands (<code>cmd:trade</code>):</strong></p>
 <table>
 <thead>
@@ -825,6 +829,11 @@ the <code>PortfolioModel</code> contract.</p>
 <td><code>analyze</code></td>
 <td><code>{symbol}</code></td>
 <td>MTF technical + fundamental analysis, plus the <strong>validated swing model</strong> verdict (Position), the <strong>Markov 2.0</strong> forecast (5-band composite-score chain → band-probability forecast + bounded drift tilt), and the Investor verdict → <code>cache:trade:analysis</code>.</td>
+</tr>
+<tr>
+<td><code>dividends_refresh</code></td>
+<td>none</td>
+<td>Runs the dividend pull now, past the once-a-day guard (~one proxy call per followed symbol). Writes the store only — <code>news_svc</code> picks it up on its next calendar pass. Ignored while <code>[calendar.dividends] enabled = false</code>; a command older than <strong>180 s</strong> (<code>DIVIDENDS_REFRESH_MAX_AGE_SEC</code>) is dropped as a replay.</td>
 </tr>
 </tbody>
 </table>
@@ -977,40 +986,44 @@ were retired 2026-09-10. The ticker toggle only hides the marquee.</p>
 <h2 id="news-service-8216">News service — :8216</h2>
 <p><strong>Entry:</strong> <code>services/news_svc/app.py</code> (<code>make_app("news", scheduler=scheduler.loop,
 command_handler=handlers.handle_command)</code>). Polls free public feeds —
-<code>config/news.toml [[feeds]]</code>, read through <code>shared/news_config.py</code> — into
-<code>services/news_svc/data/news.db</code>, and publishes three views. <strong>No Schwab call, no
-Claude call, no proxy.</strong> Design: <code>docs/plans/2026-09-25-news-feed-design.md</code>.</p>
-<p><strong>Scheduler cadence</strong> (<code>services/news_svc/scheduler.py</code>, values from <code>[collector]</code>):</p>
+<code>config/news.toml [[feeds]]</code>, read through <code>shared/news_config.py</code> — and the economic
+calendar's sources into <code>services/news_svc/data/news.db</code>, and publishes eight views.
+<strong>No Schwab call, no Claude call, no proxy</strong>; the dividends come from a store
+<code>trade_svc</code> writes, opened read-only. One optional credential, <code>FRED_API_KEY</code>, read
+from the process environment (the stack <code>.env</code>). Designs:
+<code>docs/plans/2026-09-25-news-feed-design.md</code>, <code>docs/plans/2026-09-26-news-v2-design.md</code>.</p>
+<p><strong>Scheduler</strong> (<code>services/news_svc/scheduler.py</code>): the loop wakes every <code>TICK_S</code>
+(30 s), beats the heartbeat, and launches three branches as keyed background tasks —
+a branch whose previous task is still running is skipped, never doubled, and one
+branch's failure never stops another:</p>
 <table>
 <thead>
 <tr>
-<th>Key</th>
-<th>Default</th>
-<th>When</th>
+<th>Branch</th>
+<th>Runs</th>
+<th>Cadence</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>rth_poll_min</code></td>
-<td><code>5</code></td>
-<td>08:30–15:00 CT on a trading day (<code>shared.market_calendar</code>).</td>
+<td><code>feeds</code></td>
+<td><code>compute.poll_now</code></td>
+<td><code>[collector]</code>: <code>rth_poll_min</code> 5 (08:30–15:00 CT on a trading day), <code>offhours_poll_min</code> 15, <code>weekend_poll_min</code> 60 (weekends, NYSE holidays); counted from when the last poll <strong>ended</strong>; never faster than <code>MIN_INTERVAL_S</code> (60 s)</td>
 </tr>
 <tr>
-<td><code>offhours_poll_min</code></td>
-<td><code>15</code></td>
-<td>A trading day outside that window.</td>
+<td><code>calendar</code></td>
+<td><code>econ_calendar.refresh_now</code></td>
+<td>every tick; fetches only the sources whose own <code>refresh_min</code> is due, then republishes (<code>skip_unchanged</code>)</td>
 </tr>
 <tr>
-<td><code>weekend_poll_min</code></td>
-<td><code>60</code></td>
-<td>Saturday, Sunday and NYSE holidays.</td>
+<td><code>watch</code></td>
+<td><code>econ_calendar.watch_now</code></td>
+<td>every tick; fetches only a series whose release just passed and whose value has not landed, every <code>release_poll_min</code> (2) for <code>release_watch_min</code> (60); does nothing otherwise</td>
 </tr>
 </tbody>
 </table>
-<p>The loop wakes every <code>TICK_S</code> (30 s), re-reads the config (mtime-cached) and polls
-once the interval since the last poll <strong>ended</strong> has passed, so an edit applies
-without a restart. Nothing polls faster than <code>MIN_INTERVAL_S</code> (60 s). Gated by the
-environment's <code>schedulers</code> flag like every other loop.</p>
+<p>Config is re-read every pass (mtime-cached), so an edit applies without a restart.
+Gated by the environment's <code>schedulers</code> flag like every other loop.</p>
 <p><strong>Commands (<code>cmd:news</code>):</strong></p>
 <table>
 <thead>
@@ -1024,7 +1037,7 @@ environment's <code>schedulers</code> flag like every other loop.</p>
 <tr>
 <td><code>news_refresh</code></td>
 <td>none</td>
-<td>Polls every enabled feed now (the private page's Refresh). One poll at a time: while one runs, the command returns at once and is logged as skipped. Its end is visible as a new <code>cache:news:status</code> publish.</td>
+<td>The private page's Refresh: re-checks the calendar (only the sources that are due — a click never forces one early), then polls every enabled feed. Each cycle runs one at a time: while one runs, that step returns at once and is logged as skipped; a calendar failure never costs the feed poll. Its end is visible as a new <code>cache:news:status</code> publish.</td>
 </tr>
 </tbody>
 </table>
@@ -1040,35 +1053,83 @@ environment's <code>schedulers</code> flag like every other loop.</p>
 <tbody>
 <tr>
 <td><code>cache:news:feed</code></td>
-<td><code>{"items": [item, ...]}</code> — the newest <code>view_items</code> (300), every enabled feed</td>
+<td><code>{"items": [item, ...]}</code> — the newest <code>view_items</code> (300) <strong>headlines</strong>: every kind but <code>edgar_form4</code> / <code>edgar_filings</code></td>
 <td><code>skip_unchanged</code>; no timestamp in the payload, so read "last confirmed current" from <code>cache:news:feed:ts</code></td>
 </tr>
 <tr>
 <td><code>cache:news:feed_public</code></td>
-<td>the same shape, only rows whose <strong>primary</strong> feed is public under the CURRENT <code>[feed_flags]</code>; <code>sources</code> and <code>tickers</code> cut to what public feeds contributed</td>
-<td><code>skip_unchanged</code>; the ONLY news key the public origin reads</td>
+<td>the same shape, only rows whose <strong>primary</strong> feed is public under the CURRENT <code>[feed_flags]</code>; <code>sources</code> and <code>tickers</code> cut to what public feeds contributed; <code>impact</code> re-scored from that row</td>
+<td><code>skip_unchanged</code></td>
+</tr>
+<tr>
+<td><code>cache:news:sec</code></td>
+<td><code>{"items": [...]}</code> — the newest <code>sec_view_items</code> (100) <code>edgar_form4</code> / <code>edgar_filings</code> items</td>
+<td><code>skip_unchanged</code></td>
+</tr>
+<tr>
+<td><code>cache:news:sec_public</code></td>
+<td>the SEC items under the same public rule as <code>feed_public</code></td>
+<td><code>skip_unchanged</code></td>
 </tr>
 <tr>
 <td><code>cache:news:status</code></td>
 <td><code>{"feeds": [{name, kind, enabled, public, last_ok, last_poll, error, inserted}], "ts": &lt;ISO UTC&gt;}</code> — one row per configured feed, <code>inserted</code> is this poll's count</td>
 <td>every poll, even one that failed</td>
 </tr>
+<tr>
+<td><code>cache:news:calendar</code></td>
+<td>the calendar payload (below), dividends for every followed ticker</td>
+<td><code>skip_unchanged</code>; no timestamp</td>
+</tr>
+<tr>
+<td><code>cache:news:calendar_public</code></td>
+<td>the same, BUILT with the GEX collection list as the dividend symbol set, so <code>[tickers] extras</code> never appear</td>
+<td><code>skip_unchanged</code>; no timestamp</td>
+</tr>
+<tr>
+<td><code>cache:news:calendar_status</code></td>
+<td><code>{"sources": [{name, last_ok, last_poll, error}]}</code> — one row per source, <code>error</code> redacted. <strong>Private</strong></td>
+<td>every calendar pass, <code>skip_unchanged</code>; no timestamp (read <code>cache:news:calendar_status:ts</code>)</td>
+</tr>
 </tbody>
 </table>
 <p>An <strong>item</strong> is <code>{id, source, sources, original_source, title, teaser, url,
-published_at, first_seen, tickers, kind, topics, detail, public}</code>: <code>id</code> a hash of the
-canonical URL; <code>source</code> the feed whose title / url / teaser are stored and <code>sources</code>
-every feed that carried the story (primary first); times are UTC ISO strings (an
-unparseable publish time is stored as <code>"undated"</code>); <code>kind</code> is the adapter
-(<code>rss</code>, <code>yahoo_ticker</code>, <code>google_news</code>, <code>edgar_form4</code>, <code>edgar_filings</code>); <code>topics</code> is
-structural only (<code>SEC Filing</code>, <code>Insider Transaction</code>, <code>Offering</code>); <code>detail</code> is <code>{}</code>
-except for EDGAR — a Form 4 carries <code>symbol, company, insider, insiders,
-relationship, groups, total_value, transaction_date</code>, an offering <code>form, cik,
-accession</code>. Every string in an item is third-party text: render it escaped, and
-never use <code>url</code> as a link without checking it is http(s).</p>
-<p>⚠ The public origin's Redis user reads <code>~cache:*</code>, which covers <code>cache:news:feed</code>
-too. Keeping the private feed off <code>live.neuralstrike.co</code> is the job of the code that
-chooses the key (<code>pages/news_live.py</code>, <code>desk.bus_key</code>), not of the ACL.</p>
+published_at, first_seen, tickers, kind, topics, detail, public, impact}</code>: <code>id</code> a hash
+of the canonical URL; <code>source</code> the feed whose title / url / teaser are stored and
+<code>sources</code> every feed that carried the story (primary first); times are UTC ISO strings
+(an unparseable publish time is stored as <code>"undated"</code>); <code>kind</code> is the adapter (<code>rss</code>,
+<code>yahoo_ticker</code>, <code>google_news</code>, <code>edgar_form4</code>, <code>edgar_filings</code>); <code>topics</code> is structural
+only (<code>SEC Filing</code>, <code>Insider Transaction</code>, <code>Offering</code>); <code>detail</code> is <code>{}</code> except for
+EDGAR — a Form 4 carries <code>symbol, company, insider, insiders, relationship, groups,
+total_value, transaction_date</code>, an offering <code>form, cik, accession</code>. <strong><code>impact</code></strong> is
+<code>{"band": "high" | "med" | "low", "score": int, "reasons": [code, ...]}</code>, or <code>null</code>
+when never scored; a High older than <code>[impact] stale_after_h</code> is published as <code>med</code>
+with <code>"stale"</code> appended. Reason codes: <code>kw:&lt;tier&gt;:&lt;word&gt;</code>, <code>source:&lt;feed&gt;</code>,
+<code>sources:&lt;n&gt;</code>, <code>watchlist</code>, <code>form4:$&lt;total&gt;</code>, <code>officer</code>, <code>filing:&lt;form&gt;</code>,
+<code>untracked</code>. Every string in an item is third-party text: render it escaped, and never
+use <code>url</code> as a link without checking it is http(s).</p>
+<p>The <strong>calendar payload</strong>:</p>
+<pre><code>{&quot;events&quot;:    [{&quot;title&quot;, &quot;at&quot;, &quot;date&quot;}],
+ &quot;dividends&quot;: [{&quot;symbol&quot;, &quot;ex_date&quot;, &quot;pay_date&quot;, &quot;amount&quot;}],
+ &quot;ipos&quot;:      [{&quot;symbol&quot;, &quot;company&quot;, &quot;date&quot;, &quot;price&quot;, &quot;price_range&quot;, &quot;offer_usd&quot;}],
+ &quot;data&quot;:      [{&quot;key&quot;, &quot;label&quot;, &quot;tile&quot;, &quot;unit&quot;, &quot;next_release_at&quot;, &quot;next_date&quot;,
+                &quot;last_release_at&quot;, &quot;latest&quot;, &quot;prior&quot;}],
+ &quot;sources&quot;:   {name: &quot;ok&quot; | &quot;stale&quot; | &quot;never&quot; | &quot;off&quot;},
+ &quot;settings&quot;:  {&quot;release_watch_min&quot;, &quot;actual_fresh_h&quot;}}
+</code></pre>
+<p><code>at</code> / <code>*_release_at</code> / <code>first_seen</code> are aware UTC ISO instants or <code>null</code>; dates are
+<code>YYYY-MM-DD</code>. <code>latest</code> / <code>prior</code> are <code>{obs_date, value, first_seen, bootstrap}</code> or
+<code>null</code>, <code>value</code> the DERIVED figure per <code>unit</code> (<code>pct_mom</code>, <code>change_k</code>, <code>level_pct</code>,
+<code>level_k</code>, <code>pct_saar</code>). <code>amount</code> is a positive per-payment figure or <code>null</code> (never 0).
+<code>sources</code> names <code>fed</code>, <code>bls</code>, <code>bea</code>, <code>dividends</code>, <code>nasdaq_ipo</code>, <code>fred_calendar</code>,
+<code>fred_api</code>, <code>fredgraph</code> — the FRED observation path not in use reports <code>off</code>. The
+payload carries FACTS only: whether an indicator is <em>released</em>, <em>awaiting</em> or
+<em>upcoming</em> depends on <code>now</code>, so the reader decides it
+(<code>webgui/pages/news_view.indicator_state</code>).</p>
+<p>⚠ The public origin's Redis user reads <code>~cache:*</code>, which covers every private news key
+too — <code>feed</code>, <code>sec</code>, <code>calendar</code> and <code>calendar_status</code> (which carries error text).
+Keeping them off <code>live.neuralstrike.co</code> is the job of the code that chooses the key
+(<code>pages/news_live.py</code>, <code>desk.bus_key</code>), not of the ACL.</p>
 <hr />
 <h1 id="schwab-proxy">Schwab Proxy</h1>
 <p><strong>Entry:</strong> <code>schwab-proxy/schwab_proxy.py</code>, port <strong>8100</strong>. Central token manager +
@@ -1281,8 +1342,13 @@ cache:trade:markov_prior       cache:trade:universe_factors
 cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
-cache:news:feed                events:news:feed               (every feed)
-cache:news:feed_public         events:news:feed_public        (public feeds only - the live origin's key)
+cache:news:feed                events:news:feed               (headlines - every kind but the SEC ones)
+cache:news:feed_public         events:news:feed_public        (public feeds only - a live-origin key)
+cache:news:sec                 events:news:sec                (Form 4s and offering filings)
+cache:news:sec_public          events:news:sec_public         (public feeds only - a live-origin key)
+cache:news:calendar            events:news:calendar           (the economic calendar)
+cache:news:calendar_public     events:news:calendar_public    (dividends cut to the collection list - a live-origin key)
+cache:news:calendar_status     events:news:calendar_status    (private: per-source errors)
 cache:news:status              events:news:status
 cmd:trade   cmd:portfolio   cmd:market   cmd:news
 </code></pre>

@@ -226,12 +226,15 @@ behind all three.
 `https://neuralstrike.co/live.html` is a thumbnail menu of them, and the site's
 **Tools** menu links the four screens a visitor can act on, and Market News.
 
-The public **Market News** page is your Market News list with every control
-that belongs to you taken out: no Refresh, no Watchlist only, and a ticker is a
-filter chip rather than a link to a Symbol page (the public site has none). It
-shows only the feeds marked **public** (Settings → Configuration → Market news →
-Feed switches; every shipped feed is public), and switching one off removes its
-stories from the public page at the next poll. A link such as
+The public **Market News** page is your Market News page — headlines, the SEC
+panel and the calendar — with every control that belongs to you taken out: no
+Refresh, no Watchlist only, and a ticker is a filter chip rather than a link to a
+Symbol page (the public site has none). It shows only the feeds marked **public**
+(Settings → Configuration → Market news → Feed switches; every shipped feed is
+public), and switching one off removes its stories from the public page at the next
+poll. Its impact letters are worked out again from what the public page shows, and
+its dividends cover only the gamma collection list, so a ticker you added to
+`[tickers] extras` never appears there. A link such as
 `live.neuralstrike.co/news?symbol=NVDA` opens it filtered to one ticker. It
 writes nothing: a visitor cannot make the service fetch anything. The public
 **Desk**'s headlines strip reads the same public-only list.
@@ -778,19 +781,33 @@ for that symbol.
 
 **Route:** `/news`. A rail item under **MARKETS**, directly below Flow Alerts.
 
-The newest headlines, SEC filings and insider buys in one list, newest first — each
-row shows when it was published (Central time), the tickers it names, the headline,
-and a small badge naming the feed it came from.
+Three panels: the **headlines** on the left, the **SEC / EDGAR** panel (filings and
+insider buys) top right, and the **economic calendar** below it. On a phone they
+stack in that order. Every time is Central.
 
-- **Sources** are public news feeds (MarketWatch, CNBC, Yahoo Finance, the press-release
-  wires and others) plus **SEC EDGAR**: insider **purchases** filed on Form 4, and new
-  share offerings. A story several feeds carried shows each feed's badge.
-- **A ticker is tagged only when the headline names it explicitly** — a cashtag like
-  `$NVDA` or a bracket like `(NASDAQ: NVDA)` — or when it came from Yahoo Finance's
-  page for that ticker, and only for tickers the app follows (the Watchlist only
-  set). An **SEC filing** is the exception: it carries the filing company's own
-  ticker whether or not the app follows it. A company name alone never tags, so a
-  ticker filter can miss a story about that company.
+- **Each headline is one line**: when it was published (an older item shows its
+  date), an **impact** letter, up to two tickers (a **+N** chip holds the rest —
+  hover it for the list), the headline, and a small badge naming each feed that ran
+  it. On a narrow screen the feed badges are dropped so the headline keeps its room.
+- **Impact (H / M / L)** is a rules-based rank the service gives every item: keyword
+  tiers (*FOMC*, *CPI*, *merger*, *bankruptcy* … count most; *downgrade*,
+  *earnings*, *tariff* … less; *outlook*, *analyst* … least — each tier counts
+  once), points for the feed (the Federal Reserve most), a bonus when two or more
+  feeds ran the story or when it is tagged with a ticker you follow, the size of an
+  insider buy (more for an officer or director), and the type of an offering filing.
+  A score of **6** or more is High, **3** or more Med, anything lower Low. A High
+  older than **24 hours** shows as **Med**. Hover the letter to read the rules that
+  scored it. Every threshold, keyword and point value is in **Settings →
+  Configuration → Market news → Impact** (and the *Impact keywords*, *by feed*,
+  *insider buys* and *SEC filings* sections below it).
+- **Sources** are public news feeds (MarketWatch, CNBC, Yahoo Finance, the
+  press-release wires and others). A story several feeds carried shows each feed's
+  badge.
+- **A ticker is tagged only when the headline names it explicitly** — a cashtag
+  like `$NVDA` or a bracket like `(NASDAQ: NVDA)` — or when it came from Yahoo
+  Finance's page for that ticker, and only for tickers the app follows (the
+  Watchlist only set). A company name alone never tags, so a ticker filter can miss
+  a story about that company.
 - **Click a ticker** to open its Symbol page. **Click a headline** to read it on the
   publisher's site, in a new tab.
 - **Trending** chips count the tickers named in headlines from the general feeds
@@ -798,18 +815,44 @@ and a small badge naming the feed it came from.
   Finance's per-ticker stories are left out, because they carry the ticker they
   were fetched for rather than one the headline named. Click one to show only its
   news; click it again to clear.
-- Filter by **Sources**, **Ticker** or **Watchlist only** (the symbols the app
-  collects gamma for, plus `[tickers] extras`); choosing no source means every
-  source. **Show more** pages further down the list.
+- Filter by **Sources**, **Ticker**, **Watchlist only** (the symbols the app
+  collects gamma for, plus `[tickers] extras`) or **Impact** (All · High · High +
+  Med); choosing no source means every source. The filters apply to the headlines
+  only. **Show more** pages further down the list.
+- **The SEC / EDGAR panel** lists insider **purchases** filed on Form 4 and new share
+  offerings (S-1, S-3, 424B5, S-3ASR) in three columns: **Date/Time**, **Symbol**
+  and **Headline/Details** — the impact letter, the title, then for an insider buy
+  how many purchases, their total and the date, or for a filing its form. A filing
+  carries the filer's own ticker whether or not the app follows it. Titles open the
+  filing on **sec.gov** and nowhere else.
+- **The calendar** is three groups of tiles:
+  - **Economic news/Calendar** — FOMC meetings, the Beige Book, Board speeches and
+    testimony from the Federal Reserve's own calendar, plus a few other scheduled
+    releases (JOLTS, the Employment Cost Index).
+  - **Dividend / IPO** — the ex-dividend date, amount and pay date for the tickers
+    you follow (the next 30 days, and the last 3), and IPOs of $100 million or more
+    from Nasdaq's calendar — upcoming with their price range, priced ones for a week
+    with their price.
+  - **Economic data (CPI, PPI etc)** — one tile per report: CPI, PPI, Jobs (payrolls
+    and unemployment), PCE, GDP, Retail sales and Jobless claims. Each line shows
+    **Actual** and **Prior**, and the tile shows when the **Next** release is due.
+    For a day after a release the tile is either **released** — the new number has
+    arrived and is the Actual — or reads **Awaiting the release** (Actual —) while
+    the service checks for it every 2 minutes for up to an hour. A tile with no
+    future date reads *Next date not yet published*.
+  A muted note under a group means its sources could not be reached; it is showing
+  the last good reading.
 - **Refresh** checks every feed now instead of waiting for the next scheduled poll
-  (every 5 minutes in market hours, 15 off-hours, 60 at weekends and holidays).
+  (every 5 minutes in market hours, 15 off-hours, 60 at weekends and holidays), and
+  re-checks the calendar — though each calendar source still keeps its own schedule.
 - The **Desk** shows the five newest headlines and each **Symbol** page an
-  *In the news* band; the public site has its own copy of this page (see *The
-  public live screens*). Every feed, its on/off switch, whether the public site
-  may show it, and the poll intervals are in **Settings → Configuration →
-  Market news**.
+  *In the news* band (headlines and SEC items); the public site has its own copy of
+  this page (see *The public live screens*). Every feed, its on/off switch, whether
+  the public site may show it, the poll intervals, the impact rules and the
+  calendar's sources are in **Settings → Configuration → Market news**.
 
-> A headline is not a verified fact, and nothing here is a trade recommendation.
+> A headline is not a verified fact, the impact letter is a rule count and not a
+> judgement, and nothing here is a trade recommendation.
 
 ## Market Dashboard
 

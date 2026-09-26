@@ -265,9 +265,9 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | sentiment_svc | 8210 | Sentiment composite, trend, market regime, rotation, nightly momentum cascade. |
 | options_svc | 8211 | Scans, paper trading, gamma collection, flow alerts, calculator, simulator, expected move, rescue. |
 | portfolio_svc | 8212 | Holdings, sectors, performance, live P&L stream. |
-| trade_svc | 8213 | On-demand single-symbol analysis + deep dive. |
+| trade_svc | 8213 | On-demand single-symbol analysis + deep dive; the daily watchlist dividend pull. |
 | market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). |
-| news_svc | 8216 | Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds into `news.db`. No Schwab, no Claude. |
+| news_svc | 8216 | Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds and the economic calendar (Fed, BLS, BEA, FRED, Nasdaq) into `news.db`. No Schwab, no Claude, no proxy. |
 | webgui | 8500 | The web UI. |
 | webgui_live | 8501 | The seventeen public screens, on their own origin. |
 
@@ -1967,8 +1967,10 @@ are config.
 
 # Market News
 
-`services/news_svc` — the one service with no Schwab or Claude call. Design:
-`docs/plans/2026-09-25-news-feed-design.md`.
+`services/news_svc` — the one service with no Schwab or Claude call, and the one
+that never calls the proxy. It reads one optional credential, `FRED_API_KEY`.
+Designs: `docs/plans/2026-09-25-news-feed-design.md` (v1) and
+`docs/plans/2026-09-26-news-v2-design.md` (impact, the SEC panel, the calendar).
 
 ## Sources
 
@@ -2010,13 +2012,125 @@ hold the poll.
 
 ## Views and the public copy
 
-`cache:news:feed` holds every feed; `cache:news:feed_public` holds only rows whose
-**primary** feed is public under the current `[feed_flags]`, re-read at every publish,
-with each row's tickers and source badges cut to what public feeds contributed.
-`cache:news:status` is one row per configured feed. The two feed views carry no
-timestamp and publish `skip_unchanged`, so a poll that found nothing new repaints
-nothing; the page's "Updated" stamp is the key's `:ts` side key, refreshed on every
-publish.
+Each poll publishes five views. **`cache:news:feed`** holds the headlines — every
+kind but the two SEC ones — and **`cache:news:sec`** only `edgar_form4` /
+`edgar_filings` (the newest `sec_view_items`, 100); the split is made by the store's
+kind filters, at the producer. **`cache:news:feed_public`** / **`cache:news:sec_public`**
+hold only rows whose **primary** feed is public under the current `[feed_flags]`,
+re-read at every publish, with each row's tickers and source badges cut to what public
+feeds contributed. `cache:news:status` is one row per configured feed. The four item
+views carry no timestamp and publish `skip_unchanged`, so a poll that found nothing
+new repaints nothing; the page's "Updated" stamp is the key's `:ts` side key,
+refreshed on every publish.
+
+## Impact
+
+`services/news_svc/impact.py` is pure over `(row, [impact] config, ticker set)` and
+returns points plus the reason codes that produced them:
+
+| Rule | Reason code | Shipped points |
+|---|---|---|
+| Keyword tiers `[impact.keywords.<tier>]`, matched case-insensitively as whole words / phrases in the **headline** (`match_teaser = true` adds the teaser, searched separately). A tier counts **once**, naming the first word in list order that matched | `kw:<tier>:<word>` | tier1 +5 · tier2 +3 · tier3 +1 |
+| `[impact.source_points]` — the **max** over the row's feeds, not the sum | `source:<feed>` | Federal Reserve +3 · Truth Social +2 · WSJ +1 · ZeroHedge −1 |
+| Two or more distinct feeds | `sources:<n>` | `multi_source` +1 |
+| Tagged with a ticker in the ticker set | `watchlist` (names no ticker) | `watchlist` +2 |
+| Form 4 by `detail.total_value`: the largest of `huge_usd` / `large_usd` / `small_usd` it reaches | `form4:$<total>` | $10M +6 · $1M +3 · $250K +1 |
+| … plus an officer / director (any relationship but *10% owner* / *insider*), only on a buy that scored | `officer` | +1 |
+| Offering filing, by **exact** form (S-3 never takes S-3ASR's value) | `filing:<form>` | 424B5 +3 · S-3 +2 · S-1 +1 · S-3ASR +1 |
+| A filing tagged with no ticker (likely a micro-cap) | `untracked` | −1 |
+
+`band`: score ≥ `high_at` (6) → `high`, ≥ `med_at` (3) → `med`, else `low`; a pair
+that is not `high_at > med_at` falls back to 6 / 3. A junk row or config scores 0,
+never raises.
+
+**Stored uncapped, capped at publish.** A row's impact is stored with
+`impact.fingerprint(config, ticker set)`; every poll re-scores the rows whose stored
+fingerprint is stale (a Settings edit or a ticker-set change), and a scoring failure is
+one `news.impact` degrade while the views still publish with the stored impact. At
+publish, `cap_stale` shows a **High older than `stale_after_h` (24 h) as Med** and
+appends `stale` to its reasons; an undated item is never capped, and
+`stale_after_h` is left out of the fingerprint so editing it re-scores nothing.
+
+⚠ **The public views are re-scored, not copied.** Each public row is scored afresh from
+the row as the public view carries it — `sources` and `tickers` already cut to public
+feeds — against **`public_universe`**: the ticker set cut to the GEX collection list
+(`config/symbols.toml`, public). So a private feed never appears in a `source:` reason,
+and a `watchlist` point can never reveal a `[tickers] extras` name. Keywords are
+echoed into public reasons, so a ticker or anything private must never be made a
+keyword.
+
+## Economic calendar
+
+`services/news_svc/econ_calendar.py` fetches and stores; `econ.py` builds the payload
+(pure). Each source is a `[calendar.sources.<name>]` table with its own `url`,
+`user_agent` (`""` = the collector's `feed_user_agent`) and `refresh_min` (absent =
+`[calendar] refresh_min`, 60):
+
+| Source | What | Time basis | Cadence (shipped) | Requests |
+|---|---|---|---|---|
+| `fed` | `federalreserve.gov/json/calendar.json`: FOMC, Beige Book, speeches, testimony (`[calendar.fed] types`) | the Board's times are **Eastern**; a non-clock time ("noon", "TBA") keeps a date-only event | 60 min | 1 |
+| `bls` | the BLS release schedule (ICS) — CPI, PPI, Employment Situation, JOLTS, ECI | `TZID=US-Eastern` wall clock | 720 min | 1 |
+| `bea` | the BEA release schedule (ICS) — PCE, GDP | UTC (`…Z`) | 720 min | 1 |
+| `fred_calendar` | FRED's release-calendar HTML, one page per `release_id` a `schedule = "fred"` indicator names (retail sales 9, jobless claims 180), 45 days back to 120 ahead | the page renders **Central**; a date without a time takes the indicator's `time_ct` | 720 min | 2 |
+| `nasdaq_ipo` | `api.nasdaq.com` IPO calendar, this month and next; priced + upcoming tables only | dates | 240 min | 2 |
+| `fred_api` / `fredgraph` | each enabled indicator's FRED series, ~400 days back | observation dates | `values_refresh_min` (240), and the release watch | 10 |
+| `dividends` | the store `trade_svc` fills (below), opened **read-only** | dates | 60 min | 0 (local) |
+
+Every instant is stored as aware UTC and displayed in **Central**. The indicators
+(`[calendar.indicators.<key>]`: CPI, core CPI, PPI, payrolls, unemployment, PCE, core
+PCE, GDP, retail sales, claims) name a FRED `series`, a `transform` (`pct_mom` % m/m ·
+`change_k` change in thousands · `level_pct` · `level_k` level / 1000 · `pct_saar`), a
+`schedule` (`bls` / `bea` matched by a case-insensitive release-name PREFIX on a
+boundary — `"GDP ("` never takes *GDP by Industry* — or `fred` by `release_id`) and a
+`tile`. A missing or non-positive base is `None`, never 0.
+
+**The FRED key, and its fallback.** With `FRED_API_KEY` set in the process environment
+(read at call time, from the stack `.env` only — never config, never `.env.live`),
+observations come from the FRED API; without it, from the key-free
+`fredgraph.csv` download. The key is a query parameter, so every exception raised while
+a key-bearing URL was in play is rebuilt redacted with no cause chain, logged without a
+traceback, and every stored error goes through `fred.redact`. When the release-calendar
+HTML has never parsed, the key path's release **dates** stand in (their time from
+`time_ct`).
+
+**User-Agents are per source, and they disagree.** BLS answers **403** to a browser
+User-Agent and FRED resets a bare Chrome one from a datacenter IP, so both keep the
+repo's contact-bearing `feed_user_agent`; Nasdaq refuses that one and needs a
+**Chrome** User-Agent plus `Accept: application/json` (both in its table).
+
+**The release watch.** For `release_watch_min` (60) after a scheduled release, the
+series whose new observation has not landed yet — first seen at or after the release,
+and not a first-fill `bootstrap` row — is fetched every `release_poll_min` (2), at most
+~30 requests per series per release. A steady day is ~104 requests in all.
+
+**Failure.** Each source fails alone: one `news.cal.<source>` degrade, an `error` on
+its row, and its last GOOD parsed result keeps being published (state `stale`). A
+failed source is retried after at most `[calendar] refresh_min`. A missing dividends
+store is `never`, not "no dividends".
+
+**The views.** `cache:news:calendar` (owner), `cache:news:calendar_public` — BUILT with
+`public_symbols` = the collection list, so only dividends differ and an extra's never
+reach it — and the private `cache:news:calendar_status` (per-source `last_ok` /
+`last_poll` / redacted `error`). All three carry no timestamp and publish
+`skip_unchanged`, since the calendar branch republishes every tick. Whether a value is **released** or **awaiting** is a function of
+`now`, so the page decides it (`news_view.indicator_state`) from the facts the payload
+carries: `last_release_at`, and the latest observation's `first_seen` / `bootstrap`.
+
+## Dividends (trade_svc)
+
+`services/trade_svc/dividends.py` is the write half. Once a **trading day**, at or
+after `[calendar.dividends] refresh_at` (**06:40 CT**), `trade_svc`'s scheduler pulls
+each followed symbol (`news_config.ticker_set()` less `$` indices) through the proxy —
+**one** `/quotes` passthrough call per symbol, since the passthrough splits `params` on
+commas — reads the quote's `fundamental` block and writes
+`services/trade_svc/data/dividends.db` through `shared/dividends.py`. Each symbol lands
+as `ok`, `none` (a non-payer) or `error`; `ok` / `none` replace its forward rows, and
+an amount that is absent or not finite is stored `None`, never 0. The day is recorded
+in the store, so a restart does not refetch; a failure retries after 15 min. The
+`dividends_refresh` command on `cmd:trade` runs the same pull on demand (forced past
+the once-a-day guard), and drops a command older than 180 s as a replay. ⚠ Schwab's
+dividend field names are unverified on prod; every spelling is in one table,
+`dividends._FIELDS`.
 
 **Trending** counts the tickers on items published within `[trending] window_h`
 (6 h), skipping `yahoo_ticker` items, whose tag is the ticker they were fetched for.
@@ -2113,9 +2227,9 @@ the source; this table is a summary of them.
 | sentiment_svc | Composite refresh every **120 s** (`REFRESH_INTERVAL_SEC`), throttled to one refresh per **15 min** off-hours (`_OFFHOURS_INTERVAL_MIN`); directional trend recompute every **900 s** (`TREND_INTERVAL_SEC`); market-regime recompute every **5 min** (`REGIME_INTERVAL_MIN`); order-flow publish every **30 s** (`ORDER_FLOW_PUBLISH_SEC`); **momentum cascade once nightly at 16:20** (`momentum_due`); rotation at startup / on demand. |
 | options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00, no 15:00 run** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged). |
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
-| trade_svc | On-demand only (no scheduler). |
+| trade_svc | Analysis on demand. One scheduled job: the watchlist **dividend pull**, once a trading day at or after **06:40 CT** (`[calendar.dividends] refresh_at` in `config/news.toml`); the loop wakes every **60 s** and retries a failed pull after **15 min**. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
-| news_svc | Every feed polled every **5 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **15 min** otherwise on a trading day (`offhours_poll_min`), **60 min** at weekends and holidays (`weekend_poll_min`) — all in `config/news.toml`, editable in Settings. The loop wakes every **30 s** (`TICK_S`) and counts an interval from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). One poll at a time: a Refresh during a poll is skipped. |
+| news_svc | Three branches, launched every **30 s** tick (`TICK_S`) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. **feeds**: every feed polled every **5 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **15 min** otherwise on a trading day (`offhours_poll_min`), **60 min** at weekends and holidays (`weekend_poll_min`), counted from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). **calendar**: every tick, fetching only the sources whose own `refresh_min` is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). **watch**: every tick, fetching only a series whose release just passed — every **2 min** for up to **60 min**. All in `config/news.toml`, editable in Settings. One cycle of each at a time: a Refresh during one is skipped. |
 
 Three once-a-day jobs are **not** on any service's loop — they are systemd timers,
 generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving

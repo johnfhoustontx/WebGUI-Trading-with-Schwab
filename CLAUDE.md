@@ -97,7 +97,9 @@ The monorepo was re-tiered (strangler-fig) into three **physically separate** ti
 portfolio, trade, market — and every page reads Redis (the autonomous driver,
 once a sixth, was removed 2026-09-22). The sixth service today, **`news_svc`**
 (2026-09-26), was born in the tiers rather than migrated: it polls free public
-feeds and calls neither the proxy nor Claude. The shape:
+feeds and calls neither the proxy nor Claude, and reads one optional credential,
+`FRED_API_KEY` (from the stack `.env`, never `.env.live` or config; without it the
+calendar's values come from FRED's key-free CSV). The shape:
 
 **The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
 153 non-test `webgui/**/*.py`, extended 2026-08-21, and again 2026-08-25, and 2026-09-15):
@@ -209,7 +211,7 @@ open migration item. Full design:
 | `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + `live_composite.py` (live intraday composite + bridge payload) + `publish_bridge.py` (headless bridge writer) + bridge + `sectors_ref.py`. **Its `market_calendar.py` was absorbed into `shared/market_calendar.py` and DELETED (2026-08-02)** — same module name and same three function names, but *inclusive* `prev/next_trading_day` vs the shared module's *exclusive*, an invisible one-day trap. | ported to NiceGUI `/sentiment` |
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
-| `services/`            | The six Tier-2 services — `sentiment`/`options`/`portfolio`/`trade`/`market`/`news` `_svc` (:8210–8213, 8215, 8216) — plus `_scaffold`/`_degrade`/`_heartbeat`. **`news_svc`** is the one with no copied engine: RSS/EDGAR adapters → `services/news_svc/data/news.db` → three views, no Schwab or Claude call. | backend          |
+| `services/`            | The six Tier-2 services — `sentiment`/`options`/`portfolio`/`trade`/`market`/`news` `_svc` (:8210–8213, 8215, 8216) — plus `_scaffold`/`_degrade`/`_heartbeat`. **`news_svc`** is the one with no copied engine: RSS/EDGAR and economic-calendar adapters → `services/news_svc/data/news.db` → eight views, no Schwab or Claude call. **`trade_svc` runs a scheduler** (since 2026-09-26) with one job, the daily watchlist dividend pull through the proxy into `shared/dividends.py`'s store; `news_svc` opens that store read-only and never calls the proxy. | backend          |
 | `shared/`              | `analysis_lib/` (technical · sector_analysis · config) + secret templates/values. | library          |
 | `tools/`               | `check_env.py`, `db_admin.py` maintenance utilities.        | CLI              |
 | `webgui/`              | **NEW** NiceGUI multi-page front-end. Shell + Options section built. | the new UI, :8500 |
@@ -384,7 +386,7 @@ Routes:
 | `/options/scanner` | Options · Market Scanner — 0-DTE / Swing / Directional subtabs. Reads **`cache:options:scan_day`** (the day union), not `scan`, so dropped signals stay dimmed + frozen to EOD. ⚠ Each row's `setup_key` (`SYMBOL|TYPE|EXPIRATION`, strikes excluded) is a LOOKUP into the envelope's `setups` persistence map, **never a row key** — row identity stays `id` — and a setup whose start was not observed carries `age_unknown`, never a `first_seen` stamped `now`. [Detail](docs/webgui-routes.md) | built |
 | `/options/matrix` | Opportunity Board — one sortable row per watchlist symbol, default-sorted by Hotness. Tier-1 reader of `cache:options:matrix`. The symbol cell opens its `/symbol` dossier — drawn only where `shell.can_navigate` says the route exists, so the public `/opportunity` copy stays plain text. **Rows gained `call_wall`/`put_wall`/`net_gex`/`atm_iv`/`iv_state`/`dealer_regime` on 2026-08-18** (for the Desk; additive, no contract change — `MatrixSnapshot` validates only `rows: list[dict]`). All degrade to `None`/`"na"`, **never `0`** — the off-hours case turns on that distinction. [Detail](docs/webgui-routes.md) | built |
 | `/options/flow` | Flow Alerts — today's flow alerts (crossover · unusual activity · gamma flip · big_delta), newest first. Reader of `cache:options:flow_alerts`; resets overnight. [Detail](docs/webgui-routes.md) | built |
-| `/news` | Market News — headlines, SEC filings and insider buys from free public feeds, tagged by ticker, newest first, times in CT. Reader of `cache:news:feed` (`news_svc`); Refresh enqueues `news_refresh` on `cmd:news`. The Desk's headlines strip and the Symbol page's *In the news* band read the same view. A public copy runs at live `/news` (`news_live`), reading only `cache:news:feed_public`. [Detail](docs/webgui-routes.md) | built |
+| `/news` | Market News — three regions: headlines (one line each, a High/Med/Low impact pill, times in CT), an **SEC / EDGAR** panel, and the economic **calendar** tiles. The SEC kinds are split out at the PRODUCER: `cache:news:feed` carries headlines only, `cache:news:sec` the Form 4s and offerings, `cache:news:calendar` the tiles (`news_svc`); Refresh enqueues `news_refresh` on `cmd:news`, which re-checks the calendar then polls the feeds. The Desk's headlines strip reads `news:feed`; the Symbol page's *In the news* band reads `news:feed` + `news:sec`. A public copy runs at live `/news` (`news_live`), reading only `feed_public`, `sec_public` and `calendar_public`. [Detail](docs/webgui-routes.md) | built |
 | `/options/paper` | Paper Ledger — ledger table + shared detail panel; open trades repriced for live unrealized P&L on the manage tick. [Detail](docs/webgui-routes.md) | built |
 | `/options/captured` | Captured Signals — newest capture first, with a day footer (opened/closed today · booked P&L · open P&L). [Detail](docs/webgui-routes.md) | built |
 | `/options/portfolio` | Paper Account (the engine’s paper account) | built |
@@ -844,12 +846,16 @@ ONE store every visitor would share. Design:
 
 **Market News (`/news`, 2026-09-26) is the one Tools screen that writes
 nothing.** `news.render(public=True)` hands off to `pages/news_live.py`, which
-has no command site and reads `cache:news:feed_public` alone — the view
-`news_svc` builds from the rows whose PRIMARY feed is public under the CURRENT
-`[feed_flags]` (re-checked at every publish, tickers cut to those a public feed
-contributed). ⚠ **The ACL is not a layer here**: the `live` user's `~cache:*`
-read covers the private `cache:news:feed` too, and a wildcard cannot exclude one
-key beneath it, so the code is the only guard (`test_news_live.py`). That binds
+has no command site and reads three public views alone — `cache:news:feed_public`
+and `cache:news:sec_public`, which `news_svc` builds from the rows whose PRIMARY
+feed is public under the CURRENT `[feed_flags]` (re-checked at every publish,
+tickers cut to those a public feed contributed, impact RE-SCORED from that public
+row against the collection list, never `[tickers] extras`), and
+`cache:news:calendar_public`, BUILT with the collection list so an extra's
+dividends never reach it. ⚠ **The ACL is not a layer here**: the `live` user's
+`~cache:*` read covers the private `feed`, `sec`, `calendar` and
+`calendar_status` (which carries error text) too, and a wildcard cannot exclude
+one key beneath it, so the code is the only guard (`test_news_live.py`). That binds
 the **Desk** as well, a published screen: its headlines strip reads through
 `desk.bus_key(view)`, which swaps `news:feed` for `news:feed_public` when
 `shell.is_public()`. Any new public reader of the news feed needs the same swap.

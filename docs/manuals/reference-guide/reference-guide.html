@@ -985,7 +985,7 @@ the ticker, not that nothing happened. Headlines open the article in a new tab.<
 <tbody>
 <tr>
 <td>Views</td>
-<td><code>options:matrix</code>, <code>options:scan_funnel</code>, <code>options:scan_day</code>, <code>options:gex_status</code> (whether the walls are current), <code>options:flow_alerts</code>, the four paper books, <code>sentiment:regime</code>, <code>sentiment:bullbear</code>, <code>news:feed</code> — one batched poll every 2 s</td>
+<td><code>options:matrix</code>, <code>options:scan_funnel</code>, <code>options:scan_day</code>, <code>options:gex_status</code> (whether the walls are current), <code>options:flow_alerts</code>, the four paper books, <code>sentiment:regime</code>, <code>sentiment:bullbear</code>, <code>news:feed</code>, <code>news:sec</code> — one batched poll every 2 s</td>
 </tr>
 <tr>
 <td>On-demand</td>
@@ -1608,9 +1608,11 @@ you already follow is worth more than a strong alert on a name you have never tr
 <h2 id="market-news">Market News</h2>
 <p><em>Menu: MARKETS → Market News · Route <code>/news</code></em></p>
 <h3 id="what-it-is_5">What it is</h3>
-<p>One list of the newest market headlines, SEC filings and insider buys, newest first,
-each tagged with the tickers it names. It answers <em>"is there news on this?"</em> without
-leaving the app.</p>
+<p>Three panels on one screen: the newest market <strong>headlines</strong> (each ranked High, Med or
+Low and tagged with the tickers it names), the <strong>SEC / EDGAR</strong> filings and insider
+buys, and the <strong>economic calendar</strong> — Fed events, dividends and IPOs, and the latest
+and next values of the reports that move the market. It answers <em>"is there news on
+this, and what is scheduled?"</em> without leaving the app.</p>
 <h3 id="where-the-data-comes-from_4">Where the data comes from</h3>
 <table>
 <thead>
@@ -1622,32 +1624,73 @@ leaving the app.</p>
 <tbody>
 <tr>
 <td>Service</td>
-<td><code>news_svc</code> (:8216), <code>cache:news:feed</code></td>
+<td><code>news_svc</code> (:8216): <code>cache:news:feed</code> (headlines), <code>cache:news:sec</code> (the SEC panel), <code>cache:news:calendar</code> (the tiles)</td>
 </tr>
 <tr>
 <td>Sources</td>
-<td>Public RSS feeds (MarketWatch, CNBC, Benzinga, the press-release wires and others), Yahoo Finance per-ticker headlines, and <strong>SEC EDGAR</strong> — Form 4 insider purchases and share-offering filings. The list is <code>config/news.toml [[feeds]]</code>.</td>
+<td>Public RSS feeds (MarketWatch, CNBC, Benzinga, the press-release wires and others), Yahoo Finance per-ticker headlines, and <strong>SEC EDGAR</strong> — Form 4 insider purchases and share-offering filings. The list is <code>config/news.toml [[feeds]]</code>. The calendar reads the <strong>Federal Reserve</strong>'s calendar, the <strong>BLS</strong> and <strong>BEA</strong> release schedules, <strong>FRED</strong> (release dates and the values), <strong>Nasdaq</strong>'s IPO calendar, and a dividends store the <strong>trade service</strong> fills once a day.</td>
 </tr>
 <tr>
 <td>Refresh</td>
-<td>Every <strong>5 minutes</strong> in regular hours, <strong>15</strong> off-hours, <strong>60</strong> at weekends and holidays</td>
+<td>Headlines every <strong>5 minutes</strong> in regular hours, <strong>15</strong> off-hours, <strong>60</strong> at weekends and holidays. The calendar on its own cadence: Fed events hourly, the release schedules twice a day, IPOs every 4 hours, the values every 4 hours — and every <strong>2 minutes</strong> for up to an hour after a report is due</td>
 </tr>
 <tr>
 <td>Retention</td>
-<td>The newest 300 items are published; the store keeps 7 days</td>
+<td>The newest 300 headlines and 100 SEC items are published; the store keeps 7 days</td>
 </tr>
 <tr>
 <td>Settings</td>
-<td><strong>Settings → Configuration → Market news</strong> — poll intervals, extra tickers, the Trending window, and each feed's <strong>Enabled</strong> / <strong>Show on the public site</strong> switch. The feed list itself is read-only there; feeds are added in <code>config/news.toml</code></td>
+<td><strong>Settings → Configuration → Market news</strong> — poll intervals, extra tickers, the Trending window, each feed's <strong>Enabled</strong> / <strong>Show on the public site</strong> switch, the <strong>Impact</strong> rules, and the <strong>Calendar</strong> (sources, Fed events, IPOs, dividends, indicators). The feed list itself is read-only there; feeds are added in <code>config/news.toml</code></td>
 </tr>
 </tbody>
 </table>
 <h3 id="reading-the-screen_3">Reading the screen</h3>
-<p><strong>Each row.</strong> The publish time in <strong>Central time</strong> (an item from an earlier day shows
-its date too) · the <strong>tickers</strong> it names · the <strong>headline</strong>, a link to the publisher's
-own page · a grey <strong>badge</strong> per feed that carried it · and a muted second line with the
-feed's summary, or for a filing what was filed (insider buys: how many purchases, their
-total value and the transaction date).</p>
+<p><strong>Each headline</strong> is one line: the publish time in <strong>Central time</strong> (an item from an
+earlier day shows its date too) · the <strong>impact</strong> letter · up to two <strong>tickers</strong> (a
+<strong>+N</strong> chip holds the rest, listed on hover) · the <strong>headline</strong>, a link to the
+publisher's own page, with its summary on hover · a grey <strong>badge</strong> per feed that
+carried it. On a phone the badges give way first.</p>
+<p><strong>Impact.</strong> A fixed set of rules gives every item points, and the points cut into
+three ranks — <strong>High</strong> at 6 or more, <strong>Med</strong> at 3 or more, <strong>Low</strong> below:</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Points (shipped)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A keyword tier matched in the headline (each tier counts once)</td>
+<td>tier 1 (FOMC, CPI, payrolls, merger, bankruptcy, trading halt, guidance cut …) <strong>+5</strong> · tier 2 (downgrade, earnings, PPI, GDP, tariff, lawsuit, offering …) <strong>+3</strong> · tier 3 (outlook, analyst, rally, selloff …) <strong>+1</strong></td>
+</tr>
+<tr>
+<td>The best feed that carried it</td>
+<td>Federal Reserve <strong>+3</strong>, Truth Social <strong>+2</strong>, WSJ <strong>+1</strong>, ZeroHedge <strong>−1</strong>, others 0</td>
+</tr>
+<tr>
+<td>Two or more feeds carried it</td>
+<td><strong>+1</strong></td>
+</tr>
+<tr>
+<td>Tagged with a ticker you follow</td>
+<td><strong>+2</strong></td>
+</tr>
+<tr>
+<td>An insider buy (Form 4), by total dollars</td>
+<td>$250K <strong>+1</strong> · $1M <strong>+3</strong> · $10M <strong>+6</strong>, and <strong>+1</strong> more when an officer or director bought</td>
+</tr>
+<tr>
+<td>An offering filing, by exact form</td>
+<td>424B5 <strong>+3</strong> · S-3 <strong>+2</strong> · S-1 <strong>+1</strong> · S-3ASR <strong>+1</strong> · on no followed ticker <strong>−1</strong></td>
+</tr>
+</tbody>
+</table>
+<p>A High more than <strong>24 hours</strong> old (<code>stale_after_h</code>) is shown as <strong>Med</strong>. Hover the
+letter to read the rules that scored an item. Every number above is editable in
+<strong>Settings → Configuration → Market news → Impact</strong> and the four <em>Impact</em> sections
+after it. On the public site the rank is worked out again from the public row, so a
+private feed or a ticker only you follow never adds to it there.</p>
 <p><strong>Tickers.</strong> A row is tagged only when the headline <strong>names a ticker explicitly</strong> — a
 cashtag (<code>$NVDA</code>) or an exchange bracket (<code>(NASDAQ: NVDA)</code>), and then only for a ticker
 the app follows (the gamma collection list plus <code>[tickers] extras</code>; the Watchlist-only
@@ -1661,23 +1704,60 @@ the last <strong>6 hours</strong> (<code>[trending] window_h</code>), most-menti
 per-ticker items are left out: each carries the ticker it was fetched for, so counting
 them would make every polled name trend on polling alone. Click one to filter to it;
 click it again to clear.</p>
-<p><strong>Filters.</strong> <strong>Sources</strong> (none chosen means every source), <strong>Ticker</strong>, and
+<p><strong>Filters.</strong> <strong>Sources</strong> (none chosen means every source), <strong>Ticker</strong>,
 <strong>Watchlist only</strong> — the symbols the app collects gamma for plus the feed config's
-extras. Filters run instantly on rows already loaded.</p>
-<p><strong>Refresh</strong> asks the service to poll every feed now; the button spins until that
-poll finishes (usually a few minutes) and new items land as it does.</p>
+extras — and <strong>Impact</strong> (All, High, High + Med). Filters run instantly on the
+headlines already loaded; they do not filter the SEC panel.</p>
+<p><strong>SEC / EDGAR.</strong> Columns <strong>Date/Time · Symbol · Headline/Details</strong>: an insider buy
+reads how many purchases, their total and the transaction date; an offering its form.
+A title links only to the filing on sec.gov.</p>
+<p><strong>Calendar.</strong> Three groups of tiles, all times Central:</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>What is in it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Economic news/Calendar</strong></td>
+<td>FOMC meetings, the Beige Book, Board speeches and testimony (speeches 14 days ahead, the rest 45), plus the <code>extra_releases</code> from the BLS / BEA schedules (JOLTS, the Employment Cost Index)</td>
+</tr>
+<tr>
+<td><strong>Dividend / IPO</strong></td>
+<td>Ex-dividend date, amount a share and pay date for every ticker you follow (30 days ahead, 3 back); IPOs of at least $100M — upcoming with their range, priced ones for 7 days with their price</td>
+</tr>
+<tr>
+<td><strong>Economic data (CPI, PPI etc)</strong></td>
+<td>One tile per report — CPI, PPI, Jobs, PCE, GDP, Retail sales, Jobless claims — each indicator an <strong>Actual · Prior</strong> line, and the tile's <strong>Next</strong> release date and time</td>
+</tr>
+</tbody>
+</table>
+<p>An indicator is <strong>released</strong> once its new value has arrived after the scheduled
+release (it stays that way for <code>actual_fresh_h</code>, 24 h), <strong>awaiting</strong> while the release
+has passed and the value has not landed (<em>Awaiting the release</em>, Actual shown as —),
+and otherwise <strong>upcoming</strong> — Actual —, Prior the latest value. No future date on the
+agencies' schedules reads <em>Next date not yet published</em>; the app never guesses one. A
+muted note on a group means every source behind it failed and it is showing the last
+good reading.</p>
+<p><strong>Refresh</strong> asks the service to re-check the calendar (only the sources that are due)
+and poll every feed now; the button spins until that poll finishes (usually a few
+minutes) and new items land as it does.</p>
 <h3 id="why-it-matters_3">Why it matters</h3>
 <p>Price moves have causes, and a gamma wall or an unusual-volume alert reads differently
-once you know an offering was filed or an insider bought that morning. Having the
-headline beside the symbol saves the tab-switch.</p>
+once you know an offering was filed, an insider bought that morning, or CPI is out at
+07:30. Having the headline and the calendar beside the symbol saves the tab-switch.</p>
 <h3 id="when-to-use-it_3">When to use it</h3>
-<p>Before placing a trade on a name, and when a symbol shows up on
-<a href="#flow-alerts">Flow Alerts</a> or the <a href="#opportunity-board">Opportunity Board</a> for no
-visible reason.</p>
+<p>Before placing a trade on a name, first thing in the morning for what is scheduled, and
+when a symbol shows up on <a href="#flow-alerts">Flow Alerts</a> or the
+<a href="#opportunity-board">Opportunity Board</a> for no visible reason.</p>
 <h3 id="caveats-and-gotchas_4">Caveats and gotchas</h3>
 <ul>
 <li><strong>A missing tag is not missing news.</strong> A story that never writes the ticker is not
   tagged, so a Ticker filter will not find it.</li>
+<li><strong>Impact is a rule count, not a judgement.</strong> A keyword in a headline scores whether
+  or not the story is about the market ("rate cut" in a mortgage ad counts).</li>
 <li>Headlines are third-party text and are shown as written — the app does not verify
   them.</li>
 <li>Feeds publish on their own schedules; a quiet list at the weekend is normal.</li>
@@ -1685,14 +1765,19 @@ visible reason.</p>
   day is one row with both badges; one feed repeating a headline is merged only
   within <code>[dedupe] same_feed_merge_h</code> (6 hours), so a daily column keeps a row per
   day. SEC filings are never merged this way — their headlines are templated.</li>
+<li><strong>A calendar value is FRED's</strong>, derived the way the tile says (month-on-month %,
+  change in thousands, level). It may differ in the last digit from the agency's own
+  release text.</li>
 </ul>
 <h3 id="on-the-public-site">On the public site</h3>
 <p><code>live.neuralstrike.co/news</code> is this page less every control that is yours: no
 Refresh, no Watchlist only, and a ticker is a filter chip rather than a link (the
 public site has no Symbol page). It lists only feeds whose <strong>public</strong> switch is on,
 decided again at every poll, so switching a feed off removes its stories from the
-public page within one poll. <code>?symbol=NVDA</code> opens it filtered to one ticker. It
-writes nothing, so a visitor cannot make the service fetch.</p>
+public page within one poll. Its impact ranks are worked out from the public rows, and
+its dividends cover the gamma collection list only — a ticker in <code>[tickers] extras</code>
+never appears there. <code>?symbol=NVDA</code> opens it filtered to one ticker. It writes
+nothing, so a visitor cannot make the service fetch.</p>
 <h3 id="related-pages_4">Related pages</h3>
 <p><a href="#symbol">Symbol</a> · <a href="#flow-alerts">Flow Alerts</a> · <a href="#desk">Desk</a>.</p>
 <hr />

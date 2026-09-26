@@ -171,6 +171,9 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#sources">Sources</a></li>
 <li><a href="#tickers-duplicates-retention">Tickers, duplicates, retention</a></li>
 <li><a href="#views-and-the-public-copy">Views and the public copy</a></li>
+<li><a href="#impact">Impact</a></li>
+<li><a href="#economic-calendar">Economic calendar</a></li>
+<li><a href="#dividends-trade_svc">Dividends (trade_svc)</a></li>
 <li><a href="#failure-policy">Failure policy</a></li>
 </ul>
 </li>
@@ -735,7 +738,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <tr>
 <td>trade_svc</td>
 <td>8213</td>
-<td>On-demand single-symbol analysis + deep dive.</td>
+<td>On-demand single-symbol analysis + deep dive; the daily watchlist dividend pull.</td>
 </tr>
 <tr>
 <td>market_svc</td>
@@ -745,7 +748,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <tr>
 <td>news_svc</td>
 <td>8216</td>
-<td>Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds into <code>news.db</code>. No Schwab, no Claude.</td>
+<td>Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds and the economic calendar (Fed, BLS, BEA, FRED, Nasdaq) into <code>news.db</code>. No Schwab, no Claude, no proxy.</td>
 </tr>
 <tr>
 <td>webgui</td>
@@ -2817,8 +2820,10 @@ book the same number.</p>
 ledger is empty - so 0.50 and 21 are <strong>sourced, not fitted</strong>. That is why they
 are config.</p>
 <h1 id="market-news">Market News</h1>
-<p><code>services/news_svc</code> — the one service with no Schwab or Claude call. Design:
-<code>docs/plans/2026-09-25-news-feed-design.md</code>.</p>
+<p><code>services/news_svc</code> — the one service with no Schwab or Claude call, and the one
+that never calls the proxy. It reads one optional credential, <code>FRED_API_KEY</code>.
+Designs: <code>docs/plans/2026-09-25-news-feed-design.md</code> (v1) and
+<code>docs/plans/2026-09-26-news-v2-design.md</code> (impact, the SEC panel, the calendar).</p>
 <h2 id="sources">Sources</h2>
 <p>Every source is a free public feed listed in <code>config/news.toml [[feeds]]</code>, one
 adapter per <code>kind</code> (<code>services/news_svc/adapters/</code>), each a pure parse over the
@@ -2883,13 +2888,202 @@ hold the poll.</p>
   (<code>view_items</code>).</li>
 </ul>
 <h2 id="views-and-the-public-copy">Views and the public copy</h2>
-<p><code>cache:news:feed</code> holds every feed; <code>cache:news:feed_public</code> holds only rows whose
-<strong>primary</strong> feed is public under the current <code>[feed_flags]</code>, re-read at every publish,
-with each row's tickers and source badges cut to what public feeds contributed.
-<code>cache:news:status</code> is one row per configured feed. The two feed views carry no
-timestamp and publish <code>skip_unchanged</code>, so a poll that found nothing new repaints
-nothing; the page's "Updated" stamp is the key's <code>:ts</code> side key, refreshed on every
-publish.</p>
+<p>Each poll publishes five views. <strong><code>cache:news:feed</code></strong> holds the headlines — every
+kind but the two SEC ones — and <strong><code>cache:news:sec</code></strong> only <code>edgar_form4</code> /
+<code>edgar_filings</code> (the newest <code>sec_view_items</code>, 100); the split is made by the store's
+kind filters, at the producer. <strong><code>cache:news:feed_public</code></strong> / <strong><code>cache:news:sec_public</code></strong>
+hold only rows whose <strong>primary</strong> feed is public under the current <code>[feed_flags]</code>,
+re-read at every publish, with each row's tickers and source badges cut to what public
+feeds contributed. <code>cache:news:status</code> is one row per configured feed. The four item
+views carry no timestamp and publish <code>skip_unchanged</code>, so a poll that found nothing
+new repaints nothing; the page's "Updated" stamp is the key's <code>:ts</code> side key,
+refreshed on every publish.</p>
+<h2 id="impact">Impact</h2>
+<p><code>services/news_svc/impact.py</code> is pure over <code>(row, [impact] config, ticker set)</code> and
+returns points plus the reason codes that produced them:</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Reason code</th>
+<th>Shipped points</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Keyword tiers <code>[impact.keywords.&lt;tier&gt;]</code>, matched case-insensitively as whole words / phrases in the <strong>headline</strong> (<code>match_teaser = true</code> adds the teaser, searched separately). A tier counts <strong>once</strong>, naming the first word in list order that matched</td>
+<td><code>kw:&lt;tier&gt;:&lt;word&gt;</code></td>
+<td>tier1 +5 · tier2 +3 · tier3 +1</td>
+</tr>
+<tr>
+<td><code>[impact.source_points]</code> — the <strong>max</strong> over the row's feeds, not the sum</td>
+<td><code>source:&lt;feed&gt;</code></td>
+<td>Federal Reserve +3 · Truth Social +2 · WSJ +1 · ZeroHedge −1</td>
+</tr>
+<tr>
+<td>Two or more distinct feeds</td>
+<td><code>sources:&lt;n&gt;</code></td>
+<td><code>multi_source</code> +1</td>
+</tr>
+<tr>
+<td>Tagged with a ticker in the ticker set</td>
+<td><code>watchlist</code> (names no ticker)</td>
+<td><code>watchlist</code> +2</td>
+</tr>
+<tr>
+<td>Form 4 by <code>detail.total_value</code>: the largest of <code>huge_usd</code> / <code>large_usd</code> / <code>small_usd</code> it reaches</td>
+<td><code>form4:$&lt;total&gt;</code></td>
+<td>$10M +6 · $1M +3 · $250K +1</td>
+</tr>
+<tr>
+<td>… plus an officer / director (any relationship but <em>10% owner</em> / <em>insider</em>), only on a buy that scored</td>
+<td><code>officer</code></td>
+<td>+1</td>
+</tr>
+<tr>
+<td>Offering filing, by <strong>exact</strong> form (S-3 never takes S-3ASR's value)</td>
+<td><code>filing:&lt;form&gt;</code></td>
+<td>424B5 +3 · S-3 +2 · S-1 +1 · S-3ASR +1</td>
+</tr>
+<tr>
+<td>A filing tagged with no ticker (likely a micro-cap)</td>
+<td><code>untracked</code></td>
+<td>−1</td>
+</tr>
+</tbody>
+</table>
+<p><code>band</code>: score ≥ <code>high_at</code> (6) → <code>high</code>, ≥ <code>med_at</code> (3) → <code>med</code>, else <code>low</code>; a pair
+that is not <code>high_at &gt; med_at</code> falls back to 6 / 3. A junk row or config scores 0,
+never raises.</p>
+<p><strong>Stored uncapped, capped at publish.</strong> A row's impact is stored with
+<code>impact.fingerprint(config, ticker set)</code>; every poll re-scores the rows whose stored
+fingerprint is stale (a Settings edit or a ticker-set change), and a scoring failure is
+one <code>news.impact</code> degrade while the views still publish with the stored impact. At
+publish, <code>cap_stale</code> shows a <strong>High older than <code>stale_after_h</code> (24 h) as Med</strong> and
+appends <code>stale</code> to its reasons; an undated item is never capped, and
+<code>stale_after_h</code> is left out of the fingerprint so editing it re-scores nothing.</p>
+<p>⚠ <strong>The public views are re-scored, not copied.</strong> Each public row is scored afresh from
+the row as the public view carries it — <code>sources</code> and <code>tickers</code> already cut to public
+feeds — against <strong><code>public_universe</code></strong>: the ticker set cut to the GEX collection list
+(<code>config/symbols.toml</code>, public). So a private feed never appears in a <code>source:</code> reason,
+and a <code>watchlist</code> point can never reveal a <code>[tickers] extras</code> name. Keywords are
+echoed into public reasons, so a ticker or anything private must never be made a
+keyword.</p>
+<h2 id="economic-calendar">Economic calendar</h2>
+<p><code>services/news_svc/econ_calendar.py</code> fetches and stores; <code>econ.py</code> builds the payload
+(pure). Each source is a <code>[calendar.sources.&lt;name&gt;]</code> table with its own <code>url</code>,
+<code>user_agent</code> (<code>""</code> = the collector's <code>feed_user_agent</code>) and <code>refresh_min</code> (absent =
+<code>[calendar] refresh_min</code>, 60):</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>What</th>
+<th>Time basis</th>
+<th>Cadence (shipped)</th>
+<th>Requests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fed</code></td>
+<td><code>federalreserve.gov/json/calendar.json</code>: FOMC, Beige Book, speeches, testimony (<code>[calendar.fed] types</code>)</td>
+<td>the Board's times are <strong>Eastern</strong>; a non-clock time ("noon", "TBA") keeps a date-only event</td>
+<td>60 min</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>bls</code></td>
+<td>the BLS release schedule (ICS) — CPI, PPI, Employment Situation, JOLTS, ECI</td>
+<td><code>TZID=US-Eastern</code> wall clock</td>
+<td>720 min</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>bea</code></td>
+<td>the BEA release schedule (ICS) — PCE, GDP</td>
+<td>UTC (<code>…Z</code>)</td>
+<td>720 min</td>
+<td>1</td>
+</tr>
+<tr>
+<td><code>fred_calendar</code></td>
+<td>FRED's release-calendar HTML, one page per <code>release_id</code> a <code>schedule = "fred"</code> indicator names (retail sales 9, jobless claims 180), 45 days back to 120 ahead</td>
+<td>the page renders <strong>Central</strong>; a date without a time takes the indicator's <code>time_ct</code></td>
+<td>720 min</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>nasdaq_ipo</code></td>
+<td><code>api.nasdaq.com</code> IPO calendar, this month and next; priced + upcoming tables only</td>
+<td>dates</td>
+<td>240 min</td>
+<td>2</td>
+</tr>
+<tr>
+<td><code>fred_api</code> / <code>fredgraph</code></td>
+<td>each enabled indicator's FRED series, ~400 days back</td>
+<td>observation dates</td>
+<td><code>values_refresh_min</code> (240), and the release watch</td>
+<td>10</td>
+</tr>
+<tr>
+<td><code>dividends</code></td>
+<td>the store <code>trade_svc</code> fills (below), opened <strong>read-only</strong></td>
+<td>dates</td>
+<td>60 min</td>
+<td>0 (local)</td>
+</tr>
+</tbody>
+</table>
+<p>Every instant is stored as aware UTC and displayed in <strong>Central</strong>. The indicators
+(<code>[calendar.indicators.&lt;key&gt;]</code>: CPI, core CPI, PPI, payrolls, unemployment, PCE, core
+PCE, GDP, retail sales, claims) name a FRED <code>series</code>, a <code>transform</code> (<code>pct_mom</code> % m/m ·
+<code>change_k</code> change in thousands · <code>level_pct</code> · <code>level_k</code> level / 1000 · <code>pct_saar</code>), a
+<code>schedule</code> (<code>bls</code> / <code>bea</code> matched by a case-insensitive release-name PREFIX on a
+boundary — <code>"GDP ("</code> never takes <em>GDP by Industry</em> — or <code>fred</code> by <code>release_id</code>) and a
+<code>tile</code>. A missing or non-positive base is <code>None</code>, never 0.</p>
+<p><strong>The FRED key, and its fallback.</strong> With <code>FRED_API_KEY</code> set in the process environment
+(read at call time, from the stack <code>.env</code> only — never config, never <code>.env.live</code>),
+observations come from the FRED API; without it, from the key-free
+<code>fredgraph.csv</code> download. The key is a query parameter, so every exception raised while
+a key-bearing URL was in play is rebuilt redacted with no cause chain, logged without a
+traceback, and every stored error goes through <code>fred.redact</code>. When the release-calendar
+HTML has never parsed, the key path's release <strong>dates</strong> stand in (their time from
+<code>time_ct</code>).</p>
+<p><strong>User-Agents are per source, and they disagree.</strong> BLS answers <strong>403</strong> to a browser
+User-Agent and FRED resets a bare Chrome one from a datacenter IP, so both keep the
+repo's contact-bearing <code>feed_user_agent</code>; Nasdaq refuses that one and needs a
+<strong>Chrome</strong> User-Agent plus <code>Accept: application/json</code> (both in its table).</p>
+<p><strong>The release watch.</strong> For <code>release_watch_min</code> (60) after a scheduled release, the
+series whose new observation has not landed yet — first seen at or after the release,
+and not a first-fill <code>bootstrap</code> row — is fetched every <code>release_poll_min</code> (2), at most
+~30 requests per series per release. A steady day is ~104 requests in all.</p>
+<p><strong>Failure.</strong> Each source fails alone: one <code>news.cal.&lt;source&gt;</code> degrade, an <code>error</code> on
+its row, and its last GOOD parsed result keeps being published (state <code>stale</code>). A
+failed source is retried after at most <code>[calendar] refresh_min</code>. A missing dividends
+store is <code>never</code>, not "no dividends".</p>
+<p><strong>The views.</strong> <code>cache:news:calendar</code> (owner), <code>cache:news:calendar_public</code> — BUILT with
+<code>public_symbols</code> = the collection list, so only dividends differ and an extra's never
+reach it — and the private <code>cache:news:calendar_status</code> (per-source <code>last_ok</code> /
+<code>last_poll</code> / redacted <code>error</code>). All three carry no timestamp and publish
+<code>skip_unchanged</code>, since the calendar branch republishes every tick. Whether a value is <strong>released</strong> or <strong>awaiting</strong> is a function of
+<code>now</code>, so the page decides it (<code>news_view.indicator_state</code>) from the facts the payload
+carries: <code>last_release_at</code>, and the latest observation's <code>first_seen</code> / <code>bootstrap</code>.</p>
+<h2 id="dividends-trade_svc">Dividends (trade_svc)</h2>
+<p><code>services/trade_svc/dividends.py</code> is the write half. Once a <strong>trading day</strong>, at or
+after <code>[calendar.dividends] refresh_at</code> (<strong>06:40 CT</strong>), <code>trade_svc</code>'s scheduler pulls
+each followed symbol (<code>news_config.ticker_set()</code> less <code>$</code> indices) through the proxy —
+<strong>one</strong> <code>/quotes</code> passthrough call per symbol, since the passthrough splits <code>params</code> on
+commas — reads the quote's <code>fundamental</code> block and writes
+<code>services/trade_svc/data/dividends.db</code> through <code>shared/dividends.py</code>. Each symbol lands
+as <code>ok</code>, <code>none</code> (a non-payer) or <code>error</code>; <code>ok</code> / <code>none</code> replace its forward rows, and
+an amount that is absent or not finite is stored <code>None</code>, never 0. The day is recorded
+in the store, so a restart does not refetch; a failure retries after 15 min. The
+<code>dividends_refresh</code> command on <code>cmd:trade</code> runs the same pull on demand (forced past
+the once-a-day guard), and drops a command older than 180 s as a replay. ⚠ Schwab's
+dividend field names are unverified on prod; every spelling is in one table,
+<code>dividends._FIELDS</code>.</p>
 <p><strong>Trending</strong> counts the tickers on items published within <code>[trending] window_h</code>
 (6 h), skipping <code>yahoo_ticker</code> items, whose tag is the ticker they were fetched for.</p>
 <h2 id="failure-policy">Failure policy</h2>
@@ -3076,7 +3270,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>trade_svc</td>
-<td>On-demand only (no scheduler).</td>
+<td>Analysis on demand. One scheduled job: the watchlist <strong>dividend pull</strong>, once a trading day at or after <strong>06:40 CT</strong> (<code>[calendar.dividends] refresh_at</code> in <code>config/news.toml</code>); the loop wakes every <strong>60 s</strong> and retries a failed pull after <strong>15 min</strong>.</td>
 </tr>
 <tr>
 <td>market_svc</td>
@@ -3084,7 +3278,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>news_svc</td>
-<td>Every feed polled every <strong>5 min</strong> 08:30–15:00 CT (<code>[collector] rth_poll_min</code>), <strong>15 min</strong> otherwise on a trading day (<code>offhours_poll_min</code>), <strong>60 min</strong> at weekends and holidays (<code>weekend_poll_min</code>) — all in <code>config/news.toml</code>, editable in Settings. The loop wakes every <strong>30 s</strong> (<code>TICK_S</code>) and counts an interval from the END of the last poll; nothing polls faster than <strong>60 s</strong> (<code>MIN_INTERVAL_S</code>). One poll at a time: a Refresh during a poll is skipped.</td>
+<td>Three branches, launched every <strong>30 s</strong> tick (<code>TICK_S</code>) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. <strong>feeds</strong>: every feed polled every <strong>5 min</strong> 08:30–15:00 CT (<code>[collector] rth_poll_min</code>), <strong>15 min</strong> otherwise on a trading day (<code>offhours_poll_min</code>), <strong>60 min</strong> at weekends and holidays (<code>weekend_poll_min</code>), counted from the END of the last poll; nothing polls faster than <strong>60 s</strong> (<code>MIN_INTERVAL_S</code>). <strong>calendar</strong>: every tick, fetching only the sources whose own <code>refresh_min</code> is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). <strong>watch</strong>: every tick, fetching only a series whose release just passed — every <strong>2 min</strong> for up to <strong>60 min</strong>. All in <code>config/news.toml</code>, editable in Settings. One cycle of each at a time: a Refresh during one is skipped.</td>
 </tr>
 </tbody>
 </table>
