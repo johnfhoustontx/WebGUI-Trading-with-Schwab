@@ -86,3 +86,101 @@ def test_google_news_strips_a_publisher_containing_an_ampersand():
     out = google_news.parse(body, feed, NOW, universe=[])
     assert out[0]["original_source"] == "AT&T"
     assert out[0]["title"] == "X rises"
+
+
+# --- review fixes: dotted symbols, cleaned tags, looser suffix, bad config ---
+
+def test_yahoo_urls_use_the_dash_form_for_a_dotted_symbol_but_keep_the_tag():
+    # Yahoo spells class shares BRK-B; the dotted form returns an empty
+    # channel silently. The pair keeps the ORIGINAL symbol as its tag.
+    feed = {"name": "Y", "kind": "yahoo_ticker", "url": "https://f/rss?s={symbol}"}
+    assert yahoo_ticker.urls(feed, ["BRK.B", "SPY"]) == [
+        ("BRK.B", "https://f/rss?s=BRK-B"),
+        ("SPY", "https://f/rss?s=SPY"),
+    ]
+
+
+def test_yahoo_urls_percent_encode_the_symbol():
+    feed = {"name": "Y", "kind": "yahoo_ticker", "url": "https://f/rss?s={symbol}"}
+    assert yahoo_ticker.urls(feed, ["A&B"]) == [("A&B", "https://f/rss?s=A%26B")]
+
+
+def test_yahoo_urls_refuse_a_non_string_url():
+    for bad in (["https://f/{symbol}"], 5, {"u": "{symbol}"}):
+        feed = {"name": "Y", "kind": "yahoo_ticker", "url": bad}
+        assert yahoo_ticker.urls(feed, ["SPY"]) == []
+
+
+_ONE_ITEM = b"""<rss><channel><item><title>Something happened</title>
+<link>https://a.com/x</link></item></channel></rss>"""
+
+
+def test_yahoo_parse_cleans_the_fetched_symbol():
+    feed = {"name": "Y", "kind": "yahoo_ticker", "url": "x"}
+    out = yahoo_ticker.parse(_ONE_ITEM, feed, NOW, universe=["NVDA"], symbol="nvda")
+    assert out[0]["tickers"] == ["NVDA"]
+
+
+def test_yahoo_parse_does_not_force_an_unusable_symbol():
+    feed = {"name": "Y", "kind": "yahoo_ticker", "url": "x"}
+    for bad in (None, "", "not a ticker!", "TOOLONGSYMBOL"):
+        out = yahoo_ticker.parse(_ONE_ITEM, feed, NOW, universe=["NVDA"], symbol=bad)
+        assert out[0]["tickers"] == []
+
+
+def test_yahoo_parse_does_not_duplicate_a_cleaned_symbol():
+    body = b"""<rss><channel><item><title>$NVDA rallies</title>
+    <link>https://a.com/x</link></item></channel></rss>"""
+    feed = {"name": "Y", "kind": "yahoo_ticker", "url": "x"}
+    out = yahoo_ticker.parse(body, feed, NOW, universe=["NVDA"], symbol="nvda")
+    assert out[0]["tickers"] == ["NVDA"]
+
+
+def _google_item(title, pub):
+    return (f"<item><title>{title}</title><link>https://news.google.com/a</link>"
+            f"<source url=\"https://p.com\">{pub}</source></item>")
+
+
+def test_google_news_strips_double_spaces_and_en_or_em_dashes():
+    body = ("<rss><channel>"
+            + _google_item("Stocks close higher  -  WSJ", "WSJ")
+            + _google_item("Oil rises – Reuters", "Reuters")
+            + _google_item("Fed holds — Bloomberg ", "Bloomberg")
+            + _google_item("Dow at 50000 -WSJ", "WSJ")
+            + "</channel></rss>").encode()
+    feed = {"name": "G", "kind": "google_news", "query": "q"}
+    out = google_news.parse(body, feed, NOW, universe=[])
+    assert [i["title"] for i in out] == [
+        "Stocks close higher",
+        "Oil rises",
+        "Fed holds",
+        "Dow at 50000 -WSJ",   # no whitespace before the dash: not a suffix
+    ]
+
+
+def test_google_news_never_strips_to_an_empty_title():
+    # A title that IS only the suffix keeps the original rather than blanking.
+    assert google_news._strip_publisher(" - WSJ", "WSJ") == " - WSJ"
+    assert google_news._strip_publisher("\t\u2014 WSJ ", "WSJ") == "\t\u2014 WSJ "
+    assert google_news._strip_publisher("Up - WSJ", "") == "Up - WSJ"
+
+
+def test_google_news_publisher_is_matched_literally_not_as_a_regex():
+    body = ("<rss><channel>" + _google_item("X rises - A.B", "A.B")
+            + _google_item("Y rises - AxB", "A.B")
+            + "</channel></rss>").encode()
+    feed = {"name": "G", "kind": "google_news", "query": "q"}
+    out = google_news.parse(body, feed, NOW, universe=[])
+    assert [i["title"] for i in out] == ["X rises", "Y rises - AxB"]
+
+
+def test_google_news_url_is_none_for_a_missing_or_unusable_query():
+    # Contract: None means "skip this feed" - the poll cycle never fetches
+    # "q=None" or an empty search.
+    for feed in ({"name": "G", "kind": "google_news"},
+                 {"name": "G", "kind": "google_news", "query": None},
+                 {"name": "G", "kind": "google_news", "query": ""},
+                 {"name": "G", "kind": "google_news", "query": "   "},
+                 {"name": "G", "kind": "google_news", "query": ["site:wsj.com"]},
+                 {"name": "G", "kind": "google_news", "query": 5}):
+        assert google_news.url(feed) is None
