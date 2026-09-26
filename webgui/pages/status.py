@@ -122,6 +122,7 @@ def component_targets():
         "portfolio": "portfolio_svc (holdings + live P&L)",
         "trade": "trade_svc (on-demand analysis)",
         "market": "market_svc (macro-ticker dashboard)",
+        "news": "news_svc (public news feeds)",
     }
     for domain, label in svc_labels.items():
         url = SERVICE_URLS.get(domain)

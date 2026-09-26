@@ -199,6 +199,11 @@ def test_restart_spec_market_service():
     assert spec["name"] == "market_svc"
 
 
+def test_restart_spec_news_service():
+    spec = status.restart_spec(_target("news", "service"))
+    assert spec == {"kind": "unit", "title": "news_svc :8216", "name": "news_svc"}
+
+
 def test_restart_spec_redis_is_never_restartable(monkeypatch):
     """Redis is a SYSTEM unit; `systemctl --user` cannot reach it, and one server
     serves both environments. Read-only in prod as well as dev now -- previously
@@ -284,12 +289,12 @@ def test_everything_else_stays_restartable_in_prod(monkeypatch):
     restartable = {t["key"] for t in status.component_targets()
                    if status.restart_spec(t) is not None}
     assert restartable == {"proxy", "sentiment", "options", "portfolio",
-                           "trade", "market", "webgui", "webgui_live"}
+                           "trade", "market", "news", "webgui", "webgui_live"}
     assert "driver" not in {t["key"] for t in status.component_targets()}
 
 
 def test_dev_can_still_restart_everything_it_owns(monkeypatch):
-    # The guards must not over-fire. Dev owns its five services (offset ports)
+    # The guards must not over-fire. Dev owns its six services (offset ports)
     # and its own web GUI; leaving an operator unable to restart ANYTHING would
     # be a worse outcome than the cross-environment hazard being fixed.
     monkeypatch.setattr(status, "IS_DEV", True)
@@ -302,7 +307,7 @@ def test_dev_can_still_restart_everything_it_owns(monkeypatch):
     # screens share nothing: dev binds its own offset port and runs its own
     # process, so this button reaches only this checkout.
     assert restartable == {"sentiment", "options", "portfolio", "trade",
-                           "market", "webgui", "webgui_live"}
+                           "market", "news", "webgui", "webgui_live"}
 
 
 # --- restart_command ----------------------------------------------------------
