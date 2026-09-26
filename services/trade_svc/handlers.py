@@ -11,13 +11,19 @@ time, so a single latest-result view is the right shape (mirroring the
 simulator/calculator on-demand result views) — the GUI reads the latest analysis
 and the payload's own ``symbol`` field identifies it.
 
-On-demand only: there is no scheduler. The GUI Trade page enqueues an
-``analyze`` command with the symbol; we never run unprompted.
+Analysis is on-demand only: the GUI Trade page enqueues an ``analyze`` command
+with the symbol. The service's one scheduled job is the daily dividend pull
+(``scheduler.py``); ``dividends_refresh`` runs that same pull on demand.
 
 Kept synchronous: the scaffold's consumer loop handles sync handlers.
 """
+import datetime as _dt
+import logging
+
 from services.trade_svc import compute
 from shared.contracts.trade import TradeAnalysis, RankBoard, ModelBook
+
+log = logging.getLogger(__name__)
 
 CACHE_ANALYSIS = "cache:trade:analysis"
 EVENT_ANALYSIS = "events:trade:analysis"
@@ -144,10 +150,52 @@ def deepdive_query(bus, args) -> None:
     bus.publish(EVENT_DEEPDIVE_QUERY, {"version": version})
 
 
+# A ``dividends_refresh`` older than this is a REPLAY, not a request: acted on
+# only while someone could still be waiting for it (options_svc's
+# ``STALE_OPEN_MAX_AGE_SEC`` budget, the same missing-ts back-compat rule).
+DIVIDENDS_REFRESH_MAX_AGE_SEC = 180
+
+
+def _command_age_seconds(command):
+    """Seconds since ``command.ts`` (ISO-8601 UTC), or None when absent or
+    unparseable - the caller then treats it as fresh (a legacy command)."""
+    ts = getattr(command, "ts", None)
+    if not ts:
+        return None
+    try:
+        when = _dt.datetime.fromisoformat(ts)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=_dt.timezone.utc)
+    return (_dt.datetime.now(_dt.timezone.utc) - when).total_seconds()
+
+
+def dividends_refresh(bus, args=None) -> None:
+    """Run the watchlist dividend pull NOW (the scheduler's job, on demand).
+
+    ``force=True`` bypasses ``refresh``'s once-a-day guard (an operator asking
+    now means now, e.g. after editing the ticker list), and the scheduler's
+    trading-day / ``refresh_at`` gate is not applied. ``[calendar.dividends]
+    enabled`` is still honoured. Writes the store only; news_svc reads it on
+    its calendar cycle.
+
+    ⚠ Because it is forced it is NOT idempotent - each run is ~80 proxy calls -
+    so :func:`handle_command` drops a replay by AGE
+    (``DIVIDENDS_REFRESH_MAX_AGE_SEC``) before this runs: a fresh consumer
+    group re-delivers the stream from id 0."""
+    from services.trade_svc import dividends, scheduler
+    if not scheduler.dividends_config().get("enabled"):
+        log.info("dividends_refresh ignored: [calendar.dividends] enabled = false")
+        return
+    dividends.refresh(force=True)
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:trade`` command. ``analyze`` (args ``symbol``) → run the
     single-symbol analysis; ``deepdive`` / ``deepdive_query`` → the EquityDeepDive
-    report / chat-prompt query; else no-op. All cache + publish."""
+    report / chat-prompt query; ``dividends_refresh`` → today's dividend pull
+    (store write only); else no-op. The rest cache + publish."""
     if command.type == "analyze":
         analyze(bus, command.args)
     elif command.type == "deepdive":
@@ -158,3 +206,9 @@ def handle_command(bus, command) -> None:
         rank_board(bus, command.args)
     elif command.type == "model_book":
         model_book(bus, command.args)
+    elif command.type == "dividends_refresh":
+        age = _command_age_seconds(command)
+        if age is not None and age > DIVIDENDS_REFRESH_MAX_AGE_SEC:
+            log.warning("dividends_refresh dropped: enqueued %.0f s ago (a replay)", age)
+            return
+        dividends_refresh(bus, command.args)
