@@ -832,3 +832,129 @@ def test_a_successful_rollback_logs_nothing(tmp_path, caplog):
         except TypeError:
             pass
     assert [r for r in caplog.records if r.name == store.__name__] == []
+
+
+# ── per-source tickers: a private feed's tickers never reach the public view ──
+
+def test_a_private_feeds_ticker_never_reaches_the_public_row_by_an_id_merge(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://y/1", title=_STORY, tickers=["AAPL"]), "Yahoo Finance")])
+    db.insert_many([_src(_item("https://y/1", title=_STORY, tickers=["MSFT"], public=False),
+                         "Private")])                                # same URL -> same id
+    [pub] = db.newest(10, public_sources={"Yahoo Finance"})
+    assert pub["tickers"] == ["AAPL"]
+    assert db.newest(10)[0]["tickers"] == ["AAPL", "MSFT"]           # the owner keeps both
+
+
+def test_a_private_feeds_ticker_never_reaches_the_public_row_by_a_title_merge(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://y/1", title=_STORY, tickers=["AAPL"]), "Yahoo Finance")])
+    db.insert_many([_src(_item("https://p/9", title=_STORY, tickers=["AAPL", "TSLA"],
+                               public=False), "Private")])
+    [pub] = db.newest(10, public_sources={"Yahoo Finance"})
+    assert pub["tickers"] == ["AAPL"]
+    [own] = db.newest(10)
+    assert own["tickers"] == ["AAPL", "TSLA"]
+    assert "ticker_sources" not in own and "ticker_sources" not in pub
+
+
+def test_a_ticker_from_a_second_public_feed_reaches_the_public_view(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://y/1", title=_STORY, tickers=["AAPL"]), "Yahoo Finance")])
+    db.insert_many([_src(_item("https://g/1", title=_STORY, tickers=["QQQ"]), "Google")])
+    [pub] = db.newest(10, public_sources={"Yahoo Finance", "Google"})
+    assert pub["tickers"] == ["AAPL", "QQQ"]
+    [pub] = db.newest(10, public_sources={"Yahoo Finance"})         # Google flipped off
+    assert pub["tickers"] == ["AAPL"]
+
+
+def test_a_ticker_both_feeds_carry_stays_public(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://p/1", title=_STORY, tickers=["AAPL"]), "Private")])
+    db.insert_many([_src(_item("https://p/1", title=_STORY, tickers=["AAPL"]), "Pub")])
+    assert db.newest(10, public_sources={"Private", "Pub"})[0]["tickers"] == ["AAPL"]
+    # Private is the primary, so the row is out of a view where only Pub is public
+    assert db.newest(10, public_sources={"Pub"}) == []
+
+
+_V1_ITEMS = """
+CREATE TABLE items (
+    id TEXT PRIMARY KEY, source TEXT NOT NULL, sources TEXT NOT NULL,
+    original_source TEXT, title TEXT NOT NULL, title_key TEXT,
+    teaser TEXT, url TEXT NOT NULL, published_at TEXT NOT NULL, first_seen TEXT NOT NULL,
+    tickers TEXT NOT NULL, kind TEXT NOT NULL, topics TEXT NOT NULL,
+    detail TEXT NOT NULL, public INTEGER NOT NULL
+);
+CREATE TABLE feed_state (
+    name TEXT PRIMARY KEY, etag TEXT, last_modified TEXT, last_ok TEXT,
+    last_poll TEXT, error TEXT
+);
+CREATE TABLE seen_accessions (accession TEXT PRIMARY KEY, seen TEXT NOT NULL);
+"""
+
+
+def _v1_db(path):
+    import sqlite3
+    c = sqlite3.connect(str(path))
+    c.executescript(_V1_ITEMS)
+    c.execute("INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              (items.item_id("https://y/1"), "Yahoo Finance", '["Yahoo Finance", "Private"]', "", _STORY,
+               "apple rallies on iphone demand", "", "https://y/1",
+               "2026-09-25T20:00:00+00:00", NOW, '["AAPL", "TSLA"]', "rss", "[]", "{}", 1))
+    c.execute("INSERT INTO feed_state VALUES ('MW', 'e0', 'lm0', ?, ?, NULL)", (NOW, NOW))
+    c.execute("INSERT INTO seen_accessions VALUES ('0001-26-000001', ?)", (NOW,))
+    c.commit()
+    c.close()
+
+
+def test_a_v1_database_is_migrated_and_old_tickers_belong_to_the_primary_source(tmp_path):
+    _v1_db(tmp_path / "n.db")
+    db = store.Store(tmp_path / "n.db")
+    # every existing ticker is attributed to the row's primary source
+    assert db.newest(10, public_sources={"Yahoo Finance"})[0]["tickers"] == ["AAPL", "TSLA"]
+    db.insert_many([_src(_item("https://y/1", title=_STORY, tickers=["NVDA"], public=False),
+                         "Private")])
+    assert db.newest(10, public_sources={"Yahoo Finance"})[0]["tickers"] == ["AAPL", "TSLA"]
+    assert db.newest(10)[0]["tickers"] == ["AAPL", "TSLA", "NVDA"]
+    st = db.feed_state("MW")
+    assert (st["etag"], st["last_modified"], st["url"]) == ("e0", "lm0", None)
+    db.close()
+    store.Store(tmp_path / "n.db").close()                       # a second open is a no-op
+
+
+def test_a_v1_seen_accession_is_seen_by_every_feed_until_it_is_pruned(tmp_path):
+    _v1_db(tmp_path / "n.db")
+    db = store.Store(tmp_path / "n.db")
+    acc = "0001-26-000001"
+    assert db.unseen_accessions([acc], feed="SEC Insider Buys") == []
+    assert db.unseen_accessions([acc], feed="Anything") == []
+    db.prune(keep_days=7, now="2026-10-10T00:00:00+00:00")
+    assert db.unseen_accessions([acc], feed="SEC Insider Buys") == [acc]
+
+
+# ── feed_state remembers the URL its validators belong to ──────────────────
+
+def test_feed_state_round_trips_the_url(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    assert db.feed_state("MW")["url"] is None
+    db.set_feed_state("MW", etag="e1", url="https://mw")
+    db.set_feed_state("MW", error="boom")
+    st = db.feed_state("MW")
+    assert (st["etag"], st["url"], st["error"]) == ("e1", "https://mw", "boom")
+
+
+# ── seen accessions are per feed ───────────────────────────────────────────
+
+def test_seen_accessions_are_kept_per_feed(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.mark_accessions(["a"], NOW, feed="F4 one")
+    assert db.unseen_accessions(["a", "b"], feed="F4 one") == ["b"]
+    assert db.unseen_accessions(["a", "b"], feed="F4 two") == ["a", "b"]
+    assert db.unseen_accessions(["a", "b"]) == ["b"]        # no feed: seen by ANY feed
+
+
+def test_an_accession_marked_without_a_feed_is_seen_by_every_feed(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.mark_accessions(["a"])
+    assert db.unseen_accessions(["a"], feed="F4 one") == []
+    assert db.unseen_accessions(["a"], feed="F4 two") == []

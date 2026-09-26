@@ -27,6 +27,12 @@ Merging, which is the part worth reading before changing anything here:
   while its PRIMARY source is: its stored url / title / teaser are that feed's, so
   a story first stored by a non-public feed stays out even once a public feed
   carries it (fail closed; an accepted loss).
+* ``ticker_sources`` records WHICH feeds tagged each ticker (``{ticker: [feed,
+  ...]}``), maintained on every insert and merge. The public view keeps only the
+  tickers some CURRENTLY public feed contributed, so a private feed merging into
+  a public row adds its tickers to the owner's view and never to the public one.
+  (``newest_for_ticker`` still MATCHES on the full ticker list - pinned by
+  ``test_public_view_for_ticker`` - and trims the returned tickers only.)
 
 Writes: every write opens ``BEGIN IMMEDIATE`` and either commits or rolls back
 whole. IMMEDIATE takes the write lock BEFORE the id / title lookups, so two Store
@@ -54,6 +60,25 @@ read (Python accepts ISO basic and week forms SQLite does not). Otherwise:
   sorts last, is never stale, and is pruned by ``first_seen``.
 
 A usable date is stored verbatim.
+
+Seen EDGAR accessions are per FEED (``(feed, accession)``): two feeds reading one
+Atom must each decide what the accession means to them. An accession marked with
+``feed=""`` is seen by EVERY feed.
+
+Migrations (run once at open, inside ``BEGIN IMMEDIATE`` so two openers cannot
+race, each a no-op on a database that already has the shape):
+
+* ``items.ticker_sources`` is added and back-filled: every existing ticker is
+  attributed to its row's PRIMARY source - the only attribution that cannot put
+  a private feed's ticker into the public view (a row whose primary is private
+  is out of the public view anyway).
+* ``feed_state.url`` is added as NULL. A NULL url never matches the feed's
+  current url, so the first poll after the upgrade sends no validators (one full
+  fetch per feed) and stores the url.
+* ``seen_accessions`` is rebuilt keyed by ``(feed, accession)``; the old rows
+  are kept under ``feed=""`` - seen by every feed - until ``prune`` ages them
+  out. Dropping them instead would refetch up to 100 Form 4s (200 SEC requests)
+  per feed on the first poll and re-log every poison filing.
 """
 import contextlib
 import datetime as dt
@@ -73,17 +98,21 @@ CREATE TABLE IF NOT EXISTS items (
     original_source TEXT, title TEXT NOT NULL, title_key TEXT,
     teaser TEXT, url TEXT NOT NULL, published_at TEXT NOT NULL, first_seen TEXT NOT NULL,
     tickers TEXT NOT NULL, kind TEXT NOT NULL, topics TEXT NOT NULL,
-    detail TEXT NOT NULL, public INTEGER NOT NULL
+    detail TEXT NOT NULL, public INTEGER NOT NULL, ticker_sources TEXT
 );
 DROP INDEX IF EXISTS idx_items_published;
 CREATE INDEX IF NOT EXISTS idx_items_published_jd ON items(julianday(published_at));
 CREATE INDEX IF NOT EXISTS idx_items_title_key ON items(title_key);
 CREATE TABLE IF NOT EXISTS feed_state (
     name TEXT PRIMARY KEY, etag TEXT, last_modified TEXT, last_ok TEXT,
-    last_poll TEXT, error TEXT
+    last_poll TEXT, error TEXT, url TEXT
 );
 CREATE TABLE IF NOT EXISTS aliases (id TEXT PRIMARY KEY, item_id TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS seen_accessions (accession TEXT PRIMARY KEY, seen TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS seen_accessions (
+    feed TEXT NOT NULL, accession TEXT NOT NULL, seen TEXT NOT NULL,
+    PRIMARY KEY (feed, accession)
+);
+CREATE INDEX IF NOT EXISTS idx_seen_accession ON seen_accessions(accession);
 """
 
 _JSON_COLS = ("sources", "tickers", "topics", "detail")
@@ -94,6 +123,11 @@ _TITLE_MERGE_DAYS = 1.0
 _ORDER = "ORDER BY julianday(published_at) DESC, first_seen DESC"
 _IN_CHUNK = 500
 _UNDATED = "undated"          # unparseable on purpose: julianday() -> NULL, sorts last
+_ROW_COLS = "id, source, sources, tickers, ticker_sources, public"
+_ITEM_COLS = ("id, source, sources, original_source, title, title_key, teaser, url, "
+              "published_at, first_seen, tickers, kind, topics, detail, public, "
+              "ticker_sources")
+_STATE_COLS = ("name", "etag", "last_modified", "last_ok", "last_poll", "error", "url")
 
 
 def _names(value):
@@ -125,6 +159,20 @@ def _aware_iso(value) -> bool:
         return False
 
 
+def _ticker_sources(row) -> dict:
+    """``{ticker: [feed, ...]}`` for a stored row. A row with none recorded
+    (unreadable, or written before the column existed) attributes every ticker
+    to its PRIMARY source."""
+    raw = row["ticker_sources"]
+    try:
+        got = json.loads(raw) if raw else None
+    except (TypeError, ValueError):
+        got = None
+    if not isinstance(got, dict):
+        return {t: [row["source"]] for t in json.loads(row["tickers"])}
+    return {t: list(v) if isinstance(v, list) else [] for t, v in got.items()}
+
+
 def _union(existing, incoming) -> list:
     out = list(existing)
     for v in incoming:
@@ -147,6 +195,7 @@ class Store:
                                   timeout=_BUSY_TIMEOUT_MS / 1000, isolation_level=None)
         self._c.row_factory = sqlite3.Row
         self._c.execute("PRAGMA journal_mode=WAL")
+        self._migrate()
         self._c.executescript(SCHEMA)
 
     def close(self) -> None:
@@ -159,6 +208,35 @@ class Store:
     def __exit__(self, *exc):
         self.close()
         return False
+
+    def _columns(self, table) -> set:
+        return {r[1] for r in self._c.execute(f"PRAGMA table_info({table})").fetchall()}
+
+    def _migrate(self) -> None:
+        """Bring an older database to the current shape (see the module
+        docstring). Checked inside the transaction, so a second opener that
+        waited on the lock finds the work done."""
+        with self._write():
+            cols = self._columns("items")
+            if cols and "ticker_sources" not in cols:
+                self._c.execute("ALTER TABLE items ADD COLUMN ticker_sources TEXT")
+            if cols:
+                for r in self._c.execute("SELECT id, source, tickers, ticker_sources FROM items "
+                                         "WHERE ticker_sources IS NULL").fetchall():
+                    self._c.execute("UPDATE items SET ticker_sources=? WHERE id=?",
+                                    (_dumps(_ticker_sources(r)), r["id"]))
+            cols = self._columns("feed_state")
+            if cols and "url" not in cols:
+                self._c.execute("ALTER TABLE feed_state ADD COLUMN url TEXT")
+            cols = self._columns("seen_accessions")
+            if cols and "feed" not in cols:
+                self._c.execute("ALTER TABLE seen_accessions RENAME TO seen_accessions_v1")
+                self._c.execute(
+                    "CREATE TABLE seen_accessions (feed TEXT NOT NULL, accession TEXT NOT NULL, "
+                    "seen TEXT NOT NULL, PRIMARY KEY (feed, accession))")
+                self._c.execute("INSERT OR IGNORE INTO seen_accessions (feed, accession, seen) "
+                                "SELECT '', accession, seen FROM seen_accessions_v1")
+                self._c.execute("DROP TABLE seen_accessions_v1")
 
     def _rollback(self) -> None:
         """Best effort: a failed rollback must not mask the error that caused it,
@@ -209,23 +287,34 @@ class Store:
 
     # ── items ──────────────────────────────────────────────────────────────
     def _merge_into(self, row, it) -> None:
-        """Union ``it``'s tickers and source into the stored ``row``; ``public``
-        becomes stored OR incoming."""
+        """Union ``it``'s tickers and source into the stored ``row``, recording
+        ``it``'s source against each of its tickers; ``public`` becomes stored
+        OR incoming."""
         tickers = json.loads(row["tickers"])
         sources = json.loads(row["sources"])
-        new_tickers = _union(tickers, it.get("tickers") or [])
+        incoming = list(it.get("tickers") or [])
+        new_tickers = _union(tickers, incoming)
         new_sources = _union(sources, [it["source"]])
+        by_ticker = _ticker_sources(row)
+        new_by_ticker = {t: list(v) for t, v in by_ticker.items()}
+        for t in incoming:
+            feeds = new_by_ticker.setdefault(t, [])
+            if it["source"] not in feeds:
+                feeds.append(it["source"])
         public = int(bool(row["public"]) or bool(it.get("public")))
-        if new_tickers != tickers or new_sources != sources or public != row["public"]:
-            self._c.execute("UPDATE items SET tickers=?, sources=?, public=? WHERE id=?",
-                            (_dumps(new_tickers), _dumps(new_sources), public, row["id"]))
+        if (new_tickers != tickers or new_sources != sources or public != row["public"]
+                or new_by_ticker != by_ticker or not row["ticker_sources"]):
+            self._c.execute(
+                "UPDATE items SET tickers=?, sources=?, public=?, ticker_sources=? WHERE id=?",
+                (_dumps(new_tickers), _dumps(new_sources), public, _dumps(new_by_ticker),
+                 row["id"]))
 
     def _title_match(self, it, key):
         """The row this item is the same story as, from ANOTHER feed, or None."""
         if key is None:
             return None
         candidates = self._c.execute(
-            "SELECT id, sources, tickers, public FROM items WHERE title_key=? AND "
+            f"SELECT {_ROW_COLS} FROM items WHERE title_key=? AND "
             "abs(julianday(published_at)-julianday(?)) < ? "
             "ORDER BY abs(julianday(published_at)-julianday(?))",
             (key, it["published_at"], _TITLE_MERGE_DAYS, it["published_at"])).fetchall()
@@ -255,7 +344,7 @@ class Store:
                 if self._stale(it, min_published):
                     continue
                 same_id = self._c.execute(
-                    "SELECT id, sources, tickers, public FROM items WHERE id=? OR id="
+                    f"SELECT {_ROW_COLS} FROM items WHERE id=? OR id="
                     "(SELECT item_id FROM aliases WHERE id=?)", (it["id"], it["id"])).fetchone()
                 if same_id is not None:
                     self._merge_into(same_id, it)
@@ -267,12 +356,15 @@ class Store:
                     self._c.execute("INSERT OR IGNORE INTO aliases VALUES (?,?)",
                                     (it["id"], dup["id"]))
                     continue
+                tickers = list(it["tickers"])
                 cur = self._c.execute(
-                    "INSERT OR IGNORE INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    f"INSERT OR IGNORE INTO items ({_ITEM_COLS}) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (it["id"], it["source"], _dumps([it["source"]]), it["original_source"],
                      it["title"], key, it["teaser"], it["url"], it["published_at"],
-                     it["first_seen"], _dumps(list(it["tickers"])), it["kind"],
-                     _dumps(list(it["topics"])), _dumps(it["detail"]), int(bool(it["public"]))))
+                     it["first_seen"], _dumps(tickers), it["kind"],
+                     _dumps(list(it["topics"])), _dumps(it["detail"]), int(bool(it["public"])),
+                     _dumps({t: [it["source"]] for t in tickers})))
                 n += cur.rowcount
         return n
 
@@ -306,6 +398,8 @@ class Store:
         out = []
         for r in rows:
             d = dict(r)
+            by_ticker = _ticker_sources(r)
+            d.pop("ticker_sources", None)
             for col in _JSON_COLS:
                 d[col] = json.loads(d[col])
             d["public"] = bool(d["public"])
@@ -316,6 +410,10 @@ class Store:
                 allowed = set(public_sources)
                 d["sources"] = [d["source"]] + [s for s in d["sources"]
                                                 if s in allowed and s != d["source"]]
+                # ...and only the tickers some public feed tagged: a private
+                # feed merged into this row adds nothing here.
+                d["tickers"] = [t for t in d["tickers"]
+                                if allowed.intersection(by_ticker.get(t, ()))]
                 d["public"] = True
             out.append(d)
         return out
@@ -361,39 +459,47 @@ class Store:
     def feed_state(self, name) -> dict:
         with self._lock:
             r = self._c.execute("SELECT * FROM feed_state WHERE name=?", (name,)).fetchone()
-        return dict(r) if r else {"name": name, "etag": None, "last_modified": None,
-                                  "last_ok": None, "last_poll": None, "error": None}
+        if r:
+            return dict(r)
+        return dict.fromkeys(_STATE_COLS, None) | {"name": name}
 
     def set_feed_state(self, name, **fields):
+        """Update the named fields; the rest keep their stored values. ``url`` is
+        the URL ``etag`` / ``last_modified`` were answered for."""
         with self._write():
             st = self.feed_state(name)
             st.update(fields)
             self._c.execute(
-                "INSERT OR REPLACE INTO feed_state VALUES (?,?,?,?,?,?)",
-                (name, st["etag"], st["last_modified"], st["last_ok"], st["last_poll"],
-                 st["error"]))
+                f"INSERT OR REPLACE INTO feed_state ({', '.join(_STATE_COLS)}) "
+                f"VALUES ({','.join('?' * len(_STATE_COLS))})",
+                (name, *(st[c] for c in _STATE_COLS[1:])))
 
     def all_feed_states(self) -> list:
         with self._lock:
             return [dict(r) for r in self._c.execute("SELECT * FROM feed_state").fetchall()]
 
     # ── EDGAR ─────────────────────────────────────────────────────────────
-    def unseen_accessions(self, accessions) -> list:
-        """The incoming accessions not yet seen, in their order. Looks up only
-        the batch (``IN`` over at most ``_IN_CHUNK`` names a query)."""
+    def unseen_accessions(self, accessions, *, feed=None) -> list:
+        """The incoming accessions ``feed`` has not seen, in their order - one
+        marked for ``feed`` or for every feed (``""``). ``feed=None`` asks
+        whether ANY feed has seen it. Looks up only the batch (``IN`` over at
+        most ``_IN_CHUNK`` names a query)."""
         accessions = list(accessions)
         wanted = list(dict.fromkeys(accessions))
         seen = set()
+        scope, extra = ("", []) if feed is None else ("feed IN (?, '') AND ", [str(feed)])
         with self._lock:
             for i in range(0, len(wanted), _IN_CHUNK):
                 chunk = wanted[i:i + _IN_CHUNK]
                 seen.update(r[0] for r in self._c.execute(
-                    "SELECT accession FROM seen_accessions WHERE accession IN "
-                    f"({','.join('?' * len(chunk))})", chunk).fetchall())
+                    f"SELECT accession FROM seen_accessions WHERE {scope}accession IN "
+                    f"({','.join('?' * len(chunk))})", [*extra, *chunk]).fetchall())
         return [a for a in accessions if a not in seen]
 
-    def mark_accessions(self, accessions, now=None):
+    def mark_accessions(self, accessions, now=None, *, feed=""):
+        """Mark ``accessions`` seen by ``feed`` (``""``: by every feed)."""
         now = now or dt.datetime.now(dt.timezone.utc).isoformat()
         with self._write():
-            self._c.executemany("INSERT OR IGNORE INTO seen_accessions VALUES (?,?)",
-                                [(a, now) for a in accessions])
+            self._c.executemany(
+                "INSERT OR IGNORE INTO seen_accessions (feed, accession, seen) VALUES (?,?,?)",
+                [(str(feed), a, now) for a in accessions])
