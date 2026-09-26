@@ -10,9 +10,16 @@ Merging, which is the part worth reading before changing anything here:
   AMD feeds under one URL, and must end up tagged with both), and its source is
   added to ``sources`` when new.
 * Otherwise an item whose **title key** matches a row published within a day is
-  the same story under another URL - but only ACROSS feeds. A feed whose name is
-  already in that row's ``sources`` never merges into it, because two stories
-  from one feed with one title are two stories (a daily "Morning Bid" column).
+  the same story under another URL - ACROSS feeds. A feed whose name is already
+  in that row's ``sources`` merges into it only when the two are published within
+  ``same_feed_merge_h`` hours (``insert_many``'s argument, from ``[dedupe]`` in
+  config/news.toml): one feed repeating a headline minutes apart is one story
+  under two URLs (WSJ via Google News publishes one piece under two redirect
+  URLs), while the same title ~24 h apart is two stories (a daily "Morning Bid"
+  column). ``0`` - the default here - turns the same-feed rule off. It never
+  applies to an ``_UNDATED`` item or row: with no date there is no gap to
+  measure (``julianday`` reads the sentinel as NULL, so such an item finds no
+  title candidate at all).
 * A title-merged item's id is kept in ``aliases``, pointing at the row it
   merged into, so the same feed re-serving that story on the next poll is an
   id match - not, since its feed is now in ``sources``, a brand-new row.
@@ -329,19 +336,37 @@ class Store:
                 (_dumps(new_tickers), _dumps(new_sources), public, _dumps(new_by_ticker),
                  row["id"]))
 
-    def _title_match(self, it, key):
-        """The row this item is the same story as, from ANOTHER feed, or None."""
+    def _title_match(self, it, key, same_feed_merge_h=0):
+        """The row this item is the same story as, or None: the nearest row with
+        its title key published within a day, from ANOTHER feed - or from the
+        same feed when the gap is at most ``same_feed_merge_h`` hours (> 0)."""
         if key is None:
             return None
         candidates = self._c.execute(
-            f"SELECT {_ROW_COLS} FROM items WHERE title_key=? AND "
+            f"SELECT {_ROW_COLS}, published_at, "
+            "abs(julianday(published_at)-julianday(?)) * 24 AS gap_h "
+            "FROM items WHERE title_key=? AND "
             "abs(julianday(published_at)-julianday(?)) < ? "
             "ORDER BY abs(julianday(published_at)-julianday(?))",
-            (key, it["published_at"], _TITLE_MERGE_DAYS, it["published_at"])).fetchall()
+            (it["published_at"], key, it["published_at"], _TITLE_MERGE_DAYS,
+             it["published_at"])).fetchall()
         for row in candidates:
             if it["source"] not in json.loads(row["sources"]):
                 return row
+            if self._same_feed_close(it, row, same_feed_merge_h):
+                return row
         return None
+
+    @staticmethod
+    def _same_feed_close(it, row, window_h) -> bool:
+        """The same-feed rule: a real date on both sides and a gap within
+        ``window_h`` hours. ``0`` (or less) is off - a gap of 0 must not merge."""
+        if not window_h or window_h <= 0:
+            return False
+        if _UNDATED in (it["published_at"], row["published_at"]):
+            return False
+        gap = row["gap_h"]
+        return gap is not None and gap <= window_h
 
     def _stale(self, it, min_published) -> bool:
         """Published before the cutoff. ``_UNDATED`` is NOT stale here -
@@ -351,11 +376,14 @@ class Store:
         return self._c.execute("SELECT julianday(?) < julianday(?)",
                                (it["published_at"], min_published)).fetchone()[0] == 1
 
-    def insert_many(self, rows, *, min_published=None) -> int:
+    def insert_many(self, rows, *, min_published=None, same_feed_merge_h=0) -> int:
         """Insert new items, merging duplicates (see the module docstring).
         Returns the count of NEW rows only. An item published before
         ``min_published`` (an ISO cutoff - pass the prune cutoff) is skipped and
         not counted: it would only be pruned again at the end of the cycle.
+        ``same_feed_merge_h`` is the same-feed title-merge window in hours; the
+        default ``0`` is off, so the store alone never folds one feed's items -
+        the poll cycle passes the configured window.
         Atomic: a failure mid-batch writes nothing of the batch."""
         n = 0
         with self._write():
@@ -370,7 +398,7 @@ class Store:
                     self._merge_into(same_id, it)
                     continue
                 key = items.title_key(it["title"])
-                dup = self._title_match(it, key)
+                dup = self._title_match(it, key, same_feed_merge_h)
                 if dup is not None:
                     self._merge_into(dup, it)
                     self._c.execute("INSERT OR IGNORE INTO aliases VALUES (?,?)",

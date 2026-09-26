@@ -354,6 +354,33 @@ def test_insert_many_is_given_the_prune_cutoff(tmp_path, monkeypatch):
     assert got["min_published"] == "2026-09-19T00:00:00+00:00"
 
 
+@pytest.mark.parametrize("dedupe, expected", [
+    (None, 6),                                   # no [dedupe] table -> the default
+    ({"same_feed_merge_h": 2}, 2),
+    ({"same_feed_merge_h": 0}, 0),               # off
+    ({"same_feed_merge_h": "six"}, 6),           # malformed -> the default
+    ({"same_feed_merge_h": -1}, 6),
+])
+def test_insert_many_is_given_the_same_feed_merge_window(tmp_path, monkeypatch, dedupe,
+                                                         expected):
+    db = store.Store(tmp_path / "n.db")
+    got = {}
+    real = db.insert_many
+
+    def spy(rows, **kw):
+        got.update(kw)
+        return real(rows, **kw)
+
+    monkeypatch.setattr(db, "insert_many", spy)
+    feed = {"name": "MW", "kind": "rss", "public": True, "url": "https://mw"}
+    cfg = _cfg([feed])
+    if dedupe is not None:
+        cfg["dedupe"] = dedupe
+    compute.poll_feed(feed, db, FakeFetch({"https://mw": (FIX / "marketwatch.xml").read_bytes()}),
+                      universe=[], now=NOW, cfg=cfg)
+    assert got["same_feed_merge_h"] == expected
+
+
 # ── F: EDGAR ─────────────────────────────────────────────────────────────────
 
 def _form4_setup(db, pick):

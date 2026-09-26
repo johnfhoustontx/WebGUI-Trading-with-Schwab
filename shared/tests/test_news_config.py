@@ -33,6 +33,41 @@ def test_defaults_match_the_shipped_file():
         shipped = tomllib.load(fh)
     assert nc.DEFAULTS["collector"] == shipped["collector"]
     assert nc.DEFAULTS["trending"] == shipped["trending"]
+    assert nc.DEFAULTS["dedupe"] == shipped["dedupe"]
+
+
+def test_same_feed_merge_h_reads_the_shipped_file():
+    assert nc.DEFAULTS["dedupe"]["same_feed_merge_h"] == 6
+    assert nc.same_feed_merge_h() == 6
+    assert nc.same_feed_merge_h(nc.load()) == 6
+
+
+def test_same_feed_merge_h_takes_a_real_number_including_zero(monkeypatch):
+    for value in (0, 2, 1.5, 24):
+        monkeypatch.setattr(nc, "load", lambda v=value: {"dedupe": {"same_feed_merge_h": v}})
+        assert nc.same_feed_merge_h() == value
+
+
+def test_a_bad_same_feed_merge_h_is_the_default(monkeypatch):
+    for bad in (True, False, "6", None, -1, -0.5, float("nan"), float("inf"), [6], {"h": 6}):
+        cfg = {"dedupe": {"same_feed_merge_h": bad}}
+        assert nc.same_feed_merge_h(cfg) == 6, bad
+    for cfg in ({}, {"dedupe": 6}, {"dedupe": None}, None, "x"):
+        monkeypatch.setattr(nc, "load", lambda c=cfg: c)
+        assert nc.same_feed_merge_h() == 6, cfg
+
+
+def test_a_local_override_of_same_feed_merge_h_round_trips(tmp_path, monkeypatch):
+    base = tmp_path / "news.toml"
+    base.write_text((ROOT / "config" / "news.toml").read_text(encoding="utf-8"),
+                    encoding="utf-8")
+    local = tmp_path / "local"
+    local.mkdir()
+    (local / "news.toml").write_text("[dedupe]\nsame_feed_merge_h = 0\n", encoding="utf-8")
+    monkeypatch.setenv("TRADING_CONFIG_OVERRIDES_IN_TESTS", "1")
+    load, _reset = config_toml.toml_loader(base, nc.DEFAULTS, label="news.toml")
+    monkeypatch.setattr(nc, "load", load)
+    assert nc.same_feed_merge_h() == 0
 
 
 def test_feeds_returns_exactly_the_shipped_enabled_feeds_in_order():

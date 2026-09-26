@@ -31,7 +31,10 @@ and ``public_feed_names()`` apply the same rules through the same resolver
 and a warning there would repeat per call.
 
 It does NOT validate values (URLs, poll minutes, counts): a wrong number of the
-right type is read as written. Nothing here raises. Treat anything ``load()``
+right type is read as written - except ``[dedupe] same_feed_merge_h``, which
+``same_feed_merge_h()`` reads as the default when it is not a finite number >= 0
+(a bool included), because it decides whether two rows become one. Nothing here
+raises. Treat anything ``load()``
 returns as read-only: it is the cached mapping.
 """
 import copy
@@ -60,6 +63,9 @@ DEFAULTS = {
     },
     "tickers": {"extras": []},
     "trending": {"window_h": 6},
+    # One feed repeating one title within this many hours is ONE story (the
+    # same WSJ piece under two Google redirect URLs). 0 = off. See store.py.
+    "dedupe": {"same_feed_merge_h": 6},
     "feeds": [],
     "feed_flags": {},
 }
@@ -250,6 +256,23 @@ def public_feed_names() -> list:
     or not, in file order - the public view's ``public_sources``. Silent, and
     by the same rules as ``flags()``: a malformed flag fails closed."""
     return [feed["name"] for feed in all_feeds() if feed["public"]]
+
+
+def same_feed_merge_h(cfg=None) -> float:
+    """``[dedupe] same_feed_merge_h``: the hours within which ONE feed's two
+    items with one title key merge into one row (0 = never). ``cfg`` is a
+    loaded mapping (``load()`` when omitted). Anything that is not a finite
+    real number >= 0 - a bool, a string, NaN, a negative, a missing table - is
+    the built-in default, silently: the poll cycle reads it every feed."""
+    default = DEFAULTS["dedupe"]["same_feed_merge_h"]
+    cfg = load() if cfg is None else cfg
+    table = cfg.get("dedupe") if isinstance(cfg, dict) else None
+    value = table.get("same_feed_merge_h", default) if isinstance(table, dict) else default
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return default
+    if not 0 <= value < float("inf"):      # NaN fails every comparison
+        return default
+    return value
 
 
 def ticker_set() -> list:

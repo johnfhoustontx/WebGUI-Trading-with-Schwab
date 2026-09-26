@@ -25,6 +25,14 @@ extras = []
 [trending]
 window_h = 6               # the Trending chips count mentions in this window
 
+[dedupe]
+# One feed publishing one headline twice within this many hours is ONE story - e.g.
+# the same WSJ piece under two Google News redirect URLs minutes apart. Beyond it the
+# two stay separate rows, so a daily column ("Morning Bid", ~24 h apart) is not
+# folded into yesterday's. Two DIFFERENT feeds with one headline merge within a day
+# regardless. 0 = off (one feed never merges its own headlines).
+same_feed_merge_h = 6
+
 # ── feeds ──────────────────────────────────────────────────────────────────────
 # kind: rss | yahoo_ticker | google_news | edgar_form4 | edgar_filings
 # The switches are NOT here: each feed's enabled / public lives in [feed_flags] below.

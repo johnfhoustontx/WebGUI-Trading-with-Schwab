@@ -317,7 +317,8 @@ def poll_feed(feed, db, fetch, *, universe, now, cfg) -> dict:
         else:
             raise FeedConfigError(f"unknown feed kind {kind!r}")
         # Stored FIRST; only then is anything remembered (see the module docstring).
-        inserted = db.insert_many(new, min_published=min_published)
+        inserted = db.insert_many(new, min_published=min_published,
+                                  same_feed_merge_h=nc.same_feed_merge_h(cfg))
         if seen:
             db.mark_accessions(seen, now, feed=name)
         if partial:

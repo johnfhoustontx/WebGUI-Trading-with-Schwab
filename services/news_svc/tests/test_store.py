@@ -112,6 +112,114 @@ def test_a_feed_already_merged_into_a_row_does_not_merge_its_next_story(tmp_path
     assert len(db.newest(10)) == 2
 
 
+# ── 3b: one feed repeating a headline within ``same_feed_merge_h`` ─────────
+
+_WSJ = "What's News in Markets: Stocks slip as yields climb"
+
+
+def _wsj(url, published):
+    return _src(_item(url, title=_WSJ, published=published), "WSJ")
+
+
+def test_one_feeds_repeat_minutes_apart_merges_and_repolling_adds_nothing(tmp_path):
+    """The live case: WSJ via Google News, one story under two redirect URLs
+    five minutes apart - one row, one source, and the second id an alias."""
+    db = store.Store(tmp_path / "n.db")
+    first = _wsj("https://news.google.com/rss/articles/AAA", "2026-09-25T11:00:00+00:00")
+    second = _wsj("https://news.google.com/rss/articles/BBB", "2026-09-25T11:05:00+00:00")
+    assert db.insert_many([first], same_feed_merge_h=6) == 1
+    assert db.insert_many([second], same_feed_merge_h=6) == 0
+    rows = db.newest(10)
+    assert len(rows) == 1
+    assert rows[0]["sources"] == ["WSJ"]
+    assert rows[0]["url"] == "https://news.google.com/rss/articles/AAA"
+    aliased = db._c.execute("SELECT item_id FROM aliases WHERE id=?", (second["id"],)).fetchone()
+    assert aliased is not None and aliased[0] == first["id"]
+    # The next poll re-serves BOTH urls: each is an id match, nothing is new -
+    # even with the rule switched off, since the alias is what catches it.
+    for window in (6, 0):
+        assert db.insert_many([_wsj("https://news.google.com/rss/articles/AAA",
+                                    "2026-09-25T11:00:00+00:00"),
+                               _wsj("https://news.google.com/rss/articles/BBB",
+                                    "2026-09-25T11:05:00+00:00")],
+                              same_feed_merge_h=window) == 0
+    assert len(db.newest(10)) == 1
+
+
+def test_one_feeds_repeat_within_one_batch_merges(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    assert db.insert_many([_wsj("https://g/a", "2026-09-25T11:00:00+00:00"),
+                           _wsj("https://g/b", "2026-09-25T11:05:00+00:00")],
+                          same_feed_merge_h=6) == 1
+    assert len(db.newest(10)) == 1
+
+
+def test_a_daily_column_a_day_apart_stays_two_rows_with_the_rule_on(tmp_path):
+    """Morning Bid at 06:00 on consecutive days: 24 h apart is outside the
+    title window altogether, and 23 h apart is inside it but past the 6 h
+    same-feed window - both stay separate."""
+    db = store.Store(tmp_path / "n.db")
+    mon = _src(_item("https://r/mon", title="Morning Bid: markets wait",
+                     published="2026-09-24T06:00:00+00:00"), "Reuters")
+    tue = _src(_item("https://r/tue", title="Morning Bid: Markets wait!",
+                     published="2026-09-25T06:00:00+00:00"), "Reuters")
+    late = _src(_item("https://r/late", title="Morning Bid: markets wait",
+                      published="2026-09-26T05:00:00+00:00"), "Reuters")
+    assert db.insert_many([mon], same_feed_merge_h=6) == 1
+    assert db.insert_many([tue], same_feed_merge_h=6) == 1
+    assert db.insert_many([late], same_feed_merge_h=6) == 1
+    assert len(db.newest(10)) == 3
+
+
+def test_the_same_feed_window_is_inclusive_and_bounded(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    assert db.insert_many([_wsj("https://g/a", "2026-09-25T06:00:00+00:00")],
+                          same_feed_merge_h=6) == 1
+    assert db.insert_many([_wsj("https://g/b", "2026-09-25T11:59:00+00:00")],
+                          same_feed_merge_h=6) == 0
+    assert db.insert_many([_wsj("https://g/c", "2026-09-25T12:30:00+00:00")],
+                          same_feed_merge_h=6) == 1
+
+
+def test_zero_turns_the_same_feed_rule_off(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    assert db.insert_many([_wsj("https://g/a", "2026-09-25T11:00:00+00:00")],
+                          same_feed_merge_h=0) == 1
+    # Even an identical timestamp: a gap of 0 must not merge when the rule is off.
+    assert db.insert_many([_wsj("https://g/b", "2026-09-25T11:00:00+00:00")],
+                          same_feed_merge_h=0) == 1
+    assert len(db.newest(10)) == 2
+
+
+def test_the_store_default_is_off(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    assert db.insert_many([_wsj("https://g/a", "2026-09-25T11:00:00+00:00")]) == 1
+    assert db.insert_many([_wsj("https://g/b", "2026-09-25T11:05:00+00:00")]) == 1
+
+
+def test_an_undated_item_never_merges_by_the_same_feed_rule(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    a = _wsj("https://g/a", "not a date"); a["first_seen"] = "junk"
+    b = _wsj("https://g/b", "not a date"); b["first_seen"] = "junk"
+    assert db.insert_many([a], same_feed_merge_h=24) == 1
+    assert db.insert_many([b], same_feed_merge_h=24) == 1
+    rows = db.newest(10)
+    assert len(rows) == 2 and all(r["published_at"] == store._UNDATED for r in rows)
+    # ...and a dated repeat does not fold into an undated row either.
+    c = _wsj("https://g/c", "2026-09-25T11:00:00+00:00")
+    assert db.insert_many([c], same_feed_merge_h=24) == 1
+
+
+def test_same_feed_close_refuses_the_undated_sentinel_on_either_side():
+    row = {"published_at": store._UNDATED, "gap_h": 0.0}
+    assert not store.Store._same_feed_close({"published_at": "2026-09-25T11:00:00+00:00"},
+                                            row, 6)
+    row = {"published_at": "2026-09-25T11:00:00+00:00", "gap_h": 0.0}
+    assert not store.Store._same_feed_close({"published_at": store._UNDATED}, row, 6)
+    assert store.Store._same_feed_close({"published_at": "2026-09-25T11:00:00+00:00"},
+                                        row, 6)
+
+
 # ── 4: tickers union on an id or title match ───────────────────────────────
 
 def test_same_id_on_two_symbol_feeds_unions_tickers(tmp_path):
@@ -491,8 +599,8 @@ def test_two_stores_racing_on_one_title_make_one_row(tmp_path):
     looked, release = threading.Event(), threading.Event()
     real = a._title_match
 
-    def slow_match(it, key):                 # A has looked and found nothing - now B tries
-        row = real(it, key)
+    def slow_match(it, key, *rest):          # A has looked and found nothing - now B tries
+        row = real(it, key, *rest)
         looked.set()
         release.wait(5)
         return row

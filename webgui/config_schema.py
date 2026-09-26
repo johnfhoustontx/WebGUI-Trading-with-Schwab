@@ -907,6 +907,14 @@ _NEWS = ConfigFile(
                   "The Trending chips count ticker mentions in this window.",
                   kind="int", unit="h", min=1, max=48, step=1),
         )),
+        Section("Duplicates", "Two different feeds with one headline within a "
+                "day are always shown as one story.", (
+            Field("dedupe.same_feed_merge_h", "One feed's repeated headline",
+                  "When ONE feed publishes the same headline twice within this "
+                  "many hours, it is shown once. Longer apart, both are kept, so a "
+                  "daily column with a fixed title is not folded into yesterday's. "
+                  "0 turns this off.", kind="int", unit="h", min=0, max=24, step=1),
+        )),
         Section("Feed switches", "One pair per feed, named by the feed. A switch "
                 "is a table entry, so changing one leaves every other feed alone.", (
             Field("feed_flags.*.enabled", "Enabled",
