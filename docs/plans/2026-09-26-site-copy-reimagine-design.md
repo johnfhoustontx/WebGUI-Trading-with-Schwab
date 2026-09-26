@@ -1,7 +1,7 @@
 # neuralstrike.co — the wording, reimagined
 
-**Date:** 2026-09-26 · **Status:** proposed, awaiting the owner's approval before any
-page is edited.
+**Date:** 2026-09-26 · **Status:** approved by the owner and applied the same day
+(commit `0421d94`); the tables below are the record of what changed and why.
 
 **Request:** "Look at neuralstrike.co holistically, then reimagine the wording while
 keeping the branding the same."
