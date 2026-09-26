@@ -1,0 +1,96 @@
+# Market news feed — every source news_svc polls, and how often.
+# Read through shared/news_config.py (built-in defaults ← this file ← config/local/news.toml).
+# Every key is editable in Settings -> Configuration.
+
+[collector]
+rth_poll_min      = 5      # 08:30–15:00 CT (shared.market_calendar)
+offhours_poll_min = 15
+weekend_poll_min  = 60     # Saturday, Sunday and NYSE holidays
+keep_days         = 7      # rows older than this are pruned from news.db
+view_items        = 300    # newest rows in the published views
+request_timeout_s = 20
+# The SEC requires a contact in the User-Agent and allows at most 10 requests/s.
+sec_user_agent    = "NeuralStrike news_svc contact@neuralstrike.co"
+
+[tickers]
+# Followed but not scanned. The base set is the GEX collection list (config/symbols.toml).
+extras = []
+
+[trending]
+window_h = 6               # the Trending chips count mentions in this window
+
+# ── feeds ──────────────────────────────────────────────────────────────────────
+# kind: rss | yahoo_ticker | google_news | edgar_form4 | edgar_filings
+# enabled (default true) · public (default true: shown on live.neuralstrike.co/news)
+
+[[feeds]]
+name = "MarketWatch"
+kind = "rss"
+url  = "https://feeds.content.dowjones.io/public/rss/mw_topstories"
+
+[[feeds]]
+name = "CNBC"
+kind = "rss"
+url  = "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+
+[[feeds]]
+name = "ZeroHedge"
+kind = "rss"
+url  = "https://feeds.feedburner.com/zerohedge/feed"
+
+[[feeds]]
+name = "Benzinga"
+kind = "rss"
+url  = "https://www.benzinga.com/feed"
+
+[[feeds]]
+name = "Federal Reserve"
+kind = "rss"
+url  = "https://www.federalreserve.gov/feeds/press_all.xml"
+
+[[feeds]]
+name = "PR Newswire"
+kind = "rss"
+url  = "https://www.prnewswire.com/rss/financial-services-latest-news/financial-services-latest-news-list.rss"
+
+[[feeds]]
+name = "GlobeNewswire"
+kind = "rss"
+url  = "https://www.globenewswire.com/RssFeed/subjectcode/13-Earnings%20Releases%20and%20Operating%20Results/feedTitle/GlobeNewswire%20-%20Earnings%20Releases"
+# Off: 2026-09-25 the whole host (homepage included) drops non-browser clients after the TLS handshake, from the VPS and Windows alike.
+enabled = false
+
+[[feeds]]
+name = "Business Wire"
+kind = "rss"
+url  = "https://feed.businesswire.com/rss/home/?rss=G1QFDERJXkJeEFpRVQ=="
+
+[[feeds]]
+name = "Truth Social"
+kind = "rss"
+url  = "https://trumpstruth.org/feed"
+
+[[feeds]]
+name = "Yahoo Finance"
+kind = "yahoo_ticker"
+url  = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
+
+[[feeds]]
+name  = "WSJ"
+kind  = "google_news"
+query = "site:wsj.com markets when:1d"
+
+[[feeds]]
+name  = "Seeking Alpha"
+kind  = "google_news"
+query = "site:seekingalpha.com when:1d"
+
+[[feeds]]
+name = "SEC Insider Buys"
+kind = "edgar_form4"
+min_value_usd = 1000000   # every code-P buy on a tracked ticker, plus any buy at or above this
+
+[[feeds]]
+name  = "SEC Offerings"
+kind  = "edgar_filings"
+forms = ["S-1", "S-3", "424B5"]

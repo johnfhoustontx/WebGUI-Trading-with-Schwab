@@ -1,5 +1,6 @@
 """news_svc is wired everywhere a service must be: port, data dir, guards."""
 import pathlib
+import re
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -22,9 +23,15 @@ def test_news_data_is_backed_up():
     assert "services/news_svc/data" in backup_local.DATA_TREES
 
 
+def _pins(path, pkg):
+    """Lines of ``path`` that PIN ``pkg`` - anchored at the line start, so a
+    mention in a comment or another package's note cannot satisfy the check."""
+    lines = (ROOT / path).read_text(encoding="utf-8").splitlines()
+    return [ln for ln in lines if re.match(rf"^{re.escape(pkg)}==", ln)]
+
+
 def test_feedparser_is_locked():
-    txt = (ROOT / "requirements.txt").read_text()
-    lock = (ROOT / "requirements.lock").read_text()
     for pkg in ("feedparser", "sgmllib3k"):
-        assert pkg in txt, pkg
-        assert pkg in lock, f"{pkg} missing from requirements.lock — prod would not install it"
+        assert _pins("requirements.txt", pkg), pkg
+        assert _pins("requirements.lock", pkg), (
+            f"{pkg} missing from requirements.lock — prod would not install it")
