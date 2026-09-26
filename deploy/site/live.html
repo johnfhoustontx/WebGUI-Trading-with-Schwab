@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NeuralStrike — Live screens</title>
-<meta name="description" content="Twenty-four NeuralStrike screens, running live against the market: dealer positioning, options flow, market regime, sector rotation and the desk itself, plus four tools that rank, repair, price and simulate a trade. No sign-in.">
+<meta name="description" content="Seventeen NeuralStrike screens running against the market with nothing to sign into: dealer positioning, options flow, market regime and sector rotation, plus five tools that rank, repair, price and simulate a trade and follow the news behind it.">
 <meta name="theme-color" content="#161826">
 <!-- Icons. The SVG is the good one and every modern browser takes it; the
      other two exist because some browsers never ask for it.
@@ -20,7 +20,7 @@
 <link rel="stylesheet" href="assets/site.css">
 
 <!--
-  LIVE SCREENS — a menu of the fourteen read-only screens published at
+  LIVE SCREENS — a menu of the screens published at
   live.neuralstrike.co, which is a SEPARATE ORIGIN running its own process
   (webgui/live_main.py). The table of what is published lives in
   webgui/live_screens.py and nothing here restates it: the tiles below are
@@ -37,8 +37,8 @@
 
   ── WHY CAPTURES AND NOT IFRAMES ────────────────────────────────────────────
   Each tile is a PICTURE — live/<slug>.webp, written every 15 minutes by
-  tools/capture_live_shots.py on the box that serves this file. Fourteen
-  iframes would open fourteen NiceGUI sessions per visitor against the public
+  tools/capture_live_shots.py on the box that serves this file. A dozen
+  iframes would open a dozen NiceGUI sessions per visitor against the public
   process, for a page whose entire job is to be a menu, and would give this
   static tree a runtime dependency on the app being up. A dead live process
   should cost a visitor a 502 on the screen they chose, not a broken index.
@@ -79,11 +79,11 @@
       <div class="ns-menu-panel">
         <a class="ns-menu-item" href="https://live.neuralstrike.co/finder">
           <span class="ns-menu-title">Strategy Finder</span>
-          <span class="ns-menu-desc">Rank trades for any symbol</span>
+          <span class="ns-menu-desc">Rank every trade for a symbol</span>
         </a>
         <a class="ns-menu-item" href="https://live.neuralstrike.co/rescue">
           <span class="ns-menu-title">Rescue my Sh*tty trade</span>
-          <span class="ns-menu-desc">Repair a trade you hold</span>
+          <span class="ns-menu-desc">Repair a trade you already hold</span>
         </a>
         <a class="ns-menu-item" href="https://live.neuralstrike.co/calculator">
           <span class="ns-menu-title">Calculator</span>
@@ -91,7 +91,7 @@
         </a>
         <a class="ns-menu-item" href="https://live.neuralstrike.co/simulator">
           <span class="ns-menu-title">Simulator</span>
-          <span class="ns-menu-desc">See value by price and days ahead</span>
+          <span class="ns-menu-desc">Value it across price and time</span>
         </a>
         <a class="ns-menu-item" href="https://live.neuralstrike.co/news">
           <span class="ns-menu-title">Market News</span>
@@ -107,11 +107,12 @@
       <p class="ns-eyebrow">Live screens</p>
       <h1 class="ns-live-title">Running against the market, right now.</h1>
       <p class="ns-live-lede">
-        Twenty-four screens from the workbench, open to anyone with nothing to sign into. Twenty are
-        read-only views of what the desk runs on. The other four are tools you use: the Strategy
-        Finder ranks trades for a symbol, Rescue repairs a trade you hold, the Calculator prices any
-        structure, and the Simulator shows what it is worth as the price moves and the days pass.
-        Pick one to open it; the thumbnails are refreshed through the session.
+        Seventeen screens from the desk, open to anyone. Twelve are the readings the desk runs on,
+        from dealer positioning to sector rotation. Five are tools you drive: the Strategy Finder
+        ranks every trade for a symbol, Rescue repairs one you already hold, the Calculator prices
+        any structure, the Simulator shows what it is worth as price and time move, and Market News
+        follows the headlines and filings behind it. Pick a screen to open it; the thumbnails
+        refresh through the session.
       </p>
     </div>
 
@@ -179,14 +180,14 @@
     </div>
 
     <p class="ns-live-note">
-      Quiet outside market hours: the screens show the last session until the next one opens.
-      Want the whole app, including the parts that are not published? The
-      <a href="gallery.html">gallery</a> has a capture of every screen.
+      Quiet outside market hours: each screen holds the last session until the next one opens.
+      The <a href="gallery.html">gallery</a> has a capture of every screen, including the ones
+      that stay private.
     </p>
   </main>
 
   <footer class="ns-foot ns-live-foot">
-    Paper positions only. The only real money on screen is your read-only brokerage portfolio.
+    NeuralStrike — dealer flow, measured. Educational and simulation software, not investment advice. No orders are transmitted to any broker.
   </footer>
 
 </div>

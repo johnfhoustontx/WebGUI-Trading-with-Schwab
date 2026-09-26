@@ -899,6 +899,59 @@ def test_the_grid_carries_no_timestamp():
     assert not re.search(r"\b\d{4}-\d{2}-\d{2}\b", markup)
 
 
+_WORDS = {5: "five", 12: "twelve", 17: "seventeen"}
+
+
+def test_the_live_page_states_the_published_counts_in_words():
+    """A COUNT IN COPY IS A FACT THAT GOES STALE IN SILENCE -- the live page's
+    twin of the gallery test above. live.html said "Twenty-four screens ...
+    twenty read-only ... four tools" from 2026-09-21 until 2026-09-26, while the
+    table published seventeen (twelve tiles and five tools), because the tiles
+    are pinned against ``live_screens.SCREENS`` and the prose never was.
+
+    Derived from the same table the route registration reads, so the words
+    cannot be right by luck. ``_WORDS`` is deliberately narrow: a count it does
+    not name fails here, which is the moment to add the word AND reread the
+    lede -- the sentence that says "Five are tools" also lists them by name.
+    """
+    screens = _live_screens().SCREENS
+    tiles = sum(1 for s in screens if s.tile)
+    tools = sum(1 for s in screens if not s.tile and not s.parent)
+    total = tiles + tools
+    lede = re.search(r'<p class="ns-live-lede">(.*?)</p>', _markup("live.html"), re.S)
+    assert lede, "live.html has no lede"
+    prose = " ".join(lede.group(1).split())
+    for n in (total, tiles, tools):
+        assert n in _WORDS, f"no word for {n}; add it and reread the lede"
+    assert prose.startswith(f"{_WORDS[total].capitalize()} screens"), prose[:60]
+    assert f"{_WORDS[tiles].capitalize()} are the readings" in prose, prose
+    assert f"{_WORDS[tools].capitalize()} are tools" in prose, prose
+    for _, title in TOOLS:
+        # The lede names every tool. Rescue's menu name is "Rescue my Sh*tty
+        # trade"; the prose says "Rescue", which is the word before "my".
+        assert title.split(" my ")[0] in prose, f"the lede does not name {title}"
+    meta = re.search(r'<meta name="description" content="([^"]+)"', _text("live.html"))
+    assert meta and meta.group(1).startswith(f"{_WORDS[total].capitalize()} NeuralStrike screens"), (
+        "the meta description states a different count from the table")
+    assert f"plus {_WORDS[tools]} tools" in meta.group(1)
+
+
+DISCLAIMER = ("NeuralStrike — dealer flow, measured. Educational and simulation "
+              "software, not investment advice. No orders are transmitted to any broker.")
+
+
+def test_every_footer_carries_the_one_disclaimer_verbatim():
+    """The 2026-09-26 rewrite reduced five phrasings of "paper only, no orders"
+    to one sentence, reused byte-for-byte -- the same rule the app keeps in
+    ``webgui/pages/copy.py``: two surfaces wording one condition differently
+    read as a defect, not a style. report.html frames a document that carries
+    its own footer, and the glossary is a reference page; the three pages that
+    make the claim make it identically."""
+    for name in ("index.html", "gallery.html", "live.html"):
+        markup = " ".join(_markup(name).split())
+        assert DISCLAIMER in markup, f"{name} does not carry the disclaimer verbatim"
+
+
 def test_live_screens_is_the_primary_call_to_action():
     """The nav's own comment records that Live Screens was the design's primary
     button and lost the slot only because the page was an empty placeholder.
@@ -909,13 +962,14 @@ def test_live_screens_is_the_primary_call_to_action():
     explaining the history, so a raw-text search matches inside the comment and
     passes for the wrong reason -- exactly what ``_markup`` exists to prevent.
     """
-    text = _markup("index.html")
-    live = re.search(r'<a[^>]*href="live\.html"[^>]*>', text)
-    gallery = re.search(r'<a[^>]*href="gallery\.html"[^>]*>[^<]*App gallery', text)
+    nav = re.search(r"<nav\b.*?</nav>", _markup("index.html"), re.S)
+    assert nav, "index.html has no <nav>"
+    live = re.search(r'<a[^>]*href="live\.html"[^>]*>', nav.group(0))
+    gallery = re.search(r'<a[^>]*href="gallery\.html"[^>]*>', nav.group(0))
     assert live, "no live.html link in the index nav"
     assert "btn-primary" in live.group(0), "Live screens is not the primary button"
     assert gallery and "btn-primary" not in gallery.group(0), (
-        "App gallery still carries the primary treatment")
+        "the Gallery link still carries the primary treatment")
 
 
 def test_the_gallery_and_the_live_grid_link_to_each_other_IN_THE_NAV():

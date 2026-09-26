@@ -4,6 +4,35 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-26 (**neuralstrike.co reworded, branding untouched** — the five
+public pages re-centred on the live screens and tools a visitor can actually open.)
+
+- **What was wrong, holistically.** The copy was written on 2026-09-06, the day before
+  the public live origin existed, and never re-centred: the hero, the first stat and
+  both safety cards sold a program that "runs on your own computer" (there is no build
+  to download) while the seventeen live screens and five tools appeared only as a nav
+  button. `live.html` said *twenty-four screens … four tools* against the seventeen
+  the table publishes; its footer promised a read-only portfolio the public origin never
+  shows; the gallery's meta still listed the dropped daily briefings; the one
+  instruction on the landing page ("explained under Dealer Positioning") was a manual
+  heading, not a link; and the disclaimer was phrased five ways.
+- **What changed.** Every page's prose, meta and `og:` description; the Tools menu's
+  three weaker descriptions; the hero and close buttons now open the live screens; the
+  tagline is promoted to the eyebrow and `<title>`; the pull-quote links to the
+  glossary's dealer-positioning section and the live Gamma screen; one paper line and
+  one disclaimer are reused verbatim. **Kept, as the brand:** the headline, the
+  tagline, the thesis line, the Flip caption, the screen names, "Rescue my Sh*tty
+  trade" and "no signal-selling". Full old→new tables:
+  [the design](plans/2026-09-26-site-copy-reimagine-design.md).
+- **Tests.** `test_the_live_page_states_the_published_counts_in_words` derives
+  seventeen / twelve / five from `live_screens.SCREENS` and reads them out of the lede
+  and meta (mutation-checked: putting "Twenty-four" back goes red);
+  `test_every_footer_carries_the_one_disclaimer_verbatim`; the primary-CTA test now
+  scopes to the `<nav>` instead of matching the label "App gallery", which is "Gallery".
+- ⚠ **A backslash-b in a bash heredoc became a backspace byte twice in this session**
+  (`r"<nav\b"` → `<nav^H`), so the regex silently matched nothing. Write test edits
+  through a file, never a heredoc — the memory note already said so.
+
 **Last updated:** 2026-09-26 (**Market News redesigned to the operator's mockup** —
 two columns, a filter card, banded rows, a next-event hero, SEC chips and one agenda.)
 
