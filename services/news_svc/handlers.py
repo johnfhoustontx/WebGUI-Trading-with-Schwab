@@ -12,8 +12,9 @@ write only when the payload is byte-identical, so a ``ts`` in it would bump the
 version - and repaint every reader - on every poll. "Updated at" comes from the
 bus instead: ``{key}:ts`` (``bus_client.read_meta`` - what ``ui_kit.header(view=)``
 already draws) is refreshed on EVERY publish, skipped or not, and so means "last
-confirmed current"; the envelope's own ``ts`` means "last changed". The status
-view keeps its ``ts``: its per-feed ``last_poll`` moves every poll anyway."""
+confirmed current"; the envelope's own ``ts`` means "last changed". The feed
+status view keeps its ``ts``: its per-feed ``last_poll`` moves every poll
+anyway. The calendar status carries none - it is published every tick."""
 import logging
 
 log = logging.getLogger("news_svc.handlers")
@@ -83,10 +84,15 @@ def publish_calendar_public(bus, payload) -> int:
                          skip_unchanged=True)
 
 
-def publish_calendar_status(bus, sources, now) -> int:
-    """Private: per-source ``last_ok`` / ``last_poll`` / redacted ``error``, plus ``ts``."""
-    return bus.cache_set(CACHE_CAL_STATUS, {"sources": sources, "ts": now},
-                         event=EVENT_CAL_STATUS)
+def publish_calendar_status(bus, sources) -> int:
+    """Private: per-source ``last_ok`` / ``last_poll`` / redacted ``error``.
+
+    No ``ts``, and ``skip_unchanged``: the calendar branch publishes this every
+    30 s tick while a source's ``last_poll`` moves only when it is fetched, so a
+    stamp would rewrite and repaint on every tick for nothing. "Updated at" is
+    the ``{key}:ts`` side key, as for the item views."""
+    return bus.cache_set(CACHE_CAL_STATUS, {"sources": sources},
+                         event=EVENT_CAL_STATUS, skip_unchanged=True)
 
 
 def handle_command(bus, command) -> None:

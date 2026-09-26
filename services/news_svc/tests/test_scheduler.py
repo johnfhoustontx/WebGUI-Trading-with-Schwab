@@ -300,7 +300,7 @@ def test_a_huge_config_value_does_not_kill_the_loop(monkeypatch):
     assert h.polls == [0.0, float(_default_s("rth_poll_min"))]
 
 
-def test_cancellation_during_a_poll_propagates(monkeypatch, caplog):
+def test_a_poll_cancelled_from_inside_ends_only_that_branch(monkeypatch, caplog):
     """The poll is a background task now, so the loop no longer awaits it: a
     CancelledError inside the poll ends THAT task cancelled - it is neither
     swallowed as a failed cycle nor stamped - and cancelling the loop itself
@@ -592,3 +592,133 @@ def test_heartbeat_still_beats_inside_the_while():
     first = loops[0].body[0]
     assert isinstance(first, ast.Expr) and isinstance(first.value, ast.Call)
     assert ast.unparse(first.value) == "_heartbeat.tick()"
+
+
+# ── shutdown and stuck branches ────────────────────────────────────────────────
+
+def test_cancelling_the_loop_cancels_its_running_branches(monkeypatch):
+    """A branch still running when the loop is cancelled (service shutdown)
+    must not be left behind as a pending task: the loop cancels and awaits
+    every one before its CancelledError propagates."""
+    async def main():
+        started = asyncio.Event()
+
+        async def hang(fn, *args):
+            started.set()
+            await asyncio.Event().wait()   # never returns on its own
+
+        async def long_sleep(s):
+            await asyncio.sleep(3600)
+
+        monkeypatch.setattr(scheduler, "_to_thread", hang)
+        monkeypatch.setattr(scheduler, "_sleep", long_sleep)
+        monkeypatch.setattr(scheduler, "_utcnow", lambda: RTH)
+        monkeypatch.setattr(scheduler.nc, "load", lambda: CFG)
+        monkeypatch.setattr(scheduler._heartbeat, "tick", lambda: None)
+        task = asyncio.get_running_loop().create_task(scheduler.loop(object()))
+        await asyncio.wait_for(started.wait(), 5)
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+        others = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        return others
+
+    assert asyncio.run(main()) == []
+
+
+class _FakeTask:
+    def __init__(self):
+        self.finished = False
+
+    def done(self):
+        return self.finished
+
+
+def _warnings(caplog):
+    return [r for r in caplog.records
+            if r.levelno == logging.WARNING and "still running" in r.getMessage()]
+
+
+def test_a_stuck_branch_warns_once_per_episode(monkeypatch, caplog):
+    clock = {"t": 0.0}
+    monkeypatch.setattr(scheduler, "_monotonic", lambda: clock["t"])
+    running, starts, tasks = {}, {}, []
+
+    def create(coro):
+        tasks.append(_FakeTask())
+        return tasks[-1]
+
+    def go(t):
+        clock["t"] = t
+        return scheduler.launch(running, "calendar", lambda: None, create,
+                                stuck_after_s=600, starts=starts)
+
+    with caplog.at_level(logging.DEBUG, logger="news_svc.scheduler"):
+        assert go(0) is True
+        assert go(30) is False and go(599) is False
+        assert _warnings(caplog) == []                     # slow, not stuck: DEBUG only
+        assert go(600) is False and go(630) is False and go(900) is False
+        assert len(_warnings(caplog)) == 1                 # once, not every tick
+        assert "calendar" in _warnings(caplog)[0].getMessage()
+        tasks[-1].finished = True
+        assert go(1000) is True                            # a new episode
+        assert go(1500) is False
+        assert len(_warnings(caplog)) == 1
+        assert go(1600) is False
+        assert len(_warnings(caplog)) == 2
+
+
+def test_launch_without_a_threshold_never_warns(monkeypatch, caplog):
+    monkeypatch.setattr(scheduler, "_monotonic", lambda: 10_000.0)
+    running = {"watch": _FakeTask()}
+    with caplog.at_level(logging.DEBUG, logger="news_svc.scheduler"):
+        assert scheduler.launch(running, "watch", lambda: None, lambda c: _FakeTask()) is False
+    assert _warnings(caplog) == []
+
+
+def test_the_loop_warns_about_a_stuck_feed_poll_at_twice_the_interval(monkeypatch, caplog):
+    """The feed poll hangs; the calendar and the watch finish. At the RTH
+    cadence (300 s) the feeds threshold is 600 s, the others' 600 s never
+    applies because they are never still running."""
+    clock = {"t": 0.0}
+    passes = {"n": 0}
+    warned_at = []
+
+    async def to_thread(fn, *args):
+        if fn is scheduler.compute.poll_now:
+            await asyncio.Event().wait()
+        return fn(*args)
+
+    async def fake_sleep(s):
+        await asyncio.sleep(0)
+        clock["t"] += s
+        passes["n"] += 1
+        if passes["n"] >= 40:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(scheduler, "_to_thread", to_thread)
+    monkeypatch.setattr(scheduler.compute, "poll_now", lambda bus: {"ok": True})
+    monkeypatch.setattr(econ_calendar, "refresh_now", lambda bus: {"ok": True})
+    monkeypatch.setattr(econ_calendar, "watch_now", lambda bus: {"due": []})
+    monkeypatch.setattr(scheduler, "_sleep", fake_sleep)
+    monkeypatch.setattr(scheduler, "_monotonic", lambda: clock["t"])
+    monkeypatch.setattr(scheduler, "_utcnow", lambda: RTH)
+    monkeypatch.setattr(scheduler.nc, "load", lambda: CFG)
+    monkeypatch.setattr(scheduler._heartbeat, "tick", lambda: None)
+
+    class _Grab(logging.Handler):
+        def emit(self, record):
+            if record.levelno == logging.WARNING:
+                warned_at.append((clock["t"], record.getMessage()))
+
+    grab = _Grab()
+    logging.getLogger("news_svc.scheduler").addHandler(grab)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(scheduler.loop(object()))
+    finally:
+        logging.getLogger("news_svc.scheduler").removeHandler(grab)
+    assert len(warned_at) == 1
+    t, msg = warned_at[0]
+    assert "feeds" in msg and t == 600.0

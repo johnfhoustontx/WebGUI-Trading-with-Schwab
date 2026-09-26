@@ -24,7 +24,8 @@ interval is still followed by a full interval of rest.
 
 The heartbeat is beaten once per pass, and a pass no longer waits on any
 branch, so ``/health``'s tick age stays under about ``TICK_S`` even while a
-poll runs; a hung branch shows instead as that branch never relaunching.
+poll runs; a hung branch shows instead as a WARNING once it has run past its
+threshold (``launch``), and as that branch never relaunching.
 """
 import asyncio
 import datetime as dt
@@ -42,6 +43,10 @@ _log = logging.getLogger("news_svc.scheduler")
 _CT = ZoneInfo("America/Chicago")
 
 TICK_S = 30          # how often the loop wakes (heartbeat, config re-read)
+# A branch still running this long is logged at WARNING (once per episode):
+# the feed poll at twice its current interval, the calendar and watch here.
+STUCK_FEEDS_FACTOR = 2
+STUCK_CALENDAR_S = 600
 MIN_INTERVAL_S = 60  # a bad or tiny config value never polls faster than this
 MAX_INTERVAL_MIN = 10_080  # one week; anything larger is a bad value, not a cadence
 # What the loop uses when working out the interval RAISES (a config bug, not a
@@ -137,16 +142,33 @@ async def _branch(name, fn, bus, on_end=None) -> None:
             on_end()
 
 
-def launch(running, key, make_coro, create_task) -> bool:
+def launch(running, key, make_coro, create_task, *, stuck_after_s=None,
+           starts=None) -> bool:
     """Launch branch ``key`` as a background task unless its previous task is
     still running (``options_svc.scheduler.launch_branches``' shape): a slow
     branch can only ever delay ITSELF. The coroutine is built only when it will
-    run, so a skip leaves nothing to close. Returns whether it launched."""
+    run, so a skip leaves nothing to close. Returns whether it launched.
+
+    A skip is DEBUG - a branch outliving one tick is normal. With ``starts``
+    (a dict this function keeps: key -> launch time + whether it warned) and
+    ``stuck_after_s``, a skip of a task running that long or longer logs a
+    WARNING instead, once per stuck episode: a hung branch never relaunches, and
+    before this its only trace was a DEBUG line every 30 s."""
     prev = running.get(key)
     if prev is not None and not prev.done():
-        _log.debug("news branch %r still running; skipping this tick", key)
+        entry = starts.get(key) if starts is not None else None
+        if (entry is not None and stuck_after_s is not None and not entry["warned"]
+                and _monotonic() - entry["t"] >= stuck_after_s):
+            entry["warned"] = True
+            _log.warning("news branch %r still running after %.0f s (threshold "
+                         "%.0f s) - it is not relaunched until it ends",
+                         key, _monotonic() - entry["t"], stuck_after_s)
+        else:
+            _log.debug("news branch %r still running; skipping this tick", key)
         return False
     running[key] = create_task(make_coro())
+    if starts is not None:
+        starts[key] = {"t": _monotonic(), "warned": False}
     return True
 
 
@@ -163,11 +185,15 @@ async def loop(bus) -> None:
       unless a release has just passed and its value has not landed.
 
     A 60 s feed poll therefore never holds a release watch back a minute, and a
-    branch still running from an earlier tick is skipped, never doubled."""
+    branch still running from an earlier tick is skipped, never doubled (and
+    WARNED about once it has run ``STUCK_FEEDS_FACTOR`` intervals, or
+    ``STUCK_CALENDAR_S``). Cancelling the loop cancels and awaits every branch
+    still running before the CancelledError propagates."""
     from services.news_svc import econ_calendar
 
     create_task = asyncio.get_running_loop().create_task
     running = {}
+    starts = {}
     feeds = {"last_end": None}
     interval_failing = False
 
@@ -176,30 +202,43 @@ async def loop(bus) -> None:
         # still followed by a full interval of rest, never back-to-back.
         feeds["last_end"] = _monotonic()
 
-    while True:
-        _heartbeat.tick()
-        try:
-            interval = poll_interval_s(_utcnow(), nc.load())
-            interval_failing = False
-        except Exception:  # a config bug must never escape the loop
-            if not interval_failing:   # once per failure run, not every 30 s
-                _log.exception("news poll interval could not be computed - using "
-                               "the built-in %s s", FALLBACK_INTERVAL_S)
-            interval_failing = True
-            interval = FALLBACK_INTERVAL_S
-        last = feeds["last_end"]
-        if last is None or _monotonic() - last >= interval:
-            launch(running, "feeds",
-                   lambda: _branch("poll", compute.poll_now, bus, _feeds_ended),
-                   create_task)
-        launch(running, "calendar",
-               lambda: _branch("calendar", econ_calendar.refresh_now, bus), create_task)
-        launch(running, "watch",
-               lambda: _branch("watch", econ_calendar.watch_now, bus), create_task)
-        prev = running.get("feeds")
-        last = feeds["last_end"]
-        if last is None or (prev is not None and not prev.done()):
-            remaining = TICK_S
-        else:
-            remaining = interval - (_monotonic() - last)
-        await _sleep(max(1.0, min(TICK_S, remaining)))
+    try:
+        while True:
+            _heartbeat.tick()
+            try:
+                interval = poll_interval_s(_utcnow(), nc.load())
+                interval_failing = False
+            except Exception:  # a config bug must never escape the loop
+                if not interval_failing:   # once per failure run, not every 30 s
+                    _log.exception("news poll interval could not be computed - using "
+                                   "the built-in %s s", FALLBACK_INTERVAL_S)
+                interval_failing = True
+                interval = FALLBACK_INTERVAL_S
+            last = feeds["last_end"]
+            if last is None or _monotonic() - last >= interval:
+                launch(running, "feeds",
+                       lambda: _branch("poll", compute.poll_now, bus, _feeds_ended),
+                       create_task, stuck_after_s=STUCK_FEEDS_FACTOR * interval,
+                       starts=starts)
+            launch(running, "calendar",
+                   lambda: _branch("calendar", econ_calendar.refresh_now, bus),
+                   create_task, stuck_after_s=STUCK_CALENDAR_S, starts=starts)
+            launch(running, "watch",
+                   lambda: _branch("watch", econ_calendar.watch_now, bus),
+                   create_task, stuck_after_s=STUCK_CALENDAR_S, starts=starts)
+            prev = running.get("feeds")
+            last = feeds["last_end"]
+            if last is None or (prev is not None and not prev.done()):
+                remaining = TICK_S
+            else:
+                remaining = interval - (_monotonic() - last)
+            await _sleep(max(1.0, min(TICK_S, remaining)))
+    finally:
+        # Shutdown: no branch task outlives the loop. Cancelling one that waits
+        # on the executor returns at once - the thread finishes its call on its
+        # own, so nothing is cut off mid-SQLite.
+        tasks = [t for t in running.values() if not t.done()]
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)

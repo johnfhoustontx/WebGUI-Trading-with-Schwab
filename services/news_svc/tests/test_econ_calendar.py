@@ -303,12 +303,27 @@ def test_an_unchanged_calendar_does_not_bump_the_version(db, bus, cal_config):
     assert bus.cache_version(handlers.CACHE_CAL_PUBLIC) == vp
 
 
-def test_the_calendar_views_carry_no_timestamp_and_the_status_does(db, bus, cal_config):
+def test_no_calendar_view_carries_a_timestamp_not_even_the_status(db, bus, cal_config):
+    """A ``ts`` in the status payload made every 30 s tick a new write and a
+    repaint; "updated at" is the bus's ``{key}:ts`` side key instead."""
     econ_calendar.refresh(bus, db, FakeFetch(), now=NOW, env={})
     for key in (handlers.CACHE_CAL, handlers.CACHE_CAL_PUBLIC):
         p = _payload(bus, key)
         assert set(p) == {"events", "dividends", "ipos", "data", "sources", "settings"}
-    assert _payload(bus, handlers.CACHE_CAL_STATUS)["ts"] == NOW.isoformat()
+    status = _payload(bus, handlers.CACHE_CAL_STATUS)
+    assert set(status) == {"sources"}
+    assert {r["name"] for r in status["sources"]} == set(econ_calendar.econ.SOURCE_NAMES)
+
+
+def test_ten_quiet_ticks_do_not_bump_the_status_version(db, bus, cal_config):
+    fetch = FakeFetch()
+    econ_calendar.refresh(bus, db, fetch, now=NOW, env={})
+    v = bus.cache_version(handlers.CACHE_CAL_STATUS)
+    n = len(fetch.calls)
+    for k in range(1, 11):                          # the scheduler's 30 s tick
+        econ_calendar.refresh(bus, db, fetch, now=NOW + dt.timedelta(seconds=30 * k), env={})
+    assert len(fetch.calls) == n                    # nothing was due
+    assert bus.cache_version(handlers.CACHE_CAL_STATUS) == v
 
 
 def test_a_source_is_refetched_only_after_its_refresh_min(db, bus, cal_config):

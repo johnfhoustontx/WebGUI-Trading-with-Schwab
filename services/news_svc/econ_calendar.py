@@ -468,7 +468,7 @@ def _publish(bus, db, *, now, key, cal, indicators):
         except Exception:  # noqa: BLE001 - the status is how the page learns the store is sick
             _degrade.degraded("news.cal.status", exc_info=False)
             rows = []
-        handlers.publish_calendar_status(bus, rows, _iso(now))
+        handlers.publish_calendar_status(bus, rows)
 
 
 def refresh(bus, db, fetch, *, now, env=None, dividends_db=None) -> dict:
