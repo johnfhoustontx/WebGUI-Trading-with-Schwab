@@ -12,10 +12,12 @@ payload is ``{"items": [...]}``; nothing here reads any other key of it.
 page renders them through labels and links, which escape; a caller must never
 hand them to ``ui.html`` unescaped.
 
-Times display in ET. A naive ``published_at`` / ``first_seen`` is read as UTC
-(the adapters emit UTC); an unparseable one - or one too extreme to convert,
-like year 1 or 9999 - gives an empty time, no age and ``today`` False. A naive
-``now`` follows the project convention instead: it is CENTRAL wall-clock time.
+Times display in CENTRAL time, and ``today`` is the Central date - the app's
+convention (the header stamp, the Flow page and the Desk all read CT). A naive
+``published_at`` / ``first_seen`` is read as UTC (the adapters emit UTC); an
+unparseable one - or one too extreme to convert, like year 1 or 9999 - gives an
+empty time, no age and ``today`` False. A naive ``now`` follows the project
+convention instead: it is CENTRAL wall-clock time.
 """
 import datetime as dt
 import math
@@ -25,8 +27,7 @@ from zoneinfo import ZoneInfo
 
 from shared.symbols import clean_symbol
 
-_ET = ZoneInfo("America/New_York")
-_CT = ZoneInfo("America/Chicago")   # a naive ``now`` is Central (CLAUDE.md)
+_CT = ZoneInfo("America/Chicago")   # display zone, and a naive ``now`` (CLAUDE.md)
 VIEW = "news:feed"
 VIEW_PUBLIC = "news:feed_public"
 VIEW_STATUS = "news:status"
@@ -38,7 +39,7 @@ SYMBOL_LIMIT = 8   # rows on the Symbol dossier's news band
 def _dt(s):
     """An aware datetime (naive read as UTC), or ``None``.
 
-    A stamp that parses but cannot be carried into UTC and ET (year 1 with a
+    A stamp that parses but cannot be carried into UTC and CT (year 1 with a
     positive offset, 9999-12-31 late with a negative one, year 1 naive) is
     ``None`` too: every consumer converts, and one such item must not take
     down the whole page."""
@@ -49,7 +50,7 @@ def _dt(s):
         if when.tzinfo is None:
             when = when.replace(tzinfo=dt.timezone.utc)
         when.astimezone(dt.timezone.utc)
-        when.astimezone(_ET)
+        when.astimezone(_CT)
     except (ValueError, OverflowError):
         return None
     return when
@@ -98,29 +99,29 @@ def _sources(it):
     return [one] if one else []
 
 
-def _time(et):
-    return et.strftime("%I:%M %p").lstrip("0") if et else ""
+def _time(ct):
+    return ct.strftime("%I:%M %p").lstrip("0") if ct else ""
 
 
-def _day(et):
+def _day(ct):
     """``"Sep 5"`` - month and an UNPADDED day."""
-    return f"{et.strftime('%b')} {et.day}" if et else ""
+    return f"{ct.strftime('%b')} {ct.day}" if ct else ""
 
 
 def rows(payload, *, now) -> list:
     """One display dict per usable item, in payload order."""
     now = _aware(now)
     try:
-        today_et = now.astimezone(_ET).date()
+        today_ct = now.astimezone(_CT).date()
     except (ValueError, OverflowError):
-        today_et = None
+        today_ct = None
     out = []
     for it in _items(payload):
         published = it.get("published_at")
         when = _dt(published)
-        et = when.astimezone(_ET) if when else None
-        today = et is not None and et.date() == today_et
-        time_, day = _time(et), _day(et)
+        ct = when.astimezone(_CT) if when else None
+        today = ct is not None and ct.date() == today_ct
+        time_, day = _time(ct), _day(ct)
         topics = it.get("topics")
         detail = it.get("detail")
         out.append({
@@ -131,18 +132,27 @@ def rows(payload, *, now) -> list:
             "topics": [t for t in topics if isinstance(t, str)] if isinstance(topics, list) else [],
             "detail": detail if isinstance(detail, dict) else {},
             "time": time_, "day": day, "today": today,
-            "when": (time_ if today else f"{day} {time_}") if et else "",
+            "when": (time_ if today else f"{day} {time_}") if ct else "",
             "published_at": published, "first_seen": it.get("first_seen"),
             "age_min": ((now - when).total_seconds() / 60) if when else None,
         })
     return out
 
 
+# A Yahoo per-ticker item is tagged with the ticker it was FETCHED for, not one
+# its headline named, so it would make every polled name trend on its own.
+_NOT_TRENDING_KINDS = frozenset({"yahoo_ticker"})
+
+
 def trending(payload, *, now, window_h) -> list:
     """``[(TICKER, n_items)]`` over items published within ``window_h`` hours,
-    most-mentioned first, ties alphabetical. An undated item never trends."""
+    most-mentioned first, ties alphabetical. An undated item never trends, and
+    neither does a Yahoo per-ticker item: Trending counts tickers NAMED in the
+    general feeds' headlines, not the ones the collector asked about."""
     counts = Counter()
     for r in rows(payload, now=now):
+        if r["kind"] in _NOT_TRENDING_KINDS:
+            continue
         if r["age_min"] is not None and r["age_min"] <= window_h * 60:
             counts.update(r["tickers"])
     return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))

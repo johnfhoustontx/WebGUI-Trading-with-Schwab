@@ -765,7 +765,7 @@ for that symbol.
 **Route:** `/news`. A rail item under **MARKETS**, directly below Flow Alerts.
 
 The newest headlines, SEC filings and insider buys in one list, newest first — each
-row shows when it was published (Eastern time), the tickers it names, the headline,
+row shows when it was published (Central time), the tickers it names, the headline,
 and a small badge naming the feed it came from.
 
 - **Sources** are public news feeds (MarketWatch, CNBC, Yahoo Finance, the press-release
@@ -777,9 +777,11 @@ and a small badge naming the feed it came from.
   tags, so a ticker filter can miss a story about that company.
 - **Click a ticker** to open its Symbol page. **Click a headline** to read it on the
   publisher's site, in a new tab.
-- **Trending** chips count the tickers named most in the last 6 hours
-  (`[trending] window_h` in `config/news.toml`). Click one to show only its news;
-  click it again to clear.
+- **Trending** chips count the tickers named in headlines from the general feeds
+  over the last 6 hours (`[trending] window_h` in `config/news.toml`). Yahoo
+  Finance's per-ticker stories are left out, because they carry the ticker they
+  were fetched for rather than one the headline named. Click one to show only its
+  news; click it again to clear.
 - Filter by **Sources**, **Ticker** or **Watchlist only**; choosing no source means
   every source. **Show more** pages further down the list.
 - **Refresh** checks every feed now instead of waiting for the next scheduled poll

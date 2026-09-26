@@ -230,3 +230,63 @@ def test_refresh_holds_its_button_until_the_poll_reports(monkeypatch):
     assert news.REFRESH_TIMEOUT_SEC >= 120
     watched[news.nv.VIEW_STATUS]()
     assert "loading" not in btn.props and btn.enabled
+
+
+# ── review fixes (b013d39) ───────────────────────────────────────────────────
+def test_a_real_teaser_that_opens_with_the_headline_is_kept():
+    """Only the Google "headline + publisher" echo is dropped. A teaser that
+    carries on past the headline with real text is the story's first line."""
+    from pages import news
+    long_teaser = ("Costco beats estimates as margins widen on record membership "
+                   "renewals and a stronger holiday quarter")
+    assert news.second_line({"title": "Costco Beats", "teaser": long_teaser}) == long_teaser
+    # The exact headline, however it is spaced or cased, is dropped.
+    assert news.second_line({"title": "Costco Beats", "teaser": "  costco   BEATS "}) == ""
+    # The publisher tail is dropped even when it is long, if it names the source.
+    pub = "The Wall Street Journal Weekend Edition International"
+    assert news.second_line({"title": "Fed holds", "teaser": f"Fed holds  {pub}",
+                             "original_source": pub}) == ""
+    assert news.second_line({"title": "Fed holds", "teaser": f"Fed holds - {pub}",
+                             "sources": [pub]}) == ""
+    # A teaser that does not open with the headline is never touched.
+    assert news.second_line({"title": "Fed holds", "teaser": "Short."}) == "Short."
+
+
+def test_an_unpublished_symbol_route_leaves_the_tickers_as_chips(monkeypatch):
+    """``route_for`` answers None where this origin does not serve the dossier.
+    Falling back to ``/symbol`` would link to a path that 404s here - the ticker
+    becomes the filter chip instead."""
+    import shell
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    monkeypatch.setattr(shell, "route_for", lambda route: None)
+    rows = nv.rows({"items": [_item(1, tickers=["NVDA"])]}, now=NOW)
+    picked = []
+    before = set(ui.context.client.elements)
+    news.draw_rows(ui.column(), rows, linked=True, on_ticker=picked.append)
+    new = _new_elements(before)
+    assert not [e for e in new if isinstance(e, ui.link) and e.text == "NVDA"]
+    assert not [e for e in new if isinstance(e, ui.link)
+                and "/symbol" in str(e.props.get("href"))]
+    (chip,) = [e for e in new if getattr(e, "text", None) == "NVDA"]
+    for lst in chip._event_listeners.values():
+        if lst.type == "click":
+            lst.handler(None)
+    assert picked == ["NVDA"]
+
+
+def test_the_ticker_field_is_debounced(monkeypatch):
+    """Each keystroke would otherwise rebuild up to 60 rows."""
+    from nicegui import ui
+    new, _ = _render(monkeypatch, {"items": [_item(1)]})
+    (field,) = [e for e in new if isinstance(e, ui.input)]
+    assert int(field.props["debounce"]) == 300
+
+
+def test_the_time_column_fits_a_dated_stamp_on_one_line():
+    """"Sep 25 10:43 AM" must not wrap: the column is w-28 and nowrap, and the
+    second line indents past it."""
+    from pages import news
+    assert "w-28" in news._WHEN and "whitespace-nowrap" in news._WHEN
+    assert "pl-[120px]" in news._SECOND

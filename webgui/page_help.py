@@ -828,7 +828,7 @@ Covers today only; the list resets overnight.
 **Market News — the simple version**
 
 The newest **headlines, SEC filings and insider buys** in one list, newest first,
-each with the time it was published (Eastern time; an older item shows its date
+each with the time it was published (Central time; an older item shows its date
 as well).
 
 - **Where it comes from** — public news feeds (MarketWatch, CNBC, Yahoo Finance,
@@ -842,8 +842,10 @@ as well).
   for. A company **name** never tags, so a
   story plainly about Nvidia that never writes its ticker gets no tag and a
   ticker filter will miss it. **Click a ticker** to open its Symbol page.
-- **Trending** — the tickers named most often in the last few hours (6 by
-  default). Click one to show only its news; click it again to clear.
+- **Trending** — the tickers **named in headlines** from the general news feeds
+  most often in the last few hours (6 by default). Yahoo's per-ticker stories
+  don't count toward it, since they carry the ticker they were fetched for.
+  Click one to show only its news; click it again to clear.
 - **Filters** — pick one or more **Sources**, type a **Ticker**, or switch on
   **Watchlist only** to keep the symbols this app follows. Choosing no source
   means every source.

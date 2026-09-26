@@ -231,8 +231,10 @@ MARKETS rail item after Flow Alerts; added to `test_shell.py`, the nav-partition
 test, the inline-style guard and `page_help.py`). Layout follows the reference
 site: header with the Updated stamp and a Refresh button (enqueues
 `news_refresh`); a **source chip row** (All + each enabled feed); **Trending
-6h** ticker chips (a pure count over the view); a **watchlist toggle** (ticker
-set only) and a **ticker search**; rows of *time ET · ticker chips → `/symbol`
+6h** ticker chips (a pure count of tickers named in the general feeds'
+headlines — Yahoo per-ticker items are skipped, since they carry the ticker they
+were fetched for); a **watchlist toggle** (ticker set only) and a **ticker
+search**; rows of *time CT (the app's convention) · ticker chips → `/symbol`
 · headline (opens the original in a new tab) · source badge(s)*, Form 4 rows
 showing the parsed detail; 60 rows then "Show more". Repaint is
 `view_watch.watch_view("news:feed", …)`. The rail badge counts items newer

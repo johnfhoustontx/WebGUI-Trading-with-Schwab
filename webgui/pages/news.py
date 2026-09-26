@@ -52,32 +52,54 @@ NO_MATCH = "Nothing matches those filters. Clear one to see more."
 
 # ── row styling (fixed Tailwind classes; no inline style) ───────────────────
 _ROW = "w-full gap-1 py-2 border-b border-[#213152]/60"
-_WHEN = f"text-xs tabular-nums {_t.MUTED} w-[96px] shrink-0"
+# w-28 holds a dated stamp ("Sep 25 10:43 AM") on one line; the second line
+# indents by that width plus the row's gap-2.
+_WHEN = f"text-xs tabular-nums whitespace-nowrap {_t.MUTED} w-28 shrink-0"
 _CHIP = "text-[11px] font-semibold px-1.5 py-0.5"
 _TICKER_LINK = f"{_CHIP} {_t.BADGE_ACCENT} no-underline hover:underline"
 _TICKER_CHIP = f"{_CHIP} {_t.BADGE_ACCENT} cursor-pointer hover:underline"
 _SOURCE = f"text-[10.5px] px-1.5 py-0.5 {_t.BADGE_MUTED}"
 _HEADLINE = f"text-sm {_t.LABEL} no-underline hover:underline min-w-0"
-_SECOND = f"text-xs {_t.MUTED} pl-[104px] line-clamp-2"
+_SECOND = f"text-xs {_t.MUTED} pl-[120px] line-clamp-2"
 _TREND_ON = f"{_CHIP} {_t.BADGE_ACCENT} cursor-pointer"
 _TREND_OFF = f"{_CHIP} {_t.BADGE_MUTED} cursor-pointer hover:underline"
+
+
+# A remainder after the headline shorter than this is a publisher tag, not a
+# sentence (Google News: "<headline>  <publisher>").
+_ECHO_TAIL_CHARS = 40
+_TAIL_PUNCT = " -–—|:·•,"
 
 
 def _norm(text) -> str:
     return " ".join(text.split()).casefold() if isinstance(text, str) else ""
 
 
+def _echoes_title(teaser, row) -> bool:
+    """True when ``teaser`` is only the headline again, or the headline plus a
+    publisher's name — Google News writes its description that way, which on
+    screen reads as the headline printed twice. A teaser that merely OPENS with
+    the headline and carries on is a real first line and is kept."""
+    title, text = _norm(row.get("title")), _norm(teaser)
+    if not title or not text.startswith(title):
+        return False
+    tail = text[len(title):].strip(_TAIL_PUNCT)
+    if not tail or len(tail) < _ECHO_TAIL_CHARS:
+        return True
+    names = [row.get("original_source"), row.get("source"),
+             *(row.get("sources") if isinstance(row.get("sources"), list) else [])]
+    return any(_norm(n) and _norm(n) == tail for n in names)
+
+
 def second_line(row) -> str:
     """The muted line under a headline: its teaser, else a filing's summary.
 
-    A teaser that merely repeats the headline is dropped — Google News writes
-    its description as the title plus the publisher's name, which on screen
-    reads as the headline printed twice."""
+    A teaser that only echoes the headline (plus, at most, its publisher) is
+    dropped; see ``_echoes_title``."""
     if not isinstance(row, dict):
         return ""
     teaser = (row.get("teaser") or "").strip() if isinstance(row.get("teaser"), str) else ""
-    title = _norm(row.get("title"))
-    if teaser and title and _norm(teaser).startswith(title):
+    if teaser and _echoes_title(teaser, row):
         teaser = ""
     return teaser or nv.detail_line(row)
 
@@ -123,7 +145,10 @@ def draw_rows(container, rows, *, linked, on_ticker):
     href_base = None
     if linked:
         import shell as _shell
-        href_base = _shell.route_for(SYMBOL_ROUTE) or SYMBOL_ROUTE
+        # None means this origin serves no dossier: the private path would 404
+        # here, so the tickers become filter chips rather than dead links.
+        href_base = _shell.route_for(SYMBOL_ROUTE)
+        linked = href_base is not None
     container.clear()
     with container:
         for r in rows or []:
@@ -200,7 +225,8 @@ def render(public=False):
                                        width="w-80").props("use-chips clearable")
             # No placeholder: in the boxed field it renders as bright as a value,
             # so "NVDA" there read as a filter already in force.
-            sym_in = kit.text_field("Ticker", width="w-[110px]")
+            # Debounced: each keystroke would otherwise rebuild up to 60 rows.
+            sym_in = kit.text_field("Ticker", width="w-[110px]").props("debounce=300")
             with kit.field("Watchlist"):
                 wl = ui.switch("Watchlist only")
         with ui.row().classes("w-full items-center gap-2 flex-wrap") as trend_box:
@@ -273,6 +299,8 @@ def render(public=False):
             src_sel.update()
         _paint()
         if state["payload"] is not None:
+            # Written on EVERY publish, visible tab or not; the rail badge that
+            # will read it may want "seen while visible" instead.
             app_settings.set(SEEN_KEY, _dt.datetime.now(_dt.timezone.utc).isoformat())
 
     @guard

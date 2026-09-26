@@ -939,7 +939,7 @@ leaving the app.
 
 ### Reading the screen
 
-**Each row.** The publish time in **Eastern time** (an item from an earlier day shows
+**Each row.** The publish time in **Central time** (an item from an earlier day shows
 its date too) · the **tickers** it names · the **headline**, a link to the publisher's
 own page · a grey **badge** per feed that carried it · and a muted second line with the
 feed's summary, or for a filing what was filed (insider buys: how many purchases, their
@@ -952,9 +952,11 @@ time, and each carries the ticker it was fetched for even when the headline does
 name it. A company *name* never tags: precision over recall. **Click a ticker** to open
 its [Symbol](#symbol) dossier.
 
-**Trending.** The tickers named in the most items over the last **6 hours**
-(`[trending] window_h`), most-mentioned first. Click one to filter to it; click it
-again to clear.
+**Trending.** The tickers named in headlines from the general feeds, counted over
+the last **6 hours** (`[trending] window_h`), most-mentioned first. Yahoo Finance's
+per-ticker items are left out: each carries the ticker it was fetched for, so counting
+them would make every polled name trend on polling alone. Click one to filter to it;
+click it again to clear.
 
 **Filters.** **Sources** (none chosen means every source), **Ticker**, and
 **Watchlist only** — the symbols the app collects gamma for plus the feed config's

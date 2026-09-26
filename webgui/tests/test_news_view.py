@@ -15,9 +15,11 @@ def _it(i, *, tickers=(), source="MarketWatch", sources=None, hours_ago=0.5, pub
             "tickers": list(tickers), "kind": "rss", "topics": [], "detail": {}, "public": public}
 
 
-def test_rows_are_shaped_for_display_in_et():
+def test_rows_are_shaped_for_display_in_ct():
+    # Central time, the app's convention (2026-09-26 coordinator decision; the
+    # plan's value here was the ET "8:30 PM").
     r = nv.rows({"items": [_it(1, tickers=["NVDA"])]}, now=NOW)[0]
-    assert r["time"] == "8:30 PM"          # 01:00 UTC → 21:00 ET
+    assert r["time"] == "7:30 PM"          # 00:30 UTC → 19:30 CDT
     assert r["tickers"] == ["NVDA"] and r["sources"] == ["MarketWatch"]
 
 
@@ -49,16 +51,16 @@ def test_unseen_count_and_cold_feed():
 
 def test_morning_time_has_no_leading_zero_and_carries_the_day():
     it = _it(1)
-    it["published_at"] = "2026-09-25T13:05:00+00:00"      # 09:05 ET
+    it["published_at"] = "2026-09-25T13:05:00+00:00"      # 08:05 CT
     r = nv.rows({"items": [it]}, now=NOW)[0]
-    assert r["time"] == "9:05 AM" and r["day"] == "Sep 25"
+    assert r["time"] == "8:05 AM" and r["day"] == "Sep 25"
 
 
 def test_naive_published_at_is_read_as_utc():
     it = _it(1)
     it["published_at"] = "2026-09-26T00:30:00"
     r = nv.rows({"items": [it]}, now=NOW)[0]
-    assert r["time"] == "8:30 PM"
+    assert r["time"] == "7:30 PM"
     assert r["age_min"] == 30
 
 
@@ -232,18 +234,18 @@ def test_a_naive_now_is_central_time():
     it["published_at"] = "2026-09-26T00:30:00+00:00"
     r = nv.rows({"items": [it]}, now=naive_now)[0]
     assert r["age_min"] == 30
-    assert r["today"] is True and r["when"] == "8:30 PM"
+    assert r["today"] is True and r["when"] == "7:30 PM"
 
 
 def test_today_item_shows_the_time_alone():
     r = nv.rows({"items": [_it(1)]}, now=NOW)[0]
-    assert r["today"] is True and r["when"] == "8:30 PM" and r["day"] == "Sep 25"
+    assert r["today"] is True and r["when"] == "7:30 PM" and r["day"] == "Sep 25"
 
 
-def test_an_item_three_hours_old_can_be_yesterday_in_et():
-    now = dt.datetime(2026, 9, 26, 5, 0, tzinfo=dt.timezone.utc)   # 01:00 ET Sep 26
+def test_an_item_three_hours_old_can_be_yesterday_in_ct():
+    now = dt.datetime(2026, 9, 26, 6, 0, tzinfo=dt.timezone.utc)   # 01:00 CT Sep 26
     it = _it(1)
-    it["published_at"] = "2026-09-26T02:00:00+00:00"                # 22:00 ET Sep 25
+    it["published_at"] = "2026-09-26T03:00:00+00:00"                # 22:00 CT Sep 25
     r = nv.rows({"items": [it]}, now=now)[0]
     assert r["age_min"] == 180
     assert r["today"] is False
@@ -253,9 +255,9 @@ def test_an_item_three_hours_old_can_be_yesterday_in_et():
 
 def test_day_is_not_zero_padded():
     it = _it(1)
-    it["published_at"] = "2026-09-05T13:05:00+00:00"                # 09:05 ET Sep 5
+    it["published_at"] = "2026-09-05T13:05:00+00:00"                # 08:05 CT Sep 5
     r = nv.rows({"items": [it]}, now=NOW)[0]
-    assert r["day"] == "Sep 5" and r["today"] is False and r["when"] == "Sep 5 9:05 AM"
+    assert r["day"] == "Sep 5" and r["today"] is False and r["when"] == "Sep 5 8:05 AM"
 
 
 def test_undated_row_is_not_today_and_has_no_when():
@@ -312,3 +314,34 @@ def test_safe_href_passes_only_an_absolute_web_address():
                 "https://", "http:///path", "//a.example/x", "/relative", "ftp://a.b/c",
                 "vbscript:x", "", "   ", None, 7, b"https://a.b", "http://[::1"):
         assert nv.safe_href(bad) is None, bad
+
+
+# ---- review fixes (b013d39) -----------------------------------------------
+
+
+def test_today_is_the_central_date_not_the_eastern_one():
+    """23:30 CT is 00:30 ET the next day. The item and ``now`` share a Central
+    date, so the row is today and shows its time alone."""
+    now = dt.datetime(2026, 9, 26, 4, 45, tzinfo=dt.timezone.utc)   # 23:45 CT Sep 25
+    it = _it(1)
+    it["published_at"] = "2026-09-26T04:30:00+00:00"                # 23:30 CT Sep 25
+    r = nv.rows({"items": [it]}, now=now)[0]
+    assert r["today"] is True and r["when"] == "11:30 PM" and r["day"] == "Sep 25"
+    # And the Central midnight, not the Eastern one, starts a new day.
+    now = dt.datetime(2026, 9, 26, 5, 15, tzinfo=dt.timezone.utc)   # 00:15 CT Sep 26
+    r = nv.rows({"items": [it]}, now=now)[0]
+    assert r["today"] is False and r["when"] == "Sep 25 11:30 PM"
+
+
+def test_trending_skips_yahoo_per_ticker_items():
+    """A Yahoo per-ticker item carries the ticker it was FETCHED for, so counting
+    it would make every watchlist name trend on volume of polling, not of news.
+    Trending counts tickers named in the general feeds only."""
+    yahoo = [_it(i, tickers=["AAPL"]) for i in range(5)]
+    for it in yahoo:
+        it["kind"] = "yahoo_ticker"
+    items = yahoo + [_it(10, tickers=["NVDA"]), _it(11, tickers=["NVDA", "AAPL"])]
+    assert nv.trending({"items": items}, now=NOW, window_h=6) == [("NVDA", 2), ("AAPL", 1)]
+    # The rows themselves are untouched: a Yahoo item still lists and filters.
+    rows = nv.rows({"items": items}, now=NOW)
+    assert len(nv.filter_rows(rows, sources=None, symbol="AAPL")) == 6
