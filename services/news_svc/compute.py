@@ -33,7 +33,9 @@ Load-bearing rules, each pinned in ``tests/test_compute.py``:
 * **Validators belong to a URL.** A feed whose url (or Google query) changed
   sends no ETag / Last-Modified on its next fetch.
 * **A store failure costs its own step.** A failed prune or view read is a
-  degrade; the other views - and always the status view - still publish.
+  degrade; the other views - and always the status view - still publish. If
+  even the feed states cannot be read, the status is built from the config
+  alone (every row's ``error`` "store unreadable") and one degrade is counted.
 """
 import concurrent.futures
 import datetime as dt
@@ -336,16 +338,26 @@ def poll_feed(feed, db, fetch, *, universe, now, cfg) -> dict:
 
 # ── the cycle ────────────────────────────────────────────────────────────────
 
+_STORE_UNREADABLE = "store unreadable"
+
+
 def status_rows(db, polled, results) -> list:
     """One row per CONFIGURED feed (enabled or not, in file order), then any
-    polled feed the config does not name. ``inserted`` is this poll's count."""
+    polled feed the config does not name. ``inserted`` is this poll's count.
+
+    ``db=None`` builds the rows from the config alone - no ``last_ok`` /
+    ``last_poll``, and ``error`` saying the store could not be read - which is
+    what ``run_poll`` publishes when ``feed_state`` fails."""
     by_name = {r["feed"]: r for r in results}
     feeds = {f["name"]: f for f in nc.all_feeds()}
     for f in polled:
         feeds.setdefault(str(f.get("name") or "?"), f)
     rows = []
     for name, f in feeds.items():
-        st = db.feed_state(name)
+        if db is None:
+            st = {"last_ok": None, "last_poll": None, "error": _STORE_UNREADABLE}
+        else:
+            st = db.feed_state(name)
         rows.append({"name": name, "kind": f.get("kind"),
                      "enabled": bool(f.get("enabled", True)),
                      "public": bool(f.get("public", False)),
@@ -371,7 +383,12 @@ def run_poll(bus, db, fetch, *, feeds, universe, now, cfg) -> dict:
         handlers.publish_feed_public(bus, db.newest(n, public_sources=nc.public_feed_names()))
     except Exception:  # noqa: BLE001 - as above
         _degrade.degraded("news.publish_public")
-    handlers.publish_status(bus, status_rows(db, feeds, results), now)
+    try:
+        rows = status_rows(db, feeds, results)
+    except Exception:  # noqa: BLE001 - the status is how the page learns the store is sick
+        _degrade.degraded("news.status")
+        rows = status_rows(None, feeds, results)
+    handlers.publish_status(bus, rows, now)
     return {"results": results}
 
 

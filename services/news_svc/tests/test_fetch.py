@@ -1,4 +1,10 @@
-"""fetch.http_fetch: the one network call, driven through a fake ``requests.get``."""
+"""fetch.http_fetch: the one network call, driven through a fake ``fetch._open``
+(the ``requests.get``-shaped seam) - plus a loopback server for the deadline,
+which is about real sockets and cannot be proven with a fake clock alone."""
+import socket
+import threading
+import time
+
 import pytest
 import requests
 
@@ -35,7 +41,7 @@ def fake_get(monkeypatch):
             raise state["response"]
         return state["response"]
 
-    monkeypatch.setattr(fetch.requests, "get", _get)
+    monkeypatch.setattr(fetch, "_open", _get)
     return state
 
 
@@ -165,7 +171,7 @@ def test_the_deadline_is_checked_before_reading_the_body(fake_get, monkeypatch):
         clock.t += 61                                 # headers took longer than 3 x 20 s
         return resp
 
-    monkeypatch.setattr(fetch.requests, "get", slow_get)
+    monkeypatch.setattr(fetch, "_open", slow_get)
     with pytest.raises(fetch.FetchError, match="deadline"):
         fetch.http_fetch("https://x", timeout=20, max_bytes=1000)
     assert resp.read == 0 and resp.closed
@@ -207,3 +213,107 @@ def test_a_304_without_validators_is_an_error_not_an_empty_poll(fake_get):
         fetch.http_fetch("https://x", max_bytes=100)
     assert err.value.status == 304
     assert fake_get["response"].closed
+
+
+# ── the deadline on a REAL socket: a watchdog, not a check between chunks ───
+#
+# urllib3 fills a whole chunk before ``iter_content`` yields, and headers are
+# read before ``requests.get`` returns, so a check between chunks never runs
+# against a server that drips. Only a watchdog that cuts the socket stops it.
+
+class _DripServer:
+    """One-connection loopback server: ``head`` is sent at once, then ``drip``
+    one byte every ``step`` seconds until the client goes away or the test
+    ends."""
+
+    def __init__(self, head, drip, step=0.3):
+        self.head, self.drip, self.step = head, drip, step
+        self.stop = threading.Event()
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(1)
+        self.sock.settimeout(5)
+        self.url = f"http://127.0.0.1:{self.sock.getsockname()[1]}/feed"
+        self.thread = threading.Thread(target=self._serve, daemon=True)
+        self.thread.start()
+
+    def _serve(self):
+        try:
+            conn, _ = self.sock.accept()
+        except OSError:
+            return
+        with conn:
+            try:
+                conn.recv(65536)                       # the request; content irrelevant
+                if self.head:
+                    conn.sendall(self.head)
+                for b in self.drip:
+                    if self.stop.wait(self.step):
+                        return
+                    conn.sendall(bytes([b]))
+            except OSError:
+                return                                 # the client cut us off: good
+
+    def close(self):
+        self.stop.set()
+        self.sock.close()
+        self.thread.join(5)
+
+
+@pytest.fixture
+def drip_server(monkeypatch):
+    for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+                "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+    servers = []
+
+    def _make(head, drip, step=0.3):
+        s = _DripServer(head, drip, step)
+        servers.append(s)
+        return s
+
+    yield _make
+    for s in servers:
+        s.close()
+
+
+def _timed_fetch(url, **kw):
+    t0 = time.monotonic()
+    with pytest.raises(fetch.FetchError, match="deadline") as err:
+        fetch.http_fetch(url, max_bytes=10_000, **kw)
+    return time.monotonic() - t0, err.value
+
+
+def test_a_content_length_body_dripped_a_byte_at_a_time_is_cut_at_the_deadline(drip_server):
+    srv = drip_server(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n", b"x" * 1000)
+    elapsed, err = _timed_fetch(srv.url, timeout=1, deadline_s=1.5)
+    assert elapsed < 2.0
+    assert err.status is None
+
+
+def test_headers_dripped_a_byte_at_a_time_are_cut_at_the_deadline(drip_server):
+    srv = drip_server(b"HTTP/1.1 200 OK\r\n", b"X-Slow: " + b"a" * 1000)
+    elapsed, err = _timed_fetch(srv.url, timeout=1, deadline_s=1.5)
+    assert elapsed < 2.0
+    assert err.status is None
+
+
+def test_a_close_delimited_body_cut_by_the_deadline_is_an_error_not_a_short_body(drip_server):
+    """Without a Content-Length the body ends at EOF - and cutting the socket IS
+    an EOF, so a truncated body must not come back as a successful fetch."""
+    srv = drip_server(b"HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n", b"y" * 1000)
+    elapsed, _ = _timed_fetch(srv.url, timeout=1, deadline_s=1.5)
+    assert elapsed < 2.0
+
+
+def test_a_fast_loopback_body_is_read_whole_and_the_watchdog_is_disarmed(drip_server):
+    body = b"<rss>" + b"z" * 200 + b"</rss>"
+    srv = drip_server(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nETag: e9\r\n\r\n" % len(body)
+                      + body, b"", step=0)
+    before = {t.name for t in threading.enumerate()}
+    got = fetch.http_fetch(srv.url, timeout=1, deadline_s=1.5, max_bytes=10_000)
+    assert (got.status, got.body, got.etag) == (200, body, "e9")
+    time.sleep(0.05)
+    leftover = {t.name for t in threading.enumerate()} - before
+    assert not [n for n in leftover if n.startswith("news-fetch-deadline")]

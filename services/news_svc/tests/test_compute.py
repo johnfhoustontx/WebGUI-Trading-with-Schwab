@@ -1015,3 +1015,39 @@ def test_a_failed_newest_still_publishes_the_status(tmp_path, monkeypatch):
     assert bus.cache_get(handlers.CACHE_PUBLIC) is None
     assert {s["name"] for s in bus.cache_get(handlers.CACHE_STATUS).payload["feeds"]} == {"P", "Q"}
     assert sorted(a for a, _ in calls) == ["news.publish", "news.publish_public"]
+
+
+def test_an_unreadable_store_still_publishes_a_status_built_from_config(tmp_path, monkeypatch):
+    """``feed_state`` failing must not cost the status view: it is how the page
+    says the collector is sick, so it is built from the config alone."""
+    from shared.bus import Bus
+    calls = _degrades(monkeypatch)
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    cfg, bodies = _two_public_feeds(monkeypatch)
+    feeds = nc.feeds()
+    compute.run_poll(bus, db, FakeFetch(bodies), feeds=feeds, universe=[], now=NOW,
+                     cfg=_cfg(feeds))                         # a healthy poll first
+    polled = {s["name"]: s["inserted"]
+              for s in bus.cache_get(handlers.CACHE_STATUS).payload["feeds"]}
+    calls.clear()
+    monkeypatch.setattr(db, "feed_state", _boom)
+    # a status that could only come from the store is unavailable; the rows
+    # still carry what the config says and this poll's counts
+    results = [{"feed": n, "inserted": 3, "error": None, "status": 200} for n in polled]
+    monkeypatch.setattr(compute, "poll_feed", lambda f, *a, **kw: dict(
+        next(r for r in results if r["feed"] == f["name"])))
+    compute.run_poll(bus, db, FakeFetch(bodies), feeds=feeds, universe=[], now=NOW,
+                     cfg=_cfg(feeds))
+    status = bus.cache_get(handlers.CACHE_STATUS).payload
+    assert status["ts"] == NOW
+    rows = {s["name"]: s for s in status["feeds"]}
+    assert set(rows) == set(polled) == {"P", "Q"}
+    for name, row in rows.items():
+        f = next(f for f in nc.all_feeds() if f["name"] == name)
+        assert row == {"name": name, "kind": f.get("kind"),
+                       "enabled": bool(f.get("enabled", True)),
+                       "public": bool(f.get("public", False)),
+                       "last_ok": None, "last_poll": None,
+                       "error": "store unreadable", "inserted": 3}
+    assert [a for a, _ in calls] == ["news.status"]

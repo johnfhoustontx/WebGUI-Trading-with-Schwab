@@ -1,3 +1,5 @@
+import json
+
 from services.news_svc import items, store
 
 NOW = "2026-09-26T00:00:00+00:00"
@@ -930,14 +932,24 @@ CREATE TABLE seen_accessions (accession TEXT PRIMARY KEY, seen TEXT NOT NULL);
 """
 
 
-def _v1_db(path):
+def _v1_row(c, url, source, sources, tickers, published="2026-09-25T20:00:00+00:00"):
+    c.execute("INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              (items.item_id(url), source, json.dumps(sources), "", _STORY,
+               "apple rallies on iphone demand", "", url,
+               published, NOW, json.dumps(tickers), "rss", "[]", "{}", 1))
+
+
+def _v1_db(path, merged=False):
+    """A database in the 9f35147 shape (before ``ticker_sources``, ``feed_state.url``
+    and per-feed accessions). ``merged`` adds a second, older row that a private
+    feed had merged into - its ``sources`` names both feeds."""
     import sqlite3
     c = sqlite3.connect(str(path))
     c.executescript(_V1_ITEMS)
-    c.execute("INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-              (items.item_id("https://y/1"), "Yahoo Finance", '["Yahoo Finance", "Private"]', "", _STORY,
-               "apple rallies on iphone demand", "", "https://y/1",
-               "2026-09-25T20:00:00+00:00", NOW, '["AAPL", "TSLA"]', "rss", "[]", "{}", 1))
+    _v1_row(c, "https://y/1", "Yahoo Finance", ["Yahoo Finance"], ["AAPL", "TSLA"])
+    if merged:
+        _v1_row(c, "https://y/2", "Pub", ["Pub", "Priv"], ["MSFT", "NVDA"],
+                published="2026-09-25T19:00:00+00:00")
     c.execute("INSERT INTO feed_state VALUES ('MW', 'e0', 'lm0', ?, ?, NULL)", (NOW, NOW))
     c.execute("INSERT INTO seen_accessions VALUES ('0001-26-000001', ?)", (NOW,))
     c.commit()
@@ -947,7 +959,7 @@ def _v1_db(path):
 def test_a_v1_database_is_migrated_and_old_tickers_belong_to_the_primary_source(tmp_path):
     _v1_db(tmp_path / "n.db")
     db = store.Store(tmp_path / "n.db")
-    # every existing ticker is attributed to the row's primary source
+    # a row only its primary feed ever carried: every ticker is that feed's
     assert db.newest(10, public_sources={"Yahoo Finance"})[0]["tickers"] == ["AAPL", "TSLA"]
     db.insert_many([_src(_item("https://y/1", title=_STORY, tickers=["NVDA"], public=False),
                          "Private")])
@@ -957,6 +969,31 @@ def test_a_v1_database_is_migrated_and_old_tickers_belong_to_the_primary_source(
     assert (st["etag"], st["last_modified"], st["url"]) == ("e0", "lm0", None)
     db.close()
     store.Store(tmp_path / "n.db").close()                       # a second open is a no-op
+
+
+def test_a_v1_row_a_private_feed_merged_into_credits_no_ticker_publicly(tmp_path):
+    """Before ``ticker_sources`` nothing recorded WHICH feed tagged a ticker, so
+    on a row whose ``sources`` names more than its primary any ticker may be the
+    private feed's. The backfill credits nobody; the owner still sees them."""
+    _v1_db(tmp_path / "n.db", merged=True)
+    db = store.Store(tmp_path / "n.db")
+    pub = {r["url"]: r for r in db.newest(10, public_sources={"Pub", "Yahoo Finance"})}
+    assert pub["https://y/2"]["tickers"] == []
+    assert pub["https://y/2"]["sources"] == ["Pub"]
+    assert pub["https://y/1"]["tickers"] == ["AAPL", "TSLA"]     # unmerged: credited
+    assert db.newest_for_ticker("MSFT", 10, public_sources={"Pub"}) == []
+    assert db.newest_for_ticker("NVDA", 10, public_sources={"Pub"}) == []
+    owner = {r["url"]: r for r in db.newest(10)}
+    assert owner["https://y/2"]["tickers"] == ["MSFT", "NVDA"]
+    assert [r["url"] for r in db.newest_for_ticker("MSFT", 10)] == ["https://y/2"]
+    # a public feed tagging it AFTER the upgrade is credited as usual
+    db.insert_many([_src(_item("https://y/2", title=_STORY, tickers=["MSFT"]), "Pub")])
+    assert [r["tickers"] for r in db.newest_for_ticker("MSFT", 10, public_sources={"Pub"})] \
+        == [["MSFT"]]
+    db.close()
+    db = store.Store(tmp_path / "n.db")                          # re-open: nothing re-credited
+    assert db.newest_for_ticker("NVDA", 10, public_sources={"Pub"}) == []
+    db.close()
 
 
 def test_a_v1_seen_accession_is_seen_by_every_feed_until_it_is_pruned(tmp_path):

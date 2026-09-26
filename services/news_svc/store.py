@@ -31,8 +31,10 @@ Merging, which is the part worth reading before changing anything here:
   ...]}``), maintained on every insert and merge. The public view keeps only the
   tickers some CURRENTLY public feed contributed, so a private feed merging into
   a public row adds its tickers to the owner's view and never to the public one.
-  (``newest_for_ticker`` still MATCHES on the full ticker list - pinned by
-  ``test_public_view_for_ticker`` - and trims the returned tickers only.)
+  ``newest_for_ticker`` applies the same rule to the MATCH: under
+  ``public_sources`` a row is found by a ticker only when some currently public
+  feed contributed that ticker, so a public per-ticker read never lists a story
+  under a tag only a private feed gave it.
 
 Writes: every write opens ``BEGIN IMMEDIATE`` and either commits or rolls back
 whole. IMMEDIATE takes the write lock BEFORE the id / title lookups, so two Store
@@ -68,10 +70,13 @@ Atom must each decide what the accession means to them. An accession marked with
 Migrations (run once at open, inside ``BEGIN IMMEDIATE`` so two openers cannot
 race, each a no-op on a database that already has the shape):
 
-* ``items.ticker_sources`` is added and back-filled: every existing ticker is
-  attributed to its row's PRIMARY source - the only attribution that cannot put
-  a private feed's ticker into the public view (a row whose primary is private
-  is out of the public view anyway).
+* ``items.ticker_sources`` is added and back-filled. The old shape never
+  recorded which feed tagged a ticker, so a row's tickers are credited to its
+  PRIMARY source only when ``sources`` is exactly ``[primary]`` - then no other
+  feed can have contributed one. A row another feed had merged into (``sources``
+  names more) gets ``{}``: any of its tickers may be a private feed's, so none is
+  public until that row ages out (fail closed; the owner's view still has them,
+  and a public feed tagging the story after the upgrade is credited as usual).
 * ``feed_state.url`` is added as NULL. A NULL url never matches the feed's
   current url, so the first poll after the upgrade sends no validators (one full
   fetch per feed) and stores the url.
@@ -173,6 +178,21 @@ def _ticker_sources(row) -> dict:
     return {t: list(v) if isinstance(v, list) else [] for t, v in got.items()}
 
 
+def _backfilled_ticker_sources(row) -> dict:
+    """The migration's attribution for a row stored before ``ticker_sources``:
+    every ticker is the primary's when the primary is the row's ONLY source,
+    else nobody's (see the module docstring). An unreadable ``sources`` or
+    ``tickers`` credits nobody."""
+    try:
+        sources = json.loads(row["sources"])
+        tickers = json.loads(row["tickers"])
+    except (TypeError, ValueError):
+        return {}
+    if sources != [row["source"]] or not isinstance(tickers, list):
+        return {}
+    return {t: [row["source"]] for t in tickers if isinstance(t, str)}
+
+
 def _union(existing, incoming) -> list:
     out = list(existing)
     for v in incoming:
@@ -221,10 +241,10 @@ class Store:
             if cols and "ticker_sources" not in cols:
                 self._c.execute("ALTER TABLE items ADD COLUMN ticker_sources TEXT")
             if cols:
-                for r in self._c.execute("SELECT id, source, tickers, ticker_sources FROM items "
+                for r in self._c.execute("SELECT id, source, sources, tickers FROM items "
                                          "WHERE ticker_sources IS NULL").fetchall():
                     self._c.execute("UPDATE items SET ticker_sources=? WHERE id=?",
-                                    (_dumps(_ticker_sources(r)), r["id"]))
+                                    (_dumps(_backfilled_ticker_sources(r)), r["id"]))
             cols = self._columns("feed_state")
             if cols and "url" not in cols:
                 self._c.execute("ALTER TABLE feed_state ADD COLUMN url TEXT")
