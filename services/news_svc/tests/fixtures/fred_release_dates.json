@@ -1,0 +1,23 @@
+{
+ "realtime_start": "2026-09-26",
+ "realtime_end": "9999-12-31",
+ "order_by": "release_date",
+ "sort_order": "asc",
+ "count": 3,
+ "offset": 0,
+ "limit": 10000,
+ "release_dates": [
+  {
+   "release_id": 9,
+   "date": "2026-10-15"
+  },
+  {
+   "release_id": 9,
+   "date": "2026-11-17"
+  },
+  {
+   "release_id": 9,
+   "date": "2026-12-16"
+  }
+ ]
+}
