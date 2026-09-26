@@ -303,3 +303,263 @@ def test_prune_forgets_aliases_of_pruned_rows(tmp_path):
     db.insert_many([a, b])
     assert db.prune(keep_days=7, now=NOW) == 1
     assert db._c.execute("SELECT COUNT(*) FROM aliases").fetchone()[0] == 0
+
+
+# ── review of 51807d7: 1. a failed batch writes NOTHING ────────────────────
+
+def test_a_failed_batch_writes_nothing_and_leaves_no_open_transaction(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    good = _item("https://a/good")
+    bad = _item("https://a/bad")
+    bad["detail"] = {"x": object()}                      # json.dumps raises mid-batch
+    try:
+        db.insert_many([good, bad])
+    except TypeError:
+        pass
+    else:
+        raise AssertionError("the unserialisable detail should have raised")
+    assert db._c.in_transaction is False
+    db.set_feed_state("Yahoo Finance", error="boom")     # the caller's except path commits
+    assert db.newest(10) == []
+    other = store.Store(tmp_path / "n.db")
+    other._c.execute("PRAGMA busy_timeout=200")          # a held lock fails fast, not in 10 s
+    other.set_feed_state("Google", error=None)           # would raise "database is locked"
+    assert other.insert_many([_item("https://a/other")]) == 1
+    assert [r["url"] for r in db.newest(10)] == ["https://a/other"]
+
+
+def test_the_other_writers_roll_back_on_failure(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    for call in (lambda: db.mark_accessions(["a", object()]),
+                 lambda: db.set_feed_state("F", etag=object()),
+                 lambda: db.prune(keep_days=object(), now=NOW)):
+        try:
+            call()
+        except Exception:
+            pass
+        else:
+            raise AssertionError("expected a failure")
+        assert db._c.in_transaction is False
+    assert db.unseen_accessions(["a"]) == ["a"]
+    assert db.all_feed_states() == []
+
+
+# ── 2. the public view reads CURRENT feed flags ────────────────────────────
+
+_STORY = "Apple rallies on iPhone demand"
+
+
+def test_public_view_shows_a_row_first_stored_by_a_non_public_feed(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://p/1", title=_STORY, public=False), "Private")])
+    db.insert_many([_src(_item("https://y/1", title=_STORY), "Yahoo Finance")])
+    rows = db.newest(10, public_sources={"Yahoo Finance"})
+    assert len(rows) == 1
+    assert rows[0]["source"] == "Yahoo Finance"
+    assert rows[0]["sources"] == ["Yahoo Finance"]
+    assert rows[0]["public"] is True
+    assert db.newest(10)[0]["sources"] == ["Private", "Yahoo Finance"]   # owner view intact
+
+
+def test_public_view_never_names_a_non_public_feed(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://y/1", title=_STORY), "Yahoo Finance")])
+    db.insert_many([_src(_item("https://p/1", title=_STORY, public=False), "Private")])
+    db.insert_many([_src(_item("https://g/1", title=_STORY), "Google")])
+    rows = db.newest(10, public_sources=["Google", "Yahoo Finance"])
+    assert [(r["source"], r["sources"]) for r in rows] == [
+        ("Yahoo Finance", ["Yahoo Finance", "Google"])]
+
+
+def test_public_view_drops_a_feed_turned_non_public(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://m/1", published="2026-09-25T21:00:00+00:00"), "MarketWatch"),
+                    _src(_item("https://y/1", published="2026-09-25T20:00:00+00:00"), "Yahoo Finance")])
+    assert len(db.newest(10, public_sources={"MarketWatch", "Yahoo Finance"})) == 2
+    got = db.newest(10, public_sources={"Yahoo Finance"})           # MarketWatch flipped off
+    assert [r["url"] for r in got] == ["https://y/1"]
+    assert db.newest(10, public_sources=set()) == []
+    assert db.newest(10, public_sources=[]) == []
+
+
+def test_public_view_limit_applies_after_the_filter(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://p/1", published="2026-09-25T22:00:00+00:00"), "Private"),
+                    _src(_item("https://y/1", published="2026-09-25T21:00:00+00:00"), "Yahoo Finance"),
+                    _src(_item("https://y/2", published="2026-09-25T20:00:00+00:00"), "Yahoo Finance")])
+    got = db.newest(1, public_sources={"Yahoo Finance"})
+    assert [r["url"] for r in got] == ["https://y/1"]
+
+
+def test_public_view_for_ticker(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://p/1", title=_STORY, tickers=["AAPL"], public=False),
+                         "Private")])
+    db.insert_many([_src(_item("https://y/1", title=_STORY, tickers=["QQQ"]), "Yahoo Finance")])
+    db.insert_many([_src(_item("https://m/1", tickers=["AAPL"], published="2026-09-25T19:00:00+00:00"),
+                         "MarketWatch")])
+    rows = db.newest_for_ticker("AAPL", 10, public_sources={"Yahoo Finance"})
+    assert [(r["url"], r["source"], r["sources"]) for r in rows] == [
+        ("https://p/1", "Yahoo Finance", ["Yahoo Finance"])]
+    assert db.newest_for_ticker("AAPL", 10, public_sources={"Nobody"}) == []
+    assert db.newest_for_ticker("AAPL", 10, public_sources=()) == []
+
+
+def test_a_merge_sets_the_public_column_to_existing_or_incoming(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://p/1", title=_STORY, public=False), "Private")])
+    db.insert_many([_src(_item("https://y/1", title=_STORY, public=True), "Yahoo Finance")])
+    db.insert_many([_src(_item("https://q/1", title=_STORY, public=False), "Private2")])
+    assert db.newest(10)[0]["public"] is True
+    assert len(db.newest(10, public_only=True)) == 1
+    db.insert_many([_item("https://s/1", public=False), _item("https://s/1", public=False)])
+    assert [r["public"] for r in db.newest(10) if r["url"] == "https://s/1"] == [False]
+
+
+# ── 3. write batches take the write lock BEFORE they look anything up ──────
+
+def test_write_batches_open_with_begin_immediate(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    seen = []
+    db._c.set_trace_callback(seen.append)
+    db.insert_many([_src(_item("https://y/1", title=_STORY), "Yahoo Finance")])
+    first_read = next(i for i, s in enumerate(seen) if s.lstrip().upper().startswith("SELECT"))
+    begins = [i for i, s in enumerate(seen) if s.strip().upper().startswith("BEGIN")]
+    assert begins and seen[begins[0]].strip().upper() == "BEGIN IMMEDIATE"
+    assert begins[0] < first_read
+
+
+def test_two_stores_racing_on_one_title_make_one_row(tmp_path):
+    import threading
+    import time
+    a = store.Store(tmp_path / "n.db")
+    b = store.Store(tmp_path / "n.db")
+    looked, release = threading.Event(), threading.Event()
+    real = a._title_match
+
+    def slow_match(it, key):                 # A has looked and found nothing - now B tries
+        row = real(it, key)
+        looked.set()
+        release.wait(5)
+        return row
+
+    a._title_match = slow_match
+    errors = []
+
+    def run(db, it):
+        try:
+            db.insert_many([it])
+        except Exception as exc:             # noqa: BLE001 - surfaced by the assert below
+            errors.append(exc)
+
+    ta = threading.Thread(target=run, args=(a, _src(_item("https://y/1", title=_STORY), "Yahoo Finance")))
+    tb = threading.Thread(target=run, args=(b, _src(_item("https://g/1", title=_STORY), "Google")))
+    ta.start()
+    assert looked.wait(5)
+    tb.start()
+    time.sleep(0.3)                          # B is now waiting on A's write lock
+    release.set()
+    ta.join(10); tb.join(10)
+    assert errors == []
+    rows = a.newest(10)
+    assert len(rows) == 1 and rows[0]["sources"] == ["Yahoo Finance", "Google"]
+
+
+# ── 4. an item already past the keep window is not inserted ────────────────
+
+def test_min_published_skips_stale_items_and_does_not_count_them(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    cutoff = "2026-09-19T00:00:00+00:00"
+    got = db.insert_many([_item("https://a/stale", published="2026-09-01T00:00:00+00:00"),
+                          _item("https://a/fresh", published="2026-09-25T00:00:00+00:00"),
+                          _item("https://a/zulu", published="2026-09-18T23:59:59Z"),
+                          _item("https://a/odd", published="not a date")],
+                         min_published=cutoff)
+    assert got == 2
+    assert sorted(r["url"] for r in db.newest(10)) == ["https://a/fresh", "https://a/odd"]
+    assert db.insert_many([_item("https://a/stale", published="2026-09-01T00:00:00+00:00")],
+                          min_published=cutoff) == 0
+    assert db.insert_many([_item("https://a/stale", published="2026-09-01T00:00:00+00:00")]) == 1
+
+
+# ── 5. one instant written two ways ties on first_seen ─────────────────────
+
+def test_same_instant_as_z_and_offset_tie_breaks_by_first_seen(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    z = _item("https://a/z"); z["published_at"] = "2026-09-25T20:00:00Z"
+    z["first_seen"] = "2026-09-25T20:01:00+00:00"
+    off = _item("https://a/off"); off["published_at"] = "2026-09-25T20:00:00+00:00"
+    off["first_seen"] = "2026-09-25T20:05:00+00:00"
+    db.insert_many([z, off])
+    assert [r["url"] for r in db.newest(10)] == ["https://a/off", "https://a/z"]
+
+
+# ── 6. a bare str is one name, not its characters ──────────────────────────
+
+def test_a_bare_str_names_one_feed(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://g/1", tickers=["NVDA"]), "G"),
+                    _src(_item("https://x/1", tickers=["NVDA"],
+                               published="2026-09-25T19:00:00+00:00"), "GY")])
+    assert [r["url"] for r in db.newest(10, sources="G")] == ["https://g/1"]
+    assert [r["url"] for r in db.newest(10, public_sources="GY")] == ["https://x/1"]
+    assert [r["url"] for r in db.newest_for_ticker("NVDA", 10, sources="GY")] == ["https://x/1"]
+    assert db.newest(10, sources="Y") == []
+
+
+# ── 7. nits ────────────────────────────────────────────────────────────────
+
+def test_newest_is_served_by_the_published_expression_index(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    names = {r[0] for r in db._c.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert "idx_items_published" not in names
+    plan = " ".join(r[3] for r in db._c.execute(
+        f"EXPLAIN QUERY PLAN SELECT * FROM items {store._ORDER} LIMIT 5"))
+    assert "USING INDEX idx_items_published_jd" in plan
+
+
+def test_an_old_plain_published_index_is_dropped(tmp_path):
+    import sqlite3
+    c = sqlite3.connect(str(tmp_path / "n.db"))
+    c.executescript(store.SCHEMA)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_items_published ON items(published_at)")
+    c.commit(); c.close()
+    db = store.Store(tmp_path / "n.db")
+    names = {r[0] for r in db._c.execute("SELECT name FROM sqlite_master WHERE type='index'")}
+    assert "idx_items_published" not in names
+
+
+def test_unseen_accessions_queries_only_the_batch_in_chunks(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.mark_accessions([f"x{i}" for i in range(50)] + ["a7", "a999"])
+    batch = [f"a{i}" for i in range(1200)] + ["a7"]
+    seen = []
+    db._c.set_trace_callback(seen.append)
+    got = db.unseen_accessions(batch)
+    assert got == [a for a in batch if a not in ("a7", "a999")]
+    selects = [s for s in seen if "seen_accessions" in s]
+    assert selects and all(" IN (" in s for s in selects)
+    assert all(s.count("?") <= 500 or s.count("'") // 2 <= 500 for s in selects)
+    assert len(selects) == 3                               # 1201 names, 500 a query
+    assert db.unseen_accessions([]) == []
+
+
+def test_close_and_context_manager(tmp_path):
+    import sqlite3
+    with store.Store(tmp_path / "n.db") as db:
+        assert db.insert_many([_item("https://a/1")]) == 1
+    try:
+        db.newest(1)
+    except sqlite3.ProgrammingError:
+        pass
+    else:
+        raise AssertionError("a closed store should refuse")
+    db2 = store.Store(tmp_path / "n.db")
+    assert len(db2.newest(10)) == 1
+    db2.close()
+    db2.close()                                           # idempotent
+
+
+def test_one_busy_timeout(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    assert db._c.execute("PRAGMA busy_timeout").fetchone()[0] == store._BUSY_TIMEOUT_MS
