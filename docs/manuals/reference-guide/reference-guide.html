@@ -1608,10 +1608,11 @@ you already follow is worth more than a strong alert on a name you have never tr
 <h2 id="market-news">Market News</h2>
 <p><em>Menu: MARKETS → Market News · Route <code>/news</code></em></p>
 <h3 id="what-it-is_5">What it is</h3>
-<p>Three panels on one screen: the newest market <strong>headlines</strong> (each ranked High, Med or
-Low and tagged with the tickers it names), the <strong>SEC / EDGAR</strong> filings and insider
-buys, and the <strong>economic calendar</strong> — Fed events, dividends and IPOs, and the latest
-and next values of the reports that move the market. It answers <em>"is there news on
+<p>Two columns on one screen: the newest market <strong>headlines</strong> on the left (each ranked
+High, Med or Low and tagged with the tickers it names), and on the right what is
+<strong>next on the calendar</strong>, the <strong>SEC filings</strong> and insider buys, and the <strong>economic
+calendar</strong> — Fed events, dividends and IPOs, and the latest and next values of the
+reports that move the market. It answers <em>"is there news on
 this, and what is scheduled?"</em> without leaving the app.</p>
 <h3 id="where-the-data-comes-from_4">Where the data comes from</h3>
 <table>
@@ -1624,7 +1625,7 @@ this, and what is scheduled?"</em> without leaving the app.</p>
 <tbody>
 <tr>
 <td>Service</td>
-<td><code>news_svc</code> (:8216): <code>cache:news:feed</code> (headlines), <code>cache:news:sec</code> (the SEC panel), <code>cache:news:calendar</code> (the tiles)</td>
+<td><code>news_svc</code> (:8216): <code>cache:news:feed</code> (headlines), <code>cache:news:sec</code> (the SEC filings), <code>cache:news:calendar</code> (the hero and the agenda)</td>
 </tr>
 <tr>
 <td>Sources</td>
@@ -1645,14 +1646,21 @@ this, and what is scheduled?"</em> without leaving the app.</p>
 </tbody>
 </table>
 <h3 id="reading-the-screen_3">Reading the screen</h3>
-<p><strong>Each headline</strong> is one line, in columns under a sticky header — <strong>Time · Imp. ·
-Symbol · Headline · Source</strong>: the publish time in <strong>Central time</strong> (an item from an
-earlier day shows its date too) · the <strong>impact</strong> letter · up to two <strong>tickers</strong> (a
-<strong>+N</strong> chip holds the rest, listed on hover) · the <strong>headline</strong>, a link to the
-publisher's own page, with its summary on hover · the <strong>source</strong>, the first feed that
-carried it plus <strong>+N</strong> for the others (every feed on hover). Every column but the
-headline has a fixed width, so they line up down the list. On a phone the Symbol and
-Source columns give way first.</p>
+<p><strong>Filters</strong> sit in one card above the list: a search box (<em>Filter by ticker or
+keyword</em> — any word of the headline, or part of a ticker, in any case), the <strong>All ·
+High · Med · Low</strong> picker (a band shows only that band), <strong>Watchlist only</strong> (the
+symbols the app collects gamma for plus the feed config's extras) and one
+<strong>Sources</strong> chip per feed in the list, with its story count (several may be on; none
+means every source). They run instantly on the headlines already loaded and do not
+filter the SEC card. Under the card: <strong>Most mentioned</strong> tickers, and <em>N of M stories</em>.</p>
+<p><strong>Each headline</strong> is one line, with no header row: the publish time in <strong>Central
+time, 24-hour</strong> (<em>9:41</em> today, <em>Fri 16:22</em> this week, a date before that) · the
+impact word — <strong>HIGH</strong> in red, <strong>MED</strong> in amber, <strong>LOW</strong> in grey · the <strong>headline</strong>, a
+link to the publisher's own page, with its summary on hover · up to two <strong>tickers</strong> (a
+<strong>+N</strong> chip holds the rest, listed on hover) · the <strong>source</strong> in blue, the first feed
+that carried it (every feed on hover). A High row carries a red left edge and a faint
+red wash, a Med row an amber edge. On a phone the tickers and the source give way so
+the headline keeps its room.</p>
 <p><strong>Impact.</strong> A fixed set of rules gives every item points, and the points cut into
 three ranks — <strong>High</strong> at 6 or more, <strong>Med</strong> at 3 or more, <strong>Low</strong> below:</p>
 <table>
@@ -1690,7 +1698,7 @@ three ranks — <strong>High</strong> at 6 or more, <strong>Med</strong> at 3 or
 </tbody>
 </table>
 <p>A High more than <strong>24 hours</strong> old (<code>stale_after_h</code>) is shown as <strong>Med</strong>. Hover the
-letter to read the rules that scored an item. Every number above is editable in
+word to read the rules that scored an item. Every number above is editable in
 <strong>Settings → Configuration → Market news → Impact</strong> and the four <em>Impact</em> sections
 after it. On the public site the rank is worked out again from the public row, so a
 private feed or a ticker only you follow never adds to it there.</p>
@@ -1702,49 +1710,54 @@ ticker whether or not the app follows it. Yahoo Finance is the other exception: 
 time, and each carries the ticker it was fetched for even when the headline does not
 name it. A company <em>name</em> never tags: precision over recall. <strong>Click a ticker</strong> to open
 its <a href="#symbol">Symbol</a> dossier.</p>
-<p><strong>Trending.</strong> The tickers named in headlines from the general feeds, counted over
+<p><strong>Most mentioned.</strong> The tickers named in headlines from the general feeds, counted over
 the last <strong>6 hours</strong> (<code>[trending] window_h</code>), most-mentioned first. Yahoo Finance's
 per-ticker items are left out: each carries the ticker it was fetched for, so counting
 them would make every polled name trend on polling alone. Click one to filter to it;
 click it again to clear.</p>
-<p><strong>Filters.</strong> <strong>Sources</strong> (none chosen means every source), <strong>Ticker</strong>,
-<strong>Watchlist only</strong> — the symbols the app collects gamma for plus the feed config's
-extras — and <strong>Impact</strong> (All, High, High + Med). Filters run instantly on the
-headlines already loaded; they do not filter the SEC panel.</p>
-<p><strong>SEC / EDGAR.</strong> Columns <strong>Date/Time · Symbol · Headline/Details</strong>: an insider buy
-reads how many purchases, their total and the transaction date; an offering its form.
-A title links only to the filing on sec.gov.</p>
-<p><strong>Calendar.</strong> Three groups of tiles, all times Central:</p>
+<p><strong>Next on the calendar.</strong> The top of the right column: the next Fed event or data
+release that has a time, with a countdown (<em>in 1d 19h</em>, <em>in 45m</em>, <em>now</em>), its title
+and its date and time. Items with only a date are not counted down to.</p>
+<p><strong>SEC filings.</strong> Chips <strong>All · Insider buys · Offerings · Registrations</strong> show one
+kind at a time (Form 4; a 424B prospectus; an S-1, S-3, S-3ASR, F-1 … registration).
+Each row: a dot for its impact, the form badge (<strong>FORM 4</strong> green — spelled out, because
+<em>F-4</em> is a different SEC form — 424B5 red, S-1 amber, S-3 grey), the symbol, who filed
+(the insider, or the company and what it filed; the full title on hover), an insider
+buy's dollar total in green, and the time. The note <em>EDGAR · newest first</em> says what
+the list is: the newest items the service keeps, not a fixed time window. A name links
+only to the filing on sec.gov.</p>
+<p><strong>Economic calendar.</strong> One agenda grouped by day, all times Central. Each row is a
+time, a badge, a title and a grey subtitle; the badge tells the three kinds apart:</p>
 <table>
 <thead>
 <tr>
-<th>Group</th>
-<th>What is in it</th>
+<th>Badge</th>
+<th>What it is</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>Economic news/Calendar</strong></td>
-<td>FOMC meetings, the Beige Book, Board speeches and testimony (speeches 14 days ahead, the rest 45), plus the <code>extra_releases</code> from the BLS / BEA schedules (JOLTS, the Employment Cost Index)</td>
+<td><strong>FOMC</strong> · <strong>SPEECH</strong> · <strong>TESTIMONY</strong> · <strong>EVENT</strong></td>
+<td>FOMC meetings, the Beige Book, Board speeches and testimony (speeches 14 days ahead, the rest 45), plus the <code>extra_releases</code> from the BLS / BEA schedules (JOLTS, the Employment Cost Index). A speech shows the speaker's name as the title and the role as the subtitle, when the Fed's title has the usual <em>Speech - <role> <name></em> shape</td>
 </tr>
 <tr>
-<td><strong>Dividend / IPO</strong></td>
+<td><strong>DIVIDEND</strong> · <strong>IPO</strong></td>
 <td>Ex-dividend date, amount a share and pay date for every ticker you follow (30 days ahead, 3 back); IPOs of at least $100M — upcoming with their range, priced ones for 7 days with their price</td>
 </tr>
 <tr>
-<td><strong>Economic data (CPI, PPI etc)</strong></td>
-<td>One tile per report — CPI, PPI, Jobs, PCE, GDP, Retail sales, Jobless claims — each indicator an <strong>Actual · Prior</strong> line, and the tile's <strong>Next</strong> release date and time</td>
+<td><strong>DATA</strong></td>
+<td>One row per report — CPI, PPI, Jobs, PCE, GDP, Retail sales, Jobless claims — at its next release with the <strong>Prior</strong> value, or, for a day after a release, at the release with its <strong>Actual</strong> (a line per indicator when a report has two)</td>
 </tr>
 </tbody>
 </table>
 <p>An indicator is <strong>released</strong> once its new value has arrived after the scheduled
 release (it stays that way for <code>actual_fresh_h</code>, 24 h), <strong>awaiting</strong> while the release
 has passed and the value has not landed (<em>Awaiting the release</em>, Actual shown as —),
-and otherwise <strong>upcoming</strong> — Actual —, Prior the latest value. No future date on the
-agencies' schedules reads <em>Next date not yet published</em>; the app never guesses one. A
-muted note on a group means every source behind it failed and it is showing the last
-good reading.</p>
-<p><strong>High-impact tiles</strong> carry an amber border and a <strong>HIGH</strong> tag. Shipped: the FOMC
+and otherwise <strong>upcoming</strong> — Prior the latest value. A report with no future date on
+the agencies' schedules is listed at the end under <em>Date not yet published</em>; the app
+never guesses one. A muted note at the top of the card means every source behind a
+kind failed and it is showing the last good reading.</p>
+<p><strong>High-impact rows</strong> carry an amber left edge and wash and a <strong>HIGH</strong> tag. Shipped: the FOMC
 statement, its press conference and the Fed Chair's own speeches and testimony
 (<code>[calendar.events] high_impact</code> — a case-insensitive <em>contains</em> match on the title;
 <code>- Chair</code> matches <em>Speech - Chair …</em> and <em>Testimony - Chairman …</em> but never a Vice
@@ -1764,19 +1777,22 @@ when a symbol shows up on <a href="#flow-alerts">Flow Alerts</a> or the
 <h3 id="caveats-and-gotchas_4">Caveats and gotchas</h3>
 <ul>
 <li><strong>A missing tag is not missing news.</strong> A story that never writes the ticker is not
-  tagged, so a Ticker filter will not find it.</li>
+  tagged, so a ticker filter will not find it (the search box still finds it by a
+  word in the headline).</li>
 <li><strong>Impact is a rule count, not a judgement.</strong> A keyword in a headline scores whether
   or not the story is about the market ("rate cut" in a mortgage ad counts).</li>
 <li>Headlines are third-party text and are shown as written — the app does not verify
   them.</li>
 <li>Feeds publish on their own schedules; a quiet list at the weekend is normal.</li>
 <li><strong>One story, several feeds.</strong> The same headline from two different feeds within a
-  day is one row with both badges; one feed repeating a headline is merged only
+  day is one row naming the first feed (all of them on hover); one feed repeating a headline is merged only
   within <code>[dedupe] same_feed_merge_h</code> (6 hours), so a daily column keeps a row per
   day. SEC filings are never merged this way — their headlines are templated.</li>
 <li><strong>A calendar value is FRED's</strong>, derived the way the tile says (month-on-month %,
   change in thousands, level). It may differ in the last digit from the agency's own
   release text.</li>
+<li><strong>Times are 24-hour</strong> on the list, the SEC card and the agenda (<em>16:22</em>), and
+  12-hour in full dates (<em>Mon Sep 28 · 7:15 AM CT</em>).</li>
 </ul>
 <h3 id="on-the-public-site">On the public site</h3>
 <p><code>live.neuralstrike.co/news</code> is this page less every control that is yours: no

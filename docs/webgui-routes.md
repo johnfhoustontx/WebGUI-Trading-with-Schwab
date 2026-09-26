@@ -579,41 +579,52 @@ Flow Alerts (**NEW 2026-08-09** — a **main-menu (left-rail) item under the Opt
 
 ## `/news`
 
-**Market News (NEW 2026-09-26; v2 the same day)** — a standalone rail page under
-**MARKETS**, after Flow Alerts (`main.OPTIONS_RAIL`, like the three market-wide reads
-above it). Three regions, each its own view and its own `watch_view`
-(`pages/news.py`; every fact from the pure `pages/news_view.py`), all published by
-**`news_svc`** (:8216): the **headlines** (`cache:news:feed`) in the left column, the
-**SEC / EDGAR** panel (`cache:news:sec`) top right, the **calendar** tiles
-(`cache:news:calendar`) bottom right. At `lg` the right column's two panels are each
-half the viewport tall and scroll on their own, and the headline column is held to
-their combined height (`100vh - 9.25rem`): its control bar stays put and the list
-below it scrolls; below `lg` the three stack in that
-DOM order at natural height. Designs + plans:
+**Market News (NEW 2026-09-26; v2 the same day; redesigned to the operator's mockup
+the same evening)** — a standalone rail page under **MARKETS**, after Flow Alerts
+(`main.OPTIONS_RAIL`). Three views, each its own `watch_view` (`pages/news.py`; every
+fact from the pure `pages/news_view.py`), all published by **`news_svc`** (:8216):
+the **headlines** (`cache:news:feed`), the **SEC filings** (`cache:news:sec`) and the
+**calendar** (`cache:news:calendar`). Two columns at `lg` — two thirds and one third
+(`lg:grid-cols-3`), natural height, the page scrolls — stacking below `lg` in DOM
+order: filters, headlines, then the hero, SEC and calendar cards. Every region and
+filter is built by **`news.build_board`**, which reads no view (each page does its
+own reads and hands the payloads over) — so the public copy is the same board.
+Designs + plans:
 [`plans/2026-09-25-news-feed-design.md`](plans/2026-09-25-news-feed-design.md),
 [`plans/2026-09-26-news-v2-design.md`](plans/2026-09-26-news-v2-design.md).
 
-- **Headline rows** (`news.draw_rows`, shared with the public copy) sit under a sticky
-  column header — **Time · Imp. · Symbol · Headline · Source**, each label carrying
-  the width class of the cell below it (drawn only when there are rows) — and are ONE
-  line each, nothing wraps: time — CENTRAL, with the date when the item is not from today (CT) ·
-  the **impact pill** (H / M / L, a fixed class map `news_view.BAND_CLASSES`; an
-  unscored row keeps the empty slot and never reads "low") whose hover is
-  `news_view.reason_text` — the rules that scored it in words · the **Symbol** slot, a
-  fixed `w-32` holding at most `MAX_ROW_TICKERS` (2) ticker chips, the rest collapsed
-  into a **`+N`** chip with the full list on hover · the headline, truncated with an
-  ellipsis, a new-tab link to the original (`news_view.safe_href`: http/https with a
-  host, else plain text), its hover the teaser · the **Source** cell, a fixed `w-32`:
-  the first of the row's sources (truncated) plus **`+N`** when there are more, every
-  source on hover; empty but the same width for a row with none. **Phone:** the row is
-  `overflow-hidden`, and below `sm` the Symbol and Source columns go, header labels
-  and all (`max-sm:hidden`), so the headline keeps ~178px of a 390px screen (a
-  one-chip Symbol slot left it 122px). ⚠ Never `hidden sm:flex` here: Quasar's
-  `.hidden` is `display:none !important`, which beats every `sm:` display utility —
-  the per-source badges this column replaced were written that way and never showed
-  at any width. ⚠ Titles, teasers and detail lines are third-party text and reach
-  the page only through `ui.label` / `ui.link`; a source-level test pins that the
-  module calls `ui.html` nowhere.
+- **The filter card**: a search box (*Filter by ticker or keyword* — 300 ms debounce;
+  case-insensitive, whitespace collapsed, a substring of the headline or of any
+  ticker: `news_view.filter_rows(query=)`), the segmented band picker **All · High ·
+  Med · Low** (a coloured dot each; a band shows **only** that band —
+  `filter_rows(band=)`; an unscored row passes only All), on the private page a
+  **Watchlist only** chip (`news_config.ticker_set()`: the GEX collection list +
+  `[tickers] extras`), and a **SOURCES** row — one toggle chip per source in the
+  current feed with its count (`news_view.source_counts`: every source a row lists
+  counts it; alphabetical, so a chip does not move as stories arrive; several may be
+  on; none = all; a source that leaves the feed leaves the selection). The picker and
+  the chips are clickable rows, not `kit.button`s — a picker with a selected state.
+- **MOST MENTIONED**: up to `TRENDING_CHIPS` (8) ticker chips with counts over
+  `[trending] window_h` (6 h, `news.trending_window_h`, 6 on a junk value). ⚠
+  `yahoo_ticker` items are skipped — each carries the ticker it was FETCHED for. A chip
+  filters the list by its ticker; a second click clears it; the ticker in force always
+  keeps a chip, so it can be cleared. Right-aligned: **N of M stories**
+  (`news_view.story_count`).
+- **Headline rows** (`news.draw_rows`) sit in one rounded card, **no header row**, ONE
+  line each, nothing wraps: the stamp (`row["stamp"]` — Central, **24-hour**, `9:41`
+  today, `Fri 16:22` within the week, `Sep 18` before) · the band word **HIGH / MED /
+  LOW** (`BAND_TEXT`: rose / amber / muted; empty for an unscored row, never a guessed
+  LOW; its hover is `news_view.reason_text`) · the headline, truncated, a new-tab link
+  (`news_view.safe_href`; its hover the teaser) · up to `MAX_ROW_TICKERS` (2) ticker
+  chips and **+N** (the rest on hover) · the first source in accent blue, right-aligned
+  in a fixed `w-32` cell (every source on hover when several). The row's left border
+  follows its band (`ROW_ACCENT`): **high** a rose border and a faint rose wash,
+  **med** an amber border, low and unscored transparent (so every row's text starts at
+  the same x). **Phone:** tickers and source go below `sm` (`max-sm:hidden`). ⚠ Never
+  `hidden sm:flex`: Quasar's `.hidden` is `display:none !important`, which beats every
+  `sm:` display utility. ⚠ Titles, teasers and detail lines are third-party text and
+  reach the page only through `ui.label` / `ui.link`; a source-level test pins that
+  the module calls `ui.html` nowhere. `PAGE_SIZE` 60, then **Show more**.
 - **Impact** is computed by the service, not the page (`services/news_svc/impact.py`,
   `[impact]` in `config/news.toml`, editable in Settings → Configuration → Market news
   → Impact…): keyword tiers (each tier counts once), the best feed's points, +1 when
@@ -624,68 +635,78 @@ DOM order at natural height. Designs + plans:
   reason — capped at publish, never stored capped. The pill hover reads "older news,
   so shown one level lower" — deliberately no duration, since `stale_after_h` is
   editable and the page does not read it.
-- **The SEC / EDGAR panel** (`news.draw_sec_rows`): a sticky column header —
-  **Date/Time · Symbol · Headline/Details** — then one line per `news_view.sec_rows`
-  row: the symbol (the first tagged ticker, else the filer's own), the pill, the title
-  and, after a dot, `news_view.detail_line` (a Form 4's purchases · total · date, or
-  "Form S-3"). A title links **only** to an `https` address on `sec.gov`
-  (`news_view.sec_href`); anything else is plain text. `SEC_PAGE_SIZE` 40, then Show
-  more. The headline filters do not apply to it.
-- **The calendar** (`news.draw_calendar` over `news_view.calendar_groups`) is three
-  groups of tiles, in order: **Economic news/Calendar** (Fed events and the
-  `extra_releases` from the BLS/BEA schedules; an event already past is dropped),
-  **Dividend / IPO** (watchlist ex-dividend dates and Nasdaq IPOs; the producer owns
-  their windows), **Economic data (CPI, PPI etc)** (one tile per `tile` name — CPI,
-  PPI, Jobs, PCE, GDP, Retail sales, Jobless claims — each indicator an *Actual ·
-  Prior* line and the tile's *Next* release). Times are Central. An indicator is
-  decided page-side by `indicator_state`, because it is a function of `now`: within
+- **NEXT ON THE CALENDAR** (`news.draw_next` over `news_view.next_up`): the
+  earliest event or tracked data release ahead with a real **instant** (a date-only
+  item cannot be counted down to), its countdown (`news_view.countdown`: *now*, *in
+  45m*, *in 3h 5m*, *in 1d 19h*), its title (a Fed speaker as *Vice Chair for
+  Supervision Michelle W. Bowman — discussion*), its badge and its Central date and
+  time, plus HIGH for a high-impact item. Hidden until the calendar is published; a
+  quiet line when nothing timed is ahead. The countdown moves on the 60 s repaint.
+- **SEC filings** (`news.draw_sec_rows`): the note reads *EDGAR · newest first* — the
+  view is the service's `sec_view_items` window, not a time window. Chips **All ·
+  Insider buys · Offerings · Registrations** (`news_view.SEC_KINDS` / `filter_sec`,
+  by `sec_kind`: Form 4 / `424B*` / `S-` or `F-` registrations). One line per filing:
+  the band dot · the form badge by family (`news_view.sec_tone` → `FORM_CLASSES`:
+  **FORM 4** emerald — deliberately not "F-4", a different SEC form — `424B*` rose,
+  `S-1`/`F-1` amber, other registrations slate) · the symbol (hidden on a phone) · the
+  filer (`sec_name`: the insider, read out of the service's title, or *Company — what
+  was filed*; the full title and the teaser on hover) · a Form 4's dollar total in
+  green (`sec_value`, never `$0`) · the time. A name links **only** to an `https`
+  sec.gov address (`news_view.sec_href`). `SEC_PAGE_SIZE` 40, then Show more. The
+  headline filters do not apply to it.
+- **Economic calendar** (`news.draw_calendar` over `news_view.agenda`, *all times
+  CT*): ONE agenda grouped by Central day (`MON · SEP 28`; `TODAY · …` for today),
+  each row a time (24-hour; `—` for a date-only item), a badge (`BADGE_CLASSES`:
+  **FOMC**, **SPEECH**, **TESTIMONY**, **EVENT** — read off the event title, the
+  payload carries no kind — **DATA**, **DIVIDEND**, **IPO**), the title and a muted
+  subtitle. It replaced the three tile groups but keeps all three kinds: a Fed
+  speaker's name is the title and the role the subtitle (`news_view.speaker`, only for
+  a known *Speech / Discussion / Testimony - <role> <name>* shape, else the title as
+  it is); a dividend reads *Ex-dividend · $1.40 a share · Pays …*; an IPO its price or
+  range and offer size; a DATA row *Prior x*, *Awaiting the release · Prior x* or
+  *Actual x · Prior y · Released 7:30 AM CT*, one line per indicator when a tile holds
+  several (CPI and Core CPI). A data tile sits at the release that made it fresh, else
+  at its next release; one with no next date is listed under *DATE NOT YET PUBLISHED*.
+  An indicator is decided
+  page-side by `indicator_state`, because it is a function of `now`: within
   `actual_fresh_h` of its release it is **released** (the new value landed — first
   seen at or after the release; a first-fill `bootstrap` value only once the watch
   window has passed; status line *Released 7:30 AM CT*, the weekday and date added
   when the release fell on an earlier Central day) or **awaiting** (*Awaiting the
   release*, Actual —); otherwise
   **upcoming** (Actual —, Prior = the latest value). No future date reads *Next date
-  not yet published*, never a guess. A group whose every source is `stale` / `never`
-  carries a muted note; an empty group says so in its own sentence. **High-impact
-  tiles** are drawn with an amber border and wash (`border-amber-400/70
-  bg-amber-400/[0.08]`) and a **HIGH** chip by the title (hover *High-impact
-  release*). The producer decides: `news_svc/econ.py` stamps a real bool `high` on
+  not yet published*, never a guess. **High-impact** is the producer's call: `news_svc/econ.py` stamps a real bool `high` on
   every row — an event whose title contains a `[calendar.events] high_impact` phrase
   (case-insensitive; shipped `FOMC statement`, `Press conference`, `- Chair`, which
   matches the Chair's own speeches and testimony and never a Vice Chair's), a data
   entry whose `[calendar.indicators.<key>] high` is true (every shipped indicator but
   jobless claims); dividends and IPOs are never high. `calendar_groups` carries it
-  onto the tile only for a real `True` (a data tile: any of its indicators).
-- **Filters** run page-side over the headline rows already read: **Sources** (none =
-  all), a **Ticker** field (300 ms debounce, `clean_symbol` both sides — a string that
-  does not clean matches NOTHING), **Watchlist only** (`news_config.ticker_set()`: the
-  GEX collection list + `[tickers] extras`), and **Impact** (All / High / High + Med —
-  an unbanded row never passes a band filter). `PAGE_SIZE` 60 rows, then **Show
-  more**. The status line carries counts only.
-- **Trending**: the top 12 tickers by item count within `[trending] window_h` (6 h, read
-  through `news.trending_window_h`, which falls back to 6 on a junk value). ⚠
-  `yahoo_ticker` items are skipped — each carries the ticker it was FETCHED for, so
-  counting them made every polled name trend. A chip toggles the ticker filter.
+  and `agenda` onto the row only for a real `True` (a data tile: any of its
+  indicators). A high row gets an amber left border and wash (`CAL_ACCENT`) and a
+  **HIGH** marker (hover *High-impact release*).
+  The stale-source notes lead the card (*Dividend / IPO: Source unavailable …*), and
+  a kind with nothing ahead says so at its foot.
 - **Refresh** enqueues `news_refresh` on `cmd:news` — built only where
   `shell.may_enqueue()`, and the handler re-checks. The service re-checks the calendar
   (only sources whose own cadence is due — a click never forces one early) and then
   polls every feed. The button spins until the next `news:status` publish (every feed
   poll ends with one), with a `REFRESH_TIMEOUT_SEC` (240 s) backstop.
 - **Repaint** is `view_watch.watch_view` per view with an async re-read, plus a
-  `REPAINT_SEC` (60 s) redraw from the payloads already held — stamps drop their date
-  at midnight and calendar events pass while a tab sits open, and the views republish
-  only on a CONTENT change. The header's Updated stamp is the feed key's `:ts` side key
-  and is not `stale`-aware.
+  `REPAINT_SEC` (60 s) redraw from the payloads already held (in `build_board`) —
+  stamps, the countdown and the agenda age while a tab sits open, and the views
+  republish only on a CONTENT change. The header's Updated stamp is the feed key's
+  `:ts` side key and is not `stale`-aware.
 - **Empty states**: never published (`copy.WAITING_NEWS`, shared with the Desk strip
-  and the Symbol band; `SEC_WAITING`, `CAL_WAITING` for the other two), published but
-  empty (`EMPTY_FEED`, `SEC_EMPTY`), filters exclude everything (`NO_MATCH`).
+  and the Symbol band; `SEC_WAITING`, `CAL_WAITING`), published but empty
+  (`EMPTY_FEED`, `SEC_EMPTY`, `CAL_EMPTY`), filters exclude everything (`NO_MATCH`,
+  `SEC_NO_MATCH`).
 
-**The public copy** (`live.neuralstrike.co/news`, `pages/news_live.py`) draws the same
-three regions with the same painters (`linked=False`: a ticker filters the headline
-list rather than opening a dossier), reads `feed_public`, `sec_public` and
-`calendar_public` and nothing else, and has no Refresh and no Watchlist only. Its
-impact is RE-SCORED from the public row against the collection list, and its calendar
-dividends are cut to the collection list — so no `[tickers] extras` name leaks.
+**The public copy** (`live.neuralstrike.co/news`, `pages/news_live.py`) is the same
+`news.build_board` with `linked=False` (a ticker filters the headline list rather
+than opening a dossier) and no watchlist chip; it reads `feed_public`, `sec_public`
+and `calendar_public` and nothing else, and has no Refresh. Its impact is RE-SCORED
+from the public row against the collection list, and its calendar dividends are cut
+to the collection list — so no `[tickers] extras` name leaks.
 
 Not built from the design: the rail badge counting unseen items (`SEEN_KEY` is written on
 each visit, read by nothing yet), and a status line naming a failing feed or calendar

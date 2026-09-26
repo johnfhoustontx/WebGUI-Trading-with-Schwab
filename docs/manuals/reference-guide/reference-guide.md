@@ -937,17 +937,18 @@ you already follow is worth more than a strong alert on a name you have never tr
 
 ### What it is
 
-Three panels on one screen: the newest market **headlines** (each ranked High, Med or
-Low and tagged with the tickers it names), the **SEC / EDGAR** filings and insider
-buys, and the **economic calendar** — Fed events, dividends and IPOs, and the latest
-and next values of the reports that move the market. It answers *"is there news on
+Two columns on one screen: the newest market **headlines** on the left (each ranked
+High, Med or Low and tagged with the tickers it names), and on the right what is
+**next on the calendar**, the **SEC filings** and insider buys, and the **economic
+calendar** — Fed events, dividends and IPOs, and the latest and next values of the
+reports that move the market. It answers *"is there news on
 this, and what is scheduled?"* without leaving the app.
 
 ### Where the data comes from
 
 | | |
 |---|---|
-| Service | `news_svc` (:8216): `cache:news:feed` (headlines), `cache:news:sec` (the SEC panel), `cache:news:calendar` (the tiles) |
+| Service | `news_svc` (:8216): `cache:news:feed` (headlines), `cache:news:sec` (the SEC filings), `cache:news:calendar` (the hero and the agenda) |
 | Sources | Public RSS feeds (MarketWatch, CNBC, Benzinga, AP, the press-release wires, the White House, USTR and the SEC, investingLive, The Fly, StockStory, Techmeme, the biotech trade press and others), Yahoo Finance per-ticker headlines, and **SEC EDGAR** — Form 4 insider purchases and share-offering filings. The list is `config/news.toml [[feeds]]`. The calendar reads the **Federal Reserve**'s calendar, the **BLS** and **BEA** release schedules, **FRED** (release dates and the values), **Nasdaq**'s IPO calendar, and a dividends store the **trade service** fills once a day. |
 | Refresh | Headlines every **5 minutes** in regular hours, **15** off-hours, **60** at weekends and holidays. The calendar on its own cadence: Fed events hourly, the release schedules twice a day, IPOs every 4 hours, the values every 4 hours — and every **2 minutes** for up to an hour after a report is due |
 | Retention | The newest 300 headlines and 100 SEC items are published; the store keeps 7 days |
@@ -955,14 +956,22 @@ this, and what is scheduled?"* without leaving the app.
 
 ### Reading the screen
 
-**Each headline** is one line, in columns under a sticky header — **Time · Imp. ·
-Symbol · Headline · Source**: the publish time in **Central time** (an item from an
-earlier day shows its date too) · the **impact** letter · up to two **tickers** (a
-**+N** chip holds the rest, listed on hover) · the **headline**, a link to the
-publisher's own page, with its summary on hover · the **source**, the first feed that
-carried it plus **+N** for the others (every feed on hover). Every column but the
-headline has a fixed width, so they line up down the list. On a phone the Symbol and
-Source columns give way first.
+**Filters** sit in one card above the list: a search box (*Filter by ticker or
+keyword* — any word of the headline, or part of a ticker, in any case), the **All ·
+High · Med · Low** picker (a band shows only that band), **Watchlist only** (the
+symbols the app collects gamma for plus the feed config's extras) and one
+**Sources** chip per feed in the list, with its story count (several may be on; none
+means every source). They run instantly on the headlines already loaded and do not
+filter the SEC card. Under the card: **Most mentioned** tickers, and *N of M stories*.
+
+**Each headline** is one line, with no header row: the publish time in **Central
+time, 24-hour** (*9:41* today, *Fri 16:22* this week, a date before that) · the
+impact word — **HIGH** in red, **MED** in amber, **LOW** in grey · the **headline**, a
+link to the publisher's own page, with its summary on hover · up to two **tickers** (a
+**+N** chip holds the rest, listed on hover) · the **source** in blue, the first feed
+that carried it (every feed on hover). A High row carries a red left edge and a faint
+red wash, a Med row an amber edge. On a phone the tickers and the source give way so
+the headline keeps its room.
 
 **Impact.** A fixed set of rules gives every item points, and the points cut into
 three ranks — **High** at 6 or more, **Med** at 3 or more, **Low** below:
@@ -977,7 +986,7 @@ three ranks — **High** at 6 or more, **Med** at 3 or more, **Low** below:
 | An offering filing, by exact form | 424B5 **+3** · S-3 **+2** · S-1 **+1** · S-3ASR **+1** · on no followed ticker **−1** |
 
 A High more than **24 hours** old (`stale_after_h`) is shown as **Med**. Hover the
-letter to read the rules that scored an item. Every number above is editable in
+word to read the rules that scored an item. Every number above is editable in
 **Settings → Configuration → Market news → Impact** and the four *Impact* sections
 after it. On the public site the rank is worked out again from the public row, so a
 private feed or a ticker only you follow never adds to it there.
@@ -991,38 +1000,43 @@ time, and each carries the ticker it was fetched for even when the headline does
 name it. A company *name* never tags: precision over recall. **Click a ticker** to open
 its [Symbol](#symbol) dossier.
 
-**Trending.** The tickers named in headlines from the general feeds, counted over
+**Most mentioned.** The tickers named in headlines from the general feeds, counted over
 the last **6 hours** (`[trending] window_h`), most-mentioned first. Yahoo Finance's
 per-ticker items are left out: each carries the ticker it was fetched for, so counting
 them would make every polled name trend on polling alone. Click one to filter to it;
 click it again to clear.
 
-**Filters.** **Sources** (none chosen means every source), **Ticker**,
-**Watchlist only** — the symbols the app collects gamma for plus the feed config's
-extras — and **Impact** (All, High, High + Med). Filters run instantly on the
-headlines already loaded; they do not filter the SEC panel.
+**Next on the calendar.** The top of the right column: the next Fed event or data
+release that has a time, with a countdown (*in 1d 19h*, *in 45m*, *now*), its title
+and its date and time. Items with only a date are not counted down to.
 
-**SEC / EDGAR.** Columns **Date/Time · Symbol · Headline/Details**: an insider buy
-reads how many purchases, their total and the transaction date; an offering its form.
-A title links only to the filing on sec.gov.
+**SEC filings.** Chips **All · Insider buys · Offerings · Registrations** show one
+kind at a time (Form 4; a 424B prospectus; an S-1, S-3, S-3ASR, F-1 … registration).
+Each row: a dot for its impact, the form badge (**FORM 4** green — spelled out, because
+*F-4* is a different SEC form — 424B5 red, S-1 amber, S-3 grey), the symbol, who filed
+(the insider, or the company and what it filed; the full title on hover), an insider
+buy's dollar total in green, and the time. The note *EDGAR · newest first* says what
+the list is: the newest items the service keeps, not a fixed time window. A name links
+only to the filing on sec.gov.
 
-**Calendar.** Three groups of tiles, all times Central:
+**Economic calendar.** One agenda grouped by day, all times Central. Each row is a
+time, a badge, a title and a grey subtitle; the badge tells the three kinds apart:
 
-| Group | What is in it |
+| Badge | What it is |
 |---|---|
-| **Economic news/Calendar** | FOMC meetings, the Beige Book, Board speeches and testimony (speeches 14 days ahead, the rest 45), plus the `extra_releases` from the BLS / BEA schedules (JOLTS, the Employment Cost Index) |
-| **Dividend / IPO** | Ex-dividend date, amount a share and pay date for every ticker you follow (30 days ahead, 3 back); IPOs of at least $100M — upcoming with their range, priced ones for 7 days with their price |
-| **Economic data (CPI, PPI etc)** | One tile per report — CPI, PPI, Jobs, PCE, GDP, Retail sales, Jobless claims — each indicator an **Actual · Prior** line, and the tile's **Next** release date and time |
+| **FOMC** · **SPEECH** · **TESTIMONY** · **EVENT** | FOMC meetings, the Beige Book, Board speeches and testimony (speeches 14 days ahead, the rest 45), plus the `extra_releases` from the BLS / BEA schedules (JOLTS, the Employment Cost Index). A speech shows the speaker's name as the title and the role as the subtitle, when the Fed's title has the usual *Speech - <role> <name>* shape |
+| **DIVIDEND** · **IPO** | Ex-dividend date, amount a share and pay date for every ticker you follow (30 days ahead, 3 back); IPOs of at least $100M — upcoming with their range, priced ones for 7 days with their price |
+| **DATA** | One row per report — CPI, PPI, Jobs, PCE, GDP, Retail sales, Jobless claims — at its next release with the **Prior** value, or, for a day after a release, at the release with its **Actual** (a line per indicator when a report has two) |
 
 An indicator is **released** once its new value has arrived after the scheduled
 release (it stays that way for `actual_fresh_h`, 24 h), **awaiting** while the release
 has passed and the value has not landed (*Awaiting the release*, Actual shown as —),
-and otherwise **upcoming** — Actual —, Prior the latest value. No future date on the
-agencies' schedules reads *Next date not yet published*; the app never guesses one. A
-muted note on a group means every source behind it failed and it is showing the last
-good reading.
+and otherwise **upcoming** — Prior the latest value. A report with no future date on
+the agencies' schedules is listed at the end under *Date not yet published*; the app
+never guesses one. A muted note at the top of the card means every source behind a
+kind failed and it is showing the last good reading.
 
-**High-impact tiles** carry an amber border and a **HIGH** tag. Shipped: the FOMC
+**High-impact rows** carry an amber left edge and wash and a **HIGH** tag. Shipped: the FOMC
 statement, its press conference and the Fed Chair's own speeches and testimony
 (`[calendar.events] high_impact` — a case-insensitive *contains* match on the title;
 `- Chair` matches *Speech - Chair …* and *Testimony - Chairman …* but never a Vice
@@ -1048,19 +1062,22 @@ when a symbol shows up on [Flow Alerts](#flow-alerts) or the
 ### Caveats and gotchas
 
 - **A missing tag is not missing news.** A story that never writes the ticker is not
-  tagged, so a Ticker filter will not find it.
+  tagged, so a ticker filter will not find it (the search box still finds it by a
+  word in the headline).
 - **Impact is a rule count, not a judgement.** A keyword in a headline scores whether
   or not the story is about the market ("rate cut" in a mortgage ad counts).
 - Headlines are third-party text and are shown as written — the app does not verify
   them.
 - Feeds publish on their own schedules; a quiet list at the weekend is normal.
 - **One story, several feeds.** The same headline from two different feeds within a
-  day is one row with both badges; one feed repeating a headline is merged only
+  day is one row naming the first feed (all of them on hover); one feed repeating a headline is merged only
   within `[dedupe] same_feed_merge_h` (6 hours), so a daily column keeps a row per
   day. SEC filings are never merged this way — their headlines are templated.
 - **A calendar value is FRED's**, derived the way the tile says (month-on-month %,
   change in thousands, level). It may differ in the last digit from the agency's own
   release text.
+- **Times are 24-hour** on the list, the SEC card and the agenda (*16:22*), and
+  12-hour in full dates (*Mon Sep 28 · 7:15 AM CT*).
 
 ### On the public site
 

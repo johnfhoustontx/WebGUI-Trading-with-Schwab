@@ -4,7 +4,42 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-26 (**Market News: a Source column on the headline list, and
+**Last updated:** 2026-09-26 (**Market News redesigned to the operator's mockup** —
+two columns, a filter card, banded rows, a next-event hero, SEC chips and one agenda.)
+
+- **Layout.** Two thirds / one third at `lg` (`lg:grid-cols-3`), natural height,
+  stacking on a phone. LEFT: a filter card (search box over headline + tickers, the
+  All · High · Med · Low segmented picker where a band shows ONLY that band, the
+  private Watchlist only chip, one SOURCES toggle chip per feed with its count), a
+  MOST MENTIONED line with *N of M stories*, and the headline card — no header row;
+  24-hour stamp · HIGH/MED/LOW word · headline · ≤2 ticker chips + `+N` · the first
+  source in accent blue; a high row a rose left border and wash, a med row an amber
+  border. RIGHT: NEXT ON THE CALENDAR (earliest timed event or data release, with a
+  countdown), SEC filings (All / Insider buys / Offerings / Registrations chips; band
+  dot, form badge by family, symbol, filer, a Form 4's dollar total in green, time),
+  and the Economic calendar as ONE agenda grouped by day, the three kinds told apart
+  by badge (FOMC / SPEECH / TESTIMONY / EVENT, DATA, DIVIDEND, IPO); high items keep
+  the amber border, wash and HIGH marker.
+- **One board, two origins.** `news.build_board` builds every region and filter and
+  reads NO view; `news.render` and `news_live.render` each do their own reads and hand
+  the payloads over, so the public page is the same board (`linked=False`, no
+  watchlist). The public-view-only and no-write guards are unchanged and still green.
+- **Pure logic in `news_view`**: `filter_rows(query=, band=)`, `source_counts`,
+  `story_count`, the `stamp` field (24-hour; a column of times with no AM/PM must not
+  be ambiguous), `sec_kind` / `sec_form` / `sec_name` / `sec_value` / `sec_tone` /
+  `filter_sec`, `event_badge`, `speaker` (only a known *Speech - <role> <name>*
+  shape), `countdown`, `next_up`, `agenda`; `indicator_state` gained `place_at` /
+  `place_date`.
+- **Deviations from the mockup, deliberately:** times are IBM Plex Sans tabular
+  figures, not a mono face (the UI standard keeps mono for code and logs); the Form 4
+  badge reads **FORM 4**, not "F-4" (a different SEC form); the SEC note reads *EDGAR ·
+  newest first*, because the view is an item window, not "last 24 h".
+- **Tests.** The layout tests that pinned the old look (the sticky column header, the
+  Impact select, the Ticker input, the tile groups, the fixed-height columns) were
+  rewritten to the new structure; `test_news_live`'s two painter-call tests now pin
+  `news.build_board(linked=False, watchlist=None)` and that the board reads no view.
+
+**Prior —** 2026-09-26 (**Market News: a Source column on the headline list, and
 high-impact calendar tiles highlighted** — both at the operator's request.)
 
 - **Source column.** The headline list opens with a sticky column header — **Time ·
