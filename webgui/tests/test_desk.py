@@ -3615,7 +3615,9 @@ def test_panel_heads_carry_every_panel_and_the_caps_stay_interpolated():
     dropped: a title drifting back to caps still fails here.
     """
     heads = d.PANEL_HEADS
-    assert set(heads) == {"dealer", "board", "flow", "positions"}
+    # "news" joined 2026-09-26 with the headlines strip (the news feed plan,
+    # Task 14); the set is still asserted EXACTLY.
+    assert set(heads) == {"dealer", "board", "flow", "positions", "news"}
     for key, (title, use_line) in heads.items():
         assert title == title.capitalize(), key
         assert use_line, key
@@ -4110,7 +4112,9 @@ def test_the_empty_panels_use_the_apps_one_empty_line():
     untouched (a cold feed and a quiet tape still read differently)."""
     from pages import ui_kit as kit
     assert not hasattr(d, "_PLACEHOLDER")
-    assert inspect.getsource(d.render).count("kit.empty(") == 9
+    # Nine, plus the headlines strip's two (cold feed, quiet feed) since
+    # 2026-09-26 - and those two are worded differently too.
+    assert inspect.getsource(d.render).count("kit.empty(") == 11
     assert "text-center" in kit.EMPTY
 
 
@@ -4204,3 +4208,212 @@ def test_the_reactive_remove_set_covers_every_class_its_painters_apply():
                 for u in (True, False) for s in (-1, 0, 1)}
     applied |= {d.CON_WARN, d.CON_POS}          # the freshness label's pair
     assert applied <= set(d._ALL_STATE_TEXT.split())
+
+
+# ── the headlines strip (news feed, Task 14) ─────────────────────────────────
+_NEWS_NOW = datetime.datetime(2026, 9, 25, 15, 0, tzinfo=datetime.timezone.utc)
+
+
+def _news_item(i, title=None, url=None, source="S"):
+    return {"id": str(i), "title": title or f"headline {i}",
+            "url": url if url is not None else f"https://news.example/{i}",
+            "tickers": [], "source": source, "sources": [source],
+            "published_at": (_NEWS_NOW
+                             - datetime.timedelta(minutes=i)).isoformat()}
+
+
+def test_news_view_is_polled_in_the_batch_and_owns_its_region():
+    from pages import desk
+    assert "news:feed" in desk.VIEWS
+    assert desk._REGION_VIEWS["news"] == ("news:feed",)
+
+
+def test_the_news_strip_has_its_own_cold_and_quiet_lines():
+    """A dead feed and a still one must never read the same - the rule every
+    other panel here keeps. The cold line is the ONE shared sentence."""
+    from pages import copy as shared_copy
+    assert d.WAITING_NEWS is shared_copy.WAITING_NEWS
+    assert d.EMPTY_NEWS == "No headlines published yet today."
+    assert d.WAITING_NEWS != d.EMPTY_NEWS
+
+
+def test_news_rows_are_the_newest_five_and_none_for_a_cold_feed():
+    from pages import news_view
+    assert d.news_rows(None, now=_NEWS_NOW) is None
+    assert d.news_rows("nonsense", now=_NEWS_NOW) is None
+    assert d.news_rows({"items": []}, now=_NEWS_NOW) == []
+    view = {"items": [_news_item(i) for i in range(9)]}
+    rows = d.news_rows(view, now=_NEWS_NOW)
+    assert len(rows) == news_view.DESK_LIMIT == 5
+    assert rows[0]["title"] == "headline 0"
+    assert rows[0]["source"] == "S"
+
+
+def test_news_rows_name_every_source_that_carried_the_story():
+    item = dict(_news_item(1), sources=["Reuters", "CNBC"])
+    (row,) = d.news_rows({"items": [item]}, now=_NEWS_NOW)
+    assert row["source"] == "Reuters · CNBC"
+
+
+@pytest.mark.parametrize("url, ok", [
+    ("https://a.example/x", True), ("http://a.example/x", True),
+    ("javascript:alert(1)", False), ("JavaScript:alert(1)", False),
+    ("data:text/html,x", False), ("", False), (None, False),
+    ("//evil.example", False), ("/news", False)])
+def test_a_headline_links_only_to_a_web_address(url, ok):
+    """``ui.link`` escapes the TEXT, not the href: a ``javascript:`` URL in a
+    third-party feed would run on click. Anything but http(s) is plain text."""
+    assert (d.news_href(url) is not None) is ok
+    if ok:
+        assert d.news_href(url) == url
+
+
+def test_the_news_head_says_what_the_strip_is_for():
+    title, use_line = d.PANEL_HEADS["news"]
+    assert title == "Headlines"
+    assert str(d.NEWS_ROWS_N) in use_line
+
+
+def _nested_source(outer, name):
+    src = inspect.getsource(outer).lstrip()
+    fn = next(n for n in ast.walk(ast.parse(src))
+              if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+              and n.name == name)
+    return ast.get_source_segment(src, fn)
+
+
+def _ui_calls(source):
+    """The ``ui.<name>`` widgets a source segment CALLS (comments ignored)."""
+    return {n.func.attr for n in ast.walk(ast.parse(source))
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and isinstance(n.func.value, ast.Name) and n.func.value.id == "ui"}
+
+
+def test_the_news_painter_never_hands_feed_text_to_ui_html():
+    """Headlines are PLAIN TEXT from third-party feeds; only escaping widgets
+    may carry them."""
+    for name in ("_paint_news", "_news_row"):
+        assert "html" not in _ui_calls(_nested_source(d.render, name)), name
+    assert {"link", "label"} <= _ui_calls(_nested_source(d.render, "_news_row"))
+    assert "new_tab=True" in _nested_source(d.render, "_news_row")
+    assert not _ui_calls(inspect.getsource(d.news_rows))
+
+
+def test_render_with_a_cold_news_feed_says_so_in_the_strip():
+    from pages import desk
+    texts = _rendered_texts()
+    assert "Headlines" in texts
+    assert texts.count(desk.WAITING_NEWS) == 1
+    assert desk.EMPTY_NEWS not in texts
+
+
+def test_render_with_a_quiet_news_feed_says_nothing_has_published(monkeypatch):
+    from pages import desk
+    _seed_bus(monkeypatch, {"news:feed": {"items": []}})
+    texts = _rendered_texts()
+    assert desk.EMPTY_NEWS in texts
+    assert desk.WAITING_NEWS not in texts
+
+
+def _rendered_links():
+    from nicegui import ui
+    from pages import desk
+    before = set(ui.context.client.elements)
+    desk.render()
+    return [e for key, e in ui.context.client.elements.items()
+            if key not in before and isinstance(e, ui.link)]
+
+
+def test_render_draws_each_headline_as_an_escaping_link(monkeypatch):
+    title = "<img src=x onerror=alert(1)> Fed & markets"
+    _seed_bus(monkeypatch, {"news:feed": {"items": [
+        _news_item(i, title=title if i == 0 else None) for i in range(7)]}})
+    links = [e for e in _rendered_links() if e.props.get("target") == "_blank"
+             and str(e.props.get("href", "")).startswith("https://news.")]
+    assert len(links) == 5
+    assert links[0].text == title
+    assert links[0].props["href"] == "https://news.example/0"
+
+
+def test_render_never_links_a_headline_to_a_script_url(monkeypatch):
+    _seed_bus(monkeypatch, {"news:feed": {"items": [
+        _news_item(0, title="bad link", url="javascript:alert(1)")]}})
+    from nicegui import ui
+    from pages import desk
+    before = set(ui.context.client.elements)
+    desk.render()
+    made = [e for k, e in ui.context.client.elements.items() if k not in before]
+    assert not any(isinstance(e, ui.link)
+                   and "javascript" in str(e.props.get("href", ""))
+                   for e in made)
+    assert "bad link" in [getattr(e, "text", None) for e in made]
+
+
+def test_the_public_desk_reads_only_the_public_feed(monkeypatch):
+    """The Desk is a PUBLISHED screen. A feed whose ``public`` flag is off must
+    never reach live.neuralstrike.co, and the service enforces that by writing
+    ``news:feed_public`` - so the public process must read THAT key, never
+    ``news:feed``, which holds every feed."""
+    import bus_client
+    import shell
+    data = {"news:feed": {"items": [_news_item(0, title="PRIVATE ONLY")]},
+            "news:feed_public": {"items": [_news_item(0, title="FOR ALL")]}}
+    asked = []
+
+    def _read_full(v):
+        asked.append(v)
+        return data.get(v), (1 if v in data else None)
+
+    monkeypatch.setattr(bus_client, "read_full", _read_full)
+    monkeypatch.setattr(bus_client, "read", lambda v: data.get(v))
+    shell.publish({})
+    try:
+        texts = [t for t in _rendered_texts() if t]
+    finally:
+        shell.unpublish()
+    assert "FOR ALL" in texts
+    assert "PRIVATE ONLY" not in texts
+    assert "news:feed" not in asked and "news:feed_public" in asked
+
+
+def test_the_private_desk_reads_the_whole_feed():
+    import shell
+    assert not shell.is_public()
+    assert d.bus_key("news:feed") == "news:feed"
+    assert d.bus_key("options:matrix") == "options:matrix"
+
+
+def test_the_poll_probes_the_origins_own_news_key():
+    """The seed and the 2 s poll both go through ``bus_key``, or the poll would
+    probe ``news:feed`` on the public origin and repaint from it."""
+    src = inspect.getsource(d.render)
+    poll = _nested_source(d.render, "_poll")
+    assert "bus_key(" in poll
+    assert "read_versions" in poll
+    seed = src[src.index("seed = {}"):]
+    assert "bus_key(" in seed[:400]
+
+
+def test_the_strip_points_to_the_news_page_only_where_it_exists(monkeypatch):
+    """The Desk is click-through: the strip's way on to the full feed is one
+    link, drawn only where this process serves /news."""
+    import shell
+    _seed_bus(monkeypatch, {"news:feed": {"items": [_news_item(0)]},
+                            "news:feed_public": {"items": [_news_item(0)]}})
+    assert d.NEWS_MORE in _rendered_texts()
+    handlers = []
+    monkeypatch.setattr(shell, "navigate_to",
+                        lambda route, new_tab=False: handlers.append(route))
+    from nicegui import ui
+    before = set(ui.context.client.elements)
+    d.render()
+    (more,) = [e for k, e in ui.context.client.elements.items()
+               if k not in before and getattr(e, "text", "") == d.NEWS_MORE]
+    for listener in more._event_listeners.values():
+        listener.handler(None)
+    assert handlers == ["/news"]
+    shell.publish({})                 # a public origin with no /news route
+    try:
+        assert d.NEWS_MORE not in _rendered_texts()
+    finally:
+        shell.unpublish()

@@ -136,7 +136,9 @@ def test_the_poll_reads_the_ten_shared_views_plus_this_symbols_dossier():
     views = sp.poll_views("MU")
     assert views[:len(sp.VIEWS)] == sp.VIEWS
     assert views[-1] == "options:dossier:MU"
-    assert len(sp.VIEWS) == 10              # nine + gex_status (wall freshness)
+    # nine + gex_status (wall freshness) + news:feed (the "In the news" band,
+    # 2026-09-26)
+    assert len(sp.VIEWS) == 11
 
 
 def test_a_rejected_symbol_polls_no_dossier_view():

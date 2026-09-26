@@ -38,6 +38,7 @@ import logging
 import math
 import time
 from datetime import datetime
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 # ``alerts`` for its ONE market-hours predicate. The Settings card promises the
@@ -67,6 +68,7 @@ from pages.regime_mix import regime_picture as _regime_picture
 # imported rather than restated, for the reason at the top of this file.
 from pages import sentiment_bullbear as _bbmap
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
+from pages import news_view as _news
 from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
 # The structure bar's geometry, shared with the Symbol Dossier. Used below, and
 # also re-exported: ``desk.structure_positions`` is what test_desk calls.
@@ -343,6 +345,71 @@ def flow_rows(flow_view, limit=FLOW_ROWS_N):
     restraint ("No buy/sell claim"), and the Desk must not add one by paraphrase.
     """
     return _flow.alert_rows(flow_view)[:max(0, int(limit))]
+
+
+# ── the headlines strip (news feed) ─────────────────────────────────────────
+# The newest few items of ``cache:news:feed``, one line each: when · source ·
+# the headline, which opens the ORIGINAL article in a new tab. Every fact comes
+# from ``pages/news_view.py``, the same builder /news and the Symbol band use.
+NEWS_ROWS_N = _news.DESK_LIMIT
+NEWS_VIEW = _news.VIEW
+NEWS_ROUTE = "/news"
+NEWS_MORE = "All headlines →"
+
+
+def bus_key(view):
+    """The cache key THIS process reads for ``view``.
+
+    ⚠ The Desk is a PUBLISHED screen (``live_screens.SCREENS``), and
+    ``news:feed`` holds every feed - including any whose ``public`` flag is
+    off, which must never reach live.neuralstrike.co. The service enforces
+    that flag by writing ``news:feed_public``, so the public origin reads that
+    key instead. The page keeps ONE name for the view (``VIEWS`` and
+    ``_REGION_VIEWS`` are unchanged); only the key read on the wire differs."""
+    if view == NEWS_VIEW and _shell.is_public():
+        return _news.VIEW_PUBLIC
+    return view
+
+
+def news_href(url):
+    """``url`` if it is a web address, else ``None``.
+
+    ``ui.link`` escapes its TEXT, not its href: a ``javascript:`` or ``data:``
+    URL in a third-party feed would run on click. Anything but an absolute
+    http(s) address draws the headline as plain text instead."""
+    if not isinstance(url, str):
+        return None
+    url = url.strip()
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in ("http", "https") or not parts.netloc:
+        return None
+    return url
+
+
+def news_rows(news_view, *, now, limit=NEWS_ROWS_N):
+    """The newest ``limit`` headlines, or ``None`` for a cold feed.
+
+    ``None`` (nothing published, or a payload that is not a dict) and ``[]``
+    (a live feed with nothing in it) are different facts, and the strip says
+    them in different words. A row with no title says nothing and is skipped.
+    ⚠ ``title`` is PLAIN TEXT from a third-party feed - only an escaping widget
+    may draw it."""
+    if not isinstance(news_view, dict):
+        return None
+    out = []
+    for r in _news.rows(news_view, now=now):
+        title = r["title"].strip()
+        if not title:
+            continue
+        out.append({"id": r["id"], "when": r["when"], "title": title,
+                    "source": " · ".join(r["sources"]),
+                    "href": news_href(r["url"])})
+        if len(out) >= max(0, int(limit)):
+            break
+    return out
 
 
 # ── open positions (both books) ─────────────────────────────────────────
@@ -1558,7 +1625,7 @@ def signed_class(v):
 VIEWS = ("sentiment:regime", "sentiment:composite",
          "sentiment:history", "options:gex_status", "options:matrix",
          "options:flow_alerts", "options:paper_account", "options:captured",
-         "sentiment:bullbear", "market:summary")
+         "sentiment:bullbear", "market:summary", NEWS_VIEW)
 
 # Which views each region depends on. A repaint touches only the regions whose
 # inputs actually changed — without this, one 2 s header bump would rebuild all
@@ -1575,6 +1642,9 @@ _REGION_VIEWS = {
     "bullbear": ("sentiment:bullbear",),
     "flow": ("options:flow_alerts",),
     "positions": ("options:paper_account", "options:captured"),
+    # The headlines strip - one view. On the public origin the KEY read is
+    # ``news:feed_public`` (see ``bus_key``); the view's name here is the same.
+    "news": (NEWS_VIEW,),
     # The sentence (market_svc, on change) and the five views its live chips
     # read. Chips and sentence update IN PLACE, so a repaint here costs nothing
     # visible when only a day-move ticked.
@@ -2602,6 +2672,10 @@ _HEAD = f"text-[10px] tracking-[.2em] {REF_HEAD_TXT}"
 # nowhere to go and must not be dressed as links (see ``_position_row``).
 _ROW_STATIC = f"items-center px-1 py-[11px] border-b {_ROW_RULE}"
 _ROW = f"{_ROW_STATIC} cursor-pointer"
+# The headlines strip's one way on to /news - the app's link colour, as the
+# Symbol Dossier's band links wear it.
+_NEWS_MORE = (f"text-[12px] tracking-[.06em] cursor-pointer pt-2 self-start "
+              f"text-[{_P['focus']}] hover:underline")
 _VALUE = f"text-[13px] tabular-nums {LABEL}"
 # The dealer panel's three price columns, one shade apart (see the ladder above).
 _V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
@@ -2644,6 +2718,10 @@ EMPTY_DEALER = ("No dealer positioning yet — these levels appear once the "
 EMPTY_BOARD = "Nothing ranked yet — the board fills once the scanner runs."
 EMPTY_FLOW = "Nothing unusual has traded yet today."
 EMPTY_POSITIONS = "Nothing open — no paper trades running."
+# The headlines strip's pair: a cold news feed (the ONE shared sentence) and a
+# live one that has nothing in it.
+WAITING_NEWS = _copy.WAITING_NEWS
+EMPTY_NEWS = "No headlines published yet today."
 
 
 def stale_walls_note(label):
@@ -2967,6 +3045,10 @@ PANEL_HEADS = {
              f"who initiated."),
     "positions": ("Positions",
                   "What you are holding, and what needs a decision."),
+    # A headline opens the ORIGINAL article; the strip itself is not a verdict.
+    "news": ("Headlines",
+             f"The {NEWS_ROWS_N} newest stories. Each opens the original "
+             f"article."),
 }
 
 # One label per grid track, hoisted for the same reason as the heads above: the
@@ -3339,6 +3421,12 @@ def render():
             board_body, board_signals = _panel(*PANEL_HEADS["board"])
             flow_body, _ = _panel(*PANEL_HEADS["flow"])
             pos_body, _ = _panel(*PANEL_HEADS["positions"])
+
+        # ── the headlines strip ──────────────────────────────────────────────
+        # Full width under the four panels: one line per story needs the width
+        # far more than it needs a column of its own, and a fifth cell in the
+        # 2x2 grid would leave a hole beside it.
+        news_body, _ = _panel(*PANEL_HEADS["news"])
 
         # ── the market summary ───────────────────────────────────────────────
         # At the BOTTOM, full width: the four panels above are per-symbol, and
@@ -3819,6 +3907,46 @@ def render():
             for row in shown:
                 _position_row(row)
 
+    def _paint_news():
+        news_body.clear()
+        rows = news_rows(_view(NEWS_VIEW), now=datetime.now(_CT))
+        with news_body:
+            if rows is None:
+                kit.empty(WAITING_NEWS)
+                return
+            if not rows:
+                kit.empty(EMPTY_NEWS)
+                return
+            for row in rows:
+                _news_row(row)
+            # The strip is a pointer, like every panel here: the full feed, its
+            # filters and its trending list live on /news. Drawn only where this
+            # process serves that page.
+            if _shell.can_navigate(NEWS_ROUTE):
+                ui.label(NEWS_MORE).classes(_NEWS_MORE).on(
+                    "click", lambda _e: _open_news())
+
+    def _news_row(row):
+        # ⚠ ``row["title"]`` is third-party PLAIN TEXT: ``ui.link`` and
+        # ``ui.label`` escape it. Never ``ui.html``.
+        #
+        # The row itself is NOT a click-through (unlike the four panels above):
+        # its headline already opens the article, and a row click on top of it
+        # would fire both. "All headlines" is the way to /news.
+        with ui.row().classes(f"w-full gap-3 no-wrap {_ROW_STATIC}"):
+            ui.label(row["when"] or _DASH).classes(
+                f"text-[11px] tabular-nums whitespace-nowrap shrink-0 {MUTED}")
+            ui.label(row["source"] or _DASH).classes(
+                f"text-[10px] tracking-[.08em] whitespace-nowrap shrink-0 "
+                f"{_DIM}")
+            if row["href"]:
+                ui.link(row["title"], row["href"], new_tab=True).classes(
+                    f"text-[13px] min-w-0 truncate no-underline "
+                    f"hover:underline {LABEL}")
+            else:
+                ui.label(row["title"]).classes(
+                    f"text-[13px] min-w-0 truncate {LABEL}")
+
     def _position_row(row):
         # Rebuild-time only, same as the flow row above — never updated in place.
         #
@@ -3881,6 +4009,10 @@ def render():
         _handoff.send_to_gamma(symbol)
 
     @guard
+    def _open_news():
+        _shell.navigate_to(NEWS_ROUTE)
+
+    @guard
     def _open_map():
         """The strip is a pointer, not a second map: every industry and stock
         inside a sector lives one click away, and none of them is on this
@@ -3899,7 +4031,7 @@ def render():
     painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
                 "dealer": _paint_dealer, "board": _paint_board,
                 "flow": _paint_flow, "positions": _paint_positions,
-                "summary": _paint_summary}
+                "news": _paint_news, "summary": _paint_summary}
 
     # ── arrival detection ────────────────────────────────────────────────────
     # Thin: read the cache, build the rows, hand them to the module-level fold.
@@ -4040,16 +4172,20 @@ def render():
         ``read_versions`` reads the eleven tiny ``{key}:ver`` counters in a
         single pipelined round-trip; a full payload is deserialized only for a
         view that actually moved."""
-        vers = await run.io_bound(bus_client.read_versions, list(VIEWS))
+        # Probed and read by ``bus_key``: the public origin's news KEY is
+        # ``news:feed_public``, while the page keeps one name for the view.
+        keys = {v: bus_key(v) for v in VIEWS}
+        vers = await run.io_bound(bus_client.read_versions,
+                                  list(keys.values()))
         changed = [v for v in VIEWS
-                   if vers.get(v) is not None
-                   and vers.get(v) != state["versions"].get(v)]
+                   if vers.get(keys[v]) is not None
+                   and vers.get(keys[v]) != state["versions"].get(v)]
         if not changed:
             return
         payloads = {}
         for v in changed:
-            payloads[v] = await run.io_bound(bus_client.read, v)
-            state["versions"][v] = vers.get(v)
+            payloads[v] = await run.io_bound(bus_client.read, keys[v])
+            state["versions"][v] = vers.get(keys[v])
         _paint(payloads)
         # After the paint, never before: the row must already be lit when the
         # sentence starts, and synthesis can take a second.
@@ -4061,7 +4197,7 @@ def render():
     # dead service must not blank the page.
     seed = {}
     for view in VIEWS:
-        payload, version = bus_client.read_full(view)
+        payload, version = bus_client.read_full(bus_key(view))
         seed[view] = payload
         state["versions"][view] = version
     _tick_clock()

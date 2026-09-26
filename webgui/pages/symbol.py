@@ -3,7 +3,7 @@ band to the page that owns that fact.
 
 Design: ``docs/plans/2026-09-17-symbol-dossier-design.md``.
 
-Tier-1 reader. It polls ten shared cache views plus this symbol's own
+Tier-1 reader. It polls eleven shared cache views plus this symbol's own
 ``cache:options:dossier:<SYMBOL>`` on ONE batched ``read_versions`` every two
 seconds (``VIEWS`` / ``REGION_VIEWS``, the Desk's shape), and repaints only the
 bands whose views moved. Every number comes from ``pages/symbol_facts.py`` or a
@@ -51,6 +51,7 @@ from nicegui import run, ui
 from pages import bullbear as _bb
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages import desk as _desk
+from pages import news_view as _news
 from pages import symbol_facts as sf
 from pages import ui_kit as kit
 from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
@@ -190,7 +191,7 @@ VIEWS = ("options:matrix", "options:scan_funnel", "options:scan_day",
          "options:gex_status",
          "options:flow_alerts", "options:paper_account", "options:paper_trades",
          "options:captured",
-         "sentiment:regime", "sentiment:bullbear")
+         "sentiment:regime", "sentiment:bullbear", _news.VIEW)
 
 # What the header's Updated stamp reads. ⚠ NOT this symbol's dossier: that key
 # is written ONCE per look-up and never republished, and a scanned symbol has
@@ -222,6 +223,9 @@ REGION_VIEWS = {
                 "options:matrix", "options:scan_funnel", DOSSIER),
     "signals": (SCAN_DAY,),
     "flow": ("options:flow_alerts",),
+    # The whole feed, private only: this page is not a public screen, so it
+    # reads ``news:feed`` (the Desk's ``bus_key`` is what swaps the key there).
+    "news": (_news.VIEW,),
     "positions": _BOOK_VIEWS,
 }
 
@@ -712,6 +716,29 @@ def flow_band(symbol, flow_env):
          "text": r.get("text", "")} for r in rows]}
 
 
+# The news feed has published nothing — the ONE shared sentence, which the
+# Desk's headlines strip shows too.
+WAITING_NEWS = _copy.WAITING_NEWS
+
+
+def news_band(symbol, news_env, now):
+    """The newest headlines that NAME the symbol — or the cold-feed / quiet
+    line. ``now`` decides each row's "today" and time (``news_view.rows``).
+
+    ⚠ A row's ``title`` is PLAIN TEXT from a third-party feed; the painter
+    draws it through ``ui.link`` / ``ui.label`` only, and links it only when
+    ``href`` (``desk.news_href``: http(s) or nothing) is set."""
+    sym = clean_symbol(symbol)
+    if not isinstance(news_env, dict):
+        return {"message": WAITING_NEWS, "rows": []}
+    rows = _news.for_symbol(news_env, sym, now=now) if sym else []
+    if not rows:
+        return {"message": f"No headlines for {sym} in the feed.", "rows": []}
+    return {"message": "", "rows": [
+        dict(r, source=" · ".join(r["sources"]),
+             href=_desk.news_href(r["url"])) for r in rows]}
+
+
 # Which books the manage cycle's rescue overlay tags (the Desk's ``BOOKS``):
 # the automated paper account. The ledger and the captured tape are never
 # inspected, so their rows print an em-dash, not "OK".
@@ -889,6 +916,8 @@ def render(symbol=None):
                  "/options/scanner"),))
             flow_body = _band("Flow alerts", (
                 ("Flow Alerts", _go_route("/options/flow"), "/options/flow"),))
+        news_body = _band("In the news", (
+            ("Market News", _go_route("/news"), "/news"),))
         pos_body = _band("Your position", (
             ("Paper Ledger", _go_route("/options/paper"), "/options/paper"),
             ("Rescue", _go_route("/options/rescue"), "/options/rescue")))
@@ -1121,6 +1150,33 @@ def render(symbol=None):
                     ui.label(r["kind"]).classes(f"{_LINE} {r['tone']}".strip())
                     ui.label(r["detail"]).classes(_SUB)
 
+    def _paint_news():
+        news_body.clear()
+        if sym is None:
+            _absent(news_body, "")
+            return
+        band = news_band(sym, _d(_news.VIEW), _dt.datetime.now(_CT))
+        with news_body:
+            if not band["rows"]:
+                kit.empty(band["message"])
+                return
+            for r in band["rows"]:
+                # ⚠ Third-party PLAIN TEXT: ``ui.link`` / ``ui.label`` escape
+                # it. Never ``ui.html``.
+                with ui.row().classes(_ROW):
+                    ui.label(r["when"] or _DASH).classes(
+                        f"{_SUB} tabular-nums whitespace-nowrap shrink-0")
+                    ui.label(r["source"] or _DASH).classes(
+                        f"text-[11px] leading-snug {_FAINT} "
+                        f"whitespace-nowrap shrink-0")
+                    title = r["title"] or _DASH
+                    if r["href"]:
+                        ui.link(title, r["href"], new_tab=True).classes(
+                            f"{_LINE} min-w-0 truncate no-underline "
+                            f"hover:underline")
+                    else:
+                        ui.label(title).classes(f"{_LINE} min-w-0 truncate")
+
     def _paint_positions():
         pos_body.clear()
         if sym is None:
@@ -1147,7 +1203,7 @@ def render(symbol=None):
     painters = {"header": _paint_header, "structure": _paint_structure,
                 "volatility": _paint_volatility, "context": _paint_context,
                 "signals": _paint_signals, "flow": _paint_flow,
-                "positions": _paint_positions}
+                "news": _paint_news, "positions": _paint_positions}
 
     def _release_refresh():
         """Give Refresh back, then re-apply the page's own rule.

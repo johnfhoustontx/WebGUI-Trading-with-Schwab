@@ -24,7 +24,8 @@ def _page_sources():
 def test_the_shared_sentences_name_no_internal_service():
     """Off-hours these are the most-read text in the app, and naming a service
     makes a closed market read as a fault worth chasing."""
-    for name in ("WAITING_OPTIONS", "WAITING_SENTIMENT", "WAITING_MARKET"):
+    for name in ("WAITING_OPTIONS", "WAITING_SENTIMENT", "WAITING_MARKET",
+                 "WAITING_NEWS"):
         line = getattr(shared_copy, name)
         assert "service" not in line.lower(), name
         assert "hasn't published" in line, name
@@ -36,6 +37,15 @@ def test_the_three_sentences_are_distinct():
     lines = {shared_copy.WAITING_OPTIONS, shared_copy.WAITING_SENTIMENT,
              shared_copy.WAITING_MARKET}
     assert len(lines) == 3
+
+
+def test_the_news_sentence_is_a_fourth_distinct_domain():
+    """The news feed's cold line (the Desk strip and the Symbol band, since
+    2026-09-26) joins the three without collapsing into any of them."""
+    lines = {shared_copy.WAITING_OPTIONS, shared_copy.WAITING_SENTIMENT,
+             shared_copy.WAITING_MARKET, shared_copy.WAITING_NEWS}
+    assert len(lines) == 4
+    assert "news" in shared_copy.WAITING_NEWS
 
 
 def test_no_page_restates_a_waiting_line_as_a_literal():

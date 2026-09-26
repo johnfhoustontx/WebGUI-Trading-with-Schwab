@@ -40,6 +40,11 @@ WAITING_SENTIMENT = ("No data yet — the sentiment feed hasn't published "
                      "this session.")
 WAITING_MARKET = "No data yet — the market feed hasn't published this session."
 
+# The news feed's (2026-09-26): the Desk's headlines strip and the Symbol
+# Dossier's "In the news" band both show it. Each keeps its own quiet-feed line
+# (``desk.EMPTY_NEWS``, "No headlines for <SYM> in the feed.").
+WAITING_NEWS = "No headlines yet — the news feed hasn't published this session."
+
 # Outside the live-price window the public Rescue, Calculator and Simulator
 # still run (``after_hours`` in config/sessions.toml), on whatever Schwab
 # returns after the close. One wording on all three screens, so a visitor reads
