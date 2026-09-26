@@ -804,3 +804,93 @@ def test_impact_config_is_a_copy(monkeypatch):
 
 def test_an_unknown_calendar_source_is_disabled():
     assert nc.calendar_source("nope")["enabled"] is False
+
+
+# ── review findings (2026-09-26): calendar + impact scalar validation ─────────
+def _layered(tmp_path, monkeypatch, override_text):
+    """The shipped file under a config/local override - the real load path."""
+    base = tmp_path / "news.toml"
+    base.write_text((ROOT / "config" / "news.toml").read_text(encoding="utf-8"),
+                    encoding="utf-8")
+    local = tmp_path / "local"
+    local.mkdir()
+    (local / "news.toml").write_text(override_text, encoding="utf-8")
+    monkeypatch.setenv("TRADING_CONFIG_OVERRIDES_IN_TESTS", "1")
+    load, _reset = config_toml.toml_loader(base, nc.DEFAULTS, label="news.toml")
+    monkeypatch.setattr(nc, "load", load)
+
+
+def test_a_non_bool_calendar_enabled_fails_closed(tmp_path, monkeypatch, caplog):
+    _layered(tmp_path, monkeypatch, '[calendar]\nenabled = "yes"\n')
+    assert nc.calendar_config()["enabled"] is False
+    assert "enabled" in caplog.text
+    for bad in (1, "true", None, [True]):
+        monkeypatch.setattr(nc, "load", lambda b=bad: {"calendar": {"enabled": b}})
+        assert nc.calendar_config()["enabled"] is False, bad
+
+
+def test_a_real_bool_calendar_enabled_is_kept(tmp_path, monkeypatch):
+    _layered(tmp_path, monkeypatch, "[calendar]\nenabled = false\n")
+    assert nc.calendar_config()["enabled"] is False
+    assert nc.calendar_config()["refresh_min"] == 60
+
+
+def test_bad_calendar_cadences_are_the_defaults(tmp_path, monkeypatch):
+    _layered(tmp_path, monkeypatch,
+             '[calendar]\nrefresh_min = 0\nvalues_refresh_min = -5\n'
+             'release_poll_min = "2"\nrelease_watch_min = true\nactual_fresh_h = nan\n')
+    cal = nc.calendar_config()
+    d = nc.DEFAULTS["calendar"]
+    for key in ("refresh_min", "values_refresh_min", "release_poll_min",
+                "release_watch_min", "actual_fresh_h"):
+        assert cal[key] == d[key], key
+    for bad in (float("inf"), -0.1, None, [5]):
+        monkeypatch.setattr(nc, "load", lambda b=bad: {"calendar": {"refresh_min": b}})
+        assert nc.calendar_config()["refresh_min"] == 60, bad
+
+
+def test_good_calendar_cadences_are_read_as_written(tmp_path, monkeypatch):
+    _layered(tmp_path, monkeypatch,
+             "[calendar]\nrefresh_min = 30\nrelease_poll_min = 0.5\nactual_fresh_h = 12\n")
+    cal = nc.calendar_config()
+    assert (cal["refresh_min"], cal["release_poll_min"], cal["actual_fresh_h"]) == (30, 0.5, 12)
+
+
+def test_a_bad_source_refresh_min_is_the_calendar_default(tmp_path, monkeypatch):
+    _layered(tmp_path, monkeypatch,
+             "[calendar]\nrefresh_min = 45\n"
+             '[calendar.sources.bls]\nrefresh_min = 0\n'
+             '[calendar.sources.bea]\nrefresh_min = "720"\n'
+             "[calendar.sources.nasdaq_ipo]\nrefresh_min = 90\n")
+    assert nc.calendar_source("bls")["refresh_min"] == 45
+    assert nc.calendar_source("bea")["refresh_min"] == 45
+    assert nc.calendar_source("nasdaq_ipo")["refresh_min"] == 90
+    assert nc.calendar_source("fed")["refresh_min"] == 45       # absent: inherited
+
+
+def test_an_inherited_bad_refresh_min_is_the_built_in_default(tmp_path, monkeypatch):
+    _layered(tmp_path, monkeypatch,
+             "[calendar]\nrefresh_min = -1\n[calendar.sources.bls]\nrefresh_min = true\n")
+    assert nc.calendar_source("fed")["refresh_min"] == 60
+    assert nc.calendar_source("bls")["refresh_min"] == 60
+
+
+def test_bad_impact_scalars_are_the_defaults(tmp_path, monkeypatch, caplog):
+    _layered(tmp_path, monkeypatch,
+             "[impact]\nstale_after_h = -3\nmulti_source = -1\nwatchlist = -2\n")
+    imp = nc.impact_config()
+    assert (imp["stale_after_h"], imp["multi_source"], imp["watchlist"]) == (24, 1, 2)
+    assert "stale_after_h" in caplog.text
+    caplog.clear()
+    nc.impact_config()
+    assert "stale_after_h" not in caplog.text                   # one WARNING per value
+    for bad in (0, float("nan"), True, "24"):
+        monkeypatch.setattr(nc, "load", lambda b=bad: {"impact": {"stale_after_h": b}})
+        assert nc.impact_config()["stale_after_h"] == 24, bad
+
+
+def test_zero_multi_source_and_watchlist_mean_off_and_are_kept(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: {"impact": {"multi_source": 0, "watchlist": 0,
+                                                        "stale_after_h": 6}})
+    imp = nc.impact_config()
+    assert (imp["multi_source"], imp["watchlist"], imp["stale_after_h"]) == (0, 0, 6)

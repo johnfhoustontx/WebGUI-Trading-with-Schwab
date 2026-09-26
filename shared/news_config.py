@@ -36,8 +36,11 @@ right type is read as written - except ``[dedupe] same_feed_merge_h``, which
 (a bool included) and clamps to 24 above it, because it decides whether two
 rows become one - and the v2 accessors: ``impact_config()`` (thresholds must be
 numbers with ``high_at > med_at``, else the built-in pair with one WARNING;
-malformed keyword tiers and non-numeric points are dropped) and
-``indicators()`` (unknown transform/schedule or no series -> skipped with a
+``stale_after_h`` must be > 0 and the two boosts >= 0, else the default with
+one WARNING; malformed keyword tiers and non-numeric points are dropped),
+``calendar_config()`` / ``calendar_source()`` (a non-bool ``enabled`` fails
+closed; a ``*_min`` / ``*_h`` that is not a finite number > 0 is the default)
+and ``indicators()`` (unknown transform/schedule or no series -> skipped with a
 WARNING). Keyword tiers, sources and indicators are TABLES, never lists: a list
 in ``config/local`` replaces the whole list. Nothing here raises. Treat anything ``load()``
 returns as read-only: it is the cached mapping.
@@ -144,7 +147,10 @@ DEFAULTS = {
         "ipo": {"min_offer_usd": 100_000_000, "lookback_days": 7},
         "dividends": {"enabled": True, "refresh_at": "06:40", "horizon_days": 30,
                       "lookback_days": 3},
-        # File order = tile order.
+        # Tile order is THIS built-in order: the loader deep-merges the file
+        # onto these defaults, so an indicator the file adds appends after
+        # them, and removing a table from the file does NOT remove it (the
+        # default survives the merge) - set enabled = false instead.
         "indicators": {
             "cpi": {"enabled": True, "label": "CPI", "series": "CPIAUCSL",
                     "transform": "pct_mom", "schedule": "bls",
@@ -485,9 +491,20 @@ def impact_config() -> dict:
                    high, med, default["high_at"], default["med_at"])
         high, med = default["high_at"], default["med_at"]
     out = {"high_at": high, "med_at": med}
-    for key in ("stale_after_h", "multi_source", "watchlist"):
+    # stale_after_h must be > 0 (0 would cap every HIGH on sight); the two
+    # boosts may be 0 (off) but never negative - a negative "boost" would
+    # quietly turn a followed ticker into a penalty.
+    for key, floor_ok in (("stale_after_h", lambda v: v > 0),
+                          ("multi_source", lambda v: v >= 0),
+                          ("watchlist", lambda v: v >= 0)):
         value = raw.get(key, default[key])
-        out[key] = value if _is_num(value) else default[key]
+        if _is_num(value) and floor_ok(value):
+            out[key] = value
+            continue
+        _warn_once(("impact", key, repr(value)),
+                   "news.toml: [impact] %s = %r is not a usable number - using %r",
+                   key, value, default[key])
+        out[key] = default[key]
     teaser = raw.get("match_teaser", default["match_teaser"])
     out["match_teaser"] = teaser if isinstance(teaser, bool) else default["match_teaser"]
     out["keywords"] = _tiers(raw.get("keywords"))
@@ -501,20 +518,53 @@ def _calendar():
     return _table(load(), "calendar") or DEFAULTS["calendar"]
 
 
+def _cadence_key(key) -> bool:
+    return isinstance(key, str) and key.endswith(("_min", "_h"))
+
+
+def _cadence(where, key, value, default):
+    """A ``*_min`` / ``*_h`` value when it is a finite number > 0 (never a
+    bool), else ``default`` with one WARNING per distinct bad value. A 0 or
+    negative cadence would poll in a tight loop or never; NaN fails ``> 0``."""
+    if _is_num(value) and value > 0:
+        return value
+    _warn_once((where, key, repr(value)),
+               "news.toml: %s %s = %r is not a number > 0 - using %r",
+               where, key, value, default)
+    return default
+
+
 def calendar_config() -> dict:
     """The ``[calendar]`` scalars (sub-tables left out), each defaulted when
-    absent. A copy."""
+    absent. A copy.
+
+    ``enabled`` that is not a real bool FAILS CLOSED (False), as a source's or
+    an indicator's does. Every ``*_min`` / ``*_h`` scalar that is not a finite
+    number > 0 (a bool, a string, NaN, 0, a negative) is its built-in default;
+    one WARNING per distinct bad value."""
     cal = _calendar()
-    out = {k: v for k, v in DEFAULTS["calendar"].items() if not isinstance(v, dict)}
+    base = DEFAULTS["calendar"]
+    out = {k: v for k, v in base.items() if not isinstance(v, dict)}
     out.update({k: v for k, v in cal.items() if not isinstance(v, dict)})
+    if not isinstance(out.get("enabled"), bool):
+        _warn_once(("calendar", "enabled", repr(out.get("enabled"))),
+                   "news.toml: [calendar] enabled = %r, not true/false - treated as "
+                   "false", out.get("enabled"))
+        out["enabled"] = False
+    for key in list(out):
+        if _cadence_key(key) and key in base:
+            out[key] = _cadence("[calendar]", key, out[key], base[key])
+        elif _cadence_key(key) and not (_is_num(out[key]) and out[key] > 0):
+            out.pop(key)                 # an unknown key with no default: drop it
     return copy.deepcopy(out)
 
 
 def calendar_source(name) -> dict:
     """``[calendar.sources.<name>]`` as a copy, with ``user_agent`` filled from
     ``[collector] feed_user_agent`` when ``""`` or absent, and ``refresh_min``
-    from ``[calendar] refresh_min`` when absent. A name that is not a source
-    table is ``enabled = False`` (fail closed)."""
+    from ``[calendar] refresh_min`` when absent OR not a finite number > 0 (the
+    inherited value is itself validated by ``calendar_config``). A name that is
+    not a source table is ``enabled = False`` (fail closed)."""
     sources = _table(_calendar(), "sources") or {}
     table = sources.get(name) if isinstance(name, str) else None
     out = copy.deepcopy(table) if isinstance(table, dict) else {"enabled": False}
@@ -526,14 +576,19 @@ def calendar_source(name) -> dict:
         ua = collector.get("feed_user_agent")
         out["user_agent"] = (ua if isinstance(ua, str) and ua
                              else DEFAULTS["collector"]["feed_user_agent"])
-    if "refresh_min" not in out:
-        out["refresh_min"] = calendar_config()["refresh_min"]
+    inherited = calendar_config()["refresh_min"]          # already validated
+    if "refresh_min" in out:
+        out["refresh_min"] = _cadence(f"[calendar.sources.{name}]", "refresh_min",
+                                      out["refresh_min"], inherited)
+    else:
+        out["refresh_min"] = inherited
     return out
 
 
 def indicators() -> list:
     """Every ENABLED ``[calendar.indicators.<key>]`` table as a dict with
-    ``key`` added, in table order. An unknown ``transform`` / ``schedule``, a
+    ``key`` added, in the built-in order with any file-only indicator
+    appended (the file is deep-merged onto DEFAULTS). An unknown ``transform`` / ``schedule``, a
     missing ``series`` or a non-table entry is skipped with a WARNING; an
     ``enabled`` that is not a real bool fails closed."""
     tables = _table(_calendar(), "indicators")

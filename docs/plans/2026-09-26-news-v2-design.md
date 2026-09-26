@@ -229,7 +229,11 @@ Every stored and published time is an **aware ISO instant**; a date-only event
 carries `date` with `at: null`. Tier 1 renders CT (`"Wed Oct 14 · 7:30 AM CT"`) —
 the app's convention.
 
-### Indicators — `[calendar.indicators.<key>]`, one table each (file order = tile order)
+### Indicators — `[calendar.indicators.<key>]`, one table each (tile order = the built-in order)
+
+Order is the built-in `DEFAULTS` order: the file is deep-merged onto it, so a new
+indicator appends, and removing a table from the file does not remove it — set
+`enabled = false`.
 
 | key | label | series | transform | schedule | match / rid | tile |
 |---|---|---|---|---|---|---|
