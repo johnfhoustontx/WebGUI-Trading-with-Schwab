@@ -15,7 +15,8 @@ it is read from the STORE (``shared.dividends.last_run_day``), in the executor,
 so a restart does not refetch. ``refresh`` checks the same day again itself,
 under a lock that keeps a command pull from overlapping this one. The pull is
 blocking I/O (~80 proxy calls), so it runs in the default executor. A failure
-is logged and retried after ``RETRY_AFTER_FAIL_S``, never every tick.
+is logged and retried after ``[calendar.dividends] retry_min`` minutes
+(:func:`retry_after_fail_s`), never every tick.
 
 ``make_app``'s ``schedulers`` flag gates the whole loop, so dev stays quiet.
 """
@@ -32,7 +33,6 @@ _log = logging.getLogger("trade_svc.scheduler")
 _CT = ZoneInfo("America/Chicago")
 
 TICK_S = 60               # how often the loop wakes (heartbeat, config re-read)
-RETRY_AFTER_FAIL_S = 900  # a failed pull is retried after this, not every tick
 
 # Seams for tests (a fake clock and sleep; never patch asyncio.sleep globally).
 _sleep = asyncio.sleep
@@ -63,6 +63,19 @@ def dividends_config() -> dict:
 def _default_refresh_at() -> str:
     from shared import news_config as nc
     return nc.DEFAULTS["calendar"]["dividends"]["refresh_at"]
+
+
+def retry_after_fail_s(cfg) -> int:
+    """Seconds before a failed pull is retried: ``cfg["retry_min"]`` x 60.
+
+    ``shared.news_config.dividends_config`` already validated it (an int in
+    1..1440); anything else here is the shipped default from
+    ``shared.news_config.DEFAULTS``, not a second literal."""
+    from shared import news_config as nc
+    raw = cfg.get("retry_min") if isinstance(cfg, dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 1440:
+        raw = nc.DEFAULTS["calendar"]["dividends"]["retry_min"]
+    return raw * 60
 
 
 def _parse_hhmm(raw) -> dt.time:
@@ -126,10 +139,12 @@ async def loop(bus) -> None:
     failed_at = None
     check_failing = False
     ran_day = None   # the CT day a pull last succeeded (or the store said ran)
+    retry_s = retry_after_fail_s(None)
     while True:
         _heartbeat.tick()
         try:
             cfg = dividends_config()
+            retry_s = retry_after_fail_s(cfg)
             now = _utcnow()
             today = _local(now).date().isoformat()
             # The store is opened only once the clock says a run could be due
@@ -148,7 +163,7 @@ async def loop(bus) -> None:
                 _log.exception("dividend schedule check failed")
             check_failing = True
             due = False
-        if due and (failed_at is None or _monotonic() - failed_at >= RETRY_AFTER_FAIL_S):
+        if due and (failed_at is None or _monotonic() - failed_at >= retry_s):
             try:
                 n = await ev.run_in_executor(None, _refresh)
                 _log.info("dividend pull: %s symbols fetched", n)
@@ -158,6 +173,6 @@ async def loop(bus) -> None:
                 raise
             except Exception:  # never let one bad pull kill the scheduler
                 _log.exception("dividend pull failed - retrying in %s s",
-                               RETRY_AFTER_FAIL_S)
+                               retry_s)
                 failed_at = _monotonic()
         await _sleep(TICK_S)

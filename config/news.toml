@@ -296,6 +296,7 @@ enabled = true
 refresh_at = "06:40"       # CT, trading days, run by trade_svc
 horizon_days = 30
 lookback_days = 3
+retry_min = 15             # a failed pull is retried after this many minutes (1-1440)
 
 # One table per indicator. Tile order is the BUILT-IN order (shared/news_config.py
 # DEFAULTS), not this file's: a new indicator added here appends after them, and

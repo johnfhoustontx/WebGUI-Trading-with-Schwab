@@ -863,8 +863,9 @@ order. All times are Central.
   just-priced IPOs. **Economic data (CPI, PPI etc)**: one tile per report with
   its **Actual** and **Prior** value and when the next one is due. Just after a
   release a tile reads **Awaiting the release** until the new number arrives
-  (it is checked every couple of minutes), then shows it as the Actual — that
-  is **released**, and it stays that way for a day. A muted note on a group
+  (it is checked every couple of minutes), then shows it as the Actual and reads
+  **Released** with the time, in Central (e.g. *Released 7:30 AM CT*; the day is
+  added once it is no longer today). It stays that way for a day. A muted note on a group
   means its sources could not be reached and it shows the last good reading.
 
 The headlines refresh themselves — every 5 minutes in market hours, less often

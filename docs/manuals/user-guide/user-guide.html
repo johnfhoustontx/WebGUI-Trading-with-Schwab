@@ -1082,9 +1082,11 @@ stack in that order. Every time is Central.</p>
 <li><strong>Economic data (CPI, PPI etc)</strong> — one tile per report: CPI, PPI, Jobs (payrolls
     and unemployment), PCE, GDP, Retail sales and Jobless claims. Each line shows
     <strong>Actual</strong> and <strong>Prior</strong>, and the tile shows when the <strong>Next</strong> release is due.
-    For a day after a release the tile is either <strong>released</strong> — the new number has
-    arrived and is the Actual — or reads <strong>Awaiting the release</strong> (Actual —) while
-    the service checks for it every 2 minutes for up to an hour. A tile with no
+    For a day after a release the tile reads either <strong>Awaiting the release</strong>
+    (Actual —) while the service checks for the new number every 2 minutes for up
+    to an hour, or <strong>Released</strong> with the release time in Central — <em>Released 7:30
+    AM CT</em>, with the day added once it is no longer today — once the new number has
+    arrived and is the Actual. A tile with no
     future date reads <em>Next date not yet published</em>.
   A muted note under a group means its sources could not be reached; it is showing
   the last good reading.</li>

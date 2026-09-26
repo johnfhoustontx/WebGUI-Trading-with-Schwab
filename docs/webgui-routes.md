@@ -611,8 +611,9 @@ DOM order at natural height. Designs + plans:
   bands (+1 officer / director), and filing points by exact form (−1 for a filing on
   no followed ticker). Score ≥ `high_at` (6) is High, ≥ `med_at` (3) Med, else Low.
   A High older than `stale_after_h` (24 h) is **published as Med** with a `stale`
-  reason — capped at publish, never stored capped. ⚠ The pill hover words that cap
-  "older than a day" whatever `stale_after_h` says.
+  reason — capped at publish, never stored capped. The pill hover reads "older news,
+  so shown one level lower" — deliberately no duration, since `stale_after_h` is
+  editable and the page does not read it.
 - **The SEC / EDGAR panel** (`news.draw_sec_rows`): a sticky column header —
   **Date/Time · Symbol · Headline/Details** — then one line per `news_view.sec_rows`
   row: the symbol (the first tagged ticker, else the filer's own), the pill, the title
@@ -630,7 +631,9 @@ DOM order at natural height. Designs + plans:
   decided page-side by `indicator_state`, because it is a function of `now`: within
   `actual_fresh_h` of its release it is **released** (the new value landed — first
   seen at or after the release; a first-fill `bootstrap` value only once the watch
-  window has passed) or **awaiting** (*Awaiting the release*, Actual —); otherwise
+  window has passed; status line *Released 7:30 AM CT*, the weekday and date added
+  when the release fell on an earlier Central day) or **awaiting** (*Awaiting the
+  release*, Actual —); otherwise
   **upcoming** (Actual —, Prior = the latest value). No future date reads *Next date
   not yet published*, never a guess. A group whose every source is `stale` / `never`
   carries a muted note; an empty group says so in its own sentence.

@@ -300,7 +300,7 @@ def sec_href(url):
 _REASON_WORDS = {
     "watchlist": "a followed ticker",
     "officer": "bought by an officer",
-    "stale": "older than a day, so shown one level lower",
+    "stale": "older news, so shown one level lower",
 }
 
 
@@ -498,6 +498,21 @@ def _obs(ind, key):
     return o if isinstance(o, dict) else {}
 
 
+AWAITING = "Awaiting the release"
+
+
+def _released_text(last, now):
+    """``"Released 7:30 AM CT"``; the day is named when the release fell on an
+    earlier Central date than ``now`` (a release can be up to ``actual_fresh_h``
+    old, and a bare time would read as today's)."""
+    try:
+        ct, today = last.astimezone(_CT), now.astimezone(_CT).date()
+    except (ValueError, OverflowError):
+        return "Released"
+    day = "" if ct.date() == today else f"{_weekday_day(ct)} \u00b7 "
+    return f"Released {day}{_time(ct)} CT"
+
+
 def indicator_state(ind, now, cfg) -> dict:
     """Actual / Prior / state / next-release text for one indicator.
 
@@ -508,6 +523,10 @@ def indicator_state(ind, now, cfg) -> dict:
     has passed. Within ``actual_fresh_h`` of the release the tile reads
     ``released`` (value landed) or ``awaiting`` (not yet); otherwise it is
     ``upcoming``: Actual \u2014, Prior = the latest observation.
+
+    ``status`` is the tile's state line: ``"Released 7:30 AM CT"`` (the
+    release's weekday and date added when it fell on an earlier Central day),
+    ``AWAITING`` while the value has not landed, ``""`` when upcoming.
 
     A ``next_release_at`` the clock has already passed (a payload older than
     the release) is treated as the last release, and the next is unknown."""
@@ -529,15 +548,16 @@ def indicator_state(ind, now, cfg) -> dict:
         last = nxt if last is None or nxt > last else last
         nxt, next_date = None, None
 
-    state, actual, shown_prior = "upcoming", DASH, latest_txt
+    state, actual, shown_prior, status = "upcoming", DASH, latest_txt, ""
     if last is not None and now - last <= fresh:
         seen = _dt(latest.get("first_seen"))
         boot = not _explicitly_not_bootstrap(latest.get("bootstrap"))
         after = seen is not None and seen >= last
         if after and (not boot or now - last > watch):
             state, actual, shown_prior = "released", latest_txt, prior_txt
+            status = _released_text(last, now)
         else:
-            state = "awaiting"
+            state, status = "awaiting", AWAITING
             # a bootstrap value first seen after the release may BE the new
             # figure: it cannot be called the prior either
             shown_prior = DASH if (after and boot) else latest_txt
@@ -552,7 +572,8 @@ def indicator_state(ind, now, cfg) -> dict:
             today = None
         next_txt = _weekday_day(d) if d and today and d >= today else NO_NEXT
     return {"key": _str(ind.get("key")), "label": _str(ind.get("label")),
-            "actual": actual, "prior": shown_prior, "state": state, "next": next_txt}
+            "actual": actual, "prior": shown_prior, "state": state, "status": status,
+            "next": next_txt}
 
 
 def _list(payload, key):

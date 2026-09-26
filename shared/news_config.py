@@ -147,7 +147,7 @@ DEFAULTS = {
                                       "Employment Cost Index"]},
         "ipo": {"min_offer_usd": 100_000_000, "lookback_days": 7},
         "dividends": {"enabled": True, "refresh_at": "06:40", "horizon_days": 30,
-                      "lookback_days": 3},
+                      "lookback_days": 3, "retry_min": 15},
         # Tile order is THIS built-in order: the loader deep-merges the file
         # onto these defaults, so an indicator the file adds appends after
         # them, and removing a table from the file does NOT remove it (the
@@ -601,6 +601,12 @@ def _int_at_least(value, floor):
     return value if value >= floor else None
 
 
+def _retry_minutes(value):
+    """A real int in 1..1440 (a day at most), else None."""
+    v = _int_at_least(value, 1)
+    return v if v is not None and v <= 1440 else None
+
+
 def dividends_config() -> dict:
     """``[calendar.dividends]`` validated, as a copy - the table
     ``calendar_config()`` leaves out (it returns ``[calendar]`` scalars only).
@@ -610,7 +616,9 @@ def dividends_config() -> dict:
       zero-padded: ``"7:05"`` -> ``"07:05"``);
     * ``horizon_days`` not an int >= 1 -> the default;
     * ``lookback_days`` not an int >= 0 -> the default (0 is real: keep no
-      past rows).
+      past rows);
+    * ``retry_min`` (the minutes before a failed pull is retried) not an int
+      in 1..1440 -> the default.
 
     A bool is never an int here. A table that is not a table is the defaults.
     One WARNING per distinct bad value; never raises. Keys the table does not
@@ -627,7 +635,8 @@ def dividends_config() -> dict:
     out["enabled"] = enabled
     checks = (("refresh_at", _hhmm, "HH:MM"),
               ("horizon_days", lambda v: _int_at_least(v, 1), "an int >= 1"),
-              ("lookback_days", lambda v: _int_at_least(v, 0), "an int >= 0"))
+              ("lookback_days", lambda v: _int_at_least(v, 0), "an int >= 0"),
+              ("retry_min", _retry_minutes, "an int from 1 to 1440"))
     for key, check, want in checks:
         value = raw.get(key, default[key])
         good = check(value)

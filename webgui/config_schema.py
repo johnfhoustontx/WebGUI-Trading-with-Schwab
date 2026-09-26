@@ -1000,6 +1000,10 @@ _NEWS_CALENDAR_SECTIONS = (
               unit="days", min=1, max=120, step=1),
         Field("calendar.dividends.lookback_days", "Keep past dates for", "",
               kind="int", unit="days", min=0, max=30, step=1),
+        Field("calendar.dividends.retry_min", "Retry a failed pull after",
+              "How long the trade service waits before trying a failed dividend "
+              "pull again.", kind="int", unit="min", min=1, max=1440, step=1,
+              restart=(TRADE,)),
     ), restart=(TRADE, NEWS)),
     Section("Economic indicators", "One entry per indicator, in tile order. "
             "Indicators sharing a tile name are shown together.", (

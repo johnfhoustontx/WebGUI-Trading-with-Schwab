@@ -361,8 +361,10 @@ def draw_calendar(container, groups):
                                 ui.label(f"Actual {ind.get('actual') or nv.DASH}"
                                          f" · Prior {ind.get('prior') or nv.DASH}") \
                                     .classes(_CAL_IND)
-                                if ind.get("state") == "awaiting":
-                                    ui.label("Awaiting the release").classes(_CAL_LINE)
+                                status = ind.get("status") or (
+                                    nv.AWAITING if ind.get("state") == "awaiting" else "")
+                                if status:
+                                    ui.label(status).classes(_CAL_LINE)
 
 
 def render(public=False):

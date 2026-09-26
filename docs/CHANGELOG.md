@@ -36,8 +36,9 @@ scheduler for a daily dividend pull.** Branch `claude/extract-news-from-x-bdb6ae
 - **Dividends** (`services/trade_svc/dividends.py`, `scheduler.py`): once a trading day
   at or after 06:40 CT, one proxy `/quotes` passthrough call per followed symbol into
   `shared/dividends.py`'s store; `dividends_refresh` on `cmd:trade` forces it,
-  age-gated at 180 s against replay. `news_svc` opens the store read-only and never
-  calls the proxy.
+  age-gated at 180 s against replay. A failed pull retries after
+  `[calendar.dividends] retry_min` (15 min, Settings → Configuration). `news_svc` opens
+  the store read-only and never calls the proxy.
 - **Scheduler branches** (`81e5bcc`): `feeds`, `calendar` and `watch` launch as keyed
   tasks every 30 s tick, so a slow feed poll never holds a release watch back;
   `news_refresh` re-checks the calendar, then polls the feeds.
@@ -45,14 +46,15 @@ scheduler for a daily dividend pull.** Branch `claude/extract-news-from-x-bdb6ae
   (impact pill with its reasons on hover, ≤ 2 tickers + `+N`, source badges hidden on a
   phone), the SEC panel (Date/Time · Symbol · Headline/Details, links to sec.gov only),
   and calendar tiles in three groups (*Economic news/Calendar*, *Dividend / IPO*,
-  *Economic data (CPI, PPI etc)*), Awaiting vs Released decided page-side, times in
-  CT. An Impact filter joins Sources / Ticker / Watchlist only.
+  *Economic data (CPI, PPI etc)*), Awaiting vs Released decided page-side (a released
+  tile reads *Released 7:30 AM CT*), times in CT. An Impact filter joins Sources /
+  Ticker / Watchlist only. The pill's `stale` reason reads "older news, so shown one
+  level lower" — no duration, because `stale_after_h` is editable.
 - **Docs**: CLAUDE.md, `webgui-routes.md`, `page_help.py`, the four manuals,
   `dev-prod-environments.md` (the `FRED_API_KEY` row and the User-Agent facts).
 - **Not done / open.** Live verification (plan Task 22) — the Schwab dividend field
   names, the calendar sources from prod's IP, the first CPI morning — has not run.
-  `cache:news:calendar_status` is read by no page. The impact pill's hover words the
-  cap "older than a day" whatever `stale_after_h` says.
+  `cache:news:calendar_status` is read by no page.
 
 **Prior —** 2026-09-26 (**Market News — a sixth service, `news_svc`, and
 four readers: `/news`, the Desk's headlines strip, the Symbol page's *In the news*

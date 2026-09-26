@@ -8,7 +8,7 @@ import pytest
 from services.trade_svc import scheduler
 
 CT = ZoneInfo("America/Chicago")
-C = {"enabled": True, "refresh_at": "06:40"}
+C = {"enabled": True, "refresh_at": "06:40", "retry_min": 15}
 
 
 def ct(text):
@@ -134,11 +134,37 @@ def test_loop_survives_a_failure_and_retries_after_the_backoff(monkeypatch):
     def boom(h):
         raise RuntimeError("proxy down")
 
-    passes = int(scheduler.RETRY_AFTER_FAIL_S / scheduler.TICK_S) + 3
+    retry_s = C["retry_min"] * 60
+    passes = int(retry_s / scheduler.TICK_S) + 3
     h = _Harness(monkeypatch, start=ct("2026-09-28 06:40"), passes=passes, refresh=boom)
     h.run()
     assert len(h.calls) == 2                               # it kept going
-    assert (h.calls[1] - h.calls[0]).total_seconds() >= scheduler.RETRY_AFTER_FAIL_S
+    assert (h.calls[1] - h.calls[0]).total_seconds() >= retry_s
+
+
+def test_the_retry_backoff_is_read_from_the_config(monkeypatch):
+    def boom(h):
+        raise RuntimeError("proxy down")
+
+    passes = int(5 * 60 / scheduler.TICK_S) + 3            # 8 minutes of ticks
+    h = _Harness(monkeypatch, start=ct("2026-09-28 06:40"), passes=passes, refresh=boom)
+    monkeypatch.setattr(scheduler, "dividends_config", lambda: dict(C, retry_min=5))
+    h.run()
+    assert len(h.calls) == 2                   # 15 minutes would still be waiting
+    assert 300 <= (h.calls[1] - h.calls[0]).total_seconds() < 900
+
+
+@pytest.mark.parametrize("bad", [0, -3, 1441, True, 15.0, "15", None])
+def test_a_bad_retry_min_is_the_shared_default(bad):
+    from shared import news_config as nc
+    default = nc.DEFAULTS["calendar"]["dividends"]["retry_min"]
+    assert scheduler.retry_after_fail_s({"retry_min": bad}) == default * 60
+    assert scheduler.retry_after_fail_s(None) == default * 60
+
+
+def test_the_retry_is_not_a_module_literal():
+    assert not hasattr(scheduler, "RETRY_AFTER_FAIL_S")
+    assert scheduler.retry_after_fail_s({"retry_min": 7}) == 420
 
 
 def test_loop_survives_a_config_failure(monkeypatch):

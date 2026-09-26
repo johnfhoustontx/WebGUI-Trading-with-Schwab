@@ -340,6 +340,14 @@ def test_the_dividend_keys_restart_trade_and_news():
     assert set(cs.restart_for(cfg, sec, fld)) == {cs.NEWS}
 
 
+def test_the_dividend_retry_restarts_trade_only_and_is_bounded():
+    cfg = cs.BY_NAME["news.toml"]
+    sec, fld = cs.locate(cfg, ("calendar", "dividends", "retry_min"))
+    assert fld is not None and fld.kind == "int"
+    assert set(cs.restart_for(cfg, sec, fld)) == {cs.TRADE}
+    assert (fld.min, fld.max) == (1, 1440)
+
+
 def test_the_caution_names_the_fred_key_env_var_and_no_field_holds_it():
     cfg = cs.BY_NAME["news.toml"]
     assert "FRED_API_KEY" in cfg.caution

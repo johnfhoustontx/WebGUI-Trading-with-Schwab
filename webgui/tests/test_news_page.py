@@ -504,6 +504,23 @@ def test_calendar_text_is_escaped_and_an_awaiting_indicator_says_so():
     assert "Source unavailable — showing the last good reading" in texts
 
 
+def test_a_released_indicator_shows_its_status_line():
+    from nicegui import ui
+
+    from pages import news
+    groups = [{"title": "Economic data (CPI, PPI etc)", "note": None, "empty": None,
+               "tiles": [{"title": "CPI", "when": "Wed Nov 11 · 7:30 AM CT",
+                          "lines": [], "indicators": [
+                              {"label": "CPI m/m", "actual": "+0.4% m/m", "prior": "+0.2% m/m",
+                               "state": "released", "status": "Released 7:30 AM CT",
+                               "next": "x"}]}]}]
+    before = set(ui.context.client.elements)
+    news.draw_calendar(ui.column(), groups)
+    texts = [e.text for e in _new_elements(before) if isinstance(e, ui.label)]
+    assert "Released 7:30 AM CT" in texts
+    assert "Awaiting the release" not in texts
+
+
 def test_refresh_toast_mentions_the_calendar():
     src = (PAGES / "news.py").read_text(encoding="utf-8")
     assert "the calendar now" in src

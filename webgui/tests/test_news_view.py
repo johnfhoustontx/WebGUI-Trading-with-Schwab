@@ -496,11 +496,31 @@ def test_next_release_renders_central_or_date_only():
     assert s["next"] == "Mon Oct 5"
 
 
+def test_a_released_indicator_says_when_it_was_released():
+    s = nv.indicator_state(IND_WITH_NEW_OBS, now=RELEASE_AT + dt.timedelta(minutes=9), cfg=CALCFG)
+    assert s["state"] == "released" and s["status"] == "Released 7:30 AM CT"
+
+
+def test_a_release_on_an_earlier_day_names_the_day():
+    # 7:30 AM CT on Wed Oct 14, read at 6:00 AM CT the next morning
+    s = nv.indicator_state(IND_WITH_NEW_OBS, now=RELEASE_AT + dt.timedelta(hours=22, minutes=30),
+                           cfg=CALCFG)
+    assert s["state"] == "released" and s["status"] == "Released Wed Oct 14 · 7:30 AM CT"
+
+
+def test_awaiting_and_upcoming_status_lines():
+    ind = {**IND, "last_release_at": RELEASE_AT.isoformat(), "next_release_at": None}
+    s = nv.indicator_state(ind, now=RELEASE_AT + dt.timedelta(minutes=3), cfg=CALCFG)
+    assert s["status"] == "Awaiting the release"
+    assert nv.indicator_state(IND, now=NOW, cfg=CALCFG)["status"] == ""
+
+
 def test_indicator_state_tolerates_junk():
     for ind in (None, {}, {"latest": "x", "prior": 5, "last_release_at": "bogus", "unit": 3},
                 {**IND, "last_release_at": "9999-12-31T23:59:59-12:00"}):
         s = nv.indicator_state(ind, now=NOW, cfg=None)
         assert s["actual"] == "—" and isinstance(s["prior"], str) and isinstance(s["next"], str)
+        assert isinstance(s["status"], str)
 
 
 EVENT = {"id": "fed:1", "title": "FOMC statement", "at": "2026-10-28T18:00:00+00:00",
@@ -701,7 +721,7 @@ def test_reason_text_maps_codes_to_reader_phrases():
     assert nv.reason_text(["form4:$136.4M", "officer"]) == \
         "insider buy of $136.4M, bought by an officer"
     assert nv.reason_text(["filing:S-3"]) == "S-3 filing"
-    assert nv.reason_text(["stale"]) == "older than a day, so shown one level lower"
+    assert nv.reason_text(["stale"]) == "older news, so shown one level lower"
 
 
 def test_reason_text_shows_unknown_codes_as_is_and_skips_junk():

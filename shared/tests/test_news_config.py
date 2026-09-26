@@ -930,12 +930,14 @@ def test_dividends_config_reads_the_sub_table_calendar_config_drops(tmp_path, mo
     table is absent from it; dividends_config() is the one accessor."""
     assert "dividends" not in nc.calendar_config()
     assert nc.dividends_config() == {"enabled": True, "refresh_at": "06:40",
-                                     "horizon_days": 30, "lookback_days": 3}
+                                     "horizon_days": 30, "lookback_days": 3,
+                                     "retry_min": 15}
     _layered(tmp_path, monkeypatch,
              '[calendar.dividends]\nlookback_days = 9\nrefresh_at = "7:05"\n'
-             "horizon_days = 45\nenabled = false\n")
+             "horizon_days = 45\nenabled = false\nretry_min = 5\n")
     assert nc.dividends_config() == {"enabled": False, "refresh_at": "07:05",
-                                     "horizon_days": 45, "lookback_days": 9}
+                                     "horizon_days": 45, "lookback_days": 9,
+                                     "retry_min": 5}
 
 
 def test_dividends_config_defaults_match_the_shipped_table():
@@ -954,6 +956,7 @@ def test_a_bad_dividends_value_is_its_default(monkeypatch, caplog):
     d = nc.DEFAULTS["calendar"]["dividends"]
     for key, bads in (("lookback_days", (-1, True, 3.5, "3", None, float("nan"), [3])),
                       ("horizon_days", (0, -5, False, 30.0, "30", None)),
+                      ("retry_min", (0, -1, 1441, True, 15.0, "15", None, float("inf"))),
                       ("refresh_at", ("24:00", "06:60", "6", "06:40:00", "ab:cd", "",
                                       640, None, True, "-1:30", "06: 40"))):
         for bad in bads:
@@ -961,6 +964,13 @@ def test_a_bad_dividends_value_is_its_default(monkeypatch, caplog):
                                 lambda k=key, b=bad: {"calendar": {"dividends": {k: b}}})
             assert nc.dividends_config()[key] == d[key], (key, bad)
     assert "calendar.dividends" in caplog.text
+
+
+def test_dividends_retry_min_keeps_its_bounds(monkeypatch):
+    for good in (1, 60, 1440):
+        monkeypatch.setattr(nc, "load",
+                            lambda g=good: {"calendar": {"dividends": {"retry_min": g}}})
+        assert nc.dividends_config()["retry_min"] == good
 
 
 def test_a_non_bool_dividends_enabled_fails_closed(monkeypatch):
