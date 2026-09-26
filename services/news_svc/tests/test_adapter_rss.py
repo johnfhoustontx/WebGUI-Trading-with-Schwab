@@ -161,3 +161,79 @@ def test_only_http_and_https_links_are_kept():
                 b"<item><title>plain</title><link>http://a.com/p</link></item>")
     out = rss.parse(body, FEED, NOW, universe=[])
     assert [i["title"] for i in out] == ["upper", "plain"]
+
+
+# --- second review round ------------------------------------------------------
+
+import logging
+
+import pytest
+
+
+def _title(title_xml: bytes) -> str:
+    body = _one(b"<item>" + title_xml + b"<link>https://a.com/x</link></item>")
+    return rss.parse(body, FEED, NOW, universe=[])[0]["title"]
+
+
+@pytest.mark.parametrize("title_xml, expected", [
+    (b"<title>S&amp;P &lt; 5000 but &gt; 4000</title>", "S&P < 5000 but > 4000"),
+    (b"<title><![CDATA[S&P < 5000 > 4000]]></title>", "S&P < 5000 > 4000"),
+    (b"<title>Yields &lt;3% as SPY &gt;&gt; peers</title>", "Yields <3% as SPY >> peers"),
+])
+def test_a_plain_text_angle_bracket_is_kept_not_stripped_as_a_tag(title_xml, expected):
+    assert _title(title_xml) == expected
+
+
+def test_real_tags_and_comments_are_still_stripped():
+    assert _title(b"<title>x &lt;b&gt;y&lt;/b&gt; &lt;!-- c --&gt; z</title>") == "x y z"
+    assert _title(b"<title><![CDATA[<i>a</i> <br/>b <?pi x?>c]]></title>") == "a b c"
+
+
+@pytest.mark.parametrize("junk", ["<" * 200_000, "<a" * 100_000])
+def test_a_long_run_of_tag_openers_parses_quickly(junk):
+    body = _one(b"<item><title>t</title><link>https://a.com/x</link><description><![CDATA["
+                + junk.encode() + b"]]></description></item>")
+    t0 = time.perf_counter()
+    out = rss.parse(body, FEED, NOW, universe=[])
+    assert time.perf_counter() - t0 < 1.0
+    assert len(out) == 1 and len(out[0]["teaser"]) <= 400
+
+
+def test_a_naive_now_is_read_as_utc_keeps_every_entry_and_still_clamps():
+    naive = "2026-09-26T12:00:00"
+    body = _one(b"<item><title>past</title><link>https://a.com/p</link>"
+                b"<pubDate>Fri, 25 Sep 2026 12:00:00 GMT</pubDate></item>"
+                b"<item><title>future</title><link>https://a.com/f</link>"
+                b"<pubDate>Fri, 01 Jan 2100 00:00:00 GMT</pubDate></item>")
+    by = {i["title"]: i for i in rss.parse(body, FEED, naive, universe=[])}
+    assert set(by) == {"past", "future"}
+    assert by["past"]["published_at"] == "2026-09-25T12:00:00+00:00"
+    assert by["future"]["published_at"] == "2026-09-26T12:00:00+00:00"
+
+
+def test_skipped_entries_log_one_warning_per_parse_with_feed_and_count(monkeypatch, caplog):
+    real = rss._link
+
+    def boom(entry):
+        if entry.get("title", "").startswith("bad"):
+            raise RuntimeError("unexpected")
+        return real(entry)
+
+    monkeypatch.setattr(rss, "_link", boom)
+    body = _one(b"<item><title>bad1</title><link>https://a.com/1</link></item>"
+                b"<item><title>bad2</title><link>https://a.com/2</link></item>"
+                b"<item><title>good</title><link>https://a.com/g</link></item>")
+    with caplog.at_level(logging.DEBUG, logger=rss.__name__):
+        out = rss.parse(body, FEED, NOW, universe=[])
+    assert [i["title"] for i in out] == ["good"]
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    msg = warnings[0].getMessage()
+    assert "MarketWatch" in msg and "2" in msg
+
+
+def test_a_clean_parse_logs_no_warning(caplog):
+    body = _one(b"<item><title>t</title><link>https://a.com/x</link></item>")
+    with caplog.at_level(logging.DEBUG, logger=rss.__name__):
+        rss.parse(body, FEED, NOW, universe=[])
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

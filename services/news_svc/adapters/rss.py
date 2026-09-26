@@ -13,9 +13,12 @@ from services.news_svc import items
 
 log = logging.getLogger(__name__)
 
-# ``<[^<>]*>`` rather than ``<[^>]+>``: the latter backtracks quadratically on
-# a long run of '<' (~20 s at 200 KB).
-_TAGS = re.compile(r"<[^<>]*>")
+# Only TAG-SHAPED text is stripped: '<' followed by a letter, '!', '/' or '?'
+# (``<b>``, ``</i>``, ``<!-- -->``, ``<?pi?>``). A plain-text title such as
+# "S&P < 5000 but > 4000" or "Yields <3%" keeps its brackets. ``[^<>]*`` rather
+# than ``[^>]+``: the latter backtracks quadratically on a long run of '<'
+# (~20 s at 200 KB).
+_TAGS = re.compile(r"<[A-Za-z!/?][^<>]*>")
 # The raw summary is capped BEFORE stripping - the teaser keeps 400 chars.
 MAX_RAW_SUMMARY = 8000
 MAX_TEASER = 400
@@ -46,6 +49,20 @@ def _iso(entry, now):
     except (TypeError, ValueError):
         return when.isoformat()
     return now if when > limit else when.isoformat()
+
+
+def _normalise_now(now):
+    """``now`` as an aware ISO string. A NAIVE ``now`` is read as UTC - left
+    naive, the future-date clamp would compare aware with naive, raise, and
+    every dated entry would be skipped. An unparseable ``now`` is returned
+    unchanged (``_iso`` then keeps feed dates unclamped)."""
+    try:
+        when = dt.datetime.fromisoformat(now)
+    except (TypeError, ValueError):
+        return now
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=dt.timezone.utc)
+    return when.isoformat()
 
 
 def _teaser(entry):
@@ -92,13 +109,18 @@ def parse(body: bytes, feed: dict, now: str, *, universe) -> list:
         parsed = feedparser.parse(io.BytesIO(bytes(body)))
     except Exception:  # noqa: BLE001 - a broken feed is an empty poll, logged by the caller
         return []
-    out = []
+    now = _normalise_now(now)
+    out, skipped = [], 0
     for entry in parsed.get("entries") or []:
         try:
             it = _item(entry, feed, now, universe)
         except Exception:  # noqa: BLE001 - one bad entry must not lose the feed
+            skipped += 1
             log.debug("rss entry skipped (%s)", feed.get("name"), exc_info=True)
             continue
         if it is not None:
             out.append(it)
+    if skipped:
+        log.warning("rss feed %s: %d entr%s skipped (parse error; detail at DEBUG)",
+                    feed.get("name"), skipped, "y" if skipped == 1 else "ies")
     return out
