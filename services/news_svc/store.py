@@ -36,25 +36,36 @@ mid-batch leaves nothing of that batch and no open transaction behind it.
 
 Times: every adapter hands over UTC ISO strings. Ordering and pruning compare
 ``julianday(...)`` rather than the raw strings, so a fractional-seconds stamp
-sorts by its instant. An unparseable ``published_at`` sorts last and is pruned by
-``first_seen`` - our own clock - so it can never be kept forever.
+sorts by its instant.
 
-A ``published_at`` of the literal ``now`` (trimmed, any case) is stored as the
-item's ``first_seen`` instead: SQLite reads ``julianday('now')`` as the current
-clock, which the expression index refuses as non-deterministic - one such item
-rolled back its whole batch, every cycle. ``first_seen`` is the moment we saw it,
-which is what "now" meant. Should ``first_seen`` be ``now`` too (or not a str), the date
-becomes ``_UNDATED``, an unparseable sentinel that sorts last and is pruned by
-``first_seen`` like any other unparseable date.
+Every date is NORMALISED before it is stored, because SQLite reads some strings
+as the clock: ``julianday('now')`` - and, from 3.42, ``'subsec'`` /
+``'subsecond'`` in any case - are the current time, which the expression index
+refuses as non-deterministic (one such item rolled back its whole batch, every
+cycle), and a ``first_seen`` read as the clock is never older than any cutoff,
+so its row could never be pruned. A date is USABLE only if it is a str that
+``datetime.fromisoformat`` parses, is timezone-aware, and ``julianday()`` can
+read (Python accepts ISO basic and week forms SQLite does not). Otherwise:
+
+* ``first_seen`` becomes the current UTC time - it is our own clock, the moment
+  we saw the item - so the row ages out like any other.
+* ``published_at`` becomes the item's ``first_seen`` when the INCOMING
+  ``first_seen`` is usable, else ``_UNDATED``: an unparseable sentinel that
+  sorts last, is never stale, and is pruned by ``first_seen``.
+
+A usable date is stored verbatim.
 """
 import contextlib
 import datetime as dt
 import json
+import logging
 import pathlib
 import sqlite3
 import threading
 
 from services.news_svc import items
+
+log = logging.getLogger(__name__)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS items (
@@ -99,18 +110,19 @@ def _dumps(value) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _is_now(value) -> bool:
-    return isinstance(value, str) and value.strip().casefold() == "now"
+def _utcnow() -> str:
+    """Our own clock, as an aware UTC ISO string (a seam for tests)."""
+    return dt.datetime.now(dt.timezone.utc).isoformat()
 
 
-def _dated(it) -> dict:
-    """``it`` with a literal-"now" ``published_at`` replaced (see the module
-    docstring). A copy - the caller's dict is never changed."""
-    if not _is_now(it.get("published_at")):
-        return it
-    first_seen = it.get("first_seen")
-    usable = isinstance(first_seen, str) and first_seen.strip() and not _is_now(first_seen)
-    return dict(it, published_at=first_seen if usable else _UNDATED)
+def _aware_iso(value) -> bool:
+    """A str ``datetime.fromisoformat`` parses to a timezone-AWARE datetime."""
+    if not isinstance(value, str):
+        return False
+    try:
+        return dt.datetime.fromisoformat(value).tzinfo is not None
+    except ValueError:
+        return False
 
 
 def _union(existing, incoming) -> list:
@@ -149,11 +161,37 @@ class Store:
         return False
 
     def _rollback(self) -> None:
-        """Best effort: a failed rollback must not mask the error that caused it."""
+        """Best effort: a failed rollback must not mask the error that caused it,
+        so it is swallowed - but never silently, since a transaction left open
+        wedges every later BEGIN IMMEDIATE until a restart."""
         try:
             self._c.rollback()
         except Exception:          # noqa: BLE001 - the original error is re-raised
-            pass
+            log.warning("news store: rollback failed", exc_info=True)
+        try:
+            wedged = self._c.in_transaction
+        except Exception:          # noqa: BLE001 - e.g. a closed connection
+            wedged = False
+        if wedged:
+            log.warning("news store: a transaction is still open after the rollback; "
+                        "later writes will fail until it closes")
+
+    def _usable(self, value) -> bool:
+        """See the module docstring: aware ISO that julianday() can read."""
+        return _aware_iso(value) and self._c.execute(
+            "SELECT julianday(?) IS NOT NULL", (value,)).fetchone()[0] == 1
+
+    def _dated(self, it) -> dict:
+        """``it`` with both dates normalised (see the module docstring). A copy
+        when anything changes - the caller's dict is never changed."""
+        published, first_seen = it.get("published_at"), it.get("first_seen")
+        seen_ok = self._usable(first_seen)
+        fixed = {}
+        if not self._usable(published):
+            fixed["published_at"] = first_seen if seen_ok else _UNDATED
+        if not seen_ok:
+            fixed["first_seen"] = _utcnow()
+        return dict(it, **fixed) if fixed else it
 
     @contextlib.contextmanager
     def _write(self):
@@ -197,7 +235,7 @@ class Store:
         return None
 
     def _stale(self, it, min_published) -> bool:
-        """Published before the cutoff. An unparseable date is NOT stale here -
+        """Published before the cutoff. ``_UNDATED`` is NOT stale here -
         ``prune`` ages it out by ``first_seen``."""
         if min_published is None:
             return False
@@ -213,7 +251,7 @@ class Store:
         n = 0
         with self._write():
             for it in rows:
-                it = _dated(it)
+                it = self._dated(it)
                 if self._stale(it, min_published):
                     continue
                 same_id = self._c.execute(
@@ -305,7 +343,8 @@ class Store:
 
     def prune(self, *, keep_days, now) -> int:
         """Delete items published OR first seen before the cutoff (``first_seen``
-        is our own UTC clock, so an unparseable ``published_at`` still ages out),
+        is always a usable UTC stamp - our own clock when the feed's was not - so
+        an ``_UNDATED`` ``published_at`` still ages out),
         and accessions seen before it. Returns the count of items deleted."""
         cutoff = (dt.datetime.fromisoformat(now) - dt.timedelta(days=keep_days)).isoformat()
         with self._write():

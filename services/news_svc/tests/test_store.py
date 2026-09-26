@@ -700,3 +700,135 @@ def test_a_non_positive_or_non_int_limit_returns_nothing(tmp_path):
         assert db.newest(bad, public_sources={"S"}) == [], bad
     assert len(db.newest(1)) == 1
     assert len(db.newest_for_ticker("NVDA", 2)) == 2
+
+
+# ── review of b125120: 1. every unparseable published_at is normalised ─────
+
+_UNUSABLE_DATES = ("now", "subsec", "SUBSECOND", " Subsec ", "garbage", "",
+                   "2026-09-25T20:00:00",          # naive: no zone, not an instant
+                   "20260925T200000Z")             # aware, but julianday() cannot read it
+
+
+def test_every_unusable_published_at_becomes_first_seen(tmp_path):
+    # "subsec" / "subsecond" read as the clock in julianday() (SQLite >= 3.42),
+    # so the expression index refused them and rolled the whole batch back.
+    db = store.Store(tmp_path / "n.db")
+    batch = []
+    for i, raw in enumerate(_UNUSABLE_DATES):
+        it = _item(f"https://a/{i}", published=raw)
+        it["first_seen"] = f"2026-09-25T1{i}:00:00+00:00"
+        batch.append(it)
+    good = _item("https://a/good", published="2026-09-25T20:00:00.5+00:00")
+    assert db.insert_many(batch + [good]) == len(batch) + 1
+    got = {r["url"]: r["published_at"] for r in db.newest(20)}
+    for i, _ in enumerate(_UNUSABLE_DATES):
+        assert got[f"https://a/{i}"] == f"2026-09-25T1{i}:00:00+00:00", _UNUSABLE_DATES[i]
+    assert got["https://a/good"] == "2026-09-25T20:00:00.5+00:00"      # kept verbatim
+    assert batch[1]["published_at"] == "subsec"                           # caller's dict untouched
+    assert db._c.in_transaction is False
+
+
+def test_an_unusable_published_at_with_an_unusable_first_seen_is_undated(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    batch = []
+    for i, raw in enumerate(_UNUSABLE_DATES):
+        it = _item(f"https://a/{i}", published=raw)
+        it["first_seen"] = _UNUSABLE_DATES[(i + 1) % len(_UNUSABLE_DATES)]
+        batch.append(it)
+    assert db.insert_many(batch + [_item("https://a/dated")]) == len(batch) + 1
+    rows = db.newest(20)
+    assert rows[0]["url"] == "https://a/dated"
+    assert all(r["published_at"] == store._UNDATED for r in rows[1:])
+
+
+def test_a_non_str_published_at_is_normalised_too(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    it = _item("https://a/1"); it["published_at"] = None
+    it["first_seen"] = "2026-09-25T20:00:00+00:00"
+    assert db.insert_many([it]) == 1
+    assert db.newest(10)[0]["published_at"] == "2026-09-25T20:00:00+00:00"
+
+
+# ── 2. an unusable first_seen is our clock, so the row still ages out ──────
+
+def test_an_unusable_first_seen_is_stored_as_the_current_utc_time(tmp_path, monkeypatch):
+    import datetime as dt
+    db = store.Store(tmp_path / "n.db")
+    before = dt.datetime.now(dt.timezone.utc)
+    batch = []
+    for i, raw in enumerate(_UNUSABLE_DATES + (None,)):
+        it = _item(f"https://a/{i}"); it["first_seen"] = raw
+        batch.append(it)
+    db.insert_many(batch)
+    after = dt.datetime.now(dt.timezone.utc)
+    for r in db.newest(20):
+        seen = dt.datetime.fromisoformat(r["first_seen"])
+        assert seen.tzinfo is not None and before <= seen <= after, r["url"]
+
+
+def test_a_row_with_an_unusable_first_seen_is_pruned_once_old(tmp_path, monkeypatch):
+    # julianday('now') reads the clock, so a stored first_seen of "now" was
+    # never older than any cutoff: the row could never be pruned.
+    db = store.Store(tmp_path / "n.db")
+    monkeypatch.setattr(store, "_utcnow", lambda: "2026-09-01T00:00:00+00:00")
+    rows = []
+    for i, raw in enumerate(_UNUSABLE_DATES):
+        both = _item(f"https://a/both{i}", published=raw); both["first_seen"] = raw
+        future = _item(f"https://a/future{i}", published="2027-01-01T00:00:00+00:00")
+        future["first_seen"] = raw
+        rows += [both, future]
+    db.insert_many(rows)
+    assert all(r["first_seen"] == "2026-09-01T00:00:00+00:00" for r in db.newest(50))
+    assert db.prune(keep_days=7, now=NOW) == len(rows)
+    assert db.newest(50) == []
+
+
+# ── 3. a failed rollback leaves a trace ────────────────────────────────────
+
+class _RollbackFails:
+    """Delegates to a real connection; rollback() raises WITHOUT rolling back."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def rollback(self):
+        import sqlite3
+        raise sqlite3.OperationalError("rollback exploded")
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def test_a_failed_rollback_is_logged_and_the_original_error_still_raised(tmp_path, caplog):
+    import logging
+    db = store.Store(tmp_path / "n.db")
+    real = db._c
+    db._c = _RollbackFails(real)
+    bad = _item("https://a/bad"); bad["detail"] = {"x": object()}
+    with caplog.at_level(logging.WARNING, logger=store.__name__):
+        try:
+            db.insert_many([bad])
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("the original error must be the one raised")
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    failed = [r for r in warnings if r.exc_info and "rollback exploded" in str(r.exc_info[1])]
+    assert len(failed) == 1
+    wedged = [r for r in warnings if "transaction" in r.getMessage() and not r.exc_info]
+    assert len(wedged) == 1 and real.in_transaction is True
+    real.rollback()
+    db._c = real
+    assert db.insert_many([_item("https://a/next")]) == 1
+
+
+def test_a_successful_rollback_logs_nothing(tmp_path, caplog):
+    import logging
+    db = store.Store(tmp_path / "n.db")
+    bad = _item("https://a/bad"); bad["detail"] = {"x": object()}
+    with caplog.at_level(logging.WARNING, logger=store.__name__):
+        try:
+            db.insert_many([bad])
+        except TypeError:
+            pass
+    assert [r for r in caplog.records if r.name == store.__name__] == []
