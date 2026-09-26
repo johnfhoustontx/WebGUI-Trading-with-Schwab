@@ -578,3 +578,125 @@ def test_close_and_context_manager(tmp_path):
 def test_one_busy_timeout(tmp_path):
     db = store.Store(tmp_path / "n.db")
     assert db._c.execute("PRAGMA busy_timeout").fetchone()[0] == store._BUSY_TIMEOUT_MS
+
+
+# ── review of 2af76d2/df28bb7: 1. a literal "now" date ─────────────────────
+
+def test_a_literal_now_published_at_is_stored_as_first_seen(tmp_path):
+    # julianday('now') is non-deterministic, so the expression index refuses the
+    # row and the WHOLE batch rolled back - every cycle, for good.
+    db = store.Store(tmp_path / "n.db")
+    batch = []
+    for i, raw in enumerate(("now", "NOW", " Now ")):
+        it = _item(f"https://a/now{i}", published=raw)
+        it["first_seen"] = f"2026-09-25T2{i}:00:00+00:00"
+        batch.append(it)
+    keep = _item("https://a/keep", published="2026-09-25T19:00:00+00:00")
+    assert db.insert_many(batch + [keep]) == 4
+    rows = db.newest(10)
+    assert [(r["url"], r["published_at"]) for r in rows] == [
+        ("https://a/now2", "2026-09-25T22:00:00+00:00"),
+        ("https://a/now1", "2026-09-25T21:00:00+00:00"),
+        ("https://a/now0", "2026-09-25T20:00:00+00:00"),
+        ("https://a/keep", "2026-09-25T19:00:00+00:00")]
+    assert batch[0]["published_at"] == "now"               # the caller's dict is untouched
+    assert db._c.in_transaction is False
+
+
+def test_a_literal_now_is_stale_and_merged_by_its_first_seen(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    old = _item("https://a/old", published="now")
+    old["first_seen"] = "2026-09-01T00:00:00+00:00"
+    assert db.insert_many([old], min_published="2026-09-19T00:00:00+00:00") == 0
+    y = _src(_item("https://y/1", title=_STORY, published="NOW"), "Yahoo Finance")
+    y["first_seen"] = "2026-09-25T20:00:00+00:00"
+    g = _src(_item("https://g/1", title=_STORY, published="2026-09-25T20:30:00+00:00"), "Google")
+    assert db.insert_many([y, g]) == 1
+    assert db.newest(10)[0]["sources"] == ["Yahoo Finance", "Google"]
+    assert db.prune(keep_days=7, now=NOW) == 0
+
+
+def test_a_now_first_seen_as_well_falls_back_to_the_unparseable_sentinel(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    it = _item("https://a/both", published="now")
+    it["first_seen"] = "now"
+    dated = _item("https://a/dated")
+    assert db.insert_many([it, dated]) == 2
+    rows = db.newest(10)
+    assert [r["url"] for r in rows] == ["https://a/dated", "https://a/both"]   # sorts last
+    assert rows[1]["published_at"] == store._UNDATED
+
+
+# ── 2. a failed COMMIT rolls back and leaves no open transaction ───────────
+
+class _CommitFailsOnce:
+    """Delegates to a real connection; its first commit() raises WITHOUT committing."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self.failed = False
+
+    def commit(self):
+        if not self.failed:
+            self.failed = True
+            import sqlite3
+            raise sqlite3.OperationalError("disk I/O error")
+        return self._conn.commit()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def test_a_failed_commit_rolls_back_and_the_next_write_succeeds(tmp_path):
+    import sqlite3
+    db = store.Store(tmp_path / "n.db")
+    real = db._c
+    db._c = _CommitFailsOnce(real)
+    try:
+        db.insert_many([_item("https://a/lost")])
+    except sqlite3.OperationalError as exc:
+        assert "disk I/O" in str(exc)
+    else:
+        raise AssertionError("the failed commit should have re-raised")
+    assert db._c.failed is True
+    assert real.in_transaction is False
+    assert db.insert_many([_item("https://a/next")]) == 1          # BEGIN IMMEDIATE works again
+    assert real.in_transaction is False
+    db._c = real
+    assert [r["url"] for r in db.newest(10)] == ["https://a/next"]  # the failed batch is gone
+    other = store.Store(tmp_path / "n.db")
+    other._c.execute("PRAGMA busy_timeout=200")
+    assert other.insert_many([_item("https://a/other")]) == 1       # no lock left behind
+
+
+def test_a_failed_commit_in_the_other_writers_rolls_back_too(tmp_path):
+    import sqlite3
+    db = store.Store(tmp_path / "n.db")
+    real = db._c
+    for call in (lambda: db.mark_accessions(["a"]),
+                 lambda: db.set_feed_state("F", etag="x"),
+                 lambda: db.prune(keep_days=7, now=NOW)):
+        db._c = _CommitFailsOnce(real)
+        try:
+            call()
+        except sqlite3.OperationalError:
+            pass
+        else:
+            raise AssertionError("expected the commit failure")
+        assert real.in_transaction is False
+    db._c = real
+    assert db.unseen_accessions(["a"]) == ["a"]
+    assert db.all_feed_states() == []
+
+
+# ── 3. a limit that is not a positive int returns nothing ──────────────────
+
+def test_a_non_positive_or_non_int_limit_returns_nothing(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_item("https://a/1", tickers=["NVDA"]), _item("https://a/2", tickers=["NVDA"])])
+    for bad in (0, -1, -5, None, "5", 2.5, 1.0, True, False):
+        assert db.newest(bad) == [], bad
+        assert db.newest_for_ticker("NVDA", bad) == [], bad
+        assert db.newest(bad, public_sources={"S"}) == [], bad
+    assert len(db.newest(1)) == 1
+    assert len(db.newest_for_ticker("NVDA", 2)) == 2

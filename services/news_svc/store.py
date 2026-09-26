@@ -38,6 +38,14 @@ Times: every adapter hands over UTC ISO strings. Ordering and pruning compare
 ``julianday(...)`` rather than the raw strings, so a fractional-seconds stamp
 sorts by its instant. An unparseable ``published_at`` sorts last and is pruned by
 ``first_seen`` - our own clock - so it can never be kept forever.
+
+A ``published_at`` of the literal ``now`` (trimmed, any case) is stored as the
+item's ``first_seen`` instead: SQLite reads ``julianday('now')`` as the current
+clock, which the expression index refuses as non-deterministic - one such item
+rolled back its whole batch, every cycle. ``first_seen`` is the moment we saw it,
+which is what "now" meant. Should ``first_seen`` be ``now`` too (or not a str), the date
+becomes ``_UNDATED``, an unparseable sentinel that sorts last and is pruned by
+``first_seen`` like any other unparseable date.
 """
 import contextlib
 import datetime as dt
@@ -74,6 +82,7 @@ _TITLE_MERGE_DAYS = 1.0
 # first_seen, so there is deliberately no raw-string key between the two.
 _ORDER = "ORDER BY julianday(published_at) DESC, first_seen DESC"
 _IN_CHUNK = 500
+_UNDATED = "undated"          # unparseable on purpose: julianday() -> NULL, sorts last
 
 
 def _names(value):
@@ -88,6 +97,20 @@ def _names(value):
 
 def _dumps(value) -> str:
     return json.dumps(value, ensure_ascii=False)
+
+
+def _is_now(value) -> bool:
+    return isinstance(value, str) and value.strip().casefold() == "now"
+
+
+def _dated(it) -> dict:
+    """``it`` with a literal-"now" ``published_at`` replaced (see the module
+    docstring). A copy - the caller's dict is never changed."""
+    if not _is_now(it.get("published_at")):
+        return it
+    first_seen = it.get("first_seen")
+    usable = isinstance(first_seen, str) and first_seen.strip() and not _is_now(first_seen)
+    return dict(it, published_at=first_seen if usable else _UNDATED)
 
 
 def _union(existing, incoming) -> list:
@@ -125,17 +148,26 @@ class Store:
         self.close()
         return False
 
+    def _rollback(self) -> None:
+        """Best effort: a failed rollback must not mask the error that caused it."""
+        try:
+            self._c.rollback()
+        except Exception:          # noqa: BLE001 - the original error is re-raised
+            pass
+
     @contextlib.contextmanager
     def _write(self):
-        """One atomic write: BEGIN IMMEDIATE, then COMMIT, or ROLLBACK and re-raise."""
+        """One atomic write: BEGIN IMMEDIATE, then COMMIT, or ROLLBACK and re-raise.
+        The COMMIT is inside the guard: a failed commit can leave the transaction
+        open, and then every later BEGIN IMMEDIATE fails until a restart."""
         with self._lock:
             self._c.execute("BEGIN IMMEDIATE")
             try:
                 yield
+                self._c.commit()
             except BaseException:
-                self._c.rollback()
+                self._rollback()
                 raise
-            self._c.commit()
 
     # ── items ──────────────────────────────────────────────────────────────
     def _merge_into(self, row, it) -> None:
@@ -181,6 +213,7 @@ class Store:
         n = 0
         with self._write():
             for it in rows:
+                it = _dated(it)
                 if self._stale(it, min_published):
                     continue
                 same_id = self._c.execute(
@@ -206,6 +239,10 @@ class Store:
         return n
 
     def _select(self, where, params, limit, *, public_only, sources, public_sources) -> list:
+        # SQLite reads a negative LIMIT as "no limit"; a limit that is not a
+        # positive int (bool included) returns nothing.
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            return []
         sources = _names(sources)
         if sources is not None:
             if not sources:
@@ -254,7 +291,8 @@ class Store:
         names, primary first. ``sources`` keeps only rows whose primary ``source`` is in it;
         ``public_only`` keeps rows whose ingest-time ``public`` column is set.
         A bare str is one name; an EMPTY collection returns nothing. The limit
-        applies after every filter."""
+        applies after every filter; a ``limit`` that is not a positive int
+        returns nothing."""
         return self._select([], [], limit, public_only=public_only, sources=sources,
                             public_sources=public_sources)
 
