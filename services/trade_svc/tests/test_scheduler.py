@@ -231,3 +231,65 @@ def test_a_command_with_no_ts_is_treated_as_fresh(monkeypatch):
     monkeypatch.setattr(scheduler, "dividends_config", lambda: dict(C))
     handlers.handle_command(object(), Command(type="dividends_refresh", ts=None))
     assert calls == [{"force": True}]
+
+
+# ── the in-memory run day, and the parse that trusts the validated config ──
+
+class _CountingHarness(_Harness):
+    def __init__(self, monkeypatch, **kw):
+        super().__init__(monkeypatch, **kw)
+        self.reads = []
+        monkeypatch.setattr(scheduler, "_read_last_run", self.read)
+
+    def read(self):
+        import threading
+        self.reads.append((self.now, threading.current_thread() is threading.main_thread()))
+        return self.last_run
+
+
+def test_after_a_run_the_rest_of_the_day_reads_no_store(monkeypatch):
+    """The run day is kept in memory once a pull succeeds, so the ticks after
+    it until midnight never open the store."""
+    h = _CountingHarness(monkeypatch, start=ct("2026-09-28 06:38"), passes=30, refresh=_ok)
+    h.run()
+    assert len(h.calls) == 1
+    ran = h.calls[0]
+    assert [t for t, _ in h.reads if t > ran] == []      # 0 reads after the run
+    assert len([t for t, _ in h.reads if t <= ran]) == 1  # the one that decided it
+
+
+def test_the_store_read_runs_in_the_executor(monkeypatch):
+    h = _CountingHarness(monkeypatch, start=ct("2026-09-28 09:00"), passes=3, refresh=_ok,
+                         last_run="2026-09-28")
+    h.run()
+    assert h.reads and all(on_main is False for _, on_main in h.reads)
+
+
+def test_a_restart_reads_the_store_once_then_remembers_the_day(monkeypatch):
+    """Nothing in memory after a restart: the store says today already ran, so
+    no pull, and the day is remembered - one read, not one per tick."""
+    h = _CountingHarness(monkeypatch, start=ct("2026-09-28 09:00"), passes=10, refresh=_ok,
+                         last_run="2026-09-28")
+    h.run()
+    assert h.calls == [] and len(h.reads) == 1
+
+
+def test_the_next_trading_day_runs_again(monkeypatch):
+    h = _CountingHarness(monkeypatch, start=ct("2026-09-28 23:58"), passes=3, refresh=_ok,
+                         last_run="2026-09-28")
+    monkeypatch.setattr(scheduler, "TICK_S", 60)
+    h.run()
+    assert h.calls == []            # before 06:40 on the 29th: nothing due
+    h2 = _CountingHarness(monkeypatch, start=ct("2026-09-29 06:39"), passes=4, refresh=_ok,
+                          last_run="2026-09-28")
+    h2.run()
+    assert len(h2.calls) == 1
+
+
+def test_the_fallback_is_the_shared_default_not_a_second_literal(monkeypatch):
+    from shared import news_config as nc
+    div = dict(nc.DEFAULTS["calendar"]["dividends"], refresh_at="05:15")
+    cal = dict(nc.DEFAULTS["calendar"], dividends=div)
+    monkeypatch.setattr(nc, "DEFAULTS", dict(nc.DEFAULTS, calendar=cal))
+    assert scheduler.refresh_at_time({"refresh_at": "junk"}) == dt.time(5, 15)
+    assert not hasattr(scheduler, "_DEFAULT_REFRESH_AT")

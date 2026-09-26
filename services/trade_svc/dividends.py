@@ -27,6 +27,7 @@ past/forward rules are on :func:`parse_fundamental`.
 import datetime as dt
 import logging
 import math
+import threading
 from zoneinfo import ZoneInfo
 
 from services import _degrade
@@ -36,6 +37,10 @@ log = logging.getLogger(__name__)
 
 _CT = ZoneInfo("America/Chicago")
 _DEFAULT_LOOKBACK_DAYS = 3
+# One pull at a time: the scheduler's and a ``dividends_refresh`` command's run
+# on different executor threads. The second waits, then meets the once-a-day
+# guard (unless ``force``) - never two watchlist pulls side by side.
+_REFRESH_LOCK = threading.Lock()
 
 # ── the ONE field mapping (see the module docstring) ────────────────────────
 # Each entry is (quote spelling, instruments spelling); the first present wins.
@@ -270,7 +275,15 @@ def refresh(fetch=None, symbols=None, db_path=None, today=None, force=False):
     whole watchlist. A crash INSIDE the loop records nothing, so it retries.
     ⚠ A proxy outage is NOT a loop crash - every symbol lands as ``error`` and
     the day IS recorded, so there is no same-day retry: the budget is one call
-    per symbol per day, and a manual ``force`` refresh is the way to re-pull."""
+    per symbol per day, and a manual ``force`` refresh is the way to re-pull.
+
+    Serialised by ``_REFRESH_LOCK``: a concurrent call waits for the running
+    one, then re-reads ``last_run_day`` like any other call."""
+    with _REFRESH_LOCK:
+        return _refresh_locked(fetch, symbols, db_path, today, force)
+
+
+def _refresh_locked(fetch, symbols, db_path, today, force):
     if today is None:
         today = _today_ct()
     else:

@@ -345,3 +345,62 @@ def test_a_non_string_ticker_is_skipped_not_an_attribute_error(tmp_path):
     n = dividends.refresh(fetch=fetch, symbols=[None, 42, ["JPM"], True, " jpm "],
                           db_path=tmp_path / "d.db", today="2026-09-26")
     assert (n, calls) == (1, ["JPM"])
+
+
+def _blocking_fetch(entered, release):
+    calls = []
+
+    def fetch(sym):
+        calls.append(sym)
+        if len(calls) == 1:
+            entered.set()
+            release.wait(5)
+        return {sym: {"fundamental": QUOTE_FUND}}
+    return fetch, calls
+
+
+def test_two_concurrent_pulls_never_overlap(tmp_path):
+    """A scheduled pull and a command pull share one lock: the second waits,
+    then meets the once-a-day guard and fetches nothing."""
+    import threading
+    entered, release = threading.Event(), threading.Event()
+    fetch, calls = _blocking_fetch(entered, release)
+    db = tmp_path / "d.db"
+    out = {}
+
+    def run(name):
+        out[name] = dividends.refresh(fetch=fetch, symbols=["JPM", "AAA"], db_path=db,
+                                      today="2026-09-26")
+    t1 = threading.Thread(target=run, args=("a",))
+    t1.start()
+    assert entered.wait(5)
+    t2 = threading.Thread(target=run, args=("b",))
+    t2.start()
+    t2.join(0.3)
+    assert t2.is_alive()             # it is waiting, not pulling beside the first
+    release.set()
+    t1.join(5)
+    t2.join(5)
+    assert sorted(out.values()) == [0, 2]
+    assert calls == ["JPM", "AAA"]
+
+
+def test_a_forced_pull_waits_for_the_running_one_then_runs(tmp_path):
+    import threading
+    entered, release = threading.Event(), threading.Event()
+    fetch, calls = _blocking_fetch(entered, release)
+    db = tmp_path / "d.db"
+    out = {}
+    t1 = threading.Thread(target=lambda: out.setdefault("a", dividends.refresh(
+        fetch=fetch, symbols=["JPM"], db_path=db, today="2026-09-26")))
+    t1.start()
+    assert entered.wait(5)
+    t2 = threading.Thread(target=lambda: out.setdefault("b", dividends.refresh(
+        fetch=fetch, symbols=["JPM"], db_path=db, today="2026-09-26", force=True)))
+    t2.start()
+    t2.join(0.3)
+    assert t2.is_alive() and calls == ["JPM"]
+    release.set()
+    t1.join(5)
+    t2.join(5)
+    assert out == {"a": 1, "b": 1} and calls == ["JPM", "JPM"]
