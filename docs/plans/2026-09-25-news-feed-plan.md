@@ -175,6 +175,20 @@ $PY -m pytest shared/tests/test_news_config.py -q
 ```
 Expected: FAIL (`ModuleNotFoundError: shared.news_config`).
 
+> **Superseded in part (Task 5b, 2026-09-26).** The per-feed switches moved
+> out of `[[feeds]]` into one `[feed_flags."<feed name>"]` table per feed
+> (`enabled`, `public`), written explicitly for every shipped feed — a table
+> merges key by key under a `config/local` override where a list replaces the
+> whole list. GlobeNewswire's `enabled = false` and its comment live in its
+> `[feed_flags]` entry; every feed ships `public = true`, ZeroHedge and Truth
+> Social included. `DEFAULTS` gains `"feed_flags": {}`; `feeds()` reads the
+> flags from there (legacy `[[feeds]]` flags warn and are only a fallback) and
+> `news_config.flags(name)` gives one feed's current switches. In Task 3's
+> catalogue the Feeds section is read-only (`Section(readonly=True)`), a "Feed
+> switches" section edits `feed_flags.*.enabled` / `.public`, and
+> `collector.rth_poll_min` has `min=3`. The sample below is the pre-5b shape.
+> See the design doc, §2.
+
 **Step 3: Write the config file**
 
 `config/news.toml`:
@@ -1229,6 +1243,15 @@ class Store:
 ---
 
 ### Task 9: The fetcher and the poll cycle
+
+> **Task 5b note.** The public view re-checks the CURRENT flags at every
+> publish, not only the ingest-time copy: `feed_public` keeps a row only when
+> its store `public` is true AND `news_config.flags(row["source"])["public"]`
+> is true (evaluate `flags` once per source per publish), so switching a feed's
+> `public` off in Settings hides its existing items on the next poll. A feed
+> whose current `enabled` is false is not polled. Add a producer-side test: a
+> public feed's items reach `feed_public`, then its flag flips to
+> `public = false` and the next publish drops them.
 
 **Files:**
 - Create: `services/news_svc/fetch.py`

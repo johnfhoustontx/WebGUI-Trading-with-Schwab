@@ -38,7 +38,7 @@ public feeds directly costs one small collector and depends on nobody.
 | Claude summaries? | **Phase 2.** v1 is headline + teaser + source + tickers | See the raw feed quality first; the summary step is designed below and built after. |
 | Which tickers drive per-ticker feeds and the filter? | **The GEX collection list** (`config/symbols.toml` via `shared.symbols`) **plus a small `[tickers] extras`** | Zero new list to keep in step; a name added to the scan gets news automatically. `extras` is for names followed but not traded. |
 | Where does it show? | `/news` · a Symbol-page band · a Desk strip · **and `live.neuralstrike.co/news`** under the site's Tools menu | The three private readers are one view apiece on polls that already run; the public screen is the reference site's whole product. |
-| What may the public see? | Headline, the feed's own teaser, source, time, link — never a body or a summary; **per-feed `public` flag**, enforced at the service | The shape RSS exists to syndicate and the one Google News / STN use. A source with restrictive terms — or one kept as the operator's edge — is dropped at the producer, not hidden by the page. |
+| What may the public see? | Headline, the feed's own teaser, source, time, link — never a body or a summary; **per-feed `public` flag** (`[feed_flags]`, re-checked at every publish), enforced at the service | The shape RSS exists to syndicate and the one Google News / STN use. A source with restrictive terms — or one kept as the operator's edge — is dropped at the producer, not hidden by the page. |
 | New dependencies | **`feedparser`** only (pure Python; `requirements.txt` AND `requirements.lock`) | RSS/Atom variants are messy; Form 4 XML parses with the stdlib. |
 | Paid calls | **None.** Zero Schwab, zero Claude, zero vendor keys in v1 | Every source is public; EDGAR asks only for a contact User-Agent. |
 
@@ -70,7 +70,7 @@ raises). Every value below is an operator choice and gets a
 
 ```toml
 [collector]
-rth_poll_min      = 5      # 08:30–15:00 CT, via shared.market_calendar
+rth_poll_min      = 5      # 08:30–15:00 CT, via shared.market_calendar (floor 3 in Settings)
 offhours_poll_min = 15
 weekend_poll_min  = 60     # holidays follow the calendar too
 keep_days         = 7      # news.db retention
@@ -88,7 +88,6 @@ window_h = 6               # the Trending chips count mentions in this window
 name = "MarketWatch"
 kind = "rss"
 url  = "https://feeds.content.dowjones.io/public/rss/mw_topstories"
-# enabled = true, public = true, poll_min = <collector cadence> are the defaults
 
 [[feeds]]
 name = "Yahoo Finance"
@@ -112,7 +111,50 @@ forms = ["S-1", "S-3", "424B5"]
 
 # also shipped: CNBC, ZeroHedge, Benzinga, Federal Reserve press releases,
 # PR Newswire, GlobeNewswire, Business Wire, the Truth Social archive
+
+# The per-feed switches, one TABLE per feed, keyed by the feed's name.
+[feed_flags."MarketWatch"]
+enabled = true
+public  = true
+
+[feed_flags."SEC Insider Buys"]
+enabled = true
+public  = true
+# ... one entry for EVERY shipped feed
 ```
+
+**The switches live in `[feed_flags."<feed name>"]`, not in `[[feeds]]`
+(2026-09-26).** A list in `config/local/news.toml` replaces the whole shipped
+list, while a table deep-merges key by key — so with the flags inside
+`[[feeds]]`, switching one feed off from Settings would have written a copy of
+the entire feed list into the override and frozen it there, and every later
+change to the shipped list would have been silently shadowed. As tables, an
+override of one feed's `public` is one line and touches nothing else. The rules
+(`shared/news_config.py`):
+
+- a flag absent from `[feed_flags]` defaults **true**; a present but non-bool
+  one **fails closed** (`false`, with a WARNING);
+- a legacy `enabled` / `public` still inside a `[[feeds]]` entry is WARNed as
+  moved and used only where `[feed_flags]` is silent, so a legacy
+  `enabled = false` still keeps the feed off;
+- a `[feed_flags]` entry naming no feed (a typo) is WARNed; one that is not a
+  table is ignored with a WARNING;
+- a duplicate feed name keeps the FIRST entry, and the WARNING says when that
+  kept entry is disabled — the name keys the switch, so "enabling the
+  duplicate" does nothing;
+- `news_config.flags(name)` returns one feed's current `{enabled, public}` by
+  the same rules, `false`/`false` for a name that is not a usable feed.
+
+**Every shipped feed is public**, ZeroHedge and Truth Social included; only
+GlobeNewswire ships disabled (its host drops non-browser clients). There is
+**no per-feed `poll_min`**: every feed polls on the collector's cadence.
+
+**Settings → Configuration** edits the switches ("Feed switches", one row per
+feed, named by the feed) and `[collector]` / `[tickers]` / `[trending]`, but
+shows the **feed list read-only** — displayed, never editable, never written to
+the override — because the only way to override part of a list is to replace
+all of it. A feed is added or changed in `config/news.toml`. During market hours
+the poll interval cannot go below **3 minutes** (`collector.rth_poll_min`).
 
 **Five `kind`s, one adapter each** (`services/news_svc/adapters/`), every one a
 pure function `parse(bytes, feed_cfg, now) -> list[Item]` over the fetched
@@ -145,8 +187,12 @@ Item: id · source · original_source · title · teaser · url · published_at 
   `Insider Transaction`, `Offering`, `Macro` for the Fed feed); no keyword
   classifier. The reference site's 75%-"General" tag is the argument for not
   building one yet.
-- **`public`** is copied from the feed's flag at ingest, so an item's
-  eligibility is decided once, by the producer.
+- **`public`** is copied from the feed's flag at ingest **and re-checked at
+  every publish**: the public view is built from the store's `public` column
+  AND the feed's CURRENT `news_config.flags(source)["public"]`, so switching a
+  feed's `public` off hides the items it already published on the next poll,
+  not only the ones ingested afterwards (built in the poll-cycle task). Either
+  way the decision is the producer's.
 
 **Store.** `services/news_svc/data/news.db` (gitignored, added to the root
 `conftest.py` live-DB guard list and to `backup_local.DATA_TREES`): `items`
@@ -155,7 +201,8 @@ last-modified, last poll, last error, last item time). Retention prunes past
 `keep_days` on each poll.
 
 **Publish.** After each poll, `feed` = the newest `view_items` rows,
-`feed_public` = the same query with `public = 1`, both `cache_set(...,
+`feed_public` = the same query with `public = 1`, further filtered to feeds
+whose CURRENT flag is public (`news_config.flags`), both `cache_set(...,
 skip_unchanged=True)` with an event; `status` alongside. ⚠ `feed_public` is
 built from the store's flag, never by filtering `feed` page-side — a
 producer-side test feeds a `public = false` feed through the real publish and
