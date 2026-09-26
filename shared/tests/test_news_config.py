@@ -856,6 +856,33 @@ def test_good_calendar_cadences_are_read_as_written(tmp_path, monkeypatch):
     assert (cal["refresh_min"], cal["release_poll_min"], cal["actual_fresh_h"]) == (30, 0.5, 12)
 
 
+def test_a_calendar_cadence_past_its_cap_is_the_default(monkeypatch):
+    # minutes cap at a week (10080), hours at a year (8760) - the same caps
+    # webgui/pages/news_view.py builds its timedeltas under.
+    d = nc.DEFAULTS["calendar"]
+    for key, bad in (("refresh_min", 10081), ("release_watch_min", 10**400),
+                     ("release_poll_min", 1e300), ("actual_fresh_h", 8761)):
+        monkeypatch.setattr(nc, "load", lambda k=key, b=bad: {"calendar": {k: b}})
+        assert nc.calendar_config()[key] == d[key], (key, bad)
+    monkeypatch.setattr(nc, "load", lambda: {"calendar": {
+        "release_watch_min": 10080, "actual_fresh_h": 8760}})
+    cal = nc.calendar_config()
+    assert (cal["release_watch_min"], cal["actual_fresh_h"]) == (10080, 8760)
+
+
+def test_a_source_refresh_min_past_the_cap_is_inherited(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: {"calendar": {
+        "refresh_min": 45, "sources": {"bls": {"refresh_min": 10**400}}}})
+    assert nc.calendar_source("bls")["refresh_min"] == 45
+
+
+def test_an_unknown_calendar_cadence_past_its_cap_is_dropped(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: {"calendar": {
+        "extra_min": 20000, "other_h": 9000, "fine_min": 5}})
+    cal = nc.calendar_config()
+    assert "extra_min" not in cal and "other_h" not in cal and cal["fine_min"] == 5
+
+
 def test_a_bad_source_refresh_min_is_the_calendar_default(tmp_path, monkeypatch):
     _layered(tmp_path, monkeypatch,
              "[calendar]\nrefresh_min = 45\n"

@@ -16,8 +16,9 @@ the batch.
 
 A ``time`` that is not an ``h:mm a.m./p.m.`` clock ("noon", "14:00", "TBA")
 keeps the row as a DATE-ONLY event (``at`` None, id suffix ``:day``) with a
-DEBUG line - the date is still true; a range ("2:00 p.m. - 3:00 p.m.") takes
-its start. A clock-shaped time out of range ("25:99 p.m.") is a corrupt row
+DEBUG line - the date is still true; a range ("2:00 p.m. - 3:00 p.m.", an en or
+em dash, or "to") takes its start, and a trailing Eastern zone word ("ET",
+"EDT", "EST") is allowed; any other zone word is date-only. A clock-shaped time out of range ("25:99 p.m.") is a corrupt row
 and is skipped. ``link`` is kept only when it is an ``https://`` URL after
 stripping whitespace (the live file has ``live`` values with a leading
 space); ``http://``, relative and scheme-less links are dropped DELIBERATELY,
@@ -40,7 +41,12 @@ log = logging.getLogger(__name__)
 URL = "https://www.federalreserve.gov/json/calendar.json"
 EASTERN = ZoneInfo("America/New_York")
 
-_TIME = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?\s*$", re.I)
+# A clock, optionally followed by an Eastern zone word ("ET", "EDT", "EST",
+# bare or in parentheses) - the Board's times are Eastern either way.
+_TIME = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?"
+                   r"(?:\s*\(?\s*e[ds]?t\s*\)?)?\s*$", re.I)
+# A range separator: a hyphen, en dash or em dash, or the word "to".
+_RANGE = re.compile(r"\s*[-\u2013\u2014]\s*|\s+to\s+", re.I)
 _TAG = re.compile(r"<[^>]+>")
 _SPACE = re.compile(r"\s+")
 _SLUG = re.compile(r"[^a-z0-9]+")
@@ -70,8 +76,9 @@ def _slug(title: str) -> str:
 def _clock(raw):
     """"2:00 p.m." -> (14, 0); "" -> None (date-only).
 
-    A range takes its start: the text before the first hyphen is tried first,
-    then the whole text. A time that is no clock at all ("noon", "14:00") is
+    A range takes its start: the text before the first separator (``-``,
+    ``\u2013``, ``\u2014`` or the word ``to``) is tried first, then the whole
+    text. A trailing Eastern zone word (``ET`` / ``EDT`` / ``EST``) is allowed. A time that is no clock at all ("noon", "14:00") is
     ``None`` too - date-only, with a DEBUG line - because the date is still
     right. A clock-SHAPED time out of range ("25:99 p.m.") raises ValueError:
     that row is corrupt, and the caller skips it."""
@@ -79,7 +86,7 @@ def _clock(raw):
         return None
     m = None
     if isinstance(raw, str):
-        head = raw.split("-", 1)[0]
+        head = _RANGE.split(raw, 1)[0]
         m = _TIME.match(head) or _TIME.match(raw)
     if not m:
         log.debug("fed_calendar: unreadable time %r - kept as date-only", raw)

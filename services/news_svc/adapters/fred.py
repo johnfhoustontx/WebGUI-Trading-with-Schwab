@@ -233,15 +233,31 @@ def api_release_dates_url(base, rid, key):
 # ---- redaction -----------------------------------------------------------
 
 def safe_error(exc, key):
-    """A NEW ``FetchError`` carrying ``redact(exc, key)`` as its message (and
-    ``exc``'s ``status`` when it has one), with no ``__cause__`` / ``__context__``
-    and ``__suppress_context__`` set - so a traceback of it prints nothing but
-    the redacted line. Re-raise it ``from None``. Never raises."""
+    """A NEW exception carrying ``redact(exc, key)`` as its message (and
+    ``exc``'s ``status`` when it has one). Its type is ``type(exc)`` when
+    ``exc`` is a ``FetchError`` subclass (``TooLarge`` stays ``TooLarge``, so a
+    caller's ``except TooLarge`` still means "not an outage"), falling back to
+    ``FetchError`` when that type cannot be built this way; anything else
+    becomes a plain ``FetchError``.
+
+    It is returned with no ``__cause__`` / ``__context__`` and with
+    ``__suppress_context__`` set. ⚠ Raised INSIDE an ``except`` block, Python
+    sets ``__context__`` again at raise time (to the exception being handled,
+    key and all); it stays out of a printed traceback only because
+    ``__suppress_context__`` hides it. So raise it outside the ``except``
+    block, or ``raise fred.safe_error(exc, key) from None``. Never raises."""
     from services.news_svc.fetch import FetchError
     status = getattr(exc, "status", None)
     if isinstance(status, bool) or not isinstance(status, int):
         status = None
-    safe = FetchError(redact(exc, key), status=status)
+    message = redact(exc, key)
+    cls = type(exc) if isinstance(exc, FetchError) else FetchError
+    try:
+        safe = cls(message, status=status)
+        if not isinstance(safe, FetchError):
+            raise TypeError("not a FetchError")
+    except Exception:  # noqa: BLE001 - a subclass with another signature: the base
+        safe = FetchError(message, status=status)
     safe.__cause__ = None
     safe.__context__ = None
     safe.__suppress_context__ = True

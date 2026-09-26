@@ -1463,9 +1463,11 @@ def test_econ_obs_a_missing_value_is_null_and_never_erases_a_reading(tmp_path):
     assert [r["value"] for r in db.obs("S")] == [None, None, None]
     db.upsert_obs("S", [{"obs_date": "2026-07-01", "value": 1.5}], now="t2")
     db.upsert_obs("S", [{"obs_date": "2026-07-01", "value": float("inf")}], now="t3")
-    # first_seen is t2: the stored NULL was no reading, 1.5 first reached us at t2
+    # first_seen is t2: the stored NULL was no reading, 1.5 first reached us at t2.
+    # bootstrap was pinned True here; fixed to False - a value that later fills a
+    # NULL is a real arrival, not part of the first fill.
     assert db.obs("S")[0] == {"obs_date": "2026-07-01", "value": 1.5, "first_seen": "t2",
-                              "bootstrap": True}
+                              "bootstrap": False}
 
 
 def test_econ_obs_bootstrap_is_per_series(tmp_path):
@@ -1528,10 +1530,32 @@ def test_cal_source_an_unserialisable_payload_still_records_the_poll(tmp_path):
     db.set_cal_source("bls", payload=[{"x": 1}], last_poll="t1", error=None)
     db.set_cal_source("bls", payload={"bad": object()}, last_poll="t2", error="boom")
     st = db.cal_source("bls")
-    assert st["last_poll"] == "t2" and st["error"] == "boom" and st["payload"] is None
+    # Fixed: the unserialisable payload no longer wipes the last good one (it was
+    # pinned as None) - the poll and its error are still recorded.
+    assert st["last_poll"] == "t2" and st["error"] == "boom" and st["payload"] == [{"x": 1}]
     assert not db._c.in_transaction
     db.set_cal_source("fred", payload=[float("nan"), {1, 2}], last_poll="t3")
     assert db.cal_source("fred")["last_poll"] == "t3"
+
+
+def test_cal_source_unserialisable_payload_with_no_previous_one_stays_none(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.set_cal_source("bea", payload={"bad": object()}, last_poll="t1", error="boom")
+    st = db.cal_source("bea")
+    assert st["payload"] is None and st["last_poll"] == "t1" and st["error"] == "boom"
+
+
+def test_econ_obs_a_null_filled_inside_the_first_fill_stays_bootstrap(tmp_path):
+    # The same obs_date twice in the very first fetch: the fill is still part
+    # of the first fill, so it must not be promoted to a real arrival.
+    db = store.Store(tmp_path / "n.db")
+    db.upsert_obs("S", [{"obs_date": "2026-08-01", "value": None},
+                        {"obs_date": "2026-08-01", "value": 2.5}], now="t1")
+    assert db.obs("S")[0]["bootstrap"] is True
+    db.upsert_obs("S", [{"obs_date": "2026-09-01", "value": None}], now="t2")
+    db.upsert_obs("S", [{"obs_date": "2026-09-01", "value": 3.0}], now="t3")
+    assert db.obs("S")[1] == {"obs_date": "2026-09-01", "value": 3.0, "first_seen": "t3",
+                              "bootstrap": False}
 
 
 def test_econ_obs_first_seen_is_when_the_first_reading_arrived(tmp_path):
@@ -1544,5 +1568,7 @@ def test_econ_obs_first_seen_is_when_the_first_reading_arrived(tmp_path):
     db.upsert_obs("S", [{"obs_date": "2026-08-01", "value": 2.5}], now="t3")
     assert db.obs("S")[0]["first_seen"] == "t3"
     db.upsert_obs("S", [{"obs_date": "2026-08-01", "value": 2.6}], now="t4")   # a revision
+    # bootstrap was pinned True here; fixed to False - the t3 fill of a stored
+    # NULL is a real later arrival, not a first fill (a revision keeps it).
     assert db.obs("S")[0] == {"obs_date": "2026-08-01", "value": 2.6, "first_seen": "t3",
-                              "bootstrap": True}
+                              "bootstrap": False}

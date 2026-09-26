@@ -742,19 +742,21 @@ class Store:
     def set_cal_source(self, name, *, payload=_UNSET, **fields) -> None:
         """Update the named fields; the rest keep their stored values. Leaving
         ``payload`` out keeps the last good result - a failed fetch records its
-        ``error`` / ``last_poll`` and nothing else."""
+        ``error`` / ``last_poll`` and nothing else. A payload json cannot encode
+        is treated the same way: the stored payload is kept, the poll recorded."""
         unknown = set(fields) - set(_CAL_COLS[2:])
         if unknown:
             raise TypeError(f"unknown calendar source field(s): {sorted(unknown)}")
         # Serialise BEFORE the write: a payload json cannot encode must not
-        # lose the poll's last_poll / error - it is stored as no payload.
+        # lose the poll's last_poll / error, nor overwrite the last GOOD
+        # payload - it is dropped and the stored one kept.
         if payload is not _UNSET and payload is not None:
             try:
                 payload = _dumps(payload)
             except (TypeError, ValueError):
                 log.warning("news store: calendar source %s payload is not JSON-serialisable; "
-                            "storing none", name, exc_info=True)
-                payload = None
+                            "keeping the last good payload", name, exc_info=True)
+                payload = _UNSET
         with self._write():
             r = self._c.execute("SELECT * FROM cal_sources WHERE name=?", (name,)).fetchone()
             st = dict(r) if r else dict.fromkeys(_CAL_COLS, None)
@@ -775,7 +777,9 @@ class Store:
         ``value`` is updated, since FRED revises - but a missing value (NaN,
         ``"."``, anything not a finite number, stored NULL) never erases a
         reading. Rows inserted while the series had NO row are ``bootstrap``:
-        the first fetch's history, not a release we watched arrive."""
+        the first fetch's history, not a release we watched arrive. A later
+        poll that fills a stored NULL clears ``bootstrap`` with ``first_seen``:
+        that value arrived while we were watching."""
         with self._write():
             boot = int(self._c.execute("SELECT NOT EXISTS (SELECT 1 FROM econ_obs "
                                        "WHERE series=?)", (series,)).fetchone()[0])
@@ -788,7 +792,12 @@ class Store:
                     "VALUES (?,?,?,?,?) ON CONFLICT(series, obs_date) DO UPDATE SET "
                     "value=COALESCE(excluded.value, econ_obs.value), "
                     "first_seen=CASE WHEN econ_obs.value IS NULL AND excluded.value IS NOT NULL "
-                    "THEN excluded.first_seen ELSE econ_obs.first_seen END",
+                    "THEN excluded.first_seen ELSE econ_obs.first_seen END, "
+                    # a fill of a stored NULL is a real later arrival: not bootstrap
+                    # (excluded.bootstrap is 0 whenever the series already had rows;
+                    # it stays 1 only for a duplicate inside the very first fill)
+                    "bootstrap=CASE WHEN econ_obs.value IS NULL AND excluded.value IS NOT NULL "
+                    "THEN excluded.bootstrap ELSE econ_obs.bootstrap END",
                     (series, obs_date, _obs_value(r.get("value")), now, boot))
 
     def obs(self, series) -> list:

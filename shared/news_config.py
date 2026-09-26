@@ -39,7 +39,8 @@ numbers with ``high_at > med_at``, else the built-in pair with one WARNING;
 ``stale_after_h`` must be > 0 and the two boosts >= 0, else the default with
 one WARNING; malformed keyword tiers and non-numeric points are dropped),
 ``calendar_config()`` / ``calendar_source()`` (a non-bool ``enabled`` fails
-closed; a ``*_min`` / ``*_h`` that is not a finite number > 0 is the default)
+closed; a ``*_min`` / ``*_h`` that is not a finite number > 0, or is past its
+cap of a week of minutes / a year of hours, is the default)
 and ``indicators()`` (unknown transform/schedule or no series -> skipped with a
 WARNING). Keyword tiers, sources and indicators are TABLES, never lists: a list
 in ``config/local`` replaces the whole list. Nothing here raises. Treat anything ``load()``
@@ -522,15 +523,32 @@ def _cadence_key(key) -> bool:
     return isinstance(key, str) and key.endswith(("_min", "_h"))
 
 
+# The largest cadence a timedelta is ever built from: a week of minutes, a year
+# of hours - the same caps ``webgui/pages/news_view.py`` (_MAX_WATCH_MIN /
+# _MAX_FRESH_H) reads the published settings under. Past them a value is junk
+# (``10**400`` minutes would overflow every timedelta built from it).
+CADENCE_MAX_MIN = 10080
+CADENCE_MAX_H = 8760
+
+
+def _cadence_max(key):
+    return CADENCE_MAX_MIN if key.endswith("_min") else CADENCE_MAX_H
+
+
+def _cadence_ok(key, value) -> bool:
+    return _is_num(value) and 0 < value <= _cadence_max(key)
+
+
 def _cadence(where, key, value, default):
-    """A ``*_min`` / ``*_h`` value when it is a finite number > 0 (never a
-    bool), else ``default`` with one WARNING per distinct bad value. A 0 or
-    negative cadence would poll in a tight loop or never; NaN fails ``> 0``."""
-    if _is_num(value) and value > 0:
+    """A ``*_min`` / ``*_h`` value when it is a finite number > 0 and at most
+    its cap (a week of minutes, a year of hours; never a bool), else
+    ``default`` with one WARNING per distinct bad value. A 0 or negative
+    cadence would poll in a tight loop or never; NaN fails ``> 0``."""
+    if _cadence_ok(key, value):
         return value
     _warn_once((where, key, repr(value)),
-               "news.toml: %s %s = %r is not a number > 0 - using %r",
-               where, key, value, default)
+               "news.toml: %s %s = %r is not a number > 0 and <= %r - using %r",
+               where, key, value, _cadence_max(key), default)
     return default
 
 
@@ -540,7 +558,8 @@ def calendar_config() -> dict:
 
     ``enabled`` that is not a real bool FAILS CLOSED (False), as a source's or
     an indicator's does. Every ``*_min`` / ``*_h`` scalar that is not a finite
-    number > 0 (a bool, a string, NaN, 0, a negative) is its built-in default;
+    number > 0 (a bool, a string, NaN, 0, a negative) or is past its cap
+    (10080 minutes, 8760 hours) is its built-in default;
     one WARNING per distinct bad value."""
     cal = _calendar()
     base = DEFAULTS["calendar"]
@@ -554,7 +573,7 @@ def calendar_config() -> dict:
     for key in list(out):
         if _cadence_key(key) and key in base:
             out[key] = _cadence("[calendar]", key, out[key], base[key])
-        elif _cadence_key(key) and not (_is_num(out[key]) and out[key] > 0):
+        elif _cadence_key(key) and not _cadence_ok(key, out[key]):
             out.pop(key)                 # an unknown key with no default: drop it
     return copy.deepcopy(out)
 

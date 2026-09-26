@@ -56,10 +56,14 @@ _CAL = _NEWS_DEFAULTS["calendar"]
 # ---- small readers ------------------------------------------------------------
 
 def _finite(v):
-    """A finite real number as float, else ``None`` (bools and strings too)."""
+    """A finite real number as float, else ``None`` (bools and strings too, and
+    an int too large for a float - ``10**400`` raises OverflowError there)."""
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
-    v = float(v)
+    try:
+        v = float(v)
+    except OverflowError:
+        return None
     return v if math.isfinite(v) else None
 
 
@@ -68,12 +72,31 @@ def _table(cfg, key):
     return v if isinstance(v, dict) else {}
 
 
-def _setting(table, key, default):
-    """A finite number >= 0 from ``table``, else ``default``."""
+# The largest settings a timedelta is ever built from (webgui/pages/news_view.py
+# reads the published two under the same caps, and shared.news_config refuses
+# a cadence past them): a week of minutes, a year of hours, ten years of days.
+_MAX_MIN = 10080
+_MAX_H = 8760
+_MAX_DAYS = 3660
+
+
+def _setting(table, key, default, hi=None):
+    """A finite number >= 0 (and <= ``hi`` when given) from ``table``, else
+    ``default``. Never raises - an overflowing value is junk, not an error."""
     v = _finite(table.get(key)) if isinstance(table, dict) else None
-    if v is None or v < 0:
+    if v is None or v < 0 or (hi is not None and v > hi):
         return default
     return int(v) if v == int(v) else v
+
+
+def _is_bootstrap(flag):
+    """Only a bool ``False`` or a plain int ``0`` says an observation is NOT a
+    first fill; anything else (missing, ``None``, ``"0"``, ``0.0``) is treated as
+    one - an unclear flag must never promote a first-fill value to an Actual.
+    The same rule ``news_view._explicitly_not_bootstrap`` reads the payload by."""
+    if flag is False:
+        return False
+    return not (type(flag) is int and flag == 0)
 
 
 def _aware(now):
@@ -145,6 +168,12 @@ def _clean_obs(obs):
 
 
 def _figure(rows, i, transform):
+    """The derived figure through ``_finite``: extreme inputs (``1e300 / 1e-300``)
+    overflow to infinity, which is no reading - ``None``, never ``inf``."""
+    return _finite(_raw_figure(rows, i, transform))
+
+
+def _raw_figure(rows, i, transform):
     cur = _finite(rows[i].get("value"))
     if cur is None:
         return None
@@ -200,6 +229,23 @@ def _time_ct(raw):
     return (h, m) if 0 <= h <= 23 and 0 <= m <= 59 else None
 
 
+_BOUNDARIES = (",", " (", ";", ":", " -", " \u2013", " \u2014")
+
+
+def _prefix_match(text, prefix):
+    """``text`` starts with ``prefix`` (case-insensitive) ON A BOUNDARY: the
+    rest is empty or opens with ``,`` / `` (`` / ``;`` / ``:`` / `` -``, or the
+    prefix itself ends in punctuation (``"GDP ("``). So "Employment Situation"
+    takes "Employment Situation" but never "Employment Situation of Veterans"."""
+    if not (isinstance(text, str) and isinstance(prefix, str)):
+        return False
+    t, p = text.strip().casefold(), prefix.strip().casefold()
+    if not p or not t.startswith(p):
+        return False
+    rest = t[len(p):]
+    return not rest or not p[-1].isalnum() or rest.startswith(_BOUNDARIES)
+
+
 def _schedule_events(ind, schedules):
     """``[(instant | None, date)]`` for the indicator's own release."""
     ind = ind if isinstance(ind, dict) else {}
@@ -227,9 +273,8 @@ def _schedule_events(ind, schedules):
     match = ind.get("match")
     if not (isinstance(match, str) and match.strip()):
         return []
-    want = match.casefold()
     for ev in evs:
-        if not _event_text(ev).lstrip().casefold().startswith(want):
+        if not _prefix_match(_event_text(ev), match):
             continue
         when, d = _instant(ev.get("at")), _date(ev.get("date"))
         if d is None and when is not None:
@@ -244,8 +289,9 @@ def releases_for(ind, schedules, *, now):
 
     ``schedules`` is ``{"bls": [ics events], "bea": [ics events], "fred":
     [fred calendar / API release-date rows]}``. BLS / BEA events match the
-    indicator's ``match`` as a case-insensitive PREFIX of the summary ("GDP ("
-    takes "GDP (Advance Estimate)", never "GDP by Industry"); FRED rows match
+    indicator's ``match`` as a case-insensitive PREFIX of the summary, on a
+    boundary (``_prefix_match``: "GDP (" takes "GDP (Advance Estimate)", never
+    "GDP by Industry"; "Employment Situation" never takes "... of Veterans"); FRED rows match
     on ``release_id``, and only a FRED row with a date and no time takes the
     indicator's ``time_ct`` (Central). A date-only event can be the NEXT one
     (``next_date``) but never the last (it has no instant to compare with a
@@ -278,19 +324,20 @@ def watch_due(st, *, now, cfg):
     "last_watch_poll"}``. Due from the release instant for ``release_watch_min``
     minutes, at most every ``release_poll_min``, and only until an observation
     first seen at or after the release lands (a ``bootstrap`` one does not
-    count: the first fill says nothing about this release)."""
+    count: the first fill says nothing about this release; the flag is read by
+    ``_is_bootstrap``, so only an explicit False / 0 ends the watch)."""
     if not isinstance(st, dict):
         return False
     now = _aware(now)
     release = _instant(st.get("last_release_at"))
     if now is None or release is None or now < release:
         return False
-    watch = _setting(cfg, "release_watch_min", _CAL["release_watch_min"])
-    poll = _setting(cfg, "release_poll_min", _CAL["release_poll_min"])
+    watch = _setting(cfg, "release_watch_min", _CAL["release_watch_min"], _MAX_MIN)
+    poll = _setting(cfg, "release_poll_min", _CAL["release_poll_min"], _MAX_MIN)
     if now - release > dt.timedelta(minutes=watch):
         return False
     seen = _instant(st.get("latest_first_seen"))
-    if seen is not None and seen >= release and st.get("latest_bootstrap") not in (True, 1):
+    if seen is not None and seen >= release and not _is_bootstrap(st.get("latest_bootstrap")):
         return False
     last_poll = _instant(st.get("last_watch_poll"))
     if last_poll is not None and now - last_poll < dt.timedelta(minutes=poll):
@@ -319,14 +366,16 @@ def events_group(*, fed, ics, extra_releases, now, cfg):
     Fed speeches and testimony look ``speech_horizon_days`` ahead, everything
     else ``horizon_days``; an extra release looks ``horizon_days`` ahead. A
     tracked indicator's release is NOT an event here (it is a data tile) - only
-    a summary starting with an ``extra_releases`` name joins. Ordered by date,
+    a summary starting with an ``extra_releases`` name, on a boundary
+    (``_prefix_match``), joins. Ordered by date,
     then instant, then title; exact duplicates collapse."""
     now = _aware(now)
     if now is None:
         return []
     fed_cfg = _table(cfg, "fed")
-    horizon = _setting(fed_cfg, "horizon_days", _CAL["fed"]["horizon_days"])
-    speech = _setting(fed_cfg, "speech_horizon_days", _CAL["fed"]["speech_horizon_days"])
+    horizon = _setting(fed_cfg, "horizon_days", _CAL["fed"]["horizon_days"], _MAX_DAYS)
+    speech = _setting(fed_cfg, "speech_horizon_days", _CAL["fed"]["speech_horizon_days"],
+                      _MAX_DAYS)
     rows = {}
     for ev in _dicts(fed):
         title, d, when = _str(ev.get("title")), _date(ev.get("date")), _instant(ev.get("at"))
@@ -336,13 +385,13 @@ def events_group(*, fed, ics, extra_releases, now, cfg):
         if _within(when, d, now, days):
             row = _event_row(title, when, d)
             rows[(d, row["at"] or "", title)] = row
-    extras = [x.strip().casefold() for x in extra_releases
+    extras = [x for x in extra_releases
               if isinstance(x, str) and x.strip()] if isinstance(extra_releases, list) else []
     for name in ("bls", "bea"):
         evs = _dicts(ics.get(name)) if isinstance(ics, dict) else []
         for ev in evs:
             text = _event_text(ev).strip()
-            if not text or not any(text.casefold().startswith(x) for x in extras):
+            if not text or not any(_prefix_match(text, x) for x in extras):
                 continue
             when, d = _instant(ev.get("at")), _date(ev.get("date"))
             if d is None:
@@ -376,7 +425,7 @@ def ipos_group(rows, *, now, cfg):
         return []
     ipo_cfg = _table(cfg, "ipo")
     min_offer = _setting(ipo_cfg, "min_offer_usd", _CAL["ipo"]["min_offer_usd"])
-    lookback = _setting(ipo_cfg, "lookback_days", _CAL["ipo"]["lookback_days"])
+    lookback = _setting(ipo_cfg, "lookback_days", _CAL["ipo"]["lookback_days"], _MAX_DAYS)
     floor = _today_ct(now - dt.timedelta(days=lookback))
     if floor is None:
         return []
@@ -465,7 +514,7 @@ def _obs_fact(raw_by_date, derived):
     boot = raw.get("bootstrap")
     return {"obs_date": derived["obs_date"], "value": derived["value"],
             "first_seen": _iso(_instant(raw.get("first_seen"))),
-            "bootstrap": boot is True or (type(boot) is int and boot == 1)}
+            "bootstrap": _is_bootstrap(boot)}
 
 
 def _data_entry(ind, schedules, obs_map, now):
@@ -514,7 +563,8 @@ def build_calendar(*, parts, public_symbols):
                  for ind in _dicts(parts.get("indicators"))],
         "sources": _sources(parts.get("sources"), parts.get("fred_obs_source")),
         "settings": {
-            "release_watch_min": _setting(cfg, "release_watch_min", _CAL["release_watch_min"]),
-            "actual_fresh_h": _setting(cfg, "actual_fresh_h", _CAL["actual_fresh_h"]),
+            "release_watch_min": _setting(cfg, "release_watch_min", _CAL["release_watch_min"],
+                                          _MAX_MIN),
+            "actual_fresh_h": _setting(cfg, "actual_fresh_h", _CAL["actual_fresh_h"], _MAX_H),
         },
     }

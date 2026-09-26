@@ -244,6 +244,42 @@ def test_safe_error_re_raised_from_none_logs_no_key():
     assert key not in text and "***" in text
 
 
+def test_safe_error_keeps_the_fetch_error_subclass():
+    from services.news_svc.fetch import FetchError, TooLarge
+    safe = fred.safe_error(TooLarge("body over cap api_key=SECRET"), "SECRET")
+    assert type(safe) is TooLarge and "SECRET" not in str(safe)
+    safe = fred.safe_error(FetchError("404 api_key=SECRET", status=404), "SECRET")
+    assert type(safe) is FetchError and safe.status == 404
+    assert type(fred.safe_error(RuntimeError("x api_key=SECRET"), "SECRET")) is FetchError
+
+
+def test_safe_error_falls_back_to_fetch_error_when_the_subclass_will_not_build():
+    from services.news_svc.fetch import FetchError
+
+    class Odd(FetchError):
+        def __init__(self, a, b):                     # not FetchError's signature
+            super().__init__(f"{a} {b}")
+
+    safe = fred.safe_error(Odd("api_key=SECRET", "y"), "SECRET")
+    assert type(safe) is FetchError and "SECRET" not in str(safe)
+
+
+def test_safe_error_raised_inside_except_hides_its_context():
+    # Raised inside an except block Python sets __context__ at raise time; it
+    # stays hidden because __suppress_context__ is set (as ``from None`` does).
+    import traceback
+    key = "".join(["SEC", "RET"])
+    try:
+        try:
+            raise OSError(f"https://api/x?api_key={key}")
+        except OSError as exc:
+            raise fred.safe_error(exc, key)
+    except Exception as final:  # noqa: BLE001
+        assert final.__suppress_context__ is True
+        text = "".join(traceback.format_exception(final))
+    assert key not in text
+
+
 def test_calendar_regex_is_linear_on_an_unclosed_td():
     import time
     t0 = time.perf_counter()

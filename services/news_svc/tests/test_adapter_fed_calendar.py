@@ -177,6 +177,26 @@ def test_a_time_range_takes_its_start():
     assert ev["at"] == "2026-10-05T13:30:00+00:00"
 
 
+def test_a_time_range_with_dashes_or_to_takes_its_start():
+    for raw in ("2:00 p.m. \u2013 3:00 p.m.", "2:00 p.m.\u20143:00 p.m.",
+                "2:00 p.m. to 3:00 p.m.", "2:00 p.m. TO 3:30 p.m. ET"):
+        ev, = _one(time=raw)
+        assert ev["at"] == "2026-10-05T18:00:00+00:00", raw
+
+
+def test_a_trailing_eastern_zone_word_is_allowed():
+    for raw in ("2:00 p.m. ET", "2:00 p.m. EDT", "2:00 p.m. est", "2:00 p.m. (ET)",
+                "2:00 p.m. ET - 3:00 p.m. ET"):
+        ev, = _one(time=raw)
+        assert ev["at"] == "2026-10-05T18:00:00+00:00" and ev["id"].endswith(":14:00"), raw
+
+
+def test_another_zone_word_is_still_date_only():
+    for raw in ("2:00 p.m. PT", "2:00 p.m. CET", "2:00 p.m. today"):
+        ev, = _one(time=raw)
+        assert ev["at"] is None and ev["id"].endswith(":day"), raw
+
+
 def test_types_as_a_bare_string_is_one_type_not_its_letters():
     evs = fed_calendar.parse(BODY, types="FOMC")
     assert evs and {e["type"] for e in evs} == {"FOMC"}

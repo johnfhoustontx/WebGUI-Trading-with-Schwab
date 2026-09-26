@@ -67,6 +67,16 @@ def test_a_junk_latest_value_is_none(bad):
     assert prior == {"obs_date": "2026-07-01", "value": 4.0}
 
 
+def test_an_overflowing_derived_figure_is_none_never_inf():
+    rows = [{"obs_date": "2026-07-01", "value": 1e-300},
+            {"obs_date": "2026-08-01", "value": 1e300}]
+    latest, _ = econ.derive(rows, "pct_mom")
+    assert latest["value"] is None
+    rows = [{"obs_date": "2026-07-01", "value": -1.7e308},
+            {"obs_date": "2026-08-01", "value": 1.7e308}]
+    assert econ.derive(rows, "change_k")[0]["value"] is None
+
+
 def test_level_k_divides_by_a_thousand_and_levels_pass_through():
     obs = [{"obs_date": "2026-09-12", "value": 201000}, {"obs_date": "2026-09-19", "value": 197000}]
     assert econ.derive(obs, "level_k") == ({"obs_date": "2026-09-19", "value": 197.0},
@@ -116,6 +126,53 @@ def test_january_gap_is_none_not_a_guess():
     assert s["last_release_at"] == DEC_ONLY_EVENTS[0]["at"]
 
 
+FIXTURES = __import__("pathlib").Path(__file__).parent / "fixtures"
+
+
+def test_employment_situation_never_takes_the_veterans_release():
+    from services.news_svc.adapters import ics
+    evs = ics.parse((FIXTURES / "bls_full.ics").read_bytes())
+    assert any(e["summary"].startswith("Employment Situation of Veterans") for e in evs)
+    nfp = {"key": "nfp", "schedule": "bls", "match": "Employment Situation"}
+    picked = econ._schedule_events(nfp, {"bls": evs})
+    veterans = {e["date"] for e in evs if e["summary"].startswith("Employment Situation of")}
+    assert picked and not ({d for _, d in picked} & veterans)
+    real = [e for e in evs if e["summary"].strip() == "Employment Situation"]
+    assert len(picked) == len(real)
+    ev = econ.events_group(fed=[], ics={"bls": evs}, extra_releases=["Employment Situation"],
+                           now=dt.datetime(2025, 1, 1, tzinfo=UTC),
+                           cfg={**C, "fed": {"horizon_days": 3660, "speech_horizon_days": 14}})
+    assert ev and all(r["title"] == "Employment Situation" for r in ev)
+
+
+def test_every_2026_gdp_estimate_matches_and_gdp_by_county_does_not():
+    from services.news_svc.adapters import ics
+    evs = ics.parse((FIXTURES / "bea_full.ics").read_bytes())
+    gdp = {"key": "gdp", "schedule": "bea", "match": "GDP ("}
+    picked = {d for _, d in econ._schedule_events(gdp, {"bea": evs})}
+    estimates = {e["date"] for e in evs
+                 if e["summary"].startswith("GDP (") and e["date"].startswith("2026")}
+    assert estimates and estimates <= picked
+    county = {e["date"] for e in evs if e["summary"].startswith("GDP by")}
+    assert not (county & picked)
+
+
+@pytest.mark.parametrize("text, prefix, ok", [
+    ("Employment Situation", "Employment Situation", True),
+    ("Employment Situation, August 2026", "Employment Situation", True),
+    ("Employment Situation (revised)", "Employment Situation", True),
+    ("Employment Situation: note", "Employment Situation", True),
+    ("Employment Situation - late", "Employment Situation", True),
+    ("Employment Situation of Veterans", "Employment Situation", False),
+    ("Employment Situations", "Employment Situation", False),
+    ("GDP (Advance Estimate), 3rd Quarter", "GDP (", True),
+    ("GDP by Industry", "GDP (", False),
+    ("personal income and outlays, May 2026", "Personal Income and Outlays", True),
+])
+def test_prefix_match_needs_a_boundary(text, prefix, ok):
+    assert econ._prefix_match(text, prefix) is ok
+
+
 def test_a_missing_schedule_or_junk_events_is_all_none():
     for scheds in ({}, {"bls": None}, {"bls": "x"}, {"bls": [None, 3, {"summary": 5}]}):
         assert econ.releases_for(IND, scheds, now=NOW) == {
@@ -150,7 +207,11 @@ def test_watch_due_window_and_cadence():
     assert econ.watch_due({**st, "last_watch_poll": at("12:31")}, now=at("12:32"), cfg=C) is False
     assert econ.watch_due({**st, "last_watch_poll": at("12:31")}, now=at("12:33"), cfg=C) is True
     assert econ.watch_due(st, now=at("13:31"), cfg=C) is False             # window (60 min) over
-    assert econ.watch_due({**st, "latest_first_seen": at("12:40")}, now=at("12:45"), cfg=C) is False  # landed
+    # landed: a real (explicitly non-bootstrap) arrival ends the watch. The flag
+    # is now spelled out - an ABSENT flag reads as bootstrap (strict rule, see
+    # test_watch_due_reads_bootstrap_strictly), which keeps watching.
+    assert econ.watch_due({**st, "latest_first_seen": at("12:40"), "latest_bootstrap": False},
+                          now=at("12:45"), cfg=C) is False
 
 
 def test_watch_due_keeps_watching_past_a_bootstrap_fill():
@@ -158,6 +219,49 @@ def test_watch_due_keeps_watching_past_a_bootstrap_fill():
           "latest_first_seen": "2026-10-14T12:35:00+00:00", "latest_bootstrap": True,
           "last_watch_poll": None}
     assert econ.watch_due(st, now=at("12:40"), cfg=C) is True
+
+
+@pytest.mark.parametrize("bad", [10**400, 1e300, 10081, -(10**400)])
+def test_watch_due_never_raises_on_a_huge_cadence(bad):
+    st = {"last_release_at": "2026-10-14T12:30:00+00:00", "latest_first_seen": None,
+          "last_watch_poll": "2026-10-14T12:31:00+00:00"}
+    for key in ("release_watch_min", "release_poll_min"):
+        cfg = {**C, key: bad}
+        # a junk value is the default: 60-minute window, 2-minute poll
+        assert econ.watch_due(st, now=at("12:34"), cfg=cfg) is True, key
+        assert econ.watch_due(st, now=at("13:31"), cfg=cfg) is False, key
+
+
+def test_finite_and_setting_treat_an_overflowing_int_as_absent():
+    assert econ._finite(10**400) is None
+    assert econ._setting({"x": 10**400}, "x", 7) == 7
+
+
+def test_the_published_settings_are_capped():
+    payload = econ.build_calendar(
+        parts={"now": NOW, "cfg": {**C, "release_watch_min": 10**400, "actual_fresh_h": 8761}},
+        public_symbols=None)
+    assert payload["settings"] == {"release_watch_min": econ._CAL["release_watch_min"],
+                                   "actual_fresh_h": econ._CAL["actual_fresh_h"]}
+
+
+@pytest.mark.parametrize("flag, landed", [
+    (False, True), (0, True),
+    (True, False), (1, False), (None, False), ("0", False), (0.0, False), ("false", False)])
+def test_watch_due_reads_bootstrap_strictly(flag, landed):
+    st = {"last_release_at": "2026-10-14T12:30:00+00:00",
+          "latest_first_seen": "2026-10-14T12:35:00+00:00", "latest_bootstrap": flag,
+          "last_watch_poll": None}
+    assert econ.watch_due(st, now=at("12:40"), cfg=C) is (not landed)
+
+
+def test_obs_fact_bootstrap_is_false_only_for_false_or_int_zero():
+    derived = {"obs_date": "2026-08-01", "value": 1.0}
+    for flag, want in ((False, False), (0, False), (True, True), (1, True), (None, True),
+                       ("0", True), (0.0, True), (2, True)):
+        fact = econ._obs_fact({"2026-08-01": {"bootstrap": flag}}, derived)
+        assert fact["bootstrap"] is want, flag
+    assert econ._obs_fact({}, derived)["bootstrap"] is True          # no flag at all
 
 
 def test_watch_due_with_nothing_to_watch_is_false():
