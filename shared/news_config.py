@@ -11,7 +11,8 @@ What it guards, and what it does not:
 * ``[[feeds]]`` or ``[tickers] extras`` that is not a list -> ``[]``, with a
   WARNING (a bare string must never be iterated into single letters);
 * a feed with an unknown ``kind``, no ``name``, or a name already seen -> that
-  feed is skipped, with a WARNING (the first of two duplicates wins);
+  feed is skipped, with a WARNING (the first of two duplicates wins); a name
+  that is not a non-empty str (a list, table, int, bool) counts as no name;
 * the switches live in ``[feed_flags."<feed name>"]`` (a table, so a local
   override of one feed's flag merges key by key rather than replacing the
   whole ``[[feeds]]`` list); a flag absent there defaults True;
@@ -19,8 +20,8 @@ What it guards, and what it does not:
   is disabled / not public, with a WARNING;
 * a legacy ``enabled`` / ``public`` still inside a ``[[feeds]]`` entry -> a
   WARNING that it moved, and used only where ``[feed_flags]`` is silent;
-* a ``[feed_flags]`` entry naming no feed, or one that is not a table -> a
-  WARNING (the second is ignored);
+* a ``[feed_flags]`` entry naming no feed, one that is not a table, or one
+  whose key is not a str -> a WARNING (the last two are ignored);
 * ``feeds()`` coming back empty -> a WARNING, so a service collecting nothing
   leaves a trace.
 
@@ -76,6 +77,14 @@ FLAG_KEYS = ("enabled", "public")
 _CLOSED = {"enabled": False, "public": False}
 
 
+def _name(raw):
+    """A feed's name if it is a non-empty str, else ``None``. Anything else -
+    a list or table (unhashable: keying the switch by it would raise), an int,
+    a bool - is no name at all, so the feed is skipped as nameless."""
+    name = raw.get("name")
+    return name if isinstance(name, str) and name else None
+
+
 def _flag_table(warn=True):
     """``[feed_flags]`` as ``{name: table}``. A non-table ``[feed_flags]`` or a
     non-table entry in it is ignored with a WARNING (its feed's flags then
@@ -90,6 +99,11 @@ def _flag_table(warn=True):
         return {}
     out = {}
     for name, entry in table.items():
+        if not isinstance(name, str):
+            if warn:
+                log.warning("news.toml: [feed_flags] key %r is not a string - ignored",
+                            name)
+            continue
         if isinstance(entry, dict):
             out[name] = entry
         elif warn:
@@ -115,8 +129,8 @@ def _resolve(raw, table, warn=True):
     ``[feed_flags."<name>"]`` decides; a key it does not set falls back to a
     LEGACY copy inside the ``[[feeds]]`` entry (with a WARNING that the switch
     moved, so a legacy ``enabled = false`` still fails closed), else True."""
-    name = raw.get("name")
-    entry = table.get(name, {})
+    name = _name(raw)
+    entry = table.get(name, {}) if name else {}
     out = {}
     for key in FLAG_KEYS:
         if key in raw and warn:
@@ -151,7 +165,7 @@ def _resolved(warn):
                 log.warning("news.toml: a [[feeds]] entry is not a table (%s) - skipped",
                             type(raw).__name__)
             continue
-        name = raw.get("name")
+        name = _name(raw)
         feed = copy.deepcopy(raw)
         feed.update(_resolve(raw, table, warn))
         if feed.get("kind") not in KINDS:
@@ -191,8 +205,8 @@ def feeds() -> list:
     kept, table = _resolved(warn=True)
     named = set()
     for raw in _as_list(load().get("feeds"), "[[feeds]]", warn=False):
-        if isinstance(raw, dict) and raw.get("name"):
-            named.add(raw["name"])
+        if isinstance(raw, dict) and _name(raw):
+            named.add(_name(raw))
     for name in table:
         if name not in named:
             log.warning("news.toml: [feed_flags] entry %r names no feed - ignored "
@@ -212,7 +226,8 @@ def flags(name) -> dict:
     publish. A disabled feed reports its real ``public`` with ``enabled``
     False; a name that is not a usable feed - absent, or one ``feeds()`` skips -
     is ``False`` for both: fail closed."""
-    feed = _resolved(warn=False)[0].get(name) if name else None
+    ok = isinstance(name, str) and name
+    feed = _resolved(warn=False)[0].get(name) if ok else None
     if feed is None:
         return dict(_CLOSED)
     return {key: feed[key] for key in FLAG_KEYS}

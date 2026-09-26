@@ -435,6 +435,51 @@ def test_flags_equals_the_resolved_feed_on_every_malformed_config(monkeypatch):
             assert nc.flags(name) == want.get(name, closed), (cfg, name)
 
 
+# ── a name that is not a non-empty str is no name ──────────────────────────
+
+_BAD_NAMES = [["A"], {"n": "A"}, 7, True, 0, ""]
+
+
+def test_a_feed_whose_name_is_not_a_string_is_nameless_and_nothing_raises(
+        monkeypatch, caplog):
+    """A list or table name is unhashable - keying the switch by it raised."""
+    for bad in _BAD_NAMES:
+        monkeypatch.setattr(nc, "load", lambda bad=bad: _cfg(
+            [{"name": bad, "kind": "rss", "url": "x"},
+             {"name": "B", "kind": "rss", "url": "y"}]))
+        caplog.clear()
+        with caplog.at_level("WARNING", logger=nc.__name__):
+            assert [f["name"] for f in nc.feeds()] == ["B"], bad
+        assert "has no name" in caplog.text, bad
+
+
+def test_flags_treats_a_non_string_name_as_no_feed_silently(monkeypatch, caplog):
+    closed = {"enabled": False, "public": False}
+    for bad in _BAD_NAMES:
+        monkeypatch.setattr(nc, "load", lambda bad=bad: _cfg(
+            [{"name": bad, "kind": "rss", "url": "x"},
+             {"name": "B", "kind": "rss", "url": "y"}]))
+        caplog.clear()
+        with caplog.at_level("DEBUG", logger=nc.__name__):
+            assert nc.flags(bad) == closed, bad
+            assert nc.flags("B") == {"enabled": True, "public": True}, bad
+        assert not caplog.records, caplog.text
+
+
+def test_a_non_string_key_in_feed_flags_is_ignored_with_a_warning(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: _cfg(
+        [{"name": "A", "kind": "rss", "url": "x"}],
+        {7: {"enabled": False}, ("A",): {"public": False}, "A": {"public": False}}))
+    with caplog.at_level("WARNING", logger=nc.__name__):
+        (feed,) = nc.feeds()
+    assert (feed["enabled"], feed["public"]) == (True, False)
+    assert "7" in caplog.text and "not a string" in caplog.text
+    caplog.clear()
+    with caplog.at_level("DEBUG", logger=nc.__name__):
+        assert nc.flags("A") == {"enabled": True, "public": False}
+    assert not caplog.records, caplog.text
+
+
 # ── the shipped file ────────────────────────────────────────────────────────
 
 def _shipped():
