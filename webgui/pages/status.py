@@ -350,9 +350,9 @@ def _do_restart(target):
 
 
 # ── the restart confirm ──────────────────────────────────────────────────────
-# Eight of the ten cards carry a Restart, and every one of them bounces a live
-# process on this box: the five services, the proxy when this checkout owns it,
-# the PUBLIC live screens, and this web app itself. Two of those eight cost more
+# Nine of the eleven cards carry a Restart, and every one of them bounces a live
+# process on this box: the six services, the proxy when this checkout owns it,
+# the PUBLIC live screens, and this web app itself. Two of those nine cost more
 # than the component they name, so the dialog says which one you are about to
 # pay. The sentences are module constants rather than literals inside render()
 # so a test can pin them without copying prose.

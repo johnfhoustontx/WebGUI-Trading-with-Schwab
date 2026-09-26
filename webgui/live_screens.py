@@ -118,7 +118,7 @@ SCREENS = (
            "/options/simulator", kwargs={"public": True}, tile=False),
     # A pure READER - the one Tools screen that writes nothing. Reads
     # cache:news:feed_public (items from feeds flagged public in
-    # config/news.toml, decided at ingest). ``public=True`` hands off to
+    # config/news.toml, re-checked at every publish). ``public=True`` hands off to
     # pages/news_live.py before the private page builds its Refresh.
     # ⚠ The live ACL user's ``~cache:*`` read grant ALSO covers the private
     # cache:news:feed - a wildcard cannot exclude one key - so what keeps the
