@@ -325,7 +325,8 @@ def test_rows_draw_one_line_with_time_impact_tickers_headline_source():
     pill = first[1]
     assert set(nv.BAND_CLASSES["high"].split()) <= _classes(pill)
     tip = [d for d in _descendants(pill) if isinstance(d, ui.tooltip)]
-    assert tip and tip[0].text == "kw:tier1:FOMC"
+    # the reason code reads as a phrase (news_view.reason_text), not a code
+    assert tip and tip[0].text == "mentions FOMC"
     headline = first[3]
     assert {"truncate", "min-w-0", "flex-1"} <= _classes(headline)
     assert "shrink-0" in _classes(first[4])                  # the source badge
@@ -506,3 +507,134 @@ def test_calendar_text_is_escaped_and_an_awaiting_indicator_says_so():
 def test_refresh_toast_mentions_the_calendar():
     src = (PAGES / "news.py").read_text(encoding="utf-8")
     assert "the calendar now" in src
+
+
+# ── review round: phone rows, echoes, readable reasons, live repaint ────────
+def test_the_row_clips_and_source_badges_hide_on_a_phone():
+    """At ~375px a nowrap row squeezed the headline to 0px: the row clips, and
+    the source badges only show from ``sm`` up."""
+    from pages import news
+    assert "overflow-hidden" in news._ROW.split()
+    src = news._SOURCE.split()
+    assert "hidden" in src and "sm:inline-flex" in src
+
+
+def test_a_row_shows_two_tickers_then_a_count_with_the_rest_on_hover():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    assert news.MAX_ROW_TICKERS == 2
+    rows = nv.rows(_items_payload(_item(1, tickers=["NVDA", "AMD", "INTC", "MU"])),
+                   now=NOW)
+    box = ui.column()
+    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    (row_el,) = box.default_slot.children
+    texts = [getattr(c, "text", None) for c in row_el.default_slot.children]
+    assert texts[2:5] == ["NVDA", "AMD", "+2"]
+    assert "INTC" not in texts and "MU" not in texts
+    more = row_el.default_slot.children[4]
+    assert "shrink-0" in _classes(more)
+    tips = [d for d in _descendants(more) if isinstance(d, ui.tooltip)]
+    assert tips and tips[0].text == "INTC, MU"
+    # two tickers or fewer: no count
+    rows = nv.rows(_items_payload(_item(2, tickers=["NVDA", "AMD"])), now=NOW)
+    box = ui.column()
+    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    texts = [getattr(c, "text", None) for c in box.default_slot.children[0].default_slot.children]
+    assert not [t for t in texts if isinstance(t, str) and t.startswith("+")]
+
+
+def test_a_teaser_that_is_the_headline_plus_a_publisher_adds_no_hover():
+    from pages import news
+    assert news.hover_text({"title": "Costco Beats", "teaser": "Costco  beats WSJ"}) == ""
+    assert news.hover_text({"title": "Fed holds", "teaser": "Fed holds - Reuters"}) == ""
+    pub = "The Wall Street Journal Weekend Edition International"
+    assert news.hover_text({"title": "Fed holds", "teaser": f"Fed holds  {pub}",
+                            "original_source": pub}) == ""
+    # a real first line that opens with the headline is kept
+    long_teaser = ("Costco beats estimates as margins widen on record membership "
+                   "renewals and a stronger holiday quarter")
+    assert news.hover_text({"title": "Costco Beats", "teaser": long_teaser}) == long_teaser
+    # the headline must end at a word: "Fed" is not echoed by "Federal ..."
+    assert news.hover_text({"title": "Fed", "teaser": "Federal Reserve holds"}) \
+        == "Federal Reserve holds"
+    assert news.hover_text({"title": "Fed holds", "teaser": "Short."}) == "Short."
+
+
+def test_the_sec_row_hover_does_not_repeat_its_inline_detail():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    rows = nv.sec_rows(_items_payload(SEC_ITEM), now=NOW)
+    box = ui.column()
+    news.draw_sec_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    tips = [d for d in _descendants(box) if isinstance(d, ui.tooltip)
+            and d.parent_slot.parent.text == "ACME insider buys $136.4M"]
+    assert tips == []                                   # no teaser: no hover
+    with_teaser = {**SEC_ITEM, "teaser": "Nine open-market buys by the CEO."}
+    box = ui.column()
+    news.draw_sec_rows(box, nv.sec_rows(_items_payload(with_teaser), now=NOW),
+                       linked=True, on_ticker=lambda t: None)
+    hover = [d.text for d in _descendants(box) if isinstance(d, ui.label)
+             and isinstance(d.parent_slot.parent, ui.tooltip)]
+    assert hover == ["Nine open-market buys by the CEO."]
+
+
+def test_the_sec_column_header_sticks_over_the_panel():
+    from pages import news
+    head = news._SEC_HEAD.split()
+    assert {"sticky", "top-0"} <= set(head)
+    assert [c for c in head if c.startswith("z-")]
+    assert [c for c in head if c.startswith("bg-")]
+
+
+def test_a_filing_links_only_to_https_sec_gov():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    good = {**SEC_ITEM, "url": "https://www.sec.gov/Archives/edgar/data/1/x.htm"}
+    box = ui.column()
+    news.draw_sec_rows(box, nv.sec_rows(_items_payload(good), now=NOW),
+                       linked=True, on_ticker=lambda t: None)
+    links = {d.text: d for d in _descendants(box) if isinstance(d, ui.link)}
+    assert links["ACME insider buys $136.4M"].props["href"] == good["url"]
+    for url in ("https://example.com/50", "http://www.sec.gov/x",
+                "https://sec.gov.evil.com/x"):
+        box = ui.column()
+        news.draw_sec_rows(box, nv.sec_rows(_items_payload({**SEC_ITEM, "url": url}),
+                                            now=NOW),
+                           linked=True, on_ticker=lambda t: None)
+        assert "ACME insider buys $136.4M" not in [
+            d.text for d in _descendants(box) if isinstance(d, ui.link)], url
+        assert "ACME insider buys $136.4M" in [
+            d.text for d in _descendants(box) if isinstance(d, ui.label)], url
+
+
+def test_an_open_tab_repaints_its_held_payloads_every_minute(monkeypatch):
+    """Time stamps ("10:43 AM" vs "Sep 25 10:43 AM"), filings and calendar tiles
+    age while a tab stays open; a slow guarded timer repaints them from the
+    payloads already held - it never re-reads the bus."""
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    pre = set(ui.context.client.elements)   # earlier tests share the client
+    new, reads = _render_views(monkeypatch, {
+        nv.VIEW: _items_payload(_item(1, title="A headline")),
+        nv.VIEW_SEC: _items_payload(SEC_ITEM),
+        nv.VIEW_CAL: CAL_PAYLOAD,
+    })
+    timers = [e for e in new if isinstance(e, ui.timer)
+              and e.interval == news.REPAINT_SEC]
+    assert news.REPAINT_SEC == 60 and len(timers) == 1
+
+    def _ids(text):
+        return {k for k, e in ui.context.client.elements.items()
+                if k not in pre and getattr(e, "text", None) == text}
+    before = {t: _ids(t) for t in ("A headline", "ACME insider buys $136.4M",
+                                   "JPM dividend")}
+    n = len(reads)
+    timers[0].callback()
+    assert len(reads) == n                                 # no bus read
+    for text, ids in before.items():
+        now_ids = _ids(text)
+        assert now_ids and not now_ids & ids, text        # redrawn, not kept

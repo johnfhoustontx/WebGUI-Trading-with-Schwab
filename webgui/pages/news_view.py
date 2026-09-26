@@ -277,6 +277,67 @@ def safe_href(url):
     return url
 
 
+def sec_href(url):
+    """``url`` if it is an ``https`` address on ``sec.gov`` (or a subdomain of
+    it), else ``None``. The SEC panel's filings only ever link to EDGAR; a row
+    carrying any other target renders its title as plain text."""
+    url = safe_href(url)
+    if url is None:
+        return None
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if parts.scheme.lower() != "https":
+        return None
+    return url if host == "sec.gov" or host.endswith(".sec.gov") else None
+
+
+# ---- the impact pill's reasons, as a reader reads them ----------------------
+
+# The service's reason CODES (services/news_svc/impact.py and the publish-time
+# staleness cap) name the rule that scored an item; the pill's hover says the
+# same thing in words. An unknown code is shown as it is - never dropped, so a
+# new rule is visible before it has a phrase.
+_REASON_WORDS = {
+    "watchlist": "a followed ticker",
+    "officer": "bought by an officer",
+    "stale": "older than a day, so shown one level lower",
+}
+
+
+def _reason_phrase(code):
+    if code in _REASON_WORDS:
+        return _REASON_WORDS[code]
+    head, _, rest = code.partition(":")
+    if head == "kw":
+        word = rest.partition(":")[2]
+        return f"mentions {word}" if word else code
+    if not rest:
+        return code
+    if head == "source":
+        return f"from {rest}"
+    if head == "sources":
+        return f"reported by {rest} sources"
+    if head == "form4":
+        return f"insider buy of {rest}"
+    if head == "filing":
+        return f"{rest} filing"
+    return code
+
+
+def reason_text(reasons) -> str:
+    """The pill's hover: each reason code as a plain phrase, comma-joined.
+
+    ``"kw:tier1:FOMC"`` -> ``"mentions FOMC"``; ``"source:Reuters"`` ->
+    ``"from Reuters"``; ``"sources:3"`` -> ``"reported by 3 sources"``;
+    ``"form4:$136.4M"`` -> ``"insider buy of $136.4M"``; ``"filing:S-3"`` ->
+    ``"S-3 filing"``. Unknown codes as-is; non-strings and blanks skipped; a
+    non-list is ``""``."""
+    if not isinstance(reasons, list):
+        return ""
+    return ", ".join(_reason_phrase(r.strip()) for r in reasons
+                     if isinstance(r, str) and r.strip())
+
+
 def _finite(v):
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
@@ -523,11 +584,13 @@ def _event_tile(ev, now, today):
     return {"title": title, "when": _when_text(ev.get("at"), ev.get("date")), "lines": []}
 
 
-def _dividend_tile(d, today):
-    """``None`` without a symbol or an ex-date, or once the ex-date is past."""
+def _dividend_tile(d):
+    """``None`` without a symbol or an ex-date. A past ex-date is KEPT: the
+    producer prunes by ``[calendar.dividends] lookback_days`` and owns the
+    window."""
     sym = clean_symbol(d["symbol"]) if isinstance(d.get("symbol"), str) else None
     ex = _date(d.get("ex_date"))
-    if not sym or ex is None or (today is not None and ex < today):
+    if not sym or ex is None:
         return None
     pay = _date(d.get("pay_date"))
     amount = _finite(d.get("amount"))
@@ -540,27 +603,31 @@ def _dividend_tile(d, today):
             "when": f"Ex-div {_weekday_day(ex)}" if ex else "", "lines": lines}
 
 
-def _ipo_tile(i, today):
-    """``None`` with neither a symbol nor a company, with no date, or once the
-    date is past."""
+def _ipo_tile(i):
+    """``None`` with neither a symbol nor a company, or with no date. A past
+    date is KEPT: the producer applies ``[calendar.ipo] lookback_days`` (a
+    priced deal stays up for a week) and owns the window. A priced deal reads
+    ``"Priced Mon Sep 21"`` with its per-share price below."""
     sym = clean_symbol(i["symbol"]) if isinstance(i.get("symbol"), str) else None
     company = _str(i.get("company")).strip()
     day = _date(i.get("date"))
-    if not (sym or company) or day is None or (today is not None and day < today):
+    if not (sym or company) or day is None:
         return None
     name = " \u00b7 ".join(x for x in (sym, company) if x)
     lines = []
     price = _finite(i.get("price"))
+    priced = price is not None and price > 0
     rng = _str(i.get("price_range")).strip()
-    if price is not None and price > 0:
-        lines.append(f"Priced ${price:.2f}")
+    if priced:
+        lines.append(f"${price:.2f} a share")
     elif rng:
         lines.append(rng if rng.startswith("$") else f"${rng}")
     offer = _finite(i.get("offer_usd"))
     if offer is not None and offer > 0:
         lines.append(f"{_money(offer)} offer")
+    when = _weekday_day(day)
     return {"title": f"{name} IPO" if name else "IPO",
-            "when": _when_text(None, i.get("date")), "lines": lines}
+            "when": f"Priced {when}" if priced else when, "lines": lines}
 
 
 def _data_tiles(data, now, cfg):
@@ -596,15 +663,16 @@ def calendar_groups(payload, *, now) -> list:
 
     A tile with nothing to say is skipped (an event with no title, a dividend
     with no symbol or ex-date, an IPO with no name or date, a data item with no
-    tile or label), and so is anything already past ``now`` - an event by its
-    instant, else by its Central date; a dividend or IPO by its Central date."""
+    tile or label), and so is an EVENT already past ``now`` - by its instant,
+    else by its Central date. Dividends and IPOs are not dropped by date here:
+    the producer publishes them within its own ``lookback_days`` windows."""
     cfg = payload.get("settings") if isinstance(payload, dict) else None
     raw_sources = payload.get("sources") if isinstance(payload, dict) else None
     sources = raw_sources if isinstance(raw_sources, dict) else {}
     today = _today_ct(now)
     events = [_event_tile(e, now, today) for e in _list(payload, "events")]
-    others = ([_dividend_tile(d, today) for d in _list(payload, "dividends")]
-              + [_ipo_tile(i, today) for i in _list(payload, "ipos")])
+    others = ([_dividend_tile(d) for d in _list(payload, "dividends")]
+              + [_ipo_tile(i) for i in _list(payload, "ipos")])
     tile_sets = (
         [t for t in events if t is not None],
         [t for t in others if t is not None],

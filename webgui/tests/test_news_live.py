@@ -60,11 +60,14 @@ def test_the_private_feed_is_never_named():
 
 
 def test_every_bus_read_names_the_public_view():
-    """Each ``bus_client.<read>(...)`` / ``watch_view(...)`` / ``kit.header(view=)``
-    passes ``nv.VIEW_PUBLIC`` - never a string, never a variable that could be
-    something else."""
+    """Each ``bus_client.<read>(...)`` / ``run.io_bound(bus_client.<read>, ...)`` /
+    ``watch_view(...)`` names one of the three public views as ``nv.<VIEW>_PUBLIC``
+    (``VIEW_PUBLIC``, ``VIEW_SEC_PUBLIC``, ``VIEW_CAL_PUBLIC``), and
+    ``kit.header(view=)`` names ``nv.VIEW_PUBLIC`` - never a string, never a
+    variable, never another module's attribute that could be something else."""
     def _is_public(node):
-        return isinstance(node, ast.Attribute) and node.attr in PUBLIC_VIEWS
+        return (isinstance(node, ast.Attribute) and node.attr in PUBLIC_VIEWS
+                and isinstance(node.value, ast.Name) and node.value.id == "nv")
 
     reads = 0
     for n in ast.walk(_tree()):
@@ -90,8 +93,12 @@ def test_every_bus_read_names_the_public_view():
         elif name == "header":
             views = [k.value for k in n.keywords if k.arg == "view"]
             assert views and all(isinstance(v, ast.Attribute)
-                                 and v.attr == "VIEW_PUBLIC" for v in views)
-    assert reads >= 3, "the walk found no bus read - it would pass vacuously"
+                                 and v.attr == "VIEW_PUBLIC"
+                                 and isinstance(v.value, ast.Name)
+                                 and v.value.id == "nv" for v in views)
+    # three views x (the first read, the off-loop re-read, the watch): a read
+    # dropped or renamed out of the walk's sight is noticed here.
+    assert reads >= 9, f"the walk found {reads} bus reads, expected 9"
 
 
 def test_no_import_of_main_app_settings_or_a_writer():
@@ -448,3 +455,28 @@ def test_the_band_filter_is_display_only(monkeypatch):
 def test_no_refresh_is_built(monkeypatch):
     new, _ = _render_v2(monkeypatch)
     assert "Refresh" not in {t for t in _texts(new) if isinstance(t, str)}
+
+
+def test_an_open_tab_repaints_its_held_payloads_every_minute(monkeypatch):
+    """The same slow timer as the private page: it redraws the held headline,
+    SEC and calendar payloads (stamps and dates age) and reads no view."""
+    from nicegui import ui
+
+    from pages import news
+    pre = set(ui.context.client.elements)   # earlier tests share the client
+    new, asked = _render_v2(monkeypatch)
+    timers = [e for e in new if isinstance(e, ui.timer)
+              and e.interval == news.REPAINT_SEC]
+    assert len(timers) == 1
+
+    def _ids(text):
+        return {k for k, e in ui.context.client.elements.items()
+                if k not in pre and getattr(e, "text", None) == text}
+    before = {t: _ids(t) for t in ("Public NVDA story", "JPM insider buys $2.0M",
+                                   "JPM dividend")}
+    n = len(asked)
+    timers[0].callback()
+    assert len(asked) == n
+    for text, ids in before.items():
+        now_ids = _ids(text)
+        assert now_ids and not now_ids & ids, text

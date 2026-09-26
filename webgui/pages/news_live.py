@@ -78,7 +78,7 @@ def render():
     """Build the public Market News page."""
     state = {"payload": None, "rows": [], "sources": [],
              "symbol": seed_symbol(_query_symbol()), "min_band": None,
-             "shown": news.PAGE_SIZE, "sec_payload": None,
+             "shown": news.PAGE_SIZE, "sec_payload": None, "cal_payload": None,
              "sec_shown": news.SEC_PAGE_SIZE}
 
     with kit.page():
@@ -218,9 +218,10 @@ def render():
         state["sec_payload"] = payload if isinstance(payload, dict) else None
         _paint_sec()
 
-    def _take_cal(payload):
+    def _paint_cal():
         cal_region.busy.hide()
-        if not isinstance(payload, dict):
+        payload = state["cal_payload"]
+        if payload is None:
             cal_region.content.clear()
             with cal_region.content:
                 kit.empty(news.CAL_WAITING)
@@ -228,6 +229,22 @@ def render():
         news.draw_calendar(cal_region.content,
                            nv.calendar_groups(payload,
                                               now=_dt.datetime.now(_dt.timezone.utc)))
+
+    def _take_cal(payload):
+        state["cal_payload"] = payload if isinstance(payload, dict) else None
+        _paint_cal()
+
+    @guard
+    def _repaint_held():
+        # The slow clock: redraw what is already held (stamps, filings and
+        # calendar dates age while a tab stays open). No bus read here, and no
+        # "seen" stamp - nothing new has arrived.
+        if state["payload"] is not None:
+            state["rows"] = nv.rows(state["payload"],
+                                    now=_dt.datetime.now(_dt.timezone.utc))
+        _paint()
+        _paint_sec()
+        _paint_cal()
 
     @guard
     def _sec_more():
@@ -260,3 +277,4 @@ def render():
     _take_cal(bus_client.read(nv.VIEW_CAL_PUBLIC))
     watch_view(nv.VIEW_SEC_PUBLIC, _reread_sec)
     watch_view(nv.VIEW_CAL_PUBLIC, _reread_cal)
+    ui.timer(news.REPAINT_SEC, _repaint_held, immediate=False)

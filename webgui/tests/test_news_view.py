@@ -674,7 +674,12 @@ def test_past_calendar_items_are_dropped():
                   {**IPO, "symbol": "TODAY", "date": "2026-09-25"}]}
     gs = nv.calendar_groups(p, now=NOW)
     assert [t["title"] for t in gs[0]["tiles"]] == ["Later", "Today"]
-    assert [t["title"] for t in gs[1]["tiles"]] == ["NOW dividend", "TODAY · Acme Corp IPO"]
+    # Dividends and IPOs are NOT dropped by date here: the producer
+    # (services/news_svc/econ.py) owns their window - [calendar.ipo] and
+    # [calendar.dividends] lookback_days - so a priced IPO stays on the page for
+    # the week it is meant to. Only past EVENTS are dropped by ``now``.
+    assert [t["title"] for t in gs[1]["tiles"]] == [
+        "OLD dividend", "NOW dividend", "GONE · Acme Corp IPO", "TODAY · Acme Corp IPO"]
 
 
 def test_past_items_use_the_central_date_of_a_naive_now():
@@ -682,4 +687,51 @@ def test_past_items_use_the_central_date_of_a_naive_now():
     p = {"events": [{**DATE_ONLY_EVENT, "date": "2026-09-24"}],
          "dividends": [{**DIVIDEND, "ex_date": "2026-09-25"}]}
     gs = nv.calendar_groups(p, now=naive_now)
+    # the past EVENT is dropped; the dividend is kept (the producer owns its window)
     assert gs[0]["tiles"] == [] and len(gs[1]["tiles"]) == 1
+
+
+# ── review round: readable reasons, the producer-owned calendar window ──────
+
+def test_reason_text_maps_codes_to_reader_phrases():
+    assert nv.reason_text(["kw:tier1:FOMC"]) == "mentions FOMC"
+    assert nv.reason_text(["source:Reuters", "sources:3"]) == \
+        "from Reuters, reported by 3 sources"
+    assert nv.reason_text(["watchlist"]) == "a followed ticker"
+    assert nv.reason_text(["form4:$136.4M", "officer"]) == \
+        "insider buy of $136.4M, bought by an officer"
+    assert nv.reason_text(["filing:S-3"]) == "S-3 filing"
+    assert nv.reason_text(["stale"]) == "older than a day, so shown one level lower"
+
+
+def test_reason_text_shows_unknown_codes_as_is_and_skips_junk():
+    assert nv.reason_text(["mystery:7", "kw:tier1:", 5, None, ""]) == "mystery:7, kw:tier1:"
+    assert nv.reason_text(None) == "" and nv.reason_text("stale") == ""
+    assert nv.reason_text([]) == ""
+
+
+def test_a_past_priced_ipo_reads_priced_on_its_day():
+    p = {"ipos": [{"symbol": "NEWCO", "company": "NewCo", "date": "2026-09-21",
+                   "price": 18.0, "offer_usd": 400_000_000}]}
+    (t,) = nv.calendar_groups(p, now=NOW)[1]["tiles"]
+    assert t["when"] == "Priced Mon Sep 21"
+    assert t["lines"] == ["$18.00 a share", "$400.0M offer"]
+    # an upcoming deal keeps its date and range
+    (u,) = nv.calendar_groups({"ipos": [IPO]}, now=NOW)[1]["tiles"]
+    assert u["when"] == "Fri Oct 2" and u["lines"][0] == "$40.00-44.00"
+
+
+def test_a_past_dividend_is_kept_with_its_ex_date():
+    (t,) = nv.calendar_groups({"dividends": [{**DIVIDEND, "ex_date": "2026-09-21"}]},
+                              now=NOW)[1]["tiles"]
+    assert t["when"] == "Ex-div Mon Sep 21"
+
+
+def test_sec_href_takes_only_https_sec_gov():
+    ok = "https://www.sec.gov/Archives/edgar/data/1/x.htm"
+    assert nv.sec_href(ok) == ok
+    assert nv.sec_href("https://sec.gov/x") == "https://sec.gov/x"
+    for bad in ("http://www.sec.gov/x", "https://example.com/x",
+                "https://sec.gov.evil.com/x", "https://notsec.gov/x",
+                "javascript:alert(1)", None, 7, ""):
+        assert nv.sec_href(bad) is None, bad

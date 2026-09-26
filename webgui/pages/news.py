@@ -45,6 +45,14 @@ from pages import news_view as nv
 from pages.options import theme as _t
 
 PAGE_SIZE = 60
+# How often an open tab redraws what it already holds. A headline's stamp drops
+# its date at midnight Central, filings age and calendar events pass while a
+# tab sits open; the views only republish when their CONTENT changes. A redraw
+# from the held payloads - never a bus read.
+REPAINT_SEC = 60
+# Tickers drawn inline on one headline row; the rest collapse into "+N" with
+# the full list on hover (four chips squeezed the headline to nothing).
+MAX_ROW_TICKERS = 2
 # How long Refresh may spin before the backstop gives the button back. One poll
 # of every feed walks the Yahoo per-ticker feeds and SEC's paced requests, so it
 # is minutes, not seconds; the release is ``news:status``, published at the end
@@ -66,13 +74,19 @@ EMPTY_FEED = "The feed is up but carries no items right now."
 
 # ── row styling (fixed Tailwind classes; no inline style) ───────────────────
 # One line per item: nothing wraps; the headline gives way with an ellipsis.
-_ROW = "w-full items-center gap-2 flex-nowrap py-1.5 border-b border-[#213152]/60"
+# overflow-hidden: on a phone the fixed-width cells would otherwise push the
+# headline to 0px and the row off the side of the card.
+_ROW = ("w-full items-center gap-2 flex-nowrap overflow-hidden py-1.5 "
+        "border-b border-[#213152]/60")
 # w-28 holds a dated stamp ("Sep 25 10:43 AM") on one line.
 _WHEN = f"text-xs tabular-nums whitespace-nowrap {_t.MUTED} w-28 shrink-0"
 _CHIP = "text-[11px] font-semibold px-1.5 py-0.5"
 _TICKER_LINK = f"{_CHIP} {_t.BADGE_ACCENT} no-underline hover:underline shrink-0"
 _TICKER_CHIP = f"{_CHIP} {_t.BADGE_ACCENT} cursor-pointer hover:underline shrink-0"
-_SOURCE = f"text-[10.5px] px-1.5 py-0.5 {_t.BADGE_MUTED} whitespace-nowrap shrink-0"
+# Source badges are the first thing to go below ``sm``: the headline matters more.
+_SOURCE = (f"text-[10.5px] px-1.5 py-0.5 {_t.BADGE_MUTED} whitespace-nowrap shrink-0 "
+           "hidden sm:inline-flex")
+_MORE_TICKERS = f"{_CHIP} {_t.BADGE_MUTED} whitespace-nowrap shrink-0 cursor-default"
 _HEADLINE = f"text-sm {_t.LABEL} no-underline hover:underline truncate min-w-0 flex-1"
 # The impact pill: a fixed-width slot, so a row with no band keeps the columns.
 _PILL_SLOT = "w-5 shrink-0"
@@ -88,7 +102,11 @@ _GRID = "w-full grid grid-cols-1 lg:grid-cols-5 gap-3 items-start"
 _LEFT = "lg:col-span-3 min-w-0 w-full gap-3"
 _RIGHT = "lg:col-span-2 min-w-0 w-full flex flex-col gap-3"
 _PANEL = f"{_t.CARD} w-full min-w-0 gap-2 lg:h-[calc(50vh-5rem)] overflow-y-auto flex-nowrap"
-_SEC_HEAD = f"w-full items-center gap-2 flex-nowrap {_t.EYEBROW}"
+# The panel's own background (the CARD token's ``bg-``), so rows scrolling
+# under the sticky column header do not show through it.
+_PANEL_BG = next((c for c in _t.CARD.split() if c.startswith("bg-")), "bg-[#101a30]")
+_SEC_HEAD = (f"w-full items-center gap-2 flex-nowrap {_t.EYEBROW} "
+             f"sticky top-0 z-10 {_PANEL_BG} py-1")
 _SEC_SYM = "w-14 shrink-0"
 _SEC_CELL = "min-w-0 flex-1 items-center gap-1.5 flex-nowrap overflow-hidden"
 _SEC_TITLE = f"text-sm {_t.LABEL} no-underline hover:underline truncate min-w-0"
@@ -118,15 +136,48 @@ def _norm(text) -> str:
     return " ".join(text.split()).casefold() if isinstance(text, str) else ""
 
 
-def hover_text(row) -> str:
-    """What the headline shows on hover: its teaser, else a filing's summary.
-    A teaser that is only the headline again adds nothing and is skipped."""
+# A remainder after the headline shorter than this is a publisher tag, not a
+# sentence (Google News: "<headline>  <publisher>").
+_ECHO_TAIL_CHARS = 40
+_TAIL_PUNCT = " -–—|:·•,"
+
+
+def _teaser_echoes(teaser, row) -> bool:
+    """True when ``teaser`` is only the headline again, or the headline plus a
+    publisher's name - Google News writes its description that way, which on
+    hover reads as the headline printed twice. A teaser that merely OPENS with
+    the headline and carries on is a real first line and is kept.
+
+    The headline must end on a word boundary in the teaser - whitespace,
+    punctuation or the end - so "Fed" is not echoed by "Federal Reserve holds".
+    (The rule the two-line v1 rows used, restored for the hover.)"""
+    title, text = _norm(row.get("title")), _norm(teaser)
+    if not title or not text.startswith(title):
+        return False
+    if len(text) > len(title) and text[len(title)].isalnum():
+        return False
+    tail = text[len(title):].strip(_TAIL_PUNCT)
+    if not tail or len(tail) < _ECHO_TAIL_CHARS:
+        return True
+    names = [row.get("original_source"), row.get("source"),
+             *(row.get("sources") if isinstance(row.get("sources"), list) else [])]
+    return any(_norm(n) and _norm(n) == tail for n in names)
+
+
+def teaser_text(row) -> str:
+    """The row's teaser, or ``""`` when there is none or it only echoes the
+    headline (see ``_teaser_echoes``)."""
     if not isinstance(row, dict):
         return ""
-    teaser = row.get("teaser") if isinstance(row.get("teaser"), str) else ""
-    if teaser.strip() and _norm(teaser) != _norm(row.get("title")):
-        return teaser.strip()
-    return nv.detail_line(row)
+    teaser = row.get("teaser").strip() if isinstance(row.get("teaser"), str) else ""
+    return "" if not teaser or _teaser_echoes(teaser, row) else teaser
+
+
+def hover_text(row) -> str:
+    """What a headline shows on hover: its teaser, else a filing's summary."""
+    if not isinstance(row, dict):
+        return ""
+    return teaser_text(row) or nv.detail_line(row)
 
 
 def trending_window_h() -> float:
@@ -185,20 +236,21 @@ def _pill(band, reasons):
     if not letter:
         return ui.element("span").classes(_PILL_SLOT)
     pill = ui.label(letter).classes(f"{_PILL} {nv.BAND_CLASSES[band]}")
-    if reasons:
+    words = nv.reason_text(reasons)
+    if words:
         with pill:
-            ui.tooltip(", ".join(reasons))
+            ui.tooltip(words)
     return pill
 
 
-def _headline(row, classes):
-    """The headline as a new-tab link (only a web URL), else plain text; the
-    teaser (or a filing's summary) on hover. Every string is escaped."""
+def _headline(row, classes, *, href=nv.safe_href, hover=hover_text):
+    """The headline as a new-tab link (only what ``href`` passes), else plain
+    text; ``hover(row)`` on hover. Every string is escaped."""
     from nicegui import ui
     title = row.get("title") or "(untitled)"
-    url = nv.safe_href(row.get("url"))
+    url = href(row.get("url"))
     el = (ui.link(title, url, new_tab=True) if url else ui.label(title)).classes(classes)
-    extra = hover_text(row)
+    extra = hover(row)
     if extra:
         with el:
             with ui.tooltip().classes("max-w-[420px]"):
@@ -223,8 +275,13 @@ def draw_rows(container, rows, *, linked, on_ticker):
             with ui.row().classes(_ROW):
                 ui.label(r.get("when") or "").classes(_WHEN)
                 _pill(r.get("band"), r.get("reasons") or [])
-                for t in r.get("tickers") or []:
+                tickers = r.get("tickers") or []
+                for t in tickers[:MAX_ROW_TICKERS]:
                     _ticker(t, href_base, on_ticker)
+                rest = tickers[MAX_ROW_TICKERS:]
+                if rest:
+                    with ui.label(f"+{len(rest)}").classes(_MORE_TICKERS):
+                        ui.tooltip(", ".join(rest))
                 _headline(r, _HEADLINE)
                 for s in r.get("sources") or []:
                     ui.label(s).classes(_SOURCE)
@@ -233,7 +290,15 @@ def draw_rows(container, rows, *, linked, on_ticker):
 def draw_sec_rows(container, rows, *, linked, on_ticker):
     """Clear ``container`` and draw the SEC panel: a column header, then one
     line per ``news_view.sec_rows`` row - Date/Time · Symbol · Headline/Details,
-    the impact pill leading the third cell and ``details`` muted after a dot."""
+    the impact pill leading the third cell and ``details`` muted after a dot.
+
+    A filing's title links only to an ``https`` sec.gov address
+    (``news_view.sec_href``); its hover carries the teaser alone, never the
+    detail line already printed inline.
+
+    Where this origin serves no Symbol dossier (``linked`` False, or the route
+    is not published here) the symbol is a filter chip - and ``on_ticker``
+    filters the HEADLINE list only: the SEC panel itself is not filtered by it."""
     from nicegui import ui
 
     href_base = _symbol_base(linked)
@@ -251,7 +316,7 @@ def draw_sec_rows(container, rows, *, linked, on_ticker):
                         _ticker(r["symbol"], href_base, on_ticker)
                 with ui.row().classes(_SEC_CELL):
                     _pill(r.get("band"), r.get("reasons") or [])
-                    _headline(r, _SEC_TITLE)
+                    _headline(r, _SEC_TITLE, href=nv.sec_href, hover=teaser_text)
                     if r.get("details"):
                         ui.label("·").classes(_SEC_DOT)
                         ui.label(r["details"]).classes(_SEC_DETAIL)
@@ -319,7 +384,7 @@ def render(public=False):
     linked = _shell.can_navigate(SYMBOL_ROUTE)
     state = {"payload": None, "rows": [], "sources": [], "symbol": "",
              "watchlist_only": False, "min_band": None, "shown": PAGE_SIZE,
-             "sec_payload": None, "sec_shown": SEC_PAGE_SIZE}
+             "sec_payload": None, "cal_payload": None, "sec_shown": SEC_PAGE_SIZE}
     try:
         watchlist = set(nc.ticker_set())
     except Exception:  # noqa: BLE001 - a broken config must not blank the page
@@ -498,15 +563,32 @@ def render(public=False):
         state["sec_payload"] = payload if isinstance(payload, dict) else None
         _paint_sec()
 
-    def _take_cal(payload):
+    def _paint_cal():
         cal_region.busy.hide()
-        if not isinstance(payload, dict):
+        payload = state["cal_payload"]
+        if payload is None:
             cal_region.content.clear()
             with cal_region.content:
                 kit.empty(CAL_WAITING)
             return
         draw_calendar(cal_region.content,
                       nv.calendar_groups(payload, now=_dt.datetime.now(_dt.timezone.utc)))
+
+    def _take_cal(payload):
+        state["cal_payload"] = payload if isinstance(payload, dict) else None
+        _paint_cal()
+
+    @guard
+    def _repaint_held():
+        # The slow clock: redraw what is already held (stamps, filings and
+        # calendar dates age while a tab stays open). No bus read here, and no
+        # "seen" stamp - nothing new has arrived.
+        if state["payload"] is not None:
+            state["rows"] = nv.rows(state["payload"],
+                                    now=_dt.datetime.now(_dt.timezone.utc))
+        _paint()
+        _paint_sec()
+        _paint_cal()
 
     @guard
     def _sec_more():
@@ -544,6 +626,7 @@ def render(public=False):
     _take_cal(bus_client.read(nv.VIEW_CAL))
     watch_view(nv.VIEW_SEC, _reread_sec)
     watch_view(nv.VIEW_CAL, _reread_cal)
+    ui.timer(REPAINT_SEC, _repaint_held, immediate=False)
     if refresh_btn is not None:
         # Every poll ends with a status publish - even one that found nothing
         # new, which leaves the feed view (skip_unchanged) untouched.
