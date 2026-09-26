@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from services.news_svc import scheduler
+from services.news_svc import econ_calendar, scheduler
 
 CT = ZoneInfo("America/Chicago")
 CFG = {"collector": {"rth_poll_min": 5, "offhours_poll_min": 15, "weekend_poll_min": 60}}
@@ -154,6 +154,8 @@ class _Harness:
         self.cfg = cfg if cfg is not None else {"collector": dict(CFG["collector"])}
         self.passes = passes
         self.on_sleep = on_sleep
+        self.cal = []
+        self.watch = []
 
         def fake_poll(bus):
             self.polls.append(self.clock)
@@ -162,6 +164,10 @@ class _Harness:
             return {"ok": True}
 
         async def fake_sleep(s):
+            # The branches are background tasks now: yield once so the ones
+            # this pass launched run (inline, via ``_to_thread`` below) at the
+            # pass's clock time, before the clock moves.
+            await asyncio.sleep(0)
             self.sleeps.append(s)
             self.clock += s
             if self.on_sleep is not None:
@@ -176,7 +182,15 @@ class _Harness:
         def fake_tick():
             self.ticks += 1
 
+        async def inline(fn, *args):
+            return fn(*args)
+
         monkeypatch.setattr(scheduler.compute, "poll_now", fake_poll)
+        monkeypatch.setattr(scheduler, "_to_thread", inline)
+        monkeypatch.setattr(econ_calendar, "refresh_now",
+                            lambda bus: self.cal.append(self.clock) or {"ok": True})
+        monkeypatch.setattr(econ_calendar, "watch_now",
+                            lambda bus: self.watch.append(self.clock) or {"due": []})
         monkeypatch.setattr(scheduler, "_sleep", fake_sleep)
         monkeypatch.setattr(scheduler, "_monotonic", lambda: self.clock)
         monkeypatch.setattr(scheduler, "_utcnow", lambda: RTH)
@@ -286,13 +300,20 @@ def test_a_huge_config_value_does_not_kill_the_loop(monkeypatch):
     assert h.polls == [0.0, float(_default_s("rth_poll_min"))]
 
 
-def test_cancellation_during_a_poll_propagates(monkeypatch):
+def test_cancellation_during_a_poll_propagates(monkeypatch, caplog):
+    """The poll is a background task now, so the loop no longer awaits it: a
+    CancelledError inside the poll ends THAT task cancelled - it is neither
+    swallowed as a failed cycle nor stamped - and cancelling the loop itself
+    (the harness does, from its sleep) still propagates out of ``loop``."""
     def cancel(bus, n):
         raise asyncio.CancelledError
 
-    h = _Harness(monkeypatch, passes=99, poll=cancel)
-    h.run()
-    assert h.sleeps == []
+    h = _Harness(monkeypatch, passes=3, poll=cancel)
+    with caplog.at_level(logging.ERROR, logger="news_svc.scheduler"):
+        h.run()
+    assert not any("cycle failed" in r.getMessage() for r in caplog.records)
+    assert h.polls == [0.0]           # ended (stamped), so not retried until the cadence
+    assert len(h.cal) == len(h.watch) == 3   # the other branches were untouched
 
 
 # ── a value too large to repr, and a config bug that raises ────────────────────
@@ -377,3 +398,197 @@ def test_the_failure_is_logged_again_after_a_recovery(monkeypatch, caplog):
     with caplog.at_level(logging.ERROR, logger="news_svc.scheduler"):
         h.run()
     assert sum("interval" in r.getMessage() for r in caplog.records) == 2
+
+
+# ── the branches (T17): feeds, calendar, watch as keyed background tasks ───────
+
+class _Cmd:
+    def __init__(self, type):
+        self.type = type
+
+
+def test_a_slow_feed_poll_does_not_delay_the_release_watch(monkeypatch):
+    """The feed poll blocks (on a real executor thread) for the whole run; the
+    release watch still runs on EVERY tick, and the poll is never doubled."""
+    import threading
+
+    release = threading.Event()
+    polls, watches = [], []
+
+    def slow_poll(bus):
+        polls.append(1)
+        release.wait(5)
+        return {"ok": True}
+
+    passes = {"n": 0}
+
+    async def fake_sleep(s):
+        passes["n"] += 1
+        for _ in range(200):               # let this pass's watch thread land
+            if len(watches) >= passes["n"]:
+                break
+            await asyncio.sleep(0.005)
+        if passes["n"] >= 4:
+            release.set()                  # so asyncio.run's executor shutdown returns
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(scheduler.compute, "poll_now", slow_poll)
+    monkeypatch.setattr(econ_calendar, "refresh_now", lambda bus: {"ok": True})
+    monkeypatch.setattr(econ_calendar, "watch_now",
+                        lambda bus: watches.append(1) or {"due": []})
+    monkeypatch.setattr(scheduler, "_sleep", fake_sleep)
+    monkeypatch.setattr(scheduler, "_utcnow", lambda: RTH)
+    monkeypatch.setattr(scheduler.nc, "load", lambda: CFG)
+    monkeypatch.setattr(scheduler._heartbeat, "tick", lambda: None)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(scheduler.loop(object()))
+    assert polls == [1]                    # still running: skipped, never doubled
+    assert len(watches) == 4               # one per tick, none held back by the poll
+
+
+def test_a_branch_still_running_is_skipped_not_doubled():
+    class _Task:
+        def __init__(self, done):
+            self._done = done
+
+        def done(self):
+            return self._done
+
+    made = []
+
+    def make():
+        made.append(1)
+        return "coro"
+
+    running = {"calendar": _Task(done=False)}
+    assert scheduler.launch(running, "calendar", make, lambda c: _Task(False)) is False
+    assert made == []                      # no coroutine built, so none left unawaited
+    running["calendar"] = _Task(done=True)
+    assert scheduler.launch(running, "calendar", make, lambda c: _Task(False)) is True
+    assert made == [1] and running["calendar"].done() is False
+    # A key never seen launches; another key's running task does not block it.
+    assert scheduler.launch(running, "watch", make, lambda c: _Task(False)) is True
+
+
+def test_a_slow_calendar_branch_is_skipped_on_the_next_tick(monkeypatch):
+    """End to end: a calendar refresh that outlives a tick is not relaunched
+    beside itself; the feed poll and the watch are unaffected."""
+    import threading
+
+    release = threading.Event()
+    cals, watches = [], []
+
+    def slow_cal(bus):
+        cals.append(1)
+        release.wait(5)
+        return {"ok": True}
+
+    passes = {"n": 0}
+
+    async def fake_sleep(s):
+        passes["n"] += 1
+        for _ in range(200):
+            if len(watches) >= passes["n"]:
+                break
+            await asyncio.sleep(0.005)
+        if passes["n"] >= 3:
+            release.set()
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(scheduler.compute, "poll_now", lambda bus: {"ok": True})
+    monkeypatch.setattr(econ_calendar, "refresh_now", slow_cal)
+    monkeypatch.setattr(econ_calendar, "watch_now",
+                        lambda bus: watches.append(1) or {"due": []})
+    monkeypatch.setattr(scheduler, "_sleep", fake_sleep)
+    monkeypatch.setattr(scheduler, "_utcnow", lambda: RTH)
+    monkeypatch.setattr(scheduler.nc, "load", lambda: CFG)
+    monkeypatch.setattr(scheduler._heartbeat, "tick", lambda: None)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(scheduler.loop(object()))
+    assert cals == [1]
+    assert len(watches) == 3
+
+
+def test_calendar_branch_runs_at_start_then_every_refresh_min(monkeypatch):
+    """The scheduler launches the calendar at start and on EVERY tick; the
+    per-source ``refresh_min`` is ``econ_calendar.refresh``'s to decide
+    (pinned by test_econ_calendar's
+    ``test_a_source_is_refetched_only_after_its_refresh_min``), so a tick with
+    nothing due fetches nothing. Same for the watch."""
+    h = _Harness(monkeypatch, passes=int(300 / scheduler.TICK_S) + 1)
+    h.run()
+    ticks = [i * float(scheduler.TICK_S) for i in range(h.passes)]
+    assert h.cal == ticks
+    assert h.watch == ticks
+    assert h.polls == [0.0, 300.0]         # the feeds keep the v1 cadence
+
+
+def test_a_failing_calendar_branch_kills_neither_the_feeds_nor_the_watch(monkeypatch, caplog):
+    h = _Harness(monkeypatch, passes=int(300 / scheduler.TICK_S) + 1)
+
+    def boom(bus):
+        h.cal.append(h.clock)
+        raise RuntimeError("calendar exploded")
+
+    monkeypatch.setattr(econ_calendar, "refresh_now", boom)
+    with caplog.at_level(logging.ERROR, logger="news_svc.scheduler"):
+        h.run()
+    assert len(h.cal) == h.passes          # retried every tick
+    assert len(h.watch) == h.passes
+    assert h.polls == [0.0, 300.0]
+    assert any("calendar cycle failed" in r.getMessage() and r.exc_info
+               for r in caplog.records)
+
+
+def test_news_refresh_runs_the_calendar_then_the_feeds(monkeypatch):
+    from services.news_svc import compute, handlers
+
+    order = []
+    monkeypatch.setattr(econ_calendar, "refresh_now", lambda bus: order.append("cal"))
+    monkeypatch.setattr(compute, "poll_now", lambda bus: order.append("feeds"))
+    handlers.handle_command(object(), _Cmd("news_refresh"))
+    assert order == ["cal", "feeds"]
+
+
+def test_news_refresh_still_polls_the_feeds_when_the_calendar_fails(monkeypatch):
+    from services.news_svc import compute, handlers
+
+    order = []
+
+    def boom(bus):
+        raise RuntimeError("calendar exploded")
+
+    monkeypatch.setattr(econ_calendar, "refresh_now", boom)
+    monkeypatch.setattr(compute, "poll_now", lambda bus: order.append("feeds"))
+    handlers.handle_command(object(), _Cmd("news_refresh"))
+    assert order == ["feeds"]
+
+
+def test_news_refresh_while_the_scheduler_refreshes_is_a_quiet_skip(monkeypatch):
+    """A click racing the scheduler's calendar branch gets ``busy`` from
+    ``refresh_now``'s lock - no second cycle - and the feeds still run."""
+    from services.news_svc import compute, handlers
+
+    order = []
+    monkeypatch.setattr(econ_calendar, "refresh_now",
+                        lambda bus: order.append("cal") or {"skipped": "busy"})
+    monkeypatch.setattr(compute, "poll_now", lambda bus: order.append("feeds"))
+    handlers.handle_command(object(), _Cmd("news_refresh"))
+    assert order == ["cal", "feeds"]
+
+
+def test_heartbeat_still_beats_inside_the_while():
+    """services/tests/test_scaffold.py's per-service guard covers news_svc too;
+    this pins that the branch rework kept the beat INSIDE the ``while`` and
+    before any branch is launched (a beat after an ``await`` on a branch would
+    age with it)."""
+    import ast
+    import inspect
+    import textwrap
+
+    fn = ast.parse(textwrap.dedent(inspect.getsource(scheduler.loop))).body[0]
+    loops = [w for w in ast.walk(fn) if isinstance(w, ast.While)]
+    assert len(loops) == 1
+    first = loops[0].body[0]
+    assert isinstance(first, ast.Expr) and isinstance(first.value, ast.Call)
+    assert ast.unparse(first.value) == "_heartbeat.tick()"

@@ -90,9 +90,25 @@ def publish_calendar_status(bus, sources, now) -> int:
 
 
 def handle_command(bus, command) -> None:
+    """``news_refresh`` (the page's Refresh): the calendar, then the feeds.
+
+    Cheap and safe to replay, with no age gate of its own (v1 had none either):
+    a fresh consumer group re-delivering a backlog of clicks costs at most one
+    real pass. ``econ_calendar.refresh_now`` fetches only the sources whose own
+    ``refresh_min`` has passed - a click never forces a source early, so it
+    cannot hammer the Fed, BLS, BEA, FRED or Nasdaq - and the feed poll sends
+    each feed's conditional-GET validators. Each holds its own lock and answers
+    ``{"skipped": "busy"}`` while the scheduler's branch runs, so a click never
+    doubles a cycle. A calendar failure never costs the feed poll."""
     kind = getattr(command, "type", None)
     if kind == "news_refresh":
-        from services.news_svc import compute
+        from services.news_svc import compute, econ_calendar
+        try:
+            result = econ_calendar.refresh_now(bus)
+            if isinstance(result, dict) and result.get("skipped") == "busy":
+                log.info("news_refresh: the calendar is already refreshing")
+        except Exception:  # the feeds still run
+            log.exception("news_refresh: calendar refresh failed")
         result = compute.poll_now(bus)
         if isinstance(result, dict) and result.get("skipped"):
             log.info("news_refresh skipped: a poll is already running")
