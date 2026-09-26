@@ -596,6 +596,10 @@ OPTIONS_RAIL = [
     ("/options/gamma", "Dealer Positioning", "stacked_line_chart"),
     ("/options/matrix", "Opportunity Board", "grid_on"),
     ("/options/flow", "Flow Alerts", "bolt"),
+    # Market News: headlines, SEC filings and insider buys, tagged by ticker
+    # (news_svc). A market-wide read like the three above, so it sits beside
+    # them under MARKETS.
+    ("/news", "Market News", "newspaper"),
 ]
 
 # The two MODELLING tools, paired as their own group (2026-07-28). They are the
@@ -747,6 +751,7 @@ NAV_SECTIONS = [
         _sec_page("/options/gamma"),      # Dealer Positioning
         _sec_page("/options/matrix"),     # Opportunity Board
         _sec_page("/options/flow"),       # Flow Alerts
+        _sec_page("/news"),               # Market News
         _sec_group("Trend & Sentiment"),
     ]),
     ("STRATEGY", [
@@ -903,6 +908,7 @@ _TAB_COLOR = {
     "/options/scanner": "#42a5f5",        # Market Scanner — blue
     "/options/matrix": "#4dd0e1",         # Opportunity Board — cyan
     "/options/flow": "#d500f9",           # Flow Alerts — magenta
+    "/news": "#ff7043",                   # Market News — deep orange
     "/options/paper": "#66bb6a",          # Paper Ledger — green
     "/options/captured": "#ab47bc",       # Captured Signals — purple
     "/options/portfolio": "#26a69a",      # Paper Account — teal
@@ -2350,6 +2356,13 @@ def options_flow_page() -> None:
     with _layout("/options/flow", "Flow Alerts"):
         from pages.options import flow
         flow.render()
+
+
+@_page("/news")
+def news_page() -> None:
+    with _layout("/news", "Market News"):
+        from pages import news
+        news.render()
 
 
 @_page("/sentiment")

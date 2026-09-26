@@ -918,6 +918,77 @@ you already follow is worth more than a strong alert on a name you have never tr
 
 ---
 
+## Market News
+
+*Menu: MARKETS → Market News · Route `/news`*
+
+### What it is
+
+One list of the newest market headlines, SEC filings and insider buys, newest first,
+each tagged with the tickers it names. It answers *"is there news on this?"* without
+leaving the app.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `news_svc` (:8216), `cache:news:feed` |
+| Sources | Public RSS feeds (MarketWatch, CNBC, Benzinga, the press-release wires and others), Yahoo Finance per-ticker headlines, and **SEC EDGAR** — Form 4 insider purchases and share-offering filings. The list is `config/news.toml [[feeds]]`. |
+| Refresh | Every **5 minutes** in regular hours, **15** off-hours, **60** at weekends and holidays |
+| Retention | The newest 300 items are published; the store keeps 7 days |
+
+### Reading the screen
+
+**Each row.** The publish time in **Eastern time** (an item from an earlier day shows
+its date too) · the **tickers** it names · the **headline**, a link to the publisher's
+own page · a grey **badge** per feed that carried it · and a muted second line with the
+feed's summary, or for a filing what was filed (insider buys: how many purchases, their
+total value and the transaction date).
+
+**Tickers.** A row is tagged only when the headline **names a ticker explicitly** — a
+cashtag (`$NVDA`), an exchange bracket (`(NASDAQ: NVDA)`), or a company's own EDGAR
+filing. Yahoo Finance is the exception: its headlines are fetched one ticker at a
+time, and each carries the ticker it was fetched for even when the headline does not
+name it. A company *name* never tags: precision over recall. **Click a ticker** to open
+its [Symbol](#symbol) dossier.
+
+**Trending.** The tickers named in the most items over the last **6 hours**
+(`[trending] window_h`), most-mentioned first. Click one to filter to it; click it
+again to clear.
+
+**Filters.** **Sources** (none chosen means every source), **Ticker**, and
+**Watchlist only** — the symbols the app collects gamma for plus the feed config's
+extras. Filters run instantly on rows already loaded.
+
+**Refresh** asks the service to poll every feed now; the button spins until that
+poll finishes (usually a few minutes) and new items land as it does.
+
+### Why it matters
+
+Price moves have causes, and a gamma wall or an unusual-volume alert reads differently
+once you know an offering was filed or an insider bought that morning. Having the
+headline beside the symbol saves the tab-switch.
+
+### When to use it
+
+Before placing a trade on a name, and when a symbol shows up on
+[Flow Alerts](#flow-alerts) or the [Opportunity Board](#opportunity-board) for no
+visible reason.
+
+### Caveats and gotchas
+
+- **A missing tag is not missing news.** A story that never writes the ticker is not
+  tagged, so a Ticker filter will not find it.
+- Headlines are third-party text and are shown as written — the app does not verify
+  them.
+- Feeds publish on their own schedules; a quiet list at the weekend is normal.
+
+### Related pages
+
+[Symbol](#symbol) · [Flow Alerts](#flow-alerts) · [Desk](#desk).
+
+---
+
 ## Market Dashboard
 
 *Menu: MARKETS → Trend & Sentiment → Market Dashboard · Route `/market` — and the

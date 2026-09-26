@@ -20,6 +20,7 @@ like year 1 or 9999 - gives an empty time, no age and ``today`` False. A naive
 import datetime as dt
 import math
 from collections import Counter
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 from shared.symbols import clean_symbol
@@ -201,6 +202,25 @@ def unseen(payload, *, since) -> int:
 
 def for_symbol(payload, symbol, *, now, limit=SYMBOL_LIMIT) -> list:
     return filter_rows(rows(payload, now=now), sources=None, symbol=symbol)[:limit]
+
+
+def safe_href(url):
+    """``url`` (stripped) if a browser may follow it as a link, else ``None``.
+
+    ``ui.link`` escapes its TEXT, not its href: a ``javascript:`` or ``data:``
+    URL in a third-party feed would run on click. Only an absolute ``http`` /
+    ``https`` address with a host qualifies; a caller draws the headline as
+    plain text for anything else."""
+    if not isinstance(url, str):
+        return None
+    url = url.strip()
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in ("http", "https") or not parts.hostname:
+        return None
+    return url
 
 
 def _finite(v):

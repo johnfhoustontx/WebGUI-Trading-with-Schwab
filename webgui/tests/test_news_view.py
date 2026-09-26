@@ -301,3 +301,14 @@ def test_news_view_imports_only_stdlib_and_shared_symbols():
            if m != "shared.symbols" and m.split(".")[0] not in sys.stdlib_module_names}
     assert not bad, bad
     assert "shared.symbols" in found
+
+
+def test_safe_href_passes_only_an_absolute_web_address():
+    """``ui.link`` escapes its text, not its href: a feed's ``javascript:`` or
+    ``data:`` URL would run on click. Only http(s) with a host is a link."""
+    assert nv.safe_href(" https://a.example/x?y=1 ") == "https://a.example/x?y=1"
+    assert nv.safe_href("HTTP://A.EXAMPLE") == "HTTP://A.EXAMPLE"
+    for bad in ("javascript:alert(1)", " JavaScript:alert(1)", "data:text/html,x",
+                "https://", "http:///path", "//a.example/x", "/relative", "ftp://a.b/c",
+                "vbscript:x", "", "   ", None, 7, b"https://a.b", "http://[::1"):
+        assert nv.safe_href(bad) is None, bad

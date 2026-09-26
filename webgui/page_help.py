@@ -824,6 +824,39 @@ Positioning for that symbol.
 
 Covers today only; the list resets overnight.
 """,
+    "/news": """
+**Market News — the simple version**
+
+The newest **headlines, SEC filings and insider buys** in one list, newest first,
+each with the time it was published (Eastern time; an older item shows its date
+as well).
+
+- **Where it comes from** — public news feeds (MarketWatch, CNBC, Yahoo Finance,
+  press-release wires and others) plus **SEC EDGAR**: insider **purchases** filed
+  on Form 4, and new share offerings. The small grey badge on each row names the
+  feed; a story several feeds carried shows each of them.
+- **Tickers** — a row is tagged with a ticker only when the headline **names it
+  explicitly**: as a cashtag like `$NVDA`, in brackets like `(NASDAQ: NVDA)`, or
+  because it is that company's own filing. The one exception is **Yahoo Finance**,
+  whose stories are fetched per ticker and carry the ticker they were fetched
+  for. A company **name** never tags, so a
+  story plainly about Nvidia that never writes its ticker gets no tag and a
+  ticker filter will miss it. **Click a ticker** to open its Symbol page.
+- **Trending** — the tickers named most often in the last few hours (6 by
+  default). Click one to show only its news; click it again to clear.
+- **Filters** — pick one or more **Sources**, type a **Ticker**, or switch on
+  **Watchlist only** to keep the symbols this app follows. Choosing no source
+  means every source.
+- The line under a headline is its summary, or for a filing what was filed
+  (for insider buys: how many purchases, their total and the date).
+
+The list refreshes itself — every 5 minutes in market hours, less often after
+the close and at weekends. **Refresh** checks every feed right now; its button
+spins until the check finishes, usually within a few minutes.
+
+Headlines open on the publisher's own site, in a new tab. Nothing here is a
+recommendation, and a headline is not a verified fact.
+""",
     "/options/paper": """
 **Paper Ledger — the simple version**
 

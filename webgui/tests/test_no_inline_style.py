@@ -196,8 +196,8 @@ PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
                  "config_editor.py",
                  # Post to X.
                  "x_post.py",
-                 # Market News - the pure facts module.
-                 "news_view.py"]
+                 # Market News - the pure facts module, and its page.
+                 "news_view.py", "news.py"]
 
 
 def test_utility_pages_have_no_inline_style():

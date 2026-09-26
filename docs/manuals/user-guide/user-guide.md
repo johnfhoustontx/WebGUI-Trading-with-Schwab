@@ -760,6 +760,33 @@ for that symbol.
 > every row as "something large happened here", then use price and gamma to decide
 > direction.
 
+## Market News
+
+**Route:** `/news`. A rail item under **MARKETS**, directly below Flow Alerts.
+
+The newest headlines, SEC filings and insider buys in one list, newest first — each
+row shows when it was published (Eastern time), the tickers it names, the headline,
+and a small badge naming the feed it came from.
+
+- **Sources** are public news feeds (MarketWatch, CNBC, Yahoo Finance, the press-release
+  wires and others) plus **SEC EDGAR**: insider **purchases** filed on Form 4, and new
+  share offerings. A story several feeds carried shows each feed's badge.
+- **A ticker is tagged only when the headline names it explicitly** — a cashtag like
+  `$NVDA`, a bracket like `(NASDAQ: NVDA)`, or the company's own filing — or when
+  it came from Yahoo Finance's page for that ticker. A company name alone never
+  tags, so a ticker filter can miss a story about that company.
+- **Click a ticker** to open its Symbol page. **Click a headline** to read it on the
+  publisher's site, in a new tab.
+- **Trending** chips count the tickers named most in the last 6 hours
+  (`[trending] window_h` in `config/news.toml`). Click one to show only its news;
+  click it again to clear.
+- Filter by **Sources**, **Ticker** or **Watchlist only**; choosing no source means
+  every source. **Show more** pages further down the list.
+- **Refresh** checks every feed now instead of waiting for the next scheduled poll
+  (every 5 minutes in market hours, 15 off-hours, 60 at weekends).
+
+> A headline is not a verified fact, and nothing here is a trade recommendation.
+
 ## Market Dashboard
 
 **Route:** `/market`. It is the **Trend & Sentiment** group's first tab, so clicking
