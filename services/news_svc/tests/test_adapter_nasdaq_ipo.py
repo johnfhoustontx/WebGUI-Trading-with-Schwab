@@ -114,3 +114,76 @@ def test_money_accepts_the_shapes_nasdaq_sends(raw):
 @pytest.mark.parametrize("raw", ["$nan", "inf", "-$5", "$1,00,000", True, 3.5, "$0"])
 def test_money_refuses_anything_else(raw):
     assert nasdaq_ipo._money(raw) is None
+
+
+# --- review fixes: recursion, per-deal ids + dedupe, fallback ids, ASCII only ---
+
+def test_deep_nesting_is_a_valueerror_not_a_recursionerror():
+    body = b"[" * 200_000 + b"]" * 200_000
+    with pytest.raises(ValueError):
+        nasdaq_ipo.parse(body)
+    deep = b'{"status": {"rCode": 200}, "data": ' + b"[" * 200_000 + b"]" * 200_000 + b"}"
+    with pytest.raises(ValueError):
+        nasdaq_ipo.parse(deep)
+
+
+def test_id_is_per_deal_not_per_status():
+    up = nasdaq_ipo.parse(_one({"dealID": "9-9", "proposedTickerSymbol": "ABC",
+                                "companyName": "A", "expectedPriceDate": "9/30/2026"}, table="upcoming"))
+    pr = nasdaq_ipo.parse(_one({"dealID": "9-9", "proposedTickerSymbol": "ABC",
+                                "companyName": "A", "pricedDate": "10/01/2026"}))
+    assert up[0]["id"] == pr[0]["id"] == "nasdaq_ipo:9-9"
+
+
+def test_dedupe_keeps_one_row_per_id_preferring_priced():
+    up = {"id": "nasdaq_ipo:1", "status": "upcoming", "date": "2026-09-30"}
+    pr = {"id": "nasdaq_ipo:1", "status": "priced", "date": "2026-10-01"}
+    other = {"id": "nasdaq_ipo:2", "status": "upcoming", "date": "2026-09-29"}
+    assert nasdaq_ipo.dedupe([up, other, pr]) == [pr, other]
+    assert nasdaq_ipo.dedupe([pr, other, up]) == [pr, other]
+
+
+def test_dedupe_preference_order():
+    rank = ["priced", "upcoming", "filed", "withdrawn"]
+    for i, better in enumerate(rank):
+        for worse in rank[i + 1:]:
+            a = {"id": "x", "status": worse}
+            b = {"id": "x", "status": better}
+            assert nasdaq_ipo.dedupe([a, b]) == [b]
+            assert nasdaq_ipo.dedupe([b, a]) == [b]
+
+
+def test_dedupe_first_seen_wins_a_tie_and_empty_is_empty():
+    a = {"id": "x", "status": "upcoming", "date": "2026-09-01"}
+    b = {"id": "x", "status": "upcoming", "date": "2026-09-02"}
+    assert nasdaq_ipo.dedupe([a, b]) == [a]
+    assert nasdaq_ipo.dedupe([]) == []
+
+
+def test_dedupe_over_two_real_months_pages():
+    rows = nasdaq_ipo.parse(BODY)
+    assert nasdaq_ipo.dedupe(rows + rows) == rows
+
+
+def test_fallback_ids_without_a_deal_id_do_not_collide():
+    doc = {"data": {"priced": {"rows": [
+        {"proposedTickerSymbol": None, "companyName": None, "pricedDate": "9/1/2026"},
+        {"proposedTickerSymbol": None, "companyName": None, "pricedDate": "9/1/2026"},
+        {"proposedTickerSymbol": "ABC", "companyName": "Acme", "pricedDate": "9/1/2026"},
+        {"proposedTickerSymbol": "ABC", "companyName": "Other Co", "pricedDate": "9/1/2026"},
+    ]}}, "status": {"rCode": 200}}
+    rows = nasdaq_ipo.parse(json.dumps(doc).encode())
+    ids = [r["id"] for r in rows]
+    assert len(rows) == 4 and len(set(ids)) == 4
+    assert all(i.startswith("nasdaq_ipo:") for i in ids)
+    assert "Acme" in ids[2] and "ABC" in ids[2] and "2026-09-01" in ids[2]
+
+
+@pytest.mark.parametrize("raw", ["$２,530,000,000", "２５３０", "$240,000,000.０", "٣٠٠"])
+def test_money_refuses_non_ascii_digits(raw):
+    assert nasdaq_ipo._money(raw) is None
+
+
+@pytest.mark.parametrize("raw", ["９/30/2026", "9/３0/2026", "9/30/２０２６", "٩/30/2026"])
+def test_date_refuses_non_ascii_digits(raw):
+    assert nasdaq_ipo._iso_date(raw) is None

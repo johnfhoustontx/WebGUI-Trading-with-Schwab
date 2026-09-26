@@ -25,10 +25,12 @@ from shared.symbols import clean_symbol
 
 URL = "https://api.nasdaq.com/api/ipo/calendar?date={year:04d}-{month:02d}"
 
-_DATE = re.compile(r"^\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*$")
+_DATE = re.compile(r"^\s*(\d{1,2})/(\d{1,2})/(\d{4})\s*$", re.ASCII)
 # "$240,000,000" / "$828,000,000.00" / "2530000000" - properly grouped or not
 # grouped at all. Anything else (an exponent, a sign, "n/a", "nan") is None.
-_MONEY = re.compile(r"^\$?(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$")
+# re.ASCII: without it \d matches full-width and Arabic-Indic digits too, and
+# int() would happily convert them.
+_MONEY = re.compile(r"^\$?(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$", re.ASCII)
 
 # (status, path to the rows list, the field holding the row's date)
 _TABLES = (
@@ -86,7 +88,7 @@ def _rows_at(data, path):
     return node if isinstance(node, list) else []
 
 
-def _row(status, raw, date_field):
+def _row(status, raw, date_field, index):
     if not isinstance(raw, dict):
         return None
     when = _iso_date(raw.get(date_field))
@@ -95,7 +97,11 @@ def _row(status, raw, date_field):
     symbol = _symbol(raw.get("proposedTickerSymbol"))
     company = _text(raw.get("companyName"))
     deal = _text(raw.get("dealID"))
-    ident = deal or f"{symbol or company or '?'}|{when}"
+    # The id is per DEAL, never per status: a deal listed as upcoming on one
+    # month's page and priced on the next is one row (see ``dedupe``). Without
+    # a dealID, symbol + company + date + the row's index in its table keep two
+    # anonymous rows apart.
+    ident = deal or f"{symbol or ''}|{company or ''}|{when}|{index}"
     return {
         "symbol": symbol,
         "company": company,
@@ -104,7 +110,7 @@ def _row(status, raw, date_field):
         "price": _text(raw.get("proposedSharePrice")),
         "offer_usd": _money(raw.get("dollarValueOfSharesOffered")),
         "exchange": _text(raw.get("proposedExchange")),
-        "id": f"nasdaq_ipo:{status}:{ident}",
+        "id": f"nasdaq_ipo:{ident}",
     }
 
 
@@ -116,7 +122,7 @@ def parse(body):
     """
     try:
         doc = json.loads(body.decode("utf-8-sig") if isinstance(body, bytes) else body)
-    except (UnicodeDecodeError, ValueError, TypeError, AttributeError) as exc:
+    except (UnicodeDecodeError, ValueError, TypeError, AttributeError, RecursionError) as exc:
         raise ValueError(f"nasdaq_ipo: body is not JSON ({type(exc).__name__})") from None
     if not isinstance(doc, dict):
         raise ValueError("nasdaq_ipo: body is not a JSON object")
@@ -129,8 +135,32 @@ def parse(body):
         raise ValueError("nasdaq_ipo: no data table")
     out = []
     for status_name, path, date_field in _TABLES:
-        for raw in _rows_at(data, path):
-            row = _row(status_name, raw, date_field)
+        for index, raw in enumerate(_rows_at(data, path)):
+            row = _row(status_name, raw, date_field, index)
             if row is not None:
                 out.append(row)
     return out
+
+
+# Most-settled first: a priced deal supersedes its upcoming listing, and so on.
+_STATUS_RANK = {"priced": 0, "upcoming": 1, "filed": 2, "withdrawn": 3}
+
+
+def dedupe(rows):
+    """One row per ``id``, keeping the most settled status.
+
+    Preference: priced > upcoming > filed > withdrawn (an unknown status ranks
+    last); on a tie the first row seen wins. Order follows each id's first
+    appearance, so merging two months' pages is stable.
+    """
+    best = {}
+    order = []
+    for row in rows:
+        key = row.get("id")
+        rank = _STATUS_RANK.get(row.get("status"), len(_STATUS_RANK))
+        if key not in best:
+            order.append(key)
+            best[key] = (rank, row)
+        elif rank < best[key][0]:
+            best[key] = (rank, row)
+    return [best[k][1] for k in order]
