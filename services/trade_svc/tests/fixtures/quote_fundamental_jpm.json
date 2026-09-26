@@ -1,0 +1,19 @@
+{
+ "_note": "Built from Schwab's DOCUMENTED /quotes fundamental field names; NOT yet replaced by a live prod reply (plan Task 13 step 0, left open for Task 22).",
+ "avg10DaysVolume": 8412345.0,
+ "avg1YearVolume": 9123456.0,
+ "declarationDate": "2026-09-16T00:00:00Z",
+ "divAmount": 5.6,
+ "divExDate": "2026-10-06T00:00:00Z",
+ "divFreq": 4,
+ "divPayAmount": 1.4,
+ "divPayDate": "2026-10-31T00:00:00Z",
+ "divYield": 1.87,
+ "eps": 19.75,
+ "fundLeverageFactor": 0.0,
+ "lastEarningsDate": "2026-07-14T00:00:00Z",
+ "nextDivExDate": "2027-01-06T00:00:00Z",
+ "nextDivPayDate": "2027-01-31T00:00:00Z",
+ "peRatio": 15.1,
+ "sharesOutstanding": 2790000000
+}

@@ -346,6 +346,22 @@ class SchwabProxyClient:
         """Generic pass-through (used for /chains in SPX P/C calculation)."""
         return self._proxy_get(endpoint, params=params)
 
+    def get_quote_raw(self, symbol: str) -> Optional[Dict]:
+        """One symbol's RAW ``/quotes`` reply, fundamental block included.
+
+        ``{SYMBOL: {"quote": ..., "fundamental": ..., ...}}`` exactly as Schwab
+        sends it (not flattened like :meth:`get_quotes`), or None when the proxy
+        failed. Goes through ``/passthrough``, which splits ``params`` on commas —
+        so a second symbol would be mangled and a comma is refused outright.
+        Used by trade_svc's daily dividend pull.
+        """
+        if "," in (symbol or ""):
+            raise ValueError(f"one symbol per call, got {symbol!r}")
+        return self._proxy_get("/passthrough", params={
+            "endpoint": "/quotes",
+            "params": f"symbols={symbol},fields=fundamental",
+        })
+
     def get_fundamentals(self, symbol: str) -> Optional[Dict]:
         """Fetch Schwab fundamentals for a symbol (the inner ``fundamental`` dict).
 

@@ -1,0 +1,10 @@
+{
+ "_note": "A non-payer: amounts zero, no dates.",
+ "avg10DaysVolume": 1200000.0,
+ "divAmount": 0.0,
+ "divFreq": 0,
+ "divPayAmount": 0.0,
+ "divYield": 0.0,
+ "eps": -0.42,
+ "peRatio": 0.0
+}

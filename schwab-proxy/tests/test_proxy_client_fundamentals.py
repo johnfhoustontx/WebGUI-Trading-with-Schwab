@@ -35,3 +35,38 @@ def test_get_fundamentals_none_when_no_instruments():
 def test_get_fundamentals_none_when_instrument_lacks_fundamental():
     c = _client({"instruments": [{"symbol": "AAPL"}]})
     assert c.get_fundamentals("AAPL") is None
+
+
+# ── get_quote_raw: the dividend pull's one-symbol /quotes passthrough ───────
+
+def _recording_client(stub):
+    calls = []
+    c = SchwabProxyClient("http://test")
+
+    def fake(path, params=None):
+        calls.append((path, params))
+        return stub
+    c._proxy_get = fake
+    return c, calls
+
+
+def test_get_quote_raw_is_one_symbol_through_the_passthrough():
+    payload = {"JPM": {"fundamental": {"divAmount": 5.6}}}
+    c, calls = _recording_client(payload)
+    assert c.get_quote_raw("JPM") == payload
+    assert calls == [("/passthrough", {"endpoint": "/quotes",
+                                       "params": "symbols=JPM,fields=fundamental"})]
+
+
+def test_get_quote_raw_refuses_a_comma():
+    """The proxy splits `params` on commas, so a second symbol would be mangled."""
+    import pytest
+    c, calls = _recording_client({})
+    with pytest.raises(ValueError):
+        c.get_quote_raw("JPM,KO")
+    assert calls == []
+
+
+def test_get_quote_raw_passes_a_proxy_failure_through_as_none():
+    c, _ = _recording_client(None)
+    assert c.get_quote_raw("JPM") is None
