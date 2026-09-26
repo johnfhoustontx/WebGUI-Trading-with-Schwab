@@ -27,6 +27,11 @@ def watch_view(view, on_change, *, interval: float = 2.0, timer=None):
     ``on_change`` is wrapped in :func:`guard`, so a repaint that outlives its
     client is a clean no-op rather than a traceback per tick. ``timer`` is an
     injection point for tests; production always uses ``ui.timer``.
+
+    An ``async def`` ``on_change`` works too: the tick RETURNS its coroutine and
+    NiceGUI's timer awaits whatever awaitable its callback returns. Calling it and
+    dropping the result would create the coroutine and never run it — the page
+    would simply stop repainting after its first load.
     """
     state = {"ver": bus_client.read_version(view)}
 
@@ -36,6 +41,6 @@ def watch_view(view, on_change, *, interval: float = 2.0, timer=None):
         if ver == state["ver"]:
             return
         state["ver"] = ver
-        on_change()
+        return on_change()
 
     return (timer or ui.timer)(interval, _tick)

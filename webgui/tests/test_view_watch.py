@@ -103,3 +103,38 @@ def test_watch_view_absorbs_a_deleted_client_repaint():
     _watch("sentiment:rotation", _gone)
     b.cache_set("cache:sentiment:rotation", {"a": 2})
     _FakeTimer.last.cb()          # clean no-op, no traceback
+
+
+def test_watch_view_hands_an_async_repaint_back_to_the_timer_to_await():
+    """An ``async def`` repaint (news, shares, income) must actually RUN on a
+    version change. ``_tick`` used to call ``on_change()`` and drop the result, so
+    the coroutine was created, never awaited ("coroutine was never awaited"), and
+    the page never repainted after its first load. NiceGUI's timer awaits an
+    awaitable its callback returns, so the tick must return it."""
+    import asyncio
+    import inspect
+
+    b = bus_client.bus()
+    b.cache_set("cache:sentiment:rotation", {"a": 1})
+    ran = []
+
+    async def _repaint():
+        ran.append(1)
+
+    _watch("sentiment:rotation", _repaint)
+    b.cache_set("cache:sentiment:rotation", {"a": 2})
+    result = _FakeTimer.last.cb()
+    assert inspect.isawaitable(result)
+    asyncio.run(result)
+    assert ran == [1]
+
+
+def test_watch_view_with_no_change_returns_nothing_to_await():
+    b = bus_client.bus()
+    b.cache_set("cache:sentiment:rotation", {"a": 1})
+
+    async def _repaint():
+        raise AssertionError("must not run without a version change")
+
+    _watch("sentiment:rotation", _repaint)
+    assert _FakeTimer.last.cb() is None
