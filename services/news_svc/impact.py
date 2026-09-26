@@ -36,10 +36,16 @@ _NOT_OFFICER = frozenset({"", "10% owner", "insider"})
 
 # ── small total helpers ───────────────────────────────────────────────────────
 def _num(v):
-    """A finite real number, or ``None`` (rejects bool, NaN, inf, strings)."""
+    """A finite real number, or ``None`` (rejects bool, NaN, inf, strings).
+
+    Never raises: an int too large for a float (``10**400``) makes
+    ``math.isfinite`` raise ``OverflowError``, and is ``None`` here."""
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
-    return v if math.isfinite(v) else None
+    try:
+        return v if math.isfinite(v) else None
+    except OverflowError:
+        return None
 
 
 def _dict(v) -> dict:
@@ -55,6 +61,19 @@ def _strs(v) -> list[str]:
     if not isinstance(v, (list, tuple)):
         return []
     return [s for s in v if isinstance(s, str) and s]
+
+
+def _universe(v) -> set[str]:
+    """The ticker set as a set of non-empty strings. A bare str is ONE ticker
+    (never its letters); anything not iterable is the empty set. Never raises."""
+    if isinstance(v, str):
+        return {v} if v else set()
+    if v is None or isinstance(v, (bytes, bytearray, dict)):
+        return set()
+    try:
+        return {s for s in v if isinstance(s, str) and s}
+    except TypeError:
+        return set()
 
 
 def _points(v) -> int:
@@ -82,10 +101,30 @@ def _money(v):
 
 # ── fingerprint + keyword compilation ─────────────────────────────────────────
 def fingerprint(cfg, universe) -> str:
-    """A short, stable id of (config, ticker set); ticker ORDER does not matter."""
-    u = sorted(s for s in (universe or ()) if isinstance(s, str))
-    blob = json.dumps({"cfg": cfg, "u": u}, sort_keys=True, default=str)
+    """A short, stable id of (config, ticker set); ticker ORDER does not matter.
+
+    Never raises: a config whose tables mix key types (``{"a": 1, 2: 3}``),
+    which ``json.dumps(sort_keys=True)`` refuses, is canonicalised with every
+    key sorted by its ``str`` instead. The ordinary path is unchanged, so a
+    well-formed config keeps the fingerprint its stored rows carry."""
+    u = sorted(_universe(universe))
+    try:
+        blob = json.dumps({"cfg": cfg, "u": u}, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        blob = json.dumps({"cfg": _canon(cfg), "u": u}, default=str)
     return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _canon(v):
+    """``v`` with every mapping turned into ``[[str(key), value], ...]`` sorted
+    by ``(str(key), type name)`` - JSON-encodable whatever the key types."""
+    if isinstance(v, dict):
+        pairs = [(str(k), type(k).__name__, _canon(x)) for k, x in v.items()]
+        pairs.sort(key=lambda p: (p[0], p[1]))
+        return [[k, t, x] for k, t, x in pairs]
+    if isinstance(v, (list, tuple)):
+        return [_canon(x) for x in v]
+    return v
 
 
 def _tiers(cfg) -> list[tuple[str, int, list[str]]]:
@@ -139,6 +178,10 @@ def _form4(detail: dict, f4: dict, reasons: list[str]) -> int:
             pts = _points(f4.get(band_name))
             break
     reasons.append(f"form4:{_money(value)}")
+    if pts <= 0:
+        # The officer bonus rides on a buy big enough to score at all: a $1K
+        # director purchase is routine, not news.
+        return pts
     labels = [p.strip().lower() for p in _str(detail.get("relationship")).split(",")]
     if any(lab not in _NOT_OFFICER for lab in labels):
         officer = _points(f4.get("officer"))
@@ -154,13 +197,16 @@ def score(row, cfg, universe) -> tuple[int, list[str]]:
     reasons: list[str] = []
     total = 0
 
-    text = _str(row.get("title"))
+    # Title and teaser are searched SEPARATELY: joined, a phrase's ``\s+``
+    # would bridge the two ("...trim rate" + "cut odds..." is not a rate cut).
+    texts = [_str(row.get("title"))]
     if cfg.get("match_teaser") is True:
-        text = f"{text}\n{_str(row.get('teaser'))}"
-    if text.strip():
+        texts.append(_str(row.get("teaser")))
+    texts = [t for t in texts if t.strip()]
+    if texts:
         for name, pts, words in _compile(cfg):
             for word, pat in words:       # a tier counts ONCE, whatever matches in it
-                if pat.search(text):
+                if any(pat.search(t) for t in texts):
                     total += pts
                     reasons.append(f"kw:{name}:{word}")
                     break
@@ -182,7 +228,7 @@ def score(row, cfg, universe) -> tuple[int, list[str]]:
             reasons.append(f"sources:{len(set(sources))}")
 
     tickers = set(_strs(row.get("tickers")))
-    if tickers and tickers & set(_strs(list(universe or ()))):
+    if tickers and tickers & _universe(universe):
         boost = _points(cfg.get("watchlist"))
         if boost:
             total += boost
@@ -232,6 +278,13 @@ def apply(row, cfg, universe) -> dict:
 
 
 def _instant(v):
+    """An aware datetime for ``v`` (a datetime or an ISO string), or ``None``.
+
+    A NAIVE value is read as UTC - the store writes aware UTC instants, so a
+    naive one is a caller's mistake, and UTC is the only reading that cannot
+    shift it by a DST-dependent offset. Callers must pass an AWARE ``now``
+    (any zone: aware instants compare correctly); a naive CT wall clock would
+    be read five or six hours early."""
     if isinstance(v, datetime):
         dt = v
     elif isinstance(v, str) and v.strip():
@@ -247,13 +300,17 @@ def _instant(v):
 def cap_stale(band_name, published_at, now, cfg) -> tuple[str, bool]:
     """A HIGH older than ``stale_after_h`` shows as MED; anything else unchanged.
 
-    An unparseable ``published_at`` (the store's ``"undated"`` sentinel) is
-    never stale — capping needs an age, and an unknown age is not an old one."""
+    ``now`` must be an AWARE datetime (or ISO string with an offset); a naive
+    one is read as UTC (see ``_instant``). An unparseable ``published_at`` (the
+    store's ``"undated"`` sentinel) is never stale — capping needs an age, and
+    an unknown age is not an old one. A ``stale_after_h`` that is not a finite
+    number > 0 is unusable and caps NOTHING: a 0 or negative window would
+    otherwise demote every HIGH the moment it was published."""
     if band_name != "high":
         return band_name, False
     hours = _num(_dict(cfg).get("stale_after_h"))
     pub, ref = _instant(published_at), _instant(now)
-    if hours is None or pub is None or ref is None:
+    if hours is None or hours <= 0 or pub is None or ref is None:
         return band_name, False
     if (ref - pub).total_seconds() > hours * 3600:
         return "med", True

@@ -13,6 +13,20 @@ and descriptions carry HTML entities, and descriptions are escaped HTML. Times
 are the Board's convention, **Eastern**; ``at`` is stored as an aware UTC ISO
 instant, ``date`` as the Eastern calendar date. One bad row is skipped, never
 the batch.
+
+A ``time`` that is not an ``h:mm a.m./p.m.`` clock ("noon", "14:00", "TBA")
+keeps the row as a DATE-ONLY event (``at`` None, id suffix ``:day``) with a
+DEBUG line - the date is still true; a range ("2:00 p.m. - 3:00 p.m.") takes
+its start. A clock-shaped time out of range ("25:99 p.m.") is a corrupt row
+and is skipped. ``link`` is kept only when it is an ``https://`` URL after
+stripping whitespace (the live file has ``live`` values with a leading
+space); ``http://``, relative and scheme-less links are dropped DELIBERATELY,
+since the page opens them as-is.
+
+Every output string (``title``, ``location``, ``description``, ``link``) is
+PLAIN TEXT with entities already unescaped and tags removed - which means it
+may now contain a literal ``<`` or ``&``. Render it escaped (``ui.label``,
+never ``ui.html``).
 """
 import html
 import json
@@ -54,12 +68,22 @@ def _slug(title: str) -> str:
 
 
 def _clock(raw):
-    """"2:00 p.m." -> (14, 0); "" -> None (date-only); anything else raises ValueError."""
+    """"2:00 p.m." -> (14, 0); "" -> None (date-only).
+
+    A range takes its start: the text before the first hyphen is tried first,
+    then the whole text. A time that is no clock at all ("noon", "14:00") is
+    ``None`` too - date-only, with a DEBUG line - because the date is still
+    right. A clock-SHAPED time out of range ("25:99 p.m.") raises ValueError:
+    that row is corrupt, and the caller skips it."""
     if raw is None or (isinstance(raw, str) and not raw.strip()):
         return None
-    m = _TIME.match(raw) if isinstance(raw, str) else None
+    m = None
+    if isinstance(raw, str):
+        head = raw.split("-", 1)[0]
+        m = _TIME.match(head) or _TIME.match(raw)
     if not m:
-        raise ValueError(f"unreadable time {raw!r}")
+        log.debug("fed_calendar: unreadable time %r - kept as date-only", raw)
+        return None
     hour, minute, half = int(m.group(1)), int(m.group(2)), m.group(3).lower()
     if not (1 <= hour <= 12 and 0 <= minute <= 59):
         raise ValueError(f"unreadable time {raw!r}")
@@ -78,8 +102,9 @@ def _kind_and_title(rtype: str, title: str):
 def _link(row) -> str:
     for key in ("link", "live"):
         v = row.get(key)
-        if isinstance(v, str) and v.startswith("https://"):
-            return v.strip()
+        v = v.strip() if isinstance(v, str) else ""
+        if v.startswith("https://"):
+            return v
     return ""
 
 
@@ -131,10 +156,15 @@ def parse(body, *, types) -> list[dict]:
     fomc_minutes / beige / speech / testimony / the lower-cased type),
     ``type``, ``title``, ``date`` (Eastern ``YYYY-MM-DD``), ``at`` (UTC ISO or
     ``None`` for a date-only row), ``location``, ``description``, ``link``,
-    ``source``. Never raises; junk yields ``[]``.
+    ``source``. Never raises; junk yields ``[]``. ``types`` given as one str is
+    one type. Every string field is plain text: render it escaped, never
+    through ``ui.html``.
     """
     try:
+        if isinstance(types, str):
+            types = (types,)                             # one type, never its letters
         wanted = {t.strip().lower() for t in (types or ()) if isinstance(t, str)}
+        wanted.discard("")
         if not wanted or not isinstance(body, (bytes, bytearray, str)):
             return []
         text = body.decode("utf-8-sig") if isinstance(body, (bytes, bytearray)) else body.lstrip("﻿")

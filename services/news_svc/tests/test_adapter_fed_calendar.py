@@ -137,3 +137,47 @@ def test_junk_never_raises():
               b"\xff\xfe garbage", b"[1, 2]", b"null", None, 42):
         assert fed_calendar.parse(b, types=TYPES) == []
     assert fed_calendar.parse(BODY, types=None) == []
+
+
+# ── review findings (2026-09-26) ──────────────────────────────────────────────
+def _one(**kw):
+    base = {"month": "2026-10", "days": "5", "time": "2:00 p.m.", "type": "Speeches",
+            "title": "A speech"}
+    base.update(kw)
+    return fed_calendar.parse(json.dumps({"events": [base]}).encode(), types=TYPES)
+
+
+def test_a_live_link_with_a_leading_space_is_kept():
+    ev, = _one(live=" https://www.federalreserve.gov/live.htm ")
+    assert ev["link"] == "https://www.federalreserve.gov/live.htm"
+    ev, = _one(link="  https://a.example/x", live="https://b.example/y")
+    assert ev["link"] == "https://a.example/x"
+
+
+def test_http_and_scheme_less_links_are_dropped():
+    for bad in ("http://www.federalreserve.gov/x", "www.federalreserve.gov/x",
+                "/newsevents/x.htm", "javascript:alert(1)", 5):
+        ev, = _one(link=bad)
+        assert ev["link"] == "", bad
+
+
+def test_an_unreadable_time_keeps_the_row_as_date_only(caplog):
+    import logging
+    caplog.set_level(logging.DEBUG, logger=fed_calendar.__name__)
+    for raw in ("noon", "14:00", "TBA", "Afternoon"):
+        ev, = _one(time=raw)
+        assert ev["at"] is None and ev["id"].endswith(":day") and ev["date"] == "2026-10-05", raw
+    assert "noon" in caplog.text
+
+
+def test_a_time_range_takes_its_start():
+    ev, = _one(time="2:00 p.m. - 3:00 p.m.")
+    assert ev["at"] == "2026-10-05T18:00:00+00:00" and ev["id"].endswith(":14:00")
+    ev, = _one(time="9:30 a.m.-10:30 a.m.")
+    assert ev["at"] == "2026-10-05T13:30:00+00:00"
+
+
+def test_types_as_a_bare_string_is_one_type_not_its_letters():
+    evs = fed_calendar.parse(BODY, types="FOMC")
+    assert evs and {e["type"] for e in evs} == {"FOMC"}
+    assert fed_calendar.parse(BODY, types="F") == []

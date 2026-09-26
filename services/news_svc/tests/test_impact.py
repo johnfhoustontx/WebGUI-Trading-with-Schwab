@@ -144,3 +144,77 @@ def test_a_junk_config_never_raises():
                      "form4": None, "filings": "x", "high_at": "six"}):
         assert impact.score(row(title="FOMC", kind="edgar_form4",
                                 detail={"total_value": 5e6}), cfg, [])[0] == 0
+
+
+# ── review findings (2026-09-26) ──────────────────────────────────────────────
+def test_num_rejects_a_huge_int_without_raising():
+    assert impact._num(10 ** 400) is None
+    assert impact._num(-(10 ** 400)) is None
+    assert impact._num(7) == 7
+
+
+def test_a_huge_form4_value_or_threshold_never_raises():
+    r = row(kind="edgar_form4", detail={"total_value": 10 ** 400, "relationship": "CEO"})
+    assert impact.score(r, CFG, [])[0] == 0
+    cfg = {**CFG, "form4": {**CFG["form4"], "huge_usd": 10 ** 400}}
+    r = row(kind="edgar_form4", detail={"total_value": 2_000_000})
+    assert impact.score(r, cfg, [])[0] == 3
+    assert impact.band(10 ** 400, CFG) == "low"
+
+
+def test_a_phrase_never_matches_across_the_title_teaser_join():
+    cfg = {**CFG, "match_teaser": True}
+    r = row(title="Traders trim rate", teaser="cut odds after the data")
+    assert impact.score(r, cfg, [])[0] == 0
+    # each field still matches on its own
+    assert impact.score(row(title="Fed", teaser="a rate cut looms"), cfg, [])[0] == 5
+    assert impact.score(row(title="Fed rate cut", teaser="more"), cfg, [])[0] == 5
+
+
+def test_an_aware_non_utc_now_is_compared_as_the_same_instant():
+    from datetime import datetime, timedelta, timezone
+    ct = timezone(timedelta(hours=-5))
+    now = datetime(2026, 9, 26, 10, 0, tzinfo=ct)          # = 15:00Z
+    assert impact.cap_stale("high", "2026-09-25T14:00:00+00:00", now, CFG) == ("med", True)
+    assert impact.cap_stale("high", "2026-09-25T16:00:00+00:00", now, CFG) == ("high", False)
+    # a naive now is still read as UTC (documented)
+    naive = datetime(2026, 9, 26, 15, 0)
+    assert impact.cap_stale("high", "2026-09-25T14:00:00+00:00", naive, CFG) == ("med", True)
+
+
+def test_a_non_positive_or_non_finite_stale_window_caps_nothing():
+    old = "2020-01-01T00:00:00+00:00"
+    now = "2026-09-26T15:00:00+00:00"
+    for bad in (0, -1, -0.5, float("nan"), float("inf"), float("-inf"), True, "24", None):
+        assert impact.cap_stale("high", old, now, {**CFG, "stale_after_h": bad}) == \
+            ("high", False), bad
+
+
+def test_the_officer_bonus_needs_a_scoring_form4_value():
+    r = row(kind="edgar_form4", detail={"total_value": 1_000, "relationship": "Director"})
+    s, why = impact.score(r, {**CFG, "watchlist": 0}, [])
+    assert s == 0 and "officer" not in why
+    r = row(kind="edgar_form4", detail={"total_value": 300_000, "relationship": "Director"})
+    assert impact.score(r, {**CFG, "watchlist": 0}, [])[0] == 2
+
+
+def test_a_bare_string_universe_is_one_ticker_not_its_letters():
+    r = row(tickers=["S"])
+    assert impact.score(r, CFG, "SPY")[0] == 0
+    assert impact.score(row(tickers=["SPY"]), CFG, "SPY")[0] == 2
+    assert impact.fingerprint(CFG, "SPY") == impact.fingerprint(CFG, ["SPY"])
+
+
+def test_a_non_iterable_universe_is_empty_and_never_raises():
+    for bad in (5, 1.5, True, object()):
+        assert impact.score(row(tickers=["SPY"]), CFG, bad)[0] == 0
+        assert impact.fingerprint(CFG, bad) == impact.fingerprint(CFG, [])
+
+
+def test_fingerprint_never_raises_on_mixed_type_keys():
+    cfg = {**CFG, "source_points": {"WSJ": 1, 2: 3, (1, 2): 4}}
+    a = impact.fingerprint(cfg, ["A", 5, None])
+    assert a == impact.fingerprint(cfg, ["A"])
+    assert isinstance(a, str) and len(a) == 16
+    # the ordinary path is unchanged, so stored rows are not all rescored
+    assert impact.fingerprint(CFG, ["A"]) == impact.fingerprint(dict(CFG), ("A",))
