@@ -196,16 +196,6 @@ def test_only_a_web_url_becomes_a_link():
     assert "Bad link" in [e.text for e in new if isinstance(e, ui.label)]
 
 
-def test_a_teaser_that_repeats_the_headline_is_not_printed_twice():
-    from pages import news
-    assert news.second_line({"title": "Costco Beats", "teaser": "Costco  beats WSJ"}) == ""
-    assert news.second_line({"title": "Costco Beats", "teaser": "Margins widened."}) \
-        == "Margins widened."
-    assert news.second_line({"title": "X", "teaser": None, "kind": "edgar_filings",
-                             "detail": {"form": "S-3"}}) == "Form S-3"
-    assert news.second_line(None) == ""
-
-
 def test_refresh_holds_its_button_until_the_poll_reports(monkeypatch):
     """Refresh enqueues one poll of every feed, which takes minutes. The button
     spins until the service publishes ``news:status`` (it does at the end of
@@ -233,25 +223,6 @@ def test_refresh_holds_its_button_until_the_poll_reports(monkeypatch):
 
 
 # ── review fixes (b013d39) ───────────────────────────────────────────────────
-def test_a_real_teaser_that_opens_with_the_headline_is_kept():
-    """Only the Google "headline + publisher" echo is dropped. A teaser that
-    carries on past the headline with real text is the story's first line."""
-    from pages import news
-    long_teaser = ("Costco beats estimates as margins widen on record membership "
-                   "renewals and a stronger holiday quarter")
-    assert news.second_line({"title": "Costco Beats", "teaser": long_teaser}) == long_teaser
-    # The exact headline, however it is spaced or cased, is dropped.
-    assert news.second_line({"title": "Costco Beats", "teaser": "  costco   BEATS "}) == ""
-    # The publisher tail is dropped even when it is long, if it names the source.
-    pub = "The Wall Street Journal Weekend Edition International"
-    assert news.second_line({"title": "Fed holds", "teaser": f"Fed holds  {pub}",
-                             "original_source": pub}) == ""
-    assert news.second_line({"title": "Fed holds", "teaser": f"Fed holds - {pub}",
-                             "sources": [pub]}) == ""
-    # A teaser that does not open with the headline is never touched.
-    assert news.second_line({"title": "Fed holds", "teaser": "Short."}) == "Short."
-
-
 def test_an_unpublished_symbol_route_leaves_the_tickers_as_chips(monkeypatch):
     """``route_for`` answers None where this origin does not serve the dossier.
     Falling back to ``/symbol`` would link to a path that 404s here - the ticker
@@ -285,24 +256,10 @@ def test_the_ticker_field_is_debounced(monkeypatch):
 
 
 def test_the_time_column_fits_a_dated_stamp_on_one_line():
-    """"Sep 25 10:43 AM" must not wrap: the column is w-28 and nowrap, and the
-    second line indents past it."""
+    """"Sep 25 10:43 AM" must not wrap: the column is w-28 and nowrap. (The
+    second line it used to indent past is gone - see test_second_line_is_gone.)"""
     from pages import news
     assert "w-28" in news._WHEN and "whitespace-nowrap" in news._WHEN
-    assert "pl-[120px]" in news._SECOND
-
-
-def test_an_echo_must_end_at_a_word_in_the_teaser():
-    """The headline has to end on a word boundary in the teaser to count as an
-    echo: "Fed" is not echoed by "Federal Reserve holds" - that is the story's
-    own first line, and it is kept."""
-    from pages import news
-    assert news.second_line({"title": "Fed", "teaser": "Federal Reserve holds"}) \
-        == "Federal Reserve holds"
-    # A boundary made of punctuation, whitespace or the end still echoes.
-    assert news.second_line({"title": "Fed", "teaser": "Fed"}) == ""
-    assert news.second_line({"title": "Fed", "teaser": "Fed - Reuters"}) == ""
-    assert news.second_line({"title": "Fed", "teaser": "Fed: Reuters"}) == ""
 
 
 def test_the_empty_feed_line_is_one_constant_on_both_origins():
@@ -318,3 +275,234 @@ def test_the_empty_feed_line_is_one_constant_on_both_origins():
                     and n.value == news.EMPTY_FEED]
         assert len(literals) == (1 if name == "news.py" else 0), name
         assert "EMPTY_FEED" in src
+
+
+# ── v2: one-line rows, the SEC panel and the calendar (Task 18) ─────────────
+def _classes(e):
+    return set(e.classes)
+
+
+def _descendants(e):
+    out = []
+    for slot in e.slots.values():
+        for c in slot.children:
+            out.append(c)
+            out.extend(_descendants(c))
+    return out
+
+
+def _items_payload(*items):
+    return {"items": list(items)}
+
+
+def test_second_line_is_gone():
+    from pages import news
+    assert not hasattr(news, "second_line") and "_SECOND" not in vars(news)
+    assert not hasattr(news, "_echoes_title")
+
+
+def test_rows_draw_one_line_with_time_impact_tickers_headline_source():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    it = {**_item(1, tickers=["NVDA"], teaser="Chips rallied on the news."),
+          "impact": {"band": "high", "score": 7, "reasons": ["kw:tier1:FOMC"]}}
+    rows = nv.rows(_items_payload(it, _item(2)), now=NOW)
+    box = ui.column()
+    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    kids = box.default_slot.children
+    assert len(kids) == 2                                   # one element per item
+    for row_el in kids:
+        assert isinstance(row_el, ui.row)
+        assert "flex-nowrap" in _classes(row_el)             # one line, never wraps
+        # no nested row or column: nothing can drop to a second line
+        assert not [d for d in _descendants(row_el)
+                    if isinstance(d, (ui.row, ui.column))]
+    first = kids[0].default_slot.children
+    texts = [getattr(c, "text", None) for c in first]
+    # time · impact · ticker · headline · source, in that order
+    assert texts == [rows[0]["when"], "H", "NVDA", "Headline 1", "MarketWatch"]
+    pill = first[1]
+    assert set(nv.BAND_CLASSES["high"].split()) <= _classes(pill)
+    tip = [d for d in _descendants(pill) if isinstance(d, ui.tooltip)]
+    assert tip and tip[0].text == "kw:tier1:FOMC"
+    headline = first[3]
+    assert {"truncate", "min-w-0", "flex-1"} <= _classes(headline)
+    assert "shrink-0" in _classes(first[4])                  # the source badge
+    # a row with no band keeps an EMPTY slot of the pill's width, never "L"
+    second = kids[1].default_slot.children
+    assert getattr(second[1], "text", "") in ("", None)
+    assert "w-5" in _classes(second[1])
+    # the teaser is on the headline's hover, not on a second line
+    hover = [d for d in _descendants(headline) if isinstance(d, ui.label)]
+    assert [h.text for h in hover] == ["Chips rallied on the news."]
+
+
+def test_a_teaser_equal_to_the_headline_adds_no_hover():
+    from pages import news
+    assert news.hover_text({"title": "Costco Beats", "teaser": "  costco   BEATS "}) == ""
+    assert news.hover_text({"title": "X", "teaser": "", "kind": "edgar_filings",
+                            "detail": {"form": "S-3"}}) == "Form S-3"
+    assert news.hover_text(None) == ""
+
+
+def test_the_band_filter_hides_lower_bands(monkeypatch):
+    from nicegui import ui
+    items = [{**_item(i, title=f"B{band}"), "impact": {"band": band, "score": 1,
+                                                       "reasons": []}}
+             for i, band in enumerate(("high", "med", "low"))]
+    items.append(_item(9, title="Bnone"))
+    from pages import news_view as nv
+    # the feed view only: the band filter is the headline list's, not the SEC panel's
+    new, _ = _render_views(monkeypatch, {nv.VIEW: _items_payload(*items)})
+    sels = [e for e in new if isinstance(e, ui.select)
+            and isinstance(e.options, dict) and "med" in e.options]
+    assert len(sels) == 1
+    band_sel = sels[0]
+    assert band_sel.options == {"all": "All", "high": "High", "med": "High + Med"}
+    assert band_sel.value == "all"
+
+    def _titles():
+        return {e.text for e in ui.context.client.elements.values()
+                if isinstance(e, ui.link) and e.text.startswith("B")}
+    assert _titles() == {"Bhigh", "Bmed", "Blow", "Bnone"}
+    band_sel.value = "med"
+    assert _titles() == {"Bhigh", "Bmed"}
+    band_sel.value = "high"
+    assert _titles() == {"Bhigh"}
+    band_sel.value = "all"
+    assert _titles() == {"Bhigh", "Bmed", "Blow", "Bnone"}
+
+
+SEC_ITEM = {**_item(50, tickers=["ACME"], kind="edgar_form4",
+                    title="ACME insider buys $136.4M",
+                    detail={"groups": [{}] * 9, "total_value": 136_400_000.0,
+                            "transaction_date": "2026-09-23"}),
+            "impact": {"band": "med", "score": 4, "reasons": ["form4:size"]}}
+CAL_PAYLOAD = {
+    "events": [{"title": "FOMC statement", "at": "2026-10-28T18:00:00+00:00"}],
+    "dividends": [{"symbol": "JPM", "ex_date": "2026-10-06", "amount": 1.4}],
+    "ipos": [], "data": [], "sources": {"fed": "ok"},
+}
+
+
+def _render_views(monkeypatch, by_view):
+    import app_settings
+    import bus_client
+    from nicegui import ui
+
+    from pages import news
+    reads = []
+    monkeypatch.setattr(bus_client, "read", lambda v: reads.append(v) or by_view.get(v))
+    monkeypatch.setattr(bus_client, "read_version", lambda v: 1)
+    monkeypatch.setattr(app_settings, "set", lambda k, v: None)
+    before = set(ui.context.client.elements)
+    news.render()
+    return _new_elements(before), reads
+
+
+def test_the_sec_panel_reads_the_sec_view_and_the_calendar_its_view(monkeypatch):
+    import pages.view_watch as vw
+    from pages import news_view as nv
+    watched = []
+    monkeypatch.setattr(vw, "watch_view", lambda view, fn, **k: watched.append(view))
+    _, reads = _render_views(monkeypatch, {})
+    assert {nv.VIEW, nv.VIEW_SEC, nv.VIEW_CAL} <= set(reads)
+    assert {nv.VIEW, nv.VIEW_SEC, nv.VIEW_CAL} <= set(watched)
+    # never a public view, never the calendar's private error-text status
+    assert not {nv.VIEW_PUBLIC, nv.VIEW_SEC_PUBLIC, nv.VIEW_CAL_PUBLIC} & set(reads)
+
+
+def test_three_regions_render_in_dom_order(monkeypatch):
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    new, _ = _render_views(monkeypatch, {
+        nv.VIEW: _items_payload(_item(1, title="A headline")),
+        nv.VIEW_SEC: _items_payload(SEC_ITEM),
+        nv.VIEW_CAL: CAL_PAYLOAD,
+    })
+    # DOM order (a depth-first walk from the page column), not creation order:
+    # the regions are built first and painted afterwards.
+    ids = {x.id for x in new}
+    tops = [e for e in new if e.parent_slot is not None
+            and e.parent_slot.parent.id not in ids]
+    root = max(tops, key=lambda e: len(_descendants(e)))     # the page column
+    order = [e for e in [root, *_descendants(root)]
+             if isinstance(e, (ui.label, ui.link))]
+    texts = [e.text for e in order]
+    i_head = texts.index("A headline")
+    i_sec = texts.index(news.SEC_TITLE)
+    i_cal = texts.index(news.CAL_TITLE)
+    assert i_head < i_sec < i_cal
+    # the SEC panel's own columns, and the ONE line per filing
+    for col in ("Date/Time", "Symbol", "Headline/Details"):
+        assert i_sec < texts.index(col) < i_cal
+    assert i_sec < texts.index("ACME insider buys $136.4M") < i_cal
+    assert i_sec < texts.index("9 purchases · $136.4M · 2026-09-23") < i_cal
+    # the calendar's three headers, in order, after the SEC panel
+    heads = [texts.index(t) for t in ("Economic news/Calendar", "Dividend / IPO",
+                                      "Economic data (CPI, PPI etc)")]
+    assert i_cal < heads[0] < heads[1] < heads[2]
+    assert "Wed Oct 28 · 1:00 PM CT" in texts          # Central time on the tile
+    assert "JPM dividend" in texts
+    # the grid: headlines left (3 of 5), the two right panels scroll at lg
+    grids = [e for e in new if "lg:grid-cols-5" in e.classes]
+    assert len(grids) == 1
+    panels = [e for e in new if "lg:h-[calc(50vh-5rem)]" in e.classes]
+    assert len(panels) == 2 and all("overflow-y-auto" in p.classes for p in panels)
+
+
+def test_the_sec_row_links_its_symbol_and_leads_with_the_pill():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    rows = nv.sec_rows(_items_payload(SEC_ITEM), now=NOW)
+    box = ui.column()
+    news.draw_sec_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    kids = box.default_slot.children
+    assert len(kids) == 2                                  # the header + one row
+    row_el = kids[1]
+    assert "flex-nowrap" in row_el.classes
+    links = {d.text: d for d in _descendants(row_el) if isinstance(d, ui.link)}
+    assert links["ACME"].props["href"] == "/symbol?symbol=ACME"
+    labels = [d.text for d in _descendants(row_el) if isinstance(d, ui.label)]
+    assert labels.index("M") < labels.index("9 purchases · $136.4M · 2026-09-23")
+
+
+def test_a_cold_sec_and_calendar_say_nothing_has_been_published(monkeypatch):
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    new, _ = _render_views(monkeypatch, {nv.VIEW: _items_payload(_item(1))})
+    texts = [e.text for e in new if isinstance(e, ui.label)]
+    assert news.SEC_WAITING in texts and news.CAL_WAITING in texts
+    assert news.SEC_WAITING != news.SEC_EMPTY
+
+
+def test_calendar_text_is_escaped_and_an_awaiting_indicator_says_so():
+    from nicegui import ui
+
+    from pages import news
+    groups = [{"title": "Economic data (CPI, PPI etc)", "note": None, "empty": None,
+               "tiles": [{"title": "<b>CPI</b>", "when": "Tue Oct 13 · 7:30 AM CT",
+                          "lines": [], "indicators": [
+                              {"label": "CPI m/m", "actual": "—", "prior": "+0.2% m/m",
+                               "state": "awaiting", "next": "x"}]}]},
+              {"title": "Dividend / IPO", "note": "Source unavailable — showing the "
+               "last good reading", "empty": "No dividends or IPOs ahead", "tiles": []}]
+    before = set(ui.context.client.elements)
+    news.draw_calendar(ui.column(), groups)
+    new = _new_elements(before)
+    texts = [e.text for e in new if isinstance(e, ui.label)]
+    assert "<b>CPI</b>" in texts                        # a label: escaped
+    assert "Next Tue Oct 13 · 7:30 AM CT" in texts
+    assert "Actual — · Prior +0.2% m/m" in texts
+    assert "Awaiting the release" in texts
+    assert "No dividends or IPOs ahead" in texts
+    assert "Source unavailable — showing the last good reading" in texts
+
+
+def test_refresh_toast_mentions_the_calendar():
+    src = (PAGES / "news.py").read_text(encoding="utf-8")
+    assert "the calendar now" in src
