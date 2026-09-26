@@ -93,7 +93,7 @@ The app reads market data and your positions from Schwab, so you need:
 ## Ports the app uses
 
 The app runs entirely on your own machine and needs these local ports free:
-**6379** (Redis), **8100** (Schwab gateway), **8210–8213** and **8215** (the five services),
+**6379** (Redis), **8100** (Schwab gateway), **8210–8213**, **8215** and **8216** (the six services),
 **8500** (the web app) and **8501** (the public live screens). If another program
 is already using one of them, the matching piece won't start.
 
@@ -108,7 +108,7 @@ all together with one of the launcher scripts in the project root:
 
 | Command | What it does |
 |----------|--------------|
-| `systemctl --user start trading-prod.target` | Starts the gateway, the five domain services, the web app and the public live screens. |
+| `systemctl --user start trading-prod.target` | Starts the gateway, the six domain services, the web app and the public live screens. |
 | `systemctl --user list-units 'trading-prod*'` | Shows what is running. |
 | `journalctl --user -u trading-prod-options_svc -f` | Follows one service's log. |
 
@@ -143,12 +143,12 @@ skips the sign-in, which is what the wall display uses.
 
 ## The public live screens
 
-Sixteen of the app's screens are also published **without any sign-in** on
+Seventeen of the app's screens are also published **without any sign-in** on
 a second address, `https://live.neuralstrike.co` — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &
 Industry, Sector Rotation, RRG, Momentum, Net Prem, **Gamma**, the **Strategy
 Finder**, the Rescue ad-hoc form (published as **Rescue my Sh\*tty trade**), the
-**Calculator** and the **Simulator**.
+**Calculator**, the **Simulator** and **Market News**.
 
 The public **Gamma** page is Dealer Positioning with its symbol dropdown: a
 visitor picks any symbol your collector gathers (the `symbols.toml` lists plus
@@ -224,7 +224,17 @@ budget is under **Public Rescue form → Budget**, because it is one allowance
 behind all three.
 
 `https://neuralstrike.co/live.html` is a thumbnail menu of them, and the site's
-**Tools** menu links the four screens a visitor can act on.
+**Tools** menu links the four screens a visitor can act on, and Market News.
+
+The public **Market News** page is your Market News list with every control
+that belongs to you taken out: no Refresh, no Watchlist only, and a ticker is a
+filter chip rather than a link to a Symbol page (the public site has none). It
+shows only the feeds marked **public** (Settings → Configuration → Market news →
+Feed switches; every shipped feed is public), and switching one off removes its
+stories from the public page at the next poll. A link such as
+`live.neuralstrike.co/news?symbol=NVDA` opens it filtered to one ticker. It
+writes nothing: a visitor cannot make the service fetch anything. The public
+**Desk**'s headlines strip reads the same public-only list.
 
 Three things to know:
 
@@ -254,8 +264,8 @@ You don't interact with these directly, but it helps to know they exist:
 - **Schwab gateway (proxy)** — handles the Schwab connection and market data.
   Everything else depends on it. **It must be running first** (the launcher
   handles ordering for you).
-- **Five domain services** — Sentiment, Options, Portfolio, Trade and
-  Market. Each one powers its matching page(s).
+- **Six domain services** — Sentiment, Options, Portfolio, Trade, Market and
+  News. Each one powers its matching page(s).
 - **The public live screens** — a second, read-only copy of the web app serving
   `live.neuralstrike.co`. See *The public live screens* above.
 - **Redis** — a local data backbone the services and the web app share.
@@ -278,7 +288,7 @@ launcher, or restart the specific service from the **System Status** page.
 Use **Stop All Services** at the foot of the rail — it asks for your
 authenticator code before it will do anything — or run
 `systemctl --user stop trading-prod.target`. This stops the
-gateway, the five services, the web app **and the public live screens** — so the
+gateway, the six services, the web app **and the public live screens** — so the
 public site goes dark until you start the stack again. (Redis is intentionally
 left running — it is a *system* service the app's own units cannot reach.)
 
@@ -341,6 +351,7 @@ and **Symbol** (one screen about one ticker).
 | **Dealer Positioning** (standalone) | — |
 | **Opportunity Board** (standalone) | — |
 | **Flow Alerts** (standalone) | — |
+| **Market News** (standalone) | — |
 | **Trend & Sentiment** (group) | Market Dashboard · Sentiment · Sector & Industry · Sector Rotation · RRG · Momentum |
 
 **STRATEGY — what should I trade?**
@@ -370,8 +381,8 @@ and the destructive one sits above it.
 
 Two groupings are worth explaining because they are deliberate:
 
-- **Dealer Positioning, Opportunity Board and Flow Alerts sit under MARKETS, not
-  under Options.** They are market-*wide* reads. The Options group is the
+- **Dealer Positioning, Opportunity Board, Flow Alerts and Market News sit under
+  MARKETS, not under Options.** They are market-*wide* reads. The Options group is the
   per-signal workflow — find a trade, analyze it, track it, repair it — and its
   tabs run in that order.
 - **Calculator and Simulator are their own group.** They model legs *you* bring,
@@ -452,6 +463,7 @@ structure · what should I act on · what am I holding.*
 | **Opportunity Board** | The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
 | **Live Flow Alerts** | The five newest unusual-options events |
 | **Positions** | Your paper trades and captured signals together, with live marks and an **OK / Watch / At risk / Rescue** flag |
+| **Headlines** | The five newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. **All headlines →** opens Market News. Full width |
 | **Market Summary** | Up to five highlights from the latest published market report, with which report they came from and a link to the full report, over six live chips (Sentiment, Trend, Bias, Signal, Regime, Bull/Bear) — full width, at the bottom |
 
 **Hover Bias, Signal or the market regime word** and a sentence explains what it
@@ -459,7 +471,8 @@ means and, for Bias, what position size it implies.
 
 **Clicking any row** opens the page it came from, already set to that symbol — a
 dealer row opens Dealer Positioning on that symbol, a position opens the Paper
-Ledger or Captured Signals.
+Ledger or Captured Signals. (A headline row is the exception: its headline opens
+the article itself.)
 
 **Nothing on this page can place or change a trade.** It reads and links only.
 
@@ -547,7 +560,7 @@ above the section captions: the Desk answers *what is happening*, Symbol answers
 
 **How to use it:** type a ticker in the box at the top left and press **Enter**
 (or tab out of the box). Letters, digits, `$` and `.` are accepted — `MU`,
-`BRK.B`, `$SPX` all work. The page then fills five bands, each ending in a link
+`BRK.B`, `$SPX` all work. The page then fills six bands, each ending in a link
 to the page that owns those facts:
 
 | Band | What it gives you | Link |
@@ -556,6 +569,7 @@ to the page that owns those facts:
 | **Volatility** | **Vol Rank** as a bar, **IV vs HV** with its word (*high* at 1.2× or more, *low* at 0.9× or less, otherwise *mid*), ATM implied vol and whether it is rising or falling, and the one-standard-deviation **expected move** for a day and a week | Expected Move |
 | **Context** | The market regime word, the name's sector and industry, its quadrant on the Bull / Bear map and its rank there (with last session's rank), and the next **earnings** date with how many days away it is | Bull / Bear Map |
 | **Today** | Two columns. **Signals**: this name's rows from today's Market Scanner, each with the time it was first seen and how many scans it has survived, its score trend, and a small line of the score across the day — plus one line per setup, such as *Live since 09:15 · 1 gap*. **Flow alerts**: this name's alerts, newest first | Market Scanner · Flow Alerts |
+| **In the news** | The eight newest Market News items tagged with this ticker — time, feed and headline, which opens the article in a new tab. A story that never writes the ticker is not tagged, so an empty band is not proof of no news | Market News |
 | **Your position** | Anything open in this name in the paper account, the paper ledger or captured signals, with the rescue flag where the book carries one | Paper Ledger · Rescue |
 
 **The chip beside the price says where the numbers came from:**
@@ -619,7 +633,7 @@ links.
 
 # MARKETS — what is the market doing?
 
-The four rail entries in this section establish the conditions a trade would be
+The five rail entries in this section establish the conditions a trade would be
 taken in. Nothing here proposes a trade.
 
 ## Dealer Positioning
@@ -773,8 +787,9 @@ and a small badge naming the feed it came from.
   share offerings. A story several feeds carried shows each feed's badge.
 - **A ticker is tagged only when the headline names it explicitly** — a cashtag like
   `$NVDA`, a bracket like `(NASDAQ: NVDA)`, or the company's own filing — or when
-  it came from Yahoo Finance's page for that ticker. A company name alone never
-  tags, so a ticker filter can miss a story about that company.
+  it came from Yahoo Finance's page for that ticker — and only for tickers the
+  app follows (the Watchlist only set). A company name alone never tags, so a
+  ticker filter can miss a story about that company.
 - **Click a ticker** to open its Symbol page. **Click a headline** to read it on the
   publisher's site, in a new tab.
 - **Trending** chips count the tickers named in headlines from the general feeds
@@ -782,10 +797,16 @@ and a small badge naming the feed it came from.
   Finance's per-ticker stories are left out, because they carry the ticker they
   were fetched for rather than one the headline named. Click one to show only its
   news; click it again to clear.
-- Filter by **Sources**, **Ticker** or **Watchlist only**; choosing no source means
-  every source. **Show more** pages further down the list.
+- Filter by **Sources**, **Ticker** or **Watchlist only** (the symbols the app
+  collects gamma for, plus `[tickers] extras`); choosing no source means every
+  source. **Show more** pages further down the list.
 - **Refresh** checks every feed now instead of waiting for the next scheduled poll
-  (every 5 minutes in market hours, 15 off-hours, 60 at weekends).
+  (every 5 minutes in market hours, 15 off-hours, 60 at weekends and holidays).
+- The **Desk** shows the five newest headlines and each **Symbol** page an
+  *In the news* band; the public site has its own copy of this page (see *The
+  public live screens*). Every feed, its on/off switch, whether the public site
+  may show it, and the poll intervals are in **Settings → Configuration →
+  Market news**.
 
 > A headline is not a verified fact, and nothing here is a trade recommendation.
 
@@ -2369,7 +2390,7 @@ A health board for the whole stack.
 
 - An **overall banner** — green (all up), red (naming what's down), or grey
   (checking).
-- A **component grid** — Redis, the Schwab gateway, the five services, the web app
+- A **component grid** — Redis, the Schwab gateway, the six services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the **Schwab auth** state.
 - A **Re-authorize** button on the gateway card opens Schwab's OAuth login in a new
@@ -2505,7 +2526,7 @@ group, next to EOD Report.
 A guarded "stop the whole local stack" page. The **Stop all services** button — a
 red outline, matching the rail — opens a confirmation; the solid red button is the
 **Stop everything** inside it, which is where the decision is actually made.
-Confirming stops the gateway, the five services, the web app **and the public live
+Confirming stops the gateway, the six services, the web app **and the public live
 screens** — the public site goes dark with it.
 
 **The confirmation asks for your authenticator code.** Type the current 6-digit

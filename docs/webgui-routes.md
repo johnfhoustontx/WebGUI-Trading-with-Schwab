@@ -270,6 +270,22 @@ the four panels; the public live Desk renders it too.
 
 Design: [`2026-09-10-desk-market-summary-design.md`](plans/2026-09-10-desk-market-summary-design.md).
 
+**The headlines strip (2026-09-26).** Full width under the four panels (a fifth cell
+in the 2×2 grid would leave a hole): the `DESK_LIMIT` (5) newest items of the news feed,
+one line each — time (CT) · source badge(s) · the headline, which opens the ORIGINAL
+article in a new tab. Rows come from `desk.news_rows` over `pages/news_view.py`, the same
+builder `/news` and the Symbol band use; an untitled item is skipped, and a URL that is
+not absolute http(s) draws the headline as plain text (`news_href` — `ui.link` escapes
+its text, not its href). ⚠ **The row is deliberately not a click-through**, unlike every
+panel above: the headline is already a link, and a row click would fire both. *All
+headlines →* navigates to `/news`, drawn only where `shell.can_navigate("/news")`.
+**Two empty states:** a view that was never published reads `copy.WAITING_NEWS` (the
+shared line), a published but empty one `EMPTY_NEWS`. `news:feed` is the poll's
+eleventh view. ⚠ **On the public origin the strip reads `cache:news:feed_public`**:
+`desk.bus_key(view)` swaps the KEY when `shell.is_public()`, while `VIEWS` /
+`_REGION_VIEWS` keep the one view name — the live ACL's `~cache:*` grant cannot stop
+this page reading the private feed, so the swap is the only guard.
+
 ## `/symbol`
 
 **Symbol Dossier (NEW 2026-09-17)** — one screen per ticker, pinned beside the Desk
@@ -363,6 +379,19 @@ covered by the calendar*, never *none scheduled*.
 
 **Private only**: it enqueues, which the public process refuses, so it is NOT in
 `live_screens.SCREENS`. Links in: the Opportunity Board's symbol cell.
+
+**In the news (2026-09-26).** A band between *Flow alerts* and *Your position*: the
+`SYMBOL_LIMIT` (8) newest items of `cache:news:feed` **tagged** with this ticker
+(`symbol.news_band` over `news_view.for_symbol`; untitled items are dropped BEFORE the
+cap, or they would use up the band's rows). Each row: time (CT) · source · the headline,
+linking to the article in a new tab under the same http(s)-only rule as the Desk. Three
+lines, worded apart: the feed never published (`copy.WAITING_NEWS`), the symbol does not
+clean (`NEWS_NO_SYMBOL`), and *No headlines for MU in the feed.* The band's link goes to
+`/news` — not pre-filtered. ⚠ An empty band is not "no news": tagging is explicit-only
+(a cashtag or a bracketed ticker in the text, EDGAR's own filer, or a Yahoo per-ticker
+fetch) and limited to the ticker set, so a story that only names the company is never
+here. `news:feed` joins the page's one batched `read_versions`; the page is private, so
+it has no public-key swap.
 
 ## Trade detail panel — Expected Move on captured signals (2026-08-25)
 
@@ -544,6 +573,50 @@ process's import closure.
 ## `/options/flow`
 
 Flow Alerts (**NEW 2026-08-09** — a **main-menu (left-rail) item under the Options group** (`main.OPTIONS_RAIL`, standalone page, NOT an Options tab-strip entry — it's a market-wide read, not a step in that strip's per-signal find→analyze→track→repair workflow): the **durable view of today's options-flow alerts**, which until now only chimed + toasted (miss the toast and the alert was gone; the only trace was the Opportunity Board's per-symbol count). Pure Tier-1 reader of **`cache:options:flow_alerts`** (`webgui/pages/options/flow.py`) — **no new service, command, or cache key** — version-polling ~2 s: a chronological table **newest first** (the service appends oldest-first) — Time (CT) / **Age** / Symbol / Type / Side / Detail / Alert — over the FOUR detector types (**Crossover** premium-lead flip · **Unusual activity** contract vol-vs-OI · **Gamma flip** spot crossing the dealer flip · **Big delta** one contract holding an outsized share of the symbol's gross exposure, which carries the **Share** column), with per-type `alert_detail` cells and rows tinted from a finite `(type, side)` → Tailwind class map bound via `:class` (Tailwind-first, no `:style`). Kind + symbol filters run **client-side** over already-read rows, so toggling is instant. **ONE 2 s timer serves two cadences**: the payload is re-read only when the cache VERSION moves, while the **Age** column recomputes against the rows already on screen — age stays live without churning the table. **Row click → Dealer Positioning for that symbol** (`handoff.send_to_gamma` + a one-shot stash consumed at `gamma.render()`'s build-time symbol sync, which already sets the dropdown BEFORE wiring `on_value_change` — so the handed symbol beats the cached one without a spurious refresh, then one explicit `_request_refresh()` moves the snapshot to it). **Two Tier-2 lines came with it** (both confirmed against the live key, which held exactly 50 alerts of which only 18 had a timestamp): `_FLOW_ALERTS_MAX` **50 → 300** (50 dropped the morning's alerts on a busy day) and a **`ts` stamped on UOA alerts** in the drain loop — `flow_alerts.detect_uoa` never emitted one, so unusual-activity alerts had **no time at all** while crossover/gamma_flip did. ⚠ UOA timestamps appear only on alerts published AFTER an `options_svc` restart; older rows legitimately render a blank Time. **Today only**, resets overnight; no badge, no history, and the toast/chime/phone-push/Settings toggle are unchanged)
+
+## `/news`
+
+**Market News (NEW 2026-09-26)** — a standalone rail page under **MARKETS**, after Flow
+Alerts (`main.OPTIONS_RAIL`, like the three market-wide reads above it). The newest
+headlines, SEC filings and insider buys, newest first. Tier-1 reader of
+**`cache:news:feed`** (`pages/news.py`; every fact from the pure `pages/news_view.py`),
+published by **`news_svc`** (:8216). Design + plan:
+[`plans/2026-09-25-news-feed-design.md`](plans/2026-09-25-news-feed-design.md).
+
+- **Rows** (`news.draw_rows`, shared with the public copy): time — CENTRAL, with the date
+  when the item is not from today (CT) · a chip per ticker, linking to
+  `/symbol?symbol=` where `shell.route_for("/symbol")` exists · the headline, a
+  new-tab link to the original (`news_view.safe_href`: http/https with a host, else plain
+  text) · a badge per source · a muted second line: the feed's teaser (dropped when it
+  only repeats the headline, or the headline plus a short publisher tail), else
+  `news_view.detail_line` for a filing. ⚠ Titles, teasers and detail lines are
+  third-party text and reach the page only through `ui.label` / `ui.link`; a source-level
+  test pins that the module calls `ui.html` nowhere.
+- **Filters** run page-side over rows already read: **Sources** (none = all), a
+  **Ticker** field (300 ms debounce, `clean_symbol` both sides — a string that does not
+  clean matches NOTHING), **Watchlist only** (`news_config.ticker_set()`: the GEX
+  collection list + `[tickers] extras`). `PAGE_SIZE` 60 rows, then **Show more**. The
+  status line carries counts only.
+- **Trending**: the top 12 tickers by item count within `[trending] window_h` (6 h, read
+  through `news.trending_window_h`, which falls back to 6 on a junk value). ⚠
+  `yahoo_ticker` items are skipped — each carries the ticker it was FETCHED for, so
+  counting them made every polled name trend. A chip toggles the ticker filter.
+- **Refresh** enqueues `news_refresh` on `cmd:news` — built only where
+  `shell.may_enqueue()`, and the handler re-checks. The button spins until the next
+  `news:status` publish (every poll ends with one, even a poll that changed nothing and
+  so left the `skip_unchanged` feed view alone), with a `REFRESH_TIMEOUT_SEC` (240 s)
+  backstop, since one poll walks every Yahoo ticker and the paced SEC requests.
+- **Repaint** is `view_watch.watch_view("news:feed", ...)` with an async re-read — which
+  is why `watch_view` now returns its callback's result for NiceGUI's timer to await.
+  The header's Updated stamp is the key's `:ts` side key and is not `stale`-aware: the
+  cadence moves 5 → 60 min across the week, so an old stamp on a Sunday is not a fault.
+- **Empty states** are three: never published (`copy.WAITING_NEWS`, shared with the Desk
+  strip and the Symbol band), published but empty (`EMPTY_FEED`), filters exclude
+  everything (`NO_MATCH`).
+
+Not built from the design: the rail badge counting unseen items (`SEEN_KEY` is written on
+each visit, read by nothing yet), and a status line naming a failing feed —
+`cache:news:status` is read only to release Refresh.
 
 ## `/options/captured`
 
@@ -1002,7 +1075,7 @@ Post to X (2026-09-22; `webgui/pages/x_post.py`). A composer — post text, a li
 
 ## Public live screens (`live.neuralstrike.co`) — 2026-09-07
 
-Twenty-four routes (fourteen from 2026-09-07; six more Dealer Positioning views, the public Strategy Finder, the public Rescue form, and the public Calculator and Simulator on 2026-09-21) served by a **second NiceGUI process**,
+Twenty-five routes (fourteen from 2026-09-07; six more Dealer Positioning views, the public Strategy Finder, the public Rescue form, and the public Calculator and Simulator on 2026-09-21; the public Market News on 2026-09-26) served by a **second NiceGUI process**,
 `webgui/live_main.py` on `nicegui_live` (prod :8501, dev :9501), unauthenticated to
 anyone. **They render the same page modules the private routes render** — each pin is
 an optional keyword on the real `render()` — the precedent is
@@ -1017,7 +1090,7 @@ in [`plans/2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-li
 
 | Public route | Renders (private route) | Pinned |
 |---|---|---|
-| `/desk` | `desk.render()` (`/desk`) | — |
+| `/desk` | `desk.render()` (`/desk`) | — (its headlines strip reads `cache:news:feed_public`, via `desk.bus_key`) |
 | `/opportunity` | `options.matrix.render()` (`/options/matrix`) | — |
 | `/flow` | `options.flow.render()` (`/options/flow`) | — |
 | `/macro` | `market.render()` (`/market`) | `macro_skin="B"` (Heat Lattice) — an `app_settings` pin, not a render kwarg, because the page reads it from settings |
@@ -1033,6 +1106,7 @@ in [`plans/2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-li
 | `/rescue` | `options.rescue.render(public=True)` → `options.rescue_live` (`/options/rescue`) | ⚠ **writes**: Load and Compute put a validated strikes request or trade on `cmd:rescue_public`. The ad-hoc form only - never the owner's at-risk board. Titled "Rescue my Sh*tty trade" |
 | `/calculator` | `options.calculator.render(public=True)` → `options.calc_live` (`/options/calculator`) | ⚠ **writes**: Load, an extra expiration and Rate my trade go on `cmd:tools_public`; every price edit and the implied-volatility estimate on `cmd:tools_public_math`. While the quotes switch is off: no chain grid, no price source, no delta, and the checklist's cost-to-trade line greys out. Open in Simulator hands the position over through tab storage |
 | `/simulator` | `options.simulator.render(public=True)` → `options.sim_live` (`/options/simulator`) | ⚠ **writes**: a snapshot load goes on `cmd:tools_public`; each what-if sweep on `cmd:tools_public_math`. Price & Time only, without the Delta and Theta tiles; seeds from the Calculator's hand-off. Snapshots live in their own store, never the owner's |
+| `/news` | `news.render(public=True)` → `news_live` (`/news`) | **writes nothing** — no Refresh, no Watchlist only, no "seen" stamp; reads `cache:news:feed_public` and no other news key. Ticker chips filter instead of linking (no dossier here); `?symbol=` seeds the filter through `clean_symbol`. No grid tile (`tile=False`); the site's Tools menu reaches it |
 
 `BIG10` is a symbol inside the `indices` group in `config/symbols.toml`, not a group
 of its own.

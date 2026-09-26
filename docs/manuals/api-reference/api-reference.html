@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-22</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-26</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -93,6 +93,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#portfolio-service-8212">Portfolio service — :8212</a></li>
 <li><a href="#trade-service-8213">Trade service — :8213</a></li>
 <li><a href="#market-service-8215">Market service — :8215</a></li>
+<li><a href="#news-service-8216">News service — :8216</a></li>
 </ul>
 </li>
 <li><a href="#schwab-proxy">Schwab Proxy</a><ul>
@@ -135,7 +136,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Symbol</strong></td>
 <td><code>options_svc</code> (+ <code>sentiment_svc</code> for context)</td>
-<td><code>cache:options:matrix</code>, <code>:scan_funnel</code>, <code>:scan_day</code>, <code>:gex_status</code>, <code>:flow_alerts</code>, the four paper books, <code>cache:sentiment:regime</code>, <code>:bullbear</code>; <code>cache:options:dossier:&lt;SYMBOL&gt;</code> via the <code>dossier</code> command</td>
+<td><code>cache:options:matrix</code>, <code>:scan_funnel</code>, <code>:scan_day</code>, <code>:gex_status</code>, <code>:flow_alerts</code>, the four paper books, <code>cache:sentiment:regime</code>, <code>:bullbear</code>, <code>cache:news:feed</code>; <code>cache:options:dossier:&lt;SYMBOL&gt;</code> via the <code>dossier</code> command</td>
 </tr>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
@@ -151,6 +152,11 @@ keys that feed it. Menu order matches the rail.</p>
 <td><strong>Flow Alerts</strong></td>
 <td><code>options_svc</code></td>
 <td><code>cache:options:flow_alerts</code></td>
+</tr>
+<tr>
+<td><strong>Market News</strong></td>
+<td><code>news_svc</code> :8216</td>
+<td><code>cache:news:feed</code>, <code>:status</code> (the public copy reads <code>:feed_public</code>); also the Desk's headlines strip and the Symbol page's news band</td>
 </tr>
 <tr>
 <td><strong>Market Dashboard</strong></td>
@@ -968,6 +974,101 @@ environment's <code>allow_claude</code> flag.</p>
 every command type, including a replayed <code>enable_summary</code> / <code>disable_summary</code> from
 an older webgui — those, and the <code>cache:market:summary_enabled</code> key they wrote,
 were retired 2026-09-10. The ticker toggle only hides the marquee.</p>
+<h2 id="news-service-8216">News service — :8216</h2>
+<p><strong>Entry:</strong> <code>services/news_svc/app.py</code> (<code>make_app("news", scheduler=scheduler.loop,
+command_handler=handlers.handle_command)</code>). Polls free public feeds —
+<code>config/news.toml [[feeds]]</code>, read through <code>shared/news_config.py</code> — into
+<code>services/news_svc/data/news.db</code>, and publishes three views. <strong>No Schwab call, no
+Claude call, no proxy.</strong> Design: <code>docs/plans/2026-09-25-news-feed-design.md</code>.</p>
+<p><strong>Scheduler cadence</strong> (<code>services/news_svc/scheduler.py</code>, values from <code>[collector]</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Default</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rth_poll_min</code></td>
+<td><code>5</code></td>
+<td>08:30–15:00 CT on a trading day (<code>shared.market_calendar</code>).</td>
+</tr>
+<tr>
+<td><code>offhours_poll_min</code></td>
+<td><code>15</code></td>
+<td>A trading day outside that window.</td>
+</tr>
+<tr>
+<td><code>weekend_poll_min</code></td>
+<td><code>60</code></td>
+<td>Saturday, Sunday and NYSE holidays.</td>
+</tr>
+</tbody>
+</table>
+<p>The loop wakes every <code>TICK_S</code> (30 s), re-reads the config (mtime-cached) and polls
+once the interval since the last poll <strong>ended</strong> has passed, so an edit applies
+without a restart. Nothing polls faster than <code>MIN_INTERVAL_S</code> (60 s). Gated by the
+environment's <code>schedulers</code> flag like every other loop.</p>
+<p><strong>Commands (<code>cmd:news</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Payload</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>news_refresh</code></td>
+<td>none</td>
+<td>Polls every enabled feed now (the private page's Refresh). One poll at a time: while one runs, the command returns at once and is logged as skipped. Its end is visible as a new <code>cache:news:status</code> publish.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Views:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Payload</th>
+<th>Written</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cache:news:feed</code></td>
+<td><code>{"items": [item, ...]}</code> — the newest <code>view_items</code> (300), every enabled feed</td>
+<td><code>skip_unchanged</code>; no timestamp in the payload, so read "last confirmed current" from <code>cache:news:feed:ts</code></td>
+</tr>
+<tr>
+<td><code>cache:news:feed_public</code></td>
+<td>the same shape, only rows whose <strong>primary</strong> feed is public under the CURRENT <code>[feed_flags]</code>; <code>sources</code> and <code>tickers</code> cut to what public feeds contributed</td>
+<td><code>skip_unchanged</code>; the ONLY news key the public origin reads</td>
+</tr>
+<tr>
+<td><code>cache:news:status</code></td>
+<td><code>{"feeds": [{name, kind, enabled, public, last_ok, last_poll, error, inserted}], "ts": &lt;ISO UTC&gt;}</code> — one row per configured feed, <code>inserted</code> is this poll's count</td>
+<td>every poll, even one that failed</td>
+</tr>
+</tbody>
+</table>
+<p>An <strong>item</strong> is <code>{id, source, sources, original_source, title, teaser, url,
+published_at, first_seen, tickers, kind, topics, detail, public}</code>: <code>id</code> a hash of the
+canonical URL; <code>source</code> the feed whose title / url / teaser are stored and <code>sources</code>
+every feed that carried the story (primary first); times are UTC ISO strings (an
+unparseable publish time is stored as <code>"undated"</code>); <code>kind</code> is the adapter
+(<code>rss</code>, <code>yahoo_ticker</code>, <code>google_news</code>, <code>edgar_form4</code>, <code>edgar_filings</code>); <code>topics</code> is
+structural only (<code>SEC Filing</code>, <code>Insider Transaction</code>, <code>Offering</code>); <code>detail</code> is <code>{}</code>
+except for EDGAR — a Form 4 carries <code>symbol, company, insider, insiders,
+relationship, groups, total_value, transaction_date</code>, an offering <code>form, cik,
+accession</code>. Every string in an item is third-party text: render it escaped, and
+never use <code>url</code> as a link without checking it is http(s).</p>
+<p>⚠ The public origin's Redis user reads <code>~cache:*</code>, which covers <code>cache:news:feed</code>
+too. Keeping the private feed off <code>live.neuralstrike.co</code> is the job of the code that
+chooses the key (<code>pages/news_live.py</code>, <code>desk.bus_key</code>), not of the ACL.</p>
 <hr />
 <h1 id="schwab-proxy">Schwab Proxy</h1>
 <p><strong>Entry:</strong> <code>schwab-proxy/schwab_proxy.py</code>, port <strong>8100</strong>. Central token manager +
@@ -1180,7 +1281,10 @@ cache:trade:markov_prior       cache:trade:universe_factors
 cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
-cmd:trade   cmd:portfolio   cmd:market
+cache:news:feed                events:news:feed               (every feed)
+cache:news:feed_public         events:news:feed_public        (public feeds only - the live origin's key)
+cache:news:status              events:news:status
+cmd:trade   cmd:portfolio   cmd:market   cmd:news
 </code></pre>
 <hr />
 <h1 id="service-scaffold">Service Scaffold</h1>
@@ -1283,6 +1387,11 @@ hard-code ports or <code>D:\</code> paths.</p>
 <td><code>SERVICE_PORTS["market"]</code></td>
 </tr>
 <tr>
+<td>news_svc</td>
+<td>8216</td>
+<td><code>SERVICE_PORTS["news"]</code></td>
+</tr>
+<tr>
 <td>webgui (NiceGUI)</td>
 <td>8500</td>
 <td><code>NICEGUI_PORT</code> / <code>NICEGUI_URL</code></td>
@@ -1312,8 +1421,8 @@ resolves the identity and every port consumer follows it with no edit of its own
 <tbody>
 <tr>
 <td><code>[services]</code> ports</td>
-<td>8210–8213, 8215</td>
-<td><strong>9210–9213, 9215</strong> (<code>port_offset</code>)</td>
+<td>8210–8213, 8215, 8216</td>
+<td><strong>9210–9213, 9215, 9216</strong> (<code>port_offset</code>)</td>
 </tr>
 <tr>
 <td>webgui</td>

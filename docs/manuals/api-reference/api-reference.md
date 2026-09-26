@@ -19,10 +19,11 @@ keys that feed it. Menu order matches the rail.
 
 | Menu page | Service | Primary cache key(s) |
 |---|---|---|
-| **Symbol** | `options_svc` (+ `sentiment_svc` for context) | `cache:options:matrix`, `:scan_funnel`, `:scan_day`, `:gex_status`, `:flow_alerts`, the four paper books, `cache:sentiment:regime`, `:bullbear`; `cache:options:dossier:<SYMBOL>` via the `dossier` command |
+| **Symbol** | `options_svc` (+ `sentiment_svc` for context) | `cache:options:matrix`, `:scan_funnel`, `:scan_day`, `:gex_status`, `:flow_alerts`, the four paper books, `cache:sentiment:regime`, `:bullbear`, `cache:news:feed`; `cache:options:dossier:<SYMBOL>` via the `dossier` command |
 | **Dealer Positioning** | `options_svc` :8211 | `cache:options:gamma`, `:gamma_hist_*`, `:gamma_symbols`, `:net_premium`, `:gamma_analyze*`, `:gamma_briefings` |
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
 | **Flow Alerts** | `options_svc` | `cache:options:flow_alerts` |
+| **Market News** | `news_svc` :8216 | `cache:news:feed`, `:status` (the public copy reads `:feed_public`); also the Desk's headlines strip and the Symbol page's news band |
 | **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary` |
 | **Sentiment** | `sentiment_svc` :8210 | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history` |
 | **Sector & Industry** | `sentiment_svc` | `cache:sentiment:sectors` |
@@ -438,6 +439,57 @@ every command type, including a replayed `enable_summary` / `disable_summary` fr
 an older webgui — those, and the `cache:market:summary_enabled` key they wrote,
 were retired 2026-09-10. The ticker toggle only hides the marquee.
 
+## News service — :8216
+
+**Entry:** `services/news_svc/app.py` (`make_app("news", scheduler=scheduler.loop,
+command_handler=handlers.handle_command)`). Polls free public feeds —
+`config/news.toml [[feeds]]`, read through `shared/news_config.py` — into
+`services/news_svc/data/news.db`, and publishes three views. **No Schwab call, no
+Claude call, no proxy.** Design: `docs/plans/2026-09-25-news-feed-design.md`.
+
+**Scheduler cadence** (`services/news_svc/scheduler.py`, values from `[collector]`):
+
+| Key | Default | When |
+|---|---|---|
+| `rth_poll_min` | `5` | 08:30–15:00 CT on a trading day (`shared.market_calendar`). |
+| `offhours_poll_min` | `15` | A trading day outside that window. |
+| `weekend_poll_min` | `60` | Saturday, Sunday and NYSE holidays. |
+
+The loop wakes every `TICK_S` (30 s), re-reads the config (mtime-cached) and polls
+once the interval since the last poll **ended** has passed, so an edit applies
+without a restart. Nothing polls faster than `MIN_INTERVAL_S` (60 s). Gated by the
+environment's `schedulers` flag like every other loop.
+
+**Commands (`cmd:news`):**
+
+| Type | Payload | Effect |
+|---|---|---|
+| `news_refresh` | none | Polls every enabled feed now (the private page's Refresh). One poll at a time: while one runs, the command returns at once and is logged as skipped. Its end is visible as a new `cache:news:status` publish. |
+
+**Views:**
+
+| Key | Payload | Written |
+|---|---|---|
+| `cache:news:feed` | `{"items": [item, ...]}` — the newest `view_items` (300), every enabled feed | `skip_unchanged`; no timestamp in the payload, so read "last confirmed current" from `cache:news:feed:ts` |
+| `cache:news:feed_public` | the same shape, only rows whose **primary** feed is public under the CURRENT `[feed_flags]`; `sources` and `tickers` cut to what public feeds contributed | `skip_unchanged`; the ONLY news key the public origin reads |
+| `cache:news:status` | `{"feeds": [{name, kind, enabled, public, last_ok, last_poll, error, inserted}], "ts": <ISO UTC>}` — one row per configured feed, `inserted` is this poll's count | every poll, even one that failed |
+
+An **item** is `{id, source, sources, original_source, title, teaser, url,
+published_at, first_seen, tickers, kind, topics, detail, public}`: `id` a hash of the
+canonical URL; `source` the feed whose title / url / teaser are stored and `sources`
+every feed that carried the story (primary first); times are UTC ISO strings (an
+unparseable publish time is stored as `"undated"`); `kind` is the adapter
+(`rss`, `yahoo_ticker`, `google_news`, `edgar_form4`, `edgar_filings`); `topics` is
+structural only (`SEC Filing`, `Insider Transaction`, `Offering`); `detail` is `{}`
+except for EDGAR — a Form 4 carries `symbol, company, insider, insiders,
+relationship, groups, total_value, transaction_date`, an offering `form, cik,
+accession`. Every string in an item is third-party text: render it escaped, and
+never use `url` as a link without checking it is http(s).
+
+⚠ The public origin's Redis user reads `~cache:*`, which covers `cache:news:feed`
+too. Keeping the private feed off `live.neuralstrike.co` is the job of the code that
+chooses the key (`pages/news_live.py`, `desk.bus_key`), not of the ACL.
+
 ---
 
 # Schwab Proxy
@@ -578,7 +630,10 @@ cache:trade:markov_prior       cache:trade:universe_factors
 cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
-cmd:trade   cmd:portfolio   cmd:market
+cache:news:feed                events:news:feed               (every feed)
+cache:news:feed_public         events:news:feed_public        (public feeds only - the live origin's key)
+cache:news:status              events:news:status
+cmd:trade   cmd:portfolio   cmd:market   cmd:news
 ```
 
 ---
@@ -658,6 +713,7 @@ hard-code ports or `D:\` paths.
 | portfolio_svc | 8212 | `SERVICE_PORTS["portfolio"]` |
 | trade_svc | 8213 | `SERVICE_PORTS["trade"]` |
 | market_svc | 8215 | `SERVICE_PORTS["market"]` |
+| news_svc | 8216 | `SERVICE_PORTS["news"]` |
 | webgui (NiceGUI) | 8500 | `NICEGUI_PORT` / `NICEGUI_URL` |
 | webgui_live (public screens) | 8501 | `NICEGUI_LIVE_PORT` / `NICEGUI_LIVE_URL` |
 
@@ -671,7 +727,7 @@ resolves the identity and every port consumer follows it with no edit of its own
 
 | | prod | dev |
 |---|---|---|
-| `[services]` ports | 8210–8213, 8215 | **9210–9213, 9215** (`port_offset`) |
+| `[services]` ports | 8210–8213, 8215, 8216 | **9210–9213, 9215, 9216** (`port_offset`) |
 | webgui | 8500 | **9500** |
 | webgui_live | 8501 | **9501** |
 | Redis | Redis db **0** | Redis db **1** |

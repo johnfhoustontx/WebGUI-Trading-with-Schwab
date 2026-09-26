@@ -60,7 +60,7 @@ degrades rather than crashes.
 
 | Requirement | Detail | Status |
 |-------------|--------|--------|
-| **Operating system** | **Ubuntu Server 24.04 LTS.** The stack runs as nine `systemd --user` units; there are no launcher scripts. `loginctl enable-linger` is what makes them start at boot and survive logout. | Required |
+| **Operating system** | **Ubuntu Server 24.04 LTS.** The stack runs as ten `systemd --user` units; there are no launcher scripts. `loginctl enable-linger` is what makes them start at boot and survive logout. | Required |
 | **Python** | **3.11+** (developed/tested on **3.11.9**; CI pins **3.11**; `ruff` targets `py311`). | Required |
 | **Virtual environment** | A venv at the repo root: **`.venv`**. The launchers resolve `\.venv/bin/python.exe` explicitly and abort if it's missing. | Required |
 | **Browser** | Any modern browser for the web GUI at `http://127.0.0.1:8500`. | Required |
@@ -94,13 +94,14 @@ Load-bearing runtime packages:
 | Package | Role |
 |---------|------|
 | `nicegui[highcharts]>=2.0.0` | The web GUI and every chart/gauge. |
-| `fastapi==0.137.0`, `uvicorn==0.49.0`, `starlette==1.3.1` | The proxy + the five domain services. |
+| `fastapi==0.137.0`, `uvicorn==0.49.0`, `starlette==1.3.1` | The proxy + the six domain services. |
 | `redis==8.0.0` | Client for the Redis backbone. `fakeredis>=2.20` backs the tests (no live server needed). |
 | `pydantic>=2.0` | The typed cross-tier contracts. |
 | `schwab-py==1.5.1` | Schwab auth / market data / streaming. |
 | `requests==2.34.2`, `httpx==0.28.1` | HTTP clients. |
 | `pandas>=2.0`, `numpy>=1.24`, `scipy` | Analytics; `scipy.stats.norm` powers Black-Scholes. |
 | `openpyxl` | Reads the sector/watchlist workbooks. |
+| `feedparser==6.0.11` (+ `sgmllib3k`) | `news_svc` parses the public RSS / Atom feeds it polls. |
 | `anthropic==0.112.0` | Claude tool-use calls (imported lazily — the suite runs without it configured). |
 | `matplotlib`, `Pillow`, `yfinance` | Charts/imaging, optional fallback data. Notifications are Telegram / Discord / SMS-over-SMTP / X — all HTTP or SMTP, no OS hooks. |
 
@@ -112,7 +113,7 @@ Load-bearing runtime packages:
 
 | Requirement | Detail | Status |
 |-------------|--------|--------|
-| **Redis running on `:6379`** | `sudo systemctl enable --now redis-server`. It is the Tier-3 cache, pub/sub, and command bus — **without it none of the five services can publish and every page shows a "Waiting for … service" placeholder.** It is a **system** unit, so a `systemctl --user` stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter. | Required |
+| **Redis running on `:6379`** | `sudo systemctl enable --now redis-server`. It is the Tier-3 cache, pub/sub, and command bus — **without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.** It is a **system** unit, so a `systemctl --user` stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter. | Required |
 | `MEMURAI_PASSWORD` | Optional AUTH. Unset = no AUTH (the default, unchanged behavior). | Optional |
 
 ## Schwab API credentials
@@ -169,6 +170,7 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | 8212 | portfolio_svc | Required |
 | 8213 | trade_svc | Required |
 | 8215 | market_svc | Required |
+| 8216 | news_svc | Required |
 | 8500 | webgui (NiceGUI) | Required |
 | 8501 | webgui_live — the PUBLIC read-only screens, a second NiceGUI process | Required |
 
@@ -185,30 +187,31 @@ were removed in September 2026 — nothing in the stack talks to those processes
 
 ## Startup order
 
-The dependency chain is strict: **Redis → schwab-proxy → the five services → webgui.**
-Services wait on the proxy because every one of them resolves market data through it.
+The dependency chain is strict: **Redis → schwab-proxy → the six services → webgui.**
+Services wait on the proxy because they resolve market data through it (`news_svc`
+calls no proxy — it reads public feeds — but is ordered with the others).
 `webgui_live` sits outside that chain: it reads Redis and nothing else — no proxy
 call, no Schwab call, no service call — so it is ordered after nothing in the target.
 
 | Launcher | Behavior |
 |----------|----------|
-| `systemctl --user start trading-prod.target` | Proxy + 5 services + webgui + webgui_live. Also starts at boot. |
-| `systemctl --user stop trading-prod.target` | Stops all nine, the public live screens included. **Redis survives** — it is a system unit this cannot reach. |
+| `systemctl --user start trading-prod.target` | Proxy + 6 services + webgui + webgui_live. Also starts at boot. |
+| `systemctl --user stop trading-prod.target` | Stops all ten, the public live screens included. **Redis survives** — it is a system unit this cannot reach. |
 | `systemctl --user restart trading-prod-options_svc` | One component. This is exactly what the Status page's Restart button runs. |
 | `journalctl --user -u trading-prod-webgui -f` | Logs. Replaces the `logs/*.out.log` redirection. |
 | `.venv/bin/python -m deploy.systemd.generate_units --install` | Regenerate the units after a port, path or identity change. Also reloads systemd and **arms every timer it wrote** — a written `.timer` that nothing enables never fires. Dev arms nothing, by design. |
 
-> The eight processes must stay **separate OS processes**. Merging services into one
+> The nine processes must stay **separate OS processes**. Merging services into one
 > Python process would re-introduce the top-level module-name collisions
 > (`config` / `scoring` / `notifier` / `src`) that the 3-tier split exists to prevent.
 
 ## Verifying the install
 
 1. Open **`http://127.0.0.1:8500/status`** — the System Status page probes Redis,
-   the proxy, Schwab authorization, all five services, the webgui and the public
+   the proxy, Schwab authorization, all six services, the webgui and the public
    live screens, plus a data-freshness table.
 2. Or probe directly: `GET http://127.0.0.1:8100/health` and
-   `GET http://127.0.0.1:82{10..13}/health` and `:8215/health` (each returns `{"domain": …, "up": true}`).
+   `GET http://127.0.0.1:82{10..13}/health`, `:8215/health` and `:8216/health` (each returns `{"domain": …, "up": true}`).
 3. Run the tests **one folder at a time** (never `pytest services` across all of
    them — that re-triggers the module-name collisions):
 
@@ -264,13 +267,14 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | portfolio_svc | 8212 | Holdings, sectors, performance, live P&L stream. |
 | trade_svc | 8213 | On-demand single-symbol analysis + deep dive. |
 | market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). |
+| news_svc | 8216 | Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds into `news.db`. No Schwab, no Claude. |
 | webgui | 8500 | The web UI. |
-| webgui_live | 8501 | The twenty-one public screens, on their own origin. |
+| webgui_live | 8501 | The seventeen public screens, on their own origin. |
 
 Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 
 > **These are the *prod* profile.** A **dev** checkout offsets the `[services]`
-> ports to 9210–9213 and 9215 and the web GUI to 9500, uses Redis **db 1** instead of db 0,
+> ports to 9210–9213, 9215 and 9216 and the web GUI to 9500, uses Redis **db 1** instead of db 0,
 > and starts **no proxy of its own** — it borrows prod's on 8100, because the Schwab
 > OAuth refresh token is a single rotating credential that two proxies would
 > invalidate for each other. Identity comes from the gitignored
@@ -298,7 +302,7 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | `trade-analyzer/` | `src/analysis` — recommendation, scoring, fundamentals, sector. |
 | `portfolio-analyzer/` | `src/` — sector breakdown, comparisons, evaluation. |
 | `shared/` | `analysis_lib/` (technical, market data), `contracts/`, `bus/`. |
-| `services/` | The five Tier-2 domain services. |
+| `services/` | The six Tier-2 domain services. |
 | `webgui/` | The NiceGUI front end. |
 
 ## Scoring conventions (shared idioms)
@@ -1961,6 +1965,70 @@ book the same number.
 ledger is empty - so 0.50 and 21 are **sourced, not fitted**. That is why they
 are config.
 
+# Market News
+
+`services/news_svc` — the one service with no Schwab or Claude call. Design:
+`docs/plans/2026-09-25-news-feed-design.md`.
+
+## Sources
+
+Every source is a free public feed listed in `config/news.toml [[feeds]]`, one
+adapter per `kind` (`services/news_svc/adapters/`), each a pure parse over the
+fetched bytes:
+
+| kind | Fetches | Notes |
+|---|---|---|
+| `rss` | one URL (MarketWatch, CNBC, ZeroHedge, Benzinga, Federal Reserve, PR Newswire, GlobeNewswire, Business Wire, the Truth Social archive) | Conditional GET: `ETag` / `Last-Modified` are sent back, so an unchanged feed costs a 304. GlobeNewswire ships **disabled** — its host drops non-browser clients |
+| `yahoo_ticker` | the URL template once per ticker in the ticker set, 4 at a time | Each item carries the ticker it was fetched for |
+| `google_news` | one Google News search (WSJ, Seeking Alpha) | Links stay Google redirects; the publisher comes from the item's `<source>` |
+| `edgar_form4` | EDGAR's current-filings Atom for Form 4, then each new filing's ownership XML | Open-market **purchases** (code P) only; a buy on an untracked ticker shows only at or above `min_value_usd` ($1,000,000) |
+| `edgar_filings` | the same Atom per form (`S-1`, `S-3`, `424B5`) | Headline "`<company>` files `<form>`" |
+
+The SEC gets `sec_user_agent` (it requires a contact) at most one request every
+0.15 s; every other feed gets `feed_user_agent`, which must keep a `Mozilla/5.0`
+token (Yahoo answers a 404 without one). A response over `max_body_bytes` (5 MB) is
+refused, and each fetch has a total deadline of **3 × `request_timeout_s`**
+enforced by a watchdog that closes the socket, so a server trickling bytes cannot
+hold the poll.
+
+## Tickers, duplicates, retention
+
+- **Tickers are explicit only**: a cashtag (`$NVDA`), an exchange prefix
+  (`(NASDAQ: NVDA)`), or a bare bracket of 3–6 letters (`(NVDA)`), matched against
+  the ticker set — the GEX collection list plus `[tickers] extras`. A company name
+  never tags. EDGAR items resolve through the SEC's CIK map; Yahoo items carry their
+  fetch ticker.
+- **An item's id** is a hash of its canonical URL (tracking parameters and the
+  fragment removed). The same id from another feed adds that feed's badge and
+  tickers to the stored row.
+- **The same headline under a different URL** is one story when it comes from a
+  **different** feed within a day, or from the **same** feed within
+  `[dedupe] same_feed_merge_h` (6 h; 0 turns that off). SEC items never take the
+  same-feed rule — their titles are templated, so two filings would fold into one.
+- The store keeps **7 days** (`keep_days`); each publish carries the newest **300**
+  (`view_items`).
+
+## Views and the public copy
+
+`cache:news:feed` holds every feed; `cache:news:feed_public` holds only rows whose
+**primary** feed is public under the current `[feed_flags]`, re-read at every publish,
+with each row's tickers and source badges cut to what public feeds contributed.
+`cache:news:status` is one row per configured feed. The two feed views carry no
+timestamp and publish `skip_unchanged`, so a poll that found nothing new repaints
+nothing; the page's "Updated" stamp is the key's `:ts` side key, refreshed on every
+publish.
+
+**Trending** counts the tickers on items published within `[trending] window_h`
+(6 h), skipping `yahoo_ticker` items, whose tag is the ticker they were fetched for.
+
+## Failure policy
+
+One failing feed never stops the poll: it counts one `_degrade`
+(`news.feed.<name>`), records its error in `cache:news:status`, and keeps its last
+items. An SEC 403, 429, 5xx, network failure or missed deadline is treated as an
+outage — that accession and every later one are retried next poll — while any other
+status is that filing's own answer and is not retried.
+
 # Known issues
 
 Documented defects a maintainer should know about before trusting a number. These
@@ -2047,6 +2115,7 @@ the source; this table is a summary of them.
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
 | trade_svc | On-demand only (no scheduler). |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
+| news_svc | Every feed polled every **5 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **15 min** otherwise on a trading day (`offhours_poll_min`), **60 min** at weekends and holidays (`weekend_poll_min`) — all in `config/news.toml`, editable in Settings. The loop wakes every **30 s** (`TICK_S`) and counts an interval from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). One poll at a time: a Refresh during a poll is skipped. |
 
 Three once-a-day jobs are **not** on any service's loop — they are systemd timers,
 generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving

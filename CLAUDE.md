@@ -94,8 +94,10 @@ client and market data through `http://127.0.0.1:8100`.
 
 The monorepo was re-tiered (strangler-fig) into three **physically separate** tiers over a
 **Redis backbone**. **All five domains are migrated** — sentiment, options,
-portfolio, trade, market — and every page reads Redis (a sixth, the autonomous
-driver, was removed 2026-09-22). The shape:
+portfolio, trade, market — and every page reads Redis (the autonomous driver,
+once a sixth, was removed 2026-09-22). The sixth service today, **`news_svc`**
+(2026-09-26), was born in the tiers rather than migrated: it polls free public
+feeds and calls neither the proxy nor Claude. The shape:
 
 **The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
 153 non-test `webgui/**/*.py`, extended 2026-08-21, and again 2026-08-25, and 2026-09-15):
@@ -137,6 +139,9 @@ stream, request builder, status and dropdown-list keys and hot-set config -
 `shared.x_text` (since 2026-09-22; X's weighted length, hashtags and
 fitting a post into 280 - stdlib only, pinned by `shared/tests/test_x_text.py`,
 so the `/x` page's live count is the service's own computation) ·
+`shared.news_config` (since 2026-09-26; `config/news.toml`'s loader - stdlib +
+`shared.config_toml` + `shared.symbols` + `repo_paths` only; Tier 1 reads just
+the ticker set and `[trending] window_h` from it) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
@@ -182,7 +187,7 @@ TIER 3 STORE+COMM  Redis (:6379): cache:{domain}:{view} (replaces _CACHE/_LAST_R
                    payloads = the API) + shared/bus/ (redis-py wrapper, fakeredis under pytest).
                    On-disk DBs unchanged. sentiment_bridge.json kept as dual-write shim.
         ▲ publish                          │ consume
-TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfolio/market):
+TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfolio/market/news):
                    each imports ONLY its engines, owns its scheduler/auto-scan + command
                    consumer, validates+caches+publishes. Separate processes ⇒ the scoring/
                    notifier sys.path collision class CANNOT occur (options_scoring() guard is
@@ -190,7 +195,7 @@ TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfo
 ```
 
 **Unit order: Redis → proxy → services → webgui**, expressed as `Requires=`/`After=`.** Ports: `memurai=6379` plus one
-per service (8210–8213, 8215; 8214 was the removed driver's). One shim survives by decision — `sentiment_bridge.json` is still
+per service (8210–8213, 8215, 8216; 8214 was the removed driver's). One shim survives by decision — `sentiment_bridge.json` is still
 dual-written for `regime_filter`; retiring it (making `regime_filter` read Redis) is the last
 open migration item. Full design:
 [3-tier design doc](docs/plans/2026-06-15-three-tier-architecture-design.md).
@@ -204,6 +209,7 @@ open migration item. Full design:
 | `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + `live_composite.py` (live intraday composite + bridge payload) + `publish_bridge.py` (headless bridge writer) + bridge + `sectors_ref.py`. **Its `market_calendar.py` was absorbed into `shared/market_calendar.py` and DELETED (2026-08-02)** — same module name and same three function names, but *inclusive* `prev/next_trading_day` vs the shared module's *exclusive*, an invisible one-day trap. | ported to NiceGUI `/sentiment` |
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
+| `services/`            | The six Tier-2 services — `sentiment`/`options`/`portfolio`/`trade`/`market`/`news` `_svc` (:8210–8213, 8215, 8216) — plus `_scaffold`/`_degrade`/`_heartbeat`. **`news_svc`** is the one with no copied engine: RSS/EDGAR adapters → `services/news_svc/data/news.db` → three views, no Schwab or Claude call. | backend          |
 | `shared/`              | `analysis_lib/` (technical · sector_analysis · config) + secret templates/values. | library          |
 | `tools/`               | `check_env.py`, `db_admin.py` maintenance utilities.        | CLI              |
 | `webgui/`              | **NEW** NiceGUI multi-page front-end. Shell + Options section built. | the new UI, :8500 |
@@ -219,9 +225,9 @@ open migration item. Full design:
 2026-07-11; the drawer became an **ICON RAIL** 2026-07-15; **reorganized
 2026-07-27; **Strategy Tools group added 2026-07-28**; **system pages moved to
 the drawer FOOT 2026-08-12**; **grouped into CAPTIONED SECTIONS 2026-08-16**):
-the left drawer holds **16 items** — a top-pinned **Desk** and **Symbol** in a
+the left drawer holds **17 items** — a top-pinned **Desk** and **Symbol** in a
 **caption-less leading `NAV_SECTIONS` block** (Desk 2026-08-18, Symbol 2026-09-17:
-the two entry points, *what is happening* and *tell me about X*), 10 in three captioned
+the two entry points, *what is happening* and *tell me about X*), 11 in three captioned
 sections, plus a bottom-pinned **`SYSTEM_RAIL`** block (**System Status**,
 **Settings**, **Stop All Services**, **Sign out**) — and the active group's
 **child pages render as a compact TAB STRIP across the top of the page**
@@ -245,7 +251,7 @@ Sentiment group** (it was a flat item until 2026-07-27), and since
 **The rail's ORDER is data, not the sequence of render calls (2026-08-16).**
 `NAV_SECTIONS` is a list of `(caption, entries)` — a **caption-less leading block**
 (Desk · Symbol) · **MARKETS** (Dealer
-Positioning · Opportunity Board · Flow Alerts · Trend & Sentiment) · **STRATEGY**
+Positioning · Opportunity Board · Flow Alerts · Market News · Trend & Sentiment) · **STRATEGY**
 (Strategy Tools · Options · Strategy Finder · Trade Analyzer) · **ACCOUNT**
 (Portfolio · More) — where an entry is either a GROUP (`_nav_group_link`) or a
 standalone rail page (`_nav_link`). **A caption of `None` means render NO header
@@ -267,7 +273,7 @@ caption-less routes, `/desk` and `/symbol`. (`EXTERNAL_RAIL_ROUTES` and `_nav_li
 the Live Mirror and went with it on 2026-09-02 — a rail row that opens elsewhere
 must not claim the active wash, so anything reviving that shape needs both.) ⚠ The
 Options group sits under STRATEGY while Dealer Positioning
-/ Opportunity Board / Flow Alerts sit under MARKETS — deliberate: those three are
+/ Opportunity Board / Flow Alerts / Market News sit under MARKETS — deliberate: those four are
 market-WIDE reads, the Options group is the per-signal find → analyze → track →
 repair workflow. `test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled`
 is the guard that matters: a regrouping that drops or doubles an item is invisible
@@ -373,11 +379,12 @@ Routes:
 | Route | Page | Status |
 |-------|------|--------|
 | `/` | **Redirect to `/desk`** (2026-08-18; was `/market` from 2026-08-16, and the Market Scanner before that). A redirect, not a second render — the shell keys the active nav item and breadcrumb off the route, so a page at two URLs would highlight nothing. | built |
-| `/desk` | **Desk — the HOME page.** Single-screen aggregate: regime + Day/Week/Month sentiment & trend rings · dealer positioning for `$SPX`/`SPY`/`QQQ`/`$NDX` (spot, flip, walls, net GEX, structure bar) · top-5 Opportunity · newest-5 Flow · merged paper + captured Positions with rescue flags. Tier-1 reader of **10 views** on ONE batched 2 s `read_versions`. Read-only + click-through. **No Highcharts** (deliberate). [Design](docs/plans/2026-08-18-desk-home-dashboard-design.md) | built |
-| `/symbol` | **Symbol Dossier** — one screen per ticker (`?symbol=` — linkable, and allow-listed through `shared.symbols.clean_symbol` before it names anything): structure · volatility (Vol Rank, IV vs HV, expected move) · context · today's signals with age + score trend · flow · open positions in every book, each band linking out to the page that owns it. Reads 11 shared views + its own `cache:options:dossier:<SYMBOL>` on ONE batched 2 s `read_versions`. **Cache wins**: the paid on-demand `dossier` command (4–5 Schwab calls, 15-min TTL, a 60-s service-side dedup) only FILLS gaps, and is enqueued on navigation or Refresh for a symbol the scanner does not cover — never by the poll. **Private only** (it enqueues, so it is not a public live screen). No Highcharts. [Detail](docs/webgui-routes.md) | built |
+| `/desk` | **Desk — the HOME page.** Single-screen aggregate: regime + Day/Week/Month sentiment & trend rings · dealer positioning for `$SPX`/`SPY`/`QQQ`/`$NDX` (spot, flip, walls, net GEX, structure bar) · top-5 Opportunity · newest-5 Flow · newest-5 headlines · merged paper + captured Positions with rescue flags. Tier-1 reader of **11 views** on ONE batched 2 s `read_versions`. Read-only + click-through. **No Highcharts** (deliberate). [Design](docs/plans/2026-08-18-desk-home-dashboard-design.md) | built |
+| `/symbol` | **Symbol Dossier** — one screen per ticker (`?symbol=` — linkable, and allow-listed through `shared.symbols.clean_symbol` before it names anything): structure · volatility (Vol Rank, IV vs HV, expected move) · context · today's signals with age + score trend · flow · in the news · open positions in every book, each band linking out to the page that owns it. Reads 11 shared views + its own `cache:options:dossier:<SYMBOL>` on ONE batched 2 s `read_versions`. **Cache wins**: the paid on-demand `dossier` command (4–5 Schwab calls, 15-min TTL, a 60-s service-side dedup) only FILLS gaps, and is enqueued on navigation or Refresh for a symbol the scanner does not cover — never by the poll. **Private only** (it enqueues, so it is not a public live screen). No Highcharts. [Detail](docs/webgui-routes.md) | built |
 | `/options/scanner` | Options · Market Scanner — 0-DTE / Swing / Directional subtabs. Reads **`cache:options:scan_day`** (the day union), not `scan`, so dropped signals stay dimmed + frozen to EOD. ⚠ Each row's `setup_key` (`SYMBOL|TYPE|EXPIRATION`, strikes excluded) is a LOOKUP into the envelope's `setups` persistence map, **never a row key** — row identity stays `id` — and a setup whose start was not observed carries `age_unknown`, never a `first_seen` stamped `now`. [Detail](docs/webgui-routes.md) | built |
 | `/options/matrix` | Opportunity Board — one sortable row per watchlist symbol, default-sorted by Hotness. Tier-1 reader of `cache:options:matrix`. The symbol cell opens its `/symbol` dossier — drawn only where `shell.can_navigate` says the route exists, so the public `/opportunity` copy stays plain text. **Rows gained `call_wall`/`put_wall`/`net_gex`/`atm_iv`/`iv_state`/`dealer_regime` on 2026-08-18** (for the Desk; additive, no contract change — `MatrixSnapshot` validates only `rows: list[dict]`). All degrade to `None`/`"na"`, **never `0`** — the off-hours case turns on that distinction. [Detail](docs/webgui-routes.md) | built |
 | `/options/flow` | Flow Alerts — today's flow alerts (crossover · unusual activity · gamma flip · big_delta), newest first. Reader of `cache:options:flow_alerts`; resets overnight. [Detail](docs/webgui-routes.md) | built |
+| `/news` | Market News — headlines, SEC filings and insider buys from free public feeds, tagged by ticker, newest first, times in CT. Reader of `cache:news:feed` (`news_svc`); Refresh enqueues `news_refresh` on `cmd:news`. The Desk's headlines strip and the Symbol page's *In the news* band read the same view. A public copy runs at live `/news` (`news_live`), reading only `cache:news:feed_public`. [Detail](docs/webgui-routes.md) | built |
 | `/options/paper` | Paper Ledger — ledger table + shared detail panel; open trades repriced for live unrealized P&L on the manage tick. [Detail](docs/webgui-routes.md) | built |
 | `/options/captured` | Captured Signals — newest capture first, with a day footer (opened/closed today · booked P&L · open P&L). [Detail](docs/webgui-routes.md) | built |
 | `/options/portfolio` | Paper Account (the engine’s paper account) | built |
@@ -401,7 +408,7 @@ Routes:
 | `/x` | **Post to X** (More tab, private only) — compose an ad-hoc marketing post (text, link, hashtags, optional image) with a live 280 count, confirm, and enqueue `x_post` on `cmd:options`; below it, the log of EVERY X post (reports, hourly trade ideas, ad-hoc) from `cache:options:x_log`, with why any was refused. The page never talks to X. [Design](docs/plans/2026-09-22-x-posting-design.md) | built |
 | `/eod` · `/eod/detail` | EOD Report — Summary + Detailed aggregator over the `options:*` caches; Generate archives standalone HTML under `webgui/data/eod/<date>/`. ⚠ It **confirms, and refuses a cold cache** (2026-09-20): `write_archive` overwrites per DATE and every builder degrades to an empty note, so an unchecked click while the stack is stopped replaced the day's real report with a complete-looking empty one — `has_data` gates the button as it already gated `tools/generate_eod_report.py`. [Detail](docs/webgui-routes.md) | built |
 | `/market` | Market Dashboard — live grid of ~48 macro tickers in framed category panels, coloured by semantic risk-on/off. Reader of `cache:market:dashboard`. [Detail](docs/webgui-routes.md) | built |
-| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the five services / webgui / **`webgui_live`** (a `peer` card: an HTTP liveness probe on the public screens, deliberately OUT of the 2 s health fan-out, so a dead public origin never badges the rail or chimes), plus cache freshness; per-component Restart via `systemctl --user`, **confirm-gated since 2026-09-20** — eight of the ten cards carry one, including this web app and the proxy, and the dialog names what THAT restart costs. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
+| `/status` | System Status — health board probing Redis / proxy / Schwab auth / the six services / webgui / **`webgui_live`** (a `peer` card: an HTTP liveness probe on the public screens, deliberately OUT of the 2 s health fan-out, so a dead public origin never badges the rail or chimes), plus cache freshness; per-component Restart via `systemctl --user`, **confirm-gated since 2026-09-20** — nine of the eleven cards carry one, including this web app and the proxy, and the dialog names what THAT restart costs. ⚠ The Redis card is READ-ONLY in every environment: it is a system unit a user-scoped systemctl cannot reach, and one server serves both environments. | built |
 | `/terminate` | Stop All Services — confirm-gated `systemctl --user --no-block stop trading-<env>.target`. ⚠ Since 2026-09-07 that stops **both** web apps, so the public live screens go dark too. Redis survives structurally: it is a system unit the user target cannot reach. | built |
 
 The `pages/options/` subpackage shares `detail.py` (collapsible Trade detail panel, reused by all signal
@@ -694,14 +701,14 @@ still logs in full.
 
 ## The public live screens — a SECOND Tier-1 process
 
-`webgui/live_main.py` serves **sixteen screens, unauthenticated, to
+`webgui/live_main.py` serves **seventeen screens, unauthenticated, to
 anyone** on `nicegui_live` (prod :8501, dev :9501) behind `LIVE_HOST`
 (`live.neuralstrike.co`). It renders the **real page modules the app renders**, so a
 published screen cannot drift from the private one. The published set and every pin
 are pure data in **`webgui/live_screens.py`** (`SCREENS` · `SETTINGS_PINS` ·
 `PUBLIC_PINS`), read by the route registration, `tools/capture_live_shots.py` and the
 static grid on `neuralstrike.co/live.html` alike — so **adding a `Screen` publishes a
-route**. `Screen.tile = False` (the four interactive tools) publishes the route but
+route**. `Screen.tile = False` (the four interactive tools and Market News) publishes the route but
 draws no grid tile and takes no capture; the site's Tools menu reaches them. `Screen.parent`
 (the four extra $SPX Gamma views) draws a small link under that parent's tile instead. Per-screen detail: [docs/webgui-routes.md](docs/webgui-routes.md); design +
 plan: [`docs/plans/2026-09-07-public-live-screens-{design,plan}.md`](docs/plans/2026-09-07-public-live-screens-design.md).
@@ -835,7 +842,19 @@ only reads, nothing outlives `handoff_keep_min`, and the private pages'
 ONE store every visitor would share. Design:
 [`docs/plans/2026-09-21-public-calculator-simulator-design.md`](docs/plans/2026-09-21-public-calculator-simulator-design.md).
 
-⚠ **The published route set is the sixteen screens, the eight 308 redirects in
+**Market News (`/news`, 2026-09-26) is the one Tools screen that writes
+nothing.** `news.render(public=True)` hands off to `pages/news_live.py`, which
+has no command site and reads `cache:news:feed_public` alone — the view
+`news_svc` builds from the rows whose PRIMARY feed is public under the CURRENT
+`[feed_flags]` (re-checked at every publish, tickers cut to those a public feed
+contributed). ⚠ **The ACL is not a layer here**: the `live` user's `~cache:*`
+read covers the private `cache:news:feed` too, and a wildcard cannot exclude one
+key beneath it, so the code is the only guard (`test_news_live.py`). That binds
+the **Desk** as well, a published screen: its headlines strip reads through
+`desk.bus_key(view)`, which swaps `news:feed` for `news:feed_public` when
+`shell.is_public()`. Any new public reader of the news feed needs the same swap.
+
+⚠ **The published route set is the seventeen screens, the eight 308 redirects in
 `live_screens.RETIRED_ROUTES` (the pinned Gamma screens retired 2026-09-22, each
 now a redirect to `/gamma`), PLUS exactly one non-page route: `/static`
 (2026-09-09).** Every screen now carries a slim header — the
@@ -1559,6 +1578,7 @@ options   = 8211
 portfolio = 8212
 trade     = 8213
 market    = 8215
+news      = 8216
 ```
 
 **STANDING RULE — configurable by default (the user's instruction, 2026-09-19).**
@@ -1857,6 +1877,9 @@ moves. It was written out longhand on 22 pages; 4 (the sentiment screens sharing
 the canonical shape) were converted 2026-08-20, the rest have genuinely different
 shapes. ⚠ It deliberately does NOT swallow repaint errors — only the
 deleted-client case, via `ui_guard`. Anything else propagates so NiceGUI logs it.
+⚠ An `async def` `on_change` works only because the tick RETURNS its result for
+NiceGUI's timer to await; a wrapper that calls it and drops the coroutine
+repaints nothing, silently (it did, 2026-09-26, on `/news` and the Income/Shares pages).
 
 **`shared/market_calendar.py` is the single source of truth for the NYSE calendar**
 (holidays **derived algorithmically** — no yearly edit) **and session/window
@@ -1900,8 +1923,8 @@ gitignored. **Never commit real keys, tokens, or account numbers.**
 
 ## Running
 
-**The stack is nine `systemd --user` units on a Linux host** — the target, the
-proxy, the five services, the web app, and `webgui_live`, the public read-only
+**The stack is ten `systemd --user` units on a Linux host** — the target, the
+proxy, the six services, the web app, and `webgui_live`, the public read-only
 screens (2026-09-07). There are no
 launcher scripts: the twelve `.bat` files, `tools/stop_all.py`, `watchdog.py` and
 both `check_stack_*` helpers were deleted in the 2026-08-29 migration, because
@@ -2043,8 +2066,8 @@ stack:
 .venv/bin/python services/options_svc/app.py     # :8211
 ```
 
-Same order as the units: Redis, then the proxy on :8100, then the five services
-(8210–8213, 8215), then `webgui/main.py` on :8500. Everything reads market data through
+Same order as the units: Redis, then the proxy on :8100, then the six services
+(8210–8213, 8215, 8216), then `webgui/main.py` on :8500. Everything reads market data through
 the proxy, so it starts first. `webgui/live_main.py` on :8501 orders after nothing
 in the target — it reads Redis (a *system* unit) and nothing else.
 
@@ -2083,13 +2106,13 @@ Rationale: [design](docs/plans/2026-08-08-dev-prod-environments-design.md).
 |---|---|---|
 | Folder | `/home/administrator/dev` ⚠ (not `…/prod` — see above) | — none exists today |
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — runs no proxy unit |
-| sentiment / options / portfolio / trade / market | 8210–8213, 8215 | 9210–9213, 9215 |
+| sentiment / options / portfolio / trade / market / news | 8210–8213, 8215, 8216 | 9210–9213, 9215, 9216 |
 | webgui | `:8500` | `:9500` |
 | webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (`:6379`) | **db 0** | **db 1** |
 | SQLite, `logs/`, `webgui/data` | its own | its own |
 | Schedulers · Claude · notifications | live | **off** |
-| Units | `trading-prod.target` (9 units) | `trading-dev.target` (8 — no proxy, but it DOES get `webgui_live`) |
+| Units | `trading-prod.target` (10 units) | `trading-dev.target` (9 — no proxy, but it DOES get `webgui_live`) |
 
 Prod's ports are byte-identical to the pre-environment numbers, so prod is a
 relocation, not a reconfiguration. Dev borrows prod's proxy because the Schwab
@@ -2128,7 +2151,7 @@ the code already has, so a suppressed dev cannot take a code path prod never tak
 |---|---|---|
 | `allow_notifications` | `shared/notify/channels.py:load_config` | recursively zeroes **every** `enabled` key, LAST so it also overrides the `NOTIFY_ENABLED`/`X_ENABLED` env escapes — kills Telegram, Discord, Fi-SMS, **X** (and each of its `kinds`) and the sentiment state-transition alert in one stroke. `options_svc/push_notify.load_config` delegates here, so this is the single chokepoint |
 | `allow_claude` | the client factory in `options_svc/compute.py` returns `None` | falls into the existing *no-API-key* path: the briefing renders its explanatory page (market_svc makes no Claude call since 2026-09-16 — its summary quotes the published market report) |
-| `schedulers` | `services/_scaffold.py:_schedulers_enabled` (consumed by `make_app`) | all five services stop collecting and polling; **command handlers still run**, so the UI stays fully usable off the snapshot |
+| `schedulers` | `services/_scaffold.py:_schedulers_enabled` (consumed by `make_app`) | all six services stop collecting and polling; **command handlers still run**, so the UI stays fully usable off the snapshot |
 
 **X has ONE posting path (2026-09-22).** Every post — market reports, hourly
 trade ideas, the `/x` page's ad-hoc posts — goes through
@@ -2196,7 +2219,7 @@ checking a feature branch out there is the exact disaster this rule exists to
 prevent, and the guard hook does not catch it: the hook matches the local Windows
 prod path, not an `ssh` command, and that directory is not named `prod`. The
 honest options are to stand a second checkout up as real dev (`name = "dev"`,
-ports 9500/9210-9215, `owns_proxy = false`, its own units), or to accept
+ports 9500/9210-9216, `owns_proxy = false`, its own units), or to accept
 verifying a genuinely additive, read-only change on prod after it lands — and to
 name which one you took. A change under `deploy/site` is the exception that needs
 neither: Caddy serves that tree as static files, so serving the directory locally
@@ -3644,7 +3667,8 @@ real levers if a page feels sluggish or a service churns CPU/network. Audited
 - **The webgui watcher regressed twice as the app grew:** `_freshness_facts` was
   full-deserializing 4 payload envelopes (incl. `options:scan` a SECOND time) every
   2 s tick per tab — `cache_set` now writes a tiny `{key}:ts` side key (same
-  pipeline as the SET; skipped when `skip_unchanged` skips) and
+  pipeline as the SET; still refreshed when `skip_unchanged` skips the payload, so
+  it means "last confirmed current") and
   `bus_client.read_metas` probes `:ver`+`:ts` for all views in ONE pipelined
   round-trip (pre-upgrade keys fall back to the envelope once). And `_tick` called
   `_refresh_health` unconditionally (a proxy HTTP GET every 2 s per tab, bypassing
@@ -3713,6 +3737,11 @@ is given. The `SET` can't fold into the `INCR` (the envelope still embeds the ve
 for `cache_get`). options_svc header + gex_status use `skip_unchanged`; other periodic
 republishers (sentiment 120 s, portfolio per-tick) still bump
 unconditionally — opt them in the same way if they prove chatty.
+⚠ **A `skip_unchanged` view must carry no timestamp of its own** — a `ts` in the
+payload makes every write unique, so it never skips and every reader repaints
+every poll. The news feed views are built that way and take "updated at" from
+the `{key}:ts` side key (`bus_client.read_meta`, what `ui_kit.header(view=)`
+draws); the payload envelope's own `ts` means "last changed".
 
 **Every service shares the proxy's 5 req/s, so a scheduled chain burst must stay
 off the quarter hours (2026-09-16).** The 1-min GEX poll fetches ~92 chains in

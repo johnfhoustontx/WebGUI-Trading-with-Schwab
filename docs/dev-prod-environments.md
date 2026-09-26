@@ -18,13 +18,13 @@ box, along with the twelve `.bat` launchers.
 | Folder | `/home/administrator/prod` | `/home/administrator/dev` |
 | Git | pinned to `main` | feature branches |
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — starts none |
-| sentiment / options / portfolio / trade / market | 8210–8213, 8215 | 9210–9213, 9215 |
+| sentiment / options / portfolio / trade / market / news | 8210–8213, 8215, 8216 | 9210–9213, 9215, 9216 |
 | webgui | `:8500` | `:9500` |
 | webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (one server, `:6379`) | **db 0** | **db 1** |
 | SQLite, `logs/`, `webgui/data` | its own | its own |
 | Schedulers · Claude · notifications | live | **off** |
-| Units | `trading-prod.target` — **8** units | `trading-dev.target` — **7** (no proxy) |
+| Units | `trading-prod.target` — **10** units | `trading-dev.target` — **9** (no proxy) |
 | Start / stop | `systemctl --user start trading-prod.target` | `systemctl --user start trading-dev.target` |
 | Nightly backup timer | **enabled** | **not enabled** — its data is a disposable snapshot of prod |
 | Secrets in `.env` | `MEMURAI_PASSWORD` | `MEMURAI_PASSWORD` only |
@@ -71,7 +71,7 @@ Check what a checkout thinks it is — do this **before** generating units, sinc
 cd /home/administrator/dev && .venv/bin/python -c "import repo_paths as r; print(r.ENV_NAME, r.SERVICE_PORTS, r.NICEGUI_PORT, r.PROXY_URL, r.REDIS_DB)"
 ```
 
-Expected in dev: `dev {…9210-9215} 9500 http://127.0.0.1:8100 1`.
+Expected in dev: `dev {…9210-9216} 9500 http://127.0.0.1:8100 1`.
 
 Template: `config/env.local.example.toml`.
 

@@ -4,7 +4,91 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-25 (**`tools/pull_backups.ps1` fixed — it could not
+**Last updated:** 2026-09-26 (**Market News — a sixth service, `news_svc`, and
+four readers: `/news`, the Desk's headlines strip, the Symbol page's *In the news*
+band, and a public `/news` on `live.neuralstrike.co`.** Branch
+`claude/extract-news-from-x-bdb6ae-ryosve`, `2748923`..`e813a46`; design + plan
+`docs/plans/2026-09-25-news-feed-{design,plan}.md`.)
+
+- **What it is.** Headlines, SEC filings and insider buys from **free public feeds
+  only** — no paid news API, no X reads, no Schwab call, no Claude call. The
+  reference site (stocktradernetwork.com's news feed) was traced to the same public
+  feeds; the decision was to read the sources directly, never its undocumented
+  endpoint.
+- **The service** (`services/news_svc`, :8216 / dev :9216; the stack is now ten
+  units): `config/news.toml` → five adapters (`rss`, `yahoo_ticker`, `google_news`,
+  `edgar_form4`, `edgar_filings`, each a pure parse over saved fixtures in tests) →
+  `services/news_svc/data/news.db` (gitignored, in the root conftest's live-DB guard
+  and `backup_local.DATA_TREES`) → `cache:news:feed`, `cache:news:feed_public`,
+  `cache:news:status`. One command, `news_refresh` on `cmd:news`. Cadence 5 min in
+  regular hours, 15 off-hours, 60 at weekends and holidays, all in `[collector]` and
+  editable in Settings → Configuration → Market news (`webgui/config_schema.py`
+  `_NEWS`). `feedparser` (+ `sgmllib3k`) in both `requirements.txt` and
+  `requirements.lock`. Status-page card and Restart; `shared/news_config.py` is the
+  loader, on the Tier-1 allow-list.
+- **The feeds.** MarketWatch, CNBC, ZeroHedge, Benzinga, Federal Reserve press
+  releases, PR Newswire, Business Wire, the Truth Social archive (`rss`); Yahoo
+  Finance per ticker; WSJ and Seeking Alpha through Google News searches; SEC Form 4
+  open-market purchases and S-1 / S-3 / 424B5 offerings. **GlobeNewswire ships
+  disabled** — on 2026-09-25 its whole host dropped non-browser clients after the TLS
+  handshake, from the VPS and from Windows alike.
+- **Operator decisions recorded in the build.**
+  - The per-feed switches live in **`[feed_flags."<name>"]` tables**, not inside
+    `[[feeds]]`: a list in `config/local/news.toml` would replace the whole shipped
+    list, a table deep-merges one key. Settings shows the feed list read-only.
+  - The public view is decided **at every publish** from the CURRENT flags (and the
+    row's primary feed), not from the ingest-time column, so turning a feed private
+    empties it from the public page on the next poll.
+  - **Every shipped feed is public**, ZeroHedge and Truth Social included.
+  - Times display in **Central**, and "today" is the Central date.
+  - One feed repeating a headline merges only within `[dedupe] same_feed_merge_h`
+    (6 h) — a daily column keeps a row per day — and **never for the SEC kinds**,
+    whose titles are templated; different feeds with one headline merge within a day.
+  - **The public ticker rule**: a public row keeps only the tickers some currently
+    public feed contributed (`items.ticker_sources`), and a public per-ticker read
+    matches on that same rule, so a private feed merging into a public row adds
+    nothing publicly.
+- **Fixes the reviews forced**, each with its test: a real total fetch deadline
+  (`3 × request_timeout_s`, a watchdog that shuts the socket — `requests`' timeout
+  bounds each read, not the request) and a streamed body cap; an SEC 403 / 429 / 5xx
+  / network failure is an OUTAGE that leaves the accession unseen, not the filing's
+  answer; nothing (validators, EDGAR accessions) is remembered before the store write
+  succeeds; validators belong to the URL they were fetched from; atomic `BEGIN
+  IMMEDIATE` store writes; every date normalised before SQLite can read `'now'` as the
+  clock; EDGAR times UTC and sec.gov-only links; the migration never credits a merged
+  row's tickers to a public feed; the status view always publishes; the scheduler
+  never raises on a config value of any size; Yahoo dotted symbols; a feed name that
+  is not a string is no name.
+- **Webgui.** `/news` under MARKETS (17 rail items); the Desk strip reads its news
+  KEY through `desk.bus_key`, which swaps to `feed_public` on the public origin —
+  the live ACL's `~cache:*` covers the private key too, so code is the only guard.
+  Trending skips Yahoo per-ticker items (each carries the ticker it was fetched for,
+  so every polled name trended). The public screen is the one Tools screen that
+  writes nothing, linked from the four site menus.
+- ⚠ **`view_watch.watch_view` dropped an async callback's coroutine** (`60db52c`):
+  `/news`, `/options/shares` and both `/options/income` watches never repainted after
+  their first load. The tick now returns the callback's result for NiceGUI's timer to
+  await.
+- **Not done.**
+  - **Not run live and not promoted.** No poll has run against the real feeds on the
+    box, and nothing is on prod: push, `tools/promote.sh`, then check the Status card,
+    `cache:news:status` and the public page.
+  - **SEC contact.** `sec_user_agent` names `contact@neuralstrike.co`; the SEC asks for
+    a monitored address — confirm it is one.
+  - **S-3ASR.** `forms` matches exactly, so an automatic shelf registration (`S-3ASR`,
+    the large issuers' form) is not collected. Add it to `forms` or not — an operator
+    call.
+  - **Reset to shipped values** on Settings → Configuration → Market news writes `{}`
+    for the whole file, so it also resets every feed switch — a feed taken private
+    becomes public again at the next poll. Whether that button should spare
+    `[feed_flags]` is an open question.
+  - From the design, unbuilt: the rail badge (`news_seen_ts` is written, read by
+    nothing), a status line naming a failing feed, the `Macro` topic on the Fed feed,
+    a Status-page freshness row for the news views; `tools/snapshot_from_prod.py`
+    copies no `news.db` (the Redis views come across; the store starts empty). Phase
+    2 — Claude summaries, bodies, alerts — is designed, not built.
+
+**Prior —** 2026-09-25 (**`tools/pull_backups.ps1` fixed — it could not
 run, and its prune would have deleted the offsite decryption key.**)
 
 - **Dead host.** The default was `vps-ts`, the suspended original server. It is

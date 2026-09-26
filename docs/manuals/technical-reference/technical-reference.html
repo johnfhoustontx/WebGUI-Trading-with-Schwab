@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-22</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-26</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -165,6 +165,13 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#why-a-separate-rule-set">Why a separate rule set</a></li>
 <li><a href="#the-three-rules-in-order">The three rules, in order</a></li>
 <li><a href="#scope-and-absences">Scope and absences</a></li>
+</ul>
+</li>
+<li><a href="#market-news">Market News</a><ul>
+<li><a href="#sources">Sources</a></li>
+<li><a href="#tickers-duplicates-retention">Tickers, duplicates, retention</a></li>
+<li><a href="#views-and-the-public-copy">Views and the public copy</a></li>
+<li><a href="#failure-policy">Failure policy</a></li>
 </ul>
 </li>
 <li><a href="#known-issues">Known issues</a><ul>
@@ -306,7 +313,7 @@ degrades rather than crashes.</p>
 <tbody>
 <tr>
 <td><strong>Operating system</strong></td>
-<td><strong>Ubuntu Server 24.04 LTS.</strong> The stack runs as nine <code>systemd --user</code> units; there are no launcher scripts. <code>loginctl enable-linger</code> is what makes them start at boot and survive logout.</td>
+<td><strong>Ubuntu Server 24.04 LTS.</strong> The stack runs as ten <code>systemd --user</code> units; there are no launcher scripts. <code>loginctl enable-linger</code> is what makes them start at boot and survive logout.</td>
 <td>Required</td>
 </tr>
 <tr>
@@ -363,7 +370,7 @@ regenerating the lock that way silently drops the pins and quietly reopens the g
 </tr>
 <tr>
 <td><code>fastapi==0.137.0</code>, <code>uvicorn==0.49.0</code>, <code>starlette==1.3.1</code></td>
-<td>The proxy + the five domain services.</td>
+<td>The proxy + the six domain services.</td>
 </tr>
 <tr>
 <td><code>redis==8.0.0</code></td>
@@ -388,6 +395,10 @@ regenerating the lock that way silently drops the pins and quietly reopens the g
 <tr>
 <td><code>openpyxl</code></td>
 <td>Reads the sector/watchlist workbooks.</td>
+</tr>
+<tr>
+<td><code>feedparser==6.0.11</code> (+ <code>sgmllib3k</code>)</td>
+<td><code>news_svc</code> parses the public RSS / Atom feeds it polls.</td>
 </tr>
 <tr>
 <td><code>anthropic==0.112.0</code></td>
@@ -416,7 +427,7 @@ Highcharts license. This is a licensing prerequisite, not a technical one.</p>
 <tbody>
 <tr>
 <td><strong>Redis running on <code>:6379</code></strong></td>
-<td><code>sudo systemctl enable --now redis-server</code>. It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the five services can publish and every page shows a "Waiting for … service" placeholder.</strong> It is a <strong>system</strong> unit, so a <code>systemctl --user</code> stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter.</td>
+<td><code>sudo systemctl enable --now redis-server</code>. It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.</strong> It is a <strong>system</strong> unit, so a <code>systemctl --user</code> stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter.</td>
 <td>Required</td>
 </tr>
 <tr>
@@ -564,6 +575,11 @@ automatically and start empty.</p>
 <td>Required</td>
 </tr>
 <tr>
+<td>8216</td>
+<td>news_svc</td>
+<td>Required</td>
+</tr>
+<tr>
 <td>8500</td>
 <td>webgui (NiceGUI)</td>
 <td>Required</td>
@@ -598,8 +614,9 @@ were removed in September 2026 — nothing in the stack talks to those processes
 </tbody>
 </table>
 <h2 id="startup-order">Startup order</h2>
-<p>The dependency chain is strict: <strong>Redis → schwab-proxy → the five services → webgui.</strong>
-Services wait on the proxy because every one of them resolves market data through it.
+<p>The dependency chain is strict: <strong>Redis → schwab-proxy → the six services → webgui.</strong>
+Services wait on the proxy because they resolve market data through it (<code>news_svc</code>
+calls no proxy — it reads public feeds — but is ordered with the others).
 <code>webgui_live</code> sits outside that chain: it reads Redis and nothing else — no proxy
 call, no Schwab call, no service call — so it is ordered after nothing in the target.</p>
 <table>
@@ -612,11 +629,11 @@ call, no Schwab call, no service call — so it is ordered after nothing in the 
 <tbody>
 <tr>
 <td><code>systemctl --user start trading-prod.target</code></td>
-<td>Proxy + 5 services + webgui + webgui_live. Also starts at boot.</td>
+<td>Proxy + 6 services + webgui + webgui_live. Also starts at boot.</td>
 </tr>
 <tr>
 <td><code>systemctl --user stop trading-prod.target</code></td>
-<td>Stops all nine, the public live screens included. <strong>Redis survives</strong> — it is a system unit this cannot reach.</td>
+<td>Stops all ten, the public live screens included. <strong>Redis survives</strong> — it is a system unit this cannot reach.</td>
 </tr>
 <tr>
 <td><code>systemctl --user restart trading-prod-options_svc</code></td>
@@ -633,17 +650,17 @@ call, no Schwab call, no service call — so it is ordered after nothing in the 
 </tbody>
 </table>
 <blockquote>
-<p>The eight processes must stay <strong>separate OS processes</strong>. Merging services into one
+<p>The nine processes must stay <strong>separate OS processes</strong>. Merging services into one
 Python process would re-introduce the top-level module-name collisions
 (<code>config</code> / <code>scoring</code> / <code>notifier</code> / <code>src</code>) that the 3-tier split exists to prevent.</p>
 </blockquote>
 <h2 id="verifying-the-install">Verifying the install</h2>
 <ol>
 <li>Open <strong><code>http://127.0.0.1:8500/status</code></strong> — the System Status page probes Redis,
-   the proxy, Schwab authorization, all five services, the webgui and the public
+   the proxy, Schwab authorization, all six services, the webgui and the public
    live screens, plus a data-freshness table.</li>
 <li>Or probe directly: <code>GET http://127.0.0.1:8100/health</code> and
-   <code>GET http://127.0.0.1:82{10..13}/health</code> and <code>:8215/health</code> (each returns <code>{"domain": …, "up": true}</code>).</li>
+   <code>GET http://127.0.0.1:82{10..13}/health</code>, <code>:8215/health</code> and <code>:8216/health</code> (each returns <code>{"domain": …, "up": true}</code>).</li>
 <li>Run the tests <strong>one folder at a time</strong> (never <code>pytest services</code> across all of
    them — that re-triggers the module-name collisions):</li>
 </ol>
@@ -726,6 +743,11 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <td>Live macro-ticker Market Dashboard (~3 s RTH poll).</td>
 </tr>
 <tr>
+<td>news_svc</td>
+<td>8216</td>
+<td>Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds into <code>news.db</code>. No Schwab, no Claude.</td>
+</tr>
+<tr>
 <td>webgui</td>
 <td>8500</td>
 <td>The web UI.</td>
@@ -733,14 +755,14 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <tr>
 <td>webgui_live</td>
 <td>8501</td>
-<td>The twenty-one public screens, on their own origin.</td>
+<td>The seventeen public screens, on their own origin.</td>
 </tr>
 </tbody>
 </table>
 <p>Ports come from <code>config/ports.toml</code> via <code>repo_paths.py</code> — never hard-coded.</p>
 <blockquote>
 <p><strong>These are the <em>prod</em> profile.</strong> A <strong>dev</strong> checkout offsets the <code>[services]</code>
-ports to 9210–9213 and 9215 and the web GUI to 9500, uses Redis <strong>db 1</strong> instead of db 0,
+ports to 9210–9213, 9215 and 9216 and the web GUI to 9500, uses Redis <strong>db 1</strong> instead of db 0,
 and starts <strong>no proxy of its own</strong> — it borrows prod's on 8100, because the Schwab
 OAuth refresh token is a single rotating credential that two proxies would
 invalidate for each other. Identity comes from the gitignored
@@ -793,7 +815,7 @@ invalidate for each other. Identity comes from the gitignored
 </tr>
 <tr>
 <td><code>services/</code></td>
-<td>The five Tier-2 domain services.</td>
+<td>The six Tier-2 domain services.</td>
 </tr>
 <tr>
 <td><code>webgui/</code></td>
@@ -2794,6 +2816,88 @@ book the same number.</p>
 <p>⚠ <strong>No debit outcome data exists</strong> - <code>signals.db</code> holds only PCS/CCS/IC and the
 ledger is empty - so 0.50 and 21 are <strong>sourced, not fitted</strong>. That is why they
 are config.</p>
+<h1 id="market-news">Market News</h1>
+<p><code>services/news_svc</code> — the one service with no Schwab or Claude call. Design:
+<code>docs/plans/2026-09-25-news-feed-design.md</code>.</p>
+<h2 id="sources">Sources</h2>
+<p>Every source is a free public feed listed in <code>config/news.toml [[feeds]]</code>, one
+adapter per <code>kind</code> (<code>services/news_svc/adapters/</code>), each a pure parse over the
+fetched bytes:</p>
+<table>
+<thead>
+<tr>
+<th>kind</th>
+<th>Fetches</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rss</code></td>
+<td>one URL (MarketWatch, CNBC, ZeroHedge, Benzinga, Federal Reserve, PR Newswire, GlobeNewswire, Business Wire, the Truth Social archive)</td>
+<td>Conditional GET: <code>ETag</code> / <code>Last-Modified</code> are sent back, so an unchanged feed costs a 304. GlobeNewswire ships <strong>disabled</strong> — its host drops non-browser clients</td>
+</tr>
+<tr>
+<td><code>yahoo_ticker</code></td>
+<td>the URL template once per ticker in the ticker set, 4 at a time</td>
+<td>Each item carries the ticker it was fetched for</td>
+</tr>
+<tr>
+<td><code>google_news</code></td>
+<td>one Google News search (WSJ, Seeking Alpha)</td>
+<td>Links stay Google redirects; the publisher comes from the item's <code>&lt;source&gt;</code></td>
+</tr>
+<tr>
+<td><code>edgar_form4</code></td>
+<td>EDGAR's current-filings Atom for Form 4, then each new filing's ownership XML</td>
+<td>Open-market <strong>purchases</strong> (code P) only; a buy on an untracked ticker shows only at or above <code>min_value_usd</code> ($1,000,000)</td>
+</tr>
+<tr>
+<td><code>edgar_filings</code></td>
+<td>the same Atom per form (<code>S-1</code>, <code>S-3</code>, <code>424B5</code>)</td>
+<td>Headline "<code>&lt;company&gt;</code> files <code>&lt;form&gt;</code>"</td>
+</tr>
+</tbody>
+</table>
+<p>The SEC gets <code>sec_user_agent</code> (it requires a contact) at most one request every
+0.15 s; every other feed gets <code>feed_user_agent</code>, which must keep a <code>Mozilla/5.0</code>
+token (Yahoo answers a 404 without one). A response over <code>max_body_bytes</code> (5 MB) is
+refused, and each fetch has a total deadline of <strong>3 × <code>request_timeout_s</code></strong>
+enforced by a watchdog that closes the socket, so a server trickling bytes cannot
+hold the poll.</p>
+<h2 id="tickers-duplicates-retention">Tickers, duplicates, retention</h2>
+<ul>
+<li><strong>Tickers are explicit only</strong>: a cashtag (<code>$NVDA</code>), an exchange prefix
+  (<code>(NASDAQ: NVDA)</code>), or a bare bracket of 3–6 letters (<code>(NVDA)</code>), matched against
+  the ticker set — the GEX collection list plus <code>[tickers] extras</code>. A company name
+  never tags. EDGAR items resolve through the SEC's CIK map; Yahoo items carry their
+  fetch ticker.</li>
+<li><strong>An item's id</strong> is a hash of its canonical URL (tracking parameters and the
+  fragment removed). The same id from another feed adds that feed's badge and
+  tickers to the stored row.</li>
+<li><strong>The same headline under a different URL</strong> is one story when it comes from a
+  <strong>different</strong> feed within a day, or from the <strong>same</strong> feed within
+  <code>[dedupe] same_feed_merge_h</code> (6 h; 0 turns that off). SEC items never take the
+  same-feed rule — their titles are templated, so two filings would fold into one.</li>
+<li>The store keeps <strong>7 days</strong> (<code>keep_days</code>); each publish carries the newest <strong>300</strong>
+  (<code>view_items</code>).</li>
+</ul>
+<h2 id="views-and-the-public-copy">Views and the public copy</h2>
+<p><code>cache:news:feed</code> holds every feed; <code>cache:news:feed_public</code> holds only rows whose
+<strong>primary</strong> feed is public under the current <code>[feed_flags]</code>, re-read at every publish,
+with each row's tickers and source badges cut to what public feeds contributed.
+<code>cache:news:status</code> is one row per configured feed. The two feed views carry no
+timestamp and publish <code>skip_unchanged</code>, so a poll that found nothing new repaints
+nothing; the page's "Updated" stamp is the key's <code>:ts</code> side key, refreshed on every
+publish.</p>
+<p><strong>Trending</strong> counts the tickers on items published within <code>[trending] window_h</code>
+(6 h), skipping <code>yahoo_ticker</code> items, whose tag is the ticker they were fetched for.</p>
+<h2 id="failure-policy">Failure policy</h2>
+<p>One failing feed never stops the poll: it counts one <code>_degrade</code>
+(<code>news.feed.&lt;name&gt;</code>), records its error in <code>cache:news:status</code>, and keeps its last
+items. An SEC 403, 429, 5xx, network failure or missed deadline is treated as an
+outage — that accession and every later one are retried next poll — while any other
+status is that filing's own answer and is not retried.</p>
 <h1 id="known-issues">Known issues</h1>
 <p>Documented defects a maintainer should know about before trusting a number. These
 are recorded rather than silently carried.</p>
@@ -2977,6 +3081,10 @@ the source; this table is a summary of them.</p>
 <tr>
 <td>market_svc</td>
 <td>Quote poll <strong>3 s</strong> RTH (<code>RTH_INTERVAL_SEC</code>), <strong>15 s</strong> off-hours (<code>OFFHOURS_INTERVAL_SEC</code>), <strong>60 s</strong> at weekends (<code>WEEKEND_INTERVAL_SEC</code>); report summary re-read when the published market report changes (a stat of <code>deploy/site/reports/latest.html</code> + <code>latest.txt</code> per poll) — no Claude call.</td>
+</tr>
+<tr>
+<td>news_svc</td>
+<td>Every feed polled every <strong>5 min</strong> 08:30–15:00 CT (<code>[collector] rth_poll_min</code>), <strong>15 min</strong> otherwise on a trading day (<code>offhours_poll_min</code>), <strong>60 min</strong> at weekends and holidays (<code>weekend_poll_min</code>) — all in <code>config/news.toml</code>, editable in Settings. The loop wakes every <strong>30 s</strong> (<code>TICK_S</code>) and counts an interval from the END of the last poll; nothing polls faster than <strong>60 s</strong> (<code>MIN_INTERVAL_S</code>). One poll at a time: a Refresh during a poll is skipped.</td>
 </tr>
 </tbody>
 </table>

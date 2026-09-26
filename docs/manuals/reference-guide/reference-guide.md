@@ -43,7 +43,7 @@ Three layers, running as separate programs on your machine:
 | Layer | What it is | Why you care |
 |---|---|---|
 | **The gateway** | `schwab-proxy` on port 8100. Holds your Schwab login and fetches all market data. | If this is down, nothing has fresh data. Start it first. |
-| **The services** | Five background programs (ports 8210–8213 and 8215), one per subject area: sentiment, options, portfolio, trade, market. | They do the work — scanning, scoring, collecting — whether or not a browser is open. |
+| **The services** | Six background programs (ports 8210–8213, 8215 and 8216), one per subject area: sentiment, options, portfolio, trade, market, news. | They do the work — scanning, scoring, collecting — whether or not a browser is open. |
 | **The web app** | What you look at, on port 8500. | It **only displays**. It never calculates anything itself. |
 
 Between them sits a small in-memory database (Redis).
@@ -66,6 +66,7 @@ right now?*) and **Symbol** (*tell me everything about this one ticker*).
 | **Dealer Positioning** | You want to know where price is likely to stick or accelerate today. |
 | **Opportunity Board** | You want the whole watchlist ranked on one screen. |
 | **Flow Alerts** | You want to see the unusual option activity the app flagged today. |
+| **Market News** | You want today's headlines, SEC filings and insider buys, tagged by ticker. |
 | **Trend & Sentiment** ▸ Market Dashboard | You want the macro tape — volatility, breadth, sectors, futures — at a glance. |
 | ▸ Sentiment | You want one number for market mood, plus what *character* the tape has. |
 | ▸ Sector & Industry | You want to know which sectors and industries are working. |
@@ -277,6 +278,13 @@ days to expiration, size, entry, live mark, unrealized profit or loss, and a fla
 unrealized P&L, and how many need attention. *At risk* and *Rescue* are the two
 that count toward that total; *Watch* does not.
 
+**Headlines.** Full width, under the four panels: the five newest items from
+[Market News](#market-news), one line each — the time in Central, the feed, and the
+headline, which opens the article itself in a new tab (so the row is not a
+click-through the way the panels above are). **All headlines →** opens Market News,
+where the filters and Trending live. On the public live Desk the strip shows only
+the feeds marked public.
+
 **Market Summary.** Full width, across the bottom. The highlights of the latest
 published **NeuralStrike market report** — the same report the website publishes
 five times a trading day (pre-market, the open, the first hour, midday and the
@@ -414,6 +422,7 @@ a new trade, because the position band searches all three books at once.
 | **Context** | What is the market doing, where does this name sit in its sector, and when does it report? | [Bull / Bear Map](#bull-bear-map) |
 | **Today — Signals** | Did the scanner find a trade here today, how long has it been live, and is its score improving? | [Market Scanner](#market-scanner) |
 | **Today — Flow alerts** | Did anything unusual trade in this name today? | [Flow Alerts](#flow-alerts) |
+| **In the news** | Has anything been published about this name? The eight newest items tagged with it | [Market News](#market-news) |
 | **Your position** | What do I already have on in this name, and is any of it in trouble? | [Paper Ledger](#paper-ledger) · [Rescue](#rescue) |
 
 **Structure.** The bar runs from the put wall at the left end to the call wall at the
@@ -449,11 +458,15 @@ rows sits one line per setup — *Live since 09:15 · 1 gap* — because a setup
 outlive any single row: the exact strikes change from scan to scan while the idea
 stays live. A dimmed row has dropped out of the latest scan; it keeps its age.
 
+**In the news.** A story appears here only when it is **tagged** with this ticker —
+the same explicit-only rule as Market News — so an empty band means nothing named
+the ticker, not that nothing happened. Headlines open the article in a new tab.
+
 ### Where the data comes from
 
 | | |
 |---|---|
-| Views | `options:matrix`, `options:scan_funnel`, `options:scan_day`, `options:gex_status` (whether the walls are current), `options:flow_alerts`, the four paper books, `sentiment:regime`, `sentiment:bullbear` — one batched poll every 2 s |
+| Views | `options:matrix`, `options:scan_funnel`, `options:scan_day`, `options:gex_status` (whether the walls are current), `options:flow_alerts`, the four paper books, `sentiment:regime`, `sentiment:bullbear`, `news:feed` — one batched poll every 2 s |
 | On-demand | `cmd:options` → `dossier` → `cache:options:dossier:<SYMBOL>`, kept 15 minutes |
 | Cost | Nothing for a scanned symbol. **4–5 Schwab calls** per on-demand look-up |
 
@@ -936,6 +949,7 @@ leaving the app.
 | Sources | Public RSS feeds (MarketWatch, CNBC, Benzinga, the press-release wires and others), Yahoo Finance per-ticker headlines, and **SEC EDGAR** — Form 4 insider purchases and share-offering filings. The list is `config/news.toml [[feeds]]`. |
 | Refresh | Every **5 minutes** in regular hours, **15** off-hours, **60** at weekends and holidays |
 | Retention | The newest 300 items are published; the store keeps 7 days |
+| Settings | **Settings → Configuration → Market news** — poll intervals, extra tickers, the Trending window, and each feed's **Enabled** / **Show on the public site** switch. The feed list itself is read-only there; feeds are added in `config/news.toml` |
 
 ### Reading the screen
 
@@ -947,7 +961,8 @@ total value and the transaction date).
 
 **Tickers.** A row is tagged only when the headline **names a ticker explicitly** — a
 cashtag (`$NVDA`), an exchange bracket (`(NASDAQ: NVDA)`), or a company's own EDGAR
-filing. Yahoo Finance is the exception: its headlines are fetched one ticker at a
+filing — and only for a ticker the app follows (the gamma collection list plus
+`[tickers] extras`; the Watchlist-only set). Yahoo Finance is the exception: its headlines are fetched one ticker at a
 time, and each carries the ticker it was fetched for even when the headline does not
 name it. A company *name* never tags: precision over recall. **Click a ticker** to open
 its [Symbol](#symbol) dossier.
@@ -984,6 +999,19 @@ visible reason.
 - Headlines are third-party text and are shown as written — the app does not verify
   them.
 - Feeds publish on their own schedules; a quiet list at the weekend is normal.
+- **One story, several feeds.** The same headline from two different feeds within a
+  day is one row with both badges; one feed repeating a headline is merged only
+  within `[dedupe] same_feed_merge_h` (6 hours), so a daily column keeps a row per
+  day. SEC filings are never merged this way — their headlines are templated.
+
+### On the public site
+
+`live.neuralstrike.co/news` is this page less every control that is yours: no
+Refresh, no Watchlist only, and a ticker is a filter chip rather than a link (the
+public site has no Symbol page). It lists only feeds whose **public** switch is on,
+decided again at every poll, so switching a feed off removes its stories from the
+public page within one poll. `?symbol=NVDA` opens it filtered to one ticker. It
+writes nothing, so a visitor cannot make the service fetch.
 
 ### Related pages
 
@@ -993,8 +1021,8 @@ visible reason.
 
 ## Market Dashboard
 
-*Menu: MARKETS → Trend & Sentiment → Market Dashboard · Route `/market` — and the
-app's **landing page**: opening `http://127.0.0.1:8500` redirects here*
+*Menu: MARKETS → Trend & Sentiment → Market Dashboard · Route `/market` — the
+group's first tab, so clicking Trend & Sentiment in the rail lands here*
 
 ### What it is
 
@@ -2397,7 +2425,7 @@ Directional with a 70 on Swing.
 
 ### When to use it
 
-Throughout the session. It is the default landing page for a reason.
+Throughout the session.
 
 ### Caveats and gotchas
 
@@ -4041,6 +4069,7 @@ merely running but actually *publishing*.
 | portfolio_svc | 2 | 8212 |
 | trade_svc | 2 | 8213 |
 | market_svc | 2 | 8215 |
+| news_svc | 2 | 8216 |
 | webgui (this app) | 1 | 8500 |
 | webgui_live (public live screens) | 1 | 8501 |
 
@@ -4184,7 +4213,7 @@ number before that happens. The Claude counter does the same for money.
 
 *Menu: bottom of the rail, the red-outlined button · Route `/terminate`*
 
-A confirm-gated stop of the entire local stack — the gateway, all five services, the
+A confirm-gated stop of the entire local stack — the gateway, all six services, the
 web app itself, and the public live screens on `live.neuralstrike.co`, which go dark
 with it. **Redis is deliberately left running**, because it is a *system* service
 this app does not own.

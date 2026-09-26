@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-22</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-26</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -102,6 +102,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#dealer-positioning">Dealer Positioning</a></li>
 <li><a href="#opportunity-board">Opportunity Board</a></li>
 <li><a href="#flow-alerts">Flow Alerts</a></li>
+<li><a href="#market-news">Market News</a></li>
 <li><a href="#market-dashboard">Market Dashboard</a></li>
 <li><a href="#sentiment">Sentiment</a></li>
 <li><a href="#bull-bear-map">Bull / Bear Map</a></li>
@@ -247,7 +248,7 @@ just click <strong>Authorize</strong> again.</p>
 </ul>
 <h2 id="ports-the-app-uses">Ports the app uses</h2>
 <p>The app runs entirely on your own machine and needs these local ports free:
-<strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8213</strong> and <strong>8215</strong> (the five services),
+<strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8213</strong>, <strong>8215</strong> and <strong>8216</strong> (the six services),
 <strong>8500</strong> (the web app) and <strong>8501</strong> (the public live screens). If another program
 is already using one of them, the matching piece won't start.</p>
 <hr />
@@ -265,7 +266,7 @@ all together with one of the launcher scripts in the project root:</p>
 <tbody>
 <tr>
 <td><code>systemctl --user start trading-prod.target</code></td>
-<td>Starts the gateway, the five domain services, the web app and the public live screens.</td>
+<td>Starts the gateway, the six domain services, the web app and the public live screens.</td>
 </tr>
 <tr>
 <td><code>systemctl --user list-units 'trading-prod*'</code></td>
@@ -300,12 +301,12 @@ not ask again for a while; a new browser, or a private window, always will.</p>
 <p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> still works there and
 skips the sign-in, which is what the wall display uses.</p>
 <h2 id="the-public-live-screens">The public live screens</h2>
-<p>Sixteen of the app's screens are also published <strong>without any sign-in</strong> on
+<p>Seventeen of the app's screens are also published <strong>without any sign-in</strong> on
 a second address, <code>https://live.neuralstrike.co</code> — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &amp;
 Industry, Sector Rotation, RRG, Momentum, Net Prem, <strong>Gamma</strong>, the <strong>Strategy
 Finder</strong>, the Rescue ad-hoc form (published as <strong>Rescue my Sh*tty trade</strong>), the
-<strong>Calculator</strong> and the <strong>Simulator</strong>.</p>
+<strong>Calculator</strong>, the <strong>Simulator</strong> and <strong>Market News</strong>.</p>
 <p>The public <strong>Gamma</strong> page is Dealer Positioning with its symbol dropdown: a
 visitor picks any symbol your collector gathers (the <code>symbols.toml</code> lists plus
 your Top 20 list) and switches between Gamma, Charm, Delta, Vanna and Flow.
@@ -374,7 +375,16 @@ Schwab call, runs at any time and allows 600 an hour. Their limits are in
 budget is under <strong>Public Rescue form → Budget</strong>, because it is one allowance
 behind all three.</p>
 <p><code>https://neuralstrike.co/live.html</code> is a thumbnail menu of them, and the site's
-<strong>Tools</strong> menu links the four screens a visitor can act on.</p>
+<strong>Tools</strong> menu links the four screens a visitor can act on, and Market News.</p>
+<p>The public <strong>Market News</strong> page is your Market News list with every control
+that belongs to you taken out: no Refresh, no Watchlist only, and a ticker is a
+filter chip rather than a link to a Symbol page (the public site has none). It
+shows only the feeds marked <strong>public</strong> (Settings → Configuration → Market news →
+Feed switches; every shipped feed is public), and switching one off removes its
+stories from the public page at the next poll. A link such as
+<code>live.neuralstrike.co/news?symbol=NVDA</code> opens it filtered to one ticker. It
+writes nothing: a visitor cannot make the service fetch anything. The public
+<strong>Desk</strong>'s headlines strip reads the same public-only list.</p>
 <p>Three things to know:</p>
 <ul>
 <li><strong>They are not redacted.</strong> The Desk shows your open paper positions and captured signals,
@@ -401,8 +411,8 @@ rather than the moment you open the menu. The screen behind it is always live.</
 <li><strong>Schwab gateway (proxy)</strong> — handles the Schwab connection and market data.
   Everything else depends on it. <strong>It must be running first</strong> (the launcher
   handles ordering for you).</li>
-<li><strong>Five domain services</strong> — Sentiment, Options, Portfolio, Trade and
-  Market. Each one powers its matching page(s).</li>
+<li><strong>Six domain services</strong> — Sentiment, Options, Portfolio, Trade, Market and
+  News. Each one powers its matching page(s).</li>
 <li><strong>The public live screens</strong> — a second, read-only copy of the web app serving
   <code>live.neuralstrike.co</code>. See <em>The public live screens</em> above.</li>
 <li><strong>Redis</strong> — a local data backbone the services and the web app share.</li>
@@ -420,7 +430,7 @@ launcher, or restart the specific service from the <strong>System Status</strong
 <p>Use <strong>Stop All Services</strong> at the foot of the rail — it asks for your
 authenticator code before it will do anything — or run
 <code>systemctl --user stop trading-prod.target</code>. This stops the
-gateway, the five services, the web app <strong>and the public live screens</strong> — so the
+gateway, the six services, the web app <strong>and the public live screens</strong> — so the
 public site goes dark until you start the stack again. (Redis is intentionally
 left running — it is a <em>system</em> service the app's own units cannot reach.)</p>
 <hr />
@@ -489,6 +499,10 @@ and <strong>Symbol</strong> (one screen about one ticker).</p>
 <td>—</td>
 </tr>
 <tr>
+<td><strong>Market News</strong> (standalone)</td>
+<td>—</td>
+</tr>
+<tr>
 <td><strong>Trend &amp; Sentiment</strong> (group)</td>
 <td>Market Dashboard · Sentiment · Sector &amp; Industry · Sector Rotation · RRG · Momentum</td>
 </tr>
@@ -549,8 +563,8 @@ hit, so the slot goes to the control that costs nothing if you hit it by mistake
 and the destructive one sits above it.</p>
 <p>Two groupings are worth explaining because they are deliberate:</p>
 <ul>
-<li><strong>Dealer Positioning, Opportunity Board and Flow Alerts sit under MARKETS, not
-  under Options.</strong> They are market-<em>wide</em> reads. The Options group is the
+<li><strong>Dealer Positioning, Opportunity Board, Flow Alerts and Market News sit under
+  MARKETS, not under Options.</strong> They are market-<em>wide</em> reads. The Options group is the
   per-signal workflow — find a trade, analyze it, track it, repair it — and its
   tabs run in that order.</li>
 <li><strong>Calculator and Simulator are their own group.</strong> They model legs <em>you</em> bring,
@@ -644,6 +658,10 @@ structure · what should I act on · what am I holding.</em></p>
 <td>Your paper trades and captured signals together, with live marks and an <strong>OK / Watch / At risk / Rescue</strong> flag</td>
 </tr>
 <tr>
+<td><strong>Headlines</strong></td>
+<td>The five newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. <strong>All headlines →</strong> opens Market News. Full width</td>
+</tr>
+<tr>
 <td><strong>Market Summary</strong></td>
 <td>Up to five highlights from the latest published market report, with which report they came from and a link to the full report, over six live chips (Sentiment, Trend, Bias, Signal, Regime, Bull/Bear) — full width, at the bottom</td>
 </tr>
@@ -653,7 +671,8 @@ structure · what should I act on · what am I holding.</em></p>
 means and, for Bias, what position size it implies.</p>
 <p><strong>Clicking any row</strong> opens the page it came from, already set to that symbol — a
 dealer row opens Dealer Positioning on that symbol, a position opens the Paper
-Ledger or Captured Signals.</p>
+Ledger or Captured Signals. (A headline row is the exception: its headline opens
+the article itself.)</p>
 <p><strong>Nothing on this page can place or change a trade.</strong> It reads and links only.</p>
 <p><strong>It announces arrivals out loud.</strong> When a new flow alert or a newly-opened position
 appears, the Desk speaks it and the row itself <strong>glows for ten seconds</strong>, so your eye
@@ -731,7 +750,7 @@ above the section captions: the Desk answers <em>what is happening</em>, Symbol 
 <em>tell me about this one name</em>.</p>
 <p><strong>How to use it:</strong> type a ticker in the box at the top left and press <strong>Enter</strong>
 (or tab out of the box). Letters, digits, <code>$</code> and <code>.</code> are accepted — <code>MU</code>,
-<code>BRK.B</code>, <code>$SPX</code> all work. The page then fills five bands, each ending in a link
+<code>BRK.B</code>, <code>$SPX</code> all work. The page then fills six bands, each ending in a link
 to the page that owns those facts:</p>
 <table>
 <thead>
@@ -761,6 +780,11 @@ to the page that owns those facts:</p>
 <td><strong>Today</strong></td>
 <td>Two columns. <strong>Signals</strong>: this name's rows from today's Market Scanner, each with the time it was first seen and how many scans it has survived, its score trend, and a small line of the score across the day — plus one line per setup, such as <em>Live since 09:15 · 1 gap</em>. <strong>Flow alerts</strong>: this name's alerts, newest first</td>
 <td>Market Scanner · Flow Alerts</td>
+</tr>
+<tr>
+<td><strong>In the news</strong></td>
+<td>The eight newest Market News items tagged with this ticker — time, feed and headline, which opens the article in a new tab. A story that never writes the ticker is not tagged, so an empty band is not proof of no news</td>
+<td>Market News</td>
 </tr>
 <tr>
 <td><strong>Your position</strong></td>
@@ -822,7 +846,7 @@ the second means the name is covered and nothing is on the calendar.</p>
 links.</p>
 <hr />
 <h1 id="markets-what-is-the-market-doing">MARKETS — what is the market doing?</h1>
-<p>The four rail entries in this section establish the conditions a trade would be
+<p>The five rail entries in this section establish the conditions a trade would be
 taken in. Nothing here proposes a trade.</p>
 <h2 id="dealer-positioning">Dealer Positioning</h2>
 <p><strong>Route:</strong> <code>/options/gamma</code>.</p>
@@ -997,6 +1021,41 @@ for that symbol.</p>
 <p><strong>No alert can tell a buy from a sell</strong> — Schwab publishes no options tape. Read
 every row as "something large happened here", then use price and gamma to decide
 direction.</p>
+</blockquote>
+<h2 id="market-news">Market News</h2>
+<p><strong>Route:</strong> <code>/news</code>. A rail item under <strong>MARKETS</strong>, directly below Flow Alerts.</p>
+<p>The newest headlines, SEC filings and insider buys in one list, newest first — each
+row shows when it was published (Central time), the tickers it names, the headline,
+and a small badge naming the feed it came from.</p>
+<ul>
+<li><strong>Sources</strong> are public news feeds (MarketWatch, CNBC, Yahoo Finance, the press-release
+  wires and others) plus <strong>SEC EDGAR</strong>: insider <strong>purchases</strong> filed on Form 4, and new
+  share offerings. A story several feeds carried shows each feed's badge.</li>
+<li><strong>A ticker is tagged only when the headline names it explicitly</strong> — a cashtag like
+  <code>$NVDA</code>, a bracket like <code>(NASDAQ: NVDA)</code>, or the company's own filing — or when
+  it came from Yahoo Finance's page for that ticker — and only for tickers the
+  app follows (the Watchlist only set). A company name alone never tags, so a
+  ticker filter can miss a story about that company.</li>
+<li><strong>Click a ticker</strong> to open its Symbol page. <strong>Click a headline</strong> to read it on the
+  publisher's site, in a new tab.</li>
+<li><strong>Trending</strong> chips count the tickers named in headlines from the general feeds
+  over the last 6 hours (<code>[trending] window_h</code> in <code>config/news.toml</code>). Yahoo
+  Finance's per-ticker stories are left out, because they carry the ticker they
+  were fetched for rather than one the headline named. Click one to show only its
+  news; click it again to clear.</li>
+<li>Filter by <strong>Sources</strong>, <strong>Ticker</strong> or <strong>Watchlist only</strong> (the symbols the app
+  collects gamma for, plus <code>[tickers] extras</code>); choosing no source means every
+  source. <strong>Show more</strong> pages further down the list.</li>
+<li><strong>Refresh</strong> checks every feed now instead of waiting for the next scheduled poll
+  (every 5 minutes in market hours, 15 off-hours, 60 at weekends and holidays).</li>
+<li>The <strong>Desk</strong> shows the five newest headlines and each <strong>Symbol</strong> page an
+  <em>In the news</em> band; the public site has its own copy of this page (see <em>The
+  public live screens</em>). Every feed, its on/off switch, whether the public site
+  may show it, and the poll intervals are in <strong>Settings → Configuration →
+  Market news</strong>.</li>
+</ul>
+<blockquote>
+<p>A headline is not a verified fact, and nothing here is a trade recommendation.</p>
 </blockquote>
 <h2 id="market-dashboard">Market Dashboard</h2>
 <p><strong>Route:</strong> <code>/market</code>. It is the <strong>Trend &amp; Sentiment</strong> group's first tab, so clicking
@@ -2736,7 +2795,7 @@ in a trading workflow, which is why they sit apart.</p>
 <ul>
 <li>An <strong>overall banner</strong> — green (all up), red (naming what's down), or grey
   (checking).</li>
-<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the five services, the web app
+<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the six services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the <strong>Schwab auth</strong> state.</li>
 <li>A <strong>Re-authorize</strong> button on the gateway card opens Schwab's OAuth login in a new
@@ -2896,7 +2955,7 @@ group, next to EOD Report.</p>
 <p>A guarded "stop the whole local stack" page. The <strong>Stop all services</strong> button — a
 red outline, matching the rail — opens a confirmation; the solid red button is the
 <strong>Stop everything</strong> inside it, which is where the decision is actually made.
-Confirming stops the gateway, the five services, the web app <strong>and the public live
+Confirming stops the gateway, the six services, the web app <strong>and the public live
 screens</strong> — the public site goes dark with it.</p>
 <p><strong>The confirmation asks for your authenticator code.</strong> Type the current 6-digit
 code from your authenticator app into the dialog and press <strong>Stop everything</strong> — or
