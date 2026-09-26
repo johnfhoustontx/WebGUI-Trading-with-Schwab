@@ -7,18 +7,26 @@ here before the private page builds anything. It is the one Tools screen that
 WRITES NOTHING - there is no command site in this module, so it has no enqueue
 gate to hold.
 
-⚠ IT READS ``nv.VIEW_PUBLIC`` AND NO OTHER VIEW, and that is the whole of what
-keeps a private feed off this origin. The service writes the public key with
-only the items of feeds flagged ``public`` in config/news.toml, while the
-private key (``nv.VIEW``) holds every feed. The public process's Redis user
-reads ``~cache:*``, which covers BOTH keys - a wildcard grant cannot exclude
-one key - so the ACL does not stand behind this rule; the code does.
-``tests/test_news_live.py`` pins it at the source (every bus read names
-``nv.VIEW_PUBLIC``; the private key is never spelled here) and by rendering the
-page against a bus that serves a different item under each key.
+Same layout as the private page: the headline list on the left, the SEC /
+EDGAR panel top right, the calendar tiles bottom right.
 
-Rows are drawn by ``news.draw_rows`` - the private page's own painter, with
-``linked=False`` - so the two origins cannot drift. A ticker chip filters this
+⚠ IT READS THREE VIEWS AND NO OTHER - ``nv.VIEW_PUBLIC`` (headlines),
+``nv.VIEW_SEC_PUBLIC`` (the SEC panel) and ``nv.VIEW_CAL_PUBLIC`` (the
+calendar) - and that is the whole of what keeps private items off this origin.
+The service writes each public key with only what may be published (the items
+of feeds flagged ``public`` in config/news.toml; the calendar less the owner's
+extra dividend symbols), while the private keys (the unsuffixed feed, SEC and calendar views, plus
+the calendar's status view, which carries error text) hold everything. The public process's Redis user reads ``~cache:*``, which covers
+every one of those keys - a wildcard grant cannot exclude one key - so the ACL
+does not stand behind this rule; the code does. ``tests/test_news_live.py``
+pins it at the source (every bus read names a public view; no private view is
+ever spelled here) and by rendering the page against a bus that serves a
+different item under each key.
+
+Rows, filings and tiles are drawn by ``news.draw_rows`` / ``draw_sec_rows`` /
+``draw_calendar`` - the private page's own painters, with ``linked=False`` -
+so the two origins cannot drift. The impact filter is drawn too: it only hides
+rows already on the page. A ticker chip filters this
 page (this origin serves no dossier). ``?symbol=`` seeds that filter, through
 ``shared.symbols.clean_symbol`` like every other ticker a URL can carry;
 anything it refuses seeds nothing.
@@ -69,25 +77,44 @@ def _query_symbol():
 def render():
     """Build the public Market News page."""
     state = {"payload": None, "rows": [], "sources": [],
-             "symbol": seed_symbol(_query_symbol()), "shown": news.PAGE_SIZE}
+             "symbol": seed_symbol(_query_symbol()), "min_band": None,
+             "shown": news.PAGE_SIZE, "sec_payload": None,
+             "sec_shown": news.SEC_PAGE_SIZE}
 
     with kit.page():
         kit.header(TITLE, view=nv.VIEW_PUBLIC)
-        with kit.control_bar():
-            src_sel = kit.select_field("Sources", [], value=[], multiple=True,
-                                       width="w-80").props("use-chips clearable")
-            sym_in = kit.text_field("Ticker", value=state["symbol"],
-                                    width="w-[110px]")
-        with ui.row().classes("w-full items-center gap-2 flex-wrap") as trend_box:
-            pass
-        status = kit.status_line("")
-        region = kit.region("Loading the news…")
-        more = kit.button("Show more", kind="secondary", icon="expand_more")
-        more.set_visibility(False)
+        with ui.element("div").classes(news._GRID):
+            # LEFT: the headline list, its control bar and Trending filter.
+            with ui.column().classes(news._LEFT):
+                with kit.control_bar():
+                    src_sel = kit.select_field("Sources", [], value=[], multiple=True,
+                                               width="w-72").props("use-chips clearable")
+                    sym_in = kit.text_field("Ticker", value=state["symbol"],
+                                            width="w-[110px]")
+                    band_sel = kit.select_field("Impact", news.BAND_OPTIONS,
+                                                value="all", width="w-32")
+                with ui.row().classes("w-full items-center gap-2 flex-wrap") as trend_box:
+                    pass
+                status = kit.status_line("")
+                region = kit.region("Loading the news…")
+                more = kit.button("Show more", kind="secondary", icon="expand_more")
+                more.set_visibility(False)
+            # RIGHT: the SEC panel on top, the calendar below.
+            with ui.column().classes(news._RIGHT):
+                with ui.column().classes(news._PANEL):
+                    kit.section_title(news.SEC_TITLE)
+                    sec_region = kit.region("Loading filings…")
+                    sec_more = kit.button("Show more", kind="secondary",
+                                          icon="expand_more")
+                    sec_more.set_visibility(False)
+                with ui.column().classes(news._PANEL):
+                    kit.section_title(news.CAL_TITLE)
+                    cal_region = kit.region("Loading the calendar…")
 
     def _filtered():
         return nv.filter_rows(state["rows"], sources=state["sources"] or None,
-                              symbol=state["symbol"] or None)
+                              symbol=state["symbol"] or None,
+                              min_band=state["min_band"])
 
     @guard
     def _pick_ticker(t):
@@ -158,13 +185,60 @@ def render():
         _paint()
 
     @guard
+    def _on_band(e):
+        v = e.value if e.value in news.BAND_OPTIONS else "all"
+        state["min_band"] = None if v == "all" else v
+        state["shown"] = news.PAGE_SIZE
+        _paint()
+
+    @guard
     def _more():
         state["shown"] += news.PAGE_SIZE
         _paint()
 
+    def _paint_sec():
+        sec_region.busy.hide()
+        payload = state["sec_payload"]
+        if payload is None:
+            news.draw_sec_rows(sec_region.content, [], linked=False,
+                               on_ticker=_pick_ticker)
+            with sec_region.content:
+                kit.empty(news.SEC_WAITING)
+            sec_more.set_visibility(False)
+            return
+        srows = nv.sec_rows(payload, now=_dt.datetime.now(_dt.timezone.utc))
+        news.draw_sec_rows(sec_region.content, srows[:state["sec_shown"]],
+                           linked=False, on_ticker=_pick_ticker)
+        if not srows:
+            with sec_region.content:
+                kit.empty(news.SEC_EMPTY)
+        sec_more.set_visibility(len(srows) > state["sec_shown"])
+
+    def _take_sec(payload):
+        state["sec_payload"] = payload if isinstance(payload, dict) else None
+        _paint_sec()
+
+    def _take_cal(payload):
+        cal_region.busy.hide()
+        if not isinstance(payload, dict):
+            cal_region.content.clear()
+            with cal_region.content:
+                kit.empty(news.CAL_WAITING)
+            return
+        news.draw_calendar(cal_region.content,
+                           nv.calendar_groups(payload,
+                                              now=_dt.datetime.now(_dt.timezone.utc)))
+
+    @guard
+    def _sec_more():
+        state["sec_shown"] += news.SEC_PAGE_SIZE
+        _paint_sec()
+
     src_sel.on_value_change(_on_sources)
     sym_in.on_value_change(_on_symbol)
+    band_sel.on_value_change(_on_band)
     more.on_click(_more)
+    sec_more.on_click(_sec_more)
 
     @guard_async
     async def _reread():
@@ -173,3 +247,16 @@ def render():
 
     _take(bus_client.read(nv.VIEW_PUBLIC))
     watch_view(nv.VIEW_PUBLIC, _reread)
+
+    @guard_async
+    async def _reread_sec():
+        _take_sec(await run.io_bound(bus_client.read, nv.VIEW_SEC_PUBLIC))
+
+    @guard_async
+    async def _reread_cal():
+        _take_cal(await run.io_bound(bus_client.read, nv.VIEW_CAL_PUBLIC))
+
+    _take_sec(bus_client.read(nv.VIEW_SEC_PUBLIC))
+    _take_cal(bus_client.read(nv.VIEW_CAL_PUBLIC))
+    watch_view(nv.VIEW_SEC_PUBLIC, _reread_sec)
+    watch_view(nv.VIEW_CAL_PUBLIC, _reread_cal)
