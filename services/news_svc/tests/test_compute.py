@@ -994,6 +994,42 @@ def test_widening_forms_picks_up_an_accession_skipped_before(tmp_path):
     assert {i["detail"]["form"] for i in db.newest(500)} == {"S-3", "S-3ASR"}
 
 
+_EMPTY_ATOM = (b'<?xml version="1.0" encoding="ISO-8859-1" ?>'
+               b'<feed xmlns="http://www.w3.org/2005/Atom"><title>Latest Filings</title></feed>')
+
+
+def test_the_shipped_offerings_forms_take_each_s3asr_exactly_once(tmp_path):
+    """SEC's ``type=`` is a PREFIX match, so the S-3 Atom already lists every
+    S-3ASR, and the S-3ASR Atom lists them again. The second fetch is kept (each
+    Atom is capped at 100 entries, so a busy S-3 day could push an S-3ASR off the
+    first); the accession is handled once per poll and marked seen after it."""
+    from shared import news_config as nc
+    nc.reset_cache()
+    shipped = next(f for f in nc.all_feeds() if f["name"] == "SEC Offerings")
+    assert shipped["forms"] == ["S-1", "S-3", "424B5", "S-3ASR"]
+    db = store.Store(tmp_path / "n.db")
+    atom = (FIX / "edgar_current_s3.xml").read_bytes()
+    entries = edgar.parse_current(atom)
+    asr = [e["accession"] for e in entries if e["form"] == "S-3ASR"]
+    assert asr
+    fetch = FakeFetch({edgar.CURRENT.format(form="S-1"): _EMPTY_ATOM,
+                       edgar.CURRENT.format(form="S-3"): atom,
+                       edgar.CURRENT.format(form="424B5"): _EMPTY_ATOM,
+                       edgar.CURRENT.format(form="S-3ASR"): atom,   # worst case: overlaps fully
+                       edgar.TICKERS_JSON: (FIX / "company_tickers.json").read_bytes()})
+    feed = {"name": "SEC Offerings", "kind": "edgar_filings", "public": True,
+            "forms": ["S-1", "S-3", "424B5", "S-3ASR"]}
+    for _ in range(2):
+        res = compute.poll_feed(feed, db, fetch, universe=[], now=NOW, cfg=_cfg([feed]))
+        assert res["error"] is None
+    stored = db.newest(500)
+    forms = [i["detail"]["form"] for i in stored]
+    assert forms.count("S-3ASR") == len(asr)
+    assert forms.count("S-3") == sum(e["form"] == "S-3" for e in entries)
+    assert set(forms) == {"S-3", "S-3ASR"}
+    assert db.unseen_accessions(asr, feed="SEC Offerings") == []
+
+
 # ── O: an unchanged poll does not bump the feed views ───────────────────────
 
 def test_two_polls_with_identical_rows_do_not_change_the_feed_versions(tmp_path, monkeypatch):

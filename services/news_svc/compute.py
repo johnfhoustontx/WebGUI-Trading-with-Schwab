@@ -180,6 +180,8 @@ def _poll_edgar(feed, db, fetch, *, universe, now, ua, timeout):
 
     Form 4: only form ``4`` exactly (a ``4/A`` re-reports the same purchase).
     Filings: exact form matches only (``S-3`` never takes ``S-3ASR`` / ``S-3/A``).
+    SEC's ``type=`` is a prefix match, so two listed forms can share rows (the
+    S-3 Atom lists every S-3ASR); ``handled`` takes each accession once a poll.
     An accession of a form the feed did not ask for is skipped and NOT marked.
     A poison accession is logged once, marked seen, and skipped; an SEC outage
     mid-poll (``_transient``) leaves that accession and every later one unseen,

@@ -106,7 +106,7 @@ min_value_usd = 1000000   # every code-P buy on a tracked ticker, plus any buy a
 [[feeds]]
 name  = "SEC Offerings"
 kind  = "edgar_filings"
-forms = ["S-1", "S-3", "424B5"]
+forms = ["S-1", "S-3", "424B5", "S-3ASR"]   # S-3ASR: the automatic shelf large issuers file
 
 # ── feed switches ──────────────────────────────────────────────────────────────
 # One table per feed, keyed by its name above. A table (not a list) so an override

@@ -1982,7 +1982,7 @@ fetched bytes:
 | `yahoo_ticker` | the URL template once per ticker in the ticker set, 4 at a time | Each item carries the ticker it was fetched for |
 | `google_news` | one Google News search (WSJ, Seeking Alpha) | Links stay Google redirects; the publisher comes from the item's `<source>` |
 | `edgar_form4` | EDGAR's current-filings Atom for Form 4, then each new filing's ownership XML | Open-market **purchases** (code P) only; a buy on an untracked ticker shows only at or above `min_value_usd` ($1,000,000) |
-| `edgar_filings` | the same Atom per form (`S-1`, `S-3`, `424B5`) | Headline "`<company>` files `<form>`" |
+| `edgar_filings` | the same Atom per form (`S-1`, `S-3`, `424B5`, `S-3ASR`) | Headline "`<company>` files `<form>`" |
 
 The SEC gets `sec_user_agent` (it requires a contact) at most one request every
 0.15 s; every other feed gets `feed_user_agent`, which must keep a `Mozilla/5.0`
