@@ -1463,7 +1463,8 @@ def test_econ_obs_a_missing_value_is_null_and_never_erases_a_reading(tmp_path):
     assert [r["value"] for r in db.obs("S")] == [None, None, None]
     db.upsert_obs("S", [{"obs_date": "2026-07-01", "value": 1.5}], now="t2")
     db.upsert_obs("S", [{"obs_date": "2026-07-01", "value": float("inf")}], now="t3")
-    assert db.obs("S")[0] == {"obs_date": "2026-07-01", "value": 1.5, "first_seen": "t1",
+    # first_seen is t2: the stored NULL was no reading, 1.5 first reached us at t2
+    assert db.obs("S")[0] == {"obs_date": "2026-07-01", "value": 1.5, "first_seen": "t2",
                               "bootstrap": True}
 
 
@@ -1485,3 +1486,63 @@ def test_the_calendar_writers_roll_back_on_failure(tmp_path):
     with pytest.raises(sqlite3.OperationalError):
         db.set_cal_source("bls", payload=[1])
     assert db.cal_source("bls")["payload"] is None
+
+
+# ── review findings: scoring guard, reasons, calendar payload, first_seen ────
+
+def test_a_failed_set_impact_keeps_the_merge_guard_for_its_retry(tmp_path):
+    import pytest
+    a = store.Store(tmp_path / "n.db")
+    b = store.Store(tmp_path / "n.db")
+    a.insert_many([_news("u1", "Fed holds rates steady today", "CNBC")])
+    todo = a.rows_to_score("fp1")
+    scores = [(r["id"], 5, "med", ["kw:tier1:FOMC"], "fp1") for r in todo]
+    real = a._c
+    a._c = _CommitFailsOnce(real)
+    with pytest.raises(sqlite3.OperationalError):
+        a.set_impact(scores)
+    a._c = real
+    b.insert_many([_news("u2", "Fed holds rates steady today", "WSJ")])   # cross-feed merge
+    a.set_impact(scores)                                                  # the retry
+    assert [r["id"] for r in a.rows_to_score("fp1")] == [item_id("u1")]
+    assert a.newest(10)[0]["impact"] is None
+
+
+def test_a_successful_set_impact_releases_the_captured_shapes(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC")])
+    db.rows_to_score("fp1")
+    db.set_impact([(item_id("u1"), 5, "med", [], "fp1")])
+    assert item_id("u1") not in db._to_score
+
+
+def test_a_str_reason_is_one_reason_not_its_characters(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC")])
+    db.set_impact([(item_id("u1"), 5, "med", "kw:tier1:FOMC", "fp1")])
+    assert db.newest(10)[0]["impact"]["reasons"] == ["kw:tier1:FOMC"]
+
+
+def test_cal_source_an_unserialisable_payload_still_records_the_poll(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.set_cal_source("bls", payload=[{"x": 1}], last_poll="t1", error=None)
+    db.set_cal_source("bls", payload={"bad": object()}, last_poll="t2", error="boom")
+    st = db.cal_source("bls")
+    assert st["last_poll"] == "t2" and st["error"] == "boom" and st["payload"] is None
+    assert not db._c.in_transaction
+    db.set_cal_source("fred", payload=[float("nan"), {1, 2}], last_poll="t3")
+    assert db.cal_source("fred")["last_poll"] == "t3"
+
+
+def test_econ_obs_first_seen_is_when_the_first_reading_arrived(tmp_path):
+    # A stored NULL is not a reading: the value that later fills it reached us
+    # at ITS poll, which is what the release tile compares to the release time.
+    db = store.Store(tmp_path / "n.db")
+    db.upsert_obs("S", [{"obs_date": "2026-08-01", "value": "."}], now="t1")
+    db.upsert_obs("S", [{"obs_date": "2026-08-01", "value": None}], now="t2")
+    assert db.obs("S")[0]["first_seen"] == "t1"
+    db.upsert_obs("S", [{"obs_date": "2026-08-01", "value": 2.5}], now="t3")
+    assert db.obs("S")[0]["first_seen"] == "t3"
+    db.upsert_obs("S", [{"obs_date": "2026-08-01", "value": 2.6}], now="t4")   # a revision
+    assert db.obs("S")[0] == {"obs_date": "2026-08-01", "value": 2.6, "first_seen": "t3",
+                              "bootstrap": True}

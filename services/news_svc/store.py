@@ -110,8 +110,8 @@ it counts private sources and tickers, so the publisher re-scores the public row
 
 Calendar: ``cal_sources`` keeps each source's last GOOD parsed ``payload`` beside
 its poll state, so a failed fetch records its error without losing the result.
-``econ_obs`` keeps each observation's ``first_seen`` forever (when it reached us)
-and marks the rows of a series' first fetch ``bootstrap``.
+``econ_obs`` keeps each observation's ``first_seen`` forever (when its first
+non-NULL value reached us - a stored NULL is no reading) and marks the rows of a series' first fetch ``bootstrap``.
 """
 import contextlib
 import datetime as dt
@@ -638,17 +638,28 @@ class Store:
     def set_impact(self, rows) -> None:
         """Store ``(id, score, band, reasons, fingerprint)`` rows in one write.
         An unknown id is ignored; a row read by the last ``rows_to_score`` and
-        merged since is left for the next pass."""
+        merged since is left for the next pass. ``reasons`` may be a bare str,
+        stored as ONE reason.
+
+        The captured shapes are released only once the write has COMMITTED: a
+        failed write leaves them in place, so its retry is still guarded against
+        a merge that lands in between."""
+        rows = list(rows)
+        done = []
         with self._write():
             for item_id, score, band, reasons, fp in rows:
                 sql = ("UPDATE items SET impact_score=?, impact_band=?, impact_reasons=?, "
                        "impact_ver=? WHERE id=?")
-                args = [score, band, _dumps(list(reasons or [])), fp, item_id]
-                shape = self._to_score.pop(item_id, None)
+                args = [score, band, _dumps(_names(reasons) or []), fp, item_id]
+                shape = self._to_score.get(item_id)
                 if shape is not None:
                     sql += " AND sources=? AND tickers=? AND ticker_sources IS ? AND public=?"
                     args.extend(shape)
                 self._c.execute(sql, args)
+                done.append(item_id)
+        with self._lock:
+            for item_id in done:
+                self._to_score.pop(item_id, None)
 
     def prune(self, *, keep_days, now) -> int:
         """Delete items published OR first seen before the cutoff (``first_seen``
@@ -735,12 +746,21 @@ class Store:
         unknown = set(fields) - set(_CAL_COLS[2:])
         if unknown:
             raise TypeError(f"unknown calendar source field(s): {sorted(unknown)}")
+        # Serialise BEFORE the write: a payload json cannot encode must not
+        # lose the poll's last_poll / error - it is stored as no payload.
+        if payload is not _UNSET and payload is not None:
+            try:
+                payload = _dumps(payload)
+            except (TypeError, ValueError):
+                log.warning("news store: calendar source %s payload is not JSON-serialisable; "
+                            "storing none", name, exc_info=True)
+                payload = None
         with self._write():
             r = self._c.execute("SELECT * FROM cal_sources WHERE name=?", (name,)).fetchone()
             st = dict(r) if r else dict.fromkeys(_CAL_COLS, None)
             st.update(fields)
             if payload is not _UNSET:
-                st["payload"] = None if payload is None else _dumps(payload)
+                st["payload"] = payload                  # already serialised above
             self._c.execute(
                 f"INSERT OR REPLACE INTO cal_sources ({', '.join(_CAL_COLS)}) "
                 f"VALUES ({','.join('?' * len(_CAL_COLS))})",
@@ -749,8 +769,9 @@ class Store:
     def upsert_obs(self, series, rows, *, now) -> None:
         """Store ``{"obs_date", "value"}`` observations of ``series``.
 
-        ``first_seen`` is written once and never overwritten (it is when the
-        value reached us, which the release tile compares to the release time);
+        ``first_seen`` is when the value reached us, which the release tile
+        compares to the release time: kept once a reading is stored, but a
+        stored NULL is no reading, so the poll that first fills it sets it;
         ``value`` is updated, since FRED revises - but a missing value (NaN,
         ``"."``, anything not a finite number, stored NULL) never erases a
         reading. Rows inserted while the series had NO row are ``bootstrap``:
@@ -765,7 +786,9 @@ class Store:
                 self._c.execute(
                     "INSERT INTO econ_obs (series, obs_date, value, first_seen, bootstrap) "
                     "VALUES (?,?,?,?,?) ON CONFLICT(series, obs_date) DO UPDATE SET "
-                    "value=COALESCE(excluded.value, econ_obs.value)",
+                    "value=COALESCE(excluded.value, econ_obs.value), "
+                    "first_seen=CASE WHEN econ_obs.value IS NULL AND excluded.value IS NOT NULL "
+                    "THEN excluded.first_seen ELSE econ_obs.first_seen END",
                     (series, obs_date, _obs_value(r.get("value")), now, boot))
 
     def obs(self, series) -> list:
