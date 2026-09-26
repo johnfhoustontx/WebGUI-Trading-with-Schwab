@@ -345,3 +345,249 @@ def test_trending_skips_yahoo_per_ticker_items():
     # The rows themselves are untouched: a Yahoo item still lists and filters.
     rows = nv.rows({"items": items}, now=NOW)
     assert len(nv.filter_rows(rows, sources=None, symbol="AAPL")) == 6
+
+
+# ---- v2: impact, the SEC panel and calendar tiles (plan Task 10) -----------
+
+import pytest  # noqa: E402
+
+ITEM = _it(1, tickers=["NVDA"])
+
+
+def test_rows_carry_the_impact_band_and_reasons():
+    r = nv.rows({"items": [{**ITEM, "impact": {"band": "high", "score": 7,
+                                              "reasons": ["kw:tier1:FOMC"]}}]}, now=NOW)[0]
+    assert (r["band"], r["reasons"]) == ("high", ["kw:tier1:FOMC"])
+
+
+def test_a_missing_or_junk_impact_reads_as_no_band_never_low():
+    for imp in (None, {}, {"band": "extreme"}, "high"):
+        assert nv.rows({"items": [{**ITEM, "impact": imp}]}, now=NOW)[0]["band"] is None
+
+
+def test_junk_reasons_are_cleaned_to_strings():
+    imp = {"band": "med", "reasons": ["a", 3, None, "b"]}
+    assert nv.rows({"items": [{**ITEM, "impact": imp}]}, now=NOW)[0]["reasons"] == ["a", "b"]
+    imp = {"band": "med", "reasons": "a"}
+    assert nv.rows({"items": [{**ITEM, "impact": imp}]}, now=NOW)[0]["reasons"] == []
+
+
+def test_min_band_filter():
+    rs = [{"band": "high", "tickers": []}, {"band": "med", "tickers": []},
+          {"band": "low", "tickers": []}, {"band": None, "tickers": []}]
+    assert [r["band"] for r in nv.filter_rows(rs, sources=None, symbol=None, min_band="med")] == ["high", "med"]
+    assert [r["band"] for r in nv.filter_rows(rs, sources=None, symbol=None, min_band="high")] == ["high"]
+    assert len(nv.filter_rows(rs, sources=None, symbol=None, min_band=None)) == 4
+
+
+def test_band_classes_are_a_fixed_finite_map():
+    assert set(nv.BAND_CLASSES) == {"high", "med", "low", None}
+    assert all("[" not in c or "#" in c for c in nv.BAND_CLASSES.values())   # no runtime values
+    assert nv.BAND_LETTER == {"high": "H", "med": "M", "low": "L"}
+
+
+def test_view_names():
+    assert (nv.VIEW_SEC, nv.VIEW_SEC_PUBLIC) == ("news:sec", "news:sec_public")
+    assert (nv.VIEW_CAL, nv.VIEW_CAL_PUBLIC, nv.VIEW_CAL_STATUS) == (
+        "news:calendar", "news:calendar_public", "news:calendar_status")
+
+
+FORM4_ITEM = {**_it(9, tickers=["ACME"], source="SEC"), "kind": "edgar_form4",
+              "detail": {**FORM4_DETAIL, "symbol": "ACME"}}
+
+
+def test_sec_rows_join_headline_and_detail():
+    r = nv.sec_rows({"items": [FORM4_ITEM]}, now=NOW)[0]
+    assert r["symbol"] == "ACME" and r["details"] == "9 purchases · $136.4M · 2026-09-23"
+
+
+def test_sec_row_symbol_falls_back_to_the_filer_and_else_empty():
+    it = {**FORM4_ITEM, "tickers": []}
+    assert nv.sec_rows({"items": [it]}, now=NOW)[0]["symbol"] == "ACME"
+    it = {**FORM4_ITEM, "tickers": [], "detail": {"symbol": "not a symbol!"}}
+    assert nv.sec_rows({"items": [it]}, now=NOW)[0]["symbol"] == ""
+    assert nv.sec_rows(None, now=NOW) == []
+
+
+RELEASE_AT = dt.datetime(2026, 10, 14, 12, 30, tzinfo=dt.timezone.utc)
+PREV_RELEASE = "2026-09-11T12:30:00+00:00"
+CALCFG = {"release_watch_min": 60, "actual_fresh_h": 24}
+
+
+def _obs(date, value, first_seen, bootstrap=False):
+    return {"obs_date": date, "value": value, "first_seen": first_seen, "bootstrap": bootstrap}
+
+
+IND = {"key": "cpi", "label": "CPI", "tile": "CPI", "unit": "pct_mom",
+       "next_release_at": RELEASE_AT.isoformat(), "next_date": "2026-10-14",
+       "last_release_at": PREV_RELEASE,
+       "latest": _obs("2026-08-01", 0.2, "2026-09-11T12:40:00+00:00"),
+       "prior": _obs("2026-07-01", 0.1, "2026-08-12T12:40:00+00:00")}
+IND_WITH_NEW_OBS = {**IND, "last_release_at": RELEASE_AT.isoformat(),
+                    "next_release_at": "2026-11-13T13:30:00+00:00", "next_date": "2026-11-13",
+                    "latest": _obs("2026-09-01", 0.4, (RELEASE_AT + dt.timedelta(minutes=8)).isoformat()),
+                    "prior": IND["latest"]}
+IND_BOOTSTRAP = {**IND_WITH_NEW_OBS,
+                 "latest": _obs("2026-09-01", 0.4, (RELEASE_AT + dt.timedelta(minutes=1)).isoformat(),
+                                bootstrap=True)}
+IND_NO_NEXT = {**IND, "next_release_at": None, "next_date": None}
+
+
+@pytest.mark.parametrize("unit,value,text", [("pct_mom", 0.4, "+0.4% m/m"), ("change_k", 162.0, "+162K"),
+    ("level_pct", 4.1, "4.1%"), ("level_k", 197.0, "197K"), ("pct_saar", 1.5, "1.5% SAAR"),
+    ("pct_mom", None, "—"), ("pct_mom", float("nan"), "—")])
+def test_indicator_values(unit, value, text):
+    assert nv.fmt_indicator(value, unit) == text
+
+
+def test_indicator_values_signs_and_junk():
+    assert nv.fmt_indicator(-0.1, "pct_mom") == "-0.1% m/m"
+    assert nv.fmt_indicator(0.0, "pct_mom") == "0.0% m/m"
+    assert nv.fmt_indicator(-33.0, "change_k") == "-33K"
+    assert nv.fmt_indicator(True, "pct_mom") == "—"
+    assert nv.fmt_indicator("0.4", "pct_mom") == "—"
+    assert nv.fmt_indicator(float("inf"), "level_k") == "—"
+    assert nv.fmt_indicator(1.25, "mystery") == "1.2"   # an unknown unit prints the bare number
+
+
+def test_actual_before_and_after_release():
+    before = nv.indicator_state(IND, now=RELEASE_AT - dt.timedelta(minutes=5), cfg=CALCFG)
+    assert (before["actual"], before["prior"]) == ("—", "+0.2% m/m")
+    after = nv.indicator_state(IND_WITH_NEW_OBS, now=RELEASE_AT + dt.timedelta(minutes=9), cfg=CALCFG)
+    assert (after["actual"], after["prior"], after["state"]) == ("+0.4% m/m", "+0.2% m/m", "released")
+
+
+def test_released_ends_after_actual_fresh_h():
+    later = nv.indicator_state(IND_WITH_NEW_OBS, now=RELEASE_AT + dt.timedelta(hours=25), cfg=CALCFG)
+    assert (later["actual"], later["prior"], later["state"]) == ("—", "+0.4% m/m", "upcoming")
+
+
+def test_a_release_passed_with_no_new_value_is_awaiting():
+    ind = {**IND, "last_release_at": RELEASE_AT.isoformat(), "next_release_at": None}
+    s = nv.indicator_state(ind, now=RELEASE_AT + dt.timedelta(minutes=3), cfg=CALCFG)
+    assert (s["state"], s["actual"], s["prior"]) == ("awaiting", "—", "+0.2% m/m")
+
+
+def test_a_stale_payload_whose_next_release_has_passed_is_awaiting():
+    # the payload predates the release; the page's clock has moved past it
+    s = nv.indicator_state(IND, now=RELEASE_AT + dt.timedelta(minutes=2), cfg=CALCFG)
+    assert (s["state"], s["actual"]) == ("awaiting", "—")
+    assert s["next"] == "Next date not yet published"
+
+
+def test_bootstrap_value_inside_the_watch_window_is_awaiting_not_actual():
+    s = nv.indicator_state(IND_BOOTSTRAP, now=RELEASE_AT + dt.timedelta(minutes=3), cfg=CALCFG)
+    assert s["state"] == "awaiting" and s["actual"] == "—"
+
+
+def test_bootstrap_value_after_the_watch_window_is_the_actual():
+    s = nv.indicator_state(IND_BOOTSTRAP, now=RELEASE_AT + dt.timedelta(minutes=61), cfg=CALCFG)
+    assert (s["state"], s["actual"], s["prior"]) == ("released", "+0.4% m/m", "+0.2% m/m")
+
+
+def test_no_future_release_says_so():
+    assert nv.indicator_state(IND_NO_NEXT, now=NOW, cfg=CALCFG)["next"] == "Next date not yet published"
+
+
+def test_next_release_renders_central_or_date_only():
+    s = nv.indicator_state(IND, now=NOW, cfg=CALCFG)
+    assert s["next"] == "Wed Oct 14 · 7:30 AM CT"
+    s = nv.indicator_state({**IND, "next_release_at": None, "next_date": "2026-10-05"}, now=NOW, cfg=CALCFG)
+    assert s["next"] == "Mon Oct 5"
+
+
+def test_indicator_state_tolerates_junk():
+    for ind in (None, {}, {"latest": "x", "prior": 5, "last_release_at": "bogus", "unit": 3},
+                {**IND, "last_release_at": "9999-12-31T23:59:59-12:00"}):
+        s = nv.indicator_state(ind, now=NOW, cfg=None)
+        assert s["actual"] == "—" and isinstance(s["prior"], str) and isinstance(s["next"], str)
+
+
+EVENT = {"id": "fed:1", "title": "FOMC statement", "at": "2026-10-28T18:00:00+00:00",
+         "date": "2026-10-28", "source": "fed"}
+DATE_ONLY_EVENT = {"id": "fed:2", "title": "Beige Book", "at": None, "date": "2026-10-05",
+                   "source": "fed"}
+DIVIDEND = {"symbol": "JPM", "ex_date": "2026-10-05", "pay_date": "2026-10-31", "amount": 1.4}
+IPO = {"symbol": "ACME", "company": "Acme Corp", "date": "2026-10-02",
+       "price_range": "40.00-44.00", "offer_usd": 2_530_000_000, "status": "upcoming"}
+CAL_PAYLOAD = {"events": [EVENT, DATE_ONLY_EVENT], "data": [IND], "dividends": [DIVIDEND],
+               "ipos": [IPO], "sources": {"fed": "ok", "bls": "ok"}, "settings": CALCFG}
+
+
+def test_calendar_group_headers_and_order():
+    gs = nv.calendar_groups(CAL_PAYLOAD, now=NOW)
+    assert [g["title"] for g in gs] == ["Economic news/Calendar", "Dividend / IPO",
+                                       "Economic data (CPI, PPI etc)"]
+
+
+def test_calendar_times_render_central():
+    t = nv.calendar_groups(CAL_PAYLOAD, now=NOW)[0]["tiles"][0]
+    assert t["when"] == "Wed Oct 28 · 1:00 PM CT"          # 2:00 p.m. ET
+    assert t["title"] == "FOMC statement"
+
+
+def test_a_date_only_event_prints_no_time():
+    t = nv.calendar_groups(CAL_PAYLOAD, now=NOW)[0]["tiles"][1]
+    assert t["when"] == "Mon Oct 5"
+
+
+def test_dividend_and_ipo_tiles():
+    tiles = nv.calendar_groups(CAL_PAYLOAD, now=NOW)[1]["tiles"]
+    div, ipo = tiles
+    assert div["title"] == "JPM dividend" and div["when"] == "Ex-div Mon Oct 5"
+    assert div["lines"] == ["$1.40 a share", "Pays Sat Oct 31"]
+    assert ipo["title"] == "ACME · Acme Corp IPO" and ipo["when"] == "Fri Oct 2"
+    assert ipo["lines"] == ["$40.00-44.00", "$2.5B offer"]
+
+
+def test_ipo_with_no_ticker_and_no_money_prints_no_zero():
+    t = nv.calendar_groups({"ipos": [{"company": "Blank Co", "date": "2026-10-02",
+                                      "offer_usd": 0}]}, now=NOW)[1]["tiles"][0]
+    assert t["title"] == "Blank Co IPO" and t["lines"] == []
+
+
+def test_data_tiles_group_indicators_by_tile_in_order():
+    core = {**IND, "key": "core_cpi", "label": "Core CPI"}
+    ppi = {**IND, "key": "ppi", "label": "PPI", "tile": "PPI"}
+    g = nv.calendar_groups({"data": [IND, ppi, core], "settings": CALCFG}, now=NOW)[2]
+    assert [t["title"] for t in g["tiles"]] == ["CPI", "PPI"]
+    cpi = g["tiles"][0]
+    assert [i["label"] for i in cpi["indicators"]] == ["CPI", "Core CPI"]
+    assert cpi["when"] == "Wed Oct 14 · 7:30 AM CT"
+    assert cpi["indicators"][0]["prior"] == "+0.2% m/m"
+
+
+def test_calendar_reads_settings_from_the_payload():
+    # a 5-minute watch window: at +9 min a bootstrap value is attributed
+    p = {"data": [IND_BOOTSTRAP], "settings": {"release_watch_min": 5, "actual_fresh_h": 24}}
+    ind = nv.calendar_groups(p, now=RELEASE_AT + dt.timedelta(minutes=9))[2]["tiles"][0]["indicators"][0]
+    assert ind["state"] == "released"
+    p = {"data": [IND_BOOTSTRAP], "settings": "junk"}   # defaults: 60-minute window
+    ind = nv.calendar_groups(p, now=RELEASE_AT + dt.timedelta(minutes=9))[2]["tiles"][0]["indicators"][0]
+    assert ind["state"] == "awaiting"
+
+
+def test_stale_and_never_sources_grey_their_group():
+    gs = nv.calendar_groups({**CAL_PAYLOAD, "sources": {"fed": "stale"}}, now=NOW)
+    assert gs[0]["note"] == "Source unavailable — showing the last good reading"
+    assert gs[1]["note"] is None and gs[2]["note"] is None
+    gs = nv.calendar_groups({"sources": {"fed": "never", "bls": "never", "bea": "off"}}, now=NOW)
+    assert gs[0]["note"] == "Not published yet"
+    gs = nv.calendar_groups({**CAL_PAYLOAD, "sources": {"fed": "stale", "bls": "ok"}}, now=NOW)
+    assert gs[0]["note"] is None                     # one good source: not the whole group
+
+
+def test_empty_groups_say_so_and_junk_never_raises():
+    for junk in (None, "x", {}, {"events": 5, "data": [1, None], "dividends": {"a": 1},
+                                  "ipos": ["x"], "sources": [1], "settings": 3}):
+        gs = nv.calendar_groups(junk, now=NOW)
+        assert [len(g["tiles"]) for g in gs] == [0, 0, 0]
+        assert all(g["empty"] for g in gs)
+    assert nv.calendar_groups(CAL_PAYLOAD, now=NOW)[0]["empty"] is None
+
+
+def test_a_junk_event_time_falls_back_to_its_date():
+    ev = {**EVENT, "at": "garbage"}
+    assert nv.calendar_groups({"events": [ev]}, now=NOW)[0]["tiles"][0]["when"] == "Wed Oct 28"
+    ev = {"title": "No date at all"}
+    assert nv.calendar_groups({"events": [ev]}, now=NOW)[0]["tiles"][0]["when"] == ""

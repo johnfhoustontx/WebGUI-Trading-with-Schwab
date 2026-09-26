@@ -6,7 +6,15 @@ Imports nothing from nicegui or bus_client; stdlib and ``shared.symbols`` only
 Everything here tolerates junk: a payload that is not a dict, ``items`` that is
 not a list, an item that is not a dict, or a ``tickers`` / ``sources`` field that
 is not a list of strings is skipped or cleaned, never raised on. The published
-payload is ``{"items": [...]}``; nothing here reads any other key of it.
+feed payloads are ``{"items": [...]}``; nothing here reads any other key of
+them. The calendar payload (``news:calendar``) is read only by
+``calendar_groups`` / ``indicator_state``, and its settings
+(``release_watch_min``, ``actual_fresh_h``) come from the payload's own
+``settings`` key - Tier 1 never reads the calendar config.
+
+An item's ``impact`` is ``{"band", "score", "reasons"}``; a missing or junk one
+is NO band (``None``), never "low" - a row that was not scored must not read as
+scored and unimportant.
 
 ⚠ A row's ``title`` and ``teaser`` are PLAIN TEXT from third-party feeds. The
 page renders them through labels and links, which escape; a caller must never
@@ -31,6 +39,21 @@ _CT = ZoneInfo("America/Chicago")   # display zone, and a naive ``now`` (CLAUDE.
 VIEW = "news:feed"
 VIEW_PUBLIC = "news:feed_public"
 VIEW_STATUS = "news:status"
+VIEW_SEC = "news:sec"
+VIEW_SEC_PUBLIC = "news:sec_public"
+VIEW_CAL = "news:calendar"
+VIEW_CAL_PUBLIC = "news:calendar_public"
+VIEW_CAL_STATUS = "news:calendar_status"      # private: carries error text
+
+# Impact pill: a FIXED finite map (the Tailwind-first rule - no runtime colour).
+BAND_CLASSES = {
+    "high": "bg-rose-500/20 text-rose-300",
+    "med": "bg-amber-500/15 text-amber-300",
+    "low": "bg-white/5 text-[#7f8db0]",
+    None: "",
+}
+BAND_LETTER = {"high": "H", "med": "M", "low": "L"}
+_BAND_RANK = {"high": 3, "med": 2, "low": 1}
 
 DESK_LIMIT = 5     # rows on the Desk's news strip
 SYMBOL_LIMIT = 8   # rows on the Symbol dossier's news band
@@ -108,6 +131,18 @@ def _day(ct):
     return f"{ct.strftime('%b')} {ct.day}" if ct else ""
 
 
+def _impact(it):
+    """``(band, reasons)``; junk is ``(None, [])`` - never "low"."""
+    imp = it.get("impact")
+    if not isinstance(imp, dict):
+        return None, []
+    band = imp.get("band")
+    band = band if isinstance(band, str) and band in _BAND_RANK else None
+    raw = imp.get("reasons")
+    reasons = [x for x in raw if isinstance(x, str)] if isinstance(raw, list) else []
+    return band, reasons
+
+
 def rows(payload, *, now) -> list:
     """One display dict per usable item, in payload order."""
     now = _aware(now)
@@ -124,6 +159,7 @@ def rows(payload, *, now) -> list:
         time_, day = _time(ct), _day(ct)
         topics = it.get("topics")
         detail = it.get("detail")
+        band, reasons = _impact(it)
         out.append({
             "id": it.get("id"), "title": _str(it.get("title")), "teaser": _str(it.get("teaser")),
             "url": _str(it.get("url")), "tickers": _tickers(it.get("tickers")),
@@ -135,6 +171,7 @@ def rows(payload, *, now) -> list:
             "when": (time_ if today else f"{day} {time_}") if ct else "",
             "published_at": published, "first_seen": it.get("first_seen"),
             "age_min": ((now - when).total_seconds() / 60) if when else None,
+            "band": band, "reasons": reasons,
         })
     return out
 
@@ -167,9 +204,14 @@ def _row_symbols(r):
     return set(_tickers(raw))
 
 
-def filter_rows(rows_, *, sources, symbol, watchlist=None) -> list:
+def filter_rows(rows_, *, sources, symbol, watchlist=None, min_band=None) -> list:
     """Rows matching every given filter. ``symbol`` is cleaned on both sides;
-    a symbol that does not clean matches NOTHING (not everything)."""
+    a symbol that does not clean matches NOTHING (not everything).
+
+    ``min_band`` (``"high"`` / ``"med"`` / ``"low"``) keeps rows at that band or
+    above; an unbanded row never passes a band filter. ``None`` (or an unknown
+    word) filters nothing."""
+    floor = _BAND_RANK.get(min_band) if isinstance(min_band, str) else None
     sym = None
     if symbol:
         sym = clean_symbol(symbol) if isinstance(symbol, str) else None
@@ -191,6 +233,8 @@ def filter_rows(rows_, *, sources, symbol, watchlist=None) -> list:
         if sym and sym not in tickers:
             continue
         if watch is not None and not (tickers & watch):
+            continue
+        if floor is not None and _BAND_RANK.get(r.get("band"), 0) < floor:
             continue
         out.append(r)
     return out
@@ -286,3 +330,231 @@ def detail_line(row) -> str:
         form = _str(d.get("form")).strip()
         return f"Form {form}" if form else ""
     return ""
+
+
+
+# ---- the SEC panel ----------------------------------------------------------
+
+
+def sec_rows(payload, *, now) -> list:
+    """``rows()`` plus ``symbol`` (the first tagged ticker, else the filer's
+    cleaned symbol, else ``""``) and ``details`` (``detail_line``)."""
+    out = []
+    for r in rows(payload, now=now):
+        sym = r["tickers"][0] if r["tickers"] else None
+        if not sym:
+            raw = r["detail"].get("symbol")
+            sym = clean_symbol(raw) if isinstance(raw, str) else None
+        out.append({**r, "symbol": sym or "", "details": detail_line(r)})
+    return out
+
+
+# ---- the economic calendar ----------------------------------------------------
+
+DASH = "\u2014"
+NO_NEXT = "Next date not yet published"
+_DEFAULT_WATCH_MIN = 60.0
+_DEFAULT_FRESH_H = 24.0
+
+# (title, the sources that feed it, what an empty group says). The source names
+# are the producer's ``sources`` keys; a group greys only when EVERY one of its
+# sources the payload reports (``off`` aside) is ``stale`` or ``never``.
+_GROUPS = (
+    ("Economic news/Calendar", ("fed", "bls", "bea"), "No scheduled events ahead"),
+    ("Dividend / IPO", ("dividends", "nasdaq_ipo"), "No dividends or IPOs ahead"),
+    ("Economic data (CPI, PPI etc)", ("bls", "bea", "fred_calendar", "fred_api", "fredgraph"),
+     "No indicators to show"),
+)
+_NOTE_STALE = "Source unavailable \u2014 showing the last good reading"
+_NOTE_NEVER = "Not published yet"
+
+
+def _setting(cfg, key, default):
+    v = _finite(cfg.get(key)) if isinstance(cfg, dict) else None
+    return v if v is not None and v >= 0 else default
+
+
+def _weekday_day(d):
+    return f"{d.strftime('%a %b')} {d.day}"
+
+
+def _date(s):
+    if not isinstance(s, str) or not s.strip():
+        return None
+    try:
+        return dt.date.fromisoformat(s.strip()[:10])
+    except ValueError:
+        return None
+
+
+def _when_text(at, date):
+    """``"Wed Oct 28 \u00b7 1:00 PM CT"`` for an instant, ``"Mon Oct 5"`` for a date
+    only, ``""`` for neither."""
+    when = _dt(at)
+    if when is not None:
+        ct = when.astimezone(_CT)
+        return f"{_weekday_day(ct)} \u00b7 {_time(ct)} CT"
+    d = _date(date)
+    return _weekday_day(d) if d else ""
+
+
+def fmt_indicator(value, unit) -> str:
+    """The display figure for one derived indicator value; ``"\u2014"`` for no
+    reading (``None``, NaN, infinity, a bool or a string) - never ``0.0%``."""
+    v = _finite(value)
+    if v is None:
+        return DASH
+    places = 0 if unit in ("change_k", "level_k") else 1
+    text = f"{v:.{places}f}"
+    if float(text) == 0:
+        text = text.lstrip("-")                 # never "-0.0"
+    if unit in ("pct_mom", "change_k") and float(text) > 0:
+        text = "+" + text                       # a change carries its sign
+    suffix = {"pct_mom": "% m/m", "change_k": "K", "level_pct": "%",
+              "level_k": "K", "pct_saar": "% SAAR"}.get(unit, "")
+    return text + suffix
+
+
+def _obs(ind, key):
+    o = ind.get(key)
+    return o if isinstance(o, dict) else {}
+
+
+def indicator_state(ind, now, cfg) -> dict:
+    """Actual / Prior / state / next-release text for one indicator.
+
+    Decided HERE, from facts the payload carries, because it is a function of
+    ``now``: the latest observation is the last release's ACTUAL only if it was
+    first seen at or after that release - and a ``bootstrap`` observation (the
+    series' first fill, stamped with the fill time) only once the watch window
+    has passed. Within ``actual_fresh_h`` of the release the tile reads
+    ``released`` (value landed) or ``awaiting`` (not yet); otherwise it is
+    ``upcoming``: Actual \u2014, Prior = the latest observation.
+
+    A ``next_release_at`` the clock has already passed (a payload older than
+    the release) is treated as the last release, and the next is unknown."""
+    ind = ind if isinstance(ind, dict) else {}
+    now = _aware(now)
+    watch = dt.timedelta(minutes=_setting(cfg, "release_watch_min", _DEFAULT_WATCH_MIN))
+    fresh = dt.timedelta(hours=_setting(cfg, "actual_fresh_h", _DEFAULT_FRESH_H))
+    unit = _str(ind.get("unit"))
+    latest, prior = _obs(ind, "latest"), _obs(ind, "prior")
+    latest_txt = fmt_indicator(latest.get("value"), unit)
+    prior_txt = fmt_indicator(prior.get("value"), unit)
+
+    last = _dt(ind.get("last_release_at"))
+    if last is not None and last > now:
+        last = None
+    nxt, next_date = _dt(ind.get("next_release_at")), ind.get("next_date")
+    if nxt is not None and nxt <= now:
+        last = nxt if last is None or nxt > last else last
+        nxt, next_date = None, None
+
+    state, actual, shown_prior = "upcoming", DASH, latest_txt
+    if last is not None and now - last <= fresh:
+        seen = _dt(latest.get("first_seen"))
+        boot = latest.get("bootstrap") is True or latest.get("bootstrap") == 1
+        after = seen is not None and seen >= last
+        if after and (not boot or now - last > watch):
+            state, actual, shown_prior = "released", latest_txt, prior_txt
+        else:
+            state = "awaiting"
+            # a bootstrap value first seen after the release may BE the new
+            # figure: it cannot be called the prior either
+            shown_prior = DASH if (after and boot) else latest_txt
+
+    if nxt is not None:
+        next_txt = _when_text(ind.get("next_release_at"), None)
+    else:
+        d = _date(next_date)
+        try:
+            today = now.astimezone(_CT).date()
+        except (ValueError, OverflowError):
+            today = None
+        next_txt = _weekday_day(d) if d and today and d >= today else NO_NEXT
+    return {"key": _str(ind.get("key")), "label": _str(ind.get("label")),
+            "actual": actual, "prior": shown_prior, "state": state, "next": next_txt}
+
+
+def _list(payload, key):
+    v = payload.get(key) if isinstance(payload, dict) else None
+    return [x for x in v if isinstance(x, dict)] if isinstance(v, list) else []
+
+
+def _event_tile(ev):
+    return {"title": _str(ev.get("title")).strip(),
+            "when": _when_text(ev.get("at"), ev.get("date")), "lines": []}
+
+
+def _dividend_tile(d):
+    sym = clean_symbol(d["symbol"]) if isinstance(d.get("symbol"), str) else None
+    ex = _date(d.get("ex_date"))
+    pay = _date(d.get("pay_date"))
+    amount = _finite(d.get("amount"))
+    lines = []
+    if amount is not None and amount > 0:
+        lines.append(f"${amount:.2f} a share")
+    if pay:
+        lines.append(f"Pays {_weekday_day(pay)}")
+    return {"title": f"{sym} dividend" if sym else "Dividend",
+            "when": f"Ex-div {_weekday_day(ex)}" if ex else "", "lines": lines}
+
+
+def _ipo_tile(i):
+    sym = clean_symbol(i["symbol"]) if isinstance(i.get("symbol"), str) else None
+    company = _str(i.get("company")).strip()
+    name = " \u00b7 ".join(x for x in (sym, company) if x)
+    lines = []
+    price = _finite(i.get("price"))
+    rng = _str(i.get("price_range")).strip()
+    if price is not None and price > 0:
+        lines.append(f"Priced ${price:.2f}")
+    elif rng:
+        lines.append(rng if rng.startswith("$") else f"${rng}")
+    offer = _finite(i.get("offer_usd"))
+    if offer is not None and offer > 0:
+        lines.append(f"{_money(offer)} offer")
+    return {"title": f"{name} IPO" if name else "IPO",
+            "when": _when_text(None, i.get("date")), "lines": lines}
+
+
+def _data_tiles(data, now, cfg):
+    tiles, by_title = [], {}
+    for ind in data:
+        title = _str(ind.get("tile")).strip() or _str(ind.get("label")).strip()
+        state = indicator_state(ind, now, cfg)
+        tile = by_title.get(title)
+        if tile is None:
+            tile = {"title": title, "when": state["next"], "lines": [], "indicators": []}
+            by_title[title] = tile
+            tiles.append(tile)
+        tile["indicators"].append(state)
+    return tiles
+
+
+def _group_note(sources, names):
+    states = [sources[n] for n in names
+              if isinstance(sources.get(n), str) and sources[n] != "off"]
+    if not states or any(s not in ("stale", "never") for s in states):
+        return None
+    return _NOTE_NEVER if all(s == "never" for s in states) else _NOTE_STALE
+
+
+def calendar_groups(payload, *, now) -> list:
+    """The calendar's three groups, in order: ``{"title", "tiles", "note",
+    "empty"}``. A tile is ``{"title", "when", "lines"}`` (a data tile adds
+    ``indicators``, each an ``indicator_state``). ``note`` greys a group whose
+    sources all failed; ``empty`` is the plain sentence for a group with no
+    tiles (``None`` otherwise)."""
+    cfg = payload.get("settings") if isinstance(payload, dict) else None
+    raw_sources = payload.get("sources") if isinstance(payload, dict) else None
+    sources = raw_sources if isinstance(raw_sources, dict) else {}
+    tile_sets = (
+        [_event_tile(e) for e in _list(payload, "events")],
+        [_dividend_tile(d) for d in _list(payload, "dividends")]
+        + [_ipo_tile(i) for i in _list(payload, "ipos")],
+        _data_tiles(_list(payload, "data"), now, cfg),
+    )
+    return [{"title": title, "tiles": tiles, "note": _group_note(sources, names),
+             "empty": None if tiles else empty}
+            for (title, names, empty), tiles in zip(_GROUPS, tile_sets)]
