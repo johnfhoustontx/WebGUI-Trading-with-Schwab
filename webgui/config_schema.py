@@ -18,8 +18,10 @@ Kinds
     time            "HH:MM", Central time unless the section says otherwise
     date            "YYYY-MM-DD"
     choice          one of ``choices``
-    text            a short piece of text (a tab name)
+    text            a short piece of text (a tab name); ``blank_ok`` lets "" stand
     symbols         a list of tickers
+    phrases         a list of keyword phrases: case and inner spaces kept,
+                    split on commas only, deduplicated ignoring case
     pair            two numbers [low, high]
     ladder          a list of [peak, lock] rungs (fractions, shown as percents)
     sector          one of the sector names (the sector-map editor)
@@ -69,6 +71,9 @@ class Field:
     choices: tuple = ()
     optional: bool = False    # may be absent from the file: unset = off / inherited
     restart: tuple | None = None   # overrides the section's / file's restart list
+    # text only: "" is a real value (e.g. "use the default User-Agent"), stored
+    # as "" rather than refused or read as unset.
+    blank_ok: bool = False
 
 
 @dataclass(frozen=True)
@@ -855,6 +860,171 @@ _PAPER = ConfigFile(
 # ─────────────────────────────────────────────────────────────────────────────
 # Market news — config/news.toml
 # ─────────────────────────────────────────────────────────────────────────────
+def _pts(key, label, help=""):
+    """A points value in the impact score: whole points, either sign."""
+    return Field(key, label, help, kind="int", unit="pts", min=-10, max=10, step=1)
+
+
+# Mirrors shared.news_config.TRANSFORMS / SCHEDULES (pinned equal by
+# tests/test_config_schema.py; this module stays import-free).
+INDICATOR_TRANSFORMS = ("pct_mom", "change_k", "level_pct", "level_k", "pct_saar")
+INDICATOR_SCHEDULES = ("bls", "bea", "fred")
+
+# How the calendar's sources read on screen (``calendar.sources.<name>``).
+CALENDAR_SOURCE_NAMES = {
+    "fed": "Federal Reserve calendar", "bls": "BLS", "bea": "BEA",
+    "fred_calendar": "FRED release calendar", "fred_api": "FRED API",
+    "fredgraph": "FRED graph download", "nasdaq_ipo": "Nasdaq IPOs",
+}
+
+_NEWS_IMPACT_SECTIONS = (
+    Section("Impact", "Every headline gets a High, Med or Low rank from points: "
+            "keywords, the feed, insider-buy size and filing type add up to a "
+            "score, and these cut it into the three ranks.", (
+        Field("impact.high_at", "High at", "A score at or above this is High.",
+              kind="int", unit="pts", min=1, max=30, step=1),
+        Field("impact.med_at", "Med at", "A score at or above this (and below High) "
+              "is Med; anything lower is Low.", kind="int", unit="pts", min=0,
+              max=30, step=1),
+        Field("impact.stale_after_h", "High fades after",
+              "A High item older than this shows as Med.", kind="int", unit="h",
+              min=1, max=168, step=1),
+        _pts("impact.multi_source", "Carried by two or more feeds",
+             "Added when more than one feed ran the same story."),
+        _pts("impact.watchlist", "About a followed ticker",
+             "Added when the item is tagged with a ticker you follow."),
+        Field("impact.match_teaser", "Match keywords in the summary too",
+              "Off matches the headline only, which is less noisy.", kind="bool"),
+    )),
+    Section("Impact keywords", "Tiers of words and phrases. A tier adds its "
+            "points once, however many of its words a headline contains. "
+            "Matching ignores case.", (
+        _pts("impact.keywords.*.points", "Points",
+             "Added when any word of this tier matches."),
+        Field("impact.keywords.*.words", "Words",
+              "Type a word or phrase and press Enter; each chip is matched as a "
+              "whole phrase.", kind="phrases"),
+    )),
+    Section("Impact by feed", "Points added for the feed an item came from. A "
+            "story on several feeds takes the highest; a feed not listed adds "
+            "nothing.", (
+        _pts("impact.source_points.*", ""),
+    )),
+    Section("Impact: insider buys", "Points for an SEC Form 4 open-market buy, by "
+            "the total dollars bought.", (
+        Field("impact.form4.small_usd", "Small buy from", "", kind="money",
+              min=0, max=1e10, step=50000),
+        _pts("impact.form4.small", "Small buy points"),
+        Field("impact.form4.large_usd", "Large buy from", "", kind="money",
+              min=0, max=1e10, step=100000),
+        _pts("impact.form4.large", "Large buy points"),
+        Field("impact.form4.huge_usd", "Very large buy from", "", kind="money",
+              min=0, max=1e11, step=1000000),
+        _pts("impact.form4.huge", "Very large buy points"),
+        _pts("impact.form4.officer", "Bought by an officer or director",
+             "Added on top of the size points."),
+    )),
+    Section("Impact: SEC filings", "Points for an offering filing, by its exact "
+            "form type.", (
+        _pts("impact.filings.untracked", "On a ticker you do not follow",
+             "Usually a micro-cap; a negative value pushes these down."),
+        _pts("impact.filings.*", ""),
+    )),
+)
+
+_NEWS_CALENDAR_SECTIONS = (
+    Section("Calendar", "The economic calendar: Fed events, data release dates "
+            "and the latest values, IPOs and dividends.", (
+        Field("calendar.enabled", "Calendar on", "Off stops every calendar fetch.",
+              kind="bool"),
+        Field("calendar.refresh_min", "Refresh schedules every",
+              "Release schedules, Fed events and dividends. A source may set its "
+              "own.", kind="int", unit="min", min=5, max=1440, step=5),
+        Field("calendar.values_refresh_min", "Refresh values every",
+              "Latest indicator values, outside a release watch.", kind="int",
+              unit="min", min=15, max=1440, step=15),
+        Field("calendar.release_poll_min", "During a release, check every",
+              "How often a just-due release is checked for its new value.",
+              kind="int", unit="min", min=1, max=30, step=1),
+        Field("calendar.release_watch_min", "Watch a release for",
+              "How long after its scheduled time a release keeps being checked.",
+              kind="int", unit="min", min=5, max=480, step=5),
+        Field("calendar.actual_fresh_h", "Mark a new value as released for",
+              "", kind="int", unit="h", min=1, max=168, step=1),
+    )),
+    Section("Calendar sources", "Where each part of the calendar comes from.", (
+        Field("calendar.sources.*.enabled", "Enabled", "", kind="bool"),
+        Field("calendar.sources.*.url", "Address",
+              "Words in {braces} are filled in by the collector.", kind="text"),
+        Field("calendar.sources.*.user_agent", "User-Agent",
+              "Empty sends the feed User-Agent. BLS refuses a browser one; "
+              "Nasdaq requires it.", kind="text", optional=True, blank_ok=True),
+        Field("calendar.sources.*.refresh_min", "Refresh every",
+              "Unset uses the calendar's own refresh.", kind="int", unit="min",
+              min=5, max=1440, step=5, optional=True),
+        Field("calendar.sources.*.accept", "Accept header",
+              "The response type the source is asked for.", kind="text",
+              optional=True),
+    )),
+    Section("Fed events", "From the Federal Reserve's own calendar.", (
+        Field("calendar.fed.types", "Event types shown",
+              "Fed calendar types, e.g. FOMC, Beige, Speeches, Testimony.",
+              kind="phrases"),
+        Field("calendar.fed.horizon_days", "Look ahead",
+              "An FOMC meeting can be six weeks out.", kind="int", unit="days",
+              min=1, max=180, step=1),
+        Field("calendar.fed.speech_horizon_days", "Look ahead for speeches",
+              "Board speeches are frequent, so they get a shorter window.",
+              kind="int", unit="days", min=1, max=90, step=1),
+    )),
+    Section("Other releases", "", (
+        Field("calendar.events.extra_releases", "Extra releases shown",
+              "Release names, as the BLS or BEA schedule spells them, shown as "
+              "dated events without a value tile.", kind="phrases"),
+    )),
+    Section("IPOs", "From Nasdaq's IPO calendar.", (
+        Field("calendar.ipo.min_offer_usd", "Smallest deal shown",
+              "About half of the rows are SPACs and tiny deals.", kind="money",
+              min=0, max=1e11, step=10000000),
+        Field("calendar.ipo.lookback_days", "Keep priced deals for", "",
+              kind="int", unit="days", min=0, max=60, step=1),
+    )),
+    Section("Dividends", "Collected by the trade service for the followed "
+            "tickers.", (
+        Field("calendar.dividends.enabled", "Dividends on", "", kind="bool"),
+        Field("calendar.dividends.refresh_at", "Refresh at",
+              "Central time, trading days.", kind="time"),
+        Field("calendar.dividends.horizon_days", "Look ahead", "", kind="int",
+              unit="days", min=1, max=120, step=1),
+        Field("calendar.dividends.lookback_days", "Keep past dates for", "",
+              kind="int", unit="days", min=0, max=30, step=1),
+    ), restart=(TRADE, NEWS)),
+    Section("Economic indicators", "One entry per indicator, in tile order. "
+            "Indicators sharing a tile name are shown together.", (
+        Field("calendar.indicators.*.enabled", "Enabled", "", kind="bool"),
+        Field("calendar.indicators.*.label", "Name", "", kind="text"),
+        Field("calendar.indicators.*.series", "FRED series",
+              "The FRED series id the value is read from.", kind="text"),
+        Field("calendar.indicators.*.transform", "Shown as",
+              "pct_mom: % change on the month · change_k: change in thousands · "
+              "level_pct: the level, as a percent · level_k: the level in "
+              "thousands · pct_saar: annualised % rate.", kind="choice",
+              choices=INDICATOR_TRANSFORMS),
+        Field("calendar.indicators.*.schedule", "Release dates from",
+              "bls or bea: matched by release name · fred: by release number.",
+              kind="choice", choices=INDICATOR_SCHEDULES),
+        Field("calendar.indicators.*.match", "Release name contains",
+              "For bls and bea schedules.", kind="text", optional=True),
+        Field("calendar.indicators.*.release_id", "FRED release number",
+              "For the fred schedule.", kind="int", min=1, max=100000, step=1,
+              optional=True),
+        Field("calendar.indicators.*.time_ct", "Release time",
+              "Central time; used only when the date source gives no time.",
+              kind="time", optional=True),
+        Field("calendar.indicators.*.tile", "Tile", "", kind="text"),
+    )),
+)
+
 _NEWS = ConfigFile(
     name="news.toml", title="Market news", icon="newspaper",
     summary="Which public feeds the news collector reads, how often, and which "
@@ -863,7 +1033,8 @@ _NEWS = ConfigFile(
     caution="Every feed is a public RSS, Google News or SEC feed. A feed marked "
             "not public stays in the app and never reaches live.neuralstrike.co. "
             "The feed list itself is read-only here: add or change a feed in "
-            "config/news.toml.",
+            "config/news.toml. The FRED API key is read from FRED_API_KEY in the "
+            "stack .env and is never stored here.",
     sections=(
         Section("Polling", "How often every feed is read. Faster costs nothing "
                 "in API budget but is discourteous to the publishers.", (
@@ -882,6 +1053,9 @@ _NEWS = ConfigFile(
             Field("collector.view_items", "Rows published",
                   "The newest rows the page, the Desk and the Symbol page read.",
                   kind="int", min=50, max=1000, step=50),
+            Field("collector.sec_view_items", "SEC rows published",
+                  "The newest SEC filings and insider buys the SEC panel reads.",
+                  kind="int", min=10, max=1000, step=10),
             Field("collector.request_timeout_s", "Request timeout",
                   "How long one feed may take to answer before it is skipped "
                   "until the next poll.", kind="int", unit="s", min=5, max=120, step=5),
@@ -917,6 +1091,8 @@ _NEWS = ConfigFile(
                   "follow a template, so two different filings can share one. "
                   "0 turns this off.", kind="int", unit="h", min=0, max=24, step=1),
         )),
+        *_NEWS_IMPACT_SECTIONS,
+        *_NEWS_CALENDAR_SECTIONS,
         Section("Feed switches", "One pair per feed, named by the feed. A switch "
                 "is a table entry, so changing one leaves every other feed alone.", (
             Field("feed_flags.*.enabled", "Enabled",
@@ -1058,6 +1234,8 @@ def parse(fld: Field, raw, *, shipped=None):
     """Editor value -> the value stored in TOML, or ``ValueError`` with a
     sentence the page shows beside the field. ``shipped`` keeps an int an int."""
     k = fld.kind
+    if k == "text" and fld.blank_ok and (raw is None or str(raw).strip() == ""):
+        return ""
     if raw is None or (isinstance(raw, str) and raw.strip() == ""):
         if fld.optional:
             return None
@@ -1111,6 +1289,15 @@ def parse(fld: Field, raw, *, shipped=None):
             t = str(it).strip().upper() if fld.key != "single_leg.excluded_grades" \
                 else str(it).strip().capitalize()
             if t and t not in out:
+                out.append(t)
+        return out
+    if k == "phrases":
+        items = raw if isinstance(raw, (list, tuple)) else str(raw).split(",")
+        out, seen = [], set()
+        for it in items:
+            t = " ".join(str(it).split())
+            if t and t.casefold() not in seen:
+                seen.add(t.casefold())
                 out.append(t)
         return out
     if k == "pair":

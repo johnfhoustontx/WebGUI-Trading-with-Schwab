@@ -150,8 +150,11 @@ def change_stamp(at):
 def _group_label(f, fld, path, label):
     """Rows under a wildcard are named after what they belong to: a Net Prem
     group ("Mega-caps — symbols"), a news feed's switch ("ZeroHedge — Enabled",
-    keyed by the feed's name) or a news feed's field ("MarketWatch — Feed URL",
-    an array item, so named by its ``name`` value)."""
+    keyed by the feed's name), a news feed's field ("MarketWatch — Feed URL",
+    an array item, so named by its ``name`` value), an impact keyword tier
+    ("Tier 1 — Words"), a feed's or form's impact points (the name itself), a
+    calendar source ("BLS — User-Agent") or an indicator ("CPI — Tile", by its
+    ``label`` value)."""
     if fld.key.startswith("netprem_groups.*."):
         group = f["labels"].get(path[1], path[1])
         return f"{group} — {'tab name' if path[-1] == 'label' else 'symbols'}"
@@ -160,7 +163,24 @@ def _group_label(f, fld, path, label):
     if fld.key.startswith("feeds.*."):
         feed = f["values"].get(("feeds", path[1], "name")) or f"Feed {path[1]}"
         return f"{feed} — {label}"
+    if fld.key.startswith("impact.keywords.*."):
+        return f"{_tier_name(path[2])} — {label}"
+    if fld.key in ("impact.source_points.*", "impact.filings.*"):
+        return path[-1]          # a feed name / an SEC form type, verbatim
+    if fld.key.startswith("calendar.sources.*."):
+        return f"{cs.CALENDAR_SOURCE_NAMES.get(path[2], path[2])} — {label}"
+    if fld.key.startswith("calendar.indicators.*."):
+        name = f["values"].get(("calendar", "indicators", path[2], "label")) or path[2]
+        return f"{name} — {label}"
     return label
+
+
+def _tier_name(key):
+    """``tier1`` -> ``Tier 1``; any other keyword-table name is humanized."""
+    s = str(key)
+    if s.startswith("tier") and s[4:].isdigit():
+        return f"Tier {s[4:]}"
+    return cs.humanize(s)
 
 
 def overrides_to_save(cfg, shipped, over, values):
@@ -867,7 +887,8 @@ def _build_control(control, fld, value, on_change, *, optional=False):
         control["set"] = lambda v: setattr(el, "value", v)
         return
 
-    if k == "symbols":
+    if k in ("symbols", "phrases"):
+        # phrases are the same chips; only config_schema.parse differs (case kept)
         el = ui.input_chips(value=list(shown or []), new_value_mode="add-unique",
                             clearable=True).props("dense outlined") \
             .classes("w-full max-w-xl")

@@ -310,3 +310,70 @@ def test_a_switch_override_round_trips_through_the_writer_and_merges_by_key():
     assert merged["feeds"] == shipped["feeds"]
     assert merged["feed_flags"]["SEC Insider Buys"] == {"enabled": True, "public": False}
     assert merged["feed_flags"]["MarketWatch"] == shipped["feed_flags"]["MarketWatch"]
+
+
+# ── news v2: impact rank, economic calendar (T11) ────────────────────────────
+def test_phrases_keep_case_and_spaces_and_split_on_commas_only():
+    f = F("w", "w", kind="phrases")
+    assert cs.parse(f, "rate cut, FOMC ,rate cut") == ["rate cut", "FOMC"]
+    assert cs.parse(f, ["Fed chair", "fed chair"]) == ["Fed chair"]     # casefold dedupe
+    assert cs.parse(f, ["  chapter 11 ", "", "SEC charges"]) == ["chapter 11",
+                                                                  "SEC charges"]
+    assert cs.parse(f, []) == []
+
+
+def test_the_impact_keyword_words_are_phrases_and_their_points_are_bounded():
+    cfg = cs.BY_NAME["news.toml"]
+    _s, words = cs.locate(cfg, ("impact", "keywords", "tier1", "words"))
+    assert words.kind == "phrases"
+    _s, pts = cs.locate(cfg, ("impact", "keywords", "tier2", "points"))
+    assert pts.kind == "int" and pts.min == -10 and pts.max == 10
+    with pytest.raises(ValueError, match="at most 10"):
+        cs.parse(pts, 11)
+
+
+def test_the_dividend_keys_restart_trade_and_news():
+    cfg = cs.BY_NAME["news.toml"]
+    sec, fld = cs.locate(cfg, ("calendar", "dividends", "refresh_at"))
+    assert set(cs.restart_for(cfg, sec, fld)) == {cs.TRADE, cs.NEWS}
+    sec, fld = cs.locate(cfg, ("calendar", "refresh_min"))
+    assert set(cs.restart_for(cfg, sec, fld)) == {cs.NEWS}
+
+
+def test_the_caution_names_the_fred_key_env_var_and_no_field_holds_it():
+    cfg = cs.BY_NAME["news.toml"]
+    assert "FRED_API_KEY" in cfg.caution
+    assert not any("api_key" in f.key for s in cfg.sections for f in s.fields)
+
+
+def test_a_source_user_agent_may_be_left_empty_and_stays_empty():
+    """"" is a real setting (send the feed User-Agent), not an absent one."""
+    cfg = cs.BY_NAME["news.toml"]
+    _s, ua = cs.locate(cfg, ("calendar", "sources", "bls", "user_agent"))
+    assert ua.kind == "text"
+    assert cs.parse(ua, "", shipped="") == ""
+    assert cs.parse(ua, "  ", shipped="Mozilla/5.0 x") == ""
+    assert cs.parse(ua, " Mozilla/5.0 x ") == "Mozilla/5.0 x"
+    # an ordinary text field still refuses an empty value
+    with pytest.raises(ValueError, match="required"):
+        cs.parse(F("t", "t", kind="text"), "")
+
+
+def test_indicator_transform_and_schedule_are_choices_from_the_loader():
+    from shared import news_config
+    cfg = cs.BY_NAME["news.toml"]
+    _s, tr = cs.locate(cfg, ("calendar", "indicators", "cpi", "transform"))
+    _s, sc = cs.locate(cfg, ("calendar", "indicators", "cpi", "schedule"))
+    assert tr.kind == "choice" and set(tr.choices) == set(news_config.TRANSFORMS)
+    assert sc.kind == "choice" and set(sc.choices) == set(news_config.SCHEDULES)
+
+
+def test_no_new_news_section_is_read_only():
+    cfg = cs.BY_NAME["news.toml"]
+    for path in (("impact", "high_at"), ("impact", "source_points", "WSJ"),
+                 ("impact", "filings", "424B5"), ("impact", "filings", "untracked"),
+                 ("calendar", "sources", "nasdaq_ipo", "accept"),
+                 ("calendar", "indicators", "gdp", "match"),
+                 ("collector", "sec_view_items")):
+        assert cs.locate(cfg, path)[1] is not None, path
+        assert not cs.is_readonly(cfg, path), path

@@ -573,3 +573,40 @@ def test_the_reset_button_on_market_news_keeps_the_hand_written_feeds(monkeypatc
     assert name == "news.toml"
     assert over == {"feeds": kept}
     assert [c[0] for c in changes] == ["feed_flags › ZeroHedge › public"]
+
+
+# ── news v2 (T11): impact keywords, calendar sources and indicators ──────────
+def test_a_phrases_field_is_a_chip_editor_that_keeps_case():
+    """Keyword phrases are chips like symbols, but never upper-cased: "rate cut"
+    matches a headline case-insensitively and reads better as typed."""
+    from nicegui import ui
+    fld = ce.cs.Field("impact.keywords.tier1.words", "Words", kind="phrases")
+    got = []
+    with ui.card() as host:
+        control = {}
+        ce._build_control(control, fld, ["rate cut", "FOMC"], got.append)
+    (chips,) = [e for e in host.descendants() if isinstance(e, ui.input_chips)]
+    assert chips.value == ["rate cut", "FOMC"]
+    chips.value = ["rate cut", "FOMC", "Fed chair"]
+    assert got[-1] == ["rate cut", "FOMC", "Fed chair"]
+    assert ce.cs.parse(fld, got[-1]) == ["rate cut", "FOMC", "Fed chair"]
+    control["set"](["tariff"])
+    assert chips.value == ["tariff"]
+
+
+def test_a_phrases_value_reads_as_a_list_in_the_changed_chip():
+    fld = ce.cs.Field("w", "w", kind="phrases")
+    assert ce.display_value(["rate cut", "FOMC"], [], fld) == "rate cut, FOMC"
+    assert ce.display_value([], [], fld) == "none"
+
+
+def test_news_v2_wildcard_rows_are_named_after_what_they_belong_to(monkeypatch):
+    host = _render(monkeypatch)
+    _click_nav(host, "Market news")
+    for label in ("Tier 1 — Words", "Tier 3 — Points",
+                  "Federal Reserve", "424B5", "S-3ASR",
+                  "Nasdaq IPOs — User-Agent", "BLS — Refresh every",
+                  "CPI — FRED series", "Jobless claims — FRED release number"):
+        _row_with(host, label)
+    (chips,) = _controls(_row_with(host, "Tier 1 — Words"))
+    assert "rate cut" in chips.value and "FOMC" in chips.value
