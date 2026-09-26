@@ -1980,9 +1980,9 @@ fetched bytes:
 
 | kind | Fetches | Notes |
 |---|---|---|
-| `rss` | one URL (MarketWatch, CNBC, ZeroHedge, Benzinga, Federal Reserve, PR Newswire, GlobeNewswire, Business Wire, the Truth Social archive) | Conditional GET: `ETag` / `Last-Modified` are sent back, so an unchanged feed costs a 304. GlobeNewswire ships **disabled** — its host drops non-browser clients |
+| `rss` | one URL (MarketWatch, CNBC, ZeroHedge, Benzinga, Federal Reserve, PR Newswire, GlobeNewswire, Business Wire, the Truth Social archive, White House Actions, White House, USTR, SEC Press, EIA, investingLive, StockStory, Techmeme, Endpoints, Fierce Biotech, The Fly, OilPrice, CoinDesk) | Conditional GET: `ETag` / `Last-Modified` are sent back, so an unchanged feed costs a 304. GlobeNewswire ships **disabled** — its host drops non-browser clients |
 | `yahoo_ticker` | the URL template once per ticker in the ticker set, 4 at a time | Each item carries the ticker it was fetched for |
-| `google_news` | one Google News search (WSJ, Seeking Alpha) | Links stay Google redirects; the publisher comes from the item's `<source>` |
+| `google_news` | one Google News search (WSJ, Seeking Alpha, AP) | Links stay Google redirects; the publisher comes from the item's `<source>` |
 | `edgar_form4` | EDGAR's current-filings Atom for Form 4, then each new filing's ownership XML | Open-market **purchases** (code P) only; a buy on an untracked ticker shows only at or above `min_value_usd` ($1,000,000) |
 | `edgar_filings` | the same Atom per form (`S-1`, `S-3`, `424B5`, `S-3ASR`) | Headline "`<company>` files `<form>`" |
 

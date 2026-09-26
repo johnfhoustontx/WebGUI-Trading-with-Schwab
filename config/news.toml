@@ -86,6 +86,71 @@ kind = "rss"
 url  = "https://trumpstruth.org/feed"
 
 [[feeds]]
+name = "White House Actions"
+kind = "rss"
+url  = "https://www.whitehouse.gov/presidential-actions/feed/"   # executive orders, proclamations, tariff actions
+
+[[feeds]]
+name = "White House"
+kind = "rss"
+url  = "https://www.whitehouse.gov/news/feed/"   # fact sheets and statements
+
+[[feeds]]
+name = "USTR"
+kind = "rss"
+url  = "https://ustr.gov/rss.xml"   # trade actions
+
+[[feeds]]
+name = "SEC Press"
+kind = "rss"
+url  = "https://www.sec.gov/news/pressreleases.rss"   # SEC press releases (rules, enforcement); not EDGAR
+
+[[feeds]]
+name = "EIA"
+kind = "rss"
+url  = "https://www.eia.gov/rss/todayinenergy.xml"   # Today in Energy
+
+[[feeds]]
+name = "investingLive"
+kind = "rss"
+url  = "https://investinglive.com/feed"   # ex-ForexLive: fast macro / FX headlines
+
+[[feeds]]
+name = "StockStory"
+kind = "rss"
+url  = "https://stockstory.org/rss"   # earnings and price-move recaps; tickers written as (TICKER)
+
+[[feeds]]
+name = "Techmeme"
+kind = "rss"
+url  = "https://www.techmeme.com/feed.xml"
+
+[[feeds]]
+name = "Endpoints"
+kind = "rss"
+url  = "https://endpoints.news/feed/"   # FDA decisions, trial readouts
+
+[[feeds]]
+name = "Fierce Biotech"
+kind = "rss"
+url  = "https://www.fiercebiotech.com/rss/biotech/xml"
+
+[[feeds]]
+name = "The Fly"
+kind = "rss"
+url  = "https://rss.thefly.com/rss.php"   # analyst actions (paid content: headlines and links only)
+
+[[feeds]]
+name = "OilPrice"
+kind = "rss"
+url  = "https://feeds.feedburner.com/oilpricecom"
+
+[[feeds]]
+name = "CoinDesk"
+kind = "rss"
+url  = "https://www.coindesk.com/arc/outboundfeeds/rss/"   # crypto; bears on the miners and COIN
+
+[[feeds]]
 name = "Yahoo Finance"
 kind = "yahoo_ticker"
 url  = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
@@ -99,6 +164,11 @@ query = "site:wsj.com markets when:1d"
 name  = "Seeking Alpha"
 kind  = "google_news"
 query = "site:seekingalpha.com when:1d"
+
+[[feeds]]
+name  = "AP"
+kind  = "google_news"
+query = "site:apnews.com business when:1d"   # AP's own RSS answers 403
 
 [[feeds]]
 name = "SEC Insider Buys"
@@ -163,6 +233,62 @@ enabled = true
 public  = true
 
 [feed_flags."Seeking Alpha"]
+enabled = true
+public  = true
+
+[feed_flags."White House Actions"]
+enabled = true
+public  = true
+
+[feed_flags."White House"]
+enabled = true
+public  = true
+
+[feed_flags."USTR"]
+enabled = true
+public  = true
+
+[feed_flags."SEC Press"]
+enabled = true
+public  = true
+
+[feed_flags."EIA"]
+enabled = true
+public  = true
+
+[feed_flags."investingLive"]
+enabled = true
+public  = true
+
+[feed_flags."StockStory"]
+enabled = true
+public  = true
+
+[feed_flags."Techmeme"]
+enabled = true
+public  = true
+
+[feed_flags."Endpoints"]
+enabled = true
+public  = true
+
+[feed_flags."Fierce Biotech"]
+enabled = true
+public  = true
+
+[feed_flags."The Fly"]
+enabled = true
+public  = true
+
+[feed_flags."OilPrice"]
+enabled = true
+public  = true
+
+[feed_flags."CoinDesk"]
+enabled = true
+public  = true
+
+[feed_flags."AP"]
 enabled = true
 public  = true
 

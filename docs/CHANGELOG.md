@@ -4,7 +4,23 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-26 (**Market News v2 — an impact rank on every item, the
+**Last updated:** 2026-09-26 (**Fourteen more news feeds**, from a probe of the operator's
+848-row candidate list `market_news_feeds.csv`: every row fetched and parsed with news_svc's own
+fetcher and RSS parser from the cloud container, not the VPS.)
+
+- **Added, all enabled and public**: White House Actions, White House, USTR, SEC Press, EIA
+  (Today in Energy), investingLive (ex-ForexLive), StockStory, Techmeme, Endpoints, Fierce Biotech,
+  The Fly, OilPrice, CoinDesk (`rss`), and AP (`google_news`, `site:apnews.com business` - AP's own
+  RSS answers 403). Each polled once through `compute.poll_feed` before commit, all 200.
+- **The Fly is paid content**, published on the live page at the operator's request (headlines and
+  links only). **StockStory** tags tickers the most (about half its items write `(TICKER)`); the
+  others mostly tag none, so they reach the headline list but rarely the Symbol band.
+- **Rejected** from the list: duplicates of current feeds, GuruFocus (~640 items/day would flush the
+  300-row view), podcasts (over the 5 MB cap), YouTube / Reddit (429) / Mastodon, off-desk
+  international, agriculture and shipping feeds, stale Fed/stat feeds, and the 69 non-RSS rows (they
+  need adapters). ⚠ Not yet confirmed from the VPS's IP.
+
+**Prior —** 2026-09-26 (**Market News v2 — an impact rank on every item, the
 SEC / EDGAR items in their own panel, and an economic calendar; `trade_svc` gains a
 scheduler for a daily dividend pull.** Branch `claude/extract-news-from-x-bdb6ae-ryosve`,
 `6370b73`..`c95be6c` plus this docs commit; design + plan
