@@ -34,6 +34,7 @@ from dataclasses import dataclass
 OPTIONS = "options_svc"
 SENTIMENT = "sentiment_svc"
 MARKET = "market_svc"
+NEWS = "news_svc"
 TRADE = "trade_svc"
 WEBGUI = "webgui"
 TIMERS = "timers"
@@ -42,6 +43,7 @@ RESTART_LABELS = {
     OPTIONS: "Options service",
     SENTIMENT: "Sentiment service",
     MARKET: "Market service",
+    NEWS: "News service",
     TRADE: "Trade service",
     WEBGUI: "Web app (this page reloads)",
     TIMERS: "Scheduled timers (regenerated, no restart)",
@@ -845,7 +847,74 @@ _PAPER = ConfigFile(
     ),
 )
 
-FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _SESSIONS, _SYMBOLS, _SECTORS,
+# ─────────────────────────────────────────────────────────────────────────────
+# Market news — config/news.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_NEWS = ConfigFile(
+    name="news.toml", title="Market news", icon="newspaper",
+    summary="Which public feeds the news collector reads, how often, and which "
+            "of them the public site may show.",
+    restart=(NEWS,),
+    caution="Every feed is a public RSS, Google News or SEC feed. A feed marked "
+            "not public stays in the app and never reaches live.neuralstrike.co.",
+    sections=(
+        Section("Polling", "How often every feed is read. Faster costs nothing "
+                "in API budget but is discourteous to the publishers.", (
+            Field("collector.rth_poll_min", "During market hours",
+                  "Minutes between polls, 08:30–15:00 CT.", kind="int", unit="min",
+                  min=1, max=60, step=1),
+            Field("collector.offhours_poll_min", "Outside market hours",
+                  "Minutes between polls on a trading day outside 08:30–15:00 CT.",
+                  kind="int", unit="min", min=1, max=240, step=1),
+            Field("collector.weekend_poll_min", "Weekends and holidays",
+                  "Minutes between polls on Saturday, Sunday and market holidays.",
+                  kind="int", unit="min", min=5, max=720, step=5),
+            Field("collector.keep_days", "Keep items for",
+                  "Older rows are pruned from the store.", kind="int", unit="days",
+                  min=1, max=90, step=1),
+            Field("collector.view_items", "Rows published",
+                  "The newest rows the page, the Desk and the Symbol page read.",
+                  kind="int", min=50, max=1000, step=50),
+            Field("collector.request_timeout_s", "Request timeout",
+                  "How long one feed may take to answer before it is skipped "
+                  "until the next poll.", kind="int", unit="s", min=5, max=120, step=5),
+            Field("collector.sec_user_agent", "SEC User-Agent",
+                  "The SEC requires a contact address in every request.", kind="text"),
+        )),
+        Section("Tickers", "The per-ticker feeds and the watchlist filter use the "
+                "gamma collection list (Symbols & watchlists) plus these.", (
+            Field("tickers.extras", "Extra tickers",
+                  "Followed by the news feeds but not scanned for trades.",
+                  kind="symbols"),
+        )),
+        Section("Trending", "", (
+            Field("trending.window_h", "Trending window",
+                  "The Trending chips count ticker mentions in this window.",
+                  kind="int", unit="h", min=1, max=48, step=1),
+        )),
+        Section("Feeds", "One entry per source, in display order.", (
+            Field("feeds.*.name", "Name", "", kind="text"),
+            Field("feeds.*.kind", "Kind", "rss · yahoo_ticker · google_news · "
+                  "edgar_form4 · edgar_filings", kind="choice",
+                  choices=("rss", "yahoo_ticker", "google_news", "edgar_form4",
+                           "edgar_filings")),
+            Field("feeds.*.url", "Feed URL", "For rss and yahoo_ticker ({symbol} "
+                  "expands over the ticker set).", kind="text", optional=True),
+            Field("feeds.*.query", "Google News search", "", kind="text",
+                  optional=True),
+            Field("feeds.*.forms", "SEC form types", "", kind="symbols",
+                  optional=True),
+            Field("feeds.*.min_value_usd", "Insider buy floor",
+                  "A buy on an untracked ticker is shown only at or above this.",
+                  kind="money", min=0, optional=True),
+            Field("feeds.*.enabled", "Enabled", "", kind="bool", optional=True),
+            Field("feeds.*.public", "Show on the public site", "", kind="bool",
+                  optional=True),
+        )),
+    ),
+)
+
+FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
