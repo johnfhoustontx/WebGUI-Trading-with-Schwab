@@ -77,6 +77,11 @@ class Section:
     help: str
     fields: tuple
     restart: tuple | None = None   # overrides the file's restart list
+    # Shown, never edited: the page draws the value with no input, and the save
+    # path never writes it (see ``is_readonly`` and
+    # ``pages/config_editor.overrides_to_save``). A hand-written override of it
+    # in config/local is carried through a save untouched.
+    readonly: bool = False
 
 
 @dataclass(frozen=True)
@@ -856,13 +861,15 @@ _NEWS = ConfigFile(
             "of them the public site may show.",
     restart=(NEWS,),
     caution="Every feed is a public RSS, Google News or SEC feed. A feed marked "
-            "not public stays in the app and never reaches live.neuralstrike.co.",
+            "not public stays in the app and never reaches live.neuralstrike.co. "
+            "The feed list itself is read-only here: add or change a feed in "
+            "config/news.toml.",
     sections=(
         Section("Polling", "How often every feed is read. Faster costs nothing "
                 "in API budget but is discourteous to the publishers.", (
             Field("collector.rth_poll_min", "During market hours",
                   "Minutes between polls, 08:30–15:00 CT.", kind="int", unit="min",
-                  min=1, max=60, step=1),
+                  min=3, max=60, step=1),
             Field("collector.offhours_poll_min", "Outside market hours",
                   "Minutes between polls on a trading day outside 08:30–15:00 CT.",
                   kind="int", unit="min", min=1, max=240, step=1),
@@ -892,7 +899,17 @@ _NEWS = ConfigFile(
                   "The Trending chips count ticker mentions in this window.",
                   kind="int", unit="h", min=1, max=48, step=1),
         )),
-        Section("Feeds", "One entry per source, in display order.", (
+        Section("Feed switches", "One pair per feed, named by the feed. A switch "
+                "is a table entry, so changing one leaves every other feed alone.", (
+            Field("feed_flags.*.enabled", "Enabled",
+                  "Off stops polling this feed; its items age out of the store.",
+                  kind="bool"),
+            Field("feed_flags.*.public", "Show on the public site",
+                  "Off keeps this feed's headlines in the app only.", kind="bool"),
+        )),
+        Section("Feeds", "One entry per source, in display order. Read-only here: "
+                "a list in config/local would replace the whole shipped list, so "
+                "feeds are added and changed in config/news.toml.", (
             Field("feeds.*.name", "Name", "", kind="text"),
             Field("feeds.*.kind", "Kind", "rss · yahoo_ticker · google_news · "
                   "edgar_form4 · edgar_filings", kind="choice",
@@ -907,10 +924,7 @@ _NEWS = ConfigFile(
             Field("feeds.*.min_value_usd", "Insider buy floor",
                   "A buy on an untracked ticker is shown only at or above this.",
                   kind="money", min=0, optional=True),
-            Field("feeds.*.enabled", "Enabled", "", kind="bool", optional=True),
-            Field("feeds.*.public", "Show on the public site", "", kind="bool",
-                  optional=True),
-        )),
+        ), readonly=True),
     ),
 )
 
@@ -955,6 +969,24 @@ def locate(cfg: ConfigFile, parts):
             if wild is None and "*" in f.key and _matches(f.key, parts):
                 wild = (sec, f)
     return wild or (None, None)
+
+
+def is_readonly(cfg: ConfigFile, parts) -> bool:
+    """True when the key path ``parts`` may be shown but never written.
+
+    A path the catalogue locates is read-only when its section is. A path it
+    does NOT locate (a hand-written key with no field) is read-only when its
+    top-level table belongs to read-only sections only - so an unknown key under
+    ``feeds`` cannot become writable by falling outside the catalogue."""
+    parts = list(parts)
+    sec, fld = locate(cfg, parts)
+    if fld is not None:
+        return bool(sec.readonly)
+    tops = {}
+    for s in cfg.sections:
+        for f in s.fields:
+            tops.setdefault(split_key(f.key)[0], set()).add(bool(s.readonly))
+    return bool(parts) and tops.get(parts[0]) == {True}
 
 
 def restart_for(cfg: ConfigFile, section: Section | None, fld: Field | None):

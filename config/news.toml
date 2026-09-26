@@ -21,7 +21,8 @@ window_h = 6               # the Trending chips count mentions in this window
 
 # ── feeds ──────────────────────────────────────────────────────────────────────
 # kind: rss | yahoo_ticker | google_news | edgar_form4 | edgar_filings
-# enabled (default true) · public (default true: shown on live.neuralstrike.co/news)
+# The switches are NOT here: each feed's enabled / public lives in [feed_flags] below.
+# Settings -> Configuration shows this list read-only; add or change a feed in the file.
 
 [[feeds]]
 name = "MarketWatch"
@@ -57,8 +58,6 @@ url  = "https://www.prnewswire.com/rss/financial-services-latest-news/financial-
 name = "GlobeNewswire"
 kind = "rss"
 url  = "https://www.globenewswire.com/RssFeed/subjectcode/13-Earnings%20Releases%20and%20Operating%20Results/feedTitle/GlobeNewswire%20-%20Earnings%20Releases"
-# Off: 2026-09-25 the whole host (homepage included) drops non-browser clients after the TLS handshake, from the VPS and Windows alike.
-enabled = false
 
 [[feeds]]
 name = "Business Wire"
@@ -94,3 +93,67 @@ min_value_usd = 1000000   # every code-P buy on a tracked ticker, plus any buy a
 name  = "SEC Offerings"
 kind  = "edgar_filings"
 forms = ["S-1", "S-3", "424B5"]
+
+# ── feed switches ──────────────────────────────────────────────────────────────
+# One table per feed, keyed by its name above. A table (not a list) so an override
+# in config/local/news.toml of one feed's switch merges key by key and leaves every
+# other feed alone. enabled = false stops polling the feed; public = false keeps
+# its headlines in the app only (never on live.neuralstrike.co/news). Editable in
+# Settings -> Configuration -> Market news -> Feed switches.
+
+[feed_flags."MarketWatch"]
+enabled = true
+public  = true
+
+[feed_flags."CNBC"]
+enabled = true
+public  = true
+
+[feed_flags."ZeroHedge"]
+enabled = true
+public  = true
+
+[feed_flags."Benzinga"]
+enabled = true
+public  = true
+
+[feed_flags."Federal Reserve"]
+enabled = true
+public  = true
+
+[feed_flags."PR Newswire"]
+enabled = true
+public  = true
+
+[feed_flags."GlobeNewswire"]
+# Off: 2026-09-25 the whole host (homepage included) drops non-browser clients after the TLS handshake, from the VPS and Windows alike.
+enabled = false
+public  = true
+
+[feed_flags."Business Wire"]
+enabled = true
+public  = true
+
+[feed_flags."Truth Social"]
+enabled = true
+public  = true
+
+[feed_flags."Yahoo Finance"]
+enabled = true
+public  = true
+
+[feed_flags."WSJ"]
+enabled = true
+public  = true
+
+[feed_flags."Seeking Alpha"]
+enabled = true
+public  = true
+
+[feed_flags."SEC Insider Buys"]
+enabled = true
+public  = true
+
+[feed_flags."SEC Offerings"]
+enabled = true
+public  = true

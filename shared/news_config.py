@@ -12,8 +12,15 @@ What it guards, and what it does not:
   WARNING (a bare string must never be iterated into single letters);
 * a feed with an unknown ``kind``, no ``name``, or a name already seen -> that
   feed is skipped, with a WARNING (the first of two duplicates wins);
+* the switches live in ``[feed_flags."<feed name>"]`` (a table, so a local
+  override of one feed's flag merges key by key rather than replacing the
+  whole ``[[feeds]]`` list); a flag absent there defaults True;
 * ``enabled`` / ``public`` present but not a real bool -> FAIL CLOSED: the feed
   is disabled / not public, with a WARNING;
+* a legacy ``enabled`` / ``public`` still inside a ``[[feeds]]`` entry -> a
+  WARNING that it moved, and used only where ``[feed_flags]`` is silent;
+* a ``[feed_flags]`` entry naming no feed, or one that is not a table -> a
+  WARNING (the second is ignored);
 * ``feeds()`` coming back empty -> a WARNING, so a service collecting nothing
   leaves a trace.
 
@@ -44,6 +51,7 @@ DEFAULTS = {
     "tickers": {"extras": []},
     "trending": {"window_h": 6},
     "feeds": [],
+    "feed_flags": {},
 }
 
 load, reset_cache = toml_loader(NEWS_TOML, DEFAULTS, label="news.toml")
@@ -60,53 +68,136 @@ def _as_list(value, where):
     return []
 
 
-def _flag(feed, key, default):
-    """A real bool, the default when absent, else ``False`` with a WARNING -
-    a malformed ``enabled`` or ``public`` must fail CLOSED."""
-    if key not in feed:
-        return default
-    value = feed[key]
+FLAG_KEYS = ("enabled", "public")
+_CLOSED = {"enabled": False, "public": False}
+
+
+def _flag_table():
+    """``[feed_flags]`` as ``{name: table}``. A non-table ``[feed_flags]`` or a
+    non-table entry in it is ignored with a WARNING (its feed's flags then
+    default, which is True - the same as the entry being absent)."""
+    table = load().get("feed_flags")
+    if table is None:
+        return {}
+    if not isinstance(table, dict):
+        log.warning("news.toml: [feed_flags] is not a table (%s) - ignored",
+                    type(table).__name__)
+        return {}
+    out = {}
+    for name, entry in table.items():
+        if isinstance(entry, dict):
+            out[name] = entry
+        else:
+            log.warning("news.toml: [feed_flags] entry %r is not a table (%s) - ignored",
+                        name, type(entry).__name__)
+    return out
+
+
+def _bool(name, key, value):
+    """A real bool, else ``False`` with a WARNING - a malformed ``enabled`` or
+    ``public`` must fail CLOSED."""
     if isinstance(value, bool):
         return value
     log.warning("news.toml: feed %r has %s = %r, not true/false - treated as false",
-                feed.get("name"), key, value)
+                name, key, value)
     return False
 
 
-def feeds() -> list:
-    """Enabled feeds with ``enabled`` / ``public`` filled in as real bools.
+def _resolve(raw, table):
+    """``{"enabled", "public"}`` for one ``[[feeds]]`` entry.
 
-    Each feed is a deep COPY - ``load()`` returns the cached mapping, so filling
-    the flags in place would write into every later reader's config. Unknown
-    kinds, nameless feeds and repeated names are skipped with a WARNING (the
-    name keys the per-feed state, so the first of two duplicates wins)."""
-    out, seen = [], set()
+    ``[feed_flags."<name>"]`` decides; a key it does not set falls back to a
+    LEGACY copy inside the ``[[feeds]]`` entry (with a WARNING that the switch
+    moved, so a legacy ``enabled = false`` still fails closed), else True."""
+    name = raw.get("name")
+    entry = table.get(name, {})
+    out = {}
+    for key in FLAG_KEYS:
+        if key in raw:
+            log.warning("news.toml: feed %r sets %s inside [[feeds]] - that switch "
+                        "moved to [feed_flags.%r] and is used only where "
+                        "[feed_flags] does not set it", name, key, name)
+        if key in entry:
+            out[key] = _bool(name, key, entry[key])
+        elif key in raw:
+            out[key] = _bool(name, key, raw[key])
+        else:
+            out[key] = True
+    return out
+
+
+def _entries():
+    """The ``[[feeds]]`` entries that are tables, in file order."""
+    out = []
     for raw in _as_list(load().get("feeds"), "[[feeds]]"):
         if not isinstance(raw, dict):
             log.warning("news.toml: a [[feeds]] entry is not a table (%s) - skipped",
                         type(raw).__name__)
             continue
+        out.append(raw)
+    return out
+
+
+def feeds() -> list:
+    """Enabled feeds with ``enabled`` / ``public`` filled in as real bools.
+
+    The switches live in ``[feed_flags."<name>"]`` (see ``_resolve``). Each feed
+    is a deep COPY - ``load()`` returns the cached mapping, so filling the flags
+    in place would write into every later reader's config. Unknown kinds,
+    nameless feeds and repeated names are skipped with a WARNING (the name keys
+    the per-feed state and the switch, so the first of two duplicates wins), and
+    a ``[feed_flags]`` entry that names no feed is reported - a typo there would
+    otherwise switch nothing, silently."""
+    table = _flag_table()
+    out, kept, named = [], {}, set()
+    for raw in _entries():
+        name = raw.get("name")
+        if name:
+            named.add(name)
         feed = copy.deepcopy(raw)
-        feed["enabled"] = _flag(raw, "enabled", True)
-        feed["public"] = _flag(raw, "public", True)
+        feed.update(_resolve(raw, table))
         if feed.get("kind") not in KINDS:
             log.warning("news.toml: feed %r has unknown kind %r - skipped",
-                        feed.get("name"), feed.get("kind"))
+                        name, feed.get("kind"))
             continue
-        name = feed.get("name")
         if not name:
             log.warning("news.toml: a %r feed has no name - skipped", feed.get("kind"))
             continue
-        if name in seen:
-            log.warning("news.toml: duplicate feed name %r - the later one is skipped",
-                        name)
+        if name in kept:
+            if kept[name]["enabled"]:
+                log.warning("news.toml: duplicate feed name %r - the later one is "
+                            "skipped", name)
+            else:
+                log.warning("news.toml: duplicate feed name %r - the later one is "
+                            "skipped, and the kept (first) entry is disabled, so no "
+                            "%r feed is polled", name, name)
             continue
-        seen.add(name)
+        kept[name] = feed
         if feed["enabled"]:
             out.append(feed)
+    for name in table:
+        if name not in named:
+            log.warning("news.toml: [feed_flags] entry %r names no feed - ignored "
+                        "(a typo?)", name)
     if not out:
         log.warning("news.toml: no enabled feeds - news_svc will collect nothing")
     return out
+
+
+def flags(name) -> dict:
+    """The CURRENT ``{"enabled", "public"}`` for one feed, as real bools.
+
+    The same rules as ``feeds()`` (the first entry of a name wins), for the poll
+    cycle to re-check at every publish. A name that is not a usable feed - absent,
+    or one ``feeds()`` would skip for its kind - is ``False`` for both: fail
+    closed."""
+    for raw in _entries():
+        if raw.get("name") != name:
+            continue
+        if not name or raw.get("kind") not in KINDS:
+            return dict(_CLOSED)
+        return _resolve(raw, _flag_table())
+    return dict(_CLOSED)
 
 
 def ticker_set() -> list:

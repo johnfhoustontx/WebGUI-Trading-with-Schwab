@@ -25,6 +25,7 @@ and calls the restart. They keep their names, their module and the set type.
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 import subprocess
 import sys
@@ -147,11 +148,43 @@ def change_stamp(at):
 
 
 def _group_label(f, fld, path, label):
-    """A Net Prem group's rows are named after the group ("Mega-caps — symbols")."""
-    if not fld.key.startswith("netprem_groups.*."):
-        return label
-    group = f["labels"].get(path[1], path[1])
-    return f"{group} — {'tab name' if path[-1] == 'label' else 'symbols'}"
+    """Rows under a wildcard are named after what they belong to: a Net Prem
+    group ("Mega-caps — symbols"), a news feed's switch ("ZeroHedge — Enabled",
+    keyed by the feed's name) or a news feed's field ("MarketWatch — Feed URL",
+    an array item, so named by its ``name`` value)."""
+    if fld.key.startswith("netprem_groups.*."):
+        group = f["labels"].get(path[1], path[1])
+        return f"{group} — {'tab name' if path[-1] == 'label' else 'symbols'}"
+    if fld.key.startswith("feed_flags.*."):
+        return f"{path[1]} — {label}"
+    if fld.key.startswith("feeds.*."):
+        feed = f["values"].get(("feeds", path[1], "name")) or f"Feed {path[1]}"
+        return f"{feed} — {label}"
+    return label
+
+
+def overrides_to_save(cfg, shipped, over, values):
+    """The override table a save writes for one file. PURE.
+
+    Read-only keys (``config_schema.is_readonly``) are never WRITTEN: their
+    values are left out of the build, whatever the page holds for them. What
+    the existing override already says about them - a hand-written
+    ``[[feeds]]`` list in config/local, say - is carried through verbatim, so a
+    save of an unrelated switch neither drops nor rewrites it."""
+    editable = {p: v for p, v in values.items() if not cs.is_readonly(cfg, p)}
+    out = store.build_overrides(shipped, editable)
+    for top, node in (over or {}).items():
+        leaves = store.flatten({top: node})
+        if not leaves or not all(cs.is_readonly(cfg, p) for p in leaves):
+            continue
+        if top in out:
+            # a table shared with editable keys: lay the read-only leaves back
+            # on. (A rebuilt LIST stays as built - a list cannot be merged.)
+            if isinstance(out[top], dict) and isinstance(node, dict):
+                out[top] = store.effective(out[top], node)
+        else:
+            out[top] = copy.deepcopy(node)
+    return out
 
 
 # ── restarting ───────────────────────────────────────────────────────────────
@@ -271,7 +304,25 @@ def render():
         else:
             eds[path] = parsed
 
+    def _readonly_row(cfg, fld, path, label):
+        """Shown, not edited: the value as text, no input, no reset."""
+        f = state["files"][cfg.name]
+        v = f["values"].get(path)
+        with ui.row().classes(_ROW):
+            with ui.column().classes("w-72 shrink-0 gap-0"):
+                ui.label(label).classes(f"text-sm {LABEL}")
+                if fld.help:
+                    ui.label(fld.help).classes(f"text-xs {MUTED}")
+            ui.label(display_value(v, v, fld)).classes(
+                f"grow min-w-0 text-sm break-all {MUTED}")
+            with ui.row().classes("w-64 shrink-0 items-center justify-end gap-1"):
+                if v != f["base"].get(path):
+                    ui.label(f"Set in config/local/{cfg.name}").classes(_CHIP_CHANGED)
+
     def _field_row(cfg, fld, path, label):
+        if cs.is_readonly(cfg, path):
+            _readonly_row(cfg, fld, path, label)
+            return
         name = cfg.name
         f = state["files"][name]
         shipped_v = f["base"].get(path)
@@ -589,12 +640,14 @@ def render():
         units: list = []
         saved = 0
         for name, eds in list(state["edits"].items()):
+            cfg = cs.BY_NAME[name]
+            # a read-only key has no control, so this is belt and braces
+            eds = {p: v for p, v in eds.items() if not cs.is_readonly(cfg, p)}
             if not eds:
                 continue
-            cfg = cs.BY_NAME[name]
             f = state["files"][name]
             values = {**f["values"], **eds}
-            over = store.build_overrides(f["shipped"], values)
+            over = overrides_to_save(cfg, f["shipped"], f["over"], values)
             changes = [(" › ".join(p), f["values"].get(p), v) for p, v in eds.items()]
             try:
                 store.save(name, over, changes=changes)

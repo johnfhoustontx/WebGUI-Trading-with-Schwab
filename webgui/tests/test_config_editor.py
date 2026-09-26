@@ -424,3 +424,89 @@ def test_the_recent_changes_row_carries_the_zone(monkeypatch):
     line = [t for t in _texts(host) if t and "risk › cap" in t]
     assert line, "the change row is not on the page"
     assert line[0].startswith("2026-09-20 14:03 CT · ")
+
+
+# ── Market news: the feeds list is shown read-only, the switches are edited ──
+_INPUTS = ("input", "number", "select", "switch", "input_chips", "checkbox")
+
+
+def _row_with(host, text):
+    """The one field row (``_ROW``: bordered) whose label reads ``text``."""
+    rows = [e for e in host.descendants()
+            if type(e).__name__ == "Row" and "border-b" in e.classes
+            and any(getattr(c, "text", None) == text for c in e.descendants())]
+    assert rows, f"no field row labelled {text!r}"
+    return rows[-1]
+
+
+def _controls(row):
+    from nicegui import ui
+    kinds = tuple(getattr(ui, k) for k in _INPUTS)
+    return [e for e in row.descendants() if isinstance(e, kinds)]
+
+
+def test_a_read_only_feed_field_renders_its_value_without_an_input(monkeypatch):
+    host = _render(monkeypatch)
+    _click_nav(host, "Market news")
+    row = _row_with(host, "MarketWatch — Feed URL")
+    assert _controls(row) == [], "a read-only field grew an input"
+    texts = [getattr(c, "text", None) for c in row.descendants()]
+    assert any(t and t.startswith("https://feeds.content.dowjones.io") for t in texts)
+
+
+def test_each_feed_switch_is_a_row_named_by_its_feed(monkeypatch):
+    from nicegui import ui
+    host = _render(monkeypatch)
+    _click_nav(host, "Market news")
+    for label in ("SEC Insider Buys — Show on the public site",
+                  "Federal Reserve — Enabled", "GlobeNewswire — Enabled"):
+        (sw,) = _controls(_row_with(host, label))
+        assert isinstance(sw, ui.switch), label
+    assert _controls(_row_with(host, "GlobeNewswire — Enabled"))[0].value is False
+
+
+def test_saving_a_switch_writes_only_the_switch_and_keeps_a_hand_written_feed_list(
+        monkeypatch):
+    """The save path never writes the read-only list: a hand-written
+    config/local [[feeds]] override is carried verbatim, and the switch lands as
+    a TABLE entry that merges key by key."""
+    from nicegui import ui
+    real_load = ce.store.load
+    hand = {"feeds": [{"name": "Mine", "kind": "rss", "url": "https://mine"}]}
+
+    def _load(name):
+        shipped, over = real_load(name)
+        return (shipped, hand) if name == "news.toml" else (shipped, over)
+
+    monkeypatch.setattr(ce.store, "load", _load)
+    host = _render(monkeypatch)
+    _said(monkeypatch)
+    saved = []
+    monkeypatch.setattr(ce.store, "save", lambda name, over, changes=(): saved.append(
+        (name, over, list(changes))))
+    _click_nav(host, "Market news")
+    (sw,) = _controls(_row_with(host, "ZeroHedge — Show on the public site"))
+    assert isinstance(sw, ui.switch) and sw.value is True
+    sw.value = False
+    _click(host, "Save changes")
+    (name, over, changes), = saved
+    assert name == "news.toml"
+    assert over == {"feeds": hand["feeds"],
+                    "feed_flags": {"ZeroHedge": {"public": False}}}
+    assert [c[0] for c in changes] == ["feed_flags › ZeroHedge › public"]
+
+
+def test_overrides_to_save_drops_a_read_only_edit_and_keeps_the_existing_one():
+    import tomllib
+    import pathlib
+    cfg = cs.BY_NAME["news.toml"]
+    shipped = tomllib.loads((pathlib.Path(__file__).resolve().parents[2]
+                             / "config" / "news.toml").read_text(encoding="utf-8"))
+    values = store.flatten(shipped)
+    values[("feeds", "0", "url")] = "https://evil"        # somehow edited
+    values[("feed_flags", "WSJ", "enabled")] = False
+    assert ce.overrides_to_save(cfg, shipped, {}, values) == {
+        "feed_flags": {"WSJ": {"enabled": False}}}
+    kept = [{"name": "Mine", "kind": "rss", "url": "https://mine"}]
+    got = ce.overrides_to_save(cfg, shipped, {"feeds": kept}, values)
+    assert got["feeds"] == kept and got["feeds"] is not kept

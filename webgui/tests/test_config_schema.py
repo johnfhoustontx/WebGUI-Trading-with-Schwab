@@ -235,3 +235,78 @@ def test_the_change_log_stamp_is_central_time_and_carries_its_offset(
     # host happens to be set to.
     assert when.utcoffset() == when.astimezone(
         ZoneInfo("America/Chicago")).utcoffset()
+
+
+# ── Market news: the feeds list is read-only, the switches are editable ─────
+NEWS = cs.BY_NAME["news.toml"]
+
+
+def test_rth_polling_cannot_go_below_three_minutes():
+    _sec, fld = cs.locate(NEWS, ("collector", "rth_poll_min"))
+    assert fld.min == 3
+    with pytest.raises(ValueError, match="at least 3"):
+        cs.parse(fld, 2)
+    assert cs.parse(fld, 3) == 3
+
+
+def test_every_shipped_feed_field_is_read_only():
+    paths = [p for p in store.flatten(_shipped("news.toml")) if p[0] == "feeds"]
+    assert paths
+    assert all(cs.is_readonly(NEWS, p) for p in paths)
+
+
+def test_a_feeds_key_the_catalogue_does_not_know_is_still_read_only():
+    """A hand-written [[feeds]] entry may carry a key with no field; it must not
+    become writable by falling outside the catalogue."""
+    assert cs.is_readonly(NEWS, ("feeds", "3", "some_new_key"))
+
+
+def test_the_feed_switches_are_editable_and_named_by_feed():
+    flags = [p for p in store.flatten(_shipped("news.toml")) if p[0] == "feed_flags"]
+    assert {p[1] for p in flags} == {f["name"] for f in _shipped("news.toml")["feeds"]}
+    for p in flags:
+        sec, fld = cs.locate(NEWS, p)
+        assert sec.title == "Feed switches" and fld.kind == "bool", p
+        assert not cs.is_readonly(NEWS, p), p
+    _s, pub = cs.locate(NEWS, ("feed_flags", "ZeroHedge", "public"))
+    assert pub.help == "Off keeps this feed's headlines in the app only."
+    _s, en = cs.locate(NEWS, ("feed_flags", "ZeroHedge", "enabled"))
+    assert "stops polling" in en.help
+
+
+def test_no_other_file_has_a_read_only_field():
+    """Read-only is the news feed list's; nothing else changed shape."""
+    for cfg in cs.EDITABLE:
+        if cfg is NEWS:
+            continue
+        assert not [p for p in store.flatten(_shipped(cfg.name))
+                    if cs.is_readonly(cfg, p)], cfg.name
+
+
+def test_quoted_feed_names_with_spaces_and_dots_split_and_locate():
+    assert cs.split_key('feed_flags."SEC Insider Buys".public') == [
+        "feed_flags", "SEC Insider Buys", "public"]
+    assert cs.split_key('feed_flags."A.B".enabled') == ["feed_flags", "A.B", "enabled"]
+    _s, fld = cs.locate(NEWS, cs.split_key('feed_flags."Federal Reserve".enabled'))
+    assert fld is not None and fld.kind == "bool"
+
+
+def test_a_switch_override_round_trips_through_the_writer_and_merges_by_key():
+    """Names with spaces are quoted by the writer, read back by tomllib, and the
+    override is a TABLE - merged over the shipped file it leaves every other
+    feed's switches, and the whole feeds list, as shipped."""
+    shipped = _shipped("news.toml")
+    values = store.flatten(shipped)
+    values[("feed_flags", "SEC Insider Buys", "public")] = False
+    values[("feed_flags", "Federal Reserve", "enabled")] = False
+    over = store.build_overrides(shipped, values)
+    assert over == {"feed_flags": {"SEC Insider Buys": {"public": False},
+                                   "Federal Reserve": {"enabled": False}}}
+    text = config_toml.dumps(over)
+    assert '[feed_flags."SEC Insider Buys"]' in text
+    back = tomllib.loads(text)
+    assert back == over
+    merged = store.effective(shipped, back)
+    assert merged["feeds"] == shipped["feeds"]
+    assert merged["feed_flags"]["SEC Insider Buys"] == {"enabled": True, "public": False}
+    assert merged["feed_flags"]["MarketWatch"] == shipped["feed_flags"]["MarketWatch"]
