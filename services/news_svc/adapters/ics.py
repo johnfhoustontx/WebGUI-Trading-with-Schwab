@@ -14,11 +14,17 @@ Order matters: lines are UNFOLDED before any escape is undone, because the real
 BEA file folds between the backslash and the comma of ``\\,``. ``parse`` never
 raises - a malformed event is skipped, a malformed body yields ``[]``.
 
-Lines split on ``\\r?\\n`` ONLY - never ``str.splitlines()``, which also breaks on
-U+2028, U+0085, form feeds and friends and would let text inside a SUMMARY inject
-a property line. A property's value starts at the first colon OUTSIDE double
+Lines split on CRLF, LF or a bare CR ONLY - never ``str.splitlines()``, which also
+breaks on U+2028, U+0085, form feeds and friends and would let text inside a
+SUMMARY inject a property line. A property's value starts at the first colon OUTSIDE double
 quotes (``DESCRIPTION;ALTREP="cid:x":text``). Only the VEVENT's OWN properties are
 read: anything inside a nested block (a VALARM) is ignored.
+
+A VEVENT cannot nest, so a broken event never costs the events after it: a
+``BEGIN:VEVENT`` while one is open drops the open one and starts afresh (even
+from inside an unclosed VALARM), ``END:VEVENT`` closes the current event whatever
+nested block is still open, and a ``BEGIN:``/``END:VCALENDAR`` inside an event
+drops it. Each drop is logged at DEBUG.
 
 Recurrence is NOT expanded: ``RRULE`` / ``RDATE`` / ``EXDATE`` are ignored, so a
 recurring event yields its first occurrence (its DTSTART) only. The agencies we
@@ -44,8 +50,8 @@ _TZ_ALIASES = {
     "utc": "UTC",
     "gmt": "UTC",
 }
-_FOLD = re.compile(r"\r?\n[ \t]")
-_LINES = re.compile(r"\r?\n")
+_FOLD = re.compile(r"(?:\r\n|\r|\n)[ \t]")
+_LINES = re.compile(r"\r\n|\r|\n")
 _ESCAPE = re.compile(r"\\([\\,;nN])")
 _DATETIME = re.compile(r"^(\d{8})T(\d{6})(Z?)$")
 _DATE = re.compile(r"^(\d{8})$")
@@ -166,23 +172,28 @@ def parse(body) -> list[dict]:
         out: list[dict] = []
         current: list[str] | None = None
         depth = 0           # nested blocks open inside the current VEVENT
-        for raw in _LINES.split(text):
-            line = raw.rstrip("\r")
+        for line in _LINES.split(text):
             upper = line.strip().upper()
-            if current is None:
-                if upper == "BEGIN:VEVENT":
-                    current, depth = [], 0
+            if upper == "BEGIN:VEVENT":
+                if current is not None:
+                    log.debug("ics: VEVENT not closed before the next one - dropped")
+                current, depth = [], 0
                 continue
-            if upper.startswith("BEGIN:"):
+            if current is None:
+                continue
+            if upper in ("BEGIN:VCALENDAR", "END:VCALENDAR"):
+                log.debug("ics: calendar boundary inside a VEVENT - dropped")
+                current = None
+            elif upper == "END:VEVENT":
+                ev = _event(current)
+                if ev is not None:
+                    out.append(ev)
+                current = None
+            elif upper.startswith("BEGIN:"):
                 depth += 1
             elif upper.startswith("END:"):
                 if depth:
                     depth -= 1
-                elif upper == "END:VEVENT":
-                    ev = _event(current)
-                    if ev is not None:
-                        out.append(ev)
-                    current = None
             elif depth == 0:
                 current.append(line)
         return out

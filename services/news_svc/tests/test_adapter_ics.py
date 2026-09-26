@@ -149,3 +149,42 @@ def test_nested_block_end_does_not_close_the_event_early():
             b"END:VALARM\r\nSUMMARY:After alarm\r\nEND:VEVENT\r\n")
     evs = ics.parse(body)
     assert [e["summary"] for e in evs] == ["After alarm"]
+
+
+def _good(n):
+    return (f"BEGIN:VEVENT\r\nDTSTART:2026102{n}T123000Z\r\nSUMMARY:Good {n}\r\n"
+            "END:VEVENT\r\n")
+
+
+def test_a_missing_end_vevent_never_swallows_the_rest_of_the_file():
+    body = ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261020T123000Z\r\n"
+            "SUMMARY:Broken\r\n" + _good(1) + _good(2) + _good(3) + "END:VCALENDAR\r\n").encode()
+    assert [e["summary"] for e in ics.parse(body)] == ["Good 1", "Good 2", "Good 3"]
+
+
+def test_an_unclosed_valarm_never_swallows_the_rest_of_the_file():
+    body = ("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261020T123000Z\r\n"
+            "SUMMARY:Alarmed\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n"
+            + _good(1) + _good(2) + _good(3) + "END:VCALENDAR\r\n").encode()
+    assert [e["summary"] for e in ics.parse(body)] == ["Good 1", "Good 2", "Good 3"]
+
+
+def test_end_vevent_closes_the_event_even_inside_an_unclosed_nested_block():
+    body = (b"BEGIN:VEVENT\r\nDTSTART:20261029T123000Z\r\nSUMMARY:GDP\r\n"
+            b"BEGIN:VALARM\r\nACTION:DISPLAY\r\nEND:VEVENT\r\n" + _good(1).encode())
+    assert [e["summary"] for e in ics.parse(body)] == ["GDP", "Good 1"]
+
+
+def test_a_vcalendar_boundary_inside_an_event_drops_it():
+    body = (b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261029T123000Z\r\nSUMMARY:Cut\r\n"
+            b"END:VCALENDAR\r\nBEGIN:VCALENDAR\r\n" + _good(1).encode() + b"END:VCALENDAR\r\n")
+    assert [e["summary"] for e in ics.parse(body)] == ["Good 1"]
+
+
+def test_bare_cr_line_endings_are_lines():
+    body = (b"BEGIN:VCALENDAR\rBEGIN:VEVENT\rDTSTART:20261029T123000Z\rSUMMARY:GDP\r"
+            b" Advance\rDESCRIPTION:d\rEND:VEVENT\rEND:VCALENDAR\r")
+    evs = ics.parse(body)
+    assert len(evs) == 1
+    assert evs[0]["summary"] == "GDPAdvance" and evs[0]["description"] == "d"
+    assert evs[0]["at"] == "2026-10-29T12:30:00+00:00"
