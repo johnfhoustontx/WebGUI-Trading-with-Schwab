@@ -17,6 +17,17 @@ caller keeps its last good result. One bad row is skipped, never the batch.
 ``http_fetch`` and ``requests`` echo URLs into exception text. Anything built
 from such text (a source error, a degrade detail, a log line, a published
 status) goes through ``redact`` first.
+
+⚠ Redacting the MESSAGE is not enough: ``http_fetch`` raises
+``FetchError(...) from exc``, so ``__cause__`` still holds the original
+exception - unredacted URL and all - and any log call with ``exc_info``
+(``_degrade.degraded`` logs one) prints the whole chain. The caller rule, for
+any exception raised while a key-bearing URL was in play:
+
+* re-raise it as ``raise fred.safe_error(exc, key) from None``, or
+* log it with ``exc_info=False`` and ``detail=fred.redact(exc, key)``.
+
+Never log or re-raise the original exception object itself.
 """
 import csv
 import html
@@ -35,10 +46,11 @@ CALENDAR = "https://fred.stlouisfed.org/releases/calendar"
 CALENDAR_TZ = ZoneInfo("America/Chicago")
 MASK = "***"
 
-_DATE_COL = "observation_date"
+# fredgraph.csv's first header: ``observation_date`` today, ``DATE`` before.
+_DATE_COLS = ("observation_date", "DATE")
 _DAY = re.compile(r'<span style="font-weight:\s*bold;?">([^<]*)</span>', re.I)
 _ROW = re.compile(
-    r'<td nowrap[^>]*>(?P<time>[^<]*)</td>\s*<td[^>]*>\s*'
+    r'<td nowrap[^<>]*>(?P<time>[^<]*)</td>\s*<td[^<>]*>\s*'
     r'<a href="/release\?rid=(?P<rid>\d+)">(?P<name>[^<]*)</a>', re.I)
 _TOKEN = re.compile(_DAY.pattern + "|" + _ROW.pattern, re.I)
 _TIME = re.compile(r"^(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?$", re.I)
@@ -93,11 +105,14 @@ def parse_csv(body, series):
     The second header must BE ``series``: a body for another series is a
     failure, not data."""
     rows = csv.reader(io.StringIO(_text(body)))
-    header = next(rows, None)
-    if not header or len(header) < 2 or header[0].strip() != _DATE_COL \
-            or header[1].strip() != str(series):
-        raise ValueError(f"fredgraph.csv is not series {series!r}")
-    return _ascending((r[0], r[1]) for r in rows if len(r) >= 2)
+    try:
+        header = next(rows, None)
+        if not header or len(header) < 2 or header[0].strip() not in _DATE_COLS \
+                or header[1].strip() != str(series):
+            raise ValueError(f"fredgraph.csv is not series {series!r}")
+        return _ascending((r[0], r[1]) for r in rows if len(r) >= 2)
+    except csv.Error as exc:            # e.g. an unterminated quote past the field limit
+        raise ValueError(f"fredgraph.csv is malformed: {exc}") from None
 
 
 def _json(body, key):
@@ -105,6 +120,8 @@ def _json(body, key):
         doc = json.loads(_text(body))
     except json.JSONDecodeError as exc:
         raise ValueError("FRED body is not JSON") from exc
+    except RecursionError:              # b"[" * 100000 nests past the stack
+        raise ValueError("FRED body nests too deeply") from None
     if not isinstance(doc, dict) or "error_code" in doc:
         raise ValueError("FRED returned an error envelope")
     rows = doc.get(key)
@@ -214,6 +231,23 @@ def api_release_dates_url(base, rid, key):
 
 
 # ---- redaction -----------------------------------------------------------
+
+def safe_error(exc, key):
+    """A NEW ``FetchError`` carrying ``redact(exc, key)`` as its message (and
+    ``exc``'s ``status`` when it has one), with no ``__cause__`` / ``__context__``
+    and ``__suppress_context__`` set - so a traceback of it prints nothing but
+    the redacted line. Re-raise it ``from None``. Never raises."""
+    from services.news_svc.fetch import FetchError
+    status = getattr(exc, "status", None)
+    if isinstance(status, bool) or not isinstance(status, int):
+        status = None
+    safe = FetchError(redact(exc, key), status=status)
+    safe.__cause__ = None
+    safe.__context__ = None
+    safe.__suppress_context__ = True
+    safe.__traceback__ = None
+    return safe
+
 
 def redact(text, key):
     """``text`` (any object - an exception is fine) as a string with the key,

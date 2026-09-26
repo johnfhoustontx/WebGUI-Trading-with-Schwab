@@ -205,3 +205,70 @@ def test_values_are_plain_floats_or_none():
     assert [o["obs_date"] for o in obs if o["value"] is None] == ["2025-10-01"]
     assert all(type(o["value"]) is float and math.isfinite(o["value"])
                for o in obs if o["value"] is not None)
+
+
+# ---- hardening (review findings) -------------------------------------------
+
+def test_safe_error_drops_the_chained_cause_that_holds_the_key():
+    # fetch.http_fetch raises FetchError(...) from exc, and the CAUSE carries
+    # the unredacted URL; a traceback logged with exc_info prints the chain.
+    import traceback
+    try:
+        try:
+            raise ConnectionError("GET https://api/x?series_id=A&api_key=SECRET failed")
+        except ConnectionError as inner:
+            raise RuntimeError("fetch failed api_key=SECRET") from inner
+    except RuntimeError as exc:
+        safe = fred.safe_error(exc, "SECRET")
+    assert safe.__cause__ is None and safe.__context__ is None
+    assert safe.__suppress_context__ is True
+    text = "".join(traceback.format_exception(safe))
+    assert "SECRET" not in text and "api_key=***" in text
+
+
+def test_safe_error_re_raised_from_none_logs_no_key():
+    # The key is built at runtime so the traceback's echoed SOURCE lines
+    # cannot contain it - only a leaked exception message could.
+    import traceback
+    key = "".join(["SEC", "RET"])
+    try:
+        try:
+            try:
+                raise OSError(f"https://api/x?api_key={key}")
+            except OSError as inner:
+                raise RuntimeError(f"wrapped {key}") from inner
+        except RuntimeError as exc:
+            raise fred.safe_error(exc, key) from None
+    except Exception as final:  # noqa: BLE001
+        text = "".join(traceback.format_exception(final))
+    assert key not in text and "***" in text
+
+
+def test_calendar_regex_is_linear_on_an_unclosed_td():
+    import time
+    t0 = time.perf_counter()
+    assert fred.parse_calendar_html(b"<td nowrap" * 40000, rid=None) == []
+    assert time.perf_counter() - t0 < 1.0
+
+
+def test_csv_error_is_a_value_error():
+    # An unterminated quote swallows the rest of the body into one field past
+    # csv's 131072-char limit, which raises csv.Error.
+    body = b'observation_date,X\n2026-08-01,"' + b"1" * 200000 + b"\n"
+    with pytest.raises(ValueError):
+        fred.parse_csv(body, "X")
+
+
+def test_deeply_nested_json_is_a_value_error():
+    with pytest.raises(ValueError):
+        fred.parse_api_observations(b"[" * 100000)
+    with pytest.raises(ValueError):
+        fred.parse_api_release_dates(b"[" * 100000)
+
+
+def test_csv_accepts_the_legacy_date_header():
+    obs = fred.parse_csv(b"DATE,X\n2026-07-01,1.5\n2026-08-01,2\n", "X")
+    assert obs == [{"obs_date": "2026-07-01", "value": 1.5},
+                   {"obs_date": "2026-08-01", "value": 2.0}]
+    with pytest.raises(ValueError):
+        fred.parse_csv(b"DATE,UNRATE\n2026-08-01,4.1\n", "X")
