@@ -41,10 +41,22 @@ Load-bearing rules, each pinned in ``tests/test_econ_calendar.py``:
 * **A missing dividends store is ``never``, not an empty "no dividends"**, and
   it is opened READ-ONLY (``mode=ro``) and only when the file exists: this
   service must not create or migrate a store another service owns.
-* **The views carry no timestamp** (``skip_unchanged``); the status view does.
+* **A dividends store nobody has checked is ``never`` too**: with no symbol's
+  coverage ``ok`` or ``none`` (``shared.dividends.coverage``), an empty list is
+  not an answer. The store is opened through ``Path.as_uri()`` so a ``?``,
+  ``#`` or ``%`` in the path cannot cut ``mode=ro`` off the URI.
+* **Observations are scheduled PER SERIES** (``obs:<source>:<series>`` rows): a
+  series failing forever is retried alone every ``[calendar] refresh_min``, and
+  the source reads ``stale`` with an error naming the failed series until each
+  has a good fetch - a good watch fetch clears its series at once.
+* **Fed / BLS / BEA are conditional GETs**: the stored ``etag`` /
+  ``last_modified`` go out beside a stored payload, and a 304 keeps it.
+* **The views carry no timestamp** (``skip_unchanged``); the status view doesn't either.
 * **One cycle at a time**: ``refresh`` and ``watch`` each hold their own lock
-  (a second caller gets ``{"skipped": "busy"}``) and share one publish lock, so
-  an older build can never overwrite a newer one.
+  (a second caller gets ``{"skipped": "busy"}``) and share one publish lock;
+  a publish builds as of the NEWEST ``now`` any publish used (the ``published``
+  row), so a refresh that read its clock before a watch published cannot
+  rebuild the page as of that earlier instant.
 
 Budget, per ``refresh`` with every source due: 1 + 1 + 1 + 2 + 2 + 10 = **17
 requests**, but on their own cadences - Fed hourly, BLS / BEA / FRED calendar
@@ -87,6 +99,12 @@ OBS_BACK_DAYS = 400             # 13+ monthly rows: a prior, and room for a y/y
 _SCHEDULE_SOURCES = ("fed", "bls", "bea", "fred_calendar", "nasdaq_ipo")
 _FRED_DATES = "fred_api_dates"  # internal row: the key path's release-date fallback
 _WATCH_PREFIX = "watch:"        # internal rows: the release watch's last poll per series
+_OBS_PREFIX = "obs:"            # internal rows: one per (observation source, series)
+_PUBLISHED = "published"        # internal row: the ``now`` of the newest publish
+# How far ahead of this call's ``now`` a stored publish ``now`` may be and still
+# be taken: a racing cycle is minutes, not days - a bad clock must not freeze it.
+_PUBLISH_SKEW = dt.timedelta(minutes=15)
+_NOT_MODIFIED = object()
 
 _CAL_LOCK = threading.Lock()
 _WATCH_LOCK = threading.Lock()
@@ -195,18 +213,42 @@ def _fred_api(fetch, url, key, src, timeout, parse):
 
 # ── per-source fetch + parse (each raises on failure) ─────────────────────────
 
-def _get_fed(fetch, src, timeout, now):
-    events = fed_calendar.parse(_fetch(fetch, src["url"], src, timeout), types=_fed_types())
+def _parse_fed(body):
+    events = fed_calendar.parse(body, types=_fed_types())
     if not events:
         raise ValueError("calendar.json parsed to no events")
     return events
 
 
-def _get_ics(fetch, src, timeout, now):
-    events = ics.parse(_fetch(fetch, src["url"], src, timeout))
+def _parse_ics(body):
+    events = ics.parse(body)
     if not events:
         raise ValueError("the ICS schedule parsed to no events")
     return events
+
+
+# One URL each, so a conditional GET is cheap: the stored validators go out, a
+# 304 keeps the stored payload.
+_CONDITIONAL = {"fed": _parse_fed, "bls": _parse_ics, "bea": _parse_ics}
+
+
+def _get_conditional(fetch, src, timeout, st, parse):
+    """``(payload, etag, last_modified)``, or ``_NOT_MODIFIED`` on a 304 to a
+    conditional request. Validators are sent ONLY beside a stored payload - a
+    304 must never answer a source that has nothing to keep - and a 304 to an
+    unconditional request is a failure, as ``http_fetch`` treats it."""
+    sent = {}
+    if st.get("payload") is not None:
+        for field in ("etag", "last_modified"):
+            if isinstance(st.get(field), str) and st[field]:
+                sent[field] = st[field]
+    got = fetch(src["url"], user_agent=src["user_agent"], timeout=timeout, headers={}, **sent)
+    status = getattr(got, "status", 200)
+    if status == 304 and sent:
+        return _NOT_MODIFIED
+    if status != 200 or not getattr(got, "body", b""):
+        raise FetchError(f"HTTP {status} with no body", status=None)
+    return parse(got.body), getattr(got, "etag", None), getattr(got, "last_modified", None)
 
 
 def _fred_rids(indicators):
@@ -256,7 +298,7 @@ def _refresh_schedules(db, fetch, *, now, key, timeout, cal, indicators):
     now_iso = _iso(now)
     retry = cal["refresh_min"]
     getters = {
-        "fed": _get_fed, "bls": _get_ics, "bea": _get_ics, "nasdaq_ipo": _get_nasdaq,
+        "nasdaq_ipo": _get_nasdaq,
         "fred_calendar": lambda f, s, t, n: _get_fred_calendar(f, s, t, n, _fred_rids(indicators)),
     }
     for name in _SCHEDULE_SOURCES:
@@ -269,6 +311,15 @@ def _refresh_schedules(db, fetch, *, now, key, timeout, cal, indicators):
         if not _due(st, src["refresh_min"], retry, now):
             continue
         try:
+            if name in _CONDITIONAL:
+                got = _get_conditional(fetch, src, timeout, st, _CONDITIONAL[name])
+                if got is _NOT_MODIFIED:
+                    db.set_cal_source(name, last_ok=now_iso, last_poll=now_iso, error=None)
+                    continue
+                payload, etag, last_modified = got
+                db.set_cal_source(name, payload=payload, last_ok=now_iso, last_poll=now_iso,
+                                  error=None, etag=etag, last_modified=last_modified)
+                continue
             payload = getters[name](fetch, src, timeout, now)
             db.set_cal_source(name, payload=payload, last_ok=now_iso, last_poll=now_iso,
                               error=None)
@@ -318,12 +369,18 @@ def _series(indicators):
     return out
 
 
+def _obs_row(name, series):
+    return f"{_OBS_PREFIX}{name}:{series}"
+
+
 def _fetch_series(db, fetch, series_list, *, name, src, key, timeout, now):
     """Fetch and store ``series_list``; one failing series does not stop the
-    rest. Returns ``(fetched, first_error)``."""
+    rest. Each series' own row (``obs:<source>:<series>``) records its poll,
+    its success and its (redacted) error, which is what schedules its next
+    fetch. Returns the first exception, or None."""
     start = (_today_ct(now) - dt.timedelta(days=OBS_BACK_DAYS)).isoformat()
     now_iso = _iso(now)
-    done, error = [], None
+    error = None
     for series in series_list:
         try:
             if name == "fred_api":
@@ -333,29 +390,56 @@ def _fetch_series(db, fetch, series_list, *, name, src, key, timeout, now):
                 url = src["url"].format(series=quote(series, safe=""), start=start)
                 rows = fred.parse_csv(_fetch(fetch, url, src, timeout), series)
             db.upsert_obs(series, rows, now=now_iso)
-            done.append(series)
+            db.set_cal_source(_obs_row(name, series), last_ok=now_iso, last_poll=now_iso,
+                              error=None)
         except Exception as exc:  # noqa: BLE001 - redacted before it goes anywhere
             error = error or exc
-    return done, error
+            try:
+                db.set_cal_source(_obs_row(name, series), last_poll=now_iso,
+                                  error=fred.redact(exc, key)[:300])
+            except Exception:  # noqa: BLE001 - the source row below still says it failed
+                log.warning("calendar: could not record %s's failure", series, exc_info=False)
+    return error
+
+
+def _record_obs_source(db, *, name, series_list, key, now, error):
+    """The observation source's own row, from its series' rows: ``ok`` when
+    every series has a good fetch and no error, else an error NAMING the failed
+    series (redacted) - ``stale`` beside earlier good series, ``never`` with none."""
+    now_iso = _iso(now)
+    good, failed = [], []
+    for series in series_list:
+        st = db.cal_source(_obs_row(name, series))
+        if st.get("error") or not st.get("last_ok"):
+            failed.append(series)
+        else:
+            good.append(series)
+    if not failed:
+        db.set_cal_source(name, payload={"series": sorted(good)}, last_ok=now_iso,
+                          last_poll=now_iso, error=None)
+        return
+    detail = f"series failed: {', '.join(failed)}"
+    if error is not None:
+        detail += f" - {fred.redact(error, key)}"
+    _fail(db, name, detail, key=key, now_iso=now_iso, in_except=False)
+    if good:
+        db.set_cal_source(name, payload={"series": sorted(good)}, last_ok=now_iso)
 
 
 def _refresh_obs(db, fetch, *, now, key, timeout, cal, indicators):
+    """Fetch only the DUE series: each on ``values_refresh_min``, a failed one
+    again after ``[calendar] refresh_min`` - never the healthy ones with it."""
     name, src = _obs_source(key)
     if not src.get("enabled"):
         return
-    st = db.cal_source(name)
-    if not _due(st, cal["values_refresh_min"], cal["refresh_min"], now):
+    series_list = _series(indicators)
+    due = [s for s in series_list
+           if _due(db.cal_source(_obs_row(name, s)), cal["values_refresh_min"],
+                   cal["refresh_min"], now)]
+    if not due:
         return
-    done, error = _fetch_series(db, fetch, _series(indicators), name=name, src=src,
-                                key=key, timeout=timeout, now=now)
-    now_iso = _iso(now)
-    if error is not None:
-        _fail(db, name, error, key=key, now_iso=now_iso, in_except=False)
-        if done:
-            db.set_cal_source(name, payload={"series": sorted(done)}, last_ok=now_iso)
-        return
-    db.set_cal_source(name, payload={"series": sorted(done)}, last_ok=now_iso,
-                      last_poll=now_iso, error=None)
+    error = _fetch_series(db, fetch, due, name=name, src=src, key=key, timeout=timeout, now=now)
+    _record_obs_source(db, name=name, series_list=series_list, key=key, now=now, error=error)
 
 
 def _dividend_symbols():
@@ -381,13 +465,23 @@ def _refresh_dividends(db, *, now, cal, path):
     start = today - dt.timedelta(days=div_cfg["lookback_days"])
     end = today + dt.timedelta(days=div_cfg["horizon_days"])
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        # ``as_uri`` percent-encodes ``?``, ``#`` and ``%``: spliced raw, they
+        # would end the path early and drop ``mode=ro`` - SQLite would then
+        # CREATE a different file read-write.
+        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
         try:
-            rows = _div.upcoming(conn, _dividend_symbols(), start, end)
+            symbols = _dividend_symbols()
+            cov = _div.coverage(conn, symbols)
+            rows = _div.upcoming(conn, symbols, start, end)
         finally:
             conn.close()
     except Exception as exc:  # noqa: BLE001 - that source alone goes stale
         _fail(db, "dividends", exc, key=None, now_iso=now_iso)
+        return
+    if symbols and not any(v in ("ok", "none") for v in cov.values()):
+        # No symbol has an answer yet: an empty list here is a zero nobody read.
+        db.set_cal_source("dividends", last_poll=now_iso,
+                          error="no symbol's dividends have been checked yet (trade_svc checks them)")
         return
     db.set_cal_source("dividends", payload=rows, last_ok=now_iso, last_poll=now_iso, error=None)
 
@@ -445,8 +539,26 @@ def status_rows(db) -> list:
     return out
 
 
+def _publish_now(db, now):
+    """``now``, or the newer ``now`` a publish already used: a refresh that took
+    its clock before a watch published must not rebuild the page as of that
+    earlier instant (a released CPI tile would read "not yet"). Stored in the
+    store, so every ``Store`` on one file agrees; a stored instant more than
+    ``_PUBLISH_SKEW`` ahead is a bad clock, not a race, and is ignored."""
+    try:
+        last = _instant(db.cal_source(_PUBLISHED).get("last_poll"))
+        if last is not None and now < last <= now + _PUBLISH_SKEW:
+            return last
+        if last is None or now > last:
+            db.set_cal_source(_PUBLISHED, last_poll=_iso(now))
+    except Exception:  # noqa: BLE001 - publish on this call's clock rather than not at all
+        log.warning("calendar: could not read the last publish time", exc_info=False)
+    return now
+
+
 def _publish(bus, db, *, now, key, cal, indicators):
     with _PUBLISH_LOCK:
+        now = _publish_now(db, now)
         if cal["enabled"]:
             parts = _parts(db, now=now, key=key, cal=cal, indicators=indicators)
         else:
@@ -551,10 +663,12 @@ def watch(bus, db, fetch, *, now, env=None) -> dict:
         now_iso = _iso(now)
         for series in due:
             db.set_cal_source(_WATCH_PREFIX + series, last_poll=now_iso)
-        _, error = _fetch_series(db, fetch, due, name=name, src=src, key=key,
-                                 timeout=_timeout(nc.load()), now=now)
-        if error is not None:
-            _fail(db, name, error, key=key, now_iso=now_iso, in_except=False)
+        error = _fetch_series(db, fetch, due, name=name, src=src, key=key,
+                              timeout=_timeout(nc.load()), now=now)
+        # A good watch fetch clears that series' error at once, not at the next
+        # scheduled refresh.
+        _record_obs_source(db, name=name, series_list=_series(indicators), key=key,
+                           now=now, error=error)
         _publish(bus, db, now=now, key=key, cal=cal, indicators=indicators)
         return {"due": due}
     finally:

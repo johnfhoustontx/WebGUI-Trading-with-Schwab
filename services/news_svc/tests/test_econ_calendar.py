@@ -103,11 +103,17 @@ def bus():
     return Bus(fake=True)
 
 
-def _dividends_store(tmp_path, rows):
-    path = tmp_path / "dividends.db"
+def _dividends_store(tmp_path, rows, coverage=None, name="dividends.db"):
+    """A dividends store as ``trade_svc`` leaves it: rows AND per-symbol
+    coverage (every row's symbol ``ok`` unless ``coverage`` says otherwise)."""
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
     conn = divs.init_db(path)
     divs.upsert(conn, [{"symbol": s, "ex_date": d, "pay_date": None, "amount": 0.5}
                        for s, d in rows])
+    cov = {s: "ok" for s, _ in rows} if coverage is None else coverage
+    if cov:
+        divs.set_coverage(conn, cov, "2026-09-26")
     divs.close_db(conn)
     return path
 
@@ -287,7 +293,7 @@ def test_the_dividends_store_is_opened_read_only(db, bus, cal_config, tmp_path, 
         return real(database, *a, **kw)
     monkeypatch.setattr(econ_calendar.sqlite3, "connect", spy)
     econ_calendar.refresh(bus, db, FakeFetch(), now=NOW, env={}, dividends_db=path)
-    assert seen == [(f"file:{path}?mode=ro", True)]
+    assert seen == [(path.resolve().as_uri() + "?mode=ro", True)]
     assert _payload(bus, handlers.CACHE_CAL)["sources"]["dividends"] == "ok"
 
 
@@ -414,3 +420,191 @@ def test_the_key_is_read_from_the_environment_at_call_time(db, bus, cal_config, 
     fetch = FakeFetch()
     econ_calendar.refresh(bus, db, fetch, now=NOW)
     assert fetch.urls("api.stlouisfed.org")
+
+
+# ── review fixes ──────────────────────────────────────────────────────────────
+
+def test_a_dividends_path_with_uri_metacharacters_is_still_opened_read_only(
+        db, bus, cal_config, tmp_path):
+    """``f"file:{path}?mode=ro"`` cut the path at a ``?`` or ``#`` and dropped
+    ``mode=ro`` - SQLite then opened (and CREATED) a different file read-write."""
+    odd = tmp_path / "a?b#c%20d"
+    path = _dividends_store(odd, [("JPM", "2026-10-06")])
+    def files():                                    # news.db's own WAL is not ours to judge
+        return sorted(str(p) for p in tmp_path.rglob("*") if not p.name.startswith("news.db"))
+    before = files()
+    econ_calendar.refresh(bus, db, FakeFetch(), now=NOW, env={}, dividends_db=path)
+    after = files()
+    assert after == before                          # nothing created anywhere
+    p = _payload(bus, handlers.CACHE_CAL)
+    assert p["sources"]["dividends"] == "ok"
+    assert [d["symbol"] for d in p["dividends"]] == ["JPM"]
+
+
+def test_a_dividends_store_with_no_coverage_is_never_not_an_empty_ok(db, bus, cal_config,
+                                                                      tmp_path):
+    """The store exists but ``trade_svc`` has checked no symbol yet: an "ok"
+    with no dividends would print a zero nobody read."""
+    path = _dividends_store(tmp_path, [], coverage={})
+    econ_calendar.refresh(bus, db, FakeFetch(), now=NOW, env={}, dividends_db=path)
+    assert _payload(bus, handlers.CACHE_CAL)["sources"]["dividends"] == "never"
+    assert "checked" in db.cal_source("dividends")["error"]
+
+
+def test_a_dividends_store_whose_checks_all_errored_is_not_ok(db, bus, cal_config, tmp_path):
+    path = _dividends_store(tmp_path, [], coverage={"JPM": "error", "EXTRA": "error"})
+    econ_calendar.refresh(bus, db, FakeFetch(), now=NOW, env={}, dividends_db=path)
+    assert _payload(bus, handlers.CACHE_CAL)["sources"]["dividends"] == "never"
+
+
+def test_one_symbol_checked_with_no_dividend_is_a_real_empty_answer(db, bus, cal_config,
+                                                                     tmp_path):
+    path = _dividends_store(tmp_path, [], coverage={"JPM": "none"})
+    econ_calendar.refresh(bus, db, FakeFetch(), now=NOW, env={}, dividends_db=path)
+    p = _payload(bus, handlers.CACHE_CAL)
+    assert p["sources"]["dividends"] == "ok" and p["dividends"] == []
+
+
+def test_a_series_failing_forever_costs_its_retries_not_every_series(db, bus, cal_config):
+    """One 404ing series used to put the whole observation source on the
+    hourly retry - all ten series refetched every hour (240 a day)."""
+    bad = nc.indicators()[0]["series"]
+    fetch = FakeFetch()
+    orig = FakeFetch.__call__
+
+    def route(url, **kw):
+        if "fredgraph.csv" in url and f"id={bad}&" in url + "&":
+            fetch.calls.append((url, kw.get("user_agent"), kw.get("headers")))
+            raise compute.FetchError(f"HTTP 404 {url}", status=404)
+        return orig(fetch, url, **kw)
+    n_series = len(_series := {ind["series"] for ind in nc.indicators()})
+    for k in range(48):                             # a day of 30-minute ticks
+        econ_calendar.refresh(bus, db, route, now=NOW + dt.timedelta(minutes=30 * k), env={})
+    calls = fetch.urls("fredgraph.csv")
+    bad_calls = [u for u in calls if f"id={bad}&" in u + "&"]
+    good_calls = len(calls) - len(bad_calls)
+    assert good_calls == (n_series - 1) * 6         # every 4 h
+    assert len(bad_calls) == 24                     # hourly retries
+    assert len(calls) < 100
+    st = db.cal_source("fredgraph")
+    assert bad in st["error"] and _payload(bus, handlers.CACHE_CAL)["sources"]["fredgraph"] == "stale"
+    others = _series - {bad}
+    assert all(s not in st["error"] for s in others)
+
+
+def test_the_obs_source_is_ok_again_once_the_failed_series_recovers(db, bus, cal_config):
+    bad = nc.indicators()[0]["series"]
+    fetch = FakeFetch()
+    fetch_all = fetch.__call__
+    failing = {"on": True}
+
+    def route(url, **kw):
+        if failing["on"] and "fredgraph.csv" in url and f"id={bad}&" in url + "&":
+            raise compute.FetchError("HTTP 404", status=404)
+        return fetch_all(url, **kw)
+    econ_calendar.refresh(bus, db, route, now=NOW, env={})
+    assert _payload(bus, handlers.CACHE_CAL)["sources"]["fredgraph"] == "stale"
+    failing["on"] = False
+    n = len(fetch.urls("fredgraph.csv"))
+    econ_calendar.refresh(bus, db, route, now=NOW + dt.timedelta(minutes=61), env={})
+    assert len(fetch.urls("fredgraph.csv")) == n + 1          # the failed one only
+    assert _payload(bus, handlers.CACHE_CAL)["sources"]["fredgraph"] == "ok"
+    assert db.cal_source("fredgraph")["error"] is None
+
+
+def test_the_obs_error_names_the_series_but_never_the_key(db, bus, cal_config):
+    fetch = FakeFetch()
+    fetch.fail("api.stlouisfed.org", compute.FetchError(
+        f"HTTP 500 https://api.stlouisfed.org/x?api_key={KEY}", status=500))
+    econ_calendar.refresh(bus, db, fetch, now=NOW, env={"FRED_API_KEY": KEY})
+    err = db.cal_source("fred_api")["error"]
+    assert KEY not in err and nc.indicators()[0]["series"] in err
+
+
+def test_a_stale_refresh_never_overwrites_the_watchs_newer_build(db, bus, cal_config):
+    """The review's race: a refresh takes ``now`` at release-20s, the watch
+    publishes the release at +3 min, then the refresh publishes."""
+    fetch = FakeFetch()
+    econ_calendar.refresh(bus, db, fetch, now=NOW, env={})
+    release = dt.datetime(2026, 10, 14, 12, 30, tzinfo=UTC)
+    fetch.extra_rows = ("2026-09-01,102.3",)
+    econ_calendar.watch(bus, db, fetch, now=release + dt.timedelta(minutes=3), env={})
+    cpi = next(d for d in _payload(bus, handlers.CACHE_CAL)["data"] if d["key"] == "cpi")
+    assert dt.datetime.fromisoformat(cpi["last_release_at"]) == release
+    econ_calendar.refresh(bus, db, fetch, now=release - dt.timedelta(seconds=20), env={})
+    cpi = next(d for d in _payload(bus, handlers.CACHE_CAL)["data"] if d["key"] == "cpi")
+    assert dt.datetime.fromisoformat(cpi["last_release_at"]) == release
+    assert cpi["latest"]["obs_date"] == "2026-09-01"
+
+
+def test_a_successful_watch_fetch_clears_that_series_error(db, bus, cal_config):
+    fetch = FakeFetch()
+    econ_calendar.refresh(bus, db, fetch, now=NOW, env={})
+    release = dt.datetime(2026, 10, 14, 12, 30, tzinfo=UTC)
+    # The scheduled refresh just before the release: CPI's two series fail.
+    orig = fetch.__call__
+
+    def broken(url, **kw):
+        if "fredgraph.csv" in url and ("CPIAUCSL" in url or "CPILFESL" in url):
+            raise compute.FetchError("HTTP 503", status=503)
+        return orig(url, **kw)
+    econ_calendar.refresh(bus, db, broken, now=release - dt.timedelta(minutes=5), env={})
+    assert _payload(bus, handlers.CACHE_CAL)["sources"]["fredgraph"] == "stale"
+    fetch.extra_rows = ("2026-09-01,102.3",)
+    econ_calendar.watch(bus, db, fetch, now=release + dt.timedelta(minutes=3), env={})
+    assert db.cal_source("fredgraph")["error"] is None
+    assert _payload(bus, handlers.CACHE_CAL)["sources"]["fredgraph"] == "ok"
+
+
+class CondFetch(FakeFetch):
+    """Answers 304 when the request carries the validators it handed out."""
+
+    def __call__(self, url, *, user_agent=None, timeout=20, headers=None, etag=None,
+                 last_modified=None):
+        host = urllib.parse.urlsplit(url).netloc
+        if host in ("www.federalreserve.gov", "www.bls.gov", "www.bea.gov"):
+            self.calls.append((url, user_agent, headers))
+            self.sent = getattr(self, "sent", []) + [(host, etag, last_modified)]
+            if etag == f"E-{host}" and last_modified == "LM":
+                return compute.Fetched(status=304, body=b"", etag=etag, last_modified=last_modified)
+            got = super().__call__(url, user_agent=user_agent, timeout=timeout, headers=headers)
+            self.calls.pop()
+            return compute.Fetched(status=200, body=got.body, etag=f"E-{host}",
+                                   last_modified="LM")
+        return super().__call__(url, user_agent=user_agent, timeout=timeout, headers=headers)
+
+
+def test_the_fed_calendar_is_fetched_conditionally_and_a_304_keeps_it(db, bus, cal_config):
+    fetch = CondFetch()
+    econ_calendar.refresh(bus, db, fetch, now=NOW, env={})
+    first = _payload(bus, handlers.CACHE_CAL)
+    assert ("www.federalreserve.gov", None, None) in fetch.sent      # nothing to send yet
+    assert db.cal_source("fed")["etag"] == "E-www.federalreserve.gov"
+    econ_calendar.refresh(bus, db, fetch, now=NOW + dt.timedelta(minutes=61), env={})
+    assert fetch.sent[-1] == ("www.federalreserve.gov", "E-www.federalreserve.gov", "LM")
+    p = _payload(bus, handlers.CACHE_CAL)
+    assert p["sources"]["fed"] == "ok" and p["events"] == first["events"]
+    st = db.cal_source("fed")
+    assert st["error"] is None and st["last_ok"] == econ_calendar._iso(NOW + dt.timedelta(minutes=61))
+
+
+def test_no_validators_are_sent_without_a_stored_payload(db, bus, cal_config):
+    """A 304 must never answer a source that has nothing to keep."""
+    db.set_cal_source("fed", etag="E-www.federalreserve.gov", last_modified="LM",
+                      last_poll=None)
+    fetch = CondFetch()
+    econ_calendar.refresh(bus, db, fetch, now=NOW, env={})
+    assert ("www.federalreserve.gov", None, None) in fetch.sent
+    assert _payload(bus, handlers.CACHE_CAL)["sources"]["fed"] == "ok"
+
+
+def test_a_304_nobody_asked_for_is_a_failure(db, bus, cal_config):
+    fetch = FakeFetch()
+    orig = fetch.__call__
+
+    def weird(url, **kw):
+        if "federalreserve" in url:
+            return compute.Fetched(status=304, body=b"", etag=None, last_modified=None)
+        return orig(url, **kw)
+    econ_calendar.refresh(bus, db, weird, now=NOW, env={})
+    assert _payload(bus, handlers.CACHE_CAL)["sources"]["fed"] == "never"
