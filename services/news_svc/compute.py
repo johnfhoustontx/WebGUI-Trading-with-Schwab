@@ -1,5 +1,11 @@
-"""The poll cycle: feeds -> adapters -> store -> the three views. Pure over an
-injected ``fetch`` so the whole thing runs in tests with no network.
+"""The poll cycle: feeds -> adapters -> store -> impact -> the five views. Pure
+over an injected ``fetch`` so the whole thing runs in tests with no network.
+
+The five views: ``feed`` / ``feed_public`` (headlines - every kind BUT the SEC
+ones), ``sec`` / ``sec_public`` (``edgar_form4`` / ``edgar_filings`` only, their
+own ``[collector] sec_view_items`` window, so a busy 424B5 day cannot eat the
+headline window) and ``status``. The split is made HERE, by the store's kind
+filters, never page-side.
 
 Load-bearing rules, each pinned in ``tests/test_compute.py``:
 
@@ -32,6 +38,17 @@ Load-bearing rules, each pinned in ``tests/test_compute.py``:
   ``forms`` list - still reads them.
 * **Validators belong to a URL.** A feed whose url (or Google query) changed
   sends no ETag / Last-Modified on its next fetch.
+* **Impact is scored after the prune, stored uncapped, capped at publish.**
+  ``_rescore`` scores every row whose ``impact_ver`` is not the current
+  ``impact.fingerprint(config, ticker set)`` (the store's race guard decides
+  which scores land). A scoring failure is ONE ``news.impact`` degrade and the
+  views still publish, each row carrying whatever impact it had stored. The
+  private views cap the STORED band (``cap_stale``: a HIGH older than
+  ``stale_after_h`` goes out as MED with ``stale`` appended); the PUBLIC views
+  never carry the stored score - it counts private feeds and tickers - so each
+  public row is re-scored from the row as the store returns it (``sources`` and
+  ``tickers`` already cut to the public ones) and then capped. A private feed's
+  name therefore never reaches a public ``source:`` reason.
 * **A store failure costs its own step.** A failed prune or view read is a
   degrade; the other views - and always the status view - still publish. If
   even the feed states cannot be read, the status is built from the config
@@ -46,7 +63,7 @@ import threading
 import time
 
 from services import _degrade
-from services.news_svc import handlers, store as _store
+from services.news_svc import handlers, impact, store as _store
 from services.news_svc.adapters import edgar, google_news, rss, yahoo_ticker
 from services.news_svc.fetch import (  # noqa: F401 (re-exported for tests)
     FetchError, Fetched, TooLarge, http_fetch)
@@ -370,22 +387,101 @@ def status_rows(db, polled, results) -> list:
     return rows
 
 
+def _aware_now(now) -> dt.datetime:
+    """``now`` as an AWARE UTC datetime (``cap_stale`` needs one); an unusable or
+    naive ``now`` is the current UTC time."""
+    if isinstance(now, str):
+        try:
+            parsed = dt.datetime.fromisoformat(now.strip().replace("Z", "+00:00"))
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed.tzinfo is not None:
+            return parsed.astimezone(dt.timezone.utc)
+    elif isinstance(now, dt.datetime) and now.tzinfo is not None:
+        return now.astimezone(dt.timezone.utc)
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def _rescore(db, icfg, universe) -> None:
+    """Score every row the store says is out of date and store the results in
+    one write. Never raises: a failure is one ``news.impact`` degrade and the
+    rows keep what they had (a new row stays unscored until the next pass)."""
+    try:
+        fp = impact.fingerprint(icfg, universe)
+        out = []
+        for row in db.rows_to_score(fp):
+            pts, reasons = impact.score(row, icfg, universe)
+            out.append((row["id"], pts, impact.band(pts, icfg), reasons, fp))
+        if out:
+            db.set_impact(out)
+    except Exception:  # noqa: BLE001 - the views still publish with the stored impact
+        _degrade.degraded("news.impact")
+
+
+def _capped(imp, published_at, now, icfg):
+    """``imp`` with the staleness cap applied (a copy; ``None`` stays ``None``)."""
+    if not isinstance(imp, dict):
+        return None
+    band, capped = impact.cap_stale(imp.get("band"), published_at, now, icfg)
+    reasons = list(imp.get("reasons") or [])
+    if capped:
+        reasons.append("stale")
+    return {"band": band, "score": imp.get("score"), "reasons": reasons}
+
+
+def _finish(rows, now, icfg, universe, *, public) -> list:
+    """The rows as published. Private: the STORED impact, capped. Public: the
+    stored impact is never used (the store hands back ``None``); each row is
+    re-scored from itself - its ``sources`` / ``tickers`` already cut to the
+    public ones - then capped. A public re-score failure publishes the rows
+    with ``impact: None`` and one ``news.impact.public`` degrade."""
+    out, failed = [], False
+    for row in rows:
+        row = dict(row)
+        if public:
+            imp = None
+            if not failed:
+                try:
+                    imp = impact.apply(row, icfg, universe)
+                except Exception:  # noqa: BLE001 - the view still publishes, unscored
+                    failed = True
+                    _degrade.degraded("news.impact.public")
+        else:
+            imp = row.get("impact")
+        row["impact"] = _capped(imp, row.get("published_at"), now, icfg)
+        out.append(row)
+    return out
+
+
 def run_poll(bus, db, fetch, *, feeds, universe, now, cfg) -> dict:
     results = [poll_feed(f, db, fetch, universe=universe, now=now, cfg=cfg) for f in feeds]
     try:
         db.prune(keep_days=_collector(cfg, "keep_days"), now=now)
     except Exception:  # noqa: BLE001 - old rows linger a cycle; the views still publish
         _degrade.degraded("news.prune")
+    icfg = nc.impact_config()
+    _rescore(db, icfg, universe)
+    at = _aware_now(now)
     n = _collector(cfg, "view_items")
-    try:
-        handlers.publish_feed(bus, db.newest(n))
-    except Exception:  # noqa: BLE001 - the last published view stays; status still goes
-        _degrade.degraded("news.publish")
-    try:
-        # The CURRENT flags, re-read at every publish - never the ingest-time copy.
-        handlers.publish_feed_public(bus, db.newest(n, public_sources=nc.public_feed_names()))
-    except Exception:  # noqa: BLE001 - as above
-        _degrade.degraded("news.publish_public")
+    sec_n = _collector(cfg, "sec_view_items")
+    # The CURRENT flags, re-read at every publish - never the ingest-time copy
+    # (inside each public view's own step, so a failure costs that view alone).
+    public = nc.public_feed_names
+    views = (
+        ("news.publish", handlers.publish_feed, False,
+         lambda: db.newest(n, exclude_kinds=_EDGAR_KINDS)),
+        ("news.publish_public", handlers.publish_feed_public, True,
+         lambda: db.newest(n, public_sources=public(), exclude_kinds=_EDGAR_KINDS)),
+        ("news.publish_sec", handlers.publish_sec, False,
+         lambda: db.newest(sec_n, kinds=_EDGAR_KINDS)),
+        ("news.publish_sec_public", handlers.publish_sec_public, True,
+         lambda: db.newest(sec_n, public_sources=public(), kinds=_EDGAR_KINDS)),
+    )
+    for area, publish, is_public, read in views:
+        try:
+            publish(bus, _finish(read(), at, icfg, universe, public=is_public))
+        except Exception:  # noqa: BLE001 - that view's last copy stays; the rest go
+            _degrade.degraded(area)
     try:
         rows = status_rows(db, feeds, results)
     except Exception:  # noqa: BLE001 - the status is how the page learns the store is sick

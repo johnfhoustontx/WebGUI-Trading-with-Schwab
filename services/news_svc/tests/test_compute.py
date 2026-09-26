@@ -216,8 +216,13 @@ def test_run_poll_publishes_the_public_view_through_public_sources(tmp_path, mon
             {"A": {"public": False}})
     compute.run_poll(Bus(), db, FakeFetch({}), feeds=[], universe=[], now=NOW,
                      cfg=_cfg([]))
-    assert {} in seen
-    assert {"public_sources": []} in seen
+    # v2: the headline views exclude the SEC kinds and the SEC views take only
+    # them (Task 14); both public reads still go through public_sources.
+    edgar_kinds = ("edgar_form4", "edgar_filings")
+    assert {"exclude_kinds": edgar_kinds} in seen
+    assert {"public_sources": [], "exclude_kinds": edgar_kinds} in seen
+    assert {"kinds": edgar_kinds} in seen
+    assert {"public_sources": [], "kinds": edgar_kinds} in seen
 
 
 # ── B: which User-Agent each request carries ─────────────────────────────────
@@ -1076,8 +1081,11 @@ def test_a_failed_newest_still_publishes_the_status(tmp_path, monkeypatch):
                      cfg=_cfg(nc.feeds()))
     assert bus.cache_get(handlers.CACHE_FEED) is None
     assert bus.cache_get(handlers.CACHE_PUBLIC) is None
+    assert bus.cache_get(handlers.CACHE_SEC) is None            # v2: the SEC views too
+    assert bus.cache_get(handlers.CACHE_SEC_PUBLIC) is None
     assert {s["name"] for s in bus.cache_get(handlers.CACHE_STATUS).payload["feeds"]} == {"P", "Q"}
-    assert sorted(a for a, _ in calls) == ["news.publish", "news.publish_public"]
+    assert sorted(a for a, _ in calls) == ["news.publish", "news.publish_public",
+                                           "news.publish_sec", "news.publish_sec_public"]
 
 
 def test_an_unreadable_store_still_publishes_a_status_built_from_config(tmp_path, monkeypatch):
@@ -1114,3 +1122,235 @@ def test_an_unreadable_store_still_publishes_a_status_built_from_config(tmp_path
                        "last_ok": None, "last_poll": None,
                        "error": "store unreadable", "inserted": 3}
     assert [a for a, _ in calls] == ["news.status"]
+
+
+# ── Task 14 (news v2): impact on every item, and the SEC split ──────────────
+
+from services import _degrade  # noqa: E402
+from services.news_svc import impact, items  # noqa: E402
+
+_EDGAR = {"edgar_form4", "edgar_filings"}
+ICFG = {"high_at": 6, "med_at": 3, "stale_after_h": 24, "multi_source": 1, "watchlist": 2,
+        "match_teaser": False,
+        "keywords": {"tier1": {"points": 5, "words": ["FOMC"]},
+                     "tier2": {"points": 3, "words": ["beats"]}},
+        "source_points": {"Priv": 3},
+        "form4": {"small_usd": 250_000, "small": 1, "large_usd": 1_000_000, "large": 3,
+                  "huge_usd": 10_000_000, "huge": 6, "officer": 1},
+        "filings": {"424B5": 3, "S-3": 2, "untracked": -1}}
+
+
+def _impact_config(monkeypatch, feeds, flags=None, icfg=None):
+    cfg = _config(monkeypatch, feeds, flags)
+    cfg["impact"] = json.loads(json.dumps(icfg or ICFG))
+    return cfg
+
+
+def _it(url, title, source="Pub", kind="rss", published=NOW, tickers=(), detail=None):
+    it = items.make_item(source=source, title=title, url=url, published_at=published,
+                         public=True, now=NOW, kind=kind, tickers=tickers, detail=detail)
+    return it
+
+
+def _poll(bus, db, now=NOW, universe=()):
+    return compute.run_poll(bus, db, FakeFetch({}), feeds=[], universe=list(universe),
+                            now=now, cfg=_cfg([]))
+
+
+def _by_title(bus, key):
+    return {i["title"]: i for i in bus.cache_get(key).payload["items"]}
+
+
+def test_every_row_is_scored_after_a_poll_and_the_view_carries_it(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"}],
+                   {"Pub": {"public": True}})
+    feed = {"name": "Pub", "kind": "rss", "url": "https://p", "public": True}
+    body = (b"<rss><channel><item><title>FOMC holds rates steady this afternoon</title>"
+            b"<link>https://p/1</link><pubDate>Fri, 25 Sep 2026 23:00:00 GMT</pubDate>"
+            b"</item></channel></rss>")
+    compute.run_poll(bus, db, FakeFetch({"https://p": body}), feeds=[feed], universe=[],
+                     now=NOW, cfg=_cfg([feed]))
+    assert db.rows_to_score(impact.fingerprint(nc.impact_config(), [])) == []
+    [row] = bus.cache_get(handlers.CACHE_FEED).payload["items"]
+    assert row["impact"] == {"band": "med", "score": 5, "reasons": ["kw:tier1:FOMC"]}
+    [pub] = bus.cache_get(handlers.CACHE_PUBLIC).payload["items"]
+    assert pub["impact"] == {"band": "med", "score": 5, "reasons": ["kw:tier1:FOMC"]}
+
+
+def test_a_config_change_rescores_stored_rows(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    cfg = _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"}])
+    db.insert_many([_it("https://p/1", "FOMC holds rates steady this afternoon")])
+    _poll(bus, db)
+    assert bus.cache_get(handlers.CACHE_FEED).payload["items"][0]["impact"]["score"] == 5
+    cfg["impact"]["keywords"]["tier1"]["points"] = 7              # Settings edits the tier
+    _poll(bus, db)
+    got = bus.cache_get(handlers.CACHE_FEED).payload["items"][0]["impact"]
+    assert (got["score"], got["band"]) == (7, "high")
+    stored = db.newest(5)[0]["impact"]
+    assert (stored["score"], stored["band"]) == (7, "high")
+
+
+def test_edgar_kinds_publish_to_sec_and_never_to_feed(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"},
+                                 {"name": "F4", "kind": "edgar_form4"},
+                                 {"name": "S3", "kind": "edgar_filings", "forms": ["S-3"]}],
+                   {n: {"public": True} for n in ("Pub", "F4", "S3")})
+    db.insert_many([
+        _it("https://p/1", "Apple beats on iPhone demand this quarter"),
+        _it("https://sec/1", "ACME insider purchase", source="F4", kind="edgar_form4",
+            tickers=["ACME"], detail={"total_value": 1_200_000, "relationship": "Director"}),
+        _it("https://sec/2", "ACME files S-3", source="S3", kind="edgar_filings",
+            tickers=["ACME"], detail={"form": "S-3"}),
+    ])
+    _poll(bus, db)
+    feed = bus.cache_get(handlers.CACHE_FEED).payload["items"]
+    sec = bus.cache_get(handlers.CACHE_SEC).payload["items"]
+    assert {i["kind"] for i in feed}.isdisjoint(_EDGAR)
+    assert sec and {i["kind"] for i in sec} <= _EDGAR
+    assert {i["kind"] for i in sec} == _EDGAR
+    pub = bus.cache_get(handlers.CACHE_PUBLIC).payload["items"]
+    sec_pub = bus.cache_get(handlers.CACHE_SEC_PUBLIC).payload["items"]
+    assert {i["kind"] for i in pub}.isdisjoint(_EDGAR) and pub
+    assert {i["kind"] for i in sec_pub} == _EDGAR
+    f4 = next(i for i in sec if i["kind"] == "edgar_form4")
+    assert f4["impact"] == {"band": "med", "score": 4, "reasons": ["form4:$1.2M", "officer"]}
+
+
+def test_the_sec_window_is_its_own(tmp_path, monkeypatch):
+    """A busy filings day cannot eat the headline window, nor the reverse."""
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"}])
+    db.insert_many([_it(f"https://sec/{k}", f"Filing number {k} by some issuer", source="S3",
+                        kind="edgar_filings", detail={"form": "424B5"}) for k in range(4)]
+                   + [_it("https://p/1", "A headline that is only a headline today",
+                          published="2026-09-25T00:00:00+00:00")])
+    cfg = {"collector": {"keep_days": 7, "view_items": 1, "sec_view_items": 3,
+                         "request_timeout_s": 5, "sec_user_agent": "t"}, "feeds": []}
+    compute.run_poll(bus, db, FakeFetch({}), feeds=[], universe=[], now=NOW, cfg=cfg)
+    assert len(bus.cache_get(handlers.CACHE_FEED).payload["items"]) == 1
+    assert len(bus.cache_get(handlers.CACHE_SEC).payload["items"]) == 3
+
+
+def test_sec_public_uses_the_current_public_flags(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    cfg = _impact_config(monkeypatch, [{"name": "F4", "kind": "edgar_form4"},
+                                       {"name": "S3", "kind": "edgar_filings", "forms": ["S-3"]}],
+                         {"F4": {"public": True}, "S3": {"public": True}})
+    db.insert_many([
+        _it("https://sec/1", "ACME insider purchase", source="F4", kind="edgar_form4",
+            tickers=["ACME"], detail={"total_value": 300_000}),
+        _it("https://sec/2", "ACME files S-3", source="S3", kind="edgar_filings",
+            tickers=["ACME"], detail={"form": "S-3"}),
+    ])
+    _poll(bus, db)
+    assert {i["source"] for i in bus.cache_get(handlers.CACHE_SEC_PUBLIC).payload["items"]} \
+        == {"F4", "S3"}
+    cfg["feed_flags"]["S3"] = {"public": False}                     # Settings flips S3
+    _poll(bus, db)
+    assert {i["source"] for i in bus.cache_get(handlers.CACHE_SEC_PUBLIC).payload["items"]} \
+        == {"F4"}
+    assert {i["source"] for i in bus.cache_get(handlers.CACHE_SEC).payload["items"]} \
+        == {"F4", "S3"}
+
+
+def test_a_stale_high_publishes_as_med_with_the_reason(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"}],
+                   {"Pub": {"public": True}})
+    db.insert_many([
+        _it("https://p/1", "FOMC surprise: Apple beats as markets reel",
+            published="2026-09-24T20:00:00+00:00"),                         # 28 h old
+        _it("https://p/2", "FOMC minutes: Nvidia beats as chips surge",
+            published="2026-09-25T20:00:00+00:00"),                         # 4 h old
+    ])
+    _poll(bus, db)
+    for key in (handlers.CACHE_FEED, handlers.CACHE_PUBLIC):
+        rows = _by_title(bus, key)
+        old = rows["FOMC surprise: Apple beats as markets reel"]["impact"]
+        new = rows["FOMC minutes: Nvidia beats as chips surge"]["impact"]
+        assert old == {"band": "med", "score": 8,
+                       "reasons": ["kw:tier1:FOMC", "kw:tier2:beats", "stale"]}, key
+        assert new == {"band": "high", "score": 8,
+                       "reasons": ["kw:tier1:FOMC", "kw:tier2:beats"]}, key
+    # stored UNCAPPED: the cap is a function of the publish time
+    stored = {r["title"]: r["impact"] for r in db.newest(5)}
+    assert stored["FOMC surprise: Apple beats as markets reel"]["band"] == "high"
+
+
+def test_the_public_view_is_rescored_from_the_public_row(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"},
+                                 {"name": "Priv", "kind": "rss", "url": "v"}],
+                   {"Pub": {"public": True}, "Priv": {"public": False}})
+    title = "FOMC holds rates steady this afternoon"
+    db.insert_many([_it("https://p/1", title, source="Pub")])
+    db.insert_many([_it("https://q/1", title, source="Priv", tickers=["NVDA"])])  # merges
+    _poll(bus, db, universe=["NVDA"])
+    private = _by_title(bus, handlers.CACHE_FEED)[title]
+    public = _by_title(bus, handlers.CACHE_PUBLIC)[title]
+    assert private["sources"] == ["Pub", "Priv"]
+    assert "source:Priv" in private["impact"]["reasons"]
+    assert "sources:2" in private["impact"]["reasons"]
+    assert "watchlist" in private["impact"]["reasons"]
+    assert public["sources"] == ["Pub"] and public["tickers"] == []
+    assert public["impact"] == {"band": "med", "score": 5, "reasons": ["kw:tier1:FOMC"]}
+    assert not any("Priv" in r for r in public["impact"]["reasons"])
+    # lower by the private feed's points, the multi-source boost and the watchlist tag
+    assert private["impact"]["score"] - public["impact"]["score"] == 3 + 1 + 2
+
+
+def test_views_carry_no_timestamp(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"}],
+                   {"Pub": {"public": True}})
+    db.insert_many([_it("https://p/1", "FOMC holds rates steady this afternoon"),
+                    _it("https://sec/1", "ACME files S-3", source="Pub", kind="edgar_filings",
+                        detail={"form": "S-3"})])
+    _poll(bus, db)
+    for key in (handlers.CACHE_FEED, handlers.CACHE_PUBLIC, handlers.CACHE_SEC,
+                handlers.CACHE_SEC_PUBLIC):
+        assert set(bus.cache_get(key).payload) == {"items"}, key
+    before = {k: bus.cache_version(k) for k in (handlers.CACHE_SEC, handlers.CACHE_SEC_PUBLIC)}
+    _poll(bus, db, now="2026-09-26T00:05:00+00:00")
+    assert {k: bus.cache_version(k) for k in before} == before     # skip_unchanged
+
+
+def test_a_scoring_failure_degrades_and_still_publishes(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"}],
+                   {"Pub": {"public": True}})
+    db.insert_many([_it("https://p/1", "FOMC holds rates steady this afternoon")])
+    _poll(bus, db)                                                  # scored and stored
+    db.insert_many([_it("https://p/2", "Apple beats on iPhone demand this quarter")])
+    _degrade.reset()
+    monkeypatch.setattr(impact, "score", _boom)
+    _poll(bus, db)
+    rows = _by_title(bus, handlers.CACHE_FEED)
+    assert rows["FOMC holds rates steady this afternoon"]["impact"]["score"] == 5   # stored
+    assert rows["Apple beats on iPhone demand this quarter"]["impact"] is None      # never scored
+    assert bus.cache_get(handlers.CACHE_PUBLIC).payload["items"]
+    assert bus.cache_get(handlers.CACHE_SEC) is not None
+    assert _degrade.counts()["news.impact"] == 1
+    assert _degrade.counts().get("news.impact.public") == 1
+    _degrade.reset()
