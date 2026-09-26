@@ -2126,7 +2126,7 @@ commas — reads the quote's `fundamental` block and writes
 `services/trade_svc/data/dividends.db` through `shared/dividends.py`. Each symbol lands
 as `ok`, `none` (a non-payer) or `error`; `ok` / `none` replace its forward rows, and
 an amount that is absent or not finite is stored `None`, never 0. The day is recorded
-in the store, so a restart does not refetch; a failure retries after 15 min. The
+in the store, so a restart does not refetch; a failure retries after `[calendar.dividends] retry_min` (15 min shipped). The
 `dividends_refresh` command on `cmd:trade` runs the same pull on demand (forced past
 the once-a-day guard), and drops a command older than 180 s as a replay. ⚠ Schwab's
 dividend field names are unverified on prod; every spelling is in one table,
