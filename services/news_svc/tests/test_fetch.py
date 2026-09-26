@@ -317,3 +317,41 @@ def test_a_fast_loopback_body_is_read_whole_and_the_watchdog_is_disarmed(drip_se
     time.sleep(0.05)
     leftover = {t.name for t in threading.enumerate()} - before
     assert not [n for n in leftover if n.startswith("news-fetch-deadline")]
+
+
+# ── caller-supplied headers ─────────────────────────────────────────────────
+
+def test_extra_headers_are_sent_and_cannot_replace_the_user_agent(fake_get):
+    fetch.http_fetch("https://x", user_agent="UA", max_bytes=100,
+                     headers={"Accept": "application/json", "User-Agent": "evil"})
+    sent = fake_get["calls"][-1][1]["headers"]
+    assert sent["Accept"] == "application/json" and sent["User-Agent"] == "UA"
+
+
+def test_a_differently_cased_reserved_header_is_dropped_not_sent_beside_ours(fake_get):
+    # HTTP names are case-insensitive: {"user-agent": ...} beside "User-Agent"
+    # would put two User-Agent lines on the wire (or let requests pick one).
+    fetch.http_fetch("https://x", user_agent="UA", etag="e0", last_modified="lm0",
+                     max_bytes=100, headers={"user-agent": "evil",
+                                             "if-none-match": "x", "IF-MODIFIED-SINCE": "y"})
+    sent = fake_get["calls"][-1][1]["headers"]
+    lowered = {k.lower(): v for k, v in sent.items()}
+    assert len(lowered) == len(sent)
+    assert lowered["user-agent"] == "UA"
+    assert lowered["if-none-match"] == "e0" and lowered["if-modified-since"] == "lm0"
+
+
+def test_a_caller_cannot_make_a_request_conditional_behind_the_validators_back(fake_get):
+    # With no etag/last_modified the request must stay unconditional, so a 304
+    # is still the "no validators" error rather than a silent empty poll.
+    fake_get["response"] = FakeResponse(status=304, chunks=())
+    with pytest.raises(fetch.FetchError):
+        fetch.http_fetch("https://x", max_bytes=100,
+                         headers={"If-None-Match": "x", "If-Modified-Since": "y"})
+    sent = {k.lower() for k in fake_get["calls"][-1][1]["headers"]}
+    assert "if-none-match" not in sent and "if-modified-since" not in sent
+
+
+def test_no_extra_headers_sends_exactly_the_old_set(fake_get):
+    fetch.http_fetch("https://x", user_agent="UA", max_bytes=100)
+    assert fake_get["calls"][-1][1]["headers"] == {"User-Agent": "UA"}

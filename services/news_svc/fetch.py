@@ -34,6 +34,11 @@ from urllib3 import connectionpool as _u3pool
 from shared import news_config as _nc
 
 _CHUNK = 64 * 1024
+# Headers ``http_fetch`` owns. A caller's copy of any of them is DROPPED
+# (compared case-insensitively, as HTTP does): it may neither replace the User-
+# Agent nor make a request conditional behind the validators' back, which
+# would turn a 304 into an empty "healthy" poll.
+_RESERVED_HEADERS = frozenset({"user-agent", "if-none-match", "if-modified-since"})
 _DEADLINE_FACTOR = 3
 
 
@@ -175,8 +180,9 @@ def _open(url, **kwargs):
 
 
 def http_fetch(url, *, etag=None, last_modified=None, user_agent=None, timeout=20,
-               max_bytes=None, deadline_s=None) -> Fetched:
-    """GET ``url``. A 304 to a conditional request comes back as
+               max_bytes=None, deadline_s=None, headers=None) -> Fetched:
+    """GET ``url``. ``headers`` adds request headers (an ``Accept``, say); the
+    User-Agent and conditional headers stay this function's own. A 304 to a conditional request comes back as
     ``Fetched(304, b"", ...)``; anything else that is not a 200 with a body of
     at most ``max_bytes``, read within ``deadline_s``, raises FetchError."""
     cap = _default_max_bytes() if max_bytes is None else int(max_bytes)
@@ -191,7 +197,10 @@ def http_fetch(url, *, etag=None, last_modified=None, user_agent=None, timeout=2
         if watch.expired or time.monotonic() - started > limit:
             raise _deadline_error()
 
-    headers = {"User-Agent": user_agent or _nc.DEFAULTS["collector"]["feed_user_agent"]}
+    extra = {str(k): v for k, v in (headers or {}).items()
+             if str(k).lower() not in _RESERVED_HEADERS}
+    headers = {**extra,
+               "User-Agent": user_agent or _nc.DEFAULTS["collector"]["feed_user_agent"]}
     if etag:
         headers["If-None-Match"] = etag
     if last_modified:
