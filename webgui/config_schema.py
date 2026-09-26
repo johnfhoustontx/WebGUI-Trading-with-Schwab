@@ -887,6 +887,14 @@ _NEWS = ConfigFile(
                   "until the next poll.", kind="int", unit="s", min=5, max=120, step=5),
             Field("collector.sec_user_agent", "SEC User-Agent",
                   "The SEC requires a contact address in every request.", kind="text"),
+            Field("collector.feed_user_agent", "Feed User-Agent",
+                  "Sent to every feed that is not the SEC. Keep the leading "
+                  "Mozilla/5.0: Yahoo answers a missing-page error to a client "
+                  "without it.", kind="text"),
+            Field("collector.max_body_bytes", "Largest response read",
+                  "A feed answering more than this is skipped until the next poll "
+                  "instead of being read into memory.", kind="int", unit="bytes",
+                  min=100000, max=50000000, step=100000),
         )),
         Section("Tickers", "The per-ticker feeds and the watchlist filter use the "
                 "gamma collection list (Symbols & watchlists) plus these.", (

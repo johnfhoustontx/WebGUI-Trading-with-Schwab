@@ -25,9 +25,10 @@ What it guards, and what it does not:
 * ``feeds()`` coming back empty -> a WARNING, so a service collecting nothing
   leaves a trace.
 
-Every WARNING above comes from ``feeds()``. ``flags(name)`` applies the same
-rules through the same resolver (``_resolved``) but SILENTLY, because the poll
-cycle calls it at every publish and a warning there would repeat per call.
+Every WARNING above comes from ``feeds()``. ``flags(name)``, ``all_feeds()``
+and ``public_feed_names()`` apply the same rules through the same resolver
+(``_resolved``) but SILENTLY, because the poll cycle calls them at every publish
+and a warning there would repeat per call.
 
 It does NOT validate values (URLs, poll minutes, counts): a wrong number of the
 right type is read as written. Nothing here raises. Treat anything ``load()``
@@ -52,6 +53,10 @@ DEFAULTS = {
         "rth_poll_min": 5, "offhours_poll_min": 15, "weekend_poll_min": 60,
         "keep_days": 7, "view_items": 300, "request_timeout_s": 20,
         "sec_user_agent": "NeuralStrike news_svc contact@neuralstrike.co",
+        # Every non-SEC feed. Browser-style because Yahoo answers a 404 page to
+        # a client with no Mozilla token (measured 2026-09-26).
+        "feed_user_agent": "Mozilla/5.0 (compatible; NeuralStrike news_svc; +https://neuralstrike.co)",
+        "max_body_bytes": 5_000_000,
     },
     "tickers": {"extras": []},
     "trending": {"window_h": 6},
@@ -231,6 +236,20 @@ def flags(name) -> dict:
     if feed is None:
         return dict(_CLOSED)
     return {key: feed[key] for key in FLAG_KEYS}
+
+
+def all_feeds() -> list:
+    """EVERY usable feed - enabled or not - in file order, with ``enabled`` /
+    ``public`` filled in, resolved exactly as ``feeds()`` resolves them but
+    SILENTLY (the poll cycle calls it at every publish, for the status view)."""
+    return list(_resolved(warn=False)[0].values())
+
+
+def public_feed_names() -> list:
+    """The names of every feed whose CURRENT ``public`` flag is True, enabled
+    or not, in file order - the public view's ``public_sources``. Silent, and
+    by the same rules as ``flags()``: a malformed flag fails closed."""
+    return [feed["name"] for feed in all_feeds() if feed["public"]]
 
 
 def ticker_set() -> list:

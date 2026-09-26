@@ -19,6 +19,13 @@ def test_defaults_are_the_real_values():
     assert cfg["trending"]["window_h"] == 6
 
 
+def test_the_collector_carries_a_feed_user_agent_and_a_body_cap():
+    col = nc.DEFAULTS["collector"]
+    assert col["feed_user_agent"].startswith("Mozilla/5.0")
+    assert col["feed_user_agent"] != col["sec_user_agent"]
+    assert col["max_body_bytes"] == 5_000_000
+
+
 def test_defaults_match_the_shipped_file():
     """The built-in DEFAULTS and the tracked TOML are two copies of the same
     values; pin them together so an edit to one cannot silently drift."""
@@ -478,6 +485,63 @@ def test_a_non_string_key_in_feed_flags_is_ignored_with_a_warning(monkeypatch, c
     with caplog.at_level("DEBUG", logger=nc.__name__):
         assert nc.flags("A") == {"enabled": True, "public": False}
     assert not caplog.records, caplog.text
+
+
+# ── all_feeds() / public_feed_names(): the publish-time re-check ────────────
+
+def test_all_feeds_keeps_disabled_feeds_and_follows_the_same_rules(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: _cfg(
+        [{"name": "A", "kind": "rss", "url": "x"},
+         {"name": "B", "kind": "rss", "url": "y"},
+         {"name": "C", "kind": "carrier_pigeon", "url": "z"},
+         {"name": "A", "kind": "rss", "url": "dup"}],
+        {"B": {"enabled": False, "public": False}}))
+    got = nc.all_feeds()
+    assert [f["name"] for f in got] == ["A", "B"]
+    assert got[0]["url"] == "x"
+    assert [(f["enabled"], f["public"]) for f in got] == [(True, True), (False, False)]
+
+
+def test_public_feed_names_are_every_public_feed_enabled_or_not(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: _cfg(
+        [{"name": "A", "kind": "rss", "url": "x"},
+         {"name": "B", "kind": "rss", "url": "y"},
+         {"name": "C", "kind": "rss", "url": "z"},
+         {"name": "D", "kind": "carrier_pigeon", "url": "w"}],
+        {"B": {"enabled": False}, "C": {"public": False}, "D": {"public": True}}))
+    assert nc.public_feed_names() == ["A", "B"]
+
+
+def test_public_feed_names_fail_closed_on_a_malformed_flag(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: _cfg(
+        [{"name": "A", "kind": "rss", "url": "x"}], {"A": {"public": "yes"}}))
+    assert nc.public_feed_names() == []
+
+
+def test_the_helpers_are_silent_on_a_malformed_config(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {
+        "feeds": [{"name": "A", "kind": "rss", "url": "x", "public": "no"},
+                  {"name": "A", "kind": "rss", "url": "y"},
+                  "junk"],
+        "feed_flags": {"ghost": {"public": True}, "A": 3}})
+    with caplog.at_level("WARNING", logger=nc.__name__):
+        nc.all_feeds()
+        nc.public_feed_names()
+    assert not caplog.records, caplog.text
+
+
+def test_public_feed_names_agree_with_flags_on_the_shipped_file():
+    names = [f["name"] for f in _shipped_feeds()]
+    assert nc.public_feed_names() == [n for n in names if nc.flags(n)["public"]]
+    assert "GlobeNewswire" in nc.public_feed_names()      # disabled, still public
+
+
+def test_all_feeds_is_a_deep_copy(monkeypatch):
+    cfg = _cfg([{"name": "A", "kind": "edgar_filings", "forms": ["S-1"]}])
+    monkeypatch.setattr(nc, "load", lambda: cfg)
+    nc.all_feeds()[0]["forms"].append("S-3")
+    assert cfg["feeds"][0]["forms"] == ["S-1"]
+    assert "enabled" not in cfg["feeds"][0]
 
 
 # ── the shipped file ────────────────────────────────────────────────────────

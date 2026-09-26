@@ -11,6 +11,12 @@ view_items        = 300    # newest rows in the published views
 request_timeout_s = 20
 # The SEC requires a contact in the User-Agent and allows at most 10 requests/s.
 sec_user_agent    = "NeuralStrike news_svc contact@neuralstrike.co"
+# Every other feed. It must carry a browser-style "Mozilla/5.0" token: Yahoo
+# answers a 404 page without one (checked 2026-09-26 - this value gets 200 from
+# Yahoo, Google News and MarketWatch).
+feed_user_agent   = "Mozilla/5.0 (compatible; NeuralStrike news_svc; +https://neuralstrike.co)"
+# A response larger than this is refused rather than read (a runaway or hostile feed).
+max_body_bytes    = 5000000
 
 [tickers]
 # Followed but not scanned. The base set is the GEX collection list (config/symbols.toml).
