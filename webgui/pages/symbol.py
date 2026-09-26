@@ -191,7 +191,7 @@ VIEWS = ("options:matrix", "options:scan_funnel", "options:scan_day",
          "options:gex_status",
          "options:flow_alerts", "options:paper_account", "options:paper_trades",
          "options:captured",
-         "sentiment:regime", "sentiment:bullbear", _news.VIEW)
+         "sentiment:regime", "sentiment:bullbear", _news.VIEW, _news.VIEW_SEC)
 
 # What the header's Updated stamp reads. ⚠ NOT this symbol's dossier: that key
 # is written ONCE per look-up and never republished, and a scanned symbol has
@@ -225,7 +225,9 @@ REGION_VIEWS = {
     "flow": ("options:flow_alerts",),
     # The whole feed, private only: this page is not a public screen, so it
     # reads ``news:feed`` (the Desk's ``bus_key`` is what swaps the key there).
-    "news": (_news.VIEW,),
+    # Headlines and the SEC items are split at the producer; an insider buy on
+    # the symbol is dossier material, so the band reads ``news:sec`` too.
+    "news": (_news.VIEW, _news.VIEW_SEC),
     "positions": _BOOK_VIEWS,
 }
 
@@ -723,15 +725,24 @@ WAITING_NEWS = _copy.WAITING_NEWS
 NEWS_NO_SYMBOL = "No headlines for this symbol in the feed."
 
 
-def news_band(symbol, news_env, now):
-    """The newest headlines that NAME the symbol — or the cold-feed / quiet
-    line. ``now`` decides each row's "today" and time (``news_view.rows``).
+def _newest_first(r):
+    # ``age_min`` is None for an unparseable stamp: those sort last.
+    age = r.get("age_min")
+    return (age is None, age if age is not None else 0.0)
+
+
+def news_band(symbol, news_env, now, sec_env=None):
+    """The newest headlines AND SEC items (``news:sec``) that NAME the symbol,
+    merged newest first — or the cold-feed / quiet line. ``now`` decides each
+    row's "today" and time (``news_view.rows``). The band is cold only when
+    BOTH views are; SEC items still show while the headline feed is cold.
 
     ⚠ A row's ``title`` is PLAIN TEXT from a third-party feed; the painter
     draws it through ``ui.link`` / ``ui.label`` only, and links it only when
     ``href`` (``desk.news_href``: http(s) or nothing) is set."""
     sym = clean_symbol(symbol)
-    if not isinstance(news_env, dict):
+    envs = [e for e in (news_env, sec_env) if isinstance(e, dict)]
+    if not envs:
         return {"message": WAITING_NEWS, "rows": []}
     if not sym:
         # The allow-list refused it: name no symbol rather than print "None"
@@ -739,9 +750,11 @@ def news_band(symbol, news_env, now):
         return {"message": NEWS_NO_SYMBOL, "rows": []}
     # A blank title would draw an empty link, so it is dropped — and the cap
     # applies AFTER that, or untitled items would use up the band's rows.
+    merged = [r for env in envs
+              for r in _news.for_symbol(env, sym, now=now, limit=None)]
+    merged.sort(key=_newest_first)          # stable: ties keep feed order
     rows = [dict(r, title=r["title"].strip())
-            for r in _news.for_symbol(news_env, sym, now=now, limit=None)
-            if r["title"].strip()][:_news.SYMBOL_LIMIT]
+            for r in merged if r["title"].strip()][:_news.SYMBOL_LIMIT]
     if not rows:
         return {"message": f"No headlines for {sym} in the feed.", "rows": []}
     return {"message": "", "rows": [
@@ -1165,7 +1178,8 @@ def render(symbol=None):
         if sym is None:
             _absent(news_body, "")
             return
-        band = news_band(sym, _d(_news.VIEW), _dt.datetime.now(_CT))
+        band = news_band(sym, _d(_news.VIEW), _dt.datetime.now(_CT),
+                         sec_env=_d(_news.VIEW_SEC))
         with news_body:
             if not band["rows"]:
                 kit.empty(band["message"])

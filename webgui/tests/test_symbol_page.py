@@ -132,13 +132,13 @@ def test_the_enqueue_helper_is_called_only_on_navigation_and_refresh():
 
 # ── the poll's view set ────────────────────────────────────────────────────
 
-def test_the_poll_reads_the_eleven_shared_views_plus_this_symbols_dossier():
+def test_the_poll_reads_the_twelve_shared_views_plus_this_symbols_dossier():
     views = sp.poll_views("MU")
     assert views[:len(sp.VIEWS)] == sp.VIEWS
     assert views[-1] == "options:dossier:MU"
-    # nine + gex_status (wall freshness) + news:feed (the "In the news" band,
-    # 2026-09-26)
-    assert len(sp.VIEWS) == 11
+    # nine + gex_status (wall freshness) + news:feed and news:sec (the "In the
+    # news" band, 2026-09-26)
+    assert len(sp.VIEWS) == 12
 
 
 def test_a_rejected_symbol_polls_no_dossier_view():

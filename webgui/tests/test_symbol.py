@@ -100,7 +100,7 @@ def test_an_uncleanable_symbol_gets_a_neutral_line_never_none(raw):
 # ── the poll ─────────────────────────────────────────────────────────────────
 def test_the_news_view_joins_the_one_batch_and_owns_its_region():
     assert news_view.VIEW in symbol.VIEWS
-    assert symbol.REGION_VIEWS["news"] == (news_view.VIEW,)
+    assert symbol.REGION_VIEWS["news"] == (news_view.VIEW, news_view.VIEW_SEC)
     assert symbol.regions_for({news_view.VIEW}, "NVDA") == {"news"}
 
 
@@ -190,3 +190,73 @@ def test_a_headline_renders_as_an_escaping_link_to_the_article(world):
     assert hit, [e.text for e in links]
     assert hit[0].props.get("href") == "https://news.example/1"
     assert hit[0].props.get("target") == "_blank"
+
+
+# ── SEC items (news v2, Task 20) ─────────────────────────────────────────────
+# Headlines and the EDGAR kinds are split at the producer (``news:feed`` /
+# ``news:sec``); the dossier band reads both, because an insider buy on the
+# symbol is dossier material.
+FEED_WITHOUT_ACME = {"items": [_item(1, tickers=("NVDA",))]}
+SEC_WITH_ACME_FORM4 = {"items": [dict(
+    _item(3, tickers=("ACME",), title="ACME director purchases 10,000 shares"),
+    kind="edgar_form4", source="SEC Form 4", sources=["SEC Form 4"])]}
+
+
+def test_news_band_includes_an_insider_buy_for_the_symbol():
+    band = symbol.news_band("ACME", FEED_WITHOUT_ACME, NOW, sec_env=SEC_WITH_ACME_FORM4)
+    assert any("purchases" in r["title"] or r["kind"] == "edgar_form4" for r in band["rows"])
+
+
+def test_the_band_merges_headlines_and_sec_items_newest_first():
+    feed = {"items": [_item(2), _item(6)]}
+    sec = {"items": [dict(_item(1), kind="edgar_form4"),
+                     dict(_item(4), kind="edgar_filings")]}
+    rows = symbol.news_band("NVDA", feed, NOW, sec_env=sec)["rows"]
+    assert [r["id"] for r in rows] == ["1", "2", "4", "6"]
+
+
+def test_the_merged_band_is_capped_at_the_symbol_limit():
+    n = news_view.SYMBOL_LIMIT
+    feed = {"items": [_item(2 * i) for i in range(n)]}
+    sec = {"items": [dict(_item(2 * i + 1), kind="edgar_form4") for i in range(n)]}
+    rows = symbol.news_band("NVDA", feed, NOW, sec_env=sec)["rows"]
+    assert [r["id"] for r in rows] == [str(i) for i in range(n)]
+
+
+def test_sec_items_show_even_while_the_headline_feed_is_cold():
+    rows = symbol.news_band("ACME", None, NOW, sec_env=SEC_WITH_ACME_FORM4)["rows"]
+    assert [r["kind"] for r in rows] == ["edgar_form4"]
+
+
+def test_both_views_cold_is_still_the_cold_line():
+    assert symbol.news_band("NVDA", None, NOW, sec_env=None)["message"] == symbol.WAITING_NEWS
+
+
+def test_an_sec_item_for_another_symbol_stays_out():
+    rows = symbol.news_band("NVDA", FEED_WITHOUT_ACME, NOW,
+                            sec_env=SEC_WITH_ACME_FORM4)["rows"]
+    assert [r["id"] for r in rows] == ["1"]
+
+
+def test_the_sec_view_joins_the_one_batch_and_repaints_the_news_band():
+    assert news_view.VIEW_SEC in symbol.VIEWS
+    assert symbol.regions_for({news_view.VIEW_SEC}, "NVDA") == {"news"}
+
+
+def test_the_dossier_reads_the_private_views_never_the_public_ones():
+    """/symbol is private only; the public keys are the Desk's ``bus_key``
+    business, and it swaps ``news:feed`` alone."""
+    assert news_view.VIEW_PUBLIC not in symbol.VIEWS
+    assert news_view.VIEW_SEC_PUBLIC not in symbol.VIEWS
+    from pages import desk
+    assert desk.bus_key(news_view.VIEW_SEC) == news_view.VIEW_SEC
+
+
+def test_an_insider_buy_renders_in_the_mounted_band(world):
+    from nicegui import ui
+    world[news_view.VIEW] = {"items": [_item(1)]}
+    world[news_view.VIEW_SEC] = {"items": [dict(
+        _item(2, title="NVDA officer purchases 500 shares"), kind="edgar_form4")]}
+    links = [e.text for e in _built("NVDA") if isinstance(e, ui.link)]
+    assert "NVDA officer purchases 500 shares" in links
+    assert "headline 1" in links
