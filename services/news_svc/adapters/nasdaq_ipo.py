@@ -88,7 +88,17 @@ def _rows_at(data, path):
     return node if isinstance(node, list) else []
 
 
-def _row(status, raw, date_field, index):
+def _fallback_ident(symbol, company, when):
+    """A content-only id for a row with no dealID: the JSON of the tuple.
+
+    JSON quotes and escapes each field, so no company name can spell another
+    row's id (``"A|B"`` + ``"C"`` never equals ``"A"`` + ``"B|C"``), and the id
+    does not move when rows are reordered or a new one arrives above it.
+    """
+    return json.dumps([symbol, company, when], ensure_ascii=False, separators=(",", ":"))
+
+
+def _row(status, raw, date_field, seen):
     if not isinstance(raw, dict):
         return None
     when = _iso_date(raw.get(date_field))
@@ -99,9 +109,16 @@ def _row(status, raw, date_field, index):
     deal = _text(raw.get("dealID"))
     # The id is per DEAL, never per status: a deal listed as upcoming on one
     # month's page and priced on the next is one row (see ``dedupe``). Without
-    # a dealID, symbol + company + date + the row's index in its table keep two
-    # anonymous rows apart.
-    ident = deal or f"{symbol or ''}|{company or ''}|{when}|{index}"
+    # a dealID the id is the row's CONTENT (symbol, company, date); only rows
+    # with an identical tuple in the same table get an ordinal (``#2``, ``#3``
+    # in table order), so a row's id never depends on its position.
+    if deal:
+        ident = deal
+    else:
+        ident = _fallback_ident(symbol, company, when)
+        seen[ident] = seen.get(ident, 0) + 1
+        if seen[ident] > 1:
+            ident = f"{ident}#{seen[ident]}"
     return {
         "symbol": symbol,
         "company": company,
@@ -116,6 +133,10 @@ def _row(status, raw, date_field, index):
 
 def parse(body):
     """Priced and upcoming IPO rows from one month's body.
+
+    The result is already passed through ``dedupe``: ids are unique within
+    one call, and a deal listed in both tables keeps its priced row. Callers
+    merging several months' pages still call ``dedupe`` over the union.
 
     Raises ``ValueError`` only when the body is a failure (see the module
     docstring); anything malformed inside a good body is skipped.
@@ -135,11 +156,12 @@ def parse(body):
         raise ValueError("nasdaq_ipo: no data table")
     out = []
     for status_name, path, date_field in _TABLES:
-        for index, raw in enumerate(_rows_at(data, path)):
-            row = _row(status_name, raw, date_field, index)
+        seen = {}
+        for raw in _rows_at(data, path):
+            row = _row(status_name, raw, date_field, seen)
             if row is not None:
                 out.append(row)
-    return out
+    return dedupe(out)
 
 
 # Most-settled first: a priced deal supersedes its upcoming listing, and so on.
@@ -151,12 +173,23 @@ def dedupe(rows):
 
     Preference: priced > upcoming > filed > withdrawn (an unknown status ranks
     last); on a tie the first row seen wins. Order follows each id's first
-    appearance, so merging two months' pages is stable.
+    appearance, so merging two months' pages is stable. A row with no id (or
+    ``id`` None) cannot be matched to anything and passes through untouched in
+    its place; an unhashable id is compared by its ``str()``.
     """
     best = {}
     order = []
     for row in rows:
-        key = row.get("id")
+        key = row.get("id") if isinstance(row, dict) else None
+        if key is None:
+            order.append((False, len(order)))
+            best[order[-1]] = (None, row)
+            continue
+        try:
+            hash(key)
+        except TypeError:
+            key = str(key)
+        key = (True, key)
         rank = _STATUS_RANK.get(row.get("status"), len(_STATUS_RANK))
         if key not in best:
             order.append(key)
