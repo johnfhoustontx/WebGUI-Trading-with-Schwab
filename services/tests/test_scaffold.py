@@ -506,7 +506,7 @@ def test_suppressed_environment_reports_neither(monkeypatch):
 
 
 @pytest.mark.parametrize("svc", ["options_svc", "sentiment_svc",
-                                 "market_svc", "portfolio_svc"])
+                                 "market_svc", "portfolio_svc", "news_svc"])
 def test_every_service_loop_beats_inside_its_while_loop(svc):
     """A beat outside the loop body would report one tick at startup and then a
     forever-growing age — the old number under the new name."""
