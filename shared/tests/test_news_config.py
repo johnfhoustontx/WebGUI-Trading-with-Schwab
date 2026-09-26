@@ -696,3 +696,111 @@ def test_news_config_imports_only_config_and_the_symbol_allow_list():
     stray = {m for m in new if m not in EXPECTED and m.split(".")[0] != "tzdata"}
     assert not stray, sorted(stray)
     assert {"shared.news_config", "shared.symbols"} <= new
+
+
+# ── v2: [impact] and [calendar] (docs/plans/2026-09-26-news-v2-plan.md, Task 1) ──
+
+def test_impact_defaults_are_the_design_values():
+    imp = nc.impact_config()
+    assert (imp["high_at"], imp["med_at"], imp["stale_after_h"]) == (6, 3, 24)
+    assert imp["keywords"]["tier1"]["points"] == 5
+    assert "FOMC" in imp["keywords"]["tier1"]["words"]
+    assert imp["filings"]["424B5"] > imp["filings"]["S-3"] > imp["filings"]["S-1"]
+
+
+def test_inverted_thresholds_fall_back_to_the_defaults(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {"impact": {"high_at": 2, "med_at": 5}})
+    imp = nc.impact_config()
+    assert (imp["high_at"], imp["med_at"]) == (6, 3)
+    assert "impact" in caplog.text
+
+
+def test_a_keyword_tier_that_is_not_a_table_is_dropped(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: {"impact": {"keywords": {"tier1": ["FOMC"]}}})
+    assert "tier1" not in nc.impact_config()["keywords"]
+
+
+def test_source_user_agent_defaults_to_the_feed_ua_and_nasdaq_ships_a_browser():
+    feed_ua = nc.load()["collector"]["feed_user_agent"]
+    assert nc.calendar_source("bls")["user_agent"] == feed_ua
+    assert nc.calendar_source("fred_calendar")["user_agent"] == feed_ua
+    nas = nc.calendar_source("nasdaq_ipo")["user_agent"]
+    assert "Chrome/" in nas and nas != feed_ua
+
+
+def test_a_source_without_refresh_min_takes_the_calendar_default():
+    assert nc.calendar_source("fed")["refresh_min"] == nc.calendar_config()["refresh_min"]
+
+
+def test_indicators_are_tables_in_file_order_with_the_ten_shipped():
+    keys = [i["key"] for i in nc.indicators()]
+    assert keys == ["cpi", "core_cpi", "ppi", "nfp", "unrate", "pce", "core_pce",
+                    "gdp", "retail", "claims"]
+    gdp = next(i for i in nc.indicators() if i["key"] == "gdp")
+    assert gdp["series"] == "A191RL1Q225SBEA"          # the headline, not nominal GDP
+
+
+def test_an_indicator_with_an_unknown_transform_or_schedule_is_skipped(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {"calendar": {"indicators": {
+        "x": {"label": "X", "series": "X", "transform": "magic", "schedule": "bls"}}}})
+    assert nc.indicators() == [] and "magic" in caplog.text
+
+
+def test_the_config_never_carries_a_fred_key():
+    text = (ROOT / "config" / "news.toml").read_text()
+    assert "api_key" not in text.lower() and "FRED_API_KEY=" not in text
+
+
+def test_impact_and_calendar_defaults_match_the_shipped_file():
+    """Same pin as the [collector] one: DEFAULTS and the tracked TOML are two
+    copies of one set of values."""
+    with open(nc.NEWS_TOML, "rb") as fh:
+        shipped = tomllib.load(fh)
+    assert nc.DEFAULTS["impact"] == shipped["impact"]
+    assert nc.DEFAULTS["calendar"] == shipped["calendar"]
+    assert nc.DEFAULTS["collector"]["sec_view_items"] == 100
+
+
+def test_the_fred_indicators_carry_a_release_id_and_a_ct_time():
+    by_key = {i["key"]: i for i in nc.indicators()}
+    assert (by_key["retail"]["release_id"], by_key["claims"]["release_id"]) == (9, 180)
+    assert by_key["retail"]["time_ct"] == by_key["claims"]["time_ct"] == "07:30"
+
+
+def test_a_disabled_indicator_is_left_out(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: {"calendar": {"indicators": {
+        "a": {"series": "A", "transform": "pct_mom", "schedule": "bls", "enabled": False},
+        "b": {"series": "B", "transform": "level_k", "schedule": "fred"}}}})
+    assert [i["key"] for i in nc.indicators()] == ["b"]
+
+
+def test_an_indicator_without_a_series_is_skipped(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {"calendar": {"indicators": {
+        "nos": {"transform": "pct_mom", "schedule": "bls"}}}})
+    assert nc.indicators() == [] and "nos" in caplog.text
+
+
+def test_non_numeric_or_nan_thresholds_fall_back(monkeypatch):
+    for bad in (True, "6", float("nan"), None):
+        monkeypatch.setattr(nc, "load", lambda b=bad: {"impact": {"high_at": b, "med_at": 3}})
+        imp = nc.impact_config()
+        assert (imp["high_at"], imp["med_at"]) == (6, 3), bad
+
+
+def test_a_tier_with_bad_points_or_words_is_dropped(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: {"impact": {"keywords": {
+        "a": {"points": "5", "words": ["x"]},
+        "b": {"points": 2, "words": "x"},
+        "c": {"points": True, "words": ["x"]},
+        "d": {"points": 2, "words": ["ok", "", 3]}}}})
+    kw = nc.impact_config()["keywords"]
+    assert set(kw) == {"d"} and kw["d"]["words"] == ["ok"]
+
+
+def test_impact_config_is_a_copy(monkeypatch):
+    nc.impact_config()["keywords"]["tier1"]["words"].append("ZZZ")
+    assert "ZZZ" not in nc.impact_config()["keywords"]["tier1"]["words"]
+
+
+def test_an_unknown_calendar_source_is_disabled():
+    assert nc.calendar_source("nope")["enabled"] is False

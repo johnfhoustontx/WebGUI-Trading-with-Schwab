@@ -34,7 +34,12 @@ It does NOT validate values (URLs, poll minutes, counts): a wrong number of the
 right type is read as written - except ``[dedupe] same_feed_merge_h``, which
 ``same_feed_merge_h()`` reads as the default when it is not a finite number >= 0
 (a bool included) and clamps to 24 above it, because it decides whether two
-rows become one. Nothing here raises. Treat anything ``load()``
+rows become one - and the v2 accessors: ``impact_config()`` (thresholds must be
+numbers with ``high_at > med_at``, else the built-in pair with one WARNING;
+malformed keyword tiers and non-numeric points are dropped) and
+``indicators()`` (unknown transform/schedule or no series -> skipped with a
+WARNING). Keyword tiers, sources and indicators are TABLES, never lists: a list
+in ``config/local`` replaces the whole list. Nothing here raises. Treat anything ``load()``
 returns as read-only: it is the cached mapping.
 """
 import copy
@@ -60,6 +65,7 @@ DEFAULTS = {
         # a client with no Mozilla token (measured 2026-09-26).
         "feed_user_agent": "Mozilla/5.0 (compatible; NeuralStrike news_svc; +https://neuralstrike.co)",
         "max_body_bytes": 5_000_000,
+        "sec_view_items": 100,
     },
     "tickers": {"extras": []},
     "trending": {"window_h": 6},
@@ -68,6 +74,111 @@ DEFAULTS = {
     "dedupe": {"same_feed_merge_h": 6},
     "feeds": [],
     "feed_flags": {},
+    # The rules-based High / Med / Low on every item (services/news_svc/impact.py).
+    "impact": {
+        "high_at": 6, "med_at": 3, "stale_after_h": 24,
+        "multi_source": 1, "watchlist": 2, "match_teaser": False,
+        "keywords": {
+            "tier1": {"points": 5, "words": [
+                "FOMC", "rate decision", "rate cut", "rate hike", "Fed chair", "CPI",
+                "inflation report", "jobs report", "nonfarm payrolls", "payrolls",
+                "bankruptcy", "chapter 11", "trading halt", "halted", "SEC charges",
+                "indicted", "acquire", "acquisition", "merger", "takeover",
+                "tender offer", "guidance cut", "cuts guidance", "raises guidance",
+                "profit warning", "delist"]},
+            "tier2": {"points": 3, "words": [
+                "downgrade", "upgrade", "beats", "misses", "earnings", "PPI", "PCE",
+                "GDP", "retail sales", "jobless claims", "tariff", "sanctions",
+                "buyback", "dividend cut", "recall", "investigation", "lawsuit",
+                "layoffs", "price target", "offering", "stake"]},
+            "tier3": {"points": 1, "words": [
+                "outlook", "forecast", "analyst", "sector", "rally", "selloff"]},
+        },
+        "source_points": {"Federal Reserve": 3, "Truth Social": 2, "WSJ": 1,
+                          "ZeroHedge": -1},
+        "form4": {"small_usd": 250_000, "small": 1, "large_usd": 1_000_000,
+                  "large": 3, "huge_usd": 10_000_000, "huge": 6, "officer": 1},
+        "filings": {"424B5": 3, "S-3": 2, "S-1": 1, "S-3ASR": 1, "untracked": -1},
+    },
+    # The economic calendar: Fed events, BLS/BEA/FRED release schedules, FRED
+    # observations, Nasdaq IPOs, watchlist dividends (trade_svc writes those).
+    "calendar": {
+        "enabled": True,
+        "refresh_min": 60,
+        "values_refresh_min": 240,
+        "release_poll_min": 2,
+        "release_watch_min": 60,
+        "actual_fresh_h": 24,
+        "sources": {
+            "fed": {"enabled": True,
+                    "url": "https://www.federalreserve.gov/json/calendar.json",
+                    "user_agent": ""},
+            "bls": {"enabled": True,
+                    "url": "https://www.bls.gov/schedule/news_release/bls.ics",
+                    "user_agent": "", "refresh_min": 720},
+            "bea": {"enabled": True,
+                    "url": "https://www.bea.gov/news/schedule/ics/"
+                           "online-calendar-subscription.ics",
+                    "user_agent": "", "refresh_min": 720},
+            "fred_calendar": {"enabled": True,
+                              "url": "https://fred.stlouisfed.org/releases/calendar"
+                                     "?rid={rid}&y={year}&view=year&vs={start}&ve={end}",
+                              "user_agent": "", "refresh_min": 720},
+            "fred_api": {"enabled": True, "url": "https://api.stlouisfed.org/fred",
+                         "user_agent": ""},
+            "fredgraph": {"enabled": True,
+                          "url": "https://fred.stlouisfed.org/graph/fredgraph.csv"
+                                 "?id={series}&cosd={start}",
+                          "user_agent": ""},
+            "nasdaq_ipo": {"enabled": True,
+                           "url": "https://api.nasdaq.com/api/ipo/calendar?date={month}",
+                           "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+                                         " (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+                           "accept": "application/json, text/plain, */*",
+                           "refresh_min": 240},
+        },
+        "fed": {"types": ["FOMC", "Beige", "Speeches", "Testimony"],
+                "horizon_days": 45, "speech_horizon_days": 14},
+        "events": {"extra_releases": ["Job Openings and Labor Turnover Survey",
+                                      "Employment Cost Index"]},
+        "ipo": {"min_offer_usd": 100_000_000, "lookback_days": 7},
+        "dividends": {"enabled": True, "refresh_at": "06:40", "horizon_days": 30,
+                      "lookback_days": 3},
+        # File order = tile order.
+        "indicators": {
+            "cpi": {"enabled": True, "label": "CPI", "series": "CPIAUCSL",
+                    "transform": "pct_mom", "schedule": "bls",
+                    "match": "Consumer Price Index", "tile": "CPI"},
+            "core_cpi": {"enabled": True, "label": "Core CPI", "series": "CPILFESL",
+                         "transform": "pct_mom", "schedule": "bls",
+                         "match": "Consumer Price Index", "tile": "CPI"},
+            "ppi": {"enabled": True, "label": "PPI", "series": "PPIFIS",
+                    "transform": "pct_mom", "schedule": "bls",
+                    "match": "Producer Price Index", "tile": "PPI"},
+            "nfp": {"enabled": True, "label": "Nonfarm payrolls", "series": "PAYEMS",
+                    "transform": "change_k", "schedule": "bls",
+                    "match": "Employment Situation", "tile": "Jobs"},
+            "unrate": {"enabled": True, "label": "Unemployment", "series": "UNRATE",
+                       "transform": "level_pct", "schedule": "bls",
+                       "match": "Employment Situation", "tile": "Jobs"},
+            "pce": {"enabled": True, "label": "PCE prices", "series": "PCEPI",
+                    "transform": "pct_mom", "schedule": "bea",
+                    "match": "Personal Income and Outlays", "tile": "PCE"},
+            "core_pce": {"enabled": True, "label": "Core PCE", "series": "PCEPILFE",
+                         "transform": "pct_mom", "schedule": "bea",
+                         "match": "Personal Income and Outlays", "tile": "PCE"},
+            # The headline (real, SAAR), not "GDP" - that series is a nominal level.
+            "gdp": {"enabled": True, "label": "GDP", "series": "A191RL1Q225SBEA",
+                    "transform": "pct_saar", "schedule": "bea", "match": "GDP (",
+                    "tile": "GDP"},
+            "retail": {"enabled": True, "label": "Retail sales", "series": "RSAFS",
+                       "transform": "pct_mom", "schedule": "fred", "release_id": 9,
+                       "time_ct": "07:30", "tile": "Retail sales"},
+            "claims": {"enabled": True, "label": "Jobless claims", "series": "ICSA",
+                       "transform": "level_k", "schedule": "fred", "release_id": 180,
+                       "time_ct": "07:30", "tile": "Jobless claims"},
+        },
+    },
 }
 
 load, reset_cache = toml_loader(NEWS_TOML, DEFAULTS, label="news.toml")
@@ -297,4 +408,167 @@ def ticker_set() -> list:
         if sym and sym not in seen:
             seen.add(sym)
             out.append(sym)
+    return out
+
+
+# ── v2: impact rank and economic calendar ─────────────────────────────────────
+
+TRANSFORMS = ("pct_mom", "change_k", "level_pct", "level_k", "pct_saar")
+SCHEDULES = ("bls", "bea", "fred")
+
+_warned = set()
+
+
+def _warn_once(key, msg, *args):
+    """One WARNING per distinct bad value: these accessors run every poll."""
+    if key in _warned:
+        return
+    _warned.add(key)
+    log.warning(msg, *args)
+
+
+def _is_num(value) -> bool:
+    """A finite real number, never a bool (``float(True)`` is 1.0). No
+    ``math`` here - the module's import set is pinned for Tier 1."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return value == value and value not in (float("inf"), float("-inf"))
+
+
+def _table(cfg, key):
+    value = cfg.get(key) if isinstance(cfg, dict) else None
+    return value if isinstance(value, dict) else None
+
+
+def _num_table(value, default):
+    """``{str: number}`` - a non-table falls back to the default table, a
+    non-numeric entry is dropped (silently: the scorer adds only numbers)."""
+    if not isinstance(value, dict):
+        value = default
+    return {k: v for k, v in value.items() if isinstance(k, str) and _is_num(v)}
+
+
+def _tiers(value):
+    """Keep a tier only when it is a table with an int ``points`` and a list
+    of words; the words keep only non-empty strings."""
+    if not isinstance(value, dict):
+        value = DEFAULTS["impact"]["keywords"]
+    out = {}
+    for name, tier in value.items():
+        if not isinstance(tier, dict):
+            continue
+        points, words = tier.get("points"), tier.get("words")
+        if isinstance(points, bool) or not isinstance(points, int):
+            continue
+        if not isinstance(words, list):
+            continue
+        out[name] = {"points": points,
+                     "words": [w for w in words if isinstance(w, str) and w.strip()]}
+    return out
+
+
+def impact_config() -> dict:
+    """``[impact]`` as a validated COPY (the scorer may keep it).
+
+    ``high_at`` / ``med_at`` must both be finite numbers with
+    ``high_at > med_at``; anything else is the built-in pair, with one WARNING
+    per distinct bad value. Other scalars fall back silently to their default;
+    keyword tiers, source points, Form 4 bands and filing points keep only
+    well-formed entries (see ``_tiers`` / ``_num_table``). Never raises."""
+    default = DEFAULTS["impact"]
+    raw = _table(load(), "impact") or {}
+    high, med = raw.get("high_at", default["high_at"]), raw.get("med_at", default["med_at"])
+    if not (_is_num(high) and _is_num(med) and high > med):
+        _warn_once(("impact", repr(high), repr(med)),
+                   "news.toml: [impact] high_at = %r, med_at = %r is not a pair of "
+                   "numbers with high_at > med_at - using %r / %r",
+                   high, med, default["high_at"], default["med_at"])
+        high, med = default["high_at"], default["med_at"]
+    out = {"high_at": high, "med_at": med}
+    for key in ("stale_after_h", "multi_source", "watchlist"):
+        value = raw.get(key, default[key])
+        out[key] = value if _is_num(value) else default[key]
+    teaser = raw.get("match_teaser", default["match_teaser"])
+    out["match_teaser"] = teaser if isinstance(teaser, bool) else default["match_teaser"]
+    out["keywords"] = _tiers(raw.get("keywords"))
+    out["source_points"] = _num_table(raw.get("source_points"), default["source_points"])
+    out["form4"] = _num_table(raw.get("form4"), default["form4"])
+    out["filings"] = _num_table(raw.get("filings"), default["filings"])
+    return copy.deepcopy(out)
+
+
+def _calendar():
+    return _table(load(), "calendar") or DEFAULTS["calendar"]
+
+
+def calendar_config() -> dict:
+    """The ``[calendar]`` scalars (sub-tables left out), each defaulted when
+    absent. A copy."""
+    cal = _calendar()
+    out = {k: v for k, v in DEFAULTS["calendar"].items() if not isinstance(v, dict)}
+    out.update({k: v for k, v in cal.items() if not isinstance(v, dict)})
+    return copy.deepcopy(out)
+
+
+def calendar_source(name) -> dict:
+    """``[calendar.sources.<name>]`` as a copy, with ``user_agent`` filled from
+    ``[collector] feed_user_agent`` when ``""`` or absent, and ``refresh_min``
+    from ``[calendar] refresh_min`` when absent. A name that is not a source
+    table is ``enabled = False`` (fail closed)."""
+    sources = _table(_calendar(), "sources") or {}
+    table = sources.get(name) if isinstance(name, str) else None
+    out = copy.deepcopy(table) if isinstance(table, dict) else {"enabled": False}
+    if not isinstance(out.get("enabled", True), bool):
+        out["enabled"] = False
+    out.setdefault("enabled", True)
+    if not (isinstance(out.get("user_agent"), str) and out["user_agent"]):
+        collector = _table(load(), "collector") or {}
+        ua = collector.get("feed_user_agent")
+        out["user_agent"] = (ua if isinstance(ua, str) and ua
+                             else DEFAULTS["collector"]["feed_user_agent"])
+    if "refresh_min" not in out:
+        out["refresh_min"] = calendar_config()["refresh_min"]
+    return out
+
+
+def indicators() -> list:
+    """Every ENABLED ``[calendar.indicators.<key>]`` table as a dict with
+    ``key`` added, in table order. An unknown ``transform`` / ``schedule``, a
+    missing ``series`` or a non-table entry is skipped with a WARNING; an
+    ``enabled`` that is not a real bool fails closed."""
+    tables = _table(_calendar(), "indicators")
+    if tables is None:
+        tables = DEFAULTS["calendar"]["indicators"]
+    out = []
+    for key, raw in tables.items():
+        if not isinstance(raw, dict):
+            _warn_once(("ind", key, "table"),
+                       "news.toml: [calendar.indicators.%s] is not a table - skipped", key)
+            continue
+        enabled = raw.get("enabled", True)
+        if not isinstance(enabled, bool):
+            _warn_once(("ind", key, "enabled", repr(enabled)),
+                       "news.toml: indicator %r has enabled = %r, not true/false - "
+                       "treated as false", key, enabled)
+            continue
+        if not enabled:
+            continue
+        series = raw.get("series")
+        if not (isinstance(series, str) and series):
+            _warn_once(("ind", key, "series"),
+                       "news.toml: indicator %r has no series - skipped", key)
+            continue
+        if raw.get("transform") not in TRANSFORMS:
+            _warn_once(("ind", key, "transform", repr(raw.get("transform"))),
+                       "news.toml: indicator %r has unknown transform %r - skipped",
+                       key, raw.get("transform"))
+            continue
+        if raw.get("schedule") not in SCHEDULES:
+            _warn_once(("ind", key, "schedule", repr(raw.get("schedule"))),
+                       "news.toml: indicator %r has unknown schedule %r - skipped",
+                       key, raw.get("schedule"))
+            continue
+        item = copy.deepcopy(raw)
+        item["key"] = key
+        out.append(item)
     return out

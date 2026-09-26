@@ -17,6 +17,8 @@ sec_user_agent    = "NeuralStrike news_svc contact@neuralstrike.co"
 feed_user_agent   = "Mozilla/5.0 (compatible; NeuralStrike news_svc; +https://neuralstrike.co)"
 # A response larger than this is refused rather than read (a runaway or hostile feed).
 max_body_bytes    = 5000000
+# Newest rows in the SEC panel's views (EDGAR kinds, split out of the headline feed).
+sec_view_items    = 100
 
 [tickers]
 # Followed but not scanned. The base set is the GEX collection list (config/symbols.toml).
@@ -171,3 +173,220 @@ public  = true
 [feed_flags."SEC Offerings"]
 enabled = true
 public  = true
+
+# ── impact rank ────────────────────────────────────────────────────────────────
+# Every item gets a rules-based High / Med / Low from these points (services/news_svc/impact.py).
+# Keyword tiers, source points, Form 4 bands and filing points are TABLES, so an
+# override in config/local/news.toml of one entry merges key by key.
+
+[impact]
+high_at          = 6       # score >= high_at -> high
+med_at           = 3       # score >= med_at  -> med, else low
+stale_after_h    = 24      # a HIGH item older than this shows as MED
+multi_source     = 1       # +points when two or more feeds carry the story
+watchlist        = 2       # +points when the item is tagged with a followed ticker
+match_teaser     = false   # keywords match the headline only
+
+[impact.keywords.tier1]    # a tier counts once, whatever matches inside it
+points = 5
+words  = ["FOMC", "rate decision", "rate cut", "rate hike", "Fed chair", "CPI",
+          "inflation report", "jobs report", "nonfarm payrolls", "payrolls",
+          "bankruptcy", "chapter 11", "trading halt", "halted", "SEC charges", "indicted",
+          "acquire", "acquisition", "merger", "takeover", "tender offer",
+          "guidance cut", "cuts guidance", "raises guidance", "profit warning", "delist"]
+
+[impact.keywords.tier2]
+points = 3
+words  = ["downgrade", "upgrade", "beats", "misses", "earnings", "PPI", "PCE", "GDP",
+          "retail sales", "jobless claims", "tariff", "sanctions", "buyback",
+          "dividend cut", "recall", "investigation", "lawsuit", "layoffs",
+          "price target", "offering", "stake"]
+
+[impact.keywords.tier3]
+points = 1
+words  = ["outlook", "forecast", "analyst", "sector", "rally", "selloff"]
+
+[impact.source_points]     # by feed name; a feed absent here scores 0 (max over a row's sources)
+"Federal Reserve" = 3
+"Truth Social"    = 2
+"WSJ"             = 1
+"ZeroHedge"       = -1
+
+[impact.form4]             # by the sum of code-P buys, dollars
+small_usd  = 250000
+small      = 1
+large_usd  = 1000000
+large      = 3
+huge_usd   = 10000000
+huge       = 6
+officer    = 1             # + when the relationship names an officer or director
+
+[impact.filings]           # by form, looked up exactly
+"424B5"  = 3               # a takedown: shares actually being sold now
+"S-3"    = 2
+"S-1"    = 1
+"S-3ASR" = 1               # a large issuer's automatic shelf: routine
+untracked = -1             # a filing on no followed ticker (likely a micro-cap)
+
+# ── economic calendar ─────────────────────────────────────────────────────────
+[calendar]
+enabled            = true
+refresh_min        = 60    # schedules, Fed events, dividends store; a source may override
+values_refresh_min = 240   # FRED observations outside a release watch
+release_poll_min   = 2     # during a release watch
+release_watch_min  = 60    # how long after a scheduled release to keep watching
+actual_fresh_h     = 24    # a just-released value is marked "Released" this long
+
+[calendar.sources.fed]
+enabled = true
+url = "https://www.federalreserve.gov/json/calendar.json"
+user_agent = ""            # "" = [collector] feed_user_agent
+
+[calendar.sources.bls]
+enabled = true
+url = "https://www.bls.gov/schedule/news_release/bls.ics"
+user_agent = ""            # BLS answers 403 to a browser UA; keep the contact-bearing one
+refresh_min = 720
+
+[calendar.sources.bea]
+enabled = true
+url = "https://www.bea.gov/news/schedule/ics/online-calendar-subscription.ics"
+user_agent = ""
+refresh_min = 720
+
+[calendar.sources.fred_calendar]
+enabled = true
+url = "https://fred.stlouisfed.org/releases/calendar?rid={rid}&y={year}&view=year&vs={start}&ve={end}"
+user_agent = ""            # FRED resets a bare Chrome UA from a datacenter IP
+refresh_min = 720
+
+[calendar.sources.fred_api]
+enabled = true             # used only when the stack .env holds a FRED key (never set here)
+url = "https://api.stlouisfed.org/fred"
+user_agent = ""
+
+[calendar.sources.fredgraph]
+enabled = true             # the key-free fallback for observations
+url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}&cosd={start}"
+user_agent = ""
+
+[calendar.sources.nasdaq_ipo]
+enabled = true
+url = "https://api.nasdaq.com/api/ipo/calendar?date={month}"
+user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+accept = "application/json, text/plain, */*"
+refresh_min = 240
+
+[calendar.fed]
+types = ["FOMC", "Beige", "Speeches", "Testimony"]
+horizon_days = 45          # an FOMC meeting can be six weeks out
+speech_horizon_days = 14   # Board speeches are frequent
+
+[calendar.events]
+extra_releases = ["Job Openings and Labor Turnover Survey", "Employment Cost Index"]
+
+[calendar.ipo]
+min_offer_usd = 100000000  # roughly half of Nasdaq's rows are SPACs and tiny deals
+lookback_days = 7          # priced deals stay on the calendar this long
+
+[calendar.dividends]
+enabled = true
+refresh_at = "06:40"       # CT, trading days, run by trade_svc
+horizon_days = 30
+lookback_days = 3
+
+# One table per indicator; file order = tile order. transform: pct_mom | change_k |
+# level_pct | level_k | pct_saar. schedule: bls | bea (matched by release name) |
+# fred (by release_id). time_ct is used only when a date source gives no time.
+
+[calendar.indicators.cpi]
+enabled = true
+label = "CPI"
+series = "CPIAUCSL"
+transform = "pct_mom"
+schedule = "bls"
+match = "Consumer Price Index"
+tile = "CPI"
+
+[calendar.indicators.core_cpi]
+enabled = true
+label = "Core CPI"
+series = "CPILFESL"
+transform = "pct_mom"
+schedule = "bls"
+match = "Consumer Price Index"
+tile = "CPI"
+
+[calendar.indicators.ppi]
+enabled = true
+label = "PPI"
+series = "PPIFIS"
+transform = "pct_mom"
+schedule = "bls"
+match = "Producer Price Index"
+tile = "PPI"
+
+[calendar.indicators.nfp]
+enabled = true
+label = "Nonfarm payrolls"
+series = "PAYEMS"
+transform = "change_k"
+schedule = "bls"
+match = "Employment Situation"
+tile = "Jobs"
+
+[calendar.indicators.unrate]
+enabled = true
+label = "Unemployment"
+series = "UNRATE"
+transform = "level_pct"
+schedule = "bls"
+match = "Employment Situation"
+tile = "Jobs"
+
+[calendar.indicators.pce]
+enabled = true
+label = "PCE prices"
+series = "PCEPI"
+transform = "pct_mom"
+schedule = "bea"
+match = "Personal Income and Outlays"
+tile = "PCE"
+
+[calendar.indicators.core_pce]
+enabled = true
+label = "Core PCE"
+series = "PCEPILFE"
+transform = "pct_mom"
+schedule = "bea"
+match = "Personal Income and Outlays"
+tile = "PCE"
+
+[calendar.indicators.gdp]
+enabled = true
+label = "GDP"
+series = "A191RL1Q225SBEA"  # real GDP growth, SAAR - the headline, not nominal GDP
+transform = "pct_saar"
+schedule = "bea"
+match = "GDP ("
+tile = "GDP"
+
+[calendar.indicators.retail]
+enabled = true
+label = "Retail sales"
+series = "RSAFS"
+transform = "pct_mom"
+schedule = "fred"
+release_id = 9
+time_ct = "07:30"
+tile = "Retail sales"
+
+[calendar.indicators.claims]
+enabled = true
+label = "Jobless claims"
+series = "ICSA"
+transform = "level_k"
+schedule = "fred"
+release_id = 180
+time_ct = "07:30"
+tile = "Jobless claims"
