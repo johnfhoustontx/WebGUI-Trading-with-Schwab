@@ -1,0 +1,139 @@
+{
+ "data": {
+  "priced": {
+   "asOf": null,
+   "headers": {
+    "proposedTickerSymbol": "Symbol",
+    "companyName": "Company Name",
+    "proposedExchange": "Exchange/ Market",
+    "proposedSharePrice": "Price",
+    "sharesOffered": "Shares",
+    "pricedDate": "Date",
+    "dollarValueOfSharesOffered": "Offer Amount",
+    "dealStatus": "Actions"
+   },
+   "rows": [
+    {
+     "dealID": "1399245-119118",
+     "proposedTickerSymbol": "OIG",
+     "companyName": "Orion180 Insurance Group Inc.",
+     "proposedExchange": "NASDAQ Global Select",
+     "proposedSharePrice": "12.00",
+     "sharesOffered": "20,000,000",
+     "pricedDate": "9/18/2026",
+     "dollarValueOfSharesOffered": "$240,000,000",
+     "dealStatus": "Priced"
+    },
+    {
+     "dealID": "1354580-119195",
+     "proposedTickerSymbol": "ETRA",
+     "companyName": "Electra Therapeutics, Inc.",
+     "proposedExchange": "NASDAQ Global Select",
+     "proposedSharePrice": "15.00",
+     "sharesOffered": "23,333,334",
+     "pricedDate": "9/18/2026",
+     "dollarValueOfSharesOffered": "$350,000,010",
+     "dealStatus": "Priced"
+    }
+   ]
+  },
+  "upcoming": {
+   "upcomingTable": {
+    "asOf": null,
+    "headers": {
+     "proposedTickerSymbol": "Symbol",
+     "companyName": "Company Name",
+     "proposedExchange": "Exchange/ Market",
+     "proposedSharePrice": "Price",
+     "sharesOffered": "Shares",
+     "expectedPriceDate": "Expected IPO Date",
+     "dollarValueOfSharesOffered": "Offer Amount"
+    },
+    "rows": [
+     {
+      "dealID": "1400871-119254",
+      "proposedTickerSymbol": "OURA",
+      "companyName": "Oura Inc.",
+      "proposedExchange": "NASDAQ Global Select",
+      "proposedSharePrice": "40.00-44.00",
+      "sharesOffered": "50,000,000",
+      "expectedPriceDate": "9/30/2026",
+      "dollarValueOfSharesOffered": "$2,530,000,000"
+     },
+     {
+      "dealID": "1400711-119247",
+      "proposedTickerSymbol": "ACCV",
+      "companyName": "Accelevation Holdings Corp.",
+      "proposedExchange": "NASDAQ Global Select",
+      "proposedSharePrice": "20.00-24.00",
+      "sharesOffered": "30,000,000",
+      "expectedPriceDate": "9/30/2026",
+      "dollarValueOfSharesOffered": "$828,000,000.00"
+     },
+     {
+      "dealID": "1397270-118941",
+      "proposedTickerSymbol": "PTT",
+      "companyName": "SIYATA PTT",
+      "proposedExchange": "NASDAQ Capital",
+      "proposedSharePrice": null,
+      "sharesOffered": "6,112,327",
+      "expectedPriceDate": "9/30/2026",
+      "dollarValueOfSharesOffered": ""
+     }
+    ]
+   },
+   "lastUpdatedTime": "LAST UPDATED: 09/24/2026* - Source: EDGAR® Online"
+  },
+  "filed": {
+   "asOf": null,
+   "headers": {
+    "proposedTickerSymbol": "Symbol",
+    "companyName": "Company Name",
+    "filedDate": "Date Filed",
+    "dollarValueOfSharesOffered": "Offer Amount"
+   },
+   "rows": [
+    {
+     "dealID": "1403574-119467",
+     "proposedTickerSymbol": "CTY",
+     "companyName": "CITY THERAPEUTICS, INC.",
+     "filedDate": "9/24/2026",
+     "dollarValueOfSharesOffered": "$100,000,000.00"
+    }
+   ]
+  },
+  "withdrawn": {
+   "asOf": null,
+   "headers": {
+    "proposedTickerSymbol": "Symbol",
+    "companyName": "Company Name",
+    "proposedExchange": "Exchange/ Market",
+    "sharesOffered": "Shares",
+    "filedDate": "Date Filed",
+    "dollarValueOfSharesOffered": "Offer Amount",
+    "withdrawDate": "Date Withdrawn"
+   },
+   "rows": [
+    {
+     "dealID": "1338886-114301",
+     "proposedTickerSymbol": null,
+     "companyName": "GEBE Environmental Technology Ltd",
+     "proposedExchange": null,
+     "sharesOffered": "3,750,000",
+     "filedDate": "6/13/2025",
+     "dollarValueOfSharesOffered": "$25,875,000",
+     "withdrawDate": "9/18/2026"
+    }
+   ]
+  },
+  "month": 9,
+  "year": 2026,
+  "totalResults": 7
+ },
+ "message": null,
+ "status": {
+  "rCode": 200,
+  "bCodeMessage": null,
+  "developerMessage": null
+ }
+}
