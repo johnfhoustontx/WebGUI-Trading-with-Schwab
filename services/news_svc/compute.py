@@ -48,7 +48,9 @@ Load-bearing rules, each pinned in ``tests/test_compute.py``:
   never carry the stored score - it counts private feeds and tickers - so each
   public row is re-scored from the row as the store returns it (``sources`` and
   ``tickers`` already cut to the public ones) and then capped. A private feed's
-  name therefore never reaches a public ``source:`` reason.
+  name therefore never reaches a public ``source:`` reason. The public re-score
+  runs against ``public_universe`` (the collection list, never the private
+  ``[tickers] extras``), so a public ``watchlist`` reason cannot reveal an extra.
 * **A store failure costs its own step.** A failed prune or view read is a
   degrade; the other views - and always the status view - still publish. If
   even the feed states cannot be read, the status is built from the config
@@ -68,6 +70,8 @@ from services.news_svc.adapters import edgar, google_news, rss, yahoo_ticker
 from services.news_svc.fetch import (  # noqa: F401 (re-exported for tests)
     FetchError, Fetched, TooLarge, http_fetch)
 from shared import news_config as nc
+from shared import symbols as _symbols
+from shared.symbols import clean_symbol
 
 log = logging.getLogger("news_svc.compute")
 
@@ -453,15 +457,40 @@ def _finish(rows, now, icfg, universe, *, public) -> list:
     return out
 
 
+def public_universe(universe) -> list:
+    """The ticker set a PUBLIC view is scored against: ``universe`` cut to the
+    GEX collection list, which is public (``config/symbols.toml``, and the
+    published gamma screens name its symbols). ``[tickers] extras`` is the
+    owner's private list, so a ``watchlist`` reason - or its points - on a
+    public row must never say whether a name is in it. Never wider than
+    ``universe``; a failure to read the collection list is an empty set (no
+    watchlist points publicly) and one degrade."""
+    try:
+        base = {clean_symbol(s) for s in _symbols.collection_base()}
+    except Exception:  # noqa: BLE001 - lose the public watchlist boost, never leak it
+        _degrade.degraded("news.public_universe")
+        return []
+    return [s for s in (universe or []) if clean_symbol(s) in base]
+
+
 def run_poll(bus, db, fetch, *, feeds, universe, now, cfg) -> dict:
     results = [poll_feed(f, db, fetch, universe=universe, now=now, cfg=cfg) for f in feeds]
     try:
         db.prune(keep_days=_collector(cfg, "keep_days"), now=now)
     except Exception:  # noqa: BLE001 - old rows linger a cycle; the views still publish
         _degrade.degraded("news.prune")
-    icfg = nc.impact_config()
+    try:
+        icfg = nc.impact_config()
+    except Exception:  # noqa: BLE001 - score with the built-in rules; the views still publish
+        _degrade.degraded("news.impact_config")
+        icfg = nc.DEFAULTS["impact"]
     _rescore(db, icfg, universe)
-    at = _aware_now(now)
+    try:
+        at = _aware_now(now)
+    except Exception:  # noqa: BLE001 - the stale cap needs a clock; the current one will do
+        _degrade.degraded("news.now")
+        at = dt.datetime.now(dt.timezone.utc)
+    pub_universe = public_universe(universe)
     n = _collector(cfg, "view_items")
     sec_n = _collector(cfg, "sec_view_items")
     # The CURRENT flags, re-read at every publish - never the ingest-time copy
@@ -479,7 +508,9 @@ def run_poll(bus, db, fetch, *, feeds, universe, now, cfg) -> dict:
     )
     for area, publish, is_public, read in views:
         try:
-            publish(bus, _finish(read(), at, icfg, universe, public=is_public))
+            publish(bus, _finish(read(), at, icfg,
+                                 pub_universe if is_public else universe,
+                                 public=is_public))
         except Exception:  # noqa: BLE001 - that view's last copy stays; the rest go
             _degrade.degraded(area)
     try:

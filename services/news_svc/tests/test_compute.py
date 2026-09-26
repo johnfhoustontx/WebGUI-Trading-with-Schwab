@@ -1354,3 +1354,115 @@ def test_a_scoring_failure_degrades_and_still_publishes(tmp_path, monkeypatch):
     assert _degrade.counts()["news.impact"] == 1
     assert _degrade.counts().get("news.impact.public") == 1
     _degrade.reset()
+
+
+# ── Review fixes: the public universe, the fingerprint, a sick impact config ──
+
+def test_public_views_score_the_watchlist_against_the_public_universe_only(
+        tmp_path, monkeypatch):
+    """``[tickers] extras`` is private: a public row tagged with an extras-only
+    name must not reveal it through a ``watchlist`` reason or its points."""
+    from shared import symbols
+    from shared.bus import Bus
+    assert "ACME" not in symbols.collection_base() and "SPY" in symbols.collection_base()
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"},
+                                 {"name": "S3", "kind": "edgar_filings", "forms": ["S-3"]}],
+                   {"Pub": {"public": True}, "S3": {"public": True}})
+    db.insert_many([
+        _it("https://sec/2", "ACME files S-3", source="S3", kind="edgar_filings",
+            tickers=["ACME"], detail={"form": "S-3"}),
+        _it("https://p/1", "SPY slips as traders wait on the data", source="Pub",
+            tickers=["SPY"]),
+    ])
+    _poll(bus, db, universe=["SPY", "ACME"])                    # ACME = a private extra
+    private = _by_title(bus, handlers.CACHE_SEC)["ACME files S-3"]
+    public = _by_title(bus, handlers.CACHE_SEC_PUBLIC)["ACME files S-3"]
+    assert public["tickers"] == ["ACME"]
+    assert "watchlist" in private["impact"]["reasons"]
+    assert "watchlist" not in public["impact"]["reasons"]
+    assert private["impact"]["score"] - public["impact"]["score"] == ICFG["watchlist"]
+    rss = _by_title(bus, handlers.CACHE_PUBLIC)["SPY slips as traders wait on the data"]
+    assert "watchlist" in rss["impact"]["reasons"]              # a public name still counts
+    assert rss["impact"]["score"] == ICFG["watchlist"]
+
+
+def test_the_public_universe_never_widens_the_configured_one(tmp_path, monkeypatch):
+    """A collection name the service was not handed is not a public watchlist hit."""
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"}],
+                   {"Pub": {"public": True}})
+    db.insert_many([_it("https://p/1", "SPY slips as traders wait on the data",
+                        tickers=["SPY"])])
+    _poll(bus, db, universe=[])
+    rss = _by_title(bus, handlers.CACHE_PUBLIC)["SPY slips as traders wait on the data"]
+    assert "watchlist" not in (rss["impact"] or {}).get("reasons", [])
+
+
+def test_the_fingerprint_ignores_the_stale_window():
+    """``stale_after_h`` is applied at publish, never stored - editing it must
+    not force a re-score of every row."""
+    a = json.loads(json.dumps(ICFG))
+    b = json.loads(json.dumps(ICFG))
+    b["stale_after_h"] = 72
+    assert impact.fingerprint(a, ["SPY"]) == impact.fingerprint(b, ["SPY"])
+    b["watchlist"] = 9
+    assert impact.fingerprint(a, ["SPY"]) != impact.fingerprint(b, ["SPY"])
+
+
+def test_run_poll_scores_with_a_fingerprint_that_ignores_the_stale_window(
+        tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    cfg = _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"}])
+    db.insert_many([_it("https://p/1", "FOMC holds rates steady this afternoon")])
+    _poll(bus, db)
+    seen = []
+    real = db.set_impact
+    monkeypatch.setattr(db, "set_impact", lambda rows: seen.append(rows) or real(rows))
+    cfg["impact"]["stale_after_h"] = 72                         # Settings edits the window
+    _poll(bus, db)
+    assert seen == []                                           # nothing was re-scored
+    cfg["impact"]["watchlist"] = 5                              # a scoring edit still does
+    _poll(bus, db)
+    assert len(seen) == 1
+
+
+def test_a_broken_impact_config_falls_back_to_the_defaults_and_still_publishes(
+        tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"}],
+                   {"Pub": {"public": True}})
+    db.insert_many([_it("https://p/1", "FOMC holds rates steady this afternoon")])
+    monkeypatch.setattr(nc, "impact_config", _boom)
+    _degrade.reset()
+    _poll(bus, db)
+    assert _degrade.counts().get("news.impact_config") == 1
+    [row] = bus.cache_get(handlers.CACHE_FEED).payload["items"]
+    assert row["impact"] is not None
+    assert bus.cache_get(handlers.CACHE_PUBLIC).payload["items"]
+    assert bus.cache_get(handlers.CACHE_STATUS) is not None
+    _degrade.reset()
+
+
+def test_a_failing_clock_falls_back_to_utc_now_and_still_publishes(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    _impact_config(monkeypatch, [{"name": "Pub", "kind": "rss", "url": "u"}],
+                   {"Pub": {"public": True}})
+    db.insert_many([_it("https://p/1", "FOMC holds rates steady this afternoon")])
+    monkeypatch.setattr(compute, "_aware_now", _boom)
+    _degrade.reset()
+    _poll(bus, db)
+    assert _degrade.counts().get("news.now") == 1
+    [row] = bus.cache_get(handlers.CACHE_FEED).payload["items"]
+    assert row["impact"]["score"] == 5
+    assert bus.cache_get(handlers.CACHE_STATUS) is not None
+    _degrade.reset()

@@ -106,8 +106,13 @@ def fingerprint(cfg, universe) -> str:
     Never raises: a config whose tables mix key types (``{"a": 1, 2: 3}``),
     which ``json.dumps(sort_keys=True)`` refuses, is canonicalised with every
     key sorted by its ``str`` instead. The ordinary path is unchanged, so a
-    well-formed config keeps the fingerprint its stored rows carry."""
+    well-formed config keeps the fingerprint its stored rows carry.
+
+    ``stale_after_h`` is left out: the staleness cap is applied at publish and
+    never stored, so editing that window must not force a re-score of every row."""
     u = sorted(_universe(universe))
+    if isinstance(cfg, dict) and "stale_after_h" in cfg:
+        cfg = {k: v for k, v in cfg.items() if k != "stale_after_h"}
     try:
         blob = json.dumps({"cfg": cfg, "u": u}, sort_keys=True, default=str)
     except (TypeError, ValueError):
