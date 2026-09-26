@@ -434,9 +434,32 @@ class Store:
 
     def newest_for_ticker(self, symbol, limit, *, public_only=False, sources=None,
                           public_sources=None) -> list:
-        """As ``newest``, restricted to items tagged with exactly ``symbol``."""
+        """As ``newest``, restricted to items tagged with exactly ``symbol``.
+
+        Under ``public_sources`` the tag itself must be PUBLIC: a row matches
+        only when some public feed contributed ``symbol`` (per
+        ``ticker_sources``), the same rule that cuts the returned ``tickers``.
+        Fail closed - otherwise a public per-ticker page would list a story
+        under AAPL while showing it untagged, because only a private feed said
+        AAPL. A row whose ``ticker_sources`` is unreadable attributes every
+        ticker to its primary source (as ``_ticker_sources`` does), which the
+        public view already requires to be public. The filter is in SQL so the
+        limit applies after it."""
+        where = ["EXISTS (SELECT 1 FROM json_each(items.tickers) WHERE value=?)"]
+        params = [symbol]
+        names = _names(public_sources)
+        if names:
+            marks = ",".join("?" * len(names))
+            where.append(
+                "(CASE WHEN json_valid(items.ticker_sources) "
+                "AND json_type(items.ticker_sources)='object' "
+                "THEN EXISTS (SELECT 1 FROM json_each(items.ticker_sources) AS ts "
+                "WHERE ts.key=? AND ts.type='array' AND EXISTS "
+                f"(SELECT 1 FROM json_each(ts.value) AS f WHERE f.value IN ({marks}))) "
+                "ELSE 1 END)")
+            params.extend([symbol, *names])
         return self._select(
-            ["EXISTS (SELECT 1 FROM json_each(items.tickers) WHERE value=?)"], [symbol],
+            where, params,
             limit, public_only=public_only, sources=sources, public_sources=public_sources)
 
     def prune(self, *, keep_days, now) -> int:

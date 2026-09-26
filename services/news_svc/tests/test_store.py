@@ -413,11 +413,48 @@ def test_public_view_for_ticker(tmp_path):
     p2 = _src(_item("https://p/2", title="Nvidia beats on data center sales", tickers=["AAPL"],
                     public=False), "Private")
     db.insert_many([y]); db.insert_many([p2])
-    rows = db.newest_for_ticker("AAPL", 10, public_sources={"Yahoo Finance"})
-    assert [(r["url"], r["source"], r["sources"]) for r in rows] == [
-        ("https://y/2", "Yahoo Finance", ["Yahoo Finance"])]
+    # Spec change (coordinator decision, fail closed): a public per-ticker read
+    # matches only tickers a PUBLIC feed contributed. Only Private tagged this
+    # row AAPL, so it is NOT listed under AAPL publicly - it would otherwise be
+    # listed under AAPL while showing no AAPL tag.
+    assert db.newest_for_ticker("AAPL", 10, public_sources={"Yahoo Finance"}) == []
+    # ...its public tag still matches, and the owner view still lists it under AAPL
+    rows = db.newest_for_ticker("NVDA", 10, public_sources={"Yahoo Finance"})
+    assert [(r["url"], r["tickers"]) for r in rows] == [("https://y/2", ["NVDA"])]
+    assert "https://y/2" in [r["url"] for r in db.newest_for_ticker("AAPL", 10)]
     assert db.newest_for_ticker("AAPL", 10, public_sources={"Nobody"}) == []
     assert db.newest_for_ticker("AAPL", 10, public_sources=()) == []
+
+
+def test_public_ticker_read_matches_a_ticker_a_public_feed_contributed(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    story = "Nvidia beats on data center sales"
+    db.insert_many([_src(_item("https://y/1", title=story, tickers=["NVDA"]), "Yahoo Finance")])
+    db.insert_many([_src(_item("https://m/1", title=story, tickers=["AAPL"]), "MarketWatch")])
+    # MarketWatch (public) tagged AAPL on Yahoo's row -> listed under AAPL, tagged AAPL
+    rows = db.newest_for_ticker("AAPL", 10, public_sources={"Yahoo Finance", "MarketWatch"})
+    assert [(r["url"], r["tickers"]) for r in rows] == [("https://y/1", ["NVDA", "AAPL"])]
+    # with MarketWatch not public, its AAPL tag no longer counts
+    assert db.newest_for_ticker("AAPL", 10, public_sources={"Yahoo Finance"}) == []
+
+
+def test_public_ticker_filter_applies_before_the_limit(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://y/old", title="older AAPL story", tickers=["AAPL"],
+                               published="2026-09-25T18:00:00+00:00"), "Yahoo Finance")])
+    db.insert_many([_src(_item("https://y/new", title=_STORY, tickers=["NVDA"]), "Yahoo Finance")])
+    db.insert_many([_src(_item("https://p/new", title=_STORY, tickers=["AAPL"], public=False),
+                         "Private")])
+    rows = db.newest_for_ticker("AAPL", 1, public_sources={"Yahoo Finance"})
+    assert [r["url"] for r in rows] == ["https://y/old"]
+
+
+def test_public_ticker_read_on_unreadable_ticker_sources_uses_the_primary(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_src(_item("https://y/1", tickers=["AAPL"]), "Yahoo Finance")])
+    db._c.execute("UPDATE items SET ticker_sources='not json'")
+    rows = db.newest_for_ticker("AAPL", 10, public_sources={"Yahoo Finance"})
+    assert [(r["url"], r["tickers"]) for r in rows] == [("https://y/1", ["AAPL"])]
 
 
 def test_a_merge_sets_the_public_column_to_existing_or_incoming(tmp_path):
