@@ -48,6 +48,13 @@ def test_same_feed_merge_h_takes_a_real_number_including_zero(monkeypatch):
         assert nc.same_feed_merge_h() == value
 
 
+def test_same_feed_merge_h_is_clamped_to_the_schema_range():
+    """The Settings field is 0-24; a title match needs a gap under a day
+    anyway, so a hand-edited 48 means 24, and the reader says so."""
+    for value, expected in ((48, 24), (24.5, 24), (1e9, 24), (24, 24), (0, 0)):
+        assert nc.same_feed_merge_h({"dedupe": {"same_feed_merge_h": value}}) == expected, value
+
+
 def test_a_bad_same_feed_merge_h_is_the_default(monkeypatch):
     for bad in (True, False, "6", None, -1, -0.5, float("nan"), float("inf"), [6], {"h": 6}):
         cfg = {"dedupe": {"same_feed_merge_h": bad}}

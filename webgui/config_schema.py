@@ -913,6 +913,8 @@ _NEWS = ConfigFile(
                   "When ONE feed publishes the same headline twice within this "
                   "many hours, it is shown once. Longer apart, both are kept, so a "
                   "daily column with a fixed title is not folded into yesterday's. "
+                  "SEC filing feeds are never folded this way: their headlines "
+                  "follow a template, so two different filings can share one. "
                   "0 turns this off.", kind="int", unit="h", min=0, max=24, step=1),
         )),
         Section("Feed switches", "One pair per feed, named by the feed. A switch "

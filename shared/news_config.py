@@ -33,8 +33,8 @@ and a warning there would repeat per call.
 It does NOT validate values (URLs, poll minutes, counts): a wrong number of the
 right type is read as written - except ``[dedupe] same_feed_merge_h``, which
 ``same_feed_merge_h()`` reads as the default when it is not a finite number >= 0
-(a bool included), because it decides whether two rows become one. Nothing here
-raises. Treat anything ``load()``
+(a bool included) and clamps to 24 above it, because it decides whether two
+rows become one. Nothing here raises. Treat anything ``load()``
 returns as read-only: it is the cached mapping.
 """
 import copy
@@ -258,12 +258,20 @@ def public_feed_names() -> list:
     return [feed["name"] for feed in all_feeds() if feed["public"]]
 
 
+SAME_FEED_MERGE_MAX_H = 24
+
+
 def same_feed_merge_h(cfg=None) -> float:
     """``[dedupe] same_feed_merge_h``: the hours within which ONE feed's two
     items with one title key merge into one row (0 = never). ``cfg`` is a
     loaded mapping (``load()`` when omitted). Anything that is not a finite
     real number >= 0 - a bool, a string, NaN, a negative, a missing table - is
-    the built-in default, silently: the poll cycle reads it every feed."""
+    the built-in default, silently: the poll cycle reads it every feed.
+
+    A usable value above ``SAME_FEED_MERGE_MAX_H`` (24) is clamped to it: the
+    Settings field is 0-24, and a title match already needs the two items
+    within a day, so 48 would act as 24 anyway - the reader returns what the
+    store will actually do. A decimal within range is kept as written."""
     default = DEFAULTS["dedupe"]["same_feed_merge_h"]
     cfg = load() if cfg is None else cfg
     table = cfg.get("dedupe") if isinstance(cfg, dict) else None
@@ -272,7 +280,7 @@ def same_feed_merge_h(cfg=None) -> float:
         return default
     if not 0 <= value < float("inf"):      # NaN fails every comparison
         return default
-    return value
+    return min(value, SAME_FEED_MERGE_MAX_H)
 
 
 def ticker_set() -> list:

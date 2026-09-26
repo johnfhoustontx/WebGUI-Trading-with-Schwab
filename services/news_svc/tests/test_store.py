@@ -211,13 +211,100 @@ def test_an_undated_item_never_merges_by_the_same_feed_rule(tmp_path):
 
 
 def test_same_feed_close_refuses_the_undated_sentinel_on_either_side():
-    row = {"published_at": store._UNDATED, "gap_h": 0.0}
-    assert not store.Store._same_feed_close({"published_at": "2026-09-25T11:00:00+00:00"},
+    dated = {"published_at": "2026-09-25T11:00:00+00:00", "kind": "rss"}
+    row = {"published_at": store._UNDATED, "gap_h": 0.0, "kind": "rss"}
+    assert not store.Store._same_feed_close(dated, row, 6)
+    row = {"published_at": "2026-09-25T11:00:00+00:00", "gap_h": 0.0, "kind": "rss"}
+    assert not store.Store._same_feed_close({"published_at": store._UNDATED, "kind": "rss"},
                                             row, 6)
-    row = {"published_at": "2026-09-25T11:00:00+00:00", "gap_h": 0.0}
-    assert not store.Store._same_feed_close({"published_at": store._UNDATED}, row, 6)
-    assert store.Store._same_feed_close({"published_at": "2026-09-25T11:00:00+00:00"},
-                                        row, 6)
+    assert store.Store._same_feed_close(dated, row, 6)
+
+
+def test_same_feed_close_needs_an_article_kind_on_both_sides():
+    row = {"published_at": "2026-09-25T11:00:00+00:00", "gap_h": 0.0, "kind": "rss"}
+    at = "2026-09-25T11:00:00+00:00"
+    for kind in ("edgar_form4", "edgar_filings", None, "unknown"):
+        assert not store.Store._same_feed_close({"published_at": at, "kind": kind}, row, 6)
+        assert not store.Store._same_feed_close({"published_at": at, "kind": "rss"},
+                                                dict(row, kind=kind), 6)
+    assert not store.Store._same_feed_close({"published_at": at}, row, 6)   # no kind at all
+
+
+# ── 3c: templated SEC headlines are never same-feed merged ─────────────────
+# EDGAR titles are built from a template, so two DISTINCT filings routinely
+# share one title. Each accession is its own row; the same-feed rule is for
+# article feeds only. Built with the REAL adapters so the titles are real.
+
+def _filing(accession, updated):
+    from services.news_svc.adapters import edgar
+    entry = {"form": "424B5", "company": "Acme Therapeutics Inc.", "cik": "1234567",
+             "accession": accession, "index_url": f"https://www.sec.gov/Archives/{accession}-index.htm",
+             "updated": updated}
+    feed = {"name": "SEC Offerings", "kind": "edgar_filings", "public": True, "forms": ["424B5"]}
+    return edgar.filing_item(entry, feed, NOW, cik_to_ticker={"1234567": "ACME"})
+
+
+def _form4(accession):
+    from services.news_svc.adapters import edgar
+    detail = {"symbol": "NVDA", "insider": "Doe John", "relationship": "Director",
+              "total_value": 1_000_000, "groups": [], "company": "NVIDIA Corp",
+              "transaction_date": "2026-09-24"}
+    feed = {"name": "SEC Insider Buys", "kind": "edgar_form4", "public": True,
+            "min_value_usd": 0}
+    return edgar.form4_item(detail, feed, f"https://www.sec.gov/Archives/{accession}-index.htm",
+                            NOW, universe=["NVDA"])
+
+
+def test_two_424b5_filings_39_minutes_apart_stay_two_rows(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    a = _filing("0001234567-26-000101", "2026-09-25T10:00:00-04:00")
+    b = _filing("0001234567-26-000102", "2026-09-25T10:39:00-04:00")
+    assert a["title"] == b["title"] and a["id"] != b["id"]      # the premise
+    assert items.title_key(a["title"]) is not None
+    assert db.insert_many([a], same_feed_merge_h=6) == 1
+    assert db.insert_many([b], same_feed_merge_h=6) == 1
+    assert len(db.newest(10)) == 2
+    assert db._c.execute("SELECT count(*) FROM aliases").fetchone()[0] == 0
+
+
+def test_two_form4_purchases_in_one_poll_stay_two_rows(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    a, b = _form4("0001045810-26-000201"), _form4("0001045810-26-000202")
+    assert a["title"] == b["title"] and a["published_at"] == b["published_at"]
+    assert db.insert_many([a, b], same_feed_merge_h=6) == 2
+    assert len(db.newest(10)) == 2
+
+
+def test_an_edgar_kind_on_either_side_skips_the_same_feed_rule(tmp_path):
+    """The stored kind counts as much as the incoming one: an article item
+    whose feed also stored an EDGAR row with its title does not fold into it."""
+    for stored_kind, incoming_kind in (("edgar_filings", "rss"), ("rss", "edgar_form4")):
+        db = store.Store(tmp_path / f"{stored_kind}-{incoming_kind}.db")
+        a = _wsj("https://g/a", "2026-09-25T11:00:00+00:00"); a["kind"] = stored_kind
+        b = _wsj("https://g/b", "2026-09-25T11:05:00+00:00"); b["kind"] = incoming_kind
+        assert db.insert_many([a], same_feed_merge_h=6) == 1
+        assert db.insert_many([b], same_feed_merge_h=6) == 1
+
+
+def test_every_article_kind_still_same_feed_merges(tmp_path):
+    for kind in ("rss", "google_news", "yahoo_ticker"):
+        db = store.Store(tmp_path / f"{kind}.db")
+        a = _wsj("https://g/a", "2026-09-25T11:00:00+00:00"); a["kind"] = kind
+        b = _wsj("https://g/b", "2026-09-25T11:05:00+00:00"); b["kind"] = kind
+        assert db.insert_many([a], same_feed_merge_h=6) == 1
+        assert db.insert_many([b], same_feed_merge_h=6) == 0, kind
+
+
+def test_edgar_rows_still_merge_across_feeds(tmp_path):
+    """Only the SAME-feed rule is restricted: a second feed carrying the same
+    title still merges, as before."""
+    db = store.Store(tmp_path / "n.db")
+    a = _filing("0001234567-26-000101", "2026-09-25T10:00:00-04:00")
+    b = _filing("0001234567-26-000102", "2026-09-25T10:39:00-04:00")
+    b["source"] = "SEC Offerings (mirror)"
+    assert db.insert_many([a], same_feed_merge_h=6) == 1
+    assert db.insert_many([b], same_feed_merge_h=6) == 0
+    assert db.newest(10)[0]["sources"] == ["SEC Offerings", "SEC Offerings (mirror)"]
 
 
 # ── 4: tickers union on an id or title match ───────────────────────────────

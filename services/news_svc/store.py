@@ -19,7 +19,13 @@ Merging, which is the part worth reading before changing anything here:
   column). ``0`` - the default here - turns the same-feed rule off. It never
   applies to an ``_UNDATED`` item or row: with no date there is no gap to
   measure (``julianday`` reads the sentinel as NULL, so such an item finds no
-  title candidate at all).
+  title candidate at all). Nor does it apply when EITHER side is an SEC kind
+  (``edgar_form4`` / ``edgar_filings``): their titles are templated, so two
+  distinct filings - two 424B5s by one company 39 min apart, two Form 4
+  purchases in one poll (both stamped ``now``, a gap of 0) - share one title,
+  and folding the second would mark its accession seen and never show it. Only
+  the article kinds in ``_SAME_FEED_KINDS`` take the rule; cross-feed merging
+  is unchanged for every kind.
 * A title-merged item's id is kept in ``aliases``, pointing at the row it
   merged into, so the same feed re-serving that story on the next poll is an
   id match - not, since its feed is now in ``sources``, a brand-new row.
@@ -136,6 +142,9 @@ _ORDER = "ORDER BY julianday(published_at) DESC, first_seen DESC"
 _IN_CHUNK = 500
 _UNDATED = "undated"          # unparseable on purpose: julianday() -> NULL, sorts last
 _ROW_COLS = "id, source, sources, tickers, ticker_sources, public"
+# The kinds whose repeated same-feed headline can be one story (see the module
+# docstring). The SEC kinds are left out on purpose: their titles are templated.
+_SAME_FEED_KINDS = frozenset({"rss", "google_news", "yahoo_ticker"})
 _ITEM_COLS = ("id, source, sources, original_source, title, title_key, teaser, url, "
               "published_at, first_seen, tickers, kind, topics, detail, public, "
               "ticker_sources")
@@ -343,7 +352,7 @@ class Store:
         if key is None:
             return None
         candidates = self._c.execute(
-            f"SELECT {_ROW_COLS}, published_at, "
+            f"SELECT {_ROW_COLS}, published_at, kind, "
             "abs(julianday(published_at)-julianday(?)) * 24 AS gap_h "
             "FROM items WHERE title_key=? AND "
             "abs(julianday(published_at)-julianday(?)) < ? "
@@ -359,9 +368,13 @@ class Store:
 
     @staticmethod
     def _same_feed_close(it, row, window_h) -> bool:
-        """The same-feed rule: a real date on both sides and a gap within
-        ``window_h`` hours. ``0`` (or less) is off - a gap of 0 must not merge."""
+        """The same-feed rule: an article kind on both sides, a real date on
+        both sides and a gap within ``window_h`` hours. ``0`` (or less) is off -
+        a gap of 0 must not merge. A missing kind is not an article kind."""
         if not window_h or window_h <= 0:
+            return False
+        row_kind = row["kind"] if "kind" in row.keys() else None
+        if it.get("kind") not in _SAME_FEED_KINDS or row_kind not in _SAME_FEED_KINDS:
             return False
         if _UNDATED in (it["published_at"], row["published_at"]):
             return False
