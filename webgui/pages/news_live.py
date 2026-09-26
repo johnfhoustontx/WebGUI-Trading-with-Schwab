@@ -96,9 +96,10 @@ def render():
                 with ui.row().classes("w-full items-center gap-2 flex-wrap") as trend_box:
                     pass
                 status = kit.status_line("")
-                region = kit.region("Loading the news…")
-                more = kit.button("Show more", kind="secondary", icon="expand_more")
-                more.set_visibility(False)
+                with ui.column().classes(news._LIST):
+                    region = kit.region("Loading the news…")
+                    more = kit.button("Show more", kind="secondary", icon="expand_more")
+                    more.set_visibility(False)
             # RIGHT: the SEC panel on top, the calendar below.
             with ui.column().classes(news._RIGHT):
                 with ui.column().classes(news._PANEL):

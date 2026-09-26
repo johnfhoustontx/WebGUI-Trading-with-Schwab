@@ -99,7 +99,12 @@ _TREND_OFF = f"{_CHIP} {_t.BADGE_MUTED} cursor-pointer hover:underline"
 # Each panel is half the viewport tall at lg and scrolls on its own; below lg
 # the three regions stack in DOM order at natural height.
 _GRID = "w-full grid grid-cols-1 lg:grid-cols-5 gap-3 items-start"
-_LEFT = "lg:col-span-3 min-w-0 w-full gap-3"
+# The left column is exactly as tall as the right one at lg: two panels of
+# (50vh - 5rem) plus the right column's gap-3 (0.75rem) = 100vh - 9.25rem. Its
+# control bar and Trending stay put; the headline list below them scrolls in
+# ``_LIST``. Below lg everything stacks at natural height.
+_LEFT = "lg:col-span-3 min-w-0 w-full gap-3 lg:h-[calc(100vh-9.25rem)] flex-nowrap"
+_LIST = "w-full min-w-0 gap-2 flex-nowrap lg:flex-1 lg:min-h-0 lg:overflow-y-auto"
 _RIGHT = "lg:col-span-2 min-w-0 w-full flex flex-col gap-3"
 _PANEL = f"{_t.CARD} w-full min-w-0 gap-2 lg:h-[calc(50vh-5rem)] overflow-y-auto flex-nowrap"
 # The panel's own background (the CARD token's ``bg-``), so rows scrolling
@@ -432,9 +437,10 @@ def render(public=False):
                 with ui.row().classes("w-full items-center gap-2 flex-wrap") as trend_box:
                     pass
                 status = kit.status_line("")
-                region = kit.region("Loading the news…")
-                more = kit.button("Show more", kind="secondary", icon="expand_more")
-                more.set_visibility(False)
+                with ui.column().classes(_LIST):
+                    region = kit.region("Loading the news…")
+                    more = kit.button("Show more", kind="secondary", icon="expand_more")
+                    more.set_visibility(False)
             # RIGHT: the SEC panel on top, the calendar below; each scrolls.
             with ui.column().classes(_RIGHT):
                 with ui.column().classes(_PANEL):

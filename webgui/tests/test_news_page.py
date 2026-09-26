@@ -452,6 +452,23 @@ def test_three_regions_render_in_dom_order(monkeypatch):
     assert len(grids) == 1
     panels = [e for e in new if "lg:h-[calc(50vh-5rem)]" in e.classes]
     assert len(panels) == 2 and all("overflow-y-auto" in p.classes for p in panels)
+    # the headline column is as tall as both right panels plus their gap, and
+    # its list (not the control bar) scrolls inside it
+    lefts = [e for e in new if "lg:h-[calc(100vh-9.25rem)]" in e.classes]
+    assert len(lefts) == 1
+    lists = [e for e in new if "lg:overflow-y-auto" in e.classes]
+    assert len(lists) == 1 and "lg:min-h-0" in lists[0].classes
+    assert lists[0] in _descendants(lefts[0])
+
+
+def test_the_left_column_height_is_the_two_panels_and_their_gap():
+    import re
+
+    from pages import news
+    panel = re.search(r"lg:h-\[calc\(50vh-(\d+(?:\.\d+)?)rem\)\]", news._PANEL)
+    left = re.search(r"lg:h-\[calc\(100vh-(\d+(?:\.\d+)?)rem\)\]", news._LEFT)
+    assert panel and left and "gap-3" in news._RIGHT.split()
+    assert float(left.group(1)) == 2 * float(panel.group(1)) - 0.75
 
 
 def test_the_sec_row_links_its_symbol_and_leads_with_the_pill():

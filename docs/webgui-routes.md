@@ -586,7 +586,9 @@ above it). Three regions, each its own view and its own `watch_view`
 **`news_svc`** (:8216): the **headlines** (`cache:news:feed`) in the left column, the
 **SEC / EDGAR** panel (`cache:news:sec`) top right, the **calendar** tiles
 (`cache:news:calendar`) bottom right. At `lg` the right column's two panels are each
-half the viewport tall and scroll on their own; below `lg` the three stack in that
+half the viewport tall and scroll on their own, and the headline column is held to
+their combined height (`100vh - 9.25rem`): its control bar stays put and the list
+below it scrolls; below `lg` the three stack in that
 DOM order at natural height. Designs + plans:
 [`plans/2026-09-25-news-feed-design.md`](plans/2026-09-25-news-feed-design.md),
 [`plans/2026-09-26-news-v2-design.md`](plans/2026-09-26-news-v2-design.md).
