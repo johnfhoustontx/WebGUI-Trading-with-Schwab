@@ -125,7 +125,7 @@ keeps its label. Tools menu descriptions, shared by all four pages:
 |---|---|---|
 | eyebrow | Local options workbench | **Dealer flow, measured** |
 | h1 | Most tools show you prices. This one shows you who has to trade next. | *(kept — the brand)* |
-| lede | NeuralStrike runs on your own computer and talks to your brokerage account through a small gateway. Market conditions, trade candidates, pricing models, a practice account and your real holdings — on one screen. | **Every option you buy, a market maker sells. They do not want your bet, only the fee, so they hedge — and as price moves they have to hedge again. NeuralStrike measures that forced flow across the whole chain and puts the reading, the trade it implies and a paper book to test it on one screen.** |
+| lede | NeuralStrike runs on your own computer and talks to your brokerage account through a small gateway. Market conditions, trade candidates, pricing models, a practice account and your real holdings — on one screen. | **Every option you buy, a market maker sells. They do not want your bet, only the fee, so they hedge, and as price moves they have to hedge again. NeuralStrike measures that forced flow across the whole chain and puts the reading, the trade it implies and a paper book to test it on one screen.** |
 | primary button | See the screens → gallery | **Open the live screens** → `live.html` |
 | ghost button | Learn dealer gamma → #idea | **How the flow works** → `#idea` |
 | note | No real orders. Every position it opens is paper, priced against live market data. | **Nothing here places an order. Every position is paper, marked against the live market.** |
