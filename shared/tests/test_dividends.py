@@ -3,6 +3,8 @@ import ast
 import math
 from pathlib import Path
 
+import pytest
+
 from shared import dividends
 
 
@@ -194,9 +196,120 @@ def test_replace_symbol_rolls_back_the_delete_when_the_insert_fails(tmp_path):
         def executemany(self, *a, **k):
             raise RuntimeError("disk full")
 
-    try:
+    with pytest.raises(RuntimeError):
         dividends.replace_symbol(_FailingInsert(c), "JPM", [_row("JPM", "2026-10-08")],
                                  today="2026-09-26")
-    except RuntimeError:
-        pass
     assert _all(c, "JPM") == [("2026-10-06", None, 1.0)]
+
+
+@pytest.mark.parametrize("symbol", [None, "", "   ", 42])
+def test_replace_symbol_refuses_an_unusable_symbol(tmp_path, symbol):
+    c = dividends.init_db(tmp_path / "d.db")
+    dividends.upsert(c, [_row("JPM", "2026-10-06")], now="t")
+    with pytest.raises(ValueError):
+        dividends.replace_symbol(c, symbol, [_row("JPM", "2026-10-08")], today="2026-09-26")
+    assert _all(c, "JPM") == [("2026-10-06", None, 1.0)]
+
+
+@pytest.mark.parametrize("today", [None, "", "soon", "2026-13-40", "20260926"])
+def test_replace_symbol_refuses_an_unusable_today(tmp_path, today):
+    c = dividends.init_db(tmp_path / "d.db")
+    dividends.upsert(c, [_row("JPM", "2026-10-06")], now="t")
+    with pytest.raises(ValueError):
+        dividends.replace_symbol(c, "JPM", [_row("JPM", "2026-10-08")], today=today)
+    assert _all(c, "JPM") == [("2026-10-06", None, 1.0)]
+
+
+@pytest.mark.parametrize("before", [None, "", "garbage", "2026-1-1"])
+def test_prune_refuses_an_unusable_cutoff(tmp_path, before):
+    c = dividends.init_db(tmp_path / "d.db")
+    dividends.upsert(c, [_row("JPM", "2025-01-06")], now="t")
+    with pytest.raises(ValueError):
+        dividends.prune(c, before)
+    assert [r[0] for r in _all(c, "JPM")] == ["2025-01-06"]
+
+
+def test_replace_symbol_accepts_a_date_object_for_today(tmp_path):
+    import datetime as dt
+    c = dividends.init_db(tmp_path / "d.db")
+    dividends.upsert(c, [_row("JPM", "2026-10-06")], now="t")
+    n = dividends.replace_symbol(c, "JPM", [_row("JPM", "2026-10-08")],
+                                 today=dt.date(2026, 9, 26))
+    assert n == 1
+    assert _all(c, "JPM") == [("2026-10-08", None, 1.0)]
+
+
+def test_upsert_counts_duplicate_keys_once_and_the_last_wins(tmp_path):
+    c = dividends.init_db(tmp_path / "d.db")
+    n = dividends.upsert(c, [_row("JPM", "2026-10-06", amount=1.40),
+                             _row("jpm", "2026-10-06T00:00:00Z", amount=1.45),
+                             _row("KO", "2026-10-10")], now="t")
+    assert n == 2
+    assert _all(c, "JPM") == [("2026-10-06", None, 1.45)]
+
+
+def test_replace_symbol_counts_duplicate_keys_once_and_the_last_wins(tmp_path):
+    c = dividends.init_db(tmp_path / "d.db")
+    n = dividends.replace_symbol(c, "JPM", [_row("JPM", "2026-10-06", amount=1.40),
+                                            _row("JPM", "2026-10-06", amount=1.45)],
+                                 today="2026-09-26")
+    assert n == 1
+    assert _all(c, "JPM") == [("2026-10-06", None, 1.45)]
+
+
+def test_replace_symbol_ignores_rows_before_today(tmp_path):
+    c = dividends.init_db(tmp_path / "d.db")
+    dividends.upsert(c, [_row("JPM", "2026-07-06", amount=0.9)], now="t")
+    n = dividends.replace_symbol(c, "JPM", [_row("JPM", "2026-07-06", amount=5.0),
+                                            _row("JPM", "2026-09-01"),
+                                            _row("JPM", "2026-09-26"),
+                                            _row("JPM", "2026-10-06")],
+                                 today="2026-09-26")
+    assert n == 2
+    assert _all(c, "JPM") == [("2026-07-06", None, 0.9), ("2026-09-26", None, 1.0),
+                              ("2026-10-06", None, 1.0)]
+
+
+def test_set_coverage_stores_an_unhashable_status_as_error(tmp_path):
+    c = dividends.init_db(tmp_path / "d.db")
+    dividends.set_coverage(c, {"JPM": ["ok"], "KO": {"s": 1}, "PG": 3, "XOM": "ok"},
+                           day="2026-09-26")
+    assert dividends.coverage(c, ["JPM", "KO", "PG", "XOM"]) == {
+        "JPM": "error", "KO": "error", "PG": "error", "XOM": "ok"}
+
+
+@pytest.mark.parametrize("bad", ["2026-10-061", "20261006", "2026-10-06x",
+                                 "2026-W40-1", "2026-10-6", "+2026-10-06"])
+def test_iso_date_is_strict(bad):
+    assert dividends._iso_date(bad) is None
+
+
+@pytest.mark.parametrize("good", ["2026-10-06", "2026-10-06T00:00:00Z",
+                                  "2026-10-06 09:30:00", " 2026-10-06 "])
+def test_iso_date_accepts_a_date_or_a_timestamp(good):
+    assert dividends._iso_date(good) == "2026-10-06"
+
+
+def test_strict_dates_reject_a_row_with_trailing_digits(tmp_path):
+    c = dividends.init_db(tmp_path / "d.db")
+    n = dividends.upsert(c, [_row("JPM", "2026-10-061"), _row("JPM", "20261006")], now="t")
+    assert n == 0
+    assert _all(c, "JPM") == []
+
+
+def test_upcoming_accepts_date_objects_and_timestamps_for_the_window(tmp_path):
+    import datetime as dt
+    c = dividends.init_db(tmp_path / "d.db")
+    dividends.upsert(c, [_row("JPM", "2026-10-31"), _row("JPM", "2026-11-01")], now="t")
+    by_date = dividends.upcoming(c, ["JPM"], dt.date(2026, 10, 1), dt.date(2026, 10, 31))
+    by_stamp = dividends.upcoming(c, ["JPM"], "2026-10-01T00:00:00",
+                                  "2026-10-31T23:59:59Z")
+    assert [r["ex_date"] for r in by_date] == ["2026-10-31"]
+    assert by_stamp == by_date
+
+
+@pytest.mark.parametrize("start,end", [(None, "2026-10-31"), ("2026-10-01", "garbage")])
+def test_upcoming_refuses_an_unusable_window(tmp_path, start, end):
+    c = dividends.init_db(tmp_path / "d.db")
+    with pytest.raises(ValueError):
+        dividends.upcoming(c, ["JPM"], start, end)
