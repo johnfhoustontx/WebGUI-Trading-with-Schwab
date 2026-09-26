@@ -1,0 +1,335 @@
+"""The poll cycle: feeds -> adapters -> store -> the three views. Pure over an
+injected ``fetch`` so the whole thing runs in tests with no network.
+
+Load-bearing rules, each pinned in ``tests/test_compute.py``:
+
+* **One feed never stops the cycle.** ``poll_feed`` never raises; a failure is
+  a ``_degrade`` count, an ``error`` on the feed's state, and the feed's last
+  items stay in the store.
+* **Nothing is remembered before it is stored.** A feed's etag / last-modified
+  and the EDGAR accessions it saw are written only AFTER ``insert_many``
+  succeeds - saved first, a failed insert would turn the next poll into a 304 or
+  a skip and the batch would be lost for good.
+* **The public view re-reads the CURRENT flags at every publish**
+  (``news_config.public_feed_names`` -> ``store.newest(public_sources=...)``),
+  so switching a feed private hides what it already published on the next poll.
+* **User-Agents.** The SEC gets ``sec_user_agent`` (it requires a contact) and
+  requests at most every ``_SEC_MIN_GAP_S``; every other feed gets
+  ``feed_user_agent`` (Yahoo answers a 404 page to a non-browser agent).
+* **One poll at a time** (``_POLL_LOCK``): the scheduler and a ``news_refresh``
+  command never overlap; the second caller returns ``{"skipped": "busy"}``.
+"""
+import concurrent.futures
+import datetime as dt
+import functools
+import json
+import logging
+import threading
+import time
+
+from services import _degrade
+from services.news_svc import handlers, store as _store
+from services.news_svc.adapters import edgar, google_news, rss, yahoo_ticker
+from services.news_svc.fetch import FetchError, Fetched, http_fetch  # noqa: F401 (re-exported for tests)
+from shared import news_config as nc
+
+log = logging.getLogger("news_svc.compute")
+
+_SEC_MIN_GAP_S = 0.15          # the SEC allows <= 10 req/s; this is ~6.7/s
+_YAHOO_WORKERS = 4             # one Yahoo URL per symbol, fetched this many at once
+_CIK_TTL_S = 86400
+_WARN_LIST = 10                # symbols named in the one per-feed WARNING
+
+_POLL_LOCK = threading.Lock()
+_cik_cache = {"ts": 0.0, "map": {}}
+_sec_pace = {"last": 0.0}
+_sec_lock = threading.Lock()
+
+_EDGAR_KINDS = ("edgar_form4", "edgar_filings")
+
+
+class FeedConfigError(Exception):
+    """The feed's configuration cannot be polled; nothing was fetched."""
+
+
+class _Poison(Exception):
+    """One EDGAR accession whose documents cannot be read. It is marked seen,
+    so it is not fetched again every poll."""
+
+
+def _now_iso():
+    return dt.datetime.now(dt.timezone.utc).isoformat()
+
+
+def _collector(cfg, key):
+    col = (cfg or {}).get("collector") or {}
+    return col.get(key, nc.DEFAULTS["collector"][key])
+
+
+def _cutoff(now, keep_days) -> str:
+    return (dt.datetime.fromisoformat(now) - dt.timedelta(days=keep_days)).isoformat()
+
+
+# ── SEC ──────────────────────────────────────────────────────────────────────
+
+def _sec_get(fetch, url, ua, timeout):
+    """One SEC request, never sooner than ``_SEC_MIN_GAP_S`` after the last."""
+    with _sec_lock:
+        wait = _SEC_MIN_GAP_S - (time.monotonic() - _sec_pace["last"])
+        if wait > 0:
+            time.sleep(wait)
+        try:
+            return fetch(url, user_agent=ua, timeout=timeout)
+        finally:
+            _sec_pace["last"] = time.monotonic()
+
+
+def _transient(exc) -> bool:
+    """A network failure, a 5xx or a 429 is the SEC being unavailable; any other
+    HTTP status is this accession's own answer."""
+    status = getattr(exc, "status", None)
+    return status is None or status >= 500 or status == 429
+
+
+def _cik_to_ticker(fetch, ua, timeout) -> dict:
+    """``{cik: TICKER}``, cached for a day. Unavailable -> ``{}`` (filings are
+    then stored without tickers - never an aborted feed); a failure is not
+    cached, so the next poll tries again."""
+    if _cik_cache["map"] and time.time() - _cik_cache["ts"] < _CIK_TTL_S:
+        return _cik_cache["map"]
+    try:
+        got = _sec_get(fetch, edgar.TICKERS_JSON, ua, timeout)
+        mapping = edgar.cik_map(json.loads(got.body))
+    except Exception as exc:  # noqa: BLE001 - a missing map costs tickers, not the feed
+        log.warning("news: SEC company_tickers.json unavailable (%s) - filings are "
+                    "stored without tickers this poll", exc)
+        return {}
+    if mapping:
+        _cik_cache.update(ts=time.time(), map=mapping)
+    return mapping
+
+
+def _form4_item(e, feed, fetch, *, ua, timeout, now, universe):
+    """The item for one Form 4 accession, ``None`` when it holds no open-market
+    purchase (the normal case). Raises ``_Poison`` / ``ValueError`` for an
+    unreadable filing and ``FetchError`` for a failed request."""
+    folder = e["index_url"].rsplit("/", 1)[0]
+    listing = json.loads(_sec_get(fetch, f"{folder}/index.json", ua, timeout).body)
+    xml = edgar.xml_url(e["index_url"], listing)
+    if not xml:
+        raise _Poison("no XML document listed in index.json")
+    body = _sec_get(fetch, xml, ua, timeout).body
+    # parse_form4 returns None both for "no purchase" and for "not XML"; only
+    # the second is a poison filing.
+    if edgar._parse_xml(body) is None:
+        raise _Poison("the Form 4 XML does not parse")
+    detail = edgar.parse_form4(body)
+    if not detail:
+        return None
+    return edgar.form4_item(detail, feed, e["index_url"], now, universe=universe)
+
+
+def _forms(feed) -> list:
+    if feed["kind"] == "edgar_form4":
+        return ["4"]
+    raw = feed.get("forms")
+    raw = [raw] if isinstance(raw, str) else (raw if isinstance(raw, list) else [])
+    forms = [f for f in raw if isinstance(f, str) and f]
+    if not forms:
+        raise FeedConfigError("no forms configured")
+    return forms
+
+
+def _poll_edgar(feed, db, fetch, *, universe, now, ua, timeout):
+    """``(items, status, accessions to mark seen)``. The accessions are marked
+    by the CALLER, after the items are stored.
+
+    Form 4: only form ``4`` exactly (a ``4/A`` re-reports the same purchase).
+    Filings: exact form matches only (``S-3`` never takes ``S-3ASR`` / ``S-3/A``).
+    A poison accession is logged once, marked seen, and skipped; an SEC outage
+    mid-poll leaves that accession and every later one unseen for the next poll."""
+    name, form4 = feed["name"], feed["kind"] == "edgar_form4"
+    forms = _forms(feed)
+    new_items, seen, handled = [], [], set()
+    cik_map, stopped = None, False
+    for form in forms:
+        if stopped:
+            break
+        entries = edgar.parse_current(_sec_get(fetch, edgar.CURRENT.format(form=form),
+                                               ua, timeout).body)
+        fresh = set(db.unseen_accessions([e["accession"] for e in entries]))
+        for i, e in enumerate(entries):
+            acc = e["accession"]
+            if acc not in fresh or acc in handled:
+                continue
+            handled.add(acc)
+            if e["form"] not in (["4"] if form4 else forms):
+                seen.append(acc)
+                continue
+            try:
+                if form4:
+                    it = _form4_item(e, feed, fetch, ua=ua, timeout=timeout, now=now,
+                                     universe=universe)
+                else:
+                    if cik_map is None:
+                        cik_map = _cik_to_ticker(fetch, ua, timeout)
+                    it = edgar.filing_item(e, feed, now, cik_to_ticker=cik_map)
+            except FetchError as exc:
+                if _transient(exc):
+                    left = sum(1 for x in entries[i + 1:] if x["accession"] in fresh)
+                    log.warning("news feed %s: SEC request failed at accession %s (%s) - "
+                                "it and %d later accession(s) are left for the next poll",
+                                name, acc, exc, left)
+                    stopped = True
+                    break
+                log.warning("news feed %s: accession %s skipped and marked seen (%s)",
+                            name, acc, exc)
+                it = None
+            except Exception as exc:  # noqa: BLE001 - one poison filing must not stop the rest
+                log.warning("news feed %s: accession %s skipped and marked seen (%s: %s)",
+                            name, acc, type(exc).__name__, exc)
+                it = None
+            seen.append(acc)
+            if it:
+                new_items.append(it)
+    return new_items, 200, seen
+
+
+# ── Yahoo ────────────────────────────────────────────────────────────────────
+
+def _poll_yahoo(feed, fetch, *, universe, now, ua, timeout):
+    """One URL per symbol, fetched and parsed in a small pool; the caller does
+    every store write. One symbol failing costs that symbol; the feed fails only
+    when EVERY symbol did."""
+    pairs = yahoo_ticker.urls(feed, universe)
+    if not pairs:
+        if any(isinstance(s, str) and not s.startswith("$") for s in universe):
+            raise FeedConfigError("no usable {symbol} url configured")
+        return [], 200
+
+    def one(sym, url):
+        got = fetch(url, user_agent=ua, timeout=timeout)
+        return yahoo_ticker.parse(got.body, feed, now, universe=universe, symbol=sym)
+
+    new, failed = [], []
+    workers = max(1, min(_YAHOO_WORKERS, len(pairs)))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers,
+                                               thread_name_prefix="news-yahoo") as pool:
+        futures = [(sym, pool.submit(one, sym, url)) for sym, url in pairs]
+        for sym, fut in futures:
+            try:
+                new.extend(fut.result())
+            except Exception as exc:  # noqa: BLE001 - summarised below
+                failed.append((sym, exc))
+    if failed and len(failed) == len(pairs):
+        sym, exc = failed[0]
+        raise FetchError(f"every symbol failed ({len(pairs)}); first: {sym}: {exc}")
+    if failed:
+        named = ", ".join(f"{s} ({str(e)[:80]})" for s, e in failed[:_WARN_LIST])
+        more = f", +{len(failed) - _WARN_LIST} more" if len(failed) > _WARN_LIST else ""
+        log.warning("news feed %s: %d of %d symbols failed this poll: %s%s",
+                    feed["name"], len(failed), len(pairs), named, more)
+    return new, 200
+
+
+# ── one feed ─────────────────────────────────────────────────────────────────
+
+def poll_feed(feed, db, fetch, *, universe, now, cfg) -> dict:
+    """Poll one feed into the store. Never raises: a failure is recorded on the
+    feed's state, counted as a degrade, and the feed's last items stay."""
+    name = str(feed.get("name") or "?")
+    kind = feed.get("kind")
+    try:
+        timeout = _collector(cfg, "request_timeout_s")
+        feed_ua = _collector(cfg, "feed_user_agent")
+        min_published = _cutoff(now, _collector(cfg, "keep_days"))
+        validators, seen = {}, []
+        if kind in ("rss", "google_news"):
+            url = feed.get("url") if kind == "rss" else google_news.url(feed)
+            if not isinstance(url, str) or not url.strip():
+                raise FeedConfigError("no query configured" if kind == "google_news"
+                                      else "no url configured")
+            st = db.feed_state(name)
+            got = fetch(url, etag=st["etag"], last_modified=st["last_modified"],
+                        user_agent=feed_ua, timeout=timeout)
+            parse = rss.parse if kind == "rss" else google_news.parse
+            new = [] if got.status == 304 else parse(got.body, feed, now, universe=universe)
+            status = got.status
+            validators = {"etag": got.etag, "last_modified": got.last_modified}
+        elif kind == "yahoo_ticker":
+            new, status = _poll_yahoo(feed, fetch, universe=universe, now=now, ua=feed_ua,
+                                      timeout=timeout)
+        elif kind in _EDGAR_KINDS:
+            new, status, seen = _poll_edgar(feed, db, fetch, universe=universe, now=now,
+                                            ua=_collector(cfg, "sec_user_agent"),
+                                            timeout=timeout)
+        else:
+            raise FeedConfigError(f"unknown feed kind {kind!r}")
+        # Stored FIRST; only then is anything remembered (see the module docstring).
+        inserted = db.insert_many(new, min_published=min_published)
+        if seen:
+            db.mark_accessions(seen, now)
+        db.set_feed_state(name, last_ok=now, last_poll=now, error=None, **validators)
+        return {"feed": name, "inserted": inserted, "error": None, "status": status}
+    except Exception as exc:  # noqa: BLE001 - one feed must not stop the cycle
+        expected = isinstance(exc, (FetchError, FeedConfigError))
+        _degrade.degraded(f"news.feed.{name}", detail=str(exc)[:200], exc_info=not expected)
+        error = (str(exc) if expected else f"{type(exc).__name__}: {exc}")[:200]
+        try:
+            db.set_feed_state(name, last_poll=now, error=error)
+        except Exception:  # noqa: BLE001 - the error is still returned to the status view
+            log.warning("news feed %s: could not record its error", name, exc_info=True)
+        return {"feed": name, "inserted": 0, "error": error, "status": None}
+
+
+# ── the cycle ────────────────────────────────────────────────────────────────
+
+def status_rows(db, polled, results) -> list:
+    """One row per CONFIGURED feed (enabled or not, in file order), then any
+    polled feed the config does not name. ``inserted`` is this poll's count."""
+    by_name = {r["feed"]: r for r in results}
+    feeds = {f["name"]: f for f in nc.all_feeds()}
+    for f in polled:
+        feeds.setdefault(str(f.get("name") or "?"), f)
+    rows = []
+    for name, f in feeds.items():
+        st = db.feed_state(name)
+        rows.append({"name": name, "kind": f.get("kind"),
+                     "enabled": bool(f.get("enabled", True)),
+                     "public": bool(f.get("public", False)),
+                     "last_ok": st["last_ok"], "last_poll": st["last_poll"],
+                     "error": st["error"],
+                     "inserted": by_name.get(name, {}).get("inserted", 0)})
+    return rows
+
+
+def run_poll(bus, db, fetch, *, feeds, universe, now, cfg) -> dict:
+    results = [poll_feed(f, db, fetch, universe=universe, now=now, cfg=cfg) for f in feeds]
+    db.prune(keep_days=_collector(cfg, "keep_days"), now=now)
+    n = _collector(cfg, "view_items")
+    handlers.publish_feed(bus, db.newest(n), now)
+    # The CURRENT flags, re-read at every publish - never the ingest-time copy.
+    handlers.publish_feed_public(bus, db.newest(n, public_sources=nc.public_feed_names()),
+                                 now)
+    handlers.publish_status(bus, status_rows(db, feeds, results), now)
+    return {"results": results}
+
+
+def poll_now(bus, db=None, fetch=None):
+    """What the scheduler and the ``news_refresh`` command both run. One at a
+    time: a second caller while a poll runs gets ``{"skipped": "busy"}`` at once."""
+    if not _POLL_LOCK.acquire(blocking=False):
+        return {"skipped": "busy"}
+    try:
+        cfg = nc.load()
+        if fetch is None:
+            fetch = functools.partial(http_fetch,
+                                      max_bytes=_collector(cfg, "max_body_bytes"))
+        kw = {"feeds": nc.feeds(), "universe": nc.ticker_set(), "now": _now_iso(),
+              "cfg": cfg}
+        if db is not None:
+            return run_poll(bus, db, fetch, **kw)
+        with _store.Store() as own:
+            return run_poll(bus, own, fetch, **kw)
+    finally:
+        _POLL_LOCK.release()
