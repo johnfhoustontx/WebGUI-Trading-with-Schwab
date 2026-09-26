@@ -29,7 +29,7 @@ band, and a public `/news` on `live.neuralstrike.co`.** Branch
 - **The feeds.** MarketWatch, CNBC, ZeroHedge, Benzinga, Federal Reserve press
   releases, PR Newswire, Business Wire, the Truth Social archive (`rss`); Yahoo
   Finance per ticker; WSJ and Seeking Alpha through Google News searches; SEC Form 4
-  open-market purchases and S-1 / S-3 / 424B5 offerings. **GlobeNewswire ships
+  open-market purchases and S-1 / S-3 / 424B5 / S-3ASR offerings. **GlobeNewswire ships
   disabled** — on 2026-09-25 its whole host dropped non-browser clients after the TLS
   handshake, from the VPS and from Windows alike.
 - **Operator decisions recorded in the build.**
@@ -48,6 +48,18 @@ band, and a public `/news` on `live.neuralstrike.co`.** Branch
     public feed contributed (`items.ticker_sources`), and a public per-ticker read
     matches on that same rule, so a private feed merging into a public row adds
     nothing publicly.
+  - **SEC Offerings includes `S-3ASR`**, the automatic shelf registration large
+    issuers file. `forms` still matches exactly; SEC's `type=` is a prefix match,
+    so the S-3 Atom already lists every S-3ASR and its own fetch lists them again
+    (kept: each Atom is capped at 100 entries). Each accession becomes one item —
+    pinned against the real current-filings fixture.
+  - **Reset to shipped values keeps read-only entries.** On Settings →
+    Configuration it returns the editable settings (`[feed_flags]` included) to
+    shipped, and a hand-written `[[feeds]]` list in `config/local/news.toml` stays
+    (`config_editor.reset_plan`).
+  - **The public route stays `/news`.**
+  - **SEC contact.** `sec_user_agent` names `contact@neuralstrike.co`, confirmed as
+    a monitored address.
 - **Fixes the reviews forced**, each with its test: a real total fetch deadline
   (`3 × request_timeout_s`, a watchdog that shuts the socket — `requests`' timeout
   bounds each read, not the request) and a streamed body cap; an SEC 403 / 429 / 5xx
@@ -73,15 +85,6 @@ band, and a public `/news` on `live.neuralstrike.co`.** Branch
   - **Not run live and not promoted.** No poll has run against the real feeds on the
     box, and nothing is on prod: push, `tools/promote.sh`, then check the Status card,
     `cache:news:status` and the public page.
-  - **SEC contact.** `sec_user_agent` names `contact@neuralstrike.co`; the SEC asks for
-    a monitored address — confirm it is one.
-  - **S-3ASR.** `forms` matches exactly, so an automatic shelf registration (`S-3ASR`,
-    the large issuers' form) is not collected. Add it to `forms` or not — an operator
-    call.
-  - **Reset to shipped values** on Settings → Configuration → Market news writes `{}`
-    for the whole file, so it also resets every feed switch — a feed taken private
-    becomes public again at the next poll. Whether that button should spare
-    `[feed_flags]` is an open question.
   - From the design, unbuilt: the rail badge (`news_seen_ts` is written, read by
     nothing), a status line naming a failing feed, the `Macro` topic on the Fed feed,
     a Status-page freshness row for the news views; `tools/snapshot_from_prod.py`
