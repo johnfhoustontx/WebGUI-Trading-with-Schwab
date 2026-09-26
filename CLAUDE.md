@@ -1879,7 +1879,7 @@ shapes. ⚠ It deliberately does NOT swallow repaint errors — only the
 deleted-client case, via `ui_guard`. Anything else propagates so NiceGUI logs it.
 ⚠ An `async def` `on_change` works only because the tick RETURNS its result for
 NiceGUI's timer to await; a wrapper that calls it and drops the coroutine
-repaints nothing, silently (it did, 2026-09-26, on `/news` and the Income/Shares pages).
+repaints nothing, silently.
 
 **`shared/market_calendar.py` is the single source of truth for the NYSE calendar**
 (holidays **derived algorithmically** — no yearly edit) **and session/window
@@ -2381,7 +2381,8 @@ cooldown map the previous one wrote. Call `reset_fake_bus()` and rebuild.
 at the defaults (2026-08-28).** The repo-root **`conftest.py`** carries an autouse
 fixture that refuses any connect resolving into a live data directory
 (`options-scanner/data`, `options-scanner` itself for `gex_history.db`,
-`shared/data`, `webgui/data`, `services/trade_svc/data`). `tmp_path` and
+`shared/data`, `webgui/data`, `services/trade_svc/data`, `services/news_svc/data`).
+`tmp_path` and
 `:memory:` are unaffected; a test that genuinely must read production shape marks
 itself **`@pytest.mark.allow_live_db`**. It is verified to apply to per-app runs
 (`cd options-scanner && pytest tests`) since the repo-root `pyproject.toml` is the
@@ -3935,6 +3936,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 .venv/bin/python -m pytest services/portfolio_svc  # 32
 .venv/bin/python -m pytest services/trade_svc      # 77
 .venv/bin/python -m pytest services/market_svc     # 77
+.venv/bin/python -m pytest services/news_svc
 .venv/bin/python -m pytest shared/bus              # 25
 .venv/bin/python -m pytest shared/contracts        # 49 (no app-dir imports — safe together)
 .venv/bin/python -m pytest shared/tests            # 89

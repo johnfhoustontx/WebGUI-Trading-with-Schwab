@@ -1649,9 +1649,10 @@ own page · a grey <strong>badge</strong> per feed that carried it · and a mute
 feed's summary, or for a filing what was filed (insider buys: how many purchases, their
 total value and the transaction date).</p>
 <p><strong>Tickers.</strong> A row is tagged only when the headline <strong>names a ticker explicitly</strong> — a
-cashtag (<code>$NVDA</code>), an exchange bracket (<code>(NASDAQ: NVDA)</code>), or a company's own EDGAR
-filing — and only for a ticker the app follows (the gamma collection list plus
-<code>[tickers] extras</code>; the Watchlist-only set). Yahoo Finance is the exception: its headlines are fetched one ticker at a
+cashtag (<code>$NVDA</code>) or an exchange bracket (<code>(NASDAQ: NVDA)</code>), and then only for a ticker
+the app follows (the gamma collection list plus <code>[tickers] extras</code>; the Watchlist-only
+set) — or when it is a company's own <strong>SEC EDGAR filing</strong>, which carries the filer's
+ticker whether or not the app follows it. Yahoo Finance is the other exception: its headlines are fetched one ticker at a
 time, and each carries the ticker it was fetched for even when the headline does not
 name it. A company <em>name</em> never tags: precision over recall. <strong>Click a ticker</strong> to open
 its <a href="#symbol">Symbol</a> dossier.</p>

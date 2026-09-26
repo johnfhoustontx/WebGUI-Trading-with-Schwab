@@ -389,7 +389,8 @@ lines, worded apart: the feed never published (`copy.WAITING_NEWS`), the symbol 
 clean (`NEWS_NO_SYMBOL`), and *No headlines for MU in the feed.* The band's link goes to
 `/news` — not pre-filtered. ⚠ An empty band is not "no news": tagging is explicit-only
 (a cashtag or a bracketed ticker in the text, EDGAR's own filer, or a Yahoo per-ticker
-fetch) and limited to the ticker set, so a story that only names the company is never
+fetch) and, for headlines, limited to the ticker set (an EDGAR filing carries its filer's
+ticker either way), so a story that only names the company is never
 here. `news:feed` joins the page's one batched `read_versions`; the page is private, so
 it has no public-key swap.
 

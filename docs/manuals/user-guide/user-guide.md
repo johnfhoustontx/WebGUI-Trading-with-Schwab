@@ -786,9 +786,10 @@ and a small badge naming the feed it came from.
   wires and others) plus **SEC EDGAR**: insider **purchases** filed on Form 4, and new
   share offerings. A story several feeds carried shows each feed's badge.
 - **A ticker is tagged only when the headline names it explicitly** — a cashtag like
-  `$NVDA`, a bracket like `(NASDAQ: NVDA)`, or the company's own filing — or when
-  it came from Yahoo Finance's page for that ticker — and only for tickers the
-  app follows (the Watchlist only set). A company name alone never tags, so a
+  `$NVDA` or a bracket like `(NASDAQ: NVDA)` — or when it came from Yahoo Finance's
+  page for that ticker, and only for tickers the app follows (the Watchlist only
+  set). An **SEC filing** is the exception: it carries the filing company's own
+  ticker whether or not the app follows it. A company name alone never tags, so a
   ticker filter can miss a story about that company.
 - **Click a ticker** to open its Symbol page. **Click a headline** to read it on the
   publisher's site, in a new tab.
