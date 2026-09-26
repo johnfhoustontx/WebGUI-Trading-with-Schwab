@@ -573,7 +573,7 @@ def test_the_throttle_sits_below_the_kill():
 def test_the_cap_is_generous_enough_for_normal_use_and_tight_enough_to_matter():
     """Both bounds, because either alone is satisfiable by an absurd number.
 
-    The floor: the whole nine-unit stack is budgeted at ~1.2 GB of process
+    The floor: the whole ten-unit stack is budgeted at ~1.2 GB of process
     memory, so a cap under 512 MiB would be inside a single NiceGUI process's
     plausible working set. The ceiling: the host's minimum is 8 GB and the
     trading stack plus the page cache for the 1.52 GB gex_history.db have to
