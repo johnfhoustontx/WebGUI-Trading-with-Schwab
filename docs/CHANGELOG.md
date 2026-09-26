@@ -81,10 +81,11 @@ band, and a public `/news` on `live.neuralstrike.co`.** Branch
   `/news`, `/options/shares` and both `/options/income` watches never repainted after
   their first load. The tick now returns the callback's result for NiceGUI's timer to
   await.
+- **Promoted and verified live, 2026-09-26** (`main` at `171fab3`): the
+  `trading-prod-news_svc` unit active, its first poll clean in the journal, the
+  Status card healthy, `/news` and the Desk strip filled on the app, and the public
+  `/news` rendering with no Refresh or watchlist control.
 - **Not done.**
-  - **Not run live and not promoted.** No poll has run against the real feeds on the
-    box, and nothing is on prod: push, `tools/promote.sh`, then check the Status card,
-    `cache:news:status` and the public page.
   - From the design, unbuilt: the rail badge (`news_seen_ts` is written, read by
     nothing), a status line naming a failing feed, the `Macro` topic on the Fed feed,
     a Status-page freshness row for the news views; `tools/snapshot_from_prod.py`
