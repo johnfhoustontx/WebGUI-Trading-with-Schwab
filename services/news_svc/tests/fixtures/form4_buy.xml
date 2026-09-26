@@ -1,0 +1,435 @@
+<?xml version="1.0"?>
+<ownershipDocument>
+
+    <schemaVersion>X0609</schemaVersion>
+
+    <documentType>4</documentType>
+
+    <periodOfReport>2026-09-23</periodOfReport>
+
+    <issuer>
+        <issuerCik>0000920760</issuerCik>
+        <issuerName>LENNAR CORP /NEW/</issuerName>
+        <issuerTradingSymbol>LEN</issuerTradingSymbol>
+        <issuerForeignTradingSymbol></issuerForeignTradingSymbol>
+    </issuer>
+
+    <reportingOwner>
+        <reportingOwnerId>
+            <rptOwnerCik>0001067983</rptOwnerCik>
+            <rptOwnerName>BERKSHIRE HATHAWAY INC</rptOwnerName>
+        </reportingOwnerId>
+        <reportingOwnerAddress>
+            <rptOwnerNonUSAddressFlag>false</rptOwnerNonUSAddressFlag>
+            <rptOwnerStreet1>3555 FARNAM STREET</rptOwnerStreet1>
+            <rptOwnerStreet2></rptOwnerStreet2>
+            <rptOwnerCity>OMAHA</rptOwnerCity>
+            <rptOwnerState>NE</rptOwnerState>
+            <rptOwnerZipCode>68131</rptOwnerZipCode>
+            <rptOwnerStateDescription></rptOwnerStateDescription>
+        </reportingOwnerAddress>
+        <reportingOwnerRelationship>
+            <isDirector>false</isDirector>
+            <isOfficer>false</isOfficer>
+            <isTenPercentOwner>true</isTenPercentOwner>
+            <isOther>false</isOther>
+        </reportingOwnerRelationship>
+    </reportingOwner>
+
+    <reportingOwner>
+        <reportingOwnerId>
+            <rptOwnerCik>0000315090</rptOwnerCik>
+            <rptOwnerName>BUFFETT WARREN E</rptOwnerName>
+        </reportingOwnerId>
+        <reportingOwnerAddress>
+            <rptOwnerNonUSAddressFlag>false</rptOwnerNonUSAddressFlag>
+            <rptOwnerStreet1>3555 FARNAM STREET</rptOwnerStreet1>
+            <rptOwnerStreet2></rptOwnerStreet2>
+            <rptOwnerCity>OMAHA</rptOwnerCity>
+            <rptOwnerState>NE</rptOwnerState>
+            <rptOwnerZipCode>68131</rptOwnerZipCode>
+            <rptOwnerStateDescription></rptOwnerStateDescription>
+        </reportingOwnerAddress>
+        <reportingOwnerRelationship>
+            <isDirector>false</isDirector>
+            <isOfficer>false</isOfficer>
+            <isTenPercentOwner>true</isTenPercentOwner>
+            <isOther>false</isOther>
+        </reportingOwnerRelationship>
+    </reportingOwner>
+
+    <aff10b5One>false</aff10b5One>
+
+    <nonDerivativeTable>
+        <nonDerivativeTransaction>
+            <securityTitle>
+                <value>Class A Common Stock</value>
+            </securityTitle>
+            <transactionDate>
+                <value>2026-09-23</value>
+            </transactionDate>
+            <transactionCoding>
+                <transactionFormType>4</transactionFormType>
+                <transactionCode>P</transactionCode>
+                <equitySwapInvolved>false</equitySwapInvolved>
+            </transactionCoding>
+            <transactionAmounts>
+                <transactionShares>
+                    <value>532993</value>
+                </transactionShares>
+                <transactionPricePerShare>
+                    <value>81.65</value>
+                    <footnoteId id="F3"/>
+                </transactionPricePerShare>
+                <transactionAcquiredDisposedCode>
+                    <value>A</value>
+                </transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts>
+                <sharesOwnedFollowingTransaction>
+                    <value>24252102</value>
+                </sharesOwnedFollowingTransaction>
+            </postTransactionAmounts>
+            <ownershipNature>
+                <directOrIndirectOwnership>
+                    <value>I</value>
+                </directOrIndirectOwnership>
+                <natureOfOwnership>
+                    <value>See footnote</value>
+                    <footnoteId id="F1"/>
+                </natureOfOwnership>
+            </ownershipNature>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle>
+                <value>Class A Common Stock</value>
+            </securityTitle>
+            <transactionDate>
+                <value>2026-09-24</value>
+            </transactionDate>
+            <transactionCoding>
+                <transactionFormType>4</transactionFormType>
+                <transactionCode>P</transactionCode>
+                <equitySwapInvolved>false</equitySwapInvolved>
+            </transactionCoding>
+            <transactionAmounts>
+                <transactionShares>
+                    <value>399238</value>
+                </transactionShares>
+                <transactionPricePerShare>
+                    <value>80.58</value>
+                    <footnoteId id="F4"/>
+                </transactionPricePerShare>
+                <transactionAcquiredDisposedCode>
+                    <value>A</value>
+                </transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts>
+                <sharesOwnedFollowingTransaction>
+                    <value>24651340</value>
+                </sharesOwnedFollowingTransaction>
+            </postTransactionAmounts>
+            <ownershipNature>
+                <directOrIndirectOwnership>
+                    <value>I</value>
+                </directOrIndirectOwnership>
+                <natureOfOwnership>
+                    <value>See footnote</value>
+                    <footnoteId id="F1"/>
+                </natureOfOwnership>
+            </ownershipNature>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle>
+                <value>Class A Common Stock</value>
+            </securityTitle>
+            <transactionDate>
+                <value>2026-09-24</value>
+            </transactionDate>
+            <transactionCoding>
+                <transactionFormType>4</transactionFormType>
+                <transactionCode>P</transactionCode>
+                <equitySwapInvolved>false</equitySwapInvolved>
+            </transactionCoding>
+            <transactionAmounts>
+                <transactionShares>
+                    <value>241692</value>
+                </transactionShares>
+                <transactionPricePerShare>
+                    <value>81.44</value>
+                    <footnoteId id="F5"/>
+                </transactionPricePerShare>
+                <transactionAcquiredDisposedCode>
+                    <value>A</value>
+                </transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts>
+                <sharesOwnedFollowingTransaction>
+                    <value>24893032</value>
+                </sharesOwnedFollowingTransaction>
+            </postTransactionAmounts>
+            <ownershipNature>
+                <directOrIndirectOwnership>
+                    <value>I</value>
+                </directOrIndirectOwnership>
+                <natureOfOwnership>
+                    <value>See footnote</value>
+                    <footnoteId id="F1"/>
+                </natureOfOwnership>
+            </ownershipNature>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle>
+                <value>Class A Common Stock</value>
+            </securityTitle>
+            <transactionDate>
+                <value>2026-09-25</value>
+            </transactionDate>
+            <transactionCoding>
+                <transactionFormType>4</transactionFormType>
+                <transactionCode>P</transactionCode>
+                <equitySwapInvolved>false</equitySwapInvolved>
+            </transactionCoding>
+            <transactionAmounts>
+                <transactionShares>
+                    <value>313379</value>
+                </transactionShares>
+                <transactionPricePerShare>
+                    <value>80.9</value>
+                    <footnoteId id="F6"/>
+                </transactionPricePerShare>
+                <transactionAcquiredDisposedCode>
+                    <value>A</value>
+                </transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts>
+                <sharesOwnedFollowingTransaction>
+                    <value>25206411</value>
+                </sharesOwnedFollowingTransaction>
+            </postTransactionAmounts>
+            <ownershipNature>
+                <directOrIndirectOwnership>
+                    <value>I</value>
+                </directOrIndirectOwnership>
+                <natureOfOwnership>
+                    <value>See footnote</value>
+                    <footnoteId id="F1"/>
+                </natureOfOwnership>
+            </ownershipNature>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle>
+                <value>Class A Common Stock</value>
+            </securityTitle>
+            <transactionDate>
+                <value>2026-09-25</value>
+            </transactionDate>
+            <transactionCoding>
+                <transactionFormType>4</transactionFormType>
+                <transactionCode>P</transactionCode>
+                <equitySwapInvolved>false</equitySwapInvolved>
+            </transactionCoding>
+            <transactionAmounts>
+                <transactionShares>
+                    <value>171723</value>
+                </transactionShares>
+                <transactionPricePerShare>
+                    <value>81.6</value>
+                    <footnoteId id="F7"/>
+                </transactionPricePerShare>
+                <transactionAcquiredDisposedCode>
+                    <value>A</value>
+                </transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts>
+                <sharesOwnedFollowingTransaction>
+                    <value>25378134</value>
+                </sharesOwnedFollowingTransaction>
+            </postTransactionAmounts>
+            <ownershipNature>
+                <directOrIndirectOwnership>
+                    <value>I</value>
+                </directOrIndirectOwnership>
+                <natureOfOwnership>
+                    <value>See footnote</value>
+                    <footnoteId id="F1"/>
+                </natureOfOwnership>
+            </ownershipNature>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle>
+                <value>Class B Common Stock</value>
+            </securityTitle>
+            <transactionDate>
+                <value>2026-09-23</value>
+            </transactionDate>
+            <transactionCoding>
+                <transactionFormType>4</transactionFormType>
+                <transactionCode>P</transactionCode>
+                <equitySwapInvolved>false</equitySwapInvolved>
+            </transactionCoding>
+            <transactionAmounts>
+                <transactionShares>
+                    <value>1263</value>
+                </transactionShares>
+                <transactionPricePerShare>
+                    <value>79.99</value>
+                    <footnoteId id="F8"/>
+                </transactionPricePerShare>
+                <transactionAcquiredDisposedCode>
+                    <value>A</value>
+                </transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts>
+                <sharesOwnedFollowingTransaction>
+                    <value>529480</value>
+                </sharesOwnedFollowingTransaction>
+            </postTransactionAmounts>
+            <ownershipNature>
+                <directOrIndirectOwnership>
+                    <value>I</value>
+                </directOrIndirectOwnership>
+                <natureOfOwnership>
+                    <value>See footnote</value>
+                    <footnoteId id="F2"/>
+                </natureOfOwnership>
+            </ownershipNature>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle>
+                <value>Class B Common Stock</value>
+            </securityTitle>
+            <transactionDate>
+                <value>2026-09-24</value>
+            </transactionDate>
+            <transactionCoding>
+                <transactionFormType>4</transactionFormType>
+                <transactionCode>P</transactionCode>
+                <equitySwapInvolved>false</equitySwapInvolved>
+            </transactionCoding>
+            <transactionAmounts>
+                <transactionShares>
+                    <value>9415</value>
+                </transactionShares>
+                <transactionPricePerShare>
+                    <value>79.42</value>
+                    <footnoteId id="F9"/>
+                </transactionPricePerShare>
+                <transactionAcquiredDisposedCode>
+                    <value>A</value>
+                </transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts>
+                <sharesOwnedFollowingTransaction>
+                    <value>538895</value>
+                </sharesOwnedFollowingTransaction>
+            </postTransactionAmounts>
+            <ownershipNature>
+                <directOrIndirectOwnership>
+                    <value>I</value>
+                </directOrIndirectOwnership>
+                <natureOfOwnership>
+                    <value>See footnote</value>
+                    <footnoteId id="F2"/>
+                </natureOfOwnership>
+            </ownershipNature>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle>
+                <value>Class B Common Stock</value>
+            </securityTitle>
+            <transactionDate>
+                <value>2026-09-24</value>
+            </transactionDate>
+            <transactionCoding>
+                <transactionFormType>4</transactionFormType>
+                <transactionCode>P</transactionCode>
+                <equitySwapInvolved>false</equitySwapInvolved>
+            </transactionCoding>
+            <transactionAmounts>
+                <transactionShares>
+                    <value>2975</value>
+                </transactionShares>
+                <transactionPricePerShare>
+                    <value>79.91</value>
+                    <footnoteId id="F10"/>
+                </transactionPricePerShare>
+                <transactionAcquiredDisposedCode>
+                    <value>A</value>
+                </transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts>
+                <sharesOwnedFollowingTransaction>
+                    <value>541870</value>
+                </sharesOwnedFollowingTransaction>
+            </postTransactionAmounts>
+            <ownershipNature>
+                <directOrIndirectOwnership>
+                    <value>I</value>
+                </directOrIndirectOwnership>
+                <natureOfOwnership>
+                    <value>See footnote</value>
+                    <footnoteId id="F2"/>
+                </natureOfOwnership>
+            </ownershipNature>
+        </nonDerivativeTransaction>
+        <nonDerivativeTransaction>
+            <securityTitle>
+                <value>Class B Common Stock</value>
+            </securityTitle>
+            <transactionDate>
+                <value>2026-09-25</value>
+            </transactionDate>
+            <transactionCoding>
+                <transactionFormType>4</transactionFormType>
+                <transactionCode>P</transactionCode>
+                <equitySwapInvolved>false</equitySwapInvolved>
+            </transactionCoding>
+            <transactionAmounts>
+                <transactionShares>
+                    <value>7022</value>
+                </transactionShares>
+                <transactionPricePerShare>
+                    <value>79.53</value>
+                    <footnoteId id="F11"/>
+                </transactionPricePerShare>
+                <transactionAcquiredDisposedCode>
+                    <value>A</value>
+                </transactionAcquiredDisposedCode>
+            </transactionAmounts>
+            <postTransactionAmounts>
+                <sharesOwnedFollowingTransaction>
+                    <value>548892</value>
+                </sharesOwnedFollowingTransaction>
+            </postTransactionAmounts>
+            <ownershipNature>
+                <directOrIndirectOwnership>
+                    <value>I</value>
+                </directOrIndirectOwnership>
+                <natureOfOwnership>
+                    <value>See footnote</value>
+                    <footnoteId id="F2"/>
+                </natureOfOwnership>
+            </ownershipNature>
+        </nonDerivativeTransaction>
+    </nonDerivativeTable>
+
+    <footnotes>
+        <footnote id="F1">25,378,134 of the total reported shares of the Class A Common Stock (&quot;Class A Common Stock&quot;) of Lennar Corporation (&quot;Lennar&quot;) are owned by the following subsidiaries of Berkshire Hathaway Inc. (&quot;Berkshire&quot;): AZGUARD Insurance Company (3,098,000), BHG Life Insurance Company (3,625,000), Medical Protective Company (3,875,785), National Indemnity Company (12,366,349), NorGUARD Insurance Company (1,195,000) and WestGUARD Insurance Company (1,218,000). As Berkshire is in the chain of ownership of each of these subsidiaries, it may be deemed to both beneficially own and have a pecuniary interest in all such shares owned by each of these subsidiaries. Warren E. Buffett, as the controlling stockholder of Berkshire, may be deemed to beneficially own, but only to the extent he has a pecuniary interest in, such shares owned by each such subsidiary. Mr. Buffett disclaims beneficial ownership of the reported securities except to the extent of his pecuniary interest therein.</footnote>
+        <footnote id="F2">548,892 of the total reported shares of the Class B Common Stock (&quot;Class B Common Stock&quot;) of Lennar are owned by the following subsidiaries of Berkshire: AZGUARD Insurance Company (273,264) and National Indemnity Company (275,628). As Berkshire is in the chain of ownership of each of these subsidiaries, it may be deemed to both beneficially own and have a pecuniary interest in all such shares owned by each of these subsidiaries. Mr. Buffett, as the controlling stockholder of Berkshire, may be deemed to beneficially own, but only to the extent he has a pecuniary interest in, such shares owned by each such subsidiary. Mr. Buffett disclaims beneficial ownership of the reported securities except to the extent of his pecuniary interest therein.</footnote>
+        <footnote id="F3">The reported price in Column 4 is a weighted average price. These shares were purchased in multiple transactions at prices ranging from $81.3200 to $82.0000 per share, inclusive. The reporting person undertakes to provide to Lennar, any security holder of Lennar, or the staff of the Securities and Exchange Commission, upon request, full information regarding the number of shares purchased at each separate price within the range set forth in this footnote.</footnote>
+        <footnote id="F4">The reported price in Column 4 is a weighted average price. These shares were purchased in multiple transactions at prices ranging from $80.1450 to $81.1400 per share, inclusive. The reporting person undertakes to provide to Lennar, any security holder of Lennar, or the staff of the Securities and Exchange Commission, upon request, full information regarding the number of shares purchased at each separate price within the range set forth in this footnote.</footnote>
+        <footnote id="F5">The reported price in Column 4 is a weighted average price. These shares were purchased in multiple transactions at prices ranging from $81.1450 to $81.9750 per share, inclusive. The reporting person undertakes to provide to Lennar, any security holder of Lennar, or the staff of the Securities and Exchange Commission, upon request, full information regarding the number of shares purchased at each separate price within the range set forth in this footnote.</footnote>
+        <footnote id="F6">The reported price in Column 4 is a weighted average price. These shares were purchased in multiple transactions at prices ranging from $80.3800 to $ 81.3750 per share, inclusive. The reporting person undertakes to provide to Lennar, any security holder of Lennar, or the staff of the Securities and Exchange Commission, upon request, full information regarding the number of shares purchased at each separate price within the range set forth in this footnote.</footnote>
+        <footnote id="F7">The reported price in Column 4 is a weighted average price. These shares were purchased in multiple transactions at prices ranging from $81.3800- to $ 82.0000 per share, inclusive. The reporting person undertakes to provide to Lennar, any security holder of Lennar, or the staff of the Securities and Exchange Commission, upon request, full information regarding the number of shares purchased at each separate price within the range set forth in this footnote.</footnote>
+        <footnote id="F8">The reported price in Column 4 is a weighted average price. These shares were purchased in multiple transactions at prices ranging from $79.9300 to $80.0000 per share, inclusive. The reporting person undertakes to provide to Lennar, any security holder of Lennar, or the staff of the Securities and Exchange Commission, upon request, full information regarding the number of shares purchased at each separate price within the range set forth in this footnote.</footnote>
+        <footnote id="F9">The reported price in Column 4 is a weighted average price. These shares were purchased in multiple transactions at prices ranging from $78.8500 to $79.8400 per share, inclusive. The reporting person undertakes to provide to Lennar, any security holder of Lennar, or the staff of the Securities and Exchange Commission, upon request, full information regarding the number of shares purchased at each separate price within the range set forth in this footnote.</footnote>
+        <footnote id="F10">The reported price in Column 4 is a weighted average price. These shares were purchased in multiple transactions at prices ranging from $79.8600 to $80.0000 per share, inclusive. The reporting person undertakes to provide to Lennar, any security holder of Lennar, or the staff of the Securities and Exchange Commission, upon request, full information regarding the number of shares purchased at each separate price within the range set forth in this footnote.</footnote>
+        <footnote id="F11">The reported price in Column 4 is a weighted average price. These shares were purchased in multiple transactions at prices ranging from $79.1300 to $79.9800 per share, inclusive. The reporting person undertakes to provide to Lennar, any security holder of Lennar, or the staff of the Securities and Exchange Commission, upon request, full information regarding the number of shares purchased at each separate price within the range set forth in this footnote.</footnote>
+    </footnotes>
+
+    <ownerSignature>
+        <signatureName>/s/ Warren E. Buffett, on behalf of himself  and each other reporting person hereunder</signatureName>
+        <signatureDate>2026-09-25</signatureDate>
+    </ownerSignature>
+</ownershipDocument>
