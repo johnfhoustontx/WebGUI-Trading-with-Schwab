@@ -1032,7 +1032,9 @@ the `webgui/config_schema.py` catalogue, grouped by purpose (Trade selection · 
 Symbols & watchlists · Sector map · Commissions, plus Ports and Environments
 read-only): plain-English label and help per key, unit suffixes, fractions typed as
 percents, inline validation that says why a value is refused, cross-field checks on
-Save, a per-key **Shipped: X** chip with a reset button, a per-category reset, a
+Save, a per-key **Shipped: X** chip with a reset button, a per-category reset (it
+returns the editable keys only — `config_editor.reset_plan` carries a hand-written
+read-only entry such as a `[[feeds]]` list through), a
 search box across every setting, and a sticky Save / Discard bar. Save writes only
 the differences to `config/local/<name>.toml` (`config_store`, never the tracked
 file), logs each change to `config/local/changes.jsonl` (the "Recent changes"

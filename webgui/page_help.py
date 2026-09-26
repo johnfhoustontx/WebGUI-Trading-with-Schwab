@@ -1429,7 +1429,8 @@ caps, exit rules, flow alerts, market hours and schedules, symbols, the sector m
 commissions — each with a plain-English explanation. Changes are saved as
 overrides on top of the shipped values, so **Reset to shipped values** always
 takes you back and an app update never overwrites what you set; that Reset
-clears the whole file, so it asks first. **Save** offers to restart the
+returns every editable setting in the file, so it asks first (read-only entries
+written by hand in config/local, like a news feed list, stay). **Save** offers to restart the
 services that read them, and that dialog stays up — with its button spinning —
 until every one has answered.
 

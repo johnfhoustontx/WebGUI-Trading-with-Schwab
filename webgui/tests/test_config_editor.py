@@ -328,7 +328,7 @@ def test_the_restart_dialog_holds_its_own_confirm_and_reports_once_per_outcome(
 
 
 def test_the_reset_dialog_is_destructive_and_asks_cancel_first(monkeypatch):
-    """Reset writes ``{}`` - every override in that file goes - and it was a
+    """Reset removes every editable override in that file - and it was a
     quiet grey link beside a primary-blue confirm."""
     from nicegui import ui
     host = _render(monkeypatch)
@@ -510,3 +510,66 @@ def test_overrides_to_save_drops_a_read_only_edit_and_keeps_the_existing_one():
     kept = [{"name": "Mine", "kind": "rss", "url": "https://mine"}]
     got = ce.overrides_to_save(cfg, shipped, {"feeds": kept}, values)
     assert got["feeds"] == kept and got["feeds"] is not kept
+
+
+# ── Reset keeps the read-only part of an override (2026-09-26 decision) ──────
+def _shipped_news():
+    import tomllib
+    import pathlib
+    return tomllib.loads((pathlib.Path(__file__).resolve().parents[2]
+                          / "config" / "news.toml").read_text(encoding="utf-8"))
+
+
+def test_reset_plan_keeps_a_hand_written_feed_list_and_drops_the_switches():
+    cfg = cs.BY_NAME["news.toml"]
+    shipped = _shipped_news()
+    kept = [{"name": "Mine", "kind": "rss", "url": "https://mine"}]
+    over = {"feeds": kept, "feed_flags": {"ZeroHedge": {"public": False}}}
+    values = store.flatten(store.effective(shipped, over))
+    new_over, changed = ce.reset_plan(cfg, shipped, over, values)
+    assert new_over == {"feeds": kept}
+    assert changed == [("feed_flags", "ZeroHedge", "public")]
+
+
+def test_reset_plan_without_read_only_sections_still_writes_an_empty_override():
+    cfg = cs.BY_NAME["scanner.toml"]
+    shipped, _ = store.load("scanner.toml")
+    base = store.flatten(shipped)
+    path = next(p for p, v in base.items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+                and not cs.is_readonly(cfg, p))
+    over = store.build_overrides(shipped, {path: base[path] + 1})
+    assert over, "the fixture override is empty"
+    values = store.flatten(store.effective(shipped, over))
+    new_over, changed = ce.reset_plan(cfg, shipped, over, values)
+    assert new_over == {}
+    assert changed == [path]
+
+
+def test_the_reset_button_on_market_news_keeps_the_hand_written_feeds(monkeypatch):
+    real_load = ce.store.load
+    kept = [{"name": "Mine", "kind": "rss", "url": "https://mine"}]
+    hand = {"feeds": kept, "feed_flags": {"ZeroHedge": {"public": False}}}
+
+    def _load(name):
+        shipped, over = real_load(name)
+        return (shipped, hand) if name == "news.toml" else (shipped, over)
+
+    monkeypatch.setattr(ce.store, "load", _load)
+    monkeypatch.setattr(ce, "_PENDING", set())
+    host = _render(monkeypatch)
+    _said(monkeypatch)
+    saved = []
+    monkeypatch.setattr(ce.store, "save", lambda name, over, changes=(): saved.append(
+        (name, over, list(changes))))
+    _click_nav(host, "Market news")
+    reset = [b for b in _buttons(host) if b.text == "Reset to shipped values"]
+    _fire(reset[-1], "click")
+    dlg = _dialog_with("Reset")
+    body = _dialog_body(dlg).text
+    assert "read-only" in body and "stay" in body, body
+    _confirm(dlg)
+    (name, over, changes), = saved
+    assert name == "news.toml"
+    assert over == {"feeds": kept}
+    assert [c[0] for c in changes] == ["feed_flags › ZeroHedge › public"]

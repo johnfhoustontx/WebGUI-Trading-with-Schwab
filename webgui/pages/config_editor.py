@@ -187,6 +187,21 @@ def overrides_to_save(cfg, shipped, over, values):
     return out
 
 
+def reset_plan(cfg, shipped, over, values):
+    """``(override to write, editable paths that change)`` for "Reset to
+    shipped values". PURE.
+
+    Only the EDITABLE settings go back to shipped: the read-only part of the
+    existing override - a hand-written ``[[feeds]]`` list in config/local, say -
+    is carried through, exactly as a save carries it. The changed paths (the
+    change log and the restart list) are editable ones only, so a hand-written
+    list never reads as a setting the reset undid."""
+    base = store.flatten(shipped)
+    changed = [p for p, v in values.items()
+               if base.get(p) != v and not cs.is_readonly(cfg, p)]
+    return overrides_to_save(cfg, shipped, over, {}), changed
+
+
 # ── restarting ───────────────────────────────────────────────────────────────
 def _restart_units(units):
     """Restart each unit; regenerate timers for TIMERS. Returns [(unit, ok, msg)]."""
@@ -733,10 +748,9 @@ def render():
         @guard
         def _do():
             f = state["files"][cfg.name]
-            changed = [p for p, v in f["values"].items()
-                       if f["base"].get(p) != v]
+            over, changed = reset_plan(cfg, f["shipped"], f["over"], f["values"])
             try:
-                store.save(cfg.name, {}, changes=[
+                store.save(cfg.name, over, changes=[
                     (" › ".join(p), f["values"].get(p), f["base"].get(p))
                     for p in changed])
             except Exception as exc:  # noqa: BLE001 - shown; the override stands
@@ -758,8 +772,9 @@ def render():
         with page_col:
             dlg = kit.confirm(
                 f"Put every {cfg.title} setting back to its shipped value?",
-                "Every override you saved for this file is removed. It takes "
-                "effect when the services that read it restart.",
+                "The settings you can edit here go back to their shipped values; "
+                "read-only entries you wrote by hand in config/local stay. It "
+                "takes effect when the services that read it restart.",
                 confirm_text="Reset", danger=True, on_confirm=_do, ephemeral=True)
         dlg.open()
 
