@@ -3041,8 +3041,19 @@ keyword.</p>
 PCE, GDP, retail sales, claims) name a FRED <code>series</code>, a <code>transform</code> (<code>pct_mom</code> % m/m ·
 <code>change_k</code> change in thousands · <code>level_pct</code> · <code>level_k</code> level / 1000 · <code>pct_saar</code>), a
 <code>schedule</code> (<code>bls</code> / <code>bea</code> matched by a case-insensitive release-name PREFIX on a
-boundary — <code>"GDP ("</code> never takes <em>GDP by Industry</em> — or <code>fred</code> by <code>release_id</code>) and a
-<code>tile</code>. A missing or non-positive base is <code>None</code>, never 0.</p>
+boundary — <code>"GDP ("</code> never takes <em>GDP by Industry</em> — or <code>fred</code> by <code>release_id</code>), a
+<code>tile</code>, and <code>high</code> (true for every shipped indicator but claims; a non-bool is false,
+with one WARNING). A missing or non-positive base is <code>None</code>, never 0.</p>
+<p><strong>High impact.</strong> <code>econ.py</code> stamps <code>high</code> on every row it publishes: an event is high
+when its title CONTAINS a <code>[calendar.events] high_impact</code> phrase, case-insensitively
+(<code>news_config.high_impact_events()</code>; shipped <code>FOMC statement</code>, <code>Press conference</code>,
+<code>- Chair</code> — the Fed adapter titles an FOMC meeting <em>FOMC statement</em> and its press
+conference <em>Press conference</em>, and the Board titles the Chair's own appearances
+<em>Speech - Chair …</em> / <em>Testimony - Chairman …</em>, so <code>- Chair</code> never takes a Vice
+Chair's; not a list → the default; junk entries dropped with one WARNING; <code>[]</code> is
+real and highlights nothing), a data entry when its indicator's <code>high</code> is <code>true</code>; a
+dividend or IPO is never high. <code>econ_calendar</code> passes the phrases as
+<code>parts["high_events"]</code> to both builds, so the two views flag alike.</p>
 <p><strong>The FRED key, and its fallback.</strong> With <code>FRED_API_KEY</code> set in the process environment
 (read at call time, from the stack <code>.env</code> only — never config, never <code>.env.live</code>),
 observations come from the FRED API; without it, from the key-free

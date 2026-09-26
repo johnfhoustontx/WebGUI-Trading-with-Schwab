@@ -277,7 +277,7 @@ def test_extra_releases_join_the_events_group_and_tracked_ones_do_not():
                            extra_releases=["Job Openings and Labor Turnover Survey"], now=NOW, cfg=C)
     assert [e["title"] for e in ev] == ["Job Openings and Labor Turnover Survey"]
     assert ev[0] == {"title": "Job Openings and Labor Turnover Survey",
-                     "at": JOLTS["at"], "date": "2026-10-06"}
+                     "at": JOLTS["at"], "date": "2026-10-06", "high": False}
 
 
 def _fed(kind, title, day, when="18:00:00"):
@@ -302,7 +302,7 @@ def test_events_are_ordered_by_instant_and_a_date_only_event_keeps_its_date():
            _fed("speech", "Speech - A", "2026-10-06", when="14:00:00")]
     ev = econ.events_group(fed=list(reversed(fed)), ics={}, extra_releases=[], now=NOW, cfg=C)
     assert [e["title"] for e in ev] == ["Speech - A", "Beige Book", "FOMC statement"]
-    assert ev[1] == {"title": "Beige Book", "at": None, "date": "2026-10-14"}
+    assert ev[1] == {"title": "Beige Book", "at": None, "date": "2026-10-14", "high": False}
 
 
 def test_events_group_survives_junk():
@@ -310,6 +310,61 @@ def test_events_group_survives_junk():
                            ics={"bls": "junk", "bea": [None]}, extra_releases="not a list",
                            now=NOW, cfg={})
     assert ev == []
+
+
+HIGH = ["FOMC statement", "Press conference", "- Chair"]
+
+
+def test_an_event_is_high_when_its_title_contains_a_phrase_in_any_case():
+    fed = [_fed("fomc_statement", "FOMC statement", "2026-10-28"),
+           _fed("fomc_press", "Press conference", "2026-10-28", when="18:30:00"),
+           _fed("fomc_minutes", "FOMC minutes", "2026-10-07"),
+           _fed("beige", "Beige Book", "2026-10-14"),
+           _fed("speech", "Speech - Chair Jerome H. Powell", "2026-10-01"),
+           _fed("testimony", "Testimony - Chairman Kevin Warsh", "2026-10-02"),
+           _fed("speech", "Speech - Vice Chair Philip N. Jefferson", "2026-10-03"),
+           _fed("speech", "Speech - Vice Chair for Supervision Michelle W. Bowman",
+                "2026-10-04"),
+           _fed("speech", "Discussion - Governor Lisa D. Cook", "2026-10-05")]
+    ev = econ.events_group(fed=fed, ics={}, extra_releases=[], now=NOW, cfg=C,
+                           high_events=["fomc STATEMENT", "press conference", "- Chair"])
+    high = {e["title"] for e in ev if e["high"] is True}
+    assert high == {"FOMC statement", "Press conference", "Speech - Chair Jerome H. Powell",
+                    "Testimony - Chairman Kevin Warsh"}
+    assert all(e["high"] is False for e in ev if e["title"] not in high)
+
+
+def test_extra_releases_are_matched_too_and_no_phrases_highlight_nothing():
+    ev = econ.events_group(fed=[], ics={"bls": [JOLTS]},
+                           extra_releases=["Job Openings and Labor Turnover Survey"],
+                           now=NOW, cfg=C, high_events=["job openings"])
+    assert ev[0]["high"] is True
+    for junk in (None, [], "Job", [3, "", None]):
+        ev = econ.events_group(fed=[], ics={"bls": [JOLTS]},
+                               extra_releases=["Job Openings and Labor Turnover Survey"],
+                               now=NOW, cfg=C, high_events=junk)
+        assert ev[0]["high"] is False, junk
+
+
+def test_a_data_entry_is_high_only_when_its_indicator_says_true():
+    p = econ.build_calendar(parts=PARTS, public_symbols=None)
+    assert [d["high"] for d in p["data"]] == [True, False, False]   # cpi · claims · gdp
+    for bad in ("yes", 1, None):
+        ind = [{**INDICATORS[0], "high": bad}]
+        q = econ.build_calendar(parts={**PARTS, "indicators": ind}, public_symbols=None)
+        assert q["data"][0]["high"] is False, bad
+
+
+def test_build_calendar_highlights_by_the_high_events_part_in_both_views():
+    p = econ.build_calendar(parts=PARTS, public_symbols=None)
+    q = econ.build_calendar(parts=PARTS, public_symbols={"JPM"})
+    assert {e["title"]: e["high"] for e in p["events"]} == {
+        "Job Openings and Labor Turnover Survey": False, "FOMC statement": True}
+    assert p["events"] == q["events"]
+    assert all(r["high"] is False for r in p["dividends"] + p["ipos"])
+    bare = econ.build_calendar(parts={k: v for k, v in PARTS.items() if k != "high_events"},
+                               public_symbols=None)
+    assert all(e["high"] is False for e in bare["events"])        # a missing part is empty
 
 
 # ---- IPOs and dividends ------------------------------------------------------
@@ -328,9 +383,11 @@ def test_ipo_filter_min_offer_and_lookback():
     out = econ.ipos_group(rows, now=NOW, cfg=C)
     assert [i["symbol"] for i in out] == ["NEW", "OURA"]
     assert out[0] == {"symbol": "NEW", "company": "NEW Inc.", "date": "2026-09-22",
-                      "price": 17.0, "price_range": "", "offer_usd": 240_000_000}
+                      "price": 17.0, "price_range": "", "offer_usd": 240_000_000,
+                      "high": False}
     assert out[1] == {"symbol": "OURA", "company": "OURA Inc.", "date": "2026-09-30",
-                      "price": None, "price_range": "40.00-44.00", "offer_usd": 2_530_000_000}
+                      "price": None, "price_range": "40.00-44.00", "offer_usd": 2_530_000_000,
+                      "high": False}
 
 
 def test_ipos_from_two_months_are_one_row_per_deal_the_priced_one():
@@ -355,10 +412,14 @@ def test_dividends_are_clean_and_unknown_amounts_are_none():
             {"symbol": "", "ex_date": "2026-10-02"}, {"symbol": "IBM", "ex_date": None}, None]
     out = econ.dividends_group(rows, public_symbols=None)
     assert out == [
-        {"symbol": "KO", "ex_date": "2026-10-01", "pay_date": None, "amount": None},
-        {"symbol": "T", "ex_date": "2026-10-02", "pay_date": None, "amount": None},
-        {"symbol": "XOM", "ex_date": "2026-10-02", "pay_date": None, "amount": None},
-        {"symbol": "JPM", "ex_date": "2026-10-06", "pay_date": "2026-10-31", "amount": 1.4}]
+        {"symbol": "KO", "ex_date": "2026-10-01", "pay_date": None, "amount": None,
+         "high": False},
+        {"symbol": "T", "ex_date": "2026-10-02", "pay_date": None, "amount": None,
+         "high": False},
+        {"symbol": "XOM", "ex_date": "2026-10-02", "pay_date": None, "amount": None,
+         "high": False},
+        {"symbol": "JPM", "ex_date": "2026-10-06", "pay_date": "2026-10-31", "amount": 1.4,
+         "high": False}]
 
 
 # ---- source state ------------------------------------------------------------
@@ -378,7 +439,7 @@ def test_source_state_words():
 
 INDICATORS = [
     {"key": "cpi", "label": "CPI", "series": "CPIAUCSL", "transform": "pct_mom",
-     "schedule": "bls", "match": "Consumer Price Index", "tile": "CPI"},
+     "schedule": "bls", "match": "Consumer Price Index", "tile": "CPI", "high": True},
     {"key": "claims", "label": "Jobless claims", "series": "ICSA", "transform": "level_k",
      "schedule": "fred", "release_id": 180, "time_ct": "07:30", "tile": "Jobless claims"},
     {"key": "gdp", "label": "GDP", "series": "A191RL1Q225SBEA", "transform": "pct_saar",
@@ -396,6 +457,7 @@ PARTS = {
     "fred_calendar": [{"rid": 180, "date": "2026-10-01", "at": "2026-10-01T12:30:00+00:00"},
                       {"rid": 180, "date": "2026-09-24", "at": "2026-09-24T12:30:00+00:00"}],
     "extra_releases": ["Job Openings and Labor Turnover Survey"],
+    "high_events": ["FOMC statement", "Press conference", "- Chair"],
     "obs": {
         "CPIAUCSL": [{"obs_date": "2026-06-01", "value": 330.0, "first_seen": "2026-08-01T00:00:00+00:00", "bootstrap": True},
                      {"obs_date": "2026-07-01", "value": 331.65, "first_seen": "2026-08-01T00:00:00+00:00", "bootstrap": True},
@@ -439,6 +501,7 @@ def test_the_payload_shape():
     assert [d["key"] for d in p["data"]] == ["cpi", "claims", "gdp"]
     cpi, claims, gdp = p["data"]
     assert cpi == {"key": "cpi", "label": "CPI", "tile": "CPI", "unit": "pct_mom",
+                   "high": True,
                    "next_release_at": "2026-10-14T12:30:00+00:00", "next_date": "2026-10-14",
                    "last_release_at": "2026-09-11T12:30:00+00:00",
                    "latest": {"obs_date": "2026-08-01", "value": pytest.approx(0.401, abs=1e-3),

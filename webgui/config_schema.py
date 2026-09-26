@@ -983,6 +983,13 @@ _NEWS_CALENDAR_SECTIONS = (
         Field("calendar.events.extra_releases", "Extra releases shown",
               "Release names, as the BLS or BEA schedule spells them, shown as "
               "dated events without a value tile.", kind="phrases"),
+        Field("calendar.events.high_impact", "Highlight events whose title contains",
+              "An event whose title contains one of these, in any case, is drawn "
+              "highlighted on the calendar. The Fed calendar names an FOMC meeting "
+              "\"FOMC statement\" and its press conference \"Press conference\"; "
+              "\"- Chair\" matches the Chair's own speeches and testimony and never "
+              "a Vice Chair's. Leave it empty to highlight no event.",
+              kind="phrases"),
     )),
     Section("IPOs", "From Nasdaq's IPO calendar.", (
         Field("calendar.ipo.min_offer_usd", "Smallest deal shown",
@@ -1031,6 +1038,9 @@ _NEWS_CALENDAR_SECTIONS = (
               "Central time; used only when the date source gives no time.",
               kind="time", optional=True),
         Field("calendar.indicators.*.tile", "Tile", "", kind="text"),
+        Field("calendar.indicators.*.high", "High impact",
+              "On draws this indicator's tile highlighted on the calendar. Off for "
+              "a routine release.", kind="bool", optional=True),
     )),
 )
 

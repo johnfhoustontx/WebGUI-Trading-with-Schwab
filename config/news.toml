@@ -412,6 +412,12 @@ speech_horizon_days = 14   # Board speeches are frequent
 
 [calendar.events]
 extra_releases = ["Job Openings and Labor Turnover Survey", "Employment Cost Index"]
+# An event whose title CONTAINS one of these (any case) is drawn highlighted.
+# The Fed calendar's FOMC meeting reads "FOMC statement" and its press
+# conference "Press conference"; the Chair's own speeches and testimony read
+# "Speech - Chair ..." / "Testimony - Chairman ...", which "- Chair" matches and
+# a Vice Chair's never does. [] highlights no event.
+high_impact = ["FOMC statement", "Press conference", "- Chair"]
 
 [calendar.ipo]
 min_offer_usd = 100000000  # roughly half of Nasdaq's rows are SPACs and tiny deals
@@ -430,6 +436,7 @@ retry_min = 15             # a failed pull is retried after this many minutes (1
 # transform: pct_mom | change_k |
 # level_pct | level_k | pct_saar. schedule: bls | bea (matched by release name) |
 # fred (by release_id). time_ct is used only when a date source gives no time.
+# high = true draws the indicator's tile highlighted on the Market News calendar.
 
 [calendar.indicators.cpi]
 enabled = true
@@ -439,6 +446,7 @@ transform = "pct_mom"
 schedule = "bls"
 match = "Consumer Price Index"
 tile = "CPI"
+high = true
 
 [calendar.indicators.core_cpi]
 enabled = true
@@ -448,6 +456,7 @@ transform = "pct_mom"
 schedule = "bls"
 match = "Consumer Price Index"
 tile = "CPI"
+high = true
 
 [calendar.indicators.ppi]
 enabled = true
@@ -457,6 +466,7 @@ transform = "pct_mom"
 schedule = "bls"
 match = "Producer Price Index"
 tile = "PPI"
+high = true
 
 [calendar.indicators.nfp]
 enabled = true
@@ -466,6 +476,7 @@ transform = "change_k"
 schedule = "bls"
 match = "Employment Situation"
 tile = "Jobs"
+high = true
 
 [calendar.indicators.unrate]
 enabled = true
@@ -475,6 +486,7 @@ transform = "level_pct"
 schedule = "bls"
 match = "Employment Situation"
 tile = "Jobs"
+high = true
 
 [calendar.indicators.pce]
 enabled = true
@@ -484,6 +496,7 @@ transform = "pct_mom"
 schedule = "bea"
 match = "Personal Income and Outlays"
 tile = "PCE"
+high = true
 
 [calendar.indicators.core_pce]
 enabled = true
@@ -493,6 +506,7 @@ transform = "pct_mom"
 schedule = "bea"
 match = "Personal Income and Outlays"
 tile = "PCE"
+high = true
 
 [calendar.indicators.gdp]
 enabled = true
@@ -502,6 +516,7 @@ transform = "pct_saar"
 schedule = "bea"
 match = "GDP ("
 tile = "GDP"
+high = true
 
 [calendar.indicators.retail]
 enabled = true
@@ -512,6 +527,7 @@ schedule = "fred"
 release_id = 9
 time_ct = "07:30"
 tile = "Retail sales"
+high = true
 
 [calendar.indicators.claims]
 enabled = true
@@ -522,3 +538,4 @@ schedule = "fred"
 release_id = 180
 time_ct = "07:30"
 tile = "Jobless claims"
+high = false

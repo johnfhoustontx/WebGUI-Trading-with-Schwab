@@ -955,11 +955,14 @@ this, and what is scheduled?"* without leaving the app.
 
 ### Reading the screen
 
-**Each headline** is one line: the publish time in **Central time** (an item from an
+**Each headline** is one line, in columns under a sticky header — **Time · Imp. ·
+Symbol · Headline · Source**: the publish time in **Central time** (an item from an
 earlier day shows its date too) · the **impact** letter · up to two **tickers** (a
 **+N** chip holds the rest, listed on hover) · the **headline**, a link to the
-publisher's own page, with its summary on hover · a grey **badge** per feed that
-carried it. On a phone the badges give way first.
+publisher's own page, with its summary on hover · the **source**, the first feed that
+carried it plus **+N** for the others (every feed on hover). Every column but the
+headline has a fixed width, so they line up down the list. On a phone the Symbol and
+Source columns give way first.
 
 **Impact.** A fixed set of rules gives every item points, and the points cut into
 three ranks — **High** at 6 or more, **Med** at 3 or more, **Low** below:
@@ -1018,6 +1021,13 @@ and otherwise **upcoming** — Actual —, Prior the latest value. No future dat
 agencies' schedules reads *Next date not yet published*; the app never guesses one. A
 muted note on a group means every source behind it failed and it is showing the last
 good reading.
+
+**High-impact tiles** carry an amber border and a **HIGH** tag. Shipped: the FOMC
+statement, its press conference and the Fed Chair's own speeches and testimony
+(`[calendar.events] high_impact` — a case-insensitive *contains* match on the title;
+`- Chair` matches *Speech - Chair …* and *Testimony - Chairman …* but never a Vice
+Chair), and every indicator but Jobless claims (`high = true` in its
+`[calendar.indicators.<key>]` table). A dividend or an IPO is never highlighted.
 
 **Refresh** asks the service to re-check the calendar (only the sources that are due)
 and poll every feed now; the button spins until that poll finishes (usually a few

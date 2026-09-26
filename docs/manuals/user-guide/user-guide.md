@@ -785,10 +785,13 @@ Three panels: the **headlines** on the left, the **SEC / EDGAR** panel (filings 
 insider buys) top right, and the **economic calendar** below it. On a phone they
 stack in that order. Every time is Central.
 
-- **Each headline is one line**: when it was published (an older item shows its
-  date), an **impact** letter, up to two tickers (a **+N** chip holds the rest —
-  hover it for the list), the headline, and a small badge naming each feed that ran
-  it. On a narrow screen the feed badges are dropped so the headline keeps its room.
+- **Each headline is one line**, in columns under a header that stays at the top
+  of the list as it scrolls: **Time** (when it was published; an older item shows
+  its date), **Imp.** (the impact letter), **Symbol** (up to two tickers; a **+N**
+  chip holds the rest — hover it for the list), the **Headline**, and **Source** —
+  the feed that ran it, with **+N** when more feeds carried the same story (hover
+  it for every feed). On a narrow screen the Symbol and Source columns are dropped
+  so the headline keeps its room.
 - **Impact (H / M / L)** is a rules-based rank the service gives every item: keyword
   tiers (*FOMC*, *CPI*, *merger*, *bankruptcy* … count most; *downgrade*,
   *earnings*, *tariff* … less; *outlook*, *analyst* … least — each tier counts
@@ -801,8 +804,8 @@ stack in that order. Every time is Central.
   Configuration → Market news → Impact** (and the *Impact keywords*, *by feed*,
   *insider buys* and *SEC filings* sections below it).
 - **Sources** are public news feeds (MarketWatch, CNBC, Yahoo Finance, the
-  press-release wires and others). A story several feeds carried shows each feed's
-  badge.
+  press-release wires and others). A story several feeds carried names the first in
+  its Source column and counts the rest as **+N**.
 - **A ticker is tagged only when the headline names it explicitly** — a cashtag
   like `$NVDA` or a bracket like `(NASDAQ: NVDA)` — or when it came from Yahoo
   Finance's page for that ticker, and only for tickers the app follows (the
@@ -844,6 +847,13 @@ stack in that order. Every time is Central.
     future date reads *Next date not yet published*.
   A muted note under a group means its sources could not be reached; it is showing
   the last good reading.
+  **Highlighted tiles** — an amber border and a **HIGH** tag — are the releases that
+  most often move the market: the FOMC statement and its press conference, the Fed
+  Chair's own speeches and testimony, and the CPI, PPI, Jobs, PCE, GDP and Retail
+  sales reports (Jobless claims is not). The service decides: an event is high when
+  its title contains one of the phrases in **Settings → Configuration → Market news
+  → Other releases → Highlight events whose title contains**, and a report when its
+  indicator's **High impact** switch is on.
 - **Refresh** checks every feed now instead of waiting for the next scheduled poll
   (every 5 minutes in market hours, 15 off-hours, 60 at weekends and holidays), and
   re-checks the calendar — though each calendar source still keeps its own schedule.

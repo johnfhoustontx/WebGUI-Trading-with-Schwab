@@ -1031,10 +1031,13 @@ direction.</p>
 insider buys) top right, and the <strong>economic calendar</strong> below it. On a phone they
 stack in that order. Every time is Central.</p>
 <ul>
-<li><strong>Each headline is one line</strong>: when it was published (an older item shows its
-  date), an <strong>impact</strong> letter, up to two tickers (a <strong>+N</strong> chip holds the rest —
-  hover it for the list), the headline, and a small badge naming each feed that ran
-  it. On a narrow screen the feed badges are dropped so the headline keeps its room.</li>
+<li><strong>Each headline is one line</strong>, in columns under a header that stays at the top
+  of the list as it scrolls: <strong>Time</strong> (when it was published; an older item shows
+  its date), <strong>Imp.</strong> (the impact letter), <strong>Symbol</strong> (up to two tickers; a <strong>+N</strong>
+  chip holds the rest — hover it for the list), the <strong>Headline</strong>, and <strong>Source</strong> —
+  the feed that ran it, with <strong>+N</strong> when more feeds carried the same story (hover
+  it for every feed). On a narrow screen the Symbol and Source columns are dropped
+  so the headline keeps its room.</li>
 <li><strong>Impact (H / M / L)</strong> is a rules-based rank the service gives every item: keyword
   tiers (<em>FOMC</em>, <em>CPI</em>, <em>merger</em>, <em>bankruptcy</em> … count most; <em>downgrade</em>,
   <em>earnings</em>, <em>tariff</em> … less; <em>outlook</em>, <em>analyst</em> … least — each tier counts
@@ -1047,8 +1050,8 @@ stack in that order. Every time is Central.</p>
   Configuration → Market news → Impact</strong> (and the <em>Impact keywords</em>, <em>by feed</em>,
   <em>insider buys</em> and <em>SEC filings</em> sections below it).</li>
 <li><strong>Sources</strong> are public news feeds (MarketWatch, CNBC, Yahoo Finance, the
-  press-release wires and others). A story several feeds carried shows each feed's
-  badge.</li>
+  press-release wires and others). A story several feeds carried names the first in
+  its Source column and counts the rest as <strong>+N</strong>.</li>
 <li><strong>A ticker is tagged only when the headline names it explicitly</strong> — a cashtag
   like <code>$NVDA</code> or a bracket like <code>(NASDAQ: NVDA)</code> — or when it came from Yahoo
   Finance's page for that ticker, and only for tickers the app follows (the
@@ -1089,7 +1092,14 @@ stack in that order. Every time is Central.</p>
     arrived and is the Actual. A tile with no
     future date reads <em>Next date not yet published</em>.
   A muted note under a group means its sources could not be reached; it is showing
-  the last good reading.</li>
+  the last good reading.
+  <strong>Highlighted tiles</strong> — an amber border and a <strong>HIGH</strong> tag — are the releases that
+  most often move the market: the FOMC statement and its press conference, the Fed
+  Chair's own speeches and testimony, and the CPI, PPI, Jobs, PCE, GDP and Retail
+  sales reports (Jobless claims is not). The service decides: an event is high when
+  its title contains one of the phrases in <strong>Settings → Configuration → Market news
+  → Other releases → Highlight events whose title contains</strong>, and a report when its
+  indicator's <strong>High impact</strong> switch is on.</li>
 <li><strong>Refresh</strong> checks every feed now instead of waiting for the next scheduled poll
   (every 5 minutes in market hours, 15 off-hours, 60 at weekends and holidays), and
   re-checks the calendar — though each calendar source still keeps its own schedule.</li>

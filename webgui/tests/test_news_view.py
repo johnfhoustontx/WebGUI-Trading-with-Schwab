@@ -755,3 +755,33 @@ def test_sec_href_takes_only_https_sec_gov():
                 "https://sec.gov.evil.com/x", "https://notsec.gov/x",
                 "javascript:alert(1)", None, 7, ""):
         assert nv.sec_href(bad) is None, bad
+
+
+# ── high-impact tiles (2026-09-26) ───────────────────────────────────────────
+
+def test_a_tile_is_high_only_when_the_producer_said_true():
+    p = {"events": [{**EVENT, "high": True}, {**DATE_ONLY_EVENT, "high": False}],
+         "dividends": [{**DIVIDEND, "high": True}], "ipos": [IPO],
+         "data": [{**IND, "high": True}], "settings": CALCFG}
+    ev, other, data = nv.calendar_groups(p, now=NOW)
+    assert [t["high"] for t in ev["tiles"]] == [True, False]
+    assert [t["high"] for t in other["tiles"]] == [True, False]   # the producer decides
+    assert data["tiles"][0]["high"] is True
+
+
+def test_a_missing_or_non_bool_high_is_not_high():
+    for bad in (None, 1, "true", [True]):
+        p = {"events": [{**EVENT, "high": bad}], "data": [{**IND, "high": bad}],
+             "settings": CALCFG}
+        ev, _, data = nv.calendar_groups(p, now=NOW)
+        assert ev["tiles"][0]["high"] is False, bad
+        assert data["tiles"][0]["high"] is False, bad
+    ev, other, data = nv.calendar_groups(CAL_PAYLOAD, now=NOW)       # no flag at all
+    assert not any(t["high"] for g in (ev, other, data) for t in g["tiles"])
+
+
+def test_a_data_tile_is_high_when_any_of_its_indicators_is():
+    core = {**IND, "key": "core_cpi", "label": "Core CPI", "high": False}
+    p = {"data": [{**IND, "high": False}, {**core, "high": True}], "settings": CALCFG}
+    (tile,) = nv.calendar_groups(p, now=NOW)[2]["tiles"]
+    assert len(tile["indicators"]) == 2 and tile["high"] is True

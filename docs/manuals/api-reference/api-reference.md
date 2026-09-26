@@ -507,11 +507,12 @@ use `url` as a link without checking it is http(s).
 The **calendar payload**:
 
 ```
-{"events":    [{"title", "at", "date"}],
- "dividends": [{"symbol", "ex_date", "pay_date", "amount"}],
- "ipos":      [{"symbol", "company", "date", "price", "price_range", "offer_usd"}],
- "data":      [{"key", "label", "tile", "unit", "next_release_at", "next_date",
-                "last_release_at", "latest", "prior"}],
+{"events":    [{"title", "at", "date", "high"}],
+ "dividends": [{"symbol", "ex_date", "pay_date", "amount", "high"}],
+ "ipos":      [{"symbol", "company", "date", "price", "price_range", "offer_usd",
+                "high"}],
+ "data":      [{"key", "label", "tile", "unit", "high", "next_release_at",
+                "next_date", "last_release_at", "latest", "prior"}],
  "sources":   {name: "ok" | "stale" | "never" | "off"},
  "settings":  {"release_watch_min", "actual_fresh_h"}}
 ```
@@ -520,6 +521,10 @@ The **calendar payload**:
 `YYYY-MM-DD`. `latest` / `prior` are `{obs_date, value, first_seen, bootstrap}` or
 `null`, `value` the DERIVED figure per `unit` (`pct_mom`, `change_k`, `level_pct`,
 `level_k`, `pct_saar`). `amount` is a positive per-payment figure or `null` (never 0).
+`high` is a real bool on every row — the producer's "draw this highlighted": an event
+whose title contains a `[calendar.events] high_impact` phrase (case-insensitive), a
+data entry whose indicator has `high = true`; a dividend or an IPO is always `false`.
+The page highlights only a real `true` (`news_view.calendar_groups`).
 `sources` names `fed`, `bls`, `bea`, `dividends`, `nasdaq_ipo`, `fred_calendar`,
 `fred_api`, `fredgraph` — the FRED observation path not in use reports `off`. The
 payload carries FACTS only: whether an indicator is *released*, *awaiting* or

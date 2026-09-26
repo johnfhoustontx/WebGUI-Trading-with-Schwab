@@ -311,17 +311,21 @@ def test_rows_draw_one_line_with_time_impact_tickers_headline_source():
     box = ui.column()
     news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
     kids = box.default_slot.children
-    assert len(kids) == 2                                   # one element per item
-    for row_el in kids:
+    assert len(kids) == 3                     # the column header, then one per item
+    for row_el in kids[1:]:
         assert isinstance(row_el, ui.row)
         assert "flex-nowrap" in _classes(row_el)             # one line, never wraps
         # no nested row or column: nothing can drop to a second line
         assert not [d for d in _descendants(row_el)
                     if isinstance(d, (ui.row, ui.column))]
-    first = kids[0].default_slot.children
+    first = kids[1].default_slot.children
     texts = [getattr(c, "text", None) for c in first]
-    # time · impact · ticker · headline · source, in that order
-    assert texts == [rows[0]["when"], "H", "NVDA", "Headline 1", "MarketWatch"]
+    # time · impact · [tickers] · headline · [source], in that order
+    assert texts[:2] == [rows[0]["when"], "H"] and texts[3] == "Headline 1"
+    assert len(first) == 5
+    assert [c.text for c in first[2].default_slot.children] == ["NVDA"]
+    assert [d.text for d in _descendants(first[4]) if isinstance(d, ui.label)
+            and not isinstance(d.parent_slot.parent, ui.tooltip)] == ["MarketWatch"]
     pill = first[1]
     assert set(nv.BAND_CLASSES["high"].split()) <= _classes(pill)
     tip = [d for d in _descendants(pill) if isinstance(d, ui.tooltip)]
@@ -329,9 +333,9 @@ def test_rows_draw_one_line_with_time_impact_tickers_headline_source():
     assert tip and tip[0].text == "mentions FOMC"
     headline = first[3]
     assert {"truncate", "min-w-0", "flex-1"} <= _classes(headline)
-    assert "shrink-0" in _classes(first[4])                  # the source badge
+    assert "shrink-0" in _classes(first[4])                  # the source cell
     # a row with no band keeps an EMPTY slot of the pill's width, never "L"
-    second = kids[1].default_slot.children
+    second = kids[2].default_slot.children
     assert getattr(second[1], "text", "") in ("", None)
     assert "w-5" in _classes(second[1])
     # the teaser is on the headline's hover, not on a second line
@@ -436,9 +440,13 @@ def test_three_regions_render_in_dom_order(monkeypatch):
     i_sec = texts.index(news.SEC_TITLE)
     i_cal = texts.index(news.CAL_TITLE)
     assert i_head < i_sec < i_cal
-    # the SEC panel's own columns, and the ONE line per filing
+    # the headline list's own column header comes before its first row
+    cols = [texts.index(c) for c in news.LIST_COLUMNS]
+    assert cols == sorted(cols) and cols[-1] < i_head
+    # the SEC panel's own columns (searched from the panel on: the headline
+    # list has a "Symbol" column too), and the ONE line per filing
     for col in ("Date/Time", "Symbol", "Headline/Details"):
-        assert i_sec < texts.index(col) < i_cal
+        assert i_sec < texts.index(col, i_sec) < i_cal
     assert i_sec < texts.index("ACME insider buys $136.4M") < i_cal
     assert i_sec < texts.index("9 purchases · $136.4M · 2026-09-23") < i_cal
     # the calendar's three headers, in order, after the SEC panel
@@ -544,13 +552,17 @@ def test_refresh_toast_mentions_the_calendar():
 
 
 # ── review round: phone rows, echoes, readable reasons, live repaint ────────
-def test_the_row_clips_and_source_badges_hide_on_a_phone():
+def test_the_row_clips_and_the_symbol_and_source_columns_hide_on_a_phone():
     """At ~375px a nowrap row squeezed the headline to 0px: the row clips, and
-    the source badges only show from ``sm`` up."""
+    the Symbol and Source columns - each cell AND its header label - only show
+    from ``sm`` up."""
     from pages import news
     assert "overflow-hidden" in news._ROW.split()
-    src = news._SOURCE.split()
-    assert "hidden" in src and "sm:inline-flex" in src
+    for cls in (news._SOURCE_CELL, news._SOURCE_HEAD, news._TICKER_SLOT, news._TICKER_W):
+        assert "max-sm:hidden" in cls.split(), cls
+        # never Tailwind's bare ``hidden``: Quasar's ``.hidden`` is
+        # ``display:none !important`` and no ``sm:`` display beats it
+        assert "hidden" not in cls.split(), cls
 
 
 def test_a_row_shows_two_tickers_then_a_count_with_the_rest_on_hover():
@@ -562,11 +574,12 @@ def test_a_row_shows_two_tickers_then_a_count_with_the_rest_on_hover():
                    now=NOW)
     box = ui.column()
     news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    (row_el,) = box.default_slot.children
-    texts = [getattr(c, "text", None) for c in row_el.default_slot.children]
-    assert texts[2:5] == ["NVDA", "AMD", "+2"]
+    (_head, row_el) = box.default_slot.children
+    slot = row_el.default_slot.children[2]
+    texts = [getattr(c, "text", None) for c in slot.default_slot.children]
+    assert texts == ["NVDA", "AMD", "+2"]
     assert "INTC" not in texts and "MU" not in texts
-    more = row_el.default_slot.children[4]
+    more = slot.default_slot.children[2]
     assert "shrink-0" in _classes(more)
     tips = [d for d in _descendants(more) if isinstance(d, ui.tooltip)]
     assert tips and tips[0].text == "INTC, MU"
@@ -574,8 +587,9 @@ def test_a_row_shows_two_tickers_then_a_count_with_the_rest_on_hover():
     rows = nv.rows(_items_payload(_item(2, tickers=["NVDA", "AMD"])), now=NOW)
     box = ui.column()
     news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    texts = [getattr(c, "text", None) for c in box.default_slot.children[0].default_slot.children]
-    assert not [t for t in texts if isinstance(t, str) and t.startswith("+")]
+    slot = box.default_slot.children[1].default_slot.children[2]
+    texts = [getattr(c, "text", None) for c in slot.default_slot.children]
+    assert texts == ["NVDA", "AMD"]
 
 
 def test_a_teaser_that_is_the_headline_plus_a_publisher_adds_no_hover():
@@ -672,3 +686,149 @@ def test_an_open_tab_repaints_its_held_payloads_every_minute(monkeypatch):
     for text, ids in before.items():
         now_ids = _ids(text)
         assert now_ids and not now_ids & ids, text        # redrawn, not kept
+
+
+# ── the Source column (2026-09-26) ───────────────────────────────────────────
+
+def test_the_headline_list_opens_with_a_sticky_column_header():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    rows = nv.rows(_items_payload(_item(1, tickers=["NVDA"])), now=NOW)
+    box = ui.column()
+    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    head = box.default_slot.children[0]
+    assert isinstance(head, ui.row)
+    assert [c.text for c in head.default_slot.children] == list(news.LIST_COLUMNS)
+    assert news.LIST_COLUMNS == ("Time", "Imp.", "Symbol", "Headline", "Source")
+    cls = news._LIST_HEAD.split()
+    assert {"sticky", "top-0", "flex-nowrap"} <= set(cls)
+    assert [c for c in cls if c.startswith("z-")] and [c for c in cls if c.startswith("bg-")]
+    # each label sits over its cell: the same width class as the cell below
+    time_h, imp_h, sym_h, head_h, src_h = head.default_slot.children
+    row = box.default_slot.children[1].default_slot.children
+    assert "w-28" in _classes(time_h) and "w-28" in _classes(row[0])
+    assert "w-5" in _classes(imp_h) and "w-5" in _classes(row[1])
+    assert "w-32" in _classes(sym_h) and "w-32" in _classes(row[2])
+    assert "flex-1" in _classes(head_h) and "flex-1" in _classes(row[3])
+    assert "w-32" in _classes(src_h) and "w-32" in _classes(row[4])
+    tips = [d for d in _descendants(imp_h) if isinstance(d, ui.tooltip)]
+    assert tips and "Impact" in tips[0].text
+
+
+def test_no_rows_draw_no_column_header():
+    from nicegui import ui
+
+    from pages import news
+    box = ui.column()
+    news.draw_rows(box, [], linked=True, on_ticker=lambda t: None)
+    assert box.default_slot.children == []
+
+
+def test_the_ticker_slot_and_source_cell_have_fixed_widths_and_clip():
+    from pages import news
+    slot = news._TICKER_SLOT.split()
+    assert {"w-32", "shrink-0", "overflow-hidden", "flex-nowrap"} <= set(slot)
+    cell = news._SOURCE_CELL.split()
+    assert {"w-32", "shrink-0", "overflow-hidden"} <= set(cell)
+    assert {"truncate", "min-w-0"} <= set(news._SOURCE.split())
+
+
+def test_a_phone_keeps_the_headline_its_room():
+    """Below ``sm`` only Time, the pill and the headline are drawn; at 390px
+    less two 16px gutters each side (the page's and the column's) the headline
+    keeps >= 150px - measured 178px in a browser, where a one-chip Symbol slot
+    left it 122px."""
+    from pages import news
+    phone = [c for c in (news._WHEN, news._PILL_SLOT, news._TICKER_SLOT, news._SOURCE_CELL)
+             if "max-sm:hidden" not in c.split()]
+    assert phone == [news._WHEN, news._PILL_SLOT]
+    px = {"w-28": 112, "w-5": 20}
+    assert 390 - 4 * 16 - sum(px.values()) - 2 * 8 >= 150
+
+
+def test_the_source_cell_shows_the_first_source_a_count_and_all_on_hover():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    it = {**_item(1), "source": "Reuters", "sources": ["Reuters", "CNBC", "WSJ"]}
+    rows = nv.rows(_items_payload(it), now=NOW)
+    box = ui.column()
+    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    cell = box.default_slot.children[1].default_slot.children[4]
+    shown = [c.text for c in cell.default_slot.children if isinstance(c, ui.label)]
+    assert shown == [rows[0]["sources"][0], f"+{len(rows[0]['sources']) - 1}"]
+    tips = [d for d in _descendants(cell) if isinstance(d, ui.tooltip)]
+    assert tips and tips[0].text == ", ".join(rows[0]["sources"])
+    # one source: its name, no count and no hover
+    rows = nv.rows(_items_payload(_item(2, source="CNBC")), now=NOW)
+    box = ui.column()
+    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    cell = box.default_slot.children[1].default_slot.children[4]
+    assert [c.text for c in cell.default_slot.children] == ["CNBC"]
+    assert not [d for d in _descendants(cell) if isinstance(d, ui.tooltip)]
+
+
+def test_a_row_with_no_source_keeps_an_empty_source_cell():
+    from nicegui import ui
+
+    from pages import news
+    rows = [{"title": "X", "when": "9:00 AM", "tickers": [], "sources": []}]
+    box = ui.column()
+    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    cell = box.default_slot.children[1].default_slot.children[4]
+    assert cell.default_slot.children == [] and "w-32" in _classes(cell)
+
+
+# ── high-impact calendar tiles (2026-09-26) ──────────────────────────────────
+
+def _tile_group(*tiles):
+    return [{"title": "Economic news/Calendar", "note": None, "empty": None,
+             "tiles": list(tiles)}]
+
+
+def test_a_high_tile_is_highlighted_with_a_chip():
+    from nicegui import ui
+
+    from pages import news
+    box = ui.column()
+    news.draw_calendar(box, _tile_group(
+        {"title": "FOMC statement", "when": "Wed Oct 28", "lines": [], "high": True},
+        {"title": "FOMC minutes", "when": "Wed Oct 7", "lines": [], "high": False}))
+    tiles = [d for d in _descendants(box) if isinstance(d, ui.column)
+             and "rounded-[8px]" in d.classes]
+    assert len(tiles) == 2
+    hi, lo = tiles
+    assert set(news._CAL_TILE_HIGH.split()) <= _classes(hi)
+    assert set(news._CAL_TILE.split()) <= _classes(lo)
+    assert "border-amber-400/70" in _classes(hi) and "border-[#213152]" not in _classes(hi)
+    chips = [d for d in _descendants(hi) if isinstance(d, ui.label)
+             and d.text == news.HIGH_CHIP]
+    assert len(chips) == 1 and set(news._CAL_CHIP.split()) <= _classes(chips[0])
+    tips = [d for d in _descendants(chips[0]) if isinstance(d, ui.tooltip)]
+    assert tips and tips[0].text == "High-impact release"
+    assert not [d for d in _descendants(lo) if getattr(d, "text", None) == news.HIGH_CHIP]
+    # the title still reads first, and still truncates
+    titles = [d for d in _descendants(hi) if getattr(d, "text", None) == "FOMC statement"]
+    assert titles and "truncate" in _classes(titles[0])
+
+
+def test_a_tile_with_a_missing_or_non_bool_high_is_not_highlighted():
+    from nicegui import ui
+
+    from pages import news
+    for bad in (None, 1, "true"):
+        box = ui.column()
+        tile = {"title": "CPI", "when": "x", "lines": []}
+        if bad is not None:
+            tile["high"] = bad
+        news.draw_calendar(box, _tile_group(tile))
+        assert not [d for d in _descendants(box) if getattr(d, "text", None) == news.HIGH_CHIP]
+        assert not [d for d in _descendants(box) if "border-amber-400/70" in d.classes]
+
+
+def test_the_high_classes_are_fixed_palette_classes():
+    from pages import news
+    assert news.HIGH_CHIP == "HIGH"
+    assert "bg-amber-400/[0.08]" in news._CAL_TILE_HIGH.split()
+    assert {"text-amber-300", "uppercase"} <= set(news._CAL_CHIP.split())

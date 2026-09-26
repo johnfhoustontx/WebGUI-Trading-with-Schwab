@@ -1109,11 +1109,12 @@ with <code>"stale"</code> appended. Reason codes: <code>kw:&lt;tier&gt;:&lt;word
 <code>untracked</code>. Every string in an item is third-party text: render it escaped, and never
 use <code>url</code> as a link without checking it is http(s).</p>
 <p>The <strong>calendar payload</strong>:</p>
-<pre><code>{&quot;events&quot;:    [{&quot;title&quot;, &quot;at&quot;, &quot;date&quot;}],
- &quot;dividends&quot;: [{&quot;symbol&quot;, &quot;ex_date&quot;, &quot;pay_date&quot;, &quot;amount&quot;}],
- &quot;ipos&quot;:      [{&quot;symbol&quot;, &quot;company&quot;, &quot;date&quot;, &quot;price&quot;, &quot;price_range&quot;, &quot;offer_usd&quot;}],
- &quot;data&quot;:      [{&quot;key&quot;, &quot;label&quot;, &quot;tile&quot;, &quot;unit&quot;, &quot;next_release_at&quot;, &quot;next_date&quot;,
-                &quot;last_release_at&quot;, &quot;latest&quot;, &quot;prior&quot;}],
+<pre><code>{&quot;events&quot;:    [{&quot;title&quot;, &quot;at&quot;, &quot;date&quot;, &quot;high&quot;}],
+ &quot;dividends&quot;: [{&quot;symbol&quot;, &quot;ex_date&quot;, &quot;pay_date&quot;, &quot;amount&quot;, &quot;high&quot;}],
+ &quot;ipos&quot;:      [{&quot;symbol&quot;, &quot;company&quot;, &quot;date&quot;, &quot;price&quot;, &quot;price_range&quot;, &quot;offer_usd&quot;,
+                &quot;high&quot;}],
+ &quot;data&quot;:      [{&quot;key&quot;, &quot;label&quot;, &quot;tile&quot;, &quot;unit&quot;, &quot;high&quot;, &quot;next_release_at&quot;,
+                &quot;next_date&quot;, &quot;last_release_at&quot;, &quot;latest&quot;, &quot;prior&quot;}],
  &quot;sources&quot;:   {name: &quot;ok&quot; | &quot;stale&quot; | &quot;never&quot; | &quot;off&quot;},
  &quot;settings&quot;:  {&quot;release_watch_min&quot;, &quot;actual_fresh_h&quot;}}
 </code></pre>
@@ -1121,6 +1122,10 @@ use <code>url</code> as a link without checking it is http(s).</p>
 <code>YYYY-MM-DD</code>. <code>latest</code> / <code>prior</code> are <code>{obs_date, value, first_seen, bootstrap}</code> or
 <code>null</code>, <code>value</code> the DERIVED figure per <code>unit</code> (<code>pct_mom</code>, <code>change_k</code>, <code>level_pct</code>,
 <code>level_k</code>, <code>pct_saar</code>). <code>amount</code> is a positive per-payment figure or <code>null</code> (never 0).
+<code>high</code> is a real bool on every row — the producer's "draw this highlighted": an event
+whose title contains a <code>[calendar.events] high_impact</code> phrase (case-insensitive), a
+data entry whose indicator has <code>high = true</code>; a dividend or an IPO is always <code>false</code>.
+The page highlights only a real <code>true</code> (<code>news_view.calendar_groups</code>).
 <code>sources</code> names <code>fed</code>, <code>bls</code>, <code>bea</code>, <code>dividends</code>, <code>nasdaq_ipo</code>, <code>fred_calendar</code>,
 <code>fred_api</code>, <code>fredgraph</code> — the FRED observation path not in use reports <code>off</code>. The
 payload carries FACTS only: whether an indicator is <em>released</em>, <em>awaiting</em> or

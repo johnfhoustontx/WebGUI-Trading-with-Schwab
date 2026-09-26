@@ -593,17 +593,25 @@ DOM order at natural height. Designs + plans:
 [`plans/2026-09-25-news-feed-design.md`](plans/2026-09-25-news-feed-design.md),
 [`plans/2026-09-26-news-v2-design.md`](plans/2026-09-26-news-v2-design.md).
 
-- **Headline rows** (`news.draw_rows`, shared with the public copy) are ONE line each,
-  nothing wraps: time — CENTRAL, with the date when the item is not from today (CT) ·
+- **Headline rows** (`news.draw_rows`, shared with the public copy) sit under a sticky
+  column header — **Time · Imp. · Symbol · Headline · Source**, each label carrying
+  the width class of the cell below it (drawn only when there are rows) — and are ONE
+  line each, nothing wraps: time — CENTRAL, with the date when the item is not from today (CT) ·
   the **impact pill** (H / M / L, a fixed class map `news_view.BAND_CLASSES`; an
   unscored row keeps the empty slot and never reads "low") whose hover is
-  `news_view.reason_text` — the rules that scored it in words · at most
-  `MAX_ROW_TICKERS` (2) ticker chips, the rest collapsed into a **`+N`** chip with the
-  full list on hover · the headline, truncated with an ellipsis, a new-tab link to the
-  original (`news_view.safe_href`: http/https with a host, else plain text), its hover
-  the teaser · a badge per source. **Phone:** the row is `overflow-hidden`, and the
-  source badges are the first thing to go (`hidden sm:inline-flex`), so the headline
-  keeps its width. ⚠ Titles, teasers and detail lines are third-party text and reach
+  `news_view.reason_text` — the rules that scored it in words · the **Symbol** slot, a
+  fixed `w-32` holding at most `MAX_ROW_TICKERS` (2) ticker chips, the rest collapsed
+  into a **`+N`** chip with the full list on hover · the headline, truncated with an
+  ellipsis, a new-tab link to the original (`news_view.safe_href`: http/https with a
+  host, else plain text), its hover the teaser · the **Source** cell, a fixed `w-32`:
+  the first of the row's sources (truncated) plus **`+N`** when there are more, every
+  source on hover; empty but the same width for a row with none. **Phone:** the row is
+  `overflow-hidden`, and below `sm` the Symbol and Source columns go, header labels
+  and all (`max-sm:hidden`), so the headline keeps ~178px of a 390px screen (a
+  one-chip Symbol slot left it 122px). ⚠ Never `hidden sm:flex` here: Quasar's
+  `.hidden` is `display:none !important`, which beats every `sm:` display utility —
+  the per-source badges this column replaced were written that way and never showed
+  at any width. ⚠ Titles, teasers and detail lines are third-party text and reach
   the page only through `ui.label` / `ui.link`; a source-level test pins that the
   module calls `ui.html` nowhere.
 - **Impact** is computed by the service, not the page (`services/news_svc/impact.py`,
@@ -638,7 +646,16 @@ DOM order at natural height. Designs + plans:
   release*, Actual —); otherwise
   **upcoming** (Actual —, Prior = the latest value). No future date reads *Next date
   not yet published*, never a guess. A group whose every source is `stale` / `never`
-  carries a muted note; an empty group says so in its own sentence.
+  carries a muted note; an empty group says so in its own sentence. **High-impact
+  tiles** are drawn with an amber border and wash (`border-amber-400/70
+  bg-amber-400/[0.08]`) and a **HIGH** chip by the title (hover *High-impact
+  release*). The producer decides: `news_svc/econ.py` stamps a real bool `high` on
+  every row — an event whose title contains a `[calendar.events] high_impact` phrase
+  (case-insensitive; shipped `FOMC statement`, `Press conference`, `- Chair`, which
+  matches the Chair's own speeches and testimony and never a Vice Chair's), a data
+  entry whose `[calendar.indicators.<key>] high` is true (every shipped indicator but
+  jobless claims); dividends and IPOs are never high. `calendar_groups` carries it
+  onto the tile only for a real `True` (a data tile: any of its indicators).
 - **Filters** run page-side over the headline rows already read: **Sources** (none =
   all), a **Ticker** field (300 ms debounce, `clean_symbol` both sides — a string that
   does not clean matches NOTHING), **Watchlist only** (`news_config.ticker_set()`: the

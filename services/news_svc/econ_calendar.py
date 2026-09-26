@@ -520,6 +520,7 @@ def _parts(db, *, now, key, cal, indicators):
         "ics": {"bls": _payload(db, "bls") or [], "bea": _payload(db, "bea") or []},
         "fred_calendar": fred_rows or [],
         "extra_releases": _extra_releases(),
+        "high_events": nc.high_impact_events(),
         "obs": {s: db.obs(s) for s in _series(indicators)},
         "ipos": _payload(db, "nasdaq_ipo") or [],
         "dividends": _payload(db, "dividends") or [],

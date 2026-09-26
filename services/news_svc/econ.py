@@ -4,18 +4,22 @@ The calendar cycle (``econ_calendar``) fetches and stores; this module turns
 what it holds into the published payload that ``webgui/pages/news_view.py``
 (``calendar_groups`` / ``indicator_state``) reads::
 
-    {"events":    [{"title", "at", "date"}],
-     "dividends": [{"symbol", "ex_date", "pay_date", "amount"}],
-     "ipos":      [{"symbol", "company", "date", "price", "price_range", "offer_usd"}],
-     "data":      [{"key", "label", "tile", "unit", "next_release_at", "next_date",
-                    "last_release_at", "latest", "prior"}],
+    {"events":    [{"title", "at", "date", "high"}],
+     "dividends": [{"symbol", "ex_date", "pay_date", "amount", "high"}],
+     "ipos":      [{"symbol", "company", "date", "price", "price_range", "offer_usd",
+                    "high"}],
+     "data":      [{"key", "label", "tile", "unit", "high", "next_release_at",
+                    "next_date", "last_release_at", "latest", "prior"}],
      "sources":   {name: "ok" | "stale" | "never" | "off"},
      "settings":  {"release_watch_min", "actual_fresh_h"}}
 
 ``at`` / ``*_release_at`` / ``first_seen`` are AWARE UTC ISO instants (or
 ``None``); dates are ``YYYY-MM-DD``. ``latest`` / ``prior`` are
 ``{"obs_date", "value", "first_seen", "bootstrap"}`` or ``None``, and ``value``
-is the DERIVED figure (see ``derive``). These are FACTS only - whether the
+is the DERIVED figure (see ``derive``). ``high`` (a real bool on every row) is the
+producer's "draw this highlighted": an event whose title contains a
+``[calendar.events] high_impact`` phrase, an indicator whose table says
+``high = true``; a dividend or an IPO is never high. These are FACTS only - whether the
 latest observation is the last release's Actual is a function of ``now``, so
 the page decides it.
 
@@ -356,12 +360,28 @@ def _within(when, d, now, horizon_days):
     return today is not None and last_day is not None and today <= d <= last_day
 
 
-def _event_row(title, when, d):
-    return {"title": title, "at": _iso(when), "date": d}
+def _phrases(high_events):
+    """The usable high-impact phrases, casefolded: non-empty strings only; any
+    other shape is none (nothing is highlighted, never everything)."""
+    if not isinstance(high_events, (list, tuple)):
+        return []
+    return [p.strip().casefold() for p in high_events if isinstance(p, str) and p.strip()]
 
 
-def events_group(*, fed, ics, extra_releases, now, cfg):
+def _is_high(title, phrases):
+    text = title.casefold()
+    return any(p in text for p in phrases)
+
+
+def _event_row(title, when, d, phrases):
+    return {"title": title, "at": _iso(when), "date": d, "high": _is_high(title, phrases)}
+
+
+def events_group(*, fed, ics, extra_releases, now, cfg, high_events=()):
     """Fed events plus the ``extra_releases`` from the BLS / BEA schedules.
+
+    Each row carries ``high``: True when its title CONTAINS one of
+    ``high_events`` (``[calendar.events] high_impact``), case-insensitively.
 
     Fed speeches and testimony look ``speech_horizon_days`` ahead, everything
     else ``horizon_days``; an extra release looks ``horizon_days`` ahead. A
@@ -376,6 +396,7 @@ def events_group(*, fed, ics, extra_releases, now, cfg):
     horizon = _setting(fed_cfg, "horizon_days", _CAL["fed"]["horizon_days"], _MAX_DAYS)
     speech = _setting(fed_cfg, "speech_horizon_days", _CAL["fed"]["speech_horizon_days"],
                       _MAX_DAYS)
+    phrases = _phrases(high_events)
     rows = {}
     for ev in _dicts(fed):
         title, d, when = _str(ev.get("title")), _date(ev.get("date")), _instant(ev.get("at"))
@@ -383,7 +404,7 @@ def events_group(*, fed, ics, extra_releases, now, cfg):
             continue
         days = speech if ev.get("kind") in _SPEECH_KINDS else horizon
         if _within(when, d, now, days):
-            row = _event_row(title, when, d)
+            row = _event_row(title, when, d, phrases)
             rows[(d, row["at"] or "", title)] = row
     extras = [x for x in extra_releases
               if isinstance(x, str) and x.strip()] if isinstance(extra_releases, list) else []
@@ -397,7 +418,7 @@ def events_group(*, fed, ics, extra_releases, now, cfg):
             if d is None:
                 continue
             if _within(when, d, now, horizon):
-                row = _event_row(text, when, d)
+                row = _event_row(text, when, d, phrases)
                 rows[(d, row["at"] or "", text)] = row
     return [rows[k] for k in sorted(rows)]
 
@@ -445,7 +466,7 @@ def ipos_group(rows, *, now, cfg):
             "symbol": sym, "company": _str(r.get("company")), "date": d,
             "price": _price(text) if priced else None,
             "price_range": "" if priced else text,
-            "offer_usd": offer}))
+            "offer_usd": offer, "high": False}))
     return [row for _, row in sorted(out, key=lambda kv: kv[0])]
 
 
@@ -469,7 +490,7 @@ def dividends_group(rows, *, public_symbols):
         if not sym or ex is None or (allowed is not None and sym not in allowed):
             continue
         out[(ex, sym)] = {"symbol": sym, "ex_date": ex, "pay_date": _date(r.get("pay_date")),
-                          "amount": _amount(r.get("amount"))}
+                          "amount": _amount(r.get("amount")), "high": False}
     return [out[k] for k in sorted(out)]
 
 
@@ -527,7 +548,7 @@ def _data_entry(ind, schedules, obs_map, now):
     rel = (releases_for(ind, schedules, now=now) if now is not None else
            {"last_release_at": None, "next_release_at": None, "next_date": None})
     return {"key": key, "label": label, "tile": _str(ind.get("tile")) or label,
-            "unit": transform, "next_release_at": rel["next_release_at"],
+            "unit": transform, "high": ind.get("high") is True, "next_release_at": rel["next_release_at"],
             "next_date": rel["next_date"], "last_release_at": rel["last_release_at"],
             "latest": _obs_fact(by_date, latest), "prior": _obs_fact(by_date, prior)}
 
@@ -539,7 +560,8 @@ def build_calendar(*, parts, public_symbols):
     scalars plus its ``fed`` / ``ipo`` tables), ``indicators`` (the enabled
     list, in tile order), ``fed`` (Fed adapter events), ``ics`` (``{"bls",
     "bea"}`` ICS events), ``fred_calendar`` (FRED release rows),
-    ``extra_releases``, ``obs`` (``{series: store rows}``), ``ipos`` (Nasdaq
+    ``extra_releases``, ``high_events`` (``[calendar.events] high_impact``),
+    ``obs`` (``{series: store rows}``), ``ipos`` (Nasdaq
     rows, any number of months), ``dividends`` (store rows), ``sources``
     (``{name: state}``) and ``fred_obs_source`` (``"fred_api"`` or
     ``"fredgraph"`` - the other reports ``off``). Any part missing or junk is
@@ -556,7 +578,8 @@ def build_calendar(*, parts, public_symbols):
     obs_map = parts.get("obs") if isinstance(parts.get("obs"), dict) else {}
     return {
         "events": events_group(fed=parts.get("fed"), ics=ics,
-                               extra_releases=parts.get("extra_releases"), now=now, cfg=cfg),
+                               extra_releases=parts.get("extra_releases"), now=now, cfg=cfg,
+                               high_events=parts.get("high_events")),
         "dividends": dividends_group(parts.get("dividends"), public_symbols=public_symbols),
         "ipos": ipos_group(parts.get("ipos"), now=now, cfg=cfg),
         "data": [_data_entry(ind, schedules, obs_map, now)

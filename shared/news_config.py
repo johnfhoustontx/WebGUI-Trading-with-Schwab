@@ -41,8 +41,9 @@ one WARNING; malformed keyword tiers and non-numeric points are dropped),
 ``calendar_config()`` / ``calendar_source()`` (a non-bool ``enabled`` fails
 closed; a ``*_min`` / ``*_h`` that is not a finite number > 0, or is past its
 cap of a week of minutes / a year of hours, is the default)
-and ``indicators()`` (unknown transform/schedule or no series -> skipped with a
-WARNING). Keyword tiers, sources and indicators are TABLES, never lists: a list
+``indicators()`` (unknown transform/schedule or no series -> skipped with a
+WARNING; a non-bool ``high`` is False) and ``high_impact_events()`` (the
+phrases that mark a calendar event high-impact). Keyword tiers, sources and indicators are TABLES, never lists: a list
 in ``config/local`` replaces the whole list. Nothing here raises. Treat anything ``load()``
 returns as read-only: it is the cached mapping.
 """
@@ -143,8 +144,14 @@ DEFAULTS = {
         },
         "fed": {"types": ["FOMC", "Beige", "Speeches", "Testimony"],
                 "horizon_days": 45, "speech_horizon_days": 14},
+        # high_impact: an event whose title CONTAINS one of these (any case) is
+        # drawn highlighted. The Fed adapter titles an FOMC meeting "FOMC
+        # statement" and its press conference "Press conference"; the Board
+        # titles the Chair's own appearances "Speech - Chair ..." / "Testimony -
+        # Chairman ...", so "- Chair" matches those and never a Vice Chair's.
         "events": {"extra_releases": ["Job Openings and Labor Turnover Survey",
-                                      "Employment Cost Index"]},
+                                      "Employment Cost Index"],
+                   "high_impact": ["FOMC statement", "Press conference", "- Chair"]},
         "ipo": {"min_offer_usd": 100_000_000, "lookback_days": 7},
         "dividends": {"enabled": True, "refresh_at": "06:40", "horizon_days": 30,
                       "lookback_days": 3, "retry_min": 15},
@@ -155,35 +162,35 @@ DEFAULTS = {
         "indicators": {
             "cpi": {"enabled": True, "label": "CPI", "series": "CPIAUCSL",
                     "transform": "pct_mom", "schedule": "bls",
-                    "match": "Consumer Price Index", "tile": "CPI"},
+                    "match": "Consumer Price Index", "tile": "CPI", "high": True},
             "core_cpi": {"enabled": True, "label": "Core CPI", "series": "CPILFESL",
                          "transform": "pct_mom", "schedule": "bls",
-                         "match": "Consumer Price Index", "tile": "CPI"},
+                         "match": "Consumer Price Index", "tile": "CPI", "high": True},
             "ppi": {"enabled": True, "label": "PPI", "series": "PPIFIS",
                     "transform": "pct_mom", "schedule": "bls",
-                    "match": "Producer Price Index", "tile": "PPI"},
+                    "match": "Producer Price Index", "tile": "PPI", "high": True},
             "nfp": {"enabled": True, "label": "Nonfarm payrolls", "series": "PAYEMS",
                     "transform": "change_k", "schedule": "bls",
-                    "match": "Employment Situation", "tile": "Jobs"},
+                    "match": "Employment Situation", "tile": "Jobs", "high": True},
             "unrate": {"enabled": True, "label": "Unemployment", "series": "UNRATE",
                        "transform": "level_pct", "schedule": "bls",
-                       "match": "Employment Situation", "tile": "Jobs"},
+                       "match": "Employment Situation", "tile": "Jobs", "high": True},
             "pce": {"enabled": True, "label": "PCE prices", "series": "PCEPI",
                     "transform": "pct_mom", "schedule": "bea",
-                    "match": "Personal Income and Outlays", "tile": "PCE"},
+                    "match": "Personal Income and Outlays", "tile": "PCE", "high": True},
             "core_pce": {"enabled": True, "label": "Core PCE", "series": "PCEPILFE",
                          "transform": "pct_mom", "schedule": "bea",
-                         "match": "Personal Income and Outlays", "tile": "PCE"},
+                         "match": "Personal Income and Outlays", "tile": "PCE", "high": True},
             # The headline (real, SAAR), not "GDP" - that series is a nominal level.
             "gdp": {"enabled": True, "label": "GDP", "series": "A191RL1Q225SBEA",
                     "transform": "pct_saar", "schedule": "bea", "match": "GDP (",
-                    "tile": "GDP"},
+                    "tile": "GDP", "high": True},
             "retail": {"enabled": True, "label": "Retail sales", "series": "RSAFS",
                        "transform": "pct_mom", "schedule": "fred", "release_id": 9,
-                       "time_ct": "07:30", "tile": "Retail sales"},
+                       "time_ct": "07:30", "tile": "Retail sales", "high": True},
             "claims": {"enabled": True, "label": "Jobless claims", "series": "ICSA",
                        "transform": "level_k", "schedule": "fred", "release_id": 180,
-                       "time_ct": "07:30", "tile": "Jobless claims"},
+                       "time_ct": "07:30", "tile": "Jobless claims", "high": False},
         },
     },
 }
@@ -715,5 +722,40 @@ def indicators() -> list:
             continue
         item = copy.deepcopy(raw)
         item["key"] = key
+        high = raw.get("high", False)
+        if not isinstance(high, bool):
+            _warn_once(("ind", key, "high", repr(high)),
+                       "news.toml: indicator %r has high = %r, not true/false - "
+                       "treated as false", key, high)
+            high = False
+        item["high"] = high
         out.append(item)
+    return out
+
+
+def high_impact_events() -> list:
+    """``[calendar.events] high_impact``: the phrases an event title is matched
+    against (a case-insensitive CONTAINS match, made by the producer) to draw it
+    highlighted. A copy; each phrase is stripped.
+
+    Not a list -> the built-in default with one WARNING. A list keeps its
+    non-empty strings; a dropped entry leaves one WARNING, and a non-empty list
+    with NOTHING usable is the default too. An empty list is real: nothing is
+    highlighted."""
+    default = list(DEFAULTS["calendar"]["events"]["high_impact"])
+    events = _table(_calendar(), "events") or {}
+    raw = events.get("high_impact", default)
+    if not isinstance(raw, list):
+        _warn_once(("events", "high_impact", repr(raw)),
+                   "news.toml: [calendar.events] high_impact = %r is not a list - "
+                   "using the default", raw)
+        return default
+    out = [p.strip() for p in raw if isinstance(p, str) and p.strip()]
+    if len(out) != len(raw):
+        _warn_once(("events", "high_impact", repr(raw)),
+                   "news.toml: [calendar.events] high_impact keeps only non-empty "
+                   "strings - dropped %d entr%s", len(raw) - len(out),
+                   "y" if len(raw) - len(out) == 1 else "ies")
+        if not out:
+            return default
     return out

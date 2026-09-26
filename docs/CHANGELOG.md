@@ -4,7 +4,38 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-26 (**Fourteen more news feeds**, from a probe of the operator's
+**Last updated:** 2026-09-26 (**Market News: a Source column on the headline list, and
+high-impact calendar tiles highlighted** — both at the operator's request.)
+
+- **Source column.** The headline list opens with a sticky column header — **Time ·
+  Imp. · Symbol · Headline · Source** — and every cell but the headline is a fixed
+  width, so the columns line up (`news.draw_rows`, shared with the public `/news`).
+  The Symbol slot is `w-32` (two chips and `+N`); the Source cell is `w-32`: the first
+  of the row's sources, truncated, `+N` for the rest, all of them on hover. Below `sm`
+  the Symbol and Source columns go, labels and all (`max-sm:hidden`): measured at
+  390px, a one-chip Symbol slot left the headline 122px, without it 178px.
+- ⚠ **The per-source badges this replaced never showed, at any width.** They were
+  `hidden sm:inline-flex`, and Quasar's `.hidden` is `display:none !important`, which
+  beats every `sm:` display utility; the test pinned the two class names, not what the
+  browser drew. The replaced test (`test_the_row_clips_and_source_badges_hide_on_a_phone`)
+  now forbids the bare `hidden` class on these cells.
+- **High-impact tiles.** `news_svc/econ.py` stamps a real bool `high` on every calendar
+  row: an event whose title contains a `[calendar.events] high_impact` phrase
+  (case-insensitive; shipped `FOMC statement`, `Press conference`, `- Chair` — matched
+  against the real Fed file's titles: *FOMC statement* / *Press conference* are the
+  adapter's labels, and `- Chair` takes *Speech - Chair …* / *Testimony - Chairman …*
+  but never a Vice Chair's; the minutes and the Beige Book are not high), a data entry
+  whose `[calendar.indicators.<key>] high` is true (all shipped but claims); dividends
+  and IPOs are never high. `news_config.high_impact_events()` validates the list;
+  `econ_calendar` passes it to both builds. `news_view.calendar_groups` carries `high`
+  onto a tile only for a real `True` (a data tile: any indicator), and `draw_calendar`
+  draws an amber border and wash plus a **HIGH** chip. Both new keys are in Settings →
+  Configuration → Market news.
+- Existing exact-payload assertions in `services/news_svc/tests/test_econ.py` gained the
+  new `high` key; `test_news_page.py`'s row-structure tests follow the new header row
+  and the Symbol / Source cells.
+
+**Prior —** 2026-09-26 (**Fourteen more news feeds**, from a probe of the operator's
 848-row candidate list `market_news_feeds.csv`: every row fetched and parsed with news_svc's own
 fetcher and RSS parser from the cloud container, not the VPS.)
 

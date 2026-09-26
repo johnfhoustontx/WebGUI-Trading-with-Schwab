@@ -988,3 +988,56 @@ def test_a_non_table_dividends_is_the_defaults(monkeypatch):
 def test_dividends_config_is_a_copy():
     nc.dividends_config()["lookback_days"] = 99
     assert nc.dividends_config()["lookback_days"] == 3
+
+
+# ── high-impact calendar items (2026-09-26) ──────────────────────────────────
+
+HIGH_KEYS = {"cpi", "core_cpi", "ppi", "nfp", "unrate", "pce", "core_pce", "gdp", "retail"}
+
+
+def test_every_shipped_indicator_but_claims_is_high_impact():
+    by_key = {i["key"]: i["high"] for i in nc.indicators()}
+    assert {k for k, v in by_key.items() if v is True} == HIGH_KEYS
+    assert by_key["claims"] is False
+
+
+def test_an_indicator_high_that_is_not_a_bool_is_false(monkeypatch, caplog):
+    for bad in ("yes", 1, None, [True]):
+        monkeypatch.setattr(nc, "load", lambda b=bad: {"calendar": {"indicators": {
+            "a": {"series": "A", "transform": "pct_mom", "schedule": "bls", "high": b}}}})
+        (ind,) = nc.indicators()
+        assert ind["high"] is False, bad
+    monkeypatch.setattr(nc, "load", lambda: {"calendar": {"indicators": {
+        "a": {"series": "A", "transform": "pct_mom", "schedule": "bls"}}}})
+    assert nc.indicators()[0]["high"] is False            # absent: not high
+    assert "high" in caplog.text
+
+
+def test_the_shipped_high_impact_events_are_the_fomc_and_the_chair():
+    assert nc.high_impact_events() == ["FOMC statement", "Press conference", "- Chair"]
+
+
+def test_high_impact_events_keep_only_non_empty_strings(monkeypatch, caplog):
+    monkeypatch.setattr(nc, "load", lambda: {"calendar": {"events": {
+        "high_impact": ["  FOMC statement ", "", 3, "Chair"]}}})
+    assert nc.high_impact_events() == ["FOMC statement", "Chair"]
+    assert "high_impact" in caplog.text
+
+
+def test_high_impact_events_that_are_not_a_list_are_the_default(monkeypatch, caplog):
+    default = nc.DEFAULTS["calendar"]["events"]["high_impact"]
+    for bad in ("FOMC", 3, {"a": 1}):
+        monkeypatch.setattr(nc, "load", lambda b=bad: {"calendar": {"events": {
+            "high_impact": b}}})
+        assert nc.high_impact_events() == default, bad
+    assert "high_impact" in caplog.text
+
+
+def test_an_empty_high_impact_list_highlights_nothing(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: {"calendar": {"events": {"high_impact": []}}})
+    assert nc.high_impact_events() == []
+
+
+def test_high_impact_events_is_a_copy():
+    nc.high_impact_events().append("ZZZ")
+    assert "ZZZ" not in nc.high_impact_events()

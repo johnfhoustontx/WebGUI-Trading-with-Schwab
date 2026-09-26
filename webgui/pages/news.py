@@ -11,9 +11,13 @@ built only when ``shell.may_enqueue()`` says this process may.
 Layout (design §3): the headline list in the LEFT column (its control bar and
 Trending filter it alone); the SEC panel in the RIGHT column's top half, the
 calendar in its bottom half, each scrolling on its own at ``lg``. Below ``lg``
-the three stack in that DOM order. Each headline is ONE line - time (Central),
-impact pill, tickers, the headline truncated with an ellipsis, source badges;
-the teaser (or a filing's summary) is on the headline's hover.
+the three stack in that DOM order. The headline list opens with a sticky
+column header (Time · Imp. · Symbol · Headline · Source); each headline is ONE
+line under it - time (Central), impact pill, a fixed-width Symbol slot, the
+headline truncated with an ellipsis, and a fixed-width Source cell (the first
+source, "+N", every source on hover); the teaser (or a filing's summary) is on
+the headline's hover. A high-impact calendar tile (the producer's ``high``) is
+drawn with an amber border and wash and a "HIGH" chip.
 
 Every fact comes from ``pages/news_view.py`` (pure); this module holds widgets
 and wiring. ``draw_rows`` / ``draw_sec_rows`` / ``draw_calendar`` are
@@ -79,13 +83,30 @@ EMPTY_FEED = "The feed is up but carries no items right now."
 _ROW = ("w-full items-center gap-2 flex-nowrap overflow-hidden py-1.5 "
         "border-b border-[#213152]/60")
 # w-28 holds a dated stamp ("Sep 25 10:43 AM") on one line.
-_WHEN = f"text-xs tabular-nums whitespace-nowrap {_t.MUTED} w-28 shrink-0"
+_WHEN_W = "w-28 shrink-0"
+_WHEN = f"text-xs tabular-nums whitespace-nowrap {_t.MUTED} {_WHEN_W}"
 _CHIP = "text-[11px] font-semibold px-1.5 py-0.5"
 _TICKER_LINK = f"{_CHIP} {_t.BADGE_ACCENT} no-underline hover:underline shrink-0"
 _TICKER_CHIP = f"{_CHIP} {_t.BADGE_ACCENT} cursor-pointer hover:underline shrink-0"
-# Source badges are the first thing to go below ``sm``: the headline matters more.
-_SOURCE = (f"text-[10.5px] px-1.5 py-0.5 {_t.BADGE_MUTED} whitespace-nowrap shrink-0 "
-           "hidden sm:inline-flex")
+# ⚠ ``max-sm:hidden``, never ``hidden sm:flex``: Quasar ships
+# ``.hidden { display: none !important }``, which beats every ``sm:`` display
+# utility - the source badges the Source column replaced were written that way
+# and never showed at any width.
+_SM_ONLY = "max-sm:hidden"
+# The Symbol column: a FIXED-width slot (two chips and a "+N"), so the headline
+# starts at the same x on every row. Below ``sm`` it goes, header label and
+# all, like the Source column: measured at 390px (16px page gutters twice),
+# even a one-chip slot left the headline 122px; without it, 178px.
+_TICKER_W = f"w-32 shrink-0 {_SM_ONLY}"
+_TICKER_SLOT = f"{_TICKER_W} flex items-center gap-1.5 flex-nowrap overflow-hidden"
+# The Source column: the first source (truncated) plus "+N", every source on
+# hover. A fixed-width cell - kept empty when a row has no source - that is
+# the first thing to go below ``sm``, header label and all: the headline
+# matters more on a phone.
+_SOURCE_CELL = (f"w-32 shrink-0 flex {_SM_ONLY} items-center gap-1 flex-nowrap "
+                "overflow-hidden cursor-default")
+_SOURCE = f"text-[10.5px] px-1.5 py-0.5 {_t.BADGE_MUTED} whitespace-nowrap truncate min-w-0"
+_SOURCE_MORE = f"text-[10.5px] px-1 py-0.5 {_t.MUTED} whitespace-nowrap shrink-0"
 _MORE_TICKERS = f"{_CHIP} {_t.BADGE_MUTED} whitespace-nowrap shrink-0 cursor-default"
 _HEADLINE = f"text-sm {_t.LABEL} no-underline hover:underline truncate min-w-0 flex-1"
 # The impact pill: a fixed-width slot, so a row with no band keeps the columns.
@@ -113,6 +134,12 @@ _PANEL_BG = next((c for c in _t.CARD.split() if c.startswith("bg-")), "bg-[#101a
 _SEC_HEAD = (f"w-full items-center gap-2 flex-nowrap {_t.EYEBROW} "
              f"sticky top-0 z-10 {_PANEL_BG} py-1")
 _SEC_SYM = "w-14 shrink-0"
+# The headline list's column header: the SEC panel's sticky header, over the
+# list's own cells (each label takes the width class of the cell below it).
+_LIST_HEAD = _SEC_HEAD
+_SOURCE_HEAD = f"w-32 shrink-0 {_SM_ONLY}"
+LIST_COLUMNS = ("Time", "Imp.", "Symbol", "Headline", "Source")
+IMPACT_HINT = "Impact: H high · M medium · L low"
 _SEC_CELL = "min-w-0 flex-1 items-center gap-1.5 flex-nowrap overflow-hidden"
 _SEC_TITLE = f"text-sm {_t.LABEL} no-underline hover:underline truncate min-w-0"
 _SEC_DETAIL = f"text-xs {_t.MUTED} truncate min-w-0 max-w-[45%] shrink-0"
@@ -120,7 +147,17 @@ _SEC_DOT = f"text-xs {_t.MUTED} shrink-0"
 _CAL_GROUP = "w-full gap-1.5"
 _CAL_TILES = "w-full grid grid-cols-1 sm:grid-cols-2 gap-2"
 _CAL_TILE = "gap-0.5 min-w-0 rounded-[8px] border border-[#213152] bg-white/[0.02] px-2.5 py-2"
+# A high-impact tile (the producer's ``high``): an amber accent border and a
+# faint amber wash in place of the plain ones, and a "HIGH" chip by its title.
+_CAL_TILE_HIGH = ("gap-0.5 min-w-0 rounded-[8px] border border-amber-400/70 "
+                  "bg-amber-400/[0.08] px-2.5 py-2")
 _CAL_TITLE = f"text-sm font-semibold {_t.LABEL} truncate w-full"
+_CAL_HEAD = "w-full items-center gap-1.5 flex-nowrap"
+_CAL_TITLE_HIGH = f"text-sm font-semibold {_t.LABEL} truncate min-w-0"
+_CAL_CHIP = ("text-[10px] font-bold uppercase tracking-[.06em] text-amber-300 "
+             "rounded-[4px] bg-amber-400/15 px-1 py-px shrink-0 cursor-default")
+HIGH_CHIP = "HIGH"
+HIGH_HINT = "High-impact release"
 _CAL_WHEN = f"text-xs tabular-nums {_t.MUTED}"
 _CAL_LINE = f"text-xs {_t.MUTED}"
 _CAL_IND = f"text-xs {_t.LABEL} tabular-nums"
@@ -263,10 +300,43 @@ def _headline(row, classes, *, href=nv.safe_href, hover=hover_text):
     return el
 
 
+def _list_head():
+    """The headline list's column header: Time · Imp. · Symbol · Headline ·
+    Source, each label carrying its cell's width so it sits over it."""
+    from nicegui import ui
+    widths = (_WHEN_W, _PILL_SLOT, _TICKER_W, "min-w-0 flex-1", _SOURCE_HEAD)
+    with ui.row().classes(_LIST_HEAD):
+        for text, width in zip(LIST_COLUMNS, widths):
+            el = ui.label(text).classes(f"{width} whitespace-nowrap")
+            if text == LIST_COLUMNS[1]:
+                with el:
+                    ui.tooltip(IMPACT_HINT)
+
+
+def _sources_cell(sources):
+    """The Source cell: the first source, ``+N`` for the rest, all on hover.
+    Empty (same width) for a row with none."""
+    from nicegui import ui
+    names = [s for s in sources if isinstance(s, str) and s] \
+        if isinstance(sources, list) else []
+    with ui.element("div").classes(_SOURCE_CELL) as cell:
+        if names:
+            ui.label(names[0]).classes(_SOURCE)
+        if len(names) > 1:
+            ui.label(f"+{len(names) - 1}").classes(_SOURCE_MORE)
+            ui.tooltip(", ".join(names))
+    return cell
+
+
 def draw_rows(container, rows, *, linked, on_ticker):
-    """Clear ``container`` and draw ONE LINE per row: the time
-    (``row["when"]``, Central), the impact pill, a chip per ticker, the headline
-    (truncated with an ellipsis) and a badge per source.
+    """Clear ``container`` and draw a column header (when there are rows), then
+    ONE LINE per row: the time (``row["when"]``, Central), the impact pill, the
+    Symbol slot (two ticker chips and "+N"), the headline (truncated with an
+    ellipsis) and the Source cell (the first source and "+N", every source on
+    hover). Below ``sm`` the Symbol and Source columns go, header labels and
+    all, so a phone keeps the headline its room. Every
+    cell but the headline is a fixed width, so the columns line up under the
+    header.
 
     A ticker links to its Symbol dossier when ``linked``; otherwise it is a chip
     that calls ``on_ticker(TICKER)`` - the public screen, which has no dossier,
@@ -276,20 +346,22 @@ def draw_rows(container, rows, *, linked, on_ticker):
     href_base = _symbol_base(linked)
     container.clear()
     with container:
+        if rows:
+            _list_head()
         for r in rows or []:
             with ui.row().classes(_ROW):
                 ui.label(r.get("when") or "").classes(_WHEN)
                 _pill(r.get("band"), r.get("reasons") or [])
                 tickers = r.get("tickers") or []
-                for t in tickers[:MAX_ROW_TICKERS]:
-                    _ticker(t, href_base, on_ticker)
-                rest = tickers[MAX_ROW_TICKERS:]
-                if rest:
-                    with ui.label(f"+{len(rest)}").classes(_MORE_TICKERS):
-                        ui.tooltip(", ".join(rest))
+                with ui.element("div").classes(_TICKER_SLOT):
+                    for t in tickers[:MAX_ROW_TICKERS]:
+                        _ticker(t, href_base, on_ticker)
+                    rest = tickers[MAX_ROW_TICKERS:]
+                    if rest:
+                        with ui.label(f"+{len(rest)}").classes(_MORE_TICKERS):
+                            ui.tooltip(", ".join(rest))
                 _headline(r, _HEADLINE)
-                for s in r.get("sources") or []:
-                    ui.label(s).classes(_SOURCE)
+                _sources_cell(r.get("sources"))
 
 
 def draw_sec_rows(container, rows, *, linked, on_ticker):
@@ -337,7 +409,9 @@ def _tile_when(tile):
 def draw_calendar(container, groups):
     """Clear ``container`` and draw ``news_view.calendar_groups``: per group its
     header, a muted note when its sources failed, then its tiles - or the
-    group's own plain sentence when it has none."""
+    group's own plain sentence when it has none. A tile whose ``high`` is a real
+    ``True`` (the producer decides: ``[calendar.events] high_impact``, an
+    indicator's ``high``) gets the amber border and wash and a "HIGH" chip."""
     from nicegui import ui
 
     container.clear()
@@ -353,8 +427,16 @@ def draw_calendar(container, groups):
                     continue
                 with ui.element("div").classes(_CAL_TILES):
                     for tile in tiles:
-                        with ui.column().classes(_CAL_TILE):
-                            ui.label(tile.get("title") or "").classes(_CAL_TITLE)
+                        high = tile.get("high") is True
+                        with ui.column().classes(_CAL_TILE_HIGH if high else _CAL_TILE):
+                            if high:
+                                with ui.row().classes(_CAL_HEAD):
+                                    ui.label(tile.get("title") or "") \
+                                        .classes(_CAL_TITLE_HIGH)
+                                    with ui.label(HIGH_CHIP).classes(_CAL_CHIP):
+                                        ui.tooltip(HIGH_HINT)
+                            else:
+                                ui.label(tile.get("title") or "").classes(_CAL_TITLE)
                             when = _tile_when(tile)
                             if when:
                                 ui.label(when).classes(_CAL_WHEN)

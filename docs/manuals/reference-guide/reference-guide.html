@@ -1645,11 +1645,14 @@ this, and what is scheduled?"</em> without leaving the app.</p>
 </tbody>
 </table>
 <h3 id="reading-the-screen_3">Reading the screen</h3>
-<p><strong>Each headline</strong> is one line: the publish time in <strong>Central time</strong> (an item from an
+<p><strong>Each headline</strong> is one line, in columns under a sticky header — <strong>Time · Imp. ·
+Symbol · Headline · Source</strong>: the publish time in <strong>Central time</strong> (an item from an
 earlier day shows its date too) · the <strong>impact</strong> letter · up to two <strong>tickers</strong> (a
 <strong>+N</strong> chip holds the rest, listed on hover) · the <strong>headline</strong>, a link to the
-publisher's own page, with its summary on hover · a grey <strong>badge</strong> per feed that
-carried it. On a phone the badges give way first.</p>
+publisher's own page, with its summary on hover · the <strong>source</strong>, the first feed that
+carried it plus <strong>+N</strong> for the others (every feed on hover). Every column but the
+headline has a fixed width, so they line up down the list. On a phone the Symbol and
+Source columns give way first.</p>
 <p><strong>Impact.</strong> A fixed set of rules gives every item points, and the points cut into
 three ranks — <strong>High</strong> at 6 or more, <strong>Med</strong> at 3 or more, <strong>Low</strong> below:</p>
 <table>
@@ -1741,6 +1744,12 @@ and otherwise <strong>upcoming</strong> — Actual —, Prior the latest value. 
 agencies' schedules reads <em>Next date not yet published</em>; the app never guesses one. A
 muted note on a group means every source behind it failed and it is showing the last
 good reading.</p>
+<p><strong>High-impact tiles</strong> carry an amber border and a <strong>HIGH</strong> tag. Shipped: the FOMC
+statement, its press conference and the Fed Chair's own speeches and testimony
+(<code>[calendar.events] high_impact</code> — a case-insensitive <em>contains</em> match on the title;
+<code>- Chair</code> matches <em>Speech - Chair …</em> and <em>Testimony - Chairman …</em> but never a Vice
+Chair), and every indicator but Jobless claims (<code>high = true</code> in its
+<code>[calendar.indicators.&lt;key&gt;]</code> table). A dividend or an IPO is never highlighted.</p>
 <p><strong>Refresh</strong> asks the service to re-check the calendar (only the sources that are due)
 and poll every feed now; the button spins until that poll finishes (usually a few
 minutes) and new items land as it does.</p>

@@ -2081,8 +2081,20 @@ Every instant is stored as aware UTC and displayed in **Central**. The indicator
 PCE, GDP, retail sales, claims) name a FRED `series`, a `transform` (`pct_mom` % m/m ·
 `change_k` change in thousands · `level_pct` · `level_k` level / 1000 · `pct_saar`), a
 `schedule` (`bls` / `bea` matched by a case-insensitive release-name PREFIX on a
-boundary — `"GDP ("` never takes *GDP by Industry* — or `fred` by `release_id`) and a
-`tile`. A missing or non-positive base is `None`, never 0.
+boundary — `"GDP ("` never takes *GDP by Industry* — or `fred` by `release_id`), a
+`tile`, and `high` (true for every shipped indicator but claims; a non-bool is false,
+with one WARNING). A missing or non-positive base is `None`, never 0.
+
+**High impact.** `econ.py` stamps `high` on every row it publishes: an event is high
+when its title CONTAINS a `[calendar.events] high_impact` phrase, case-insensitively
+(`news_config.high_impact_events()`; shipped `FOMC statement`, `Press conference`,
+`- Chair` — the Fed adapter titles an FOMC meeting *FOMC statement* and its press
+conference *Press conference*, and the Board titles the Chair's own appearances
+*Speech - Chair …* / *Testimony - Chairman …*, so `- Chair` never takes a Vice
+Chair's; not a list → the default; junk entries dropped with one WARNING; `[]` is
+real and highlights nothing), a data entry when its indicator's `high` is `true`; a
+dividend or IPO is never high. `econ_calendar` passes the phrases as
+`parts["high_events"]` to both builds, so the two views flag alike.
 
 **The FRED key, and its fallback.** With `FRED_API_KEY` set in the process environment
 (read at call time, from the stack `.env` only — never config, never `.env.live`),

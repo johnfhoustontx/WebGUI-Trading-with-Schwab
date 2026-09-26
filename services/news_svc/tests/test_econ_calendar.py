@@ -608,3 +608,34 @@ def test_a_304_nobody_asked_for_is_a_failure(db, bus, cal_config):
         return orig(url, **kw)
     econ_calendar.refresh(bus, db, weird, now=NOW, env={})
     assert _payload(bus, handlers.CACHE_CAL)["sources"]["fed"] == "never"
+
+
+# ── high-impact items (2026-09-26) ────────────────────────────────────────────
+
+def test_the_fomc_rows_of_the_real_fed_file_are_high_in_both_views(db, bus, cal_config):
+    """The real calendar.json: the FOMC statement and its press conference are
+    high; the minutes, the Beige Book and every Vice Chair's or Governor's
+    speech are not. The public view carries the same flags."""
+    econ_calendar.refresh(bus, db, FakeFetch(), now=NOW, env={})
+    for key in (handlers.CACHE_CAL, handlers.CACHE_CAL_PUBLIC):
+        ev = _payload(bus, key)["events"]
+        high = {e["title"] for e in ev if e["high"] is True}
+        assert high == {"FOMC statement", "Press conference"}, key
+        low = {e["title"] for e in ev if e["high"] is False}
+        assert {"FOMC minutes", "Beige Book",
+                "Speech - Vice Chair Philip N. Jefferson"} <= low, key
+        assert all(isinstance(e["high"], bool) for e in ev)
+
+
+def test_the_high_impact_phrases_come_from_the_config(db, bus, cal_config):
+    cal_config["calendar"]["events"]["high_impact"] = ["beige"]
+    econ_calendar.refresh(bus, db, FakeFetch(), now=NOW, env={})
+    ev = _payload(bus, handlers.CACHE_CAL)["events"]
+    assert {e["title"] for e in ev if e["high"]} == {"Beige Book"}
+
+
+def test_the_indicator_high_flags_reach_the_data_entries(db, bus, cal_config):
+    econ_calendar.refresh(bus, db, FakeFetch(), now=NOW, env={})
+    data = {d["key"]: d["high"] for d in _payload(bus, handlers.CACHE_CAL)["data"]}
+    assert data["claims"] is False
+    assert all(data[k] is True for k in data if k != "claims")

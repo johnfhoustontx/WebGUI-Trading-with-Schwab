@@ -831,10 +831,13 @@ Three panels: **headlines** on the left, **SEC filings and insider buys** top
 right, and the **economic calendar** below them. On a phone they stack in that
 order. All times are Central.
 
-- **Each headline is one line** — the time (an older item shows its date too),
-  an **impact** letter, up to two tickers (**+3** means three more; hover it for
-  the list), the headline and a small grey badge per feed. On a narrow screen
-  the feed badges are hidden so the headline keeps its room.
+- **Each headline is one line**, in columns under a header that stays put as
+  you scroll: **Time** (an older item shows its date too), **Imp.** (the
+  impact letter), **Symbol** (up to two tickers; **+3** means three more — hover
+  it for the list), the **Headline**, and **Source** — the feed that ran it,
+  with **+2** when two more feeds carried the same story (hover for all of
+  them). On a narrow screen the Symbol and Source columns are hidden so the
+  headline keeps its room.
 - **Impact — H, M or L** — a rough rank from fixed rules, not a judgement:
   words like *FOMC*, *merger* or *downgrade*, which feed ran it, several feeds
   running the same story, a ticker you follow, the size of an insider buy, the
@@ -867,6 +870,11 @@ order. All times are Central.
   **Released** with the time, in Central (e.g. *Released 7:30 AM CT*; the day is
   added once it is no longer today). It stays that way for a day. A muted note on a group
   means its sources could not be reached and it shows the last good reading.
+- **Highlighted tiles** — an amber border and a **HIGH** tag mark the releases
+  that most often move the market: the FOMC statement and press conference, the
+  Fed Chair's own speeches and testimony, and the CPI, PPI, jobs, PCE, GDP and
+  retail-sales reports. Which ones count is in **Settings → Configuration →
+  Market news**.
 
 The headlines refresh themselves — every 5 minutes in market hours, less often
 after the close and at weekends; the calendar keeps its own, slower schedule.

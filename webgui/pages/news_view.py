@@ -588,6 +588,12 @@ def _today_ct(now):
         return None
 
 
+def _high(row):
+    """The producer's "draw this highlighted" - True only for a real ``True``
+    (a missing flag, a 1 or a "true" is not high: never guess importance)."""
+    return row.get("high") is True
+
+
 def _event_tile(ev, now, today):
     """``None`` for an event with no title, or one already past: by its
     instant when it has one, else by its Central date."""
@@ -602,7 +608,8 @@ def _event_tile(ev, now, today):
         d = _date(ev.get("date"))
         if d is not None and today is not None and d < today:
             return None
-    return {"title": title, "when": _when_text(ev.get("at"), ev.get("date")), "lines": []}
+    return {"title": title, "when": _when_text(ev.get("at"), ev.get("date")), "lines": [],
+            "high": _high(ev)}
 
 
 def _dividend_tile(d):
@@ -621,7 +628,8 @@ def _dividend_tile(d):
     if pay:
         lines.append(f"Pays {_weekday_day(pay)}")
     return {"title": f"{sym} dividend" if sym else "Dividend",
-            "when": f"Ex-div {_weekday_day(ex)}" if ex else "", "lines": lines}
+            "when": f"Ex-div {_weekday_day(ex)}" if ex else "", "lines": lines,
+            "high": _high(d)}
 
 
 def _ipo_tile(i):
@@ -648,7 +656,8 @@ def _ipo_tile(i):
         lines.append(f"{_money(offer)} offer")
     when = _weekday_day(day)
     return {"title": f"{name} IPO" if name else "IPO",
-            "when": f"Priced {when}" if priced else when, "lines": lines}
+            "when": f"Priced {when}" if priced else when, "lines": lines,
+            "high": _high(i)}
 
 
 def _data_tiles(data, now, cfg):
@@ -660,10 +669,13 @@ def _data_tiles(data, now, cfg):
         state = indicator_state(ind, now, cfg)
         tile = by_title.get(title)
         if tile is None:
-            tile = {"title": title, "when": state["next"], "lines": [], "indicators": []}
+            tile = {"title": title, "when": state["next"], "lines": [], "indicators": [],
+                    "high": False}
             by_title[title] = tile
             tiles.append(tile)
         tile["indicators"].append(state)
+        # One high indicator makes its tile high (CPI and Core CPI share one).
+        tile["high"] = tile["high"] or _high(ind)
     return tiles
 
 
@@ -677,8 +689,10 @@ def _group_note(sources, names):
 
 def calendar_groups(payload, *, now) -> list:
     """The calendar's three groups, in order: ``{"title", "tiles", "note",
-    "empty"}``. A tile is ``{"title", "when", "lines"}`` (a data tile adds
-    ``indicators``, each an ``indicator_state``). ``note`` greys a group whose
+    "empty"}``. A tile is ``{"title", "when", "lines", "high"}`` (a data tile
+    adds ``indicators``, each an ``indicator_state``). ``high`` is True only
+    where the producer stamped a real ``True`` (a data tile: any of its
+    indicators); the page draws such a tile highlighted. ``note`` greys a group whose
     sources all failed; ``empty`` is the plain sentence for a group with no
     tiles (``None`` otherwise).
 
