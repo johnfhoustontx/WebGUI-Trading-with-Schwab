@@ -349,14 +349,19 @@ def test_the_other_writers_roll_back_on_failure(tmp_path):
 _STORY = "Apple rallies on iPhone demand"
 
 
-def test_public_view_shows_a_row_first_stored_by_a_non_public_feed(tmp_path):
+def test_public_view_hides_a_row_whose_stored_text_came_from_a_non_public_feed(tmp_path):
+    # Coordinator decision (fail closed): the stored url / title / teaser /
+    # original_source are the PRIMARY feed's, so a row first stored by a
+    # non-public feed never enters the public view - even once a public feed
+    # carries the same story. Accepted loss.
     db = store.Store(tmp_path / "n.db")
     db.insert_many([_src(_item("https://p/1", title=_STORY, public=False), "Private")])
     db.insert_many([_src(_item("https://y/1", title=_STORY), "Yahoo Finance")])
-    rows = db.newest(10, public_sources={"Yahoo Finance"})
+    assert db.newest(10, public_sources={"Yahoo Finance"}) == []
+    rows = db.newest(10, public_sources={"Private", "Yahoo Finance"})   # once Private is public
     assert len(rows) == 1
-    assert rows[0]["source"] == "Yahoo Finance"
-    assert rows[0]["sources"] == ["Yahoo Finance"]
+    assert rows[0]["source"] == "Private"
+    assert rows[0]["sources"] == ["Private", "Yahoo Finance"]
     assert rows[0]["public"] is True
     assert db.newest(10)[0]["sources"] == ["Private", "Yahoo Finance"]   # owner view intact
 
@@ -398,9 +403,19 @@ def test_public_view_for_ticker(tmp_path):
     db.insert_many([_src(_item("https://y/1", title=_STORY, tickers=["QQQ"]), "Yahoo Finance")])
     db.insert_many([_src(_item("https://m/1", tickers=["AAPL"], published="2026-09-25T19:00:00+00:00"),
                          "MarketWatch")])
+    # the merged row's url / title are Private's, so it stays out of the public view
+    assert db.newest_for_ticker("AAPL", 10, public_sources={"Yahoo Finance"}) == []
+    rows = db.newest_for_ticker("AAPL", 10, public_sources={"Yahoo Finance", "MarketWatch"})
+    assert [(r["url"], r["source"], r["sources"]) for r in rows] == [
+        ("https://m/1", "MarketWatch", ["MarketWatch"])]
+    y = _src(_item("https://y/2", title="Nvidia beats on data center sales", tickers=["NVDA"]),
+             "Yahoo Finance")
+    p2 = _src(_item("https://p/2", title="Nvidia beats on data center sales", tickers=["AAPL"],
+                    public=False), "Private")
+    db.insert_many([y]); db.insert_many([p2])
     rows = db.newest_for_ticker("AAPL", 10, public_sources={"Yahoo Finance"})
     assert [(r["url"], r["source"], r["sources"]) for r in rows] == [
-        ("https://p/1", "Yahoo Finance", ["Yahoo Finance"])]
+        ("https://y/2", "Yahoo Finance", ["Yahoo Finance"])]
     assert db.newest_for_ticker("AAPL", 10, public_sources={"Nobody"}) == []
     assert db.newest_for_ticker("AAPL", 10, public_sources=()) == []
 

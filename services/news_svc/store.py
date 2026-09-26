@@ -23,7 +23,10 @@ Merging, which is the part worth reading before changing anything here:
 * A merge sets the ``public`` column to (stored OR incoming). The column is the
   ingest-time record only: the PUBLIC VIEW is decided by ``public_sources`` - the
   feeds public NOW - at every read, so a feed turned private disappears from it at
-  once, and a merged row names only its public feeds there.
+  once, and a merged row names only its public feeds there. A row is public only
+  while its PRIMARY source is: its stored url / title / teaser are that feed's, so
+  a story first stored by a non-public feed stays out even once a public feed
+  carries it (fail closed; an accepted loss).
 
 Writes: every write opens ``BEGIN IMMEDIATE`` and either commits or rolls back
 whole. IMMEDIATE takes the write lock BEFORE the id / title lookups, so two Store
@@ -213,8 +216,11 @@ class Store:
         if public_sources is not None:
             if not public_sources:
                 return []
-            where.append("EXISTS (SELECT 1 FROM json_each(items.sources) WHERE value IN "
-                         f"({','.join('?' * len(public_sources))}))")
+            # The PRIMARY source must be public: the stored url / title / teaser /
+            # original_source are that feed's, and must never reach the public
+            # view from a non-public feed (fail closed - a story first stored by
+            # a non-public feed stays out even once a public feed carries it).
+            where.append(f"source IN ({','.join('?' * len(public_sources))})")
             params.extend(public_sources)
         if public_only:
             where.append("public=1")
@@ -233,8 +239,8 @@ class Store:
                 # Only public names reach the public view - a non-public feed's
                 # name must never leak through a merged row's ``sources``.
                 allowed = set(public_sources)
-                d["sources"] = [s for s in d["sources"] if s in allowed]
-                d["source"] = d["sources"][0]
+                d["sources"] = [d["source"]] + [s for s in d["sources"]
+                                                if s in allowed and s != d["source"]]
                 d["public"] = True
             out.append(d)
         return out
@@ -243,9 +249,9 @@ class Store:
         """The newest ``limit`` items.
 
         ``public_sources`` - the feeds public NOW - is THE public view: a row is
-        returned iff any feed in its ``sources`` is in it, and the row comes back
-        with ``sources`` cut to those public names and ``source`` the first of
-        them. ``sources`` keeps only rows whose primary ``source`` is in it;
+        returned iff its PRIMARY ``source`` (the feed whose url / title / teaser
+        are stored) is in it, and comes back with ``sources`` cut to the public
+        names, primary first. ``sources`` keeps only rows whose primary ``source`` is in it;
         ``public_only`` keeps rows whose ingest-time ``public`` column is set.
         A bare str is one name; an EMPTY collection returns nothing. The limit
         applies after every filter."""
