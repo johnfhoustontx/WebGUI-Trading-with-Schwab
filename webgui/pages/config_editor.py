@@ -86,6 +86,10 @@ def display_value(value, shipped_value, fld):
     v = cs.to_display(fld, value)
     if v is None:
         return "not set"
+    if fld.blank_ok and v == "":
+        # a blank that stands for something reads as that, never as nothing
+        return ("empty (feed User-Agent)" if fld.key.endswith("user_agent")
+                else "empty")
     if fld.kind == "bool":
         return "on" if v else "off"
     if fld.kind == "money":

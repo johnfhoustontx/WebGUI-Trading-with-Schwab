@@ -21,13 +21,15 @@ Kinds
     text            a short piece of text (a tab name); ``blank_ok`` lets "" stand
     symbols         a list of tickers
     phrases         a list of keyword phrases: case and inner spaces kept,
-                    split on commas only, deduplicated ignoring case
+                    split on commas only (each list item too), deduplicated
+                    ignoring case; non-string items are skipped
     pair            two numbers [low, high]
     ladder          a list of [peak, lock] rungs (fractions, shown as percents)
     sector          one of the sector names (the sector-map editor)
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 # Unit names of the systemd user units a change needs restarted, as the Status
@@ -1014,7 +1016,10 @@ _NEWS_CALENDAR_SECTIONS = (
               "bls or bea: matched by release name · fred: by release number.",
               kind="choice", choices=INDICATOR_SCHEDULES),
         Field("calendar.indicators.*.match", "Release name contains",
-              "For bls and bea schedules.", kind="text", optional=True),
+              "For bls and bea schedules. Surrounding spaces are trimmed, and it "
+              "is a prefix match on the release name: \"GDP (\" picks only the "
+              "releases starting with that, where \"GDP\" also picks \"GDP by "
+              "Industry\".", kind="text", optional=True),
         Field("calendar.indicators.*.release_id", "FRED release number",
               "For the fred schedule.", kind="int", min=1, max=100000, step=1,
               optional=True),
@@ -1230,6 +1235,17 @@ def _u(fld):
     return "" if not fld.unit else (fld.unit if fld.unit == "%" else f" {fld.unit}")
 
 
+_API_KEY_RE = re.compile(r"(?i)api_key")
+
+
+def _refuse_api_key(fld, text):
+    """A calendar source's address or headers must never carry an API key:
+    whatever is saved here lands in config/local and its changes.jsonl."""
+    if fld.key.startswith("calendar.sources.") and _API_KEY_RE.search(text):
+        raise ValueError("no API key here: the FRED key belongs in FRED_API_KEY "
+                         "in the stack .env, never in this file")
+
+
 def parse(fld: Field, raw, *, shipped=None):
     """Editor value -> the value stored in TOML, or ``ValueError`` with a
     sentence the page shows beside the field. ``shipped`` keeps an int an int."""
@@ -1277,6 +1293,7 @@ def parse(fld: Field, raw, *, shipped=None):
         s = str(raw).strip()
         if not s:
             raise ValueError("a value is required")
+        _refuse_api_key(fld, s)
         return s
     if k in ("choice", "sector"):
         if raw not in fld.choices:
@@ -1292,13 +1309,20 @@ def parse(fld: Field, raw, *, shipped=None):
                 out.append(t)
         return out
     if k == "phrases":
-        items = raw if isinstance(raw, (list, tuple)) else str(raw).split(",")
+        # Only strings survive, ints included in the skip: the loader
+        # (news_config._tiers) keeps only strings, so a str()-ed 11 or None
+        # would be a phrase the editor shows and the service never matches.
+        # Each item is split on commas too, so a pasted "a, b" is two phrases.
+        items = raw if isinstance(raw, (list, tuple)) else [str(raw)]
         out, seen = [], set()
         for it in items:
-            t = " ".join(str(it).split())
-            if t and t.casefold() not in seen:
-                seen.add(t.casefold())
-                out.append(t)
+            if not isinstance(it, str):
+                continue
+            for part in it.split(","):
+                t = " ".join(part.split())
+                if t and t.casefold() not in seen:
+                    seen.add(t.casefold())
+                    out.append(t)
         return out
     if k == "pair":
         try:
@@ -1328,6 +1352,10 @@ def parse(fld: Field, raw, *, shipped=None):
     return raw
 
 
+def _real(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
 # ── cross-field checks: (file, message) pairs over a flat {path-tuple: value} ─
 def cross_check(name, values):
     """Sentences for combinations that each pass alone but not together."""
@@ -1352,6 +1380,16 @@ def cross_check(name, values):
         w, t = g("rescue", "proximity_watch_pct"), g("rescue", "proximity_tested_pct")
         if None not in (w, t) and t >= w:
             errs.append("\"Tested\" must be closer to the strike than \"watch\".")
+    if name == "news.toml":
+        hi, med = g("impact", "high_at"), g("impact", "med_at")
+        if _real(hi) and _real(med) and med >= hi:
+            # the loader would drop BOTH to its defaults, with no sign here
+            errs.append("Impact: High must be above Med.")
+        bands = [g("impact", "form4", k) for k in ("small_usd", "large_usd",
+                                                     "huge_usd")]
+        if all(_real(b) for b in bands) and not (bands[0] < bands[1] < bands[2]):
+            errs.append("Impact: insider buy sizes must rise: small below large "
+                        "below very large.")
     if name == "flow_alerts.toml":
         lo, hi = g("big_delta", "delta_lo"), g("big_delta", "delta_hi")
         if None not in (lo, hi) and lo >= hi:

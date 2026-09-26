@@ -366,6 +366,9 @@ def test_indicator_transform_and_schedule_are_choices_from_the_loader():
     _s, sc = cs.locate(cfg, ("calendar", "indicators", "cpi", "schedule"))
     assert tr.kind == "choice" and set(tr.choices) == set(news_config.TRANSFORMS)
     assert sc.kind == "choice" and set(sc.choices) == set(news_config.SCHEDULES)
+    # exact: same order, no duplicates (a set comparison hides both)
+    assert tuple(tr.choices) == tuple(news_config.TRANSFORMS)
+    assert tuple(sc.choices) == tuple(news_config.SCHEDULES)
 
 
 def test_no_new_news_section_is_read_only():
@@ -377,3 +380,74 @@ def test_no_new_news_section_is_read_only():
                  ("collector", "sec_view_items")):
         assert cs.locate(cfg, path)[1] is not None, path
         assert not cs.is_readonly(cfg, path), path
+
+
+# ── news review fixes ────────────────────────────────────────────────────────
+def test_impact_med_must_be_below_high():
+    """The loader drops BOTH to defaults when med_at >= high_at, silently to
+    the operator - so the editor refuses the pair."""
+    errs = cs.cross_check("news.toml", {("impact", "high_at"): 5,
+                                        ("impact", "med_at"): 5})
+    assert "Impact: High must be above Med." in errs
+    assert "Impact: High must be above Med." in cs.cross_check(
+        "news.toml", {("impact", "high_at"): 3, ("impact", "med_at"): 4})
+    assert not cs.cross_check("news.toml", {("impact", "high_at"): 6,
+                                            ("impact", "med_at"): 3})
+
+
+def test_form4_bands_must_rise():
+    ok = {("impact", "form4", "small_usd"): 250_000,
+          ("impact", "form4", "large_usd"): 1_000_000,
+          ("impact", "form4", "huge_usd"): 10_000_000}
+    assert not cs.cross_check("news.toml", ok)
+    for bad in ({**ok, ("impact", "form4", "large_usd"): 250_000},
+                {**ok, ("impact", "form4", "huge_usd"): 500_000},
+                {**ok, ("impact", "form4", "small_usd"): 20_000_000}):
+        errs = cs.cross_check("news.toml", bad)
+        assert any("insider" in e.lower() for e in errs), bad
+    # a missing band is not checked
+    assert not cs.cross_check("news.toml", {("impact", "form4", "small_usd"): 9e9,
+                                            ("impact", "form4", "large_usd"): 1})
+
+
+def test_the_shipped_news_file_passes_its_own_cross_checks():
+    shipped = tomllib.loads((pathlib.Path(__file__).resolve().parents[2]
+                             / "config" / "news.toml").read_text())
+    assert cs.cross_check("news.toml", store.flatten(shipped)) == []
+
+
+@pytest.mark.parametrize("leaf", ["url", "user_agent", "accept"])
+def test_no_api_key_can_be_typed_into_a_calendar_source(leaf):
+    cfg = cs.BY_NAME["news.toml"]
+    _s, fld = cs.locate(cfg, ("calendar", "sources", "fred_api", leaf))
+    for text in ("https://api.stlouisfed.org/fred?api_key=abc123",
+                 "x API_KEY=1", "Api_Key"):
+        with pytest.raises(ValueError, match="FRED_API_KEY"):
+            cs.parse(fld, text)
+    # a placeholder the collector fills is fine only when it is not api_key
+    assert cs.parse(fld, "https://example.org/{series}") == \
+        "https://example.org/{series}"
+
+
+def test_the_api_key_refusal_is_only_on_calendar_sources():
+    assert cs.parse(F("t", "t", kind="text"), "api_key") == "api_key"
+
+
+def test_phrases_skip_items_that_are_not_strings():
+    """The loader keeps only strings (news_config._tiers), so the editor skips
+    everything else - ints included - rather than storing "None" or "[...]"."""
+    f = F("w", "w", kind="phrases")
+    assert cs.parse(f, ["FOMC", None, ["x"], {"a": 1}, True, 11, 1.5, "CPI"]) == \
+        ["FOMC", "CPI"]
+
+
+def test_phrases_list_items_are_split_on_commas_too():
+    f = F("w", "w", kind="phrases")
+    assert cs.parse(f, ["rate cut, FOMC", "Fed chair ,, rate cut"]) == \
+        ["rate cut", "FOMC", "Fed chair"]
+
+
+def test_indicator_match_help_says_it_is_a_trimmed_prefix():
+    _s, fld = cs.locate(cs.BY_NAME["news.toml"],
+                        ("calendar", "indicators", "gdp", "match"))
+    assert "prefix" in fld.help and "trimmed" in fld.help

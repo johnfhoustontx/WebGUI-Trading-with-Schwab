@@ -610,3 +610,12 @@ def test_news_v2_wildcard_rows_are_named_after_what_they_belong_to(monkeypatch):
         _row_with(host, label)
     (chips,) = _controls(_row_with(host, "Tier 1 — Words"))
     assert "rate cut" in chips.value and "FOMC" in chips.value
+
+
+def test_a_blank_ok_empty_value_reads_as_empty_not_blank():
+    ua = ce.cs.Field("calendar.sources.*.user_agent", "User-Agent", kind="text",
+                     optional=True, blank_ok=True)
+    assert ce.display_value("", "Mozilla/5.0", ua) == "empty (feed User-Agent)"
+    other = ce.cs.Field("x.y", "Y", kind="text", optional=True, blank_ok=True)
+    assert ce.display_value("", "z", other) == "empty"
+    assert ce.display_value("Mozilla/5.0", "", ua) == "Mozilla/5.0"
