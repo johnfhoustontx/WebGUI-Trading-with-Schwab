@@ -171,6 +171,10 @@ SHORT_INTEREST_DB = TRADE_SVC_DATA / "short_interest.db"
 # forward calendar — so this is a vendor product by necessity.
 EARNINGS_CALENDAR_DB = TRADE_SVC_DATA / "earnings_calendar.db"
 
+# news_svc: the public-feed collector's own store (gitignored data/).
+NEWS_SVC_DATA = REPO_ROOT / "services" / "news_svc" / "data"
+NEWS_DB = NEWS_SVC_DATA / "news.db"
+
 # ------------------------------------------------------------------ environment
 # Which environment this CHECKOUT is (dev or prod), and the behavior flags that
 # follow from it. Resolution lives here rather than in a new module because this

@@ -121,6 +121,7 @@ DATA_TREES = (
     "portfolio-analyzer/data",
     "shared/data",
     "services/trade_svc/data",
+    "services/news_svc/data",
     "schwab-proxy/data",
     # The operator's Settings -> Configuration overrides (gitignored). Losing
     # them silently reverts every tuned threshold to the shipped value.

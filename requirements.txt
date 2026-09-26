@@ -32,6 +32,10 @@ starlette==1.3.1          # ASGI framework under fastapi — pinned explicitly (
 requests==2.34.2          # pinned (was >=2.31.0)
 httpx==0.28.1             # pinned (was unpinned) — async HTTP client used by the FastAPI services (P, O)
 
+# --- Market news feeds (news_svc) ---
+feedparser==6.0.11        # news_svc: parses the free public RSS/Atom feeds it polls
+sgmllib3k==1.0.0          # feedparser's only dependency - pinned so the lock stays complete
+
 # --- Schwab API SDK (P, O, S) ---
 schwab-py==1.5.1          # pinned (was unpinned) — provides the `schwab` package (auth, streaming)
 

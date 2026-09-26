@@ -27,3 +27,4 @@ options   = 8211
 portfolio = 8212
 trade     = 8213
 market    = 8215
+news      = 8216   # public-feed news collector (news_svc)
