@@ -36,6 +36,11 @@ _DTD = re.compile(rb"<!(?:DOCTYPE|ENTITY)", re.IGNORECASE)
 _NO_SYMBOL = {"NONE", "NA", "N/A"}
 _PREFERRED_XML = ("form4", "primary_doc", "ownership")
 
+# Transaction groups kept in one item's detail. A fund's Form 4 can list
+# hundreds of lots; every one would ride in every published view. The headline
+# total is computed over ALL of them before the cut.
+MAX_GROUPS = 10
+
 FORM_LABEL = {"S-1": "IPO / new registration", "S-3": "shelf registration",
               "S-3ASR": "automatic shelf registration",
               "424B5": "prospectus supplement (offering)"}
@@ -142,16 +147,26 @@ def _flag(rel, tag):
     return (rel.findtext(tag) or "").strip().lower() in ("1", "true")
 
 
-def parse_form4(body: bytes):
-    """A Form 4's open-market purchases (code P), or None when it has none.
+def parse_form4_status(body):
+    """``(status, detail)`` for one Form 4 document:
 
-    A purchase whose shares or price is missing, non-numeric or non-finite is
-    SKIPPED rather than counted as zero-or-NaN: it cannot be valued."""
+    * ``("ok", detail)`` - its open-market purchases (``detail`` as
+      ``parse_form4`` returns it);
+    * ``("no_purchase", None)`` - a readable ownership document with none (a
+      sale, a grant - the normal case);
+    * ``("poison", reason)`` - not something a retry can read: not XML, a DTD,
+      or not an ownership document.
+
+    Never raises. A purchase whose shares or price is missing, non-numeric or
+    non-finite is SKIPPED rather than counted as zero-or-NaN: it cannot be
+    valued."""
     if isinstance(body, (bytes, bytearray)):
         body = _XMLNS.sub(b"", bytes(body), count=1)
     root = _parse_xml(body)
-    if root is None or root.tag.rsplit("}", 1)[-1] != "ownershipDocument":
-        return None
+    if root is None:
+        return "poison", "the Form 4 XML does not parse"
+    if root.tag.rsplit("}", 1)[-1] != "ownershipDocument":
+        return "poison", f"not an ownership document (<{root.tag}>)"
     groups = []
     for tx in root.iter("nonDerivativeTransaction"):
         if (tx.findtext("transactionCoding/transactionCode") or "").strip() != "P":
@@ -165,7 +180,7 @@ def parse_form4(body: bytes):
                        "shares": shares, "price": price, "value": shares * price,
                        "date": (tx.findtext("transactionDate/value") or "").strip()})
     if not groups:
-        return None
+        return "no_purchase", None
     rel = root.find("reportingOwner/reportingOwnerRelationship")
     labels = []
     if rel is not None:
@@ -180,17 +195,27 @@ def parse_form4(body: bytes):
         name = (owner.findtext("reportingOwnerId/rptOwnerName") or "").strip()
         if name and name not in insiders:
             insiders.append(name)
-    return {"symbol": _symbol(root.findtext("issuer/issuerTradingSymbol")),
-            "company": (root.findtext("issuer/issuerName") or "").strip(),
-            "insider": insiders[0] if insiders else "",
-            "insiders": insiders,
-            "relationship": ", ".join(labels) or "Insider",
-            "groups": groups, "total_value": sum(g["value"] for g in groups),
-            "transaction_date": groups[0]["date"]}
+    return "ok", {"symbol": _symbol(root.findtext("issuer/issuerTradingSymbol")),
+                  "company": (root.findtext("issuer/issuerName") or "").strip(),
+                  "insider": insiders[0] if insiders else "",
+                  "insiders": insiders,
+                  "relationship": ", ".join(labels) or "Insider",
+                  "groups": groups, "total_value": sum(g["value"] for g in groups),
+                  "transaction_date": groups[0]["date"]}
+
+
+def parse_form4(body: bytes):
+    """A Form 4's open-market purchases (code P), or None when it has none -
+    or cannot be read (``parse_form4_status`` tells the two apart)."""
+    status, detail = parse_form4_status(body)
+    return detail if status == "ok" else None
 
 
 def _money(v):
-    """``$136.4M``-style; a negative keeps its sign, a non-number reads $0."""
+    """``$136.4M``-style; a negative keeps its sign, a non-number reads $0.
+
+    Each unit is chosen on the ROUNDED figure, so a value that rounds up to
+    1000 of one unit reads as 1 of the next (``$1.0M``, never ``$1000K``)."""
     try:
         v = float(v)
     except (TypeError, ValueError):
@@ -198,15 +223,13 @@ def _money(v):
     if not math.isfinite(v):
         return "$0"
     sign, a = ("-" if v < 0 else ""), abs(v)
-    if a >= 1e9:
-        return f"{sign}${a/1e9:.1f}B"
-    if a >= 1e6:
-        return f"{sign}${a/1e6:.1f}M"
-    if a >= 1e3:
-        return f"{sign}${a/1e3:.0f}K"
     if round(a) == 0:
         return "$0"
-    return f"{sign}${a:.0f}"
+    for scale, suffix, fmt in ((1, "", ".0f"), (1e3, "K", ".0f"), (1e6, "M", ".1f")):
+        text = format(a / scale, fmt)
+        if float(text) < 1000:
+            return f"{sign}${text}{suffix}"
+    return f"{sign}${a / 1e9:.1f}B"
 
 
 def _value(v):
@@ -243,6 +266,9 @@ def form4_item(detail: dict, feed: dict, index_url: str, now: str, *, universe):
             who = f"{who} +{extra}"
     rel = detail.get("relationship") or "Insider"
     title = f"{sym or detail.get('company') or 'Unknown'} — {who} ({rel}) bought {_money(total)}"
+    groups = detail.get("groups")
+    if isinstance(groups, list) and len(groups) > MAX_GROUPS:
+        detail = dict(detail, groups=groups[:MAX_GROUPS], groups_more=len(groups) - MAX_GROUPS)
     return items.make_item(
         source=feed.get("name", "SEC"), kind="edgar_form4", public=feed.get("public", False),
         title=title, teaser="Form 4 insider purchase filed with the SEC",

@@ -136,6 +136,7 @@ def test_run_poll_publishes_both_views_and_status(tmp_path, monkeypatch):
     assert {i["source"] for i in pub["items"]} == {"Pub"}
     assert {s["name"] for s in status["feeds"]} == {"Pub", "Priv"}
     assert status["ts"] == NOW
+    assert "ts" not in feed and "ts" not in pub     # the envelope carries the time
 
 
 # ── A: the public view re-checks the CURRENT flags at every publish ─────────
@@ -194,7 +195,7 @@ def test_a_disabled_but_public_feed_keeps_its_items_public_until_they_age_out(
 def test_publish_feed_public_does_not_assert_on_the_ingest_flag():
     from shared.bus import Bus
     bus = Bus()
-    handlers.publish_feed_public(bus, [{"id": "x", "public": False}], NOW)
+    handlers.publish_feed_public(bus, [{"id": "x", "public": False}])
     assert bus.cache_get("cache:news:feed_public").payload["items"][0]["id"] == "x"
 
 
@@ -368,7 +369,10 @@ def _index(name="ownership.xml"):
     return json.dumps({"directory": {"item": [{"name": name}]}}).encode()
 
 
-def test_form4_amendments_are_skipped_without_a_fetch_and_marked_seen(tmp_path):
+def test_form4_amendments_are_skipped_without_a_fetch_and_not_marked_seen(tmp_path):
+    """Changed by the per-feed accession fix: a form the feed did not ask for is
+    skipped at no cost but NOT remembered, so widening ``forms`` later still
+    picks it up (it was "marked seen" until then)."""
     db = store.Store(tmp_path / "n.db")
     feed = {"name": "F4", "kind": "edgar_form4", "public": True, "min_value_usd": 0}
     atom, fresh = _form4_setup(db, lambda e: e["form"] != "4")
@@ -377,7 +381,10 @@ def test_form4_amendments_are_skipped_without_a_fetch_and_marked_seen(tmp_path):
     res = compute.poll_feed(feed, db, fetch, universe=[], now=NOW, cfg=_cfg([feed]))
     assert res["inserted"] == 0 and res["error"] is None
     assert fetch.calls == [edgar.CURRENT.format(form="4")]
-    assert db.unseen_accessions([e["accession"] for e in fresh]) == []
+    accs = [e["accession"] for e in fresh]
+    assert db.unseen_accessions(accs, feed="F4") == accs
+    compute.poll_feed(feed, db, fetch, universe=[], now=NOW, cfg=_cfg([feed]))
+    assert fetch.calls == [edgar.CURRENT.format(form="4")] * 2   # still no per-filing fetch
 
 
 def test_filings_keep_exact_form_matches_only(tmp_path):
@@ -392,7 +399,12 @@ def test_filings_keep_exact_form_matches_only(tmp_path):
     stored = db.newest(500)
     assert res["inserted"] == len(stored) == sum(e["form"] == "S-3" for e in entries)
     assert {i["detail"]["form"] for i in stored} == {"S-3"}
-    assert db.unseen_accessions([e["accession"] for e in entries]) == []
+    # only the wanted form is remembered (per-feed accession fix); the rest stay
+    # unseen for this feed, so widening ``forms`` later still reads them
+    s3 = [e["accession"] for e in entries if e["form"] == "S-3"]
+    other = [e["accession"] for e in entries if e["form"] != "S-3"]
+    assert db.unseen_accessions(s3, feed="S3") == []
+    assert db.unseen_accessions(other, feed="S3") == other
 
 
 def test_a_poison_accession_is_logged_once_marked_seen_and_does_not_stop_the_rest(
@@ -400,12 +412,17 @@ def test_a_poison_accession_is_logged_once_marked_seen_and_does_not_stop_the_res
     db = store.Store(tmp_path / "n.db")
     feed = {"name": "F4", "kind": "edgar_form4", "public": True, "min_value_usd": 0}
     atom, fresh = _form4_setup(db, lambda e: e["form"] == "4")
-    bad_json, no_xml, bad_xml, sale, good = fresh[:5]
-    db.mark_accessions([e["accession"] for e in fresh[5:]])
+    bad_json, no_xml, bad_xml, sale, good, sale2, sale3 = fresh[:7]
+    # sale2 / sale3: readable, so 3 poison of 7 stays under "more than half failed"
+    db.mark_accessions([e["accession"] for e in fresh[7:]])
     folder = lambda e: e["index_url"].rsplit("/", 1)[0]  # noqa: E731
     buy = (FIX / "form4_buy.xml").read_bytes()
     assert b"<transactionCode>P</transactionCode>" in buy
+    sold = buy.replace(b"<transactionCode>P</transactionCode>",
+                       b"<transactionCode>S</transactionCode>")
     bodies = {edgar.CURRENT.format(form="4"): atom,
+              f"{folder(sale2)}/index.json": _index(), f"{folder(sale2)}/ownership.xml": sold,
+              f"{folder(sale3)}/index.json": _index(), f"{folder(sale3)}/ownership.xml": sold,
               f"{folder(bad_json)}/index.json": b"<html>not json</html>",
               f"{folder(no_xml)}/index.json": b'{"directory": {"item": []}}',
               f"{folder(bad_xml)}/index.json": _index(),
@@ -728,3 +745,273 @@ def test_handle_command_runs_a_poll_on_news_refresh(monkeypatch):
     handlers.handle_command("BUS", Cmd())
     handlers.handle_command("BUS", type("Other", (), {"type": "nope"})())
     assert ran == ["BUS"]
+
+
+# ── K: an SEC block or outage is transient: nothing is marked seen ──────────
+
+def _degrades(monkeypatch):
+    calls = []
+    monkeypatch.setattr(compute._degrade, "degraded",
+                        lambda area, **kw: calls.append((area, kw.get("detail"))))
+    return calls
+
+
+@pytest.mark.parametrize("status", [403, 429, 500, 503, None])
+def test_an_sec_block_on_every_accession_marks_nothing_seen_and_is_the_feeds_error(
+        tmp_path, monkeypatch, status):
+    calls = _degrades(monkeypatch)
+    db = store.Store(tmp_path / "n.db")
+    feed = {"name": "F4", "kind": "edgar_form4", "public": True, "min_value_usd": 0}
+    atom = (FIX / "edgar_current_4.xml").read_bytes()
+    entries = edgar.parse_current(atom)
+    requested = []
+
+    def fetch(url, **kw):
+        requested.append(url)
+        if url.endswith("/index.json"):
+            raise compute.FetchError(f"HTTP {status} {url}", status=status)
+        return FakeFetch({edgar.CURRENT.format(form="4"): atom})(url, **kw)
+
+    res = compute.poll_feed(feed, db, fetch, universe=["LEN"], now=NOW, cfg=_cfg([feed]))
+    accs = [e["accession"] for e in entries]
+    assert db.unseen_accessions(accs, feed="F4") == accs                 # 0 marked seen
+    assert sum(u.endswith("/index.json") for u in requested) == 1        # stopped at once
+    assert res["error"] and res["inserted"] == 0
+    st = db.feed_state("F4")
+    assert st["error"] and st["last_ok"] is None and st["last_poll"] == NOW
+    assert [a for a, _ in calls] == ["news.feed.F4"]                     # one degrade
+
+
+def test_an_sec_outage_mid_poll_keeps_the_items_built_so_far_and_reports_it(
+        tmp_path, monkeypatch):
+    calls = _degrades(monkeypatch)
+    db = store.Store(tmp_path / "n.db")
+    feed = {"name": "F4", "kind": "edgar_form4", "public": True, "min_value_usd": 0}
+    atom, fresh = _form4_setup(db, lambda e: e["form"] == "4")
+    good, blocked, later = fresh[:3]
+    db.mark_accessions([e["accession"] for e in fresh[3:]])
+    g = good["index_url"].rsplit("/", 1)[0]
+
+    def fetch(url, **kw):
+        if url.startswith(blocked["index_url"].rsplit("/", 1)[0]):
+            raise compute.FetchError("HTTP 403", status=403)
+        return FakeFetch({edgar.CURRENT.format(form="4"): atom, f"{g}/index.json": _index(),
+                          f"{g}/ownership.xml": (FIX / "form4_buy.xml").read_bytes()})(url, **kw)
+
+    res = compute.poll_feed(feed, db, fetch, universe=["LEN"], now=NOW, cfg=_cfg([feed]))
+    assert res["inserted"] == 1 and "403" in res["error"]
+    assert db.unseen_accessions([e["accession"] for e in (good, blocked, later)],
+                                feed="F4") == [blocked["accession"], later["accession"]]
+    assert len(db.newest(10)) == 1
+    assert [a for a, _ in calls] == ["news.feed.F4"]
+
+
+def test_more_than_half_of_the_accessions_failing_is_the_feeds_error(tmp_path, monkeypatch):
+    calls = _degrades(monkeypatch)
+    db = store.Store(tmp_path / "n.db")
+    feed = {"name": "F4", "kind": "edgar_form4", "public": True, "min_value_usd": 0}
+    atom, fresh = _form4_setup(db, lambda e: e["form"] == "4")
+    bad1, bad2, bad3, good, sale = fresh[:5]
+    db.mark_accessions([e["accession"] for e in fresh[5:]])
+    folder = lambda e: e["index_url"].rsplit("/", 1)[0]  # noqa: E731
+    buy = (FIX / "form4_buy.xml").read_bytes()
+    bodies = {edgar.CURRENT.format(form="4"): atom,
+              f"{folder(bad1)}/index.json": b"<html>", f"{folder(bad2)}/index.json": b"<html>",
+              f"{folder(bad3)}/index.json": b"<html>",
+              f"{folder(good)}/index.json": _index(), f"{folder(good)}/ownership.xml": buy,
+              f"{folder(sale)}/index.json": _index(),
+              f"{folder(sale)}/ownership.xml": buy.replace(
+                  b"<transactionCode>P</transactionCode>", b"<transactionCode>S</transactionCode>")}
+    res = compute.poll_feed(feed, db, FakeFetch(bodies), universe=["LEN"], now=NOW,
+                            cfg=_cfg([feed]))
+    assert res["inserted"] == 1 and res["error"] and "3 of 5" in res["error"]
+    assert db.unseen_accessions([e["accession"] for e in fresh[:5]], feed="F4") == []
+    assert db.feed_state("F4")["error"] == res["error"]
+    assert [a for a, _ in calls] == ["news.feed.F4"]
+
+
+def test_exactly_half_failing_is_not_an_error(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    feed = {"name": "F4", "kind": "edgar_form4", "public": True, "min_value_usd": 0}
+    atom, fresh = _form4_setup(db, lambda e: e["form"] == "4")
+    bad, good = fresh[:2]
+    db.mark_accessions([e["accession"] for e in fresh[2:]])
+    g = good["index_url"].rsplit("/", 1)[0]
+    fetch = FakeFetch({edgar.CURRENT.format(form="4"): atom,
+                       f"{bad['index_url'].rsplit('/', 1)[0]}/index.json": b"<html>",
+                       f"{g}/index.json": _index(),
+                       f"{g}/ownership.xml": (FIX / "form4_buy.xml").read_bytes()})
+    res = compute.poll_feed(feed, db, fetch, universe=["LEN"], now=NOW, cfg=_cfg([feed]))
+    assert res["error"] is None and res["inserted"] == 1
+
+
+def test_a_later_forms_atom_failure_keeps_the_earlier_forms_work(tmp_path, monkeypatch):
+    calls = _degrades(monkeypatch)
+    db = store.Store(tmp_path / "n.db")
+    feed = {"name": "S", "kind": "edgar_filings", "public": True, "forms": ["S-3", "S-1"]}
+    atom = (FIX / "edgar_current_s3.xml").read_bytes()
+    s3 = [e["accession"] for e in edgar.parse_current(atom) if e["form"] == "S-3"]
+    fetch = FakeFetch({edgar.CURRENT.format(form="S-3"): atom,       # the S-1 Atom 404s
+                       edgar.TICKERS_JSON: (FIX / "company_tickers.json").read_bytes()})
+    res = compute.poll_feed(feed, db, fetch, universe=[], now=NOW, cfg=_cfg([feed]))
+    assert res["inserted"] == len(s3) and res["error"] and "S-1" in res["error"]
+    assert db.unseen_accessions(s3, feed="S") == []                  # not re-done next poll
+    assert [a for a, _ in calls] == ["news.feed.S"]
+
+
+def test_an_oversized_form4_is_poison_not_an_outage(tmp_path, monkeypatch):
+    db = store.Store(tmp_path / "n.db")
+    feed = {"name": "F4", "kind": "edgar_form4", "public": True, "min_value_usd": 0}
+    atom, fresh = _form4_setup(db, lambda e: e["form"] == "4")
+    huge, good = fresh[:2]
+    db.mark_accessions([e["accession"] for e in fresh[2:]])
+    h, g = (e["index_url"].rsplit("/", 1)[0] for e in (huge, good))
+    inner = FakeFetch({edgar.CURRENT.format(form="4"): atom, f"{h}/index.json": _index(),
+                       f"{g}/index.json": _index(),
+                       f"{g}/ownership.xml": (FIX / "form4_buy.xml").read_bytes()})
+
+    def fetch(url, **kw):
+        if url == f"{h}/ownership.xml":
+            raise compute.TooLarge(f"response too large {url}")
+        return inner(url, **kw)
+
+    res = compute.poll_feed(feed, db, fetch, universe=["LEN"], now=NOW, cfg=_cfg([feed]))
+    assert res["error"] is None and res["inserted"] == 1
+    assert db.unseen_accessions([huge["accession"], good["accession"]], feed="F4") == []
+
+
+# ── L: the CIK map outlives a failed refresh ────────────────────────────────
+
+def test_a_failed_company_tickers_refresh_keeps_the_stale_map_and_retries(tmp_path, monkeypatch):
+    real = edgar.cik_map(json.loads((FIX / "company_tickers.json").read_bytes()))
+    compute._cik_cache.update(ts=1.0, map=real)                      # long expired
+    db = store.Store(tmp_path / "n.db")
+    feed = {"name": "S3", "kind": "edgar_filings", "public": True, "forms": ["S-3"]}
+    atom = (FIX / "edgar_current_s3.xml").read_bytes()
+    fetch = FakeFetch({edgar.CURRENT.format(form="S-3"): atom})      # tickers json 404s
+    res = compute.poll_feed(feed, db, fetch, universe=[], now=NOW, cfg=_cfg([feed]))
+    assert res["error"] is None
+    assert any(i["tickers"] for i in db.newest(500))                 # the stale map was used
+    assert compute._cik_to_ticker(fetch, "ua", 5) == real
+    assert fetch.calls.count(edgar.TICKERS_JSON) == 2                # and retried each time
+
+
+# ── M: validators belong to the URL they were answered for ──────────────────
+
+class ValidatorFetch(FakeFetch):
+    def __init__(self, bodies):
+        super().__init__(bodies)
+        self.sent = []
+
+    def __call__(self, url, *, etag=None, last_modified=None, **kw):
+        self.sent.append((url, etag, last_modified))
+        return super().__call__(url, etag=etag, last_modified=last_modified, **kw)
+
+
+def test_a_changed_feed_url_drops_the_saved_validators(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.set_feed_state("MW", etag="e0", last_modified="lm0", url="https://old")
+    feed = {"name": "MW", "kind": "rss", "public": True, "url": "https://new"}
+    fetch = ValidatorFetch({"https://new": (FIX / "marketwatch.xml").read_bytes()})
+    compute.poll_feed(feed, db, fetch, universe=[], now=NOW, cfg=_cfg([feed]))
+    assert fetch.sent == [("https://new", None, None)]
+    st = db.feed_state("MW")
+    assert (st["etag"], st["url"]) == ("e1", "https://new")
+    compute.poll_feed(feed, db, fetch, universe=[], now=NOW, cfg=_cfg([feed]))
+    assert fetch.sent[-1] == ("https://new", "e1", None)             # same url: sent
+
+
+def test_a_changed_google_query_drops_the_saved_validators(tmp_path):
+    from services.news_svc.adapters import google_news
+    db = store.Store(tmp_path / "n.db")
+    old = {"name": "G", "kind": "google_news", "public": True, "query": "site:wsj.com"}
+    new = dict(old, query="site:ft.com")
+    db.set_feed_state("G", etag="e0", url=google_news.url(old))
+    fetch = ValidatorFetch({google_news.url(new): (FIX / "google_wsj.xml").read_bytes()})
+    compute.poll_feed(new, db, fetch, universe=[], now=NOW, cfg=_cfg([new]))
+    assert fetch.sent == [(google_news.url(new), None, None)]
+
+
+# ── N: seen accessions are per feed ─────────────────────────────────────────
+
+def test_two_form4_feeds_each_process_an_accession(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    atom, fresh = _form4_setup(db, lambda e: e["form"] == "4")
+    first = fresh[0]
+    db.mark_accessions([e["accession"] for e in fresh[1:]])
+    f = first["index_url"].rsplit("/", 1)[0]
+    fetch = FakeFetch({edgar.CURRENT.format(form="4"): atom, f"{f}/index.json": _index(),
+                       f"{f}/ownership.xml": (FIX / "form4_buy.xml").read_bytes()})
+    big = {"name": "Big buys", "kind": "edgar_form4", "public": True, "min_value_usd": 0}
+    mine = {"name": "My tickers", "kind": "edgar_form4", "public": False, "min_value_usd": 0}
+    for feed in (big, mine):
+        compute.poll_feed(feed, db, fetch, universe=["LEN"], now=NOW, cfg=_cfg([big, mine]))
+    assert fetch.calls.count(f"{f}/ownership.xml") == 2
+    assert db.newest(10)[0]["sources"] == ["Big buys", "My tickers"]
+    for name in ("Big buys", "My tickers"):
+        assert db.unseen_accessions([first["accession"]], feed=name) == []
+
+
+def test_widening_forms_picks_up_an_accession_skipped_before(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    atom = (FIX / "edgar_current_s3.xml").read_bytes()
+    asr = [e for e in edgar.parse_current(atom) if e["form"] == "S-3ASR"]
+    fetch = FakeFetch({edgar.CURRENT.format(form="S-3"): atom,
+                       edgar.TICKERS_JSON: (FIX / "company_tickers.json").read_bytes()})
+    feed = {"name": "S3", "kind": "edgar_filings", "public": True, "forms": ["S-3"]}
+    compute.poll_feed(feed, db, fetch, universe=[], now=NOW, cfg=_cfg([feed]))
+    assert db.unseen_accessions([e["accession"] for e in asr], feed="S3") == [
+        e["accession"] for e in asr]
+    feed["forms"] = ["S-3", "S-3ASR"]
+    compute.poll_feed(feed, db, fetch, universe=[], now=NOW, cfg=_cfg([feed]))
+    assert {i["detail"]["form"] for i in db.newest(500)} == {"S-3", "S-3ASR"}
+
+
+# ── O: an unchanged poll does not bump the feed views ───────────────────────
+
+def test_two_polls_with_identical_rows_do_not_change_the_feed_versions(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    cfg, bodies = _two_public_feeds(monkeypatch)
+    kw = {"feeds": nc.feeds(), "universe": [], "cfg": _cfg(nc.feeds())}
+    compute.run_poll(bus, db, FakeFetch(bodies), now=NOW, **kw)
+    before = {k: bus.cache_version(k) for k in (handlers.CACHE_FEED, handlers.CACHE_PUBLIC,
+                                                handlers.CACHE_STATUS)}
+    compute.run_poll(bus, db, FakeFetch(bodies), now="2026-09-26T00:05:00+00:00", **kw)
+    after = {k: bus.cache_version(k) for k in before}
+    assert after[handlers.CACHE_FEED] == before[handlers.CACHE_FEED]
+    assert after[handlers.CACHE_PUBLIC] == before[handlers.CACHE_PUBLIC]
+    assert after[handlers.CACHE_STATUS] > before[handlers.CACHE_STATUS]   # last_poll moved
+
+
+# ── P: a store failure costs its own step, not all three views ──────────────
+
+def test_a_failed_prune_still_publishes_every_view(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    calls = _degrades(monkeypatch)
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    cfg, bodies = _two_public_feeds(monkeypatch)
+    monkeypatch.setattr(db, "prune", _boom)
+    compute.run_poll(bus, db, FakeFetch(bodies), feeds=nc.feeds(), universe=[], now=NOW,
+                     cfg=_cfg(nc.feeds()))
+    for key in (handlers.CACHE_FEED, handlers.CACHE_PUBLIC, handlers.CACHE_STATUS):
+        assert bus.cache_get(key) is not None, key
+    assert bus.cache_get(handlers.CACHE_FEED).payload["items"]
+    assert [a for a, _ in calls] == ["news.prune"]
+
+
+def test_a_failed_newest_still_publishes_the_status(tmp_path, monkeypatch):
+    from shared.bus import Bus
+    calls = _degrades(monkeypatch)
+    bus = Bus()
+    db = store.Store(tmp_path / "n.db")
+    cfg, bodies = _two_public_feeds(monkeypatch)
+    monkeypatch.setattr(db, "newest", _boom)
+    compute.run_poll(bus, db, FakeFetch(bodies), feeds=nc.feeds(), universe=[], now=NOW,
+                     cfg=_cfg(nc.feeds()))
+    assert bus.cache_get(handlers.CACHE_FEED) is None
+    assert bus.cache_get(handlers.CACHE_PUBLIC) is None
+    assert {s["name"] for s in bus.cache_get(handlers.CACHE_STATUS).payload["feeds"]} == {"P", "Q"}
+    assert sorted(a for a, _ in calls) == ["news.publish", "news.publish_public"]

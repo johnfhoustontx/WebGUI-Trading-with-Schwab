@@ -118,3 +118,92 @@ def test_a_stream_cut_off_mid_body_is_a_fetch_error(fake_get):
     with pytest.raises(fetch.FetchError):
         fetch.http_fetch("https://x", max_bytes=100)
     assert fake_get["response"].closed
+
+
+# ── the overall deadline: requests' timeout is per READ, not per request ────
+
+class _Clock:
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+class DripResponse(FakeResponse):
+    """A server that sends one chunk every ``step`` seconds - never idle long
+    enough for requests' per-read timeout, so only a total deadline stops it."""
+
+    def __init__(self, clock, step, chunks):
+        super().__init__(chunks=chunks)
+        self._clock, self._step = clock, step
+
+    def iter_content(self, chunk_size=1):
+        for c in self._chunks:
+            self._clock.t += self._step
+            self.read += len(c)
+            yield c
+
+
+def test_a_drip_fed_body_is_stopped_by_the_total_deadline(fake_get, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(fetch.time, "monotonic", clock)
+    fake_get["response"] = DripResponse(clock, 19, [b"x"] * 50)
+    with pytest.raises(fetch.FetchError, match="deadline") as err:
+        fetch.http_fetch("https://x", timeout=20, max_bytes=1000)   # default 3 x 20 s
+    assert err.value.status is None                  # an outage, not the server's answer
+    assert fake_get["response"].read == 4            # 76 s > 60 s: stopped at once
+    assert fake_get["response"].closed
+
+
+def test_the_deadline_is_checked_before_reading_the_body(fake_get, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(fetch.time, "monotonic", clock)
+    resp = DripResponse(clock, 0, [b"x"])
+
+    def slow_get(url, **kw):
+        clock.t += 61                                 # headers took longer than 3 x 20 s
+        return resp
+
+    monkeypatch.setattr(fetch.requests, "get", slow_get)
+    with pytest.raises(fetch.FetchError, match="deadline"):
+        fetch.http_fetch("https://x", timeout=20, max_bytes=1000)
+    assert resp.read == 0 and resp.closed
+
+
+def test_an_explicit_deadline_overrides_the_default(fake_get, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(fetch.time, "monotonic", clock)
+    fake_get["response"] = DripResponse(clock, 3, [b"x"] * 10)
+    with pytest.raises(fetch.FetchError, match="deadline"):
+        fetch.http_fetch("https://x", timeout=20, deadline_s=5, max_bytes=1000)
+    assert fake_get["response"].read == 2
+
+
+def test_a_body_inside_the_deadline_is_kept(fake_get, monkeypatch):
+    clock = _Clock()
+    monkeypatch.setattr(fetch.time, "monotonic", clock)
+    fake_get["response"] = DripResponse(clock, 19, [b"a", b"b", b"c"])     # 57 s < 60 s
+    assert fetch.http_fetch("https://x", timeout=20, max_bytes=1000).body == b"abc"
+
+
+# ── "too large" is its own kind: the response's answer, not an outage ───────
+
+def test_an_oversized_body_is_a_too_large_error(fake_get):
+    fake_get["response"] = FakeResponse(chunks=[b"x" * 40] * 10)
+    with pytest.raises(fetch.TooLarge):
+        fetch.http_fetch("https://x", max_bytes=100)
+    fake_get["response"] = FakeResponse(chunks=[b"x"], headers={"Content-Length": "500"})
+    with pytest.raises(fetch.TooLarge) as err:
+        fetch.http_fetch("https://x", max_bytes=100)
+    assert isinstance(err.value, fetch.FetchError)
+
+
+# ── a 304 nobody asked for ───────────────────────────────────────────────────
+
+def test_a_304_without_validators_is_an_error_not_an_empty_poll(fake_get):
+    fake_get["response"] = FakeResponse(status=304, chunks=())
+    with pytest.raises(fetch.FetchError, match="304 without validators") as err:
+        fetch.http_fetch("https://x", max_bytes=100)
+    assert err.value.status == 304
+    assert fake_get["response"].closed

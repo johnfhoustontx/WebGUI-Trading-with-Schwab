@@ -348,3 +348,67 @@ def test_a_feed_without_public_yields_a_private_item():
                              cik_to_ticker={})["public"] is False
     assert edgar.form4_item(d, {"public": True}, "https://sec/x", NOW,
                             universe=["ZZZ"])["public"] is True
+
+
+# ── money never rounds past its unit ─────────────────────────────────────────
+
+def test_money_steps_up_a_unit_when_the_rounded_figure_reaches_1000():
+    assert edgar._money(999_600) == "$1.0M"          # not "$1000K"
+    assert edgar._money(999_960_000) == "$1.0B"      # not "$1000.0M"
+    assert edgar._money(-999_600) == "-$1.0M"
+    assert edgar._money(999_499) == "$999K"
+    assert edgar._money(999_949_999) == "$999.9M"
+    assert edgar._money(999.6) == "$1K"              # dollars roll into thousands too
+    assert edgar._money(0) == "$0" and edgar._money(0.4) == "$0"
+    assert edgar._money(-1_500_000) == "-$1.5M"
+
+
+# ── a Form 4 item carries at most ten groups; the total counts them all ────
+
+def _detail(n):
+    groups = [{"code": "P", "security": "Common", "shares": 100.0 + i, "price": 10.0,
+               "value": (100.0 + i) * 10.0, "date": "2026-09-24"} for i in range(n)]
+    return {"symbol": "LEN", "company": "Lennar", "insider": "A", "insiders": ["A"],
+            "relationship": "Director", "groups": groups,
+            "total_value": sum(g["value"] for g in groups), "transaction_date": "2026-09-24"}
+
+
+_F4 = {"name": "F4", "kind": "edgar_form4", "public": True, "min_value_usd": 0}
+
+
+def test_form4_item_caps_its_groups_at_ten_and_keeps_the_full_total():
+    d = _detail(15)
+    it = edgar.form4_item(d, _F4, "https://sec/x", NOW, universe=["LEN"])
+    assert len(it["detail"]["groups"]) == edgar.MAX_GROUPS == 10
+    assert it["detail"]["groups"] == d["groups"][:10]
+    assert it["detail"]["groups_more"] == 5
+    assert math.isclose(it["detail"]["total_value"], sum(g["value"] for g in d["groups"]))
+    assert it["title"].endswith(edgar._money(d["total_value"]))
+    assert len(d["groups"]) == 15                                  # the caller's dict is untouched
+
+
+def test_form4_item_with_ten_groups_or_fewer_is_unchanged():
+    d = _detail(10)
+    it = edgar.form4_item(d, _F4, "https://sec/x", NOW, universe=["LEN"])
+    assert it["detail"] == d and "groups_more" not in it["detail"]
+
+
+def test_parse_form4_keeps_every_group_for_the_total():
+    d = edgar.parse_form4((FIX / "form4_buy.xml").read_bytes())
+    assert len(d["groups"]) == 9                                   # every P lot in the fixture
+    assert math.isclose(d["total_value"], sum(g["value"] for g in d["groups"]))
+
+
+# ── parse_form4_status: poison vs "no purchase" vs a purchase ───────────────
+
+def test_parse_form4_status_tells_poison_from_no_purchase():
+    buy = (FIX / "form4_buy.xml").read_bytes()
+    status, detail = edgar.parse_form4_status(buy)
+    assert status == "ok" and detail == edgar.parse_form4(buy)
+    sale = buy.replace(b"<transactionCode>P</transactionCode>",
+                       b"<transactionCode>S</transactionCode>")
+    assert edgar.parse_form4_status(sale) == ("no_purchase", None)
+    for junk in (b"\x00 not xml", b"", None, b"<html><body>hi</body></html>",
+                 b'<!DOCTYPE x [<!ENTITY a "b">]><ownershipDocument/>'):
+        status, reason = edgar.parse_form4_status(junk)
+        assert status == "poison" and isinstance(reason, str) and reason, junk
