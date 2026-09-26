@@ -272,3 +272,10 @@ def test_trending_reads_the_public_payload(monkeypatch):
     texts = [t for t in _texts(new) if isinstance(t, str)]
     assert "AAPL 2" in texts
     assert not [t for t in texts if t.startswith("NVDA ")]
+
+
+def test_the_empty_feed_line_is_the_private_pages_own():
+    """The public page draws the private page's empty-feed line, never a copy."""
+    from pages import news, news_live
+    assert news_live.EMPTY_FEED is news.EMPTY_FEED
+    assert "carries no items" not in _src()

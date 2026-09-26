@@ -290,3 +290,31 @@ def test_the_time_column_fits_a_dated_stamp_on_one_line():
     from pages import news
     assert "w-28" in news._WHEN and "whitespace-nowrap" in news._WHEN
     assert "pl-[120px]" in news._SECOND
+
+
+def test_an_echo_must_end_at_a_word_in_the_teaser():
+    """The headline has to end on a word boundary in the teaser to count as an
+    echo: "Fed" is not echoed by "Federal Reserve holds" - that is the story's
+    own first line, and it is kept."""
+    from pages import news
+    assert news.second_line({"title": "Fed", "teaser": "Federal Reserve holds"}) \
+        == "Federal Reserve holds"
+    # A boundary made of punctuation, whitespace or the end still echoes.
+    assert news.second_line({"title": "Fed", "teaser": "Fed"}) == ""
+    assert news.second_line({"title": "Fed", "teaser": "Fed - Reuters"}) == ""
+    assert news.second_line({"title": "Fed", "teaser": "Fed: Reuters"}) == ""
+
+
+def test_the_empty_feed_line_is_one_constant_on_both_origins():
+    """A feed that is up but empty reads the same on the private page and the
+    public one: one module-level line in news.py, and no copy of it anywhere."""
+    from pages import news, news_live
+    assert isinstance(news.EMPTY_FEED, str) and news.EMPTY_FEED
+    assert news_live.EMPTY_FEED is news.EMPTY_FEED
+    for name in ("news.py", "news_live.py"):
+        src = (PAGES / name).read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        literals = [n for n in ast.walk(tree) if isinstance(n, ast.Constant)
+                    and n.value == news.EMPTY_FEED]
+        assert len(literals) == (1 if name == "news.py" else 0), name
+        assert "EMPTY_FEED" in src

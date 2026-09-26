@@ -43,8 +43,8 @@ from pages.ui_guard import guard, guard_async
 from pages.view_watch import watch_view
 
 TITLE = "Market News"
-# The private page's empty-feed line, word for word (it is a literal there).
-EMPTY_FEED = "The feed is up but carries no items right now."
+# The private page's own empty-feed line, never a copy of it.
+EMPTY_FEED = news.EMPTY_FEED
 
 
 def seed_symbol(raw) -> str:

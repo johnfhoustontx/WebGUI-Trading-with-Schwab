@@ -49,6 +49,9 @@ DEFAULT_WINDOW_H = 6               # config/news.toml [trending] window_h
 # must never read the same.
 WAITING = _copy.WAITING_NEWS
 NO_MATCH = "Nothing matches those filters. Clear one to see more."
+# The feed is up and published an empty list: the ONE line for that, drawn by
+# this page and by the public copy (pages/news_live.py) alike.
+EMPTY_FEED = "The feed is up but carries no items right now."
 
 # ── row styling (fixed Tailwind classes; no inline style) ───────────────────
 _ROW = "w-full gap-1 py-2 border-b border-[#213152]/60"
@@ -79,9 +82,14 @@ def _echoes_title(teaser, row) -> bool:
     """True when ``teaser`` is only the headline again, or the headline plus a
     publisher's name — Google News writes its description that way, which on
     screen reads as the headline printed twice. A teaser that merely OPENS with
-    the headline and carries on is a real first line and is kept."""
+    the headline and carries on is a real first line and is kept.
+
+    The headline must end on a word boundary in the teaser - whitespace,
+    punctuation or the end - so "Fed" is not echoed by "Federal Reserve holds"."""
     title, text = _norm(row.get("title")), _norm(teaser)
     if not title or not text.startswith(title):
+        return False
+    if len(text) > len(title) and text[len(title)].isalnum():
         return False
     tail = text[len(title):].strip(_TAIL_PUNCT)
     if not tail or len(tail) < _ECHO_TAIL_CHARS:
@@ -277,8 +285,7 @@ def render(public=False):
         draw_rows(region.content, shown, linked=linked, on_ticker=_pick_ticker)
         if not matched:
             with region.content:
-                kit.empty(NO_MATCH if state["rows"] else
-                          "The feed is up but carries no items right now.")
+                kit.empty(NO_MATCH if state["rows"] else EMPTY_FEED)
         status.text = status_text(len(state["rows"]), len(matched), len(shown))
         more.set_visibility(len(matched) > state["shown"])
         _paint_trending()
