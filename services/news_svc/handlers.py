@@ -1,4 +1,5 @@
-"""Publish the five news views; dispatch cmd:news.
+"""Publish the news views (five item/status views, three calendar views);
+dispatch cmd:news.
 
 ``feed`` / ``feed_public`` carry headlines (every kind but the SEC ones);
 ``sec`` / ``sec_public`` carry ``edgar_form4`` / ``edgar_filings`` only
@@ -27,6 +28,14 @@ CACHE_SEC_PUBLIC = "cache:news:sec_public"
 EVENT_SEC_PUBLIC = "events:news:sec_public"
 CACHE_STATUS = "cache:news:status"
 EVENT_STATUS = "events:news:status"
+# The economic calendar (``econ_calendar``). Names mirror webgui/pages/news_view.py
+# VIEW_CAL / VIEW_CAL_PUBLIC / VIEW_CAL_STATUS.
+CACHE_CAL = "cache:news:calendar"
+EVENT_CAL = "events:news:calendar"
+CACHE_CAL_PUBLIC = "cache:news:calendar_public"
+EVENT_CAL_PUBLIC = "events:news:calendar_public"
+CACHE_CAL_STATUS = "cache:news:calendar_status"
+EVENT_CAL_STATUS = "events:news:calendar_status"
 
 
 def publish_feed(bus, rows) -> int:
@@ -59,6 +68,25 @@ def publish_sec_public(bus, rows) -> int:
 def publish_status(bus, feeds, now) -> int:
     """``feeds``: one row per configured feed (``compute.status_rows``)."""
     return bus.cache_set(CACHE_STATUS, {"feeds": feeds, "ts": now}, event=EVENT_STATUS)
+
+
+def publish_calendar(bus, payload) -> int:
+    """``econ.build_calendar(public_symbols=None)`` - the owner view. No ``ts``."""
+    return bus.cache_set(CACHE_CAL, payload, event=EVENT_CAL, skip_unchanged=True)
+
+
+def publish_calendar_public(bus, payload) -> int:
+    """⚠ ``payload`` MUST be BUILT with ``public_symbols=set(collection_base())``
+    (``econ_calendar._publish``) - never a filter of the owner view: the
+    dividends of ``[tickers] extras`` reach only ``publish_calendar``."""
+    return bus.cache_set(CACHE_CAL_PUBLIC, payload, event=EVENT_CAL_PUBLIC,
+                         skip_unchanged=True)
+
+
+def publish_calendar_status(bus, sources, now) -> int:
+    """Private: per-source ``last_ok`` / ``last_poll`` / redacted ``error``, plus ``ts``."""
+    return bus.cache_set(CACHE_CAL_STATUS, {"sources": sources, "ts": now},
+                         event=EVENT_CAL_STATUS)
 
 
 def handle_command(bus, command) -> None:
