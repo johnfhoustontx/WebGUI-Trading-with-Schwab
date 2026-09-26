@@ -75,3 +75,14 @@ def test_google_news_strips_only_the_exact_publisher_suffix():
         "Markets rally on WSJ",                        # no " - " separator
         "No publisher here - WSJ",                     # no <source>: nothing to strip
     ]
+
+
+def test_google_news_strips_a_publisher_containing_an_ampersand():
+    body = b"""<rss><channel>
+    <item><title>X rises - AT&amp;T</title>
+      <link>https://news.google.com/a</link><source url="https://att.com">AT&amp;T</source></item>
+    </channel></rss>"""
+    feed = {"name": "G", "kind": "google_news", "query": "q"}
+    out = google_news.parse(body, feed, NOW, universe=[])
+    assert out[0]["original_source"] == "AT&T"
+    assert out[0]["title"] == "X rises"
