@@ -94,3 +94,94 @@ def test_make_item_public_is_a_real_bool_and_every_field_present():
     off = items.make_item(source="S", title="T", url="https://a.com/x",
                           published_at=None, public=0, now="n")
     assert off["public"] is False
+
+
+# --- review fixes: title keys ------------------------------------------------
+
+import pytest  # noqa: E402
+
+
+def test_title_key_is_none_for_empty_or_punctuation_only_titles():
+    assert items.title_key("") is None
+    assert items.title_key(None) is None
+    assert items.title_key("!!!") is None
+
+
+def test_title_key_is_none_for_a_title_too_short_to_identify_a_story():
+    # "Stocks rise" names a hundred different stories; merging on it would
+    # collapse unrelated items into one.
+    assert items.title_key("Stocks rise") is None
+
+
+def test_title_key_keeps_non_latin_and_accented_titles():
+    key = items.title_key("日本株が上昇")
+    assert key  # a real, non-empty key - not None, not ""
+    assert items.title_key("日本株が下落") != key
+    assert "nestlé" in items.title_key("Nestlé raises its outlook again")
+
+
+def test_title_key_casefolds():
+    assert items.title_key("STRASSE Deal Closes Today") == items.title_key("straße deal closes today")
+
+
+# --- review fixes: explicit ticker forms -------------------------------------
+
+@pytest.mark.parametrize("text", [
+    "Meta (NASDAQ: META) jumps",
+    "Meta (NASDAQ:META) jumps",
+    "Meta (Nasdaq: META) jumps",
+    "Meta (META) jumps",
+    "Meta (META:NASDAQ) jumps",
+])
+def test_every_parenthesised_form_tags_meta(text):
+    assert items.extract_tickers(text, ["META"]) == ["META"]
+
+
+@pytest.mark.parametrize("text, sym", [
+    ("Ford (NYSE:F) recalls", "F"),
+    ("SPDR (NYSEARCA: SPY) inflows", "SPY"),
+    ("US Steel (AMEX:X) bid", "X"),
+    ("Something (CBOE: X) listed", "X"),
+])
+def test_exchange_prefixed_parentheses_tag_the_part_after_the_exchange(text, sym):
+    assert items.extract_tickers(text, [sym]) == [sym]
+
+
+def test_a_short_ticker_in_bare_parentheses_never_tags():
+    assert items.extract_tickers("artificial intelligence (AI)", ["AI"]) == []
+    assert items.extract_tickers("information technology (IT) spend", ["IT"]) == []
+    assert items.extract_tickers("Ford (F) recalls", ["F"]) == []
+
+
+def test_a_short_ticker_tags_from_a_cashtag_or_an_exchange_prefix():
+    assert items.extract_tickers("Ford (NYSE: F) and $AI", ["F", "AI"]) == ["F", "AI"]
+
+
+def test_a_class_share_cashtag_keeps_its_suffix():
+    assert items.extract_tickers("$BRK.B hits a record", ["BRK.B"]) == ["BRK.B"]
+    assert items.extract_tickers("Buy $NVDA.", ["NVDA"]) == ["NVDA"]
+
+
+# --- review fixes: tracking keys ---------------------------------------------
+
+def test_tracking_keys_are_case_insensitive_and_include_click_ids():
+    assert items.canonical_url("https://a.com/x?UTM_Source=a&p=1") == "https://a.com/x?p=1"
+    assert items.canonical_url("https://a.com/x?.tsrc=rss&p=1") == "https://a.com/x?p=1"
+    assert items.canonical_url("https://a.com/x?fbclid=1&gclid=2") == "https://a.com/x"
+
+
+# --- review fixes: make_item -------------------------------------------------
+
+@pytest.mark.parametrize("url", ["", "   ", None])
+def test_make_item_refuses_an_item_without_a_url(url):
+    with pytest.raises(ValueError):
+        items.make_item(source="S", title="T", url=url, published_at=None,
+                        public=True, now="n")
+
+
+def test_make_item_treats_a_string_topic_or_ticker_as_one_value():
+    it = items.make_item(source="S", title="T", url="https://a.com/x",
+                         published_at=None, public=True, now="n",
+                         tickers="NVDA", topics="earnings")
+    assert it["tickers"] == ["NVDA"]
+    assert it["topics"] == ["earnings"]
