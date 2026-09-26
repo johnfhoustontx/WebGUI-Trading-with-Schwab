@@ -171,6 +171,10 @@ SHORT_INTEREST_DB = TRADE_SVC_DATA / "short_interest.db"
 # forward calendar — so this is a vendor product by necessity.
 EARNINGS_CALENDAR_DB = TRADE_SVC_DATA / "earnings_calendar.db"
 
+# Forward ex-dividend dates, beside the earnings calendar and shaped like it
+# (``shared/dividends.py`` holds the store and its read path).
+DIVIDENDS_DB = TRADE_SVC_DATA / "dividends.db"
+
 # news_svc: the public-feed collector's own store (gitignored data/).
 NEWS_SVC_DATA = REPO_ROOT / "services" / "news_svc" / "data"
 NEWS_DB = NEWS_SVC_DATA / "news.db"
