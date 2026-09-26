@@ -13,7 +13,9 @@ page renders them through labels and links, which escape; a caller must never
 hand them to ``ui.html`` unescaped.
 
 Times display in ET. A naive ``published_at`` / ``first_seen`` is read as UTC
-(the store writes UTC); an unparseable one gives an empty time and no age.
+(the adapters emit UTC); an unparseable one - or one too extreme to convert,
+like year 1 or 9999 - gives an empty time, no age and ``today`` False. A naive
+``now`` follows the project convention instead: it is CENTRAL wall-clock time.
 """
 import datetime as dt
 import math
@@ -23,6 +25,7 @@ from zoneinfo import ZoneInfo
 from shared.symbols import clean_symbol
 
 _ET = ZoneInfo("America/New_York")
+_CT = ZoneInfo("America/Chicago")   # a naive ``now`` is Central (CLAUDE.md)
 VIEW = "news:feed"
 VIEW_PUBLIC = "news:feed_public"
 VIEW_STATUS = "news:status"
@@ -32,18 +35,28 @@ SYMBOL_LIMIT = 8   # rows on the Symbol dossier's news band
 
 
 def _dt(s):
-    """An aware datetime (naive read as UTC), or ``None``."""
+    """An aware datetime (naive read as UTC), or ``None``.
+
+    A stamp that parses but cannot be carried into UTC and ET (year 1 with a
+    positive offset, 9999-12-31 late with a negative one, year 1 naive) is
+    ``None`` too: every consumer converts, and one such item must not take
+    down the whole page."""
     if not isinstance(s, str) or not s.strip():
         return None
     try:
         when = dt.datetime.fromisoformat(s.strip())
-    except ValueError:
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=dt.timezone.utc)
+        when.astimezone(dt.timezone.utc)
+        when.astimezone(_ET)
+    except (ValueError, OverflowError):
         return None
-    return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
+    return when
 
 
 def _aware(now):
-    return now if now.tzinfo else now.replace(tzinfo=dt.timezone.utc)
+    """``now`` as an aware datetime; a naive one is Central wall-clock time."""
+    return now if now.tzinfo else now.replace(tzinfo=_CT)
 
 
 def _items(payload):
@@ -88,14 +101,25 @@ def _time(et):
     return et.strftime("%I:%M %p").lstrip("0") if et else ""
 
 
+def _day(et):
+    """``"Sep 5"`` - month and an UNPADDED day."""
+    return f"{et.strftime('%b')} {et.day}" if et else ""
+
+
 def rows(payload, *, now) -> list:
     """One display dict per usable item, in payload order."""
     now = _aware(now)
+    try:
+        today_et = now.astimezone(_ET).date()
+    except (ValueError, OverflowError):
+        today_et = None
     out = []
     for it in _items(payload):
         published = it.get("published_at")
         when = _dt(published)
         et = when.astimezone(_ET) if when else None
+        today = et is not None and et.date() == today_et
+        time_, day = _time(et), _day(et)
         topics = it.get("topics")
         detail = it.get("detail")
         out.append({
@@ -105,7 +129,8 @@ def rows(payload, *, now) -> list:
             "kind": _str(it.get("kind")),
             "topics": [t for t in topics if isinstance(t, str)] if isinstance(topics, list) else [],
             "detail": detail if isinstance(detail, dict) else {},
-            "time": _time(et), "day": et.strftime("%b %d") if et else "",
+            "time": time_, "day": day, "today": today,
+            "when": (time_ if today else f"{day} {time_}") if et else "",
             "published_at": published, "first_seen": it.get("first_seen"),
             "age_min": ((now - when).total_seconds() / 60) if when else None,
         })
@@ -142,6 +167,8 @@ def filter_rows(rows_, *, sources, symbol, watchlist=None) -> list:
     watch = None
     if watchlist is not None:
         watch = {clean_symbol(w) for w in watchlist if isinstance(w, str)} - {None}
+    if isinstance(sources, str):
+        sources = [sources]          # a bare string is ONE source name, not its letters
     want_sources = set(sources) if sources else None
     out = []
     for r in rows_ or []:
@@ -182,16 +209,23 @@ def _finite(v):
     return float(v) if math.isfinite(v) else None
 
 
+_MONEY_UNITS = ((1e9, "B", 1), (1e6, "M", 1), (1e3, "K", 0), (1.0, "", 0))
+
+
 def _money(v):
-    """``$136.4M``-style, matching the service's Form 4 titles."""
+    """``$136.4M``-style, matching the service's Form 4 titles.
+
+    A figure that ROUNDS to 1000 of its unit steps up one unit, so 999,600
+    reads ``$1.0M``, never ``$1000K``."""
     sign, a = ("-" if v < 0 else ""), abs(v)
-    if a >= 1e9:
-        return f"{sign}${a / 1e9:.1f}B"
-    if a >= 1e6:
-        return f"{sign}${a / 1e6:.1f}M"
-    if a >= 1e3:
-        return f"{sign}${a / 1e3:.0f}K"
-    return f"{sign}${a:.0f}"
+    i = next((k for k, (scale, _, _) in enumerate(_MONEY_UNITS) if a >= scale),
+             len(_MONEY_UNITS) - 1)
+    while True:
+        scale, suffix, places = _MONEY_UNITS[i]
+        text = f"{a / scale:.{places}f}"
+        if i == 0 or float(text) < 1000:
+            return f"{sign}${text}{suffix}"
+        i -= 1
 
 
 def detail_line(row) -> str:

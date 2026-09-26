@@ -198,6 +198,95 @@ def test_detail_line_is_empty_for_plain_rows_and_junk():
         assert nv.detail_line(junk) == ""
 
 
+# ---- review fixes (bea3639) -----------------------------------------------
+
+EXTREME_DATES = ("0001-01-01T00:00:00", "0001-01-01T00:00:00+05:00", "9999-12-31T23:59:59-05:00")
+
+
+def test_extreme_published_at_is_undated_not_a_crash():
+    for extreme in EXTREME_DATES:
+        it = _it(1, tickers=["NVDA"])
+        it["published_at"] = extreme
+        payload = {"items": [it, _it(2, tickers=["NVDA"])]}
+        out = nv.rows(payload, now=NOW)
+        assert [r["id"] for r in out] == ["i1", "i2"], extreme
+        r = out[0]
+        assert r["time"] == "" and r["day"] == "" and r["age_min"] is None, extreme
+        assert r["when"] == "" and r["today"] is False, extreme
+        assert nv.trending(payload, now=NOW, window_h=6) == [("NVDA", 1)], extreme
+        assert [r["id"] for r in nv.for_symbol(payload, "NVDA", now=NOW)] == ["i1", "i2"], extreme
+
+
+def test_extreme_first_seen_or_since_never_counts_and_never_raises():
+    for extreme in EXTREME_DATES:
+        it = _it(1)
+        it["first_seen"] = extreme
+        assert nv.unseen({"items": [it]}, since="2026-09-26T00:00:00+00:00") == 0, extreme
+        assert nv.unseen({"items": [_it(2)]}, since=extreme) == 0, extreme
+
+
+def test_a_naive_now_is_central_time():
+    # 20:00 on the Central clock is 01:00 UTC the next day - NOW.
+    naive_now = dt.datetime(2026, 9, 25, 20, 0)
+    it = _it(1)
+    it["published_at"] = "2026-09-26T00:30:00+00:00"
+    r = nv.rows({"items": [it]}, now=naive_now)[0]
+    assert r["age_min"] == 30
+    assert r["today"] is True and r["when"] == "8:30 PM"
+
+
+def test_today_item_shows_the_time_alone():
+    r = nv.rows({"items": [_it(1)]}, now=NOW)[0]
+    assert r["today"] is True and r["when"] == "8:30 PM" and r["day"] == "Sep 25"
+
+
+def test_an_item_three_hours_old_can_be_yesterday_in_et():
+    now = dt.datetime(2026, 9, 26, 5, 0, tzinfo=dt.timezone.utc)   # 01:00 ET Sep 26
+    it = _it(1)
+    it["published_at"] = "2026-09-26T02:00:00+00:00"                # 22:00 ET Sep 25
+    r = nv.rows({"items": [it]}, now=now)[0]
+    assert r["age_min"] == 180
+    assert r["today"] is False
+    assert r["time"] == "10:00 PM" and r["day"] == "Sep 25"
+    assert r["when"] == "Sep 25 10:00 PM"
+
+
+def test_day_is_not_zero_padded():
+    it = _it(1)
+    it["published_at"] = "2026-09-05T13:05:00+00:00"                # 09:05 ET Sep 5
+    r = nv.rows({"items": [it]}, now=NOW)[0]
+    assert r["day"] == "Sep 5" and r["today"] is False and r["when"] == "Sep 5 9:05 AM"
+
+
+def test_undated_row_is_not_today_and_has_no_when():
+    it = _it(1)
+    it["published_at"] = "bogus"
+    r = nv.rows({"items": [it]}, now=NOW)[0]
+    assert r["today"] is False and r["when"] == ""
+
+
+def test_money_steps_up_a_unit_when_rounding_reaches_1000():
+    assert nv._money(999_600) == "$1.0M"
+    assert nv._money(999_960_000) == "$1.0B"
+    assert nv._money(-999_600) == "-$1.0M"
+    assert nv._money(999_400) == "$999K"
+    assert nv._money(999_940_000) == "$999.9M"
+    assert nv._money(136_382_789.45) == "$136.4M"
+    assert nv._money(5000.0) == "$5K"
+    assert nv._money(2.5e12) == "$2500.0B"                           # no unit above B
+
+
+def test_detail_line_total_just_under_a_million_reads_one_million():
+    d = {"groups": [{"value": 1.0}], "total_value": 999_600.0}
+    assert nv.detail_line({"kind": "edgar_form4", "detail": d}) == "1 purchase · $1.0M"
+
+
+def test_a_bare_string_source_is_one_source_name():
+    items = [_it(1), _it(2, source="CNBC"), _it(3, source="C")]
+    rows = nv.rows({"items": items}, now=NOW)
+    assert [r["id"] for r in nv.filter_rows(rows, sources="CNBC", symbol=None)] == ["i2"]
+
+
 def test_news_view_imports_only_stdlib_and_shared_symbols():
     src = (pathlib.Path(__file__).resolve().parents[1] / "pages" / "news_view.py").read_text(
         encoding="utf-8")
