@@ -29,6 +29,7 @@ CLASS:PUBLIC
 UID:45aff633-36ac-4279-b455-92488fd7199c
 DTSTART;TZID=US-Eastern:20260929T100000
 DURATION:PT0M
+X-FIXTURE-NOTE:invented edit - this SUMMARY is folded by hand to test unfolding
 SUMMARY:Job Openings and Labor 
  Turnover Survey
 LOCATION:Washington\, DC
@@ -94,6 +95,7 @@ BEGIN:VEVENT
 SEQUENCE:1
 CLASS:PUBLIC
 UID:00000000-0000-4000-8000-000000000001
+X-FIXTURE-NOTE:invented event - a VALUE=DATE release to test date-only events
 DTSTART;VALUE=DATE:20261103
 SUMMARY:Consumer Expenditures\, 2025
 LOCATION:Washington\, DC

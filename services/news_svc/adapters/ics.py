@@ -13,6 +13,16 @@ Eastern calendar ``date``; a ``VALUE=DATE`` event has ``at = None``.
 Order matters: lines are UNFOLDED before any escape is undone, because the real
 BEA file folds between the backslash and the comma of ``\\,``. ``parse`` never
 raises - a malformed event is skipped, a malformed body yields ``[]``.
+
+Lines split on ``\\r?\\n`` ONLY - never ``str.splitlines()``, which also breaks on
+U+2028, U+0085, form feeds and friends and would let text inside a SUMMARY inject
+a property line. A property's value starts at the first colon OUTSIDE double
+quotes (``DESCRIPTION;ALTREP="cid:x":text``). Only the VEVENT's OWN properties are
+read: anything inside a nested block (a VALARM) is ignored.
+
+Recurrence is NOT expanded: ``RRULE`` / ``RDATE`` / ``EXDATE`` are ignored, so a
+recurring event yields its first occurrence (its DTSTART) only. The agencies we
+read publish one VEVENT per release.
 """
 from __future__ import annotations
 
@@ -35,6 +45,7 @@ _TZ_ALIASES = {
     "gmt": "UTC",
 }
 _FOLD = re.compile(r"\r?\n[ \t]")
+_LINES = re.compile(r"\r?\n")
 _ESCAPE = re.compile(r"\\([\\,;nN])")
 _DATETIME = re.compile(r"^(\d{8})T(\d{6})(Z?)$")
 _DATE = re.compile(r"^(\d{8})$")
@@ -44,13 +55,37 @@ def _unescape(text: str) -> str:
     return _ESCAPE.sub(lambda m: "\n" if m.group(1) in "nN" else m.group(1), text)
 
 
+def _first_unquoted_colon(line: str) -> int:
+    quoted = False
+    for i, ch in enumerate(line):
+        if ch == '"':
+            quoted = not quoted
+        elif ch == ":" and not quoted:
+            return i
+    return -1
+
+
+def _split_unquoted(text: str, sep: str) -> list[str]:
+    parts, buf, quoted = [], [], False
+    for ch in text:
+        if ch == '"':
+            quoted = not quoted
+        if ch == sep and not quoted:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    parts.append("".join(buf))
+    return parts
+
+
 def _split_prop(line: str) -> tuple[str, dict, str] | None:
     """``NAME;P=V;Q=W:value`` -> (NAME, {P: V}, value). The value may itself hold ':'."""
-    colon = line.find(":")
+    colon = _first_unquoted_colon(line)
     if colon <= 0:
         return None
     head, value = line[:colon], line[colon + 1:]
-    parts = head.split(";")
+    parts = _split_unquoted(head, ";")
     params = {}
     for p in parts[1:]:
         k, _, v = p.partition("=")
@@ -130,18 +165,25 @@ def parse(body) -> list[dict]:
         text = _FOLD.sub("", text)
         out: list[dict] = []
         current: list[str] | None = None
-        for raw in text.splitlines():
+        depth = 0           # nested blocks open inside the current VEVENT
+        for raw in _LINES.split(text):
             line = raw.rstrip("\r")
             upper = line.strip().upper()
-            if upper == "BEGIN:VEVENT":
-                current = []
-            elif upper == "END:VEVENT":
-                if current is not None:
+            if current is None:
+                if upper == "BEGIN:VEVENT":
+                    current, depth = [], 0
+                continue
+            if upper.startswith("BEGIN:"):
+                depth += 1
+            elif upper.startswith("END:"):
+                if depth:
+                    depth -= 1
+                elif upper == "END:VEVENT":
                     ev = _event(current)
                     if ev is not None:
                         out.append(ev)
-                current = None
-            elif current is not None:
+                    current = None
+            elif depth == 0:
                 current.append(line)
         return out
     except Exception:  # noqa: BLE001 - a feed must never take the poll down

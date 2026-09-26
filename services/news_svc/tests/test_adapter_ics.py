@@ -1,3 +1,12 @@
+"""ICS adapter tests.
+
+Fixture note: ``bls_sample.ics`` is a trimmed copy of the real BLS calendar with
+TWO invented edits, each marked in the file by an ``X-FIXTURE-NOTE:`` line (an
+X- property, which the parser ignores): the Job Openings SUMMARY is folded by
+hand to exercise unfolding, and the ``VALUE=DATE`` Consumer Expenditures event
+is invented to exercise a date-only event. ``bls_full.ics`` / ``bea_*.ics`` are
+unedited.
+"""
 import pathlib
 
 from services.news_svc.adapters import ics
@@ -89,3 +98,54 @@ def test_escapes_and_description():
 def test_non_bytes_and_missing_summary_never_raise():
     assert ics.parse(None) == [] and ics.parse("text") == []
     assert ics.parse(b"BEGIN:VEVENT\nDTSTART:20261029T123000Z\nEND:VEVENT") == []
+
+
+# --- review fixes: line splitting, quoted colons, nested blocks ---
+
+def test_fixture_notes_are_present_and_ignored():
+    raw = FIX.joinpath("bls_sample.ics").read_text()
+    assert raw.count("X-FIXTURE-NOTE:") == 2
+    evs = ics.parse(FIX.joinpath("bls_sample.ics").read_bytes())
+    assert not any("FIXTURE" in e["summary"] or "FIXTURE" in e["description"] for e in evs)
+
+
+def test_unicode_line_separators_cannot_inject_a_property():
+    for sep in ("\u2028", "\u2029", "\u0085", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e"):
+        body = ("BEGIN:VEVENT\r\nDTSTART:20261029T123000Z\r\n"
+                f"SUMMARY:GDP{sep}DTSTART:20990101T000000Z\r\nEND:VEVENT\r\n").encode()
+        evs = ics.parse(body)
+        assert len(evs) == 1, repr(sep)
+        assert evs[0]["at"] == "2026-10-29T12:30:00+00:00", repr(sep)
+        assert evs[0]["summary"].startswith("GDP"), repr(sep)
+
+
+def test_colon_inside_a_quoted_parameter_is_not_the_value_separator():
+    body = (b'BEGIN:VEVENT\r\nDTSTART:20261029T123000Z\r\nSUMMARY:GDP\r\n'
+            b'DESCRIPTION;ALTREP="cid:part1.0001@example.org":the real text\r\nEND:VEVENT\r\n')
+    e = ics.parse(body)[0]
+    assert e["description"] == "the real text"
+
+
+def test_split_prop_quoted_param_value():
+    name, params, value = ics._split_prop('DESCRIPTION;ALTREP="cid:a:b";LANGUAGE=en:x:y')
+    assert name == "DESCRIPTION" and params["ALTREP"] == "cid:a:b"
+    assert params["LANGUAGE"] == "en" and value == "x:y"
+
+
+def test_nested_valarm_does_not_overwrite_event_properties():
+    body = (b"BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:20261029T123000Z\r\nSUMMARY:GDP\r\n"
+            b"DESCRIPTION:real\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\nSUMMARY:Reminder\r\n"
+            b"DESCRIPTION:alarm text\r\nDTSTART:20990101T000000Z\r\nEND:VALARM\r\n"
+            b"END:VEVENT\r\nEND:VCALENDAR\r\n")
+    evs = ics.parse(body)
+    assert len(evs) == 1
+    e = evs[0]
+    assert e["summary"] == "GDP" and e["description"] == "real"
+    assert e["at"] == "2026-10-29T12:30:00+00:00"
+
+
+def test_nested_block_end_does_not_close_the_event_early():
+    body = (b"BEGIN:VEVENT\r\nDTSTART:20261029T123000Z\r\nBEGIN:VALARM\r\nACTION:DISPLAY\r\n"
+            b"END:VALARM\r\nSUMMARY:After alarm\r\nEND:VEVENT\r\n")
+    evs = ics.parse(body)
+    assert [e["summary"] for e in evs] == ["After alarm"]
