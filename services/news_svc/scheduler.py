@@ -7,10 +7,15 @@ during the regular session, ``offhours_poll_min`` on a trading day outside it,
 The loop wakes every ``TICK_S`` seconds rather than sleeping a whole interval,
 and on each wake it beats the heartbeat, re-reads the config (``nc.load`` is
 mtime-cached, so this is a stat) and polls when the interval since the last
-poll has elapsed. So the first poll runs at start, an interval edit applies
-without a restart, a session boundary (08:30 CT) is noticed within ``TICK_S``
-rather than after up to an hour, and ``/health``'s tick age stays under
-``TICK_S`` on a healthy loop even while the weekend cadence is 60 minutes.
+poll ENDED has elapsed. So the first poll runs at start, an interval edit
+applies without a restart, a session boundary (08:30 CT) is noticed within
+``TICK_S`` rather than after up to an hour, and a poll that overruns its
+interval is still followed by a full interval of rest.
+
+The heartbeat is beaten once per pass, not from inside a poll, so ``/health``'s
+tick age stays under about ``TICK_S`` BETWEEN polls (even on the 60-minute
+weekend cadence) but grows for as long as a poll runs, and a slow poll reads
+as an older tick.
 """
 import asyncio
 import datetime as dt
@@ -29,6 +34,7 @@ _CT = ZoneInfo("America/Chicago")
 
 TICK_S = 30          # how often the loop wakes (heartbeat, config re-read)
 MIN_INTERVAL_S = 60  # a bad or tiny config value never polls faster than this
+MAX_INTERVAL_MIN = 10_080  # one week; anything larger is a bad value, not a cadence
 
 # Seams for tests (a fake clock and sleep; never patch asyncio.sleep globally).
 _sleep = asyncio.sleep
@@ -40,19 +46,29 @@ def _utcnow():
     return dt.datetime.now(dt.timezone.utc)
 
 
+def _usable_minutes(value) -> bool:
+    """True for a real, finite number in (0, ``MAX_INTERVAL_MIN``]. Anything
+    that RAISES while being checked (a 400-digit int makes ``math.isfinite``
+    raise OverflowError) is unusable, never an exception out of the loop."""
+    try:
+        return (not isinstance(value, bool) and isinstance(value, (int, float))
+                and math.isfinite(value) and 0 < value <= MAX_INTERVAL_MIN)
+    except Exception:
+        return False
+
+
 def _minutes(cfg, key) -> float:
-    """``cfg["collector"][key]`` if it is a real, finite, positive number of
-    minutes, else the built-in default. A bool, a string (even "5"), a NaN or
-    a non-positive value is refused rather than coerced."""
+    """``cfg["collector"][key]`` if it is a real, finite number of minutes in
+    (0, one week], else the built-in default. A bool, a string (even "5"), a
+    NaN, a non-positive or a huge value is refused rather than coerced."""
     default = nc.DEFAULTS["collector"][key]
     section = cfg.get("collector") if isinstance(cfg, dict) else None
     value = section.get(key) if isinstance(section, dict) else None
-    if (isinstance(value, bool) or not isinstance(value, (int, float))
-            or not math.isfinite(value) or value <= 0):
+    if not _usable_minutes(value):
         if value is not None and (key, repr(value)) not in _warned:
             _warned.add((key, repr(value)))   # read every pass: warn once, not every 30 s
-            _log.warning("news.toml: [collector] %s = %r is not a positive number "
-                         "of minutes - using %s", key, value, default)
+            _log.warning("news.toml: [collector] %s = %r is not a number of minutes "
+                         "in (0, %s] - using %s", key, value, MAX_INTERVAL_MIN, default)
         return float(default)
     return float(value)
 
@@ -77,7 +93,6 @@ async def loop(bus) -> None:
         _heartbeat.tick()
         interval = poll_interval_s(_utcnow(), nc.load())
         if last_poll is None or _monotonic() - last_poll >= interval:
-            last_poll = _monotonic()
             try:
                 result = await ev.run_in_executor(None, compute.poll_now, bus)
                 if isinstance(result, dict) and result.get("skipped"):
@@ -86,5 +101,8 @@ async def loop(bus) -> None:
                 raise
             except Exception:  # never let one bad cycle kill the scheduler
                 _log.exception("news poll cycle failed")
+            # Stamped when the poll ENDS, so a poll that overruns its interval
+            # is still followed by a full interval of rest, never back-to-back.
+            last_poll = _monotonic()
         remaining = interval - (_monotonic() - last_poll)
         await _sleep(max(1.0, min(TICK_S, remaining)))

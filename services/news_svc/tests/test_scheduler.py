@@ -100,6 +100,45 @@ def test_a_numeric_string_is_not_read_as_minutes():
     assert scheduler.poll_interval_s(RTH, cfg) == _default_s("rth_poll_min")
 
 
+# 1e307 is finite but * 60 overflows to inf (int(inf) raises); 10**400 makes
+# math.isfinite itself raise OverflowError. Neither may kill the loop.
+@pytest.mark.parametrize("huge", [1e307, 10 ** 400, -(10 ** 400), 10_081, 10_080.5,
+                                  float(10 ** 20)],
+                         ids=["1e307", "10**400", "-10**400", "10081", "10080.5", "1e20"])
+def test_a_huge_value_falls_back_to_the_built_in_default(huge):
+    cfg = {"collector": {"rth_poll_min": huge, "offhours_poll_min": 15,
+                         "weekend_poll_min": 60}}
+    assert scheduler.poll_interval_s(RTH, cfg) == _default_s("rth_poll_min")
+
+
+def test_one_week_is_the_largest_accepted_interval():
+    cfg = {"collector": {"rth_poll_min": 10_080, "offhours_poll_min": 15,
+                         "weekend_poll_min": 60}}
+    assert scheduler.poll_interval_s(RTH, cfg) == 10_080 * 60
+
+
+def test_a_huge_value_warns_once_not_on_every_pass(monkeypatch, caplog):
+    monkeypatch.setattr(scheduler, "_warned", set())
+    cfg = {"collector": {"rth_poll_min": 10 ** 400}}
+    with caplog.at_level(logging.WARNING, logger="news_svc.scheduler"):
+        for _ in range(5):
+            scheduler.poll_interval_s(RTH, cfg)
+    assert sum("rth_poll_min" in r.getMessage() for r in caplog.records) == 1
+
+
+class _Explodes(float):
+    """A float (so it passes the type check) whose every comparison raises -
+    validation must not propagate it."""
+    def __le__(self, other):
+        raise RuntimeError("no")
+    __lt__ = __gt__ = __ge__ = __le__
+
+
+def test_a_value_that_raises_during_validation_falls_back():
+    cfg = {"collector": {"rth_poll_min": _Explodes(5.0)}}
+    assert scheduler.poll_interval_s(RTH, cfg) == _default_s("rth_poll_min")
+
+
 # ── the loop ──────────────────────────────────────────────────────────────────
 
 class _Harness:
@@ -198,6 +237,53 @@ def test_a_busy_poll_does_not_break_the_loop(monkeypatch):
                  poll=lambda bus, n: {"skipped": "busy"})
     h.run()
     assert h.polls == [0.0, 300.0]
+
+
+def test_a_slow_poll_is_followed_by_a_full_interval_of_rest(monkeypatch):
+    """A 90 s poll on a 60 s cadence: the interval is measured END-to-start, so
+    the next poll never follows the last one back-to-back."""
+    cfg = {"collector": dict(CFG["collector"], rth_poll_min=1)}
+    ends = []
+    box = {}
+
+    def slow(bus, n):
+        box["h"].clock += 90.0
+        ends.append(box["h"].clock)
+        return {"ok": True}
+
+    h = _Harness(monkeypatch, passes=20, cfg=cfg, poll=slow)
+    box["h"] = h
+    h.run()
+    assert len(h.polls) >= 3
+    for end, nxt in zip(ends, h.polls[1:]):
+        assert nxt - end >= 60
+    assert h.polls[:3] == [0.0, 150.0, 300.0]
+
+
+def test_a_failed_slow_poll_still_rests_a_full_interval(monkeypatch):
+    cfg = {"collector": dict(CFG["collector"], rth_poll_min=1)}
+    ends = []
+    box = {}
+
+    def slow_boom(bus, n):
+        box["h"].clock += 90.0
+        ends.append(box["h"].clock)
+        raise RuntimeError("slow and broken")
+
+    h = _Harness(monkeypatch, passes=20, cfg=cfg, poll=slow_boom)
+    box["h"] = h
+    h.run()
+    assert len(h.polls) >= 3
+    for end, nxt in zip(ends, h.polls[1:]):
+        assert nxt - end >= 60
+
+
+def test_a_huge_config_value_does_not_kill_the_loop(monkeypatch):
+    cfg = {"collector": dict(CFG["collector"], rth_poll_min=10 ** 400)}
+    h = _Harness(monkeypatch, passes=int(_default_s("rth_poll_min") / scheduler.TICK_S) + 1,
+                 cfg=cfg)
+    h.run()
+    assert h.polls == [0.0, float(_default_s("rth_poll_min"))]
 
 
 def test_cancellation_during_a_poll_propagates(monkeypatch):
