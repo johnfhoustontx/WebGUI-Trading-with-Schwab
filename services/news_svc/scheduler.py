@@ -35,6 +35,11 @@ _CT = ZoneInfo("America/Chicago")
 TICK_S = 30          # how often the loop wakes (heartbeat, config re-read)
 MIN_INTERVAL_S = 60  # a bad or tiny config value never polls faster than this
 MAX_INTERVAL_MIN = 10_080  # one week; anything larger is a bad value, not a cadence
+# What the loop uses when working out the interval RAISES (a config bug, not a
+# bad value - those fall back per key in ``_minutes``): the built-in RTH
+# cadence, the shortest default, so a broken config degrades to polling a
+# little too often rather than going quiet.
+FALLBACK_INTERVAL_S = max(MIN_INTERVAL_S, int(nc.DEFAULTS["collector"]["rth_poll_min"]) * 60)
 
 # Seams for tests (a fake clock and sleep; never patch asyncio.sleep globally).
 _sleep = asyncio.sleep
@@ -57,6 +62,16 @@ def _usable_minutes(value) -> bool:
         return False
 
 
+def _safe_repr(value) -> str:
+    """``repr(value)``, or a placeholder when repr itself raises - an int over
+    ``sys.get_int_max_str_digits()`` decimal digits (a TOML hex literal has no
+    digit limit) makes repr raise ValueError."""
+    try:
+        return repr(value)
+    except Exception:
+        return f"<{type(value).__name__} too large to print>"
+
+
 def _minutes(cfg, key) -> float:
     """``cfg["collector"][key]`` if it is a real, finite number of minutes in
     (0, one week], else the built-in default. A bool, a string (even "5"), a
@@ -65,10 +80,11 @@ def _minutes(cfg, key) -> float:
     section = cfg.get("collector") if isinstance(cfg, dict) else None
     value = section.get(key) if isinstance(section, dict) else None
     if not _usable_minutes(value):
-        if value is not None and (key, repr(value)) not in _warned:
-            _warned.add((key, repr(value)))   # read every pass: warn once, not every 30 s
-            _log.warning("news.toml: [collector] %s = %r is not a number of minutes "
-                         "in (0, %s] - using %s", key, value, MAX_INTERVAL_MIN, default)
+        shown = _safe_repr(value)
+        if value is not None and (key, shown) not in _warned:
+            _warned.add((key, shown))   # read every pass: warn once, not every 30 s
+            _log.warning("news.toml: [collector] %s = %s is not a number of minutes "
+                         "in (0, %s] - using %s", key, shown, MAX_INTERVAL_MIN, default)
         return float(default)
     return float(value)
 
@@ -89,9 +105,18 @@ def poll_interval_s(now, cfg) -> int:
 async def loop(bus) -> None:
     ev = asyncio.get_running_loop()
     last_poll = None
+    interval_failing = False
     while True:
         _heartbeat.tick()
-        interval = poll_interval_s(_utcnow(), nc.load())
+        try:
+            interval = poll_interval_s(_utcnow(), nc.load())
+            interval_failing = False
+        except Exception:  # a config bug must never escape the loop
+            if not interval_failing:   # once per failure run, not every 30 s
+                _log.exception("news poll interval could not be computed - using "
+                               "the built-in %s s", FALLBACK_INTERVAL_S)
+            interval_failing = True
+            interval = FALLBACK_INTERVAL_S
         if last_poll is None or _monotonic() - last_poll >= interval:
             try:
                 result = await ev.run_in_executor(None, compute.poll_now, bus)

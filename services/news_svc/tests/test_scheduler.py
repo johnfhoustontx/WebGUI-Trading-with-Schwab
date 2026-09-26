@@ -293,3 +293,87 @@ def test_cancellation_during_a_poll_propagates(monkeypatch):
     h = _Harness(monkeypatch, passes=99, poll=cancel)
     h.run()
     assert h.sleeps == []
+
+
+# ── a value too large to repr, and a config bug that raises ────────────────────
+
+# A TOML hex literal is an int with no digit limit, but repr() of an int over
+# sys.get_int_max_str_digits() (4300) decimal digits raises ValueError.
+_UNREPRABLE = int("F" * 5000, 16)
+
+
+def test_the_unreprable_fixture_really_cannot_be_repred():
+    with pytest.raises(ValueError):
+        repr(_UNREPRABLE)
+
+
+def test_a_value_too_large_to_repr_falls_back_to_the_built_in_default(monkeypatch, caplog):
+    monkeypatch.setattr(scheduler, "_warned", set())
+    cfg = {"collector": {"rth_poll_min": _UNREPRABLE, "offhours_poll_min": 15,
+                         "weekend_poll_min": 60}}
+    with caplog.at_level(logging.WARNING, logger="news_svc.scheduler"):
+        for _ in range(5):
+            assert scheduler.poll_interval_s(RTH, cfg) == _default_s("rth_poll_min")
+    msgs = [r.getMessage() for r in caplog.records if "rth_poll_min" in r.getMessage()]
+    assert len(msgs) == 1                     # warned once, and the message rendered
+    assert "too large" in msgs[0]
+
+
+def test_a_value_too_large_to_repr_does_not_kill_the_loop(monkeypatch):
+    monkeypatch.setattr(scheduler, "_warned", set())
+    cfg = {"collector": dict(CFG["collector"], rth_poll_min=_UNREPRABLE)}
+    h = _Harness(monkeypatch, passes=int(_default_s("rth_poll_min") / scheduler.TICK_S) + 1,
+                 cfg=cfg)
+    h.run()
+    assert h.polls == [0.0, float(_default_s("rth_poll_min"))]
+
+
+def test_a_raising_interval_computation_falls_back_and_the_loop_stays_up(monkeypatch, caplog):
+    def broken(now, cfg):
+        raise RuntimeError("config bug")
+
+    h = _Harness(monkeypatch, passes=int(2 * scheduler.FALLBACK_INTERVAL_S / scheduler.TICK_S) + 1)
+    monkeypatch.setattr(scheduler, "poll_interval_s", broken)
+    with caplog.at_level(logging.ERROR, logger="news_svc.scheduler"):
+        h.run()
+    fb = float(scheduler.FALLBACK_INTERVAL_S)
+    assert h.polls == [0.0, fb, 2 * fb]
+    assert h.ticks == h.passes                # the heartbeat still beat every pass
+    failures = [r for r in caplog.records if "interval" in r.getMessage()]
+    assert len(failures) == 1                 # logged once, not every 30 s
+    assert failures[0].exc_info               # with the traceback
+
+
+def test_the_fallback_interval_is_the_built_in_rth_default():
+    assert scheduler.FALLBACK_INTERVAL_S == _default_s("rth_poll_min")
+
+
+def test_a_raising_config_load_falls_back_and_the_loop_stays_up(monkeypatch):
+    h = _Harness(monkeypatch, passes=int(scheduler.FALLBACK_INTERVAL_S / scheduler.TICK_S) + 1)
+
+    def broken_load():
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(scheduler.nc, "load", broken_load)
+    h.run()
+    assert h.polls == [0.0, float(scheduler.FALLBACK_INTERVAL_S)]
+
+
+def test_the_failure_is_logged_again_after_a_recovery(monkeypatch, caplog):
+    state = {"broken": True}
+    real = scheduler.poll_interval_s
+
+    def flaky(now, cfg):
+        if state["broken"]:
+            raise RuntimeError("config bug")
+        return real(now, cfg)
+
+    def toggle(h):
+        # broken for the first pass, healthy for the second, broken after
+        state["broken"] = len(h.sleeps) != 1
+
+    h = _Harness(monkeypatch, passes=4, on_sleep=toggle)
+    monkeypatch.setattr(scheduler, "poll_interval_s", flaky)
+    with caplog.at_level(logging.ERROR, logger="news_svc.scheduler"):
+        h.run()
+    assert sum("interval" in r.getMessage() for r in caplog.records) == 2
