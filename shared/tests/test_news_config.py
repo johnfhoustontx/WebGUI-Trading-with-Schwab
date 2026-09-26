@@ -321,6 +321,120 @@ def test_flags_agrees_with_feeds_on_the_shipped_file():
             assert got["enabled"] is False
 
 
+# Every way a config can make feeds() warn, split across configs where two
+# shapes cannot coexist (a [feed_flags] that is not a table has no entries).
+_MALFORMED = [
+    _cfg([{"name": "A", "kind": "rss", "url": "x", "enabled": True},      # legacy
+          {"name": "B", "kind": "rss", "url": "y", "public": False},      # legacy
+          {"name": "C", "kind": "rss", "url": "z"},
+          {"name": "D", "kind": "carrier_pigeon", "url": "w"},            # bad kind
+          {"name": "C", "kind": "rss", "url": "dup"},                     # duplicate
+          {"name": "E", "kind": "carrier_pigeon", "url": "v"},            # bad kind,
+          {"name": "E", "kind": "rss", "url": "kept"},                    # then kept
+          {"kind": "rss", "url": "nameless"},
+          "not a table"],
+         {"A": {"enabled": "yes"}, "C": {"public": 1},                    # non-bool
+          "B": False,                                                     # non-table
+          "Typo": {"enabled": False}}),                                   # names none
+    _cfg([{"name": "A", "kind": "rss", "url": "x", "public": "no"}], ["A"]),
+    _cfg({"name": "A", "kind": "rss", "url": "x"}),                       # not a list
+]
+
+
+def test_flags_is_silent_on_a_malformed_config_while_feeds_still_warns(
+        monkeypatch, caplog):
+    """The poll cycle calls flags() at every publish, so a warning there would
+    repeat once per call - one leftover legacy switch flooding the journal.
+    feeds() is the one place a malformed config is reported."""
+    for cfg in _MALFORMED:
+        monkeypatch.setattr(nc, "load", lambda cfg=cfg: cfg)
+        caplog.clear()
+        with caplog.at_level("DEBUG", logger=nc.__name__):
+            for _ in range(10):
+                for name in ("A", "B", "C", "D", "E", "Typo", "nope", None, ""):
+                    nc.flags(name)
+        assert not caplog.records, caplog.text
+        with caplog.at_level("WARNING", logger=nc.__name__):
+            nc.feeds()
+        assert caplog.records, cfg
+
+
+def test_flags_resolves_the_same_values_it_did_while_it_warned(monkeypatch):
+    """Silence changes the logging only: the malformed values still fail closed."""
+    monkeypatch.setattr(nc, "load", lambda: _MALFORMED[0])
+    assert nc.flags("A") == {"enabled": False, "public": True}   # "yes" -> False
+    assert nc.flags("B") == {"enabled": True, "public": False}   # legacy fallback
+    assert nc.flags("C") == {"enabled": True, "public": False}   # 1 -> False
+    assert nc.flags("D") == {"enabled": False, "public": False}  # unknown kind
+    assert nc.flags("E") == {"enabled": True, "public": True}    # the later entry
+    assert nc.flags("Typo") == {"enabled": False, "public": False}
+
+
+def test_flags_agrees_with_feeds_when_a_duplicates_first_entry_has_an_unknown_kind(
+        monkeypatch):
+    """feeds() skips the unknown-kind entry before recording its name, so the
+    SECOND entry is the one kept and polled - flags() must report that one,
+    not stop at the first match and fail closed on a feed that is running."""
+    monkeypatch.setattr(nc, "load", lambda: _cfg(
+        [{"name": "A", "kind": "carrier_pigeon", "url": "first"},
+         {"name": "A", "kind": "rss", "url": "second"}],
+        {"A": {"public": False}}))
+    (feed,) = nc.feeds()
+    assert feed["url"] == "second"
+    assert nc.flags("A") == {"enabled": True, "public": False}
+
+
+def _reference_flags(cfg):
+    """The rules feeds() documents, restated independently: the FIRST table
+    entry of a name with a known kind wins; each flag comes from
+    [feed_flags."<name>"] (when that entry is a table), else a legacy copy in
+    the [[feeds]] entry, else True; anything but a real bool is False."""
+    table = cfg.get("feed_flags")
+    table = table if isinstance(table, dict) else {}
+    feeds = cfg.get("feeds")
+    out = {}
+    for raw in feeds if isinstance(feeds, list) else []:
+        if not isinstance(raw, dict) or raw.get("kind") not in nc.KINDS:
+            continue
+        name = raw.get("name")
+        if not name or name in out:
+            continue
+        entry = table.get(name)
+        entry = entry if isinstance(entry, dict) else {}
+        got = {}
+        for key in ("enabled", "public"):
+            value = entry[key] if key in entry else raw.get(key, True)
+            got[key] = value if isinstance(value, bool) else False
+        out[name] = got
+    return out
+
+
+def test_flags_equals_the_resolved_feed_for_every_shipped_name_disabled_included():
+    cfg = nc.load()
+    names = {f["name"] for f in _shipped_feeds()}
+    want = _reference_flags(cfg)
+    assert set(want) == names
+    assert any(not w["enabled"] for w in want.values())    # a disabled one is covered
+    running = {f["name"]: f for f in nc.feeds()}
+    for name in names:
+        assert nc.flags(name) == want[name], name
+        if want[name]["enabled"]:
+            assert running[name]["public"] == want[name]["public"], name
+        else:
+            assert name not in running, name
+
+
+def test_flags_equals_the_resolved_feed_on_every_malformed_config(monkeypatch):
+    for cfg in _MALFORMED:
+        monkeypatch.setattr(nc, "load", lambda cfg=cfg: cfg)
+        want = _reference_flags(cfg)
+        running = {f["name"]: f for f in nc.feeds()}
+        assert {n for n, w in want.items() if w["enabled"]} == set(running)
+        for name in set(want) | {"nope", "Typo", "D"}:
+            closed = {"enabled": False, "public": False}
+            assert nc.flags(name) == want.get(name, closed), (cfg, name)
+
+
 # ── the shipped file ────────────────────────────────────────────────────────
 
 def _shipped():
