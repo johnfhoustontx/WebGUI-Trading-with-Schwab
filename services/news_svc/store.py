@@ -97,11 +97,27 @@ race, each a no-op on a database that already has the shape):
   are kept under ``feed=""`` - seen by every feed - until ``prune`` ages them
   out. Dropping them instead would refetch up to 100 Form 4s (200 SEC requests)
   per feed on the first poll and re-log every poison filing.
+* ``items.impact_score`` / ``impact_band`` / ``impact_reasons`` / ``impact_ver``
+  are added as NULL, so every old row is unscored and ``rows_to_score`` hands it
+  to the next pass. The new tables ``cal_sources`` and ``econ_obs`` are created
+  by ``SCHEMA`` (``IF NOT EXISTS``) after the migration.
+
+Impact: the stored band is the UNCAPPED one (the staleness cap is a function of
+now, applied at publish). ``impact_ver`` is the fingerprint the row was scored
+under; NULL means "score me" - a new row, or one a merge CHANGED (a repoll that
+adds nothing keeps its score). The public view never carries the stored impact:
+it counts private sources and tickers, so the publisher re-scores the public row.
+
+Calendar: ``cal_sources`` keeps each source's last GOOD parsed ``payload`` beside
+its poll state, so a failed fetch records its error without losing the result.
+``econ_obs`` keeps each observation's ``first_seen`` forever (when it reached us)
+and marks the rows of a series' first fetch ``bootstrap``.
 """
 import contextlib
 import datetime as dt
 import json
 import logging
+import math
 import pathlib
 import sqlite3
 import threading
@@ -116,7 +132,8 @@ CREATE TABLE IF NOT EXISTS items (
     original_source TEXT, title TEXT NOT NULL, title_key TEXT,
     teaser TEXT, url TEXT NOT NULL, published_at TEXT NOT NULL, first_seen TEXT NOT NULL,
     tickers TEXT NOT NULL, kind TEXT NOT NULL, topics TEXT NOT NULL,
-    detail TEXT NOT NULL, public INTEGER NOT NULL, ticker_sources TEXT
+    detail TEXT NOT NULL, public INTEGER NOT NULL, ticker_sources TEXT,
+    impact_score INTEGER, impact_band TEXT, impact_reasons TEXT, impact_ver TEXT
 );
 DROP INDEX IF EXISTS idx_items_published;
 CREATE INDEX IF NOT EXISTS idx_items_published_jd ON items(julianday(published_at));
@@ -131,6 +148,14 @@ CREATE TABLE IF NOT EXISTS seen_accessions (
     PRIMARY KEY (feed, accession)
 );
 CREATE INDEX IF NOT EXISTS idx_seen_accession ON seen_accessions(accession);
+CREATE TABLE IF NOT EXISTS cal_sources (
+    name TEXT PRIMARY KEY, payload TEXT, last_ok TEXT, last_poll TEXT, error TEXT,
+    etag TEXT, last_modified TEXT
+);
+CREATE TABLE IF NOT EXISTS econ_obs (
+    series TEXT NOT NULL, obs_date TEXT NOT NULL, value REAL, first_seen TEXT NOT NULL,
+    bootstrap INTEGER NOT NULL, PRIMARY KEY (series, obs_date)
+);
 """
 
 _JSON_COLS = ("sources", "tickers", "topics", "detail")
@@ -149,6 +174,37 @@ _ITEM_COLS = ("id, source, sources, original_source, title, title_key, teaser, u
               "published_at, first_seen, tickers, kind, topics, detail, public, "
               "ticker_sources")
 _STATE_COLS = ("name", "etag", "last_modified", "last_ok", "last_poll", "error", "url")
+_IMPACT_COLS = (("impact_score", "INTEGER"), ("impact_band", "TEXT"),
+                ("impact_reasons", "TEXT"), ("impact_ver", "TEXT"))
+_CAL_COLS = ("name", "payload", "last_ok", "last_poll", "error", "etag", "last_modified")
+_UNSET = object()
+_NO_LIMIT = object()
+
+
+def _impact(d) -> dict | None:
+    """Pop the four ``impact_*`` columns off a row dict and return the stored
+    impact, or None for a row never scored (no band). Unreadable reasons read
+    as none."""
+    score, band = d.pop("impact_score", None), d.pop("impact_band", None)
+    raw, _ = d.pop("impact_reasons", None), d.pop("impact_ver", None)
+    if band is None:
+        return None
+    try:
+        reasons = json.loads(raw) if raw else []
+    except (TypeError, ValueError):
+        reasons = []
+    if not isinstance(reasons, list):
+        reasons = []
+    return {"band": band, "score": score, "reasons": reasons}
+
+
+def _obs_value(value):
+    """A finite number as a float, else None (NaN, infinities, bools, FRED's
+    ``"."`` and anything else unreadable are no reading)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) else None
 
 
 def _names(value):
@@ -225,6 +281,7 @@ class Store:
         db_path = pathlib.Path(db_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
+        self._to_score = {}        # id -> the row's shape when rows_to_score read it
         # isolation_level=None: no implicit transactions, so every write is the
         # explicit BEGIN IMMEDIATE in _write(). ``timeout`` is the ONE busy wait.
         self._c = sqlite3.connect(str(db_path), check_same_thread=False,
@@ -261,6 +318,10 @@ class Store:
                                          "WHERE ticker_sources IS NULL").fetchall():
                     self._c.execute("UPDATE items SET ticker_sources=? WHERE id=?",
                                     (_dumps(_backfilled_ticker_sources(r)), r["id"]))
+            cols = self._columns("items")
+            for name, sql_type in _IMPACT_COLS:
+                if cols and name not in cols:
+                    self._c.execute(f"ALTER TABLE items ADD COLUMN {name} {sql_type}")
             cols = self._columns("feed_state")
             if cols and "url" not in cols:
                 self._c.execute("ALTER TABLE feed_state ADD COLUMN url TEXT")
@@ -340,8 +401,11 @@ class Store:
         public = int(bool(row["public"]) or bool(it.get("public")))
         if (new_tickers != tickers or new_sources != sources or public != row["public"]
                 or new_by_ticker != by_ticker or not row["ticker_sources"]):
+            # The score counts sources and tickers, so a row the merge changed
+            # is re-scored (``impact_ver`` NULL); its stored band stays until then.
             self._c.execute(
-                "UPDATE items SET tickers=?, sources=?, public=?, ticker_sources=? WHERE id=?",
+                "UPDATE items SET tickers=?, sources=?, public=?, ticker_sources=?, "
+                "impact_ver=NULL WHERE id=?",
                 (_dumps(new_tickers), _dumps(new_sources), public, _dumps(new_by_ticker),
                  row["id"]))
 
@@ -429,11 +493,25 @@ class Store:
                 n += cur.rowcount
         return n
 
-    def _select(self, where, params, limit, *, public_only, sources, public_sources) -> list:
+    def _select(self, where, params, limit, *, public_only, sources, public_sources,
+                kinds=None, exclude_kinds=None, capture=None) -> list:
         # SQLite reads a negative LIMIT as "no limit"; a limit that is not a
-        # positive int (bool included) returns nothing.
-        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+        # positive int (bool included) returns nothing. ``_NO_LIMIT`` (internal
+        # callers only) is no LIMIT at all.
+        unlimited = limit is _NO_LIMIT
+        if not unlimited and (isinstance(limit, bool) or not isinstance(limit, int)
+                              or limit <= 0):
             return []
+        kinds = _names(kinds)
+        if kinds is not None:
+            if not kinds:
+                return []
+            where.append(f"kind IN ({','.join('?' * len(kinds))})")
+            params.extend(kinds)
+        exclude_kinds = _names(exclude_kinds)
+        if exclude_kinds:
+            where.append(f"kind NOT IN ({','.join('?' * len(exclude_kinds))})")
+            params.extend(exclude_kinds)
         sources = _names(sources)
         if sources is not None:
             if not sources:
@@ -453,12 +531,17 @@ class Store:
         if public_only:
             where.append("public=1")
         clause = f"WHERE {' AND '.join(where)}" if where else ""
+        tail, args = ("", tuple(params)) if unlimited else ("LIMIT ?", (*params, limit))
         with self._lock:
-            rows = self._c.execute(f"SELECT * FROM items {clause} {_ORDER} LIMIT ?",
-                                   (*params, limit)).fetchall()
+            rows = self._c.execute(f"SELECT * FROM items {clause} {_ORDER} {tail}",
+                                   args).fetchall()
         out = []
         for r in rows:
             d = dict(r)
+            if capture is not None:
+                capture[d["id"]] = (d["sources"], d["tickers"], d["ticker_sources"],
+                                    d["public"])
+            d["impact"] = _impact(d)
             by_ticker = _ticker_sources(r)
             d.pop("ticker_sources", None)
             for col in _JSON_COLS:
@@ -476,10 +559,14 @@ class Store:
                 d["tickers"] = [t for t in d["tickers"]
                                 if allowed.intersection(by_ticker.get(t, ()))]
                 d["public"] = True
+                # The stored score counts private sources and tickers; the
+                # publisher re-scores the public row, so none reaches it here.
+                d["impact"] = None
             out.append(d)
         return out
 
-    def newest(self, limit, *, public_only=False, sources=None, public_sources=None) -> list:
+    def newest(self, limit, *, public_only=False, sources=None, public_sources=None,
+               kinds=None, exclude_kinds=None) -> list:
         """The newest ``limit`` items.
 
         ``public_sources`` - the feeds public NOW - is THE public view: a row is
@@ -487,14 +574,21 @@ class Store:
         are stored) is in it, and comes back with ``sources`` cut to the public
         names, primary first. ``sources`` keeps only rows whose primary ``source`` is in it;
         ``public_only`` keeps rows whose ingest-time ``public`` column is set.
-        A bare str is one name; an EMPTY collection returns nothing. The limit
+        ``kinds`` keeps only those kinds, ``exclude_kinds`` drops those (an empty
+        ``exclude_kinds`` drops nothing). A bare str is one name; an EMPTY
+        ``sources`` / ``public_sources`` / ``kinds`` returns nothing. The limit
         applies after every filter; a ``limit`` that is not a positive int
-        returns nothing."""
+        returns nothing.
+
+        Each row carries ``impact``: ``{"band", "score", "reasons"}`` as stored
+        (uncapped), or None when never scored - and None always under
+        ``public_sources``, whose rows the publisher re-scores."""
         return self._select([], [], limit, public_only=public_only, sources=sources,
-                            public_sources=public_sources)
+                            public_sources=public_sources, kinds=kinds,
+                            exclude_kinds=exclude_kinds)
 
     def newest_for_ticker(self, symbol, limit, *, public_only=False, sources=None,
-                          public_sources=None) -> list:
+                          public_sources=None, kinds=None, exclude_kinds=None) -> list:
         """As ``newest``, restricted to items tagged with exactly ``symbol``.
 
         Under ``public_sources`` the tag itself must be PUBLIC: a row matches
@@ -521,7 +615,40 @@ class Store:
             params.extend([symbol, *names])
         return self._select(
             where, params,
-            limit, public_only=public_only, sources=sources, public_sources=public_sources)
+            limit, public_only=public_only, sources=sources, public_sources=public_sources,
+            kinds=kinds, exclude_kinds=exclude_kinds)
+
+    # ── impact ────────────────────────────────────────────────────────────
+    def rows_to_score(self, fingerprint) -> list:
+        """Every item whose ``impact_ver`` is NULL (new, or changed by a merge)
+        or differs from ``fingerprint`` (the config / ticker set moved), shaped
+        as ``newest`` returns it (owner view), newest first.
+
+        The shape each row was read in is remembered, so a ``set_impact`` for it
+        writes only if no merge changed the row in between - otherwise a score of
+        the old row would mark the merged one current."""
+        seen = {}
+        rows = self._select(["(impact_ver IS NULL OR impact_ver != ?)"], [fingerprint], _NO_LIMIT,
+                            public_only=False, sources=None, public_sources=None,
+                            capture=seen)
+        with self._lock:
+            self._to_score = seen
+        return rows
+
+    def set_impact(self, rows) -> None:
+        """Store ``(id, score, band, reasons, fingerprint)`` rows in one write.
+        An unknown id is ignored; a row read by the last ``rows_to_score`` and
+        merged since is left for the next pass."""
+        with self._write():
+            for item_id, score, band, reasons, fp in rows:
+                sql = ("UPDATE items SET impact_score=?, impact_band=?, impact_reasons=?, "
+                       "impact_ver=? WHERE id=?")
+                args = [score, band, _dumps(list(reasons or [])), fp, item_id]
+                shape = self._to_score.pop(item_id, None)
+                if shape is not None:
+                    sql += " AND sources=? AND tickers=? AND ticker_sources IS ? AND public=?"
+                    args.extend(shape)
+                self._c.execute(sql, args)
 
     def prune(self, *, keep_days, now) -> int:
         """Delete items published OR first seen before the cutoff (``first_seen``
@@ -587,3 +714,65 @@ class Store:
             self._c.executemany(
                 "INSERT OR IGNORE INTO seen_accessions (feed, accession, seen) VALUES (?,?,?)",
                 [(str(feed), a, now) for a in accessions])
+
+    # ── calendar ──────────────────────────────────────────────────────────
+    def cal_source(self, name) -> dict:
+        """One calendar source's state. ``payload`` is its last GOOD parsed
+        result (None when there is none, or it is unreadable)."""
+        with self._lock:
+            r = self._c.execute("SELECT * FROM cal_sources WHERE name=?", (name,)).fetchone()
+        st = dict(r) if r else dict.fromkeys(_CAL_COLS, None) | {"name": name}
+        try:
+            st["payload"] = json.loads(st["payload"]) if st["payload"] is not None else None
+        except (TypeError, ValueError):
+            st["payload"] = None
+        return st
+
+    def set_cal_source(self, name, *, payload=_UNSET, **fields) -> None:
+        """Update the named fields; the rest keep their stored values. Leaving
+        ``payload`` out keeps the last good result - a failed fetch records its
+        ``error`` / ``last_poll`` and nothing else."""
+        unknown = set(fields) - set(_CAL_COLS[2:])
+        if unknown:
+            raise TypeError(f"unknown calendar source field(s): {sorted(unknown)}")
+        with self._write():
+            r = self._c.execute("SELECT * FROM cal_sources WHERE name=?", (name,)).fetchone()
+            st = dict(r) if r else dict.fromkeys(_CAL_COLS, None)
+            st.update(fields)
+            if payload is not _UNSET:
+                st["payload"] = None if payload is None else _dumps(payload)
+            self._c.execute(
+                f"INSERT OR REPLACE INTO cal_sources ({', '.join(_CAL_COLS)}) "
+                f"VALUES ({','.join('?' * len(_CAL_COLS))})",
+                (name, *(st[c] for c in _CAL_COLS[1:])))
+
+    def upsert_obs(self, series, rows, *, now) -> None:
+        """Store ``{"obs_date", "value"}`` observations of ``series``.
+
+        ``first_seen`` is written once and never overwritten (it is when the
+        value reached us, which the release tile compares to the release time);
+        ``value`` is updated, since FRED revises - but a missing value (NaN,
+        ``"."``, anything not a finite number, stored NULL) never erases a
+        reading. Rows inserted while the series had NO row are ``bootstrap``:
+        the first fetch's history, not a release we watched arrive."""
+        with self._write():
+            boot = int(self._c.execute("SELECT NOT EXISTS (SELECT 1 FROM econ_obs "
+                                       "WHERE series=?)", (series,)).fetchone()[0])
+            for r in rows:
+                obs_date = r.get("obs_date")
+                if not isinstance(obs_date, str) or not obs_date:
+                    continue
+                self._c.execute(
+                    "INSERT INTO econ_obs (series, obs_date, value, first_seen, bootstrap) "
+                    "VALUES (?,?,?,?,?) ON CONFLICT(series, obs_date) DO UPDATE SET "
+                    "value=COALESCE(excluded.value, econ_obs.value)",
+                    (series, obs_date, _obs_value(r.get("value")), now, boot))
+
+    def obs(self, series) -> list:
+        """``series``' observations, oldest first."""
+        with self._lock:
+            rows = self._c.execute(
+                "SELECT obs_date, value, first_seen, bootstrap FROM econ_obs WHERE series=? "
+                "ORDER BY obs_date", (series,)).fetchall()
+        return [{"obs_date": r["obs_date"], "value": r["value"], "first_seen": r["first_seen"],
+                 "bootstrap": bool(r["bootstrap"])} for r in rows]

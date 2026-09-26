@@ -475,9 +475,9 @@ def test_everything_round_trips_including_non_ascii_detail(tmp_path):
                          detail={"note": "café 株", "n": [1, 2.5, None], "ok": True})
     db.insert_many([it])
     row = db.newest(10)[0]
-    expected = dict(it, sources=["Reuters"])
+    expected = dict(it, sources=["Reuters"], impact=None)       # v2: never scored yet
     assert row == expected
-    assert set(row) == set(items.FIELDS) | {"sources"}
+    assert set(row) == set(items.FIELDS) | {"sources", "impact"}
 
 
 def test_a_title_merged_item_repolled_next_cycle_is_not_a_new_row(tmp_path):
@@ -1227,3 +1227,261 @@ def test_an_accession_marked_without_a_feed_is_seen_by_every_feed(tmp_path):
     db.mark_accessions(["a"])
     assert db.unseen_accessions(["a"], feed="F4 one") == []
     assert db.unseen_accessions(["a"], feed="F4 two") == []
+
+
+# ── v2: impact columns, kind filters, calendar state ──────────────────────
+
+import sqlite3  # noqa: E402
+
+from services.news_svc.items import item_id  # noqa: E402
+
+
+def _news(url, title, source, published="2026-09-25T20:00:00+00:00", tickers=()):
+    return _src(_item(url, title=title, published=published, tickers=tickers), source)
+
+
+def test_new_rows_need_a_score_and_merges_reset_it(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC")])
+    assert [r["id"] for r in db.rows_to_score("fp1")] == [item_id("u1")]
+    db.set_impact([(item_id("u1"), 5, "med", ["kw:tier1:FOMC"], "fp1")])
+    assert db.rows_to_score("fp1") == []
+    db.insert_many([_news("u2", "Fed holds rates steady today", "WSJ")])   # title merge
+    assert [r["id"] for r in db.rows_to_score("fp1")] == [item_id("u1")]
+    assert [r["id"] for r in db.rows_to_score("fp2")] == [item_id("u1")]   # config moved
+
+
+def test_rows_to_score_are_shaped_like_newest(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC", tickers=["NVDA"])])
+    got = db.rows_to_score("fp1")[0]
+    want = db.newest(10)[0]
+    assert got == want
+    assert got["tickers"] == ["NVDA"] and got["sources"] == ["CNBC"] and got["impact"] is None
+    assert not any(k.startswith("impact_") for k in got) and "title_key" not in got
+
+
+def test_a_repoll_that_changes_nothing_keeps_the_score(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC")])
+    db.set_impact([(item_id("u1"), 5, "med", ["kw:tier1:FOMC"], "fp1")])
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC")])   # same id, nothing new
+    assert db.rows_to_score("fp1") == []
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC", tickers=["SPY"])])
+    assert [r["id"] for r in db.rows_to_score("fp1")] == [item_id("u1")]    # a new ticker
+
+
+def test_newest_carries_the_stored_impact(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC"),
+                    _news("u2", "Oil climbs on supply worries again", "CNBC",
+                          published="2026-09-25T19:00:00+00:00")])
+    db.set_impact([(item_id("u1"), 5, "med", ["kw:tier1:FOMC"], "fp1")])
+    rows = db.newest(10)
+    assert rows[0]["impact"] == {"band": "med", "score": 5, "reasons": ["kw:tier1:FOMC"]}
+    assert rows[1]["impact"] is None
+    assert db.newest_for_ticker("NONE", 10) == []
+
+
+def test_a_merge_keeps_the_stored_band_until_it_is_rescored(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC")])
+    db.set_impact([(item_id("u1"), 5, "med", ["kw:tier1:FOMC"], "fp1")])
+    db.insert_many([_news("u2", "Fed holds rates steady today", "WSJ")])
+    assert db.newest(10)[0]["impact"] == {"band": "med", "score": 5,
+                                          "reasons": ["kw:tier1:FOMC"]}
+
+
+def test_the_public_view_never_carries_the_stored_impact(tmp_path):
+    # The stored score counts private sources and tickers; the publisher
+    # re-scores the public row, so the store hands the public view none.
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC")])
+    db.set_impact([(item_id("u1"), 7, "high", ["sources:3"], "fp1")])
+    assert db.newest(10, public_sources={"CNBC"})[0]["impact"] is None
+    assert db.newest(10)[0]["impact"]["band"] == "high"
+
+
+def test_set_impact_is_atomic_and_ignores_unknown_ids(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_news("u1", "Fed holds rates steady today", "CNBC")])
+    db.set_impact([("nope", 1, "low", [], "fp1")])
+    assert [r["id"] for r in db.rows_to_score("fp1")] == [item_id("u1")]
+    db._c = _CommitFailsOnce(db._c)
+    import pytest
+    with pytest.raises(sqlite3.OperationalError):
+        db.set_impact([(item_id("u1"), 5, "med", [], "fp1")])
+    assert not db._c.in_transaction
+    assert db.newest(10)[0]["impact"] is None
+
+
+def test_a_score_computed_before_a_merge_is_not_marked_current(tmp_path):
+    # A second Store (the news_refresh command) merges between the read and
+    # the write: the stale score must not mark the merged row as scored.
+    a = store.Store(tmp_path / "n.db")
+    b = store.Store(tmp_path / "n.db")
+    a.insert_many([_news("u1", "Fed holds rates steady today", "CNBC")])
+    todo = a.rows_to_score("fp1")
+    b.insert_many([_news("u2", "Fed holds rates steady today", "WSJ")])
+    a.set_impact([(r["id"], 5, "med", ["kw:tier1:FOMC"], "fp1") for r in todo])
+    assert [r["id"] for r in a.rows_to_score("fp1")] == [item_id("u1")]
+    a.set_impact([(item_id("u1"), 6, "med", ["sources:2"], "fp1")])
+    assert a.rows_to_score("fp1") == []
+
+
+def test_kind_filters_apply_before_the_limit(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.insert_many([_news("r1", "Fed holds rates steady today", "CNBC",
+                          published="2026-09-25T10:00:00+00:00"),
+                    _news("r2", "Oil climbs on supply worries again", "CNBC",
+                          published="2026-09-25T11:00:00+00:00")])
+    db.insert_many([_filing(f"0001-26-00000{i}", f"2026-09-25T2{i}:00:00+00:00")
+                    for i in range(3)])
+    assert [r["kind"] for r in db.newest(5)][:3] == ["edgar_filings"] * 3
+    assert [r["kind"] for r in db.newest(2, exclude_kinds=("edgar_form4", "edgar_filings"))] \
+        == ["rss", "rss"]
+    assert {r["kind"] for r in db.newest(5, kinds=("edgar_filings",))} == {"edgar_filings"}
+    assert len(db.newest(5, kinds=("edgar_filings",))) == 3
+    assert [r["kind"] for r in db.newest(5, kinds="rss")] == ["rss", "rss"]      # a str is one kind
+    assert db.newest(5, kinds=()) == []                                          # empty: nothing
+    assert len(db.newest(5, exclude_kinds=())) == 5                              # empty: no filter
+    assert db.newest_for_ticker("ACME", 5, exclude_kinds=("edgar_filings",)) == []
+    assert len(db.newest_for_ticker("ACME", 5, kinds=("edgar_filings",))) == 3
+
+
+def _pre_impact_db(path):
+    """The shape just before v2: ``ticker_sources``, ``feed_state.url`` and
+    per-feed accessions, but no impact columns and no calendar tables."""
+    import sqlite3 as _sq
+    c = _sq.connect(str(path))
+    c.executescript(_V1_ITEMS.replace("detail TEXT NOT NULL, public INTEGER NOT NULL",
+                                      "detail TEXT NOT NULL, public INTEGER NOT NULL, "
+                                      "ticker_sources TEXT")
+                    .replace("last_poll TEXT, error TEXT", "last_poll TEXT, error TEXT, url TEXT")
+                    .replace("CREATE TABLE seen_accessions (accession TEXT PRIMARY KEY, "
+                             "seen TEXT NOT NULL);",
+                             "CREATE TABLE seen_accessions (feed TEXT NOT NULL, accession "
+                             "TEXT NOT NULL, seen TEXT NOT NULL, PRIMARY KEY (feed, accession));"))
+    c.execute("INSERT INTO items VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+              (item_id("https://y/1"), "Yahoo Finance", '["Yahoo Finance"]', "", _STORY,
+               "apple rallies on iphone demand", "", "https://y/1",
+               "2026-09-25T20:00:00+00:00", NOW, '["AAPL"]', "rss", "[]", "{}", 1,
+               '{"AAPL": ["Yahoo Finance"]}'))
+    c.commit()
+    c.close()
+
+
+_IMPACT_COLS = {"impact_score", "impact_band", "impact_reasons", "impact_ver"}
+
+
+def test_old_database_gains_the_impact_columns(tmp_path):
+    _pre_impact_db(tmp_path / "n.db")
+    db = store.Store(tmp_path / "n.db")
+    assert _IMPACT_COLS <= db._columns("items")
+    assert {"cal_sources", "econ_obs"} <= {r[0] for r in db._c.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'")}
+    # the old row is unscored, and still reads
+    assert [r["id"] for r in db.rows_to_score("fp1")] == [item_id("https://y/1")]
+    assert db.newest(10)[0]["impact"] is None
+    db.close()
+    again = store.Store(tmp_path / "n.db")          # idempotent on a second open
+    assert _IMPACT_COLS <= again._columns("items")
+
+
+def test_a_v1_database_gains_the_impact_columns_too(tmp_path):
+    _v1_db(tmp_path / "n.db")
+    db = store.Store(tmp_path / "n.db")
+    assert _IMPACT_COLS | {"ticker_sources"} <= db._columns("items")
+
+
+def test_the_impact_migration_runs_inside_begin_immediate(tmp_path):
+    _pre_impact_db(tmp_path / "n.db")
+    seen = []
+    import sqlite3 as _sq
+    real = _sq.connect
+
+    def spy(*a, **k):
+        c = real(*a, **k)
+        c.set_trace_callback(seen.append)
+        return c
+    import unittest.mock as um
+    with um.patch.object(store.sqlite3, "connect", spy):
+        store.Store(tmp_path / "n.db")
+    alters = [i for i, s in enumerate(seen) if s.startswith("ALTER TABLE items ADD COLUMN impact")]
+    begins = [i for i, s in enumerate(seen) if s == "BEGIN IMMEDIATE"]
+    commits = [i for i, s in enumerate(seen) if s == "COMMIT"]
+    assert len(alters) == 4
+    assert begins and begins[0] < alters[0] and any(c > alters[-1] for c in commits)
+
+
+def test_cal_source_last_good_survives_a_failure(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.set_cal_source("bls", payload=[{"x": 1}], last_ok="t1", last_poll="t1", error=None)
+    db.set_cal_source("bls", last_poll="t2", error="HTTP 403")          # no payload given
+    st = db.cal_source("bls")
+    assert st["payload"] == [{"x": 1}] and st["error"] == "HTTP 403" and st["last_ok"] == "t1"
+    assert st["last_poll"] == "t2"
+
+
+def test_cal_source_unknown_and_validators(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    st = db.cal_source("fed")
+    assert st["name"] == "fed" and st["payload"] is None and st["etag"] is None
+    db.set_cal_source("fed", etag="e1", last_modified="lm1")
+    assert (db.cal_source("fed")["etag"], db.cal_source("fed")["last_modified"]) == ("e1", "lm1")
+    db.set_cal_source("fed", payload=None)                              # explicit None clears
+    assert db.cal_source("fed")["payload"] is None
+    import pytest
+    with pytest.raises(TypeError):
+        db.set_cal_source("fed", nonsense=1)
+
+
+def test_cal_source_unreadable_payload_reads_as_none(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.set_cal_source("bls", payload={"a": 1})
+    with db._write():
+        db._c.execute("UPDATE cal_sources SET payload='{not json' WHERE name='bls'")
+    assert db.cal_source("bls")["payload"] is None
+
+
+def test_econ_obs_first_seen_is_kept_and_bootstrap_marked(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.upsert_obs("CPIAUCSL", [{"obs_date": "2026-07-01", "value": 332.8}], now="t1")
+    db.upsert_obs("CPIAUCSL", [{"obs_date": "2026-07-01", "value": 332.9},
+                               {"obs_date": "2026-08-01", "value": 334.1}], now="t2")
+    rows = db.obs("CPIAUCSL")
+    assert rows[0] == {"obs_date": "2026-07-01", "value": 332.9, "first_seen": "t1", "bootstrap": True}
+    assert rows[1] == {"obs_date": "2026-08-01", "value": 334.1, "first_seen": "t2", "bootstrap": False}
+    assert db.obs("PAYEMS") == []
+
+
+def test_econ_obs_a_missing_value_is_null_and_never_erases_a_reading(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.upsert_obs("S", [{"obs_date": "2026-07-01", "value": float("nan")},
+                        {"obs_date": "2026-08-01", "value": "."},
+                        {"obs_date": "2026-09-01", "value": True}], now="t1")
+    assert [r["value"] for r in db.obs("S")] == [None, None, None]
+    db.upsert_obs("S", [{"obs_date": "2026-07-01", "value": 1.5}], now="t2")
+    db.upsert_obs("S", [{"obs_date": "2026-07-01", "value": float("inf")}], now="t3")
+    assert db.obs("S")[0] == {"obs_date": "2026-07-01", "value": 1.5, "first_seen": "t1",
+                              "bootstrap": True}
+
+
+def test_econ_obs_bootstrap_is_per_series(tmp_path):
+    db = store.Store(tmp_path / "n.db")
+    db.upsert_obs("A", [{"obs_date": "2026-07-01", "value": 1.0}], now="t1")
+    db.upsert_obs("B", [{"obs_date": "2026-07-01", "value": 2.0}], now="t2")
+    assert db.obs("B")[0]["bootstrap"] is True
+
+
+def test_the_calendar_writers_roll_back_on_failure(tmp_path):
+    import pytest
+    db = store.Store(tmp_path / "n.db")
+    db._c = _CommitFailsOnce(db._c)
+    with pytest.raises(sqlite3.OperationalError):
+        db.upsert_obs("S", [{"obs_date": "2026-07-01", "value": 1.0}], now="t1")
+    assert not db._c.in_transaction and db.obs("S") == []
+    db._c = _CommitFailsOnce(db._c._conn)
+    with pytest.raises(sqlite3.OperationalError):
+        db.set_cal_source("bls", payload=[1])
+    assert db.cal_source("bls")["payload"] is None
