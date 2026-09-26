@@ -207,6 +207,20 @@ naming the variable.
 ⚠ **`.env.live` is in the backup and in `.gitignore`** — both as their own
 line, because neither `.env` entry matches this name.
 
+**The public Market News screen (`/news`, 2026-09-26) needs NO ACL change.**
+The `live` user's key pattern is `~cache:*` (its grant, as recorded in
+[the public-screens verification](plans/2026-09-07-public-live-screens-verification.md)
+Phase 2: `~cache:* resetchannels &events:* -@all +@connection +@read
++@transaction … +subscribe +psubscribe -keys`), which already covers
+`cache:news:feed_public`. ⚠ **It equally covers `cache:news:feed`, the PRIVATE
+feed, and no ACL can take that back:** Redis key patterns only grant, so a
+wildcard cannot exclude one key beneath it, and adding a `%R~cache:news:*`
+selector would grant nothing new and exclude nothing. What keeps the private
+feed off the public origin is **code** — the Desk's `bus_key` and
+`webgui/pages/news_live.py` read only `news_view.VIEW_PUBLIC` in this process —
+pinned by `webgui/tests/test_news_live.py` and the Desk's public-key tests. The
+screen writes nothing, so it needs no write selector either.
+
 **4c. The live ACL user's FIRST write (public Strategy Finder).** The `live`
 user is read-only except for its Redis 7 selectors, one per public stream, each
 allowing `XADD` on that one key and nothing else. This first one is for

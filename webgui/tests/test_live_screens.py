@@ -14,13 +14,15 @@ FORBIDDEN = {"/terminate", "/settings", "/status", "/driver", "/manuals",
 _LIVE_SCREENS = pathlib.Path(__file__).resolve().parents[1] / "live_screens.py"
 
 
-def test_there_are_exactly_sixteen_screens():
+def test_there_are_exactly_seventeen_screens():
     # 22 -> 24 on 2026-09-21: the public Calculator and Simulator, published
     # deliberately (each is a write surface, gated in test_live_commands.py).
     # 24 -> 16 on 2026-09-22: nine pinned Gamma screens became ONE public Gamma
     # page with a dropdown; their routes redirect (RETIRED_ROUTES).
+    # 16 -> 17 on 2026-09-26: the public Market News screen (/news), a pure
+    # reader of cache:news:feed_public (tests/test_news_live.py).
     import live_screens
-    assert len(live_screens.SCREENS) == 16
+    assert len(live_screens.SCREENS) == 17
 
 
 def test_the_retired_routes_redirect_to_a_published_screen_and_are_not_one():

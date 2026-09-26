@@ -1,4 +1,4 @@
-"""The sixteen screens published on the public live origin.
+"""The seventeen screens published on the public live origin.
 
 PURE DATA -- no NiceGUI import -- so the route registration, the thumbnail
 capture script and the static grid on neuralstrike.co all read one source and
@@ -116,6 +116,16 @@ SCREENS = (
            "/options/calculator", kwargs={"public": True}, tile=False),
     Screen("simulator", "/simulator", "Simulator", "options.simulator",
            "/options/simulator", kwargs={"public": True}, tile=False),
+    # A pure READER - the one Tools screen that writes nothing. Reads
+    # cache:news:feed_public (items from feeds flagged public in
+    # config/news.toml, decided at ingest). ``public=True`` hands off to
+    # pages/news_live.py before the private page builds its Refresh.
+    # ⚠ The live ACL user's ``~cache:*`` read grant ALSO covers the private
+    # cache:news:feed - a wildcard cannot exclude one key - so what keeps the
+    # private feed off this origin is code, pinned by tests/test_news_live.py.
+    # Design: docs/plans/2026-09-25-news-feed-design.md.
+    Screen("news", "/news", "Market News", "news", "/news",
+           kwargs={"public": True}, tile=False),
 )
 
 

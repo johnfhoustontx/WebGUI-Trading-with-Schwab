@@ -1,6 +1,6 @@
 """The PUBLIC read-only screens: a second NiceGUI process on its own origin.
 
-Serves the twenty screens in ``live_screens.SCREENS`` at ``live.neuralstrike.co``,
+Serves the screens in ``live_screens.SCREENS`` at ``live.neuralstrike.co``,
 unauthenticated, to anyone. It renders the REAL page modules — the same ones the
 app renders — so a published screen cannot drift from the private one.
 

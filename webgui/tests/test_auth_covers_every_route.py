@@ -187,8 +187,9 @@ def test_the_live_route_exclusion_covers_exactly_the_published_screens():
     must be exactly the size of the thing it exists for -- and the coverage it
     costs must be KNOWN, not merely small.
 
-    ``/desk`` and ``/sentiment`` are registered by BOTH entrypoints, so
-    excluding them stops this sweep checking two of the app's own gated routes.
+    ``/desk``, ``/sentiment`` and ``/news`` are registered by BOTH entrypoints,
+    so excluding them stops this sweep checking three of the app's own gated
+    routes.
     That is the accepted cost of the shared global app; it is asserted as a
     closed set so a future screen table cannot quietly widen it. If it ever
     grows, the fix is to give the live routes their own prefix (``/live/desk``)
@@ -202,7 +203,12 @@ def test_the_live_route_exclusion_covers_exactly_the_published_screens():
     # off main.py's route table is what makes this a live measurement of the
     # coverage lost rather than a restatement of what someone once believed.
     shared = _LIVE_ROUTES & set(_main_page_routes().values())
-    assert shared == {"/desk", "/sentiment"}, (
+    # {"/desk", "/sentiment"} -> + "/news" on 2026-09-26: the public Market
+    # News screen publishes the private page's own route (the news plan, Task
+    # 15, pins route == private_route == "/news"). Known and named here, and
+    # bought back by the next test, which drives every shadowed path
+    # unauthenticated -- /news included.
+    assert shared == {"/desk", "/sentiment", "/news"}, (
         f"the live screens now shadow {sorted(shared)} of the app's own routes; "
         "this sweep no longer checks them")
     assert shared <= app_paths
@@ -211,9 +217,9 @@ def test_the_live_route_exclusion_covers_exactly_the_published_screens():
 def test_the_routes_the_exclusion_shadows_are_still_gated(client_unauthenticated):
     """Buy back the coverage the exclusion costs, for the overlap we KNOW about.
 
-    ``/desk`` and ``/sentiment`` are the app's own gated pages and are skipped by
-    the sweep above only because the live process happens to publish the same
-    two paths. Driven explicitly here, so the exclusion costs the sweep's
+    ``/desk``, ``/sentiment`` and ``/news`` are the app's own gated pages and are
+    skipped by the sweep above only because the live process happens to publish
+    the same three paths. Driven explicitly here, so the exclusion costs the sweep's
     *generality* over them and not the assertion itself. It cannot buy back an
     overlap nobody has noticed yet -- that is what the closed-set assertion
     above is for.
