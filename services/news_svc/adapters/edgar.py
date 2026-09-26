@@ -9,8 +9,10 @@ SEC blocks anything else.
 import math
 import re
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 
 from services.news_svc import items
+from shared.symbols import clean_symbol
 
 ATOM = "{http://www.w3.org/2005/Atom}"
 CURRENT = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent"
@@ -19,17 +21,57 @@ TICKERS_JSON = "https://www.sec.gov/files/company_tickers.json"
 
 _TITLE = re.compile(r"^(?P<form>[\w/-]+) - (?P<company>.+?) \((?P<cik>\d+)\) \((?P<role>[^)]+)\)")
 _ACCESSION = re.compile(r"/(\d{10}-\d{2}-\d{6})-index\.htm")
+# The ONLY links accepted. An href becomes a public url AND the host the poll
+# fetches index.json / the XML from, with the SEC User-Agent - so a link off
+# this prefix is refused outright. Plain http:// is refused too rather than
+# upgraded: the SEC only ever sends https, so anything else is not the SEC.
+SEC_ARCHIVE = "https://www.sec.gov/Archives/edgar/data/"
 # A default namespace on the root (some filers add one) hides every
 # un-prefixed path from ElementTree's lookups; the schema has no other.
-_XMLNS = re.compile(rb'\sxmlns="[^"]*"')
+_XMLNS = re.compile(rb"""\sxmlns=(?:"[^"]*"|'[^']*')""")
+# A DTD is how an entity bomb / external entity arrives; the SEC never sends one.
+_DTD = re.compile(rb"<!(?:DOCTYPE|ENTITY)", re.IGNORECASE)
+# Placeholders filers type where the issuer has no ticker. They pass the
+# ticker allow-list, so they are named here.
+_NO_SYMBOL = {"NONE", "NA", "N/A"}
+_PREFERRED_XML = ("form4", "primary_doc", "ownership")
 
 FORM_LABEL = {"S-1": "IPO / new registration", "S-3": "shelf registration",
+              "S-3ASR": "automatic shelf registration",
               "424B5": "prospectus supplement (offering)"}
+
+
+def form_label(form) -> str:
+    """The plain-English label for a form type; any ``.../A`` is an amendment."""
+    form = str(form or "")
+    if form.upper().endswith("/A"):
+        return f"amended {FORM_LABEL.get(form[:-2], 'registration')}"
+    return FORM_LABEL.get(form, "registration")
+
+
+def _symbol(raw) -> str:
+    """A real ticker, or ``""`` - never a filer's NONE / N/A placeholder."""
+    sym = clean_symbol(raw)
+    return "" if not sym or sym in _NO_SYMBOL else sym
+
+
+def _utc(stamp, now):
+    """``stamp`` as a UTC ``+00:00`` ISO string, or ``now``. The store sorts
+    and prunes ``published_at`` as TEXT, so the SEC's ``-04:00`` must not leak."""
+    try:
+        dt = datetime.fromisoformat(str(stamp).strip()) if isinstance(stamp, str) else None
+    except ValueError:
+        return now
+    if dt is None or dt.tzinfo is None:
+        return now
+    return dt.astimezone(timezone.utc).isoformat()
 
 
 def _parse_xml(body):
     """The document root, or ``None`` for anything that is not XML."""
     if not isinstance(body, (bytes, bytearray)) or not body.strip():
+        return None
+    if _DTD.search(bytes(body[:2048])):
         return None
     try:
         return ET.fromstring(body)
@@ -51,7 +93,7 @@ def parse_current(body: bytes) -> list:
         link = entry.find(f"{ATOM}link")
         href = (link.get("href") or "").strip() if link is not None else ""
         m, a = _TITLE.match(title), _ACCESSION.search(href)
-        if not m or not a:
+        if not m or not a or not href.startswith(SEC_ARCHIVE):
             continue
         acc = a.group(1)
         rec = {"form": m["form"], "company": m["company"], "cik": str(int(m["cik"])),
@@ -64,14 +106,26 @@ def parse_current(body: bytes) -> list:
 
 def xml_url(index_url: str, index_json):
     """The primary Form 4 XML inside a filing folder, from its ``index.json``."""
-    if not isinstance(index_json, dict) or not index_url:
+    if (not isinstance(index_json, dict) or not isinstance(index_url, str)
+            or not index_url.startswith(SEC_ARCHIVE)):
         return None
+    directory = index_json.get("directory")
+    listing = directory.get("item") if isinstance(directory, dict) else None
+    if not isinstance(listing, list):
+        return None
+    names = []
+    for f in listing:
+        name = f.get("name") if isinstance(f, dict) else None
+        if (not isinstance(name, str) or not name.lower().endswith(".xml")
+                or "filingsummary" in name.lower()
+                or any(c in name for c in ("/", "\\", "..", ":"))):
+            continue
+        names.append(name)
+    if not names:
+        return None
+    best = next((n for n in names if any(p in n.lower() for p in _PREFERRED_XML)), names[0])
     folder = index_url.rsplit("/", 1)[0]
-    for f in (index_json.get("directory") or {}).get("item") or []:
-        name = f.get("name", "") if isinstance(f, dict) else ""
-        if name.endswith(".xml") and "FilingSummary" not in name:
-            return f"{folder}/{name}"
-    return None
+    return f"{folder}/{best}"
 
 
 def _num(el, path):
@@ -96,7 +150,7 @@ def parse_form4(body: bytes):
     if isinstance(body, (bytes, bytearray)):
         body = _XMLNS.sub(b"", bytes(body), count=1)
     root = _parse_xml(body)
-    if root is None:
+    if root is None or root.tag.rsplit("}", 1)[-1] != "ownershipDocument":
         return None
     groups = []
     for tx in root.iter("nonDerivativeTransaction"):
@@ -121,10 +175,15 @@ def parse_form4(body: bytes):
             labels.append((rel.findtext("officerTitle") or "").strip() or "Officer")
         if _flag(rel, "isTenPercentOwner"):
             labels.append("10% Owner")
-    return {"symbol": (root.findtext("issuer/issuerTradingSymbol") or "").strip().upper(),
+    insiders = []
+    for owner in root.iter("reportingOwner"):
+        name = (owner.findtext("reportingOwnerId/rptOwnerName") or "").strip()
+        if name and name not in insiders:
+            insiders.append(name)
+    return {"symbol": _symbol(root.findtext("issuer/issuerTradingSymbol")),
             "company": (root.findtext("issuer/issuerName") or "").strip(),
-            "insider": (root.findtext("reportingOwner/reportingOwnerId/rptOwnerName")
-                        or "").strip(),
+            "insider": insiders[0] if insiders else "",
+            "insiders": insiders,
             "relationship": ", ".join(labels) or "Insider",
             "groups": groups, "total_value": sum(g["value"] for g in groups),
             "transaction_date": groups[0]["date"]}
@@ -164,16 +223,28 @@ def form4_item(detail: dict, feed: dict, index_url: str, now: str, *, universe):
     if not str(index_url or "").strip():
         return None
     detail = detail or {}
-    sym = str(detail.get("symbol") or "").strip().upper()
+    sym = _symbol(detail.get("symbol"))
     total = _value(detail.get("total_value"))
     floor = _value(feed.get("min_value_usd"))
-    if sym not in set(universe or ()) and total < floor:
+    if (not sym or sym not in set(universe or ())) and total < floor:
         return None
-    who = detail.get("insider") or "Insider"
+    who = str(detail.get("insider") or "").strip() or "Insider"
+    # Only a detail that CARRIES ``insiders`` gets the "+N" - one without it
+    # (an older stored item) renders exactly as before.
+    others = detail.get("insiders")
+    if isinstance(others, (list, tuple)):
+        names = []
+        for n in others:
+            n = str(n).strip() if n is not None else ""
+            if n and n not in names:
+                names.append(n)
+        extra = len([n for n in names if n != who])
+        if extra:
+            who = f"{who} +{extra}"
     rel = detail.get("relationship") or "Insider"
     title = f"{sym or detail.get('company') or 'Unknown'} — {who} ({rel}) bought {_money(total)}"
     return items.make_item(
-        source=feed.get("name", "SEC"), kind="edgar_form4", public=feed.get("public", True),
+        source=feed.get("name", "SEC"), kind="edgar_form4", public=feed.get("public", False),
         title=title, teaser="Form 4 insider purchase filed with the SEC",
         url=index_url, published_at=now, now=now, tickers=[sym] if sym else [],
         topics=["SEC Filing", "Insider Transaction"], detail=detail)
@@ -183,7 +254,8 @@ def cik_map(company_tickers) -> dict:
     """``{cik (no leading zeros): TICKER}`` from the SEC's company_tickers.json."""
     out = {}
     for v in (company_tickers or {}).values() if isinstance(company_tickers, dict) else ():
-        if not isinstance(v, dict) or not v.get("ticker"):
+        if (not isinstance(v, dict) or not v.get("ticker")
+                or isinstance(v.get("cik_str"), bool)):
             continue
         try:
             out[str(int(v["cik_str"]))] = str(v["ticker"]).upper()
@@ -201,11 +273,11 @@ def filing_item(entry: dict, feed: dict, now: str, *, cik_to_ticker):
     form = entry.get("form") or "filing"
     sym = (cik_to_ticker or {}).get(entry.get("cik") or "")
     title = (f"{entry.get('company') or 'Unknown company'} files {form} "
-             f"({FORM_LABEL.get(form, 'registration')})")
+             f"({form_label(form)})")
     return items.make_item(
-        source=feed.get("name", "SEC"), kind="edgar_filings", public=feed.get("public", True),
+        source=feed.get("name", "SEC"), kind="edgar_filings", public=feed.get("public", False),
         title=title, teaser="", url=url,
-        published_at=entry.get("updated") or now, now=now,
+        published_at=_utc(entry.get("updated"), now), now=now,
         tickers=[sym] if sym else [], topics=["SEC Filing", "Offering"],
         detail={"form": form, "cik": entry.get("cik") or "",
                 "accession": entry.get("accession") or ""})

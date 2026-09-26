@@ -184,3 +184,167 @@ def test_xml_url_picks_the_ownership_xml():
             == "https://www.sec.gov/Archives/edgar/data/1067983/000119312526403089/ownership.xml")
     assert edgar.xml_url("https://sec/a/b-index.htm", {}) is None
     assert edgar.xml_url("https://sec/a/b-index.htm", None) is None
+
+
+# --- review fixes (7453a8b) -----------------------------------------------
+
+def _entry(href, title="S-3 - Evil Co (0000000001) (Filer)"):
+    return f"""<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<entry><title>{title}</title>
+<link rel="alternate" type="text/html" href="{href}"/>
+<updated>2026-09-25T17:08:19-04:00</updated></entry>
+</feed>""".encode()
+
+
+def test_filing_item_published_at_is_utc_like_every_other_adapter():
+    entries = edgar.parse_current((FIX / "edgar_current_s3.xml").read_bytes())
+    cyto = [e for e in entries if e["company"] == "CytoDyn Inc."][0]
+    assert cyto["updated"] == "2026-09-25T17:08:19-04:00"      # the SEC's own offset
+    it = edgar.filing_item(cyto, {"name": "SEC Offerings"}, NOW, cik_to_ticker={})
+    assert it["published_at"] == "2026-09-25T21:08:19+00:00"
+
+
+def test_filing_item_bad_or_naive_time_falls_back_to_now():
+    for updated in ("garbage", "2026-09-25T17:08:19", "", None, 12345):
+        e = {"form": "S-3", "company": "X", "cik": "1", "accession": "a",
+             "index_url": "https://sec/i", "updated": updated}
+        assert edgar.filing_item(e, {}, NOW, cik_to_ticker={})["published_at"] == NOW, updated
+
+
+def test_parse_current_accepts_only_sec_archive_links():
+    good = "https://www.sec.gov/Archives/edgar/data/1/000000000126000001/0000000001-26-000001-index.htm"
+    assert len(edgar.parse_current(_entry(good))) == 1
+    for bad in ("https://evil.example/x/0000000001-26-000001-index.htm",
+                "https://www.sec.gov.evil.example/Archives/edgar/data/1/0000000001-26-000001-index.htm",
+                "https://evil.example/https://www.sec.gov/Archives/edgar/data/0000000001-26-000001-index.htm",
+                # plain http is REFUSED, not upgraded - the SEC only ever sends https
+                "http://www.sec.gov/Archives/edgar/data/1/000000000126000001/0000000001-26-000001-index.htm",
+                "/Archives/edgar/data/1/000000000126000001/0000000001-26-000001-index.htm"):
+        assert edgar.parse_current(_entry(bad)) == [], bad
+
+
+_IDX_URL = ("https://www.sec.gov/Archives/edgar/data/1067983/000119312526403089/"
+            "0001193125-26-403089-index.htm")
+_FOLDER = _IDX_URL.rsplit("/", 1)[0]
+
+
+def test_xml_url_refuses_path_like_names():
+    for name in ("../x.xml", "a/b.xml", "a\\b.xml", "https:x.xml", "..x.xml"):
+        assert edgar.xml_url(_IDX_URL, {"directory": {"item": [{"name": name}]}}) is None, name
+
+
+def test_xml_url_refuses_a_non_sec_index_url():
+    idx = {"directory": {"item": [{"name": "form4.xml"}]}}
+    assert edgar.xml_url("https://evil.example/a/b-index.htm", idx) is None
+
+
+def test_xml_url_never_raises_on_malformed_index_json():
+    for idx in ({"directory": "x"}, {"directory": {"item": 5}}, {"item": [{"name": None}]},
+                {"directory": {"item": [{"name": None}, {"name": 7}, "x", None]}},
+                {"directory": None}, {"directory": {"item": None}}, [], "x", 5):
+        assert edgar.xml_url(_IDX_URL, idx) is None, idx
+    assert edgar.xml_url(None, {"directory": {"item": [{"name": "a.xml"}]}}) is None
+    assert edgar.xml_url(5, {"directory": {"item": [{"name": "a.xml"}]}}) is None
+
+
+def test_xml_url_prefers_the_ownership_document_and_ignores_case():
+    idx = {"directory": {"item": [{"name": "exhibit.XML"}, {"name": "FilingSummary.xml"},
+                                  {"name": "wk-FORM4_17.XML"}]}}
+    assert edgar.xml_url(_IDX_URL, idx) == f"{_FOLDER}/wk-FORM4_17.XML"
+    idx = {"directory": {"item": [{"name": "other.xml"}, {"name": "primary_doc.xml"}]}}
+    assert edgar.xml_url(_IDX_URL, idx) == f"{_FOLDER}/primary_doc.xml"
+    idx = {"directory": {"item": [{"name": "readme.txt"}, {"name": "Doc.XML"}]}}
+    assert edgar.xml_url(_IDX_URL, idx) == f"{_FOLDER}/Doc.XML"
+
+
+def test_parse_form4_requires_an_ownership_document_root():
+    body = _one_purchase("100", "10").replace(b"ownershipDocument", b"somethingElse")
+    assert edgar.parse_form4(body) is None
+
+
+def test_form4_single_quoted_default_namespace_still_parses():
+    body = (FIX / "form4_buy.xml").read_bytes().replace(
+        b"<ownershipDocument>",
+        b"<ownershipDocument xmlns='http://www.sec.gov/edgar/ownership'>", 1)
+    d = edgar.parse_form4(body)
+    assert d is not None and d["symbol"] == "LEN"
+
+
+def test_doctype_or_entity_bodies_are_refused():
+    form4 = (FIX / "form4_buy.xml").read_bytes()
+    evil = form4.replace(b"<ownershipDocument>",
+                         b'<!DOCTYPE x [<!ENTITY a "aaaa">]>\n<ownershipDocument>', 1)
+    assert edgar.parse_form4(evil) is None
+    atom = (FIX / "edgar_current_4.xml").read_bytes()
+    assert edgar.parse_current(atom.replace(b"<feed", b"<!doctype feed>\n<feed", 1)) == []
+    assert edgar.parse_current(b'<!ENTITY x "y"><feed/>') == []
+
+
+def test_form4_junk_issuer_symbol_is_no_symbol():
+    for junk in ("NONE", "none", "NA", "N/A", "n/a", "", "bad sym", "$$$$$$$$$$"):
+        d = edgar.parse_form4(_one_purchase("100", "10").replace(
+            b"<issuerTradingSymbol>zzz</issuerTradingSymbol>",
+            f"<issuerTradingSymbol>{junk}</issuerTradingSymbol>".encode()))
+        assert d is not None and d["symbol"] == "", junk
+        it = edgar.form4_item(d, {"min_value_usd": 0}, "https://sec/x", NOW, universe=[])
+        assert it["tickers"] == [] and it["title"].startswith("Z Corp — "), junk
+
+
+def test_form4_item_refuses_a_junk_symbol_in_detail():
+    feed = {"min_value_usd": 1_000_000}
+    for junk in ("NONE", "N/A", "NA"):
+        it = edgar.form4_item({"symbol": junk, "company": "Z Corp", "total_value": 5},
+                              feed, "https://sec/x", NOW, universe=[junk])
+        # a junk symbol is not a ticker, so universe membership cannot rescue it
+        assert it is None, junk
+    it = edgar.form4_item({"symbol": "NONE", "company": "Z Corp", "total_value": 5e6},
+                          feed, "https://sec/x", NOW, universe=[])
+    assert it["tickers"] == [] and it["title"].startswith("Z Corp — ")
+
+
+def test_form4_names_every_reporting_owner():
+    d = edgar.parse_form4((FIX / "form4_buy.xml").read_bytes())
+    assert d["insider"] == "BERKSHIRE HATHAWAY INC"
+    assert d["insiders"] == ["BERKSHIRE HATHAWAY INC", "BUFFETT WARREN E"]
+    assert d["relationship"] == "10% Owner"                 # the FIRST owner's
+    it = edgar.form4_item(d, {"min_value_usd": 0}, "https://sec/x", NOW, universe=["LEN"])
+    assert it["title"].startswith("LEN — BERKSHIRE HATHAWAY INC +1 (10% Owner) bought $")
+    assert it["detail"]["insiders"] == ["BERKSHIRE HATHAWAY INC", "BUFFETT WARREN E"]
+
+
+def test_form4_single_owner_has_no_suffix_and_non_str_insider_is_stringified():
+    d = edgar.parse_form4(_one_purchase("100", "10"))
+    assert d["insiders"] == ["A B"]
+    it = edgar.form4_item(d, {"min_value_usd": 0}, "https://sec/x", NOW, universe=["ZZZ"])
+    assert it["title"] == "ZZZ — A B (Director) bought $2K"
+    it = edgar.form4_item({"symbol": "ZZZ", "insider": 42, "insiders": [42, None, "x"],
+                           "total_value": 5}, {"min_value_usd": 0}, "https://sec/x", NOW,
+                          universe=["ZZZ"])
+    assert it["title"].startswith("ZZZ — 42 +1 (")
+
+
+def test_cik_map_ignores_a_bool_cik():
+    m = edgar.cik_map({"0": {"cik_str": True, "ticker": "BAD"},
+                       "1": {"cik_str": 320193, "ticker": "aapl"}})
+    assert m == {"320193": "AAPL"}
+
+
+def test_form_labels_cover_automatic_shelves_and_amendments():
+    def title(form):
+        return edgar.filing_item({"form": form, "company": "X", "index_url": "https://sec/i"},
+                                 {}, NOW, cik_to_ticker={})["title"]
+    assert title("S-3ASR") == "X files S-3ASR (automatic shelf registration)"
+    assert title("S-3/A") == "X files S-3/A (amended shelf registration)"
+    assert title("S-1/A") == "X files S-1/A (amended IPO / new registration)"
+    assert title("F-9/A") == "X files F-9/A (amended registration)"
+
+
+def test_a_feed_without_public_yields_a_private_item():
+    d = {"symbol": "ZZZ", "total_value": 5e6}
+    assert edgar.form4_item(d, {"min_value_usd": 0}, "https://sec/x", NOW,
+                            universe=["ZZZ"])["public"] is False
+    assert edgar.filing_item({"form": "S-3", "index_url": "https://sec/i"}, {}, NOW,
+                             cik_to_ticker={})["public"] is False
+    assert edgar.form4_item(d, {"public": True}, "https://sec/x", NOW,
+                            universe=["ZZZ"])["public"] is True
