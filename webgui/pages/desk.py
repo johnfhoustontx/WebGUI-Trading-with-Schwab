@@ -399,7 +399,10 @@ def news_rows(news_view, *, now, limit=NEWS_ROWS_N):
     may draw it."""
     if not isinstance(news_view, dict):
         return None
+    limit = int(limit)
     out = []
+    if limit <= 0:
+        return out
     for r in _news.rows(news_view, now=now):
         title = r["title"].strip()
         if not title:
@@ -407,7 +410,7 @@ def news_rows(news_view, *, now, limit=NEWS_ROWS_N):
         out.append({"id": r["id"], "when": r["when"], "title": title,
                     "source": " · ".join(r["sources"]),
                     "href": news_href(r["url"])})
-        if len(out) >= max(0, int(limit)):
+        if len(out) >= limit:
             break
     return out
 

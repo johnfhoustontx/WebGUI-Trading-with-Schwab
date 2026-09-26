@@ -719,6 +719,8 @@ def flow_band(symbol, flow_env):
 # The news feed has published nothing — the ONE shared sentence, which the
 # Desk's headlines strip shows too.
 WAITING_NEWS = _copy.WAITING_NEWS
+# The band's line when the symbol itself does not clean.
+NEWS_NO_SYMBOL = "No headlines for this symbol in the feed."
 
 
 def news_band(symbol, news_env, now):
@@ -731,7 +733,15 @@ def news_band(symbol, news_env, now):
     sym = clean_symbol(symbol)
     if not isinstance(news_env, dict):
         return {"message": WAITING_NEWS, "rows": []}
-    rows = _news.for_symbol(news_env, sym, now=now) if sym else []
+    if not sym:
+        # The allow-list refused it: name no symbol rather than print "None"
+        # or echo text the allow-list rejected.
+        return {"message": NEWS_NO_SYMBOL, "rows": []}
+    # A blank title would draw an empty link, so it is dropped — and the cap
+    # applies AFTER that, or untitled items would use up the band's rows.
+    rows = [dict(r, title=r["title"].strip())
+            for r in _news.for_symbol(news_env, sym, now=now, limit=None)
+            if r["title"].strip()][:_news.SYMBOL_LIMIT]
     if not rows:
         return {"message": f"No headlines for {sym} in the feed.", "rows": []}
     return {"message": "", "rows": [

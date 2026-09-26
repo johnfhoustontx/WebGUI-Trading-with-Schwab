@@ -70,6 +70,33 @@ def test_only_items_that_name_the_symbol_are_shown():
     assert [r["title"] for r in rows] == ["headline 2"]
 
 
+
+def test_untitled_items_are_skipped_before_the_cap():
+    """A row with a blank title draws an empty link: it is dropped, and it
+    must not use up one of the band's rows - the cap applies AFTER the filter."""
+    blanks = [dict(_item(i), title=t) for i, t in
+              enumerate(["", "   ", "\t", "\n", " ", "", "  ", ""])]
+    assert len(blanks) == news_view.SYMBOL_LIMIT
+    real = [_item(20, title="real one"), _item(21, title="real two")]
+    rows = symbol.news_band("NVDA", {"items": blanks + real}, now=NOW)["rows"]
+    assert [r["title"] for r in rows] == ["real one", "real two"]
+
+
+def test_a_feed_of_only_untitled_items_is_quiet():
+    env = {"items": [dict(_item(1), title=""), dict(_item(2), title="  ")]}
+    band = symbol.news_band("NVDA", env, now=NOW)
+    assert band == {"message": "No headlines for NVDA in the feed.", "rows": []}
+
+
+@pytest.mark.parametrize("raw", [None, "", "not a <ticker>!", "NV;DA", "A" * 40, 7])
+def test_an_uncleanable_symbol_gets_a_neutral_line_never_none(raw):
+    """``clean_symbol`` refuses it, so the band names no symbol at all rather
+    than printing "None" or echoing text the allow-list rejected."""
+    env = {"items": [_item(1)]}
+    band = symbol.news_band(raw, env, now=NOW)
+    assert band == {"message": "No headlines for this symbol in the feed.", "rows": []}
+    assert "None" not in band["message"]
+
 # ── the poll ─────────────────────────────────────────────────────────────────
 def test_the_news_view_joins_the_one_batch_and_owns_its_region():
     assert news_view.VIEW in symbol.VIEWS

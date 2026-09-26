@@ -4249,6 +4249,18 @@ def test_news_rows_are_the_newest_five_and_none_for_a_cold_feed():
     assert rows[0]["source"] == "S"
 
 
+
+@pytest.mark.parametrize("limit", [0, -1, -5])
+def test_news_rows_with_no_room_are_empty(limit):
+    view = {"items": [_news_item(i) for i in range(3)]}
+    assert d.news_rows(view, now=_NEWS_NOW, limit=limit) == []
+
+
+def test_news_rows_limit_is_exact():
+    view = {"items": [_news_item(i) for i in range(3)]}
+    assert len(d.news_rows(view, now=_NEWS_NOW, limit=1)) == 1
+    assert len(d.news_rows(view, now=_NEWS_NOW, limit=2)) == 2
+
 def test_news_rows_name_every_source_that_carried_the_story():
     item = dict(_news_item(1), sources=["Reuters", "CNBC"])
     (row,) = d.news_rows({"items": [item]}, now=_NEWS_NOW)

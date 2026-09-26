@@ -132,7 +132,7 @@ def test_the_enqueue_helper_is_called_only_on_navigation_and_refresh():
 
 # ── the poll's view set ────────────────────────────────────────────────────
 
-def test_the_poll_reads_the_ten_shared_views_plus_this_symbols_dossier():
+def test_the_poll_reads_the_eleven_shared_views_plus_this_symbols_dossier():
     views = sp.poll_views("MU")
     assert views[:len(sp.VIEWS)] == sp.VIEWS
     assert views[-1] == "options:dossier:MU"
