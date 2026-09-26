@@ -116,19 +116,24 @@ def test_no_import_of_main_app_settings_or_a_writer():
     assert "may_enqueue" not in _src()   # nothing here to gate: it sends nothing
 
 
-def test_rows_are_drawn_by_the_private_pages_own_painter():
-    """The two origins cannot drift: this page draws rows with
-    ``news.draw_rows`` and has no row builder of its own."""
+def test_rows_are_drawn_by_the_private_pages_own_board():
+    """The two origins cannot drift: this page builds every region with the
+    private page's ``news.build_board`` (whose painters are ``draw_rows`` /
+    ``draw_sec_rows`` / ``draw_next`` / ``draw_calendar``), unlinked and with
+    no watchlist, and has no builder or painter of its own. (Rewritten
+    2026-09-26: it pinned direct ``news.draw_rows`` calls.)"""
     calls = [n for n in ast.walk(_tree()) if isinstance(n, ast.Call)
-             and isinstance(n.func, ast.Attribute) and n.func.attr == "draw_rows"]
-    assert calls
-    for c in calls:
-        assert isinstance(c.func.value, ast.Name) and c.func.value.id == "news"
-        linked = [k.value for k in c.keywords if k.arg == "linked"]
-        assert linked and isinstance(linked[0], ast.Constant) \
-            and linked[0].value is False, "a public row must not link a dossier"
+             and isinstance(n.func, ast.Attribute) and n.func.attr == "build_board"]
+    assert len(calls) == 1
+    (c,) = calls
+    assert isinstance(c.func.value, ast.Name) and c.func.value.id == "news"
+    kw = {k.arg: k.value for k in c.keywords}
+    assert isinstance(kw["linked"], ast.Constant) and kw["linked"].value is False, \
+        "a public row must not link a dossier"
+    assert isinstance(kw["watchlist"], ast.Constant) and kw["watchlist"].value is None
     defs = {n.name for n in ast.walk(_tree()) if isinstance(n, ast.FunctionDef)}
-    assert "draw_rows" not in defs
+    assert not defs & {"draw_rows", "draw_sec_rows", "draw_next", "draw_calendar",
+                       "build_board"}
 
 
 def test_feed_text_never_reaches_ui_html():
@@ -280,11 +285,13 @@ def test_a_cold_public_feed_says_nothing_has_been_published(monkeypatch):
 
 def test_trending_reads_the_public_payload(monkeypatch):
     """A ticker only the private feed carries never trends here."""
+    from nicegui import ui
     new, _ = _render(monkeypatch, public={"items": [
         _item(1, title="a", tickers=["AAPL"]), _item(2, title="b", tickers=["AAPL"])]})
-    texts = [t for t in _texts(new) if isinstance(t, str)]
-    assert "AAPL 2" in texts
-    assert not [t for t in texts if t.startswith("NVDA ")]
+    chips = [[getattr(c, "text", None) for c in e.default_slot.children]
+             for e in new if isinstance(e, ui.row) and "cursor-pointer" in e.classes]
+    assert ["AAPL", "2"] in chips
+    assert not [c for c in chips if c[:1] == ["NVDA"]]
 
 
 def test_the_empty_feed_line_is_the_private_pages_own():
@@ -306,17 +313,14 @@ def test_reads_only_public_views():
         assert public in src, public
 
 
-def test_the_sec_and_calendar_regions_use_the_private_painters_unlinked():
-    calls = {n.func.attr: n for n in ast.walk(_tree()) if isinstance(n, ast.Call)
-             and isinstance(n.func, ast.Attribute)
-             and n.func.attr in ("draw_sec_rows", "draw_calendar")}
-    assert set(calls) == {"draw_sec_rows", "draw_calendar"}
-    for name, c in calls.items():
-        assert isinstance(c.func.value, ast.Name) and c.func.value.id == "news", name
-    linked = [k.value for k in calls["draw_sec_rows"].keywords if k.arg == "linked"]
-    assert linked and isinstance(linked[0], ast.Constant) and linked[0].value is False
-    defs = {n.name for n in ast.walk(_tree()) if isinstance(n, ast.FunctionDef)}
-    assert not defs & {"draw_sec_rows", "draw_calendar"}
+def test_the_board_itself_reads_no_view():
+    """``build_board`` does no bus read: every read of the public page stays in
+    this module, where ``test_every_bus_read_names_the_public_view`` sees it."""
+    import inspect
+
+    from pages import news
+    src = inspect.getsource(news.build_board)
+    assert "bus_client" not in src and "watch_view" not in src
 
 
 def test_no_command_site_exists():
@@ -441,15 +445,21 @@ def test_a_cold_sec_and_calendar_say_nothing_has_been_published(monkeypatch):
 
 
 def test_the_band_filter_is_display_only(monkeypatch):
-    """The impact filter is drawn (it only hides rows already on the page) and
+    """The band picker is drawn (it only hides rows already on the page) and
     touches no view."""
-    from pages import news, news_view as nv
+    from nicegui import ui
+
+    from pages import news_view as nv
     new, asked = _render_v2(monkeypatch)
-    sels = [e for e in new if getattr(e, "options", None) == news.BAND_OPTIONS]
-    assert sels
+    opts = [e for e in new if isinstance(e, ui.row) and "cursor-pointer" in e.classes
+            and [getattr(c, "text", None) for c in e.default_slot.children][-1:] == ["High"]]
+    assert opts
     n = len(asked)
-    sels[0].value = "high"
+    for lst in list(opts[0]._event_listeners.values()):
+        if lst.type == "click":
+            lst.handler(None)
     assert not {nv.VIEW, nv.VIEW_SEC, nv.VIEW_CAL} & set(asked[n:])
+    assert len(asked) == n
 
 
 def test_no_refresh_is_built(monkeypatch):

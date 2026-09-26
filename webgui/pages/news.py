@@ -2,26 +2,39 @@
 
 Tier-1: nicegui + bus_client + shell + app_settings + ``shared.news_config`` +
 ``pages.*`` only. Reads three views - ``cache:news:feed`` (``news_view.VIEW``,
-the headline list), ``cache:news:sec`` (``VIEW_SEC``, the SEC / EDGAR panel)
-and ``cache:news:calendar`` (``VIEW_CAL``, the calendar tiles) - each on its
-own ``watch_view``. The ONE write is Refresh → ``news_refresh`` on cmd:news,
-built only when ``shell.may_enqueue()`` says this process may.
+the headline list), ``cache:news:sec`` (``VIEW_SEC``, the SEC filings card)
+and ``cache:news:calendar`` (``VIEW_CAL``, the calendar hero and agenda) - each
+on its own ``watch_view``. The ONE write is Refresh → ``news_refresh`` on
+cmd:news, built only when ``shell.may_enqueue()`` says this process may.
 ``render(public=True)`` hands off to ``news_live`` before anything here builds.
 
-Layout (design §3): the headline list in the LEFT column (its control bar and
-Trending filter it alone); the SEC panel in the RIGHT column's top half, the
-calendar in its bottom half, each scrolling on its own at ``lg``. Below ``lg``
-the three stack in that DOM order. The headline list opens with a sticky
-column header (Time · Imp. · Symbol · Headline · Source); each headline is ONE
-line under it - time (Central), impact pill, a fixed-width Symbol slot, the
-headline truncated with an ellipsis, and a fixed-width Source cell (the first
-source, "+N", every source on hover); the teaser (or a filing's summary) is on
-the headline's hover. A high-impact calendar tile (the producer's ``high``) is
-drawn with an amber border and wash and a "HIGH" chip.
+Layout (the 2026-09-26 redesign): two columns at ``lg`` - two thirds and one
+third - stacking below it in DOM order.
+
+LEFT: a filter card (a search box over headlines and tickers, the All / High /
+Med / Low band picker, one Sources chip per source in the feed with its count);
+a line of MOST MENTIONED ticker chips with "N of M stories" at its right; then
+the headline list - one line per story, no header row: time (Central, 24-hour),
+the band word, the headline (a new-tab link), up to two ticker chips and "+N",
+and the first source. A high story carries a red left border and a faint wash, a
+med one an amber border.
+
+RIGHT: the NEXT ON THE CALENDAR hero (the earliest timed event or data release
+ahead, with a countdown); the SEC filings card (All / Insider buys / Offerings /
+Registrations; a form badge, the symbol, the filer, a Form 4's dollar total and
+the time); the Economic calendar card - an agenda grouped by day, every kind in
+one list told apart by its badge (FOMC, SPEECH, TESTIMONY, EVENT, DATA,
+DIVIDEND, IPO), a high-impact item with an amber border and a HIGH marker.
+
+``build_board`` builds every region and its filters and returns the handles the
+page feeds payloads into; the public screen (``news_live``) calls it too, so the
+two origins cannot drift. It does NO bus read: each page reads its own views and
+hands the payloads over. ``draw_rows`` / ``draw_sec_rows`` / ``draw_calendar`` /
+``draw_next`` are the module-level painters it uses.
 
 Every fact comes from ``pages/news_view.py`` (pure); this module holds widgets
-and wiring. ``draw_rows`` / ``draw_sec_rows`` / ``draw_calendar`` are
-module-level because the public screen draws the same regions.
+and wiring. Colours are FIXED palette classes chosen from finite maps (a band, a
+form family, a badge) - never a runtime value.
 
 ⚠ A title, teaser, detail line or calendar title is THIRD-PARTY TEXT. It reaches
 the page only through ``ui.label`` / ``ui.link``, which escape — never
@@ -29,19 +42,19 @@ the page only through ``ui.label`` / ``ui.link``, which escape — never
 nowhere. A link's target is a feed's URL too, and ``ui.link`` does NOT escape
 an href, so only what ``news_view.safe_href`` passes (http/https with a host)
 becomes a link; anything else (a ``javascript:`` URL included) renders the
-title as plain text.
+title as plain text. A filing links to https sec.gov alone (``sec_href``).
 
 Built on the page kit (``pages/ui_kit.py``): the header line carries the title,
-the Updated stamp and Refresh; the filters sit in a control bar; the status line
-carries counts only; one region per panel holds what a publish replaces. The
-stamp is not ``stale``-aware: the collector's cadence moves with the session (5
-min in regular hours, 60 at the weekend), so an old stamp on a Sunday is not a
-fault.
+the Updated stamp and Refresh; one region per panel holds what a publish
+replaces. The stamp is not ``stale``-aware: the collector's cadence moves with
+the session (5 min in regular hours, 60 at the weekend), so an old stamp on a
+Sunday is not a fault.
 """
 from __future__ import annotations
 
 import datetime as _dt
 import math
+from types import SimpleNamespace
 from urllib.parse import quote
 
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
@@ -50,13 +63,15 @@ from pages.options import theme as _t
 
 PAGE_SIZE = 60
 # How often an open tab redraws what it already holds. A headline's stamp drops
-# its date at midnight Central, filings age and calendar events pass while a
-# tab sits open; the views only republish when their CONTENT changes. A redraw
-# from the held payloads - never a bus read.
+# its time for a day at midnight Central, filings age, calendar events pass and
+# the countdown moves while a tab sits open; the views only republish when their
+# CONTENT changes. A redraw from the held payloads - never a bus read.
 REPAINT_SEC = 60
 # Tickers drawn inline on one headline row; the rest collapse into "+N" with
 # the full list on hover (four chips squeezed the headline to nothing).
 MAX_ROW_TICKERS = 2
+# Chips on the MOST MENTIONED line.
+TRENDING_CHIPS = 8
 # How long Refresh may spin before the backstop gives the button back. One poll
 # of every feed walks the Yahoo per-ticker feeds and SEC's paced requests, so it
 # is minutes, not seconds; the release is ``news:status``, published at the end
@@ -76,102 +91,167 @@ NO_MATCH = "Nothing matches those filters. Clear one to see more."
 # this page and by the public copy (pages/news_live.py) alike.
 EMPTY_FEED = "The feed is up but carries no items right now."
 
-# ── row styling (fixed Tailwind classes; no inline style) ───────────────────
-# One line per item: nothing wraps; the headline gives way with an ellipsis.
-# overflow-hidden: on a phone the fixed-width cells would otherwise push the
-# headline to 0px and the row off the side of the card.
-_ROW = ("w-full items-center gap-2 flex-nowrap overflow-hidden py-1.5 "
-        "border-b border-[#213152]/60")
-# w-28 holds a dated stamp ("Sep 25 10:43 AM") on one line.
-_WHEN_W = "w-28 shrink-0"
-_WHEN = f"text-xs tabular-nums whitespace-nowrap {_t.MUTED} {_WHEN_W}"
-_CHIP = "text-[11px] font-semibold px-1.5 py-0.5"
-_TICKER_LINK = f"{_CHIP} {_t.BADGE_ACCENT} no-underline hover:underline shrink-0"
-_TICKER_CHIP = f"{_CHIP} {_t.BADGE_ACCENT} cursor-pointer hover:underline shrink-0"
-# ⚠ ``max-sm:hidden``, never ``hidden sm:flex``: Quasar ships
-# ``.hidden { display: none !important }``, which beats every ``sm:`` display
-# utility - the source badges the Source column replaced were written that way
-# and never showed at any width.
-_SM_ONLY = "max-sm:hidden"
-# The Symbol column: a FIXED-width slot (two chips and a "+N"), so the headline
-# starts at the same x on every row. Below ``sm`` it goes, header label and
-# all, like the Source column: measured at 390px (16px page gutters twice),
-# even a one-chip slot left the headline 122px; without it, 178px.
-_TICKER_W = f"w-32 shrink-0 {_SM_ONLY}"
-_TICKER_SLOT = f"{_TICKER_W} flex items-center gap-1.5 flex-nowrap overflow-hidden"
-# The Source column: the first source (truncated) plus "+N", every source on
-# hover. A fixed-width cell - kept empty when a row has no source - that is
-# the first thing to go below ``sm``, header label and all: the headline
-# matters more on a phone.
-_SOURCE_CELL = (f"w-32 shrink-0 flex {_SM_ONLY} items-center gap-1 flex-nowrap "
-                "overflow-hidden cursor-default")
-_SOURCE = f"text-[10.5px] px-1.5 py-0.5 {_t.BADGE_MUTED} whitespace-nowrap truncate min-w-0"
-_SOURCE_MORE = f"text-[10.5px] px-1 py-0.5 {_t.MUTED} whitespace-nowrap shrink-0"
-_MORE_TICKERS = f"{_CHIP} {_t.BADGE_MUTED} whitespace-nowrap shrink-0 cursor-default"
-_HEADLINE = f"text-sm {_t.LABEL} no-underline hover:underline truncate min-w-0 flex-1"
-# The impact pill: a fixed-width slot, so a row with no band keeps the columns.
-_PILL_SLOT = "w-5 shrink-0"
-_PILL = ("w-5 shrink-0 text-center text-[10.5px] font-bold rounded-[4px] "
-         "py-0.5 cursor-default")
-_TREND_ON = f"{_CHIP} {_t.BADGE_ACCENT} cursor-pointer"
-_TREND_OFF = f"{_CHIP} {_t.BADGE_MUTED} cursor-pointer hover:underline"
+SEARCH_HINT = "Filter by ticker or keyword"
+# The band picker's options, in order; "all" is no filter. Selecting a band
+# shows ONLY that band.
+BAND_OPTIONS = {"all": "All", "high": "High", "med": "Med", "low": "Low"}
+BAND_WORD = {"high": "HIGH", "med": "MED", "low": "LOW"}
+SOURCES_LABEL = "SOURCES"
+TRENDING_LABEL = "MOST MENTIONED"
+WATCHLIST_CHIP = "Watchlist only"
 
-# ── the right column: SEC panel (top) and calendar (bottom) ─────────────────
-# Each panel is half the viewport tall at lg and scrolls on its own; below lg
-# the three regions stack in DOM order at natural height.
-_GRID = "w-full grid grid-cols-1 lg:grid-cols-5 gap-3 items-start"
-# The left column is exactly as tall as the right one at lg: two panels of
-# (50vh - 5rem) plus the right column's gap-3 (0.75rem) = 100vh - 9.25rem. Its
-# control bar and Trending stay put; the headline list below them scrolls in
-# ``_LIST``. Below lg everything stacks at natural height.
-_LEFT = "lg:col-span-3 min-w-0 w-full gap-3 lg:h-[calc(100vh-9.25rem)] flex-nowrap"
-_LIST = "w-full min-w-0 gap-2 flex-nowrap lg:flex-1 lg:min-h-0 lg:overflow-y-auto"
-_RIGHT = "lg:col-span-2 min-w-0 w-full flex flex-col gap-3"
-_PANEL = f"{_t.CARD} w-full min-w-0 gap-2 lg:h-[calc(50vh-5rem)] overflow-y-auto flex-nowrap"
-# The panel's own background (the CARD token's ``bg-``), so rows scrolling
-# under the sticky column header do not show through it.
-_PANEL_BG = next((c for c in _t.CARD.split() if c.startswith("bg-")), "bg-[#101a30]")
-_SEC_HEAD = (f"w-full items-center gap-2 flex-nowrap {_t.EYEBROW} "
-             f"sticky top-0 z-10 {_PANEL_BG} py-1")
-_SEC_SYM = "w-14 shrink-0"
-# The headline list's column header: the SEC panel's sticky header, over the
-# list's own cells (each label takes the width class of the cell below it).
-_LIST_HEAD = _SEC_HEAD
-_SOURCE_HEAD = f"w-32 shrink-0 {_SM_ONLY}"
-LIST_COLUMNS = ("Time", "Imp.", "Symbol", "Headline", "Source")
-IMPACT_HINT = "Impact: H high · M medium · L low"
-_SEC_CELL = "min-w-0 flex-1 items-center gap-1.5 flex-nowrap overflow-hidden"
-_SEC_TITLE = f"text-sm {_t.LABEL} no-underline hover:underline truncate min-w-0"
-_SEC_DETAIL = f"text-xs {_t.MUTED} truncate min-w-0 max-w-[45%] shrink-0"
-_SEC_DOT = f"text-xs {_t.MUTED} shrink-0"
-_CAL_GROUP = "w-full gap-1.5"
-_CAL_TILES = "w-full grid grid-cols-1 sm:grid-cols-2 gap-2"
-_CAL_TILE = "gap-0.5 min-w-0 rounded-[8px] border border-[#213152] bg-white/[0.02] px-2.5 py-2"
-# A high-impact tile (the producer's ``high``): an amber accent border and a
-# faint amber wash in place of the plain ones, and a "HIGH" chip by its title.
-_CAL_TILE_HIGH = ("gap-0.5 min-w-0 rounded-[8px] border border-amber-400/70 "
-                  "bg-amber-400/[0.08] px-2.5 py-2")
-_CAL_TITLE = f"text-sm font-semibold {_t.LABEL} truncate w-full"
-_CAL_HEAD = "w-full items-center gap-1.5 flex-nowrap"
-_CAL_TITLE_HIGH = f"text-sm font-semibold {_t.LABEL} truncate min-w-0"
-_CAL_CHIP = ("text-[10px] font-bold uppercase tracking-[.06em] text-amber-300 "
-             "rounded-[4px] bg-amber-400/15 px-1 py-px shrink-0 cursor-default")
+SEC_TITLE = "SEC filings"
+# What is true of the SEC view: the newest filings EDGAR published (the service
+# keeps its own item window - not a time window, so no "last 24 h" here).
+SEC_NOTE = "EDGAR · newest first"
+SEC_PAGE_SIZE = 40
+CAL_TITLE = "Economic calendar"
+CAL_NOTE = "all times CT"
+NEXT_TITLE = "NEXT ON THE CALENDAR"
 HIGH_CHIP = "HIGH"
 HIGH_HINT = "High-impact release"
-_CAL_WHEN = f"text-xs tabular-nums {_t.MUTED}"
-_CAL_LINE = f"text-xs {_t.MUTED}"
-_CAL_IND = f"text-xs {_t.LABEL} tabular-nums"
-_CAL_NOTE = f"text-xs {_t.TXT_WARN}"
-
-SEC_TITLE = "SEC / EDGAR"
-CAL_TITLE = "Calendar"
-SEC_PAGE_SIZE = 40
 # The SEC and calendar views have published NOTHING (never "nothing to report").
 SEC_WAITING = "No filings yet — the SEC feed hasn't published this session."
 SEC_EMPTY = "No SEC filings or insider buys right now."
+SEC_NO_MATCH = "No filings of that kind right now."
 CAL_WAITING = "No calendar yet — it hasn't been published this session."
-# The impact filter's options; "all" is no filter.
-BAND_OPTIONS = {"all": "All", "high": "High", "med": "High + Med"}
+CAL_EMPTY = "Nothing on the calendar ahead."
+UNDATED_HEAD = "DATE NOT YET PUBLISHED"
+
+# ── styling: fixed Tailwind classes, colours from finite maps ────────────────
+# ⚠ ``max-sm:hidden``, never ``hidden sm:flex``: Quasar ships
+# ``.hidden { display: none !important }``, which beats every ``sm:`` display
+# utility - the source badges an earlier version drew were written that way and
+# never showed at any width.
+_SM_ONLY = "max-sm:hidden"
+_CAPS = "text-[10.5px] font-semibold uppercase tracking-[.14em] text-[#6d76a0] whitespace-nowrap"
+_GRID = "w-full grid grid-cols-1 lg:grid-cols-3 gap-4 items-start"
+_LEFT = "lg:col-span-2 min-w-0 w-full flex flex-col gap-3 flex-nowrap"
+_RIGHT = "min-w-0 w-full flex flex-col gap-4 flex-nowrap"
+_FILTER_CARD = f"{_t.CARD} w-full min-w-0 gap-3 flex-nowrap"
+_SIDE_CARD = f"{_t.CARD} w-full min-w-0 gap-2 flex-nowrap"
+_CARD_HEAD = "w-full items-baseline gap-2 flex-nowrap"
+_CARD_NOTE = "ml-auto text-[11.5px] text-[#6d76a0] whitespace-nowrap"
+
+# The search box: a boxed app field (APP_FIELD_CSS) with a search icon; its
+# placeholder muted so it never reads as a filter already in force.
+_SEARCH = "flex-1 min-w-[220px]"
+_SEARCH_PROPS = 'debounce=300 clearable input-class="placeholder:text-[#6d76a0]"'
+# The segmented band picker (not a kit.button: a picker with a selected state).
+_SEG = ("items-center gap-1 flex-nowrap rounded-[10px] border border-[#252c46] "
+        "bg-[#141a30] p-1")
+_SEG_OPT = ("items-center gap-1.5 flex-nowrap rounded-[7px] px-3 py-1 text-[13px] "
+            "cursor-pointer select-none")
+_SEG_ON = "bg-[#232b4d] text-[#eef1f6]"
+_SEG_OFF = "text-[#8891ab] hover:text-[#eef1f6]"
+_DOT = "w-1.5 h-1.5 rounded-[2px] shrink-0"
+BAND_DOT = {"all": "bg-[#a9b6ff]", "high": "bg-rose-400", "med": "bg-amber-400",
+            "low": "bg-[#6d76a0]", None: "bg-transparent"}
+# A toggle chip (a source, the watchlist switch, an SEC kind).
+_CHIP = ("items-center gap-1.5 flex-nowrap rounded-[8px] border px-2.5 py-1 "
+         "cursor-pointer select-none text-[13px]")
+_CHIP_OFF = "border-[#252c46] bg-[#141a30] text-[#c7cee6] hover:border-[#3a4570]"
+_CHIP_ON = "border-[#6b86ff] bg-[#6b86ff]/15 text-[#eef1f6]"
+_CHIP_N = "text-[11px] text-[#6d76a0] tabular-nums"
+_PILL = ("items-center flex-nowrap rounded-full border px-3 py-0.5 cursor-pointer "
+         "select-none text-[12.5px]")
+# MOST MENTIONED: a boxed ticker and its count.
+_TREND = ("items-center gap-1.5 flex-nowrap rounded-[6px] border px-2 py-0.5 "
+          "cursor-pointer select-none")
+_TREND_OFF = "border-[#2a3358] bg-[#141a30] hover:border-[#3a4570]"
+_TREND_ON = "border-[#6b86ff] bg-[#6b86ff]/15"
+_TREND_SYM = "text-[12px] font-bold text-[#eef1f6]"
+_COUNT = "ml-auto text-[12px] tabular-nums text-[#6d76a0] whitespace-nowrap"
+
+# ── the headline list ────────────────────────────────────────────────────────
+_LIST_CARD = ("w-full gap-0 flex-nowrap rounded-[12px] border border-[#1c2340] "
+              "bg-[#0f1428] overflow-hidden")
+# One line per story: nothing wraps; the headline gives way with an ellipsis.
+# overflow-hidden: on a phone a fixed-width cell would otherwise push the
+# headline to 0px and the row off the side of the card.
+_ROW = ("w-full items-center gap-3 flex-nowrap overflow-hidden pl-3.5 pr-4 py-2.5 "
+        "border-l-2 border-b border-b-[#1c2340] last:border-b-0")
+# A row's left accent (and a high row's wash) by band; low and unbanded keep a
+# transparent border so every row's text starts at the same x.
+ROW_ACCENT = {"high": "border-l-rose-500 bg-rose-500/[0.07]",
+              "med": "border-l-amber-400", "low": "border-l-transparent",
+              None: "border-l-transparent"}
+# w-[4.5rem] holds a dated stamp ("Tue 16:22") on one line.
+_STAMP = "w-[4.5rem] shrink-0 text-[13px] tabular-nums text-[#8891ab] whitespace-nowrap"
+_BAND = "w-9 shrink-0 text-[10.5px] font-bold tracking-[.08em] whitespace-nowrap cursor-default"
+BAND_TEXT = {"high": "text-rose-400", "med": "text-amber-400", "low": "text-[#6d76a0]",
+             None: ""}
+_HEADLINE = ("text-[14px] font-medium text-[#eef1f6] no-underline hover:underline "
+             "truncate min-w-0 flex-1")
+_TICKERS = f"shrink-0 flex items-center gap-1.5 flex-nowrap {_SM_ONLY}"
+_TCHIP = ("text-[11px] font-semibold px-1.5 py-px rounded-[4px] border border-[#2a3358] "
+          "bg-[#141a30] text-[#a9b6ff] shrink-0 whitespace-nowrap")
+_TICKER_LINK = f"{_TCHIP} no-underline hover:underline"
+_TICKER_CHIP = f"{_TCHIP} cursor-pointer hover:underline"
+_MORE_TICKERS = ("text-[11px] font-semibold px-1.5 py-px rounded-[4px] border "
+                 "border-[#2a3358] text-[#c7cee6] shrink-0 whitespace-nowrap cursor-default")
+# The first source, accent blue, right-aligned in a fixed-width cell (kept
+# empty for a row with none); every source on hover when there are several.
+_SOURCE = (f"w-32 shrink-0 text-right text-[12.5px] text-[#7d93ff] truncate "
+           f"cursor-default {_SM_ONLY}")
+
+# ── the SEC card ─────────────────────────────────────────────────────────────
+_SEC_ROW = ("w-full items-center gap-2.5 flex-nowrap overflow-hidden py-2 "
+            "border-b border-[#1c2340] last:border-b-0")
+_FORM_SLOT = "w-14 shrink-0 flex"
+_FORM = ("text-[10px] font-bold tracking-[.04em] px-1.5 py-px rounded-[4px] "
+         "whitespace-nowrap cursor-default")
+# The form badge by family (news_view.sec_tone): Form 4 green, an offering rose,
+# a new (IPO) registration amber, a shelf slate.
+FORM_CLASSES = {"form4": "bg-emerald-500/15 text-emerald-300",
+                "offering": "bg-rose-500/15 text-rose-300",
+                "ipo": "bg-amber-500/15 text-amber-300",
+                "shelf": "bg-slate-400/15 text-slate-300",
+                "other": "bg-white/5 text-[#8891ab]"}
+_SEC_SYM = f"w-14 shrink-0 flex {_SM_ONLY}"
+_SEC_NONE = "text-[12px] text-[#6d76a0]"
+_SEC_NAME = ("text-[13px] font-medium text-[#eef1f6] no-underline hover:underline "
+             "truncate min-w-0 flex-1")
+_SEC_VALUE = f"text-[12.5px] font-semibold tabular-nums {_t.TXT_POS} shrink-0 whitespace-nowrap"
+_SEC_TIME = ("w-[4.5rem] shrink-0 text-right text-[12.5px] tabular-nums text-[#8891ab] "
+             "whitespace-nowrap")
+
+# ── the calendar hero and agenda ─────────────────────────────────────────────
+_HERO = ("w-full gap-1.5 flex-nowrap rounded-[12px] border border-[#34407a] "
+         "bg-gradient-to-br from-[#161e44] to-[#0f1428] px-4 py-3.5")
+_HERO_HEAD = "w-full items-center gap-2 flex-nowrap"
+_HERO_EYEBROW = ("text-[10.5px] font-semibold uppercase tracking-[.14em] "
+                 "text-[#c7cee6] whitespace-nowrap")
+_HERO_COUNT = "ml-auto text-[13px] font-semibold tabular-nums text-[#eef1f6] whitespace-nowrap"
+_HERO_TITLE = "text-[16px] font-semibold leading-snug text-[#eef1f6] line-clamp-2 w-full"
+_HERO_WHEN = "text-[12.5px] tabular-nums text-[#8891ab]"
+_HERO_QUIET = "text-[13px] text-[#8891ab]"
+_DAY = f"{_CAPS} pt-2"
+_CAL_ROW = ("w-full items-center gap-3 flex-nowrap overflow-hidden py-2 pl-2 pr-1 "
+            "border-l-2 border-b border-b-[#1c2340] last:border-b-0")
+# A high-impact item: an amber left border and a faint amber wash.
+CAL_ACCENT = {True: "border-l-amber-400 bg-amber-400/[0.07]", False: "border-l-transparent"}
+_CAL_TIME = "w-11 shrink-0 text-[13px] tabular-nums text-[#c7cee6] whitespace-nowrap"
+_BADGE_SLOT = "w-[4.75rem] shrink-0 flex"
+_BADGE = ("text-[9.5px] font-bold tracking-[.06em] px-1.5 py-px rounded-[4px] "
+          "whitespace-nowrap cursor-default")
+BADGE_CLASSES = {"FOMC": "bg-rose-500/15 text-rose-300",
+                 "SPEECH": "bg-[#6b86ff]/15 text-[#a9b6ff]",
+                 "TESTIMONY": "bg-violet-500/15 text-violet-300",
+                 "EVENT": "bg-white/5 text-[#8891ab]",
+                 "DATA": "bg-amber-500/15 text-amber-300",
+                 "DIVIDEND": "bg-emerald-500/15 text-emerald-300",
+                 "IPO": "bg-sky-500/15 text-sky-300"}
+_BADGE_FALLBACK = "bg-white/5 text-[#8891ab]"
+_CAL_CELL = "min-w-0 flex-1 gap-0.5 flex-nowrap"
+_CAL_LINE1 = "w-full items-baseline gap-2 flex-nowrap overflow-hidden"
+_CAL_TITLE = "text-[13px] font-semibold text-[#eef1f6] truncate min-w-0 shrink-0 max-w-[78%]"
+_CAL_SUB = f"text-[12px] text-[#6d76a0] truncate min-w-0 flex-1 {_SM_ONLY}"
+_CAL_LINE = "text-[12px] text-[#8891ab] truncate w-full"
+_CAL_CHIP = ("text-[9.5px] font-bold uppercase tracking-[.06em] text-amber-300 "
+             "rounded-[4px] bg-amber-400/15 px-1 py-px shrink-0 cursor-default")
+_CAL_NOTE = f"text-xs {_t.TXT_WARN}"
+_CAL_EMPTY = f"text-xs {_t.MUTED}"
 
 
 def _norm(text) -> str:
@@ -222,6 +302,11 @@ def hover_text(row) -> str:
     return teaser_text(row) or nv.detail_line(row)
 
 
+def band_hover(row) -> str:
+    """The band word's hover: why the story scored as it did, in words."""
+    return nv.reason_text(row.get("reasons") if isinstance(row, dict) else None)
+
+
 def trending_window_h() -> float:
     """``[trending] window_h`` from config/news.toml, or the default when that
     is not a positive, finite number (a bool is not a number here)."""
@@ -235,17 +320,6 @@ def trending_window_h() -> float:
     if not math.isfinite(v) or v <= 0:
         return DEFAULT_WINDOW_H
     return v
-
-
-def status_text(n_all, n_match, n_shown) -> str:
-    """Counts only — the time lives in the header stamp."""
-    if not n_all:
-        return ""
-    if n_match == n_all:
-        head = f"{n_all} item{'' if n_all == 1 else 's'}"
-    else:
-        head = f"{n_match} of {n_all} items match"
-    return head if n_shown >= n_match else f"{head} · showing {n_shown}"
 
 
 def _symbol_base(linked):
@@ -270,26 +344,11 @@ def _ticker(t, href_base, on_ticker):
     return chip
 
 
-def _pill(band, reasons):
-    """The impact pill (``H`` / ``M`` / ``L``, reasons on hover), or an empty
-    slot of the same width for an item with no band - never a guessed "low"."""
-    from nicegui import ui
-    letter = nv.BAND_LETTER.get(band) if isinstance(band, str) else None
-    if not letter:
-        return ui.element("span").classes(_PILL_SLOT)
-    pill = ui.label(letter).classes(f"{_PILL} {nv.BAND_CLASSES[band]}")
-    words = nv.reason_text(reasons)
-    if words:
-        with pill:
-            ui.tooltip(words)
-    return pill
-
-
-def _headline(row, classes, *, href=nv.safe_href, hover=hover_text):
+def _headline(row, classes, *, href=nv.safe_href, hover=hover_text, text=None):
     """The headline as a new-tab link (only what ``href`` passes), else plain
     text; ``hover(row)`` on hover. Every string is escaped."""
     from nicegui import ui
-    title = row.get("title") or "(untitled)"
+    title = text or row.get("title") or "(untitled)"
     url = href(row.get("url"))
     el = (ui.link(title, url, new_tab=True) if url else ui.label(title)).classes(classes)
     extra = hover(row)
@@ -300,43 +359,39 @@ def _headline(row, classes, *, href=nv.safe_href, hover=hover_text):
     return el
 
 
-def _list_head():
-    """The headline list's column header: Time · Imp. · Symbol · Headline ·
-    Source, each label carrying its cell's width so it sits over it."""
+def _band_word(row):
+    """The band word (HIGH / MED / LOW, the reasons on hover), or an empty slot
+    of the same width for an unscored story - never a guessed "LOW"."""
     from nicegui import ui
-    widths = (_WHEN_W, _PILL_SLOT, _TICKER_W, "min-w-0 flex-1", _SOURCE_HEAD)
-    with ui.row().classes(_LIST_HEAD):
-        for text, width in zip(LIST_COLUMNS, widths):
-            el = ui.label(text).classes(f"{width} whitespace-nowrap")
-            if text == LIST_COLUMNS[1]:
-                with el:
-                    ui.tooltip(IMPACT_HINT)
+    band = row.get("band") if row.get("band") in BAND_WORD else None
+    el = ui.label(BAND_WORD.get(band, "")).classes(f"{_BAND} {BAND_TEXT[band]}")
+    words = band_hover(row) if band else ""
+    if words:
+        with el:
+            ui.tooltip(words)
+    return el
 
 
-def _sources_cell(sources):
-    """The Source cell: the first source, ``+N`` for the rest, all on hover.
-    Empty (same width) for a row with none."""
+def _source(sources):
+    """The Source cell: the first source; every source on hover when there are
+    several. Empty (same width) for a row with none."""
     from nicegui import ui
     names = [s for s in sources if isinstance(s, str) and s] \
         if isinstance(sources, list) else []
-    with ui.element("div").classes(_SOURCE_CELL) as cell:
-        if names:
-            ui.label(names[0]).classes(_SOURCE)
-        if len(names) > 1:
-            ui.label(f"+{len(names) - 1}").classes(_SOURCE_MORE)
+    el = ui.label(names[0] if names else "").classes(_SOURCE)
+    if len(names) > 1:
+        with el:
             ui.tooltip(", ".join(names))
-    return cell
+    return el
 
 
 def draw_rows(container, rows, *, linked, on_ticker):
-    """Clear ``container`` and draw a column header (when there are rows), then
-    ONE LINE per row: the time (``row["when"]``, Central), the impact pill, the
-    Symbol slot (two ticker chips and "+N"), the headline (truncated with an
-    ellipsis) and the Source cell (the first source and "+N", every source on
-    hover). Below ``sm`` the Symbol and Source columns go, header labels and
-    all, so a phone keeps the headline its room. Every
-    cell but the headline is a fixed width, so the columns line up under the
-    header.
+    """Clear ``container`` and, when there are rows, draw the headline card: ONE
+    LINE per row - the stamp (``row["stamp"]``, Central, 24-hour), the band
+    word, the headline (truncated with an ellipsis; a new-tab link), up to two
+    ticker chips and "+N", and the first source. The row's left border and wash
+    follow its band (``ROW_ACCENT``). Below ``sm`` the tickers and the source
+    go, so a phone keeps the headline its room.
 
     A ticker links to its Symbol dossier when ``linked``; otherwise it is a chip
     that calls ``on_ticker(TICKER)`` - the public screen, which has no dossier,
@@ -345,113 +400,432 @@ def draw_rows(container, rows, *, linked, on_ticker):
 
     href_base = _symbol_base(linked)
     container.clear()
+    if not rows:
+        return
     with container:
-        if rows:
-            _list_head()
-        for r in rows or []:
-            with ui.row().classes(_ROW):
-                ui.label(r.get("when") or "").classes(_WHEN)
-                _pill(r.get("band"), r.get("reasons") or [])
-                tickers = r.get("tickers") or []
-                with ui.element("div").classes(_TICKER_SLOT):
-                    for t in tickers[:MAX_ROW_TICKERS]:
-                        _ticker(t, href_base, on_ticker)
-                    rest = tickers[MAX_ROW_TICKERS:]
-                    if rest:
-                        with ui.label(f"+{len(rest)}").classes(_MORE_TICKERS):
-                            ui.tooltip(", ".join(rest))
-                _headline(r, _HEADLINE)
-                _sources_cell(r.get("sources"))
+        with ui.column().classes(_LIST_CARD):
+            for r in rows:
+                band = r.get("band") if r.get("band") in BAND_WORD else None
+                with ui.row().classes(f"{_ROW} {ROW_ACCENT[band]}"):
+                    ui.label(r.get("stamp") or r.get("when") or "").classes(_STAMP)
+                    _band_word(r)
+                    _headline(r, _HEADLINE)
+                    tickers = r.get("tickers") or []
+                    with ui.element("div").classes(_TICKERS):
+                        for t in tickers[:MAX_ROW_TICKERS]:
+                            _ticker(t, href_base, on_ticker)
+                        rest = tickers[MAX_ROW_TICKERS:]
+                        if rest:
+                            with ui.label(f"+{len(rest)}").classes(_MORE_TICKERS):
+                                ui.tooltip(", ".join(rest))
+                    _source(r.get("sources"))
+
+
+def _sec_hover(row):
+    """A filing's hover: its full title when the row shows a shortened name,
+    then its teaser - never the detail line printed inline."""
+    parts = []
+    title = row.get("title") or ""
+    if title and title != row.get("name"):
+        parts.append(title)
+    teaser = teaser_text(row)
+    if teaser:
+        parts.append(teaser)
+    return " — ".join(parts)
 
 
 def draw_sec_rows(container, rows, *, linked, on_ticker):
-    """Clear ``container`` and draw the SEC panel: a column header, then one
-    line per ``news_view.sec_rows`` row - Date/Time · Symbol · Headline/Details,
-    the impact pill leading the third cell and ``details`` muted after a dot.
+    """Clear ``container`` and draw one line per ``news_view.sec_rows`` row: the
+    band dot, the form badge (``FORM_CLASSES`` by ``news_view.sec_tone``), the
+    symbol, the filer (``name``; the full title on hover), a Form 4's dollar
+    total in green, and the time.
 
-    A filing's title links only to an ``https`` sec.gov address
-    (``news_view.sec_href``); its hover carries the teaser alone, never the
-    detail line already printed inline.
-
-    Where this origin serves no Symbol dossier (``linked`` False, or the route
-    is not published here) the symbol is a filter chip - and ``on_ticker``
-    filters the HEADLINE list only: the SEC panel itself is not filtered by it."""
+    A filing's name links only to an ``https`` sec.gov address
+    (``news_view.sec_href``). Where this origin serves no Symbol dossier
+    (``linked`` False, or the route is not published here) the symbol is a
+    filter chip - and ``on_ticker`` filters the HEADLINE list only."""
     from nicegui import ui
 
     href_base = _symbol_base(linked)
     container.clear()
     with container:
-        with ui.row().classes(_SEC_HEAD):
-            ui.label("Date/Time").classes("w-28 shrink-0")
-            ui.label("Symbol").classes(_SEC_SYM)
-            ui.label("Headline/Details").classes("min-w-0 flex-1")
-        for r in rows or []:
-            with ui.row().classes(_ROW):
-                ui.label(r.get("when") or "").classes(_WHEN)
-                with ui.element("div").classes(_SEC_SYM):
-                    if r.get("symbol"):
-                        _ticker(r["symbol"], href_base, on_ticker)
-                with ui.row().classes(_SEC_CELL):
-                    _pill(r.get("band"), r.get("reasons") or [])
-                    _headline(r, _SEC_TITLE, href=nv.sec_href, hover=teaser_text)
-                    if r.get("details"):
-                        ui.label("·").classes(_SEC_DOT)
-                        ui.label(r["details"]).classes(_SEC_DETAIL)
+        with ui.column().classes("w-full gap-0 flex-nowrap"):
+            for r in rows or []:
+                band = r.get("band") if r.get("band") in BAND_WORD else None
+                with ui.row().classes(_SEC_ROW):
+                    dot = ui.element("span").classes(f"{_DOT} {BAND_DOT[band]}")
+                    if band:
+                        with dot:
+                            ui.tooltip(f"{BAND_OPTIONS[band]} impact")
+                    with ui.element("div").classes(_FORM_SLOT):
+                        if r.get("form"):
+                            tone = FORM_CLASSES.get(nv.sec_tone(r), FORM_CLASSES["other"])
+                            ui.label(r["form"]).classes(f"{_FORM} {tone}")
+                    with ui.element("div").classes(_SEC_SYM):
+                        if r.get("symbol"):
+                            _ticker(r["symbol"], href_base, on_ticker)
+                        else:
+                            ui.label("—").classes(_SEC_NONE)
+                    _headline(r, _SEC_NAME, href=nv.sec_href, hover=_sec_hover,
+                              text=r.get("name") or None)
+                    if r.get("value"):
+                        ui.label(r["value"]).classes(_SEC_VALUE)
+                    ui.label(r.get("stamp") or r.get("when") or "").classes(_SEC_TIME)
 
 
-def _tile_when(tile):
-    when = tile.get("when") or ""
-    if tile.get("indicators") is not None and when and when != nv.NO_NEXT:
-        return f"Next {when}"
-    return when
-
-
-def draw_calendar(container, groups):
-    """Clear ``container`` and draw ``news_view.calendar_groups``: per group its
-    header, a muted note when its sources failed, then its tiles - or the
-    group's own plain sentence when it has none. A tile whose ``high`` is a real
-    ``True`` (the producer decides: ``[calendar.events] high_impact``, an
-    indicator's ``high``) gets the amber border and wash and a "HIGH" chip."""
+def draw_next(container, nxt):
+    """Clear ``container`` and draw the NEXT ON THE CALENDAR hero from
+    ``news_view.next_up``: the eyebrow and the countdown, the title (two lines
+    at most) and its Central date and time - or a quiet line for ``None``."""
     from nicegui import ui
 
     container.clear()
     with container:
-        for g in groups or []:
-            with ui.column().classes(_CAL_GROUP):
-                ui.label(g.get("title") or "").classes(_t.EYEBROW)
-                if g.get("note"):
-                    ui.label(g["note"]).classes(_CAL_NOTE)
-                tiles = g.get("tiles") or []
-                if not tiles:
-                    ui.label(g.get("empty") or "").classes(_CAL_LINE)
-                    continue
-                with ui.element("div").classes(_CAL_TILES):
-                    for tile in tiles:
-                        high = tile.get("high") is True
-                        with ui.column().classes(_CAL_TILE_HIGH if high else _CAL_TILE):
-                            if high:
-                                with ui.row().classes(_CAL_HEAD):
-                                    ui.label(tile.get("title") or "") \
-                                        .classes(_CAL_TITLE_HIGH)
-                                    with ui.label(HIGH_CHIP).classes(_CAL_CHIP):
-                                        ui.tooltip(HIGH_HINT)
-                            else:
-                                ui.label(tile.get("title") or "").classes(_CAL_TITLE)
-                            when = _tile_when(tile)
-                            if when:
-                                ui.label(when).classes(_CAL_WHEN)
-                            for line in tile.get("lines") or []:
-                                ui.label(line).classes(_CAL_LINE)
-                            for ind in tile.get("indicators") or []:
-                                if ind.get("label"):
-                                    ui.label(ind["label"]).classes(_CAL_LINE)
-                                ui.label(f"Actual {ind.get('actual') or nv.DASH}"
-                                         f" · Prior {ind.get('prior') or nv.DASH}") \
-                                    .classes(_CAL_IND)
-                                status = ind.get("status") or (
-                                    nv.AWAITING if ind.get("state") == "awaiting" else "")
-                                if status:
-                                    ui.label(status).classes(_CAL_LINE)
+        with ui.row().classes(_HERO_HEAD):
+            ui.label(NEXT_TITLE).classes(_HERO_EYEBROW)
+            if nxt:
+                ui.label(nxt.get("countdown") or "").classes(_HERO_COUNT)
+        if not nxt:
+            ui.label(nv.NOTHING_NEXT).classes(_HERO_QUIET)
+            return
+        ui.label(nxt.get("title") or "").classes(_HERO_TITLE)
+        with ui.row().classes("w-full items-center gap-2 flex-nowrap"):
+            badge = nxt.get("badge") or ""
+            if badge:
+                ui.label(badge).classes(f"{_BADGE} {BADGE_CLASSES.get(badge, _BADGE_FALLBACK)}")
+            ui.label(nxt.get("when") or "").classes(_HERO_WHEN)
+            if nxt.get("high") is True:
+                with ui.label(HIGH_CHIP).classes(_CAL_CHIP):
+                    ui.tooltip(HIGH_HINT)
+
+
+def _agenda_row(item):
+    from nicegui import ui
+    high = item.get("high") is True
+    with ui.row().classes(f"{_CAL_ROW} {CAL_ACCENT[high]}"):
+        ui.label(item.get("time") or "—").classes(_CAL_TIME)
+        with ui.element("div").classes(_BADGE_SLOT):
+            badge = item.get("badge") or ""
+            ui.label(badge).classes(f"{_BADGE} {BADGE_CLASSES.get(badge, _BADGE_FALLBACK)}")
+        with ui.column().classes(_CAL_CELL):
+            with ui.row().classes(_CAL_LINE1) as line1:
+                ui.label(item.get("title") or "").classes(_CAL_TITLE)
+                if item.get("sub"):
+                    ui.label(item["sub"]).classes(_CAL_SUB)
+                full = " · ".join(x for x in (item.get("title"), item.get("sub")) if x)
+                if full:
+                    with line1:
+                        ui.tooltip(full)
+            for line in item.get("lines") or []:
+                ui.label(line).classes(_CAL_LINE)
+        if high:
+            with ui.label(HIGH_CHIP).classes(_CAL_CHIP):
+                ui.tooltip(HIGH_HINT)
+
+
+def draw_calendar(container, agenda):
+    """Clear ``container`` and draw ``news_view.agenda``: its stale-source
+    notes, then each day's header and its rows (time, badge, title and a muted
+    subtitle or one line per indicator), the undated tiles last, and the plain
+    sentence of each kind with nothing to show. An item whose ``high`` is a real
+    ``True`` gets an amber left border and wash and a HIGH marker."""
+    from nicegui import ui
+
+    agenda = agenda if isinstance(agenda, dict) else {}
+    container.clear()
+    with container:
+        with ui.column().classes("w-full gap-0 flex-nowrap"):
+            for note in agenda.get("notes") or []:
+                ui.label(note).classes(_CAL_NOTE)
+            days = agenda.get("days") or []
+            undated = agenda.get("undated") or []
+            for day in days:
+                ui.label(day.get("head") or "").classes(_DAY)
+                for item in day.get("items") or []:
+                    _agenda_row(item)
+            if undated:
+                ui.label(UNDATED_HEAD).classes(_DAY)
+                for item in undated:
+                    _agenda_row(item)
+            if not days and not undated:
+                ui.label(CAL_EMPTY).classes(f"{_CAL_EMPTY} py-2")
+            for line in agenda.get("empty") or []:
+                ui.label(line).classes(f"{_CAL_EMPTY} pt-2")
+
+
+def build_board(*, linked, symbol="", watchlist=None):
+    """Build every region of the page inside the current context and return the
+    handles a page feeds: ``take(feed)``, ``take_sec(sec)``, ``take_cal(cal)``
+    (each a payload or ``None``), plus ``state`` and ``repaint``.
+
+    It reads NO view - the caller does, so the public screen's reads stay in
+    its own module where a test can see every one. ``symbol`` seeds the ticker
+    filter; ``watchlist`` (a set of tickers) draws the "Watchlist only" chip -
+    the private page's, and ``None`` on the public one. A slow timer
+    (``REPAINT_SEC``) redraws what is held: stamps, filings, the countdown and
+    the agenda age while a tab stays open."""
+    from nicegui import ui
+
+    from pages import ui_kit as kit
+    from pages.ui_guard import guard
+
+    st = {"payload": None, "rows": [], "sources": set(), "symbol": symbol or "",
+          "query": "", "band": "all", "watchlist_only": False, "shown": PAGE_SIZE,
+          "sec_payload": None, "sec_kind": "all", "sec_shown": SEC_PAGE_SIZE,
+          "cal_payload": None}
+
+    def _now():
+        return _dt.datetime.now(_dt.timezone.utc)
+
+    with ui.element("div").classes(_GRID):
+        with ui.column().classes(_LEFT):
+            with ui.column().classes(_FILTER_CARD):
+                with ui.row().classes("w-full items-center gap-3 flex-wrap"):
+                    search = ui.input(placeholder=SEARCH_HINT) \
+                        .props(f"{kit.FIELD_PROPS} {_SEARCH_PROPS}").classes(_SEARCH)
+                    with search.add_slot("prepend"):
+                        ui.icon("search").classes("text-[18px]")
+                    band_box = ui.row().classes(_SEG)
+                    wl_box = ui.row().classes("items-center")
+                    wl_box.set_visibility(watchlist is not None)
+                with ui.row().classes("w-full items-center gap-2 flex-wrap") as src_row:
+                    ui.label(SOURCES_LABEL).classes(f"{_CAPS} mr-1")
+                    src_box = ui.row().classes("items-center gap-2 flex-wrap")
+            with ui.row().classes("w-full items-center gap-2 flex-wrap sm:flex-nowrap"):
+                trend_box = ui.row().classes("items-center gap-2 flex-wrap min-w-0 flex-1")
+                count = ui.label("").classes(_COUNT)
+            region = kit.region("Loading the news…")
+            more = kit.button("Show more", kind="secondary", icon="expand_more")
+            more.set_visibility(False)
+        with ui.column().classes(_RIGHT):
+            hero = ui.column().classes(_HERO)
+            hero.set_visibility(False)
+            with ui.column().classes(_SIDE_CARD):
+                with ui.row().classes(_CARD_HEAD):
+                    kit.section_title(SEC_TITLE)
+                    ui.label(SEC_NOTE).classes(_CARD_NOTE)
+                sec_chips = ui.row().classes("w-full items-center gap-2 flex-wrap")
+                sec_region = kit.region("Loading filings…")
+                sec_more = kit.button("Show more", kind="secondary", icon="expand_more")
+                sec_more.set_visibility(False)
+            with ui.column().classes(_SIDE_CARD):
+                with ui.row().classes(_CARD_HEAD):
+                    kit.section_title(CAL_TITLE)
+                    ui.label(CAL_NOTE).classes(_CARD_NOTE)
+                cal_region = kit.region("Loading the calendar…")
+
+    # ── the headline list and its filters ─────────────────────────────────
+    def _filtered():
+        return nv.filter_rows(st["rows"], sources=st["sources"] or None,
+                              symbol=st["symbol"] or None,
+                              watchlist=watchlist if st["watchlist_only"] else None,
+                              band=st["band"], query=st["query"])
+
+    def _reset_paging():
+        st["shown"] = PAGE_SIZE
+
+    @guard
+    def _pick_ticker(t):
+        # A second click on the ticker already in force clears it.
+        st["symbol"] = "" if st["symbol"] == t else t
+        _reset_paging()
+        _paint()
+
+    @guard
+    def _pick_band(key):
+        st["band"] = key if key in BAND_OPTIONS else "all"
+        _reset_paging()
+        _paint()
+
+    @guard
+    def _toggle_source(name):
+        st["sources"] ^= {name}
+        _reset_paging()
+        _paint()
+
+    @guard
+    def _toggle_watchlist():
+        st["watchlist_only"] = not st["watchlist_only"]
+        _reset_paging()
+        _paint()
+
+    def _paint_band():
+        band_box.clear()
+        with band_box:
+            for key, text in BAND_OPTIONS.items():
+                on = st["band"] == key
+                with ui.row().classes(f"{_SEG_OPT} {_SEG_ON if on else _SEG_OFF}") as opt:
+                    ui.element("span").classes(f"{_DOT} {BAND_DOT[key]}")
+                    ui.label(text)
+                opt.on("click", guard(lambda _e=None, k=key: _pick_band(k)))
+
+    def _paint_watchlist():
+        wl_box.clear()
+        if watchlist is None:
+            return
+        with wl_box:
+            on = st["watchlist_only"]
+            with ui.row().classes(f"{_CHIP} {_CHIP_ON if on else _CHIP_OFF}") as chip:
+                ui.label(WATCHLIST_CHIP)
+            chip.on("click", guard(lambda _e=None: _toggle_watchlist()))
+
+    def _paint_sources():
+        src_box.clear()
+        pairs = nv.source_counts(st["rows"])
+        src_row.set_visibility(bool(pairs))
+        with src_box:
+            for name, n in pairs:
+                on = name in st["sources"]
+                with ui.row().classes(f"{_CHIP} {_CHIP_ON if on else _CHIP_OFF}") as chip:
+                    ui.label(name)
+                    ui.label(str(n)).classes(_CHIP_N)
+                chip.on("click", guard(lambda _e=None, s=name: _toggle_source(s)))
+
+    def _paint_trending():
+        trend_box.clear()
+        if st["payload"] is None:
+            return
+        pairs = nv.trending(st["payload"], now=_now(),
+                            window_h=trending_window_h())[:TRENDING_CHIPS]
+        sym = st["symbol"]
+        if sym and sym not in {t for t, _ in pairs}:
+            # The ticker in force always has a chip, so it can be cleared.
+            n = sum(1 for r in st["rows"] if sym in (r.get("tickers") or []))
+            pairs = [(sym, n), *pairs]
+        if not pairs:
+            return
+        with trend_box:
+            ui.label(TRENDING_LABEL).classes(f"{_CAPS} mr-1")
+            for t, n in pairs:
+                on = sym == t
+                with ui.row().classes(f"{_TREND} {_TREND_ON if on else _TREND_OFF}") as chip:
+                    ui.label(t).classes(_TREND_SYM)
+                    ui.label(str(n)).classes(_CHIP_N)
+                chip.on("click", guard(lambda _e=None, t=t: _pick_ticker(t)))
+
+    def _paint():
+        region.busy.hide()
+        _paint_band()
+        _paint_watchlist()
+        _paint_sources()
+        _paint_trending()
+        if st["payload"] is None:
+            draw_rows(region.content, [], linked=linked, on_ticker=_pick_ticker)
+            with region.content:
+                kit.empty(WAITING)
+            count.text = ""
+            more.set_visibility(False)
+            return
+        matched = _filtered()
+        shown = matched[:st["shown"]]
+        draw_rows(region.content, shown, linked=linked, on_ticker=_pick_ticker)
+        if not matched:
+            with region.content:
+                kit.empty(NO_MATCH if st["rows"] else EMPTY_FEED)
+        count.text = nv.story_count(len(matched), len(st["rows"]))
+        more.set_visibility(len(matched) > st["shown"])
+
+    def take(payload):
+        st["payload"] = payload if isinstance(payload, dict) else None
+        st["rows"] = nv.rows(st["payload"], now=_now())
+        # A source that stopped appearing would leave a filter with no visible
+        # cause; drop it from the selection.
+        st["sources"] &= {s for s, _ in nv.source_counts(st["rows"])}
+        _paint()
+
+    @guard
+    def _on_search(e):
+        st["query"] = e.value if isinstance(e.value, str) else ""
+        _reset_paging()
+        _paint()
+
+    @guard
+    def _more():
+        st["shown"] += PAGE_SIZE
+        _paint()
+
+    search.on_value_change(_on_search)
+    more.on_click(_more)
+
+    # ── the SEC card ───────────────────────────────────────────────────────
+    @guard
+    def _pick_sec(key):
+        st["sec_kind"] = key if key in nv.SEC_KINDS else "all"
+        st["sec_shown"] = SEC_PAGE_SIZE
+        _paint_sec()
+
+    def _paint_sec_chips():
+        sec_chips.clear()
+        with sec_chips:
+            for key, text in nv.SEC_KINDS.items():
+                on = st["sec_kind"] == key
+                with ui.row().classes(f"{_PILL} {_CHIP_ON if on else _CHIP_OFF}") as chip:
+                    ui.label(text)
+                chip.on("click", guard(lambda _e=None, k=key: _pick_sec(k)))
+
+    def _paint_sec():
+        sec_region.busy.hide()
+        _paint_sec_chips()
+        payload = st["sec_payload"]
+        if payload is None:
+            draw_sec_rows(sec_region.content, [], linked=linked, on_ticker=_pick_ticker)
+            with sec_region.content:
+                kit.empty(SEC_WAITING)
+            sec_more.set_visibility(False)
+            return
+        srows = nv.sec_rows(payload, now=_now())
+        picked = nv.filter_sec(srows, st["sec_kind"])
+        draw_sec_rows(sec_region.content, picked[:st["sec_shown"]],
+                      linked=linked, on_ticker=_pick_ticker)
+        if not picked:
+            with sec_region.content:
+                kit.empty(SEC_NO_MATCH if srows else SEC_EMPTY)
+        sec_more.set_visibility(len(picked) > st["sec_shown"])
+
+    def take_sec(payload):
+        st["sec_payload"] = payload if isinstance(payload, dict) else None
+        _paint_sec()
+
+    @guard
+    def _sec_more():
+        st["sec_shown"] += SEC_PAGE_SIZE
+        _paint_sec()
+
+    sec_more.on_click(_sec_more)
+
+    # ── the calendar hero and agenda ───────────────────────────────────────
+    def _paint_cal():
+        cal_region.busy.hide()
+        payload = st["cal_payload"]
+        if payload is None:
+            hero.set_visibility(False)
+            cal_region.content.clear()
+            with cal_region.content:
+                kit.empty(CAL_WAITING)
+            return
+        now = _now()
+        hero.set_visibility(True)
+        draw_next(hero, nv.next_up(payload, now=now))
+        draw_calendar(cal_region.content, nv.agenda(payload, now=now))
+
+    def take_cal(payload):
+        st["cal_payload"] = payload if isinstance(payload, dict) else None
+        _paint_cal()
+
+    @guard
+    def repaint():
+        # The slow clock: redraw what is already held. No bus read here.
+        if st["payload"] is not None:
+            st["rows"] = nv.rows(st["payload"], now=_now())
+        _paint()
+        _paint_sec()
+        _paint_cal()
+
+    ui.timer(REPAINT_SEC, repaint, immediate=False)
+    return SimpleNamespace(take=take, take_sec=take_sec, take_cal=take_cal,
+                           repaint=repaint, state=st, search=search,
+                           pick_ticker=_pick_ticker, pick_band=_pick_band,
+                           pick_sec=_pick_sec)
 
 
 def render(public=False):
@@ -462,7 +836,7 @@ def render(public=False):
     import app_settings
     import bus_client
     import shell as _shell
-    from nicegui import run, ui
+    from nicegui import run
 
     from pages import ui_kit as kit
     from pages.ui_guard import guard, guard_async
@@ -471,9 +845,6 @@ def render(public=False):
 
     _may_enqueue = _shell.may_enqueue()
     linked = _shell.can_navigate(SYMBOL_ROUTE)
-    state = {"payload": None, "rows": [], "sources": [], "symbol": "",
-             "watchlist_only": False, "min_band": None, "shown": PAGE_SIZE,
-             "sec_payload": None, "cal_payload": None, "sec_shown": SEC_PAGE_SIZE}
     try:
         watchlist = set(nc.ticker_set())
     except Exception:  # noqa: BLE001 - a broken config must not blank the page
@@ -500,223 +871,35 @@ def render(public=False):
                     "Refresh", kind="secondary", icon="refresh", on_click=_refresh,
                     tooltip="Poll every news feed and re-check the calendar now "
                             "instead of waiting for the next scheduled check.")
-        with ui.element("div").classes(_GRID):
-            # LEFT: the headline list. The control bar and Trending filter it
-            # alone, so they sit inside this column.
-            with ui.column().classes(_LEFT):
-                with kit.control_bar():
-                    src_sel = kit.select_field("Sources", [], value=[], multiple=True,
-                                               width="w-72").props("use-chips clearable")
-                    # No placeholder: in the boxed field it renders as bright as a
-                    # value, so "NVDA" there read as a filter already in force.
-                    # Debounced: each keystroke would otherwise rebuild up to 60 rows.
-                    sym_in = kit.text_field("Ticker", width="w-[110px]") \
-                        .props("debounce=300")
-                    band_sel = kit.select_field("Impact", BAND_OPTIONS, value="all",
-                                                width="w-32")
-                    with kit.field("Watchlist"):
-                        wl = ui.switch("Watchlist only")
-                with ui.row().classes("w-full items-center gap-2 flex-wrap") as trend_box:
-                    pass
-                status = kit.status_line("")
-                with ui.column().classes(_LIST):
-                    region = kit.region("Loading the news…")
-                    more = kit.button("Show more", kind="secondary", icon="expand_more")
-                    more.set_visibility(False)
-            # RIGHT: the SEC panel on top, the calendar below; each scrolls.
-            with ui.column().classes(_RIGHT):
-                with ui.column().classes(_PANEL):
-                    kit.section_title(SEC_TITLE)
-                    sec_region = kit.region("Loading filings…")
-                    sec_more = kit.button("Show more", kind="secondary",
-                                          icon="expand_more")
-                    sec_more.set_visibility(False)
-                with ui.column().classes(_PANEL):
-                    kit.section_title(CAL_TITLE)
-                    cal_region = kit.region("Loading the calendar…")
-
-    def _filtered():
-        return nv.filter_rows(state["rows"], sources=state["sources"] or None,
-                              symbol=state["symbol"] or None,
-                              watchlist=watchlist if state["watchlist_only"] else None,
-                              min_band=state["min_band"])
-
-    @guard
-    def _pick_ticker(t):
-        # A second click on the chip already in force clears it.
-        sym_in.value = "" if state["symbol"] == t else t
-
-    def _paint_trending():
-        trend_box.clear()
-        payload = state["payload"]
-        if payload is None:
-            return
-        pairs = nv.trending(payload, now=_dt.datetime.now(_dt.timezone.utc),
-                            window_h=trending_window_h())[:12]
-        if not pairs:
-            return
-        with trend_box:
-            ui.label("Trending").classes(_t.EYEBROW)
-            for t, n in pairs:
-                cls = _TREND_ON if state["symbol"] == t else _TREND_OFF
-                chip = ui.label(f"{t} {n}").classes(cls)
-                chip.on("click", guard(lambda _e=None, t=t: _pick_ticker(t)))
-
-    def _paint():
-        region.busy.hide()
-        if state["payload"] is None:
-            draw_rows(region.content, [], linked=linked, on_ticker=_pick_ticker)
-            with region.content:
-                kit.empty(WAITING)
-            status.text = ""
-            more.set_visibility(False)
-            trend_box.clear()
-            return
-        matched = _filtered()
-        shown = matched[:state["shown"]]
-        draw_rows(region.content, shown, linked=linked, on_ticker=_pick_ticker)
-        if not matched:
-            with region.content:
-                kit.empty(NO_MATCH if state["rows"] else EMPTY_FEED)
-        status.text = status_text(len(state["rows"]), len(matched), len(shown))
-        more.set_visibility(len(matched) > state["shown"])
-        _paint_trending()
+        board = build_board(linked=linked, watchlist=watchlist)
 
     def _take(payload):
-        state["payload"] = payload if isinstance(payload, dict) else None
-        state["rows"] = nv.rows(state["payload"],
-                                now=_dt.datetime.now(_dt.timezone.utc))
-        opts = nv.sources_present(state["rows"])
-        if list(src_sel.options) != opts:
-            src_sel.options = opts
-            # A source that stopped appearing would leave a filter with no visible
-            # cause; drop it from the selection.
-            kept = [s for s in (src_sel.value or []) if s in opts]
-            if kept != list(src_sel.value or []):
-                src_sel.value = kept
-                state["sources"] = kept
-            src_sel.update()
-        _paint()
-        if state["payload"] is not None:
+        board.take(payload)
+        if isinstance(payload, dict):
             # Written on EVERY publish, visible tab or not; the rail badge that
             # will read it may want "seen while visible" instead.
             app_settings.set(SEEN_KEY, _dt.datetime.now(_dt.timezone.utc).isoformat())
-
-    @guard
-    def _on_sources(e):
-        state["sources"] = list(e.value or [])
-        state["shown"] = PAGE_SIZE
-        _paint()
-
-    @guard
-    def _on_symbol(e):
-        state["symbol"] = (e.value or "").strip().upper()
-        state["shown"] = PAGE_SIZE
-        _paint()
-
-    @guard
-    def _on_watchlist(e):
-        state["watchlist_only"] = bool(e.value)
-        state["shown"] = PAGE_SIZE
-        _paint()
-
-    @guard
-    def _on_band(e):
-        v = e.value if e.value in BAND_OPTIONS else "all"
-        state["min_band"] = None if v == "all" else v
-        state["shown"] = PAGE_SIZE
-        _paint()
-
-    @guard
-    def _more():
-        state["shown"] += PAGE_SIZE
-        _paint()
-
-    def _paint_sec():
-        sec_region.busy.hide()
-        payload = state["sec_payload"]
-        if payload is None:
-            draw_sec_rows(sec_region.content, [], linked=linked, on_ticker=_pick_ticker)
-            with sec_region.content:
-                kit.empty(SEC_WAITING)
-            sec_more.set_visibility(False)
-            return
-        srows = nv.sec_rows(payload, now=_dt.datetime.now(_dt.timezone.utc))
-        draw_sec_rows(sec_region.content, srows[:state["sec_shown"]],
-                      linked=linked, on_ticker=_pick_ticker)
-        if not srows:
-            with sec_region.content:
-                kit.empty(SEC_EMPTY)
-        sec_more.set_visibility(len(srows) > state["sec_shown"])
-
-    def _take_sec(payload):
-        state["sec_payload"] = payload if isinstance(payload, dict) else None
-        _paint_sec()
-
-    def _paint_cal():
-        cal_region.busy.hide()
-        payload = state["cal_payload"]
-        if payload is None:
-            cal_region.content.clear()
-            with cal_region.content:
-                kit.empty(CAL_WAITING)
-            return
-        draw_calendar(cal_region.content,
-                      nv.calendar_groups(payload, now=_dt.datetime.now(_dt.timezone.utc)))
-
-    def _take_cal(payload):
-        state["cal_payload"] = payload if isinstance(payload, dict) else None
-        _paint_cal()
-
-    @guard
-    def _repaint_held():
-        # The slow clock: redraw what is already held (stamps, filings and
-        # calendar dates age while a tab stays open). No bus read here, and no
-        # "seen" stamp - nothing new has arrived.
-        if state["payload"] is not None:
-            state["rows"] = nv.rows(state["payload"],
-                                    now=_dt.datetime.now(_dt.timezone.utc))
-        _paint()
-        _paint_sec()
-        _paint_cal()
-
-    @guard
-    def _sec_more():
-        state["sec_shown"] += SEC_PAGE_SIZE
-        _paint_sec()
-
-    src_sel.on_value_change(_on_sources)
-    sym_in.on_value_change(_on_symbol)
-    wl.on_value_change(_on_watchlist)
-    band_sel.on_value_change(_on_band)
-    more.on_click(_more)
-    sec_more.on_click(_sec_more)
 
     @guard_async
     async def _reread():
         # The bus read is blocking; keep it off the event loop (house pattern).
         _take(await run.io_bound(bus_client.read, nv.VIEW))
 
-    payload = bus_client.read(nv.VIEW)
-    if payload is not None:
-        _take(payload)
-    else:
-        _paint()
+    _take(bus_client.read(nv.VIEW))
     watch_view(nv.VIEW, _reread)
 
     @guard_async
     async def _reread_sec():
-        _take_sec(await run.io_bound(bus_client.read, nv.VIEW_SEC))
+        board.take_sec(await run.io_bound(bus_client.read, nv.VIEW_SEC))
 
     @guard_async
     async def _reread_cal():
-        _take_cal(await run.io_bound(bus_client.read, nv.VIEW_CAL))
+        board.take_cal(await run.io_bound(bus_client.read, nv.VIEW_CAL))
 
-    _take_sec(bus_client.read(nv.VIEW_SEC))
-    _take_cal(bus_client.read(nv.VIEW_CAL))
+    board.take_sec(bus_client.read(nv.VIEW_SEC))
+    board.take_cal(bus_client.read(nv.VIEW_CAL))
     watch_view(nv.VIEW_SEC, _reread_sec)
     watch_view(nv.VIEW_CAL, _reread_cal)
-    ui.timer(REPAINT_SEC, _repaint_held, immediate=False)
     if refresh_btn is not None:
         # Every poll ends with a status publish - even one that found nothing
         # new, which leaves the feed view (skip_unchanged) untouched.

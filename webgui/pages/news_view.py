@@ -8,7 +8,7 @@ not a list, an item that is not a dict, or a ``tickers`` / ``sources`` field tha
 is not a list of strings is skipped or cleaned, never raised on. The published
 feed payloads are ``{"items": [...]}``; nothing here reads any other key of
 them. The calendar payload (``news:calendar``) is read only by
-``calendar_groups`` / ``indicator_state``, and its settings
+``calendar_groups`` / ``agenda`` / ``next_up`` / ``indicator_state``, and its settings
 (``release_watch_min``, ``actual_fresh_h``) come from the payload's own
 ``settings`` key - Tier 1 never reads the calendar config.
 
@@ -29,6 +29,7 @@ convention instead: it is CENTRAL wall-clock time.
 """
 import datetime as dt
 import math
+import re as _re
 from collections import Counter
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
@@ -131,6 +132,24 @@ def _day(ct):
     return f"{ct.strftime('%b')} {ct.day}" if ct else ""
 
 
+def _clock(ct):
+    """``"9:41"`` / ``"16:22"`` - 24-hour, the hour unpadded. A column of
+    times with no AM/PM must not be ambiguous."""
+    return f"{ct.hour}:{ct.minute:02d}"
+
+
+def _stamp(ct, today_ct):
+    """The list's compact stamp: ``"9:41"`` today, ``"Fri 16:22"`` within the
+    past six days, ``"Sep 18"`` before that; ``""`` with no time."""
+    if ct is None:
+        return ""
+    if today_ct is not None and ct.date() == today_ct:
+        return _clock(ct)
+    if today_ct is not None and 0 < (today_ct - ct.date()).days < 7:
+        return f"{ct.strftime('%a')} {_clock(ct)}"
+    return _day(ct)
+
+
 def _impact(it):
     """``(band, reasons)``; junk is ``(None, [])`` - never "low"."""
     imp = it.get("impact")
@@ -167,7 +186,7 @@ def rows(payload, *, now) -> list:
             "kind": _str(it.get("kind")),
             "topics": [t for t in topics if isinstance(t, str)] if isinstance(topics, list) else [],
             "detail": detail if isinstance(detail, dict) else {},
-            "time": time_, "day": day, "today": today,
+            "time": time_, "day": day, "today": today, "stamp": _stamp(ct, today_ct),
             "when": (time_ if today else f"{day} {time_}") if ct else "",
             "published_at": published, "first_seen": it.get("first_seen"),
             "age_min": ((now - when).total_seconds() / 60) if when else None,
@@ -204,14 +223,22 @@ def _row_symbols(r):
     return set(_tickers(raw))
 
 
-def filter_rows(rows_, *, sources, symbol, watchlist=None, min_band=None) -> list:
+def filter_rows(rows_, *, sources, symbol, watchlist=None, min_band=None, band=None,
+                query=None) -> list:
     """Rows matching every given filter. ``symbol`` is cleaned on both sides;
     a symbol that does not clean matches NOTHING (not everything).
 
     ``min_band`` (``"high"`` / ``"med"`` / ``"low"``) keeps rows at that band or
-    above; an unbanded row never passes a band filter. ``None`` (or an unknown
-    word) filters nothing."""
+    above; ``band`` keeps rows of EXACTLY that band (the page's segmented
+    picker: High shows high only). An unbanded row never passes either. ``None``
+    (or an unknown word, ``"all"`` included) filters nothing.
+
+    ``query`` is the page's free-text box: case-insensitive, whitespace
+    collapsed, matched as a substring of the headline or of any ticker. Blank
+    filters nothing."""
     floor = _BAND_RANK.get(min_band) if isinstance(min_band, str) else None
+    exact = band if isinstance(band, str) and band in _BAND_RANK else None
+    q = " ".join(query.split()).casefold() if isinstance(query, str) else ""
     sym = None
     if symbol:
         sym = clean_symbol(symbol) if isinstance(symbol, str) else None
@@ -236,8 +263,36 @@ def filter_rows(rows_, *, sources, symbol, watchlist=None, min_band=None) -> lis
             continue
         if floor is not None and _BAND_RANK.get(r.get("band"), 0) < floor:
             continue
+        if exact is not None and r.get("band") != exact:
+            continue
+        if q and not _matches(r, tickers, q):
+            continue
         out.append(r)
     return out
+
+
+def _matches(r, tickers, q):
+    title = " ".join(_str(r.get("title")).split()).casefold()
+    return q in title or any(q in t.casefold() for t in tickers)
+
+
+def source_counts(rows_) -> list:
+    """``[(source, n_rows)]`` for the Sources chips: every source a row lists
+    counts that row (the filter matches any of them). Alphabetical, so a chip
+    does not move under the pointer as new stories arrive."""
+    counts = Counter()
+    for r in rows_ or []:
+        if isinstance(r, dict):
+            counts.update({s for s in (r.get("sources") or [])
+                           if isinstance(s, str) and s})
+    return sorted(counts.items(), key=lambda kv: (kv[0].casefold(), kv[0]))
+
+
+def story_count(n_match, n_all) -> str:
+    """``"17 of 17 stories"``; ``""`` for an empty feed."""
+    if not n_all:
+        return ""
+    return f"{n_match} of {n_all} {'story' if n_all == 1 else 'stories'}"
 
 
 def unseen(payload, *, since) -> int:
@@ -399,14 +454,18 @@ def detail_line(row) -> str:
 
 def sec_rows(payload, *, now) -> list:
     """``rows()`` plus ``symbol`` (the first tagged ticker, else the filer's
-    cleaned symbol, else ``""``) and ``details`` (``detail_line``)."""
+    cleaned symbol, else ``""``), ``details`` (``detail_line``) and the panel's
+    display fields: ``sec_kind`` / ``form`` / ``name`` / ``value`` (see
+    ``sec_kind``, ``sec_form``, ``sec_name``, ``sec_value`` below)."""
     out = []
     for r in rows(payload, now=now):
         sym = r["tickers"][0] if r["tickers"] else None
         if not sym:
             raw = r["detail"].get("symbol")
             sym = clean_symbol(raw) if isinstance(raw, str) else None
-        out.append({**r, "symbol": sym or "", "details": detail_line(r)})
+        out.append({**r, "symbol": sym or "", "details": detail_line(r),
+                    "sec_kind": sec_kind(r), "form": sec_form(r), "name": sec_name(r),
+                    "value": sec_value(r)})
     return out
 
 
@@ -571,9 +630,18 @@ def indicator_state(ind, now, cfg) -> dict:
         except (ValueError, OverflowError):
             today = None
         next_txt = _weekday_day(d) if d and today and d >= today else NO_NEXT
+    # Where the agenda places this indicator: a fresh release (released or
+    # awaiting) sits at the release that made it fresh; an upcoming one at its
+    # next release, by instant when there is one, else by its date.
+    if state != "upcoming":
+        place_at, place_date = last.isoformat(), None
+    else:
+        place_at = nxt.isoformat() if nxt is not None else None
+        d = _date(next_date) if nxt is None else None
+        place_date = d.isoformat() if d is not None and next_txt != NO_NEXT else None
     return {"key": _str(ind.get("key")), "label": _str(ind.get("label")),
             "actual": actual, "prior": shown_prior, "state": state, "status": status,
-            "next": next_txt}
+            "next": next_txt, "place_at": place_at, "place_date": place_date}
 
 
 def _list(payload, key):
@@ -716,3 +784,316 @@ def calendar_groups(payload, *, now) -> list:
     return [{"title": title, "tiles": tiles, "note": _group_note(sources, names),
              "empty": None if tiles else empty}
             for (title, names, empty), tiles in zip(_GROUPS, tile_sets)]
+
+
+# ---- the SEC panel's display fields (the 2026-09-26 redesign) --------------
+
+# The panel's filter chips, in order: key -> label. "all" is no filter.
+SEC_KINDS = {"all": "All", "form4": "Insider buys", "offering": "Offerings",
+             "registration": "Registrations"}
+# Registration forms by prefix: S-1, S-3 (and S-3ASR), F-1, F-3, S-4, F-4 ...
+_REGISTRATION = _re.compile(r"^(S|F)-\d")
+_FORM4_TITLE = _re.compile(r"^(?P<sym>.+?) — (?P<who>.+) \((?P<rel>[^()]*)\) bought (?P<amt>\S+)$")
+_FILING_TITLE = _re.compile(r"^(?P<co>.+?) files (?P<form>\S+) \((?P<label>.+)\)$")
+
+
+def sec_kind(row) -> str:
+    """``"form4"`` (an insider purchase), ``"offering"`` (a 424B prospectus),
+    ``"registration"`` (S-1, S-3, S-3ASR, F-1 ... and their amendments) or
+    ``"other"`` - from the row's kind and its filing's form, never its title."""
+    if not isinstance(row, dict):
+        return "other"
+    if row.get("kind") == "edgar_form4":
+        return "form4"
+    d = row.get("detail") if isinstance(row.get("detail"), dict) else {}
+    form = _str(d.get("form")).strip().upper()
+    if form.startswith("424B"):
+        return "offering"
+    if _REGISTRATION.match(form):
+        return "registration"
+    return "other"
+
+
+def sec_form(row) -> str:
+    """The form badge's text: ``"FORM 4"`` for an insider buy (never ``"F-4"``,
+    which is a different SEC form), else the filing's form as filed."""
+    if sec_kind(row) == "form4":
+        return "FORM 4"
+    d = row.get("detail") if isinstance(row, dict) and isinstance(row.get("detail"), dict) else {}
+    return _str(d.get("form")).strip().upper()[:10]
+
+
+def sec_name(row) -> str:
+    """What the row's middle cell says: the insider for a Form 4 (``"Warren
+    Buffett +2"``), ``"<company> — <what was filed>"`` for a filing - both
+    read out of the title the service wrote - else the title as it is."""
+    title = _str(row.get("title")).strip() if isinstance(row, dict) else ""
+    if not title:
+        return ""
+    if row.get("kind") == "edgar_form4":
+        m = _FORM4_TITLE.match(title)
+        return m["who"].strip() if m else title
+    m = _FILING_TITLE.match(title)
+    return f"{m['co'].strip()} — {m['label'].strip()}" if m else title
+
+
+def sec_value(row) -> str:
+    """A Form 4's dollar total (``"$136.4M"``); ``""`` for anything else or no
+    usable figure - never ``"$0"``."""
+    if not isinstance(row, dict) or row.get("kind") != "edgar_form4":
+        return ""
+    d = row.get("detail") if isinstance(row.get("detail"), dict) else {}
+    v = _finite(d.get("total_value"))
+    return _money(v) if v is not None and v > 0 else ""
+
+
+def filter_sec(rows_, kind) -> list:
+    """SEC rows of one ``SEC_KINDS`` key; ``"all"`` / unknown keeps every row."""
+    if kind not in SEC_KINDS or kind == "all":
+        return [r for r in rows_ or [] if isinstance(r, dict)]
+    return [r for r in rows_ or [] if isinstance(r, dict) and r.get("sec_kind") == kind]
+
+
+# ---- the calendar: next up, and the agenda -----------------------------------
+
+# An agenda row's badge: FOMC / SPEECH / TESTIMONY / EVENT for a scheduled
+# event (read off the title - the payload carries no kind), DATA for a tracked
+# indicator, DIVIDEND and IPO for those rows.
+BADGES = ("FOMC", "SPEECH", "TESTIMONY", "EVENT", "DATA", "DIVIDEND", "IPO")
+# The Fed calendar's own prefixes (``"Speech - Governor Lisa D. Cook"``).
+_SPEECH_PREFIX = {"speech": "SPEECH", "discussion": "SPEECH", "remarks": "SPEECH",
+                  "testimony": "TESTIMONY"}
+# Longest first, so "Vice Chair for Supervision" wins over "Vice Chair".
+_ROLES = ("Vice Chair for Supervision", "Vice Chairman for Supervision", "Vice Chairman",
+          "Vice Chair", "Chairman", "Chair", "Governor", "President")
+_AGENDA_EMPTY = "Nothing on the calendar ahead."
+NOTHING_NEXT = "Nothing scheduled with a time yet."
+
+
+def _prefix(title):
+    head, sep, rest = title.partition(" - ")
+    if not sep:
+        return None, title
+    return head.strip().casefold(), rest.strip()
+
+
+def event_badge(title) -> str:
+    """The agenda badge for an event title."""
+    title = _str(title).strip()
+    head, _ = _prefix(title)
+    if head in _SPEECH_PREFIX:
+        return _SPEECH_PREFIX[head]
+    if "fomc" in title.casefold() or "federal open market" in title.casefold():
+        return "FOMC"
+    return "EVENT"
+
+
+def speaker(title):
+    """``{"name", "role", "what"}`` for a Fed speech / discussion / testimony
+    whose speaker starts with a known role (``"Speech - Vice Chair for
+    Supervision Michelle W. Bowman"`` -> Michelle W. Bowman, Vice Chair for
+    Supervision, speech), else ``None`` - an unknown shape is shown as its
+    title, never half-parsed."""
+    head, rest = _prefix(_str(title).strip())
+    if head not in _SPEECH_PREFIX or not rest:
+        return None
+    for role in _ROLES:
+        if rest.casefold().startswith(role.casefold() + " "):
+            name = rest[len(role):].strip()
+            if name:
+                return {"name": name, "role": rest[:len(role)], "what": head}
+    return None
+
+
+def countdown(seconds) -> str:
+    """``"now"`` under a minute, ``"in 45m"``, ``"in 3h 5m"``, ``"in 1d 19h"``
+    (a zero part dropped: ``"in 2d"``); ``""`` for junk or the past."""
+    s = _finite(seconds)
+    if s is None or s < 0:
+        return ""
+    m = int(s // 60)
+    if m < 1:
+        return "now"
+    d, rem = divmod(m, 1440)
+    h, mm = divmod(rem, 60)
+    if d:
+        return f"in {d}d {h}h" if h else f"in {d}d"
+    if h:
+        return f"in {h}h {mm}m" if mm else f"in {h}h"
+    return f"in {mm}m"
+
+
+def _hero_title(title, badge):
+    sp = speaker(title)
+    if sp:
+        return f"{sp['role']} {sp['name']} — {sp['what']}"
+    return title
+
+
+def next_up(payload, *, now):
+    """The calendar hero: the earliest event or tracked data release with a
+    future INSTANT - ``{"title", "badge", "when", "countdown", "high"}`` - or
+    ``None``. A date-only item cannot be counted down to and is skipped."""
+    now = _aware(now)
+    best = None
+    for ev in _list(payload, "events"):
+        title, when = _str(ev.get("title")).strip(), _dt(ev.get("at"))
+        if title and when is not None and when > now:
+            badge = event_badge(title)
+            cand = (when, _hero_title(title, badge), badge, _high(ev))
+            best = cand if best is None or cand[0] < best[0] else best
+    for ind in _list(payload, "data"):
+        title = _str(ind.get("tile")).strip() or _str(ind.get("label")).strip()
+        when = _dt(ind.get("next_release_at"))
+        if title and when is not None and when > now:
+            cand = (when, title, "DATA", _high(ind))
+            best = cand if best is None or cand[0] < best[0] else best
+    if best is None:
+        return None
+    when, title, badge, high = best
+    ct = when.astimezone(_CT)
+    return {"title": title, "badge": badge, "high": high,
+            "when": f"{_weekday_day(ct)} · {_time(ct)} CT",
+            "countdown": countdown((when - now).total_seconds())}
+
+
+def _day_head(d, today):
+    head = f"{d.strftime('%a')} · {d.strftime('%b')} {d.day}".upper()
+    return f"TODAY · {head}" if d == today else head
+
+
+def _place(at, date):
+    """``(sort key, Central date, "H:MM" or "")`` for an instant or a date."""
+    when = _dt(at) if at else None
+    if when is not None:
+        ct = when.astimezone(_CT)
+        return (ct.date(), ct.time().isoformat()), ct.date(), _clock(ct)
+    d = _date(date) if date else None
+    if d is not None:
+        return (d, ""), d, ""
+    return None, None, ""
+
+
+def _data_line(ind):
+    a, p = ind.get("actual") or DASH, ind.get("prior") or DASH
+    if ind.get("state") == "released":
+        return " · ".join(x for x in (f"Actual {a}", f"Prior {p}", ind.get("status")) if x)
+    if ind.get("state") == "awaiting":
+        return f"{AWAITING} · Prior {p}"
+    return f"Prior {p}"
+
+
+def agenda(payload, *, now) -> dict:
+    """The calendar card: ``{"days", "undated", "notes", "empty"}``.
+
+    ``days`` is ``[{"head": "MON · SEP 28", "date", "items"}]`` in date order,
+    each item ``{"time", "badge", "title", "sub", "lines", "high"}`` in time
+    order (an item with no time first). The three kinds the page has always
+    shown share it and are told apart by ``badge``: scheduled events (FOMC /
+    SPEECH / TESTIMONY / EVENT - a Fed speaker's name is the title and the
+    role the ``sub``), dividends and IPOs (their amount / price line), and
+    tracked economic data (DATA - Actual / Prior / the release state, one line
+    per indicator in ``lines`` when a tile carries more than one).
+
+    The same rules as ``calendar_groups`` decide what is kept: a past EVENT is
+    dropped; dividends and IPOs keep the producer's windows; a data tile sits at
+    the release that made it fresh, else at its next one. A tile with no next
+    date is listed under ``undated``. ``notes`` are the stale-source sentences
+    (``"Dividend / IPO: Source unavailable ..."``); ``empty`` the plain
+    sentence of each kind with nothing to show."""
+    today = _today_ct(now)
+    cfg = payload.get("settings") if isinstance(payload, dict) else None
+    raw_sources = payload.get("sources") if isinstance(payload, dict) else None
+    sources = raw_sources if isinstance(raw_sources, dict) else {}
+    placed, undated = [], []
+    counts = [0, 0, 0]
+
+    def put(key, d, item):
+        if key is None:
+            undated.append(item)
+        else:
+            placed.append((key, d, item))
+
+    for ev in _list(payload, "events"):
+        tile = _event_tile(ev, now, today)
+        if tile is None:
+            continue
+        badge = event_badge(tile["title"])
+        sp = speaker(tile["title"])
+        title, sub = tile["title"], ""
+        if sp:
+            title = sp["name"] + (f" — {sp['what']}" if sp["what"] != "speech" else "")
+            sub = sp["role"]
+        key, d, clock = _place(ev.get("at"), ev.get("date"))
+        counts[0] += 1
+        put(key, d, {"time": clock, "badge": badge, "title": title, "sub": sub,
+                     "lines": [], "high": tile["high"]})
+    for raw, build, badge, date_key in (
+            [(x, _dividend_tile, "DIVIDEND", "ex_date") for x in _list(payload, "dividends")]
+            + [(x, _ipo_tile, "IPO", "date") for x in _list(payload, "ipos")]):
+        tile = build(raw)
+        if tile is None:
+            continue
+        lines = list(tile["lines"])
+        if badge == "IPO" and tile["when"].startswith("Priced"):
+            lines.insert(0, "Priced")
+        if badge == "DIVIDEND":
+            lines.insert(0, "Ex-dividend")
+        key, d, _ = _place(None, raw.get(date_key))
+        counts[1] += 1
+        put(key, d, {"time": "", "badge": badge, "title": tile["title"],
+                     "sub": " · ".join(lines), "lines": [], "high": tile["high"]})
+    by_title, order = {}, []
+    for ind in _list(payload, "data"):
+        title = _str(ind.get("tile")).strip() or _str(ind.get("label")).strip()
+        if not title:
+            continue
+        st = indicator_state(ind, now, cfg)
+        if title not in by_title:
+            by_title[title] = {"title": title, "inds": [], "high": False, "st": st}
+            order.append(title)
+        t = by_title[title]
+        t["inds"].append(st)
+        t["high"] = t["high"] or _high(ind)
+    for title in order:
+        t = by_title[title]
+        st = t["st"]
+        lines = [_data_line(i) for i in t["inds"]]
+        if len(lines) > 1:
+            lines = [f"{i['label']}: {ln}" if i.get("label") else ln
+                     for i, ln in zip(t["inds"], lines)]
+            sub = ""
+        else:
+            sub, lines = lines[0], []
+        key, d, clock = _place(st.get("place_at"), st.get("place_date"))
+        counts[2] += 1
+        item = {"time": clock, "badge": "DATA", "title": title, "sub": sub,
+                "lines": lines, "high": t["high"]}
+        if key is None:
+            item["sub"] = " · ".join(x for x in (NO_NEXT, sub) if x)
+        put(key, d, item)
+    placed.sort(key=lambda x: x[0])
+    days = []
+    for key, d, item in placed:
+        if not days or days[-1]["date"] != d.isoformat():
+            days.append({"head": _day_head(d, today), "date": d.isoformat(), "items": []})
+        days[-1]["items"].append(item)
+    notes = []
+    for (title, names, empty) in _GROUPS:
+        note = _group_note(sources, names)
+        if note:
+            notes.append(f"{title}: {note}")
+    empties = [empty for (_, _, empty), n in zip(_GROUPS, counts) if n == 0]
+    return {"days": days, "undated": undated, "notes": notes, "empty": empties}
+
+
+def sec_tone(row) -> str:
+    """The form badge's colour family: ``"form4"``, ``"offering"``, ``"ipo"``
+    (an S-1 / F-1 - a new registration, usually an IPO), ``"shelf"`` (any other
+    registration: S-3, S-3ASR, F-3 ...) or ``"other"``. A finite set: the page
+    maps each to a fixed palette class."""
+    kind = sec_kind(row)
+    if kind != "registration":
+        return kind
+    form = sec_form(row)
+    return "ipo" if form.startswith(("S-1", "F-1")) else "shelf"

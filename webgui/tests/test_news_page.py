@@ -60,24 +60,6 @@ def _new_elements(before):
     return [e for k, e in ui.context.client.elements.items() if k not in before]
 
 
-def test_draw_rows_links_the_headline_and_the_tickers_when_linked():
-    from nicegui import ui
-
-    from pages import news, news_view as nv
-    rows = nv.rows({"items": [_item(1, tickers=["NVDA"], teaser="<b>hi</b>")]},
-                   now=NOW)
-    before = set(ui.context.client.elements)
-    box = ui.column()
-    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    links = [e for e in _new_elements(before) if isinstance(e, ui.link)]
-    by_text = {e.text: e for e in links}
-    assert by_text["Headline 1"].props["href"] == "https://example.com/1"
-    assert by_text["Headline 1"].props.get("target") == "_blank"
-    assert by_text["NVDA"].props["href"] == "/symbol?symbol=NVDA"
-    labels = [e.text for e in _new_elements(before) if isinstance(e, ui.label)]
-    assert rows[0]["when"] in labels
-    assert "MarketWatch" in labels
-    assert "<b>hi</b>" in labels          # a label escapes; never rendered as HTML
 
 
 def test_draw_rows_unlinked_ticker_is_a_chip_that_calls_on_ticker():
@@ -247,19 +229,8 @@ def test_an_unpublished_symbol_route_leaves_the_tickers_as_chips(monkeypatch):
     assert picked == ["NVDA"]
 
 
-def test_the_ticker_field_is_debounced(monkeypatch):
-    """Each keystroke would otherwise rebuild up to 60 rows."""
-    from nicegui import ui
-    new, _ = _render(monkeypatch, {"items": [_item(1)]})
-    (field,) = [e for e in new if isinstance(e, ui.input)]
-    assert int(field.props["debounce"]) == 300
 
 
-def test_the_time_column_fits_a_dated_stamp_on_one_line():
-    """"Sep 25 10:43 AM" must not wrap: the column is w-28 and nowrap. (The
-    second line it used to indent past is gone - see test_second_line_is_gone.)"""
-    from pages import news
-    assert "w-28" in news._WHEN and "whitespace-nowrap" in news._WHEN
 
 
 def test_the_empty_feed_line_is_one_constant_on_both_origins():
@@ -301,46 +272,6 @@ def test_second_line_is_gone():
     assert not hasattr(news, "_echoes_title")
 
 
-def test_rows_draw_one_line_with_time_impact_tickers_headline_source():
-    from nicegui import ui
-
-    from pages import news, news_view as nv
-    it = {**_item(1, tickers=["NVDA"], teaser="Chips rallied on the news."),
-          "impact": {"band": "high", "score": 7, "reasons": ["kw:tier1:FOMC"]}}
-    rows = nv.rows(_items_payload(it, _item(2)), now=NOW)
-    box = ui.column()
-    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    kids = box.default_slot.children
-    assert len(kids) == 3                     # the column header, then one per item
-    for row_el in kids[1:]:
-        assert isinstance(row_el, ui.row)
-        assert "flex-nowrap" in _classes(row_el)             # one line, never wraps
-        # no nested row or column: nothing can drop to a second line
-        assert not [d for d in _descendants(row_el)
-                    if isinstance(d, (ui.row, ui.column))]
-    first = kids[1].default_slot.children
-    texts = [getattr(c, "text", None) for c in first]
-    # time · impact · [tickers] · headline · [source], in that order
-    assert texts[:2] == [rows[0]["when"], "H"] and texts[3] == "Headline 1"
-    assert len(first) == 5
-    assert [c.text for c in first[2].default_slot.children] == ["NVDA"]
-    assert [d.text for d in _descendants(first[4]) if isinstance(d, ui.label)
-            and not isinstance(d.parent_slot.parent, ui.tooltip)] == ["MarketWatch"]
-    pill = first[1]
-    assert set(nv.BAND_CLASSES["high"].split()) <= _classes(pill)
-    tip = [d for d in _descendants(pill) if isinstance(d, ui.tooltip)]
-    # the reason code reads as a phrase (news_view.reason_text), not a code
-    assert tip and tip[0].text == "mentions FOMC"
-    headline = first[3]
-    assert {"truncate", "min-w-0", "flex-1"} <= _classes(headline)
-    assert "shrink-0" in _classes(first[4])                  # the source cell
-    # a row with no band keeps an EMPTY slot of the pill's width, never "L"
-    second = kids[2].default_slot.children
-    assert getattr(second[1], "text", "") in ("", None)
-    assert "w-5" in _classes(second[1])
-    # the teaser is on the headline's hover, not on a second line
-    hover = [d for d in _descendants(headline) if isinstance(d, ui.label)]
-    assert [h.text for h in hover] == ["Chips rallied on the news."]
 
 
 def test_a_teaser_equal_to_the_headline_adds_no_hover():
@@ -351,32 +282,6 @@ def test_a_teaser_equal_to_the_headline_adds_no_hover():
     assert news.hover_text(None) == ""
 
 
-def test_the_band_filter_hides_lower_bands(monkeypatch):
-    from nicegui import ui
-    items = [{**_item(i, title=f"B{band}"), "impact": {"band": band, "score": 1,
-                                                       "reasons": []}}
-             for i, band in enumerate(("high", "med", "low"))]
-    items.append(_item(9, title="Bnone"))
-    from pages import news_view as nv
-    # the feed view only: the band filter is the headline list's, not the SEC panel's
-    new, _ = _render_views(monkeypatch, {nv.VIEW: _items_payload(*items)})
-    sels = [e for e in new if isinstance(e, ui.select)
-            and isinstance(e.options, dict) and "med" in e.options]
-    assert len(sels) == 1
-    band_sel = sels[0]
-    assert band_sel.options == {"all": "All", "high": "High", "med": "High + Med"}
-    assert band_sel.value == "all"
-
-    def _titles():
-        return {e.text for e in ui.context.client.elements.values()
-                if isinstance(e, ui.link) and e.text.startswith("B")}
-    assert _titles() == {"Bhigh", "Bmed", "Blow", "Bnone"}
-    band_sel.value = "med"
-    assert _titles() == {"Bhigh", "Bmed"}
-    band_sel.value = "high"
-    assert _titles() == {"Bhigh"}
-    band_sel.value = "all"
-    assert _titles() == {"Bhigh", "Bmed", "Blow", "Bnone"}
 
 
 SEC_ITEM = {**_item(50, tickers=["ACME"], kind="edgar_form4",
@@ -418,82 +323,10 @@ def test_the_sec_panel_reads_the_sec_view_and_the_calendar_its_view(monkeypatch)
     assert not {nv.VIEW_PUBLIC, nv.VIEW_SEC_PUBLIC, nv.VIEW_CAL_PUBLIC} & set(reads)
 
 
-def test_three_regions_render_in_dom_order(monkeypatch):
-    from nicegui import ui
-
-    from pages import news, news_view as nv
-    new, _ = _render_views(monkeypatch, {
-        nv.VIEW: _items_payload(_item(1, title="A headline")),
-        nv.VIEW_SEC: _items_payload(SEC_ITEM),
-        nv.VIEW_CAL: CAL_PAYLOAD,
-    })
-    # DOM order (a depth-first walk from the page column), not creation order:
-    # the regions are built first and painted afterwards.
-    ids = {x.id for x in new}
-    tops = [e for e in new if e.parent_slot is not None
-            and e.parent_slot.parent.id not in ids]
-    root = max(tops, key=lambda e: len(_descendants(e)))     # the page column
-    order = [e for e in [root, *_descendants(root)]
-             if isinstance(e, (ui.label, ui.link))]
-    texts = [e.text for e in order]
-    i_head = texts.index("A headline")
-    i_sec = texts.index(news.SEC_TITLE)
-    i_cal = texts.index(news.CAL_TITLE)
-    assert i_head < i_sec < i_cal
-    # the headline list's own column header comes before its first row
-    cols = [texts.index(c) for c in news.LIST_COLUMNS]
-    assert cols == sorted(cols) and cols[-1] < i_head
-    # the SEC panel's own columns (searched from the panel on: the headline
-    # list has a "Symbol" column too), and the ONE line per filing
-    for col in ("Date/Time", "Symbol", "Headline/Details"):
-        assert i_sec < texts.index(col, i_sec) < i_cal
-    assert i_sec < texts.index("ACME insider buys $136.4M") < i_cal
-    assert i_sec < texts.index("9 purchases · $136.4M · 2026-09-23") < i_cal
-    # the calendar's three headers, in order, after the SEC panel
-    heads = [texts.index(t) for t in ("Economic news/Calendar", "Dividend / IPO",
-                                      "Economic data (CPI, PPI etc)")]
-    assert i_cal < heads[0] < heads[1] < heads[2]
-    assert "Wed Oct 28 · 1:00 PM CT" in texts          # Central time on the tile
-    assert "JPM dividend" in texts
-    # the grid: headlines left (3 of 5), the two right panels scroll at lg
-    grids = [e for e in new if "lg:grid-cols-5" in e.classes]
-    assert len(grids) == 1
-    panels = [e for e in new if "lg:h-[calc(50vh-5rem)]" in e.classes]
-    assert len(panels) == 2 and all("overflow-y-auto" in p.classes for p in panels)
-    # the headline column is as tall as both right panels plus their gap, and
-    # its list (not the control bar) scrolls inside it
-    lefts = [e for e in new if "lg:h-[calc(100vh-9.25rem)]" in e.classes]
-    assert len(lefts) == 1
-    lists = [e for e in new if "lg:overflow-y-auto" in e.classes]
-    assert len(lists) == 1 and "lg:min-h-0" in lists[0].classes
-    assert lists[0] in _descendants(lefts[0])
 
 
-def test_the_left_column_height_is_the_two_panels_and_their_gap():
-    import re
-
-    from pages import news
-    panel = re.search(r"lg:h-\[calc\(50vh-(\d+(?:\.\d+)?)rem\)\]", news._PANEL)
-    left = re.search(r"lg:h-\[calc\(100vh-(\d+(?:\.\d+)?)rem\)\]", news._LEFT)
-    assert panel and left and "gap-3" in news._RIGHT.split()
-    assert float(left.group(1)) == 2 * float(panel.group(1)) - 0.75
 
 
-def test_the_sec_row_links_its_symbol_and_leads_with_the_pill():
-    from nicegui import ui
-
-    from pages import news, news_view as nv
-    rows = nv.sec_rows(_items_payload(SEC_ITEM), now=NOW)
-    box = ui.column()
-    news.draw_sec_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    kids = box.default_slot.children
-    assert len(kids) == 2                                  # the header + one row
-    row_el = kids[1]
-    assert "flex-nowrap" in row_el.classes
-    links = {d.text: d for d in _descendants(row_el) if isinstance(d, ui.link)}
-    assert links["ACME"].props["href"] == "/symbol?symbol=ACME"
-    labels = [d.text for d in _descendants(row_el) if isinstance(d, ui.label)]
-    assert labels.index("M") < labels.index("9 purchases · $136.4M · 2026-09-23")
 
 
 def test_a_cold_sec_and_calendar_say_nothing_has_been_published(monkeypatch):
@@ -506,44 +339,8 @@ def test_a_cold_sec_and_calendar_say_nothing_has_been_published(monkeypatch):
     assert news.SEC_WAITING != news.SEC_EMPTY
 
 
-def test_calendar_text_is_escaped_and_an_awaiting_indicator_says_so():
-    from nicegui import ui
-
-    from pages import news
-    groups = [{"title": "Economic data (CPI, PPI etc)", "note": None, "empty": None,
-               "tiles": [{"title": "<b>CPI</b>", "when": "Tue Oct 13 · 7:30 AM CT",
-                          "lines": [], "indicators": [
-                              {"label": "CPI m/m", "actual": "—", "prior": "+0.2% m/m",
-                               "state": "awaiting", "next": "x"}]}]},
-              {"title": "Dividend / IPO", "note": "Source unavailable — showing the "
-               "last good reading", "empty": "No dividends or IPOs ahead", "tiles": []}]
-    before = set(ui.context.client.elements)
-    news.draw_calendar(ui.column(), groups)
-    new = _new_elements(before)
-    texts = [e.text for e in new if isinstance(e, ui.label)]
-    assert "<b>CPI</b>" in texts                        # a label: escaped
-    assert "Next Tue Oct 13 · 7:30 AM CT" in texts
-    assert "Actual — · Prior +0.2% m/m" in texts
-    assert "Awaiting the release" in texts
-    assert "No dividends or IPOs ahead" in texts
-    assert "Source unavailable — showing the last good reading" in texts
 
 
-def test_a_released_indicator_shows_its_status_line():
-    from nicegui import ui
-
-    from pages import news
-    groups = [{"title": "Economic data (CPI, PPI etc)", "note": None, "empty": None,
-               "tiles": [{"title": "CPI", "when": "Wed Nov 11 · 7:30 AM CT",
-                          "lines": [], "indicators": [
-                              {"label": "CPI m/m", "actual": "+0.4% m/m", "prior": "+0.2% m/m",
-                               "state": "released", "status": "Released 7:30 AM CT",
-                               "next": "x"}]}]}]
-    before = set(ui.context.client.elements)
-    news.draw_calendar(ui.column(), groups)
-    texts = [e.text for e in _new_elements(before) if isinstance(e, ui.label)]
-    assert "Released 7:30 AM CT" in texts
-    assert "Awaiting the release" not in texts
 
 
 def test_refresh_toast_mentions_the_calendar():
@@ -552,44 +349,8 @@ def test_refresh_toast_mentions_the_calendar():
 
 
 # ── review round: phone rows, echoes, readable reasons, live repaint ────────
-def test_the_row_clips_and_the_symbol_and_source_columns_hide_on_a_phone():
-    """At ~375px a nowrap row squeezed the headline to 0px: the row clips, and
-    the Symbol and Source columns - each cell AND its header label - only show
-    from ``sm`` up."""
-    from pages import news
-    assert "overflow-hidden" in news._ROW.split()
-    for cls in (news._SOURCE_CELL, news._SOURCE_HEAD, news._TICKER_SLOT, news._TICKER_W):
-        assert "max-sm:hidden" in cls.split(), cls
-        # never Tailwind's bare ``hidden``: Quasar's ``.hidden`` is
-        # ``display:none !important`` and no ``sm:`` display beats it
-        assert "hidden" not in cls.split(), cls
 
 
-def test_a_row_shows_two_tickers_then_a_count_with_the_rest_on_hover():
-    from nicegui import ui
-
-    from pages import news, news_view as nv
-    assert news.MAX_ROW_TICKERS == 2
-    rows = nv.rows(_items_payload(_item(1, tickers=["NVDA", "AMD", "INTC", "MU"])),
-                   now=NOW)
-    box = ui.column()
-    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    (_head, row_el) = box.default_slot.children
-    slot = row_el.default_slot.children[2]
-    texts = [getattr(c, "text", None) for c in slot.default_slot.children]
-    assert texts == ["NVDA", "AMD", "+2"]
-    assert "INTC" not in texts and "MU" not in texts
-    more = slot.default_slot.children[2]
-    assert "shrink-0" in _classes(more)
-    tips = [d for d in _descendants(more) if isinstance(d, ui.tooltip)]
-    assert tips and tips[0].text == "INTC, MU"
-    # two tickers or fewer: no count
-    rows = nv.rows(_items_payload(_item(2, tickers=["NVDA", "AMD"])), now=NOW)
-    box = ui.column()
-    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    slot = box.default_slot.children[1].default_slot.children[2]
-    texts = [getattr(c, "text", None) for c in slot.default_slot.children]
-    assert texts == ["NVDA", "AMD"]
 
 
 def test_a_teaser_that_is_the_headline_plus_a_publisher_adds_no_hover():
@@ -609,31 +370,8 @@ def test_a_teaser_that_is_the_headline_plus_a_publisher_adds_no_hover():
     assert news.hover_text({"title": "Fed holds", "teaser": "Short."}) == "Short."
 
 
-def test_the_sec_row_hover_does_not_repeat_its_inline_detail():
-    from nicegui import ui
-
-    from pages import news, news_view as nv
-    rows = nv.sec_rows(_items_payload(SEC_ITEM), now=NOW)
-    box = ui.column()
-    news.draw_sec_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    tips = [d for d in _descendants(box) if isinstance(d, ui.tooltip)
-            and d.parent_slot.parent.text == "ACME insider buys $136.4M"]
-    assert tips == []                                   # no teaser: no hover
-    with_teaser = {**SEC_ITEM, "teaser": "Nine open-market buys by the CEO."}
-    box = ui.column()
-    news.draw_sec_rows(box, nv.sec_rows(_items_payload(with_teaser), now=NOW),
-                       linked=True, on_ticker=lambda t: None)
-    hover = [d.text for d in _descendants(box) if isinstance(d, ui.label)
-             and isinstance(d.parent_slot.parent, ui.tooltip)]
-    assert hover == ["Nine open-market buys by the CEO."]
 
 
-def test_the_sec_column_header_sticks_over_the_panel():
-    from pages import news
-    head = news._SEC_HEAD.split()
-    assert {"sticky", "top-0"} <= set(head)
-    assert [c for c in head if c.startswith("z-")]
-    assert [c for c in head if c.startswith("bg-")]
 
 
 def test_a_filing_links_only_to_https_sec_gov():
@@ -690,94 +428,16 @@ def test_an_open_tab_repaints_its_held_payloads_every_minute(monkeypatch):
 
 # ── the Source column (2026-09-26) ───────────────────────────────────────────
 
-def test_the_headline_list_opens_with_a_sticky_column_header():
-    from nicegui import ui
-
-    from pages import news, news_view as nv
-    rows = nv.rows(_items_payload(_item(1, tickers=["NVDA"])), now=NOW)
-    box = ui.column()
-    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    head = box.default_slot.children[0]
-    assert isinstance(head, ui.row)
-    assert [c.text for c in head.default_slot.children] == list(news.LIST_COLUMNS)
-    assert news.LIST_COLUMNS == ("Time", "Imp.", "Symbol", "Headline", "Source")
-    cls = news._LIST_HEAD.split()
-    assert {"sticky", "top-0", "flex-nowrap"} <= set(cls)
-    assert [c for c in cls if c.startswith("z-")] and [c for c in cls if c.startswith("bg-")]
-    # each label sits over its cell: the same width class as the cell below
-    time_h, imp_h, sym_h, head_h, src_h = head.default_slot.children
-    row = box.default_slot.children[1].default_slot.children
-    assert "w-28" in _classes(time_h) and "w-28" in _classes(row[0])
-    assert "w-5" in _classes(imp_h) and "w-5" in _classes(row[1])
-    assert "w-32" in _classes(sym_h) and "w-32" in _classes(row[2])
-    assert "flex-1" in _classes(head_h) and "flex-1" in _classes(row[3])
-    assert "w-32" in _classes(src_h) and "w-32" in _classes(row[4])
-    tips = [d for d in _descendants(imp_h) if isinstance(d, ui.tooltip)]
-    assert tips and "Impact" in tips[0].text
 
 
-def test_no_rows_draw_no_column_header():
-    from nicegui import ui
-
-    from pages import news
-    box = ui.column()
-    news.draw_rows(box, [], linked=True, on_ticker=lambda t: None)
-    assert box.default_slot.children == []
 
 
-def test_the_ticker_slot_and_source_cell_have_fixed_widths_and_clip():
-    from pages import news
-    slot = news._TICKER_SLOT.split()
-    assert {"w-32", "shrink-0", "overflow-hidden", "flex-nowrap"} <= set(slot)
-    cell = news._SOURCE_CELL.split()
-    assert {"w-32", "shrink-0", "overflow-hidden"} <= set(cell)
-    assert {"truncate", "min-w-0"} <= set(news._SOURCE.split())
 
 
-def test_a_phone_keeps_the_headline_its_room():
-    """Below ``sm`` only Time, the pill and the headline are drawn; at 390px
-    less two 16px gutters each side (the page's and the column's) the headline
-    keeps >= 150px - measured 178px in a browser, where a one-chip Symbol slot
-    left it 122px."""
-    from pages import news
-    phone = [c for c in (news._WHEN, news._PILL_SLOT, news._TICKER_SLOT, news._SOURCE_CELL)
-             if "max-sm:hidden" not in c.split()]
-    assert phone == [news._WHEN, news._PILL_SLOT]
-    px = {"w-28": 112, "w-5": 20}
-    assert 390 - 4 * 16 - sum(px.values()) - 2 * 8 >= 150
 
 
-def test_the_source_cell_shows_the_first_source_a_count_and_all_on_hover():
-    from nicegui import ui
-
-    from pages import news, news_view as nv
-    it = {**_item(1), "source": "Reuters", "sources": ["Reuters", "CNBC", "WSJ"]}
-    rows = nv.rows(_items_payload(it), now=NOW)
-    box = ui.column()
-    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    cell = box.default_slot.children[1].default_slot.children[4]
-    shown = [c.text for c in cell.default_slot.children if isinstance(c, ui.label)]
-    assert shown == [rows[0]["sources"][0], f"+{len(rows[0]['sources']) - 1}"]
-    tips = [d for d in _descendants(cell) if isinstance(d, ui.tooltip)]
-    assert tips and tips[0].text == ", ".join(rows[0]["sources"])
-    # one source: its name, no count and no hover
-    rows = nv.rows(_items_payload(_item(2, source="CNBC")), now=NOW)
-    box = ui.column()
-    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    cell = box.default_slot.children[1].default_slot.children[4]
-    assert [c.text for c in cell.default_slot.children] == ["CNBC"]
-    assert not [d for d in _descendants(cell) if isinstance(d, ui.tooltip)]
 
 
-def test_a_row_with_no_source_keeps_an_empty_source_cell():
-    from nicegui import ui
-
-    from pages import news
-    rows = [{"title": "X", "when": "9:00 AM", "tickers": [], "sources": []}]
-    box = ui.column()
-    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
-    cell = box.default_slot.children[1].default_slot.children[4]
-    assert cell.default_slot.children == [] and "w-32" in _classes(cell)
 
 
 # ── high-impact calendar tiles (2026-09-26) ──────────────────────────────────
@@ -787,48 +447,422 @@ def _tile_group(*tiles):
              "tiles": list(tiles)}]
 
 
-def test_a_high_tile_is_highlighted_with_a_chip():
+
+
+
+
+
+
+# ── the 2026-09-26 redesign (the mockup) ─────────────────────────────────────
+# Rewritten from the one-line table with a sticky column header, the Impact
+# select, the Ticker input and the three calendar tile groups.
+
+def _click(el):
+    for lst in list(el._event_listeners.values()):
+        if lst.type == "click":
+            lst.handler(None)
+
+
+def _live_texts(pre, cls=None):
+    from nicegui import ui
+    cls = cls or (ui.label, ui.link)
+    return [e.text for k, e in ui.context.client.elements.items()
+            if k not in pre and isinstance(e, cls)]
+
+
+def test_draw_rows_links_the_headline_and_the_tickers_when_linked():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    rows = nv.rows({"items": [_item(1, tickers=["NVDA"], teaser="<b>hi</b>")]},
+                   now=NOW)
+    before = set(ui.context.client.elements)
+    box = ui.column()
+    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    links = [e for e in _new_elements(before) if isinstance(e, ui.link)]
+    by_text = {e.text: e for e in links}
+    assert by_text["Headline 1"].props["href"] == "https://example.com/1"
+    assert by_text["Headline 1"].props.get("target") == "_blank"
+    assert by_text["NVDA"].props["href"] == "/symbol?symbol=NVDA"
+    labels = [e.text for e in _new_elements(before) if isinstance(e, ui.label)]
+    assert rows[0]["stamp"] in labels
+    assert "MarketWatch" in labels
+    assert "<b>hi</b>" in labels          # a label escapes; never rendered as HTML
+
+
+def test_a_row_is_one_line_stamp_band_headline_tickers_source_with_no_header():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    it = {**_item(1, tickers=["NVDA"], teaser="Chips rallied on the news."),
+          "impact": {"band": "high", "score": 7, "reasons": ["kw:tier1:FOMC"]}}
+    rows = nv.rows(_items_payload(it, _item(2)), now=NOW)
+    box = ui.column()
+    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    (card,) = box.default_slot.children                  # one card, no header row
+    kids = card.default_slot.children
+    assert len(kids) == 2
+    for row_el in kids:
+        assert isinstance(row_el, ui.row) and "flex-nowrap" in _classes(row_el)
+        assert "overflow-hidden" in _classes(row_el)
+        assert not [d for d in _descendants(row_el) if isinstance(d, (ui.row, ui.column))]
+    first = kids[0].default_slot.children
+    assert [getattr(c, "text", None) for c in first[:3]] == [rows[0]["stamp"], "HIGH",
+                                                            "Headline 1"]
+    assert [c.text for c in first[3].default_slot.children] == ["NVDA"]
+    assert first[4].text == "MarketWatch"
+    # the band word: fixed palette, its reasons as a phrase on hover
+    assert "text-rose-400" in _classes(first[1])
+    tip = [d for d in _descendants(first[1]) if isinstance(d, ui.tooltip)]
+    assert tip and tip[0].text == "mentions FOMC"
+    assert {"truncate", "min-w-0", "flex-1"} <= _classes(first[2])
+    hover = [d.text for d in _descendants(first[2]) if isinstance(d, ui.label)]
+    assert hover == ["Chips rallied on the news."]
+    # a high row: red left border and wash; an unscored row: transparent, no word
+    assert set(news.ROW_ACCENT["high"].split()) <= _classes(kids[0])
+    second = kids[1].default_slot.children
+    assert second[1].text == "" and "border-l-transparent" in _classes(kids[1])
+
+
+def test_the_row_accents_and_band_words_are_fixed_palette_maps():
+    from pages import news
+    assert set(news.ROW_ACCENT) == set(news.BAND_TEXT) == {"high", "med", "low", None}
+    assert news.ROW_ACCENT["med"] == "border-l-amber-400"
+    assert news.ROW_ACCENT["low"] == news.ROW_ACCENT[None] == "border-l-transparent"
+    assert news.BAND_WORD == {"high": "HIGH", "med": "MED", "low": "LOW"}
+    for m in (news.ROW_ACCENT, news.BAND_TEXT, news.BAND_DOT, news.FORM_CLASSES,
+              news.BADGE_CLASSES, news.CAL_ACCENT):
+        for v in m.values():
+            assert "{" not in v and "var(" not in v
+
+
+def test_a_phone_keeps_the_headline_its_room():
+    """Below ``sm`` the tickers and the source go - with ``max-sm:hidden``,
+    never Tailwind's bare ``hidden``: Quasar's ``.hidden`` is
+    ``display:none !important`` and no ``sm:`` display beats it."""
+    from pages import news
+    for cls in (news._TICKERS, news._SOURCE, news._SEC_SYM, news._CAL_SUB):
+        assert "max-sm:hidden" in cls.split(), cls
+        assert "hidden" not in cls.split(), cls
+    for cls in (news._STAMP, news._BAND, news._HEADLINE):
+        assert "max-sm:hidden" not in cls.split()
+    assert "overflow-hidden" in news._ROW.split()
+
+
+def test_a_row_shows_two_tickers_then_a_count_with_the_rest_on_hover():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    assert news.MAX_ROW_TICKERS == 2
+    rows = nv.rows(_items_payload(_item(1, tickers=["NVDA", "AMD", "INTC", "MU"])),
+                   now=NOW)
+    box = ui.column()
+    news.draw_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    slot = box.default_slot.children[0].default_slot.children[0].default_slot.children[3]
+    assert [c.text for c in slot.default_slot.children] == ["NVDA", "AMD", "+2"]
+    tips = [d for d in _descendants(slot.default_slot.children[2])
+            if isinstance(d, ui.tooltip)]
+    assert tips and tips[0].text == "INTC, MU"
+
+
+def test_the_source_is_the_first_one_with_all_on_hover_and_empty_without():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    it = {**_item(1), "source": "Reuters", "sources": ["Reuters", "CNBC", "WSJ"]}
+    box = ui.column()
+    news.draw_rows(box, nv.rows(_items_payload(it), now=NOW), linked=True,
+                   on_ticker=lambda t: None)
+    src = box.default_slot.children[0].default_slot.children[0].default_slot.children[4]
+    assert src.text == "Reuters" and "w-32" in _classes(src)
+    assert [d.text for d in _descendants(src) if isinstance(d, ui.tooltip)] == \
+        ["Reuters, CNBC, WSJ"]
+    box = ui.column()
+    news.draw_rows(box, [{"title": "X", "stamp": "9:00", "tickers": [], "sources": []}],
+                   linked=True, on_ticker=lambda t: None)
+    src = box.default_slot.children[0].default_slot.children[0].default_slot.children[4]
+    assert src.text == "" and "w-32" in _classes(src)
+
+
+def test_no_rows_draw_nothing():
     from nicegui import ui
 
     from pages import news
     box = ui.column()
-    news.draw_calendar(box, _tile_group(
-        {"title": "FOMC statement", "when": "Wed Oct 28", "lines": [], "high": True},
-        {"title": "FOMC minutes", "when": "Wed Oct 7", "lines": [], "high": False}))
-    tiles = [d for d in _descendants(box) if isinstance(d, ui.column)
-             and "rounded-[8px]" in d.classes]
-    assert len(tiles) == 2
-    hi, lo = tiles
-    assert set(news._CAL_TILE_HIGH.split()) <= _classes(hi)
-    assert set(news._CAL_TILE.split()) <= _classes(lo)
-    assert "border-amber-400/70" in _classes(hi) and "border-[#213152]" not in _classes(hi)
-    chips = [d for d in _descendants(hi) if isinstance(d, ui.label)
-             and d.text == news.HIGH_CHIP]
-    assert len(chips) == 1 and set(news._CAL_CHIP.split()) <= _classes(chips[0])
-    tips = [d for d in _descendants(chips[0]) if isinstance(d, ui.tooltip)]
-    assert tips and tips[0].text == "High-impact release"
-    assert not [d for d in _descendants(lo) if getattr(d, "text", None) == news.HIGH_CHIP]
-    # the title still reads first, and still truncates
-    titles = [d for d in _descendants(hi) if getattr(d, "text", None) == "FOMC statement"]
-    assert titles and "truncate" in _classes(titles[0])
+    news.draw_rows(box, [], linked=True, on_ticker=lambda t: None)
+    assert box.default_slot.children == []
 
 
-def test_a_tile_with_a_missing_or_non_bool_high_is_not_highlighted():
+def _band_items():
+    items = [{**_item(i, title=f"B{band}"), "impact": {"band": band, "score": 1,
+                                                       "reasons": []}}
+             for i, band in enumerate(("high", "med", "low"))]
+    return items + [_item(9, title="Bnone")]
+
+
+def _titles(pre):
+    from nicegui import ui
+    return {t for t in _live_texts(pre, (ui.link,)) if t.startswith("B")}
+
+
+def test_the_band_picker_shows_only_the_band_picked(monkeypatch):
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    pre = set(ui.context.client.elements)
+    _render_views(monkeypatch, {nv.VIEW: _items_payload(*_band_items())})
+    assert list(news.BAND_OPTIONS.values()) == ["All", "High", "Med", "Low"]
+
+    def _opt(text):
+        return [e for k, e in ui.context.client.elements.items() if k not in pre
+                and isinstance(e, ui.row) and "cursor-pointer" in e.classes
+                and [getattr(c, "text", None) for c in e.default_slot.children][-1:] == [text]][-1]
+    assert _titles(pre) == {"Bhigh", "Bmed", "Blow", "Bnone"}
+    for text, want in (("High", {"Bhigh"}), ("Med", {"Bmed"}), ("Low", {"Blow"}),
+                       ("All", {"Bhigh", "Bmed", "Blow", "Bnone"})):
+        pre2 = set(ui.context.client.elements)
+        _click(_opt(text))
+        assert _titles(pre2) == want, text
+        # the picked option is drawn selected
+        assert set(news._SEG_ON.split()) <= set(_opt(text).classes), text
+
+
+def test_the_search_box_filters_headlines_and_tickers(monkeypatch):
+    from nicegui import ui
+
+    from pages import news_view as nv
+    items = [_item(1, title="Fed holds rates"), _item(2, title="Chip rally", tickers=["NVDA"])]
+    new, _ = _render_views(monkeypatch, {nv.VIEW: _items_payload(*items)})
+    (field,) = [e for e in new if isinstance(e, ui.input)]
+    assert int(field.props["debounce"]) == 300           # each keystroke would repaint
+    assert field.props.get("placeholder") == "Filter by ticker or keyword"
+    pre = set(ui.context.client.elements)
+    field.value = "nvd"
+    assert set(_live_texts(pre, (ui.link,))) >= {"Chip rally"}
+    assert "Fed holds rates" not in _live_texts(pre, (ui.link,))
+    pre = set(ui.context.client.elements)
+    field.value = "HOLDS"
+    links = _live_texts(pre, (ui.link,))
+    assert "Fed holds rates" in links and "Chip rally" not in links
+
+
+def test_source_chips_carry_counts_and_toggle(monkeypatch):
+    from nicegui import ui
+
+    from pages import news_view as nv
+    items = [_item(1, title="A1", source="WSJ"), _item(2, title="A2", source="WSJ"),
+             _item(3, title="A3", source="Reuters")]
+    pre = set(ui.context.client.elements)
+    _render_views(monkeypatch, {nv.VIEW: _items_payload(*items)})
+
+    def _chip(name):
+        return [e for k, e in ui.context.client.elements.items() if k not in pre
+                and isinstance(e, ui.row) and "cursor-pointer" in e.classes
+                and [getattr(c, "text", None) for c in e.default_slot.children][:1] == [name]][-1]
+    wsj = _chip("WSJ")
+    assert [c.text for c in wsj.default_slot.children] == ["WSJ", "2"]
+    pre2 = set(ui.context.client.elements)
+    _click(wsj)
+    assert set(_live_texts(pre2, (ui.link,))) == {"A1", "A2"}
+    pre2 = set(ui.context.client.elements)
+    _click(_chip("Reuters"))                              # several at once
+    assert set(_live_texts(pre2, (ui.link,))) == {"A1", "A2", "A3"}
+    assert "3 of 3 stories" in _live_texts(pre, (ui.label,))   # the count line
+    pre2 = set(ui.context.client.elements)
+    _click(_chip("WSJ"))
+    assert set(_live_texts(pre2, (ui.link,))) == {"A3"}
+    assert "1 of 3 stories" in _live_texts(pre, (ui.label,))
+
+
+def test_a_most_mentioned_chip_filters_by_its_ticker_and_clears(monkeypatch):
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    items = [_item(1, title="N1", tickers=["NVDA"]), _item(2, title="N2", tickers=["NVDA"]),
+             _item(3, title="A3", tickers=["AAPL"])]
+    monkeypatch.setattr(news, "trending_window_h", lambda: 6)
+    monkeypatch.setattr(news.nv, "trending",
+                        lambda p, now, window_h: [("NVDA", 2), ("AAPL", 1)])
+    pre = set(ui.context.client.elements)
+    _render_views(monkeypatch, {nv.VIEW: _items_payload(*items)})
+    assert news.TRENDING_LABEL in _live_texts(pre, (ui.label,))
+
+    def _chip(t):
+        return [e for k, e in ui.context.client.elements.items() if k not in pre
+                and isinstance(e, ui.row) and "cursor-pointer" in e.classes
+                and [getattr(c, "text", None) for c in e.default_slot.children] == [t, "2" if t == "NVDA" else "1"]][-1]
+    pre2 = set(ui.context.client.elements)
+    _click(_chip("NVDA"))
+    assert set(_live_texts(pre2, (ui.link,))) >= {"N1", "N2"}
+    assert "A3" not in _live_texts(pre2, (ui.link,))
+    assert set(news._TREND_ON.split()) <= set(_chip("NVDA").classes)
+    pre2 = set(ui.context.client.elements)
+    _click(_chip("NVDA"))
+    assert "A3" in _live_texts(pre2, (ui.link,))
+
+
+def test_the_regions_render_left_then_right_in_dom_order(monkeypatch):
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    new, _ = _render_views(monkeypatch, {
+        nv.VIEW: _items_payload(_item(1, title="A headline")),
+        nv.VIEW_SEC: _items_payload(SEC_ITEM),
+        nv.VIEW_CAL: CAL_PAYLOAD,
+    })
+    ids = {x.id for x in new}
+    tops = [e for e in new if e.parent_slot is not None
+            and e.parent_slot.parent.id not in ids]
+    root = max(tops, key=lambda e: len(_descendants(e)))
+    texts = [e.text for e in [root, *_descendants(root)]
+             if isinstance(e, (ui.label, ui.link))]
+    i_head = texts.index("A headline")
+    i_next = texts.index(news.NEXT_TITLE)
+    i_sec = texts.index(news.SEC_TITLE)
+    i_cal = texts.index(news.CAL_TITLE)
+    assert texts.index(news.SOURCES_LABEL) < i_head < i_next < i_sec < i_cal
+    assert i_sec < texts.index("ACME insider buys $136.4M") < i_cal
+    assert i_sec < texts.index("$136.4M") < i_cal          # the Form 4 value, in green
+    assert i_next < texts.index("FOMC statement") < i_sec  # the hero
+    for chip in nv.SEC_KINDS.values():
+        assert i_sec < texts.index(chip, i_sec) < i_cal
+    # the agenda: a day header, the event, the dividend - one list, badges apart
+    assert i_cal < texts.index("JPM dividend")
+    assert "DIVIDEND" in texts[i_cal:] and "FOMC" in texts[i_cal:]
+    assert "WED · OCT 28" in texts[i_cal:]
+    # the grid: two thirds / one third at lg
+    grids = [e for e in new if "lg:grid-cols-3" in e.classes]
+    assert len(grids) == 1
+    assert [e for e in new if "lg:col-span-2" in e.classes]
+
+
+def test_the_sec_row_links_its_symbol_and_draws_its_form_value_and_time():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    rows = nv.sec_rows(_items_payload(SEC_ITEM), now=NOW)
+    box = ui.column()
+    news.draw_sec_rows(box, rows, linked=True, on_ticker=lambda t: None)
+    (row_el,) = box.default_slot.children[0].default_slot.children
+    assert {"flex-nowrap", "overflow-hidden"} <= _classes(row_el)
+    links = {d.text: d for d in _descendants(row_el) if isinstance(d, ui.link)}
+    assert links["ACME"].props["href"] == "/symbol?symbol=ACME"
+    labels = {d.text: d for d in _descendants(row_el) if isinstance(d, ui.label)}
+    assert set(news.FORM_CLASSES["form4"].split()) <= _classes(labels["FORM 4"])
+    assert news._t.TXT_POS in labels["$136.4M"].classes
+    assert rows[0]["stamp"] in labels
+
+
+def test_the_sec_hover_is_the_full_title_and_teaser_never_the_inline_detail():
+    from nicegui import ui
+
+    from pages import news, news_view as nv
+    it = {**SEC_ITEM, "title": "ACME — Jane Doe (CEO) bought $1.0M",
+          "teaser": "Nine open-market buys by the CEO."}
+    box = ui.column()
+    news.draw_sec_rows(box, nv.sec_rows(_items_payload(it), now=NOW),
+                       linked=True, on_ticker=lambda t: None)
+    names = [d for d in _descendants(box) if getattr(d, "text", None) == "Jane Doe"]
+    assert names
+    hover = [d.text for d in _descendants(names[0]) if isinstance(d, ui.label)]
+    assert hover == ["ACME — Jane Doe (CEO) bought $1.0M — "
+                     "Nine open-market buys by the CEO."]
+    assert "9 purchases" not in " ".join(hover)
+
+
+def test_the_sec_chips_filter_by_kind(monkeypatch):
+    from nicegui import ui
+
+    from pages import news_view as nv
+    filing = {**_item(60, title="Kyndryl files 424B5 (prospectus supplement (offering))",
+                      kind="edgar_filings", detail={"form": "424B5"}),
+              "url": "https://www.sec.gov/x"}
+    pre = set(ui.context.client.elements)
+    _render_views(monkeypatch, {nv.VIEW_SEC: _items_payload(
+        {**SEC_ITEM, "url": "https://www.sec.gov/y"}, filing)})
+
+    def _chip(text):
+        return [e for k, e in ui.context.client.elements.items() if k not in pre
+                and isinstance(e, ui.row) and "rounded-full" in e.classes
+                and [getattr(c, "text", None) for c in e.default_slot.children] == [text]][-1]
+    pre2 = set(ui.context.client.elements)
+    _click(_chip("Offerings"))
+    shown = _live_texts(pre2, (ui.link,))
+    assert "Kyndryl — prospectus supplement (offering)" in shown
+    assert "ACME insider buys $136.4M" not in shown
+    pre2 = set(ui.context.client.elements)
+    _click(_chip("Registrations"))
+    from pages import news
+    assert news.SEC_NO_MATCH in _live_texts(pre2, (ui.label,))
+
+
+def test_the_hero_names_the_next_timed_item_and_counts_down():
     from nicegui import ui
 
     from pages import news
-    for bad in (None, 1, "true"):
-        box = ui.column()
-        tile = {"title": "CPI", "when": "x", "lines": []}
-        if bad is not None:
-            tile["high"] = bad
-        news.draw_calendar(box, _tile_group(tile))
-        assert not [d for d in _descendants(box) if getattr(d, "text", None) == news.HIGH_CHIP]
-        assert not [d for d in _descendants(box) if "border-amber-400/70" in d.classes]
+    box = ui.column()
+    news.draw_next(box, {"title": "<b>FOMC statement</b>", "badge": "FOMC",
+                         "when": "Wed Oct 28 · 1:00 PM CT", "countdown": "in 1d 19h",
+                         "high": True})
+    texts = [d.text for d in _descendants(box) if isinstance(d, ui.label)]
+    assert texts[:2] == [news.NEXT_TITLE, "in 1d 19h"]
+    assert "<b>FOMC statement</b>" in texts             # a label: escaped
+    assert "Wed Oct 28 · 1:00 PM CT" in texts and news.HIGH_CHIP in texts
+    box = ui.column()
+    news.draw_next(box, None)
+    texts = [d.text for d in _descendants(box) if isinstance(d, ui.label)]
+    from pages import news_view as nv
+    assert texts == [news.NEXT_TITLE, nv.NOTHING_NEXT]
 
 
-def test_the_high_classes_are_fixed_palette_classes():
+def test_the_agenda_draws_days_badges_subs_notes_and_escapes():
+    from nicegui import ui
+
     from pages import news
-    assert news.HIGH_CHIP == "HIGH"
-    assert "bg-amber-400/[0.08]" in news._CAL_TILE_HIGH.split()
-    assert {"text-amber-300", "uppercase"} <= set(news._CAL_CHIP.split())
+    agenda = {"notes": ["Dividend / IPO: Source unavailable — showing the last good reading"],
+              "days": [{"head": "MON · SEP 28", "date": "2026-09-28", "items": [
+                  {"time": "7:15", "badge": "SPEECH", "title": "<b>Michelle W. Bowman</b>",
+                   "sub": "Vice Chair", "lines": [], "high": False},
+                  {"time": "7:30", "badge": "DATA", "title": "CPI", "sub": "",
+                   "lines": ["CPI m/m: Awaiting the release · Prior +0.2% m/m"], "high": True}]}],
+              "undated": [{"time": "", "badge": "DATA", "title": "GDP",
+                           "sub": "Next date not yet published", "lines": [], "high": False}],
+              "empty": ["No dividends or IPOs ahead"]}
+    box = ui.column()
+    news.draw_calendar(box, agenda)
+    texts = [d.text for d in _descendants(box) if isinstance(d, ui.label)]
+    for t in ("MON · SEP 28", "7:15", "SPEECH", "<b>Michelle W. Bowman</b>", "Vice Chair",
+              "CPI m/m: Awaiting the release · Prior +0.2% m/m", news.UNDATED_HEAD, "GDP",
+              "No dividends or IPOs ahead",
+              "Dividend / IPO: Source unavailable — showing the last good reading"):
+        assert t in texts, t
+    assert texts.index("MON · SEP 28") < texts.index("7:15") < texts.index(news.UNDATED_HEAD)
+    badge = [d for d in _descendants(box) if getattr(d, "text", None) == "SPEECH"][0]
+    assert set(news.BADGE_CLASSES["SPEECH"].split()) <= _classes(badge)
+
+
+def test_a_high_agenda_item_is_highlighted_with_a_marker_and_only_a_real_true():
+    from nicegui import ui
+
+    from pages import news
+
+    def _draw(high):
+        box = ui.column()
+        item = {"time": "13:00", "badge": "FOMC", "title": "FOMC statement", "sub": "",
+                "lines": []}
+        if high is not None:
+            item["high"] = high
+        news.draw_calendar(box, {"days": [{"head": "WED · OCT 28", "items": [item]}]})
+        return box
+    box = _draw(True)
+    rows = [d for d in _descendants(box) if isinstance(d, ui.row)
+            and "border-l-amber-400" in d.classes]
+    assert len(rows) == 1 and "bg-amber-400/[0.07]" in rows[0].classes
+    chips = [d for d in _descendants(box) if getattr(d, "text", None) == news.HIGH_CHIP]
+    assert len(chips) == 1 and set(news._CAL_CHIP.split()) <= _classes(chips[0])
+    tips = [d for d in _descendants(chips[0]) if isinstance(d, ui.tooltip)]
+    assert tips and tips[0].text == news.HIGH_HINT
+    for bad in (None, 1, "true", False):
+        box = _draw(bad)
+        assert not [d for d in _descendants(box) if getattr(d, "text", None) == news.HIGH_CHIP]
+        assert not [d for d in _descendants(box) if "border-l-amber-400" in d.classes]

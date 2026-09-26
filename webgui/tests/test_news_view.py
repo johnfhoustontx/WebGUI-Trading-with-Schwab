@@ -785,3 +785,216 @@ def test_a_data_tile_is_high_when_any_of_its_indicators_is():
     p = {"data": [{**IND, "high": False}, {**core, "high": True}], "settings": CALCFG}
     (tile,) = nv.calendar_groups(p, now=NOW)[2]["tiles"]
     assert len(tile["indicators"]) == 2 and tile["high"] is True
+
+
+# ── the 2026-09-26 redesign: filters, counts, SEC display, next-up, agenda ──
+
+def test_rows_carry_a_compact_24_hour_stamp():
+    today = _it(1)                                           # 00:30 UTC = 19:30 CT
+    older = {**_it(2), "published_at": "2026-09-22T21:22:00+00:00"}   # Tue 16:22 CT
+    oldest = {**_it(3), "published_at": "2026-09-10T15:00:00+00:00"}
+    none = {**_it(4), "published_at": "junk"}
+    rs = nv.rows({"items": [today, older, oldest, none]}, now=NOW)
+    assert [r["stamp"] for r in rs] == ["19:30", "Tue 16:22", "Sep 10", ""]
+    morning = {**_it(5), "published_at": "2026-09-25T14:05:00+00:00"}  # 9:05 CT
+    assert nv.rows({"items": [morning]}, now=NOW)[0]["stamp"] == "9:05"
+
+
+def test_the_query_matches_the_headline_or_a_ticker_case_insensitively():
+    rs = [{"title": "Fed holds  RATES", "tickers": ["SPY"]},
+          {"title": "Chip rally", "tickers": ["NVDA", "AMD"]},
+          {"title": "Oil edges up", "tickers": []}]
+    q = lambda s: [r["title"] for r in nv.filter_rows(rs, sources=None, symbol=None, query=s)]
+    assert q("holds rates") == ["Fed holds  RATES"]
+    assert q("nvd") == ["Chip rally"]
+    assert q("  ") == q(None) == q("") == [r["title"] for r in rs]
+    assert q("zzz") == []
+
+
+def test_the_band_picker_keeps_exactly_one_band():
+    rs = [{"band": "high", "tickers": []}, {"band": "med", "tickers": []},
+          {"band": "low", "tickers": []}, {"band": None, "tickers": []}]
+    for b in ("high", "med", "low"):
+        assert [r["band"] for r in nv.filter_rows(rs, sources=None, symbol=None, band=b)] == [b]
+    for b in (None, "all", "extreme", 3):
+        assert len(nv.filter_rows(rs, sources=None, symbol=None, band=b)) == 4
+
+
+def test_source_counts_count_every_listed_source_alphabetically():
+    rs = nv.rows({"items": [_it(1, sources=["WSJ", "Reuters"]), _it(2, source="WSJ"),
+                            _it(3, source="bloomberg")]}, now=NOW)
+    assert nv.source_counts(rs) == [("bloomberg", 1), ("Reuters", 1), ("WSJ", 2)]
+    assert nv.source_counts(None) == [] and nv.source_counts(["junk"]) == []
+
+
+def test_story_count():
+    assert nv.story_count(17, 17) == "17 of 17 stories"
+    assert nv.story_count(1, 1) == "1 of 1 story"
+    assert nv.story_count(0, 0) == ""
+
+
+FILING = {**_it(20, tickers=["KD"], source="SEC"), "kind": "edgar_filings",
+          "title": "Kyndryl Holdings files 424B5 (prospectus supplement (offering))",
+          "detail": {"form": "424B5"}}
+S3 = {**FILING, "title": "CytoDyn files S-3ASR (automatic shelf registration)",
+      "detail": {"form": "S-3ASR"}}
+FORM4 = {**_it(21, tickers=["LEN"], source="SEC"), "kind": "edgar_form4",
+         "title": "LEN — Berkshire Hathaway Inc +1 (10% Owner) bought $136.4M",
+         "detail": {"total_value": 136_400_000.0}}
+
+
+def test_sec_display_fields():
+    rs = nv.sec_rows({"items": [FORM4, FILING, S3]}, now=NOW)
+    assert [r["sec_kind"] for r in rs] == ["form4", "offering", "registration"]
+    assert [r["form"] for r in rs] == ["FORM 4", "424B5", "S-3ASR"]
+    assert [r["name"] for r in rs] == ["Berkshire Hathaway Inc +1",
+                                      "Kyndryl Holdings — prospectus supplement (offering)",
+                                      "CytoDyn — automatic shelf registration"]
+    assert [r["value"] for r in rs] == ["$136.4M", "", ""]
+
+
+def test_sec_display_falls_back_and_never_prints_a_zero():
+    odd = {**FORM4, "title": "Something else", "detail": {"total_value": 0}}
+    r = nv.sec_rows({"items": [odd]}, now=NOW)[0]
+    assert (r["name"], r["value"]) == ("Something else", "")
+    for form, kind in (("S-1/A", "registration"), ("F-1", "registration"),
+                       ("424B3", "offering"), ("8-K", "other"), ("", "other")):
+        assert nv.sec_kind({"kind": "edgar_filings", "detail": {"form": form}}) == kind, form
+    assert nv.sec_kind(None) == "other"
+
+
+def test_filter_sec_by_kind():
+    rs = nv.sec_rows({"items": [FORM4, FILING, S3]}, now=NOW)
+    assert [r["form"] for r in nv.filter_sec(rs, "form4")] == ["FORM 4"]
+    assert [r["form"] for r in nv.filter_sec(rs, "offering")] == ["424B5"]
+    assert [r["form"] for r in nv.filter_sec(rs, "registration")] == ["S-3ASR"]
+    assert len(nv.filter_sec(rs, "all")) == len(nv.filter_sec(rs, "nope")) == 3
+    assert list(nv.SEC_KINDS) == ["all", "form4", "offering", "registration"]
+
+
+def test_speaker_parsing_is_only_for_a_known_shape():
+    assert nv.speaker("Speech - Vice Chair for Supervision Michelle W. Bowman") == {
+        "name": "Michelle W. Bowman", "role": "Vice Chair for Supervision", "what": "speech"}
+    assert nv.speaker("Discussion - Governor Lisa D. Cook ")["what"] == "discussion"
+    assert nv.speaker("Testimony - Chairman Kevin Warsh")["role"] == "Chairman"
+    for t in ("FOMC statement", "Speech - Someone Unknown", "Speech - Governor", None, 3):
+        assert nv.speaker(t) is None, t
+
+
+def test_event_badges():
+    assert nv.event_badge("Speech - Governor Lisa D. Cook") == "SPEECH"
+    assert nv.event_badge("Discussion - Governor Lisa D. Cook") == "SPEECH"
+    assert nv.event_badge("Testimony - Chairman Kevin Warsh") == "TESTIMONY"
+    assert nv.event_badge("FOMC minutes") == "FOMC"
+    assert nv.event_badge("Employment Situation") == "EVENT"
+    assert set(nv.BADGES) >= {"FOMC", "SPEECH", "TESTIMONY", "DATA", "DIVIDEND", "IPO"}
+
+
+def test_countdown_words():
+    assert nv.countdown(30) == "now"
+    assert nv.countdown(45 * 60 + 10) == "in 45m"
+    assert nv.countdown(3 * 3600 + 5 * 60) == "in 3h 5m"
+    assert nv.countdown(3 * 3600) == "in 3h"
+    assert nv.countdown(86400 + 19 * 3600 + 59) == "in 1d 19h"
+    assert nv.countdown(2 * 86400) == "in 2d"
+    for junk in (-5, None, float("nan"), True, "10"):
+        assert nv.countdown(junk) == "", junk
+
+
+def test_next_up_is_the_earliest_timed_item_ahead():
+    # NOW = Fri Sep 25 20:00 CT
+    cal = {"events": [
+        {"title": "FOMC statement", "at": "2026-10-28T18:00:00+00:00", "high": True},
+        {"title": "Speech - Vice Chair for Supervision Michelle W. Bowman",
+         "at": "2026-09-28T12:15:00+00:00"},
+        {"title": "Past", "at": "2026-09-25T12:00:00+00:00"},
+        {"title": "Date only", "date": "2026-09-26"}],
+        "data": [{"tile": "JOLTS", "next_release_at": "2026-09-29T14:00:00+00:00"}]}
+    n = nv.next_up(cal, now=NOW)
+    assert n["title"] == "Vice Chair for Supervision Michelle W. Bowman — speech"
+    assert (n["badge"], n["when"], n["countdown"]) == ("SPEECH", "Mon Sep 28 · 7:15 AM CT",
+                                                       "in 2d 11h")
+    only_data = {"data": cal["data"]}
+    assert nv.next_up(only_data, now=NOW)["title"] == "JOLTS"
+    assert nv.next_up({"events": [cal["events"][2], cal["events"][3]]}, now=NOW) is None
+    assert nv.next_up(None, now=NOW) is None
+
+
+def test_agenda_groups_every_kind_by_day_in_time_order():
+    cal = {"events": [
+        {"title": "Discussion - Vice Chair for Supervision Michelle W. Bowman",
+         "at": "2026-09-28T12:15:00+00:00", "date": "2026-09-28"},
+        {"title": "Speech - Governor Lisa D. Cook", "at": "2026-09-28T17:25:00+00:00",
+         "date": "2026-09-28"},
+        {"title": "FOMC statement", "at": "2026-10-28T18:00:00+00:00", "date": "2026-10-28",
+         "high": True},
+        {"title": "Beige Book", "date": "2026-09-28"}],
+        "dividends": [{"symbol": "JPM", "ex_date": "2026-09-28", "amount": 1.4,
+                       "pay_date": "2026-10-31"}],
+        "ipos": [{"symbol": "NEWC", "company": "NewCo", "date": "2026-09-29",
+                  "price_range": "18-20"}],
+        "data": [{**IND, "tile": "JOLTS", "label": "Job openings",
+                  "next_release_at": "2026-09-29T14:00:00+00:00"}],
+        "sources": {"fed": "ok", "dividends": "stale", "nasdaq_ipo": "stale"},
+        "settings": CALCFG}
+    a = nv.agenda(cal, now=NOW)
+    assert [d["head"] for d in a["days"]] == ["MON · SEP 28", "TUE · SEP 29",
+                                             "WED · OCT 28"]
+    mon = a["days"][0]["items"]
+    # date-only items (no time) lead the day, then by time
+    assert [(i["time"], i["badge"], i["title"]) for i in mon] == [
+        ("", "EVENT", "Beige Book"), ("", "DIVIDEND", "JPM dividend"),
+        ("7:15", "SPEECH", "Michelle W. Bowman — discussion"),
+        ("12:25", "SPEECH", "Lisa D. Cook")]
+    assert mon[2]["sub"] == "Vice Chair for Supervision" and mon[3]["sub"] == "Governor"
+    assert mon[1]["sub"] == "Ex-dividend · $1.40 a share · Pays Sat Oct 31"
+    tue = a["days"][1]["items"]
+    assert [(i["time"], i["badge"], i["title"]) for i in tue] == [
+        ("", "IPO", "NEWC · NewCo IPO"), ("9:00", "DATA", "JOLTS")]
+    assert tue[0]["sub"] == "$18-20" and tue[1]["sub"] == "Prior +0.2% m/m"
+    assert a["days"][2]["items"][0]["high"] is True
+    assert a["notes"] == ["Dividend / IPO: Source unavailable — showing the last good reading"]
+    assert a["empty"] == [] and a["undated"] == []
+
+
+def test_agenda_places_a_fresh_release_at_its_release_and_says_so():
+    a = nv.agenda({"data": [IND_WITH_NEW_OBS], "settings": CALCFG},
+                  now=RELEASE_AT + dt.timedelta(minutes=9))
+    (day,) = a["days"]
+    assert day["head"] == "TODAY · WED · OCT 14"
+    (item,) = day["items"]
+    assert item["time"] == "7:30" and item["badge"] == "DATA"
+    assert item["sub"] == "Actual +0.4% m/m · Prior +0.2% m/m · Released 7:30 AM CT"
+    waiting = {**IND, "last_release_at": RELEASE_AT.isoformat(), "next_release_at": None}
+    a = nv.agenda({"data": [waiting], "settings": CALCFG},
+                  now=RELEASE_AT + dt.timedelta(minutes=3))
+    assert a["days"][0]["items"][0]["sub"] == "Awaiting the release · Prior +0.2% m/m"
+
+
+def test_agenda_multi_indicator_tiles_line_per_indicator_and_undated_tiles():
+    two = [{**IND, "label": "CPI m/m"}, {**IND, "key": "core", "label": "Core CPI m/m",
+                                        "high": True}]
+    a = nv.agenda({"data": two, "settings": CALCFG}, now=NOW)
+    (item,) = a["days"][0]["items"]
+    assert item["sub"] == "" and item["high"] is True
+    assert item["lines"] == ["CPI m/m: Prior +0.2% m/m", "Core CPI m/m: Prior +0.2% m/m"]
+    a = nv.agenda({"data": [IND_NO_NEXT], "settings": CALCFG}, now=NOW)
+    assert a["days"] == [] and len(a["undated"]) == 1
+    assert a["undated"][0]["sub"].startswith(nv.NO_NEXT)
+
+
+def test_agenda_says_which_kinds_are_empty_and_never_raises_on_junk():
+    a = nv.agenda({"events": [], "dividends": [], "ipos": [], "data": []}, now=NOW)
+    assert a["days"] == [] and a["empty"] == ["No scheduled events ahead",
+                                              "No dividends or IPOs ahead",
+                                              "No indicators to show"]
+    for junk in (None, "x", {"events": "x", "data": [None, 3, {}]}, {"dividends": [{}]}):
+        a = nv.agenda(junk, now=NOW)
+        assert a["days"] == [] and isinstance(a["notes"], list)
+
+
+def test_sec_tone_is_a_finite_family_per_form():
+    tone = lambda form: nv.sec_tone({"kind": "edgar_filings", "detail": {"form": form}})
+    assert [tone(f) for f in ("S-1", "S-1/A", "F-1", "S-3", "S-3ASR", "F-3", "424B5", "8-K")] \
+        == ["ipo", "ipo", "ipo", "shelf", "shelf", "shelf", "offering", "other"]
+    assert nv.sec_tone(FORM4) == "form4" and nv.sec_tone(None) == "other"
