@@ -770,6 +770,10 @@ def test_status_lists_every_configured_feed_enabled_or_not(tmp_path, monkeypatch
 def test_handle_command_runs_a_poll_on_news_refresh(monkeypatch):
     ran = []
     monkeypatch.setattr(compute, "poll_now", lambda bus: ran.append(bus))
+    # The refresh also re-checks the calendar; stub it so this test never
+    # reaches the calendar's store.
+    from services.news_svc import econ_calendar
+    monkeypatch.setattr(econ_calendar, "refresh_now", lambda bus: None)
 
     class Cmd:
         type = "news_refresh"
