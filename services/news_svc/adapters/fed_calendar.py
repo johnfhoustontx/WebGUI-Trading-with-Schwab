@@ -1,0 +1,157 @@
+"""Federal Reserve Board calendar: ``federalreserve.gov/json/calendar.json``.
+
+Pure over bytes - no network, and ``parse`` never raises. Shape of a row::
+
+    {"month": "2026-10", "days": "1, 8", "time": "3:30 p.m.", "type": "Speeches",
+     "title": "Discussion - Governor Lisa D. Cook ", "location": "...",
+     "description": "&lt;p&gt;...&lt;/p&gt;", "link"/"live": "https://..."}
+
+Traps, each handled here: the body starts with a UTF-8 BOM (``json.loads``
+refuses it); ``days`` is a comma list, one event per day; ``time`` may be
+``""`` (a date-only event); titles carry trailing spaces; titles, locations
+and descriptions carry HTML entities, and descriptions are escaped HTML. Times
+are the Board's convention, **Eastern**; ``at`` is stored as an aware UTC ISO
+instant, ``date`` as the Eastern calendar date. One bad row is skipped, never
+the batch.
+"""
+import html
+import json
+import logging
+import re
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
+
+log = logging.getLogger(__name__)
+
+URL = "https://www.federalreserve.gov/json/calendar.json"
+EASTERN = ZoneInfo("America/New_York")
+
+_TIME = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*([ap])\.?\s*m\.?\s*$", re.I)
+_TAG = re.compile(r"<[^>]+>")
+_SPACE = re.compile(r"\s+")
+_SLUG = re.compile(r"[^a-z0-9]+")
+
+# FOMC rows by exact (normalized) title -> (kind, short display label).
+_FOMC = {
+    "fomc meeting": ("fomc_statement", "FOMC statement"),
+    "fomc press conference": ("fomc_press", "Press conference"),
+    "fomc minutes": ("fomc_minutes", "FOMC minutes"),
+}
+_KIND_BY_TYPE = {"beige": "beige", "speeches": "speech", "testimony": "testimony"}
+
+
+def _text(value) -> str:
+    """Unescape entities (twice: descriptions are escaped HTML), drop tags, squeeze space."""
+    if not isinstance(value, str):
+        return ""
+    s = html.unescape(html.unescape(value))
+    s = _TAG.sub(" ", s)
+    return _SPACE.sub(" ", s).strip()
+
+
+def _slug(title: str) -> str:
+    return _SLUG.sub("-", title.lower()).strip("-") or "event"
+
+
+def _clock(raw):
+    """"2:00 p.m." -> (14, 0); "" -> None (date-only); anything else raises ValueError."""
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    m = _TIME.match(raw) if isinstance(raw, str) else None
+    if not m:
+        raise ValueError(f"unreadable time {raw!r}")
+    hour, minute, half = int(m.group(1)), int(m.group(2)), m.group(3).lower()
+    if not (1 <= hour <= 12 and 0 <= minute <= 59):
+        raise ValueError(f"unreadable time {raw!r}")
+    hour = hour % 12 + (12 if half == "p" else 0)
+    return hour, minute
+
+
+def _kind_and_title(rtype: str, title: str):
+    if rtype.lower() == "fomc":
+        return _FOMC.get(title.lower(), ("fomc", title))
+    if rtype.lower() == "beige":
+        return "beige", "Beige Book"
+    return _KIND_BY_TYPE.get(rtype.lower(), _slug(rtype).replace("-", "_")), title
+
+
+def _link(row) -> str:
+    for key in ("link", "live"):
+        v = row.get(key)
+        if isinstance(v, str) and v.startswith("https://"):
+            return v.strip()
+    return ""
+
+
+def _row_events(row, wanted):
+    if not isinstance(row, dict):
+        return []
+    rtype = row.get("type")
+    if not isinstance(rtype, str) or rtype.strip().lower() not in wanted:
+        return []
+    title = _text(row.get("title"))
+    month = row.get("month")
+    days = row.get("days")
+    if not title or not isinstance(month, str) or not isinstance(days, str):
+        return []
+    year, mon = (int(p) for p in month.split("-"))       # ValueError -> row skipped
+    clock = _clock(row.get("time"))
+    kind, label = _kind_and_title(rtype.strip(), title)
+    base = {
+        "kind": kind,
+        "type": rtype.strip(),
+        "title": label,
+        "location": _text(row.get("location")),
+        "description": _text(row.get("description")),
+        "link": _link(row),
+        "source": "fed",
+    }
+    out = []
+    for part in days.split(","):
+        try:
+            d = date(year, mon, int(part.strip()))
+        except (TypeError, ValueError):
+            log.debug("fed_calendar: skipped day %r of %s %s", part, month, title)
+            continue
+        if clock is None:
+            at, hhmm = None, "day"
+        else:
+            local = datetime(d.year, d.month, d.day, clock[0], clock[1], tzinfo=EASTERN)
+            at = local.astimezone(timezone.utc).isoformat()
+            hhmm = f"{clock[0]:02d}:{clock[1]:02d}"
+        out.append({**base, "id": f"fed:{d.isoformat()}:{_slug(title)}:{hhmm}",
+                    "date": d.isoformat(), "at": at})
+    return out
+
+
+def parse(body, *, types) -> list[dict]:
+    """``calendar.json`` bytes -> events of the wanted ``types`` (the file's ``type`` values).
+
+    Each event: ``id`` (stable), ``kind`` (fomc_statement / fomc_press /
+    fomc_minutes / beige / speech / testimony / the lower-cased type),
+    ``type``, ``title``, ``date`` (Eastern ``YYYY-MM-DD``), ``at`` (UTC ISO or
+    ``None`` for a date-only row), ``location``, ``description``, ``link``,
+    ``source``. Never raises; junk yields ``[]``.
+    """
+    try:
+        wanted = {t.strip().lower() for t in (types or ()) if isinstance(t, str)}
+        if not wanted or not isinstance(body, (bytes, bytearray, str)):
+            return []
+        text = body.decode("utf-8-sig") if isinstance(body, (bytes, bytearray)) else body.lstrip("﻿")
+        doc = json.loads(text)
+        rows = doc.get("events") if isinstance(doc, dict) else None
+        if not isinstance(rows, list):
+            return []
+    except Exception:                                    # bad bytes / bad JSON / bad types
+        log.debug("fed_calendar: unreadable body", exc_info=True)
+        return []
+    events, seen = [], set()
+    for row in rows:
+        try:
+            for ev in _row_events(row, wanted):
+                if ev["id"] not in seen:
+                    seen.add(ev["id"])
+                    events.append(ev)
+        except Exception:                                # one bad row, never the batch
+            log.debug("fed_calendar: skipped row %r", row, exc_info=True)
+    return events
