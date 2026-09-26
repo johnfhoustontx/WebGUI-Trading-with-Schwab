@@ -894,3 +894,60 @@ def test_zero_multi_source_and_watchlist_mean_off_and_are_kept(monkeypatch):
                                                         "stale_after_h": 6}})
     imp = nc.impact_config()
     assert (imp["multi_source"], imp["watchlist"], imp["stale_after_h"]) == (0, 0, 6)
+
+
+# ── [calendar.dividends] ─────────────────────────────────────────────────────
+
+def test_dividends_config_reads_the_sub_table_calendar_config_drops(tmp_path, monkeypatch):
+    """calendar_config() returns [calendar] SCALARS only, so the dividends
+    table is absent from it; dividends_config() is the one accessor."""
+    assert "dividends" not in nc.calendar_config()
+    assert nc.dividends_config() == {"enabled": True, "refresh_at": "06:40",
+                                     "horizon_days": 30, "lookback_days": 3}
+    _layered(tmp_path, monkeypatch,
+             '[calendar.dividends]\nlookback_days = 9\nrefresh_at = "7:05"\n'
+             "horizon_days = 45\nenabled = false\n")
+    assert nc.dividends_config() == {"enabled": False, "refresh_at": "07:05",
+                                     "horizon_days": 45, "lookback_days": 9}
+
+
+def test_dividends_config_defaults_match_the_shipped_table():
+    with open(nc.NEWS_TOML, "rb") as fh:
+        shipped = tomllib.load(fh)["calendar"]["dividends"]
+    assert nc.DEFAULTS["calendar"]["dividends"] == shipped
+    assert set(nc.dividends_config()) == set(shipped)
+
+
+def test_dividends_config_lookback_zero_is_kept(monkeypatch):
+    monkeypatch.setattr(nc, "load", lambda: {"calendar": {"dividends": {"lookback_days": 0}}})
+    assert nc.dividends_config()["lookback_days"] == 0
+
+
+def test_a_bad_dividends_value_is_its_default(monkeypatch, caplog):
+    d = nc.DEFAULTS["calendar"]["dividends"]
+    for key, bads in (("lookback_days", (-1, True, 3.5, "3", None, float("nan"), [3])),
+                      ("horizon_days", (0, -5, False, 30.0, "30", None)),
+                      ("refresh_at", ("24:00", "06:60", "6", "06:40:00", "ab:cd", "",
+                                      640, None, True, "-1:30", "06: 40"))):
+        for bad in bads:
+            monkeypatch.setattr(nc, "load",
+                                lambda k=key, b=bad: {"calendar": {"dividends": {k: b}}})
+            assert nc.dividends_config()[key] == d[key], (key, bad)
+    assert "calendar.dividends" in caplog.text
+
+
+def test_a_non_bool_dividends_enabled_fails_closed(monkeypatch):
+    for bad in (1, "true", None, [True]):
+        monkeypatch.setattr(nc, "load", lambda b=bad: {"calendar": {"dividends": {"enabled": b}}})
+        assert nc.dividends_config()["enabled"] is False, bad
+
+
+def test_a_non_table_dividends_is_the_defaults(monkeypatch):
+    for bad in ("x", 3, [1], None):
+        monkeypatch.setattr(nc, "load", lambda b=bad: {"calendar": {"dividends": b}})
+        assert nc.dividends_config() == nc.DEFAULTS["calendar"]["dividends"], bad
+
+
+def test_dividends_config_is_a_copy():
+    nc.dividends_config()["lookback_days"] = 99
+    assert nc.dividends_config()["lookback_days"] == 3

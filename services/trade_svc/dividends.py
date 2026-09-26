@@ -21,7 +21,8 @@ Per symbol the fetch lands in one of three coverage states (the store's
 :func:`shared.dividends.coverage`): ``ok`` (a dividend date was read), ``none``
 (a readable block with no dividend — a non-payer) and ``error`` (we could not
 tell). ``ok`` and ``none`` REPLACE the symbol's forward rows, so a revised or
-cancelled dividend leaves no stale row; ``error`` keeps what it had.
+cancelled dividend leaves no stale row; ``error`` keeps what it had. The exact
+past/forward rules are on :func:`parse_fundamental`.
 """
 import datetime as dt
 import logging
@@ -69,26 +70,39 @@ def _number(value):
     return v if math.isfinite(v) else None
 
 
+# A parsed date outside this range is a unit or data error (an epoch read in
+# the wrong unit lands in 1970 or the far future), never a dividend.
+_MIN_DATE = "2000-01-01"
+_MAX_DATE = "2100-12-31"
+# Below this an epoch number is SECONDS, at or above it MILLISECONDS: 1e11 s
+# is the year 5138, 1e11 ms is 1973 - no plausible date sits on either side
+# of the wrong reading.
+_EPOCH_MS_FROM = 1e11
+
+
+def _in_range(day):
+    return day if day and _MIN_DATE <= day <= _MAX_DATE else None
+
+
 def _date(value):
-    """``YYYY-MM-DD`` from a date, an ISO timestamp, ``YYYY-MM-DD HH:MM:SS.f`` or
-    epoch milliseconds; None for anything else."""
+    """``YYYY-MM-DD`` or None, and never a date before 2000 or after 2100.
+
+    A string goes through the store's STRICT parser
+    (:func:`shared.dividends.iso_date`: ``YYYY-MM-DD`` then ``T``, a space or
+    the end - ``"2026-W40-1"`` is None). A number is an epoch: seconds below
+    1e11, milliseconds from there up (UTC date)."""
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
         if not math.isfinite(value) or value <= 0:
             return None
+        seconds = value / 1000.0 if value >= _EPOCH_MS_FROM else float(value)
         try:
-            stamp = dt.datetime.fromtimestamp(value / 1000.0, tz=dt.timezone.utc)
+            stamp = dt.datetime.fromtimestamp(seconds, tz=dt.timezone.utc)
         except (OverflowError, OSError, ValueError):
             return None
-        return stamp.date().isoformat()
-    text = str(value).strip()
-    if len(text) < 10 or (len(text) > 10 and text[10] not in "T "):
-        return None
-    try:
-        return dt.date.fromisoformat(text[:10]).isoformat()
-    except ValueError:
-        return None
+        return _in_range(stamp.date().isoformat())
+    return _in_range(store.iso_date(value))
 
 
 def _frequency(fund):
@@ -123,24 +137,43 @@ def _is_non_payer(fund):
     return bool(present) and all(a == 0.0 for a in present)
 
 
-def parse_fundamental(symbol, fund):
+def parse_fundamental(symbol, fund, today=None):
     """``(rows, status)`` from one quote's ``fundamental`` block. Never raises.
 
-    ``status`` is ``ok`` (rows hold at least one ex date), ``none`` (the block
-    says the symbol pays nothing — zero amounts, a stale date ignored) or
-    ``error`` (not a block, or no date and no zero amount to show it pays
-    nothing). The ``next*`` date, when Schwab gives one after the current, is a
-    second row with amount None: it is a projection, and its amount unknown."""
+    ``today`` (``YYYY-MM-DD``, a date, or None for today in CT) splits the ex
+    dates into past and FORWARD (``>= today``); only forward rows reach the
+    calendar (``store.replace_symbol`` ignores the rest).
+
+    * The current ex date (``divExDate``) carries the per-payment amount. The
+      ``next*`` date, when after it, is a second row: with amount None while
+      the current one is still ahead (a projection - its amount unknown), but
+      carrying the amount once the current one has PASSED, since it is then the
+      next payment of that same known dividend.
+    * ``ok``: at least one forward row. A future ex date whose amounts read
+      zero is still ``ok``, with amount None - a dated dividend is evidence of
+      a payment, a zero amount is not evidence against it.
+    * No forward row, but a known (positive) amount and a past date: ``ok``
+      with only past rows. That is a payer whose next date Schwab has not
+      published yet; ``ok`` clears its forward rows (the source names none)
+      and coverage then means "checked, nothing dated ahead", not that forward
+      data exists.
+    * No forward row and no known amount (zero or absent): ``none`` with no
+      rows - a non-payer, or a stale date with nothing behind it.
+    * ``error``: not a block, or no date at all and no zero amount to show it
+      pays nothing."""
     try:
         if not isinstance(fund, dict):
             return [], "error"
-        if _is_non_payer(fund):
-            return [], "none"
+        today = store.iso_date(today) if today is not None else _today_ct()
+        if not today:
+            return [], "error"
+        zero = _is_non_payer(fund)
         ex = _date(_field(fund, "ex_date"))
         next_ex = _date(_field(fund, "next_ex_date"))
         if not ex and not next_ex:
-            return [], "error"
-        amount, freq = _amount(fund), _frequency(fund)
+            return [], "none" if zero else "error"
+        amount = None if zero else _amount(fund)
+        freq = _frequency(fund)
         rows = []
         if ex:
             rows.append({"symbol": symbol, "ex_date": ex,
@@ -148,11 +181,16 @@ def parse_fundamental(symbol, fund):
                          "amount": amount, "frequency": freq,
                          "declared_date": _date(_field(fund, "declared_date"))})
         if next_ex and (ex is None or next_ex > ex):
+            carries = ex is None or ex < today
             rows.append({"symbol": symbol, "ex_date": next_ex,
                          "pay_date": _date(_field(fund, "next_pay_date")),
-                         "amount": None if ex else amount, "frequency": freq,
+                         "amount": amount if carries else None, "frequency": freq,
                          "declared_date": None})
-        return rows, "ok"
+        if any(r["ex_date"] >= today for r in rows):
+            return rows, "ok"
+        if amount is not None:
+            return rows, "ok"
+        return [], "none"
     except Exception:  # a parser must never take the pull down
         log.warning("dividends: unparseable fundamental block for %s", symbol,
                     exc_info=True)
@@ -184,41 +222,76 @@ def _default_fetch():
 
 
 def _lookback_days():
+    """``[calendar.dividends] lookback_days`` via
+    :func:`shared.news_config.dividends_config` (validated there: an int >= 0).
+
+    ⚠ Not ``calendar_config()["dividends"]`` - that accessor returns the
+    ``[calendar]`` scalars only, so the lookup always fell back to 3."""
     try:
         from shared import news_config
-        days = int(news_config.calendar_config()["dividends"]["lookback_days"])
-        return days if days >= 0 else _DEFAULT_LOOKBACK_DAYS
+        days = news_config.dividends_config()["lookback_days"]
     except Exception:
+        _degrade.degraded("trade.dividends", detail="lookback_days config")
         return _DEFAULT_LOOKBACK_DAYS
+    if isinstance(days, bool) or not isinstance(days, int) or days < 0:
+        return _DEFAULT_LOOKBACK_DAYS
+    return days
 
 
-def refresh(fetch=None, symbols=None, db_path=None, today=None):
-    """Pull every followed symbol's dividend dates once a day.
-
-    Returns how many symbols were FETCHED (one proxy call each): 0 when today's
-    run is already recorded, so a restart does not refetch. ``$`` indices are
-    skipped. A symbol whose fetch fails, or whose reply is unreadable, is an
-    ``error`` coverage row and one ``trade.dividends`` degrade — never an abort. ``last_run_day`` is
-    recorded only after the loop, so a crash mid-loop retries."""
-    today = _date(today) or _today_ct()
-    fetch = fetch or _default_fetch()
-    wanted = symbols if symbols is not None else _default_symbols()
+def _clean_symbols(wanted):
+    """Upper-cased, de-duplicated, ``$`` indices and non-strings dropped."""
     syms, seen = [], set()
     for raw in wanted:
-        sym = (raw or "").strip().upper()
+        if not isinstance(raw, str):
+            continue
+        sym = raw.strip().upper()
         if sym and not sym.startswith("$") and sym not in seen:
             seen.add(sym)
             syms.append(sym)
+    return syms
+
+
+def refresh(fetch=None, symbols=None, db_path=None, today=None, force=False):
+    """Pull every followed symbol's dividend dates once a day.
+
+    Returns how many symbols were FETCHED (one proxy call each): 0 when today's
+    run is already recorded, so a restart does not refetch - unless ``force``
+    (a manual refresh command), which runs regardless. ``$`` indices and
+    non-string entries are skipped. A symbol whose fetch fails, or whose reply
+    is unreadable, is an ``error`` coverage row and one ``trade.dividends``
+    degrade - never an abort.
+
+    ``today`` (CT day) defaults to now; one GIVEN but unusable raises
+    ValueError before anything is fetched or written - a caller bug, not a day.
+
+    ``last_run_day`` is recorded once the per-symbol loop finishes, and in a
+    ``finally`` around the post-loop steps (coverage, prune): a DB-lock error
+    there still propagates, but cannot make every scheduler tick refetch the
+    whole watchlist. A crash INSIDE the loop records nothing, so it retries.
+    ⚠ A proxy outage is NOT a loop crash - every symbol lands as ``error`` and
+    the day IS recorded, so there is no same-day retry: the budget is one call
+    per symbol per day, and a manual ``force`` refresh is the way to re-pull."""
+    if today is None:
+        today = _today_ct()
+    else:
+        day = store.iso_date(today)
+        if not day:
+            raise ValueError(f"unusable today: {today!r} (want YYYY-MM-DD or a date)")
+        today = day
+    fetch = fetch or _default_fetch()
+    wanted = symbols if symbols is not None else _default_symbols()
+    syms = _clean_symbols(wanted)
 
     conn = store.init_db(db_path)
     try:
-        if store.last_run_day(conn) == today:
+        if not force and store.last_run_day(conn) == today:
             return 0
         statuses, fetched = {}, 0
         for sym in syms:
             fetched += 1
             try:
-                rows, status = parse_fundamental(sym, _fundamental_of(fetch(sym), sym))
+                rows, status = parse_fundamental(
+                    sym, _fundamental_of(fetch(sym), sym), today=today)
             except Exception:
                 _degrade.degraded("trade.dividends", detail=sym)
                 statuses[sym] = "error"
@@ -233,11 +306,13 @@ def refresh(fetch=None, symbols=None, db_path=None, today=None):
                     _degrade.degraded("trade.dividends", detail=sym)
                     status = "error"
             statuses[sym] = status
-        store.set_coverage(conn, statuses, day=today)
-        cutoff = (dt.date.fromisoformat(today)
-                  - dt.timedelta(days=_lookback_days())).isoformat()
-        store.prune(conn, cutoff)
-        store.set_last_run_day(conn, today)
+        try:
+            store.set_coverage(conn, statuses, day=today)
+            cutoff = (dt.date.fromisoformat(today)
+                      - dt.timedelta(days=_lookback_days())).isoformat()
+            store.prune(conn, cutoff)
+        finally:
+            store.set_last_run_day(conn, today)
         n_ok = sum(1 for s in statuses.values() if s == "ok")
         log.info("dividends: %d symbols fetched (%d ok, %d none, %d error)",
                  fetched, n_ok, sum(1 for s in statuses.values() if s == "none"),

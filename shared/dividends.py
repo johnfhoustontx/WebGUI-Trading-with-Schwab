@@ -104,7 +104,7 @@ def _int_or_none(value):
 _DIGITS = frozenset("0123456789")
 
 
-def _iso_date(value):
+def iso_date(value):
     """``YYYY-MM-DD`` or None. A timestamp keeps its date part, so
     ``"2026-10-31T00:00:00Z"`` and ``"2026-10-31"`` are ONE key and both fall
     inside a window ending that day; anything unparseable is None.
@@ -127,6 +127,9 @@ def _iso_date(value):
         return dt.date.fromisoformat(head).isoformat()
     except ValueError:
         return None
+
+
+_iso_date = iso_date   # the pre-public name; kept so existing callers keep working
 
 
 def _require_day(value, name):

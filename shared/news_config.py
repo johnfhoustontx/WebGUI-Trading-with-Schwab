@@ -559,6 +559,68 @@ def calendar_config() -> dict:
     return copy.deepcopy(out)
 
 
+def _hhmm(value):
+    """``"HH:MM"`` (1-2 digit hour 0-23, 2-digit minute 0-59) normalised to two
+    digits each, else None. No ``re``: the import set is pinned for Tier 1."""
+    if not isinstance(value, str):
+        return None
+    parts = value.strip().split(":")
+    if len(parts) != 2:
+        return None
+    hh, mm = parts
+    if not (hh.isascii() and hh.isdigit() and 1 <= len(hh) <= 2
+            and mm.isascii() and mm.isdigit() and len(mm) == 2):
+        return None
+    h, m = int(hh), int(mm)
+    return f"{h:02d}:{m:02d}" if h < 24 and m < 60 else None
+
+
+def _int_at_least(value, floor):
+    """A real int (never a bool or a float) ``>= floor``, else None."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value if value >= floor else None
+
+
+def dividends_config() -> dict:
+    """``[calendar.dividends]`` validated, as a copy - the table
+    ``calendar_config()`` leaves out (it returns ``[calendar]`` scalars only).
+
+    * ``enabled`` not a real bool -> False (FAIL CLOSED);
+    * ``refresh_at`` not ``"HH:MM"`` -> the default (a valid one comes back
+      zero-padded: ``"7:05"`` -> ``"07:05"``);
+    * ``horizon_days`` not an int >= 1 -> the default;
+    * ``lookback_days`` not an int >= 0 -> the default (0 is real: keep no
+      past rows).
+
+    A bool is never an int here. A table that is not a table is the defaults.
+    One WARNING per distinct bad value; never raises. Keys the table does not
+    ship with are dropped."""
+    default = DEFAULTS["calendar"]["dividends"]
+    raw = _table(_calendar(), "dividends") or {}
+    out = {}
+    enabled = raw.get("enabled", default["enabled"])
+    if not isinstance(enabled, bool):
+        _warn_once(("calendar.dividends", "enabled", repr(enabled)),
+                   "news.toml: [calendar.dividends] enabled = %r, not true/false - "
+                   "treated as false", enabled)
+        enabled = False
+    out["enabled"] = enabled
+    checks = (("refresh_at", _hhmm, "HH:MM"),
+              ("horizon_days", lambda v: _int_at_least(v, 1), "an int >= 1"),
+              ("lookback_days", lambda v: _int_at_least(v, 0), "an int >= 0"))
+    for key, check, want in checks:
+        value = raw.get(key, default[key])
+        good = check(value)
+        if good is None:
+            _warn_once(("calendar.dividends", key, repr(value)),
+                       "news.toml: [calendar.dividends] %s = %r is not %s - using %r",
+                       key, value, want, default[key])
+            good = default[key]
+        out[key] = good
+    return copy.deepcopy(out)
+
+
 def calendar_source(name) -> dict:
     """``[calendar.sources.<name>]`` as a copy, with ``user_agent`` filled from
     ``[collector] feed_user_agent`` when ``""`` or absent, and ``refresh_min``
