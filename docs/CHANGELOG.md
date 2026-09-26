@@ -4,6 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-26 (**news feeds poll every 2 min in RTH, 5 min in extended
+hours, 30 min otherwise** — the operator's cadence, and a fourth session bucket.)
+
+- **`[collector] eth_poll_min`** is new in `config/news.toml` (5): `scheduler.poll_interval_s`
+  asks `market_calendar.is_extended_hours` after `is_regular_hours`, so GTH (06:30–08:25 CT)
+  and Curb (15:00–15:15) poll at their own cadence — before the 2026-08-17 activation date
+  that predicate is always False and the bucket is simply unreachable. A file written
+  before the key existed falls back to the built-in 5, never to the off-hours value.
+- **The other three moved**: `rth_poll_min` 5 → **2**, `offhours_poll_min` 15 → **30**,
+  `weekend_poll_min` 60 → **30** ("other time" was read as everything that is neither
+  session; weekends have their own key if that is too often). Cost at 2 min: the 25
+  enabled feeds are ~750 fetches an hour through the regular session, all public RSS,
+  EDGAR under its 10 req/s.
+- **Settings → Configuration** shows all four under *Market news · Collector*; the RTH
+  field's floor dropped from 3 to **1**, the scheduler's own `MIN_INTERVAL_S` (60 s)
+  being the real floor. `DEFAULTS` in `shared/news_config.py` follow the file, as the
+  config contract requires; both manuals' cadence tables updated.
+- ⚠ **Six news/config tests fail on WINDOWS before and after this change** — three
+  tests read a source or config file with no `encoding=` (cp1252 chokes on an em dash),
+  one builds a path Windows refuses (`a?b#c`), two race a thread against a 5 ms sleep.
+  The three encoding reads are fixed here; the other three are Linux-green and left.
+
 **Last updated:** 2026-09-26 (**neuralstrike.co reworded, branding untouched** — the five
 public pages re-centred on the live screens and tools a visitor can actually open.)
 

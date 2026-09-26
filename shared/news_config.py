@@ -63,7 +63,8 @@ KINDS = ("rss", "yahoo_ticker", "google_news", "edgar_form4", "edgar_filings")
 
 DEFAULTS = {
     "collector": {
-        "rth_poll_min": 5, "offhours_poll_min": 15, "weekend_poll_min": 60,
+        "rth_poll_min": 2, "eth_poll_min": 5, "offhours_poll_min": 30,
+        "weekend_poll_min": 30,
         "keep_days": 7, "view_items": 300, "request_timeout_s": 20,
         "sec_user_agent": "NeuralStrike news_svc contact@neuralstrike.co",
         # Every non-SEC feed. Browser-style because Yahoo answers a 404 page to

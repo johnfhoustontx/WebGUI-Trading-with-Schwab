@@ -8,13 +8,20 @@ import pytest
 from services.news_svc import econ_calendar, scheduler
 
 CT = ZoneInfo("America/Chicago")
-CFG = {"collector": {"rth_poll_min": 5, "offhours_poll_min": 15, "weekend_poll_min": 60}}
+CFG = {"collector": {"rth_poll_min": 5, "eth_poll_min": 8, "offhours_poll_min": 15,
+                     "weekend_poll_min": 60}}
 RTH = dt.datetime(2026, 9, 24, 10, 0, tzinfo=CT)      # a Thursday, mid-session
 
 
 def test_cadence_by_calendar():
     assert scheduler.poll_interval_s(dt.datetime(2026, 9, 24, 10, 0, tzinfo=CT), CFG) == 300
+    # Extended hours: GTH 06:30-08:25 and Curb 15:00-15:15 CT (active since
+    # 2026-08-17). 15:00 itself belongs to the regular session.
+    assert scheduler.poll_interval_s(dt.datetime(2026, 9, 24, 7, 0, tzinfo=CT), CFG) == 480
+    assert scheduler.poll_interval_s(dt.datetime(2026, 9, 24, 15, 10, tzinfo=CT), CFG) == 480
+    assert scheduler.poll_interval_s(dt.datetime(2026, 9, 24, 15, 0, tzinfo=CT), CFG) == 300
     assert scheduler.poll_interval_s(dt.datetime(2026, 9, 24, 18, 0, tzinfo=CT), CFG) == 900
+    assert scheduler.poll_interval_s(dt.datetime(2026, 9, 24, 6, 0, tzinfo=CT), CFG) == 900
     assert scheduler.poll_interval_s(dt.datetime(2026, 9, 26, 10, 0, tzinfo=CT), CFG) == 3600
     assert scheduler.poll_interval_s(dt.datetime(2026, 7, 3, 10, 0, tzinfo=CT), CFG) == 3600  # holiday
 
@@ -65,6 +72,16 @@ def test_the_interval_is_floored_at_sixty_seconds():
     cfg = {"collector": {"rth_poll_min": 0.25, "offhours_poll_min": 15,
                          "weekend_poll_min": 60}}
     assert scheduler.poll_interval_s(RTH, cfg) == 60
+
+
+def test_a_missing_eth_interval_falls_back_to_its_own_default():
+    """A file written before the key existed keeps polling in extended hours
+    at the built-in ETH cadence, not at the off-hours one."""
+    from shared import news_config as nc
+    cfg = {"collector": {"rth_poll_min": 5, "offhours_poll_min": 15,
+                         "weekend_poll_min": 60}}
+    gth = dt.datetime(2026, 9, 24, 7, 0, tzinfo=CT)
+    assert scheduler.poll_interval_s(gth, cfg) == int(nc.DEFAULTS["collector"]["eth_poll_min"]) * 60
 
 
 @pytest.mark.parametrize("bad", [0, -5, "five", None, True, False, float("nan"),

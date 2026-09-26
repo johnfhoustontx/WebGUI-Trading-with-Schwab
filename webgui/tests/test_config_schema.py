@@ -241,12 +241,15 @@ def test_the_change_log_stamp_is_central_time_and_carries_its_offset(
 NEWS = cs.BY_NAME["news.toml"]
 
 
-def test_rth_polling_cannot_go_below_three_minutes():
+def test_rth_polling_cannot_go_below_one_minute():
+    """The floor was 3 until 2026-09-26, when the operator set RTH to 2. One
+    minute is the scheduler's own hard floor (``MIN_INTERVAL_S``), so the
+    catalogue refuses only what the service would refuse anyway."""
     _sec, fld = cs.locate(NEWS, ("collector", "rth_poll_min"))
-    assert fld.min == 3
-    with pytest.raises(ValueError, match="at least 3"):
-        cs.parse(fld, 2)
-    assert cs.parse(fld, 3) == 3
+    assert fld.min == 1
+    with pytest.raises(ValueError, match="at least 1"):
+        cs.parse(fld, 0)
+    assert cs.parse(fld, 2) == 2
 
 
 def test_every_shipped_feed_field_is_read_only():
@@ -420,7 +423,7 @@ def test_form4_bands_must_rise():
 
 def test_the_shipped_news_file_passes_its_own_cross_checks():
     shipped = tomllib.loads((pathlib.Path(__file__).resolve().parents[2]
-                             / "config" / "news.toml").read_text())
+                             / "config" / "news.toml").read_text(encoding="utf-8"))
     assert cs.cross_check("news.toml", store.flatten(shipped)) == []
 
 

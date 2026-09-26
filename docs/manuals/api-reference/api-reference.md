@@ -462,7 +462,7 @@ branch's failure never stops another:
 
 | Branch | Runs | Cadence |
 |---|---|---|
-| `feeds` | `compute.poll_now` | `[collector]`: `rth_poll_min` 5 (08:30–15:00 CT on a trading day), `offhours_poll_min` 15, `weekend_poll_min` 60 (weekends, NYSE holidays); counted from when the last poll **ended**; never faster than `MIN_INTERVAL_S` (60 s) |
+| `feeds` | `compute.poll_now` | `[collector]`: `rth_poll_min` 2 (08:30–15:00 CT on a trading day), `eth_poll_min` 5 (06:30–08:25 and 15:00–15:15 CT), `offhours_poll_min` 30 (a trading day outside those), `weekend_poll_min` 30 (weekends, NYSE holidays); counted from when the last poll **ended**; never faster than `MIN_INTERVAL_S` (60 s) |
 | `calendar` | `econ_calendar.refresh_now` | every tick; fetches only the sources whose own `refresh_min` is due, then republishes (`skip_unchanged`) |
 | `watch` | `econ_calendar.watch_now` | every tick; fetches only a series whose release just passed and whose value has not landed, every `release_poll_min` (2) for `release_watch_min` (60); does nothing otherwise |
 

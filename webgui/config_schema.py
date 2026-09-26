@@ -1058,10 +1058,14 @@ _NEWS = ConfigFile(
         Section("Polling", "How often every feed is read. Faster costs nothing "
                 "in API budget but is discourteous to the publishers.", (
             Field("collector.rth_poll_min", "During market hours",
-                  "Minutes between polls, 08:30–15:00 CT.", kind="int", unit="min",
-                  min=3, max=60, step=1),
+                  "Minutes between polls, 08:30–15:00 CT. The service never polls "
+                  "faster than once a minute.", kind="int", unit="min",
+                  min=1, max=60, step=1),
+            Field("collector.eth_poll_min", "During extended hours",
+                  "Minutes between polls in the early and late sessions, 06:30–08:25 "
+                  "and 15:00–15:15 CT.", kind="int", unit="min", min=1, max=120, step=1),
             Field("collector.offhours_poll_min", "Outside market hours",
-                  "Minutes between polls on a trading day outside 08:30–15:00 CT.",
+                  "Minutes between polls on a trading day outside every session.",
                   kind="int", unit="min", min=1, max=240, step=1),
             Field("collector.weekend_poll_min", "Weekends and holidays",
                   "Minutes between polls on Saturday, Sunday and market holidays.",

@@ -11,8 +11,10 @@ and per series whether anything is due, so most ticks fetch nothing.
 The rest of this docstring is about the ``feeds`` branch.
 
 The cadence comes from ``config/news.toml [collector]``: ``rth_poll_min``
-during the regular session, ``offhours_poll_min`` on a trading day outside it,
-``weekend_poll_min`` on a weekend or NYSE holiday (``shared.market_calendar``).
+during the regular session, ``eth_poll_min`` in the two extended sessions (GTH
+and Curb, so never before the activation date), ``offhours_poll_min`` on a
+trading day outside all three, ``weekend_poll_min`` on a weekend or NYSE
+holiday (``shared.market_calendar``).
 
 The loop wakes every ``TICK_S`` seconds rather than sleeping a whole interval,
 and on each wake it beats the heartbeat, re-reads the config (``nc.load`` is
@@ -111,6 +113,8 @@ def poll_interval_s(now, cfg) -> int:
         key = "weekend_poll_min"
     elif mc.is_regular_hours(local):
         key = "rth_poll_min"
+    elif mc.is_extended_hours(local):
+        key = "eth_poll_min"
     else:
         key = "offhours_poll_min"
     return max(MIN_INTERVAL_S, int(_minutes(cfg, key) * 60))

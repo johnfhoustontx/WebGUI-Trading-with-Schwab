@@ -14,7 +14,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 
 def test_defaults_are_the_real_values():
     cfg = nc.load()
-    assert cfg["collector"]["rth_poll_min"] == 5
+    assert cfg["collector"]["rth_poll_min"] == 2
+    assert cfg["collector"]["eth_poll_min"] == 5
     assert cfg["collector"]["view_items"] == 300
     assert cfg["trending"]["window_h"] == 6
 
@@ -747,7 +748,7 @@ def test_an_indicator_with_an_unknown_transform_or_schedule_is_skipped(monkeypat
 
 
 def test_the_config_never_carries_a_fred_key():
-    text = (ROOT / "config" / "news.toml").read_text()
+    text = (ROOT / "config" / "news.toml").read_text(encoding="utf-8")
     assert "api_key" not in text.lower() and "FRED_API_KEY=" not in text
 
 

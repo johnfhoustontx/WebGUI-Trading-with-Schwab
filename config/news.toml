@@ -3,9 +3,10 @@
 # Every key is editable in Settings -> Configuration.
 
 [collector]
-rth_poll_min      = 5      # 08:30–15:00 CT (shared.market_calendar)
-offhours_poll_min = 15
-weekend_poll_min  = 60     # Saturday, Sunday and NYSE holidays
+rth_poll_min      = 2      # 08:30–15:00 CT (shared.market_calendar)
+eth_poll_min      = 5      # extended hours: 06:30–08:25 and 15:00–15:15 CT
+offhours_poll_min = 30     # a trading day outside those sessions
+weekend_poll_min  = 30     # Saturday, Sunday and NYSE holidays
 keep_days         = 7      # rows older than this are pruned from news.db
 view_items        = 300    # newest rows in the published views
 request_timeout_s = 20
