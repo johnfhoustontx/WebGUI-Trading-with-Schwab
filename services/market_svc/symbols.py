@@ -26,9 +26,12 @@ from shared import symbols as _shared_symbols
 CATEGORY_ORDER = [
     "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
     "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Top 10",
-    "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
+    "Sector SPDR", "Thematic / Industry ETF",
     "Fixed Income / Credit ETF", "Crypto / Alternatives", "Metals", "Countries",
 ]
+# "Factor / Momentum ETF" (MTUM, SPMO) was dropped 2026-09-27: measured over a
+# year of daily bars the two moved together at 0.97, and MTUM tracked SMH (0.93)
+# more closely than SPY, so the frame repeated the Thematic semis tiles.
 
 # Frames rendered as a LEADERBOARD: their tiles are emitted ranked by day
 # %-change (descending), so the strongest name sits top-left and the rank is
@@ -117,8 +120,16 @@ SYMBOL_MAP = [
     _spread("$ADVN-$DECN", "$ADVN", "$DECN", "diff_last",
             "Net advancers (breadth spread)", _INT, "normal"),
     _q("$TICK", "$TICK", "NYSE TICK", _INT, "normal", value_only=True),
-    # Currency (equivalent: UUP; inverted — dollar strength = risk-off)
+    # Currency (equivalent: UUP; inverted — dollar strength = risk-off). The yen is
+    # inverted too: it is the funding currency of the carry trade, so a yen surge is
+    # carry being unwound, which is risk-off. The euro and pound stay literal: they
+    # rise when the dollar falls, so they read as the mirror of the inverted UUP.
     _q("$DXY", "UUP", "US Dollar Index (via UUP proxy)", "Currency", "inverted"),
+    _q("FXY", "FXY", "Japanese yen — Invesco CurrencyShares Yen Trust",
+       "Currency", "inverted"),
+    _q("FXE", "FXE", "Euro — Invesco CurrencyShares Euro Trust", "Currency"),
+    _q("FXB", "FXB", "British pound — Invesco CurrencyShares British Pound Trust",
+       "Currency"),
     # Cash Index (prem: per-symbol call/put premium skew subline)
     _q("SPX", "$SPX", "S&P 500 Index", "Cash Index", prem=True),
     _q("NDX", "$NDX", "Nasdaq 100 Index", "Cash Index", prem=True),
@@ -148,9 +159,6 @@ SYMBOL_MAP = [
     _q("AVGO", "AVGO", "Broadcom", _MAG, prem=True),
     _q("PLTR", "PLTR", "Palantir Technologies", _MAG, prem=True),
     _q("AMD", "AMD", "Advanced Micro Devices", _MAG, prem=True),
-    # Factor / Momentum ETF
-    _q("MTUM", "MTUM", "iShares MSCI USA Momentum Factor ETF", "Factor / Momentum ETF"),
-    _q("SPMO", "SPMO", "Invesco S&P 500 Momentum ETF", "Factor / Momentum ETF"),
     # Thematic / Industry ETF
     _q("SMH", "SMH", "VanEck Semiconductor ETF", _THM),
     _q("XSD", "XSD", "SPDR S&P Semiconductor ETF", _THM),

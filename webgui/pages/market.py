@@ -75,7 +75,6 @@ _ACCENT = {
     "Top 10": "#00E5A0",
     "Sector SPDR": "#22D3EE",
     "Thematic / Industry ETF": "#C86BFF",
-    "Factor / Momentum ETF": "#FFB627",
     "Fixed Income / Credit ETF": "#6E82A3",
     "Crypto / Alternatives": "#FF3DCB",
     "Metals": "#FFB627",

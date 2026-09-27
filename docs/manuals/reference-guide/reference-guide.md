@@ -1118,8 +1118,8 @@ app's widest lens — the tape everything else happens inside.
 
 **Tile colour is semantic, not directional.** Green means **risk-on**, red means
 **risk-off**, grey means no data. For most instruments that matches up/down — but fear
-gauges are **polarity-flipped**: VIX, SKEW, put/call, TLT and UUP shade **red when they
-rise**, because a rising VIX is risk-off even though the number went up. Colour
+gauges are **polarity-flipped**: VIX, SKEW, put/call, TLT, UUP and the yen (FXY) shade
+**red when they rise**, because a rising VIX is risk-off even though the number went up. Colour
 intensity scales with the size of the move.
 
 **The frames, in reading order:**
@@ -1129,14 +1129,13 @@ intensity scales with the size of the move.
 | **Volatility** | VIX, VIX1D, VIX3M, SKEW | The market's expected volatility. VIX1D above VIX means near-term stress. |
 | **Options Sentiment** | Put/Call, Net Prem, MGTN | The app's own cap-weighted put/call and dollar-weighted premium skew. |
 | **Market Internals / Breadth** | $ADVN, $DECN, the net spread, $TICK | How *broad* a move is. A rally on negative breadth is narrow and fragile. |
-| **Currency** | $DXY (via UUP) | Dollar strength — generally a headwind for equities and commodities. |
+| **Currency** | $DXY (via UUP), yen (FXY), euro (FXE), pound (FXB) | Dollar strength — generally a headwind for equities and commodities. A sharp yen rally is the classic sign of the carry trade unwinding, so it shades red; the euro and pound shade green when they rise, as the mirror of a weaker dollar. |
 | **Cash Index** | SPX, NDX | The indices themselves, each with a call/put premium subline. |
 | **Equity Index Futures** | /ES, /NQ | The overnight tape, when cash is closed. |
 | **Broad-Market ETF** | SPY, DIA, QQQ, IWM, RSP, QQEW | Ranked by the day's move. RSP and QQEW are *equal-weighted* — compare where they land against SPY and QQQ to see if the move is broad or driven by a few giants. |
 | **Top 10** | A **BIG10** composite plus its ten mega-cap members | BIG10 shows the equal-weighted average move and a breadth subline ("5/10 up"). |
 | **Sector SPDR** | The eleven S&P sectors | Ranked by the day's move. |
 | **Thematic / Industry ETF** | Semis, biotech, software, retail, oil, transports (IYT)… | Ranked. |
-| **Factor / Momentum** | MTUM, SPMO | Whether momentum as a style is working. |
 | **Fixed Income / Credit** | TLT, HYG, LQD | HYG weak while equities rally is a classic warning. |
 | **Crypto / Alternatives**, **Countries** | | Countries is ranked. |
 

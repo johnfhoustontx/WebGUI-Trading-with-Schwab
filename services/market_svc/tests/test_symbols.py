@@ -5,13 +5,12 @@ _EXPECTED_DISPLAYS = {
     "VIX", "VIX1D", "VIX3M", "SKEW",
     "Put/Call", "Net Prem", "MGTN",
     "$ADVN", "$DECN", "$ADVN-$DECN", "$TICK",
-    "$DXY",
+    "$DXY", "FXY", "FXE", "FXB",
     "SPX", "NDX",
     "/ES[U26]", "/NQ[U26]",
     "SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW",
     "BIG10", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA",
     "AVGO", "PLTR", "AMD",
-    "MTUM", "SPMO",
     "SMH", "XSD", "IGV", "QTUM", "XBI", "XRT", "XME", "USO", "IYT",
     "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
     "TLT", "HYG", "LQD",
@@ -26,12 +25,13 @@ def test_every_csv_symbol_is_mapped():
     # the Mag-7 + AVGO/PLTR/AMD) + the Net Prem external tile + the $MGTN index tile
     # (CBOE Magnificent Ten, added 2026-07-21) + USO (added 2026-08-12) + IYT
     # (added 2026-09-11) + the Metals frame GLD/SLV/COPX (added 2026-09-21)
-    # + EWG/EWQ country ETFs (added 2026-09-27).
+    # + EWG/EWQ country ETFs (added 2026-09-27) + the FXY/FXE/FXB currency tiles
+    # (added 2026-09-27) − the MTUM/SPMO Factor frame (dropped 2026-09-27).
     # (base 55 = $PCALL+$PCSP→ONE put/call tile; HYG-LQD dropped; $ADD/$ADSPD dropped;
     # XLB added; +10 country ETFs.)
-    assert len(S.SYMBOL_MAP) == 75
+    assert len(S.SYMBOL_MAP) == 76
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 75
+    assert len(_EXPECTED_DISPLAYS) == 76
     assert {t["display"] for t in S.SYMBOL_MAP} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in S.SYMBOL_MAP:
@@ -44,7 +44,7 @@ def test_categories_cover_the_expected_set_in_frame_order():
     assert S.CATEGORY_ORDER == [
         "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
         "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Top 10",
-        "Sector SPDR", "Thematic / Industry ETF", "Factor / Momentum ETF",
+        "Sector SPDR", "Thematic / Industry ETF",
         "Fixed Income / Credit ETF", "Crypto / Alternatives", "Metals", "Countries",
     ]
     # every mapped tile's category is in the order list
@@ -62,6 +62,11 @@ def test_translations_and_polarities():
     assert by_disp["MGTN"]["quote_symbol"] == "$MGTN"
     assert by_disp["MGTN"]["category"] == "Options Sentiment"
     assert by_disp["$DXY"]["polarity"] == "inverted"
+    # yen = carry-funding safe haven (up = risk-off); euro/pound mirror the dollar
+    assert by_disp["FXY"]["polarity"] == "inverted"
+    assert by_disp["FXE"]["polarity"] == "normal"
+    assert by_disp["FXB"]["polarity"] == "normal"
+    assert {by_disp[s]["category"] for s in ("FXY", "FXE", "FXB")} == {"Currency"}
     assert by_disp["TLT"]["polarity"] == "inverted"
     assert by_disp["XLP"]["polarity"] == "normal"        # defensive sector stays literal
 
