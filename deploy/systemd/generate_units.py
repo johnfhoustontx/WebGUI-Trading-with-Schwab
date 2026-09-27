@@ -125,6 +125,11 @@ BACKUP_TIMEOUT_SEC = 7200
 # report that still looks like a report.
 FLOW_DELTA_TIMEOUT_SEC = 1800
 
+# The journal labeler fetches two years of daily bars per distinct symbol that
+# has a matured reading, through the proxy's 5 req/s. Usually a handful of
+# symbols; the ceiling covers a catch-up night over the whole rank-board universe.
+LABEL_JOURNAL_TIMEOUT_SEC = 900
+
 # ── The public process's memory cap ──────────────────────────────────────────
 # ⚠ ONLY the public unit carries these, and that is deliberate. The other eight
 # are not internet-facing and a wrong value there kills the trading stack.
@@ -842,6 +847,69 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-flow-delta.timer": tmr}
 
 
+def _label_journal_units():
+    """The recommendation-journal labeler: a oneshot plus its timer.
+
+    **Orphaned by the Linux migration, found 2026-09-27.** `tools/label_journal.py`
+    ran under Windows Task Scheduler, and the 2026-08-29 move gave it no unit. The
+    Windows tasks kept firing against a frozen copy of the tree -- one found
+    "nothing due", the other could not reach a proxy -- so nothing labelled the
+    live journal for a month, and its first five matured readings sat
+    unlabelled with nothing saying so. Same shape as flow-delta's eleven
+    silent days.
+
+    **Persistent=true, unlike the EOD report.** The tool labels every matured,
+    unlabelled reading whenever it runs, so a late run is as good as an on-time
+    one; a catch-up at boot only shortens the gap.
+
+    **EnvironmentFile for PROXY_SHARED_SECRET** -- every history fetch goes
+    through the proxy, which checks it.
+
+    **No Restart=.** A run that cannot fetch SPY labels nothing and exits 1 (it
+    will not label without the market reference), so it lands in
+    `systemctl --user --failed`; tomorrow's run is the retry and loses nothing.
+    """
+    at = slot_times("label_journal")["at"]
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - recommendation journal labeler
+# No PartOf and no [Install]: the timer owns this.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# PROXY_SHARED_SECRET: every history fetch goes through the proxy.
+EnvironmentFile={_env_file()}
+TimeoutStartSec={LABEL_JOURNAL_TIMEOUT_SEC}
+ExecStart={_python()} -X utf8 tools/label_journal.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - recommendation journal labeler timer
+
+[Timer]
+# Derived from [slots.label_journal] in config/sessions.toml.
+# Mon..Fri: a weekend adds no daily bar. A holiday firing is harmless -- it
+# labels whatever has matured, which is what it would do the next day anyway.
+OnCalendar=Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00
+# Persistent=true: the tool labels everything matured and unlabelled, so a
+# catch-up run after downtime is exactly as good as the missed one.
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-label-journal.service": svc,
+            f"trading-{ENV_NAME}-label-journal.timer": tmr}
+
+
 def render_all():
     """``{unit filename: text}`` for this environment."""
     out = {unit_name(c): _service_text(c, p, s) for c, p, s in components()}
@@ -851,6 +919,7 @@ def render_all():
     out.update(_gallery_capture_units())
     out.update(_eod_report_units())
     out.update(_flow_delta_units())
+    out.update(_label_journal_units())
     return out
 
 

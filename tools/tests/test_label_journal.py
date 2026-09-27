@@ -101,6 +101,36 @@ class TestItRefusesToGuess:
         assert _rows(journal)["AAPL"]["labeled_at"] is None
 
 
+class TestAScheduledRunCanFail:
+    """Under systemd the exit code is the only signal. A run that could not
+    fetch SPY labels nothing and must show up in `systemctl --user --failed`;
+    exiting 0 there is how a missing labeler went unnoticed for a month."""
+
+    def test_strict_run_exits_nonzero_without_SPY(self, journal, monkeypatch):
+        monkeypatch.setattr(LJ, "_history",
+                            lambda s, years=2: None if s == "SPY" else _closes())
+        with pytest.raises(SystemExit) as exc:
+            LJ.run(log=lambda *_: None, db_path=journal, strict=True)
+        assert exc.value.code == 1
+        assert all(r["labeled_at"] is None for r in _rows(journal).values())
+
+    def test_strict_run_with_nothing_due_is_a_success(self, tmp_path):
+        db = tmp_path / "empty.db"
+        assert LJ.run(log=lambda *_: None, db_path=db, strict=True) == 0
+
+    def test_a_non_strict_run_still_just_returns(self, journal, monkeypatch):
+        monkeypatch.setattr(LJ, "_history",
+                            lambda s, years=2: None if s == "SPY" else _closes())
+        assert LJ.run(log=lambda *_: None, db_path=journal) == 0
+
+    def test_the_command_line_runs_strict(self, monkeypatch):
+        seen = {}
+        monkeypatch.setattr(LJ, "run", lambda **kw: seen.update(kw))
+        monkeypatch.setattr("sys.argv", ["label_journal.py"])
+        LJ.main()
+        assert seen.get("strict") is True
+
+
 class TestMaturityGate:
     def test_a_reading_from_today_is_not_even_considered(self, tmp_path,
                                                          monkeypatch):

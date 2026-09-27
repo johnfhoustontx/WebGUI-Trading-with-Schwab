@@ -1012,6 +1012,93 @@ def test_the_eod_report_timer_is_armed():
     assert f"trading-{ENV_NAME}-eod-report.timer" in units.timer_units()
 
 
+# --- the recommendation-journal labeler, orphaned by the Linux migration ------
+#
+# `tools/label_journal.py` ran under Windows Task Scheduler. The 2026-08-29 move
+# gave it no unit, and the two Windows tasks kept firing against a frozen copy of
+# the tree -- one found "nothing due", the other could not reach a proxy -- so the
+# LIVE journal on the server had no labeler for a month and nothing said so.
+LJ_SVC = f"trading-{ENV_NAME}-label-journal.service"
+LJ_TMR = f"trading-{ENV_NAME}-label-journal.timer"
+
+
+def test_the_label_journal_units_are_generated():
+    all_units = units.render_all()
+    assert LJ_SVC in all_units
+    assert LJ_TMR in all_units
+
+
+def test_the_label_journal_fires_once_a_day_at_the_configured_slot():
+    """Derived from [slots.label_journal], never typed."""
+    from shared import market_calendar as mc
+    at = mc.slot_times("label_journal")["at"]
+    text = units.render_all()[LJ_TMR]
+    assert _directives(text, "OnCalendar") == [
+        f"Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00"]
+
+
+def test_the_label_journal_schedule_follows_the_slot_rather_than_a_literal(monkeypatch):
+    import datetime as _dt
+
+    monkeypatch.setattr(units, "slot_times", lambda name: {"at": _dt.time(21, 3)})
+    text = units.render_all()[LJ_TMR]
+    assert _directives(text, "OnCalendar") == ["Mon..Fri *-*-* 21:03:00"]
+
+
+def test_the_label_journal_runs_after_the_cash_close():
+    """A label is a forward return measured in daily closes; before the close
+    the day's bar does not exist yet."""
+    from shared import market_calendar as mc
+    at = mc.slot_times("label_journal")["at"]
+    _open, close = mc._session_bounds("regular")
+    assert at > close, (at, close)
+
+
+def test_the_label_journal_catches_up_after_downtime(rendered):
+    """Unlike the EOD report, a late run is exactly as good as an on-time one:
+    the tool labels every matured-but-unlabelled reading, whenever it runs."""
+    tmr = rendered[LJ_TMR]
+    assert tmr["Timer"]["Persistent"].lower() == "true"
+    assert tmr["Install"]["WantedBy"] == "timers.target"
+
+
+def test_the_label_journal_is_a_oneshot_that_does_not_retry(rendered):
+    svc = rendered[LJ_SVC]
+    assert svc["Service"]["Type"] == "oneshot"
+    assert "Restart" not in svc["Service"]
+    assert int(svc["Unit"]["StartLimitBurst"]) > 0
+    assert "StartLimitBurst" not in svc["Service"]
+
+
+def test_the_label_journal_is_not_a_member_of_the_fleet(rendered):
+    svc = rendered[LJ_SVC]
+    assert "PartOf" not in svc["Unit"]
+    assert "Install" not in svc
+    assert LJ_SVC not in stack_services()
+
+
+def test_the_label_journal_loads_the_stack_env(rendered):
+    """It fetches history through the proxy, which checks PROXY_SHARED_SECRET --
+    and that secret lives in the stack .env."""
+    assert rendered[LJ_SVC]["Service"]["EnvironmentFile"] == str(units._env_file())
+
+
+def test_the_label_journal_is_not_killed_at_the_default_start_timeout(rendered):
+    """A oneshot inherits DefaultTimeoutStartSec (90s). One history fetch per
+    distinct symbol through a 5 req/s proxy can outrun that on a busy night."""
+    assert int(rendered[LJ_SVC]["Service"]["TimeoutStartSec"]) > 90
+
+
+def test_the_label_journal_runs_the_tool_directly(rendered):
+    exec_start = rendered[LJ_SVC]["Service"]["ExecStart"]
+    assert exec_start.endswith("tools/label_journal.py")
+    assert ".sh" not in exec_start
+
+
+def test_the_label_journal_timer_is_armed():
+    assert LJ_TMR in units.timer_units()
+
+
 # --- arming, which is not the same thing as writing --------------------------
 #
 # A generated `.timer` that nothing enables is a FILE, not a schedule. That is

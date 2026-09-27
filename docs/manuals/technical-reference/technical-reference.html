@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-26</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-27</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -3289,11 +3289,11 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>news_svc</td>
-<td>Three branches, launched every <strong>30 s</strong> tick (<code>TICK_S</code>) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. <strong>feeds</strong>: every feed polled every <strong>5 min</strong> 08:30–15:00 CT (<code>[collector] rth_poll_min</code>), <strong>15 min</strong> otherwise on a trading day (<code>offhours_poll_min</code>), <strong>60 min</strong> at weekends and holidays (<code>weekend_poll_min</code>), counted from the END of the last poll; nothing polls faster than <strong>60 s</strong> (<code>MIN_INTERVAL_S</code>). <strong>calendar</strong>: every tick, fetching only the sources whose own <code>refresh_min</code> is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). <strong>watch</strong>: every tick, fetching only a series whose release just passed — every <strong>2 min</strong> for up to <strong>60 min</strong>. All in <code>config/news.toml</code>, editable in Settings. One cycle of each at a time: a Refresh during one is skipped.</td>
+<td>Three branches, launched every <strong>30 s</strong> tick (<code>TICK_S</code>) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. <strong>feeds</strong>: every feed polled every <strong>2 min</strong> 08:30–15:00 CT (<code>[collector] rth_poll_min</code>), <strong>5 min</strong> in the extended sessions 06:30–08:25 and 15:00–15:15 CT (<code>eth_poll_min</code>), <strong>30 min</strong> otherwise on a trading day (<code>offhours_poll_min</code>) and <strong>30 min</strong> at weekends and holidays (<code>weekend_poll_min</code>), counted from the END of the last poll; nothing polls faster than <strong>60 s</strong> (<code>MIN_INTERVAL_S</code>). <strong>calendar</strong>: every tick, fetching only the sources whose own <code>refresh_min</code> is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). <strong>watch</strong>: every tick, fetching only a series whose release just passed — every <strong>2 min</strong> for up to <strong>60 min</strong>. All in <code>config/news.toml</code>, editable in Settings. One cycle of each at a time: a Refresh during one is skipped.</td>
 </tr>
 </tbody>
 </table>
-<p>Three once-a-day jobs are <strong>not</strong> on any service's loop — they are systemd timers,
+<p>Four once-a-day jobs are <strong>not</strong> on any service's loop — they are systemd timers,
 generated from <code>config/sessions.toml</code> by <code>deploy/systemd/generate_units.py</code>, so moving
 one needs <code>generate_units --install</code> plus a <code>daemon-reload</code> rather than a service
 restart. Each gates on the market calendar in its own script, so the timer only has to
@@ -3321,6 +3321,11 @@ exclude weekends.</p>
 <td>Flow-delta instrumentation</td>
 <td><strong>16:00</strong> (<code>[slots.flow_delta]</code>)</td>
 <td>The only measurement of the <code>[big_delta]</code> / UOA thresholds.</td>
+</tr>
+<tr>
+<td>Trade Analyzer outcome labelling</td>
+<td><strong>18:30</strong> (<code>[slots.label_journal]</code>)</td>
+<td><code>tools/label_journal.py</code>: writes the realized 5/10/20-day forward returns (raw, beta-adjusted, and SPY's) onto recommendations whose horizon has passed. One daily-bar fetch per symbol through the proxy; labels everything outstanding, so a missed night catches up.</td>
 </tr>
 </tbody>
 </table>

@@ -490,6 +490,10 @@ _SESSIONS = ConfigFile(
                   restart=(TIMERS,)),
             Field("slots.flow_delta.at", "Flow instrumentation report", "",
                   kind="time", restart=(TIMERS,)),
+            Field("slots.label_journal.at", "Trade Analyzer outcome labelling",
+                  "Fills in how each recommendation actually did once its "
+                  "20-day horizon has passed. Must be after the close.",
+                  kind="time", restart=(TIMERS,)),
             Field("slots.momentum.at", "Momentum recompute",
                   "Earlier than ~80 minutes after the close scores stale bars.",
                   kind="time", restart=(SENTIMENT, TRADE, WEBGUI)),

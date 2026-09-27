@@ -2243,7 +2243,7 @@ the source; this table is a summary of them.
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 | news_svc | Three branches, launched every **30 s** tick (`TICK_S`) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. **feeds**: every feed polled every **2 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **5 min** in the extended sessions 06:30–08:25 and 15:00–15:15 CT (`eth_poll_min`), **30 min** otherwise on a trading day (`offhours_poll_min`) and **30 min** at weekends and holidays (`weekend_poll_min`), counted from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). **calendar**: every tick, fetching only the sources whose own `refresh_min` is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). **watch**: every tick, fetching only a series whose release just passed — every **2 min** for up to **60 min**. All in `config/news.toml`, editable in Settings. One cycle of each at a time: a Refresh during one is skipped. |
 
-Three once-a-day jobs are **not** on any service's loop — they are systemd timers,
+Four once-a-day jobs are **not** on any service's loop — they are systemd timers,
 generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving
 one needs `generate_units --install` plus a `daemon-reload` rather than a service
 restart. Each gates on the market calendar in its own script, so the timer only has to
@@ -2254,6 +2254,7 @@ exclude weekends.
 | EOD report archive | **15:15** (`[slots.eod_report]`) | Writes `webgui/data/eod/<date>/summary.html` + `detail.html` — the `/eod` **Generate** button, unattended. Reads Redis only: no Schwab call, no Claude call. Writes nothing if every cache read was empty. |
 | Marketing gallery recapture | **09:07** (`[slots.gallery_capture]`) | Re-photographs the private app for the public gallery. |
 | Flow-delta instrumentation | **16:00** (`[slots.flow_delta]`) | The only measurement of the `[big_delta]` / UOA thresholds. |
+| Trade Analyzer outcome labelling | **18:30** (`[slots.label_journal]`) | `tools/label_journal.py`: writes the realized 5/10/20-day forward returns (raw, beta-adjusted, and SPY's) onto recommendations whose horizon has passed. One daily-bar fetch per symbol through the proxy; labels everything outstanding, so a missed night catches up. |
 
 > **The GEX collection interval is 1 minute, not 2.** The serial per-symbol chain
 > fetch was measured dropping roughly 37% of its slots; fetching in a small pool

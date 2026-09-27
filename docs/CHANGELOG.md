@@ -4,6 +4,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-27 (**the Trade Analyzer journal labeler is a systemd timer** —
+it had no schedule on the server since the Linux move.)
+
+- **Found while cleaning the Windows workstation.** `tools/label_journal.py` ran under
+  Windows Task Scheduler; the 2026-08-29 migration gave it no unit. Two Windows tasks
+  kept firing nightly against the frozen `D:\WebGUI Trading Prod` copy — one logged
+  "nothing due", the other could not reach a proxy — so nothing labelled the live
+  `rec_journal.db`. A dry run on vps2 found its first five matured readings (MU, NVDA,
+  ORCL from 08-23; DELL, INTC from 08-24) all unlabelled.
+- **`trading-<env>-label-journal.{service,timer}`** from `[slots.label_journal]`
+  (**18:30 CT**, Mon..Fri — the old schtasks time, after the close and before the 20:00
+  backup). `Persistent=true`, unlike the EOD report: the tool labels everything matured
+  and unlabelled whenever it runs, so a catch-up after downtime loses nothing.
+  `EnvironmentFile` for `PROXY_SHARED_SECRET`; `TimeoutStartSec` 900. Armed by
+  `--install` like every generated timer. Editable in **Settings → Configuration →
+  After-close jobs**; the Technical Reference's timer table gains the row (its HTML
+  rebuild also carries the 09-26 news-cadence edit, whose Markdown had not been built).
+- **The command line now exits 1 when SPY cannot be fetched** (`run(strict=True)`), so
+  a failed night lands in `systemctl --user --failed` instead of exiting 0 into the
+  journal. `run()` called from code keeps returning 0.
+- **Removed from the Windows box:** Memurai (uninstalled, folder deleted) and the
+  scheduled tasks `FlowDeltaInstrumentation`, `BigDeltaReportReminder`,
+  `TradeJournalLabeler-Prod` and `TradeJournalLabeler-Dev` — each ran against the
+  frozen D: copy; vps2's `trading-prod-flow-delta.timer` is the real flow-delta run.
+
 **Last updated:** 2026-09-26 (**news feeds poll every 2 min in RTH, 5 min in extended
 hours, 30 min otherwise** — the operator's cadence, and a fourth session bucket.)
 

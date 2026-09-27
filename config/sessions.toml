@@ -181,6 +181,16 @@ morning = "08:52"     # 09:52 ET
 #   16:30  calibration rebuild
 at = "16:00"
 
+[slots.label_journal]
+# The recommendation-journal labeler (tools/label_journal.py): fills in the realized
+# 5/10/20-trading-day forward returns (raw, beta-adjusted, and SPY's own move) on
+# Trade Analyzer readings whose horizon has matured. A systemd timer, like
+# [slots.flow_delta]: moving it needs `generate_units --install` + `daemon-reload`.
+# It labels EVERYTHING matured and unlabelled whenever it runs, so a missed night is
+# caught up by the next one. After the close (it reads daily bars) and before the
+# 20:00 backup, so a night's labels land in that night's copy.
+at = "18:30"
+
 [slots.trade_idea]
 # The hourly trade idea: ONE graded trade off the live Market Scanner, drawn as a
 # branded image and posted to Discord + Telegram (gate + channel +
