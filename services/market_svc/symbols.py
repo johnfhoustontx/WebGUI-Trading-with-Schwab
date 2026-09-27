@@ -193,6 +193,8 @@ SYMBOL_MAP = [
     _q("EWZ", "EWZ", "Brazil — iShares MSCI Brazil ETF", _CTY),
     _q("EWA", "EWA", "Australia — iShares MSCI Australia ETF", _CTY),
     _q("EWU", "EWU", "United Kingdom — iShares MSCI United Kingdom ETF", _CTY),
+    _q("EWG", "EWG", "Germany — iShares MSCI Germany ETF", _CTY),
+    _q("EWQ", "EWQ", "France — iShares MSCI France ETF", _CTY),
     _q("EWW", "EWW", "Mexico — iShares MSCI Mexico ETF", _CTY),
     _q("EWC", "EWC", "Canada — iShares MSCI Canada ETF", _CTY),
 ]
