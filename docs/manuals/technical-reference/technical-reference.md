@@ -1404,8 +1404,9 @@ panel + an aligned forward Series):
   This replaces the old ±40 score cuts — the BUY/SELL bands are the top/bottom calibrated
   bands.
 
-**Offline fit** (`fit_swing_model.py`, run **manually/periodically — never in the request
-path**): pulls ≈ 78 liquid symbols' **5-yr** daily history via the proxy (a curated
+**Offline fit** (`fit_swing_model.py`, run **monthly by a systemd timer (the 1st, 19:00
+CT) — never in the request path**; a fit replaces the live artifact only if it passes the
+ship gate in `config/swing_model.toml`, see the scheduled-jobs table): pulls ≈ 78 liquid symbols' **5-yr** daily history via the proxy (a curated
 `UNIVERSE_SECTOR` map → sector ETFs; concurrent), builds a `(date, symbol)` panel with
 **20-day forward EXCESS-return-vs-SPY** labels (the prediction target; factors are causal,
 so using the future H-bar return as the label is legitimate), computes per-factor IC +
@@ -1452,8 +1453,8 @@ dependent**. Top quintile ≈ **+1.35% / 4 wk at 52.3% beat-SPY**; bottom ≈ **
 **turnover +0.07** (`pth`/`str_5d`/`vol_adj_mom`/`rs_spy` fell below the floor → 0).
 **Survivorship** (the fit universe is today's survivors) and **regime non-stationarity**
 caveats apply; the model leans on low_vol's inverted sign, which could flip. Validation
-reduces self-deception; it does not guarantee forward performance — **re-run
-`fit_swing_model.py` periodically**. Regime-conditional weighting is the planned next
+reduces self-deception; it does not guarantee forward performance — which is why
+it is **refit monthly**, and why a refit ships only past the gate. Regime-conditional weighting is the planned next
 step (same harness, new regime keys).
 
 ## Markov 2.0 forecast (Position)
@@ -2243,11 +2244,12 @@ the source; this table is a summary of them.
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 | news_svc | Three branches, launched every **30 s** tick (`TICK_S`) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. **feeds**: every feed polled every **2 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **5 min** in the extended sessions 06:30–08:25 and 15:00–15:15 CT (`eth_poll_min`), **30 min** otherwise on a trading day (`offhours_poll_min`) and **30 min** at weekends and holidays (`weekend_poll_min`), counted from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). **calendar**: every tick, fetching only the sources whose own `refresh_min` is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). **watch**: every tick, fetching only a series whose release just passed — every **2 min** for up to **60 min**. All in `config/news.toml`, editable in Settings. One cycle of each at a time: a Refresh during one is skipped. |
 
-Four once-a-day jobs are **not** on any service's loop — they are systemd timers,
+Five scheduled jobs are **not** on any service's loop — they are systemd timers,
 generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving
 one needs `generate_units --install` plus a `daemon-reload` rather than a service
-restart. Each gates on the market calendar in its own script, so the timer only has to
-exclude weekends.
+restart. The EOD report, gallery capture and flow-delta gate on the market calendar in
+their own scripts, so their timers only exclude weekends; the labeler and the refit
+read history and have no session to gate on.
 
 | Job | Slot | What it does |
 |-----|------|--------------|
@@ -2255,6 +2257,7 @@ exclude weekends.
 | Marketing gallery recapture | **09:07** (`[slots.gallery_capture]`) | Re-photographs the private app for the public gallery. |
 | Flow-delta instrumentation | **16:00** (`[slots.flow_delta]`) | The only measurement of the `[big_delta]` / UOA thresholds. |
 | Trade Analyzer outcome labelling | **18:30** (`[slots.label_journal]`) | `tools/label_journal.py`: writes the realized 5/10/20-day forward returns (raw, beta-adjusted, and SPY's) onto recommendations whose horizon has passed. One daily-bar fetch per symbol through the proxy; labels everything outstanding, so a missed night catches up. |
+| Swing model refit | **1st of the month, 19:00** (`[slots.swing_refit]`) | `tools/refit_swing_model.sh`: archives the live `swing_model.json`, refits it on five years of history, and replaces it **only if** the fit passes `config/swing_model.toml` — at least 90% of the 78-symbol universe loaded and an out-of-sample IC above 0. A refused fit is kept as `swing_model.rejected.json` + its report, the live model is untouched, and the run shows as failed. |
 
 > **The GEX collection interval is 1 minute, not 2.** The serial per-symbol chain
 > fetch was measured dropping roughly 37% of its slots; fetching in a small pool

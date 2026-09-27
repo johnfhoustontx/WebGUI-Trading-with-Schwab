@@ -4,6 +4,32 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-09-27 (**the swing model refits monthly, and ships only past a
+gate** — its timer was a comment since the Linux move.)
+
+- **`trading-<env>-swing-refit.{service,timer}`**: the 1st of each month at
+  `[slots.swing_refit]` (**19:00 CT**), running `tools/refit_swing_model.sh` (archive the
+  live model, refuse without a proxy, fit, diff the reports). `Persistent=true`,
+  `ExecStartPre` waits for the proxy so a catch-up at boot is not refused, `Nice=10`,
+  `TimeoutStartSec` 3600. Until now the wrapper's header *described* this timer and nothing
+  installed it: the live `swing_model.json` was still the 2026-08-22 fit.
+- **The ship gate is the operator's decision** (asked 2026-09-27: ship only if it passes).
+  `trade_svc` re-reads the artifact on every call, so the fit's write IS the deploy, and
+  before this it overwrote the live model whatever came out — including when symbols'
+  history silently failed to load (`fetch_daily` returns None and the symbol is dropped).
+  `fit_swing_model.ship_decision` now refuses a fit under **90% coverage** of the
+  78-symbol universe or with an all-regime **out-of-sample IC not above 0.0**
+  (`config/swing_model.toml`, new, in **Settings → Configuration → Swing model refit**).
+  The live model it was written against scored **+0.021**. A refused fit is written as
+  `swing_model.rejected.json` + `swing_model_report.rejected.md`, the live model is
+  byte-identical, and the run exits 1 into `systemctl --user --failed`; the wrapper then
+  diffs the live report against the rejected one. A later shipped fit deletes a stale
+  rejection. NaN / unreadable IC is refused (`not (ic > floor)`).
+- **`fit_swing_model.py --no-ship`** writes `*.candidate.*` and never touches the live
+  files — a real fit you can inspect by hand.
+- Technical Reference (scheduled-jobs table, the "Offline fit" paragraph) and the API
+  Reference's artifact note no longer say "run manually".
+
 **Last updated:** 2026-09-27 (**the Trade Analyzer journal labeler is a systemd timer** —
 it had no schedule on the server since the Linux move.)
 

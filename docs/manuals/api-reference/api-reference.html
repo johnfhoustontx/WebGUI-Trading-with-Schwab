@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-26</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-27</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -919,7 +919,8 @@ symbol scored; absent → the page shows the legacy verdict). Produced by
 </table>
 <p><strong>Offline artifact (not a service view).</strong> <code>trade-analyzer/data/swing_model.json</code>
 (<code>repo_paths.SWING_MODEL</code>, gitignored) is fit <strong>offline</strong> by
-<code>trade-analyzer/fit_swing_model.py</code> (run manually/periodically — never imported by a
+<code>trade-analyzer/fit_swing_model.py</code> (run monthly by <code>trading-&lt;env&gt;-swing-refit.timer</code>,
+shipping only past <code>config/swing_model.toml</code>'s gate — never imported by a
 service) using the pure <code>src/analysis/factors.py</code> + <code>src/analysis/backtest.py</code>. It
 stores, per regime key (<code>"all"</code>), the signed <code>weights</code>, per-factor <code>factor_ic</code>
 (<code>mean_ic</code>/<code>icir</code>/<code>n_days</code>), the cross-sectional <code>norm</code> (<code>{factor: {mean, std}}</code> — the
@@ -1008,7 +1009,7 @@ branch's failure never stops another:</p>
 <tr>
 <td><code>feeds</code></td>
 <td><code>compute.poll_now</code></td>
-<td><code>[collector]</code>: <code>rth_poll_min</code> 5 (08:30–15:00 CT on a trading day), <code>offhours_poll_min</code> 15, <code>weekend_poll_min</code> 60 (weekends, NYSE holidays); counted from when the last poll <strong>ended</strong>; never faster than <code>MIN_INTERVAL_S</code> (60 s)</td>
+<td><code>[collector]</code>: <code>rth_poll_min</code> 2 (08:30–15:00 CT on a trading day), <code>eth_poll_min</code> 5 (06:30–08:25 and 15:00–15:15 CT), <code>offhours_poll_min</code> 30 (a trading day outside those), <code>weekend_poll_min</code> 30 (weekends, NYSE holidays); counted from when the last poll <strong>ended</strong>; never faster than <code>MIN_INTERVAL_S</code> (60 s)</td>
 </tr>
 <tr>
 <td><code>calendar</code></td>

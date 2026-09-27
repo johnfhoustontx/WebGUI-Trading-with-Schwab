@@ -494,6 +494,10 @@ _SESSIONS = ConfigFile(
                   "Fills in how each recommendation actually did once its "
                   "20-day horizon has passed. Must be after the close.",
                   kind="time", restart=(TIMERS,)),
+            Field("slots.swing_refit.at", "Swing model refit (1st of the month)",
+                  "Refits the Short Term model. It replaces the live model only "
+                  "if it passes the checks under Swing model refit.",
+                  kind="time", restart=(TIMERS,)),
             Field("slots.momentum.at", "Momentum recompute",
                   "Earlier than ~80 minutes after the close scores stale bars.",
                   kind="time", restart=(SENTIMENT, TRADE, WEBGUI)),
@@ -680,6 +684,30 @@ _EDGE = ConfigFile(
                   "Prefix bits. One IPv6 visitor can use a whole /64, so smaller "
                   "numbers group more loosely.", kind="int", unit="bits", min=1,
                   max=128, step=1),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Swing model refit — config/swing_model.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read by trade-analyzer/fit_swing_model.py at fit time: nothing to restart.
+_SWING_MODEL = ConfigFile(
+    name="swing_model.toml", title="Swing model refit", icon="model_training",
+    summary="When a monthly refit of the Short Term model may replace the live one.",
+    restart=(),
+    sections=(
+        Section("Replace the live model only if", "A fit that fails either check "
+                "is kept beside the live model as a rejected copy, and the live "
+                "model stays as it was.", (
+            Field("refit.min_coverage", "Share of symbols that loaded",
+                  "Of the 78 symbols the model is fitted on. A symbol whose "
+                  "history fails to load is dropped from the fit.",
+                  kind="fraction", min=50, max=100, step=1),
+            Field("refit.min_oos_ic", "Out-of-sample score above",
+                  "How well the new fit ranked stocks on data it was not fitted "
+                  "on (information coefficient). 0 means any real edge at all.",
+                  kind="float", min=-0.1, max=0.2, step=0.005),
         )),
     ),
 )
@@ -1150,7 +1178,7 @@ _NEWS = ConfigFile(
 )
 
 FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _COMMISSIONS, _PORTS, _ENVS)
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _SWING_MODEL, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 

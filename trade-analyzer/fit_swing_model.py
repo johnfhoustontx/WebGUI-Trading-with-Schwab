@@ -5,8 +5,17 @@ a (date, symbol) panel with forward EXCESS returns vs SPY, runs the pure backtes
 engine, and writes SWING_MODEL (json) + SWING_MODEL_REPORT (markdown). Run
 manually/scheduled; NEVER imported by a service. Factors are causal (factors.py);
 labels legitimately use the future H-bar return (the prediction target).
+
+**The ship gate.** ``trade_svc`` re-reads SWING_MODEL on every call, so writing it
+IS the deploy. A fit replaces it only if ``ship_decision`` finds nothing wrong --
+enough of the universe arrived, and the out-of-sample IC is above the floor, both
+from ``config/swing_model.toml``. A refused fit is written beside the live files as
+``*.rejected.*`` and the run exits 1. ``--no-ship`` writes ``*.candidate.*`` (or the
+rejected pair) and never touches the live files -- for checking a fit by hand.
 """
+import argparse
 import json
+import math
 import sys
 import pathlib
 from concurrent.futures import ThreadPoolExecutor
@@ -18,6 +27,8 @@ import requests
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))   # repo root
 from repo_paths import PROXY_URL, SWING_MODEL, SWING_MODEL_REPORT       # noqa: E402
+from repo_paths import SWING_MODEL_TOML                                 # noqa: E402
+from shared.config_toml import toml_loader                              # noqa: E402
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))        # for src.analysis
 from src.analysis import factors as F                                   # noqa: E402
 from src.analysis import backtest as B                                  # noqa: E402
@@ -51,6 +62,11 @@ UNIVERSE_SECTOR = {
     "AMT": "XLRE", "PLD": "XLRE", "EQIX": "XLRE",
 }
 SECTOR_ETFS = sorted(set(UNIVERSE_SECTOR.values()))
+
+# config/swing_model.toml's built-in defaults - the file only overrides.
+REFIT_DEFAULTS = {"refit": {"min_coverage": 0.90, "min_oos_ic": 0.0}}
+load_refit_config, reset_refit_config = toml_loader(
+    SWING_MODEL_TOML, REFIT_DEFAULTS, label="swing_model.toml")
 
 
 def fetch_daily(symbol, years=YEARS):
@@ -191,14 +207,49 @@ def fit():
     return artifact, ics, weights, horizon_ic, wf, calib, used
 
 
-def write_artifact(artifact):
-    SWING_MODEL.parent.mkdir(parents=True, exist_ok=True)
-    SWING_MODEL.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+def ship_decision(artifact, cfg):
+    """Why ``artifact`` must NOT replace the live model -- ``[]`` means ship it.
+
+    Two checks from ``cfg["refit"]``: the share of the fit universe that actually
+    arrived (``fetch_daily`` returns None on any failure and the symbol is just
+    dropped), and the all-regime out-of-sample IC, which must be strictly ABOVE
+    ``min_oos_ic``. Written as ``not (ic > floor)`` so a NaN or unreadable IC is
+    refused rather than waved through by a comparison that is simply False.
+    """
+    r = cfg["refit"]
+    reasons = []
+    total = len(artifact.get("fit_universe") or UNIVERSE_SECTOR)
+    used = artifact.get("fit_universe_n") or 0
+    share = used / total if total else 0.0
+    min_cov = float(r["min_coverage"])
+    if not (share >= min_cov):
+        reasons.append(f"the fit used {used} of {total} symbols ({share:.0%}); "
+                       f"it needs at least {min_cov:.0%}")
+    ic = ((artifact.get("regimes") or {}).get("all") or {}).get("oos_ic")
+    try:
+        ic = float(ic)
+    except (TypeError, ValueError):
+        ic = math.nan
+    min_ic = float(r["min_oos_ic"])
+    if not (ic > min_ic):
+        reasons.append(f"out-of-sample IC {ic:+.4f} is not above {min_ic:+.4f}")
+    return reasons
 
 
-def write_report(artifact, ics, weights, horizon_ic, wf, calib, used):
+def write_artifact(artifact, path=None):
+    path = path or SWING_MODEL
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
+
+
+def write_report(artifact, ics, weights, horizon_ic, wf, calib, used, path=None,
+                 verdict=None):
+    path = path or SWING_MODEL_REPORT
     reg = artifact["regimes"]["all"]
-    lines = [f"# Swing model research report — {artifact['version']}", "",
+    lines = [f"# Swing model research report — {artifact['version']}", ""]
+    if verdict:
+        lines += [f"**{verdict}**", ""]
+    lines += [
              f"Fit universe: **{used}** symbols · horizon **{HORIZON}d** · "
              f"walk-forward train/test/step = {TRAIN}/{TEST}/{STEP} · folds {wf['n_folds']}", "",
              f"**Composite OOS IC: {wf['oos_ic']:+.4f}**  (per fold: "
@@ -257,16 +308,53 @@ def write_report(artifact, ics, weights, horizon_ic, wf, calib, used):
               "- Regime non-stationarity: a few-year fit may not hold forward.",
               "- Thin LIVE cross-section (the ~20-name watchlist) vs the fit universe.",
               "- Validation reduces self-deception; it does not guarantee forward performance."]
-    SWING_MODEL_REPORT.write_text("\n".join(lines), encoding="utf-8")
+    path.write_text("\n".join(lines), encoding="utf-8")
 
 
-def main():
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Fit the swing factor model.")
+    ap.add_argument("--no-ship", action="store_true",
+                    help="never touch the live model; write a candidate to inspect")
+    args = ap.parse_args(argv)
+
     artifact, ics, weights, horizon_ic, wf, calib, used = fit()
-    write_artifact(artifact)
-    write_report(artifact, ics, weights, horizon_ic, wf, calib, used)
     kept = sum(1 for v in weights.values() if v != 0)
     print(f"OOS IC={wf['oos_ic']:+.4f} · folds={wf['n_folds']} · "
           f"kept {kept}/{len(ics)} factors · universe {used} symbols")
+    report_args = (artifact, ics, weights, horizon_ic, wf, calib, used)
+
+    # Resolved at CALL time from the module constants, so a test that points
+    # SWING_MODEL at tmp_path moves every sibling file with it.
+    rej_json = SWING_MODEL.with_name("swing_model.rejected.json")
+    rej_md = SWING_MODEL_REPORT.with_name("swing_model_report.rejected.md")
+
+    reasons = ship_decision(artifact, load_refit_config())
+    if reasons:
+        verdict = "NOT SHIPPED: " + "; ".join(reasons)
+        write_artifact(artifact, rej_json)
+        write_report(*report_args, path=rej_md, verdict=verdict)
+        print(verdict)
+        print(f"the live model is unchanged: {SWING_MODEL}")
+        print(f"wrote {rej_json}")
+        print(f"wrote {rej_md}")
+        raise SystemExit(1)
+
+    if args.no_ship:
+        cand_json = SWING_MODEL.with_name("swing_model.candidate.json")
+        cand_md = SWING_MODEL_REPORT.with_name("swing_model_report.candidate.md")
+        write_artifact(artifact, cand_json)
+        write_report(*report_args, path=cand_md)
+        print("passed the ship gate; --no-ship, so the live model is unchanged")
+        print(f"wrote {cand_json}")
+        print(f"wrote {cand_md}")
+        return
+
+    write_artifact(artifact)
+    write_report(*report_args, path=SWING_MODEL_REPORT)
+    # A rejection from an earlier month would otherwise sit beside a model that
+    # has since shipped and read as the current state.
+    for stale in (rej_json, rej_md):
+        stale.unlink(missing_ok=True)
     print(f"wrote {SWING_MODEL}")
     print(f"wrote {SWING_MODEL_REPORT}")
 

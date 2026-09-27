@@ -393,7 +393,8 @@ symbol scored; absent → the page shows the legacy verdict). Produced by
 
 **Offline artifact (not a service view).** `trade-analyzer/data/swing_model.json`
 (`repo_paths.SWING_MODEL`, gitignored) is fit **offline** by
-`trade-analyzer/fit_swing_model.py` (run manually/periodically — never imported by a
+`trade-analyzer/fit_swing_model.py` (run monthly by `trading-<env>-swing-refit.timer`,
+shipping only past `config/swing_model.toml`'s gate — never imported by a
 service) using the pure `src/analysis/factors.py` + `src/analysis/backtest.py`. It
 stores, per regime key (`"all"`), the signed `weights`, per-factor `factor_ic`
 (`mean_ic`/`icir`/`n_days`), the cross-sectional `norm` (`{factor: {mean, std}}` — the

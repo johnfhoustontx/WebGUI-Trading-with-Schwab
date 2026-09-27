@@ -94,6 +94,8 @@ TOOLS_PUBLIC_TOML = REPO_ROOT / "config" / "tools_public.toml"
 # deploy/caddy/generate_caddyfile.py only; a change needs the Caddyfile
 # regenerated and Caddy reloaded, as root.
 EDGE_TOML = REPO_ROOT / "config" / "edge.toml"
+# The swing model refit's ship gate (trade-analyzer/fit_swing_model.py).
+SWING_MODEL_TOML = REPO_ROOT / "config" / "swing_model.toml"
 
 # History of Gamma Analyze briefings (the 4×/day Auto briefings + ad-hoc/manual runs).
 # Stores the STRUCTURED analysis payload (the source of truth) per (date, slot); the

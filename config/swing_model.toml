@@ -1,0 +1,20 @@
+# The swing factor model's monthly refit - read by trade-analyzer/fit_swing_model.py.
+#
+# The refit (trading-<env>-swing-refit.timer, [slots.swing_refit] in sessions.toml)
+# replaces the LIVE model only if the new fit passes BOTH checks below. trade_svc
+# re-reads swing_model.json on every call, so writing that file IS the deploy.
+# A fit that fails is written beside it as swing_model.rejected.json (+ its report,
+# swing_model_report.rejected.md) for inspection, the live model is left as it was,
+# and the run exits 1 so it shows in `systemctl --user --failed`.
+#
+# Read at fit time: a change here needs no restart.
+
+[refit]
+# The fraction of the 78-symbol fit universe whose history actually arrived. A
+# symbol whose fetch fails is silently dropped from the fit, so a proxy that
+# stumbles mid-run would otherwise ship a model built from part of the universe.
+min_coverage = 0.90
+# The new fit's out-of-sample information coefficient (walk-forward, all regimes)
+# must be ABOVE this. 0.0 means "any out-of-sample edge at all"; the model live on
+# 2026-09-27 scored +0.021.
+min_oos_ic = 0.0

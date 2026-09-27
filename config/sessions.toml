@@ -191,6 +191,15 @@ at = "16:00"
 # 20:00 backup, so a night's labels land in that night's copy.
 at = "18:30"
 
+[slots.swing_refit]
+# The monthly swing factor model refit (tools/refit_swing_model.sh ->
+# trade-analyzer/fit_swing_model.py), on the 1st of each month at this time. Only
+# the TIME is set here; the day is fixed by the timer. The new fit replaces the live
+# model only if it passes config/swing_model.toml's checks. ~90 five-year daily
+# histories through the proxy, then a walk-forward fit. A systemd timer, like
+# [slots.flow_delta]: moving it needs `generate_units --install` + `daemon-reload`.
+at = "19:00"
+
 [slots.trade_idea]
 # The hourly trade idea: ONE graded trade off the live Market Scanner, drawn as a
 # branded image and posted to Discord + Telegram (gate + channel +

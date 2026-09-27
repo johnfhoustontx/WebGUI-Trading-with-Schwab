@@ -1099,6 +1099,92 @@ def test_the_label_journal_timer_is_armed():
     assert LJ_TMR in units.timer_units()
 
 
+# --- the monthly swing-model refit, also orphaned by the migration -----------
+#
+# tools/refit_swing_model.sh carried a COMMENT saying how to schedule it; nothing
+# did, so the live swing_model.json stayed at its 2026-08-22 fit.
+SR_SVC = f"trading-{ENV_NAME}-swing-refit.service"
+SR_TMR = f"trading-{ENV_NAME}-swing-refit.timer"
+
+
+def test_the_swing_refit_units_are_generated():
+    all_units = units.render_all()
+    assert SR_SVC in all_units
+    assert SR_TMR in all_units
+
+
+def test_the_swing_refit_fires_monthly_on_the_first_at_the_slot():
+    from shared import market_calendar as mc
+    at = mc.slot_times("swing_refit")["at"]
+    text = units.render_all()[SR_TMR]
+    assert _directives(text, "OnCalendar") == [
+        f"*-*-01 {at.hour:02d}:{at.minute:02d}:00"]
+
+
+def test_the_swing_refit_schedule_follows_the_slot_rather_than_a_literal(monkeypatch):
+    import datetime as _dt
+
+    monkeypatch.setattr(units, "slot_times", lambda name: {"at": _dt.time(21, 3)})
+    text = units.render_all()[SR_TMR]
+    assert _directives(text, "OnCalendar") == ["*-*-01 21:03:00"]
+
+
+def test_the_swing_refit_catches_up_after_downtime(rendered):
+    """A month is long; a refit on the 2nd is as good as one on the 1st."""
+    tmr = rendered[SR_TMR]
+    assert tmr["Timer"]["Persistent"].lower() == "true"
+    assert tmr["Install"]["WantedBy"] == "timers.target"
+
+
+def test_the_swing_refit_waits_for_the_proxy(rendered):
+    """A catch-up run at boot can fire before the proxy answers; the wrapper then
+    refuses (correctly) and the month is lost. Wait for it first."""
+    pre = rendered[SR_SVC]["Service"]["ExecStartPre"]
+    assert "tools/wait_http.py" in pre and f"--port {PROXY_PORT}" in pre
+
+
+def test_the_swing_refit_is_a_oneshot_that_does_not_retry(rendered):
+    """A refused fit exits 1 on purpose; a Restart= would refit until one passed."""
+    svc = rendered[SR_SVC]
+    assert svc["Service"]["Type"] == "oneshot"
+    assert "Restart" not in svc["Service"]
+    assert int(svc["Unit"]["StartLimitBurst"]) > 0
+    assert "StartLimitBurst" not in svc["Service"]
+
+
+def test_the_swing_refit_is_not_a_member_of_the_fleet(rendered):
+    svc = rendered[SR_SVC]
+    assert "PartOf" not in svc["Unit"]
+    assert "Install" not in svc
+    assert SR_SVC not in stack_services()
+
+
+def test_the_swing_refit_outlasts_the_default_start_timeout(rendered):
+    """Five years of daily bars for ~90 symbols plus a walk-forward fit."""
+    assert int(rendered[SR_SVC]["Service"]["TimeoutStartSec"]) >= 1800
+
+
+def test_the_swing_refit_runs_below_the_services_priority(rendered):
+    """A CPU-bound fit must not starve the stack it shares a box with."""
+    assert int(rendered[SR_SVC]["Service"]["Nice"]) > 0
+
+
+def test_the_swing_refit_runs_the_wrapper_from_this_checkout(rendered):
+    """The wrapper archives the old model, refuses without a proxy and diffs the
+    reports -- real work, unlike flow-delta's -- so the unit runs it, by its path
+    in this checkout. That only works while git keeps it executable and LF."""
+    exec_start = rendered[SR_SVC]["Service"]["ExecStart"]
+    assert exec_start == f"{POSIX_ROOT}/tools/refit_swing_model.sh"
+    import subprocess
+    mode = subprocess.run(["git", "ls-files", "-s", "tools/refit_swing_model.sh"],
+                          capture_output=True, text=True, cwd=REPO_ROOT).stdout
+    assert mode.startswith("100755"), mode
+
+
+def test_the_swing_refit_timer_is_armed():
+    assert SR_TMR in units.timer_units()
+
+
 # --- arming, which is not the same thing as writing --------------------------
 #
 # A generated `.timer` that nothing enables is a FILE, not a schedule. That is

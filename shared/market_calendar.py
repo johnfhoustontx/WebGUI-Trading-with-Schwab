@@ -295,8 +295,9 @@ _DEFAULTS = {
         # cash close and after [slots.action_alert] close + the 15:10 EOD push,
         # so the books it reads have settled; it costs no Schwab and no Claude
         # call, so sharing the minute with the last autoscan slot is free.
-        # ⚠ FOUR of these slots are read by SYSTEMD rather than by a service
-        # scheduler -- flow_delta, eod_report, gallery_capture and label_journal:
+        # ⚠ FIVE of these slots are read by SYSTEMD rather than by a service
+        # scheduler -- flow_delta, eod_report, gallery_capture, label_journal
+        # and swing_refit:
         # deploy/systemd/generate_units.py turns each into a timer's OnCalendar
         # at unit-GENERATION time, so moving one needs
         # `generate_units --install` + `daemon-reload`, not a service restart.
@@ -307,6 +308,10 @@ _DEFAULTS = {
         # 18:30 is the time it ran under Windows Task Scheduler, and it sits
         # before the 20:00 backup so a night's labels are in that night's copy.
         "label_journal": {"at": "18:30"},
+        # The monthly swing-model refit (tools/refit_swing_model.sh), on the
+        # 1st of each month at this time. Only the time is configurable; the
+        # day is the unit's. After the labeler, before the 20:00 backup.
+        "swing_refit": {"at": "19:00"},
         # The marketing gallery recapture. It still needs a default here like
         # every other slot -- the TOML only overrides, and a TOML-only slot
         # raises KeyError out of _slot_group.

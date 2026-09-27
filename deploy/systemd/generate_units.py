@@ -130,6 +130,11 @@ FLOW_DELTA_TIMEOUT_SEC = 1800
 # symbols; the ceiling covers a catch-up night over the whole rank-board universe.
 LABEL_JOURNAL_TIMEOUT_SEC = 900
 
+# The swing refit pulls five years of daily bars for ~90 symbols (8 at a time)
+# and runs a walk-forward fit. Generous for the same reason as flow-delta: a
+# SIGTERM partway must never be what decides whether a model ships.
+SWING_REFIT_TIMEOUT_SEC = 3600
+
 # ── The public process's memory cap ──────────────────────────────────────────
 # ⚠ ONLY the public unit carries these, and that is deliberate. The other eight
 # are not internet-facing and a wrong value there kills the trading stack.
@@ -910,6 +915,73 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-label-journal.timer": tmr}
 
 
+def _swing_refit_units():
+    """The monthly swing-model refit: a oneshot plus its timer.
+
+    **Orphaned by the Linux migration.** `tools/refit_swing_model.sh` carried a
+    COMMENT describing this timer; nothing installed it, so the live
+    `swing_model.json` stayed at its 2026-08-22 fit. Built 2026-09-27.
+
+    **The fit gates its own output** (`config/swing_model.toml`): trade_svc
+    re-reads the artifact on every call, so the write IS the deploy. A refused
+    fit exits 1 and lands in `systemctl --user --failed`, with the rejected copy
+    beside the live model.
+
+    **Runs the wrapper, not the Python** -- unlike flow-delta, the wrapper does
+    real work: it archives the live model under a dated folder, refuses without a
+    proxy, and diffs the new report against the old. Run by its path in THIS
+    checkout (the house rule every unit follows); git holds it as 100755 and
+    `.gitattributes` pins `*.sh` to LF, so it is directly executable.
+
+    **ExecStartPre waits for the proxy.** Persistent=true means a boot after a
+    missed 1st fires at once, before the proxy answers; the wrapper would then
+    refuse (correctly) and the month would be lost.
+
+    **Nice=10**: a CPU-bound pandas fit on the box that runs the stack.
+    **No Restart=**: a refused fit is a verdict, not a transient failure.
+    """
+    at = slot_times("swing_refit")["at"]
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - monthly swing model refit
+# No PartOf and no [Install]: the timer owns this.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# The stack .env, like every unit here: nothing inline, and a proxy that later
+# requires its shared secret on /pricehistory needs no second edit.
+EnvironmentFile={_env_file()}
+ExecStartPre={_python()} tools/wait_http.py --port {PROXY_PORT} --timeout {PROXY_WAIT_TIMEOUT_SEC} --label 'the proxy'
+TimeoutStartSec={SWING_REFIT_TIMEOUT_SEC}
+Nice=10
+ExecStart={_workdir()}/tools/refit_swing_model.sh
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - monthly swing model refit timer
+
+[Timer]
+# The 1st of every month at [slots.swing_refit] in config/sessions.toml. Weekends
+# and holidays do not matter: it reads history, not a live session.
+OnCalendar=*-*-01 {at.hour:02d}:{at.minute:02d}:00
+# Persistent=true: a refit a day late is as good as one on time.
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-swing-refit.service": svc,
+            f"trading-{ENV_NAME}-swing-refit.timer": tmr}
+
+
 def render_all():
     """``{unit filename: text}`` for this environment."""
     out = {unit_name(c): _service_text(c, p, s) for c, p, s in components()}
@@ -920,6 +992,7 @@ def render_all():
     out.update(_eod_report_units())
     out.update(_flow_delta_units())
     out.update(_label_journal_units())
+    out.update(_swing_refit_units())
     return out
 
 

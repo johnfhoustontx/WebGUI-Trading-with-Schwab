@@ -2173,8 +2173,9 @@ panel + an aligned forward Series):</p>
   This replaces the old ±40 score cuts — the BUY/SELL bands are the top/bottom calibrated
   bands.</li>
 </ul>
-<p><strong>Offline fit</strong> (<code>fit_swing_model.py</code>, run <strong>manually/periodically — never in the request
-path</strong>): pulls ≈ 78 liquid symbols' <strong>5-yr</strong> daily history via the proxy (a curated
+<p><strong>Offline fit</strong> (<code>fit_swing_model.py</code>, run <strong>monthly by a systemd timer (the 1st, 19:00
+CT) — never in the request path</strong>; a fit replaces the live artifact only if it passes the
+ship gate in <code>config/swing_model.toml</code>, see the scheduled-jobs table): pulls ≈ 78 liquid symbols' <strong>5-yr</strong> daily history via the proxy (a curated
 <code>UNIVERSE_SECTOR</code> map → sector ETFs; concurrent), builds a <code>(date, symbol)</code> panel with
 <strong>20-day forward EXCESS-return-vs-SPY</strong> labels (the prediction target; factors are causal,
 so using the future H-bar return as the label is legitimate), computes per-factor IC +
@@ -2215,8 +2216,8 @@ dependent</strong>. Top quintile ≈ <strong>+1.35% / 4 wk at 52.3% beat-SPY</st
 <strong>turnover +0.07</strong> (<code>pth</code>/<code>str_5d</code>/<code>vol_adj_mom</code>/<code>rs_spy</code> fell below the floor → 0).
 <strong>Survivorship</strong> (the fit universe is today's survivors) and <strong>regime non-stationarity</strong>
 caveats apply; the model leans on low_vol's inverted sign, which could flip. Validation
-reduces self-deception; it does not guarantee forward performance — <strong>re-run
-<code>fit_swing_model.py</code> periodically</strong>. Regime-conditional weighting is the planned next
+reduces self-deception; it does not guarantee forward performance — which is why
+it is <strong>refit monthly</strong>, and why a refit ships only past the gate. Regime-conditional weighting is the planned next
 step (same harness, new regime keys).</p>
 <h2 id="markov-20-forecast-position">Markov 2.0 forecast (Position)</h2>
 <p><strong>Files:</strong> <code>trade-analyzer/src/analysis/markov.py</code> (pure math) +
@@ -3293,11 +3294,12 @@ the source; this table is a summary of them.</p>
 </tr>
 </tbody>
 </table>
-<p>Four once-a-day jobs are <strong>not</strong> on any service's loop — they are systemd timers,
+<p>Five scheduled jobs are <strong>not</strong> on any service's loop — they are systemd timers,
 generated from <code>config/sessions.toml</code> by <code>deploy/systemd/generate_units.py</code>, so moving
 one needs <code>generate_units --install</code> plus a <code>daemon-reload</code> rather than a service
-restart. Each gates on the market calendar in its own script, so the timer only has to
-exclude weekends.</p>
+restart. The EOD report, gallery capture and flow-delta gate on the market calendar in
+their own scripts, so their timers only exclude weekends; the labeler and the refit
+read history and have no session to gate on.</p>
 <table>
 <thead>
 <tr>
@@ -3326,6 +3328,11 @@ exclude weekends.</p>
 <td>Trade Analyzer outcome labelling</td>
 <td><strong>18:30</strong> (<code>[slots.label_journal]</code>)</td>
 <td><code>tools/label_journal.py</code>: writes the realized 5/10/20-day forward returns (raw, beta-adjusted, and SPY's) onto recommendations whose horizon has passed. One daily-bar fetch per symbol through the proxy; labels everything outstanding, so a missed night catches up.</td>
+</tr>
+<tr>
+<td>Swing model refit</td>
+<td><strong>1st of the month, 19:00</strong> (<code>[slots.swing_refit]</code>)</td>
+<td><code>tools/refit_swing_model.sh</code>: archives the live <code>swing_model.json</code>, refits it on five years of history, and replaces it <strong>only if</strong> the fit passes <code>config/swing_model.toml</code> — at least 90% of the 78-symbol universe loaded and an out-of-sample IC above 0. A refused fit is kept as <code>swing_model.rejected.json</code> + its report, the live model is untouched, and the run shows as failed.</td>
 </tr>
 </tbody>
 </table>
