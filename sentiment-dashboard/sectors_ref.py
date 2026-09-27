@@ -197,8 +197,10 @@ def _load_gics_map_uncached(xlsx_path):
             code = row[6]
             code = str(int(code)) if isinstance(code, (int, float)) \
                 else _cell_text(row, 6)
-            symbols = [s for s in (_cell_text(row, i).upper() for i in range(8, 13))
-                       if s]
+            # A share class is written BRK.B in the workbook, but Schwab quotes
+            # and serves history only for BRK/B — the dotted form returns nothing.
+            symbols = [s.replace(".", "/") for s in
+                       (_cell_text(row, i).upper() for i in range(8, 13)) if s]
             rows.append({
                 "sector": _cell_text(row, 1),
                 "industry_group": _cell_text(row, 3),

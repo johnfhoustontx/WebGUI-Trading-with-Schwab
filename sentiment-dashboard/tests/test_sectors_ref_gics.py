@@ -67,5 +67,14 @@ def test_gics_symbols_is_the_deduped_universe_in_workbook_order():
     assert symbols[:3] == ["NE", "RIG", "VAL"]
 
 
+def test_share_classes_are_spelled_the_way_schwab_quotes_them():
+    # The workbook writes BRK.B; Schwab answers only BRK/B (measured on prod
+    # 2026-09-27: BRK.B returned no bars and no quote, BRK/B both).
+    symbols = set(sectors_ref.gics_symbols())
+
+    assert {"BRK/B", "BF/B"} <= symbols
+    assert not any("." in s for s in symbols)
+
+
 def test_a_missing_workbook_yields_an_empty_map(tmp_path):
     assert sectors_ref.load_gics_map(tmp_path / "absent.xlsx") == []

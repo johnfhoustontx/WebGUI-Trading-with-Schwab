@@ -25,6 +25,13 @@ GICS Map tab's listed stocks.)
   old ETF universe's ranks never chart beside the new one.
 - **First night after deploy:** ~500 new symbols backfill a year of bars (~100 s), and
   the stock Δ column compares against the old 311-stock ranks for one session.
+- **Measured on prod after the promote:** 11 sectors · 158 sub-industries · 675 stocks
+  (689 KB). Excluded: 38 for liquidity (mostly OTC ADRs and micro-caps), 4 baskets
+  under two members, Drug Retail with none, and 12 `no_quote`. Two of those were
+  spelling: the workbook writes `BRK.B` / `BF.B` and Schwab serves only `BRK/B` /
+  `BF/B`, so `load_gics_map` now converts the dot. The other ten — BK, MMC, TEF, SATS,
+  NSA, LEG, ATGE, OMI, PCH, SMNEY — return no quote and no history at all from Schwab;
+  they are workbook entries to correct, not a code fault.
 - Design: [gics-subindustries](plans/2026-09-27-bullbear-gics-subindustries-design.md).
 
 **Prior —** 2026-09-27 (**the swing model refits monthly, and ships only past a
