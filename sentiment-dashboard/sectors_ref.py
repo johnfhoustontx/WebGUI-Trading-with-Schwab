@@ -129,6 +129,100 @@ def constituents_by_industry(xlsx_path=SECTORS_XLSX):
     return out
 
 
+# ── GICS Map — the momentum cascade's sub-industry level and stock universe ──
+# Sector -> sub-industry -> up to five representative symbols, one row per GICS
+# sub-industry (the March 2023 structure). The Bull / Bear Map and the Momentum
+# page score a sub-industry as an equal-weight basket of these symbols, since a
+# sub-industry has no ETF of its own. The Stocks/Industries tabs of
+# SECTORS_XLSX still drive the sector heat grid's industry ETFs.
+GICS_XLSX = Path(__file__).parent / "GICS_Classification_Symbols.xlsx"
+GICS_SHEET = "GICS Map"
+
+_gics_cache = {"path": None, "mtime": None, "data": None}
+
+
+def reset_gics_cache():
+    """Drop the cached GICS rows so the next load re-reads (test helper)."""
+    _gics_cache.update(path=None, mtime=None, data=None)
+
+
+def load_gics_map(xlsx_path=GICS_XLSX):
+    """Load the GICS Map tab — one row per sub-industry — mtime-cached.
+
+    Returns a list of dicts in workbook order:
+        {sector, industry_group, industry, sub_industry, code, symbols}
+    ``code`` is the 8-digit sub-industry code as a string; ``symbols`` drops
+    blank cells, so a sub-industry with no listed symbol has ``[]``.
+    Returns [] if the workbook, the tab, or openpyxl is unavailable.
+    """
+    key = str(xlsx_path)
+    try:
+        mtime = Path(xlsx_path).stat().st_mtime
+    except OSError:
+        mtime = None
+    if (_gics_cache["data"] is not None and _gics_cache["path"] == key
+            and _gics_cache["mtime"] == mtime and mtime is not None):
+        return _gics_cache["data"]
+    data = _load_gics_map_uncached(xlsx_path)
+    if mtime is not None:
+        _gics_cache.update(path=key, mtime=mtime, data=data)
+    return data
+
+
+def _cell_text(row, i):
+    value = row[i] if len(row) > i else None
+    return str(value).strip() if value is not None else ""
+
+
+def _load_gics_map_uncached(xlsx_path):
+    try:
+        import openpyxl
+    except ImportError:
+        return []
+    try:
+        wb = openpyxl.load_workbook(str(xlsx_path), read_only=True, data_only=True)
+    except Exception:
+        return []
+    try:
+        if GICS_SHEET not in wb.sheetnames:
+            return []
+        rows = []
+        # Columns: Sector Code, Sector, Industry Group Code, Industry Group,
+        # Industry Code, Industry, Sub-Industry Code, Sub-Industry,
+        # Symbol 1..5, # Symbols, Notes.
+        for row in wb[GICS_SHEET].iter_rows(min_row=2, values_only=True):
+            sub_industry = _cell_text(row or (), 7)
+            if not sub_industry:
+                continue
+            code = row[6]
+            code = str(int(code)) if isinstance(code, (int, float)) \
+                else _cell_text(row, 6)
+            symbols = [s for s in (_cell_text(row, i).upper() for i in range(8, 13))
+                       if s]
+            rows.append({
+                "sector": _cell_text(row, 1),
+                "industry_group": _cell_text(row, 3),
+                "industry": _cell_text(row, 5),
+                "sub_industry": sub_industry,
+                "code": code,
+                "symbols": symbols,
+            })
+        return rows
+    finally:
+        wb.close()
+
+
+def gics_symbols(xlsx_path=GICS_XLSX):
+    """Deduped GICS Map symbols in workbook order — the stock universe."""
+    seen, out = set(), []
+    for row in load_gics_map(xlsx_path):
+        for symbol in row["symbols"]:
+            if symbol not in seen:
+                seen.add(symbol)
+                out.append(symbol)
+    return out
+
+
 def load_sectors_data(xlsx_path=SECTORS_XLSX):
     """Load sector / industry / ETF rows from the reference workbook (mtime-cached).
 

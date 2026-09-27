@@ -45,6 +45,11 @@ SESSIONS_TOML = REPO_ROOT / "config" / "sessions.toml"
 # config_paper.py. Edit + restart options_svc.
 PAPER_TOML = REPO_ROOT / "config" / "paper.toml"
 
+# The momentum cascade's GICS sub-industry baskets and the Bull / Bear Map's live
+# quote batching. Read by services/sentiment_svc/momentum_config.py. Edit +
+# restart sentiment_svc.
+MOMENTUM_TOML = REPO_ROOT / "config" / "momentum.toml"
+
 # Trade-management stop/target rules (take-profit fraction, stop multiple, delta
 # drift + hard ceiling, cut-DTE, the trail ladders). Read by shared/trade_mgmt.py,
 # which BOTH options-scanner/signal_recommender.py (the auto-manage cycle) and

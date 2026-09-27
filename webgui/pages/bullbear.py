@@ -317,9 +317,10 @@ def build_tree(levels):
     """``levels{sector,industry,stock}`` -> nested sectors, strongest first.
 
     Each sector gains ``industries`` (each with its own ``stocks``) and
-    ``orphan_stocks`` — constituents (5 of 296 on 2026-08-19) whose industry has
-    no row, since ``sentiment_svc.compute`` scores an industry only when its ETF
-    cleared ``_momentum_admit`` while every member stock is scored regardless.
+    ``orphan_stocks`` — constituents whose industry has no row. Since
+    2026-09-27 the middle level is GICS sub-industries, each an equal-weight
+    basket that ``sentiment_svc.compute`` scores only when enough of its members
+    are usable, while every member stock is scored on its own regardless.
     A row naming a parent that does not exist is DROPPED, never filed under an
     invented bucket that would put a phantom row in the counts — that module
     maps a stock in no scored industry to ``("", "")``, 10 of 296 that day.

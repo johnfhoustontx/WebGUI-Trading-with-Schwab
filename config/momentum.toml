@@ -1,0 +1,24 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/momentum.toml — the momentum cascade's GICS sub-industry baskets and
+# the Bull / Bear Map's live quotes
+#
+#   Edit a value here (or in Settings -> Configuration), restart sentiment_svc.
+#   Anything you delete falls back to the built-in default in
+#   services/sentiment_svc/momentum_config.py, as does a value below 1.
+#
+#   The universe itself is the "GICS Map" tab of
+#   sentiment-dashboard/GICS_Classification_Symbols.xlsx.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[subindustry]
+# A GICS sub-industry has no ETF, so it is scored as an equal-weight basket of
+# its listed symbols. It needs at least this many of them to clear the
+# liquidity and history checks; below it the sub-industry is reported as
+# excluded and its stocks are still scored on their own. At 1 a basket can be a
+# single stock under another name.
+min_members = 2
+
+[bullbear]
+# The Bull / Bear Map asks Schwab for every symbol's day move in batches of this
+# size. 375 is the largest batch measured to come back in one call.
+quote_batch = 375

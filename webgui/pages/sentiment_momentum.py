@@ -71,7 +71,7 @@ QUADRANTS = {
     "lagging": "Lagging",
 }
 
-LEVEL_OPTIONS = {"industry": "Industries", "stock": "Stocks"}
+LEVEL_OPTIONS = {"industry": "Sub-industries", "stock": "Stocks"}
 
 
 _ALIGN_FILLED = "▮"
@@ -354,7 +354,7 @@ def render(level="industry"):
                         align_lbl = ui.label("0").classes(
                             f"{theme.LABEL} tabular-nums text-[34px] font-medium "
                             "leading-none tracking-[-0.03em]")
-                        ui.label("stocks whose industry and sector both confirm") \
+                        ui.label("stocks whose sub-industry and sector both confirm") \
                             .classes(f"text-[13px] leading-[1.35] {_ALIGN_BODY}")
                     ui.label("The highest-conviction rows on the page — these are "
                              "the ones to take to Trade Analyzer.").classes(
@@ -510,7 +510,7 @@ def render(level="industry"):
         align_lbl.text = str(a["count"])
         with aligned_box:
             if not a["members"]:
-                ui.label("No stock has both its industry and its sector "
+                ui.label("No stock has both its sub-industry and its sector "
                          "behind it today.").classes(
                     f"text-[12.5px] leading-[1.4] {theme.MUTED}")
                 return

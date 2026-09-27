@@ -892,6 +892,34 @@ _PAPER = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Momentum / Bull-Bear Map — config/momentum.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_MOMENTUM = ConfigFile(
+    name="momentum.toml", title="Momentum & Bull / Bear Map", icon="account_tree",
+    summary="How GICS sub-industries are scored, and how the Bull / Bear Map "
+            "fetches its live day moves.",
+    restart=(SENTIMENT,),
+    sections=(
+        Section("Sub-industry baskets",
+                "A GICS sub-industry has no ETF, so it is scored as an equal-weight "
+                "basket of its listed stocks.", (
+            Field("subindustry.min_members", "Fewest stocks in a basket",
+                  "Below this many usable stocks the sub-industry is left out and "
+                  "its stocks are scored on their own. At 1, a basket can be one "
+                  "stock under another name.",
+                  kind="int", min=1, max=5, step=1),
+        )),
+        Section("Live quotes", "The Bull / Bear Map's day-move column.", (
+            Field("bullbear.quote_batch", "Symbols per quote request",
+                  "The map asks Schwab for every symbol's day move in batches of "
+                  "this size. 375 is the largest batch measured to come back in "
+                  "one call.",
+                  kind="int", min=50, max=500, step=25),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Market news — config/news.toml
 # ─────────────────────────────────────────────────────────────────────────────
 def _pts(key, label, help=""):
@@ -1177,7 +1205,7 @@ _NEWS = ConfigFile(
     ),
 )
 
-FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS,
+FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS, _MOMENTUM,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _SWING_MODEL, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

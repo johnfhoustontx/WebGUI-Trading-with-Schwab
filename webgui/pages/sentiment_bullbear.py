@@ -63,9 +63,9 @@ NO_SCORES = "Scores not yet computed"
 NO_QUOTES = ("Live quotes unavailable — the day-move column is empty. The "
              "scores, quadrants and breadth below are unaffected.")
 NOTHING_CHANGED = "Refreshed — the map was already current."
-NO_INDUSTRIES = "No scored industries in this sector"
+NO_INDUSTRIES = "No scored sub-industries in this sector"
 NO_STOCKS = "No scored member stocks"
-ORPHANS = "Not in a scored industry"
+ORPHANS = "Not in a scored sub-industry"
 
 # How long a Refresh may still be in flight. It has to be a clock, because on a
 # frozen tape there is no ack to wait for: ``handlers.publish_bullbear`` carries
@@ -305,8 +305,8 @@ def render():
         with ui.column().classes("w-full gap-2.5"):
             headline_lbl = ui.label("").classes(_HEADLINE[True])
             sub_lbl = ui.label(
-                "Counted at sector level. Expand a sector for the industries "
-                "inside it, an industry for its stocks — each level counts "
+                "Counted at sector level. Expand a sector for the GICS "
+                "sub-industries inside it, a sub-industry for its stocks — each level counts "
                 "separately.").classes(f"{_FAINT} text-[12.5px] leading-snug")
             dist_box = ui.row().classes("flex-wrap gap-1.5 pt-1")
 
@@ -325,7 +325,7 @@ def render():
                     with ui.element("div").classes(
                             f"{GRID} h-[34px] border-b {_HEAD_RULE}"):
                         for text, align in (
-                                ("Sector · Industry · Stock", "pl-6"),
+                                ("Sector · Sub-industry · Stock", "pl-6"),
                                 ("Quadrant", ""), ("Trend", "text-right pr-4"),
                                 ("vs SPY", "text-right pr-4"),
                                 ("Today", "text-right pr-4"), ("Breadth", "")):

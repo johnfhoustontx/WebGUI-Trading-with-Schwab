@@ -27,6 +27,37 @@ def test_bullbear_symbols_covers_all_three_levels_deduped():
         "XLV", "XBI", "AMGN", compute.MOMENTUM_BENCHMARK]
 
 
+def test_a_basket_row_is_never_quoted_but_its_members_are():
+    """A GICS sub-industry row's symbol is its 8-digit code — not a ticker. Its
+    members are asked for, even one too thin to be a scored stock row."""
+    levels = {"sector": [{"symbol": "XLK"}],
+              "industry": [{"symbol": "45301020", "basket": True,
+                            "members": ["NVDA", "THIN"]}],
+              "stock": [{"symbol": "NVDA"}]}
+    out = compute.bullbear_symbols(levels)
+    assert "45301020" not in out
+    assert out == ["XLK", "NVDA", "THIN", compute.MOMENTUM_BENCHMARK]
+
+
+def test_merge_live_gives_a_basket_the_mean_of_its_members_day_moves():
+    levels = {"industry": [{"symbol": "45301020", "basket": True,
+                            "members": ["A", "B", "C"]}]}
+    quotes = {"A": {"change_pct": 2.0}, "B": {"change_pct": -1.0},
+              compute.MOMENTUM_BENCHMARK: {"change_pct": 0.25}}
+    row = compute.merge_live(levels, quotes)["industry"][0]
+    # C was not quoted, so it is left out of the mean rather than counted as 0.
+    assert row["day_pct"] == pytest.approx(0.5)
+    assert row["day_excess"] == pytest.approx(0.25)
+
+
+def test_merge_live_leaves_a_basket_with_no_quoted_member_unread():
+    levels = {"industry": [{"symbol": "45301020", "basket": True,
+                            "members": ["A"]}]}
+    row = compute.merge_live(levels, {"45301020": {"change_pct": 9.0}})["industry"][0]
+    assert row["day_pct"] is None
+    assert row["day_excess"] is None
+
+
 def test_bullbear_symbols_skips_rows_with_no_usable_symbol():
     levels = {"sector": [{"symbol": ""}, {"symbol": None}, {}, None,
                          {"symbol": "XLV"}]}
@@ -159,6 +190,24 @@ def test_bullbear_quotes_forwards_the_symbol_list_to_the_shared_proxy_client(
     monkeypatch.setattr(_proxy, "schwab_client", client)
     assert compute._bullbear_quotes(["XLV", "AMGN"]) == {"XLV": {"change_pct": 1.0}}
     assert client.asked == [["XLV", "AMGN"]]
+
+
+def test_bullbear_quotes_batches_a_long_list_and_merges_the_answers(monkeypatch):
+    """The GICS universe is ~740 symbols; 375 is the largest batch measured to
+    return in one call, so the list goes out in config-sized batches."""
+    from services.sentiment_svc import momentum_config
+
+    class Echo(_RecordingClient):
+        def get_quotes(self, symbols):
+            self.asked.append(list(symbols))
+            return {s: {"change_pct": 1.0} for s in symbols}
+
+    client = Echo()
+    monkeypatch.setattr(_proxy, "schwab_client", client)
+    monkeypatch.setattr(momentum_config, "quote_batch", lambda: 2)
+    out = compute._bullbear_quotes(["A", "B", "C", "D", "E"])
+    assert client.asked == [["A", "B"], ["C", "D"], ["E"]]
+    assert set(out) == {"A", "B", "C", "D", "E"}
 
 
 def test_bullbear_quotes_does_not_ask_the_proxy_for_an_empty_symbol_list(

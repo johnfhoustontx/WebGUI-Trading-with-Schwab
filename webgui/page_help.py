@@ -1113,8 +1113,16 @@ heat band you read down the page rather than a table you read across.
     "/sentiment/bullbear": """
 **Bull / Bear Map — the simple version**
 
-Where the market is strong and weak, as a tree: eleven sectors, the industries
-inside each, and the stocks inside those. Click a row to open the level below it.
+Where the market is strong and weak, as a tree: eleven sectors, the GICS
+**sub-industries** inside each, and the stocks inside those. Click a row to open
+the level below it.
+
+- **A sub-industry has no ETF**, so its row is an **equal-weight basket** of the
+  up-to-five stocks the GICS map lists for it — each stock counts the same,
+  whatever its price. Its code (e.g. 45301020) sits where a ticker would. Its
+  **Today** move is the average of its members' moves. A sub-industry with
+  fewer than two usable stocks is left out, and its stocks show under **Not in a
+  scored sub-industry**.
 
 - **"Bullish" is two facts, not one**, and this page never merges them.
   **Trend** asks whether price is genuinely rising. **vs SPY** asks whether it is
@@ -1189,8 +1197,9 @@ which way it is heading.
     "/sentiment/momentum": """
 **Momentum — the simple version**
 
-Which sectors, industries and stocks are actually moving — and whether the
-current market pays for chasing them. Recomputed **once a night**, not live.
+Which sectors, GICS sub-industries and stocks are actually moving — and whether
+the current market pays for chasing them. A sub-industry has no ETF, so it is
+scored as an **equal-weight basket** of the stocks the GICS map lists for it. Recomputed **once a night**, not live.
 The page reads as five numbered steps, top to bottom.
 
 - **1 · Is it worth trading today?** All three states are shown side by side and
@@ -1203,11 +1212,11 @@ The page reads as five numbered steps, top to bottom.
   dispersion means everything is moving together, so a relative-strength screen
   has little to separate — the score still computes, it just matters less.
 - **2 · Three levels.** How many names in each universe are in their own top
-  quartile. The green panel counts the **stocks whose industry and sector both
-  confirm** — the highest-conviction rows on the page — and **lists them by
+  quartile. The green panel counts the **stocks whose sub-industry and sector
+  both confirm** — the highest-conviction rows on the page — and **lists them by
   rank** underneath. Clicking one decomposes it in section 4; because these are
   stocks, it switches the level selector to Stocks to do it. Hover a ticker for
-  its sector and industry.
+  its sector and sub-industry.
 - **3 · Where the names sit.** The four quadrants as counts: **Leading** (strong
   and still accelerating), **Improving** (weak but turning up), **Weakening**
   (strong but fading — late, don't chase), **Lagging** (weak and decelerating).
@@ -1221,7 +1230,7 @@ The page reads as five numbered steps, top to bottom.
   participation) — the current leader until you pick something else, and
   **Top ranked** puts it back. Leaderboard rows are clickable too.
   Bars run either side of a centre line, which is the universe average.
-  **Participation** is how many of an industry's constituents are above their own
+  **Participation** is how many of a sub-industry's stocks are above their own
   50-day average — leadership its own members don't confirm is thin.
 - **5 · Rank over recent sessions.** Steady climbers beat one-day pops. A short
   line means that name has fewer stored sessions, not a shorter trend.

@@ -47,9 +47,9 @@ def _tiny_universe():
     return {
         "stocks": ["AAA", "BBB", "CCC", "DDD"],
         "industries": [
-            {"sector": "Tech", "industry": "Chips", "etf": "SMH",
+            {"sector": "Tech", "industry": "Chips", "code": "45301020",
              "members": ["AAA", "BBB"]},
-            {"sector": "Tech", "industry": "Software", "etf": "IGV",
+            {"sector": "Tech", "industry": "Software", "code": "45103010",
              "members": ["CCC", "DDD"]},
         ],
         "sectors": [{"sector": "Tech", "etf": "XLK",
@@ -66,29 +66,31 @@ def tiny(monkeypatch):
 
 # --- universe ---------------------------------------------------------------
 
-def test_universe_covers_every_constituent_and_industry_etf():
+def test_universe_is_the_gics_map():
     uni = compute._momentum_universe()
 
-    assert len(uni["stocks"]) == 311
-    # 74 industries on the Stocks tab, but 4 share an ETF another industry
-    # already owns — scoring the same price series twice would put duplicate
-    # rows in the cross-section and invent a "two industries agree" signal.
-    assert len(uni["industries"]) == 70
-    assert len(uni["orphans"]) == 4
+    # The GICS Map tab: 725 symbols over 163 sub-industries, one of which
+    # (Drug Retail) lists no symbol at all and is reported rather than lost.
+    assert len(uni["stocks"]) == 725
+    assert len(uni["industries"]) == 162
+    assert uni["orphans"] == [{"sector": "Consumer Staples",
+                               "industry": "Drug Retail", "code": "30101010",
+                               "reason": "no_members"}]
     assert len(uni["sectors"]) == 11
 
 
-def test_orphan_industries_still_feed_their_sector():
+def test_every_stock_sits_in_exactly_one_sub_industry_of_its_sector():
     uni = compute._momentum_universe()
-    tech = {s["sector"]: s for s in uni["sectors"]}
 
-    every_member = {m for s in tech.values() for m in s["members"]}
-    assert len(every_member) > 0
-    for orphan in uni["orphans"]:
-        assert orphan["reason"] == "duplicate_etf"
+    placed = [m for i in uni["industries"] for m in i["members"]]
+    assert sorted(placed) == sorted(uni["stocks"])
+    by_sector = {s["sector"]: set(s["members"]) for s in uni["sectors"]}
+    for ind in uni["industries"]:
+        assert set(ind["members"]) <= by_sector[ind["sector"]]
+        assert len(ind["code"]) == 8
 
 
-def test_fetch_universe_is_constituents_plus_etfs_plus_benchmark():
+def test_fetch_universe_is_stocks_plus_sector_etfs_plus_benchmark():
     uni = compute._momentum_universe()
 
     symbols = compute._momentum_fetch_symbols(uni)
@@ -96,7 +98,10 @@ def test_fetch_universe_is_constituents_plus_etfs_plus_benchmark():
     assert len(symbols) == len(set(symbols))
     assert compute.MOMENTUM_BENCHMARK in symbols
     assert set(uni["stocks"]) <= set(symbols)
-    assert {i["etf"] for i in uni["industries"]} <= set(symbols)
+    assert {s["etf"] for s in uni["sectors"]} <= set(symbols)
+    # A sub-industry is a basket of its members — it has no price series of its
+    # own to fetch, and the 8-digit code must never reach the proxy.
+    assert not {i["code"] for i in uni["industries"]} & set(symbols)
 
 
 # --- delta fetch ------------------------------------------------------------
@@ -107,8 +112,9 @@ def test_first_run_fetches_every_symbol(conn, tiny):
     compute.compute_momentum(session_date="2026-07-28", conn=conn, client=client)
 
     fetched = {s for s, _ in client.requested}
-    assert {"AAA", "BBB", "CCC", "DDD", "SMH", "IGV", "XLK",
+    assert {"AAA", "BBB", "CCC", "DDD", "XLK",
             compute.MOMENTUM_BENCHMARK} <= fetched
+    assert not {"45301020", "45103010"} & fetched
 
 
 def test_a_symbol_already_current_is_not_refetched(conn, tiny):
@@ -318,33 +324,40 @@ def test_rank_history_accumulates_across_sessions(conn, tiny):
 
 # --- liquidity floors differ by role ----------------------------------------
 
-def test_a_thin_industry_etf_is_kept_but_a_thin_stock_is_not(conn, tiny):
-    # The $5M floor asks "can I hold a position" — right for a stock, wrong for
-    # an industry ETF, which is a measurement instrument for its constituents.
+def _industry(payload, label):
+    return next((r for r in payload["levels"]["industry"]
+                 if r["label"] == label), None)
+
+
+def test_a_thin_stock_still_measures_its_basket_but_is_not_ranked(conn, tiny):
+    # The $5M floor asks "can I hold a position" — right for a stock row, wrong
+    # for a basket member, which is only measuring its sub-industry. So a thin
+    # name is dropped from the stock level but still counts in its basket.
     client = FakeClient()
     thin = FakeClient(volume=400_000.0)
     original = client.get_daily_history
 
     def mixed(symbol, months=12):
         return thin.get_daily_history(symbol, months) \
-            if symbol in {"SMH", "BBB"} else original(symbol, months)
+            if symbol == "BBB" else original(symbol, months)
 
     client.get_daily_history = mixed
 
     payload = compute.compute_momentum(session_date="2026-07-28", conn=conn,
                                        client=client)
 
-    assert "SMH" in {r["symbol"] for r in payload["levels"]["industry"]}
     assert "BBB" not in {r["symbol"] for r in payload["levels"]["stock"]}
+    assert _industry(payload, "Chips")["members"] == ["AAA", "BBB"]
 
 
-def test_an_untradeable_etf_price_series_is_still_dropped(conn, tiny):
+def test_an_untradeable_member_leaves_the_basket_and_a_short_basket_is_excluded(
+        conn, tiny):
     client = FakeClient()
     dead = FakeClient(volume=100.0)
     original = client.get_daily_history
 
     def mixed(symbol, months=12):
-        return dead.get_daily_history(symbol, months) if symbol == "SMH" \
+        return dead.get_daily_history(symbol, months) if symbol == "BBB" \
             else original(symbol, months)
 
     client.get_daily_history = mixed
@@ -352,7 +365,110 @@ def test_an_untradeable_etf_price_series_is_still_dropped(conn, tiny):
     payload = compute.compute_momentum(session_date="2026-07-28", conn=conn,
                                        client=client)
 
-    assert "SMH" not in {r["symbol"] for r in payload["levels"]["industry"]}
+    # Chips keeps one usable member, below the shipped minimum of two.
+    assert _industry(payload, "Chips") is None
+    assert _excluded(payload)["Chips"] == "too_few_members"
+    # AAA is still scored as a stock, and Software is unaffected.
+    assert "AAA" in {r["symbol"] for r in payload["levels"]["stock"]}
+    assert _industry(payload, "Software") is not None
+
+
+def test_the_minimum_basket_size_comes_from_config(conn, tiny, monkeypatch):
+    from services.sentiment_svc import momentum_config
+    monkeypatch.setattr(momentum_config, "min_basket_members", lambda: 3)
+
+    payload = compute.compute_momentum(session_date="2026-07-28", conn=conn,
+                                       client=FakeClient())
+
+    assert payload["levels"]["industry"] == []
+    assert _excluded(payload)["Chips"] == "too_few_members"
+
+
+def test_a_sub_industry_row_is_a_basket_keyed_by_its_gics_code(conn, tiny):
+    payload = compute.compute_momentum(session_date="2026-07-28", conn=conn,
+                                       client=FakeClient())
+
+    chips = _industry(payload, "Chips")
+    assert chips["symbol"] == "45301020"
+    assert chips["sector"] == "Tech"
+    assert chips["basket"] is True
+    assert chips["members"] == ["AAA", "BBB"]
+    assert chips["raw"]["trend"] is not None
+
+
+def test_stock_rows_name_their_sub_industry(conn, tiny):
+    payload = compute.compute_momentum(session_date="2026-07-28", conn=conn,
+                                       client=FakeClient())
+
+    by_symbol = {r["symbol"]: r for r in payload["levels"]["stock"]}
+    assert by_symbol["AAA"]["industry"] == "Chips"
+    assert by_symbol["CCC"]["industry"] == "Software"
+
+
+def test_rank_history_only_names_rows_scored_this_session(conn, tiny):
+    # The universe changed on 2026-09-27 (ETF industries -> GICS sub-industry
+    # baskets). A prior session's rows for names no longer scored must not be
+    # charted beside today's, where an old rank 1 would read as a leader.
+    momentum_db.write_scores(conn, "2026-07-27", "industry", [
+        {"symbol": "SMH", "score": 1.0, "percentile": 100.0, "rank": 1,
+         "components": {}, "participation": 0.5}])
+
+    payload = compute.compute_momentum(session_date="2026-07-28", conn=conn,
+                                       client=FakeClient())
+
+    assert "SMH" not in payload["rank_history"]["industry"]
+    assert "45301020" in payload["rank_history"]["industry"]
+
+
+def test_baskets_still_build_when_the_benchmark_fails(conn, tiny):
+    payload = compute.compute_momentum(
+        session_date="2026-07-28", conn=conn,
+        client=FakeClient(fail={compute.MOMENTUM_BENCHMARK}))
+
+    assert {r["label"] for r in payload["levels"]["industry"]} == \
+        {"Chips", "Software"}
+
+
+# --- the equal-weight basket (pure) -----------------------------------------
+
+def test_basket_is_the_mean_of_member_daily_returns():
+    grid = ["d0", "d1", "d2"]
+    members = {"A": ([100.0, 110.0, 110.0], grid),
+               "B": ([50.0, 50.0, 55.0], grid)}
+
+    level = compute._momentum_basket(members, grid)
+
+    # d1: (+10% + 0%) / 2 = +5%; d2: (0% + 10%) / 2 = +5%.
+    assert level == pytest.approx([100.0, 105.0, 110.25])
+
+
+def test_basket_weights_are_equal_not_price_weighted():
+    grid = ["d0", "d1"]
+    members = {"PRICEY": ([1000.0, 1100.0], grid),   # +10%
+               "CHEAP": ([10.0, 9.0], grid)}         # -10%
+
+    assert compute._momentum_basket(members, grid) == pytest.approx([100.0, 100.0])
+
+
+def test_a_member_joins_the_basket_when_its_history_starts():
+    grid = ["d0", "d1", "d2"]
+    members = {"OLD": ([100.0, 100.0, 100.0], grid),
+               "NEW": ([20.0, 22.0], ["d1", "d2"])}
+
+    # d1: only OLD has a return (0%); d2: (0% + 10%) / 2.
+    assert compute._momentum_basket(members, grid) == pytest.approx(
+        [100.0, 100.0, 105.0])
+
+
+def test_basket_starts_at_the_first_date_any_member_has():
+    members = {"A": ([10.0, 11.0], ["d1", "d2"])}
+
+    assert compute._momentum_basket(members, ["d0", "d1", "d2"]) == \
+        pytest.approx([100.0, 110.0])
+
+
+def test_an_empty_basket_is_empty():
+    assert compute._momentum_basket({}, ["d0", "d1"]) == []
 
 
 def test_the_two_floors_are_separate_named_constants():

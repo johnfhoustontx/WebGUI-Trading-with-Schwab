@@ -24,7 +24,7 @@ import time
 
 from repo_paths import SENTIMENT, SHARED
 from services._parallel import parallel_map
-from services.sentiment_svc import momentum_db
+from services.sentiment_svc import momentum_config, momentum_db
 
 log = logging.getLogger(__name__)
 
@@ -1807,11 +1807,12 @@ MOMENTUM_MIN_BARS = 90                    # == scoring.momentum.TREND_WINDOW
 MOMENTUM_LIQUIDITY_WINDOW = 20
 # Two floors, because the question differs by role. For a STOCK it is "can I
 # hold a position" — several small caps on the Stocks tab cannot support one and
-# would otherwise top the leaderboard on a thin-volume pop. For an industry or
-# sector ETF it is only "is this price series trustworthy": the ETF is a
-# measurement instrument and the trade is expressed through its constituents, so
-# a position-sized floor there silently deletes a third of the cross-section
-# (measured: 23 of 70 industry ETFs on 2026-07-28).
+# would otherwise top the leaderboard on a thin-volume pop. For a sector ETF, or
+# a stock that is only MEASURING its GICS sub-industry basket, it is "is this
+# price series trustworthy": a measurement instrument, with the trade expressed
+# elsewhere, so a position-sized floor there silently deletes part of the
+# cross-section (measured: 23 of 70 industry ETFs on 2026-07-28, when the middle
+# level was still industry ETFs).
 MOMENTUM_MIN_DOLLAR_VOLUME = 5_000_000.0
 MOMENTUM_MIN_ETF_DOLLAR_VOLUME = 250_000.0
 MOMENTUM_TOP_QUARTILE = 75.0
@@ -1820,49 +1821,82 @@ MOMENTUM_FETCH_WORKERS = 6
 
 
 def _momentum_universe():
-    """The three levels, plus the industries that cannot have their own score.
+    """The three levels, from the GICS Map tab (2026-09-27).
 
-    Four of the Stocks tab's 74 industries name an ETF that another industry
-    already owns (MJ, XRT, BETZ and VEGI are each listed twice in the
-    workbook). Scoring one price series under two labels would put duplicate
-    rows in the cross-section and invent a "two industries agree" signal, so
-    those four are reported as orphans instead — their constituents still roll
-    up to the sector level and are still scored individually.
+    The middle level is the GICS SUB-INDUSTRY, and a sub-industry has no ETF:
+    it is scored as an equal-weight basket of its listed symbols (see
+    ``_momentum_basket``), so each industry entry carries its 8-digit ``code``
+    and its ``members`` rather than an ``etf``. The sector level is still the
+    SPDR sector ETF, joined to the GICS sector by name.
+
+    A sub-industry that lists no symbol at all (Drug Retail, today) is reported
+    as an orphan rather than silently dropped.
     """
     import sectors_ref
 
-    by_industry = sectors_ref.constituents_by_industry()
-    etf_by_key, sector_etf = {}, {}
-    for row in sectors_ref.load_sectors_data():
-        if row["kind"] == "industry":
-            etf_by_key[(row["sector"], row["label"])] = row["etf"]
-        elif row["etf"]:
-            sector_etf[row["sector"]] = row["etf"]
+    sector_etf = {row["sector"]: row["etf"]
+                  for row in sectors_ref.load_sectors_data()
+                  if row["kind"] == "sector" and row["etf"]}
 
     industries, orphans, members_by_sector = [], [], {}
-    for (sector, industry), members in by_industry.items():
+    for row in sectors_ref.load_gics_map():
+        sector, members = row["sector"], list(row["symbols"])
         members_by_sector.setdefault(sector, []).extend(members)
-        etf = etf_by_key.get((sector, industry))
-        if not etf:
-            orphans.append({"sector": sector, "industry": industry,
-                            "reason": "duplicate_etf"})
+        if not members:
+            orphans.append({"sector": sector, "industry": row["sub_industry"],
+                            "code": row["code"], "reason": "no_members"})
             continue
-        industries.append({"sector": sector, "industry": industry,
-                           "etf": etf, "members": list(members)})
+        industries.append({"sector": sector, "industry": row["sub_industry"],
+                           "code": row["code"], "members": members})
 
     sectors = [{"sector": sector, "etf": sector_etf[sector],
                 "members": sorted(set(members))}
                for sector, members in members_by_sector.items()
                if sector_etf.get(sector)]
-    return {"stocks": sectors_ref.stock_symbols(), "industries": industries,
+    return {"stocks": sectors_ref.gics_symbols(), "industries": industries,
             "sectors": sectors, "orphans": orphans}
 
 
+def _momentum_basket(members, grid):
+    """PURE: an equal-weight index of ``members`` on the date ``grid``.
+
+    ``members`` is ``{symbol: (closes, dates)}`` and ``grid`` the benchmark's
+    dates, oldest first. Each step is the MEAN of the members' daily returns
+    that day — equal weight, so a $1,000 stock and a $10 one move the basket
+    alike — compounded from 100. A member counts from its second bar, so a
+    recent listing joins when its history starts instead of shortening the
+    whole basket; a day on which no member has a return carries the level.
+
+    The index starts at the first grid date any member has a bar for, and is
+    returned on the grid's tail so ``scoring.momentum`` can align it with the
+    benchmark exactly as it aligns an ETF's closes. ``[]`` when no member has
+    a bar on the grid.
+    """
+    prices = [dict(zip(dates, closes)) for closes, dates in members.values()]
+    level, value, prev = [], 100.0, None
+    for day in grid:
+        if not level:
+            if any(day in p for p in prices):
+                level.append(value)
+                prev = day
+            continue
+        rets = [p[day] / p[prev] - 1.0 for p in prices
+                if day in p and p.get(prev)]
+        if rets:
+            value *= 1.0 + sum(rets) / len(rets)
+        level.append(value)
+        prev = day
+    return level
+
+
 def _momentum_fetch_symbols(universe):
-    """Every symbol needing bars, deduped, benchmark included."""
+    """Every symbol needing bars, deduped, benchmark included.
+
+    A sub-industry is a basket of stocks already in ``stocks``, so it adds no
+    symbol of its own — its GICS code must never reach the proxy.
+    """
     out, seen = [], set()
     for symbol in ([MOMENTUM_BENCHMARK] + list(universe["stocks"])
-                   + [i["etf"] for i in universe["industries"]]
                    + [s["etf"] for s in universe["sectors"]]):
         if symbol and symbol not in seen:
             seen.add(symbol)
@@ -1930,13 +1964,18 @@ def _momentum_sync_bars(symbols, conn, session_date, client):
 
 
 def _momentum_series(conn, symbols):
-    """{symbol: (closes, dollar_volumes)} from the store."""
+    """{symbol: (closes, dollar_volumes, dates)} from the store.
+
+    ``dates`` pairs one-to-one with ``closes`` (both skip a missing close); the
+    sub-industry baskets need them to line members up by day.
+    """
     out = {}
     for symbol in symbols:
         rows = momentum_db.bars(conn, symbol, limit=MOMENTUM_BARS)
         closes = [r["close"] for r in rows if r["close"]]
+        dates = [r["date"] for r in rows if r["close"]]
         dollars = [(r["close"] or 0.0) * (r["volume"] or 0.0) for r in rows]
-        out[symbol] = (closes, dollars)
+        out[symbol] = (closes, dollars, dates)
     return out
 
 
@@ -1946,7 +1985,7 @@ def _momentum_admit(symbol, series, floor=MOMENTUM_MIN_DOLLAR_VOLUME):
     A dropped symbol leaves the z-score population entirely; it must never
     become a zero in the distribution.
     """
-    closes, dollars = series.get(symbol, ([], []))
+    closes, dollars = series.get(symbol, ([], [], []))[:2]
     if not closes:
         return None, "no_quote"
     if len(closes) < MOMENTUM_MIN_BARS:
@@ -2094,9 +2133,8 @@ def compute_momentum(session_date=None, conn=None, client=None):
         series = _momentum_series(conn, symbols)
 
         excluded = [dict(o, symbol=o["industry"]) for o in universe["orphans"]]
-        etfs = ({i["etf"] for i in universe["industries"]}
-                | {s["etf"] for s in universe["sectors"]} | {MOMENTUM_BENCHMARK})
-        admitted = {}
+        etfs = {s["etf"] for s in universe["sectors"]} | {MOMENTUM_BENCHMARK}
+        admitted, measurable = {}, {}
         for symbol in symbols:
             floor = (MOMENTUM_MIN_ETF_DOLLAR_VOLUME if symbol in etfs
                      else MOMENTUM_MIN_DOLLAR_VOLUME)
@@ -2105,7 +2143,16 @@ def compute_momentum(session_date=None, conn=None, client=None):
                 excluded.append({"symbol": symbol, "reason": reason})
             else:
                 admitted[symbol] = closes
+            # A basket member only MEASURES its sub-industry, so it answers the
+            # instrument's question ("is this series trustworthy"), not the
+            # position's — the same split the two floors already draw.
+            closes, reason = _momentum_admit(symbol, series,
+                                             MOMENTUM_MIN_ETF_DOLLAR_VOLUME)
+            if not reason:
+                measurable[symbol] = closes
         bench = admitted.get(MOMENTUM_BENCHMARK) or []
+        grid = (series.get(MOMENTUM_BENCHMARK, ([], [], []))[2]
+                if bench else [])
 
         industry_of = {}
         for ind in universe["industries"]:
@@ -2120,14 +2167,30 @@ def compute_momentum(session_date=None, conn=None, client=None):
                                   "sector": sector, "industry": industry})
 
         def _participation(members):
-            return momentum.participation([admitted[m] for m in members
-                                           if m in admitted])
+            return momentum.participation([measurable[m] for m in members
+                                           if m in measurable])
 
-        industry_entries = [
-            {"symbol": i["etf"], "label": i["industry"], "sector": i["sector"],
-             "closes": admitted[i["etf"]],
-             "participation": _participation(i["members"])}
-            for i in universe["industries"] if i["etf"] in admitted]
+        min_members = momentum_config.min_basket_members()
+        industry_entries = []
+        for ind in universe["industries"]:
+            members = [m for m in ind["members"] if m in measurable]
+            # The benchmark's days, so the basket aligns with SPY bar for bar;
+            # the members' own days only when SPY itself failed to load.
+            basket = _momentum_basket(
+                {m: (series[m][0], series[m][2]) for m in members},
+                grid or sorted({d for m in members for d in series[m][2]})) \
+                if len(members) >= min_members else []
+            if len(basket) < MOMENTUM_MIN_BARS:
+                excluded.append({"symbol": ind["industry"], "code": ind["code"],
+                                 "sector": ind["sector"],
+                                 "reason": "too_few_members"
+                                 if len(members) < min_members
+                                 else "insufficient_bars"})
+                continue
+            industry_entries.append({
+                "symbol": ind["code"], "label": ind["industry"],
+                "sector": ind["sector"], "basket": True, "members": members,
+                "closes": basket, "participation": _participation(members)})
         sector_entries = [
             {"symbol": s["etf"], "label": s["sector"], "closes": admitted[s["etf"]],
              "participation": _participation(s["members"])}
@@ -2167,8 +2230,15 @@ def compute_momentum(session_date=None, conn=None, client=None):
         # session — otherwise it is empty on the very first run.
         for level, rows in levels.items():
             momentum_db.write_scores(conn, session_date, level, rows)
-        payload["rank_history"] = {
-            level: momentum_db.rank_history(conn, level) for level in levels}
+        # Only rows scored THIS session: stored history can name symbols the
+        # universe no longer holds (the 2026-09-27 switch from industry ETFs to
+        # GICS sub-industry baskets), and an old rank 1 would chart as a leader.
+        payload["rank_history"] = {}
+        for level, rows in levels.items():
+            current = {r["symbol"] for r in rows}
+            payload["rank_history"][level] = {
+                sym: hist for sym, hist in momentum_db.rank_history(conn, level).items()
+                if sym in current}
         momentum_db.prune(conn)
     except Exception:
         log.exception("momentum: compute failed")
@@ -2199,17 +2269,21 @@ BULLBEAR_LEVELS = ("sector", "industry", "stock")
 def bullbear_symbols(levels):
     """Every distinct symbol across the three levels, plus the benchmark.
 
-    Deduped because an industry ETF is usually a scored stock as well, and
-    MOMENTUM_BENCHMARK can itself be a scored row. Order preserved; the
+    Deduped because a basket's members are usually scored stock rows as well,
+    and MOMENTUM_BENCHMARK can itself be a scored row. Order preserved; the
     benchmark goes last, and only when no row already carries it.
     """
     out, seen = [], set()
     for name in BULLBEAR_LEVELS:
         for row in (levels or {}).get(name) or []:
-            symbol = (row or {}).get("symbol")
-            if symbol and symbol not in seen:
-                seen.add(symbol)
-                out.append(symbol)
+            row = row or {}
+            # A GICS sub-industry basket's symbol is its 8-digit code, not a
+            # ticker: its day move is its members', so ask for them instead.
+            for symbol in (row.get("members") or [] if row.get("basket")
+                           else [row.get("symbol")]):
+                if symbol and symbol not in seen:
+                    seen.add(symbol)
+                    out.append(symbol)
     # One more symbol, not one more request: 374 came back in a single call
     # (measured 2026-08-19), so a live relative axis can be computed against the
     # benchmark's own day move for no new proxy round-trip and no new schedule.
@@ -2253,6 +2327,18 @@ def _quoted_day_pct(quotes, symbol):
     return _as_finite(pct)
 
 
+def _basket_day_pct(quotes, members):
+    """A sub-industry basket's day move: the mean of its QUOTED members'.
+
+    Equal weight, matching how ``_momentum_basket`` builds the nightly index.
+    A member the proxy omitted is left out of the mean, never counted as 0.0;
+    with no quoted member at all the basket has no reading (None).
+    """
+    moves = [m for m in (_quoted_day_pct(quotes, s) for s in members or [])
+             if m is not None]
+    return sum(moves) / len(moves) if moves else None
+
+
 def merge_live(levels, quotes):
     """Attach ``day_pct`` and ``day_excess`` to a COPY of every row.
 
@@ -2276,7 +2362,9 @@ def merge_live(levels, quotes):
         rows = []
         for row in (levels or {}).get(name) or []:
             out_row = dict(row or {})
-            day = _quoted_day_pct(quotes, out_row.get("symbol"))
+            day = (_basket_day_pct(quotes, out_row.get("members"))
+                   if out_row.get("basket")
+                   else _quoted_day_pct(quotes, out_row.get("symbol")))
             out_row["day_pct"] = day
             # None when EITHER side is absent.
             out_row["day_excess"] = (
@@ -2287,16 +2375,23 @@ def merge_live(levels, quotes):
 
 
 def _bullbear_quotes(symbols):
-    """One batched ``/quotes`` call for every symbol.
+    """Batched ``/quotes`` calls covering every symbol, merged into one mapping.
 
-    Measured 2026-08-19: the tree's 374 came back in a SINGLE call, so asking
-    for those plus the benchmark is one request per poll and not one per name.
+    Measured 2026-08-19: the tree's 374 came back in a SINGLE call. The GICS
+    universe (2026-09-27) is about twice that, so the list goes out in batches
+    of ``momentum.toml [bullbear] quote_batch`` (375) — two requests per poll,
+    still never one per name. A failing batch raises, exactly as the single
+    call did, so ``bullbear_view`` degrades the same way.
     """
     from services import _proxy
 
-    if not symbols:
-        return {}
-    return _proxy.schwab_client.get_quotes(list(symbols)) or {}
+    symbols = list(symbols or [])
+    size = momentum_config.quote_batch()
+    out = {}
+    for start in range(0, len(symbols), size):
+        out.update(_proxy.schwab_client.get_quotes(symbols[start:start + size])
+                   or {})
+    return out
 
 
 def bullbear_view(momentum) -> dict:

@@ -204,7 +204,7 @@ def test_normalise_level_rejects_junk():
 
 
 def test_section_heading_names_the_level():
-    assert "Industries" in sm.section_heading("Leaders", "industry")
+    assert "Sub-industries" in sm.section_heading("Leaders", "industry")
     assert "Stocks" in sm.section_heading("Leaders", "stock")
 
 

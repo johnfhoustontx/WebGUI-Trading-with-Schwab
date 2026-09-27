@@ -115,7 +115,7 @@ def dispersion(regime):
 
 # ── 2 · the three levels ─────────────────────────────────────────────────────
 LEVEL_ORDER = ("sector", "industry", "stock")
-LEVEL_NAMES = {"sector": "Sectors", "industry": "Industries", "stock": "Stocks"}
+LEVEL_NAMES = {"sector": "Sectors", "industry": "Sub-industries", "stock": "Stocks"}
 TOP_QUARTILE = 75.0
 
 
@@ -441,7 +441,8 @@ LIMITS = [
     ("Nightly",
      "Recomputed once at 16:20 CT on daily bars. It cannot react to today's news."),
     ("Coarse sample",
-     "Participation is measured on a handful of constituents per industry."),
+     "Participation is measured on up to five listed stocks per GICS "
+     "sub-industry."),
     ("Blind spots",
      "Says nothing about valuation or event risk — an earnings date overrides "
      "everything here."),

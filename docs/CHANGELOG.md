@@ -4,7 +4,30 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-27 (**the swing model refits monthly, and ships only past a
+**Last updated:** 2026-09-27 (**Bull / Bear Map and Momentum on GICS sub-industries** —
+the middle level is now the 163 GICS sub-industries, each an equal-weight basket of the
+GICS Map tab's listed stocks.)
+
+- **Universe:** `sentiment-dashboard/GICS_Classification_Symbols.xlsx` (GICS Map tab,
+  725 symbols) replaces the Stocks tab + industry ETFs for the momentum cascade
+  (`sectors_ref.load_gics_map` / `gics_symbols`). Sectors stay on their SPDR ETFs.
+- **Scoring:** a sub-industry has no ETF, so `compute._momentum_basket` builds an
+  equal-weight index of its members on SPY's date grid, scored exactly as an ETF was.
+  Row `symbol` is the 8-digit GICS code, with `basket: true` and `members`. The level
+  key stays `industry` (contract, `momentum_scores`, the public `/momentum` pin); only
+  the display words moved to "Sub-industries".
+- **Live layer:** a basket's code is never quoted. Its members are, and its day move is
+  their mean. `/quotes` now goes out in batches of 375 (`config/momentum.toml`,
+  new, in Settings → Configuration), which is two calls per poll.
+- **Exclusions:** fewer than 2 usable members → `too_few_members` (today: Highways &
+  Railtracks, Marine Ports & Services, Specialized Finance), and no listed symbol →
+  `no_members` (Drug Retail). Rank history is cut to rows scored this session, so the
+  old ETF universe's ranks never chart beside the new one.
+- **First night after deploy:** ~500 new symbols backfill a year of bars (~100 s), and
+  the stock Δ column compares against the old 311-stock ranks for one session.
+- Design: [gics-subindustries](plans/2026-09-27-bullbear-gics-subindustries-design.md).
+
+**Prior —** 2026-09-27 (**the swing model refits monthly, and ships only past a
 gate** — its timer was a comment since the Linux move.)
 
 - **`trading-<env>-swing-refit.{service,timer}`**: the 1st of each month at
