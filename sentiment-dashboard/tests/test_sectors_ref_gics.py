@@ -62,9 +62,33 @@ def test_sector_names_match_the_sector_etf_rows():
 def test_gics_symbols_is_the_deduped_universe_in_workbook_order():
     symbols = sectors_ref.gics_symbols()
 
-    assert len(symbols) == 725
+    assert len(symbols) == 719
     assert len(symbols) == len(set(symbols))
     assert symbols[:3] == ["NE", "RIG", "VAL"]
+
+
+def test_renamed_tickers_carry_their_new_symbols():
+    # Operator corrections, 2026-09-27: each old ticker returned no quote and no
+    # history from Schwab; the new one quotes.
+    rows = {r["sub_industry"]: r["symbols"] for r in sectors_ref.load_gics_map()}
+
+    assert "BNY" in rows["Asset Management & Custody Banks"]
+    assert "MRSH" in rows["Insurance Brokers"]
+    assert "ECHO" in rows["Cable & Satellite"]
+    assert "ACH" in rows["Health Care Distributors"]
+
+
+def test_symbols_schwab_calls_invalid_are_gone():
+    # Schwab lists these six in ``invalidSymbols`` (measured on prod
+    # 2026-09-27); the operator dropped them from the map.
+    dropped = {"BK", "MMC", "SATS", "OMI",
+               "TEF", "NSA", "LEG", "ATGE", "PCH", "SMNEY"}
+
+    assert not dropped & set(sectors_ref.gics_symbols())
+    rows = {r["sub_industry"]: r["symbols"] for r in sectors_ref.load_gics_map()}
+    # A removal closes the gap rather than leaving a hole mid-row.
+    assert rows["Home Furnishings"] == ["MHK", "SGI", "LZB", "ETD"]
+    assert rows["Timber REITs"] == ["WY", "RYN"]
 
 
 def test_share_classes_are_spelled_the_way_schwab_quotes_them():

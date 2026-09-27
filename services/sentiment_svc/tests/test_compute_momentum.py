@@ -69,9 +69,9 @@ def tiny(monkeypatch):
 def test_universe_is_the_gics_map():
     uni = compute._momentum_universe()
 
-    # The GICS Map tab: 725 symbols over 163 sub-industries, one of which
+    # The GICS Map tab: 719 symbols over 163 sub-industries, one of which
     # (Drug Retail) lists no symbol at all and is reported rather than lost.
-    assert len(uni["stocks"]) == 725
+    assert len(uni["stocks"]) == 719
     assert len(uni["industries"]) == 162
     assert uni["orphans"] == [{"sector": "Consumer Staples",
                                "industry": "Drug Retail", "code": "30101010",

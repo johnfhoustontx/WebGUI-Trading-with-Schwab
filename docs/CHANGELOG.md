@@ -29,9 +29,11 @@ GICS Map tab's listed stocks.)
   (689 KB). Excluded: 38 for liquidity (mostly OTC ADRs and micro-caps), 4 baskets
   under two members, Drug Retail with none, and 12 `no_quote`. Two of those were
   spelling: the workbook writes `BRK.B` / `BF.B` and Schwab serves only `BRK/B` /
-  `BF/B`, so `load_gics_map` now converts the dot. The other ten — BK, MMC, TEF, SATS,
-  NSA, LEG, ATGE, OMI, PCH, SMNEY — return no quote and no history at all from Schwab;
-  they are workbook entries to correct, not a code fault.
+  `BF/B`, so `load_gics_map` now converts the dot. The other ten returned nothing from
+  Schwab, and the repo's copy of the workbook was corrected (operator, same day): four
+  renames — BK → **BNY**, MMC → **MRSH**, SATS → **ECHO**, OMI → **ACH** (Accendra
+  Health) — and six dropped, which Schwab lists in `invalidSymbols` (TEF, NSA, LEG,
+  ATGE, PCH, SMNEY: non-US listings). The universe is **719** symbols.
 - Design: [gics-subindustries](plans/2026-09-27-bullbear-gics-subindustries-design.md).
 
 **Prior —** 2026-09-27 (**the swing model refits monthly, and ships only past a
