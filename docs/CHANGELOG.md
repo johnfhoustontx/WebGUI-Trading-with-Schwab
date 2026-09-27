@@ -11,7 +11,8 @@ gate** — its timer was a comment since the Linux move.)
   `[slots.swing_refit]` (**19:00 CT**), running `tools/refit_swing_model.sh` (archive the
   live model, refuse without a proxy, fit, diff the reports). `Persistent=true`,
   `ExecStartPre` waits for the proxy so a catch-up at boot is not refused, `Nice=10`,
-  `TimeoutStartSec` 3600. Until now the wrapper's header *described* this timer and nothing
+  `TimeoutStartSec` 7200 (a `--no-ship` trial on prod took 2240 s; raised from 3600 at
+  the operator's request the same day). Until now the wrapper's header *described* this timer and nothing
   installed it: the live `swing_model.json` was still the 2026-08-22 fit.
 - **The ship gate is the operator's decision** (asked 2026-09-27: ship only if it passes).
   `trade_svc` re-reads the artifact on every call, so the fit's write IS the deploy, and

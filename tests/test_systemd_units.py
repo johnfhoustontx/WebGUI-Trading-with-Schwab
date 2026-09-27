@@ -1159,9 +1159,13 @@ def test_the_swing_refit_is_not_a_member_of_the_fleet(rendered):
     assert SR_SVC not in stack_services()
 
 
-def test_the_swing_refit_outlasts_the_default_start_timeout(rendered):
-    """Five years of daily bars for ~90 symbols plus a walk-forward fit."""
-    assert int(rendered[SR_SVC]["Service"]["TimeoutStartSec"]) >= 1800
+def test_the_swing_refit_has_room_over_its_measured_runtime(rendered):
+    """Five years of daily bars for ~90 symbols plus a walk-forward fit: 2240 s
+    measured on vps2 (2026-09-27). A limit under ~3x that is one busy evening
+    away from killing the fit every month -- which fails safe (nothing ships)
+    but means the model is never refitted."""
+    measured = 2240
+    assert int(rendered[SR_SVC]["Service"]["TimeoutStartSec"]) >= 3 * measured
 
 
 def test_the_swing_refit_runs_below_the_services_priority(rendered):

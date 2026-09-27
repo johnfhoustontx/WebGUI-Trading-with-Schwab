@@ -131,9 +131,11 @@ FLOW_DELTA_TIMEOUT_SEC = 1800
 LABEL_JOURNAL_TIMEOUT_SEC = 900
 
 # The swing refit pulls five years of daily bars for ~90 symbols (8 at a time)
-# and runs a walk-forward fit. Generous for the same reason as flow-delta: a
-# SIGTERM partway must never be what decides whether a model ships.
-SWING_REFIT_TIMEOUT_SEC = 3600
+# and runs a walk-forward fit. MEASURED 2026-09-27 on vps2 at Nice 10: 2240 s
+# (37 min), almost all of it single-core CPU. Two hours is ~3x that, for a busier
+# box or a longer history. Generous for the same reason as flow-delta: a SIGTERM
+# partway must never be what decides whether a model ships.
+SWING_REFIT_TIMEOUT_SEC = 7200
 
 # ── The public process's memory cap ──────────────────────────────────────────
 # ⚠ ONLY the public unit carries these, and that is deliberate. The other eight
