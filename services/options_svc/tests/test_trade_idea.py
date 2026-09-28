@@ -487,3 +487,74 @@ def test_the_trade_idea_dry_runs_to_the_x_log_end_to_end(monkeypatch, tmp_path):
     assert f"${res['idea']['symbol'].lstrip('$')}" in entry["text"]
     assert entry["image"] is True
     assert (tmp_path / "x_posts.jsonl").exists()
+
+
+# ── the Google Calendar event (config/notify.toml channels.trade_idea.calendar) ──
+@pytest.fixture
+def calendar(monkeypatch):
+    """Silence the channels; record every calendar call. Switch starts ON."""
+    from shared.notify import gcal, switches
+    events = []
+    state = {"on": True}
+    monkeypatch.setattr(push_notify, "send_telegram_photo", lambda *a: None)
+    monkeypatch.setattr(push_notify, "send_discord_file", lambda *a, **k: None)
+    monkeypatch.setattr(push_notify, "send_telegram", lambda *a: None)
+    monkeypatch.setattr(push_notify, "send_discord", lambda *a: None)
+    real = switches.enabled
+    monkeypatch.setattr(switches, "enabled", lambda cat, chan: state["on"]
+                        if (cat, chan) == ("trade_idea", "calendar") else real(cat, chan))
+    monkeypatch.setattr(switches, "calendar_settings", lambda: {
+        "calendar_id": "cal@x", "lead_min": 2, "duration_min": 7})
+    monkeypatch.setattr(gcal, "create_event",
+                        lambda summary, description, **kw: events.append(
+                            (summary, description, kw)) or True)
+    return events, state
+
+
+def test_a_posted_idea_creates_a_calendar_event(calendar):
+    events, _ = calendar
+    idea = T.normalize(pcs())
+    assert push_notify.send_trade_idea(idea, now=NOW, config=_cfg()) is True
+    caption = T.caption(idea)
+    assert len(events) == 1
+    summary, description, kw = events[0]
+    assert summary == caption.splitlines()[0] and summary.startswith("Trade idea: SPY")
+    assert description == caption
+    assert kw == {"calendar_id": "cal@x", "lead_min": 2, "duration_min": 7}
+
+
+def test_the_calendar_switch_off_creates_no_event(calendar):
+    events, state = calendar
+    state["on"] = False
+    push_notify.send_trade_idea(T.normalize(pcs()), now=NOW, config=_cfg())
+    assert events == []
+
+
+def test_the_calendar_is_off_by_default():
+    from shared.notify import switches
+    assert switches.enabled("trade_idea", "calendar") is False
+
+
+def test_a_calendar_failure_never_breaks_the_post(calendar, monkeypatch):
+    from shared.notify import gcal
+
+    def boom(*a, **k):
+        raise RuntimeError("calendar down")
+    monkeypatch.setattr(gcal, "create_event", boom)
+    assert push_notify.send_trade_idea(T.normalize(pcs()), now=NOW, config=_cfg()) is True
+
+
+def test_the_text_fallback_also_creates_the_event(calendar, monkeypatch):
+    events, _ = calendar
+    monkeypatch.setattr(push_notify.trade_idea_card, "render_trade_idea_png", lambda *a, **k: None)
+    assert push_notify.send_trade_idea(T.normalize(pcs()), now=NOW, config=_cfg()) is True
+    assert len(events) == 1
+
+
+def test_a_gated_or_refused_idea_creates_no_event(calendar, monkeypatch):
+    events, _ = calendar
+    idea = T.normalize(pcs())
+    assert push_notify.send_trade_idea(idea, now=NOW, config=_cfg(enabled=False)) is False
+    monkeypatch.setattr(push_notify, "_MS_MAX_BYTES", 1)          # "too large"
+    assert push_notify.send_trade_idea(idea, now=NOW, config=_cfg()) is False
+    assert events == []

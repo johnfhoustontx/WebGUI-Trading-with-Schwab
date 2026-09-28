@@ -646,9 +646,28 @@ def trade_idea_png(idea: dict, *, now, config: dict | None = None):
         idea, now=now, footer=str(block.get("footer") or ""))
 
 
+def _calendar_trade_idea(caption: str) -> None:
+    """The trade idea's Google Calendar event, when its switch is on
+    (config/notify.toml ``channels.trade_idea.calendar``, Settings -> General).
+
+    Runs AFTER Discord and Telegram so a slow Google call cannot delay them, and
+    swallows everything: a calendar problem must never cost the post. The popup
+    itself is the calendar's default notification (see ``shared.notify.gcal``)."""
+    try:
+        from shared.notify import gcal, switches
+        if not switches.enabled("trade_idea", "calendar"):
+            return
+        lines = (caption or "").splitlines()
+        gcal.create_event(lines[0] if lines else "Trade idea", caption,
+                          **switches.calendar_settings())
+    except Exception as exc:  # noqa: BLE001 - best-effort, like every sender
+        log.warning("trade idea calendar event failed: %s", exc)
+
+
 def send_trade_idea(idea: dict, *, now, config: dict | None = None,
                     archive_dir=None, png: bytes | None = None) -> bool:
-    """Push one trade idea as a branded PNG to Telegram + Discord. Never raises.
+    """Push one trade idea as a branded PNG to Telegram + Discord (and, when its
+    switch is on, a Google Calendar event). Never raises.
 
     Returns True if a send was attempted. On a render failure it falls back to
     the text caption, never to silence -- the same rule as the snapshot. No SMS:
@@ -670,6 +689,7 @@ def send_trade_idea(idea: dict, *, now, config: dict | None = None,
         log.warning("trade idea %s: render failed - pushing text only", idea.get("id"))
         send_telegram(tok, chat, _html.escape(caption))
         send_discord(webhook, {"description": caption})
+        _calendar_trade_idea(caption)
         return True
     if len(png) > _MS_MAX_BYTES:
         log.warning("trade idea %s too large (%d bytes)", idea.get("id"), len(png))
@@ -679,6 +699,7 @@ def send_trade_idea(idea: dict, *, now, config: dict | None = None,
         trade_idea.archive(archive_dir, idea, png, caption, now)
     send_telegram_photo(tok, chat, name, png, caption)
     send_discord_file(webhook, name, png, caption, content_type="image/png")
+    _calendar_trade_idea(caption)
     return True
 
 
