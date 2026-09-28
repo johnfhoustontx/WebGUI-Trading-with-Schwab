@@ -23,6 +23,9 @@ BRIDGE_PATH = SHARED / "sentiment_bridge.json"
 APPSETTINGS = SHARED / "appsettings.json"
 TOKENS      = SHARED / "tokens.json"
 NOTIFICATIONS_CONFIG = SHARED / "notifications.json"
+# Google Cloud service-account key for the trade idea's Calendar event
+# (shared/notify/gcal.py). Gitignored; absent = the calendar step is a no-op.
+GCAL_SERVICE_ACCOUNT = SHARED / "google_calendar_sa.json"
 
 # App styling config (webgui theme) — edit + restart the webgui to restyle the
 # app without touching code. Missing file/keys fall back to the built-in
@@ -33,6 +36,12 @@ THEME_TOML = REPO_ROOT / "config" / "theme.toml"
 # restart options_svc to tune. Missing file/keys fall back to the built-in
 # defaults in services/options_svc/flow_alerts.py.
 FLOW_ALERTS_TOML = REPO_ROOT / "config" / "flow_alerts.toml"
+
+# Per-category push-notification channel switches (Discord / Telegram, plus the
+# trade idea's Google Calendar event). Written by Settings -> General as a
+# config/local override; read at send time by shared/notify/switches.py, so a
+# switch applies on the next send with no restart.
+NOTIFY_TOML = REPO_ROOT / "config" / "notify.toml"
 
 # Market session windows + the extended-hours activation date. Read by
 # shared/market_calendar.py (mtime-cached). Edit + restart the affected service

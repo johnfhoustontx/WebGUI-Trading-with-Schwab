@@ -10,6 +10,7 @@ shared/webgui_auth.json
 shared/anthropic_key.txt
 shared/alphavantage_key.txt
 shared/massive_key.txt
+shared/google_calendar_sa.json
 # Belt and braces: the same names ANYWHERE, not only under shared/. A stray copy
 # of a key at the repo root was found untracked and unignored on 2026-08-22 —
 # one `git add .` from being committed. Only `shared/` is ever READ (see
@@ -18,6 +19,7 @@ shared/massive_key.txt
 **/anthropic_key.txt
 **/alphavantage_key.txt
 **/massive_key.txt
+**/google_calendar_sa.json
 shared/driver_model.txt
 # Which environment this checkout is (dev|prod). Gitignored ON PURPOSE: a git
 # pull must never be able to carry an environment identity between checkouts.

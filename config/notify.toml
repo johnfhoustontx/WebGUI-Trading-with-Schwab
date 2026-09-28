@@ -1,0 +1,61 @@
+# Push notifications: which channels each category is sent to.
+#
+# Settings -> General -> "Push notifications" flips these without editing this
+# file (it writes config/local/notify.toml, which wins over the values here).
+# Read at SEND time (shared/notify/switches.py, mtime-cached): a change applies on
+# the next send, NO restart. These sit BELOW the master switch in
+# shared/notifications.json ("enabled") and the per-category routing there
+# ("routes"): a category switched on here still needs a webhook / chat to go to.
+# A missing or malformed value reads as ON for discord/telegram, OFF for calendar.
+
+[channels.signals]             # new scanner signals
+discord = true
+telegram = true
+
+[channels.flow_uoa]            # unusual options activity
+discord = true
+telegram = true
+
+[channels.flow_crossover]      # put/call premium crossover
+discord = true
+telegram = true
+
+[channels.flow_gamma_flip]     # spot crossed the dealer gamma flip
+discord = true
+telegram = true
+
+[channels.action_alert]        # the thrice-daily open-position action digest
+discord = true
+telegram = true
+
+[channels.eod_summary]         # the end-of-day summary
+discord = true
+telegram = true
+
+[channels.gamma_briefing]      # the scheduled Dealer Positioning briefings
+discord = true
+telegram = true
+
+[channels.market_snapshot]     # the market snapshot image
+discord = true
+telegram = true
+
+[channels.market_state]        # sentiment state-change alert (sentiment_svc)
+discord = true
+telegram = true
+
+[channels.trade_idea]          # the hourly trade idea ([slots.trade_idea], :35)
+discord = true
+telegram = true
+calendar = false               # also create a Google Calendar event (see [calendar])
+
+# The trade idea's Google Calendar event (shared/notify/gcal.py). Needs the
+# service-account key at shared/google_calendar_sa.json on the server and a
+# calendar shared with that account; with either missing it does nothing. The
+# POPUP comes from the calendar's own default notification - set it to
+# "at time of event" - because an API-set reminder belongs to the service
+# account, not to you.
+[calendar]
+calendar_id = ""               # Settings -> Integrate calendar -> Calendar ID
+lead_min = 1                   # the event starts this many minutes after the post
+duration_min = 5               # event length
