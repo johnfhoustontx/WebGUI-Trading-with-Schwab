@@ -668,3 +668,32 @@ def test_a_suppressed_environment_turns_x_off(tmp_path, monkeypatch):
     cfg = ch.load_config(p)
     assert cfg["x"]["enabled"] is False
     assert all(k["enabled"] is False for k in cfg["x"]["kinds"].values())
+
+
+# ── per-category switches (config/notify.toml, Settings -> General) ─────────
+def test_a_switched_off_category_has_no_discord_target(monkeypatch):
+    from shared.notify import switches
+    monkeypatch.setattr(switches, "enabled",
+                        lambda cat, chan: not (cat == "signals" and chan == "discord"))
+    cfg = {"discord": {"webhook_url": "https://g"},
+           "telegram": {"bot_token": "t", "chat_id": 1}}
+    assert ch.discord_target(cfg, "signals") == ""
+    assert ch.discord_target(cfg, "flow_uoa") == "https://g"
+    assert ch.telegram_target(cfg, "signals") == ("t", 1)
+
+
+def test_a_switched_off_category_has_no_telegram_target(monkeypatch):
+    from shared.notify import switches
+    monkeypatch.setattr(switches, "enabled", lambda cat, chan: chan != "telegram")
+    cfg = {"telegram": {"bot_token": "t", "chat_id": 1},
+           "routes": {"trade_idea": {"telegram_chat_id": 9}}}
+    assert ch.telegram_target(cfg, "trade_idea") == ("", "")
+
+
+def test_a_broken_switch_read_leaves_the_feed_on(monkeypatch):
+    from shared.notify import switches
+
+    def boom(*_a):
+        raise RuntimeError("disk gone")
+    monkeypatch.setattr(switches, "enabled", boom)
+    assert ch.discord_target({"discord": {"webhook_url": "https://g"}}, "signals") == "https://g"

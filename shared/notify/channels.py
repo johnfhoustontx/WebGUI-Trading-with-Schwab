@@ -234,8 +234,24 @@ def _route(cfg, category) -> dict:
     return _as_dict(_as_dict(_as_dict(cfg).get("routes")).get(category))
 
 
+def _switch_on(category, channel) -> bool:
+    """The per-category switch in config/notify.toml (Settings -> General).
+
+    Never raises: a broken switch read leaves the feed ON, which is exactly the
+    behaviour before the switches existed. Imported lazily so the module can be
+    patched in tests and a bad import cannot take every sender down."""
+    try:
+        from shared.notify import switches
+        return switches.enabled(category, channel)
+    except Exception:  # noqa: BLE001
+        return True
+
+
 def discord_target(cfg, category) -> str:
-    """Discord webhook for `category`: route -> legacy key -> global. "" if none."""
+    """Discord webhook for `category`: route -> legacy key -> global. "" if none,
+    or if the category's Discord switch is off."""
+    if not _switch_on(category, "discord"):
+        return ""
     cfg = _as_dict(cfg)
     block, key = _LEGACY_DISCORD_KEYS.get(category, (None, None))
     legacy = _as_dict(cfg.get(block)).get(key) if block else None
@@ -248,7 +264,10 @@ def discord_target(cfg, category) -> str:
 
 def telegram_target(cfg, category) -> tuple:
     """(bot_token, chat_id) for `category`. The bot token is always the global one;
-    only the chat can be overridden per category."""
+    only the chat can be overridden per category. ("", "") when the category's
+    Telegram switch is off."""
+    if not _switch_on(category, "telegram"):
+        return "", ""
     tg = _as_dict(_as_dict(cfg).get("telegram"))
     chat = _first_set(_route(cfg, category).get("telegram_chat_id"), tg.get("chat_id"))
     return tg.get("bot_token", ""), (chat if chat is not None else "")
