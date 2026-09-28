@@ -1205,7 +1205,43 @@ _NEWS = ConfigFile(
     ),
 )
 
-FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS, _MOMENTUM,
+# ─────────────────────────────────────────────────────────────────────────────
+# Push notifications — config/notify.toml (also Settings -> General's grid)
+# ─────────────────────────────────────────────────────────────────────────────
+_NOTIFY = ConfigFile(
+    name="notify.toml", title="Push notifications", icon="notifications",
+    summary="Which channels each push category is sent to, and the trade idea's "
+            "Google Calendar event.",
+    restart=(),       # read at send time (shared/notify/switches.py)
+    sections=(
+        Section("Channels", "One entry per category. The same switches are on "
+                "Settings → General.", (
+            Field("channels.*.discord", "Discord", "Off stops this category's "
+                  "Discord posts.", kind="bool"),
+            Field("channels.*.telegram", "Telegram", "Off stops this category's "
+                  "Telegram posts.", kind="bool"),
+            Field("channels.*.calendar", "Google Calendar event",
+                  "Trade idea only: also create a short event in the calendar "
+                  "below.", kind="bool", optional=True),
+        )),
+        Section("Google Calendar", "The trade idea's event. Needs the "
+                "service-account key at shared/google_calendar_sa.json on the "
+                "server, and the calendar shared with that account. The popup "
+                "is the calendar's own default notification — set it to \"at "
+                "time of event\".", (
+            Field("calendar.calendar_id", "Calendar ID",
+                  "Google Calendar → the calendar's Settings → Integrate "
+                  "calendar → Calendar ID. Blank = no event.",
+                  kind="text", blank_ok=True),
+            Field("calendar.lead_min", "Event starts after the post", "",
+                  kind="int", unit="min", min=0, max=60, step=1),
+            Field("calendar.duration_min", "Event length", "",
+                  kind="int", unit="min", min=1, max=120, step=1),
+        )),
+    ),
+)
+
+FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS, _MOMENTUM,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _SWING_MODEL, _COMMISSIONS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
