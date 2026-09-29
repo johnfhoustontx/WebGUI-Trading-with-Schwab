@@ -4,7 +4,32 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-27 (**Bull / Bear Map and Momentum on GICS sub-industries** —
+**Last updated:** 2026-09-28 (**Push-notification checkboxes per category, and a Google
+Calendar popup for the hourly trade idea.**)
+
+- **Switches:** new tracked `config/notify.toml`, one `[channels.<category>]` table per
+  `ROUTE_CATEGORIES` entry with `discord` / `telegram` (all on as shipped, so the deploy
+  changes nothing). Enforced at the two chokepoints every sender in options_svc and
+  sentiment_svc already uses — `channels.discord_target` / `telegram_target` return an
+  empty target for an unticked category. Read at send time through
+  `shared/notify/switches.py` (layered + mtime-cached): no restart. A malformed value
+  reads as ON (never silently mutes a feed); the calendar defaults OFF.
+- **Settings → General → Push notifications:** a checkbox grid (category × channel),
+  written through `config_store` to `config/local/notify.toml`. The file is also
+  catalogued for Settings → Configuration, whose `_group_label` now names each wildcard
+  row after its category (`config_schema.NOTIFY_CATEGORY_NAMES`, shared by both tabs).
+- **Calendar:** `shared/notify/gcal.py` — a service-account client with no Google SDK
+  (RS256 JWT via `cryptography`, two `requests` calls; no new dependency). Called at the
+  end of `push_notify.send_trade_idea` when `channels.trade_idea.calendar` is ticked:
+  a 5-minute event starting 1 minute after the post, summary = the caption's first line.
+  ⚠ It uses `reminders.useDefault` on a dedicated calendar whose default notification the
+  operator sets to "at time of event" — an API-written popup override would belong to the
+  service account, not the operator. Key at `shared/google_calendar_sa.json` (gitignored);
+  setup steps in the User Guide. Absent key or ID = no-op; every failure is one WARNING
+  and never delays or blocks the Discord/Telegram post.
+- Design + plan: `docs/plans/2026-09-28-notification-toggles-and-trade-idea-calendar-{design,plan}.md`.
+
+**Prior —** 2026-09-27 (**Bull / Bear Map and Momentum on GICS sub-industries** —
 the middle level is now the 163 GICS sub-industries, each an equal-weight basket of the
 GICS Map tab's listed stocks.)
 

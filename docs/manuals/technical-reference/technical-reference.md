@@ -182,7 +182,7 @@ were removed in September 2026 — nothing in the stack talks to those processes
 
 | Feature | Requirement |
 |---------|-------------|
-| **Push notifications** | Gitignored `shared/notifications.json` (template: `shared/notifications.example.json`). Telegram needs a bot token + chat id; Discord needs a channel webhook URL; Google Fi SMS needs your 10-digit Fi number plus a Gmail **App Password**. Each channel self-gates — missing creds are a silent no-op. Env vars override file values. |
+| **Push notifications** | Gitignored `shared/notifications.json` (template: `shared/notifications.example.json`). Telegram needs a bot token + chat id; Discord needs a channel webhook URL; Google Fi SMS needs your 10-digit Fi number plus a Gmail **App Password**. Each channel self-gates — missing creds are a silent no-op. Env vars override file values. **Per-category on/off** lives in `config/notify.toml` (`[channels.<category>] discord / telegram`, all on by default; Settings → General writes `config/local/notify.toml`), enforced in `shared/notify/channels.discord_target` / `telegram_target` and read at send time (mtime-cached, no restart). The trade idea's optional **Google Calendar event** (`channels.trade_idea.calendar`, `[calendar] calendar_id / lead_min / duration_min`) is created by `shared/notify/gcal.py` with the service-account key `shared/google_calendar_sa.json`; it uses the calendar's own default notification (`reminders.useDefault`). |
 | **Proxy hardening** | `PROXY_SHARED_SECRET` (guards the trading endpoints; enforced only when set) and `PROXY_CORS_ORIGINS` (overrides the local allowlist). See `docs/SECURITY.md`. |
 
 ## Startup order

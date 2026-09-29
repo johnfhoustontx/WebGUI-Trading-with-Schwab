@@ -87,6 +87,9 @@ The app reads market data and your positions from Schwab, so you need:
   on the Market Scanner, drawn as an image with its legs, grade, risk, profit,
   probability of profit and payoff chart. It skips an hour rather than post a weak,
   stale or same-day trade. Turn it off with `"trade_idea": {"enabled": false}`.
+  Which channels each kind of alert goes to is set in **Settings → General → Push
+  notifications**, and the trade idea can also pop up as a **Google Calendar**
+  event (see *Google Calendar popup for the trade idea* under Settings).
 - **The watchlist workbook** `options-scanner/data/Top 20.xlsx` — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.
 
@@ -2497,6 +2500,7 @@ a file on the server — in one place, grouped by what they do:
 | **Exits & trade management** | Take profit, stop loss, time and delta stops, the profit-lock ladder, per-structure rules, Rescue board warnings |
 | **Paper books** | The largest loss one trade may carry in each paper book |
 | **Flow alerts** | Each detector's thresholds, and which alerts reach your phone |
+| **Push notifications** | Which channels each alert category goes to (the same checkboxes as on General), and the trade idea's Google Calendar ID |
 | **Market hours & schedules** | Session times, operating windows, and the time of every scheduled job (briefings, digests, reports) |
 | **Symbols & watchlists** | What the gamma collector polls, the BIG10 basket, the Net Prem groups |
 | **Sector map** | Which sector each symbol counts toward for the sector cap |
@@ -2542,6 +2546,15 @@ Preferences, all saved on your machine:
   deliberately no second market-hours toggle here: spoken alerts obey the *only
   during market hours* switch in **Scanner alerts** above.
 - **Desktop notifications** — enable them and grant the browser permission.
+- **Push notifications** — one row per kind of phone alert (new scanner signals,
+  unusual options activity, premium crossover, gamma flip, the position action
+  digest, the end-of-day summary, the Dealer Positioning briefings, the market
+  snapshot, the market state change and the hourly trade idea), with a
+  **Discord** and a **Telegram** checkbox on each. **Ticked means that alert is
+  sent there**; untick it to stop it. A change applies to the very next alert —
+  no restart. The hourly trade idea also has a **Calendar** checkbox (off until
+  you tick it): see below. A ticked box still needs that channel set up in
+  `shared/notifications.json` — it cannot send where there is no webhook or chat.
 - **Flow alerts** — whether put/call premium crossovers and unusual activity alert
   you.
 - **Captured trade auto-management** — whether captured signals are actively
@@ -2563,6 +2576,42 @@ Preferences, all saved on your machine:
   tells you whether the purge switch above it is on** — with it on, every saved
   session but the last five is deleted before the compaction. The button shows a
   spinner while it runs, and the tool's own output lands underneath it.
+
+### Google Calendar popup for the trade idea
+
+With **Calendar** ticked on the *Hourly trade idea* row, every trade idea the app
+posts also creates a short event (five minutes, starting a minute after the post)
+titled with the trade, for example *Trade idea: SPY put credit spread*, with the
+full caption in its description. Your phone or computer pops it up like any other
+calendar reminder. An hour the app skips (no Strong or Good trade) creates nothing.
+
+It needs a one-time setup, done by you in Google — the app never sees your Google
+password:
+
+1. In the [Google Cloud console](https://console.cloud.google.com/), create a
+   project (or pick one), open **APIs & Services → Library** and enable the
+   **Google Calendar API**.
+2. **APIs & Services → Credentials → Create credentials → Service account.** Give
+   it a name; no roles are needed. Open it, go to **Keys → Add key → JSON**, and
+   download the key file.
+3. Copy that file to the server as `shared/google_calendar_sa.json` in the app's
+   folder. It is a secret: it is gitignored, like `notifications.json`.
+4. In [Google Calendar](https://calendar.google.com/), create a **new calendar**
+   (for example *NeuralStrike Trade Ideas*). In its **Settings**:
+   - **Event notifications → set it to 0 minutes (at the time of the event),
+     Notification.** This is what makes it pop up. The app cannot set it for you:
+     a reminder written by the app would belong to the service account, not to
+     you.
+   - **Share with specific people** → add the service account's email (the
+     `client_email` in the key file, ending in `iam.gserviceaccount.com`) with
+     **Make changes to events**.
+   - **Integrate calendar → Calendar ID** — copy it.
+5. In the app, **Settings → Configuration → Push notifications → Calendar ID**:
+   paste it and save. Then tick **Calendar** on the trade-idea row in **General**.
+
+If the key file or the Calendar ID is missing, the checkbox simply does nothing.
+A problem talking to Google is logged by the options service and never stops the
+Discord and Telegram posts.
 
 > Clicking **Test sound** — or **Test voice** — also unlocks browser audio for the
 > session. Browsers block sound until you interact with the page, and they do it

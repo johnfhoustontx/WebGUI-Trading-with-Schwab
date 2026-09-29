@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-26</div>
+  <div class="meta">NeuralStrike · Generated 2026-09-28</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -153,6 +153,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#settings">Settings</a><ul>
 <li><a href="#configuration">Configuration</a></li>
 <li><a href="#general">General</a></li>
+<li><a href="#google-calendar-popup-for-the-trade-idea">Google Calendar popup for the trade idea</a></li>
 </ul>
 </li>
 <li><a href="#stop-all-services">Stop All Services</a></li>
@@ -242,7 +243,10 @@ just click <strong>Authorize</strong> again.</p>
   an hour during the regular session (08:35–14:35 CT): the best Strong or Good trade
   on the Market Scanner, drawn as an image with its legs, grade, risk, profit,
   probability of profit and payoff chart. It skips an hour rather than post a weak,
-  stale or same-day trade. Turn it off with <code>"trade_idea": {"enabled": false}</code>.</li>
+  stale or same-day trade. Turn it off with <code>"trade_idea": {"enabled": false}</code>.
+  Which channels each kind of alert goes to is set in <strong>Settings → General → Push
+  notifications</strong>, and the trade idea can also pop up as a <strong>Google Calendar</strong>
+  event (see <em>Google Calendar popup for the trade idea</em> under Settings).</li>
 <li><strong>The watchlist workbook</strong> <code>options-scanner/data/Top 20.xlsx</code> — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.</li>
 </ul>
@@ -2917,6 +2921,10 @@ a file on the server — in one place, grouped by what they do:</p>
 <td>Each detector's thresholds, and which alerts reach your phone</td>
 </tr>
 <tr>
+<td><strong>Push notifications</strong></td>
+<td>Which channels each alert category goes to (the same checkboxes as on General), and the trade idea's Google Calendar ID</td>
+</tr>
+<tr>
 <td><strong>Market hours &amp; schedules</strong></td>
 <td>Session times, operating windows, and the time of every scheduled job (briefings, digests, reports)</td>
 </tr>
@@ -2976,6 +2984,15 @@ day).</p>
   deliberately no second market-hours toggle here: spoken alerts obey the <em>only
   during market hours</em> switch in <strong>Scanner alerts</strong> above.</li>
 <li><strong>Desktop notifications</strong> — enable them and grant the browser permission.</li>
+<li><strong>Push notifications</strong> — one row per kind of phone alert (new scanner signals,
+  unusual options activity, premium crossover, gamma flip, the position action
+  digest, the end-of-day summary, the Dealer Positioning briefings, the market
+  snapshot, the market state change and the hourly trade idea), with a
+  <strong>Discord</strong> and a <strong>Telegram</strong> checkbox on each. <strong>Ticked means that alert is
+  sent there</strong>; untick it to stop it. A change applies to the very next alert —
+  no restart. The hourly trade idea also has a <strong>Calendar</strong> checkbox (off until
+  you tick it): see below. A ticked box still needs that channel set up in
+  <code>shared/notifications.json</code> — it cannot send where there is no webhook or chat.</li>
 <li><strong>Flow alerts</strong> — whether put/call premium crossovers and unusual activity alert
   you.</li>
 <li><strong>Captured trade auto-management</strong> — whether captured signals are actively
@@ -2998,6 +3015,39 @@ day).</p>
   session but the last five is deleted before the compaction. The button shows a
   spinner while it runs, and the tool's own output lands underneath it.</li>
 </ul>
+<h3 id="google-calendar-popup-for-the-trade-idea">Google Calendar popup for the trade idea</h3>
+<p>With <strong>Calendar</strong> ticked on the <em>Hourly trade idea</em> row, every trade idea the app
+posts also creates a short event (five minutes, starting a minute after the post)
+titled with the trade, for example <em>Trade idea: SPY put credit spread</em>, with the
+full caption in its description. Your phone or computer pops it up like any other
+calendar reminder. An hour the app skips (no Strong or Good trade) creates nothing.</p>
+<p>It needs a one-time setup, done by you in Google — the app never sees your Google
+password:</p>
+<ol>
+<li>In the <a href="https://console.cloud.google.com/">Google Cloud console</a>, create a
+   project (or pick one), open <strong>APIs &amp; Services → Library</strong> and enable the
+   <strong>Google Calendar API</strong>.</li>
+<li><strong>APIs &amp; Services → Credentials → Create credentials → Service account.</strong> Give
+   it a name; no roles are needed. Open it, go to <strong>Keys → Add key → JSON</strong>, and
+   download the key file.</li>
+<li>Copy that file to the server as <code>shared/google_calendar_sa.json</code> in the app's
+   folder. It is a secret: it is gitignored, like <code>notifications.json</code>.</li>
+<li>In <a href="https://calendar.google.com/">Google Calendar</a>, create a <strong>new calendar</strong>
+   (for example <em>NeuralStrike Trade Ideas</em>). In its <strong>Settings</strong>:
+   - <strong>Event notifications → set it to 0 minutes (at the time of the event),
+     Notification.</strong> This is what makes it pop up. The app cannot set it for you:
+     a reminder written by the app would belong to the service account, not to
+     you.
+   - <strong>Share with specific people</strong> → add the service account's email (the
+     <code>client_email</code> in the key file, ending in <code>iam.gserviceaccount.com</code>) with
+     <strong>Make changes to events</strong>.
+   - <strong>Integrate calendar → Calendar ID</strong> — copy it.</li>
+<li>In the app, <strong>Settings → Configuration → Push notifications → Calendar ID</strong>:
+   paste it and save. Then tick <strong>Calendar</strong> on the trade-idea row in <strong>General</strong>.</li>
+</ol>
+<p>If the key file or the Calendar ID is missing, the checkbox simply does nothing.
+A problem talking to Google is logged by the options service and never stops the
+Discord and Telegram posts.</p>
 <blockquote>
 <p>Clicking <strong>Test sound</strong> — or <strong>Test voice</strong> — also unlocks browser audio for the
 session. Browsers block sound until you interact with the page, and they do it

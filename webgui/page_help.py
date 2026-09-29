@@ -1478,6 +1478,11 @@ The General tab controls the alert chimes, notifications and the ticker.
 
 - **Audio alert / sound / volume** — what plays when new signals appear.
 - **Market-hours only / minimum score** — when the app is allowed to bother you.
+- **Push notifications** — a Discord and a Telegram checkbox for each kind of
+  phone alert: ticked means it is sent there. Applies to the next alert, no
+  restart. The hourly trade idea also has **Calendar**, which creates a Google
+  Calendar event when it posts (one-time setup in the User Guide; the Calendar ID
+  goes under Configuration → Push notifications).
 - **Ticker** — the scrolling market-summary bar at the bottom of every page.
   It scrolls the latest market report — its headline, its highlights, then
   which report they came from — and changes only when a new report is
@@ -1575,8 +1580,9 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
                        "bearish bet, scored on fit + quality (not the premium model).",
     },
     "/settings": {
-        "General": "App preferences: alert sounds, spoken alerts, the ticker, "
-                   "API usage and maintenance.",
+        "General": "App preferences: alert sounds, spoken alerts, which phone "
+                   "alerts go to Discord and Telegram, the ticker, API usage "
+                   "and maintenance.",
         "Appearance": "Every colour and font in the app, with a live preview. "
                       "Saved changes show after a web GUI restart.",
         "Configuration": "Every trading setting — scanner floors, per-trade caps, "

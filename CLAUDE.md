@@ -2159,6 +2159,14 @@ the code already has, so a suppressed dev cannot take a code path prod never tak
 | `allow_claude` | the client factory in `options_svc/compute.py` returns `None` | falls into the existing *no-API-key* path: the briefing renders its explanatory page (market_svc makes no Claude call since 2026-09-16 — its summary quotes the published market report) |
 | `schedulers` | `services/_scaffold.py:_schedulers_enabled` (consumed by `make_app`) | all six services stop collecting and polling; **command handlers still run**, so the UI stays fully usable off the snapshot |
 
+**Per-category push switches live in `config/notify.toml` (2026-09-28)** and are
+enforced ONLY at `channels.discord_target` / `telegram_target` — a new push category
+must resolve its destination through those two, or Settings → General's checkbox for
+it will do nothing. They sit below the three gates above (master `enabled`, dev
+zeroing), and a malformed value reads as ON. The trade idea's Google Calendar event
+(`shared/notify/gcal.py`) relies on the calendar's OWN default notification: an
+API-written reminder belongs to the service account, so it would never pop up.
+
 **X has ONE posting path (2026-09-22).** Every post — market reports, hourly
 trade ideas, the `/x` page's ad-hoc posts — goes through
 `shared/notify/x_post.post`, called only from `options_svc` (market_svc enqueues
