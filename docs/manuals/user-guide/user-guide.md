@@ -2580,7 +2580,7 @@ Preferences, all saved on your machine:
 ### Google Calendar popup for the trade idea
 
 With **Calendar** ticked on the *Hourly trade idea* row, every trade idea the app
-posts also creates a short event (five minutes, starting a minute after the post)
+posts also creates a short event (five minutes, starting five minutes after the post)
 titled with the trade, for example *Trade idea: SPY put credit spread*, with the
 full caption in its description. Your phone or computer pops it up like any other
 calendar reminder. An hour the app skips (no Strong or Good trade) creates nothing.
@@ -2608,6 +2608,11 @@ password:
    - **Integrate calendar → Calendar ID** — copy it.
 5. In the app, **Settings → Configuration → Push notifications → Calendar ID**:
    paste it and save. Then tick **Calendar** on the trade-idea row in **General**.
+
+The popup arrives when the event starts, so about five minutes after the Discord
+and Telegram post. That gap is deliberate: with a one-minute gap your phone and
+browser had not synced the event before its reminder was due, and no popup came.
+It is **Event starts after the post** under Configuration → Push notifications.
 
 If the key file or the Calendar ID is missing, the checkbox simply does nothing.
 A problem talking to Google is logged by the options service and never stops the

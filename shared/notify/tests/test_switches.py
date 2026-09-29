@@ -52,7 +52,7 @@ def test_a_local_override_is_seen_without_a_reload(tmp_path, monkeypatch):
 
 
 def test_calendar_settings_shipped_values():
-    assert sw.calendar_settings() == {"calendar_id": "", "lead_min": 1, "duration_min": 5}
+    assert sw.calendar_settings() == {"calendar_id": "", "lead_min": 5, "duration_min": 5}
 
 
 def test_calendar_settings_refuse_bad_values(tmp_path, monkeypatch):
@@ -61,4 +61,4 @@ def test_calendar_settings_refuse_bad_values(tmp_path, monkeypatch):
                  'lead_min = -3\nduration_min = true\n')
     _use(monkeypatch, f)
     assert sw.calendar_settings() == {"calendar_id": "abc@group.calendar.google.com",
-                                      "lead_min": 1, "duration_min": 5}
+                                      "lead_min": 5, "duration_min": 5}

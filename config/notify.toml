@@ -57,5 +57,8 @@ calendar = false               # also create a Google Calendar event (see [calen
 # account, not to you.
 [calendar]
 calendar_id = ""               # Settings -> Integrate calendar -> Calendar ID
-lead_min = 1                   # the event starts this many minutes after the post
+lead_min = 5                   # the event starts this many minutes after the post.
+                               # Measured 2026-09-28: at 1 minute NO popup arrived on
+                               # phone or browser (the device had not synced the event
+                               # before its reminder was due); at 4 minutes both did.
 duration_min = 5               # event length

@@ -1248,7 +1248,10 @@ _NOTIFY = ConfigFile(
                   "Google Calendar → the calendar's Settings → Integrate "
                   "calendar → Calendar ID. Blank = no event.",
                   kind="text", blank_ok=True),
-            Field("calendar.lead_min", "Event starts after the post", "",
+            Field("calendar.lead_min", "Event starts after the post",
+                  "The popup fires when the event starts. Under about 4 minutes "
+                  "your phone may not have synced the event in time, and no "
+                  "popup arrives.",
                   kind="int", unit="min", min=0, max=60, step=1),
             Field("calendar.duration_min", "Event length", "",
                   kind="int", unit="min", min=1, max=120, step=1),

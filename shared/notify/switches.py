@@ -16,7 +16,9 @@ from repo_paths import NOTIFY_TOML
 from shared.config_toml import toml_loader
 
 _DEFAULT_ON = ("discord", "telegram")
-_CAL_DEFAULTS = {"calendar_id": "", "lead_min": 1, "duration_min": 5}
+# lead_min 5: at 1 minute the popup never arrived (the device had not synced the
+# event before its reminder was due); 4 worked on phone and browser (2026-09-28).
+_CAL_DEFAULTS = {"calendar_id": "", "lead_min": 5, "duration_min": 5}
 _CAL_FLOOR = {"lead_min": 0, "duration_min": 1}
 
 

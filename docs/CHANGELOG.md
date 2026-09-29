@@ -21,7 +21,7 @@ Calendar popup for the hourly trade idea.**)
 - **Calendar:** `shared/notify/gcal.py` — a service-account client with no Google SDK
   (RS256 JWT via `cryptography`, two `requests` calls; no new dependency). Called at the
   end of `push_notify.send_trade_idea` when `channels.trade_idea.calendar` is ticked:
-  a 5-minute event starting 1 minute after the post, summary = the caption's first line.
+  a 5-minute event starting 5 minutes after the post (`lead_min`; measured live: at 1 minute no popup reached phone or browser, at 4 both did), summary = the caption's first line.
   ⚠ It uses `reminders.useDefault` on a dedicated calendar whose default notification the
   operator sets to "at time of event" — an API-written popup override would belong to the
   service account, not the operator. Key at `shared/google_calendar_sa.json` (gitignored);
