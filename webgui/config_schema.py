@@ -1205,6 +1205,21 @@ _NEWS = ConfigFile(
     ),
 )
 
+# The push categories' plain-English names (config/notify.toml [channels.*]),
+# shared by the Configuration editor's row labels and Settings -> General's grid.
+NOTIFY_CATEGORY_NAMES = {
+    "signals": "New scanner signals",
+    "flow_uoa": "Unusual options activity",
+    "flow_crossover": "Put/call premium crossover",
+    "flow_gamma_flip": "Gamma flip",
+    "action_alert": "Open-position action digest",
+    "eod_summary": "End-of-day summary",
+    "gamma_briefing": "Dealer Positioning briefings",
+    "market_snapshot": "Market snapshot",
+    "market_state": "Market state change",
+    "trade_idea": "Hourly trade idea",
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Push notifications — config/notify.toml (also Settings -> General's grid)
 # ─────────────────────────────────────────────────────────────────────────────

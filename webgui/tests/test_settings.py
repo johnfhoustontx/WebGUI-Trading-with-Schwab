@@ -430,3 +430,56 @@ def test_public_scan_rows_with_nothing_read_show_dashes_not_zero():
     from pages import settings
     assert settings.public_scan_rows(None) == [("Scans today", "—"),
                                                ("Refused as not a symbol", "—")]
+
+
+# ── push notification switches (config/notify.toml) ─────────────────────────
+import pathlib as _pathlib
+import tomllib as _tomllib
+
+_NOTIFY_SHIPPED = _tomllib.loads(
+    (_pathlib.Path(__file__).resolve().parents[2] / "config" / "notify.toml").read_text())
+
+
+def test_every_shipped_category_has_a_plain_english_label():
+    assert list(S.NOTIFY_LABELS) == list(_NOTIFY_SHIPPED["channels"])
+
+
+def test_grid_rows_follow_the_file_and_offer_calendar_only_on_the_trade_idea():
+    rows = S.notify_grid_rows(_NOTIFY_SHIPPED, {})
+    assert [r[0] for r in rows] == list(_NOTIFY_SHIPPED["channels"])
+    by_cat = {cat: sw for cat, _label, sw in rows}
+    assert by_cat["signals"] == {"discord": True, "telegram": True}
+    assert by_cat["trade_idea"] == {"discord": True, "telegram": True, "calendar": False}
+    assert dict((c, lbl) for c, lbl, _ in rows)["trade_idea"] == "Hourly trade idea"
+
+
+def test_grid_rows_show_the_override_and_read_garbage_as_the_default():
+    over = {"channels": {"signals": {"discord": False, "telegram": "no"}}}
+    by_cat = {c: sw for c, _l, sw in S.notify_grid_rows(_NOTIFY_SHIPPED, over)}
+    assert by_cat["signals"] == {"discord": False, "telegram": True}
+
+
+def test_toggle_writes_only_the_difference_and_keeps_other_overrides():
+    over = {"calendar": {"calendar_id": "cal@x"}}
+    new, change = S.notify_toggle(_NOTIFY_SHIPPED, over, "trade_idea", "calendar", True)
+    assert new == {"calendar": {"calendar_id": "cal@x"},
+                   "channels": {"trade_idea": {"calendar": True}}}
+    assert change == ("channels.trade_idea.calendar", False, True)
+    # switching it back to the shipped value removes the key again
+    back, _ = S.notify_toggle(_NOTIFY_SHIPPED, new, "trade_idea", "calendar", False)
+    assert back == {"calendar": {"calendar_id": "cal@x"}}
+
+
+def test_toggle_off_then_the_switch_reader_agrees(tmp_path, monkeypatch):
+    """End to end over a real file pair: what the grid writes is what the
+    service reads."""
+    from shared import config_toml
+    from shared.notify import switches
+    monkeypatch.setenv("TRADING_CONFIG_OVERRIDES_IN_TESTS", "1")
+    f = tmp_path / "notify.toml"
+    f.write_text(config_toml.dumps(_NOTIFY_SHIPPED))
+    new, _ = S.notify_toggle(_NOTIFY_SHIPPED, {}, "flow_uoa", "telegram", False)
+    config_toml.write_overrides(f, new)
+    monkeypatch.setattr(switches, "_load", switches._make_loader(f)[0])
+    assert switches.enabled("flow_uoa", "telegram") is False
+    assert switches.enabled("flow_uoa", "discord") is True

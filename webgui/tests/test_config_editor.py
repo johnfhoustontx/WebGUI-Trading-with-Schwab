@@ -619,3 +619,10 @@ def test_a_blank_ok_empty_value_reads_as_empty_not_blank():
     other = ce.cs.Field("x.y", "Y", kind="text", optional=True, blank_ok=True)
     assert ce.display_value("", "z", other) == "empty"
     assert ce.display_value("Mozilla/5.0", "", ua) == "Mozilla/5.0"
+
+
+def test_a_push_channel_row_is_named_after_its_category():
+    from pages import config_editor as ce
+    fld = cs.BY_NAME["notify.toml"].sections[0].fields[1]      # channels.*.telegram
+    assert ce._group_label({}, fld, ("channels", "flow_gamma_flip", "telegram"),
+                           "Telegram") == "Gamma flip — Telegram"

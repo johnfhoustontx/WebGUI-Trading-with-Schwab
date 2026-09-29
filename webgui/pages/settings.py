@@ -16,6 +16,8 @@ for the whole page rather than for this tab.
 """
 import app_settings
 import bus_client
+import config_schema
+import config_store
 import proxy as _proxy
 import voice
 from nicegui import run, ui
@@ -192,6 +194,96 @@ def render():
             config_editor.render()
 
 
+# ── push notification switches (config/notify.toml) ─────────────────────────
+# Written as a config/local override through config_store (the same path as
+# Settings -> Configuration); options_svc and sentiment_svc read it at SEND time
+# (shared/notify/switches.py), so a flip applies on the next send, no restart.
+# The categories come from the shipped file's [channels] tables, so no category
+# list is mirrored here - only its label (config_schema.NOTIFY_CATEGORY_NAMES),
+# and a test pins one per table.
+NOTIFY_FILE = "notify.toml"
+NOTIFY_LABELS = config_schema.NOTIFY_CATEGORY_NAMES
+NOTIFY_CHANNELS = (("discord", "Discord"), ("telegram", "Telegram"),
+                   ("calendar", "Calendar"))
+_NOTIFY_DEFAULT_ON = ("discord", "telegram")   # same rule as shared/notify/switches
+
+
+def notify_grid_rows(shipped, overrides):
+    """``[(category, label, {channel: on})]`` in the shipped file's order. A
+    channel appears only where the shipped row has it (so Calendar only on the
+    trade idea), and a non-bool value reads as the default, exactly as the
+    service reads it."""
+    eff = config_store.effective(shipped, overrides).get("channels", {})
+    rows = []
+    for cat, ship_row in (shipped or {}).get("channels", {}).items():
+        if not isinstance(ship_row, dict):
+            continue
+        cur = eff.get(cat) if isinstance(eff.get(cat), dict) else {}
+        sw = {}
+        for chan, _label in NOTIFY_CHANNELS:
+            if chan in ship_row:
+                v = cur.get(chan)
+                sw[chan] = v if isinstance(v, bool) else chan in _NOTIFY_DEFAULT_ON
+        rows.append((cat, NOTIFY_LABELS.get(cat, cat.replace("_", " ")), sw))
+    return rows
+
+
+def notify_toggle(shipped, overrides, category, channel, value):
+    """``(new_overrides, change)`` for one switch flip. Every other override in
+    the file (a calendar id set on the Configuration tab) is kept, and a value
+    equal to the shipped one leaves no key behind."""
+    values = config_store.flatten(config_store.effective(shipped, overrides))
+    path = ("channels", category, channel)
+    old = values.get(path)
+    values[path] = bool(value)
+    new = config_store.build_overrides(shipped, values)
+    return new, (".".join(path), old, bool(value))
+
+
+def _render_notify_switches():
+    """The Push notifications card: one row per category, a checkbox per
+    channel - ticked means that category is sent there."""
+    shipped, _ = config_store.load(NOTIFY_FILE)
+
+    @guard
+    def _flip(category, channel, value):
+        try:
+            cur_shipped, overrides = config_store.load(NOTIFY_FILE)
+            new, change = notify_toggle(cur_shipped, overrides, category, channel, value)
+            config_store.save(NOTIFY_FILE, new, changes=[change])
+        except Exception as exc:  # noqa: BLE001 - say so, never a traceback
+            kit.toast("error", f"Could not save that switch: {exc}")
+
+    with _card():
+        kit.section_title("Push notifications")
+        ui.label("Tick a channel to send that category there; untick to stop it. "
+                 "A change applies to the next send, with no restart. Calendar "
+                 "also creates a Google "
+                 "Calendar event when the trade idea posts; its calendar is set "
+                 "under Configuration → Push notifications.").classes(
+                 f"text-sm {theme.MUTED}")
+        if not shipped.get("channels"):
+            kit.notice("config/notify.toml could not be read.")
+            return
+        with ui.grid().classes("w-full items-center gap-x-4 gap-y-1 "
+                               "grid-cols-[minmax(0,1fr)_5rem_5rem_5rem]"):
+            ui.label("")
+            for _chan, label in NOTIFY_CHANNELS:
+                ui.label(label).classes(f"text-xs {theme.EYEBROW} justify-self-center")
+            _, overrides = config_store.load(NOTIFY_FILE)
+            for cat, label, sw in notify_grid_rows(shipped, overrides):
+                ui.label(label).classes("text-sm")
+                for chan, chan_label in NOTIFY_CHANNELS:
+                    if chan not in sw:
+                        ui.label("")
+                        continue
+                    box = ui.checkbox(value=sw[chan]).classes(
+                        "justify-self-center").props(
+                        f'dense aria-label="{label} {chan_label}"')
+                    box.on_value_change(
+                        lambda e, c=cat, ch=chan: _flip(c, ch, e.value))
+
+
 def _card():
     """One preferences card. ``max-w-2xl`` is the cap these have always had —
     the PAGE is full width, like the other two Settings tabs, and a column of
@@ -304,6 +396,8 @@ def _render_general():
                                "activity)", value=s.get("flow_alerts_enabled", True))
             flowsw.on_value_change(
                 lambda e: app_settings.set("flow_alerts_enabled", e.value))
+
+        _render_notify_switches()
 
         with _card():
             kit.section_title("Captured trade auto-management")

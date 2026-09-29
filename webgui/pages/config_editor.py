@@ -153,7 +153,8 @@ def change_stamp(at):
 
 def _group_label(f, fld, path, label):
     """Rows under a wildcard are named after what they belong to: a Net Prem
-    group ("Mega-caps — symbols"), a news feed's switch ("ZeroHedge — Enabled",
+    group ("Mega-caps — symbols"), a push category's channel ("Gamma flip —
+    Telegram"), a news feed's switch ("ZeroHedge — Enabled",
     keyed by the feed's name), a news feed's field ("MarketWatch — Feed URL",
     an array item, so named by its ``name`` value), an impact keyword tier
     ("Tier 1 — Words"), a feed's or form's impact points (the name itself), a
@@ -162,6 +163,8 @@ def _group_label(f, fld, path, label):
     if fld.key.startswith("netprem_groups.*."):
         group = f["labels"].get(path[1], path[1])
         return f"{group} — {'tab name' if path[-1] == 'label' else 'symbols'}"
+    if fld.key.startswith("channels.*."):
+        return f"{cs.NOTIFY_CATEGORY_NAMES.get(path[1], cs.humanize(path[1]))} — {label}"
     if fld.key.startswith("feed_flags.*."):
         return f"{path[1]} — {label}"
     if fld.key.startswith("feeds.*."):
