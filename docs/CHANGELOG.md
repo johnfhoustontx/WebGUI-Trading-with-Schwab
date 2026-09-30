@@ -4,7 +4,21 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-29 (**One menu on every page of neuralstrike.co.**)
+**Last updated:** 2026-09-29 (**Trade idea results follow the app's exit rules.**)
+
+- "At this price at expiry" misread long options, which the app closes at +50% and
+  never carries to expiry. Each site idea now follows `trade_mgmt.structure_rules` —
+  including prod's overrides (long calls stop at −55%, long puts at −50%): target,
+  then stop, else settled at expiry.
+- The option is modelled from the stock alone (Black-Scholes at the entry price's
+  implied volatility) on every 1-minute bar since the post; no option quote is read.
+  Stop before target; a stop gapped through fills at the open, a target at its level.
+- The scan is incremental (`checked_to`), so late-arriving bars still count, and the
+  refresh now fills a missing entry stock price itself.
+- Dry run on prod over the 42 cards: 13 targets, 14 stops, 15 open.
+- Design revision: `docs/plans/2026-09-29-site-trade-idea-results-design.md`.
+
+**Prior —** 2026-09-29 (**One menu on every page of neuralstrike.co.**)
 
 - Six pages had six menus: different order, each page leaving itself out, the glossary
   with no links, and "Live screens" on the home page but "Back to overview" elsewhere.

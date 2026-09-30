@@ -251,12 +251,15 @@ just click <strong>Authorize</strong> again.</p>
   the home page, and every card of the last six posting days on <strong>neuralstrike.co/ideas.html</strong>.
   Settings → Configuration → Push notifications → <em>Public site</em> turns that off or
   changes how many days are kept; nothing that already posted is taken down by it.
-  Each card also shows <strong>how the idea did</strong>, measured from the stock price alone:
-  while it is open, the stock's move since the post and what the trade would pay
-  <em>at expiry</em> if the stock finished at today's price (a long option is usually worth
-  more than that before expiry, because of its time value); once it has expired, its
-  settled result on the expiry-day close. It refreshes every 15 minutes during the
-  session (<em>Result refresh</em> in the same section).</li>
+  Each card also shows <strong>how the idea did under the app's own exit rules</strong> (the
+  profit target and stop in Settings → Configuration → Trade management): it closes
+  the first minute its option reaches the target or the stop, and otherwise settles
+  at intrinsic on the expiry-day close. The option's value is <em>modelled</em> from the
+  stock price at the volatility its entry price implied, so no option quote is ever
+  published, and an open idea shows an estimated value now beside its target. A stop
+  reached by an overnight gap is booked at the opening value, worse than the stop
+  itself. It refreshes every 15 minutes during the session (<em>Result refresh</em> in the
+  same section).</li>
 <li><strong>The watchlist workbook</strong> <code>options-scanner/data/Top 20.xlsx</code> — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.</li>
 </ul>

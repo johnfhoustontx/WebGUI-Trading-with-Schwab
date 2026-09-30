@@ -49,5 +49,36 @@ show no line.
 
 ## Not done
 
-A live option mark (D2). Early exits (targets/stops) — a posted idea states no exit
-but expiry.
+A live option mark (D2). (Early exits were first left out here; the revision below
+added the app's targets and stops.)
+
+
+## Revision (same day): the app's exit rules, modelled
+
+The operator pointed out that "the payoff at expiry" misleads for long options: the
+app takes profit at +50% the moment it is reached and never carries them to expiry.
+So each idea now follows the app's own rules from `trade_mgmt.structure_rules`
+(operator overrides included - prod stops long calls at -55%, long puts at -50%):
+
+- **The option is modelled, not quoted.** Black-Scholes at the IV solved from the
+  entry price at the post, held constant, priced on every 1-minute STOCK bar since the
+  post (bar high, low and close). Still no option quote, so D2 is untouched. Chosen
+  over sampling the real chain every 15 minutes because it catches intraday touches,
+  works for the backfilled cards (no option history exists) and costs one history
+  call per symbol per refresh. Its one assumption - constant IV - is why every such
+  line says "modelled".
+- **Order and fills follow `_recommend_debit`:** stop before target. A target is a
+  resting limit, booked AT the target even after a gap past it; a stop is a market
+  order, so a bar that OPENS beyond it fills at that open's modelled value. Measured
+  in the dry run on prod: most stops fired on the 08:30 bar after a gap, and booking
+  the level would have flattered each by 5-11 points.
+- **Incremental and final.** `checked_to` records the last bar scanned; bars that
+  arrive late (Schwab serves the current session's minute bars only after a delay)
+  are scanned when they appear and a hit keeps its true minute. A target, stop or
+  expiry is final. An idea settles at expiry only once its bars are scanned to within
+  15 minutes of the close (or a day has passed), so a late hit is not missed.
+- **Missing entry price** is filled by the refresh from the same minute bars.
+- The delta and time rules are not modelled; the time exit never applies to these
+  1-11 DTE ideas.
+
+Dry run on prod, 42 cards (Sep 22-29): 13 closed at target, 14 stopped out, 15 open.
