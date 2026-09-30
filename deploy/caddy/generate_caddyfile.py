@@ -87,6 +87,10 @@ CAPTURE_MAX_AGE = 300
 # life of the brand and are the largest repeated download on the site.
 FONT_MAX_AGE = 2592000          # 30 days
 
+# The trade idea cards under /ideas/<day>/ (services/options_svc/site_ideas.py).
+# Each is named for its day and minute, so it never changes under its name.
+IDEAS_MAX_AGE = 86400           # 1 day
+
 # Where Caddy reads its config on Debian/Ubuntu when installed from the official
 # repository. Named here rather than buried in main() so the tests can assert
 # the path and moving it is one edit.
@@ -204,7 +208,7 @@ def _public_block():
     # `no-cache` does NOT mean "do not cache" -- it means "cache, but always
     # revalidate", which with the ETag already being sent makes the common case
     # a 304 carrying no body rather than a re-download.
-    @revalidate path / *.html *.css *.js
+    @revalidate path / *.html *.css *.js *.json
     header @revalidate Cache-Control "no-cache"
 
     # The thumbnails are rewritten under the SAME filenames every 15 minutes.
@@ -215,6 +219,12 @@ def _public_block():
     # disk.
     @captures path /live/*
     header @captures Cache-Control "max-age={CAPTURE_MAX_AGE}, must-revalidate"
+
+    # The trade idea cards (ideas.json, their manifest, is *.json above). A card
+    # never changes under its name, but a pruned day must not linger, hence
+    # must-revalidate after a day rather than a longer lifetime.
+    @ideas path /ideas/*
+    header @ideas Cache-Control "max-age={IDEAS_MAX_AGE}, must-revalidate"
 
     # Two self-hosted faces, byte-stable for the life of the brand, and the
     # largest repeated download on the site. The only thing here allowed to

@@ -426,6 +426,24 @@ def test_the_live_captures_go_stale_on_their_own(cfg):
         "shows a thumbnail older than the one on disk")
 
 
+def test_the_trade_ideas_manifest_revalidates(cfg):
+    """ideas.json is rewritten after every hourly trade idea, under one name, so
+    it takes the pages' policy rather than a lifetime."""
+    block = _block(cfg, repo_paths.SITE_HOST)
+    m = re.search(r"@revalidate\s+path\s+([^\n]+)", block)
+    assert m and "*.json" in m.group(1).split()
+
+
+def test_the_trade_idea_cards_live_a_day(cfg):
+    """A card is named for its day and minute, so it never changes under its
+    name; a day is safe, and must-revalidate keeps a pruned day from lingering."""
+    block = _block(cfg, repo_paths.SITE_HOST)
+    assert re.search(r"@ideas\s+path\s+/ideas/\*", block)
+    m = re.search(r'header\s+@ideas\s+Cache-Control\s+"max-age=(\d+), must-revalidate"',
+                  block)
+    assert m and int(m.group(1)) == 86400
+
+
 def test_the_fonts_are_the_only_thing_cached_without_revalidation(cfg):
     """Two self-hosted woff2 faces, byte-stable for the life of the brand, and
     the largest repeated download on the site. Everything else revalidates."""

@@ -1325,3 +1325,17 @@ def test_the_tools_menu_needs_no_script():
     <details>: it opens and closes with no JavaScript on any page."""
     for name in TOOLS_PAGES:
         assert "<script" not in _tools_menu(name)
+
+
+# ── Trade ideas (ideas.html + the home page strip) ──────────────────────────
+def test_the_generated_trade_ideas_are_never_committed():
+    """services/options_svc/site_ideas.py writes the cards and ideas.json into
+    this served tree on prod after every post. Tracked, the first post would
+    dirty prod's tree and tools/promote.sh refuses a dirty tree."""
+    import subprocess
+    root = pathlib.Path(repo_paths.REPO_ROOT)
+    for rel in ("deploy/site/ideas/2026-09-29/1435-MU.png",
+                "deploy/site/ideas/2026-09-29/1435-MU.webp",
+                "deploy/site/ideas.json"):
+        out = subprocess.run(["git", "check-ignore", "-q", rel], cwd=root)
+        assert out.returncode == 0, f"{rel} is not gitignored"

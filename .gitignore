@@ -115,6 +115,13 @@ deploy/site/live/*.webp
 # upload would dirty prod's tree and tools/promote.sh refuses a dirty tree.
 deploy/site/reports/
 
+# The hourly trade ideas behind ideas.html and the home page's strip, written by
+# services/options_svc/site_ideas.py on the box that serves the site each time an
+# idea posts. Same reason as live/*.webp: tracked, the first post would dirty
+# prod's tree and tools/promote.sh refuses a dirty tree.
+deploy/site/ideas/
+deploy/site/ideas.json
+
 # The marketing gallery's screenshots, re-photographed from the PRIVATE app by
 # tools/capture_gallery_shots.py on the box that serves the site. Same reason as
 # deploy/site/live/*.webp above: committed, a capture run would dirty prod's
