@@ -4,7 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-29 (**The day's trade ideas on neuralstrike.co.**)
+**Last updated:** 2026-09-29 (**How each trade idea did, on neuralstrike.co.**)
+
+- **Measured from the stock price only.** Open idea: the stock's move since the post
+  and "At this price at expiry: ±$N (±x% of risk)" — the expiry payoff at today's
+  price, labelled as such because a long option also carries time value. Expired
+  idea: settled at intrinsic on the expiry-day daily close, then final. A live option
+  mark was declined: on a public page it publishes the option's price (the open D2
+  question the public Strategy Finder already defers).
+- **Refresh:** `handlers.refresh_site_idea_results` every `[site] refresh_min` (15)
+  inside the scan window — ONE batched `/quotes` call for every open idea, plus one
+  daily-history call per expiring symbol. A missing quote keeps the last result.
+  `site_ideas` now holds a lock around every manifest write (the post and the refresh
+  run on different executor threads).
+- **Page:** a result line per card (green/red), and the day header counts
+  "N ahead, M behind".
+- **Backfill:** `tools/backfill_site_ideas.py` now rebuilds each archived card's legs,
+  expiry and entry from its caption — accepted only when the rebuilt legs reproduce
+  the caption's own Risk AND Profit (all 42 prod captions do) — plus the stock at the
+  post minute from 1-minute history, marks them `approx`, then computes every result.
+- Design: `docs/plans/2026-09-29-site-trade-idea-results-design.md`.
+
+**Prior —** 2026-09-29 (**The day's trade ideas on neuralstrike.co.**)
 
 - **Where:** a *Today's trade ideas* strip on the home page under the fact band (the
   newest three cards, "See all N →") and a new `ideas.html` — a day picker over the

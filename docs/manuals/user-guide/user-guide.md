@@ -94,6 +94,12 @@ The app reads market data and your positions from Schwab, so you need:
   the home page, and every card of the last six posting days on **neuralstrike.co/ideas.html**.
   Settings → Configuration → Push notifications → *Public site* turns that off or
   changes how many days are kept; nothing that already posted is taken down by it.
+  Each card also shows **how the idea did**, measured from the stock price alone:
+  while it is open, the stock's move since the post and what the trade would pay
+  *at expiry* if the stock finished at today's price (a long option is usually worth
+  more than that before expiry, because of its time value); once it has expired, its
+  settled result on the expiry-day close. It refreshes every 15 minutes during the
+  session (*Result refresh* in the same section).
 - **The watchlist workbook** `options-scanner/data/Top 20.xlsx` — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.
 

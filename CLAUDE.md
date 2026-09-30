@@ -917,7 +917,11 @@ moment the capture timer first fires, and **`tools/promote.sh` refuses a dirty t
 **`deploy/site/ideas/` + `deploy/site/ideas.json` are the same** — every POSTED hourly
 trade idea's card, written by `options_svc/site_ideas.py` after the sends (never
 raising, so a site write cannot cost a post) and drawn by `assets/ideas.js` on the home
-strip and `ideas.html`. ⚠ The options_svc conftest redirects `site_ideas.SITE_ROOT`;
+strip and `ideas.html`. ⚠ Each card's RESULT is measured from the **stock price
+only** (`site_ideas.refresh`, every `[site] refresh_min`): a live option mark on a
+public page is a published option quote, which is the open D2 question. An open
+idea's number is the EXPIRY payoff at today's price and is labelled that way.
+⚠ The options_svc conftest redirects `site_ideas.SITE_ROOT`;
 a test that posts without it writes cards into this checkout.
 **`deploy/site/reports/` is the same** — the market reports `report.html` frames, uploaded
 from the operator's workstation by tooling that lives outside this repo
