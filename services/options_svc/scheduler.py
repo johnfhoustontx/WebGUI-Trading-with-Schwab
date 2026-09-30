@@ -252,6 +252,18 @@ def periodic_refresh_due(now, last_slot):
     return (slot != last_slot, slot)
 
 
+# ── The public site's trade idea results ([site] refresh_min) ───────────────
+def site_results_due(now, last_slot, interval_min):
+    """(should_refresh, slot): once per ``interval_min``-minute slot on a trading
+    day inside the scan window (08:00-15:15 CT), which also covers the 15:05
+    expiry-day settlement. The refresh is one batched stock-quote call."""
+    if not (_is_trading_day(now) and _is_market_hours(now)):
+        return (False, last_slot)
+    step = max(1, int(interval_min))
+    slot = (now.date().isoformat(), (now.hour * 60 + now.minute) // step)
+    return (slot != last_slot, slot)
+
+
 # ── Scheduled $SPX/SPY/QQQ Gamma Analyze (Claude briefing) cadence ──────────
 # The Gamma Analyze button is ALSO auto-run at four fixed points on each trading
 # day so the day's index dealer-positioning briefings are generated unattended (in
@@ -556,6 +568,7 @@ async def loop(bus):
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
     trade_idea_ran = set()  # (date, slot) of fired hourly trade-idea posts (see trade_idea_due)
+    last_site_results_slot = None  # public-site trade idea results slot (see site_results_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
     # commands re-publish it), so it is NOT polled every tick. Guarded so a
@@ -964,6 +977,25 @@ async def loop(bus):
 
         if ti_slot:
             branches.append(("trade_idea", _trade_idea_branch(ti_slot)))
+
+        # The public site's trade idea results - how each posted idea has done,
+        # from the stock price only. One batched quote call per [site] refresh_min.
+        try:
+            from shared.notify import switches as _switches
+            sr_due, last_site_results_slot = site_results_due(
+                now, last_site_results_slot, _switches.site_settings()["refresh_min"])
+        except Exception:
+            log.exception("site_results_due gate degraded")
+            sr_due = False
+
+        async def _site_results_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.refresh_site_idea_results)
+            except Exception:
+                log.exception("refresh_site_idea_results branch degraded")
+
+        if sr_due:
+            branches.append(("site_results", _site_results_branch()))
 
         # Launch all DUE branches as keyed background tasks (bounded by the fixed
         # key set). The tick does NOT wait for them — see launch_branches.

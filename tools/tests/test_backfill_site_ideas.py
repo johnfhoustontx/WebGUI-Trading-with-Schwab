@@ -65,3 +65,55 @@ def test_a_card_with_no_caption_still_publishes(tmp_path):
 
 def test_a_missing_archive_publishes_nothing(tmp_path):
     assert b.backfill(tmp_path / "nope", tmp_path / "site", keep_days=6) == 0
+
+
+# ── entry facts rebuilt from the caption (for the results) ─────────────────
+from zoneinfo import ZoneInfo  # noqa: E402
+
+_CT = ZoneInfo("America/Chicago")
+POST = dt.datetime(2026, 9, 22, 10, 35, tzinfo=_CT)
+
+
+def test_a_long_call_caption_rebuilds_its_legs_and_debit():
+    f = b.facts_from_caption("Trade idea: MU Long Call · Sep 26 +190C · Grade Good · "
+                             "Risk $411 · Profit Unlimited · POP 39%", POST)
+    assert f["legs"] == [{"side": "long", "kind": "call", "strike": 190.0, "qty": 1}]
+    assert f["expiration"] == "2026-09-26"
+    assert f["entry_cash"] == -411.0 and f["max_loss"] == 411.0 and f["approx"] is True
+
+
+def test_a_credit_spread_caption_rebuilds_its_credit():
+    f = b.facts_from_caption(CAPTION, POST)       # -880P / +875P, Risk $365, Profit $135
+    assert [(l["side"], l["kind"], l["strike"]) for l in f["legs"]] == [
+        ("short", "put", 880.0), ("long", "put", 875.0)]
+    assert f["entry_cash"] == 135.0 and f["max_loss"] == 365.0
+    assert f["expiration"] == "2026-10-09"
+
+
+def test_thousands_separators_and_the_new_year_rollover():
+    f = b.facts_from_caption("Trade idea: $SPX Long Put · Jan 2 +6,600P · Grade Good · "
+                             "Risk $2,516 · Profit $657,484 · POP 39%",
+                             dt.datetime(2026, 12, 29, 9, 35, tzinfo=_CT))
+    assert f["legs"][0]["strike"] == 6600.0 and f["expiration"] == "2027-01-02"
+
+
+def test_a_caption_whose_numbers_do_not_agree_is_not_measured():
+    # a 1:2 ratio the caption cannot show: Risk disagrees with one-lot legs
+    assert b.facts_from_caption("Trade idea: MU Put Credit Spread · Oct 9 -880P / +875P · "
+                                "Grade Good · Risk $365 · Profit $999 · POP 71%", POST) == {}
+    assert b.facts_from_caption("something else", POST) == {}
+
+
+def test_backfill_with_history_stores_the_facts_and_the_post_price(tmp_path):
+    arch, site = tmp_path / "arch", tmp_path / "site"
+    _archive(arch, "2026-09-29", "1035", "MU")
+    stamp = int(dt.datetime(2026, 9, 29, 10, 35, tzinfo=_CT).timestamp() * 1000)
+    calls = []
+
+    def minute_fn(symbol):
+        calls.append(symbol)
+        return [{"datetime": stamp, "close": 890.5}]
+    assert b.backfill(arch, site, keep_days=6, minute_fn=minute_fn) == 1
+    idea = json.loads((site / "ideas.json").read_text(encoding="utf-8"))["days"][0]["ideas"][0]
+    assert idea["spot"] == 890.5 and idea["entry_cash"] == 135.0 and idea["approx"] is True
+    assert calls == ["MU"]

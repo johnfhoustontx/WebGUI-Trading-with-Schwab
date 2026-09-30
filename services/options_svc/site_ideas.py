@@ -28,8 +28,11 @@ import pathlib
 import re
 import shutil
 import tempfile
+import threading
+from zoneinfo import ZoneInfo
 
 import repo_paths
+from services.options_svc import trade_idea as _ti
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +41,14 @@ IDEAS_DIR = "ideas"
 MANIFEST = "ideas.json"
 WEB_WIDTH = 1200          # the card is drawn at 2x (2400 wide); half is plenty on a page
 WEBP_QUALITY = 86
+
+# An expiring idea settles on its expiry-day close once the session is over
+# (15:00 CT); five minutes of slack so the daily candle carries the close.
+SETTLE_AFTER = _dt.time(15, 5)
+
+# Every read-modify-write of ideas.json holds this: the post (trade idea branch)
+# and the result refresh run on different executor threads of one process.
+_LOCK = threading.Lock()
 
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _REF_RE = re.compile(r"^ideas/\d{4}-\d{2}-\d{2}/[A-Za-z0-9-]+\.(png|webp)$")
@@ -57,6 +68,164 @@ def entry(symbol, label, grade, caption_text, now) -> dict:
             "alt": str(caption_text or ""),
             "img": f"{IDEAS_DIR}/{day}/{stem}.webp",
             "full": f"{IDEAS_DIR}/{day}/{stem}.png"}
+
+
+def _finite(v):
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f and f not in (float("inf"), float("-inf")) else None
+
+
+def entry_facts(idea, *, approx=False) -> dict:
+    """What a result is measured from - the legs, expiry, entry cash (per contract,
+    commission in), max loss and the stock price at the post. All of it is already
+    printed on the card. ``{}`` when the idea cannot be measured."""
+    legs = []
+    for lg in idea.get("legs") or []:
+        strike = _finite(lg.get("strike")) if isinstance(lg, dict) else None
+        if strike is None or lg.get("kind") not in ("call", "put") \
+                or lg.get("side") not in ("long", "short"):
+            return {}
+        legs.append({"side": lg["side"], "kind": lg["kind"], "strike": strike,
+                     "qty": int(lg.get("qty") or 1)})
+    cash, max_loss = _finite(idea.get("entry_cash")), _finite(idea.get("max_loss"))
+    expiration = str(idea.get("expiration") or "")[:10]
+    if not legs or cash is None or not max_loss or max_loss <= 0 \
+            or not _DAY_RE.match(expiration):
+        return {}
+    return {"legs": legs, "expiration": expiration, "entry_cash": cash,
+            "max_loss": max_loss, "spot": _finite(idea.get("spot")), "approx": bool(approx)}
+
+
+def _result(facts, spot, now):
+    pnl = round(_ti.payoff(facts["legs"], facts["entry_cash"], spot), 2)
+    entry_spot = facts.get("spot")
+    move = round((spot - entry_spot) / entry_spot * 100.0, 2) if entry_spot else None
+    return {"spot": round(spot, 2), "move_pct": move, "pnl": pnl,
+            "pnl_pct": round(pnl / facts["max_loss"] * 100.0, 1),
+            "as_of": now.isoformat(timespec="seconds")}
+
+
+def open_result(facts, spot, now) -> dict:
+    """An open idea: the stock's move and the EXPIRY payoff at today's price.
+    Not a mark - a long option also carries time value, and the page says so."""
+    return {"status": "open", **_result(facts, spot, now)}
+
+
+def settled_result(facts, close, day, now) -> dict:
+    """An expired idea, settled at intrinsic against the expiry-day close. Final."""
+    return {"status": "expired", **_result(facts, close, now), "settled": day}
+
+
+def _measurable(i):
+    return bool(i.get("legs")) and (i.get("result") or {}).get("status") != "expired"
+
+
+def _settles(i, now):
+    exp, today = i.get("expiration"), f"{now:%Y-%m-%d}"
+    return bool(exp) and (exp < today or (exp == today and now.time() >= SETTLE_AFTER))
+
+
+def due(manifest, now):
+    """``(symbols to quote, {(symbol, expiration)} to settle)`` for a refresh."""
+    quotes, settle = set(), set()
+    for d in _valid_days(manifest):
+        for i in d["ideas"]:
+            if not _measurable(i):
+                continue
+            if _settles(i, now):
+                settle.add((i["symbol"], i["expiration"]))
+            else:
+                quotes.add(i["symbol"])
+    return quotes, settle
+
+
+def apply_results(manifest, quotes, closes, now) -> dict:
+    """PURE. The manifest with each measurable idea's result recomputed. A missing
+    quote or close leaves the previous result (and its time) alone - never a 0."""
+    days = _valid_days(manifest)
+    for d in days:
+        for i in d["ideas"]:
+            if not _measurable(i):
+                continue
+            facts = {k: i.get(k) for k in ("legs", "entry_cash", "max_loss", "spot")}
+            if _settles(i, now):
+                close = _finite(closes.get((i["symbol"], i["expiration"])))
+                if close:
+                    i["result"] = settled_result(facts, close, i["expiration"], now)
+                continue
+            last = _finite(quotes.get(i["symbol"]))
+            if last:
+                i["result"] = open_result(facts, last, now)
+    out = dict(manifest) if isinstance(manifest, dict) else {}
+    out["days"] = days
+    return out
+
+
+def refresh(quote_fn, close_fn, now, *, root=None) -> int:
+    """Recompute every open idea's result and rewrite the manifest.
+
+    ``quote_fn(symbols) -> {symbol: last}`` is ONE batched call; ``close_fn(symbol,
+    day) -> close`` runs once per expiring idea. Returns the number of ideas given a
+    new result. Never raises."""
+    try:
+        path = (pathlib.Path(root) if root is not None else SITE_ROOT) / MANIFEST
+        with _LOCK:
+            manifest = _read_manifest(path)
+            symbols, settle = due(manifest, now)
+            if not symbols and not settle:
+                return 0
+            quotes = quote_fn(sorted(symbols)) if symbols else {}
+            closes = {(s, e): close_fn(s, e) for s, e in sorted(settle)}
+            before = json.dumps(manifest, sort_keys=True)
+            out = apply_results(json.loads(before), quotes or {}, closes, now)
+            n = sum(1 for d in out["days"] for i in d["ideas"]
+                    if (i.get("result") or {}).get("as_of") == now.isoformat(timespec="seconds"))
+            if n:
+                _write_atomic(path, json.dumps(out, indent=1).encode("utf-8"))
+            return n
+    except Exception:  # noqa: BLE001 -- a result refresh must never break the scheduler
+        log.warning("trade idea: site result refresh failed", exc_info=True)
+        return 0
+
+
+# ── Schwab /pricehistory candles (raw: epoch-ms stamps) ─────────────────────
+# Read raw rather than through proxy_client's DataFrame helpers, whose datetime
+# column is NAIVE UTC (the documented trap). Daily candles are stamped midnight
+# Central, so the Central date of the stamp is the session date.
+_CT = ZoneInfo("America/Chicago")
+PRICE_AT_MAX_GAP = _dt.timedelta(minutes=15)
+
+
+def _candle_time(c):
+    try:
+        return _dt.datetime.fromtimestamp(int(c["datetime"]) / 1000, _CT)
+    except (TypeError, ValueError, KeyError, OverflowError, OSError):
+        return None
+
+
+def close_on(candles, day):
+    """The close of the daily candle for ``day`` (YYYY-MM-DD), or None."""
+    for c in candles or ():
+        t = _candle_time(c) if isinstance(c, dict) else None
+        if t is not None and f"{t:%Y-%m-%d}" == day:
+            return _finite(c.get("close"))
+    return None
+
+
+def price_at(candles, when):
+    """The close of the last minute bar at or before ``when`` - None when there is
+    none, or it is more than PRICE_AT_MAX_GAP old (not the price at the post)."""
+    best = None
+    for c in candles or ():
+        t = _candle_time(c) if isinstance(c, dict) else None
+        if t is not None and t <= when and (best is None or t > best[0]):
+            best = (t, _finite(c.get("close")))
+    if best is None or when - best[0] > PRICE_AT_MAX_GAP:
+        return None
+    return best[1]
 
 
 def _valid_idea(i) -> bool:
@@ -137,28 +306,35 @@ def _prune(ideas_dir, keep):
             shutil.rmtree(p, ignore_errors=True)
 
 
-def publish(idea, png, caption_text, now, *, root=None, keep_days=6) -> bool:
+def publish(idea, png, caption_text, now, *, root=None, keep_days=6, approx=False) -> bool:
     """Write the card, its web copy and the manifest into the site tree.
 
-    Never raises; False when nothing usable was written."""
+    The manifest row also carries the idea's entry facts (``entry_facts``) so its
+    result can be refreshed. Never raises; False when nothing usable was written."""
     try:
-        root = pathlib.Path(root) if root is not None else SITE_ROOT
-        row = entry(idea.get("symbol"), idea.get("label"), idea.get("grade"),
-                    caption_text, now)
-        full = root / row["full"]
-        full.parent.mkdir(parents=True, exist_ok=True)
-        _write_atomic(full, png)
-        web = webp_copy(png)
-        if web:
-            _write_atomic(root / row["img"], web)
-        else:
-            row["img"] = row["full"]
-        path = root / MANIFEST
-        manifest = merge_manifest(_read_manifest(path), f"{now:%Y-%m-%d}", row,
-                                  keep_days, now.isoformat(timespec="seconds"))
-        _write_atomic(path, json.dumps(manifest, indent=1).encode("utf-8"))
-        _prune(root / IDEAS_DIR, {d["date"] for d in manifest["days"]})
-        return True
+        with _LOCK:
+            return _publish(idea, png, caption_text, now, root, keep_days, approx)
     except Exception:  # noqa: BLE001 -- a site write must never cost a post
         log.warning("trade idea: site publish failed", exc_info=True)
         return False
+
+
+def _publish(idea, png, caption_text, now, root, keep_days, approx):
+    root = pathlib.Path(root) if root is not None else SITE_ROOT
+    row = entry(idea.get("symbol"), idea.get("label"), idea.get("grade"),
+                caption_text, now)
+    row.update(entry_facts(idea, approx=approx))
+    full = root / row["full"]
+    full.parent.mkdir(parents=True, exist_ok=True)
+    _write_atomic(full, png)
+    web = webp_copy(png)
+    if web:
+        _write_atomic(root / row["img"], web)
+    else:
+        row["img"] = row["full"]
+    path = root / MANIFEST
+    manifest = merge_manifest(_read_manifest(path), f"{now:%Y-%m-%d}", row,
+                              keep_days, now.isoformat(timespec="seconds"))
+    _write_atomic(path, json.dumps(manifest, indent=1).encode("utf-8"))
+    _prune(root / IDEAS_DIR, {d["date"] for d in manifest["days"]})
+    return True

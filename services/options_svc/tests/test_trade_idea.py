@@ -619,3 +619,64 @@ def test_a_text_only_post_has_no_card_to_publish(idea_ready, site, monkeypatch):
     res = handlers.run_trade_idea(idea_ready, "h1035", now=NOW)
     assert res["status"] == "posted" and res["site"] is False
     assert not (site / "ideas.json").exists()
+
+
+# ── how each idea did: the refresh ─────────────────────────────────────────
+def test_the_result_refresh_uses_the_stock_quote_and_daily_close(monkeypatch):
+    from services.options_svc import compute, site_ideas
+    from shared.notify import switches
+    monkeypatch.setattr(switches, "site_settings",
+                        lambda: {"trade_ideas": True, "keep_days": 6, "refresh_min": 15})
+    got = {}
+
+    def fake_refresh(quote_fn, close_fn, now, root=None):
+        got.update(quote_fn=quote_fn, close_fn=close_fn, now=now)
+        return 3
+    monkeypatch.setattr(site_ideas, "refresh", fake_refresh)
+    assert handlers.refresh_site_idea_results(now=NOW) == 3
+    assert got["quote_fn"] is compute.site_idea_quotes
+    assert got["close_fn"] is compute.daily_close and got["now"] == NOW
+
+
+def test_the_result_refresh_is_off_with_the_site_switch(monkeypatch):
+    from services.options_svc import site_ideas
+    from shared.notify import switches
+    monkeypatch.setattr(switches, "site_settings",
+                        lambda: {"trade_ideas": False, "keep_days": 6, "refresh_min": 15})
+
+    def boom(*a, **k):
+        raise AssertionError("must not refresh")
+    monkeypatch.setattr(site_ideas, "refresh", boom)
+    assert handlers.refresh_site_idea_results(now=NOW) == 0
+
+
+def test_site_idea_quotes_reads_last_price_per_symbol(monkeypatch):
+    from services.options_svc import compute
+    raw = {"MU": {"quote": {"lastPrice": 191.2}}, "$SPX": {"quote": {"lastPrice": 6600.5}}}
+    monkeypatch.setattr(compute, "matrix_quotes", lambda symbols: raw)
+    assert compute.site_idea_quotes(["MU", "$SPX", "QQQ"]) == {
+        "MU": 191.2, "$SPX": 6600.5, "QQQ": None}
+
+
+def test_daily_close_asks_for_daily_candles_and_reads_the_date(monkeypatch):
+    from services.options_svc import compute
+    stamp = int(dt.datetime(2026, 10, 2, tzinfo=_CT).timestamp() * 1000)
+    seen = {}
+
+    class _C:
+        def _request(self, path, params=None):
+            seen.update(path=path, **params)
+            return {"candles": [{"datetime": stamp, "close": 184.1}]}
+    monkeypatch.setattr(compute._proxy, "schwab_client", _C())
+    assert compute.daily_close("MU", "2026-10-02") == 184.1
+    assert seen["path"] == "/pricehistory" and seen["frequencyType"] == "daily"
+
+
+def test_the_result_slot_fires_once_per_interval_inside_the_session():
+    at = dt.datetime(2026, 9, 29, 10, 16, tzinfo=_CT)
+    due, slot = scheduler.site_results_due(at, None, 15)
+    assert due
+    assert scheduler.site_results_due(at + dt.timedelta(minutes=5), slot, 15)[0] is False
+    assert scheduler.site_results_due(at + dt.timedelta(minutes=15), slot, 15)[0] is True
+    assert scheduler.site_results_due(dt.datetime(2026, 9, 29, 18, 0, tzinfo=_CT), None, 15)[0] is False
+    assert scheduler.site_results_due(dt.datetime(2026, 12, 25, 10, 0, tzinfo=_CT), None, 15)[0] is False

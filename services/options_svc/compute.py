@@ -3787,6 +3787,44 @@ def matrix_quotes(symbols):
         return {}
 
 
+# ── The public site's trade idea results (site_ideas.refresh) ───────────────
+# STOCK prices only - no option quote is ever read for a published result.
+
+def site_idea_quotes(symbols):
+    """``{symbol: last}`` in ONE batched /quotes call; None where there is none."""
+    raw = matrix_quotes(symbols)
+    return {s: quote_last(raw, s) for s in symbols}
+
+
+def _raw_candles(symbol, params):
+    data = _proxy.schwab_client._request("/pricehistory", {"symbol": symbol, **params})
+    return (data or {}).get("candles") or []
+
+
+def daily_close(symbol, day):
+    """The stock's close on ``day`` (YYYY-MM-DD) from the last month of daily
+    candles, or None (not printed yet, or no data). Settles an expired idea."""
+    from services.options_svc import site_ideas
+    try:
+        return site_ideas.close_on(_raw_candles(symbol, {
+            "periodType": "month", "period": 1, "frequencyType": "daily",
+            "frequency": 1}), day)
+    except Exception:  # noqa: BLE001
+        log.warning("daily_close %s %s failed", symbol, day, exc_info=True)
+        return None
+
+
+def minute_candles(symbol, days=10):
+    """The last ``days`` sessions of 1-minute candles (raw), or []. The backfill's
+    stock price at each post minute."""
+    try:
+        return _raw_candles(symbol, {"periodType": "day", "period": days,
+                                     "frequencyType": "minute", "frequency": 1})
+    except Exception:  # noqa: BLE001
+        log.warning("minute_candles %s failed", symbol, exc_info=True)
+        return []
+
+
 # ── Gamma (ported from webgui/pages/options/gamma.py) ───────────────────────
 # The heaviest options page: a live option-chain fetch + GammaEngine compute
 # (GEX/Charm/DEX/Vanna) + per-view summary/walls/history grids + a term grid +
