@@ -4,7 +4,16 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-29 (**Trade idea results follow the app's exit rules.**)
+**Last updated:** 2026-09-30 (**The home page strip states the trade ideas' record.**)
+
+- One line under "Today's trade ideas": the record over every idea the site keeps —
+  `Last 6 trading days · 39 ideas: 11 hit target · 13 stopped out · 15 open` and
+  `Closed so far: −$5,039` (green/red). Open ideas are counted but never added to the
+  dollar total, since their figure is a modelled estimate. Computed in
+  `assets/ideas.js` (`record` / `renderRecord`) from the same `ideas.json`; the line
+  ships hidden, like the strip.
+
+**Prior —** 2026-09-29 (**Trade idea results follow the app's exit rules.**)
 
 - "At this price at expiry" misread long options, which the app closes at +50% and
   never carries to expiry. Each site idea now follows `trade_mgmt.structure_rules` —

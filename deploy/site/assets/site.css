@@ -1127,6 +1127,7 @@ a.ns-menu-item:hover {
  * landing page whenever there is nothing to show.
  */
 .ns-ideas-strip[hidden],
+.ns-ideas-record[hidden],
 .ns-day-picker[hidden],
 [data-ideas-empty][hidden] { display: none !important; }
 
@@ -1259,3 +1260,20 @@ a.ns-menu-item:hover {
 }
 /* An eyebrow that carries a count (Gallery · 15 screens) keeps one type style. */
 .ns-eyebrow .ns-count { font-size: inherit; letter-spacing: inherit; color: inherit; }
+
+/* The strip's record line (ideas.js renderRecord): counts, then the closed total
+ * in the same P&L green/red as the cards. */
+.ns-ideas-strip { --ns-up: #34d399; --ns-down: #f87171; }
+.ns-ideas-record {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+.ns-ideas-record-net { font-weight: 600; color: var(--color-text); }
+.ns-ideas-record-net.is-up { color: var(--ns-up); }
+.ns-ideas-record-net.is-down { color: var(--ns-down); }

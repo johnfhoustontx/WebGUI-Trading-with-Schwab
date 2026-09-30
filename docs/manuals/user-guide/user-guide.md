@@ -92,6 +92,9 @@ The app reads market data and your positions from Schwab, so you need:
   event (see *Google Calendar popup for the trade idea* under Settings).
   Every trade idea that posts also appears on the public site: the newest three on
   the home page, and every card of the last six posting days on **neuralstrike.co/ideas.html**.
+  Under the home page heading, one line gives the record for those days — how many
+  hit their target, were stopped out or are still open, and the dollar result of the
+  ones that have closed.
   Settings → Configuration → Push notifications → *Public site* turns that off or
   changes how many days are kept; nothing that already posted is taken down by it.
   Each card also shows **how the idea did under the app's own exit rules** (the

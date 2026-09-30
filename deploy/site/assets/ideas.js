@@ -180,6 +180,46 @@
     return up + down ? " · " + up + " ahead, " + down + " behind" : "";
   }
 
+  // The record over every idea the site keeps: how the feed has done, as counts
+  // plus the dollar result of the ideas that have CLOSED. Open ideas are counted,
+  // never added to the total - their figure is a modelled estimate that moves.
+  function record(days) {
+    var out = { days: days.length, ideas: 0, hit: 0, stopped: 0, expired: 0,
+                open: 0, closed: 0, net: 0 };
+    days.forEach(function (d) {
+      d.ideas.forEach(function (i) {
+        out.ideas += 1;
+        var r = resultOf(i);
+        if (!r) return;
+        if (r.status === "target") out.hit += 1;
+        else if (r.status === "stop") out.stopped += 1;
+        else if (r.status === "expired") out.expired += 1;
+        else { out.open += 1; return; }
+        out.closed += 1;
+        out.net += r.pnl;
+      });
+    });
+    return out;
+  }
+
+  function renderRecord(box, days) {
+    var r = record(days);
+    if (!r.ideas) return;                           // stays hidden
+    while (box.firstChild) box.removeChild(box.firstChild);
+    var parts = [r.hit + " hit target", r.stopped + " stopped out"];
+    if (r.expired) parts.push(r.expired + " expired");
+    parts.push(r.open + " open");
+    box.appendChild(el("span", "ns-ideas-record-counts",
+      "Last " + r.days + (r.days === 1 ? " trading day" : " trading days") + " · "
+      + r.ideas + (r.ideas === 1 ? " idea: " : " ideas: ") + parts.join(" · ")));
+    if (r.closed) {
+      var tone = r.net > 0 ? " is-up" : r.net < 0 ? " is-down" : "";
+      box.appendChild(el("span", "ns-ideas-record-net" + tone,
+        "Closed so far: " + money(r.net)));
+    }
+    box.hidden = false;
+  }
+
   function card(idea, eager) {
     var a = el("a", "ns-idea-card");
     a.href = idea.full;
@@ -227,6 +267,8 @@
       ? "See all " + day.ideas.length + " →"
       : "Every trade idea →";
     fill(grid, day.ideas.slice(0, STRIP_COUNT), 0);
+    var recordBox = root.querySelector("[data-ideas-record]");
+    if (recordBox) renderRecord(recordBox, days);
     root.hidden = false;
   }
 

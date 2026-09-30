@@ -1407,3 +1407,14 @@ def test_an_open_result_is_labelled_as_an_expiry_payoff_not_a_mark():
     shown = " ".join(re.findall(r'"([^"\n]*)"', js)).lower()
     for word in ("unrealized", "current value", "now worth", "mark"):
         assert word not in shown, word
+
+
+def test_the_home_strip_states_the_record_and_it_ships_hidden():
+    """One line under the strip's heading: how every idea the site keeps has
+    done. Hidden until the script fills it, like the strip itself; the dollar
+    figure is the CLOSED ideas only, since an open idea's value is an estimate."""
+    markup = _markup("index.html")
+    boxes = re.findall(r"<p[^>]*data-ideas-record[^>]*>", markup)
+    assert len(boxes) == 1 and re.search(r"\shidden(\s|>|=)", boxes[0])
+    js = _text("assets/ideas.js")
+    assert "Closed so far: " in js and "trading days" in js
