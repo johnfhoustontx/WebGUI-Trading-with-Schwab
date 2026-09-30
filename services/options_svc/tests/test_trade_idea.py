@@ -629,13 +629,14 @@ def test_the_result_refresh_uses_the_stock_quote_and_daily_close(monkeypatch):
                         lambda: {"trade_ideas": True, "keep_days": 6, "refresh_min": 15})
     got = {}
 
-    def fake_refresh(quote_fn, close_fn, now, root=None):
-        got.update(quote_fn=quote_fn, close_fn=close_fn, now=now)
+    def fake_refresh(quote_fn, close_fn, now, root=None, minutes_fn=None):
+        got.update(quote_fn=quote_fn, close_fn=close_fn, now=now, minutes_fn=minutes_fn)
         return 3
     monkeypatch.setattr(site_ideas, "refresh", fake_refresh)
     assert handlers.refresh_site_idea_results(now=NOW) == 3
     assert got["quote_fn"] is compute.site_idea_quotes
     assert got["close_fn"] is compute.daily_close and got["now"] == NOW
+    assert got["minutes_fn"] is compute.minute_candles
 
 
 def test_the_result_refresh_is_off_with_the_site_switch(monkeypatch):

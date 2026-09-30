@@ -2569,9 +2569,10 @@ def _publish_trade_idea_site(idea, png, now) -> bool:
 
 
 def refresh_site_idea_results(now=None) -> int:
-    """Recompute how each posted trade idea on the public site has done, from the
-    STOCK price only: one batched quote call for every open idea, and a daily
-    close for each one that has expired. Driven by ``scheduler.site_results_due``
+    """Recompute how each posted trade idea on the public site has done, under the
+    app's exit rules, from the STOCK price only: one batched quote call, one
+    1-minute history call per symbol with open ideas (the modelled target/stop
+    check), and a daily close for each one that has expired. Driven by ``scheduler.site_results_due``
     every ``[site] refresh_min``. Returns the ideas updated; never raises."""
     from zoneinfo import ZoneInfo as _ZI
     now = now or _dt.datetime.now(_ZI("America/Chicago"))
@@ -2580,7 +2581,8 @@ def refresh_site_idea_results(now=None) -> int:
         from shared.notify import switches
         if not switches.site_settings()["trade_ideas"]:
             return 0
-        n = site_ideas.refresh(compute.site_idea_quotes, compute.daily_close, now)
+        n = site_ideas.refresh(compute.site_idea_quotes, compute.daily_close, now,
+                               minutes_fn=compute.minute_candles)
         if n:
             log.info("site trade idea results: %d updated", n)
         return n

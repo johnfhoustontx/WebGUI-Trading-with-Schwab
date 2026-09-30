@@ -80,6 +80,8 @@ def test_a_long_call_caption_rebuilds_its_legs_and_debit():
     assert f["legs"] == [{"side": "long", "kind": "call", "strike": 190.0, "qty": 1}]
     assert f["expiration"] == "2026-09-26"
     assert f["entry_cash"] == -411.0 and f["max_loss"] == 411.0 and f["approx"] is True
+    assert f["type"] == "LONG_CALL"          # the exit rules key on the structure
+    assert f["posted"] == POST.isoformat()
 
 
 def test_a_credit_spread_caption_rebuilds_its_credit():

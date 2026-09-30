@@ -1,8 +1,11 @@
-"""How each posted trade idea did, measured from the STOCK price alone.
+"""How each posted trade idea did - under the app's own exit rules.
 
-No option quote is ever read or published: an open idea shows the stock's move and
-the expiry payoff at today's price; an expired one settles at intrinsic against the
-expiry-day close.
+Measured from the STOCK price only; no option quote is read or published. Each
+idea's option is modelled with Black-Scholes at the implied volatility its entry
+price implies, on every 1-minute stock bar since the post. The first bar that
+reaches the profit target (``[stops] tp_frac``, 50%: of the DEBIT for a long
+option) closes it at the target; a stop, where the structure has one, likewise.
+Otherwise it settles at intrinsic on the expiry-day close.
 """
 import datetime as dt
 import json
@@ -14,152 +17,276 @@ from services.options_svc import site_ideas as S
 
 _CT = ZoneInfo("America/Chicago")
 POSTED = dt.datetime(2026, 9, 29, 10, 35, tzinfo=_CT)
+EXP = "2026-10-02"
 
 
 def _long_call(**over):
-    idea = {"symbol": "MU", "label": "Long Call", "grade": "Good", "expiration": "2026-10-02",
+    idea = {"symbol": "MU", "label": "Long Call", "grade": "Good", "type": "LONG_CALL",
+            "expiration": EXP,
             "legs": [{"side": "long", "kind": "call", "strike": 190.0,
-                      "expiration": "2026-10-02", "qty": 1}],
-            "entry_cash": -411.0, "max_loss": 411.0, "spot": 186.4}
+                      "expiration": EXP, "qty": 1}],
+            "entry_cash": -411.0, "max_loss": 411.0, "max_profit": None, "spot": 186.4}
     idea.update(over)
     return idea
 
 
 def _pcs():
-    return {"symbol": "QQQ", "label": "Put Credit Spread", "grade": "Good",
-            "expiration": "2026-10-02",
-            "legs": [{"side": "short", "kind": "put", "strike": 740.0, "expiration": "2026-10-02", "qty": 1},
-                     {"side": "long", "kind": "put", "strike": 735.0, "expiration": "2026-10-02", "qty": 1}],
-            "entry_cash": 122.0, "max_loss": 378.0, "spot": 759.38}
+    return {"symbol": "QQQ", "label": "Put Credit Spread", "grade": "Good", "type": "PCS",
+            "expiration": EXP,
+            "legs": [{"side": "short", "kind": "put", "strike": 740.0, "expiration": EXP, "qty": 1},
+                     {"side": "long", "kind": "put", "strike": 735.0, "expiration": EXP, "qty": 1}],
+            "entry_cash": 122.0, "max_loss": 378.0, "max_profit": 122.0, "spot": 759.38}
 
 
-def _manifest(*facts_rows, day="2026-09-29"):
-    ideas = []
-    for n, (idea, extra) in enumerate(facts_rows):
-        e = S.entry(idea["symbol"], idea["label"], idea["grade"], "cap",
-                    POSTED + dt.timedelta(hours=n))
-        e.update(S.entry_facts(idea))
-        e.update(extra)
-        ideas.append(e)
-    return {"updated": "u", "days": [{"date": day, "ideas": ideas}]}
+def _row(idea, posted=POSTED, **extra):
+    e = S.entry(idea["symbol"], idea["label"], idea["grade"], "cap", posted)
+    e.update(S.entry_facts(idea, posted=posted))
+    e.update(extra)
+    return e
+
+
+def _manifest(*rows, day="2026-09-29"):
+    return {"updated": "u", "days": [{"date": day, "ideas": list(rows)}]}
+
+
+def _ms(t):
+    return int(t.timestamp() * 1000)
+
+
+def _bars(start, prices):
+    """One 1-minute bar per price, starting at ``start``."""
+    return [{"datetime": _ms(start + dt.timedelta(minutes=n)), "open": p, "high": p,
+             "low": p, "close": p} for n, p in enumerate(prices)]
 
 
 # ── entry facts ────────────────────────────────────────────────────────────
 def test_entry_facts_keep_what_the_card_already_prints():
-    f = S.entry_facts(_long_call())
+    f = S.entry_facts(_long_call(), posted=POSTED)
     assert f == {"legs": [{"side": "long", "kind": "call", "strike": 190.0, "qty": 1}],
-                 "expiration": "2026-10-02", "entry_cash": -411.0, "max_loss": 411.0,
-                 "spot": 186.4, "approx": False}
+                 "type": "LONG_CALL", "expiration": EXP, "entry_cash": -411.0,
+                 "max_loss": 411.0, "max_profit": None, "spot": 186.4, "approx": False,
+                 "posted": "2026-09-29T10:35:00-05:00"}
 
 
 def test_entry_facts_are_empty_when_the_idea_cannot_be_measured():
-    assert S.entry_facts(_long_call(legs=None)) == {}
-    assert S.entry_facts(_long_call(entry_cash=None)) == {}
-    assert S.entry_facts(_long_call(max_loss=None)) == {}
+    assert S.entry_facts(_long_call(legs=None), posted=POSTED) == {}
+    assert S.entry_facts(_long_call(entry_cash=None), posted=POSTED) == {}
+    assert S.entry_facts(_long_call(max_loss=None), posted=POSTED) == {}
 
 
-# ── one result ─────────────────────────────────────────────────────────────
-def test_an_open_long_call_reads_the_payoff_at_this_price():
-    r = S.open_result(S.entry_facts(_long_call()), 196.0, POSTED)
-    assert r == {"status": "open", "spot": 196.0, "move_pct": 5.15, "pnl": 189.0,
-                 "pnl_pct": 46.0, "as_of": POSTED.isoformat(timespec="seconds")}
+# ── the exit rules, from config/trade_mgmt.toml ────────────────────────────
+def test_a_long_option_targets_half_the_debit_and_has_no_stop():
+    assert S.exit_levels(S.entry_facts(_long_call(), posted=POSTED)) == (205.5, None)
 
 
-def test_an_open_credit_spread_above_the_short_keeps_the_credit():
-    r = S.open_result(S.entry_facts(_pcs()), 750.0, POSTED)
-    assert r["pnl"] == 122.0 and r["pnl_pct"] == 32.3       # one decimal
+def test_a_credit_spread_targets_half_the_credit_and_stops_at_twice_it():
+    assert S.exit_levels(S.entry_facts(_pcs(), posted=POSTED)) == (61.0, 244.0)
 
 
-def test_a_settled_long_call_below_the_strike_loses_the_whole_debit():
-    r = S.settled_result(S.entry_facts(_long_call()), 184.1, "2026-10-02", POSTED)
-    assert r["status"] == "expired" and r["settled"] == "2026-10-02"
-    assert r["pnl"] == -411.0 and r["pnl_pct"] == -100.0 and r["spot"] == 184.1
+def test_the_levels_follow_the_config(monkeypatch):
+    from shared import trade_mgmt
+    monkeypatch.setattr(trade_mgmt, "structure_rules",
+                        lambda s: {"tp_frac": 0.8, "debit_stop_frac": 0.6,
+                                   "loss_rules": True, "stop_mult": 2.0})
+    assert S.exit_levels(S.entry_facts(_long_call(), posted=POSTED)) == (
+        pytest.approx(328.8), pytest.approx(246.6))
 
 
-def test_no_entry_spot_means_no_move_never_a_zero():
-    facts = dict(S.entry_facts(_long_call()), spot=None)
-    assert S.open_result(facts, 196.0, POSTED)["move_pct"] is None
+# ── the model ──────────────────────────────────────────────────────────────
+def test_the_entry_iv_reprices_the_entry():
+    facts = S.entry_facts(_long_call(), posted=POSTED)
+    iv = S.solve_iv(facts)
+    assert 0.05 < iv < 3.0
+    assert S.model_pnl(facts, iv, 186.4, POSTED) == pytest.approx(0.0, abs=0.5)
 
 
-# ── what a refresh needs ───────────────────────────────────────────────────
-def test_due_splits_open_quotes_from_settlements():
-    m = _manifest((_long_call(), {}), (_pcs(), {}))
-    before_close = dt.datetime(2026, 10, 2, 14, 0, tzinfo=_CT)
-    assert S.due(m, before_close) == ({"MU", "QQQ"}, set())
-    after_close = dt.datetime(2026, 10, 2, 15, 5, tzinfo=_CT)
-    assert S.due(m, after_close) == (set(), {("MU", "2026-10-02"), ("QQQ", "2026-10-02")})
-    next_day = dt.datetime(2026, 10, 5, 9, 0, tzinfo=_CT)
-    assert S.due(m, next_day) == (set(), {("MU", "2026-10-02"), ("QQQ", "2026-10-02")})
+def test_no_entry_spot_means_no_model():
+    assert S.solve_iv(S.entry_facts(_long_call(spot=None), posted=POSTED)) is None
 
 
-def test_due_skips_settled_ideas_and_ideas_without_facts():
-    settled = {"result": {"status": "expired", "pnl": -411.0}}
-    m = _manifest((_long_call(), settled), (_pcs(), {}))
-    m["days"][0]["ideas"].append(S.entry("AAPL", "Long Call", "Good", "cap", POSTED))
-    assert S.due(m, POSTED) == ({"QQQ"}, set())
+def test_a_rally_through_the_target_closes_it_at_the_target_minute():
+    facts = S.entry_facts(_long_call(), posted=POSTED)
+    iv = S.solve_iv(facts)
+    start = POSTED + dt.timedelta(minutes=1)
+    bars = _bars(start, [186.4 + 0.5 * n for n in range(40)])      # to ~206
+    hit, last = S.scan(facts, iv, bars, POSTED, POSTED + dt.timedelta(hours=2))
+    assert hit["status"] == "target" and hit["pnl"] == 205.5 and hit["pnl_pct"] == 50.0
+    closed = dt.datetime.fromisoformat(hit["closed_at"])
+    assert start < closed < start + dt.timedelta(minutes=40)
+    assert S.model_pnl(facts, iv, hit["spot"], closed) >= 205.5
+
+
+def test_a_quiet_tape_hits_nothing_and_records_how_far_it_looked():
+    facts = S.entry_facts(_long_call(), posted=POSTED)
+    iv = S.solve_iv(facts)
+    bars = _bars(POSTED + dt.timedelta(minutes=1), [186.0] * 30)
+    hit, last = S.scan(facts, iv, bars, POSTED, POSTED + dt.timedelta(hours=1))
+    assert hit is None and last == POSTED + dt.timedelta(minutes=30)
+
+
+def test_a_gap_through_the_stop_fills_at_the_open_not_the_stop(monkeypatch):
+    """A stop is a market order: after an overnight gap it fills at the opening
+    price, which is WORSE than the stop level. Booking the level would flatter
+    every gap-down loss - the measured case on prod, where most stops fired on the
+    08:30 bar."""
+    from shared import trade_mgmt
+    monkeypatch.setattr(trade_mgmt, "structure_rules",
+                        lambda s: {"tp_frac": 0.5, "debit_stop_frac": 0.5})
+    facts = S.entry_facts(_long_call(), posted=POSTED)
+    iv = S.solve_iv(facts)
+    next_open = dt.datetime(2026, 9, 30, 8, 30, tzinfo=_CT)
+    bars = [{"datetime": _ms(next_open), "open": 170.0, "high": 171.0, "low": 169.0,
+             "close": 170.5}]
+    hit, _ = S.scan(facts, iv, bars, POSTED, next_open + dt.timedelta(hours=1))
+    assert hit["status"] == "stop"
+    assert hit["pnl"] == pytest.approx(S.model_pnl(facts, iv, 170.0, next_open), abs=0.01)
+    assert hit["pnl"] < -205.5
+
+
+def test_a_target_is_booked_at_the_target_even_after_a_gap_up():
+    """The cautious reading on the winning side: a resting limit fills AT its
+    price, so a gap past it is not credited."""
+    facts = S.entry_facts(_long_call(), posted=POSTED)
+    iv = S.solve_iv(facts)
+    next_open = dt.datetime(2026, 9, 30, 8, 30, tzinfo=_CT)
+    bars = [{"datetime": _ms(next_open), "open": 215.0, "high": 216.0, "low": 214.0,
+             "close": 215.0}]
+    hit, _ = S.scan(facts, iv, bars, POSTED, next_open + dt.timedelta(hours=1))
+    assert hit["status"] == "target" and hit["pnl"] == 205.5
+
+
+def test_bars_before_the_post_or_after_the_close_are_ignored():
+    facts = S.entry_facts(_long_call(), posted=POSTED)
+    iv = S.solve_iv(facts)
+    early = _bars(POSTED - dt.timedelta(minutes=30), [260.0] * 10)   # before the post
+    hit, _ = S.scan(facts, iv, early, POSTED, POSTED + dt.timedelta(hours=1))
+    assert hit is None
 
 
 # ── applying a refresh ─────────────────────────────────────────────────────
-def test_apply_marks_open_ideas_and_settles_expired_ones():
-    m = _manifest((_long_call(), {}), (_pcs(), {}))
-    now = dt.datetime(2026, 10, 2, 15, 10, tzinfo=_CT)
-    out = S.apply_results(m, {}, {("MU", "2026-10-02"): 184.1, ("QQQ", "2026-10-02"): 751.0}, now)
-    mu, qqq = out["days"][0]["ideas"]
-    assert mu["result"]["status"] == "expired" and mu["result"]["pnl"] == -411.0
-    assert qqq["result"]["status"] == "expired" and qqq["result"]["pnl"] == 122.0
+def test_an_open_idea_shows_the_modelled_value_now():
+    m = _manifest(_row(_long_call()))
+    now = POSTED + dt.timedelta(hours=1)
+    bars = {"MU": _bars(POSTED + dt.timedelta(minutes=1), [187.0] * 30)}
+    out = S.apply_results(m, {"MU": 188.0}, {}, bars, now)
+    idea = out["days"][0]["ideas"][0]
+    r = idea["result"]
+    assert r["status"] == "open" and r["basis"] == "model"
+    assert r["spot"] == 188.0 and r["target"] == 205.5
+    assert r["pnl"] == pytest.approx(S.model_pnl(S.entry_facts(_long_call(), posted=POSTED),
+                                                 idea["iv"], 188.0, now), abs=0.01)
+    assert idea["checked_to"] == (POSTED + dt.timedelta(minutes=30)).isoformat()
 
 
-def test_a_missing_quote_keeps_the_last_result_and_its_time():
-    old = {"status": "open", "spot": 190.0, "move_pct": 1.93, "pnl": -411.0,
-           "pnl_pct": -100.0, "as_of": "2026-09-29T11:00:00-05:00"}
-    m = _manifest((_long_call(), {"result": dict(old)}))
-    out = S.apply_results(m, {"MU": None}, {}, POSTED)
+def test_a_target_hit_is_final():
+    m = _manifest(_row(_long_call()))
+    now = POSTED + dt.timedelta(hours=1)
+    bars = {"MU": _bars(POSTED + dt.timedelta(minutes=1), [186.4 + 0.5 * n for n in range(40)])}
+    out = S.apply_results(m, {"MU": 200.0}, {}, bars, now)
+    hit = out["days"][0]["ideas"][0]["result"]
+    assert hit["status"] == "target"
+    later = S.apply_results(out, {"MU": 150.0}, {("MU", EXP): 150.0},
+                            {"MU": []}, dt.datetime(2026, 10, 5, 9, 0, tzinfo=_CT))
+    assert later["days"][0]["ideas"][0]["result"] == hit
+
+
+def test_expiry_without_a_hit_settles_at_intrinsic_once_the_scan_is_complete():
+    row = _row(_long_call(), checked_to="2026-10-02T14:59:00-05:00", iv=0.5)
+    now = dt.datetime(2026, 10, 5, 9, 0, tzinfo=_CT)
+    out = S.apply_results(_manifest(row), {}, {("MU", EXP): 184.1}, {"MU": []}, now)
+    r = out["days"][0]["ideas"][0]["result"]
+    assert r["status"] == "expired" and r["pnl"] == -411.0 and r["settled"] == EXP
+
+
+def test_expiry_waits_for_the_bars_before_settling():
+    row = _row(_long_call(), checked_to="2026-10-01T15:00:00-05:00", iv=0.5)
+    now = dt.datetime(2026, 10, 2, 16, 0, tzinfo=_CT)                 # bars not in yet
+    out = S.apply_results(_manifest(row), {}, {("MU", EXP): 184.1}, {"MU": []}, now)
+    assert (out["days"][0]["ideas"][0].get("result") or {}).get("status") != "expired"
+    much_later = dt.datetime(2026, 10, 6, 9, 0, tzinfo=_CT)          # gave up waiting
+    out = S.apply_results(_manifest(row), {}, {("MU", EXP): 184.1}, {"MU": []}, much_later)
+    assert out["days"][0]["ideas"][0]["result"]["status"] == "expired"
+
+
+def test_a_missing_entry_price_is_filled_from_the_minute_bars():
+    row = _row(_long_call(spot=None))
+    bars = {"MU": _bars(POSTED - dt.timedelta(minutes=2), [186.0, 186.2, 186.4, 186.5])}
+    out = S.apply_results(_manifest(row), {"MU": 187.0}, {}, bars,
+                          POSTED + dt.timedelta(minutes=30))
+    idea = out["days"][0]["ideas"][0]
+    assert idea["spot"] == 186.4 and idea["iv"] and idea["result"]["basis"] == "model"
+
+
+def test_without_a_model_the_open_line_falls_back_to_the_expiry_payoff():
+    row = _row(_long_call(spot=None))                                 # nothing to solve from
+    out = S.apply_results(_manifest(row), {"MU": 196.0}, {}, {"MU": []},
+                          POSTED + dt.timedelta(minutes=30))
+    r = out["days"][0]["ideas"][0]["result"]
+    assert r["status"] == "open" and r["basis"] == "expiry" and r["pnl"] == 189.0
+
+
+def test_a_missing_quote_keeps_the_last_result():
+    old = {"status": "open", "basis": "model", "spot": 190.0, "pnl": -50.0,
+           "pnl_pct": -12.2, "move_pct": 1.9, "target": 205.5, "as_of": "x"}
+    row = _row(_long_call(), result=dict(old), iv=0.5,
+               checked_to=(POSTED + dt.timedelta(minutes=5)).isoformat())
+    out = S.apply_results(_manifest(row), {"MU": None}, {}, {"MU": []},
+                          POSTED + dt.timedelta(minutes=30))
     assert out["days"][0]["ideas"][0]["result"] == old
 
 
-def test_a_settlement_with_no_close_yet_stays_open_until_the_next_slot():
-    m = _manifest((_long_call(), {}))
-    now = dt.datetime(2026, 10, 2, 15, 6, tzinfo=_CT)
-    out = S.apply_results(m, {}, {("MU", "2026-10-02"): None}, now)
-    assert "result" not in out["days"][0]["ideas"][0]
+# ── what a refresh needs, and the refresh itself ───────────────────────────
+def test_due_asks_for_bars_from_where_each_symbol_last_looked():
+    a = _row(_long_call(), checked_to="2026-09-29T12:00:00-05:00")
+    b = _row(_long_call(), POSTED + dt.timedelta(hours=1))
+    m = _manifest(a, b, _row(_pcs()))
+    quotes, settle, since = S.due(m, POSTED + dt.timedelta(hours=3))
+    assert quotes == {"MU", "QQQ"} and settle == set()
+    assert since["MU"] == POSTED + dt.timedelta(hours=1)             # the earlier of the two
+    assert since["QQQ"] == POSTED
 
 
-def test_an_expired_result_is_final():
-    final = {"status": "expired", "spot": 184.1, "pnl": -411.0, "pnl_pct": -100.0,
-             "move_pct": -1.23, "as_of": "x", "settled": "2026-10-02"}
-    m = _manifest((_long_call(), {"result": dict(final)}))
-    out = S.apply_results(m, {"MU": 250.0}, {("MU", "2026-10-02"): 250.0},
-                          dt.datetime(2026, 10, 5, 9, 0, tzinfo=_CT))
-    assert out["days"][0]["ideas"][0]["result"] == final
+def test_minute_days_rounds_up_to_what_schwab_accepts():
+    now = dt.datetime(2026, 9, 29, 12, 0, tzinfo=_CT)
+    assert S.minute_days(now - dt.timedelta(hours=2), now) == 1
+    assert S.minute_days(now - dt.timedelta(days=5), now) == 10
+    assert S.minute_days(now - dt.timedelta(days=30), now) == 10
+    assert S.minute_days(now - dt.timedelta(days=2), now) == 3   # 2 days back + today
 
 
-# ── the refresh itself (disk + lock) ───────────────────────────────────────
-def test_refresh_reads_quotes_once_and_rewrites_the_manifest(tmp_path):
-    (tmp_path / S.MANIFEST).write_text(json.dumps(_manifest((_long_call(), {}), (_pcs(), {}))))
-    calls = []
+def test_refresh_fetches_each_symbol_once_and_rewrites_the_manifest(tmp_path):
+    (tmp_path / S.MANIFEST).write_text(json.dumps(_manifest(_row(_long_call()), _row(_pcs()))))
+    quote_calls, minute_calls = [], []
 
     def quotes(symbols):
-        calls.append(sorted(symbols))
-        return {"MU": 196.0, "QQQ": 750.0}
+        quote_calls.append(sorted(symbols))
+        return {"MU": 188.0, "QQQ": 750.0}
 
-    n = S.refresh(quotes, lambda sym, day: None, POSTED, root=tmp_path)
-    assert n == 2 and calls == [["MU", "QQQ"]]
+    def minutes(symbol, days):
+        minute_calls.append((symbol, days))
+        price = {"MU": 187.0, "QQQ": 758.0}[symbol]
+        return _bars(POSTED + dt.timedelta(minutes=1), [price] * 5)
+
+    now = POSTED + dt.timedelta(hours=1)
+    n = S.refresh(quotes, lambda s, d: None, now, root=tmp_path, minutes_fn=minutes)
+    assert n == 2 and quote_calls == [["MU", "QQQ"]]
+    assert sorted(minute_calls) == [("MU", 1), ("QQQ", 1)]
     m = json.loads((tmp_path / S.MANIFEST).read_text())
-    assert [i["result"]["pnl"] for i in m["days"][0]["ideas"]] == [189.0, 122.0]
+    assert all(i["result"]["status"] == "open" for i in m["days"][0]["ideas"])
 
 
 def test_refresh_with_nothing_open_calls_nobody(tmp_path):
     def boom(*a):
         raise AssertionError("no call expected")
-    assert S.refresh(boom, boom, POSTED, root=tmp_path) == 0      # no manifest at all
+    assert S.refresh(boom, boom, POSTED, root=tmp_path, minutes_fn=boom) == 0
 
 
 def test_refresh_never_raises(tmp_path):
-    (tmp_path / S.MANIFEST).write_text(json.dumps(_manifest((_long_call(), {}))))
+    (tmp_path / S.MANIFEST).write_text(json.dumps(_manifest(_row(_long_call()))))
 
-    def boom(symbols):
+    def boom(*a):
         raise RuntimeError("proxy down")
-    assert S.refresh(boom, boom, POSTED, root=tmp_path) == 0
+    assert S.refresh(boom, boom, POSTED, root=tmp_path, minutes_fn=boom) == 0
 
 
 def test_a_post_stores_the_entry_facts(tmp_path):
@@ -170,28 +297,22 @@ def test_a_post_stores_the_entry_facts(tmp_path):
     assert S.publish(_long_call(), buf.getvalue(), "cap", POSTED, root=tmp_path)
     first = json.loads((tmp_path / S.MANIFEST).read_text())["days"][0]["ideas"][0]
     assert first["legs"][0]["strike"] == 190.0 and first["entry_cash"] == -411.0
-    assert first["spot"] == 186.4 and first["approx"] is False
+    assert first["spot"] == 186.4 and first["type"] == "LONG_CALL"
+    assert first["posted"] == POSTED.isoformat()
 
 
 # ── candles (raw Schwab /pricehistory: epoch-ms stamps) ────────────────────
-def _ms(y, mo, d, h=0, mi=0, tz=_CT):
-    return int(dt.datetime(y, mo, d, h, mi, tzinfo=tz).timestamp() * 1000)
-
-
 def test_close_on_reads_the_candle_stamped_that_central_date():
-    candles = [{"datetime": _ms(2026, 10, 1), "close": 180.0},
-               {"datetime": _ms(2026, 10, 2), "close": 184.1},
-               {"datetime": _ms(2026, 10, 5), "close": 190.0}]
+    day = lambda d: _ms(dt.datetime(2026, 10, d, tzinfo=_CT))   # noqa: E731
+    candles = [{"datetime": day(1), "close": 180.0}, {"datetime": day(2), "close": 184.1}]
     assert S.close_on(candles, "2026-10-02") == 184.1
     assert S.close_on(candles, "2026-10-03") is None
     assert S.close_on([{"datetime": "x"}, None], "2026-10-02") is None
 
 
 def test_price_at_takes_the_last_bar_at_or_before_the_post():
-    candles = [{"datetime": _ms(2026, 9, 29, 10, 33), "close": 186.1},
-               {"datetime": _ms(2026, 9, 29, 10, 34), "close": 186.4},
-               {"datetime": _ms(2026, 9, 29, 10, 36), "close": 187.0}]
-    assert S.price_at(candles, POSTED) == 186.4
-    assert S.price_at(candles, POSTED - dt.timedelta(hours=1)) is None
-    # a bar hours stale is not "the price at the post"
-    assert S.price_at(candles, POSTED + dt.timedelta(hours=3)) is None
+    bars = _bars(POSTED - dt.timedelta(minutes=2), [186.1, 186.4])
+    bars.append({"datetime": _ms(POSTED + dt.timedelta(minutes=1)), "close": 187.0})
+    assert S.price_at(bars, POSTED) == 186.4
+    assert S.price_at(bars, POSTED - dt.timedelta(hours=1)) is None
+    assert S.price_at(bars, POSTED + dt.timedelta(hours=3)) is None

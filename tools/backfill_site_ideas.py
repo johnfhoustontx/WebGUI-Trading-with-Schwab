@@ -104,9 +104,12 @@ def facts_from_caption(text, posted):
         return {}
     if (mp is None) != (want_mp is None) or (mp is not None and abs(mp - want_mp) > _AGREE):
         return {}
-    return site_ideas.entry_facts({"legs": legs, "expiration": exp.isoformat(),
-                                   "entry_cash": round(cash, 2), "max_loss": max_loss},
-                                  approx=True)
+    label = parts[0][len("Trade idea: "):].partition(" ")[2].strip().lower()
+    types = {v.lower(): k for k, v in trade_idea.STRATEGY_LABELS.items()}
+    return site_ideas.entry_facts({"legs": legs, "type": types.get(label, ""),
+                                   "expiration": exp.isoformat(),
+                                   "entry_cash": round(cash, 2), "max_loss": max_loss,
+                                   "max_profit": mp}, approx=True, posted=posted)
 
 
 def backfill(archive_dir, site_root, keep_days, minute_fn=None) -> int:
@@ -161,7 +164,8 @@ def main(argv=None):
     if minute_fn:
         from services.options_svc import compute, site_ideas
         now = _dt.datetime.now(_CT)
-        r = site_ideas.refresh(compute.site_idea_quotes, compute.daily_close, now)
+        r = site_ideas.refresh(compute.site_idea_quotes, compute.daily_close, now,
+                               minutes_fn=compute.minute_candles)
         print(f"results computed for {r} idea(s)")
     return 0
 

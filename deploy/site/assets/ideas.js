@@ -78,9 +78,13 @@
   }
 
   // ── How the idea did (site_ideas.refresh) ──────────────────────────────────
-  // Measured from the STOCK price only. An open idea shows the stock's move and
-  // what the trade would pay AT EXPIRY at today's price - not a live mark, which
-  // is why the line says "at expiry". An expired one shows its settled result.
+  // Each idea follows the app's own exit rules (config/trade_mgmt.toml): closed at
+  // its profit target or its stop, the first minute the option reaches one, or
+  // settled at expiry. The option is MODELLED from the stock price at the implied
+  // volatility of its entry price - no option quote is read or published - so the
+  // line says "modelled" and an open idea's figure is an estimate. Without a model
+  // (no entry stock price yet) the open line falls back to the expiry payoff at
+  // today's price and says "at expiry".
   function num(v) {
     return typeof v === "number" && isFinite(v) ? v : null;
   }
@@ -110,6 +114,18 @@
     return "as of " + (day === todayCT() ? "" : shortDate(day) + ", ") + time + " CT";
   }
 
+  function closedAt(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    var day = new Intl.DateTimeFormat("en-CA", {
+      timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit"
+    }).format(d);
+    var time = new Intl.DateTimeFormat("en-US", {
+      timeZone: TZ, hour: "numeric", minute: "2-digit"
+    }).format(d);
+    return shortDate(day) + ", " + time + " CT";
+  }
+
   function resultOf(idea) {
     var r = idea && idea.result;
     if (!r || num(r.pnl) === null || num(r.spot) === null) return null;
@@ -126,16 +142,27 @@
       ? str(idea.symbol) + " " + price(idea.spot) + " → " + price(r.spot)
         + (num(r.move_pct) === null ? "" : " (" + signedPct(r.move_pct) + ")")
       : str(idea.symbol) + " " + price(r.spot);
-    if (r.status === "expired" && DAY.test(str(r.settled))) {
+    var modelled = r.status === "target" || r.status === "stop" || r.basis === "model";
+    if ((r.status === "target" || r.status === "stop") && str(r.closed_at)) {
+      var when = closedAt(r.closed_at);
+      box.appendChild(el("span", "ns-idea-state", (r.status === "target"
+        ? "Closed at its profit target" : "Stopped out") + (when ? " · " + when : "")));
+      box.appendChild(el("span", "ns-idea-pnl", "Result " + money(r.pnl) + pct));
+    } else if (r.status === "expired" && DAY.test(str(r.settled))) {
       box.appendChild(el("span", "ns-idea-state", "Expired " + shortDate(r.settled)
         + " at " + price(r.spot)));
       box.appendChild(el("span", "ns-idea-pnl", "Result " + money(r.pnl) + pct));
+    } else if (r.basis === "model") {
+      box.appendChild(el("span", "ns-idea-state", move));
+      box.appendChild(el("span", "ns-idea-pnl", "Est. value now " + money(r.pnl) + pct
+        + (num(r.target) === null ? "" : " · target " + money(r.target))));
     } else {
       box.appendChild(el("span", "ns-idea-state", move));
       box.appendChild(el("span", "ns-idea-pnl", "At this price at expiry: " + money(r.pnl) + pct));
     }
     var note = [];
-    if (r.status !== "expired") note.push(asOf(r.as_of));
+    if (r.status === "open") note.push(asOf(r.as_of));
+    if (modelled) note.push("modelled");
     if (idea.approx) note.push("approx. entry");
     note = note.filter(Boolean);
     if (note.length) box.appendChild(el("span", "ns-idea-note", note.join(" · ")));
