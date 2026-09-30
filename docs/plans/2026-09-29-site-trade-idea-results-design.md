@@ -8,7 +8,7 @@
 | Question | Answer | Why |
 |---|---|---|
 | Measured how? | The **underlying's price only** — never an option quote | A live option mark on a public page lets anyone read the option price back (entry + P&L). That is the open Schwab redistribution question (D2) the public Strategy Finder already defers with `show_leg_quotes = false`. Stock prices are already public on the live screens. |
-| Open idea | Stock move since the post (`$186.40 → $191.20, +2.6%`) and **"If it expired at today's price: +$89"** (first worded "At this price at expiry", reworded for readers) — the payoff at expiration if the stock settled here | Computable from the legs and the stock price alone. It is NOT a mark: a long option also carries time value, and the label says so. |
+| Open idea | Stock move since the post (`$186.40 → $191.20, +2.6%`) and **"At the close of today: +$89"** (the operator's wording; first "At this price at expiry") — the payoff at expiration if the stock settled here | Computable from the legs and the stock price alone. It is NOT a mark: a long option also carries time value, and the label says so. |
 | Expired idea | Settled at intrinsic against the stock's **expiry-day close**: `Expired Sep 26 at $184.10 · −$411 (−100% of risk)`. Final, never recomputed | The trade's actual result held to expiration — the only exit a posted idea states. |
 | % | Result ÷ the idea's max loss ("of risk") | Every posted idea has a bounded loss (the selector refuses unbounded). |
 | Day header | `Today, Sep 29 · 7 ideas · 3 ahead, 4 behind` | Counts open and settled together; a bad day reads as one. |

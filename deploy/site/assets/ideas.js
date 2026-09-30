@@ -84,7 +84,7 @@
   // volatility of its entry price - no option quote is read or published - so the
   // line says "modelled" and an open idea's figure is an estimate. Without a model
   // (no entry stock price yet) the open line falls back to the expiry payoff at
-  // today's price and says so: "If it expired at today's price".
+  // today's price, labelled "At the close of today" (operator wording).
   function num(v) {
     return typeof v === "number" && isFinite(v) ? v : null;
   }
@@ -158,7 +158,7 @@
         + (num(r.target) === null ? "" : " · target " + money(r.target))));
     } else {
       box.appendChild(el("span", "ns-idea-state", move));
-      box.appendChild(el("span", "ns-idea-pnl", "If it expired at today\u2019s price: " + money(r.pnl) + pct));
+      box.appendChild(el("span", "ns-idea-pnl", "At the close of today: " + money(r.pnl) + pct));
     }
     var note = [];
     if (r.status === "open") note.push(asOf(r.as_of));

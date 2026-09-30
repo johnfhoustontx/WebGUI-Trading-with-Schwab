@@ -1402,7 +1402,7 @@ def test_an_open_result_is_labelled_as_an_expiry_payoff_not_a_mark():
     today's price - a long option also carries time value - so the words must
     say so, and no line may present it as a current value."""
     js = _text("assets/ideas.js")
-    assert r"If it expired at today\u2019s price" in js
+    assert "At the close of today" in js
     # What a visitor can read is the script's string literals, not its comments.
     shown = " ".join(re.findall(r'"([^"\n]*)"', js)).lower()
     for word in ("unrealized", "current value", "now worth", "mark"):
