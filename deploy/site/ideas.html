@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NeuralStrike — Market report</title>
-<meta name="description" content="The latest NeuralStrike read on the market: the macro picture down to the ten largest names, with calls and the confidence behind them, rewritten five times each trading day.">
+<title>NeuralStrike — Trade ideas</title>
+<meta name="description" content="One options trade an hour through the regular session, picked from the NeuralStrike live Market Scanner: the legs, the grade, the risk, the profit and the probability of profit.">
 <meta name="theme-color" content="#161826">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
@@ -13,25 +13,21 @@
 <link rel="stylesheet" href="assets/site.css">
 
 <!--
-  MARKET REPORT — a frame around the latest market assessment.
+  TRADE IDEAS — every card the hourly trade idea has posted, by day.
 
-  The report itself is reports/latest.html, which is NOT in git. The five daily
-  reports are written on the operator's workstation (outside this repo) and
-  uploaded into deploy/site/reports/ on the box that serves this file, so the
-  directory is gitignored exactly like live/*.webp: tracked, the first upload
-  would dirty prod's tree and tools/promote.sh refuses a dirty tree.
+  The cards and ideas.json are NOT in git. services/options_svc/site_ideas.py
+  writes them into deploy/site/ on the box that serves this file each time an
+  idea posts to X, Discord and Telegram, so the directory is gitignored exactly
+  like live/*.webp: tracked, the first post would dirty prod's tree and
+  tools/promote.sh refuses a dirty tree.
 
-  ── WHY A FRAME ─────────────────────────────────────────────────────────────
-  The report is a self-contained document with its own stylesheet, drawn to be
-  printed as a PDF. Inlining it into this page would put two stylesheets over
-  one DOM; generating this page around it would move the site's nav into a
-  generator outside the repo, where nothing here could test it. A same-origin
-  frame keeps the nav in this tracked file and the report whole. It loads
-  nothing off-origin and runs no script — the frame scrolls on its own.
+  Everything below the heading is drawn by assets/ideas.js from ideas.json. With
+  no manifest (a fresh deploy, or before the first post) the page says so rather
+  than showing an empty grid. A card links to the full-size image as posted.
 
   ── NO TIMESTAMP HERE, DELIBERATELY ─────────────────────────────────────────
   Same reason as live.html: this file is served long after anything it could
-  say. The report carries its own time stamp in its header.
+  say. Each card carries its own time, and each day its own date.
 -->
 </head>
 
@@ -47,9 +43,9 @@
       </svg>
       <span class="ns-brand">Neural<span class="ns-brand-b">Strike</span></span>
     </a>
-    <span class="ns-crumb">/ Market report</span>
+    <span class="ns-crumb">/ Trade ideas</span>
     <span class="ns-spacer"></span>
-    <a class="ns-navlink" href="ideas.html">Trade ideas</a>
+    <a class="ns-navlink" href="report.html">Market report</a>
     <a class="ns-navlink" href="glossary.html">Glossary</a>
     <a class="ns-navlink" href="gallery.html">Gallery</a>
     <a class="ns-navlink" href="live.html">Live screens</a>
@@ -81,24 +77,32 @@
     <a class="btn btn-ghost btn-outline" href="index.html">Back to overview</a>
   </nav>
 
-  <main class="ns-live-main ns-report-main">
-    <div class="ns-live-head ns-report-head">
-      <p class="ns-eyebrow">Market report</p>
-      <h1 class="ns-live-title">The latest read on the market.</h1>
+  <main class="ns-live-main" data-ideas-page>
+    <div class="ns-live-head">
+      <p class="ns-eyebrow">Trade ideas</p>
+      <h1 class="ns-live-title">One trade an hour, from the live scanner.</h1>
       <p class="ns-live-lede">
-        From the macro picture down to the ten largest names, with the calls and the confidence
-        behind each. Rewritten five times a trading day — pre-market, at the open, after the first
-        hour, at lunch and at the close — and every report grades the ones before it.
-      </p>
-      <p class="ns-report-links">
-        <a href="reports/latest.html">Open the report on its own page</a>
+        Every hour of the regular session, from 8:35 to 2:35 Central, NeuralStrike picks one graded
+        trade from the live Market Scanner and posts it here, on X, on Discord and on Telegram. Each
+        card shows the legs, the grade, the most it can lose, the most it can make and the
+        probability of profit. Pick a day to see what was proposed; open a card to see it full size.
       </p>
     </div>
 
-    <iframe class="ns-report-frame" src="reports/latest.html"
-            title="The latest NeuralStrike market report"></iframe>
+    <div class="ns-day-picker" role="group" aria-label="Days" data-ideas-days hidden></div>
+    <h2 class="ns-ideas-day" data-ideas-heading></h2>
+    <div class="ns-ideas-grid ns-ideas-grid-page" data-ideas-grid></div>
+    <p class="ns-live-note" data-ideas-empty hidden>
+      No trade ideas have been posted yet. The first goes out at 8:35 Central on the next
+      trading day.
+    </p>
   </main>
 
+  <footer class="ns-foot ns-live-foot">
+    NeuralStrike — dealer flow, measured. Educational and simulation software, not investment advice. No orders are transmitted to any broker.
+  </footer>
+
 </div>
+<script src="assets/ideas.js" defer></script>
 </body>
 </html>

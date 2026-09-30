@@ -33,7 +33,8 @@ SITE = pathlib.Path(repo_paths.SITE_ROOT)
 # ⚠ EVERY page belongs here. A page left out is not partially checked, it is
 # UNCHECKED -- no link resolution, no app-host guard, no origin guard. The
 # glossary shipped with none of them until it was added.
-PAGES = ("index.html", "gallery.html", "live.html", "glossary.html", "report.html")
+PAGES = ("index.html", "gallery.html", "live.html", "glossary.html", "report.html",
+         "ideas.html")
 
 # The site calls nobody. Empty on purpose, and widening it is a decision:
 # every entry is a third party learning the IP of everyone who loads the page.
@@ -72,7 +73,9 @@ ALLOWED_OUTBOUND = (
 # `reports/` is the same shape: the market reports are uploaded into the served
 # root after each scheduled run and gitignored for the same promote reason. What
 # pins those paths instead is test_the_report_page_frames_the_latest_report.
-GENERATED_REF_PREFIXES = ("live/", "reports/")
+# `ideas/` too: the trade idea cards are written by services/options_svc/site_ideas.py
+# after each post, and only ideas.js (never the markup) names a card.
+GENERATED_REF_PREFIXES = ("live/", "reports/", "ideas/")
 
 
 def _regenerated_shot_refs():
@@ -481,7 +484,8 @@ def test_the_stacked_rail_resets_its_flex_basis():
 MARK_LARGE = ("M20 11 L32 23 L44 11", "M20 53 L32 41 L44 53")
 MARK_SMALL = ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52")
 
-MARK_LARGE_FILES = ("index.html", "gallery.html", "live.html", "report.html", "assets/mark.svg")
+MARK_LARGE_FILES = ("index.html", "gallery.html", "live.html", "report.html", "ideas.html",
+                    "assets/mark.svg")
 MARK_SMALL_FILES = ("assets/favicon.svg",)
 
 
@@ -947,7 +951,7 @@ def test_every_footer_carries_the_one_disclaimer_verbatim():
     read as a defect, not a style. report.html frames a document that carries
     its own footer, and the glossary is a reference page; the three pages that
     make the claim make it identically."""
-    for name in ("index.html", "gallery.html", "live.html"):
+    for name in ("index.html", "gallery.html", "live.html", "ideas.html"):
         markup = " ".join(_markup(name).split())
         assert DISCLAIMER in markup, f"{name} does not carry the disclaimer verbatim"
 
@@ -1239,9 +1243,11 @@ def test_the_market_report_is_in_every_destination_nav():
     glossary.html is a leaf nav with no destination links, deliberately."""
     for name in ("index.html", "gallery.html", "live.html"):
         assert 'href="report.html"' in _nav(name), f"{name}'s nav has no Market report link"
-    nav = _nav("report.html")
-    for dest in ("glossary.html", "gallery.html", "live.html", "index.html"):
-        assert f'href="{dest}"' in nav, f"report.html's nav has no way to {dest}"
+    for page in ("report.html", "ideas.html"):
+        nav = _nav(page)
+        for dest in ("glossary.html", "gallery.html", "live.html", "index.html"):
+            assert f'href="{dest}"' in nav, f"{page}'s nav has no way to {dest}"
+    assert 'href="report.html"' in _nav("ideas.html")
 
 
 def test_the_published_reports_are_never_committed():
@@ -1274,7 +1280,7 @@ TOOLS = (("finder", "Strategy Finder"), ("rescue", "Rescue my Sh*tty trade"),
 
 # The pages whose navs carry destination links. glossary.html is a leaf's nav
 # by design (see the gallery/live test above), so it has no Tools menu.
-TOOLS_PAGES = ("index.html", "live.html", "gallery.html", "report.html")
+TOOLS_PAGES = ("index.html", "live.html", "gallery.html", "report.html", "ideas.html")
 
 
 def _nav(name):
@@ -1339,3 +1345,43 @@ def test_the_generated_trade_ideas_are_never_committed():
                 "deploy/site/ideas.json"):
         out = subprocess.run(["git", "check-ignore", "-q", rel], cwd=root)
         assert out.returncode == 0, f"{rel} is not gitignored"
+
+
+def test_every_page_navigates_to_the_trade_ideas():
+    """In the <nav>, not merely somewhere on the page -- the same reason as the
+    gallery/live test above. The glossary's nav is a leaf's crumb, and
+    ideas.html does not link to itself."""
+    for name in ("index.html", "gallery.html", "live.html", "report.html"):
+        assert 'href="ideas.html"' in _nav(name), f"{name}'s nav has no Trade ideas"
+    assert 'href="ideas.html"' not in _nav("ideas.html")
+
+
+def test_the_home_strip_starts_hidden_and_the_script_fills_it():
+    """The cards are generated state: on a fresh deploy, or before the first
+    post, there is nothing to show -- so the strip ships HIDDEN and ideas.js
+    unhides it only once it has a card. Never an empty frame on the landing page."""
+    markup = _markup("index.html")
+    strips = re.findall(r"<section[^>]*data-ideas-strip[^>]*>", markup)
+    assert len(strips) == 1, "index.html needs exactly one trade ideas strip"
+    assert re.search(r"\shidden(\s|>|=)", strips[0]), "the strip must ship hidden"
+    assert '<script src="assets/ideas.js" defer></script>' in markup
+
+
+def test_the_ideas_page_mounts_the_script():
+    markup = _markup("ideas.html")
+    assert "data-ideas-page" in markup
+    assert '<script src="assets/ideas.js" defer></script>' in markup
+
+
+def test_ideas_js_reads_the_manifest_safely():
+    """Always revalidated (the Caddy rule is installed by hand, and a stale
+    manifest shows yesterday's trades as today's), dated in Central time like
+    the posts, and drawn with textContent -- the manifest is data, never markup."""
+    js = _text("assets/ideas.js")
+    assert re.search(r'fetch\(\s*"ideas\.json"\s*,\s*\{\s*cache:\s*"no-cache"', js)
+    assert "America/Chicago" in js
+    assert "innerHTML" not in js and "insertAdjacentHTML" not in js
+
+
+def test_the_sitemap_lists_the_ideas_page():
+    assert "https://neuralstrike.co/ideas.html" in _text("sitemap.txt").split()

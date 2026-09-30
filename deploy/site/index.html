@@ -83,6 +83,7 @@
     <a class="ns-navlink" href="#idea">The idea</a>
     <a class="ns-navlink" href="#community">Community</a>
     <a class="ns-navlink" href="report.html">Market report</a>
+    <a class="ns-navlink" href="ideas.html">Trade ideas</a>
     <a class="ns-navlink" href="glossary.html">Glossary</a>
     <a class="ns-navlink" href="gallery.html">Gallery</a>
     <!-- Live Screens is the design's primary button, and now earns it: the page
@@ -176,6 +177,24 @@
         <p class="ns-stat-label">No orders, ever</p>
       </div>
     </div>
+  </section>
+
+  <!-- ─── Today's trade ideas ──────────────────────────────────────────
+       The hourly trade idea, as posted to X, Discord and Telegram. The cards are
+       generated on the serving box (services/options_svc/site_ideas.py) and
+       gitignored, so this section SHIPS HIDDEN: assets/ideas.js fills it from
+       ideas.json and unhides it only once it has a card to show. Before the
+       day's first post it shows the last session's ideas, named for that day. -->
+  <section id="ideas" class="ns-wrap ns-ideas-strip" data-ideas-strip hidden
+           aria-labelledby="ideas-heading">
+    <div class="ns-ideas-head">
+      <div>
+        <span class="ns-eyebrow">One trade an hour, from the live scanner</span>
+        <h2 class="ns-h2-sm" id="ideas-heading" data-ideas-heading>Today’s trade ideas</h2>
+      </div>
+      <a class="btn btn-ghost btn-outline" href="ideas.html" data-ideas-more>Every trade idea →</a>
+    </div>
+    <div class="ns-ideas-grid" data-ideas-grid></div>
   </section>
 
   <!-- ─── The idea ─────────────────────────────────────────────────────── -->
@@ -329,8 +348,7 @@
 
 </div>
 
-<!-- THE MARKET GLOW. Progressive enhancement, and the only scripting on this
-     page: the Live screens button above lights green while the US session is
+<!-- THE MARKET GLOW. Progressive enhancement: the Live screens button above lights green while the US session is
      open. A file server cannot know that, so the client works it out.
 
      ORDER IS THE CONTRACT. market-clock.js is GENERATED DATA (the holiday list
@@ -344,5 +362,8 @@
      button, which is why this needs no `.js` hook the way the gallery does. -->
 <script src="assets/market-clock.js" defer></script>
 <script src="assets/market-glow.js" defer></script>
+<!-- The trade ideas strip above. Hidden until this fills it; with scripting
+     off, or before the first idea posts, the section simply is not there. -->
+<script src="assets/ideas.js" defer></script>
 </body>
 </html>
