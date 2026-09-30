@@ -65,27 +65,31 @@ def test_calendar_settings_refuse_bad_values(tmp_path, monkeypatch):
 
 
 # ── [site]: publishing trade ideas to neuralstrike.co ──────────────────────
+_SITE_DEFAULT = {"trade_ideas": True, "keep_days": 6, "refresh_min": 15}
+
+
 def test_the_shipped_file_publishes_six_days(tmp_path, monkeypatch):
-    assert sw.site_settings() == {"trade_ideas": True, "keep_days": 6}
+    assert sw.site_settings() == _SITE_DEFAULT
 
 
 def test_site_settings_default_when_the_section_is_missing(tmp_path, monkeypatch):
     _use(monkeypatch, tmp_path / "missing.toml")
-    assert sw.site_settings() == {"trade_ideas": True, "keep_days": 6}
+    assert sw.site_settings() == _SITE_DEFAULT
 
 
 def test_site_settings_read_the_file(tmp_path, monkeypatch):
     f = tmp_path / "notify.toml"
-    f.write_text("[site]\ntrade_ideas = false\nkeep_days = 3\n")
+    f.write_text("[site]\ntrade_ideas = false\nkeep_days = 3\nrefresh_min = 30\n")
     _use(monkeypatch, f)
-    assert sw.site_settings() == {"trade_ideas": False, "keep_days": 3}
+    assert sw.site_settings() == {"trade_ideas": False, "keep_days": 3, "refresh_min": 30}
 
 
 def test_site_settings_reject_bad_values_one_key_at_a_time(tmp_path, monkeypatch):
     f = tmp_path / "notify.toml"
-    f.write_text('[site]\ntrade_ideas = "no"\nkeep_days = 0\n')
+    f.write_text('[site]\ntrade_ideas = "no"\nkeep_days = 0\nrefresh_min = 2\n')
     _use(monkeypatch, f)
-    assert sw.site_settings() == {"trade_ideas": True, "keep_days": 6}
-    f.write_text("[site]\nkeep_days = true\n")            # a bool is not a day count
+    assert sw.site_settings() == _SITE_DEFAULT
+    f.write_text("[site]\nkeep_days = true\nrefresh_min = 90\n")   # a bool is not a count
     _use(monkeypatch, f)
     assert sw.site_settings()["keep_days"] == 6
+    assert sw.site_settings()["refresh_min"] == 15

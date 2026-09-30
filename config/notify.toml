@@ -69,3 +69,5 @@ duration_min = 5               # event length
 [site]
 trade_ideas = true             # off = post as usual, publish nothing to the site
 keep_days = 6                  # posting days kept on the site (today + the 5 before)
+refresh_min = 15               # how often each open idea's result is recomputed from the
+                               # stock price (one batched quote call), 08:00-15:15 CT

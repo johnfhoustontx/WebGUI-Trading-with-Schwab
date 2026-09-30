@@ -1266,6 +1266,10 @@ _NOTIFY = ConfigFile(
                   "Counts days on which an idea was posted, so weekends and "
                   "holidays do not use one up. Older cards are deleted.",
                   kind="int", unit="days", min=1, max=30, step=1),
+            Field("site.refresh_min", "Result refresh",
+                  "How often each open idea's result is recomputed from the stock "
+                  "price during the session. One quote call per refresh.",
+                  kind="int", unit="min", min=5, max=60, step=5),
         )),
     ),
 )

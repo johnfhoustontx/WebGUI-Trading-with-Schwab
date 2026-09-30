@@ -22,8 +22,9 @@ _CAL_DEFAULTS = {"calendar_id": "", "lead_min": 5, "duration_min": 5}
 _CAL_FLOOR = {"lead_min": 0, "duration_min": 1}
 # [site]: each posted trade idea is also written into deploy/site (the public
 # site's home-page strip and ideas.html). keep_days counts POSTING days.
-_SITE_DEFAULTS = {"trade_ideas": True, "keep_days": 6}
-_SITE_KEEP_RANGE = (1, 30)
+# refresh_min: how often each open idea's result is recomputed from the stock price.
+_SITE_DEFAULTS = {"trade_ideas": True, "keep_days": 6, "refresh_min": 15}
+_SITE_RANGES = {"keep_days": (1, 30), "refresh_min": (5, 60)}
 
 
 def _make_loader(path):
@@ -66,8 +67,8 @@ def calendar_settings() -> dict:
 
 
 def site_settings() -> dict:
-    """``{"trade_ideas", "keep_days"}`` for publishing trade ideas to the site.
-    Bad values read as the defaults, one key at a time; never raises."""
+    """``{"trade_ideas", "keep_days", "refresh_min"}`` for publishing trade ideas
+    to the site. Bad values read as the defaults, one key at a time; never raises."""
     out = dict(_SITE_DEFAULTS)
     try:
         block = _load().get("site")
@@ -77,8 +78,8 @@ def site_settings() -> dict:
         return out
     if isinstance(block.get("trade_ideas"), bool):
         out["trade_ideas"] = block["trade_ideas"]
-    v = block.get("keep_days")
-    lo, hi = _SITE_KEEP_RANGE
-    if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi:
-        out["keep_days"] = v
+    for key, (lo, hi) in _SITE_RANGES.items():
+        v = block.get(key)
+        if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi:
+            out[key] = v
     return out
