@@ -45,7 +45,11 @@
 <body>
 <div class="ns-page-sub">
 
-  <nav class="ns-nav ns-nav-sticky">
+  <!-- THE SITE MENU. Byte-identical on every page but for aria-current,
+       which marks the page you are on (deploy/tests/test_site.py pins it).
+       The mark is inlined, not an <img>, so it takes the accent through
+       currentColor. Change it on ALL six pages or none. -->
+  <nav class="ns-nav ns-nav-sticky" aria-label="Site">
     <a class="ns-lockup" href="index.html">
       <svg class="ns-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
         <rect x="5" y="30.75" width="54" height="2.5" rx="1.25" class="ns-mark-rule"/>
@@ -54,16 +58,12 @@
       </svg>
       <span class="ns-brand">Neural<span class="ns-brand-b">Strike</span></span>
     </a>
-    <span class="ns-crumb">/ Gallery</span>
     <span class="ns-spacer"></span>
-    <a class="ns-navlink" href="glossary.html">Glossary</a>
-    <!-- The gallery is captures; the live grid is the running app. This page had
-         no way to reach it at all, which is a dead end only a visitor ever sees:
-         the author always arrives here from a page that does carry the link. -->
     <a class="ns-navlink" href="report.html">Market report</a>
     <a class="ns-navlink" href="ideas.html">Trade ideas</a>
-    <a class="ns-navlink" href="live.html">Live screens</a>
-    <span class="ns-count">15 screens</span>
+    <a class="ns-navlink" href="glossary.html">Glossary</a>
+    <a class="ns-navlink" href="gallery.html" aria-current="page">Gallery</a>
+    <a class="ns-navlink" href="index.html#community">Community</a>
     <details class="ns-menu">
       <summary class="ns-navlink">Tools</summary>
       <div class="ns-menu-panel">
@@ -89,13 +89,13 @@
         </a>
       </div>
     </details>
-    <a class="btn btn-ghost btn-outline" href="index.html">Back to overview</a>
+    <a class="btn btn-primary" href="live.html" style="white-space: nowrap;">Live screens</a>
   </nav>
 
   <div class="ns-gallery">
 
     <aside class="ns-rail">
-      <p class="ns-eyebrow ns-eyebrow-sm" style="margin: 0 0 14px;">Gallery</p>
+      <p class="ns-eyebrow ns-eyebrow-sm" style="margin: 0 0 14px;">Gallery · <span class="ns-count">15 screens</span></p>
       <div class="ns-rail-list" role="tablist" aria-label="Screens" aria-orientation="vertical">
         <a class="ns-rail-row" role="tab" href="#screen-0"
            id="rail-0" aria-controls="screen-0"

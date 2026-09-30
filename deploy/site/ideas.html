@@ -34,7 +34,11 @@
 <body>
 <div class="ns-page-sub ns-live-page">
 
-  <nav class="ns-nav">
+  <!-- THE SITE MENU. Byte-identical on every page but for aria-current,
+       which marks the page you are on (deploy/tests/test_site.py pins it).
+       The mark is inlined, not an <img>, so it takes the accent through
+       currentColor. Change it on ALL six pages or none. -->
+  <nav class="ns-nav ns-nav-sticky" aria-label="Site">
     <a class="ns-lockup" href="index.html">
       <svg class="ns-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
         <rect x="5" y="30.75" width="54" height="2.5" rx="1.25" class="ns-mark-rule"/>
@@ -43,12 +47,12 @@
       </svg>
       <span class="ns-brand">Neural<span class="ns-brand-b">Strike</span></span>
     </a>
-    <span class="ns-crumb">/ Trade ideas</span>
     <span class="ns-spacer"></span>
     <a class="ns-navlink" href="report.html">Market report</a>
+    <a class="ns-navlink" href="ideas.html" aria-current="page">Trade ideas</a>
     <a class="ns-navlink" href="glossary.html">Glossary</a>
     <a class="ns-navlink" href="gallery.html">Gallery</a>
-    <a class="ns-navlink" href="live.html">Live screens</a>
+    <a class="ns-navlink" href="index.html#community">Community</a>
     <details class="ns-menu">
       <summary class="ns-navlink">Tools</summary>
       <div class="ns-menu-panel">
@@ -74,7 +78,7 @@
         </a>
       </div>
     </details>
-    <a class="btn btn-ghost btn-outline" href="index.html">Back to overview</a>
+    <a class="btn btn-primary" href="live.html" style="white-space: nowrap;">Live screens</a>
   </nav>
 
   <main class="ns-live-main" data-ideas-page>

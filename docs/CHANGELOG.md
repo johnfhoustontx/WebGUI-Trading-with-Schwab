@@ -4,7 +4,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-29 (**How each trade idea did, on neuralstrike.co.**)
+**Last updated:** 2026-09-29 (**One menu on every page of neuralstrike.co.**)
+
+- Six pages had six menus: different order, each page leaving itself out, the glossary
+  with no links, and "Live screens" on the home page but "Back to overview" elsewhere.
+  Now every page carries the same block: Market report · Trade ideas · Glossary ·
+  Gallery · Community · Tools ▾ · [Live screens]. The logo goes home; the current page
+  is underlined (`aria-current`), not dropped, so nothing shifts between pages.
+- Dropped from the menu: the breadcrumbs, "Back to overview", and the home page's
+  "The idea" (its hero button still goes there). "Community" now links to
+  `index.html#community` from every page. The gallery and glossary counts moved into
+  their page headers.
+- Sticky on wide screens; on a phone (≤700px) the three-row menu scrolls away.
+- Pinned by `test_every_page_carries_the_same_menu` (byte-identical once
+  `aria-current` is removed) and `test_the_menu_marks_the_page_you_are_on_and_nothing_else`.
+
+**Prior —** 2026-09-29 (**How each trade idea did, on neuralstrike.co.**)
 
 - **Measured from the stock price only.** Open idea: the stock's move since the post
   and "At this price at expiry: ±$N (±x% of risk)" — the expiry payoff at today's

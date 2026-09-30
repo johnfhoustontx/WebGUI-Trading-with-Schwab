@@ -275,6 +275,10 @@ a.ns-menu-item:hover {
 @media (max-width: 700px) {
   .ns-nav { flex-wrap: wrap; gap: 10px 14px; }
   .ns-nav .ns-spacer { flex: 0 0 100%; height: 0; }
+  /* The one site menu wraps to three rows (~140px) on a 375px phone; pinned, it
+   * would hold a sixth of the screen while reading. It scrolls away instead.
+   * Still a positioned box, which the Tools panel above needs. */
+  .ns-nav-sticky { position: relative; }
 }
 /* The landing's nav settles at three visual rows on a 375px screen — brand,
  * the three links, then the button. Shrinking the link type and the button
@@ -1243,3 +1247,15 @@ a.ns-menu-item:hover {
   font-size: 12px;
   color: color-mix(in srgb, var(--color-text) 50%, transparent);
 }
+
+/* The page you are on, in the one site menu (every page carries the same menu;
+ * aria-current marks the current item instead of the item being left out). */
+.ns-navlink[aria-current="page"] {
+  color: var(--color-text);
+  text-decoration: underline;
+  text-decoration-color: var(--color-accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 6px;
+}
+/* An eyebrow that carries a count (Gallery · 15 screens) keeps one type style. */
+.ns-eyebrow .ns-count { font-size: inherit; letter-spacing: inherit; color: inherit; }

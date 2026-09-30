@@ -987,9 +987,8 @@ def test_the_gallery_and_the_live_grid_link_to_each_other_IN_THE_NAV():
     the gallery a SECOND time in its body prose, so deleting the nav link left
     it green. A link buried in a paragraph is not navigation.
 
-    ⚠ ``glossary.html`` is deliberately NOT in this: its nav is a leaf's, a crumb
-    and a term count and a way back, carrying no destination links in either
-    direction. Adding one there is a nav decision, not this invariant.
+    Every page now carries the same menu (test_every_page_carries_the_same_menu),
+    which covers the glossary too; this test keeps the pair it was written for.
     """
     def nav(name):
         m = re.search(r"<nav\b.*?</nav>", _markup(name), re.S)
@@ -1239,9 +1238,8 @@ def test_the_report_page_runs_nothing():
 def test_the_market_report_is_in_every_destination_nav():
     """The menu item IS the feature: a report page reachable only by typing its
     URL is not published. Scoped to the <nav> for the reason given in
-    test_the_gallery_and_the_live_grid_link_to_each_other_IN_THE_NAV.
-    glossary.html is a leaf nav with no destination links, deliberately."""
-    for name in ("index.html", "gallery.html", "live.html"):
+    test_the_gallery_and_the_live_grid_link_to_each_other_IN_THE_NAV."""
+    for name in ("index.html", "gallery.html", "live.html", "glossary.html"):
         assert 'href="report.html"' in _nav(name), f"{name}'s nav has no Market report link"
     for page in ("report.html", "ideas.html"):
         nav = _nav(page)
@@ -1278,9 +1276,8 @@ TOOLS = (("finder", "Strategy Finder"), ("rescue", "Rescue my Sh*tty trade"),
          ("calculator", "Calculator"), ("simulator", "Simulator"),
          ("news", "Market News"))
 
-# The pages whose navs carry destination links. glossary.html is a leaf's nav
-# by design (see the gallery/live test above), so it has no Tools menu.
-TOOLS_PAGES = ("index.html", "live.html", "gallery.html", "report.html", "ideas.html")
+# Every page: they all carry the one site menu, Tools included.
+TOOLS_PAGES = PAGES
 
 
 def _nav(name):
@@ -1347,13 +1344,25 @@ def test_the_generated_trade_ideas_are_never_committed():
         assert out.returncode == 0, f"{rel} is not gitignored"
 
 
-def test_every_page_navigates_to_the_trade_ideas():
-    """In the <nav>, not merely somewhere on the page -- the same reason as the
-    gallery/live test above. The glossary's nav is a leaf's crumb, and
-    ideas.html does not link to itself."""
-    for name in ("index.html", "gallery.html", "live.html", "report.html"):
-        assert 'href="ideas.html"' in _nav(name), f"{name}'s nav has no Trade ideas"
-    assert 'href="ideas.html"' not in _nav("ideas.html")
+def test_every_page_carries_the_same_menu():
+    """ONE menu, the operator's rule (2026-09-29): every page's <nav> is
+    byte-identical once ``aria-current`` is removed. Before it, six pages held
+    six menus -- different order, each page leaving itself out, the glossary with
+    no links at all, and the right-hand button "Live screens" on one page and
+    "Back to overview" on the rest -- because each was hand-edited on its own."""
+    def bare(name):
+        return re.sub(r'\s+aria-current="page"', "", _nav(name))
+    first = bare(PAGES[0])
+    for name in PAGES[1:]:
+        assert bare(name) == first, f"{name}'s menu differs from {PAGES[0]}'s"
+
+
+def test_the_menu_marks_the_page_you_are_on_and_nothing_else():
+    """The current page is MARKED, not left out -- the item stays where it
+    always is, so the menu never shifts under the reader's hand."""
+    for name in PAGES:
+        marked = re.findall(r'href="([^"]+)"\s+aria-current="page"', _nav(name))
+        assert marked == [name], f"{name} marks {marked}"
 
 
 def test_the_home_strip_starts_hidden_and_the_script_fills_it():

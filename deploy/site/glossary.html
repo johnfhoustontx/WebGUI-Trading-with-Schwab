@@ -43,7 +43,11 @@
 <body>
 <div class="ns-page-sub">
 
-  <nav class="ns-nav ns-nav-sticky">
+  <!-- THE SITE MENU. Byte-identical on every page but for aria-current,
+       which marks the page you are on (deploy/tests/test_site.py pins it).
+       The mark is inlined, not an <img>, so it takes the accent through
+       currentColor. Change it on ALL six pages or none. -->
+  <nav class="ns-nav ns-nav-sticky" aria-label="Site">
     <a class="ns-lockup" href="index.html">
       <svg class="ns-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
         <rect x="5" y="30.75" width="54" height="2.5" rx="1.25" class="ns-mark-rule"/>
@@ -52,15 +56,43 @@
       </svg>
       <span class="ns-brand">Neural<span class="ns-brand-b">Strike</span></span>
     </a>
-    <span class="ns-crumb">/ Glossary</span>
     <span class="ns-spacer"></span>
-    <span class="ns-count">187 terms</span>
-    <a class="btn btn-ghost btn-outline" href="index.html">Back to overview</a>
+    <a class="ns-navlink" href="report.html">Market report</a>
+    <a class="ns-navlink" href="ideas.html">Trade ideas</a>
+    <a class="ns-navlink" href="glossary.html" aria-current="page">Glossary</a>
+    <a class="ns-navlink" href="gallery.html">Gallery</a>
+    <a class="ns-navlink" href="index.html#community">Community</a>
+    <details class="ns-menu">
+      <summary class="ns-navlink">Tools</summary>
+      <div class="ns-menu-panel">
+        <a class="ns-menu-item" href="https://live.neuralstrike.co/finder">
+          <span class="ns-menu-title">Strategy Finder</span>
+          <span class="ns-menu-desc">Rank every trade for a symbol</span>
+        </a>
+        <a class="ns-menu-item" href="https://live.neuralstrike.co/rescue">
+          <span class="ns-menu-title">Rescue my Sh*tty trade</span>
+          <span class="ns-menu-desc">Repair a trade you already hold</span>
+        </a>
+        <a class="ns-menu-item" href="https://live.neuralstrike.co/calculator">
+          <span class="ns-menu-title">Calculator</span>
+          <span class="ns-menu-desc">Price any structure</span>
+        </a>
+        <a class="ns-menu-item" href="https://live.neuralstrike.co/simulator">
+          <span class="ns-menu-title">Simulator</span>
+          <span class="ns-menu-desc">Value it across price and time</span>
+        </a>
+        <a class="ns-menu-item" href="https://live.neuralstrike.co/news">
+          <span class="ns-menu-title">Market News</span>
+          <span class="ns-menu-desc">Headlines, filings and insider buys, live</span>
+        </a>
+      </div>
+    </details>
+    <a class="btn btn-primary" href="live.html" style="white-space: nowrap;">Live screens</a>
   </nav>
 
   <div class="ns-wrap gl-wrap">
     <header class="gl-head">
-      <span class="ns-eyebrow">Options glossary</span>
+      <span class="ns-eyebrow">Options glossary · <span class="ns-count">187 terms</span></span>
       <h1 class="ns-h2">The words, in plain English.</h1>
       <p class="ns-body">Every term the app puts on screen, defined without the jargon:
         from what a contract is, to what dealer gamma means and why it moves price.
