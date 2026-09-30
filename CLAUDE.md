@@ -914,6 +914,11 @@ heatmap, silently**, because a missing history key reads as "no history yet".
 ⚠ **`deploy/site/live/*.webp` is generated, gitignored state under `SITE_ROOT`** — the
 same shape as `webgui/data/`. Committed, the captures would dirty prod's tree the
 moment the capture timer first fires, and **`tools/promote.sh` refuses a dirty tree.**
+**`deploy/site/ideas/` + `deploy/site/ideas.json` are the same** — every POSTED hourly
+trade idea's card, written by `options_svc/site_ideas.py` after the sends (never
+raising, so a site write cannot cost a post) and drawn by `assets/ideas.js` on the home
+strip and `ideas.html`. ⚠ The options_svc conftest redirects `site_ideas.SITE_ROOT`;
+a test that posts without it writes cards into this checkout.
 **`deploy/site/reports/` is the same** — the market reports `report.html` frames, uploaded
 from the operator's workstation by tooling that lives outside this repo
 (`D:\NeuralStrike Reports\tools\publish.py`, which refuses to upload until prod ignores

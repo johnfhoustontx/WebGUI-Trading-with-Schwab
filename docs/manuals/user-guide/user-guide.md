@@ -90,6 +90,10 @@ The app reads market data and your positions from Schwab, so you need:
   Which channels each kind of alert goes to is set in **Settings → General → Push
   notifications**, and the trade idea can also pop up as a **Google Calendar**
   event (see *Google Calendar popup for the trade idea* under Settings).
+  Every trade idea that posts also appears on the public site: the newest three on
+  the home page, and every card of the last six posting days on **neuralstrike.co/ideas.html**.
+  Settings → Configuration → Push notifications → *Public site* turns that off or
+  changes how many days are kept; nothing that already posted is taken down by it.
 - **The watchlist workbook** `options-scanner/data/Top 20.xlsx` — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.
 

@@ -4,7 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-28 (**Push-notification checkboxes per category, and a Google
+**Last updated:** 2026-09-29 (**The day's trade ideas on neuralstrike.co.**)
+
+- **Where:** a *Today's trade ideas* strip on the home page under the fact band (the
+  newest three cards, "See all N →") and a new `ideas.html` — a day picker over the
+  last six posting days, every card, `?day=YYYY-MM-DD` deep links. *Trade ideas* joins
+  the nav on every page but the glossary, and the sitemap.
+- **What:** only POSTED ideas — the same PNG card that went to X, Discord and Telegram,
+  caption as alt text, click for full size. After the sends, `run_trade_idea` calls
+  `site_ideas.publish`: the card, a 1200-wide WebP (~27 KB against ~110 KB), and
+  `ideas.json` written atomically; day folders that fall out are deleted. Gitignored
+  generated state, like `live/*.webp`. A text-only post publishes nothing; a failure is
+  a `_degrade` and never costs the post (`result["site"]` records it).
+- **Config:** `config/notify.toml [site] trade_ideas / keep_days`, catalogued under
+  Settings → Configuration → Push notifications.
+- **Edge:** `ideas.json` joins the `no-cache` rule, `/ideas/*` gets a day. ⚠ Installing
+  the regenerated Caddyfile is the operator's (sudo); until then `ideas.js` fetches the
+  manifest with `cache: "no-cache"`, so it never reads stale.
+- **Backfill:** `tools/backfill_site_ideas.py` republishes the newest days from the card
+  archive (`TRADE_IDEAS_DIR`) so the page is not empty on its first day.
+- Design + plan: `docs/plans/2026-09-29-site-trade-ideas-{design,plan}.md`.
+
+**Prior —** 2026-09-28 (**Push-notification checkboxes per category, and a Google
 Calendar popup for the hourly trade idea.**)
 
 - **Switches:** new tracked `config/notify.toml`, one `[channels.<category>]` table per
