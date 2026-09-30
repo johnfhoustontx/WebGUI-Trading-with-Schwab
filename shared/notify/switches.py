@@ -20,10 +20,15 @@ _DEFAULT_ON = ("discord", "telegram")
 # event before its reminder was due); 4 worked on phone and browser (2026-09-28).
 _CAL_DEFAULTS = {"calendar_id": "", "lead_min": 5, "duration_min": 5}
 _CAL_FLOOR = {"lead_min": 0, "duration_min": 1}
+# [site]: each posted trade idea is also written into deploy/site (the public
+# site's home-page strip and ideas.html). keep_days counts POSTING days.
+_SITE_DEFAULTS = {"trade_ideas": True, "keep_days": 6}
+_SITE_KEEP_RANGE = (1, 30)
 
 
 def _make_loader(path):
-    return toml_loader(path, {"channels": {}, "calendar": dict(_CAL_DEFAULTS)},
+    return toml_loader(path, {"channels": {}, "calendar": dict(_CAL_DEFAULTS),
+                              "site": dict(_SITE_DEFAULTS)},
                        label="notify.toml")
 
 
@@ -57,4 +62,23 @@ def calendar_settings() -> dict:
         v = block.get(key)
         if isinstance(v, int) and not isinstance(v, bool) and v >= floor:
             out[key] = v
+    return out
+
+
+def site_settings() -> dict:
+    """``{"trade_ideas", "keep_days"}`` for publishing trade ideas to the site.
+    Bad values read as the defaults, one key at a time; never raises."""
+    out = dict(_SITE_DEFAULTS)
+    try:
+        block = _load().get("site")
+    except Exception:  # noqa: BLE001
+        return out
+    if not isinstance(block, dict):
+        return out
+    if isinstance(block.get("trade_ideas"), bool):
+        out["trade_ideas"] = block["trade_ideas"]
+    v = block.get("keep_days")
+    lo, hi = _SITE_KEEP_RANGE
+    if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi:
+        out["keep_days"] = v
     return out

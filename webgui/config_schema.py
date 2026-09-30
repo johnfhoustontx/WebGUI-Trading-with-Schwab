@@ -1256,6 +1256,17 @@ _NOTIFY = ConfigFile(
             Field("calendar.duration_min", "Event length", "",
                   kind="int", unit="min", min=1, max=120, step=1),
         )),
+        Section("Public site", "Each posted trade idea also appears on "
+                "neuralstrike.co: the home page shows the newest three, and "
+                "ideas.html shows every card of the days kept.", (
+            Field("site.trade_ideas", "Publish trade ideas to the website",
+                  "Off still posts to Discord, Telegram and X, but adds nothing "
+                  "to the site. Cards already there stay.", kind="bool"),
+            Field("site.keep_days", "Days kept on the site",
+                  "Counts days on which an idea was posted, so weekends and "
+                  "holidays do not use one up. Older cards are deleted.",
+                  kind="int", unit="days", min=1, max=30, step=1),
+        )),
     ),
 )
 

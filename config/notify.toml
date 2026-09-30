@@ -62,3 +62,10 @@ lead_min = 5                   # the event starts this many minutes after the po
                                # phone or browser (the device had not synced the event
                                # before its reminder was due); at 4 minutes both did.
 duration_min = 5               # event length
+
+# The public site (neuralstrike.co: the home page's "trade ideas" strip and
+# ideas.html). Each POSTED trade idea's card is also written into deploy/site/ideas/
+# and deploy/site/ideas.json (both gitignored, generated). Read at post time.
+[site]
+trade_ideas = true             # off = post as usual, publish nothing to the site
+keep_days = 6                  # posting days kept on the site (today + the 5 before)
