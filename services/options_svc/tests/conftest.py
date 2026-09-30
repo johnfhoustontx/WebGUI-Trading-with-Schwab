@@ -10,6 +10,15 @@ from shared import market_calendar as mc
 
 
 @pytest.fixture(autouse=True)
+def _site_ideas_into_tmp(monkeypatch, tmp_path):
+    """A posted trade idea is also written into the public site tree
+    (``site_ideas.SITE_ROOT`` = deploy/site). Every test that posts would otherwise
+    write cards and ideas.json into this checkout's real deploy/site."""
+    from services.options_svc import site_ideas
+    monkeypatch.setattr(site_ideas, "SITE_ROOT", tmp_path / "site")
+
+
+@pytest.fixture(autouse=True)
 def _no_live_claude(monkeypatch):
     """Neutralize real Claude-client resolution across the whole options_svc suite.
 

@@ -558,3 +558,64 @@ def test_a_gated_or_refused_idea_creates_no_event(calendar, monkeypatch):
     monkeypatch.setattr(push_notify, "_MS_MAX_BYTES", 1)          # "too large"
     assert push_notify.send_trade_idea(idea, now=NOW, config=_cfg()) is False
     assert events == []
+
+
+# ── the public site: every POSTED card also lands in deploy/site ───────────
+@pytest.fixture
+def site(monkeypatch):
+    from services.options_svc import site_ideas
+    from shared.notify import switches
+    monkeypatch.setattr(switches, "site_settings",
+                        lambda: {"trade_ideas": True, "keep_days": 6})
+    monkeypatch.setattr(handlers.x_post, "post", lambda *a, **k: {"ok": True})
+    monkeypatch.setattr(push_notify, "trade_idea_png", lambda idea, **kw: b"PNG")
+    return site_ideas.SITE_ROOT
+
+
+def _manifest(root):
+    import json as _json
+    return _json.loads((root / "ideas.json").read_text(encoding="utf-8"))
+
+
+def test_a_posted_idea_is_published_to_the_site(idea_ready, site, monkeypatch):
+    monkeypatch.setattr(push_notify, "send_trade_idea", lambda idea, **kw: True)
+    res = handlers.run_trade_idea(idea_ready, "h1035", now=NOW)
+    assert res["status"] == "posted" and res["site"] is True
+    first = _manifest(site)["days"][0]["ideas"][0]
+    assert first["symbol"] == res["idea"]["symbol"]
+    assert first["alt"] == T.caption(res["idea"])
+
+
+def test_the_site_switch_off_publishes_nothing(idea_ready, site, monkeypatch):
+    from shared.notify import switches
+    monkeypatch.setattr(switches, "site_settings",
+                        lambda: {"trade_ideas": False, "keep_days": 6})
+    monkeypatch.setattr(push_notify, "send_trade_idea", lambda idea, **kw: True)
+    res = handlers.run_trade_idea(idea_ready, "h1035", now=NOW)
+    assert res["status"] == "posted" and res["site"] is False
+    assert not (site / "ideas.json").exists()
+
+
+def test_a_site_failure_never_costs_the_post(idea_ready, site, monkeypatch):
+    from services.options_svc import site_ideas
+
+    def boom(*a, **k):
+        raise RuntimeError("disk full")
+    monkeypatch.setattr(site_ideas, "publish", boom)
+    monkeypatch.setattr(push_notify, "send_trade_idea", lambda idea, **kw: True)
+    res = handlers.run_trade_idea(idea_ready, "h1035", now=NOW)
+    assert res["status"] == "posted" and res["site"] is False
+
+
+def test_an_unsent_idea_is_not_published(idea_ready, site, monkeypatch):
+    monkeypatch.setattr(push_notify, "send_trade_idea", lambda idea, **kw: False)
+    handlers.run_trade_idea(idea_ready, "h1035", now=NOW)
+    assert not (site / "ideas.json").exists()
+
+
+def test_a_text_only_post_has_no_card_to_publish(idea_ready, site, monkeypatch):
+    monkeypatch.setattr(push_notify, "trade_idea_png", lambda idea, **kw: None)
+    monkeypatch.setattr(push_notify, "send_trade_idea", lambda idea, **kw: True)
+    res = handlers.run_trade_idea(idea_ready, "h1035", now=NOW)
+    assert res["status"] == "posted" and res["site"] is False
+    assert not (site / "ideas.json").exists()

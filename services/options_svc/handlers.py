@@ -2542,9 +2542,30 @@ def run_trade_idea(bus, slot, now=None) -> dict:
         result["status"] = "posted"
         result["posted"] = trade_idea.next_posted(posted, idea, today)
         result["x"] = _post_trade_idea_x(bus, idea, png, now)
+        result["site"] = _publish_trade_idea_site(idea, png, now)
     else:
         result["reason"] = "send failed"
     return _finish()
+
+
+def _publish_trade_idea_site(idea, png, now) -> bool:
+    """Put a POSTED card on the public site (neuralstrike.co: the home page strip
+    and ideas.html) through ``site_ideas.publish``. Runs after every other send and
+    never raises: a site write must never cost a post. A text-only post (the card
+    failed to render) has nothing to show, so it publishes nothing."""
+    if not png:
+        return False
+    try:
+        from services.options_svc import site_ideas, trade_idea
+        from shared.notify import switches
+        cfg = switches.site_settings()
+        if not cfg["trade_ideas"]:
+            return False
+        return site_ideas.publish(idea, png, trade_idea.caption(idea), now,
+                                  keep_days=cfg["keep_days"])
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.run_trade_idea.site")
+        return False
 
 
 def _post_trade_idea_x(bus, idea, png, now) -> dict:
