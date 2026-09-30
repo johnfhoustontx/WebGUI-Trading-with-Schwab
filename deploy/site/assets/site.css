@@ -1140,11 +1140,12 @@ a.ns-menu-item:hover {
 
 .ns-ideas-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
   gap: clamp(14px, 1.6vw, 22px);
   align-items: start;
 }
-.ns-ideas-grid-page { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+/* min(): a 320px phone has less than a column's minimum, which would overflow. */
+.ns-ideas-grid-page { grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); }
 
 .ns-idea-card {
   display: block;
