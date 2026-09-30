@@ -77,6 +77,82 @@
     return n;
   }
 
+  // ── How the idea did (site_ideas.refresh) ──────────────────────────────────
+  // Measured from the STOCK price only. An open idea shows the stock's move and
+  // what the trade would pay AT EXPIRY at today's price - not a live mark, which
+  // is why the line says "at expiry". An expired one shows its settled result.
+  function num(v) {
+    return typeof v === "number" && isFinite(v) ? v : null;
+  }
+
+  function money(v) {
+    var whole = Math.round(Math.abs(v)).toLocaleString("en-US");
+    return (v > 0 ? "+" : v < 0 ? "−" : "") + "$" + whole;
+  }
+
+  function signedPct(v) {
+    return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v).toFixed(1) + "%";
+  }
+
+  function price(v) {
+    return "$" + v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function asOf(iso) {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    var day = new Intl.DateTimeFormat("en-CA", {
+      timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit"
+    }).format(d);
+    var time = new Intl.DateTimeFormat("en-US", {
+      timeZone: TZ, hour: "numeric", minute: "2-digit"
+    }).format(d);
+    return "as of " + (day === todayCT() ? "" : shortDate(day) + ", ") + time + " CT";
+  }
+
+  function resultOf(idea) {
+    var r = idea && idea.result;
+    if (!r || num(r.pnl) === null || num(r.spot) === null) return null;
+    return r;
+  }
+
+  function resultBlock(idea) {
+    var r = resultOf(idea);
+    if (!r) return null;
+    var tone = r.pnl > 0 ? " is-up" : r.pnl < 0 ? " is-down" : "";
+    var box = el("span", "ns-idea-result" + tone);
+    var pct = num(r.pnl_pct) === null ? "" : " (" + signedPct(r.pnl_pct) + " of risk)";
+    var move = num(idea.spot) !== null
+      ? str(idea.symbol) + " " + price(idea.spot) + " → " + price(r.spot)
+        + (num(r.move_pct) === null ? "" : " (" + signedPct(r.move_pct) + ")")
+      : str(idea.symbol) + " " + price(r.spot);
+    if (r.status === "expired" && DAY.test(str(r.settled))) {
+      box.appendChild(el("span", "ns-idea-state", "Expired " + shortDate(r.settled)
+        + " at " + price(r.spot)));
+      box.appendChild(el("span", "ns-idea-pnl", "Result " + money(r.pnl) + pct));
+    } else {
+      box.appendChild(el("span", "ns-idea-state", move));
+      box.appendChild(el("span", "ns-idea-pnl", "At this price at expiry: " + money(r.pnl) + pct));
+    }
+    var note = [];
+    if (r.status !== "expired") note.push(asOf(r.as_of));
+    if (idea.approx) note.push("approx. entry");
+    note = note.filter(Boolean);
+    if (note.length) box.appendChild(el("span", "ns-idea-note", note.join(" · ")));
+    return box;
+  }
+
+  function tally(ideas) {
+    var up = 0, down = 0;
+    ideas.forEach(function (i) {
+      var r = resultOf(i);
+      if (!r) return;
+      if (r.pnl > 0) up += 1;
+      else if (r.pnl < 0) down += 1;
+    });
+    return up + down ? " · " + up + " ahead, " + down + " behind" : "";
+  }
+
   function card(idea, eager) {
     var a = el("a", "ns-idea-card");
     a.href = idea.full;
@@ -99,6 +175,8 @@
 
     a.appendChild(img);
     a.appendChild(meta);
+    var result = resultBlock(idea);
+    if (result) a.appendChild(result);
     return a;
   }
 
@@ -143,7 +221,8 @@
         b.setAttribute("aria-pressed", b.dataset.day === day.date ? "true" : "false");
       });
       var n = day.ideas.length;
-      heading.textContent = dayTitle(day.date) + " · " + n + (n === 1 ? " idea" : " ideas");
+      heading.textContent = dayTitle(day.date) + " · " + n + (n === 1 ? " idea" : " ideas")
+        + tally(day.ideas);
       fill(grid, day.ideas, 2);
       return day.date;
     }

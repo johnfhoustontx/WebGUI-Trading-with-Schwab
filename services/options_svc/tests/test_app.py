@@ -78,6 +78,9 @@ _BRANCH_HANDLERS = (
     # (slot 08:52 + 20 min grace), and unstubbed it fans out ~23 LIVE chain
     # fetches through the proxy on a background thread.
     "publish_income",
+    # The public site's trade idea results: a live /quotes call, plus a write
+    # into deploy/site if a manifest exists.
+    "refresh_site_idea_results",
 )
 
 

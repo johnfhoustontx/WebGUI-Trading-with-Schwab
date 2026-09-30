@@ -1385,3 +1385,16 @@ def test_ideas_js_reads_the_manifest_safely():
 
 def test_the_sitemap_lists_the_ideas_page():
     assert "https://neuralstrike.co/ideas.html" in _text("sitemap.txt").split()
+
+
+def test_an_open_result_is_labelled_as_an_expiry_payoff_not_a_mark():
+    """The site measures an idea from the STOCK price only (no option quote is
+    published). An open idea's number is what the trade would pay AT EXPIRY at
+    today's price - a long option also carries time value - so the words must
+    say so, and no line may present it as a current value."""
+    js = _text("assets/ideas.js")
+    assert "At this price at expiry" in js
+    # What a visitor can read is the script's string literals, not its comments.
+    shown = " ".join(re.findall(r'"([^"\n]*)"', js)).lower()
+    for word in ("unrealized", "current value", "now worth", "mark"):
+        assert word not in shown, word

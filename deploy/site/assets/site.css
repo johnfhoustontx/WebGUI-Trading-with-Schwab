@@ -1221,3 +1221,25 @@ a.ns-menu-item:hover {
   margin: 0 0 16px;
 }
 .ns-ideas-day:empty { display: none; }
+
+/* How the idea did (ideas.js resultBlock). Up/down are the app's own P&L pair,
+ * the same green and red the cards themselves print; the site palette has none. */
+.ns-idea-card { --ns-up: #34d399; --ns-down: #f87171; }
+.ns-idea-result {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 14px 12px;
+  margin-top: -4px;
+  font-size: 13px;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+.ns-idea-pnl { font-weight: 600; color: var(--color-text); }
+.ns-idea-result.is-up .ns-idea-pnl { color: var(--ns-up); }
+.ns-idea-result.is-down .ns-idea-pnl { color: var(--ns-down); }
+.ns-idea-note {
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent);
+}
