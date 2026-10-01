@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import logging
+import math
 import struct
 import zlib
 import sqlite3
@@ -309,16 +310,38 @@ def init_hiro_schema(conn: sqlite3.Connection) -> None:
 _HIRO_COLS = ("ts", "spot", "impact", "classified_vol", "unclassified_vol")
 
 
-def insert_hiro_row(conn: sqlite3.Connection, symbol: str, ts, row: dict) -> None:
-    """One minute of HIRO-model hedge impact (services/options_svc/hiro.py).
-    INSERT OR REPLACE: a re-run of the same minute overwrites, never doubles."""
-    conn.execute(
+def _hiro_params(symbol: str, ts, row: dict) -> tuple:
+    vals = []
+    for key in ("impact", "classified_vol", "unclassified_vol"):
+        v = float(row[key])
+        if not math.isfinite(v):
+            raise ValueError(f"hiro_minutes {symbol}@{ts}: non-finite {key}={v!r}")
+        vals.append(v)
+    return (symbol, int(ts), row.get("spot"), *vals)
+
+
+def insert_hiro_rows(conn: sqlite3.Connection, items) -> None:
+    """Many minutes of HIRO-model hedge impact (services/options_svc/hiro.py)
+    in ONE commit. ``items`` is an iterable of ``(symbol, ts, row)``.
+
+    INSERT OR REPLACE: a re-run of the same minute overwrites, never doubles.
+    A missing or non-finite impact / classified_vol / unclassified_vol RAISES
+    (KeyError / TypeError / ValueError) before anything is written, and the
+    caller degrades. It is checked here because SQLite would store an infinity
+    silently (only a NaN trips NOT NULL), and one inf would poison a baseline.
+    A None spot is stored NULL."""
+    params = [_hiro_params(symbol, ts, row) for symbol, ts, row in items]
+    conn.executemany(
         "INSERT OR REPLACE INTO hiro_minutes "
         "(symbol, ts, spot, impact, classified_vol, unclassified_vol) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (symbol, int(ts), row.get("spot"), float(row["impact"]),
-         float(row["classified_vol"]), float(row["unclassified_vol"])))
+        params)
     conn.commit()
+
+
+def insert_hiro_row(conn: sqlite3.Connection, symbol: str, ts, row: dict) -> None:
+    """One minute; see :func:`insert_hiro_rows` for the contract."""
+    insert_hiro_rows(conn, [(symbol, ts, row)])
 
 
 def load_hiro_day(conn: sqlite3.Connection, symbol: str, d=None) -> list[dict]:

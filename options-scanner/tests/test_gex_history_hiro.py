@@ -4,6 +4,8 @@ retention (the HIRO baseline needs 5 sessions BEFORE today, the GEX grids keep
 import datetime as dt
 import sqlite3
 
+import pytest
+
 import gex_history_db as gh
 
 
@@ -80,8 +82,24 @@ def test_purge_keep_sessions_does_not_touch_hiro(tmp_path):
 
 def test_init_schema_is_idempotent_with_hiro(tmp_path):
     conn = _conn(tmp_path)
+    d = dt.date(2026, 10, 1)
+    row = {"spot": 1.0, "impact": 3.0, "classified_vol": 1.0, "unclassified_vol": 0.0}
+    gh.insert_hiro_row(conn, "SPY", _ts(d, 9, 0), row)
     gh.init_schema(conn)          # second call must not raise
     gh.init_schema(conn)
+    assert [r["impact"] for r in gh.load_hiro_day(conn, "SPY", d)] == [3.0]
+    names = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "hiro_minutes" in names
+
+
+def test_init_schema_alone_creates_hiro_table(tmp_path):
+    """init_schema (not only init_hiro_schema) must create hiro_minutes."""
+    conn = sqlite3.connect(str(tmp_path / "fresh.db"))
+    gh.init_schema(conn)
+    names = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "hiro_minutes" in names
 
 
 def test_load_hiro_prior_sessions_spans_symbols_independently(tmp_path):
@@ -92,3 +110,48 @@ def test_load_hiro_prior_sessions_spans_symbols_independently(tmp_path):
     gh.insert_hiro_row(conn, "SPY", _ts(dt.date(2026, 9, 29), 9, 0), row)
     got = gh.load_hiro_prior_sessions(conn, "SPY", 5, before=dt.date(2026, 10, 1))
     assert len(got) == 1
+    assert got[0][0]["ts"] == _ts(dt.date(2026, 9, 29), 9, 0)
+
+
+def test_load_hiro_prior_sessions_n_zero_is_empty(tmp_path):
+    conn = _conn(tmp_path)
+    row = {"spot": 1.0, "impact": 1.0, "classified_vol": 1.0, "unclassified_vol": 0.0}
+    gh.insert_hiro_row(conn, "SPY", _ts(dt.date(2026, 9, 29), 9, 0), row)
+    assert gh.load_hiro_prior_sessions(conn, "SPY", 1, before=dt.date(2026, 10, 1)) != []
+    assert gh.load_hiro_prior_sessions(conn, "SPY", 0, before=dt.date(2026, 10, 1)) == []
+
+
+def test_insert_hiro_rows_batches_symbols_in_one_call(tmp_path):
+    conn = _conn(tmp_path)
+    d = dt.date(2026, 10, 1)
+    gh.insert_hiro_rows(conn, [
+        ("SPY", _ts(d, 9, 0), {"spot": 500.0, "impact": 1.0,
+                               "classified_vol": 1.0, "unclassified_vol": 0.0}),
+        ("QQQ", _ts(d, 9, 0), {"spot": 400.0, "impact": -2.0,
+                               "classified_vol": 2.0, "unclassified_vol": 1.0}),
+    ])
+    assert [r["impact"] for r in gh.load_hiro_day(conn, "SPY", d)] == [1.0]
+    assert [r["impact"] for r in gh.load_hiro_day(conn, "QQQ", d)] == [-2.0]
+
+
+def test_insert_hiro_none_spot_stored_null(tmp_path):
+    conn = _conn(tmp_path)
+    d = dt.date(2026, 10, 1)
+    gh.insert_hiro_row(conn, "SPY", _ts(d, 9, 0), {"spot": None, "impact": 1.0,
+                       "classified_vol": 1.0, "unclassified_vol": 0.0})
+    assert gh.load_hiro_day(conn, "SPY", d)[0]["spot"] is None
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_insert_hiro_rows_non_finite_raises_and_writes_nothing(tmp_path, bad):
+    """SQLite would store an infinity silently (only NaN trips NOT NULL), so
+    the check is in code - and a bad row anywhere in a batch writes nothing."""
+    conn = _conn(tmp_path)
+    d = dt.date(2026, 10, 1)
+    good = {"spot": 1.0, "impact": 1.0, "classified_vol": 1.0, "unclassified_vol": 0.0}
+    with pytest.raises(ValueError):
+        gh.insert_hiro_rows(conn, [("SPY", _ts(d, 9, 0), good),
+                                   ("QQQ", _ts(d, 9, 0), {**good, "impact": bad})])
+    conn.commit()
+    assert gh.load_hiro_day(conn, "SPY", d) == []
+    assert gh.load_hiro_day(conn, "QQQ", d) == []
