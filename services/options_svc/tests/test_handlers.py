@@ -2893,7 +2893,7 @@ def test_run_flow_alerts_hiro_flip_seen_marker_has_no_pipe(monkeypatch):
     assert not any(k.startswith("SPY|hiro_flip_seen") for k in cmap)
 
 
-def test_run_flow_alerts_hiro_surge_and_flip_count_two_for_hotness(monkeypatch):
+def test_run_flow_alerts_hiro_surge_and_flip_do_not_count_for_hotness(monkeypatch):
     from services.options_svc import compute
     rows = _hrows(_HIRO_BOTH)
     bus, handlers, _ = _hiro_setup(monkeypatch, rows, _HIRO_PRIOR)
