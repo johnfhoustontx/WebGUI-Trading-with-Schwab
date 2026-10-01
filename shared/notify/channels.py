@@ -196,9 +196,9 @@ def _disable_all(node: dict) -> None:
 # edit, not a code change. Resolution is route -> legacy key -> global, and the
 # LEGACY step is what keeps existing installs working untouched.
 ROUTE_CATEGORIES = (
-    "signals", "flow_uoa", "flow_crossover", "flow_gamma_flip", "action_alert",
-    "eod_summary", "gamma_briefing", "market_snapshot", "market_state",
-    "trade_idea",
+    "signals", "flow_uoa", "flow_crossover", "flow_gamma_flip", "flow_hiro",
+    "action_alert", "eod_summary", "gamma_briefing", "market_snapshot",
+    "market_state", "trade_idea",
 )
 
 # Category -> the pre-`routes` config key it used to read (back-compat only).

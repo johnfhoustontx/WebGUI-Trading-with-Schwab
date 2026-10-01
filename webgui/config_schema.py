@@ -1246,6 +1246,7 @@ NOTIFY_CATEGORY_NAMES = {
     "flow_uoa": "Unusual options activity",
     "flow_crossover": "Put/call premium crossover",
     "flow_gamma_flip": "Gamma flip",
+    "flow_hiro": "Hedging flow",
     "action_alert": "Open-position action digest",
     "eod_summary": "End-of-day summary",
     "gamma_briefing": "Dealer Positioning briefings",

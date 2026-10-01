@@ -249,9 +249,10 @@ def send_action_digest(items: dict, *, slot_label: str = "", config: dict | None
 
 
 # ── Options-flow alerts (call/put premium crossover + contract-level UOA) ──────
-# An alert dict: {"type": "crossover"|"uoa", "side": ..., "symbol": ..., "text": ...}
-# (built by flow_alerts). Green = bullish (calls overtook / unusual call activity);
-# red = bearish (puts overtook / unusual put activity).
+# An alert dict: {"type": "crossover"|"uoa"|..., "side": ..., "symbol": ..., "text": ...}
+# (built by flow_alerts). Green = bullish (calls overtook / unusual call activity /
+# positive gamma / the HIRO model's dealers BUYING stock, which is upward
+# pressure); red = bearish (the mirror of each).
 _FLOW_GREEN = 0x2ECC71
 _FLOW_RED = 0xE74C3C
 
@@ -259,7 +260,9 @@ _FLOW_RED = 0xE74C3C
 def _flow_is_bullish(a) -> bool:
     return (a.get("type") == "crossover" and a.get("side") == "calls_over") or \
            (a.get("type") == "uoa" and a.get("side") == "call") or \
-           (a.get("type") == "gamma_flip" and a.get("side") == "to_positive")
+           (a.get("type") == "gamma_flip" and a.get("side") == "to_positive") or \
+           (a.get("type") == "hiro_surge" and a.get("side") == "dealers_buying") or \
+           (a.get("type") == "hiro_flip" and a.get("side") == "to_buying")
 
 
 def flow_alert_telegram_text(a) -> str:
@@ -275,7 +278,9 @@ def flow_alert_discord_embed(a) -> dict:
 
 _FLOW_CATEGORIES = {"uoa": "flow_uoa",
                     "crossover": "flow_crossover",
-                    "gamma_flip": "flow_gamma_flip"}
+                    "gamma_flip": "flow_gamma_flip",
+                    "hiro_surge": "flow_hiro",
+                    "hiro_flip": "flow_hiro"}
 
 
 def flow_category(a) -> str:

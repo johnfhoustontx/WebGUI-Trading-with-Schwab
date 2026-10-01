@@ -607,6 +607,18 @@ def test_flow_webhook_routes_gamma_flip():
     assert discord_target({"discord": {"webhook_url": "gen"}}, cat) == "gen"
 
 
+def test_flow_category_routes_both_hiro_types_to_flow_hiro():
+    assert pn.flow_category({"type": "hiro_surge"}) == "flow_hiro"
+    assert pn.flow_category({"type": "hiro_flip"}) == "flow_hiro"
+
+
+def test_hiro_bullishness_follows_dealer_direction():
+    assert pn._flow_is_bullish({"type": "hiro_surge", "side": "dealers_buying"})
+    assert not pn._flow_is_bullish({"type": "hiro_surge", "side": "dealers_selling"})
+    assert pn._flow_is_bullish({"type": "hiro_flip", "side": "to_buying"})
+    assert not pn._flow_is_bullish({"type": "hiro_flip", "side": "to_selling"})
+
+
 def test_briefing_caption_full():
     res = {"analysis": {"regime": "Positive gamma · pinned",
                         "bias": 18.0,

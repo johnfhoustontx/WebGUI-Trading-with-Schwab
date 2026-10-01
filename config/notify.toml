@@ -24,6 +24,10 @@ telegram = true
 discord = true
 telegram = true
 
+[channels.flow_hiro]           # HIRO-model hedging surge / reversal
+discord = true
+telegram = true
+
 [channels.action_alert]        # the thrice-daily open-position action digest
 discord = true
 telegram = true

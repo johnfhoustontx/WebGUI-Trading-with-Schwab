@@ -491,9 +491,9 @@ def test_telegram_target_survives_malformed_config():
 
 def test_route_categories_cover_every_notification_category():
     assert set(ch.ROUTE_CATEGORIES) == {
-        "signals", "flow_uoa", "flow_crossover", "flow_gamma_flip", "action_alert",
-        "eod_summary", "gamma_briefing", "market_snapshot", "market_state",
-        "trade_idea",
+        "signals", "flow_uoa", "flow_crossover", "flow_gamma_flip", "flow_hiro",
+        "action_alert", "eod_summary", "gamma_briefing", "market_snapshot",
+        "market_state", "trade_idea",
     }
     # Every legacy key belongs to a real category (no typo'd orphans).
     assert set(ch._LEGACY_DISCORD_KEYS) <= set(ch.ROUTE_CATEGORIES)
