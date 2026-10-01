@@ -2944,6 +2944,21 @@ def test_run_flow_alerts_hiro_slow_tick_still_fires_both(monkeypatch):
     assert sorted(a["type"] for a in _hiro_alerts(bus)) == ["hiro_flip", "hiro_surge"]
 
 
+def test_run_flow_alerts_hiro_string_config_values_fall_back_not_kill(monkeypatch):
+    """A hand-edited ``cooldown_min = "30"`` (and friends) must not kill the
+    symbol every tick: each bad numeric key falls back to its default once,
+    at setup, and both rules still fire."""
+    rows = _hrows(_HIRO_BOTH)
+    bus, handlers, _ = _hiro_setup(monkeypatch, rows, _HIRO_PRIOR,
+                                   {"cooldown_min": "30", "flip_cooldown_min": "60",
+                                    "k": "3", "flip_band": "1.0",
+                                    "window_min": "15"})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: rows[-1]["ts"])
+    handlers.run_flow_alerts(bus)
+    assert sorted(a["type"] for a in _hiro_alerts(bus)) == ["hiro_flip", "hiro_surge"]
+    assert bus.cache_get("cache:options:hiro").payload["symbols"]["SPY"]["ts"] == rows[-1]["ts"]
+
+
 def test_run_flow_alerts_hiro_stale_rows_do_not_fire(monkeypatch):
     """The handler passes the clock: rows ten minutes old fire neither rule."""
     rows = _hrows(_HIRO_BOTH)

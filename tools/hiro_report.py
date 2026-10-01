@@ -101,8 +101,12 @@ def _usable_sigma(sigma):
 
 
 def load_cfg() -> dict:
-    """The live ``[hiro]`` table, merged over its defaults."""
-    return dict(flow_alerts.load_thresholds()["hiro"])
+    """The live ``[hiro]`` table, merged over its defaults, with its numbers
+    coerced by ``hiro.clean_cfg`` -- the helper the live handler uses, so a bad
+    hand-edited value replays exactly as it runs live. A non-dict table (a
+    ``hiro = 5`` in the TOML) falls back to the built-in defaults."""
+    h = flow_alerts.load_thresholds().get("hiro")
+    return hiro.clean_cfg(h, flow_alerts._DEFAULTS["hiro"])
 
 
 # --- sigma, as live had it ----------------------------------------------------

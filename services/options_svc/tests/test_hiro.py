@@ -423,6 +423,38 @@ def test_detect_flip_age_limit_is_inclusive():
     assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None) is None
 
 
+# --- Config coercion -------------------------------------------------------------
+
+_DEF = {"enabled": True, "symbols": ["SPY"], "flip_not_before": "09:00",
+        "window_min": 15, "k": 3.0, "push_k": 4.0, "min_notional": 25e6,
+        "max_unclassified": 0.5, "cooldown_min": 30, "baseline_sessions": 5,
+        "min_minutes": 30, "flip_band": 1.0, "flip_cooldown_min": 60,
+        "keep_sessions": 20}
+
+
+def test_clean_cfg_falls_back_per_key_on_a_bad_value():
+    """A hand-edited string (or NaN / inf / bool / None) must not reach the
+    rules, where ``"30" * 60`` or a NaN comparison kills or silences the
+    symbol every tick. Each bad key falls back to its own default; the good
+    keys and the non-numeric keys are kept as given."""
+    h = {**_DEF, "cooldown_min": "30", "k": math.nan, "window_min": True,
+         "min_notional": math.inf, "flip_band": None, "max_unclassified": 0.25,
+         "symbols": ["QQQ"], "flip_not_before": "09:30"}
+    c = hiro.clean_cfg(h, _DEF)
+    assert c["cooldown_min"] == 30 and c["k"] == 3.0 and c["window_min"] == 15
+    assert c["min_notional"] == 25e6 and c["flip_band"] == 1.0
+    assert c["max_unclassified"] == 0.25
+    assert c["symbols"] == ["QQQ"] and c["flip_not_before"] == "09:30"
+    assert h["cooldown_min"] == "30"                     # caller's dict untouched
+
+
+def test_clean_cfg_fills_a_missing_key_and_tolerates_a_non_dict():
+    c = hiro.clean_cfg({"k": 2.5}, _DEF)
+    assert c["k"] == 2.5 and c["cooldown_min"] == 30 and c["push_k"] == 4.0
+    assert hiro.clean_cfg("oops", _DEF) == _DEF
+    assert hiro.clean_cfg(None, _DEF) == _DEF
+
+
 # --- View row ----------------------------------------------------------------
 
 def test_symbol_view_summarises_latest_minute():

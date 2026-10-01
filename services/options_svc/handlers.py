@@ -1925,7 +1925,8 @@ def publish_matrix(bus) -> None:
     Feeds ``compute.build_matrix`` the scan_day day-union + the flow-alert cooldown
     SEEN-MAP (``cache:options:flow_alert_cooldowns`` — the uncapped daily record of
     distinct flow-alert events per symbol, so the Flow column reflects the true daily
-    count rather than the 50-capped ``cache:options:flow_alerts`` rolling list).
+    count rather than the ``cache:options:flow_alerts`` rolling list, capped at
+    ``_FLOW_ALERTS_MAX`` = 300).
     That builder is fully defensive (a DB-connect failure degrades to empty rows).
     ``skip_unchanged`` so an unchanged matrix doesn't wake GUI version-pollers.
     Guarded so a matrix failure never escapes into the caller (the 1-min GEX
@@ -2199,6 +2200,11 @@ def _run_hiro(conn, cfg, bus, today, cooldowns, now_ts):
         h = cfg.get("hiro") if isinstance(cfg, dict) else None
         if not isinstance(h, dict) or h.get("enabled") is not True or conn is None:
             return []
+        # Every numeric key coerced ONCE, per key back to its default on a bad
+        # value: a hand-edited cooldown_min = "30" would otherwise raise inside
+        # the per-symbol loop and kill that symbol on every tick. The same
+        # helper the daily report uses, so the two cannot read it differently.
+        h = hiro.clean_cfg(h, flow_alerts._DEFAULTS["hiro"])
         symbols = _hiro_symbols(h)
         # Stamped on every alert so Tier 1 decides from the ALERT, never from
         # this service's config: ``quiet`` = unvalidated (no phone push, and the

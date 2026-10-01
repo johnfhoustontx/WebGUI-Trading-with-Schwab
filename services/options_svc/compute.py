@@ -5246,8 +5246,9 @@ def _count_flow_alerts(flow_cooldowns, today):
     Each ``cid`` (e.g. ``$SPX|crossover`` or ``QQQ|uoa|put|706|2026-07-21``) is one
     distinct alert event; the prefix before the first ``|`` is the symbol. This
     date-scoped seen-map is UNCAPPED and never pruned, so it is the true daily count —
-    unlike ``cache:options:flow_alerts`` (a rolling list capped at 50 total that
-    undercounts every symbol once the day fires >50 alerts). Gated on the map's date.
+    unlike ``cache:options:flow_alerts`` (a rolling list capped at
+    ``handlers._FLOW_ALERTS_MAX`` = 300 total that undercounts every symbol once the
+    day fires more alerts than that). Gated on the map's date.
 
     ⚠ HIRO keys (``SYM|hiro_surge|<side>``, ``SYM|hiro_flip``) are NOT counted:
     HIRO is an unvalidated MODEL of dealer hedging, and while it is one it must

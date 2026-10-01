@@ -22,6 +22,31 @@ def _finite(v):
     return v if math.isfinite(v) else None
 
 
+# The numeric [hiro] keys the rules and the daily report read. Coerced ONCE, by
+# ``clean_cfg``, which both the live handler and tools/hiro_report.py call, so a
+# hand-edited value cannot be read one way live and another in the report.
+NUMERIC_KEYS = ("window_min", "k", "push_k", "min_notional", "max_unclassified",
+                "cooldown_min", "baseline_sessions", "min_minutes", "flip_band",
+                "flip_cooldown_min", "keep_sessions")
+
+
+def clean_cfg(h, defaults):
+    """A copy of the ``[hiro]`` table with every NUMERIC_KEYS value a finite
+    number, each bad one (a string, NaN, inf, a bool, None, missing) replaced by
+    ``defaults``' own value for that key. Non-numeric keys are kept as given. A
+    non-dict ``h`` yields a copy of ``defaults``. Never raises; never mutates.
+
+    A string is NOT parsed: ``"30"`` falls back like any other non-number, the
+    rule ``flow_alerts.hiro_should_push`` already applies to ``push_k``."""
+    out = dict(defaults or {})
+    if isinstance(h, dict):
+        out.update(h)
+    for key in NUMERIC_KEYS:
+        if _finite(out.get(key)) is None and key in (defaults or {}):
+            out[key] = defaults[key]
+    return out
+
+
 def classify_side(last, bid, ask) -> int:
     """+1 customer bought, -1 customer sold, 0 unclassified.
 

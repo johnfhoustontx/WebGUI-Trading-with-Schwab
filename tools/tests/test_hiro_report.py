@@ -45,6 +45,27 @@ def _quiet(n):
 
 
 # --- replay_surges ------------------------------------------------------------
+def test_load_cfg_tolerates_a_non_dict_hiro_table(monkeypatch):
+    """``hiro = 5`` in the TOML replaces the whole table; the report falls
+    back to the built-in [hiro] defaults rather than crashing on dict(5)."""
+    from services.options_svc import flow_alerts
+    monkeypatch.setattr(hr.flow_alerts, "load_thresholds", lambda: {"hiro": 5})
+    assert hr.load_cfg() == flow_alerts._DEFAULTS["hiro"]
+
+
+def test_load_cfg_coerces_numbers_like_the_live_handler(monkeypatch):
+    """The SAME coercion live applies (hiro.clean_cfg), so a string cooldown
+    replays as the default it runs at live, not as a crash."""
+    from services.options_svc import flow_alerts
+    d = flow_alerts._DEFAULTS["hiro"]
+    monkeypatch.setattr(hr.flow_alerts, "load_thresholds",
+                        lambda: {"hiro": {**d, "cooldown_min": "30", "k": math.nan,
+                                          "push_k": "4", "symbols": ["SPY"]}})
+    c = hr.load_cfg()
+    assert c["cooldown_min"] == d["cooldown_min"] and c["k"] == d["k"]
+    assert c["push_k"] == d["push_k"] and c["symbols"] == ["SPY"]
+
+
 def test_a_long_surge_fires_once_per_cooldown_not_once_per_minute():
     imp = _quiet(200)
     for i in range(100, 140):               # a 40-minute surge

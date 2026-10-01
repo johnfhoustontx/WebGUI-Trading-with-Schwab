@@ -385,7 +385,9 @@ _FLOW = ConfigFile(
                   "Off = they appear in this app only, never on the public live "
                   "screens. Turning it off later leaves alerts already published "
                   "visible there until the list resets overnight.", kind="bool"),
-            Field("hiro.symbols", "Symbols watched", "", kind="symbols"),
+            Field("hiro.symbols", "Symbols watched",
+                  "Only symbols in the GEX collection list are measured.",
+                  kind="symbols"),
             Field("hiro.window_min", "Surge window", "", kind="int", unit="min",
                   min=5, max=60, step=1),
             Field("hiro.k", "Surge at", "Multiples of the symbol's normal window size.",
@@ -412,7 +414,9 @@ _FLOW = ConfigFile(
                   kind="int", unit="min", min=0, max=1440, step=5),
             Field("hiro.keep_sessions", "Keep minute history for", "",
                   kind="int", unit="sessions", min=6, max=120, step=1),
-        )),
+        # No restart: options_svc re-reads [hiro] (mtime-cached) on every
+        # 1-minute tick -- the measurement, the rules and the purge alike.
+        ), restart=()),
     ),
 )
 

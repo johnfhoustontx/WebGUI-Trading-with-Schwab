@@ -343,6 +343,22 @@ def test_the_dividend_keys_restart_trade_and_news():
     assert set(cs.restart_for(cfg, sec, fld)) == {cs.NEWS}
 
 
+def test_every_hiro_key_needs_no_restart():
+    """options_svc re-reads [hiro] every 1-minute tick, so a saved change needs
+    no restart -- and the page must not offer one (a restart mid-session costs
+    GEX slots). The other flow_alerts.toml keys still restart options."""
+    cfg = cs.BY_NAME["flow_alerts.toml"]
+    hiro_fields = [(sec, f) for sec in cfg.sections for f in sec.fields
+                   if f.key.startswith("hiro.")]
+    assert len(hiro_fields) >= 15
+    for sec, f in hiro_fields:
+        assert tuple(cs.restart_for(cfg, sec, f)) == (), f.key
+    sec, fld = cs.locate(cfg, ("big_delta", "top_n"))
+    assert tuple(cs.restart_for(cfg, sec, fld)) == (cs.OPTIONS,)
+    _, sym = cs.locate(cfg, ("hiro", "symbols"))
+    assert "GEX collection list" in sym.help
+
+
 def test_the_dividend_retry_restarts_trade_only_and_is_bounded():
     cfg = cs.BY_NAME["news.toml"]
     sec, fld = cs.locate(cfg, ("calendar", "dividends", "retry_min"))
