@@ -2077,7 +2077,7 @@ def _run_gamma_flip(conn, cfg, bus, today, cooldowns, now_ts, universe):
     """Detect dealer gamma-regime flips (spot crossing the flip level) for the
     configured symbols and return a list of fresh alert dicts. Persists the
     per-symbol regime state; honors a per-symbol cooldown. Best-effort → []."""
-    gf = cfg.get("gamma_flip", {})
+    gf = flow_alerts.section(cfg, "gamma_flip")
     if not gf.get("enabled", True) or conn is None:
         return []
     gf_symbols = gf.get("symbols") or list(universe)

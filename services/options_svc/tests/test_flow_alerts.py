@@ -502,3 +502,37 @@ def test_hiro_money_boundaries():
     assert flow_alerts._hiro_money(999_500_000) == "$1.00B"
     assert flow_alerts._hiro_money(-2.4e9) == "-$2.40B"
     assert flow_alerts._hiro_money("x") == "$0"
+
+
+# --- A malformed section (a scalar override of a table) ---
+# flow_alerts._merge lets `big_delta = 5` in config/local replace the whole
+# [big_delta] table. Each reader then falls back to that section's BUILT-IN
+# defaults -- what _merge would have produced without the bad override -- rather
+# than raising into GEX collection or the flow-alert run.
+
+@pytest.mark.parametrize("name", ["uoa", "big_delta", "crossover", "gamma_flip", "hiro"])
+@pytest.mark.parametrize("bad", [5, "x", None, [1, 2], True])
+def test_section_falls_back_to_the_built_in_defaults(name, bad):
+    got = flow_alerts.section({name: bad}, name)
+    assert got == flow_alerts._DEFAULTS[name]
+    assert got is not flow_alerts._DEFAULTS[name]      # a copy: callers cannot mutate defaults
+
+
+def test_section_returns_a_real_table_untouched():
+    table = {"enabled": False, "k": 9.0}
+    assert flow_alerts.section({"uoa": table}, "uoa") is table
+
+
+@pytest.mark.parametrize("cfg", [None, 5, "x"])
+def test_section_of_a_malformed_whole_config_is_the_defaults(cfg):
+    assert flow_alerts.section(cfg, "big_delta") == flow_alerts._DEFAULTS["big_delta"]
+
+
+def test_detectors_survive_a_scalar_section():
+    ch = _chain(100.0, [("call", 100, "2026-08-14", 3, 0.5, 300_000)])
+    assert isinstance(flow_alerts.detect_uoa("SPY", ch, {"uoa": 5}), list)
+    assert isinstance(flow_alerts.detect_big_delta("SPY", ch, {"big_delta": 5}), list)
+    assert flow_alerts.big_delta_should_push({"pct_of_gross": 0.9}, {"big_delta": 5}) is False
+    series = [(60, 100.0, 0, 0, 100000.0, 200000.0), (120, 100.0, 0, 0, 260000.0, 200000.0)]
+    out = flow_alerts.detect_flow_alerts("SPY", series, {"crossover": 5}, {}, 120)
+    assert [a["type"] for a in out] == ["crossover"]   # ran with the built-in defaults

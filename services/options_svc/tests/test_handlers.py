@@ -3202,3 +3202,23 @@ def test_run_flow_alerts_hiro_text_failure_does_not_burn_the_cooldown(monkeypatc
     assert _hiro_alerts(bus) == []
     handlers.run_flow_alerts(bus)                       # not on a burnt cooldown
     assert len(_hiro_alerts(bus, "hiro_surge")) == 1
+
+
+def test_run_flow_alerts_malformed_gamma_flip_section_keeps_other_alerts(monkeypatch):
+    """A scalar [gamma_flip] in config/local used to raise inside run_flow_alerts'
+    outer try, silencing EVERY flow alert for the day."""
+    from services.options_svc import flow_alerts
+    bus = Bus(fake=True)
+    series = [(60, 100.0, 0, 0, 100000.0, 200000.0),
+              (120, 100.0, 0, 0, 260000.0, 200000.0)]
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["$SPX"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: series)
+    monkeypatch.setattr(handlers, "_load_spot_flip_for", lambda conn, sym: None)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 120)
+    real = flow_alerts.load_thresholds()
+    monkeypatch.setattr(handlers.flow_alerts, "load_thresholds",
+                        lambda: {**real, "gamma_flip": 5, "crossover": "x"})
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: None)
+    handlers.run_flow_alerts(bus)
+    alerts = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    assert [a["type"] for a in alerts] == ["crossover"]

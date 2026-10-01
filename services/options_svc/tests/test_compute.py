@@ -6570,3 +6570,29 @@ def test_collect_gex_snapshots_accepts_a_bare_string_hiro_symbol(monkeypatch):
                            chains={"SPY": _hchain(1000)})
     assert "SPY" in compute._HIRO_MEMO["prev"]        # measured (seeded)
     compute.reset_hiro_memo()
+
+
+@pytest.mark.parametrize("cfg", [
+    {"big_delta": 5},                                  # a scalar override of the table
+    {"big_delta": "off"},
+    {"uoa": 5},
+])
+def test_collect_gex_snapshots_survives_a_malformed_flow_section(monkeypatch, cfg):
+    """A scalar [big_delta] or [uoa] in config/local used to raise
+    AttributeError BEFORE poll_once, stopping all GEX collection."""
+    calls, n = _collect_with_hiro_cfg(monkeypatch, cfg, chains={"SPY": _hchain(1000)})
+    assert calls["poll"] is True and calls["touched"] is True
+    assert n == 3
+    compute.reset_hiro_memo()
+
+
+@pytest.mark.parametrize("enabled, runs", [(True, True), (False, False),
+                                           ("false", False), ("true", False)])
+def test_big_delta_runs_only_when_enabled_is_literally_true(monkeypatch, enabled, runs):
+    """Fail closed: a hand-typed string never switches the detector on."""
+    seen = []
+    monkeypatch.setattr(compute, "stash_big_delta", lambda sym, c: seen.append(sym))
+    _collect_with_hiro_cfg(monkeypatch, {"big_delta": {"enabled": enabled}},
+                           chains={"SPY": _hchain(1000)})
+    assert bool(seen) is runs
+    compute.reset_hiro_memo()

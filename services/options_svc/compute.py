@@ -4959,7 +4959,11 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         _uoa_on = _uoa_cfg.get("enabled", True)
         # big_delta has its OWN enabled flag (independent of the top-level UOA
         # switch above) — the whole detector is inert when [big_delta].enabled=false.
-        _big_delta_on = _uoa_cfg.get("big_delta", {}).get("enabled", True)
+        # Read through flow_alerts.section and required to be literally True: a
+        # scalar `big_delta = 5` in config/local used to raise HERE, before
+        # poll_once, stopping all GEX collection; a hand-typed "false" switched
+        # the detector ON. Both now fail safe.
+        _big_delta_on = flow_alerts.section(_uoa_cfg, "big_delta").get("enabled") is True
         # HIRO model (docs/plans/2026-10-01-hiro-alert-design.md): REGULAR
         # session only -- off-hours the chain's underlyingPrice can be stale and
         # index OI reads zero. Measured in on_chain (no extra fetch); the rows

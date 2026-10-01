@@ -86,6 +86,23 @@ def load_thresholds() -> dict:
     return cfg
 
 
+def section(cfg, name) -> dict:
+    """``cfg[name]`` when it is a table, else a COPY of that section's built-in
+    defaults. Never raises.
+
+    ``_merge`` lets a scalar override replace a whole table (``big_delta = 5``
+    in config/local), and every reader used to do ``cfg.get(name, {}).get(...)``
+    -- which raised before ``poll_once`` (stopping all GEX collection) or inside
+    ``run_flow_alerts`` (silencing every flow alert for the day). Falling back
+    to the defaults is exactly what ``_merge`` would have produced without the
+    bad override. Settings -> Configuration writes typed values, so this only
+    ever meets a hand edit."""
+    got = cfg.get(name) if isinstance(cfg, dict) else None
+    if isinstance(got, dict):
+        return got
+    return _merge(_DEFAULTS.get(name, {}), {})
+
+
 def big_delta_should_push(alert, cfg) -> bool:
     """Whether a big_delta alert should be PUSHED to the phone (vs screen-only).
 
@@ -95,10 +112,12 @@ def big_delta_should_push(alert, cfg) -> bool:
     comprehensive while the phone sees only the high-conviction ones. Requires
     ``push=true``. Defensive: push off, a non-big_delta alert, or a missing/invalid
     share → no push (never raises)."""
-    b = (cfg or {}).get("big_delta", {}) if isinstance(cfg, dict) else {}
+    b = section(cfg, "big_delta")
     if not b.get("push", False):
         return False
-    thr = b.get("push_threshold", 0.35)
+    thr = b.get("push_threshold")
+    if not _is_finite_number(thr):
+        thr = _DEFAULTS["big_delta"]["push_threshold"]
     p = (alert or {}).get("pct_of_gross") if isinstance(alert, dict) else None
     return isinstance(p, (int, float)) and not isinstance(p, bool) and float(p) >= thr
 
@@ -201,7 +220,7 @@ def detect_uoa(symbol, chain, cfg):
     Qualify a contract when volume/open-interest >= k AND volume >= vol_floor AND
     premium ($ = mark*vol*100) >= premium_floor; skip oi <= 0 (ratio undefined).
     Return the top_n qualifiers by premium (desc). Pure + defensive → []."""
-    u = (cfg or {}).get("uoa", {})
+    u = section(cfg, "uoa")
     k = u.get("k", 3.0); vol_floor = u.get("vol_floor", 500)
     prem_floor = u.get("premium_floor", 250000); top_n = u.get("top_n", 3)
     out = []
@@ -248,7 +267,7 @@ def detect_uoa(symbol, chain, cfg):
 def detect_big_delta(symbol, chain, cfg):
     """Relative delta-notional flow: a contract carrying >= rel_threshold of its symbol's OWN
     gross delta-notional AND >= min_contract_notional absolute. Pure + defensive → []."""
-    b = (cfg or {}).get("big_delta", {})
+    b = section(cfg, "big_delta")
     rel = b.get("rel_threshold", 0.20)
     floor = b.get("min_contract_notional", 10_000_000)
     lo = b.get("delta_lo", 0.05)
@@ -385,7 +404,7 @@ def detect_flow_alerts(symbol, series, cfg, cooldowns, now_ts):
     """Run both detectors for one symbol, honoring the cooldown map (mutated in place;
     the caller persists it). Returns a list of alert dicts (each with symbol + id)."""
     out = []
-    xo = cfg.get("crossover", {})
+    xo = section(cfg, "crossover")
     norm_rows = _norm(series)   # normalize ONCE
 
     a = _crossover_rows(norm_rows, band=xo.get("band", 0.02),
