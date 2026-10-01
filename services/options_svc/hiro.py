@@ -172,7 +172,11 @@ def baseline_sigma(prior_sessions, today_rows, cfg):
     window = int(cfg["window_min"]) * 60
     need = int(cfg["baseline_sessions"])
     if len(prior_sessions) >= need:
-        return rms([v for s in prior_sessions[:need] for v in full_window_sums(s, window)])
+        sigma = rms([v for s in prior_sessions[:need] for v in full_window_sums(s, window)])
+        if sigma is not None:
+            return sigma
+        # Prior sessions with no usable full window (a broken collection day,
+        # or all-NaN rows) fall through to today rather than silencing the day.
     if len(today_rows) >= int(cfg["min_minutes"]):
         return rms(full_window_sums(today_rows, window))
     return None
@@ -180,7 +184,11 @@ def baseline_sigma(prior_sessions, today_rows, cfg):
 
 def detect_surge(symbol, today_rows, sigma, cfg):
     """A ``hiro_surge`` alert dict for the window ending at the latest row, or
-    None. No cooldown here — the handler owns that, as for every flow detector."""
+    None. No cooldown here — the handler owns that, as for every flow detector.
+
+    A non-finite window or sigma never fires: NaN fails every comparison, so
+    unguarded it would pass the floor and the multiple both."""
+    sigma = _finite(sigma)
     if not today_rows or sigma is None or sigma <= 0:
         return None
     last = today_rows[-1]
@@ -189,7 +197,7 @@ def detect_surge(symbol, today_rows, sigma, cfg):
     if share is None or share > cfg["max_unclassified"]:
         return None
     imp = w["impact"]
-    if abs(imp) < cfg["min_notional"]:
+    if not math.isfinite(imp) or abs(imp) < cfg["min_notional"]:
         return None
     mult = abs(imp) / sigma
     if mult < cfg["k"]:
@@ -233,10 +241,16 @@ def flip_transitions(rows, band, not_before_ts):
     The running total counts from the session's FIRST row; only the evaluation
     waits for ``not_before_ts``. The first state reached is the baseline and is
     not a transition. Hysteresis: a state changes only when the total clears zero
-    by ``band`` on the other side."""
+    by ``band`` on the other side.
+
+    A non-finite minute is skipped: added, it would make the total NaN for the
+    rest of the day, every later comparison False, and the state frozen."""
     out, state, cum = [], None, 0.0
     for r in rows:
-        cum += r["impact"]
+        imp = _finite(r["impact"])
+        if imp is None:
+            continue
+        cum += imp
         if r["ts"] < not_before_ts:
             continue
         new = _state(cum, state, band)
@@ -254,6 +268,7 @@ def detect_flip(symbol, rows, sigma, cfg, not_before_ts, seen_ts):
     Stateless: replays today's rows every tick. Fires only for a transition
     newer than ``seen_ts`` AND at most FLIP_MAX_AGE_SEC old, so a restart cannot
     fire an old flip and an intraday-moving sigma cannot surface one."""
+    sigma = _finite(sigma)
     if not rows or sigma is None or sigma <= 0:
         return None
     t = flip_transitions(rows, float(cfg["flip_band"]) * sigma, not_before_ts)
@@ -270,11 +285,17 @@ def detect_flip(symbol, rows, sigma, cfg, not_before_ts, seen_ts):
 
 
 def symbol_view(rows, sigma, cfg):
-    """The small per-symbol summary published to cache:options:hiro."""
+    """The small per-symbol summary published to cache:options:hiro.
+
+    A non-finite figure is published as None, never as a number: a NaN in the
+    view would read as a reading on screen."""
     last = rows[-1]
     w = window_sum(rows, last["ts"], int(cfg["window_min"]) * 60)
-    return {"ts": last["ts"], "spot": last["spot"], "impact": last["impact"],
-            "cum": sum(r["impact"] for r in rows), "window_impact": w["impact"],
-            "sigma": sigma,
-            "mult": (abs(w["impact"]) / sigma) if sigma else None,
+    window_impact = _finite(w["impact"])
+    sigma = _finite(sigma)
+    mult = (_finite(abs(window_impact) / sigma)
+            if window_impact is not None and sigma is not None and sigma > 0 else None)
+    return {"ts": last["ts"], "spot": last["spot"], "impact": _finite(last["impact"]),
+            "cum": _finite(sum(r["impact"] for r in rows)),
+            "window_impact": window_impact, "sigma": sigma, "mult": mult,
             "unclassified_share": w["unclassified_share"]}

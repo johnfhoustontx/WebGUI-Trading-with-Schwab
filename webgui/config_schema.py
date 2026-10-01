@@ -399,7 +399,7 @@ _FLOW = ConfigFile(
                   kind="int", unit="min", min=15, max=390, step=5),
             Field("hiro.flip_enabled", "Reversal alerts on", "", kind="bool"),
             Field("hiro.flip_band", "Reversal dead zone", "Multiples of normal window size.",
-                  kind="float", unit="× normal", min=0, max=10, step=0.25),
+                  kind="float", unit="× normal", min=0.25, max=10, step=0.25),
             Field("hiro.flip_not_before", "No reversals before", "Central time.",
                   kind="time"),
             Field("hiro.flip_cooldown_min", "Reversal quiet period", "",

@@ -222,9 +222,31 @@ def test_baseline_partial_prior_history_is_not_mixed_in():
     assert hiro.baseline_sigma(prior, _rows([1e6] * 30), CFG) == pytest.approx(15e6)
 
 
-def test_baseline_prior_sessions_with_no_full_window_is_none():
+def test_baseline_prior_sessions_with_no_full_window_falls_back_to_today():
     prior = [_rows([1e6] * 5), _rows([1e6] * 5)]       # each shorter than a window
-    assert hiro.baseline_sigma(prior, _rows([1e6] * 40), CFG) is None
+    assert hiro.baseline_sigma(prior, _rows([1e6] * 30), CFG) == pytest.approx(15e6)
+
+
+def test_baseline_prior_sessions_with_no_full_window_and_short_today_is_none():
+    prior = [_rows([1e6] * 5), _rows([1e6] * 5)]
+    assert hiro.baseline_sigma(prior, _rows([1e6] * 29), CFG) is None
+
+
+def test_baseline_nan_row_drops_its_windows_never_poisons_sigma():
+    """A NaN minute makes every window containing it NaN; rms drops those
+    windows, so sigma comes from the clean ones rather than reading NaN."""
+    bad = _rows([1e6] * 20)
+    bad[19]["impact"] = math.nan                       # only the LAST window holds it
+    assert math.isnan(hiro.window_sum(bad, bad[19]["ts"], 900)["impact"])
+    sums = hiro.full_window_sums(bad, 900)
+    assert sum(1 for s in sums if math.isnan(s)) == 1
+    sigma = hiro.baseline_sigma([bad, _rows([-1e6] * 20)], [], CFG)
+    assert sigma == pytest.approx(15e6)
+
+
+def test_baseline_all_nan_prior_falls_back_to_today():
+    prior = [_rows([math.nan] * 20), _rows([math.nan] * 20)]
+    assert hiro.baseline_sigma(prior, _rows([1e6] * 30), CFG) == pytest.approx(15e6)
 
 
 def test_surge_fires_dealers_buying_above_k():
@@ -248,6 +270,18 @@ def test_surge_silent_below_k_below_floor_unlabelled_or_no_sigma():
     assert hiro.detect_surge("SPY", _rows([4e6] * 15, uncl=20.0), 15e6, CFG) is None
     assert hiro.detect_surge("SPY", _rows([4e6] * 15), None, CFG) is None
     assert hiro.detect_surge("SPY", [], 15e6, CFG) is None
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
+def test_surge_never_fires_on_a_non_finite_window(bad):
+    rows = _rows([4e6] * 15)
+    rows[7]["impact"] = bad
+    assert hiro.detect_surge("SPY", rows, 15e6, CFG) is None
+
+
+@pytest.mark.parametrize("sigma", [math.nan, math.inf, 0.0, -1.0])
+def test_surge_refuses_unusable_sigma(sigma):
+    assert hiro.detect_surge("SPY", _rows([4e6] * 15), sigma, CFG) is None
 
 
 # --- Flip (reversal) ---------------------------------------------------------
@@ -292,6 +326,22 @@ def test_detect_flip_needs_sigma():
     assert hiro.detect_flip("SPY", _rows([10, -30]), None, CFG, 0, None) is None
 
 
+@pytest.mark.parametrize("sigma", [math.nan, math.inf, 0.0, -5.0])
+def test_detect_flip_refuses_unusable_sigma(sigma):
+    assert hiro.detect_flip("SPY", _rows([10, -30]), sigma, CFG, 0, None) is None
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
+def test_flip_transitions_skip_a_non_finite_minute(bad):
+    """A NaN total would make every later comparison False and freeze the state
+    for the rest of the day; the bad minute is skipped instead."""
+    rows = _rows([10, bad, -30])                       # cum 10 -> (skip) -> -20
+    t = hiro.flip_transitions(rows, band=5.0, not_before_ts=rows[0]["ts"])
+    assert t == [(rows[2]["ts"], "selling", -20.0)]
+    a = hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None)
+    assert a["side"] == "to_selling" and a["cum"] == -20.0
+
+
 def test_detect_flip_to_buying_mirror():
     rows = _rows([-10, 30])                           # cum -10 -> +20
     a = hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None)
@@ -323,3 +373,19 @@ def test_symbol_view_summarises_latest_minute():
                  "window_impact": 15e6, "sigma": 5e6, "mult": pytest.approx(3.0),
                  "unclassified_share": 0.0}
     assert hiro.symbol_view(rows, None, CFG)["mult"] is None
+
+
+def test_symbol_view_non_finite_reads_as_none_never_a_number():
+    rows = _rows([1e6] * 15)
+    rows[14]["impact"] = math.nan                      # the latest minute, in the window
+    v = hiro.symbol_view(rows, 5e6, CFG)
+    assert v["impact"] is None and v["cum"] is None
+    assert v["window_impact"] is None and v["mult"] is None
+    assert v["ts"] == rows[-1]["ts"] and v["spot"] == 500.0
+
+
+@pytest.mark.parametrize("sigma", [math.nan, math.inf])
+def test_symbol_view_non_finite_sigma_gives_no_mult(sigma):
+    v = hiro.symbol_view(_rows([1e6] * 15), sigma, CFG)
+    assert v["mult"] is None and v["sigma"] is None
+    assert v["window_impact"] == 15e6

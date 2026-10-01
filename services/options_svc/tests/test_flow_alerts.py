@@ -1,3 +1,5 @@
+import pytest
+
 from services.options_svc import flow_alerts
 
 
@@ -468,6 +470,13 @@ def test_hiro_should_push_gates():
 def test_hiro_should_push_malformed_cfg_is_false():
     assert flow_alerts.hiro_should_push({**_HS, "mult": 9.0}, None) is False
     assert flow_alerts.hiro_should_push({**_HS, "mult": 9.0}, {"hiro": 5}) is False
+
+
+@pytest.mark.parametrize("push_k", ["4", None, float("nan"), float("inf"), True, [4]])
+def test_hiro_should_push_bad_push_k_falls_back_to_4(push_k):
+    cfg = {"hiro": {"push": True, "push_k": push_k}}
+    assert flow_alerts.hiro_should_push({**_HS, "mult": 4.0}, cfg) is True
+    assert flow_alerts.hiro_should_push({**_HS, "mult": 3.9}, cfg) is False
 
 
 def test_hiro_money_boundaries():

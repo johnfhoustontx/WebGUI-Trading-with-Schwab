@@ -4,6 +4,7 @@ Operates on a symbol's day flow series (list of (ts, spot, call_vol, put_vol,
 call_prem, put_prem) tuples from gex_history_db.load_flow_series) and a cooldown
 map. No I/O, no push — the handler wires those. See the design doc."""
 import logging
+import math
 import tomllib
 
 from repo_paths import FLOW_ALERTS_TOML
@@ -118,8 +119,17 @@ def hiro_should_push(alert, cfg) -> bool:
     if t != "hiro_surge":
         return False
     m = alert.get("mult")
-    return (isinstance(m, (int, float)) and not isinstance(m, bool)
-            and m == m and float(m) >= h.get("push_k", 4.0))
+    k = h.get("push_k", 4.0)
+    if not _is_finite_number(k):            # "4", None, NaN, a bool -> the default
+        k = 4.0
+    return _is_finite_number(m) and float(m) >= float(k)
+
+
+def _is_finite_number(v) -> bool:
+    """A real finite int/float (rejects bool, NaN, inf, strings, None). Local on
+    purpose: flow_alerts stays free of the hiro module."""
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and math.isfinite(v))
 
 
 def _norm(series):
