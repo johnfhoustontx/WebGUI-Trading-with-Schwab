@@ -106,9 +106,18 @@ def test_measure_zero_delta_is_labelled_with_no_impact(delta):
     assert row["classified_vol"] == 20.0 and row["unclassified_vol"] == 0.0
 
 
-def test_measure_volume_reset_books_nothing():
+def test_measure_volume_drop_books_nothing_and_keeps_high_water():
     row, prev = hiro.measure_chain(_chain(calls=[_c("C1", 5, 0.5, 1.10)]), {"C1": 1000.0})
-    assert row["impact"] == 0.0 and prev["C1"] == 5.0
+    assert row["impact"] == 0.0 and prev["C1"] == 1000.0
+
+
+def test_measure_volume_glitch_does_not_book_the_day_into_the_next_minute():
+    """A one-off totalVolume=0 read must not reset the baseline: the next real
+    read then books only the true increment, not the contract's whole day."""
+    _, prev = hiro.measure_chain(_chain(calls=[_c("C1", 0, 0.5, 1.10)]), {"C1": 1000.0})
+    row, prev = hiro.measure_chain(_chain(calls=[_c("C1", 1010, 0.5, 1.10)]), prev)
+    assert row["classified_vol"] == 10.0
+    assert prev["C1"] == 1010.0
 
 
 @pytest.mark.parametrize("spot", [None, 0, -1, math.nan])

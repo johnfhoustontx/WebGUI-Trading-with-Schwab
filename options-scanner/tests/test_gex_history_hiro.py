@@ -33,13 +33,21 @@ def test_hiro_insert_and_load_day_roundtrip(tmp_path):
     assert gh.load_hiro_day(conn, "QQQ", d) == []
 
 
-def test_hiro_insert_same_minute_replaces(tmp_path):
+def test_hiro_insert_same_minute_accumulates(tmp_path):
+    """Flow, not state: two ticks can share a minute, and the memo has already
+    advanced past the first, so REPLACE would lose its volume for good."""
     conn = _conn(tmp_path)
     d = dt.date(2026, 10, 1)
     row = {"spot": 1.0, "impact": 1.0, "classified_vol": 1.0, "unclassified_vol": 0.0}
     gh.insert_hiro_row(conn, "SPY", _ts(d, 9, 0), row)
-    gh.insert_hiro_row(conn, "SPY", _ts(d, 9, 0), {**row, "impact": 2.0})
-    assert [r["impact"] for r in gh.load_hiro_day(conn, "SPY", d)] == [2.0]
+    gh.insert_hiro_row(conn, "SPY", _ts(d, 9, 0),
+                       {**row, "spot": 2.0, "impact": 2.0, "classified_vol": 3.0,
+                        "unclassified_vol": 4.0})
+    got = gh.load_hiro_day(conn, "SPY", d)
+    assert [r["impact"] for r in got] == [3.0]
+    assert [r["classified_vol"] for r in got] == [4.0]
+    assert [r["unclassified_vol"] for r in got] == [4.0]
+    assert [r["spot"] for r in got] == [2.0]            # spot is state: the latest wins
 
 
 def test_hiro_prior_sessions_newest_first_and_excludes_today(tmp_path):

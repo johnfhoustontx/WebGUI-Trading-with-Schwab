@@ -77,6 +77,11 @@ def measure_chain(chain, prev_vol):
     A contract's FIRST reading only seeds the baseline: after a restart it must
     never book the whole day's volume into one minute.
 
+    The stored baseline is a HIGH-WATER mark (``max(vol, before)``): volume
+    never falls within a session, so a one-off glitch read of 0 books nothing
+    and cannot re-book the day later. A legitimate daily reset is unaffected --
+    the caller clears ``prev_vol`` when the session date changes.
+
     Volume that cannot be turned into impact -- no buy/sell label, an unusable
     delta, or a delta of the wrong sign for its right -- is counted as
     ``unclassified_vol``, so the window never looks better measured than it was.
@@ -94,9 +99,13 @@ def measure_chain(chain, prev_vol):
         if not osi or vol is None:
             continue
         before = new_prev.get(osi)
-        new_prev[osi] = vol
         if before is None:
+            new_prev[osi] = vol
             continue
+        # High-water mark: cumulative volume never falls within a session, so a
+        # glitch read (totalVolume = 0) must not reset the baseline and book the
+        # contract's whole day into the next minute.
+        new_prev[osi] = max(vol, before)
         dv = vol - before
         if dv <= 0:
             continue

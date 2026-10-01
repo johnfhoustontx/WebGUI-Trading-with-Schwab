@@ -324,7 +324,11 @@ def insert_hiro_rows(conn: sqlite3.Connection, items) -> None:
     """Many minutes of HIRO-model hedge impact (services/options_svc/hiro.py)
     in ONE commit. ``items`` is an iterable of ``(symbol, ts, row)``.
 
-    INSERT OR REPLACE: a re-run of the same minute overwrites, never doubles.
+    A row for a minute already stored ACCUMULATES: impact and both volume
+    columns are added, spot takes the latest value. These are FLOWS -- two ticks
+    can share a minute (one starting at X:59.9, the next at X+1:30), and the
+    caller's volume memo has already advanced past the first, so replacing
+    would lose its volume for good. (UPSERT needs SQLite 3.24+.)
     A missing or non-finite impact / classified_vol / unclassified_vol RAISES
     (KeyError / TypeError / ValueError) before anything is written, and the
     caller degrades. It is checked here because SQLite would store an infinity
@@ -332,9 +336,14 @@ def insert_hiro_rows(conn: sqlite3.Connection, items) -> None:
     A None spot is stored NULL."""
     params = [_hiro_params(symbol, ts, row) for symbol, ts, row in items]
     conn.executemany(
-        "INSERT OR REPLACE INTO hiro_minutes "
+        "INSERT INTO hiro_minutes "
         "(symbol, ts, spot, impact, classified_vol, unclassified_vol) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(symbol, ts) DO UPDATE SET "
+        "impact = impact + excluded.impact, "
+        "classified_vol = classified_vol + excluded.classified_vol, "
+        "unclassified_vol = unclassified_vol + excluded.unclassified_vol, "
+        "spot = excluded.spot",
         params)
     conn.commit()
 
