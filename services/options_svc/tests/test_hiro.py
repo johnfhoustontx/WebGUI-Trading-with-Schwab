@@ -439,3 +439,25 @@ def test_symbol_view_non_finite_sigma_gives_no_mult(sigma):
     v = hiro.symbol_view(_rows([1e6] * 15), sigma, CFG)
     assert v["mult"] is None and v["sigma"] is None
     assert v["window_impact"] == 15e6
+
+
+# --- prior_sigma: the prior-session half of baseline_sigma, memoizable per day --
+
+def test_prior_sigma_is_the_rms_of_the_newest_prior_sessions():
+    prior = [_rows([1e6] * 20), _rows([-1e6] * 20), _rows([9e9] * 20)]  # newest first
+    assert hiro.prior_sigma(prior, CFG) == pytest.approx(15e6)        # oldest excluded
+
+
+def test_prior_sigma_none_with_too_few_sessions():
+    assert hiro.prior_sigma([_rows([1e6] * 20)], CFG) is None
+    assert hiro.prior_sigma([], CFG) is None
+
+
+def test_prior_sigma_none_without_a_full_window():
+    assert hiro.prior_sigma([_rows([1e6] * 5), _rows([1e6] * 5)], CFG) is None
+    assert hiro.prior_sigma([_rows([math.nan] * 20), _rows([math.nan] * 20)], CFG) is None
+
+
+def test_baseline_sigma_agrees_with_prior_sigma_when_prior_exists():
+    prior = [_rows([2e6] * 20), _rows([-1e6] * 20)]
+    assert hiro.baseline_sigma(prior, _rows([9e9] * 40), CFG) == hiro.prior_sigma(prior, CFG)

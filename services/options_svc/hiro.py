@@ -165,18 +165,28 @@ def rms(values):
     return s if s > 0 else None
 
 
+def prior_sigma(prior_sessions, cfg):
+    """The prior-session half of ``baseline_sigma``: the RMS of the full-window
+    sums over the newest ``baseline_sessions`` sessions (newest first), or None
+    when there are fewer sessions than that or no usable full window. It cannot
+    change within a day, which is what lets the handler memoize it."""
+    window = int(cfg["window_min"]) * 60
+    need = int(cfg["baseline_sessions"])
+    if len(prior_sessions) < need:
+        return None
+    return rms([v for s in prior_sessions[:need] for v in full_window_sums(s, window)])
+
+
 def baseline_sigma(prior_sessions, today_rows, cfg):
     """A symbol's normal 15-minute size. Prior sessions (newest first) when at
     least ``baseline_sessions`` exist; else today's full windows once there are
     ``min_minutes`` rows; else None (the rules do not run)."""
+    sigma = prior_sigma(prior_sessions, cfg)
+    if sigma is not None:
+        return sigma
+    # Prior sessions with no usable full window (a broken collection day, or
+    # all-NaN rows) fall through to today rather than silencing the day.
     window = int(cfg["window_min"]) * 60
-    need = int(cfg["baseline_sessions"])
-    if len(prior_sessions) >= need:
-        sigma = rms([v for s in prior_sessions[:need] for v in full_window_sums(s, window)])
-        if sigma is not None:
-            return sigma
-        # Prior sessions with no usable full window (a broken collection day,
-        # or all-NaN rows) fall through to today rather than silencing the day.
     if len(today_rows) >= int(cfg["min_minutes"]):
         return rms(full_window_sums(today_rows, window))
     return None
