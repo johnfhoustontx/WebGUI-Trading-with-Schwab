@@ -877,9 +877,9 @@ def _hiro_report_units():
     **Persistent=true -- and, unlike flow-delta, a missed day is not lost.** The
     minutes stay in hiro_minutes for [hiro].keep_sessions sessions, and with no
     `--date` the tool reports the newest CLOSED session (today after the close,
-    else the previous trading day), so a catch-up run at boot the next morning
-    still reports the day it missed. A weekend boot skips (the gate); any day
-    can be re-run by hand with `--date`.
+    else the previous trading day -- on a weekend or holiday too), so a catch-up
+    run at boot the next morning, or after a weekend, still reports the day it
+    missed. Any day can be re-run by hand with `--date`.
 
     **EnvironmentFile only by convention.** The tool reads no secret, no Redis
     and no proxy, so it needs nothing from .env; it carries the line because
@@ -915,9 +915,9 @@ Description=NeuralStrike {ENV_NAME} - HIRO-model validation report timer
 
 [Timer]
 # Derived from [slots.hiro_report] in config/sessions.toml.
-# Mon..Fri excludes weekends only. Holidays are NOT filtered here and do not need
-# to be: hiro_report.main() gates on shared.market_calendar.is_trading_day and
-# exits 0, so a firing is not a run.
+# Mon..Fri excludes weekends only. A holiday firing is harmless: with no --date
+# the tool reports the newest closed session, so it rewrites the previous
+# trading day's report from the same stored minutes.
 OnCalendar=Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00
 # Persistent=true: the minutes are stored, so a catch-up run still has its day
 # to read (and any other day can be re-run with --date).

@@ -290,9 +290,17 @@ def test_a_morning_catch_up_reports_the_session_it_missed():
     assert hr.default_day(_ct("2026-10-05", "07:00")) == _dt.date(2026, 10, 2)  # Monday
 
 
-def test_a_non_trading_day_stays_itself_so_the_gate_can_skip_it():
+def test_a_non_trading_day_reports_the_last_trading_day():
+    """A weekend or holiday catch-up run reports the session it missed."""
     import datetime as _dt
-    assert hr.default_day(_ct("2026-10-03", "16:10")) == _dt.date(2026, 10, 3)
+    assert hr.default_day(_ct("2026-10-03", "16:10")) == _dt.date(2026, 10, 2)  # Saturday
+    assert hr.default_day(_ct("2026-10-04", "09:00")) == _dt.date(2026, 10, 2)  # Sunday
+
+
+def test_the_default_day_turns_over_at_the_close():
+    import datetime as _dt
+    assert hr.default_day(_ct(DAY, "14:59")) == _dt.date(2026, 9, 29)
+    assert hr.default_day(_ct(DAY, "15:01")) == _dt.date(2026, 9, 30)
 
 
 # --- main ---------------------------------------------------------------------------
@@ -352,3 +360,175 @@ def test_main_survives_one_symbols_bad_data(tmp_path, monkeypatch):
     text = (out / DAY / "report.md").read_text(encoding="utf-8")
     assert "corrupt minute" in text
     assert "## SPY" in text and "no minutes stored" not in text.split("## SPY", 1)[1]
+
+
+def test_main_fails_when_every_symbol_errored(tmp_path, monkeypatch):
+    _seed_db(tmp_path / "gex_history.db", monkeypatch)
+    monkeypatch.setattr(hr, "load_cfg", lambda: CFG)
+
+    def broken(conn, symbol, d=None):
+        raise ValueError("corrupt minute")
+
+    monkeypatch.setattr(hr.gh, "load_hiro_day", broken)
+    out = tmp_path / "reports"
+    assert hr.main(["--date", DAY, "--force", "--out", str(out)]) == 1
+    assert (out / DAY / "report.md").is_file()
+
+
+def test_main_fails_loudly_when_a_trading_day_has_no_minutes_at_all(
+        tmp_path, monkeypatch, capsys):
+    """Every symbol empty on a trading day is a dead collector, not a quiet day."""
+    _seed_db(tmp_path / "gex_history.db", monkeypatch)
+    monkeypatch.setattr(hr, "load_cfg", lambda: {**CFG, "symbols": ["QQQ", "IWM"]})
+    out = tmp_path / "reports"
+    assert hr.main(["--date", DAY, "--out", str(out)]) == 1
+    text = (out / DAY / "report.md").read_text(encoding="utf-8")
+    assert "collector" in text.lower()
+    assert "collector" in capsys.readouterr().err.lower()
+
+
+def test_some_empty_symbols_are_not_a_failure(tmp_path, monkeypatch):
+    _seed_db(tmp_path / "gex_history.db", monkeypatch)
+    monkeypatch.setattr(hr, "load_cfg", lambda: {**CFG, "symbols": ["SPY", "QQQ"]})
+    assert hr.main(["--date", DAY, "--out", str(tmp_path / "r")]) == 0
+
+
+def test_a_malformed_flip_not_before_skips_reversals_but_reports_surges(
+        tmp_path, monkeypatch):
+    _seed_db(tmp_path / "gex_history.db", monkeypatch)
+    monkeypatch.setattr(hr, "load_cfg", lambda: {**CFG, "flip_not_before": "nine"})
+    out = tmp_path / "reports"
+    assert hr.main(["--date", DAY, "--out", str(out)]) == 0
+    text = (out / DAY / "report.md").read_text(encoding="utf-8")
+    assert "flip_not_before" in text
+    assert "3.0 (live)" in text
+
+
+def test_k_and_horizons_parse_as_lists():
+    a = hr.parse_args(["--k", "2,3.5", "--horizons", "5,30"])
+    assert a.k == [2.0, 3.5] and a.horizons == [5, 30]
+    b = hr.parse_args([])
+    assert b.k is None and b.horizons is None
+
+
+# --- base rate, direction, ties -----------------------------------------------------
+def test_the_base_rate_counts_every_minute_with_the_same_slack_rule():
+    spots = [100.0, 101.0, 101.0, 100.0, 99.0, 99.0, 99.0]
+    rows = _rows(_quiet(7), spots)
+    b = hr.base_counts(rows, [1])
+    # moves after each minute: +, 0, -, -, 0, 0, (none: session over)
+    assert b[1] == {"up": 1, "down": 2, "flat": 3}
+    gap = _rows(_quiet(3), [100.0, 101.0, 102.0]) + _rows(
+        _quiet(2), [90.0, 80.0], t0=T0 + 60 * 60)
+    assert sum(hr.base_counts(gap, [1])[1].values()) == 3    # no move across the gap
+
+
+def test_hits_are_per_direction_and_ties_are_counted_apart():
+    fires = [{"side": "dealers_buying", "fwd": {5: 0.01}},
+             {"side": "dealers_buying", "fwd": {5: 0.0}},
+             {"side": "dealers_buying", "fwd": {5: -0.02}},
+             {"side": "dealers_selling", "fwd": {5: 0.03}},
+             {"side": "dealers_buying", "fwd": {5: None}}]
+    t = hr.tally(fires, "dealers_buying", 5)
+    assert (t["hits"], t["n"], t["flat"]) == (1, 2, 1)
+    s = hr.tally(fires, "dealers_selling", 5)
+    assert (s["hits"], s["n"], s["flat"]) == (1, 1, 0)
+
+
+def test_hits_read_k_of_n_and_a_percentage_only_from_ten():
+    assert hr.k_of_n(3, 7) == "3 of 7"
+    assert hr.k_of_n(6, 10) == "6 of 10 (60%)"
+    assert hr.k_of_n(0, 0) == "—"
+
+
+def test_the_report_names_hit_rate_and_base_rate():
+    text = hr.build_report(DAY, _summaries(), CFG)
+    assert "Hit rate" in text and "base rate" in text
+    assert "flat" in text
+
+
+def test_a_sigma_less_symbol_shows_dashes_for_its_fires():
+    text = hr.build_report(DAY, _summaries(), CFG)
+    spy = text.split("## SPY", 1)[1].split("## QQQ", 1)[0]
+    fires = [ln for ln in spy.splitlines() if ln.startswith("| 3.0 (live)")]
+    assert fires and fires[0].rstrip().endswith("| — |")
+
+
+def test_negative_money_and_the_reversal_size_are_unambiguous():
+    assert hr._money(-250.6e6) == "-$250.6M"
+    rows = _rows(_quiet(30))
+    flip = {"type": "hiro_flip", "side": "to_selling", "ts": T0, "spot": 100.0,
+            "cum": -250.6e6}
+    assert hr.event_row(flip, rows, [5])["size"] == "day net -$250.6M"
+    surge = {"type": "hiro_surge", "side": "dealers_buying", "ts": T0,
+             "spot": 100.0, "mult": 3.26}
+    assert hr.event_row(surge, rows, [5])["size"] == "3.3× normal"
+
+
+def test_reversals_are_labelled_off_live_when_flips_are_disabled():
+    cfg = {**CFG, "flip_enabled": False}
+    prior = [_noisy(60, 1), _noisy(60, 2)]
+    s = hr.symbol_summary(_noisy(60, 3), prior, cfg, [3.0], [5], hiro.ct_ts(DAY, "09:00"))
+    text = hr.build_report(DAY, {"SPY": s}, cfg)
+    assert "Reversals (off live)" in text
+
+
+# --- today's sigma, as live had it ----------------------------------------------------
+def test_live_sigmas_equal_baseline_sigma_on_every_prefix():
+    rows = _noisy(60, 5)
+    got = hr.live_sigmas(rows, CFG)
+    for i in range(len(rows)):
+        want = hiro.baseline_sigma([], rows[:i + 1], CFG)
+        if want is None:
+            assert got[i] is None, i
+        else:
+            assert math.isclose(got[i], want), i
+
+
+def test_a_today_sourced_day_cannot_fire_before_min_minutes():
+    """No look-ahead: the end-of-day size would let an early surge through,
+    but live had no size at all before min_minutes rows."""
+    imp = _quiet(390)
+    for i in range(16, 21):
+        imp[i] = 3e6
+    rows = _rows(imp)
+    s = hr.symbol_summary(rows, [], CFG, [3.0], [5], hiro.ct_ts(DAY, "09:00"))
+    assert s["sigma_source"] == "today"
+    assert all(f["ts"] >= rows[CFG["min_minutes"] - 1]["ts"] for f in s["surges"])
+    final = hr.replay_surges(rows, s["sigma"], CFG, 3.0)
+    assert any(f["ts"] < rows[CFG["min_minutes"] - 1]["ts"] for f in final)
+
+
+# --- the pooled sessions --------------------------------------------------------------
+def test_each_prior_day_takes_the_sigma_live_had_that_day():
+    hist = [_noisy(60, 11), _noisy(60, 12), _noisy(60, 13)]     # newest first
+    cfg = {**CFG, "keep_sessions": 3}
+    days = hr.session_summaries(_noisy(60, 10), hist, cfg, [3.0], [5],
+                                lambda rows: rows[0]["ts"])
+    assert len(days) == 3
+    assert days[0]["sigma_source"] == "prior"
+    assert math.isclose(days[0]["sigma"], hiro.prior_sigma(hist[:2], cfg))
+    assert math.isclose(days[1]["sigma"], hiro.prior_sigma(hist[1:3], cfg))
+    assert days[2]["sigma_source"] == "today"            # only one older session
+
+
+def test_pooling_keeps_surges_and_reversals_apart_and_sums_the_base_rate():
+    a = {"surges": [{"side": "dealers_buying", "fwd": {5: 0.01}}],
+         "reversals": [{"side": "to_selling", "fwd": {5: -0.01}}],
+         "base": {5: {"up": 3, "down": 1, "flat": 0}}, "sigma": 1.0}
+    b = {"surges": [{"side": "dealers_buying", "fwd": {5: -0.01}}], "reversals": [],
+         "base": {5: {"up": 1, "down": 3, "flat": 2}}, "sigma": 1.0}
+    p = hr.pool([a, b])
+    assert len(p["surges"]) == 2 and len(p["reversals"]) == 1
+    assert p["base"][5] == {"up": 4, "down": 4, "flat": 2}
+    assert p["sessions"] == 2
+
+
+def test_the_report_carries_the_pooled_section(tmp_path, monkeypatch):
+    _seed_db(tmp_path / "gex_history.db", monkeypatch)
+    monkeypatch.setattr(hr, "load_cfg", lambda: CFG)
+    out = tmp_path / "reports"
+    assert hr.main(["--date", DAY, "--out", str(out)]) == 0
+    text = (out / DAY / "report.md").read_text(encoding="utf-8")
+    assert "### Last 3 sessions" in text
+    assert "correlated" in text
