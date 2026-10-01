@@ -2113,23 +2113,24 @@ def _run_gamma_flip(conn, cfg, bus, today, cooldowns, now_ts, universe):
     return out
 
 
-def _load_hiro_today(conn, symbol):
-    """Today's stored hiro_minutes rows for one symbol (ASC) over an already-open
-    read-only connection. Defensive → []."""
+def _load_hiro_today(conn, symbol, day):
+    """The stored hiro_minutes rows for one symbol on ``day`` (the CT session
+    date, passed explicitly rather than the host's local date), ASC, over an
+    already-open read-only connection. Defensive → []."""
     try:
         import gex_history_db as gh
-        return gh.load_hiro_day(conn, symbol)
+        return gh.load_hiro_day(conn, symbol, day)
     except Exception:
         log.debug("load_hiro_day degraded for %s", symbol, exc_info=True)
         return []
 
 
-def _load_hiro_prior(conn, symbol, n):
-    """The last ``n`` stored sessions before today for one symbol (newest
-    first). Defensive → []."""
+def _load_hiro_prior(conn, symbol, n, day):
+    """The last ``n`` stored sessions strictly before ``day`` (the CT session
+    date) for one symbol, newest first. Defensive → []."""
     try:
         import gex_history_db as gh
-        return gh.load_hiro_prior_sessions(conn, symbol, n)
+        return gh.load_hiro_prior_sessions(conn, symbol, n, before=day)
     except Exception:
         log.debug("load_hiro_prior_sessions degraded for %s", symbol, exc_info=True)
         return []
@@ -2150,15 +2151,16 @@ def reset_hiro_sigma_memo():
         _HIRO_SIGMA_MEMO.clear()
 
 
-def _hiro_sigma(conn, sym, rows, h, today):
+def _hiro_sigma(conn, sym, rows, h, today, day):
     """A symbol's baseline sigma: the memoized prior-session sigma when there is
-    one, else today's own full windows (``hiro.baseline_sigma`` with no prior)."""
+    one, else today's own full windows (``hiro.baseline_sigma`` with no prior).
+    ``today`` is the CT date string (the memo key), ``day`` the same as a date."""
     key = (sym, today, int(h["window_min"]), int(h["baseline_sessions"]))
     with _HIRO_SIGMA_LOCK:
         cached = _HIRO_SIGMA_MEMO.get(key)
     if cached is not None:
         return cached
-    prior = _load_hiro_prior(conn, sym, int(h["baseline_sessions"]))
+    prior = _load_hiro_prior(conn, sym, int(h["baseline_sessions"]), day)
     sigma = hiro.prior_sigma(prior, h)
     if isinstance(sigma, float) and math.isfinite(sigma) and sigma > 0:
         with _HIRO_SIGMA_LOCK:
@@ -2196,6 +2198,7 @@ def _run_hiro(conn, cfg, bus, today, cooldowns, now_ts):
         if not isinstance(h, dict) or h.get("enabled") is not True or conn is None:
             return []
         symbols = _hiro_symbols(h)
+        day = _dt.date.fromisoformat(today)     # the CT session date, not the host's
         flips_on = h.get("flip_enabled") is True
         not_before = None
         if flips_on:
@@ -2212,19 +2215,21 @@ def _run_hiro(conn, cfg, bus, today, cooldowns, now_ts):
     out, view = [], {}
     for sym in symbols:
         try:
-            rows = _load_hiro_today(conn, sym)
+            rows = _load_hiro_today(conn, sym, day)
             if not rows:
                 continue
-            sigma = _hiro_sigma(conn, sym, rows, h, today)
+            sigma = _hiro_sigma(conn, sym, rows, h, today, day)
 
+            # id and text are built BEFORE the cooldown is set, so a failure in
+            # between cannot burn a cooldown with no alert to show for it.
             a = hiro.detect_surge(sym, rows, sigma, h, now_ts=now_ts)
             if a:
                 key = f"{sym}|hiro_surge|{a['side']}"
                 if not flow_alerts._on_cooldown(cooldowns, key, now_ts,
                                                 h["cooldown_min"] * 60):
-                    cooldowns[key] = now_ts
                     a["id"] = f"{key}|{int(a['ts'])}"
                     a["text"] = flow_alerts.alert_text(a)
+                    cooldowns[key] = now_ts
                     out.append(a)
 
             if flips_on:
@@ -2236,17 +2241,21 @@ def _run_hiro(conn, cfg, bus, today, cooldowns, now_ts):
                     key = f"{sym}|hiro_flip"
                     if not flow_alerts._on_cooldown(cooldowns, key, now_ts,
                                                     h["flip_cooldown_min"] * 60):
-                        cooldowns[key] = now_ts
                         f["id"] = f"{sym}|hiro_flip|{f['side']}|{int(f['ts'])}"
                         f["text"] = flow_alerts.alert_text(f)
+                        cooldowns[key] = now_ts
                         out.append(f)
 
             view[sym] = hiro.symbol_view(rows, sigma, h)
         except Exception:
             _degrade.degraded("options.run_hiro", detail=sym)
 
-    # Only once a symbol has a stored minute: an empty view says nothing the
-    # missing key does not, and would rewrite the key every quiet minute.
+    # Only once a symbol has a stored minute. No reader needs an empty dated
+    # view: a reader must already gate on payload["date"] == today AND on each
+    # symbol's own ts against the clock (a stalled collector also leaves a
+    # today-dated view), and an empty one would pass the first check while
+    # saying nothing. (With skip_unchanged an identical empty view would only
+    # be a read-and-compare, so this is about meaning, not write cost.)
     if view:
         try:
             bus.cache_set(CACHE_HIRO, {"date": today, "symbols": view},

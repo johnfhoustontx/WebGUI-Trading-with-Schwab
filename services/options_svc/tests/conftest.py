@@ -72,6 +72,15 @@ def _pin_flow_window_clock(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_hiro_sigma_memo():
+    """``handlers._HIRO_SIGMA_MEMO`` is a module-level per-day memo of the HIRO
+    prior-session sigma; without a reset one test's sigma would serve the next
+    test that happens to share a symbol, date and window."""
+    from services.options_svc import handlers as _handlers
+    _handlers.reset_hiro_sigma_memo()
+
+
+@pytest.fixture(autouse=True)
 def _in_memory_gex_db(monkeypatch):
     """Give ``gex_history_db.connect`` an EMPTY IN-MEMORY database.
 

@@ -2783,8 +2783,8 @@ def _hiro_setup(monkeypatch, today_rows, prior, cfg_over=None, symbols=("SPY",))
         def close(self):
             pass
     monkeypatch.setattr(gh, "connect", lambda **k: _FakeConn())
-    monkeypatch.setattr(handlers, "_load_hiro_today", lambda conn, sym: today_rows)
-    monkeypatch.setattr(handlers, "_load_hiro_prior", lambda conn, sym, n: prior)
+    monkeypatch.setattr(handlers, "_load_hiro_today", lambda conn, sym, day: today_rows)
+    monkeypatch.setattr(handlers, "_load_hiro_prior", lambda conn, sym, n, day: prior)
     real = flow_alerts.load_thresholds()
     hcfg = {**real["hiro"], "symbols": list(symbols), "min_notional": 1.0,
             "flip_not_before": "00:00", **(cfg_over or {})}
@@ -2947,7 +2947,7 @@ def test_run_flow_alerts_hiro_prior_sigma_memoized_per_day(monkeypatch):
     bus, handlers, _ = _hiro_setup(monkeypatch, rows, _HIRO_PRIOR)
     calls = []
     monkeypatch.setattr(handlers, "_load_hiro_prior",
-                        lambda conn, sym, n: calls.append((sym, n)) or _HIRO_PRIOR)
+                        lambda conn, sym, n, day: calls.append((sym, n)) or _HIRO_PRIOR)
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: rows[-1]["ts"])
     handlers.run_flow_alerts(bus)
     handlers.run_flow_alerts(bus)
@@ -2966,7 +2966,7 @@ def test_run_flow_alerts_hiro_none_prior_sigma_is_never_cached(monkeypatch):
     bus, handlers, _ = _hiro_setup(monkeypatch, rows, [])
     calls = []
     monkeypatch.setattr(handlers, "_load_hiro_prior",
-                        lambda conn, sym, n: calls.append(sym) or [])
+                        lambda conn, sym, n, day: calls.append(sym) or [])
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: rows[-1]["ts"])
     handlers.run_flow_alerts(bus)
     handlers.run_flow_alerts(bus)
@@ -2981,7 +2981,7 @@ def test_run_flow_alerts_hiro_changed_window_misses_the_memo(monkeypatch):
     bus, handlers, _ = _hiro_setup(monkeypatch, rows, _HIRO_PRIOR)
     calls = []
     monkeypatch.setattr(handlers, "_load_hiro_prior",
-                        lambda conn, sym, n: calls.append(sym) or _HIRO_PRIOR)
+                        lambda conn, sym, n, day: calls.append(sym) or _HIRO_PRIOR)
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: rows[-1]["ts"])
     handlers.run_flow_alerts(bus)
     cfg = handlers.flow_alerts.load_thresholds()
@@ -2998,7 +2998,7 @@ def test_run_flow_alerts_hiro_one_symbol_error_does_not_stop_the_next(monkeypatc
     rows = _hrows([0] * 15 + [5e6] * 15)
     bus, handlers, _ = _hiro_setup(monkeypatch, rows, _HIRO_PRIOR, symbols=("SPY", "QQQ"))
 
-    def _today(conn, sym):
+    def _today(conn, sym, day):
         if sym == "SPY":
             raise RuntimeError("boom")
         return rows
@@ -3055,3 +3055,95 @@ def test_run_flow_alerts_existing_style_publishes_no_hiro_view(monkeypatch):
     monkeypatch.setattr(handlers, "_flow_now_ts", lambda: 120)
     handlers.run_flow_alerts(bus)
     assert bus.cache_get(handlers.CACHE_HIRO) is None
+
+
+def test_run_flow_alerts_hiro_loaders_get_the_ct_session_date(monkeypatch):
+    import datetime as _d
+    rows = _hrows([0] * 15 + [5e6] * 15)
+    bus, handlers, _ = _hiro_setup(monkeypatch, rows, _HIRO_PRIOR)
+    seen = []
+    monkeypatch.setattr(handlers, "_load_hiro_today",
+                        lambda conn, sym, day: seen.append(("today", day)) or rows)
+    monkeypatch.setattr(handlers, "_load_hiro_prior",
+                        lambda conn, sym, n, day: seen.append(("prior", day)) or _HIRO_PRIOR)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: rows[-1]["ts"])
+    handlers.run_flow_alerts(bus)
+    assert seen == [("today", _d.date(2026, 10, 1)), ("prior", _d.date(2026, 10, 1))]
+
+
+def test_hiro_loaders_forward_the_date_to_the_store(monkeypatch):
+    import datetime as _d
+    import gex_history_db as gh
+    calls = {}
+    monkeypatch.setattr(gh, "load_hiro_day",
+                        lambda conn, sym, d=None: calls.setdefault("day", d) and [1])
+    monkeypatch.setattr(gh, "load_hiro_prior_sessions",
+                        lambda conn, sym, n, before=None: calls.setdefault("before", before)
+                        and [[1]])
+    day = _d.date(2026, 10, 1)
+    assert handlers._load_hiro_today(object(), "SPY", day) == [1]
+    assert handlers._load_hiro_prior(object(), "SPY", 5, day) == [[1]]
+    assert calls == {"day": day, "before": day}
+
+
+def test_run_flow_alerts_hiro_flip_is_pushed_when_push_on(monkeypatch):
+    today = _hrows([20e6, -40e6])                        # a reversal, no surge
+    bus, handlers, sent = _hiro_setup(monkeypatch, today, _HIRO_PRIOR, {"push": True})
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: today[-1]["ts"])
+    handlers.run_flow_alerts(bus)
+    assert [a["type"] for a in sent] == ["hiro_flip"]
+
+
+def test_run_flow_alerts_hiro_opposite_surge_fires_inside_the_first_cooldown(monkeypatch):
+    buying = _hrows([0] * 15 + [5e6] * 15)
+    bus, handlers, _ = _hiro_setup(monkeypatch, buying, _HIRO_PRIOR)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: buying[-1]["ts"])
+    handlers.run_flow_alerts(bus)
+    selling = _hrows([0] * 15 + [5e6] * 15 + [-10e6] * 15)   # 15 min later
+    monkeypatch.setattr(handlers, "_load_hiro_today", lambda conn, sym, day: selling)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: selling[-1]["ts"])
+    handlers.run_flow_alerts(bus)                       # 15 min < the 30-min cooldown
+    assert [a["side"] for a in _hiro_alerts(bus, "hiro_surge")] == \
+        ["dealers_buying", "dealers_selling"]
+
+
+def test_run_flow_alerts_hiro_flip_inside_cooldown_is_seen_not_fired_later(monkeypatch):
+    first = _hrows([20e6, -40e6])                        # -> selling at minute 1
+    bus, handlers, _ = _hiro_setup(monkeypatch, first, _HIRO_PRIOR)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: first[-1]["ts"])
+    handlers.run_flow_alerts(bus)
+    assert [a["side"] for a in _hiro_alerts(bus, "hiro_flip")] == ["to_selling"]
+
+    second = _hrows([20e6, -40e6, 40e6])                 # -> buying at minute 2
+    monkeypatch.setattr(handlers, "_load_hiro_today", lambda conn, sym, day: second)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: second[-1]["ts"])
+    handlers.run_flow_alerts(bus)                       # inside the 60-min cooldown
+    assert [a["side"] for a in _hiro_alerts(bus, "hiro_flip")] == ["to_selling"]
+    cmap = bus.cache_get(handlers._FLOW_COOLDOWN_KEY).payload["map"]
+    assert cmap["hiro_flip_seen:SPY"] == second[-1]["ts"]
+
+    # Same minute, cooldown now gone: only the seen marker can stop it.
+    cfg = handlers.flow_alerts.load_thresholds()
+    monkeypatch.setattr(handlers.flow_alerts, "load_thresholds",
+                        lambda: {**cfg, "hiro": {**cfg["hiro"], "flip_cooldown_min": 0}})
+    handlers.run_flow_alerts(bus)
+    assert [a["side"] for a in _hiro_alerts(bus, "hiro_flip")] == ["to_selling"]
+
+
+def test_run_flow_alerts_hiro_text_failure_does_not_burn_the_cooldown(monkeypatch):
+    rows = _hrows([0] * 15 + [5e6] * 15)
+    bus, handlers, _ = _hiro_setup(monkeypatch, rows, _HIRO_PRIOR)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: rows[-1]["ts"])
+    real_text = handlers.flow_alerts.alert_text
+    state = {"n": 0}
+
+    def _flaky(a):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise RuntimeError("text exploded")
+        return real_text(a)
+    monkeypatch.setattr(handlers.flow_alerts, "alert_text", _flaky)
+    handlers.run_flow_alerts(bus)                       # first build fails
+    assert _hiro_alerts(bus) == []
+    handlers.run_flow_alerts(bus)                       # not on a burnt cooldown
+    assert len(_hiro_alerts(bus, "hiro_surge")) == 1
