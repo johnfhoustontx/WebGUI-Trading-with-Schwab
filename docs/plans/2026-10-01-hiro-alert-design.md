@@ -139,10 +139,13 @@ the gamma flip.
 - Fires when the 15-minute sum is ≥ `k × σ` (default 3) **and** clears
   `min_notional` (an absolute floor against a dead tape) **and** the window's
   unclassified share ≤ `max_unclassified` (default 0.5) **and** the newest stored row
-  is at most **120 s** old against the clock (`hiro.FRESH_ROW_SEC`, two polls). Rows
-  stop at the 15:00 close while detection keeps running, and a stalled collector
-  freezes the newest row; without the clock check the same old window would re-fire
-  every time its cooldown lapsed. A non-finite window or σ never fires.
+  is at most **300 s** old against the clock (`hiro.STALE_ROW_SEC`). Rows stop at the
+  15:00 close while detection keeps running, and a stalled collector freezes the
+  newest row; without the clock check the same old window would re-fire every time
+  its cooldown lapsed. 300 s and not one poll: a row's `ts` is the minute floor of the
+  collect START and the check runs after a 30–90 s poll, so a healthy newest row is
+  routinely 90–150 s old — a slow poll still counts, a stalled collector does not. A
+  non-finite window or σ never fires.
 - Direction: `dealers_buying` (upward pressure) or `dealers_selling`.
 - Cooldown: 30 minutes per symbol and direction.
 - Payload: `symbol`, `side`, `ts`, `spot`, `impact` (the window's dollars), `mult`
@@ -161,9 +164,14 @@ the gamma flip.
   would make the total NaN for the rest of the day and freeze the state).
 - **Stateless:** every tick replays today's stored minutes through the hysteresis and
   alerts only on a transition that is (a) newer than the last one seen, recorded in
-  the shared cooldown map as `hiro_flip_seen:<SYM>`, and (b) at most 2 minutes old
-  against the clock (`hiro.FLIP_MAX_AGE_SEC`). So a restart cannot fire a false flip,
-  and a σ that moves intraday (today-fallback) cannot surface an old one. The seen
+  the shared cooldown map as `hiro_flip_seen:<SYM>`, and (b) at most 2 minutes older
+  than the **newest stored row** (`hiro.FLIP_MAX_AGE_SEC`). So a restart cannot fire a
+  false flip, and a σ that moves intraday (today-fallback) cannot surface an old one.
+  The age is measured against the newest row, never the clock: on a busy tape the
+  check runs well over 2 minutes after the row's `ts`, and a transition refused then
+  was never marked seen, so it was lost for good while the report — which replays
+  with the clock at each row — counted it. Frozen data is refused separately, by the
+  same 300-s `STALE_ROW_SEC` check as the Surge. The seen
   marker deliberately has no `|`, so it can never be read as an alert event by the
   per-symbol counts (below).
 - Cooldown: 60 minutes per symbol. A transition inside the cooldown is marked seen

@@ -16,10 +16,14 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   `keep_sessions` 20; same-minute rows accumulate; seed minutes write nothing).
 - **Two alerts** on Flow Alerts: **Hedging surge** (`hiro_surge`: the rolling
   15-minute sum ≥ 3× the symbol's normal size — the RMS of full 15-minute sums over
-  the 5 prior sessions — and ≥ $25M, ≤ 50% unlabelled volume, fresh row ≤ 120 s,
-  30-minute cooldown per direction) and **Hedging reversal** (`hiro_flip`: the day's
-  running total crosses zero by 1× normal, none before 09:00 CT, stateless replay,
-  60-minute cooldown). Every row says it is a model (`≈`, "model"). Summary view
+  the 5 prior sessions — and ≥ $25M, ≤ 50% unlabelled volume, 30-minute cooldown per
+  direction) and **Hedging reversal** (`hiro_flip`: the day's running total crosses
+  zero by 1× normal, none before 09:00 CT, stateless replay, at most 120 s older than
+  the newest stored row, 60-minute cooldown). Both refuse frozen data — a newest row
+  more than 300 s old against the clock (`hiro.STALE_ROW_SEC`) — but a slow poll
+  still counts: a reversal's age is measured against the newest row, never the clock,
+  because a reversal refused on a slow tick was never marked seen and was lost for
+  good while the report counted it. Every row says it is a model (`≈`, "model"). Summary view
   `cache:options:hiro` (no reader yet). Push category `flow_hiro` ("Hedging flow").
   Every `[hiro]` key in `config/flow_alerts.toml` is in Settings → Configuration.
 - **Quiet-live, by the owner's two decisions.** (1) **Silent Desk**: the service
@@ -46,7 +50,10 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   `run_flow_alerts` · `fadb80a` push category · `ee48607` / `55b1ce6` Flow screen ·
   `d232495` quiet/public flags · `64c3620` silent Desk, public hide · `b565933` /
   `472f224` out of Hotness and EOD counts · `fbe5c04` captures hide · `1641c34` /
-  `d415e78` / `ca3ba84` the report · `7186368` the timer.
+  `d415e78` / `ca3ba84` / `cb85cdb` the report (`cb85cdb`: pools only faithful days,
+  significance) · `7186368` the timer · `71c6e12` freshness survives a slow tick, a
+  failed batch insert rolled back before the per-symbol fallback (no double count) ·
+  `d163d29` `[hiro]` numbers coerced once by `hiro.clean_cfg`, shared with the report.
 - Tests at the time: options_svc **3061 passed** (of them `test_hiro.py` 100, and 75
   HIRO cases across handlers/compute/flow_alerts/push_notify); options-scanner
   `test_gex_history_hiro.py` 14; `tools/tests/test_hiro_report.py` 52.

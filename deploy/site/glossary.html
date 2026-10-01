@@ -92,7 +92,7 @@
 
   <div class="ns-wrap gl-wrap">
     <header class="gl-head">
-      <span class="ns-eyebrow">Options glossary · <span class="ns-count">187 terms</span></span>
+      <span class="ns-eyebrow">Options glossary · <span class="ns-count">188 terms</span></span>
       <h1 class="ns-h2">The words, in plain English.</h1>
       <p class="ns-body">Every term the app puts on screen, defined without the jargon:
         from what a contract is, to what dealer gamma means and why it moves price.
@@ -432,6 +432,8 @@
           <dd>GEX can be expressed as shares per 1% move, dollars per 1% move, or dollars per 1-point move. Comparing numbers across sources without checking units produces nonsense.</dd>
           <dt>Open interest change</dt>
           <dd>Day-over-day OI change tells you whether positions opened or closed. Volume alone can&#x27;t distinguish a new position from a closed one, and OI publishes with a delay.</dd>
+          <dt>HIRO / hedging flow</dt>
+          <dd>The stock dealers have to buy or sell, right now, to stay hedged against the options customers are trading: a customer buying calls makes a dealer buy stock, a customer buying puts makes a dealer sell it. Added up minute by minute it shows which way hedging is pushing price. HIRO is SpotGamma&#x27;s name for its own measure built from every trade on the tape. This app&#x27;s *<em>Hedging surge</em><em> and </em><em>Hedging reversal</em><em> alerts use a home-built </em>model<em> of the same idea: Schwab publishes no tape, so each contract&#x27;s trades are labelled bought or sold once a minute from where the last price sat against the bid and ask (see </em>trade classification*). Treat it as an estimate, not an observation.</dd>
           <dt>Hedging window</dt>
           <dd>The recurring times when mechanical hedging concentrates: the open, the 3:30–4:00 close, Thursday/Friday charm decay, and monthly OPEX.</dd>
         </dl>

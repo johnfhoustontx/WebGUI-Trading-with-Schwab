@@ -838,9 +838,11 @@ anyway. Then, in **Settings → Configuration → Flow alerts → Hedging flow (
 model)**:
 
 - **Send hedging-flow pushes to the phone** — sends reversals and the strongest surges
-  (at **Push surges at**, 4× normal by default) to your phone, and lets the Desk speak
-  them. Which channels they go to is the **Hedging flow** row under **Settings →
-  General → Push notifications**.
+  (at **Push surges at**, 4× normal by default) to your phone. The Desk then speaks
+  every reversal and every surge at or above the surge bar (**Surge at**, 3× normal by
+  default), while only surges at or above the push bar reach the phone. Which channels
+  they go to is the **Hedging flow** row under **Settings → General → Push
+  notifications**.
 - **Show hedging-flow alerts on the public screens** — shows them on the public
   Flow Alerts and Desk screens. Turning it off again leaves alerts already shown there
   until the list resets overnight.

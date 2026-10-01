@@ -900,9 +900,10 @@ detector behind each):
 **The two hedging-flow types are a model and ship quiet.** They watch `$SPX`, SPY, QQQ
 and IWM in regular hours, and label each option trade bought or sold from where it
 printed against the quote — Schwab publishes no tape, so that label is inferred, and
-the rows say so with **≈** and **model**. Until a daily report shows they lead price,
-they never chime, do not push to your phone, are not spoken on the Desk, are hidden
-on the public screens, and do not count toward the Opportunity Board. The
+the rows say so with **≈** and **model**. They never chime or toast, whatever the
+settings. Until a daily report shows they lead price, they also do not push to your
+phone, are not spoken on the Desk, are hidden on the public screens, and do not count
+toward the Opportunity Board. The
 **User Guide** says how to turn the push and the public
 display on; the Technical Reference has the formula.
 

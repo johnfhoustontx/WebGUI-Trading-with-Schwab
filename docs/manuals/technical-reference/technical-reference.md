@@ -1812,12 +1812,15 @@ memoized per symbol per day.
 | abs(S15) ≥ `k` · σ | `k` = 3 |
 | abs(S15) ≥ `min_notional` (dead-tape floor) | $25,000,000 |
 | unlabelled share of the window's volume ≤ `max_unclassified` | 0.5 |
-| newest stored row ≤ 120 s old against the clock (`hiro.FRESH_ROW_SEC`) | — |
+| newest stored row ≤ 300 s old against the clock (`hiro.STALE_ROW_SEC`) | — |
 
 Side `dealers_buying` when S15 > 0 (upward pressure), else `dealers_selling`.
 Cooldown `cooldown_min` (30) per symbol and direction. The clock check stops a
 stalled collector — or the rows simply stopping at 15:00 — re-firing the same old
-window every time its cooldown lapses. A non-finite window or σ never fires.
+window every time its cooldown lapses. It is 300 s, not one poll, because a row's
+`ts` is the minute floor of the collect START and the check runs after a 30–90 s
+poll: a healthy newest row is routinely 90–150 s old, so a slow poll still counts
+and only a stalled collector does not. A non-finite window or σ never fires.
 
 **Reversal (`hiro_flip`).** The day's running total `cum` (the sum of every stored
 minute since the session's first row, skipping a non-finite one) drives a two-state
@@ -1832,8 +1835,12 @@ no state yet        → the first side cum clears by flip_band · σ (the baseli
 Evaluation waits for `flip_not_before` (09:00 CT); the total still counts from the
 first row. The rule is **stateless**: each tick replays today's rows and alerts only
 on the latest transition if it is newer than the one recorded as seen
-(`hiro_flip_seen:<SYM>` in the flow cooldown map) **and** at most 120 s old against
-the clock (`hiro.FLIP_MAX_AGE_SEC`), so a restart cannot fire an old reversal.
+(`hiro_flip_seen:<SYM>` in the flow cooldown map) **and** at most 120 s older than
+the **newest stored row** (`hiro.FLIP_MAX_AGE_SEC`), so a restart cannot fire an old
+reversal. The age is measured against the newest row, never the clock: a reversal
+refused on a slow tick would never be marked seen and would be lost for good, while
+the daily report (which replays with the clock at each row) counted it. The same
+300-s staleness check as the surge (`hiro.STALE_ROW_SEC`) refuses it on frozen data.
 Cooldown `flip_cooldown_min` (60) per symbol; a transition inside it is marked seen
 and dropped.
 
