@@ -438,22 +438,32 @@ _HF = {"type": "hiro_flip", "side": "to_selling", "symbol": "SPY", "ts": 1,
 def test_alert_text_hiro_surge():
     t = flow_alerts.alert_text(_HS)
     assert t.startswith("$SPX — hedging surge: dealers BUYING about $2.40B of stock")
-    assert "15 min" in t and "3.6× normal" in t and "18% unlabelled" in t
-    assert "model" in t
+    assert "15 min" in t and "3.6× normal" in t
+    assert "18% of volume had no buy/sell label" in t
+    assert "model estimate" in t
+    assert t == ("$SPX — hedging surge: dealers BUYING about $2.40B of stock in 15 min "
+                 "(3.6× normal) · spot 5712.5 · model estimate; "
+                 "18% of volume had no buy/sell label")
 
 
 def test_alert_text_hiro_flip():
     t = flow_alerts.alert_text(_HF)
     assert t.startswith("SPY — dealer hedging turned to net SELLING for the day")
-    assert "-$310.00M" in t
+    assert "(model; running total -$310.00M)" in t
+    assert t == ("SPY — dealer hedging turned to net SELLING for the day "
+                 "(model; running total -$310.00M) · spot 571.2")
 
 
 def test_alert_text_hiro_none_fields_do_not_raise():
     t = flow_alerts.alert_text({**_HS, "spot": None, "mult": None,
                                 "unclassified_share": None, "impact": None})
     assert t.startswith("$SPX — hedging surge")
+    assert "spot 0" not in t and "0.0×" not in t
+    assert "spot —" in t and "normal" not in t and "%" not in t
     t = flow_alerts.alert_text({**_HF, "spot": None, "cum": None})
     assert t.startswith("SPY — dealer hedging turned to net SELLING")
+    assert "spot 0" not in t and "spot —" in t
+    assert "$0" not in t                    # no invented running total either
 
 
 def test_hiro_should_push_gates():
@@ -470,6 +480,13 @@ def test_hiro_should_push_gates():
 def test_hiro_should_push_malformed_cfg_is_false():
     assert flow_alerts.hiro_should_push({**_HS, "mult": 9.0}, None) is False
     assert flow_alerts.hiro_should_push({**_HS, "mult": 9.0}, {"hiro": 5}) is False
+
+
+@pytest.mark.parametrize("push", ["false", "true", 1, None])
+def test_hiro_should_push_fails_closed_unless_push_is_true(push):
+    cfg = {"hiro": {"push": push, "push_k": 4.0}}
+    assert flow_alerts.hiro_should_push({**_HS, "mult": 9.0}, cfg) is False
+    assert flow_alerts.hiro_should_push(_HF, cfg) is False
 
 
 @pytest.mark.parametrize("push_k", ["4", None, float("nan"), float("inf"), True, [4]])

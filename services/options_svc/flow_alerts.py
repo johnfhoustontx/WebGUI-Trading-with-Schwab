@@ -111,7 +111,7 @@ def hiro_should_push(alert, cfg) -> bool:
     h = (cfg or {}).get("hiro", {}) if isinstance(cfg, dict) else {}
     if not isinstance(h, dict):
         return False
-    if not h.get("push", False) or not isinstance(alert, dict):
+    if h.get("push") is not True or not isinstance(alert, dict):   # fail closed: "false" is truthy
         return False
     t = alert.get("type")
     if t == "hiro_flip":
@@ -123,6 +123,16 @@ def hiro_should_push(alert, cfg) -> bool:
     if not _is_finite_number(k):            # "4", None, NaN, a bool -> the default
         k = 4.0
     return _is_finite_number(m) and float(m) >= float(k)
+
+
+def _num(v):
+    """``float(v)`` for a real finite number, else None."""
+    return float(v) if _is_finite_number(v) else None
+
+
+def _spot_text(v):
+    n = _num(v)
+    return "—" if n is None else f"{n:g}"
 
 
 def _is_finite_number(v) -> bool:
@@ -417,16 +427,23 @@ def alert_text(a) -> str:
                     f"{flip:g} (dealers short gamma → volatility amplified)")
         return (f"{s} — gamma flipped POSITIVE: spot {spot:g} rose above the gamma flip "
                 f"{flip:g} (dealers long gamma → volatility dampened)")
+    # HIRO: a missing figure DROPS its clause (or reads "—"), never a printed 0.
     if a["type"] == "hiro_surge":
         word = "BUYING" if a["side"] == "dealers_buying" else "SELLING"
-        return (f"{s} — hedging surge: dealers {word} about "
+        mult, share = _num(a.get("mult")), _num(a.get("unclassified_share"))
+        text = (f"{s} — hedging surge: dealers {word} about "
                 f"{_hiro_money(abs(a.get('impact') or 0))} of stock in "
-                f"{a.get('window_min') or 15} min ({(a.get('mult') or 0):.1f}× normal) · "
-                f"spot {(a.get('spot') or 0):g} · model, "
-                f"{(a.get('unclassified_share') or 0):.0%} unlabelled")
+                f"{a.get('window_min') or 15} min")
+        if mult is not None:
+            text += f" ({mult:.1f}× normal)"
+        text += f" · spot {_spot_text(a.get('spot'))} · model estimate"
+        if share is not None:
+            text += f"; {share:.0%} of volume had no buy/sell label"
+        return text
     if a["type"] == "hiro_flip":
         word = "BUYING" if a["side"] == "to_buying" else "SELLING"
+        cum = _num(a.get("cum"))
+        note = "model" if cum is None else f"model; running total {_hiro_money(cum)}"
         return (f"{s} — dealer hedging turned to net {word} for the day "
-                f"(running total {_hiro_money(a.get('cum'))}) · "
-                f"spot {(a.get('spot') or 0):g}")
+                f"({note}) · spot {_spot_text(a.get('spot'))}")
     return f"{s}: flow alert"

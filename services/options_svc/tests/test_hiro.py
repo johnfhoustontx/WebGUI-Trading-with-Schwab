@@ -211,6 +211,11 @@ def test_baseline_prefers_prior_sessions():
     assert sigma == pytest.approx(15e6)                # today's spike not used
 
 
+def test_baseline_uses_only_the_newest_prior_sessions():
+    prior = [_rows([1e6] * 20), _rows([-1e6] * 20), _rows([9e9] * 20)]  # newest first
+    assert hiro.baseline_sigma(prior, [], CFG) == pytest.approx(15e6)   # oldest excluded
+
+
 def test_baseline_falls_back_to_today_then_none():
     assert hiro.baseline_sigma([], _rows([1e6] * 30), CFG) == pytest.approx(15e6)
     assert hiro.baseline_sigma([], _rows([1e6] * 29), CFG) is None
@@ -279,6 +284,18 @@ def test_surge_never_fires_on_a_non_finite_window(bad):
     assert hiro.detect_surge("SPY", rows, 15e6, CFG) is None
 
 
+def test_surge_needs_a_fresh_newest_row_against_now_ts():
+    """Rows stop at the close while detection runs on; a stale window must not
+    re-fire after its cooldown."""
+    rows = _rows([4e6] * 15)
+    last = rows[-1]["ts"]
+    assert hiro.detect_surge("SPY", rows, 15e6, CFG,
+                             now_ts=last + hiro.FRESH_ROW_SEC) is not None
+    assert hiro.detect_surge("SPY", rows, 15e6, CFG,
+                             now_ts=last + hiro.FRESH_ROW_SEC + 1) is None
+    assert hiro.FRESH_ROW_SEC == 120
+
+
 @pytest.mark.parametrize("sigma", [math.nan, math.inf, 0.0, -1.0])
 def test_surge_refuses_unusable_sigma(sigma):
     assert hiro.detect_surge("SPY", _rows([4e6] * 15), sigma, CFG) is None
@@ -306,6 +323,24 @@ def test_flip_transitions_ignore_minutes_before_not_before_but_keep_their_cum():
     rows = _rows([20, -1, -1])                        # cum 20, 19, 18
     t = hiro.flip_transitions(rows, band=5.0, not_before_ts=rows[1]["ts"])
     assert t == []                                    # baseline buying, no change
+
+
+def test_flip_transitions_carry_cum_from_before_not_before():
+    """Discriminating: cum 20 -> 10 (baseline buying) -> -6 (selling). An
+    implementation that reset the total at not_before would see -10 then -26
+    (baseline selling, no change) and return []."""
+    rows = _rows([20, -10, -16])
+    t = hiro.flip_transitions(rows, band=5.0, not_before_ts=rows[1]["ts"])
+    assert t == [(rows[2]["ts"], "selling", -6.0)]
+
+
+def test_detect_flip_age_measured_against_now_ts():
+    rows = _rows([10, -30])                           # fresh against the newest row
+    flip_ts = rows[1]["ts"]
+    assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None,
+                            now_ts=flip_ts + hiro.FLIP_MAX_AGE_SEC) is not None
+    assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None,
+                            now_ts=flip_ts + hiro.FLIP_MAX_AGE_SEC + 1) is None
 
 
 def test_detect_flip_fresh_newer_than_seen():
@@ -379,9 +414,24 @@ def test_symbol_view_non_finite_reads_as_none_never_a_number():
     rows = _rows([1e6] * 15)
     rows[14]["impact"] = math.nan                      # the latest minute, in the window
     v = hiro.symbol_view(rows, 5e6, CFG)
-    assert v["impact"] is None and v["cum"] is None
+    # cum is the shared running total, which SKIPS the bad minute (14 x 1e6)
+    assert v["impact"] is None and v["cum"] == pytest.approx(14e6)
     assert v["window_impact"] is None and v["mult"] is None
     assert v["ts"] == rows[-1]["ts"] and v["spot"] == 500.0
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
+def test_running_total_skips_non_finite_minutes(bad):
+    assert hiro.running_total(_rows([10, bad, -30])) == -20.0
+    assert hiro.running_total([]) == 0.0
+
+
+def test_screen_total_and_reversal_total_agree():
+    """symbol_view's cum and the flip rule's running total are one computation,
+    so the screen cannot show a total the reversal rule did not use."""
+    rows = _rows([10, math.nan, -30])
+    t = hiro.flip_transitions(rows, band=5.0, not_before_ts=rows[0]["ts"])
+    assert t[-1][2] == hiro.symbol_view(rows, 5.0, CFG)["cum"] == hiro.running_total(rows)
 
 
 @pytest.mark.parametrize("sigma", [math.nan, math.inf])

@@ -145,8 +145,8 @@ def window_sum(rows, end_ts, window_sec):
 def full_window_sums(rows, window_sec):
     """The window sum ending at every row whose window lies wholly inside the
     session (the first ``window`` minutes give partial sums, which would shrink
-    the baseline). "Inside" is measured from the first STORED row. Rows are ASC;
-    O(n x window), fine for ~390 rows."""
+    the baseline). "Inside" is measured from the first STORED row. Rows are ASC.
+    O(n^2) -- every window rescans all rows -- fine for ~390 rows a session."""
     if not rows:
         return []
     first = rows[0]["ts"]
@@ -182,16 +182,25 @@ def baseline_sigma(prior_sessions, today_rows, cfg):
     return None
 
 
-def detect_surge(symbol, today_rows, sigma, cfg):
+# Rows stop at the 15:00 CT close, but detection keeps running after it, and a
+# stalled collector freezes the newest row: without a clock check the same old
+# window would re-fire every time its cooldown lapsed. Two poll intervals.
+FRESH_ROW_SEC = 120
+
+
+def detect_surge(symbol, today_rows, sigma, cfg, *, now_ts=None):
     """A ``hiro_surge`` alert dict for the window ending at the latest row, or
     None. No cooldown here — the handler owns that, as for every flow detector.
 
-    A non-finite window or sigma never fires: NaN fails every comparison, so
-    unguarded it would pass the floor and the multiple both."""
+    With ``now_ts``, the newest row must be at most FRESH_ROW_SEC old against
+    the clock. A non-finite window or sigma never fires: NaN fails every
+    comparison, so unguarded it would pass the floor and the multiple both."""
     sigma = _finite(sigma)
     if not today_rows or sigma is None or sigma <= 0:
         return None
     last = today_rows[-1]
+    if now_ts is not None and now_ts - last["ts"] > FRESH_ROW_SEC:
+        return None
     w = window_sum(today_rows, last["ts"], int(cfg["window_min"]) * 60)
     share = w["unclassified_share"]
     if share is None or share > cfg["max_unclassified"]:
@@ -235,6 +244,18 @@ def _state(cum, prev, band):
     return None
 
 
+def _row_impact(row):
+    """A row's impact if it is a usable number, else None. The ONE skip rule for
+    the day's running total, shared by the reversal rule and the screen."""
+    return _finite(row.get("impact"))
+
+
+def running_total(rows):
+    """The day's net hedge impact so far, skipping non-finite minutes (one NaN
+    added would make the total NaN for the rest of the day)."""
+    return sum((v for v in (_row_impact(r) for r in rows) if v is not None), 0.0)
+
+
 def flip_transitions(rows, band, not_before_ts):
     """``[(ts, new_state, cum)]`` for every change of the day's hedging direction.
 
@@ -243,11 +264,12 @@ def flip_transitions(rows, band, not_before_ts):
     not a transition. Hysteresis: a state changes only when the total clears zero
     by ``band`` on the other side.
 
-    A non-finite minute is skipped: added, it would make the total NaN for the
-    rest of the day, every later comparison False, and the state frozen."""
+    A non-finite minute is skipped (``_row_impact``, the rule ``running_total``
+    uses): added, it would make the total NaN for the rest of the day, every
+    later comparison False, and the state frozen."""
     out, state, cum = [], None, 0.0
     for r in rows:
-        imp = _finite(r["impact"])
+        imp = _row_impact(r)
         if imp is None:
             continue
         cum += imp
@@ -262,12 +284,13 @@ def flip_transitions(rows, band, not_before_ts):
     return out
 
 
-def detect_flip(symbol, rows, sigma, cfg, not_before_ts, seen_ts):
+def detect_flip(symbol, rows, sigma, cfg, not_before_ts, seen_ts, *, now_ts=None):
     """A ``hiro_flip`` alert for the latest transition, or None.
 
     Stateless: replays today's rows every tick. Fires only for a transition
     newer than ``seen_ts`` AND at most FLIP_MAX_AGE_SEC old, so a restart cannot
-    fire an old flip and an intraday-moving sigma cannot surface one."""
+    fire an old flip and an intraday-moving sigma cannot surface one. The age is
+    measured against ``now_ts`` when given (the clock), else the newest row."""
     sigma = _finite(sigma)
     if not rows or sigma is None or sigma <= 0:
         return None
@@ -277,7 +300,8 @@ def detect_flip(symbol, rows, sigma, cfg, not_before_ts, seen_ts):
     ts, state, cum = t[-1]
     if seen_ts is not None and ts <= seen_ts:
         return None
-    if rows[-1]["ts"] - ts > FLIP_MAX_AGE_SEC:
+    ref = rows[-1]["ts"] if now_ts is None else now_ts
+    if ref - ts > FLIP_MAX_AGE_SEC:
         return None
     spot = next((r["spot"] for r in rows if r["ts"] == ts), None)
     return {"type": "hiro_flip", "side": "to_buying" if state == "buying" else "to_selling",
@@ -288,7 +312,9 @@ def symbol_view(rows, sigma, cfg):
     """The small per-symbol summary published to cache:options:hiro.
 
     A non-finite figure is published as None, never as a number: a NaN in the
-    view would read as a reading on screen."""
+    view would read as a reading on screen. ``cum`` is ``running_total``, the
+    same total the reversal rule uses, so it skips a bad minute rather than
+    going None; ``window_impact`` stays None while a bad minute is in it."""
     last = rows[-1]
     w = window_sum(rows, last["ts"], int(cfg["window_min"]) * 60)
     window_impact = _finite(w["impact"])
@@ -296,6 +322,6 @@ def symbol_view(rows, sigma, cfg):
     mult = (_finite(abs(window_impact) / sigma)
             if window_impact is not None and sigma is not None and sigma > 0 else None)
     return {"ts": last["ts"], "spot": last["spot"], "impact": _finite(last["impact"]),
-            "cum": _finite(sum(r["impact"] for r in rows)),
+            "cum": running_total(rows),
             "window_impact": window_impact, "sigma": sigma, "mult": mult,
             "unclassified_share": w["unclassified_share"]}
