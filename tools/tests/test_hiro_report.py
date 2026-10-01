@@ -510,6 +510,82 @@ def test_each_prior_day_takes_the_sigma_live_had_that_day():
     assert math.isclose(days[0]["sigma"], hiro.prior_sigma(hist[:2], cfg))
     assert math.isclose(days[1]["sigma"], hiro.prior_sigma(hist[1:3], cfg))
     assert days[2]["sigma_source"] == "today"            # only one older session
+    # ...and live had a prior sigma that day (the older sessions were purged
+    # since), so the replay is not faithful and the day stays out of the pool.
+    assert days[2]["excluded"] and not days[1]["excluded"] and not days[0]["excluded"]
+    p = hr.pool(days)
+    assert p["sessions"] == 2 and p["excluded"] == 1
+
+
+def test_a_young_history_keeps_its_today_sigma_days_in_the_pool():
+    """In the first weeks live ALSO used today's minutes, so those days are
+    faithful replays and stay in."""
+    hist = [_noisy(60, 11), _noisy(60, 12), _noisy(60, 13)]
+    cfg = {**CFG, "keep_sessions": 20}
+    days = hr.session_summaries(_noisy(60, 10), hist, cfg, [3.0], [5],
+                                lambda rows: rows[0]["ts"])
+    assert len(days) == 4
+    assert [d["sigma_source"] for d in days] == ["prior", "prior", "today", "today"]
+    assert not any(d["excluded"] for d in days)
+    p = hr.pool(days)
+    assert p["sessions"] == 4 and p["excluded"] == 0
+    assert p["sources"] == {"prior": 2, "today": 2, None: 0}
+
+
+def test_the_pooled_base_rate_counts_only_days_where_the_rules_ran():
+    ran = {"surges": [], "reversals": [], "sigma": 1.0, "sigma_source": "prior",
+           "base": {5: {"up": 3, "down": 1, "flat": 0}}}
+    idle = {"surges": [], "reversals": [], "sigma": None, "sigma_source": None,
+            "base": {5: {"up": 100, "down": 0, "flat": 0}}}
+    assert hr.pool([ran, idle])["base"][5] == {"up": 3, "down": 1, "flat": 0}
+
+
+def test_chance_by_luck_is_the_exact_one_sided_binomial():
+    assert math.isclose(hr.chance_by_luck(5, 5, 0.5), 1 / 32)
+    assert math.isclose(hr.chance_by_luck(4, 5, 0.5), 6 / 32)
+    # 3 of 6 at 0.4: P(X>=3) = 1 - (0.6^6 + 6*0.4*0.6^5 + 15*0.16*0.6^4)
+    want = 1 - (0.6 ** 6 + 6 * 0.4 * 0.6 ** 5 + 15 * 0.16 * 0.6 ** 4)
+    assert math.isclose(hr.chance_by_luck(3, 6, 0.4), want)
+    assert hr.chance_by_luck(4, 4, 0.5) is None          # fewer than 5 tries
+    assert hr.chance_by_luck(5, 5, None) is None
+
+
+def test_the_report_explains_signed_moves_and_luck():
+    text = hr.build_report(DAY, _summaries(), CFG)
+    assert "signed" in text and "Chance by luck" in text
+    assert "Mean move (signed)" in text and "Mean return" not in text
+
+
+def test_a_single_session_has_no_pooled_section(tmp_path, monkeypatch):
+    monkeypatch.setattr(hr.gh, "DB_PATH", tmp_path / "g.db")
+    conn = hr.gh.connect()
+    hr.gh.init_schema(conn)
+    rnd = random.Random(1)
+    hr.gh.insert_hiro_rows(conn, [("SPY", T0 + 60 * i, {
+        "spot": 100.0, "impact": rnd.gauss(0, 1e6), "classified_vol": 100.0,
+        "unclassified_vol": 10.0}) for i in range(60)])
+    conn.close()
+    monkeypatch.setattr(hr, "load_cfg", lambda: {**CFG, "symbols": ["SPY"]})
+    out = tmp_path / "r"
+    assert hr.main(["--date", DAY, "--out", str(out)]) == 0
+    assert "### Last" not in (out / DAY / "report.md").read_text(encoding="utf-8")
+
+
+def test_a_partial_failure_is_summarised_on_stderr_and_still_exits_zero(
+        tmp_path, monkeypatch, capsys):
+    _seed_db(tmp_path / "gex_history.db", monkeypatch)
+    monkeypatch.setattr(hr, "load_cfg", lambda: CFG)
+    real = hr.gh.load_hiro_day
+
+    def flaky(conn, symbol, d=None):
+        if symbol == "$SPX":
+            raise ValueError("corrupt minute")
+        return real(conn, symbol, d)
+
+    monkeypatch.setattr(hr.gh, "load_hiro_day", flaky)
+    assert hr.main(["--date", DAY, "--out", str(tmp_path / "r")]) == 0
+    err = capsys.readouterr().err
+    assert "1 of 2 symbols failed" in err
 
 
 def test_pooling_keeps_surges_and_reversals_apart_and_sums_the_base_rate():

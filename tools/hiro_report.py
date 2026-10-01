@@ -334,32 +334,52 @@ def session_summaries(today_rows, history, cfg, k_grid, horizons, not_before_for
     """``[today, the session before, ...]`` -- up to ``keep_sessions`` in all --
     each summarised by ``symbol_summary`` with the prior sessions live had on
     THAT day (the ``baseline_sessions`` before it in ``history``, newest first).
-    ``not_before_for(rows)`` gives a session's reversal start (or None)."""
+    ``not_before_for(rows)`` gives a session's reversal start (or None).
+
+    Each summary carries ``excluded``. A prior day whose own window of older
+    sessions is incomplete is a FAITHFUL replay only while the history is young
+    (live, too, had no prior sessions then and used today's minutes). Once the
+    stored history is purge-limited (``keep_sessions - 1`` older sessions or
+    more), that day's older sessions existed live and were purged since, so its
+    replay would use a size live never used: it is summarised but excluded."""
     need = int(cfg["baseline_sessions"])
     keep = max(1, int(cfg.get("keep_sessions", 1)))
-    out = [symbol_summary(today_rows, history[:need], cfg, k_grid, horizons,
-                          not_before_for(today_rows))]
+    purge_limited = len(history) >= keep - 1
+    out = [{**symbol_summary(today_rows, history[:need], cfg, k_grid, horizons,
+                             not_before_for(today_rows)), "excluded": False}]
     for j, rows in enumerate(history[:keep - 1]):
         if not rows:
             continue
-        out.append(symbol_summary(rows, history[j + 1:j + 1 + need], cfg,
-                                  [float(cfg["k"])], horizons, not_before_for(rows)))
+        older = history[j + 1:j + 1 + need]
+        s = symbol_summary(rows, older, cfg, [float(cfg["k"])], horizons,
+                           not_before_for(rows))
+        s["excluded"] = purge_limited and len(older) < need
+        out.append(s)
     return out
 
 
 def pool(days):
-    """Pool symbol-days: surges and reversals in SEPARATE lists, base-rate
-    counts summed per horizon."""
+    """Pool the symbol-days not ``excluded``: surges and reversals in SEPARATE
+    lists, base-rate counts summed per horizon over the days where the rules
+    ran (a day with no sigma had no fires to compare), sigma sources counted."""
+    kept = [d for d in days if not d.get("excluded")]
     base = {}
-    for d in days:
+    for d in kept:
+        if d.get("sigma") is None:
+            continue
         for h, c in d["base"].items():
             acc = base.setdefault(h, {"up": 0, "down": 0, "flat": 0})
             for key in acc:
                 acc[key] += c.get(key, 0)
-    return {"sessions": len(days),
-            "measured": sum(1 for d in days if d.get("sigma") is not None),
-            "surges": [f for d in days for f in d["surges"]],
-            "reversals": [f for d in days for f in d["reversals"]],
+    sources = {"prior": 0, "today": 0, None: 0}
+    for d in kept:
+        src = d.get("sigma_source")
+        sources[src if src in sources else None] += 1
+    return {"sessions": len(kept), "excluded": len(days) - len(kept),
+            "measured": sum(1 for d in kept if d.get("sigma") is not None),
+            "sources": sources,
+            "surges": [f for d in kept for f in d["surges"]],
+            "reversals": [f for d in kept for f in d["reversals"]],
             "base": base}
 
 
@@ -392,11 +412,34 @@ def k_of_n(k, n):
     return s + (f" ({k / n * 100:.0f}%)" if n >= MIN_N_FOR_PCT else "")
 
 
-def _base_cell(base, side, h):
+def _base_kn(base, side, h):
     c = (base or {}).get(h) or {}
     n = c.get("up", 0) + c.get("down", 0)
-    k = c.get("up", 0) if side in _UP else c.get("down", 0)
-    return k_of_n(k, n)
+    return (c.get("up", 0) if side in _UP else c.get("down", 0)), n
+
+
+def _base_cell(base, side, h):
+    return k_of_n(*_base_kn(base, side, h))
+
+
+# Below this many decided tries the luck figure says nothing worth printing.
+MIN_N_FOR_LUCK = 5
+
+
+def chance_by_luck(k, n, p):
+    """P(at least ``k`` hits in ``n`` tries) when each try hits with
+    probability ``p`` (the same-direction base rate): the exact one-sided
+    binomial tail. None below MIN_N_FOR_LUCK tries or without a usable ``p``."""
+    p = _finite(p)
+    if p is None or not 0 <= p <= 1 or n < MIN_N_FOR_LUCK or not 0 <= k <= n:
+        return None
+    return sum(math.comb(n, i) * p ** i * (1 - p) ** (n - i) for i in range(k, n + 1))
+
+
+def _luck(x):
+    if x is None:
+        return DASH
+    return "<0.1%" if x < 0.001 else f"{x * 100:.1f}%"
 
 
 def _ct(ts):
@@ -420,25 +463,27 @@ def _outcome_table(L, signals, base, horizons, measured):
     """``signals`` = [(label, fires, sides, skipped)]; one row per signal, side
     and horizon, each beside the base rate for the SAME direction."""
     L += ["| Signal | Direction | Horizon | Hit rate | Flat | Same-direction base rate "
-          "| Mean return |", "|---|---|---|---|---|---|---|"]
+          "| Chance by luck | Mean move (signed) |", "|---|---|---|---|---|---|---|---|"]
     for label, fires, sides, skipped in signals:
         for side in sides:
             for h in horizons:
+                bk, bn = _base_kn(base, side, h)
                 if not measured or skipped:
-                    cells = (DASH, DASH, DASH)
+                    cells = (DASH, DASH, DASH, DASH)
                 else:
                     t = tally(fires, side, h)
                     if t["n"] + t["flat"] == 0:
-                        cells = ("no fires", DASH, DASH)
+                        cells = ("no fires", DASH, DASH, DASH)
                     else:
+                        luck = chance_by_luck(t["hits"], t["n"], bk / bn if bn else None)
                         cells = (k_of_n(t["hits"], t["n"]), str(t["flat"]),
-                                 _bp(t["mean"]))
+                                 _luck(luck), _bp(t["mean"]))
                 L.append(f"| {label} | {_SIDE_WORDS[side]} | {h} min | {cells[0]} | "
-                         f"{cells[1]} | {_base_cell(base, side, h)} | {cells[2]} |")
+                         f"{cells[1]} | {k_of_n(bk, bn)} | {cells[2]} | {cells[3]} |")
     L.append("")
 
 
-def _symbol_section(sym, s, pooled=None, keep=None):
+def _symbol_section(sym, s, pooled=None, keep=None, need=None):
     L = [f"## {sym}", ""]
     if s and "error" in s:
         L += [f"Skipped: {s['error']}", ""]
@@ -474,21 +519,30 @@ def _symbol_section(sym, s, pooled=None, keep=None):
     if s["events"]:
         hs = s["horizons"]
         L += ["| Time (CT) | Signal | Direction | Size | "
-              + " | ".join(f"{h} min" for h in hs) + " |",
+              + " | ".join(f"Move {h} min" for h in hs) + " |",
               "|---|---|---|---|" + "---|" * len(hs)]
         for e in s["events"]:
             L.append(f"| {_ct(e['ts'])} | {e['kind']} | {_SIDE_WORDS[e['side']]} | "
                      f"{e['size']} | " + " | ".join(_bp(e['fwd'][h]) for h in hs) + " |")
         L.append("")
-    if pooled:
+    if pooled and pooled["sessions"] > 1:
+        src = pooled["sources"]
+        left_out = ""
+        if pooled["excluded"]:
+            left_out = (f" {pooled['excluded']} older session(s) left out: fewer "
+                        f"than {need} sessions before them are still stored "
+                        f"(retention keeps {keep}), so the normal size live used "
+                        f"that day cannot be rebuilt.")
         L += [f"### Last {pooled['sessions']} sessions"
               + (f" (up to {keep} kept)" if keep else ""), "",
-              f"{pooled['measured']} of {pooled['sessions']} sessions had a normal "
-              f"size to measure against. Each day used the size live had that day. "
-              f"Surges and reversals are pooled SEPARATELY: they are correlated (a "
-              f"reversal often follows a surge), and so are fires within one "
-              f"session, so the counts below overstate how many independent tries "
-              f"there were.", ""]
+              f"Pooled {pooled['sessions']} sessions.{left_out} Normal size from "
+              f"the prior sessions on {src['prior']}, from that day's own minutes "
+              f"(as live had them each minute) on {src['today']}, and none, so the "
+              f"rules did not run, on {src[None]}. The base rate counts only days "
+              f"where the rules ran. Surges and reversals are pooled SEPARATELY: "
+              f"they are correlated (a reversal often follows a surge), and so are "
+              f"fires within one session, so the counts below overstate how many "
+              f"independent tries there were.", ""]
         signals = [(f"Surge at {k_live:.1f} (live)", pooled["surges"], SURGE_SIDES,
                     False),
                    (rev, pooled["reversals"], FLIP_SIDES, s.get("flips_skipped"))]
@@ -521,6 +575,13 @@ def build_report(day, per_symbol, cfg, notes=(), pooled=None):
          "most buying signals 'hit' by doing nothing. The phone push stays off "
          "until several sessions show hit rates well above their base rate at the "
          "live setting.", "",
+         "Moves are **signed**: + means the price moved the way the signal "
+         "pointed (up after a buying signal, down after a selling one), so a "
+         "positive mean is good for the signal whichever way it pointed.", "",
+         "**Chance by luck** is how likely at least that many hits would be if "
+         "each fire were a coin weighted to the day's base rate: small means "
+         "unlikely to be luck. Fires within one session are correlated, so treat "
+         f"it as optimistic. Shown from {MIN_N_FOR_LUCK} decided fires.", "",
          f"Live settings: Surge at {float(cfg['k']):.1f}× normal "
          f"(push at {float(cfg['push_k']):.1f}×), a {int(cfg['window_min'])}-minute "
          f"window, quiet {int(cfg['cooldown_min'])} minutes per direction; "
@@ -532,8 +593,9 @@ def build_report(day, per_symbol, cfg, notes=(), pooled=None):
     for n in notes:
         L += [f"**{n}**", ""]
     keep = cfg.get("keep_sessions")
+    need = cfg.get("baseline_sessions")
     for sym, s in per_symbol.items():
-        L += _symbol_section(sym, s, (pooled or {}).get(sym), keep)
+        L += _symbol_section(sym, s, (pooled or {}).get(sym), keep, need)
     return "\n".join(L)
 
 
@@ -657,6 +719,9 @@ def main(argv=None):
         failed = True
     for n in notes:
         print(n, file=sys.stderr)
+    if errored and measured:
+        print(f"{len(errored)} of {len(symbols)} symbols failed "
+              f"({', '.join(errored)}); the rest were reported.", file=sys.stderr)
 
     base = pathlib.Path(args.out) if args.out else OPTIONS_SCANNER / "data" / "hiro_report"
     out_dir = base / day.isoformat()
