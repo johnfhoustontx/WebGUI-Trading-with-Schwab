@@ -299,9 +299,12 @@ def _handler_class(nonce, token):
     # Tells the app this is a screenshot session, so it suppresses NiceGUI's
     # "Connection lost" banner -- which --virtual-time-budget provokes by racing
     # the client's socket.io heartbeat while the server pings on the wall clock.
-    # NOT HttpOnly-sensitive and carries no authority: shell.capture_chrome_css
-    # hides one cosmetic element and nothing else, and the public origin does
-    # not read it at all. See shell.CAPTURE_CHROME_CSS for why it is narrow.
+    # It also makes the render hide flow alerts stamped non-public (HIRO while
+    # [hiro].public is off), exactly as the public origin does, because these
+    # shots are published -- see shell.hides_non_public and the comment by
+    # shell.CAPTURE_COOKIE. It carries no authority: everything it changes
+    # REMOVES content (one cosmetic banner, non-public rows), and the public
+    # origin does not read it at all.
     capture_cookie = (f"{shell.CAPTURE_COOKIE}=1; Path=/; HttpOnly; "
                       f"SameSite=Lax")
 

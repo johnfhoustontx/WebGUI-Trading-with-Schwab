@@ -339,7 +339,12 @@ def _shown(alerts):
 
     This is the one filter: ``alert_rows`` (the Flow page, the Desk panel and
     its speech, the Symbol band) and ``status_text``'s count both go through
-    it, so a hidden alert cannot reach a published row OR count here."""
+    it, so a hidden alert cannot reach a published row OR count here.
+
+    ⚠ Call it on the event loop, inside a page build or a timer callback. The
+    capture check reads the current client's request; a worker thread
+    (``run.io_bound``) has no client, so a gallery capture would quietly stop
+    hiding. The public origin is unaffected (``is_public`` is process state)."""
     if not isinstance(alerts, list) or not _hiding():
         return alerts
     return [a for a in alerts
