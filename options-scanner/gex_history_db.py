@@ -116,6 +116,22 @@ CREATE INDEX IF NOT EXISTS idx_term_date ON gex_term_snapshots (substr(timestamp
 """
 
 
+# Per-minute HIRO-model hedge impact (services/options_svc/hiro.py). Its OWN
+# retention (purge_hiro), never purge_keep_sessions: the GEX grids keep 5
+# sessions in total, and the HIRO baseline needs 5 sessions BEFORE today.
+HIRO_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS hiro_minutes (
+    symbol            TEXT    NOT NULL,
+    ts                INTEGER NOT NULL,
+    spot              REAL,
+    impact            REAL    NOT NULL,
+    classified_vol    REAL    NOT NULL,
+    unclassified_vol  REAL    NOT NULL,
+    PRIMARY KEY (symbol, ts)
+);
+"""
+
+
 _GRID_SIG_FIGS = 6
 
 
@@ -275,12 +291,91 @@ def init_schema(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {col_type}")
     conn.commit()
     init_term_schema(conn)
+    init_hiro_schema(conn)
 
 
 def init_term_schema(conn: sqlite3.Connection) -> None:
     """Idempotent schema creation for the term-structure snapshots table."""
     conn.executescript(TERM_SCHEMA_SQL)
     conn.commit()
+
+
+def init_hiro_schema(conn: sqlite3.Connection) -> None:
+    """Idempotent schema creation for the hiro_minutes table."""
+    conn.executescript(HIRO_SCHEMA_SQL)
+    conn.commit()
+
+
+_HIRO_COLS = ("ts", "spot", "impact", "classified_vol", "unclassified_vol")
+
+
+def insert_hiro_row(conn: sqlite3.Connection, symbol: str, ts, row: dict) -> None:
+    """One minute of HIRO-model hedge impact (services/options_svc/hiro.py).
+    INSERT OR REPLACE: a re-run of the same minute overwrites, never doubles."""
+    conn.execute(
+        "INSERT OR REPLACE INTO hiro_minutes "
+        "(symbol, ts, spot, impact, classified_vol, unclassified_vol) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (symbol, int(ts), row.get("spot"), float(row["impact"]),
+         float(row["classified_vol"]), float(row["unclassified_vol"])))
+    conn.commit()
+
+
+def load_hiro_day(conn: sqlite3.Connection, symbol: str, d=None) -> list[dict]:
+    """Every hiro_minutes row for ``symbol`` on local date ``d`` (default
+    today), ascending by ts. Sargable ts range, like load_today."""
+    start, end = _local_unix_range(d)
+    cur = conn.execute(
+        "SELECT ts, spot, impact, classified_vol, unclassified_vol FROM hiro_minutes "
+        "WHERE symbol = ? AND ts >= ? AND ts < ? ORDER BY ts", (symbol, start, end))
+    return [dict(zip(_HIRO_COLS, r)) for r in cur.fetchall()]
+
+
+def _hiro_dates(conn: sqlite3.Connection, symbol: str | None = None) -> list[str]:
+    """Distinct local session-dates (YYYY-MM-DD) in hiro_minutes, newest first;
+    restricted to ``symbol`` when given."""
+    sql = "SELECT DISTINCT DATE(ts, 'unixepoch', 'localtime') AS d FROM hiro_minutes"
+    args: tuple = ()
+    if symbol is not None:
+        sql += " WHERE symbol = ?"
+        args = (symbol,)
+    cur = conn.execute(sql + " ORDER BY d DESC", args)
+    return [r[0] for r in cur.fetchall() if r[0] is not None]
+
+
+def load_hiro_prior_sessions(
+    conn: sqlite3.Connection, symbol: str, n: int, before=None,
+) -> list[list[dict]]:
+    """The last ``n`` stored sessions for ``symbol`` strictly BEFORE local date
+    ``before`` (default today), newest first, each a list of rows ascending.
+    A date stored only for another symbol is not a session of this one."""
+    before_s = (before or _dt.date.today()).isoformat()
+    out: list[list[dict]] = []
+    for ds in _hiro_dates(conn, symbol):
+        if ds >= before_s:
+            continue
+        if len(out) >= n:
+            break
+        y, m, dd = (int(x) for x in ds.split("-"))
+        out.append(load_hiro_day(conn, symbol, _dt.date(y, m, dd)))
+    return out
+
+
+def purge_hiro(conn: sqlite3.Connection, keep_sessions: int = 20) -> int:
+    """Keep the last ``keep_sessions`` distinct session-dates of hiro_minutes
+    (across all symbols); delete everything older. Returns rows deleted.
+
+    Separate from purge_keep_sessions on purpose: the GEX grids keep 5
+    sessions, and the HIRO baseline needs 5 sessions BEFORE today."""
+    keep_sessions = max(1, int(keep_sessions))
+    dates = _hiro_dates(conn)
+    if len(dates) <= keep_sessions:
+        return 0
+    y, m, dd = (int(x) for x in dates[keep_sessions - 1].split("-"))
+    cutoff, _ = _local_unix_range(_dt.date(y, m, dd))
+    cur = conn.execute("DELETE FROM hiro_minutes WHERE ts < ?", (cutoff,))
+    conn.commit()
+    return cur.rowcount or 0
 
 
 def insert_term_snapshot_rows(
