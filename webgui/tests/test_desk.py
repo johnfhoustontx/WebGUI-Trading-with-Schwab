@@ -3175,6 +3175,54 @@ def test_a_new_flow_alert_speaks_its_contract_from_the_raw_payload():
     assert said == "Q Q Q. Unusual volume, 0-D T E 7 37 Call."
 
 
+_RAW_HIRO = {"type": "hiro_surge", "side": "dealers_buying", "symbol": "SPY",
+             "ts": 1754750100, "spot": 571.2, "impact": 2.4e8, "mult": 3.6,
+             "window_min": 15, "unclassified_share": 0.1,
+             "id": "SPY|hiro_surge|dealers_buying|1754750100", "text": "t"}
+
+
+def test_a_quiet_alert_glows_but_the_desk_does_not_speak_it():
+    """``quiet`` is stamped by the service (HIRO while [hiro].push is off). The
+    Desk decides from the FLAG, not the type, so any future quiet alert is
+    silent too. The row still lights."""
+    s = d.arrival_state()
+    s["first"] = False
+    raw = {**_RAW_HIRO, "quiet": True}
+    assert d.fold_flow_arrivals(s, d.flow_rows({"alerts": [raw]}), now=1.0) is None
+    assert s["glow"] == {raw["id"]: (d.GLOW_NEW, 1.0)}
+
+
+def test_the_same_alert_with_quiet_false_is_spoken():
+    s = d.arrival_state()
+    s["first"] = False
+    raw = {**_RAW_HIRO, "quiet": False}
+    said = d.fold_flow_arrivals(s, d.flow_rows({"alerts": [raw]}), now=1.0)
+    assert said == "S P Y. Hedging surge alert, dealers buying."
+
+
+def test_an_alert_with_no_quiet_key_still_speaks():
+    """uoa / crossover carry no ``quiet`` today: existing behaviour unchanged."""
+    s = d.arrival_state()
+    s["first"] = False
+    raw = {"type": "crossover", "side": "calls_over", "symbol": "SPY",
+           "call_prem": 1.2e6, "put_prem": 4e5, "ts": 1, "id": "x"}
+    said = d.fold_flow_arrivals(s, d.flow_rows({"alerts": [raw]}), now=1.0)
+    assert said == "S P Y. Premium shift alert, calls over."
+
+
+def test_a_burst_names_and_counts_only_the_speakable_alerts():
+    """A quiet alert is neither the one named nor one of the "Plus N more"."""
+    s = d.arrival_state()
+    s["first"] = False
+    loud = {"type": "crossover", "side": "calls_over", "symbol": "QQQ", "ts": 1,
+            "id": "loud"}
+    quiet = {**_RAW_HIRO, "quiet": True}
+    # The service appends oldest-first, so the QUIET one is the newest row.
+    said = d.fold_flow_arrivals(s, d.flow_rows({"alerts": [loud, quiet]}), now=1.0)
+    assert said == "Q Q Q. Premium shift alert, calls over."
+    assert set(s["glow"]) == {"loud", quiet["id"]}
+
+
 def test_a_new_position_speaks_its_contract_from_the_raw_payload():
     """The expiration is deliberately far out so ``dte`` cannot reach 0 and turn
     the date into "0-D T E" — ``position_rows`` computes it against today."""

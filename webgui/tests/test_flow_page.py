@@ -380,6 +380,48 @@ def test_alert_rows_build_end_to_end_for_hiro():
     assert hs["strike"] is None and hs["dte"] is None and hs["share_pct"] is None
 
 
+# ── the service's quiet/public flags ─────────────────────────────────────────
+def _public(monkeypatch, on):
+    import shell
+    monkeypatch.setattr(shell, "is_public", lambda: on)
+
+
+def test_rows_carry_the_quiet_flag_only_when_it_is_really_true():
+    rows = {r["id"]: r for r in flow.alert_rows({"alerts": [
+        {**_HS, "id": "q", "quiet": True}, {**_HS, "id": "l", "quiet": False},
+        {**_HS, "id": "s", "quiet": "true"}, _XO]})}
+    assert rows["q"]["quiet"] is True
+    assert rows["l"]["quiet"] is False
+    assert rows["s"]["quiet"] is False           # only a real True silences
+    assert rows[_XO["id"]]["quiet"] is False     # no key: speaks as before
+
+
+def test_public_screens_hide_an_alert_marked_not_public(monkeypatch):
+    _public(monkeypatch, True)
+    view = {"alerts": [{**_HS, "id": "hidden", "public": False},
+                       {**_HF, "id": "shown", "public": True}, _XO]}
+    assert {r["id"] for r in flow.alert_rows(view)} == {"shown", _XO["id"]}
+
+
+def test_the_private_app_shows_every_alert(monkeypatch):
+    _public(monkeypatch, False)
+    view = {"alerts": [{**_HS, "id": "hidden", "public": False}, _XO]}
+    assert {r["id"] for r in flow.alert_rows(view)} == {"hidden", _XO["id"]}
+
+
+def test_the_public_status_line_counts_only_what_it_shows(monkeypatch):
+    """"2 alerts today" over a table of one would leak the hidden alert."""
+    view = {"date": "2026-10-01",
+            "alerts": [{**_HS, "id": "hidden", "public": False}, _XO]}
+    _public(monkeypatch, True)
+    assert flow.status_text(view) == "1 alert today · 2026-10-01"
+    only_hidden = {"date": "2026-10-01",
+                   "alerts": [{**_HS, "id": "hidden", "public": False}]}
+    assert flow.status_text(only_hidden).startswith("Nothing unusual has traded")
+    _public(monkeypatch, False)
+    assert flow.status_text(view) == "2 alerts today · 2026-10-01"
+
+
 def test_the_gamma_sides_moved_with_their_kind():
     """"Hedging flipped · To positive" would be LESS legible than the name it
     replaced: "to positive" is only interpretable once you know the subject is

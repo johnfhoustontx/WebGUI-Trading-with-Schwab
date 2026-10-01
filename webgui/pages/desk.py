@@ -1852,6 +1852,11 @@ def fold_flow_arrivals(state, rows, now):
     ONE sentence per paint however many arrived: the newest is named and the
     rest are counted ("Plus 2 more"). Six sentences queued back to back is a
     minute of talking over a moving tape.
+
+    A row flagged ``quiet`` (stamped by the service — today HIRO while
+    ``[hiro].push`` is off) glows like any arrival but is never spoken: it is
+    neither the one named nor one of the "N more". Decided by the FLAG, not the
+    alert type, so any future quiet alert is silent too.
     """
     ids = new_ids(rows, state["seen_flow"])
     state["seen_flow"] = id_set(rows)
@@ -1859,9 +1864,15 @@ def fold_flow_arrivals(state, rows, now):
         return None
     for rid in ids:
         state["glow"][rid] = (GLOW_NEW, now)
-    newest = next((r for r in rows
-                   if isinstance(r, dict) and r.get("id") == ids[0]), None)
-    return _utterance(newest, _voice.flow_phrase, len(ids) - 1)
+    by_id = {}
+    for r in rows:
+        if isinstance(r, dict):
+            by_id.setdefault(r.get("id"), r)    # first occurrence, as before
+    speakable = [rid for rid in ids if by_id.get(rid, {}).get("quiet") is not True]
+    if not speakable:
+        return None
+    return _utterance(by_id.get(speakable[0]), _voice.flow_phrase,
+                      len(speakable) - 1)
 
 
 def fold_position_arrivals(state, rows, now):

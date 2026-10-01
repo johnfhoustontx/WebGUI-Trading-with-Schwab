@@ -827,9 +827,11 @@ The two hedging rows DO name a direction, but it is a **model's estimate**: each
 trade's buyer or seller is inferred from where it printed against the quote,
 never observed — which is why their dollar figures carry a **≈** and their
 detail ends in **model**. They appear here, in the Desk's flow panel and on the
-Symbol page. They never chime or pop up a toast, and they reach your phone only
-if **Send hedging-flow pushes to the phone** is on in Settings → Configuration
-(it ships off).
+Symbol page. They never chime or pop up a toast. While **Send hedging-flow
+pushes to the phone** is off in Settings → Configuration (it ships off) they do
+not reach your phone and the Desk does not speak them. They are not shown on the
+public live screens unless **Show hedging-flow alerts on the public screens** is
+on (it ships off).
 
 **Age** tells you whether this just happened or is this morning's news. Filter by
 type or symbol, and **click a symbol** (the dotted underline) to open Dealer

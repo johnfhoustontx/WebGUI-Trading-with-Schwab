@@ -323,6 +323,28 @@ def _share_pct(a):
     return round(float(p) * 100, 1)
 
 
+def _on_public_origin():
+    """True in the process serving the public live screens. Imported lazily, as
+    ``render`` does, so this module's pure builders stay importable alone."""
+    import shell as _shell
+    return _shell.is_public()
+
+
+def _shown(alerts):
+    """The alerts THIS process may display. On the public origin an alert the
+    service stamped ``public: False`` (HIRO until ``[hiro].public`` is on) is
+    dropped; an alert with no ``public`` key stays, which is every older type.
+    The private app shows everything, and gets the list back UNCHANGED.
+
+    This is the one filter: ``alert_rows`` (the Flow page, the Desk panel and
+    its speech, the Symbol band) and ``status_text``'s count both go through
+    it, so a hidden alert cannot reach a public row OR a public count here."""
+    if not isinstance(alerts, list) or not _on_public_origin():
+        return alerts
+    return [a for a in alerts
+            if not (isinstance(a, dict) and a.get("public") is False)]
+
+
 def alert_rows(view):
     """Display rows, NEWEST FIRST. The service appends oldest-first.
 
@@ -331,7 +353,7 @@ def alert_rows(view):
     if not isinstance(alerts, list):
         return []
     rows = []
-    for a in alerts:
+    for a in _shown(alerts):
         if not isinstance(a, dict):
             continue
         ts = a.get("ts")
@@ -362,6 +384,10 @@ def alert_rows(view):
             "share_pct": _share_pct(a),     # numeric % for the sortable Share column
             "text": a.get("text", ""),
             "_tone_class": tone_class(a),
+            # Stamped by the service: an unvalidated alert the Desk must not
+            # speak (``desk.fold_flow_arrivals``). Only a real True silences;
+            # an alert with no flag speaks as it always has.
+            "quiet": a.get("quiet") is True,
         })
     rows.reverse()
     return rows
@@ -397,7 +423,7 @@ def status_text(view):
     and already the Desk's wording for its own empty flow panel."""
     if not isinstance(view, dict) or not view:
         return _copy.WAITING_OPTIONS
-    n = len(view.get("alerts") or [])
+    n = len(_shown(view.get("alerts")) or [])
     date = view.get("date") or ""
     if not n:
         return f"Nothing unusual has traded yet today · {date}".rstrip(" ·")
