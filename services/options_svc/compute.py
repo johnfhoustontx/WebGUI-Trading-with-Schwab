@@ -4330,6 +4330,78 @@ def take_big_delta_stash() -> dict:
     return out
 
 
+# HIRO model (docs/plans/2026-10-01-hiro-alert-design.md) — per-contract volume
+# memo carried between 1-min polls:
+#   date     the CT session date the memo belongs to; a new date clears it all,
+#            so the first poll of a day SEEDS rather than books (measure_chain)
+#   prev     {symbol: {contract symbol: totalVolume}} as of the last GOOD minute
+#   last_ts  {symbol: minute ts of that last good minute}
+# A plain module dict is safe: ``on_chain`` runs on the collector's CALLING
+# thread (gex_collector.poll_once fetches in a pool, then loops over the results
+# on its own thread), and only one collect runs at a time.
+_HIRO_MEMO: dict = {"date": None, "prev": {}, "last_ts": {}}
+
+# A symbol whose last good minute is more than this before the current one is
+# RE-SEEDED instead of measured: N missed minutes of volume booked into one
+# minute would carry one minute's bid/ask label — the same reason a restart
+# seeds. 150 s is ~2.5 polls of the 1-min cadence, so one dropped slot (120 s)
+# still books. A constant, not config: it follows the POLL CADENCE
+# (gex_collector.POLL_INTERVAL_MIN), not an operator's choice.
+HIRO_MAX_GAP_SEC = 150
+
+
+def reset_hiro_memo():
+    _HIRO_MEMO.update(date=None, prev={}, last_ts={})
+
+
+def hiro_tick_row(symbol, chain, session_date, now_ts):
+    """This minute's HIRO-model row for one symbol (or None), advancing the memo.
+
+    ``last_ts`` advances ONLY when a row is produced. A None row (unusable spot)
+    leaves ``prev`` at the last good minute — measure_chain returns it
+    unchanged — so the gap clock must measure from that same minute: a long run
+    of unusable chains then re-seeds rather than booking the whole run into the
+    next good minute, while one bad minute is bridged as an ordinary 120 s step.
+
+    Best-effort: never raises (a measurement failure must not break collection)."""
+    try:
+        from services.options_svc import hiro
+        if _HIRO_MEMO["date"] != session_date:
+            _HIRO_MEMO.update(date=session_date, prev={}, last_ts={})
+        last = _HIRO_MEMO["last_ts"].get(symbol)
+        if last is not None and now_ts - last > HIRO_MAX_GAP_SEC:
+            _HIRO_MEMO["prev"].pop(symbol, None)
+        row, new_prev = hiro.measure_chain(chain, _HIRO_MEMO["prev"].get(symbol, {}))
+        _HIRO_MEMO["prev"][symbol] = new_prev
+        if row is not None:
+            _HIRO_MEMO["last_ts"][symbol] = now_ts
+        return row
+    except Exception:
+        _degrade.degraded("options.hiro_tick_row", detail=symbol)
+        return None
+
+
+def _write_hiro_rows(gh, conn, ts_min, rows) -> None:
+    """Persist one minute's HIRO rows ``{symbol: row}``. Never raises.
+
+    ONE batch (one commit) normally. ``insert_hiro_rows`` validates every row
+    BEFORE writing any, so one bad row fails the whole batch — then fall back to
+    one insert per symbol, so that row alone is lost, not the minute for every
+    symbol."""
+    if not rows:
+        return
+    try:
+        gh.insert_hiro_rows(conn, [(s, ts_min, r) for s, r in rows.items()])
+        return
+    except Exception:
+        log.debug("hiro batch insert failed; falling back per symbol", exc_info=True)
+    for s, r in rows.items():
+        try:
+            gh.insert_hiro_row(conn, s, ts_min, r)
+        except Exception:
+            _degrade.degraded("options.hiro_insert", detail=s)
+
+
 def _rth_bounds(session_date):
     """(start_ts, end_ts) unix seconds bounding RTH on ``session_date`` in CT.
 
@@ -4669,7 +4741,19 @@ def _maybe_purge_gex(gh, conn) -> None:
         _LAST_PURGE_DATE = today
     except Exception:
         # Leave _LAST_PURGE_DATE unset so the next collect start retries.
-        pass
+        return
+    # HIRO minutes keep their OWN retention (the baseline needs prior sessions
+    # the GEX grids' 5 do not guarantee), and never fewer than baseline + today,
+    # so a keep set below the baseline cannot silently starve it. Separately
+    # guarded: a hiro failure neither breaks nor un-marks the GEX purge above.
+    try:
+        from services.options_svc import flow_alerts as _fa
+        _hcfg = _fa.load_thresholds().get("hiro", {})
+        keep = max(int(_hcfg.get("keep_sessions", 20)),
+                   int(_hcfg.get("baseline_sessions", 5)) + 1)
+        gh.purge_hiro(conn, keep_sessions=keep)
+    except Exception:
+        _degrade.degraded("options.purge_hiro")
 
 
 def _publish_eth_eligibility(seen) -> None:
@@ -4855,6 +4939,23 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         # big_delta has its OWN enabled flag (independent of the top-level UOA
         # switch above) — the whole detector is inert when [big_delta].enabled=false.
         _big_delta_on = _uoa_cfg.get("big_delta", {}).get("enabled", True)
+        # HIRO model (docs/plans/2026-10-01-hiro-alert-design.md): REGULAR
+        # session only -- off-hours the chain's underlyingPrice can be stale and
+        # index OI reads zero. Measured in on_chain (no extra fetch); the rows
+        # are written AFTER poll_once, on this write connection.
+        from services.options_svc import scheduler as _sched
+        from shared import market_calendar as _mc
+        _hiro_cfg = _uoa_cfg.get("hiro", {})
+        # Same clock _gth_symbols reads, so the two gates agree; a naive ``now``
+        # is CT (the project convention), made explicit before .timestamp().
+        _hiro_now = now if now is not None else _sched._market_now()
+        if _hiro_now.tzinfo is None:
+            _hiro_now = _hiro_now.replace(tzinfo=ZoneInfo("America/Chicago"))
+        _hiro_on = bool(_hiro_cfg.get("enabled", True)) and _mc.is_regular_hours(_hiro_now)
+        _hiro_syms = set(_hiro_cfg.get("symbols") or [])
+        _hiro_date = _hiro_now.astimezone(ZoneInfo("America/Chicago")).date().isoformat()
+        _hiro_ts = int(_hiro_now.timestamp()) // 60 * 60
+        _hiro_rows: dict = {}
         wanted = set(capture_symbols) if capture_symbols else set()
         _eth_seen: dict = {}
 
@@ -4876,9 +4977,15 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
                     stash_big_delta(sym, flow_alerts.detect_big_delta(sym, chain, _uoa_cfg))
                 except Exception:
                     gc.log.debug("big_delta detect failed for %s", sym, exc_info=True)
+            if _hiro_on and sym in _hiro_syms:
+                # hiro_tick_row never raises; a None row (unusable spot) is skipped.
+                _r = hiro_tick_row(sym, chain, _hiro_date, _hiro_ts)
+                if _r is not None:
+                    _hiro_rows[sym] = _r
 
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
                      symbols=symbols, on_chain=on_chain)
+        _write_hiro_rows(gh, conn, _hiro_ts, _hiro_rows)   # never raises
         gc.touch_lock(gc.LOCK_PATH, source="options_svc", owner=owner,
                       now=int(time.time()))
         try:

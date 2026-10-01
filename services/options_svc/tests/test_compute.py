@@ -6132,3 +6132,303 @@ def test_eod_briefing_hands_news_client_to_the_news_phase(monkeypatch):
     marker = object()
     compute.eod_briefing(client=_ToolClient("submit_eod"), news_client=marker)
     assert seen == [marker]
+
+
+# ── HIRO model: per-minute measurement during GEX collection ────────────────
+# docs/plans/2026-10-01-hiro-alert-design.md. Chains use Schwab's real shape
+# ("100.0" strike keys, putCall).
+
+def _hchain(vol, last=1.10, spot=500.0):
+    return {"underlyingPrice": spot,
+            "callExpDateMap": {"2026-10-02:1": {"100.0": [
+                {"putCall": "CALL", "symbol": "C1", "totalVolume": vol, "delta": 0.5,
+                 "last": last, "bid": 1.0, "ask": 1.1}]}},
+            "putExpDateMap": {}}
+
+
+def test_hiro_tick_row_seeds_then_books_and_resets_per_date():
+    compute.reset_hiro_memo()
+    assert compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)["impact"] == 0.0
+    row = compute.hiro_tick_row("SPY", _hchain(1010), "2026-10-01", 120)
+    assert row["impact"] == pytest.approx(250_000.0)
+    # a new session date clears the memo: first reading seeds again
+    assert compute.hiro_tick_row("SPY", _hchain(20), "2026-10-02", 180)["impact"] == 0.0
+    compute.reset_hiro_memo()
+
+
+def test_hiro_tick_row_never_raises():
+    compute.reset_hiro_memo()
+    assert compute.hiro_tick_row("SPY", None, "2026-10-01", 60) is None
+
+
+def test_hiro_tick_row_never_raises_and_degrades_on_an_internal_error(monkeypatch):
+    from services.options_svc import hiro
+    seen = []
+    monkeypatch.setattr(compute._degrade, "degraded",
+                        lambda area, **kw: seen.append(area))
+
+    def _boom(chain, prev):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(hiro, "measure_chain", _boom)
+    compute.reset_hiro_memo()
+    assert compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60) is None
+    assert seen == ["options.hiro_tick_row"]
+    compute.reset_hiro_memo()
+
+
+def test_hiro_max_gap_is_about_two_and_a_half_polls():
+    assert compute.HIRO_MAX_GAP_SEC == 150
+
+
+def test_hiro_tick_row_reseeds_after_a_gap_instead_of_booking_it():
+    """N missed minutes of volume must not be booked into ONE minute under ONE
+    minute's bid/ask label -- the same reasoning as the restart rule."""
+    compute.reset_hiro_memo()
+    compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)
+    late = 60 + compute.HIRO_MAX_GAP_SEC + 60
+    row = compute.hiro_tick_row("SPY", _hchain(1500), "2026-10-01", late)
+    assert row["impact"] == 0.0               # re-seeded, not 500 contracts booked
+    assert row["classified_vol"] == 0.0
+    # ...and the re-seeded baseline then books the normal next step
+    row = compute.hiro_tick_row("SPY", _hchain(1510), "2026-10-01", late + 60)
+    assert row["impact"] == pytest.approx(250_000.0)
+    compute.reset_hiro_memo()
+
+
+def test_hiro_tick_row_books_a_normal_step_and_one_missed_slot():
+    compute.reset_hiro_memo()
+    compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)
+    assert compute.hiro_tick_row("SPY", _hchain(1010), "2026-10-01", 120)["impact"] \
+        == pytest.approx(250_000.0)
+    # one dropped slot (120 s) is inside the tolerance: still booked
+    assert compute.hiro_tick_row("SPY", _hchain(1020), "2026-10-01", 240)["impact"] \
+        == pytest.approx(250_000.0)
+    # exactly at the limit still books; only MORE than it re-seeds
+    assert compute.hiro_tick_row(
+        "SPY", _hchain(1030), "2026-10-01", 240 + compute.HIRO_MAX_GAP_SEC
+    )["impact"] == pytest.approx(250_000.0)
+    compute.reset_hiro_memo()
+
+
+def test_hiro_unusable_spot_minutes_do_not_advance_the_gap_clock():
+    """A None row leaves the baseline at the last GOOD minute, so the gap clock
+    must measure from that minute too: a long run of unusable chains re-seeds
+    rather than booking the whole run into the next good minute."""
+    compute.reset_hiro_memo()
+    compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)
+    # three unusable minutes (spot 0) -- each yields no row
+    for t in (120, 180, 240):
+        assert compute.hiro_tick_row("SPY", _hchain(1100, spot=0.0),
+                                     "2026-10-01", t) is None
+    # next good minute is 240 s after the last good one (> 150): re-seed
+    row = compute.hiro_tick_row("SPY", _hchain(1200), "2026-10-01", 300)
+    assert row["impact"] == 0.0
+    compute.reset_hiro_memo()
+
+
+def test_hiro_one_unusable_minute_is_bridged_by_the_next_good_one():
+    compute.reset_hiro_memo()
+    compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)
+    assert compute.hiro_tick_row("SPY", _hchain(1005, spot=0.0), "2026-10-01", 120) is None
+    row = compute.hiro_tick_row("SPY", _hchain(1010), "2026-10-01", 180)
+    assert row["impact"] == pytest.approx(250_000.0)   # 120 s gap: booked
+    compute.reset_hiro_memo()
+
+
+def test_hiro_symbols_are_independent_in_the_memo():
+    compute.reset_hiro_memo()
+    compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)
+    # QQQ's first reading seeds even though SPY already has a baseline
+    assert compute.hiro_tick_row("QQQ", _hchain(5000), "2026-10-01", 60)["impact"] == 0.0
+    assert compute.hiro_tick_row("SPY", _hchain(1010), "2026-10-01", 120)["impact"] \
+        == pytest.approx(250_000.0)
+    assert compute.hiro_tick_row("QQQ", _hchain(5020), "2026-10-01", 120)["impact"] \
+        == pytest.approx(500_000.0)
+    # a gap on QQQ alone re-seeds QQQ only
+    assert compute.hiro_tick_row("SPY", _hchain(1020), "2026-10-01", 180)["impact"] \
+        == pytest.approx(250_000.0)
+    assert compute.hiro_tick_row("QQQ", _hchain(5030), "2026-10-01", 600)["impact"] == 0.0
+    compute.reset_hiro_memo()
+
+
+# Retention: purge_hiro rides the once-a-day GEX purge.
+
+def _fake_purge_gh(calls, *, hiro_boom=False):
+    import types as _types
+
+    def _purge(conn, keep_sessions=5):
+        calls.append(("gex", keep_sessions))
+
+    def _purge_hiro(conn, keep_sessions=20):
+        if hiro_boom:
+            raise RuntimeError("hiro table locked")
+        calls.append(("hiro", keep_sessions))
+    return _types.SimpleNamespace(purge_keep_sessions=_purge, purge_hiro=_purge_hiro)
+
+
+def _hiro_cfg(monkeypatch, keep, baseline):
+    from services.options_svc import flow_alerts
+    monkeypatch.setattr(flow_alerts, "load_thresholds", lambda: {
+        "hiro": {"keep_sessions": keep, "baseline_sessions": baseline}})
+
+
+def test_maybe_purge_gex_also_purges_hiro_with_its_own_retention(monkeypatch):
+    monkeypatch.setattr(compute, "_LAST_PURGE_DATE", None)
+    _hiro_cfg(monkeypatch, keep=20, baseline=5)
+    calls = []
+    compute._maybe_purge_gex(_fake_purge_gh(calls), object())
+    assert calls == [("gex", compute.GEX_KEEP_SESSIONS), ("hiro", 20)]
+
+
+def test_maybe_purge_gex_never_lets_hiro_keep_starve_the_baseline(monkeypatch):
+    """keep_sessions set below the baseline would delete the sessions the
+    baseline reads; the purge keeps at least baseline + 1 (today)."""
+    monkeypatch.setattr(compute, "_LAST_PURGE_DATE", None)
+    _hiro_cfg(monkeypatch, keep=3, baseline=5)
+    calls = []
+    compute._maybe_purge_gex(_fake_purge_gh(calls), object())
+    assert ("hiro", 6) in calls
+
+
+def test_maybe_purge_gex_hiro_failure_neither_raises_nor_unmarks_the_gex_purge(
+        monkeypatch):
+    import datetime as _dtm
+    monkeypatch.setattr(compute, "_LAST_PURGE_DATE", None)
+    _hiro_cfg(monkeypatch, keep=20, baseline=5)
+    seen = []
+    monkeypatch.setattr(compute._degrade, "degraded",
+                        lambda area, **kw: seen.append(area))
+    calls = []
+    compute._maybe_purge_gex(_fake_purge_gh(calls, hiro_boom=True), object())
+    assert calls == [("gex", compute.GEX_KEEP_SESSIONS)]
+    assert compute._LAST_PURGE_DATE == _dtm.date.today()
+    assert seen == ["options.purge_hiro"]
+
+
+# Writing the minute: one batch, per-row fallback.
+
+class _HiroGh:
+    def __init__(self, batch_boom=False, bad=()):
+        self.batch_boom, self.bad = batch_boom, set(bad)
+        self.batches, self.singles = [], []
+
+    def insert_hiro_rows(self, conn, items):
+        items = list(items)
+        if self.batch_boom:
+            raise ValueError("a non-finite impact somewhere in the batch")
+        self.batches.append(items)
+
+    def insert_hiro_row(self, conn, symbol, ts, row):
+        if symbol in self.bad:
+            raise ValueError(f"bad row for {symbol}")
+        self.singles.append((symbol, ts, row))
+
+
+def test_write_hiro_rows_writes_the_minute_in_one_batch():
+    gh = _HiroGh()
+    rows = {"SPY": {"impact": 1.0}, "QQQ": {"impact": 2.0}}
+    compute._write_hiro_rows(gh, object(), 600, rows)
+    assert len(gh.batches) == 1
+    assert sorted(gh.batches[0]) == sorted([("SPY", 600, rows["SPY"]),
+                                            ("QQQ", 600, rows["QQQ"])])
+    assert gh.singles == []
+
+
+def test_write_hiro_rows_falls_back_per_symbol_and_one_bad_row_loses_only_itself(
+        monkeypatch):
+    seen = []
+    monkeypatch.setattr(compute._degrade, "degraded",
+                        lambda area, **kw: seen.append((area, kw.get("detail"))))
+    gh = _HiroGh(batch_boom=True, bad={"SPY"})
+    rows = {"SPY": {"impact": float("inf")}, "QQQ": {"impact": 2.0},
+            "IWM": {"impact": 3.0}}
+    compute._write_hiro_rows(gh, object(), 600, rows)     # must not raise
+    assert sorted(s for s, _, _ in gh.singles) == ["IWM", "QQQ"]
+    assert [a for a, _ in seen] == ["options.hiro_insert"]
+    assert seen[0][1] == "SPY"
+
+
+def test_write_hiro_rows_with_nothing_to_write_touches_nothing():
+    gh = _HiroGh()
+    compute._write_hiro_rows(gh, object(), 600, {})
+    assert gh.batches == [] and gh.singles == []
+
+
+def test_write_hiro_rows_never_raises_when_the_module_lacks_the_writers(monkeypatch):
+    import types as _types
+    seen = []
+    monkeypatch.setattr(compute._degrade, "degraded",
+                        lambda area, **kw: seen.append(area))
+    compute._write_hiro_rows(_types.SimpleNamespace(), object(), 600,
+                             {"SPY": {"impact": 1.0}})
+    assert seen == ["options.hiro_insert"]
+
+
+# Wiring: regular session only.
+
+def _hiro_ct(h, m):
+    import datetime as _dtm
+    from zoneinfo import ZoneInfo as _ZI
+    return _dtm.datetime(2026, 8, 17, h, m, tzinfo=_ZI("America/Chicago"))
+
+
+def test_collect_gex_snapshots_records_hiro_rows_in_regular_hours(monkeypatch):
+    import sys as _sys
+    now = _hiro_ct(10, 0)
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True, now=now,
+                              chains={"SPY": _hchain(1000), "NVDA": _hchain(7)})
+    monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
+    gh = _HiroGh()
+    _sys.modules["gex_history_db"].insert_hiro_rows = gh.insert_hiro_rows
+    _sys.modules["gex_history_db"].insert_hiro_row = gh.insert_hiro_row
+    compute.reset_hiro_memo()
+
+    compute.collect_gex_snapshots(now=now)
+
+    assert calls["poll"] is True
+    assert len(gh.batches) == 1
+    (sym, ts, row), = gh.batches[0]                 # NVDA is not a [hiro] symbol
+    assert sym == "SPY"
+    assert ts == int(now.timestamp()) // 60 * 60
+    assert row["impact"] == 0.0                      # first reading of the day seeds
+    compute.reset_hiro_memo()
+
+
+def test_collect_gex_snapshots_records_no_hiro_rows_outside_regular_hours(monkeypatch):
+    """15:10 CT is inside the collection window but past the regular close:
+    off-hours the chain's underlyingPrice is stale and index OI reads zero."""
+    import sys as _sys
+    now = _hiro_ct(15, 10)
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True, now=now,
+                              chains={"SPY": _hchain(1000)})
+    monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
+    gh = _HiroGh()
+    _sys.modules["gex_history_db"].insert_hiro_rows = gh.insert_hiro_rows
+    _sys.modules["gex_history_db"].insert_hiro_row = gh.insert_hiro_row
+    compute.reset_hiro_memo()
+
+    compute.collect_gex_snapshots(now=now)
+
+    assert calls["poll"] is True                     # collection itself still ran
+    assert gh.batches == [] and gh.singles == []
+    assert compute._HIRO_MEMO["prev"] == {}          # nothing measured either
+    compute.reset_hiro_memo()
+
+
+def test_collect_gex_snapshots_hiro_write_failure_never_breaks_collection(monkeypatch):
+    import sys as _sys
+    now = _hiro_ct(10, 0)
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True, now=now,
+                              chains={"SPY": _hchain(1000)})
+    monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
+    monkeypatch.setattr(compute._degrade, "degraded", lambda area, **kw: None)
+    gh = _HiroGh(batch_boom=True, bad={"SPY"})
+    _sys.modules["gex_history_db"].insert_hiro_rows = gh.insert_hiro_rows
+    _sys.modules["gex_history_db"].insert_hiro_row = gh.insert_hiro_row
+    compute.reset_hiro_memo()
+
+    n = compute.collect_gex_snapshots(now=now)
+
+    assert n == 3
+    assert calls["touched"] is True and calls["closed"] is True
+    compute.reset_hiro_memo()
