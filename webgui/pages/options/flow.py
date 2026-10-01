@@ -21,10 +21,10 @@ calling that stale would report a working feed as broken.
 from __future__ import annotations
 
 import datetime as _dt
-import math
 from zoneinfo import ZoneInfo
 
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
+from pages import fmt as _fmt    # the shared numeric vocabulary (``num``)
 from shared.symbols import clean_symbol
 
 VIEW = "options:flow_alerts"
@@ -173,58 +173,66 @@ def _money(v):
     return f"${v:,.0f}"
 
 
-def _finite(v):
-    """``v`` as a finite float, else None (a bool, NaN or infinity is no reading)."""
-    if isinstance(v, bool):
-        return None
-    try:
-        v = float(v)
-    except (TypeError, ValueError):
-        return None
-    return v if math.isfinite(v) else None
-
-
 def _hiro_money(v):
     """Signed dollars with a B form ($SPX hedging runs to billions): $2.40B /
     -$310.00M / -$4k. '' when unusable. Page-local: Tier 1 cannot import the
-    service's formatter."""
-    v = _finite(v)
+    service's formatter. A value that ROUNDS to zero carries no sign — "-$0"
+    would read as a direction the number does not have."""
+    v = _fmt.num(v)
     if v is None:
         return ""
-    sign = "-" if v < 0 else ""
     if abs(v) >= 999_500_000:            # rounds to >= $1.00B -> use the B form
-        return f"{sign}${abs(v)/1e9:.2f}B"
-    return sign + _money(abs(v))
+        body = f"${abs(v)/1e9:.2f}B"
+    else:
+        body = _money(abs(v))
+    return ("-" + body) if v < 0 and body != "$0" else body
+
+
+def _approx(money):
+    """``≈`` in front of a modelled dollar figure. A negative takes a space
+    (``≈ -$310.00M``) so the sign stays legible rather than fusing with the
+    ``≈`` into one glyph-cluster; a positive takes none (``≈$2.40B``)."""
+    return f"≈ {money}" if money.startswith("-") else f"≈{money}"
+
+
+# Every HIRO detail cell ends with this. The Desk's flow panel and the Symbol
+# page draw ``detail``, not the alert's own text, so the "this is a model"
+# qualifier must ride the detail or those two surfaces lose it.
+_HIRO_MODEL = "model"
 
 
 def _hiro_detail(d):
     """The two HIRO detail cells. A missing or non-finite reading DROPS its
     clause rather than printing an invented zero ("0% unlabelled", "spot 0");
-    the headline dollar figure is the one thing the row cannot do without."""
+    the headline dollar figure is the one thing the row cannot do without.
+    Dollar figures carry ``≈`` and the cell ends in "model": every number here
+    is an estimate of hedging nobody observed."""
     if d.get("type") == "hiro_surge":
-        impact = _finite(d.get("impact"))
+        impact = _fmt.num(d.get("impact"))
         if impact is None:
             return ""
-        head = _hiro_money(abs(impact))
-        window = _finite(d.get("window_min"))
+        head = _approx(_hiro_money(abs(impact)))
+        window = _fmt.num(d.get("window_min"))
         if window is not None and window > 0:
             head += f" in {window:g} min"
         parts = [head]
-        mult = _finite(d.get("mult"))
+        mult = _fmt.num(d.get("mult"))
         if mult is not None:
             parts.append(f"{mult:.1f}× normal")
-        share = _finite(d.get("unclassified_share"))
+        share = _fmt.num(d.get("unclassified_share"))
         if share is not None:
             parts.append(f"{share:.0%} unlabelled")
+        parts.append(_HIRO_MODEL)
         return " · ".join(parts)
-    cum = _finite(d.get("cum"))
+    cum = _fmt.num(d.get("cum"))
     if cum is None:
         return ""
-    out = f"running total {_hiro_money(cum)}"
-    spot = _finite(d.get("spot"))
+    parts = [f"running total {_approx(_hiro_money(cum))}"]
+    spot = _fmt.num(d.get("spot"))
     if spot is not None:
-        out += f" · spot {spot:g}"
-    return out
+        parts.append(f"spot {spot:g}")
+    parts.append(_HIRO_MODEL)
+    return " · ".join(parts)
 
 
 def _exp_short(expiry, dte):

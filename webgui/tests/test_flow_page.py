@@ -315,27 +315,40 @@ def test_hiro_the_other_two_sides_label_and_tone_the_other_way():
 
 
 def test_hiro_detail_cells():
-    assert flow.alert_detail(_HS) == "$2.40B in 15 min · 3.6× normal · 18% unlabelled"
-    assert flow.alert_detail(_HF) == "running total -$310.00M · spot 571.2"
+    assert flow.alert_detail(_HS) == \
+        "≈$2.40B in 15 min · 3.6× normal · 18% unlabelled · model"
+    assert flow.alert_detail(_HF) == "running total ≈ -$310.00M · spot 571.2 · model"
     assert flow.alert_detail({"type": "hiro_surge"}) == ""
     assert flow.alert_detail({"type": "hiro_flip"}) == ""
+
+
+def test_hiro_detail_says_model_on_every_surface():
+    """The Desk flow panel and the Symbol page draw ``detail`` and not the
+    alert text, so the "it is a model" qualifier has to live in the detail."""
+    assert flow.alert_detail(_HS).endswith(" · model")
+    assert flow.alert_detail(_HF).endswith(" · model")
+    assert flow.alert_detail({**_HF, "cum": 2.0e8}) == \
+        "running total ≈$200.00M · spot 571.2 · model"
 
 
 def test_hiro_detail_never_prints_an_invented_zero():
     """A missing reading drops its clause; it never renders as 0% / spot 0."""
     no_share = {k: v for k, v in _HS.items() if k != "unclassified_share"}
-    assert flow.alert_detail(no_share) == "$2.40B in 15 min · 3.6× normal"
+    assert flow.alert_detail(no_share) == "≈$2.40B in 15 min · 3.6× normal · model"
     assert "0%" not in flow.alert_detail({**_HS, "unclassified_share": None})
-    assert flow.alert_detail({**_HF, "spot": None}) == "running total -$310.00M"
+    assert flow.alert_detail({**_HF, "spot": None}) == \
+        "running total ≈ -$310.00M · model"
 
 
 def test_hiro_detail_treats_non_finite_numbers_as_missing():
     nan, inf = float("nan"), float("inf")
     assert flow.alert_detail({**_HS, "impact": nan}) == ""
     assert flow.alert_detail({**_HS, "unclassified_share": nan}) == \
-        "$2.40B in 15 min · 3.6× normal"
+        "≈$2.40B in 15 min · 3.6× normal · model"
     assert flow.alert_detail({**_HF, "cum": inf}) == ""
-    assert flow.alert_detail({**_HF, "spot": nan}) == "running total -$310.00M"
+    assert flow.alert_detail({**_HF, "spot": nan}) == \
+        "running total ≈ -$310.00M · model"
+    assert flow.alert_detail({**_HS, "impact": True}) == ""      # a bool is no reading
 
 
 def test_hiro_money_signs_and_scales():
@@ -346,14 +359,22 @@ def test_hiro_money_signs_and_scales():
     assert flow._hiro_money(float("nan")) == ""
 
 
+def test_hiro_money_never_prints_minus_zero():
+    """A value that rounds to zero carries no sign: "-$0" reads as a direction."""
+    assert flow._hiro_money(-0.4) == "$0"
+    assert flow._hiro_money(-0.0) == "$0"
+    assert flow._hiro_money(0.3) == "$0"
+    assert flow._hiro_money(-0.6) == "-$1"
+
+
 def test_alert_rows_build_end_to_end_for_hiro():
     rows = {r["_kind_key"]: r for r in flow.alert_rows({"alerts": [_HS, _HF]})}
     hs, hf = rows["hiro_surge"], rows["hiro_flip"]
     assert hs["symbol"] == "$SPX" and hs["kind"] == "Hedging surge"
-    assert hs["detail"].startswith("$2.40B in 15 min")
+    assert hs["detail"].startswith("≈$2.40B in 15 min")
     assert hs["_tone_class"] == flow._TONE_POS
     assert hf["symbol"] == "SPY" and hf["kind"] == "Hedging reversal"
-    assert hf["detail"].startswith("running total -$310.00M")
+    assert hf["detail"].startswith("running total ≈ -$310.00M")
     assert hf["_tone_class"] == flow._TONE_NEG
     # A model of the stock hedge, not a contract: nothing to speak as a contract.
     assert hs["strike"] is None and hs["dte"] is None and hs["share_pct"] is None

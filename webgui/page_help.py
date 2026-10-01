@@ -825,7 +825,11 @@ The first four cannot tell a **buy** from a **sell** — Schwab publishes no opt
 tape — so read those rows as "something large happened here", not as a direction.
 The two hedging rows DO name a direction, but it is a **model's estimate**: each
 trade's buyer or seller is inferred from where it printed against the quote,
-never observed. They show here only; they do not chime or go to your phone yet.
+never observed — which is why their dollar figures carry a **≈** and their
+detail ends in **model**. They appear here, in the Desk's flow panel and on the
+Symbol page. They never chime or pop up a toast, and they reach your phone only
+if **Send hedging-flow pushes to the phone** is on in Settings → Configuration
+(it ships off).
 
 **Age** tells you whether this just happened or is this morning's news. Filter by
 type or symbol, and **click a symbol** (the dotted underline) to open Dealer
