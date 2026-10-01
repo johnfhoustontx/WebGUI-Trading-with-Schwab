@@ -2904,6 +2904,34 @@ def test_run_flow_alerts_hiro_surge_and_flip_count_two_for_hotness(monkeypatch):
     assert compute._count_flow_alerts(cd, "2026-10-01") == {"SPY": 2}
 
 
+def _hiro_flags(monkeypatch, cfg_over=None):
+    rows = _hrows(_HIRO_BOTH)
+    bus, handlers, _ = _hiro_setup(monkeypatch, rows, _HIRO_PRIOR, cfg_over)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: rows[-1]["ts"])
+    handlers.run_flow_alerts(bus)
+    got = {a["type"]: (a.get("quiet"), a.get("public")) for a in _hiro_alerts(bus)}
+    assert set(got) == {"hiro_surge", "hiro_flip"}
+    return got
+
+
+def test_hiro_alerts_ship_quiet_and_off_the_public_screens(monkeypatch):
+    """Default config: both flags stamped on BOTH kinds. Tier 1 reads the flags,
+    never the services' config."""
+    got = _hiro_flags(monkeypatch)
+    assert got == {"hiro_surge": (True, False), "hiro_flip": (True, False)}
+
+
+def test_hiro_alerts_follow_push_and_public_when_both_are_on(monkeypatch):
+    got = _hiro_flags(monkeypatch, {"push": True, "public": True})
+    assert got == {"hiro_surge": (False, True), "hiro_flip": (False, True)}
+
+
+def test_hiro_flags_fail_closed_on_a_truthy_non_bool(monkeypatch):
+    """A string "true" is not True: quiet stays on and public stays off."""
+    got = _hiro_flags(monkeypatch, {"push": "true", "public": "true"})
+    assert got == {"hiro_surge": (True, False), "hiro_flip": (True, False)}
+
+
 def test_run_flow_alerts_hiro_stale_rows_do_not_fire(monkeypatch):
     """The handler passes the clock: rows ten minutes old fire neither rule."""
     rows = _hrows(_HIRO_BOTH)

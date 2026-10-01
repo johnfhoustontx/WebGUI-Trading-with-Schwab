@@ -83,6 +83,7 @@ top_n = 3                 # most-significant contracts per symbol per tick (by d
 # Every value below is a STARTING GUESS until tools/hiro_report.py has measured it.
 enabled = true            # measure + detect
 push    = false           # PHONE gate. false = Flow screen only (ship state).
+public  = false           # show HIRO alerts on the public live screens; off until the daily report validates it
 symbols = ["$SPX", "SPY", "QQQ", "IWM"]
 window_min = 15           # Surge window: rolling sum of hedge impact over this many minutes
 k = 3.0                   # Surge fires at >= k x the symbol's normal 15-min size (RMS)

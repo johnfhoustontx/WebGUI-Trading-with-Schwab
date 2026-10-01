@@ -2198,6 +2198,12 @@ def _run_hiro(conn, cfg, bus, today, cooldowns, now_ts):
         if not isinstance(h, dict) or h.get("enabled") is not True or conn is None:
             return []
         symbols = _hiro_symbols(h)
+        # Stamped on every alert so Tier 1 decides from the ALERT, never from
+        # this service's config: ``quiet`` = unvalidated (no phone push, and the
+        # Desk does not speak it); ``public`` = may appear on the public live
+        # screens. Both fail closed: only a real True opens either.
+        flags = {"quiet": h.get("push") is not True,
+                 "public": h.get("public") is True}
         day = _dt.date.fromisoformat(today)     # the CT session date, not the host's
         flips_on = h.get("flip_enabled") is True
         not_before = None
@@ -2229,6 +2235,7 @@ def _run_hiro(conn, cfg, bus, today, cooldowns, now_ts):
                                                 h["cooldown_min"] * 60):
                     a["id"] = f"{key}|{int(a['ts'])}"
                     a["text"] = flow_alerts.alert_text(a)
+                    a.update(flags)
                     cooldowns[key] = now_ts
                     out.append(a)
 
@@ -2243,6 +2250,7 @@ def _run_hiro(conn, cfg, bus, today, cooldowns, now_ts):
                                                     h["flip_cooldown_min"] * 60):
                         f["id"] = f"{sym}|hiro_flip|{f['side']}|{int(f['ts'])}"
                         f["text"] = flow_alerts.alert_text(f)
+                        f.update(flags)
                         cooldowns[key] = now_ts
                         out.append(f)
 

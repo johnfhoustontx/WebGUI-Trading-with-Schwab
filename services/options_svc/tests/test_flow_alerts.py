@@ -414,6 +414,7 @@ def test_load_thresholds_has_hiro_defaults(tmp_path, monkeypatch):
     h = flow_alerts.load_thresholds()["hiro"]
     assert h["enabled"] is True
     assert h["push"] is False                     # screen-only at ship
+    assert h["public"] is False                   # off the public screens at ship
     assert h["symbols"] == ["$SPX", "SPY", "QQQ", "IWM"]
     assert h["window_min"] == 15 and h["k"] == 3.0 and h["push_k"] == 4.0
     assert h["min_notional"] == 25_000_000

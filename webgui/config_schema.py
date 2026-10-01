@@ -379,7 +379,11 @@ _FLOW = ConfigFile(
                 "per minute.", (
             Field("hiro.enabled", "Hedging-flow alerts on", "", kind="bool"),
             Field("hiro.push", "Send hedging-flow pushes to the phone",
-                  "Off = on screen only, never pushed.", kind="bool"),
+                  "Off = on screen only, never pushed, and the Desk does not speak "
+                  "them.", kind="bool"),
+            Field("hiro.public", "Show hedging-flow alerts on the public screens",
+                  "Off = they appear in this app only, never on the public live "
+                  "screens.", kind="bool"),
             Field("hiro.symbols", "Symbols watched", "", kind="symbols"),
             Field("hiro.window_min", "Surge window", "", kind="int", unit="min",
                   min=5, max=60, step=1),

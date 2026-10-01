@@ -37,8 +37,10 @@ _DEFAULTS = {
                   "delta_hi": 0.85, "delta_max": 1.0, "top_n": 3},
     # HIRO-style dealer hedging flow (docs/plans/2026-10-01-hiro-alert-design.md).
     # A MODEL of SpotGamma's HIRO from the 1-min chain poll: Schwab has no tape, so
-    # each contract gets one buy/sell label per minute. push=false = Flow screen only.
-    "hiro": {"enabled": True, "push": False,
+    # each contract gets one buy/sell label per minute. push=false = no phone push
+    # and (via the alert's ``quiet`` flag) no Desk speech; public=false = the
+    # alerts are hidden on the public live screens (the alert's ``public`` flag).
+    "hiro": {"enabled": True, "push": False, "public": False,
              "symbols": ["$SPX", "SPY", "QQQ", "IWM"],
              "window_min": 15, "k": 3.0, "push_k": 4.0,
              "min_notional": 25_000_000, "max_unclassified": 0.5,
