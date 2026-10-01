@@ -34,6 +34,16 @@ _DEFAULTS = {
                   "push_threshold": 0.35,
                   "min_contract_notional": 10_000_000, "delta_lo": 0.05,
                   "delta_hi": 0.85, "delta_max": 1.0, "top_n": 3},
+    # HIRO-style dealer hedging flow (docs/plans/2026-10-01-hiro-alert-design.md).
+    # A MODEL of SpotGamma's HIRO from the 1-min chain poll: Schwab has no tape, so
+    # each contract gets one buy/sell label per minute. push=false = Flow screen only.
+    "hiro": {"enabled": True, "push": False,
+             "symbols": ["$SPX", "SPY", "QQQ", "IWM"],
+             "window_min": 15, "k": 3.0, "push_k": 4.0,
+             "min_notional": 25_000_000, "max_unclassified": 0.5,
+             "cooldown_min": 30, "baseline_sessions": 5, "min_minutes": 30,
+             "flip_enabled": True, "flip_band": 1.0, "flip_not_before": "09:00",
+             "flip_cooldown_min": 60, "keep_sessions": 20},
 }
 
 

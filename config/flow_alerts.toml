@@ -75,3 +75,25 @@ delta_lo = 0.05           # delta band low  — drop near-zero delta (noise)
 delta_hi = 0.85           # delta band high — drop deep-ITM (stock-replacement / assignment)
 delta_max = 1.0           # sentinel guard  — drop |delta| > 1 (Schwab's -999 no-value)
 top_n = 3                 # most-significant contracts per symbol per tick (by delta-notional)
+
+[hiro]
+# HIRO-style dealer hedging flow -- a MODEL of SpotGamma's HIRO built from the 1-min
+# chain poll (Schwab publishes no trade tape, so each contract gets ONE buy/sell label
+# per minute). Design: docs/plans/2026-10-01-hiro-alert-design.md.
+# Every value below is a STARTING GUESS until tools/hiro_report.py has measured it.
+enabled = true            # measure + detect
+push    = false           # PHONE gate. false = Flow screen only (ship state).
+symbols = ["$SPX", "SPY", "QQQ", "IWM"]
+window_min = 15           # Surge window: rolling sum of hedge impact over this many minutes
+k = 3.0                   # Surge fires at >= k x the symbol's normal 15-min size (RMS)
+push_k = 4.0              # ...and is PHONE-pushed only at >= push_k x (needs push = true)
+min_notional = 25000000   # ...and the window's |impact| is at least this ($) -- dead-tape guard
+max_unclassified = 0.5    # skip when more than this share of the window's volume had no buy/sell label
+cooldown_min = 30         # per symbol and direction
+baseline_sessions = 5     # "normal size" = prior sessions used; fewer stored -> today's data
+min_minutes = 30          # today-fallback needs at least this many minutes of rows
+flip_enabled = true       # Hedging reversal: the day's running total changes sign
+flip_band = 1.0           # dead zone around zero, in multiples of normal 15-min size
+flip_not_before = "09:00" # CT -- the first half hour crosses zero constantly
+flip_cooldown_min = 60    # per symbol
+keep_sessions = 20        # hiro_minutes retention (the GEX snapshots keep only 5)

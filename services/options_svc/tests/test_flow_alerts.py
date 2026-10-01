@@ -404,3 +404,21 @@ def test_detect_uoa_nan_mark_falls_back_to_bid_ask():
         {"totalVolume": 500, "openInterest": 100, "mark": nan,
          "bid": 1.0, "ask": 1.2}), _uoa_cfg())
     assert len(out) == 1 and out[0]["premium"] == 55000.0
+
+
+def test_load_thresholds_has_hiro_defaults(tmp_path, monkeypatch):
+    monkeypatch.setattr(flow_alerts, "_TOML_PATH", tmp_path / "missing.toml")
+    flow_alerts.reset_thresholds_cache()
+    h = flow_alerts.load_thresholds()["hiro"]
+    assert h["enabled"] is True
+    assert h["push"] is False                     # screen-only at ship
+    assert h["symbols"] == ["$SPX", "SPY", "QQQ", "IWM"]
+    assert h["window_min"] == 15 and h["k"] == 3.0 and h["push_k"] == 4.0
+    assert h["min_notional"] == 25_000_000
+    assert h["max_unclassified"] == 0.5
+    assert h["cooldown_min"] == 30
+    assert h["baseline_sessions"] == 5 and h["min_minutes"] == 30
+    assert h["flip_enabled"] is True and h["flip_band"] == 1.0
+    assert h["flip_not_before"] == "09:00" and h["flip_cooldown_min"] == 60
+    assert h["keep_sessions"] == 20
+    flow_alerts.reset_thresholds_cache()
