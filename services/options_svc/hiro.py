@@ -41,3 +41,64 @@ def classify_side(last, bid, ask) -> int:
     if last < mid:
         return -1
     return 0
+
+
+def _contracts(chain):
+    """Yield every contract dict in a Schwab chain. Total over malformed input."""
+    for mapkey in ("callExpDateMap", "putExpDateMap"):
+        exp_map = chain.get(mapkey)
+        if not isinstance(exp_map, dict):
+            continue
+        for strike_map in exp_map.values():
+            if not isinstance(strike_map, dict):
+                continue
+            for contracts in strike_map.values():
+                if not isinstance(contracts, list):
+                    continue
+                for c in contracts:
+                    if isinstance(c, dict):
+                        yield c
+
+
+def measure_chain(chain, prev_vol):
+    """One minute of hedge impact for one symbol.
+
+    ``prev_vol`` is ``{contract symbol: totalVolume}`` from the previous poll.
+    Returns ``(row, new_prev)``; ``row`` is ``{"spot", "impact",
+    "classified_vol", "unclassified_vol"}`` or None when the chain has no usable
+    spot (then ``new_prev`` is ``prev_vol`` unchanged, so the next good minute
+    books the volume rather than losing it).
+
+    A contract's FIRST reading only seeds the baseline: after a restart it must
+    never book the whole day's volume into one minute."""
+    prev_vol = dict(prev_vol or {})
+    if not isinstance(chain, dict):
+        return None, prev_vol
+    spot = _finite(chain.get("underlyingPrice"))
+    if spot is None or spot <= 0:
+        return None, prev_vol
+    new_prev = dict(prev_vol)
+    impact = classified = unclassified = 0.0
+    for c in _contracts(chain):
+        osi = c.get("symbol")
+        vol = _finite(c.get("totalVolume"))
+        if not osi or vol is None:
+            continue
+        before = new_prev.get(osi)
+        new_prev[osi] = vol
+        if before is None:
+            continue
+        dv = vol - before
+        if dv <= 0:
+            continue
+        delta = _finite(c.get("delta"))
+        if delta is None or abs(delta) > 1:      # NaN / Schwab's -999 sentinel
+            continue
+        side = classify_side(c.get("last"), c.get("bid"), c.get("ask"))
+        if side == 0:
+            unclassified += dv
+            continue
+        classified += dv
+        impact += side * delta * dv * 100.0 * spot
+    return ({"spot": spot, "impact": impact, "classified_vol": classified,
+             "unclassified_vol": unclassified}, new_prev)

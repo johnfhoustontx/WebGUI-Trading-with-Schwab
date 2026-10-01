@@ -27,3 +27,72 @@ def test_classify_side_quote_rule(last, bid, ask, want):
 ])
 def test_classify_side_unusable_quote_is_unclassified(last, bid, ask):
     assert hiro.classify_side(last, bid, ask) == 0
+
+
+def _c(osi, vol, delta, last, bid=1.00, ask=1.10):
+    return {"symbol": osi, "totalVolume": vol, "delta": delta,
+            "last": last, "bid": bid, "ask": ask}
+
+
+def _chain(calls=(), puts=(), spot=500.0):
+    def emap(cs):
+        return {"2026-10-02:1": {str(100 + i): [c] for i, c in enumerate(cs)}}
+    return {"underlyingPrice": spot, "callExpDateMap": emap(calls),
+            "putExpDateMap": emap(puts)}
+
+
+def test_measure_first_sight_seeds_baseline_and_books_nothing():
+    chain = _chain(calls=[_c("C1", 1000, 0.5, 1.10)])
+    row, prev = hiro.measure_chain(chain, {})
+    assert prev == {"C1": 1000.0}
+    assert row["impact"] == 0.0 and row["classified_vol"] == 0.0
+    assert row["unclassified_vol"] == 0.0 and row["spot"] == 500.0
+
+
+def test_measure_signs_call_and_put_buys_correctly():
+    prev = {"C1": 1000.0, "P1": 50.0}
+    chain = _chain(calls=[_c("C1", 1010, 0.5, 1.10)],      # 10 bought at ask
+                   puts=[_c("P1", 54, -0.4, 1.10)])        # 4 bought at ask
+    row, new_prev = hiro.measure_chain(chain, prev)
+    # call: +1 * 0.5 * 10 * 100 * 500 = +250,000 ; put: +1 * -0.4 * 4 * 100 * 500 = -80,000
+    assert row["impact"] == pytest.approx(170_000.0)
+    assert row["classified_vol"] == 14.0
+    assert new_prev == {"C1": 1010.0, "P1": 54.0}
+
+
+def test_measure_customer_sell_of_call_is_dealer_selling():
+    row, _ = hiro.measure_chain(_chain(calls=[_c("C1", 1010, 0.5, 1.00)]), {"C1": 1000.0})
+    assert row["impact"] == pytest.approx(-250_000.0)
+
+
+def test_measure_mid_print_is_unclassified_and_contributes_nothing():
+    row, _ = hiro.measure_chain(_chain(calls=[_c("C1", 1010, 0.5, 1.05)]), {"C1": 1000.0})
+    assert row["impact"] == 0.0
+    assert row["unclassified_vol"] == 10.0 and row["classified_vol"] == 0.0
+
+
+@pytest.mark.parametrize("delta", [math.nan, -999.0, 1.5, None, True])
+def test_measure_drops_bad_delta(delta):
+    row, prev = hiro.measure_chain(_chain(calls=[_c("C1", 1010, delta, 1.10)]), {"C1": 1000.0})
+    assert row["impact"] == 0.0
+    assert row["classified_vol"] == 0.0 and row["unclassified_vol"] == 0.0
+    assert prev["C1"] == 1010.0           # baseline still advances
+
+
+def test_measure_volume_reset_books_nothing():
+    row, prev = hiro.measure_chain(_chain(calls=[_c("C1", 5, 0.5, 1.10)]), {"C1": 1000.0})
+    assert row["impact"] == 0.0 and prev["C1"] == 5.0
+
+
+@pytest.mark.parametrize("spot", [None, 0, -1, math.nan])
+def test_measure_unusable_spot_returns_no_row(spot):
+    chain = _chain(calls=[_c("C1", 1010, 0.5, 1.10)], spot=spot)
+    row, prev = hiro.measure_chain(chain, {"C1": 1000.0})
+    assert row is None
+    assert prev == {"C1": 1000.0}          # nothing consumed: the next good minute books it
+
+
+@pytest.mark.parametrize("bad", [None, {}, "x", {"callExpDateMap": "x", "underlyingPrice": 500}])
+def test_measure_malformed_chain_is_total(bad):
+    row, prev = hiro.measure_chain(bad, {})
+    assert prev == {}
