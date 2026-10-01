@@ -122,3 +122,78 @@ def measure_chain(chain, prev_vol):
         impact += side * delta * dv * 100.0 * spot
     return ({"spot": spot, "impact": impact, "classified_vol": classified,
              "unclassified_vol": unclassified}, new_prev)
+
+
+# --- Surge ------------------------------------------------------------------
+# Rows are the stored ``hiro_minutes`` rows, ASC by ts. A seeding minute is never
+# stored, so every row is a real measurement. A missing minute (restart gap)
+# simply contributes nothing to a wall-clock window.
+
+def window_sum(rows, end_ts, window_sec):
+    """Sum of the rows with ``end_ts - window_sec < ts <= end_ts``."""
+    w = [r for r in rows if end_ts - window_sec < r["ts"] <= end_ts]
+    impact = sum(r["impact"] for r in w)
+    cls = sum(r["classified_vol"] for r in w)
+    uncl = sum(r["unclassified_vol"] for r in w)
+    total = cls + uncl
+    return {"impact": impact, "n": len(w),
+            "unclassified_share": (uncl / total) if total > 0 else None}
+
+
+def full_window_sums(rows, window_sec):
+    """The window sum ending at every row whose window lies wholly inside the
+    session (the first ``window`` minutes give partial sums, which would shrink
+    the baseline). "Inside" is measured from the first STORED row. Rows are ASC;
+    O(n x window), fine for ~390 rows."""
+    if not rows:
+        return []
+    first = rows[0]["ts"]
+    return [window_sum(rows, r["ts"], window_sec)["impact"]
+            for r in rows if r["ts"] - first >= window_sec - 60]
+
+
+def rms(values):
+    """Root-mean-square of the finite values, or None (none, or all zero).
+    RMS, not a standard deviation: hedging flow's centre is zero, and a
+    day-long drift is the signal, not noise to subtract."""
+    vals = [v for v in (_finite(x) for x in values) if v is not None]
+    if not vals:
+        return None
+    s = math.sqrt(sum(v * v for v in vals) / len(vals))
+    return s if s > 0 else None
+
+
+def baseline_sigma(prior_sessions, today_rows, cfg):
+    """A symbol's normal 15-minute size. Prior sessions (newest first) when at
+    least ``baseline_sessions`` exist; else today's full windows once there are
+    ``min_minutes`` rows; else None (the rules do not run)."""
+    window = int(cfg["window_min"]) * 60
+    need = int(cfg["baseline_sessions"])
+    if len(prior_sessions) >= need:
+        return rms([v for s in prior_sessions[:need] for v in full_window_sums(s, window)])
+    if len(today_rows) >= int(cfg["min_minutes"]):
+        return rms(full_window_sums(today_rows, window))
+    return None
+
+
+def detect_surge(symbol, today_rows, sigma, cfg):
+    """A ``hiro_surge`` alert dict for the window ending at the latest row, or
+    None. No cooldown here — the handler owns that, as for every flow detector."""
+    if not today_rows or sigma is None or sigma <= 0:
+        return None
+    last = today_rows[-1]
+    w = window_sum(today_rows, last["ts"], int(cfg["window_min"]) * 60)
+    share = w["unclassified_share"]
+    if share is None or share > cfg["max_unclassified"]:
+        return None
+    imp = w["impact"]
+    if abs(imp) < cfg["min_notional"]:
+        return None
+    mult = abs(imp) / sigma
+    if mult < cfg["k"]:
+        return None
+    return {"type": "hiro_surge",
+            "side": "dealers_buying" if imp > 0 else "dealers_selling",
+            "symbol": symbol, "ts": last["ts"], "spot": last["spot"],
+            "impact": imp, "mult": mult, "window_min": int(cfg["window_min"]),
+            "unclassified_share": share}

@@ -157,3 +157,94 @@ def test_measure_mixed_labelled_and_mid_prints_fill_both_counters():
     row, _ = hiro.measure_chain(chain, {"C1": 1000.0, "C2": 500.0})
     assert row["classified_vol"] == 10.0 and row["unclassified_vol"] == 6.0
     assert row["impact"] == pytest.approx(250_000.0)
+
+
+def test_measure_duplicate_contract_books_once():
+    """The same OSI listed twice (under two strikes) books its new volume ONCE:
+    the second copy reads the baseline the first just wrote, so it adds 0."""
+    chain = _chain(calls=[_c("C1", 1010, 0.5, 1.10), _c("C1", 1010, 0.5, 1.10)])
+    row, prev = hiro.measure_chain(chain, {"C1": 1000.0})
+    assert row["classified_vol"] == 10.0
+    assert row["impact"] == pytest.approx(250_000.0)
+    assert prev == {"C1": 1010.0}
+
+
+# --- Surge -----------------------------------------------------------------
+
+CFG = {"window_min": 15, "k": 3.0, "min_notional": 1_000_000,
+       "max_unclassified": 0.5, "baseline_sessions": 2, "min_minutes": 30,
+       "flip_band": 1.0}
+
+
+def _rows(impacts, t0=36000, spot=500.0, uncl=0.0):
+    return [{"ts": t0 + 60 * i, "spot": spot, "impact": float(x),
+             "classified_vol": 10.0, "unclassified_vol": uncl}
+            for i, x in enumerate(impacts)]
+
+
+def test_window_sum_covers_last_n_minutes_only():
+    rows = _rows([1, 2, 3, 4])
+    w = hiro.window_sum(rows, rows[-1]["ts"], 120)      # last 2 minutes
+    assert w["impact"] == 7.0 and w["n"] == 2
+
+
+def test_window_sum_unclassified_share():
+    rows = _rows([1, 1], uncl=10.0)
+    assert hiro.window_sum(rows, rows[-1]["ts"], 900)["unclassified_share"] == 0.5
+
+
+def test_full_window_sums_skip_partial_windows():
+    rows = _rows([1] * 20)
+    sums = hiro.full_window_sums(rows, 900)
+    assert len(sums) == 6 and all(s == 15.0 for s in sums)
+
+
+def test_rms_ignores_nonfinite_and_rejects_zero():
+    assert hiro.rms([3.0, -4.0]) == pytest.approx(math.sqrt(12.5))
+    assert hiro.rms([math.nan, 3.0]) == 3.0
+    assert hiro.rms([]) is None and hiro.rms([0.0, 0.0]) is None
+
+
+def test_baseline_prefers_prior_sessions():
+    prior = [_rows([1e6] * 20), _rows([-1e6] * 20)]
+    sigma = hiro.baseline_sigma(prior, _rows([9e9] * 40), CFG)
+    assert sigma == pytest.approx(15e6)                # today's spike not used
+
+
+def test_baseline_falls_back_to_today_then_none():
+    assert hiro.baseline_sigma([], _rows([1e6] * 30), CFG) == pytest.approx(15e6)
+    assert hiro.baseline_sigma([], _rows([1e6] * 29), CFG) is None
+
+
+def test_baseline_partial_prior_history_is_not_mixed_in():
+    """Fewer prior sessions than baseline_sessions -> today alone, never a blend."""
+    prior = [_rows([9e9] * 20)]
+    assert hiro.baseline_sigma(prior, _rows([1e6] * 30), CFG) == pytest.approx(15e6)
+
+
+def test_baseline_prior_sessions_with_no_full_window_is_none():
+    prior = [_rows([1e6] * 5), _rows([1e6] * 5)]       # each shorter than a window
+    assert hiro.baseline_sigma(prior, _rows([1e6] * 40), CFG) is None
+
+
+def test_surge_fires_dealers_buying_above_k():
+    rows = _rows([0] * 15 + [4e6] * 15)                 # last 15m = 60e6
+    a = hiro.detect_surge("SPY", rows, 15e6, CFG)
+    assert a["type"] == "hiro_surge" and a["side"] == "dealers_buying"
+    assert a["impact"] == 60e6 and a["mult"] == pytest.approx(4.0)
+    assert a["ts"] == rows[-1]["ts"] and a["spot"] == 500.0
+    assert a["unclassified_share"] == 0.0 and a["window_min"] == 15
+
+
+def test_surge_selling_side():
+    a = hiro.detect_surge("SPY", _rows([-4e6] * 15), 15e6, CFG)
+    assert a["side"] == "dealers_selling"
+
+
+def test_surge_silent_below_k_below_floor_unlabelled_or_no_sigma():
+    assert hiro.detect_surge("SPY", _rows([2e6] * 15), 15e6, CFG) is None   # 2x
+    small = {**CFG, "min_notional": 1e9}
+    assert hiro.detect_surge("SPY", _rows([4e6] * 15), 15e6, small) is None
+    assert hiro.detect_surge("SPY", _rows([4e6] * 15, uncl=20.0), 15e6, CFG) is None
+    assert hiro.detect_surge("SPY", _rows([4e6] * 15), None, CFG) is None
+    assert hiro.detect_surge("SPY", [], 15e6, CFG) is None
