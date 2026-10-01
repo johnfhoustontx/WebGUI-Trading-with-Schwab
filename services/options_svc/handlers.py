@@ -17,6 +17,7 @@ import base64
 import binascii
 import datetime as _dt
 import logging
+import math
 import threading
 import time
 
@@ -25,6 +26,8 @@ from services.options_svc import compute
 from services.options_svc import dossier
 from services.options_svc import flow_alerts
 from services.options_svc import gamma_public
+# HIRO-model hedging flow rules (design 2026-10-01). Pure, stdlib only.
+from services.options_svc import hiro
 from services.options_svc import push_notify
 # Rate my trade (design 2026-09-16): the Calculator's legs graded by the
 # Strategy Finder's own scorer.
@@ -544,6 +547,10 @@ EVENT_NET_PREMIUM = "events:options:net_premium"
 CACHE_FLOW_ALERTS = "cache:options:flow_alerts"
 EVENT_FLOW_ALERTS = "events:options:flow_alerts"
 _FLOW_COOLDOWN_KEY = "cache:options:flow_alert_cooldowns"
+# HIRO-model dealer hedging flow: a small per-symbol summary for the screen
+# (docs/plans/2026-10-01-hiro-alert-design.md). Its alerts join CACHE_FLOW_ALERTS.
+CACHE_HIRO = "cache:options:hiro"
+EVENT_HIRO = "events:options:hiro"
 # Per-symbol last-alerted gamma regime ('positive'/'negative'), date-scoped so the
 # first snapshot each day sets the baseline without firing an open-time alert.
 _GAMMA_REGIME_KEY = "cache:options:gamma_regime_state"
@@ -2106,6 +2113,149 @@ def _run_gamma_flip(conn, cfg, bus, today, cooldowns, now_ts, universe):
     return out
 
 
+def _load_hiro_today(conn, symbol):
+    """Today's stored hiro_minutes rows for one symbol (ASC) over an already-open
+    read-only connection. Defensive → []."""
+    try:
+        import gex_history_db as gh
+        return gh.load_hiro_day(conn, symbol)
+    except Exception:
+        log.debug("load_hiro_day degraded for %s", symbol, exc_info=True)
+        return []
+
+
+def _load_hiro_prior(conn, symbol, n):
+    """The last ``n`` stored sessions before today for one symbol (newest
+    first). Defensive → []."""
+    try:
+        import gex_history_db as gh
+        return gh.load_hiro_prior_sessions(conn, symbol, n)
+    except Exception:
+        log.debug("load_hiro_prior_sessions degraded for %s", symbol, exc_info=True)
+        return []
+
+
+# The prior-session HIRO baseline cannot change within a day, and recomputing it
+# (5 sessions x ~390 rows of O(n^2) window sums) cost ~0.15 s a tick for four
+# symbols. Keyed (symbol, today, window_min, baseline_sessions); ONLY a usable
+# prior sigma is stored. A None (too little history) is never cached: today's
+# fallback moves every minute, and it must not hide history that arrives later.
+_HIRO_SIGMA_MEMO: dict = {}
+_HIRO_SIGMA_LOCK = threading.Lock()
+
+
+def reset_hiro_sigma_memo():
+    """Drop the per-day prior-sigma memo (test helper)."""
+    with _HIRO_SIGMA_LOCK:
+        _HIRO_SIGMA_MEMO.clear()
+
+
+def _hiro_sigma(conn, sym, rows, h, today):
+    """A symbol's baseline sigma: the memoized prior-session sigma when there is
+    one, else today's own full windows (``hiro.baseline_sigma`` with no prior)."""
+    key = (sym, today, int(h["window_min"]), int(h["baseline_sessions"]))
+    with _HIRO_SIGMA_LOCK:
+        cached = _HIRO_SIGMA_MEMO.get(key)
+    if cached is not None:
+        return cached
+    prior = _load_hiro_prior(conn, sym, int(h["baseline_sessions"]))
+    sigma = hiro.prior_sigma(prior, h)
+    if isinstance(sigma, float) and math.isfinite(sigma) and sigma > 0:
+        with _HIRO_SIGMA_LOCK:
+            for k in [k for k in _HIRO_SIGMA_MEMO if k[1] != today]:
+                del _HIRO_SIGMA_MEMO[k]
+            _HIRO_SIGMA_MEMO[key] = sigma
+        return sigma
+    return hiro.baseline_sigma([], rows, h)
+
+
+def _hiro_symbols(h):
+    """The [hiro] symbols with collection's tolerance: a list/tuple of strings,
+    a bare string as one symbol, anything else nothing."""
+    raw = h.get("symbols")
+    if isinstance(raw, str):
+        raw = [raw]
+    if not isinstance(raw, (list, tuple)):
+        return []
+    return [s for s in raw if isinstance(s, str)]
+
+
+def _run_hiro(conn, cfg, bus, today, cooldowns, now_ts):
+    """HIRO-model Surge + Reversal for the [hiro] symbols; returns fresh alerts
+    and publishes the small cache:options:hiro view. Best-effort -> [], never
+    raises; one symbol's failure degrades and the next still runs.
+
+    The reversal's seen marker is ``hiro_flip_seen:<SYM>`` -- deliberately with
+    no ``|``: compute._count_flow_alerts counts every ``SYMBOL|...`` key in the
+    cooldown map as one alert (Hotness, the EOD briefing), so a ``|`` marker
+    would count every reversal twice. The surge and flip COOLDOWN keys do count,
+    as crossover's per-symbol key does. Design:
+    docs/plans/2026-10-01-hiro-alert-design.md."""
+    try:
+        h = cfg.get("hiro") if isinstance(cfg, dict) else None
+        if not isinstance(h, dict) or h.get("enabled") is not True or conn is None:
+            return []
+        symbols = _hiro_symbols(h)
+        flips_on = h.get("flip_enabled") is True
+        not_before = None
+        if flips_on:
+            try:
+                not_before = hiro.ct_ts(today, h.get("flip_not_before", "09:00"))
+            except Exception:
+                _degrade.degraded("options.run_hiro.flip_not_before",
+                                  detail=repr(h.get("flip_not_before")))
+                flips_on = False
+    except Exception:
+        _degrade.degraded("options.run_hiro.setup")
+        return []
+
+    out, view = [], {}
+    for sym in symbols:
+        try:
+            rows = _load_hiro_today(conn, sym)
+            if not rows:
+                continue
+            sigma = _hiro_sigma(conn, sym, rows, h, today)
+
+            a = hiro.detect_surge(sym, rows, sigma, h, now_ts=now_ts)
+            if a:
+                key = f"{sym}|hiro_surge|{a['side']}"
+                if not flow_alerts._on_cooldown(cooldowns, key, now_ts,
+                                                h["cooldown_min"] * 60):
+                    cooldowns[key] = now_ts
+                    a["id"] = f"{key}|{int(a['ts'])}"
+                    a["text"] = flow_alerts.alert_text(a)
+                    out.append(a)
+
+            if flips_on:
+                seen_key = f"hiro_flip_seen:{sym}"
+                f = hiro.detect_flip(sym, rows, sigma, h, not_before,
+                                     cooldowns.get(seen_key), now_ts=now_ts)
+                if f:
+                    cooldowns[seen_key] = f["ts"]       # seen once, fired or not
+                    key = f"{sym}|hiro_flip"
+                    if not flow_alerts._on_cooldown(cooldowns, key, now_ts,
+                                                    h["flip_cooldown_min"] * 60):
+                        cooldowns[key] = now_ts
+                        f["id"] = f"{sym}|hiro_flip|{f['side']}|{int(f['ts'])}"
+                        f["text"] = flow_alerts.alert_text(f)
+                        out.append(f)
+
+            view[sym] = hiro.symbol_view(rows, sigma, h)
+        except Exception:
+            _degrade.degraded("options.run_hiro", detail=sym)
+
+    # Only once a symbol has a stored minute: an empty view says nothing the
+    # missing key does not, and would rewrite the key every quiet minute.
+    if view:
+        try:
+            bus.cache_set(CACHE_HIRO, {"date": today, "symbols": view},
+                          event=EVENT_HIRO, skip_unchanged=True)
+        except Exception:
+            _degrade.degraded("options.run_hiro.publish")
+    return out
+
+
 def _flow_now_ts():
     import time
     return int(time.time())
@@ -2162,6 +2312,9 @@ def run_flow_alerts(bus) -> None:
             # Dealer gamma-regime flips (spot crossing the flip level) — reuses the
             # same open read-only connection + cooldown map.
             fresh.extend(_run_gamma_flip(conn, cfg, bus, today, cooldowns, now_ts, allowed))
+            # HIRO-model hedging flow (Surge + Reversal) — same open read-only conn
+            # and cooldown map; returns [] when [hiro] is off or conn is None.
+            fresh.extend(_run_hiro(conn, cfg, bus, today, cooldowns, now_ts))
         finally:
             if conn is not None:
                 try:
@@ -2211,6 +2364,10 @@ def run_flow_alerts(bus) -> None:
             # flow_alerts.big_delta_should_push. Every other alert type is unaffected.
             for a in fresh:
                 if a.get("type") == "big_delta" and not flow_alerts.big_delta_should_push(a, cfg):
+                    continue
+                # HIRO: same screen-always / phone-gated split ([hiro].push, push_k).
+                if (a.get("type") in flow_alerts.HIRO_TYPES
+                        and not flow_alerts.hiro_should_push(a, cfg)):
                     continue
                 try:
                     push_notify.send_flow_alert(a, config=push_cfg)
