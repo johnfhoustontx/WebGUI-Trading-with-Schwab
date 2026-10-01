@@ -3530,7 +3530,8 @@ def _fake_gex_modules(monkeypatch, *, lock_ok=True, chains=None, now=None):
 
     fake_gh = _types.SimpleNamespace(connect=lambda: _Conn(),
                                      init_schema=lambda conn: None,
-                                     purge_keep_sessions=_purge)
+                                     purge_keep_sessions=_purge,
+                                     purge_hiro=lambda conn, keep_sessions=20: 0)
     fake_gt = _types.SimpleNamespace(GammaEngine=lambda: "ENGINE")
     monkeypatch.setitem(_sys.modules, "gex_collector", fake_gc)
     monkeypatch.setitem(_sys.modules, "gex_history_db", fake_gh)
@@ -6148,11 +6149,11 @@ def _hchain(vol, last=1.10, spot=500.0):
 
 def test_hiro_tick_row_seeds_then_books_and_resets_per_date():
     compute.reset_hiro_memo()
-    assert compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)["impact"] == 0.0
+    assert compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60) is None
     row = compute.hiro_tick_row("SPY", _hchain(1010), "2026-10-01", 120)
     assert row["impact"] == pytest.approx(250_000.0)
     # a new session date clears the memo: first reading seeds again
-    assert compute.hiro_tick_row("SPY", _hchain(20), "2026-10-02", 180)["impact"] == 0.0
+    assert compute.hiro_tick_row("SPY", _hchain(20), "2026-10-02", 180) is None
     compute.reset_hiro_memo()
 
 
@@ -6187,8 +6188,7 @@ def test_hiro_tick_row_reseeds_after_a_gap_instead_of_booking_it():
     compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)
     late = 60 + compute.HIRO_MAX_GAP_SEC + 60
     row = compute.hiro_tick_row("SPY", _hchain(1500), "2026-10-01", late)
-    assert row["impact"] == 0.0               # re-seeded, not 500 contracts booked
-    assert row["classified_vol"] == 0.0
+    assert row is None                        # re-seeded, not 500 contracts booked
     # ...and the re-seeded baseline then books the normal next step
     row = compute.hiro_tick_row("SPY", _hchain(1510), "2026-10-01", late + 60)
     assert row["impact"] == pytest.approx(250_000.0)
@@ -6222,7 +6222,7 @@ def test_hiro_unusable_spot_minutes_do_not_advance_the_gap_clock():
                                      "2026-10-01", t) is None
     # next good minute is 240 s after the last good one (> 150): re-seed
     row = compute.hiro_tick_row("SPY", _hchain(1200), "2026-10-01", 300)
-    assert row["impact"] == 0.0
+    assert row is None
     compute.reset_hiro_memo()
 
 
@@ -6239,7 +6239,7 @@ def test_hiro_symbols_are_independent_in_the_memo():
     compute.reset_hiro_memo()
     compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)
     # QQQ's first reading seeds even though SPY already has a baseline
-    assert compute.hiro_tick_row("QQQ", _hchain(5000), "2026-10-01", 60)["impact"] == 0.0
+    assert compute.hiro_tick_row("QQQ", _hchain(5000), "2026-10-01", 60) is None
     assert compute.hiro_tick_row("SPY", _hchain(1010), "2026-10-01", 120)["impact"] \
         == pytest.approx(250_000.0)
     assert compute.hiro_tick_row("QQQ", _hchain(5020), "2026-10-01", 120)["impact"] \
@@ -6247,7 +6247,36 @@ def test_hiro_symbols_are_independent_in_the_memo():
     # a gap on QQQ alone re-seeds QQQ only
     assert compute.hiro_tick_row("SPY", _hchain(1020), "2026-10-01", 180)["impact"] \
         == pytest.approx(250_000.0)
-    assert compute.hiro_tick_row("QQQ", _hchain(5030), "2026-10-01", 600)["impact"] == 0.0
+    assert compute.hiro_tick_row("QQQ", _hchain(5030), "2026-10-01", 600) is None
+    compute.reset_hiro_memo()
+
+
+def test_hiro_seed_minute_still_advances_the_gap_clock():
+    """The trap: if last_ts advanced only when a row is RETURNED, the seed after
+    a gap (which returns None) would leave the clock stale, and every minute
+    after it would re-seed forever and never book."""
+    compute.reset_hiro_memo()
+    compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)
+    late = 60 + compute.HIRO_MAX_GAP_SEC + 60
+    assert compute.hiro_tick_row("SPY", _hchain(1500), "2026-10-01", late) is None
+    for i, t in enumerate((late + 60, late + 120), start=1):
+        row = compute.hiro_tick_row("SPY", _hchain(1500 + 10 * i), "2026-10-01", t)
+        assert row is not None and row["impact"] == pytest.approx(250_000.0)
+    compute.reset_hiro_memo()
+
+
+def test_hiro_partial_seed_is_still_a_real_row():
+    """Only a PURE seed (no baseline at all for the symbol) writes nothing; a
+    minute where a new contract appears beside booking ones is a real row."""
+    compute.reset_hiro_memo()
+    compute.hiro_tick_row("SPY", _hchain(1000), "2026-10-01", 60)
+    chain = _hchain(1010)
+    chain["callExpDateMap"]["2026-10-02:1"]["101.0"] = [
+        {"putCall": "CALL", "symbol": "C2", "totalVolume": 50, "delta": 0.4,
+         "last": 0.9, "bid": 0.8, "ask": 0.9}]
+    row = compute.hiro_tick_row("SPY", chain, "2026-10-01", 120)
+    assert row is not None
+    assert row["impact"] == pytest.approx(250_000.0)   # C1's 10; C2 only seeds
     compute.reset_hiro_memo()
 
 
@@ -6375,8 +6404,8 @@ def _hiro_ct(h, m):
 def test_collect_gex_snapshots_records_hiro_rows_in_regular_hours(monkeypatch):
     import sys as _sys
     now = _hiro_ct(10, 0)
-    calls = _fake_gex_modules(monkeypatch, lock_ok=True, now=now,
-                              chains={"SPY": _hchain(1000), "NVDA": _hchain(7)})
+    chains = {"SPY": _hchain(1000), "NVDA": _hchain(7)}
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True, now=now, chains=chains)
     monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
     gh = _HiroGh()
     _sys.modules["gex_history_db"].insert_hiro_rows = gh.insert_hiro_rows
@@ -6384,13 +6413,19 @@ def test_collect_gex_snapshots_records_hiro_rows_in_regular_hours(monkeypatch):
     compute.reset_hiro_memo()
 
     compute.collect_gex_snapshots(now=now)
-
     assert calls["poll"] is True
+    assert gh.batches == []                          # first reading of the day seeds
+
+    import datetime as _dtm
+    later = now + _dtm.timedelta(minutes=1)
+    chains["SPY"] = _hchain(1010)
+    compute.collect_gex_snapshots(now=later)
+
     assert len(gh.batches) == 1
     (sym, ts, row), = gh.batches[0]                 # NVDA is not a [hiro] symbol
     assert sym == "SPY"
-    assert ts == int(now.timestamp()) // 60 * 60
-    assert row["impact"] == 0.0                      # first reading of the day seeds
+    assert ts == int(later.timestamp()) // 60 * 60
+    assert row["impact"] == pytest.approx(250_000.0)
     compute.reset_hiro_memo()
 
 
@@ -6417,18 +6452,77 @@ def test_collect_gex_snapshots_records_no_hiro_rows_outside_regular_hours(monkey
 
 def test_collect_gex_snapshots_hiro_write_failure_never_breaks_collection(monkeypatch):
     import sys as _sys
+    import datetime as _dtm
     now = _hiro_ct(10, 0)
-    calls = _fake_gex_modules(monkeypatch, lock_ok=True, now=now,
-                              chains={"SPY": _hchain(1000)})
+    chains = {"SPY": _hchain(1000)}
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True, now=now, chains=chains)
     monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
-    monkeypatch.setattr(compute._degrade, "degraded", lambda area, **kw: None)
+    seen = []
+    monkeypatch.setattr(compute._degrade, "degraded",
+                        lambda area, **kw: seen.append(area))
     gh = _HiroGh(batch_boom=True, bad={"SPY"})
     _sys.modules["gex_history_db"].insert_hiro_rows = gh.insert_hiro_rows
     _sys.modules["gex_history_db"].insert_hiro_row = gh.insert_hiro_row
     compute.reset_hiro_memo()
 
-    n = compute.collect_gex_snapshots(now=now)
+    compute.collect_gex_snapshots(now=now)            # seeds: nothing to write
+    chains["SPY"] = _hchain(1010)
+    calls["touched"] = calls["closed"] = False
+    n = compute.collect_gex_snapshots(now=now + _dtm.timedelta(minutes=1))
 
     assert n == 3
     assert calls["touched"] is True and calls["closed"] is True
+    assert seen == ["options.hiro_insert"]           # the write really was attempted
+    compute.reset_hiro_memo()
+
+
+def _collect_with_hiro_cfg(monkeypatch, cfg, chains=None):
+    """Run one regular-hours collect with flow_alerts.load_thresholds -> cfg."""
+    from services.options_svc import flow_alerts
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True, now=_hiro_ct(10, 0),
+                              chains=chains)
+    monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
+    monkeypatch.setattr(flow_alerts, "load_thresholds", lambda: cfg)
+    compute.reset_hiro_memo()
+    n = compute.collect_gex_snapshots(now=_hiro_ct(10, 0))
+    return calls, n
+
+
+@pytest.mark.parametrize("cfg", [
+    {"hiro": 5},                                       # a scalar override of the table
+    {"hiro": {"enabled": True, "symbols": 5}},         # a scalar symbols list
+    {"hiro": {"enabled": "yes", "symbols": ["SPY"]}},  # enabled must be literally True
+])
+def test_collect_gex_snapshots_survives_a_malformed_hiro_config(monkeypatch, cfg):
+    """flow_alerts._merge replaces a dict default with a scalar override, so a
+    bad config/local value must not stop ALL GEX collection."""
+    calls, n = _collect_with_hiro_cfg(monkeypatch, cfg, chains={"SPY": _hchain(1000)})
+    assert calls["poll"] is True and calls["touched"] is True
+    assert n == 3
+    assert compute._HIRO_MEMO["prev"] == {}           # nothing measured
+    compute.reset_hiro_memo()
+
+
+def test_collect_gex_snapshots_hiro_setup_error_degrades_and_collects(monkeypatch):
+    from shared import market_calendar as _mc
+    seen = []
+    monkeypatch.setattr(compute._degrade, "degraded",
+                        lambda area, **kw: seen.append(area))
+
+    def _boom(now):
+        raise RuntimeError("calendar broken")
+    monkeypatch.setattr(_mc, "is_regular_hours", _boom)
+    calls, n = _collect_with_hiro_cfg(
+        monkeypatch, {"hiro": {"enabled": True, "symbols": ["SPY"]}},
+        chains={"SPY": _hchain(1000)})
+    assert calls["poll"] is True and n == 3
+    assert "options.hiro_setup" in seen
+    assert compute._HIRO_MEMO["prev"] == {}
+    compute.reset_hiro_memo()
+
+
+def test_collect_gex_snapshots_accepts_a_bare_string_hiro_symbol(monkeypatch):
+    _collect_with_hiro_cfg(monkeypatch, {"hiro": {"enabled": True, "symbols": "SPY"}},
+                           chains={"SPY": _hchain(1000)})
+    assert "SPY" in compute._HIRO_MEMO["prev"]        # measured (seeded)
     compute.reset_hiro_memo()

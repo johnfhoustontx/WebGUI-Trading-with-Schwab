@@ -4357,11 +4357,19 @@ def reset_hiro_memo():
 def hiro_tick_row(symbol, chain, session_date, now_ts):
     """This minute's HIRO-model row for one symbol (or None), advancing the memo.
 
-    ``last_ts`` advances ONLY when a row is produced. A None row (unusable spot)
-    leaves ``prev`` at the last good minute — measure_chain returns it
-    unchanged — so the gap clock must measure from that same minute: a long run
-    of unusable chains then re-seeds rather than booking the whole run into the
-    next good minute, while one bad minute is bridged as an ordinary 120 s step.
+    Returns None — nothing to write — for an unusable chain AND for a PURE seed
+    minute (the symbol had no baseline at all: the first poll of the day, or the
+    first after a gap). A seed books nothing, and writing it as a zero would
+    read as a quiet minute to the baseline. A PARTIAL seed (a new contract
+    appearing beside ones that book) is a real row.
+
+    ``last_ts`` advances on every minute measure_chain accepted — a seed
+    included. A seed IS a good minute for the gap clock: tie the clock to "a row
+    was returned" and every minute after a gap re-seeds forever. An unusable
+    chain leaves both ``prev`` (measure_chain returns it unchanged) and the
+    clock at the last good minute, so a long run of unusable chains re-seeds
+    rather than booking the whole run into one minute, while one bad minute is
+    bridged as an ordinary 120 s step.
 
     Best-effort: never raises (a measurement failure must not break collection)."""
     try:
@@ -4371,11 +4379,13 @@ def hiro_tick_row(symbol, chain, session_date, now_ts):
         last = _HIRO_MEMO["last_ts"].get(symbol)
         if last is not None and now_ts - last > HIRO_MAX_GAP_SEC:
             _HIRO_MEMO["prev"].pop(symbol, None)
+        was_empty = not _HIRO_MEMO["prev"].get(symbol)
         row, new_prev = hiro.measure_chain(chain, _HIRO_MEMO["prev"].get(symbol, {}))
         _HIRO_MEMO["prev"][symbol] = new_prev
-        if row is not None:
-            _HIRO_MEMO["last_ts"][symbol] = now_ts
-        return row
+        if row is None:
+            return None
+        _HIRO_MEMO["last_ts"][symbol] = now_ts
+        return None if was_empty else row
     except Exception:
         _degrade.degraded("options.hiro_tick_row", detail=symbol)
         return None
@@ -4749,7 +4759,9 @@ def _maybe_purge_gex(gh, conn) -> None:
     try:
         from services.options_svc import flow_alerts as _fa
         _hcfg = _fa.load_thresholds().get("hiro", {})
-        keep = max(int(_hcfg.get("keep_sessions", 20)),
+        if not isinstance(_hcfg, dict):      # a scalar override of the table
+            _hcfg = {}
+        keep =max(int(_hcfg.get("keep_sessions", 20)),
                    int(_hcfg.get("baseline_sessions", 5)) + 1)
         gh.purge_hiro(conn, keep_sessions=keep)
     except Exception:
@@ -4943,19 +4955,39 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         # session only -- off-hours the chain's underlyingPrice can be stale and
         # index OI reads zero. Measured in on_chain (no extra fetch); the rows
         # are written AFTER poll_once, on this write connection.
-        from services.options_svc import scheduler as _sched
-        from shared import market_calendar as _mc
-        _hiro_cfg = _uoa_cfg.get("hiro", {})
-        # Same clock _gth_symbols reads, so the two gates agree; a naive ``now``
-        # is CT (the project convention), made explicit before .timestamp().
-        _hiro_now = now if now is not None else _sched._market_now()
-        if _hiro_now.tzinfo is None:
-            _hiro_now = _hiro_now.replace(tzinfo=ZoneInfo("America/Chicago"))
-        _hiro_on = bool(_hiro_cfg.get("enabled", True)) and _mc.is_regular_hours(_hiro_now)
-        _hiro_syms = set(_hiro_cfg.get("symbols") or [])
-        _hiro_date = _hiro_now.astimezone(ZoneInfo("America/Chicago")).date().isoformat()
-        _hiro_ts = int(_hiro_now.timestamp()) // 60 * 60
+        # Safe defaults FIRST, derived inside a guard: flow_alerts._merge lets a
+        # scalar override replace the [hiro] table (hiro = 5, symbols = 5 in
+        # config/local), and a setup error here must never stop GEX collection.
+        _hiro_on = False
+        _hiro_syms: set = set()
+        _hiro_date = None
+        _hiro_ts = None
         _hiro_rows: dict = {}
+        try:
+            from services.options_svc import scheduler as _sched
+            from shared import market_calendar as _mc
+            _hiro_cfg = _uoa_cfg.get("hiro", {})
+            if not isinstance(_hiro_cfg, dict):
+                _hiro_cfg = {}
+            _raw_syms = _hiro_cfg.get("symbols")
+            if isinstance(_raw_syms, str):
+                _raw_syms = [_raw_syms]
+            if isinstance(_raw_syms, (list, tuple)):
+                _hiro_syms = {s for s in _raw_syms if isinstance(s, str)}
+            # Same clock _gth_symbols reads, so the two gates agree; a naive
+            # ``now`` is CT (the project convention), made explicit before
+            # .timestamp().
+            _hiro_now = now if now is not None else _sched._market_now()
+            if _hiro_now.tzinfo is None:
+                _hiro_now = _hiro_now.replace(tzinfo=ZoneInfo("America/Chicago"))
+            _hiro_date = _hiro_now.astimezone(
+                ZoneInfo("America/Chicago")).date().isoformat()
+            _hiro_ts = int(_hiro_now.timestamp()) // 60 * 60
+            _hiro_on = (_hiro_cfg.get("enabled") is True and bool(_hiro_syms)
+                        and _mc.is_regular_hours(_hiro_now))
+        except Exception:
+            _degrade.degraded("options.hiro_setup")
+            _hiro_on = False
         wanted = set(capture_symbols) if capture_symbols else set()
         _eth_seen: dict = {}
 
