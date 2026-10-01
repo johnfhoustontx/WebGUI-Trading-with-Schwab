@@ -125,6 +125,11 @@ BACKUP_TIMEOUT_SEC = 7200
 # report that still looks like a report.
 FLOW_DELTA_TIMEOUT_SEC = 1800
 
+# The HIRO report replays four symbols' sessions from SQLite: ~0.3 s measured on
+# synthetic full days. The ceiling only has to clear the 90s default by a margin
+# that a slow disk or a long keep_sessions history cannot reach.
+HIRO_REPORT_TIMEOUT_SEC = 600
+
 # The journal labeler fetches two years of daily bars per distinct symbol that
 # has a matured reading, through the proxy's 5 req/s. Usually a handful of
 # symbols; the ceiling covers a catch-up night over the whole rank-board universe.
@@ -854,6 +859,78 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-flow-delta.timer": tmr}
 
 
+def _hiro_report_units():
+    """The daily HIRO-model validation report: a oneshot plus its timer.
+
+    **It decides whether the hiro_surge / hiro_flip alerts ever earn a phone
+    push.** Both ship quiet (docs/plans/2026-10-01-hiro-alert-design.md) until
+    several sessions show hedging flow leading price; a report nobody schedules
+    is the flow-delta failure again -- a directory that silently stops gaining
+    dates.
+
+    **16:10 CT, from [slots.hiro_report].** After the 15:00 close it scores, and
+    clear of everything that loads the proxy: it reads gex_history.db alone, so
+    sitting beside flow_delta's 16:00 fan-out costs nothing. Before the 16:20 /
+    16:30 cascades. Moving it needs `generate_units --install` plus a
+    `daemon-reload`, not a service restart.
+
+    **Persistent=true -- and, unlike flow-delta, a missed day is not lost.** The
+    minutes stay in hiro_minutes for [hiro].keep_sessions sessions, and with no
+    `--date` the tool reports the newest CLOSED session (today after the close,
+    else the previous trading day), so a catch-up run at boot the next morning
+    still reports the day it missed. A weekend boot skips (the gate); any day
+    can be re-run by hand with `--date`.
+
+    **EnvironmentFile only by convention.** The tool reads no secret, no Redis
+    and no proxy, so it needs nothing from .env; it carries the line because
+    every service unit here does, and `test_secrets_come_from_an_EnvironmentFile`
+    holds them all to it. No ExecStartPre wait either: nothing to wait for.
+
+    **No Restart=.** A failure is a database problem a retry minutes later will
+    not fix; it lands in `systemctl --user --failed`, and `--date` re-runs it.
+    """
+    at = slot_times("hiro_report")["at"]
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - HIRO-model validation report
+# No PartOf and no [Install]: the timer owns this.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# Convention only: the report reads gex_history.db and no secret.
+EnvironmentFile={_env_file()}
+TimeoutStartSec={HIRO_REPORT_TIMEOUT_SEC}
+ExecStart={_python()} -X utf8 tools/hiro_report.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - HIRO-model validation report timer
+
+[Timer]
+# Derived from [slots.hiro_report] in config/sessions.toml.
+# Mon..Fri excludes weekends only. Holidays are NOT filtered here and do not need
+# to be: hiro_report.main() gates on shared.market_calendar.is_trading_day and
+# exits 0, so a firing is not a run.
+OnCalendar=Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00
+# Persistent=true: the minutes are stored, so a catch-up run still has its day
+# to read (and any other day can be re-run with --date).
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-hiro-report.service": svc,
+            f"trading-{ENV_NAME}-hiro-report.timer": tmr}
+
+
 def _label_journal_units():
     """The recommendation-journal labeler: a oneshot plus its timer.
 
@@ -993,6 +1070,7 @@ def render_all():
     out.update(_gallery_capture_units())
     out.update(_eod_report_units())
     out.update(_flow_delta_units())
+    out.update(_hiro_report_units())
     out.update(_label_journal_units())
     out.update(_swing_refit_units())
     return out

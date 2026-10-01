@@ -19,7 +19,7 @@ showed.
 
 USAGE
 -----
-    .venv/bin/python tools/hiro_report.py                     # today (CT)
+    .venv/bin/python tools/hiro_report.py                     # the latest closed session
     .venv/bin/python tools/hiro_report.py --date 2026-09-30   # re-run a past day
     .venv/bin/python tools/hiro_report.py --date 2026-10-03 --force
 
@@ -53,7 +53,8 @@ if str(OPTIONS_SCANNER) not in sys.path:
 import gex_history_db as gh  # noqa: E402
 
 from services.options_svc import flow_alerts, hiro  # noqa: E402
-from shared.market_calendar import is_trading_day  # noqa: E402
+from shared.market_calendar import (_session_bounds, is_trading_day,  # noqa: E402
+                                    prev_trading_day)
 
 CT = ZoneInfo("America/Chicago")
 
@@ -358,7 +359,8 @@ def _int_list(s):
 def parse_args(argv):
     p = argparse.ArgumentParser(description="Daily HIRO-model validation report.")
     p.add_argument("--date", type=_dt.date.fromisoformat, default=None,
-                   help="the session to report, YYYY-MM-DD (default: today, CT)")
+                   help="the session to report, YYYY-MM-DD (default: today after the "
+                        "close, else the previous trading day)")
     p.add_argument("--force", action="store_true",
                    help="report even on a weekend or market holiday")
     p.add_argument("--out", default=None,
@@ -371,6 +373,18 @@ def parse_args(argv):
     return p.parse_args(argv)
 
 
+def default_day(now):
+    """The session a run with no ``--date`` reports: today once the regular
+    session has closed, else the previous trading day -- so a catch-up run at
+    boot (the timer is Persistent) reports the session it missed rather than an
+    empty morning. A non-trading day is returned as itself, for the gate."""
+    d = now.date()
+    if not is_trading_day(d):
+        return d
+    _open, close = _session_bounds("regular")
+    return d if now.time() > close else prev_trading_day(d)
+
+
 def _symbols(cfg):
     raw = cfg.get("symbols")
     if isinstance(raw, str):
@@ -380,7 +394,7 @@ def _symbols(cfg):
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else list(argv))
-    day = args.date or _dt.datetime.now(CT).date()
+    day = args.date or default_day(_dt.datetime.now(CT))
     if not is_trading_day(day) and not args.force:
         print(f"Skipped: {day} is not a trading day. No report written "
               f"(--force to report anyway).")

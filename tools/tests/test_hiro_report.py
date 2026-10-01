@@ -271,6 +271,30 @@ def test_a_symbol_that_failed_is_named_with_its_reason():
     assert "IWM" in text and "ValueError: bad row" in text
 
 
+# --- default_day ----------------------------------------------------------------------
+def _ct(day, hhmm):
+    import datetime as _dt
+    return _dt.datetime.fromtimestamp(hiro.ct_ts(day, hhmm), hr.CT)
+
+
+def test_after_the_close_the_default_day_is_today():
+    import datetime as _dt
+    assert hr.default_day(_ct(DAY, "16:10")) == _dt.date(2026, 9, 30)
+
+
+def test_a_morning_catch_up_reports_the_session_it_missed():
+    """Persistent=true fires a missed run at boot; before today's close the
+    newest finished session is the previous trading day, not an empty today."""
+    import datetime as _dt
+    assert hr.default_day(_ct("2026-10-01", "07:00")) == _dt.date(2026, 9, 30)
+    assert hr.default_day(_ct("2026-10-05", "07:00")) == _dt.date(2026, 10, 2)  # Monday
+
+
+def test_a_non_trading_day_stays_itself_so_the_gate_can_skip_it():
+    import datetime as _dt
+    assert hr.default_day(_ct("2026-10-03", "16:10")) == _dt.date(2026, 10, 3)
+
+
 # --- main ---------------------------------------------------------------------------
 def _seed_db(path, monkeypatch):
     monkeypatch.setattr(hr.gh, "DB_PATH", path)

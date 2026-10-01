@@ -1318,3 +1318,88 @@ def test_install_reports_a_failure_to_arm_with_a_nonzero_exit(tmp_path, monkeypa
                         lambda *a, **k: [("trading-x.timer", "FAILED: boom")])
     assert units.main(["--install"]) == 1
     assert "NOT armed" in capsys.readouterr().out
+
+
+# --- the daily HIRO-model validation report ----------------------------------
+#
+# tools/hiro_report.py decides whether the quiet hiro_surge / hiro_flip alerts
+# ever earn a phone push. It reads gex_history.db alone, so unlike flow-delta a
+# missed day can be re-run with --date -- but only while purge_hiro keeps it.
+HR_SVC = f"trading-{ENV_NAME}-hiro-report.service"
+HR_TMR = f"trading-{ENV_NAME}-hiro-report.timer"
+
+
+def test_the_hiro_report_units_are_generated():
+    all_units = units.render_all()
+    assert HR_SVC in all_units
+    assert HR_TMR in all_units
+
+
+def test_the_hiro_report_fires_once_a_trading_day_at_the_configured_slot():
+    from shared import market_calendar as mc
+    at = mc.slot_times("hiro_report")["at"]
+    text = units.render_all()[HR_TMR]
+    assert _directives(text, "OnCalendar") == [
+        f"Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00"]
+
+
+def test_the_hiro_report_schedule_follows_the_slot_rather_than_a_literal(monkeypatch):
+    import datetime as _dt
+
+    monkeypatch.setattr(units, "slot_times", lambda name: {"at": _dt.time(21, 3)})
+    text = units.render_all()[HR_TMR]
+    assert _directives(text, "OnCalendar") == ["Mon..Fri *-*-* 21:03:00"]
+
+
+def test_the_hiro_report_runs_after_the_cash_close():
+    """It scores the whole session, which ends at the regular close."""
+    from shared import market_calendar as mc
+    at = mc.slot_times("hiro_report")["at"]
+    _open, close = mc._session_bounds("regular")
+    assert at > close, (at, close)
+
+
+def test_the_hiro_report_catches_up_after_downtime(rendered):
+    """It reads stored minutes, so a late run reports the same day."""
+    tmr = rendered[HR_TMR]
+    assert tmr["Timer"]["Persistent"].lower() == "true"
+    assert tmr["Install"]["WantedBy"] == "timers.target"
+
+
+def test_the_hiro_report_is_a_oneshot_that_does_not_retry(rendered):
+    svc = rendered[HR_SVC]
+    assert svc["Service"]["Type"] == "oneshot"
+    assert "Restart" not in svc["Service"]
+    assert int(svc["Unit"]["StartLimitBurst"]) > 0
+    assert "StartLimitBurst" not in svc["Service"]
+
+
+def test_the_hiro_report_is_not_a_member_of_the_fleet(rendered):
+    svc = rendered[HR_SVC]
+    assert "PartOf" not in svc["Unit"]
+    assert "Install" not in svc
+    assert HR_SVC not in stack_services()
+
+
+def test_the_hiro_report_waits_for_nothing(rendered):
+    """No proxy, no Redis: a wait on either would only add a way to fail."""
+    text = units.render_all()[HR_SVC]
+    assert _directives(text, "ExecStartPre") == []
+    assert "After" not in rendered[HR_SVC]["Unit"]
+
+
+def test_the_hiro_report_is_not_killed_at_the_default_start_timeout(rendered):
+    assert int(rendered[HR_SVC]["Service"]["TimeoutStartSec"]) > 90
+
+
+def test_the_hiro_report_runs_the_tool_directly(rendered):
+    exec_start = rendered[HR_SVC]["Service"]["ExecStart"]
+    assert exec_start.endswith("tools/hiro_report.py")
+    assert ".sh" not in exec_start
+
+
+def test_the_hiro_report_timer_is_armed_in_prod_and_never_in_dev(monkeypatch):
+    assert HR_TMR in units.timer_units()
+    monkeypatch.setattr(units, "IS_DEV", True)
+    statuses = dict(units.activate(runner=_fake_systemctl()))
+    assert statuses[HR_TMR].startswith("skipped")

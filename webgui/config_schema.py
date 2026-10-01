@@ -530,6 +530,10 @@ _SESSIONS = ConfigFile(
                   restart=(TIMERS,)),
             Field("slots.flow_delta.at", "Flow instrumentation report", "",
                   kind="time", restart=(TIMERS,)),
+            Field("slots.hiro_report.at", "Hedging-flow validation report",
+                  "Scores the day's hedging-flow alerts against the price move "
+                  "after each. Must be after the close.",
+                  kind="time", restart=(TIMERS,)),
             Field("slots.label_journal.at", "Trade Analyzer outcome labelling",
                   "Fills in how each recommendation actually did once its "
                   "20-day horizon has passed. Must be after the close.",

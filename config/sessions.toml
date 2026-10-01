@@ -181,6 +181,15 @@ morning = "08:52"     # 09:52 ET
 #   16:30  calibration rebuild
 at = "16:00"
 
+[slots.hiro_report]
+# The daily HIRO-model validation report (tools/hiro_report.py): replays the quiet
+# hiro_surge / hiro_flip rules over the session's stored minutes and scores the
+# 5/15-minute price move after each fire, under options-scanner/data/hiro_report/.
+# It reads gex_history.db only (no proxy, no Redis), so a missed day can be re-run
+# with --date while [hiro].keep_sessions still holds it. A systemd timer, like
+# [slots.flow_delta]: moving it needs `generate_units --install` + `daemon-reload`.
+at = "16:10"
+
 [slots.label_journal]
 # The recommendation-journal labeler (tools/label_journal.py): fills in the realized
 # 5/10/20-trading-day forward returns (raw, beta-adjusted, and SPY's own move) on

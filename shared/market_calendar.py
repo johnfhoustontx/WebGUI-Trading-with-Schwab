@@ -288,6 +288,9 @@ _DEFAULTS = {
         # overnight). 16:00 sits after live_capture's 15:25-15:50 window and
         # before the 16:20/16:30 cascades -- see [slots.flow_delta].
         "flow_delta": {"at": "16:00"},
+        # The daily HIRO-model validation report (tools/hiro_report.py). Reads
+        # gex_history.db only, so it can run beside flow_delta's fan-out.
+        "hiro_report": {"at": "16:10"},
         "momentum": {"at": "16:20"},
         "calibration": {"at": "16:30"},
         # The end-of-day report archive (tools/generate_eod_report.py): the
@@ -295,9 +298,9 @@ _DEFAULTS = {
         # cash close and after [slots.action_alert] close + the 15:10 EOD push,
         # so the books it reads have settled; it costs no Schwab and no Claude
         # call, so sharing the minute with the last autoscan slot is free.
-        # ⚠ FIVE of these slots are read by SYSTEMD rather than by a service
-        # scheduler -- flow_delta, eod_report, gallery_capture, label_journal
-        # and swing_refit:
+        # ⚠ SIX of these slots are read by SYSTEMD rather than by a service
+        # scheduler -- flow_delta, hiro_report, eod_report, gallery_capture,
+        # label_journal and swing_refit:
         # deploy/systemd/generate_units.py turns each into a timer's OnCalendar
         # at unit-GENERATION time, so moving one needs
         # `generate_units --install` + `daemon-reload`, not a service restart.
