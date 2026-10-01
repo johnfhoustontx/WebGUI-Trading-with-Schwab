@@ -231,6 +231,11 @@ def health_alert_text(n):
 
 
 # ── Options-flow alerts (crossover + unusual activity) ───────────────────────
+# Alert types that are QUIET-LIVE: on the Flow Alerts screen, but never a chime
+# or toast.
+_QUIET_FLOW_TYPES = ("big_delta", "hiro_surge", "hiro_flip")
+
+
 def new_flow_alerts(view, acked):
     """``(new_alerts_in_order, updated_acked)`` from a flow-alerts view.
 
@@ -238,9 +243,12 @@ def new_flow_alerts(view, acked):
     every id present so each alert fires once (fire-on-first-seen). Defensive:
     a bad/None view → ``([], acked)`` unchanged.
 
-    ``big_delta`` is quiet-live: it is excluded from the chime/toast trigger set
-    (the Flow Alerts screen still shows it — this only silences the audible/visual
-    nudge) but its id is still marked seen, so it's considered exactly once.
+    The ``_QUIET_FLOW_TYPES`` are quiet-live: excluded from the chime/toast
+    trigger set (the Flow Alerts screen still shows them — this only silences the
+    audible/visual nudge) but their ids are still marked seen, so each is
+    considered exactly once. ``big_delta`` has been quiet since it shipped; the
+    two HIRO types (``hiro_surge``, ``hiro_flip``) are quiet-live until their
+    daily validation report justifies a push.
     """
     lst = (view or {}).get("alerts") if isinstance(view, dict) else None
     lst = lst if isinstance(lst, list) else []
@@ -248,7 +256,7 @@ def new_flow_alerts(view, acked):
     for a in lst:
         if isinstance(a, dict) and a.get("id") and a["id"] not in all_ids:
             all_ids.add(a["id"])
-            if a.get("type") == "big_delta":
+            if a.get("type") in _QUIET_FLOW_TYPES:
                 continue          # quiet-live: no chime/toast, still on the screen
             new.append(a)
     return new, all_ids

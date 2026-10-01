@@ -197,6 +197,13 @@ def test_new_flow_alerts_excludes_big_delta_from_chime():
     assert acked == {"a", "b"}                    # both marked seen (b never re-considered)
 
 
+def test_new_flow_alerts_excludes_hiro_from_chime():
+    view = {"alerts": [{"id": "a", "type": "uoa"}, {"id": "b", "type": "hiro_surge"},
+                       {"id": "c", "type": "hiro_flip"}]}
+    new, acked = alerts.new_flow_alerts(view, set())
+    assert [a["id"] for a in new] == ["a"] and acked == {"a", "b", "c"}
+
+
 # ── Flow alerts: market-hours gate + backlog-replay guard ────────────────────
 _RTH = dt.datetime(2026, 7, 23, 10, 0, tzinfo=CT)      # Thu 10:00 CT
 _AFTER = dt.datetime(2026, 7, 23, 21, 0, tzinfo=CT)    # Thu 21:00 CT

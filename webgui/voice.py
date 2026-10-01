@@ -530,7 +530,7 @@ def ensure(text, voice_name=None, rate=RATE, warn=True, timeout=None):
 
 
 # The (kind, side) pairs the flow panel can produce, as DISPLAY labels — the
-# same eight ``pages.options.flow`` maps its four types and their sides onto.
+# same twelve ``pages.options.flow`` maps its six types and their sides onto.
 # Restated here rather than imported because the flow module is a PAGE and the
 # prewarm runs before any page is built.
 # ``test_voice.test_all_causes_cover_every_pair_the_flow_page_can_emit`` is
@@ -538,27 +538,37 @@ def ensure(text, voice_name=None, rate=RATE, warn=True, timeout=None):
 _ALL_CAUSES = (("Premium shift", "Calls over"), ("Premium shift", "Puts over"),
                ("Unusual volume", "Call"), ("Unusual volume", "Put"),
                ("Hedging flip", "Now damping"), ("Hedging flip", "Now amplifying"),
-               ("Outsized bet", "Call"), ("Outsized bet", "Put"))
+               ("Outsized bet", "Call"), ("Outsized bet", "Put"),
+               ("Hedging surge", "Dealers buying"), ("Hedging surge", "Dealers selling"),
+               ("Hedging reversal", "Now buying"), ("Hedging reversal", "Now selling"))
 
 # The kinds whose phrase embeds a CONTRACT (see ``flow_phrase``). Their phrase
 # space is the option chain, so it is unbounded and nothing in it can be warmed
 # in advance.
 CONTRACT_KINDS = ("Unusual volume", "Outsized bet")
 
-# ...which is why the prewarm list is the OTHER four. Warming the contract kinds
+# The kinds the prewarm does NOT warm: the contract kinds above, plus the two
+# HIRO kinds. HIRO fires on only the few symbols in ``[hiro].symbols``
+# (config/flow_alerts.toml), while the prewarm warms the hottest matrix symbols,
+# so warming HIRO phrases there would mostly synthesize clips no alert can play.
+# A live HIRO alert synthesizes its clip on demand, which costs one short pause.
+UNWARMED_KINDS = CONTRACT_KINDS + ("Hedging surge", "Hedging reversal")
+
+# ...which is why the prewarm list is the remaining four (premium shift and
+# gamma flip, two sides each). Warming the contract kinds
 # synthesized "N D X. Unusual volume alert, put." — a sentence no live alert
 # produces any more, since a real one always carries a strike and an expiry. It
 # was half the prewarm's network, disk and time, spent on clips that could never
 # be played. DERIVED rather than written out a second time: a hand-kept subset
 # of a hand-kept copy is two chances to rot instead of one.
 FLOW_CAUSES = tuple((kind, side) for kind, side in _ALL_CAUSES
-                    if kind not in CONTRACT_KINDS)
+                    if kind not in UNWARMED_KINDS)
 
 
 def prewarm_texts(symbols):
     """Every WARMABLE flow phrase the given symbols can produce.
 
-    Flow only, and only the contract-less kinds (see ``FLOW_CAUSES``). A new
+    Flow only, and only the warmable kinds (see ``FLOW_CAUSES``). A new
     position is a thing the user just did, so they are already looking at the
     screen and a couple of seconds of first synthesis costs nothing; a flow
     alert arrives unbidden and is the case worth paying disk for.

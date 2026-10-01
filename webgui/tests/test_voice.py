@@ -282,6 +282,10 @@ _FLOW_CASES = {
     ("QQQ", "Hedging flip", "Now damping"): "Q Q Q. Hedging flip alert, now damping.",
     ("AMD", "Outsized bet", "Call"): "A M D. Outsized bet alert, call.",
     ("AMD", "Outsized bet", "Put"): "A M D. Outsized bet alert, put.",
+    ("$SPX", "Hedging surge", "Dealers buying"): "S P X. Hedging surge alert, dealers buying.",
+    ("$SPX", "Hedging surge", "Dealers selling"): "S P X. Hedging surge alert, dealers selling.",
+    ("SPY", "Hedging reversal", "Now buying"): "S P Y. Hedging reversal alert, now buying.",
+    ("SPY", "Hedging reversal", "Now selling"): "S P Y. Hedging reversal alert, now selling.",
 }
 
 
@@ -1021,9 +1025,11 @@ def test_the_prewarm_list_is_exactly_the_contract_less_pairs():
     from pages.options import flow
     real = {(flow.alert_kind_label({"type": t}), flow.side_label({"side": s}))
             for t, s in flow._TONE}
-    want = {(k, s) for k, s in real if k not in voice.CONTRACT_KINDS}
+    want = {(k, s) for k, s in real if k not in voice.UNWARMED_KINDS}
     assert set(voice.FLOW_CAUSES) == want
     assert len(want) == 4
+    # HIRO fires on a handful of symbols only, so its phrases are never warmed.
+    assert not {k for k, _s in voice.FLOW_CAUSES} & {"Hedging surge", "Hedging reversal"}
 
 
 # ── board_phrase ─────────────────────────────────────────────────────────────

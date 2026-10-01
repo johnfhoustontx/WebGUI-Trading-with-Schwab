@@ -814,9 +814,18 @@ that chime and hit your phone, kept somewhere you can actually read them.
   way: **now damping** or **now amplifying**.
 - **Outsized bet** — one contract carries an outsized share of that symbol's
   whole directional exposure; **Share of flow** is how big a share.
+- **Hedging surge** — the stock that dealers would have to buy or sell to hedge
+  the last few minutes of option trades ran several times its normal size. The
+  side says which way: **dealers buying** (upward pressure, green) or **dealers
+  selling** (downward, red).
+- **Hedging reversal** — that running hedging total for the day changed sign:
+  **now buying** or **now selling**.
 
-None of these can tell a **buy** from a **sell** — Schwab publishes no options
-tape — so read every row as "something large happened here", not as a direction.
+The first four cannot tell a **buy** from a **sell** — Schwab publishes no options
+tape — so read those rows as "something large happened here", not as a direction.
+The two hedging rows DO name a direction, but it is a **model's estimate**: each
+trade's buyer or seller is inferred from where it printed against the quote,
+never observed. They show here only; they do not chime or go to your phone yet.
 
 **Age** tells you whether this just happened or is this morning's news. Filter by
 type or symbol, and **click a symbol** (the dotted underline) to open Dealer

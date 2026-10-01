@@ -390,7 +390,8 @@ _FLOW = ConfigFile(
             Field("hiro.min_notional", "…and at least", "Ignores a dead tape.",
                   kind="money", min=0, max=1e11, step=1000000),
             _pct("hiro.max_unclassified", "Skip when unlabelled volume exceeds",
-                 "Trades at the exact midpoint get no buy/sell label.", hi=100, step=5),
+                 "Volume with no buy/sell label: a print at the exact midpoint, or "
+                 "a quote or delta that cannot be read.", hi=100, step=5),
             Field("hiro.cooldown_min", "Surge quiet period", "Per symbol and direction.",
                   kind="int", unit="min", min=0, max=1440, step=5),
             Field("hiro.baseline_sessions", "Normal size from the last", "",

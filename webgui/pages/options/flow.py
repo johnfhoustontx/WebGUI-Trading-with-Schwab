@@ -1,8 +1,9 @@
 """Flow Alerts — Tier-1 reader of cache:options:flow_alerts.
 
-The options service detects three kinds of flow alert on each 1-min GEX tick
-(premium crossover, contract-level unusual activity, dealer gamma-regime flip),
-pushes them to the phone, and publishes a day-scoped rolling list. Until this
+The options service detects its flow alerts on each 1-min GEX tick (premium
+crossover, contract-level unusual activity, dealer gamma-regime flip, outsized
+delta, and the HIRO hedging-flow model's surge and reversal), pushes the ones
+configured to push to the phone, and publishes a day-scoped rolling list. Until this
 page existed the webgui only chimed and toasted them, so a missed toast meant a
 lost alert. This is the durable view: today's alerts, newest first.
 
@@ -20,6 +21,7 @@ calling that stale would report a working feed as broken.
 from __future__ import annotations
 
 import datetime as _dt
+import math
 from zoneinfo import ZoneInfo
 
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
@@ -72,20 +74,31 @@ def gamma_symbol_slot(linked):
 # "Hedging flipped". ``voice.flow_phrase`` builds its contract-less form as
 # f"{kind} alert" — the form a gamma flip ALWAYS takes, since it names no
 # contract — and a clause there speaks as "Hedging flipped alert, now damping."
+# The two HIRO kinds follow the same rule, and the reversal is "Hedging
+# reversal" — never "flip", which is already the gamma flip's word.
 _KIND_LABEL = {"crossover": "Premium shift", "uoa": "Unusual volume",
-               "gamma_flip": "Hedging flip", "big_delta": "Outsized bet"}
+               "gamma_flip": "Hedging flip", "big_delta": "Outsized bet",
+               "hiro_surge": "Hedging surge", "hiro_flip": "Hedging reversal"}
 # ⚠ The two gamma sides had to move WITH their kind. "Hedging flipped · To
 # positive" would read worse than the name it replaced: "to positive" is only
 # interpretable once you already know the subject is gamma sign, and that is
 # precisely the word the new kind name takes away.
 #
-# The other four are untouched, and deliberately literal. This page can say
-# WHICH SIDE traded and never who initiated — Schwab publishes no time-and-sales
-# tape to this app — so "Call" must keep meaning the contract class and nothing
-# more.
+# The call/put four are untouched, and deliberately literal. For those rows this
+# page can say WHICH SIDE traded and never who initiated — Schwab publishes no
+# time-and-sales tape to this app — so "Call" must keep meaning the contract
+# class and nothing more.
+#
+# ⚠ The HIRO sides are the one exception, and an honest one only because they
+# are a MODEL: options_svc infers each print's initiator from where it sits
+# against the quote and turns that into the stock dealers would have to trade
+# to hedge it. "Dealers buying" is that model's estimate, not an observed trade,
+# and the row's own text and the help guide say so.
 _SIDE_LABEL = {"calls_over": "Calls over", "puts_over": "Puts over",
                "call": "Call", "put": "Put",
-               "to_positive": "Now damping", "to_negative": "Now amplifying"}
+               "to_positive": "Now damping", "to_negative": "Now amplifying",
+               "dealers_buying": "Dealers buying", "dealers_selling": "Dealers selling",
+               "to_buying": "Now buying", "to_selling": "Now selling"}
 
 # Direction → a FIXED Tailwind class (the finite-set mapping the UI standard
 # requires — never a computed color, never an inline style).
@@ -108,6 +121,11 @@ _TONE = {
     ("gamma_flip", "to_negative"): _TONE_NEG,
     ("big_delta", "call"): _TONE_BIG_DELTA_CALL,
     ("big_delta", "put"): _TONE_BIG_DELTA_PUT,
+    # Dealers BUYING stock to hedge is upward pressure on price; selling, downward.
+    ("hiro_surge", "dealers_buying"): _TONE_POS,
+    ("hiro_surge", "dealers_selling"): _TONE_NEG,
+    ("hiro_flip", "to_buying"): _TONE_POS,
+    ("hiro_flip", "to_selling"): _TONE_NEG,
 }
 
 # Colored cells bind the stamped ``_tone_class`` field via :class (Tailwind-first
@@ -155,6 +173,60 @@ def _money(v):
     return f"${v:,.0f}"
 
 
+def _finite(v):
+    """``v`` as a finite float, else None (a bool, NaN or infinity is no reading)."""
+    if isinstance(v, bool):
+        return None
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
+def _hiro_money(v):
+    """Signed dollars with a B form ($SPX hedging runs to billions): $2.40B /
+    -$310.00M / -$4k. '' when unusable. Page-local: Tier 1 cannot import the
+    service's formatter."""
+    v = _finite(v)
+    if v is None:
+        return ""
+    sign = "-" if v < 0 else ""
+    if abs(v) >= 999_500_000:            # rounds to >= $1.00B -> use the B form
+        return f"{sign}${abs(v)/1e9:.2f}B"
+    return sign + _money(abs(v))
+
+
+def _hiro_detail(d):
+    """The two HIRO detail cells. A missing or non-finite reading DROPS its
+    clause rather than printing an invented zero ("0% unlabelled", "spot 0");
+    the headline dollar figure is the one thing the row cannot do without."""
+    if d.get("type") == "hiro_surge":
+        impact = _finite(d.get("impact"))
+        if impact is None:
+            return ""
+        head = _hiro_money(abs(impact))
+        window = _finite(d.get("window_min"))
+        if window is not None and window > 0:
+            head += f" in {window:g} min"
+        parts = [head]
+        mult = _finite(d.get("mult"))
+        if mult is not None:
+            parts.append(f"{mult:.1f}× normal")
+        share = _finite(d.get("unclassified_share"))
+        if share is not None:
+            parts.append(f"{share:.0%} unlabelled")
+        return " · ".join(parts)
+    cum = _finite(d.get("cum"))
+    if cum is None:
+        return ""
+    out = f"running total {_hiro_money(cum)}"
+    spot = _finite(d.get("spot"))
+    if spot is not None:
+        out += f" · spot {spot:g}"
+    return out
+
+
 def _exp_short(expiry, dte):
     if dte == 0:
         return "0DTE"
@@ -195,6 +267,8 @@ def alert_detail(a):
             pct_txt = f"{float(pct):.0%}" if isinstance(pct, (int, float)) else "—"
             return (f"{_exp_short(d.get('expiry'), d.get('dte'))} {float(d['strike']):g}{cp} · "
                     f"{_money(d.get('delta_notional'))} · {pct_txt} of gross")
+        if t in ("hiro_surge", "hiro_flip"):
+            return _hiro_detail(d)
     except (TypeError, ValueError):
         return ""
     return ""

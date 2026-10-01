@@ -343,6 +343,10 @@ def flow_rows(flow_view, limit=FLOW_ROWS_N):
     exposes no time-and-sales tape to this app, so "call side, 4.4x OI" is the
     whole of what is known — ``flow_alerts.alert_text`` carries the same
     restraint ("No buy/sell claim"), and the Desk must not add one by paraphrase.
+    The one exception is the two HIRO rows (Hedging surge / reversal): their
+    text DOES make a buy/sell claim, but a MODELLED one — each print's initiator
+    inferred from where it sat against the quote — and the text says so. The
+    Desk passes that through as written and adds no stronger claim of its own.
     """
     return _flow.alert_rows(flow_view)[:max(0, int(limit))]
 

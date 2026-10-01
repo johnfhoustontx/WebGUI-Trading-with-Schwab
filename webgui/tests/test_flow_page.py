@@ -290,6 +290,75 @@ def test_alert_kinds_say_what_happened_not_which_detector_fired():
     assert flow.alert_kind_label({"type": "big_delta"}) == "Outsized bet"
 
 
+# ── HIRO (the hedging-flow model) on the Flow Alerts screen ─────────────────
+_HS = {"type": "hiro_surge", "side": "dealers_buying", "symbol": "$SPX", "ts": 1,
+       "spot": 5712.5, "impact": 2.4e9, "mult": 3.6, "window_min": 15,
+       "unclassified_share": 0.18, "id": "x1", "text": "t"}
+_HF = {"type": "hiro_flip", "side": "to_selling", "symbol": "SPY", "ts": 1,
+       "spot": 571.2, "cum": -3.1e8, "id": "x2", "text": "t"}
+
+
+def test_hiro_labels_and_tones():
+    assert flow.alert_kind_label(_HS) == "Hedging surge"
+    assert flow.alert_kind_label(_HF) == "Hedging reversal"
+    assert flow.side_label(_HS) == "Dealers buying"
+    assert flow.side_label(_HF) == "Now selling"
+    assert flow.tone_class(_HS) == "text-emerald-400"
+    assert flow.tone_class(_HF) == "text-rose-400"
+
+
+def test_hiro_the_other_two_sides_label_and_tone_the_other_way():
+    assert flow.side_label({**_HS, "side": "dealers_selling"}) == "Dealers selling"
+    assert flow.side_label({**_HF, "side": "to_buying"}) == "Now buying"
+    assert flow.tone_class({**_HS, "side": "dealers_selling"}) == "text-rose-400"
+    assert flow.tone_class({**_HF, "side": "to_buying"}) == "text-emerald-400"
+
+
+def test_hiro_detail_cells():
+    assert flow.alert_detail(_HS) == "$2.40B in 15 min · 3.6× normal · 18% unlabelled"
+    assert flow.alert_detail(_HF) == "running total -$310.00M · spot 571.2"
+    assert flow.alert_detail({"type": "hiro_surge"}) == ""
+    assert flow.alert_detail({"type": "hiro_flip"}) == ""
+
+
+def test_hiro_detail_never_prints_an_invented_zero():
+    """A missing reading drops its clause; it never renders as 0% / spot 0."""
+    no_share = {k: v for k, v in _HS.items() if k != "unclassified_share"}
+    assert flow.alert_detail(no_share) == "$2.40B in 15 min · 3.6× normal"
+    assert "0%" not in flow.alert_detail({**_HS, "unclassified_share": None})
+    assert flow.alert_detail({**_HF, "spot": None}) == "running total -$310.00M"
+
+
+def test_hiro_detail_treats_non_finite_numbers_as_missing():
+    nan, inf = float("nan"), float("inf")
+    assert flow.alert_detail({**_HS, "impact": nan}) == ""
+    assert flow.alert_detail({**_HS, "unclassified_share": nan}) == \
+        "$2.40B in 15 min · 3.6× normal"
+    assert flow.alert_detail({**_HF, "cum": inf}) == ""
+    assert flow.alert_detail({**_HF, "spot": nan}) == "running total -$310.00M"
+
+
+def test_hiro_money_signs_and_scales():
+    assert flow._hiro_money(2.4e9) == "$2.40B"
+    assert flow._hiro_money(-3.1e8) == "-$310.00M"
+    assert flow._hiro_money(-4_000) == "-$4k"
+    assert flow._hiro_money(None) == ""
+    assert flow._hiro_money(float("nan")) == ""
+
+
+def test_alert_rows_build_end_to_end_for_hiro():
+    rows = {r["_kind_key"]: r for r in flow.alert_rows({"alerts": [_HS, _HF]})}
+    hs, hf = rows["hiro_surge"], rows["hiro_flip"]
+    assert hs["symbol"] == "$SPX" and hs["kind"] == "Hedging surge"
+    assert hs["detail"].startswith("$2.40B in 15 min")
+    assert hs["_tone_class"] == flow._TONE_POS
+    assert hf["symbol"] == "SPY" and hf["kind"] == "Hedging reversal"
+    assert hf["detail"].startswith("running total -$310.00M")
+    assert hf["_tone_class"] == flow._TONE_NEG
+    # A model of the stock hedge, not a contract: nothing to speak as a contract.
+    assert hs["strike"] is None and hs["dte"] is None and hs["share_pct"] is None
+
+
 def test_the_gamma_sides_moved_with_their_kind():
     """"Hedging flipped · To positive" would be LESS legible than the name it
     replaced: "to positive" is only interpretable once you know the subject is
@@ -313,7 +382,7 @@ def test_the_raw_payload_keys_are_NOT_renamed():
     section names and _TONE's own keys. Renaming a WORD is this page's business;
     renaming a KEY would be a cross-tier migration for no reader's benefit."""
     assert set(flow._KIND_LABEL) == {"crossover", "uoa", "gamma_flip",
-                                     "big_delta"}
+                                     "big_delta", "hiro_surge", "hiro_flip"}
     assert {t for t, _s in flow._TONE} == set(flow._KIND_LABEL)
 
 
