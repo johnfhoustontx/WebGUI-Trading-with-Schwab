@@ -9,7 +9,9 @@ Hedge impact of a trade = side x delta x contracts x 100 x spot, with the
 contract's SIGNED delta: a customer buying a call (+1 x +delta) makes the dealer
 buy stock (positive); buying a put (+1 x -delta) makes the dealer sell (negative).
 """
+import datetime as _dt
 import math
+from zoneinfo import ZoneInfo
 
 
 def _finite(v):
@@ -197,3 +199,71 @@ def detect_surge(symbol, today_rows, sigma, cfg):
             "symbol": symbol, "ts": last["ts"], "spot": last["spot"],
             "impact": imp, "mult": mult, "window_min": int(cfg["window_min"]),
             "unclassified_share": share}
+
+
+# --- Flip (reversal) ---------------------------------------------------------
+
+_CT = ZoneInfo("America/Chicago")
+FLIP_MAX_AGE_SEC = 120     # a transition older than this is history, not news
+
+
+def ct_ts(day, hhmm) -> int:
+    """Unix seconds of ``hhmm`` Central on ``day`` ('YYYY-MM-DD' or a date)."""
+    if isinstance(day, str):
+        day = _dt.date.fromisoformat(day)
+    h, m = (int(x) for x in str(hhmm).split(":"))
+    return int(_dt.datetime(day.year, day.month, day.day, h, m, tzinfo=_CT).timestamp())
+
+
+def _state(cum, prev, band):
+    if prev == "buying":
+        return "selling" if cum <= -band else "buying"
+    if prev == "selling":
+        return "buying" if cum >= band else "selling"
+    if cum >= band:
+        return "buying"
+    if cum <= -band:
+        return "selling"
+    return None
+
+
+def flip_transitions(rows, band, not_before_ts):
+    """``[(ts, new_state, cum)]`` for every change of the day's hedging direction.
+
+    The running total counts from the session's FIRST row; only the evaluation
+    waits for ``not_before_ts``. The first state reached is the baseline and is
+    not a transition. Hysteresis: a state changes only when the total clears zero
+    by ``band`` on the other side."""
+    out, state, cum = [], None, 0.0
+    for r in rows:
+        cum += r["impact"]
+        if r["ts"] < not_before_ts:
+            continue
+        new = _state(cum, state, band)
+        if new is None:
+            continue
+        if state is not None and new != state:
+            out.append((r["ts"], new, cum))
+        state = new
+    return out
+
+
+def detect_flip(symbol, rows, sigma, cfg, not_before_ts, seen_ts):
+    """A ``hiro_flip`` alert for the latest transition, or None.
+
+    Stateless: replays today's rows every tick. Fires only for a transition
+    newer than ``seen_ts`` AND at most FLIP_MAX_AGE_SEC old, so a restart cannot
+    fire an old flip and an intraday-moving sigma cannot surface one."""
+    if not rows or sigma is None or sigma <= 0:
+        return None
+    t = flip_transitions(rows, float(cfg["flip_band"]) * sigma, not_before_ts)
+    if not t:
+        return None
+    ts, state, cum = t[-1]
+    if seen_ts is not None and ts <= seen_ts:
+        return None
+    if rows[-1]["ts"] - ts > FLIP_MAX_AGE_SEC:
+        return None
+    spot = next((r["spot"] for r in rows if r["ts"] == ts), None)
+    return {"type": "hiro_flip", "side": "to_buying" if state == "buying" else "to_selling",
+            "symbol": symbol, "ts": ts, "spot": spot, "cum": cum}

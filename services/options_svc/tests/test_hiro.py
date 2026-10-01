@@ -248,3 +248,67 @@ def test_surge_silent_below_k_below_floor_unlabelled_or_no_sigma():
     assert hiro.detect_surge("SPY", _rows([4e6] * 15, uncl=20.0), 15e6, CFG) is None
     assert hiro.detect_surge("SPY", _rows([4e6] * 15), None, CFG) is None
     assert hiro.detect_surge("SPY", [], 15e6, CFG) is None
+
+
+# --- Flip (reversal) ---------------------------------------------------------
+
+def test_ct_ts_is_central_wallclock():
+    import datetime as _d
+    from zoneinfo import ZoneInfo
+    want = _d.datetime(2026, 10, 1, 9, 0, tzinfo=ZoneInfo("America/Chicago")).timestamp()
+    assert hiro.ct_ts("2026-10-01", "09:00") == int(want)
+
+
+def test_flip_transitions_hysteresis_and_baseline():
+    # impacts 5,5,-6,-6,-4,-6 -> cum 5,10,4,-2,-6,-12 ; band 5 -> baseline
+    # buying at the first row (5 >= 5), selling only once cum <= -5 (at -6)
+    rows = _rows([5, 5, -6, -6, -4, -6])
+    t = hiro.flip_transitions(rows, band=5.0, not_before_ts=rows[0]["ts"])
+    assert [(s) for _, s, _ in t] == ["selling"]
+    assert t[0][0] == rows[4]["ts"]
+
+
+def test_flip_transitions_ignore_minutes_before_not_before_but_keep_their_cum():
+    rows = _rows([20, -1, -1])                        # cum 20, 19, 18
+    t = hiro.flip_transitions(rows, band=5.0, not_before_ts=rows[1]["ts"])
+    assert t == []                                    # baseline buying, no change
+
+
+def test_detect_flip_fresh_newer_than_seen():
+    rows = _rows([10, -30])                           # cum 10 -> -20
+    a = hiro.detect_flip("SPY", rows, sigma=5.0, cfg=CFG,
+                         not_before_ts=rows[0]["ts"], seen_ts=None)
+    assert a["type"] == "hiro_flip" and a["side"] == "to_selling"
+    assert a["ts"] == rows[1]["ts"] and a["cum"] == -20.0 and a["spot"] == 500.0
+    assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], seen_ts=a["ts"]) is None
+
+
+def test_detect_flip_ignores_a_stale_transition():
+    rows = _rows([10, -30, -1, -1, -1])               # flip at minute 1, now minute 4
+    assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None) is None
+
+
+def test_detect_flip_needs_sigma():
+    assert hiro.detect_flip("SPY", _rows([10, -30]), None, CFG, 0, None) is None
+
+
+def test_detect_flip_to_buying_mirror():
+    rows = _rows([-10, 30])                           # cum -10 -> +20
+    a = hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None)
+    assert a["side"] == "to_buying" and a["ts"] == rows[1]["ts"] and a["cum"] == 20.0
+
+
+def test_flip_dead_zone_never_sets_a_state():
+    rows = _rows([1, -2, 3, -4, 2])                   # cum 1,-1,2,-2,0 : inside +-5
+    assert hiro.flip_transitions(rows, band=5.0, not_before_ts=rows[0]["ts"]) == []
+    assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None) is None
+
+
+def test_detect_flip_age_limit_is_inclusive():
+    rows = _rows([10, -30, 0])
+    flip_ts = rows[1]["ts"]
+    rows[2]["ts"] = flip_ts + hiro.FLIP_MAX_AGE_SEC
+    a = hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None)
+    assert a is not None and a["ts"] == flip_ts
+    rows[2]["ts"] = flip_ts + hiro.FLIP_MAX_AGE_SEC + 1
+    assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None) is None
