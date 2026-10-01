@@ -286,14 +286,24 @@ def test_surge_never_fires_on_a_non_finite_window(bad):
 
 def test_surge_needs_a_fresh_newest_row_against_now_ts():
     """Rows stop at the close while detection runs on; a stale window must not
-    re-fire after its cooldown."""
+    re-fire after its cooldown. A slow poll (newest row 300 s old) still counts;
+    a stalled collector (301 s) does not."""
     rows = _rows([4e6] * 15)
     last = rows[-1]["ts"]
     assert hiro.detect_surge("SPY", rows, 15e6, CFG,
-                             now_ts=last + hiro.FRESH_ROW_SEC) is not None
+                             now_ts=last + hiro.STALE_ROW_SEC) is not None
     assert hiro.detect_surge("SPY", rows, 15e6, CFG,
-                             now_ts=last + hiro.FRESH_ROW_SEC + 1) is None
-    assert hiro.FRESH_ROW_SEC == 120
+                             now_ts=last + hiro.STALE_ROW_SEC + 1) is None
+    assert hiro.STALE_ROW_SEC == 300
+
+
+def test_surge_survives_a_slow_tick():
+    """The row ts is the minute floor of the collect START and the check runs
+    after a 30-90 s poll: a newest row 150 s old against the clock is a slow
+    tick, not frozen data, and must still fire."""
+    rows = _rows([4e6] * 15)
+    assert hiro.detect_surge("SPY", rows, 15e6, CFG,
+                             now_ts=rows[-1]["ts"] + 150) is not None
 
 
 @pytest.mark.parametrize("sigma", [math.nan, math.inf, 0.0, -1.0])
@@ -334,13 +344,27 @@ def test_flip_transitions_carry_cum_from_before_not_before():
     assert t == [(rows[2]["ts"], "selling", -6.0)]
 
 
-def test_detect_flip_age_measured_against_now_ts():
-    rows = _rows([10, -30])                           # fresh against the newest row
+def test_detect_flip_age_measured_against_the_newest_row_not_now_ts():
+    """The transition's age is measured against the NEWEST ROW, so a slow tick
+    (newest row 150 s old against the clock) does not lose the reversal -- the
+    report replays with now_ts = row ts and counts it, so live must too. The
+    clock only refuses frozen data: a newest row over STALE_ROW_SEC old."""
+    rows = _rows([10, -30])                           # the flip is the newest row
     flip_ts = rows[1]["ts"]
     assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None,
-                            now_ts=flip_ts + hiro.FLIP_MAX_AGE_SEC) is not None
+                            now_ts=flip_ts + 150) is not None
     assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None,
-                            now_ts=flip_ts + hiro.FLIP_MAX_AGE_SEC + 1) is None
+                            now_ts=flip_ts + hiro.STALE_ROW_SEC) is not None
+    assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None,
+                            now_ts=flip_ts + hiro.STALE_ROW_SEC + 1) is None
+
+
+def test_detect_flip_old_transition_is_refused_against_the_newest_row_even_on_a_fresh_clock():
+    """A fresh clock cannot rescue a transition that is history against the
+    newest row (a restart, or an intraday-moving sigma surfacing an old one)."""
+    rows = _rows([10, -30, -1, -1, -1])               # flip at minute 1, newest minute 4
+    assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None,
+                            now_ts=rows[-1]["ts"]) is None
 
 
 def test_detect_flip_fresh_newer_than_seen():

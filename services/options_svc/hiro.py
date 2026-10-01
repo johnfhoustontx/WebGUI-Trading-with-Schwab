@@ -194,22 +194,31 @@ def baseline_sigma(prior_sessions, today_rows, cfg):
 
 # Rows stop at the 15:00 CT close, but detection keeps running after it, and a
 # stalled collector freezes the newest row: without a clock check the same old
-# window would re-fire every time its cooldown lapsed. Two poll intervals.
-FRESH_ROW_SEC = 120
+# window would re-fire every time its cooldown lapsed. 300 s = a slow poll still
+# counts, a stalled collector does not. (A row's ts is the minute floor of the
+# collect START and the check runs after a 30-90 s poll, so a healthy newest row
+# is routinely 90-150 s old against the clock; a 120 s limit lost real alerts.)
+STALE_ROW_SEC = 300
+
+
+def _stale(rows, now_ts):
+    """True when the newest row is older than STALE_ROW_SEC against the clock
+    (frozen data). No clock (``now_ts`` None) never reads as stale."""
+    return now_ts is not None and now_ts - rows[-1]["ts"] > STALE_ROW_SEC
 
 
 def detect_surge(symbol, today_rows, sigma, cfg, *, now_ts=None):
     """A ``hiro_surge`` alert dict for the window ending at the latest row, or
     None. No cooldown here — the handler owns that, as for every flow detector.
 
-    With ``now_ts``, the newest row must be at most FRESH_ROW_SEC old against
+    With ``now_ts``, the newest row must be at most STALE_ROW_SEC old against
     the clock. A non-finite window or sigma never fires: NaN fails every
     comparison, so unguarded it would pass the floor and the multiple both."""
     sigma = _finite(sigma)
     if not today_rows or sigma is None or sigma <= 0:
         return None
     last = today_rows[-1]
-    if now_ts is not None and now_ts - last["ts"] > FRESH_ROW_SEC:
+    if _stale(today_rows, now_ts):
         return None
     w = window_sum(today_rows, last["ts"], int(cfg["window_min"]) * 60)
     share = w["unclassified_share"]
@@ -231,7 +240,8 @@ def detect_surge(symbol, today_rows, sigma, cfg, *, now_ts=None):
 # --- Flip (reversal) ---------------------------------------------------------
 
 _CT = ZoneInfo("America/Chicago")
-FLIP_MAX_AGE_SEC = 120     # a transition older than this is history, not news
+# A transition more than this older than the NEWEST ROW is history, not news.
+FLIP_MAX_AGE_SEC = 120
 
 
 def ct_ts(day, hhmm) -> int:
@@ -298,11 +308,17 @@ def detect_flip(symbol, rows, sigma, cfg, not_before_ts, seen_ts, *, now_ts=None
     """A ``hiro_flip`` alert for the latest transition, or None.
 
     Stateless: replays today's rows every tick. Fires only for a transition
-    newer than ``seen_ts`` AND at most FLIP_MAX_AGE_SEC old, so a restart cannot
-    fire an old flip and an intraday-moving sigma cannot surface one. The age is
-    measured against ``now_ts`` when given (the clock), else the newest row."""
+    newer than ``seen_ts`` AND at most FLIP_MAX_AGE_SEC older than the NEWEST
+    ROW, so a restart cannot fire an old flip and an intraday-moving sigma cannot
+    surface one. The age is measured against the newest row, never the clock: a
+    slow tick must not lose a reversal (it would never be marked seen, so it
+    would be lost for good), and the daily report replays it this way.
+    Separately, with ``now_ts`` the newest row itself must be at most
+    STALE_ROW_SEC old against the clock (frozen data fires nothing)."""
     sigma = _finite(sigma)
     if not rows or sigma is None or sigma <= 0:
+        return None
+    if _stale(rows, now_ts):
         return None
     t = flip_transitions(rows, float(cfg["flip_band"]) * sigma, not_before_ts)
     if not t:
@@ -310,8 +326,7 @@ def detect_flip(symbol, rows, sigma, cfg, not_before_ts, seen_ts, *, now_ts=None
     ts, state, cum = t[-1]
     if seen_ts is not None and ts <= seen_ts:
         return None
-    ref = rows[-1]["ts"] if now_ts is None else now_ts
-    if ref - ts > FLIP_MAX_AGE_SEC:
+    if rows[-1]["ts"] - ts > FLIP_MAX_AGE_SEC:
         return None
     spot = next((r["spot"] for r in rows if r["ts"] == ts), None)
     return {"type": "hiro_flip", "side": "to_buying" if state == "buying" else "to_selling",

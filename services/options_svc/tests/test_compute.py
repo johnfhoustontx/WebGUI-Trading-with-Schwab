@@ -6400,6 +6400,27 @@ def test_write_hiro_rows_falls_back_per_symbol_and_one_bad_row_loses_only_itself
     assert seen[0][1] == "SPY"
 
 
+def test_write_hiro_rows_failed_batch_is_rolled_back_before_the_fallback():
+    """A DB-level failure part-way through the batch leaves the earlier rows in
+    an OPEN transaction; the per-symbol fallback then UPSERTs them again
+    (accumulate) and commits -- a double count. The batch must be rolled back
+    first. Real sqlite in memory; a trigger aborts on the second symbol."""
+    import sqlite3
+    import gex_history_db as gh
+    conn = sqlite3.connect(":memory:")
+    gh.init_schema(conn)
+    conn.execute("CREATE TRIGGER boom BEFORE INSERT ON hiro_minutes "
+                 "WHEN NEW.symbol = 'QQQ' "
+                 "BEGIN SELECT RAISE(ABORT, 'boom'); END")
+    conn.commit()
+    row = {"spot": 500.0, "impact": 1.0, "classified_vol": 10.0,
+           "unclassified_vol": 0.0}
+    compute._write_hiro_rows(gh, conn, 600, {"SPY": dict(row), "QQQ": dict(row)})
+    got = conn.execute("SELECT symbol, impact, classified_vol FROM hiro_minutes"
+                       ).fetchall()
+    assert got == [("SPY", 1.0, 10.0)]          # stored ONCE, not 2.0 / 20.0
+
+
 def test_write_hiro_rows_with_nothing_to_write_touches_nothing():
     gh = _HiroGh()
     compute._write_hiro_rows(gh, object(), 600, {})

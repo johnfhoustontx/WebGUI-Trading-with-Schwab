@@ -2932,6 +2932,18 @@ def test_hiro_flags_fail_closed_on_a_truthy_non_bool(monkeypatch):
     assert got == {"hiro_surge": (True, False), "hiro_flip": (True, False)}
 
 
+def test_run_flow_alerts_hiro_slow_tick_still_fires_both(monkeypatch):
+    """A busy tape: the alert check runs 150 s after the newest row's ts (the
+    minute floor of the collect START, then a slow poll). Both rules fire and
+    the reversal is marked seen -- under a 120-s clock limit it was neither
+    fired nor marked, so it was lost for good while the report counted it."""
+    rows = _hrows(_HIRO_BOTH)
+    bus, handlers, _ = _hiro_setup(monkeypatch, rows, _HIRO_PRIOR)
+    monkeypatch.setattr(handlers, "_flow_now_ts", lambda: rows[-1]["ts"] + 150)
+    handlers.run_flow_alerts(bus)
+    assert sorted(a["type"] for a in _hiro_alerts(bus)) == ["hiro_flip", "hiro_surge"]
+
+
 def test_run_flow_alerts_hiro_stale_rows_do_not_fire(monkeypatch):
     """The handler passes the clock: rows ten minutes old fire neither rule."""
     rows = _hrows(_HIRO_BOTH)
