@@ -4761,7 +4761,7 @@ def _maybe_purge_gex(gh, conn) -> None:
         _hcfg = _fa.load_thresholds().get("hiro", {})
         if not isinstance(_hcfg, dict):      # a scalar override of the table
             _hcfg = {}
-        keep =max(int(_hcfg.get("keep_sessions", 20)),
+        keep = max(int(_hcfg.get("keep_sessions", 20)),
                    int(_hcfg.get("baseline_sessions", 5)) + 1)
         gh.purge_hiro(conn, keep_sessions=keep)
     except Exception:

@@ -343,7 +343,7 @@ def insert_hiro_rows(conn: sqlite3.Connection, items) -> None:
         "impact = impact + excluded.impact, "
         "classified_vol = classified_vol + excluded.classified_vol, "
         "unclassified_vol = unclassified_vol + excluded.unclassified_vol, "
-        "spot = excluded.spot",
+        "spot = COALESCE(excluded.spot, spot)",
         params)
     conn.commit()
 
