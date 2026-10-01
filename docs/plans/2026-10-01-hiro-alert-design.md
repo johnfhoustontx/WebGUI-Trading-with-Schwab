@@ -38,11 +38,14 @@ Per contract, per minute:
    previous reading per (symbol, contract symbol), reset each session. A contract's
    first reading after a restart only seeds the baseline — never books the day's
    volume into one minute. A negative `dv` is dropped.
-2. **Side**, only when `tradeTimeInLong` advanced since the last poll:
+2. **Side**, only when `dv > 0` — new volume means new trades printed, and `last`
+   is the latest of them, so no trade-time field is needed (`tradeTimeInLong` was
+   considered and dropped: no code here reads it, and `dv > 0` says the same thing).
    `last ≥ ask` → customer bought (+1); `last ≤ bid` → customer sold (−1); otherwise
-   the side of the midpoint `last` sits on. Exactly at the midpoint, no new trade, or
-   an unusable quote → **unclassified**: its volume is counted separately and
-   contributes nothing, never a guessed side.
+   the side of the midpoint `last` sits on. Exactly at the midpoint or an unusable
+   quote → **unclassified**: its volume is counted separately and contributes
+   nothing, never a guessed side. ⚠ The bid/ask are this minute's, and the trade may
+   be up to a minute older than them — one more reason the label is coarse.
 3. **Hedge impact ($)** `= side × delta × dv × 100 × spot`, with the contract's own
    SIGNED delta (call positive, put negative), which gives the dealer direction with
    no call/put branch.
@@ -56,8 +59,11 @@ Per symbol per minute the series records: `ts`, `spot`, `impact` (net $),
 a literal). Off-hours the chain's `underlyingPrice` can be stale and index open
 interest reads zero.
 
-**Storage:** one row per symbol per minute in a small SQLite table (alongside the GEX
-history), so a restart does not reset the running total. Published as
+**Storage:** one row per symbol per minute in a `hiro_minutes` table inside
+`gex_history.db` (reusing its `connect()` and the collector's write connection), so a
+restart does not reset the running total. It has its OWN retention,
+`[hiro].keep_sessions` (default 20), because the GEX snapshots keep only 5 sessions
+and the Surge baseline needs 5 sessions BEFORE today. Published as
 `cache:options:hiro` (`skip_unchanged`, no timestamp inside the payload).
 
 **Accepted limits, stated on screen and in the manuals:** one side per contract per
@@ -70,12 +76,19 @@ All values in `[hiro]` of `config/flow_alerts.toml`, with built-in defaults in
 `flow_alerts._DEFAULTS`, and an entry each in `webgui/config_schema.py`. The defaults
 are guesses until the daily report measures them.
 
-### Surge (`kind = "surge"`)
+Two alert TYPES, `hiro_surge` and `hiro_flip`, so the Flow screen's Type filter,
+tone map and spoken phrases need no second key. Reader-facing names: **Hedging
+surge** and **Hedging reversal** — never "flip", which the screen already uses for
+the gamma flip.
+
+### Surge (`hiro_surge`)
 
 - Window: rolling 15-minute sum of `impact`.
-- Normal size σ: the spread of the symbol's own 15-minute sums over its last 5 stored
-  sessions. Until 5 sessions exist, today's data, and only after ≥ 30 minutes of it;
-  otherwise the rule does not run.
+- Normal size σ: the **root-mean-square** of the symbol's own full 15-minute sums over
+  its last 5 stored sessions before today. RMS rather than a standard deviation
+  because hedging flow's natural centre is zero, and a day-long drift is the very
+  thing being measured, not noise to subtract. Until 5 prior sessions exist, today's
+  full windows, and only after ≥ 30 minutes of rows; otherwise the rule does not run.
 - Fires when the 15-minute sum is ≥ `k × σ` (default 3) **and** clears
   `min_notional` (an absolute floor against a dead tape) **and** the window's
   unclassified share ≤ `max_unclassified` (default 0.5).
@@ -83,15 +96,20 @@ are guesses until the daily report measures them.
 - Cooldown: 30 minutes per symbol and direction.
 - Payload: symbol, direction, dollars, multiple of σ, spot, unclassified share.
 
-### Flip (`kind = "flip"`)
+### Flip (`hiro_flip`)
 
-- State per symbol: dealers `net_buying` or `net_selling` for the day.
+- State per symbol: dealers `buying` or `selling` for the day.
 - Switches only when `cum` clears zero by a dead zone of `flip_band × σ` — the
   `gamma_flip` hysteresis pattern, scaled per symbol.
 - Held until `flip_not_before` (default 09:00 CT): early in the session the total is
-  tiny and crosses zero constantly.
-- Cooldown: 60 minutes per symbol.
-- After a restart the state is rebuilt from the stored minutes, so no false flip.
+  tiny and crosses zero constantly. The first state after that is the baseline and
+  never alerts.
+- **Stateless:** every tick replays today's stored minutes through the hysteresis and
+  alerts only on a transition that is (a) newer than the last one seen, recorded in
+  the shared cooldown map, and (b) at most 2 minutes old. So a restart cannot fire a
+  false flip, and a σ that moves intraday (today-fallback) cannot surface an old one.
+- Cooldown: 60 minutes per symbol. A transition inside the cooldown is marked seen
+  and dropped, not deferred.
 
 ### Delivery
 
