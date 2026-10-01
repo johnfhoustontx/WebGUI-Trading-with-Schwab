@@ -5244,7 +5244,8 @@ def _count_flow_alerts(flow_cooldowns, today):
     HIRO is an unvalidated MODEL of dealer hedging, and while it is one it must
     not move any ranking -- Hotness, ``n_alerts`` or the EOD briefing count,
     private or public. Revisit once the daily HIRO validation report
-    (tools/hiro_report.py, planned) has validated it. (Its reversal seen marker, ``hiro_flip_seen:SYM``, has no
+    (tools/hiro_report.py, run daily at [slots.hiro_report]) has validated it.
+    (Its reversal seen marker, ``hiro_flip_seen:SYM``, has no
     ``|`` and never counted.)"""
     if not flow_cooldowns or flow_cooldowns.get("date") != today:
         return {}
