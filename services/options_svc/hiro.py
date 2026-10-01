@@ -29,13 +29,17 @@ def classify_side(last, bid, ask) -> int:
     last, bid, ask = _finite(last), _finite(bid), _finite(ask)
     if last is None or bid is None or ask is None:
         return 0
-    if last <= 0 or bid < 0 or ask <= 0 or ask < bid:
+    if last <= 0 or bid < 0 or ask <= 0 or ask <= bid:   # crossed or LOCKED quote
         return 0
     if last >= ask:
         return 1
     if last <= bid:
         return -1
     mid = (bid + ask) / 2.0
+    # A print meant to be AT the mid can miss it by an ulp in binary (0.15 vs
+    # (0.10 + 0.20) / 2), and must not be labelled by that rounding.
+    if math.isclose(last, mid, rel_tol=1e-9, abs_tol=1e-9):
+        return 0
     if last > mid:
         return 1
     if last < mid:
@@ -44,8 +48,9 @@ def classify_side(last, bid, ask) -> int:
 
 
 def _contracts(chain):
-    """Yield every contract dict in a Schwab chain. Total over malformed input."""
-    for mapkey in ("callExpDateMap", "putExpDateMap"):
+    """Yield ``(is_call, contract)`` for every contract dict in a Schwab chain,
+    ``is_call`` from the map it came from. Total over malformed input."""
+    for mapkey, is_call in (("callExpDateMap", True), ("putExpDateMap", False)):
         exp_map = chain.get(mapkey)
         if not isinstance(exp_map, dict):
             continue
@@ -57,7 +62,7 @@ def _contracts(chain):
                     continue
                 for c in contracts:
                     if isinstance(c, dict):
-                        yield c
+                        yield is_call, c
 
 
 def measure_chain(chain, prev_vol):
@@ -70,16 +75,20 @@ def measure_chain(chain, prev_vol):
     books the volume rather than losing it).
 
     A contract's FIRST reading only seeds the baseline: after a restart it must
-    never book the whole day's volume into one minute."""
-    prev_vol = dict(prev_vol or {})
+    never book the whole day's volume into one minute.
+
+    Volume that cannot be turned into impact -- no buy/sell label, an unusable
+    delta, or a delta of the wrong sign for its right -- is counted as
+    ``unclassified_vol``, so the window never looks better measured than it was.
+    The caller's ``prev_vol`` is never mutated."""
+    new_prev = dict(prev_vol or {})
     if not isinstance(chain, dict):
-        return None, prev_vol
+        return None, new_prev
     spot = _finite(chain.get("underlyingPrice"))
     if spot is None or spot <= 0:
-        return None, prev_vol
-    new_prev = dict(prev_vol)
+        return None, new_prev
     impact = classified = unclassified = 0.0
-    for c in _contracts(chain):
+    for is_call, c in _contracts(chain):
         osi = c.get("symbol")
         vol = _finite(c.get("totalVolume"))
         if not osi or vol is None:
@@ -92,7 +101,9 @@ def measure_chain(chain, prev_vol):
         if dv <= 0:
             continue
         delta = _finite(c.get("delta"))
-        if delta is None or abs(delta) > 1:      # NaN / Schwab's -999 sentinel
+        if (delta is None or abs(delta) > 1      # NaN / Schwab's -999 sentinel
+                or (is_call and delta < 0) or (not is_call and delta > 0)):
+            unclassified += dv
             continue
         side = classify_side(c.get("last"), c.get("bid"), c.get("ask"))
         if side == 0:
