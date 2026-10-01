@@ -860,6 +860,17 @@ the **Desk** as well, a published screen: its headlines strip reads through
 `desk.bus_key(view)`, which swaps `news:feed` for `news:feed_public` when
 `shell.is_public()`. Any new public reader of the news feed needs the same swap.
 
+**Flow alerts can carry service-stamped `quiet` / `public` flags** (since 2026-10-01,
+the HIRO-model `hiro_surge` / `hiro_flip`). `quiet: True` = no push and no Desk speech;
+`public: False` = hidden wherever `shell.hides_non_public()` is true — the public
+origin **and** gallery captures (`ns_capture=1`), which publish to the website. The
+one filter is `pages/options/flow._shown`, reached through `flow.alert_rows`; ⚠ **any
+NEW reader that shows flow-alert rows or COUNTS must go through it**, and must call it
+in the page context (it reads the request cookie, so inside `run.io_bound` a capture
+would silently stop hiding). Tier 1 decides from the flag on the alert, never from
+`[hiro]` config, and a missing flag means shown/spoken. As with the news feed, the ACL
+is no layer here: the `live` user can read the whole `cache:options:flow_alerts`.
+
 ⚠ **The published route set is the seventeen screens, the eight 308 redirects in
 `live_screens.RETIRED_ROUTES` (the pinned Gamma screens retired 2026-09-22, each
 now a redirect to `/gamma`), PLUS exactly one non-page route: `/static`

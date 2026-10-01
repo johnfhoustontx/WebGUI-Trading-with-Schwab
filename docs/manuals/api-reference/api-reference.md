@@ -618,6 +618,7 @@ cache:options:dossier:<SYMBOL> events:options:dossier:<SYMBOL>   (TTL 900 s; the
 cache:options:matrix           events:options:matrix        (Opportunity Board)
 cache:options:flow_alerts      events:options:flow_alerts   (Flow Alerts, today only)
 cache:options:flow_alert_cooldowns  (uncapped seen-map behind the per-symbol counts)
+cache:options:hiro             events:options:hiro          (HIRO-model hedging flow, per-symbol summary; no reader yet)
 cache:options:flow_skew        events:options:flow_skew
 cache:options:net_premium      events:options:net_premium   (Net Prem subtab, 28 symbols)
 cache:options:header           events:options:header
@@ -666,6 +667,23 @@ cache:options:rescue:<position_id>   events:options:rescue:<position_id>   (Resc
 cache:options:rescue_summary   events:options:rescue_summary
 cmd:options
 ```
+
+**`cache:options:flow_alerts`** is `{date, alerts: [...]}`, oldest first, capped at
+300, today only. Each alert carries `type` — `crossover`, `uoa`, `gamma_flip`,
+`big_delta`, `hiro_surge` or `hiro_flip` — plus `side`, `symbol`, `ts`, `id` and
+`text`. The two `hiro_*` types also carry two flags the service stamps from
+`[hiro]` in `config/flow_alerts.toml`: **`quiet`** (true while `push` is off — not
+pushed, and the Desk does not speak it) and **`public`** (false while `public` is
+off — hidden on the public live screens and in gallery captures). A reader that
+shows flow-alert rows must go through `webgui/pages/options/flow.alert_rows` (its
+`_shown` filter does the hiding); an alert with no `public` key is shown. The
+`hiro_*` alerts are not counted in `flow_alert_cooldowns`-derived counts (Hotness,
+`n_alerts`) while the model is unvalidated.
+
+**`cache:options:hiro`** is `{date, symbols: {SYM: {ts, spot, impact, cum,
+window_impact, sigma, mult, unclassified_share}}}`, `ts` being that symbol's newest
+stored minute. Gate on `date` **and** each symbol's `ts` against the clock — a stalled
+collector also leaves a today-dated view.
 
 **Trade / Portfolio / Market:**
 

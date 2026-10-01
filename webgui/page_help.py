@@ -809,8 +809,10 @@ without opening each page.
     "/options/flow": """
 **Flow Alerts — the simple version**
 
-Everything the options service flagged **today**, newest first — the same alerts
-that chime and hit your phone, kept somewhere you can actually read them.
+Everything the options service flagged **today**, newest first, kept somewhere you
+can actually read it. Some of these also chime or reach your phone; the
+**Outsized bet** and **hedging** rows never chime, and a row only reaches your
+phone when its push is switched on in Settings.
 
 - **Premium shift** — call premium overtook put premium on a symbol, or the
   reverse.
@@ -836,8 +838,9 @@ detail ends in **model**. They appear here, in the Desk's flow panel and on the
 Symbol page. They never chime or pop up a toast. While **Send hedging-flow
 pushes to the phone** is off in Settings → Configuration (it ships off) they do
 not reach your phone and the Desk does not speak them. They are not shown on the
-public live screens unless **Show hedging-flow alerts on the public screens** is
-on (it ships off).
+public live screens, or in the website's gallery pictures, unless **Show
+hedging-flow alerts on the public screens** is on (it ships off). They never
+count toward the Opportunity Board's **Flow alerts** or its score.
 
 **Age** tells you whether this just happened or is this morning's news. Filter by
 type or symbol, and **click a symbol** (the dotted underline) to open Dealer

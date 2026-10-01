@@ -514,6 +514,10 @@ over."* A new position adds its strikes, expiry and entry price, and says **cred
 debit** out loud — *"S P Y. New position, put credit spread. 2 07. point 5, 2 05,
 8 - 31, entry 56 cent credit."*
 
+A **hedging-flow** alert (a hedging surge or reversal — see
+[Flow Alerts](#flow-alerts)) glows but stays **silent** while its phone push is off,
+which is how it ships: it is neither named nor counted in "plus N more".
+
 A position that only changes **flag** — OK to At risk to Rescue — glows amber and
 stays **silent**. It was already in the book, and the flag column has already told
 you.
@@ -537,7 +541,8 @@ as the scanner chime.
   showing the last reading it trusts.
 - **Flow alerts say "call" or "put", never "bought" or "sold".** Schwab publishes
   no time-and-sales tape, so nobody — including this app — can honestly tell you
-  which side initiated.
+  which side initiated. The one exception is a **hedging** row, whose buying or
+  selling is a model's estimate and says so (≈ and "model").
 - **The top strip shows no prices at all.** SPX and QQQ sit in the panel directly
   below with more context; showing them twice from two separately-updating sources
   could briefly display two different prices for the same symbol. (VIX used to be
@@ -761,7 +766,8 @@ without opening a page per ticker.
 Columns: **Ticker · Spot · Day % · Trend** (an arrow) **· Call / Put** (whether
 premium is accelerating) **· P/C · Net $M · GEX** (whether spot is above or below
 the dealer gamma flip) **· Sig** (live scanner signals) **· Flow** (flow alerts
-today) **· Signal** (buy/neutral/sell) **· Hot**.
+today, not counting the hedging-flow alerts, which are an unvalidated model)
+**· Signal** (buy/neutral/sell) **· Hot**.
 
 **Hot** is the default sort. Click any column header to re-sort. Three tiles at the
 top count how many symbols are currently Buy, Neutral and Sell.
@@ -778,13 +784,19 @@ live.neuralstrike.co has no dossier, so there the symbol is plain text.
 
 **Route:** `/options/flow`. Also a rail item under **MARKETS**.
 
-Every unusual options event the app detected **today**, newest first — the same
-alerts that chime and push to your phone, kept somewhere you can read them.
+Every unusual options event the app detected **today**, newest first, kept somewhere
+you can read it — whether or not it chimed or reached your phone.
 
-Four detector types: **Crossover** (call premium overtook put premium, or the
-reverse), **Unusual activity** (a contract traded far above its open interest),
-**Gamma flip** (spot crossed the dealer gamma flip) and **Big delta** (one contract
-holds an outsized share of the symbol's directional exposure).
+Six kinds of alert. The screen names each by what happened:
+
+| Type on screen | What happened |
+|---|---|
+| **Premium shift** | Call premium overtook put premium on a symbol, or the reverse. |
+| **Unusual volume** | One contract traded far above its open interest. |
+| **Hedging flip** | Spot crossed the dealer gamma flip, so dealer hedging starts damping moves instead of amplifying them, or the reverse. |
+| **Outsized bet** | One contract holds an outsized share of the symbol's directional exposure (the **Share** column). |
+| **Hedging surge** | The stock dealers would have to buy or sell to hedge the last 15 minutes of option trades ran several times its normal size. Side: **Dealers buying** (upward pressure, green) or **Dealers selling** (downward, red). |
+| **Hedging reversal** | The day's running hedging total changed sign: **Now buying** or **Now selling**. |
 
 Columns: **Time · Age · Symbol · Type · Side · Detail · Share · Alert**. Filter by
 type or symbol — filtering is instant. **Click any row** to open Dealer Positioning
@@ -792,9 +804,49 @@ for that symbol.
 
 > The list covers **today only** and resets overnight. There is no history.
 
-> **No alert can tell a buy from a sell** — Schwab publishes no options tape. Read
-> every row as "something large happened here", then use price and gamma to decide
-> direction.
+> **The first four cannot tell a buy from a sell** — Schwab publishes no options
+> tape. Read those rows as "something large happened here", then use price and gamma
+> to decide direction.
+
+### The two hedging-flow alerts
+
+**Hedging surge** and **Hedging reversal** watch only `$SPX`, SPY, QQQ and IWM, during
+regular hours (08:30–15:00 CT). They are the one place this app names a direction,
+and that direction is a **model's estimate**, never an observation: each minute, every
+option contract's new volume is labelled bought or sold by where its last trade price
+sat against the bid and ask, and turned into the stock a dealer on the other side
+would trade to stay hedged. That is why their dollar figures carry **≈** and their
+detail ends in **model**. It is a home-built imitation of the idea behind SpotGamma's
+HIRO, not SpotGamma's number. Trades exactly at the midpoint, or on a quote that
+cannot be read, get no label; a surge does not fire when more than half of the
+window's volume had none.
+
+They ship **quiet and private**, because nobody has yet shown that they lead price:
+
+- They **never chime or pop up a toast**, whatever the settings.
+- They **do not reach your phone** and the **Desk does not speak them** (the row still
+  glows).
+- They are **hidden on the public live screens** and in the website's gallery
+  pictures.
+- They **do not count** toward the Opportunity Board's **Flow alerts** column or its
+  score, or the end-of-day mover counts.
+
+**When to turn them on.** A report scores them every weekday at 16:10 CT (see the
+Technical Reference). Leave them quiet until several sessions of that report show
+their hit rates **well above the base rate** — how often price simply moved that way
+anyway. Then, in **Settings → Configuration → Flow alerts → Hedging flow (HIRO
+model)**:
+
+- **Send hedging-flow pushes to the phone** — sends reversals and the strongest surges
+  (at **Push surges at**, 4× normal by default) to your phone, and lets the Desk speak
+  them. Which channels they go to is the **Hedging flow** row under **Settings →
+  General → Push notifications**.
+- **Show hedging-flow alerts on the public screens** — shows them on the public
+  Flow Alerts and Desk screens. Turning it off again leaves alerts already shown there
+  until the list resets overnight.
+
+Either switch applies to alerts fired **after** the change: each alert carries the
+setting it was fired under, so the rows already on today's list keep theirs.
 
 ## Market News
 
@@ -2563,7 +2615,7 @@ Preferences, all saved on your machine:
   during market hours* switch in **Scanner alerts** above.
 - **Desktop notifications** — enable them and grant the browser permission.
 - **Push notifications** — one row per kind of phone alert (new scanner signals,
-  unusual options activity, premium crossover, gamma flip, the position action
+  unusual options activity, premium crossover, gamma flip, hedging flow, the position action
   digest, the end-of-day summary, the Dealer Positioning briefings, the market
   snapshot, the market state change and the hourly trade idea), with a
   **Discord** and a **Telegram** checkbox on each. **Ticked means that alert is

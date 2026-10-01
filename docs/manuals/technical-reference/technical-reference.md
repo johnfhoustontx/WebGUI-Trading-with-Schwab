@@ -31,7 +31,7 @@ Use this map to get from a screen to its numbers. Menu order matches the rail.
 | **Symbol** | Composition, like the Desk. Its own arithmetic — IV vs HV and the expected move — is in *Options Scoring* → **Expected move and IV analysis**; the signal age and score trend in **Signal age and score trend**; the look-up's cost in the *Constants Appendix* |
 | **Dealer Positioning** | *GEX / Gamma* · *Black-Scholes & the Simulator* (the Greeks behind charm and vanna) |
 | **Opportunity Board** | *GEX / Gamma* (the flip and flow series) · *Options Scoring* (its signal counts) |
-| **Flow Alerts** | *GEX / Gamma* (the premium series) · *Constants Appendix* (detector thresholds) |
+| **Flow Alerts** | *GEX / Gamma* (the premium series, and **Hedging-flow model (HIRO)** for the two hedging alerts) · *Constants Appendix* (detector thresholds) |
 | **Market Dashboard** | *Architecture Overview* — the board normalizes and colours quotes rather than deriving anything |
 | **Sentiment** | *Sentiment Calculations*, including the composite blend, the intraday trend, and the blended market regime |
 | **Sector & Industry** | *Sentiment Calculations* → **Sector Performance** |
@@ -1733,6 +1733,160 @@ trading days (from 06:30 CT for ETH-eligible symbols) (reusing the standalone co
 which feeds the strike × time heat map. The universe is the index base
 (`$SPX`/`$VIX`/`SPY`/`QQQ`) plus the watchlist.
 
+## Hedging-flow model (HIRO)
+
+**Files:** `services/options_svc/hiro.py` (pure measurement and rules),
+`compute.hiro_tick_row` (the per-minute memo), `handlers._run_hiro` (detection and
+publishing), `options-scanner/gex_history_db.py` (the `hiro_minutes` table). Design:
+`docs/plans/2026-10-01-hiro-alert-design.md`.
+
+A **model** of the idea behind SpotGamma's HIRO — the stock dealers must trade to
+hedge the options customers trade — built from the 1-minute chain poll the collection
+above already makes, so it adds **no Schwab calls**. Schwab publishes no
+time-and-sales tape and no aggressor side, so each contract gets **one** buy/sell
+label per minute, inferred from the quote. It is not SpotGamma's number, and its
+thresholds are unvalidated starting guesses.
+
+**Scope.** The symbols in `[hiro].symbols` (`$SPX`, SPY, QQQ, IWM), the chain the
+collector fetches for them (expiries from today through **+7 days**), and the
+**regular session only**, 08:30–15:00 CT (`market_calendar.is_regular_hours`).
+
+**Per contract, per minute.**
+
+```
+dv     = totalVolume − previous totalVolume          (books only when dv > 0)
+side   = +1 if last ≥ ask          (customer bought)
+         −1 if last ≤ bid          (customer sold)
+         else the side of the midpoint last sits on
+         0 (unlabelled) exactly at the midpoint, or on an unusable quote
+impact = side · delta · dv · 100 · spot              ($ of stock the dealer trades)
+```
+
+`delta` is the contract's own **signed** delta (call positive, put negative), so a
+customer buying a call (+1 · +Δ) makes the dealer **buy** stock and buying a put
+(+1 · −Δ) makes it **sell**, with no call/put branch. An unusable quote is a missing
+or non-finite field, a bid below zero, a last or ask of zero or less, or a locked or
+crossed quote (ask ≤ bid). Volume with no label — that, an exact-midpoint print, or a
+delta that is non-finite, beyond ±1 (Schwab's `−999` sentinel) or of the wrong sign
+for its right — is added to `unclassified_vol`, never guessed. A non-finite or
+non-positive spot makes the whole minute unusable: nothing is written and the volume
+baseline is left untouched, so the next good minute books that volume.
+
+**The volume memo** (`compute._HIRO_MEMO`, in memory) holds each contract's last
+`totalVolume` as a **high-water mark** (volume never falls within a session, so a
+glitch read of 0 books nothing), cleared when the CT session date changes. A
+contract's first reading only **seeds** it. A symbol whose last good minute is more
+than **150 s** old (`HIRO_MAX_GAP_SEC`, about 2.5 polls) is re-seeded rather than
+measured, so several minutes of volume are never booked under one minute's quote. A
+minute in which the symbol had no baseline at all writes **no row** — a zero would
+read as a quiet minute to the baseline.
+
+**Storage — `hiro_minutes` in `gex_history.db`.** One row per symbol per minute:
+`symbol`, `ts`, `spot`, `impact`, `classified_vol`, `unclassified_vol`, primary key
+`(symbol, ts)`. A second row for the same minute **adds** its impact and volumes
+(spot takes the newer value), because two ticks can share a minute and replacing
+would lose the first one's volume. A non-finite impact or volume refuses the insert.
+Its retention is its own, `[hiro].keep_sessions` (20) — never fewer than
+`baseline_sessions + 1` — because the GEX snapshots keep only 5 sessions and the
+baseline needs 5 sessions **before** today.
+
+**Normal size σ.** The **root-mean-square** of the symbol's full 15-minute window sums
+over its last `baseline_sessions` (5) stored sessions before today:
+
+```
+σ = sqrt( mean( S² ) )   over every full-window sum S in those sessions
+```
+
+RMS, not a standard deviation: hedging flow's natural centre is zero, and a day-long
+drift is the signal, not noise to subtract. A window is "full" when it ends at least
+one window after the session's first stored row. With fewer prior sessions (or none
+with a usable window), σ comes from today's own full windows once at least
+`min_minutes` (30) rows exist; before that, neither rule runs. The prior-session σ is
+memoized per symbol per day.
+
+**Surge (`hiro_surge`).** With `S15` = the sum of `impact` over the last 15 minutes
+(`window_min`), it fires when **all** of these hold:
+
+| Condition | Default |
+|---|---|
+| abs(S15) ≥ `k` · σ | `k` = 3 |
+| abs(S15) ≥ `min_notional` (dead-tape floor) | $25,000,000 |
+| unlabelled share of the window's volume ≤ `max_unclassified` | 0.5 |
+| newest stored row ≤ 120 s old against the clock (`hiro.FRESH_ROW_SEC`) | — |
+
+Side `dealers_buying` when S15 > 0 (upward pressure), else `dealers_selling`.
+Cooldown `cooldown_min` (30) per symbol and direction. The clock check stops a
+stalled collector — or the rows simply stopping at 15:00 — re-firing the same old
+window every time its cooldown lapses. A non-finite window or σ never fires.
+
+**Reversal (`hiro_flip`).** The day's running total `cum` (the sum of every stored
+minute since the session's first row, skipping a non-finite one) drives a two-state
+hysteresis:
+
+```
+buying  → selling   when cum ≤ −flip_band · σ
+selling → buying    when cum ≥ +flip_band · σ
+no state yet        → the first side cum clears by flip_band · σ (the baseline; no alert)
+```
+
+Evaluation waits for `flip_not_before` (09:00 CT); the total still counts from the
+first row. The rule is **stateless**: each tick replays today's rows and alerts only
+on the latest transition if it is newer than the one recorded as seen
+(`hiro_flip_seen:<SYM>` in the flow cooldown map) **and** at most 120 s old against
+the clock (`hiro.FLIP_MAX_AGE_SEC`), so a restart cannot fire an old reversal.
+Cooldown `flip_cooldown_min` (60) per symbol; a transition inside it is marked seen
+and dropped.
+
+**Delivery.** Both alerts join `cache:options:flow_alerts` and carry two flags the
+service stamps: `quiet` (`[hiro].push` is not `true`: no phone push, and the Desk does
+not speak it) and `public` (`[hiro].public` is `true`; otherwise the row is hidden on
+the public live screens and in gallery captures). Both fail closed. With `push` on, a
+reversal is always pushed and a surge only at `mult` ≥ `push_k` (4), through the
+`flow_hiro` push category. Neither ever chimes or toasts in the browser. Neither
+counts toward the Opportunity Board's flow count or Hotness
+(`compute._count_flow_alerts` skips `hiro_*` cooldown keys) or the EOD mover counts
+(`compute._notable_movers`).
+
+**The summary view `cache:options:hiro`** (`skip_unchanged`, event
+`events:options:hiro`): `{date, symbols: {SYM: {ts, spot, impact, cum,
+window_impact, sigma, mult, unclassified_share}}}`, where `ts` is that symbol's
+newest stored minute. It is written only once a symbol has a stored minute, and the
+window, σ and multiple are published as `null` rather than a non-finite number. A
+reader must check `date` **and** each symbol's `ts` against the clock: a stalled
+collector also leaves a today-dated view. No page reads it yet.
+
+**Known limitations.**
+
+- **One label per contract per minute**, not per trade, from this minute's quote — a
+  trade may be up to a minute older than the bid and ask it is judged against.
+- **Expiries beyond +7 days are not counted.**
+- **The opening minute only seeds.** The first poll inside regular hours seeds every
+  contract from its cumulative volume, so the trades printed between 08:30:00 and
+  that poll are never booked.
+- **A restart gap is lost.** The memo is in memory; the first poll after a restart
+  (or after any gap over 150 s) seeds again.
+- **A model, unvalidated.** The daily report below is what decides whether `push` or
+  `public` is ever turned on.
+
+**The daily validation report — `tools/hiro_report.py`.** Run by the systemd timer at
+16:10 CT (see *Service cadences*), it replays the live rules minute by minute — the
+same `hiro.detect_surge` / `detect_flip`, the handler's σ rule as live had it at each
+minute, and the cooldowns — and writes `options-scanner/data/hiro_report/<date>/report.md`.
+Per symbol: minutes measured, the unlabelled share, σ and its source, how many surges
+would fire at each `k` in 2 · 2.5 · 3 · 3.5 · 4 · 5, and the reversals. A **hit** is a
+fire after which spot moved the way the modelled hedging pushed it over **5** and
+**15** minutes (read from the first stored row at or after the horizon, no more than
+120 s past it); a return of exactly zero is **flat** and left out. Each hit rate is
+set beside that day's **base rate for the same direction** — the share of every
+measured minute after which spot simply rose (or fell) over the same horizon — never a
+coin flip. Hits print as "k of n", with a percentage from 10 decided fires. A **Last N
+sessions** block pools every stored session (up to `keep_sessions`) with surges and
+reversals pooled separately. It reads `gex_history.db` read-only and nothing else, so
+any stored day can be re-run: `--date YYYY-MM-DD` (default: the newest **closed**
+session), `--force` (a weekend or holiday), `--out DIR`, `--k 2,3,4`,
+`--horizons 5,15`. It exits **1** when nothing was measured (every symbol failed, or a
+trading day with no stored minute for any symbol — a dead collector).
+
 ---
 
 # Rescue Tested Trades
@@ -2221,14 +2375,27 @@ A consolidated table of the load-bearing constants. The cited file governs.
 | Flow: unusual activity (UOA) | volume ≥ 3.0 × OI, vol floor 500, premium floor **$5M**, top 3 per symbol | `[uoa]` |
 | Flow: gamma flip | 0.15% hysteresis band, cooldown 60 min, watching `$SPX SPY QQQ IWM` | `[gamma_flip]` |
 | Flow: big delta | fires at **25%** of the symbol's own gross delta-notional AND ≥ $10M; phone push at the higher **35%**; delta band 0.05–0.85 | `[big_delta]` |
+| Flow: hedging surge (HIRO model) | 15-min hedge impact ≥ **3×** normal (RMS of full windows over the 5 prior sessions) AND ≥ $25M; ≤ 50% unlabelled volume; cooldown 30 min per direction; phone push at **4×** only with `push = true` (ships `false`); `public = false`; watching `$SPX SPY QQQ IWM` | `[hiro]` |
+| Flow: hedging reversal (HIRO model) | running total clears zero by **1.0×** normal; none before 09:00 CT; cooldown 60 min; minute history kept 20 sessions | `[hiro]` |
 
-> **Four detectors, and the file is the source.** `services/options_svc/flow_alerts.py`
+> **Five detectors, and the file is the source.** `services/options_svc/flow_alerts.py`
 > carries defaults, but `config/flow_alerts.toml` overrides them and is what runs —
 > it raises the UOA premium floor from $250k to $5M and the big-delta fire bar from
 > 0.20 to 0.25. Read the TOML, not the module, when you want the live number.
 >
 > `big_delta` fires and pushes on **separate** bars on purpose: the Flow screen stays
-> comprehensive at 25% while the phone only sees the high-conviction 35%.
+> comprehensive at 25% while the phone only sees the high-conviction 35%. The
+> hedging-flow surge follows the same pattern (fire at `k`, push at `push_k`); its
+> `[hiro]` table is the fifth detector, with two rules. Every `[hiro]` value is a
+> starting guess until the daily report has measured it — see
+> **Hedging-flow model (HIRO)** in the *GEX / Gamma* chapter.
+>
+> Every `[hiro]` key: `enabled` · `push` · `public` · `symbols` · `window_min` (15) ·
+> `k` (3.0) · `push_k` (4.0) · `min_notional` (25,000,000) · `max_unclassified` (0.5) ·
+> `cooldown_min` (30) · `baseline_sessions` (5) · `min_minutes` (30) · `flip_enabled`
+> · `flip_band` (1.0) · `flip_not_before` ("09:00") · `flip_cooldown_min` (60) ·
+> `keep_sessions` (20). All are in **Settings → Configuration → Flow alerts →
+> Hedging flow (HIRO model)**.
 
 ## Service cadences
 
@@ -2244,18 +2411,21 @@ the source; this table is a summary of them.
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 | news_svc | Three branches, launched every **30 s** tick (`TICK_S`) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. **feeds**: every feed polled every **2 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **5 min** in the extended sessions 06:30–08:25 and 15:00–15:15 CT (`eth_poll_min`), **30 min** otherwise on a trading day (`offhours_poll_min`) and **30 min** at weekends and holidays (`weekend_poll_min`), counted from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). **calendar**: every tick, fetching only the sources whose own `refresh_min` is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). **watch**: every tick, fetching only a series whose release just passed — every **2 min** for up to **60 min**. All in `config/news.toml`, editable in Settings. One cycle of each at a time: a Refresh during one is skipped. |
 
-Five scheduled jobs are **not** on any service's loop — they are systemd timers,
+Six scheduled jobs are **not** on any service's loop — they are systemd timers,
 generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving
 one needs `generate_units --install` plus a `daemon-reload` rather than a service
 restart. The EOD report, gallery capture and flow-delta gate on the market calendar in
 their own scripts, so their timers only exclude weekends; the labeler and the refit
-read history and have no session to gate on.
+read history and have no session to gate on. The HIRO report's timer also excludes
+weekends only: with no `--date` it reports the newest closed session, so a holiday
+firing just rewrites the previous trading day's report from the same stored minutes.
 
 | Job | Slot | What it does |
 |-----|------|--------------|
 | EOD report archive | **15:15** (`[slots.eod_report]`) | Writes `webgui/data/eod/<date>/summary.html` + `detail.html` — the `/eod` **Generate** button, unattended. Reads Redis only: no Schwab call, no Claude call. Writes nothing if every cache read was empty. |
 | Marketing gallery recapture | **09:07** (`[slots.gallery_capture]`) | Re-photographs the private app for the public gallery. |
 | Flow-delta instrumentation | **16:00** (`[slots.flow_delta]`) | The only measurement of the `[big_delta]` / UOA thresholds. |
+| HIRO-model validation report | **16:10** (`[slots.hiro_report]`) | `tools/hiro_report.py` via `trading-<env>-hiro-report.timer` (Monday to Friday, `Persistent=true`, so a missed run catches up at boot): replays the day's `hiro_surge` / `hiro_flip` rules and scores the 5- and 15-minute price move after each fire against the same-direction base rate, into `options-scanner/data/hiro_report/<date>/report.md`. Reads `gex_history.db` only — no Schwab, no Redis, no Claude call. The only measurement of the `[hiro]` thresholds. |
 | Trade Analyzer outcome labelling | **18:30** (`[slots.label_journal]`) | `tools/label_journal.py`: writes the realized 5/10/20-day forward returns (raw, beta-adjusted, and SPY's) onto recommendations whose horizon has passed. One daily-bar fetch per symbol through the proxy; labels everything outstanding, so a missed night catches up. |
 | Swing model refit | **1st of the month, 19:00** (`[slots.swing_refit]`) | `tools/refit_swing_model.sh`: archives the live `swing_model.json`, refits it on five years of history, and replaces it **only if** the fit passes `config/swing_model.toml` — at least 90% of the 78-symbol universe loaded and an out-of-sample IC above 0. A refused fit is kept as `swing_model.rejected.json` + its report, the live model is untouched, and the run shows as failed. |
 

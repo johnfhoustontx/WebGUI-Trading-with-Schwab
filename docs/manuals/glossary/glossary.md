@@ -318,6 +318,8 @@ These describe what market makers are forced to do to stay hedged, and why that 
 
 **Open interest change** — Day-over-day OI change tells you whether positions opened or closed. Volume alone can't distinguish a new position from a closed one, and OI publishes with a delay.
 
+**HIRO / hedging flow** — The stock dealers have to buy or sell, right now, to stay hedged against the options customers are trading: a customer buying calls makes a dealer buy stock, a customer buying puts makes a dealer sell it. Added up minute by minute it shows which way hedging is pushing price. HIRO is SpotGamma's name for its own measure built from every trade on the tape. This app's **Hedging surge** and **Hedging reversal** alerts use a home-built *model* of the same idea: Schwab publishes no tape, so each contract's trades are labelled bought or sold once a minute from where the last price sat against the bid and ask (see *trade classification*). Treat it as an estimate, not an observation.
+
 **Hedging window** — The recurring times when mechanical hedging concentrates: the open, the 3:30–4:00 close, Thursday/Friday charm decay, and monthly OPEX.
 
 ---

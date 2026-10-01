@@ -340,6 +340,13 @@ five"*. This was settled by listening, not by argument. If any part of a contrac
 is missing or unreadable, the announcement falls back to the short form rather than
 speaking a sentence with a hole in it — **shorter, never half**.
 
+**A quiet alert glows but is never spoken.** The options service marks an alert
+*quiet* when it is not yet trusted — today the two hedging-flow alerts (surge and
+reversal), for as long as their phone push is off. Such a row glows like any arrival
+but is neither named nor counted in "plus N more". The rule follows the mark, not
+the alert type, so once their push is turned on the Desk speaks the ones fired after
+that.
+
 Three more rules are worth knowing, because each is a decision rather than an
 accident:
 
@@ -813,7 +820,7 @@ this board and open the two that stand out.
 | **Net $M** | Net premium in millions — call dollars minus put dollars. | Large positive = money through calls. Size matters more than sign on small names. |
 | **GEX** | Whether spot sits **above** or **below** the dealer gamma flip. | *above* = expect pinning; *below* = expect momentum; *na* = not computable. |
 | **Sig** | How many live scanner signals this symbol has. | |
-| **Flow** | How many flow alerts fired today. | |
+| **Flow** | How many flow alerts fired today, not counting the hedging-flow alerts (an unvalidated model). | |
 | **Signal** | An overall Buy / Neutral / Sell from the flow composite. | |
 | **Hot** | **Hotness**, the default sort. A blend of the above. | Highest first. This is a measure of *activity*, not of *quality*. |
 
@@ -861,9 +868,10 @@ credit-spread filters exclude.
 
 ### What it is
 
-A readable log of every unusual options event the app detected today. These are the
-same alerts that chime, toast, and push to your phone — kept somewhere you can actually
-review them, because a toast you miss is gone.
+A readable log of every unusual options event the app detected today — kept somewhere
+you can actually review it, because a toast you miss is gone. Some of these alerts
+also chime, toast or push to your phone; the big-delta and hedging-flow ones never
+chime or toast.
 
 ### Where the data comes from
 
@@ -877,16 +885,29 @@ review them, because a toast you miss is gone.
 
 ### Reading the screen
 
-**The four detector types.**
+**The six alert types** (named on screen by what happened, shown here first, with the
+detector behind each):
 
 | Type | What triggered it | What it may mean |
 |---|---|---|
-| **Crossover** | Call premium overtook put premium for a symbol, or the reverse. | A shift in where the day's option money is going. Bullish flip on calls-over, bearish on puts-over. |
-| **Unusual activity** | One contract traded far more than its open interest (e.g. 21×). | Someone opened a large new position — the volume cannot be existing holders closing, because there were not that many to close. |
-| **Gamma flip** | Spot crossed the dealer gamma flip level. | The market just switched between move-damping and move-amplifying behaviour. See [Dealer Positioning](#dealer-positioning). |
-| **Big delta** | A single contract carries an outsized share of the symbol's total directional exposure. | A concentrated bet or hedge large enough to matter to that symbol's hedging flow. |
+| **Premium shift** (crossover) | Call premium overtook put premium for a symbol, or the reverse. | A shift in where the day's option money is going. Bullish flip on calls-over, bearish on puts-over. |
+| **Unusual volume** (unusual activity) | One contract traded far more than its open interest (e.g. 21×). | Someone opened a large new position — the volume cannot be existing holders closing, because there were not that many to close. |
+| **Hedging flip** (gamma flip) | Spot crossed the dealer gamma flip level. | The market just switched between move-damping and move-amplifying behaviour. See [Dealer Positioning](#dealer-positioning). |
+| **Outsized bet** (big delta) | A single contract carries an outsized share of the symbol's total directional exposure. | A concentrated bet or hedge large enough to matter to that symbol's hedging flow. |
+| **Hedging surge** (hedging-flow model) | The stock dealers would have to trade to hedge the last 15 minutes of option trades ran several times its normal size. | Hedging pressure on the index, **as estimated by a model** — dealers buying is upward pressure, selling downward. Unvalidated. |
+| **Hedging reversal** (hedging-flow model) | The day's running hedging total changed sign. | The day's modelled hedging pressure switched direction. Unvalidated. |
 
-**Columns.** Time (CT) · **Age** · Symbol · Type · **Side** (call or put) · **Detail** ·
+**The two hedging-flow types are a model and ship quiet.** They watch `$SPX`, SPY, QQQ
+and IWM in regular hours, and label each option trade bought or sold from where it
+printed against the quote — Schwab publishes no tape, so that label is inferred, and
+the rows say so with **≈** and **model**. Until a daily report shows they lead price,
+they never chime, do not push to your phone, are not spoken on the Desk, are hidden
+on the public screens, and do not count toward the Opportunity Board. The
+**User Guide** says how to turn the push and the public
+display on; the Technical Reference has the formula.
+
+**Columns.** Time (CT) · **Age** · Symbol · Type · **Side** (call or put, or for the
+hedging types the modelled dealer direction) · **Detail** ·
 **Share** (for big-delta, the percentage of the symbol's gross exposure) · **Alert**
 (the full sentence, as it was pushed).
 

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-27</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-01</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -1292,6 +1292,7 @@ cache:options:dossier:&lt;SYMBOL&gt; events:options:dossier:&lt;SYMBOL&gt;   (TT
 cache:options:matrix           events:options:matrix        (Opportunity Board)
 cache:options:flow_alerts      events:options:flow_alerts   (Flow Alerts, today only)
 cache:options:flow_alert_cooldowns  (uncapped seen-map behind the per-symbol counts)
+cache:options:hiro             events:options:hiro          (HIRO-model hedging flow, per-symbol summary; no reader yet)
 cache:options:flow_skew        events:options:flow_skew
 cache:options:net_premium      events:options:net_premium   (Net Prem subtab, 28 symbols)
 cache:options:header           events:options:header
@@ -1340,6 +1341,21 @@ cache:options:rescue:&lt;position_id&gt;   events:options:rescue:&lt;position_id
 cache:options:rescue_summary   events:options:rescue_summary
 cmd:options
 </code></pre>
+<p><strong><code>cache:options:flow_alerts</code></strong> is <code>{date, alerts: [...]}</code>, oldest first, capped at
+300, today only. Each alert carries <code>type</code> — <code>crossover</code>, <code>uoa</code>, <code>gamma_flip</code>,
+<code>big_delta</code>, <code>hiro_surge</code> or <code>hiro_flip</code> — plus <code>side</code>, <code>symbol</code>, <code>ts</code>, <code>id</code> and
+<code>text</code>. The two <code>hiro_*</code> types also carry two flags the service stamps from
+<code>[hiro]</code> in <code>config/flow_alerts.toml</code>: <strong><code>quiet</code></strong> (true while <code>push</code> is off — not
+pushed, and the Desk does not speak it) and <strong><code>public</code></strong> (false while <code>public</code> is
+off — hidden on the public live screens and in gallery captures). A reader that
+shows flow-alert rows must go through <code>webgui/pages/options/flow.alert_rows</code> (its
+<code>_shown</code> filter does the hiding); an alert with no <code>public</code> key is shown. The
+<code>hiro_*</code> alerts are not counted in <code>flow_alert_cooldowns</code>-derived counts (Hotness,
+<code>n_alerts</code>) while the model is unvalidated.</p>
+<p><strong><code>cache:options:hiro</code></strong> is <code>{date, symbols: {SYM: {ts, spot, impact, cum,
+window_impact, sigma, mult, unclassified_share}}}</code>, <code>ts</code> being that symbol's newest
+stored minute. Gate on <code>date</code> <strong>and</strong> each symbol's <code>ts</code> against the clock — a stalled
+collector also leaves a today-dated view.</p>
 <p><strong>Trade / Portfolio / Market:</strong></p>
 <pre><code>cache:trade:analysis           events:trade:analysis          (TradeAnalysis)
 cache:trade:deepdive           events:trade:deepdive

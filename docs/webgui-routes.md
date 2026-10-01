@@ -577,6 +577,35 @@ process's import closure.
 
 Flow Alerts (**NEW 2026-08-09** — a **main-menu (left-rail) item under the Options group** (`main.OPTIONS_RAIL`, standalone page, NOT an Options tab-strip entry — it's a market-wide read, not a step in that strip's per-signal find→analyze→track→repair workflow): the **durable view of today's options-flow alerts**, which until now only chimed + toasted (miss the toast and the alert was gone; the only trace was the Opportunity Board's per-symbol count). Pure Tier-1 reader of **`cache:options:flow_alerts`** (`webgui/pages/options/flow.py`) — **no new service, command, or cache key** — version-polling ~2 s: a chronological table **newest first** (the service appends oldest-first) — Time (CT) / **Age** / Symbol / Type / Side / Detail / Alert — over the FOUR detector types (**Crossover** premium-lead flip · **Unusual activity** contract vol-vs-OI · **Gamma flip** spot crossing the dealer flip · **Big delta** one contract holding an outsized share of the symbol's gross exposure, which carries the **Share** column), with per-type `alert_detail` cells and rows tinted from a finite `(type, side)` → Tailwind class map bound via `:class` (Tailwind-first, no `:style`). Kind + symbol filters run **client-side** over already-read rows, so toggling is instant. **ONE 2 s timer serves two cadences**: the payload is re-read only when the cache VERSION moves, while the **Age** column recomputes against the rows already on screen — age stays live without churning the table. **Row click → Dealer Positioning for that symbol** (`handoff.send_to_gamma` + a one-shot stash consumed at `gamma.render()`'s build-time symbol sync, which already sets the dropdown BEFORE wiring `on_value_change` — so the handed symbol beats the cached one without a spurious refresh, then one explicit `_request_refresh()` moves the snapshot to it). **Two Tier-2 lines came with it** (both confirmed against the live key, which held exactly 50 alerts of which only 18 had a timestamp): `_FLOW_ALERTS_MAX` **50 → 300** (50 dropped the morning's alerts on a busy day) and a **`ts` stamped on UOA alerts** in the drain loop — `flow_alerts.detect_uoa` never emitted one, so unusual-activity alerts had **no time at all** while crossover/gamma_flip did. ⚠ UOA timestamps appear only on alerts published AFTER an `options_svc` restart; older rows legitimately render a blank Time. **Today only**, resets overnight; no badge, no history, and the toast/chime/phone-push/Settings toggle are unchanged)
 
+**The two hedging-flow kinds (2026-10-01).** Two more alert types from a HIRO-style
+**model** of dealer hedging flow (`services/options_svc/hiro.py`, design
+[`plans/2026-10-01-hiro-alert-design.md`](plans/2026-10-01-hiro-alert-design.md)):
+**Hedging surge** (`hiro_surge`, sides **Dealers buying** / **Dealers selling**) and
+**Hedging reversal** (`hiro_flip`, **Now buying** / **Now selling**) — never "flip",
+which is the gamma flip's word. Green for buying, red for selling, from the same
+finite `(type, side)` tone map. They are the one buy/sell claim on this page, and a
+modelled one, so every surface says so: the dollar figure carries `≈` and the detail
+ends in "model" (`flow._hiro_detail`), on this page, the Desk's flow panel and the
+Symbol band alike. Behaviour turns on two flags the SERVICE stamps on each alert, so
+Tier 1 never reads `[hiro]` itself:
+
+- **`quiet`** (true while `[hiro].push` is off, the ship state): no phone push, and
+  `desk.fold_flow_arrivals` glows the row but never speaks it or counts it in "plus N
+  more". Independently, both types sit in `alerts._QUIET_FLOW_TYPES` beside
+  `big_delta`, so they never chime or toast whatever `push` says.
+- **`public`** (false while `[hiro].public` is off, the ship state): `flow._shown`
+  drops the row wherever `shell.hides_non_public()` is true — the public `/flow` and
+  `/desk` screens **and** any render carrying the gallery-capture cookie
+  (`ns_capture=1`). It reads the cookie, so it must run in the page context, never
+  inside `run.io_bound`. While hiding, the Type picker omits a HIRO kind with no
+  visible row, and the status line counts only shown rows. An alert with no `public`
+  key is shown (every older alert).
+
+Both kinds are excluded from the Opportunity Board's flow count and Hotness and from
+the EOD mover counts. `cache:options:hiro` (the per-symbol summary: newest minute,
+15-minute window, normal size, running total) is published beside them, but **no page
+reads it yet**; a reader must gate on its `date` and each symbol's `ts`.
+
 ## `/news`
 
 **Market News (NEW 2026-09-26; v2 the same day; redesigned to the operator's mockup
@@ -1193,7 +1222,7 @@ in [`plans/2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-li
 |---|---|---|
 | `/desk` | `desk.render()` (`/desk`) | — (its headlines strip reads `cache:news:feed_public`, via `desk.bus_key`) |
 | `/opportunity` | `options.matrix.render()` (`/options/matrix`) | — |
-| `/flow` | `options.flow.render()` (`/options/flow`) | — |
+| `/flow` | `options.flow.render()` (`/options/flow`) | — (alerts stamped `public: False`, today the hedging-flow kinds, are hidden by `flow._shown`; the Desk's flow panel the same) |
 | `/macro` | `market.render()` (`/market`) | `macro_skin="B"` (Heat Lattice) — an `app_settings` pin, not a render kwarg, because the page reads it from settings |
 | `/sentiment` | `sentiment.render()` (`/sentiment`) | — |
 | `/bullbear` | `sentiment_bullbear.render()` (`/sentiment/bullbear`) | — |

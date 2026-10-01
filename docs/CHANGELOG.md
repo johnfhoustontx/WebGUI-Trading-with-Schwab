@@ -4,7 +4,55 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-09-30 (**The home page strip states the trade ideas' record.**)
+**Last updated:** 2026-10-01 (**HIRO-style hedging-flow alerts, quiet-live.**)
+
+- **What it is.** A *model* of SpotGamma's HIRO — the stock dealers would trade to
+  hedge customers' option trades — for `$SPX`, SPY, QQQ and IWM, in regular hours,
+  from the chains the 1-minute GEX poll already fetches (today through +7 days of
+  expiries; **no new Schwab calls**). Schwab has no tape, so each contract gets one
+  buy/sell label a minute from where its last price sits against the bid and ask;
+  `impact = side × signed delta × new volume × 100 × spot`. Stored per symbol per
+  minute in a new `hiro_minutes` table in `gex_history.db` (own retention,
+  `keep_sessions` 20; same-minute rows accumulate; seed minutes write nothing).
+- **Two alerts** on Flow Alerts: **Hedging surge** (`hiro_surge`: the rolling
+  15-minute sum ≥ 3× the symbol's normal size — the RMS of full 15-minute sums over
+  the 5 prior sessions — and ≥ $25M, ≤ 50% unlabelled volume, fresh row ≤ 120 s,
+  30-minute cooldown per direction) and **Hedging reversal** (`hiro_flip`: the day's
+  running total crosses zero by 1× normal, none before 09:00 CT, stateless replay,
+  60-minute cooldown). Every row says it is a model (`≈`, "model"). Summary view
+  `cache:options:hiro` (no reader yet). Push category `flow_hiro` ("Hedging flow").
+  Every `[hiro]` key in `config/flow_alerts.toml` is in Settings → Configuration.
+- **Quiet-live, by the owner's two decisions.** (1) **Silent Desk**: the service
+  stamps `quiet` while `[hiro].push` is off (the ship state), so no phone push and the
+  Desk glows but never speaks the row; neither type ever chimes or toasts. (2)
+  **Private**: the service stamps `public: False` while `[hiro].public` is off, and
+  `flow._shown` hides the row on the public screens **and** in gallery captures (the
+  `ns_capture` cookie, `shell.hides_non_public`). HIRO is also excluded from Hotness,
+  `n_alerts` and the EOD mover counts until validated.
+- **The validation report.** `tools/hiro_report.py`, run by
+  `trading-<env>-hiro-report.timer` at `[slots.hiro_report]` (16:10 CT, Mon–Fri,
+  `Persistent=true`) → `options-scanner/data/hiro_report/<date>/report.md`. Replays the
+  live rules minute by minute, fires at k = 2…5, and scores the 5- and 15-minute move
+  after each fire as "k of n" against that day's same-direction **base rate**, plus a
+  pooled "Last N sessions" block. Reads `gex_history.db` only; exits 1 when nothing was
+  measured. `push` and `public` stay off until several sessions beat the base rate.
+- **Known limits:** one label per contract per minute; ≤ 7 days of expiries; the
+  opening minute only seeds (trades between 08:30:00 and the first poll are not
+  booked); a restart gap is lost; unvalidated thresholds.
+- Commits `b37a54a..HEAD`: `d376b60` config defaults · `18b04bb` / `e864406` quote
+  rule and `measure_chain` · `a17d3bb` / `35e23a8` the table, accumulate on conflict ·
+  `d87b048` / `8e3f184` recording, seed minutes write nothing · `3df565d` surge ·
+  `bca40a4` reversal · `0f50597` freshness against the clock · `cd3ad7d` in
+  `run_flow_alerts` · `fadb80a` push category · `ee48607` / `55b1ce6` Flow screen ·
+  `d232495` quiet/public flags · `64c3620` silent Desk, public hide · `b565933` /
+  `472f224` out of Hotness and EOD counts · `fbe5c04` captures hide · `1641c34` /
+  `d415e78` / `ca3ba84` the report · `7186368` the timer.
+- Tests at the time: options_svc **3061 passed** (of them `test_hiro.py` 100, and 75
+  HIRO cases across handlers/compute/flow_alerts/push_notify); options-scanner
+  `test_gex_history_hiro.py` 14; `tools/tests/test_hiro_report.py` 52.
+- Design: `docs/plans/2026-10-01-hiro-alert-design.md` (plan beside it).
+
+**Prior —** 2026-09-30 (**The home page strip states the trade ideas' record.**)
 
 - One line under "Today's trade ideas": the record over every idea the site keeps —
   `Last 6 trading days · 39 ideas: 11 hit target · 13 stopped out · 15 open` and

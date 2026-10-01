@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Options Glossary</h1>
-  <div class="meta">NeuralStrike · Generated 2026-09-22</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-01</div>
 </div>
 <h1 id="options-trading-glossary">Options Trading Glossary</h1>
 <p>Plain-English definitions of the terms you'll run into trading and analyzing options.</p>
@@ -228,6 +228,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Trade classification</strong> — Inferring whether a trade was buyer- or seller-initiated by comparing the print to the prevailing bid and ask. The foundation of any attempt to build positioning data from raw tape rather than assumptions.</p>
 <p><strong>Gamma units</strong> — GEX can be expressed as shares per 1% move, dollars per 1% move, or dollars per 1-point move. Comparing numbers across sources without checking units produces nonsense.</p>
 <p><strong>Open interest change</strong> — Day-over-day OI change tells you whether positions opened or closed. Volume alone can't distinguish a new position from a closed one, and OI publishes with a delay.</p>
+<p><strong>HIRO / hedging flow</strong> — The stock dealers have to buy or sell, right now, to stay hedged against the options customers are trading: a customer buying calls makes a dealer buy stock, a customer buying puts makes a dealer sell it. Added up minute by minute it shows which way hedging is pushing price. HIRO is SpotGamma's name for its own measure built from every trade on the tape. This app's <strong>Hedging surge</strong> and <strong>Hedging reversal</strong> alerts use a home-built <em>model</em> of the same idea: Schwab publishes no tape, so each contract's trades are labelled bought or sold once a minute from where the last price sat against the bid and ask (see <em>trade classification</em>). Treat it as an estimate, not an observation.</p>
 <p><strong>Hedging window</strong> — The recurring times when mechanical hedging concentrates: the open, the 3:30–4:00 close, Thursday/Friday charm decay, and monthly OPEX.</p>
 <hr />
 <h2 id="7-orders-execution-and-risk">7. Orders, Execution, and Risk</h2>
