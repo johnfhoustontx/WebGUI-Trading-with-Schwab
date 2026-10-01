@@ -5238,12 +5238,24 @@ def _count_flow_alerts(flow_cooldowns, today):
     distinct alert event; the prefix before the first ``|`` is the symbol. This
     date-scoped seen-map is UNCAPPED and never pruned, so it is the true daily count —
     unlike ``cache:options:flow_alerts`` (a rolling list capped at 50 total that
-    undercounts every symbol once the day fires >50 alerts). Gated on the map's date."""
+    undercounts every symbol once the day fires >50 alerts). Gated on the map's date.
+
+    ⚠ HIRO keys (``SYM|hiro_surge|<side>``, ``SYM|hiro_flip``) are NOT counted:
+    HIRO is an unvalidated MODEL of dealer hedging, and while it is one it must
+    not move any ranking -- Hotness, ``n_alerts`` or the EOD briefing count,
+    private or public. Revisit once the daily HIRO validation report
+    (tools/hiro_report.py, planned) has validated it. (Its reversal seen marker, ``hiro_flip_seen:SYM``, has no
+    ``|`` and never counted.)"""
     if not flow_cooldowns or flow_cooldowns.get("date") != today:
         return {}
     counts: dict = {}
     for cid in flow_cooldowns.get("map") or {}:
-        sym = cid.split("|", 1)[0] if isinstance(cid, str) and "|" in cid else None
+        if not isinstance(cid, str) or "|" not in cid:
+            continue
+        parts = cid.split("|")
+        if parts[1].startswith("hiro_"):
+            continue                      # unvalidated model: see the docstring
+        sym = parts[0]
         if sym:
             counts[sym] = counts.get(sym, 0) + 1
     return counts

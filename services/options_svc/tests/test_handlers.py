@@ -2901,7 +2901,7 @@ def test_run_flow_alerts_hiro_surge_and_flip_count_two_for_hotness(monkeypatch):
     handlers.run_flow_alerts(bus)
     assert {a["type"] for a in _hiro_alerts(bus)} == {"hiro_surge", "hiro_flip"}
     cd = bus.cache_get(handlers._FLOW_COOLDOWN_KEY).payload
-    assert compute._count_flow_alerts(cd, "2026-10-01") == {"SPY": 2}
+    assert compute._count_flow_alerts(cd, "2026-10-01") == {}
 
 
 def _hiro_flags(monkeypatch, cfg_over=None):

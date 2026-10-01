@@ -4465,6 +4465,16 @@ def test_count_flow_alerts_gates_on_date():
                  "map": {"SPY|crossover": 1}}, today="2026-07-20") == {}
 
 
+def test_count_flow_alerts_leaves_out_the_unvalidated_hiro_model():
+    """HIRO is an unvalidated model, so it must not move Hotness / n_alerts /
+    the EOD count. Its reversal seen marker has no ``|`` and never counted."""
+    from services.options_svc import compute
+    cd = {"date": "2026-10-01", "map": {
+        "SPY|crossover": 1, "SPY|hiro_surge|dealers_buying": 2,
+        "SPY|hiro_flip": 3, "hiro_flip_seen:SPY": 4}}
+    assert compute._count_flow_alerts(cd, "2026-10-01") == {"SPY": 1}
+
+
 class _RecConn:
     """A recording fake connection so the ``finally: conn.close()`` is actually
     exercised (not swallowed as an AttributeError on a bare object())."""
