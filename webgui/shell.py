@@ -495,6 +495,12 @@ def subtab_slot():
 # session cookie. Cookies ignore PORT, so the bootstrap server on its ephemeral
 # 127.0.0.1 port sets one the app on :8500 receives -- the same mechanism that
 # delivers the session itself.
+#
+# Since 2026-10-01 it ALSO hides non-public rows (``hides_non_public``): a
+# capture render is published to the neuralstrike.co gallery, so it must hide
+# what the public origin hides (e.g. a flow alert the service stamped
+# ``public: False``). The safe direction -- the cookie can only ever REMOVE
+# content from a page, never add any, so a visitor setting it gains nothing.
 CAPTURE_COOKIE = "ns_capture"
 
 # ⚠ SUPPRESSES A REAL SIGNAL, DELIBERATELY AND NARROWLY.
@@ -532,3 +538,34 @@ def capture_chrome_css(cookies):
     if not cookies:
         return None
     return CAPTURE_CHROME_CSS if cookies.get(CAPTURE_COOKIE) == "1" else None
+
+
+def is_capture(cookies) -> bool:
+    """Whether a cookie mapping marks a screenshot session. PURE, and the same
+    exact-value contract as ``capture_chrome_css``: ``ns_capture=1`` only."""
+    try:
+        return bool(cookies) and cookies.get(CAPTURE_COOKIE) == "1"
+    except AttributeError:
+        return False
+
+
+def _request_cookies():
+    """The current client's request cookies, or None. The ONE request read,
+    kept tiny so a test can monkeypatch it. ``getattr`` because the auto-index
+    client (any call outside a page) has ``request = None``; anything else that
+    goes wrong reads as "no request", never as an error."""
+    try:
+        return getattr(getattr(ui.context.client, "request", None), "cookies", None)
+    except Exception:  # noqa: BLE001 - no page, no request: not a capture.
+        return None
+
+
+def capture_session() -> bool:
+    """True while the CURRENT page render is a screenshot session."""
+    return is_capture(_request_cookies())
+
+
+def hides_non_public() -> bool:
+    """Whether this render must hide content marked not-public: the public
+    origin always, and a capture session (published to the gallery) too."""
+    return is_public() or capture_session()

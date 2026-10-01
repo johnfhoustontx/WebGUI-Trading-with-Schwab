@@ -383,7 +383,8 @@ _FLOW = ConfigFile(
                   "them.", kind="bool"),
             Field("hiro.public", "Show hedging-flow alerts on the public screens",
                   "Off = they appear in this app only, never on the public live "
-                  "screens.", kind="bool"),
+                  "screens. Turning it off later leaves alerts already published "
+                  "visible there until the list resets overnight.", kind="bool"),
             Field("hiro.symbols", "Symbols watched", "", kind="symbols"),
             Field("hiro.window_min", "Surge window", "", kind="int", unit="min",
                   min=5, max=60, step=1),

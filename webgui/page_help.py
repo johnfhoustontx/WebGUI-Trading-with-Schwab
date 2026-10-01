@@ -97,7 +97,9 @@ on · what am I holding.*
   hottest handful of all of them.
 - **Flow alerts** — the newest unusual-options events. Note these show
   **call or put**, never *bought* or *sold*: Schwab publishes no time-and-sales
-  tape, so nobody can honestly say which side traded.
+  tape, so nobody can honestly say which side traded. The one exception is a
+  **hedging** row (surge or reversal), whose buying or selling is a **model's
+  estimate** and says so.
 - **Positions** — your open paper trades and Claude's, together, with the live
   mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
   **Rescue**. The header totals open trades, open P&L, and how many need
@@ -120,7 +122,10 @@ where the voice pointed. When the alert names a **contract** it is spoken in ful
 about the whole book rather than one contract, so it stays short — *"S P Y.
 Premium shift alert, calls over."* A new position adds its strikes, expiry and entry price, and
 says **credit or debit** rather than leaving you to work out the sign. If several
-arrive at once it names the newest and counts the rest ("plus 5 more"). A position that only changes **status** — OK to At risk to Rescue — glows
+arrive at once it names the newest and counts the rest ("plus 5 more"). A
+**hedging-flow** alert (surge or reversal) glows but stays **silent** while its
+phone push is off (**Send hedging-flow pushes to the phone**, Settings →
+Configuration — it ships off); it is neither named nor counted. A position that only changes **status** — OK to At risk to Rescue — glows
 amber and stays **silent**: it was already there, and the flag column has already
 told you. A symbol that **joins the Opportunity Board** is announced too — *"N V D
 A. Joins the Opportunity Board, buy signal."* — unless it only dropped off in the
@@ -790,7 +795,8 @@ without opening each page.
   heating up or cooling off, *not* prices — the put/call ratio, **Net premium
   $M**, and **Vs flip**, which side of the dealer gamma flip price sits on.
 - **Open signals** and **Flow alerts** are counts: how many live scanner signals
-  and how many of today's flow alerts belong to that symbol. **Signal** is the
+  and how many of today's flow alerts belong to that symbol — not counting the
+  **hedging-flow** alerts, which are an unvalidated model. **Signal** is the
   one overall verdict (buy / neutral / sell), and **Score** is how much is going
   on altogether — the board's default sort.
 - **Click any column header** to sort — e.g. highest Score or biggest movers

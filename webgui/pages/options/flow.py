@@ -323,23 +323,24 @@ def _share_pct(a):
     return round(float(p) * 100, 1)
 
 
-def _on_public_origin():
-    """True in the process serving the public live screens. Imported lazily, as
-    ``render`` does, so this module's pure builders stay importable alone."""
+def _hiding():
+    """True when this render must hide non-public alerts: on the public origin,
+    and in a screenshot session of the private app (its pictures are published
+    to the neuralstrike.co gallery). Imported lazily, as ``render`` does."""
     import shell as _shell
-    return _shell.is_public()
+    return _shell.hides_non_public()
 
 
 def _shown(alerts):
-    """The alerts THIS process may display. On the public origin an alert the
-    service stamped ``public: False`` (HIRO until ``[hiro].public`` is on) is
-    dropped; an alert with no ``public`` key stays, which is every older type.
-    The private app shows everything, and gets the list back UNCHANGED.
+    """The alerts THIS render may display. While hiding (see ``_hiding``) an
+    alert the service stamped ``public: False`` (HIRO until ``[hiro].public`` is
+    on) is dropped; an alert with no ``public`` key stays, which is every older
+    type. Otherwise the list comes back UNCHANGED.
 
     This is the one filter: ``alert_rows`` (the Flow page, the Desk panel and
     its speech, the Symbol band) and ``status_text``'s count both go through
-    it, so a hidden alert cannot reach a public row OR a public count here."""
-    if not isinstance(alerts, list) or not _on_public_origin():
+    it, so a hidden alert cannot reach a published row OR count here."""
+    if not isinstance(alerts, list) or not _hiding():
         return alerts
     return [a for a in alerts
             if not (isinstance(a, dict) and a.get("public") is False)]
@@ -391,6 +392,22 @@ def alert_rows(view):
         })
     rows.reverse()
     return rows
+
+
+# The kinds whose alerts the service may stamp ``public: False`` today.
+_NON_PUBLIC_KINDS = ("hiro_surge", "hiro_flip")
+
+
+def kind_options(rows, hiding):
+    """The "Alert type" picker's options. While hiding non-public alerts, a
+    HIRO kind with no VISIBLE row is left out, so the public picker never
+    offers a type it will never show; once ``[hiro].public`` puts one on screen
+    its kind comes back. Otherwise every kind. PURE."""
+    if not hiding:
+        return dict(_KIND_LABEL)
+    seen = {r.get("_kind_key") for r in rows or () if isinstance(r, dict)}
+    return {k: v for k, v in _KIND_LABEL.items()
+            if k not in _NON_PUBLIC_KINDS or k in seen}
 
 
 def filter_rows(rows, kinds, symbol):
@@ -473,11 +490,15 @@ def render():
     # newest first, and where a click goes — lives in the page help
     # (``page_help.HELP_MD["/options/flow"]``).
     linked = _shell.can_navigate(GAMMA_ROUTE)
+    # One answer per page: the origin is process state and a client's request
+    # (the capture cookie) does not change for the life of the page.
+    hiding = _shell.hides_non_public()
     with kit.page():
         kit.header("Flow Alerts", view=VIEW)
         with kit.control_bar():
-            kind_sel = kit.select_field("Alert type", dict(_KIND_LABEL),
-                                        value=list(_KIND_LABEL), multiple=True,
+            opts0 = kind_options([], hiding)
+            kind_sel = kit.select_field("Alert type", opts0,
+                                        value=list(opts0), multiple=True,
                                         width="w-72").props("use-chips")
             symbol_sel = kit.select_field("Symbol", ["All"], value="All", width="w-40")
         status = kit.status_line(_copy.WAITING_OPTIONS)
@@ -526,6 +547,12 @@ def render():
                 state["symbol"] = None
                 symbol_sel.value = "All"
             symbol_sel.update()
+        kinds = kind_options(state["rows"], hiding)
+        if kinds != kind_sel.options:
+            # A kind newly on screen is shown by default, as every kind is at
+            # first paint; one that left the picker leaves the selection.
+            state["kinds"] |= set(kinds) - set(kind_sel.options)
+            kind_sel.set_options(kinds, value=[k for k in kinds if k in state["kinds"]])
         status.text = status_text(payload)
         _tick_age()
 

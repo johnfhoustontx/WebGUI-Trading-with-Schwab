@@ -234,6 +234,36 @@ def test_the_capture_css_needs_the_exact_cookie_value():
         assert shell.capture_chrome_css(cookies) is None, cookies
 
 
+def test_is_capture_needs_the_exact_cookie_value():
+    """The same contract as the CSS: presence is not enough."""
+    assert shell.is_capture({shell.CAPTURE_COOKIE: "1"}) is True
+    for cookies in (None, {}, {shell.CAPTURE_COOKIE: ""},
+                    {shell.CAPTURE_COOKIE: "0"},
+                    {shell.CAPTURE_COOKIE: "true"},
+                    {"ns_session": "1"}):
+        assert shell.is_capture(cookies) is False, cookies
+
+
+def test_a_capture_session_hides_non_public_content(monkeypatch):
+    """A capture render is about to be PUBLISHED (the neuralstrike.co gallery),
+    so it hides what the public origin hides."""
+    monkeypatch.setattr(shell, "is_public", lambda: False)
+    monkeypatch.setattr(shell, "_request_cookies",
+                        lambda: {shell.CAPTURE_COOKIE: "1"})
+    assert shell.capture_session() is True and shell.hides_non_public() is True
+    for cookies in (None, {shell.CAPTURE_COOKIE: ""}, {shell.CAPTURE_COOKIE: "0"}):
+        monkeypatch.setattr(shell, "_request_cookies", lambda c=cookies: c)
+        assert shell.hides_non_public() is False, cookies
+    monkeypatch.setattr(shell, "is_public", lambda: True)
+    assert shell.hides_non_public() is True
+
+
+def test_no_request_is_never_a_capture():
+    """Outside any page (or the auto-index client, whose request is None) the
+    read degrades to "not a capture", never an error."""
+    assert shell.capture_session() is False
+
+
 def test_the_capture_css_hides_the_reconnect_banner_and_nothing_else():
     """⚠ The blast radius IS the point. This CSS is injected into the real
     trading app, so a rule that reached further would hide live content from a
