@@ -100,6 +100,28 @@ def big_delta_should_push(alert, cfg) -> bool:
     return isinstance(p, (int, float)) and not isinstance(p, bool) and float(p) >= thr
 
 
+HIRO_TYPES = ("hiro_surge", "hiro_flip")
+
+
+def hiro_should_push(alert, cfg) -> bool:
+    """Phone gate for the HIRO alerts, separate from firing (the big_delta
+    pattern): every fire reaches the Flow screen; a surge is pushed only at
+    >= push_k x normal, a reversal whenever push is on. Never raises."""
+    h = (cfg or {}).get("hiro", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(h, dict):
+        return False
+    if not h.get("push", False) or not isinstance(alert, dict):
+        return False
+    t = alert.get("type")
+    if t == "hiro_flip":
+        return True
+    if t != "hiro_surge":
+        return False
+    m = alert.get("mult")
+    return (isinstance(m, (int, float)) and not isinstance(m, bool)
+            and m == m and float(m) >= h.get("push_k", 4.0))
+
+
 def _norm(series):
     """[(ts, spot, call_vol, put_vol, call_prem, put_prem), …] → list of dicts,
     dropping rows with a non-numeric ts."""
@@ -275,6 +297,17 @@ def _human_money(v):
     return f"${v:,.0f}"
 
 
+def _hiro_money(v):
+    """$2.40B / $310.00M / $25k -- billions matter here ($SPX hedging runs to $B)."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "$0"
+    if abs(v) >= 999_500_000:
+        return f"{'-' if v < 0 else ''}${abs(v)/1e9:.2f}B"
+    return ("-" if v < 0 else "") + _human_money(abs(v))
+
+
 def _exp_short(expiry, dte):
     if dte == 0:
         return "0DTE"
@@ -348,7 +381,8 @@ def detect_flow_alerts(symbol, series, cfg, cooldowns, now_ts):
 
 
 def alert_text(a) -> str:
-    """One-line human-readable alert (reused by push + popup). No buy/sell claim."""
+    """One-line human-readable alert (reused by push + popup). No buy/sell claim,
+    except the HIRO pair, whose dealer buy/sell is a MODEL and says so."""
     s = a["symbol"]
     if a["type"] == "crossover":
         cp, pp = _human_money(a.get("call_prem")), _human_money(a.get("put_prem"))
@@ -373,4 +407,16 @@ def alert_text(a) -> str:
                     f"{flip:g} (dealers short gamma → volatility amplified)")
         return (f"{s} — gamma flipped POSITIVE: spot {spot:g} rose above the gamma flip "
                 f"{flip:g} (dealers long gamma → volatility dampened)")
+    if a["type"] == "hiro_surge":
+        word = "BUYING" if a["side"] == "dealers_buying" else "SELLING"
+        return (f"{s} — hedging surge: dealers {word} about "
+                f"{_hiro_money(abs(a.get('impact') or 0))} of stock in "
+                f"{a.get('window_min') or 15} min ({(a.get('mult') or 0):.1f}× normal) · "
+                f"spot {(a.get('spot') or 0):g} · model, "
+                f"{(a.get('unclassified_share') or 0):.0%} unlabelled")
+    if a["type"] == "hiro_flip":
+        word = "BUYING" if a["side"] == "to_buying" else "SELLING"
+        return (f"{s} — dealer hedging turned to net {word} for the day "
+                f"(running total {_hiro_money(a.get('cum'))}) · "
+                f"spot {(a.get('spot') or 0):g}")
     return f"{s}: flow alert"

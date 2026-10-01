@@ -422,3 +422,56 @@ def test_load_thresholds_has_hiro_defaults(tmp_path, monkeypatch):
     assert h["flip_not_before"] == "09:00" and h["flip_cooldown_min"] == 60
     assert h["keep_sessions"] == 20
     flow_alerts.reset_thresholds_cache()
+
+
+# --- HIRO alert text + push gate ---
+
+_HS = {"type": "hiro_surge", "side": "dealers_buying", "symbol": "$SPX", "ts": 1,
+       "spot": 5712.5, "impact": 2.4e9, "mult": 3.6, "window_min": 15,
+       "unclassified_share": 0.18}
+_HF = {"type": "hiro_flip", "side": "to_selling", "symbol": "SPY", "ts": 1,
+       "spot": 571.2, "cum": -3.1e8}
+
+
+def test_alert_text_hiro_surge():
+    t = flow_alerts.alert_text(_HS)
+    assert t.startswith("$SPX — hedging surge: dealers BUYING about $2.40B of stock")
+    assert "15 min" in t and "3.6× normal" in t and "18% unlabelled" in t
+    assert "model" in t
+
+
+def test_alert_text_hiro_flip():
+    t = flow_alerts.alert_text(_HF)
+    assert t.startswith("SPY — dealer hedging turned to net SELLING for the day")
+    assert "-$310.00M" in t
+
+
+def test_alert_text_hiro_none_fields_do_not_raise():
+    t = flow_alerts.alert_text({**_HS, "spot": None, "mult": None,
+                                "unclassified_share": None, "impact": None})
+    assert t.startswith("$SPX — hedging surge")
+    t = flow_alerts.alert_text({**_HF, "spot": None, "cum": None})
+    assert t.startswith("SPY — dealer hedging turned to net SELLING")
+
+
+def test_hiro_should_push_gates():
+    on = {"hiro": {"push": True, "push_k": 4.0}}
+    off = {"hiro": {"push": False, "push_k": 4.0}}
+    assert not flow_alerts.hiro_should_push({**_HS, "mult": 9.0}, off)
+    assert not flow_alerts.hiro_should_push(_HS, on)                  # 3.6 < 4
+    assert flow_alerts.hiro_should_push({**_HS, "mult": 4.0}, on)
+    assert flow_alerts.hiro_should_push(_HF, on)                      # flips: push gate only
+    assert not flow_alerts.hiro_should_push({"type": "uoa"}, on)
+    assert not flow_alerts.hiro_should_push({**_HS, "mult": float("nan")}, on)
+
+
+def test_hiro_should_push_malformed_cfg_is_false():
+    assert flow_alerts.hiro_should_push({**_HS, "mult": 9.0}, None) is False
+    assert flow_alerts.hiro_should_push({**_HS, "mult": 9.0}, {"hiro": 5}) is False
+
+
+def test_hiro_money_boundaries():
+    assert flow_alerts._hiro_money(999_499_999) == "$999.50M"
+    assert flow_alerts._hiro_money(999_500_000) == "$1.00B"
+    assert flow_alerts._hiro_money(-2.4e9) == "-$2.40B"
+    assert flow_alerts._hiro_money("x") == "$0"

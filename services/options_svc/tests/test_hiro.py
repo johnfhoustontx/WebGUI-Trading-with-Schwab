@@ -312,3 +312,14 @@ def test_detect_flip_age_limit_is_inclusive():
     assert a is not None and a["ts"] == flip_ts
     rows[2]["ts"] = flip_ts + hiro.FLIP_MAX_AGE_SEC + 1
     assert hiro.detect_flip("SPY", rows, 5.0, CFG, rows[0]["ts"], None) is None
+
+
+# --- View row ----------------------------------------------------------------
+
+def test_symbol_view_summarises_latest_minute():
+    rows = _rows([1e6] * 15)
+    v = hiro.symbol_view(rows, 5e6, CFG)
+    assert v == {"ts": rows[-1]["ts"], "spot": 500.0, "impact": 1e6, "cum": 15e6,
+                 "window_impact": 15e6, "sigma": 5e6, "mult": pytest.approx(3.0),
+                 "unclassified_share": 0.0}
+    assert hiro.symbol_view(rows, None, CFG)["mult"] is None

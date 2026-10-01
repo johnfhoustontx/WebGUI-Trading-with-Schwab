@@ -267,3 +267,14 @@ def detect_flip(symbol, rows, sigma, cfg, not_before_ts, seen_ts):
     spot = next((r["spot"] for r in rows if r["ts"] == ts), None)
     return {"type": "hiro_flip", "side": "to_buying" if state == "buying" else "to_selling",
             "symbol": symbol, "ts": ts, "spot": spot, "cum": cum}
+
+
+def symbol_view(rows, sigma, cfg):
+    """The small per-symbol summary published to cache:options:hiro."""
+    last = rows[-1]
+    w = window_sum(rows, last["ts"], int(cfg["window_min"]) * 60)
+    return {"ts": last["ts"], "spot": last["spot"], "impact": last["impact"],
+            "cum": sum(r["impact"] for r in rows), "window_impact": w["impact"],
+            "sigma": sigma,
+            "mult": (abs(w["impact"]) / sigma) if sigma else None,
+            "unclassified_share": w["unclassified_share"]}
