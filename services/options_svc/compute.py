@@ -5851,6 +5851,10 @@ def _notable_movers(dashboard, matrix, flow_alerts, limit: int = _MOVER_LIMIT) -
         for a in ((flow_alerts or {}).get("alerts") or []):
             if not isinstance(a, dict):
                 continue
+            # HIRO is an unvalidated model: it moves no count (see
+            # ``_count_flow_alerts``, which feeds the matrix ``n_alerts`` above).
+            if str(a.get("type") or "").startswith("hiro_"):
+                continue
             sym = _mover_key(a.get("symbol"))
             if sym:
                 counts[sym] = counts.get(sym, 0) + 1

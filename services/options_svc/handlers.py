@@ -2188,11 +2188,13 @@ def _run_hiro(conn, cfg, bus, today, cooldowns, now_ts):
     raises; one symbol's failure degrades and the next still runs.
 
     The reversal's seen marker is ``hiro_flip_seen:<SYM>`` -- deliberately with
-    no ``|``: compute._count_flow_alerts counts every ``SYMBOL|...`` key in the
-    cooldown map as one alert (Hotness, the EOD briefing), so a ``|`` marker
-    would count every reversal twice. The surge and flip COOLDOWN keys do count,
-    as crossover's per-symbol key does. Design:
-    docs/plans/2026-10-01-hiro-alert-design.md."""
+    no ``|``: compute._count_flow_alerts reads every ``SYMBOL|...`` key in the
+    cooldown map as one alert event (Hotness, the EOD briefing), so a marker is
+    kept out of that shape rather than relying on a filter to skip it. The surge
+    and flip COOLDOWN keys do NOT count either: _count_flow_alerts skips any key
+    whose second segment starts with ``hiro_``, because HIRO is an unvalidated
+    model that must not move a ranking until its daily report validates it.
+    Design: docs/plans/2026-10-01-hiro-alert-design.md."""
     try:
         h = cfg.get("hiro") if isinstance(cfg, dict) else None
         if not isinstance(h, dict) or h.get("enabled") is not True or conn is None:

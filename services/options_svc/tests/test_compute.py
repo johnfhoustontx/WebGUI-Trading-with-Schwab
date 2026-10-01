@@ -4868,6 +4868,19 @@ def test_notable_movers_prefers_dashboard_pct_and_sorts_by_magnitude():
     assert mu["basis"] == "session"           # matrix-only → intraday basis
 
 
+def test_notable_movers_do_not_count_hiro_alerts():
+    """The capped-list fallback count leaves out HIRO for the same reason
+    _count_flow_alerts does: an unvalidated model must not move the briefing."""
+    from services.options_svc import compute
+    dashboard = {"categories": [{"category": "Top 10", "tiles": [
+        {"display": "NVDA", "last": 100.0, "change_pct": -4.0, "category": "Top 10"}]}]}
+    alerts = {"alerts": [{"symbol": "NVDA", "type": "uoa", "side": "put"},
+                         {"symbol": "NVDA", "type": "hiro_surge", "side": "dealers_selling"},
+                         {"symbol": "NVDA", "type": "hiro_flip", "side": "to_selling"}]}
+    out = compute._notable_movers(dashboard, {}, alerts)
+    assert out[0]["flow_alert_count"] == 1
+
+
 def test_notable_movers_defensive_on_garbage():
     from services.options_svc import compute
     assert compute._notable_movers(None, None, None) == []
