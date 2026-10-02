@@ -1605,8 +1605,12 @@ hedging types the modelled dealer direction) · <strong>Detail</strong> ·
 (the full sentence, as it was pushed).</p>
 <p>The <strong>Age</strong> column recomputes live against the rows already on screen, so it stays
 current without the table churning.</p>
-<p><strong>Filters.</strong> Type and symbol filters run instantly, on rows already loaded.</p>
-<p><strong>Click any row</strong> to open <a href="#dealer-positioning">Dealer Positioning</a> for that symbol.</p>
+<p><strong>Filters.</strong> A Symbol picker and a row of <strong>Alert type</strong> chips, each carrying
+today's count; a click switches that type off or back on, and <strong>All</strong> shows every
+type. Filters run instantly, on rows already loaded. The types you switch off are
+remembered across reloads, and the status line adds "· N shown" whenever the
+filters hide rows.</p>
+<p><strong>Click a symbol</strong> (the dotted underline) to open <a href="#dealer-positioning">Dealer Positioning</a> for it.</p>
 <h3 id="why-it-matters_2">Why it matters</h3>
 <p>Unusual-activity detection is the closest thing retail has to seeing institutional
 positioning. A contract trading at 20× its open interest is, arithmetically, mostly new
