@@ -3318,3 +3318,42 @@ class TestSignalsOnlyInRegularHours:
         monkeypatch.setattr(scanner_engine, "_signal_clock", lambda: _AFTER_CLOSE)
         scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
         assert seen == [("0DTE", 0), ("SWING", 0)]
+
+
+class TestMomentumVetoSaysWhatItDropped:
+    """The veto used to drop spreads silently, so a scan whose only candidates it
+    removed (the 2026-10-02 08:30 index CCS) could only be explained afterwards by
+    re-deriving the move ratio by hand."""
+
+    def test_a_vetoed_window_logs_symbol_side_count_and_ratio(
+            self, fake_client, monkeypatch, caplog):
+        import logging
+
+        monkeypatch.setattr(scanner_engine, "intraday_move_ratio",
+                            lambda *a, **k: 0.87)
+        with caplog.at_level(logging.INFO, logger="scanner"):
+            res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        lines = [r.getMessage() for r in caplog.records
+                 if "momentum veto" in r.getMessage()]
+        vetoed = {(sym, name): res["funnel"][sym]["buckets"][name]["spreads"]
+                  ["momentum_veto"]
+                  for sym in _FUNNEL_SYMBOLS for name in ("0DTE", "SWING")}
+        assert any(vetoed.values())                          # vacuity
+        for (sym, name), n in vetoed.items():
+            label = "0-DTE" if name == "0DTE" else "SWING"
+            hits = [m for m in lines if f"[{label}]" in m and f" {sym} " in m]
+            if n:
+                assert len(hits) == 1, (sym, name, lines)
+                assert f"{n} CCS" in hits[0] and "+0.87" in hits[0], hits[0]
+            else:
+                assert hits == [], (sym, name, hits)
+
+    def test_an_in_band_move_logs_nothing(self, fake_client, monkeypatch, caplog):
+        import logging
+
+        monkeypatch.setattr(scanner_engine, "intraday_move_ratio",
+                            lambda *a, **k: 0.2)
+        with caplog.at_level(logging.INFO, logger="scanner"):
+            scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        assert not [r for r in caplog.records
+                    if "momentum veto" in r.getMessage()]

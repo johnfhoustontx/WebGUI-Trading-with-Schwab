@@ -26,6 +26,11 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   the 08:30 scan (it finishes ~08:33), so it still posts.
 - **Why no trade?** gains the stage *Inside regular trading hours*; a funnel written
   before this has no `outside_rth` key and simply skips that stage.
+- **The momentum veto now logs what it drops** (`_log_momentum_veto`): `[0-DTE]
+  momentum veto: 3 CCS removed for SPY (move +0.77x daily EM, limit 0.60)`. It was
+  the one spread gate that removed rows silently; the 2026-10-02 08:30 scan built
+  nine index spreads and published none, and the cause (every index up 0.69-0.89x
+  its expected move at the open) could only be re-derived by hand.
 - **Tests.** `TestSignalsOnlyInRegularHours` (boundaries, closed days, both ends of
   the day, all three lists, both funnel balances, warning, nothing offered to the
   recorder). The options-scanner conftest pins `_signal_clock` to a session noon so

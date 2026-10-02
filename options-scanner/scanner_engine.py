@@ -827,6 +827,17 @@ def _apply_momentum_veto(sigs, move_ratio):
     return sigs
 
 
+def _log_momentum_veto(symbol, window, built, kept, move_ratio):
+    """Say what the veto dropped. It is otherwise the one spread gate that
+    removes rows without a log line, so a scan it emptied read as no trade with
+    no reason (2026-10-02 08:30: every index CCS, the tape up 0.7-0.9x its EM)."""
+    n = built - kept
+    if n and move_ratio is not None:
+        side = "CCS" if move_ratio >= 0 else "PCS"
+        log.info(f"  [{window}] momentum veto: {n} {side} removed for {symbol} "
+                 f"(move {move_ratio:+.2f}x daily EM, limit {MOMENTUM_VETO:.2f})")
+
+
 def gex_regime_band(gex_data):
     """Classify net-GEX regime: 'POS' / 'NEG' / 'STRONG_NEG', or None when no
     usable gamma grid. ratio = sum(net) / sum(|net|), normalized so one
@@ -2131,6 +2142,7 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
 
             built_0 = len(sigs)
             sigs = _apply_momentum_veto(sigs, move_ratio)
+            _log_momentum_veto(symbol, "0-DTE", built_0, len(sigs), move_ratio)
             ics = build_iron_condors(sigs, 2)
             for ic in ics:
                 ic["gex_walls"] = gex_walls
@@ -2166,6 +2178,7 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
                                           if bucket_s is not None else None))
             built_s = len(sigs)
             sigs = _apply_momentum_veto(sigs, move_ratio)
+            _log_momentum_veto(symbol, "SWING", built_s, len(sigs), move_ratio)
             ics = build_iron_condors(sigs, 2)
             pcs = [s for s in sigs if s["type"] == "PCS"][:3]
             ccs = [s for s in sigs if s["type"] == "CCS"][:3]
