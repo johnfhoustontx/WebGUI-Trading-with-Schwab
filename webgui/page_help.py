@@ -219,6 +219,10 @@ plus single-leg directional trades on their own tab.
   tabs): short-dated (0-4 days, NOT only today), days-to-weeks out, and single-leg
   long/short calls and puts. Directional only lists trades that clear a quality bar,
   so an empty tab means "nothing qualified today", not a failure.
+- **All three tabs fill only during regular hours (8:30–3:00 CT).** The scanner
+  also runs at 8:00, 8:15, 3:00 and 3:15, but a scan that finishes outside the
+  session holds every signal back — premarket and after-close quotes are not the
+  prices you could trade at. **Why no trade?** says so for each symbol.
 - **Score chip & Grade** — greener/higher means better reward-vs-risk, higher
   probability of profit, and better trend fit. Work from the top down.
 - **Vol Rank** (renamed from "IV Rank" on 2026-09-12, because that is what it
@@ -991,10 +995,11 @@ Market Scanner, and since 2026-09-11 the once-daily **Income** board too.
   closed today, the **booked** P&L of today's closes, and the **open** P&L across
   every signal still running. Open P&L shows a dash, not $0.00, until the signals
   have been priced — hover it to see how many of them carry a live mark.
-- **Nothing is captured outside 8:30–3:00 CT.** The scanner still runs before the
-  bell and you can still read its results on the Market Scanner — but a premarket
-  quote is priced off *yesterday's* close, so a signal booked then carries a
-  credit the open would have gapped away from. Only the booking waits for the bell.
+- **Nothing is captured outside 8:30–3:00 CT**, and since 2026-10-02 nothing is
+  offered then either: a scan that finishes before the bell or after the close
+  leaves the Market Scanner's tabs empty. A premarket quote is
+  priced off *yesterday's* close, so a signal shown then carries a credit the
+  open would have gapped away from.
 - **At most 2 open signals per symbol**, counting Market Scanner and Income rows
   together. When a scan offers more, the highest-scoring ones are kept. Once a
   symbol has 2 open, nothing new is captured for it until one closes, so the paper

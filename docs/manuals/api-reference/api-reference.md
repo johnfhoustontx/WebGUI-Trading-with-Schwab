@@ -315,7 +315,12 @@ per-symbol account of why a symbol did or did not produce a signal. Each account
 `hv_current` is 30-day realised volatility and `current_iv` the ATM implied
 volatility, both **percents**, `null` when the IV analysis did not measure them;
 `stop` is `null`, `"no_quote"` or `"no_data"`; `buckets` is keyed `0DTE` / `SWING` /
-`DIRECTIONAL`. Written after every scan with `skip_unchanged`.
+`DIRECTIONAL`. `outside_rth` (a spread bucket's `spreads.outside_rth`, the
+`DIRECTIONAL` bucket's own `outside_rth`) counts the rows held back because the
+scan finished outside the regular 08:30–15:00 CT session; outside it all three of
+`cache:options:scan`'s signal lists are empty and `warnings` carries the reason. A
+funnel written before 2026-10-02 has no such key.
+Written after every scan with `skip_unchanged`.
 
 **`cache:options:ledger_caps`** (event `events:options:ledger_caps`) — the Paper
 Ledger's book, as the Paper dialog's preview reads it:

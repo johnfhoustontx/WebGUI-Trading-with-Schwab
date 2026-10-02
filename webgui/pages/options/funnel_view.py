@@ -55,10 +55,11 @@ STRIKE_COUNTERS = ("expiration_sides_in_window",
 
 SPREAD_COUNTERS = ("built", "momentum_veto", "iron_condors", "kept_after_cap",
                    "regime_pass_added", "regime_filter", "below_iv_floor",
-                   "no_iv_history", "gamma_gate", "emitted")
+                   "no_iv_history", "gamma_gate", "outside_rth", "emitted")
 
 DIRECTIONAL_COUNTERS = ("windows_without_candidates", "built", "vol_gate",
-                        "score_cut", "capped", "emitted", "build_failed")
+                        "score_cut", "capped", "outside_rth", "emitted",
+                        "build_failed")
 
 # Display names. The bucket keys are the engine's own ``0DTE``/``SWING`` - the
 # spelling ``signal_recorder`` records and ``shared.calibration`` buckets on -
@@ -85,11 +86,15 @@ LABELS = {
     "regime_filter": "Past the regime filter",
     "iv_floor": "Past the volatility floor",
     "gamma_gate": "Past the dealer-gamma gate",
+    "outside_rth": "Inside regular trading hours",
     # single-leg directional, which has no strike-level tally of its own
     "dir_built": "Candidates built",
     "dir_vol_gate": "Past the volatility gate",
     "dir_score_cut": "Above the quality bar",
     "dir_capped": "Kept by the per-symbol cap",
+    # The same words as the spread stage on purpose: STAGE_SENTENCES is keyed by
+    # label, so the two share the one sentence below.
+    "dir_outside_rth": "Inside regular trading hours",
     # terminal, shared by all three buckets
     "emitted": "Reached the board",
 }
@@ -313,6 +318,11 @@ STAGE_SENTENCES = {
     LABELS["gamma_gate"]:
         "{n} spreads cleared the volatility floor, and the dealer-gamma regime "
         "gate removed every one.",
+    # Shared by the spread and DIRECTIONAL stages (one label), so it names
+    # neither "spreads" nor "single-leg candidates".
+    LABELS["outside_rth"]:
+        "{n} trades cleared every gate, and all were held back because the "
+        "scan ran outside regular trading hours (08:30-15:00 CT).",
     LABELS["dir_built"]: _s_dir_built,
     LABELS["dir_vol_gate"]:
         "{n} single-leg candidates were built, and the volatility gate refused "
@@ -519,6 +529,14 @@ def _spread_stages(sp):
         if remaining is None:
             return out
         out.append(_stage(LABELS[key], remaining))
+    # ⚠ An ABSENT key is a funnel from an engine older than the regular-hours
+    # gate, which held nothing back: skip the stage and keep going. A PRESENT
+    # but unreadable one is no reading at all, and stops the list like any other.
+    if "outside_rth" in sp:
+        remaining = _sub(remaining, _count(sp, "outside_rth"))
+        if remaining is None:
+            return out
+        out.append(_stage(LABELS["outside_rth"], remaining))
     emitted = _count(sp, "emitted")
     if emitted is not None:
         # Terminal, ASSIGNED off the finished list rather than accumulated - so
@@ -540,6 +558,12 @@ def _directional_stages(d):
         if remaining is None:
             return out
         out.append(_stage(LABELS[key], remaining))
+    # Absent = a funnel from before the regular-hours gate (see _spread_stages).
+    if "outside_rth" in d:
+        remaining = _sub(remaining, _count(d, "outside_rth"))
+        if remaining is None:
+            return out
+        out.append(_stage(LABELS["dir_outside_rth"], remaining))
     emitted = _count(d, "emitted")
     if emitted is not None:
         out.append(_stage(LABELS["emitted"], emitted))

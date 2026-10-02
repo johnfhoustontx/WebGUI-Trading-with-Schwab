@@ -45,3 +45,22 @@ def _isolate_production_signal_db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(signal_recorder, "record_signals", _redirected)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _scan_inside_the_regular_session(monkeypatch):
+    """Pin the clock ``run_full_scan``'s regular-hours gate reads to a weekday
+    noon, so a scan test asserts the same thing at 06:00 as at 10:00.
+
+    Without it every test that expects 0-DTE or Swing signals off the fake chain
+    would pass during the session and fail outside it — a red baseline that
+    depends on the hour, which is the trap this suite's history warns about.
+    ``TestSignalsOnlyInRegularHours`` moves the clock itself to test the gate.
+    """
+    from datetime import datetime
+
+    import scanner_engine
+
+    noon = datetime(2026, 10, 1, 12, 0, tzinfo=scanner_engine.TZ)
+    monkeypatch.setattr(scanner_engine, "_signal_clock", lambda: noon)
+    yield

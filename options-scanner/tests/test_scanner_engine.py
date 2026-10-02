@@ -2936,12 +2936,12 @@ class TestScanFunnel:
 
     def test_the_directional_bucket_partitions(self, fake_client):
         """``built`` leaves through exactly one door: the volatility gate, the
-        score cut, the per-symbol cap, or the final list."""
+        score cut, the per-symbol cap, the closed session, or the final list."""
         res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
         for entry in res["funnel"].values():
             d = entry["buckets"]["DIRECTIONAL"]
             assert d["built"] == (d["vol_gate"] + d["score_cut"] + d["capped"]
-                                  + d["emitted"])
+                                  + d["outside_rth"] + d["emitted"])
             assert d["built"] > 0                      # vacuity
             assert d["score_cut"] > 0                  # the door really is used
             assert d["build_failed"] is False
@@ -3166,17 +3166,18 @@ class TestEveryBucketCarriesAReason:
 
 class TestTheSpreadBucketBalances:
     """``emitted == kept_after_cap + regime_pass_added - regime_filter -
-    below_iv_floor - no_iv_history - gamma_gate``. The DIRECTIONAL bucket's
-    partition was pinned from the start; this is the spread buckets' one, and
-    without it the four removal counters could drift from the list they describe
-    without any test noticing."""
+    below_iv_floor - no_iv_history - gamma_gate - outside_rth``. The DIRECTIONAL
+    bucket's partition was pinned from the start; this is the spread buckets' one,
+    and without it the five removal counters could drift from the list they
+    describe without any test noticing."""
 
     def _check(self, entry, name):
         sp = entry["buckets"][name]["spreads"]
         assert sp["emitted"] == (
             sp["kept_after_cap"] + sp["regime_pass_added"]
             - sp["regime_filter"] - sp["below_iv_floor"]
-            - sp["no_iv_history"] - sp["gamma_gate"]), name
+            - sp["no_iv_history"] - sp["gamma_gate"]
+            - sp["outside_rth"]), name
         return sp
 
     def test_the_identity_holds_on_a_clean_scan(self, fake_client):
@@ -3199,3 +3200,121 @@ class TestTheSpreadBucketBalances:
             assert sp["below_iv_floor"] > 0, name          # vacuity
             assert sp["emitted"] == 0, name
             self._check(res["funnel"]["QQQ"], name)
+
+
+_CT = scanner_engine.TZ
+
+
+def _ct(y, mo, d, hh, mm):
+    return datetime(y, mo, d, hh, mm, tzinfo=_CT)
+
+
+# 2026-10-01 is a Thursday and a full NYSE session.
+_PRE_OPEN = _ct(2026, 10, 1, 8, 15)
+_AFTER_CLOSE = _ct(2026, 10, 1, 15, 2)
+
+
+class TestSignalsOnlyInRegularHours:
+    """0-DTE, Swing and Directional signals are PUBLISHED only inside the regular session
+    (08:30-15:00 CT on a trading day) - the same predicate ``signal_recorder``
+    already captured on. Before this, the 08:00/08:15 and 15:00/15:15 scans put
+    signals on the board, the day union and the phone that capture then refused.
+
+    The suite's conftest pins ``_signal_clock`` to an in-session instant, so
+    every other scan test is independent of the hour it happens to run at; the
+    tests here move that clock.
+    """
+
+    # ⚠ The calendar gives the 15:00:00 instant itself to the regular session
+    # (``session_at``: "REGULAR wins the 15:00 overlap"); one second later it is
+    # closed. A scan always FINISHES seconds after its slot starts, so the 15:00
+    # scan is held - which is what the after-close test below drives.
+    @pytest.mark.parametrize("hh,mm,ss,expected", [
+        (8, 15, 0, False), (8, 29, 59, False), (8, 30, 0, True),
+        (12, 0, 0, True), (14, 59, 59, True), (15, 0, 0, True),
+        (15, 0, 1, False), (15, 2, 56, False), (15, 15, 0, False)])
+    def test_the_session_is_the_recorders_regular_session(self, hh, mm, ss,
+                                                          expected):
+        from shared.market_calendar import is_regular_hours
+
+        now = _ct(2026, 10, 1, hh, mm).replace(second=ss)
+        assert scanner_engine._signals_session_open(now) is expected
+        # The capture gate's own predicate: publish and capture cannot disagree.
+        assert is_regular_hours(now) is expected
+
+    @pytest.mark.parametrize("when", [
+        _ct(2026, 10, 3, 10, 0),      # Saturday
+        _ct(2026, 11, 26, 10, 0),     # Thanksgiving
+    ])
+    def test_a_closed_day_is_never_a_session(self, when):
+        assert scanner_engine._signals_session_open(when) is False
+
+    @pytest.mark.parametrize("when", [_PRE_OPEN, _AFTER_CLOSE])
+    def test_outside_the_session_every_list_is_empty(
+            self, fake_client, monkeypatch, when):
+        base = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        monkeypatch.setattr(scanner_engine, "_signal_clock", lambda: when)
+        out = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for key in ("signals_0dte", "signals_swing", "signals_directional"):
+            assert base[key], key                               # vacuity
+            assert out[key] == [], key
+
+    def test_the_directional_funnel_names_the_refusal(self, fake_client,
+                                                      monkeypatch):
+        base = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        monkeypatch.setattr(scanner_engine, "_signal_clock", lambda: _PRE_OPEN)
+        out = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for sym in _FUNNEL_SYMBOLS:
+            was = base["funnel"][sym]["buckets"]["DIRECTIONAL"]["emitted"]
+            d = out["funnel"][sym]["buckets"]["DIRECTIONAL"]
+            assert d["outside_rth"] == was, sym
+            assert d["emitted"] == 0, sym
+            assert d["built"] == (d["vol_gate"] + d["score_cut"] + d["capped"]
+                                  + d["outside_rth"] + d["emitted"]), sym
+        assert any(base["funnel"][s]["buckets"]["DIRECTIONAL"]["emitted"]
+                   for s in _FUNNEL_SYMBOLS)                    # vacuity
+
+    def test_the_funnel_names_the_refusal(self, fake_client, monkeypatch):
+        """Every row that would have reached the board is counted as
+        ``outside_rth`` - so "why no trade?" says the market was closed rather
+        than showing a gate that passed everything and an empty list."""
+        base = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        monkeypatch.setattr(scanner_engine, "_signal_clock", lambda: _PRE_OPEN)
+        out = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        balance = TestTheSpreadBucketBalances()
+        for sym in _FUNNEL_SYMBOLS:
+            for name in ("0DTE", "SWING"):
+                was = base["funnel"][sym]["buckets"][name]["spreads"]["emitted"]
+                sp = balance._check(out["funnel"][sym], name)
+                assert sp["outside_rth"] == was, (sym, name)
+                assert sp["emitted"] == 0, (sym, name)
+        assert any(base["funnel"][s]["buckets"]["0DTE"]["spreads"]["emitted"]
+                   for s in _FUNNEL_SYMBOLS)                    # vacuity
+
+    def test_in_session_the_counter_is_zero(self, fake_client):
+        res = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        for entry in res["funnel"].values():
+            for name in ("0DTE", "SWING"):
+                assert entry["buckets"][name]["spreads"]["outside_rth"] == 0
+            assert entry["buckets"]["DIRECTIONAL"]["outside_rth"] == 0
+
+    def test_a_warning_says_why_the_lists_are_empty(self, fake_client, monkeypatch):
+        base = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        monkeypatch.setattr(scanner_engine, "_signal_clock", lambda: _PRE_OPEN)
+        out = scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        assert scanner_engine.OUTSIDE_RTH_WARNING in out["warnings"]
+        assert scanner_engine.OUTSIDE_RTH_WARNING not in base["warnings"]
+
+    def test_nothing_reaches_the_recorder_outside_the_session(
+            self, fake_client, monkeypatch):
+        """Capture already refused out-of-hours on its own clock; this pins that
+        the scan no longer even OFFERS it anything, so the two gates cannot
+        disagree at the boundary."""
+        import signal_recorder
+
+        seen = []
+        monkeypatch.setattr(signal_recorder, "record_signals",
+                            lambda sigs, kind, **kw: seen.append((kind, len(sigs))))
+        monkeypatch.setattr(scanner_engine, "_signal_clock", lambda: _AFTER_CLOSE)
+        scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
+        assert seen == [("0DTE", 0), ("SWING", 0)]

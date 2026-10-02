@@ -53,14 +53,15 @@ def _spreads(**over):
     d = {"built": 3, "momentum_veto": 0, "iron_condors": 1,
          "kept_after_cap": 4, "regime_pass_added": 0, "regime_filter": 0,
          "below_iv_floor": 0, "no_iv_history": 0, "gamma_gate": 0,
-         "emitted": 4}
+         "outside_rth": 0, "emitted": 4}
     d.update(over)
     return d
 
 
 def _directional(**over):
     d = {"windows_without_candidates": 0, "built": 8, "vol_gate": 2,
-         "score_cut": 4, "capped": 0, "emitted": 2, "build_failed": False}
+         "score_cut": 4, "capped": 0, "outside_rth": 0, "emitted": 2,
+         "build_failed": False}
     d.update(over)
     return d
 
@@ -180,6 +181,7 @@ def test_stage_list_runs_strikes_then_spreads_with_the_engines_arithmetic():
     assert rem[fv.LABELS["regime_filter"]] == 4
     assert rem[fv.LABELS["iv_floor"]] == 4
     assert rem[fv.LABELS["gamma_gate"]] == 4
+    assert rem[fv.LABELS["outside_rth"]] == 4
     assert rem[fv.LABELS["emitted"]] == 4
 
 
@@ -418,6 +420,7 @@ SPREAD_BINDERS = {
     "regime_filter": dict(spreads=_spreads(regime_filter=4, emitted=0)),
     "iv_floor": dict(spreads=_spreads(below_iv_floor=4, emitted=0)),
     "gamma_gate": dict(spreads=_spreads(gamma_gate=4, emitted=0)),
+    "outside_rth": dict(spreads=_spreads(outside_rth=4, emitted=0)),
     "emitted": dict(spreads=_spreads(emitted=0)),
 }
 
@@ -473,6 +476,26 @@ def test_the_two_volatility_floor_reasons_read_differently():
     assert "no_iv_history" not in none_ and "below_iv_floor" not in below
 
 
+def test_a_closed_session_says_the_market_was_closed():
+    """A scan outside 08:30-15:00 CT holds every 0-DTE and Swing signal back.
+    The panel must say THAT, not blame a gate that passed everything."""
+    h = _headline(spreads=_spreads(outside_rth=4, emitted=0))
+    assert "regular" in h and "08:30" in h
+    assert "outside_rth" not in h
+
+
+def test_a_funnel_from_before_the_session_gate_still_reaches_the_board():
+    """A funnel published by an engine older than ``outside_rth`` has no such
+    key. Its absence must drop that one stage, not truncate the list before
+    "Reached the board" - the gate did not exist, so it held nothing back."""
+    old = _spreads()
+    del old["outside_rth"]
+    card = fv.bucket_card(_entry(spreads=old), "SWING", symbol="MU")
+    rem = _remaining(card)
+    assert fv.LABELS["outside_rth"] not in rem
+    assert rem[fv.LABELS["emitted"]] == 4
+
+
 def test_the_dominant_volatility_reason_wins():
     h = _headline(spreads=_spreads(below_iv_floor=1, no_iv_history=3,
                                    emitted=0))
@@ -488,8 +511,26 @@ def test_the_directional_bucket_has_its_own_stage_list():
     assert rem[fv.LABELS["dir_vol_gate"]] == 6
     assert rem[fv.LABELS["dir_score_cut"]] == 2
     assert rem[fv.LABELS["dir_capped"]] == 2
+    assert rem[fv.LABELS["dir_outside_rth"]] == 2
     assert rem[fv.LABELS["emitted"]] == 2
     assert _binding(card) == []
+
+
+def test_a_closed_session_holds_the_directional_list_and_says_so():
+    card = fv.bucket_card(
+        _entry(directional=_directional(outside_rth=2, emitted=0)),
+        "DIRECTIONAL", symbol="MU")
+    assert _binding(card) == [fv.LABELS["dir_outside_rth"]]
+    assert "regular" in card["headline"] and "08:30" in card["headline"]
+
+
+def test_a_directional_funnel_from_before_the_session_gate_reaches_the_board():
+    old = _directional()
+    del old["outside_rth"]
+    card = fv.bucket_card(_entry(directional=old), "DIRECTIONAL", symbol="MU")
+    rem = _remaining(card)
+    assert fv.LABELS["dir_outside_rth"] not in rem
+    assert rem[fv.LABELS["emitted"]] == 2
 
 
 DIR_BINDERS = {
@@ -506,6 +547,9 @@ DIR_BINDERS = {
     "dir_capped": dict(directional=_directional(built=8, vol_gate=0,
                                                 score_cut=0, capped=8,
                                                 emitted=0)),
+    "dir_outside_rth": dict(directional=_directional(built=8, vol_gate=2,
+                                                     score_cut=4, capped=0,
+                                                     outside_rth=2, emitted=0)),
     "emitted": dict(directional=_directional(built=8, vol_gate=2, score_cut=4,
                                              capped=0, emitted=0)),
 }

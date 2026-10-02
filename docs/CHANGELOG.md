@@ -4,7 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-01 (**HIRO-style hedging-flow alerts, quiet-live.**)
+**Last updated:** 2026-10-02 (**Market Scanner signals only in regular hours.**)
+
+- **The gap.** The auto-scan window is 08:00–15:15 CT, so four scans a day (08:00,
+  08:15, 15:00, 15:15) finished outside the 08:30–15:00 session. Their 0-DTE and
+  Swing signals reached `cache:options:scan`, the day union, the phone push and the
+  board, while `signal_recorder` (gating on `market_calendar.is_regular_hours`)
+  refused to capture any of them. Measured 2026-10-01: the day's only two 0-DTE
+  signals above the 58 capture floor (IBKR 67.4, PANW 60.0) first appeared in the
+  15:00 scan.
+- **The fix.** `scanner_engine.run_full_scan` now runs a last gate,
+  `_signals_session_open(_signal_clock())`, over the same `is_regular_hours`
+  predicate capture uses: outside the session it empties `signals_0dte` and
+  `signals_swing` and `signals_directional`, counts each held row in the funnel's
+  new `outside_rth` (in `spreads` for 0-DTE/Swing, flat on `DIRECTIONAL`; both
+  balance equations now subtract it), and adds `OUTSIDE_RTH_WARNING` to
+  `warnings`. The clock is read at the END of the scan, when it publishes; the
+  calendar gives 15:00:00 itself to the session, so the 15:00 scan (which always
+  finishes seconds later) is held. The scan window itself is untouched, so the
+  pre-open scans still warm the funnel and IV history. The 08:35 trade idea reads
+  the 08:30 scan (it finishes ~08:33), so it still posts.
+- **Why no trade?** gains the stage *Inside regular trading hours*; a funnel written
+  before this has no `outside_rth` key and simply skips that stage.
+- **Tests.** `TestSignalsOnlyInRegularHours` (boundaries, closed days, both ends of
+  the day, all three lists, both funnel balances, warning, nothing offered to the
+  recorder). The options-scanner conftest pins `_signal_clock` to a session noon so
+  no scan test depends on the hour it runs at.
+
+---
+
+**Prior —** 2026-10-01 (**HIRO-style hedging-flow alerts, quiet-live.**)
 
 - **What it is.** A *model* of SpotGamma's HIRO — the stock dealers would trade to
   hedge customers' option trades — for `$SPX`, SPY, QQQ and IWM, in regular hours,

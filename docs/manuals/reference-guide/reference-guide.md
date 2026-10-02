@@ -2253,6 +2253,7 @@ candidates 0–100, split across three tabs by trade type.
 | Cache key | **`cache:options:scan_day`** — the *day's union*, not just the latest scan |
 | Schedule | **Auto-scans every 15 minutes**, 08:00–15:15 CT on trading days |
 | Manual | **Run scan** forces a refresh |
+| Hours | **Signals appear only in the regular session, 08:30–15:00 CT.** A scan that finishes before the open or after the close (the 08:00, 08:15, 15:00 and 15:15 runs) empties all three lists — 0-DTE, Swing and Directional — and **Why no trade?** names the stage *Inside regular trading hours*. |
 
 **Why the day union matters.** The table shows every signal that qualified *at any point
 today*, not only those qualifying right now. A signal that has dropped out renders

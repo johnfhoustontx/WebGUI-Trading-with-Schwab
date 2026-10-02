@@ -36,6 +36,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared.market_calendar import is_trading_day as _cal_is_trading_day  # noqa: E402
+from shared.market_calendar import is_regular_hours as _cal_is_regular_hours  # noqa: E402
 from shared import scanner_config as _scfg  # noqa: E402
 from shared import vol_gate as _vol_gate  # noqa: E402
 from shared import structures as _structures  # noqa: E402
@@ -652,6 +653,33 @@ def _is_options_market_open():
     t = now.time()
     from datetime import time as dtime
     return is_trading_day(now) and dtime(8, 30) <= t <= dtime(15, 0)
+
+
+# 0-DTE, Swing and Directional signals are published only inside the regular session. The
+# auto-scan window opens at 08:00 and closes at 15:15 CT (config/sessions.toml
+# [windows.scan]), so two scans a day ran before the 08:30 open and two after
+# the 15:00 close, and their signals reached the board, the day union and the
+# phone - while signal_recorder, gating on is_regular_hours, refused to capture
+# any of them. One predicate for both is what makes publish and capture agree.
+#
+# ⚠ Deliberately NOT _is_options_market_open above: that is the liquidity
+# gate's pre-market switch, inclusive of 15:00, and tests patch it for reasons
+# that have nothing to do with when a signal may be offered.
+OUTSIDE_RTH_WARNING = ("Outside regular trading hours (08:30-15:00 CT): 0-DTE, "
+                       "Swing and Directional signals are held until the session "
+                       "is open.")
+
+
+def _signal_clock():
+    """The instant the regular-hours gate judges. An indirection so a test can
+    pin it; read at the END of the scan, when its signals would be published."""
+    return datetime.now(TZ)
+
+
+def _signals_session_open(now):
+    """True inside the regular 08:30-15:00 CT session on a trading day - exactly
+    the predicate ``signal_recorder.record_signals`` captures on."""
+    return _cal_is_regular_hours(now)
 
 
 def passes_liquidity_gate(contract, trade_type, is_short_leg=True):
@@ -1785,17 +1813,21 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
                           make neither readable.
     ``below_iv_floor`` / ``no_iv_history`` / ``regime_filter`` / ``gamma_gate``
                           rows the four post-scoring filters removed.
+    ``outside_rth``       rows held back because the scan finished outside the
+                          regular 08:30-15:00 CT session - the last gate, so it
+                          is every row the others let through.
     ``emitted``           this symbol's rows in the final list. Terminal.
 
-    Those balance, which is what makes the four removal counters readable::
+    Those balance, which is what makes the five removal counters readable::
 
         emitted == kept_after_cap + regime_pass_added
                    - regime_filter - below_iv_floor - no_iv_history - gamma_gate
+                   - outside_rth
 
     The ``DIRECTIONAL`` bucket is the single-leg pass, which has no strike-level
-    funnel of its own, and partitions exactly::
+    funnel of its own, and partitions exactly (``outside_rth`` as above)::
 
-        built == vol_gate + score_cut + capped + emitted
+        built == vol_gate + score_cut + capped + outside_rth + emitted
 
     ⚠ unless ``build_failed`` — the block is wrapped in a bare ``except``, so a
     crash can land between any two of those counters and the identity is void.
@@ -1971,7 +2003,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
                     "built": 0, "momentum_veto": 0, "iron_condors": 0,
                     "kept_after_cap": 0, "regime_pass_added": 0,
                     "regime_filter": 0, "below_iv_floor": 0,
-                    "no_iv_history": 0, "gamma_gate": 0, "emitted": 0}}
+                    "no_iv_history": 0, "gamma_gate": 0, "outside_rth": 0,
+                    "emitted": 0}}
 
     if collect_funnel:
         for _sym in symbols:
@@ -1986,7 +2019,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
                     "0DTE": _spread_bucket(), "SWING": _spread_bucket(),
                     "DIRECTIONAL": {"windows_without_candidates": 0, "built": 0,
                                     "vol_gate": 0, "score_cut": 0, "capped": 0,
-                                    "emitted": 0, "build_failed": False}},
+                                    "outside_rth": 0, "emitted": 0,
+                                    "build_failed": False}},
             }
 
     def _bucket(sym, name):
@@ -2489,6 +2523,27 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
         dropped = before - len(results[key])
         if dropped:
             log.info(f"  GEX-regime gate: {dropped} index signals removed ({key})")
+
+    # Regular-hours gate - LAST, so the funnel's earlier counters still say what
+    # the scan found and ``outside_rth`` says only that the session was closed.
+    if not _signals_session_open(_signal_clock()):
+        held = 0
+        for key, bucket_name in (("signals_0dte", "0DTE"),
+                                 ("signals_swing", "SWING")):
+            before_by_sym = _by_symbol(results[key])
+            held += len(results[key])
+            results[key] = []
+            _count_removed(bucket_name, "outside_rth", before_by_sym, {})
+        # The DIRECTIONAL bucket keeps its counters flat (no ``spreads``), so
+        # its share is counted here rather than through ``_count_removed``.
+        for sym, n in _by_symbol(results["signals_directional"]).items():
+            entry = funnel.get(sym)
+            if entry is not None:
+                entry["buckets"]["DIRECTIONAL"]["outside_rth"] += n
+        held += len(results["signals_directional"])
+        results["signals_directional"] = []
+        results["warnings"].append(OUTSIDE_RTH_WARNING)
+        log.info(f"  Outside regular hours: {held} signals held")
 
     # Re-sort all signals by composite score
     results["signals_0dte"].sort(key=lambda x: (x.get("composite_score", 0), x.get("rr_pct", 0)), reverse=True)
