@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-02 (**Market Scanner signals only in regular hours.**)
+**Last updated:** 2026-10-02 (**Flow Alerts remembers the alert types you switch off.**)
+
+- **The bug.** The "Alert type" filter lived only in page memory, so a reload or a
+  new tab put every type back on. It is now stored in `app_settings` as
+  `flow_hidden_kinds` — the types switched OFF, so a type added later arrives
+  shown rather than silently hidden. The public origin's store is frozen: visitors
+  start from the default and their clicks write nothing.
+- **The tile.** The multi-select with chips wrapped six names inside a 288px box.
+  It is now a row of toggle chips in the Strategy Finder's style
+  (`swing.strategy_chip`), each with today's count for the chosen symbol, plus an
+  **All** chip; on a phone the group drops onto its own line. The status line adds
+  "· N shown" whenever the filters hide rows, since a remembered filter would
+  otherwise leave the day's count over a shorter table unexplained.
+- Page help, the User Guide and the Reference Guide updated (they also still said
+  "click any row", which moved to the symbol cell on 2026-09-19).
+
+---
+
+**Prior —** 2026-10-02 (**Market Scanner signals only in regular hours.**)
 
 - **The gap.** The auto-scan window is 08:00–15:15 CT, so four scans a day (08:00,
   08:15, 15:00, 15:15) finished outside the 08:30–15:00 session. Their 0-DTE and

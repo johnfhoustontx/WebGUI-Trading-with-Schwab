@@ -39,6 +39,9 @@ DEFAULTS = {
     "gamma_netprem_mode": "dollars",           # Net Prem y-axis: dollars | skew
     # Comparable magnitudes in Dollars mode, so the three read as one chart.
     "gamma_netprem_symbols": ["$SPX", "SPY", "QQQ"],   # plotted symbols
+    # Flow Alerts: the alert types the reader switched OFF. Stored as the HIDDEN
+    # set, not the shown one, so a type added later is shown by default.
+    "flow_hidden_kinds": [],
     "macro_skin": "A",               # Macro Board skin: A (Instrument) | B (Heat Lattice)
     # Calculator/Simulator chain grid columns (entry_panel; parsed by
     # chain_grid.parse_columns, which always keeps Bid and Ask).

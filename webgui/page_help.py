@@ -846,8 +846,11 @@ public live screens, or in the website's gallery pictures, unless **Show
 hedging-flow alerts on the public screens** is on (it ships off). They never
 count toward the Opportunity Board's **Flow alerts** or its score.
 
-**Age** tells you whether this just happened or is this morning's news. Filter by
-type or symbol, and **click a symbol** (the dotted underline) to open Dealer
+**Age** tells you whether this just happened or is this morning's news. Pick a
+symbol, or click the **Alert type** chips — each shows today's count — to switch a
+type off or back on; **All** brings every type back. The page remembers which types
+you switched off, and the line above the table says how many rows are shown when
+some are hidden. **Click a symbol** (the dotted underline) to open Dealer
 Positioning for that symbol.
 
 Covers today only; the list resets overnight.

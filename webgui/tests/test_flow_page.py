@@ -559,3 +559,51 @@ def test_the_symbol_link_is_only_drawn_where_it_can_go():
     from pages.options import flow
     assert "@click" in flow.gamma_symbol_slot(True)
     assert "@click" not in flow.gamma_symbol_slot(False)
+
+
+# ── the Alert type chips, and remembering them ──────────────────────────────
+def test_hidden_kinds_parse_keeps_only_known_kinds():
+    assert flow.parse_hidden_kinds(["uoa", "retired_kind", 7]) == {"uoa"}
+    for junk in (None, "uoa", 3, {"uoa": True}):
+        assert flow.parse_hidden_kinds(junk) == frozenset()
+
+
+def test_toggle_kind_flips_one_and_all_shows_everything():
+    h = flow.toggle_kind(frozenset(), "uoa")
+    assert h == {"uoa"}
+    assert flow.toggle_kind(h, "uoa") == frozenset()
+    assert flow.toggle_kind({"uoa", "crossover"}, None) == frozenset()
+
+
+def test_a_kind_not_in_the_saved_set_is_shown():
+    """The store holds what was switched OFF, so a kind the saved choice never
+    mentioned — a new detector — arrives shown, not silently hidden."""
+    shown = flow.shown_kinds(flow.parse_hidden_kinds(["uoa"]))
+    assert shown == set(flow._KIND_LABEL) - {"uoa"}
+    rows = flow.alert_rows(_VIEW)
+    assert {r["_kind_key"] for r in flow.filter_rows(rows, shown, None)} == {
+        "crossover", "gamma_flip"}
+
+
+def test_kind_chips_count_per_symbol_and_keep_zero_chips():
+    rows = flow.alert_rows({"alerts": [_XO, _UOA, _GF, _BD]})
+    opts = flow.kind_options(rows, hiding=False)
+    chips = flow.kind_chips(rows, opts, frozenset({"uoa"}), None)
+    assert [c[0] for c in chips] == list(opts)            # picker order
+    by = {k: (n, a) for k, _l, n, a in chips}
+    assert by["crossover"] == (1, True) and by["uoa"] == (1, False)
+    assert by["hiro_flip"] == (0, True)                    # zero still drawn
+    spy = {k: n for k, _l, n, _a in flow.kind_chips(rows, opts, frozenset(), "SPY")}
+    assert spy["crossover"] == 1 and spy["big_delta"] == 1 and spy["uoa"] == 0
+
+
+def test_the_hidden_kinds_setting_defaults_to_nothing_hidden():
+    import app_settings
+    assert app_settings.DEFAULTS[flow.HIDDEN_KINDS_KEY] == []
+
+
+def test_the_status_line_says_when_the_filter_hides_rows():
+    base = "9 alerts today · 2026-10-02"
+    assert flow.filtered_status(base, 9, 5) == f"{base} · 5 shown"
+    assert flow.filtered_status(base, 9, 9) == base
+    assert flow.filtered_status(base, 0, 0) == base

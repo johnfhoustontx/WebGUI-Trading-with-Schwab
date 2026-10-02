@@ -915,9 +915,13 @@ hedging types the modelled dealer direction) · **Detail** ·
 The **Age** column recomputes live against the rows already on screen, so it stays
 current without the table churning.
 
-**Filters.** Type and symbol filters run instantly, on rows already loaded.
+**Filters.** A Symbol picker and a row of **Alert type** chips, each carrying
+today's count; a click switches that type off or back on, and **All** shows every
+type. Filters run instantly, on rows already loaded. The types you switch off are
+remembered across reloads, and the status line adds "· N shown" whenever the
+filters hide rows.
 
-**Click any row** to open [Dealer Positioning](#dealer-positioning) for that symbol.
+**Click a symbol** (the dotted underline) to open [Dealer Positioning](#dealer-positioning) for it.
 
 ### Why it matters
 

@@ -161,7 +161,10 @@ PUBLIC_UNSAFE_DEFAULTS = {
 #   * or nav chrome this process has none of (``nav_pinned``);
 #   * or ``chain_grid_columns`` -- read only by the Calculator/Simulator entry
 #     panel, neither published here, purely to choose which chain columns to
-#     draw (and its write is a no-op on a frozen store).
+#     draw (and its write is a no-op on a frozen store);
+#   * or ``flow_hidden_kinds`` -- the Flow Alerts page's switched-off alert
+#     types, read purely to choose which rows to draw; on this origin it is
+#     the default (nothing hidden) and a visitor's chip click writes nothing.
 # Cross-process WRITES are refused a second way regardless: the bus is
 # read-only and ``live_main`` calls none of main's ``sync_*`` helpers.
 PUBLIC_SAFE_DEFAULTS = {
@@ -173,6 +176,7 @@ PUBLIC_SAFE_DEFAULTS = {
     "nav_pinned", "gamma_level_tracks", "gamma_spot_style",
     "gamma_spot_interval", "gamma_netprem_group", "gamma_netprem_mode",
     "gamma_netprem_symbols", "macro_skin", "chain_grid_columns",
+    "flow_hidden_kinds",
 }
 
 

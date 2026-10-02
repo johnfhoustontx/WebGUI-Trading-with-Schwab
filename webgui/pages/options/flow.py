@@ -415,6 +415,55 @@ def kind_options(rows, hiding):
             if k not in _NON_PUBLIC_KINDS or k in seen}
 
 
+# ── the "Alert type" chips, and remembering them ────────────────────────────
+# The reader's choice is stored as the types switched OFF (``app_settings``),
+# never the types switched on: a type that did not exist when the choice was
+# saved — a new detector, or a HIRO kind the public picker had left out — is
+# then SHOWN, the same default every type gets on a first visit. Stored the
+# other way round, a new type would arrive hidden and the page would quietly
+# drop the one alert nobody had seen before.
+HIDDEN_KINDS_KEY = "flow_hidden_kinds"
+
+
+def parse_hidden_kinds(raw):
+    """The saved hidden set, keeping only kinds this page knows. Anything else
+    — a missing key, a hand-edited string, a retired kind — reads as "nothing
+    hidden", never as an error. PURE."""
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(k for k in raw if isinstance(k, str) and k in _KIND_LABEL)
+
+
+def toggle_kind(hidden, key):
+    """The hidden set after clicking ``key``'s chip; ``key=None`` is the All
+    chip, which shows everything. Never mutates ``hidden``. PURE."""
+    if key is None:
+        return frozenset()
+    return frozenset(set(hidden) ^ {key})
+
+
+def shown_kinds(hidden):
+    """The kind keys ``filter_rows`` keeps for a hidden set. PURE."""
+    return {k for k in _KIND_LABEL if k not in hidden}
+
+
+def kind_chips(rows, options, hidden, symbol):
+    """One chip per offered kind: ``(key, label, count, active)``, in the
+    picker's order, the count being today's alerts of that kind for the chosen
+    symbol (all symbols when none is). A kind with no alerts still gets its
+    chip — a zero is the answer to "did any trade?", and a chip that appears
+    and vanishes with the tape would move every other chip under the cursor.
+    PURE."""
+    counts = {}
+    for r in rows or ():
+        if not isinstance(r, dict) or (symbol and r.get("symbol") != symbol):
+            continue
+        k = r.get("_kind_key")
+        counts[k] = counts.get(k, 0) + 1
+    return [(k, label, counts.get(k, 0), k not in hidden)
+            for k, label in (options or {}).items()]
+
+
 def filter_rows(rows, kinds, symbol):
     """Rows matching the selected kind keys and symbol.
 
@@ -452,6 +501,16 @@ def status_text(view):
     return f"{n} alert{'' if n == 1 else 's'} today · {date}".rstrip(" ·")
 
 
+def filtered_status(base, total, shown):
+    """The status line with the filter's effect appended when it hides rows —
+    "9 alerts today · 2026-10-02 · 5 shown". Since the hidden types are
+    remembered, a reader coming back tomorrow would otherwise read the day's
+    count over a shorter table with nothing to say why. PURE."""
+    if shown < total:
+        return f"{base} · {shown} shown"
+    return base
+
+
 def flow_columns():
     # "Alert type" and "What traded" are the DESK's words for these same two
     # quantities — its flow panel prints both — because one number labelled two
@@ -479,6 +538,7 @@ def render():
     only when the cache VERSION moves, while the Age column is recomputed every
     tick against the rows already on screen — so age stays live without churning
     the table."""
+    import app_settings
     import bus_client
     import shell as _shell
     from nicegui import run, ui
@@ -487,8 +547,15 @@ def render():
     from pages.ui_guard import guard, guard_async
 
     from .handoff import GAMMA_ROUTE, send_to_gamma
+    from .swing import strategy_chip   # the app's one filter-chip look
 
-    state = {"version": None, "rows": [], "kinds": set(_KIND_LABEL), "symbol": None}
+    # The hidden types come back from the settings store, so a reload — or a
+    # new tab — keeps what the reader switched off. On the public origin the
+    # store is frozen: every visitor starts from the default and a click there
+    # is never written (``app_settings.set`` is a no-op).
+    state = {"version": None, "rows": [], "symbol": None, "chips": None,
+             "status": _copy.WAITING_OPTIONS,
+             "hidden": parse_hidden_kinds(app_settings.get(HIDDEN_KINDS_KEY))}
 
     # No description line: the standard keeps the body to the header, the
     # filters, the status line and the table. What it said — today's alerts,
@@ -501,11 +568,17 @@ def render():
     with kit.page():
         kit.header("Flow Alerts", view=VIEW)
         with kit.control_bar():
-            opts0 = kind_options([], hiding)
-            kind_sel = kit.select_field("Alert type", opts0,
-                                        value=list(opts0), multiple=True,
-                                        width="w-72").props("use-chips")
             symbol_sel = kit.select_field("Symbol", ["All"], value="All", width="w-40")
+            # One chip per alert type, each carrying today's count — the
+            # Strategy Finder's filter row. It replaced a multi-select whose
+            # chips wrapped inside a fixed-width box: six names in a 288px
+            # field read as a pile, not a control. ``min-h-10`` matches the
+            # dense input beside it, so the two sit on one line; ``basis-80``
+            # sends the group onto a line of its own on a phone rather than
+            # squeezing it into a column beside the Symbol box.
+            with kit.field("Alert type") as kind_field:
+                kind_field.classes("flex-1 basis-80 min-w-0")
+                chips_row = ui.row().classes("min-h-10 items-center gap-2 flex-wrap")
         status = kit.status_line(_copy.WAITING_OPTIONS)
         # Today's alerts arrive as one payload; until it lands an empty table
         # reads as "a quiet session" rather than "not loaded yet".
@@ -530,9 +603,31 @@ def render():
     if linked:
         table.on(GAMMA_EVENT, _open_gamma)
 
+    def _paint_chips():
+        """Rebuild the chip row — only when a count or a state moved, since
+        the 2 s age tick reaches here too."""
+        chips = kind_chips(state["rows"], kind_options(state["rows"], hiding),
+                           state["hidden"], state["symbol"])
+        if chips == state["chips"]:
+            return
+        state["chips"] = chips
+        chips_row.clear()
+        with chips_row:
+            strategy_chip(f"All {sum(n for _k, _l, n, _a in chips)}",
+                          active=all(a for _k, _l, _n, a in chips),
+                          on_click=lambda: _on_chip(None)).classes("whitespace-nowrap")
+            for key, label, n, active in chips:
+                strategy_chip(f"{label} {n}", active=active,
+                              on_click=lambda k=key: _on_chip(k)) \
+                    .classes("whitespace-nowrap")
+
     def _apply_filters():
-        table.rows = filter_rows(state["rows"], state["kinds"], state["symbol"])
+        _paint_chips()
+        table.rows = filter_rows(state["rows"], shown_kinds(state["hidden"]),
+                                 state["symbol"])
         table.update()
+        status.text = filtered_status(state["status"], len(state["rows"]),
+                                      len(table.rows))
         region.busy.hide()
 
     def _tick_age():
@@ -552,18 +647,13 @@ def render():
                 state["symbol"] = None
                 symbol_sel.value = "All"
             symbol_sel.update()
-        kinds = kind_options(state["rows"], hiding)
-        if kinds != kind_sel.options:
-            # A kind newly on screen is shown by default, as every kind is at
-            # first paint; one that left the picker leaves the selection.
-            state["kinds"] |= set(kinds) - set(kind_sel.options)
-            kind_sel.set_options(kinds, value=[k for k in kinds if k in state["kinds"]])
-        status.text = status_text(payload)
+        state["status"] = status_text(payload)
         _tick_age()
 
     @guard
-    def _on_kind_change(e):
-        state["kinds"] = set(e.value or [])
+    def _on_chip(key):
+        state["hidden"] = toggle_kind(state["hidden"], key)
+        app_settings.set(HIDDEN_KINDS_KEY, sorted(state["hidden"]))
         _apply_filters()
 
     @guard
@@ -571,7 +661,6 @@ def render():
         state["symbol"] = None if e.value in (None, "All") else e.value
         _apply_filters()
 
-    kind_sel.on_value_change(_on_kind_change)
     symbol_sel.on_value_change(_on_symbol_change)
 
     @guard_async
@@ -591,5 +680,6 @@ def render():
         state["version"] = version
         _paint(payload)
     else:
+        _paint_chips()
         region.busy.show()
     ui.timer(2.0, _poll)

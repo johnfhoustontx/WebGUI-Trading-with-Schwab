@@ -799,8 +799,9 @@ Six kinds of alert. The screen names each by what happened:
 | **Hedging reversal** | The day's running hedging total changed sign: **Now buying** or **Now selling**. |
 
 Columns: **Time · Age · Symbol · Type · Side · Detail · Share · Alert**. Filter by
-type or symbol — filtering is instant. **Click any row** to open Dealer Positioning
-for that symbol.
+symbol, or click the **Alert type** chips to switch a type off or on (**All** shows
+every type) — filtering is instant, and the types you switch off are remembered.
+**Click a symbol** (the dotted underline) to open Dealer Positioning for it.
 
 > The list covers **today only** and resets overnight. There is no history.
 
