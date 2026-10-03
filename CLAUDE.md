@@ -745,7 +745,7 @@ live origin is not fronted by the edge); (2)
 write chokepoint**, so one refusal covers every command on every page, and on these
 pages that reaches `gamma_analyze` / `gamma_explain` (**paid Claude calls**) and
 `gamma_refresh` / sentiment `refresh` (Schwab fetches against a budget already at
-68–76k/day); (3) **`app_settings.freeze(pins)`** — `set()` becomes a no-op and
+about 84k/day, measured 2026-10-02); (3) **`app_settings.freeze(pins)`** — `set()` becomes a no-op and
 `load()` never touches disk; (4) structurally, no rail, Settings, Terminate or
 Sign-out, because those routes **do not exist in the process**. The pinned gamma
 screens refuse at the page as well: `gamma.may_enqueue(symbol, view)` gates every
@@ -2211,7 +2211,7 @@ process would need a Redis-side lock.
 **Escape hatch:** `set TRADING_ENABLE_SCHEDULERS=1` before launching turns
 schedulers on for that session — the one dev case that genuinely needs collection
 (testing the collectors themselves). It makes dev issue **real Schwab calls** on
-top of prod's ~68–76k/day; the other three suppressions stay on.
+top of prod's ~84k/day (measured 2026-10-02); the other three suppressions stay on.
 
 **Under pytest the process PRESENTS AS PROD** regardless of the marker — ports,
 Redis DB, `owns_proxy` **and `ENV_NAME` itself** — with all four suppressions

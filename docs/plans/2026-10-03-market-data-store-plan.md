@@ -2688,9 +2688,10 @@ miss, and concurrent identical requests sharing one call.
 |---|---|---|
 | Does a cut chain hold the contracts Schwab returns for the narrower window? | `chains`: `shadow_subset_match` vs `shadow_subset_mismatch`; also `shadow_cmp_match` vs `shadow_cmp_mismatch` (compared but would not have been served) | mismatches are zero, or each one is explained from the proxy journal (`shadow: stored ... differs`) |
 | Does an exact repeat match? | `chains`: `shadow_hit_match` vs `shadow_hit_mismatch` | mismatches only where an expiration listed or expired between fetches |
+| Does a stored daily series equal a fresh one? | `pricehistory`: `shadow_hit_match` vs `shadow_hit_mismatch` (every bar's timestamp, open, high, low, close and volume; in the session, today's moving bar is skipped) | mismatches are zero, or explained (the proxy journal logs the first per symbol and range). **Bars must not be switched on with unexplained mismatches**: a series fetched 10 minutes after the close is served all evening and all weekend |
 | Does the quote-built bar agree with Schwab's on price? | `pricehistory`: `shadow_bar_match` / `shadow_bar_mismatch` / `shadow_bar_no_today` | decides `bars.today_bar` |
 | Does it agree on volume? | `pricehistory`: `shadow_bar_volume_match` vs `shadow_bar_volume_mismatch` | must be clean before `today_bar = "quote"`: the scan's scorers read volume |
-| How many calls would have been saved? | `chains`: `shadow_hit_*` + `shadow_subset_*`; `quotes`: `shadow_hit`; `pricehistory`: `shadow_hit` + `shadow_composed` | replaces the design doc's estimates. `shadow_partial` (quotes) is a smaller call, not a saved one, and `shadow_cmp_*` is not a saving |
+| How many calls would have been saved? | `chains`: `shadow_hit_*` + `shadow_subset_*`; `quotes`: `shadow_hit`; `pricehistory`: `shadow_hit_match` + `shadow_hit_mismatch` + `shadow_composed` | replaces the design doc's estimates. `shadow_partial` (quotes) is a smaller call, not a saved one, and `shadow_cmp_*` is not a saving |
 
 If `shadow_bar_no_today` dominates, Schwab's daily series does not carry the bar in progress; then `today_bar = "ttl"` with a long `session_ttl_sec` is already exact, and say so in the doc.
 
@@ -2708,6 +2709,12 @@ git commit -m "docs: shadow-mode results for the market-data store"
 ### Task 14: Turn on bars, then chains, then quotes (operator checkpoint)
 
 **No code. Each switch is the operator's, made in Settings → Configuration → Local market data, which writes `config/local/marketdata.toml`. The proxy reads it on the next request; no restart.**
+
+Before any switch: the Task 13 table must be read and recorded. In shadow the
+collector sends no age limit, so shadow's `chains` would-be hits for caller
+`options_svc` come only from other callers' overlap; once `mode = on` the
+collector sends its 20-second limit on every chain request (with or without a
+3-minute tail), which is what stops it being served its own previous chain.
 
 Order, one per session so each effect is readable on its own:
 
