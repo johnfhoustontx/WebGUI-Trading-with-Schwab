@@ -478,3 +478,15 @@ def test_indicator_match_help_says_it_is_a_trimmed_prefix():
     _s, fld = cs.locate(cs.BY_NAME["news.toml"],
                         ("calendar", "indicators", "gdp", "match"))
     assert "prefix" in fld.help and "trimmed" in fld.help
+
+
+def test_marketdata_mode_and_today_bar_are_choices_from_the_loader():
+    from shared import marketdata_config
+    cfg = cs.BY_NAME["marketdata.toml"]
+    _s, mode = cs.locate(cfg, ("mode",))
+    _s, bar = cs.locate(cfg, ("bars", "today_bar"))
+    # exact: same order, no duplicates (a set comparison hides both)
+    assert mode.kind == "choice"
+    assert tuple(mode.choices) == tuple(marketdata_config.MODES)
+    assert bar.kind == "choice"
+    assert tuple(bar.choices) == tuple(marketdata_config.TODAY_BARS)

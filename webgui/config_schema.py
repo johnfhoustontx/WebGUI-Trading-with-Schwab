@@ -42,7 +42,6 @@ NEWS = "news_svc"
 TRADE = "trade_svc"
 WEBGUI = "webgui"
 TIMERS = "timers"
-PROXY = "proxy"
 
 RESTART_LABELS = {
     OPTIONS: "Options service",
@@ -52,7 +51,6 @@ RESTART_LABELS = {
     TRADE: "Trade service",
     WEBGUI: "Web app (this page reloads)",
     TIMERS: "Scheduled timers (regenerated, no restart)",
-    PROXY: "Schwab proxy",
 }
 
 SECTORS = (
@@ -1348,12 +1346,10 @@ _MARKETDATA = ConfigFile(
         Section("Option chains", "", (
             Field("chains.enabled", "Reuse option chains", "", kind="bool"),
             Field("chains.max_age_sec", "Oldest chain to reuse while a session is open",
-                  "The autoscan reads chains up to this old.", **_SEC, max=600),
+                  "Applies to every caller that sends no limit of its own. The "
+                  "autoscan is one of them.", **_SEC, max=600),
             Field("chains.closed_max_age_sec", "Oldest chain to reuse while markets are closed",
                   "", **_SEC, max=86400),
-            Field("chains.wide_days", "Days ahead fetched when a chain is refreshed",
-                  "Matches the collector's own window.", kind="int", unit="days",
-                  min=1, max=14),
             Field("chains.max_entries", "Most chains kept at once", "", kind="int",
                   min=50, max=5000),
             Field("chains.shadow_compare_max_age_sec",
@@ -1388,7 +1384,8 @@ _MARKETDATA = ConfigFile(
                   "Minutes between real fetches for watchlist symbols",
                   "1 fetches every symbol every minute. At 3, symbols that are "
                   "collected only because they are on the watchlist are fetched "
-                  "every third minute and carried forward in between.",
+                  "every third minute and carried forward in between. Takes "
+                  "effect only while the mode is on and option-chain reuse is on.",
                   kind="int", unit="minutes", min=1, max=10),
             Field("collection.fresh_max_age_sec",
                   "Oldest chain the collector treats as new", "", **_SEC, max=60),

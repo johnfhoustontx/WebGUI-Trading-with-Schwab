@@ -13,6 +13,7 @@ from repo_paths import MARKETDATA_TOML
 from shared.config_toml import toml_loader
 
 MODES = ("off", "shadow", "on")
+TODAY_BARS = ("ttl", "quote")
 
 DEFAULTS = {
     "mode": "shadow",
@@ -20,7 +21,6 @@ DEFAULTS = {
         "enabled": True,
         "max_age_sec": 45,
         "closed_max_age_sec": 1800,
-        "wide_days": 7,
         "max_entries": 400,
         "shadow_compare_max_age_sec": 120,
     },
@@ -51,10 +51,13 @@ def _usable(value, default):
     if isinstance(default, bool):
         return value if isinstance(value, bool) else default
     if isinstance(default, (int, float)):
-        if (isinstance(value, bool) or not isinstance(value, (int, float))
-                or not math.isfinite(value) or value < 0):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
             return default
-        return value
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:       # an int too large to be a float
+            return default
+        return value if finite and value >= 0 else default
     if isinstance(default, list):
         return value if isinstance(value, list) else default
     if isinstance(default, str):
@@ -64,14 +67,19 @@ def _usable(value, default):
 
 def section(name: str) -> dict:
     """One table of the file with every value checked against its default's
-    type. A table an override replaced with a scalar reads as the defaults."""
+    type. A table an override replaced with a scalar reads as the defaults,
+    except a store's ``enabled``, which is always :func:`store_on`'s answer so
+    the two readers of one switch cannot disagree."""
     base = DEFAULTS.get(name)
     if not isinstance(base, dict):
         return {}
     got = load().get(name)
     if not isinstance(got, dict):
         got = {}
-    return {k: _usable(got.get(k, d), d) for k, d in base.items()}
+    out = {k: _usable(got.get(k, d), d) for k, d in base.items()}
+    if "enabled" in base:
+        out["enabled"] = store_on(name)
+    return out
 
 
 def store_on(name: str) -> bool:
@@ -82,3 +90,10 @@ def store_on(name: str) -> bool:
         return False
     got = load().get(name)
     return isinstance(got, dict) and got.get("enabled") is True
+
+
+def today_bar() -> str:
+    """How today's daily bar is handled: one of :data:`TODAY_BARS`. Anything
+    else is ``ttl``, the behaviour that needs no live quote."""
+    v = section("bars")["today_bar"]
+    return v if v in TODAY_BARS else "ttl"

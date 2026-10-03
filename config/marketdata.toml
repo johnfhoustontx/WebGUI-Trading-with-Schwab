@@ -19,7 +19,6 @@ mode = "shadow"
 enabled = true
 max_age_sec = 45                  # while any session is open
 closed_max_age_sec = 1800         # while every session is closed
-wide_days = 7                     # the window refetched on a near miss (the collector's)
 max_entries = 400
 shadow_compare_max_age_sec = 120  # shadow only: how old an entry may be and still be compared
 
