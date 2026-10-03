@@ -395,7 +395,10 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     int}`` or None. With tiers, a watchlist-only symbol gets a real fetch one
     minute in ``interval_min`` and the proxy's stored chain otherwise; a stored
     chain is carried forward to the live quote, is NOT passed to ``on_chain``
-    (it has no new volume for the detectors), and IS written like any other.
+    (it has no new volume for the detectors), and IS written like any other:
+    the four Greek views from the carried chain, the skew readings (``rr_25d``,
+    ``atm_iv``), the volume and premium totals and the per-strike premium grid
+    from the chain as stored, so they repeat the last fetched values exactly.
     None keeps every request exactly as it was before tiers existed."""
     if symbols is None:
         symbols = collection_symbols()
@@ -460,7 +463,11 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     # Watchlist-only symbols between real fetches: the proxy handed back its
     # stored chain. Move it to the live price before anything prices off it.
     carried: set = set()
+    # Each chain as the proxy handed it back, before any carry. Empty without
+    # tiers, where the fetched chain is the only chain there is.
+    as_stored: dict = {}
     if tiers:
+        as_stored = {s: ch for s, ch in fetched if ch}
         carried, repriced = _carry_forward(client, fetched, ages, tiers, now)
         # One line a poll, zeros included: a run of zeros is how the operator
         # sees that the proxy's store is not answering.
@@ -483,10 +490,19 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
             # chain (NO extra get_option_chain call) and merged into EACH view's
             # summary so any view row persists the scalars. Fully defensive: a
             # skew-compute failure must never break the poll — degrade to None.
+            #
+            # Read from the chain AS STORED, never from a carried one. rr_25d
+            # picks a contract by delta and atm_iv a strike by price; on a carried
+            # chain those are a live price and modelled deltas beside volatilities
+            # from the fetch, so the two readings would hop between strikes on
+            # carried minutes. A carried minute repeats the last fetched values
+            # exactly; only the four Greek views below come from the carried chain.
+            # For a chain that was not carried this is the same object.
+            skew_chain = as_stored.get(symbol, chain)
             try:
-                rr = flow_skew.risk_reversal_25d(chain)
-                vol = flow_skew.index_call_put_volume(chain)
-                prem = flow_skew.index_call_put_premium(chain)
+                rr = flow_skew.risk_reversal_25d(skew_chain)
+                vol = flow_skew.index_call_put_volume(skew_chain)
+                prem = flow_skew.index_call_put_premium(skew_chain)
                 # ATM IV LEVEL (percent, e.g. 25.5) — the forward-only column that
                 # feeds the IV-direction regime (collapsing vs spiking). Pure +
                 # defensive: extract_atm_iv returns None on a thin/absent chain.
@@ -496,7 +512,7 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
                     "put_vol": (vol or {}).get("put_vol"),
                     "call_prem": (prem or {}).get("call_prem"),
                     "put_prem": (prem or {}).get("put_prem"),
-                    "atm_iv": iv_analysis.extract_atm_iv(chain),
+                    "atm_iv": iv_analysis.extract_atm_iv(skew_chain),
                 }
             except Exception:
                 log.debug("skew compute failed for %s", symbol, exc_info=True)
@@ -552,7 +568,10 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
             # ladder, never them. An empty/None grid writes NO row, so the panel
             # can tell "not collected yet" from "collected, nothing traded".
             try:
-                prem_grid = flow_skew.premium_by_strike(chain)
+                # Volume times mark, neither of which a carry changes: the stored
+                # chain, like the totals above. Its spot still comes from the
+                # Greek pass, so the ladder sits at the price the heatmap uses.
+                prem_grid = flow_skew.premium_by_strike(skew_chain)
                 if prem_grid:
                     db.insert_snapshot(
                         conn, symbol, "prem",

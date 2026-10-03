@@ -534,3 +534,186 @@ def test_a_carried_chain_writes_all_five_views_at_the_live_price(tmp_path, monke
         {int(RTH.timestamp())}
     assert by_symbol["AAPL"]["gex"][2] == by_symbol["SPY"]["gex"][2]
     conn.close()
+
+
+#############################################
+# CARRIED MINUTES REPEAT THE FETCHED SKEW READINGS
+#############################################
+# atm_iv and rr_25d pick a strike by price and by delta. Read off a carried
+# chain they would mix a live price and carried deltas with volatilities from
+# the fetch, and hop between strikes on carried minutes. They, the volume and
+# premium totals and the per-strike premium grid are read from the chain AS
+# STORED; only the four Greek views come from the carried chain.
+
+SKEW_COLUMNS = ("rr_25d", "call_vol", "put_vol", "call_prem", "put_prem", "atm_iv")
+LIVE = 104.5
+
+
+def _skew_chain(symbol):
+    """Volatility falls with the strike, so the at-the-money strike and the
+    25-delta picks each read a different number at 100 than at 104.5."""
+    rows = ((95.0, 40.0, 0.02, 0.85, -0.15),
+            (100.0, 30.0, 0.06, 0.52, -0.48),
+            (105.0, 20.0, 0.03, 0.22, -0.78))
+
+    def side(pc, col, volume, oi):
+        return {"2026-10-09:4": {
+            str(k): [{"putCall": pc, "strikePrice": k, "gamma": g, "delta": d[col],
+                      "volatility": iv, "openInterest": oi,
+                      "totalVolume": volume, "mark": 1.25}]
+            for k, iv, g, *d in rows}}
+    return {"symbol": symbol, "underlyingPrice": 100.0,
+            "callExpDateMap": side("CALL", 0, 40, 500),
+            "putExpDateMap": side("PUT", 1, 25, 300)}
+
+
+def _skew_of(chain):
+    rr = gc.flow_skew.risk_reversal_25d(chain) or {}
+    vol = gc.flow_skew.index_call_put_volume(chain) or {}
+    prem = gc.flow_skew.index_call_put_premium(chain) or {}
+    return {"rr_25d": rr.get("rr"), "call_vol": vol.get("call_vol"),
+            "put_vol": vol.get("put_vol"), "call_prem": prem.get("call_prem"),
+            "put_prem": prem.get("put_prem"),
+            "atm_iv": gc.iv_analysis.extract_atm_iv(chain)}
+
+
+def _written(tmp_path, monkeypatch, *, tiers, symbols=("SPY", "AAPL"), **client_kw):
+    """Run one poll into a real database with the real engine.
+    Returns ``{symbol: {view: {"spot": ..., <skew columns>}}}``."""
+    import gamma_tool as gt
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    c = _client(chain=_skew_chain, **client_kw)
+    gc.poll_once(c, gt.GammaEngine(), conn, symbols=list(symbols),
+                 poll_term=False, now=RTH, tiers=tiers)
+    out = {}
+    for symbol, view, spot, *skew in conn.execute(
+            "SELECT symbol, view, spot, " + ", ".join(SKEW_COLUMNS)
+            + " FROM snapshots").fetchall():
+        out.setdefault(symbol, {})[view] = dict(zip(SKEW_COLUMNS, skew), spot=spot)
+    conn.close()
+    return out
+
+
+def _skew_only(row):
+    return {k: row[k] for k in SKEW_COLUMNS}
+
+
+def test_the_fixture_really_reads_differently_once_carried():
+    """Without this the tests below could pass on a chain where the stored and
+    the carried readings happen to agree."""
+    stored = _skew_of(_skew_chain("AAPL"))
+    carried = _skew_of(chain_carry.carry_chain(_skew_chain("AAPL"), LIVE,
+                                               age_sec=95.0, now=RTH))
+    assert stored["atm_iv"] == 30.0 and carried["atm_iv"] == 20.0
+    assert stored["rr_25d"] is not None and carried["rr_25d"] is not None
+    assert stored["rr_25d"] != carried["rr_25d"]
+    # The carry never touches volume or marks, so these agree either way.
+    for col in ("call_vol", "put_vol", "call_prem", "put_prem"):
+        assert stored[col] == carried[col] and stored[col]
+
+
+def test_a_carried_minute_writes_the_skew_readings_of_the_stored_chain(
+        tmp_path, monkeypatch):
+    rows = _written(tmp_path, monkeypatch, tiers=TIERS,
+                    ages={"AAPL": 95.0}, quotes={"AAPL": LIVE})
+    stored = _skew_of(_skew_chain("AAPL"))
+    assert set(rows["AAPL"]) == {"gex", "charm", "dex", "vanna", "prem"}
+    for view, row in rows["AAPL"].items():
+        assert _skew_only(row) == stored, view
+        assert row["spot"] == LIVE, view           # the Greeks ARE at the live price
+
+
+def test_a_carried_minutes_greek_views_still_come_from_the_carried_chain(
+        tmp_path, monkeypatch):
+    import gamma_tool as gt
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    c = _client(chain=_skew_chain, ages={"AAPL": 95.0}, quotes={"AAPL": LIVE})
+    gc.poll_once(c, gt.GammaEngine(), conn, symbols=["AAPL"], poll_term=False,
+                 now=RTH, tiers=TIERS)
+    (net_total,) = conn.execute(
+        "SELECT net_total FROM snapshots WHERE symbol='AAPL' AND view='gex'").fetchone()
+    conn.close()
+
+    def net(chain):
+        gex, *_ = gt.GammaEngine().calc_all_from_chain(chain, use_volume=False)
+        return gt.GammaEngine.snapshot_summary(gex)["net_total"]
+
+    carried = chain_carry.carry_chain(_skew_chain("AAPL"), LIVE, age_sec=95.0, now=RTH)
+    assert net_total == pytest.approx(net(carried), rel=1e-6)
+    assert net_total != pytest.approx(net(_skew_chain("AAPL")), rel=1e-3)
+    assert net_total != pytest.approx(
+        net(dict(_skew_chain("AAPL"), underlyingPrice=LIVE)), rel=1e-3)
+
+
+def test_a_fresh_symbol_in_the_same_poll_is_unaffected(tmp_path, monkeypatch):
+    rows = _written(tmp_path, monkeypatch, tiers=TIERS,
+                    ages={"AAPL": 95.0, "SPY": 2.0}, quotes={"AAPL": LIVE, "SPY": LIVE})
+    fresh = _skew_of(_skew_chain("SPY"))
+    for view, row in rows["SPY"].items():
+        assert _skew_only(row) == fresh, view
+        assert row["spot"] == 100.0, view
+
+
+def test_without_tiers_every_reading_is_the_fetched_chains_own(tmp_path, monkeypatch):
+    """Old answers and a live quote on offer: with tiers off none of it is used."""
+    rows = _written(tmp_path, monkeypatch, tiers=None,
+                    ages={"AAPL": 95.0, "SPY": 400.0}, quotes={"AAPL": LIVE, "SPY": LIVE})
+    own = _skew_of(_skew_chain("AAPL"))
+    for symbol in ("AAPL", "SPY"):
+        assert set(rows[symbol]) == {"gex", "charm", "dex", "vanna", "prem"}
+        for view, row in rows[symbol].items():
+            assert _skew_only(row) == own, (symbol, view)
+            assert row["spot"] == 100.0, (symbol, view)
+
+
+def test_the_premium_grid_is_read_from_the_stored_chain_and_placed_at_the_live_spot(
+        tmp_path, monkeypatch):
+    seen = {}
+    real = gc.flow_skew.premium_by_strike
+
+    def spy(chain):
+        seen[chain["symbol"]] = chain["underlyingPrice"]
+        return real(chain)
+
+    monkeypatch.setattr(gc.flow_skew, "premium_by_strike", spy)
+    rows = _written(tmp_path, monkeypatch, tiers=TIERS,
+                    ages={"AAPL": 95.0}, quotes={"AAPL": LIVE})
+    assert seen == {"SPY": 100.0, "AAPL": 100.0}   # the chain as stored
+    assert rows["AAPL"]["prem"]["spot"] == LIVE    # spot from the Greek pass
+    assert rows["SPY"]["prem"]["spot"] == 100.0
+
+
+@pytest.mark.parametrize("module, name", [
+    ("flow_skew", "risk_reversal_25d"), ("flow_skew", "index_call_put_volume"),
+    ("flow_skew", "index_call_put_premium"), ("flow_skew", "premium_by_strike"),
+    ("iv_analysis", "extract_atm_iv")])
+def test_every_skew_reader_is_handed_the_stored_chain(tmp_path, monkeypatch,
+                                                      module, name):
+    """Volume and premium read the same off either chain today, so only WHICH
+    chain each reader is given can pin it: the stored one is at 100, the
+    carried one at 104.5."""
+    seen = {}
+    mod = getattr(gc, module)
+    real = getattr(mod, name)
+
+    def spy(chain):
+        seen[chain["symbol"]] = chain["underlyingPrice"]
+        return real(chain)
+
+    monkeypatch.setattr(mod, name, spy)
+    _written(tmp_path, monkeypatch, tiers=TIERS,
+             ages={"AAPL": 95.0}, quotes={"AAPL": LIVE})
+    assert seen == {"SPY": 100.0, "AAPL": 100.0}
+
+
+def test_a_carried_chain_that_got_no_live_price_writes_its_own_readings(
+        tmp_path, monkeypatch):
+    rows = _written(tmp_path, monkeypatch, tiers=TIERS, symbols=("AAPL",),
+                    ages={"AAPL": 95.0}, quotes_raise=True)
+    stored = _skew_of(_skew_chain("AAPL"))
+    for view, row in rows["AAPL"].items():
+        assert _skew_only(row) == stored and row["spot"] == 100.0, view
