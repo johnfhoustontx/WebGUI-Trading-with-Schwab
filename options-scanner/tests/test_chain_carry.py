@@ -465,3 +465,112 @@ def test_call_and_put_deltas_move_together():
     put = out["putExpDateMap"][NEAR]["100.0"][0]["delta"]
     assert call > 0.50 and put > -0.50             # both rise with the price
     assert call - put == pytest.approx(1.0, abs=1e-9)   # they started 1.0 apart
+
+
+#############################################
+# HOW OFTEN THE GAMMA CAP BINDS (tools/measure_chain_carry.py reports it)
+#############################################
+
+def _cap_case():
+    """Thirty minutes to the close, the price walks onto the 101 strike."""
+    now = dt.datetime.combine(TODAY, dt.time(14, 30), tzinfo=CT)
+    src = _chain(exps=(ZERO, FAR))
+    src["callExpDateMap"][ZERO]["101.0"] = [_c("CALL", 101.0, 0.004, 0.02)]
+    return src, now
+
+
+def test_an_ordinary_move_caps_nothing():
+    assert cc.capped_gammas(_chain(), 102.0, age_sec=120, now=NOW) == 0
+    assert cc.capped_gammas(_chain(), 100.0, age_sec=0, now=NOW) == 0
+
+
+def test_a_capped_contract_is_counted_once():
+    src, now = _cap_case()
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=now) == 1
+
+
+def test_both_sides_are_counted():
+    src, now = _cap_case()
+    src["putExpDateMap"][ZERO]["101.0"] = [_c("PUT", 101.0, 0.004, -0.98)]
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=now) == 2
+
+
+@pytest.mark.parametrize("clock", [dt.time(9, 0), dt.time(14, 30), dt.time(14, 57),
+                                   dt.time(14, 59, 59), dt.time(15, 5)])
+@pytest.mark.parametrize("live", [50.0, 99.5, 100.0, 100.5, 101.0, 105.0, 300.0])
+@pytest.mark.parametrize("age", [0, 60, 120, 210])
+def test_the_count_is_the_number_of_gammas_the_carry_wrote_at_the_cap(clock, live, age):
+    """Counted by the same pass that carries, so the two cannot disagree."""
+    now = dt.datetime.combine(TODAY, clock, tzinfo=CT)
+    src, _ = _cap_case()
+    src["putExpDateMap"][ZERO]["100.5"] = [_c("PUT", 100.5, 0.2, -0.6, iv=4.0)]
+    out = cc.carry_chain(src, live, age_sec=age, now=now)
+    before = dict(_numbers(src))
+    at_cap = sum(1 for where, value in _numbers(out)
+                 if where[-1] == "gamma" and where[1] == ZERO
+                 and value == before[where] * cc.MAX_GAMMA_RATIO)
+    assert cc.capped_gammas(src, live, age_sec=age, now=now) == at_cap
+
+
+def test_a_ratio_exactly_at_the_cap_is_not_counted(monkeypatch):
+    """The cap BINDS only when it changed the number."""
+    src, now = _cap_case()
+    calls = iter([1.0, 10.0] * 100)
+    monkeypatch.setattr(cc, "bs_gamma", lambda *a, **k: next(calls))   # g1/g0 == 10
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=now) == 0
+    calls = iter([1.0, 10.000001] * 100)
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=now) > 0
+
+
+def test_a_gamma_that_was_not_scaled_is_not_counted():
+    """Schwab's sentinel, a zero and a missing gamma are left alone, so the cap
+    did not bind on them whatever the model's ratio."""
+    for unscaled in (-999.0, 0, None):
+        src, now = _cap_case()
+        src["callExpDateMap"][ZERO]["101.0"][0]["gamma"] = unscaled
+        assert cc.capped_gammas(src, 101.0, age_sec=120, now=now) == 0
+
+
+def test_a_capped_gamma_too_large_to_write_is_neither_written_nor_counted():
+    """Ten times a number near the top of the float range is infinity. Nothing
+    is written, so the cap did not bind on anything."""
+    src, now = _cap_case()
+    src["callExpDateMap"][ZERO]["101.0"][0]["gamma"] = 1e308
+    out = cc.carry_chain(src, 101.0, age_sec=120, now=now)
+    assert out["callExpDateMap"][ZERO]["101.0"][0]["gamma"] == 1e308
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=now) == 0
+
+
+@pytest.mark.parametrize("chain, live", [
+    (None, 101.0), ([], 101.0), ("chain", 101.0),
+    ("src", None), ("src", 0), ("src", float("nan")), ("src", "101"),
+    ("zero-price", 101.0)])
+def test_a_carry_that_does_nothing_caps_nothing(chain, live):
+    src, now = _cap_case()
+    if chain == "src":
+        chain = src
+    elif chain == "zero-price":
+        chain = dict(src, underlyingPrice=0)
+    assert cc.capped_gammas(chain, live, age_sec=120, now=now) == 0
+
+
+def test_a_settled_expiration_caps_nothing():
+    src, _ = _cap_case()
+    after = dt.datetime.combine(TODAY, dt.time(15, 5), tzinfo=CT)
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=after) == 0
+
+
+def test_only_the_expiration_that_is_carried_is_counted():
+    """The far expiration is never touched, so nothing in it can be capped."""
+    src, now = _cap_case()
+    src["callExpDateMap"][FAR]["101.0"] = [_c("CALL", 101.0, 0.004, 0.02)]
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=now) == 1
+
+
+def test_counting_does_not_change_the_carry_or_the_source():
+    src, now = _cap_case()
+    before = copy.deepcopy(src)
+    first = cc.carry_chain(src, 101.0, age_sec=120, now=now)
+    cc.capped_gammas(src, 101.0, age_sec=120, now=now)
+    assert src == before
+    assert cc.carry_chain(src, 101.0, age_sec=120, now=now) == first

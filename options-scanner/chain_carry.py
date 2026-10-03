@@ -64,40 +64,44 @@ def _central_date(now) -> str:
 
 
 def _moved(contract, kind, spot0, spot1, t0, t1):
-    """One contract with gamma and delta moved from ``spot0`` to ``spot1``.
+    """One contract with gamma and delta moved from ``spot0`` to ``spot1``, and
+    whether the gamma cap bound on it: ``(contract, capped)``.
     Returns ``contract`` itself when there is nothing to model the change with.
     Never writes a number that is not finite."""
     iv = contract.get("volatility")
     strike = contract.get("strikePrice")
     if not _real(iv) or not _real(strike) or strike <= 0:
-        return contract
+        return contract, False
     sigma = iv / 100.0
     if sigma <= 0:                # Schwab's -999 sentinel, zero, or an underflow
-        return contract
+        return contract, False
     try:
         g0 = bs_gamma(spot0, strike, t0, RISK_FREE_RATE, sigma, kind)
         g1 = bs_gamma(spot1, strike, t1, RISK_FREE_RATE, sigma, kind)
         d0 = bs_delta(spot0, strike, t0, RISK_FREE_RATE, sigma, kind)
         d1 = bs_delta(spot1, strike, t1, RISK_FREE_RATE, sigma, kind)
     except (ArithmeticError, ValueError):    # sigma * sqrt(T) rounded to zero
-        return contract
+        return contract, False
     out = dict(contract)
+    capped = False
 
     # A gamma is never negative: anything else is Schwab's "not computed"
     # sentinel, and it is not ours to scale.
     gamma = contract.get("gamma")
     if _real(gamma) and gamma > 0 and _real(g0) and _real(g1) \
             and g0 > _TINY_GAMMA and g1 >= 0:
-        new_gamma = gamma * min(g1 / g0, MAX_GAMMA_RATIO)
+        ratio = g1 / g0
+        new_gamma = gamma * min(ratio, MAX_GAMMA_RATIO)
         if _real(new_gamma):
             out["gamma"] = new_gamma
+            capped = ratio > MAX_GAMMA_RATIO     # the cap changed the number
 
     # Same for a delta outside [-1, 1].
     delta = contract.get("delta")
     if _real(delta) and -1.0 <= delta <= 1.0 and _real(d0) and _real(d1):
         lo, hi = (0.0, 1.0) if kind == "call" else (-1.0, 0.0)
         out["delta"] = min(hi, max(lo, delta + (d1 - d0)))
-    return out
+    return out, capped
 
 
 def carry_chain(chain, live_spot, *, age_sec: float, now):
@@ -107,12 +111,29 @@ def carry_chain(chain, live_spot, *, age_sec: float, now):
     a stale chain is better than an invented one.
 
     ``now`` is the Central wall clock (aware in any zone, or naive Central)."""
+    return _carry(chain, live_spot, age_sec, now)[0]
+
+
+def capped_gammas(chain, live_spot, *, age_sec: float, now) -> int:
+    """How many contracts ``carry_chain`` would write at ``MAX_GAMMA_RATIO``
+    times Schwab's gamma because the Black-Scholes ratio was larger still.
+
+    Counted by the very pass that carries, so it cannot disagree with the
+    chain ``carry_chain`` returns for the same arguments. Zero whenever the
+    carry changes nothing. ``tools/measure_chain_carry.py`` reports it: a cap
+    that binds often is a model being overruled often."""
+    return _carry(chain, live_spot, age_sec, now)[1]
+
+
+def _carry(chain, live_spot, age_sec, now):
+    """``(carried chain, contracts the gamma cap bound on)``."""
     if not isinstance(chain, dict) or not _real(live_spot) or live_spot <= 0:
-        return chain
+        return chain, 0
     spot0 = chain.get("underlyingPrice")
     if not _real(spot0) or spot0 <= 0:
-        return chain
+        return chain, 0
     age = age_sec if _real(age_sec) and age_sec > 0 else 0.0
+    capped = 0
     today = _central_date(now)
 
     out = dict(chain)
@@ -137,11 +158,19 @@ def carry_chain(chain, live_spot, *, age_sec: float, now):
             # away from Schwab's own values. Its greeks stand; the price moves.
             continue
         t0 = t1 + age / _SECONDS_PER_YEAR
+        new_strikes = {}
+        for strike, contracts in strikes.items():
+            if not isinstance(contracts, list):
+                new_strikes[strike] = contracts
+                continue
+            moved = []
+            for c in contracts:
+                if isinstance(c, dict):
+                    c, hit = _moved(c, kind, spot0, live_spot, t0, t1)
+                    capped += hit
+                moved.append(c)
+            new_strikes[strike] = moved
         new_map = dict(exp_map)
-        new_map[exp_key] = {
-            strike: ([_moved(c, kind, spot0, live_spot, t0, t1)
-                      if isinstance(c, dict) else c for c in contracts]
-                     if isinstance(contracts, list) else contracts)
-            for strike, contracts in strikes.items()}
+        new_map[exp_key] = new_strikes
         out[map_key] = new_map
-    return out
+    return out, capped
