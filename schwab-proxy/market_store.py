@@ -17,6 +17,10 @@ import threading
 import zlib
 from collections import OrderedDict
 from dataclasses import dataclass
+from datetime import datetime, time as _time, timedelta
+from zoneinfo import ZoneInfo
+
+CT = ZoneInfo("America/Chicago")
 
 
 class UpstreamError(Exception):
@@ -296,3 +300,109 @@ class QuoteStore:
 
     def get(self, symbol: str, *, max_age: float, now: float):
         return self.split([symbol], max_age=max_age, now=now)[0].get(symbol)
+
+
+#############################################
+# DAILY BARS
+#############################################
+
+def bar_key(params) -> tuple:
+    """``(symbol, periodType, period, frequencyType, frequency)`` — the exact
+    range asked for. A shorter range is never cut from a longer one."""
+    return (str(params.get("symbol")), str(params.get("periodType")),
+            int(params.get("period")), str(params.get("frequencyType")),
+            int(params.get("frequency")))
+
+
+def bar_epoch(now_ct, settle_min: float, cal) -> tuple:
+    """``(session date, "pre" | "live" | "settled")``.
+
+    ``cal`` is ``shared.market_calendar`` (or a stand-in with the same four
+    calls). An entry is served only inside the period it was fetched in, so
+    each boundary refetches once — which is also what picks up a split
+    adjustment to the history."""
+    d = now_ct.date()
+    if cal.is_trading_day(d):
+        settled_at = cal.regular_close_on(d) + timedelta(minutes=float(settle_min))
+        if now_ct >= settled_at:
+            return (d.isoformat(), "settled")
+        if cal.regular_session_has_opened(now_ct):
+            return (d.isoformat(), "live")
+        return (d.isoformat(), "pre")
+    return (cal.prev_trading_day(d).isoformat(), "settled")
+
+
+def _candle_date(candle):
+    try:
+        return datetime.fromtimestamp(candle["datetime"] / 1000, CT).date()
+    except Exception:  # noqa: BLE001 — a malformed candle has no date.
+        return None
+
+
+def compose_today(payload, quote, today):
+    """``payload`` with the bar for ``today`` built from ``quote``, or None when
+    the quote cannot supply one. Returns a new dict; ``payload`` is untouched."""
+    block = quote.get("quote") if isinstance(quote, dict) else None
+    if not isinstance(block, dict) or not isinstance(payload, dict):
+        return None
+    o, h, lo, last = (block.get(k) for k in
+                      ("openPrice", "highPrice", "lowPrice", "lastPrice"))
+    if not all(_real_number(v) and v > 0 for v in (o, h, lo, last)):
+        return None
+    volume = block.get("totalVolume")
+    bar = {"open": o, "high": h, "low": lo, "close": last,
+           "volume": volume if _real_number(volume) else 0,
+           # Schwab stamps a daily candle at midnight Central.
+           "datetime": int(datetime.combine(today, _time(0), tzinfo=CT)
+                           .timestamp() * 1000)}
+    candles = list(payload.get("candles") or [])
+    if candles and _candle_date(candles[-1]) == today:
+        candles[-1] = bar
+    else:
+        candles.append(bar)
+    return {**payload, "candles": candles}
+
+
+_BAR_TOLERANCE = 0.005   # the quote may be up to two minutes older than the bar
+
+
+def compare_today_bar(upstream, quote, today) -> str:
+    """Shadow verdict on whether the quote-built bar agrees with Schwab's:
+    ``match`` / ``mismatch`` / ``no_today`` (Schwab sent no bar for today) /
+    ``no_quote``."""
+    composed = compose_today(upstream, quote, today)
+    if composed is None:
+        return "no_quote"
+    candles = (upstream or {}).get("candles") or []
+    if not candles or _candle_date(candles[-1]) != today:
+        return "no_today"
+    theirs, ours = candles[-1], composed["candles"][-1]
+    for field in ("close", "high", "low"):
+        a, b = theirs.get(field), ours[field]
+        if not _real_number(a) or abs(a - b) > _BAR_TOLERANCE * abs(b):
+            return "mismatch"
+    return "match"
+
+
+class BarStore:
+    """Daily price series, one per (symbol, range), valid for one bar period."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._entries: dict = {}
+
+    def put(self, key, payload, *, now: float, epoch) -> None:
+        if not isinstance(payload, dict) or not payload.get("candles"):
+            return          # an empty series is refetched, never re-served
+        blob = zlib.compress(
+            json.dumps(payload, separators=(",", ":")).encode(), 1)
+        with self._lock:
+            self._entries[key] = (blob, now, epoch)
+
+    def get(self, key, *, epoch):
+        """``(JSON bytes, fetched_at)`` for this period, or None."""
+        with self._lock:
+            got = self._entries.get(key)
+        if got is None or got[2] != epoch:
+            return None
+        return zlib.decompress(got[0]), got[1]
