@@ -123,3 +123,68 @@ def test_short_resting_on_put_wall_lowers_heat():
         _mark(current_underlying=501.0, current_short_delta=0.28),
         gex={"flip": 495.0, "put_wall": 480.0}, regime=None)  # wall far away
     assert near["heat"] < off["heat"]
+
+
+# ── Regime modifier ──────────────────────────────────────────────────────────
+# Nothing exercised this branch: ``compute._rescue_regime`` returned None on
+# every call, so no test ever passed a regime. The bridge's ``trend_regime.state``
+# is the five-state vocabulary, and two of its states name the side they are NOT:
+# ``lack_of_bearishness`` is a resilient tape (lean bullish), ``lack_of_bullishness``
+# is exhaustion at highs (lean bearish). A substring test for "bear"/"bull" reads
+# each as its opposite and heats the strategy the tape is leaning TOWARD.
+
+
+def _at_risk_mark():
+    return _mark(current_underlying=501.0, current_short_delta=0.28)
+
+
+def _heat(strategy, trend_state):
+    pos = (_pos() if strategy == "PCS"
+           else _pos(strategy="CCS", short_strike=500.0, long_strike=505.0))
+    mark = (_at_risk_mark() if strategy == "PCS"
+            else _mark(current_underlying=499.0, current_short_delta=0.28))
+    regime = None if trend_state is None else {"trend_state": trend_state,
+                                               "trend_confidence": 0.8}
+    return rescue.assess_position_risk(pos, mark, gex=None, regime=regime)["heat"]
+
+
+def test_a_bearish_tape_heats_a_put_spread_and_not_a_call_spread():
+    assert _heat("PCS", "bearish") == _heat("PCS", None) + 6
+    assert _heat("CCS", "bearish") == _heat("CCS", None)
+
+
+def test_a_bullish_tape_heats_a_call_spread_and_not_a_put_spread():
+    assert _heat("CCS", "bullish") == _heat("CCS", None) + 6
+    assert _heat("PCS", "bullish") == _heat("PCS", None)
+
+
+def test_lack_of_bearishness_is_not_a_bearish_tape():
+    assert _heat("PCS", "lack_of_bearishness") == _heat("PCS", None)
+
+
+def test_lack_of_bullishness_is_not_a_bullish_tape():
+    assert _heat("CCS", "lack_of_bullishness") == _heat("CCS", None)
+
+
+def test_a_neutral_tape_tilts_neither_side():
+    assert _heat("PCS", "neutral") == _heat("PCS", None)
+    assert _heat("CCS", "neutral") == _heat("CCS", None)
+
+
+def test_the_regime_never_changes_the_state():
+    regime = {"trend_state": "bearish", "trend_confidence": 0.9}
+    with_regime = rescue.assess_position_risk(_pos(), _at_risk_mark(),
+                                              gex=None, regime=regime)
+    without = rescue.assess_position_risk(_pos(), _at_risk_mark(),
+                                          gex=None, regime=None)
+    assert with_regime["state"] == without["state"]
+
+
+def test_the_tilting_states_are_the_classifiers_hard_votes():
+    """The tilt keys on exact state names, so a classifier vocabulary change must
+    fail here rather than silently switch the modifier off."""
+    import regime_filter
+
+    votes = regime_filter._TREND_STATE_VOTE
+    assert rescue.REGIME_AGAINST_PUTS == {s for s, v in votes.items() if v == "bear"}
+    assert rescue.REGIME_AGAINST_CALLS == {s for s, v in votes.items() if v == "bull"}

@@ -47,6 +47,22 @@ def _no_live_claude(monkeypatch):
     monkeypatch.setattr(claude_cli, "_default_run", _no_real_cli)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_sentiment_bridge(monkeypatch):
+    """``regime_filter`` reads ``shared/sentiment_bridge.json`` — gitignored
+    machine state: absent in a fresh worktree, days old in a dev checkout, live
+    on the prod box. ``compute._rescue_regime`` reaches it from every rescue
+    advisory, so without this an advisory's heat and context would depend on the
+    machine the suite ran on. "No bridge" is the default; a test that wants a
+    regime patches ``regime_filter.evaluate_regime`` or passes its own dict.
+
+    On ``_load_bridge``, not ``BRIDGE_PATH``: ``evaluate_regime(path=BRIDGE_PATH)``
+    bound its default at def time, so patching the constant changes nothing.
+    """
+    import regime_filter
+    monkeypatch.setattr(regime_filter, "_load_bridge", lambda path=None: None)
+
+
 # Wed 2026-08-12, 10:00 CT: a plain trading day inside the 08:00–15:20 CT
 # collection window and BEFORE the 2026-08-17 extended-hours activation date.
 _RTH_NOW = _dt.datetime(2026, 8, 12, 10, 0, tzinfo=mc.CT)

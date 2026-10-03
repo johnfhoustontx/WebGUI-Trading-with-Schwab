@@ -23,6 +23,15 @@ RESCUE_THRESHOLDS = _trade_mgmt.rescue_thresholds()
 
 _STATES = ["ok", "watch", "tested", "critical"]
 
+# The bridge ``trend_regime.state`` values that put the tape AGAINST each side —
+# the five-state classifier's two confirmed directions, i.e. the hard votes in
+# ``regime_filter._TREND_STATE_VOTE`` (a test pins the two together). Its other
+# two directional states name the side they are NOT: ``lack_of_bearishness`` is a
+# resilient tape and ``lack_of_bullishness`` is exhaustion at highs, so matching
+# on "bear" / "bull" read each as its opposite. The soft leans add no heat.
+REGIME_AGAINST_PUTS = frozenset({"bearish"})
+REGIME_AGAINST_CALLS = frozenset({"bullish"})
+
 
 def _max(*states: str) -> str:
     return _STATES[max(_STATES.index(s) for s in states)]
@@ -131,12 +140,13 @@ def assess_position_risk(position, mark, gex=None, regime=None, today=None,
         if wall and short and abs(short - wall) / short <= 0.005:
             heat -= 5            # resting on a wall -> bounce more likely
 
-    # 6. regime modifier — strategy fighting the tape
+    # 6. regime modifier — strategy fighting the tape. Exact state names, never a
+    # substring: see REGIME_AGAINST_PUTS.
     if regime:
         ts = (regime.get("trend_state") or "").lower()
-        if put_side and "bear" in ts:
+        if put_side and ts in REGIME_AGAINST_PUTS:
             heat += 6
-        if (not put_side) and "bull" in ts:
+        if (not put_side) and ts in REGIME_AGAINST_CALLS:
             heat += 6
 
     # 7. earnings modifier — a report lands inside this position's life (B7).
