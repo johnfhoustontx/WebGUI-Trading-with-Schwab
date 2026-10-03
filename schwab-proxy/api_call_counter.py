@@ -24,6 +24,12 @@ import threading
 DB_PATH = pathlib.Path(__file__).resolve().parent / "data" / "api_call_counts.db"
 _SCHEMA = ("CREATE TABLE IF NOT EXISTS api_calls ("
            "day TEXT PRIMARY KEY, n INTEGER NOT NULL)")
+_DETAIL_SCHEMA = ("CREATE TABLE IF NOT EXISTS api_calls_detail ("
+                  "day TEXT NOT NULL, endpoint TEXT NOT NULL, caller TEXT NOT NULL, "
+                  "outcome TEXT NOT NULL, n INTEGER NOT NULL, "
+                  "PRIMARY KEY (day, endpoint, caller, outcome))")
+# Outcomes that answered a request WITHOUT a call to Schwab.
+LOCAL_OUTCOMES = ("hit", "subset", "coalesced", "composed")
 
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
@@ -51,6 +57,7 @@ def connect(path=None) -> sqlite3.Connection:
         except Exception:  # noqa: BLE001 — pragmas are best-effort tuning.
             pass
     conn.execute(_SCHEMA)
+    conn.execute(_DETAIL_SCHEMA)
     conn.commit()
     return conn
 
@@ -99,3 +106,47 @@ def stats(today: _dt.date | None = None) -> dict:
                 "since": min(rows) if rows else None}
     except Exception:  # noqa: BLE001
         return {"today": 0, "last_7_days": 0, "last_30_days": 0, "since": None}
+
+
+def record_detail(endpoint: str, caller: str, outcome: str, n: int = 1,
+                  day: str | None = None) -> None:
+    """Add ``n`` to one (day, endpoint, caller, outcome) row. Never raises.
+
+    ``outcome`` is ``upstream`` for a call sent to Schwab, one of
+    ``LOCAL_OUTCOMES`` for a request answered locally, ``partial`` for a quote
+    request that fetched only its stale symbols, or a ``shadow_*`` name."""
+    try:
+        d = day or _dt.date.today().isoformat()
+        with _lock:
+            c = _get_conn()
+            c.execute(
+                "INSERT INTO api_calls_detail(day, endpoint, caller, outcome, n) "
+                "VALUES(?, ?, ?, ?, ?) "
+                "ON CONFLICT(day, endpoint, caller, outcome) "
+                "DO UPDATE SET n = n + excluded.n",
+                (d, str(endpoint)[:40], str(caller)[:40], str(outcome)[:40], int(n)))
+            c.commit()
+    except Exception:  # noqa: BLE001 — counting must never break a request.
+        pass
+
+
+def detail_summary(day: str | None = None) -> dict:
+    """One day's breakdown: ``{"served_locally", "by_outcome", "rows"}``.
+    Never raises — an empty summary on any failure."""
+    try:
+        d = day or _dt.date.today().isoformat()
+        with _lock:
+            rows = _get_conn().execute(
+                "SELECT endpoint, caller, outcome, n FROM api_calls_detail "
+                "WHERE day = ? ORDER BY n DESC", (d,)).fetchall()
+        by_outcome: dict = {}
+        for _e, _c, outcome, n in rows:
+            by_outcome[outcome] = by_outcome.get(outcome, 0) + int(n)
+        return {
+            "served_locally": sum(by_outcome.get(o, 0) for o in LOCAL_OUTCOMES),
+            "by_outcome": by_outcome,
+            "rows": [{"endpoint": e, "caller": c, "outcome": o, "n": int(n)}
+                     for e, c, o, n in rows],
+        }
+    except Exception:  # noqa: BLE001
+        return {"served_locally": 0, "by_outcome": {}, "rows": []}

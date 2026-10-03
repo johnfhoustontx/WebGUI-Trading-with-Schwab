@@ -58,3 +58,38 @@ def test_file_connect_uses_wal_and_normal_sync(tmp_path):
     conn = acc.connect(tmp_path / "counts.db")
     assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
     assert conn.execute("PRAGMA synchronous").fetchone()[0] == 1   # NORMAL
+
+
+def test_detail_counts_by_endpoint_caller_and_outcome():
+    acc.record_detail("chains", "options_svc", "upstream", day="2026-10-05")
+    acc.record_detail("chains", "options_svc", "upstream", day="2026-10-05")
+    acc.record_detail("chains", "options_svc", "subset", day="2026-10-05")
+    acc.record_detail("quotes", "market_svc", "hit", n=4, day="2026-10-05")
+    s = acc.detail_summary(day="2026-10-05")
+    assert s["by_outcome"] == {"upstream": 2, "subset": 1, "hit": 4}
+    assert s["served_locally"] == 5                      # subset + hit
+    assert {"endpoint": "chains", "caller": "options_svc",
+            "outcome": "upstream", "n": 2} in s["rows"]
+
+
+def test_shadow_outcomes_are_not_counted_as_served_locally():
+    acc.record_detail("chains", "x", "shadow_subset_match", day="2026-10-05")
+    acc.record_detail("chains", "x", "partial", day="2026-10-05")
+    assert acc.detail_summary(day="2026-10-05")["served_locally"] == 0
+
+
+def test_detail_is_per_day():
+    acc.record_detail("chains", "x", "hit", day="2026-10-04")
+    assert acc.detail_summary(day="2026-10-05") == {
+        "served_locally": 0, "by_outcome": {}, "rows": []}
+
+
+def test_detail_never_raises(monkeypatch):
+    monkeypatch.setattr(acc, "_get_conn", lambda: (_ for _ in ()).throw(RuntimeError))
+    acc.record_detail("chains", "x", "hit")              # must not raise
+    assert acc.detail_summary()["served_locally"] == 0
+
+
+def test_long_caller_names_are_cut():
+    acc.record_detail("chains", "c" * 500, "hit", day="2026-10-05")
+    assert len(acc.detail_summary(day="2026-10-05")["rows"][0]["caller"]) == 40
