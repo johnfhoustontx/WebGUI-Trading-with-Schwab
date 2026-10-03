@@ -483,3 +483,23 @@ def test_toggle_off_then_the_switch_reader_agrees(tmp_path, monkeypatch):
     monkeypatch.setattr(switches, "_load", switches._make_loader(f)[0])
     assert switches.enabled("flow_uoa", "telegram") is False
     assert switches.enabled("flow_uoa", "discord") is True
+
+
+# ── API usage card: requests the proxy answered from its local store ────────
+
+def test_api_stats_rows_show_requests_answered_locally():
+    rows = S.api_stats_rows({"today": 70000, "last_7_days": 1, "last_30_days": 1,
+                             "store": {"served_locally": 14250}})
+    assert ("Answered locally today", "14,250") in rows
+
+
+def test_api_stats_rows_omit_the_local_row_for_an_older_proxy():
+    rows = S.api_stats_rows({"today": 1, "last_7_days": 1, "last_30_days": 1})
+    assert [label for label, _ in rows] == ["Today", "Last 7 days", "Last 30 days"]
+
+
+def test_api_stats_rows_survive_a_malformed_store_block():
+    for bad in (5, {"served_locally": "many"}, {"served_locally": True}, {}):
+        rows = S.api_stats_rows({"today": 1, "last_7_days": 1,
+                                 "last_30_days": 1, "store": bad})
+        assert len(rows) == 3

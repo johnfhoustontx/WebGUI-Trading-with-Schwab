@@ -88,8 +88,16 @@ def api_stats_rows(stats):
             return f"{int(stats.get(k, 0)):,}"
         except (TypeError, ValueError):
             return "—"
-    return [("Today", _fmt("today")), ("Last 7 days", _fmt("last_7_days")),
+    rows = [("Today", _fmt("today")), ("Last 7 days", _fmt("last_7_days")),
             ("Last 30 days", _fmt("last_30_days"))]
+    # Requests the proxy answered from data it already held, so they are NOT in
+    # the counts above. Absent from an older proxy: no row rather than a zero
+    # nobody measured.
+    store = stats.get("store")
+    local = store.get("served_locally") if isinstance(store, dict) else None
+    if isinstance(local, int) and not isinstance(local, bool):
+        rows.append(("Answered locally today", f"{local:,}"))
+    return rows
 
 
 def public_scan_rows(status):
@@ -455,13 +463,17 @@ def _render_general():
                      "forward.").classes(f"text-sm {theme.MUTED}")
 
             ui.label("Schwab").classes(f"text-xs font-semibold {theme.LABEL} mt-1")
+
+            def _stat_cell(label, val):
+                with ui.column().classes("gap-0"):
+                    ui.label(label).classes(theme.EYEBROW)
+                    return ui.label(val).classes(
+                        f"text-[20px] font-semibold {theme.LABEL}")
+
             stat_lbls = {}
-            with ui.row().classes("gap-6"):
+            with ui.row().classes("gap-6") as schwab_row:
                 for label, val in api_stats_rows(None):
-                    with ui.column().classes("gap-0"):
-                        ui.label(label).classes(theme.EYEBROW)
-                        stat_lbls[label] = ui.label(val).classes(
-                            f"text-[20px] font-semibold {theme.LABEL}")
+                    stat_lbls[label] = _stat_cell(label, val)
             api_since = ui.label("").classes(f"text-xs {theme.MUTED}")
 
             ui.label("Claude (Anthropic)").classes(
@@ -498,8 +510,18 @@ def _render_general():
             @guard_async
             async def _load_api_stats():
                 stats = await run.io_bound(_proxy.api_call_stats)
-                for label, val in api_stats_rows(stats):
+                rows = api_stats_rows(stats)
+                for label, val in rows:
+                    if label not in stat_lbls:
+                        # "Answered locally today" exists only once the proxy
+                        # reports it, so its cell is built on first sight.
+                        with schwab_row:
+                            stat_lbls[label] = _stat_cell(label, val)
                     stat_lbls[label].text = val
+                # A cell this load did not report (the proxy went away) must
+                # not keep showing its last number.
+                for label in stat_lbls.keys() - {label for label, _ in rows}:
+                    stat_lbls[label].text = "—"
                 api_since.text = (f"Counting since {stats['since']}."
                                   if stats and stats.get("since")
                                   else "No counts yet — restart the proxy if it "
