@@ -4,7 +4,23 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-02 (**Flow Alerts remembers the alert types you switch off.**)
+**Last updated:** 2026-10-02 (**EOD Report archive is a Month dropdown.**)
+
+- The EOD page listed every saved report as one row of date links, which grew by
+  a link each trading day. It is now an **Archive** dropdown of months (newest
+  first, each with its report count); the chosen month's days sit in an even grid
+  below it, each with **Summary** and **Detail** links opening the archived files
+  in a new tab. The month survives a Generate's repaint while it still exists.
+  Pure builders: `eod.archive_months` / `month_options` / `pick_month` /
+  `day_label`.
+- The per-day **Detail** link matters: an archived summary's own "detail" link is
+  the relative `detail.html`, which from `/eod/file?...` resolves to
+  `/eod/detail.html` — not a route — so before this the archive offered no working
+  way to a past day's detail file.
+
+---
+
+**Prior —** 2026-10-02 (**Flow Alerts remembers the alert types you switch off.**)
 
 - **The bug.** The "Alert type" filter lived only in page memory, so a reload or a
   new tab put every type back on. It is now stored in `app_settings` as

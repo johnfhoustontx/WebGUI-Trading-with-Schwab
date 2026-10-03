@@ -1437,6 +1437,8 @@ An end-of-day summary of the day's options activity and paper trading.
   stopped when you press Generate, every cache reads back empty — the report
   would be a full-looking document of "No captured signals." notes — so nothing
   is written and it says so. Start the stack and press it again.
+- **Archive** — pick a month to list that month's saved reports, newest first;
+  each day opens its **Summary** or **Detail** in a new tab.
 """,
     "/x": """
 **Post to X — the simple version**

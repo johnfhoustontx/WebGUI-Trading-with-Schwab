@@ -704,6 +704,50 @@ def archive_dates(root) -> list[str]:
     return sorted(dates, reverse=True)
 
 
+def archive_months(dates) -> list[dict]:
+    """Archive dates grouped by calendar month, newest month first, each
+    month's dates newest first: ``[{"key": "2026-10", "label": "October
+    2026", "dates": [...]}]``. A string that is not a ``YYYY-MM-DD`` date is
+    left out. PURE."""
+    months: dict[str, list[str]] = {}
+    for d in dates or ():
+        if not isinstance(d, str) or not _DATE_RE.match(d):
+            continue
+        months.setdefault(d[:7], []).append(d)
+    out = []
+    for key in sorted(months, reverse=True):
+        y, m = (int(x) for x in key.split("-"))
+        out.append({"key": key,
+                    "label": dt.date(y, m, 1).strftime("%B %Y"),
+                    "dates": sorted(months[key], reverse=True)})
+    return out
+
+
+def month_options(months) -> dict[str, str]:
+    """The Month dropdown's ``{key: label}``, each label carrying its report
+    count ("October 2026 · 2 reports"). PURE."""
+    out = {}
+    for m in months or ():
+        n = len(m["dates"])
+        out[m["key"]] = f"{m['label']} · {n} report{'' if n == 1 else 's'}"
+    return out
+
+
+def pick_month(months, current) -> str | None:
+    """The month to show: ``current`` while it still exists, else the newest.
+    PURE."""
+    keys = [m["key"] for m in months or ()]
+    if current in keys:
+        return current
+    return keys[0] if keys else None
+
+
+def day_label(date: str) -> str:
+    """``2026-10-02`` → ``Fri 2 Oct`` for an archive entry. PURE."""
+    d = dt.date.fromisoformat(date)
+    return f"{d.strftime('%a')} {d.day} {d.strftime('%b')}"
+
+
 def _atomic_write_text(path: Path, text: str) -> None:
     """Write ``text`` to ``path`` atomically.
 
@@ -820,6 +864,13 @@ GENERATING_TEXT = "Generating the report…"
 READING_TEXT = "Reading the caches…"
 
 
+# One saved report in the archive list: its day, then Summary and Detail links.
+ARCHIVE_GRID = "w-full grid gap-2 grid-cols-[repeat(auto-fill,minmax(190px,1fr))]"
+ARCHIVE_DAY = ("items-center justify-between gap-3 no-wrap rounded-[8px] border border-white/10 "
+               "px-3 py-1.5 text-xs")
+ARCHIVE_LINK = "text-[#8fb4ff] no-underline hover:underline"
+
+
 def render() -> None:
     """Summary page: one header line, then a region holding the archive list
     and the in-app summary fragment.
@@ -833,6 +884,7 @@ def render() -> None:
     is rightmost — which also takes them OUT of the block a repaint replaces.
     """
     ui.add_css(EOD_CSS)
+    archive = {"month": None}     # the Month picked, kept across repaints
 
     def _open_file(which: str) -> None:
         ui.navigate.to(f"/eod/file?date={_ct_today()}&which={which}", new_tab=True)
@@ -865,14 +917,44 @@ def render() -> None:
         after a Generate is the document that was archived."""
         region.content.clear()
         with region.content:
-            dates = archive_dates(ARCHIVE_ROOT)
-            if dates:
-                with ui.row().classes("items-center gap-2 flex-wrap"):
-                    ui.label("Archive").classes(theme.EYEBROW)
-                    for d in dates:
-                        ui.link(d, f"/eod/file?date={d}&which=summary") \
-                            .props("target=_blank")
+            _paint_archive(archive_months(archive_dates(ARCHIVE_ROOT)))
             ui.html(summary_fragment(snap, "/eod/detail"))
+
+    def _paint_archive(months) -> None:
+        """The saved reports, one month at a time: a Month dropdown, then that
+        month's reports, each opening its summary or detail file in a new tab.
+        It replaced one row of every date ever saved, which grew by a link a
+        trading day and had become a wall. The month picked survives a
+        Generate's repaint while it still exists."""
+        if not months:
+            return
+        archive["month"] = pick_month(months, archive["month"])
+        by_key = {m["key"]: m for m in months}
+        with ui.column().classes(f"{theme.CARD} w-full gap-3"):
+            sel = kit.select_field("Archive", month_options(months),
+                                   value=archive["month"], width="w-64")
+            days = ui.element("div").classes(ARCHIVE_GRID)
+
+        def _paint_days() -> None:
+            days.clear()
+            with days:
+                for d in by_key[archive["month"]]["dates"]:
+                    with ui.row().classes(ARCHIVE_DAY):
+                        ui.label(day_label(d)).classes(f"font-semibold {theme.LABEL}")
+                        with ui.row().classes("gap-3 no-wrap"):
+                            for which in ("summary", "detail"):
+                                ui.link(which.capitalize(),
+                                        f"/eod/file?date={d}&which={which}",
+                                        new_tab=True).classes(ARCHIVE_LINK)
+
+        @guard
+        def _on_month(e) -> None:
+            if e.value in by_key:
+                archive["month"] = e.value
+                _paint_days()
+
+        sel.on_value_change(_on_month)
+        _paint_days()
 
     @guard_async
     async def _repaint() -> None:

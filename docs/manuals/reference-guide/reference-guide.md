@@ -4030,7 +4030,8 @@ collapsible sections that work in the exported file as well as in the app.
 `detail.html` under `webgui/data/eod/<date>/`. It is **confirm-gated** — the dialog
 names the date it replaces — and it **refuses a cold cache**: if every options cache
 reads back empty it writes nothing and says so, rather than replacing a real report
-with a complete-looking empty one. The **Archive** list reopens any past day.
+with a complete-looking empty one. The **Archive** dropdown reopens any past day: pick a month and its saved reports
+appear below, each with **Summary** and **Detail** links.
 
 **It also runs by itself at 15:15 CT on every trading day** — the same snapshot, from the
 same builders, fifteen minutes after the cash close and after the day's expiries have

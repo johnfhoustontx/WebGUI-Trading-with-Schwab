@@ -2461,7 +2461,10 @@ recover a day the machine was off for. Weekends and market holidays are skipped.
   written, and an amber message says so. Start the stack and press it again.
 - **Open summary file** / **Open detail file** open those archived files in a new
   browser tab.
-- The **Archive** list reopens any past date.
+- The **Archive** dropdown reopens any past report, one month at a time: pick a
+  month (each shows how many reports it holds, newest month first) and that
+  month's days appear below it, each with a **Summary** and a **Detail** link
+  that open in a new tab.
 
 > Realized P&L is bucketed by **exit** date, while opened trades and credit
 > collected are bucketed by **entry** date. They answer different questions and will

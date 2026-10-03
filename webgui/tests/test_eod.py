@@ -116,6 +116,33 @@ def test_archive_dates_missing_dir_returns_empty(tmp_path):
     assert eod.archive_dates(tmp_path / "nope") == []
 
 
+def test_archive_months_group_newest_first():
+    dates = ["2026-09-30", "2026-10-02", "2026-08-14", "2026-10-01", "junk", None]
+    months = eod.archive_months(dates)
+    assert [m["key"] for m in months] == ["2026-10", "2026-09", "2026-08"]
+    assert months[0]["label"] == "October 2026"
+    assert months[0]["dates"] == ["2026-10-02", "2026-10-01"]
+    assert eod.archive_months([]) == []
+
+
+def test_month_options_count_reports():
+    months = eod.archive_months(["2026-10-02", "2026-10-01", "2026-09-30"])
+    assert eod.month_options(months) == {"2026-10": "October 2026 · 2 reports",
+                                         "2026-09": "September 2026 · 1 report"}
+
+
+def test_pick_month_keeps_a_choice_that_still_exists():
+    months = eod.archive_months(["2026-10-02", "2026-09-30"])
+    assert eod.pick_month(months, "2026-09") == "2026-09"
+    assert eod.pick_month(months, "2026-05") == "2026-10"     # gone -> newest
+    assert eod.pick_month(months, None) == "2026-10"
+    assert eod.pick_month([], "2026-10") is None
+
+
+def test_day_label():
+    assert eod.day_label("2026-10-02") == "Fri 2 Oct"
+
+
 def test_write_archive_creates_both_files(tmp_path):
     paths = eod.write_archive(tmp_path, "2026-06-18", "<sum/>", "<det/>")
     assert paths["summary"].read_text(encoding="utf-8") == "<sum/>"
