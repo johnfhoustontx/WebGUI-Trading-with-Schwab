@@ -63,6 +63,35 @@ def _apply_secret(session: "requests.Session") -> None:
     if secret:
         session.headers["X-Proxy-Secret"] = secret
 
+
+def _caller_name() -> str:
+    """Who this process is, for the proxy's per-caller counts: the env override,
+    else the service folder for ``services/<name>/app.py``, else the script
+    name. Never raises."""
+    env = os.environ.get("TRADING_CALLER")
+    if env and env.strip():
+        return env.strip()[:40]
+    try:
+        entry = pathlib.Path(sys.argv[0])
+        name = entry.parent.name if entry.name == "app.py" else entry.stem
+        return (name or "unknown")[:40]
+    except Exception:  # noqa: BLE001 — identity is a label, never a failure.
+        return "unknown"
+
+
+def _apply_identity(session: "requests.Session") -> None:
+    """Attach the X-Caller header the proxy counts requests by."""
+    session.headers["X-Caller"] = _caller_name()
+
+
+def _store_age(headers):
+    """Seconds since the answer left Schwab, from ``X-Store-Age``; None when the
+    proxy did not say."""
+    try:
+        return float(headers.get("X-Store-Age"))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
 #############################################
 # HELPERS
 #############################################
@@ -78,6 +107,10 @@ class FakeResponse:
     status_code: int
     _data: Any = None
     _text: str = ""
+    # Set by the proxy's local store: "hit" / "subset" / "miss" / ... and how
+    # many seconds ago the data left Schwab. None from an older proxy.
+    store_kind: Optional[str] = None
+    store_age: Optional[float] = None
 
     def json(self):
         return self._data
@@ -118,12 +151,16 @@ class SchwabPyProxyClient:
         self.base = base_url
         self.session = requests.Session()
         _apply_secret(self.session)
+        _apply_identity(self.session)
 
     def _get(self, path: str, params: Optional[Dict] = None) -> FakeResponse:
         try:
             resp = self.session.get(f"{self.base}{path}", params=params, timeout=30)
             if resp.status_code == 200:
-                return FakeResponse(status_code=200, _data=resp.json())
+                headers = getattr(resp, "headers", None) or {}
+                return FakeResponse(status_code=200, _data=resp.json(),
+                                    store_kind=headers.get("X-Store"),
+                                    store_age=_store_age(headers))
             else:
                 return FakeResponse(
                     status_code=resp.status_code,
@@ -156,6 +193,7 @@ class SchwabPyProxyClient:
         contract_type=None,
         from_date=None,
         to_date=None,
+        max_age=None,
         **kwargs,
     ) -> FakeResponse:
         """Get option chain for a symbol."""
@@ -175,6 +213,8 @@ class SchwabPyProxyClient:
                 if hasattr(to_date, "isoformat")
                 else str(to_date)
             )
+        if max_age is not None:
+            params["maxAge"] = max_age
         return self._get("/chains", params=params)
 
     def get_price_history_every_day(self, symbol: str) -> FakeResponse:
@@ -228,6 +268,7 @@ class SchwabProxyClient:
         self.base = base_url
         self.session = requests.Session()
         _apply_secret(self.session)
+        _apply_identity(self.session)
 
     def _proxy_get(self, path: str, params: Optional[Dict] = None) -> Optional[Dict]:
         try:

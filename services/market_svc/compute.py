@@ -22,6 +22,8 @@ _PCR_BASELINE = 1.0
 # Pooled HTTP session (keep-alive) — matches the house perf pattern
 # (schwab_proxy.trader_request reuses a pooled session).
 _SESSION = requests.Session()
+# Who is asking, for the proxy's per-caller counts.
+_SESSION.headers["X-Caller"] = "market_svc"
 
 
 def fetch_raw_quotes(syms, *, timeout=8.0):
@@ -33,8 +35,12 @@ def fetch_raw_quotes(syms, *, timeout=8.0):
     if not syms:
         return {}
     try:
+        # maxAge=1: this poll runs every three seconds, so with the proxy's
+        # default limit it would re-read its own previous answer. It still
+        # reuses a quote some other caller fetched within the last second.
         resp = _SESSION.get(f"{PROXY_URL}/quotes",
-                            params={"symbols": ",".join(syms)}, timeout=timeout)
+                            params={"symbols": ",".join(syms), "maxAge": 1},
+                            timeout=timeout)
         if resp.status_code != 200:
             return {}
         return resp.json() or {}

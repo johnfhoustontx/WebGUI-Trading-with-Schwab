@@ -326,3 +326,41 @@ def test_ranked_frames_are_exactly_the_five_requested():
                                          "Thematic / Industry ETF", "Countries")
     # every ranked category is a real frame (a typo would silently rank nothing)
     assert set(symbols.SORTED_CATEGORIES) <= set(symbols.CATEGORY_ORDER)
+
+
+# ── fetch_raw_quotes: what the 3-second poll sends the proxy ────────────────
+
+class _QuoteResp:
+    status_code = 200
+
+    def json(self):
+        return {"SPY": {"quote": {"lastPrice": 500.0}}}
+
+
+def _record_get(monkeypatch):
+    sent = []
+
+    def fake_get(url, **kwargs):
+        sent.append((url, kwargs))
+        return _QuoteResp()
+    monkeypatch.setattr(compute._SESSION, "get", fake_get)
+    return sent
+
+
+def test_fetch_raw_quotes_asks_for_a_quote_at_most_one_second_old(monkeypatch):
+    # The poll runs every three seconds; with the proxy's default age limit it
+    # would be handed its own previous answer once the local store is on.
+    sent = _record_get(monkeypatch)
+    assert compute.fetch_raw_quotes(["SPY", "$VIX"]) == {"SPY": {"quote": {"lastPrice": 500.0}}}
+    url, kwargs = sent[0]
+    assert url == f"{compute.PROXY_URL}/quotes"
+    assert kwargs["params"] == {"symbols": "SPY,$VIX", "maxAge": 1}
+
+
+def test_fetch_raw_quotes_names_itself_to_the_proxy(monkeypatch):
+    # The header that reaches the proxy: the session's own, overlaid by any
+    # passed on the call.
+    sent = _record_get(monkeypatch)
+    compute.fetch_raw_quotes(["SPY"])
+    headers = {**compute._SESSION.headers, **(sent[0][1].get("headers") or {})}
+    assert headers["X-Caller"] == "market_svc"
