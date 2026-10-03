@@ -17,7 +17,7 @@ import threading
 import zlib
 from collections import OrderedDict
 from dataclasses import dataclass
-from datetime import datetime, time as _time, timedelta
+from datetime import date, datetime, time as _time, timedelta
 from zoneinfo import ZoneInfo
 
 CT = ZoneInfo("America/Chicago")
@@ -98,10 +98,20 @@ class ChainKey:
                 and bool(self.from_date) and bool(self.to_date))
 
     def covers(self, other: "ChainKey") -> bool:
-        # ISO dates compare correctly as strings.
+        # ISO dates compare correctly as strings. A reversed window is covered
+        # by nothing: it is never served from a cut.
         return (self.plain and other.plain and self.symbol == other.symbol
+                and other.from_date <= other.to_date
                 and self.from_date <= other.from_date
                 and self.to_date >= other.to_date)
+
+    def days(self) -> int | None:
+        """The window's length in days, or None when a date does not parse."""
+        try:
+            return (date.fromisoformat(self.to_date)
+                    - date.fromisoformat(self.from_date)).days
+        except (TypeError, ValueError):
+            return None
 
 
 @dataclass(frozen=True)
@@ -129,28 +139,44 @@ def _pack_side(exp_map) -> dict:
     return out
 
 
+def _in_window(exp_key: str, lo: str, hi: str) -> bool:
+    return lo <= exp_key.split(":")[0] <= hi
+
+
+def _keeps_any(entry: _ChainEntry, lo: str, hi: str) -> bool:
+    """Whether a cut to ``[lo, hi]`` keeps at least one expiration. A cut that
+    keeps none is never served: Schwab answers an empty window with
+    ``underlyingPrice`` 0.0, which the stored header cannot reproduce."""
+    return any(_in_window(exp_key, lo, hi)
+               for frags in (entry.calls, entry.puts) for exp_key in frags)
+
+
 def _render(entry: _ChainEntry, lo=None, hi=None) -> bytes:
     """The entry as response JSON, cut to expirations in ``[lo, hi]`` when
-    given. Built by joining stored fragments; nothing is re-parsed."""
-    def side(frags):
-        parts, n = [], 0
+    given. Built by joining stored fragments once; nothing is re-parsed.
+    Uncut, the header is Schwab's own; a cut recounts ``numberOfContracts``."""
+    cutting = lo is not None
+    pieces, contracts = [b""], 0          # pieces[0] is the header, set last
+    for opener, frags in ((b'"callExpDateMap":{', entry.calls),
+                          (b',"putExpDateMap":{', entry.puts)):
+        pieces.append(opener)
+        first = True
         for exp_key, (blob, count) in frags.items():
-            day = exp_key.split(":")[0]
-            if lo is not None and not (lo <= day <= hi):
+            if cutting and not _in_window(exp_key, lo, hi):
                 continue
-            parts.append(json.dumps(exp_key).encode() + b":" + zlib.decompress(blob))
-            n += count
-        return b"{" + b",".join(parts) + b"}", n
-
-    calls, n_calls = side(entry.calls)
-    puts, n_puts = side(entry.puts)
-    header = dict(entry.header)
-    if "numberOfContracts" in header:
-        header["numberOfContracts"] = n_calls + n_puts
+            if not first:
+                pieces.append(b",")
+            first = False
+            pieces += (json.dumps(exp_key).encode(), b":", zlib.decompress(blob))
+            contracts += count
+        pieces.append(b"}")
+    pieces.append(b"}")
+    header = entry.header
+    if cutting and "numberOfContracts" in header:
+        header = {**header, "numberOfContracts": contracts}
     head = json.dumps(header, separators=(",", ":")).encode()
-    joiner = b"," if header else b""
-    return (head[:-1] + joiner + b'"callExpDateMap":' + calls
-            + b',"putExpDateMap":' + puts + b"}")
+    pieces[0] = head[:-1] + (b"," if header else b"")
+    return b"".join(pieces)
 
 
 def chain_shape(payload) -> frozenset:
@@ -172,7 +198,17 @@ def chain_shape(payload) -> frozenset:
     return frozenset(out)
 
 
+# The widest held window a near miss may refetch in place of the one asked for.
+# The refetch exists for the collector's roughly one-week window; a held 45- or
+# 120-day chain must never be fetched in place of a short one.
+WIDE_REFETCH_MAX_DAYS = 10
+
+
 class ChainStore:
+    """Fetched chains, one per request identity. The bound is a count of
+    entries, not bytes: a few hundred wide chains can reach a couple of hundred
+    megabytes."""
+
     def __init__(self, max_entries: int = 400):
         self._lock = threading.Lock()
         self._entries: "OrderedDict[ChainKey, _ChainEntry]" = OrderedDict()
@@ -231,7 +267,8 @@ class ChainStore:
             return Served("hit", now - exact.fetched_at, body=_render(exact))
         best = None
         for e in others:
-            if e.key.covers(key) and self._fresh(e, max_age, now, state):
+            if (e.key.covers(key) and self._fresh(e, max_age, now, state)
+                    and _keeps_any(e, key.from_date, key.to_date)):
                 if best is None or e.fetched_at > best.fetched_at:
                     best = e
         if best is None:
@@ -248,7 +285,10 @@ class ChainStore:
         today -> +7. Derived from what is held rather than configured, so it
         cannot drift from the window the collector actually asks for. A window
         that started on an earlier day is never reused: refetching it would ask
-        Schwab for expirations in the past."""
+        Schwab for expirations in the past. Nor is one longer than
+        ``WIDE_REFETCH_MAX_DAYS``, or one that held no expiration inside
+        ``key``'s window (its cut would be empty, so the wide fetch would be
+        followed by a second one)."""
         if not key.plain:
             return None
         start = today.isoformat()
@@ -256,16 +296,26 @@ class ChainStore:
             held = [e for k, e in self._entries.items()
                     if k.symbol == key.symbol and k != key
                     and k.from_date == start and k.covers(key)]
-        if not held:
+        usable = []
+        for e in held:
+            days = e.key.days()
+            if (days is not None and days <= WIDE_REFETCH_MAX_DAYS
+                    and _keeps_any(e, key.from_date, key.to_date)):
+                usable.append(e.key)
+        if not usable:
             return None
-        return min(held, key=lambda e: e.key.to_date).key
+        return min(usable, key=lambda k: k.to_date)
 
     def cut(self, wide: ChainKey, key: ChainKey) -> bytes | None:
         """``key``'s window out of the entry stored under ``wide``, regardless
-        of age — for the moment right after ``wide`` was fetched."""
+        of age — for the moment right after ``wide`` was fetched. None when
+        ``wide`` is not held, does not cover ``key`` (a strike-filtered or
+        reversed request never is), or holds no expiration in the window."""
+        if not wide.covers(key):
+            return None
         with self._lock:
             entry = self._entries.get(wide)
-        if entry is None:
+        if entry is None or not _keeps_any(entry, key.from_date, key.to_date):
             return None
         return _render(entry, key.from_date, key.to_date)
 

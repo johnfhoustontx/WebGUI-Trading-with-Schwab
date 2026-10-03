@@ -4,6 +4,8 @@ import json
 import pathlib
 import sys
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import market_store as ms  # noqa: E402
 
@@ -278,3 +280,157 @@ def test_a_chain_with_one_empty_side_is_stored():
     assert s.put(WIDE, puts_only, now=1002.0, state="REGULAR") is True
     body = json.loads(s.lookup(WIDE, max_age=45, now=1003.0, state="REGULAR").body)
     assert sorted(body["putExpDateMap"]) == sorted(EXPS) and body["callExpDateMap"] == {}
+
+
+# ---- review of Tasks 4-7 ---------------------------------------------------
+
+def _only(exps_calls=EXPS, exps_puts=EXPS):
+    """A chain whose two sides hold different expirations."""
+    return {**chain(), "callExpDateMap": chain(exps=exps_calls)["callExpDateMap"],
+            "putExpDateMap": chain(exps=exps_puts)["putExpDateMap"]}
+
+
+def test_a_cut_that_keeps_no_expiration_is_never_served():
+    # Schwab answers an empty window with underlyingPrice 0.0, not the real
+    # price, so an empty cut is not what Schwab would have sent: refetch.
+    s = ms.ChainStore()
+    s.put(WIDE, chain(exps=EXPS[3:]), now=1000.0, state="REGULAR")
+    assert s.lookup(NARROW, max_age=45, now=1001.0, state="REGULAR") is None
+    assert s.cut(WIDE, NARROW) is None
+    assert s.wide_key(NARROW, today=TODAY) is None      # one upstream call, not two
+
+
+def test_an_older_covering_entry_with_an_expiration_is_served_over_an_empty_newer_one():
+    s = _store()
+    wider = ms.ChainKey("SPY", from_date="2026-10-05", to_date="2026-10-20")
+    s.put(wider, chain(exps=EXPS[3:], spot=101.0), now=1020.0, state="REGULAR")
+    got = s.lookup(NARROW, max_age=45, now=1030.0, state="REGULAR")
+    assert got.kind == "subset" and got.age == 30.0
+    assert json.loads(got.body)["underlyingPrice"] == 100.0
+
+
+def test_a_reversed_window_is_never_served_from_a_cut():
+    backwards = ms.ChainKey("SPY", from_date="2026-10-09", to_date="2026-10-05")
+    s = _store()
+    assert not WIDE.covers(backwards)
+    assert s.lookup(backwards, max_age=45, now=1001.0, state="REGULAR") is None
+    assert s.cut(WIDE, backwards) is None
+    assert s.wide_key(backwards, today=TODAY) is None
+
+
+@pytest.mark.parametrize("full", ["callExpDateMap", "putExpDateMap"])
+def test_a_window_where_only_one_side_has_an_expiration_is_still_served(full):
+    sides = {"exps_calls": EXPS[3:], "exps_puts": EXPS[3:]}
+    sides["exps_calls" if full == "callExpDateMap" else "exps_puts"] = EXPS
+    empty = "putExpDateMap" if full == "callExpDateMap" else "callExpDateMap"
+    s = ms.ChainStore()
+    s.put(WIDE, _only(**sides), now=1000.0, state="REGULAR")
+    got = s.lookup(NARROW, max_age=45, now=1001.0, state="REGULAR")
+    assert got.kind == "subset"
+    body = json.loads(got.body)
+    assert sorted(body[full]) == list(EXPS[:3]) and body[empty] == {}
+    assert body["numberOfContracts"] == 3 * len(STRIKES)
+    assert json.loads(s.cut(WIDE, NARROW)) == body
+    assert s.wide_key(NARROW, today=TODAY) == WIDE
+
+
+def test_cut_never_answers_a_window_the_entry_does_not_cover():
+    s = _store()
+    far = ms.ChainKey("SPY", from_date="2026-10-10", to_date="2026-10-20")
+    filtered = ms.ChainKey("SPY", strike_range="NTM", strike_count=50,
+                           from_date="2026-10-05", to_date="2026-10-09")
+    assert s.cut(WIDE, far) is None
+    assert s.cut(WIDE, filtered) is None
+    assert s.cut(WIDE, ms.ChainKey("SPY")) is None
+
+
+@pytest.mark.parametrize("only", [{"contract_type": "CALL"},
+                                  {"strike_range": "NTM"},
+                                  {"strike_count": 50}])
+def test_any_one_filter_alone_keeps_a_chain_out_of_the_cutting_path(only):
+    # A filtered consumer sums over exactly the contracts it asked for.
+    asked = ms.ChainKey("SPY", from_date="2026-10-05", to_date="2026-10-09", **only)
+    held = ms.ChainKey("SPY", from_date="2026-10-05", to_date="2026-10-12", **only)
+    assert not asked.plain and not held.plain
+
+    plain_store = _store()                    # holds the plain wide chain
+    assert plain_store.lookup(asked, max_age=45, now=1001.0, state="REGULAR") is None
+    assert plain_store.wide_key(asked, today=TODAY) is None
+    assert plain_store.cut(WIDE, asked) is None
+
+    filtered_store = ms.ChainStore()          # holds only the filtered wide chain
+    assert filtered_store.put(held, chain(), now=1000.0, state="REGULAR") is True
+    assert filtered_store.lookup(NARROW, max_age=45, now=1001.0, state="REGULAR") is None
+    assert filtered_store.wide_key(NARROW, today=TODAY) is None
+    assert filtered_store.cut(held, NARROW) is None
+    # ... while the identical filtered request is still an exact hit.
+    assert filtered_store.lookup(held, max_age=45, now=1001.0, state="REGULAR").kind == "hit"
+
+
+def test_a_cut_never_crosses_a_session_change():
+    s = ms.ChainStore()
+    s.put(WIDE, chain(), now=1000.0, state="CLOSED")
+    assert s.lookup(NARROW, max_age=1800, now=1001.0, state="REGULAR") is None
+    assert s.lookup(NARROW, max_age=1800, now=1001.0, state="CLOSED").kind == "subset"
+
+
+def test_a_cut_drops_expirations_before_its_window_too():
+    later = ms.ChainKey("SPY", from_date="2026-10-07", to_date="2026-10-12")
+    body = json.loads(_store().lookup(later, max_age=45, now=1001.0,
+                                      state="REGULAR").body)
+    assert sorted(body["callExpDateMap"]) == list(EXPS[1:])
+    assert sorted(body["putExpDateMap"]) == list(EXPS[1:])
+
+
+def _plus(days):
+    return ms.ChainKey("SPY", from_date=TODAY.isoformat(),
+                       to_date=(TODAY + dt.timedelta(days=days)).isoformat())
+
+
+def test_a_near_miss_never_widens_to_a_long_window():
+    s = ms.ChainStore()
+    s.put(_plus(45), chain(), now=1000.0, state="REGULAR")
+    assert s.wide_key(_plus(4), today=TODAY) is None
+    s.put(_plus(7), chain(), now=1001.0, state="REGULAR")
+    assert s.wide_key(_plus(4), today=TODAY) == _plus(7)
+
+
+def test_the_widest_window_refetched_is_the_cap():
+    assert ms.WIDE_REFETCH_MAX_DAYS == 10
+    over = ms.ChainStore()
+    over.put(_plus(ms.WIDE_REFETCH_MAX_DAYS + 1), chain(), now=1000.0, state="REGULAR")
+    assert over.wide_key(_plus(4), today=TODAY) is None
+    at = ms.ChainStore()
+    at.put(_plus(ms.WIDE_REFETCH_MAX_DAYS), chain(), now=1000.0, state="REGULAR")
+    assert at.wide_key(_plus(4), today=TODAY) == _plus(ms.WIDE_REFETCH_MAX_DAYS)
+
+
+def test_a_held_window_with_an_unreadable_date_is_not_refetched():
+    s = ms.ChainStore()
+    odd = ms.ChainKey("SPY", from_date=TODAY.isoformat(), to_date="2026-10-1x")
+    s.put(odd, chain(), now=1000.0, state="REGULAR")
+    assert odd.covers(NARROW)                 # as strings it does cover
+    assert s.wide_key(NARROW, today=TODAY) is None
+
+
+def test_a_hit_returns_schwabs_header_untouched_and_a_cut_recounts():
+    s = ms.ChainStore()
+    s.put(WIDE, {**chain(), "numberOfContracts": 999}, now=1000.0, state="REGULAR")
+    hit = s.lookup(WIDE, max_age=45, now=1001.0, state="REGULAR")
+    assert json.loads(hit.body)["numberOfContracts"] == 999
+    sub = s.lookup(NARROW, max_age=45, now=1001.0, state="REGULAR")
+    assert json.loads(sub.body)["numberOfContracts"] == 2 * 3 * len(STRIKES)
+
+
+def test_an_entry_from_the_future_is_not_served():
+    s = _store()                              # fetched at 1000.0
+    assert s.lookup(WIDE, max_age=45, now=999.0, state="REGULAR") is None
+    assert s.lookup(NARROW, max_age=45, now=999.0, state="REGULAR") is None
+
+
+def test_the_narrowest_window_inside_the_cap_is_the_one_refetched():
+    s = ms.ChainStore()
+    s.put(_plus(10), chain(), now=1000.0, state="REGULAR")
+    s.put(_plus(7), chain(), now=1001.0, state="REGULAR")
+    s.put(_plus(9), chain(), now=1002.0, state="REGULAR")
+    assert s.wide_key(_plus(4), today=TODAY) == _plus(7)

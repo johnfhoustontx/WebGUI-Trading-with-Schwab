@@ -86,3 +86,9 @@ def test_one_reply_larger_than_the_bound_keeps_its_last_symbols():
     s.put_many({"A": q(1.0), "B": q(2.0), "C": q(3.0)}, now=100.0)
     fresh, missing, _ = s.split(["A", "B", "C"], max_age=60, now=101.0)
     assert sorted(fresh) == ["B", "C"] and missing == ["A"]
+
+
+def test_a_quote_from_the_future_is_not_served():
+    s = ms.QuoteStore()
+    s.put_many({"SPY": q(500.0)}, now=100.0)
+    assert s.split(["SPY"], max_age=5, now=99.0) == ({}, ["SPY"], 0.0)

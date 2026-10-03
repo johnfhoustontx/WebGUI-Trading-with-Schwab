@@ -1,5 +1,6 @@
 """Daily bars: one fetch per bar period, and today's bar from the live quote."""
 import datetime as dt
+import json
 import pathlib
 import sys
 from zoneinfo import ZoneInfo
@@ -77,7 +78,7 @@ def test_an_entry_is_served_inside_its_period_only():
     s = ms.BarStore()
     s.put(KEY, series(FRI, MON), now=500.0, epoch=LIVE)
     body, fetched_at = s.get(KEY, epoch=LIVE)
-    assert fetched_at == 500.0 and b'"candles"' in body
+    assert fetched_at == 500.0 and json.loads(body) == series(FRI, MON)
     assert s.get(KEY, epoch=("2026-10-05", "settled")) is None
 
 
@@ -171,3 +172,41 @@ def test_putting_a_held_series_again_evicts_nothing_and_makes_it_the_newest():
     s.put(c, series(FRI, MON), now=503.0, epoch=LIVE)   # B is now the oldest
     assert s.get(b, epoch=LIVE) is None
     assert s.get(a, epoch=LIVE)[1] == 502.0 and s.get(c, epoch=LIVE)[1] == 503.0
+
+
+def _todays(**fields):
+    """Friday plus a bar for today that agrees with QUOTE except ``fields``."""
+    out = series(FRI, MON, close=102.0)
+    out["candles"][-1].update({"high": 103.0, "low": 99.5, **fields})
+    return out
+
+
+def test_a_disagreement_on_the_high_or_the_low_alone_is_a_mismatch():
+    assert ms.compare_today_bar(_todays(), QUOTE, MON) == "match"
+    assert ms.compare_today_bar(_todays(high=110.0), QUOTE, MON) == "mismatch"
+    assert ms.compare_today_bar(_todays(low=90.0), QUOTE, MON) == "mismatch"
+
+
+def test_the_tolerance_is_half_a_percent_of_the_quote():
+    # QUOTE's last is 102.0, so the line sits 0.51 away.
+    assert ms.compare_today_bar(_todays(close=102.5), QUOTE, MON) == "match"
+    assert ms.compare_today_bar(_todays(close=101.5), QUOTE, MON) == "match"
+    assert ms.compare_today_bar(_todays(close=102.52), QUOTE, MON) == "mismatch"
+    assert ms.compare_today_bar(_todays(close=101.48), QUOTE, MON) == "mismatch"
+
+
+def test_a_candle_stamped_late_yesterday_central_is_not_todays_bar():
+    # 23:00 CT on Sunday is already Monday in UTC. The candle's date is Central.
+    src = series(FRI)
+    late = dt.datetime.combine(MON - dt.timedelta(days=1), dt.time(23, 0), tzinfo=CT)
+    src["candles"].append({**src["candles"][0], "datetime": int(late.timestamp() * 1000)})
+    out = ms.compose_today(src, QUOTE, MON)
+    assert len(out["candles"]) == 3 and out["candles"][1] == src["candles"][1]
+    assert out["candles"][-1]["datetime"] == stamp(MON)
+    assert ms.compare_today_bar(src, QUOTE, MON) == "no_today"
+
+
+def test_a_volume_that_is_not_a_real_number_is_zero():
+    for junk in (float("nan"), float("inf"), True, "5000"):
+        q = {"quote": {**QUOTE["quote"], "totalVolume": junk}}
+        assert ms.compose_today(series(FRI), q, MON)["candles"][-1]["volume"] == 0
