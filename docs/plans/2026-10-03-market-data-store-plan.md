@@ -2678,14 +2678,19 @@ Expected: a `store` block and `"store_degrades": {}`. If `store_degrades` is non
 ssh vps2 'curl -s http://127.0.0.1:8100/stats/api_calls' > /tmp/shadow.json
 ```
 
-Record in the design doc, under a new "Shadow results" heading:
+Record in the design doc, under a new "Shadow results" heading. Shadow now
+simulates mode `on` (same age limits, and a would-be local answer is not
+re-stored), so its would-be counts are what `on` would have saved. It still
+counts LOW in two cases it cannot reproduce: the wider-window refetch on a near
+miss, and concurrent identical requests sharing one call.
 
-| Question | Read from | Pass |
+| Question | Read from (`store.rows`, per endpoint and caller) | Pass |
 |---|---|---|
-| Does a cut chain hold the contracts Schwab returns for the narrower window? | `shadow_subset_match` vs `shadow_subset_mismatch` on `chains` | mismatches are zero, or each one is explained from the proxy journal |
-| Does an exact repeat match? | `shadow_hit_match` vs `shadow_hit_mismatch` | mismatches only where a new expiration listed between fetches |
-| Does the quote-built bar agree with Schwab's? | `shadow_bar_match` / `shadow_bar_mismatch` / `shadow_bar_no_today` | decides `bars.today_bar` |
-| How many calls would have been saved? | `shadow_*` totals per caller | replaces the design doc's estimates |
+| Does a cut chain hold the contracts Schwab returns for the narrower window? | `chains`: `shadow_subset_match` vs `shadow_subset_mismatch`; also `shadow_cmp_match` vs `shadow_cmp_mismatch` (compared but would not have been served) | mismatches are zero, or each one is explained from the proxy journal (`shadow: stored ... differs`) |
+| Does an exact repeat match? | `chains`: `shadow_hit_match` vs `shadow_hit_mismatch` | mismatches only where an expiration listed or expired between fetches |
+| Does the quote-built bar agree with Schwab's on price? | `pricehistory`: `shadow_bar_match` / `shadow_bar_mismatch` / `shadow_bar_no_today` | decides `bars.today_bar` |
+| Does it agree on volume? | `pricehistory`: `shadow_bar_volume_match` vs `shadow_bar_volume_mismatch` | must be clean before `today_bar = "quote"`: the scan's scorers read volume |
+| How many calls would have been saved? | `chains`: `shadow_hit_*` + `shadow_subset_*`; `quotes`: `shadow_hit`; `pricehistory`: `shadow_hit` + `shadow_composed` | replaces the design doc's estimates. `shadow_partial` (quotes) is a smaller call, not a saved one, and `shadow_cmp_*` is not a saving |
 
 If `shadow_bar_no_today` dominates, Schwab's daily series does not carry the bar in progress; then `today_bar = "ttl"` with a long `session_ttl_sec` is already exact, and say so in the doc.
 

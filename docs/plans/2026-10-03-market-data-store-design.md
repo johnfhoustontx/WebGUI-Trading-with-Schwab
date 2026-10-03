@@ -1,6 +1,6 @@
 # Local market-data store — evaluation and design
 
-**Date:** 2026-10-03 · **Status:** approved 2026-10-03, not built · **Module:** `schwab-proxy/market_store.py` (new) + `config/marketdata.toml` (new) · **Plan:** [2026-10-03-market-data-store-plan.md](2026-10-03-market-data-store-plan.md)
+**Date:** 2026-10-03 · **Status:** approved 2026-10-03; code built and reviewed on the branch, shipped dark, not yet promoted · **Module:** `schwab-proxy/market_store.py` (new) + `config/marketdata.toml` (new) · **Plan:** [2026-10-03-market-data-store-plan.md](2026-10-03-market-data-store-plan.md)
 
 **Decisions taken (operator, 2026-10-03):** the store is owned by the proxy;
 the collector moves the watchlist-only symbols to a 3-minute fetch with the
@@ -277,20 +277,26 @@ Configuration.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mode` | `"shadow"` | `off`, `shadow` or `on` |
-| `chains.enabled` / `bars.enabled` / `quotes.enabled` | `true` | per-store switch |
+| `mode` | `"shadow"` | `off`, `shadow` or `on`; anything else reads as `off` |
+| `chains.enabled` / `quotes.enabled` / `bars.enabled` | `true` | per-store switch |
 | `chains.max_age_sec` | 45 | freshness while a session is open |
 | `chains.closed_max_age_sec` | 1800 | freshness while all sessions are closed |
-| `chains.max_entries` | 400 | LRU bound |
-| `bars.today_bar` | `"ttl"` until measured | `quote` or `ttl` |
-| `bars.session_ttl_sec` | 1740 | used in `ttl` mode |
-| `bars.today_quote_max_age_sec` | 120 | used in `quote` mode |
-| `bars.settle_min` | 10 | minutes after the close before the settled refetch |
+| `chains.max_entries` | 400 | most chains kept; the oldest stored are dropped |
+| `chains.shadow_compare_max_age_sec` | 120 | shadow only: how old an entry may be and still be compared |
+| `chains.wide_refetch_max_days` | 7 | longest held window refetched in place of a narrower one; equals the collector's window |
 | `quotes.max_age_sec` | 5 | freshness for quote hits; the dashboard poll sends its own 1 |
+| `quotes.max_symbols` | 5000 | most symbols kept |
+| `bars.today_bar` | `"ttl"` until measured | `quote` or `ttl` |
+| `bars.session_ttl_sec` | 1740 | used in `ttl` mode, and in `quote` mode when no usable quote is held |
+| `bars.today_quote_max_age_sec` | 120 | oldest quote used to build today's bar |
+| `bars.settle_min` | 10 | minutes after the close before the settled refetch |
+| `bars.max_entries` | 4000 | most series kept |
 | `scan.wide_fetch` | `false` | the autoscan fetches one today → +45 chain per symbol |
 | `scan.wide_fetch_exclude` | `$SPX, $NDX, SPY, QQQ` | symbols too large for one wide fetch |
-| `collection.tail_interval_min` | 1 | minutes between real fetches for watchlist-only symbols; 3 once measured |
-| `collection.fresh_max_age_sec` | 20 | a chain older than this is treated as carried forward |
+| `collection.tail_interval_min` | 1 | minutes between real fetches for watchlist-only symbols; 3 once measured; above 5 reads as 5 |
+| `collection.fresh_max_age_sec` | 20 | the age limit sent for one-minute symbols, and the age past which an answer is treated as carried; at most 30 |
+| `collection.max_gamma_ratio` | 10 | the most a carried contract's gamma may grow over Schwab's value |
+| `collection.carry_slack_sec` | 30 | added to the interval when asking for a stored chain |
 
 ## Rollout
 
@@ -391,6 +397,76 @@ flip level and the walls. `collection.tail_interval_min` ships as 1 and moves to
 | The bar built from a quote differs from Schwab's daily bar | measured in shadow mode; `ttl` mode is the fallback |
 | The proxy becomes stateful and a store bug takes market data down | store exceptions fall through to a plain fetch; `mode = "off"` |
 | Off-hours quirks (index open interest zeroed, chain `underlyingPrice` pinned to the prior close) | unchanged — the store returns Schwab's bytes; entries do not cross a session change |
+
+## What review changed during implementation
+
+Each group of tasks was reviewed by an independent reviewer and the findings
+fixed before the next group built on it. The changes that differ from the
+sections above:
+
+**Store**
+- **An empty answer is never stored and an empty cut is never served.** Measured
+  on prod 2026-10-03 (SOFI, a +1..+2 day window with no expirations): Schwab
+  returns HTTP 200, `status: "SUCCESS"`, both maps empty, `numberOfContracts: 0`
+  and `underlyingPrice: 0.0`. A cut that kept no expiration would carry the real
+  price instead, so it is refused and the request is fetched as asked.
+- **The wider-window refetch is derived, not configured.** It uses the narrowest
+  window already held for the symbol that starts today, covers the request, has
+  an expiration inside it and is at most `wide_refetch_max_days` (7) long. A
+  ceiling of 10 would have turned the collector's one-minute `$SPX` request into
+  the 10-day term-structure window.
+- **Every stored entry is stamped when its fetch started,** not when it
+  returned. It is the conservative age.
+- **Age limits must be real numbers.** NaN, infinity and booleans never hit; a
+  caller's `maxAge` is clamped to an hour; a malformed `maxAge` uses the
+  configured limit and never fails the request.
+- **Payloads holding NaN or infinity are never stored.**
+
+**Gateway**
+- **Shadow simulates `on`.** It makes `on`'s decision with `on`'s limits and
+  does not re-store a would-be answer, so the held entry ages as it would under
+  `on`. The first version re-stored on every call and showed 19 of 20 would-be
+  hits for a caller that `on` would never serve. Shadow still counts low in two
+  cases it cannot reproduce: the wider-window refetch and coalescing.
+- **A fetch failure that is not an upstream error is not a store bug.** An
+  expired token raises inside the fetch; it now propagates once, with no degrade
+  counted and no second call.
+- **Requests waiting behind a failed fetch share its failure** instead of each
+  retrying in turn (one failed fetch can take about 95 seconds).
+- **Today's bar in `quote` mode** needs a quote fetched after the open and
+  before the close, falls back to the time limit when no usable quote is held,
+  and the shadow verdict compares open, close, high and low, with volume as its
+  own outcome.
+
+**Proxy and client**
+- The caller label is sanitized on both ends, prefixed `dev.` from a dev
+  checkout, and bounded to 64 distinct names per process (`other` past that).
+  `/stats/api_calls` returns at most 500 breakdown rows with exact totals.
+- A dead token still answers 500, now with a JSON detail body.
+
+**Scan**
+- A locally cut empty window is made to look like Schwab's own (price 0.0,
+  zero contracts), because the scan funnel reads that field.
+- A failed wide fetch logs one warning and falls back to the three window
+  fetches, so the switch can never make a scan worse than before.
+
+**Collector**
+- A carried chain's skew readings, volume and premium totals and the per-strike
+  premium grid come from the chain as stored, so those columns repeat on carried
+  minutes instead of mixing a live price with fetch-time volatility.
+- A Schwab delta of zero is never carried (the engine treats zero as missing and
+  substitutes its own). After settlement Schwab's greeks stand and only the
+  price moves. The gamma ratio is capped (`max_gamma_ratio`).
+- The gamma-flip alert's symbols stay on the one-minute tier; with that alert
+  watching every symbol there is no tail at all.
+- One quote call per poll in every session state.
+
+**Known limits, accepted**
+- On an expiration day a fast move understates carried gamma for the strike the
+  price walks onto (the cap binds). `tools/measure_chain_carry.py` reports
+  expiration-day comparisons separately so the operator sees it before choosing 3.
+- Futures roots (`/ES` answered as `/ESZ26`) never hit the quote store and are
+  fetched every time, as before.
 
 ## Not in this design — remaining cadence levers
 
