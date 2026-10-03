@@ -161,10 +161,21 @@ def test_an_excluded_symbol_keeps_three_fetches(monkeypatch):
     assert len(c.windows) == 3
 
 
-def test_a_failed_wide_fetch_yields_three_missing_chains(monkeypatch):
+def test_when_the_wide_fetch_and_its_three_fallback_fetches_all_fail_nothing_is_returned(
+        monkeypatch):
+    """A failed wide fetch falls back to the three window fetches (see the
+    section further down); only when those fail too is the result three missing
+    chains - exactly what three failed fetches give with the switch off."""
     _cfg(monkeypatch, wide=True)
-    monkeypatch.setattr(se, "fetch_option_chain", lambda *a, **k: None)
+    asked = []
+
+    def _fails(client, symbol, from_date=None, to_date=None):
+        asked.append(((from_date - D).days, (to_date - D).days))
+        return None
+
+    monkeypatch.setattr(se, "fetch_option_chain", _fails)
     assert se.scan_chains(_Client(), "AAPL", D) == {"iv": None, "swing": None, "zero": None}
+    assert asked == [(0, 45), (20, 45), (5, 15), (0, 4)]
 
 
 def test_unreadable_config_keeps_three_fetches(monkeypatch):
@@ -214,6 +225,8 @@ def test_only_a_literal_true_switches_the_wide_fetch_on(monkeypatch):
 
 def test_the_shipped_setting_is_off():
     """Nothing has switched this on: the tracked file ships three fetches."""
+    # Pins the SHIPPED value on purpose. A later rollout step changes the tracked
+    # default in config/marketdata.toml; update this test in that same change.
     assert mdc.section("scan")["wide_fetch"] is False
     c = _Client()
     se.scan_chains(c, "AAPL", D)
@@ -287,10 +300,9 @@ def _schwab_answer(master, lo, hi):
 
 
 class _Response:
-    status_code = 200
-
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
 
     def json(self):
         return self._payload
@@ -348,6 +360,116 @@ def test_cut_windows_equal_three_fetches_when_the_iv_window_lists_nothing(monkey
     fetched, cut = _both_ways(monkeypatch, [1, 7])
     assert cut == fetched
     assert cut["iv"]["callExpDateMap"] == {} and cut["iv"]["putExpDateMap"] == {}
+
+
+# ── a failed wide fetch falls back to the three window fetches ──────────────
+# The only bound on a wide chain's size is a hand-typed exclusion list, so a
+# name that outgrows one request (a new daily-expiry listing, say) would
+# otherwise lose its 0-DTE and swing buckets on every scan, silently. The rule
+# is "never worse than before": the wide fetch costs extra calls only when it
+# fails, and it says so once.
+
+import logging  # noqa: E402
+
+LISTED = [0, 2, 4, 7, 14, 21, 30, 44]
+
+
+class _Requests(_Schwab):
+    """``_Schwab`` that also records every request whole, and can refuse the
+    wide (today..+45) one with an HTTP error while answering the rest."""
+
+    def __init__(self, master, wide_status=200):
+        super().__init__(master)
+        self.requests = []
+        self.wide_status = wide_status
+
+    def get_option_chain(self, *args, **kwargs):
+        self.requests.append((args, dict(kwargs)))
+        response = super().get_option_chain(*args, **kwargs)
+        if self.windows[-1] == (0, 45) and self.wide_status != 200:
+            return _Response({"message": "upstream error"}, self.wide_status)
+        return response
+
+
+def _scanner_warnings(caplog):
+    return [r for r in caplog.records
+            if r.name == "scanner" and r.levelno >= logging.WARNING]
+
+
+def _switch_off_run(monkeypatch, days=LISTED):
+    _cfg(monkeypatch, wide=False)
+    client = _Requests(_master(days))
+    return client, se.scan_chains(client, "AAPL", D)
+
+
+def test_a_failed_wide_fetch_is_followed_by_the_three_window_fetches(monkeypatch, caplog):
+    off, _ = _switch_off_run(monkeypatch)
+    _cfg(monkeypatch, wide=True)
+    c = _Requests(_master(LISTED), wide_status=502)
+    with caplog.at_level(logging.DEBUG, logger="scanner"):
+        se.scan_chains(c, "AAPL", D)
+    assert c.requests[0] == (("AAPL",), {"contract_type": "ALL", "from_date": D,
+                                         "to_date": _day(45)})
+    assert len(off.requests) == 3                  # vacuity: there is something to equal
+    assert c.requests[1:] == off.requests          # same arguments, same order, as switch-off
+
+
+def test_a_failed_wide_fetch_returns_what_the_three_window_fetches_returned(monkeypatch):
+    _, fetched = _switch_off_run(monkeypatch)
+    _cfg(monkeypatch, wide=True)
+    got = se.scan_chains(_Requests(_master(LISTED), wide_status=502), "AAPL", D)
+    assert got == fetched
+    assert _dtes(got["zero"]) == [0, 2, 4] and _dtes(got["swing"]) == [7, 14]
+    assert _dtes(got["iv"]) == [21, 30, 44]
+
+
+def test_a_failed_wide_fetch_logs_exactly_one_warning_naming_the_symbol(monkeypatch, caplog):
+    _cfg(monkeypatch, wide=True)
+    with caplog.at_level(logging.DEBUG, logger="scanner"):
+        se.scan_chains(_Requests(_master(LISTED), wide_status=502), "AAPL", D)
+    warnings = _scanner_warnings(caplog)
+    assert len(warnings) == 1
+    assert warnings[0].levelno == logging.WARNING
+    text = warnings[0].getMessage()
+    assert "AAPL" in text and "wide" in text and "three" in text
+    assert "scan.wide_fetch_exclude" in text
+
+
+def test_the_warning_is_logged_once_even_when_the_fallback_fails_too(monkeypatch, caplog):
+    _cfg(monkeypatch, wide=True)
+    monkeypatch.setattr(se, "fetch_option_chain", lambda *a, **k: None)
+    with caplog.at_level(logging.DEBUG, logger="scanner"):
+        got = se.scan_chains(_Client(), "AAPL", D)
+    assert got == {"iv": None, "swing": None, "zero": None}
+    assert len(_scanner_warnings(caplog)) == 1
+
+
+def test_an_empty_but_successful_wide_answer_is_not_a_failure(monkeypatch, caplog):
+    """Nothing listed out to +45 days: Schwab answers 200 with empty maps. That
+    is its real answer, so it is cut as usual - no fallback, no warning."""
+    _cfg(monkeypatch, wide=True)
+    c = _Requests(_master([]))
+    with caplog.at_level(logging.DEBUG, logger="scanner"):
+        got = se.scan_chains(c, "AAPL", D)
+    assert c.windows == [(0, 45)]
+    assert _scanner_warnings(caplog) == []
+    for name in ("zero", "swing", "iv"):
+        assert got[name]["callExpDateMap"] == {} and got[name]["putExpDateMap"] == {}
+        assert got[name] is not None
+
+
+def test_a_successful_wide_fetch_logs_no_warning(monkeypatch, caplog):
+    _cfg(monkeypatch, wide=True)
+    c = _Requests(_master(LISTED))
+    with caplog.at_level(logging.DEBUG, logger="scanner"):
+        se.scan_chains(c, "AAPL", D)
+    assert c.windows == [(0, 45)] and _scanner_warnings(caplog) == []
+
+
+def test_the_switch_off_path_never_warns_about_a_wide_fetch(monkeypatch, caplog):
+    with caplog.at_level(logging.DEBUG, logger="scanner"):
+        _switch_off_run(monkeypatch)
+    assert _scanner_warnings(caplog) == []
 
 
 # ── run_iv_analysis' own fallback fetch ─────────────────────────────────────
@@ -454,7 +576,7 @@ def scan(fake_client, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setattr(se, "IV_HISTORY_DB", tmp_path / "iv.db")
     today = _real_today()
 
-    def run(wide, days):
+    def run(wide, days, wide_status=200):
         _cfg(monkeypatch, wide=wide, exclude=())
         masters = {sym: _scan_master(spot, today, days)
                    for sym, (spot, _trend) in _FAKE_SYMBOLS.items()}
@@ -462,7 +584,10 @@ def scan(fake_client, monkeypatch, tmp_path):  # noqa: F811
 
         def get_option_chain(symbol, contract_type=None, from_date=None,
                              to_date=None, **kw):
-            calls[symbol].append(((from_date - today).days, (to_date - today).days))
+            window = ((from_date - today).days, (to_date - today).days)
+            calls[symbol].append(window)
+            if window == (0, 45) and wide_status != 200:
+                return _Response({"message": "upstream error"}, wide_status)
             return _Response(_schwab_answer(masters[symbol], from_date, to_date))
 
         fake_client.get_option_chain = get_option_chain
@@ -531,3 +656,21 @@ def test_a_scan_reports_an_empty_window_the_same_either_way(scan):
             off["funnel"][symbol]["buckets"]["0DTE"]
         assert on["funnel"][symbol]["buckets"]["0DTE"]["underlying_zero"] is True
         assert on["funnel"][symbol]["buckets"]["SWING"]["underlying_zero"] is False
+
+
+def test_a_scan_whose_wide_fetches_fail_still_finds_the_same_trades(scan, caplog):
+    """The symbol keeps its 0-DTE and swing buckets: one wasted request, then the
+    three it made before, and one warning per symbol saying so."""
+    off, _ = scan(False, [1, 7, 30])
+    with caplog.at_level(logging.WARNING, logger="scanner"):
+        failed, calls = scan(True, [1, 7, 30], wide_status=502)
+    for symbol in SYMBOLS:
+        assert calls[symbol][0] == (0, 45), symbol
+        assert sorted(calls[symbol][1:]) == [(0, 4), (5, 15), (20, 45)], symbol
+        named = [r for r in _scanner_warnings(caplog)
+                 if "wide_fetch_exclude" in r.getMessage() and symbol in r.getMessage()]
+        assert len(named) == 1, symbol
+    for key in ("signals_0dte", "signals_swing", "signals_directional"):
+        assert _identity(failed[key]) == _identity(off[key]), key
+        assert off[key], key                           # vacuity: there were trades
+    assert failed["iv_data"] == off["iv_data"]

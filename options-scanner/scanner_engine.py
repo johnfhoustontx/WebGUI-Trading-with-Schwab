@@ -187,12 +187,16 @@ def slice_chain(chain, from_date, to_date):
     * ``numberOfContracts`` is recounted over what was kept.
     * A window that keeps NO expiration on either side carries
       ``underlyingPrice`` 0.0. ⚠ That is what Schwab itself answers for such a
-      window (measured: HTTP 200, status SUCCESS, both maps empty,
-      ``numberOfContracts`` 0, ``underlyingPrice`` 0.0), and
+      window. Measured 2026-10-03, SOFI, a +1..+2 day window holding no
+      expiration: HTTP 200, ``status: "SUCCESS"``, both maps empty,
+      ``numberOfContracts: 0``, ``underlyingPrice: 0.0``. So in a FETCHED chain
+      an empty window and an unpriced underlying are indistinguishable, and the
+      cut reproduces that rather than improving on it:
       ``chain_has_underlying`` - hence the funnel's ``underlying_zero`` and
-      ``screen_spreads``' early return - turns on it. A cut that kept the wide
-      chain's real price would make the same empty window read differently
-      depending on how it was fetched.
+      ``screen_spreads``' early return - turns on this price, and a cut that
+      kept the wide chain's real one would make the same empty window read
+      differently depending on how it was fetched. (``run_full_scan``'s
+      docstring states the same fact from the funnel's side.)
     """
     if not chain:
         return chain
@@ -255,13 +259,26 @@ def scan_chains(client, symbol, today) -> dict:
     """The scan's three chains for one symbol: ``{"iv", "swing", "zero"}``.
 
     One fetch out to the last window's end, cut locally, when the wide fetch is
-    on for this symbol; otherwise three fetches. A failed wide fetch yields
-    three ``None``s, exactly what three failed fetches would."""
+    on for this symbol; otherwise three fetches.
+
+    ⚠ A FAILED wide fetch (``None``) falls back to the three window fetches, so
+    the wide mode is never worse than what it replaced: it costs extra calls
+    only when it fails. Without the fallback a symbol whose 45-day chain has
+    outgrown one request would lose its 0-DTE and swing buckets on every scan,
+    silently - ``fetch_option_chain`` logs nothing on a non-200, and the only
+    bound on size is the hand-typed ``wide_fetch_exclude`` list. Hence the one
+    WARNING. A wide answer that arrived and is merely EMPTY is Schwab's real
+    answer and is cut as usual, with no fallback."""
     windows = scan_windows(today)
     if _wide_scan(symbol):
         wide = fetch_option_chain(client, symbol, from_date=windows["zero"][0],
                                   to_date=windows["iv"][1])
-        return {name: slice_chain(wide, lo, hi) for name, (lo, hi) in windows.items()}
+        if wide is not None:
+            return {name: slice_chain(wide, lo, hi) for name, (lo, hi) in windows.items()}
+        log.warning(
+            "Wide chain fetch failed for %s; the scan is using three window fetches "
+            "for it instead. If this repeats, %s may belong in "
+            "scan.wide_fetch_exclude (config/marketdata.toml).", symbol, symbol)
     return {name: fetch_option_chain(client, symbol, from_date=windows[name][0],
                                      to_date=windows[name][1])
             for name in _SCAN_FETCH_ORDER}
@@ -1905,9 +1922,17 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
     state is an all-zero bucket with no reason in it, exactly what
     ``build_failed`` exists to prevent on the bucket below). ⚠ It is a
     PER-WINDOW fact and deliberately not the symbol-level ``stop``: the scan did
-    reach a chain here, and a page reading ``stop`` would say it never did. It is
-    also NOT the zero-filled empty-window case — the expirations were listed, the
-    spot was not, so the two need different words. Then ``strikes``
+    reach a chain here, and a page reading ``stop`` would say it never did.
+    ⚠ It covers TWO states a fetched chain cannot tell apart, and this docstring
+    used to claim otherwise ("the expirations were listed, the spot was not").
+    Measured 2026-10-03, SOFI, a +1..+2 day window holding no expiration: Schwab
+    answered HTTP 200, ``status: "SUCCESS"``, both maps empty,
+    ``numberOfContracts: 0`` and ``underlyingPrice: 0.0``. So a window that lists
+    NOTHING arrives with price 0.0 and sets this flag exactly as an unpriced
+    underlying does; ``slice_chain`` reproduces that for a window cut from a
+    wider fetch, so the flag does not depend on how the window was fetched. What
+    it is distinct from is the zero-filled bucket of a chain that DID carry a
+    price and still counted nothing. Then ``strikes``
     (``screen_spreads``' own reject tally — see its docstring; ZERO-FILLED from
     ``STRIKE_FUNNEL_KEYS``, so its partition equation holds in every state
     including the two the pass returns early from) and ``spreads``:
