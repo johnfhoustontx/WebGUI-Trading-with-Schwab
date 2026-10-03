@@ -456,9 +456,10 @@ _BAR_TOLERANCE = 0.005   # the quote may be up to two minutes older than the bar
 
 
 def compare_today_bar(upstream, quote, today) -> str:
-    """Shadow verdict on whether the quote-built bar agrees with Schwab's:
-    ``match`` / ``mismatch`` / ``no_today`` (Schwab sent no bar for today) /
-    ``no_quote``."""
+    """Shadow verdict on whether the quote-built bar agrees with Schwab's on
+    its four PRICES (open, high, low, close): ``match`` / ``mismatch`` /
+    ``no_today`` (Schwab sent no bar for today) / ``no_quote``. Volume has a
+    verdict of its own, :func:`compare_today_volume`."""
     composed = compose_today(upstream, quote, today)
     if composed is None:
         return "no_quote"
@@ -466,11 +467,42 @@ def compare_today_bar(upstream, quote, today) -> str:
     if not candles or _candle_date(candles[-1]) != today:
         return "no_today"
     theirs, ours = candles[-1], composed["candles"][-1]
-    for field in ("close", "high", "low"):
+    for field in ("open", "close", "high", "low"):
         a, b = theirs.get(field), ours[field]
         if not _real_number(a) or abs(a - b) > _BAR_TOLERANCE * abs(b):
             return "mismatch"
     return "match"
+
+
+# Today's volume only grows, and the quote may be up to two minutes OLDER than
+# Schwab's bar. So the quote's volume may fall short of the bar's by what trades
+# in two minutes (about 0.5% of an even session; far more in the first minutes),
+# and should never be meaningfully ahead of it.
+VOLUME_MAX_SHORTFALL = 0.05     # the quote's volume may be up to 5% below the bar's
+VOLUME_MAX_EXCESS = 0.01        # and at most 1% above it
+
+
+def compare_today_volume(upstream, quote, today) -> str | None:
+    """Shadow verdict on whether the quote's volume agrees with the volume of
+    Schwab's bar for ``today``: ``match`` / ``mismatch``, or None when there
+    is nothing to judge - the quote carries no volume (an index does not), or
+    Schwab sent no bar for today.
+
+    Kept apart from :func:`compare_today_bar` so that a symbol with no quoted
+    volume still gets its price verdict."""
+    block = quote.get("quote") if isinstance(quote, dict) else None
+    quoted = block.get("totalVolume") if isinstance(block, dict) else None
+    if not _real_number(quoted) or quoted <= 0:
+        return None
+    candles = upstream.get("candles") if isinstance(upstream, dict) else None
+    if not candles or _candle_date(candles[-1]) != today:
+        return None
+    theirs = candles[-1].get("volume")
+    if not _real_number(theirs):
+        return "mismatch"
+    lowest = theirs * (1 - VOLUME_MAX_SHORTFALL)
+    highest = theirs * (1 + VOLUME_MAX_EXCESS)
+    return "match" if lowest <= quoted <= highest else "mismatch"
 
 
 class BarStore:
@@ -585,7 +617,9 @@ class Gateway:
     * quotes - ``shadow_hit`` (every symbol was fresh) / ``shadow_partial``
       (some were; on would have fetched the rest).
     * daily bars - ``shadow_hit`` / ``shadow_composed``, and the today's-bar
-      verdicts ``shadow_bar_*``, which claim no saving.
+      verdicts, which claim no saving: ``shadow_bar_match`` /
+      ``shadow_bar_mismatch`` / ``shadow_bar_no_today`` on the four prices, and
+      ``shadow_bar_volume_match`` / ``shadow_bar_volume_mismatch`` on volume.
 
     Two things shadow cannot reproduce, both of which make it count LOW: the
     wide refetch on a near miss (it fetches the request as asked), and
@@ -899,6 +933,10 @@ class Gateway:
                 verdict = compare_today_bar(data, quote, now_ct.date())
                 if verdict != "no_quote":
                     self._record("pricehistory", caller, f"shadow_bar_{verdict}")
+                    volume = compare_today_volume(data, quote, now_ct.date())
+                    if volume is not None:
+                        self._record("pricehistory", caller,
+                                     f"shadow_bar_volume_{volume}")
             if would is None:
                 # On would have fetched and stored this series. Otherwise the
                 # held one keeps ageing, as it would under on.

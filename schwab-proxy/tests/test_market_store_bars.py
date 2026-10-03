@@ -133,7 +133,7 @@ def test_a_missing_volume_is_zero_not_a_refusal():
 
 def test_shadow_verdicts():
     near = series(FRI, MON, close=102.1)
-    near["candles"][-1].update(high=103.0, low=99.5)
+    near["candles"][-1].update(open=100.0, high=103.0, low=99.5)
     assert ms.compare_today_bar(near, QUOTE, MON) == "match"
     assert ms.compare_today_bar(series(FRI, MON, close=90.0), QUOTE, MON) == "mismatch"
     assert ms.compare_today_bar(series(FRI), QUOTE, MON) == "no_today"
@@ -149,7 +149,7 @@ def test_a_bar_schwab_sent_without_a_real_number_is_a_mismatch():
     # NaN fails every comparison, so "not past the tolerance" would read as a match.
     for junk in (float("nan"), None, True):
         odd = series(FRI, MON, close=102.0)
-        odd["candles"][-1].update(high=103.0, low=99.5, close=junk)
+        odd["candles"][-1].update(open=100.0, high=103.0, low=99.5, close=junk)
         assert ms.compare_today_bar(odd, QUOTE, MON) == "mismatch"
 
 
@@ -182,7 +182,8 @@ def test_putting_a_held_series_again_evicts_nothing_and_makes_it_the_newest():
 def _todays(**fields):
     """Friday plus a bar for today that agrees with QUOTE except ``fields``."""
     out = series(FRI, MON, close=102.0)
-    out["candles"][-1].update({"high": 103.0, "low": 99.5, **fields})
+    out["candles"][-1].update({"open": 100.0, "high": 103.0, "low": 99.5,
+                               "volume": 5000, **fields})
     return out
 
 
@@ -267,3 +268,52 @@ def test_a_series_that_cannot_be_stored_leaves_the_held_one_alone():
     s.put(KEY, series(FRI, MON, close=float("nan")), now=600.0, epoch=LIVE)
     body, fetched_at = s.get(KEY, epoch=LIVE)
     assert fetched_at == 500.0 and json.loads(body) == series(FRI, MON)
+
+
+# ---- the verdict checks the open, and volume has a verdict of its own --------
+
+def test_a_disagreement_on_the_open_alone_is_a_mismatch():
+    assert ms.compare_today_bar(_todays(), QUOTE, MON) == "match"
+    assert ms.compare_today_bar(_todays(open=99.0), QUOTE, MON) == "mismatch"
+    assert ms.compare_today_bar(_todays(open=100.4), QUOTE, MON) == "match"
+    for junk in (float("nan"), None, True):
+        assert ms.compare_today_bar(_todays(open=junk), QUOTE, MON) == "mismatch"
+
+
+def test_volume_never_decides_the_price_verdict():
+    assert ms.compare_today_bar(_todays(volume=1), QUOTE, MON) == "match"
+    no_volume = {"quote": {k: v for k, v in QUOTE["quote"].items() if k != "totalVolume"}}
+    assert ms.compare_today_bar(_todays(), no_volume, MON) == "match"
+
+
+def test_the_volume_tolerance_is_five_percent_short_and_one_percent_over():
+    # The quote (5000) may be up to two minutes older than Schwab's bar.
+    assert (ms.VOLUME_MAX_SHORTFALL, ms.VOLUME_MAX_EXCESS) == (0.05, 0.01)
+    assert ms.compare_today_volume(_todays(volume=5000), QUOTE, MON) == "match"
+    assert ms.compare_today_volume(_todays(volume=5200), QUOTE, MON) == "match"     # 3.8% short
+    assert ms.compare_today_volume(_todays(volume=5300), QUOTE, MON) == "mismatch"  # 5.7% short
+    assert ms.compare_today_volume(_todays(volume=4960), QUOTE, MON) == "match"     # 0.8% over
+    assert ms.compare_today_volume(_todays(volume=4900), QUOTE, MON) == "mismatch"  # 2.0% over
+
+
+def test_no_quoted_volume_means_no_volume_verdict():
+    # An index quotes no volume; that must not read as a disagreement.
+    for junk in (0, None, float("nan"), float("inf"), True, "5000", -1):
+        q = {"quote": {**QUOTE["quote"], "totalVolume": junk}}
+        assert ms.compare_today_volume(_todays(), q, MON) is None
+    missing = {"quote": {k: v for k, v in QUOTE["quote"].items() if k != "totalVolume"}}
+    assert ms.compare_today_volume(_todays(), missing, MON) is None
+    for unusable in (None, {}, {"quote": None}, "x"):
+        assert ms.compare_today_volume(_todays(), unusable, MON) is None
+
+
+def test_no_bar_for_today_means_no_volume_verdict():
+    assert ms.compare_today_volume(series(FRI), QUOTE, MON) is None
+    assert ms.compare_today_volume({"candles": []}, QUOTE, MON) is None
+    assert ms.compare_today_volume(None, QUOTE, MON) is None
+
+
+def test_a_bar_volume_that_is_not_a_real_number_is_a_volume_mismatch():
+    for junk in (float("nan"), None, True, "5000"):
+        assert ms.compare_today_volume(_todays(volume=junk), QUOTE, MON) == "mismatch"
+    assert ms.compare_today_volume(_todays(volume=0), QUOTE, MON) == "mismatch"

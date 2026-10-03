@@ -610,7 +610,7 @@ def test_a_coalesced_answer_reports_the_age_of_the_entry_it_took():
 
 def quotes_for(endpoint, params):
     return {s: {"quote": {"lastPrice": 100.0, "openPrice": 99.0, "highPrice": 101.0,
-                          "lowPrice": 98.0, "totalVolume": 10}}
+                          "lowPrice": 98.0, "totalVolume": 1000}}
             for s in params["symbols"].split(",")}
 
 
@@ -738,8 +738,9 @@ def test_bars_in_shadow_count_repeats_and_judge_the_quote_built_bar():
     h.gw.pricehistory(BAR, "scan")
     assert [c[0] for c in h.calls].count("/pricehistory") == 2
     out = [r[2] for r in h.records if r[0] == "pricehistory"]
-    assert out == ["upstream", "shadow_bar_match",
-                   "upstream", "shadow_hit", "shadow_bar_match"]
+    assert out == ["upstream", "shadow_bar_match", "shadow_bar_volume_match",
+                   "upstream", "shadow_hit", "shadow_bar_match",
+                   "shadow_bar_volume_match"]
 
 
 # ---- today's bar and the open ----------------------------------------------
@@ -815,7 +816,8 @@ def test_shadow_never_judges_todays_bar_against_a_quote_fetched_before_the_open(
     set_time(h, 8, 30, 50)
     h.gw.pricehistory(BAR, "scan")
     assert bar_outcomes(h) == ["upstream",
-                               "upstream", "shadow_hit", "shadow_bar_match"]
+                               "upstream", "shadow_hit", "shadow_bar_match",
+                               "shadow_bar_volume_match"]
 
 
 def test_at_the_instant_of_the_open_no_quote_is_usable():
@@ -1140,7 +1142,8 @@ def test_shadow_reports_a_bar_that_disagrees_and_a_day_schwab_has_not_sent():
     h.gw.quotes("SPY", "market_svc")
     got = h.gw.pricehistory(BAR, "scan")
     assert got.kind == "pass" and got.data == series(FRI, MON, close=90.0)
-    assert bar_outcomes(h) == ["upstream", "shadow_bar_mismatch"]
+    assert bar_outcomes(h) == ["upstream", "shadow_bar_mismatch",
+                               "shadow_bar_volume_match"]
 
     h = Harness(Cfg(mode="shadow"),
                 responses=lambda e, p: quotes_for(e, p) if e == "/quotes" else series(FRI))
@@ -1372,7 +1375,8 @@ def test_shadow_reports_a_would_be_composed_bar_and_stores_nothing():
     got = h.gw.pricehistory(BAR, "scan")
     assert got.kind == "pass" and got.data == series(FRI, MON)
     assert bar_outcomes(h) == ["upstream",
-                               "upstream", "shadow_composed", "shadow_bar_match"]
+                               "upstream", "shadow_composed", "shadow_bar_match",
+                               "shadow_bar_volume_match"]
     _, fetched_at = h.gw.bar_store.get(ms.bar_key(BAR), epoch=("2026-10-05", "live"))
     assert fetched_at == 1000.0
 
@@ -1796,3 +1800,53 @@ def test_a_series_holding_a_number_that_is_not_json_is_returned_and_never_stored
     assert got.kind == "miss" and got.data is payload
     assert h.gw.pricehistory(BAR, "a").kind == "miss" and len(h.calls) == 2
     assert h.gw.degrades == {}
+
+
+# ---- the today's-bar verdict checks open and volume --------------------------
+
+def quote_with(**fields):
+    """A fixture quote for SPY with some fields replaced."""
+    def respond(endpoint, params):
+        if endpoint != "/quotes":
+            return series(FRI, MON)
+        out = quotes_for(endpoint, params)
+        for block in out.values():
+            block["quote"].update(fields)
+        return out
+    return respond
+
+
+def shadow_bar_verdicts(responses):
+    h = Harness(Cfg(mode="shadow"), responses=responses)
+    h.gw.quotes("SPY", "market_svc")
+    h.gw.pricehistory(BAR, "scan")
+    return bar_outcomes(h)
+
+
+def test_shadow_reports_a_quote_built_bar_whose_open_disagrees():
+    assert shadow_bar_verdicts(quote_with(openPrice=95.0)) == [
+        "upstream", "shadow_bar_mismatch", "shadow_bar_volume_match"]
+
+
+def test_shadow_reports_volume_on_its_own_beside_the_price_verdict():
+    assert shadow_bar_verdicts(quote_with(totalVolume=10)) == [
+        "upstream", "shadow_bar_match", "shadow_bar_volume_mismatch"]
+    assert shadow_bar_verdicts(quote_with(totalVolume=960)) == [
+        "upstream", "shadow_bar_match", "shadow_bar_volume_match"]
+
+
+def test_a_symbol_with_no_quoted_volume_still_gets_its_price_verdict():
+    assert shadow_bar_verdicts(quote_with(totalVolume=0)) == [
+        "upstream", "shadow_bar_match"]
+
+
+def test_no_usable_quote_means_no_volume_verdict_either():
+    assert shadow_bar_verdicts(quote_with(lastPrice=0)) == ["upstream"]
+
+
+def test_a_composed_bar_carries_the_quotes_volume():
+    h = Harness(Cfg(bars__today_bar="quote"), responses=quote_with(totalVolume=4321))
+    h.gw.pricehistory(BAR, "scan")
+    h.gw.quotes("SPY", "market_svc")
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "composed" and got.data["candles"][-1]["volume"] == 4321
