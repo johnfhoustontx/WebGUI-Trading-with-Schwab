@@ -1,0 +1,52 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/marketdata.toml — THE PROXY'S LOCAL MARKET-DATA STORE
+#
+#   The proxy keeps what it fetches from Schwab and answers later requests from
+#   that copy when the copy is fresh and covers the request. Read on every
+#   request, so a change here needs NO restart.
+#
+#   Design: docs/plans/2026-10-03-market-data-store-design.md
+# ─────────────────────────────────────────────────────────────────────────────
+
+# "off"    — the proxy passes every request to Schwab, as it did before the store.
+# "shadow" — every request still goes to Schwab; the store is filled and the proxy
+#            counts what it WOULD have answered. Costs no extra calls.
+# "on"     — repeat requests are answered locally.
+# Anything else reads as "off".
+mode = "shadow"
+
+[chains]
+enabled = true
+max_age_sec = 45                  # while any session is open
+closed_max_age_sec = 1800         # while every session is closed
+wide_days = 7                     # the window refetched on a near miss (the collector's)
+max_entries = 400
+shadow_compare_max_age_sec = 120  # shadow only: how old an entry may be and still be compared
+
+[quotes]
+enabled = true
+max_age_sec = 5                   # the dashboard poll sends its own 1
+
+[bars]
+enabled = true
+# How the bar for the session in progress is handled, daily series only.
+#   "ttl"   — re-serve the last fetched series for session_ttl_sec.
+#   "quote" — build today's bar from the live quote. Switch to this only after the
+#             shadow counts show the two agree (shadow_bar_match).
+today_bar = "ttl"
+session_ttl_sec = 1740
+today_quote_max_age_sec = 120
+settle_min = 10                   # minutes after the close before the settled refetch
+
+[scan]
+# The autoscan fetches ONE today -> +45 day chain per symbol and cuts its three
+# windows from it, instead of three fetches.
+wide_fetch = false
+wide_fetch_exclude = ["$SPX", "$NDX", "SPY", "QQQ"]   # too large for one fetch
+
+[collection]
+# Minutes between REAL chain fetches for symbols that are collected only because
+# they are on the watchlist. 1 = every minute (the behaviour before this file).
+# Works only while mode = "on" and chains.enabled; otherwise every fetch is real.
+tail_interval_min = 1
+fresh_max_age_sec = 20            # a chain older than this is treated as carried forward
