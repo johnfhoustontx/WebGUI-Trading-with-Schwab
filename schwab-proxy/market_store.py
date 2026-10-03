@@ -546,6 +546,27 @@ class Gateway:
     with an old entry; and a bug in store code falls through to a plain fetch
     and is counted in ``degrades``.
 
+    Shadow mode always calls Schwab and returns Schwab's answer, and its counts
+    are read as "calls mode on would have saved". So it makes on's decision
+    with on's limits, and it leaves the store as on would have: a request on
+    would have answered locally stores nothing, so the held entry keeps
+    ageing. Outcomes recorded in shadow, after ``upstream``:
+
+    * chains - ``shadow_hit_match`` / ``shadow_hit_mismatch`` /
+      ``shadow_subset_match`` / ``shadow_subset_mismatch``: on would have
+      answered, and whether that answer held the same contracts as Schwab's.
+      ``shadow_cmp_match`` / ``shadow_cmp_mismatch``: on would NOT have
+      answered; an entry inside ``shadow_compare_max_age_sec`` was compared
+      anyway. A comparison, never a saving.
+    * quotes - ``shadow_hit`` (every symbol was fresh) / ``shadow_partial``
+      (some were; on would have fetched the rest).
+    * daily bars - ``shadow_hit`` / ``shadow_composed``, and the today's-bar
+      verdicts ``shadow_bar_*``, which claim no saving.
+
+    Two things shadow cannot reproduce, both of which make it count LOW: the
+    wide refetch on a near miss (it fetches the request as asked), and
+    concurrent identical requests sharing one call.
+
     Called from many worker threads at once. A per-request lock is held only
     around the re-check and the upstream fetch, and ``fetch`` is never called
     while a store's own lock is held."""
@@ -607,23 +628,33 @@ class Gateway:
         key = ChainKey.from_params(params)
         store = self.chain_store
 
+        limit = effective_max_age(max_age, cfg, closed=(state == "CLOSED"))
+
         if mode == "shadow":
-            would = store.lookup(key, max_age=float(cfg["shadow_compare_max_age_sec"]),
-                                 now=self._clock(), state=state)
+            asked_at = self._clock()
+            would = store.lookup(key, max_age=limit, now=asked_at, state=state)
+            # On would have fetched. Is there still an entry worth comparing?
+            compare = None if would is not None else store.lookup(
+                key, max_age=float(cfg["shadow_compare_max_age_sec"]),
+                now=asked_at, state=state)
             data = self._fetch("/chains", params)
             self._record("chains", caller, "upstream")
-            if would is not None:
-                same = chain_shape(json.loads(would.body)) == chain_shape(data)
+            held = would or compare
+            if held is not None:
+                same = chain_shape(json.loads(held.body)) == chain_shape(data)
                 verdict = "match" if same else "mismatch"
-                self._record("chains", caller, f"shadow_{would.kind}_{verdict}")
+                name = held.kind if would is not None else "cmp"
+                self._record("chains", caller, f"shadow_{name}_{verdict}")
                 if not same:
                     self._log.warning("shadow: stored %s answer for %s differs "
-                                      "from Schwab's", would.kind, key)
-            store.put(key, data, now=self._clock(), state=state,
-                      max_entries=cfg["max_entries"])
+                                      "from Schwab's", held.kind, key)
+            if would is None:
+                # On would have fetched and stored this. When on would have
+                # answered locally there was no fetch: the entry keeps ageing.
+                store.put(key, data, now=self._clock(), state=state,
+                          max_entries=cfg["max_entries"])
             return Served("pass", 0.0, data=data)
 
-        limit = effective_max_age(max_age, cfg, closed=(state == "CLOSED"))
         hit = store.lookup(key, max_age=limit, now=self._clock(), state=state)
         if hit is not None:
             self._record("chains", caller, hit.kind)
@@ -687,7 +718,15 @@ class Gateway:
             self._record("quotes", caller, "upstream")
             if not missing:
                 self._record("quotes", caller, "shadow_hit")
-            store.put_many(data, now=self._clock(), max_symbols=cfg["max_symbols"])
+            else:
+                if fresh:
+                    self._record("quotes", caller, "shadow_partial")
+                # On would have fetched, and so stored, only the symbols that
+                # were not fresh. The fresh ones keep ageing.
+                fetched = ({k: v for k, v in data.items() if k not in fresh}
+                           if isinstance(data, dict) else data)
+                store.put_many(fetched, now=self._clock(),
+                               max_symbols=cfg["max_symbols"])
             return Served("pass", 0.0, data=data)
 
         if not missing:
@@ -725,6 +764,28 @@ class Gateway:
             return None
         return self.quote_store.get(symbol, max_age=limit, now=self._clock())
 
+    def _bar_local(self, seen, live, symbol, cfg, now_ct) -> Served | None:
+        """The answer mode on gives from the stored series ``seen``, or None
+        when it fetches. Records nothing: on and shadow both ask it, so shadow
+        cannot count a saving on would not make."""
+        if seen is None:
+            return None
+        body, fetched_at = seen
+        age = self._clock() - fetched_at
+        if not live:
+            return Served("hit", age, body=body)
+        if self._cfg.today_bar() == "quote":
+            quote = self._today_quote(symbol, cfg, now_ct)
+            composed = (compose_today(json.loads(body), quote, now_ct.date())
+                        if quote is not None else None)
+            if composed is not None:
+                return Served("composed", 0.0, data=composed)
+        # No usable quote, or ttl mode: the series as fetched, inside the
+        # session limit. So quote mode is never worse than ttl mode.
+        if age <= float(cfg["session_ttl_sec"]):
+            return Served("hit", age, body=body)
+        return None
+
     def _bars(self, params, caller, mode) -> Served:
         cfg = self._cfg.section("bars")
         now_ct = self._now_ct()
@@ -735,39 +796,29 @@ class Gateway:
         store = self.bar_store
 
         if mode == "shadow":
-            had = store.get(key, epoch=epoch)
+            would = self._bar_local(store.get(key, epoch=epoch), live, symbol,
+                                    cfg, now_ct)
             data = self._fetch("/pricehistory", params)
             self._record("pricehistory", caller, "upstream")
-            if had is not None:
-                self._record("pricehistory", caller, "shadow_hit")
+            if would is not None:
+                self._record("pricehistory", caller, f"shadow_{would.kind}")
             if live:
                 quote = self._today_quote(symbol, cfg, now_ct)
                 verdict = compare_today_bar(data, quote, now_ct.date())
                 if verdict != "no_quote":
                     self._record("pricehistory", caller, f"shadow_bar_{verdict}")
-            store.put(key, data, now=self._clock(), epoch=epoch,
-                      max_entries=cfg["max_entries"])
+            if would is None:
+                # On would have fetched and stored this series. Otherwise the
+                # held one keeps ageing, as it would under on.
+                store.put(key, data, now=self._clock(), epoch=epoch,
+                          max_entries=cfg["max_entries"])
             return Served("pass", 0.0, data=data)
 
         seen = store.get(key, epoch=epoch)
-        if seen is not None:
-            body, fetched_at = seen
-            age = self._clock() - fetched_at
-            if not live:
-                self._record("pricehistory", caller, "hit")
-                return Served("hit", age, body=body)
-            if self._cfg.today_bar() == "quote":
-                quote = self._today_quote(symbol, cfg, now_ct)
-                composed = (compose_today(json.loads(body), quote, now_ct.date())
-                            if quote is not None else None)
-                if composed is not None:
-                    self._record("pricehistory", caller, "composed")
-                    return Served("composed", 0.0, data=composed)
-            # No usable quote, or ttl mode: the series as fetched, inside the
-            # session limit. So quote mode is never worse than ttl mode.
-            if age <= float(cfg["session_ttl_sec"]):
-                self._record("pricehistory", caller, "hit")
-                return Served("hit", age, body=body)
+        local = self._bar_local(seen, live, symbol, cfg, now_ct)
+        if local is not None:
+            self._record("pricehistory", caller, local.kind)
+            return local
         with self._locks.get(("bars", key)):
             again = store.get(key, epoch=epoch)
             if again is not None and (seen is None or again[1] > seen[1]):

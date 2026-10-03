@@ -490,15 +490,19 @@ def test_shadow_judges_an_exact_repeat_too():
     assert h.outcomes() == ["upstream", "upstream", "shadow_hit_match"]
 
 
-def test_shadow_compares_inside_its_own_age_limit_not_the_serving_one():
+def test_shadow_would_serve_inside_the_serving_limit_and_only_compares_past_it():
     h = Harness(Cfg(mode="shadow"))
+    h.gw.chains(P(), "a")                            # stored
+    h.clock += 30                                    # inside the serving limit, 45
     h.gw.chains(P(), "a")
-    h.clock += 100                                   # past 45, inside 120
+    h.clock += 30                                    # 60 s old: the would-be hit did
+    h.gw.chains(P(), "a")                            # not refresh it. Inside 120.
+    h.clock += 121                                   # the compare-only fetch did
     h.gw.chains(P(), "a")
-    assert h.outcomes()[-1] == "shadow_hit_match"
-    h.clock += 121
-    h.gw.chains(P(), "a")
-    assert h.outcomes()[-1] == "upstream"            # too old to judge
+    assert h.outcomes() == ["upstream",
+                            "upstream", "shadow_hit_match",     # a call on would save
+                            "upstream", "shadow_cmp_match",     # a comparison, no saving
+                            "upstream"]                         # too old to compare
 
 
 def test_shadow_enforces_the_configured_entry_limit():
@@ -936,13 +940,13 @@ def test_an_answer_that_is_not_a_quote_mapping_is_passed_on_untouched():
 def test_quotes_in_shadow_return_schwabs_answer_and_judge_only_a_full_answer():
     h = Harness(Cfg(mode="shadow"), responses=quotes_for)
     h.gw.quotes("SPY", "a")
-    got = h.gw.quotes("SPY, DIA", "b")               # DIA is not held: no verdict
+    got = h.gw.quotes("SPY, DIA", "b")               # DIA is not held: no full answer
     assert got.kind == "pass" and list(got.data) == ["SPY", "DIA"]
     assert h.calls[-1][1]["symbols"] == "SPY,DIA"
-    assert h.outcomes() == ["upstream", "upstream"]
+    assert h.outcomes() == ["upstream", "upstream", "shadow_partial"]
     h.clock += 6                                     # past the limit: no verdict
     h.gw.quotes("SPY", "c")
-    assert h.outcomes() == ["upstream"] * 3
+    assert h.outcomes() == ["upstream", "upstream", "shadow_partial", "upstream"]
 
 
 def test_an_upstream_quote_error_is_raised_in_every_mode():
@@ -1264,3 +1268,202 @@ def test_the_configured_series_limit_is_enforced():
     assert bar_outcomes(h) == ["upstream"] * 3            # no would-be hit
     h.gw.pricehistory(BAR, "a")
     assert bar_outcomes(h)[-1] == "shadow_hit"
+
+
+# ---- shadow measures what mode on would do ----------------------------------
+# Shadow's counts are read as "calls that on would have saved", so shadow makes
+# on's decision with on's limits, and keeps the store as on would have left it:
+# a request on would have answered locally stores nothing.
+
+def test_shadow_uses_the_callers_own_age_limit():
+    h = Harness(Cfg(mode="shadow"))
+    for _ in range(5):                               # the collector's poll
+        h.gw.chains(P(), "collector", max_age=20)
+        h.clock += 60
+    assert not [o for o in h.outcomes() if o.startswith(("shadow_hit", "shadow_subset"))]
+    assert h.outcomes() == ["upstream"] + ["upstream", "shadow_cmp_match"] * 4
+
+
+def test_shadow_uses_the_closed_market_limit():
+    h = Harness(Cfg(mode="shadow"))
+    FakeCal.state = "CLOSED"
+    h.gw.chains(P(), "a")
+    h.clock += 600
+    h.gw.chains(P(), "a")
+    assert h.outcomes()[-1] == "shadow_hit_match"
+
+
+def test_a_compare_only_verdict_reports_a_shape_difference():
+    state = {"thin": False}
+    h = Harness(Cfg(mode="shadow"),
+                responses=lambda e, p: chain(exps=EXPS[:3]) if state["thin"] else chain())
+    h.gw.chains(P(), "a")
+    h.clock += 60
+    state["thin"] = True
+    h.gw.chains(P(), "a")
+    assert h.outcomes() == ["upstream", "upstream", "shadow_cmp_mismatch"]
+
+
+def test_a_would_be_chain_answer_is_not_stored():
+    state = {"spot": 100.0}
+    h = Harness(Cfg(mode="shadow"), responses=lambda e, p: chain(spot=state["spot"]))
+    wide, narrow = ms.ChainKey.from_params(P()), ms.ChainKey.from_params(P(to="2026-10-09"))
+    h.gw.chains(P(), "collector")
+    h.clock += 10
+    state["spot"] = 101.0
+    h.gw.chains(P(), "collector")                    # on would have answered this
+    h.gw.chains(P(to="2026-10-09"), "scan")          # and this, from the wide chain
+    assert h.outcomes()[-4:] == ["upstream", "shadow_hit_match",
+                                 "upstream", "shadow_subset_mismatch"]
+    held = h.gw.chain_store.lookup(wide, max_age=45, now=h.clock, state="REGULAR")
+    assert held.age == 10.0 and json.loads(held.body)["underlyingPrice"] == 100.0
+    # Nothing was stored under the narrow request either: it is still a cut.
+    assert h.gw.chain_store.lookup(narrow, max_age=45, now=h.clock,
+                                   state="REGULAR").kind == "subset"
+
+
+def test_a_would_be_quote_hit_leaves_the_stored_quote_ageing():
+    h = Harness(Cfg(mode="shadow"), responses=quotes_for)
+    for _ in range(4):                               # every 3 s against a 5 s limit
+        h.gw.quotes("SPY", "a")
+        h.clock += 3
+    assert h.outcomes() == ["upstream", "upstream", "shadow_hit",
+                            "upstream", "upstream", "shadow_hit"]
+
+
+def test_a_shadow_partial_stores_only_what_on_would_have_fetched():
+    h = Harness(Cfg(mode="shadow"), responses=quotes_for)
+    h.gw.quotes("SPY", "a")
+    h.clock += 3
+    h.gw.quotes("SPY,DIA", "a")                      # on would have fetched DIA alone
+    h.clock += 3
+    h.gw.quotes("SPY", "a")                          # 6 s old: the partial did not refresh it
+    h.gw.quotes("DIA", "a")                          # 3 s old
+    assert h.outcomes() == ["upstream", "upstream", "shadow_partial",
+                            "upstream", "upstream", "shadow_hit"]
+
+
+def test_shadow_bars_follow_the_session_limit():
+    h = Harness(Cfg(mode="shadow"), responses=bars_for)
+    for _ in range(5):                               # every 600 s against 1740 s
+        h.gw.pricehistory(BAR, "scan")
+        h.clock += 600
+    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit",
+                               "upstream", "shadow_hit", "upstream",
+                               "upstream", "shadow_hit"]
+
+
+def test_shadow_reports_a_would_be_composed_bar_and_stores_nothing():
+    h = Harness(Cfg(mode="shadow", bars__today_bar="quote"), responses=bars_for)
+    h.gw.pricehistory(BAR, "scan")                   # stored at 1000
+    h.clock += 5000                                  # far past the session limit
+    h.gw.quotes("SPY", "market_svc", max_age=0)
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "pass" and got.data == series(FRI, MON)
+    assert bar_outcomes(h) == ["upstream",
+                               "upstream", "shadow_composed", "shadow_bar_match"]
+    _, fetched_at = h.gw.bar_store.get(ms.bar_key(BAR), epoch=("2026-10-05", "live"))
+    assert fetched_at == 1000.0
+
+
+def test_shadow_quote_mode_without_a_quote_follows_the_session_limit():
+    h = Harness(Cfg(mode="shadow", bars__today_bar="quote"), responses=bars_for)
+    h.gw.pricehistory(BAR, "scan")
+    h.clock += 600
+    h.gw.pricehistory(BAR, "scan")
+    h.clock += 1141                                  # 1741 s old: on would fetch
+    h.gw.pricehistory(BAR, "scan")
+    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit", "upstream"]
+
+
+# The sequences below are run once in on and once in shadow with the same
+# clock. Shadow's would-be answers must be exactly on's local answers.
+
+LOCAL_KINDS = ("hit", "subset", "composed", "partial")
+
+
+def would_be(outcome):
+    """What a shadow outcome says on would have answered, or None for one that
+    claims no saving (the compare-only and today's-bar verdicts)."""
+    if (not outcome.startswith("shadow_")
+            or outcome.startswith(("shadow_cmp_", "shadow_bar_"))):
+        return None
+    return outcome[len("shadow_"):].split("_")[0]
+
+
+def play(mode, steps, responses, **over):
+    h = Harness(Cfg(mode=mode, **over), responses=responses)
+    answers = []
+    for advance, ask in steps:
+        h.clock += advance
+        before = len(h.records)
+        served = ask(h)
+        if mode == "on":
+            answers.append(served.kind if served.kind in LOCAL_KINDS else "fetch")
+        else:
+            assert served.kind == "pass"
+            said = [w for w in (would_be(r[2]) for r in h.records[before:]) if w]
+            assert len(said) <= 1
+            answers.append(said[0] if said else "fetch")
+    return answers, len(h.calls)
+
+
+def collector(h):
+    return h.gw.chains(P(), "collector", max_age=20)
+
+
+def scan_same(h):
+    return h.gw.chains(P(), "scan")
+
+
+def scan_narrow(h):
+    return h.gw.chains(P(to="2026-10-09"), "scan")
+
+
+def daily(h):
+    return h.gw.pricehistory(BAR, "scan")
+
+
+def poll_quote(h):
+    return h.gw.quotes("SPY", "market_svc", max_age=0)
+
+
+SEQUENCES = {
+    # The collector's own poll never re-reads itself: on saves nothing.
+    "collector every 60 s with its own 20 s limit":
+        ([(60, collector)] * 20, lambda e, p: chain(), {},
+         ["fetch"] * 20),
+    # The same chain asked every 30 s against the 45 s limit: every other one.
+    "one chain every 30 s":
+        ([(30, scan_same)] * 8, lambda e, p: chain(), {},
+         ["fetch", "hit"] * 4),
+    # A scan 5 s behind each collector poll is cut from the collector's chain.
+    "a scan behind the collector":
+        ([(55, collector), (5, scan_narrow)] * 6, lambda e, p: chain(), {},
+         ["fetch", "subset"] * 6),
+    # Quotes every 3 s against the 5 s limit, with a second caller overlapping.
+    "quotes every 3 s and an overlapping caller":
+        ([(3, lambda h: h.gw.quotes("SPY,QQQ", "a")),
+          (1, lambda h: h.gw.quotes("SPY,DIA", "b"))] * 4, quotes_for, {},
+         ["fetch", "partial", "hit", "hit", "fetch", "partial", "hit", "hit"]),
+    # A daily series every 600 s during the session, against 1740 s.
+    "a daily series every 600 s":
+        ([(600, daily)] * 8, bars_for, {},
+         ["fetch", "hit", "hit", "fetch", "hit", "hit", "fetch", "hit"]),
+    # Quote mode with the dashboard's poll keeping the quote fresh.
+    "quote mode with a polled quote":
+        ([(0, daily)] + [(700, poll_quote), (1, daily)] * 4, bars_for,
+         {"bars__today_bar": "quote"},
+         ["fetch"] + ["fetch", "composed"] * 4),
+}
+
+
+@pytest.mark.parametrize("name", list(SEQUENCES))
+def test_shadow_counts_exactly_what_on_would_have_answered_locally(name):
+    steps, responses, over, expected = SEQUENCES[name]
+    on, on_calls = play("on", steps, responses, **over)
+    shadow, shadow_calls = play("shadow", steps, responses, **over)
+    assert on == expected
+    assert shadow == on
+    assert shadow_calls == len(steps)                # shadow always calls
+    assert on_calls == sum(a in ("fetch", "partial") for a in on)
