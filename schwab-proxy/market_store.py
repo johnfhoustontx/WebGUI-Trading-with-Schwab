@@ -19,6 +19,7 @@ import threading
 import time
 import zlib
 from collections import OrderedDict
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, time as _time, timedelta
 from zoneinfo import ZoneInfo
@@ -624,16 +625,38 @@ class _FetchFailed(Exception):
 
 class KeyedLocks:
     """One lock per request identity, so identical concurrent misses make one
-    upstream call. Keys carry dates, so the map grows by a few hundred a day;
-    the proxy restarts on every promote, long before that matters."""
+    upstream call.
+
+    Keys carry dates, so the map grows by a few hundred a day and the proxy
+    runs for weeks. ``prune`` drops the keys nobody is using. It can tell:
+    every request is counted from before it starts waiting until after it
+    lets go, so a lock that is held, or that anyone is waiting on, is never
+    dropped."""
 
     def __init__(self):
         self._guard = threading.Lock()
-        self._locks: dict = {}
+        self._locks: dict = {}    # key -> [lock, requests holding or awaiting it]
 
-    def get(self, key) -> threading.Lock:
+    @contextmanager
+    def holding(self, key):
+        """Hold ``key``'s lock for the length of the ``with`` block."""
         with self._guard:
-            return self._locks.setdefault(key, threading.Lock())
+            entry = self._locks.setdefault(key, [threading.Lock(), 0])
+            entry[1] += 1
+        try:
+            with entry[0]:
+                yield
+        finally:
+            with self._guard:
+                entry[1] -= 1
+
+    def prune(self) -> list:
+        """Drop every key no request holds or waits on. Returns them."""
+        with self._guard:
+            idle = [key for key, entry in self._locks.items() if entry[1] == 0]
+            for key in idle:
+                del self._locks[key]
+        return idle
 
 
 class Gateway:
@@ -648,7 +671,11 @@ class Gateway:
     Two rules hold everywhere: an upstream error is raised, never papered over
     with an old entry; and a bug in store code falls through to a plain fetch
     and is counted in ``degrades``. A failure of ``fetch`` itself is neither:
-    whatever it raised reaches the caller as it was, after one call.
+    whatever it raised reaches the caller as it was, after one call. And a
+    store bug AFTER the fetch never costs the answer already in hand or a
+    second call: it is counted, logged, and the caller gets what Schwab sent.
+    (One exception: a wider window was fetched and cannot be cut without the
+    store, so the request is then fetched as asked.)
 
     Every stored entry is stamped with the moment its fetch BEGAN, the
     conservative age: the data cannot be newer than the request for it.
@@ -703,6 +730,9 @@ class Gateway:
         # every request is one log line. The counter carries the count.
         self._warned: set = set()
         self._warned_lock = threading.Lock()
+        # The Central date the per-day state below was last pruned on.
+        self._day = None
+        self._day_lock = threading.Lock()
         self.chain_store = ChainStore()
         self.quote_store = QuoteStore()
         self.bar_store = BarStore()
@@ -760,11 +790,35 @@ class Gateway:
         self._record(label, caller, "upstream")
         return Served("pass", 0.0, data=data)
 
-    def _degraded(self, area: str) -> None:
+    def _degraded(self, area: str, *, answered: bool = False) -> None:
+        """Count and log a bug in store code. ``answered``: it happened after
+        the upstream fetch, and the caller is given what was fetched."""
         with self._degrade_lock:      # worker threads degrade concurrently
             self.degrades[area] = self.degrades.get(area, 0) + 1
-        self._log.warning("market store degraded in %s; fetching directly",
-                          area, exc_info=True)
+        self._log.warning(
+            "market store degraded in %s after the fetch; answering with what "
+            "Schwab sent" if answered else
+            "market store degraded in %s; fetching directly", area, exc_info=True)
+
+    def _new_day(self, today) -> None:
+        """Drop the per-request state nobody is using when the Central date
+        changes. Lock keys and failure records carry request dates and what
+        was warned about is per request, so all three grow without this; the
+        proxy runs for weeks.
+
+        Safe while requests are in flight: a lock that is held or awaited is
+        kept (``KeyedLocks.prune``), and so is its failure record, which its
+        waiters are about to read."""
+        if today == self._day:
+            return
+        with self._day_lock:
+            if today == self._day:
+                return
+            self._day = today
+        for key in self._locks.prune():
+            self._failures.pop(key, None)
+        with self._warned_lock:
+            self._warned.clear()          # so a difference is logged once a day
 
     def _warn_once(self, token, message, *args) -> None:
         """Log ``message`` at WARNING the first time ``token`` is seen."""
@@ -809,6 +863,7 @@ class Gateway:
         state = self._cal.session_at(now_ct).name
         key = ChainKey.from_params(params)
         store = self.chain_store
+        self._new_day(now_ct.date())
 
         limit = effective_max_age(max_age, cfg, closed=(state == "CLOSED"))
 
@@ -820,21 +875,28 @@ class Gateway:
                 key, max_age=float(cfg["shadow_compare_max_age_sec"]),
                 now=asked_at, state=state)
             data = self._fetch("/chains", params)
-            self._record("chains", caller, "upstream")
-            held = would or compare
-            if held is not None:
-                same = chain_shape(json.loads(held.body)) == chain_shape(data)
-                verdict = "match" if same else "mismatch"
-                name = held.kind if would is not None else "cmp"
-                self._record("chains", caller, f"shadow_{name}_{verdict}")
-                if not same:
-                    self._log.warning("shadow: stored %s answer for %s differs "
-                                      "from Schwab's", held.kind, key)
-            if would is None:
-                # On would have fetched and stored this. When on would have
-                # answered locally there was no fetch: the entry keeps ageing.
-                store.put(key, data, now=asked_at, state=state,
-                          max_entries=cfg["max_entries"])
+            try:
+                self._record("chains", caller, "upstream")
+                held = would or compare
+                if held is not None:
+                    same = chain_shape(json.loads(held.body)) == chain_shape(data)
+                    verdict = "match" if same else "mismatch"
+                    name = held.kind if would is not None else "cmp"
+                    outcome = f"shadow_{name}_{verdict}"
+                    self._record("chains", caller, outcome)
+                    if not same:
+                        # Once per request and outcome: a cut that differs
+                        # systematically differs on every request.
+                        self._warn_once(("chains", key, outcome),
+                                        "shadow: the stored %s answer for %s differs "
+                                        "from Schwab's (%s)", held.kind, key, outcome)
+                if would is None:
+                    # On would have fetched and stored this. When on would have
+                    # answered locally there was no fetch: the entry keeps ageing.
+                    store.put(key, data, now=asked_at, state=state,
+                              max_entries=cfg["max_entries"])
+            except Exception:  # noqa: BLE001 — never costs the answer in hand.
+                self._degraded("chains", answered=True)
             return Served("pass", 0.0, data=data)
 
         hit = store.lookup(key, max_age=limit, now=self._clock(), state=state)
@@ -846,15 +908,22 @@ class Gateway:
         fetch_key = wide or key
         lock_key = ("chains", fetch_key)
         ticket = next(self._tickets)
-        with self._locks.get(lock_key):
+        with self._locks.holding(lock_key):
             again = store.lookup(key, max_age=limit, now=self._clock(), state=state)
             if again is not None:
                 self._record("chains", caller, "coalesced")
                 return Served("coalesced", again.age, body=again.body)
             data, began = self._fetch_once(lock_key, ticket, "/chains",
                                            fetch_key.params())
-            kept = store.put(fetch_key, data, now=began, state=state,
-                             max_entries=cfg["max_entries"])
+            kept = False
+            try:
+                kept = store.put(fetch_key, data, now=began, state=state,
+                                 max_entries=cfg["max_entries"])
+            except Exception:  # noqa: BLE001 — never costs the answer in hand.
+                # Fetched as asked: the answer is returned below. A wider
+                # window cannot be cut without the store, so that one falls
+                # back to fetching the request as asked.
+                self._degraded("chains", answered=wide is None)
             self._record("chains", caller, "upstream")
         if wide is None:
             return Served("miss", 0.0, data=data)
@@ -899,25 +968,31 @@ class Gateway:
 
         if mode == "shadow":
             data = call(symbols)
-            self._record("quotes", caller, "upstream")
-            if not missing:
-                self._record("quotes", caller, "shadow_hit")
-            else:
-                if fresh:
-                    self._record("quotes", caller, "shadow_partial")
-                # On would have fetched, and so stored, only the symbols that
-                # were not fresh. The fresh ones keep ageing.
-                fetched = ({k: v for k, v in data.items() if k not in fresh}
-                           if isinstance(data, dict) else data)
-                store.put_many(fetched, now=asked_at,
-                               max_symbols=cfg["max_symbols"])
+            try:
+                self._record("quotes", caller, "upstream")
+                if not missing:
+                    self._record("quotes", caller, "shadow_hit")
+                else:
+                    if fresh:
+                        self._record("quotes", caller, "shadow_partial")
+                    # On would have fetched, and so stored, only the symbols
+                    # that were not fresh. The fresh ones keep ageing.
+                    fetched = ({k: v for k, v in data.items() if k not in fresh}
+                               if isinstance(data, dict) else data)
+                    store.put_many(fetched, now=asked_at,
+                                   max_symbols=cfg["max_symbols"])
+            except Exception:  # noqa: BLE001 — never costs the answer in hand.
+                self._degraded("quotes", answered=True)
             return Served("pass", 0.0, data=data)
 
         if not missing:
             self._record("quotes", caller, "hit")
             return Served("hit", oldest, data={s: fresh[s] for s in symbols})
         data = call(missing)
-        store.put_many(data, now=asked_at, max_symbols=cfg["max_symbols"])
+        try:
+            store.put_many(data, now=asked_at, max_symbols=cfg["max_symbols"])
+        except Exception:  # noqa: BLE001 — never costs the answer in hand.
+            self._degraded("quotes", answered=True)
         if not fresh:
             self._record("quotes", caller, "upstream")
             return Served("miss", 0.0, data=data)     # Schwab's answer, untouched
@@ -993,41 +1068,17 @@ class Gateway:
         key = bar_key(params)
         symbol = key[0]
         store = self.bar_store
+        self._new_day(now_ct.date())
 
         if mode == "shadow":
             would = self._bar_local(store.get(key, epoch=epoch), live, symbol,
                                     cfg, now_ct)
             began = self._clock()
             data = self._fetch("/pricehistory", params)
-            self._record("pricehistory", caller, "upstream")
-            if would is not None and would.kind == "hit":
-                # On would have served the stored series. Is it the series
-                # Schwab sends now? Once settled it is served all evening and
-                # all weekend, so a difference here is a wrong answer for hours.
-                same = series_agree(json.loads(would.body), data,
-                                    moving=now_ct.date() if live else None)
-                verdict = "match" if same else "mismatch"
-                self._record("pricehistory", caller, f"shadow_hit_{verdict}")
-                if not same:
-                    self._warn_once(("bars", key), "shadow: the stored daily series "
-                                    "for %s differs from Schwab's", key)
-            elif would is not None:
-                # A composed bar's content verdict is shadow_bar_*, below.
-                self._record("pricehistory", caller, f"shadow_{would.kind}")
-            if live:
-                quote, _age = self._today_quote(symbol, cfg, now_ct)
-                verdict = compare_today_bar(data, quote, now_ct.date())
-                if verdict != "no_quote":
-                    self._record("pricehistory", caller, f"shadow_bar_{verdict}")
-                    volume = compare_today_volume(data, quote, now_ct.date())
-                    if volume is not None:
-                        self._record("pricehistory", caller,
-                                     f"shadow_bar_volume_{volume}")
-            if would is None:
-                # On would have fetched and stored this series. Otherwise the
-                # held one keeps ageing, as it would under on.
-                store.put(key, data, now=began, epoch=epoch,
-                          max_entries=cfg["max_entries"])
+            try:
+                self._shadow_bars(would, data, began, key, epoch, cfg, now_ct, caller)
+            except Exception:  # noqa: BLE001 — never costs the answer in hand.
+                self._degraded("pricehistory", answered=True)
             return Served("pass", 0.0, data=data)
 
         seen = store.get(key, epoch=epoch)
@@ -1037,13 +1088,51 @@ class Gateway:
             return local
         lock_key = ("bars", key)
         ticket = next(self._tickets)
-        with self._locks.get(lock_key):
+        with self._locks.holding(lock_key):
             again = store.get(key, epoch=epoch)
             if again is not None and (seen is None or again[1] > seen[1]):
                 self._record("pricehistory", caller, "coalesced")
                 return Served("coalesced", self._clock() - again[1], body=again[0])
             data, began = self._fetch_once(lock_key, ticket, "/pricehistory", params)
-            store.put(key, data, now=began, epoch=epoch,
-                      max_entries=cfg["max_entries"])
+            try:
+                store.put(key, data, now=began, epoch=epoch,
+                          max_entries=cfg["max_entries"])
+            except Exception:  # noqa: BLE001 — never costs the answer in hand.
+                self._degraded("pricehistory", answered=True)
             self._record("pricehistory", caller, "upstream")
         return Served("miss", 0.0, data=data)
+
+    def _shadow_bars(self, would, data, began, key, epoch, cfg, now_ct, caller):
+        """Shadow's work on a daily series Schwab has just sent: what on would
+        have answered, whether that was right, and the store as on would have
+        left it. ``would`` is on's local answer, or None."""
+        live, symbol = epoch[1] == "live", key[0]
+        self._record("pricehistory", caller, "upstream")
+        if would is not None and would.kind == "hit":
+            # On would have served the stored series. Is it the series Schwab
+            # sends now? Once settled it is served all evening and all
+            # weekend, so a difference here is a wrong answer for hours.
+            same = series_agree(json.loads(would.body), data,
+                                moving=now_ct.date() if live else None)
+            verdict = "match" if same else "mismatch"
+            self._record("pricehistory", caller, f"shadow_hit_{verdict}")
+            if not same:
+                self._warn_once(("bars", key), "shadow: the stored daily series "
+                                "for %s differs from Schwab's", key)
+        elif would is not None:
+            # A composed bar's content verdict is shadow_bar_*, below.
+            self._record("pricehistory", caller, f"shadow_{would.kind}")
+        if live:
+            quote, _age = self._today_quote(symbol, cfg, now_ct)
+            verdict = compare_today_bar(data, quote, now_ct.date())
+            if verdict != "no_quote":
+                self._record("pricehistory", caller, f"shadow_bar_{verdict}")
+                volume = compare_today_volume(data, quote, now_ct.date())
+                if volume is not None:
+                    self._record("pricehistory", caller,
+                                 f"shadow_bar_volume_{volume}")
+        if would is None:
+            # On would have fetched and stored this series. Otherwise the held
+            # one keeps ageing, as it would under on.
+            self.bar_store.put(key, data, now=began, epoch=epoch,
+                               max_entries=cfg["max_entries"])

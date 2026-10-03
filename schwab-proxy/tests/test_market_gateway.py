@@ -115,15 +115,15 @@ def all_at_once(h, slow, first, others):
     From that point the outcome no longer depends on which thread runs next."""
     queued, asked = threading.Event(), []
     out = [None] * (1 + len(others))
-    real = h.gw._locks.get
+    real = h.gw._locks.holding
 
-    def get(key):
+    def holding(key):
         asked.append(key)
         if len(asked) == len(out):
             queued.set()
         return real(key)
 
-    h.gw._locks.get = get
+    h.gw._locks.holding = holding
 
     def run(i, fn):
         try:
@@ -502,12 +502,12 @@ def test_a_degrade_is_counted_under_a_lock(monkeypatch):
 
 
 def test_a_store_bug_after_the_fetch_still_answers_and_is_counted(monkeypatch):
-    # The accepted cost: Schwab is called a second time.
+    # The answer is already in hand: it is returned, and Schwab is not asked twice.
     h = Harness()
     monkeypatch.setattr(h.gw.chain_store, "put", boom)
     got = h.gw.chains(P(), "a")
-    assert got.kind == "pass" and body(got) == chain()
-    assert len(h.calls) == 2 and h.gw.degrades == {"chains": 1}
+    assert got.kind == "miss" and body(got) == chain()
+    assert len(h.calls) == 1 and h.gw.degrades == {"chains": 1}
 
 
 def test_a_store_bug_in_shadow_falls_through_and_is_counted(monkeypatch):
@@ -2062,3 +2062,243 @@ def test_a_would_be_composed_bar_keeps_its_own_name():
 def test_no_daily_series_outcome_is_a_bare_shadow_hit_any_more():
     assert shadow_repeat(THREE, THREE) == ["upstream", "shadow_hit_match"]
     assert shadow_repeat(THREE, THREE, at=(4, 0)) == ["upstream", "shadow_hit_match"]
+
+
+# ---- a store bug after the fetch never discards the answer -------------------
+
+STORE_PUTS = {"chains": ("chain_store", "put"),
+              "quotes": ("quote_store", "put_many"),
+              "pricehistory": ("bar_store", "put")}
+
+
+def any_answer(endpoint, params):
+    if endpoint == "/chains":
+        return chain()
+    return bars_for(endpoint, params)
+
+
+@pytest.mark.parametrize("mode", ["shadow", "on"])
+@pytest.mark.parametrize("endpoint", list(ASKS))
+def test_a_put_that_raises_costs_neither_the_answer_nor_a_second_call(
+        mode, endpoint, monkeypatch):
+    h = Harness(Cfg(mode=mode), responses=any_answer)
+    store, method = STORE_PUTS[endpoint]
+    monkeypatch.setattr(getattr(h.gw, store), method, boom)
+    got = ASKS[endpoint](h)
+    assert len(h.calls) == 1                                 # one upstream call
+    assert got.data == any_answer(h.calls[0][0], h.calls[0][1])      # Schwab's answer
+    assert got.kind == ("pass" if mode == "shadow" else "miss")
+    assert h.gw.degrades == {endpoint: 1}                    # counted, once
+    assert h.outcomes() == ["upstream"]
+
+
+def test_a_comparison_that_raises_in_shadow_costs_no_second_call(monkeypatch):
+    h = Harness(Cfg(mode="shadow"), responses=any_answer)
+    h.gw.chains(P(), "a")
+    h.gw.pricehistory(BAR, "a")
+    monkeypatch.setattr(ms, "chain_shape", boom)
+    monkeypatch.setattr(ms, "series_agree", boom)
+    assert h.gw.chains(P(), "a").data == chain()
+    assert h.gw.pricehistory(BAR, "a").data == series(FRI, MON)
+    assert len(h.calls) == 4 and h.gw.degrades == {"chains": 1, "pricehistory": 1}
+
+
+def test_a_bar_verdict_that_raises_in_shadow_costs_no_second_call(monkeypatch):
+    h = Harness(Cfg(mode="shadow"), responses=any_answer)
+    h.gw.quotes("SPY", "market_svc")
+    monkeypatch.setattr(ms, "compare_today_bar", boom)
+    got = h.gw.pricehistory(BAR, "a")
+    assert got.kind == "pass" and got.data == series(FRI, MON)
+    assert bar_calls(h) == 1 and h.gw.degrades == {"pricehistory": 1}
+
+
+def test_a_quote_store_bug_after_the_partial_fetch_still_answers_in_full(monkeypatch):
+    h = Harness(responses=quotes_for)
+    h.gw.quotes("SPY", "a")
+    monkeypatch.setattr(h.gw.quote_store, "put_many", boom)
+    got = h.gw.quotes("DIA,SPY", "a")
+    assert got.kind == "partial" and list(got.data) == ["DIA", "SPY"]
+    assert len(h.calls) == 2 and h.gw.degrades == {"quotes": 1}
+
+
+def test_a_store_bug_after_the_fetch_says_the_answer_was_kept(monkeypatch, caplog):
+    h = Harness()
+    monkeypatch.setattr(h.gw.chain_store, "put", boom)
+    with caplog.at_level("WARNING", logger="market_store"):
+        h.gw.chains(P(), "a")
+    (rec,) = [r for r in caplog.records if r.name == "market_store"]
+    assert "after the fetch" in rec.getMessage() and "chains" in rec.getMessage()
+    assert rec.exc_info is not None and rec.exc_info[0] is RuntimeError
+
+
+@pytest.mark.parametrize("method", ["put", "cut"])
+def test_a_store_bug_on_a_wide_refetch_still_falls_back_to_a_plain_fetch(method, monkeypatch):
+    # The wide chain cannot be cut without the store, and the caller asked for
+    # the narrow window: that is fetched as asked.
+    h = Harness()
+    h.gw.chains(P(), "collector")
+    h.clock += 50
+    monkeypatch.setattr(h.gw.chain_store, method, boom)
+    got = h.gw.chains(P(to="2026-10-09"), "scan")
+    assert [c[1]["toDate"] for c in h.calls] == ["2026-10-12", "2026-10-12", "2026-10-09"]
+    assert got.kind == "pass" and got.data == chain()
+    assert h.gw.degrades == {"chains": 1}
+
+
+# ---- one log line per repeating difference -----------------------------------
+
+def store_warnings(caplog):
+    return [r.getMessage() for r in caplog.records
+            if r.name == "market_store" and r.levelname == "WARNING"]
+
+
+def test_a_chain_shape_difference_is_logged_once_per_request_and_outcome(caplog):
+    # The fake sends the full chain for the narrow window too, so every cut of
+    # the collector's chain differs from "Schwab's" answer.
+    h = Harness(Cfg(mode="shadow"))
+    h.gw.chains(P(), "collector")
+    with caplog.at_level("WARNING", logger="market_store"):
+        for _ in range(3):
+            h.gw.chains(P(to="2026-10-09"), "scan")
+        assert h.outcomes().count("shadow_subset_mismatch") == 3     # all counted
+        assert len(store_warnings(caplog)) == 1                      # one line
+        h.clock += 60                    # past the serving limit: compare-only
+        h.gw.chains(P(to="2026-10-08"), "scan")      # shadow_cmp_mismatch; stored
+        h.gw.chains(P(to="2026-10-07"), "scan")      # a cut of that one: subset
+    assert h.outcomes()[-3:] == ["shadow_cmp_mismatch", "upstream", "shadow_subset_mismatch"]
+    assert len(store_warnings(caplog)) == 3          # each request its own line
+
+
+def test_the_same_request_is_logged_again_for_a_different_outcome(caplog):
+    h = Harness(Cfg(mode="shadow"))
+    h.gw.chains(P(), "collector")
+    with caplog.at_level("WARNING", logger="market_store"):
+        h.gw.chains(P(to="2026-10-09"), "scan")      # shadow_subset_mismatch
+        h.gw.chains(P(to="2026-10-09"), "scan")
+        h.clock += 60
+        h.gw.chains(P(to="2026-10-09"), "scan")      # shadow_cmp_mismatch
+    assert h.outcomes()[-1] == "shadow_cmp_mismatch"
+    assert len(store_warnings(caplog)) == 2
+
+
+# ---- per-day state is dropped when the date changes --------------------------
+
+TUE = dt.datetime(2026, 10, 6, 10, 0, tzinfo=CT)
+
+
+def test_idle_locks_are_dropped_and_a_lock_in_use_never_is():
+    locks = ms.KeyedLocks()
+    with locks.holding("a"):
+        pass
+    with locks.holding("b"):
+        assert locks.prune() == ["a"]                # "b" is held
+        assert list(locks._locks) == ["b"]
+    assert locks.prune() == ["b"] and locks._locks == {}
+    assert locks.prune() == []
+
+
+def test_a_lock_a_request_is_waiting_on_is_never_dropped():
+    locks = ms.KeyedLocks()
+    inside, peak = [], []
+    entered, gate = threading.Event(), threading.Event()
+
+    def work(wait):
+        with locks.holding("k"):
+            inside.append(1)
+            peak.append(len(inside))
+            entered.set()
+            if wait:
+                gate.wait(5)
+            inside.pop()
+
+    a = threading.Thread(target=work, args=(True,))
+    a.start()
+    assert entered.wait(5)
+    b = threading.Thread(target=work, args=(False,))
+    b.start()
+    for _ in range(500):                             # until b is queueing
+        if locks._locks["k"][1] == 2:
+            break
+        threading.Event().wait(0.01)
+    assert locks._locks["k"][1] == 2
+    assert locks.prune() == []                       # held by a, awaited by b
+    c = threading.Thread(target=work, args=(False,))
+    c.start()                                        # must queue on the SAME lock
+    gate.set()
+    for t in (a, b, c):
+        t.join(5)
+    assert peak == [1, 1, 1]                         # never two inside at once
+    assert locks.prune() == ["k"]
+
+
+def test_a_new_day_drops_yesterdays_locks_and_failure_records():
+    state = {"fail": False}
+    h = Harness(responses=lambda e, p: ms.UpstreamError(503, "unavailable")
+                if state["fail"] else any_answer(e, p))
+    for to in ("2026-10-09", "2026-10-10", "2026-10-12"):
+        h.gw.chains(P(to=to), "a")
+    h.gw.pricehistory(BAR, "a")
+    state["fail"] = True
+    with pytest.raises(ms.UpstreamError):
+        h.gw.chains(P(to="2026-10-13"), "a")
+    state["fail"] = False
+    assert len(h.gw._locks._locks) == 5 and len(h.gw._failures) == 1
+    # The same day: nothing is dropped.
+    h.gw.chains(P(to="2026-10-14"), "a")
+    assert len(h.gw._locks._locks) == 6 and len(h.gw._failures) == 1
+    # The next day's first request drops what nobody is using.
+    h.now_ct = TUE
+    h.clock += 86400
+    h.gw.chains(P(frm="2026-10-06", to="2026-10-13"), "a")
+    assert list(h.gw._locks._locks) == [
+        ("chains", ms.ChainKey.from_params(P(frm="2026-10-06", to="2026-10-13")))]
+    assert h.gw._failures == {}
+
+
+def test_a_daily_series_request_drops_yesterdays_state_too():
+    h = Harness(responses=any_answer)
+    h.gw.chains(P(), "a")
+    h.now_ct = TUE
+    h.clock += 86400
+    h.gw.pricehistory(BAR, "a")
+    assert list(h.gw._locks._locks) == [("bars", ms.bar_key(BAR))]
+
+
+def test_a_fetch_in_flight_across_midnight_keeps_its_lock():
+    slow = Slow(lambda e, p: chain(), hold={"SPY"})
+    h = Harness(responses=slow)
+    out = {}
+    a = threading.Thread(target=lambda: out.update(a=h.gw.chains(P(), "a").kind))
+    a.start()
+    assert slow.started.wait(5)                      # SPY's fetch is in flight
+    h.now_ct = TUE
+    h.gw.chains({**P(), "symbol": "QQQ"}, "x")       # the new day's first request
+    assert ("chains", ms.ChainKey.from_params(P())) in h.gw._locks._locks
+    queued = threading.Event()
+    real = h.gw._locks.holding
+
+    def holding(key):
+        queued.set()
+        return real(key)
+
+    h.gw._locks.holding = holding
+    b = threading.Thread(target=lambda: out.update(b=h.gw.chains(P(), "b").kind))
+    b.start()
+    assert queued.wait(5)
+    slow.gate.set()
+    a.join(5)
+    b.join(5)
+    assert out == {"a": "miss", "b": "coalesced"}
+    assert [c[1]["symbol"] for c in h.calls].count("SPY") == 1
+
+
+def test_a_repeating_difference_is_logged_again_on_a_new_day(caplog):
+    h = Harness(Cfg(mode="shadow"))
+    with caplog.at_level("WARNING", logger="market_store"):
+        for day in (h.now_ct, TUE):
+            h.now_ct = day
+            h.gw.chains(P(), "collector")
+            h.gw.chains(P(to="2026-10-09"), "scan")
+            h.gw.chains(P(to="2026-10-09"), "scan")
+    assert h.outcomes().count("shadow_subset_mismatch") == 4
+    assert len(store_warnings(caplog)) == 2
