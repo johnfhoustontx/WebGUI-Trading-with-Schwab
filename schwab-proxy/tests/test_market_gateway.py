@@ -88,6 +88,55 @@ def body(served):
     return json.loads(served.body) if served.body is not None else served.data
 
 
+class Slow:
+    """An upstream call that blocks until ``gate`` is set, for the symbols in
+    ``hold`` (every symbol when ``hold`` is None)."""
+
+    def __init__(self, answer, hold=None):
+        self.started, self.gate = threading.Event(), threading.Event()
+        self.answer, self.hold = answer, hold
+
+    def __call__(self, endpoint, params):
+        symbol = params.get("symbol") or params.get("symbols")
+        if self.hold is None or symbol in self.hold:
+            self.started.set()
+            self.gate.wait(5)
+        return self.answer(endpoint, params)
+
+
+def two_at_once(h, slow, first, second):
+    """Run ``first`` until it is inside the upstream call, start ``second`` and
+    wait until it has passed its own first look at the store and is queueing
+    for the same request lock, then let the call finish. Returns both answers.
+
+    From that point the outcome no longer depends on which thread runs next."""
+    queued, asked, out = threading.Event(), [], [None, None]
+    real = h.gw._locks.get
+
+    def get(key):
+        asked.append(key)
+        if len(asked) == 2:
+            queued.set()
+        return real(key)
+
+    h.gw._locks.get = get
+
+    def run(i, fn):
+        out[i] = fn()
+
+    a = threading.Thread(target=run, args=(0, first))
+    a.start()
+    assert slow.started.wait(5)
+    b = threading.Thread(target=run, args=(1, second))
+    b.start()
+    assert queued.wait(5)
+    slow.gate.set()
+    a.join(5)
+    b.join(5)
+    assert not a.is_alive() and not b.is_alive()
+    return out
+
+
 # ---- mode: off -------------------------------------------------------------
 
 def test_off_passes_every_request_through_and_stores_nothing():
@@ -203,23 +252,11 @@ def test_a_store_bug_falls_through_to_a_plain_fetch_and_is_counted(monkeypatch):
 
 
 def test_two_concurrent_identical_misses_make_one_call():
-    gate, started = threading.Event(), threading.Event()
-
-    def slow(endpoint, params):
-        started.set()
-        gate.wait(5)
-        return chain()
-
+    slow = Slow(lambda endpoint, params: chain())
     h = Harness(responses=slow)
-    kinds = []
-    threads = [threading.Thread(target=lambda: kinds.append(h.gw.chains(P(), "a").kind))
-               for _ in range(2)]
-    threads[0].start()
-    started.wait(5)
-    threads[1].start()
-    gate.set()
-    for t in threads:
-        t.join(5)
+    # The second request is queueing on the lock before the first call returns.
+    kinds = [served.kind for served in two_at_once(
+        h, slow, lambda: h.gw.chains(P(), "a"), lambda: h.gw.chains(P(), "a"))]
     assert len(h.calls) == 1 and sorted(kinds) == ["coalesced", "miss"]
 
 
@@ -259,55 +296,6 @@ EMPTY = {**chain(), "callExpDateMap": {}, "putExpDateMap": {}}
 
 def boom(*args, **kwargs):
     raise RuntimeError("boom")
-
-
-class Slow:
-    """An upstream call that blocks until ``gate`` is set, for the symbols in
-    ``hold`` (every symbol when ``hold`` is None)."""
-
-    def __init__(self, answer, hold=None):
-        self.started, self.gate = threading.Event(), threading.Event()
-        self.answer, self.hold = answer, hold
-
-    def __call__(self, endpoint, params):
-        symbol = params.get("symbol") or params.get("symbols")
-        if self.hold is None or symbol in self.hold:
-            self.started.set()
-            self.gate.wait(5)
-        return self.answer(endpoint, params)
-
-
-def two_at_once(h, slow, first, second):
-    """Run ``first`` until it is inside the upstream call, start ``second`` and
-    wait until it has passed its own first look at the store and is queueing
-    for the same request lock, then let the call finish. Returns both answers.
-
-    From that point the outcome no longer depends on which thread runs next."""
-    queued, asked, out = threading.Event(), [], [None, None]
-    real = h.gw._locks.get
-
-    def get(key):
-        asked.append(key)
-        if len(asked) == 2:
-            queued.set()
-        return real(key)
-
-    h.gw._locks.get = get
-
-    def run(i, fn):
-        out[i] = fn()
-
-    a = threading.Thread(target=run, args=(0, first))
-    a.start()
-    assert slow.started.wait(5)
-    b = threading.Thread(target=run, args=(1, second))
-    b.start()
-    assert queued.wait(5)
-    slow.gate.set()
-    a.join(5)
-    b.join(5)
-    assert not a.is_alive() and not b.is_alive()
-    return out
 
 
 def test_a_mode_that_is_not_one_of_the_three_answers_nothing_locally():
@@ -456,6 +444,24 @@ def test_a_store_bug_leaves_a_warning_with_its_traceback(monkeypatch, caplog):
     (rec,) = [r for r in caplog.records if r.name == "market_store"]
     assert rec.levelname == "WARNING" and "chains" in rec.getMessage()
     assert rec.exc_info is not None and rec.exc_info[0] is RuntimeError
+
+
+def test_a_degrade_is_counted_under_a_lock(monkeypatch):
+    # Many worker threads can degrade at once; a read-then-write loses counts.
+    h = Harness()
+    held = []
+
+    class Watched(dict):
+        def __setitem__(self, area, count):
+            held.append(h.gw._degrade_lock.locked())
+            super().__setitem__(area, count)
+
+    h.gw.degrades = Watched()
+    monkeypatch.setattr(h.gw.chain_store, "lookup", boom)
+    h.gw.chains(P(), "a")
+    h.gw.chains(P(), "a")
+    assert held == [True, True] and h.gw.degrades == {"chains": 2}
+    assert not h.gw._degrade_lock.locked()
 
 
 def test_a_store_bug_after_the_fetch_still_answers_and_is_counted(monkeypatch):
@@ -738,21 +744,46 @@ def bar_outcomes(h):
     return [r[2] for r in h.records if r[0] == "pricehistory"]
 
 
+def quote_100_series_90(endpoint, params):
+    """The quote says 100; Schwab's own bar for today closes at 90."""
+    return (quotes_for(endpoint, params) if endpoint == "/quotes"
+            else series(FRI, MON, close=90.0))
+
+
+def last_close(served):
+    return body(served)["candles"][-1]["close"]
+
+
 def test_quote_mode_never_builds_todays_bar_from_a_quote_fetched_before_the_open():
-    h = Harness(Cfg(bars__today_bar="quote"), responses=bars_for)
+    h = Harness(Cfg(bars__today_bar="quote"), responses=quote_100_series_90)
     set_time(h, 8, 29, 30)
     h.gw.quotes("SPY", "market_svc")                 # yesterday's open, high, low
     set_time(h, 8, 30, 10)
     assert h.gw.pricehistory(BAR, "scan").kind == "miss"     # first of the period
     set_time(h, 8, 30, 30)
-    # The quote is 60 s old, inside the 120 s limit, but the session is 30 s old.
-    assert h.gw.pricehistory(BAR, "scan").kind == "miss"
-    assert bar_calls(h) == 2
+    # The quote is 60 s old, inside the 120 s limit, but the session is 30 s old:
+    # it is not used. The series is 20 s old, so Schwab's own bar is served.
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "hit" and last_close(got) == 90.0
+    assert bar_calls(h) == 1
     set_time(h, 8, 30, 40)
     h.gw.quotes("SPY", "market_svc", max_age=0)      # fetched since the open
     set_time(h, 8, 30, 50)
     got = h.gw.pricehistory(BAR, "scan")
-    assert got.kind == "composed" and got.data["candles"][-1]["close"] == 100.0
+    assert got.kind == "composed" and last_close(got) == 100.0
+    assert bar_calls(h) == 1
+
+
+def test_a_pre_open_quote_is_not_used_when_the_series_is_past_its_limit_either():
+    h = Harness(Cfg(bars__today_bar="quote", bars__session_ttl_sec=15),
+                responses=quote_100_series_90)
+    set_time(h, 8, 29, 30)
+    h.gw.quotes("SPY", "market_svc")
+    set_time(h, 8, 30, 10)
+    h.gw.pricehistory(BAR, "scan")
+    set_time(h, 8, 30, 30)                           # series 20 s old, limit 15
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "miss" and last_close(got) == 90.0
     assert bar_calls(h) == 2
 
 
@@ -780,13 +811,49 @@ def test_at_the_instant_of_the_open_no_quote_is_usable():
 
 
 def test_well_after_the_open_the_quotes_own_age_limit_still_applies():
-    h = Harness(Cfg(bars__today_bar="quote"), responses=bars_for)
+    h = Harness(Cfg(bars__today_bar="quote"), responses=quote_100_series_90)
     h.gw.pricehistory(BAR, "scan")
     h.gw.quotes("SPY", "market_svc")
     h.clock += 120
-    assert h.gw.pricehistory(BAR, "scan").kind == "composed"
-    h.clock += 1
-    assert h.gw.pricehistory(BAR, "scan").kind == "miss" and bar_calls(h) == 2
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "composed" and last_close(got) == 100.0
+    h.clock += 1                                     # the quote is now too old
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "hit" and last_close(got) == 90.0 and bar_calls(h) == 1
+
+
+# ---- quote mode is never worse than ttl mode --------------------------------
+
+def test_quote_mode_without_a_quote_serves_the_series_inside_the_session_limit():
+    h = Harness(Cfg(bars__today_bar="quote"), responses=bars_for)
+    h.gw.pricehistory(BAR, "scan")
+    h.clock += 600
+    got = h.gw.pricehistory(BAR, "sentiment")
+    assert (got.kind, got.age) == ("hit", 600.0) and body(got) == series(FRI, MON)
+    h.clock += 1140                                  # the limit itself still hits
+    assert h.gw.pricehistory(BAR, "sentiment").kind == "hit"
+    assert len(h.calls) == 1
+    assert bar_outcomes(h) == ["upstream", "hit", "hit"]
+
+
+def test_quote_mode_without_a_quote_fetches_past_the_session_limit():
+    h = Harness(Cfg(bars__today_bar="quote"), responses=bars_for)
+    h.gw.pricehistory(BAR, "scan")
+    h.clock += 1741
+    assert h.gw.pricehistory(BAR, "scan").kind == "miss" and len(h.calls) == 2
+    h.clock += 600                                   # the new series is 600 s old
+    assert h.gw.pricehistory(BAR, "scan").kind == "hit" and len(h.calls) == 2
+
+
+@pytest.mark.parametrize("series_age", [0, 600, 1740, 1741, 20000])
+def test_quote_mode_with_a_usable_quote_composes_however_old_the_series_is(series_age):
+    h = Harness(Cfg(bars__today_bar="quote"), responses=quote_100_series_90)
+    h.gw.pricehistory(BAR, "scan")
+    h.clock += series_age
+    h.gw.quotes("SPY", "market_svc", max_age=0)
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "composed" and last_close(got) == 100.0
+    assert bar_calls(h) == 1 and bar_outcomes(h) == ["upstream", "composed"]
 
 
 # ---- quotes: gaps found by review and mutation testing ----------------------
@@ -987,12 +1054,16 @@ def test_a_composed_bar_is_counted_and_leaves_the_stored_series_alone():
     assert json.loads(stored) == series(FRI, MON, close=90.0)
 
 
-def test_a_quote_that_cannot_build_a_bar_means_a_fetch():
+def test_a_quote_that_cannot_build_a_bar_is_the_same_as_no_quote():
     h = Harness(Cfg(bars__today_bar="quote"),
                 responses=lambda e, p: {"SPY": {"quote": {"lastPrice": 100.0}}}
-                if e == "/quotes" else series(FRI, MON))
+                if e == "/quotes" else series(FRI, MON, close=90.0))
     h.gw.pricehistory(BAR, "scan")
     h.gw.quotes("SPY", "market_svc")
+    got = h.gw.pricehistory(BAR, "scan")             # inside the session limit
+    assert got.kind == "hit" and last_close(got) == 90.0 and bar_calls(h) == 1
+    h.clock += 1741
+    h.gw.quotes("SPY", "market_svc", max_age=0)
     assert h.gw.pricehistory(BAR, "scan").kind == "miss" and bar_calls(h) == 2
 
 

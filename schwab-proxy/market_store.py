@@ -536,6 +536,7 @@ class Gateway:
         self._now_ct = now_ct or (lambda: datetime.now(CT))
         self._log = log or logging.getLogger("market_store")
         self._locks = KeyedLocks()
+        self._degrade_lock = threading.Lock()
         self.chain_store = ChainStore()
         self.quote_store = QuoteStore()
         self.bar_store = BarStore()
@@ -556,7 +557,8 @@ class Gateway:
         return Served("pass", 0.0, data=data)
 
     def _degraded(self, area: str) -> None:
-        self.degrades[area] = self.degrades.get(area, 0) + 1
+        with self._degrade_lock:      # worker threads degrade concurrently
+            self.degrades[area] = self.degrades.get(area, 0) + 1
         self._log.warning("market store degraded in %s; fetching directly",
                           area, exc_info=True)
 
@@ -738,7 +740,9 @@ class Gateway:
                 if composed is not None:
                     self._record("pricehistory", caller, "composed")
                     return Served("composed", 0.0, data=composed)
-            elif age <= float(cfg["session_ttl_sec"]):
+            # No usable quote, or ttl mode: the series as fetched, inside the
+            # session limit. So quote mode is never worse than ttl mode.
+            if age <= float(cfg["session_ttl_sec"]):
                 self._record("pricehistory", caller, "hit")
                 return Served("hit", age, body=body)
         with self._locks.get(("bars", key)):
