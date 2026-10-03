@@ -257,3 +257,42 @@ class ChainStore:
         if entry is None:
             return None
         return _render(entry, key.from_date, key.to_date)
+
+
+#############################################
+# QUOTES
+#############################################
+
+class QuoteStore:
+    """Schwab's raw per-symbol quote blocks, each with its own fetch time.
+    Bounded by the app's symbol universe (about 900), so it needs no eviction."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._quotes: dict = {}
+
+    def put_many(self, payload, *, now: float) -> None:
+        if not isinstance(payload, dict):
+            return
+        with self._lock:
+            for symbol, block in payload.items():
+                # "errors" is Schwab's invalid-symbols bucket, not a quote.
+                if symbol != "errors" and isinstance(block, dict):
+                    self._quotes[symbol] = (block, now)
+
+    def split(self, symbols, *, max_age: float, now: float):
+        """``(fresh {symbol: block}, missing [symbol], oldest fresh age)``."""
+        fresh, missing, oldest = {}, [], 0.0
+        with self._lock:
+            for symbol in symbols:
+                got = self._quotes.get(symbol)
+                age = None if got is None else now - got[1]
+                if age is not None and max_age > 0 and 0 <= age <= max_age:
+                    fresh[symbol] = got[0]
+                    oldest = max(oldest, age)
+                else:
+                    missing.append(symbol)
+        return fresh, missing, oldest
+
+    def get(self, symbol: str, *, max_age: float, now: float):
+        return self.split([symbol], max_age=max_age, now=now)[0].get(symbol)
