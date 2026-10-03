@@ -521,32 +521,69 @@ def compare_today_volume(upstream, quote, today) -> str | None:
 _CANDLE_FIELDS = ("open", "high", "low", "close", "volume")
 
 
-def series_agree(stored, fresh, *, moving=None) -> bool:
-    """Whether a stored daily series is the one Schwab sends now: the same
-    bars on the same days with the same open, high, low, close and volume.
+_SHOWN_MAX = 30          # characters of one value in a described difference
+_DIFFERENCE_MAX = 120    # characters of the whole description: one log line
+
+
+def _shown(value) -> str:
+    """One value for a log line, cut short however large it is."""
+    try:
+        text = repr(value)
+    except Exception:  # noqa: BLE001 — an int too long to print, for one.
+        text = f"<{type(value).__name__}>"
+    return text if len(text) <= _SHOWN_MAX else text[:_SHOWN_MAX - 3] + "..."
+
+
+def series_difference(stored, fresh, *, moving=None) -> str | None:
+    """The FIRST difference between a stored daily series and the one Schwab
+    sends now, in a few words for the log, or None when they are the same
+    series: the same bars on the same days with the same open, high, low,
+    close and volume. ``stored`` is named first, ``fresh`` second.
 
     ``moving`` is today's date during the session in progress. Today's bar
     legitimately moves then, so when the last bar is today's its values are
     not compared; its presence and its day still are. Anything else that
     differs is a real difference: a revised bar, a split-adjusted history, a
-    bar added or dropped."""
+    bar added or dropped.
+
+    What an operator reads it for: ``length 251 vs 252`` is a bar added
+    (today's, appearing after a first fetch at the open); ``bar 0 (oldest):
+    datetime ...`` is the window's first bar sliding; ``last bar: volume ...``
+    is a late revision to the settled bar."""
     ours = stored.get("candles") if isinstance(stored, dict) else None
     theirs = fresh.get("candles") if isinstance(fresh, dict) else None
     if not isinstance(ours, list) or not isinstance(theirs, list):
-        return False
+        return "not a series"
     if len(ours) != len(theirs):
-        return False
+        return f"length {len(ours)} vs {len(theirs)}"
     last = len(ours) - 1
+
+    def at(i, what):
+        where = ("last bar" if i == last else "bar 0 (oldest)" if i == 0
+                 else f"bar {last - i} from the end")
+        return f"{where}: {what}"[:_DIFFERENCE_MAX]
+
     for i, (a, b) in enumerate(zip(ours, theirs)):
         if not isinstance(a, dict) or not isinstance(b, dict):
-            return False
+            return at(i, "not a bar")
         if a.get("datetime") != b.get("datetime"):
-            return False
+            day_a, day_b = _candle_date(a), _candle_date(b)
+            if day_a is not None and day_b is not None and day_a != day_b:
+                return at(i, f"datetime {day_a.isoformat()} vs {day_b.isoformat()}")
+            return at(i, f"datetime {_shown(a.get('datetime'))} vs "
+                         f"{_shown(b.get('datetime'))}")
         if i == last and moving is not None and _candle_date(b) == moving:
             continue
-        if any(a.get(field) != b.get(field) for field in _CANDLE_FIELDS):
-            return False
-    return True
+        for field in _CANDLE_FIELDS:
+            if a.get(field) != b.get(field):
+                return at(i, f"{field} {_shown(a.get(field))} vs {_shown(b.get(field))}")
+    return None
+
+
+def series_agree(stored, fresh, *, moving=None) -> bool:
+    """Whether a stored daily series is the one Schwab sends now. Exactly
+    ``series_difference(...) is None``: one comparison, read two ways."""
+    return series_difference(stored, fresh, moving=moving) is None
 
 
 class BarStore:
@@ -696,7 +733,8 @@ class Gateway:
       (some were; on would have fetched the rest).
     * daily bars - ``shadow_hit_match`` / ``shadow_hit_mismatch``: on would
       have served the stored series, and whether it is the series Schwab sends
-      now (:func:`series_agree`). ``shadow_composed``: on would have built
+      now (:func:`series_difference`; the first mismatch per series logs what
+      differed). ``shadow_composed``: on would have built
       today's bar from the quote. And the today's-bar verdicts, which claim no
       saving: ``shadow_bar_match`` / ``shadow_bar_mismatch`` /
       ``shadow_bar_no_today`` on the four prices, and
@@ -1112,13 +1150,15 @@ class Gateway:
             # On would have served the stored series. Is it the series Schwab
             # sends now? Once settled it is served all evening and all
             # weekend, so a difference here is a wrong answer for hours.
-            same = series_agree(json.loads(would.body), data,
-                                moving=now_ct.date() if live else None)
-            verdict = "match" if same else "mismatch"
+            difference = series_difference(json.loads(would.body), data,
+                                           moving=now_ct.date() if live else None)
+            verdict = "match" if difference is None else "mismatch"
             self._record("pricehistory", caller, f"shadow_hit_{verdict}")
-            if not same:
+            if difference is not None:
+                # What differed, so each mismatch can be explained: a bar
+                # added, the window's first bar sliding, a revised value.
                 self._warn_once(("bars", key), "shadow: the stored daily series "
-                                "for %s differs from Schwab's", key)
+                                "for %s differs from Schwab's: %s", key, difference)
         elif would is not None:
             # A composed bar's content verdict is shadow_bar_*, below.
             self._record("pricehistory", caller, f"shadow_{would.kind}")

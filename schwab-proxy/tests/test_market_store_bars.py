@@ -426,3 +426,140 @@ def test_something_that_is_not_a_series_never_agrees():
         assert ms.series_agree(held, junk) is False
         assert ms.series_agree(junk, held) is False
     assert ms.series_agree(held, {"candles": [1, 2, 3]}) is False
+
+
+# ---- what differed, for the log ----------------------------------------------
+
+import pytest  # noqa: E402
+
+HELD = series(THU, FRI, MON)
+
+
+def test_agreement_has_no_difference():
+    assert ms.series_difference(HELD, series(THU, FRI, MON)) is None
+    assert ms.series_difference(HELD, series(THU, FRI, MON), moving=MON) is None
+    moved = _with(HELD, -1, high=105.0, close=104.0, volume=9999)
+    assert ms.series_difference(HELD, moved, moving=MON) is None
+
+
+def test_a_bar_added_or_dropped_is_named_by_the_two_lengths():
+    # Today's bar appearing after a first fetch at the open.
+    assert ms.series_difference(series(THU, FRI), HELD, moving=MON) == "length 2 vs 3"
+    assert ms.series_difference(HELD, series(FRI, MON)) == "length 3 vs 2"
+
+
+def test_a_revised_value_names_the_bar_the_field_and_both_values():
+    # A late volume revision to the settled bar.
+    assert (ms.series_difference(HELD, _with(HELD, -1, volume=1200))
+            == "last bar: volume 1000 vs 1200")
+    assert (ms.series_difference(HELD, _with(HELD, -1, close=101.5))
+            == "last bar: close 100.0 vs 101.5")
+    assert (ms.series_difference(HELD, _with(HELD, 1, open=98.5), moving=MON)
+            == "bar 1 from the end: open 99.0 vs 98.5")
+    assert (ms.series_difference(HELD, _with(HELD, 0, low=97.0))
+            == "bar 0 (oldest): low 98.0 vs 97.0")
+    four = series(dt.date(2026, 9, 30), THU, FRI, MON)
+    assert (ms.series_difference(four, _with(four, 1, high=111.0))
+            == "bar 2 from the end: high 101.0 vs 111.0")
+
+
+def test_a_bar_on_a_different_day_names_both_days():
+    # The one-year window's first bar sliding.
+    slid = _with(HELD, 0, datetime=stamp(dt.date(2026, 9, 30)))
+    assert (ms.series_difference(HELD, slid)
+            == "bar 0 (oldest): datetime 2026-10-01 vs 2026-09-30")
+    assert (ms.series_difference(HELD, _with(HELD, -1, datetime=stamp(SAT)), moving=MON)
+            == "last bar: datetime 2026-10-05 vs 2026-10-03")
+
+
+def test_two_stamps_on_one_day_are_shown_as_they_are():
+    later = _with(HELD, 0, datetime=stamp(THU) + 3_600_000)
+    assert (ms.series_difference(HELD, later)
+            == f"bar 0 (oldest): datetime {stamp(THU)} vs {stamp(THU) + 3_600_000}")
+    assert (ms.series_difference(HELD, _with(HELD, 0, datetime=None))
+            == f"bar 0 (oldest): datetime {stamp(THU)} vs None")
+
+
+def test_the_first_difference_is_the_one_described():
+    # Oldest bar first; within a bar the day, then open, high, low, close, volume.
+    both = _with(_with(HELD, 0, close=77, volume=5), -1, open=1)
+    assert ms.series_difference(HELD, both) == "bar 0 (oldest): close 100.0 vs 77"
+    assert ms.series_difference(HELD, _scaled(HELD, 0.5)) == "bar 0 (oldest): open 99.0 vs 49.5"
+
+
+def test_a_missing_field_is_shown_as_none():
+    gone = json.loads(json.dumps(HELD))
+    del gone["candles"][-1]["volume"]
+    assert ms.series_difference(HELD, gone) == "last bar: volume 1000 vs None"
+
+
+def test_something_that_is_not_a_series_says_so():
+    for junk in (None, [], "x", {}, {"candles": None}, {"candles": "x"}):
+        assert ms.series_difference(HELD, junk) == "not a series"
+        assert ms.series_difference(junk, HELD) == "not a series"
+    assert ms.series_difference(HELD, {"candles": [1, 2, 3]}) == "bar 0 (oldest): not a bar"
+    assert ms.series_difference(HELD, {"candles": HELD["candles"][:2] + ["x"]}) == "last bar: not a bar"
+
+
+def test_a_one_bar_series_names_its_only_bar_the_last():
+    one = series(MON)
+    assert ms.series_difference(one, _with(one, 0, close=5)) == "last bar: close 100.0 vs 5"
+
+
+def test_a_description_stays_short_whatever_the_values():
+    huge = [10 ** 400, "x" * 5000, -(10 ** 400), {"k": "v" * 900}, list(range(900)), 1e308]
+    for value in huge:
+        for field in ("open", "volume", "datetime"):
+            for index in (0, 1, -1):
+                text = ms.series_difference(HELD, _with(HELD, index, **{field: value}))
+                assert text is not None and len(text) <= 120, (len(text), text[:80])
+        text = ms.series_difference(_with(HELD, 0, close=value), _with(HELD, 0, close=1))
+        assert text is not None and len(text) <= 120
+        # Each value is cut on its own, so the second one is never pushed off the end.
+        assert text.startswith("bar 0 (oldest): close ") and text.endswith(" vs 1")
+    assert len(ms.series_difference({"candles": [{}] * 10 ** 6}, HELD)) <= 120
+
+
+# Every pair the series_agree tests above use, as (stored, fresh, moving).
+AGREE_CASES = [
+    (HELD, series(THU, FRI, MON), None),
+    (HELD, series(THU, FRI, MON), MON),
+    *[(HELD, _with(HELD, -1, **{f: 77}), None)
+      for f in ("open", "high", "low", "close", "volume")],
+    (HELD, _with(HELD, -1, high=105.0, close=104.0, volume=9999), MON),
+    (HELD, _with(HELD, -1, high=105.0, close=104.0, volume=9999), None),
+    (series(THU, FRI), _with(series(THU, FRI), -1, close=77), MON),
+    (HELD, _with(HELD, 0, close=77), MON),
+    (HELD, _with(HELD, 1, volume=77), MON),
+    (HELD, _with(HELD, 0, close=77), None),
+    (HELD, _scaled(HELD, 0.5), None),
+    (HELD, _scaled(HELD, 0.5), MON),
+    (HELD, series(FRI, MON), None),
+    (series(THU, FRI), HELD, MON),
+    (HELD, _with(HELD, 0, datetime=stamp(SAT)), None),
+    (HELD, _with(HELD, -1, datetime=stamp(SAT)), MON),
+    *[(HELD, junk, None) for junk in (None, [], "x", {}, {"candles": None}, {"candles": "x"})],
+    *[(junk, HELD, None) for junk in (None, [], "x", {}, {"candles": None}, {"candles": "x"})],
+    (HELD, {"candles": [1, 2, 3]}, None),
+]
+
+
+@pytest.mark.parametrize("case", range(len(AGREE_CASES)))
+def test_agreeing_is_exactly_having_no_difference(case):
+    stored, fresh, moving = AGREE_CASES[case]
+    difference = ms.series_difference(stored, fresh, moving=moving)
+    assert ms.series_agree(stored, fresh, moving=moving) is (difference is None)
+    assert difference is None or (isinstance(difference, str) and difference)
+
+
+def test_the_cases_cover_both_answers():
+    answers = {ms.series_agree(s, f, moving=m) for s, f, m in AGREE_CASES}
+    assert answers == {True, False}
+
+
+def test_series_agree_is_built_on_series_difference(monkeypatch):
+    # One comparison, two readings of it: they cannot disagree.
+    monkeypatch.setattr(ms, "series_difference", lambda *a, **k: "last bar: close 1 vs 2")
+    assert ms.series_agree(HELD, HELD) is False
+    monkeypatch.setattr(ms, "series_difference", lambda *a, **k: None)
+    assert ms.series_agree(HELD, series(FRI)) is True

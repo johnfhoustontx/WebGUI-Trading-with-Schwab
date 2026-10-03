@@ -2097,7 +2097,7 @@ def test_a_comparison_that_raises_in_shadow_costs_no_second_call(monkeypatch):
     h.gw.chains(P(), "a")
     h.gw.pricehistory(BAR, "a")
     monkeypatch.setattr(ms, "chain_shape", boom)
-    monkeypatch.setattr(ms, "series_agree", boom)
+    monkeypatch.setattr(ms, "series_difference", boom)
     assert h.gw.chains(P(), "a").data == chain()
     assert h.gw.pricehistory(BAR, "a").data == series(FRI, MON)
     assert len(h.calls) == 4 and h.gw.degrades == {"chains": 1, "pricehistory": 1}
@@ -2302,3 +2302,58 @@ def test_a_repeating_difference_is_logged_again_on_a_new_day(caplog):
             h.gw.chains(P(to="2026-10-09"), "scan")
     assert h.outcomes().count("shadow_subset_mismatch") == 4
     assert len(store_warnings(caplog)) == 2
+
+
+# ---- the bar-series mismatch log names what differed -------------------------
+
+def series_warning(first, second, at):
+    """The one WARNING a mismatching repeat of one series logs."""
+    import logging
+    state = {"series": first}
+    h = Harness(Cfg(mode="shadow"), responses=moving_series(state))
+    set_time(h, *at)
+    seen = []
+
+    class Catch(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+
+    handler = Catch(level=logging.WARNING)
+    logging.getLogger("market_store").addHandler(handler)
+    try:
+        h.gw.pricehistory(BAR, "scan")
+        state["series"] = second
+        h.gw.pricehistory(BAR, "scan")
+        h.gw.pricehistory(BAR, "scan")
+    finally:
+        logging.getLogger("market_store").removeHandler(handler)
+    assert bar_outcomes(h).count("shadow_hit_mismatch") == 2 and h.gw.degrades == {}
+    (line,) = seen                                   # still one line per series
+    return line
+
+
+def test_the_mismatch_warning_says_what_differed():
+    line = series_warning(THREE, revised(THREE, -1, volume=1200), SETTLED)
+    assert "SPY" in line and line.endswith("last bar: volume 1000 vs 1200")
+    line = series_warning(THREE, revised(THREE, 0, close=101.5), (10, 0))
+    assert line.endswith("bar 0 (oldest): close 100.0 vs 101.5")
+    line = series_warning(series(dt.date(2026, 10, 1), FRI), THREE, (10, 0))
+    assert line.endswith("length 2 vs 3")
+
+
+def test_the_warning_is_the_description_series_difference_gives():
+    fresh = revised(THREE, 1, high=111.0)
+    line = series_warning(THREE, fresh, SETTLED)
+    assert line.endswith(ms.series_difference(THREE, fresh))
+
+
+def test_a_fault_while_describing_the_difference_still_returns_schwabs_answer(monkeypatch):
+    state = {"series": THREE}
+    h = Harness(Cfg(mode="shadow"), responses=moving_series(state))
+    set_time(h, *SETTLED)
+    h.gw.pricehistory(BAR, "scan")
+    state["series"] = revised(THREE, -1, close=101.5)
+    monkeypatch.setattr(ms, "series_difference", boom)
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "pass" and got.data == state["series"]
+    assert bar_calls(h) == 2 and h.gw.degrades == {"pricehistory": 1}
