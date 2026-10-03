@@ -103,3 +103,431 @@ def test_a_one_sided_window_is_not_an_empty_one():
     wide["putExpDateMap"] = {}
     out = se.slice_chain(wide, D, D + dt.timedelta(days=4))
     assert out["underlyingPrice"] == 100.0 and out["numberOfContracts"] == 3
+
+
+# ── Task 16: the scan fetches one wide chain per symbol ─────────────────────
+
+from shared import marketdata_config as mdc  # noqa: E402
+
+
+class _Client:
+    class Options:
+        class ContractType:
+            ALL = "ALL"
+
+    def __init__(self):
+        self.windows = []
+
+    def get_option_chain(self, symbol, contract_type=None, from_date=None,
+                         to_date=None, **kw):
+        self.windows.append(((from_date - D).days, (to_date - D).days))
+
+        class R:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return _chain()
+        return R()
+
+
+def _cfg(monkeypatch, wide, exclude=("SPY",)):
+    monkeypatch.setattr(mdc, "section", lambda name: {
+        "wide_fetch": wide, "wide_fetch_exclude": list(exclude)})
+
+
+def test_wide_fetch_off_keeps_three_fetches(monkeypatch):
+    _cfg(monkeypatch, wide=False)
+    c = _Client()
+    out = se.scan_chains(c, "AAPL", D)
+    assert sorted(c.windows) == [(0, 4), (5, 15), (20, 45)]
+    assert set(out) == {"iv", "swing", "zero"}
+
+
+def test_wide_fetch_on_makes_one_fetch_and_cuts_three_windows(monkeypatch):
+    _cfg(monkeypatch, wide=True)
+    c = _Client()
+    out = se.scan_chains(c, "AAPL", D)
+    assert c.windows == [(0, 45)]
+    assert _dtes(out["zero"]) == [0, 2, 4]
+    assert _dtes(out["swing"]) == [7, 14]
+    assert _dtes(out["iv"]) == [21, 30, 44]
+
+
+def test_an_excluded_symbol_keeps_three_fetches(monkeypatch):
+    _cfg(monkeypatch, wide=True, exclude=("SPY", "$SPX"))
+    c = _Client()
+    se.scan_chains(c, "SPY", D)
+    assert len(c.windows) == 3
+
+
+def test_a_failed_wide_fetch_yields_three_missing_chains(monkeypatch):
+    _cfg(monkeypatch, wide=True)
+    monkeypatch.setattr(se, "fetch_option_chain", lambda *a, **k: None)
+    assert se.scan_chains(_Client(), "AAPL", D) == {"iv": None, "swing": None, "zero": None}
+
+
+def test_unreadable_config_keeps_three_fetches(monkeypatch):
+    monkeypatch.setattr(mdc, "section",
+                        lambda name: (_ for _ in ()).throw(RuntimeError("x")))
+    c = _Client()
+    se.scan_chains(c, "AAPL", D)
+    assert len(c.windows) == 3
+
+
+# ── the exclusion list is hand-typed ────────────────────────────────────────
+
+def test_the_exclusion_list_matches_whatever_the_case(monkeypatch):
+    _cfg(monkeypatch, wide=True, exclude=("spy", "$spx"))
+    for symbol in ("SPY", "$SPX", "Spy"):
+        c = _Client()
+        se.scan_chains(c, symbol, D)
+        assert len(c.windows) == 3, symbol
+
+
+def test_a_stray_item_in_the_exclusion_list_neither_raises_nor_excludes(monkeypatch):
+    _cfg(monkeypatch, wide=True, exclude=(7, None, 2.5, True, ["SPY"], "qqq"))
+    c = _Client()
+    se.scan_chains(c, "AAPL", D)
+    assert c.windows == [(0, 45)]             # the junk excluded nothing
+    c = _Client()
+    se.scan_chains(c, "QQQ", D)
+    assert len(c.windows) == 3                # and the real entry beside it still works
+
+
+def test_an_exclusion_list_that_is_not_a_list_keeps_three_fetches(monkeypatch):
+    """A bare string would otherwise be read letter by letter and exclude nothing."""
+    monkeypatch.setattr(mdc, "section", lambda name: {
+        "wide_fetch": True, "wide_fetch_exclude": "SPY"})
+    c = _Client()
+    se.scan_chains(c, "SPY", D)
+    assert len(c.windows) == 3
+
+
+def test_only_a_literal_true_switches_the_wide_fetch_on(monkeypatch):
+    for value in ("true", 1, None):
+        _cfg(monkeypatch, wide=value)
+        c = _Client()
+        se.scan_chains(c, "AAPL", D)
+        assert len(c.windows) == 3, value
+
+
+def test_the_shipped_setting_is_off():
+    """Nothing has switched this on: the tracked file ships three fetches."""
+    assert mdc.section("scan")["wide_fetch"] is False
+    c = _Client()
+    se.scan_chains(c, "AAPL", D)
+    assert len(c.windows) == 3
+
+
+# ── off is exactly what the scan did before ─────────────────────────────────
+
+class _Recorder(_Client):
+    """Records every request whole: positional args and every keyword."""
+
+    def __init__(self):
+        super().__init__()
+        self.requests = []
+
+    def get_option_chain(self, *args, **kwargs):
+        self.requests.append((args, kwargs))
+        return super().get_option_chain(*args, **kwargs)
+
+
+def _day(n):
+    return D + dt.timedelta(days=n)
+
+
+def test_wide_fetch_off_sends_the_same_three_requests_as_before(monkeypatch):
+    """The three requests ``_fetch_symbol_data`` made before ``scan_chains``
+    existed, argument for argument and in the order it made them: the +20..+45
+    IV window, the +5..+15 swing window, the 0..+4 window."""
+    _cfg(monkeypatch, wide=False)
+    c = _Recorder()
+    se.scan_chains(c, "AAPL", D)
+    assert c.requests == [
+        (("AAPL",), {"contract_type": "ALL", "from_date": _day(20), "to_date": _day(45)}),
+        (("AAPL",), {"contract_type": "ALL", "from_date": _day(5), "to_date": _day(15)}),
+        (("AAPL",), {"contract_type": "ALL", "from_date": D, "to_date": _day(4)}),
+    ]
+
+
+def test_the_wide_request_differs_from_a_window_request_only_in_its_dates(monkeypatch):
+    _cfg(monkeypatch, wide=True)
+    c = _Recorder()
+    se.scan_chains(c, "AAPL", D)
+    assert c.requests == [
+        (("AAPL",), {"contract_type": "ALL", "from_date": D, "to_date": _day(45)})]
+
+
+def test_the_scan_windows_are_the_ones_the_scan_has_always_used():
+    assert se.scan_windows(D) == {
+        "zero": (D, _day(4)), "swing": (_day(5), _day(15)), "iv": (_day(20), _day(45))}
+
+
+# ── a cut window equals the fetch it stands in for ──────────────────────────
+
+def _schwab_answer(master, lo, hi):
+    """What Schwab answers for the window ``[lo, hi]`` of ``master``. Written
+    WITHOUT ``slice_chain``, so the comparison below is not the function against
+    itself. An empty window comes back as Schwab's own: price 0.0, no contracts."""
+    out = dict(master, status="SUCCESS")
+    count = 0
+    for side in ("callExpDateMap", "putExpDateMap"):
+        kept = {}
+        for key, strikes in master[side].items():
+            if lo <= dt.date.fromisoformat(key.split(":")[0]) <= hi:
+                kept[key] = strikes
+                count += sum(len(c) for c in strikes.values())
+        out[side] = kept
+    out["numberOfContracts"] = count
+    if count == 0:
+        out["underlyingPrice"] = 0.0
+    return out
+
+
+class _Response:
+    status_code = 200
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+class _Schwab(_Client):
+    """Serves each requested window of one master chain, as Schwab would."""
+
+    def __init__(self, master):
+        super().__init__()
+        self.master = master
+
+    def get_option_chain(self, symbol, contract_type=None, from_date=None,
+                         to_date=None, **kw):
+        self.windows.append(((from_date - D).days, (to_date - D).days))
+        return _Response(_schwab_answer(self.master, from_date, to_date))
+
+
+def _master(days):
+    exp = {f"{_day(n).isoformat()}:{n}": {"100.0": [{"x": n}], "105.0": [{"x": -n}]}
+           for n in days}
+    return {"symbol": "AAPL", "underlyingPrice": 100.0,
+            "callExpDateMap": dict(exp), "putExpDateMap": dict(exp)}
+
+
+def _both_ways(monkeypatch, days):
+    _cfg(monkeypatch, wide=False)
+    three = _Schwab(_master(days))
+    fetched = se.scan_chains(three, "AAPL", D)
+    _cfg(monkeypatch, wide=True)
+    one = _Schwab(_master(days))
+    cut = se.scan_chains(one, "AAPL", D)
+    assert len(three.windows) == 3 and one.windows == [(0, 45)]
+    return fetched, cut
+
+
+def test_cut_windows_equal_what_three_fetches_return(monkeypatch):
+    fetched, cut = _both_ways(monkeypatch, [0, 2, 4, 7, 14, 21, 30, 44])
+    assert cut == fetched
+    assert cut["zero"]["numberOfContracts"] == 12    # vacuity: 3 exp x 2 strikes x 2 sides
+
+
+def test_cut_windows_equal_three_fetches_when_a_window_lists_nothing(monkeypatch):
+    """A monthlies-only name: nothing in 0..+4 or +5..+15. Schwab answers those
+    two windows with price 0.0 and no contracts, and so must the cut."""
+    fetched, cut = _both_ways(monkeypatch, [30])
+    assert cut == fetched
+    for name in ("zero", "swing"):
+        assert cut[name]["callExpDateMap"] == {} and cut[name]["underlyingPrice"] == 0.0
+        assert not se.chain_has_underlying(cut[name])
+    assert se.chain_has_underlying(cut["iv"])
+
+
+def test_cut_windows_equal_three_fetches_when_the_iv_window_lists_nothing(monkeypatch):
+    fetched, cut = _both_ways(monkeypatch, [1, 7])
+    assert cut == fetched
+    assert cut["iv"]["callExpDateMap"] == {} and cut["iv"]["putExpDateMap"] == {}
+
+
+# ── run_iv_analysis' own fallback fetch ─────────────────────────────────────
+# Handed a +20..+45 chain with no expirations, ``run_iv_analysis`` re-asks for
+# that window and then for 0..+60. It decides on ``callExpDateMap`` alone, so a
+# cut window with nothing in it must set off exactly the fetches Schwab's own
+# empty answer does.
+
+import iv_analysis  # noqa: E402
+
+
+def _real_today():
+    """The date ``run_iv_analysis`` and ``run_full_scan`` read for themselves."""
+    return dt.datetime.now(se.TZ).date()
+
+
+class _IvClient(_Client):
+    """Answers the 0..+60 fallback with a real ladder and everything narrower
+    with Schwab's empty window."""
+
+    def __init__(self, today):
+        super().__init__()
+        self.today = today
+
+    def get_option_chain(self, symbol, contract_type=None, from_date=None,
+                         to_date=None, **kw):
+        window = ((from_date - self.today).days, (to_date - self.today).days)
+        self.windows.append(window)
+        if window != (0, 60):
+            return _Response(_schwab_empty_window())
+        key = f"{(self.today + dt.timedelta(days=30)).isoformat()}:30"
+        ladder = {key: {"100.0": [{"volatility": 22.0}]}}
+        return _Response({"underlyingPrice": 100.0, "status": "SUCCESS",
+                          "callExpDateMap": ladder, "putExpDateMap": ladder})
+
+
+def _iv_run(chain):
+    client = _IvClient(_real_today())
+    result = iv_analysis.run_iv_analysis(client, "AAPL", price=100.0,
+                                         hist={"candles": []}, chain=chain)
+    return client.windows, result
+
+
+def test_a_cut_empty_iv_window_sets_off_the_same_fallback_as_schwabs_empty_answer():
+    cut = se.slice_chain(_schwab_chain(), _day(50), _day(60))
+    assert cut["callExpDateMap"] == {}                 # the window really is empty
+    cut_windows, cut_result = _iv_run(cut)
+    schwab_windows, schwab_result = _iv_run(_schwab_empty_window())
+    assert cut_windows == schwab_windows == [(20, 45), (0, 60)]
+    assert cut_result == schwab_result
+    assert cut_result["current_iv"] == 22.0            # the fallback's chain was used
+
+
+def test_a_failed_wide_fetch_sets_off_the_same_fallback_as_a_failed_iv_fetch(monkeypatch):
+    with monkeypatch.context() as m:
+        m.setattr(mdc, "section", lambda name: {"wide_fetch": True,
+                                                "wide_fetch_exclude": []})
+        m.setattr(se, "fetch_option_chain", lambda *a, **k: None)
+        chain_iv = se.scan_chains(_Client(), "AAPL", D)["iv"]
+    assert chain_iv is None
+    windows, result = _iv_run(chain_iv)
+    assert windows == [(20, 45), (0, 60)] and result["current_iv"] == 22.0
+
+
+def test_a_cut_iv_window_with_expirations_needs_no_fallback():
+    today = _real_today()
+    key = f"{(today + dt.timedelta(days=30)).isoformat()}:30"
+    ladder = {key: {"100.0": [{"volatility": 31.0}]}}
+    wide = {"underlyingPrice": 100.0, "status": "SUCCESS",
+            "callExpDateMap": ladder, "putExpDateMap": ladder}
+    cut = se.slice_chain(wide, today + dt.timedelta(days=20),
+                         today + dt.timedelta(days=45))
+    windows, result = _iv_run(cut)
+    assert windows == [] and result["current_iv"] == 31.0
+
+
+# ── through run_full_scan ───────────────────────────────────────────────────
+
+import pytest  # noqa: E402
+
+from tests.test_scanner_engine import (  # noqa: E402,F401  (fake_client is a fixture)
+    _FAKE_SYMBOLS, _chain_at, fake_client)
+
+SYMBOLS = ["SPY", "QQQ"]
+
+
+def _scan_master(spot, today, days):
+    """One symbol's whole listed chain: a ``_chain_at`` ladder per expiration."""
+    master = {"underlyingPrice": spot, "putExpDateMap": {}, "callExpDateMap": {}}
+    for n in days:
+        one = _chain_at(spot, (today + dt.timedelta(days=n)).isoformat(), n)
+        master["putExpDateMap"].update(one["putExpDateMap"])
+        master["callExpDateMap"].update(one["callExpDateMap"])
+    return master
+
+
+@pytest.fixture
+def scan(fake_client, monkeypatch, tmp_path):  # noqa: F811
+    """``run(wide, days)`` -> ``(results, {symbol: [window, ...]})``.
+
+    ``fake_client`` with its chain endpoint swapped for one that serves each
+    requested window of a master chain as Schwab would, and records the window.
+    """
+    monkeypatch.setattr(se, "IV_HISTORY_DB", tmp_path / "iv.db")
+    today = _real_today()
+
+    def run(wide, days):
+        _cfg(monkeypatch, wide=wide, exclude=())
+        masters = {sym: _scan_master(spot, today, days)
+                   for sym, (spot, _trend) in _FAKE_SYMBOLS.items()}
+        calls = {sym: [] for sym in SYMBOLS}
+
+        def get_option_chain(symbol, contract_type=None, from_date=None,
+                             to_date=None, **kw):
+            calls[symbol].append(((from_date - today).days, (to_date - today).days))
+            return _Response(_schwab_answer(masters[symbol], from_date, to_date))
+
+        fake_client.get_option_chain = get_option_chain
+        return se.run_full_scan(fake_client, symbols=SYMBOLS), calls
+
+    return run
+
+
+def _identity(signals):
+    """Which trades a list holds, leaving out everything that moves with the
+    clock between two runs (scores, marks worked against time to expiry)."""
+    keys = ("symbol", "type", "strategy", "expiration", "short_strike",
+            "long_strike", "put_short", "put_long", "call_short", "call_long")
+    return sorted(
+        repr([s.get(k) for k in keys]
+             + [(leg.get("strike"), leg.get("option_type"), leg.get("side"))
+                for leg in (s.get("legs") or [])])
+        for s in signals)
+
+
+def test_a_scan_with_the_wide_fetch_off_makes_its_three_fetches_per_symbol(scan):
+    results, calls = scan(False, [1, 7, 30])
+    for symbol in SYMBOLS:
+        assert sorted(calls[symbol]) == [(0, 4), (5, 15), (20, 45)], symbol
+    assert results["signals_0dte"] and results["signals_swing"]
+
+
+def test_a_scan_with_the_wide_fetch_on_makes_one_fetch_per_symbol(scan):
+    results, calls = scan(True, [1, 7, 30])
+    for symbol in SYMBOLS:
+        assert calls[symbol] == [(0, 45)], symbol
+    assert results["signals_0dte"] and results["signals_swing"]
+
+
+def test_a_scan_finds_the_same_trades_either_way(scan):
+    off, _ = scan(False, [1, 7, 30])
+    on, _ = scan(True, [1, 7, 30])
+    for key in ("signals_0dte", "signals_swing", "signals_directional"):
+        assert _identity(on[key]) == _identity(off[key]), key
+        assert off[key], key                           # vacuity: there were trades
+    assert on["iv_data"] == off["iv_data"]
+    for symbol in SYMBOLS:
+        assert on["funnel"][symbol]["buckets"] == off["funnel"][symbol]["buckets"]
+
+
+def test_a_scan_with_no_expiration_in_the_iv_window_falls_back_either_way(scan):
+    """``run_iv_analysis`` re-asks for +20..+45 and then 0..+60 whether the
+    empty IV chain was fetched or cut, and measures the same volatility."""
+    off, off_calls = scan(False, [1, 7])
+    on, on_calls = scan(True, [1, 7])
+    for symbol in SYMBOLS:
+        assert sorted(off_calls[symbol]) == [(0, 4), (0, 60), (5, 15), (20, 45), (20, 45)]
+        assert sorted(on_calls[symbol]) == [(0, 45), (0, 60), (20, 45)]
+        assert on["iv_data"][symbol]["current_iv"] is not None
+    assert on["iv_data"] == off["iv_data"]
+
+
+def test_a_scan_reports_an_empty_window_the_same_either_way(scan):
+    """A name with nothing listed in 0..+4: the funnel's ``underlying_zero`` is
+    what the page words its reason from, and it must not depend on whether the
+    window was fetched or cut."""
+    off, _ = scan(False, [7, 30])
+    on, _ = scan(True, [7, 30])
+    for symbol in SYMBOLS:
+        assert on["funnel"][symbol]["buckets"]["0DTE"] == \
+            off["funnel"][symbol]["buckets"]["0DTE"]
+        assert on["funnel"][symbol]["buckets"]["0DTE"]["underlying_zero"] is True
+        assert on["funnel"][symbol]["buckets"]["SWING"]["underlying_zero"] is False

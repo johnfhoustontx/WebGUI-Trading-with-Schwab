@@ -210,6 +210,63 @@ def slice_chain(chain, from_date, to_date):
     return out
 
 
+def scan_windows(today):
+    """The scan's three chain windows as ``{name: (from_date, to_date)}``:
+    ``zero`` 0..+4 days (the "0-DTE" bucket), ``swing`` +5..+15 and ``iv``
+    +20..+45 (ATM IV extraction). Why those ranges is recorded in
+    ``run_full_scan``, beside the DTE bounds that have to agree with them."""
+    return {
+        "zero": (today, today + timedelta(days=4)),
+        "swing": (today + timedelta(days=5), today + timedelta(days=15)),
+        "iv": (today + timedelta(days=20), today + timedelta(days=45)),
+    }
+
+
+# The order the three windows are fetched in when each is its own request: the
+# order ``run_full_scan`` has always asked for them.
+_SCAN_FETCH_ORDER = ("iv", "swing", "zero")
+
+
+def _wide_scan(symbol) -> bool:
+    """Whether the scan fetches ONE wide chain for ``symbol`` (config/marketdata.toml
+    [scan]). Any trouble reading the setting means three fetches, as before.
+
+    The exclusion list is hand-typed, so it is matched without regard to case
+    and anything in it that is not text is ignored. A list that is not a list
+    at all excludes everything: three fetches is the safe reading of a setting
+    that cannot be read.
+    """
+    try:
+        from shared import marketdata_config
+        cfg = marketdata_config.section("scan")
+        if cfg.get("wide_fetch") is not True:
+            return False
+        listed = cfg.get("wide_fetch_exclude", [])
+        if not isinstance(listed, (list, tuple)):
+            return False
+        exclude = {s.strip().upper() for s in listed if isinstance(s, str)}
+        return str(symbol).strip().upper() not in exclude
+    except Exception:  # noqa: BLE001 — the old behaviour is the safe fallback.
+        log.debug("wide scan fetch setting unreadable for %s", symbol, exc_info=True)
+        return False
+
+
+def scan_chains(client, symbol, today) -> dict:
+    """The scan's three chains for one symbol: ``{"iv", "swing", "zero"}``.
+
+    One fetch out to the last window's end, cut locally, when the wide fetch is
+    on for this symbol; otherwise three fetches. A failed wide fetch yields
+    three ``None``s, exactly what three failed fetches would."""
+    windows = scan_windows(today)
+    if _wide_scan(symbol):
+        wide = fetch_option_chain(client, symbol, from_date=windows["zero"][0],
+                                  to_date=windows["iv"][1])
+        return {name: slice_chain(wide, lo, hi) for name, (lo, hi) in windows.items()}
+    return {name: fetch_option_chain(client, symbol, from_date=windows[name][0],
+                                     to_date=windows[name][1])
+            for name in _SCAN_FETCH_ORDER}
+
+
 def fetch_price_history(client, symbol):
     try:
         r = client.get_price_history_every_day(symbol)
@@ -1969,12 +2026,12 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
     #     credit; DTE 1-4 has meaningful overnight/multi-day theta to harvest.
     #   "SWING" bucket scans 5-15 DTE.
     # IV analysis still wants 20-45 DTE for ATM IV extraction.
-    iv_from = today + timedelta(days=20)
-    iv_to = today + timedelta(days=45)
-    zerodte_from = today
-    zerodte_to = today + timedelta(days=4)
-    swing_from = today + timedelta(days=5)
-    swing_to = today + timedelta(days=15)
+    # The dates themselves come from ``scan_windows``, the one definition the
+    # fetch and the local cut of a wide chain (``scan_chains``) both read.
+    _windows = scan_windows(today)
+    iv_from, iv_to = _windows["iv"]
+    zerodte_from, zerodte_to = _windows["zero"]
+    swing_from, swing_to = _windows["swing"]
     zerodte_min_dte = 0
     zerodte_max_dte = 4
     swing_min_dte = 5
@@ -2000,8 +2057,14 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
         # Swing (1-15 DTE) and IV analysis (20-45 DTE) windows are disjoint,
         # so fetch them separately. run_iv_analysis falls back to a broader
         # 0-60 DTE fetch internally if its chain comes back empty.
-        chain_iv = fetch_option_chain(client, symbol, from_date=iv_from, to_date=iv_to)
-        chain_swing = fetch_option_chain(client, symbol, from_date=swing_from, to_date=swing_to)
+        # "0-DTE" bucket now covers 0-4 DTE — fetch the whole window in one call.
+        #
+        # ``scan_chains`` makes those three fetches (iv_from..iv_to,
+        # swing_from..swing_to, zerodte_from..zerodte_to) - or, when
+        # config/marketdata.toml [scan] wide_fetch is on for this symbol, ONE
+        # fetch from zerodte_from to iv_to cut into the same three windows.
+        chains = scan_chains(client, symbol, today)
+        chain_iv, chain_swing, chain_0 = chains["iv"], chains["swing"], chains["zero"]
         try:
             iv_data = run_iv_analysis(
                 client, symbol, price=price, hist=hist, chain=chain_iv,
@@ -2009,8 +2072,6 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
         except Exception as e:
             log.warning(f"  IV analysis for {symbol} failed: {e}")
             iv_data = _empty_iv_data(symbol)
-        # "0-DTE" bucket now covers 0-4 DTE — fetch the whole window in one call.
-        chain_0 = fetch_option_chain(client, symbol, from_date=zerodte_from, to_date=zerodte_to)
         return symbol, {
             "price": price, "hist": hist, "iv_data": iv_data,
             # The +20..+45 DTE chain rides back so the C3 volatility snapshot can
