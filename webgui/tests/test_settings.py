@@ -503,3 +503,107 @@ def test_api_stats_rows_survive_a_malformed_store_block():
         rows = S.api_stats_rows({"today": 1, "last_7_days": 1,
                                  "last_30_days": 1, "store": bad})
         assert len(rows) == 3
+
+
+# ── API usage card: which cells one load creates, sets and blanks ───────────
+# The card builds a cell per placeholder row, then every load writes into those
+# cells by label. A row the placeholders lack ("Answered locally today") used to
+# raise KeyError there, which also left the Claude and public-finder counts
+# unloaded. plan_stat_cells is that bookkeeping, kept free of NiceGUI.
+
+_BASE = ["Today", "Last 7 days", "Last 30 days"]
+_LOCAL = "Answered locally today"
+_WITH_STORE = {"today": 70000, "last_7_days": 80000, "last_30_days": 90000,
+               "store": {"served_locally": 14250}}
+_NO_STORE = {"today": 70000, "last_7_days": 80000, "last_30_days": 90000}
+
+
+def _load(cells, stats):
+    """Apply one load to ``cells`` (label -> text) exactly as the card does:
+    build what the plan says to build, then write every text it gives."""
+    to_create, texts = S.plan_stat_cells(cells, S.api_stats_rows(stats))
+    for label in to_create:
+        assert label not in cells          # never rebuilds a cell it has
+        cells[label] = None
+    for label, text in texts:
+        cells[label] = text                # KeyError here = the old bug
+    return to_create
+
+
+def _placeholders():
+    return dict(S.api_stats_rows(None))
+
+
+def test_plan_stat_cells_builds_the_cell_for_a_fourth_row_and_sets_all_four():
+    cells = _placeholders()
+    assert _load(cells, _WITH_STORE) == [_LOCAL]
+    assert cells == {"Today": "70,000", "Last 7 days": "80,000",
+                     "Last 30 days": "90,000", _LOCAL: "14,250"}
+    assert list(cells) == _BASE + [_LOCAL]          # appended after the base three
+
+
+def test_plan_stat_cells_every_text_has_a_cell_to_go_in():
+    # The invariant the KeyError broke: nothing is written to a label that is
+    # neither already built nor in this load's build list.
+    existing = _placeholders()
+    to_create, texts = S.plan_stat_cells(existing, S.api_stats_rows(_WITH_STORE))
+    assert {label for label, _ in texts} <= set(existing) | set(to_create)
+
+
+def test_plan_stat_cells_builds_the_fourth_cell_only_once():
+    cells = _placeholders()
+    _load(cells, _WITH_STORE)
+    again = dict(_WITH_STORE, store={"served_locally": 14300})
+    assert _load(cells, again) == []
+    assert cells[_LOCAL] == "14,300"
+
+
+def test_plan_stat_cells_builds_nothing_for_an_older_proxy():
+    cells = _placeholders()
+    assert _load(cells, _NO_STORE) == []
+    assert list(cells) == _BASE and cells["Today"] == "70,000"
+
+
+def test_plan_stat_cells_dashes_a_row_that_disappears_on_the_next_load():
+    cells = _placeholders()
+    _load(cells, _WITH_STORE)
+    assert _load(cells, _NO_STORE) == []
+    assert cells[_LOCAL] == "—"                     # not left at 14,250
+    # ... while the three rows still reported keep their numbers
+    assert [cells[k] for k in _BASE] == ["70,000", "80,000", "90,000"]
+
+
+def test_plan_stat_cells_never_dashes_a_base_row_while_it_is_reported():
+    for stats in (_WITH_STORE, _NO_STORE):
+        cells = _placeholders()
+        _load(cells, _WITH_STORE)
+        _load(cells, stats)
+        assert "—" not in [cells[k] for k in _BASE]
+
+
+def test_plan_stat_cells_dashes_everything_and_builds_nothing_with_no_stats():
+    for empty in (None, {}):
+        cells = _placeholders()
+        _load(cells, _WITH_STORE)
+        assert _load(cells, empty) == []
+        assert cells == {"Today": "—", "Last 7 days": "—",
+                         "Last 30 days": "—", _LOCAL: "—"}
+
+
+def test_plan_stat_cells_with_no_rows_at_all_dashes_every_cell():
+    for rows in (None, []):
+        to_create, texts = S.plan_stat_cells(_BASE + [_LOCAL], rows)
+        assert to_create == []
+        assert texts == [(label, "—") for label in _BASE + [_LOCAL]]
+
+
+def test_the_api_usage_loader_goes_through_plan_stat_cells():
+    # The loader is a closure inside the render and has no browser test, so pin
+    # the wiring at source level: the Schwab cells are written from the plan,
+    # never indexed straight off the reported rows.
+    import inspect
+    src = inspect.getsource(S._render_general)
+    load = src[src.index("async def _load_api_stats"):]
+    load = load[:load.index("cstats = ")]
+    assert "plan_stat_cells(stat_lbls, api_stats_rows(stats))" in load
+    assert "in api_stats_rows(" not in load

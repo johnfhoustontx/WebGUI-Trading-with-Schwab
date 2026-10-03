@@ -100,6 +100,27 @@ def api_stats_rows(stats):
     return rows
 
 
+def plan_stat_cells(existing_labels, rows):
+    """What one load must do to the API-usage card's cells — pure/testable.
+
+    ``existing_labels`` are the labels that already have a cell, in display
+    order; ``rows`` are the ``(label, text)`` rows this load reported. Returns
+    ``(to_create, texts)``: the labels whose cell must be built first, in row
+    order, and the text for EVERY cell that exists afterwards.
+
+    The card is built from the three placeholder rows, but a load can report a
+    row they lack ("Answered locally today"), so writing by label alone raises
+    KeyError and stops the rest of the card loading. A cell this load did not
+    report (the proxy went away) reads "—" rather than keeping its last number."""
+    existing = list(existing_labels or ())
+    reported = {}
+    for label, text in rows or ():
+        reported.setdefault(label, text)
+    to_create = [label for label in reported if label not in existing]
+    texts = [(label, reported.get(label, "—")) for label in existing + to_create]
+    return to_create, texts
+
+
 def public_scan_rows(status):
     """(label, value-text) rows for the public Strategy Finder's usage - pure.
 
@@ -510,18 +531,14 @@ def _render_general():
             @guard_async
             async def _load_api_stats():
                 stats = await run.io_bound(_proxy.api_call_stats)
-                rows = api_stats_rows(stats)
-                for label, val in rows:
-                    if label not in stat_lbls:
-                        # "Answered locally today" exists only once the proxy
-                        # reports it, so its cell is built on first sight.
-                        with schwab_row:
-                            stat_lbls[label] = _stat_cell(label, val)
-                    stat_lbls[label].text = val
-                # A cell this load did not report (the proxy went away) must
-                # not keep showing its last number.
-                for label in stat_lbls.keys() - {label for label, _ in rows}:
-                    stat_lbls[label].text = "—"
+                to_create, texts = plan_stat_cells(stat_lbls, api_stats_rows(stats))
+                # "Answered locally today" exists only once the proxy reports
+                # it, so its cell is built on first sight.
+                for label in to_create:
+                    with schwab_row:
+                        stat_lbls[label] = _stat_cell(label, "—")
+                for label, text in texts:
+                    stat_lbls[label].text = text
                 api_since.text = (f"Counting since {stats['since']}."
                                   if stats and stats.get("since")
                                   else "No counts yet — restart the proxy if it "
