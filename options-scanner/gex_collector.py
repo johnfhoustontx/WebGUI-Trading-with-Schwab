@@ -220,7 +220,7 @@ def _is_regular_hours(now) -> bool:
         return True
 
 
-def _reanchor_spots(client, symbols, fetched, now) -> int:
+def _reanchor_spots(client, symbols, fetched, now, spots_out=None) -> int:
     """Overwrite each chain's STALE ``underlyingPrice`` with the live quote.
 
     Outside the regular session Schwab's chain payload pins ``underlyingPrice``
@@ -242,6 +242,11 @@ def _reanchor_spots(client, symbols, fetched, now) -> int:
 
     ONE batched ``/quotes`` call per poll, not one per symbol: across the
     90-minute GTH window that is ~90 extra calls rather than ~1,500.
+
+    ``spots_out`` — an optional dict. When the quote call was MADE (so only
+    outside the regular session) its ``"spots"`` key is set to what came back,
+    ``{}`` if the call failed. ``poll_once`` hands that to the carry-forward so
+    a poll never asks for quotes twice. The return value is unchanged.
     """
     if _is_regular_hours(now):
         return 0
@@ -252,7 +257,11 @@ def _reanchor_spots(client, symbols, fetched, now) -> int:
     except Exception as e:  # noqa: BLE001 — a stale spot beats a dead poll
         log.warning("Live-spot re-anchor unavailable (%s); "
                     "using the chain's own underlyingPrice", e)
+        if spots_out is not None:
+            spots_out["spots"] = {}
         return 0
+    if spots_out is not None:
+        spots_out["spots"] = spots
     corrected = 0
     for symbol, chain in fetched:
         if not chain or symbol not in spots:
@@ -269,6 +278,28 @@ def _reanchor_spots(client, symbols, fetched, now) -> int:
 # Slack added to the tail interval when asking the proxy for a STORED chain, so
 # a chain fetched a little late in its own minute is still inside the limit.
 CARRY_SLACK_SEC = 30
+
+
+# What has already been said at WARNING this process, so a setting that is
+# clamped every minute is reported once, not 440 times a day.
+_WARNED: set = set()
+
+
+def _warn_once(key, msg, *args) -> None:
+    if key not in _WARNED:
+        _WARNED.add(key)
+        log.warning(msg, *args)
+
+
+def fresh_age_ceiling() -> int:
+    """The most ``fresh_max_age_sec`` may be: one poll interval less the slack.
+
+    The setting does two jobs. It is the line above which an answer counts as
+    carried, AND it is the age limit sent for every one-minute symbol. Above
+    this ceiling a one-minute symbol's request is regularly answered with the
+    PREVIOUS minute's chain and treated as new: its rows repeat and the
+    detectors see no new volume."""
+    return max(0, POLL_INTERVAL_MIN * 60 - CARRY_SLACK_SEC)
 
 
 def tail_due(symbol, minute_index: int, interval: int) -> bool:
@@ -304,6 +335,12 @@ def _usable_tiers(tiers):
         return None
     if interval <= 1 or not tail:
         return None                    # nothing would ever be carried
+    ceiling = fresh_age_ceiling()
+    if fresh > ceiling:
+        _warn_once(("fresh_max_age_sec", fresh, ceiling),
+                   "collection fresh_max_age_sec=%s is above %s (one poll "
+                   "interval less the slack); using %s", fresh, ceiling, ceiling)
+        fresh = ceiling
     return {"tail": tail, "interval_min": interval, "fresh_max_age_sec": fresh}
 
 
@@ -332,9 +369,13 @@ def _answer_age(resp):
     return float(age)
 
 
-def _carry_forward(client, fetched, ages, tiers, now):
+def _carry_forward(client, fetched, ages, tiers, now, spots=None):
     """Re-price every carried chain at the live quote, in place in ``fetched``.
     Returns ``(carried symbols, how many were re-priced)``.
+
+    ``spots`` — live prices this poll ALREADY fetched (the re-anchor's, outside
+    the regular session), or None to fetch them here. Given, no quote call is
+    made, even when it is empty: one quote call a poll in every session state.
 
     Carried is decided by the ANSWER: a chain older than the fresh limit, for
     whatever reason the proxy handed it back. A symbol that was not due but got
@@ -349,13 +390,16 @@ def _carry_forward(client, fetched, ages, tiers, now):
                if chain and ages.get(s) is not None and ages[s] > limit}
     if not carried:
         return carried, 0
-    try:
-        resp = client.get_quotes(sorted(carried))
-        payload = resp.json() if getattr(resp, "status_code", 500) == 200 else None
-        spots = live_spots(payload)
-    except Exception as e:  # noqa: BLE001 — a stored price beats a dead poll
-        log.warning("Carry-forward quotes unavailable (%s); using stored prices", e)
-        return carried, 0
+    if spots is None:
+        try:
+            resp = client.get_quotes(sorted(carried))
+            payload = (resp.json()
+                       if getattr(resp, "status_code", 500) == 200 else None)
+            spots = live_spots(payload)
+        except Exception as e:  # noqa: BLE001 — a stored price beats a dead poll
+            log.warning("Carry-forward quotes unavailable (%s); "
+                        "using stored prices", e)
+            return carried, 0
     repriced = 0
     for i, (symbol, chain) in enumerate(fetched):
         if symbol not in carried or symbol not in spots:
@@ -455,7 +499,8 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     # Outside RTH the chain's underlyingPrice is the PREVIOUS CLOSE. Fix it here,
     # before on_chain / the engine / the term poll — every one of them prices off
     # spot, so a single correction upstream serves them all.
-    corrected = _reanchor_spots(client, symbols, fetched, now)
+    reanchor: dict = {}
+    corrected = _reanchor_spots(client, symbols, fetched, now, spots_out=reanchor)
     if corrected:
         log.info("Re-anchored %d chain(s) on live quotes (extended hours)",
                  corrected)
@@ -468,7 +513,8 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     as_stored: dict = {}
     if tiers:
         as_stored = {s: ch for s, ch in fetched if ch}
-        carried, repriced = _carry_forward(client, fetched, ages, tiers, now)
+        carried, repriced = _carry_forward(client, fetched, ages, tiers, now,
+                                           spots=reanchor.get("spots"))
         # One line a poll, zeros included: a run of zeros is how the operator
         # sees that the proxy's store is not answering.
         log.info("Carried %d of %d chain(s) forward (%d on a live quote)",

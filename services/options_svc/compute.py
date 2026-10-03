@@ -4879,15 +4879,57 @@ def _gth_symbols(now=None):
     return [s for s in gc.collection_symbols() if s in eligible]
 
 
-def collection_tiers(universe, *, base, capture=None, hiro=None):
+# The longest tail interval the collector will run. The Opportunity Board's flow
+# acceleration reads a 15-minute window (matrix.py); past 5 minutes it holds too
+# few real fetches to mean anything. 3 and 5 divide 15; the others in range put
+# an uneven number of real fetches in each window.
+MAX_TAIL_INTERVAL_MIN = 5
+
+# Said once per process, not once a minute: a clamped setting stays clamped.
+_TIER_WARNED: set = set()
+
+
+def _flip_alert_symbols(flow_cfg):
+    """What the gamma-flip alert watches, for ``collection_tiers(flip=...)``:
+    a set of symbols, an EMPTY set for "every symbol", or None for "nothing".
+
+    Read exactly as ``handlers.run_flow_alerts`` / ``_run_gamma_flip`` read it:
+    the alert runs unless the top-level ``enabled`` or its own is falsy (so a
+    hand-typed ``"false"`` is ON, as it is there), and ``symbols or the whole
+    flow universe`` — an empty or missing list is every symbol.
+
+    A list naming symbols keeps them on the one-minute tier even while the
+    alert is off (as for the hedging-flow symbols). A value that names no
+    usable symbol is "every symbol" while the alert runs: the reading that can
+    never let the alert fire from modelled gamma."""
+    from services.options_svc import flow_alerts
+
+    gf = flow_alerts.section(flow_cfg, "gamma_flip")
+    top = flow_cfg.get("enabled", True) if isinstance(flow_cfg, dict) else True
+    running = bool(top) and bool(gf.get("enabled", True))
+    raw = gf.get("symbols")
+    if isinstance(raw, str):
+        raw = [raw]
+    named = ({s for s in raw if isinstance(s, str) and s}
+             if isinstance(raw, (list, tuple, set, frozenset)) else set())
+    if named:
+        return named
+    return set() if running else None
+
+
+def collection_tiers(universe, *, base, capture=None, hiro=None, flip=None):
     """The collector's tiers for this poll, or None for "fetch everything every
     minute" (see ``gex_collector.poll_once``).
 
     The TAIL is every polled symbol that is collected only because it is on the
     watchlist. Kept on the one-minute tier: the symbols named in
     config/symbols.toml [collection] (``base``), the symbol open on the Dealer
-    Positioning page and the public page's hot symbols (``capture``), and the
-    hedging-flow symbols (``hiro``), whose rows are measured from fresh chains.
+    Positioning page and the public page's hot symbols (``capture``), the
+    hedging-flow symbols (``hiro``), whose rows are measured from fresh chains,
+    and the symbols the gamma-flip alert watches (``flip``): a carried row's
+    flip level comes from modelled gamma, and that alert must never fire from
+    one. ``flip`` is None for "the alert watches nothing"; an EMPTY ``flip``
+    means it watches every symbol, which leaves no tail at all.
 
     None unless the proxy's chain store is ON: in shadow or off, every request
     reaches Schwab, so there is no stored chain to carry and nothing to gain.
@@ -4901,7 +4943,18 @@ def collection_tiers(universe, *, base, capture=None, hiro=None):
         interval = int(cfg["tail_interval_min"])
         if interval <= 1:
             return None
+        if interval > MAX_TAIL_INTERVAL_MIN:
+            if ("tail_interval_min", interval) not in _TIER_WARNED:
+                _TIER_WARNED.add(("tail_interval_min", interval))
+                log.warning("collection tail_interval_min=%s is above %s; using %s",
+                            interval, MAX_TAIL_INTERVAL_MIN, MAX_TAIL_INTERVAL_MIN)
+            interval = MAX_TAIL_INTERVAL_MIN
         core = set(base) | set(capture or ()) | set(hiro or ())
+        if flip is not None:
+            flip = set(flip)
+            if not flip:
+                return None            # the flip alert watches every symbol
+            core |= flip
         tail = frozenset(s for s in universe if s not in core)
         if not tail:
             return None
@@ -5064,8 +5117,14 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         # Decided HERE, after the capture set and the hedging-flow symbols are
         # known: both stay on the one-minute tier.
         _universe = symbols if symbols is not None else gc.collection_symbols()
+        try:
+            _flip = _flip_alert_symbols(_uoa_cfg)
+        except Exception:
+            # Unknown is "every symbol": no tail, every fetch real.
+            _degrade.degraded("options.flip_tier_setup")
+            _flip = set()
         _tiers = collection_tiers(_universe, base=gc.SYMBOLS, capture=wanted,
-                                  hiro=_hiro_syms)
+                                  hiro=_hiro_syms, flip=_flip)
         # Passed only when set: test doubles for poll_once predate the argument.
         _poll_kw = {"tiers": _tiers} if _tiers else {}
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,

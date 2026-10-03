@@ -490,3 +490,20 @@ def test_marketdata_mode_and_today_bar_are_choices_from_the_loader():
     assert tuple(mode.choices) == tuple(marketdata_config.MODES)
     assert bar.kind == "choice"
     assert tuple(bar.choices) == tuple(marketdata_config.TODAY_BARS)
+
+
+def test_the_collector_settings_are_bounded_and_say_why():
+    cfg = cs.BY_NAME["marketdata.toml"]
+    _s, fresh = cs.locate(cfg, ("collection", "fresh_max_age_sec"))
+    _s, interval = cs.locate(cfg, ("collection", "tail_interval_min"))
+    # One poll interval (60 s) less the 30 s slack: above it a one-minute
+    # symbol is answered with the previous minute's chain and treated as new.
+    assert (fresh.min, fresh.max) == (0, 30)
+    assert "carried" in fresh.help and "every minute" in fresh.help
+    with pytest.raises(ValueError, match="at most 30"):
+        cs.parse(fresh, 31)
+    # The Opportunity Board's flow acceleration reads a 15-minute window.
+    assert (interval.min, interval.max) == (1, 5)
+    assert "15-minute" in interval.help and "3 or 5" in interval.help
+    with pytest.raises(ValueError, match="at most 5"):
+        cs.parse(interval, 6)

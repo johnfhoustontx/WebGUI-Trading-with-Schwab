@@ -163,7 +163,7 @@ RTH = dt.datetime(2026, 8, 17, 10, 0, tzinfo=CT)           # a plain Monday
 POLLED = ["$SPX", "SPY", "NVDA", "TSLA", "AAPL", "HOOD"]
 
 
-def _collector(monkeypatch, *, strict=False, hiro_cfg=None):
+def _collector(monkeypatch, *, strict=False, hiro_cfg=None, flow_cfg=None):
     """The lazily-imported collector modules, faked. ``rec["kw"]`` is every
     keyword ``poll_once`` was called with. ``strict`` gives the stand-in the
     signature the collector had BEFORE tiers existed, so an unexpected keyword
@@ -208,8 +208,10 @@ def _collector(monkeypatch, *, strict=False, hiro_cfg=None):
     monkeypatch.setattr(compute, "_GEX_SCHEMA_READY", False)
     monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
     monkeypatch.setattr(_sched, "_market_now", lambda: RTH)
-    monkeypatch.setattr(flow_alerts, "load_thresholds",
-                        lambda: {} if hiro_cfg is None else {"hiro": hiro_cfg})
+    cfg = dict(flow_cfg or {})
+    if hiro_cfg is not None:
+        cfg["hiro"] = hiro_cfg
+    monkeypatch.setattr(flow_alerts, "load_thresholds", lambda: cfg)
     return rec
 
 
@@ -287,3 +289,181 @@ def test_tiers_that_cannot_be_decided_never_stop_the_poll(monkeypatch):
     rec = _collector(monkeypatch, strict=True)
     assert compute.collect_gex_snapshots(now=RTH) == len(POLLED)
     assert rec["poll_n"] == 1
+
+
+#############################################
+# THE INTERVAL HAS A CEILING
+#############################################
+# The Opportunity Board's flow acceleration reads a 15-minute window. An
+# interval above 5 leaves it too few real fetches to mean anything.
+
+@pytest.fixture
+def warned(monkeypatch, caplog):
+    import logging
+    monkeypatch.setattr(compute, "_TIER_WARNED", set())
+
+    def lines():
+        return [r.getMessage() for r in caplog.records
+                if r.name == compute.log.name and r.levelno == logging.WARNING]
+    with caplog.at_level(logging.WARNING, logger=compute.log.name):
+        yield lines
+
+
+@pytest.mark.parametrize("configured", [6, 7, 10, 60])
+def test_an_interval_above_five_is_five(cfg, warned, configured):
+    cfg(interval=configured)
+    assert tiers()["interval_min"] == compute.MAX_TAIL_INTERVAL_MIN == 5
+    assert len(warned()) == 1
+    assert "tail_interval_min" in warned()[0]
+    assert str(configured) in warned()[0] and "5" in warned()[0]
+
+
+def test_a_clamped_interval_is_said_once_not_once_a_minute(cfg, warned):
+    cfg(interval=9)
+    tiers()
+    tiers()
+    assert len(warned()) == 1
+    cfg(interval=12)
+    tiers()
+    assert len(warned()) == 2
+
+
+@pytest.mark.parametrize("configured", [2, 3, 4, 5])
+def test_an_interval_up_to_five_is_used_as_it_is(cfg, warned, configured):
+    cfg(interval=configured)
+    assert tiers()["interval_min"] == configured
+    assert warned() == []
+
+
+#############################################
+# THE GAMMA-FLIP ALERT NEVER FIRES FROM MODELLED GAMMA
+#############################################
+# A carried row's flip level comes from carried gammas. The symbols the alert
+# watches therefore keep a real fetch every minute.
+
+def test_flip_alert_symbols_stay_on_one_minute(cfg):
+    cfg()
+    assert tiers(flip={"HOOD"})["tail"] == frozenset({"SOFI", "UBER"})
+    assert tiers(flip=["HOOD", "NOT-POLLED"])["tail"] == frozenset({"SOFI", "UBER"})
+
+
+@pytest.mark.parametrize("everything", [set(), [], (), frozenset()])
+def test_a_flip_alert_that_watches_every_symbol_leaves_no_tail(cfg, everything):
+    """An empty list is the alert's way of saying "the whole universe"."""
+    cfg()
+    assert tiers(flip=everything) is None
+
+
+def test_no_flip_alert_at_all_changes_nothing(cfg):
+    cfg()
+    assert tiers(flip=None) == tiers()
+
+
+def test_a_whole_universe_flip_alert_is_not_a_degrade(cfg):
+    cfg()
+    _degrade.reset()
+    assert tiers(flip=[]) is None
+    assert _degrade.counts() == {}
+
+
+FLIP_ON = {"enabled": True, "band_pct": 0.0015, "cooldown_min": 60}
+
+
+def _flip_tiers(monkeypatch, cfg, flow_cfg, **kw):
+    cfg()
+    rec = _collector(monkeypatch, flow_cfg=flow_cfg, **kw)
+    compute.collect_gex_snapshots(now=RTH)
+    return rec["kw"].get("tiers")
+
+
+def test_the_symbols_listed_for_the_flip_alert_are_core(monkeypatch, cfg):
+    got = _flip_tiers(monkeypatch, cfg,
+                      {"gamma_flip": dict(FLIP_ON, symbols=["HOOD", "TSLA"])})
+    assert got["tail"] == frozenset({"NVDA", "AAPL"})
+
+
+def test_the_shipped_flip_list_is_already_core(monkeypatch, cfg):
+    """No [gamma_flip] table at all reads as the built-in list ($SPX, SPY, QQQ,
+    IWM), every one of them in the collection base."""
+    got = _flip_tiers(monkeypatch, cfg, {})
+    assert got["tail"] == frozenset({"NVDA", "TSLA", "AAPL", "HOOD"})
+
+
+@pytest.mark.parametrize("symbols", [[], None, ()])
+def test_an_empty_flip_list_with_the_alert_on_means_no_tiers(monkeypatch, cfg, symbols):
+    """handlers._run_gamma_flip reads ``symbols or the whole flow universe``."""
+    assert _flip_tiers(monkeypatch, cfg,
+                       {"gamma_flip": dict(FLIP_ON, symbols=symbols)}) is None
+
+
+def test_no_flip_symbols_key_with_the_alert_on_means_no_tiers(monkeypatch, cfg):
+    assert _flip_tiers(monkeypatch, cfg, {"gamma_flip": dict(FLIP_ON)}) is None
+
+
+@pytest.mark.parametrize("flow_cfg", [
+    {"gamma_flip": {"enabled": False, "symbols": []}},          # the alert is off
+    {"gamma_flip": {"enabled": 0, "symbols": []}},              # falsy, as handlers read it
+    {"enabled": False, "gamma_flip": dict(FLIP_ON, symbols=[])},   # every flow alert is off
+])
+def test_an_empty_flip_list_with_the_alert_off_keeps_the_tail(monkeypatch, cfg, flow_cfg):
+    got = _flip_tiers(monkeypatch, cfg, flow_cfg)
+    assert got["tail"] == frozenset({"NVDA", "TSLA", "AAPL", "HOOD"})
+
+
+def test_a_hand_typed_enabled_string_is_on_as_the_alert_itself_reads_it(monkeypatch, cfg):
+    """``handlers`` tests ``not gf.get("enabled", True)``, so "false" is ON
+    there. The tiers must agree with the detector, not with good sense."""
+    assert _flip_tiers(monkeypatch, cfg,
+                       {"gamma_flip": {"enabled": "false", "symbols": []}}) is None
+
+
+def test_listed_flip_symbols_stay_core_while_the_alert_is_off(monkeypatch, cfg):
+    """The conservative reading, as for the hedging-flow symbols: never fewer
+    real fetches than the alert could want the moment it is switched on."""
+    got = _flip_tiers(monkeypatch, cfg,
+                      {"gamma_flip": {"enabled": False, "symbols": ["HOOD"]}})
+    assert got["tail"] == frozenset({"NVDA", "TSLA", "AAPL"})
+
+
+@pytest.mark.parametrize("gamma_flip", [5, "off", {"enabled": True, "symbols": 5},
+                                        {"enabled": True, "symbols": [5, None]}])
+def test_a_broken_flip_config_never_stops_the_poll_and_never_opens_a_tail_by_accident(
+        monkeypatch, cfg, gamma_flip):
+    cfg()
+    rec = _collector(monkeypatch, flow_cfg={"gamma_flip": gamma_flip})
+    assert compute.collect_gex_snapshots(now=RTH) == len(POLLED)
+    assert rec["poll_n"] == 1
+    got = rec["kw"].get("tiers")
+    # A scalar table reads as the built-in list (flow_alerts.section); a list
+    # that names no usable symbol reads as "everything".
+    if isinstance(gamma_flip, dict):
+        assert got is None
+    else:
+        assert got["tail"] == frozenset({"NVDA", "TSLA", "AAPL", "HOOD"})
+
+
+def test_a_bare_string_flip_symbol_is_one_symbol(monkeypatch, cfg):
+    got = _flip_tiers(monkeypatch, cfg, {"gamma_flip": dict(FLIP_ON, symbols="HOOD")})
+    assert got["tail"] == frozenset({"NVDA", "TSLA", "AAPL"})
+
+
+def test_a_flip_table_with_no_switch_is_on(monkeypatch, cfg):
+    """``gf.get("enabled", True)``: a table that does not say is running."""
+    assert _flip_tiers(monkeypatch, cfg, {"gamma_flip": {"symbols": []}}) is None
+
+
+def test_a_flip_reading_that_fails_means_every_fetch_is_real(monkeypatch, cfg):
+    """Unknown is read as "every symbol": the poll runs, with no tail, and the
+    failure leaves a trace."""
+    cfg()
+    rec = _collector(monkeypatch, strict=True)
+
+    def boom(flow_cfg):
+        raise RuntimeError("bad flip config")
+
+    monkeypatch.setattr(compute, "_flip_alert_symbols", boom)
+    _degrade.reset()
+    assert compute.collect_gex_snapshots(now=RTH) == len(POLLED)
+    assert rec["poll_n"] == 1                      # strict: no tiers keyword at all
+    assert _degrade.counts() == {"options.flip_tier_setup": 1}
+    _degrade.reset()

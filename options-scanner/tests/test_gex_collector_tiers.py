@@ -717,3 +717,137 @@ def test_a_carried_chain_that_got_no_live_price_writes_its_own_readings(
     stored = _skew_of(_skew_chain("AAPL"))
     for view, row in rows["AAPL"].items():
         assert _skew_only(row) == stored and row["spot"] == 100.0, view
+
+
+#############################################
+# THE FRESH LIMIT HAS A CEILING
+#############################################
+# fresh_max_age_sec does two jobs: it is the line above which an answer counts
+# as carried, AND the age limit sent for every one-minute symbol. Set to 40 or
+# more, a core symbol's request is regularly answered with the PREVIOUS minute's
+# chain and treated as new: its rows duplicate and the detectors see no new
+# volume. So it can never exceed one poll interval less the slack.
+
+FRESH_CEILING = gc.POLL_INTERVAL_MIN * 60 - gc.CARRY_SLACK_SEC
+
+
+@pytest.fixture
+def warned(monkeypatch, caplog):
+    """A clean "already warned" memo, and the collector's WARNING lines."""
+    monkeypatch.setattr(gc, "_WARNED", set())
+
+    def lines():
+        return [r.getMessage() for r in caplog.records
+                if r.name == "gex_collector" and r.levelno == logging.WARNING]
+    with caplog.at_level(logging.WARNING, logger="gex_collector"):
+        yield lines
+
+
+def test_the_ceiling_is_one_poll_interval_less_the_slack():
+    assert FRESH_CEILING == 30                     # at the shipped 1 minute and 30 s
+
+
+@pytest.mark.parametrize("configured", [31, 40, 45, 60, 600])
+def test_a_fresh_limit_above_the_ceiling_is_clamped_in_both_of_its_roles(
+        warned, configured):
+    seen = []
+    c = _client(ages={"SPY": FRESH_CEILING + 5.0}, quotes={"SPY": 512.0})
+    _poll(c, ["SPY", "AAPL"], tiers=dict(TIERS, fresh_max_age_sec=configured),
+          now=_due("AAPL"), on_chain=lambda s, ch: seen.append(s))
+    # Role 1: the age limit sent for a one-minute symbol.
+    assert c.asked == {"SPY": FRESH_CEILING, "AAPL": FRESH_CEILING}
+    # Role 2: the line above which an answer is carried. 35 s is under every
+    # configured value here, and over the ceiling.
+    assert seen == ["AAPL"]
+    assert c.get_quotes.call_args.args[0] == ["SPY"]
+
+
+def test_a_clamped_fresh_limit_is_said_once_with_both_numbers(warned):
+    tiers = dict(TIERS, fresh_max_age_sec=45)
+    _poll(_client(), ["SPY", "AAPL"], tiers=tiers)
+    _poll(_client(), ["SPY", "AAPL"], tiers=tiers)           # the next minute
+    assert len(warned()) == 1                                # not once a minute
+    assert "fresh_max_age_sec" in warned()[0]
+    assert "45" in warned()[0] and str(FRESH_CEILING) in warned()[0]
+
+
+def test_a_different_bad_value_is_said_again(warned):
+    _poll(_client(), ["SPY", "AAPL"], tiers=dict(TIERS, fresh_max_age_sec=45))
+    _poll(_client(), ["SPY", "AAPL"], tiers=dict(TIERS, fresh_max_age_sec=50))
+    assert len(warned()) == 2
+
+
+@pytest.mark.parametrize("configured", [0, 5, 20, FRESH_CEILING])
+def test_a_fresh_limit_at_or_under_the_ceiling_is_used_as_it_is(warned, configured):
+    c = _client()
+    _poll(c, ["SPY"], tiers=dict(TIERS, fresh_max_age_sec=configured))
+    assert c.asked == {"SPY": configured}
+    assert warned() == []
+
+
+def test_the_stored_chain_limit_is_untouched_by_the_clamp(warned):
+    c = _client()
+    _poll(c, ["AAPL"], tiers=dict(TIERS, fresh_max_age_sec=45), now=_not_due("AAPL"))
+    assert c.asked == {"AAPL": 3 * 60 + gc.CARRY_SLACK_SEC}
+
+
+#############################################
+# ONE QUOTE CALL A POLL, IN EVERY SESSION STATE
+#############################################
+# Outside the regular session the re-anchor has already fetched a live quote for
+# every symbol. The carry reuses it instead of asking again.
+
+PRE_OPEN = dt.datetime(2026, 10, 5, 8, 15, tzinfo=CT)      # collecting, not yet open
+
+
+def test_before_the_open_the_carry_reuses_the_re_anchors_quotes(caplog):
+    engine = _engine()
+    seen = []
+    c = _client(ages={"AAPL": 95.0}, quotes={"AAPL": 103.0, "SPY": 512.0},
+                chain=_real_chain)
+    with caplog.at_level(logging.INFO, logger="gex_collector"):
+        _poll(c, ["SPY", "AAPL"], now=PRE_OPEN, engine=engine,
+              on_chain=lambda s, ch: seen.append(s))
+    assert c.get_quotes.call_count == 1
+    assert c.get_quotes.call_args.args[0] == ["SPY", "AAPL"]     # the re-anchor's
+    spots = {call.args[0]["symbol"]: call.args[0]["underlyingPrice"]
+             for call in engine.calc_all_from_chain.call_args_list}
+    assert spots == {"SPY": 512.0, "AAPL": 103.0}
+    assert seen == ["SPY"]                                       # still carried
+    # ... and carried through chain_carry, not merely re-priced: the gamma moved.
+    got = engine.calc_all_from_chain.call_args_list[1].args[0]
+    assert got["callExpDateMap"]["2026-10-09:4"]["100.0"][0]["gamma"] != 0.06
+    assert "Carried 1 of 2 chain(s) forward (1 on a live quote)" in [
+        r.getMessage() for r in caplog.records]
+
+
+def test_before_the_open_a_failed_quote_call_is_not_tried_twice():
+    engine = _engine()
+    c = _client(ages={"AAPL": 95.0}, quotes_raise=True)
+    _poll(c, ["SPY", "AAPL"], now=PRE_OPEN, engine=engine)
+    assert c.get_quotes.call_count == 1
+    assert [call.args[0]["underlyingPrice"]
+            for call in engine.calc_all_from_chain.call_args_list] == [100.0, 100.0]
+
+
+def test_before_the_open_a_symbol_the_re_anchor_got_no_quote_for_keeps_its_price():
+    engine = _engine()
+    c = _client(ages={"AAPL": 95.0}, quotes={"SPY": 512.0})      # AAPL: no print
+    _poll(c, ["SPY", "AAPL"], now=PRE_OPEN, engine=engine)
+    assert c.get_quotes.call_count == 1
+    spots = {call.args[0]["symbol"]: call.args[0]["underlyingPrice"]
+             for call in engine.calc_all_from_chain.call_args_list}
+    assert spots == {"SPY": 512.0, "AAPL": 100.0}
+
+
+def test_before_the_open_without_tiers_there_is_still_exactly_the_re_anchors_call():
+    c = _client(ages={"AAPL": 95.0}, quotes={"AAPL": 103.0, "SPY": 512.0})
+    _poll(c, ["SPY", "AAPL"], now=PRE_OPEN, tiers=None)
+    assert c.get_quotes.call_count == 1
+
+
+def test_in_the_regular_session_the_one_call_is_the_carrys_own():
+    c = _client(ages={"AAPL": 95.0}, quotes={"AAPL": 103.0})
+    _poll(c, ["SPY", "AAPL"], now=RTH)
+    assert c.get_quotes.call_count == 1
+    assert c.get_quotes.call_args.args[0] == ["AAPL"]

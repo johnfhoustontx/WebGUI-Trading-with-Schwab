@@ -1400,11 +1400,19 @@ _MARKETDATA = ConfigFile(
                   "Minutes between real fetches for watchlist symbols",
                   "1 fetches every symbol every minute. At 3, symbols that are "
                   "collected only because they are on the watchlist are fetched "
-                  "every third minute and carried forward in between. Takes "
+                  "every third minute and carried forward in between. Use 3 or "
+                  "5: the Opportunity Board's flow acceleration reads a "
+                  "15-minute window, and an interval that does not divide 15 "
+                  "puts an uneven number of real fetches in each window. Takes "
                   "effect only while the mode is on and option-chain reuse is on.",
-                  kind="int", unit="minutes", min=1, max=10),
+                  kind="int", unit="minutes", min=1, max=5),
             Field("collection.fresh_max_age_sec",
-                  "Oldest chain the collector treats as new", "", **_SEC, max=60),
+                  "Oldest chain the collector treats as new",
+                  "Does two jobs. An answer older than this is treated as "
+                  "carried forward. It is also the age limit sent for every "
+                  "symbol fetched every minute. Above 30 seconds, such a symbol "
+                  "is regularly answered with the previous minute's chain and "
+                  "treated as new.", **_SEC, max=30),
         )),
     ),
 )
