@@ -255,30 +255,42 @@ def _wide_scan(symbol) -> bool:
         return False
 
 
+def _lists_an_expiration(chain) -> bool:
+    """Whether a chain holds at least one expiration, on either side."""
+    return isinstance(chain, dict) and bool(
+        chain.get("callExpDateMap") or chain.get("putExpDateMap"))
+
+
 def scan_chains(client, symbol, today) -> dict:
     """The scan's three chains for one symbol: ``{"iv", "swing", "zero"}``.
 
     One fetch out to the last window's end, cut locally, when the wide fetch is
     on for this symbol; otherwise three fetches.
 
-    ⚠ A FAILED wide fetch (``None``) falls back to the three window fetches, so
-    the wide mode is never worse than what it replaced: it costs extra calls
-    only when it fails. Without the fallback a symbol whose 45-day chain has
-    outgrown one request would lose its 0-DTE and swing buckets on every scan,
-    silently - ``fetch_option_chain`` logs nothing on a non-200, and the only
-    bound on size is the hand-typed ``wide_fetch_exclude`` list. Hence the one
-    WARNING. A wide answer that arrived and is merely EMPTY is Schwab's real
-    answer and is cut as usual, with no fallback."""
+    ⚠ A wide answer with NOTHING USABLE in it falls back to the three window
+    fetches, so the wide mode is never worse than what it replaced. "Nothing
+    usable" is no answer at all (``None``) OR an answer holding no expiration on
+    either side. Without the fallback a symbol whose 45-day chain has outgrown
+    one request would lose its buckets on every scan, silently:
+    ``fetch_option_chain`` logs nothing on a non-200, the only bound on size is
+    the hand-typed ``wide_fetch_exclude`` list, and an HTTP 200 with both maps
+    empty is what Schwab answers for a window with nothing listed - so a
+    request it would not serve and a name with no options cannot be told apart.
+    Hence the one WARNING. The cost: a failing symbol makes four requests where
+    the switch-off scan makes three, and so does a name that genuinely lists
+    nothing out to the last window's end. An answer with expirations on only ONE
+    side is a real chain and is cut as usual."""
     windows = scan_windows(today)
     if _wide_scan(symbol):
         wide = fetch_option_chain(client, symbol, from_date=windows["zero"][0],
                                   to_date=windows["iv"][1])
-        if wide is not None:
+        if _lists_an_expiration(wide):
             return {name: slice_chain(wide, lo, hi) for name, (lo, hi) in windows.items()}
         log.warning(
-            "Wide chain fetch failed for %s; the scan is using three window fetches "
-            "for it instead. If this repeats, %s may belong in "
-            "scan.wide_fetch_exclude (config/marketdata.toml).", symbol, symbol)
+            "Wide chain fetch for %s returned nothing usable (no answer, or no "
+            "expirations); the scan is using three window fetches for it instead. "
+            "If this repeats, %s may belong in scan.wide_fetch_exclude "
+            "(config/marketdata.toml).", symbol, symbol)
     return {name: fetch_option_chain(client, symbol, from_date=windows[name][0],
                                      to_date=windows[name][1])
             for name in _SCAN_FETCH_ORDER}

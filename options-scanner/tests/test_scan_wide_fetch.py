@@ -444,18 +444,85 @@ def test_the_warning_is_logged_once_even_when_the_fallback_fails_too(monkeypatch
     assert len(_scanner_warnings(caplog)) == 1
 
 
-def test_an_empty_but_successful_wide_answer_is_not_a_failure(monkeypatch, caplog):
-    """Nothing listed out to +45 days: Schwab answers 200 with empty maps. That
-    is its real answer, so it is cut as usual - no fallback, no warning."""
+def test_an_empty_wide_answer_also_falls_back_to_the_three_window_fetches(monkeypatch, caplog):
+    """HTTP 200 with no expiration on either side. Schwab answers a window with
+    nothing listed that way - and could plausibly answer a request too large to
+    serve that way too - and the two cannot be told apart. Cutting it would
+    empty all three buckets on every scan with no warning, so it is treated as
+    "nothing usable": one wide fetch, then the three window fetches, one
+    WARNING, and the three window answers are what is returned."""
+    _, fetched = _switch_off_run(monkeypatch, days=[])
     _cfg(monkeypatch, wide=True)
     c = _Requests(_master([]))
     with caplog.at_level(logging.DEBUG, logger="scanner"):
         got = se.scan_chains(c, "AAPL", D)
-    assert c.windows == [(0, 45)]
-    assert _scanner_warnings(caplog) == []
+    assert c.windows == [(0, 45), (20, 45), (5, 15), (0, 4)]
+    assert len(_scanner_warnings(caplog)) == 1
+    assert got == fetched
     for name in ("zero", "swing", "iv"):
         assert got[name]["callExpDateMap"] == {} and got[name]["putExpDateMap"] == {}
         assert got[name] is not None
+
+
+class _EmptyWide(_Requests):
+    """Answers the wide request 200-with-nothing while really listing ``master``:
+    the request Schwab would not serve, as opposed to a name with no options."""
+
+    def get_option_chain(self, *args, **kwargs):
+        response = super().get_option_chain(*args, **kwargs)
+        if self.windows[-1] == (0, 45):
+            return _Response(_schwab_empty_window())
+        return response
+
+
+def test_an_empty_wide_answer_for_a_listed_name_recovers_its_three_windows(monkeypatch,
+                                                                         caplog):
+    off, fetched = _switch_off_run(monkeypatch)
+    _cfg(monkeypatch, wide=True)
+    c = _EmptyWide(_master(LISTED))
+    with caplog.at_level(logging.DEBUG, logger="scanner"):
+        got = se.scan_chains(c, "AAPL", D)
+    assert c.requests[1:] == off.requests          # same arguments, same order, as switch-off
+    assert got == fetched
+    assert _dtes(got["zero"]) == [0, 2, 4] and _dtes(got["swing"]) == [7, 14]
+    assert _dtes(got["iv"]) == [21, 30, 44]
+    warnings = _scanner_warnings(caplog)
+    assert len(warnings) == 1
+    text = warnings[0].getMessage()
+    assert "AAPL" in text and "wide" in text and "three" in text
+    assert "scan.wide_fetch_exclude" in text
+
+
+def test_a_wide_answer_with_no_maps_at_all_falls_back_too(monkeypatch):
+    """``{}`` and a body missing both maps hold no expiration either."""
+    for body in ({}, {"status": "FAILED"}, {"underlyingPrice": 100.0}):
+        _cfg(monkeypatch, wide=True)
+
+        class _Bodied(_Requests):
+            def get_option_chain(self, *args, **kwargs):
+                response = super().get_option_chain(*args, **kwargs)
+                return _Response(body) if self.windows[-1] == (0, 45) else response
+
+        c = _Bodied(_master(LISTED))
+        got = se.scan_chains(c, "AAPL", D)
+        assert c.windows == [(0, 45), (20, 45), (5, 15), (0, 4)], body
+        assert _dtes(got["zero"]) == [0, 2, 4], body
+
+
+def test_a_wide_answer_with_expirations_on_one_side_only_does_not_fall_back(monkeypatch,
+                                                                           caplog):
+    for empty_side in ("callExpDateMap", "putExpDateMap"):
+        _cfg(monkeypatch, wide=True)
+        master = _master(LISTED)
+        master[empty_side] = {}
+        c = _Requests(master)
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG, logger="scanner"):
+            got = se.scan_chains(c, "AAPL", D)
+        other = "putExpDateMap" if empty_side == "callExpDateMap" else "callExpDateMap"
+        assert c.windows == [(0, 45)], empty_side
+        assert _scanner_warnings(caplog) == [], empty_side
+        assert _dtes(got["zero"], other) == [0, 2, 4] and got["zero"][empty_side] == {}
 
 
 def test_a_successful_wide_fetch_logs_no_warning(monkeypatch, caplog):
