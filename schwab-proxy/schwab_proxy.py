@@ -49,15 +49,18 @@ import requests
 import uvicorn
 from urllib.parse import urlparse, parse_qs
 
-from fastapi import FastAPI, HTTPException, Query, Header, Depends
+from fastapi import FastAPI, HTTPException, Query, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 
 from trade_registry import TradeRegistry, resolve_legs
 import api_call_counter
 import trade_detector
 import perf_writer
 import stream_bridge
+import market_store
+from shared import market_calendar as _market_calendar
+from shared import marketdata_config as _marketdata_config
 
 #############################################
 # LOGGING
@@ -494,8 +497,15 @@ def api_call_stats():
     """Outbound Schwab API-call counts (today / last 7 / last 30 days) — the
     Settings page's "API usage" card. Counted per actual HTTP request at the
     marketdata rate-limit chokepoint + the trader request loop; per-day rows in
-    schwab-proxy/data/api_call_counts.db (forward-only from first deploy)."""
-    return api_call_counter.stats()
+    schwab-proxy/data/api_call_counts.db (forward-only from first deploy).
+
+    ``store`` is today's breakdown of market-data REQUESTS by endpoint, caller
+    and outcome, including the ones the local store answered without a call to
+    Schwab. ``store_degrades`` counts store bugs that fell back to a plain
+    fetch since this process started; anything but empty is worth a look."""
+    return {**api_call_counter.stats(),
+            "store": api_call_counter.detail_summary(),
+            "store_degrades": dict(_GATEWAY.degrades)}
 
 
 @app.get("/health")
@@ -619,46 +629,101 @@ def auth_callback(code: Optional[str] = None, url: Optional[str] = None):
 
 
 #############################################
+# LOCAL MARKET-DATA STORE
+#############################################
+# Design: docs/plans/2026-10-03-market-data-store-design.md. The handlers below
+# are adapters; every decision lives in market_store.Gateway.
+
+def _upstream(endpoint: str, params: Optional[Dict] = None):
+    """One marketdata call to Schwab, or ``UpstreamError`` when it did not
+    answer 200.
+
+    ``api_request`` returns ``{status_code, data, error}`` for anything Schwab
+    or the network did, but RAISES when the token cannot be made valid (no
+    token, refresh token expired or rejected). That is Schwab being unreachable
+    too, so it leaves here as an ``UpstreamError`` with the 500 the caller got
+    before the store existed. Left as it was, the gateway would read it as a
+    bug in the store: count a degrade and make the whole call a second time.
+    The traceback the server used to print for it is logged here instead."""
+    try:
+        result = token_mgr.api_request(endpoint, params=params)
+    except Exception as e:  # noqa: BLE001 — see the docstring.
+        logger.warning("Schwab %s was not answered: %s", endpoint, e, exc_info=True)
+        raise market_store.UpstreamError(500, f"{type(e).__name__}: {e}") from e
+    if result["status_code"] != 200:
+        raise market_store.UpstreamError(result["status_code"], result["error"])
+    return result["data"]
+
+
+_GATEWAY = market_store.Gateway(
+    fetch=_upstream, config=_marketdata_config, calendar=_market_calendar,
+    record=api_call_counter.record_detail, log=logger)
+
+
+def _caller(request) -> str:
+    """Who is asking, from the ``X-Caller`` header the clients set."""
+    return (request.headers.get("x-caller") or "unknown")[:40]
+
+
+def _send(served) -> Response:
+    """A gateway answer as an HTTP response, labelled with where it came from
+    and how old it is.
+
+    An answer that was not stored is rendered exactly as FastAPI rendered the
+    handler's returned dict before the store existed: compact, non-ASCII as
+    UTF-8, and a NaN or infinity refused (it is not JSON) rather than sent."""
+    body = served.body if served.body is not None else json.dumps(
+        served.data, ensure_ascii=False, allow_nan=False,
+        separators=(",", ":")).encode("utf-8")
+    return Response(content=body, media_type="application/json",
+                    headers={"X-Store": served.kind,
+                             "X-Store-Age": f"{served.age:.1f}"})
+
+
+def _served(work) -> Response:
+    try:
+        return _send(work())
+    except market_store.UpstreamError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+
+
+#############################################
 # MARKETDATA PROXY ENDPOINTS
 #############################################
 
 @app.get("/quote")
-def get_quote(symbol: str):
-    result = token_mgr.api_request("/quotes", params={"symbols": symbol, "fields": "quote"})
-    if result["status_code"] != 200:
-        raise HTTPException(status_code=result["status_code"], detail=result["error"])
-    return result["data"]
+def get_quote(request: Request, symbol: str, maxAge: Optional[float] = None):
+    return _served(lambda: _GATEWAY.quotes(symbol, _caller(request), maxAge))
 
 
 @app.get("/quotes")
-def get_quotes(symbols: str = Query(..., description="Comma-separated symbols")):
-    result = token_mgr.api_request("/quotes", params={"symbols": symbols, "fields": "quote"})
-    if result["status_code"] != 200:
-        raise HTTPException(status_code=result["status_code"], detail=result["error"])
-    return result["data"]
+def get_quotes(request: Request,
+               symbols: str = Query(..., description="Comma-separated symbols"),
+               maxAge: Optional[float] = None):
+    return _served(lambda: _GATEWAY.quotes(symbols, _caller(request), maxAge))
 
 
 @app.get("/chains")
 def get_option_chain(
+    request: Request,
     symbol: str,
     contractType: str = "ALL",
     range: str = Query("ALL", alias="range"),
     fromDate: Optional[str] = None,
     toDate: Optional[str] = None,
     strikeCount: Optional[int] = None,
+    maxAge: Optional[float] = None,
 ):
     params: Dict[str, Any] = {"symbol": symbol, "contractType": contractType, "range": range}
     if fromDate:    params["fromDate"] = fromDate
     if toDate:      params["toDate"] = toDate
     if strikeCount is not None: params["strikeCount"] = strikeCount
-    result = token_mgr.api_request("/chains", params=params)
-    if result["status_code"] != 200:
-        raise HTTPException(status_code=result["status_code"], detail=result["error"])
-    return result["data"]
+    return _served(lambda: _GATEWAY.chains(params, _caller(request), maxAge))
 
 
 @app.get("/pricehistory")
 def get_price_history(
+    request: Request,
     symbol: str,
     periodType: str = "year",
     period: int = 1,
@@ -677,10 +742,7 @@ def get_price_history(
     # to this same call: it 404'd on every fetch, and ``api_request`` retried each
     # 404 MAX_RETRIES times with backoff — flooding errors.log (~99% of all ERRORs)
     # and wasting ~0.75s of retry sleep per fetch. Call the correct endpoint once.
-    result = token_mgr.api_request("/pricehistory", params=params)
-    if result["status_code"] != 200:
-        raise HTTPException(status_code=result["status_code"], detail=result["error"])
-    return result["data"]
+    return _served(lambda: _GATEWAY.pricehistory(params, _caller(request)))
 
 
 @app.get("/instruments")
