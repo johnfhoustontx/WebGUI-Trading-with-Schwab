@@ -165,6 +165,51 @@ def fetch_option_chain(client, symbol, from_date=None, to_date=None):
         log.error(f"Chain fetch {symbol}: {e}")
         return None
 
+
+def _contract_count(exp_map):
+    """Contracts in one side's expiration map (``{exp: {strike: [contract]}}``)."""
+    total = 0
+    for strikes in exp_map.values():
+        if not isinstance(strikes, dict):
+            continue
+        for contracts in strikes.values():
+            total += len(contracts) if isinstance(contracts, (list, tuple)) else 1
+    return total
+
+
+def slice_chain(chain, from_date, to_date):
+    """The part of ``chain`` whose expirations fall in ``[from_date, to_date]``:
+    what a fetch of that window would have returned, out of a wider fetch.
+    Returns a new dict; ``chain`` is untouched. ``None`` stays ``None``.
+
+    The header follows the cut, because the scan reads it:
+
+    * ``numberOfContracts`` is recounted over what was kept.
+    * A window that keeps NO expiration on either side carries
+      ``underlyingPrice`` 0.0. ⚠ That is what Schwab itself answers for such a
+      window (measured: HTTP 200, status SUCCESS, both maps empty,
+      ``numberOfContracts`` 0, ``underlyingPrice`` 0.0), and
+      ``chain_has_underlying`` - hence the funnel's ``underlying_zero`` and
+      ``screen_spreads``' early return - turns on it. A cut that kept the wide
+      chain's real price would make the same empty window read differently
+      depending on how it was fetched.
+    """
+    if not chain:
+        return chain
+    lo, hi = from_date.isoformat(), to_date.isoformat()
+    out = dict(chain)
+    contracts = 0
+    for side in ("callExpDateMap", "putExpDateMap"):
+        exp_map = chain.get(side) or {}
+        out[side] = {k: v for k, v in exp_map.items()
+                     if lo <= str(k).split(":")[0] <= hi}
+        contracts += _contract_count(out[side])
+    out["numberOfContracts"] = contracts
+    if not out["callExpDateMap"] and not out["putExpDateMap"]:
+        out["underlyingPrice"] = 0.0
+    return out
+
+
 def fetch_price_history(client, symbol):
     try:
         r = client.get_price_history_every_day(symbol)
