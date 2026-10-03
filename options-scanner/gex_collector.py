@@ -12,14 +12,17 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import math
 import os
 import sys
 import time
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import chain_carry
 import flow_skew
 from gamma_tool import GammaEngine
 import gex_history_db as db
@@ -263,8 +266,114 @@ def _reanchor_spots(client, symbols, fetched, now) -> int:
     return corrected
 
 
+# Slack added to the tail interval when asking the proxy for a STORED chain, so
+# a chain fetched a little late in its own minute is still inside the limit.
+CARRY_SLACK_SEC = 30
+
+
+def tail_due(symbol, minute_index: int, interval: int) -> bool:
+    """Whether a watchlist-only symbol gets a REAL fetch this minute.
+
+    One minute in ``interval``, offset by a stable hash of the symbol so each
+    minute fetches about ``1/interval`` of them. ``zlib.crc32`` rather than
+    ``hash()``: the built-in is salted per process, which would move every
+    symbol's minute on each restart."""
+    if interval <= 1:
+        return True
+    return (minute_index + zlib.crc32(symbol.encode()) % interval) % interval == 0
+
+
+def _usable_tiers(tiers):
+    """``tiers`` checked once per poll, or None for "every fetch is real".
+
+    ``_chain_max_age`` runs inside each symbol's fetch guard, so a mapping it
+    could not read would fail EVERY fetch and leave the poll with no chains. A
+    bad mapping costs the saving, never the collection."""
+    if not tiers:
+        return None
+    try:
+        tail = frozenset(tiers["tail"])
+        interval = int(tiers["interval_min"])
+        fresh = tiers["fresh_max_age_sec"]
+        if (isinstance(fresh, bool) or not isinstance(fresh, (int, float))
+                or not math.isfinite(fresh) or fresh < 0):
+            raise ValueError(f"fresh_max_age_sec={fresh!r}")
+    except Exception:  # noqa: BLE001 — never let a settings shape stop a poll
+        log.warning("Unusable collection tiers %r; fetching every chain", tiers,
+                    exc_info=True)
+        return None
+    if interval <= 1 or not tail:
+        return None                    # nothing would ever be carried
+    return {"tail": tail, "interval_min": interval, "fresh_max_age_sec": fresh}
+
+
+def _chain_max_age(symbol, minute_index, tiers):
+    """The age limit to send for ``symbol``'s chain, or None to send none
+    (``tiers`` off: exactly the request made before tiers existed)."""
+    if not tiers:
+        return None
+    fresh = tiers["fresh_max_age_sec"]
+    interval = int(tiers["interval_min"])
+    if symbol in tiers["tail"] and not tail_due(symbol, minute_index, interval):
+        return interval * 60 + CARRY_SLACK_SEC
+    return fresh
+
+
+def _answer_age(resp):
+    """Seconds since the chain left Schwab, or None when the proxy did not say.
+    Strict on type: a test double's attribute, or anything that is not a real,
+    finite number at or above zero, must read as "fresh", never as carried —
+    or the detectors would be skipped for a chain that is new."""
+    age = getattr(resp, "store_age", None)
+    if isinstance(age, bool) or not isinstance(age, (int, float)):
+        return None
+    if not math.isfinite(age) or age < 0:
+        return None
+    return float(age)
+
+
+def _carry_forward(client, fetched, ages, tiers, now):
+    """Re-price every carried chain at the live quote, in place in ``fetched``.
+    Returns ``(carried symbols, how many were re-priced)``.
+
+    Carried is decided by the ANSWER: a chain older than the fresh limit, for
+    whatever reason the proxy handed it back. A symbol that was not due but got
+    a real fetch (the store was empty) is fresh; so is a due one answered from
+    a five-second-old chain.
+
+    ONE batched ``/quotes`` call for all of them. Any failure leaves the chains
+    as stored: a price up to a few minutes old beats a dead poll, and a chain is
+    never priced at a quote that is not a real, positive number."""
+    limit = tiers["fresh_max_age_sec"]
+    carried = {s for s, chain in fetched
+               if chain and ages.get(s) is not None and ages[s] > limit}
+    if not carried:
+        return carried, 0
+    try:
+        resp = client.get_quotes(sorted(carried))
+        payload = resp.json() if getattr(resp, "status_code", 500) == 200 else None
+        spots = live_spots(payload)
+    except Exception as e:  # noqa: BLE001 — a stored price beats a dead poll
+        log.warning("Carry-forward quotes unavailable (%s); using stored prices", e)
+        return carried, 0
+    repriced = 0
+    for i, (symbol, chain) in enumerate(fetched):
+        if symbol not in carried or symbol not in spots:
+            continue
+        try:
+            moved = chain_carry.carry_chain(
+                chain, spots[symbol], age_sec=ages[symbol], now=now)
+        except Exception:  # noqa: BLE001 — one symbol never breaks the poll
+            log.debug("Carry-forward failed for %s", symbol, exc_info=True)
+            continue
+        if moved is not chain:
+            fetched[i] = (symbol, moved)
+            repriced += 1
+    return carried, repriced
+
+
 def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
-              poll_term=None, now=None) -> None:
+              poll_term=None, now=None, tiers=None) -> None:
     """Fetch + store one snapshot per symbol. Per-symbol exceptions are logged,
     not propagated, so one bad symbol doesn't kill the whole poll.
 
@@ -280,27 +389,45 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
 
     ``now`` — the CT wall clock, injectable for tests. Outside the regular
     session each fetched chain's stale ``underlyingPrice`` is re-anchored on the
-    live quote before anything downstream sees it; see ``_reanchor_spots``."""
+    live quote before anything downstream sees it; see ``_reanchor_spots``.
+
+    ``tiers`` — ``{"tail": frozenset, "interval_min": int, "fresh_max_age_sec":
+    int}`` or None. With tiers, a watchlist-only symbol gets a real fetch one
+    minute in ``interval_min`` and the proxy's stored chain otherwise; a stored
+    chain is carried forward to the live quote, is NOT passed to ``on_chain``
+    (it has no new volume for the detectors), and IS written like any other.
+    None keeps every request exactly as it was before tiers existed."""
     if symbols is None:
         symbols = collection_symbols()
+    tiers = _usable_tiers(tiers)
     now = now if now is not None else datetime.now(TZ)
     # snap down to nearest POLL_INTERVAL_MIN boundary so all rows in one poll
     # cycle share the same ts (idempotent re-runs replace, don't duplicate).
     snapped_min = (now.minute // POLL_INTERVAL_MIN) * POLL_INTERVAL_MIN
     ts_boundary = int(now.replace(minute=snapped_min, second=0, microsecond=0).timestamp())
     today = now.date()
+    minute_index = ts_boundary // 60
+    # Seconds since each answer left Schwab. Written from the pool threads, one
+    # key per symbol; a plain dict is safe for that.
+    ages: dict = {}
 
     def _fetch(symbol):
         """(symbol, chain|None); fetch failures are logged here, never raised."""
         try:
+            kwargs = {}
+            limit = _chain_max_age(symbol, minute_index, tiers)
+            if limit is not None:
+                kwargs["max_age"] = limit
             with _maybe_lock(lock):
                 r = client.get_option_chain(
                     symbol,
                     contract_type=client.Options.ContractType.ALL,
                     from_date=today,
                     to_date=today + timedelta(days=7),
+                    **kwargs,
                 )
             chain = r.json() if getattr(r, "status_code", 500) == 200 else None
+            ages[symbol] = _answer_age(r)
             if not chain:
                 log.warning("No chain for %s", symbol)
             return symbol, chain
@@ -330,11 +457,23 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
         log.info("Re-anchored %d chain(s) on live quotes (extended hours)",
                  corrected)
 
+    # Watchlist-only symbols between real fetches: the proxy handed back its
+    # stored chain. Move it to the live price before anything prices off it.
+    carried: set = set()
+    if tiers:
+        carried, repriced = _carry_forward(client, fetched, ages, tiers, now)
+        # One line a poll, zeros included: a run of zeros is how the operator
+        # sees that the proxy's store is not answering.
+        log.info("Carried %d of %d chain(s) forward (%d on a live quote)",
+                 len(carried), sum(1 for _s, ch in fetched if ch), repriced)
+
     for symbol, chain in fetched:
         if not chain:
             continue
         try:
-            if on_chain is not None:
+            # A carried chain has no new volume: the detectors behind on_chain
+            # would read last fetch's trades as this minute's.
+            if on_chain is not None and symbol not in carried:
                 try:
                     on_chain(symbol, chain)
                 except Exception:

@@ -35,9 +35,11 @@ _TINY_GAMMA = 1e-12
 # The most a carried gamma may grow over Schwab's own value. Near the close on
 # expiration day a strike the price walks onto has a Black-Scholes ratio in the
 # thousands, and Schwab's base need not be as small as the model's: uncapped,
-# the product is a GEX wall that does not exist. A real move inside one carry
-# interval stays well under ten times. Shrinking needs no bound: the ratio
-# cannot go below zero.
+# the product is a GEX wall that does not exist. Outside the last half hour of
+# expiration day a real change inside one carry interval is far under ten
+# times; inside it (a 0.5% move onto a strike is about ten) the cap can hold a
+# carried value low until the next real fetch. Shrinking needs no bound: the
+# ratio cannot go below zero.
 MAX_GAMMA_RATIO = 10.0
 _SIDES = (("callExpDateMap", "call"), ("putExpDateMap", "put"))
 
