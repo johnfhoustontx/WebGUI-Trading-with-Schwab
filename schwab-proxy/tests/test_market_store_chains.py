@@ -154,3 +154,52 @@ def test_chain_shape_skips_an_expiration_that_is_not_a_strike_map():
     odd["callExpDateMap"]["2026-10-07:2"] = 5
     odd["putExpDateMap"]["2026-10-07:2"] = ["x"]
     assert ms.chain_shape(odd) == ms.chain_shape(good)
+
+
+import datetime as dt
+
+TODAY = dt.date(2026, 10, 5)
+
+
+def test_a_near_miss_refetches_the_wider_window_already_held():
+    s = _store()                               # holds today -> +7, at any age
+    assert s.wide_key(NARROW, today=TODAY) == WIDE
+
+
+def test_no_wider_refetch_for_a_symbol_nobody_fetched_wide():
+    assert ms.ChainStore().wide_key(NARROW, today=TODAY) is None
+
+
+def test_no_wider_refetch_when_the_request_is_the_held_window_itself():
+    assert _store().wide_key(WIDE, today=TODAY) is None
+
+
+def test_no_wider_refetch_for_a_window_the_held_one_does_not_cover():
+    far = ms.ChainKey("SPY", from_date="2026-10-10", to_date="2026-10-20")
+    assert _store().wide_key(far, today=TODAY) is None
+
+
+def test_no_wider_refetch_for_a_strike_filtered_request():
+    filtered = ms.ChainKey("SPY", strike_range="NTM", strike_count=50,
+                           from_date="2026-10-05", to_date="2026-10-09")
+    assert _store().wide_key(filtered, today=TODAY) is None
+
+
+def test_the_narrowest_covering_window_is_the_one_refetched():
+    s = _store()
+    wider = ms.ChainKey("SPY", from_date="2026-10-05", to_date="2026-11-19")
+    s.put(wider, chain(), now=1500.0, state="REGULAR")
+    assert s.wide_key(NARROW, today=TODAY) == WIDE
+
+
+def test_a_window_that_started_on_an_earlier_day_is_not_refetched():
+    s = ms.ChainStore()
+    yesterday = ms.ChainKey("SPY", from_date="2026-10-04", to_date="2026-10-11")
+    s.put(yesterday, chain(), now=1000.0, state="REGULAR")
+    assert s.wide_key(NARROW, today=TODAY) is None
+
+
+def test_cut_answers_from_the_wide_entry_whatever_its_age():
+    body = json.loads(_store().cut(WIDE, NARROW))
+    assert sorted(body["callExpDateMap"]) == ["2026-10-05:0", "2026-10-07:2", "2026-10-09:4"]
+    assert ms.ChainStore().cut(WIDE, NARROW) is None

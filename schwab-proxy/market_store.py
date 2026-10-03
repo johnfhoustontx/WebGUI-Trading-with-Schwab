@@ -227,3 +227,33 @@ class ChainStore:
             return None
         return Served("subset", now - best.fetched_at,
                       body=_render(best, key.from_date, key.to_date))
+
+    def wide_key(self, key: ChainKey, *, today) -> ChainKey | None:
+        """The wider window to fetch INSTEAD of ``key``, or None to fetch
+        ``key`` as asked.
+
+        It is the narrowest plain window already held for this symbol, at ANY
+        age, that starts today and covers ``key`` - in practice the collector's
+        today -> +7. Derived from what is held rather than configured, so it
+        cannot drift from the window the collector actually asks for. A window
+        that started on an earlier day is never reused: refetching it would ask
+        Schwab for expirations in the past."""
+        if not key.plain:
+            return None
+        start = today.isoformat()
+        with self._lock:
+            held = [e for k, e in self._entries.items()
+                    if k.symbol == key.symbol and k != key
+                    and k.from_date == start and k.covers(key)]
+        if not held:
+            return None
+        return min(held, key=lambda e: (e.key.to_date, -e.fetched_at)).key
+
+    def cut(self, wide: ChainKey, key: ChainKey) -> bytes | None:
+        """``key``'s window out of the entry stored under ``wide``, regardless
+        of age — for the moment right after ``wide`` was fetched."""
+        with self._lock:
+            entry = self._entries.get(wide)
+        if entry is None:
+            return None
+        return _render(entry, key.from_date, key.to_date)
