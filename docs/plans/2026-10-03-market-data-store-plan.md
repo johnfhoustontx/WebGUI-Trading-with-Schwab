@@ -1506,6 +1506,9 @@ class Cfg:
     def section(self, name):
         return self._s[name]
 
+    def today_bar(self):
+        return self._s["bars"]["today_bar"]
+
 
 class Harness:
     def __init__(self, cfg=None, responses=None):
@@ -1747,7 +1750,7 @@ class Gateway:
 
     ``fetch(endpoint, params)`` returns Schwab's JSON or raises
     ``UpstreamError``. ``config`` is ``shared.marketdata_config`` (``mode()``,
-    ``store_on(name)``, ``section(name)``). ``calendar`` is
+    ``store_on(name)``, ``section(name)``, ``today_bar()``). ``calendar`` is
     ``shared.market_calendar``. ``record(endpoint, caller, outcome)`` is the
     detail counter.
 
@@ -2101,7 +2104,7 @@ Expected: the new tests FAIL, `'Gateway' object has no attribute 'quotes'`.
             if not live:
                 self._record("pricehistory", caller, "hit")
                 return Served("hit", age, body=body)
-            if cfg["today_bar"] == "quote":
+            if self._cfg.today_bar() == "quote":
                 quote = self.quote_store.get(symbol, max_age=quote_age,
                                              now=self._clock())
                 composed = (compose_today(json.loads(body), quote, now_ct.date())
