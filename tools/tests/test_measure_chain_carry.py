@@ -237,7 +237,8 @@ def _run(argv, clock=None, fail=()):
 
 
 def test_every_chain_fetch_asks_for_a_real_one_over_the_collectors_window(capsys):
-    code, client, _ = _run(["--symbols", "SOFI,UBER", "--minutes", "3"])
+    code, client, _ = _run(["--symbols", "SOFI,UBER", "--minutes", "3",
+                            "--interval", "2"])
     assert code == 0
     assert len(client.chain_calls) == 6
     for symbol, kw in client.chain_calls:
@@ -269,12 +270,13 @@ def test_each_minute_compares_the_fresh_chain_with_the_one_and_two_minute_old_on
 
 
 def test_a_chain_fetch_that_fails_is_skipped_and_the_run_goes_on(capsys):
-    code, client, _ = _run(["--symbols", "SOFI,UBER", "--minutes", "3"], fail={"UBER"})
+    code, client, _ = _run(["--symbols", "SOFI,UBER", "--minutes", "3",
+                            "--interval", "2"], fail={"UBER"})
     captured = capsys.readouterr()
     assert code == 0 and len(client.chain_calls) == 6
-    assert "3 comparisons" in captured.out
+    assert "2 comparisons" in captured.out
     rows = [line for line in captured.out.splitlines() if " age " in line]
-    assert len(rows) == 3 and all("SOFI" in line for line in rows)
+    assert len(rows) == 2 and all("SOFI" in line for line in rows)
     assert captured.err.count("UBER: no chain") == 3        # said, once a minute
     assert client.quote_calls == [["SOFI", "UBER"]] * 3     # the stated quote calls
 
@@ -284,8 +286,8 @@ def test_a_symbol_with_no_live_quote_is_not_compared(capsys):
     client = _Client(clock)
     client.get_quotes = lambda symbols, **kw: _Resp(
         {"SOFI": {"quote": {"lastPrice": 0}}})                 # the no-print sentinel
-    code = mcc.main(["--symbols", "SOFI", "--minutes", "3"], clock=clock,
-                    client_factory=lambda: client, sleep=clock.sleep)
+    code = mcc.main(["--symbols", "SOFI", "--minutes", "3", "--interval", "2"],
+                    clock=clock, client_factory=lambda: client, sleep=clock.sleep)
     assert code == 0 and "0 comparisons" in capsys.readouterr().out
 
 
@@ -307,11 +309,13 @@ def test_the_carry_and_the_cap_count_are_the_collectors_own(capsys, monkeypatch)
 
     monkeypatch.setattr(chain_carry, "carry_chain", carry)
     monkeypatch.setattr(chain_carry, "capped_gammas", cap)
-    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "2"])
+    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "3", "--interval", "2"])
     assert code == 0
-    assert seen["carry"] == [(100.5, 101.0, 60.0, RTH + dt.timedelta(seconds=61))]
+    assert seen["carry"] == [(100.5, 101.0, 60.0, RTH + dt.timedelta(seconds=61)),
+                             (101.0, 101.5, 60.0, RTH + dt.timedelta(seconds=121))]
     assert seen["cap"] == seen["carry"]
-    assert "gamma cap bound on 7 contract(s), in 1 of 1 comparisons" in capsys.readouterr().out
+    assert ("gamma cap bound on 14 contract(s), in 2 of 2 comparisons"
+            in capsys.readouterr().out)
 
 
 def test_the_error_is_measured_against_the_chain_fetched_that_minute(capsys, monkeypatch):
@@ -327,13 +331,14 @@ def test_the_error_is_measured_against_the_chain_fetched_that_minute(capsys, mon
     real = mcc.compare
     monkeypatch.setattr(mcc, "compare", lambda fresh, carried: (
         seen.append((fresh["net_total"], carried["net_total"])), real(fresh, carried))[1])
-    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "2"])
+    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "3", "--interval", "2"])
     assert code == 0
     fresh = net(_chain("SOFI", 101.0))
     carried = net(chain_carry.carry_chain(_chain("SOFI", 100.5), 101.0, age_sec=60.0,
                                           now=RTH + dt.timedelta(seconds=61)))
     assert fresh != carried
-    assert seen == [(fresh, carried)]
+    assert seen[0] == (fresh, carried)
+    assert len(seen) == 2 and seen[1][0] == net(_chain("SOFI", 101.5))
 
 
 def test_a_chain_older_than_the_collector_would_carry_is_not_compared(capsys):
@@ -388,8 +393,8 @@ def test_outside_the_regular_session_the_tool_refuses_and_calls_nothing(when, ca
         raise AssertionError("refused runs must not build a client")
 
     clock = _Clock(start=when)
-    code = mcc.main(["--symbols", "SOFI", "--minutes", "3"], clock=clock,
-                    client_factory=boom, sleep=clock.sleep)
+    code = mcc.main(["--symbols", "SOFI", "--minutes", "3", "--interval", "2"],
+                    clock=clock, client_factory=boom, sleep=clock.sleep)
     captured = capsys.readouterr()
     assert code == 2 and clock.slept == []
     assert "regular session" in captured.err and "--force" in captured.err
@@ -398,10 +403,10 @@ def test_outside_the_regular_session_the_tool_refuses_and_calls_nothing(when, ca
 
 @pytest.mark.parametrize("when", CLOSED)
 def test_force_runs_anyway(when, capsys):
-    code, client, _ = _run(["--symbols", "SOFI", "--minutes", "2", "--force"],
-                           clock=_Clock(start=when))
-    assert code == 0 and len(client.chain_calls) == 2
-    assert "1 comparisons" in capsys.readouterr().out
+    code, client, _ = _run(["--symbols", "SOFI", "--minutes", "3", "--interval", "2",
+                            "--force"], clock=_Clock(start=when))
+    assert code == 0 and len(client.chain_calls) == 3
+    assert "2 comparisons" in capsys.readouterr().out
 
 
 def test_a_run_stops_when_the_session_closes_under_it(capsys):
@@ -437,8 +442,8 @@ def _caller_seen(monkeypatch, preset):
         seen.append(os.environ.get("TRADING_CALLER"))          # as the client is built
         return _Client(clock)
 
-    assert mcc.main(["--symbols", "SOFI", "--minutes", "2"], clock=clock,
-                    client_factory=factory, sleep=clock.sleep) == 0
+    assert mcc.main(["--symbols", "SOFI", "--minutes", "3", "--interval", "2"],
+                    clock=clock, client_factory=factory, sleep=clock.sleep) == 0
     return seen
 
 
@@ -483,7 +488,8 @@ def _ratios_used(monkeypatch, argv):
 
     monkeypatch.setattr(chain_carry, "carry_chain", carry)
     monkeypatch.setattr(chain_carry, "capped_gammas", cap)
-    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "2", *argv])
+    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "3", "--interval", "2",
+                       *argv])
     assert code == 0
     return seen
 
@@ -492,17 +498,18 @@ def test_the_gamma_cap_defaults_to_the_configured_one(monkeypatch, capsys):
     from shared import marketdata_config as mdc
     real = mdc.section
     monkeypatch.setattr(mdc, "section", lambda name: dict(real(name), max_gamma_ratio=6.5))
-    assert _ratios_used(monkeypatch, []) == {"carry": [6.5], "cap": [6.5]}
+    assert _ratios_used(monkeypatch, []) == {"carry": [6.5, 6.5], "cap": [6.5, 6.5]}
     assert "gamma cap: 6.5 times Schwab's value" in capsys.readouterr().out
 
 
 def test_as_shipped_the_gamma_cap_is_ten(monkeypatch, capsys):
-    assert _ratios_used(monkeypatch, []) == {"carry": [10.0], "cap": [10.0]}
+    assert _ratios_used(monkeypatch, []) == {"carry": [10.0, 10.0],
+                                             "cap": [10.0, 10.0]}
 
 
 def test_the_gamma_cap_argument_wins_over_the_setting(monkeypatch, capsys):
     assert _ratios_used(monkeypatch, ["--max-gamma-ratio", "3"]) == {
-        "carry": [3.0], "cap": [3.0]}
+        "carry": [3.0, 3.0], "cap": [3.0, 3.0]}
     assert "gamma cap: 3 times Schwab's value" in capsys.readouterr().out
 
 
@@ -573,7 +580,8 @@ def _expiring(symbol, spot):
 def _rows_of(monkeypatch, chain_of):
     rows = []
     real = mcc.report
-    monkeypatch.setattr(mcc, "report", lambda r: (rows.extend(r), real(r))[1])
+    monkeypatch.setattr(mcc, "report",
+                        lambda r, **kw: (rows.extend(r), real(r, **kw))[1])
     clock = _Clock()
     client = _Client(clock)
     calls = []
@@ -584,16 +592,224 @@ def _rows_of(monkeypatch, chain_of):
         return _Resp(chain_of(symbol, 100.0 + 0.5 * len(calls)))
 
     client.get_option_chain = get_chain
-    assert mcc.main(["--symbols", "SOFI", "--minutes", "2"], clock=clock,
-                    client_factory=lambda: client, sleep=clock.sleep) == 0
+    assert mcc.main(["--symbols", "SOFI", "--minutes", "3", "--interval", "2"],
+                    clock=clock, client_factory=lambda: client, sleep=clock.sleep) == 0
     return rows
 
 
 def test_a_comparison_is_marked_by_what_the_engine_read(monkeypatch, capsys):
-    assert [r["expiration_day"] for r in _rows_of(monkeypatch, _expiring)] == [True]
-    assert "on expiration day: 1 comparisons" in capsys.readouterr().out
+    assert [r["expiration_day"] for r in _rows_of(monkeypatch, _expiring)] == [True, True]
+    assert "on expiration day: 2 comparisons" in capsys.readouterr().out
 
 
 def test_a_chain_four_days_out_is_not_an_expiration_day(monkeypatch, capsys):
-    assert [r["expiration_day"] for r in _rows_of(monkeypatch, _chain)] == [False]
+    assert [r["expiration_day"] for r in _rows_of(monkeypatch, _chain)] == [False, False]
     assert "on expiration day: 0 comparisons" in capsys.readouterr().out
+
+
+#############################################
+# THE INTERVAL BEING CONSIDERED
+#############################################
+# At an interval of N the collector carries a chain for up to N - 1 minutes.
+# Holding two chains could only ever speak for an interval of 3, while the
+# settings say "use 3 or 5".
+
+def _config(monkeypatch, **collection):
+    from shared import marketdata_config as mdc
+    real = mdc.section
+    monkeypatch.setattr(mdc, "section", lambda name: (
+        dict(real(name), **collection) if name == "collection" else real(name)))
+
+
+def _dry(argv, capsys):
+    code = mcc.main([*argv, "--dry-run"], clock=_Clock(),
+                    client_factory=lambda: 1 / 0, sleep=lambda s: None)
+    assert code == 0
+    return capsys.readouterr().out
+
+
+def test_the_oldest_chain_compared_is_one_minute_short_of_the_interval_plus_the_slack():
+    assert mcc.max_carry_age(3, 30) == 150
+    assert mcc.max_carry_age(5, 30) == 270
+    assert mcc.max_carry_age(2, 0) == 60
+    assert mcc.max_carry_age(4, 12.5) == 192.5
+
+
+@pytest.mark.parametrize("configured, used", [(1, 3), (0, 3), (2, 2), (3, 3), (4, 4),
+                                              (5, 5), (7, 5)])
+def test_the_interval_defaults_to_the_configured_one_when_it_is_above_one(
+        monkeypatch, capsys, configured, used):
+    """Above 5 the collector reads 5, so the tool does too."""
+    _config(monkeypatch, tail_interval_min=configured)
+    assert mcc.configured_interval() == used
+    assert f"interval: {used} minutes" in _dry([], capsys)
+
+
+def test_as_shipped_the_interval_is_three(capsys):
+    out = _dry([], capsys)
+    assert "interval: 3 minutes (a carried chain is up to 2 minutes old, " \
+           "at most 150 seconds)" in out
+
+
+def test_the_interval_argument_wins_over_the_setting(monkeypatch, capsys):
+    _config(monkeypatch, tail_interval_min=3)
+    out = _dry(["--interval", "5"], capsys)
+    assert "interval: 5 minutes (a carried chain is up to 4 minutes old, " \
+           "at most 270 seconds)" in out
+
+
+def test_the_age_limit_uses_the_configured_slack(monkeypatch, capsys):
+    _config(monkeypatch, carry_slack_sec=10)
+    assert "at most 130 seconds" in _dry(["--interval", "3"], capsys)
+
+
+@pytest.mark.parametrize("bad", ["1", "0", "6", "10", "-3", "x", "2.5"])
+def test_an_interval_outside_two_to_five_is_refused_before_any_call(bad, capsys):
+    with pytest.raises(SystemExit) as stop:
+        mcc.main(["--interval", bad, "--minutes", "12"], clock=_Clock(),
+                 client_factory=lambda: 1 / 0, sleep=lambda s: None)
+    assert stop.value.code == 2
+
+
+@pytest.mark.parametrize("interval", ["2", "3", "4", "5"])
+def test_every_interval_from_two_to_five_is_accepted(interval, capsys):
+    assert f"interval: {interval} minutes" in _dry(["--interval", interval], capsys)
+
+
+@pytest.mark.parametrize("interval, minutes", [("2", "2"), ("3", "3"), ("3", "2"),
+                                               ("5", "5"), ("5", "4")])
+def test_a_run_no_longer_than_the_interval_is_refused_before_any_call(
+        interval, minutes, capsys):
+    """It would make one comparison at the oldest age, or none."""
+    with pytest.raises(SystemExit) as stop:
+        mcc.main(["--interval", interval, "--minutes", minutes], clock=_Clock(),
+                 client_factory=lambda: 1 / 0, sleep=lambda s: None)
+    assert stop.value.code == 2
+    assert "--minutes" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("interval, minutes", [("2", "3"), ("3", "4"), ("5", "6")])
+def test_a_run_one_minute_longer_than_the_interval_is_accepted(interval, minutes, capsys):
+    _dry(["--interval", interval, "--minutes", minutes], capsys)
+
+
+def test_the_dry_run_call_count_does_not_depend_on_the_interval(capsys):
+    """One chain per symbol per minute and one quote a minute, whatever is held."""
+    for interval in ("2", "5"):
+        out = _dry(["--symbols", "SOFI,UBER,HOOD", "--minutes", "12",
+                    "--interval", interval], capsys)
+        assert "Schwab calls: 36 chain + 12 quote = 48" in out
+        assert f"interval: {interval} minutes" in out
+
+
+def _ages(out):
+    return sorted(int(float(line.split("age")[1].split("s")[0]))
+                  for line in out.splitlines() if " age " in line)
+
+
+def test_an_interval_of_five_compares_chains_up_to_four_minutes_old(capsys):
+    code, client, _ = _run(["--symbols", "SOFI", "--minutes", "7", "--interval", "5"])
+    out = capsys.readouterr().out
+    assert code == 0 and len(client.chain_calls) == 7
+    # Minute 2 has one chain to carry, minute 3 two, ... from minute 5 on, four.
+    assert _ages(out) == [60] * 6 + [120] * 5 + [180] * 4 + [240] * 3
+    assert "18 comparisons" in out
+
+
+def test_an_interval_of_two_compares_only_the_last_minutes_chain(capsys):
+    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "4", "--interval", "2"])
+    out = capsys.readouterr().out
+    assert code == 0 and _ages(out) == [60, 60, 60]
+
+
+def test_a_generous_slack_does_not_let_in_a_chain_a_whole_interval_old(
+        monkeypatch, capsys):
+    """Only ``interval - 1`` chains are held. With a slack of 60 the age limit
+    alone would admit the two-minute-old chain at an interval of 2."""
+    _config(monkeypatch, carry_slack_sec=60)
+    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "4", "--interval", "2"])
+    assert code == 0 and _ages(capsys.readouterr().out) == [60, 60, 60]
+
+
+def _one_fetch_then_failures(minutes, interval, capsys, monkeypatch=None, slack=None):
+    """Minute 1 fetches, every minute up to the last fails, the last fetches."""
+    if slack is not None:
+        _config(monkeypatch, carry_slack_sec=slack)
+    clock = _Clock()
+    client = _Client(clock)
+    real = client.get_option_chain
+    client.get_option_chain = lambda symbol, **kw: (
+        real(symbol, **kw) if len(client.chain_calls) in (0, minutes - 1)
+        else (client.chain_calls.append((symbol, kw)), _Resp(None, 502))[1])
+    code = mcc.main(["--symbols", "SOFI", "--minutes", str(minutes),
+                     "--interval", str(interval)], clock=clock,
+                    client_factory=lambda: client, sleep=clock.sleep)
+    assert code == 0
+    return _ages(capsys.readouterr().out)
+
+
+def test_a_chain_held_past_the_intervals_age_limit_is_not_compared(capsys, monkeypatch):
+    # Interval 5: at most 4 x 60 + 30 = 270 s. The only held chain is 300 s old.
+    assert _one_fetch_then_failures(6, 5, capsys) == []
+    # A slack of 60 makes the limit 300 s: that same chain is now compared.
+    assert _one_fetch_then_failures(6, 5, capsys, monkeypatch, slack=60) == [300]
+
+
+def test_the_run_states_the_interval_in_its_plan_and_its_report(capsys):
+    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "5", "--interval", "4"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert out.count("interval: 4 minutes") == 1                 # the plan
+    report = out[out.index("interval considered"):]
+    assert report.splitlines()[0] == "interval considered: 4 minutes"
+    assert "comparisons" in report.splitlines()[1]               # the report follows
+
+
+#############################################
+# ERRORS BY HOW OLD THE CARRIED CHAIN WAS
+#############################################
+
+def _aged(net, age_min):
+    return {"net_rel_err": net, "flip_abs_err": 0.1, "walls_agree": True,
+            "age_min": age_min}
+
+
+def test_the_report_groups_errors_by_carried_age_in_whole_minutes():
+    rows = [_aged(0.01, 1), _aged(0.03, 1), _aged(0.02, 1),
+            _aged(0.05, 2), _aged(0.09, 2), _aged(0.20, 4)]
+    lines = mcc.report(rows, interval=5).splitlines()
+    assert "carried 1 minute old: 3 comparisons, median 2.0%, worst 3.0%" in lines
+    assert "carried 2 minutes old: 2 comparisons, median 9.0%, worst 9.0%" in lines
+    assert "carried 4 minutes old: 1 comparisons, median 20.0%, worst 20.0%" in lines
+    assert not [x for x in lines if x.startswith("carried 3 minute")]
+    ages = [x for x in lines if x.startswith("carried ")]
+    assert [x.split()[1] for x in ages] == ["1", "2", "4"]       # youngest first
+
+
+def test_an_age_group_with_no_reading_is_counted_without_numbers():
+    lines = mcc.report([_aged(None, 2), _aged(0.04, 1)]).splitlines()
+    assert "carried 2 minutes old: 1 comparisons, no reading" in lines
+
+
+def test_rows_with_no_age_get_no_age_lines():
+    rows = [{"net_rel_err": 0.01, "flip_abs_err": 0.1, "walls_agree": True}]
+    assert "carried" not in mcc.report(rows)
+
+
+def test_the_report_states_the_interval_when_it_is_given_one():
+    rows = [_aged(0.01, 1)]
+    assert mcc.report(rows, interval=3).splitlines()[0] == "interval considered: 3 minutes"
+    assert "interval considered" not in mcc.report(rows)
+
+
+def test_a_runs_rows_carry_their_age_in_whole_minutes(monkeypatch, capsys):
+    rows = []
+    real = mcc.report
+    monkeypatch.setattr(mcc, "report", lambda r, **kw: (rows.extend(r), real(r, **kw))[1])
+    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "4", "--interval", "3"])
+    assert code == 0
+    assert sorted(r["age_min"] for r in rows) == [1, 1, 1, 2, 2]
+    out = capsys.readouterr().out
+    assert "carried 1 minute old: 3 comparisons" in out
+    assert "carried 2 minutes old: 2 comparisons" in out
+    assert "interval considered: 3 minutes" in out
