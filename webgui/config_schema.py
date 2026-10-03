@@ -42,6 +42,7 @@ NEWS = "news_svc"
 TRADE = "trade_svc"
 WEBGUI = "webgui"
 TIMERS = "timers"
+PROXY = "proxy"
 
 RESTART_LABELS = {
     OPTIONS: "Options service",
@@ -51,6 +52,7 @@ RESTART_LABELS = {
     TRADE: "Trade service",
     WEBGUI: "Web app (this page reloads)",
     TIMERS: "Scheduled timers (regenerated, no restart)",
+    PROXY: "Schwab proxy",
 }
 
 SECTORS = (
@@ -1323,8 +1325,79 @@ _NOTIFY = ConfigFile(
     ),
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Local market data — config/marketdata.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_SEC = dict(kind="int", unit="seconds", min=0)
+
+_MARKETDATA = ConfigFile(
+    name="marketdata.toml", title="Local market data", icon="storage",
+    summary="How the Schwab proxy reuses data it has already fetched, and how "
+            "often watchlist symbols are fetched. Changes apply at once.",
+    restart=(),
+    caution="Longer time limits save Schwab calls and show older data. Turn the "
+            "mode to off to return to fetching everything.",
+    sections=(
+        Section("Mode", "", (
+            Field("mode", "Mode",
+                  "Off fetches everything from Schwab. Shadow still fetches "
+                  "everything and counts what could have been reused. On answers "
+                  "repeat requests locally.",
+                  kind="choice", choices=("off", "shadow", "on")),
+        )),
+        Section("Option chains", "", (
+            Field("chains.enabled", "Reuse option chains", "", kind="bool"),
+            Field("chains.max_age_sec", "Oldest chain to reuse while a session is open",
+                  "The autoscan reads chains up to this old.", **_SEC, max=600),
+            Field("chains.closed_max_age_sec", "Oldest chain to reuse while markets are closed",
+                  "", **_SEC, max=86400),
+            Field("chains.wide_days", "Days ahead fetched when a chain is refreshed",
+                  "Matches the collector's own window.", kind="int", unit="days",
+                  min=1, max=14),
+            Field("chains.max_entries", "Most chains kept at once", "", kind="int",
+                  min=50, max=5000),
+            Field("chains.shadow_compare_max_age_sec",
+                  "Oldest chain compared in shadow mode", "", **_SEC, max=600),
+        )),
+        Section("Quotes", "", (
+            Field("quotes.enabled", "Reuse quotes", "", kind="bool"),
+            Field("quotes.max_age_sec", "Oldest quote to reuse", "", **_SEC, max=60),
+        )),
+        Section("Daily price bars", "", (
+            Field("bars.enabled", "Reuse daily price bars", "", kind="bool"),
+            Field("bars.today_bar", "Today's bar",
+                  "ttl re-serves the last fetched series. quote builds today's "
+                  "bar from the live quote; use it only once the shadow counts "
+                  "show the two agree.",
+                  kind="choice", choices=("ttl", "quote")),
+            Field("bars.session_ttl_sec", "Oldest series to reuse during the session",
+                  "Used when today's bar is set to ttl.", **_SEC, max=7200),
+            Field("bars.today_quote_max_age_sec", "Oldest quote used to build today's bar",
+                  "", **_SEC, max=600),
+            Field("bars.settle_min", "Minutes after the close before bars are refetched",
+                  "", kind="int", unit="minutes", min=0, max=120),
+        )),
+        Section("Autoscan", "", (
+            Field("scan.wide_fetch", "Fetch one wide chain per symbol",
+                  "One fetch out to 45 days in place of three.", kind="bool"),
+            Field("scan.wide_fetch_exclude", "Symbols that keep three separate fetches",
+                  "Their 45-day chain is too large for one request.", kind="symbols"),
+        )),
+        Section("Collector", "", (
+            Field("collection.tail_interval_min",
+                  "Minutes between real fetches for watchlist symbols",
+                  "1 fetches every symbol every minute. At 3, symbols that are "
+                  "collected only because they are on the watchlist are fetched "
+                  "every third minute and carried forward in between.",
+                  kind="int", unit="minutes", min=1, max=10),
+            Field("collection.fresh_max_age_sec",
+                  "Oldest chain the collector treats as new", "", **_SEC, max=60),
+        )),
+    ),
+)
+
 FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS, _MOMENTUM,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _SWING_MODEL, _COMMISSIONS, _PORTS, _ENVS)
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _SWING_MODEL, _COMMISSIONS, _MARKETDATA, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 
