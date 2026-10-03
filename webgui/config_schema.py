@@ -1330,8 +1330,9 @@ _SEC = dict(kind="int", unit="seconds", min=0)
 
 _MARKETDATA = ConfigFile(
     name="marketdata.toml", title="Local market data", icon="storage",
-    summary="How the Schwab proxy reuses data it has already fetched, and how "
-            "often watchlist symbols are fetched. Changes apply at once.",
+    summary="How the Schwab proxy reuses data it has already fetched, how "
+            "often watchlist symbols are fetched, and how its paper-trade "
+            "tracker retries. Changes apply at once.",
     restart=(),
     caution="Longer time limits save Schwab calls and show older data. Turn the "
             "mode to off to return to fetching everything.",
@@ -1394,6 +1395,20 @@ _MARKETDATA = ConfigFile(
                   "One fetch out to 45 days in place of three.", kind="bool"),
             Field("scan.wide_fetch_exclude", "Symbols that keep three separate fetches",
                   "Their 45-day chain is too large for one request.", kind="symbols"),
+        )),
+        Section("Paper-trade tracker",
+                "The proxy streams the legs of open paper credit spreads. A "
+                "trade it could not start tracking is tried again after 30 "
+                "seconds, then 60, 120 and so on, up to these limits.", (
+            Field("tracker.retry_max_sec", "Longest wait before trying again",
+                  "For a failure Schwab recovering will not fix, such as a "
+                  "strike that is not in the chain.",
+                  **{**_SEC, "min": 30}, max=86400),
+            Field("tracker.fetch_retry_max_sec",
+                  "Longest wait after Schwab did not send the chain",
+                  "Kept short so tracking resumes soon after an outage or a "
+                  "Schwab re-authorization.",
+                  **{**_SEC, "min": 30}, max=3600),
         )),
         Section("Collector", "", (
             Field("collection.tail_interval_min",

@@ -82,3 +82,11 @@ max_gamma_ratio = 10.0
 # chain (3 minutes + 30 = 210), so a chain fetched a little late in its own
 # minute is still inside the limit.
 carry_slack_sec = 30
+
+[tracker]
+# The proxy's paper-trade tracker (/track and its 30-second reconcile). A trade
+# it could not start tracking is tried again after 30 seconds, then 60, 120 ...
+# up to these limits. A trade it will never follow (a debit structure, a missing
+# strike or credit) is not tried again at all, and costs no Schwab call.
+retry_max_sec = 1800              # a strike not in the chain, or an unexpected fault
+fetch_retry_max_sec = 300         # Schwab did not send the chain: resume soon after

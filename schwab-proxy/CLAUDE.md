@@ -83,7 +83,8 @@ know are in the root `CLAUDE.md` ("The proxy can answer from memory").
   (`{endpoint, caller, outcome, n}`) — ⚠ `rows` lists at most the 500 largest
   (`MAX_DETAIL_ROWS`) while both totals cover every row. `store_degrades` is
   `{area: count}` of store faults since the process started that fell back to a
-  plain fetch; anything but empty is worth a look. `today` / `last_7_days` /
+  plain fetch; anything but empty is worth a look. `tracker` is
+  `{tracked, not_followed, failing}` for the paper-trade tracker. `today` / `last_7_days` /
   `last_30_days` still count calls SENT to Schwab: a local answer skips
   `_rate_limit` and `api_call_counter.record`.
 - **A dead token answers 500 with a JSON `detail` body.** `api_request` raises
@@ -96,6 +97,46 @@ know are in the root `CLAUDE.md` ("The proxy can answer from memory").
   known exception (the collector's own repeats while every session is closed,
   about 700 a day on `chains` for caller `options_svc`); see the root
   `CLAUDE.md`.
+
+## The paper-trade tracker (`/track`, `/untrack`, the 30-second reconcile)
+
+The tracker streams the legs of OPEN paper-ledger trades and fires three
+events: target (half the credit captured), stop (twice the credit) and short
+strike tested. **Those are credit-spread rules, so it follows `PCS`, `CCS` and
+`IC` only** (`trade_registry.TRACKED`). The ledger also holds debit structures:
+their `entry_credit` is negative and their strikes live in `legs`, not in the
+four strike columns. A row named `IRON_CONDOR` is read as `IC` when it carries
+all four strikes.
+
+- ⚠ **Decide before you fetch.** `trade_registry.track_refusal(body)` answers
+  from the trade alone (structure, symbol, expiration, usable strikes, a
+  positive credit) and `_track` calls it BEFORE the chain request. Until
+  2026-10-03 the structure was only discovered after the chain was fetched, so
+  every open debit trade cost one Schwab chain call and one ERROR line every 30
+  seconds for as long as it stayed open (measured on prod: 4.0 calls a minute
+  for two open trades, 48,462 ERROR lines since 2026-09-15).
+- ⚠ **A loop that retries must remember what failed.** `_reconcile_once` keeps
+  `trade_registry.TrackAttempts`. A trade answered `skipped` (the tracker will
+  never follow it) is not tried again. One answered `error` is tried again
+  after 30 seconds, then 60, 120 ... up to a limit from
+  `config/marketdata.toml` `[tracker]`: `fetch_retry_max_sec` (5 minutes) when
+  Schwab did not send the chain (an error status, or `api_request` raising
+  because the token cannot be made valid), so tracking resumes soon after an
+  outage or a re-authorization, and `retry_max_sec` (30 minutes) otherwise. A
+  setting that is not a number above zero is replaced by that limit's own
+  built-in value. The memory is dropped when the trade closes or becomes
+  tracked.
+- ⚠ **"Reported once" keys on a stable name, not on the message.** `_track`
+  returns a `key` beside `detail`; the same key as last time is logged at
+  DEBUG. The detail of a failed chain fetch carries Schwab's error body, which
+  can differ on every attempt, so keying on it would log every retry.
+- **The standing signal** is the reconcile summary line
+  (`not_followed=N failing=M`, at INFO whenever those counts change) and the
+  `tracker` block of `/stats/api_calls`.
+- `_track` returns `ok`, `skipped` or `error` and never raises. A skipped trade
+  gets no streaming events; the ledger's own hourly manage cycle still prices
+  and settles it.
+- `_track`'s chain request does not go through the market-data store.
 
 **Streaming SSE fan-outs (2026-07-07).** The shared `_stream_worker` fans level-one ticks to SSE
 subscribers via **`/stream/quotes?symbols=…`** (equities — `_normalize_level1_equity` widened with

@@ -655,6 +655,16 @@ streaming fails).
 | `/track` | POST | `{trade_id, symbol, strategy, expiration, quantity, entry_credit, short_strike, long_strike, call_short, call_long, target_mid, stop_mid}` |
 | `/untrack` | POST | `{trade_id}` |
 
+`/track` always answers HTTP 200 with a `status`:
+
+| `status` | Meaning |
+|----------|---------|
+| `ok` | The trade is tracked; `legs` maps each leg to its option symbol. |
+| `skipped` | The tracker will not follow this trade, and `detail` says why: a structure other than a put credit spread, a call credit spread or an iron condor; a missing strike or credit; or an expiration already past. No option chain is fetched. |
+| `error` | A failure that may clear (the chain could not be fetched, or a strike is not in it); `detail` says which. |
+
+Every 30 seconds the proxy also reconciles against the paper ledger's open trades. A skipped trade is not tried again while it stays open. A failed one is tried again after 30 seconds, then 60, 120 and so on: up to 5 minutes when Schwab did not send the chain (an error status, or a Schwab sign-in that needs renewing), and up to 30 minutes otherwise. Both limits are in `config/marketdata.toml` under `[tracker]`. `GET /stats/api_calls` reports the tracker's state as `tracker: {tracked, not_followed, failing}`.
+
 ---
 
 # Cache Key Index

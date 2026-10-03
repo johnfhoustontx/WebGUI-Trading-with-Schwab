@@ -4,10 +4,43 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-03 (**The proxy's local market-data store, the collector's two tiers and the scan's wide fetch — built on a branch, shipped switched off.**)
+**Last updated:** 2026-10-03 (**The proxy's trade tracker stopped asking Schwab about trades it cannot follow.**)
 
-- **Status.** The code is on the branch `claude/schwab-api-local-cache-85ddba` and
-  has **not been promoted**. It ships dark: `config/marketdata.toml` has
+- **What was wrong.** The tracker (`/track`, the 30-second reconcile in
+  `schwab-proxy/schwab_proxy.py`) follows credit spreads only, but it learned a
+  trade's structure AFTER fetching that trade's option chain, and the reconcile
+  loop kept no memory of a failure. So every OPEN debit trade in the paper ledger
+  cost one Schwab chain call and one ERROR line every 30 seconds until it closed.
+- **Measured on prod, 2026-10-03.** Two open trades (a `LONG_PUT` on SOFI, a
+  `CONDOR_CALL` on CRWD). Over four minutes the proxy sent 23 calls to Schwab, 16
+  of them from this loop: 4.0 a minute, about 5,760 a day, matching the 16 ERROR
+  lines in the same window. The retained journal held **48,462** such lines since
+  2026-09-15 (`BEAR_PUT` 24,734 · `LONG_PUT` 12,132 · `CONDOR_CALL` 8,788 ·
+  `BULL_CALL` 2,818), each one a chain call, plus 3,194 INFO lines for expired rows.
+- **The fix.** `trade_registry.track_refusal` decides from the trade alone
+  (structure, symbol, expiration, usable strikes, a positive credit) and `_track`
+  asks it before the chain request; a row named `IRON_CONDOR` is read as `IC`
+  when it carries all four strikes. `trade_registry.TrackAttempts`
+  gives the reconcile a memory: a `skipped` trade is not tried again, an `error`
+  is retried after 30 s, 60 s, 120 s ... capped at 5 minutes when Schwab did not
+  send the chain (an error status, or a token that cannot be made valid) and 30
+  minutes otherwise (`config/marketdata.toml` `[tracker]`, in Settings →
+  Configuration → Local market data; an unusable value means that limit's own
+  built-in number). An outcome is logged loudly
+  once and at DEBUG while it repeats, keyed on a stable name because Schwab's
+  error text can differ on every attempt. The reconcile summary line and
+  `/stats/api_calls` (`tracker`) carry `not_followed` and `failing` counts. The
+  loop body is now `_reconcile_once`, which is what the tests drive.
+- **Tests.** `schwab-proxy/tests/test_track_reconcile.py` (new) replays prod's two
+  rows: twenty reconciles, no Schwab call, no ERROR, one line per trade.
+- **Not changed.** Debit trades are still not stream-tracked: the tracker's three
+  events are credit-spread rules. The ledger's hourly manage cycle prices and
+  settles them as before.
+
+**Prior — 2026-10-03** (**The proxy's local market-data store, the collector's two tiers and the scan's wide fetch — promoted in shadow mode, every switch off.**)
+
+- **Status.** Merged to `main` and **promoted to prod on 2026-10-03 in shadow
+  mode** (`9190bb7`). It ships dark: `config/marketdata.toml` has
   `mode = "shadow"`, `scan.wide_fetch = false` and
   `collection.tail_interval_min = 1`, so every request still reaches Schwab and
   every cadence is what it was. **Nothing below has been measured in production.**

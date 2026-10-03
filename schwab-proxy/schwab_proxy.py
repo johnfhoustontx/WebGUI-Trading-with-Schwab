@@ -28,6 +28,7 @@ import os
 import re
 import sys
 import hmac
+import math
 import time
 import base64
 import asyncio
@@ -54,7 +55,9 @@ from fastapi import FastAPI, HTTPException, Query, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 
-from trade_registry import TradeRegistry, resolve_legs
+from trade_registry import (FETCH_RETRY_CAP_SEC, RETRY_CAP_SEC, TrackAttempts,
+                            TradeRegistry, resolve_legs, track_refusal,
+                            tracked_strategy)
 import api_call_counter
 import trade_detector
 import perf_writer
@@ -506,7 +509,9 @@ def api_call_stats():
     fetch since this process started; anything but empty is worth a look."""
     return {**api_call_counter.stats(),
             "store": api_call_counter.detail_summary(),
-            "store_degrades": dict(_GATEWAY.degrades)}
+            "store_degrades": dict(_GATEWAY.degrades),
+            "tracker": {"tracked": len(_registry.all_trades()),
+                        **_track_attempts.counts()}}
 
 
 @app.get("/health")
@@ -1088,6 +1093,10 @@ STOP_MULT = 2.0
 RECONCILE_INTERVAL = 30  # seconds
 
 _registry = TradeRegistry()
+# What the reconcile remembers about trades it could not start tracking. Its
+# retry limits are config/marketdata.toml [tracker], read on every pass.
+_track_attempts = TrackAttempts(RECONCILE_INTERVAL)
+_last_tracker_counts: Optional[dict] = None   # for "log the summary on a change"
 _stream_loop: Optional[asyncio.AbstractEventLoop] = None  # set by the worker thread
 _stream_client = None
 _leg_quotes: Dict[str, Dict[str, Any]] = {}  # osi -> {"bid","ask","iv"}
@@ -1127,43 +1136,92 @@ def _now_iso() -> str:
 # TRACK / UNTRACK CORE (shared by REST + reconcile)
 #############################################
 
-def _track(body: dict) -> dict:
+def _track(body: dict, *, known_key: Optional[str] = None) -> dict:
     """Resolve a trade's legs to OSI symbols, register it, and subscribe its legs.
 
     `body` keys: trade_id, symbol, strategy, expiration, quantity, entry_credit,
     short_strike, long_strike, call_short, call_long, target_mid, stop_mid.
-    Returns {"status":"ok","legs":{...}} or {"status":"error","detail":...}.
+
+    Returns one of:
+      {"status": "ok", "legs": {...}}
+      {"status": "skipped", "detail": ..., "key": ...}  the tracker will never
+          follow this trade (a structure it does not follow, no usable strikes or
+          credit, already expired). Decided BEFORE any chain is fetched.
+      {"status": "error", "detail": ..., "key": ...}    a failure that might clear
+          (the chain fetch failed, a strike is not in the chain). ``transient``
+          is set when Schwab did not send the chain.
+
+    ``key`` is a stable name for the outcome; ``detail`` may carry upstream text
+    that differs on every attempt. `known_key` is the key this trade failed with
+    LAST time (the reconcile loop passes it): the same outcome again is logged at
+    DEBUG, so a trade that keeps failing the same way is reported once.
+
     Never raises — callers (REST + reconcile) rely on this.
     """
-    trade_id = body.get("trade_id")
+    trade_id = body.get("trade_id") if isinstance(body, dict) else None
+
+    def refuse(status: str, detail: str, *, key: Optional[str] = None,
+               transient: bool = False, exc_info: bool = False) -> dict:
+        key = key or detail
+        if key == known_key:
+            logger.debug("track %s: %s (unchanged)", trade_id, detail)
+        elif status == "skipped":
+            logger.info("track %s: not tracked: %s", trade_id, detail)
+        else:
+            logger.error("track %s: %s", trade_id, detail, exc_info=exc_info)
+        out = {"status": status, "detail": detail, "key": key}
+        if transient:
+            out["transient"] = True
+        return out
+
     try:
+        # Before anything that costs a Schwab call. The tracker follows credit
+        # spreads only; a debit structure from the paper ledger used to be found
+        # out AFTER its chain was fetched, every reconcile cycle, for as long as
+        # the trade stayed open.
+        refusal = track_refusal(body)
+        if refusal is not None:
+            return refuse("skipped", refusal)
         expiration = body["expiration"]
         # Skip already-expired trades: Schwab 400s on a chain request for a past
-        # expiration, and reconcile would retry every cycle forever. Today's 0-DTE
-        # (expiration == today) is still tracked. Stale OPEN rows just get skipped.
+        # expiration. Today's 0-DTE (expiration == today) is still tracked. Stale
+        # OPEN rows just get skipped.
         try:
             if datetime.fromisoformat(expiration).date() < datetime.now(CENTRAL_TZ).date():
-                logger.info("track %s: skipping expired trade (exp %s)", trade_id, expiration)
-                return {"status": "skipped", "detail": "expired"}
+                return refuse("skipped", f"expired ({expiration})")
         except (ValueError, TypeError):
             pass  # malformed date — fall through to the normal path
-        result = token_mgr.api_request(
-            "/chains",
-            params={
-                "symbol": body["symbol"],
-                "contractType": "ALL",
-                "fromDate": expiration,
-                "toDate": expiration,
-            },
-        )
+        try:
+            result = token_mgr.api_request(
+                "/chains",
+                params={
+                    "symbol": body["symbol"],
+                    "contractType": "ALL",
+                    "fromDate": expiration,
+                    "toDate": expiration,
+                },
+            )
+        except Exception as exc:
+            # api_request raises when the token cannot be made valid (the weekly
+            # re-authorization is due, a refresh failed). That is Schwab not
+            # sending the chain, like a 502: the short limit, and no traceback
+            # for a known condition.
+            return refuse(
+                "error", f"chain fetch failed: {type(exc).__name__}: {exc}",
+                key=f"chain fetch failed ({type(exc).__name__})", transient=True)
         if result["status_code"] != 200 or not result["data"]:
-            detail = f"chain fetch failed ({result['status_code']}): {result['error']}"
-            logger.error("track %s: %s", trade_id, detail)
-            return {"status": "error", "detail": detail}
+            # The body Schwab sends can differ on every attempt (a request id),
+            # so the key is the status alone.
+            return refuse(
+                "error", f"chain fetch failed ({result['status_code']}): {result['error']}",
+                key=f"chain fetch failed ({result['status_code']})", transient=True)
 
+        # The tracker's own name: IRON_CONDOR is IC, which is what the detector
+        # reads off the stored state.
+        strategy = tracked_strategy(body["strategy"])
         legs = resolve_legs(
             result["data"],
-            body["strategy"],
+            strategy,
             body["short_strike"],
             body["long_strike"],
             body.get("call_short"),
@@ -1181,7 +1239,7 @@ def _track(body: dict) -> dict:
 
         state = {
             "trade_id": trade_id,
-            "strategy": body["strategy"],
+            "strategy": strategy,
             "entry_credit": credit,
             "quantity": body.get("quantity", 1),
             "short_strike": body["short_strike"],
@@ -1193,15 +1251,13 @@ def _track(body: dict) -> dict:
         }
         _registry.add(state)
         _subscribe(set(legs.values()))
-        logger.info("tracking %s (%s) legs=%s", trade_id, body["strategy"], legs)
+        logger.info("tracking %s (%s) legs=%s", trade_id, strategy, legs)
         return {"status": "ok", "legs": legs}
     except KeyError as exc:
-        detail = f"strike/field not found: {exc}"
-        logger.error("track %s: %s", trade_id, detail)
-        return {"status": "error", "detail": detail}
+        return refuse("error", f"strike/field not found: {exc}")
     except Exception as exc:  # never let a bad track break the caller/reconcile
-        logger.exception("track %s failed", trade_id)
-        return {"status": "error", "detail": str(exc)}
+        return refuse("error", f"{type(exc).__name__}: {exc}",
+                      key=f"unexpected {type(exc).__name__}", exc_info=True)
 
 
 def _untrack(trade_id: str) -> dict:
@@ -1238,8 +1294,11 @@ def track(body: dict):
 
     Returns HTTP 200 even on resolution failure (with status="error") so a
     transient chain hiccup doesn't break the caller — reconcile retries later.
+    ``status`` is ``ok``, ``skipped`` (the tracker does not follow this trade) or
+    ``error``.
     """
-    return _track(body)
+    res = _track(body)
+    return {k: res[k] for k in ("status", "detail", "legs") if k in res}
 
 
 @app.post("/untrack")
@@ -1282,6 +1341,91 @@ def _read_open_trades() -> Optional[Dict[str, dict]]:
         conn.close()
 
 
+def _tracker_retry_caps():
+    """``(retry cap, fetch-retry cap)`` in seconds from config/marketdata.toml
+    [tracker], read on every pass. A setting that is unreadable, or is not a
+    real number above zero, is replaced by ITS OWN built-in limit, so a bad
+    fetch limit means five minutes and never the half hour."""
+    try:
+        cfg = _marketdata_config.section("tracker")
+    except Exception:
+        logger.debug("tracker settings unreadable; using the built-in limits",
+                     exc_info=True)
+        cfg = {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    def usable(value, builtin):
+        ok = (isinstance(value, (int, float)) and not isinstance(value, bool)
+              and math.isfinite(value) and value > 0)
+        return value if ok else builtin
+
+    return (usable(cfg.get("retry_max_sec"), RETRY_CAP_SEC),
+            usable(cfg.get("fetch_retry_max_sec"), FETCH_RETRY_CAP_SEC))
+
+
+def _reconcile_once(open_trades: Dict[str, dict], now: Optional[float] = None):
+    """One reconcile pass: start tracking OPEN trades that are not tracked, stop
+    tracking trades that are no longer OPEN. Returns ``(added, removed)``.
+
+    A trade that could not be tracked is remembered in ``_track_attempts``: one
+    the tracker will never follow is not tried again, and one that failed is
+    tried again with a growing gap (short when Schwab did not send the chain, so
+    tracking resumes soon after an outage; long otherwise). Before that memory
+    existed every such trade was retried, with a Schwab chain call and an ERROR
+    line, on every pass.
+    """
+    global _last_tracker_counts
+    now = time.monotonic() if now is None else now
+    open_ids = set(open_trades)
+    tracked_ids = {s["trade_id"] for s in _registry.all_trades()}
+    # Keep memory only for trades still waiting: open and not tracked (a trade
+    # the REST /track call started tracking is done with).
+    _track_attempts.prune(open_ids - tracked_ids)
+    retry_cap, fetch_cap = _tracker_retry_caps()
+
+    added = 0
+    for trade_id in open_ids - tracked_ids:
+        if not _track_attempts.due(trade_id, now):
+            continue
+        known = _track_attempts.last_key(trade_id)
+        try:
+            # _track fills in the target and stop from the entry credit itself.
+            res = _track(dict(open_trades[trade_id]), known_key=known)
+        except Exception as exc:
+            key = f"reconcile failed: {type(exc).__name__}"
+            if key != known:
+                logger.exception("reconcile: track %s failed", trade_id)
+            res = {"status": "error", "detail": f"{key}: {exc}", "key": key}
+        _track_attempts.record(
+            trade_id, res, now,
+            cap_sec=fetch_cap if res.get("transient") else retry_cap)
+        if res.get("status") == "ok":
+            added += 1
+
+    removed = 0
+    for trade_id in tracked_ids - open_ids:
+        try:
+            _untrack(trade_id)
+            removed += 1
+        except Exception:
+            logger.exception("reconcile: untrack %s failed", trade_id)
+
+    # Log at INFO only when something CHANGED; a quiet reconcile (the common
+    # case, every 30s 24/7) logs at DEBUG to avoid ~2,880 noise lines/day. The
+    # two counts are the standing signal that trades are being refused or
+    # retried, since each of those is reported loudly only once.
+    counts = _track_attempts.counts()
+    changed = bool(added or removed) or counts != _last_tracker_counts
+    _last_tracker_counts = counts
+    logger.log(
+        logging.INFO if changed else logging.DEBUG,
+        "reconcile: tracked=%d added=%d removed=%d not_followed=%d failing=%d",
+        len(tracked_ids) + added - removed, added, removed,
+        counts["not_followed"], counts["failing"])
+    return added, removed
+
+
 def _reconcile_loop():
     """Every RECONCILE_INTERVAL s, sync the registry with trades.db OPEN rows."""
     while True:
@@ -1290,38 +1434,7 @@ def _reconcile_loop():
             open_trades = _read_open_trades()
             if open_trades is None:
                 continue  # DB unavailable this cycle
-            open_ids = set(open_trades)
-            tracked_ids = {s["trade_id"] for s in _registry.all_trades()}
-
-            added = 0
-            for trade_id in open_ids - tracked_ids:
-                row = open_trades[trade_id]
-                try:
-                    credit = row["entry_credit"]
-                    body = dict(row)
-                    body["target_mid"] = round(credit * (1 - TP_FRAC), 2)
-                    body["stop_mid"] = round(credit * (1 + STOP_MULT), 2)
-                    res = _track(body)
-                    if res.get("status") == "ok":
-                        added += 1
-                except Exception:
-                    logger.exception("reconcile: track %s failed", trade_id)
-
-            removed = 0
-            for trade_id in tracked_ids - open_ids:
-                try:
-                    _untrack(trade_id)
-                    removed += 1
-                except Exception:
-                    logger.exception("reconcile: untrack %s failed", trade_id)
-
-            # Log at INFO only when something CHANGED; a quiet reconcile (the
-            # common case, every 30s 24/7) logs at DEBUG to avoid ~2,880 noise
-            # lines/day.
-            level = logging.INFO if (added or removed) else logging.DEBUG
-            logger.log(
-                level, "reconcile: tracked=%d added=%d removed=%d",
-                len(tracked_ids) + added - removed, added, removed)
+            _reconcile_once(open_trades)
         except Exception:
             logger.exception("reconcile loop iteration failed")
 

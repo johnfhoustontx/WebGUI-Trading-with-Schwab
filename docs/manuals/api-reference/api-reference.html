@@ -1375,6 +1375,30 @@ streaming fails).</p>
 </tr>
 </tbody>
 </table>
+<p><code>/track</code> always answers HTTP 200 with a <code>status</code>:</p>
+<table>
+<thead>
+<tr>
+<th><code>status</code></th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ok</code></td>
+<td>The trade is tracked; <code>legs</code> maps each leg to its option symbol.</td>
+</tr>
+<tr>
+<td><code>skipped</code></td>
+<td>The tracker will not follow this trade, and <code>detail</code> says why: a structure other than a put credit spread, a call credit spread or an iron condor; a missing strike or credit; or an expiration already past. No option chain is fetched.</td>
+</tr>
+<tr>
+<td><code>error</code></td>
+<td>A failure that may clear (the chain could not be fetched, or a strike is not in it); <code>detail</code> says which.</td>
+</tr>
+</tbody>
+</table>
+<p>Every 30 seconds the proxy also reconciles against the paper ledger's open trades. A skipped trade is not tried again while it stays open. A failed one is tried again after 30 seconds, then 60, 120 and so on: up to 5 minutes when Schwab did not send the chain (an error status, or a Schwab sign-in that needs renewing), and up to 30 minutes otherwise. Both limits are in <code>config/marketdata.toml</code> under <code>[tracker]</code>. <code>GET /stats/api_calls</code> reports the tracker's state as <code>tracker: {tracked, not_followed, failing}</code>.</p>
 <hr />
 <h1 id="cache-key-index">Cache Key Index</h1>
 <p>Every Redis key by domain. Views without a strict contract are validated

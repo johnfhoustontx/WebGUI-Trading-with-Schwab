@@ -243,3 +243,17 @@ def test_the_carrys_built_in_limits_are_the_shipped_settings():
                             "MAX_GAMMA_RATIO") == shipped["max_gamma_ratio"]
     assert _module_constant("options-scanner/gex_collector.py",
                             "CARRY_SLACK_SEC") == shipped["carry_slack_sec"]
+
+
+def test_the_trackers_built_in_limits_are_the_shipped_settings():
+    # ``schwab-proxy/trade_registry.py`` falls back to its own numbers when the
+    # settings cannot be read. Loaded by path: the folder is not a package and the
+    # module imports nothing outside the standard library.
+    import importlib.util
+    path = repo_paths.REPO_ROOT / "schwab-proxy" / "trade_registry.py"
+    spec = importlib.util.spec_from_file_location("_trade_registry_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.RETRY_CAP_SEC == mc.DEFAULTS["tracker"]["retry_max_sec"]
+    assert module.FETCH_RETRY_CAP_SEC == mc.DEFAULTS["tracker"]["fetch_retry_max_sec"]
+    assert mc.section("tracker") == mc.DEFAULTS["tracker"]
