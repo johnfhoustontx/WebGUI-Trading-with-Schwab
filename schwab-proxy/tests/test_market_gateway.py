@@ -764,7 +764,7 @@ def test_bars_in_shadow_count_repeats_and_judge_the_quote_built_bar():
     assert [c[0] for c in h.calls].count("/pricehistory") == 2
     out = [r[2] for r in h.records if r[0] == "pricehistory"]
     assert out == ["upstream", "shadow_bar_match", "shadow_bar_volume_match",
-                   "upstream", "shadow_hit", "shadow_bar_match",
+                   "upstream", "shadow_hit_match", "shadow_bar_match",
                    "shadow_bar_volume_match"]
 
 
@@ -841,7 +841,7 @@ def test_shadow_never_judges_todays_bar_against_a_quote_fetched_before_the_open(
     set_time(h, 8, 30, 50)
     h.gw.pricehistory(BAR, "scan")
     assert bar_outcomes(h) == ["upstream",
-                               "upstream", "shadow_hit", "shadow_bar_match",
+                               "upstream", "shadow_hit_match", "shadow_bar_match",
                                "shadow_bar_volume_match"]
 
 
@@ -1157,7 +1157,7 @@ def test_shadow_gives_no_bar_verdict_outside_the_session_in_progress():
     h.gw.quotes("SPY", "market_svc")
     h.gw.pricehistory(BAR, "scan")
     h.gw.pricehistory(BAR, "scan")
-    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit"]
+    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit_match"]
 
 
 def test_shadow_reports_a_bar_that_disagrees_and_a_day_schwab_has_not_sent():
@@ -1306,7 +1306,7 @@ def test_the_configured_series_limit_is_enforced():
         h.gw.pricehistory(params, "a")
     assert bar_outcomes(h) == ["upstream"] * 3            # no would-be hit
     h.gw.pricehistory(BAR, "a")
-    assert bar_outcomes(h)[-1] == "shadow_hit"
+    assert bar_outcomes(h)[-1] == "shadow_hit_match"
 
 
 # ---- shadow measures what mode on would do ----------------------------------
@@ -1387,9 +1387,9 @@ def test_shadow_bars_follow_the_session_limit():
     for _ in range(5):                               # every 600 s against 1740 s
         h.gw.pricehistory(BAR, "scan")
         h.clock += 600
-    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit",
-                               "upstream", "shadow_hit", "upstream",
-                               "upstream", "shadow_hit"]
+    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit_match",
+                               "upstream", "shadow_hit_match", "upstream",
+                               "upstream", "shadow_hit_match"]
 
 
 def test_shadow_reports_a_would_be_composed_bar_and_stores_nothing():
@@ -1413,7 +1413,7 @@ def test_shadow_quote_mode_without_a_quote_follows_the_session_limit():
     h.gw.pricehistory(BAR, "scan")
     h.clock += 1141                                  # 1741 s old: on would fetch
     h.gw.pricehistory(BAR, "scan")
-    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit", "upstream"]
+    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit_match", "upstream"]
 
 
 # The sequences below are run once in on and once in shadow with the same
@@ -1736,7 +1736,7 @@ def test_shadow_gives_no_bar_verdict_and_no_composed_answer_after_the_close():
     set_time(h, 15, 1, 0)
     h.gw.quotes("SPY", "market_svc")
     h.gw.pricehistory(BAR, "scan")
-    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit"]
+    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit_match"]
 
 
 # ---- reported ages and the order of a partial answer ------------------------
@@ -1925,3 +1925,140 @@ def test_a_recorded_crash_keeps_the_original_to_hand_to_waiters():
         h.gw.chains(P(), "a")
     ((_ticket, what),) = h.gw._failures.values()
     assert what.original is crash
+
+
+# ---- the newest held chain is the one served ---------------------------------
+
+def test_the_collectors_not_due_request_gets_the_scans_newer_chain():
+    # Its own 7-day chain is 80 s old; the scan's 45-day chain is 10 s old.
+    state = {"spot": 100.0}
+    h = Harness(responses=lambda e, p: chain(spot=state["spot"]))
+    h.gw.chains(P(), "collector")
+    h.clock += 70
+    state["spot"] = 101.0
+    h.gw.chains(P(to="2026-11-19"), "scan")
+    h.clock += 10
+    got = h.gw.chains(P(), "collector", max_age=210)
+    assert (got.kind, got.age) == ("subset", 10.0) and len(h.calls) == 2
+    assert body(got)["underlyingPrice"] == 101.0
+    assert h.records[-1] == ("chains", "collector", "subset")
+
+
+def test_shadow_reports_the_newer_covering_chain_as_the_would_be_answer():
+    h = Harness(Cfg(mode="shadow"))
+    h.gw.chains(P(), "collector")
+    h.clock += 70
+    h.gw.chains(P(to="2026-11-19"), "scan")
+    h.clock += 10
+    h.gw.chains(P(), "collector", max_age=210)
+    assert h.outcomes()[-2:] == ["upstream", "shadow_subset_match"]
+
+
+# ---- shadow compares a stored daily series with Schwab's fresh one -----------
+
+def moving_series(state):
+    """Schwab's series, whatever ``state["series"]`` is at the time."""
+    return lambda e, p: quotes_for(e, p) if e == "/quotes" else state["series"]
+
+
+def revised(src, index, **fields):
+    out = json.loads(json.dumps(src))
+    out["candles"][index].update(fields)
+    return out
+
+
+def shadow_repeat(first, second, at=(10, 0)):
+    """Two requests for one series in shadow; Schwab sends ``first`` then
+    ``second``. Returns the outcomes of the second request."""
+    state = {"series": first}
+    h = Harness(Cfg(mode="shadow"), responses=moving_series(state))
+    set_time(h, *at)
+    h.gw.pricehistory(BAR, "scan")
+    state["series"] = second
+    before = len(h.records)
+    h.gw.pricehistory(BAR, "scan")
+    return [r[2] for r in h.records[before:]]
+
+
+SETTLED = (16, 0)
+THREE = series(dt.date(2026, 10, 1), FRI, MON)
+
+
+def test_an_identical_settled_series_is_a_match():
+    assert shadow_repeat(THREE, THREE, at=SETTLED) == ["upstream", "shadow_hit_match"]
+
+
+def test_a_revised_close_on_the_last_bar_after_it_settled_is_a_mismatch():
+    assert shadow_repeat(THREE, revised(THREE, -1, close=101.5), at=SETTLED) == [
+        "upstream", "shadow_hit_mismatch"]
+
+
+def test_todays_bar_moving_during_the_session_is_still_a_match():
+    moved = revised(THREE, -1, high=105.0, close=104.0, volume=5000)
+    assert shadow_repeat(THREE, moved) == ["upstream", "shadow_hit_match"]
+    # The same difference once the day is over is a mismatch.
+    assert shadow_repeat(THREE, moved, at=SETTLED) == ["upstream", "shadow_hit_mismatch"]
+
+
+def test_a_revised_historical_bar_during_the_session_is_a_mismatch():
+    assert shadow_repeat(THREE, revised(THREE, 0, close=101.5)) == [
+        "upstream", "shadow_hit_mismatch"]
+
+
+def test_a_split_adjusted_history_is_a_mismatch():
+    halved = json.loads(json.dumps(THREE))
+    for candle in halved["candles"]:
+        for field in ("open", "high", "low", "close"):
+            candle[field] /= 2
+    assert shadow_repeat(THREE, halved, at=SETTLED) == ["upstream", "shadow_hit_mismatch"]
+    assert shadow_repeat(THREE, halved) == ["upstream", "shadow_hit_mismatch"]
+
+
+def test_a_mismatching_series_is_never_stored_over_the_held_one():
+    # On would have answered locally: there was no fetch to store.
+    state = {"series": THREE}
+    h = Harness(Cfg(mode="shadow"), responses=moving_series(state))
+    set_time(h, *SETTLED)
+    h.gw.pricehistory(BAR, "scan")
+    state["series"] = revised(THREE, -1, close=101.5)
+    h.gw.pricehistory(BAR, "scan")
+    stored, _ = h.gw.bar_store.get(ms.bar_key(BAR), epoch=("2026-10-05", "settled"))
+    assert json.loads(stored) == THREE
+
+
+def test_a_series_mismatch_is_logged_once_per_series_not_once_per_request(caplog):
+    state = {"series": THREE}
+    h = Harness(Cfg(mode="shadow"), responses=moving_series(state))
+    set_time(h, *SETTLED)
+    qqq = {**BAR, "symbol": "QQQ"}
+    h.gw.pricehistory(BAR, "scan")
+    h.gw.pricehistory(qqq, "scan")
+    state["series"] = revised(THREE, -1, close=101.5)
+    with caplog.at_level("WARNING", logger="market_store"):
+        for _ in range(4):
+            h.gw.pricehistory(BAR, "scan")
+        h.gw.pricehistory(qqq, "scan")
+    assert bar_outcomes(h).count("shadow_hit_mismatch") == 5     # every one counted
+    warned = [r.getMessage() for r in caplog.records if r.name == "market_store"]
+    assert len(warned) == 2                                      # one per series
+    assert "SPY" in warned[0] and "QQQ" in warned[1]
+
+
+def test_a_matching_series_logs_nothing(caplog):
+    with caplog.at_level("WARNING", logger="market_store"):
+        assert shadow_repeat(THREE, THREE, at=SETTLED) == ["upstream", "shadow_hit_match"]
+    assert not [r for r in caplog.records if r.name == "market_store"]
+
+
+def test_a_would_be_composed_bar_keeps_its_own_name():
+    h = Harness(Cfg(mode="shadow", bars__today_bar="quote"), responses=bars_for)
+    h.gw.pricehistory(BAR, "scan")
+    h.gw.quotes("SPY", "market_svc")
+    h.gw.pricehistory(BAR, "scan")
+    assert "shadow_composed" in bar_outcomes(h)
+    assert not [o for o in bar_outcomes(h) if o.startswith("shadow_hit")]
+
+
+def test_no_daily_series_outcome_is_a_bare_shadow_hit_any_more():
+    assert shadow_repeat(THREE, THREE) == ["upstream", "shadow_hit_match"]
+    assert shadow_repeat(THREE, THREE, at=(4, 0)) == ["upstream", "shadow_hit_match"]

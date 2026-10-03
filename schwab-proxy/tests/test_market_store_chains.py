@@ -488,3 +488,79 @@ def test_every_body_the_store_renders_is_strict_json():
     assert _strict(s.lookup(WIDE, max_age=45, now=1001.0, state="REGULAR").body) == chain()
     assert _strict(s.lookup(NARROW, max_age=45, now=1001.0, state="REGULAR").body)
     assert _strict(s.cut(WIDE, NARROW))
+
+
+# ---- the newest held chain is the one served ---------------------------------
+
+FAR = ms.ChainKey("SPY", from_date="2026-10-05", to_date="2026-11-19")   # 45 days
+
+
+def test_a_newer_covering_chain_is_served_over_an_older_exact_one():
+    # The collector's own week, 80 s old, beside the scan's 45-day chain, 10 s
+    # old: real data is in hand and it is the newer chain.
+    s = ms.ChainStore()
+    s.put(WIDE, chain(spot=100.0), now=1000.0, state="REGULAR")
+    s.put(FAR, chain(spot=101.0), now=1070.0, state="REGULAR")
+    got = s.lookup(WIDE, max_age=210, now=1080.0, state="REGULAR")
+    assert (got.kind, got.age) == ("subset", 10.0)
+    body = json.loads(got.body)
+    assert body["underlyingPrice"] == 101.0 and sorted(body["callExpDateMap"]) == list(EXPS)
+
+
+def test_a_newer_exact_chain_is_served_over_an_older_covering_one():
+    s = ms.ChainStore()
+    s.put(FAR, chain(spot=101.0), now=1000.0, state="REGULAR")
+    s.put(WIDE, chain(spot=100.0), now=1070.0, state="REGULAR")
+    got = s.lookup(WIDE, max_age=210, now=1080.0, state="REGULAR")
+    assert (got.kind, got.age) == ("hit", 10.0)
+    assert json.loads(got.body) == chain(spot=100.0)        # Schwab's own, uncut
+
+
+def test_an_exact_and_a_covering_chain_of_the_same_age_serve_the_exact_one():
+    s = ms.ChainStore()
+    s.put(FAR, chain(spot=101.0), now=1000.0, state="REGULAR")
+    s.put(WIDE, chain(spot=100.0), now=1000.0, state="REGULAR")
+    got = s.lookup(WIDE, max_age=210, now=1080.0, state="REGULAR")
+    assert got.kind == "hit" and json.loads(got.body)["underlyingPrice"] == 100.0
+
+
+def test_a_newer_covering_chain_with_nothing_in_the_window_leaves_the_exact_hit():
+    s = ms.ChainStore()
+    s.put(NARROW, chain(exps=EXPS[:3], spot=100.0), now=1000.0, state="REGULAR")
+    s.put(FAR, chain(exps=EXPS[3:], spot=101.0), now=1070.0, state="REGULAR")
+    got = s.lookup(NARROW, max_age=210, now=1080.0, state="REGULAR")
+    assert (got.kind, got.age) == ("hit", 80.0)
+    assert json.loads(got.body)["underlyingPrice"] == 100.0
+
+
+def test_a_newer_covering_chain_that_is_not_fresh_leaves_the_exact_hit():
+    s = ms.ChainStore()
+    s.put(WIDE, chain(spot=100.0), now=1000.0, state="REGULAR")
+    s.put(FAR, chain(spot=101.0), now=1070.0, state="CLOSED")   # another session
+    got = s.lookup(WIDE, max_age=210, now=1080.0, state="REGULAR")
+    assert (got.kind, got.age) == ("hit", 80.0)
+    # ... and a strike-filtered one never covers at all.
+    filtered = ms.ChainKey("SPY", strike_range="NTM", strike_count=50,
+                           from_date="2026-10-05", to_date="2026-11-19")
+    s.put(filtered, chain(spot=102.0), now=1075.0, state="REGULAR")
+    assert s.lookup(WIDE, max_age=210, now=1080.0, state="REGULAR").kind == "hit"
+
+
+def test_a_stale_exact_chain_is_still_answered_by_a_fresh_covering_one():
+    s = ms.ChainStore()
+    s.put(WIDE, chain(spot=100.0), now=1000.0, state="REGULAR")
+    s.put(FAR, chain(spot=101.0), now=1070.0, state="REGULAR")
+    got = s.lookup(WIDE, max_age=20, now=1080.0, state="REGULAR")
+    assert (got.kind, got.age) == ("subset", 10.0)
+    assert s.lookup(WIDE, max_age=5, now=1080.0, state="REGULAR") is None
+
+
+def test_the_newest_of_several_covering_chains_beats_an_exact_one_between_them():
+    s = ms.ChainStore()
+    wider = ms.ChainKey("SPY", from_date="2026-10-05", to_date="2026-10-20")
+    s.put(wider, chain(spot=99.0), now=1000.0, state="REGULAR")
+    s.put(WIDE, chain(spot=100.0), now=1030.0, state="REGULAR")
+    s.put(FAR, chain(spot=101.0), now=1060.0, state="REGULAR")
+    got = s.lookup(WIDE, max_age=210, now=1080.0, state="REGULAR")
+    assert (got.kind, got.age) == ("subset", 20.0)
+    assert json.loads(got.body)["underlyingPrice"] == 101.0

@@ -272,14 +272,19 @@ class ChainStore:
 
     def lookup(self, key: ChainKey, *, max_age: float, now: float,
                state: str) -> Served | None:
+        """The NEWEST fresh answer held for ``key``: its own entry (``hit``)
+        or a cut of a wider one that covers it (``subset``). A fresh entry of
+        its own does not stop a newer covering chain being served: the
+        collector's week, 80 seconds old, must not be handed back while the
+        scan's 45-day chain for the symbol is 10 seconds old. On a tie the
+        entry of its own wins."""
         with self._lock:
             exact = self._entries.get(key)
             others = ([e for k, e in self._entries.items()
                        if k.symbol == key.symbol and k != key]
                       if key.plain else [])
-        if exact is not None and self._fresh(exact, max_age, now, state):
-            return Served("hit", now - exact.fetched_at, body=_render(exact))
-        best = None
+        best = exact if (exact is not None
+                         and self._fresh(exact, max_age, now, state)) else None
         for e in others:
             if (e.key.covers(key) and self._fresh(e, max_age, now, state)
                     and _keeps_any(e, key.from_date, key.to_date)):
@@ -287,6 +292,8 @@ class ChainStore:
                     best = e
         if best is None:
             return None
+        if best is exact:
+            return Served("hit", now - exact.fetched_at, body=_render(exact))
         return Served("subset", now - best.fetched_at,
                       body=_render(best, key.from_date, key.to_date))
 
@@ -510,6 +517,37 @@ def compare_today_volume(upstream, quote, today) -> str | None:
     return "match" if lowest <= quoted <= highest else "mismatch"
 
 
+_CANDLE_FIELDS = ("open", "high", "low", "close", "volume")
+
+
+def series_agree(stored, fresh, *, moving=None) -> bool:
+    """Whether a stored daily series is the one Schwab sends now: the same
+    bars on the same days with the same open, high, low, close and volume.
+
+    ``moving`` is today's date during the session in progress. Today's bar
+    legitimately moves then, so when the last bar is today's its values are
+    not compared; its presence and its day still are. Anything else that
+    differs is a real difference: a revised bar, a split-adjusted history, a
+    bar added or dropped."""
+    ours = stored.get("candles") if isinstance(stored, dict) else None
+    theirs = fresh.get("candles") if isinstance(fresh, dict) else None
+    if not isinstance(ours, list) or not isinstance(theirs, list):
+        return False
+    if len(ours) != len(theirs):
+        return False
+    last = len(ours) - 1
+    for i, (a, b) in enumerate(zip(ours, theirs)):
+        if not isinstance(a, dict) or not isinstance(b, dict):
+            return False
+        if a.get("datetime") != b.get("datetime"):
+            return False
+        if i == last and moving is not None and _candle_date(b) == moving:
+            continue
+        if any(a.get(field) != b.get(field) for field in _CANDLE_FIELDS):
+            return False
+    return True
+
+
 class BarStore:
     """Daily price series, one per (symbol, range), valid for one bar period.
     Bounded: past ``max_entries`` the oldest-stored series are dropped."""
@@ -629,9 +667,12 @@ class Gateway:
       anyway. A comparison, never a saving.
     * quotes - ``shadow_hit`` (every symbol was fresh) / ``shadow_partial``
       (some were; on would have fetched the rest).
-    * daily bars - ``shadow_hit`` / ``shadow_composed``, and the today's-bar
-      verdicts, which claim no saving: ``shadow_bar_match`` /
-      ``shadow_bar_mismatch`` / ``shadow_bar_no_today`` on the four prices, and
+    * daily bars - ``shadow_hit_match`` / ``shadow_hit_mismatch``: on would
+      have served the stored series, and whether it is the series Schwab sends
+      now (:func:`series_agree`). ``shadow_composed``: on would have built
+      today's bar from the quote. And the today's-bar verdicts, which claim no
+      saving: ``shadow_bar_match`` / ``shadow_bar_mismatch`` /
+      ``shadow_bar_no_today`` on the four prices, and
       ``shadow_bar_volume_match`` / ``shadow_bar_volume_mismatch`` on volume.
 
     Two things shadow cannot reproduce, both of which make it count LOW: the
@@ -658,6 +699,10 @@ class Gateway:
         # exception for anything else. Read and written only while holding
         # that key's lock.
         self._failures: dict = {}
+        # What has already been warned about, so a difference that repeats on
+        # every request is one log line. The counter carries the count.
+        self._warned: set = set()
+        self._warned_lock = threading.Lock()
         self.chain_store = ChainStore()
         self.quote_store = QuoteStore()
         self.bar_store = BarStore()
@@ -720,6 +765,14 @@ class Gateway:
             self.degrades[area] = self.degrades.get(area, 0) + 1
         self._log.warning("market store degraded in %s; fetching directly",
                           area, exc_info=True)
+
+    def _warn_once(self, token, message, *args) -> None:
+        """Log ``message`` at WARNING the first time ``token`` is seen."""
+        with self._warned_lock:
+            if token in self._warned:
+                return
+            self._warned.add(token)
+        self._log.warning(message, *args)
 
     def _guarded(self, label, endpoint, params, caller, work) -> Served:
         try:
@@ -947,7 +1000,19 @@ class Gateway:
             began = self._clock()
             data = self._fetch("/pricehistory", params)
             self._record("pricehistory", caller, "upstream")
-            if would is not None:
+            if would is not None and would.kind == "hit":
+                # On would have served the stored series. Is it the series
+                # Schwab sends now? Once settled it is served all evening and
+                # all weekend, so a difference here is a wrong answer for hours.
+                same = series_agree(json.loads(would.body), data,
+                                    moving=now_ct.date() if live else None)
+                verdict = "match" if same else "mismatch"
+                self._record("pricehistory", caller, f"shadow_hit_{verdict}")
+                if not same:
+                    self._warn_once(("bars", key), "shadow: the stored daily series "
+                                    "for %s differs from Schwab's", key)
+            elif would is not None:
+                # A composed bar's content verdict is shadow_bar_*, below.
                 self._record("pricehistory", caller, f"shadow_{would.kind}")
             if live:
                 quote, _age = self._today_quote(symbol, cfg, now_ct)

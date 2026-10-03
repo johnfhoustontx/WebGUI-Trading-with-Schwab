@@ -356,3 +356,73 @@ def test_a_bar_volume_that_is_not_a_real_number_is_a_volume_mismatch():
     for junk in (float("nan"), None, True, "5000"):
         assert ms.compare_today_volume(_todays(volume=junk), QUOTE, MON) == "mismatch"
     assert ms.compare_today_volume(_todays(volume=0), QUOTE, MON) == "mismatch"
+
+
+# ---- a stored series against a fresh one -------------------------------------
+
+THU = dt.date(2026, 10, 1)
+
+
+def _scaled(src, factor):
+    out = json.loads(json.dumps(src))
+    for candle in out["candles"]:
+        for field in ("open", "high", "low", "close"):
+            candle[field] *= factor
+    return out
+
+
+def _with(src, index, **fields):
+    out = json.loads(json.dumps(src))
+    out["candles"][index].update(fields)
+    return out
+
+
+def test_identical_series_agree():
+    held = series(THU, FRI, MON)
+    assert ms.series_agree(held, series(THU, FRI, MON)) is True
+    assert ms.series_agree(held, series(THU, FRI, MON), moving=MON) is True
+
+
+def test_a_revised_last_bar_disagrees_once_the_day_is_over():
+    held = series(THU, FRI, MON)
+    for field in ("open", "high", "low", "close", "volume"):
+        assert ms.series_agree(held, _with(held, -1, **{field: 77})) is False
+
+
+def test_todays_bar_may_move_during_the_session_and_only_then():
+    held = series(THU, FRI, MON)
+    moved = _with(held, -1, high=105.0, close=104.0, volume=9999)
+    assert ms.series_agree(held, moved, moving=MON) is True
+    assert ms.series_agree(held, moved) is False
+    # Only TODAY's bar may move: a last bar from another day is compared.
+    assert ms.series_agree(series(THU, FRI), _with(series(THU, FRI), -1, close=77),
+                           moving=MON) is False
+
+
+def test_a_revised_historical_bar_disagrees_even_during_the_session():
+    held = series(THU, FRI, MON)
+    assert ms.series_agree(held, _with(held, 0, close=77), moving=MON) is False
+    assert ms.series_agree(held, _with(held, 1, volume=77), moving=MON) is False
+    assert ms.series_agree(held, _with(held, 0, close=77)) is False
+
+
+def test_a_split_adjusted_history_disagrees():
+    held = series(THU, FRI, MON)
+    assert ms.series_agree(held, _scaled(held, 0.5)) is False
+    assert ms.series_agree(held, _scaled(held, 0.5), moving=MON) is False
+
+
+def test_a_different_number_of_bars_or_different_days_disagree():
+    held = series(THU, FRI, MON)
+    assert ms.series_agree(held, series(FRI, MON)) is False
+    assert ms.series_agree(series(THU, FRI), held, moving=MON) is False   # today's bar is new
+    assert ms.series_agree(held, _with(held, 0, datetime=stamp(SAT))) is False
+    assert ms.series_agree(held, _with(held, -1, datetime=stamp(SAT)), moving=MON) is False
+
+
+def test_something_that_is_not_a_series_never_agrees():
+    held = series(THU, FRI, MON)
+    for junk in (None, [], "x", {}, {"candles": None}, {"candles": "x"}):
+        assert ms.series_agree(held, junk) is False
+        assert ms.series_agree(junk, held) is False
+    assert ms.series_agree(held, {"candles": [1, 2, 3]}) is False
