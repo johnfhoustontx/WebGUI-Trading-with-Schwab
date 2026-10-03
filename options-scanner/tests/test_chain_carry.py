@@ -574,3 +574,117 @@ def test_counting_does_not_change_the_carry_or_the_source():
     cc.capped_gammas(src, 101.0, age_sec=120, now=now)
     assert src == before
     assert cc.carry_chain(src, 101.0, age_sec=120, now=now) == first
+
+
+#############################################
+# A SCHWAB DELTA OF ZERO IS "MISSING" TO THE ENGINE
+#############################################
+# GammaEngine.calc_all_from_chain reads ``delta is None or delta == 0`` as "no
+# delta" and substitutes its own Black-Scholes delta at the live price. A carry
+# that writes ``0 + (d1 - d0)`` hands it a small non-zero number instead, which
+# it then USES: measured on an at-the-money call, the strike's DEX fell 14 times
+# on an up-move and not on a down-move.
+
+def _engine_at(monkeypatch, now):
+    """The real engine with its wall clock pinned, so two runs price the same T."""
+    import gamma_tool as gt
+
+    class _Pinned(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz is None else now.astimezone(tz)
+
+    monkeypatch.setattr(gt, "datetime", _Pinned)
+    return gt
+
+
+def _dex(gt, chain):
+    _gex, _charm, dex, _vanna = gt.GammaEngine().calc_all_from_chain(
+        chain, use_volume=False)
+    return dex["gex"]
+
+
+@pytest.mark.parametrize("live", [103.0, 97.0])               # an up-move, a down-move
+@pytest.mark.parametrize("side, pc", [("callExpDateMap", "call"),
+                                      ("putExpDateMap", "put")])
+def test_a_zero_delta_keeps_the_engines_own_fallback(monkeypatch, live, side, pc):
+    gt = _engine_at(monkeypatch, NOW)
+    src = _chain()
+    src[side][NEAR]["100.0"][0]["delta"] = 0
+    carried = cc.carry_chain(src, live, age_sec=120, now=NOW)
+
+    assert carried[side][NEAR]["100.0"][0]["delta"] == 0      # left for the engine
+    assert carried[side][NEAR]["100.0"][0]["gamma"] != 0.060  # the gamma still moved
+
+    # The same chain, never carried, simply read at the live price.
+    never_carried = dict(src, underlyingPrice=live)
+    got = _dex(gt, carried)[100.0][pc]
+    want = _dex(gt, never_carried)[100.0][pc]
+    assert got == want
+    assert want != 0                                           # the fallback did apply
+
+
+@pytest.mark.parametrize("zero", [0, 0.0, -0.0])
+def test_every_spelling_of_zero_is_left_alone(zero):
+    src = _chain()
+    src["callExpDateMap"][NEAR]["100.0"][0]["delta"] = zero
+    out = cc.carry_chain(src, 103.0, age_sec=120, now=NOW)
+    assert out["callExpDateMap"][NEAR]["100.0"][0]["delta"] == 0
+
+
+def test_a_tiny_real_delta_is_still_moved():
+    """Only an exact zero is "missing". A far wing's 0.001 is a reading."""
+    src = _chain()
+    src["callExpDateMap"][NEAR]["105.0"][0]["delta"] = 0.001
+    out = cc.carry_chain(src, 104.0, age_sec=120, now=NOW)
+    assert out["callExpDateMap"][NEAR]["105.0"][0]["delta"] > 0.001
+
+
+#############################################
+# THE STRIKE: THE CONTRACT'S OWN, ELSE THE MAP KEY THE ENGINE USES
+#############################################
+
+def test_a_contract_with_no_strike_field_is_carried_at_its_map_key():
+    src = _chain()
+    for m in ("callExpDateMap", "putExpDateMap"):
+        for contracts in src[m][NEAR].values():
+            del contracts[0]["strikePrice"]
+    out = cc.carry_chain(src, 102.0, age_sec=120, now=NOW)
+    assert out == _strip_strikes(cc.carry_chain(_chain(), 102.0, age_sec=120, now=NOW))
+    assert out["callExpDateMap"][NEAR]["100.0"][0]["gamma"] != 0.060
+    assert "strikePrice" not in out["callExpDateMap"][NEAR]["100.0"][0]
+
+
+def _strip_strikes(chain):
+    out = copy.deepcopy(chain)
+    for m in ("callExpDateMap", "putExpDateMap"):
+        for contracts in out[m][NEAR].values():
+            contracts[0].pop("strikePrice", None)
+    return out
+
+
+@pytest.mark.parametrize("key", ["abc", "", "nan", "inf", "0", "-100.0"])
+def test_no_strike_field_and_a_map_key_that_is_not_a_strike_keeps_schwabs_greeks(key):
+    src = _chain()
+    contract = _c("CALL", 100.0, 0.060, 0.50)
+    del contract["strikePrice"]
+    src["callExpDateMap"][NEAR] = {key: [contract]}
+    out = cc.carry_chain(src, 103.0, age_sec=120, now=NOW)
+    c = out["callExpDateMap"][NEAR][key][0]
+    assert (c["gamma"], c["delta"]) == (0.060, 0.50)
+    assert out["underlyingPrice"] == 103.0
+
+
+def test_the_contracts_own_strike_wins_over_the_map_key():
+    src = _chain()
+    src["callExpDateMap"][NEAR] = {"999.0": [_c("CALL", 100.0, 0.060, 0.50)]}
+    out = cc.carry_chain(src, 102.0, age_sec=120, now=NOW)
+    want = cc.carry_chain(_chain(), 102.0, age_sec=120, now=NOW)
+    assert (out["callExpDateMap"][NEAR]["999.0"][0]["gamma"]
+            == want["callExpDateMap"][NEAR]["100.0"][0]["gamma"])
+
+
+def test_a_capped_contract_with_no_strike_field_is_counted():
+    src, now = _cap_case()
+    del src["callExpDateMap"][ZERO]["101.0"][0]["strikePrice"]
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=now) == 1

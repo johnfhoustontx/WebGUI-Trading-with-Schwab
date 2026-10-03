@@ -63,13 +63,24 @@ def _central_date(now) -> str:
     return now.strftime("%Y-%m-%d")
 
 
-def _moved(contract, kind, spot0, spot1, t0, t1):
+def _strike_of(contract, strike_key):
+    """The contract's own ``strikePrice``. A contract that carries no such
+    field is priced at its map key, which is the strike the engine uses."""
+    if "strikePrice" in contract:
+        return contract["strikePrice"]
+    try:
+        return float(strike_key)
+    except (TypeError, ValueError):
+        return None
+
+
+def _moved(contract, kind, spot0, spot1, t0, t1, strike_key=None):
     """One contract with gamma and delta moved from ``spot0`` to ``spot1``, and
     whether the gamma cap bound on it: ``(contract, capped)``.
     Returns ``contract`` itself when there is nothing to model the change with.
     Never writes a number that is not finite."""
     iv = contract.get("volatility")
-    strike = contract.get("strikePrice")
+    strike = _strike_of(contract, strike_key)
     if not _real(iv) or not _real(strike) or strike <= 0:
         return contract, False
     sigma = iv / 100.0
@@ -96,9 +107,13 @@ def _moved(contract, kind, spot0, spot1, t0, t1):
             out["gamma"] = new_gamma
             capped = ratio > MAX_GAMMA_RATIO     # the cap changed the number
 
-    # Same for a delta outside [-1, 1].
+    # Same for a delta outside [-1, 1]. And a delta of exactly ZERO is left at
+    # zero: the engine reads ``delta is None or delta == 0`` as "no delta" and
+    # substitutes its own Black-Scholes delta at the live price. Writing
+    # ``0 + (d1 - d0)`` would hand it a small non-zero number to USE instead.
     delta = contract.get("delta")
-    if _real(delta) and -1.0 <= delta <= 1.0 and _real(d0) and _real(d1):
+    if _real(delta) and delta != 0 and -1.0 <= delta <= 1.0 \
+            and _real(d0) and _real(d1):
         lo, hi = (0.0, 1.0) if kind == "call" else (-1.0, 0.0)
         out["delta"] = min(hi, max(lo, delta + (d1 - d0)))
     return out, capped
@@ -166,7 +181,7 @@ def _carry(chain, live_spot, age_sec, now):
             moved = []
             for c in contracts:
                 if isinstance(c, dict):
-                    c, hit = _moved(c, kind, spot0, live_spot, t0, t1)
+                    c, hit = _moved(c, kind, spot0, live_spot, t0, t1, strike)
                     capped += hit
                 moved.append(c)
             new_strikes[strike] = moved
