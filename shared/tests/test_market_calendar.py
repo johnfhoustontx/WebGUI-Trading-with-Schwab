@@ -292,6 +292,35 @@ def test_regular_close_on_reads_the_configured_regular_end(monkeypatch):
     assert mc.regular_close_on(date(2026, 11, 27)) == _ct(2026, 11, 27, 12, 0)
 
 
+def test_regular_open_on_is_the_08_30_ct_open_of_that_date():
+    # 08:30 CT == 09:30 ET in both halves of the year: the zones shift together.
+    assert mc.regular_open_on(date(2026, 9, 10)) == _ct(2026, 9, 10, 8, 30)
+    assert mc.regular_open_on(date(2026, 1, 15)) == _ct(2026, 1, 15, 8, 30)
+    assert mc.regular_open_on(date(2026, 9, 10)) == _et(2026, 9, 10, 9, 30)
+    assert mc.regular_open_on(date(2026, 1, 15)) == _et(2026, 1, 15, 9, 30)
+
+
+def test_regular_open_on_is_the_instant_the_regular_session_opens():
+    opened = mc.regular_open_on(date(2026, 8, 17))
+    assert mc.regular_session_has_opened(opened) is True
+    assert mc.regular_session_has_opened(opened - dt.timedelta(minutes=1)) is False
+    # ... and the same instant next_regular_open counts down to.
+    assert mc.next_regular_open(opened - dt.timedelta(hours=2)) == opened
+
+
+def test_regular_open_on_reads_the_configured_regular_start(monkeypatch):
+    """No time literal of its own, like ``regular_close_on``."""
+    monkeypatch.setattr(mc, "_session_bounds",
+                        lambda name: (dt.time(9, 5), dt.time(15, 0)))
+    assert mc.regular_open_on(date(2026, 11, 27)) == _ct(2026, 11, 27, 9, 5)
+
+
+def test_regular_open_on_does_not_ask_whether_the_date_trades():
+    # Like regular_close_on: a Saturday still answers the clock mark.
+    assert mc.is_trading_day(date(2026, 10, 3)) is False
+    assert mc.regular_open_on(date(2026, 10, 3)) == _ct(2026, 10, 3, 8, 30)
+
+
 def test_is_extended_hours_only_after_activation():
     assert mc.is_extended_hours(_ct(2026, 8, 17, 7, 0)) is True
     assert mc.is_extended_hours(_ct(2026, 8, 14, 7, 0)) is False

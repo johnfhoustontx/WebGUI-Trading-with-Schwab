@@ -562,6 +562,19 @@ def regular_close_on(d) -> datetime:
     return datetime.combine(d, end, tzinfo=CT)
 
 
+def regular_open_on(d) -> datetime:
+    """The regular-session OPEN on date ``d``, CT-aware (08:30 CT = 9:30am ET).
+
+    The mirror of ``regular_close_on``: the instant from which a quote's open,
+    high and low describe ``d``'s session rather than the one before it. Reads
+    the SAME ``sessions.regular`` start ``regular_session_has_opened`` tests,
+    and adds no time literal of its own. It does not ask whether ``d`` is a
+    trading day: a caller that needs that already asked.
+    """
+    start, _end = _session_bounds("regular")
+    return datetime.combine(d, start, tzinfo=CT)
+
+
 def is_extended_hours(now) -> bool:
     """True during GTH or Curb -- so always False before the activation date."""
     return session_at(now) in (Session.GTH, Session.CURB)
