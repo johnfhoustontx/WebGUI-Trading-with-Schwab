@@ -50,6 +50,12 @@ class FakeTokenMgr:
         self.api_request = api_request
 
 
+@pytest.fixture(autouse=True)
+def _no_callers_seen_yet(monkeypatch):
+    """Each test starts with the caller names of a proxy that just started."""
+    monkeypatch.setattr(schwab_proxy, "_CALLERS_SEEN", {"unknown"})
+
+
 @pytest.fixture
 def gw(monkeypatch):
     def install(**kw):
@@ -209,6 +215,58 @@ def test_a_long_caller_name_is_cut_to_the_counter_column(gw):
 
 
 #############################################
+# THE CALLER NAME IS A BOUNDED COUNTER KEY
+#############################################
+# Anything can send X-Caller, and every distinct value is a row in the counts.
+
+def test_a_caller_name_is_cut_to_plain_characters():
+    # Header bytes reach the app decoded as latin-1.
+    assert schwab_proxy._caller(Req("night job/" + chr(0xE9))) == "night_job__"
+    assert schwab_proxy._caller(Req("label-journal_v1.2")) == "label-journal_v1.2"
+    assert schwab_proxy._caller(Req("  dev.options_svc  ")) == "dev.options_svc"
+
+
+def test_a_blank_caller_name_is_unknown():
+    for blank in ("   ", chr(9)):
+        assert schwab_proxy._caller(Req(blank)) == "unknown"
+
+
+def test_the_number_of_caller_names_is_bounded():
+    got = [schwab_proxy._caller(Req(f"visitor{i}")) for i in range(300)]
+    assert schwab_proxy.MAX_CALLER_NAMES == 64
+    assert len(set(got)) <= 65
+    # The first names keep their own label; everything after them is "other".
+    assert got[:63] == [f"visitor{i}" for i in range(63)]
+    assert set(got[63:]) == {"other"}
+    assert len(schwab_proxy._CALLERS_SEEN) == 64
+
+
+def test_a_name_seen_before_the_bound_keeps_its_label_after_it():
+    assert schwab_proxy._caller(Req("options_svc")) == "options_svc"
+    for i in range(300):
+        schwab_proxy._caller(Req(f"visitor{i}"))
+    assert schwab_proxy._caller(Req("brand_new")) == "other"
+    assert schwab_proxy._caller(Req("options_svc")) == "options_svc"
+    assert schwab_proxy._caller(Req("visitor5")) == "visitor5"
+    assert schwab_proxy._caller(Req()) == "unknown"
+
+
+def test_a_request_with_no_name_never_uses_up_the_bound():
+    for _ in range(300):
+        assert schwab_proxy._caller(Req()) == "unknown"
+    assert schwab_proxy._CALLERS_SEEN == {"unknown"}
+
+
+def test_the_bound_reaches_the_counter_over_http(real):
+    _, records = real
+    client = TestClient(schwab_proxy.app)
+    for i in range(80):
+        client.get("/quotes?symbols=SPY", headers={"X-Caller": f"visitor {i}"})
+    callers = {r[1] for r in records}
+    assert len(callers) == 64 and "other" in callers and "visitor_0" in callers
+
+
+#############################################
 # THE REAL GATEWAY BEHIND THE HANDLERS
 #############################################
 # The tests above use a fake gateway, so they cannot see a handler and the
@@ -357,6 +415,108 @@ def test_an_upstream_error_over_http_keeps_its_status_and_detail(gw):
     gw(error=ms.UpstreamError(429, "slow down"))
     resp = TestClient(schwab_proxy.app).get("/quotes?symbols=SPY")
     assert resp.status_code == 429 and resp.json() == {"detail": "slow down"}
+
+
+#############################################
+# AN AGE-LIMIT HINT NEVER FAILS A REQUEST
+#############################################
+# ``maxAge`` is optional advice. A value that is not a usable number falls back
+# to the configured limit (quotes 5 s, chains 45 s here); it is never a 422.
+
+class Clock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def timed(monkeypatch):
+    """The real gateway in mode ``on`` with a clock the test moves. Returns
+    ``(client, upstream, clock)``."""
+    up, clock = Upstream(), Clock()
+    FakeCal.state = "REGULAR"
+    monkeypatch.setattr(schwab_proxy, "_GATEWAY", ms.Gateway(
+        fetch=up, config=Cfg("on"), calendar=FakeCal, record=lambda *a: None,
+        clock=clock, now_ct=lambda: dt.datetime(2026, 10, 5, 10, 0, tzinfo=CT)))
+    return TestClient(schwab_proxy.app), up, clock
+
+
+def _kind(resp):
+    assert resp.status_code == 200, resp.text
+    return resp.headers["x-store"]
+
+
+BAD_AGES = ["abc", "", "nan", "inf", "-inf", "-1", "1,5", "5s"]
+
+
+@pytest.mark.parametrize("bad", BAD_AGES)
+def test_a_bad_quotes_age_limit_uses_the_configured_one(timed, bad):
+    client, up, clock = timed
+    url = "/quotes?symbols=SPY&maxAge=" + bad
+    assert _kind(client.get("/quotes?symbols=SPY")) == "miss"
+    clock.now += 3                      # inside the configured 5 seconds
+    assert _kind(client.get(url)) == "hit"
+    clock.now += 3                      # past it
+    assert _kind(client.get(url)) == "miss"
+    assert len(up.calls) == 2
+
+
+@pytest.mark.parametrize("bad", BAD_AGES)
+def test_a_bad_single_quote_age_limit_uses_the_configured_one(timed, bad):
+    client, up, clock = timed
+    url = "/quote?symbol=SPY&maxAge=" + bad
+    assert _kind(client.get("/quote?symbol=SPY")) == "miss"
+    clock.now += 3
+    assert _kind(client.get(url)) == "hit"
+    clock.now += 3
+    assert _kind(client.get(url)) == "miss"
+
+
+@pytest.mark.parametrize("bad", BAD_AGES)
+def test_a_bad_chains_age_limit_uses_the_configured_one(timed, bad):
+    client, up, clock = timed
+    url = "/chains?symbol=SPY&fromDate=2026-10-05&toDate=2026-10-12&maxAge=" + bad
+    assert _kind(client.get(url)) == "miss"
+    clock.now += 44                     # inside the configured 45 seconds
+    assert _kind(client.get(url)) == "hit"
+    clock.now += 2                      # past it
+    assert _kind(client.get(url)) == "miss"
+    assert len(up.calls) == 2
+
+
+def test_a_huge_age_limit_behaves_as_one_hour(timed):
+    client, up, clock = timed
+    url = "/quotes?symbols=SPY&maxAge=1e12"
+    assert _kind(client.get(url)) == "miss"
+    clock.now += 3599
+    assert _kind(client.get(url)) == "hit"
+    clock.now += 2
+    assert _kind(client.get(url)) == "miss"
+
+
+def test_an_age_limit_of_zero_always_fetches_over_http(timed):
+    client, up, _ = timed
+    for _ in range(3):
+        assert _kind(client.get("/quotes?symbols=SPY&maxAge=0")) == "miss"
+        assert _kind(client.get(
+            "/chains?symbol=SPY&fromDate=2026-10-05&toDate=2026-10-12&maxAge=0")) == "miss"
+    assert len(up.calls) == 6
+
+
+def test_a_usable_age_limit_is_honoured_over_http(timed):
+    client, up, clock = timed
+    url = "/chains?symbol=SPY&fromDate=2026-10-05&toDate=2026-10-12&maxAge=210"
+    assert _kind(client.get(url)) == "miss"
+    clock.now += 200                    # far past the configured 45 seconds
+    assert _kind(client.get(url)) == "hit"
+    clock.now += 11
+    assert _kind(client.get(url)) == "miss"
+    quote = "/quotes?symbols=SPY&maxAge=210"
+    assert _kind(client.get(quote)) == "miss"
+    clock.now += 200
+    assert _kind(client.get(quote)) == "hit"
 
 
 def test_the_module_gateway_is_wired_to_the_real_config_and_calendar(monkeypatch):

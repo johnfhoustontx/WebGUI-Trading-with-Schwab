@@ -36,6 +36,8 @@ _DETAIL_SCHEMA = ("CREATE TABLE IF NOT EXISTS api_calls_detail ("
                   "PRIMARY KEY (day, endpoint, caller, outcome))")
 # Outcomes that answered a request WITHOUT a call to Schwab.
 LOCAL_OUTCOMES = ("hit", "subset", "coalesced", "composed")
+# The most rows one day's breakdown lists. The totals always cover every row.
+MAX_DETAIL_ROWS = 500
 
 _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
@@ -138,17 +140,23 @@ def record_detail(endpoint: str, caller: str, outcome: str, n: int = 1,
 
 def detail_summary(day: str | None = None) -> dict:
     """One day's breakdown: ``{"served_locally", "by_outcome", "rows"}``.
+
+    ``by_outcome`` and ``served_locally`` are totals over EVERY row of the day.
+    ``rows`` lists the ``MAX_DETAIL_ROWS`` largest: the caller name comes from a
+    request header, so the number of rows is not ours to bound.
     Never raises — an empty summary on any failure."""
     try:
         d = day or _dt.date.today().isoformat()
         with _lock:
-            rows = _get_conn().execute(
+            conn = _get_conn()
+            totals = conn.execute(
+                "SELECT outcome, SUM(n) FROM api_calls_detail WHERE day = ? "
+                "GROUP BY outcome ORDER BY SUM(n) DESC, outcome", (d,)).fetchall()
+            rows = conn.execute(
                 "SELECT endpoint, caller, outcome, n FROM api_calls_detail "
-                "WHERE day = ? ORDER BY n DESC, endpoint, caller, outcome",
-                (d,)).fetchall()
-        by_outcome: dict = {}
-        for _e, _c, outcome, n in rows:
-            by_outcome[outcome] = by_outcome.get(outcome, 0) + int(n)
+                "WHERE day = ? ORDER BY n DESC, endpoint, caller, outcome "
+                "LIMIT ?", (d, max(0, int(MAX_DETAIL_ROWS)))).fetchall()
+        by_outcome = {outcome: int(n) for outcome, n in totals}
         return {
             "served_locally": sum(by_outcome.get(o, 0) for o in LOCAL_OUTCOMES),
             "by_outcome": by_outcome,

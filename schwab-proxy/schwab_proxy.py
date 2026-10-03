@@ -25,6 +25,7 @@ Version 1.0.0 Changes:
 
 import json
 import os
+import re
 import sys
 import hmac
 import time
@@ -660,9 +661,28 @@ _GATEWAY = market_store.Gateway(
     record=api_call_counter.record_detail, log=logger)
 
 
+# The caller name comes from a request header and becomes a key in the per-day
+# counts, so it is cut to plain characters and the number of distinct names one
+# process will count is bounded. Past the bound a NEW name is counted as "other".
+MAX_CALLER_NAMES = 64
+_CALLER_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]")
+_CALLERS_SEEN = {"unknown"}
+_CALLERS_LOCK = threading.Lock()
+
+
 def _caller(request) -> str:
-    """Who is asking, from the ``X-Caller`` header the clients set."""
-    return (request.headers.get("x-caller") or "unknown")[:40]
+    """Who is asking, from the ``X-Caller`` header the clients set: letters,
+    digits, ``_``, ``.`` and ``-``, at most 40 characters, ``unknown`` when
+    there is none, ``other`` once ``MAX_CALLER_NAMES`` names have been seen."""
+    raw = request.headers.get("x-caller") or ""
+    name = _CALLER_UNSAFE.sub("_", str(raw).strip())[:40] or "unknown"
+    with _CALLERS_LOCK:
+        if name in _CALLERS_SEEN:
+            return name
+        if len(_CALLERS_SEEN) < MAX_CALLER_NAMES:
+            _CALLERS_SEEN.add(name)
+            return name
+    return "other"
 
 
 def _send(served) -> Response:
@@ -680,6 +700,10 @@ def _send(served) -> Response:
                              "X-Store-Age": f"{served.age:.1f}"})
 
 
+# ``maxAge`` on the handlers below is text on purpose: it is optional advice,
+# and the gateway reads anything that is not a usable number as "none given".
+# Declared as a number, a typo would fail the whole request with a 422.
+
 def _served(work) -> Response:
     try:
         return _send(work())
@@ -692,14 +716,14 @@ def _served(work) -> Response:
 #############################################
 
 @app.get("/quote")
-def get_quote(request: Request, symbol: str, maxAge: Optional[float] = None):
+def get_quote(request: Request, symbol: str, maxAge: Optional[str] = None):
     return _served(lambda: _GATEWAY.quotes(symbol, _caller(request), maxAge))
 
 
 @app.get("/quotes")
 def get_quotes(request: Request,
                symbols: str = Query(..., description="Comma-separated symbols"),
-               maxAge: Optional[float] = None):
+               maxAge: Optional[str] = None):
     return _served(lambda: _GATEWAY.quotes(symbols, _caller(request), maxAge))
 
 
@@ -712,7 +736,7 @@ def get_option_chain(
     fromDate: Optional[str] = None,
     toDate: Optional[str] = None,
     strikeCount: Optional[int] = None,
-    maxAge: Optional[float] = None,
+    maxAge: Optional[str] = None,
 ):
     params: Dict[str, Any] = {"symbol": symbol, "contractType": contractType, "range": range}
     if fromDate:    params["fromDate"] = fromDate

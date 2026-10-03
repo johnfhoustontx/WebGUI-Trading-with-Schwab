@@ -365,6 +365,31 @@ def test_an_infinite_age_limit_falls_back_to_the_configured_one():
     assert h.gw.chains(P(), "a", max_age=float("inf")).kind == "miss"
 
 
+def test_a_callers_limit_is_capped_at_an_hour():
+    # A typo such as 1e12 must not make an old entry look fresh.
+    cfg = {"max_age_sec": 45, "closed_max_age_sec": 1800}
+    assert ms.MAX_REQUEST_AGE_SEC == 3600
+    for huge in (1e12, "1e12", 3601, 10 ** 30):
+        assert ms.effective_max_age(huge, cfg, closed=False) == 3600.0
+    for fine in (0, "0", 1, 210, "210", 3600):
+        assert ms.effective_max_age(fine, cfg, closed=False) == float(fine)
+
+
+def test_the_cap_is_on_the_callers_limit_not_the_configured_one():
+    cfg = {"max_age_sec": 45, "closed_max_age_sec": 7200}
+    assert ms.effective_max_age(None, cfg, closed=True) == 7200.0
+    assert ms.effective_max_age("soon", cfg, closed=True) == 7200.0
+
+
+def test_a_huge_chain_age_limit_serves_nothing_older_than_an_hour():
+    h = Harness()
+    h.gw.chains(P(), "a")
+    h.clock += 3599
+    assert h.gw.chains(P(), "a", max_age=1e12).kind == "hit"
+    h.clock += 2
+    assert h.gw.chains(P(), "a", max_age=1e12).kind == "miss"
+
+
 def test_the_wide_refetch_is_one_call_counted_once():
     h = Harness()
     h.gw.chains(P(), "collector")

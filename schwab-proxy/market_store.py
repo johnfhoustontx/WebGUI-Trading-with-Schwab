@@ -551,16 +551,24 @@ class BarStore:
 # GATEWAY
 #############################################
 
+# The most a caller's own age limit can ask for. The longest legitimate request
+# is the collector's few minutes; a typo such as 1e12 must not make stale data
+# look fresh.
+MAX_REQUEST_AGE_SEC = 3600
+
+
 def effective_max_age(requested, cfg, *, closed: bool) -> float:
-    """The caller's ``maxAge`` when it is a usable number, else the configured
-    limit for the current market state."""
+    """The caller's ``maxAge`` when it is a usable number (at most
+    ``MAX_REQUEST_AGE_SEC``), else the configured limit for the current market
+    state. The hint is optional advice: text, NaN, infinity or a negative
+    number all mean "none given"."""
     if requested is not None:
         try:
             value = float(requested)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             value = float("nan")
         if math.isfinite(value) and value >= 0:
-            return value
+            return min(value, float(MAX_REQUEST_AGE_SEC))
     return float(cfg["closed_max_age_sec"] if closed else cfg["max_age_sec"])
 
 
