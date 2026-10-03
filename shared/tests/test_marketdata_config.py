@@ -156,3 +156,51 @@ def test_an_unknown_today_bar_reads_as_ttl(monkeypatch, bad):
 def test_module_reloads_cleanly():
     importlib.reload(mc)
     assert mc.mode() == "shadow"
+
+
+# ---- the store's three remaining limits -------------------------------------
+
+LIMITS = [("chains", "wide_refetch_max_days", 10),
+          ("quotes", "max_symbols", 5000),
+          ("bars", "max_entries", 4000)]
+
+
+@pytest.mark.parametrize("name, key, shipped", LIMITS)
+def test_the_stores_limits_are_settings(monkeypatch, name, key, shipped):
+    assert mc.section(name)[key] == shipped
+    _with(monkeypatch, name, key, shipped + 3)
+    assert mc.section(name)[key] == shipped + 3
+    for bad in ("10", True, float("nan"), -1, _MISSING):
+        _with(monkeypatch, name, key, bad)
+        assert mc.section(name)[key] == shipped
+
+
+def _market_store():
+    """``schwab-proxy/market_store.py`` by path: the folder is not a package,
+    and the module imports nothing outside the standard library."""
+    import importlib.util
+    import sys
+    path = repo_paths.REPO_ROOT / "schwab-proxy" / "market_store.py"
+    spec = importlib.util.spec_from_file_location("_market_store_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module          # dataclasses look the module up
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        del sys.modules[spec.name]
+    return module
+
+
+def test_the_stores_built_in_limits_are_the_shipped_settings():
+    # The store falls back to its own number when handed an unusable one. Two
+    # copies of one default, in tiers that cannot import each other.
+    import inspect
+    ms = _market_store()
+    assert ms.WIDE_REFETCH_MAX_DAYS == mc.DEFAULTS["chains"]["wide_refetch_max_days"]
+
+    def default(cls, arg):
+        return inspect.signature(cls).parameters[arg].default
+
+    assert default(ms.ChainStore, "max_entries") == mc.DEFAULTS["chains"]["max_entries"]
+    assert default(ms.QuoteStore, "max_symbols") == mc.DEFAULTS["quotes"]["max_symbols"]
+    assert default(ms.BarStore, "max_entries") == mc.DEFAULTS["bars"]["max_entries"]

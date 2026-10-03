@@ -1354,10 +1354,20 @@ _MARKETDATA = ConfigFile(
                   min=50, max=5000),
             Field("chains.shadow_compare_max_age_sec",
                   "Oldest chain compared in shadow mode", "", **_SEC, max=600),
+            Field("chains.wide_refetch_max_days",
+                  "Longest held window refetched in place of a shorter one",
+                  "When a request just misses, the proxy fetches a wider window "
+                  "it already holds for that symbol and cuts the answer from it. "
+                  "Keep this a little above the collector's 7-day window, so a "
+                  "long chain is never fetched in place of a short one.",
+                  kind="int", unit="days", min=1, max=60),
         )),
         Section("Quotes", "", (
             Field("quotes.enabled", "Reuse quotes", "", kind="bool"),
             Field("quotes.max_age_sec", "Oldest quote to reuse", "", **_SEC, max=60),
+            Field("quotes.max_symbols", "Most symbols kept at once",
+                  "Past this the symbols stored longest ago are dropped.",
+                  kind="int", min=100, max=50000),
         )),
         Section("Daily price bars", "", (
             Field("bars.enabled", "Reuse daily price bars", "", kind="bool"),
@@ -1367,11 +1377,16 @@ _MARKETDATA = ConfigFile(
                   "show the two agree.",
                   kind="choice", choices=("ttl", "quote")),
             Field("bars.session_ttl_sec", "Oldest series to reuse during the session",
-                  "Used when today's bar is set to ttl.", **_SEC, max=7200),
+                  "Used when today's bar is set to ttl, and in quote mode "
+                  "whenever no usable quote is held.", **_SEC, max=7200),
             Field("bars.today_quote_max_age_sec", "Oldest quote used to build today's bar",
                   "", **_SEC, max=600),
             Field("bars.settle_min", "Minutes after the close before bars are refetched",
                   "", kind="int", unit="minutes", min=0, max=120),
+            Field("bars.max_entries", "Most price series kept at once",
+                  "One series per symbol and range. Past this the series stored "
+                  "longest ago are dropped.",
+                  kind="int", min=100, max=50000),
         )),
         Section("Autoscan", "", (
             Field("scan.wide_fetch", "Fetch one wide chain per symbol",

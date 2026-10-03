@@ -434,3 +434,27 @@ def test_the_narrowest_window_inside_the_cap_is_the_one_refetched():
     s.put(_plus(7), chain(), now=1001.0, state="REGULAR")
     s.put(_plus(9), chain(), now=1002.0, state="REGULAR")
     assert s.wide_key(_plus(4), today=TODAY) == _plus(7)
+
+
+# ---- the widest refetched window is a setting -------------------------------
+
+def test_the_widest_window_refetched_can_be_given_on_the_call():
+    s = ms.ChainStore()
+    s.put(_plus(7), chain(), now=1000.0, state="REGULAR")
+    assert s.wide_key(_plus(4), today=TODAY, max_days=7) == _plus(7)
+    assert s.wide_key(_plus(4), today=TODAY, max_days=6) is None
+    long = ms.ChainStore()
+    long.put(_plus(45), chain(), now=1000.0, state="REGULAR")
+    assert long.wide_key(_plus(4), today=TODAY) is None          # the built-in cap
+    assert long.wide_key(_plus(4), today=TODAY, max_days=44) is None
+    assert long.wide_key(_plus(4), today=TODAY, max_days=45) == _plus(45)
+
+
+def test_a_widest_window_that_is_not_a_usable_number_keeps_the_built_in_one():
+    over, at = ms.ChainStore(), ms.ChainStore()
+    over.put(_plus(ms.WIDE_REFETCH_MAX_DAYS + 1), chain(), now=1000.0, state="REGULAR")
+    at.put(_plus(ms.WIDE_REFETCH_MAX_DAYS), chain(), now=1000.0, state="REGULAR")
+    for bad in (None, "45", float("nan"), float("inf"), True, -1):
+        assert over.wide_key(_plus(4), today=TODAY, max_days=bad) is None
+        assert (at.wide_key(_plus(4), today=TODAY, max_days=bad)
+                == _plus(ms.WIDE_REFETCH_MAX_DAYS))

@@ -92,3 +92,33 @@ def test_a_quote_from_the_future_is_not_served():
     s = ms.QuoteStore()
     s.put_many({"SPY": q(500.0)}, now=100.0)
     assert s.split(["SPY"], max_age=5, now=99.0) == ({}, ["SPY"], 0.0)
+
+
+# ---- the bound is a setting, given on each put ------------------------------
+
+def _held(s, *symbols):
+    return sorted(s.split(list(symbols), max_age=600, now=200.0)[0])
+
+
+def test_the_bound_can_be_changed_on_a_put():
+    s = ms.QuoteStore(max_symbols=10)
+    for i, sym in enumerate(("A", "B", "C")):
+        s.put_many({sym: q(float(i))}, now=100.0 + i, max_symbols=2)
+    assert _held(s, "A", "B", "C") == ["B", "C"]
+    s.put_many({"D": q(9.0)}, now=110.0, max_symbols=3)          # raised: room for one more
+    assert _held(s, "A", "B", "C", "D") == ["B", "C", "D"]
+
+
+def test_an_unusable_bound_keeps_the_one_in_force():
+    s = ms.QuoteStore(max_symbols=10)
+    s.put_many({"A": q(1.0)}, now=100.0, max_symbols=2)
+    for i, (sym, bad) in enumerate((("B", "many"), ("C", float("inf")),
+                                    ("D", float("nan")), ("E", None))):
+        s.put_many({sym: q(2.0)}, now=101.0 + i, max_symbols=bad)
+    assert _held(s, "A", "B", "C", "D", "E") == ["D", "E"]       # still two
+
+
+def test_a_bound_below_one_keeps_one_symbol():
+    s = ms.QuoteStore()
+    s.put_many({"A": q(1.0), "B": q(2.0)}, now=100.0, max_symbols=0)
+    assert _held(s, "A", "B") == ["B"]

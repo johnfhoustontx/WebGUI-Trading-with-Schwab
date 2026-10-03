@@ -53,6 +53,17 @@ def _real_number(v) -> bool:
             and math.isfinite(v))
 
 
+def _bound(value) -> int | None:
+    """A store's size bound as given on one put: at least 1, or None (keep the
+    bound already in force) when nothing usable was given."""
+    if value is None:
+        return None
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 #############################################
 # CHAINS
 #############################################
@@ -202,7 +213,8 @@ def chain_shape(payload) -> frozenset:
 
 # The widest held window a near miss may refetch in place of the one asked for.
 # The refetch exists for the collector's roughly one-week window; a held 45- or
-# 120-day chain must never be fetched in place of a short one.
+# 120-day chain must never be fetched in place of a short one. The built-in
+# value; the gateway passes ``[chains] wide_refetch_max_days``.
 WIDE_REFETCH_MAX_DAYS = 10
 
 
@@ -236,12 +248,7 @@ class ChainStore:
                 calls=_pack_side(calls), puts=_pack_side(puts))
         except (ValueError, TypeError):
             return False
-        bound = None
-        if max_entries is not None:
-            try:
-                bound = max(1, int(max_entries))
-            except (TypeError, ValueError, OverflowError):
-                pass                      # keep the bound already in force
+        bound = _bound(max_entries)
         with self._lock:
             if bound is not None:
                 self._max = bound
@@ -278,7 +285,8 @@ class ChainStore:
         return Served("subset", now - best.fetched_at,
                       body=_render(best, key.from_date, key.to_date))
 
-    def wide_key(self, key: ChainKey, *, today) -> ChainKey | None:
+    def wide_key(self, key: ChainKey, *, today,
+                 max_days=WIDE_REFETCH_MAX_DAYS) -> ChainKey | None:
         """The wider window to fetch INSTEAD of ``key``, or None to fetch
         ``key`` as asked.
 
@@ -287,12 +295,14 @@ class ChainStore:
         today -> +7. Derived from what is held rather than configured, so it
         cannot drift from the window the collector actually asks for. A window
         that started on an earlier day is never reused: refetching it would ask
-        Schwab for expirations in the past. Nor is one longer than
-        ``WIDE_REFETCH_MAX_DAYS``, or one that held no expiration inside
-        ``key``'s window (its cut would be empty, so the wide fetch would be
-        followed by a second one)."""
+        Schwab for expirations in the past. Nor is one longer than ``max_days``
+        (``WIDE_REFETCH_MAX_DAYS`` when that is not a usable number), or one
+        that held no expiration inside ``key``'s window (its cut would be
+        empty, so the wide fetch would be followed by a second one)."""
         if not key.plain:
             return None
+        if not _real_number(max_days) or max_days < 0:
+            max_days = WIDE_REFETCH_MAX_DAYS
         start = today.isoformat()
         with self._lock:
             held = [e for k, e in self._entries.items()
@@ -301,7 +311,7 @@ class ChainStore:
         usable = []
         for e in held:
             days = e.key.days()
-            if (days is not None and days <= WIDE_REFETCH_MAX_DAYS
+            if (days is not None and days <= max_days
                     and _keeps_any(e, key.from_date, key.to_date)):
                 usable.append(e.key)
         if not usable:
@@ -338,10 +348,16 @@ class QuoteStore:
         self._quotes: "OrderedDict[str, tuple]" = OrderedDict()
         self._max = max(1, int(max_symbols))
 
-    def put_many(self, payload, *, now: float) -> None:
+    def put_many(self, payload, *, now: float, max_symbols=None) -> None:
+        """Keep every quote block in one reply. ``max_symbols`` is the bound to
+        enforce on THIS put (the gateway passes the configured value, so a
+        saved setting applies without a restart)."""
         if not isinstance(payload, dict):
             return
+        bound = _bound(max_symbols)
         with self._lock:
+            if bound is not None:
+                self._max = bound
             for symbol, block in payload.items():
                 # "errors" is Schwab's invalid-symbols bucket, not a quote.
                 if symbol != "errors" and isinstance(block, dict):
@@ -461,12 +477,17 @@ class BarStore:
         self._entries: "OrderedDict[tuple, tuple]" = OrderedDict()
         self._max = max(1, int(max_entries))
 
-    def put(self, key, payload, *, now: float, epoch) -> None:
+    def put(self, key, payload, *, now: float, epoch, max_entries=None) -> None:
+        """Keep one series. ``max_entries`` is the bound to enforce on THIS put
+        (the gateway passes the configured value)."""
         if not isinstance(payload, dict) or not payload.get("candles"):
             return          # an empty series is refetched, never re-served
         blob = zlib.compress(
             json.dumps(payload, separators=(",", ":")).encode(), 1)
+        bound = _bound(max_entries)
         with self._lock:
+            if bound is not None:
+                self._max = bound
             self._entries[key] = (blob, now, epoch)
             self._entries.move_to_end(key)
             while len(self._entries) > self._max:
@@ -607,7 +628,8 @@ class Gateway:
         if hit is not None:
             self._record("chains", caller, hit.kind)
             return hit
-        wide = store.wide_key(key, today=now_ct.date())
+        wide = store.wide_key(key, today=now_ct.date(),
+                              max_days=cfg["wide_refetch_max_days"])
         fetch_key = wide or key
         with self._locks.get(("chains", fetch_key)):
             again = store.lookup(key, max_age=limit, now=self._clock(), state=state)
@@ -665,14 +687,14 @@ class Gateway:
             self._record("quotes", caller, "upstream")
             if not missing:
                 self._record("quotes", caller, "shadow_hit")
-            store.put_many(data, now=self._clock())
+            store.put_many(data, now=self._clock(), max_symbols=cfg["max_symbols"])
             return Served("pass", 0.0, data=data)
 
         if not missing:
             self._record("quotes", caller, "hit")
             return Served("hit", oldest, data={s: fresh[s] for s in symbols})
         data = call(missing)
-        store.put_many(data, now=self._clock())
+        store.put_many(data, now=self._clock(), max_symbols=cfg["max_symbols"])
         kind = "partial" if fresh else "miss"
         self._record("quotes", caller, "partial" if fresh else "upstream")
         if not isinstance(data, dict):
@@ -723,7 +745,8 @@ class Gateway:
                 verdict = compare_today_bar(data, quote, now_ct.date())
                 if verdict != "no_quote":
                     self._record("pricehistory", caller, f"shadow_bar_{verdict}")
-            store.put(key, data, now=self._clock(), epoch=epoch)
+            store.put(key, data, now=self._clock(), epoch=epoch,
+                      max_entries=cfg["max_entries"])
             return Served("pass", 0.0, data=data)
 
         seen = store.get(key, epoch=epoch)
@@ -751,6 +774,7 @@ class Gateway:
                 self._record("pricehistory", caller, "coalesced")
                 return Served("coalesced", self._clock() - again[1], body=again[0])
             data = self._fetch("/pricehistory", params)
-            store.put(key, data, now=self._clock(), epoch=epoch)
+            store.put(key, data, now=self._clock(), epoch=epoch,
+                      max_entries=cfg["max_entries"])
             self._record("pricehistory", caller, "upstream")
         return Served("miss", 0.0, data=data)

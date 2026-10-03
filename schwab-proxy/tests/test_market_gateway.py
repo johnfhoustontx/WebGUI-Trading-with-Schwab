@@ -16,10 +16,11 @@ from test_market_store_chains import chain  # noqa: E402
 CT = ZoneInfo("America/Chicago")
 DEFAULTS = {
     "chains": {"enabled": True, "max_age_sec": 45, "closed_max_age_sec": 1800,
-               "max_entries": 400, "shadow_compare_max_age_sec": 120},
-    "quotes": {"enabled": True, "max_age_sec": 5},
+               "max_entries": 400, "shadow_compare_max_age_sec": 120,
+               "wide_refetch_max_days": 10},
+    "quotes": {"enabled": True, "max_age_sec": 5, "max_symbols": 5000},
     "bars": {"enabled": True, "today_bar": "ttl", "session_ttl_sec": 1740,
-             "today_quote_max_age_sec": 120, "settle_min": 10},
+             "today_quote_max_age_sec": 120, "settle_min": 10, "max_entries": 4000},
 }
 
 
@@ -1204,3 +1205,62 @@ def test_no_upstream_call_is_ever_made_under_a_store_lock():
         h.clock += 1741
         h.gw.pricehistory(BAR, "a")
     assert held and not any(held)
+
+
+# ---- the store's three remaining limits are settings ------------------------
+
+def test_the_harness_defaults_are_the_shipped_defaults():
+    # A stand-in config that drifts from the real one tests nothing.
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from shared import marketdata_config
+    for name, table in DEFAULTS.items():
+        assert table == marketdata_config.DEFAULTS[name]
+
+
+def test_the_configured_wide_refetch_limit_is_enforced():
+    for limit, fetched_to in ((6, "2026-10-09"), (7, "2026-10-12")):
+        h = Harness(Cfg(chains__wide_refetch_max_days=limit))
+        h.gw.chains(P(), "collector")                # a 7-day window is held
+        h.clock += 50
+        assert h.gw.chains(P(to="2026-10-09"), "scan").kind == "miss"
+        assert h.calls[-1][1]["toDate"] == fetched_to and len(h.calls) == 2
+
+
+def test_a_longer_configured_limit_refetches_a_longer_held_window():
+    for limit, fetched_to in ((10, "2026-10-09"), (45, "2026-11-19")):
+        h = Harness(Cfg(chains__wide_refetch_max_days=limit))
+        h.gw.chains(P(to="2026-11-19"), "scan")      # a 45-day window is held
+        h.clock += 50
+        h.gw.chains(P(to="2026-10-09"), "scan")
+        assert h.calls[-1][1]["toDate"] == fetched_to
+
+
+def test_the_configured_symbol_limit_is_enforced():
+    h = Harness(Cfg(quotes__max_symbols=1), responses=quotes_for)
+    h.gw.quotes("SPY", "a")
+    h.gw.quotes("QQQ", "a")
+    assert h.gw.quotes("QQQ", "a").kind == "hit"
+    assert h.gw.quotes("SPY", "a").kind == "miss"         # SPY was dropped
+
+    h = Harness(Cfg(mode="shadow", quotes__max_symbols=1), responses=quotes_for)
+    for symbol in ("SPY", "QQQ", "SPY"):
+        h.gw.quotes(symbol, "a")
+    assert h.outcomes() == ["upstream"] * 3               # no would-be hit
+    h.gw.quotes("SPY", "a")
+    assert h.outcomes()[-1] == "shadow_hit"
+
+
+def test_the_configured_series_limit_is_enforced():
+    qqq = {**BAR, "symbol": "QQQ"}
+    h = Harness(Cfg(bars__max_entries=1), responses=bars_for)
+    h.gw.pricehistory(BAR, "a")
+    h.gw.pricehistory(qqq, "a")
+    assert h.gw.pricehistory(qqq, "a").kind == "hit"
+    assert h.gw.pricehistory(BAR, "a").kind == "miss"     # SPY was dropped
+
+    h = Harness(Cfg(mode="shadow", bars__max_entries=1), responses=bars_for)
+    for params in (BAR, qqq, BAR):
+        h.gw.pricehistory(params, "a")
+    assert bar_outcomes(h) == ["upstream"] * 3            # no would-be hit
+    h.gw.pricehistory(BAR, "a")
+    assert bar_outcomes(h)[-1] == "shadow_hit"

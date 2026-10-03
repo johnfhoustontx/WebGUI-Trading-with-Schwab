@@ -21,21 +21,30 @@ max_age_sec = 45                  # while any session is open
 closed_max_age_sec = 1800         # while every session is closed
 max_entries = 400
 shadow_compare_max_age_sec = 120  # shadow only: how old an entry may be and still be compared
+# When a request just misses, the proxy refetches a wider window it already holds
+# for that symbol and cuts the answer from it, so the holder's next request hits.
+# This is the longest held window it will refetch that way, in days. Keep it a
+# little above the collector's 7-day window: a 45-day chain must never be fetched
+# in place of a short one.
+wide_refetch_max_days = 10
 
 [quotes]
 enabled = true
 max_age_sec = 5                   # the dashboard poll sends its own 1
+max_symbols = 5000                # most symbols kept; the oldest are dropped past it
 
 [bars]
 enabled = true
 # How the bar for the session in progress is handled, daily series only.
 #   "ttl"   — re-serve the last fetched series for session_ttl_sec.
 #   "quote" — build today's bar from the live quote. Switch to this only after the
-#             shadow counts show the two agree (shadow_bar_match).
+#             shadow counts show the two agree (shadow_bar_match). A symbol with
+#             no usable quote is handled as in "ttl".
 today_bar = "ttl"
 session_ttl_sec = 1740
 today_quote_max_age_sec = 120
 settle_min = 10                   # minutes after the close before the settled refetch
+max_entries = 4000                # most series kept; the oldest are dropped past it
 
 [scan]
 # The autoscan fetches ONE today -> +45 day chain per symbol and cuts its three

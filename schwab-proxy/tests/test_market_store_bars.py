@@ -215,3 +215,36 @@ def test_a_volume_that_is_not_a_real_number_is_zero():
     for junk in (float("nan"), float("inf"), True, "5000"):
         q = {"quote": {**QUOTE["quote"], "totalVolume": junk}}
         assert ms.compose_today(series(FRI), q, MON)["candles"][-1]["volume"] == 0
+
+
+# ---- the bound is a setting, given on each put ------------------------------
+
+def _held(s, *symbols):
+    return [sym for sym in symbols if s.get(_range_key(sym), epoch=LIVE) is not None]
+
+
+def test_the_bound_can_be_changed_on_a_put():
+    s = ms.BarStore(max_entries=10)
+    for i, sym in enumerate(("A", "B", "C")):
+        s.put(_range_key(sym), series(FRI, MON), now=500.0 + i, epoch=LIVE, max_entries=2)
+    assert _held(s, "A", "B", "C") == ["B", "C"]
+    s.put(_range_key("D"), series(FRI, MON), now=510.0, epoch=LIVE, max_entries=3)
+    assert _held(s, "A", "B", "C", "D") == ["B", "C", "D"]      # raised: room for one more
+
+
+def test_an_unusable_bound_keeps_the_one_in_force():
+    s = ms.BarStore(max_entries=10)
+    s.put(_range_key("A"), series(FRI, MON), now=500.0, epoch=LIVE, max_entries=2)
+    for i, (sym, bad) in enumerate((("B", "many"), ("C", float("inf")),
+                                    ("D", float("nan")), ("E", None))):
+        s.put(_range_key(sym), series(FRI, MON), now=501.0 + i, epoch=LIVE,
+              max_entries=bad)
+    assert _held(s, "A", "B", "C", "D", "E") == ["D", "E"]       # still two
+
+
+def test_a_series_that_is_not_kept_does_not_change_the_bound():
+    s = ms.BarStore(max_entries=2)
+    s.put(_range_key("A"), series(FRI, MON), now=500.0, epoch=LIVE)
+    s.put(_range_key("B"), series(FRI, MON), now=501.0, epoch=LIVE)
+    s.put(_range_key("C"), {"candles": []}, now=502.0, epoch=LIVE, max_entries=1)
+    assert _held(s, "A", "B", "C") == ["A", "B"]
