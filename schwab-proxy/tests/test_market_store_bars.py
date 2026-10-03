@@ -296,15 +296,54 @@ def test_the_volume_tolerance_is_five_percent_short_and_one_percent_over():
     assert ms.compare_today_volume(_todays(volume=4900), QUOTE, MON) == "mismatch"  # 2.0% over
 
 
+NO_VOLUME = {"quote": {k: v for k, v in QUOTE["quote"].items() if k != "totalVolume"}}
+UNUSABLE_VOLUMES = (0, None, float("nan"), float("inf"), True, "5000", -1)
+
+
+def _without_volume():
+    """Friday plus a bar for today that carries no volume field at all."""
+    out = _todays()
+    del out["candles"][-1]["volume"]
+    return out
+
+
 def test_no_quoted_volume_means_no_volume_verdict():
-    # An index quotes no volume; that must not read as a disagreement.
-    for junk in (0, None, float("nan"), float("inf"), True, "5000", -1):
+    # An index: the quote carries no volume and neither does Schwab's bar. The
+    # quote-built bar would write 0, which is what Schwab's says. Nothing to judge.
+    for junk in UNUSABLE_VOLUMES:
         q = {"quote": {**QUOTE["quote"], "totalVolume": junk}}
-        assert ms.compare_today_volume(_todays(), q, MON) is None
-    missing = {"quote": {k: v for k, v in QUOTE["quote"].items() if k != "totalVolume"}}
-    assert ms.compare_today_volume(_todays(), missing, MON) is None
+        assert ms.compare_today_volume(_todays(volume=0), q, MON) is None
+        assert ms.compare_today_volume(_without_volume(), q, MON) is None
+    assert ms.compare_today_volume(_todays(volume=0), NO_VOLUME, MON) is None
+    assert ms.compare_today_volume(_without_volume(), NO_VOLUME, MON) is None
     for unusable in (None, {}, {"quote": None}, "x"):
-        assert ms.compare_today_volume(_todays(), unusable, MON) is None
+        assert ms.compare_today_volume(_todays(volume=0), unusable, MON) is None
+
+
+def test_a_quote_with_no_volume_against_a_bar_that_has_some_is_a_mismatch():
+    # The verdict is on the volume the quote-built bar would WRITE: 0. Quote
+    # mode would zero today's volume for this symbol, and shadow must show it.
+    assert ms.compare_today_volume(_todays(volume=1000), NO_VOLUME, MON) == "mismatch"
+    for junk in UNUSABLE_VOLUMES:
+        q = {"quote": {**QUOTE["quote"], "totalVolume": junk}}
+        assert ms.compare_today_volume(_todays(volume=1000), q, MON) == "mismatch"
+    assert ms.compare_today_volume(_todays(volume=1), NO_VOLUME, MON) == "mismatch"
+
+
+def test_the_written_volume_is_the_one_judged():
+    # Whatever compose_today writes for today's volume is what the verdict is on.
+    for bar_volume, quote, verdict in ((1000, NO_VOLUME, "mismatch"),
+                                       (0, NO_VOLUME, None),
+                                       (5000, QUOTE, "match"),
+                                       (9000, QUOTE, "mismatch")):
+        written = ms.compose_today(_todays(volume=bar_volume), quote, MON)
+        assert written["candles"][-1]["volume"] == (5000 if quote is QUOTE else 0)
+        assert ms.compare_today_volume(_todays(volume=bar_volume), quote, MON) == verdict
+
+
+def test_a_bar_volume_that_is_not_a_number_and_no_quoted_volume_is_no_verdict():
+    for junk in (float("nan"), None, True, "1000"):
+        assert ms.compare_today_volume(_todays(volume=junk), NO_VOLUME, MON) is None
 
 
 def test_no_bar_for_today_means_no_volume_verdict():

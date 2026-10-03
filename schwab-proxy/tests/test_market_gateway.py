@@ -1804,14 +1804,29 @@ def test_a_series_holding_a_number_that_is_not_json_is_returned_and_never_stored
 
 # ---- the today's-bar verdict checks open and volume --------------------------
 
-def quote_with(**fields):
-    """A fixture quote for SPY with some fields replaced."""
+DROP = object()
+
+
+def quote_with(bar_volume=1000, **fields):
+    """A fixture quote for SPY with some fields replaced (or, for ``DROP``,
+    removed), beside a series whose bars carry ``bar_volume`` (``DROP``: no
+    volume field at all)."""
     def respond(endpoint, params):
         if endpoint != "/quotes":
-            return series(FRI, MON)
+            out = series(FRI, MON)
+            for candle in out["candles"]:
+                if bar_volume is DROP:
+                    del candle["volume"]
+                else:
+                    candle["volume"] = bar_volume
+            return out
         out = quotes_for(endpoint, params)
         for block in out.values():
-            block["quote"].update(fields)
+            for name, value in fields.items():
+                if value is DROP:
+                    block["quote"].pop(name, None)
+                else:
+                    block["quote"][name] = value
         return out
     return respond
 
@@ -1835,9 +1850,20 @@ def test_shadow_reports_volume_on_its_own_beside_the_price_verdict():
         "upstream", "shadow_bar_match", "shadow_bar_volume_match"]
 
 
+PRICE_ONLY = ["upstream", "shadow_bar_match"]
+ZEROED = ["upstream", "shadow_bar_match", "shadow_bar_volume_mismatch"]
+
+
 def test_a_symbol_with_no_quoted_volume_still_gets_its_price_verdict():
-    assert shadow_bar_verdicts(quote_with(totalVolume=0)) == [
-        "upstream", "shadow_bar_match"]
+    # An index: no volume in the quote and none in Schwab's bar. The price
+    # verdict stands and there is no volume outcome at all.
+    assert shadow_bar_verdicts(quote_with(bar_volume=0, totalVolume=0)) == PRICE_ONLY
+    assert shadow_bar_verdicts(quote_with(bar_volume=0, totalVolume=DROP)) == PRICE_ONLY
+    assert shadow_bar_verdicts(quote_with(bar_volume=DROP, totalVolume=DROP)) == PRICE_ONLY
+    # Schwab's bar HAS volume: the price verdict still stands, and the volume
+    # the quote-built bar would write (0) is reported as the mismatch it is.
+    assert shadow_bar_verdicts(quote_with(bar_volume=1000, totalVolume=0)) == ZEROED
+    assert shadow_bar_verdicts(quote_with(bar_volume=1000, totalVolume=DROP)) == ZEROED
 
 
 def test_no_usable_quote_means_no_volume_verdict_either():
@@ -1850,3 +1876,27 @@ def test_a_composed_bar_carries_the_quotes_volume():
     h.gw.quotes("SPY", "market_svc")
     got = h.gw.pricehistory(BAR, "scan")
     assert got.kind == "composed" and got.data["candles"][-1]["volume"] == 4321
+
+
+# ---- a recorded failure keeps no exception alive ----------------------------
+
+def test_a_recorded_upstream_failure_holds_no_exception_object():
+    # An exception object carries its traceback, and so every frame's locals,
+    # until the next success on that key.
+    h = Harness(responses=lambda e, p: ms.UpstreamError(503, "unavailable"))
+    for ask in (lambda: h.gw.chains(P(), "a"), lambda: h.gw.pricehistory(BAR, "a")):
+        with pytest.raises(ms.UpstreamError):
+            ask()
+    assert len(h.gw._failures) == 2
+    for _ticket, what in h.gw._failures.values():
+        assert what == (503, "unavailable")
+        assert not isinstance(what, BaseException)
+
+
+def test_a_recorded_crash_keeps_the_original_to_hand_to_waiters():
+    crash = RuntimeError("connection reset")
+    h = Harness(responses=lambda e, p: crash)
+    with pytest.raises(RuntimeError):
+        h.gw.chains(P(), "a")
+    ((_ticket, what),) = h.gw._failures.values()
+    assert what.original is crash

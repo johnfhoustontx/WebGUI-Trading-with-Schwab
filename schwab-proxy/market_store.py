@@ -483,21 +483,26 @@ VOLUME_MAX_EXCESS = 0.01        # and at most 1% above it
 
 
 def compare_today_volume(upstream, quote, today) -> str | None:
-    """Shadow verdict on whether the quote's volume agrees with the volume of
-    Schwab's bar for ``today``: ``match`` / ``mismatch``, or None when there
-    is nothing to judge - the quote carries no volume (an index does not), or
-    Schwab sent no bar for today.
+    """Shadow verdict on the volume a quote-built bar would WRITE for
+    ``today`` against the volume of Schwab's bar: ``match`` / ``mismatch``, or
+    None when there is nothing to judge - Schwab sent no bar for today, or
+    neither side carries a volume (an index).
 
-    Kept apart from :func:`compare_today_bar` so that a symbol with no quoted
-    volume still gets its price verdict."""
-    block = quote.get("quote") if isinstance(quote, dict) else None
-    quoted = block.get("totalVolume") if isinstance(block, dict) else None
-    if not _real_number(quoted) or quoted <= 0:
-        return None
+    A quote with no usable volume makes :func:`compose_today` write 0. Against
+    a bar of Schwab's that HAS volume that is a mismatch, and it must be
+    reported: quote mode would zero today's volume for that symbol.
+
+    Kept apart from :func:`compare_today_bar` so that a symbol with no volume
+    on either side still gets its price verdict."""
     candles = upstream.get("candles") if isinstance(upstream, dict) else None
     if not candles or _candle_date(candles[-1]) != today:
         return None
     theirs = candles[-1].get("volume")
+    block = quote.get("quote") if isinstance(quote, dict) else None
+    quoted = block.get("totalVolume") if isinstance(block, dict) else None
+    if not _real_number(quoted) or quoted <= 0:
+        # The bar would be written with no volume. Wrong only when Schwab's has some.
+        return "mismatch" if _real_number(theirs) and theirs > 0 else None
     if not _real_number(theirs):
         return "mismatch"
     lowest = theirs * (1 - VOLUME_MAX_SHORTFALL)
@@ -640,8 +645,10 @@ class Gateway:
         # Order of arrival, for requests that wait on one another. A counter,
         # not the clock: two readings of a clock can be equal.
         self._tickets = itertools.count(1)
-        # {lock key: (ticket when the fetch failed, the error)}. Read and
-        # written only while holding that key's lock.
+        # {lock key: (ticket when the fetch failed, what failed)}, where what
+        # failed is (status_code, detail) for an UpstreamError and the tagged
+        # exception for anything else. Read and written only while holding
+        # that key's lock.
         self._failures: dict = {}
         self.chain_store = ChainStore()
         self.quote_store = QuoteStore()
@@ -676,14 +683,20 @@ class Gateway:
         request that arrives after the failure calls Schwab itself."""
         failed = self._failures.get(lock_key)
         if failed is not None and ticket < failed[0]:
-            error = failed[1]             # it failed while this request waited
-            if isinstance(error, _FetchFailed):
-                raise _FetchFailed(error.original)
-            raise UpstreamError(error.status_code, error.detail)
+            what = failed[1]              # it failed while this request waited
+            if isinstance(what, _FetchFailed):
+                raise _FetchFailed(what.original)
+            raise UpstreamError(*what)
         began = self._clock()
         try:
             data = self._fetch(endpoint, params)
-        except (UpstreamError, _FetchFailed) as error:
+        except UpstreamError as error:
+            # Its status and detail, not the exception: an exception keeps its
+            # traceback, and every frame in it, alive until the next success.
+            self._failures[lock_key] = (next(self._tickets),
+                                        (error.status_code, error.detail))
+            raise
+        except _FetchFailed as error:
             self._failures[lock_key] = (next(self._tickets), error)
             raise
         self._failures.pop(lock_key, None)
