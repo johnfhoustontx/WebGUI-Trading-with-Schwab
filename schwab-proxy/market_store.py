@@ -12,8 +12,10 @@ Design: docs/plans/2026-10-03-market-data-store-design.md
 from __future__ import annotations
 
 import json
+import logging
 import math
 import threading
+import time
 import zlib
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -477,3 +479,152 @@ class BarStore:
         if got is None or got[2] != epoch:
             return None
         return zlib.decompress(got[0]), got[1]
+
+
+#############################################
+# GATEWAY
+#############################################
+
+def effective_max_age(requested, cfg, *, closed: bool) -> float:
+    """The caller's ``maxAge`` when it is a usable number, else the configured
+    limit for the current market state."""
+    if requested is not None:
+        try:
+            value = float(requested)
+        except (TypeError, ValueError):
+            value = float("nan")
+        if math.isfinite(value) and value >= 0:
+            return value
+    return float(cfg["closed_max_age_sec"] if closed else cfg["max_age_sec"])
+
+
+class KeyedLocks:
+    """One lock per request identity, so identical concurrent misses make one
+    upstream call. Keys carry dates, so the map grows by a few hundred a day;
+    the proxy restarts on every promote, long before that matters."""
+
+    def __init__(self):
+        self._guard = threading.Lock()
+        self._locks: dict = {}
+
+    def get(self, key) -> threading.Lock:
+        with self._guard:
+            return self._locks.setdefault(key, threading.Lock())
+
+
+class Gateway:
+    """Decides, per request, between a stored answer and a call to Schwab.
+
+    ``fetch(endpoint, params)`` returns Schwab's JSON or raises
+    ``UpstreamError``. ``config`` is ``shared.marketdata_config`` (``mode()``,
+    ``store_on(name)``, ``section(name)``, ``today_bar()``). ``calendar`` is
+    ``shared.market_calendar``. ``record(endpoint, caller, outcome)`` is the
+    detail counter.
+
+    Two rules hold everywhere: an upstream error is raised, never papered over
+    with an old entry; and a bug in store code falls through to a plain fetch
+    and is counted in ``degrades``.
+
+    Called from many worker threads at once. A per-request lock is held only
+    around the re-check and the upstream fetch, and ``fetch`` is never called
+    while a store's own lock is held."""
+
+    def __init__(self, *, fetch, config, calendar, record,
+                 clock=time.time, now_ct=None, log=None):
+        self._fetch, self._cfg, self._cal = fetch, config, calendar
+        self._record, self._clock = record, clock
+        self._now_ct = now_ct or (lambda: datetime.now(CT))
+        self._log = log or logging.getLogger("market_store")
+        self._locks = KeyedLocks()
+        self.chain_store = ChainStore()
+        self.quote_store = QuoteStore()
+        self.bar_store = BarStore()
+        self.degrades: dict = {}
+
+    # ---- shared ----------------------------------------------------------
+    def _mode(self, store: str) -> str:
+        try:
+            mode = self._cfg.mode() if self._cfg.store_on(store) else "off"
+        except Exception:  # noqa: BLE001 — unreadable config means no store.
+            return "off"
+        # Anything that is not one of the two store modes never answers locally.
+        return mode if mode in ("shadow", "on") else "off"
+
+    def _passthrough(self, label, endpoint, params, caller) -> Served:
+        data = self._fetch(endpoint, params)
+        self._record(label, caller, "upstream")
+        return Served("pass", 0.0, data=data)
+
+    def _degraded(self, area: str) -> None:
+        self.degrades[area] = self.degrades.get(area, 0) + 1
+        self._log.warning("market store degraded in %s; fetching directly",
+                          area, exc_info=True)
+
+    def _guarded(self, label, endpoint, params, caller, work) -> Served:
+        try:
+            return work()
+        except UpstreamError:
+            raise
+        except Exception:  # noqa: BLE001 — a store bug must not take data down.
+            self._degraded(label)
+            return self._passthrough(label, endpoint, params, caller)
+
+    # ---- chains ----------------------------------------------------------
+    def chains(self, params, caller, max_age=None) -> Served:
+        mode = self._mode("chains")
+        if mode == "off":
+            return self._passthrough("chains", "/chains", params, caller)
+        return self._guarded("chains", "/chains", params, caller,
+                             lambda: self._chains(params, caller, max_age, mode))
+
+    def _chains(self, params, caller, max_age, mode) -> Served:
+        cfg = self._cfg.section("chains")
+        now_ct = self._now_ct()
+        state = self._cal.session_at(now_ct).name
+        key = ChainKey.from_params(params)
+        store = self.chain_store
+
+        if mode == "shadow":
+            would = store.lookup(key, max_age=float(cfg["shadow_compare_max_age_sec"]),
+                                 now=self._clock(), state=state)
+            data = self._fetch("/chains", params)
+            self._record("chains", caller, "upstream")
+            if would is not None:
+                same = chain_shape(json.loads(would.body)) == chain_shape(data)
+                verdict = "match" if same else "mismatch"
+                self._record("chains", caller, f"shadow_{would.kind}_{verdict}")
+                if not same:
+                    self._log.warning("shadow: stored %s answer for %s differs "
+                                      "from Schwab's", would.kind, key)
+            store.put(key, data, now=self._clock(), state=state,
+                      max_entries=cfg["max_entries"])
+            return Served("pass", 0.0, data=data)
+
+        limit = effective_max_age(max_age, cfg, closed=(state == "CLOSED"))
+        hit = store.lookup(key, max_age=limit, now=self._clock(), state=state)
+        if hit is not None:
+            self._record("chains", caller, hit.kind)
+            return hit
+        wide = store.wide_key(key, today=now_ct.date())
+        fetch_key = wide or key
+        with self._locks.get(("chains", fetch_key)):
+            again = store.lookup(key, max_age=limit, now=self._clock(), state=state)
+            if again is not None:
+                self._record("chains", caller, "coalesced")
+                return Served("coalesced", again.age, body=again.body)
+            data = self._fetch("/chains", fetch_key.params())
+            kept = store.put(fetch_key, data, now=self._clock(), state=state,
+                             max_entries=cfg["max_entries"])
+            self._record("chains", caller, "upstream")
+        if wide is None:
+            return Served("miss", 0.0, data=data)
+        # Cut only from what was JUST stored. When the store would not keep the
+        # wide chain, the entry still held under ``wide`` is the OLD one, and a
+        # cut of it would be an old answer served as a new one.
+        cut = store.cut(wide, key) if kept else None
+        if cut is not None:
+            return Served("miss", 0.0, body=cut)
+        # The wide chain came back empty, in a shape the store would not keep,
+        # or with no expiration in the window: answer the request exactly as it
+        # was asked.
+        return self._passthrough("chains", "/chains", params, caller)
