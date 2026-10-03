@@ -281,7 +281,6 @@ Configuration.
 | `chains.enabled` / `bars.enabled` / `quotes.enabled` | `true` | per-store switch |
 | `chains.max_age_sec` | 45 | freshness while a session is open |
 | `chains.closed_max_age_sec` | 1800 | freshness while all sessions are closed |
-| `chains.wide_days` | 7 | the window refetched on a near miss |
 | `chains.max_entries` | 400 | LRU bound |
 | `bars.today_bar` | `"ttl"` until measured | `quote` or `ttl` |
 | `bars.session_ttl_sec` | 1740 | used in `ttl` mode |

@@ -106,10 +106,12 @@ def test_a_section_replaced_by_a_scalar_falls_back_to_defaults(monkeypatch):
 
 def test_an_unusable_number_falls_back_to_its_default(monkeypatch):
     cfg = {**mc.DEFAULTS, "chains": {**mc.DEFAULTS["chains"],
-                                     "max_age_sec": float("nan"), "wide_days": -3}}
+                                     "max_age_sec": float("nan"),
+                                     "closed_max_age_sec": -3}}
     monkeypatch.setattr(mc, "load", lambda: cfg)
     assert mc.section("chains")["max_age_sec"] == mc.DEFAULTS["chains"]["max_age_sec"]
-    assert mc.section("chains")["wide_days"] == mc.DEFAULTS["chains"]["wide_days"]
+    assert (mc.section("chains")["closed_max_age_sec"]
+            == mc.DEFAULTS["chains"]["closed_max_age_sec"])
 
 
 def test_module_reloads_cleanly():
@@ -155,7 +157,6 @@ mode = "shadow"
 enabled = true
 max_age_sec = 45                  # while any session is open
 closed_max_age_sec = 1800         # while every session is closed
-wide_days = 7                     # the window refetched on a near miss (the collector's)
 max_entries = 400
 shadow_compare_max_age_sec = 120  # shadow only: how old an entry may be and still be compared
 
@@ -213,7 +214,6 @@ DEFAULTS = {
         "enabled": True,
         "max_age_sec": 45,
         "closed_max_age_sec": 1800,
-        "wide_days": 7,
         "max_entries": 400,
         "shadow_compare_max_age_sec": 120,
     },
@@ -335,9 +335,6 @@ _MARKETDATA = ConfigFile(
                   "The autoscan reads chains up to this old.", **_SEC, max=600),
             Field("chains.closed_max_age_sec", "Oldest chain to reuse while markets are closed",
                   "", **_SEC, max=86400),
-            Field("chains.wide_days", "Days ahead fetched when a chain is refreshed",
-                  "Matches the collector's own window.", kind="int", unit="days",
-                  min=1, max=14),
             Field("chains.max_entries", "Most chains kept at once", "", kind="int",
                   min=50, max=5000),
             Field("chains.shadow_compare_max_age_sec",
@@ -657,6 +654,17 @@ def test_the_oldest_entries_are_dropped_past_the_limit():
     assert s.lookup(keys[2], max_age=45, now=1003.0, state="REGULAR") is not None
 
 
+def test_the_limit_can_be_changed_on_a_put():
+    s = ms.ChainStore(max_entries=10)
+    keys = [ms.ChainKey(sym, from_date="2026-10-05", to_date="2026-10-12")
+            for sym in ("A", "B", "C")]
+    for i, k in enumerate(keys):
+        s.put(k, chain(), now=1000.0 + i, state="REGULAR", max_entries=2)
+    assert s.lookup(keys[0], max_age=45, now=1003.0, state="REGULAR") is None
+    s.put(keys[0], chain(), now=1004.0, state="REGULAR", max_entries="many")
+    assert s.lookup(keys[2], max_age=45, now=1004.0, state="REGULAR") is not None
+
+
 def test_key_from_request_parameters_round_trips():
     params = {"symbol": "SPY", "contractType": "ALL", "range": "ALL",
               "fromDate": "2026-10-05", "toDate": "2026-10-12"}
@@ -855,9 +863,12 @@ class ChainStore:
         self._entries: "OrderedDict[ChainKey, _ChainEntry]" = OrderedDict()
         self._max = max(1, int(max_entries))
 
-    def put(self, key: ChainKey, payload, *, now: float, state: str) -> bool:
+    def put(self, key: ChainKey, payload, *, now: float, state: str,
+            max_entries: int | None = None) -> bool:
         """Keep one fetched chain. Returns False (and keeps nothing) for a
-        payload that is not chain-shaped."""
+        payload that is not chain-shaped. ``max_entries`` is the bound to
+        enforce on THIS put (the gateway passes the configured value, so a
+        saved setting applies without a restart)."""
         if not isinstance(payload, dict):
             return False
         calls, puts = payload.get("callExpDateMap"), payload.get("putExpDateMap")
@@ -870,6 +881,11 @@ class ChainStore:
                 calls=_pack_side(calls), puts=_pack_side(puts))
         except (ValueError, TypeError):
             return False
+        if max_entries is not None:
+            try:
+                self._max = max(1, int(max_entries))
+            except (TypeError, ValueError):
+                pass                      # keep the bound already in force
         with self._lock:
             self._entries[key] = entry
             self._entries.move_to_end(key)
@@ -932,29 +948,42 @@ import datetime as dt
 TODAY = dt.date(2026, 10, 5)
 
 
-def test_a_near_miss_inside_the_wide_window_refetches_the_wide_window():
-    s = _store()                               # holds today -> +7, any age
-    assert s.wide_key(NARROW, today=TODAY, wide_days=7) == WIDE
+def test_a_near_miss_refetches_the_wider_window_already_held():
+    s = _store()                               # holds today -> +7, at any age
+    assert s.wide_key(NARROW, today=TODAY) == WIDE
 
 
-def test_no_wide_refetch_for_a_symbol_nobody_collects():
-    s = ms.ChainStore()
-    assert s.wide_key(NARROW, today=TODAY, wide_days=7) is None
+def test_no_wider_refetch_for_a_symbol_nobody_fetched_wide():
+    assert ms.ChainStore().wide_key(NARROW, today=TODAY) is None
 
 
-def test_no_wide_refetch_when_the_request_is_the_wide_window_itself():
-    assert _store().wide_key(WIDE, today=TODAY, wide_days=7) is None
+def test_no_wider_refetch_when_the_request_is_the_held_window_itself():
+    assert _store().wide_key(WIDE, today=TODAY) is None
 
 
-def test_no_wide_refetch_for_a_window_reaching_past_it():
+def test_no_wider_refetch_for_a_window_the_held_one_does_not_cover():
     far = ms.ChainKey("SPY", from_date="2026-10-10", to_date="2026-10-20")
-    assert _store().wide_key(far, today=TODAY, wide_days=7) is None
+    assert _store().wide_key(far, today=TODAY) is None
 
 
-def test_no_wide_refetch_for_a_strike_filtered_request():
+def test_no_wider_refetch_for_a_strike_filtered_request():
     filtered = ms.ChainKey("SPY", strike_range="NTM", strike_count=50,
                            from_date="2026-10-05", to_date="2026-10-09")
-    assert _store().wide_key(filtered, today=TODAY, wide_days=7) is None
+    assert _store().wide_key(filtered, today=TODAY) is None
+
+
+def test_the_narrowest_covering_window_is_the_one_refetched():
+    s = _store()
+    wider = ms.ChainKey("SPY", from_date="2026-10-05", to_date="2026-11-19")
+    s.put(wider, chain(), now=1500.0, state="REGULAR")
+    assert s.wide_key(NARROW, today=TODAY) == WIDE
+
+
+def test_a_window_that_started_on_an_earlier_day_is_not_refetched():
+    s = ms.ChainStore()
+    yesterday = ms.ChainKey("SPY", from_date="2026-10-04", to_date="2026-10-11")
+    s.put(yesterday, chain(), now=1000.0, state="REGULAR")
+    assert s.wide_key(NARROW, today=TODAY) is None
 
 
 def test_cut_answers_from_the_wide_entry_whatever_its_age():
@@ -968,23 +997,29 @@ def test_cut_answers_from_the_wide_entry_whatever_its_age():
 Run: `(cd schwab-proxy && "$PY" -m pytest tests/test_market_store_chains.py -q)`
 Expected: FAIL, `'ChainStore' object has no attribute 'wide_key'`.
 
-**Step 3: Implement** — add `from datetime import timedelta` at the top and these methods to `ChainStore`:
+**Step 3: Implement** — add these methods to `ChainStore`:
 
 ```python
-    def wide_key(self, key: ChainKey, *, today, wide_days: int) -> ChainKey | None:
-        """The wide window to fetch INSTEAD of ``key``, or None to fetch ``key``
-        as asked. Only for a symbol whose wide window is already held (at any
-        age) — that is what marks it as collected — and only for a plain request
-        lying inside that window."""
+    def wide_key(self, key: ChainKey, *, today) -> ChainKey | None:
+        """The wider window to fetch INSTEAD of ``key``, or None to fetch
+        ``key`` as asked.
+
+        It is the narrowest plain window already held for this symbol, at ANY
+        age, that starts today and covers ``key`` - in practice the collector's
+        today -> +7. Derived from what is held rather than configured, so it
+        cannot drift from the window the collector actually asks for. A window
+        that started on an earlier day is never reused: refetching it would ask
+        Schwab for expirations in the past."""
         if not key.plain:
             return None
-        wide = ChainKey(key.symbol, from_date=today.isoformat(),
-                        to_date=(today + timedelta(days=int(wide_days))).isoformat())
-        if wide == key or not wide.covers(key):
-            return None
+        start = today.isoformat()
         with self._lock:
-            known = wide in self._entries
-        return wide if known else None
+            held = [e for k, e in self._entries.items()
+                    if k.symbol == key.symbol and k != key
+                    and k.from_date == start and k.covers(key)]
+        if not held:
+            return None
+        return min(held, key=lambda e: (e.key.to_date, -e.fetched_at)).key
 
     def cut(self, wide: ChainKey, key: ChainKey) -> bytes | None:
         """``key``'s window out of the entry stored under ``wide``, regardless
@@ -1285,7 +1320,7 @@ def test_shadow_verdicts():
 Run: `(cd schwab-proxy && "$PY" -m pytest tests/test_market_store_bars.py -q)`
 Expected: FAIL, `module 'market_store' has no attribute 'bar_epoch'`.
 
-**Step 3: Implement** — extend the `datetime` import to `from datetime import datetime, time as _time, timedelta`, add `from zoneinfo import ZoneInfo` and `CT = ZoneInfo("America/Chicago")` near the top, then append:
+**Step 3: Implement** — add `from datetime import datetime, time as _time, timedelta`, add `from zoneinfo import ZoneInfo` and `CT = ZoneInfo("America/Chicago")` near the top, then append:
 
 ```python
 #############################################
@@ -1435,7 +1470,7 @@ from test_market_store_chains import chain  # noqa: E402
 CT = ZoneInfo("America/Chicago")
 DEFAULTS = {
     "chains": {"enabled": True, "max_age_sec": 45, "closed_max_age_sec": 1800,
-               "wide_days": 7, "max_entries": 400, "shadow_compare_max_age_sec": 120},
+               "max_entries": 400, "shadow_compare_max_age_sec": 120},
     "quotes": {"enabled": True, "max_age_sec": 5},
     "bars": {"enabled": True, "today_bar": "ttl", "session_ttl_sec": 1740,
              "today_quote_max_age_sec": 120, "settle_min": 10},
@@ -1639,6 +1674,13 @@ def test_two_concurrent_identical_misses_make_one_call():
     assert len(h.calls) == 1 and sorted(kinds) == ["coalesced", "miss"]
 
 
+def test_the_configured_entry_limit_is_enforced():
+    h = Harness(Cfg(chains__max_entries=1))
+    h.gw.chains(P(), "a")
+    h.gw.chains({**P(), "symbol": "QQQ"}, "a")
+    assert h.gw.chains(P(), "a").kind == "miss"          # SPY was dropped
+
+
 # ---- mode: shadow ----------------------------------------------------------
 
 def test_shadow_always_calls_schwab_and_reports_what_it_would_have_done():
@@ -1778,7 +1820,8 @@ class Gateway:
                 if not same:
                     self._log.warning("shadow: stored %s answer for %s differs "
                                       "from Schwab's", would.kind, key)
-            store.put(key, data, now=self._clock(), state=state)
+            store.put(key, data, now=self._clock(), state=state,
+                      max_entries=cfg["max_entries"])
             return Served("pass", 0.0, data=data)
 
         limit = effective_max_age(max_age, cfg, closed=(state == "CLOSED"))
@@ -1786,7 +1829,7 @@ class Gateway:
         if hit is not None:
             self._record("chains", caller, hit.kind)
             return hit
-        wide = store.wide_key(key, today=now_ct.date(), wide_days=int(cfg["wide_days"]))
+        wide = store.wide_key(key, today=now_ct.date())
         fetch_key = wide or key
         with self._locks.get(("chains", fetch_key)):
             again = store.lookup(key, max_age=limit, now=self._clock(), state=state)
@@ -1794,7 +1837,8 @@ class Gateway:
                 self._record("chains", caller, "coalesced")
                 return Served("coalesced", again.age, body=again.body)
             data = self._fetch("/chains", fetch_key.params())
-            store.put(fetch_key, data, now=self._clock(), state=state)
+            store.put(fetch_key, data, now=self._clock(), state=state,
+                      max_entries=cfg["max_entries"])
             self._record("chains", caller, "upstream")
         if wide is None:
             return Served("miss", 0.0, data=data)
