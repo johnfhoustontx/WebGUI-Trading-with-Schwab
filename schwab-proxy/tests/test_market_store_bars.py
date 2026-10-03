@@ -248,3 +248,22 @@ def test_a_series_that_is_not_kept_does_not_change_the_bound():
     s.put(_range_key("B"), series(FRI, MON), now=501.0, epoch=LIVE)
     s.put(_range_key("C"), {"candles": []}, now=502.0, epoch=LIVE, max_entries=1)
     assert _held(s, "A", "B", "C") == ["A", "B"]
+
+
+# ---- a stored body is valid JSON --------------------------------------------
+
+def test_a_series_holding_a_number_that_is_not_json_is_not_stored():
+    for bad in (float("nan"), float("inf"), float("-inf")):
+        s = ms.BarStore()
+        s.put(KEY, series(FRI, MON, close=bad), now=500.0, epoch=LIVE)
+        assert s.get(KEY, epoch=LIVE) is None
+        s.put(KEY, {**series(FRI, MON), "previousClose": bad}, now=500.0, epoch=LIVE)
+        assert s.get(KEY, epoch=LIVE) is None
+
+
+def test_a_series_that_cannot_be_stored_leaves_the_held_one_alone():
+    s = ms.BarStore()
+    s.put(KEY, series(FRI, MON), now=500.0, epoch=LIVE)
+    s.put(KEY, series(FRI, MON, close=float("nan")), now=600.0, epoch=LIVE)
+    body, fetched_at = s.get(KEY, epoch=LIVE)
+    assert fetched_at == 500.0 and json.loads(body) == series(FRI, MON)

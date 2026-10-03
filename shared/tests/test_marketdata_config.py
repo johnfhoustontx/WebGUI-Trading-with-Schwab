@@ -160,7 +160,7 @@ def test_module_reloads_cleanly():
 
 # ---- the store's three remaining limits -------------------------------------
 
-LIMITS = [("chains", "wide_refetch_max_days", 10),
+LIMITS = [("chains", "wide_refetch_max_days", 7),
           ("quotes", "max_symbols", 5000),
           ("bars", "max_entries", 4000)]
 

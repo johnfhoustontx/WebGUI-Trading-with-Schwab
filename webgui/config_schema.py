@@ -1358,9 +1358,10 @@ _MARKETDATA = ConfigFile(
                   "Longest held window refetched in place of a shorter one",
                   "When a request just misses, the proxy fetches a wider window "
                   "it already holds for that symbol and cuts the answer from it. "
-                  "Keep this a little above the collector's 7-day window, so a "
-                  "long chain is never fetched in place of a short one.",
-                  kind="int", unit="days", min=1, max=60),
+                  "This should equal the collector's window, 7 days. Any higher "
+                  "and the collector's own request is replaced by a longer "
+                  "window that something else holds.",
+                  kind="int", unit="days", min=1, max=14),
         )),
         Section("Quotes", "", (
             Field("quotes.enabled", "Reuse quotes", "", kind="bool"),

@@ -11,6 +11,7 @@ Design: docs/plans/2026-10-03-market-data-store-design.md
 """
 from __future__ import annotations
 
+import itertools
 import json
 import logging
 import math
@@ -146,8 +147,10 @@ def _pack_side(exp_map) -> dict:
         if not isinstance(strikes, dict):
             raise ValueError("unexpected chain shape")
         count = sum(len(v) for v in strikes.values() if isinstance(v, list))
+        # allow_nan=False: NaN and the infinities are not JSON, and a stored
+        # body is sent as it is. A ValueError here means "do not store".
         blob = zlib.compress(
-            json.dumps(strikes, separators=(",", ":")).encode(), 1)
+            json.dumps(strikes, separators=(",", ":"), allow_nan=False).encode(), 1)
         out[str(exp_key)] = (blob, count)
     return out
 
@@ -212,10 +215,11 @@ def chain_shape(payload) -> frozenset:
 
 
 # The widest held window a near miss may refetch in place of the one asked for.
-# The refetch exists for the collector's roughly one-week window; a held 45- or
-# 120-day chain must never be fetched in place of a short one. The built-in
-# value; the gateway passes ``[chains] wide_refetch_max_days``.
-WIDE_REFETCH_MAX_DAYS = 10
+# The refetch exists for the collector's one-week window, so the ceiling IS that
+# window: at 10 the collector's own 7-day request for a symbol would be turned
+# into the held 10-day term-structure window, or a 9-day Strategy Finder one.
+# The built-in value; the gateway passes ``[chains] wide_refetch_max_days``.
+WIDE_REFETCH_MAX_DAYS = 7
 
 
 class ChainStore:
@@ -242,9 +246,10 @@ class ChainStore:
         if not calls and not puts:
             return False    # an empty chain is refetched, never re-served
         try:
+            header = {k: v for k, v in payload.items() if k not in _SIDES}
+            json.dumps(header, allow_nan=False)     # rendered later, checked now
             entry = _ChainEntry(
-                key=key, fetched_at=now, state=state,
-                header={k: v for k, v in payload.items() if k not in _SIDES},
+                key=key, fetched_at=now, state=state, header=header,
                 calls=_pack_side(calls), puts=_pack_side(puts))
         except (ValueError, TypeError):
             return False
@@ -482,8 +487,11 @@ class BarStore:
         (the gateway passes the configured value)."""
         if not isinstance(payload, dict) or not payload.get("candles"):
             return          # an empty series is refetched, never re-served
-        blob = zlib.compress(
-            json.dumps(payload, separators=(",", ":")).encode(), 1)
+        try:
+            text = json.dumps(payload, separators=(",", ":"), allow_nan=False)
+        except (ValueError, TypeError):
+            return          # NaN or infinity is not JSON: never stored
+        blob = zlib.compress(text.encode(), 1)
         bound = _bound(max_entries)
         with self._lock:
             if bound is not None:
@@ -519,6 +527,18 @@ def effective_max_age(requested, cfg, *, closed: bool) -> float:
     return float(cfg["closed_max_age_sec"] if closed else cfg["max_age_sec"])
 
 
+class _FetchFailed(Exception):
+    """``fetch`` raised something that is not an ``UpstreamError``.
+
+    Tagged at the one place ``fetch`` is called, so the gateway can tell a
+    failure to reach Schwab from a bug in its own store code. Never leaves the
+    gateway: the caller gets ``original``."""
+
+    def __init__(self, original):
+        super().__init__(repr(original))
+        self.original = original
+
+
 class KeyedLocks:
     """One lock per request identity, so identical concurrent misses make one
     upstream call. Keys carry dates, so the map grows by a few hundred a day;
@@ -544,7 +564,11 @@ class Gateway:
 
     Two rules hold everywhere: an upstream error is raised, never papered over
     with an old entry; and a bug in store code falls through to a plain fetch
-    and is counted in ``degrades``.
+    and is counted in ``degrades``. A failure of ``fetch`` itself is neither:
+    whatever it raised reaches the caller as it was, after one call.
+
+    Every stored entry is stamped with the moment its fetch BEGAN, the
+    conservative age: the data cannot be newer than the request for it.
 
     Shadow mode always calls Schwab and returns Schwab's answer, and its counts
     are read as "calls mode on would have saved". So it makes on's decision
@@ -573,12 +597,18 @@ class Gateway:
 
     def __init__(self, *, fetch, config, calendar, record,
                  clock=time.time, now_ct=None, log=None):
-        self._fetch, self._cfg, self._cal = fetch, config, calendar
+        self._upstream, self._cfg, self._cal = fetch, config, calendar
         self._record, self._clock = record, clock
         self._now_ct = now_ct or (lambda: datetime.now(CT))
         self._log = log or logging.getLogger("market_store")
         self._locks = KeyedLocks()
         self._degrade_lock = threading.Lock()
+        # Order of arrival, for requests that wait on one another. A counter,
+        # not the clock: two readings of a clock can be equal.
+        self._tickets = itertools.count(1)
+        # {lock key: (ticket when the fetch failed, the error)}. Read and
+        # written only while holding that key's lock.
+        self._failures: dict = {}
         self.chain_store = ChainStore()
         self.quote_store = QuoteStore()
         self.bar_store = BarStore()
@@ -592,6 +622,38 @@ class Gateway:
             return "off"
         # Anything that is not one of the two store modes never answers locally.
         return mode if mode in ("shadow", "on") else "off"
+
+    def _fetch(self, endpoint, params):
+        """The one call to Schwab. Anything it raises that is not an
+        ``UpstreamError`` is tagged, so it is never read as a store bug."""
+        try:
+            return self._upstream(endpoint, params)
+        except UpstreamError:
+            raise
+        except Exception as e:  # noqa: BLE001 — re-raised to the caller by _answer.
+            raise _FetchFailed(e) from e
+
+    def _fetch_once(self, lock_key, ticket, endpoint, params):
+        """Call Schwab for the holder of ``lock_key``'s lock: ``(data, the
+        moment the call began)``.
+
+        When the call fails, every request already waiting on the lock gets the
+        same error instead of making the call again one after another. A
+        request that arrives after the failure calls Schwab itself."""
+        failed = self._failures.get(lock_key)
+        if failed is not None and ticket < failed[0]:
+            error = failed[1]             # it failed while this request waited
+            if isinstance(error, _FetchFailed):
+                raise _FetchFailed(error.original)
+            raise UpstreamError(error.status_code, error.detail)
+        began = self._clock()
+        try:
+            data = self._fetch(endpoint, params)
+        except (UpstreamError, _FetchFailed) as error:
+            self._failures[lock_key] = (next(self._tickets), error)
+            raise
+        self._failures.pop(lock_key, None)
+        return data, began
 
     def _passthrough(self, label, endpoint, params, caller) -> Served:
         data = self._fetch(endpoint, params)
@@ -607,19 +669,31 @@ class Gateway:
     def _guarded(self, label, endpoint, params, caller, work) -> Served:
         try:
             return work()
-        except UpstreamError:
-            raise
+        except (UpstreamError, _FetchFailed):
+            raise                         # Schwab or the network, not the store
         except Exception:  # noqa: BLE001 — a store bug must not take data down.
             self._degraded(label)
             return self._passthrough(label, endpoint, params, caller)
 
+    def _answer(self, label, endpoint, params, caller, mode, work) -> Served:
+        """One request: straight through when the store is off, else ``work``
+        with the store-bug fallback. Whatever ``fetch`` itself raised leaves
+        here as the original exception."""
+        try:
+            if mode == "off":
+                return self._passthrough(label, endpoint, params, caller)
+            return self._guarded(label, endpoint, params, caller, work)
+        except _FetchFailed as tagged:
+            original = tagged.original
+        # Raised outside the handler, so the original keeps its own cause and
+        # context instead of gaining the tag as one.
+        raise original
+
     # ---- chains ----------------------------------------------------------
     def chains(self, params, caller, max_age=None) -> Served:
         mode = self._mode("chains")
-        if mode == "off":
-            return self._passthrough("chains", "/chains", params, caller)
-        return self._guarded("chains", "/chains", params, caller,
-                             lambda: self._chains(params, caller, max_age, mode))
+        return self._answer("chains", "/chains", params, caller, mode,
+                            lambda: self._chains(params, caller, max_age, mode))
 
     def _chains(self, params, caller, max_age, mode) -> Served:
         cfg = self._cfg.section("chains")
@@ -651,7 +725,7 @@ class Gateway:
             if would is None:
                 # On would have fetched and stored this. When on would have
                 # answered locally there was no fetch: the entry keeps ageing.
-                store.put(key, data, now=self._clock(), state=state,
+                store.put(key, data, now=asked_at, state=state,
                           max_entries=cfg["max_entries"])
             return Served("pass", 0.0, data=data)
 
@@ -662,13 +736,16 @@ class Gateway:
         wide = store.wide_key(key, today=now_ct.date(),
                               max_days=cfg["wide_refetch_max_days"])
         fetch_key = wide or key
-        with self._locks.get(("chains", fetch_key)):
+        lock_key = ("chains", fetch_key)
+        ticket = next(self._tickets)
+        with self._locks.get(lock_key):
             again = store.lookup(key, max_age=limit, now=self._clock(), state=state)
             if again is not None:
                 self._record("chains", caller, "coalesced")
                 return Served("coalesced", again.age, body=again.body)
-            data = self._fetch("/chains", fetch_key.params())
-            kept = store.put(fetch_key, data, now=self._clock(), state=state,
+            data, began = self._fetch_once(lock_key, ticket, "/chains",
+                                           fetch_key.params())
+            kept = store.put(fetch_key, data, now=began, state=state,
                              max_entries=cfg["max_entries"])
             self._record("chains", caller, "upstream")
         if wide is None:
@@ -688,10 +765,8 @@ class Gateway:
     def quotes(self, symbols_csv, caller, max_age=None) -> Served:
         params = {"symbols": symbols_csv, "fields": "quote"}
         mode = self._mode("quotes")
-        if mode == "off":
-            return self._passthrough("quotes", "/quotes", params, caller)
-        return self._guarded("quotes", "/quotes", params, caller,
-                             lambda: self._quotes(symbols_csv, caller, max_age, mode))
+        return self._answer("quotes", "/quotes", params, caller, mode,
+                            lambda: self._quotes(symbols_csv, caller, max_age, mode))
 
     def _quotes(self, symbols_csv, caller, max_age, mode) -> Served:
         cfg = self._cfg.section("quotes")
@@ -707,7 +782,8 @@ class Gateway:
             max_age, {"max_age_sec": cfg["max_age_sec"],
                       "closed_max_age_sec": cfg["max_age_sec"]}, closed=False)
         store = self.quote_store
-        fresh, missing, oldest = store.split(symbols, max_age=limit, now=self._clock())
+        asked_at = self._clock()          # the stamp of anything fetched below
+        fresh, missing, oldest = store.split(symbols, max_age=limit, now=asked_at)
 
         def call(wanted):
             return self._fetch("/quotes", {"symbols": ",".join(wanted),
@@ -725,7 +801,7 @@ class Gateway:
                 # were not fresh. The fresh ones keep ageing.
                 fetched = ({k: v for k, v in data.items() if k not in fresh}
                            if isinstance(data, dict) else data)
-                store.put_many(fetched, now=self._clock(),
+                store.put_many(fetched, now=asked_at,
                                max_symbols=cfg["max_symbols"])
             return Served("pass", 0.0, data=data)
 
@@ -733,36 +809,50 @@ class Gateway:
             self._record("quotes", caller, "hit")
             return Served("hit", oldest, data={s: fresh[s] for s in symbols})
         data = call(missing)
-        store.put_many(data, now=self._clock(), max_symbols=cfg["max_symbols"])
-        kind = "partial" if fresh else "miss"
-        self._record("quotes", caller, "partial" if fresh else "upstream")
+        store.put_many(data, now=asked_at, max_symbols=cfg["max_symbols"])
+        if not fresh:
+            self._record("quotes", caller, "upstream")
+            return Served("miss", 0.0, data=data)     # Schwab's answer, untouched
+        self._record("quotes", caller, "partial")
         if not isinstance(data, dict):
-            return Served(kind, 0.0, data=data)
-        return Served(kind, 0.0, data={**fresh, **data})
+            return Served("partial", oldest, data=data)
+        # The caller's order, then whatever else Schwab sent (its bucket of
+        # invalid symbols). As old as the oldest symbol that was not fetched.
+        merged = {**fresh, **data}
+        answer = {s: merged[s] for s in symbols if s in merged}
+        answer.update((k, v) for k, v in merged.items() if k not in answer)
+        return Served("partial", oldest, data=answer)
 
     # ---- daily bars ------------------------------------------------------
     def pricehistory(self, params, caller) -> Served:
         daily = (str(params.get("frequencyType")) == "daily"
                  and str(params.get("needExtendedHoursData", "false")).lower() == "false")
         mode = self._mode("bars") if daily else "off"
-        if mode == "off":
-            return self._passthrough("pricehistory", "/pricehistory", params, caller)
-        return self._guarded("pricehistory", "/pricehistory", params, caller,
-                             lambda: self._bars(params, caller, mode))
+        return self._answer("pricehistory", "/pricehistory", params, caller, mode,
+                            lambda: self._bars(params, caller, mode))
 
     def _today_quote(self, symbol, cfg, now_ct):
-        """The stored quote today's bar may be built from or judged against,
-        or None. Only asked during the session in progress.
+        """``(quote, its age)`` for the stored quote today's bar may be built
+        from or judged against, or ``(None, 0.0)``. Only asked during the
+        session in progress.
 
         A quote fetched before today's regular open still carries the PRIOR
         session's open, high and low. So the quote must be no older than the
-        configured limit AND no older than the session itself."""
-        opened = self._cal.regular_open_on(now_ct.date())
+        configured limit AND no older than the session itself.
+
+        From the regular close until the bar settles there is no usable quote
+        either: its last price can include prints after the close, which the
+        day's bar does not."""
+        today = now_ct.date()
+        if now_ct >= self._cal.regular_close_on(today):
+            return None, 0.0
         limit = min(float(cfg["today_quote_max_age_sec"]),
-                    (now_ct - opened).total_seconds())
+                    (now_ct - self._cal.regular_open_on(today)).total_seconds())
         if not limit > 0:
-            return None
-        return self.quote_store.get(symbol, max_age=limit, now=self._clock())
+            return None, 0.0
+        fresh, _missing, age = self.quote_store.split(
+            [symbol], max_age=limit, now=self._clock())
+        return fresh.get(symbol), age
 
     def _bar_local(self, seen, live, symbol, cfg, now_ct) -> Served | None:
         """The answer mode on gives from the stored series ``seen``, or None
@@ -775,11 +865,12 @@ class Gateway:
         if not live:
             return Served("hit", age, body=body)
         if self._cfg.today_bar() == "quote":
-            quote = self._today_quote(symbol, cfg, now_ct)
+            quote, quote_age = self._today_quote(symbol, cfg, now_ct)
             composed = (compose_today(json.loads(body), quote, now_ct.date())
                         if quote is not None else None)
             if composed is not None:
-                return Served("composed", 0.0, data=composed)
+                # As old as its newest part: the quote the last bar came from.
+                return Served("composed", quote_age, data=composed)
         # No usable quote, or ttl mode: the series as fetched, inside the
         # session limit. So quote mode is never worse than ttl mode.
         if age <= float(cfg["session_ttl_sec"]):
@@ -798,19 +889,20 @@ class Gateway:
         if mode == "shadow":
             would = self._bar_local(store.get(key, epoch=epoch), live, symbol,
                                     cfg, now_ct)
+            began = self._clock()
             data = self._fetch("/pricehistory", params)
             self._record("pricehistory", caller, "upstream")
             if would is not None:
                 self._record("pricehistory", caller, f"shadow_{would.kind}")
             if live:
-                quote = self._today_quote(symbol, cfg, now_ct)
+                quote, _age = self._today_quote(symbol, cfg, now_ct)
                 verdict = compare_today_bar(data, quote, now_ct.date())
                 if verdict != "no_quote":
                     self._record("pricehistory", caller, f"shadow_bar_{verdict}")
             if would is None:
                 # On would have fetched and stored this series. Otherwise the
                 # held one keeps ageing, as it would under on.
-                store.put(key, data, now=self._clock(), epoch=epoch,
+                store.put(key, data, now=began, epoch=epoch,
                           max_entries=cfg["max_entries"])
             return Served("pass", 0.0, data=data)
 
@@ -819,13 +911,15 @@ class Gateway:
         if local is not None:
             self._record("pricehistory", caller, local.kind)
             return local
-        with self._locks.get(("bars", key)):
+        lock_key = ("bars", key)
+        ticket = next(self._tickets)
+        with self._locks.get(lock_key):
             again = store.get(key, epoch=epoch)
             if again is not None and (seen is None or again[1] > seen[1]):
                 self._record("pricehistory", caller, "coalesced")
                 return Served("coalesced", self._clock() - again[1], body=again[0])
-            data = self._fetch("/pricehistory", params)
-            store.put(key, data, now=self._clock(), epoch=epoch,
+            data, began = self._fetch_once(lock_key, ticket, "/pricehistory", params)
+            store.put(key, data, now=began, epoch=epoch,
                       max_entries=cfg["max_entries"])
             self._record("pricehistory", caller, "upstream")
         return Served("miss", 0.0, data=data)

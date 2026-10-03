@@ -396,7 +396,9 @@ def test_a_near_miss_never_widens_to_a_long_window():
 
 
 def test_the_widest_window_refetched_is_the_cap():
-    assert ms.WIDE_REFETCH_MAX_DAYS == 10
+    # The collector's own window: a 7-day request is never turned into the
+    # 10-day term-structure window or a ~9-day Strategy Finder one.
+    assert ms.WIDE_REFETCH_MAX_DAYS == 7
     over = ms.ChainStore()
     over.put(_plus(ms.WIDE_REFETCH_MAX_DAYS + 1), chain(), now=1000.0, state="REGULAR")
     assert over.wide_key(_plus(4), today=TODAY) is None
@@ -433,7 +435,8 @@ def test_the_narrowest_window_inside_the_cap_is_the_one_refetched():
     s.put(_plus(10), chain(), now=1000.0, state="REGULAR")
     s.put(_plus(7), chain(), now=1001.0, state="REGULAR")
     s.put(_plus(9), chain(), now=1002.0, state="REGULAR")
-    assert s.wide_key(_plus(4), today=TODAY) == _plus(7)
+    assert s.wide_key(_plus(4), today=TODAY, max_days=10) == _plus(7)
+    assert s.wide_key(_plus(8), today=TODAY, max_days=10) == _plus(9)
 
 
 # ---- the widest refetched window is a setting -------------------------------
@@ -458,3 +461,30 @@ def test_a_widest_window_that_is_not_a_usable_number_keeps_the_built_in_one():
         assert over.wide_key(_plus(4), today=TODAY, max_days=bad) is None
         assert (at.wide_key(_plus(4), today=TODAY, max_days=bad)
                 == _plus(ms.WIDE_REFETCH_MAX_DAYS))
+
+
+# ---- a stored body is valid JSON --------------------------------------------
+
+def _strict(text):
+    """Parse as JSON proper: NaN and the infinities are not JSON."""
+    def refuse(token):
+        raise ValueError(token)
+    return json.loads(text, parse_constant=refuse)
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_a_chain_holding_a_number_that_is_not_json_is_not_stored(bad):
+    in_a_contract = chain()
+    in_a_contract["putExpDateMap"]["2026-10-07:2"]["100.0"][0]["gamma"] = bad
+    in_the_header = {**chain(), "underlyingPrice": bad}
+    for payload in (in_a_contract, in_the_header):
+        s = ms.ChainStore()
+        assert s.put(WIDE, payload, now=1000.0, state="REGULAR") is False
+        assert s.lookup(WIDE, max_age=45, now=1001.0, state="REGULAR") is None
+
+
+def test_every_body_the_store_renders_is_strict_json():
+    s = _store()
+    assert _strict(s.lookup(WIDE, max_age=45, now=1001.0, state="REGULAR").body) == chain()
+    assert _strict(s.lookup(NARROW, max_age=45, now=1001.0, state="REGULAR").body)
+    assert _strict(s.cut(WIDE, NARROW))

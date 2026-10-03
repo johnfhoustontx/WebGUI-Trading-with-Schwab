@@ -17,7 +17,7 @@ CT = ZoneInfo("America/Chicago")
 DEFAULTS = {
     "chains": {"enabled": True, "max_age_sec": 45, "closed_max_age_sec": 1800,
                "max_entries": 400, "shadow_compare_max_age_sec": 120,
-               "wide_refetch_max_days": 10},
+               "wide_refetch_max_days": 7},
     "quotes": {"enabled": True, "max_age_sec": 5, "max_symbols": 5000},
     "bars": {"enabled": True, "today_bar": "ttl", "session_ttl_sec": 1740,
              "today_quote_max_age_sec": 120, "settle_min": 10, "max_entries": 4000},
@@ -105,37 +105,48 @@ class Slow:
         return self.answer(endpoint, params)
 
 
-def two_at_once(h, slow, first, second):
-    """Run ``first`` until it is inside the upstream call, start ``second`` and
-    wait until it has passed its own first look at the store and is queueing
-    for the same request lock, then let the call finish. Returns both answers.
+def all_at_once(h, slow, first, others):
+    """Run ``first`` until it is inside the upstream call, start every one of
+    ``others`` and wait until each has passed its own first look at the store
+    and is queueing for the same request lock, then let the call finish.
+    Returns every answer, ``first``'s first; a request that raised hands back
+    its exception.
 
     From that point the outcome no longer depends on which thread runs next."""
-    queued, asked, out = threading.Event(), [], [None, None]
+    queued, asked = threading.Event(), []
+    out = [None] * (1 + len(others))
     real = h.gw._locks.get
 
     def get(key):
         asked.append(key)
-        if len(asked) == 2:
+        if len(asked) == len(out):
             queued.set()
         return real(key)
 
     h.gw._locks.get = get
 
     def run(i, fn):
-        out[i] = fn()
+        try:
+            out[i] = fn()
+        except Exception as e:  # noqa: BLE001 - the test inspects it.
+            out[i] = e
 
-    a = threading.Thread(target=run, args=(0, first))
-    a.start()
+    threads = [threading.Thread(target=run, args=(0, first))]
+    threads[0].start()
     assert slow.started.wait(5)
-    b = threading.Thread(target=run, args=(1, second))
-    b.start()
+    for i, fn in enumerate(others, start=1):
+        threads.append(threading.Thread(target=run, args=(i, fn)))
+        threads[-1].start()
     assert queued.wait(5)
     slow.gate.set()
-    a.join(5)
-    b.join(5)
-    assert not a.is_alive() and not b.is_alive()
+    for t in threads:
+        t.join(5)
+    assert not any(t.is_alive() for t in threads)
     return out
+
+
+def two_at_once(h, slow, first, second):
+    return all_at_once(h, slow, first, [second])
 
 
 # ---- mode: off -------------------------------------------------------------
@@ -591,8 +602,8 @@ def test_a_coalesced_answer_reports_the_age_of_the_entry_it_took():
     first, second = two_at_once(h, slow,
                                 lambda: h.gw.chains(P(), "a"),
                                 lambda: h.gw.chains(P(), "b"))
-    # a: look, re-check, store (1003).  b: look (1002), re-check (1004).
-    assert (first.kind, second.kind, second.age) == ("miss", "coalesced", 1.0)
+    # a: look, re-check, fetch begins (1002).  b: look (1003), re-check (1004).
+    assert (first.kind, second.kind, second.age) == ("miss", "coalesced", 2.0)
 
 
 # ---- quotes ----------------------------------------------------------------
@@ -1467,3 +1478,321 @@ def test_shadow_counts_exactly_what_on_would_have_answered_locally(name):
     assert shadow == on
     assert shadow_calls == len(steps)                # shadow always calls
     assert on_calls == sum(a in ("fetch", "partial") for a in on)
+
+
+# ---- a fetch that fails is not a store bug ----------------------------------
+
+ASKS = {"chains": lambda h: h.gw.chains(P(), "a"),
+        "quotes": lambda h: h.gw.quotes("SPY", "a"),
+        "pricehistory": lambda h: h.gw.pricehistory(BAR, "a")}
+
+
+@pytest.mark.parametrize("mode", ["on", "shadow", "off"])
+@pytest.mark.parametrize("endpoint", list(ASKS))
+def test_a_fetch_failure_that_is_not_an_upstream_error_is_raised_as_it_is(mode, endpoint):
+    crash = RuntimeError("connection reset")
+    h = Harness(Cfg(mode=mode), responses=lambda e, p: crash)
+    with pytest.raises(RuntimeError) as err:
+        ASKS[endpoint](h)
+    assert err.value is crash                        # the original, not a wrapper
+    assert len(h.calls) == 1                         # no second call
+    assert h.gw.degrades == {} and h.records == []   # and no store bug counted
+
+
+def test_the_original_failure_keeps_its_own_cause():
+    def respond(endpoint, params):
+        raise RuntimeError("connection reset") from OSError("socket closed")
+
+    h = Harness(responses=respond)
+    with pytest.raises(RuntimeError) as err:
+        h.gw.chains(P(), "a")
+    assert isinstance(err.value.__cause__, OSError)
+    assert h.gw.degrades == {}
+
+
+def test_a_fetch_failure_on_the_wide_refetch_is_raised_as_it_is():
+    state = {"crash": None}
+    h = Harness(responses=lambda e, p: state["crash"] or chain())
+    h.gw.chains(P(), "collector")
+    h.clock += 50
+    state["crash"] = RuntimeError("connection reset")
+    with pytest.raises(RuntimeError) as err:
+        h.gw.chains(P(to="2026-10-09"), "scan")
+    assert err.value is state["crash"] and len(h.calls) == 2 and h.gw.degrades == {}
+
+
+def test_a_fetch_failure_in_the_fallback_after_a_store_bug_is_raised_as_it_is(monkeypatch):
+    crash = RuntimeError("connection reset")
+    h = Harness(responses=lambda e, p: crash)
+    monkeypatch.setattr(h.gw.chain_store, "lookup", boom)
+    with pytest.raises(RuntimeError) as err:
+        h.gw.chains(P(), "a")
+    assert err.value is crash and len(h.calls) == 1
+    assert h.gw.degrades == {"chains": 1}            # the store bug, once
+
+
+# ---- waiters behind a failed fetch share its error --------------------------
+
+FAILED_ASKS = {"chains": (lambda h, who: h.gw.chains(P(), who), chain),
+               "pricehistory": (lambda h, who: h.gw.pricehistory(BAR, who),
+                                lambda: series(FRI, MON))}
+
+
+@pytest.mark.parametrize("endpoint", list(FAILED_ASKS))
+def test_waiters_behind_a_failed_fetch_raise_its_error_and_make_no_call(endpoint):
+    ask, good = FAILED_ASKS[endpoint]
+    state = {"fail": True}
+    slow = Slow(lambda e, p: ms.UpstreamError(503, "unavailable")
+                if state["fail"] else good())
+    h = Harness(responses=slow)
+    out = all_at_once(h, slow, lambda: ask(h, "a"), [lambda: ask(h, "b")] * 5)
+    assert len(h.calls) == 1                         # six requests, one call
+    assert len(out) == 6
+    for error in out:
+        assert isinstance(error, ms.UpstreamError)
+        assert (error.status_code, error.detail) == (503, "unavailable")
+    assert h.records == [] and h.gw.degrades == {}
+    # A request that arrives after the failure asks Schwab itself.
+    with pytest.raises(ms.UpstreamError):
+        ask(h, "c")
+    assert len(h.calls) == 2
+    state["fail"] = False
+    assert ask(h, "c").kind == "miss" and len(h.calls) == 3
+    assert h.gw._failures == {}                      # cleared by the success
+    assert ask(h, "c").kind == "hit" and len(h.calls) == 3
+
+
+@pytest.mark.parametrize("endpoint", list(FAILED_ASKS))
+def test_waiters_behind_a_fetch_that_crashed_raise_the_same_crash(endpoint):
+    ask, _good = FAILED_ASKS[endpoint]
+    crash = RuntimeError("connection reset")
+    slow = Slow(lambda e, p: crash)
+    h = Harness(responses=slow)
+    out = all_at_once(h, slow, lambda: ask(h, "a"), [lambda: ask(h, "b")] * 3)
+    assert len(h.calls) == 1 and all(error is crash for error in out)
+    assert h.gw.degrades == {}
+
+
+def test_a_waiter_is_answered_from_the_store_when_the_fetch_succeeded():
+    # The failure record of an EARLIER fetch must not reach later waiters.
+    state = {"fail": True}
+    slow = Slow(lambda e, p: ms.UpstreamError(503, "unavailable")
+                if state["fail"] else chain())
+    h = Harness(responses=slow)
+    slow.gate.set()
+    with pytest.raises(ms.UpstreamError):
+        h.gw.chains(P(), "a")
+    slow.gate.clear()
+    slow.started.clear()
+    state["fail"] = False
+    first, second = two_at_once(h, slow, lambda: h.gw.chains(P(), "a"),
+                                lambda: h.gw.chains(P(), "b"))
+    assert (first.kind, second.kind) == ("miss", "coalesced") and len(h.calls) == 2
+
+
+# ---- the wide refetch stays inside the collector's week ---------------------
+
+def test_the_collectors_week_is_never_widened_to_a_longer_held_window():
+    h = Harness()
+    h.gw.chains(P(to="2026-10-15"), "term")          # today -> +10 is held
+    h.clock += 50
+    got = h.gw.chains(P(), "collector", max_age=20)  # today -> +7, a near miss
+    assert got.kind == "miss" and h.calls[-1][1]["toDate"] == "2026-10-12"
+    assert sorted(got.data["callExpDateMap"]) == list(EXPS)
+
+
+def test_a_near_miss_inside_the_collectors_week_still_refetches_the_week():
+    h = Harness()
+    h.gw.chains(P(), "collector")                    # today -> +7 is held
+    h.clock += 50
+    got = h.gw.chains(P(to="2026-10-09"), "scan")    # today -> +4
+    assert got.kind == "miss" and h.calls[-1][1]["toDate"] == "2026-10-12"
+    assert sorted(body(got)["callExpDateMap"]) == list(EXPS[:3])
+
+
+# ---- an entry is as old as the moment its fetch began -----------------------
+
+def taking(h, seconds, answer):
+    """An upstream call that takes ``seconds`` on the harness clock."""
+    def respond(endpoint, params):
+        h.clock += seconds
+        return answer(endpoint, params)
+    return respond
+
+
+@pytest.mark.parametrize("mode", ["on", "shadow"])
+def test_a_stored_entry_is_stamped_when_its_fetch_began(mode):
+    h = Harness(Cfg(mode=mode))
+    h.responses = taking(h, 4, lambda e, p: chain())
+    h.gw.chains(P(), "a")                            # asked at 1000, answered at 1004
+    held = h.gw.chain_store.lookup(ms.ChainKey.from_params(P()), max_age=45,
+                                   now=h.clock, state="REGULAR")
+    assert held.age == 4.0
+
+    h = Harness(Cfg(mode=mode))
+    h.responses = taking(h, 4, quotes_for)
+    h.gw.quotes("SPY", "a")
+    assert h.gw.quote_store.split(["SPY"], max_age=5, now=h.clock)[2] == 4.0
+
+    h = Harness(Cfg(mode=mode))
+    h.responses = taking(h, 4, bars_for)
+    h.gw.pricehistory(BAR, "a")
+    assert h.gw.bar_store.get(ms.bar_key(BAR), epoch=("2026-10-05", "live"))[1] == 1000.0
+
+
+def test_a_hit_reports_the_age_since_the_fetch_began():
+    h = Harness()
+    h.responses = taking(h, 4, lambda e, p: chain())
+    h.gw.chains(P(), "a")
+    got = h.gw.chains(P(), "b")
+    assert (got.kind, got.age) == ("hit", 4.0)
+
+
+def test_a_quote_asked_before_the_open_and_answered_after_it_is_not_post_open():
+    h = Harness(Cfg(bars__today_bar="quote"))
+    state = {"slow": True}
+
+    def respond(endpoint, params):
+        if endpoint == "/quotes" and state["slow"]:
+            set_time(h, 8, 30, 5)                    # the answer lands after the open
+        return quote_100_series_90(endpoint, params)
+
+    h.responses = respond
+    set_time(h, 8, 29, 50)
+    h.gw.quotes("SPY", "market_svc")                 # sent before the open
+    state["slow"] = False
+    set_time(h, 8, 30, 10)
+    assert h.gw.pricehistory(BAR, "scan").kind == "miss"     # first of the period
+    set_time(h, 8, 30, 20)
+    got = h.gw.pricehistory(BAR, "scan")
+    # The quote's values are the prior session's, whenever the answer arrived.
+    assert got.kind == "hit" and last_close(got) == 90.0
+
+
+# ---- after the close, before the bar settles --------------------------------
+
+def test_after_the_close_quote_mode_does_not_build_todays_bar():
+    h = Harness(Cfg(bars__today_bar="quote"), responses=quote_100_series_90)
+    set_time(h, 14, 59, 0)
+    assert h.gw.pricehistory(BAR, "scan").kind == "miss"
+    set_time(h, 14, 59, 30)
+    h.gw.quotes("SPY", "market_svc", max_age=0)
+    got = h.gw.pricehistory(BAR, "scan")             # still in the session
+    assert got.kind == "composed" and last_close(got) == 100.0
+    set_time(h, 15, 0, 0)                            # the close itself
+    h.gw.quotes("SPY", "market_svc", max_age=0)
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "hit" and last_close(got) == 90.0
+    set_time(h, 15, 1, 0)                            # the quote may hold later prints
+    h.gw.quotes("SPY", "market_svc", max_age=0)
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "hit" and last_close(got) == 90.0 and bar_calls(h) == 1
+
+
+def test_after_the_close_the_time_limit_rule_decides():
+    h = Harness(Cfg(bars__today_bar="quote", bars__session_ttl_sec=60),
+                responses=quote_100_series_90)
+    set_time(h, 14, 59, 30)
+    h.gw.pricehistory(BAR, "scan")
+    set_time(h, 15, 1, 0)                            # 90 s old against 60
+    h.gw.quotes("SPY", "market_svc", max_age=0)
+    got = h.gw.pricehistory(BAR, "scan")
+    assert got.kind == "miss" and last_close(got) == 90.0 and bar_calls(h) == 2
+
+
+def test_shadow_gives_no_bar_verdict_and_no_composed_answer_after_the_close():
+    h = Harness(Cfg(mode="shadow", bars__today_bar="quote"), responses=bars_for)
+    set_time(h, 14, 59, 0)
+    h.gw.pricehistory(BAR, "scan")
+    set_time(h, 15, 1, 0)
+    h.gw.quotes("SPY", "market_svc")
+    h.gw.pricehistory(BAR, "scan")
+    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit"]
+
+
+# ---- reported ages and the order of a partial answer ------------------------
+
+def test_a_partial_answer_is_in_the_callers_order_and_as_old_as_its_oldest_symbol():
+    h = Harness(responses=quotes_for)
+    h.gw.quotes("SPY", "a")
+    h.clock += 2
+    h.gw.quotes("QQQ", "a")
+    h.clock += 2
+    got = h.gw.quotes("DIA,QQQ,IWM,SPY", "b")        # SPY is 4 s old, QQQ 2 s
+    assert h.calls[-1][1]["symbols"] == "DIA,IWM"
+    assert (got.kind, got.age) == ("partial", 4.0)
+    assert list(got.data) == ["DIA", "QQQ", "IWM", "SPY"]
+
+
+def test_what_schwab_sent_beside_the_symbols_follows_them_in_a_partial_answer():
+    def respond(endpoint, params):
+        out = {s: quotes_for(endpoint, {"symbols": s})[s]
+               for s in params["symbols"].split(",") if s != "XX"}
+        out["errors"] = {"invalidSymbols": ["XX"]}
+        return out
+
+    h = Harness(responses=respond)
+    h.gw.quotes("SPY", "a")
+    got = h.gw.quotes("XX,DIA,SPY", "a")
+    assert got.kind == "partial" and list(got.data) == ["DIA", "SPY", "errors"]
+
+
+def test_a_quote_miss_reports_no_age_and_is_schwabs_answer_untouched():
+    h = Harness(responses=quotes_for)
+    got = h.gw.quotes("SPY,QQQ", "a")
+    assert (got.kind, got.age) == ("miss", 0.0) and list(got.data) == ["SPY", "QQQ"]
+
+
+def test_a_composed_bar_is_as_old_as_the_quote_it_was_built_from():
+    h = Harness(Cfg(bars__today_bar="quote"), responses=bars_for)
+    h.gw.pricehistory(BAR, "scan")
+    h.clock += 500
+    h.gw.quotes("SPY", "market_svc")
+    h.clock += 7
+    got = h.gw.pricehistory(BAR, "scan")
+    assert (got.kind, got.age) == ("composed", 7.0)
+
+
+def test_a_coalesced_series_reports_its_real_age():
+    slow = Slow(bars_for)
+    h = Harness(responses=slow)
+    ticks = iter(range(1000, 2000))
+    h.gw._clock = lambda: float(next(ticks))         # one second per reading
+    first, second = two_at_once(h, slow,
+                                lambda: h.gw.pricehistory(BAR, "a"),
+                                lambda: h.gw.pricehistory(BAR, "b"))
+    # a: the fetch begins (1000).  b: reads the clock once, on its answer (1001).
+    assert (first.kind, second.kind, second.age) == ("miss", "coalesced", 1.0)
+
+
+# ---- a stored body is valid JSON --------------------------------------------
+
+def with_gamma(value):
+    out = chain()
+    out["callExpDateMap"]["2026-10-05:0"]["95.0"][0]["gamma"] = value
+    return out
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_a_chain_holding_a_number_that_is_not_json_is_returned_and_never_stored(bad):
+    for payload in (with_gamma(bad), {**chain(), "underlyingPrice": bad}):
+        h = Harness(responses=lambda e, p: payload)
+        got = h.gw.chains(P(), "a")
+        assert got.kind == "miss" and got.data is payload    # what Schwab sent
+        assert h.gw.chains(P(), "a").kind == "miss" and len(h.calls) == 2
+        assert h.gw.degrades == {}
+
+        h = Harness(Cfg(mode="shadow"), responses=lambda e, p: payload)
+        h.gw.chains(P(), "a")
+        h.gw.chains(P(), "a")
+        assert h.outcomes() == ["upstream", "upstream"]      # nothing was held
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+def test_a_series_holding_a_number_that_is_not_json_is_returned_and_never_stored(bad):
+    payload = series(FRI, MON, close=bad)
+    h = Harness(responses=lambda e, p: payload)
+    got = h.gw.pricehistory(BAR, "a")
+    assert got.kind == "miss" and got.data is payload
+    assert h.gw.pricehistory(BAR, "a").kind == "miss" and len(h.calls) == 2
+    assert h.gw.degrades == {}

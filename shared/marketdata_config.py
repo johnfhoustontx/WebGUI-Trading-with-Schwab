@@ -23,7 +23,7 @@ DEFAULTS = {
         "closed_max_age_sec": 1800,
         "max_entries": 400,
         "shadow_compare_max_age_sec": 120,
-        "wide_refetch_max_days": 10,
+        "wide_refetch_max_days": 7,
     },
     "quotes": {"enabled": True, "max_age_sec": 5, "max_symbols": 5000},
     "bars": {

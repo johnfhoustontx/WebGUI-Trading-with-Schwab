@@ -23,10 +23,11 @@ max_entries = 400
 shadow_compare_max_age_sec = 120  # shadow only: how old an entry may be and still be compared
 # When a request just misses, the proxy refetches a wider window it already holds
 # for that symbol and cuts the answer from it, so the holder's next request hits.
-# This is the longest held window it will refetch that way, in days. Keep it a
-# little above the collector's 7-day window: a 45-day chain must never be fetched
-# in place of a short one.
-wide_refetch_max_days = 10
+# This is the longest held window it will refetch that way, in days. It should
+# EQUAL the collector's window, 7 days: any higher and the collector's own
+# request is turned into a longer window something else holds (the 10-day term
+# structure, a Strategy Finder scan).
+wide_refetch_max_days = 7
 
 [quotes]
 enabled = true
