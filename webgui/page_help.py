@@ -1499,14 +1499,21 @@ Three tabs. **General** holds the app's own preferences (below). **Appearance**
 sets every colour and font, with a live preview; a saved change shows after a
 web GUI restart. **Configuration**
 holds every trading setting — scanner floors, the paper books' per-trade
-caps, exit rules, flow alerts, market hours and schedules, symbols, the sector map and
-commissions — each with a plain-English explanation. Changes are saved as
+caps, exit rules, flow alerts, market hours and schedules, symbols, local market
+data, the sector map and commissions — each with a plain-English explanation. Changes are saved as
 overrides on top of the shipped values, so **Reset to shipped values** always
 takes you back and an app update never overwrites what you set; that Reset
 returns every editable setting in the file, so it asks first (read-only entries
 written by hand in config/local, like a news feed list, stay). **Save** offers to restart the
 services that read them, and that dialog stays up — with its button spinning —
 until every one has answered.
+
+One Configuration category, **Local market data**, decides whether the app may
+reuse market data it has already fetched from Schwab instead of asking again.
+It ships on **Shadow**: every request still goes to Schwab and the app only
+counts what it could have reused. **On** answers repeat requests from the data
+already held, which lowers the Schwab call count; **Off** switches it out. Its
+changes apply at once, with no restart.
 
 The General tab controls the alert chimes, notifications and the ticker.
 
@@ -1524,7 +1531,10 @@ The General tab controls the alert chimes, notifications and the ticker.
   the bar.
 - **API usage** — how many calls the app made to Schwab (counted at the
   gateway) and to the Claude API (counted at each call site), today / this
-  week / this month. The four automatic gamma briefings run on the Claude
+  week / this month. **Answered locally today** counts the requests the gateway
+  answered from data it already held; they never went to Schwab, so they are
+  not in the Schwab counts. It stays at zero while Local market data is on
+  Shadow. The four automatic gamma briefings run on the Claude
   subscription instead, so they only appear here on a day one falls back to
   the API.
 - **Maintenance** — **Vacuum GEX history DB** shrinks the intraday options
@@ -1621,7 +1631,8 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
                       "Saved changes show after a web GUI restart.",
         "Configuration": "Every trading setting — scanner floors, per-trade caps, "
                          "exit rules, flow alerts, schedules, symbols, "
-                         "the sector map and commissions — with plain-English help.",
+                         "local market data, the sector map and commissions — "
+                         "with plain-English help.",
     },
     "/options/gamma": {  # Dealer Positioning — the analytics lenses
         "GEX": "Gamma exposure by strike — where dealers must hedge. Big positive "

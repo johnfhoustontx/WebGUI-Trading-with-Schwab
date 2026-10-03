@@ -292,6 +292,143 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
    `events:{domain}:{view}`.
 5. The GUI's version-poll timer sees the new version, reads the cache, and repaints.
 
+## Local market data — the proxy's store, the collector's tiers, the scan's wide fetch
+
+**Files:** `schwab-proxy/market_store.py` (the store and its gateway),
+`options-scanner/chain_carry.py` and `gex_collector.py` (the collector),
+`options-scanner/scanner_engine.py` (`scan_chains`, `slice_chain`),
+`services/options_svc/compute.py` (`collection_tiers`). **Settings:**
+`config/marketdata.toml`, in **Settings → Configuration → Local market data**; every
+key is read when it is used, so a saved change needs no restart. Design:
+`docs/plans/2026-10-03-market-data-store-design.md`.
+
+> **Off as shipped.** The three features below ship as `mode = "shadow"`,
+> `scan.wide_fetch = false` and `collection.tail_interval_min = 1`. With those values
+> every request still reaches Schwab and every cadence in this document is unchanged.
+> None of the three has been measured in production. The call savings quoted at the
+> end of this section are **estimates** from one day's proxy log.
+
+### The proxy's store and its three modes
+
+The proxy is the only process that talks to Schwab, so every option chain, quote and
+daily price series passes through it. It keeps the latest copy of each in memory —
+nothing is written to disk or to Redis, and a restart starts empty. `mode` decides
+what it does with that copy:
+
+| `mode` | Behaviour |
+|---|---|
+| `off` | Every request goes to Schwab, as before the store existed. |
+| `shadow` (shipped) | Every request still goes to Schwab and Schwab's answer is returned. The proxy also works out what `on` would have answered, and records whether it would have been reused and whether it matched. It costs no extra call and answers nothing locally. |
+| `on` | A repeat request is answered from the stored copy when that copy is fresh and covers the request. |
+
+What counts as a usable copy when the mode is `on`:
+
+| Data | Reused when |
+|---|---|
+| Option chain | The same request was fetched at most `chains.max_age_sec` (45 s) ago while a session is open, or `chains.closed_max_age_sec` (1,800 s) ago while every session is closed. A request for a narrower date window is cut from a wider stored chain for that symbol, but only when both ask for every strike and both sides. |
+| Quote | Every requested symbol was fetched at most `quotes.max_age_sec` (5 s) ago. Otherwise only the missing or older symbols are fetched and the answer is merged. |
+| Daily price bars | The same symbol and range was already fetched in the same part of the day: before the open, during the session, or after the bar settles (`bars.settle_min`, 10 minutes after the close). During the session the stored series is re-served for at most `bars.session_ttl_sec` (1,740 s); with `bars.today_bar = "quote"` today's bar is rebuilt from the live quote instead. |
+
+Intraday price bars are never stored. A caller can state its own limit with
+`maxAge=<seconds>` (`maxAge=0` always fetches); the Market Dashboard's 3-second quote
+poll sends 1.
+
+Rules that hold in every case:
+
+- A stored copy is never served across a change of market session, and never served
+  past its limit because Schwab failed — the error is returned instead.
+- A chain request with `strikeCount`, a `range` other than `ALL`, or one contract type
+  is answered only by a stored copy of that exact request. The sector put/call ratio
+  sums volume over the strikes it receives, so extra strikes would change it.
+- An empty answer is never stored, and a cut that would hold no expiration is never
+  served. For a date window with no expiration Schwab answers HTTP 200,
+  `status: "SUCCESS"`, both maps empty and `underlyingPrice: 0.0` (measured
+  2026-10-03); a cut from a stored chain would carry the real price.
+- A fault in the store falls through to a plain fetch and is counted
+  (`store_degrades` in `/stats/api_calls`).
+
+A locally answered request skips the proxy's rate limiter and its per-day call
+counter, so the Schwab counts on **Settings → General → API usage** keep meaning
+"calls sent to Schwab". The row **Answered locally today** beside them counts the
+requests answered from the store. It reads zero while the mode is `shadow` or `off`.
+
+Shadow mode makes `on`'s decision with `on`'s limits and leaves the store as `on`
+would have left it, so its counts read as "calls `on` would have saved". They run
+low, never high: shadow cannot reproduce two identical requests sharing one fetch, or
+the proxy fetching a wider window it already holds in place of a narrower one.
+
+### The collector's two tiers, and what "carried forward" means
+
+The gamma collector writes one row per symbol per view every minute (see
+*GEX / Gamma* → **Intraday collection**). As shipped, each of those rows comes from a
+chain fetched that minute.
+
+With the mode `on`, chain reuse on and `collection.tail_interval_min` above 1 (3 or
+5), the collected symbols split into two tiers:
+
+| Tier | Symbols | Real fetch |
+|---|---|---|
+| Core | Those named in `config/symbols.toml` `[collection]`, the symbol open on Dealer Positioning, the public Gamma page's hot symbols, the hedging-flow (HIRO) symbols and the symbols the gamma-flip alert watches | Every minute |
+| Watchlist-only | Every other collected symbol — collected only because it is on the watchlist | One minute in every `tail_interval_min`, staggered by symbol |
+
+On the minutes between its real fetches, a watchlist-only symbol's chain is **carried
+forward** (`chain_carry.carry_chain`): the collector takes the chain the proxy still
+holds, reads the live price in one batched quote call, and moves the chain to that
+price. `underlyingPrice` becomes the live price, and each contract's gamma and delta
+in the nearest expiration move by the Black-Scholes change between the fetch price
+and the live price. Schwab's own value stays the base, and a carried gamma may grow
+to at most `collection.max_gamma_ratio` (10) times it. Volume, open interest and
+implied volatility are not changed.
+
+A carried minute is still written to all five views, so no reader sees a gap. Its
+volume and premium totals, its skew readings and its per-strike premium grid repeat
+the last fetched values. A carried chain is **not** handed to the detectors that read
+volume (unusual activity, big delta), because it holds no new trades. So with a
+3-minute tail, an alert on a watchlist-only symbol could arrive up to two minutes
+later than it does as shipped.
+
+Whenever the chain store is on, with or without a tail, the collector also sends
+`collection.fresh_max_age_sec` (20 s) as its age limit for every symbol due a real
+fetch, so that symbol is never answered with an older stored chain.
+
+`tools/measure_chain_carry.py` is the gate before the tail is switched on: it fetches
+a few symbols every minute and compares the engine's net gamma, flip level and walls
+from a carried chain with those from the chain really fetched that minute.
+Expiration-day comparisons are reported apart, because a fast move there understates
+a carried gamma.
+
+### The autoscan's single wide fetch
+
+Each 15-minute auto-scan reads three chain windows per symbol: today to +4 days, +5
+to +15 days, and +20 to +45 days. As shipped that is three chain requests per symbol.
+With `scan.wide_fetch = true`, `scanner_engine.scan_chains` makes one request from
+today to +45 days and cuts the three windows from it locally (`slice_chain`). Symbols
+in `scan.wide_fetch_exclude` (`$SPX`, `$NDX`, `SPY`, `QQQ`) keep three requests,
+because their 45-day chain is too large for one. A wide answer that is missing or
+holds no expiration falls back to the three requests for that symbol, with one
+warning in the log.
+
+### Measured baseline, and the estimates
+
+**Measured** on prod for Friday 2026-10-02, from the proxy's access log and counter:
+**84,125** calls sent to Schwab.
+
+| Endpoint | Requests | Share |
+|---|---|---|
+| `/chains` | 50,505 | 64% |
+| `/quotes` + `/quote` | 15,653 | 20% |
+| `/pricehistory` | 11,994 | 15% |
+
+40,345 of the chain requests were the collector's one-minute fetch, and 11,043 of the
+price-history requests repeated a symbol-and-range pair already fetched that day.
+
+**Estimated, not measured:** about 70,000 calls a day with the store on, about 65,000
+with the wide scan fetch added, and about 48,000 with a 3-minute tail. The features
+are meant to be switched on one at a time, each after the one before it has been
+read: shadow → daily bars → chains → quotes → the wide scan fetch → the 3-minute
+tail. Shadow mode's counts replace the first estimate, and
+`tools/measure_chain_carry.py` is the gate for the last step.
+
 ## Folder map
 
 | Folder | Contents |
@@ -1730,8 +1867,13 @@ largest call GEX) — the single-wall pair the Gamma page draws.
 
 The options service collects GEX snapshots every minute within 08:00–15:20 CT on
 trading days (from 06:30 CT for ETH-eligible symbols) (reusing the standalone collector's `poll_once`) into `gex_history.db`,
-which feeds the strike × time heat map. The universe is the index base
-(`$SPX`/`$VIX`/`SPY`/`QQQ`) plus the watchlist.
+which feeds the strike × time heat map. The universe is the `[collection]` list in
+`config/symbols.toml` plus the watchlist.
+
+Every collected symbol's chain is fetched every minute. An optional second tier —
+watchlist-only symbols fetched every third or fifth minute and carried forward in
+between — exists and is **off as shipped**; see *Architecture Overview* → **Local
+market data**.
 
 ## Hedging-flow model (HIRO)
 

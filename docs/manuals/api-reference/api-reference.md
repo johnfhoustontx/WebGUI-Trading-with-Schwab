@@ -558,19 +558,83 @@ attempt** (never duplicate a submitted order).
 | `/health` | GET | `{status, has_token, token_expired, refresh_token_expired, token_file, timestamp}` |
 | `/auth` | GET | HTML OAuth login page |
 | `/auth/callback` | GET | Exchanges the OAuth `code`/`url` for tokens |
+| `/stats/api_calls` | GET | `{today, last_7_days, last_30_days, since, store, store_degrades}` — calls sent to Schwab per day, plus today's request breakdown (see *Local market-data store* below) |
 
 ## Market data
 
 | Endpoint | Params | Returns |
 |----------|--------|---------|
-| `/quote` | `symbol` | Single quote |
-| `/quotes` | `symbols` (comma-sep) | Quotes array |
-| `/chains` | `symbol, contractType, range, fromDate?, toDate?, strikeCount?` | Options chain |
+| `/quote` | `symbol, maxAge?` | Single quote |
+| `/quotes` | `symbols` (comma-sep), `maxAge?` | Quotes, keyed by symbol |
+| `/chains` | `symbol, contractType, range, fromDate?, toDate?, strikeCount?, maxAge?` | Options chain |
 | `/pricehistory` | `symbol, periodType, period, frequencyType, frequency, needExtendedHoursData` | Price bars |
 | `/instruments` | `symbol, projection` (e.g. `fundamental`) | `{instruments:[{fundamental, symbol, description, ...}]}` |
 | `/passthrough` | `endpoint, params` | Generic marketdata fallback |
 
-All return `{status_code, data, error}`.
+Each returns Schwab's JSON body as Schwab sent it. A failure is the upstream HTTP
+status with `{"detail": ...}`. A token that cannot be made valid (none, or the
+refresh token expired or rejected) answers **500** with a JSON `detail` naming the
+error.
+
+## Local market-data store
+
+**File:** `schwab-proxy/market_store.py`. **Settings:** `config/marketdata.toml`
+(Settings → Configuration → *Local market data*), read on every request, so a saved
+change needs no restart. Design:
+`docs/plans/2026-10-03-market-data-store-design.md`.
+
+The proxy keeps what it fetches for `/quote`, `/quotes`, `/chains` and **daily**
+`/pricehistory` in memory (nothing on disk, nothing in Redis; a restart starts
+empty). Whether it answers from that copy is set by `mode`:
+
+| `mode` | What the proxy does |
+|---|---|
+| `off` | Sends every request to Schwab. |
+| `shadow` (**shipped**) | Sends every request to Schwab and returns Schwab's answer. It also records what `on` *would* have answered and whether that matched. No request is answered locally. |
+| `on` | Answers a repeat request from the stored copy when the copy is fresh and covers the request. |
+
+Anything else reads as `off`. Each store also has its own `enabled` switch
+(`[chains]`, `[quotes]`, `[bars]`). Intraday price history always goes to Schwab.
+
+**Request: `maxAge=<seconds>`** on `/quote`, `/quotes` and `/chains` — the oldest
+stored answer this caller will accept. It is a hint, sent as text: a value that is
+not a usable number (text, negative, NaN) means "none given" and never fails the
+request with a 422. It is capped at 3,600. `maxAge=0` always fetches. With none
+given the configured limit applies: chains `chains.max_age_sec` (45) while a session
+is open and `chains.closed_max_age_sec` (1,800) while every session is closed;
+quotes `quotes.max_age_sec` (5). `proxy_client.SchwabPyProxyClient.get_option_chain`
+takes it as `max_age=`.
+
+**Request header: `X-Caller`** — who is asking, for the per-caller counts. Both
+client classes in `proxy_client.py` set it from the service's folder name (or
+`TRADING_CALLER`); a caller using plain `requests` sets it with
+`proxy_client.caller_label(name)`. The proxy keeps letters, digits, `_`, `.` and
+`-`, at most 40 characters; a request without it is counted as `unknown`; a dev
+checkout's label is prefixed `dev.`. One proxy process counts at most 64 distinct
+names — a new name past that is counted as `other`.
+
+**Response headers** on the four endpoints above, in every mode:
+
+| Header | Value |
+|---|---|
+| `X-Store` | Answered locally: `hit` (the stored answer to this exact request), `subset` (a chain cut from a wider stored chain), `coalesced` (shared the fetch another identical request was already making), `composed` (a daily series whose bar for today was built from the live quote). Fetched from Schwab: `miss`, `partial` (quotes — only the symbols that were missing or too old were fetched), `pass` (the store played no part: mode `off` or `shadow`, an intraday series, or a store fault). |
+| `X-Store-Age` | Seconds since the data left Schwab, one decimal. `0.0` for a fresh fetch. `proxy_client` exposes both as `FakeResponse.store_kind` / `store_age`. |
+
+**Rules the store keeps.** A chain is cut to a narrower date window only when both
+the stored chain and the request ask for every strike and both sides; a request with
+`strikeCount`, a `range` other than `ALL` or one contract type is answered only by
+its own exact stored copy. An entry stored in one market session is never served in
+another. An entry past its limit is never served because Schwab failed — the error
+is returned. An empty answer is never stored, and a cut that would hold no
+expiration is never served.
+
+**`/stats/api_calls`** gains two keys. `today` / `last_7_days` / `last_30_days` still
+count calls **sent to Schwab** — a locally answered request is not in them.
+
+| Key | Contents |
+|---|---|
+| `store` | Today's requests: `served_locally` (total answered without a Schwab call), `by_outcome` (`{outcome: count}` over every row), and `rows` — `[{endpoint, caller, outcome, n}]`, the 500 largest. Outcomes: `upstream`, `hit`, `subset`, `coalesced`, `composed`, `partial`, and in shadow mode the `shadow_*` names (for example `shadow_hit_match`, `shadow_subset_mismatch`, `shadow_bar_match`). |
+| `store_degrades` | `{area: count}` — store faults since this process started that fell back to a plain fetch. Empty is normal. |
 
 ## Trader API
 

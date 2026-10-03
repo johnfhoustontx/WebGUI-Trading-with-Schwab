@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-02</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-03</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -99,6 +99,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#schwab-proxy">Schwab Proxy</a><ul>
 <li><a href="#health-auth">Health &amp; auth</a></li>
 <li><a href="#market-data">Market data</a></li>
+<li><a href="#local-market-data-store">Local market-data store</a></li>
 <li><a href="#trader-api">Trader API</a></li>
 <li><a href="#trade-stream-tracker">Trade-stream tracker</a></li>
 </ul>
@@ -1172,6 +1173,11 @@ attempt</strong> (never duplicate a submitted order).</p>
 <td>GET</td>
 <td>Exchanges the OAuth <code>code</code>/<code>url</code> for tokens</td>
 </tr>
+<tr>
+<td><code>/stats/api_calls</code></td>
+<td>GET</td>
+<td><code>{today, last_7_days, last_30_days, since, store, store_degrades}</code> — calls sent to Schwab per day, plus today's request breakdown (see <em>Local market-data store</em> below)</td>
+</tr>
 </tbody>
 </table>
 <h2 id="market-data">Market data</h2>
@@ -1186,17 +1192,17 @@ attempt</strong> (never duplicate a submitted order).</p>
 <tbody>
 <tr>
 <td><code>/quote</code></td>
-<td><code>symbol</code></td>
+<td><code>symbol, maxAge?</code></td>
 <td>Single quote</td>
 </tr>
 <tr>
 <td><code>/quotes</code></td>
-<td><code>symbols</code> (comma-sep)</td>
-<td>Quotes array</td>
+<td><code>symbols</code> (comma-sep), <code>maxAge?</code></td>
+<td>Quotes, keyed by symbol</td>
 </tr>
 <tr>
 <td><code>/chains</code></td>
-<td><code>symbol, contractType, range, fromDate?, toDate?, strikeCount?</code></td>
+<td><code>symbol, contractType, range, fromDate?, toDate?, strikeCount?, maxAge?</code></td>
 <td>Options chain</td>
 </tr>
 <tr>
@@ -1216,7 +1222,103 @@ attempt</strong> (never duplicate a submitted order).</p>
 </tr>
 </tbody>
 </table>
-<p>All return <code>{status_code, data, error}</code>.</p>
+<p>Each returns Schwab's JSON body as Schwab sent it. A failure is the upstream HTTP
+status with <code>{"detail": ...}</code>. A token that cannot be made valid (none, or the
+refresh token expired or rejected) answers <strong>500</strong> with a JSON <code>detail</code> naming the
+error.</p>
+<h2 id="local-market-data-store">Local market-data store</h2>
+<p><strong>File:</strong> <code>schwab-proxy/market_store.py</code>. <strong>Settings:</strong> <code>config/marketdata.toml</code>
+(Settings → Configuration → <em>Local market data</em>), read on every request, so a saved
+change needs no restart. Design:
+<code>docs/plans/2026-10-03-market-data-store-design.md</code>.</p>
+<p>The proxy keeps what it fetches for <code>/quote</code>, <code>/quotes</code>, <code>/chains</code> and <strong>daily</strong>
+<code>/pricehistory</code> in memory (nothing on disk, nothing in Redis; a restart starts
+empty). Whether it answers from that copy is set by <code>mode</code>:</p>
+<table>
+<thead>
+<tr>
+<th><code>mode</code></th>
+<th>What the proxy does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>off</code></td>
+<td>Sends every request to Schwab.</td>
+</tr>
+<tr>
+<td><code>shadow</code> (<strong>shipped</strong>)</td>
+<td>Sends every request to Schwab and returns Schwab's answer. It also records what <code>on</code> <em>would</em> have answered and whether that matched. No request is answered locally.</td>
+</tr>
+<tr>
+<td><code>on</code></td>
+<td>Answers a repeat request from the stored copy when the copy is fresh and covers the request.</td>
+</tr>
+</tbody>
+</table>
+<p>Anything else reads as <code>off</code>. Each store also has its own <code>enabled</code> switch
+(<code>[chains]</code>, <code>[quotes]</code>, <code>[bars]</code>). Intraday price history always goes to Schwab.</p>
+<p><strong>Request: <code>maxAge=&lt;seconds&gt;</code></strong> on <code>/quote</code>, <code>/quotes</code> and <code>/chains</code> — the oldest
+stored answer this caller will accept. It is a hint, sent as text: a value that is
+not a usable number (text, negative, NaN) means "none given" and never fails the
+request with a 422. It is capped at 3,600. <code>maxAge=0</code> always fetches. With none
+given the configured limit applies: chains <code>chains.max_age_sec</code> (45) while a session
+is open and <code>chains.closed_max_age_sec</code> (1,800) while every session is closed;
+quotes <code>quotes.max_age_sec</code> (5). <code>proxy_client.SchwabPyProxyClient.get_option_chain</code>
+takes it as <code>max_age=</code>.</p>
+<p><strong>Request header: <code>X-Caller</code></strong> — who is asking, for the per-caller counts. Both
+client classes in <code>proxy_client.py</code> set it from the service's folder name (or
+<code>TRADING_CALLER</code>); a caller using plain <code>requests</code> sets it with
+<code>proxy_client.caller_label(name)</code>. The proxy keeps letters, digits, <code>_</code>, <code>.</code> and
+<code>-</code>, at most 40 characters; a request without it is counted as <code>unknown</code>; a dev
+checkout's label is prefixed <code>dev.</code>. One proxy process counts at most 64 distinct
+names — a new name past that is counted as <code>other</code>.</p>
+<p><strong>Response headers</strong> on the four endpoints above, in every mode:</p>
+<table>
+<thead>
+<tr>
+<th>Header</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>X-Store</code></td>
+<td>Answered locally: <code>hit</code> (the stored answer to this exact request), <code>subset</code> (a chain cut from a wider stored chain), <code>coalesced</code> (shared the fetch another identical request was already making), <code>composed</code> (a daily series whose bar for today was built from the live quote). Fetched from Schwab: <code>miss</code>, <code>partial</code> (quotes — only the symbols that were missing or too old were fetched), <code>pass</code> (the store played no part: mode <code>off</code> or <code>shadow</code>, an intraday series, or a store fault).</td>
+</tr>
+<tr>
+<td><code>X-Store-Age</code></td>
+<td>Seconds since the data left Schwab, one decimal. <code>0.0</code> for a fresh fetch. <code>proxy_client</code> exposes both as <code>FakeResponse.store_kind</code> / <code>store_age</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rules the store keeps.</strong> A chain is cut to a narrower date window only when both
+the stored chain and the request ask for every strike and both sides; a request with
+<code>strikeCount</code>, a <code>range</code> other than <code>ALL</code> or one contract type is answered only by
+its own exact stored copy. An entry stored in one market session is never served in
+another. An entry past its limit is never served because Schwab failed — the error
+is returned. An empty answer is never stored, and a cut that would hold no
+expiration is never served.</p>
+<p><strong><code>/stats/api_calls</code></strong> gains two keys. <code>today</code> / <code>last_7_days</code> / <code>last_30_days</code> still
+count calls <strong>sent to Schwab</strong> — a locally answered request is not in them.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>store</code></td>
+<td>Today's requests: <code>served_locally</code> (total answered without a Schwab call), <code>by_outcome</code> (<code>{outcome: count}</code> over every row), and <code>rows</code> — <code>[{endpoint, caller, outcome, n}]</code>, the 500 largest. Outcomes: <code>upstream</code>, <code>hit</code>, <code>subset</code>, <code>coalesced</code>, <code>composed</code>, <code>partial</code>, and in shadow mode the <code>shadow_*</code> names (for example <code>shadow_hit_match</code>, <code>shadow_subset_mismatch</code>, <code>shadow_bar_match</code>).</td>
+</tr>
+<tr>
+<td><code>store_degrades</code></td>
+<td><code>{area: count}</code> — store faults since this process started that fell back to a plain fetch. Empty is normal.</td>
+</tr>
+</tbody>
+</table>
 <h2 id="trader-api">Trader API</h2>
 <table>
 <thead>

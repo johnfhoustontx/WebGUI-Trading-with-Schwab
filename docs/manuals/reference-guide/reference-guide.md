@@ -4271,17 +4271,30 @@ edited) and **Restart now** applies it to every screen; **Reset to shipped value
 
 **Configuration tab.** Every trading setting the services read from `config/*.toml`
 — scanner floors, exit rules, the paper books' per-trade loss caps, flow-alert thresholds,
-session windows and scheduled-job times, symbol lists, the sector map and
-commissions — grouped by purpose, each with a plain-English explanation, its unit and
+session windows and scheduled-job times, symbol lists, local market data, the sector
+map and commissions — grouped by purpose, each with a plain-English explanation, its unit and
 its allowed range. Open it when you want to tune how the app trades or alerts
 without a code change. Saves are overrides in `config/local/` (so Reset always
 restores the shipped value and updates never overwrite yours), and **Save** offers to
 restart the services the change affects — during market hours it warns that
 restarting the options service costs gamma-collection minutes.
 
+One category, **Local market data**, is about the Schwab call count itself. It
+decides whether the app's Schwab gateway may answer a repeat request from data it
+already fetched instead of asking Schwab again. Its **Mode** ships on **Shadow**: every
+request still goes to Schwab, and the gateway only counts what it could have reused.
+**On** answers those repeats locally; **Off** switches the feature out entirely. The
+same category holds two more switches, both off as shipped — the scanner fetching one
+wide option chain per symbol in place of three, and watchlist symbols being fetched
+every third minute in place of every minute. Its changes apply at once, with no
+restart. None of it has been measured on the live system yet.
+
 **API usage.** Outbound **Schwab** calls counted at the gateway per actual HTTP request
 (including retries), and **Claude (Anthropic)** calls counted at each call site — Gamma Analyze among them — for today,
-the last 7 days and the last 30 days.
+the last 7 days and the last 30 days. **Answered locally today** is the number of
+requests the gateway answered from data it already held, so they never went to Schwab
+and are not in the Schwab counts. It stays at zero while Local market data is on
+Shadow.
 
 **Maintenance.** **Vacuum GEX history DB** compacts the intraday options database, with
 an optional purge-first switch, and reports the before-and-after size. The confirm

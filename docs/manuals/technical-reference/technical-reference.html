@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-01</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-03</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -91,6 +91,13 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#the-three-tiers">The three tiers</a></li>
 <li><a href="#process-map-and-ports">Process map and ports</a></li>
 <li><a href="#data-flow-one-request">Data flow (one request)</a></li>
+<li><a href="#local-market-data-the-proxys-store-the-collectors-tiers-the-scans-wide-fetch">Local market data — the proxy's store, the collector's tiers, the scan's wide fetch</a><ul>
+<li><a href="#the-proxys-store-and-its-three-modes">The proxy's store and its three modes</a></li>
+<li><a href="#the-collectors-two-tiers-and-what-carried-forward-means">The collector's two tiers, and what "carried forward" means</a></li>
+<li><a href="#the-autoscans-single-wide-fetch">The autoscan's single wide fetch</a></li>
+<li><a href="#measured-baseline-and-the-estimates">Measured baseline, and the estimates</a></li>
+</ul>
+</li>
 <li><a href="#folder-map">Folder map</a></li>
 <li><a href="#scoring-conventions-shared-idioms">Scoring conventions (shared idioms)</a></li>
 </ul>
@@ -784,6 +791,191 @@ invalidate for each other. Identity comes from the gitignored
    <code>events:{domain}:{view}</code>.</li>
 <li>The GUI's version-poll timer sees the new version, reads the cache, and repaints.</li>
 </ol>
+<h2 id="local-market-data-the-proxys-store-the-collectors-tiers-the-scans-wide-fetch">Local market data — the proxy's store, the collector's tiers, the scan's wide fetch</h2>
+<p><strong>Files:</strong> <code>schwab-proxy/market_store.py</code> (the store and its gateway),
+<code>options-scanner/chain_carry.py</code> and <code>gex_collector.py</code> (the collector),
+<code>options-scanner/scanner_engine.py</code> (<code>scan_chains</code>, <code>slice_chain</code>),
+<code>services/options_svc/compute.py</code> (<code>collection_tiers</code>). <strong>Settings:</strong>
+<code>config/marketdata.toml</code>, in <strong>Settings → Configuration → Local market data</strong>; every
+key is read when it is used, so a saved change needs no restart. Design:
+<code>docs/plans/2026-10-03-market-data-store-design.md</code>.</p>
+<blockquote>
+<p><strong>Off as shipped.</strong> The three features below ship as <code>mode = "shadow"</code>,
+<code>scan.wide_fetch = false</code> and <code>collection.tail_interval_min = 1</code>. With those values
+every request still reaches Schwab and every cadence in this document is unchanged.
+None of the three has been measured in production. The call savings quoted at the
+end of this section are <strong>estimates</strong> from one day's proxy log.</p>
+</blockquote>
+<h3 id="the-proxys-store-and-its-three-modes">The proxy's store and its three modes</h3>
+<p>The proxy is the only process that talks to Schwab, so every option chain, quote and
+daily price series passes through it. It keeps the latest copy of each in memory —
+nothing is written to disk or to Redis, and a restart starts empty. <code>mode</code> decides
+what it does with that copy:</p>
+<table>
+<thead>
+<tr>
+<th><code>mode</code></th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>off</code></td>
+<td>Every request goes to Schwab, as before the store existed.</td>
+</tr>
+<tr>
+<td><code>shadow</code> (shipped)</td>
+<td>Every request still goes to Schwab and Schwab's answer is returned. The proxy also works out what <code>on</code> would have answered, and records whether it would have been reused and whether it matched. It costs no extra call and answers nothing locally.</td>
+</tr>
+<tr>
+<td><code>on</code></td>
+<td>A repeat request is answered from the stored copy when that copy is fresh and covers the request.</td>
+</tr>
+</tbody>
+</table>
+<p>What counts as a usable copy when the mode is <code>on</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Data</th>
+<th>Reused when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Option chain</td>
+<td>The same request was fetched at most <code>chains.max_age_sec</code> (45 s) ago while a session is open, or <code>chains.closed_max_age_sec</code> (1,800 s) ago while every session is closed. A request for a narrower date window is cut from a wider stored chain for that symbol, but only when both ask for every strike and both sides.</td>
+</tr>
+<tr>
+<td>Quote</td>
+<td>Every requested symbol was fetched at most <code>quotes.max_age_sec</code> (5 s) ago. Otherwise only the missing or older symbols are fetched and the answer is merged.</td>
+</tr>
+<tr>
+<td>Daily price bars</td>
+<td>The same symbol and range was already fetched in the same part of the day: before the open, during the session, or after the bar settles (<code>bars.settle_min</code>, 10 minutes after the close). During the session the stored series is re-served for at most <code>bars.session_ttl_sec</code> (1,740 s); with <code>bars.today_bar = "quote"</code> today's bar is rebuilt from the live quote instead.</td>
+</tr>
+</tbody>
+</table>
+<p>Intraday price bars are never stored. A caller can state its own limit with
+<code>maxAge=&lt;seconds&gt;</code> (<code>maxAge=0</code> always fetches); the Market Dashboard's 3-second quote
+poll sends 1.</p>
+<p>Rules that hold in every case:</p>
+<ul>
+<li>A stored copy is never served across a change of market session, and never served
+  past its limit because Schwab failed — the error is returned instead.</li>
+<li>A chain request with <code>strikeCount</code>, a <code>range</code> other than <code>ALL</code>, or one contract type
+  is answered only by a stored copy of that exact request. The sector put/call ratio
+  sums volume over the strikes it receives, so extra strikes would change it.</li>
+<li>An empty answer is never stored, and a cut that would hold no expiration is never
+  served. For a date window with no expiration Schwab answers HTTP 200,
+  <code>status: "SUCCESS"</code>, both maps empty and <code>underlyingPrice: 0.0</code> (measured
+  2026-10-03); a cut from a stored chain would carry the real price.</li>
+<li>A fault in the store falls through to a plain fetch and is counted
+  (<code>store_degrades</code> in <code>/stats/api_calls</code>).</li>
+</ul>
+<p>A locally answered request skips the proxy's rate limiter and its per-day call
+counter, so the Schwab counts on <strong>Settings → General → API usage</strong> keep meaning
+"calls sent to Schwab". The row <strong>Answered locally today</strong> beside them counts the
+requests answered from the store. It reads zero while the mode is <code>shadow</code> or <code>off</code>.</p>
+<p>Shadow mode makes <code>on</code>'s decision with <code>on</code>'s limits and leaves the store as <code>on</code>
+would have left it, so its counts read as "calls <code>on</code> would have saved". They run
+low, never high: shadow cannot reproduce two identical requests sharing one fetch, or
+the proxy fetching a wider window it already holds in place of a narrower one.</p>
+<h3 id="the-collectors-two-tiers-and-what-carried-forward-means">The collector's two tiers, and what "carried forward" means</h3>
+<p>The gamma collector writes one row per symbol per view every minute (see
+<em>GEX / Gamma</em> → <strong>Intraday collection</strong>). As shipped, each of those rows comes from a
+chain fetched that minute.</p>
+<p>With the mode <code>on</code>, chain reuse on and <code>collection.tail_interval_min</code> above 1 (3 or
+5), the collected symbols split into two tiers:</p>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Symbols</th>
+<th>Real fetch</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Core</td>
+<td>Those named in <code>config/symbols.toml</code> <code>[collection]</code>, the symbol open on Dealer Positioning, the public Gamma page's hot symbols, the hedging-flow (HIRO) symbols and the symbols the gamma-flip alert watches</td>
+<td>Every minute</td>
+</tr>
+<tr>
+<td>Watchlist-only</td>
+<td>Every other collected symbol — collected only because it is on the watchlist</td>
+<td>One minute in every <code>tail_interval_min</code>, staggered by symbol</td>
+</tr>
+</tbody>
+</table>
+<p>On the minutes between its real fetches, a watchlist-only symbol's chain is <strong>carried
+forward</strong> (<code>chain_carry.carry_chain</code>): the collector takes the chain the proxy still
+holds, reads the live price in one batched quote call, and moves the chain to that
+price. <code>underlyingPrice</code> becomes the live price, and each contract's gamma and delta
+in the nearest expiration move by the Black-Scholes change between the fetch price
+and the live price. Schwab's own value stays the base, and a carried gamma may grow
+to at most <code>collection.max_gamma_ratio</code> (10) times it. Volume, open interest and
+implied volatility are not changed.</p>
+<p>A carried minute is still written to all five views, so no reader sees a gap. Its
+volume and premium totals, its skew readings and its per-strike premium grid repeat
+the last fetched values. A carried chain is <strong>not</strong> handed to the detectors that read
+volume (unusual activity, big delta), because it holds no new trades. So with a
+3-minute tail, an alert on a watchlist-only symbol could arrive up to two minutes
+later than it does as shipped.</p>
+<p>Whenever the chain store is on, with or without a tail, the collector also sends
+<code>collection.fresh_max_age_sec</code> (20 s) as its age limit for every symbol due a real
+fetch, so that symbol is never answered with an older stored chain.</p>
+<p><code>tools/measure_chain_carry.py</code> is the gate before the tail is switched on: it fetches
+a few symbols every minute and compares the engine's net gamma, flip level and walls
+from a carried chain with those from the chain really fetched that minute.
+Expiration-day comparisons are reported apart, because a fast move there understates
+a carried gamma.</p>
+<h3 id="the-autoscans-single-wide-fetch">The autoscan's single wide fetch</h3>
+<p>Each 15-minute auto-scan reads three chain windows per symbol: today to +4 days, +5
+to +15 days, and +20 to +45 days. As shipped that is three chain requests per symbol.
+With <code>scan.wide_fetch = true</code>, <code>scanner_engine.scan_chains</code> makes one request from
+today to +45 days and cuts the three windows from it locally (<code>slice_chain</code>). Symbols
+in <code>scan.wide_fetch_exclude</code> (<code>$SPX</code>, <code>$NDX</code>, <code>SPY</code>, <code>QQQ</code>) keep three requests,
+because their 45-day chain is too large for one. A wide answer that is missing or
+holds no expiration falls back to the three requests for that symbol, with one
+warning in the log.</p>
+<h3 id="measured-baseline-and-the-estimates">Measured baseline, and the estimates</h3>
+<p><strong>Measured</strong> on prod for Friday 2026-10-02, from the proxy's access log and counter:
+<strong>84,125</strong> calls sent to Schwab.</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Requests</th>
+<th>Share</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/chains</code></td>
+<td>50,505</td>
+<td>64%</td>
+</tr>
+<tr>
+<td><code>/quotes</code> + <code>/quote</code></td>
+<td>15,653</td>
+<td>20%</td>
+</tr>
+<tr>
+<td><code>/pricehistory</code></td>
+<td>11,994</td>
+<td>15%</td>
+</tr>
+</tbody>
+</table>
+<p>40,345 of the chain requests were the collector's one-minute fetch, and 11,043 of the
+price-history requests repeated a symbol-and-range pair already fetched that day.</p>
+<p><strong>Estimated, not measured:</strong> about 70,000 calls a day with the store on, about 65,000
+with the wide scan fetch added, and about 48,000 with a 3-minute tail. The features
+are meant to be switched on one at a time, each after the one before it has been
+read: shadow → daily bars → chains → quotes → the wide scan fetch → the 3-minute
+tail. Shadow mode's counts replace the first estimate, and
+<code>tools/measure_chain_carry.py</code> is the gate for the last step.</p>
 <h2 id="folder-map">Folder map</h2>
 <table>
 <thead>
@@ -2511,8 +2703,12 @@ largest call GEX) — the single-wall pair the Gamma page draws.</p>
 <h2 id="intraday-collection">Intraday collection</h2>
 <p>The options service collects GEX snapshots every minute within 08:00–15:20 CT on
 trading days (from 06:30 CT for ETH-eligible symbols) (reusing the standalone collector's <code>poll_once</code>) into <code>gex_history.db</code>,
-which feeds the strike × time heat map. The universe is the index base
-(<code>$SPX</code>/<code>$VIX</code>/<code>SPY</code>/<code>QQQ</code>) plus the watchlist.</p>
+which feeds the strike × time heat map. The universe is the <code>[collection]</code> list in
+<code>config/symbols.toml</code> plus the watchlist.</p>
+<p>Every collected symbol's chain is fetched every minute. An optional second tier —
+watchlist-only symbols fetched every third or fifth minute and carried forward in
+between — exists and is <strong>off as shipped</strong>; see <em>Architecture Overview</em> → <strong>Local
+market data</strong>.</p>
 <h2 id="hedging-flow-model-hiro">Hedging-flow model (HIRO)</h2>
 <p><strong>Files:</strong> <code>services/options_svc/hiro.py</code> (pure measurement and rules),
 <code>compute.hiro_tick_row</code> (the per-minute memo), <code>handlers._run_hiro</code> (detection and

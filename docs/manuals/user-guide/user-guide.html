@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-02</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-03</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -3031,6 +3031,10 @@ a file on the server — in one place, grouped by what they do:</p>
 <td>What the gamma collector polls, the BIG10 basket, the Net Prem groups</td>
 </tr>
 <tr>
+<td><strong>Local market data</strong></td>
+<td>Whether the app may reuse market data it has already fetched from Schwab instead of asking again, how old that data may be, and how often watchlist symbols are fetched. See the note below</td>
+</tr>
+<tr>
 <td><strong>Sector map</strong></td>
 <td>Which sector each symbol counts toward for the sector cap</td>
 </tr>
@@ -3067,6 +3071,17 @@ and <strong>Recent changes</strong> at the bottom lists what was changed and whe
 with that risk shows a yellow note (for example, every scheduled Claude briefing
 is a paid call, and each symbol added to collection costs about 440 Schwab calls a
 day).</p>
+<p><strong>Local market data ships switched to counting only.</strong> Its <strong>Mode</strong> has three
+settings. <strong>Off</strong> asks Schwab for everything. <strong>Shadow</strong> — the setting it ships
+with — still asks Schwab for everything and only counts how many requests it
+<em>could</em> have answered from data it already held. <strong>On</strong> answers those repeat
+requests locally, which lowers the number of Schwab calls and means a figure can
+be as old as the time limits in this category allow. Two further switches in the
+same category are also off: the scanner fetching one wide option chain per symbol
+in place of three, and fetching watchlist symbols every third minute in place of
+every minute. Changes in this category apply at once — no restart. Nothing in it
+has been measured on the live system yet, so leave it on Shadow until the counts
+have been read.</p>
 </blockquote>
 <h3 id="general">General</h3>
 <p>Preferences, all saved on your machine:</p>
@@ -3106,7 +3121,10 @@ day).</p>
   it to every screen; <strong>Reset to shipped values</strong> (confirm-gated) goes back.</li>
 <li><strong>API usage</strong> — how many calls the app has made to <strong>Schwab</strong> (counted at the
   gateway) and to <strong>Claude</strong> (counted at each call site), for today, the last 7 days
-  and the last 30.</li>
+  and the last 30. Under the Schwab counts, <strong>Answered locally today</strong> is the number
+  of requests the gateway answered from data it already held. Those requests never
+  went to Schwab, so they are not in the Schwab counts. It stays at zero while
+  <strong>Local market data</strong> is on Shadow, the setting it ships with.</li>
 <li><strong>Maintenance</strong> — <strong>Vacuum GEX history DB</strong> compacts the intraday options
   database and reports the before-and-after size. It asks first, and <strong>the question
   tells you whether the purge switch above it is on</strong> — with it on, every saved

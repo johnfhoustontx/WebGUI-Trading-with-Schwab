@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-02</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-03</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -5911,16 +5911,28 @@ edited) and <strong>Restart now</strong> applies it to every screen; <strong>Res
 (confirm-gated) removes the override.</p>
 <p><strong>Configuration tab.</strong> Every trading setting the services read from <code>config/*.toml</code>
 — scanner floors, exit rules, the paper books' per-trade loss caps, flow-alert thresholds,
-session windows and scheduled-job times, symbol lists, the sector map and
-commissions — grouped by purpose, each with a plain-English explanation, its unit and
+session windows and scheduled-job times, symbol lists, local market data, the sector
+map and commissions — grouped by purpose, each with a plain-English explanation, its unit and
 its allowed range. Open it when you want to tune how the app trades or alerts
 without a code change. Saves are overrides in <code>config/local/</code> (so Reset always
 restores the shipped value and updates never overwrite yours), and <strong>Save</strong> offers to
 restart the services the change affects — during market hours it warns that
 restarting the options service costs gamma-collection minutes.</p>
+<p>One category, <strong>Local market data</strong>, is about the Schwab call count itself. It
+decides whether the app's Schwab gateway may answer a repeat request from data it
+already fetched instead of asking Schwab again. Its <strong>Mode</strong> ships on <strong>Shadow</strong>: every
+request still goes to Schwab, and the gateway only counts what it could have reused.
+<strong>On</strong> answers those repeats locally; <strong>Off</strong> switches the feature out entirely. The
+same category holds two more switches, both off as shipped — the scanner fetching one
+wide option chain per symbol in place of three, and watchlist symbols being fetched
+every third minute in place of every minute. Its changes apply at once, with no
+restart. None of it has been measured on the live system yet.</p>
 <p><strong>API usage.</strong> Outbound <strong>Schwab</strong> calls counted at the gateway per actual HTTP request
 (including retries), and <strong>Claude (Anthropic)</strong> calls counted at each call site — Gamma Analyze among them — for today,
-the last 7 days and the last 30 days.</p>
+the last 7 days and the last 30 days. <strong>Answered locally today</strong> is the number of
+requests the gateway answered from data it already held, so they never went to Schwab
+and are not in the Schwab counts. It stays at zero while Local market data is on
+Shadow.</p>
 <p><strong>Maintenance.</strong> <strong>Vacuum GEX history DB</strong> compacts the intraday options database, with
 an optional purge-first switch, and reports the before-and-after size. The confirm
 <strong>names whether that switch is armed</strong> — with it on, every saved GEX session but the

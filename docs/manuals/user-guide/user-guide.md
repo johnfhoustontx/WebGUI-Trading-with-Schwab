@@ -2577,6 +2577,7 @@ a file on the server — in one place, grouped by what they do:
 | **Push notifications** | Which channels each alert category goes to (the same checkboxes as on General), and the trade idea's Google Calendar ID |
 | **Market hours & schedules** | Session times, operating windows, and the time of every scheduled job (briefings, digests, reports) |
 | **Symbols & watchlists** | What the gamma collector polls, the BIG10 basket, the Net Prem groups |
+| **Local market data** | Whether the app may reuse market data it has already fetched from Schwab instead of asking again, how old that data may be, and how often watchlist symbols are fetched. See the note below |
 | **Sector map** | Which sector each symbol counts toward for the sector cap |
 | **Commissions** | Schwab's per-contract rates |
 | **Ports / Environments** | Shown for reference only |
@@ -2604,6 +2605,18 @@ How to use it:
 > with that risk shows a yellow note (for example, every scheduled Claude briefing
 > is a paid call, and each symbol added to collection costs about 440 Schwab calls a
 > day).
+
+> **Local market data ships switched to counting only.** Its **Mode** has three
+> settings. **Off** asks Schwab for everything. **Shadow** — the setting it ships
+> with — still asks Schwab for everything and only counts how many requests it
+> *could* have answered from data it already held. **On** answers those repeat
+> requests locally, which lowers the number of Schwab calls and means a figure can
+> be as old as the time limits in this category allow. Two further switches in the
+> same category are also off: the scanner fetching one wide option chain per symbol
+> in place of three, and fetching watchlist symbols every third minute in place of
+> every minute. Changes in this category apply at once — no restart. Nothing in it
+> has been measured on the live system yet, so leave it on Shadow until the counts
+> have been read.
 
 ### General
 
@@ -2644,7 +2657,10 @@ Preferences, all saved on your machine:
   it to every screen; **Reset to shipped values** (confirm-gated) goes back.
 - **API usage** — how many calls the app has made to **Schwab** (counted at the
   gateway) and to **Claude** (counted at each call site), for today, the last 7 days
-  and the last 30.
+  and the last 30. Under the Schwab counts, **Answered locally today** is the number
+  of requests the gateway answered from data it already held. Those requests never
+  went to Schwab, so they are not in the Schwab counts. It stays at zero while
+  **Local market data** is on Shadow, the setting it ships with.
 - **Maintenance** — **Vacuum GEX history DB** compacts the intraday options
   database and reports the before-and-after size. It asks first, and **the question
   tells you whether the purge switch above it is on** — with it on, every saved
