@@ -93,3 +93,11 @@ def test_detail_never_raises(monkeypatch):
 def test_long_caller_names_are_cut():
     acc.record_detail("chains", "c" * 500, "hit", day="2026-10-05")
     assert len(acc.detail_summary(day="2026-10-05")["rows"][0]["caller"]) == 40
+
+
+def test_detail_rows_with_equal_counts_come_back_in_a_stable_order():
+    for caller in ("zeta", "alpha", "mid"):
+        acc.record_detail("chains", caller, "hit", day="2026-10-05")
+    acc.record_detail("chains", "big", "hit", n=9, day="2026-10-05")
+    callers = [r["caller"] for r in acc.detail_summary(day="2026-10-05")["rows"]]
+    assert callers == ["big", "alpha", "mid", "zeta"]

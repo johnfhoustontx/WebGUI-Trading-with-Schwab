@@ -7,7 +7,13 @@ request, including retries) and the trader path counts each attempt in
 ``GET /stats/api_calls`` endpoint (today / last 7 days / last 30 days —
 rolling windows including today).
 
-Counting is strictly best-effort: ``record``/``stats`` never raise, so a
+A second table, ``api_calls_detail``, breaks each day down by endpoint, caller
+and outcome (``record_detail`` / ``detail_summary``). It counts REQUESTS to the
+proxy, including the ones its local market-data store answered without calling
+Schwab, so it is how hits and misses are attributed; the per-day total above
+stays "calls sent to Schwab".
+
+Counting is strictly best-effort: none of these functions raise, so a
 counter failure can never break an API call. Under pytest the default
 connection is in-memory (mirrors the Bus fakeredis / intraday-DB convention —
 tests must never write the real counts file); an explicit ``path`` is always
@@ -138,7 +144,8 @@ def detail_summary(day: str | None = None) -> dict:
         with _lock:
             rows = _get_conn().execute(
                 "SELECT endpoint, caller, outcome, n FROM api_calls_detail "
-                "WHERE day = ? ORDER BY n DESC", (d,)).fetchall()
+                "WHERE day = ? ORDER BY n DESC, endpoint, caller, outcome",
+                (d,)).fetchall()
         by_outcome: dict = {}
         for _e, _c, outcome, n in rows:
             by_outcome[outcome] = by_outcome.get(outcome, 0) + int(n)
