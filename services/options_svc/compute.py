@@ -4958,8 +4958,14 @@ def collection_tiers(universe, *, base, capture=None, hiro=None, flip=None):
         tail = frozenset(s for s in universe if s not in core)
         if not tail:
             return None
-        return {"tail": tail, "interval_min": interval,
-                "fresh_max_age_sec": int(cfg["fresh_max_age_sec"])}
+        out = {"tail": tail, "interval_min": interval,
+               "fresh_max_age_sec": int(cfg["fresh_max_age_sec"])}
+        # The carry's two limits, when the settings name them. The collector
+        # checks each and falls back to its own built-in value.
+        for key in ("max_gamma_ratio", "carry_slack_sec"):
+            if key in cfg:
+                out[key] = cfg[key]
+        return out
     except Exception:
         _degrade.degraded("options.collection_tiers")
         return None

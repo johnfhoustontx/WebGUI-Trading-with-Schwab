@@ -35,7 +35,8 @@ DEFAULTS = {
         "max_entries": 4000,
     },
     "scan": {"wide_fetch": False, "wide_fetch_exclude": ["$SPX", "$NDX", "SPY", "QQQ"]},
-    "collection": {"tail_interval_min": 1, "fresh_max_age_sec": 20},
+    "collection": {"tail_interval_min": 1, "fresh_max_age_sec": 20,
+                   "max_gamma_ratio": 10.0, "carry_slack_sec": 30},
 }
 
 load, reset_cache = toml_loader(MARKETDATA_TOML, DEFAULTS, label="marketdata.toml")

@@ -65,7 +65,17 @@ tail_interval_min = 1
 #   1. an answer older than this is treated as carried forward (re-priced at the
 #      live quote, kept from the volume detectors);
 #   2. it is the age limit sent for every symbol fetched every minute.
-# So it must stay under one poll minute less the 30-second slack: at most 30.
-# Above that, a one-minute symbol is regularly answered with the PREVIOUS
-# minute's chain and treated as new. A higher value is read as 30.
+# So it must stay under one poll minute less carry_slack_sec below: at most 30
+# as shipped. Above that, a one-minute symbol is regularly answered with the
+# PREVIOUS minute's chain and treated as new. A higher value is read as that
+# ceiling.
 fresh_max_age_sec = 20
+# The most a carried contract's gamma may grow over Schwab's own value between
+# real fetches. Near the close on an expiration day the model's ratio for a
+# strike the price walks onto runs into the thousands; this caps it. Below 1 is
+# read as 10.
+max_gamma_ratio = 10.0
+# Seconds added to the interval when the collector asks the proxy for a STORED
+# chain (3 minutes + 30 = 210), so a chain fetched a little late in its own
+# minute is still inside the limit.
+carry_slack_sec = 30

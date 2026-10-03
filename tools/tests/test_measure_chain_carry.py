@@ -297,13 +297,13 @@ def test_the_carry_and_the_cap_count_are_the_collectors_own(capsys, monkeypatch)
     seen = {"carry": [], "cap": []}
     real_carry, real_cap = chain_carry.carry_chain, chain_carry.capped_gammas
 
-    def carry(chain, spot, *, age_sec, now):
+    def carry(chain, spot, *, age_sec, now, max_ratio):
         seen["carry"].append((chain["underlyingPrice"], spot, age_sec, now))
-        return real_carry(chain, spot, age_sec=age_sec, now=now)
+        return real_carry(chain, spot, age_sec=age_sec, now=now, max_ratio=max_ratio)
 
-    def cap(chain, spot, *, age_sec, now):
+    def cap(chain, spot, *, age_sec, now, max_ratio):
         seen["cap"].append((chain["underlyingPrice"], spot, age_sec, now))
-        return real_cap(chain, spot, age_sec=age_sec, now=now) + 7
+        return real_cap(chain, spot, age_sec=age_sec, now=now, max_ratio=max_ratio) + 7
 
     monkeypatch.setattr(chain_carry, "carry_chain", carry)
     monkeypatch.setattr(chain_carry, "capped_gammas", cap)
@@ -311,7 +311,7 @@ def test_the_carry_and_the_cap_count_are_the_collectors_own(capsys, monkeypatch)
     assert code == 0
     assert seen["carry"] == [(100.5, 101.0, 60.0, RTH + dt.timedelta(seconds=61))]
     assert seen["cap"] == seen["carry"]
-    assert "gamma cap bound on 7 contract(s), in 1 of 1 comparisons" in         capsys.readouterr().out
+    assert "gamma cap bound on 7 contract(s), in 1 of 1 comparisons" in capsys.readouterr().out
 
 
 def test_the_error_is_measured_against_the_chain_fetched_that_minute(capsys, monkeypatch):
@@ -462,3 +462,138 @@ def test_a_run_that_could_compare_nothing_is_refused_before_any_call(argv, capsy
         mcc.main(argv, clock=_Clock(), client_factory=lambda: 1 / 0,
                  sleep=lambda s: None)
     assert stop.value.code == 2
+
+
+#############################################
+# THE GAMMA CAP IS A SETTING, AND AN ARGUMENT
+#############################################
+
+def _ratios_used(monkeypatch, argv):
+    chain_carry = mcc._engine_modules()[0]
+    seen = {"carry": [], "cap": []}
+    real_carry, real_cap = chain_carry.carry_chain, chain_carry.capped_gammas
+
+    def carry(chain, spot, **kw):
+        seen["carry"].append(kw["max_ratio"])
+        return real_carry(chain, spot, **kw)
+
+    def cap(chain, spot, **kw):
+        seen["cap"].append(kw["max_ratio"])
+        return real_cap(chain, spot, **kw)
+
+    monkeypatch.setattr(chain_carry, "carry_chain", carry)
+    monkeypatch.setattr(chain_carry, "capped_gammas", cap)
+    code, _, _ = _run(["--symbols", "SOFI", "--minutes", "2", *argv])
+    assert code == 0
+    return seen
+
+
+def test_the_gamma_cap_defaults_to_the_configured_one(monkeypatch, capsys):
+    from shared import marketdata_config as mdc
+    real = mdc.section
+    monkeypatch.setattr(mdc, "section", lambda name: dict(real(name), max_gamma_ratio=6.5))
+    assert _ratios_used(monkeypatch, []) == {"carry": [6.5], "cap": [6.5]}
+    assert "gamma cap: 6.5 times Schwab's value" in capsys.readouterr().out
+
+
+def test_as_shipped_the_gamma_cap_is_ten(monkeypatch, capsys):
+    assert _ratios_used(monkeypatch, []) == {"carry": [10.0], "cap": [10.0]}
+
+
+def test_the_gamma_cap_argument_wins_over_the_setting(monkeypatch, capsys):
+    assert _ratios_used(monkeypatch, ["--max-gamma-ratio", "3"]) == {
+        "carry": [3.0], "cap": [3.0]}
+    assert "gamma cap: 3 times Schwab's value" in capsys.readouterr().out
+
+
+def test_a_dry_run_states_the_gamma_cap_it_would_use(capsys):
+    mcc.main(["--dry-run", "--max-gamma-ratio", "4"], clock=_Clock(),
+             client_factory=lambda: 1 / 0, sleep=lambda s: None)
+    assert "gamma cap: 4 times Schwab's value" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad", ["0.5", "0", "-2", "nan", "inf"])
+def test_a_gamma_cap_under_one_is_refused_before_any_call(bad, capsys):
+    with pytest.raises(SystemExit) as stop:
+        mcc.main(["--max-gamma-ratio", bad], clock=_Clock(),
+                 client_factory=lambda: 1 / 0, sleep=lambda s: None)
+    assert stop.value.code == 2
+
+
+#############################################
+# EXPIRATION DAY IS REPORTED ON ITS OWN
+#############################################
+# On the day the nearest expiration settles a fast move understates carried
+# gamma (measured in review: a 1.5% move with two hours left gave 0.041 carried
+# against 0.867 true at the new at-the-money strike). Mixed into one median,
+# those comparisons would hide behind the quiet ones.
+
+def _row(net, expiration_day, **kw):
+    return {"net_rel_err": net, "flip_abs_err": 0.1, "walls_agree": True,
+            "expiration_day": expiration_day, **kw}
+
+
+def test_the_report_states_expiration_day_comparisons_apart_from_the_rest():
+    rows = [_row(0.30, True), _row(0.10, True), _row(0.50, True),
+            _row(0.01, False), _row(0.03, False)]
+    text = mcc.report(rows)
+    assert ("net gamma error on expiration day: 3 comparisons, median 30.0%, "
+            "worst 50.0%; other days: 2 comparisons, median 3.0%, worst 3.0%") in text
+    assert text.count("expiration day") == 1                 # one extra line
+
+
+def test_a_group_with_nothing_in_it_says_so():
+    text = mcc.report([_row(0.02, False), _row(0.04, False)])
+    assert ("net gamma error on expiration day: 0 comparisons; "
+            "other days: 2 comparisons, median 4.0%, worst 4.0%") in text
+    text = mcc.report([_row(0.2, True)])
+    assert ("net gamma error on expiration day: 1 comparisons, median 20.0%, "
+            "worst 20.0%; other days: 0 comparisons") in text
+
+
+def test_a_group_whose_comparisons_have_no_reading_is_counted_without_numbers():
+    text = mcc.report([_row(None, True), _row(0.02, False)])
+    assert ("net gamma error on expiration day: 1 comparisons, no reading; "
+            "other days: 1 comparisons, median 2.0%, worst 2.0%") in text
+
+
+def test_rows_that_do_not_say_get_no_expiration_day_line():
+    rows = [{"net_rel_err": 0.01, "flip_abs_err": 0.1, "walls_agree": True}]
+    assert "expiration day" not in mcc.report(rows)
+
+
+def _expiring(symbol, spot):
+    """The same chain, but its only expiration is the engine's 0-DTE one."""
+    chain = _chain(symbol, spot)
+    for m in ("callExpDateMap", "putExpDateMap"):
+        chain[m] = {f"{RTH.date().isoformat()}:0": next(iter(chain[m].values()))}
+    return chain
+
+
+def _rows_of(monkeypatch, chain_of):
+    rows = []
+    real = mcc.report
+    monkeypatch.setattr(mcc, "report", lambda r: (rows.extend(r), real(r))[1])
+    clock = _Clock()
+    client = _Client(clock)
+    calls = []
+
+    def get_chain(symbol, **kw):
+        calls.append(symbol)
+        clock.now += dt.timedelta(seconds=1)
+        return _Resp(chain_of(symbol, 100.0 + 0.5 * len(calls)))
+
+    client.get_option_chain = get_chain
+    assert mcc.main(["--symbols", "SOFI", "--minutes", "2"], clock=clock,
+                    client_factory=lambda: client, sleep=clock.sleep) == 0
+    return rows
+
+
+def test_a_comparison_is_marked_by_what_the_engine_read(monkeypatch, capsys):
+    assert [r["expiration_day"] for r in _rows_of(monkeypatch, _expiring)] == [True]
+    assert "on expiration day: 1 comparisons" in capsys.readouterr().out
+
+
+def test_a_chain_four_days_out_is_not_an_expiration_day(monkeypatch, capsys):
+    assert [r["expiration_day"] for r in _rows_of(monkeypatch, _chain)] == [False]
+    assert "on expiration day: 0 comparisons" in capsys.readouterr().out

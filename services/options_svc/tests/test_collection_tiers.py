@@ -467,3 +467,31 @@ def test_a_flip_reading_that_fails_means_every_fetch_is_real(monkeypatch, cfg):
     assert rec["poll_n"] == 1                      # strict: no tiers keyword at all
     assert _degrade.counts() == {"options.flip_tier_setup": 1}
     _degrade.reset()
+
+
+#############################################
+# THE CARRY'S TWO LIMITS RIDE WITH THE TIERS
+#############################################
+
+def test_the_gamma_cap_and_the_slack_are_handed_to_the_collector(monkeypatch):
+    monkeypatch.setattr(mdc, "mode", lambda: "on")
+    monkeypatch.setattr(mdc, "store_on", lambda name: True)
+    monkeypatch.setattr(mdc, "section", lambda name: {
+        "tail_interval_min": 3, "fresh_max_age_sec": 20,
+        "max_gamma_ratio": 4.0, "carry_slack_sec": 15})
+    assert tiers() == {"tail": frozenset({"SOFI", "UBER", "HOOD"}),
+                       "interval_min": 3, "fresh_max_age_sec": 20,
+                       "max_gamma_ratio": 4.0, "carry_slack_sec": 15}
+
+
+def test_with_the_real_settings_the_tiers_carry_the_shipped_limits(monkeypatch):
+    """Only the mode, the store switch and the interval are turned on here; the
+    rest is config/marketdata.toml as shipped."""
+    real = mdc.section
+    monkeypatch.setattr(mdc, "mode", lambda: "on")
+    monkeypatch.setattr(mdc, "store_on", lambda name: True)
+    monkeypatch.setattr(mdc, "section",
+                        lambda name: dict(real(name), tail_interval_min=3))
+    t = tiers()
+    assert (t["max_gamma_ratio"], t["carry_slack_sec"]) == (10.0, 30)
+    assert t["fresh_max_age_sec"] == 20

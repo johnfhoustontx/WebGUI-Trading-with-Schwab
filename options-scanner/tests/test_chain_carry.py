@@ -688,3 +688,40 @@ def test_a_capped_contract_with_no_strike_field_is_counted():
     src, now = _cap_case()
     del src["callExpDateMap"][ZERO]["101.0"][0]["strikePrice"]
     assert cc.capped_gammas(src, 101.0, age_sec=120, now=now) == 1
+
+
+#############################################
+# THE CAP IS A SETTING (config/marketdata.toml [collection] max_gamma_ratio)
+#############################################
+
+@pytest.mark.parametrize("ratio", [1.0, 3.0, 25, 1000.0])
+def test_the_cap_is_whatever_it_is_given(ratio):
+    src, now = _cap_case()                         # the raw ratio is in the thousands
+    out = cc.carry_chain(src, 101.0, age_sec=120, now=now, max_ratio=ratio)
+    assert out["callExpDateMap"][ZERO]["101.0"][0]["gamma"] == pytest.approx(
+        0.004 * ratio, rel=1e-12)
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=now, max_ratio=ratio) == 1
+
+
+def test_a_cap_above_the_raw_ratio_binds_on_nothing():
+    src, now = _cap_case()
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=now, max_ratio=1e9) == 0
+    out = cc.carry_chain(src, 101.0, age_sec=120, now=now, max_ratio=1e9)
+    assert out["callExpDateMap"][ZERO]["101.0"][0]["gamma"] > 0.004 * 100
+
+
+@pytest.mark.parametrize("unusable", [None, 0, 0.5, -3, float("nan"), float("inf"),
+                                      "10", True])
+def test_an_unusable_cap_is_the_built_in_one(unusable):
+    """Below 1 a "cap" would shrink every gamma that should have stood still."""
+    src, now = _cap_case()
+    assert (cc.carry_chain(src, 101.0, age_sec=120, now=now, max_ratio=unusable)
+            == cc.carry_chain(src, 101.0, age_sec=120, now=now))
+    assert cc.capped_gammas(src, 101.0, age_sec=120, now=now, max_ratio=unusable) == 1
+
+
+def test_the_cap_given_does_not_touch_a_move_under_it():
+    """Four days out, a 2% move changes no gamma by as much as five times."""
+    assert cc.capped_gammas(_chain(), 102.0, age_sec=120, now=NOW, max_ratio=5.0) == 0
+    assert (cc.carry_chain(_chain(), 102.0, age_sec=120, now=NOW, max_ratio=5.0)
+            == cc.carry_chain(_chain(), 102.0, age_sec=120, now=NOW))

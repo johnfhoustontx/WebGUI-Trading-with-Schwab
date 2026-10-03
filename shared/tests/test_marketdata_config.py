@@ -204,3 +204,42 @@ def test_the_stores_built_in_limits_are_the_shipped_settings():
     assert default(ms.ChainStore, "max_entries") == mc.DEFAULTS["chains"]["max_entries"]
     assert default(ms.QuoteStore, "max_symbols") == mc.DEFAULTS["quotes"]["max_symbols"]
     assert default(ms.BarStore, "max_entries") == mc.DEFAULTS["bars"]["max_entries"]
+
+
+# ---- the carry's two limits ---------------------------------------------------
+
+CARRY_LIMITS = [("collection", "max_gamma_ratio", 10.0),
+                ("collection", "carry_slack_sec", 30)]
+
+
+@pytest.mark.parametrize("name, key, shipped", CARRY_LIMITS)
+def test_the_carrys_limits_are_settings(monkeypatch, name, key, shipped):
+    assert mc.section(name)[key] == shipped
+    _with(monkeypatch, name, key, shipped + 3)
+    assert mc.section(name)[key] == shipped + 3
+    for bad in ("10", True, float("nan"), -1, _MISSING):
+        _with(monkeypatch, name, key, bad)
+        assert mc.section(name)[key] == shipped
+
+
+def _module_constant(relative_path, name):
+    """A module-level literal, read from the SOURCE. ``chain_carry`` and
+    ``gex_collector`` import the GEX engine, so loading them here would put
+    options-scanner on this suite's path; the constant is all that is wanted."""
+    import ast
+    tree = ast.parse((repo_paths.REPO_ROOT / relative_path).read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == name for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"{relative_path} defines no {name}")
+
+
+def test_the_carrys_built_in_limits_are_the_shipped_settings():
+    # The collector falls back to its own number when handed an unusable one.
+    # Two copies of one default, in tiers that cannot import each other.
+    shipped = mc.DEFAULTS["collection"]
+    assert _module_constant("options-scanner/chain_carry.py",
+                            "MAX_GAMMA_RATIO") == shipped["max_gamma_ratio"]
+    assert _module_constant("options-scanner/gex_collector.py",
+                            "CARRY_SLACK_SEC") == shipped["carry_slack_sec"]

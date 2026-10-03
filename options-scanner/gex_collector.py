@@ -277,6 +277,9 @@ def _reanchor_spots(client, symbols, fetched, now, spots_out=None) -> int:
 
 # Slack added to the tail interval when asking the proxy for a STORED chain, so
 # a chain fetched a little late in its own minute is still inside the limit.
+# The setting is config/marketdata.toml [collection] carry_slack_sec; this is
+# its built-in value, used when the tiers carry no usable one (pinned to the
+# shipped setting by shared/tests/test_marketdata_config.py).
 CARRY_SLACK_SEC = 30
 
 
@@ -291,7 +294,13 @@ def _warn_once(key, msg, *args) -> None:
         log.warning(msg, *args)
 
 
-def fresh_age_ceiling() -> int:
+def _number(v) -> bool:
+    """A real, finite number. Never a bool."""
+    return (isinstance(v, (int, float)) and not isinstance(v, bool)
+            and math.isfinite(v))
+
+
+def fresh_age_ceiling(slack=CARRY_SLACK_SEC):
     """The most ``fresh_max_age_sec`` may be: one poll interval less the slack.
 
     The setting does two jobs. It is the line above which an answer counts as
@@ -299,7 +308,7 @@ def fresh_age_ceiling() -> int:
     this ceiling a one-minute symbol's request is regularly answered with the
     PREVIOUS minute's chain and treated as new: its rows repeat and the
     detectors see no new volume."""
-    return max(0, POLL_INTERVAL_MIN * 60 - CARRY_SLACK_SEC)
+    return max(0, POLL_INTERVAL_MIN * 60 - slack)
 
 
 def tail_due(symbol, minute_index: int, interval: int) -> bool:
@@ -335,13 +344,22 @@ def _usable_tiers(tiers):
         return None
     if interval <= 1 or not tail:
         return None                    # nothing would ever be carried
-    ceiling = fresh_age_ceiling()
+    # The carry's two limits ride in with the tiers (config/marketdata.toml
+    # [collection]). Missing or unusable, each is its built-in value.
+    slack = tiers.get("carry_slack_sec")
+    if not _number(slack) or slack < 0:
+        slack = CARRY_SLACK_SEC
+    ratio = tiers.get("max_gamma_ratio")
+    if not _number(ratio) or ratio < 1:
+        ratio = chain_carry.MAX_GAMMA_RATIO
+    ceiling = fresh_age_ceiling(slack)
     if fresh > ceiling:
         _warn_once(("fresh_max_age_sec", fresh, ceiling),
                    "collection fresh_max_age_sec=%s is above %s (one poll "
                    "interval less the slack); using %s", fresh, ceiling, ceiling)
         fresh = ceiling
-    return {"tail": tail, "interval_min": interval, "fresh_max_age_sec": fresh}
+    return {"tail": tail, "interval_min": interval, "fresh_max_age_sec": fresh,
+            "max_gamma_ratio": ratio, "carry_slack_sec": slack}
 
 
 def _chain_max_age(symbol, minute_index, tiers):
@@ -352,7 +370,7 @@ def _chain_max_age(symbol, minute_index, tiers):
     fresh = tiers["fresh_max_age_sec"]
     interval = int(tiers["interval_min"])
     if symbol in tiers["tail"] and not tail_due(symbol, minute_index, interval):
-        return interval * 60 + CARRY_SLACK_SEC
+        return interval * 60 + tiers.get("carry_slack_sec", CARRY_SLACK_SEC)
     return fresh
 
 
@@ -406,7 +424,8 @@ def _carry_forward(client, fetched, ages, tiers, now, spots=None):
             continue
         try:
             moved = chain_carry.carry_chain(
-                chain, spots[symbol], age_sec=ages[symbol], now=now)
+                chain, spots[symbol], age_sec=ages[symbol], now=now,
+                max_ratio=tiers.get("max_gamma_ratio", chain_carry.MAX_GAMMA_RATIO))
         except Exception:  # noqa: BLE001 — one symbol never breaks the poll
             log.debug("Carry-forward failed for %s", symbol, exc_info=True)
             continue
@@ -436,7 +455,8 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     live quote before anything downstream sees it; see ``_reanchor_spots``.
 
     ``tiers`` — ``{"tail": frozenset, "interval_min": int, "fresh_max_age_sec":
-    int}`` or None. With tiers, a watchlist-only symbol gets a real fetch one
+    int}`` or None, optionally with ``max_gamma_ratio`` and ``carry_slack_sec``
+    (each its built-in value when missing or unusable). With tiers, a watchlist-only symbol gets a real fetch one
     minute in ``interval_min`` and the proxy's stored chain otherwise; a stored
     chain is carried forward to the live quote, is NOT passed to ``on_chain``
     (it has no new volume for the detectors), and IS written like any other:

@@ -40,6 +40,10 @@ _TINY_GAMMA = 1e-12
 # times; inside it (a 0.5% move onto a strike is about ten) the cap can hold a
 # carried value low until the next real fetch. Shrinking needs no bound: the
 # ratio cannot go below zero.
+#
+# The setting is config/marketdata.toml [collection] max_gamma_ratio; this is
+# its built-in value, used when no usable one is handed in (pinned to the
+# shipped setting by shared/tests/test_marketdata_config.py).
 MAX_GAMMA_RATIO = 10.0
 _SIDES = (("callExpDateMap", "call"), ("putExpDateMap", "put"))
 
@@ -74,7 +78,14 @@ def _strike_of(contract, strike_key):
         return None
 
 
-def _moved(contract, kind, spot0, spot1, t0, t1, strike_key=None):
+def _usable_ratio(max_ratio) -> float:
+    """``max_ratio`` when it is a real number of at least 1, else the built-in
+    cap. Below 1 a "cap" would shrink every gamma that should have stood still."""
+    return max_ratio if _real(max_ratio) and max_ratio >= 1 else MAX_GAMMA_RATIO
+
+
+def _moved(contract, kind, spot0, spot1, t0, t1, strike_key=None,
+           max_ratio=MAX_GAMMA_RATIO):
     """One contract with gamma and delta moved from ``spot0`` to ``spot1``, and
     whether the gamma cap bound on it: ``(contract, capped)``.
     Returns ``contract`` itself when there is nothing to model the change with.
@@ -102,10 +113,10 @@ def _moved(contract, kind, spot0, spot1, t0, t1, strike_key=None):
     if _real(gamma) and gamma > 0 and _real(g0) and _real(g1) \
             and g0 > _TINY_GAMMA and g1 >= 0:
         ratio = g1 / g0
-        new_gamma = gamma * min(ratio, MAX_GAMMA_RATIO)
+        new_gamma = gamma * min(ratio, max_ratio)
         if _real(new_gamma):
             out["gamma"] = new_gamma
-            capped = ratio > MAX_GAMMA_RATIO     # the cap changed the number
+            capped = ratio > max_ratio           # the cap changed the number
 
     # Same for a delta outside [-1, 1]. And a delta of exactly ZERO is left at
     # zero: the engine reads ``delta is None or delta == 0`` as "no delta" and
@@ -119,29 +130,32 @@ def _moved(contract, kind, spot0, spot1, t0, t1, strike_key=None):
     return out, capped
 
 
-def carry_chain(chain, live_spot, *, age_sec: float, now):
+def carry_chain(chain, live_spot, *, age_sec: float, now, max_ratio=None):
     """``chain`` as it would read at ``live_spot``, ``age_sec`` after it was
     fetched. Returns a new dict. Returns ``chain`` itself, unchanged, when there
     is no usable live price or the chain has no usable price of its own —
     a stale chain is better than an invented one.
 
-    ``now`` is the Central wall clock (aware in any zone, or naive Central)."""
-    return _carry(chain, live_spot, age_sec, now)[0]
+    ``now`` is the Central wall clock (aware in any zone, or naive Central).
+    ``max_ratio`` is the most a gamma may grow over Schwab's value; None, or
+    anything that is not a real number of at least 1, is ``MAX_GAMMA_RATIO``."""
+    return _carry(chain, live_spot, age_sec, now, max_ratio)[0]
 
 
-def capped_gammas(chain, live_spot, *, age_sec: float, now) -> int:
-    """How many contracts ``carry_chain`` would write at ``MAX_GAMMA_RATIO``
-    times Schwab's gamma because the Black-Scholes ratio was larger still.
+def capped_gammas(chain, live_spot, *, age_sec: float, now, max_ratio=None) -> int:
+    """How many contracts ``carry_chain`` would write at ``max_ratio`` times
+    Schwab's gamma because the Black-Scholes ratio was larger still.
 
     Counted by the very pass that carries, so it cannot disagree with the
     chain ``carry_chain`` returns for the same arguments. Zero whenever the
     carry changes nothing. ``tools/measure_chain_carry.py`` reports it: a cap
     that binds often is a model being overruled often."""
-    return _carry(chain, live_spot, age_sec, now)[1]
+    return _carry(chain, live_spot, age_sec, now, max_ratio)[1]
 
 
-def _carry(chain, live_spot, age_sec, now):
+def _carry(chain, live_spot, age_sec, now, max_ratio=None):
     """``(carried chain, contracts the gamma cap bound on)``."""
+    max_ratio = _usable_ratio(max_ratio)
     if not isinstance(chain, dict) or not _real(live_spot) or live_spot <= 0:
         return chain, 0
     spot0 = chain.get("underlyingPrice")
@@ -181,7 +195,8 @@ def _carry(chain, live_spot, age_sec, now):
             moved = []
             for c in contracts:
                 if isinstance(c, dict):
-                    c, hit = _moved(c, kind, spot0, live_spot, t0, t1, strike)
+                    c, hit = _moved(c, kind, spot0, live_spot, t0, t1, strike,
+                                    max_ratio)
                     capped += hit
                 moved.append(c)
             new_strikes[strike] = moved

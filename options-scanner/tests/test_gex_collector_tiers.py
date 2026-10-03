@@ -851,3 +851,87 @@ def test_in_the_regular_session_the_one_call_is_the_carrys_own():
     _poll(c, ["SPY", "AAPL"], now=RTH)
     assert c.get_quotes.call_count == 1
     assert c.get_quotes.call_args.args[0] == ["AAPL"]
+
+
+#############################################
+# THE CARRY'S TWO LIMITS COME IN WITH THE TIERS
+#############################################
+
+def _carry_kwargs(monkeypatch, tiers):
+    """The keyword arguments chain_carry.carry_chain was called with."""
+    seen = []
+    real = chain_carry.carry_chain
+
+    def spy(chain, spot, **kw):
+        seen.append(kw)
+        return real(chain, spot, **kw)
+
+    monkeypatch.setattr(chain_carry, "carry_chain", spy)
+    c = _client(ages={"AAPL": 95.0}, quotes={"AAPL": 103.0}, chain=_real_chain)
+    _poll(c, ["AAPL"], tiers=tiers)
+    assert len(seen) == 1
+    return seen[0]
+
+
+def test_the_gamma_cap_in_the_tiers_reaches_the_carry(monkeypatch):
+    kw = _carry_kwargs(monkeypatch, dict(TIERS, max_gamma_ratio=3.5))
+    assert kw == {"age_sec": 95.0, "now": RTH, "max_ratio": 3.5}
+
+
+def test_tiers_without_a_gamma_cap_use_the_built_in_one(monkeypatch):
+    kw = _carry_kwargs(monkeypatch, TIERS)
+    assert kw["max_ratio"] == chain_carry.MAX_GAMMA_RATIO == 10.0
+
+
+@pytest.mark.parametrize("unusable", [None, 0, 0.5, -1, float("nan"), float("inf"),
+                                      "10", True])
+def test_an_unusable_gamma_cap_is_the_built_in_one_not_a_dead_poll(monkeypatch, unusable):
+    kw = _carry_kwargs(monkeypatch, dict(TIERS, max_gamma_ratio=unusable))
+    assert kw["max_ratio"] == chain_carry.MAX_GAMMA_RATIO
+
+
+@pytest.mark.parametrize("slack, stored_limit", [(0, 180), (10, 190), (30, 210),
+                                                 (45.0, 225.0)])
+def test_the_slack_in_the_tiers_sets_the_stored_chain_limit(slack, stored_limit):
+    c = _client()
+    _poll(c, ["AAPL"], tiers=dict(TIERS, carry_slack_sec=slack), now=_not_due("AAPL"))
+    assert c.asked == {"AAPL": stored_limit}
+
+
+def test_tiers_without_a_slack_use_the_built_in_one():
+    c = _client()
+    _poll(c, ["AAPL"], tiers=TIERS, now=_not_due("AAPL"))
+    assert c.asked == {"AAPL": 3 * 60 + gc.CARRY_SLACK_SEC}
+    assert gc.CARRY_SLACK_SEC == 30
+
+
+@pytest.mark.parametrize("unusable", [None, -5, float("nan"), float("inf"), "30", True])
+def test_an_unusable_slack_is_the_built_in_one_not_a_dead_poll(unusable):
+    c = _client()
+    _poll(c, ["SPY", "AAPL"], tiers=dict(TIERS, carry_slack_sec=unusable),
+          now=_not_due("AAPL"))
+    assert c.asked == {"SPY": 20, "AAPL": 3 * 60 + gc.CARRY_SLACK_SEC}
+
+
+def test_the_fresh_ceiling_follows_the_slack(warned):
+    """One poll interval less the slack IN FORCE, not less the built-in one."""
+    c = _client()
+    _poll(c, ["SPY"], tiers=dict(TIERS, carry_slack_sec=10, fresh_max_age_sec=45))
+    assert c.asked == {"SPY": 45} and warned() == []         # 45 <= 60 - 10
+
+    c = _client()
+    _poll(c, ["SPY"], tiers=dict(TIERS, carry_slack_sec=10, fresh_max_age_sec=55))
+    assert c.asked == {"SPY": 50} and len(warned()) == 1
+
+    c = _client()
+    _poll(c, ["SPY"], tiers=dict(TIERS, carry_slack_sec=50, fresh_max_age_sec=20))
+    assert c.asked == {"SPY": 10}                            # 60 - 50
+
+    c = _client()
+    _poll(c, ["SPY"], tiers=dict(TIERS, carry_slack_sec=90, fresh_max_age_sec=20))
+    assert c.asked == {"SPY": 0}                             # never below zero
+
+
+def test_the_age_limit_helper_reads_the_slack_from_the_tiers():
+    not_due = int(_not_due("AAPL").timestamp()) // 60
+    assert gc._chain_max_age("AAPL", not_due, dict(TIERS, carry_slack_sec=5)) == 185

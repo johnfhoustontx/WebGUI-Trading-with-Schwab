@@ -507,3 +507,34 @@ def test_the_collector_settings_are_bounded_and_say_why():
     assert "15-minute" in interval.help and "3 or 5" in interval.help
     with pytest.raises(ValueError, match="at most 5"):
         cs.parse(interval, 6)
+
+
+def test_the_carrys_two_limits_are_in_the_catalogue():
+    cfg = cs.BY_NAME["marketdata.toml"]
+    _s, ratio = cs.locate(cfg, ("collection", "max_gamma_ratio"))
+    _s, slack = cs.locate(cfg, ("collection", "carry_slack_sec"))
+    assert ratio.kind == "float" and ratio.min == 1 and ratio.label
+    assert "gamma" in ratio.help and "between fetches" in ratio.help
+    with pytest.raises(ValueError, match="at least 1"):
+        cs.parse(ratio, 0.5)                       # under 1 it would shrink gammas
+    assert slack.kind == "int" and (slack.min, slack.max) == (0, 60)
+    assert "added" in slack.help and "stored chain" in slack.help
+
+
+def test_the_fresh_limit_and_the_slack_must_fit_in_one_poll_minute():
+    """The collector clamps the fresh limit to 60 seconds less the slack, so a
+    pair that does not fit would be saved and then quietly not used."""
+    key = lambda k: ("collection", k)  # noqa: E731
+    assert not cs.cross_check("marketdata.toml", {key("fresh_max_age_sec"): 20,
+                                                  key("carry_slack_sec"): 30})
+    assert not cs.cross_check("marketdata.toml", {key("fresh_max_age_sec"): 30,
+                                                  key("carry_slack_sec"): 30})
+    errs = cs.cross_check("marketdata.toml", {key("fresh_max_age_sec"): 30,
+                                              key("carry_slack_sec"): 45})
+    assert len(errs) == 1 and "60 seconds" in errs[0]
+    assert not cs.cross_check("marketdata.toml", {key("carry_slack_sec"): 45})
+
+
+def test_the_shipped_marketdata_file_passes_its_own_cross_checks():
+    assert cs.cross_check("marketdata.toml",
+                          store.flatten(_shipped("marketdata.toml"))) == []

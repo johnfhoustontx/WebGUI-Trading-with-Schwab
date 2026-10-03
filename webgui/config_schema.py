@@ -1413,6 +1413,16 @@ _MARKETDATA = ConfigFile(
                   "symbol fetched every minute. Above 30 seconds, such a symbol "
                   "is regularly answered with the previous minute's chain and "
                   "treated as new.", **_SEC, max=30),
+            Field("collection.max_gamma_ratio",
+                  "Most a carried gamma may grow",
+                  "Caps how far a carried contract's gamma may move above "
+                  "Schwab's value between fetches, as a multiple of that value.",
+                  kind="float", unit="times", min=1, max=1000, step=1),
+            Field("collection.carry_slack_sec",
+                  "Slack when asking for a stored chain",
+                  "Seconds added to the interval when the collector asks for a "
+                  "stored chain, so one fetched a little late still counts.",
+                  **_SEC, max=60),
         )),
     ),
 )
@@ -1680,6 +1690,13 @@ def cross_check(name, values):
         if all(_real(b) for b in bands) and not (bands[0] < bands[1] < bands[2]):
             errs.append("Impact: insider buy sizes must rise: small below large "
                         "below very large.")
+    if name == "marketdata.toml":
+        fresh = g("collection", "fresh_max_age_sec")
+        slack = g("collection", "carry_slack_sec")
+        if _real(fresh) and _real(slack) and fresh + slack > 60:
+            # the collector would clamp the first, with no sign here
+            errs.append("Collector: the oldest chain treated as new plus the "
+                        "slack must not exceed 60 seconds.")
     if name == "flow_alerts.toml":
         lo, hi = g("big_delta", "delta_lo"), g("big_delta", "delta_hi")
         if None not in (lo, hi) and lo >= hi:

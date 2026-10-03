@@ -9,8 +9,11 @@ chain fetched THAT minute with its output from a chain fetched one or two
 minutes earlier and carried forward to the live price.
 
 It reports the error in net gamma, the error in the flip level, how often the
-walls differ, and how often the carry's gamma cap
-(``chain_carry.MAX_GAMMA_RATIO``) bound.
+walls differ, and how often the carry's gamma cap bound. The cap is the
+configured ``collection.max_gamma_ratio`` unless ``--max-gamma-ratio`` says
+otherwise. Comparisons made on an expiration day (the nearest expiration settles
+today) are also stated apart from the rest: a fast move there understates
+carried gamma, and one median over both would hide it.
 
 Run on the box, during the regular session:
 
@@ -99,7 +102,25 @@ def report(rows: list) -> str:
     if caps:
         lines.append(f"gamma cap bound on {sum(caps)} contract(s), in "
                      f"{sum(1 for c in caps if c)} of {len(caps)} comparisons")
+    if any("expiration_day" in r for r in rows):
+        marked = [r for r in rows if "expiration_day" in r]
+        lines.append(
+            "net gamma error on expiration day: "
+            + _group_text([r for r in marked if r["expiration_day"]])
+            + "; other days: "
+            + _group_text([r for r in marked if not r["expiration_day"]]))
     return "\n".join(lines)
+
+
+def _group_text(rows: list) -> str:
+    """Count, median and worst net-gamma error for one group of comparisons."""
+    text = f"{len(rows)} comparisons"
+    if not rows:
+        return text
+    nets = sorted(r["net_rel_err"] for r in rows if r["net_rel_err"] is not None)
+    if not nets:
+        return text + ", no reading"
+    return text + f", median {nets[len(nets) // 2]:.1%}, worst {nets[-1]:.1%}"
 
 
 def row_text(row: dict) -> str:
@@ -131,13 +152,33 @@ def planned_calls(symbols: list, minutes: int) -> dict:
             "quote_calls": minutes, "total_calls": chains + minutes}
 
 
-def plan_text(plan: dict) -> str:
-    return "\n".join([
+def plan_text(plan: dict, max_ratio=None) -> str:
+    lines = [
         f"symbols: {', '.join(plan['symbols'])} ({len(plan['symbols'])})",
         f"window: {plan['minutes']} minutes, one round a minute",
         f"Schwab calls: {plan['chain_calls']} chain + {plan['quote_calls']} quote "
         f"= {plan['total_calls']}",
-    ])
+    ]
+    if max_ratio is not None:
+        lines.append(f"gamma cap: {max_ratio:g} times Schwab's value")
+    return "\n".join(lines)
+
+
+def _gamma_ratio(text: str) -> float:
+    """``--max-gamma-ratio``: a finite number of at least 1."""
+    value = float(text)
+    if not math.isfinite(value) or value < 1:
+        raise argparse.ArgumentTypeError("must be a number of at least 1")
+    return value
+
+
+def configured_gamma_ratio() -> float:
+    """``collection.max_gamma_ratio`` from config/marketdata.toml, as the
+    collector would use it."""
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from shared import marketdata_config
+    return marketdata_config.section("collection")["max_gamma_ratio"]
 
 
 #############################################
@@ -169,13 +210,18 @@ def _name_the_caller() -> None:
         os.environ["TRADING_CALLER"] = CALLER
 
 
-def measure(client, symbols, minutes, *, clock, sleep, force=False) -> list:
+def measure(client, symbols, minutes, *, clock, sleep, force=False,
+            max_ratio=None) -> list:
     """Run the window and return the comparison rows, printing one line each."""
     chain_carry, gt, gc, mc = _engine_modules()
 
     def summarize(chain):
-        gex, *_ = gt.GammaEngine().calc_all_from_chain(chain, use_volume=False)
-        return gt.GammaEngine.snapshot_summary(gex) if gex else {}
+        """``(summary, whether the engine read an expiration that is today)``."""
+        engine = gt.GammaEngine()
+        gex, *_ = engine.calc_all_from_chain(chain, use_volume=False)
+        if not gex:
+            return {}, False             # _last_dte is 0 on an engine that read nothing
+        return gt.GammaEngine.snapshot_summary(gex), engine._last_dte == 0
 
     held: dict = {}                      # symbol -> [(fetched_at, chain), ...]
     rows: list = []
@@ -204,16 +250,17 @@ def measure(client, symbols, minutes, *, clock, sleep, force=False) -> list:
         spots = gc.live_spots(
             quotes.json() if getattr(quotes, "status_code", 500) == 200 else None)
         for sym, (fetched_at, chain) in fresh.items():
-            fresh_summary = summarize(chain)
+            fresh_summary, expiration_day = summarize(chain)
             for old_at, old in held.get(sym, []):
                 age = (fetched_at - old_at).total_seconds()
                 if sym not in spots or age > MAX_CARRY_AGE_SEC:
                     continue
-                carried = chain_carry.carry_chain(old, spots[sym],
-                                                  age_sec=age, now=fetched_at)
-                row = compare(fresh_summary, summarize(carried))
+                carried = chain_carry.carry_chain(
+                    old, spots[sym], age_sec=age, now=fetched_at, max_ratio=max_ratio)
+                row = compare(fresh_summary, summarize(carried)[0])
                 row["capped"] = chain_carry.capped_gammas(
-                    old, spots[sym], age_sec=age, now=fetched_at)
+                    old, spots[sym], age_sec=age, now=fetched_at, max_ratio=max_ratio)
+                row["expiration_day"] = expiration_day
                 rows.append(row)
                 print(f"{fetched_at:%H:%M} {sym:6s} age {age:5.0f}s  {row_text(row)}")
             held[sym] = (held.get(sym, []) + [(fetched_at, chain)])[-HELD_PER_SYMBOL:]
@@ -234,6 +281,9 @@ def main(argv=None, *, clock=None, client_factory=None, sleep=time.sleep) -> int
                     help="print the symbols, minutes and Schwab calls, and exit")
     ap.add_argument("--force", action="store_true",
                     help="run even outside the regular session")
+    ap.add_argument("--max-gamma-ratio", type=_gamma_ratio, default=None,
+                    help="the carry's gamma cap (default: the configured "
+                         "collection.max_gamma_ratio)")
     args = ap.parse_args(argv)
 
     symbols = parse_symbols(args.symbols)
@@ -242,8 +292,10 @@ def main(argv=None, *, clock=None, client_factory=None, sleep=time.sleep) -> int
     if args.minutes < 2:
         ap.error("--minutes must be at least 2: the first minute only fetches")
     plan = planned_calls(symbols, args.minutes)
+    max_ratio = (args.max_gamma_ratio if args.max_gamma_ratio is not None
+                 else configured_gamma_ratio())
     if args.dry_run:
-        print(plan_text(plan))
+        print(plan_text(plan, max_ratio))
         print("Dry run: nothing was called.")
         return 0
 
@@ -259,13 +311,13 @@ def main(argv=None, *, clock=None, client_factory=None, sleep=time.sleep) -> int
               file=sys.stderr)
         return 2
 
-    print(plan_text(plan))
+    print(plan_text(plan, max_ratio))
     _name_the_caller()
     if client_factory is None:
         _engine_modules()                # puts schwab-proxy on the path
         client_factory = _default_client
     rows = measure(client_factory(), symbols, args.minutes, clock=clock,
-                   sleep=sleep, force=args.force)
+                   sleep=sleep, force=args.force, max_ratio=max_ratio)
     print()
     print(report(rows))
     return 0
