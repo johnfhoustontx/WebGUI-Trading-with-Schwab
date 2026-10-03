@@ -879,8 +879,13 @@ counter, so the Schwab counts on <strong>Settings → General → API usage</str
 requests answered from the store. It reads zero while the mode is <code>shadow</code> or <code>off</code>.</p>
 <p>Shadow mode makes <code>on</code>'s decision with <code>on</code>'s limits and leaves the store as <code>on</code>
 would have left it, so its counts read as "calls <code>on</code> would have saved". They run
-low, never high: shadow cannot reproduce two identical requests sharing one fetch, or
-the proxy fetching a wider window it already holds in place of a narrower one.</p>
+low: shadow cannot reproduce two identical requests sharing one fetch, or
+the proxy fetching a wider window it already holds in place of a narrower one. There
+is one known case where they run high: in shadow the collector sends no age limit, so
+in the few minutes it polls while every session is closed (about 08:26 to 08:29 and
+15:16 to 15:19 Central) its requests count as would-be hits against its own previous
+chain. That is about 700 a day on chains for the caller <code>options_svc</code>, and they are not
+a saving: with the mode on, the collector sends a 20-second limit.</p>
 <h3 id="the-collectors-two-tiers-and-what-carried-forward-means">The collector's two tiers, and what "carried forward" means</h3>
 <p>The gamma collector writes one row per symbol per view every minute (see
 <em>GEX / Gamma</em> → <strong>Intraday collection</strong>). As shipped, each of those rows comes from a

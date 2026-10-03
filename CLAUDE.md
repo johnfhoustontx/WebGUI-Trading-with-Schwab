@@ -3844,7 +3844,7 @@ what it WOULD have reused, `on` answers repeats locally. Design:
 6. **A changed store rule goes through `shadow` before `on`.** Shadow makes
    `on`'s decision with `on`'s limits and compares the answer with Schwab's. It
    counts low — it cannot reproduce the wider-window refetch or two identical
-   requests sharing one call — never high.
+   requests sharing one call — with one known exception: while the mode is shadow the collector sends no age limit, so in the few minutes it polls while every session is closed (about 08:26-08:29 and 15:16-15:19 CT) its requests count as would-be hits against its own previous chain — about 700 `shadow_hit_match` a day on `chains` for caller `options_svc` that `on` will not save, because there it sends its 20-second limit. Subtract them when reading the counts.
 
 **Measure before you optimise a localhost read — twice now the estimate was the
 bug (2026-08-20).** The Desk's 11-view seed was audited as "~50-100 ms of event-loop

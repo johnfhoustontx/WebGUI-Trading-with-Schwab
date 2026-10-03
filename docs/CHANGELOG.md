@@ -28,7 +28,9 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   is never stored and an empty cut is never served. Identical concurrent misses make
   one call. A store fault falls through to a plain fetch and is counted. Shadow mode
   makes `on`'s decision with `on`'s limits and records whether the would-be answer
-  matched; it counts low, never high.
+  matched; it counts low, except for about 700 would-be chain hits a day from the
+  collector's own repeats while every session is closed (in shadow it sends no age
+  limit; in `on` it sends 20 seconds).
 - **The proxy** — `schwab_proxy.py`: the four market-data handlers are adapters over
   the gateway; `maxAge` on `/quote`, `/quotes`, `/chains` (a hint, never a 422, capped
   at an hour); the `X-Caller` request header (sanitised, 64 names then `other`);

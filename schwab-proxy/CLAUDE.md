@@ -92,7 +92,10 @@ know are in the root `CLAUDE.md` ("The proxy can answer from memory").
   (which would count a degrade and make the call a second time).
 - In shadow mode the outcomes recorded beside `upstream` are `shadow_*` names
   (`Gateway`'s docstring lists them); a would-be daily-bar hit is recorded as
-  `shadow_hit_match` / `shadow_hit_mismatch`. Shadow counts low, never high.
+  `shadow_hit_match` / `shadow_hit_mismatch`. Shadow counts low, with one
+  known exception (the collector's own repeats while every session is closed,
+  about 700 a day on `chains` for caller `options_svc`); see the root
+  `CLAUDE.md`.
 
 **Streaming SSE fan-outs (2026-07-07).** The shared `_stream_worker` fans level-one ticks to SSE
 subscribers via **`/stream/quotes?symbols=…`** (equities — `_normalize_level1_equity` widened with

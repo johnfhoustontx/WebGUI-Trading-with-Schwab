@@ -427,7 +427,12 @@ sections above:
   does not re-store a would-be answer, so the held entry ages as it would under
   `on`. The first version re-stored on every call and showed 19 of 20 would-be
   hits for a caller that `on` would never serve. Shadow still counts low in two
-  cases it cannot reproduce: the wider-window refetch and coalescing.
+  cases it cannot reproduce: the wider-window refetch and coalescing. It counts
+  HIGH in one: in shadow the collector sends no age limit, so in the few minutes
+  it polls while every session is closed (about 08:26-08:29 and 15:16-15:19 CT)
+  it records would-be hits against its own previous chain, about 700 a day on
+  `chains` for caller `options_svc`. Under `on` it sends 20 seconds, so those
+  are not a saving.
 - **A fetch failure that is not an upstream error is not a store bug.** An
   expired token raises inside the fetch; it now propagates once, with no degrade
   counted and no second call.

@@ -354,8 +354,13 @@ requests answered from the store. It reads zero while the mode is `shadow` or `o
 
 Shadow mode makes `on`'s decision with `on`'s limits and leaves the store as `on`
 would have left it, so its counts read as "calls `on` would have saved". They run
-low, never high: shadow cannot reproduce two identical requests sharing one fetch, or
-the proxy fetching a wider window it already holds in place of a narrower one.
+low: shadow cannot reproduce two identical requests sharing one fetch, or
+the proxy fetching a wider window it already holds in place of a narrower one. There
+is one known case where they run high: in shadow the collector sends no age limit, so
+in the few minutes it polls while every session is closed (about 08:26 to 08:29 and
+15:16 to 15:19 Central) its requests count as would-be hits against its own previous
+chain. That is about 700 a day on chains for the caller `options_svc`, and they are not
+a saving: with the mode on, the collector sends a 20-second limit.
 
 ### The collector's two tiers, and what "carried forward" means
 

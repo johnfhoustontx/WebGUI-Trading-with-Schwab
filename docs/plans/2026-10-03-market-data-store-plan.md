@@ -2682,7 +2682,11 @@ Record in the design doc, under a new "Shadow results" heading. Shadow now
 simulates mode `on` (same age limits, and a would-be local answer is not
 re-stored), so its would-be counts are what `on` would have saved. It still
 counts LOW in two cases it cannot reproduce: the wider-window refetch on a near
-miss, and concurrent identical requests sharing one call.
+miss, and concurrent identical requests sharing one call. It counts HIGH in one:
+about 700 `shadow_hit_match` a day on `chains` for caller `options_svc`, the
+collector's own repeats while every session is closed (see Task 14). Subtract
+them. A `shadow_hit_mismatch` on `pricehistory` logs, once per series per day,
+what first differed (length, which bar, which field).
 
 | Question | Read from (`store.rows`, per endpoint and caller) | Pass |
 |---|---|---|
@@ -2711,10 +2715,13 @@ git commit -m "docs: shadow-mode results for the market-data store"
 **No code. Each switch is the operator's, made in Settings → Configuration → Local market data, which writes `config/local/marketdata.toml`. The proxy reads it on the next request; no restart.**
 
 Before any switch: the Task 13 table must be read and recorded. In shadow the
-collector sends no age limit, so shadow's `chains` would-be hits for caller
-`options_svc` come only from other callers' overlap; once `mode = on` the
-collector sends its 20-second limit on every chain request (with or without a
-3-minute tail), which is what stops it being served its own previous chain.
+collector sends no age limit, so in the few minutes it polls while every
+session is closed (about 08:26-08:29 and 15:16-15:19 CT) it records would-be
+hits against its own previous chain: about 700 `shadow_hit_match` a day on
+`chains` for caller `options_svc`. **Subtract those; they are not a saving.**
+Once `mode = on` the collector sends its 20-second limit on every chain request
+(with or without a 3-minute tail), which is what stops it being served its own
+previous chain.
 
 Order, one per session so each effect is readable on its own:
 
