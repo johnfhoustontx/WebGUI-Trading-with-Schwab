@@ -9,7 +9,10 @@ import logging
 import requests
 
 from repo_paths import PROXY_URL
+from services import _proxy  # noqa: F401 — also puts schwab-proxy on sys.path
 from services.market_svc import classify, symbols
+
+import proxy_client  # noqa: E402 — importable once services._proxy has loaded
 
 log = logging.getLogger("market_svc.compute")
 
@@ -21,9 +24,16 @@ _PCR_BASELINE = 1.0
 
 # Pooled HTTP session (keep-alive) — matches the house perf pattern
 # (schwab_proxy.trader_request reuses a pooled session).
-_SESSION = requests.Session()
-# Who is asking, for the proxy's per-caller counts.
-_SESSION.headers["X-Caller"] = "market_svc"
+def _new_session() -> requests.Session:
+    session = requests.Session()
+    # Who is asking, for the proxy's per-caller counts. Built by the shared
+    # client's helper so the label is header-safe and a dev checkout, which
+    # borrows prod's proxy, is counted apart ("dev.market_svc").
+    session.headers["X-Caller"] = proxy_client.caller_label("market_svc")
+    return session
+
+
+_SESSION = _new_session()
 
 
 def fetch_raw_quotes(syms, *, timeout=8.0):

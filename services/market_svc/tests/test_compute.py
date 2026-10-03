@@ -364,3 +364,17 @@ def test_fetch_raw_quotes_names_itself_to_the_proxy(monkeypatch):
     compute.fetch_raw_quotes(["SPY"])
     headers = {**compute._SESSION.headers, **(sent[0][1].get("headers") or {})}
     assert headers["X-Caller"] == "market_svc"
+
+
+def test_a_dev_checkout_names_itself_apart_from_prod(monkeypatch):
+    # Dev borrows prod's proxy. With a bare "market_svc" its requests would be
+    # counted in the same row as prod's.
+    import proxy_client
+    monkeypatch.setattr(proxy_client, "IS_DEV", True)
+    assert compute._new_session().headers["X-Caller"] == "dev.market_svc"
+
+
+def test_the_caller_label_is_the_shared_clients_own(monkeypatch):
+    import proxy_client
+    monkeypatch.setattr(proxy_client, "caller_label", lambda name: f"<{name}>")
+    assert compute._new_session().headers["X-Caller"] == "<market_svc>"

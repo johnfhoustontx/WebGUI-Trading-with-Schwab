@@ -21,6 +21,7 @@ Version 1.0.0 Changes:
 
 import logging
 import os
+import re
 import sys, pathlib
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
@@ -28,7 +29,7 @@ from typing import Optional, Dict, Any, List
 import requests
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
-from repo_paths import PROXY_URL
+from repo_paths import IS_DEV, PROXY_URL
 
 logger = logging.getLogger(__name__)
 
@@ -64,19 +65,47 @@ def _apply_secret(session: "requests.Session") -> None:
         session.headers["X-Proxy-Secret"] = secret
 
 
+# A caller label travels in an HTTP header and is a key in the proxy's counts.
+_LABEL_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]")
+_LABEL_MAX = 40
+
+
+def caller_label(name) -> str:
+    """``name`` as a label that is safe to send in the ``X-Caller`` header.
+
+    Anything outside letters, digits, ``_``, ``.`` and ``-`` becomes ``_``: a
+    header value with a newline, an em dash or any non-latin-1 character makes
+    every request from the process fail before it is sent, and that reads as
+    "proxy down". Empty is ``unknown``. A dev checkout borrows prod's proxy, so
+    its label carries a ``dev.`` prefix and is counted apart. At most 40
+    characters, the width the proxy keeps. Never raises."""
+    try:
+        label = _LABEL_UNSAFE.sub("_", str(name if name is not None else "").strip())
+    except Exception:  # noqa: BLE001 — identity is a label, never a failure.
+        label = ""
+    label = label or "unknown"
+    if IS_DEV:
+        label = "dev." + label
+    return label[:_LABEL_MAX]
+
+
 def _caller_name() -> str:
     """Who this process is, for the proxy's per-caller counts: the env override,
     else the service folder for ``services/<name>/app.py``, else the script
     name. Never raises."""
     env = os.environ.get("TRADING_CALLER")
     if env and env.strip():
-        return env.strip()[:40]
+        return caller_label(env)
+    name = ""
     try:
-        entry = pathlib.Path(sys.argv[0])
-        name = entry.parent.name if entry.name == "app.py" else entry.stem
-        return (name or "unknown")[:40]
+        if sys.argv and sys.argv[0]:
+            # Resolved, so ``python app.py`` run from inside a service folder
+            # still reports the folder.
+            entry = pathlib.Path(sys.argv[0]).resolve()
+            name = entry.parent.name if entry.name == "app.py" else entry.stem
     except Exception:  # noqa: BLE001 — identity is a label, never a failure.
-        return "unknown"
+        name = ""
+    return caller_label(name)
 
 
 def _apply_identity(session: "requests.Session") -> None:
