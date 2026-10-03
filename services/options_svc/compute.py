@@ -9627,16 +9627,25 @@ def _load_open_positions():
 def _rescue_regime():
     """Build a {trend_state, trend_confidence} dict from the sentiment bridge.
 
-    Reuses ``regime_filter.evaluate_regime`` (eagerly imported at module top),
-    which reads the sentiment bridge file and exposes ``trend_state`` +
-    ``trend_confidence``. Returns None if unavailable — rescue handles None."""
+    Reuses ``regime_filter.evaluate_regime``, which reads the sentiment bridge
+    file and exposes ``trend_state`` + ``trend_confidence``. Imported HERE, not at
+    module top (see the LAZY IMPORTS note above the Gamma section). Returns None
+    if unavailable — rescue handles None. A missing or stale bridge is
+    ``evaluate_regime``'s ordinary inactive answer and is not a degrade; a
+    failure is, and is counted.
+
+    ⚠ Until 2026-10-03 this called ``evaluate_regime`` as a bare name the module
+    never bound, so the NameError fell into the guard below on every call and
+    the regime never reached an advisory."""
     try:
+        from regime_filter import evaluate_regime
         reg = evaluate_regime() or {}
         ts = reg.get("trend_state")
         if ts is None:
             return None
         return {"trend_state": ts, "trend_confidence": reg.get("trend_confidence") or 0.0}
     except Exception:
+        _degrade.degraded("options.rescue_regime")
         return None
 
 

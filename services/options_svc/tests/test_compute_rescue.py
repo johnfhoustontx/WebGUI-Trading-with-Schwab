@@ -678,3 +678,97 @@ def test_assess_open_positions_no_chain_fetch(monkeypatch):
     monkeypatch.setattr(compute, "_load_open_positions", lambda: [_pos()])
     compute.assess_open_positions()
     assert called == {"chain": False, "gamma": False}
+
+
+# ── _rescue_regime ───────────────────────────────────────────────────────────
+# The helper called ``evaluate_regime`` as a bare name this module never bound
+# (ruff F821), so every call raised NameError into its own ``except`` and came
+# back None: the regime tilt and the "Regime:" context line never reached an
+# advisory, with nothing logged. Every other test in this file replaces the
+# helper with ``lambda: None``, which is how that stayed green - so these call
+# the REAL one, captured before any test can patch it.
+
+_REAL_RESCUE_REGIME = compute._rescue_regime
+
+
+def _patch_evaluate_regime(monkeypatch, result):
+    """Stand in for ``regime_filter.evaluate_regime``; an exception is raised."""
+    import regime_filter
+
+    def _evaluate(*a, **k):
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(regime_filter, "evaluate_regime", _evaluate)
+
+
+def test_rescue_regime_returns_the_bridge_trend_state(monkeypatch):
+    _patch_evaluate_regime(monkeypatch, {"trend_state": "bearish",
+                                         "trend_confidence": 0.8, "active": True})
+    assert compute._rescue_regime() == {"trend_state": "bearish",
+                                        "trend_confidence": 0.8}
+
+
+def test_rescue_regime_reads_a_missing_confidence_as_zero(monkeypatch):
+    _patch_evaluate_regime(monkeypatch, {"trend_state": "bullish",
+                                         "trend_confidence": None})
+    assert compute._rescue_regime() == {"trend_state": "bullish",
+                                        "trend_confidence": 0.0}
+
+
+def test_rescue_regime_without_a_trend_state_is_none_and_not_a_degrade(monkeypatch):
+    """No bridge, or a stale one, is ``evaluate_regime``'s ordinary inactive
+    answer - an expected condition, so it must not be counted as a failure."""
+    from services import _degrade
+
+    _patch_evaluate_regime(monkeypatch, {"trend_state": None,
+                                         "trend_confidence": None, "active": False})
+    _degrade.reset()
+    assert compute._rescue_regime() is None
+    assert "options.rescue_regime" not in _degrade.counts()
+
+
+def test_rescue_regime_failure_degrades_to_none_and_leaves_a_trace(monkeypatch):
+    from services import _degrade
+
+    _patch_evaluate_regime(monkeypatch, RuntimeError("bridge unreadable"))
+    _degrade.reset()
+    assert compute._rescue_regime() is None
+    assert _degrade.counts().get("options.rescue_regime") == 1
+
+
+def test_the_suite_never_reads_a_real_sentiment_bridge(tmp_path):
+    """``shared/sentiment_bridge.json`` is gitignored machine state: absent in a
+    fresh worktree, days old in a dev checkout, live on the prod box. With the
+    helper working, an advisory test that read it would pass or fail by machine."""
+    import json
+
+    import regime_filter
+
+    bridge = tmp_path / "sentiment_bridge.json"
+    bridge.write_text(json.dumps({"composite_score": 2.0, "bias": "short",
+                                  "trend_regime": {"state": "bearish",
+                                                   "confidence": 0.9}}),
+                      encoding="utf-8")
+    assert regime_filter.evaluate_regime(path=bridge)["trend_state"] is None
+
+
+def test_compute_rescue_applies_the_regime_tilt_and_names_it(monkeypatch):
+    """End to end through the real helper: a put credit spread in a confirmed
+    bearish tape gains the +6 modifier and its context says why. State is
+    untouched - gex/regime are modifiers, never standalone triggers."""
+    _patch_happy(monkeypatch)
+    calm = compute.compute_rescue(7)
+    assert calm.get("error") is None
+    assert calm["heat"] + 6 <= 100          # or the clamp would hide the tilt
+    assert not any(n.startswith("Regime:") for n in calm["context"])
+
+    monkeypatch.setattr(compute, "_rescue_regime", _REAL_RESCUE_REGIME)
+    _patch_evaluate_regime(monkeypatch, {"trend_state": "bearish",
+                                         "trend_confidence": 0.8})
+    tilted = compute.compute_rescue(7)
+    assert tilted.get("error") is None
+    assert tilted["heat"] == calm["heat"] + 6
+    assert tilted["state"] == calm["state"]
+    assert "Regime: bearish (confidence 80%)." in tilted["context"]
