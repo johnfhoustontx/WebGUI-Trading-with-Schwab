@@ -1409,10 +1409,11 @@ _MARKETDATA = ConfigFile(
             Field("collection.fresh_max_age_sec",
                   "Oldest chain the collector treats as new",
                   "Does two jobs. An answer older than this is treated as "
-                  "carried forward. It is also the age limit sent for every "
-                  "symbol fetched every minute. Above 30 seconds, such a symbol "
-                  "is regularly answered with the previous minute's chain and "
-                  "treated as new.", **_SEC, max=30),
+                  "carried forward. While the store is on, it is also the age "
+                  "limit the collector sends for every symbol fetched every "
+                  "minute, and for the others on the minute they are due. Above "
+                  "30 seconds, such a symbol is regularly answered with the "
+                  "previous minute's chain and treated as new.", **_SEC, max=30),
             Field("collection.max_gamma_ratio",
                   "Most a carried gamma may grow",
                   "Caps how far a carried contract's gamma may move above "

@@ -4918,8 +4918,16 @@ def _flip_alert_symbols(flow_cfg):
 
 
 def collection_tiers(universe, *, base, capture=None, hiro=None, flip=None):
-    """The collector's tiers for this poll, or None for "fetch everything every
-    minute" (see ``gex_collector.poll_once``).
+    """The collector's tiers for this poll (see ``gex_collector.poll_once``), or
+    None while the proxy's chain store is not on.
+
+    A dict WHENEVER the store is on, even when nothing may be carried: the
+    tiers are also what makes the collector send its fresh-age limit with every
+    chain request. Without them it sends none and the proxy's own applies —
+    1,800 seconds while every session is closed, which the collector's minutes
+    before 08:30 and after 15:00 CT are, so those polls were all answered with
+    one stored chain. The tail is EMPTY at an interval of 1, when no polled
+    symbol is watchlist-only, and when the flip alert watches every symbol.
 
     The TAIL is every polled symbol that is collected only because it is on the
     watchlist. Kept on the one-minute tier: the symbols named in
@@ -4932,17 +4940,15 @@ def collection_tiers(universe, *, base, capture=None, hiro=None, flip=None):
     means it watches every symbol, which leaves no tail at all.
 
     None unless the proxy's chain store is ON: in shadow or off, every request
-    reaches Schwab, so there is no stored chain to carry and nothing to gain.
-    Any trouble reading the settings is also None — the old behaviour."""
+    reaches Schwab whatever limit it carries, so the collector's request stays
+    exactly what it was. Any trouble reading the settings is also None."""
     try:
         from shared import marketdata_config as mdc
 
         if mdc.mode() != "on" or not mdc.store_on("chains"):
             return None
         cfg = mdc.section("collection")
-        interval = int(cfg["tail_interval_min"])
-        if interval <= 1:
-            return None
+        interval = max(1, int(cfg["tail_interval_min"]))
         if interval > MAX_TAIL_INTERVAL_MIN:
             if ("tail_interval_min", interval) not in _TIER_WARNED:
                 _TIER_WARNED.add(("tail_interval_min", interval))
@@ -4950,14 +4956,14 @@ def collection_tiers(universe, *, base, capture=None, hiro=None, flip=None):
                             interval, MAX_TAIL_INTERVAL_MIN, MAX_TAIL_INTERVAL_MIN)
             interval = MAX_TAIL_INTERVAL_MIN
         core = set(base) | set(capture or ()) | set(hiro or ())
+        watches_all = False
         if flip is not None:
             flip = set(flip)
-            if not flip:
-                return None            # the flip alert watches every symbol
+            watches_all = not flip     # the flip alert watches every symbol
             core |= flip
         tail = frozenset(s for s in universe if s not in core)
-        if not tail:
-            return None
+        if interval <= 1 or watches_all:
+            tail = frozenset()         # every fetch real; the limit still sent
         out = {"tail": tail, "interval_min": interval,
                "fresh_max_age_sec": int(cfg["fresh_max_age_sec"])}
         # The carry's two limits, when the settings name them. The collector

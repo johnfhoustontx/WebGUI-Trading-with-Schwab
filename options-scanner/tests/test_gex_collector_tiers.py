@@ -285,8 +285,6 @@ def test_tiers_none_ignores_the_answers_age_entirely(caplog):
     {"tail": frozenset({"AAPL"}), "interval_min": 3, "fresh_max_age_sec": True},
     {"tail": frozenset({"AAPL"}), "interval_min": 3, "fresh_max_age_sec": -5},
     {"tail": 7, "interval_min": 3, "fresh_max_age_sec": 20},
-    {"tail": frozenset(), "interval_min": 3, "fresh_max_age_sec": 20},
-    {"tail": frozenset({"AAPL"}), "interval_min": 1, "fresh_max_age_sec": 20},
     "tiers", 7])
 def test_tiers_that_cannot_be_read_are_no_tiers_and_never_a_dead_poll(bad):
     seen = []
@@ -935,3 +933,116 @@ def test_the_fresh_ceiling_follows_the_slack(warned):
 def test_the_age_limit_helper_reads_the_slack_from_the_tiers():
     not_due = int(_not_due("AAPL").timestamp()) // 60
     assert gc._chain_max_age("AAPL", not_due, dict(TIERS, carry_slack_sec=5)) == 185
+
+
+#############################################
+# AN EMPTY TAIL STILL SENDS THE FRESH LIMIT
+#############################################
+# While the proxy's chain store is on the collector is always handed tiers, with
+# an EMPTY tail when nothing may be carried (interval 1, no watchlist-only
+# symbol, a flip alert that watches everything). With no tiers at all it would
+# send no age limit and the proxy would apply its own: 1,800 s while every
+# session is closed, which the collector's 08:00-08:30 and 15:00-15:20 CT
+# minutes are.
+
+NO_TAIL = {"tail": frozenset(), "interval_min": 1, "fresh_max_age_sec": 20}
+CLOSED_MINUTES = [dt.datetime(2026, 10, 5, 8, 27, tzinfo=CT),
+                  dt.datetime(2026, 10, 5, 15, 17, tzinfo=CT)]
+
+
+@pytest.mark.parametrize("tiers", [
+    NO_TAIL,
+    dict(NO_TAIL, interval_min=3),                               # flip watches all
+    dict(TIERS, interval_min=1),                                 # a tail, always due
+    dict(NO_TAIL, interval_min=0), dict(NO_TAIL, interval_min=-4)])
+@pytest.mark.parametrize("now", [RTH, RTH + dt.timedelta(minutes=1),
+                                 RTH + dt.timedelta(minutes=2), *CLOSED_MINUTES])
+def test_every_chain_request_carries_the_fresh_limit(tiers, now):
+    seen = []
+    c = _client(quotes={"SPY": 512.0, "AAPL": 103.0, "SOFI": 9.0})
+    _poll(c, ["SPY", "AAPL", "SOFI"], tiers=tiers, now=now,
+          on_chain=lambda s, ch: seen.append(s))
+    assert c.asked == {"SPY": 20, "AAPL": 20, "SOFI": 20}
+    assert seen == ["SPY", "AAPL", "SOFI"]          # nothing was carried
+    for kw in c.kwargs.values():                    # and nothing else changed
+        assert set(kw) == {"contract_type", "from_date", "to_date", "max_age"}
+
+
+def test_with_an_empty_tail_there_is_no_quote_call_and_the_line_says_zero(caplog):
+    c = _client(ages={"SPY": 3.0, "AAPL": 0.0})
+    with caplog.at_level(logging.INFO, logger="gex_collector"):
+        _poll(c, ["SPY", "AAPL"], tiers=NO_TAIL)
+    c.get_quotes.assert_not_called()
+    assert [r.getMessage() for r in caplog.records if r.levelno == logging.INFO] == [
+        "Carried 0 of 2 chain(s) forward (0 on a live quote)"]
+
+
+def test_an_empty_tail_is_not_called_unusable(warned):
+    _poll(_client(), ["SPY", "AAPL"], tiers=NO_TAIL)
+    assert warned() == []
+    assert gc._usable_tiers(NO_TAIL)["tail"] == frozenset()
+
+
+@pytest.mark.parametrize("interval", [1, 0, -4])
+def test_an_interval_of_one_or_less_reads_as_one(interval):
+    assert gc._usable_tiers(dict(NO_TAIL, interval_min=interval))["interval_min"] == 1
+
+
+def test_with_an_empty_tail_an_old_answer_is_still_carried_by_its_age():
+    """The proxy will not hand back an old chain against a 20-second limit. If
+    it ever does, the answer's age decides, as it does for any symbol."""
+    seen = []
+    engine = _engine()
+    c = _client(ages={"SPY": 95.0}, quotes={"SPY": 512.0})
+    _poll(c, ["SPY", "AAPL"], tiers=NO_TAIL, engine=engine,
+          on_chain=lambda s, ch: seen.append(s))
+    assert seen == ["AAPL"]
+    assert c.get_quotes.call_args.args[0] == ["SPY"]
+
+
+def test_the_fresh_ceiling_applies_with_an_empty_tail(warned):
+    c = _client()
+    _poll(c, ["SPY"], tiers=dict(NO_TAIL, fresh_max_age_sec=45))
+    assert c.asked == {"SPY": FRESH_CEILING}
+    assert len(warned()) == 1
+
+
+#############################################
+# A CARRY THAT FAILS IS SAID ONCE PER SYMBOL
+#############################################
+
+def test_a_failed_carry_is_a_warning_the_first_time_and_debug_after(monkeypatch, caplog):
+    monkeypatch.setattr(gc, "_WARNED", set())
+    real = chain_carry.carry_chain
+
+    def flaky(chain, spot, **kw):
+        if chain["symbol"] in ("AAPL", "UBER"):
+            raise RuntimeError("boom")
+        return real(chain, spot, **kw)
+
+    monkeypatch.setattr(chain_carry, "carry_chain", flaky)
+
+    def poll():
+        caplog.clear()
+        c = _client(ages={"AAPL": 95.0, "SOFI": 95.0, "UBER": 95.0},
+                    quotes={"AAPL": 103.0, "SOFI": 9.0, "UBER": 70.0})
+        with caplog.at_level(logging.DEBUG, logger="gex_collector"):
+            _poll(c, ["AAPL", "SOFI", "UBER"])
+        failed = [r for r in caplog.records if "Carry-forward failed" in r.getMessage()]
+        return sorted((r.levelno, r.getMessage().split()[3].rstrip(";")) for r in failed)
+
+    assert poll() == [(logging.WARNING, "AAPL"), (logging.WARNING, "UBER")]
+    assert poll() == [(logging.DEBUG, "AAPL"), (logging.DEBUG, "UBER")]     # the next minute
+    assert poll() == [(logging.DEBUG, "AAPL"), (logging.DEBUG, "UBER")]
+
+
+def test_the_first_failure_warning_carries_the_traceback(monkeypatch, caplog):
+    monkeypatch.setattr(gc, "_WARNED", set())
+    monkeypatch.setattr(chain_carry, "carry_chain",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    c = _client(ages={"AAPL": 95.0}, quotes={"AAPL": 103.0})
+    with caplog.at_level(logging.WARNING, logger="gex_collector"):
+        _poll(c, ["AAPL"])
+    (record,) = [r for r in caplog.records if "Carry-forward failed" in r.getMessage()]
+    assert record.levelno == logging.WARNING and record.exc_info
+    assert "stored chain" in record.getMessage()

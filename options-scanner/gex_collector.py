@@ -324,16 +324,20 @@ def tail_due(symbol, minute_index: int, interval: int) -> bool:
 
 
 def _usable_tiers(tiers):
-    """``tiers`` checked once per poll, or None for "every fetch is real".
+    """``tiers`` checked once per poll, or None for "send no age limit at all".
 
     ``_chain_max_age`` runs inside each symbol's fetch guard, so a mapping it
     could not read would fail EVERY fetch and leave the poll with no chains. A
-    bad mapping costs the saving, never the collection."""
+    bad mapping costs the saving, never the collection.
+
+    An EMPTY tail, or an interval of 1, is a usable mapping and is kept: no
+    symbol waits for its minute, and every request still carries the fresh-age
+    limit, which is what stops the proxy answering with an older stored chain."""
     if not tiers:
         return None
     try:
         tail = frozenset(tiers["tail"])
-        interval = int(tiers["interval_min"])
+        interval = max(1, int(tiers["interval_min"]))
         fresh = tiers["fresh_max_age_sec"]
         if (isinstance(fresh, bool) or not isinstance(fresh, (int, float))
                 or not math.isfinite(fresh) or fresh < 0):
@@ -342,8 +346,6 @@ def _usable_tiers(tiers):
         log.warning("Unusable collection tiers %r; fetching every chain", tiers,
                     exc_info=True)
         return None
-    if interval <= 1 or not tail:
-        return None                    # nothing would ever be carried
     # The carry's two limits ride in with the tiers (config/marketdata.toml
     # [collection]). Missing or unusable, each is its built-in value.
     slack = tiers.get("carry_slack_sec")
@@ -427,7 +429,15 @@ def _carry_forward(client, fetched, ages, tiers, now, spots=None):
                 chain, spots[symbol], age_sec=ages[symbol], now=now,
                 max_ratio=tiers.get("max_gamma_ratio", chain_carry.MAX_GAMMA_RATIO))
         except Exception:  # noqa: BLE001 — one symbol never breaks the poll
-            log.debug("Carry-forward failed for %s", symbol, exc_info=True)
+            # Its stored chain is written as it is. Said at WARNING the first
+            # time a symbol fails in this process, at DEBUG every minute after.
+            if ("carry_failed", symbol) in _WARNED:
+                log.debug("Carry-forward failed for %s; writing its stored chain",
+                          symbol, exc_info=True)
+            else:
+                _WARNED.add(("carry_failed", symbol))
+                log.warning("Carry-forward failed for %s; writing its stored chain",
+                            symbol, exc_info=True)
             continue
         if moved is not chain:
             fetched[i] = (symbol, moved)
@@ -463,7 +473,10 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     the four Greek views from the carried chain, the skew readings (``rr_25d``,
     ``atm_iv``), the volume and premium totals and the per-strike premium grid
     from the chain as stored, so they repeat the last fetched values exactly.
-    None keeps every request exactly as it was before tiers existed."""
+    With an EMPTY tail no symbol waits, and every request still carries the
+    fresh-age limit: that is what the options service hands in whenever the
+    proxy's chain store is on. None keeps every request exactly as it was
+    before tiers existed (no age limit sent)."""
     if symbols is None:
         symbols = collection_symbols()
     tiers = _usable_tiers(tiers)

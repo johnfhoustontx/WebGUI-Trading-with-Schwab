@@ -64,7 +64,10 @@ tail_interval_min = 1
 # This one number does TWO jobs:
 #   1. an answer older than this is treated as carried forward (re-priced at the
 #      live quote, kept from the volume detectors);
-#   2. it is the age limit sent for every symbol fetched every minute.
+#   2. while the store is on (mode = "on" and chains.enabled), it is the age
+#      limit the collector sends with every chain request for a symbol due a
+#      real fetch: every symbol when the interval is 1. Without it the proxy's
+#      own limit would apply, 1,800 seconds while every session is closed.
 # So it must stay under one poll minute less carry_slack_sec below: at most 30
 # as shipped. Above that, a one-minute symbol is regularly answered with the
 # PREVIOUS minute's chain and treated as new. A higher value is read as that

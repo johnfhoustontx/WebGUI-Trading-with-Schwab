@@ -28,6 +28,12 @@ def tiers(**kw):
     return compute.collection_tiers(UNIVERSE, base=BASE, **kw)
 
 
+def no_tail(interval):
+    """The tiers while the store is on and nothing may be carried: every chain
+    request still carries the fresh-age limit."""
+    return {"tail": frozenset(), "interval_min": interval, "fresh_max_age_sec": 20}
+
+
 #############################################
 # THE PLAN'S SPECIFICATION
 #############################################
@@ -50,15 +56,28 @@ def test_hedging_flow_symbols_stay_on_one_minute(cfg):
 
 
 @pytest.mark.parametrize("kw", [dict(mode="shadow"), dict(mode="off"),
-                                dict(chains=False), dict(interval=1), dict(interval=0)])
-def test_no_tiers_unless_the_store_is_on_and_the_interval_is_above_one(cfg, kw):
+                                dict(chains=False),
+                                dict(mode="shadow", interval=1),
+                                dict(chains=False, interval=1)])
+def test_no_tiers_unless_the_store_is_on(cfg, kw):
     cfg(**kw)
     assert tiers() is None
 
 
-def test_no_tiers_when_nothing_is_watchlist_only(cfg):
+@pytest.mark.parametrize("interval", [1, 0, -2])
+def test_the_store_on_at_an_interval_of_one_is_an_empty_tail_not_no_tiers(cfg, interval):
+    """With no tiers the collector sends NO age limit, and the proxy's own
+    applies: 45 s in session, 1,800 s while every session is closed. Collection
+    runs 08:00-15:20 CT around an 08:30-15:00 session, so the polls at
+    08:26-08:29 and 15:16-15:19 were each answered with the 08:25 / 15:15
+    chain: four repeated rows per symbol, twice a day."""
+    cfg(interval=interval)
+    assert tiers() == no_tail(1)
+
+
+def test_nothing_watchlist_only_is_an_empty_tail(cfg):
     cfg()
-    assert compute.collection_tiers(BASE, base=BASE) is None
+    assert compute.collection_tiers(BASE, base=BASE) == no_tail(3)
 
 
 def test_unreadable_config_means_no_tiers(monkeypatch):
@@ -101,9 +120,9 @@ def test_capture_and_hiro_add_up_and_take_any_iterable(cfg):
         "tail"] == frozenset({"SOFI", "UBER", "HOOD"})
 
 
-def test_a_tail_emptied_by_the_capture_set_is_no_tiers(cfg):
+def test_a_tail_emptied_by_the_capture_set_is_an_empty_tail(cfg):
     cfg()
-    assert tiers(capture={"SOFI", "UBER"}, hiro={"HOOD"}) is None
+    assert tiers(capture={"SOFI", "UBER"}, hiro={"HOOD"}) == no_tail(3)
 
 
 def test_the_tail_is_only_ever_symbols_being_polled(cfg):
@@ -139,11 +158,13 @@ def test_a_universe_that_cannot_be_read_leaves_a_trace_and_no_tiers(cfg):
 
 def test_the_ordinary_off_answers_are_not_degrades(cfg):
     _degrade.reset()
-    for kw in (dict(mode="shadow"), dict(chains=False), dict(interval=1)):
+    for kw in (dict(mode="shadow"), dict(chains=False)):
         cfg(**kw)
         assert tiers() is None
+    cfg(interval=1)
+    assert tiers() == no_tail(1)
     cfg()
-    assert compute.collection_tiers(BASE, base=BASE) is None
+    assert compute.collection_tiers(BASE, base=BASE) == no_tail(3)
     assert _degrade.counts() == {}
 
 
@@ -351,7 +372,7 @@ def test_flip_alert_symbols_stay_on_one_minute(cfg):
 def test_a_flip_alert_that_watches_every_symbol_leaves_no_tail(cfg, everything):
     """An empty list is the alert's way of saying "the whole universe"."""
     cfg()
-    assert tiers(flip=everything) is None
+    assert tiers(flip=everything) == no_tail(3)
 
 
 def test_no_flip_alert_at_all_changes_nothing(cfg):
@@ -362,7 +383,7 @@ def test_no_flip_alert_at_all_changes_nothing(cfg):
 def test_a_whole_universe_flip_alert_is_not_a_degrade(cfg):
     cfg()
     _degrade.reset()
-    assert tiers(flip=[]) is None
+    assert tiers(flip=[]) == no_tail(3)
     assert _degrade.counts() == {}
 
 
@@ -390,14 +411,14 @@ def test_the_shipped_flip_list_is_already_core(monkeypatch, cfg):
 
 
 @pytest.mark.parametrize("symbols", [[], None, ()])
-def test_an_empty_flip_list_with_the_alert_on_means_no_tiers(monkeypatch, cfg, symbols):
+def test_an_empty_flip_list_with_the_alert_on_means_no_tail(monkeypatch, cfg, symbols):
     """handlers._run_gamma_flip reads ``symbols or the whole flow universe``."""
     assert _flip_tiers(monkeypatch, cfg,
-                       {"gamma_flip": dict(FLIP_ON, symbols=symbols)}) is None
+                       {"gamma_flip": dict(FLIP_ON, symbols=symbols)}) == no_tail(3)
 
 
-def test_no_flip_symbols_key_with_the_alert_on_means_no_tiers(monkeypatch, cfg):
-    assert _flip_tiers(monkeypatch, cfg, {"gamma_flip": dict(FLIP_ON)}) is None
+def test_no_flip_symbols_key_with_the_alert_on_means_no_tail(monkeypatch, cfg):
+    assert _flip_tiers(monkeypatch, cfg, {"gamma_flip": dict(FLIP_ON)}) == no_tail(3)
 
 
 @pytest.mark.parametrize("flow_cfg", [
@@ -414,7 +435,7 @@ def test_a_hand_typed_enabled_string_is_on_as_the_alert_itself_reads_it(monkeypa
     """``handlers`` tests ``not gf.get("enabled", True)``, so "false" is ON
     there. The tiers must agree with the detector, not with good sense."""
     assert _flip_tiers(monkeypatch, cfg,
-                       {"gamma_flip": {"enabled": "false", "symbols": []}}) is None
+                       {"gamma_flip": {"enabled": "false", "symbols": []}}) == no_tail(3)
 
 
 def test_listed_flip_symbols_stay_core_while_the_alert_is_off(monkeypatch, cfg):
@@ -437,7 +458,7 @@ def test_a_broken_flip_config_never_stops_the_poll_and_never_opens_a_tail_by_acc
     # A scalar table reads as the built-in list (flow_alerts.section); a list
     # that names no usable symbol reads as "everything".
     if isinstance(gamma_flip, dict):
-        assert got is None
+        assert got == no_tail(3)
     else:
         assert got["tail"] == frozenset({"NVDA", "TSLA", "AAPL", "HOOD"})
 
@@ -449,14 +470,14 @@ def test_a_bare_string_flip_symbol_is_one_symbol(monkeypatch, cfg):
 
 def test_a_flip_table_with_no_switch_is_on(monkeypatch, cfg):
     """``gf.get("enabled", True)``: a table that does not say is running."""
-    assert _flip_tiers(monkeypatch, cfg, {"gamma_flip": {"symbols": []}}) is None
+    assert _flip_tiers(monkeypatch, cfg, {"gamma_flip": {"symbols": []}}) == no_tail(3)
 
 
 def test_a_flip_reading_that_fails_means_every_fetch_is_real(monkeypatch, cfg):
     """Unknown is read as "every symbol": the poll runs, with no tail, and the
     failure leaves a trace."""
     cfg()
-    rec = _collector(monkeypatch, strict=True)
+    rec = _collector(monkeypatch)
 
     def boom(flow_cfg):
         raise RuntimeError("bad flip config")
@@ -464,7 +485,8 @@ def test_a_flip_reading_that_fails_means_every_fetch_is_real(monkeypatch, cfg):
     monkeypatch.setattr(compute, "_flip_alert_symbols", boom)
     _degrade.reset()
     assert compute.collect_gex_snapshots(now=RTH) == len(POLLED)
-    assert rec["poll_n"] == 1                      # strict: no tiers keyword at all
+    assert rec["poll_n"] == 1
+    assert rec["kw"]["tiers"] == no_tail(3)        # the limit is sent; no tail
     assert _degrade.counts() == {"options.flip_tier_setup": 1}
     _degrade.reset()
 
@@ -495,3 +517,105 @@ def test_with_the_real_settings_the_tiers_carry_the_shipped_limits(monkeypatch):
     t = tiers()
     assert (t["max_gamma_ratio"], t["carry_slack_sec"]) == (10.0, 30)
     assert t["fresh_max_age_sec"] == 20
+
+
+#############################################
+# THE FRESH LIMIT IS SENT WHENEVER THE STORE IS ON
+#############################################
+
+def test_the_store_on_at_interval_one_hands_the_collector_an_empty_tail(monkeypatch, cfg):
+    cfg(interval=1)
+    rec = _collector(monkeypatch)
+    compute.collect_gex_snapshots(capture_symbols={"TSLA"}, now=RTH)
+    assert rec["kw"]["tiers"] == no_tail(1)
+
+
+@pytest.mark.parametrize("kw", [dict(mode="shadow"), dict(mode="off"),
+                                dict(chains=False), dict(mode="shadow", interval=1)])
+def test_without_the_store_poll_once_gets_no_tiers_argument_at_all(monkeypatch, cfg, kw):
+    """Shadow, off or chain reuse off: the request the collector has always made."""
+    cfg(**kw)
+    rec = _collector(monkeypatch, strict=True)     # a tiers keyword is a TypeError
+    assert compute.collect_gex_snapshots(now=RTH) == len(POLLED)
+    assert rec["poll_n"] == 1
+
+
+def test_an_empty_tail_keeps_the_carrys_two_limits_too(monkeypatch):
+    monkeypatch.setattr(mdc, "mode", lambda: "on")
+    monkeypatch.setattr(mdc, "store_on", lambda name: True)
+    monkeypatch.setattr(mdc, "section", lambda name: {
+        "tail_interval_min": 1, "fresh_max_age_sec": 20,
+        "max_gamma_ratio": 4.0, "carry_slack_sec": 15})
+    assert tiers() == dict(no_tail(1), max_gamma_ratio=4.0, carry_slack_sec=15)
+
+
+def test_an_interval_above_five_with_no_tail_is_still_clamped(cfg, warned):
+    cfg(interval=9)
+    assert tiers(flip=[]) == no_tail(5)
+    assert len(warned()) == 1
+
+
+class _Chains:
+    """A stand-in proxy client for the REAL collector."""
+    class Options:
+        class ContractType:
+            ALL = "ALL"
+
+    def __init__(self):
+        self.kwargs, self.quote_calls = {}, 0
+
+    def get_option_chain(self, symbol, **kw):
+        self.kwargs[symbol] = kw
+        return types.SimpleNamespace(
+            status_code=200, store_age=None,
+            json=lambda: {"symbol": symbol, "underlyingPrice": 100.0,
+                          "callExpDateMap": {}, "putExpDateMap": {}})
+
+    def get_quotes(self, symbols, **kw):
+        self.quote_calls += 1
+        return types.SimpleNamespace(status_code=200, json=lambda: {})
+
+
+def _real_poll(tiers_, now):
+    """One poll of the real ``gex_collector.poll_once`` with these tiers."""
+    import gex_collector as gc
+    from unittest.mock import MagicMock
+    client, seen = _Chains(), []
+    engine = MagicMock()
+    engine._last_dte = 0
+    engine.calc_all_from_chain.return_value = (None, None, None, None)
+    kw = {"tiers": tiers_} if tiers_ else {}
+    gc.poll_once(client, engine, MagicMock(), symbols=list(UNIVERSE), poll_term=False,
+                 now=now, on_chain=lambda sym, chain: seen.append(sym), **kw)
+    return client, seen
+
+
+SESSION_CLOSED = [dt.datetime(2026, 8, 17, 8, 27, tzinfo=CT),      # before the open
+                  dt.datetime(2026, 8, 17, 15, 17, tzinfo=CT)]     # after the close
+
+
+@pytest.mark.parametrize("now", [RTH, *SESSION_CLOSED])
+@pytest.mark.parametrize("kw", [dict(interval=1), dict(interval=3)])
+def test_end_to_end_the_store_on_sends_the_fresh_limit_for_every_symbol(cfg, now, kw):
+    """The decision here handed to the real collector: at interval 1, and at
+    interval 3 with the flip alert watching every symbol, every chain request
+    carries the fresh-age limit and nothing is carried."""
+    cfg(**kw)
+    decided = tiers(flip=[]) if kw["interval"] == 3 else tiers()
+    assert decided["tail"] == frozenset()
+    client, seen = _real_poll(decided, now)
+    assert {s: k.get("max_age") for s, k in client.kwargs.items()} == {
+        s: 20 for s in UNIVERSE}
+    assert seen == list(UNIVERSE)                  # every chain reached the detectors
+
+
+@pytest.mark.parametrize("kw", [dict(mode="shadow"), dict(mode="off"), dict(chains=False)])
+def test_end_to_end_in_shadow_the_request_is_exactly_todays(cfg, kw):
+    cfg(**kw)
+    assert tiers() is None
+    client, _seen = _real_poll(tiers(), RTH)
+    today = RTH.date()
+    assert client.kwargs == {s: {"contract_type": "ALL", "from_date": today,
+                                 "to_date": today + dt.timedelta(days=7)}
+                             for s in UNIVERSE}
+    assert client.quote_calls == 0
