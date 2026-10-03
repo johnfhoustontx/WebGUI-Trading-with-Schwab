@@ -4,7 +4,74 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-02 (**EOD Report archive is a Month dropdown.**)
+**Last updated:** 2026-10-03 (**The proxy's local market-data store, the collector's two tiers and the scan's wide fetch — built on a branch, shipped switched off.**)
+
+- **Status.** The code is on the branch `claude/schwab-api-local-cache-85ddba` and
+  has **not been promoted**. It ships dark: `config/marketdata.toml` has
+  `mode = "shadow"`, `scan.wide_fetch = false` and
+  `collection.tail_interval_min = 1`, so every request still reaches Schwab and
+  every cadence is what it was. **Nothing below has been measured in production.**
+  Design + plan:
+  [`docs/plans/2026-10-03-market-data-store-{design,plan}.md`](plans/2026-10-03-market-data-store-design.md).
+- **Why.** The proxy's counter read **84,125** calls sent to Schwab on Friday
+  2026-10-02 (68–76k in August). Measured from the proxy's access log for that day:
+  `/chains` 50,505 (64%) — 40,345 of them the collector's one-minute fetch across 92
+  symbols; `/quotes` + `/quote` 15,653 (20%); `/pricehistory` 11,994 (15%), of which
+  11,043 repeated a symbol-and-range pair already fetched that day. The proxy held no
+  response cache and could not say which caller a call belonged to.
+- **The store** — `schwab-proxy/market_store.py` (new): `ChainStore`, `QuoteStore`,
+  `BarStore` and the `Gateway`, in memory only. With the mode on, a repeat `/chains`,
+  `/quotes`, `/quote` or daily `/pricehistory` request is answered locally and skips
+  the rate limiter and the per-day counter. A chain is cut to a narrower date window
+  only between all-strikes, both-sides requests; an entry never crosses a session
+  change and is never served past its limit because Schwab failed; an empty answer
+  is never stored and an empty cut is never served. Identical concurrent misses make
+  one call. A store fault falls through to a plain fetch and is counted. Shadow mode
+  makes `on`'s decision with `on`'s limits and records whether the would-be answer
+  matched; it counts low, never high.
+- **The proxy** — `schwab_proxy.py`: the four market-data handlers are adapters over
+  the gateway; `maxAge` on `/quote`, `/quotes`, `/chains` (a hint, never a 422, capped
+  at an hour); the `X-Caller` request header (sanitised, 64 names then `other`);
+  `X-Store` / `X-Store-Age` on every answer; `/stats/api_calls` gains `store` (today's
+  breakdown, 500 rows at most with exact totals) and `store_degrades`; a dead token
+  answers 500 with a JSON detail. `api_call_counter.py` gains `api_calls_detail`.
+- **The client** — `proxy_client.py`: `caller_label`, the `X-Caller` identity on both
+  client classes (`dev.` prefix from a dev checkout), `max_age=` on
+  `get_option_chain`, `FakeResponse.store_kind` / `store_age`. `market_svc`'s
+  3-second quote poll sends `maxAge=1`.
+- **The settings** — `config/marketdata.toml` + `shared/marketdata_config.py` (read at
+  call time, no restart) + the **Local market data** category in
+  `webgui/config_schema.py`. Settings → General's API-usage card gains **Answered
+  locally today** (`settings.api_stats_rows` / `plan_stat_cells`).
+- **The scan** — `options-scanner/scanner_engine.py`: `slice_chain`, `scan_windows`,
+  `scan_chains`. With `scan.wide_fetch` on, one today → +45 chain per symbol is cut
+  into the three windows locally; `$SPX`, `$NDX`, `SPY` and `QQQ` are excluded; a
+  wide answer that is missing or holds no expiration falls back to the three window
+  fetches. A locally cut empty window carries `underlyingPrice` 0.0, as Schwab's own
+  does (probed 2026-10-03, SOFI: 200, `SUCCESS`, both maps empty, price 0.0).
+- **The collector** — `options-scanner/chain_carry.py` (new) and
+  `gex_collector.py` (`poll_once(tiers=...)`, `tail_due`, `_carry_forward`), with
+  `options_svc/compute.collection_tiers` deciding the tiers. Core symbols keep a real
+  fetch every minute; a watchlist-only symbol gets one every Nth minute and is
+  carried to the live quote in between — written to all five views, kept from the
+  volume detectors. Whenever the chain store is on, the collector sends its fresh-age
+  limit for every symbol due a real fetch, tail or no tail. `tools/measure_chain_carry.py` (new)
+  measures a carried chain against a real fetch.
+- **Estimates, not measurements** (from the one day's log above): about 84k → about
+  70k calls a day with the store on, about 65k with the wide scan fetch, about 48k
+  with a 3-minute tail.
+- **Rollout order, each step read before the next:** shadow → daily bars → chains →
+  quotes → the wide scan fetch → the 3-minute tail. The gates are the shadow counts
+  in `/stats/api_calls` (`shadow_*_match` against `shadow_*_mismatch`, and the
+  today's-bar verdicts before `bars.today_bar = "quote"`) and
+  `tools/measure_chain_carry.py` before `tail_interval_min` moves off 1.
+- Documentation: root, `schwab-proxy/` and `options-scanner/` `CLAUDE.md`, the API
+  Reference, Technical Reference, User Guide and Reference Guide, the Settings page
+  help and `docs/webgui-routes.md`.
+
+---
+
+**Prior —** 2026-10-02 (**EOD Report archive is a Month dropdown.**)
 
 - The EOD page listed every saved report as one row of date links, which grew by
   a link each trading day. It is now an **Archive** dropdown of months (newest

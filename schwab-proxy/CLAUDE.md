@@ -7,7 +7,8 @@
 ## Purpose
 
 Central Schwab API gateway and token manager for the whole monorepo. It owns
-Schwab OAuth, refreshes tokens, rate-limits outbound Schwab calls, and exposes a
+Schwab OAuth, refreshes tokens, rate-limits outbound Schwab calls, keeps what it
+fetches in memory (see "The local market-data store"), and exposes a
 local HTTP API so the other apps share one set of credentials instead of each
 authenticating directly. **It must be started first** — options-scanner,
 sentiment-dashboard, and the Tier-2 services all fetch market data through it.
@@ -21,7 +22,9 @@ sentiment-dashboard, and the Tier-2 services all fetch market data through it.
   self-terminated at 15:30 CT Mon–Fri via a `_shutdown_scheduler` thread) was
   **REMOVED 2026-07-22** per the user — its 24/7 consumers (market_svc's
   futures poll, off-hours pages) need the proxy up around the clock. Stop it
-  via `stop_all.bat` / the Terminate page / closing its window.
+  alone with `systemctl --user stop trading-prod-proxy`, or with the whole stack
+  (`systemctl --user stop trading-prod.target`, which is what the Stop All
+  Services page runs).
 - Key endpoints: `/health`, `/stats/api_calls` (per-day outbound Schwab API-call counts — today / last 7 / last 30 days; counted at the marketdata rate-limit chokepoint + the trader request loop into `data/api_call_counts.db`, best-effort/never-raises; feeds the webgui Settings "API usage" card), `/quote`, `/quotes`, `/chains`, `/pricehistory`,
   `/instruments` (fundamentals; `projection=fundamental` → P/E, growth, ROE,
   margins — used by trade_svc), `/accounts`, `/positions`, `/positions/{account_hash}`,
@@ -38,11 +41,58 @@ sentiment-dashboard, and the Tier-2 services all fetch market data through it.
 | File                 | Role                                                            |
 |----------------------|-----------------------------------------------------------------|
 | `schwab_proxy.py`    | FastAPI/uvicorn app, token mgmt, proxy + trader endpoints, stream worker. |
-| `proxy_client.py`    | Client helper imported by the other apps to call the proxy.     |
+| `market_store.py`    | What the proxy has already fetched, kept in memory: `ChainStore`, `QuoteStore`, `BarStore`, and the `Gateway` that decides per request between a stored answer and a call to Schwab. No FastAPI and no repo imports, so it is unit-testable on its own. |
+| `api_call_counter.py`| Per-day count of calls SENT to Schwab (`api_calls`), plus the per-day breakdown of REQUESTS by endpoint, caller and outcome (`api_calls_detail`). Never raises. |
+| `proxy_client.py`    | Client helper imported by the other apps to call the proxy. Sets `X-Caller`, takes `max_age=` on `get_option_chain`, and exposes `X-Store` / `X-Store-Age` as `FakeResponse.store_kind` / `store_age`. |
 | `trade_registry.py`  | Registry of tracked OptionsScanner paper trades.                |
 | `trade_detector.py`  | Detects fills/events from the option stream.                    |
 | `perf_writer.py`     | Writes trade-performance events + IV snapshots.                 |
 | `stream_bridge.py`   | `schwab.streaming` LEVELONE_OPTIONS/EQUITIES subscription bridge. |
+
+## The local market-data store (`market_store.py`)
+
+`/quote`, `/quotes`, `/chains` and `/pricehistory` are thin adapters over
+`market_store.Gateway`; every decision lives there. Settings are
+`config/marketdata.toml`, read through `shared/marketdata_config.py` on every
+request (no restart). **It ships `mode = "shadow"`**: every request still goes
+to Schwab, and the gateway only records what `on` would have answered. `off`
+passes straight through; `on` answers repeats from memory. Anything else reads
+as `off`. Nothing is written to disk or Redis; a restart starts empty. Design:
+`docs/plans/2026-10-03-market-data-store-design.md`. The rules a caller must
+know are in the root `CLAUDE.md` ("The proxy can answer from memory").
+
+- **`maxAge=<seconds>`** on `/quote`, `/quotes` and `/chains` — the oldest
+  stored answer the caller accepts. ⚠ It is declared as TEXT on purpose: it is
+  a hint, and a value that is not a usable number (text, negative, NaN,
+  infinity) means "none given" and never fails the request with a 422. Capped
+  at an hour (`MAX_REQUEST_AGE_SEC`). `0` always fetches. With none given the
+  configured limit applies. `/pricehistory` takes none.
+- **`X-Caller` request header** — who is asking, for the per-caller counts.
+  Cut to letters, digits, `_`, `.` and `-`, 40 characters; missing is
+  `unknown`. ⚠ The name becomes a key in the per-day counts, so one process
+  counts at most 64 distinct names (`MAX_CALLER_NAMES`) and a new one past
+  that is `other`.
+- **`X-Store` / `X-Store-Age` response headers** on all four endpoints, in
+  every mode. `X-Store` is `hit` · `subset` · `coalesced` · `composed`
+  (answered locally) or `miss` · `partial` · `pass` (Schwab was called; `pass`
+  means the store played no part — mode `off` or `shadow`, an intraday series,
+  or a store fault). `X-Store-Age` is seconds since the data left Schwab,
+  stamped from when the fetch BEGAN.
+- **`/stats/api_calls`** returns two more keys. `store` is today's request
+  breakdown: `served_locally`, `by_outcome`, and `rows`
+  (`{endpoint, caller, outcome, n}`) — ⚠ `rows` lists at most the 500 largest
+  (`MAX_DETAIL_ROWS`) while both totals cover every row. `store_degrades` is
+  `{area: count}` of store faults since the process started that fell back to a
+  plain fetch; anything but empty is worth a look. `today` / `last_7_days` /
+  `last_30_days` still count calls SENT to Schwab: a local answer skips
+  `_rate_limit` and `api_call_counter.record`.
+- **A dead token answers 500 with a JSON `detail` body.** `api_request` raises
+  when the token cannot be made valid; `_upstream` turns that into an
+  `UpstreamError(500, ...)` so the gateway does not read it as a store fault
+  (which would count a degrade and make the call a second time).
+- In shadow mode the outcomes recorded beside `upstream` are `shadow_*` names
+  (`Gateway`'s docstring lists them); a would-be daily-bar hit is recorded as
+  `shadow_hit_match` / `shadow_hit_mismatch`. Shadow counts low, never high.
 
 **Streaming SSE fan-outs (2026-07-07).** The shared `_stream_worker` fans level-one ticks to SSE
 subscribers via **`/stream/quotes?symbols=…`** (equities — `_normalize_level1_equity` widened with

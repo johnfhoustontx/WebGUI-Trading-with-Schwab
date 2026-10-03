@@ -17,7 +17,10 @@
 #     pool overlaps only the FETCH, so each added symbol also costs a SERIAL
 #     engine calc + SQLite insert inside the 60-second budget; and each writes one
 #     gex_history.db row per poll, on a DB that has already needed a manual ~1 GB
-#     VACUUM.
+#     VACUUM. A symbol listed HERE is always fetched every minute. One collected
+#     only because it is on the watchlist costs about a third of that once the
+#     3-minute tail is switched on (config/marketdata.toml [collection]
+#     tail_interval_min, which ships at 1: every symbol every minute).
 #
 #   Edit + restart options_svc, market_svc and the webgui.
 # ─────────────────────────────────────────────────────────────────────────────

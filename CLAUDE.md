@@ -206,7 +206,7 @@ open migration item. Full design:
 
 | Folder                 | Role                                                        | UI status        |
 |------------------------|------------------------------------------------------------|------------------|
-| `schwab-proxy/`        | Central Schwab API gateway / token manager. **Start FIRST.**| backend, :8100   |
+| `schwab-proxy/`        | Central Schwab API gateway / token manager, plus an in-memory store of what it has fetched (`market_store.py`; it answers from that store only when `config/marketdata.toml` `mode = "on"`). **Start FIRST.**| backend, :8100   |
 | `options-scanner/`     | GEX/options scanner engines, scoring, paper engine, simulator. **`gex_history.db` stores FIVE view strings per symbol per minute** — `gex`/`charm`/`dex`/`vanna` plus **`prem`** (2026-08-15, per-strike traded premium from `flow_skew.premium_by_strike`, feeding the Premium Divergence strike ladder). `view` is free-form and a premium cell is `{call, put, net}` floats — exactly what the columnar float32 packer gates on — so the fifth view needed **no schema change**, and costs ~**+25%** on that DB. | engines only (Dash UI dropped) |
 | `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + `live_composite.py` (live intraday composite + bridge payload) + `publish_bridge.py` (headless bridge writer) + bridge + `sectors_ref.py`. **Its `market_calendar.py` was absorbed into `shared/market_calendar.py` and DELETED (2026-08-02)** — same module name and same three function names, but *inclusive* `prev/next_trading_day` vs the shared module's *exclusive*, an invisible one-day trap. | ported to NiceGUI `/sentiment` |
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
@@ -1692,8 +1692,9 @@ reuse. Daily candles are stamped at midnight **Central** (05:00/06:00 UTC), so
 converting keeps their date. A naive pandas `Timestamp.timestamp()` reads as
 UTC, which is why the Expected Move path's epoch-ms happened to come out right.
 
-**Four config files were extracted on 2026-08-21, and all four exist because the
-value was duplicated across modules that CANNOT import each other.** That is the
+**Four config files were extracted on 2026-08-21 and a fifth added 2026-10-03, and
+all five exist because the value is shared by modules that CANNOT import each
+other.** That is the
 test for whether a value belongs in a TOML here: a config file genuinely
 deduplicates a cross-tier constant, where moving a single-consumer constant just
 relocates it.
@@ -1704,6 +1705,7 @@ relocates it.
 | **`config/scanner.toml`** | selection floors — IV-rank minimums, per-VIX-regime credit floors, directional delta band, score cutoffs | `scanner_engine.py`, `signal_recorder.py`, `options_svc/compute.py` |
 | **`config/symbols.toml`** | the traded universe — GEX collection list, Net-Prem display groups, the BIG10 basket | `gex_collector.py`, `options_svc/net_premium.py`, `market_svc/symbols.py`, **and Tier-1 `webgui/pages/options/gamma.py`** |
 | **`config/sectors.toml`** | symbol → GICS sector, behind the paper engine's SECTOR cap. A file because nothing here derives a sector, and the workbook that existed covered 48 of 80 watchlist names | `shared/sectors.py`, read by `options-scanner/paper_concentration.py` |
+| **`config/marketdata.toml`** | the proxy's local market-data store — `mode` (`off` / `shadow` / `on`) and the age limits and size bounds for chains, quotes and daily bars — plus the autoscan's wide fetch (`[scan]`) and the collector's tail interval and carry limits (`[collection]`). ⚠ Read at CALL time through `shared/marketdata_config.py`, so a saved change needs **no restart** — the exception to trap (1) below | `schwab-proxy/market_store.py` (through `schwab_proxy`'s gateway), `options-scanner/scanner_engine.py`, `options_svc/compute.collection_tiers` (which hands the collector its tiers) |
 
 Plus **`config/sessions.toml` gained `[slots]`** — the scheduled Claude-analyze
 briefings, the thrice-daily action digest, the nightly momentum cascade, and the
@@ -3701,7 +3703,7 @@ real levers if a page feels sluggish or a service churns CPU/network. Audited
   fetched chain to the caller; `collect_gex_history` captures the currently-viewed
   symbol's chain (`_current_gamma_symbol`) into a CONSUME-ONCE stash
   (`_stash_tick_chain`/`_take_tick_chain`, 45 s TTL) that `gamma_snapshot` pops —
-  only the same-tick refresh reuses it; every other caller still fetches fresh.
+  only the same-tick refresh reuses it; every other caller still asks the proxy.
 - **The webgui watcher regressed twice as the app grew:** `_freshness_facts` was
   full-deserializing 4 payload envelopes (incl. `options:scan` a SECOND time) every
   2 s tick per tab — `cache_set` now writes a tiny `{key}:ts` side key (same
@@ -3791,7 +3793,58 @@ each), so sentiment's hourly sector P/C burst runs at **:38**
 Before scheduling a new chain fan-out, read the proxy's access log
 (`journalctl --user -u trading-prod-proxy`) for that minute. The skip warning is
 `scheduler branch 'gex' still running`. Other services' load never shows in
-options_svc's own log.
+options_svc's own log. With `config/marketdata.toml` `scan.wide_fetch` on (it
+ships off) the autoscan makes ONE chain request per symbol in place of three,
+for every symbol not listed in `scan.wide_fetch_exclude`.
+
+**The proxy can answer from memory, and six rules follow from it.**
+`schwab-proxy/market_store.py` keeps what the proxy fetched — chains, quotes,
+daily bars; memory only, empty after a restart — and `config/marketdata.toml`
+`mode` decides whether it is used: `off` passes every request to Schwab,
+`shadow` (the shipped value) still sends every request to Schwab and only counts
+what it WOULD have reused, `on` answers repeats locally. Design:
+[the doc](docs/plans/2026-10-03-market-data-store-design.md).
+
+1. **A local answer is not a Schwab call.** With the mode on, a repeat
+   `/chains`, `/quotes`, `/quote` or daily `/pricehistory` request is answered
+   from memory and skips both `_rate_limit` and `api_call_counter.record` — so
+   the per-day counter still means "calls sent to Schwab". Requests, local ones
+   included, are counted apart by endpoint, caller and outcome
+   (`api_calls_detail`). Intraday `/pricehistory` always goes to Schwab.
+2. **A chain is cut to a narrower date window only between PLAIN requests** —
+   every strike, both sides, a stated window (`ChainKey.plain`). A request
+   carrying `strikeCount`, a `range` other than `ALL` or one contract type is
+   exact-match only: the sector put/call ratio sums volume over the strikes it
+   receives, so extra strikes would change the ratio.
+3. **An entry never crosses a market-session change, and is never served past
+   its limit because Schwab failed.** An empty answer is never stored and an
+   empty cut is never served: for a window holding no expiration Schwab answers
+   200, `status: "SUCCESS"`, both maps empty and `underlyingPrice: 0.0`
+   (measured 2026-10-03), which a cut from a stored header cannot reproduce.
+   `scanner_engine.slice_chain` writes that 0.0 itself, because the scan funnel
+   reads the field.
+4. **A new caller states what it needs.** One that must have a real fetch sends
+   `maxAge=0`. A poller faster than the store's limit sends its own `maxAge`, or
+   it re-reads its own previous answer (the Market Dashboard's 3-second poll
+   sends 1; whenever the chain store is on, the collector sends
+   `collection.fresh_max_age_sec` for every symbol due a real fetch, with or
+   without a tail). A bare `requests.get` is counted as
+   caller `unknown` unless it sets `X-Caller` through `proxy_client.caller_label`.
+5. **The collector has two tiers once `collection.tail_interval_min` is above 1**
+   (it ships 1, and needs the chain store on). CORE symbols — `config/symbols.toml`
+   `[collection]`, the symbol open on Dealer Positioning, the public page's hot
+   symbols, the hedging-flow (HIRO) symbols and the gamma-flip alert's symbols —
+   get a real fetch every minute. A watchlist-only symbol gets one every Nth
+   minute; in between, its stored chain is CARRIED (`chain_carry.carry_chain`:
+   re-priced at the live quote, volume and premium as last fetched), written to
+   all five views, and **not passed to `on_chain`**. So a new detector that reads
+   volume must not assume one-minute data for watchlist-only symbols, and a new
+   consumer that needs a minute-fresh chain for a symbol must make that symbol
+   core in `compute.collection_tiers`.
+6. **A changed store rule goes through `shadow` before `on`.** Shadow makes
+   `on`'s decision with `on`'s limits and compares the answer with Schwab's. It
+   counts low — it cannot reproduce the wider-window refetch or two identical
+   requests sharing one call — never high.
 
 **Measure before you optimise a localhost read — twice now the estimate was the
 bug (2026-08-20).** The Desk's 11-view seed was audited as "~50-100 ms of event-loop
@@ -4107,6 +4160,8 @@ entries (plus `approval` and `dashboard_frontend`) went on 2026-09-19.
 - [`docs/plans/2026-08-17-sector-rotation-board-design.md`](docs/plans/2026-08-17-sector-rotation-board-design.md) — **Sector Rotation board** (diverging spread gauge, weight-proportional flow band, quadrant panels)
 - [`docs/plans/2026-08-17-rrg-plot-design.md`](docs/plans/2026-08-17-rrg-plot-design.md) — **RRG hand-drawn plot** (marker area = S&P weight, smoothed 5-reading trails; why the domain is computed and `vector-effect` unusable)
 - [`docs/plans/2026-08-17-momentum-guided-page-design.md`](docs/plans/2026-08-17-momentum-guided-page-design.md) — **Momentum guided page** (a numbered argument; leaderboard behind a toggle; the ragged `rank_history` trap)
+- [`docs/plans/2026-10-03-market-data-store-design.md`](docs/plans/2026-10-03-market-data-store-design.md) — **the proxy's local market-data store** (what one day's calls were, what a store can and cannot remove, the collector's two tiers, what review changed)
+- [`docs/plans/2026-10-03-market-data-store-plan.md`](docs/plans/2026-10-03-market-data-store-plan.md) — bite-sized TDD implementation plan for the above
 
 ## User-facing manuals
 

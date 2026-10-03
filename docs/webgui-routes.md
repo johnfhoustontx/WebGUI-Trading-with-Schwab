@@ -1156,8 +1156,8 @@ theme editor lifted out of General) and **Configuration**
 (`pages/config_editor.py`). Configuration draws every `config/*.toml` setting from
 the `webgui/config_schema.py` catalogue, grouped by purpose (Trade selection · Exits
 & trade management · Paper books · Flow alerts · Market hours & schedules ·
-Symbols & watchlists · Sector map · Commissions, plus Ports and Environments
-read-only): plain-English label and help per key, unit suffixes, fractions typed as
+Symbols & watchlists · Local market data · Sector map · Commissions, plus Ports and
+Environments read-only): plain-English label and help per key, unit suffixes, fractions typed as
 percents, inline validation that says why a value is refused, cross-field checks on
 Save, a per-key **Shipped: X** chip with a reset button, a per-category reset (it
 returns the editable keys only — `config_editor.reset_plan` carries a hand-written
@@ -1168,9 +1168,12 @@ file), logs each change to `config/local/changes.jsonl` (the "Recent changes"
 panel), and opens a restart dialog listing the units the changed keys need
 (`config_schema.restart_for`; `timers` means `generate_units --install`), warning
 during market hours. `test_config_schema.py` fails on any TOML key with no catalogue
-entry and round-trips every shipped value through its own field.
+entry and round-trips every shipped value through its own field. **Local market
+data** (`config/marketdata.toml`) declares no restart (`restart=()`): the proxy, the
+scanner and the options service read it when they use it, so a save applies at once.
+It ships with `mode = "shadow"`.
 
-General — the original page. Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound; ticker toggle/speed (the theme editor moved out to the Appearance sub-tab on 2026-09-19); **API usage** (2026-07-13) — outbound Schwab API-call counts Today / last 7 / last 30 days, read off-thread from the proxy's `GET /stats/api_calls`, **plus Claude (Anthropic) call counts** from the cross-tier `shared/anthropic_counter.py` store (`shared/data/anthropic_call_counts.db`, WAL — recorded immediately before every `messages.create` at each API-key call site; services need a restart to start counting) (counted per actual HTTP request at the marketdata rate-limit chokepoint + the trader loop → per-day rows in `schwab-proxy/data/api_call_counts.db`, forward-only; requires a proxy restart to start counting); **Maintenance** (2026-07-13) — a confirm-gated **Vacuum GEX history DB** button (optional purge-first switch — ⚠ since 2026-09-20 the confirm NAMES whether that switch is on, since it deletes every saved session but the last five) that runs `tools/vacuum_gex.py` as a subprocess off-thread and prints the before→after size — the tool still refuses while the collector is active)
+General — the original page. Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound; ticker toggle/speed (the theme editor moved out to the Appearance sub-tab on 2026-09-19); **API usage** (2026-07-13) — outbound Schwab API-call counts Today / last 7 / last 30 days, read off-thread from the proxy's `GET /stats/api_calls`, **plus an "Answered locally today" row** (`store.served_locally` — requests the proxy answered from its own market-data store, so they are NOT in the Schwab counts; zero while `config/marketdata.toml` `mode` is `shadow` or `off`; the row is drawn only when the proxy reports the field, and `settings.plan_stat_cells` builds its cell on the load that first reports it), **plus Claude (Anthropic) call counts** from the cross-tier `shared/anthropic_counter.py` store (`shared/data/anthropic_call_counts.db`, WAL — recorded immediately before every `messages.create` at each API-key call site; services need a restart to start counting) (counted per actual HTTP request at the marketdata rate-limit chokepoint + the trader loop → per-day rows in `schwab-proxy/data/api_call_counts.db`, forward-only; requires a proxy restart to start counting); **Maintenance** (2026-07-13) — a confirm-gated **Vacuum GEX history DB** button (optional purge-first switch — ⚠ since 2026-09-20 the confirm NAMES whether that switch is on, since it deletes every saved session but the last five) that runs `tools/vacuum_gex.py` as a subprocess off-thread and prints the before→after size — the tool still refuses while the collector is active)
 
 Appearance (`pages/appearance.py`, 2026-09-19) — every colour and font in **eight
 groups that follow the app's design standard, not `config/theme.toml`'s sections**:
