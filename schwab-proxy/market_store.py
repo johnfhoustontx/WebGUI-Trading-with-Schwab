@@ -628,3 +628,125 @@ class Gateway:
         # or with no expiration in the window: answer the request exactly as it
         # was asked.
         return self._passthrough("chains", "/chains", params, caller)
+
+    # ---- quotes ----------------------------------------------------------
+    def quotes(self, symbols_csv, caller, max_age=None) -> Served:
+        params = {"symbols": symbols_csv, "fields": "quote"}
+        mode = self._mode("quotes")
+        if mode == "off":
+            return self._passthrough("quotes", "/quotes", params, caller)
+        return self._guarded("quotes", "/quotes", params, caller,
+                             lambda: self._quotes(symbols_csv, caller, max_age, mode))
+
+    def _quotes(self, symbols_csv, caller, max_age, mode) -> Served:
+        cfg = self._cfg.section("quotes")
+        symbols = list(dict.fromkeys(
+            s for s in (part.strip() for part in str(symbols_csv).split(",")) if s))
+        if not symbols:
+            # Nothing to look up. Schwab answered this request before the
+            # store existed, so it still does.
+            return self._passthrough("quotes", "/quotes",
+                                     {"symbols": symbols_csv, "fields": "quote"},
+                                     caller)
+        limit = effective_max_age(
+            max_age, {"max_age_sec": cfg["max_age_sec"],
+                      "closed_max_age_sec": cfg["max_age_sec"]}, closed=False)
+        store = self.quote_store
+        fresh, missing, oldest = store.split(symbols, max_age=limit, now=self._clock())
+
+        def call(wanted):
+            return self._fetch("/quotes", {"symbols": ",".join(wanted),
+                                           "fields": "quote"})
+
+        if mode == "shadow":
+            data = call(symbols)
+            self._record("quotes", caller, "upstream")
+            if not missing:
+                self._record("quotes", caller, "shadow_hit")
+            store.put_many(data, now=self._clock())
+            return Served("pass", 0.0, data=data)
+
+        if not missing:
+            self._record("quotes", caller, "hit")
+            return Served("hit", oldest, data={s: fresh[s] for s in symbols})
+        data = call(missing)
+        store.put_many(data, now=self._clock())
+        kind = "partial" if fresh else "miss"
+        self._record("quotes", caller, "partial" if fresh else "upstream")
+        if not isinstance(data, dict):
+            return Served(kind, 0.0, data=data)
+        return Served(kind, 0.0, data={**fresh, **data})
+
+    # ---- daily bars ------------------------------------------------------
+    def pricehistory(self, params, caller) -> Served:
+        daily = (str(params.get("frequencyType")) == "daily"
+                 and str(params.get("needExtendedHoursData", "false")).lower() == "false")
+        mode = self._mode("bars") if daily else "off"
+        if mode == "off":
+            return self._passthrough("pricehistory", "/pricehistory", params, caller)
+        return self._guarded("pricehistory", "/pricehistory", params, caller,
+                             lambda: self._bars(params, caller, mode))
+
+    def _today_quote(self, symbol, cfg, now_ct):
+        """The stored quote today's bar may be built from or judged against,
+        or None. Only asked during the session in progress.
+
+        A quote fetched before today's regular open still carries the PRIOR
+        session's open, high and low. So the quote must be no older than the
+        configured limit AND no older than the session itself."""
+        opened = self._cal.regular_open_on(now_ct.date())
+        limit = min(float(cfg["today_quote_max_age_sec"]),
+                    (now_ct - opened).total_seconds())
+        if not limit > 0:
+            return None
+        return self.quote_store.get(symbol, max_age=limit, now=self._clock())
+
+    def _bars(self, params, caller, mode) -> Served:
+        cfg = self._cfg.section("bars")
+        now_ct = self._now_ct()
+        epoch = bar_epoch(now_ct, float(cfg["settle_min"]), self._cal)
+        live = epoch[1] == "live"
+        key = bar_key(params)
+        symbol = key[0]
+        store = self.bar_store
+
+        if mode == "shadow":
+            had = store.get(key, epoch=epoch)
+            data = self._fetch("/pricehistory", params)
+            self._record("pricehistory", caller, "upstream")
+            if had is not None:
+                self._record("pricehistory", caller, "shadow_hit")
+            if live:
+                quote = self._today_quote(symbol, cfg, now_ct)
+                verdict = compare_today_bar(data, quote, now_ct.date())
+                if verdict != "no_quote":
+                    self._record("pricehistory", caller, f"shadow_bar_{verdict}")
+            store.put(key, data, now=self._clock(), epoch=epoch)
+            return Served("pass", 0.0, data=data)
+
+        seen = store.get(key, epoch=epoch)
+        if seen is not None:
+            body, fetched_at = seen
+            age = self._clock() - fetched_at
+            if not live:
+                self._record("pricehistory", caller, "hit")
+                return Served("hit", age, body=body)
+            if self._cfg.today_bar() == "quote":
+                quote = self._today_quote(symbol, cfg, now_ct)
+                composed = (compose_today(json.loads(body), quote, now_ct.date())
+                            if quote is not None else None)
+                if composed is not None:
+                    self._record("pricehistory", caller, "composed")
+                    return Served("composed", 0.0, data=composed)
+            elif age <= float(cfg["session_ttl_sec"]):
+                self._record("pricehistory", caller, "hit")
+                return Served("hit", age, body=body)
+        with self._locks.get(("bars", key)):
+            again = store.get(key, epoch=epoch)
+            if again is not None and (seen is None or again[1] > seen[1]):
+                self._record("pricehistory", caller, "coalesced")
+                return Served("coalesced", self._clock() - again[1], body=again[0])
+            data = self._fetch("/pricehistory", params)
+            store.put(key, data, now=self._clock(), epoch=epoch)
+            self._record("pricehistory", caller, "upstream")
+        return Served("miss", 0.0, data=data)

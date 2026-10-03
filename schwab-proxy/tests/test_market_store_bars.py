@@ -15,7 +15,8 @@ FRI = dt.date(2026, 10, 2)
 
 
 class Cal:
-    """The four calendar calls ``bar_epoch`` makes."""
+    """The four calendar calls ``bar_epoch`` makes, and ``regular_open_on``,
+    which the gateway asks before it builds today's bar from a quote."""
     @staticmethod
     def is_trading_day(d):
         return d.weekday() < 5
@@ -23,6 +24,10 @@ class Cal:
     @staticmethod
     def regular_session_has_opened(now):
         return Cal.is_trading_day(now.date()) and now.time() >= dt.time(8, 30)
+
+    @staticmethod
+    def regular_open_on(d):
+        return dt.datetime.combine(d, dt.time(8, 30), tzinfo=CT)
 
     @staticmethod
     def regular_close_on(d):
