@@ -4879,6 +4879,39 @@ def _gth_symbols(now=None):
     return [s for s in gc.collection_symbols() if s in eligible]
 
 
+def collection_tiers(universe, *, base, capture=None, hiro=None):
+    """The collector's tiers for this poll, or None for "fetch everything every
+    minute" (see ``gex_collector.poll_once``).
+
+    The TAIL is every polled symbol that is collected only because it is on the
+    watchlist. Kept on the one-minute tier: the symbols named in
+    config/symbols.toml [collection] (``base``), the symbol open on the Dealer
+    Positioning page and the public page's hot symbols (``capture``), and the
+    hedging-flow symbols (``hiro``), whose rows are measured from fresh chains.
+
+    None unless the proxy's chain store is ON: in shadow or off, every request
+    reaches Schwab, so there is no stored chain to carry and nothing to gain.
+    Any trouble reading the settings is also None — the old behaviour."""
+    try:
+        from shared import marketdata_config as mdc
+
+        if mdc.mode() != "on" or not mdc.store_on("chains"):
+            return None
+        cfg = mdc.section("collection")
+        interval = int(cfg["tail_interval_min"])
+        if interval <= 1:
+            return None
+        core = set(base) | set(capture or ()) | set(hiro or ())
+        tail = frozenset(s for s in universe if s not in core)
+        if not tail:
+            return None
+        return {"tail": tail, "interval_min": interval,
+                "fresh_max_age_sec": int(cfg["fresh_max_age_sec"])}
+    except Exception:
+        _degrade.degraded("options.collection_tiers")
+        return None
+
+
 def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
     """Fetch + persist one snapshot round (GEX/Charm/DEX/Vanna + term) for the
     tracked symbols. Returns the number of symbols polled — normally
@@ -5028,8 +5061,15 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
                 if _r is not None:
                     _hiro_rows[sym] = _r
 
+        # Decided HERE, after the capture set and the hedging-flow symbols are
+        # known: both stay on the one-minute tier.
+        _universe = symbols if symbols is not None else gc.collection_symbols()
+        _tiers = collection_tiers(_universe, base=gc.SYMBOLS, capture=wanted,
+                                  hiro=_hiro_syms)
+        # Passed only when set: test doubles for poll_once predate the argument.
+        _poll_kw = {"tiers": _tiers} if _tiers else {}
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
-                     symbols=symbols, on_chain=on_chain)
+                     symbols=symbols, on_chain=on_chain, **_poll_kw)
         _write_hiro_rows(gh, conn, _hiro_ts, _hiro_rows)   # never raises
         gc.touch_lock(gc.LOCK_PATH, source="options_svc", owner=owner,
                       now=int(time.time()))
