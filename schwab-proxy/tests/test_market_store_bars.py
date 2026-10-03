@@ -145,3 +145,29 @@ def test_a_bar_schwab_sent_without_a_real_number_is_a_mismatch():
         odd = series(FRI, MON, close=102.0)
         odd["candles"][-1].update(high=103.0, low=99.5, close=junk)
         assert ms.compare_today_bar(odd, QUOTE, MON) == "mismatch"
+
+
+def _range_key(symbol):
+    return ms.bar_key({"symbol": symbol, "periodType": "year", "period": 1,
+                       "frequencyType": "daily", "frequency": 1})
+
+
+def test_the_oldest_series_are_dropped_past_the_bound():
+    s = ms.BarStore(max_entries=2)
+    a, b, c = (_range_key(sym) for sym in ("A", "B", "C"))
+    for i, k in enumerate((a, b, c)):
+        s.put(k, series(FRI, MON), now=500.0 + i, epoch=LIVE)
+    assert s.get(a, epoch=LIVE) is None
+    assert s.get(b, epoch=LIVE)[1] == 501.0 and s.get(c, epoch=LIVE)[1] == 502.0
+
+
+def test_putting_a_held_series_again_evicts_nothing_and_makes_it_the_newest():
+    s = ms.BarStore(max_entries=2)
+    a, b, c = (_range_key(sym) for sym in ("A", "B", "C"))
+    s.put(a, series(FRI, MON), now=500.0, epoch=LIVE)
+    s.put(b, series(FRI, MON), now=501.0, epoch=LIVE)
+    s.put(a, series(FRI, MON), now=502.0, epoch=LIVE)
+    assert s.get(a, epoch=LIVE)[1] == 502.0 and s.get(b, epoch=LIVE)[1] == 501.0
+    s.put(c, series(FRI, MON), now=503.0, epoch=LIVE)   # B is now the oldest
+    assert s.get(b, epoch=LIVE) is None
+    assert s.get(a, epoch=LIVE)[1] == 502.0 and s.get(c, epoch=LIVE)[1] == 503.0

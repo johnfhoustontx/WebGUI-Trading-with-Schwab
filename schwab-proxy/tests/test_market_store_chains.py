@@ -203,3 +203,78 @@ def test_cut_answers_from_the_wide_entry_whatever_its_age():
     body = json.loads(_store().cut(WIDE, NARROW))
     assert sorted(body["callExpDateMap"]) == ["2026-10-05:0", "2026-10-07:2", "2026-10-09:4"]
     assert ms.ChainStore().cut(WIDE, NARROW) is None
+
+
+# ---- gaps found by mutation testing ----------------------------------------
+
+def _three_keys():
+    return [ms.ChainKey(sym, from_date="2026-10-05", to_date="2026-10-12")
+            for sym in ("A", "B", "C")]
+
+
+def _held(s, key, now=1010.0):
+    return s.lookup(key, max_age=45, now=now, state="REGULAR") is not None
+
+
+def test_an_age_limit_of_zero_never_hits_even_at_age_zero():
+    s = _store()
+    assert s.lookup(WIDE, max_age=0, now=1000.0, state="REGULAR") is None
+    assert s.lookup(NARROW, max_age=0, now=1000.0, state="REGULAR") is None
+
+
+def test_an_age_limit_that_is_not_a_real_number_never_hits():
+    s = _store()
+    for bad in (float("inf"), float("nan"), True, None, "45"):
+        assert s.lookup(WIDE, max_age=bad, now=1000.5, state="REGULAR") is None
+        assert s.lookup(NARROW, max_age=bad, now=1000.5, state="REGULAR") is None
+
+
+def test_a_window_that_starts_after_the_request_does_not_cover_it():
+    s = ms.ChainStore()
+    late = ms.ChainKey("SPY", from_date="2026-10-06", to_date="2026-10-12")
+    s.put(late, chain(exps=EXPS[1:]), now=1000.0, state="REGULAR")
+    assert s.lookup(NARROW, max_age=45, now=1001.0, state="REGULAR") is None
+
+
+def test_an_unusable_limit_keeps_the_one_in_force():
+    s = ms.ChainStore(max_entries=10)
+    a, b, c = _three_keys()
+    for i, k in enumerate((a, b, c)):
+        s.put(k, chain(), now=1000.0 + i, state="REGULAR", max_entries=2)
+    # Held: B, C. Neither of these changes the bound of 2.
+    s.put(a, chain(), now=1004.0, state="REGULAR", max_entries="many")
+    assert not _held(s, b) and _held(s, c) and _held(s, a)
+    s.put(b, chain(), now=1005.0, state="REGULAR", max_entries=float("inf"))
+    assert not _held(s, c) and _held(s, a) and _held(s, b)
+
+
+def test_putting_a_held_chain_again_evicts_nothing_and_makes_it_the_newest():
+    s = ms.ChainStore(max_entries=2)
+    a, b, c = _three_keys()
+    s.put(a, chain(), now=1000.0, state="REGULAR")
+    s.put(b, chain(), now=1001.0, state="REGULAR")
+    s.put(a, chain(), now=1002.0, state="REGULAR")
+    assert _held(s, a) and _held(s, b)
+    s.put(c, chain(), now=1003.0, state="REGULAR")      # B is now the oldest
+    assert not _held(s, b) and _held(s, a) and _held(s, c)
+
+
+def test_an_empty_chain_is_never_stored():
+    # A transient empty reply must not be repeated for the whole age limit.
+    s = ms.ChainStore()
+    empty = {**chain(), "callExpDateMap": {}, "putExpDateMap": {}}
+    assert s.put(WIDE, empty, now=1000.0, state="REGULAR") is False
+    assert s.lookup(WIDE, max_age=45, now=1001.0, state="REGULAR") is None
+    assert s.lookup(NARROW, max_age=45, now=1001.0, state="REGULAR") is None
+
+
+def test_a_chain_with_one_empty_side_is_stored():
+    s = ms.ChainStore()
+    calls_only = {**chain(), "putExpDateMap": {}}
+    assert s.put(WIDE, calls_only, now=1000.0, state="REGULAR") is True
+    body = json.loads(s.lookup(WIDE, max_age=45, now=1001.0, state="REGULAR").body)
+    assert sorted(body["callExpDateMap"]) == sorted(EXPS) and body["putExpDateMap"] == {}
+    puts_only = {**chain(), "callExpDateMap": {}}
+    assert s.put(WIDE, puts_only, now=1002.0, state="REGULAR") is True
+    body = json.loads(s.lookup(WIDE, max_age=45, now=1003.0, state="REGULAR").body)
+    assert sorted(body["putExpDateMap"]) == sorted(EXPS) and body["callExpDateMap"] == {}

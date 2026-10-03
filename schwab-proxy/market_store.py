@@ -189,6 +189,8 @@ class ChainStore:
         calls, puts = payload.get("callExpDateMap"), payload.get("putExpDateMap")
         if not isinstance(calls, dict) or not isinstance(puts, dict):
             return False
+        if not calls and not puts:
+            return False    # an empty chain is refetched, never re-served
         try:
             entry = _ChainEntry(
                 key=key, fetched_at=now, state=state,
@@ -196,12 +198,15 @@ class ChainStore:
                 calls=_pack_side(calls), puts=_pack_side(puts))
         except (ValueError, TypeError):
             return False
+        bound = None
         if max_entries is not None:
             try:
-                self._max = max(1, int(max_entries))
-            except (TypeError, ValueError):
+                bound = max(1, int(max_entries))
+            except (TypeError, ValueError, OverflowError):
                 pass                      # keep the bound already in force
         with self._lock:
+            if bound is not None:
+                self._max = bound
             self._entries[key] = entry
             self._entries.move_to_end(key)
             while len(self._entries) > self._max:
@@ -210,8 +215,10 @@ class ChainStore:
 
     @staticmethod
     def _fresh(entry, max_age, now, state) -> bool:
+        if not _real_number(max_age) or max_age <= 0:
+            return False                  # NaN, infinity, a bool: no limit given
         age = now - entry.fetched_at
-        return entry.state == state and 0 <= age <= max_age and max_age > 0
+        return entry.state == state and 0 <= age <= max_age
 
     def lookup(self, key: ChainKey, *, max_age: float, now: float,
                state: str) -> Served | None:
@@ -251,7 +258,7 @@ class ChainStore:
                     and k.from_date == start and k.covers(key)]
         if not held:
             return None
-        return min(held, key=lambda e: (e.key.to_date, -e.fetched_at)).key
+        return min(held, key=lambda e: e.key.to_date).key
 
     def cut(self, wide: ChainKey, key: ChainKey) -> bytes | None:
         """``key``'s window out of the entry stored under ``wide``, regardless
@@ -269,11 +276,15 @@ class ChainStore:
 
 class QuoteStore:
     """Schwab's raw per-symbol quote blocks, each with its own fetch time.
-    Bounded by the app's symbol universe (about 900), so it needs no eviction."""
 
-    def __init__(self):
+    Bounded: past ``max_symbols`` the oldest-stored symbols are dropped (the
+    public pages let visitors choose symbols). Blocks are handed back by
+    reference, so callers must not mutate what they get back."""
+
+    def __init__(self, max_symbols: int = 5000):
         self._lock = threading.Lock()
-        self._quotes: dict = {}
+        self._quotes: "OrderedDict[str, tuple]" = OrderedDict()
+        self._max = max(1, int(max_symbols))
 
     def put_many(self, payload, *, now: float) -> None:
         if not isinstance(payload, dict):
@@ -283,15 +294,20 @@ class QuoteStore:
                 # "errors" is Schwab's invalid-symbols bucket, not a quote.
                 if symbol != "errors" and isinstance(block, dict):
                     self._quotes[symbol] = (block, now)
+                    self._quotes.move_to_end(symbol)
+            while len(self._quotes) > self._max:
+                self._quotes.popitem(last=False)
 
     def split(self, symbols, *, max_age: float, now: float):
         """``(fresh {symbol: block}, missing [symbol], oldest fresh age)``."""
         fresh, missing, oldest = {}, [], 0.0
+        # NaN, infinity or a bool is no limit at all: nothing is fresh.
+        limit = max_age if _real_number(max_age) and max_age > 0 else None
         with self._lock:
             for symbol in symbols:
                 got = self._quotes.get(symbol)
-                age = None if got is None else now - got[1]
-                if age is not None and max_age > 0 and 0 <= age <= max_age:
+                age = None if got is None or limit is None else now - got[1]
+                if age is not None and 0 <= age <= limit:
                     fresh[symbol] = got[0]
                     oldest = max(oldest, age)
                 else:
@@ -385,11 +401,13 @@ def compare_today_bar(upstream, quote, today) -> str:
 
 
 class BarStore:
-    """Daily price series, one per (symbol, range), valid for one bar period."""
+    """Daily price series, one per (symbol, range), valid for one bar period.
+    Bounded: past ``max_entries`` the oldest-stored series are dropped."""
 
-    def __init__(self):
+    def __init__(self, max_entries: int = 4000):
         self._lock = threading.Lock()
-        self._entries: dict = {}
+        self._entries: "OrderedDict[tuple, tuple]" = OrderedDict()
+        self._max = max(1, int(max_entries))
 
     def put(self, key, payload, *, now: float, epoch) -> None:
         if not isinstance(payload, dict) or not payload.get("candles"):
@@ -398,6 +416,9 @@ class BarStore:
             json.dumps(payload, separators=(",", ":")).encode(), 1)
         with self._lock:
             self._entries[key] = (blob, now, epoch)
+            self._entries.move_to_end(key)
+            while len(self._entries) > self._max:
+                self._entries.popitem(last=False)
 
     def get(self, key, *, epoch):
         """``(JSON bytes, fetched_at)`` for this period, or None."""
