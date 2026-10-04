@@ -107,6 +107,24 @@ def reset_fake_bus() -> None:
     _fake_servers.clear()
 
 
+def env_password(url: str, environ=None):
+    """The stack password to authenticate ``url`` with, or None.
+
+    Only a URL that carries NO credential of its own gets it. A URL naming a
+    user or a password is a different identity (the public screens' read-only
+    ACL user), and handing it the admin password as well is how a URL with a
+    user and no password ended up authenticating as the stack's full read/write
+    user (audit SE-04). redis-py already lets a password in the URL win; this
+    makes the rule explicit and covers the user-only case."""
+    import urllib.parse
+
+    environ = os.environ if environ is None else environ
+    parts = urllib.parse.urlsplit(url or "")
+    if parts.username or parts.password:
+        return None
+    return environ.get("MEMURAI_PASSWORD") or None
+
+
 class Bus:
     def __init__(self, fake: bool = False, url: str | None = None):
         if fake or os.environ.get("PYTEST_CURRENT_TEST"):
@@ -130,9 +148,9 @@ class Bus:
             # Optional Memurai/Redis auth (backward-compatible): when MEMURAI_PASSWORD is
             # set AND Memurai is configured with `requirepass`, every service authenticates
             # with it. Unset → password=None → no AUTH, exactly as before.
+            target = url or MEMURAI_URL
             self._r = redis.Redis.from_url(
-                url or MEMURAI_URL, decode_responses=True,
-                password=os.environ.get("MEMURAI_PASSWORD") or None)
+                target, decode_responses=True, password=env_password(target))
         self._groups: set = set()  # (stream, group) consumer groups already ensured
 
     # --- versioned cache -------------------------------------------------

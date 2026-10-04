@@ -213,14 +213,29 @@ split is about what an RCE in NiceGUI would cost, not about a live bug.
 ```bash
 umask 077 && cat > /home/administrator/prod/.env.live <<'EOF'
 REDIS_LIVE_URL=redis://live:<the ACL user's password>@127.0.0.1:6379/0
-MEMURAI_PASSWORD=<the same value as in .env>
 EOF
 ```
+
+⚠ **`MEMURAI_PASSWORD` does not belong in this file.** It is the stack's admin
+Redis password, and this is the one process on the public internet. It was
+listed here until 2026-10-04; **if your `.env.live` still has that line, delete
+it** and restart `trading-prod-webgui_live`. Nothing reads it: a URL that names
+its own user is never given the stack password (`shared.bus.client.env_password`).
 
 | Key | Read by | Notes |
 |---|---|---|
 | `REDIS_LIVE_URL` | `webgui/live_main.py` and nothing else | the read-only Redis ACL user. **Unset or empty, `live_main` refuses to serve in prod** — the Bus would otherwise fall back to the stack's ordinary full read/write credential, on an origin with no login |
-| `MEMURAI_PASSWORD` | `shared/bus` | only used when `REDIS_LIVE_URL` names a user **without** a password. A password inside the URL wins over the kwarg the Bus passes (verified against redis-py 8) |
+
+
+**Two checks run before the public process serves in prod**, and either one
+stops it (the unit fails, with the reason in its journal):
+
+1. `REDIS_LIVE_URL` must name a user, and not `default`. A URL with no user is
+   the default user, which is the stack's full read/write identity.
+2. The process asks Redis: it tries one write to a cache key and one to a
+   command stream. **Both must be refused.** If either goes through, or Redis
+   does not answer after six tries five seconds apart, it does not serve. This
+   is the check a URL that merely looks right cannot pass.
 
 ⚠ **The DB index is in the URL**, so it bypasses the `redis_db` the profile
 selects. Prod is `/0`, **dev is `/1`**. Copying prod's line into dev's file aims

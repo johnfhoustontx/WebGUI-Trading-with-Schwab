@@ -289,3 +289,19 @@ def test_cache_set_ttl_refreshes_on_rewrite():
     b._r.expire("cache:test:ttl2", 5)                  # simulate near-expiry
     b.cache_set("cache:test:ttl2", {"n": 2}, ttl=60)
     assert b._r.ttl("cache:test:ttl2") > 5
+
+
+# --- SE-04: a URL that names its own credential never gets the admin password --
+
+def test_a_url_with_its_own_credential_is_not_given_the_admin_password():
+    from shared.bus import client
+    assert client.env_password("redis://live:pw@h:6379/0", {"MEMURAI_PASSWORD": "admin"}) is None
+    assert client.env_password("redis://live@h:6379/0", {"MEMURAI_PASSWORD": "admin"}) is None
+    assert client.env_password("redis://:pw@h:6379/0", {"MEMURAI_PASSWORD": "admin"}) is None
+
+
+def test_a_bare_url_still_authenticates_with_the_stack_password():
+    from shared.bus import client
+    assert client.env_password("redis://h:6379/0", {"MEMURAI_PASSWORD": "admin"}) == "admin"
+    assert client.env_password("redis://h:6379/0", {}) is None
+    assert client.env_password("redis://h:6379/0", {"MEMURAI_PASSWORD": ""}) is None

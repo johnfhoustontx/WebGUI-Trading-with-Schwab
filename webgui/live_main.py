@@ -51,6 +51,7 @@ import logging
 import os
 import pathlib
 import sys
+import time
 import urllib.parse
 
 _HERE = pathlib.Path(__file__).resolve().parent
@@ -151,8 +152,27 @@ def require_acl_url(url, env_name=ENV_NAME):
 
     ⚠ Called from the ``__main__`` block, NOT from the module body. Import must
     stay possible without the credential (see :func:`resolve_acl_url`).
+
+    **Set is not enough: the URL must name a user that is not ``default``.** A
+    URL with no user IS the default user, and that is the stack's full
+    read/write identity (audit SE-04). Whether the named user can in fact write
+    is :func:`require_read_only`'s question, asked of the server itself.
     """
     if url:
+        user = acl_user(url)
+        if user and user.lower() != "default":
+            return
+        problem = (
+            f"{ACL_URL_VAR} does not name a read-only user: it connects as the "
+            f"DEFAULT Redis user, which is the stack's full read/write identity.")
+        if env_name == "prod":
+            raise SystemExit(
+                f"refusing to serve the PUBLIC live screens: {problem}\n"
+                f"Put the read-only ACL user in the URL "
+                f"(redis://live:<password>@127.0.0.1:6379/<db>) in this "
+                f"checkout's .env.live and restart.")
+        log.warning("%s Allowed because this is the %r checkout; prod refuses.",
+                    problem, env_name)
         return
     if env_name == "prod":
         raise SystemExit(
@@ -165,6 +185,92 @@ def require_acl_url(url, env_name=ENV_NAME):
         "serving the public live screens WITHOUT %s. Allowed because this is "
         "the %r checkout, whose live origin is not fronted by the edge; prod "
         "refuses.", ACL_URL_VAR, env_name)
+
+
+def acl_user(url):
+    """The user a Redis URL names, or None."""
+    try:
+        return urllib.parse.urlsplit(url or "").username or None
+    except ValueError:
+        return None
+
+
+# Where the probe tries to write: a cache key (what a write credential could
+# overwrite) and a command stream (what it could enqueue). A key outside both
+# would be refused by the ACL's key patterns alone and prove nothing.
+PROBE_CACHE_KEY = "cache:__live_acl_probe__"
+PROBE_STREAM = "cmd:__live_acl_probe__"
+
+# How long to keep trying when Redis does not answer before giving up.
+PROBE_TRIES = 6
+PROBE_WAIT_SEC = 5.0
+
+
+def write_probe(client) -> str:
+    """Ask the SERVER whether this credential can write.
+
+    ``denied`` - both writes were refused, which is the only passing answer;
+    ``allowed`` - at least one write went through (and was removed again);
+    ``unreachable`` - Redis did not answer, so nothing is known.
+
+    This is the one check that cannot be satisfied by configuration that merely
+    looks right: the URL's user name is what the operator typed, and this is
+    what Redis does with it.
+    """
+    import redis
+
+    wrote = []
+    for attempt, key in ((lambda: client.set(PROBE_CACHE_KEY, "1", ex=5), PROBE_CACHE_KEY),
+                         (lambda: client.xadd(PROBE_STREAM, {"probe": "1"}, maxlen=1),
+                          PROBE_STREAM)):
+        try:
+            attempt()
+            wrote.append(key)
+        except redis.exceptions.NoPermissionError:
+            continue
+        except redis.exceptions.ResponseError as exc:
+            if "NOPERM" in str(exc).upper():
+                continue
+            return "unreachable"
+        except Exception:  # noqa: BLE001 - a connection fault, a timeout
+            return "unreachable"
+    if not wrote:
+        return "denied"
+    try:
+        client.delete(*wrote)
+    except Exception:  # noqa: BLE001 - the cache key expires; the stream is inert
+        pass
+    return "allowed"
+
+
+def require_read_only(probe, env_name=ENV_NAME):
+    """Refuse to SERVE prod's public origin with a credential that can write.
+
+    ``probe`` is a zero-argument callable returning :func:`write_probe`'s
+    answer. In prod only ``denied`` serves: ``allowed`` refuses at once, and
+    ``unreachable`` is retried (Redis may still be starting) and then refused,
+    because an answer nobody got is not a pass. Dev warns and serves, for the
+    reason :func:`require_acl_url` gives.
+    """
+    answer = "unreachable"
+    for attempt in range(PROBE_TRIES):
+        answer = probe()
+        if answer != "unreachable" or env_name != "prod":
+            break
+        if attempt + 1 < PROBE_TRIES:
+            time.sleep(PROBE_WAIT_SEC)
+    if answer == "denied":
+        return
+    what = ("the Redis credential in %s can WRITE" % ACL_URL_VAR
+            if answer == "allowed" else
+            "Redis did not answer, so the credential's rights could not be checked")
+    if env_name == "prod":
+        raise SystemExit(
+            f"refusing to serve the PUBLIC live screens: {what}.\n"
+            f"The public process must connect as an ACL user that can read and "
+            f"subscribe only (docs/dev-prod-environments.md, section 2 step 4b).")
+    log.warning("%s. Allowed because this is the %r checkout; prod refuses "
+                "to serve unless a write is denied.", what, env_name)
 
 
 # ── The refusals, installed before any page module is imported ───────────────
@@ -427,6 +533,9 @@ if __name__ in {"__main__", "__mp_main__"}:
     # the server is listening has already served the first anonymous request
     # with the stack's write credential in hand.
     require_acl_url(_ACL_URL)
+    # And ask Redis itself: a URL that names a user says nothing about what the
+    # user may do. Prod serves only when a write is refused.
+    require_read_only(lambda: write_probe(bus_client.bus()._r))
     # 127.0.0.1 only. Caddy terminates TLS for LIVE_HOST and is the only thing
     # that should ever talk to this port — the same rule the app follows, and
     # for the same reason. ⚠ Never widen this to 0.0.0.0.

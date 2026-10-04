@@ -839,17 +839,30 @@ def test_the_refusal_runs_before_the_server_starts():
 # way the unit does. A consumer-side assertion never driven from the producer
 # proves nothing -- CLAUDE.md's ``signal_band`` incident is the standing example.
 
+# The child also needs a Redis to ask "can this credential write?" (SE-04), and
+# the box running the suite has none. ``LIVE_TEST_REDIS`` stands one in at the
+# client class: ``deny`` refuses every write the way an ACL user does, ``allow``
+# accepts them the way the admin user would. Unset, the real client is used and
+# nothing answers.
 _SERVE_PROBE = (
-    "import runpy, sys, nicegui.ui;"
+    "import os, runpy, sys, nicegui.ui, redis;"
     "nicegui.ui.run = lambda *a, **k: print('SERVED');"
+    "mode = os.environ.get('LIVE_TEST_REDIS');\n"
+    "def _write(self, *a, **k):\n"
+    "    if mode == 'deny':\n"
+    "        raise redis.exceptions.NoPermissionError('NOPERM')\n"
+    "    return 1\n"
+    "if mode:\n"
+    "    redis.Redis.set = _write; redis.Redis.xadd = _write; redis.Redis.delete = _write\n"
     "runpy.run_path(sys.argv[1], run_name='__main__')"
 )
 
 
-def _serve(acl_url):
+def _serve(acl_url, redis_mode="deny"):
     """Run ``live_main.py`` as ``__main__`` with ``ui.run`` stubbed out."""
     env = _child_env()
     env.pop("REDIS_LIVE_URL", None)
+    env["LIVE_TEST_REDIS"] = redis_mode
     # The child must NOT present as pytest: repo_paths keys that off
     # ``"pytest" in sys.modules``, and under it ENV_NAME is pinned to prod
     # regardless of the marker -- which is what makes the dev branch reachable.
@@ -878,6 +891,24 @@ def test_a_real_prod_process_serves_once_the_acl_user_is_given():
     out = _serve(f"redis://live:pw@127.0.0.1:6379/{repo_paths.REDIS_DB}")
     assert out.returncode == 0, out.stderr
     assert "SERVED" in out.stdout, out.stdout
+
+
+def test_a_real_prod_process_will_not_serve_with_a_credential_that_can_write():
+    """SE-04, from the entrypoint: the URL names a user and looks right, and
+    the server lets that user write. It must never reach ``ui.run``."""
+    import repo_paths
+    out = _serve(f"redis://live:pw@127.0.0.1:6379/{repo_paths.REDIS_DB}",
+                 redis_mode="allow")
+    assert out.returncode != 0, f"served with a write credential: {out.stdout!r}"
+    assert "SERVED" not in out.stdout
+    assert "WRITE" in out.stderr, out.stderr
+
+
+def test_a_real_prod_process_will_not_serve_as_the_default_user():
+    import repo_paths
+    out = _serve(f"redis://127.0.0.1:6379/{repo_paths.REDIS_DB}")
+    assert out.returncode != 0 and "SERVED" not in out.stdout
+    assert "default" in out.stderr.lower(), out.stderr
 
 
 
@@ -952,3 +983,134 @@ def test_the_filter_is_installed_after_every_refusal():
     last_layer = max(freeze, publish)
     assert min(imports) > last_layer and install > last_layer, (
         "the filter arrives before the read-only layers are in place")
+
+
+# --- SE-04: the credential must be a named user, and must not be able to write ---
+# ``REDIS_LIVE_URL`` being SET proved nothing about what it could do. A URL with
+# no user is the DEFAULT user, and the Bus then authenticated it with the admin
+# password from the environment: the read-only layer was absent while the
+# startup check passed.
+
+@pytest.mark.parametrize("url", [
+    "redis://127.0.0.1:6379/0",                 # no user at all
+    "redis://:adminpw@127.0.0.1:6379/0",        # a password for the default user
+    "redis://default:adminpw@127.0.0.1:6379/0",
+    "redis://DEFAULT:adminpw@127.0.0.1:6379/0",
+])
+def test_prod_refuses_a_url_that_is_the_default_user(url):
+    live_main = _live_main()
+    with pytest.raises(SystemExit) as exc:
+        live_main.require_acl_url(url, env_name="prod")
+    assert "default" in str(exc.value).lower()
+
+
+def test_dev_only_warns_about_a_default_user(caplog):
+    live_main = _live_main()
+    with caplog.at_level("WARNING", logger="webgui.live"):
+        assert live_main.require_acl_url("redis://127.0.0.1:6379/1", env_name="dev") is None
+    assert "default" in caplog.text.lower()
+
+
+class _Denied(Exception):
+    pass
+
+
+class _FakeRedis:
+    """Stands in for the raw client: ``writes`` lists what was allowed."""
+
+    def __init__(self, allow=(), unreachable=False):
+        self.allow, self.unreachable, self.writes = set(allow), unreachable, []
+
+    def _try(self, op, key):
+        if self.unreachable:
+            raise ConnectionError("no route to redis")
+        if op in self.allow:
+            self.writes.append((op, key))
+            return True
+        import redis
+        raise redis.exceptions.NoPermissionError("NOPERM")
+
+    def set(self, key, value, ex=None):
+        return self._try("set", key)
+
+    def xadd(self, key, fields, maxlen=None):
+        return self._try("xadd", key)
+
+    def delete(self, *keys):
+        self.writes.append(("delete", keys))
+        return 1
+
+
+def test_a_credential_that_is_denied_every_write_passes():
+    live_main = _live_main()
+    assert live_main.write_probe(_FakeRedis()) == "denied"
+
+
+@pytest.mark.parametrize("allow", [{"set"}, {"xadd"}, {"set", "xadd"}])
+def test_a_credential_that_can_write_is_caught(allow):
+    live_main = _live_main()
+    client = _FakeRedis(allow=allow)
+    assert live_main.write_probe(client) == "allowed"
+    assert any(op == "delete" for op, _ in client.writes), "the probe key was left behind"
+
+
+def test_the_probe_writes_where_it_matters():
+    """A cache key and a command stream: the two things a write credential
+    could damage. A key outside both would be denied by the key pattern alone
+    and prove nothing about the commands."""
+    live_main = _live_main()
+    client = _FakeRedis(allow={"set", "xadd"})
+    live_main.write_probe(client)
+    keys = [k for op, k in client.writes if op in ("set", "xadd")]
+    assert any(k.startswith("cache:") for k in keys)
+    assert any(k.startswith("cmd:") for k in keys)
+
+
+def test_an_unreachable_redis_is_not_a_pass():
+    live_main = _live_main()
+    assert live_main.write_probe(_FakeRedis(unreachable=True)) == "unreachable"
+
+
+def test_prod_refuses_to_serve_with_a_credential_that_can_write():
+    live_main = _live_main()
+    with pytest.raises(SystemExit) as exc:
+        live_main.require_read_only(lambda: "allowed", env_name="prod")
+    assert "WRITE" in str(exc.value)
+
+
+def test_prod_refuses_when_it_cannot_check(monkeypatch):
+    live_main = _live_main()
+    monkeypatch.setattr(live_main.time, "sleep", lambda s: None)
+    calls = []
+
+    def probe():
+        calls.append(1)
+        return "unreachable"
+
+    with pytest.raises(SystemExit):
+        live_main.require_read_only(probe, env_name="prod")
+    assert len(calls) > 1, "one failed connection must be retried before refusing"
+
+
+def test_prod_serves_once_the_write_is_denied(monkeypatch):
+    live_main = _live_main()
+    monkeypatch.setattr(live_main.time, "sleep", lambda s: None)
+    answers = iter(["unreachable", "denied"])
+    assert live_main.require_read_only(lambda: next(answers), env_name="prod") is None
+
+
+def test_dev_warns_and_serves_whatever_the_probe_says(caplog):
+    live_main = _live_main()
+    with caplog.at_level("WARNING", logger="webgui.live"):
+        assert live_main.require_read_only(lambda: "allowed", env_name="dev") is None
+    assert "write" in caplog.text.lower()
+
+
+def test_the_write_check_also_runs_before_the_server_starts():
+    tree = ast.parse(_LIVE_MAIN.read_text(encoding="utf-8"))
+    guards = [n for n in tree.body if isinstance(n, ast.If)]
+    calls = [n.func.attr if isinstance(n.func, ast.Attribute) else n.func.id
+             for g in guards for n in ast.walk(g) if isinstance(n, ast.Call)
+             and isinstance(n.func, (ast.Name, ast.Attribute))]
+    assert "require_read_only" in calls
+    assert calls.index("require_read_only") < calls.index("run")
