@@ -642,6 +642,11 @@ def _composite_gate(live, snaps):
     if not snap:
         return None
     comp = snap.get("composite") or {}
+    if "total_score" in comp and comp["total_score"] is None:
+        # The producer's own "no reading" (every fetch failed). That is a
+        # shape, not drift: raising here would abort the refresh and leave the
+        # cache holding the last good composite (audit AC-60).
+        return None
     total = float(comp["total_score"])  # KeyError/ValueError -> drift caught
     bias = str(comp.get("bias", ""))
     components = dict(snap.get("component_scores") or {})

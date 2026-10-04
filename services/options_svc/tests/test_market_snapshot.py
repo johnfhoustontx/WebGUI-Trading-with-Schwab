@@ -195,3 +195,20 @@ def test_market_snapshot_doc_never_raises_on_junk_payloads():
                            derived=None, snaps=None)
     ms.market_snapshot_doc({"categories": [None]}, "x", 3, [], {"points": None},
                            {"points": [None, "x"]}, derived="nope", snaps="nope")
+
+
+# --- AC-60: a live composite with no total is no Day reading ------------------
+
+def test_the_day_arc_is_empty_when_the_live_composite_has_no_total():
+    """The live block exists and says it has no reading. The Day arc must not
+    fall back to the newest stored session and draw yesterday as today."""
+    snaps = [{"composite": {"total_score": "7.00"}}] * 3
+    arcs = ms.sentiment_arcs({"total_score": None, "bias": None}, snaps)
+    assert arcs[0]["value"] is None
+    assert arcs[1]["value"] == 70.0          # Week and Month are history's
+
+
+def test_the_day_arc_still_uses_the_newest_session_when_nothing_is_live():
+    snaps = [{"composite": {"total_score": "7.00"}}] * 3
+    assert ms.sentiment_arcs({}, snaps)[0]["value"] == 70.0
+    assert ms.sentiment_arcs(None, snaps)[0]["value"] == 70.0

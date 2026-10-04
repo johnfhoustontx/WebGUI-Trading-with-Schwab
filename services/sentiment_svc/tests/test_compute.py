@@ -1166,9 +1166,13 @@ def _dead_live():
     return live_composite.compute_live(_DeadClient(), _SECTORS)
 
 
-def test_a_dead_feed_snapshot_is_the_shape_this_guards_against():
+def test_a_dead_feed_snapshot_carries_no_total():
+    """With every fetch failing there is no composite, and the snapshot says so:
+    ``total_score`` is None. It was the string "0.00", which every screen that
+    formats the number drew as a real reading at the bottom of the scale - the
+    band words were fixed by AC-40, the NUMBER by this (audit AC-60)."""
     live = _dead_live()
-    assert live["composite"]["total_score"] == "0.00"
+    assert live["composite"]["total_score"] is None
     assert live["composite"]["aggregate_confidence"] == 0.0
 
 

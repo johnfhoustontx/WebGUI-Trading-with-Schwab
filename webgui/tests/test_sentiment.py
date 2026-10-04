@@ -1171,3 +1171,25 @@ def test_the_console_modules_carry_no_page_scoped_surface_token():
                          if not l.lstrip().startswith("#"))
         for token in retired:
             assert token not in body, f"{token} still lives in {name}"
+
+
+# --- AC-60: a composite with no total draws a dash, never 0.00 ----------------
+
+def test_total_text_is_a_dash_without_a_reading():
+    assert S.total_text({"total_score": None}) == "—"
+    assert S.total_text({}) == "—"
+    assert S.total_text({"total_score": "n/a"}) == "—"
+    assert S.total_text({"total_score": float("nan")}) == "—"
+
+
+def test_total_text_formats_a_real_reading():
+    assert S.total_text({"total_score": "6.30"}) == "6.30"
+    assert S.total_text({"total_score": 4.456}) == "4.46"
+
+
+def test_tiles_show_no_change_when_today_has_no_total():
+    """It printed ``0 - yesterday``: a dead feed after a 6.20 session read
+    "-6.20" in the Change tile."""
+    t = S.tiles({"composite": {"total_score": None}}, 6.2)
+    assert t["change"] == "—"
+    assert t["yesterday"] == "6.20"

@@ -1349,3 +1349,29 @@ def test_a_malformed_momentum_payload_is_not_published(monkeypatch, caplog):
     handlers._MOMENTUM["session"] = None
     handlers.refresh_momentum(bus, session_date="2026-08-20", force=True)
     assert bus.cache_get(handlers.CACHE_MOMENTUM) is None   # nothing published
+
+
+# --- AC-60: a dead feed publishes no total, and the refresh still completes ---
+
+def test_the_gate_accepts_a_snapshot_that_says_it_has_no_total():
+    """``total_score: None`` is the producer's own "no reading". The gate exists
+    to catch shape DRIFT; raising on this would abort the refresh and freeze the
+    cache on the last good composite, which is the worse failure."""
+    assert handlers._composite_gate(_fake_live(total=None), []) is None
+
+
+def test_the_gate_still_trips_on_a_total_that_is_missing_or_junk():
+    import pytest
+    for bad in (_fake_live(total="oops"), {"composite": {"bias": "Neutral"}}):
+        with pytest.raises(Exception):
+            handlers._composite_gate(bad, [])
+
+
+def test_a_dead_feed_refresh_publishes_the_dead_reading(monkeypatch):
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(total=None, bias=None),
+                   snaps=[{"date": "2026-06-15",
+                           "composite": {"total_score": "7.80"}}], spy=[1.0])
+    handlers.refresh(bus, with_sectors=False)
+    env = bus.cache_get(handlers.CACHE_COMPOSITE)
+    assert env.payload["live"]["composite"]["total_score"] is None

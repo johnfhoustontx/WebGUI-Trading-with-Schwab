@@ -387,14 +387,18 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
     composite, agg = scoring_composite.blend(scores, confs, WEIGHTS)
     # No band without a reading: with every fetch failed the blend is 0.0 at
     # zero confidence, and ``signal_band(0.0)`` is "0.70x / Short".
+    # No number either (audit AC-60). The total is published as None rather
+    # than "0.00": every screen that formats it would otherwise draw a real
+    # reading at the bottom of the scale for what is an outage.
     if composite_reading({"total_score": composite, "aggregate_confidence": agg}) is None:
-        modifier, bias = None, None
+        modifier, bias, total_text = None, None, None
     else:
         modifier, bias, _sig = signal_band(composite)
+        total_text = f"{composite:.2f}"
     return {
         "date": date.today().isoformat(),
         "source": "live",
-        "composite": {"total_score": f"{composite:.2f}", "bias": bias,
+        "composite": {"total_score": total_text, "bias": bias,
                       "size_modifier": modifier, "aggregate_confidence": round(agg, 3)},
         "component_scores": {**scores, "credit_pulse": 0.0},
         "component_confidence": {**{k: round(v, 3) for k, v in confs.items()}, "credit_pulse": 0.0},

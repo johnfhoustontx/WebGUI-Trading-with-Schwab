@@ -529,11 +529,25 @@ def component_table_rows(snapshot, weights=None, rotation_value=None, sector_val
     return rows
 
 
+def _total_or_none(comp):
+    """The composite total as a finite number, or None. A dead feed publishes
+    ``total_score: None``; junk and non-finite values read the same way."""
+    v = _safe_float((comp or {}).get("total_score"), None)
+    return v if v is not None and math.isfinite(v) else None
+
+
+def total_text(comp) -> str:
+    """The composite total as the console prints it: two decimals, or a dash
+    when there is no reading. Never 0.00 for an absent one (audit AC-60)."""
+    v = _total_or_none(comp)
+    return "—" if v is None else f"{v:.2f}"
+
+
 def tiles(latest, prev_total, band=None):
     """Signal tiles. ``band`` = service-computed ``(size, bias, signal)`` from
     ``derived`` (size_modifier/bias/signal); when absent, those three show '—'."""
     comp = latest.get("composite") or {}
-    total = _safe_float(comp.get("total_score"))
+    total = _total_or_none(comp)
     if band:
         size, bias, signal = band
     else:
@@ -542,7 +556,9 @@ def tiles(latest, prev_total, band=None):
         yest, change = "—", "—"
     else:
         yest = f"{_safe_float(prev_total):.2f}"
-        change = f"{total - _safe_float(prev_total):+.2f}"
+        # No total today is no change, not "0 minus yesterday".
+        change = ("—" if total is None
+                  else f"{total - _safe_float(prev_total):+.2f}")
     return {"modifier": size, "bias": bias, "signal": signal,
             "yesterday": yest, "change": change}
 
@@ -941,7 +957,6 @@ def render():
             return
         latest = live or snaps[-1]
         comp = latest.get("composite") or {}
-        total = _safe_float(comp.get("total_score"))
         # Prior series: when showing live, today=live and the prior series is
         # the full backfill (all completed sessions); when showing backfill,
         # exclude the last (it's "today").
@@ -962,7 +977,7 @@ def render():
             "trend_arcs": trend_arcs(derived),
             "bias": comp.get("bias"),
             "bias_picture": band_word_picture("bias", comp.get("bias")),
-            "total": f"{total:.2f}",
+            "total": total_text(comp),
             "confidence": _safe_float(comp.get("aggregate_confidence"), None),
             "trend_short": _TREND_SHORT.get(_trend.get("state"), ""),
             "trend_picture": trend_picture(_trend.get("state")),

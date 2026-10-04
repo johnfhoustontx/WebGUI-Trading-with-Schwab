@@ -111,8 +111,12 @@ def sentiment_arcs(sentiment, snaps):
     two horizons ``/sentiment`` shows, and the reason the handler also reads
     ``cache:sentiment:history``."""
     snaps = [s for s in (snaps or []) if isinstance(s, dict)]
-    day = _num((sentiment or {}).get("total_score"))
-    if day is None and snaps:
+    live = sentiment if isinstance(sentiment, dict) else {}
+    day = _num(live.get("total_score"))
+    # The newest stored session stands in only when NOTHING is live. A live
+    # composite that says it has no total (a dead feed publishes None) is no
+    # Day reading; drawing yesterday there would call it today (audit AC-60).
+    if day is None and snaps and "total_score" not in live:
         day = _snap_composite(snaps[-1])
     week = _avg_or_none([_snap_composite(s) for s in snaps[-WEEK_SNAPS:]])
     month = _avg_or_none([_snap_composite(s) for s in snaps])
