@@ -3483,8 +3483,8 @@ Ledger can record it — **Paper**, plus three pictures:
 
 Clicking a card opens it in the detail panel.
 
-**Cost** names the direction in words — `$195 debit`, `$804 credit` — and adds *for 100
-shares* when the trade holds stock (`$54,058 debit for 100 shares`), so a collar is never
+**Cost** names the direction in words — `$195.00 debit`, `$804.00 credit` — and adds *for 100
+shares* when the trade holds stock (`$54,058.00 debit for 100 shares`), so a collar is never
 mistaken for a contract's worth.
 
 **The ranked list.** Every idea the chips show, best score first:

@@ -260,7 +260,10 @@ raw `HTMLResponse` documents, `ui.html` fragments, Highcharts option dicts.
 ⚠ The bundled Tailwind JIT does not generate a class containing `var(...)`.
 
 **Shared page vocabulary.** `pages/fmt.py` (numbers: `num` is strict, `float_or`
-permissive, and they differ on purpose), `pages/copy.py` (sentences more than one
+permissive, and they differ on purpose; a price, strike, ratio, percentage or
+dollar total prints TWO decimals through `price` / `strike` / `ratio` / `pct` /
+`money`, a table's such columns go in `kit.table(decimals=...)`, and `:g` is
+banned outside `fmt.plain`), `pages/copy.py` (sentences more than one
 screen shows), `pages/view_watch.watch_view` (the version-gated poll),
 `pages/ui_guard` (wrap every timer and handler: a deleted client must be a no-op).
 Labels are written from the reader's side; a `Credit` column is wrong wherever a

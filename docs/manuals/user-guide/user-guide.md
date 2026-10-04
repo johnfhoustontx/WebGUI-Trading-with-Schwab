@@ -2114,7 +2114,7 @@ all four. Each card shows:
   reads **∞**;
 - a **probability-of-profit bar**, 0–100%: **amber** under 40%, **blue** from 40%
   to 60%, **green** over 60%;
-- the **cost** — `$195 debit`, `$804 credit`, or `$54,058 debit for 100 shares`
+- the **cost** — `$195.00 debit`, `$804.00 credit`, or `$54,058.00 debit for 100 shares`
   when the trade holds stock;
 - **Calculator**, and **Paper** where the Paper Ledger can record the trade (see
   below).

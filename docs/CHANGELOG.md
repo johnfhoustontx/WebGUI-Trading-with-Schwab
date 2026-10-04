@@ -4,7 +4,42 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-04 (**Class shares work: `BRK.B` in the app, `BRK/B` at Schwab.**)
+**Last updated:** 2026-10-04 (**Two decimals on every price, strike, ratio, percentage and dollar total.**)
+
+- **What was wrong.** A symbol whose price was a whole number printed as `450`,
+  not `450.00`. Two causes: tables put the raw number in the row and the browser
+  printed it as it was (the Opportunity Board's Price, the Scanner's Credit and
+  Max loss, the Account's fills), and about 200 hand-written format strings used
+  `:g`, `.1f` or `.0f` (`spot 450`, `Sell 450 P`, `1.5×`, `65%`, `$1,250`).
+- **The fix.** `webgui/pages/fmt.py` gained one formatter per kind of reading —
+  `price`, `strike`, `ratio`, `pct`, `money`, `money_short` — over one
+  `DECIMALS = 2`, and `plain` for the numbers that are none of those.
+  `kit.table(decimals=(...))` prints a numeric cell to two places in the browser,
+  so the row keeps its number and still sorts numerically. Every page was moved
+  onto those. Charts: strike axes, tooltips and level labels (`Gamma flip
+  450.00`).
+- **What changed on screen.** Strikes read `450.00/445.00` and `Sell 450.00 P`;
+  percentages `1.20%` and `65.00%`; dollar totals `$1,250.00`, `$1.20M`,
+  `$45.00K`. The Strategy Finder no longer rounds a cost of $100 or more to whole
+  dollars, and its probability label is the reading (`39.60%`) rather than a
+  rounded whole number, with the amber band decided on the printed figure. The
+  Portfolio page's percentages and relative-strength figures changed in the
+  service (`portfolio-analyzer/src/view_model.py`), which formats those cells.
+- **Left alone, on purpose.** Scores, ranks, counts, DTE, quantities, volume and
+  open interest. The Greeks and the model statistics (IC, factor weights), which
+  need more than two places. Dealer exposure magnitudes (net GEX, DEX). Scale
+  ticks on a dollar or percent axis. Spoken alerts. Settings → Configuration,
+  which echoes what was typed. Sentences a service writes (alert summaries,
+  briefings, rescue rationales), the pushed Telegram/Discord images and the daily
+  reports.
+- **Tests.** `webgui/tests/test_two_decimals_guard.py` fails on a `:g` format in
+  any page module outside `fmt.py`. Tests that pinned an old string were updated
+  to the new one; none was loosened.
+- Design and plan: `docs/plans/2026-10-04-two-decimal-display-{design,plan}.md`.
+
+---
+
+**Prior —** 2026-10-04 (**Class shares work: `BRK.B` in the app, `BRK/B` at Schwab.**)
 
 - **What was wrong.** Schwab spells a class share with a slash and refuses the
   dotted form, while the app's ticker allow-list accepts a dot and refuses a

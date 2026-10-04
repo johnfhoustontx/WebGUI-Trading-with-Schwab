@@ -15,6 +15,21 @@ title): from pages import <name>; <name>.render()`, and add the item to `NAV`
 (flat) — `_layout` handles header, drawer, and the proxy-down banner. Register
 the route in `test_shell.py`'s expected set.
 
+**Printing a number (2026-10-04).** A price, strike, ratio, percentage or dollar
+total prints exactly two decimals: `450.00`, never `450`. Say what the number IS
+through `pages/fmt.py` — `price` (`6,712.81`), `strike` (`450.00`, no separator,
+because it sits in `450.00/445.00` pairs), `ratio`, `pct`, `money`,
+`money_short` (`$1.20M`) — and use `fmt.plain` for a count, a day count or a
+score, which stay as they are. In a table, keep the NUMBER in the row and name
+the column in `kit.table(decimals=(...))`: the browser prints it to two places
+and the column still sorts numerically, where a cell formatted to text in Python
+sorts `"1,000.00"` below `"999.00"`. ⚠ A `body-cell-<name>` slot receives the
+FORMATTED text as `props.value`; a slot that does arithmetic or a null check
+reads `props.row.<field>`. Not in the two-decimal family: the Greeks and model
+statistics (more places), dealer exposure magnitudes, scale ticks on a dollar or
+percent axis, CSS widths and `data-` attributes. `tests/test_two_decimals_guard.py`
+fails on a `:g` format in any page module outside `fmt.py`.
+
 **Import an app's engine (sys.path glue).** App folders have hyphens / no package
 init, so a page adds the app dir to `sys.path` then imports the module by name —
 e.g. `from repo_paths import TRADE_ANALYZER; sys.path.insert(0,
