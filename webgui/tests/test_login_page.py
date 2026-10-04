@@ -678,3 +678,90 @@ def test_the_login_mark_is_the_same_drawing_as_everywhere_else():
     # The app header uses the LARGE drawing at 44px; this is the small one, as
     # the favicon should be -- so they share the accent, not the geometry.
     assert "#6b86ff" in app_mark and "#6b86ff" in login_page._FAVICON_SVG
+
+
+# ---------------------------------------------------------------------------
+# SE-06: one address must not be able to lock the owner out.
+
+def _flood_global(now=T0):
+    """Fifty hashed failures from rotating addresses: the global lock is on."""
+    for i in range(auth.GLOBAL_THRESHOLD):
+        login_page._lockout.record_failure(f"10.9.{i // 256}.{i % 256}", now=now)
+    assert login_page._lockout.global_locked_until(now=now) > now
+
+
+def test_one_address_hammering_does_not_lock_anyone_else_out(creds):
+    """The audit's case: a post every 17 seconds with no form token, for a
+    quarter of an hour."""
+    for i in range(60):
+        r = _attempt(password="x", code="000000", client="6.6.6.6",
+                     form_token=None, now=T0 + 17 * i)
+        assert not r.ok
+    assert login_page._lockout.tracked_global() == 0
+    good = _attempt(password=PASSWORD, code=_good_code(creds, now=T0 + 1100),
+                    client="9.9.9.9", form_token=_token(creds, now=T0 + 1100),
+                    now=T0 + 1100)
+    assert good.ok
+
+
+def test_a_locked_out_refusal_does_not_re_arm_the_global_lock(creds):
+    _flood_global()
+    before = login_page._lockout.tracked_global()
+    for _ in range(10):
+        _attempt(password="x", code="000000", client="7.7.7.7",
+                 form_token=_token(creds), now=T0 + 1)
+    assert login_page._lockout.tracked_global() == before
+    assert login_page._lockout.global_locked_until(now=T0 + auth.GLOBAL_LOCKOUT_SEC + 1) == 0
+
+
+def test_a_wrong_password_still_counts_globally(creds):
+    _attempt(password="wrong", code="000000", client="8.8.8.8",
+             form_token=_token(creds), now=T0)
+    assert login_page._lockout.tracked_global() == 1
+
+
+def test_a_remembered_device_signs_in_through_a_global_lock(creds):
+    """A device the owner already trusted is self-evidently not the flood, and
+    checking its cookie costs one HMAC. The password is still required."""
+    _flood_global()
+    remember = login_page.mint_remember_token(creds.session_secret,
+                                              epoch=creds.epoch, now=T0)
+    r = login_page.attempt(password=PASSWORD, code=None, client="9.9.9.9",
+                           form_token=_token(creds), remember_token=remember, now=T0 + 1)
+    assert r.ok
+
+
+def test_a_remembered_device_still_needs_the_password_during_a_flood(creds):
+    _flood_global()
+    remember = login_page.mint_remember_token(creds.session_secret,
+                                              epoch=creds.epoch, now=T0)
+    r = login_page.attempt(password="wrong", code=None, client="9.9.9.9",
+                           form_token=_token(creds), remember_token=remember, now=T0 + 1)
+    assert not r.ok
+
+
+def test_no_cookie_is_still_refused_during_a_global_lock(creds):
+    _flood_global()
+    r = _attempt(password=PASSWORD, code=_good_code(creds), client="9.9.9.9",
+                 form_token=_token(creds), now=T0 + 1)
+    assert not r.ok
+
+
+def test_a_forged_cookie_does_not_pass_a_global_lock(creds):
+    _flood_global()
+    r = login_page.attempt(password=PASSWORD, code=_good_code(creds), client="9.9.9.9",
+                           form_token=_token(creds), remember_token="forged.token",
+                           now=T0 + 1)
+    assert not r.ok
+
+
+def test_a_remembered_device_does_not_pass_its_own_backoff(creds):
+    """The exemption is from the GLOBAL lock only. An address that has failed
+    five times waits out its own backoff, cookie or not."""
+    for _ in range(auth.LOCKOUT_THRESHOLD):
+        login_page._lockout.record_failure("9.9.9.9", now=T0, hashed=False)
+    remember = login_page.mint_remember_token(creds.session_secret,
+                                              epoch=creds.epoch, now=T0)
+    r = login_page.attempt(password=PASSWORD, code=None, client="9.9.9.9",
+                           form_token=_token(creds), remember_token=remember, now=T0 + 1)
+    assert not r.ok

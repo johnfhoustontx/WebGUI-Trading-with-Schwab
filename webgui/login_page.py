@@ -304,7 +304,8 @@ def _load_credentials() -> auth_store.Credentials | None:
     return creds
 
 
-def _refuse(client: str, reason: str, *, now: float) -> AttemptResult:
+def _refuse(client: str, reason: str, *, now: float,
+            hashed: bool) -> AttemptResult:
     """Record, log, and hand back the one sentence.
 
     EVERY failure funnels through here, which is what makes ordering rule 3
@@ -312,12 +313,15 @@ def _refuse(client: str, reason: str, *, now: float) -> AttemptResult:
     a refusal, so a new early exit cannot skip the counter.
 
     Recording while the client is ALREADY locked out is deliberate -- it is what
-    drives the exponential further out under a hammering, instead of letting the
-    attacker sit at the threshold for free. It also re-arms the global window,
-    which is the documented and accepted cost: during an active flood the owner
-    stays refused, and regains access a minute after it stops.
+    drives that address's exponential further out under a hammering, instead of
+    letting the attacker sit at the threshold for free.
+
+    ``hashed`` says whether this attempt reached the password hash, and has NO
+    default: only those count toward the GLOBAL lock (see ``auth``'s note). A
+    refusal for being locked out used to count too, which let one address keep
+    the global lock armed for everyone.
     """
-    _lockout.record_failure(client, now=now)
+    _lockout.record_failure(client, now=now, hashed=hashed)
     log.warning("Sign-in refused for %s (%s)", client, reason)
     return _FAILURE
 
@@ -345,23 +349,37 @@ def attempt(*, password: str, code: str | None, client: str,
     # 1. The throttle, FIRST -- ahead of the credentials read as well as the
     #    hash. Cheap by construction: a bounded number of timestamp comparisons
     #    that allocate nothing outliving the call.
-    if _lockout.locked_until(client, now=at):
-        return _refuse(client, "locked out", now=at)
+    #    This address's OWN backoff binds everyone, remembered device or not.
+    if _lockout.client_locked_until(client, now=at):
+        return _refuse(client, "locked out", now=at, hashed=False)
+
+    #    The GLOBAL lock protects the password hash from a flood. A caller with
+    #    no remember-device cookie is turned away here, before anything is read.
+    globally_locked = bool(_lockout.global_locked_until(now=at))
+    if globally_locked and not remember_token:
+        return _refuse(client, "locked out (sign-in is busy)", now=at, hashed=False)
 
     creds = _load_credentials()
     if creds is None:
-        return _refuse(client, "credentials unavailable", now=at)
+        return _refuse(client, "credentials unavailable", now=at, hashed=False)
+
+    #    A device the owner already trusted is not the flood, and its cookie
+    #    costs one HMAC to check. It passes the GLOBAL lock only; the password
+    #    below is still required.
+    if globally_locked and not verify_remember_token(remember_token, creds, now=at):
+        return _refuse(client, "locked out (sign-in is busy)", now=at, hashed=False)
 
     # 2. The form token, still before Argon2. Refusing a blind POST costs one
     #    HMAC instead of 19 MiB, and it closes login-CSRF as a side effect.
     if not verify_form_token(form_token, creds, now=at):
-        return _refuse(client, "missing or invalid form token", now=at)
+        return _refuse(client, "missing or invalid form token", now=at, hashed=False)
 
     # 3. Only now is it worth paying for a hash. THE PASSWORD IS UNCONDITIONAL
     #    -- this check sits ABOVE the remember-device branch below, so a trusted
     #    device is a device that skips the CODE, not one that skips the login.
+    #    From here on a refusal has cost a hash, so it counts globally.
     if not auth.verify_password(creds.password_hash, password):
-        return _refuse(client, "password", now=at)
+        return _refuse(client, "password", now=at, hashed=True)
 
     # 4. The second factor, unless this device is already trusted.
     if verify_remember_token(remember_token, creds, now=at):
@@ -375,7 +393,7 @@ def attempt(*, password: str, code: str | None, client: str,
             creds.totp_secret, code, now=at,
             last_counter=creds.last_totp_counter)
         if not ok:
-            return _refuse(client, "code", now=at)
+            return _refuse(client, "code", now=at, hashed=True)
 
         # Persist the accepted step BEFORE declaring success. Without this write
         # the replay guard never advances and the code just used stays valid for
@@ -388,7 +406,7 @@ def attempt(*, password: str, code: str | None, client: str,
             log.warning("Could not persist the TOTP counter to %s, so this "
                         "otherwise-valid sign-in is refused: %s",
                         auth_store.DEFAULT_PATH, exc)
-            return _refuse(client, "counter persist failed", now=at)
+            return _refuse(client, "counter persist failed", now=at, hashed=True)
         log.info("Sign-in accepted for %s", client)
 
     _lockout.record_success(client)

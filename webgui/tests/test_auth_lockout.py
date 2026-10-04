@@ -238,3 +238,48 @@ def test_two_states_do_not_share_anything():
         a.record_failure("1.2.3.4", now=T0)
     assert b.locked_until("1.2.3.4", now=T0) == 0
     assert b.tracked_global() == 0
+
+
+# ---------------------------------------------------------------------------
+# The global lock counts what costs something (audit SE-06).
+#
+# Its job is to protect the password hash, which is the expensive step. It used
+# to count EVERY refusal, including the ones turned away before the hash - and a
+# refusal for being locked out counted too. So one address posting every 17
+# seconds kept fifty refusals in the window forever, and the owner could not
+# sign in from anywhere.
+
+def test_a_refusal_that_never_reached_the_hash_does_not_count_globally():
+    st = auth.LockoutState()
+    for _ in range(auth.GLOBAL_THRESHOLD + 20):
+        st.record_failure("1.2.3.4", now=T0, hashed=False)
+    assert st.tracked_global() == 0
+    assert st.locked_until("172.16.0.1", now=T0) == 0      # nobody else is locked
+    assert st.locked_until("1.2.3.4", now=T0) > T0         # the hammerer still is
+
+
+def test_a_hashed_failure_still_counts_globally():
+    st = auth.LockoutState()
+    for i in range(auth.GLOBAL_THRESHOLD):
+        st.record_failure(f"10.0.0.{i % 256}", now=T0, hashed=True)
+    assert st.locked_until("172.16.0.1", now=T0) > T0
+
+
+def test_the_default_is_the_counting_kind():
+    """A call site that forgets the argument must not switch the global
+    counter off."""
+    st = auth.LockoutState()
+    for i in range(auth.GLOBAL_THRESHOLD):
+        st.record_failure(f"10.0.0.{i % 256}", now=T0)
+    assert st.tracked_global() == auth.GLOBAL_THRESHOLD
+
+
+def test_the_two_locks_can_be_read_apart():
+    st = auth.LockoutState()
+    for i in range(auth.GLOBAL_THRESHOLD):
+        st.record_failure(f"10.0.0.{i % 256}", now=T0)
+    assert st.global_locked_until(now=T0) > T0
+    assert st.client_locked_until("172.16.0.1", now=T0) == 0
+    for _ in range(auth.LOCKOUT_THRESHOLD):
+        st.record_failure("172.16.0.1", now=T0, hashed=False)
+    assert st.client_locked_until("172.16.0.1", now=T0) > T0

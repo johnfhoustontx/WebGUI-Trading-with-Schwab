@@ -306,16 +306,25 @@ def verify_token(token: str | None, key: str, *, kind: str, epoch: int,
 # GLOBAL_LOCKOUT_SEC = 60 keeps essentially all of that protection while making
 # the owner-facing failure self-healing. Under a sustained flood the steady
 # state is ~GLOBAL_THRESHOLD attempts per minute -- under one Argon2 call per
-# second, a few percent of one core -- instead of a hard stop. State the cost
-# honestly: while a flood is actually in progress the owner is still refused,
-# because each fresh failure re-arms the window. What changes is that access
-# returns a minute after the flood stops rather than a quarter of an hour, and
-# the Tailscale path stays open throughout.
+# second, a few percent of one core -- instead of a hard stop.
 #
-# The durable fix is to let the global lock refuse only the EXPENSIVE path -- a
-# caller presenting a valid session or remember-device token costs nothing to
-# check and is self-evidently not the flood. That needs the token checks wired
-# into the login route, so it belongs with that work, not here.
+# Two rules keep that from becoming a lockout of the owner (audit SE-06,
+# 2026-10-04). Until then EVERY refusal counted here, including a refusal for
+# being locked out, so one address posting every 17 seconds held fifty refusals
+# in the window forever and nobody could sign in from anywhere.
+#
+#  1. Only an attempt that REACHED the password hash counts globally
+#     (``record_failure(..., hashed=True)``). What the counter protects is the
+#     hash; a refusal turned away before it cost nothing, and counting it let
+#     the refusals themselves re-arm the lock.
+#  2. A caller presenting a valid remember-device cookie is let past the GLOBAL
+#     lock (never past its own per-address backoff). It costs one HMAC to check,
+#     it is self-evidently not the flood, and the password is still required.
+#
+# State the remaining cost honestly: a flood from many addresses, each carrying
+# a valid form token and each reaching the hash, still holds the lock while it
+# lasts, and an owner on a device that is NOT remembered waits it out. The
+# Tailscale path stays open throughout.
 
 # Per-client and global failures are both counted over FAILURE_WINDOW_SEC.
 LOCKOUT_THRESHOLD = 5           # failures from one address before it backs off
@@ -380,11 +389,34 @@ class LockoutState:
         self._global: list[float] = []
 
     # -- reads ------------------------------------------------------------
-    def locked_until(self, client: str, *, now: float) -> float:
-        """0 when the client may attempt, else the epoch second it may retry.
+    def global_locked_until(self, *, now: float) -> float:
+        """0, or the epoch second the GLOBAL lock releases. The sign-in route
+        reads this apart from the per-address lock: a remembered device may
+        pass this one and never the other."""
+        glob = self._prune(self._global, now)
+        until = (max(glob) + GLOBAL_LOCKOUT_SEC
+                 if len(glob) >= GLOBAL_THRESHOLD else 0.0)
+        return until if until > now else 0
+
+    def client_locked_until(self, client: str, *, now: float) -> float:
+        """0, or the epoch second THIS address's own backoff releases.
 
         Uses ``.get``, never ``[]``: an unauthenticated read must not populate
         the table, or the read path becomes the growth vector it is guarding.
+        """
+        mine = self._prune(self._per_client.get(client, []), now)
+        until = 0.0
+        if len(mine) >= LOCKOUT_THRESHOLD:
+            over = len(mine) - LOCKOUT_THRESHOLD
+            delay = min(LOCKOUT_BASE_SEC * (2 ** over), LOCKOUT_MAX_SEC)
+            until = max(mine) + delay
+        # A retry instant that has already passed is not a lock. Returning it
+        # regardless would satisfy every "is it locked" test written as
+        # ``> now`` while never actually releasing.
+        return until if until > now else 0
+
+    def locked_until(self, client: str, *, now: float) -> float:
+        """0 when the client may attempt, else the epoch second it may retry.
 
         The two locks compose as a MAX rather than as an early return on
         whichever is checked first. That matters now the global penalty is the
@@ -392,22 +424,8 @@ class LockoutState:
         failing client its access back ahead of its own backoff, so a flood
         would end up protecting the attacker.
         """
-        until = 0.0
-        glob = self._prune(self._global, now)
-        if len(glob) >= GLOBAL_THRESHOLD:
-            until = max(until, max(glob) + GLOBAL_LOCKOUT_SEC)
-
-        mine = self._prune(self._per_client.get(client, []), now)
-        if len(mine) >= LOCKOUT_THRESHOLD:
-            over = len(mine) - LOCKOUT_THRESHOLD
-            delay = min(LOCKOUT_BASE_SEC * (2 ** over), LOCKOUT_MAX_SEC)
-            until = max(until, max(mine) + delay)
-
-        # A retry instant that has already passed is not a lock. Returning it
-        # regardless would satisfy every "is it locked" test written as
-        # ``> now`` while never actually releasing, and it contradicts the
-        # first line of this docstring.
-        return until if until > now else 0
+        return max(self.global_locked_until(now=now),
+                   self.client_locked_until(client, now=now))
 
     def tracked_clients(self) -> int:
         """Distinct addresses currently held -- for tests and diagnostics.
@@ -425,12 +443,19 @@ class LockoutState:
         return len(self._global)
 
     # -- writes -----------------------------------------------------------
-    def record_failure(self, client: str, *, now: float) -> None:
+    def record_failure(self, client: str, *, now: float,
+                       hashed: bool = True) -> None:
+        """One refused attempt. It always counts against the ADDRESS; it counts
+        toward the GLOBAL lock only when it reached the password hash
+        (``hashed``), which is the resource that lock protects. The default is
+        the counting kind, so a call that forgets the argument cannot switch
+        the global counter off."""
         self._per_client[client] = self._trim(
             self._prune(self._per_client[client], now) + [now],
             MAX_TRACKED_FAILURES)
-        self._global = self._trim(
-            self._prune(self._global, now) + [now], GLOBAL_THRESHOLD)
+        if hashed:
+            self._global = self._trim(
+                self._prune(self._global, now) + [now], GLOBAL_THRESHOLD)
         if len(self._per_client) > MAX_TRACKED_CLIENTS:
             self._evict(now)
 
