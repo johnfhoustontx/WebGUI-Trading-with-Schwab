@@ -288,6 +288,7 @@ Configuration.
 | `quotes.max_symbols` | 5000 | most symbols kept |
 | `bars.today_bar` | `"ttl"` until measured | `quote` or `ttl` |
 | `bars.session_ttl_sec` | 1740 | used in `ttl` mode, and in `quote` mode when no usable quote is held |
+| `bars.session_spread` | `true` | each series has its own reuse window inside that limit, offset by a stable hash, so the series one scan fetched together are not all refetched by the same later scan (added 2026-10-04, audit PF-100) |
 | `bars.today_quote_max_age_sec` | 120 | oldest quote used to build today's bar |
 | `bars.settle_min` | 10 | minutes after the close before the settled refetch |
 | `bars.max_entries` | 4000 | most series kept |
@@ -296,6 +297,7 @@ Configuration.
 | `collection.tail_interval_min` | 1 | minutes between real fetches for watchlist-only symbols; 3 once measured; above 5 reads as 5 |
 | `collection.fresh_max_age_sec` | 20 | the age limit sent for one-minute symbols, and the age past which an answer is treated as carried; at most 30 |
 | `collection.max_gamma_ratio` | 10 | the most a carried contract's gamma may grow over Schwab's value |
+| `collection.cap_refetch_max` | 8 | the most symbols one poll fetches for real because that cap bound on their carried chain; 0 writes the capped chain (added 2026-10-04, audit AC-120) |
 | `collection.carry_slack_sec` | 30 | added to the interval when asking for a stored chain |
 
 ## Rollout

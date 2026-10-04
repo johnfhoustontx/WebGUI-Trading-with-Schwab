@@ -1408,6 +1408,8 @@ two-pane layout.
 - A plain-English **VIX term** label (for example, *"VIX term: Contango (near-term
   calm) · as of 1:32 PM"*).
 - Brand-new signals get a **NEW** badge.
+- Each tab shows **100 rows a page**; the footer's arrows move through the day's
+  list, and clicking a column header sorts the whole day, not the page you are on.
 
 **Right pane — the detail panel:** click any row to see its full breakdown
 (credit, max loss, DTE, delta, theta, IV rank, and more) — with the full
@@ -2551,7 +2553,8 @@ A health board for the whole stack.
   as unhealthy with the reason, even though the process is still answering. A card
   also says when a service holds **commands it could not run** (they are kept for
   you to read and are never re-run), and the Redis card says whether Redis is
-  **saved to disk**.
+  **saved to disk**. The gateway's card says which mode the **market data store**
+  is in (off, shadow or on) and counts any store faults.
 - A **data-freshness** table showing each domain's latest cache write and its age.
   This is the more informative half: a service can be *online* and still not be
   publishing, and only this table shows that.

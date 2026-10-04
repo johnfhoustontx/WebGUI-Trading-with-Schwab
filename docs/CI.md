@@ -25,13 +25,19 @@ high-signal correctness subset:
 | `F63` | invalid comparisons / `assert (a, b)` tuple bugs / `is` on literals |
 | `F7`  | misplaced statements (`break`/`continue`/`return` outside a loop/function) |
 | `F82` | undefined names (typos, missing imports) — the highest-value check |
+| `F401` | unused imports (since 2026-10-04) |
+| `F811` | redefinitions: a name bound twice, which is how one test came to replace another of the same name |
 
-Deliberately **not** selected: `F401` (unused import), `F811` (redefinition), and all
-`E1xx–E7xx` style rules. The codebase uses an intentional compact one-line style
-(`x = 1; y = 2`, `if cond: return`) that those rules would flag as noise, and the tree
-currently has a benign unused import that `F401` would trip on — so a broader select
-would make the gate red without any real defect. `line-length = 120`. `ruff format` is
-**not** enforced (it would rewrite the compact style wholesale).
+`F401` and `F811` are **reported, never fixed automatically** (`unfixable` in
+`pyproject.toml`). The editor hook runs `ruff --fix` on every edited file; fixed
+for you, `F401` would delete an import the moment it was added, before the line
+that uses it, and a re-export that looks unused, and `F811` would delete the
+second of two same-named tests. A deliberate re-export carries `# noqa: F401`
+with who reads it. `F811` is not ignored in tests.
+
+Deliberately **not** selected: all `E1xx–E7xx` style rules. The codebase uses an
+intentional compact one-line style (`x = 1; y = 2`, `if cond: return`) that
+those rules would flag as noise.
 
 **Scope / excludes.** `.venv`, `**/data`, `**/logs`, `**/frontend`, `**/node_modules`,
 `docs`, plus the **grandfathered legacy engine dirs** (`options-scanner`,

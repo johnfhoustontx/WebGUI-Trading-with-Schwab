@@ -76,7 +76,8 @@ know are in the root `CLAUDE.md` ("The proxy can answer from memory").
   a hint, and a value that is not a usable number (text, negative, NaN,
   infinity) means "none given" and never fails the request with a 422. Capped
   at an hour (`MAX_REQUEST_AGE_SEC`). `0` always fetches. With none given the
-  configured limit applies. `/pricehistory` takes none.
+  configured limit applies. `/pricehistory` takes it too (daily series; it can
+  only tighten the store's rules).
 - **`X-Caller` request header** — who is asking, for the per-caller counts.
   Cut to letters, digits, `_`, `.` and `-`, 40 characters; missing is
   `unknown`. ⚠ The name becomes a key in the per-day counts, so one process
@@ -88,7 +89,14 @@ know are in the root `CLAUDE.md` ("The proxy can answer from memory").
   means the store played no part — mode `off` or `shadow`, an intraday series,
   or a store fault). `X-Store-Age` is seconds since the data left Schwab,
   stamped from when the fetch BEGAN.
-- **`/stats/api_calls`** returns two more keys. `store` is today's request
+- **`/health` and `/stats/api_calls` carry `market_store`**: the configured
+  `mode`, each store's real mode (`stores`), and `faults` / `faults_by_area`
+  (store faults since the process started that fell back to a plain fetch).
+  `null` when it cannot be read; neither route fails on it. The Status page's
+  proxy card and the Settings card print it.
+- **`/stats/api_calls`** returns more keys. `?day=YYYY-MM-DD` answers for an
+  earlier day (`store_day` says which; anything else is a 400). A count that
+  cannot be read is `null`, never 0. `store` is that day's request
   breakdown: `served_locally`, `by_outcome`, and `rows`
   (`{endpoint, caller, outcome, n}`) — ⚠ `rows` lists at most the 500 largest
   (`MAX_DETAIL_ROWS`) while both totals cover every row. `store_degrades` is
@@ -103,7 +111,14 @@ know are in the root `CLAUDE.md` ("The proxy can answer from memory").
   (which would count a degrade and make the call a second time).
 - In shadow mode the outcomes recorded beside `upstream` are `shadow_*` names
   (`Gateway`'s docstring lists them); a would-be daily-bar hit is recorded as
-  `shadow_hit_match` / `shadow_hit_mismatch`. Shadow counts low, with one
+  `shadow_hit_match` / `shadow_hit_mismatch`. The CHAIN verdict is
+  `market_store.chain_difference`: the stable header fields, the full expiration
+  keys (date and day count), the strikes, the contracts per strike and the
+  header's count; the first mismatch per request logs what differed. In `on`, a
+  failed week-wide fetch is followed by the request as asked (outcome
+  `wide_failed`, then `upstream`); a 401 or 429 is raised at once. With
+  `bars.session_spread` each daily series has its own reuse window inside
+  `session_ttl_sec`. Shadow counts low, with one
   known exception (the collector's own repeats while every session is closed,
   about 700 a day on `chains` for caller `options_svc`); see the root
   `CLAUDE.md`.

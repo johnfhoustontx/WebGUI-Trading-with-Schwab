@@ -15,7 +15,9 @@ nothing: ``.pre-commit-config.yaml`` with no hook installed, an editor hook that
 dropped ruff's output and did not run in a worktree, and a CI run that had been
 red on every push for an unrelated reason. An undefined name sat on main for two
 weeks. The rule set is small on purpose (E9, F63, F7, F82: syntax errors and
-undefined names), so a finding here is a bug, not a style note.
+undefined names; and, since 2026-10-04, F401 and F811: unused imports and
+redefinitions), so a finding here is a bug, not a style note. The last two are
+reported and never fixed automatically (``unfixable`` in pyproject.toml).
 """
 from __future__ import annotations
 

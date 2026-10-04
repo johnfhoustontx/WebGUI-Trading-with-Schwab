@@ -2533,6 +2533,35 @@ timeframe of one, so a complete daily read carries full confidence. Until
 three: the price sub-score could not leave 10–90 and its weight in the blend was
 0.15 against the sector term's 0.20, where the weights are 0.45 and 0.20.
 
+## Carried chains, and what a study may read
+
+With the collector's tail interval above 1 (it ships 1), a symbol collected only
+because it is on the watchlist gets a real chain fetch one minute in N. On the
+minutes between, its last fetched chain is **carried**: gamma and delta on the
+nearest expiration are moved to the live price by the Black-Scholes change, and
+volume, premium and volatility are the last fetch's. Two rules keep that honest:
+
+- **A carried row says so.** `snapshots.carried_age_sec` in the GEX history is
+  empty for a row computed from a chain fetched in its own minute and holds the
+  chain's age in seconds for a carried one, on all five views. A study reads
+  fetched rows only (`gex_history_db.fetched_only_clause`).
+- **A capped carry is not written.** A carried gamma may grow at most
+  `max_gamma_ratio` times Schwab's value; near the close on an expiration day
+  the model's ratio is far larger. A cap that binds holds growth and not
+  shrinkage, so the carried net exposure can change sign. That symbol is fetched
+  for real in the same minute instead (at most `cap_refetch_max` symbols).
+
+## Scanner strike rules
+
+The thresholds that decide which strikes the scanner may sell are settings
+(`config/scanner.toml [selection]`, Settings → Configuration → Trade selection):
+the highest short delta at entry (0.27), the delta treated as a data fault
+(0.40), the move that stops the offside spread (0.6 of the daily expected move),
+the credit required above break-even (credit ÷ width ≥ |short delta| + 0.02),
+the smallest credit ($0.25 a share), the quote always accepted as tight ($0.02),
+the widest spread (200), and the expected-move multiples for the same-day band
+(0.618 to 3.0) and the directional band (0 to 0.618).
+
 ## Expected Move deliberately disagrees with ThinkorSwim
 
 Not a defect — a definitional difference that has been measured and is documented

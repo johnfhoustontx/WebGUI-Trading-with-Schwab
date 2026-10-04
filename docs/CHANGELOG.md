@@ -4,7 +4,62 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-04 (**The audit's Medium findings: 35 of 54 fixed, three started.**)
+**Last updated:** 2026-10-04 (**The audit's remaining Medium findings: 14 more fixed, two started.**)
+
+Source: [the audit scorecard](audits/2026-10-03-app-audit-scorecard.md). One
+commit per finding. Not yet promoted. Open Medium rows after this: AC-19 (must be
+measured in regular market hours), and four in progress (AC-53, SE-09, CQ-07,
+CQ-10).
+
+**Operator notes.** No new step before promoting. The next start adds one
+nullable column to the GEX history (`carried_age_sec`). Three behaviours change
+on the live stack as soon as this lands: the Market Scanner's tables page on the
+server; long commands on the options queue run beside the short ones; and
+Rescue's Apply uses the service's own copy of the option you clicked. Everything
+in the market-data store is still behind `mode = "shadow"`.
+
+- **Market-data store.** The shadow chain verdict compares the stable header
+  fields, the full expiration keys, the strikes and the contract counts, and logs
+  what differed (AC-103, `65a1ed5`). A failed week-wide fetch is followed by the
+  request as asked (AR-100, `33178ca`). Each daily series has its own reuse
+  window, so quarter-hour scans stop alternating between refetching everything
+  and nothing (PF-100, `be28453`). The store's mode and fault count are on the
+  proxy's `/health`, the Status card and the Settings card; `/stats/api_calls`
+  answers for an earlier day; a count that cannot be read is unknown, not zero
+  (CQ-100, `916349b`).
+- **The collector's carry.** A symbol whose carried gamma hit the cap is fetched
+  for real in the same poll (AC-120, `022968f`). A carried row is marked in
+  storage and the dealer-regime study reads fetched rows only (AC-121,
+  `965427d`).
+- **Queues and threads.** Each command stream has a thread of its own, outside a
+  bounded shared pool (PF-03, `4199d76`). `cmd:options` has a slow lane for the
+  scans, the briefings, the rating, the Symbol lookup and the X posts, so a paper
+  or rescue command never waits minutes behind one (PF-04, `015c591`).
+- **Payloads.** The unchanged-write check reads a stored digest instead of the
+  payload: 17.9 ms plus a megabyte read became about 7 ms on a history-sized
+  payload, and payloads holding tuple rows, which were never skipped, now are
+  (PF-06, `b5da28e`). Browser tabs at one version of a large view share one
+  parsed copy (PF-07, `14a0265`). The Market Scanner sends one 100-row page, not
+  the day; checked in a browser, which found a mount-time pagination overwrite
+  the suite could not see (PF-05, `7787ae8`).
+- **Money path.** `rescue_apply` applies the service's own candidate, found by
+  its action and contracts; the page's echo supplies an identity only (AR-08,
+  `bb6c54b`). The paper account, the rescue summary, the Ledger, its caps book
+  and the Paper button's answer are validated before they are published (AR-08,
+  `864c16b`).
+- **Code quality.** `shared/numeric.py` holds two named numeric guards; eight
+  service modules moved onto them, and a ratchet lists the 29 private copies that
+  remain (CQ-07, `baea8d9`, in progress). Unused imports and redefinitions are
+  linted and never fixed automatically; the 79 findings included a test that had
+  never run because another had its name, and a module that reached the repo root
+  only through an import it did not use (CQ-08, `582a9be`). The scanner's eleven
+  strike-selection thresholds are settings (CQ-10, `5c6cdc6`, in progress).
+  `CLAUDE.md` went from 327 KB to 49 KB, its detail moved verbatim to
+  `docs/reference/`, under a size test (CQ-09, `f9e73f5`).
+
+---
+
+**Prior —** 2026-10-04 (**The audit's Medium findings: 35 of 54 fixed, three started.**)
 
 Source: [the audit scorecard](audits/2026-10-03-app-audit-scorecard.md), which
 has the status of every row. One commit per finding. Not yet promoted.

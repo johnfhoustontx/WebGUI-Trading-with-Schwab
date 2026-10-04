@@ -104,9 +104,12 @@ Atomically increments `{key}:ver`, stores a `CacheEnvelope` (version + ISO ts +
 payload) at `key`, and returns the new version.
 - `event` — when given, publishes `{"version": v}` on that channel in the same
   pipeline.
-- `skip_unchanged=True` — if the payload is byte-identical to what's stored, the
+- `skip_unchanged=True` — if the payload is the one already stored, the
   whole write *and* publish are skipped (no version bump, so GUI pollers don't
-  repaint). Used by tick republishers (header, GEX status).
+  repaint). Used by tick republishers (header, GEX status). The check reads a
+  third side key, `{key}:sig` (a digest of the stored payload), so the payload is
+  not fetched back to be compared. A write without `skip_unchanged` deletes the
+  digest; a key that has none yet is compared in full once.
 
 **`cache_get(key) -> CacheEnvelope | None`** — deserializes the full envelope.
 
@@ -199,6 +202,13 @@ stopped or its last tick is older than `[health] tick_stale_sec` (600 s) in
 kept for reading and never re-run; `null` if the count cannot be read),
 `degrades_total` and `degrades`.
 
+Each command stream has a thread of its own for its blocking read and its
+handler; scheduled work shares a pool of `[pool] workers` threads
+(`config/services.toml`). On `cmd:options` the long, self-contained commands
+(`rescan`, `swing_scan`, `gamma_analyze`, `gamma_explain`, `gamma_history`,
+`calc_rate`, `dossier`, `x_post`, `x_post_report`) run on a second, serial
+**slow lane**, so a paper, reprice or rescue command never waits behind one.
+
 The consumer drops a command older than `[age] replay_max_sec` (900 s) unless the
 service lists it as safe to run late; the options service also refuses thirteen
 side-effect commands older than `side_effect_max_sec` (180 s). A dropped
@@ -269,7 +279,7 @@ skip-unchanged).
 | `expected_move` | `{symbol, expiry, legs[], lookback}` | `cache:options:expected_move` |
 | `dossier` | `{symbol}` — cleaned by `shared.symbols.clean_symbol` (upper-cased, `[A-Z$][A-Z0-9$.]{0,7}`); anything it refuses is logged and writes nothing, because the symbol becomes part of the key name. Replay-guarded (a command older than 180 s is dropped). **Deduplicated** (`DOSSIER_DEDUP_SEC` = 60): if that symbol's dossier was written less than 60 s ago — measured on the envelope's own `ts`, the write time — the command is dropped and nothing is fetched or re-published. A recent success or `no_quote` blocks the fetch; a recent `fetch_failed` does **not** (a retry costs at most one quote call). An unreadable envelope counts as no recent dossier. Otherwise one fetch of **4 Schwab calls, 5 at most** (quote · GEX chain today..+7 d · 1-year daily price history · IV chain +20..+45 d · the IV analysis' own today..+60 d fallback when that window is empty); a `no_quote` or `fetch_failed` answer spends one | **`cache:options:dossier:<SYMBOL>`** (event `events:options:dossier:<SYMBOL>`), **TTL 900 s**, per symbol so two tabs never share a slot — `{symbol, error, fetched_at, spot, day_pct, flip, put_wall, call_wall, net_gex, iv_rank, current_iv, hv_current, earnings_status, earnings_date}`. Every key is always present; an absent reading is `null`, never 0. `fetched_at` is naive Central ISO. `current_iv` / `hv_current` are **percents** (48.5 = 48.5%); `iv_rank` is the scan's Vol Rank; `day_pct` is always `null` (no day-change parser is shared for a raw quote). `earnings_status` is three-valued: `upcoming` · `none_scheduled` · `not_listed` (the calendar has no data — not "no report"). Walls are assigned by side of spot, and both are `null` when `net_gex` is exactly `0.0` (the after-hours all-zero grid, whose walls would be an argmax tie-break); `flip` is kept either way. `error` is `null` on success, `"no_quote"` when Schwab **answered** and quoted nothing usable for the symbol (a typo — the other legs are skipped), or `"fetch_failed"` when the quote request itself failed (non-200 or raised: proxy down, timeout, token) — the ticker may be fine. One of the three later legs failing blanks only its own keys and records a degrade (`options.dossier_gex` · `_vol` · `_earnings`) |
 | `rescue` | `{position_id}` | `cache:options:rescue:<position_id>` |
-| `rescue_apply` | `{position_id, candidate}` | `cache:options:rescue:<position_id>` |
+| `rescue_apply` | `{position_id, candidate}` — the service applies **its own** candidate from the menu it published for the position, found by the echoed candidate's action and contracts; the echo's prices, cash and risk are ignored. No menu, or no matching row, applies nothing | `cache:options:rescue:<position_id>` |
 
 **Scheduled (not command-driven):** `rescan` (auto-scan window), `refresh_header`
 (per tick, skip-unchanged), `collect_gex_snapshots` + `publish_gex_status` +
@@ -647,8 +657,14 @@ another. An entry past its limit is never served because Schwab failed — the e
 is returned. An empty answer is never stored, and a cut that would hold no
 expiration is never served.
 
-**`/stats/api_calls`** gains two keys. `today` / `last_7_days` / `last_30_days` still
-count calls **sent to Schwab** — a locally answered request is not in them.
+**`/stats/api_calls`** gains more keys. `today` / `last_7_days` / `last_30_days` still
+count calls **sent to Schwab** — a locally answered request is not in them. A
+count that cannot be read is `null`, never 0. `?day=YYYY-MM-DD` returns `store`
+for an earlier day (`store_day` names it; an unreadable day is a 400).
+`market_store` is `{mode, stores, faults, faults_by_area}` — the same block
+`/health` carries — or `null`. A chain request that just missed and whose
+week-wide refetch failed records the outcome `wide_failed` before its own
+`upstream`.
 
 | Key | Contents |
 |---|---|

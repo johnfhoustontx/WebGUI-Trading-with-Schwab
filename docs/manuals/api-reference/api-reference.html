@@ -327,9 +327,12 @@ Atomically increments <code>{key}:ver</code>, stores a <code>CacheEnvelope</code
 payload) at <code>key</code>, and returns the new version.
 - <code>event</code> — when given, publishes <code>{"version": v}</code> on that channel in the same
   pipeline.
-- <code>skip_unchanged=True</code> — if the payload is byte-identical to what's stored, the
+- <code>skip_unchanged=True</code> — if the payload is the one already stored, the
   whole write <em>and</em> publish are skipped (no version bump, so GUI pollers don't
-  repaint). Used by tick republishers (header, GEX status).</p>
+  repaint). Used by tick republishers (header, GEX status). The check reads a
+  third side key, <code>{key}:sig</code> (a digest of the stored payload), so the payload is
+  not fetched back to be compared. A write without <code>skip_unchanged</code> deletes the
+  digest; a key that has none yet is compared in full once.</p>
 <p><strong><code>cache_get(key) -&gt; CacheEnvelope | None</code></strong> — deserializes the full envelope.</p>
 <p><strong><code>cache_version(key) -&gt; int | None</code></strong> — reads only the <code>:ver</code> counter (cheap; no
 payload deserialize). This is what GUI poll timers use.</p>
@@ -458,6 +461,12 @@ stopped or its last tick is older than <code>[health] tick_stale_sec</code> (600
 <code>scheduler_last_tick_age_s</code>, <code>dead_letters</code> (commands the service could not run,
 kept for reading and never re-run; <code>null</code> if the count cannot be read),
 <code>degrades_total</code> and <code>degrades</code>.</p>
+<p>Each command stream has a thread of its own for its blocking read and its
+handler; scheduled work shares a pool of <code>[pool] workers</code> threads
+(<code>config/services.toml</code>). On <code>cmd:options</code> the long, self-contained commands
+(<code>rescan</code>, <code>swing_scan</code>, <code>gamma_analyze</code>, <code>gamma_explain</code>, <code>gamma_history</code>,
+<code>calc_rate</code>, <code>dossier</code>, <code>x_post</code>, <code>x_post_report</code>) run on a second, serial
+<strong>slow lane</strong>, so a paper, reprice or rescue command never waits behind one.</p>
 <p>The consumer drops a command older than <code>[age] replay_max_sec</code> (900 s) unless the
 service lists it as safe to run late; the options service also refuses thirteen
 side-effect commands older than <code>side_effect_max_sec</code> (180 s). A dropped
@@ -693,7 +702,7 @@ skip-unchanged).</p>
 </tr>
 <tr>
 <td><code>rescue_apply</code></td>
-<td><code>{position_id, candidate}</code></td>
+<td><code>{position_id, candidate}</code> — the service applies <strong>its own</strong> candidate from the menu it published for the position, found by the echoed candidate's action and contracts; the echo's prices, cash and risk are ignored. No menu, or no matching row, applies nothing</td>
 <td><code>cache:options:rescue:&lt;position_id&gt;</code></td>
 </tr>
 </tbody>
@@ -1316,8 +1325,14 @@ its own exact stored copy. An entry stored in one market session is never served
 another. An entry past its limit is never served because Schwab failed — the error
 is returned. An empty answer is never stored, and a cut that would hold no
 expiration is never served.</p>
-<p><strong><code>/stats/api_calls</code></strong> gains two keys. <code>today</code> / <code>last_7_days</code> / <code>last_30_days</code> still
-count calls <strong>sent to Schwab</strong> — a locally answered request is not in them.</p>
+<p><strong><code>/stats/api_calls</code></strong> gains more keys. <code>today</code> / <code>last_7_days</code> / <code>last_30_days</code> still
+count calls <strong>sent to Schwab</strong> — a locally answered request is not in them. A
+count that cannot be read is <code>null</code>, never 0. <code>?day=YYYY-MM-DD</code> returns <code>store</code>
+for an earlier day (<code>store_day</code> names it; an unreadable day is a 400).
+<code>market_store</code> is <code>{mode, stores, faults, faults_by_area}</code> — the same block
+<code>/health</code> carries — or <code>null</code>. A chain request that just missed and whose
+week-wide refetch failed records the outcome <code>wide_failed</code> before its own
+<code>upstream</code>.</p>
 <table>
 <thead>
 <tr>

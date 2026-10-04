@@ -784,7 +784,9 @@ spreads, and the Income board's cash-secured puts and covered calls.
   fetched then, which takes a second. The line under the form says how many are
   loaded so far.
 - **Apply** adjusts your paper position. No real money, and no live order is
-  placed. The board refreshes itself as positions are re-priced.
+  placed. The board refreshes itself as positions are re-priced. If the menu you
+  were looking at has expired or changed, Apply does nothing and says the option
+  is no longer offered; the refreshed menu is shown in its place.
 - **Not every option has an Apply button.** One marked *Manual* is a trade you
   place yourself — the app will not do it for you.
 - **If prices move while you're deciding, Apply is refused** and nothing is
@@ -1484,7 +1486,8 @@ the last check ran — the page re-checks itself every 15 seconds, and
 **Refresh** does it now.
 
 - **Green/red cards** — Redis, the Schwab gateway, your Schwab login, the six
-  services, this web app, and the public live screens beside it. The live
+  services, this web app, and the public live screens beside it. The gateway's
+  card also says which mode its market data store is in and counts its faults. The live
   screens are a separate app on their own address: if that card is red the
   public site is down, and nothing about your own screens is affected.
 - **Data freshness** — confirms each service is not just *up* but actively
