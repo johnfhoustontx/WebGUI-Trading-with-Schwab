@@ -543,6 +543,24 @@ def total_text(comp) -> str:
     return "—" if v is None else f"{v:.2f}"
 
 
+def previous_total(derived, live, snaps):
+    """The prior session's composite total for the Yesterday and Change tiles.
+
+    The service's ``prev_total`` when it publishes one: that is the prior
+    session's reading on the SAME basis as today's (live against live), and a
+    None there means there is no such session - the stored history is not
+    substituted. Without the key (an older payload), the stored history's last
+    scored day, as before. PURE."""
+    d = derived if isinstance(derived, dict) else {}
+    if "prev_total" in d:
+        v = _safe_float(d.get("prev_total"), None)
+        return v if v is not None and math.isfinite(v) else None
+    snaps = snaps if isinstance(snaps, list) else []
+    prior = (composite_series(snaps)[1] if live
+             else composite_series(snaps[:-1])[1])
+    return prior[-1] if prior else None
+
+
 def tiles(latest, prev_total, band=None):
     """Signal tiles. ``band`` = service-computed ``(size, bias, signal)`` from
     ``derived`` (size_modifier/bias/signal); when absent, those three show '—'."""
@@ -957,13 +975,8 @@ def render():
             return
         latest = live or snaps[-1]
         comp = latest.get("composite") or {}
-        # Prior series: when showing live, today=live and the prior series is
-        # the full backfill (all completed sessions); when showing backfill,
-        # exclude the last (it's "today").
-        prior_scores = (composite_series(snaps)[1] if live
-                        else composite_series(snaps[:-1])[1])
-        prev_total = prior_scores[-1] if prior_scores else None
         derived = state.get("derived") or {}
+        prev_total = previous_total(derived, live, snaps)
         band_labels = None
         if derived.get("size") is not None:
             band_labels = (derived.get("size", "—"), derived.get("bias", "—"),

@@ -17,6 +17,14 @@ CREATE TABLE IF NOT EXISTS sentiment_intraday (
     sentiment REAL,
     trend     REAL
 );
+-- One row per session: the LIVE composite's last reading before the close.
+-- The stored history is scored by a different method, so velocity is measured
+-- against these, live against live (audit AC-48).
+CREATE TABLE IF NOT EXISTS composite_close (
+    date  TEXT PRIMARY KEY,
+    total REAL NOT NULL,
+    ts    INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS regime_intraday (
     ts         INTEGER PRIMARY KEY,
     mr         REAL,   -- mean_reversion membership
@@ -69,6 +77,53 @@ def insert_point(conn, ts: int, sentiment: float, trend: float) -> None:
     conn.execute(
         "INSERT OR REPLACE INTO sentiment_intraday(ts, sentiment, trend) "
         "VALUES (?, ?, ?)", (int(ts), float(sentiment), float(trend)))
+    conn.commit()
+
+
+def record_close(conn, date_iso: str, total: float, ts: int) -> None:
+    """Record (or move forward) one session's live composite. Called on every
+    recorded point, so the row ends the session holding its last reading."""
+    conn.execute(
+        "INSERT OR REPLACE INTO composite_close(date, total, ts) VALUES (?, ?, ?)",
+        (str(date_iso), float(total), int(ts)))
+    conn.commit()
+
+
+def load_closes(conn, before=None, limit: int = 60):
+    """[(date, total)] oldest first, for sessions strictly before ``before``
+    (an ISO date) when one is given. At most the newest ``limit``."""
+    if before is None:
+        rows = conn.execute(
+            "SELECT date, total FROM composite_close ORDER BY date DESC LIMIT ?",
+            (int(limit),)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT date, total FROM composite_close WHERE date < ? "
+            "ORDER BY date DESC LIMIT ?", (str(before), int(limit))).fetchall()
+    return [(r[0], r[1]) for r in reversed(rows)]
+
+
+def seed_closes(conn) -> None:
+    """Fill ``composite_close`` from the intraday samples already stored: the
+    last sample of each local date. Never overwrites a recorded close."""
+    last = {}
+    for ts, sentiment in conn.execute(
+            "SELECT ts, sentiment FROM sentiment_intraday ORDER BY ts ASC"):
+        if sentiment is not None:
+            last[_local_date(ts).isoformat()] = (float(sentiment), int(ts))
+    for date_iso, (total, ts) in last.items():
+        conn.execute(
+            "INSERT OR IGNORE INTO composite_close(date, total, ts) VALUES (?, ?, ?)",
+            (date_iso, total, ts))
+    conn.commit()
+
+
+def prune_closes(conn, keep: int = 90) -> None:
+    """Keep the newest ``keep`` sessions."""
+    conn.execute(
+        "DELETE FROM composite_close WHERE date NOT IN "
+        "(SELECT date FROM composite_close ORDER BY date DESC LIMIT ?)",
+        (int(keep),))
     conn.commit()
 
 

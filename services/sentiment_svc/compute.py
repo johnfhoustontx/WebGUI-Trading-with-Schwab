@@ -1621,8 +1621,18 @@ def _divergence_named(snapshot):
     return out
 
 
+def _usable_closes(live_closes) -> list:
+    """Finite, positive totals out of a live-close series, order kept."""
+    out = []
+    for v in live_closes or []:
+        f = _as_finite(v)
+        if f is not None and f > 0:
+            out.append(f)
+    return out
+
+
 def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
-                            trend_7d=None):
+                            trend_7d=None, live_closes=None):
     """Scoring-derived values for the GUI's composite view.
 
     Computes weights / size-bias-signal / velocity / divergence from the same
@@ -1635,6 +1645,14 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
     a safe default without raising, so a partial compute never aborts the refresh.
 
     ``trend_7d`` is LAST so the existing positional call shape is unaffected.
+
+    ``live_closes`` is the LIVE composite's last reading of each prior session
+    (``handlers._live_closes``). When a live composite is being shown and this
+    is supplied, velocity, the regime-break flag and ``prev_total`` are measured
+    against it and nothing else: the stored history is scored by a different
+    method, and the gap between the two was read as market change (audit
+    AC-48). An empty list means no like-for-like history, so no velocity; the
+    stored history is NOT borrowed. ``None`` keeps the older derivation.
     """
     latest = live or (snaps[-1] if snaps else None)
     # ``scored`` is the composite total ONLY when one was actually read; the
@@ -1669,8 +1687,11 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
     # series is the full backfill; when showing backfill, exclude the last
     # (it's "today"). Mirrors the page's L579 prior_scores derivation.
     try:
-        prior_scores = (composite_series(snaps or [])[1] if live
-                        else composite_series((snaps or [])[:-1])[1])
+        if live and live_closes is not None:
+            prior_scores = _usable_closes(live_closes)
+        else:
+            prior_scores = (composite_series(snaps or [])[1] if live
+                            else composite_series((snaps or [])[:-1])[1])
     except Exception:  # noqa: BLE001
         prior_scores = []
 
@@ -1727,6 +1748,9 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
         "velocity": velocity,
         "divergence": divergence,
         "divergence_detail": divergence_detail,
+        # The prior session's total on the SAME basis as today's, for the
+        # Yesterday and Change tiles. None when there is no such session.
+        "prev_total": prior_scores[-1] if prior_scores else None,
         "trend": trend if trend is not None else _neutral_trend(),
         "trend_7d": trend_7d if trend_7d is not None else _neutral_trend(),
         "trend_30d_ago": trend_30d if trend_30d is not None else _neutral_trend(),
@@ -1854,15 +1878,23 @@ def sector_pc_delta():
                 pass
 
 
-def build_and_write_bridge(snaps, spy, live, sector, trend=None):
-    """Build the bridge payload from cache/state data and write it. Defensive."""
+def build_and_write_bridge(snaps, spy, live, sector, trend=None,
+                           live_closes=None):
+    """Build the bridge payload from cache/state data and write it. Defensive.
+
+    With a live composite and ``live_closes`` supplied, the bridge's rolling
+    averages and velocity run over the live closes (see
+    ``derive_composite_extras``)."""
     try:
         import bridge
         from datetime import datetime, timezone
         latest = live or (snaps[-1] if snaps else None)
         if not latest:
             return
-        prior = composite_series(snaps or [])[1]
+        if live and live_closes is not None:
+            prior = _usable_closes(live_closes)
+        else:
+            prior = composite_series(snaps or [])[1]
         trend = _bridge_trend(trend, spy)
         sec_arg = None
         if sector:

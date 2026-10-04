@@ -123,3 +123,49 @@ def test_regime_table_shares_pytest_memory_isolation():
     c = db.connect()
     db.insert_regime_point(c, _ts(dt.date.today()), _VEC, 0.5, "x")
     assert db.load_regime_recent(c, n_days=1)   # writes to the in-memory DB, not the file
+
+
+# --- AC-48: each session's last LIVE composite, kept for like-for-like history --
+
+def test_record_close_keeps_the_last_reading_of_a_session():
+    c = _conn()
+    db.record_close(c, "2026-09-29", 4.10, 100)
+    db.record_close(c, "2026-09-29", 4.93, 200)       # later in the same session
+    db.record_close(c, "2026-09-30", 4.06, 300)
+    assert db.load_closes(c) == [("2026-09-29", 4.93), ("2026-09-30", 4.06)]
+
+
+def test_load_closes_stops_before_the_given_date():
+    c = _conn()
+    for d, t in (("2026-09-28", 4.0), ("2026-09-29", 4.9), ("2026-09-30", 4.1)):
+        db.record_close(c, d, t, 1)
+    assert db.load_closes(c, before="2026-09-30") == [("2026-09-28", 4.0),
+                                                      ("2026-09-29", 4.9)]
+
+
+def test_seed_closes_takes_the_last_sample_of_each_recorded_day():
+    c = _conn()
+    d1, d2 = dt.date(2026, 9, 29), dt.date(2026, 9, 30)
+    db.insert_point(c, _ts(d1, 9, 0), 4.0, 50.0)
+    db.insert_point(c, _ts(d1, 14, 58), 4.93, 50.0)
+    db.insert_point(c, _ts(d2, 14, 58), 4.06, 50.0)
+    db.seed_closes(c)
+    assert db.load_closes(c) == [("2026-09-29", 4.93), ("2026-09-30", 4.06)]
+
+
+def test_seed_closes_never_overwrites_a_recorded_close():
+    c = _conn()
+    d1 = dt.date(2026, 9, 29)
+    db.record_close(c, "2026-09-29", 5.55, 1)
+    db.insert_point(c, _ts(d1, 14, 58), 4.93, 50.0)
+    db.seed_closes(c)
+    assert db.load_closes(c) == [("2026-09-29", 5.55)]
+
+
+def test_prune_closes_keeps_the_newest():
+    c = _conn()
+    for i in range(1, 11):
+        db.record_close(c, f"2026-09-{i:02d}", float(i), i)
+    db.prune_closes(c, keep=3)
+    assert [d for d, _ in db.load_closes(c)] == ["2026-09-08", "2026-09-09",
+                                                 "2026-09-10"]

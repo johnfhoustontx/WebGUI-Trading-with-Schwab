@@ -316,6 +316,43 @@ def _is_rth_now(now=None) -> bool:
     return scheduler._is_rth(now or _dt.datetime.now(_ZI("America/Chicago")))
 
 
+# Sessions of live closes to keep: three times the 20 the velocity's z-score
+# reads, so a few missed days do not shorten its window.
+CLOSES_KEEP = 90
+_CLOSES_SEEDED = False
+
+
+def _session_date_iso() -> str:
+    """Today's date on the trading clock (Central)."""
+    return _dt.datetime.now(_ZI("America/Chicago")).date().isoformat()
+
+
+def _live_closes() -> list:
+    """The LIVE composite's last reading of each prior session, oldest first.
+
+    This is the history the velocity and the regime-break flag are measured
+    against. The stored 30-day history is scored by a different method (it has
+    no put/call reading and scores rotation differently), so differencing
+    today's live reading against it measured the gap between the two methods
+    as well as the change in the market (audit AC-48).
+
+    ``[]`` on any failure: an unreadable store means no like-for-like history,
+    which the caller renders as no velocity. Never the mixed series."""
+    global _CLOSES_SEEDED
+    try:
+        with _INTRADAY_LOCK:
+            conn = _get_intraday_conn()
+            if not _CLOSES_SEEDED:
+                intraday_history_db.seed_closes(conn)
+                _CLOSES_SEEDED = True
+            rows = intraday_history_db.load_closes(
+                conn, before=_session_date_iso())
+        return [float(t) for _d, t in rows]
+    except Exception:  # noqa: BLE001
+        log.exception("live composite closes could not be read")
+        return []
+
+
 def _intraday_values(live, trend):
     """(sentiment 0-10, trend 0-100) from the live snapshot + trend dict, or
     None when there is no live composite to record. Records the SMOOTHED trend
@@ -349,6 +386,10 @@ def _record_intraday(bus, live, trend):
             conn = _get_intraday_conn()
             ts = int(_dt.datetime.now().timestamp())
             intraday_history_db.insert_point(conn, ts, vals[0], vals[1])
+            # ... and this session's live close, moved forward on every point.
+            intraday_history_db.record_close(
+                conn, _session_date_iso(), vals[0], ts)
+            intraday_history_db.prune_closes(conn, keep=CLOSES_KEEP)
             intraday_history_db.prune(conn, n_days=5)
             rows = intraday_history_db.load_recent(conn, n_days=5)
             points = [{"ts": r[0], "sentiment": r[1], "trend": r[2]} for r in rows]
@@ -679,6 +720,7 @@ def refresh(bus, with_sectors: bool = False) -> None:
         log.exception("regime crisis check failed")
 
     now_iso = datetime.now(timezone.utc).isoformat()
+    live_closes = _live_closes()
 
     version = bus.cache_set(CACHE_COMPOSITE, {
         "live": live,
@@ -687,7 +729,7 @@ def refresh(bus, with_sectors: bool = False) -> None:
         "derived": compute.derive_composite_extras(
             live, snaps, spy,
             trend=_TREND["trend"], trend_30d=_TREND["trend_30d"],
-            trend_7d=_TREND["trend_7d"]),
+            trend_7d=_TREND["trend_7d"], live_closes=live_closes),
     })
     bus.publish(EVENT_COMPOSITE, {"version": version})
 
@@ -717,7 +759,9 @@ def refresh(bus, with_sectors: bool = False) -> None:
 
     # Always dual-write the legacy bridge (defensive — never abort on failure).
     try:
-        compute.build_and_write_bridge(snaps, spy, live, sector, trend=_TREND["trend"])
+        compute.build_and_write_bridge(snaps, spy, live, sector,
+                                       trend=_TREND["trend"],
+                                       live_closes=live_closes)
     except Exception:  # noqa: BLE001
         log.exception("bridge dual-write failed")
 

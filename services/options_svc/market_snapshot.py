@@ -18,6 +18,7 @@ fell a design behind. ``market_console`` carries the whole mirroring contract an
 names the Tier-1 function behind every decision; read its module docstring before
 touching either side.
 """
+import math
 import html as _html
 
 from services.options_svc import market_console as MC
@@ -126,14 +127,21 @@ def sentiment_arcs(sentiment, snaps):
             {"value": to100(month), "caption": "MONTH"}]
 
 
-def prev_total(snaps):
+def prev_total(snaps, derived=None):
     """The prior scored session's 0-10 composite, for YESTERDAY / CHANGE.
 
     MIRRORS ``sentiment._apply``: the push always shows the LIVE composite as
     today, so the prior series is the whole backfill (every completed session),
     and "yesterday" is its last scored entry. ``> 0`` filters the unscored rows
     exactly as ``composite_series`` does. None when there is no prior session —
-    which the Signals card renders as an em-dash rather than inventing a band."""
+    which the Signals card renders as an em-dash rather than inventing a band.
+
+    ``derived["prev_total"]`` wins when the service publishes it: that is the
+    prior session's LIVE close, the same basis as today's reading, and a None
+    there means there is no such session (audit AC-48)."""
+    if isinstance(derived, dict) and "prev_total" in derived:
+        v = _num(derived.get("prev_total"))
+        return v if v is not None and math.isfinite(v) else None
     scored = [v for v in (_snap_composite(s) for s in (snaps or []))
               if v is not None and v > 0]
     return scored[-1] if scored else None
@@ -180,7 +188,7 @@ def console_context(trend, sentiment, regime, regime_hist, derived, snaps, *,
         "trend_verdict": t.get("label"),
         "trend_guidance": t.get("description"),
         "signal_rows": MC.signal_rows(bias_word, signal_word, total,
-                                      prev_total(snaps)),
+                                      prev_total(snaps, d)),
         "velocity_values": (d.get("velocity") or {}).get("values"),
         "divergence_detail": d.get("divergence_detail"),
         "regime": regime or {},

@@ -60,7 +60,7 @@ def test_derive_composite_extras_shape_and_values():
 
     assert set(out) == {"weights", "size", "bias", "signal", "velocity",
                         "divergence", "divergence_detail", "trend", "trend_7d",
-                        "trend_30d_ago"}
+                        "trend_30d_ago", "prev_total"}     # prev_total: AC-48
     # weights = sentiment v4.3 WEIGHTS (credit_pulse excluded, sums to 1.0).
     assert abs(sum(out["weights"].values()) - 1.0) < 1e-9
     assert "credit_pulse" not in out["weights"]
@@ -1376,3 +1376,75 @@ def test_the_day_gauge_shape_is_untouched():
     for args in ((25.0, 0.4, 0.1, 55.0, 20.0), (-60.0, -0.3, -0.2, 41.0, 33.0)):
         assert (compute._finite_score_price(*args, n_timeframes=3)
                 == intraday_trend.score_price(*args, n_timeframes=3))
+
+
+# --- AC-48: velocity differences like with like --------------------------------
+#
+# The live composite and the stored history are scored by different methods (the
+# history has no put/call reading at all and scores rotation differently).
+# Measured on five sessions: the live reading at the close sat 0.60 points on
+# average, and up to 1.09, from the history's score for the SAME day. Velocity
+# and the regime-break flag differenced one against the other.
+
+def test_live_velocity_is_measured_against_live_closes_not_the_backfill():
+    snaps = [_snap(f"2026-05-{d:02d}", 3.0) for d in range(1, 21)]     # backfill: 3.0
+    live = _snap("2026-06-01", 6.0)
+    closes = [5.8, 5.9, 6.1, 6.0, 5.9, 6.0]                            # live method
+    out = compute.derive_composite_extras(live, snaps, [], live_closes=closes)
+    vals = out["velocity"]["values"]
+    assert vals["roc_3d"] == pytest.approx(6.0 - 6.0)
+    assert vals["roc_5d"] == pytest.approx(6.0 - 5.9)
+    assert out["velocity"]["flag"] == ""            # against the backfill: a break
+    assert out["prev_total"] == 6.0
+
+
+def test_the_backfill_alone_would_have_called_that_a_regime_break():
+    """The control: the same live reading against the 3.0 backfill history."""
+    snaps = [_snap(f"2026-05-{d:02d}", 3.0 + (d % 2) * 0.1) for d in range(1, 21)]
+    out = compute.derive_composite_extras(_snap("2026-06-01", 6.0), snaps, [])
+    assert "REGIME BREAK" in out["velocity"]["flag"]
+
+
+def test_with_no_live_history_the_velocity_is_absent_not_borrowed():
+    snaps = [_snap(f"2026-05-{d:02d}", 3.0) for d in range(1, 21)]
+    out = compute.derive_composite_extras(_snap("2026-06-01", 6.0), snaps, [],
+                                          live_closes=[])
+    assert out["velocity"]["values"] == {"roc_3d": None, "roc_5d": None,
+                                         "z_20d": None}
+    assert out["velocity"]["flag"] == ""
+    assert out["prev_total"] is None
+
+
+def test_a_stored_day_shown_without_a_live_reading_keeps_its_own_history():
+    """No live composite: today is the newest stored day, and stored against
+    stored is already like for like."""
+    snaps = [_snap(f"2026-05-{d:02d}", 4.0 + d * 0.1) for d in range(1, 11)]
+    out = compute.derive_composite_extras(None, snaps, [], live_closes=[9.0, 9.0, 9.0])
+    assert out["prev_total"] == pytest.approx(4.9)
+    assert out["velocity"]["values"]["roc_3d"] == pytest.approx(5.0 - 4.7)
+
+
+def test_unusable_live_closes_are_dropped():
+    out = compute.derive_composite_extras(
+        _snap("2026-06-01", 6.0), [], [],
+        live_closes=[5.0, None, float("nan"), 0.0, "x", 5.5, 5.6])
+    assert out["prev_total"] == 5.6
+    assert out["velocity"]["values"]["roc_3d"] == pytest.approx(6.0 - 5.0)
+
+
+def test_the_bridge_rolls_its_history_over_live_closes_when_live(monkeypatch):
+    seen = {}
+
+    def _fake_build(latest, prior, spy, at, sector=None, trend=None):
+        seen["prior"] = list(prior)
+        return {}
+
+    import bridge
+    monkeypatch.setattr(compute, "build_bridge_payload", _fake_build)
+    monkeypatch.setattr(bridge, "write_bridge", lambda payload: None)
+    snaps = [_snap(f"2026-05-{d:02d}", 3.0) for d in range(1, 6)]
+    compute.build_and_write_bridge(snaps, [], _snap("2026-06-01", 6.0), None,
+                                   live_closes=[5.8, 5.9])
+    assert seen["prior"] == [5.8, 5.9]
+    compute.build_and_write_bridge(snaps, [], None, None, live_closes=[5.8, 5.9])
+    assert seen["prior"] == [3.0] * 5

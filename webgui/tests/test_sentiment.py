@@ -1193,3 +1193,24 @@ def test_tiles_show_no_change_when_today_has_no_total():
     t = S.tiles({"composite": {"total_score": None}}, 6.2)
     assert t["change"] == "—"
     assert t["yesterday"] == "6.20"
+
+
+# --- AC-48: "yesterday" is the service's like-for-like figure when it sends one --
+
+def test_previous_total_prefers_the_services_figure():
+    snaps = [{"date": "d", "composite": {"total_score": "3.00"}}]
+    assert S.previous_total({"prev_total": 6.1}, {"composite": {}}, snaps) == 6.1
+
+
+def test_previous_total_of_none_from_the_service_is_none_not_the_backfill():
+    """The service says there is no like-for-like prior session. Falling back
+    to the stored history here is the comparison the service just declined."""
+    snaps = [{"date": "d", "composite": {"total_score": "3.00"}}]
+    assert S.previous_total({"prev_total": None}, {"composite": {}}, snaps) is None
+
+
+def test_previous_total_without_the_key_is_the_old_derivation():
+    snaps = [{"date": "a", "composite": {"total_score": "3.00"}},
+             {"date": "b", "composite": {"total_score": "4.00"}}]
+    assert S.previous_total({}, {"composite": {}}, snaps) == 4.0     # live shown
+    assert S.previous_total({}, None, snaps) == 3.0                  # backfill shown

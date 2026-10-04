@@ -380,7 +380,8 @@ def test_refresh_recomputes_trend_first_call_then_gates(monkeypatch):
                            "composite": {"total_score": "7.80"}}], spy=[1.0])
 
     # Real derive (the stub above replaces it) — restore so trend threads through.
-    def _derive(live, snaps, spy, trend=None, trend_30d=None, trend_7d=None):
+    def _derive(live, snaps, spy, trend=None, trend_30d=None, trend_7d=None,
+                live_closes=None):
         return {"weights": {}, "size": "", "bias": "", "signal": "",
                 "velocity": {"text": "", "flag": ""}, "divergence": "",
                 "trend": trend, "trend_30d_ago": trend_30d, "trend_7d": trend_7d}
@@ -432,7 +433,8 @@ def test_refresh_publishes_trend_7d_into_the_composite(monkeypatch):
     bus = Bus(fake=True)
     _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
 
-    def _derive(live, snaps, spy, trend=None, trend_30d=None, trend_7d=None):
+    def _derive(live, snaps, spy, trend=None, trend_30d=None, trend_7d=None,
+                live_closes=None):
         return {"weights": {}, "size": "", "bias": "", "signal": "",
                 "velocity": {"text": "", "flag": ""}, "divergence": "",
                 "trend": trend, "trend_30d_ago": trend_30d, "trend_7d": trend_7d}
@@ -533,7 +535,8 @@ def test_refresh_trend_recompute_failure_non_fatal(monkeypatch):
     bus = Bus(fake=True)
     _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
 
-    def _derive(live, snaps, spy, trend=None, trend_30d=None, trend_7d=None):
+    def _derive(live, snaps, spy, trend=None, trend_30d=None, trend_7d=None,
+                live_closes=None):
         return {"weights": {}, "size": "", "bias": "", "signal": "",
                 "velocity": {"text": "", "flag": ""}, "divergence": "",
                 "trend": trend, "trend_30d_ago": trend_30d, "trend_7d": trend_7d}
@@ -1375,3 +1378,58 @@ def test_a_dead_feed_refresh_publishes_the_dead_reading(monkeypatch):
     handlers.refresh(bus, with_sectors=False)
     env = bus.cache_get(handlers.CACHE_COMPOSITE)
     assert env.payload["live"]["composite"]["total_score"] is None
+
+
+# --- AC-48: the refresh records each session's live close and differences those --
+
+def _fresh_intraday(monkeypatch):
+    from services.sentiment_svc import intraday_history_db
+    conn = intraday_history_db.connect(":memory:")
+    monkeypatch.setattr(handlers, "_intraday_conn", conn)
+    monkeypatch.setattr(handlers, "_CLOSES_SEEDED", False)
+    return conn
+
+
+def test_recording_a_point_also_records_the_sessions_live_close(monkeypatch):
+    from services.sentiment_svc import intraday_history_db
+    conn = _fresh_intraday(monkeypatch)
+    monkeypatch.setattr(handlers, "_is_rth_now", lambda now=None: True)
+    handlers._record_intraday(Bus(fake=True), _fake_live(total="6.30"),
+                              {"smoothed_score": 55.0})
+    closes = intraday_history_db.load_closes(conn)
+    assert [t for _d, t in closes] == [6.30]
+    assert closes[0][0] == handlers._session_date_iso()
+
+
+def test_prior_live_closes_exclude_today(monkeypatch):
+    from services.sentiment_svc import intraday_history_db
+    conn = _fresh_intraday(monkeypatch)
+    today = handlers._session_date_iso()
+    intraday_history_db.record_close(conn, "2026-01-05", 5.1, 1)
+    intraday_history_db.record_close(conn, "2026-01-06", 5.4, 2)
+    intraday_history_db.record_close(conn, today, 9.9, 3)
+    assert handlers._live_closes() == [5.1, 5.4]
+
+
+def test_refresh_hands_the_live_closes_to_the_velocity_and_the_bridge(monkeypatch):
+    from services.sentiment_svc import intraday_history_db
+    bus = Bus(fake=True)
+    calls = _patch_compute(monkeypatch, live=_fake_live(),
+                           snaps=[{"date": "2026-06-15",
+                                   "composite": {"total_score": "7.80"}}], spy=[1.0])
+    conn = _fresh_intraday(monkeypatch)
+    intraday_history_db.record_close(conn, "2026-01-05", 5.1, 1)
+    seen = {}
+
+    def _derive(live, snaps, spy, **kw):
+        seen["derive"] = kw.get("live_closes")
+        return {}
+
+    def _bridge(*a, **kw):
+        seen["bridge"] = kw.get("live_closes")
+
+    monkeypatch.setattr(handlers.compute, "derive_composite_extras", _derive)
+    monkeypatch.setattr(handlers.compute, "build_and_write_bridge", _bridge)
+    handlers.refresh(bus, with_sectors=False)
+    assert seen == {"derive": [5.1], "bridge": [5.1]}
+    assert calls is not None

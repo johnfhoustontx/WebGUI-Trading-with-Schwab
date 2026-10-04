@@ -212,3 +212,12 @@ def test_the_day_arc_still_uses_the_newest_session_when_nothing_is_live():
     snaps = [{"composite": {"total_score": "7.00"}}] * 3
     assert ms.sentiment_arcs({}, snaps)[0]["value"] == 70.0
     assert ms.sentiment_arcs(None, snaps)[0]["value"] == 70.0
+
+
+def test_prev_total_prefers_the_services_like_for_like_figure():
+    """AC-48: the service publishes the prior session's LIVE close."""
+    snaps = [{"composite": {"total_score": "3.00"}}]
+    assert ms.prev_total(snaps, {"prev_total": 6.1}) == 6.1
+    assert ms.prev_total(snaps, {"prev_total": None}) is None
+    assert ms.prev_total(snaps, {}) == 3.0
+    assert ms.prev_total(snaps) == 3.0
