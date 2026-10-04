@@ -409,7 +409,14 @@ from services.options_svc.commission import commission_for, futures_commission  
 
 
 def _spread_max_loss_dollars(width, qty, total_credit_dollars) -> float:
-    """Defined-risk spread max loss in dollars: width*100*qty - total net credit."""
+    """Defined-risk spread max loss in dollars: width*100*qty - the credit the
+    spread itself was sold for.
+
+    ⚠ ``total_credit_dollars`` is the credit carried by the position that
+    REMAINS, never "the original credit plus the action's net cash". A roll or
+    a narrow realizes its cash at once; counting that again here reserved the
+    realized loss a second time ($1,060 against $760 on a 10-wide spread sold
+    for 2.40, closed at 5.40 and reopened for 2.40 - audit AC-13)."""
     return round(max(0.0, width * 100 * qty - total_credit_dollars), 2)
 
 
@@ -570,8 +577,9 @@ def build_narrow(position, mark, price_leg, ctx) -> dict | None:
     gross = round((p_old - p_new) * 100 * qty, 2)   # sell old long(+), buy closer long(-)
     commission = commission_for(2, sym, qty)
     new_width = abs(position["short_strike"] - new_long)
-    total_credit = entry_credit_d + gross
-    new_max_loss = _spread_max_loss_dollars(new_width, qty, total_credit)
+    # The narrowing debit is realized at once; the spread that remains carries
+    # its original credit over a smaller width.
+    new_max_loss = _spread_max_loss_dollars(new_width, qty, entry_credit_d)
     return {
         "action": "narrow",
         "label": "Narrow the spread",
@@ -718,8 +726,9 @@ def build_roll_down(position, mark, price_leg, ctx) -> dict | None:
     credit_new_pc = max(0.0, ns - nl)
     gross = round((-cv + credit_new_pc) * 100 * qty, 2)
     commission = commission_for(4, sym, qty)
-    total_credit = entry_credit_d + gross
-    new_max_loss = _spread_max_loss_dollars(w, qty, total_credit)
+    # The new spread's own risk: its width less the credit IT was sold for.
+    # The loss on the spread being closed is realized by the roll itself.
+    new_max_loss = _spread_max_loss_dollars(w, qty, credit_new_pc * 100 * qty)
     return {
         "action": "roll_down",
         "label": "Roll down (same expiry)",
@@ -768,8 +777,9 @@ def build_roll_out(position, mark, price_leg, ctx) -> dict | None:
     credit_new_pc = max(0.0, ns - nl)
     gross = round((-cv + credit_new_pc) * 100 * qty, 2)
     commission = commission_for(4, sym, qty)
-    total_credit = entry_credit_d + gross
-    new_max_loss = _spread_max_loss_dollars(w, qty, total_credit)
+    # The new spread's own risk: its width less the credit IT was sold for.
+    # The loss on the spread being closed is realized by the roll itself.
+    new_max_loss = _spread_max_loss_dollars(w, qty, credit_new_pc * 100 * qty)
     return {
         "action": "roll_out",
         "label": "Roll out (more time)",
@@ -820,8 +830,9 @@ def build_roll_down_out(position, mark, price_leg, ctx) -> dict | None:
     credit_new_pc = max(0.0, ns - nl)
     gross = round((-cv + credit_new_pc) * 100 * qty, 2)
     commission = commission_for(4, sym, qty)
-    total_credit = entry_credit_d + gross
-    new_max_loss = _spread_max_loss_dollars(w, qty, total_credit)
+    # The new spread's own risk: its width less the credit IT was sold for.
+    # The loss on the spread being closed is realized by the roll itself.
+    new_max_loss = _spread_max_loss_dollars(w, qty, credit_new_pc * 100 * qty)
     return {
         "action": "roll_down_out",
         "label": "Roll down & out",

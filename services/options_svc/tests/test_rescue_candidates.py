@@ -406,3 +406,62 @@ def test_close_net_cash_reflects_the_higher_ic_commission():
     ic = _pos(strategy="IC", quantity=3)
     c = rescue.build_close(ic, _mark(current_value=2.50), _flat_pricer, ctx={})
     assert c["net_cash"] == round(c["gross_cash"] - c["commission"], 2)
+
+
+# --------------------------------------------------------------------------- #
+# AC-13: "max loss after" is the risk of the position that REMAINS
+# --------------------------------------------------------------------------- #
+# A roll closes the tested spread - that loss is realized, in cash, at once -
+# and opens a new one. The builders computed the new position's max loss from
+# ``entry credit + net roll cash``, which subtracts the realized loss a second
+# time: a 10-wide spread sold for 2.40, closed at 5.40 and reopened for 2.40 was
+# given a max loss of $1,060 where the new spread risks $760.
+
+def _roll_pricer(new_short, new_long, short_px, long_px):
+    def pricer(sym, expiry, right, strike):
+        if strike == new_short:
+            return short_px
+        if strike == new_long:
+            return long_px
+        return 1.00
+    return pricer
+
+
+def _tested():
+    return (_pos(short_strike=100.0, long_strike=90.0, width=10.0,
+                 entry_credit=2.40, max_loss_total=760.0),
+            _mark(current_value=5.40))
+
+
+def test_roll_down_max_loss_is_the_new_spreads_own_risk():
+    pos, mark = _tested()
+    c = rescue.build_roll_down(pos, mark, _roll_pricer(90.0, 80.0, 3.40, 1.00), ctx={})
+    assert c["gross_cash"] == round((-5.40 + 2.40) * 100, 2)      # -300: what the roll costs
+    assert c["new_max_loss"] == 760.0                              # was 1060.0
+
+
+def test_roll_out_max_loss_is_the_new_spreads_own_risk():
+    pos, mark = _tested()
+    c = rescue.build_roll_out(pos, mark, _roll_pricer(100.0, 90.0, 3.40, 1.00), ctx={})
+    assert c["new_max_loss"] == 760.0
+
+
+def test_roll_down_out_max_loss_is_the_new_spreads_own_risk():
+    pos, mark = _tested()
+    c = rescue.build_roll_down_out(pos, mark, _roll_pricer(90.0, 80.0, 3.40, 1.00),
+                                   ctx={})
+    assert c["new_max_loss"] == 760.0
+
+
+def test_narrow_max_loss_is_the_narrower_spreads_own_risk():
+    """Selling the old long and buying a closer one is a debit, realized at
+    once. The remaining spread risks its new width less the ORIGINAL credit."""
+    pos, mark = _tested()
+
+    def pricer(sym, expiry, right, strike):
+        return 0.50 if strike == 90.0 else 1.50          # old long 0.50, new long 1.50
+
+    c = rescue.build_narrow(pos, mark, pricer, ctx={})
+    assert c["gross_cash"] == -100.0
+    assert c["new_width"] == 5.0
+    assert c["new_max_loss"] == round(5.0 * 100 - 240.0, 2)        # 260, was 360

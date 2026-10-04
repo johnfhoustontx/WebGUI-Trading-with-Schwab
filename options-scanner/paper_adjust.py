@@ -285,7 +285,28 @@ def _apply_convert(db_path, position, candidate, action):
     if new_ml is not None:
         fields["max_loss_total"] = new_ml
 
-    _apply_net_cash(db_path, candidate)   # convert collects a net credit
+    # The credit collected belongs to the POSITION: it joins ``entry_credit``
+    # and is realized when the position closes, exactly like the credit it was
+    # opened for. Only the commission is booked now.
+    #
+    # It used to be realized at once (``_apply_net_cash``) with ``entry_credit``
+    # left alone. The totals came out the same, but every later mark - which
+    # prices all four legs against ``entry_credit`` - then read worse than the
+    # position was by the whole convert credit, so the money stop sat that much
+    # nearer and the profit target that much further (audit AC-13).
+    qty = position.get("quantity") or 1
+    comm = round(candidate.get("commission", 0.0) or 0.0, 2)
+    # ``net_cash`` is the figure the dispatcher refreshes to live prices, so the
+    # credit is taken from it (plus the commission it had netted out), not from
+    # the candidate's possibly stale ``gross_cash``.
+    if candidate.get("net_cash") is not None:
+        gross = round(candidate["net_cash"] + comm, 2)
+    else:
+        gross = candidate.get("gross_cash") or 0.0
+    fields["entry_credit"] = round(
+        (position.get("entry_credit") or 0.0) + gross / (MULTIPLIER * qty), 4)
+    if comm:
+        paper_account_db.realize_pnl(db_path, -comm)
     # Reconcile reserved BP to the new max_loss_total. Converts usually LOWER
     # max loss (credit collected) -> release; an edge-case increase reserves
     # more. Handled both directions by _reconcile_bp. Independent of net_cash.
@@ -378,11 +399,18 @@ def apply_roll(db_path, position, candidate, broker=None):
     new_short = sell_leg.get("strike") if sell_leg else position.get("short_strike")
     new_long = buy_leg.get("strike") if buy_leg else position.get("long_strike")
     new_width = candidate.get("new_width") or position.get("width")
-    new_ml = candidate.get("new_max_loss")
     # reopen credit per contract (the SELL/BUY pair at the NEW strikes/expiry)
     reopen_credit = _pair_credit(reopen_legs)
     if reopen_credit is None:
         reopen_credit = position.get("entry_credit", 0.0)
+    # The risk BOOKED is the risk of the row being written: its width less the
+    # credit it is opened for. Never the candidate's figure taken on trust - the
+    # close above has already realized the old spread's loss, and a max loss
+    # that counted it again reserved it twice (audit AC-13). The candidate's
+    # number is the fallback only when this row has no width to compute from.
+    new_ml = _standalone_max_loss(new_width, qty, reopen_credit)
+    if new_ml is None:
+        new_ml = candidate.get("new_max_loss")
     max_loss_per = round(new_ml / qty, 2) if (new_ml and qty) else position.get("max_loss_per")
 
     new_id = paper_account_db.insert_position(db_path, {
@@ -413,6 +441,19 @@ def apply_roll(db_path, position, candidate, broker=None):
              new_expiry, realized)
     return _result(True, action, position["position_id"],
                    new_position_id=new_id, realized=realized)
+
+
+def _standalone_max_loss(width, qty, credit_per_share):
+    """A credit spread's own max loss in dollars, or None without a usable
+    width: ``width x 100 x qty`` less the credit it was sold for."""
+    try:
+        width, qty = float(width), int(qty)
+        credit = float(credit_per_share or 0.0)
+    except (TypeError, ValueError):
+        return None
+    if not (width > 0 and qty > 0) or credit != credit:      # NaN credit
+        return None
+    return round(max(0.0, (width - credit) * MULTIPLIER * qty), 2)
 
 
 def _partition_roll_legs(candidate, right):

@@ -178,9 +178,15 @@ def test_apply_convert_ic_sets_call_legs_and_strategy(tmp_path):
     acct = pdb.get_account(db)
     # reserved BP now tracks the new max_loss_total (was the bug: stayed 800)
     assert acct["buying_power_reserved"] == 720.0 == p["max_loss_total"]
-    # cash: net credit (+77.40) + released BP delta (800-720=80)
-    assert acct["cash"] == round(cash0 + 77.40 + 80.0, 2)
-    assert acct["realized_pnl"] == round(rp0 + 77.40, 2)
+    # The $80 collected is the POSITION's credit now (1.00 -> 1.40 a share over
+    # two contracts), realized when the position closes like the credit it was
+    # opened for. Only the commission is booked today. This asserted
+    # ``+77.40`` realized at once until 2026-10-04: the row's entry credit then
+    # did not include it, every later mark read $80 worse than the position
+    # was, and the money stop sat $80 nearer (audit AC-13).
+    assert p["entry_credit"] == 1.40
+    assert acct["cash"] == round(cash0 - 2.60 + 80.0, 2)
+    assert acct["realized_pnl"] == round(rp0 - 2.60, 2)
     rows = pdb.list_adjustments(db, pid)
     assert len(rows) == 1 and rows[0]["action"] == "convert_ic"
 
@@ -208,9 +214,11 @@ def test_apply_convert_butterfly_credits_cash(tmp_path):
     acct = pdb.get_account(db)
     # reserved BP now tracks the new max_loss_total (was the bug: stayed 800)
     assert acct["buying_power_reserved"] == 680.0 == p["max_loss_total"]
-    # cash: net credit (+117.40) + released BP delta (800-680=120)
-    assert acct["cash"] == round(cash0 + 117.40 + 120.0, 2)
-    assert acct["realized_pnl"] == round(rp0 + 117.40, 2)
+    # As above (AC-13): the $120 joins the position's credit; the commission
+    # is what is booked today. Cash still gains the released BP (800-680=120).
+    assert p["entry_credit"] == 1.60
+    assert acct["cash"] == round(cash0 - 2.60 + 120.0, 2)
+    assert acct["realized_pnl"] == round(rp0 - 2.60, 2)
     rows = pdb.list_adjustments(db, pid)
     assert len(rows) == 1 and rows[0]["action"] == "convert_butterfly"
 
@@ -252,7 +260,12 @@ def test_apply_roll_closes_old_opens_linked_new(tmp_path):
     assert new["parent_position_id"] == pid
     assert new["short_strike"] == 495.0
     assert new["long_strike"] == 490.0
-    assert new["max_loss_total"] == 760.0
+    # The risk BOOKED is the risk of the row that was written: 5 wide, two
+    # contracts, 0.45 credit = 1000 - 90. This asserted the candidate's own
+    # 760, a figure this fixture invented that does not follow from its legs;
+    # booking it left the row's max loss and its entry credit describing two
+    # different positions (audit AC-13).
+    assert new["max_loss_total"] == 910.0
     # reopen credit captured at the NEW strikes/prices (0.70 - 0.25)
     assert new["entry_credit"] == 0.45
     # close debit = 0.80 - 0.30 = 0.50; realized = (1.00 - 0.50)*100*2 = 100
@@ -263,14 +276,14 @@ def test_apply_roll_closes_old_opens_linked_new(tmp_path):
 
     # --- account-level invariants ---
     acct = pdb.get_account(db)
-    # old BP (800) released by _close, new BP (760) reserved for the reopened
+    # old BP (800) released by _close, new BP (910) reserved for the reopened
     # position => reserved == new position's max_loss_total
-    assert acct["buying_power_reserved"] == 760.0 == new["max_loss_total"]
+    assert acct["buying_power_reserved"] == 910.0 == new["max_loss_total"]
     # realized P&L: closed-spread P&L (100) minus commission (5.20)
     assert acct["realized_pnl"] == round(rp0 + realized - 5.20, 2)
     # cash: + released old BP (800) + close realized (100) - commission (5.20)
-    #       - reserved new BP (760)
-    assert acct["cash"] == round(cash0 + 800.0 + 100.0 - 5.20 - 760.0, 2)
+    #       - reserved new BP (910)
+    assert acct["cash"] == round(cash0 + 800.0 + 100.0 - 5.20 - 910.0, 2)
 
     # adjustment row on the old position id
     rows = pdb.list_adjustments(db, pid)
@@ -433,10 +446,15 @@ def test_apply_adjustment_within_tolerance_executes(tmp_path):
     assert p["strategy"] == "IC"
     assert p["call_short"] == 510.0
     assert p["call_long"] == 515.0
-    # the FRESH net_cash (117.40) was realized, not the stale 120.0
+    # The FRESH credit was used, not the stale one: fresh net 117.40 plus the
+    # 2.60 commission is $120 over two contracts, 0.60 a share onto the 1.00.
+    # (The stale candidate's 122.60 would have given 1.613.) Since AC-13 the
+    # credit joins the position rather than being realized at once, so this
+    # asserts the position's credit where it used to assert cash + 117.40.
+    assert p["entry_credit"] == 1.60
     acct = pdb.get_account(db)
-    # cash: net credit (+117.40) + released BP delta (800-720=80)
-    assert acct["cash"] == round(cash0 + 117.40 + 80.0, 2)
+    # cash: commission (-2.60) + released BP delta (800-720=80)
+    assert acct["cash"] == round(cash0 - 2.60 + 80.0, 2)
     rows = pdb.list_adjustments(db, pid)
     assert len(rows) == 1 and rows[0]["action"] == "convert_ic"
 
@@ -555,3 +573,69 @@ def test_legacy_2leg_roll_out_still_applies_with_the_scratch_fallback(tmp_path):
     res = pa.apply_roll(db, pos, cand)
     assert res["ok"] is True
     assert _pos(db, pid)["realized_pnl"] == 0.0          # scratch, as before
+
+
+#############################################
+# AC-13: what a roll and a convert book
+#############################################
+
+def test_a_rolled_position_reserves_its_own_risk_not_the_realized_loss_again(tmp_path):
+    """10 wide, sold for 2.40, closed at 5.40, reopened for 2.40. The $300 loss
+    is realized by the close. The new row risks 1000 - 240 = 760; a candidate
+    that says 1,060 (the old builders' figure) must not be what is reserved."""
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db, short_strike=100.0, long_strike=90.0, width=10.0,
+                         quantity=1, entry_credit=2.40, max_loss_per=760.0,
+                         max_loss_total=760.0)
+    cand = {"action": "roll_down", "gross_cash": -300.0, "commission": 2.60,
+            "net_cash": -302.60, "new_width": 10.0, "new_max_loss": 1060.0,
+            "new_expiry": "2026-07-31",
+            "est_fill_legs": [
+                _leg("BUY", "PUT", 100.0, qty=1, price=6.40),
+                _leg("SELL", "PUT", 90.0, qty=1, price=1.00),
+                _leg("SELL", "PUT", 90.0, qty=1, price=3.40),
+                _leg("BUY", "PUT", 80.0, qty=1, price=1.00)]}
+    res = pa.apply_roll(db, _pos(db, pid), cand)
+    new = _pos(db, res["new_position_id"])
+    assert res["realized"] == -300.0
+    assert new["entry_credit"] == 2.40
+    assert new["max_loss_total"] == 760.0
+    assert new["max_loss_per"] == 760.0
+    acct = pdb.get_account(db)
+    assert acct["buying_power_reserved"] == 760.0
+    assert pdb.reconcile_buying_power(db) == 0.0
+
+
+def test_a_convert_and_a_close_realize_the_same_total_as_before(tmp_path):
+    """Folding the credit into the position moves WHEN it is realized, never
+    how much: convert for $80, close the whole thing for 0.90 a share."""
+    import paper_engine
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db)                       # credit 1.00, two contracts
+    rp0 = pdb.get_account(db)["realized_pnl"]
+    cand = {"action": "convert_ic", "gross_cash": 80.0, "commission": 2.60,
+            "net_cash": 77.40, "new_max_loss": 720.0,
+            "est_fill_legs": [_leg("SELL", "CALL", 510.0), _leg("BUY", "CALL", 515.0)]}
+    pa.apply_convert_ic(db, _pos(db, pid), cand)
+    pos = _pos(db, pid)
+    realized = round((pos["entry_credit"] - 0.90) * 100 * 2, 2)
+    paper_engine._close(db, pos, exit_debit=0.90, exit_order_id=None,
+                        realized_pnl=realized, reason="TEST", status="CLOSED")
+    total = round(pdb.get_account(db)["realized_pnl"] - rp0, 2)
+    # (1.00 + 0.40 - 0.90) x 200 - 2.60 commission
+    assert total == round((1.00 + 0.40 - 0.90) * 200 - 2.60, 2)
+
+
+def test_after_a_convert_the_mark_reads_the_whole_positions_credit(tmp_path):
+    """The point of the fold. Closing all four legs for exactly what they were
+    sold for is a scratch; with the convert credit left out of the row it read
+    as an $80 loss, $80 nearer the money stop."""
+    db = _seed_account(tmp_path)
+    pid = _seed_position(db)
+    cand = {"action": "convert_ic", "gross_cash": 80.0, "commission": 2.60,
+            "net_cash": 77.40, "new_max_loss": 720.0,
+            "est_fill_legs": [_leg("SELL", "CALL", 510.0), _leg("BUY", "CALL", 515.0)]}
+    pa.apply_convert_ic(db, _pos(db, pid), cand)
+    pos = _pos(db, pid)
+    cost_to_close_all_four = 1.40
+    assert round((pos["entry_credit"] - cost_to_close_all_four) * 100 * 2, 2) == 0.0
