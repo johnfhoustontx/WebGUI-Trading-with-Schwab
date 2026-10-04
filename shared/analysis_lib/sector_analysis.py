@@ -272,6 +272,21 @@ def get_sector_info(symbol: str) -> Optional[IndustryInfo]:
     return FinVizScraper.get_stock_info(symbol)
 
 
+# Trading days -> the name a reader knows the horizon by.
+_PERIOD_LABELS = {1: '1D', 5: '1W', 21: '1M', 63: '3M', 126: '6M', 252: '1Y'}
+
+
+def _period_label(period: int) -> str:
+    """The label for a lookback of ``period`` trading days.
+
+    Derived from the PERIOD, never from its position in the list. The labels
+    were ``['1D', '1W', '1M', ...][i]`` until 2026-10-03, so the default
+    5 / 21 / 63-day figures printed as 1D / 1W / 1M - each one horizon too
+    short (audit AC-45). A period with no conventional name reads in days.
+    """
+    return _PERIOD_LABELS.get(period, f"{period}D")
+
+
 def calculate_stock_vs_sector_rs(
     stock_df: pd.DataFrame,
     sector_df: pd.DataFrame,
@@ -289,16 +304,15 @@ def calculate_stock_vs_sector_rs(
     """
     if periods is None:
         periods = [5, 21, 63]  # 1W, 1M, 3M
-    
-    labels = ['1D', '1W', '1M', '3M', '6M']
+
     results = {}
-    
+
     if stock_df is None or sector_df is None:
         return {}
-    
-    for i, period in enumerate(periods):
-        label = labels[min(i, len(labels)-1)]
-        
+
+    for period in periods:
+        label = _period_label(period)
+
         if len(stock_df) <= period or len(sector_df) <= period:
             results[label] = 100.0
             continue

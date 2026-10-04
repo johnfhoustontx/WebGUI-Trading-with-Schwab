@@ -146,3 +146,40 @@ def test_compute_since_purchase_returns_entry_after_all_rows():
         }
     )
     assert compute_since_purchase_returns(df, "2026-02-01") is None
+
+
+# ── The label names the period it was computed over (audit AC-45) ────────────
+# The default periods are 5, 21 and 63 trading days - a week, a month, a
+# quarter. The labels were taken by POSITION from ['1D', '1W', '1M', ...], so
+# the three figures printed as 1D / 1W / 1M: each one horizon too short.
+
+def _ramp(n, daily_growth):
+    return _rs_df([100.0 * (1 + daily_growth) ** i for i in range(n)])
+
+
+def test_default_periods_are_labelled_week_month_quarter():
+    rs = _load_rs()
+    out = rs(_ramp(80, 0.002), _ramp(80, 0.001))
+    assert list(out) == ["1W", "1M", "3M"]
+
+
+def test_each_label_carries_its_own_periods_figure():
+    rs = _load_rs()
+    stock, sector = _ramp(80, 0.002), _ramp(80, 0.001)
+    out = rs(stock, sector)
+    for label, days in (("1W", 5), ("1M", 21), ("3M", 63)):
+        expected = 100.0 * (1.002 ** days) / (1.001 ** days)
+        assert out[label] == pytest.approx(expected), label
+
+
+def test_a_single_requested_period_is_labelled_by_its_length():
+    rs = _load_rs()
+    stock, sector = _ramp(140, 0.002), _ramp(140, 0.001)
+    assert list(rs(stock, sector, periods=[21])) == ["1M"]
+    assert list(rs(stock, sector, periods=[126])) == ["6M"]
+
+
+def test_a_period_with_no_conventional_name_is_labelled_in_days():
+    rs = _load_rs()
+    out = rs(_ramp(80, 0.002), _ramp(80, 0.001), periods=[10])
+    assert list(out) == ["10D"]
