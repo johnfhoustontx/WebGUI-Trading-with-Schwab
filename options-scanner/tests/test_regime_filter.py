@@ -236,3 +236,37 @@ def test_current_bridge_snapshot_blocks_ccs():
     assert out["allow_ccs"] is False
     assert out["allow_pcs"] is True
     assert out["trend_state"] == "bullish"
+
+
+# ── A dead sentiment feed casts no vote (audit AC-40) ────────────────────────
+# With every fetch failing the bridge used to carry composite_score 0.0 and
+# bias "short": a hard bear vote from no data, which beside a bearish trend
+# blocked put credit spreads. The bridge now writes None and "unknown" for
+# that case (sentiment-dashboard/live_composite.build_bridge_payload - this
+# suite cannot import it, the two apps' ``scoring`` modules collide, so the
+# shape is restated here and pinned on the producer's side by its own tests).
+
+def _outage_bridge(score, bias, trend_state="bearish"):
+    return {"generated_at": datetime.now(timezone.utc).isoformat(),
+            "composite_score": score, "bias": bias,
+            "regime": "unknown" if score is None else "strong_bearish",
+            "aggregate_confidence": 0.0,
+            "trend_regime": {"state": trend_state, "confidence": 0.9}}
+
+
+def test_the_old_dead_feed_bridge_blocked_put_credit_spreads():
+    """What the defect did, kept as the control for the test below."""
+    out = rf.evaluate_regime(bridge=_outage_bridge(0.0, "short"))
+    assert out["allow_pcs"] is False
+
+
+def test_an_unknown_composite_casts_no_sentiment_vote():
+    out = rf.evaluate_regime(bridge=_outage_bridge(None, "unknown"))
+    assert out["allow_pcs"] is True and out["allow_ccs"] is True
+    assert out["composite_score"] is None
+    assert out["bias"] == "unknown"
+
+
+def test_an_unknown_composite_cannot_block_calls_either():
+    out = rf.evaluate_regime(bridge=_outage_bridge(None, "unknown", trend_state="bullish"))
+    assert out["allow_pcs"] is True and out["allow_ccs"] is True

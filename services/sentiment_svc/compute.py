@@ -59,7 +59,7 @@ from scoring import momentum  # noqa: E402
 from scoring import momentum_regime  # noqa: E402
 import live_composite  # noqa: E402,F401  (eager: pins module; never lazy)
 from live_composite import (  # noqa: E402
-    signal_band, compute_live, build_bridge_payload,
+    signal_band, compute_live, build_bridge_payload, composite_reading,
     _BREADTH, _last, _VIX_SYMS)  # noqa: F401
 import technical  # noqa: E402  (shared indicator lib, standalone import)
 
@@ -1581,8 +1581,15 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
     # of these words already dash on. ``total`` stays byte-for-byte what it was
     # — ``velocity`` below has its own missing-input policy, which is not this
     # line's to change.
+    #
+    # ``composite_reading`` is the producer's own test for "was one read". It
+    # was ``_as_finite`` until 2026-10-03, which caught a NaN and a missing
+    # total but not the shape the producer actually emits with every fetch
+    # failing: the STRING "0.00" at aggregate confidence 0.0, a perfectly
+    # finite number that banded as Strong Bear and was pushed to the phone
+    # (audit AC-40).
     raw_total = (latest or {}).get("composite", {}).get("total_score")
-    scored = _as_finite(raw_total)
+    scored = composite_reading((latest or {}).get("composite"))
     total = _safe_float(raw_total)
 
     try:
@@ -1602,7 +1609,12 @@ def derive_composite_extras(live, snaps, spy, trend=None, trend_30d=None,
 
     velocity = {"text": "", "flag": "", "values": _EMPTY_VELOCITY_VALUES.copy()}
     try:
-        v = scoring_composite.velocity(list(prior_scores), total)
+        # No reading, no velocity: differencing a manufactured zero against a
+        # real history prints a several-sigma "REGIME BREAK" for a data outage.
+        v = (scoring_composite.velocity(list(prior_scores), total)
+             if scored is not None
+             else {"roc_3d": None, "roc_5d": None, "z_20d": None,
+                   "regime_break": False})
         roc3, roc5, z = v["roc_3d"], v["roc_5d"], v["z_20d"]
         parts = [
             f"3d ROC: {roc3:+.2f}" if roc3 is not None else "3d ROC: —",

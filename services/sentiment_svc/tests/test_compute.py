@@ -1137,3 +1137,56 @@ def test_compute_imports_clean():
     assert not hasattr(compute, "ui")
     # And it must not import nicegui at module scope.
     assert "nicegui" not in compute.__dict__
+
+
+# ── A dead data feed, driven from the PRODUCER (audit AC-40) ─────────────────
+# The absence tests above feed ``derive_composite_extras`` shapes that the
+# producer does not emit when every fetch fails. What it emits is the STRING
+# "0.00" at aggregate confidence 0.0 - finite, so the old ``_as_finite`` guard
+# let it through and it banded as "Strong Bear / Short / 0.70x". These build the
+# snapshot with the real ``compute_live`` over a client that fails every call.
+
+class _DeadClient:
+    def __getattr__(self, name):
+        def _boom(*a, **k):
+            raise ConnectionError("proxy down")
+        return _boom
+
+
+_SECTORS = [{"kind": "sector", "etf": e, "sector": e, "sp_weight": 9.0}
+            for e in ("XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLB",
+                      "XLU", "XLRE", "XLC")]
+
+
+def _dead_live():
+    import live_composite
+    live_composite.reset_pcr_cache()
+    return live_composite.compute_live(_DeadClient(), _SECTORS)
+
+
+def test_a_dead_feed_snapshot_is_the_shape_this_guards_against():
+    live = _dead_live()
+    assert live["composite"]["total_score"] == "0.00"
+    assert live["composite"]["aggregate_confidence"] == 0.0
+
+
+def test_a_dead_feed_publishes_no_band():
+    snaps = [_snap(f"2026-05-{d:02d}", 6.0) for d in range(1, 21)]
+    out = compute.derive_composite_extras(_dead_live(), snaps, [])
+    assert (out["size"], out["bias"], out["signal"]) == (None, None, None)
+
+
+def test_a_dead_feed_reports_no_velocity_and_no_regime_break():
+    # Twenty sessions near 6.0 and then a manufactured zero is a "regime break"
+    # of many sigma - for an outage.
+    snaps = [_snap(f"2026-05-{d:02d}", 6.0 + (d % 3) * 0.1) for d in range(1, 21)]
+    out = compute.derive_composite_extras(_dead_live(), snaps, [])
+    assert out["velocity"]["flag"] == ""
+    assert out["velocity"]["values"] == {"roc_3d": None, "roc_5d": None, "z_20d": None}
+
+
+def test_zero_confidence_alone_is_no_reading():
+    live = _snap("2026-06-01", 4.2)
+    live["composite"]["aggregate_confidence"] = 0.0
+    out = compute.derive_composite_extras(live, [], [])
+    assert (out["size"], out["bias"], out["signal"]) == (None, None, None)

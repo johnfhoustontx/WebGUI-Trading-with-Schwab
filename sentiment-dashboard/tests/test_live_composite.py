@@ -240,3 +240,95 @@ def test_inf_still_scores_max_when_it_is_real():
                        new_lows=0.0, breadth_ratio=float("inf"),
                        breadth_numeric=1500.0)
     assert r.score == 10
+
+
+# ── A dead data feed is ABSENCE, not the bottom of the scale (audit AC-40) ───
+# With every fetch failing, ``scoring_composite.blend`` has nothing to weigh and
+# returns 0.0 at aggregate confidence 0.0. ``signal_band`` and the bridge's
+# regime ladder are both TOTAL over the reals, so that zero fell out of their
+# last branch as the most bearish reading in the vocabulary: "Strong Bear /
+# Short / 0.70x" on the screens and the phone, ``strong_bearish`` in the bridge
+# - where the scanner counted it as a bear vote and could block put credit
+# spreads. These tests drive the PRODUCER with a client that fails every call;
+# a guard that is only tested from the consumer side can never fire.
+
+class _DeadClient:
+    """Every Schwab call raises - the proxy is down."""
+
+    def __getattr__(self, name):
+        def _boom(*a, **k):
+            raise ConnectionError("proxy down")
+        return _boom
+
+
+# Synthetic on purpose: the sector workbook is gitignored machine state.
+_SD = [{"kind": "sector", "etf": e, "sector": e, "sp_weight": 9.0}
+       for e in ("XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLB", "XLU",
+                 "XLRE", "XLC")]
+
+
+def _dead_snapshot():
+    L.reset_pcr_cache()
+    return L.compute_live(_DeadClient(), _SD)
+
+
+def test_composite_reading_is_the_total_when_there_is_one():
+    assert L.composite_reading({"total_score": "6.81", "aggregate_confidence": 0.9}) == 6.81
+    assert L.composite_reading({"total_score": 1.0, "aggregate_confidence": 1.0}) == 1.0
+
+
+def test_composite_reading_without_a_confidence_field_trusts_the_total():
+    # A backfill snapshot carries no aggregate confidence at all.
+    assert L.composite_reading({"total_score": "4.20"}) == 4.2
+
+
+def test_composite_reading_is_none_for_a_total_no_scorer_can_produce():
+    # Components score 1-10, so a total at or below zero is not a low reading.
+    for total in ("0.00", 0, 0.0, -1.5, None, "", "n/a", float("nan"), float("inf")):
+        assert L.composite_reading({"total_score": total}) is None, total
+
+
+def test_composite_reading_is_none_at_zero_aggregate_confidence():
+    assert L.composite_reading({"total_score": "4.20", "aggregate_confidence": 0.0}) is None
+
+
+def test_composite_reading_tolerates_a_missing_composite():
+    assert L.composite_reading(None) is None
+    assert L.composite_reading({}) is None
+
+
+def test_a_dead_feed_publishes_no_band_in_the_snapshot():
+    comp = _dead_snapshot()["composite"]
+    assert comp["aggregate_confidence"] == 0.0
+    assert comp["bias"] is None
+    assert comp["size_modifier"] is None
+
+
+def test_a_dead_feed_writes_unknown_to_the_bridge_not_strong_bearish():
+    p = L.build_bridge_payload(_dead_snapshot(), history_scores=[6.0, 6.2],
+                               spy_closes=[], generated_at="t")
+    assert p["regime"] == "unknown"
+    assert p["bias"] == "unknown"
+    assert p["composite_score"] is None
+    assert p["position_size_modifier"] is None
+    assert p["contrarian_signal"] is None
+    assert p["aggregate_confidence"] == 0.0
+
+
+def test_a_dead_feed_bridge_still_roundtrips_as_json(tmp_path):
+    import bridge
+    p = L.build_bridge_payload(_dead_snapshot(), history_scores=[],
+                               spy_closes=[], generated_at="t")
+    out = bridge.write_bridge(p, path=tmp_path / "b.json")
+    assert json.loads(out.read_text())["regime"] == "unknown"
+
+
+def test_a_real_bottom_of_scale_reading_is_still_strong_bearish():
+    """The guard rejects ABSENCE, not bad news: a measured 1.2 keeps every word."""
+    p = L.build_bridge_payload(_snap(1.2), history_scores=[2.0, 1.5],
+                               spy_closes=[], generated_at="t")
+    assert p["regime"] == "strong_bearish"
+    assert p["bias"] == "short"
+    assert p["composite_score"] == 1.2
+    assert p["position_size_modifier"] == "0.70x"
+    assert p["contrarian_signal"] == "Strong Bear"

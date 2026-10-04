@@ -7,6 +7,7 @@ history_backfill._score_one_day). No tk imports.
 from __future__ import annotations
 
 import logging
+import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -63,6 +64,44 @@ def cap_weighted_pcr(pcr, weights):
     return sum(r * w for r, w in pw) / sum(w for _, w in pw)
 
 
+def composite_reading(composite):
+    """The composite total when one was actually READ, else None.
+
+    ``composite`` is a snapshot's ``composite`` block. Absent means any of:
+    no block, a total that is missing / unparseable / non-finite, a total at or
+    below zero (the components score 1-10, so no scorer can produce it - it is
+    what ``scoring.composite.blend`` returns with nothing to weigh), or an
+    aggregate confidence of zero. A snapshot that carries no confidence field
+    at all (the backfill's) is trusted on its total.
+
+    This is the ONE test for "is there a composite", and every consumer of the
+    band and the regime word goes through it: ``signal_band`` and the bridge's
+    regime ladder are both TOTAL over the reals, so without it a dead data feed
+    falls out of their last branch as "Strong Bear / Short / 0.70x" and
+    ``strong_bearish`` - a failure that reads as the most confident bearish
+    call in the vocabulary (audit AC-40).
+    """
+    comp = composite if isinstance(composite, dict) else {}
+    try:
+        total = float(comp.get("total_score"))
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(total) or total <= 0:
+        return None
+    conf = comp.get("aggregate_confidence")
+    if conf is not None:
+        try:
+            conf = float(conf)
+        except (TypeError, ValueError):
+            conf = None
+        if conf is not None and not conf > 0:      # zero, negative or NaN
+            return None
+    return total
+
+
+_NO_VELOCITY = {"roc_3d": None, "roc_5d": None, "z_20d": None, "regime_break": False}
+
+
 def signal_band(total):
     """(size_modifier, bias, signal) — mirrors source _update_position_modifier."""
     if total >= 9:
@@ -91,12 +130,22 @@ def build_bridge_payload(snapshot, history_scores, spy_closes, generated_at,
     scores = [s for s in (list(history_scores) + [total]) if s and s > 0]
     a5 = sum(scores[-5:]) / max(1, len(scores[-5:])) if scores else 0
     a20 = sum(scores[-20:]) / max(1, len(scores[-20:])) if scores else 0
-    regime = ("strong_bullish" if total >= 8 else "bullish" if total >= 6.5
-              else "neutral" if total >= 5 else "bearish" if total >= 3.5
-              else "strong_bearish")
+    # ⚠ No reading is "unknown", never the bottom rung. The scanner's regime
+    # filter reads ``composite_score`` and ``bias`` as a sentiment VOTE; None and
+    # "unknown" cast none, where 0.0 and "short" cast a bear vote that can block
+    # put credit spreads. Velocity is withheld for the same reason: a manufactured
+    # zero against a real history reads as a regime break of several sigma.
+    reading = composite_reading(comp)
+    if reading is None:
+        regime, bias, modifier, signal = "unknown", "unknown", None, None
+        vel = dict(_NO_VELOCITY)
+    else:
+        regime = ("strong_bullish" if total >= 8 else "bullish" if total >= 6.5
+                  else "neutral" if total >= 5 else "bearish" if total >= 3.5
+                  else "strong_bearish")
+        modifier, bias, signal = signal_band(total)
+        vel = scoring_composite.velocity(list(history_scores), total)
     momentum = ("rising" if a5 > a20 + 0.3 else "falling" if a5 < a20 - 0.3 else "stable")
-    modifier, bias, signal = signal_band(total)
-    vel = scoring_composite.velocity(list(history_scores), total)
     div = scoring_composite.divergence([
         (k, _safe_float(cs.get(k))) for k in _BRIDGE_COMPONENTS
         if _safe_float(cs.get(k)) > 0 and _safe_float(cc.get(k)) > 0])
@@ -106,7 +155,7 @@ def build_bridge_payload(snapshot, history_scores, spy_closes, generated_at,
         "source": "WebGUI-Sentiment",
         "generated_at": generated_at,
         "date": snapshot.get("date"),
-        "composite_score": round(total, 2),
+        "composite_score": (None if reading is None else round(total, 2)),
         "regime": regime,
         "bias": bias.lower(),
         "position_size_modifier": modifier,
@@ -332,7 +381,12 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
     confs = {"vix_complex": float(vix_complex.confidence), "put_call": float(pc_res.confidence),
              "breadth": float(br.confidence), "rotation": rot_conf, "sector_perf": sec_conf}
     composite, agg = scoring_composite.blend(scores, confs, WEIGHTS)
-    modifier, bias, _sig = signal_band(composite)
+    # No band without a reading: with every fetch failed the blend is 0.0 at
+    # zero confidence, and ``signal_band(0.0)`` is "0.70x / Short".
+    if composite_reading({"total_score": composite, "aggregate_confidence": agg}) is None:
+        modifier, bias = None, None
+    else:
+        modifier, bias, _sig = signal_band(composite)
     return {
         "date": date.today().isoformat(),
         "source": "live",
