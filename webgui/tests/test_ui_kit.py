@@ -632,6 +632,41 @@ def test_an_explicit_unsortable_column_stays_unsortable():
     assert out[0]["sortable"] is False
 
 
+def test_a_decimals_column_prints_two_places_and_keeps_its_number():
+    """The row keeps the NUMBER, so a sort stays numeric; only the browser's
+    print of it changes. 450 printed as ``450`` is the defect this closes."""
+    cols = [{"name": "symbol", "label": "Symbol", "field": "symbol"},
+            {"name": "spot", "label": "Price", "field": "spot"},
+            {"name": "dte", "label": "DTE", "field": "dte"}]
+    out = kit.table_columns(cols, numeric=("spot", "dte"), decimals=("spot",))
+    assert out[1][":format"] == kit.DECIMAL_FORMAT
+    assert ":format" not in out[0] and ":format" not in out[2]    # a count stays whole
+    assert ":format" not in cols[1]                   # the input is not mutated
+
+
+def test_the_decimal_format_follows_the_one_constant_and_dashes_a_gap():
+    from pages import fmt
+    assert f"toFixed({fmt.DECIMALS})" in kit.DECIMAL_FORMAT
+    assert fmt.DECIMALS == 2
+    assert f"'{fmt.NO_READING}'" in kit.DECIMAL_FORMAT
+    # Text in a numeric column (an "∞" max loss) passes through untouched.
+    assert "typeof val === 'number'" in kit.DECIMAL_FORMAT
+
+
+def test_a_column_with_its_own_format_keeps_it():
+    own = "(val) => val + ' days'"
+    out = kit.table_columns([{"name": "age", "field": "age", ":format": own}],
+                            decimals=("age",))
+    assert out[0][":format"] == own
+
+
+def test_the_table_passes_decimals_through_to_its_columns():
+    with ui.card():
+        t = kit.table([{"name": "spot", "label": "Price", "field": "spot"}], [],
+                      decimals=("spot",))
+    assert t._props["columns"][0][":format"] == kit.DECIMAL_FORMAT
+
+
 def test_mark_selected_stamps_exactly_one_row():
     rows = [{"id": 1}, {"id": 2}, {"id": 3}]
     kit.mark_selected(rows, 2)

@@ -72,10 +72,81 @@ def test_fixed_shows_an_em_dash_for_no_reading():
 
 
 def test_signed_pct_always_carries_its_sign():
-    assert fmt.signed_pct(1.234) == "+1.2%"
-    assert fmt.signed_pct(-0.5) == "-0.5%"
-    assert fmt.signed_pct(0) == "+0.0%"
+    assert fmt.signed_pct(1.234) == "+1.23%"
+    assert fmt.signed_pct(-0.5) == "-0.50%"
+    assert fmt.signed_pct(0) == "+0.00%"
     assert fmt.signed_pct(None) == ""
+
+
+# ── the display families: two decimals, always ─────────────────────────────
+
+_NO_READING = (None, "", "abc", float("nan"), float("inf"), True)
+
+
+def test_a_whole_number_price_keeps_its_decimals():
+    """The defect this family exists for: 450 printed as ``450``."""
+    assert fmt.price(450) == "450.00"
+    assert fmt.price(450.5) == "450.50"
+    assert fmt.price(6712.814) == "6,712.81"
+    assert fmt.price("12.3") == "12.30"
+
+
+def test_a_strike_has_two_decimals_and_no_separator():
+    assert fmt.strike(450) == "450.00"
+    assert fmt.strike(452.5) == "452.50"
+    assert fmt.strike(5800) == "5800.00"
+
+
+def test_a_ratio_has_two_decimals():
+    assert fmt.ratio(1.5) == "1.50"
+    assert fmt.ratio(2) == "2.00"
+    assert fmt.ratio(0.666) == "0.67"
+
+
+def test_a_percentage_has_two_decimals():
+    assert fmt.pct(65) == "65.00%"
+    assert fmt.pct(1.2) == "1.20%"
+    assert fmt.pct(-0.5) == "-0.50%"
+    assert fmt.pct(1.2, signed=True) == "+1.20%"
+    assert fmt.pct(-1.2, signed=True) == "-1.20%"
+    assert fmt.pct(0, signed=True) == "+0.00%"
+
+
+def test_a_dollar_total_has_two_decimals_and_a_leading_sign():
+    assert fmt.money(1250) == "$1,250.00"
+    assert fmt.money(-40) == "-$40.00"
+    assert fmt.money(0) == "$0.00"
+    assert fmt.money(61.5, signed=True) == "+$61.50"
+    assert fmt.money(-120, signed=True) == "-$120.00"
+    assert fmt.money(0, signed=True) == "$0.00"
+
+
+def test_an_abbreviated_dollar_total_has_two_decimals():
+    assert fmt.money_short(1_200_000) == "$1.20M"
+    assert fmt.money_short(45_000) == "$45.00K"
+    assert fmt.money_short(950) == "$950.00"
+    assert fmt.money_short(2_500_000_000) == "$2.50B"
+    assert fmt.money_short(-45_000) == "-$45.00K"
+    assert fmt.money_short(45_000, signed=True) == "+$45.00K"
+
+
+def test_an_abbreviated_total_that_rounds_to_a_thousand_steps_up_a_unit():
+    assert fmt.money_short(999_999) == "$1.00M"
+    assert fmt.money_short(999.999) == "$1.00K"
+
+
+def test_scaled_returns_the_figure_and_its_unit_apart():
+    assert fmt.scaled(1_200_000) == ("1.20", "M")
+    assert fmt.scaled(950) == ("950.00", "")
+    assert fmt.scaled(-45_000) == ("45.00", "K")
+
+
+@pytest.mark.parametrize("fn", [fmt.price, fmt.strike, fmt.ratio, fmt.pct,
+                                fmt.money, fmt.money_short])
+def test_every_family_shows_the_dash_for_no_reading(fn):
+    """A 0.00 would claim a measurement that was never taken."""
+    for bad in _NO_READING:
+        assert fn(bad) == fmt.NO_READING
 
 
 # ── float_or: the PERMISSIVE coercion (distinct from num on purpose) ────────

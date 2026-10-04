@@ -15,6 +15,13 @@ import math
 # "n/a" — one mark, used everywhere, meaning "nothing was measured".
 NO_READING = "—"
 
+# Digits after the decimal point for every price, strike, ratio, percentage and
+# dollar total on a screen (2026-10-04): a whole-number price prints 450.00,
+# never 450. Scores, ranks, counts, DTE and the Greeks are NOT in that family.
+# A constant, not a config value: the browser-side table format
+# (``ui_kit.DECIMAL_FORMAT``) and the Highcharts format strings follow it.
+DECIMALS = 2
+
 
 def num(v):
     """``v`` as a float, or None for anything that isn't a real reading.
@@ -74,11 +81,82 @@ def fixed(v, nd=2):
     return NO_READING if f is None else f"{f:.{nd}f}"
 
 
-def signed_pct(v, nd=1):
-    """A percentage that always carries its sign (``+1.2%`` / ``-0.5%``).
+def signed_pct(v, nd=DECIMALS):
+    """A percentage that always carries its sign (``+1.20%`` / ``-0.50%``).
 
     Empty string — not a dash — when there is no reading: these render inline in
     a sentence, where a stray em-dash reads as punctuation.
     """
     f = num(v)
     return "" if f is None else f"{'+' if f >= 0 else ''}{f:.{nd}f}%"
+
+
+# ── the display families ────────────────────────────────────────────────────
+# One function per KIND of reading, so a page says what the number is and this
+# file says how it prints. Every one answers NO_READING for an absent reading.
+# A page-local helper that needs a different absence (an empty string inside a
+# sentence, a "$0" on a fresh account) keeps that contract and calls one of
+# these for the number.
+
+def price(v):
+    """An underlying or option price, or a level: ``6,712.81`` / ``450.00``."""
+    f = num(v)
+    return NO_READING if f is None else f"{f:,.{DECIMALS}f}"
+
+
+def strike(v):
+    """A strike: ``450.00``. No thousands separator, because a strike sits in
+    pairs (``5800.00/5795.00``) and beside a right (``5800.00 P``)."""
+    f = num(v)
+    return NO_READING if f is None else f"{f:.{DECIMALS}f}"
+
+
+def ratio(v):
+    """A ratio or a multiple: ``1.50``. The page adds its own ``×``."""
+    f = num(v)
+    return NO_READING if f is None else f"{f:,.{DECIMALS}f}"
+
+
+def pct(v, signed=False):
+    """A percentage ALREADY in percent units: ``65.00%``, or ``+1.20%`` signed."""
+    f = num(v)
+    if f is None:
+        return NO_READING
+    return f"{f:+,.{DECIMALS}f}%" if signed else f"{f:,.{DECIMALS}f}%"
+
+
+def money(v, signed=False):
+    """A dollar total: ``$1,250.00`` / ``-$40.00``; ``signed`` adds the ``+``
+    to a gain and leaves exactly flat unsigned (``$0.00``)."""
+    f = num(v)
+    if f is None:
+        return NO_READING
+    sign = "-" if f < 0 else ("+" if signed and f > 0 else "")
+    return f"{sign}${abs(f):,.{DECIMALS}f}"
+
+
+# Largest first. A figure that ROUNDS to 1000 of its unit steps up one unit, so
+# 999,999 reads $1.00M and never $1000.00K.
+_MONEY_UNITS = ((1e9, "B"), (1e6, "M"), (1e3, "K"), (1.0, ""))
+
+
+def scaled(v):
+    """``(text, suffix)`` for a magnitude: ``("1.20", "M")`` / ``("950.00", "")``.
+    ``v`` is taken as a magnitude; the caller owns the sign and the currency."""
+    a = abs(v)
+    i = next((k for k, (size, _) in enumerate(_MONEY_UNITS) if a >= size),
+             len(_MONEY_UNITS) - 1)
+    if i > 0 and round(a / _MONEY_UNITS[i][0], DECIMALS) >= 1000:
+        i -= 1
+    size, suffix = _MONEY_UNITS[i]
+    return f"{a / size:,.{DECIMALS}f}", suffix
+
+
+def money_short(v, signed=False):
+    """An abbreviated dollar total: ``$1.20M`` / ``$45.00K`` / ``$950.00``."""
+    f = num(v)
+    if f is None:
+        return NO_READING
+    sign = "-" if f < 0 else ("+" if signed and f > 0 else "")
+    text, suffix = scaled(f)
+    return f"{sign}${text}{suffix}"

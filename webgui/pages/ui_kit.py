@@ -27,6 +27,7 @@ from nicegui import run, ui
 import bus_client
 import shell
 from pages import busy as _busy
+from pages import fmt as _fmt
 from pages.options import theme as _t
 from pages.options.inputs import (bind_symbol_load, mark_symbol_loaded,
                                   select_all_on_focus)
@@ -537,10 +538,23 @@ ROW_CLASS_FN = ("row => [row._row_class, row._selected ? 'kit-row-selected' : ''
                 ".filter(Boolean).join(' ')")
 
 
-def table_columns(columns, *, numeric=()):
+# A price, ratio, percentage or dollar cell: the row keeps the NUMBER (so a
+# column sort stays numeric, client-side and in ``page_of``) and the browser
+# prints it to ``fmt.DECIMALS`` places - 450 as 450.00. Text in a numeric
+# column (an "∞" max loss) passes through; a missing reading is the dash.
+# ⚠ A ``body-cell-<name>`` slot receives the FORMATTED text as ``props.value``;
+# a slot that does its own arithmetic reads ``props.row.<field>`` instead.
+DECIMAL_FORMAT = ("(val) => (val === null || val === undefined || val === '') "
+                  f"? '{_fmt.NO_READING}' : (typeof val === 'number' "
+                  f"? val.toFixed({_fmt.DECIMALS}) : val)")
+
+
+def table_columns(columns, *, numeric=(), decimals=()):
     """Column defaults. PURE - returns new dicts. Every data column sortable
     (``actions`` never; an explicit ``sortable: False`` stays); ``numeric``
-    columns right-aligned, the rest left."""
+    columns right-aligned, the rest left; ``decimals`` columns printed to two
+    places (:data:`DECIMAL_FORMAT`) unless the column brings a format of its
+    own."""
     out = []
     for col in columns:
         c = dict(col)
@@ -549,6 +563,8 @@ def table_columns(columns, *, numeric=()):
         else:
             c.setdefault("sortable", True)
         c["align"] = "right" if c.get("name") in numeric else c.get("align", "left")
+        if c.get("name") in decimals:
+            c.setdefault(":format", DECIMAL_FORMAT)
         out.append(c)
     return out
 
@@ -630,11 +646,13 @@ def page_of(rows, columns, request, *, page_size):
         "rowsPerPage": page_size, "rowsNumber": n}
 
 
-def table(columns, rows=None, *, row_key="id", numeric=(), rows_per_page=0,
-          rows_number=None, classes="w-full"):
+def table(columns, rows=None, *, row_key="id", numeric=(), decimals=(),
+          rows_per_page=0, rows_number=None, classes="w-full"):
     """The one table: dense, flat, sticky header (the app-wide ``TABLE_CSS``),
     numbers right-aligned, sortable columns, and the selected row drawn from
-    ``_selected`` (``mark_selected``). ``rows_per_page=0`` shows every row - and
+    ``_selected`` (``mark_selected``). ``decimals`` names the price, ratio,
+    percentage and dollar columns, which print to two places
+    (:data:`DECIMAL_FORMAT`). ``rows_per_page=0`` shows every row - and
     hides the "Records per page" footer with it, which otherwise sits under a
     table that has no pages.
 
@@ -643,7 +661,8 @@ def table(columns, rows=None, *, row_key="id", numeric=(), rows_per_page=0,
     ``request`` event with that page's rows and a fresh ``rowsNumber``. Only a
     page whose full list is too big to ship needs it - the Strategy Finder sends
     50 rows of up to ~510, ~190 KB against ~1.96 MB."""
-    t = ui.table(columns=table_columns(columns, numeric=numeric),
+    t = ui.table(columns=table_columns(columns, numeric=numeric,
+                                       decimals=decimals),
                  rows=list(rows or []), row_key=row_key,
                  pagination=_pagination(rows_per_page, rows_number)) \
         .classes(classes).props(TABLE_PROPS)
