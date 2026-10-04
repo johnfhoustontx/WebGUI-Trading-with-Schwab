@@ -552,3 +552,87 @@ def test_settlement_stays_at_1600_et_despite_curb_trading():
     assert pe.should_settle(exp, exp, datetime(2026, 8, 21, 14, 59, tzinfo=_CT)) is False
     # 15:00 CT (== the 16:00 ET NBBO strike): settles, curb session notwithstanding.
     assert pe.should_settle(exp, exp, datetime(2026, 8, 21, 15, 0, tzinfo=_CT)) is True
+
+
+# ── Income structures close through the REAL broker (audit AC-03) ───────────
+# Every manage test above hands the cycle a _FakeBroker, which fills whatever
+# it is asked. That is how a broker that could not price a single leg went
+# unnoticed: the rule engine asked for the close, the real broker rejected it,
+# and a rejected order row was written every hour. These two drive the real
+# ``paper_broker`` off a chain.
+
+class _Resp:
+    status_code = 200
+
+    def __init__(self, body):
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+class _ChainClient:
+    class Options:
+        class ContractType:
+            ALL = "ALL"
+
+    def __init__(self, chain):
+        self._chain = chain
+
+    def get_option_chain(self, symbol, **_kw):
+        return _Resp(self._chain)
+
+
+# The repricer refuses a contract whose expiration is behind the REAL clock, so
+# these dates are relative to today rather than pinned like the fixtures above.
+from datetime import date as _date, timedelta as _timedelta
+_TODAY = _date.today().isoformat()
+_EXPIRY = (_date.today() + _timedelta(days=44)).isoformat()
+_NOON_CT = datetime.combine(_date.today(), datetime.min.time(), _CT).replace(hour=10)
+
+
+def _single_leg_chain(side_map, strike, bid, ask, spot=100.0):
+    leg = {f"{float(strike):.1f}": [{"bid": bid, "ask": ask, "delta": -0.10,
+                                     "gamma": 0.01, "theta": -0.02, "vega": 0.05}]}
+    chain = {"putExpDateMap": {}, "callExpDateMap": {},
+             "underlyingPrice": spot, "underlying": {"last": spot}}
+    chain[side_map] = {f"{_EXPIRY}:44": leg}
+    return chain
+
+
+def _open_income_position(db, strategy, strike, credit, reservation):
+    if reservation:
+        pdb.reserve_buying_power(db, reservation)
+    return pdb.insert_position(db, {
+        "signal_id": None, "symbol": "XOM", "strategy": strategy,
+        "short_strike": strike, "long_strike": None,
+        "call_short": strike if strategy == "COVERED_CALL" else None,
+        "call_long": None, "width": None, "expiration": _EXPIRY,
+        "dte_at_entry": 44, "quantity": 1, "entry_credit": credit,
+        "entry_order_id": None, "max_loss_per": reservation,
+        "max_loss_total": reservation, "entry_ts": f"{_TODAY}T09:00:00"})
+
+
+def test_manage_cycle_closes_a_cash_secured_put_at_its_target_with_the_real_broker(tmp_path):
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, _TODAY)
+    _open_income_position(db, "SHORT_PUT", 95.0, credit=1.00, reservation=9_500.0)
+    # Sold at 1.00; the put is now 0.40 x 0.50, so buying it back costs
+    # 0.50 - 0.4 * 0.10 = 0.46 -> +$54 a contract, past the +50% target.
+    client = _ChainClient(_single_leg_chain("putExpDateMap", 95.0, 0.40, 0.50))
+    pe.run_manage_cycle(client, _TODAY, db_path=db, now_ct=_NOON_CT)
+    assert pdb.fetch_open_positions(db) == []
+    assert [o["status"] for o in pdb.fetch_orders(db)] == ["FILLED"]
+    acct = pdb.get_account(db)
+    assert acct["buying_power_reserved"] == 0.0
+    assert acct["realized_pnl"] == pytest.approx(54.0 - 1.30)   # one leg, round trip
+
+
+def test_manage_cycle_closes_a_covered_call_at_its_target_with_the_real_broker(tmp_path):
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, _TODAY)
+    _open_income_position(db, "COVERED_CALL", 105.0, credit=1.00, reservation=0.0)
+    client = _ChainClient(_single_leg_chain("callExpDateMap", 105.0, 0.40, 0.50))
+    pe.run_manage_cycle(client, _TODAY, db_path=db, now_ct=_NOON_CT)
+    assert pdb.fetch_open_positions(db) == []
+    assert [o["status"] for o in pdb.fetch_orders(db)] == ["FILLED"]

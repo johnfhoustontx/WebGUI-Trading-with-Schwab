@@ -134,3 +134,58 @@ def test_submit_order_rejects_unquoted_legs():
     resp = pb.submit_order(order, client=OneSided())
     assert resp["status"] == "REJECTED"
     assert resp["statusDescription"] == "UNQUOTED_LEGS"
+
+
+# ── Single-leg income structures (audit AC-03) ──────────────────────────────
+# The repricer has marked a cash-secured put and a covered call since
+# 2026-09-11, and the rule engine has asked for their close ever since. The
+# broker that FILLS the close priced PCS / CCS / IC only and raised on
+# anything else, so every such exit was rejected every cycle. Expected prices
+# below are worked by hand from the leg's own market, never read off the code.
+
+def test_buy_to_close_short_put_prices_off_the_put_legs_own_market():
+    chain = _chain(puts=_legs({95: (1.00, 1.20)}))
+    price = pb.simulate_fill_price(chain, side="BUY_TO_CLOSE", strategy="SHORT_PUT",
+                                   short_strike=95, long_strike=None)
+    assert price == 1.12   # ask 1.20 less 40% of the 0.20 market
+
+
+def test_sell_to_open_short_put_prices_off_the_put_legs_own_market():
+    chain = _chain(puts=_legs({95: (1.00, 1.20)}))
+    price = pb.simulate_fill_price(chain, side="SELL_TO_OPEN", strategy="SHORT_PUT",
+                                   short_strike=95, long_strike=None)
+    assert price == 1.08   # bid 1.00 plus 40% of the 0.20 market
+
+
+def test_naked_put_is_the_same_structure_as_short_put():
+    chain = _chain(puts=_legs({95: (1.00, 1.20)}))
+    price = pb.simulate_fill_price(chain, side="BUY_TO_CLOSE", strategy="NAKED_PUT",
+                                   short_strike=95, long_strike=None)
+    assert price == 1.12
+
+
+def test_buy_to_close_covered_call_reads_the_call_map_not_the_put_map():
+    # Same strike quoted on BOTH sides at different prices: a covered call's
+    # option leg is the call, so the put's market must not be the one used.
+    chain = _chain(puts=_legs({105: (4.00, 4.40)}),
+                   calls=_legs({105: (0.50, 0.60)}))
+    price = pb.simulate_fill_price(chain, side="BUY_TO_CLOSE",
+                                   strategy="COVERED_CALL",
+                                   short_strike=105, long_strike=None)
+    assert price == 0.56   # ask 0.60 less 40% of the 0.10 market
+
+
+def test_unquoted_single_leg_raises_fillerror():
+    import pytest
+    chain = _chain(puts=_legs({95: (0.0, 1.20)}))     # no bid: one-sided
+    with pytest.raises(pb.FillError):
+        pb.simulate_fill_price(chain, side="BUY_TO_CLOSE", strategy="SHORT_PUT",
+                               short_strike=95, long_strike=None)
+
+
+def test_a_structure_the_broker_cannot_price_still_raises():
+    import pytest
+    chain = _chain(puts=_legs({95: (1.00, 1.20)}))
+    with pytest.raises(pb.FillError):
+        pb.simulate_fill_price(chain, side="BUY_TO_CLOSE", strategy="LONG_CALL",
+                               short_strike=95, long_strike=None)

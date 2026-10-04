@@ -18,8 +18,11 @@ from zoneinfo import ZoneInfo
 import config_paper
 import fill_model
 import signal_repricer
+# The one taxonomy (which side, how many legs). signal_repricer has already put
+# the repo root on sys.path for exactly this import.
+from shared import structures as _structures
 
-log = logging.getLogger("paper_engine")   # shared logger -> logs/paper_engine.log
+log =logging.getLogger("paper_engine")   # shared logger -> logs/paper_engine.log
 PREFIX = "[PAPER]"
 TZ = ZoneInfo("America/Chicago")
 
@@ -51,7 +54,13 @@ def simulate_fill_price(chain, side, strategy, short_strike, long_strike,
     """Realistic limit fill against the LIVE quote (mimics how the trader
     actually executes): a limit worked fill_model.FILL_FRAC into the net
     spread market from the natural side. Raises FillError if any leg is
-    unquoted. IC sums put + call verticals."""
+    unquoted. IC sums put + call verticals.
+
+    A single-leg short (a cash-secured put, a covered call's option leg) prices
+    off that ONE leg's own market - the same branch ``signal_repricer.reprice_swing``
+    takes to mark it. Until 2026-10-03 this function raised on anything but
+    PCS / CCS / IC, so the rule engine's close for an income position was
+    rejected on every manage cycle and a rejected order row written each time."""
     pm = chain.get("putExpDateMap", {})
     cm = chain.get("callExpDateMap", {})
 
@@ -66,6 +75,12 @@ def simulate_fill_price(chain, side, strategy, short_strike, long_strike,
     elif strategy == "IC":
         raw = leg_price(pm, short_strike, long_strike) + \
               leg_price(cm, call_short, call_long)
+    elif _structures.is_single_leg(strategy):
+        leg_map = pm if _structures.is_put_side(strategy) else cm
+        bid, ask, _ = signal_repricer._leg_bid_ask(leg_map, short_strike)
+        if None in (bid, ask):
+            raise FillError(f"unquoted leg {short_strike}")
+        raw = fill_model.realistic_single_fill(bid, ask, side)
     else:
         raise FillError(f"unknown strategy {strategy}")
 
