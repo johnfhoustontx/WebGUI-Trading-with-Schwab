@@ -46,6 +46,9 @@ from shared import x_text
 from shared.notify import x_post
 from shared.notify.channels import _today_ct
 from shared.symbols import clean_symbol
+from shared.contracts.options import (LedgerCaps, PaperAccountView,
+                                      PaperCreateResult, PaperTradesView,
+                                      RescueSummary)
 from shared.contracts.options import (IncomeScan, MatrixSnapshot,
                                       NetPremiumSnapshot, ScanFunnel,
                                       ScanResult)
@@ -1294,18 +1297,32 @@ def _apply_rescue_overlay(data) -> None:
         log.exception("rescue overlay degraded (paper-account publish continues)")
 
 
+def _valid(model, payload, area) -> bool:
+    """Whether ``payload`` validates against ``model``, its write-side contract.
+
+    False is counted as a degrade (``options.contract.<area>``) and the caller
+    does not publish: the last good view stays. The payload itself is what gets
+    published when it is valid, never ``model_dump()``, so no key is lost."""
+    try:
+        model(**payload)
+    except Exception:  # noqa: BLE001 — a bad payload is reported, never raised.
+        _degrade.degraded(f"options.contract.{area}")
+        return False
+    return True
+
+
 def refresh_paper_account(bus) -> None:
     """Read the paper account view, tag rows with the rescue overlay, publish it.
 
-    No strict contract: the view is a loosely-shaped read-only dict (snapshot +
-    positions + orders + has_account flag) that only the Paper Portfolio page
-    consumes, and ``compute.paper_account_view`` is already fully defensive. The
-    overlay ADDS ``rescue_state``/``heat`` per position row (Task 6.2) without
-    changing the existing view shape."""
+    Gated by ``PaperAccountView`` (audit AR-08): a view whose rows are not
+    lists of rows is not published, and the last good one stays. The overlay
+    ADDS ``rescue_state``/``heat`` per position row (Task 6.2) without changing
+    the existing view shape."""
     data = compute.paper_account_view()
     _apply_rescue_overlay(data)
-    version = bus.cache_set(CACHE_PAPER, data)
-    bus.publish(EVENT_PAPER, {"version": version})
+    if _valid(PaperAccountView, data, "paper_account"):
+        version = bus.cache_set(CACHE_PAPER, data)
+        bus.publish(EVENT_PAPER, {"version": version})
     # Manual-book analytics (equity curve + MAE/MFE) — defensive; can't block the account
     # republish above.
     try:
@@ -1325,8 +1342,9 @@ def publish_rescue_summary(bus) -> None:
     an idle manage tick doesn't wake the GUI's badge poller."""
     res = compute.assess_open_positions()
     summary = res.get("summary", {"n_tested": 0, "n_critical": 0, "position_ids": []})
-    bus.cache_set(CACHE_RESCUE_SUMMARY, summary,
-                  event=EVENT_RESCUE_SUMMARY, skip_unchanged=True)
+    if _valid(RescueSummary, summary, "rescue_summary"):
+        bus.cache_set(CACHE_RESCUE_SUMMARY, summary,
+                      event=EVENT_RESCUE_SUMMARY, skip_unchanged=True)
 
 
 def run_manage_and_refresh(bus) -> None:
@@ -1455,9 +1473,10 @@ def refresh_paper_trades(bus, reprice: bool = True) -> None:
     trades = None
     try:
         data = compute.paper_trades_view(reprice=reprice)
-        trades = (data or {}).get("trades") or None
-        version = bus.cache_set(CACHE_PAPER_TRADES, data)
-        bus.publish(EVENT_PAPER_TRADES, {"version": version})
+        if _valid(PaperTradesView, data, "paper_trades"):
+            trades = (data or {}).get("trades") or None
+            version = bus.cache_set(CACHE_PAPER_TRADES, data)
+            bus.publish(EVENT_PAPER_TRADES, {"version": version})
     finally:
         if trades is None:
             refresh_ledger_caps(bus)
@@ -1487,8 +1506,11 @@ def refresh_ledger_caps(bus, trades=None) -> None:
                      else compute.ledger_book_state(trades=trades))
             state["sectors"] = dict(_sectors.load().get("sectors") or {})
             state["unmapped_prefix"] = _book_caps.UNMAPPED_PREFIX
-            bus.cache_set(CACHE_LEDGER_CAPS, state, event=EVENT_LEDGER_CAPS,
-                          skip_unchanged=True)
+            # A book whose equity is not a real number is not published: the
+            # dialog keeps the last book that was one.
+            if _valid(LedgerCaps, state, "ledger_caps"):
+                bus.cache_set(CACHE_LEDGER_CAPS, state, event=EVENT_LEDGER_CAPS,
+                              skip_unchanged=True)
     except Exception:  # noqa: BLE001
         _degrade.degraded("options.ledger_caps")
 
@@ -3117,6 +3139,16 @@ def _publish_paper_create(bus, result: dict) -> None:
     payload.setdefault("status", "error")
     payload["seq"] = _PAPER_CREATE_SEQ
     payload.setdefault("ts", _dt.datetime.now(mc.CT).isoformat())
+    if not _valid(PaperCreateResult, payload, "paper_create"):
+        # Publishing nothing would leave the click unanswered. Say that the
+        # answer could not be read, and where the truth is.
+        payload = {"status": "error", "symbol": payload.get("symbol")
+                   if isinstance(payload.get("symbol"), str) else None,
+                   "rungs": [], "seq": _PAPER_CREATE_SEQ, "ts": payload["ts"]
+                   if isinstance(payload.get("ts"), str)
+                   else _dt.datetime.now(mc.CT).isoformat(),
+                   "message": "The result could not be read. Check the Paper "
+                              "Ledger before trying again."}
     version = bus.cache_set(CACHE_PAPER_CREATE, payload, ttl=PAPER_CREATE_TTL_SEC)
     bus.publish(EVENT_PAPER_CREATE, {"version": version})
 

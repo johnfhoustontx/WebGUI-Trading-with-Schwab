@@ -1,6 +1,8 @@
 import datetime as _dt
 
-from pydantic import field_validator
+from typing import Literal
+
+from pydantic import ConfigDict, FiniteFloat, NonNegativeInt, StrictBool, field_validator
 
 from .envelope import _Base
 
@@ -228,3 +230,79 @@ class ScanFunnel(_Base):
     """
     timestamp: str | None = None       # the SCAN's stamp, not the publish time
     symbols: dict[str, dict] = {}      # symbol -> the per-symbol account
+
+
+# ── the five money-path views (audit AR-08) ─────────────────────────────────
+# Small on purpose. Each checks the container shapes and the few numbers a wrong
+# value of would be read as a real one. ``extra="allow"`` because the service
+# publishes the payload it VALIDATED, not ``model_dump()``: a key these models
+# do not name must never be a key the pages lose.
+
+class _MoneyView(_Base):
+    model_config = ConfigDict(extra="allow")
+
+
+class PaperAccountView(_MoneyView):
+    """cache:options:paper_account — the manual paper account."""
+    snapshot: dict | None = None
+    positions: list[dict] = []
+    orders: list[dict] = []
+    lots: list[dict] = []
+    has_account: StrictBool = False
+    perf: dict | None = None
+    greeks: dict | None = None
+
+
+class RescueSummary(_MoneyView):
+    """cache:options:rescue_summary — the at-risk counts behind the nav badge."""
+    n_tested: NonNegativeInt = 0
+    n_critical: NonNegativeInt = 0
+    position_ids: list[int | str] = []
+
+    @field_validator("n_tested", "n_critical", mode="before")
+    @classmethod
+    def _whole(cls, v):
+        # 1.5 positions is not a count; pydantic would otherwise refuse it too,
+        # but a bool or a numeric string would pass.
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError("a count is a whole number")
+        return v
+
+
+class PaperTradesView(_MoneyView):
+    """cache:options:paper_trades — the Paper Ledger."""
+    trades: list[dict] = []
+
+
+class LedgerCaps(_MoneyView):
+    """cache:options:ledger_caps — the Ledger's book, for the Paper dialog.
+
+    The three money figures must be real numbers when they are present: a NaN
+    equity makes every cap comparison False, and the preview then says a trade
+    fits."""
+    open: list[dict] = []
+    starting_balance: FiniteFloat | None = None
+    realized_pnl: FiniteFloat | None = None
+    equity: FiniteFloat | None = None
+    limits: dict = {}
+    sectors: dict = {}
+    unmapped_prefix: str = "?"
+
+    @field_validator("starting_balance", "realized_pnl", "equity", mode="before")
+    @classmethod
+    def _a_number(cls, v):
+        if v is None:
+            return v
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            raise ValueError("not a number")
+        return v
+
+
+class PaperCreateResult(_MoneyView):
+    """cache:options:paper_create — the answer to one Paper click."""
+    status: Literal["opened", "refused", "stale", "error"]
+    seq: int = 0
+    ts: str | None = None
+    symbol: str | None = None
+    rungs: list = []
+    message: str | None = None
