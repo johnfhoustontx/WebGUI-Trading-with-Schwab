@@ -755,3 +755,59 @@ def test_a_long_healthy_run_restores_the_restart_budget(schedulers_enabled, monk
         body = client.get("/health").json()
     assert len(calls) >= 8, "the scheduler stopped being restarted"
     assert body["scheduler_alive"] is True
+
+
+# --- AR-07: a dropped command is counted, and the service is told -------------
+
+def test_health_counts_the_commands_that_were_never_run():
+    bus = Bus(fake=True)
+    app = make_app("dlcountx", command_handler=lambda b, c: None, bus=bus,
+                   poll_block_ms=50)
+    bus.dead_letter("cmd:dlcountx", {"data": "{}"}, "handler raised")
+    bus.dead_letter("cmd:dlcountx", {"data": "{}"}, "handler raised")
+    with TestClient(app) as client:
+        assert client.get("/health").json()["dead_letters"] == 2
+
+
+def test_a_command_stranded_by_a_restart_is_reported_to_the_service():
+    """It is NOT re-run (a replayed open could double-open a position). The
+    service is told, so it can answer the page that is still waiting."""
+    bus = Bus(fake=True)
+    bus.enqueue_command("cmd:dropx", {"type": "paper_create", "args": {"qty": 2}})
+    bus.consume_commands("cmd:dropx", group="dropx-svc", consumer="c1", block_ms=50)
+    ran, dropped = [], []
+    app = make_app("dropx", command_handler=lambda b, c: ran.append(c.type), bus=bus,
+                   poll_block_ms=50,
+                   on_dropped=lambda b, c, why: dropped.append((c.type, c.args, why)))
+    _run_until(bus, app, lambda: dropped)
+    assert ran == []
+    assert dropped == [("paper_create", {"qty": 2}, "restart")]
+
+
+def test_a_replayed_command_is_reported_as_dropped_too():
+    from shared import service_limits
+    bus = Bus(fake=True)
+    dropped = []
+    app = make_app("dropoldx", command_handler=lambda b, c: None, bus=bus,
+                   poll_block_ms=50,
+                   on_dropped=lambda b, c, why: dropped.append((c.type, why)))
+    bus.enqueue_command("cmd:dropoldx", {"type": "paper_create", "args": {},
+                                         "ts": _old_ts(service_limits.replay_max_sec() + 60)})
+    _run_until(bus, app, lambda: dropped)
+    assert dropped == [("paper_create", "expired")]
+
+
+def test_a_failing_dropped_callback_never_stops_the_consumer():
+    bus = Bus(fake=True)
+    bus.enqueue_command("cmd:dropbadx", {"type": "a", "args": {}})
+    bus.consume_commands("cmd:dropbadx", group="dropbadx-svc", consumer="c1", block_ms=50)
+    seen = []
+
+    def boom(b, c, why):
+        raise RuntimeError("callback failed")
+
+    app = make_app("dropbadx", command_handler=lambda b, c: seen.append(c.type),
+                   bus=bus, poll_block_ms=50, on_dropped=boom)
+    bus.enqueue_command("cmd:dropbadx", {"type": "marker", "args": {}})
+    _run_until(bus, app, lambda: seen)
+    assert seen == ["marker"]

@@ -239,11 +239,32 @@ async def _supervise_scheduler(
 
 
 async def _consume_loop(domain, bus, command_handler, poll_block_ms,
-                        late_ok=frozenset()) -> None:
+                        late_ok=frozenset(), on_dropped=None) -> None:
     """Drain the domain's own ``cmd:{domain}`` stream (see :func:`_consume_stream`),
     refusing a replayed command unless its type is in ``late_ok``."""
     await _consume_stream(f"cmd:{domain}", f"{domain}-svc", bus, command_handler,
-                          poll_block_ms, late_ok=late_ok)
+                          poll_block_ms, late_ok=late_ok, on_dropped=on_dropped)
+
+
+def _tell_dropped(on_dropped, bus, command, why) -> None:
+    """Tell the service a command will never run (``why``: ``restart`` - it was
+    stranded by a restart; ``expired`` - it waited past the replay limit), so it
+    can answer a page that is still waiting. Never raises."""
+    if on_dropped is None or command is None:
+        return
+    try:
+        on_dropped(bus, command, why)
+    except Exception:  # noqa: BLE001 — a notification must never stop the consumer
+        log.exception("on_dropped failed for %r", getattr(command, "type", None))
+
+
+def _decode_stranded(fields):
+    """The Command inside a drained stream entry, or None when it will not decode."""
+    try:
+        from shared.contracts.envelope import Command
+        return Command.from_json(fields["data"])
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _is_replay(command, late_ok) -> bool:
@@ -263,7 +284,7 @@ def _is_replay(command, late_ok) -> bool:
 
 
 async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
-                          late_ok=None) -> None:
+                          late_ok=None, on_dropped=None) -> None:
     """Drain ``stream`` forever, dispatching each command to the handler.
 
     Each iteration is wrapped so a bad command (or a transient bus error) can
@@ -286,7 +307,10 @@ async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
     # Recover a prior crash's un-acked PEL (off the event loop; never raises).
     try:
         moved = await loop.run_in_executor(
-            None, lambda: bus.drain_pending(stream, group, "c1")
+            None, lambda: bus.drain_pending(
+                stream, group, "c1",
+                on_entry=lambda fields: _tell_dropped(
+                    on_dropped, bus, _decode_stranded(fields), "restart"))
         )
         if moved:
             log.warning(
@@ -318,6 +342,7 @@ async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
                             "(limit %ds)", getattr(command, "type", None), stream,
                             _service_limits.age_seconds(command) or -1,
                             _service_limits.replay_max_sec())
+                        _tell_dropped(on_dropped, bus, command, "expired")
                         continue
                     result = await loop.run_in_executor(
                         None, command_handler, bus, command
@@ -373,6 +398,7 @@ def make_app(
     scheduler_max_restarts: int = 10,
     extra_consumers: tuple = (),
     late_ok=frozenset(),
+    on_dropped=None,
 ) -> FastAPI:
     """Build the domain FastAPI app (see module docstring).
 
@@ -391,6 +417,10 @@ def make_app(
       ``[age] replay_max_sec`` (config/services.toml) is dropped: it is the
       stream's history, replayed to a new consumer group. Extra streams are not
       checked here; they answer an expired request themselves.
+    * ``on_dropped(bus, command, why)`` — called for a command on the domain's
+      own stream that will never run: stranded by a restart (``"restart"``) or
+      past the replay limit (``"expired"``). The service uses it to answer a
+      page that is still waiting. It is not called for a handler that raised.
     """
     the_bus = bus  # resolved lazily in lifespan if None (honors pytest fake selection).
 
@@ -426,7 +456,8 @@ def make_app(
             tasks.append(
                 asyncio.create_task(
                     _consume_loop(domain, b, command_handler, poll_block_ms,
-                                  late_ok=frozenset(late_ok or ()))
+                                  late_ok=frozenset(late_ok or ()),
+                                  on_dropped=on_dropped)
                 )
             )
         for stream, handler in extra_consumers:
@@ -474,6 +505,11 @@ def make_app(
             # loop's own interval unless the loop has stalled.
             "scheduler_uptime_s": hs.uptime_s(),
             "scheduler_last_tick_age_s": hs.last_tick_age_s(),
+            # Commands on this service's streams that were never run (a handler
+            # failed, or a restart stranded them). Kept for a person to read.
+            "dead_letters": sum(
+                app.state.bus.dead_letter_len(s)
+                for s in [f"cmd:{domain}"] + [e[0] for e in extra_consumers]),
             "degrades_total": _degrade.total(),
             "degrades": _degrade.counts(),
         }

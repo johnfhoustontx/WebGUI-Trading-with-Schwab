@@ -25,6 +25,13 @@ side_effect_max_sec = 180
 # nobody. A few commands that only re-read a local store run at any age.
 replay_max_sec = 900
 
+[dead_letters]
+# A command a service could not run (its handler failed, or it was stranded by a
+# restart) is kept on a list so a person can see what was lost. Nothing trimmed
+# that list until 2026-10-04. Each queue now keeps the newest this-many; the
+# count shows on the service's System Status card.
+keep = 200
+
 [health]
 # Each service runs a scheduler loop that goes round every few seconds to two
 # minutes. If the loop has not gone round for this many seconds, the service

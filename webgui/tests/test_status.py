@@ -1232,3 +1232,12 @@ def test_a_service_that_says_why_it_is_down_gets_its_own_words():
         "scheduler has not run for 900 s"
     assert status.unhealthy_detail(503, {}) == "HTTP 503"
     assert status.unhealthy_detail(200, {"up": False}) == "HTTP 200"
+
+
+def test_the_card_says_how_many_commands_were_never_run():
+    assert status.service_detail({"up": True, "dead_letters": 3}) == \
+        "healthy · 3 commands not run"
+    assert status.service_detail({"up": True, "dead_letters": 1}) == \
+        "healthy · 1 command not run"
+    for none in (0, None, True, -2, "3"):
+        assert status.service_detail({"up": True, "dead_letters": none}) == "healthy"

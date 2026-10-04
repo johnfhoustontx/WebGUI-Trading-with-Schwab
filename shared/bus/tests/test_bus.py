@@ -305,3 +305,46 @@ def test_a_bare_url_still_authenticates_with_the_stack_password():
     assert client.env_password("redis://h:6379/0", {"MEMURAI_PASSWORD": "admin"}) == "admin"
     assert client.env_password("redis://h:6379/0", {}) is None
     assert client.env_password("redis://h:6379/0", {"MEMURAI_PASSWORD": ""}) is None
+
+
+# --- AR-07: the dead-letter list is bounded and can be counted ----------------
+
+def test_the_dead_letter_list_keeps_only_the_newest_entries(monkeypatch):
+    from shared import service_limits
+    monkeypatch.setattr(service_limits, "dead_letter_keep", lambda: 5)
+    bus = Bus(fake=True)
+    for i in range(12):
+        bus.dead_letter("cmd:capx", {"data": str(i)}, "handler raised")
+    assert bus.dead_letter_len("cmd:capx") == 5
+    import json
+    kept = [json.loads(r)["fields"]["data"] for r in bus._r.lrange("cmd:capx:dead", 0, -1)]
+    assert kept == ["7", "8", "9", "10", "11"]
+
+
+def test_an_empty_or_missing_dead_letter_list_counts_zero():
+    bus = Bus(fake=True)
+    assert bus.dead_letter_len("cmd:nothing") == 0
+
+
+def test_draining_hands_each_stranded_command_to_the_caller():
+    bus = Bus(fake=True)
+    bus.enqueue_command("cmd:strx", {"type": "paper_create", "args": {"qty": 1}})
+    assert len(bus.consume_commands("cmd:strx", group="strx-svc", consumer="c1",
+                                    block_ms=50)) == 1          # read, never acked
+    seen = []
+    moved = bus.drain_pending("cmd:strx", "strx-svc", "c1", on_entry=seen.append)
+    assert moved == 1
+    assert len(seen) == 1 and "paper_create" in seen[0]["data"]
+
+
+def test_a_callback_that_raises_does_not_stop_the_drain():
+    bus = Bus(fake=True)
+    for _ in range(3):
+        bus.enqueue_command("cmd:strx2", {"type": "x", "args": {}})
+    bus.consume_commands("cmd:strx2", group="g", consumer="c1", block_ms=50)
+
+    def boom(fields):
+        raise RuntimeError("callback failed")
+
+    assert bus.drain_pending("cmd:strx2", "g", "c1", on_entry=boom) == 3
+    assert bus._r.xpending("cmd:strx2", "g")["pending"] == 0

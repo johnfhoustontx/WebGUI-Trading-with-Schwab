@@ -1525,6 +1525,13 @@ _COMMANDS = ConfigFile(
                   "only re-read a local store run at any age.",
                   kind="int", unit="seconds", min=60, max=86400, step=60),
         )),
+        Section("Commands that were never run", "", (
+            Field("dead_letters.keep", "How many to keep",
+                  "A command a service could not run is kept so you can see what "
+                  "was lost; the count shows on its System Status card. Each "
+                  "queue keeps the newest this-many.",
+                  kind="int", unit="commands", min=1, max=100000, step=10),
+        )),
         Section("When a service is unhealthy", "", (
             Field("health.tick_stale_sec", "Longest a scheduler may be silent",
                   "A service whose scheduler has not run for this long shows as "

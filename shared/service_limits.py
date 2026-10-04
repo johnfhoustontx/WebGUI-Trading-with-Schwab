@@ -30,6 +30,9 @@ DEFAULTS = {
     # round for this long; and a scheduler that ran this long without dying
     # gets its restart budget back.
     "health": {"tick_stale_sec": 600, "restart_reset_sec": 3600},
+    # Commands a service could not run are kept on a list for a person to read.
+    # Only the newest this-many are kept.
+    "dead_letters": {"keep": 200},
 }
 MAX_SEC = 7 * 24 * 3600        # past a week a "limit" is a typo
 
@@ -47,6 +50,15 @@ def _seconds(key, table="age") -> int:
     except (TypeError, OverflowError):
         ok = False
     return int(raw) if ok else DEFAULTS[table][key]
+
+
+def dead_letter_keep() -> int:
+    """How many un-run commands each stream's dead-letter list keeps (newest)."""
+    sec = load().get("dead_letters")
+    raw = sec.get("keep") if isinstance(sec, dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 100000:
+        return DEFAULTS["dead_letters"]["keep"]
+    return raw
 
 
 def tick_stale_sec() -> int:

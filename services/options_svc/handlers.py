@@ -3275,6 +3275,36 @@ def _refuse_stale(bus, command) -> None:
                               "expired in the queue")
 
 
+def command_dropped(bus, command, why) -> None:
+    """A command on ``cmd:options`` that will never run (see the scaffold's
+    ``on_dropped``): stranded by a restart, or expired in the queue. Answer the
+    page that is still waiting on it. Never raises.
+
+    Only two commands have somebody waiting on a result view: the Paper button
+    (``cache:options:paper_create``) and the /x page's post. For the rest the
+    page shows its last good view, which is the truth."""
+    try:
+        kind = getattr(command, "type", None)
+        args = command.args if isinstance(getattr(command, "args", None), dict) else {}
+        if kind == "paper_create":
+            raw = args.get("signal")
+            sig = raw if isinstance(raw, dict) else {}
+            _publish_paper_create(bus, {
+                "status": "error", "symbol": sig.get("symbol"),
+                "type": sig.get("type"), "expiration": sig.get("expiration"),
+                "rungs": [],
+                "message": "The request was not processed ("
+                           + ("the service restarted" if why == "restart"
+                              else "it waited too long")
+                           + "). Try again."})
+        elif kind == "x_post":
+            x_post.record_refusal(bus, "marketing", str(args.get("text") or ""),
+                                  "the service restarted" if why == "restart"
+                                  else "expired in the queue")
+    except Exception:  # noqa: BLE001 — telling the page must never raise
+        log.exception("command_dropped failed")
+
+
 @_command("rescan")
 def _cmd_rescan(bus, command):
     rescan(bus)

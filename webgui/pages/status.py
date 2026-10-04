@@ -418,8 +418,20 @@ def service_detail(body) -> str:
         text = "healthy"
     else:
         text = f"healthy - {n} degraded"
-    age = scheduler_age_text(body)
-    return f"{text} · {age}" if age else text
+    for extra in (dead_letter_text(body), scheduler_age_text(body)):
+        if extra:
+            text = f"{text} · {extra}"
+    return text
+
+
+def dead_letter_text(body) -> str:
+    """"3 commands not run", or "" at zero. These are commands the service could
+    not run: a handler failed, or a restart stranded them. They are kept for a
+    person to read and are never re-run. PURE."""
+    n = body.get("dead_letters") if isinstance(body, dict) else None
+    if isinstance(n, bool) or not isinstance(n, int) or n <= 0:
+        return ""
+    return f"{n} command{'' if n == 1 else 's'} not run"
 
 
 def scheduler_age_text(body) -> str:

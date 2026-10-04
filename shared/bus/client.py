@@ -29,6 +29,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from repo_paths import MEMURAI_URL  # noqa: E402
+from shared import service_limits as _service_limits  # noqa: E402
 
 # Cap the command streams (``cmd:*``) so they cannot grow without bound. XADD
 # trims (approximately, for speed) to roughly this many entries. A single-user
@@ -328,9 +329,20 @@ class Bus:
             "fields": raw_fields,
         }
         try:
-            self._r.rpush(self.dead_letter_key(stream), json.dumps(record, default=str))
+            key = self.dead_letter_key(stream)
+            self._r.rpush(key, json.dumps(record, default=str))
+            # Bounded: nothing read or trimmed this list, so it only ever grew.
+            self._r.ltrim(key, -_service_limits.dead_letter_keep(), -1)
         except Exception:  # never let dead-lettering itself take down the loop.
             pass
+
+    def dead_letter_len(self, stream: str) -> int:
+        """How many un-run commands ``stream``'s dead-letter list holds. 0 on
+        any fault: a count for a status card must never raise."""
+        try:
+            return int(cast(int, self._r.llen(self.dead_letter_key(stream))))
+        except Exception:  # noqa: BLE001
+            return 0
 
     def _ensure_group(self, stream: str, group: str) -> None:
         # Ensure the consumer group exists ONCE per (stream, group) for this Bus,
@@ -347,7 +359,8 @@ class Bus:
                 raise
         self._groups.add(gk)
 
-    def drain_pending(self, stream: str, group: str, consumer: str) -> int:
+    def drain_pending(self, stream: str, group: str, consumer: str,
+                      on_entry=None) -> int:
         """Move any entries stranded in the group's PEL to the dead-letter list.
 
         Called once at consumer startup: a previous consumer that crashed leaves
@@ -356,6 +369,10 @@ class Bus:
         human review instead of losing them, and WITHOUT auto-re-executing (a
         re-run trade-opening command could double-open a position). Returns the
         number of entries drained. Defensive — never raises.
+
+        ``on_entry(fields)`` is called for each drained entry, after it is
+        dead-lettered and acked, so the owner of the stream can tell whoever is
+        waiting on that command. A callback that raises is ignored.
         """
         self._ensure_group(stream, group)
         moved = 0
@@ -372,6 +389,11 @@ class Bus:
                     self.dead_letter(stream, fields, f"stranded in PEL ({msg_id})")
                     self._r.xack(stream, group, msg_id)
                     moved += 1
+                    if on_entry is not None:
+                        try:
+                            on_entry(fields)
+                        except Exception:  # noqa: BLE001 — never stop the drain
+                            pass
                 if not claimed or next_cursor in ("0-0", "0", b"0-0", b"0"):
                     break
                 start = next_cursor

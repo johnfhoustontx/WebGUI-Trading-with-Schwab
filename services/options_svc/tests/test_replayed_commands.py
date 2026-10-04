@@ -213,3 +213,34 @@ def test_the_side_effect_limit_comes_from_the_settings(monkeypatch):
         monkeypatch.undo()
         importlib.reload(handlers)
     assert handlers.STALE_OPEN_MAX_AGE_SEC == service_limits.side_effect_max_sec()
+
+
+# --- AR-07: a paper_create that was dropped is answered ------------------------
+
+def test_a_dropped_paper_create_tells_the_page(bus):
+    cmd = Command(type="paper_create",
+                  args={"signal": {"symbol": "MU", "type": "PCS",
+                                   "expiration": "2099-01-15"}, "qty": 1})
+    handlers.command_dropped(bus, cmd, "restart")
+    payload = bus.cache_get(handlers.CACHE_PAPER_CREATE).payload
+    assert payload["status"] == "error" and payload["symbol"] == "MU"
+    assert "not processed" in payload["message"] and "again" in payload["message"]
+
+
+def test_a_dropped_x_post_is_logged_for_the_page(bus, monkeypatch):
+    seen = []
+    monkeypatch.setattr(handlers.x_post, "record_refusal",
+                        lambda b, kind, text, reason, **k: seen.append((kind, text, reason)))
+    handlers.command_dropped(bus, Command(type="x_post", args={"text": "hello"}), "expired")
+    assert seen and seen[0][0] == "marketing" and seen[0][1] == "hello"
+
+
+def test_a_dropped_command_nobody_waits_on_publishes_nothing(bus):
+    handlers.command_dropped(bus, Command(type="rescan", args={}), "restart")
+    assert bus.cache_get(handlers.CACHE_PAPER_CREATE) is None
+
+
+def test_the_dropped_handler_never_raises(bus):
+    handlers.command_dropped(bus, Command(type="paper_create", args={"signal": "junk"}),
+                             "restart")
+    handlers.command_dropped(bus, object(), "restart")
