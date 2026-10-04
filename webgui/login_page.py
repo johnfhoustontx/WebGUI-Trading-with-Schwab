@@ -75,6 +75,26 @@ DEFAULT_NEXT = "/desk"
 # there the symptom is only that trusting a device quietly stops working, which
 # nobody would report as a bug.
 ROUTE = "/login"
+
+# The largest sign-in body the app will parse. A real form is a password, a
+# six-digit code, a form token and a return path: a few hundred bytes. POST
+# /login is the one route open to the internet without a session, and it used
+# to hand a body of ANY size to the form parser before the throttle was asked
+# (audit SE-03). The edge refuses on size as well (config/edge.toml [limits]);
+# this is the app's own check, so it does not depend on the edge being there.
+MAX_BODY_BYTES = 16 * 1024
+
+
+def body_within_limit(headers) -> bool:
+    """True only for a request that STATES a body length within the limit.
+
+    No length (a chunked body) is refused: there is nothing to check before
+    reading, and a browser's form post always sends one."""
+    raw = headers.get("content-length")
+    if raw is None or not str(raw).strip().isdigit():
+        return False
+    return int(raw) <= MAX_BODY_BYTES
+
 LOGOUT_ROUTE = "/logout"
 
 FIELD_NEXT = "next"

@@ -186,6 +186,16 @@ SWING_REFIT_TIMEOUT_SEC = 7200
 LIVE_MEMORY_HIGH = "768M"
 LIVE_MEMORY_MAX = "1G"
 
+# The PRIVATE web app is internet-facing too: its sign-in form is reachable by
+# anyone, and until 2026-10-04 it had no ceiling at all (audit SE-03). Measured
+# on the box: 90 MB resident. 2 GiB is a quarter of the smallest supported host
+# and more than twenty times that reading, so normal use never meets it; what
+# it bounds is a request flood or a leak, which now takes this one process back
+# through Restart=on-failure rather than letting the kernel choose among the
+# services, the proxy and Redis.
+APP_MEMORY_HIGH = "1536M"
+APP_MEMORY_MAX = "2G"
+
 # How often the public grid's thumbnails are refreshed. Every 15 minutes inside
 # [windows.live_capture]; the script's own gate decides the days and hours, so
 # this only has to be the cadence.
@@ -331,6 +341,13 @@ def _service_text(component, port, script):
             "# Caps WHO DIES under a request flood: these screens, alone.",
             f"MemoryHigh={LIVE_MEMORY_HIGH}",
             f"MemoryMax={LIVE_MEMORY_MAX}",
+        ]
+
+    if is_webgui:
+        service += [
+            "# Reachable from the internet (its sign-in form). See APP_MEMORY_HIGH.",
+            f"MemoryHigh={APP_MEMORY_HIGH}",
+            f"MemoryMax={APP_MEMORY_MAX}",
         ]
 
     service += [f"ExecStart={_python()} {script}",

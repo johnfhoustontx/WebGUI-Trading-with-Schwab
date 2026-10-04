@@ -321,10 +321,14 @@ async def _login_submit(request: Request):
     check and is recorded as a failure like any other -- a blind POST must not
     be a cheaper way to reach us than a well-formed one.
     """
-    try:
-        form = await request.form()
-    except Exception:   # noqa: BLE001 - any malformed body is just "no fields"
-        form = {}
+    # Size first, parse second: an oversized or unsized body is never handed to
+    # the form parser. It is an empty form, and fails like any other attempt.
+    form = {}
+    if login_page.body_within_limit(request.headers):
+        try:
+            form = await request.form()
+        except Exception:   # noqa: BLE001 - any malformed body is just "no fields"
+            form = {}
 
     target = login_target(form.get(login_page.FIELD_NEXT))
     result = login_page.attempt(

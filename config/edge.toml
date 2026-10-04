@@ -7,6 +7,14 @@
 # `caddy validate` failing leaves the running Caddy untouched, so a bad value
 # (or enabling this on a Caddy without the module) never takes the sites down.
 
+[limits]
+# The largest sign-in request the edge passes to the app, in kilobytes. A real
+# sign-in is a few hundred bytes; POST /login is the one route anyone on the
+# internet can reach without a session. Only that route is limited - uploads
+# inside the app are much larger and sit behind the login. The app also refuses
+# an oversized sign-in on its own, whatever this says.
+login_body_kb = 16
+
 [live_rate_limit]
 # Page loads per visitor on live.neuralstrike.co. Each anonymous page load holds
 # ~619 KB in the public process for ~70 s, and nothing else bounds how fast they

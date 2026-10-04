@@ -565,3 +565,32 @@ def test_a_bad_value_turns_the_limit_off_rather_than_breaking_the_reload(
 def test_enabled_must_be_a_real_true(monkeypatch):
     _with_edge(monkeypatch, enabled="yes", events=30, window_sec=60, ipv6_prefix=64)
     assert caddy.live_rate_limit() is None
+
+
+# --- request body limits (audit SE-03) ----------------------------------------
+# POST /login is open to the internet without a session. The edge refuses a body
+# over a few kilobytes before the app sees it; the app refuses again on its own.
+
+def test_the_app_block_limits_the_login_body(cfg):
+    block = cfg.split(caddy.APP_HOST + " {", 1)[1]
+    assert "@login path /login" in block
+    assert "request_body @login {" in block
+    assert f"max_size {caddy.EDGE_DEFAULTS['limits']['login_body_kb']}KB" in block
+
+
+def test_the_login_limit_does_not_bound_the_rest_of_the_app(cfg):
+    """The /x page uploads an image of up to 5 MB through the app. A site-wide
+    limit at the login's size would break it."""
+    block = cfg.split(caddy.APP_HOST + " {", 1)[1]
+    assert block.count("request_body") == 1
+
+
+def test_the_login_limit_is_read_from_the_edge_config(monkeypatch):
+    monkeypatch.setattr(caddy, "load_edge", lambda: {"limits": {"login_body_kb": 8}})
+    assert "max_size 8KB" in caddy.render()
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "16", 1.5, None, 100000])
+def test_an_unusable_login_limit_reads_as_the_shipped_one(monkeypatch, bad):
+    monkeypatch.setattr(caddy, "load_edge", lambda: {"limits": {"login_body_kb": bad}})
+    assert caddy.login_body_kb() == caddy.EDGE_DEFAULTS["limits"]["login_body_kb"]

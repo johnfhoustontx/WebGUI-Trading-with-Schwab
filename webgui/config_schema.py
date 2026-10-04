@@ -727,13 +727,20 @@ _GAMMA_PUBLIC = ConfigFile(
 # Read by deploy/caddy/generate_caddyfile.py only. No service restart applies it:
 # the Caddyfile has to be regenerated and Caddy reloaded, as root (see caution).
 _EDGE = ConfigFile(
-    name="edge.toml", title="Public site rate limit", icon="speed",
-    summary="How many pages one visitor may load on the public site per window.",
+    name="edge.toml", title="Public edge limits", icon="speed",
+    summary="How many pages one visitor may load on the public site per window, "
+            "and the largest sign-in request the edge passes on.",
     restart=(),
     caution="Needs a Caddy built with the rate-limit module. Saving here changes "
             "nothing until the Caddyfile is regenerated and Caddy reloaded, as "
             "root - see the runbook's Edge rate limit section.",
     sections=(
+        Section("Sign-in request size", "", (
+            Field("limits.login_body_kb", "Largest sign-in request",
+                  "A real sign-in is a few hundred bytes. Larger requests to the "
+                  "sign-in address are refused before they reach the app.",
+                  kind="int", unit="KB", min=1, max=1024, step=1),
+        )),
         Section("Page loads per visitor", "Counts pages only, not the images, "
                 "scripts and live connection each page uses.", (
             Field("live_rate_limit.enabled", "Limit page loads", "", kind="bool"),

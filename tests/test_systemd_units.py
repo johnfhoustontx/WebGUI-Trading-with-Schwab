@@ -582,16 +582,28 @@ def test_the_cap_is_generous_enough_for_normal_use_and_tight_enough_to_matter():
     assert 512 * 1024 ** 2 <= cap <= 2 * 1024 ** 3, units.LIVE_MEMORY_MAX
 
 
-def test_no_other_unit_carries_a_memory_cap():
-    """⚠ NOT a drive-by. The other units are not internet-facing, and a wrong
-    value on one of them kills the trading stack -- the failure this cap exists
-    to prevent, moved onto the processes that matter most."""
-    live = units.unit_name("webgui_live")
+def test_only_the_two_internet_facing_units_carry_a_memory_cap():
+    """⚠ NOT a drive-by. The services, the proxy and the timers are not
+    internet-facing, and a wrong value on one of them kills the trading stack --
+    the failure this cap exists to prevent, moved onto the processes that matter
+    most. The two web apps are the ones a stranger can send requests to: the
+    public screens, and (since 2026-10-04, audit SE-03) the private app, whose
+    sign-in form is open to anyone."""
+    capped = {units.unit_name("webgui_live"), units.unit_name("webgui")}
     for name, text in units.render_all().items():
-        if name == live:
+        if name in capped:
             continue
         for key in ("MemoryMax=", "MemoryHigh=", "MemoryLimit=", "MemorySwapMax="):
             assert key not in text, (name, key)
+
+
+def test_the_private_web_app_is_capped_too(rendered):
+    svc = rendered[units.unit_name("webgui")]["Service"]
+    assert svc["MemoryMax"] == units.APP_MEMORY_MAX
+    assert svc["MemoryHigh"] == units.APP_MEMORY_HIGH
+    assert _bytes(units.APP_MEMORY_HIGH) < _bytes(units.APP_MEMORY_MAX)
+    # Far above the 90 MB measured on the box, and at most a quarter of an 8 GB host.
+    assert 1024 ** 3 <= _bytes(units.APP_MEMORY_MAX) <= 2 * 1024 ** 3
 
 
 def test_the_public_env_file_must_exist_for_the_unit_to_start():

@@ -59,7 +59,9 @@ from repo_paths import (APP_HOST, EDGE_TOML, ENV_NAME, LIVE_HOST,  # noqa: E402
 from shared.config_toml import toml_loader  # noqa: E402
 
 EDGE_DEFAULTS = {"live_rate_limit": {"enabled": False, "events": 30,
-                                     "window_sec": 60, "ipv6_prefix": 64}}
+                                     "window_sec": 60, "ipv6_prefix": 64},
+                 # The largest POST /login body the edge passes on, in KB.
+                 "limits": {"login_body_kb": 16}}
 load_edge, reset_edge = toml_loader(EDGE_TOML, EDGE_DEFAULTS, label="edge.toml")
 
 # The requests that do NOT count toward the limit: NiceGUI's own versioned
@@ -95,6 +97,17 @@ IDEAS_MAX_AGE = 86400           # 1 day
 # repository. Named here rather than buried in main() so the tests can assert
 # the path and moving it is one edit.
 CADDY_CONFIG = "/etc/caddy/Caddyfile"
+
+
+def login_body_kb() -> int:
+    """``[limits] login_body_kb``: the largest sign-in body the edge forwards.
+    Anything that is not a whole number from 1 to 1024 reads as the shipped
+    value, so a typo cannot emit a directive Caddy rejects or a limit of zero
+    that locks the owner out."""
+    v = ((load_edge() or {}).get("limits") or {}).get("login_body_kb")
+    if isinstance(v, bool) or not isinstance(v, int) or not 1 <= v <= 1024:
+        return EDGE_DEFAULTS["limits"]["login_body_kb"]
+    return v
 
 
 def live_rate_limit():
@@ -384,6 +397,14 @@ def _app_block():
         Strict-Transport-Security "{HSTS}"
         # The public one-pager is a separate origin and must not frame this.
         Content-Security-Policy "frame-ancestors 'self'"
+    }}
+
+    # POST /login is the one route open without a session. Refuse a large body
+    # here, before the app sees it. Scoped to that path: the app's own uploads
+    # (the /x page's image) are far larger and sit behind the login.
+    @login path /login
+    request_body @login {{
+        max_size {login_body_kb()}KB
     }}
 
     handle {{
