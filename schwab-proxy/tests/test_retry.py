@@ -8,6 +8,8 @@ so these run instantly.
 import sys
 import pathlib
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import schwab_proxy  # noqa: E402
 
@@ -219,12 +221,15 @@ def test_trader_get_no_retry_on_4xx(monkeypatch):
     assert counters["get"] == 1  # no wasted retries on a client error
 
 
-def test_trader_post_is_not_retried(monkeypatch):
+def test_trader_post_is_never_sent(monkeypatch):
+    """This pinned "a POST is attempted exactly once" until 2026-10-03. The
+    application is paper-only and the order route is gone (audit SE-02), so the
+    right number of attempts is zero: the call is refused before any request."""
     _no_sleep(monkeypatch)
     counters = _wire_trader(monkeypatch, post_responses=[_FakeResp(502, text="bad gateway")])
-    res = schwab_proxy.trader_request("POST", "/accounts/h/orders", json_body={"x": 1})
-    assert res["status_code"] == 502
-    assert counters["post"] == 1  # exactly one attempt — no duplicate submission
+    with pytest.raises(ValueError):
+        schwab_proxy.trader_request("POST", "/accounts/h/orders", json_body={"x": 1})
+    assert counters["post"] == 0 and counters["get"] == 0
 
 
 # ---------------------------------------------------------------- log rotation

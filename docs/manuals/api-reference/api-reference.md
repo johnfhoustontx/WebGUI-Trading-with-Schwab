@@ -643,7 +643,6 @@ count calls **sent to Schwab** — a locally answered request is not in them.
 | `/accounts` | GET | `[{hashValue, accountNumber, ...}]` |
 | `/positions/{account_hash}` | GET | Normalized positions (net qty; options carry underlying) |
 | `/transactions/{account_hash}` | GET (`start_date, end_date`) | Normalized TRADE transactions |
-| `/orders/{account_hash}` | POST (Schwab order body) | `{status: "submitted", status_code, data}` |
 
 ## Trade-stream tracker
 

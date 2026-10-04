@@ -3,9 +3,10 @@ SchwabProxy - Centralized Schwab API Token Manager & Proxy
 Version: 1.0.1
 Last Updated: 2026-05-26
 
-Added trader API endpoints for order placement:
-  GET  /accounts                  — fetch account list (hashValue for orders)
-  POST /orders/{account_hash}     — place order via Schwab Trader API
+Trader API endpoints are READ-ONLY (accounts, positions, transactions) and
+fail closed without the shared secret. The order route this header used to
+list (POST /orders/{account_hash}) was deleted 2026-10-03: the application is
+paper-only and nothing called it.
 
 Added trade stream tracker (TRADE STREAM TRACKER section):
   POST /track / POST /untrack     — register OptionsScanner paper trades
@@ -414,11 +415,12 @@ def _resolve_cors_origins():
 
 
 def _resolve_shared_secret():
-    """The trading-endpoint shared secret, or None (default → auth DISABLED, unchanged).
+    """The proxy's shared secret, or None.
 
-    Env ``PROXY_SHARED_SECRET`` → gitignored ``shared/proxy_secret.txt``. When set, the
-    sensitive endpoints (/accounts, /orders, /positions, /transactions) require a matching
-    ``X-Proxy-Secret`` header; unset → no check, byte-for-byte as before. Never raises."""
+    Env ``PROXY_SHARED_SECRET`` → gitignored ``shared/proxy_secret.txt``. The
+    ACCOUNT routes (/accounts, /positions, /transactions) need it: with none
+    configured they refuse outright (``require_account_secret``). ``/passthrough``
+    checks it only when one is configured (``require_secret``). Never raises."""
     env = os.environ.get("PROXY_SHARED_SECRET")
     if env and env.strip():
         return env.strip()
@@ -438,15 +440,47 @@ PROXY_SHARED_SECRET = _resolve_shared_secret()
 
 
 def require_secret(x_proxy_secret: Optional[str] = Header(default=None)):
-    """FastAPI dependency guarding the sensitive (account/order) endpoints.
+    """FastAPI dependency for a MARKET-DATA route that should carry the secret.
 
-    Enforced ONLY when a shared secret is configured (else a no-op → back-compat). A
-    missing/mismatched ``X-Proxy-Secret`` header → 401. Timing-safe compare."""
+    Enforced ONLY when a shared secret is configured (else a no-op). A
+    missing/mismatched ``X-Proxy-Secret`` header → 401. Timing-safe compare.
+
+    ⚠ Not for anything that reaches the brokerage ACCOUNT API — that is
+    ``require_account_secret``, which fails closed. This one may stay open
+    with no secret because what it guards is market data the unguarded
+    ``/quotes`` and ``/chains`` routes serve anyway."""
     if PROXY_SHARED_SECRET is None:
         return
     supplied = x_proxy_secret or ""
     if not hmac.compare_digest(supplied, PROXY_SHARED_SECRET):
         raise HTTPException(status_code=401, detail="invalid or missing X-Proxy-Secret")
+
+
+def require_account_secret(x_proxy_secret: Optional[str] = Header(default=None)):
+    """FastAPI dependency guarding every route that reaches the brokerage ACCOUNT
+    API. It FAILS CLOSED: with no shared secret configured the route refuses
+    (503) rather than answering.
+
+    ``require_secret`` returned without checking when no secret was set, and on
+    the production box none was: ``GET /accounts`` answered 200 to any caller
+    that could reach the port, loopback or tailnet (audit SE-02, measured
+    2026-10-03). A check that is off by default is not a check on the one
+    surface that touches a real account.
+    """
+    if PROXY_SHARED_SECRET is None:
+        raise HTTPException(
+            status_code=503,
+            detail="account routes are locked: no PROXY_SHARED_SECRET is configured "
+                   "on the proxy (set it in the stack's .env and restart)")
+    supplied = x_proxy_secret or ""
+    if not hmac.compare_digest(supplied, PROXY_SHARED_SECRET):
+        raise HTTPException(status_code=401, detail="invalid or missing X-Proxy-Secret")
+
+
+def account_routes_state() -> str:
+    """``secret_required`` when the account routes will answer a caller holding
+    the secret, ``locked_no_secret`` when they refuse everyone."""
+    return "secret_required" if PROXY_SHARED_SECRET is not None else "locked_no_secret"
 
 
 app = FastAPI(
@@ -532,6 +566,8 @@ def health():
         "refresh_token_rejected": rejected,
         "refresh_error": getattr(token_mgr, "refresh_error", None) if rejected else None,
         "token_file": str(TOKEN_FILE),
+        # Whether /accounts, /positions and /transactions will answer at all.
+        "account_routes": account_routes_state(),
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
 
@@ -795,9 +831,26 @@ def get_instruments(
     return result["data"]
 
 
-@app.get("/passthrough")
+# The Schwab market-data endpoints /passthrough will forward, matched EXACTLY.
+# These are the five its callers use: proxy_client (/expirationchain, /quotes)
+# and the Deep Dive report's client (/quotes, /instruments, /pricehistory,
+# /chains). ⚠ An allow-list, never a deny-list or a "starts with /": the
+# upstream URL is built by string concatenation onto a base that ends
+# ``/marketdata/v1``, so ``/../../trader/v1/accounts/...`` normalised onto the
+# brokerage ACCOUNT API - accounts, positions, orders, transactions - with no
+# secret (audit SE-01).
+PASSTHROUGH_ENDPOINTS = frozenset(
+    {"/expirationchain", "/quotes", "/instruments", "/pricehistory", "/chains"})
+
+
+@app.get("/passthrough", dependencies=[Depends(require_secret)])
 def passthrough(endpoint: str, params: Optional[str] = None):
-    """Generic passthrough for any Schwab marketdata endpoint."""
+    """Passthrough for the Schwab market-data endpoints in
+    ``PASSTHROUGH_ENDPOINTS``; anything else is refused before any call."""
+    if endpoint not in PASSTHROUGH_ENDPOINTS:
+        raise HTTPException(
+            status_code=400,
+            detail="endpoint is not one of " + ", ".join(sorted(PASSTHROUGH_ENDPOINTS)))
     p = {}
     if params:
         for pair in params.split(","):
@@ -811,32 +864,38 @@ def passthrough(endpoint: str, params: Optional[str] = None):
 
 
 #############################################
-# TRADER API ENDPOINTS (order placement)
+# TRADER API ENDPOINTS (account READS only - no order route exists)
 #############################################
 
 def trader_request(method: str, endpoint: str, json_body: dict = None) -> dict:
     """
-    Authenticated Schwab Trader API request.
+    Authenticated READ of the Schwab Trader API.
     Uses SCHWAB_TRADER_URL (trader/v1) — separate from marketdata/v1.
+
+    ⚠ GET only, and anything else RAISES before a request is built. This
+    application is paper-only: it reads accounts, positions and transactions
+    for the Portfolio page and never sends the brokerage an order. The POST
+    path that used to live here existed for one route (``POST /orders/...``)
+    that nothing called and that forwarded a real order (audit SE-02); both
+    are gone, and ``tests/test_account_surface.py`` fails on a new write.
+    ``json_body`` is kept in the signature only so an old caller fails on the
+    method check rather than on an unexpected argument.
     """
+    if str(method).upper() != "GET":
+        raise ValueError(
+            f"trader_request is read-only: {method!r} to the brokerage API is refused")
     token_mgr.ensure_valid_token()
     # Do NOT set a static Content-Type here. Schwab's Trader API rejects a
     # `Content-Type: application/json` header on a bodyless GET with an opaque
     # 400 ({"errors":[{"status":500,"title":"Internal Server Error"}]}) — this
-    # silently broke /accounts, /positions, /transactions. For the POST path,
-    # requests sets Content-Type automatically from json=json_body, so omitting
-    # it here is correct for both verbs.
+    # silently broke /accounts, /positions, /transactions.
     headers = {
         "Authorization": f'Bearer {token_mgr.tokens["AccessToken"]}',
         "Accept":        "application/json",
     }
     url = f"{SCHWAB_TRADER_URL}{endpoint}"
-    is_get = method.upper() == "GET"
-    # Idempotent GETs (accounts/positions/transactions) get bounded retry on
-    # transient failures. Order POSTs do NOT: a lost response on a submitted
-    # order must never be retried, or it could double-submit. So POSTs fail
-    # fast with a single attempt, exactly as before.
-    attempts = MAX_RETRIES if is_get else 1
+    # Idempotent GETs get bounded retry on transient failures.
+    attempts = MAX_RETRIES
     result: dict = {"status_code": 502, "data": None, "error": "no attempt made"}
     # Reuse the TokenManager's pooled Session (keep-alive to api.schwabapi.com)
     # instead of bare requests.* — the marketdata path already does, so the trader
@@ -847,22 +906,18 @@ def trader_request(method: str, endpoint: str, json_body: dict = None) -> dict:
             # Trader calls bypass _rate_limit, so count each attempt here
             # (Settings "API usage" stats). record() never raises.
             api_call_counter.record()
-            resp = (session.get(url, headers=headers, timeout=30) if is_get
-                    else session.post(url, headers=headers, json=json_body, timeout=30))
+            resp = session.get(url, headers=headers, timeout=30)
             if resp.status_code == 401:
                 logger.warning("Trader API 401 — refreshing token and retrying")
                 with token_mgr._lock:
                     token_mgr._refresh()
                 headers["Authorization"] = f'Bearer {token_mgr.tokens["AccessToken"]}'
-                resp = (session.get(url, headers=headers, timeout=30) if is_get
-                        else session.post(url, headers=headers, json=json_body, timeout=30))
+                resp = session.get(url, headers=headers, timeout=30)
             if resp.status_code in (200, 201):
                 return {"status_code": resp.status_code, "data": resp.json() if resp.text else {}, "error": None}
             logger.error(f"Trader API {resp.status_code}: {resp.text[:300]}")
             result = {"status_code": resp.status_code, "data": None, "error": resp.text[:500]}
             # A deterministic 4xx won't change on re-request — don't retry it.
-            # (POSTs already fail fast via attempts=1; this also short-circuits
-            # a 4xx on the idempotent GET path.)
             if not _is_retryable_status(resp.status_code):
                 return result
         except requests.exceptions.RequestException as e:
@@ -982,11 +1037,11 @@ def _normalize_transactions(raw: list) -> list[dict]:
     return out
 
 
-@app.get("/accounts", dependencies=[Depends(require_secret)])
+@app.get("/accounts", dependencies=[Depends(require_account_secret)])
 def get_accounts():
     """
     Fetch linked Schwab account hashes (Trader API).
-    Returns list with hashValue field used for order placement.
+    Returns list with hashValue field, which the per-account reads below take.
     """
     result = trader_request("GET", "/accounts/accountNumbers")
     if result["status_code"] not in (200, 201):
@@ -994,21 +1049,7 @@ def get_accounts():
     return result["data"]
 
 
-@app.post("/orders/{account_hash}", dependencies=[Depends(require_secret)])
-def place_order(account_hash: str, order: dict):
-    """
-    Place an order via Schwab Trader API.
-    account_hash: hashValue from GET /accounts.
-    order: Schwab order body (orderType, session, price, orderLegCollection, etc.)
-    """
-    result = trader_request("POST", f"/accounts/{account_hash}/orders", json_body=order)
-    if result["status_code"] not in (200, 201):
-        raise HTTPException(status_code=result["status_code"], detail=result["error"])
-    logger.info(f"Order placed — account={account_hash[:8]}... status={result['status_code']}")
-    return {"status": "submitted", "status_code": result["status_code"], "data": result["data"]}
-
-
-@app.get("/positions", dependencies=[Depends(require_secret)])
+@app.get("/positions", dependencies=[Depends(require_account_secret)])
 def get_positions_default():
     """Merged positions across ALL linked Schwab accounts.
 
@@ -1038,7 +1079,7 @@ def get_positions_default():
     return {"positions": _merge_positions(merged)}
 
 
-@app.get("/positions/{account_hash}", dependencies=[Depends(require_secret)])
+@app.get("/positions/{account_hash}", dependencies=[Depends(require_account_secret)])
 def get_positions(account_hash: str):
     """Normalized positions for one account."""
     result = trader_request("GET", f"/accounts/{account_hash}?fields=positions")
@@ -1047,7 +1088,7 @@ def get_positions(account_hash: str):
     return {"positions": _normalize_positions(result["data"])}
 
 
-@app.get("/transactions/{account_hash}", dependencies=[Depends(require_secret)])
+@app.get("/transactions/{account_hash}", dependencies=[Depends(require_account_secret)])
 def get_transactions(account_hash: str, start_date: str, end_date: str):
     """Normalized trade transactions in [start_date, end_date] (YYYY-MM-DD)."""
     endpoint = (f"/accounts/{account_hash}/transactions"

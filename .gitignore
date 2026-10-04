@@ -8,6 +8,7 @@ shared/sentiment_bridge.json
 shared/notifications.json
 shared/webgui_auth.json
 shared/anthropic_key.txt
+shared/proxy_secret.txt
 shared/alphavantage_key.txt
 shared/massive_key.txt
 shared/google_calendar_sa.json

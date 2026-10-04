@@ -88,3 +88,56 @@ def test_get_daily_history_uses_valid_schwab_buckets(monkeypatch, months, exp_ty
     pd_.get_daily_history("AAPL", months=months)
     assert captured["params"]["periodType"] == exp_type
     assert captured["params"]["period"] == exp_period
+
+
+# ── the proxy's shared secret (audit SE-02) ──────────────────────────────────
+# The proxy's account routes refuse a caller without the secret. This client is
+# the only thing that calls them, and it sent no header at all - so the routes
+# could never be locked without taking the Portfolio page down.
+
+def test_the_session_carries_the_proxy_secret_when_one_is_configured(monkeypatch):
+    monkeypatch.setenv("PROXY_SHARED_SECRET", "s3cret")
+    assert PortfolioData(base_url="http://x").session.headers["X-Proxy-Secret"] == "s3cret"
+
+
+def test_the_session_carries_no_secret_header_when_none_is_configured(monkeypatch):
+    import proxy_client
+    monkeypatch.delenv("PROXY_SHARED_SECRET", raising=False)
+    monkeypatch.setattr(proxy_client, "_client_secret", lambda: None)
+    assert "X-Proxy-Secret" not in PortfolioData(base_url="http://x").session.headers
+
+
+def test_the_session_names_its_caller():
+    assert PortfolioData(base_url="http://x").session.headers.get("X-Caller")
+
+
+class _Refused:
+    def __init__(self, status, detail):
+        self.status_code, self._detail = status, detail
+
+    def json(self):
+        return {"detail": self._detail}
+
+    def raise_for_status(self):
+        import requests
+        raise requests.HTTPError(f"{self.status_code} Server Error")
+
+
+def test_a_locked_account_route_reports_the_proxys_own_reason(monkeypatch):
+    """The proxy answers 503 with the reason when no secret is configured. A bare
+    "503 Server Error" on the Portfolio page says nothing about what to do."""
+    pd_ = PortfolioData(base_url="http://x")
+    reason = "account routes are locked: no PROXY_SHARED_SECRET is configured"
+    monkeypatch.setattr(pd_.session, "get", lambda *a, **k: _Refused(503, reason))
+    for call in (pd_.get_positions, pd_.get_accounts,
+                 lambda: pd_.get_transactions("H", "2026-01-01", "2026-01-31")):
+        with pytest.raises(RuntimeError, match="PROXY_SHARED_SECRET"):
+            call()
+
+
+def test_a_wrong_secret_reports_the_proxys_own_reason(monkeypatch):
+    pd_ = PortfolioData(base_url="http://x")
+    monkeypatch.setattr(pd_.session, "get",
+                        lambda *a, **k: _Refused(401, "invalid or missing X-Proxy-Secret"))
+    with pytest.raises(RuntimeError, match="X-Proxy-Secret"):
+        pd_.get_positions()

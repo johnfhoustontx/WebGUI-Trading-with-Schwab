@@ -27,8 +27,10 @@ cd portfolio-analyzer && python portfolio_analyzer.py   # proxy must be up on :8
 Every Schwab call funnels through `{PROXY_URL}` — this app owns **no**
 OAuth/tokens (the proxy does). It relies on the proxy's `/accounts`,
 `/positions`, `/transactions/{account_hash}`, `/pricehistory`, and the SSE
-`/stream/quotes` endpoints. Single-leg order execution targets
-`/orders/{account_hash}` (see execution stub below). Add new Schwab access as a
+`/stream/quotes` endpoints. The three account routes need the proxy's shared
+secret (`PROXY_SHARED_SECRET`); `src/data.py` attaches it, and with none
+configured the proxy refuses them. There is no order route: the proxy only
+READS the brokerage API. Add new Schwab access as a
 method on the relevant client — never reintroduce direct `api.schwabapi.com`
 access or a local token file.
 
@@ -62,10 +64,9 @@ access or a local token file.
   vs-sector / vs-benchmark relative strength, and `build_portfolio`. Sector
   classification + relative strength reuse
   `shared/analysis_lib/sector_analysis.py` — do not duplicate that logic here.
-- **`execution.py`** — order-execution **foundation** (`build_order_body`,
-  `ExecutionClient.preview_order` / `place_order`). Single-leg equity orders
-  only; it works end-to-end via the proxy but is intentionally **not yet wired
-  to any GUI button** — it is groundwork for the live-trading roadmap.
+- **`execution.py` is NOT in this repo** (it was the source repo's
+  order-execution stub and was never copied), and the proxy route it targeted
+  was deleted 2026-10-03.
 - **`evaluation.py`** — split-speed per-position scorecard: `compute_baseline`
   runs once at load on the worker; `evaluate_portfolio` runs per tick.
   Baselines/evaluation are **EQUITY-only by design** — options and other
@@ -85,5 +86,5 @@ cd portfolio-analyzer && python -m pytest tests
 
 `tests/conftest.py` puts the app folder and repo root on `sys.path` so
 `from src...` and `import repo_paths` resolve. The suite is pure — it does not
-need the proxy running (network-bound code like the streaming thread and live
-`place_order` path is exercised via injected fakes / pure helpers).
+need the proxy running (network-bound code like the streaming thread
+is exercised via injected fakes / pure helpers).

@@ -620,7 +620,7 @@ were removed in September 2026 — nothing in the stack talks to those processes
 </tr>
 <tr>
 <td><strong>Proxy hardening</strong></td>
-<td><code>PROXY_SHARED_SECRET</code> (guards the trading endpoints; enforced only when set) and <code>PROXY_CORS_ORIGINS</code> (overrides the local allowlist). See <code>docs/SECURITY.md</code>.</td>
+<td><code>PROXY_SHARED_SECRET</code> (<strong>required</strong> by the account routes <code>/accounts</code>, <code>/positions</code>, <code>/transactions</code>: with none set they refuse every caller; there is no order route) and <code>PROXY_CORS_ORIGINS</code> (overrides the local allowlist). See <code>docs/SECURITY.md</code>.</td>
 </tr>
 </tbody>
 </table>

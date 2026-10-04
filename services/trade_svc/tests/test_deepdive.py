@@ -229,3 +229,37 @@ class TestGammaFlipMatchesTheCollector:
         assert engine.flip_point({}, spot=100.0) is None
         assert engine.flip_point(self.GRID, spot=None) is None
         assert engine.flip_point(self.GRID, spot=0) is None
+
+
+# ── the Deep Dive client and the proxy's shared secret (audit SE-01) ─────────
+# The report's client reaches Schwab through the proxy's /passthrough, which
+# now carries the secret check. It built a bare session with no header.
+
+def test_the_deep_dive_client_carries_the_proxy_secret_when_configured(monkeypatch):
+    from services.trade_svc.deepdive import engine
+    monkeypatch.setenv("PROXY_SHARED_SECRET", "s3cret")
+    assert engine.SchwabClient().session.headers["X-Proxy-Secret"] == "s3cret"
+
+
+def test_the_deep_dive_client_sends_no_secret_header_when_none_is_configured(monkeypatch):
+    import proxy_client
+    from services.trade_svc.deepdive import engine
+    monkeypatch.delenv("PROXY_SHARED_SECRET", raising=False)
+    monkeypatch.setattr(proxy_client, "_client_secret", lambda: None)
+    assert "X-Proxy-Secret" not in engine.SchwabClient().session.headers
+
+
+def test_the_deep_dive_client_uses_only_endpoints_the_passthrough_allows():
+    """The proxy's allow-list is restated here because the two cannot import
+    each other; schwab-proxy/tests/test_account_surface.py pins the proxy's side."""
+    import ast
+    import pathlib
+    from services.trade_svc.deepdive import engine
+    allowed = {"/expirationchain", "/quotes", "/instruments", "/pricehistory", "/chains"}
+    used = set()
+    for node in ast.walk(ast.parse(pathlib.Path(engine.__file__).read_text(encoding="utf-8"))):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "_get" and node.args
+                and isinstance(node.args[0], ast.Constant)):
+            used.add(node.args[0].value)
+    assert used and used <= allowed, used - allowed

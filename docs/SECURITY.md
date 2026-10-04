@@ -19,24 +19,37 @@ Nothing to do — this is the new default. To change it, set `PROXY_CORS_ORIGINS
 separated) before starting the proxy. Setting it to `*` explicitly restores the old
 wildcard (logged as a warning) if some other browser-based tool needs it.
 
-## 2. Shared secret on the trading endpoints (OFF by default)
+## 2. Shared secret on the account routes (REQUIRED — they fail closed)
 
-The sensitive endpoints — `/accounts`, `/orders/{hash}`, `/positions`,
-`/positions/{hash}`, `/transactions/{hash}` — can require an `X-Proxy-Secret` header.
-**Enforced only when a secret is configured**; unset → no check (unchanged).
+The routes that read the brokerage account — `/accounts`, `/positions`,
+`/positions/{hash}`, `/transactions/{hash}` — require an `X-Proxy-Secret` header.
+**With no secret configured they refuse every caller** (HTTP 503 naming
+`PROXY_SHARED_SECRET`), and the Portfolio page shows that reason. Until 2026-10-03
+the check was skipped when no secret was set, which is how production ran: any
+caller that could reach the port, loopback or tailnet, could read the account.
 
-To enable:
+**There is no order route.** `POST /orders/{hash}` forwarded a real order to
+Schwab and nothing called it; it was deleted, and `trader_request` refuses any
+method but GET. This application is paper-only.
 
-1. Pick a random secret and put it in **either**:
-   - the env var `PROXY_SHARED_SECRET`, **or**
+To set the secret:
+
+1. Generate a random value and put it in **either**:
+   - the stack's `.env` as `PROXY_SHARED_SECRET=<value>` (every unit loads it), **or**
    - a gitignored file `shared/proxy_secret.txt` (one line).
-2. Restart the proxy. It logs `auth ENABLED` on startup.
-3. The repo's own clients (`SchwabProxyClient` / `SchwabPyProxyClient`) resolve the **same**
-   source and attach the header automatically, so the services keep working. Any *other*
-   tool that calls the proxy must send the same header or it gets `401`.
+2. Restart the stack. `GET /health` on the proxy then reports
+   `"account_routes": "secret_required"` (it reads `locked_no_secret` without one).
+3. The repo's clients resolve the **same** source and attach the header:
+   `SchwabProxyClient` / `SchwabPyProxyClient`, the Portfolio data client and the
+   Deep Dive report's client. Any *other* tool that calls an account route must
+   send the header or it gets `401`.
 
-The compare is timing-safe (`hmac.compare_digest`). Market-data endpoints are unguarded
-(they're read-only and non-sensitive).
+The compare is timing-safe (`hmac.compare_digest`).
+
+`/passthrough` forwards only five named market-data endpoints
+(`/expirationchain`, `/quotes`, `/instruments`, `/pricehistory`, `/chains`),
+matched exactly, and carries the secret check when a secret is configured. The
+other market-data routes are unguarded (read-only, not account data).
 
 ## 3. Redis (Redis) password (OFF by default)
 

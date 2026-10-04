@@ -27,8 +27,18 @@ sentiment-dashboard, and the Tier-2 services all fetch market data through it.
   Services page runs).
 - Key endpoints: `/health`, `/stats/api_calls` (per-day outbound Schwab API-call counts — today / last 7 / last 30 days; counted at the marketdata rate-limit chokepoint + the trader request loop into `data/api_call_counts.db`, best-effort/never-raises; feeds the webgui Settings "API usage" card), `/quote`, `/quotes`, `/chains`, `/pricehistory`,
   `/instruments` (fundamentals; `projection=fundamental` → P/E, growth, ROE,
-  margins — used by trade_svc), `/accounts`, `/positions`, `/positions/{account_hash}`,
-  `/orders/{account_hash}`, and the trade-stream tracker (`/track`, `/untrack`).
+  margins — used by trade_svc), `/passthrough` (five named market-data endpoints
+  only — `PASSTHROUGH_ENDPOINTS`, matched exactly), `/accounts`, `/positions`,
+  `/positions/{account_hash}`, `/transactions/{account_hash}`, and the
+  trade-stream tracker (`/track`, `/untrack`).
+- ⚠ **The account routes FAIL CLOSED, and there is no order route.**
+  `/accounts`, `/positions*` and `/transactions*` depend on
+  `require_account_secret`: with no `PROXY_SHARED_SECRET` configured they answer
+  503 to everyone; with one, 401 without the matching `X-Proxy-Secret`.
+  `trader_request` is GET-only and raises on anything else. A new route that
+  calls `trader_request` must carry that dependency and a new write to the
+  brokerage API must not exist at all — `tests/test_account_surface.py` fails on
+  both. `require_secret` (a no-op with no secret) is for market data only.
 - **`/positions` aggregates ALL linked accounts** (not just the first): it loops
   every account hash from `/accounts/accountNumbers`, normalizes each, and folds
   same-symbol holdings across accounts into one row via `_merge_positions` (sums

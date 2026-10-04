@@ -36,6 +36,9 @@ def test_cors_wildcard_is_opt_in(monkeypatch):
 
 # ── shared-secret dependency ─────────────────────────────────────────────────
 def test_require_secret_noop_when_unset(monkeypatch):
+    # The MARKET-DATA check (the passthrough). The account routes use
+    # require_account_secret, which refuses when no secret is set - see
+    # test_account_surface.py.
     monkeypatch.setattr(schwab_proxy, "PROXY_SHARED_SECRET", None)
     assert require_secret(None) is None
     assert require_secret("anything") is None        # no check at all — back-compat
@@ -50,15 +53,20 @@ def test_require_secret_enforced_when_set(monkeypatch):
         assert ei.value.status_code == 401
 
 
-def test_sensitive_endpoints_depend_on_require_secret():
-    """The account/order/position/transaction routes carry the require_secret guard."""
-    guarded = {"/accounts", "/orders/{account_hash}", "/positions",
+def test_sensitive_endpoints_carry_the_fail_closed_guard():
+    """The account/position/transaction routes carry ``require_account_secret``.
+
+    This asserted ``require_secret`` on five routes until 2026-10-03, one of
+    them ``POST /orders/{account_hash}``. That check is a no-op with no secret
+    configured, which is how production ran, and the order route is deleted
+    (audit SE-02)."""
+    guarded = {"/accounts", "/positions",
                "/positions/{account_hash}", "/transactions/{account_hash}"}
     seen = set()
     for route in schwab_proxy.app.routes:
         if getattr(route, "path", None) in guarded:
             dep_calls = [d.call for d in route.dependant.dependencies]
-            assert require_secret in dep_calls, f"{route.path} missing require_secret"
+            assert schwab_proxy.require_account_secret in dep_calls, route.path
             seen.add(route.path)
     assert seen == guarded
 

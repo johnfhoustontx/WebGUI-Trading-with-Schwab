@@ -63,12 +63,13 @@ def test_trader_get_omits_content_type(monkeypatch):
     assert cap["headers"]["Accept"] == "application/json"
 
 
-def test_trader_post_forwards_json_body(monkeypatch):
+def test_trader_post_is_refused_and_forwards_nothing(monkeypatch):
+    """This pinned "a POST forwards its JSON body" until 2026-10-03 - the order
+    path. The proxy now only READS the brokerage API (audit SE-02)."""
+    import pytest
     cap = {}
     _wire(monkeypatch, cap)
-    body = {"orderType": "MARKET"}
-    res = schwab_proxy.trader_request("POST", "/accounts/x/orders", json_body=body)
-    assert res["status_code"] == 201
-    assert cap["json"] == body
-    # requests sets Content-Type from json=; we don't set it statically.
-    assert "Content-Type" not in cap["headers"]
+    with pytest.raises(ValueError):
+        schwab_proxy.trader_request("POST", "/accounts/x/orders",
+                                    json_body={"orderType": "MARKET"})
+    assert cap == {}                      # nothing reached the session

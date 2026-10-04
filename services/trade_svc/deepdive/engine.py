@@ -42,8 +42,12 @@ import requests
 import numpy as np
 import pandas as pd
 
-from repo_paths import PROXY_URL
+from repo_paths import PROXY_URL, SCHWAB_PROXY
 from shared import iv_history as ivh  # moved to shared/ 2026-09-12 (C3)
+
+if str(SCHWAB_PROXY) not in sys.path:      # hyphenated folder: import by path
+    sys.path.insert(0, str(SCHWAB_PROXY))
+import proxy_client as _proxy_client  # noqa: E402
 
 #############################################
 # LOGGING SETUP
@@ -98,6 +102,10 @@ class SchwabClient:
         self.base_url = (base_url or PROXY_BASE).rstrip('/')
         self.session = requests.Session()
         self.session.headers.update({'Accept': 'application/json'})
+        # /passthrough carries the proxy's shared-secret check when one is
+        # configured; X-Caller is the per-caller count label.
+        _proxy_client._apply_secret(self.session)
+        _proxy_client._apply_identity(self.session)
 
     def _build_request(self, endpoint, params):
         """Resolve the URL and query params for the active transport mode
