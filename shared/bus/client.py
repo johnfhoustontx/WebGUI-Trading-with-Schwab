@@ -13,6 +13,7 @@
 Under pytest (or with ``fake=True``) it auto-selects an in-memory
 ``fakeredis`` backend so tests need no live server.
 """
+import hashlib
 import logging
 import json
 from typing import cast
@@ -21,6 +22,8 @@ import pathlib
 import sys
 import time
 from datetime import datetime, timezone
+
+from pydantic_core import to_json as _to_json
 
 from shared.contracts.envelope import CacheEnvelope, Command
 
@@ -40,6 +43,20 @@ _XADD_MAXLEN = 1000
 
 
 log = logging.getLogger(__name__)
+
+
+def _signature(payload) -> str | None:
+    """A digest of ``payload`` as JSON, or None when it will not serialize.
+
+    Two payloads with the same signature are stored as the same bytes: a tuple
+    and a list of the same values sign alike, as they are stored alike. Key
+    ORDER counts, so a dict rebuilt in another order reads as changed and is
+    written; the builders here are deterministic. pydantic's serializer rather
+    than ``json.dumps``: measured on a 1.3 MB history payload, 5 ms against 29."""
+    try:
+        return hashlib.blake2b(_to_json(payload), digest_size=16).hexdigest()
+    except Exception:  # noqa: BLE001 — no signature means compare in full.
+        return None
 
 
 class _Subscription:
@@ -171,7 +188,8 @@ class Bus:
 
         ``skip_unchanged`` — for periodic republishers (e.g. the options
         header / GEX-status ticks). When set, if the currently-stored payload is
-        byte-identical to ``payload`` the payload write is skipped: no ``INCR``,
+        the one being written (decided from a stored digest, ``{key}:sig``, so
+        the payload is not read back) the payload write is skipped: no ``INCR``,
         no envelope ``SET``, and no event publish, returning the existing version.
         This stops unchanged data from bumping the version and waking every GUI
         version-poller into a needless repaint. The ``{key}:ts`` freshness stamp
@@ -194,9 +212,10 @@ class Bus:
         Callers that publish themselves can omit ``event`` — behaviour is then
         identical to the original two-line set+publish.
         """
+        sig = _signature(payload) if skip_unchanged else None
         if skip_unchanged:
-            current = self.cache_get(key)
-            if current is not None and current.payload == payload:
+            unchanged_at = self._unchanged_version(key, payload, sig)
+            if unchanged_at is not None:
                 # Refresh the freshness side key even though the payload write is
                 # skipped. This is the whole difference between the two stamps:
                 # ``{key}:ts`` answers "when did the publisher last CONFIRM this is
@@ -217,9 +236,9 @@ class Bus:
                 if ttl is not None:
                     # A skipped publish still means "this is current" — renew the
                     # whole family or a static-but-live view expires mid-session.
-                    for k in (key, f"{key}:ver", f"{key}:ts"):
+                    for k in (key, f"{key}:ver", f"{key}:ts", f"{key}:sig"):
                         self._r.expire(k, ttl)
-                return current.version
+                return unchanged_at
         version = self._r.incr(f"{key}:ver")
         env = CacheEnvelope(
             version=version,
@@ -234,13 +253,44 @@ class Bus:
         pipe = self._r.pipeline()
         pipe.set(key, env.to_json())
         pipe.set(f"{key}:ts", env.ts)
+        # The signature is of THIS payload or it is gone: a write that keeps
+        # none must not leave an older one behind to match a later write.
+        if sig is not None:
+            pipe.set(f"{key}:sig", sig)
+        else:
+            pipe.delete(f"{key}:sig")
         if ttl is not None:
-            for k in (key, f"{key}:ver", f"{key}:ts"):
+            for k in (key, f"{key}:ver", f"{key}:ts", f"{key}:sig"):
                 pipe.expire(k, ttl)
         if event is not None:
             pipe.publish(event, json.dumps({"version": version}))
         pipe.execute()
         return version
+
+    def _unchanged_version(self, key, payload, sig) -> int | None:
+        """The stored version when ``payload`` is what ``key`` already holds,
+        else None.
+
+        Decided from ``{key}:sig``, a digest of the stored payload, so the
+        payload itself is not fetched and parsed just to be compared (the gamma
+        history keys are over a megabyte each, checked every minute). A key
+        with no signature yet - written by an older build, or by a write that
+        did not ask for the check - is compared in full once, and signed."""
+        pipe = self._r.pipeline()
+        pipe.get(f"{key}:sig")
+        pipe.get(f"{key}:ver")
+        pipe.exists(key)
+        stored_sig, ver, exists = pipe.execute()
+        if not exists or ver is None:
+            return None
+        if sig is not None and stored_sig is not None:
+            return int(cast(str, ver)) if stored_sig == sig else None
+        current = self.cache_get(key)
+        if current is None or current.payload != payload:
+            return None
+        if sig is not None:
+            self._r.set(f"{key}:sig", sig)
+        return current.version
 
     def cache_get(self, key: str) -> CacheEnvelope | None:
         raw = self._r.get(key)

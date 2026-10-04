@@ -580,12 +580,11 @@ def test_publish_bullbear_does_not_reread_its_own_output_for_the_stamp(monkeypat
     written. It is the only writer, so while the stored version still matches the
     memo that read is pure waste.
 
-    ONE read of the key per tick remains and cannot be removed here: it happens
-    inside ``cache_set(skip_unchanged=True)``, which must compare against what is
-    actually stored before deciding to skip, and must refresh ``{key}:ts`` either
-    way so the Status board cannot read a legitimately-static publisher as dead.
-    So the tick goes from three full deserializes (304 KB + 190 KB + 190 KB) to
-    one (190 KB).
+    The last read of the key per tick was inside ``cache_set(skip_unchanged=
+    True)``, which fetched what was stored to compare it. That check reads a
+    stored digest now (audit PF-06), so the tick went from three full
+    deserializes (304 KB + 190 KB + 190 KB) to none. ``{key}:ts`` is still
+    refreshed, so the Status board cannot read a static publisher as dead.
     """
     monkeypatch.setattr(handlers.compute, "_bullbear_quotes",
                         lambda s: {"XLV": {"change_pct": 1.5}})
@@ -595,7 +594,7 @@ def test_publish_bullbear_does_not_reread_its_own_output_for_the_stamp(monkeypat
     calls = _count_gets(bus)
     for _ in range(3):
         handlers.publish_bullbear(bus)
-    assert calls.get(handlers.CACHE_BULLBEAR) == 3      # cache_set's, not ours
+    assert calls.get(handlers.CACHE_BULLBEAR) is None   # not ours, not cache_set's
     assert calls.get(handlers.CACHE_MOMENTUM) is None   # ours is gone entirely
 
 

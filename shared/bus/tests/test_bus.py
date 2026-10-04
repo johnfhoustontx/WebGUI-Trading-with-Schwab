@@ -404,3 +404,109 @@ def test_persistence_is_unknown_when_redis_will_not_say():
     bus = Bus(fake=True)
     bus._r = R()
     assert bus.persistence() == "unknown"
+
+
+# --- the unchanged check reads a signature, not the payload (audit PF-06) -----
+# ``skip_unchanged`` fetched and parsed the whole stored payload to compare it.
+# For the gamma history keys that is about 1.3 MB per key per minute, read back
+# only to find, during collection, that it had changed.
+
+def _gets(bus):
+    """Record every key this bus GETs, alone or in a pipeline."""
+    seen = []
+    real_get, real_pipeline = bus._r.get, bus._r.pipeline
+
+    def get(key, *a, **k):
+        seen.append(key)
+        return real_get(key, *a, **k)
+
+    def pipeline(*a, **k):
+        pipe = real_pipeline(*a, **k)
+        pipe_get = pipe.get
+
+        def recorded(key, *aa, **kk):
+            seen.append(key)
+            return pipe_get(key, *aa, **kk)
+
+        pipe.get = recorded
+        return pipe
+
+    bus._r.get, bus._r.pipeline = get, pipeline
+    return seen
+
+
+def test_an_unchanged_write_does_not_read_the_payload_back():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:sig", {"rows": [1, 2, 3]}, skip_unchanged=True)
+    seen = _gets(b)
+    v = b.cache_set("cache:test:sig", {"rows": [1, 2, 3]}, skip_unchanged=True)
+    assert v == 1
+    assert "cache:test:sig" not in seen, "the stored payload was fetched to compare"
+
+
+def test_a_changed_write_does_not_read_the_payload_back_either():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:sig2", {"rows": [1]}, skip_unchanged=True)
+    seen = _gets(b)
+    assert b.cache_set("cache:test:sig2", {"rows": [1, 2]}, skip_unchanged=True) == 2
+    assert "cache:test:sig2" not in seen
+    assert b.cache_get("cache:test:sig2").payload == {"rows": [1, 2]}
+
+
+def test_rows_of_tuples_are_unchanged_when_stored_as_the_same_json():
+    # A tuple is stored as a JSON list, so the parsed payload never equalled the
+    # one being written and a payload of tuple rows was rewritten every time.
+    b = Bus(fake=True)
+    payload = {"rows": [(1, 2.5, None), (2, 3.5, "x")]}
+    assert b.cache_set("cache:test:tup", payload, skip_unchanged=True) == 1
+    assert b.cache_set("cache:test:tup", payload, skip_unchanged=True) == 1
+
+
+def test_a_plain_write_in_between_does_not_leave_a_stale_signature():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:mix", {"n": 1}, skip_unchanged=True)
+    b.cache_set("cache:test:mix", {"n": 2})                     # no signature kept
+    v = b.cache_set("cache:test:mix", {"n": 1}, skip_unchanged=True)
+    assert v == 3 and b.cache_get("cache:test:mix").payload == {"n": 1}
+
+
+def test_a_key_written_before_signatures_existed_is_still_compared():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:old", {"n": 1}, skip_unchanged=True)
+    b._r.delete("cache:test:old:sig")                # as an older build left it
+    assert b.cache_set("cache:test:old", {"n": 1}, skip_unchanged=True) == 1
+    # ... and it has a signature from then on.
+    seen = _gets(b)
+    assert b.cache_set("cache:test:old", {"n": 1}, skip_unchanged=True) == 1
+    assert "cache:test:old" not in seen
+
+
+def test_a_signature_whose_payload_is_gone_does_not_skip_the_write():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:gone", {"n": 1}, skip_unchanged=True)
+    b._r.delete("cache:test:gone")                   # expired, or flushed by hand
+    b.cache_set("cache:test:gone", {"n": 1}, skip_unchanged=True)
+    assert b.cache_get("cache:test:gone").payload == {"n": 1}
+
+
+def test_the_signature_expires_with_the_rest_of_the_key():
+    b = Bus(fake=True)
+    b.cache_set("cache:test:sigttl", {"n": 1}, skip_unchanged=True, ttl=90)
+    assert 0 < b._r.ttl("cache:test:sigttl:sig") <= 90
+    b._r.persist("cache:test:sigttl:sig")
+    b.cache_set("cache:test:sigttl", {"n": 1}, skip_unchanged=True, ttl=90)   # skipped
+    assert 0 < b._r.ttl("cache:test:sigttl:sig") <= 90
+
+
+def test_a_payload_that_cannot_be_signed_is_still_written():
+    b = Bus(fake=True)
+    payload = {"n": 1}
+    import shared.bus.client as client
+    real = client._signature
+    client._signature = lambda p: None
+    try:
+        assert b.cache_set("cache:test:nosig", payload, skip_unchanged=True) == 1
+        assert b.cache_set("cache:test:nosig", payload, skip_unchanged=True) == 1
+        assert b.cache_set("cache:test:nosig", {"n": 2}, skip_unchanged=True) == 2
+    finally:
+        client._signature = real
