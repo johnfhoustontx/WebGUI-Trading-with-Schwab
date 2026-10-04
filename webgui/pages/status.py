@@ -434,6 +434,20 @@ def dead_letter_text(body) -> str:
     return f"{n} command{'' if n == 1 else 's'} not run"
 
 
+def redis_detail(up: bool, persistence: str) -> str:
+    """The Redis card's detail line. Some operator and day state lives only in
+    Redis (alert cooldowns, the day's X post count), so whether it is saved to
+    disk at all is said here. An unknown reading adds nothing rather than
+    claiming either. PURE."""
+    if not up:
+        return "no PING response"
+    if persistence in ("snapshots", "append-only file"):
+        return f"PING ok · saved to disk ({persistence})"
+    if persistence == "none":
+        return "PING ok · NOT saved to disk: a restart empties it"
+    return "PING ok"
+
+
 def scheduler_age_text(body) -> str:
     """"scheduler ran 18 s ago", or "" when the service runs no scheduler or has
     not made a pass yet. The process answering is not the service working; this
@@ -469,7 +483,8 @@ def _probe_one(target, proxy_health=None):
             out.update(up=True, detail="serving this page")
         elif kind == "memurai":
             up = bus_client.ping()
-            out.update(up=up, detail="PING ok" if up else "no PING response")
+            out.update(up=up, detail=redis_detail(
+                up, bus_client.persistence() if up else "unknown"))
         elif kind == "proxy":
             h = proxy_health if proxy_health is not None else proxy.health()
             up = bool(h.get("up"))

@@ -216,6 +216,15 @@ def ping() -> bool:
         return False
 
 
+def persistence() -> str:
+    """What Redis keeps across a restart (see ``Bus.persistence``): ``snapshots``,
+    ``append-only file``, ``none`` or ``unknown``. Never raises."""
+    try:
+        return bus().persistence()
+    except Exception:  # noqa: BLE001
+        return "unknown"
+
+
 def request(domain: str, command: dict) -> str:
     """Enqueue a command dict (e.g. {'type':'refresh'}) onto ``f'cmd:{domain}'``.
 

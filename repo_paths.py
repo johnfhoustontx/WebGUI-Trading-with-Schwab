@@ -125,6 +125,9 @@ GAMMA_BRIEFING_DB = OPTIONS_SCANNER / "data" / "gamma_briefings.db"
 # "NeuralStrike social pull" task copies them into D:\NeuralStrike Reports.
 # Gitignored with the rest of options-scanner/data/.
 TRADE_IDEAS_DIR = OPTIONS_SCANNER / "data" / "trade_ideas"
+# The two operator switches options_svc keeps (auto-close, the manual book's
+# break-even lifecycle), on disk so a Redis flush cannot put them back to default.
+OPTIONS_TOGGLES = OPTIONS_SCANNER / "data" / "operator_toggles.json"
 # Every X post attempt (posted / dry run / refused / failed), one JSON line each.
 X_POSTS_LOG = OPTIONS_SCANNER / "data" / "x_posts.jsonl"
 

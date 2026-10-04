@@ -114,6 +114,9 @@ EXTRA_FILES = (
     # The public site's manifest of published trade ideas (the cards themselves
     # are swept from deploy/site/ideas below).
     "deploy/site/ideas.json",
+    # The two operator switches options_svc keeps on disk (auto-close, the
+    # manual book's lifecycle), so they outlive a Redis flush.
+    "options-scanner/data/operator_toggles.json",
     # The units' EnvironmentFile -- MEMURAI_PASSWORD, ALPHAVANTAGE_API_KEY,
     # EDGAR_USER_AGENT, anything else read from the process environment. It is
     # loaded with NO leading dash, so a missing one does not degrade: the unit

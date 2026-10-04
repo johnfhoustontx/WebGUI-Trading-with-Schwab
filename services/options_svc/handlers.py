@@ -34,6 +34,9 @@ from services.options_svc import push_notify
 from services.options_svc import rate_trade
 # X (design 2026-09-22): the image card posted with each market report.
 from services.options_svc import report_card
+import os
+import json as _json
+from repo_paths import OPTIONS_TOGGLES as _OPTIONS_TOGGLES  # noqa: E402
 from shared import service_limits as _service_limits  # noqa: E402
 from shared import market_calendar as mc
 from shared import public_gamma
@@ -1541,33 +1544,75 @@ def publish_captured_performance(bus) -> None:
     bus.publish(EVENT_CAPTURED_PERF, {"version": version})
 
 
-def autoclose_enabled(bus) -> bool:
-    """Whether captured auto-close is enabled. Defaults **True** on a missing /
-    unreadable key — so only an EXPLICIT ``{"enabled": False}`` (from the Settings
-    toggle write-through) disables the cycle; a wiped Memurai resumes auto-close."""
+# The two operator switches, on disk as well as in Redis. Redis was their only
+# store, so a flush put each back to its default with nothing on screen to say
+# so: the Settings page reads its own file and went on showing the operator's
+# choice while the service acted on the default (audit AR-12).
+TOGGLES_PATH = _OPTIONS_TOGGLES
+
+
+def _saved_toggles() -> dict:
+    """What the file holds, ``{}`` for a missing or unusable one. Never raises."""
     try:
-        env = bus.cache_get(CACHE_AUTOCLOSE_ENABLED)
-        if env is None:
-            return True
-        return bool((env.payload or {}).get("enabled", True))
+        data = _json.loads(TOGGLES_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
     except Exception:  # noqa: BLE001
-        return True
+        return {}
+
+
+def _save_toggle(name: str, enabled: bool) -> None:
+    """Record one switch on disk, whole-file (temp + rename). Never raises: the
+    switch still takes effect through Redis if the disk refuses."""
+    try:
+        data = _saved_toggles()
+        data[name] = bool(enabled)
+        TOGGLES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = TOGGLES_PATH.with_name(f".{TOGGLES_PATH.name}.{os.getpid()}.tmp")
+        try:
+            tmp.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+            os.replace(tmp, TOGGLES_PATH)
+        finally:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+    except Exception:  # noqa: BLE001
+        log.exception("could not save the %s switch to %s", name, TOGGLES_PATH)
+
+
+def _toggle(bus, cache_key: str, name: str, default: bool) -> bool:
+    """One switch: Redis when it has an answer, else the saved file (and Redis
+    is given the answer back), else ``default``."""
+    try:
+        env = bus.cache_get(cache_key)
+    except Exception:  # noqa: BLE001
+        env = None
+    if env is not None:
+        return bool((env.payload or {}).get("enabled", default))
+    saved = _saved_toggles().get(name)
+    if not isinstance(saved, bool):
+        return default
+    try:
+        bus.cache_set(cache_key, {"enabled": saved})
+    except Exception:  # noqa: BLE001
+        pass
+    return saved
+
+
+def autoclose_enabled(bus) -> bool:
+    """Whether captured auto-close is enabled. Defaults **True** when neither
+    Redis nor the saved file has an answer — so only an EXPLICIT off (from the
+    Settings toggle write-through) disables the cycle."""
+    return _toggle(bus, CACHE_AUTOCLOSE_ENABLED, "autoclose", True)
 
 
 def manual_paper_lifecycle_enabled(bus) -> bool:
     """Whether the MANUAL paper account has opted into the captured-style
     break-even lifecycle (arm at +50% credit, ride under a break-even stop).
-    Defaults **False** on a missing / unreadable key — the INVERSE of
-    ``autoclose_enabled`` — so only an EXPLICIT ``{"enabled": True}`` (from the
-    Settings toggle write-through) opts in; a wiped Memurai reverts to today's
-    plain TAKE_PROFIT-at-+50%."""
-    try:
-        env = bus.cache_get(CACHE_MANUAL_PAPER_LIFECYCLE)
-        if env is None:
-            return False
-        return bool((env.payload or {}).get("enabled", False))
-    except Exception:  # noqa: BLE001
-        return False
+    Defaults **False** when neither Redis nor the saved file has an answer —
+    the INVERSE of ``autoclose_enabled`` — so only an EXPLICIT on (from the
+    Settings toggle write-through) opts in."""
+    return _toggle(bus, CACHE_MANUAL_PAPER_LIFECYCLE, "manual_paper_lifecycle", False)
 
 
 def _notify_captured_closes(bus, closed) -> None:
@@ -3467,6 +3512,7 @@ def _cmd_set_autoclose(bus, command):
     # Settings toggle write-through: gate the SCHEDULED captured-manage cycle.
     enabled = bool((command.args or {}).get("enabled", True))
     bus.cache_set(CACHE_AUTOCLOSE_ENABLED, {"enabled": enabled})
+    _save_toggle("autoclose", enabled)
 
 
 @_command("set_manual_paper_lifecycle")
@@ -3476,6 +3522,7 @@ def _cmd_set_manual_paper_lifecycle(bus, command):
     # on.
     enabled = bool((command.args or {}).get("enabled", False))
     bus.cache_set(CACHE_MANUAL_PAPER_LIFECYCLE, {"enabled": enabled})
+    _save_toggle("manual_paper_lifecycle", enabled)
 
 
 @_command("gamma_refresh")

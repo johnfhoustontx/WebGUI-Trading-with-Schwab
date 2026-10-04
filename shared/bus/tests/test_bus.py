@@ -348,3 +348,59 @@ def test_a_callback_that_raises_does_not_stop_the_drain():
 
     assert bus.drain_pending("cmd:strx2", "g", "c1", on_entry=boom) == 3
     assert bus._r.xpending("cmd:strx2", "g")["pending"] == 0
+
+
+# --- AR-12: a consumer survives its group being flushed away -------------------
+
+def test_a_consumer_recreates_its_group_after_a_flush():
+    """After FLUSHDB the stream and its group are gone. Every read then failed
+    with NOGROUP, forever, until the service was restarted."""
+    bus = Bus(fake=True)
+    bus.enqueue_command("cmd:flushx", {"type": "one", "args": {}})
+    assert [c.type for _, c in bus.consume_commands("cmd:flushx", "g", "c1")] == ["one"]
+    bus._r.flushdb()
+    bus.enqueue_command("cmd:flushx", {"type": "two", "args": {}})
+    got = bus.consume_commands("cmd:flushx", "g", "c1")
+    assert [c.type for _, c in got] == ["two"]
+
+
+def test_a_read_error_that_is_not_a_missing_group_still_raises():
+    bus = Bus(fake=True)
+
+    def boom(**kw):
+        raise RuntimeError("connection lost")
+
+    bus._ensure_group("cmd:errx", "g")
+    bus._r.xreadgroup = boom
+    import pytest
+    with pytest.raises(RuntimeError):
+        bus.consume_commands("cmd:errx", "g", "c1")
+
+
+def test_persistence_names_what_redis_is_configured_to_keep():
+    class R:
+        def __init__(self, save, aof):
+            self._save, self._aof = save, aof
+
+        def config_get(self, key):
+            return {"save": {"save": self._save}, "appendonly": {"appendonly": self._aof}}[key]
+
+    bus = Bus(fake=True)
+    bus._r = R("3600 1 300 100 60 10000", "no")
+    assert bus.persistence() == "snapshots"
+    bus._r = R("", "yes")
+    assert bus.persistence() == "append-only file"
+    bus._r = R("3600 1", "yes")
+    assert bus.persistence() == "append-only file"
+    bus._r = R("", "no")
+    assert bus.persistence() == "none"
+
+
+def test_persistence_is_unknown_when_redis_will_not_say():
+    class R:
+        def config_get(self, key):
+            raise RuntimeError("NOPERM")
+
+    bus = Bus(fake=True)
+    bus._r = R()
+    assert bus.persistence() == "unknown"

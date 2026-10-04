@@ -19,6 +19,15 @@ def _site_ideas_into_tmp(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _operator_toggles_into_tmp(monkeypatch, tmp_path):
+    """``set_autoclose`` / ``set_manual_paper_lifecycle`` save the switch to
+    ``options-scanner/data/operator_toggles.json``. A test that sends either
+    would otherwise write this checkout's real file - and the next test would
+    read the switch it left behind."""
+    monkeypatch.setattr(handlers, "TOGGLES_PATH", tmp_path / "operator_toggles.json")
+
+
+@pytest.fixture(autouse=True)
 def _no_live_claude(monkeypatch):
     """Neutralize real Claude-client resolution across the whole options_svc suite.
 

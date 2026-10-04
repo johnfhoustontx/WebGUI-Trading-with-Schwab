@@ -336,6 +336,23 @@ class Bus:
         except Exception:  # never let dead-lettering itself take down the loop.
             pass
 
+    def persistence(self) -> str:
+        """What Redis is configured to keep across a restart: ``snapshots``,
+        ``append-only file``, ``none``, or ``unknown`` when it will not say (a
+        credential without CONFIG, an unreachable server). Never raises.
+
+        Some operator and day state lives only in Redis (alert cooldowns, the
+        day's X post count), so "is it saved at all" belongs on the Status page
+        rather than in somebody's memory of how the box was set up."""
+        try:
+            aof = cast(dict, self._r.config_get("appendonly")).get("appendonly")
+            save = cast(dict, self._r.config_get("save")).get("save")
+        except Exception:  # noqa: BLE001
+            return "unknown"
+        if str(aof).lower() == "yes":
+            return "append-only file"
+        return "snapshots" if str(save or "").strip() else "none"
+
     def dead_letter_len(self, stream: str) -> int:
         """How many un-run commands ``stream``'s dead-letter list holds. 0 on
         any fault: a count for a status card must never raise."""
@@ -419,13 +436,28 @@ class Bus:
         are returned (the return shape is unchanged for callers).
         """
         self._ensure_group(stream, group)
-        resp = self._r.xreadgroup(
-            groupname=group,
-            consumername=consumer,
-            streams={stream: ">"},
-            count=count,
-            block=block_ms,
-        )
+
+        def _read():
+            return self._r.xreadgroup(
+                groupname=group,
+                consumername=consumer,
+                streams={stream: ">"},
+                count=count,
+                block=block_ms,
+            )
+
+        try:
+            resp = _read()
+        except Exception as exc:  # noqa: BLE001
+            # A flushed Redis has neither the stream nor its group, and this Bus
+            # remembers having made the group. Every read then failed with
+            # NOGROUP until the service was restarted (audit AR-12). Make it
+            # again and read once more; anything else is not ours to swallow.
+            if "NOGROUP" not in str(exc).upper():
+                raise
+            self._groups.discard((stream, group))
+            self._ensure_group(stream, group)
+            resp = _read()
         if not resp:
             return []
         out: list[tuple[str, Command]] = []

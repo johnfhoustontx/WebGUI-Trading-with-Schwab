@@ -1241,3 +1241,21 @@ def test_the_card_says_how_many_commands_were_never_run():
         "healthy · 1 command not run"
     for none in (0, None, True, -2, "3"):
         assert status.service_detail({"up": True, "dead_letters": none}) == "healthy"
+
+
+# --- AR-12: the Redis card says whether Redis keeps anything across a restart --
+
+def test_the_redis_card_names_its_persistence():
+    assert status.redis_detail(True, "snapshots") == "PING ok · saved to disk (snapshots)"
+    assert status.redis_detail(True, "append-only file") == \
+        "PING ok · saved to disk (append-only file)"
+
+
+def test_no_persistence_is_said_plainly():
+    assert status.redis_detail(True, "none") == \
+        "PING ok · NOT saved to disk: a restart empties it"
+
+
+def test_an_unknown_persistence_is_not_reported_as_fine():
+    assert status.redis_detail(True, "unknown") == "PING ok"
+    assert status.redis_detail(False, "snapshots") == "no PING response"
