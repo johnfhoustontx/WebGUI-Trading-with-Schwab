@@ -1387,20 +1387,39 @@ def _untrack(trade_id: str) -> dict:
 # TRACK / UNTRACK REST ENDPOINTS (Task 12)
 #############################################
 
-@app.post("/track")
+@app.post("/track", dependencies=[Depends(require_account_secret)])
 def track(body: dict):
-    """Begin streaming-tracking an OptionsScanner paper trade.
+    """Begin streaming-tracking a paper trade the Ledger holds OPEN.
 
-    Returns HTTP 200 even on resolution failure (with status="error") so a
+    The caller NAMES the trade (``trade_id``); what is tracked is the Ledger's
+    own row. Until 2026-10-04 this route took any caller on the loopback or the
+    tailnet and tracked whatever body it was sent, so a caller could replace a
+    real trade's strikes (false target and stop events in the analytics store)
+    or subscribe trades that do not exist (audit SE-100). It now needs the
+    shared secret, and an id that is not open in the Ledger is refused.
+
+    Returns HTTP 200 even on a failure to resolve (with status="error") so a
     transient chain hiccup doesn't break the caller — reconcile retries later.
-    ``status`` is ``ok``, ``skipped`` (the tracker does not follow this trade) or
-    ``error``.
+    ``status`` is ``ok``, ``skipped`` (the tracker does not follow this trade),
+    ``refused`` (not an open Ledger trade, or the Ledger could not be read) or
+    ``error``. Nothing is lost on a refusal: the 30-second reconcile tracks
+    every open Ledger trade on its own.
     """
-    res = _track(body)
+    trade_id = body.get("trade_id") if isinstance(body, dict) else None
+    if not trade_id:
+        return {"status": "error", "detail": "trade_id required"}
+    open_trades = _read_open_trades()
+    if open_trades is None:
+        return {"status": "refused", "detail": "the paper ledger could not be read"}
+    row = open_trades.get(trade_id)
+    if row is None:
+        return {"status": "refused",
+                "detail": "not an open trade in the paper ledger"}
+    res = _track(dict(row))
     return {k: res[k] for k in ("status", "detail", "legs") if k in res}
 
 
-@app.post("/untrack")
+@app.post("/untrack", dependencies=[Depends(require_account_secret)])
 def untrack(body: dict):
     """Stop tracking a trade. Body: {"trade_id": ...}."""
     trade_id = body.get("trade_id")

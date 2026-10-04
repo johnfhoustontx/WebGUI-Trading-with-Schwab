@@ -325,9 +325,11 @@ def test_a_closed_trade_is_forgotten(proxy):
     assert schwab_proxy._track_attempts.last_key("t1") is None
 
 
-def test_a_trade_the_rest_call_started_tracking_is_forgotten(proxy):
+def test_a_trade_the_rest_call_started_tracking_is_forgotten(proxy, monkeypatch):
     proxy.reply = {"status_code": 502, "data": None, "error": "bad gateway"}
     open_trades = {"t1": row("t1", "PCS")}
+    # The REST route tracks the LEDGER'S row for the id it is given (SE-100).
+    monkeypatch.setattr(schwab_proxy, "_read_open_trades", lambda: open_trades)
     cycles(open_trades, 4)                            # backed off
     proxy.reply = OK
     assert schwab_proxy.track(dict(open_trades["t1"]))["status"] == "ok"
@@ -350,7 +352,10 @@ def test_one_bad_trade_does_not_hold_back_a_good_one(proxy):
     assert len(proxy.calls) == 1
 
 
-def test_the_rest_endpoint_answers_skipped_and_says_so_once(proxy, caplog):
+def test_the_rest_endpoint_answers_skipped_and_says_so_once(proxy, caplog,
+                                                            monkeypatch):
+    monkeypatch.setattr(schwab_proxy, "_read_open_trades",
+                        lambda: {PROD_CONDOR["trade_id"]: dict(PROD_CONDOR)})
     with debug(caplog):
         res = schwab_proxy.track(dict(PROD_CONDOR))
     assert res["status"] == "skipped" and proxy.calls == []

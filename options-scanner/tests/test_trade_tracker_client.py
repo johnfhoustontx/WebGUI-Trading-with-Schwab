@@ -13,7 +13,7 @@ def _trade():
 def test_track_payload_includes_derived_thresholds():
     captured = {}
 
-    def fake_post(url, json, timeout):
+    def fake_post(url, json, timeout, headers=None):
         captured["url"] = url
         captured["json"] = json
         return MagicMock(status_code=200)
@@ -47,7 +47,7 @@ def test_track_includes_ic_call_legs():
     tr["call_short"] = 5300
     tr["call_long"] = 5350
     with patch("trade_tracker_client.requests.post",
-               side_effect=lambda url, json, timeout: captured.update(json=json) or MagicMock(status_code=200)):
+               side_effect=lambda url, json, timeout, headers=None: captured.update(json=json) or MagicMock(status_code=200)):
         ttc.track(tr)
     assert captured["json"]["call_short"] == 5300
     assert captured["json"]["call_long"] == 5350
