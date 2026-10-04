@@ -33,6 +33,10 @@ DEFAULTS = {
     # Commands a service could not run are kept on a list for a person to read.
     # Only the newest this-many are kept.
     "dead_letters": {"keep": 200},
+    # Threads in each service's shared pool: scheduler branches and anything
+    # else handed to the event loop's default executor. Each command queue has
+    # a thread of its own outside this pool.
+    "pool": {"workers": 16},
 }
 MAX_SEC = 7 * 24 * 3600        # past a week a "limit" is a typo
 
@@ -58,6 +62,15 @@ def dead_letter_keep() -> int:
     raw = sec.get("keep") if isinstance(sec, dict) else None
     if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 100000:
         return DEFAULTS["dead_letters"]["keep"]
+    return raw
+
+
+def pool_workers() -> int:
+    """Threads in a service's shared pool (2 to 256), else the shipped value."""
+    sec = load().get("pool")
+    raw = sec.get("workers") if isinstance(sec, dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 2 <= raw <= 256:
+        return DEFAULTS["pool"]["workers"]
     return raw
 
 

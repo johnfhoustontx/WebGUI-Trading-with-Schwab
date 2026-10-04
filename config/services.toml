@@ -32,6 +32,14 @@ replay_max_sec = 900
 # count shows on the service's System Status card.
 keep = 200
 
+[pool]
+# Threads each service keeps for its scheduled work (scans, the one-minute
+# collection, refreshes). Each command queue has a thread of its own outside
+# this pool, so a queue is read whatever the pool is doing. More threads let
+# more scheduled jobs overlap; they do not raise the Schwab call rate, which
+# the proxy limits. 2 to 256.
+workers = 16
+
 [health]
 # Each service runs a scheduler loop that goes round every few seconds to two
 # minutes. If the loop has not gone round for this many seconds, the service

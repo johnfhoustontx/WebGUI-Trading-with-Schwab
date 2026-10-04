@@ -811,3 +811,104 @@ def test_a_failing_dropped_callback_never_stops_the_consumer():
     bus.enqueue_command("cmd:dropbadx", {"type": "marker", "args": {}})
     _run_until(bus, app, lambda: seen)
     assert seen == ["marker"]
+
+
+# --- a queue is read whatever the shared pool is doing (audit PF-03) ----------
+# Every stream's blocking read, every scheduler branch and every command handler
+# shared the event loop's one default thread pool. With that pool full of long
+# jobs no stream was read at all: a click waited behind a scan it had nothing
+# to do with.
+
+def _fill_the_shared_pool(release, started):
+    """A scheduler that parks more blocking jobs on the default pool than any
+    pool size in use here, then idles."""
+    import asyncio
+
+    async def scheduler(bus):
+        loop = asyncio.get_running_loop()
+        for _ in range(80):
+            loop.run_in_executor(None, release.wait, 10.0)
+        started.set()
+        while True:
+            _heartbeat.tick()
+            await asyncio.sleep(0.05)
+
+    return scheduler
+
+
+def test_a_command_runs_while_the_shared_pool_is_full_of_long_jobs(schedulers_enabled):
+    import threading
+    bus = Bus(fake=True)
+    release, started, seen = threading.Event(), threading.Event(), []
+    app = make_app("poolx", scheduler=_fill_the_shared_pool(release, started),
+                   command_handler=lambda b, c: seen.append(c.type),
+                   bus=bus, poll_block_ms=50)
+    with TestClient(app):
+        try:
+            assert started.wait(3.0)
+            bus.enqueue_command("cmd:poolx", {"type": "paper_create", "args": {}})
+            assert _wait_for(lambda: seen, timeout=2.0), \
+                "the command waited behind jobs it has nothing to do with"
+        finally:
+            release.set()       # before shutdown, which waits for the pool
+    assert seen == ["paper_create"]
+
+
+def test_an_extra_stream_is_read_while_the_shared_pool_is_full(schedulers_enabled):
+    import threading
+    bus = Bus(fake=True)
+    release, started, seen = threading.Event(), threading.Event(), []
+    app = make_app("poolextrax", scheduler=_fill_the_shared_pool(release, started),
+                   extra_consumers=(("cmd:poolextrax_public",
+                                     lambda b, c: seen.append(c.type)),),
+                   bus=bus, poll_block_ms=50)
+    with TestClient(app):
+        try:
+            assert started.wait(3.0)
+            bus.enqueue_command("cmd:poolextrax_public", {"type": "scan", "args": {}})
+            assert _wait_for(lambda: seen, timeout=2.0)
+        finally:
+            release.set()       # before shutdown, which waits for the pool
+
+
+def test_each_stream_has_a_thread_of_its_own_named_for_it():
+    import threading
+    bus = Bus(fake=True)
+    names = {}
+    app = make_app(
+        "threadx", command_handler=lambda b, c: names.setdefault(
+            "domain", threading.current_thread().name),
+        extra_consumers=(("cmd:threadx_public", lambda b, c: names.setdefault(
+            "extra", threading.current_thread().name)),),
+        bus=bus, poll_block_ms=50)
+    bus.enqueue_command("cmd:threadx", {"type": "a", "args": {}})
+    bus.enqueue_command("cmd:threadx_public", {"type": "b", "args": {}})
+    with TestClient(app):
+        assert _wait_for(lambda: len(names) == 2)
+    assert names["domain"].startswith("cmd:threadx")
+    assert names["extra"].startswith("cmd:threadx_public")
+    assert names["domain"] != names["extra"]
+
+
+def test_the_shared_pool_is_the_configured_size(schedulers_enabled, monkeypatch):
+    import asyncio
+    import threading
+    from shared import service_limits
+    monkeypatch.setattr(service_limits, "pool_workers", lambda: 7)
+    seen, done = {}, threading.Event()
+
+    async def scheduler(bus):
+        loop = asyncio.get_running_loop()
+        seen["workers"] = loop._default_executor._max_workers
+        seen["thread"] = await loop.run_in_executor(
+            None, lambda: threading.current_thread().name)
+        done.set()
+        while True:
+            _heartbeat.tick()
+            await asyncio.sleep(0.05)
+
+    app = make_app("sizex", scheduler=scheduler, bus=Bus(fake=True))
+    with TestClient(app):
+        assert done.wait(3.0)
+    assert seen["workers"] == 7
+    assert seen["thread"].startswith("sizex-work")

@@ -1552,6 +1552,14 @@ _COMMANDS = ConfigFile(
                   "queue keeps the newest this-many.",
                   kind="int", unit="commands", min=1, max=100000, step=10),
         )),
+        Section("Threads", "", (
+            Field("pool.workers", "Threads for scheduled work",
+                  "How many scheduled jobs (scans, the one-minute collection, "
+                  "refreshes) one service can run at the same moment. Each "
+                  "command queue has its own thread outside this number, so a "
+                  "click is never waiting for one of these.",
+                  kind="int", unit="threads", min=2, max=256, step=1),
+        )),
         Section("When a service is unhealthy", "", (
             Field("health.tick_stale_sec", "Longest a scheduler may be silent",
                   "A service whose scheduler has not run for this long shows as "

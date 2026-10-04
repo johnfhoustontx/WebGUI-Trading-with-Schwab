@@ -16,9 +16,14 @@ asyncio tasks:
   the loop.
 
 Both tasks are cancelled cleanly on shutdown. The blocking
-``bus.consume_commands`` call runs in a thread-pool executor so it never
+``bus.consume_commands`` call runs on the stream's own thread so it never
 blocks the event loop; ``asyncio.CancelledError`` still breaks the loop, so a
-pending executor call delays shutdown by at most ``poll_block_ms``.
+pending read delays shutdown by at most ``poll_block_ms``.
+
+**Threads.** Each command stream has ONE thread of its own (its blocking read
+and its handler). Everything else that asks the loop for an executor - the
+scheduler's branches - shares a bounded pool of ``[pool] workers`` threads
+(config/services.toml). A full pool therefore cannot stop a queue being read.
 
 **Persistent logging (R3a).** On app creation ``make_app`` bootstraps a
 ``RotatingFileHandler`` (5 MB × 5 backups) at ``services/<domain>_svc/logs/
@@ -41,6 +46,7 @@ import os
 import pathlib
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from logging.handlers import RotatingFileHandler
@@ -299,7 +305,7 @@ async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
     Each iteration is wrapped so a bad command (or a transient bus error) can
     never kill the loop. Both the blocking ``consume_commands`` AND each
     (synchronous, potentially multi-second — a ``sim_fetch`` is ~19 s) command
-    handler run in the default thread-pool executor so a slow handler no longer
+    handler run off the event loop so a slow handler no longer
     stalls the event loop, ``/health``, or the scheduler task. Commands within a
     batch still run one-at-a-time (in read order) — no unbounded parallelism.
 
@@ -310,13 +316,30 @@ async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
 
     One loop per stream, so each stream is serial on its own and independent of
     every other: a slow handler on one never delays a command on another.
+
+    And one THREAD per stream, outside the shared pool. The blocking read and
+    the handler both run on it. They used to borrow the event loop's default
+    pool, which every scheduler branch also uses: with that pool full of long
+    jobs no stream was read at all (audit PF-03).
     """
     loop = asyncio.get_event_loop()
+    own = ThreadPoolExecutor(max_workers=1, thread_name_prefix=stream)
+    try:
+        await _consume_on(own, loop, stream, group, bus, command_handler,
+                          poll_block_ms, late_ok, on_dropped)
+    finally:
+        # Not waited for: a handler in mid-run finishes on its own thread.
+        own.shutdown(wait=False, cancel_futures=True)
+
+
+async def _consume_on(own, loop, stream, group, bus, command_handler,
+                      poll_block_ms, late_ok, on_dropped) -> None:
+    """:func:`_consume_stream`'s loop, on the stream's own thread ``own``."""
 
     # Recover a prior crash's un-acked PEL (off the event loop; never raises).
     try:
         moved = await loop.run_in_executor(
-            None, lambda: bus.drain_pending(
+            own, lambda: bus.drain_pending(
                 stream, group, "c1",
                 on_entry=lambda fields: _tell_dropped(
                     on_dropped, bus, _decode_stranded(fields), "restart"))
@@ -335,7 +358,7 @@ async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
     while True:
         try:
             batch = await loop.run_in_executor(
-                None,
+                own,
                 lambda: bus.consume_commands(
                     stream, group=group, consumer="c1", block_ms=poll_block_ms
                 ),
@@ -354,7 +377,7 @@ async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
                         _tell_dropped(on_dropped, bus, command, "expired")
                         continue
                     result = await loop.run_in_executor(
-                        None, command_handler, bus, command
+                        own, command_handler, bus, command
                     )
                     if inspect.isawaitable(result):
                         await result
@@ -448,6 +471,12 @@ def make_app(
         b = the_bus or Bus()
         app.state.bus = b
         app.state.scheduler_health = health_state
+        # The shared pool, bounded and named: scheduler branches and anything
+        # else that asks the loop for "an executor". The command queues are not
+        # in it (see _consume_stream).
+        asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(
+            max_workers=_service_limits.pool_workers(),
+            thread_name_prefix=f"{domain}-work"))
         tasks: list[asyncio.Task] = []
         if run_scheduler:
             tasks.append(

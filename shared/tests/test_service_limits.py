@@ -51,3 +51,20 @@ def test_older_than_judges_only_a_known_age():
     assert cl.older_than(_cmd(1000), 900) is True
     assert cl.older_than(_cmd(100), 900) is False
     assert cl.older_than(_cmd(ts=None), 900) is False
+
+
+# ---- the size of each service's shared thread pool (audit PF-03) -------------
+
+def test_the_shipped_pool_size():
+    assert cl.pool_workers() == 16
+
+
+@pytest.mark.parametrize("bad", [0, 1, -3, True, "16", 2.5, float("nan"), None, 5000])
+def test_an_unusable_pool_size_reads_as_the_shipped_one(monkeypatch, bad):
+    monkeypatch.setattr(cl, "load", lambda: {"pool": {"workers": bad}})
+    assert cl.pool_workers() == 16
+
+
+def test_a_usable_pool_size_is_used(monkeypatch):
+    monkeypatch.setattr(cl, "load", lambda: {"pool": {"workers": 24}})
+    assert cl.pool_workers() == 24
