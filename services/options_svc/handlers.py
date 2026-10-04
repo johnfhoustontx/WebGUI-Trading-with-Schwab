@@ -32,6 +32,8 @@ from services.options_svc import push_notify
 # Rate my trade (design 2026-09-16): the Calculator's legs graded by the
 # Strategy Finder's own scorer.
 from services.options_svc import rate_trade
+# The rescue menu's own vocabulary: what a candidate IS, for rescue_apply.
+from services.options_svc import rescue
 # X (design 2026-09-22): the image card posted with each market report.
 from services.options_svc import report_card
 import os
@@ -2991,7 +2993,14 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
          OPEN paper position (None / not found — covers captured-signal ids and
          bogus ids, which never live in ``paper_account_db``) we cache an advisory
          carrying an error note and return WITHOUT mutating anything.
-      2. Reprice-and-dispatch via ``paper_adjust.apply_adjustment`` with a live
+      2. Find the SERVICE's own candidate. ``candidate`` is what the page
+         echoed; only its identity is read (the action and the contracts it
+         trades, ``rescue.candidate_key``). The candidate applied is the one on
+         the menu this service published for the position
+         (``cache:options:rescue:<id>``). No menu, or no row with that
+         identity, applies nothing and says so: until 2026-10-04 the echo was
+         applied as sent, strikes, cash and max loss included (audit AR-08).
+      2b. Reprice-and-dispatch via ``paper_adjust.apply_adjustment`` with a live
          leg pricer (``compute._make_leg_pricer``) — its built-in stale-price
          guard aborts (``stale``) without mutating when prices have drifted.
       3. On a stale/failed apply, re-cache the (unchanged) advisory with the apply
@@ -3019,10 +3028,18 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
             bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
             return
 
-        symbol = pos.get("symbol")
-        price_leg = compute._make_leg_pricer(symbol, max_age=0)
-        result = _paper_adjust().apply_adjustment(
-            None, pos, candidate, price_leg=price_leg)
+        own = _own_rescue_candidate(bus, key, position_id, candidate)
+        if own is None:
+            result = {"ok": False, "stale": True, "position_id": position_id,
+                      "action": candidate.get("action")
+                      if isinstance(candidate, dict) else None,
+                      "error": "that option is no longer on this position's "
+                               "rescue menu — review the refreshed options"}
+        else:
+            symbol = pos.get("symbol")
+            price_leg = compute._make_leg_pricer(symbol, max_age=0)
+            result = _paper_adjust().apply_adjustment(
+                None, pos, own, price_leg=price_leg)
 
         ok = bool(result.get("ok"))
         if ok:
@@ -3051,6 +3068,17 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
         }
         version = bus.cache_set(key, adv, ttl=RESCUE_BOARD_TTL_SEC)
         bus.publish(EVENT_RESCUE, {"version": version, "position_id": position_id})
+
+
+def _own_rescue_candidate(bus, key, position_id, echoed):
+    """The candidate this service published for ``position_id`` that ``echoed``
+    names, or None. Read from the service's own menu; the echo supplies an
+    identity and nothing else."""
+    env = bus.cache_get(key)
+    menu = env.payload if env is not None else None
+    if not isinstance(menu, dict) or str(menu.get("position_id")) != str(position_id):
+        return None
+    return rescue.find_candidate(menu, echoed)
 
 
 def _publish_income_open(bus, result: dict) -> None:

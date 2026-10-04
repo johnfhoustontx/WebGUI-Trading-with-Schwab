@@ -9,9 +9,19 @@ fakeredis ``Bus(fake=True)`` (same style as ``test_handlers.py``).
 """
 import types
 
+import pytest
+
 from shared.bus import Bus
 from shared.contracts.envelope import Command
 from services.options_svc import handlers
+
+
+def _board(bus, position_id, *candidates):
+    """Publish the rescue menu the service showed for ``position_id``: the apply
+    takes its candidate from here, never from the page's echo (audit AR-08)."""
+    bus.cache_set(f"{handlers.CACHE_RESCUE}:{position_id}",
+                  {"position_id": position_id, "symbol": "SPY", "strategy": "PCS",
+                   "candidates": [dict(c) for c in candidates]})
 
 
 def _stub_paper_adjust(monkeypatch, apply_fn):
@@ -223,6 +233,7 @@ def test_rescue_apply_success_refreshes(monkeypatch):
                        lambda db, pos, cand, **kw: {"ok": True, "action": "convert_ic",
                                                     "position_id": 5})
 
+    _board(bus, 5, {"action": "convert_ic"})
     handlers.run_rescue_apply(bus, 5, {"action": "convert_ic"})
 
     assert calls["refresh"] == 1
@@ -251,6 +262,7 @@ def test_rescue_apply_stale_surfaces(monkeypatch):
                                                     "error": "prices moved",
                                                     "position_id": 5})
 
+    _board(bus, 5, {"action": "narrow"})
     handlers.run_rescue_apply(bus, 5, {"action": "narrow"})
 
     assert calls["refresh"] == 0  # no mutation/refresh on a stale abort
@@ -299,6 +311,7 @@ def test_rescue_apply_closed_position_minimal_advisory(monkeypatch):
                        lambda db, pos, cand, **kw: {"ok": True, "action": "close",
                                                     "position_id": 5, "realized": 42.0})
 
+    _board(bus, 5, {"action": "close"})
     handlers.run_rescue_apply(bus, 5, {"action": "close"})
 
     env = bus.cache_get(f"{handlers.CACHE_RESCUE}:5")
@@ -449,5 +462,93 @@ def test_rescue_apply_reprices_from_a_chain_fetched_now(monkeypatch):
     _stub_paper_adjust(monkeypatch,
                        lambda db, pos, cand, **kw: {"ok": True, "action": "convert_ic",
                                                     "position_id": 5})
+    _board(bus, 5, {"action": "convert_ic"})
     handlers.run_rescue_apply(bus, 5, {"action": "convert_ic"})
     assert seen["max_age"] == 0
+
+
+# ── the apply uses the SERVICE's candidate, found by what it is (audit AR-08) ─
+# ``rescue_apply`` applied whatever candidate the page echoed back: its strikes,
+# its legs, its net cash and its max loss, as sent.
+
+_LEGS = [{"side": "BUY", "right": "PUT", "strike": 495.0, "expiry": "2026-10-09",
+          "qty": 1, "price": 2.40},
+         {"side": "SELL", "right": "PUT", "strike": 490.0, "expiry": "2026-10-09",
+          "qty": 1, "price": 1.10}]
+_OURS = {"action": "roll_down", "label": "Roll down", "net_cash": -131.3,
+         "commission": 1.3, "new_max_loss": 370.0, "new_width": 5.0,
+         "new_expiry": "2026-10-09", "est_fill_legs": _LEGS}
+
+
+def _apply_env(monkeypatch, bus, seen):
+    monkeypatch.setattr(handlers.compute, "_load_position",
+                        lambda pid: {"position_id": pid, "symbol": "SPY",
+                                     "status": "OPEN"})
+    monkeypatch.setattr(handlers.compute, "_make_leg_pricer",
+                        lambda sym, max_age=None: (lambda *a, **k: 1.0))
+    monkeypatch.setattr(handlers.compute, "compute_rescue",
+                        lambda pid: dict(_SAMPLE_ADVISORY, position_id=pid))
+    monkeypatch.setattr(handlers, "refresh_paper_account",
+                        lambda b: seen.__setitem__("refresh", seen.get("refresh", 0) + 1))
+
+    def apply(db, pos, cand, **kw):
+        seen["candidate"] = cand
+        return {"ok": True, "action": cand.get("action"), "position_id": 5}
+
+    _stub_paper_adjust(monkeypatch, apply)
+
+
+def test_the_candidate_applied_is_the_services_own_not_the_echo(monkeypatch):
+    bus, seen = Bus(fake=True), {}
+    _apply_env(monkeypatch, bus, seen)
+    _board(bus, 5, {"action": "close", "label": "Close now"}, _OURS)
+    # The same action and contracts, with economics the service never computed.
+    echo = dict(_OURS, net_cash=9999.0, new_max_loss=1.0, commission=0.0,
+                est_fill_legs=[dict(leg, price=0.01) for leg in _LEGS])
+    handlers.run_rescue_apply(bus, 5, echo)
+    assert seen["candidate"]["net_cash"] == -131.3
+    assert seen["candidate"]["new_max_loss"] == 370.0
+    assert [leg["price"] for leg in seen["candidate"]["est_fill_legs"]] == [2.40, 1.10]
+
+
+def test_an_echo_that_is_not_on_the_menu_is_not_applied(monkeypatch):
+    bus, seen = Bus(fake=True), {}
+    _apply_env(monkeypatch, bus, seen)
+    _board(bus, 5, _OURS)
+    # Same action, another strike: not a trade the service offered.
+    other = dict(_OURS, est_fill_legs=[dict(_LEGS[0]), dict(_LEGS[1], strike=480.0)])
+    handlers.run_rescue_apply(bus, 5, other)
+    assert "candidate" not in seen and "refresh" not in seen
+    result = bus.cache_get(f"{handlers.CACHE_RESCUE}:5").payload["apply_result"]
+    assert result["ok"] is False and result["stale"] is True
+    assert "no longer" in result["error"]
+
+
+def test_with_no_menu_published_nothing_is_applied(monkeypatch):
+    # Expired, or never opened: there is nothing of the service's to apply.
+    bus, seen = Bus(fake=True), {}
+    _apply_env(monkeypatch, bus, seen)
+    handlers.run_rescue_apply(bus, 5, dict(_OURS))
+    assert "candidate" not in seen
+    result = bus.cache_get(f"{handlers.CACHE_RESCUE}:5").payload["apply_result"]
+    assert result["ok"] is False and result["stale"] is True
+
+
+def test_a_menu_for_another_position_is_not_used(monkeypatch):
+    bus, seen = Bus(fake=True), {}
+    _apply_env(monkeypatch, bus, seen)
+    bus.cache_set(f"{handlers.CACHE_RESCUE}:5",
+                  {"position_id": 6, "candidates": [dict(_OURS)]})
+    handlers.run_rescue_apply(bus, 5, dict(_OURS))
+    assert "candidate" not in seen
+
+
+@pytest.mark.parametrize("junk", [None, "close", 7, [], {"action": None}])
+def test_an_echo_that_is_not_a_candidate_is_refused_not_raised(monkeypatch, junk):
+    bus, seen = Bus(fake=True), {}
+    _apply_env(monkeypatch, bus, seen)
+    _board(bus, 5, _OURS)
+    handlers.run_rescue_apply(bus, 5, junk)
+    assert "candidate" not in seen
+    assert bus.cache_get(
+        f"{handlers.CACHE_RESCUE}:5").payload["apply_result"]["ok"] is False

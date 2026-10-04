@@ -8,6 +8,7 @@ See docs/plans/2026-06-21-rescue-tested-trades-design.md.
 """
 from __future__ import annotations
 import datetime as _dt
+import math
 
 from shared import structures as _structures
 from shared import trade_mgmt as _trade_mgmt
@@ -1562,3 +1563,55 @@ def rescue_candidates(position, mark, price_leg, gex=None, regime=None,
         out.append(c)
     out.sort(key=lambda x: x["score"], reverse=True)
     return out
+
+
+# ── what a candidate IS, apart from its prices (audit AR-08) ─────────────────
+
+def _leg_identity(leg):
+    """``(side, right, strike, expiry, qty)`` for one fill leg, or None when it
+    is not a usable leg."""
+    if not isinstance(leg, dict):
+        return None
+    strike = leg.get("strike")
+    if isinstance(strike, bool) or not isinstance(strike, (int, float)) \
+            or not math.isfinite(strike):
+        return None
+    qty = leg.get("qty")
+    if isinstance(qty, bool) or not isinstance(qty, int):
+        qty = 0
+    return (str(leg.get("side") or ""), str(leg.get("right") or ""),
+            float(strike), str(leg.get("expiry") or ""), qty)
+
+
+def candidate_key(candidate):
+    """What ``candidate`` IS: its action and the contracts it trades, in any
+    order. Prices, cash and risk are not part of it. None for anything that is
+    not a candidate.
+
+    ``rescue_apply`` finds the service's own candidate with it: the page names
+    a row of the menu, and the row applied is the one the service built."""
+    if not isinstance(candidate, dict):
+        return None
+    action = candidate.get("action")
+    if not isinstance(action, str) or not action:
+        return None
+    legs = candidate.get("est_fill_legs")
+    if legs is None:
+        legs = []
+    if not isinstance(legs, list):
+        return None
+    ids = [_leg_identity(leg) for leg in legs]
+    if any(i is None for i in ids):
+        return None
+    return (action, tuple(sorted(ids)))
+
+
+def find_candidate(advisory, wanted):
+    """The advisory's OWN candidate dict with ``wanted``'s identity, or None:
+    no advisory, nothing matching, or (it should never happen) more than one."""
+    key = candidate_key(wanted)
+    rows = advisory.get("candidates") if isinstance(advisory, dict) else None
+    if key is None or not isinstance(rows, list):
+        return None
+    found = [c for c in rows if candidate_key(c) == key]
+    return found[0] if len(found) == 1 else None
