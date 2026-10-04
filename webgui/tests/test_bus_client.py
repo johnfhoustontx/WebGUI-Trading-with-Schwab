@@ -730,3 +730,122 @@ def test_each_public_tools_request_writes_one_command_to_one_place(fn, stream, b
     builds = [n for n in ast.walk(node)
               if any(ast.unparse(t) == "command" for t in _targets(n))]
     assert [ast.unparse(b.value) for b in builds] == [builder]
+
+
+# --- one parse per (view, version), shared by every tab (audit PF-07) ---------
+# Each browser tab fetched and parsed its own copy of the large views. About
+# 1.4 MB of JSON becomes about 4.3 MB of objects, and fifty visitors on one
+# public page held fifty copies.
+
+def _payload_reads(view):
+    """Count the full reads of ``view`` from here on."""
+    b = bus_client.bus()
+    calls, real = [], b.cache_get
+
+    def counting(key):
+        if key == f"cache:{view}":
+            calls.append(key)
+        return real(key)
+
+    b.cache_get = counting
+    return calls
+
+
+def test_two_readers_of_one_version_share_one_parse():
+    bus_client.bus().cache_set("cache:options:gamma", {"rows": [1, 2, 3]})
+    calls = _payload_reads("options:gamma")
+    first = bus_client.read_shared("options:gamma")
+    second = bus_client.read_shared("options:gamma")
+    assert first == {"rows": [1, 2, 3]}
+    assert second is first                 # the same object, not an equal copy
+    assert len(calls) == 1
+
+
+def test_a_new_version_is_read_again():
+    b = bus_client.bus()
+    b.cache_set("cache:options:gamma", {"n": 1})
+    first = bus_client.read_shared("options:gamma")
+    b.cache_set("cache:options:gamma", {"n": 2})
+    second = bus_client.read_shared("options:gamma")
+    assert (first, second) == ({"n": 1}, {"n": 2})
+    # The first tab still holds what it painted; nothing was changed under it.
+    assert first == {"n": 1}
+
+
+def test_an_absent_view_is_none_and_is_not_remembered():
+    assert bus_client.read_shared("options:nothing") is None
+    bus_client.bus().cache_set("cache:options:nothing", {"n": 1})
+    assert bus_client.read_shared("options:nothing") == {"n": 1}
+
+
+def test_a_version_counter_ahead_of_its_payload_never_pins_the_old_one():
+    # cache_set raises the counter first and writes the payload after, so a
+    # reader can see version N beside payload N-1.
+    b = bus_client.bus()
+    b.cache_set("cache:options:gamma", {"n": 1})
+    b._r.incr("cache:options:gamma:ver")           # the counter moved; payload has not
+    assert bus_client.read_shared("options:gamma") == {"n": 1}
+    env = b.cache_get("cache:options:gamma")
+    b._r.set("cache:options:gamma", env.model_copy(
+        update={"version": 2, "payload": {"n": 2}}).to_json())   # now it lands
+    assert bus_client.read_shared("options:gamma") == {"n": 2}
+
+
+def test_the_shared_cache_holds_a_bounded_number_of_views():
+    b = bus_client.bus()
+    for i in range(bus_client.SHARED_MAX_VIEWS + 5):
+        b.cache_set(f"cache:options:gamma_pub:S{i}", {"i": i})
+        bus_client.read_shared(f"options:gamma_pub:S{i}")
+    assert bus_client.shared_size() == bus_client.SHARED_MAX_VIEWS
+    # The newest are kept; the first ones read were dropped and read again.
+    calls = _payload_reads("options:gamma_pub:S0")
+    assert bus_client.read_shared("options:gamma_pub:S0") == {"i": 0}
+    assert len(calls) == 1
+
+
+def test_readers_arriving_together_at_a_new_version_parse_it_once():
+    import threading
+    b = bus_client.bus()
+    b.cache_set("cache:options:gamma", {"n": 1})
+    real, calls, gate = b.cache_get, [], threading.Event()
+
+    def slow(key):
+        if key == "cache:options:gamma":
+            calls.append(key)
+            gate.wait(2.0)
+        return real(key)
+
+    b.cache_get = slow
+    out = []
+    threads = [threading.Thread(target=lambda: out.append(
+        bus_client.read_shared("options:gamma"))) for _ in range(8)]
+    for t in threads:
+        t.start()
+    time.sleep(0.2)
+    gate.set()
+    for t in threads:
+        t.join(5.0)
+    assert len(out) == 8 and all(o is out[0] for o in out)
+    assert len(calls) == 1
+
+
+def test_resetting_the_bus_drops_the_shared_copies():
+    bus_client.bus().cache_set("cache:options:gamma", {"n": 1})
+    bus_client.read_shared("options:gamma")
+    assert bus_client.shared_size() == 1
+    bus_client.reset()
+    assert bus_client.shared_size() == 0
+
+
+def test_the_gamma_page_reads_its_large_views_through_the_shared_copy():
+    """The three views the audit measured: the snapshot, the visible view's
+    history and the net-premium series. Source-level, because the reads sit
+    inside the page's render closure."""
+    import inspect
+    from pages.options import gamma
+    src = inspect.getsource(gamma)
+    assert "run.io_bound(bus_client.read_shared, _sv())" in src
+    assert "run.io_bound(bus_client.read_shared, history_key(view, _hsym()))" in src
+    assert "run.io_bound(bus_client.read_shared, _snap_view)" in src
+    assert src.count('bus_client.read_shared, "options:net_premium")') == 2
+    assert "run.io_bound(bus_client.read, " not in src

@@ -3031,7 +3031,7 @@ def render(symbol: str | None = None, view: str | None = None,
         seen["gamma"] = version
         state["fetching"] = True
         try:
-            snap = await run.io_bound(bus_client.read, _sv()) or None
+            snap = await run.io_bound(bus_client.read_shared, _sv()) or None
         finally:
             state["fetching"] = False
         # Only adopt a snapshot for the symbol currently selected — a foreign
@@ -3060,7 +3060,7 @@ def render(symbol: str | None = None, view: str | None = None,
             return
         state["hist_fetching"] = True
         try:
-            payload = await run.io_bound(bus_client.read, history_key(view, _hsym()))
+            payload = await run.io_bound(bus_client.read_shared, history_key(view, _hsym()))
         finally:
             state["hist_fetching"] = False
         state.setdefault("hist", {})[view] = history_rows(
@@ -3077,7 +3077,7 @@ def render(symbol: str | None = None, view: str | None = None,
         seen["netprem"] = version
         state["np_fetching"] = True
         try:
-            state["netprem"] = await run.io_bound(bus_client.read, "options:net_premium")
+            state["netprem"] = await run.io_bound(bus_client.read_shared, "options:net_premium")
         finally:
             state["np_fetching"] = False
         if view_toggle.value == "Net Prem":
@@ -3599,7 +3599,7 @@ def render(symbol: str | None = None, view: str | None = None,
         if _reads_snap and not state.get("fetching"):
             state["fetching"] = True
             try:
-                state["snap"] = await run.io_bound(bus_client.read, _snap_view) or None
+                state["snap"] = await run.io_bound(bus_client.read_shared, _snap_view) or None
             finally:
                 state["fetching"] = False
         # The Net Prem payload rides the same off-loop initial read (its own key,
@@ -3608,7 +3608,7 @@ def render(symbol: str | None = None, view: str | None = None,
             state["np_fetching"] = True
             try:
                 state["netprem"] = await run.io_bound(
-                    bus_client.read, "options:net_premium")
+                    bus_client.read_shared, "options:net_premium")
             finally:
                 state["np_fetching"] = False
         # Sync the dropdown to the symbol actually in the cache so a page (re)build

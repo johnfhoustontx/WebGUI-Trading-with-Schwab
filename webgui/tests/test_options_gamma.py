@@ -638,7 +638,8 @@ def test_big_gamma_snapshot_read_is_off_loop():
     # The big-payload read is moved off-loop. (``_snap_view`` is the view name
     # resolved once at page build — the shared key, or a pinned symbol's own
     # published one; see snapshot_view.)
-    assert "run.io_bound(bus_client.read, _snap_view)" in src
+    # (``read_shared``: one parse per version for every tab, audit PF-07.)
+    assert "run.io_bound(bus_client.read_shared, _snap_view)" in src
     # The cheap version probes are NOT wrapped (still a plain synchronous call).
     # The literal list moved out to the pure ``polled_views`` when the pinned
     # screens stopped probing keys they draw nothing from; the property this
@@ -2054,7 +2055,7 @@ def test_page_reads_each_views_history_off_loop_from_its_own_key():
     """The four history blobs were ~1.1 MB EACH and the page draws one view at a
     time. It must fetch only the visible view's, and off the event loop."""
     src = inspect.getsource(gamma.render)
-    assert "run.io_bound(bus_client.read, history_key(" in src
+    assert "run.io_bound(bus_client.read_shared, history_key(" in src
     assert 'entry.get("history")' not in src, "still reading history inline"
     # switching subtabs must be able to fetch, so the handler is async + guarded
     assert "async def _on_view_change" in src

@@ -17,6 +17,7 @@ from __future__ import annotations
 import pathlib
 import sys
 import threading
+from collections import OrderedDict
 from typing import Any, Callable, Iterable
 
 # Repo root on sys.path -> ``shared`` package is importable (mirrors webgui/proxy.py).
@@ -80,6 +81,9 @@ def reset() -> None:
     """
     global _bus
     _bus = None
+    with _shared_guard:
+        _shared.clear()
+        _shared_locks.clear()
 
 
 def read(view: str) -> dict | None:
@@ -148,6 +152,64 @@ def read_gated(view: str, memo: dict) -> tuple[dict | None, bool]:
     payload, env_ver = read_full(view)
     memo["state"] = (env_ver, payload) if env_ver is not None else None
     return payload, True
+
+
+# The most views the shared copies below may hold. A view is a key, and the
+# per-symbol public views are many keys: past this the least recently read is
+# dropped (and simply read again when someone asks).
+SHARED_MAX_VIEWS = 48
+_shared: "OrderedDict[str, tuple]" = OrderedDict()     # view -> (version, payload)
+_shared_locks: dict = {}                               # view -> its read lock
+_shared_guard = threading.Lock()
+
+
+def shared_size() -> int:
+    """How many views have a shared copy right now."""
+    with _shared_guard:
+        return len(_shared)
+
+
+def read_shared(view: str) -> dict | None:
+    """The payload for ``view``, parsed ONCE per version for the whole process.
+
+    Every caller at one version gets the SAME object. ``read`` hands each
+    caller its own parse: about 1.4 MB of JSON becomes about 4.3 MB of objects,
+    and each browser tab held a copy (fifty visitors on one public page, fifty
+    copies). A tick where the version has not moved costs one ``:ver`` probe.
+
+    ⚠ TREAT WHAT THIS RETURNS AS READ-ONLY. It is shared with every other tab;
+    a caller that sorts, pops or assigns into it changes what they all draw.
+    Use ``read`` for a payload you mean to change.
+
+    Keyed on the ENVELOPE's version, never the probed one, for the reason
+    ``read_gated`` gives: the counter moves before the payload does. Readers
+    arriving together at a new version wait on one parse instead of each
+    making their own. Only the newest version of a view is kept, and at most
+    ``SHARED_MAX_VIEWS`` views; an absent view is not remembered.
+    """
+    ver = read_version(view)
+    with _shared_guard:
+        hit = _shared.get(view)
+        if ver is not None and hit is not None and hit[0] == ver:
+            _shared.move_to_end(view)
+            return hit[1]
+        lock = _shared_locks.setdefault(view, threading.Lock())
+    with lock:
+        with _shared_guard:                 # someone else may have just read it
+            hit = _shared.get(view)
+            if ver is not None and hit is not None and hit[0] == ver:
+                return hit[1]
+        payload, env_ver = read_full(view)
+        with _shared_guard:
+            if env_ver is None:
+                _shared.pop(view, None)
+            else:
+                _shared[view] = (env_ver, payload)
+                _shared.move_to_end(view)
+                while len(_shared) > SHARED_MAX_VIEWS:
+                    dropped, _ = _shared.popitem(last=False)
+                    _shared_locks.pop(dropped, None)
+        return payload
 
 
 def read_versions(views: Iterable[str]) -> dict[str, int | None]:
