@@ -889,5 +889,100 @@ sudo systemctl restart caddy`.
 | Driving it from Windows | `tools/trading.bat` — `start` / `stop` / `restart [svc]` / `status` / `health` / `logs [svc]` / `tunnel`. Sends systemctl over SSH; supervises nothing |
 | Promotion | `tools/promote.sh` + `.claude/hooks/guard_prod_promote.py` |
 | Snapshot | `tools/snapshot_from_prod.py` |
-| Backups | `tools/backup_local.py`, `trading-prod-backup.timer`, `tools/pull_backups.ps1` |
+| Backups and restore | `tools/backup_local.py`, `tools/restore_backup.py`, `trading-prod-backup.timer`, `tools/pull_backups.ps1` (section 11) |
 | Logs | `journalctl --user -u trading-{env}-{svc}`; webgui also writes `logs/webgui.log` |
+
+---
+
+## 11. Backups, and restoring from one
+
+**What runs.** `trading-prod-backup.timer` runs `tools/backup_local.py` on
+weeknights. It copies every SQLite store through the online-backup API (the
+stack keeps running), dumps Redis, copies the gitignored files a checkout needs
+to start (`backup_local.EXTRA_FILES`) and the gitignored data trees
+(`DATA_TREES`), then encrypts the generation and uploads it to Google Drive.
+
+**What is kept.**
+
+| Where | Kept |
+|---|---|
+| `~/backups/` on the server | the newest 3 generations, plus the newest generation from each of the 4 weeks before those |
+| Google Drive (`gdrive:TradingBackups`) | the newest 3 archives, plus one from the week before |
+
+A generation whose local part finished with no failure carries a `BACKUP_OK`
+file. **The newest generation carrying it is never pruned**, however many failed
+nights follow, and pruning happens after the run's result is known.
+
+**What is in it** is decided by two lists in `backup_local.py`, and a test
+derives the expected `shared/` set from `.gitignore`, so a new credential file
+that is in neither `EXTRA_FILES` nor `NOT_BACKED_UP` fails the suite. The login
+store (`shared/webgui_auth.json`) was missing until 2026-10-03: a restore before
+that date produced an app nobody could sign in to.
+
+A failed backup now sends a **Server alert** to your phone (section "Alerts" in
+the User Guide); before 2026-10-03 the only sign was a missing date.
+
+### Restoring
+
+The drill below has been run by the test suite on every run since 2026-10-03
+(`tools/tests/test_restore_backup.py` backs up a checkout with the real tool and
+restores it with the real tool). It has **not** been run against a real
+production generation: do step 3 into a scratch directory once, when convenient.
+
+**1. Get a generation.** On the server they are already directories under
+`~/backups/`. From Drive:
+
+```bash
+mkdir -p /tmp/restore && rclone copy gdrive:TradingBackups/prod_2026-10-02_2004.tar.age /tmp/restore/
+```
+
+```bash
+age -d -i ~/.config/age/backup-key.txt /tmp/restore/prod_2026-10-02_2004.tar.age | tar xf - -C /tmp/restore
+```
+
+The private key is the backup. It lives at `~/.config/age/backup-key.txt` on the
+server and is escrowed on the workstation; without a copy the archive cannot be
+read.
+
+**2. Look first.** Nothing is written:
+
+```bash
+.venv/bin/python tools/restore_backup.py /tmp/restore/prod_2026-10-02_2004 --into /home/administrator/dev --dry-run
+```
+
+**3. Restore.** Into a live checkout, stop the stack first
+(`systemctl --user stop trading-prod.target`). Into a scratch directory, nothing
+needs stopping:
+
+```bash
+.venv/bin/python tools/restore_backup.py /tmp/restore/prod_2026-10-02_2004 --into /home/administrator/dev
+```
+
+A file that already exists is **left alone and listed**. Add `--force` to
+replace existing files, which is what a real recovery of damaged stores needs.
+Every restored database gets an integrity check; the command exits 1 and names
+any that fail. Restored files are set to owner-only (0600).
+
+**4. Redis is not restored by the tool.** The generation holds
+`redis/db0.rdb`, a dump of the whole Redis instance. The stack does not need
+it: every cache view is rebuilt by its service, and what is lost is short-lived
+state (today's flow alerts, the X post log's cache, cooldown maps). To put it
+back anyway, as root: stop `redis-server`, replace its dump file (the `dir` and
+`dbfilename` in `/etc/redis/redis.conf`, normally `/var/lib/redis/dump.rdb`)
+with the backup's, make it owned by `redis`, and start `redis-server`. If
+`appendonly yes` is set, turn it off for that start or Redis loads the
+append-only file and ignores the dump.
+
+**5. Bring it up.** On a rebuilt box, in order: create the venv and
+`pip install -r requirements.lock`, then
+
+```bash
+.venv/bin/python -m deploy.systemd.generate_units --install
+```
+
+```bash
+systemctl --user start trading-prod.target
+```
+
+Then sign in to Schwab again on the proxy's `/auth` page if the restored token
+is more than 7 days old.

@@ -67,6 +67,15 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from repo_paths import ENV_NAME, MEMURAI_PORT, REDIS_DB, REPO_ROOT  # noqa: E402
 
 KEEP = 3
+# One generation from each of this many EARLIER weeks is kept as well. Three
+# dailies on weeknights only meant the oldest copy was three trading days old:
+# a problem noticed on a Monday had nothing from before the previous Wednesday.
+# ~1.6 GB each; the box had 119 GB free when this was set (2026-10-03).
+KEEP_WEEKLY = 4
+# Written into a generation whose LOCAL part finished with no failure. prune()
+# never removes the newest generation carrying it, however many damaged nights
+# follow.
+OK_MARKER = "BACKUP_OK"
 
 # Offsite: encrypt, then upload the CIPHERTEXT. Drive never sees plaintext.
 #
@@ -77,6 +86,10 @@ KEEP = 3
 AGE_IDENTITY = pathlib.Path.home() / ".config" / "age" / "backup-key.txt"
 RCLONE_REMOTE = "gdrive:TradingBackups"
 KEEP_REMOTE = 3
+# Offsite: ONE earlier week on top of the three dailies. Each archive is ~1.6 GB
+# of a shared Drive quota (23 GiB free, 2026-10-03), so the weekly depth lives
+# on the server's disk and only one week of it is shipped.
+KEEP_REMOTE_WEEKLY = 1
 
 # Loose gitignored files that live OUTSIDE the data trees below.
 EXTRA_FILES = (
@@ -87,6 +100,20 @@ EXTRA_FILES = (
     "shared/sentiment_bridge.json",
     "schwab-proxy/proxy_tokens.json",
     "config/env.local.toml",
+    # THE LOGIN STORE: the password hash, the second-factor secret, the session
+    # secret and the last accepted code counter. Omitted until 2026-10-03, so a
+    # restore produced an app its owner could not sign in to (audit AR-04).
+    "shared/webgui_auth.json",
+    # Vendor and integration credentials, each gitignored and each absent from
+    # this list until the same date. tests/test_backup_local.py now derives the
+    # expected set from .gitignore, so the next one cannot be forgotten.
+    "shared/google_calendar_sa.json",
+    "shared/alphavantage_key.txt",
+    "shared/massive_key.txt",
+    "shared/proxy_secret.txt",
+    # The public site's manifest of published trade ideas (the cards themselves
+    # are swept from deploy/site/ideas below).
+    "deploy/site/ideas.json",
     # The units' EnvironmentFile -- MEMURAI_PASSWORD, ALPHAVANTAGE_API_KEY,
     # EDGAR_USER_AGENT, anything else read from the process environment. It is
     # loaded with NO leading dash, so a missing one does not degrade: the unit
@@ -101,6 +128,13 @@ EXTRA_FILES = (
     # complete.
     ".env.live",
 )
+
+# Gitignored ``shared/`` files deliberately NOT carried, each with its reason.
+# The guard test fails on a gitignored shared/ file that is in neither list.
+NOT_BACKED_UP = {
+    "shared/driver_model.txt": "belonged to the autonomous driver, removed "
+                               "2026-09-22; nothing reads it",
+}
 
 # Gitignored data trees, swept WHOLE.
 #
@@ -123,6 +157,11 @@ DATA_TREES = (
     "services/trade_svc/data",
     "services/news_svc/data",
     "schwab-proxy/data",
+    # The public site's generated state: every posted trade idea's card, and the
+    # market reports the site frames. Both are gitignored, so a rebuilt box
+    # serves an empty site until they are put back.
+    "deploy/site/ideas",
+    "deploy/site/reports",
     # The operator's Settings -> Configuration overrides (gitignored). Losing
     # them silently reverts every tuned threshold to the shipped value.
     "config/local",
@@ -252,16 +291,61 @@ def upload(path, remote=RCLONE_REMOTE, keep=KEEP_REMOTE):
         listing = subprocess.run(["rclone", "lsf", remote + "/"],
                                  capture_output=True, text=True, timeout=300)
         names = sorted(n for n in listing.stdout.split() if n.endswith(".tar.age"))
-        for old in names[:-keep] if len(names) > keep else []:
+        drop = remote_to_delete(names, keep=keep, keep_weekly=KEEP_REMOTE_WEEKLY)
+        for old in drop:
             subprocess.run(["rclone", "deletefile", f"{remote}/{old}"],
                            capture_output=True, text=True, timeout=300)
-        return True, f"verified; {min(len(names), keep)} generation(s) offsite"
+        return True, f"verified; {len(names) - len(drop)} generation(s) offsite"
     except Exception as exc:  # noqa: BLE001
         return False, str(exc)
 
 
-def prune(root, keep):
-    """Drop all but the newest `keep` dated generations. Returns names removed.
+def _generation_date(name):
+    """The date in a generation name (``<env>_YYYY-MM-DD_HHMM``), or None."""
+    try:
+        return dt.date.fromisoformat(name.rsplit("_", 2)[-2])
+    except (ValueError, IndexError):
+        return None
+
+
+def select_keep(names, keep, keep_weekly=0):
+    """The generation names to KEEP (PURE).
+
+    * the newest ``keep`` dated generations;
+    * then, working back through the older ones, the newest generation of each
+      of the next ``keep_weekly`` ISO weeks that has none kept already;
+    * every name with no readable date: not this tool's to delete, and it uses
+      no slot.
+    """
+    dated = sorted((n for n in names if _generation_date(n)), reverse=True)
+    kept = set(n for n in names if not _generation_date(n))
+    kept.update(dated[:max(keep, 0)])
+    weeks = {_generation_date(n).isocalendar()[:2] for n in dated[:max(keep, 0)]}
+    taken = 0
+    for n in dated[max(keep, 0):]:
+        if taken >= keep_weekly:
+            break
+        week = _generation_date(n).isocalendar()[:2]
+        if week not in weeks:
+            kept.add(n)
+            weeks.add(week)
+            taken += 1
+    return kept
+
+
+def remote_to_delete(archives, keep, keep_weekly=0):
+    """Which offsite ``.tar.age`` names to delete, oldest first (PURE)."""
+    stems = {a[:-len(".tar.age")]: a for a in archives if a.endswith(".tar.age")}
+    kept = select_keep(list(stems), keep, keep_weekly)
+    return sorted(a for stem, a in stems.items() if stem not in kept)
+
+
+def prune(root, keep, keep_weekly=0):
+    """Drop the generations ``select_keep`` does not keep. Returns names removed.
+
+    Kept: the newest ``keep``, one per earlier week for ``keep_weekly`` weeks,
+    and - whatever else is true - the newest generation carrying ``OK_MARKER``.
+    A run of damaged nights must not push out the last copy that finished clean.
 
     Takes each dropped generation's ``.tar.age`` with it. That archive is the
     retry cache for ITS generation, kept when an upload fails so a retry need
@@ -275,12 +359,18 @@ def prune(root, keep):
     offsite remote is being set up, which is when nobody is watching disk.
     """
     gens = sorted((d for d in root.iterdir() if d.is_dir()), reverse=True)
+    kept = select_keep([d.name for d in gens], keep, keep_weekly)
+    last_good = next((d.name for d in gens if (d / OK_MARKER).is_file()), None)
+    if last_good:
+        kept.add(last_good)
     dropped = []
-    for d in gens[keep:]:
+    for d in gens:
+        if d.name in kept:
+            continue
         shutil.rmtree(d, ignore_errors=True)
         (root / f"{d.name}.tar.age").unlink(missing_ok=True)
         dropped.append(d.name)
-    return dropped
+    return sorted(dropped)
 
 
 def main(argv=None):
@@ -351,7 +441,14 @@ def main(argv=None):
     print(f"  ok  swept {swept} files from the data trees "
           f"({swept_bytes / 1e6:.1f} MB)")
 
-    dropped = prune(dest_root, args.keep)
+    # Mark, THEN prune. The marker is what prune protects, so a generation with
+    # a failure is never the one that survives as "the last good copy" - and the
+    # last good copy is never dropped to make room for a damaged one. This used
+    # to prune before the failure check.
+    if not failures:
+        (out / OK_MARKER).write_text(
+            dt.datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
+    dropped = prune(dest_root, args.keep, KEEP_WEEKLY)
     if dropped:
         print(f"pruned {len(dropped)} old generation(s): {', '.join(dropped)}")
 
