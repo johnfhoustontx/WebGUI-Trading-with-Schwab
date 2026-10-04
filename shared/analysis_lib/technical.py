@@ -246,6 +246,14 @@ def calculate_vwap(df: pd.DataFrame) -> Optional[float]:
 
 def calculate_relative_volume(df: pd.DataFrame, period: int = 20) -> Tuple[float, int]:
     """Calculate relative volume vs average
+
+    Today's volume SO FAR against what each earlier day had traded by the same
+    point: the first N bars of each, where N is the number of bars today has.
+    On a finished day (or on daily bars) that is whole day against whole day.
+
+    Until 2026-10-04 today's partial volume was divided by the average of FULL
+    earlier days, so an ordinary session read about 0.25 at 11:00 and the
+    verdict scored it as thin every morning (audit AC-51).
     
     Args:
         df: DataFrame with 'datetime' and 'volume' columns
@@ -270,7 +278,12 @@ def calculate_relative_volume(df: pd.DataFrame, period: int = 20) -> Tuple[float
         if len(daily_vols) < 2:
             return 1.0, today_vol
         
-        avg_vol = daily_vols.iloc[:-1].mean()
+        today = daily_vols.index[-1]
+        bars_today = int((df_copy['date'] == today).sum())
+        earlier = df_copy[df_copy['date'] != today].sort_values('datetime')
+        same_point = (earlier.groupby('date').head(bars_today)
+                      .groupby('date')['volume'].sum())
+        avg_vol = same_point.mean() if len(same_point) else 0.0
         rel_vol = today_vol / avg_vol if avg_vol > 0 else 1.0
         
         return round(rel_vol, 2), today_vol

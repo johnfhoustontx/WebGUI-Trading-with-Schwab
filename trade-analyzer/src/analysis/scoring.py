@@ -17,8 +17,14 @@ def score_rsi(rsi: float) -> int:
     return -20
 
 
+def _direction(ema_slope: float) -> int:
+    """+1, -1, or 0 when there is no direction. Zero used to count as UP, so a
+    name with as many averages above as below scored as an uptrend (AC-51)."""
+    return 1 if ema_slope > 0 else -1 if ema_slope < 0 else 0
+
+
 def score_adx_directional(adx: float, ema_slope: float) -> int:
-    direction = 1 if ema_slope >= 0 else -1
+    direction = _direction(ema_slope)
     if adx >= 25:
         return 100 * direction
     if adx >= 20:
@@ -39,7 +45,7 @@ def score_macd(hist: float, hist_prev: float) -> int:
 
 
 def score_relative_volume(rv: float, ema_slope: float) -> int:
-    direction = 1 if ema_slope >= 0 else -1
+    direction = _direction(ema_slope)
     if rv > 1.5:
         return 60 * direction
     if rv >= 1.0:

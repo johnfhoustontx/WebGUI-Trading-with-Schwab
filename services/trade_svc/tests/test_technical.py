@@ -152,3 +152,64 @@ def test_vwap_resets_per_session():
     assert round(vwap, 6) == 12.0
 
 
+# --- AC-51: relative volume compares like with like --------------------------
+#
+# Today's volume SO FAR was divided by the average of earlier FULL days, so the
+# ratio read 0.26 at 11:00 on a perfectly ordinary day and the verdict's volume
+# factor scored it as thin (-30) every morning.
+
+def _sessions(days, bars_today, per_bar=100.0, today_per_bar=None, bars=78):
+    rows = []
+    for d in range(days):
+        n = bars_today if d == days - 1 else bars
+        vol = (today_per_bar if (d == days - 1 and today_per_bar is not None)
+               else per_bar)
+        start = pd.Timestamp("2026-09-01 13:30") + pd.Timedelta(days=d)
+        for i in range(n):
+            rows.append({"datetime": start + pd.Timedelta(minutes=5 * i),
+                         "volume": vol})
+    return pd.DataFrame(rows)
+
+
+def test_an_ordinary_morning_reads_as_ordinary():
+    rel, today = technical.calculate_relative_volume(_sessions(5, bars_today=20))
+    assert rel == 1.0
+    assert today == 2000
+
+
+def test_a_busy_morning_reads_as_busy():
+    rel, _ = technical.calculate_relative_volume(
+        _sessions(5, bars_today=20, today_per_bar=250.0))
+    assert rel == 2.5
+
+
+def test_a_finished_day_is_compared_with_whole_days():
+    rel, today = technical.calculate_relative_volume(
+        _sessions(5, bars_today=78, today_per_bar=150.0))
+    assert rel == 1.5
+    assert today == 78 * 150
+
+
+def test_daily_bars_are_unchanged():
+    """One bar a day (the fallback frame): the first bar of each earlier day is
+    the whole day, so this is the same figure as before."""
+    df = pd.DataFrame({
+        "datetime": pd.date_range("2026-08-03", periods=25, freq="B"),
+        "volume": [1000.0] * 24 + [1800.0]})
+    rel, today = technical.calculate_relative_volume(df)
+    assert rel == 1.8
+    assert today == 1800
+
+
+def test_front_loaded_days_are_compared_bar_for_bar():
+    """Volume is heaviest at the open. Earlier days: 300 a bar for the first
+    ten bars, 100 after. Today, ten bars in at 300 a bar, is exactly normal."""
+    rows = []
+    for d in range(4):
+        start = pd.Timestamp("2026-09-01 13:30") + pd.Timedelta(days=d)
+        n = 10 if d == 3 else 78
+        for i in range(n):
+            rows.append({"datetime": start + pd.Timedelta(minutes=5 * i),
+                         "volume": 300.0 if i < 10 else 100.0})
+    rel, _ = technical.calculate_relative_volume(pd.DataFrame(rows))
+    assert rel == 1.0

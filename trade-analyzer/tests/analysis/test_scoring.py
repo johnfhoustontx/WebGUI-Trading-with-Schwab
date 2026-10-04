@@ -60,7 +60,10 @@ class TestScoreAdxDirectional:
         (14.99, 1.0, 0),
         (0, 1.0, 0),
         (10, -1.0, 0),
-        (25, 0, 100),  # slope=0 -> direction +1
+        # No direction is no direction. This row read (25, 0, 100) "slope=0 ->
+        # direction +1": a name with exactly as many averages above as below
+        # was scored as a strong UPtrend (audit AC-51).
+        (25, 0, 0),
     ])
     def test_score_adx_directional(self, adx, slope, expected):
         assert score_adx_directional(adx, slope) == expected
@@ -95,7 +98,9 @@ class TestScoreRelativeVolume:
         (0.5, -1.0, -30),
         (0.7, 1.0, 0),
         (0.99, -1.0, 0),
-        (1.0, 0, 20),  # slope=0 -> +1 direction
+        (1.0, 0, 0),    # no direction: volume confirms nothing (was +20, AC-51)
+        (2.0, 0, 0),
+        (0.5, 0, -30),  # thin volume is its own reading, direction or not
     ])
     def test_score_relative_volume(self, rv, slope, expected):
         assert score_relative_volume(rv, slope) == expected

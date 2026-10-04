@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+import math
 import numpy as np
 import pandas as pd
 
@@ -45,7 +46,9 @@ class PositionInputs:
     macd_hist: float
     macd_hist_prev: float
     relative_volume: float
-    vwap: float
+    # None when there is no VWAP to read. The factor is then left out and the
+    # score taken over the rest; never substitute a price for it.
+    vwap: Optional[float]
     volume_profile: Dict[str, float]
     sector_strength: SectorStrength
     days_to_earnings: Optional[int] = None
@@ -99,12 +102,26 @@ def _verdict_from_score(score: float) -> str:
     return "HOLD"
 
 
+def _usable_vwap(v) -> Optional[float]:
+    """A VWAP that can be compared with a price, or None."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) and f > 0 else None
+
+
 class PositionVerdict:
     """Buy/Hold/Sell verdict for a 1-8 week horizon."""
 
     def score(self, inp: PositionInputs) -> dict:
-        ema_slope = 1 if inp.ema_alignment_pct >= 0 else -1
+        # 0 at an alignment of exactly 0: as many averages above as below is no
+        # direction. It was +1, which scored ADX and volume as confirming an
+        # uptrend that the alignment itself did not show (audit AC-51).
+        ema_slope = (1 if inp.ema_alignment_pct > 0
+                     else -1 if inp.ema_alignment_pct < 0 else 0)
         last_close = inp.daily["close"].iloc[-1]
+        vwap = _usable_vwap(inp.vwap)
 
         raw_scores = {
             "ema_alignment": int(np.clip(inp.ema_alignment_pct, -100, 100)),
@@ -112,7 +129,7 @@ class PositionVerdict:
             "rsi": score_rsi(inp.rsi),
             "macd": score_macd(inp.macd_hist, inp.macd_hist_prev),
             "rel_volume": score_relative_volume(inp.relative_volume, ema_slope),
-            "vwap": score_vwap(last_close, inp.vwap),
+            "vwap": score_vwap(last_close, vwap) if vwap is not None else None,
             "volume_profile": score_volume_profile_location(last_close, inp.volume_profile),
             "rs_3m": score_relative_strength_percentile(
                 _rs_percentile(inp.daily["close"], inp.spy_history["close"], 63)
@@ -124,9 +141,15 @@ class PositionVerdict:
             "sector": inp.sector_strength.score,
         }
 
+        # A factor with no reading (None) is LEFT OUT, and the score is taken
+        # over the weight that was read. Scoring it as zero would pull the total
+        # toward HOLD; substituting a neutral-looking input is worse (the last
+        # close in place of VWAP scores -40).
         breakdown: List[dict] = []
         for factor, weight in WEIGHTS_POSITION.items():
             raw = raw_scores[factor]
+            if raw is None:
+                continue
             breakdown.append({
                 "factor": factor,
                 "weight": weight,
@@ -134,7 +157,11 @@ class PositionVerdict:
                 "contribution": raw * weight / 100,
             })
 
+        read_weight = sum(b["weight"] for b in breakdown)
+        total_weight = sum(WEIGHTS_POSITION.values())
         composite = sum(b["contribution"] for b in breakdown)
+        if 0 < read_weight < total_weight:
+            composite = composite * total_weight / read_weight
         verdict = _verdict_from_score(composite)
 
         # Hard gates

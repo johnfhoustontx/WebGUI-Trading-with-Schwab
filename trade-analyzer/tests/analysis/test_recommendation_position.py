@@ -227,3 +227,56 @@ class TestSqueezeGate:
         not a reason not to be long — if anything it is fuel."""
         inp = replace(strong_uptrend_inputs, squeeze_reason="31.0% of float short")
         assert PositionVerdict().score(inp)["verdict"] == "BUY"
+
+
+# --- AC-51: three directional biases in the fallback verdict -----------------
+
+def _factor(v, name):
+    return next((b for b in v["breakdown"] if b["factor"] == name), None)
+
+
+class TestNoDirectionIsNotBullish:
+    def test_alignment_of_exactly_zero_gives_adx_and_volume_no_direction(
+            self, strong_uptrend_inputs):
+        """Alignment 0 is as many averages above as below. It was treated as an
+        uptrend: ADX 28 scored +100 and volume 1.6x scored +60."""
+        inp = replace(strong_uptrend_inputs, ema_alignment_pct=0.0)
+        v = PositionVerdict().score(inp)
+        assert _factor(v, "adx")["raw_score"] == 0
+        assert _factor(v, "rel_volume")["raw_score"] == 0
+
+    def test_the_two_signs_are_still_mirror_images(self, strong_uptrend_inputs):
+        up = PositionVerdict().score(replace(strong_uptrend_inputs, ema_alignment_pct=10.0))
+        down = PositionVerdict().score(replace(strong_uptrend_inputs, ema_alignment_pct=-10.0))
+        assert _factor(up, "adx")["raw_score"] == -_factor(down, "adx")["raw_score"] == 100
+        assert _factor(up, "rel_volume")["raw_score"] == 60
+
+
+class TestAnAbsentVwapIsDropped:
+    def test_no_vwap_leaves_the_factor_out(self, strong_uptrend_inputs):
+        v = PositionVerdict().score(replace(strong_uptrend_inputs, vwap=None))
+        assert _factor(v, "vwap") is None
+        assert len(v["breakdown"]) == 10
+
+    def test_the_score_is_over_the_factors_that_were_read(self, strong_uptrend_inputs):
+        """The other ten factors hold 95 of the 100 points; the score is scaled
+        back to the full range rather than left five points short."""
+        with_vwap = PositionVerdict().score(strong_uptrend_inputs)
+        without = PositionVerdict().score(replace(strong_uptrend_inputs, vwap=None))
+        others = sum(b["contribution"] for b in with_vwap["breakdown"]
+                     if b["factor"] != "vwap")
+        assert without["score"] == int(round(others * 100 / 95))
+
+    def test_it_is_not_scored_as_price_sitting_on_vwap(self, strong_uptrend_inputs):
+        """The service used to substitute the last close, and price exactly on
+        VWAP scores -40: a missing reading pulled every verdict toward SELL."""
+        last = float(strong_uptrend_inputs.daily["close"].iloc[-1])
+        substituted = PositionVerdict().score(replace(strong_uptrend_inputs, vwap=last))
+        assert _factor(substituted, "vwap")["raw_score"] == -40
+        absent = PositionVerdict().score(replace(strong_uptrend_inputs, vwap=None))
+        assert absent["score"] > substituted["score"]
+
+    @pytest.mark.parametrize("bad", [float("nan"), 0.0, -5.0, float("inf")])
+    def test_an_unusable_vwap_is_absent_too(self, strong_uptrend_inputs, bad):
+        v = PositionVerdict().score(replace(strong_uptrend_inputs, vwap=bad))
+        assert _factor(v, "vwap") is None

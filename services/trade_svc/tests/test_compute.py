@@ -794,3 +794,22 @@ class TestTheFundamentalsPayloadCarriesTheSurpriseRecord:
         d = compute._fundamentals_dict(Fundamentals())
         assert d["eps_surprises"] is None
         assert d["last_eps_surprise"] is None
+
+
+def test_analyze_hands_the_verdict_no_vwap_rather_than_the_last_close(monkeypatch):
+    """AC-51: a missing VWAP was replaced by the last close, and price exactly
+    on VWAP scores -40. The factor is dropped instead."""
+    _patch(monkeypatch, FakeClient(quote_last=120.0))
+    monkeypatch.setattr(compute.technical, "calculate_vwap", lambda df: None)
+    seen = {}
+    real = compute.PositionVerdict.score
+
+    def spy(self, inp):
+        seen["vwap"] = inp.vwap
+        return real(self, inp)
+
+    monkeypatch.setattr(compute.PositionVerdict, "score", spy)
+    res = compute.analyze("AAPL")
+    assert seen["vwap"] is None
+    factors = [b["factor"] for b in res["position_verdict"]["breakdown"]]
+    assert factors and "vwap" not in factors

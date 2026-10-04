@@ -1648,7 +1648,9 @@ def analyze(symbol):
         ss = _neutral_sector_strength()
 
     spy_for_pos = spy if spy is not None and not spy.empty else daily
-    vwap_val = float(vwap) if vwap else float(daily["close"].iloc[-1])
+    # None when there is no VWAP: the verdict leaves the factor out. This
+    # substituted the last close, and price exactly on VWAP scores -40.
+    vwap_val = float(vwap) if vwap else None
     pos_inputs = PositionInputs(
         daily=daily, hourly=data.get("60min") if data.get("60min") is not None else daily,
         spy_history=spy_for_pos, ema_alignment_pct=alignment_pct,
