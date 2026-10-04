@@ -525,12 +525,16 @@ neutral band around 1.0.
 
 ```
 ratio < 0.85          -> 10.0   (deep contango, calm)
-0.85 <= ratio < 0.95  -> 7.0 + (ratio-0.85)/0.10 * 2.0
-0.95 <= ratio < 1.05  -> 5.0 + (ratio-0.95)/0.10 * 1.0   (neutral band)
+0.85 <= ratio < 0.95  -> 9.0 - (ratio-0.85)/0.10 * 2.0
+0.95 <= ratio < 1.05  -> 6.0 - (ratio-0.95)/0.10 * 1.0   (neutral band)
 1.05 <= ratio < 1.15  -> 4.0 - (ratio-1.05)/0.10 * 1.0
 1.15 <= ratio < 1.30  -> 2.0 - (ratio-1.15)/0.15 * 1.0
 ratio >= 1.30         -> 1.0    (backwardation, stress)
 ```
+
+The score never rises as the ratio rises: a calmer reading always scores at least
+as high as a more stressed one. (Until 2026-10-04 the two calm segments read
+`7.0 + …` and `5.0 + …`, so inside each band a higher ratio scored higher.)
 
 **VIX1D** — `score_vix1d(vix1d, vix)` on `ratio = vix1d / vix`: same shape with
 breakpoints 0.80 / 0.88 / 0.98 / 1.05 / 1.15.
@@ -709,8 +713,11 @@ Cap-weighted daily move across the 11 GICS sectors, mapped to a 1–10 score:
 cap_wtd_return = Σ(sector_daily_return · sector_cap_weight)
 ```
 
-Mapping (return → score): `+2.0% → 10`, `+1.5 → 9`, `+1.0 → 8`, `+0.5 → 7`,
-`0..+0.5 → 6`, `-0.5..0 → 5`, `-1.0..-0.5 → 4`, `-1.0 → 3`, `-1.5 → 2`, `≤-2.0 → 1`.
+Mapping: `score = 5.0 + 2.5 · cap_wtd_return` (in percent), so a flat tape is 5.0
+and +2.0% is 10. One point is added when at least 80% of sectors are up, and one
+taken off when at least 80% are down. The result is held to **1–10**: a crash day
+scores 1.0. With no sector data the score is **absent** (`None`), not 0, and the
+component carries no weight; the 30-day history drops a day only for that.
 Cap weights live in `sectors_ref.SP500_SECTOR_WEIGHTS`.
 
 ### The Sector & Industry heat scale
@@ -752,6 +759,15 @@ roc_5d = today - scores[-5]
 z_20d  = (today - mean(scores[-20:])) / std(scores[-20:])
 regime_break = abs(z_20d) > 1.5
 ```
+
+**What `scores` holds.** When a live composite is on screen, the history is each
+earlier session's **last live composite** (recorded by the service at every
+intraday sample, 90 sessions kept), never the stored 30-day history. The two are
+scored by different methods (the stored history has no put/call reading), and the
+gap between them, measured at 0.60 points on average, was being read as movement.
+With fewer than three live sessions recorded the rate-of-change readings are a
+dash; the Yesterday and Change tiles use the same series. A stored day shown with
+no live reading is compared with the stored history.
 
 **Divergence** (`divergence(named_scores)`): of the components with score > 0, if
 `max_score − min_score ≥ 4`, flag a low-conviction divergence between the highest
@@ -933,6 +949,15 @@ score = Σ(weightᵢ · normalized_factorᵢ) / 100
 
 **Probability of Profit** — `norm_pop(pop_pct)`: `min(100, (pop_pct − 50) / 45 · 100)`
 (PoP 50% → 0, 95%+ → 100).
+
+On the Strategy Finder the probability itself (`pop_from_payoff`) is the share of
+a **lognormal** distribution of the stock price at the front expiry in which the
+position is in profit: `ln(S_T / S_0) ~ N((r − q − σ²/2)·T, σ²·T)`, with `σ` the
+at-the-money implied volatility and `T` the time left to the row's own expiry on
+the clock. Inside two months it is within a point of the zero-drift normal model
+it replaced on 2026-10-04; it is lower on long-dated short premium (two years at
+70% volatility: 54.8% against 66.0%) and it reads the hours left on an
+expiration-day row, which used to get a fixed twelve.
 
 **Theta efficiency** — `norm_theta(net_theta, max_loss, all_theta_efficiencies)`:
 `efficiency = |net_theta| / max_loss · 100` (daily decay as % of risk). Normalized
@@ -2491,22 +2516,22 @@ status is that filing's own answer and is not retried.
 Documented defects a maintainer should know about before trusting a number. These
 are recorded rather than silently carried.
 
-## The PRICE sub-score NaN exposure (open)
+## The PRICE sub-score: missing inputs, and the daily horizons
 
-`sentiment_svc/compute._finite_pcts` guards only the **sector** input. An all-NaN
-read of the structural price inputs (`macd_hist` / `rsi` / `adx`, feeding
-`score_price` with a hardcoded `vwap_pct = 0.0`) scores **82.50 — near-maximum
-bullish — at unchanged confidence**, where a sane read of the same tape scores
-**56.25**. The same all-NaN read in `compute_intraday_trend`, which drives the
-**live Day gauge**, scores **92.50**.
+Both price-scoring call sites go through `sentiment_svc/compute._finite_score_price`.
+A non-finite indicator is replaced by the value that zeroes its term and its
+weight is withheld from the confidence, so an outage moves the sub-score toward
+50 **and** lowers its confidence; all inputs missing gives 50.0 at confidence 0,
+which drops the price input out of the blend. (Before that guard an all-NaN read
+scored 82.50 to 92.50 at full confidence.)
 
-The failure is silent: nothing in the payload marks the inputs as missing, so the
-gauge renders a confident bullish number built on nothing. A fix must cover **both
-call sites with one shared filter** — patching only `score_price` leaves the live
-gauge wrong.
-
-**Until it is fixed**, treat a strongly bullish structural reading with
-*unremarkable* confidence as suspect, and cross-check against the Market Dashboard.
+The **Week and Month** gauges have one timeframe (daily bars) and no VWAP. They
+call the scorer with no VWAP term, so the direction is spread over alignment,
+MACD and RSI (weights 0.50 / 0.15 / 0.15, divided by 0.80), and with one
+timeframe of one, so a complete daily read carries full confidence. Until
+2026-10-04 they passed a neutral VWAP of 0.0 and one timeframe of an assumed
+three: the price sub-score could not leave 10–90 and its weight in the blend was
+0.15 against the sector term's 0.20, where the weights are 0.45 and 0.20.
 
 ## Expected Move deliberately disagrees with ThinkorSwim
 

@@ -757,6 +757,10 @@ spreads, and the Income board's cash-secured puts and covered calls.
   a 0–100 **heat** (green = calm, red = danger).
 - **Click a row** to see ranked **rescue options** — roll, widen, or close — each
   with its cash cost/credit and the new risk numbers.
+- **Max loss after** is the risk of the position you would be left holding: its
+  width less the credit it carries. What the action itself costs is the cash
+  figure beside it, and it is paid at once, so it is not counted in the max loss
+  a second time.
 - **Two things nudge a position UP the board without ever putting it in trouble on
   their own.** An **earnings report** landing before the position expires: the
   move can be much larger than the options priced in, and the context line names

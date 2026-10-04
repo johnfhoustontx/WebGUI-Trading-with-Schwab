@@ -4,7 +4,86 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-04 (**The audit's remaining High findings: eight fixed, two started.**)
+**Last updated:** 2026-10-04 (**The audit's Medium findings: 35 of 54 fixed, three started.**)
+
+Source: [the audit scorecard](audits/2026-10-03-app-audit-scorecard.md), which
+has the status of every row. One commit per finding. Not yet promoted.
+
+**Operator steps these add.** Set `PROXY_SHARED_SECRET` before promoting (it now
+also guards `/track` and `/untrack`; until it is set the proxy's reconcile still
+starts tracking within its interval). Delete the `MEMURAI_PASSWORD` line from
+prod's `.env.live`; the public process no longer reads it. Regenerate the
+Caddyfile as root and reload Caddy for the sign-in body limit. The next start
+builds one index on `signal_marks`.
+
+**Fixes that move live numbers.** The volatility sub-scores (AC-47), the sector
+score (AC-49) and the Week and Month gauges (AC-50) change the sentiment
+readings on the day they land. Velocity and the Yesterday / Change tiles are
+measured against live closes (AC-48), so the 20-day figure starts from the five
+sessions already recorded. The Finder's probability of profit moves on
+long-dated and same-day rows (AC-11). Return on equity (AC-46) and the Portfolio
+scorecard's cost and short-position sign (AC-54) move the Long Term verdict and
+the scorecards for the names they touch.
+
+- **Marks, Greeks and absent inputs.** A leg with no bid is a market when its
+  offer is small (`[marks] zero_bid_max_ask`), so a spread that has won is marked
+  (AC-08, `09e54dd`). Schwab's `-999` Greek placeholder is unusable everywhere,
+  through `shared/greeks.py` (AC-09), and one bad delta no longer silences a
+  symbol's big-delta alerts (AC-52). The Finder's scorers treat a non-finite
+  input as absent (AC-10, `1c980c6`). Time to expiry is subtracted in UTC
+  (AC-06, `6042e9e`).
+- **Sentiment.** Three volatility scorers that scored higher as volatility rose
+  inside their calm bands (AC-47, `500fb0a`). The sector score: no data is
+  absent, a crash day is 1, a flat tape is 5, and the history keeps crash days
+  (AC-49, `4aeee3b`). The Week and Month price score is a full reading (AC-50,
+  `19ea763`). An unreadable volatility day change is absent (AC-55, `8dc849e`).
+  A dead feed publishes no composite total (AC-60, `0bcfc05`). Velocity and the
+  regime-break flag compare live with live, after measuring the gap between the
+  live composite and the stored history on five sessions: 0.60 points on
+  average, 1.09 at most (AC-48, `cd56289`).
+- **Trade Analyzer and Portfolio.** Return on equity is a percent (AC-46,
+  `fd91ce0`). The Short Term fallback verdict loses three directional biases
+  (AC-51, `c20cd58`). The walk-forward stops training a label horizon before its
+  test window; the model is not yet refitted (AC-53, `98eea4d`). The Portfolio
+  scorecard uses the broker's cost and signs a short's return (AC-54,
+  `f7303a1`).
+- **Finder and Rescue.** Probability of profit is lognormal over the time left
+  (AC-11, `f5f91e5`). A roll or a narrow reserves the remaining position's own
+  risk, and a convert's credit joins the position (AC-13, `c020b31`).
+- **The market-data store.** The collector states its age limit in every mode
+  and configured limits are clamped (AC-102, AC-104, `35e1d12`). A fill and a
+  Rescue apply are priced from a chain fetched for them (AC-140, AC-141,
+  `297d652`). A daily bar fetched before the close is not served after it, and
+  `/pricehistory` takes `maxAge` (AC-101, `6f60b8b`).
+- **Security.** No credential in notification logs (SE-05, `4c4d077`). A sign-in
+  body limit and a memory cap on the private web app (SE-03, `275424f`). The
+  tracking routes need the account secret (SE-100, `2ebd7ea`). The sign-in
+  lockout cannot lock the owner out (SE-06, `9adddd7`). The public process
+  proves at start that it cannot write (SE-04, `38a6f03`). `NoNewPrivileges` on
+  the public unit; path isolation does not work in a user unit on this host
+  (SE-09, `7f7412c`, still open).
+- **Reliability.** A replay gate at every consumer and thirteen guarded
+  commands, with `config/services.toml` (AR-05, `b8bffe2`). `/health` fails when
+  a scheduler has stopped (AR-06, `90c0b9f`). Dead letters are bounded, counted
+  and answered (AR-07, `576f535`, `727a739`). The two JSON stores are written
+  whole and a corrupt one is set aside (AR-09, `2a0b418`). The guard hook knows
+  the server's production path (AR-10, `536105c`). The operator switches are on
+  disk, a flushed stream's group is recreated, and the Status card states Redis
+  persistence (AR-12, `390c259`).
+- **Performance and guards.** An index for the latest-mark lookup and one write
+  per manage cycle (PF-08, `913735e`). The silent-degrade guard reads call nodes
+  and covers three trees (CQ-06, `a786527`). CI runs every suite as blocking,
+  with a type check (CQ-05, `c45804f`); adding `tests/` to it found two failing
+  tests the same day. The four engine folders are linted (CQ-08, `b67dff8`,
+  still open for the two extra rules).
+
+Left open, with the reason on each row: AC-19 (needs regular market hours),
+AC-103, AC-120, AC-121, AR-08, AR-100, PF-03 to PF-07, PF-100, CQ-07, CQ-09,
+CQ-10, CQ-100.
+
+---
+
+**Prior —** 2026-10-04 (**The audit's remaining High findings: eight fixed, two started.**)
 
 Source: [the audit scorecard](audits/2026-10-03-app-audit-scorecard.md). One
 commit per finding. Not yet promoted. **Before promoting, set

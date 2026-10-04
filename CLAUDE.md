@@ -739,8 +739,10 @@ load-bearing rather than untidy: (1) a Redis **ACL user** from `REDIS_LIVE_URL`,
 structural one, enforced by the server rather than by this process — ⚠ and the only
 layer that can be **ABSENT while everything looks correct**, since unset it falls back
 to the stack's ordinary full read/write credential, so `live_main.resolve_acl_url`
-warns and `require_acl_url` **refuses to serve prod** without it (dev warns: dev's
-live origin is not fronted by the edge); (2)
+warns and `require_acl_url` **refuses to serve prod** without it, or with a URL that
+names the default user (dev warns: dev's live origin is not fronted by the edge).
+`require_read_only` then PROVES it at start: a `SET` on a cache key and an `XADD`
+on a command stream must both be refused, or prod does not serve; (2)
 **`bus_client.set_read_only(True)`** — `bus_client.request` is the **single Tier-1
 write chokepoint**, so one refusal covers every command on every page, and on these
 pages that reaches `gamma_analyze` / `gamma_explain` (**paid Claude calls**) and
@@ -904,8 +906,9 @@ events to the private app), `@write`, or `@stream` — the streams are `cmd:*`.
 `generate_units._env_file`, and it is about BLAST RADIUS, not ownership. `.env` carries
 `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `PROXY_SHARED_SECRET`,
 `SMS_SMTP_APP_PASSWORD`, `DISCORD_WEBHOOK_URL` and `GAMMA_BRIEFING_WEBHOOK_URL`; the
-public process needs `REDIS_LIVE_URL` + `MEMURAI_PASSWORD` and reads none of the
-others. Neither `.gitignore`'s `.env` line nor `backup_local.EXTRA_FILES`' entry
+public process needs `REDIS_LIVE_URL` alone (its own user and password are in the
+URL; `shared.bus.client.env_password` hands the stack password to no URL that
+carries a credential) and reads none of the others. Neither `.gitignore`'s `.env` line nor `backup_local.EXTRA_FILES`' entry
 matches the new name, so both carry it explicitly. ⚠ **`REDIS_LIVE_URL` carries the
 Redis DB INDEX in its path**, bypassing `repo_paths.REDIS_DB` — prod's line copied
 into dev aims dev's public process at **prod db 0**. Setup:
@@ -1433,8 +1436,9 @@ that the surface is covered. Two distinct holes, each fixed at its own layer:
   counts as a bear vote. `composite_reading` (a finite total ABOVE zero at
   non-zero confidence) is now the one test, used by the snapshot, the bridge
   (which writes `unknown` and a null score) and the service; velocity is
-  withheld with it. The NUMBER `0.00` itself still draws on the screens
-  (scorecard AC-60).
+  withheld with it. The producer publishes `total_score: None` for that case, so
+  no screen draws 0.00 for it; `_composite_gate` accepts that one shape and still
+  raises on a missing or junk total.
   ⚠ **The absence value has to be the one the consumers already test** — `None`
   here, since two of the three gate on `size is not None` and an empty-string
   triple is a truthy tuple that renders blank rather than dashed.
@@ -1445,6 +1449,20 @@ that the surface is covered. Two distinct holes, each fixed at its own layer:
   payload the service does not write. **A consumer-side guard proves nothing
   until a test drives it from the PRODUCER** — which is the same reason
   characterization tests pinned the ADX bug below.
+
+**Four sentiment invariants from the 2026-10 audit, each of which moved live
+numbers when it landed.** (1) The three volatility scorers (`scoring/vix.py`)
+never rise as volatility rises; two calm-band segments in each sloped the wrong
+way. (2) `sectors_score` returns `None` for no data and 1..10 for a real day (a
+crash day is 1.0, a flat tape 5.0); the history backfill drops a day only on
+`None`. (3) The Week and Month gauges call `score_price` with `None` for VWAP
+(the term is left out and the direction renormalised) and
+`expected_timeframes=1`, so their price score is a full reading rather than a
+third of one. (4) Velocity, the regime-break flag, the bridge's rolling averages
+and `derived.prev_total` compare the live composite with **live closes**
+(`composite_close` in the intraday store, `handlers._live_closes`), never with
+the stored history, which is scored by a different method; with no live history
+there is no velocity.
 
 **Do not "fix" this in `_clamp` itself** — it looks like the one-line cure and is
 not. `_clamp` is **duplicated nine times** across `sentiment-dashboard/scoring/`
@@ -2030,15 +2048,20 @@ wrong section, so the storm cap would look configured and not exist. The
 resource control lives — and carrying both traps in one file is why each is
 pinned by its own test.
 
-⚠ **Only `webgui_live` carries a memory cap** (`LIVE_MEMORY_HIGH` 768M /
-`LIVE_MEMORY_MAX` 1G). It is the one internet-facing, unauthenticated,
-**unthrottled** process — no Caddy `rate_limit` (it needs an `xcaddy` build), and
+⚠ **Two units carry a memory cap**: `webgui_live` (`LIVE_MEMORY_HIGH` 768M /
+`LIVE_MEMORY_MAX` 1G) and the private web app (`APP_MEMORY_HIGH` 1536M /
+`APP_MEMORY_MAX` 2G; it parses the one unauthenticated body, `POST /login`, which
+is also limited to 16 KB at the edge and in the handler). `webgui_live` is the one
+internet-facing, unauthenticated, **unthrottled** process — no Caddy `rate_limit` (it needs an `xcaddy` build), and
 a measured ~619 KB of retained NiceGUI `Client` per anonymous GET pruned only
 after ~70 s. The cap does not stop a flood; it decides **who dies** in one: the
 public screens alone, back on `Restart=on-failure`, instead of the OOM killer
-choosing among the services, the trading UI and Redis. ⚠ **Never add it to the
-other units as a drive-by** — they are not internet-facing and a wrong value
-kills the stack. The request rate is bounded only when `config/edge.toml`
+choosing among the services, the trading UI and Redis. ⚠ **Never add one to the
+services or the proxy as a drive-by** — they are not internet-facing and a wrong
+value kills the stack. The public unit also sets `NoNewPrivileges`; ⚠ path
+isolation (`InaccessiblePaths`, `ProtectHome`) is **silently not applied** in a
+`--user` unit on this host, so a test refuses those directives rather than let
+them read as protection. The request rate is bounded only when `config/edge.toml`
 turns Caddy's page-load limit on — off by default, because it needs a custom
 Caddy build with no apt security updates (runbook "Edge rate limit").
 
@@ -2304,8 +2327,9 @@ the launcher guards were all green in tests and wrong in practice.
 ⚠ **With no dev environment, the middle step has nowhere to run — say so rather
 than skipping it silently.** `/home/administrator/dev` is the LIVE stack, so
 checking a feature branch out there is the exact disaster this rule exists to
-prevent, and the guard hook does not catch it: the hook matches the local Windows
-prod path, not an `ssh` command, and that directory is not named `prod`. The
+prevent. The guard hook knows that path (it matches `/home/administrator/dev` on
+a path-component boundary, in an `ssh` command too, and names the promote command
+in its refusal), but it stops git verbs, not a decision to test there. The
 honest options are to stand a second checkout up as real dev (`name = "dev"`,
 ports 9500/9210-9216, `owns_proxy = false`, its own units), or to accept
 verifying a genuinely additive, read-only change on prod after it lands — and to
@@ -2384,8 +2408,12 @@ because it is the only record that the split has actually worked end to end, and
 it is what standing dev back up would be restoring. Dev was `enable`d at boot;
 its generated `trading-dev-backup.timer` was deliberately **not** enabled, since
 its stores are a disposable copy of prod's.
-⚠ `/health` cannot tell you whether schedulers are off — `scheduler_alive`
-defaults true and means "restart budget not exhausted". Read
+⚠ `/health` reports `up: false` with a `reason` when a service's scheduler has
+stopped or its last tick is older than `[health] tick_stale_sec` (600) in
+`config/services.toml`; a service whose schedulers are switched OFF (dev) is not
+unhealthy. `scheduler_alive` alone still means only "restart budget not
+exhausted". `dead_letters` is the count of commands the service could not run
+(bounded at `[dead_letters] keep`, never re-run; `None` when it cannot be read). Read
 `scheduler_uptime_s` (`null` = never started) and `scheduler_last_tick_age_s`
 (time since the loop last went round, via `services/_heartbeat.py`; each
 service's `scheduler.loop` must call `_heartbeat.tick()` inside its `while`, and
@@ -2583,6 +2611,8 @@ knows whether a missing input means "neutral 50", "floor the magnitude" or
 "confidence 0". `_finite` is deliberately **not** consolidated: three functions
 share that name and `momentum_regime`'s takes an *iterable*, so hoisting it would
 hand someone the wrong one silently. A test records that.
+
+**CI runs every suite, and every suite can fail the build.** `tests/test_ci_covers_every_suite.py` fails when a suite loses its row in `.github/workflows/ci.yml`, a row becomes optional, or a deselect comes back; the four engine folders are linted like the rest (`tests/test_lint_scope.py`), and a `typecheck` job runs pyright on its narrow scope. A new test folder needs a row there.
 
 **`pytest` now defaults to `-rf`** (`[tool.pytest.ini_options]` in
 `pyproject.toml`, which every per-app run resolves as its configfile). "Compare
@@ -3237,10 +3267,17 @@ strike ladder, and this block has shipped stale ones twice.
 
 ## What a replayed command may re-do
 
-**Six side-effectful commands are replay-guarded, and the DISPATCHER applies
-the guard.** Consumer groups are created at id `0`, so a fresh group re-delivers
-the whole backlog — the documented incident where a first launch "burned a day's
-API budget in one go". `handlers._REPLAY_GUARDED` lists them — `rescue_apply`
+**Replay is stopped in two places.** Consumer groups are created at id `0`, so a
+fresh group re-delivers the whole backlog — the documented incident where a first
+launch "burned a day's API budget in one go". (1) The CONSUMER (`_scaffold`)
+drops any command older than `[age] replay_max_sec` (900) in
+`config/services.toml` unless the service lists it as safe late (`make_app(
+late_ok=)`; options: `refresh_paper`, `paper_reload`, `captured_reload`,
+`calibration_refresh`). (2) The options DISPATCHER refuses a listed
+side-effect command older than `side_effect_max_sec` (180).
+`handlers._REPLAY_GUARDED` lists them — the seven that mutate the paper books
+(`paper_reset`, `paper_close`, `paper_delete`, `paper_delete_closed`,
+`captured_close`, `set_autoclose`, `set_manual_paper_lifecycle`) and `rescue_apply`
 (MUTATES the paper book; its own is-it-open + 15%-drift guards pass a fast
 replay), `gamma_analyze` (a PAID Claude call), `calc_rate` and `dossier` (Schwab
 calls for a page that has moved on), `x_post` / `x_post_report` (a public post) —
@@ -3354,7 +3391,11 @@ structurally unreachable from a share leg. Design:
 **The Strategy Finder has its own payoff math with TWO valuation paths**
 (`strategy_scanner.payoff_metrics`), deliberately not the Calculator's
 `calc_summary_generic` (which ignores commission, prices every leg at one IV and
-uses a different PoP model). A single-expiry, options-only leg set is valued at
+uses a different PoP model). The Finder's probability of profit
+(`pop_from_payoff`) is LOGNORMAL, centred on the forward, over the time left to
+the row's own expiry on the clock; inside two months it sits within a point of
+the zero-drift normal it replaced, and it moves long-dated and same-day rows. A
+single-expiry, options-only leg set is valued at
 intrinsic on that expiry — ⚠ **that path must stay byte-identical**, because it is
 every structure the Finder built before 2026-09-13 and their grades and cuts rest on
 it; `test_single_expiry_options_never_take_the_front_valuation_path` guards it. A
@@ -3517,6 +3558,21 @@ holds only PCS/CCS/IC and the ledger is empty, so these levels are **sourced,
 not fitted**, which is why they are config. Design:
 [the D3 doc](docs/plans/2026-09-12-debit-exit-rules-design.md).
 
+## What a Rescue roll, narrow and convert BOOK
+
+**A roll or a narrow reserves the REMAINING position's own risk**: its width
+less the credit it carries. The cash the action cost is realized at once, so a
+max loss built from "entry credit plus the action's net cash" reserves the
+realized loss a second time ($1,060 against $760 on a 10-wide spread sold for
+2.40, closed at 5.40, reopened for 2.40). `apply_roll` books the risk of the row
+it writes (`_standalone_max_loss`), never the candidate's figure on trust.
+
+**A convert's credit joins `entry_credit`** and is realized at the close, like
+the credit the position was opened for; only the commission is booked at the
+convert. Realized at once with `entry_credit` left alone, every later mark (which
+prices all four legs against `entry_credit`) read worse than the position was by
+the whole convert credit, and the money stop sat that much nearer.
+
 ## A CCS keeps its strikes in `short_strike`, and two bugs turned on forgetting it
 
 ⚠ **Only an IC uses `call_short` / `call_long`.** A standalone **CCS** keeps its
@@ -3550,6 +3606,17 @@ CCS / IC branches and asserts `_LEG_LAYOUT` matches. ⚠ Walk `parent.body`, not
 `If` node — the node's `orelse` is the whole `elif` chain, so a whole-node walk
 lets PCS "read" the IC branch's fields and the comparison passes on anything.
 Assessment: [the D2 doc](docs/plans/2026-09-12-iron-butterfly-assessment.md).
+
+## A quote or a Greek that is not usable is ABSENT, and one function says so
+
+**`shared/greeks.py`** (`usable`, `delta`, `gamma`) is the one test for a Greek
+read off a chain: Schwab sends **`-999`** as a placeholder, which is finite and
+so passed every NaN guard, pinned the delta stop and poisoned net gamma. The
+repricer, the recommender, the gamma engine and the big-delta detector all read
+through it. **A leg with no bid is still a market when its offer is at or under
+`[marks] zero_bid_max_ask`** (`config/paper.toml`): that is the long leg of a
+spread that has won, and without a mark the position gets no target and no
+profit lock. A zero bid under a larger offer stays unmarked.
 
 ## Book Greeks are NET per position, and delta is a direction not a hedge ratio
 
@@ -3841,7 +3908,7 @@ session is a bug that had nowhere else to surface.
 
 | guarded body | policy |
 |---|---|
-| **>= 15 lines** (41 found) | must speak — `_degrade.degraded(...)` or its own log line. Pinned by `services/tests/test_no_silent_degrades.py`. |
+| **>= 15 lines** (41 found) | must speak — `_degrade.degraded(...)` or its own log line. Pinned by `services/tests/test_no_silent_degrades.py`, which reads the handler's CALL NODES (text that merely mentions a log does not count) and also walks `options-scanner/` and `shared/`. |
 | **< 15 lines** (248 found) | leave alone. These are one-statement parse guards (`try: return float(x) except: return None`) where the missing-value contract IS the point; a WARNING per row per tick is spam, not observability. |
 
 ⚠ **Do not "just enable ruff BLE001" instead.** It flags every `except Exception`,
@@ -4032,9 +4099,13 @@ what it WOULD have reused, `on` answers repeats locally. Design:
 4. **A new caller states what it needs.** One that must have a real fetch sends
    `maxAge=0`. A poller faster than the store's limit sends its own `maxAge`, or
    it re-reads its own previous answer (the Market Dashboard's 3-second poll
-   sends 1; whenever the chain store is on, the collector sends
-   `collection.fresh_max_age_sec` for every symbol due a real fetch, with or
-   without a tail). A bare `requests.get` is counted as
+   sends 1; the collector sends `collection.fresh_max_age_sec` for every symbol
+   due a real fetch, in EVERY mode, with or without a tail; a paper FILL and a
+   Rescue apply send 0, and a position mark sends `[marks] chain_max_age_sec`
+   from `config/paper.toml`; the trade-idea settlement sends 0 on
+   `/pricehistory`, which takes `maxAge` too). A caller's limit only tightens.
+   The store's own configured limits are clamped in the loader
+   (`marketdata_config.AGE_CEILINGS`). A bare `requests.get` is counted as
    caller `unknown` unless it sets `X-Caller` through `proxy_client.caller_label`.
 5. **The collector has two tiers once `collection.tail_interval_min` is above 1**
    (it ships 1, and needs the chain store on). CORE symbols — `config/symbols.toml`
@@ -4054,7 +4125,9 @@ what it WOULD have reused, `on` answers repeats locally. Design:
    sat from the fresh one (they claim no saving). Shadow makes
    `on`'s decision with `on`'s limits and compares the answer with Schwab's. It
    counts low — it cannot reproduce the wider-window refetch or two identical
-   requests sharing one call — with one known exception: while the mode is shadow the collector sends no age limit, so in the few minutes it polls while every session is closed (about 08:26-08:29 and 15:16-15:19 CT) its requests count as would-be hits against its own previous chain — about 700 `shadow_hit_match` a day on `chains` for caller `options_svc` that `on` will not save, because there it sends its 20-second limit. Subtract them when reading the counts.
+   requests sharing one call. Daily bars have a `closing` period from the
+   regular close until the bar settles: nothing is served from the bar store
+   during it, so a series fetched before the close is never the day's bar after it.
 
 **Measure before you optimise a localhost read — twice now the estimate was the
 bug (2026-08-20).** The Desk's 11-view seed was audited as "~50-100 ms of event-loop

@@ -1263,7 +1263,10 @@ updates on its own about every two minutes whether or not the page is open; pres
   Circling / Gliding / Diving</strong> — and a plain-English suggestion. Hover the word
   to see what it means.</li>
 <li><strong>Signals</strong> — four tiles (Bias / Signal / Yesterday / Change) with rate-of-change
-  readings and a divergence line beneath. Hover the Bias or Signal word to see which
+  readings and a divergence line beneath. Yesterday, Change and the rate-of-change
+  readings compare today's live reading with earlier sessions' live readings; they
+  show a dash until a few sessions have been recorded, and when the data feed is
+  down the score itself shows a dash rather than 0.00. Hover the Bias or Signal word to see which
   band of the sentiment composite it covers. A high composite means calm, supportive
   conditions, so <em>Bullish</em> describes a supportive backdrop — not fear, and not a
   promise that price will rise.</li>
@@ -2976,6 +2979,11 @@ in a trading workflow, which is why they sit apart.</p>
   tier. The gateway's card also shows the <strong>Schwab auth</strong> state.</li>
 <li>A <strong>Re-authorize</strong> button on the gateway card opens Schwab's OAuth login in a new
   browser tab. Use it when the auth line says the login has expired.</li>
+<li>A service whose scheduler has <strong>stopped</strong>, or has not run for ten minutes, shows
+  as unhealthy with the reason, even though the process is still answering. A card
+  also says when a service holds <strong>commands it could not run</strong> (they are kept for
+  you to read and are never re-run), and the Redis card says whether Redis is
+  <strong>saved to disk</strong>.</li>
 <li>A <strong>data-freshness</strong> table showing each domain's latest cache write and its age.
   This is the more informative half: a service can be <em>online</em> and still not be
   publishing, and only this table shows that.</li>

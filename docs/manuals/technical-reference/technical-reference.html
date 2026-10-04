@@ -186,7 +186,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#known-issues">Known issues</a><ul>
-<li><a href="#the-price-sub-score-nan-exposure-open">The PRICE sub-score NaN exposure (open)</a></li>
+<li><a href="#the-price-sub-score-missing-inputs-and-the-daily-horizons">The PRICE sub-score: missing inputs, and the daily horizons</a></li>
 <li><a href="#expected-move-deliberately-disagrees-with-thinkorswim">Expected Move deliberately disagrees with ThinkorSwim</a></li>
 <li><a href="#index-open-interest-reads-zero-after-hours">Index open interest reads zero after hours</a></li>
 </ul>
@@ -1135,12 +1135,15 @@ in <code>WEIGHTS</code> and does not enter the blend.</p>
 neutral band around 1.0.</p>
 <p><strong>Term structure</strong> — <code>score_term(vix, vix_ma)</code> on <code>ratio = vix / vix_ma</code>:</p>
 <pre><code>ratio &lt; 0.85          -&gt; 10.0   (deep contango, calm)
-0.85 &lt;= ratio &lt; 0.95  -&gt; 7.0 + (ratio-0.85)/0.10 * 2.0
-0.95 &lt;= ratio &lt; 1.05  -&gt; 5.0 + (ratio-0.95)/0.10 * 1.0   (neutral band)
+0.85 &lt;= ratio &lt; 0.95  -&gt; 9.0 - (ratio-0.85)/0.10 * 2.0
+0.95 &lt;= ratio &lt; 1.05  -&gt; 6.0 - (ratio-0.95)/0.10 * 1.0   (neutral band)
 1.05 &lt;= ratio &lt; 1.15  -&gt; 4.0 - (ratio-1.05)/0.10 * 1.0
 1.15 &lt;= ratio &lt; 1.30  -&gt; 2.0 - (ratio-1.15)/0.15 * 1.0
 ratio &gt;= 1.30         -&gt; 1.0    (backwardation, stress)
 </code></pre>
+<p>The score never rises as the ratio rises: a calmer reading always scores at least
+as high as a more stressed one. (Until 2026-10-04 the two calm segments read
+<code>7.0 + …</code> and <code>5.0 + …</code>, so inside each band a higher ratio scored higher.)</p>
 <p><strong>VIX1D</strong> — <code>score_vix1d(vix1d, vix)</code> on <code>ratio = vix1d / vix</code>: same shape with
 breakpoints 0.80 / 0.88 / 0.98 / 1.05 / 1.15.</p>
 <p><strong>Term slope</strong> — <code>score_term_slope(vix9d, vix)</code> on <code>slope = vix9d / vix</code>:
@@ -1266,8 +1269,11 @@ rank domain from the data rather than assuming a top-20 window; live industry ra
 <p>Cap-weighted daily move across the 11 GICS sectors, mapped to a 1–10 score:</p>
 <pre><code>cap_wtd_return = Σ(sector_daily_return · sector_cap_weight)
 </code></pre>
-<p>Mapping (return → score): <code>+2.0% → 10</code>, <code>+1.5 → 9</code>, <code>+1.0 → 8</code>, <code>+0.5 → 7</code>,
-<code>0..+0.5 → 6</code>, <code>-0.5..0 → 5</code>, <code>-1.0..-0.5 → 4</code>, <code>-1.0 → 3</code>, <code>-1.5 → 2</code>, <code>≤-2.0 → 1</code>.
+<p>Mapping: <code>score = 5.0 + 2.5 · cap_wtd_return</code> (in percent), so a flat tape is 5.0
+and +2.0% is 10. One point is added when at least 80% of sectors are up, and one
+taken off when at least 80% are down. The result is held to <strong>1–10</strong>: a crash day
+scores 1.0. With no sector data the score is <strong>absent</strong> (<code>None</code>), not 0, and the
+component carries no weight; the 30-day history drops a day only for that.
 Cap weights live in <code>sectors_ref.SP500_SECTOR_WEIGHTS</code>.</p>
 <h3 id="the-sector-industry-heat-scale">The Sector &amp; Industry heat scale</h3>
 <p><strong>File:</strong> <code>webgui/pages/sector_heat.py</code> (display only — it feeds no score)</p>
@@ -1297,6 +1303,14 @@ roc_5d = today - scores[-5]
 z_20d  = (today - mean(scores[-20:])) / std(scores[-20:])
 regime_break = abs(z_20d) &gt; 1.5
 </code></pre>
+<p><strong>What <code>scores</code> holds.</strong> When a live composite is on screen, the history is each
+earlier session's <strong>last live composite</strong> (recorded by the service at every
+intraday sample, 90 sessions kept), never the stored 30-day history. The two are
+scored by different methods (the stored history has no put/call reading), and the
+gap between them, measured at 0.60 points on average, was being read as movement.
+With fewer than three live sessions recorded the rate-of-change readings are a
+dash; the Yesterday and Change tiles use the same series. A stored day shown with
+no live reading is compared with the stored history.</p>
 <p><strong>Divergence</strong> (<code>divergence(named_scores)</code>): of the components with score &gt; 0, if
 <code>max_score − min_score ≥ 4</code>, flag a low-conviction divergence between the highest
 and lowest components.</p>
@@ -1525,6 +1539,14 @@ backing.</p>
 <p><strong>Risk/Reward</strong> — <code>norm_rr(rr_pct)</code>: <code>min(100, rr_pct / 50 · 100)</code> (50%+ R:R → 100).</p>
 <p><strong>Probability of Profit</strong> — <code>norm_pop(pop_pct)</code>: <code>min(100, (pop_pct − 50) / 45 · 100)</code>
 (PoP 50% → 0, 95%+ → 100).</p>
+<p>On the Strategy Finder the probability itself (<code>pop_from_payoff</code>) is the share of
+a <strong>lognormal</strong> distribution of the stock price at the front expiry in which the
+position is in profit: <code>ln(S_T / S_0) ~ N((r − q − σ²/2)·T, σ²·T)</code>, with <code>σ</code> the
+at-the-money implied volatility and <code>T</code> the time left to the row's own expiry on
+the clock. Inside two months it is within a point of the zero-drift normal model
+it replaced on 2026-10-04; it is lower on long-dated short premium (two years at
+70% volatility: 54.8% against 66.0%) and it reads the hours left on an
+expiration-day row, which used to get a fixed twelve.</p>
 <p><strong>Theta efficiency</strong> — <code>norm_theta(net_theta, max_loss, all_theta_efficiencies)</code>:
 <code>efficiency = |net_theta| / max_loss · 100</code> (daily decay as % of risk). Normalized
 by <strong>percentile rank</strong> among all candidates when peer data exists, else linearly:
@@ -3486,19 +3508,20 @@ status is that filing's own answer and is not retried.</p>
 <h1 id="known-issues">Known issues</h1>
 <p>Documented defects a maintainer should know about before trusting a number. These
 are recorded rather than silently carried.</p>
-<h2 id="the-price-sub-score-nan-exposure-open">The PRICE sub-score NaN exposure (open)</h2>
-<p><code>sentiment_svc/compute._finite_pcts</code> guards only the <strong>sector</strong> input. An all-NaN
-read of the structural price inputs (<code>macd_hist</code> / <code>rsi</code> / <code>adx</code>, feeding
-<code>score_price</code> with a hardcoded <code>vwap_pct = 0.0</code>) scores <strong>82.50 — near-maximum
-bullish — at unchanged confidence</strong>, where a sane read of the same tape scores
-<strong>56.25</strong>. The same all-NaN read in <code>compute_intraday_trend</code>, which drives the
-<strong>live Day gauge</strong>, scores <strong>92.50</strong>.</p>
-<p>The failure is silent: nothing in the payload marks the inputs as missing, so the
-gauge renders a confident bullish number built on nothing. A fix must cover <strong>both
-call sites with one shared filter</strong> — patching only <code>score_price</code> leaves the live
-gauge wrong.</p>
-<p><strong>Until it is fixed</strong>, treat a strongly bullish structural reading with
-<em>unremarkable</em> confidence as suspect, and cross-check against the Market Dashboard.</p>
+<h2 id="the-price-sub-score-missing-inputs-and-the-daily-horizons">The PRICE sub-score: missing inputs, and the daily horizons</h2>
+<p>Both price-scoring call sites go through <code>sentiment_svc/compute._finite_score_price</code>.
+A non-finite indicator is replaced by the value that zeroes its term and its
+weight is withheld from the confidence, so an outage moves the sub-score toward
+50 <strong>and</strong> lowers its confidence; all inputs missing gives 50.0 at confidence 0,
+which drops the price input out of the blend. (Before that guard an all-NaN read
+scored 82.50 to 92.50 at full confidence.)</p>
+<p>The <strong>Week and Month</strong> gauges have one timeframe (daily bars) and no VWAP. They
+call the scorer with no VWAP term, so the direction is spread over alignment,
+MACD and RSI (weights 0.50 / 0.15 / 0.15, divided by 0.80), and with one
+timeframe of one, so a complete daily read carries full confidence. Until
+2026-10-04 they passed a neutral VWAP of 0.0 and one timeframe of an assumed
+three: the price sub-score could not leave 10–90 and its weight in the blend was
+0.15 against the sector term's 0.20, where the weights are 0.45 and 0.20.</p>
 <h2 id="expected-move-deliberately-disagrees-with-thinkorswim">Expected Move deliberately disagrees with ThinkorSwim</h2>
 <p>Not a defect — a definitional difference that has been measured and is documented
 in full under <em>Expected move and IV analysis</em>. Two independent differences push in

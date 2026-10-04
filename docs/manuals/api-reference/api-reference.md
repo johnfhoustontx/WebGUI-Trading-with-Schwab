@@ -192,7 +192,17 @@ a contract (listed in *Cache Key Index*).
 
 Each service is an async FastAPI app built by `services/_scaffold.py:make_app`,
 which provides the lifespan, the command-consumer loop, and a `GET /health`
-endpoint returning `{"domain": ..., "up": true}`.
+endpoint. `up` is **false**, with a `reason`, when the service's scheduler has
+stopped or its last tick is older than `[health] tick_stale_sec` (600 s) in
+`config/services.toml`. Other keys: `scheduler_alive`, `scheduler_uptime_s`,
+`scheduler_last_tick_age_s`, `dead_letters` (commands the service could not run,
+kept for reading and never re-run; `null` if the count cannot be read),
+`degrades_total` and `degrades`.
+
+The consumer drops a command older than `[age] replay_max_sec` (900 s) unless the
+service lists it as safe to run late; the options service also refuses thirteen
+side-effect commands older than `side_effect_max_sec` (180 s). A dropped
+`paper_create` or `x_post` is answered on its result view.
 
 ## Sentiment service — :8210
 
@@ -576,7 +586,7 @@ rate is unchanged. A request answered from the local store never waits.
 | `/quote` | `symbol, maxAge?` | Single quote |
 | `/quotes` | `symbols` (comma-sep), `maxAge?` | Quotes, keyed by symbol |
 | `/chains` | `symbol, contractType, range, fromDate?, toDate?, strikeCount?, maxAge?` | Options chain |
-| `/pricehistory` | `symbol, periodType, period, frequencyType, frequency, needExtendedHoursData` | Price bars |
+| `/pricehistory` | `symbol, periodType, period, frequencyType, frequency, needExtendedHoursData, maxAge` | Price bars. `maxAge` (seconds) is the oldest stored daily series the caller accepts; `0` forces a fetch. It can only tighten the store's own rules |
 | `/instruments` | `symbol, projection` (e.g. `fundamental`) | `{instruments:[{fundamental, symbol, description, ...}]}` |
 | `/passthrough` | `endpoint, params` | One of five market-data endpoints, matched exactly: `/expirationchain`, `/quotes`, `/instruments`, `/pricehistory`, `/chains`. Anything else is **400**. Needs `X-Proxy-Secret` when a secret is configured |
 
@@ -670,7 +680,12 @@ streaming fails).
 | `/track` | POST | `{trade_id, symbol, strategy, expiration, quantity, entry_credit, short_strike, long_strike, call_short, call_long, target_mid, stop_mid}` |
 | `/untrack` | POST | `{trade_id}` |
 
-`/track` always answers HTTP 200 with a `status`:
+Both routes need the **`X-Proxy-Secret`** header, like the Trader API (503 with
+no secret configured, 401 with a wrong one). `/track` tracks the Ledger's own
+open row for `trade_id`; the body's other fields are not trusted, and a
+`trade_id` that is not an open Ledger trade is `refused`.
+
+`/track` otherwise answers HTTP 200 with a `status`:
 
 | `status` | Meaning |
 |----------|---------|
