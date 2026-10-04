@@ -48,7 +48,12 @@ def at(d, h, m):
 def test_the_three_periods_of_a_trading_day():
     assert ms.bar_epoch(at(MON, 7, 0), 10, Cal) == ("2026-10-05", "pre")
     assert ms.bar_epoch(at(MON, 8, 30), 10, Cal) == ("2026-10-05", "live")
-    assert ms.bar_epoch(at(MON, 15, 9), 10, Cal) == ("2026-10-05", "live")
+    # From the regular close until the bar settles is its OWN period. It read
+    # "live" here until 2026-10-04, so a series fetched at 14:45 was served at
+    # 15:05 as the day's bar: 506.25 against a 506.50 close (audit AC-101).
+    assert ms.bar_epoch(at(MON, 14, 59), 10, Cal) == ("2026-10-05", "live")
+    assert ms.bar_epoch(at(MON, 15, 0), 10, Cal) == ("2026-10-05", "closing")
+    assert ms.bar_epoch(at(MON, 15, 9), 10, Cal) == ("2026-10-05", "closing")
     assert ms.bar_epoch(at(MON, 15, 10), 10, Cal) == ("2026-10-05", "settled")
     assert ms.bar_epoch(at(MON, 23, 0), 10, Cal) == ("2026-10-05", "settled")
 

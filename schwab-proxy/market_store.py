@@ -412,17 +412,25 @@ def bar_key(params) -> tuple:
 
 
 def bar_epoch(now_ct, settle_min: float, cal) -> tuple:
-    """``(session date, "pre" | "live" | "settled")``.
+    """``(session date, "pre" | "live" | "closing" | "settled")``.
 
     ``cal`` is ``shared.market_calendar`` (or a stand-in with the same four
     calls). An entry is served only inside the period it was fetched in, so
     each boundary refetches once — which is also what picks up a split
-    adjustment to the history."""
+    adjustment to the history.
+
+    ``closing`` runs from the regular close until the bar settles. It was part
+    of ``live``, so a series fetched at 14:45 was served at 15:05 as the day's
+    bar (506.25 against a 506.50 close - audit AC-101). Nothing is served from
+    the store during it: see ``Gateway._bars``."""
     d = now_ct.date()
     if cal.is_trading_day(d):
-        settled_at = cal.regular_close_on(d) + timedelta(minutes=float(settle_min))
+        close = cal.regular_close_on(d)
+        settled_at = close + timedelta(minutes=float(settle_min))
         if now_ct >= settled_at:
             return (d.isoformat(), "settled")
+        if now_ct >= close:
+            return (d.isoformat(), "closing")
         if cal.regular_session_has_opened(now_ct):
             return (d.isoformat(), "live")
         return (d.isoformat(), "pre")
@@ -685,6 +693,20 @@ def effective_max_age(requested, cfg, *, closed: bool) -> float:
         if math.isfinite(value) and value >= 0:
             return min(value, float(MAX_REQUEST_AGE_SEC))
     return float(cfg["closed_max_age_sec"] if closed else cfg["max_age_sec"])
+
+
+def _request_age(requested):
+    """A caller's ``maxAge`` as seconds, or None for "none given": text, NaN,
+    infinity and negatives are all none. Capped at ``MAX_REQUEST_AGE_SEC``."""
+    if requested is None:
+        return None
+    try:
+        value = float(requested)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not (math.isfinite(value) and value >= 0):
+        return None
+    return min(value, float(MAX_REQUEST_AGE_SEC))
 
 
 class _FetchFailed(Exception):
@@ -1084,12 +1106,14 @@ class Gateway:
         return Served("partial", oldest, data=answer)
 
     # ---- daily bars ------------------------------------------------------
-    def pricehistory(self, params, caller) -> Served:
+    def pricehistory(self, params, caller, max_age=None) -> Served:
+        """``max_age`` is the caller's own limit on a stored answer, in seconds
+        (0 = fetch). It can only tighten the store's rules, never loosen them."""
         daily = (str(params.get("frequencyType")) == "daily"
                  and str(params.get("needExtendedHoursData", "false")).lower() == "false")
         mode = self._mode("bars") if daily else "off"
         return self._answer("pricehistory", "/pricehistory", params, caller, mode,
-                            lambda: self._bars(params, caller, mode))
+                            lambda: self._bars(params, caller, mode, max_age))
 
     def _today_quote(self, symbol, cfg, now_ct):
         """``(quote, its age)`` for the stored quote today's bar may be built
@@ -1137,19 +1161,24 @@ class Gateway:
             return Served("hit", age, body=body)
         return None
 
-    def _bars(self, params, caller, mode) -> Served:
+    def _bars(self, params, caller, mode, max_age=None) -> Served:
         cfg = self._cfg.section("bars")
         now_ct = self._now_ct()
         epoch = bar_epoch(now_ct, float(cfg["settle_min"]), self._cal)
         live = epoch[1] == "live"
+        # Between the close and the settle the day's bar is still being
+        # finalised: every request is fetched, none is answered from the store.
+        closing = epoch[1] == "closing"
+        limit = _request_age(max_age)
         key = bar_key(params)
         symbol = key[0]
         store = self.bar_store
         self._new_day(now_ct.date())
 
         if mode == "shadow":
-            would = self._bar_local(store.get(key, epoch=epoch), live, symbol,
-                                    cfg, now_ct)
+            would = (None if closing else self._within(
+                self._bar_local(store.get(key, epoch=epoch), live, symbol,
+                                cfg, now_ct), limit))
             began = self._clock()
             data = self._fetch("/pricehistory", params)
             try:
@@ -1158,15 +1187,15 @@ class Gateway:
                 self._degraded("pricehistory", answered=True)
             return Served("pass", 0.0, data=data)
 
-        seen = store.get(key, epoch=epoch)
-        local = self._bar_local(seen, live, symbol, cfg, now_ct)
+        seen = None if closing else store.get(key, epoch=epoch)
+        local = self._within(self._bar_local(seen, live, symbol, cfg, now_ct), limit)
         if local is not None:
             self._record("pricehistory", caller, local.kind)
             return local
         lock_key = ("bars", key)
         ticket = next(self._tickets)
         with self._locks.holding(lock_key):
-            again = store.get(key, epoch=epoch)
+            again = None if closing else store.get(key, epoch=epoch)
             if again is not None and (seen is None or again[1] > seen[1]):
                 self._record("pricehistory", caller, "coalesced")
                 return Served("coalesced", self._clock() - again[1], body=again[0])
@@ -1178,6 +1207,13 @@ class Gateway:
                 self._degraded("pricehistory", answered=True)
             self._record("pricehistory", caller, "upstream")
         return Served("miss", 0.0, data=data)
+
+    @staticmethod
+    def _within(local, limit):
+        """``local`` unless it is older than the caller's own ``limit``."""
+        if local is None or limit is None or local.age <= limit:
+            return local
+        return None
 
     def _shadow_bars(self, would, data, began, key, epoch, cfg, now_ct, caller):
         """Shadow's work on a daily series Schwab has just sent: what on would

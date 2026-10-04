@@ -134,3 +134,20 @@ def test_publish_defaults_to_the_module_root(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "SITE_ROOT", tmp_path)
     assert S.publish(_idea(), _png(), "cap", NOW)
     assert (tmp_path / "ideas.json").exists()
+
+
+def test_an_ideas_settlement_close_asks_for_a_series_fetched_now(monkeypatch):
+    """AC-101: the result is permanent on the public site, so the close it
+    settles on must not be a stored series from before the close."""
+    from services.options_svc import compute
+    seen = {}
+
+    class _C:
+        def _request(self, endpoint, params):
+            seen["endpoint"], seen["params"] = endpoint, dict(params)
+            return {"candles": []}
+
+    monkeypatch.setattr(compute._proxy, "schwab_client", _C())
+    compute.daily_close("SPY", "2026-10-02")
+    assert seen["endpoint"] == "/pricehistory"
+    assert seen["params"]["maxAge"] == 0

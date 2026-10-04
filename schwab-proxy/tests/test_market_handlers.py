@@ -38,7 +38,7 @@ class FakeGateway:
     def quotes(self, symbols, caller, max_age=None):
         return self._answer("quotes", symbols, caller, max_age)
 
-    def pricehistory(self, params, caller):
+    def pricehistory(self, params, caller, max_age=None):
         return self._answer("pricehistory", params, caller)
 
 
@@ -564,3 +564,23 @@ def test_a_dead_token_is_one_call_and_a_500_through_the_module_gateway(monkeypat
         assert "Refresh token expired" in resp.json()["detail"]
         assert calls == [endpoint]
     assert schwab_proxy._GATEWAY.degrades == before
+
+
+def test_pricehistory_passes_the_callers_age_limit_to_the_gateway(monkeypatch):
+    """AC-101: ``/pricehistory`` took no age override at all."""
+    import schwab_proxy
+    from fastapi.testclient import TestClient
+    seen = {}
+
+    class _G:
+        def pricehistory(self, params, caller, max_age=None):
+            seen["max_age"] = max_age
+            seen["params"] = dict(params)
+            import market_store
+            return market_store.Served("pass", 0.0, data={"candles": []})
+
+    monkeypatch.setattr(schwab_proxy, "_GATEWAY", _G())
+    r = TestClient(schwab_proxy.app).get("/pricehistory?symbol=SPY&maxAge=0")
+    assert r.status_code == 200
+    assert seen["max_age"] == "0"
+    assert "maxAge" not in seen["params"]            # never forwarded to Schwab

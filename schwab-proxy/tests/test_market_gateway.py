@@ -1055,22 +1055,28 @@ def test_before_the_open_one_fetch_lasts_until_the_open():
     assert h.gw.pricehistory(BAR, "x").kind == "miss" and len(h.calls) == 2
 
 
-def test_the_session_in_progress_lasts_until_the_bar_has_settled():
+def test_the_bar_is_not_reused_until_it_has_settled():
+    """From the close to ``settle_min`` after it the day's bar is still being
+    finalised, so every request is fetched; the first fetch at the settle is
+    the one reused all evening. (Until AC-101 a request at 15:09:59 was a HIT
+    on whatever had been fetched at 15:05 - and, worse, at 14:45.)"""
     h = Harness(responses=bars_for)
     set_time(h, 15, 5)                               # closed, not yet settled
     assert h.gw.pricehistory(BAR, "x").kind == "miss"
     set_time(h, 15, 9, 59)
-    assert h.gw.pricehistory(BAR, "x").kind == "hit"
+    assert h.gw.pricehistory(BAR, "x").kind == "miss"
     set_time(h, 15, 10)                              # settle_min = 10
-    assert h.gw.pricehistory(BAR, "x").kind == "miss" and len(h.calls) == 2
+    assert h.gw.pricehistory(BAR, "x").kind == "miss" and len(h.calls) == 3
+    set_time(h, 15, 40)
+    assert h.gw.pricehistory(BAR, "x").kind == "hit" and len(h.calls) == 3
 
     h = Harness(Cfg(bars__settle_min=20), responses=bars_for)
     set_time(h, 15, 5)
     h.gw.pricehistory(BAR, "x")
     set_time(h, 15, 19)
-    assert h.gw.pricehistory(BAR, "x").kind == "hit"
+    assert h.gw.pricehistory(BAR, "x").kind == "miss"
     set_time(h, 15, 20)
-    assert h.gw.pricehistory(BAR, "x").kind == "miss" and len(h.calls) == 2
+    assert h.gw.pricehistory(BAR, "x").kind == "miss" and len(h.calls) == 3
 
 
 def test_quote_mode_builds_no_bar_once_the_session_has_settled():
@@ -1708,14 +1714,16 @@ def test_after_the_close_quote_mode_does_not_build_todays_bar():
     h.gw.quotes("SPY", "market_svc", max_age=0)
     got = h.gw.pricehistory(BAR, "scan")             # still in the session
     assert got.kind == "composed" and last_close(got) == 100.0
+    # From the close on, today's bar is not BUILT from the quote - and (AC-101)
+    # the series fetched before the close is not served either: Schwab is asked.
     set_time(h, 15, 0, 0)                            # the close itself
     h.gw.quotes("SPY", "market_svc", max_age=0)
     got = h.gw.pricehistory(BAR, "scan")
-    assert got.kind == "hit" and last_close(got) == 90.0
+    assert got.kind == "miss" and last_close(got) == 90.0
     set_time(h, 15, 1, 0)                            # the quote may hold later prints
     h.gw.quotes("SPY", "market_svc", max_age=0)
     got = h.gw.pricehistory(BAR, "scan")
-    assert got.kind == "hit" and last_close(got) == 90.0 and bar_calls(h) == 1
+    assert got.kind == "miss" and last_close(got) == 90.0 and bar_calls(h) == 3
 
 
 def test_after_the_close_the_time_limit_rule_decides():
@@ -1736,8 +1744,10 @@ def test_shadow_gives_no_bar_verdict_and_no_composed_answer_after_the_close():
     set_time(h, 15, 1, 0)
     h.gw.quotes("SPY", "market_svc")
     h.gw.pricehistory(BAR, "scan")
-    assert bar_outcomes(h) == ["upstream", "upstream", "shadow_hit_match",
-                               "shadow_moving_same"]
+    # No verdict at all: after the close "on" serves nothing from the store, so
+    # shadow has no would-be answer to judge. (This listed shadow_hit_match and
+    # shadow_moving_same while a pre-close fetch was still served - AC-101.)
+    assert bar_outcomes(h) == ["upstream", "upstream"]
 
 
 # ---- reported ages and the order of a partial answer ------------------------
@@ -2436,3 +2446,54 @@ def test_on_mode_records_no_moving_verdict():
     h.gw.pricehistory(BAR, "scan")
     h.gw.pricehistory(BAR, "scan")
     assert not [o for o in bar_outcomes(h) if o.startswith("shadow_moving_")]
+
+
+# --- AC-101: a bar fetched before the close is not the day's bar after it ------
+
+def test_a_series_fetched_before_the_close_is_not_served_after_it():
+    h = Harness(responses=bars_for)
+    set_time(h, 14, 45)
+    h.gw.pricehistory(BAR, "scan")
+    h.clock += 20 * 60
+    set_time(h, 15, 5)
+    assert h.gw.pricehistory(BAR, "scan").kind == "miss"
+    assert [c[0] for c in h.calls].count("/pricehistory") == 2
+
+
+def test_between_the_close_and_the_settle_every_request_is_fetched():
+    """The bar is still being finalised: nothing fetched in these minutes is
+    handed to a second caller."""
+    h = Harness(responses=bars_for)
+    set_time(h, 15, 2)
+    assert h.gw.pricehistory(BAR, "scan").kind == "miss"
+    h.clock += 60
+    set_time(h, 15, 3)
+    assert h.gw.pricehistory(BAR, "ideas").kind == "miss"
+    assert [c[0] for c in h.calls].count("/pricehistory") == 2
+
+
+def test_a_caller_can_demand_a_fresh_daily_series():
+    h = Harness(responses=bars_for)
+    h.gw.pricehistory(BAR, "scan")
+    h.clock += 60
+    assert h.gw.pricehistory(BAR, "scan").kind == "hit"
+    assert h.gw.pricehistory(BAR, "ideas", max_age=0).kind == "miss"
+    assert [c[0] for c in h.calls].count("/pricehistory") == 2
+
+
+def test_a_callers_age_limit_is_honoured_and_a_larger_one_never_loosens_the_stores():
+    h = Harness(responses=bars_for)
+    h.gw.pricehistory(BAR, "scan")
+    h.clock += 120
+    assert h.gw.pricehistory(BAR, "x", max_age=300).kind == "hit"
+    assert h.gw.pricehistory(BAR, "x", max_age=60).kind == "miss"
+    h.clock += 1741                                   # past the session limit
+    assert h.gw.pricehistory(BAR, "x", max_age=3600).kind == "miss"
+
+
+def test_an_unusable_age_limit_is_no_limit():
+    h = Harness(responses=bars_for)
+    h.gw.pricehistory(BAR, "scan")
+    h.clock += 60
+    for junk in ("soon", "nan", "-5", ""):
+        assert h.gw.pricehistory(BAR, "x", max_age=junk).kind == "hit"

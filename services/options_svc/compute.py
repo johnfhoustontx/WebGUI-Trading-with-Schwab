@@ -3821,7 +3821,7 @@ def daily_close(symbol, day):
     try:
         return site_ideas.close_on(_raw_candles(symbol, {
             "periodType": "month", "period": 1, "frequencyType": "daily",
-            "frequency": 1}), day)
+            "frequency": 1, "maxAge": 0}), day)    # 0: the result is permanent
     except Exception:  # noqa: BLE001
         log.warning("daily_close %s %s failed", symbol, day, exc_info=True)
         return None

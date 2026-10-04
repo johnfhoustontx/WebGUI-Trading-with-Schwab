@@ -853,6 +853,7 @@ def get_price_history(
     frequencyType: str = "daily",
     frequency: int = 1,
     needExtendedHoursData: bool = False,
+    maxAge: Optional[str] = None,
 ):
     params = {
         "symbol": symbol, "periodType": periodType, "period": period,
@@ -865,7 +866,7 @@ def get_price_history(
     # to this same call: it 404'd on every fetch, and ``api_request`` retried each
     # 404 MAX_RETRIES times with backoff — flooding errors.log (~99% of all ERRORs)
     # and wasting ~0.75s of retry sleep per fetch. Call the correct endpoint once.
-    return _served(lambda: _GATEWAY.pricehistory(params, _caller(request)))
+    return _served(lambda: _GATEWAY.pricehistory(params, _caller(request), maxAge))
 
 
 @app.get("/instruments")
