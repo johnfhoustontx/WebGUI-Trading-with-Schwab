@@ -2631,7 +2631,7 @@ def test_each_panel_paints_its_head_and_its_rows_on_one_track_string():
     over its column; if they drift, every number on the panel starts reading as
     the wrong quantity. Row painters interpolate the grid into an f-string, so
     the two uses are collected separately and compared."""
-    tree = ast.parse(inspect.getsource(d.render).lstrip())
+    tree = ast.parse(_painters_source())
     heads = {n.args[0].id for n in ast.walk(tree)
              if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "_grid_head"}
     rows = {v.value.id for j in ast.walk(tree) if isinstance(j, ast.JoinedStr)
@@ -2751,8 +2751,24 @@ def test_the_page_only_asks_for_pin_depths_the_stylesheet_can_draw():
                 f"a {depth}-cell pin has only a one-cell backdrop"
 
 
+# The row builders were nested in ``render`` until 2026-10-04, when they moved to
+# module level (audit CQ-04). The guards below are about the page's painters as
+# a whole - a head and the rows under it, a pin and the cell it lands on - so
+# they read ``render`` AND the builders it calls, as ONE source. Nothing else
+# about them changed; ``test_render_size.py`` pins the builders' new home.
+_ROW_BUILDERS = ("_dealer_row", "_board_row", "_flow_row", "_position_row",
+                 "_news_row", "_bullbear_chip", "_bullbear_breadth")
+
+
+def _painters_source():
+    import textwrap
+    parts = [textwrap.dedent(inspect.getsource(d.render))]
+    parts += [inspect.getsource(getattr(d, name)) for name in _ROW_BUILDERS]
+    return (chr(10) * 2).join(parts)
+
+
 def _render_tree():
-    src = inspect.getsource(d.render).lstrip()
+    src = _painters_source()
     return src, ast.parse(src)
 
 
@@ -4335,7 +4351,9 @@ def test_the_news_head_says_what_the_strip_is_for():
 
 
 def _nested_source(outer, name):
-    src = inspect.getsource(outer).lstrip()
+    """The source of the function ``name`` that ``outer`` defines or, for the
+    Desk's row builders (module-level since 2026-10-04), calls."""
+    src = _painters_source() if outer is d.render else inspect.getsource(outer).lstrip()
     fn = next(n for n in ast.walk(ast.parse(src))
               if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
               and n.name == name)

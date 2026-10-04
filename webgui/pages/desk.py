@@ -3180,6 +3180,302 @@ def _stack():
     return ui.column().classes("gap-[3px] min-w-0")
 
 
+# ── row builders and click-throughs ──────────────────────────────────────────
+# Module-level since 2026-10-04 (audit CQ-04): they were nested in ``render``,
+# which had reached 1,057 lines. Each builds ONE row (or chip) into whatever
+# container is open when it is called, and reads no page state - the three that
+# glow take the glow class as an argument. Moved without change otherwise.
+# webgui/tests/test_render_size.py holds them here and stops render regrowing.
+
+@guard
+def _open_gamma(symbol):
+    """Open Dealer Positioning on this symbol.
+
+    ``handoff.send_to_gamma`` both stashes the symbol — one-shot, so it
+    cannot silently re-hijack the gamma dropdown on a later build — and
+    navigates. This must not add a second stash or a second navigate."""
+    _handoff.send_to_gamma(symbol)
+
+
+@guard
+def _open_news():
+    _shell.navigate_to(NEWS_ROUTE)
+
+
+@guard
+def _open_map():
+    """The strip is a pointer, not a second map: every industry and stock
+    inside a sector lives one click away, and none of them is on this
+    page."""
+    _shell.navigate_to(BULLBEAR_ROUTE)
+
+
+@guard
+def _open_position(row):
+    """Each book has its own page; the source chip is what decides which.
+
+    A no-op where this process publishes no such page — the row wires no
+    handler there either, so this is the backstop rather than the gate."""
+    _shell.navigate_to(
+        POSITION_ROUTES.get(row.get("source"), "/options/paper"))
+
+
+def _bullbear_breadth(chip):
+    """The participation groove — how much of the sector confirms the move.
+
+    A bar rather than only the thin/not-thin flag: the flag cannot separate
+    34% (just over the line) from 96%, and participation is an INDEPENDENT
+    third dimension rather than a tiebreak on the quadrant.
+    """
+    width = chip["breadth"]
+    if width is None:
+        # NO groove at all, which is a different drawing from an empty one:
+        # a sector whose members were all unusable has no reading, where an
+        # empty groove would state that nothing confirms. The spacer keeps
+        # the chip the same height as the ones beside it.
+        ui.element("div").classes("h-[3px] w-full")
+        return
+    with ui.element("div").classes(_BB_TRACK):
+        # The documented continuous-value exception — 0..100 is 101 classes,
+        # so this one arbitrary value is built at runtime. Set once per
+        # repaint on a freshly cleared box, so there is nothing to remove.
+        ui.element("div").classes(
+            f"h-full rounded-full w-[{width}%] {_BB_FILL[chip['thin']]}")
+
+
+def _bullbear_chip(chip):
+    el = ui.column().classes(
+        f"{_BB_CHIP} {_bb.quadrant_class(chip['quadrant'])}")
+    # The stripe ONLY on a live strip: off-session both quadrants are the
+    # same value and an edge repeating the fill says nothing. Colour and
+    # words come off ONE decision on ONE field — a chip carrying the stripe
+    # without its tooltip would make colour the sole carrier of a reading.
+    # Adding the class after the frame's is safe: see ``_BB_STRIPE`` — the
+    # left edge wins on Tailwind's property order, not on class order.
+    if chip["live"]:
+        quad = chip["structural_quadrant"]
+        el.classes(stripe_class(quad))
+        el.tooltip(stripe_tooltip(quad))
+    with el:
+        with ui.row().classes(
+                "items-baseline justify-between w-full gap-2 flex-nowrap"):
+            ui.label(chip["label"]).classes(_BB_NAME)
+            ui.label(chip["day_text"]).classes(_BB_DAY)
+        # Both axes named, always — "Falling · Leading" is the whole reason
+        # the map exists, and one word for it would be the ambiguity back.
+        ui.label(_bb.quadrant_label(chip["quadrant"])).classes(_BB_QUAD)
+        _bullbear_breadth(chip)
+    el.on("click", lambda _e: _open_map())
+
+
+def _dealer_row(row):
+    # ONE grid line. The structure map is the flexible 4th cell, so it sits
+    # beside the symbol it describes rather than on a tier of its own.
+    #
+    # The symbol carries no second line: the reference shows a venue under
+    # it ("CBOE · INDEX") and this app publishes no venue for a matrix row.
+    # The cell stays a single line rather than borrowing something unrelated
+    # to fill the space.
+    el = ui.element("div").classes(
+        f"{DEALER_GRID} {_row_shell(DEALER_GRID)} {_ROW} "
+        f"hover:bg-[{_HOVER}]/[0.06]")
+    with el:
+        ui.label(row["symbol"]).classes(
+            f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
+        with _stack():
+            ui.label(fmt_price(row["spot"])).classes(_V_SPOT)
+            ui.label(fmt_signed_pct(row["day_pct"])).classes(
+                f"{_SUB} {signed_class(row['day_pct'])}")
+        with _stack():
+            ui.label(fmt_price(row["flip"])).classes(_V_FLIP)
+            # Empty string, not an em-dash: the level above it already
+            # carries the dash when there is no flip to report.
+            ui.label(flip_sub_text(row)).classes(
+                f"{_SUB} {flip_side_class(row['flip_side'])}")
+        if row["structure"] is None:
+            # No walls (or no placeable spot) is a missing READING, so it
+            # gets the same em-dash every other cell uses. An empty framed
+            # box would read as a widget that failed to draw.
+            _cell(_DASH, MUTED)
+        else:
+            _structure_map(row["structure"])
+        # Each wall in the same hue as its marker on the map, so the number
+        # and the tick standing for it are visibly one thing. The reference
+        # puts an open-interest figure under each; this app publishes no
+        # per-strike OI on a matrix row, so the second line is left out.
+        _cell(fmt_price(row["call_wall"]), f"text-[14px] text-[{CALL_HEX}]")
+        _cell(fmt_price(row["put_wall"]), f"text-[14px] text-[{PUT_HEX}]")
+        with _stack():
+            ui.label(fmt_gex(row["net_gex"])).classes(
+                f"text-[13px] font-medium tabular-nums "
+                f"{signed_class(row['net_gex'])}")
+            # `self-start` so the chip shrinks to its words. Without it the
+            # chip stretches to the full 118px track and, on a row with no
+            # regime, would draw an EMPTY outlined box — which reads as a
+            # broken widget rather than as an absent reading. Hence the
+            # dash-and-no-chip branch as well.
+            if row["regime_word"] == _NO_REGIME:
+                ui.label(_NO_REGIME).classes(f"{_SUB} {MUTED}")
+            else:
+                ui.label(row["regime_word"]).classes(
+                    f"self-start {regime_chip_class(row['regime_word'])}")
+    el.on("click", lambda _e, s=row["symbol"]: _open_gamma(s))
+
+
+def _board_row(row, glow):
+    # One grid line, and every cell on it is a single line — the same
+    # discipline the flow rows took. The proportional hotness bar that used
+    # to sit under the score went with the second line: a bar IS a second
+    # line by construction, and the scores are ranked and adjacent, so the
+    # ordering already carries the comparison the bar was drawing.
+    el = ui.element("div").classes(
+        f"{BOARD_GRID} {_row_shell(BOARD_GRID)} {_ROW} "
+        f"hover:bg-[{_HOVER}]/[0.06] "
+        + glow)
+    with el:
+        _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
+        # SCORE is pinned by the stylesheet as this row's first cell; the
+        # symbol is what the reader is actually holding onto, so it pins
+        # too (see ``_PIN_DEPTHS``) and carries its own offset.
+        ui.label(row["symbol"]).classes(
+            f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
+            f"{_pin_cell_class(BOARD_GRID, 1)}")
+        # A rationale is up to three clauses of ordinary words. Its track
+        # carries by far the largest weight (see ``BOARD_GRID``) precisely
+        # so this never ellipses at the width the page is read at; the
+        # `truncate` is the graceful floor for the narrow two-column case,
+        # not the expected behaviour.
+        ui.label(row["rationale"] or _DASH).classes(
+            f"{_SUB} min-w-0 truncate "
+            + (_DIM if row["rationale"] else MUTED))
+        # `items-baseline` so the 10px state word sits on the 13px value's
+        # baseline rather than floating mid-cap.
+        with ui.row().classes(
+                "items-baseline gap-[6px] flex-nowrap min-w-0"):
+            _cell(fmt_iv(row["atm_iv"]))
+            ui.label(row["iv_state"]).classes(
+                f"text-[10px] truncate {iv_state_class(row['iv_state'])}")
+        _cell(fmt_net_prem(row["net_prem_m"]),
+              signed_class(row["net_prem_m"]))
+        _cell(fmt_ratio(row["pc_ratio"]))
+        # `self-start` on both chips, for the reason spelled out on the
+        # dealer regime chip: a chip stretched to its track is a box around
+        # a word rather than a label on it.
+        ui.label(row["signal"].upper()).classes(
+            f"self-start px-[5px] py-[2px] rounded-[2px] text-[9px] "
+            f"tracking-[.1em] whitespace-nowrap {_signal_class(row['signal'])}")
+        # An empty setup tag renders NO chip: an empty cell reads as "no
+        # setup", where a "NEUTRAL" chip would read as a finding.
+        if row["setup"]:
+            ui.label(row["setup"]).classes(f"self-start {CHIP_SETUP}")
+    el.on("click", lambda _e: _shell.navigate_to(MATRIX_ROUTE))
+
+
+def _flow_row(row, glow):
+    # The glow class is applied at BUILD time and never touched again on a
+    # live element. Changing ``animation-delay`` on a running animation
+    # re-anchors its start, and the glow visibly jumps; both painters
+    # ``.clear()`` and rebuild, which is the path the resume trick is
+    # designed for (see the ``GLOW_SEC`` notes). ``glow`` is computed by the
+    # painter off the paint's single clock — not a fresh ``monotonic()`` per row.
+    el = ui.element("div").classes(
+        f"{FLOW_GRID} {_row_shell(FLOW_GRID)} {_ROW} "
+        f"hover:bg-[{_HOVER}]/[0.06] "
+        + glow)
+    with el:
+        ui.label(row["time"] or _DASH).classes(
+            f"text-[11px] tabular-nums {MUTED}")
+        # TIME alone does not name an alert — two can share a minute — so
+        # the pin runs through the symbol (see ``_PIN_DEPTHS``).
+        ui.label(row["symbol"]).classes(
+            f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
+            f"{_pin_cell_class(FLOW_GRID, 1)}")
+        # `min-w-0` is what lets `truncate` bite: a grid item's automatic
+        # minimum is its content, so without it a long detail line widens
+        # the track past the panel instead of ellipsing inside it.
+        ui.label(row["detail"] or row["text"] or _DASH).classes(
+            f"text-[11px] min-w-0 truncate {MUTED}")
+        # ``_tone_class`` is stamped by the Flow Alerts page from its own
+        # finite (type, side) map — borrowed here rather than re-derived,
+        # and shared by the kind and the side it qualifies.
+        ui.label(flow_kind_text(row)).classes(
+            f"text-[10px] min-w-0 truncate {row['_tone_class']}")
+    el.on("click", lambda _e: _shell.navigate_to(FLOW_ROUTE))
+
+
+def _news_row(row):
+    # ⚠ ``row["title"]`` is third-party PLAIN TEXT: ``ui.link`` and
+    # ``ui.label`` escape it. Never ``ui.html``.
+    #
+    # The row itself is NOT a click-through (unlike the four panels above):
+    # its headline already opens the article, and a row click on top of it
+    # would fire both. "All headlines" is the way to /news.
+    with ui.row().classes(f"w-full gap-3 no-wrap {_ROW_STATIC}"):
+        ui.label(row["when"] or _DASH).classes(
+            f"text-[11px] tabular-nums whitespace-nowrap shrink-0 {MUTED}")
+        ui.label(row["source"] or _DASH).classes(
+            f"text-[10px] tracking-[.08em] whitespace-nowrap shrink-0 "
+            f"{_DIM}")
+        if row["href"]:
+            ui.link(row["title"], row["href"], new_tab=True).classes(
+                f"text-[13px] min-w-0 truncate no-underline "
+                f"hover:underline {LABEL}")
+        else:
+            ui.label(row["title"]).classes(
+                f"text-[13px] min-w-0 truncate {LABEL}")
+
+
+def _position_row(row, glow):
+    # Rebuild-time only, same as the flow row above — never updated in place.
+    #
+    # ⚠ The ONLY panel whose rows are not always a link. Each book's page is
+    # deliberately unpublished, so on the public origin there is nowhere to
+    # send the reader: the row keeps every number it has and loses the
+    # pointer, the hover wash and the handler. A row dressed as a link that
+    # leads nowhere reads as broken, which is worse than reading as static.
+    route = POSITION_ROUTES.get(row.get("source"), "/options/paper")
+    can_open = _shell.can_navigate(route)
+    el = ui.element("div").classes(
+        f"{POS_GRID} {_row_shell(POS_GRID)} "
+        f"{_ROW if can_open else _ROW_STATIC} "
+        + (f"hover:bg-[{_HOVER}]/[0.06] " if can_open else "")
+        + glow)
+    with el:
+        ui.label(row["source"]).classes(
+            f"self-start {source_chip_class(row['source'])}")
+        # ⚠ The BOOK badge is this row's first cell, so the stylesheet pins
+        # THAT — and a pinned PAPER/CAPTURED chip beside ten scrolling
+        # numbers names nothing. The symbol pins with it (``_PIN_DEPTHS``).
+        ui.label(row["symbol"]).classes(
+            f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
+            f"{_pin_cell_class(POS_GRID, 1)}")
+        ui.label(strategy_label(row["strategy"])).classes(
+            f"text-[11px] min-w-0 truncate {MUTED}")
+        _cell(expiry_text(row))
+        # Both are per-share option prices (0.21 / 0.39), not position
+        # dollars — the same numbers the paper ledger quotes.
+        _cell(fmt_money(row["entry_credit"]))
+        _cell(fmt_money(row["current_value"]))
+        _cell(row["strikes"])
+        # An em-dash, never a 1: a captured signal was never sized, and a
+        # printed quantity would be this page inventing a position.
+        _cell(_DASH if row["quantity"] is None else f"{row['quantity']:g}")
+        _cell(fmt_money(row["unrealized_pnl"]),
+              signed_class(row["unrealized_pnl"]))
+        # An untagged book gets the dash BARE, with no chip around it — the
+        # same rule the dealer row follows for an unknown regime. An
+        # outlined box holding an em-dash reads as a broken widget, and a
+        # box in the FLAG column reads as a verdict whatever is inside it.
+        if row["flag"] == UNTAGGED_FLAG:
+            ui.label(UNTAGGED_FLAG).classes(
+                f"self-start text-[11px] {MUTED}")
+        else:
+            ui.label(row["flag"]).classes(
+                f"self-start {flag_chip_class(row['flag'])}")
+    if can_open:
+        el.on("click", lambda _e, r=row: _open_position(r))
+
+
 def render():
     """Mount the Desk: a top strip and a 2x2 panel grid over ``VIEWS``.
 
@@ -3488,6 +3784,12 @@ def render():
     def _view(name):
         return state["data"].get(name)
 
+    def _glow(key):
+        """The arrival-glow classes for the row ``key`` names, off this paint's
+        ONE clock. The row builders are module-level and read no page state, so
+        the painter computes this and hands it in."""
+        return glow_classes(state["glow"].get(key), state["glow_now"])
+
     def _mapping(name):
         """``_view`` narrowed to a dict — ``{}`` for anything else.
 
@@ -3618,52 +3920,6 @@ def render():
             for chip in chips:
                 _bullbear_chip(chip)
 
-    def _bullbear_chip(chip):
-        el = ui.column().classes(
-            f"{_BB_CHIP} {_bb.quadrant_class(chip['quadrant'])}")
-        # The stripe ONLY on a live strip: off-session both quadrants are the
-        # same value and an edge repeating the fill says nothing. Colour and
-        # words come off ONE decision on ONE field — a chip carrying the stripe
-        # without its tooltip would make colour the sole carrier of a reading.
-        # Adding the class after the frame's is safe: see ``_BB_STRIPE`` — the
-        # left edge wins on Tailwind's property order, not on class order.
-        if chip["live"]:
-            quad = chip["structural_quadrant"]
-            el.classes(stripe_class(quad))
-            el.tooltip(stripe_tooltip(quad))
-        with el:
-            with ui.row().classes(
-                    "items-baseline justify-between w-full gap-2 flex-nowrap"):
-                ui.label(chip["label"]).classes(_BB_NAME)
-                ui.label(chip["day_text"]).classes(_BB_DAY)
-            # Both axes named, always — "Falling · Leading" is the whole reason
-            # the map exists, and one word for it would be the ambiguity back.
-            ui.label(_bb.quadrant_label(chip["quadrant"])).classes(_BB_QUAD)
-            _bullbear_breadth(chip)
-        el.on("click", lambda _e: _open_map())
-
-    def _bullbear_breadth(chip):
-        """The participation groove — how much of the sector confirms the move.
-
-        A bar rather than only the thin/not-thin flag: the flag cannot separate
-        34% (just over the line) from 96%, and participation is an INDEPENDENT
-        third dimension rather than a tiebreak on the quadrant.
-        """
-        width = chip["breadth"]
-        if width is None:
-            # NO groove at all, which is a different drawing from an empty one:
-            # a sector whose members were all unusable has no reading, where an
-            # empty groove would state that nothing confirms. The spacer keeps
-            # the chip the same height as the ones beside it.
-            ui.element("div").classes("h-[3px] w-full")
-            return
-        with ui.element("div").classes(_BB_TRACK):
-            # The documented continuous-value exception — 0..100 is 101 classes,
-            # so this one arbitrary value is built at runtime. Set once per
-            # repaint on a freshly cleared box, so there is nothing to remove.
-            ui.element("div").classes(
-                f"h-full rounded-full w-[{width}%] {_BB_FILL[chip['thin']]}")
-
     def _paint_dealer():
         dealer_body.clear()
         matrix = _view("options:matrix")
@@ -3687,59 +3943,6 @@ def render():
             _grid_head(DEALER_GRID, DEALER_HEADS)
             for row in rows:
                 _dealer_row(row)
-
-    def _dealer_row(row):
-        # ONE grid line. The structure map is the flexible 4th cell, so it sits
-        # beside the symbol it describes rather than on a tier of its own.
-        #
-        # The symbol carries no second line: the reference shows a venue under
-        # it ("CBOE · INDEX") and this app publishes no venue for a matrix row.
-        # The cell stays a single line rather than borrowing something unrelated
-        # to fill the space.
-        el = ui.element("div").classes(
-            f"{DEALER_GRID} {_row_shell(DEALER_GRID)} {_ROW} "
-            f"hover:bg-[{_HOVER}]/[0.06]")
-        with el:
-            ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
-            with _stack():
-                ui.label(fmt_price(row["spot"])).classes(_V_SPOT)
-                ui.label(fmt_signed_pct(row["day_pct"])).classes(
-                    f"{_SUB} {signed_class(row['day_pct'])}")
-            with _stack():
-                ui.label(fmt_price(row["flip"])).classes(_V_FLIP)
-                # Empty string, not an em-dash: the level above it already
-                # carries the dash when there is no flip to report.
-                ui.label(flip_sub_text(row)).classes(
-                    f"{_SUB} {flip_side_class(row['flip_side'])}")
-            if row["structure"] is None:
-                # No walls (or no placeable spot) is a missing READING, so it
-                # gets the same em-dash every other cell uses. An empty framed
-                # box would read as a widget that failed to draw.
-                _cell(_DASH, MUTED)
-            else:
-                _structure_map(row["structure"])
-            # Each wall in the same hue as its marker on the map, so the number
-            # and the tick standing for it are visibly one thing. The reference
-            # puts an open-interest figure under each; this app publishes no
-            # per-strike OI on a matrix row, so the second line is left out.
-            _cell(fmt_price(row["call_wall"]), f"text-[14px] text-[{CALL_HEX}]")
-            _cell(fmt_price(row["put_wall"]), f"text-[14px] text-[{PUT_HEX}]")
-            with _stack():
-                ui.label(fmt_gex(row["net_gex"])).classes(
-                    f"text-[13px] font-medium tabular-nums "
-                    f"{signed_class(row['net_gex'])}")
-                # `self-start` so the chip shrinks to its words. Without it the
-                # chip stretches to the full 118px track and, on a row with no
-                # regime, would draw an EMPTY outlined box — which reads as a
-                # broken widget rather than as an absent reading. Hence the
-                # dash-and-no-chip branch as well.
-                if row["regime_word"] == _NO_REGIME:
-                    ui.label(_NO_REGIME).classes(f"{_SUB} {MUTED}")
-                else:
-                    ui.label(row["regime_word"]).classes(
-                        f"self-start {regime_chip_class(row['regime_word'])}")
-        el.on("click", lambda _e, s=row["symbol"]: _open_gamma(s))
 
     def _paint_signal_counts(matrix):
         """The head's Buy / Neutral / Sell chips, rebuilt with the body.
@@ -3784,56 +3987,7 @@ def render():
             # use-line already says "the N hottest names", so nothing is lost.
             _grid_head(BOARD_GRID, BOARD_HEADS)
             for row in rows:
-                _board_row(row)
-
-    def _board_row(row):
-        # One grid line, and every cell on it is a single line — the same
-        # discipline the flow rows took. The proportional hotness bar that used
-        # to sit under the score went with the second line: a bar IS a second
-        # line by construction, and the scores are ranked and adjacent, so the
-        # ordering already carries the comparison the bar was drawing.
-        el = ui.element("div").classes(
-            f"{BOARD_GRID} {_row_shell(BOARD_GRID)} {_ROW} "
-            f"hover:bg-[{_HOVER}]/[0.06] "
-            + glow_classes(state["glow"].get(board_glow_key(row["symbol"])),
-                           state["glow_now"]))
-        with el:
-            _cell(fmt_hotness(row["hotness"]), CON_ACCENT)
-            # SCORE is pinned by the stylesheet as this row's first cell; the
-            # symbol is what the reader is actually holding onto, so it pins
-            # too (see ``_PIN_DEPTHS``) and carries its own offset.
-            ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
-                f"{_pin_cell_class(BOARD_GRID, 1)}")
-            # A rationale is up to three clauses of ordinary words. Its track
-            # carries by far the largest weight (see ``BOARD_GRID``) precisely
-            # so this never ellipses at the width the page is read at; the
-            # `truncate` is the graceful floor for the narrow two-column case,
-            # not the expected behaviour.
-            ui.label(row["rationale"] or _DASH).classes(
-                f"{_SUB} min-w-0 truncate "
-                + (_DIM if row["rationale"] else MUTED))
-            # `items-baseline` so the 10px state word sits on the 13px value's
-            # baseline rather than floating mid-cap.
-            with ui.row().classes(
-                    "items-baseline gap-[6px] flex-nowrap min-w-0"):
-                _cell(fmt_iv(row["atm_iv"]))
-                ui.label(row["iv_state"]).classes(
-                    f"text-[10px] truncate {iv_state_class(row['iv_state'])}")
-            _cell(fmt_net_prem(row["net_prem_m"]),
-                  signed_class(row["net_prem_m"]))
-            _cell(fmt_ratio(row["pc_ratio"]))
-            # `self-start` on both chips, for the reason spelled out on the
-            # dealer regime chip: a chip stretched to its track is a box around
-            # a word rather than a label on it.
-            ui.label(row["signal"].upper()).classes(
-                f"self-start px-[5px] py-[2px] rounded-[2px] text-[9px] "
-                f"tracking-[.1em] whitespace-nowrap {_signal_class(row['signal'])}")
-            # An empty setup tag renders NO chip: an empty cell reads as "no
-            # setup", where a "NEUTRAL" chip would read as a finding.
-            if row["setup"]:
-                ui.label(row["setup"]).classes(f"self-start {CHIP_SETUP}")
-        el.on("click", lambda _e: _shell.navigate_to(MATRIX_ROUTE))
+                _board_row(row, _glow(board_glow_key(row["symbol"])))
 
     def _paint_flow():
         flow_body.clear()
@@ -3861,39 +4015,7 @@ def render():
             # Flow Alerts page's own wording.
             _grid_head(FLOW_GRID, FLOW_HEADS)
             for row in rows:
-                _flow_row(row)
-
-    def _flow_row(row):
-        # The glow class is applied at BUILD time and never touched again on a
-        # live element. Changing ``animation-delay`` on a running animation
-        # re-anchors its start, and the glow visibly jumps; both painters
-        # ``.clear()`` and rebuild, which is the path the resume trick is
-        # designed for (see the ``GLOW_SEC`` notes). ``state["glow_now"]`` is the
-        # paint's single clock — not a fresh ``monotonic()`` per row.
-        el = ui.element("div").classes(
-            f"{FLOW_GRID} {_row_shell(FLOW_GRID)} {_ROW} "
-            f"hover:bg-[{_HOVER}]/[0.06] "
-            + glow_classes(state["glow"].get(row.get("id")),
-                           state["glow_now"]))
-        with el:
-            ui.label(row["time"] or _DASH).classes(
-                f"text-[11px] tabular-nums {MUTED}")
-            # TIME alone does not name an alert — two can share a minute — so
-            # the pin runs through the symbol (see ``_PIN_DEPTHS``).
-            ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
-                f"{_pin_cell_class(FLOW_GRID, 1)}")
-            # `min-w-0` is what lets `truncate` bite: a grid item's automatic
-            # minimum is its content, so without it a long detail line widens
-            # the track past the panel instead of ellipsing inside it.
-            ui.label(row["detail"] or row["text"] or _DASH).classes(
-                f"text-[11px] min-w-0 truncate {MUTED}")
-            # ``_tone_class`` is stamped by the Flow Alerts page from its own
-            # finite (type, side) map — borrowed here rather than re-derived,
-            # and shared by the kind and the side it qualifies.
-            ui.label(flow_kind_text(row)).classes(
-                f"text-[10px] min-w-0 truncate {row['_tone_class']}")
-        el.on("click", lambda _e: _shell.navigate_to(FLOW_ROUTE))
+                _flow_row(row, _glow(row.get("id")))
 
     def _paint_positions():
         pos_body.clear()
@@ -3925,7 +4047,7 @@ def render():
             # arithmetic rather than only its result.
             _grid_head(POS_GRID, POS_HEADS)
             for row in shown:
-                _position_row(row)
+                _position_row(row, _glow(row.get("position_id")))
 
     def _paint_news():
         news_body.clear()
@@ -3945,108 +4067,6 @@ def render():
             if _shell.can_navigate(NEWS_ROUTE):
                 ui.label(NEWS_MORE).classes(_NEWS_MORE).on(
                     "click", lambda _e: _open_news())
-
-    def _news_row(row):
-        # ⚠ ``row["title"]`` is third-party PLAIN TEXT: ``ui.link`` and
-        # ``ui.label`` escape it. Never ``ui.html``.
-        #
-        # The row itself is NOT a click-through (unlike the four panels above):
-        # its headline already opens the article, and a row click on top of it
-        # would fire both. "All headlines" is the way to /news.
-        with ui.row().classes(f"w-full gap-3 no-wrap {_ROW_STATIC}"):
-            ui.label(row["when"] or _DASH).classes(
-                f"text-[11px] tabular-nums whitespace-nowrap shrink-0 {MUTED}")
-            ui.label(row["source"] or _DASH).classes(
-                f"text-[10px] tracking-[.08em] whitespace-nowrap shrink-0 "
-                f"{_DIM}")
-            if row["href"]:
-                ui.link(row["title"], row["href"], new_tab=True).classes(
-                    f"text-[13px] min-w-0 truncate no-underline "
-                    f"hover:underline {LABEL}")
-            else:
-                ui.label(row["title"]).classes(
-                    f"text-[13px] min-w-0 truncate {LABEL}")
-
-    def _position_row(row):
-        # Rebuild-time only, same as the flow row above — never updated in place.
-        #
-        # ⚠ The ONLY panel whose rows are not always a link. Each book's page is
-        # deliberately unpublished, so on the public origin there is nowhere to
-        # send the reader: the row keeps every number it has and loses the
-        # pointer, the hover wash and the handler. A row dressed as a link that
-        # leads nowhere reads as broken, which is worse than reading as static.
-        route = POSITION_ROUTES.get(row.get("source"), "/options/paper")
-        can_open = _shell.can_navigate(route)
-        el = ui.element("div").classes(
-            f"{POS_GRID} {_row_shell(POS_GRID)} "
-            f"{_ROW if can_open else _ROW_STATIC} "
-            + (f"hover:bg-[{_HOVER}]/[0.06] " if can_open else "")
-            + glow_classes(state["glow"].get(row.get("position_id")),
-                           state["glow_now"]))
-        with el:
-            ui.label(row["source"]).classes(
-                f"self-start {source_chip_class(row['source'])}")
-            # ⚠ The BOOK badge is this row's first cell, so the stylesheet pins
-            # THAT — and a pinned PAPER/CAPTURED chip beside ten scrolling
-            # numbers names nothing. The symbol pins with it (``_PIN_DEPTHS``).
-            ui.label(row["symbol"]).classes(
-                f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
-                f"{_pin_cell_class(POS_GRID, 1)}")
-            ui.label(strategy_label(row["strategy"])).classes(
-                f"text-[11px] min-w-0 truncate {MUTED}")
-            _cell(expiry_text(row))
-            # Both are per-share option prices (0.21 / 0.39), not position
-            # dollars — the same numbers the paper ledger quotes.
-            _cell(fmt_money(row["entry_credit"]))
-            _cell(fmt_money(row["current_value"]))
-            _cell(row["strikes"])
-            # An em-dash, never a 1: a captured signal was never sized, and a
-            # printed quantity would be this page inventing a position.
-            _cell(_DASH if row["quantity"] is None else f"{row['quantity']:g}")
-            _cell(fmt_money(row["unrealized_pnl"]),
-                  signed_class(row["unrealized_pnl"]))
-            # An untagged book gets the dash BARE, with no chip around it — the
-            # same rule the dealer row follows for an unknown regime. An
-            # outlined box holding an em-dash reads as a broken widget, and a
-            # box in the FLAG column reads as a verdict whatever is inside it.
-            if row["flag"] == UNTAGGED_FLAG:
-                ui.label(UNTAGGED_FLAG).classes(
-                    f"self-start text-[11px] {MUTED}")
-            else:
-                ui.label(row["flag"]).classes(
-                    f"self-start {flag_chip_class(row['flag'])}")
-        if can_open:
-            el.on("click", lambda _e, r=row: _open_position(r))
-
-    # ── click-through ────────────────────────────────────────────────────────
-    @guard
-    def _open_gamma(symbol):
-        """Open Dealer Positioning on this symbol.
-
-        ``handoff.send_to_gamma`` both stashes the symbol — one-shot, so it
-        cannot silently re-hijack the gamma dropdown on a later build — and
-        navigates. This must not add a second stash or a second navigate."""
-        _handoff.send_to_gamma(symbol)
-
-    @guard
-    def _open_news():
-        _shell.navigate_to(NEWS_ROUTE)
-
-    @guard
-    def _open_map():
-        """The strip is a pointer, not a second map: every industry and stock
-        inside a sector lives one click away, and none of them is on this
-        page."""
-        _shell.navigate_to(BULLBEAR_ROUTE)
-
-    @guard
-    def _open_position(row):
-        """Each book has its own page; the source chip is what decides which.
-
-        A no-op where this process publishes no such page — the row wires no
-        handler there either, so this is the backstop rather than the gate."""
-        _shell.navigate_to(
-            POSITION_ROUTES.get(row.get("source"), "/options/paper"))
 
     painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
                 "dealer": _paint_dealer, "board": _paint_board,
