@@ -23,8 +23,8 @@ another, a units slip would put a $26 profit beside a curve peaking at $2,600.
 PURE: no bus, no Schwab, no clock of its own. Every function takes what it reads.
 """
 import datetime as _dt
-import math
 import pathlib
+from shared.numeric import parsed_finite as _num  # noqa: E402 - one shared definition (audit CQ-07)
 
 MULT = 100
 
@@ -60,17 +60,6 @@ STRATEGY_LABELS = {
 }
 
 _CREDIT_BIAS = {"PCS": "bullish", "CCS": "bearish", "IC": "neutral"}
-
-
-def _num(v):
-    """A finite float, or None. bool is rejected: ``float(True)`` is 1.0."""
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 def _leg(side, kind, strike, expiration, qty=1):

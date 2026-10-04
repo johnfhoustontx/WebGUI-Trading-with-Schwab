@@ -21,6 +21,7 @@ import scanner_engine as se  # noqa: E402
 import strategy_scanner as ssn  # noqa: E402
 import strategy_scoring as ssc  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
+from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 #: The scan every hand-built trade is judged as. The Strategy Finder's stamps,
 #: floors and gates all key on it.
@@ -84,12 +85,6 @@ def structure_meta(code, net_delta):
     else:
         bias = "bullish" if d > 0 else "bearish"
     return ("CUSTOM", "CUSTOM", "Custom structure", bias, False)
-
-
-def _finite(v):
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    return float(v) if math.isfinite(v) else None
 
 
 def _price(v):

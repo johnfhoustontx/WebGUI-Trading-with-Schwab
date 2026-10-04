@@ -16,7 +16,6 @@ intentionally NOT ported here — ``run_full_scan`` is called directly.
 """
 import copy
 import datetime as _dt
-import json as _json
 import logging
 import math
 import sys
@@ -55,6 +54,7 @@ from shared import scanner_config as _scanner_config  # noqa: E402
 from shared import vol_gate as _vol_gate  # noqa: E402
 from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
+from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 
 def run_scan() -> dict:
@@ -4143,17 +4143,6 @@ def _crop_gamma_views(views, spot, n_side=GAMMA_N_SIDE):
 # ── Premium Divergence strike ladder ────────────────────────────────────────
 # Half-width of the ladder: 5 below + spot + 5 above = the spec's 11 rows.
 PREM_LADDER_N_SIDE = 5
-
-
-def _finite(value):
-    """A finite float, or None. Rejects bools (``True`` is an ``int``, so an
-    unguarded flag would read as a premium of $1) and nan/inf, which survive the
-    JSON round-trip through Redis and would render as a blank or an infinitely
-    long bar rather than as an obvious error."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    value = float(value)
-    return value if math.isfinite(value) else None
 
 
 def _ladder_cells(grid):
@@ -8673,7 +8662,6 @@ def sim_run(symbol, expiry=None, kind=None, strike=None, direction=None,
     store never falls back to the owner's."""
     from options_simulator import engine as seng
     import numpy as np
-    import datetime as _dt
 
     snap = (PRIVATE_SIM if store is None else store).get(symbol)
     if snap is None:

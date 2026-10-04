@@ -54,7 +54,6 @@ from __future__ import annotations
 import collections
 import datetime as dt
 import logging
-import math
 import threading
 import time
 from zoneinfo import ZoneInfo
@@ -69,6 +68,7 @@ from shared import market_calendar
 from shared import public_rescue as pr
 from shared import public_scan
 from shared import public_tools as pt
+from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 log = logging.getLogger(__name__)
 
@@ -305,10 +305,6 @@ def _is_engine_error(out) -> bool:
 
 # ── pure helpers ─────────────────────────────────────────────────────────────
 
-def _finite(v):
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    return float(v) if math.isfinite(v) else None
 
 
 def strikes_window(strikes, spot, n):

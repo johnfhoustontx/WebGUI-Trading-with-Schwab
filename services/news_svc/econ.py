@@ -42,6 +42,7 @@ from services.news_svc.adapters import nasdaq_ipo
 from shared.news_config import DEFAULTS as _NEWS_DEFAULTS
 from shared.news_config import TRANSFORMS
 from shared.symbols import clean_symbol
+from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 UTC = dt.timezone.utc
 CT = ZoneInfo("America/Chicago")          # a naive ``now``, and FRED ``time_ct``
@@ -59,16 +60,6 @@ _CAL = _NEWS_DEFAULTS["calendar"]
 
 # ---- small readers ------------------------------------------------------------
 
-def _finite(v):
-    """A finite real number as float, else ``None`` (bools and strings too, and
-    an int too large for a float - ``10**400`` raises OverflowError there)."""
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    try:
-        v = float(v)
-    except OverflowError:
-        return None
-    return v if math.isfinite(v) else None
 
 
 def _table(cfg, key):

@@ -23,7 +23,6 @@ import datetime as _dt
 import io
 import json
 import logging
-import math
 import os
 import pathlib
 import re
@@ -34,6 +33,7 @@ from zoneinfo import ZoneInfo
 
 import repo_paths
 from services.options_svc import trade_idea as _ti
+from shared.numeric import parsed_finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 log = logging.getLogger(__name__)
 
@@ -70,16 +70,6 @@ def entry(symbol, label, grade, caption_text, now) -> dict:
             "alt": str(caption_text or ""),
             "img": f"{IDEAS_DIR}/{day}/{stem}.webp",
             "full": f"{IDEAS_DIR}/{day}/{stem}.png"}
-
-
-def _finite(v):
-    if isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 def entry_facts(idea, *, approx=False, posted=None) -> dict:

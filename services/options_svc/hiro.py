@@ -12,14 +12,7 @@ buy stock (positive); buying a put (+1 x -delta) makes the dealer sell (negative
 import datetime as _dt
 import math
 from zoneinfo import ZoneInfo
-
-
-def _finite(v):
-    """A real finite float, or None (rejects bool, NaN, inf, non-numbers)."""
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    v = float(v)
-    return v if math.isfinite(v) else None
+from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 
 # The numeric [hiro] keys the rules and the daily report read. Coerced ONCE, by

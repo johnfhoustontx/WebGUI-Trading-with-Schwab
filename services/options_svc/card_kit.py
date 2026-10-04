@@ -11,8 +11,8 @@ mover -- stays with that card.
 """
 import functools
 import logging
-import math
 import os
+from shared.numeric import parsed_finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 log = logging.getLogger(__name__)
 
@@ -68,20 +68,6 @@ def hex_to_rgb(value, fallback=(0, 0, 0)):
         return tuple(int(s[i:i + 2], 16) for i in (0, 2, 4))
     except ValueError:
         return fallback
-
-
-def _finite(v):
-    """The value as a float, or None. Rejects NaN/inf and bool.
-
-    bool is excluded deliberately: ``float(True)`` is 1.0, and a True that
-    reaches a price field should read as absent, not as $1."""
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 def fmt(v, places=2):
