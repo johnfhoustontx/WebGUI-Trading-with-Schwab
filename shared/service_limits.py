@@ -1,9 +1,11 @@
-"""How old a queued command may be before a service refuses to run it.
+"""Limits every service shares, from ``config/services.toml``.
+
+COMMAND AGE. How old a queued command may be before a service refuses to run it.
 
 A consumer group is created at stream id 0, so a group that is new (a first
 launch, a flushed Redis, a renamed group) is handed the stream's whole history.
 The documented incident: a first launch "burned a day's API budget in one go".
-Two limits, from ``config/commands.toml``:
+Two limits, from ``config/services.toml``:
 
 * ``side_effect_max_sec`` (180) - commands that change a paper book, spend a
   paid call or post in public. A click that waited longer than this is acted on
@@ -19,26 +21,44 @@ Stdlib and the config loader only, so every tier may read it.
 import datetime as _dt
 import math
 
-from repo_paths import COMMANDS_TOML
+from repo_paths import SERVICES_TOML
 from shared.config_toml import toml_loader
 
-DEFAULTS = {"age": {"side_effect_max_sec": 180, "replay_max_sec": 900}}
+DEFAULTS = {
+    "age": {"side_effect_max_sec": 180, "replay_max_sec": 900},
+    # /health says a service is not up when its scheduler loop has not gone
+    # round for this long; and a scheduler that ran this long without dying
+    # gets its restart budget back.
+    "health": {"tick_stale_sec": 600, "restart_reset_sec": 3600},
+}
 MAX_SEC = 7 * 24 * 3600        # past a week a "limit" is a typo
 
-load, reset_cache = toml_loader(COMMANDS_TOML, DEFAULTS, label="commands.toml")
+load, reset_cache = toml_loader(SERVICES_TOML, DEFAULTS, label="services.toml")
 
 
-def _seconds(key) -> int:
-    """``[age].<key>`` as whole seconds from 1 to a week, else the shipped value."""
-    sec = load().get("age")
+def _seconds(key, table="age") -> int:
+    """``[<table>].<key>`` as whole seconds from 1 to a week, else the shipped value."""
+    sec = load().get(table)
     raw = sec.get(key) if isinstance(sec, dict) else None
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        return DEFAULTS["age"][key]
+        return DEFAULTS[table][key]
     try:
         ok = math.isfinite(raw) and 1 <= raw <= MAX_SEC
     except (TypeError, OverflowError):
         ok = False
-    return int(raw) if ok else DEFAULTS["age"][key]
+    return int(raw) if ok else DEFAULTS[table][key]
+
+
+def tick_stale_sec() -> int:
+    """How long a scheduler loop may go without a pass before ``/health``
+    reports the service as not up."""
+    return _seconds("tick_stale_sec", "health")
+
+
+def restart_reset_sec() -> int:
+    """How long a scheduler must run without dying to get its restart budget
+    back."""
+    return _seconds("restart_reset_sec", "health")
 
 
 def side_effect_max_sec() -> int:

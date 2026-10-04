@@ -1207,3 +1207,28 @@ def test_the_confirm_is_a_gate_in_front_of_the_handler_not_a_rewrite(monkeypatch
     assert said[-1][0] == "error" and "no such unit" in said[-1][1]
     assert not _dialog_with("Restart now").value, \
         "the dialog stayed open over a reported failure"
+
+
+# --- AR-06: the card says when the scheduler last ran, and why a service is down
+
+def test_a_healthy_card_says_when_the_scheduler_last_ran():
+    assert status.service_detail({"up": True, "scheduler_last_tick_age_s": 18.4}) == \
+        "healthy · scheduler ran 18 s ago"
+    assert status.service_detail({"up": True, "degrades_total": 3,
+                                  "scheduler_last_tick_age_s": 200}) == \
+        "healthy - 3 degraded · scheduler ran 3 min ago"
+
+
+def test_a_service_with_no_scheduler_reading_says_nothing_about_it():
+    for body in ({"up": True}, {"up": True, "scheduler_last_tick_age_s": None},
+                 {"up": True, "scheduler_last_tick_age_s": float("nan")},
+                 {"up": True, "scheduler_last_tick_age_s": True}):
+        assert status.service_detail(body) == "healthy"
+
+
+def test_a_service_that_says_why_it_is_down_gets_its_own_words():
+    assert status.unhealthy_detail(200, {"up": False,
+                                         "reason": "scheduler has not run for 900 s"}) == \
+        "scheduler has not run for 900 s"
+    assert status.unhealthy_detail(503, {}) == "HTTP 503"
+    assert status.unhealthy_detail(200, {"up": False}) == "HTTP 200"

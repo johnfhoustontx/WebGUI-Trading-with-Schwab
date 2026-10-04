@@ -1500,12 +1500,12 @@ _MARKETDATA = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Queued commands — config/commands.toml
+# Queued commands — config/services.toml
 # ─────────────────────────────────────────────────────────────────────────────
 _COMMANDS = ConfigFile(
-    name="commands.toml", title="Queued commands", icon="hourglass_bottom",
+    name="services.toml", title="Services", icon="hourglass_bottom",
     summary="How long a click may wait in a service's queue before the service "
-            "refuses to act on it.",
+            "refuses to act on it, and when a service reports itself unhealthy.",
     restart=(OPTIONS, SENTIMENT, TRADE, MARKET, NEWS),
     caution="These stop a restarted service from re-running its queue's history. "
             "Longer limits let stale clicks through; shorter ones drop a click "
@@ -1524,6 +1524,17 @@ _COMMANDS = ConfigFile(
                   "being replayed after a restart and is not run. Commands that "
                   "only re-read a local store run at any age.",
                   kind="int", unit="seconds", min=60, max=86400, step=60),
+        )),
+        Section("When a service is unhealthy", "", (
+            Field("health.tick_stale_sec", "Longest a scheduler may be silent",
+                  "A service whose scheduler has not run for this long shows as "
+                  "offline on System Status and counts on the status badge, even "
+                  "though its process still answers. Keep it well above 120.",
+                  kind="int", unit="seconds", min=150, max=86400, step=30),
+            Field("health.restart_reset_sec", "Healthy run that restores the restart budget",
+                  "A scheduler that fails is restarted up to ten times. After "
+                  "running this long without failing it gets all ten back.",
+                  kind="int", unit="seconds", min=60, max=604800, step=60),
         )),
     ),
 )

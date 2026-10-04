@@ -415,8 +415,33 @@ def service_detail(body) -> str:
     """
     n = body.get("degrades_total") if isinstance(body, dict) else None
     if isinstance(n, bool) or not isinstance(n, int) or n <= 0:
-        return "healthy"
-    return f"healthy - {n} degraded"
+        text = "healthy"
+    else:
+        text = f"healthy - {n} degraded"
+    age = scheduler_age_text(body)
+    return f"{text} · {age}" if age else text
+
+
+def scheduler_age_text(body) -> str:
+    """"scheduler ran 18 s ago", or "" when the service runs no scheduler or has
+    not made a pass yet. The process answering is not the service working; this
+    is the number that says the loop is still going round. PURE."""
+    age = body.get("scheduler_last_tick_age_s") if isinstance(body, dict) else None
+    if isinstance(age, bool) or not isinstance(age, (int, float)) or age != age or age < 0:
+        return ""
+    if age < 90:
+        return f"scheduler ran {int(age)} s ago"
+    return f"scheduler ran {int(age // 60)} min ago"
+
+
+def unhealthy_detail(status_code, body) -> str:
+    """The detail line for a service card that is NOT up. A service that
+    answered 200 and said why it is not up gets its own reason; anything else is
+    the HTTP status. PURE."""
+    reason = body.get("reason") if isinstance(body, dict) else None
+    if status_code == 200 and isinstance(reason, str) and reason.strip():
+        return reason.strip()
+    return f"HTTP {status_code}"
 
 
 def _probe_one(target, proxy_health=None):
@@ -469,7 +494,7 @@ def _probe_one(target, proxy_health=None):
             up = resp.status_code == 200 and body.get("up") is True
             out.update(up=up,
                        detail=service_detail(body) if up
-                       else f"HTTP {resp.status_code}")
+                       else unhealthy_detail(resp.status_code, body))
     except Exception as exc:  # noqa: BLE001 — a probe must never raise.
         out.update(up=False, detail=f"unreachable ({type(exc).__name__})")
     return out

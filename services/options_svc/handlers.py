@@ -34,7 +34,7 @@ from services.options_svc import push_notify
 from services.options_svc import rate_trade
 # X (design 2026-09-22): the image card posted with each market report.
 from services.options_svc import report_card
-from shared import command_limits as _command_limits  # noqa: E402
+from shared import service_limits as _service_limits  # noqa: E402
 from shared import market_calendar as mc
 from shared import public_gamma
 from shared import x_text
@@ -57,9 +57,9 @@ log = logging.getLogger(__name__)
 # Idempotent refresh/manage/reset commands are NOT gated (re-running them is safe).
 # Missing ts (a legacy command serialized before the field existed) → treated as
 # fresh (never reject a legacy command). See shared/contracts/envelope.Command.ts.
-# The value is ``[age] side_effect_max_sec`` in config/commands.toml (180 as
+# The value is ``[age] side_effect_max_sec`` in config/services.toml (180 as
 # shipped), read once at import: edit, then restart the service.
-STALE_OPEN_MAX_AGE_SEC = _command_limits.side_effect_max_sec()
+STALE_OPEN_MAX_AGE_SEC = _service_limits.side_effect_max_sec()
 
 # ``paper_adjust`` (the rescue-apply primitives) lives in options-scanner and
 # transitively pulls in ``paper_engine`` → ``scoring``. Importing it at module top

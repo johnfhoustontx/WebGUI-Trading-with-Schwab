@@ -54,7 +54,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from repo_paths import ENV_FLAGS  # noqa: E402
 from services import _degrade, _heartbeat  # noqa: E402
-from shared import command_limits as _command_limits  # noqa: E402
+from shared import service_limits as _service_limits  # noqa: E402
 from shared.bus import Bus  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -164,6 +164,27 @@ class _SchedulerHealth:
         return _heartbeat.age_s()
 
 
+def health_verdict(hs: "_SchedulerHealth", stale_sec=None):
+    """``(up, reason)`` for ``/health``.
+
+    The process answering is not the service working. It is NOT up when its
+    scheduler has stopped for good (the restart budget is spent), or when the
+    scheduler loop has not gone round for ``stale_sec``. A service with no
+    scheduler, a suppressed one (dev) and one that has not made its first pass
+    yet are all up: there is nothing to judge. Until 2026-10-04 this was
+    ``"up": True`` whatever the scheduler was doing (audit AR-06)."""
+    if not hs.has_scheduler:
+        return True, None
+    if not hs.alive:
+        return False, f"scheduler stopped after {hs.restarts} restarts"
+    age = hs.last_tick_age_s()
+    if stale_sec is None:
+        stale_sec = _service_limits.tick_stale_sec()
+    if age is not None and age > stale_sec:
+        return False, f"scheduler has not run for {int(age)} s"
+    return True, None
+
+
 async def _supervise_scheduler(
     scheduler, bus, health: _SchedulerHealth, backoff_s: float, max_restarts: int
 ) -> None:
@@ -187,6 +208,15 @@ async def _supervise_scheduler(
             raise
         except Exception:  # noqa: BLE001 — never crash the app.
             log.exception("scheduler task failed")
+
+        # A scheduler that ran a long time before this exit has earned its
+        # budget back. The count was for the life of the process, so ten
+        # unrelated faults spread over weeks left the scheduler stopped for good.
+        ran_s = time.monotonic() - health.last_start
+        if health.restarts and ran_s >= _service_limits.restart_reset_sec():
+            log.info("scheduler ran %.0fs before this exit; restart budget reset "
+                     "(was %d/%d)", ran_s, health.restarts, max_restarts)
+            health.restarts = 0
 
         if health.restarts >= max_restarts:
             health.alive = False
@@ -227,7 +257,7 @@ def _is_replay(command, late_ok) -> bool:
     try:
         if getattr(command, "type", None) in late_ok:
             return False
-        return _command_limits.older_than(command, _command_limits.replay_max_sec())
+        return _service_limits.older_than(command, _service_limits.replay_max_sec())
     except Exception:  # noqa: BLE001
         return False
 
@@ -286,8 +316,8 @@ async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
                         log.warning(
                             "dropped replayed command %r on %s: enqueued %.0fs ago "
                             "(limit %ds)", getattr(command, "type", None), stream,
-                            _command_limits.age_seconds(command) or -1,
-                            _command_limits.replay_max_sec())
+                            _service_limits.age_seconds(command) or -1,
+                            _service_limits.replay_max_sec())
                         continue
                     result = await loop.run_in_executor(
                         None, command_handler, bus, command
@@ -358,7 +388,7 @@ def make_app(
       Strategy Finder's scans are not on ``cmd:options``.
     * ``late_ok`` — command types on the domain's OWN stream that may run at any
       age (a re-read of a local store). Every other command older than
-      ``[age] replay_max_sec`` (config/commands.toml) is dropped: it is the
+      ``[age] replay_max_sec`` (config/services.toml) is dropped: it is the
       stream's history, replayed to a new consumer group. Extra streams are not
       checked here; they answer an expired request themselves.
     """
@@ -431,9 +461,12 @@ def make_app(
         # It is process-lifetime, not a rate: the useful read is "this number is
         # climbing" or "this area is 300 and every other is 0", which is exactly
         # what a silent ``except Exception -> return a plausible default`` hides.
+        up, reason = health_verdict(hs)
         return {
             "domain": domain,
-            "up": True,
+            "up": up,
+            # Why it is not up, in words the Status card shows. None when it is.
+            "reason": reason,
             "scheduler_alive": hs.alive if hs.has_scheduler else True,
             "scheduler_restarts": hs.restarts,
             # Two different clocks, and the difference is the point: uptime

@@ -353,8 +353,11 @@ def test_scheduler_permanently_dead_when_backoff_budget_exhausted(schedulers_ena
                 break
             time.sleep(0.02)
         body = client.get("/health").json()
-        assert body["up"] is True  # process still up
-        assert body["scheduler_alive"] is False  # but scheduler is dead
+        # The process still answers, and until 2026-10-04 this asserted that
+        # made it "up". It does not: a service whose scheduler has stopped for
+        # good is doing none of its work (audit AR-06).
+        assert body["up"] is False
+        assert body["scheduler_alive"] is False
         assert body["scheduler_restarts"] == 3
 
 
@@ -615,13 +618,13 @@ def _run_until(bus, app, done, tries=60):
 
 
 def test_a_replayed_command_is_dropped_not_run():
-    from shared import command_limits
+    from shared import service_limits
     bus = Bus(fake=True)
     seen = []
     app = make_app("oldx", command_handler=lambda b, c: seen.append(c.type),
                    bus=bus, poll_block_ms=50)
     bus.enqueue_command("cmd:oldx", {"type": "paper_reset", "args": {},
-                                     "ts": _old_ts(command_limits.replay_max_sec() + 60)})
+                                     "ts": _old_ts(service_limits.replay_max_sec() + 60)})
     bus.enqueue_command("cmd:oldx", {"type": "marker", "args": {}})
     _run_until(bus, app, lambda: seen)
     assert seen == ["marker"]
@@ -630,13 +633,13 @@ def test_a_replayed_command_is_dropped_not_run():
 
 
 def test_a_command_inside_the_limit_runs():
-    from shared import command_limits
+    from shared import service_limits
     bus = Bus(fake=True)
     seen = []
     app = make_app("freshx", command_handler=lambda b, c: seen.append(c.type),
                    bus=bus, poll_block_ms=50)
     bus.enqueue_command("cmd:freshx", {"type": "rescan", "args": {},
-                                       "ts": _old_ts(command_limits.replay_max_sec() - 120)})
+                                       "ts": _old_ts(service_limits.replay_max_sec() - 120)})
     _run_until(bus, app, lambda: seen)
     assert seen == ["rescan"]
 
@@ -672,3 +675,83 @@ def test_an_extra_stream_keeps_its_own_expiry_rules():
     bus.enqueue_command("cmd:extrax_pub", {"type": "scan", "args": {}, "ts": _old_ts(86400)})
     _run_until(bus, app, lambda: seen)
     assert seen == ["scan"]
+
+
+# --- /health tells the truth about the scheduler (audit AR-06) ----------------
+
+def test_a_service_whose_scheduler_stopped_is_not_up(schedulers_enabled):
+    bus = Bus(fake=True)
+
+    async def always_boom(b):
+        raise RuntimeError("always")
+
+    app = make_app("deadupx", scheduler=always_boom, bus=bus,
+                   scheduler_restart_backoff_s=0.02, scheduler_max_restarts=2)
+    with TestClient(app) as client:
+        for _ in range(200):
+            body = client.get("/health").json()
+            if body["scheduler_alive"] is False:
+                break
+            time.sleep(0.02)
+        assert body["up"] is False
+        assert "stopped" in body["reason"]
+
+
+def test_a_scheduler_that_has_gone_silent_is_not_up(schedulers_enabled, monkeypatch):
+    from services import _heartbeat, _scaffold
+    from shared import service_limits
+    bus = Bus(fake=True)
+
+    async def sched(b):
+        import asyncio
+        _heartbeat.tick()
+        await asyncio.sleep(3600)
+
+    app = make_app("silentx", scheduler=sched, bus=bus)
+    with TestClient(app) as client:
+        for _ in range(100):
+            if client.get("/health").json()["scheduler_last_tick_age_s"] is not None:
+                break
+            time.sleep(0.02)
+        assert client.get("/health").json()["up"] is True
+        monkeypatch.setattr(_scaffold._heartbeat, "age_s",
+                            lambda: service_limits.tick_stale_sec() + 5.0)
+        body = client.get("/health").json()
+        assert body["up"] is False
+        assert "has not run" in body["reason"]
+
+
+def test_a_scheduler_that_has_not_ticked_yet_is_up(schedulers_enabled):
+    """A fresh start has no tick age. That is not staleness."""
+    from services import _scaffold
+    hs = _scaffold._SchedulerHealth(has_scheduler=True)
+    assert _scaffold.health_verdict(hs, stale_sec=600) == (True, None)
+
+
+def test_a_service_with_no_scheduler_is_up():
+    from services import _scaffold
+    assert _scaffold.health_verdict(_scaffold._SchedulerHealth()) == (True, None)
+
+
+def test_a_long_healthy_run_restores_the_restart_budget(schedulers_enabled, monkeypatch):
+    """The budget was a lifetime count: ten unrelated faults a week apart and the
+    scheduler stayed stopped for good."""
+    from shared import service_limits
+    monkeypatch.setattr(service_limits, "restart_reset_sec", lambda: 0)
+    bus = Bus(fake=True)
+    calls = []
+
+    async def boom(b):
+        calls.append(1)
+        raise RuntimeError("x")
+
+    app = make_app("budgetx", scheduler=boom, bus=bus,
+                   scheduler_restart_backoff_s=0.01, scheduler_max_restarts=2)
+    with TestClient(app) as client:
+        for _ in range(100):
+            if len(calls) >= 8:
+                break
+            time.sleep(0.02)
+        body = client.get("/health").json()
+    assert len(calls) >= 8, "the scheduler stopped being restarted"
+    assert body["scheduler_alive"] is True

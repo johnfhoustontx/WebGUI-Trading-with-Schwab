@@ -204,12 +204,12 @@ def test_the_commands_that_run_at_any_age_only_re_read_a_store():
 
 def test_the_side_effect_limit_comes_from_the_settings(monkeypatch):
     import importlib
-    from shared import command_limits
-    monkeypatch.setattr(command_limits, "side_effect_max_sec", lambda: 77)
+    from shared import service_limits
+    monkeypatch.setattr(service_limits, "side_effect_max_sec", lambda: 77)
     try:
         importlib.reload(handlers)
         assert handlers.STALE_OPEN_MAX_AGE_SEC == 77
     finally:
         monkeypatch.undo()
         importlib.reload(handlers)
-    assert handlers.STALE_OPEN_MAX_AGE_SEC == command_limits.side_effect_max_sec()
+    assert handlers.STALE_OPEN_MAX_AGE_SEC == service_limits.side_effect_max_sec()

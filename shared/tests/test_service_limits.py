@@ -3,7 +3,7 @@ import datetime as dt
 
 import pytest
 
-from shared import command_limits as cl
+from shared import service_limits as cl
 
 
 def _cmd(seconds=None, ts="auto"):
