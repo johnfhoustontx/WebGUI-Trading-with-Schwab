@@ -324,50 +324,17 @@ def card_view(sig):
 
 # ------------------------------------------------------------------ paging
 
-def _sort_value(v):
-    """A cell's sort key, ordered the way Quasar's default column sort orders it:
-    a missing value below everything, numbers numerically, text case-blind.
-    Numbers sort before text rather than raising on a mixed column."""
-    if v is None or v != v:                      # None, or NaN
-        return (0, 0, 0.0)
-    if isinstance(v, (int, float)):
-        return (1, 0, float(v))
-    return (1, 1, str(v).lower())
-
-
 def page_of(rows, columns, request):
     """One page of ``rows`` for a Quasar server-side ``request`` pagination.
 
-    Returns ``(page_rows, pagination)``. The WHOLE list is sorted before it is
-    sliced, on the column's ``field`` (the numeric twin for the money, odds and
-    expiry columns), so page 2 continues page 1's order. ``sortBy`` names a
-    COLUMN, as Quasar sends it; a column that is unknown or not sortable sorts
-    nothing and the rows keep their ranked order. The page is clamped to the
-    list, and the page size is always :data:`PAGE_SIZE` - the table offers no
-    other, and a request for 0 ("all") would ship every row this exists to hold
-    back.
+    Returns ``(page_rows, pagination)``, through the page kit's one pager
+    (``kit.page_of``, which the Market Scanner shares): the whole list is
+    sorted before it is sliced, on the column's ``field`` (the numeric twin for
+    the money, odds and expiry columns); an unknown or unsortable column sorts
+    nothing; the page is clamped; and the page size is always
+    :data:`PAGE_SIZE`.
     """
-    req = request if isinstance(request, dict) else {}
-    fields = {c.get("name"): c.get("field") for c in columns or [] if c.get("sortable")}
-    sort_by = req.get("sortBy")
-    field = fields.get(sort_by) if isinstance(sort_by, str) else None
-    rows = list(rows or [])
-    if field is None:
-        sort_by, descending = None, False
-    else:
-        descending = bool(req.get("descending"))
-        rows = sorted(rows, key=lambda r: _sort_value(r.get(field)), reverse=descending)
-    n = len(rows)
-    last = max(1, -(-n // PAGE_SIZE))
-    try:
-        page = int(req.get("page") or 1)
-    except (TypeError, ValueError):
-        page = 1
-    page = min(max(page, 1), last)
-    start = (page - 1) * PAGE_SIZE
-    return rows[start:start + PAGE_SIZE], {
-        "sortBy": sort_by, "descending": descending, "page": page,
-        "rowsPerPage": PAGE_SIZE, "rowsNumber": n}
+    return kit.page_of(rows, columns, request, page_size=PAGE_SIZE)
 
 
 # ------------------------------------------------------------------ table slots

@@ -859,3 +859,71 @@ def test_the_trend_slot_is_registered_on_all_three_tables():
     assert src.count("add_slot('body-cell-score_trend', _TREND_SLOT)") == 2
     assert "_t.add_slot('body-cell-score_trend', _TREND_SLOT)" in src
     assert "table_dir.add_slot('body-cell-score_trend', _TREND_SLOT)" in src
+
+
+# ── the tables ship one page, not the day (audit PF-05) ─────────────────────
+# Quasar paged CLIENT-side: every repaint, and every 5-minute re-stamp, sent the
+# whole day union to the browser (about 4.5 MB by the close) to show 100 rows.
+
+def _day_rows(n):
+    return [{"id": f"s{i}", "symbol": f"SYM{i % 80}", "composite_score": float(i % 97),
+             "credit": 1.0 + i / 100, "_score_class": "x", "checks": "Clear"}
+            for i in range(n)]
+
+
+def test_a_table_page_is_at_most_one_hundred_rows_of_the_whole_list():
+    rows = _day_rows(1746)
+    page, pag = scanner.table_page(rows, scanner.signal_columns(), None)
+    assert len(page) == scanner.PAGE_ROWS == 100
+    assert pag["rowsNumber"] == 1746 and pag["rowsPerPage"] == 100
+    assert page == rows[:100]                       # the builder's own order
+
+
+def test_a_sorted_page_is_sorted_over_the_whole_day_not_the_page():
+    rows = _day_rows(1746)
+    page, pag = scanner.table_page(rows, scanner.signal_columns(),
+                                   {"sortBy": "credit", "descending": True})
+    assert [r["id"] for r in page[:3]] == ["s1745", "s1744", "s1743"]
+    assert pag["sortBy"] == "credit"
+
+
+def test_what_reaches_the_browser_is_a_small_share_of_the_day():
+    import json
+    rows = _day_rows(1746)
+    page, _ = scanner.table_page(rows, scanner.signal_columns(), None)
+    assert len(json.dumps(page)) * 15 < len(json.dumps(rows))
+
+
+def test_the_tables_are_built_for_server_side_paging():
+    import inspect
+    src = inspect.getsource(scanner.render)
+    # rows_number is the switch (kit._pagination), and the page size is fixed:
+    # an "All" choice in the footer would ship every row again.
+    assert "rows_number=0" in src
+    assert 't._props["rows-per-page-options"] = [PAGE_ROWS]' in src
+    assert 'table.on("request"' in src
+    # The whole list is never assigned to a table.
+    assert "table.rows = shown" not in src
+    assert "table_page(" in src
+
+
+def test_the_finder_pages_through_the_same_function():
+    from pages import ui_kit
+    from pages.options import swing
+    rows = [{"id": i} for i in range(120)]
+    assert swing.page_of(rows, [], {"page": 2}) == ui_kit.page_of(
+        rows, [], {"page": 2}, page_size=swing.PAGE_SIZE)
+
+
+def test_the_page_keeps_its_own_pagination_and_reasserts_it_over_the_tables():
+    """Seen in a browser, not in the suite: a table announces its own pagination
+    when it mounts (``update:pagination``, rowsNumber 0), and NiceGUI writes
+    that over the element's. This page's first paint lands 50 ms after build,
+    so the announcement arrived AFTER it and the footer read "1-0 of 0" over a
+    hundred rows. The page therefore keeps the pagination it last sent and
+    never reads it back from the table."""
+    import inspect
+    src = inspect.getsource(scanner.render)
+    assert "_show_page(key, table, paging[key])" in src          # the repaint
+    assert "_show_page(key, table, table.pagination)" not in src
+    assert "table.on_pagination_change(" in src                   # the re-assert

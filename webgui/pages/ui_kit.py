@@ -579,6 +579,57 @@ def _pagination(rows_per_page, rows_number):
             "rowsPerPage": rows_per_page, "rowsNumber": rows_number}
 
 
+def sort_value(v):
+    """A cell's sort key, ordered the way Quasar's default column sort orders it:
+    a missing value below everything, numbers numerically, text case-blind.
+    Numbers sort before text rather than raising on a mixed column. PURE."""
+    if v is None or v != v:                      # None, or NaN
+        return (0, 0, 0.0)
+    if isinstance(v, (int, float)):
+        return (1, 0, float(v))
+    return (1, 1, str(v).lower())
+
+
+def page_of(rows, columns, request, *, page_size):
+    """One page of ``rows`` for a Quasar server-side ``request`` pagination.
+    PURE. Returns ``(page_rows, pagination)``.
+
+    The WHOLE list is sorted before it is sliced, on the column's ``field``, so
+    page 2 continues page 1's order. ``sortBy`` names a COLUMN, as Quasar sends
+    it; a column that is unknown or not sortable sorts nothing and the rows
+    keep the order they came in. The page is clamped to the list. The page size
+    is always ``page_size``: a request for another (0 is Quasar's "all") is
+    answered with it, because the full list is what a server-paged table exists
+    to hold back - and a ``page_size`` that is not a positive number raises
+    rather than send every row.
+
+    The page's rows are the SAME dicts as in ``rows`` (a slice, not copies)."""
+    if isinstance(page_size, bool) or not isinstance(page_size, int) or page_size <= 0:
+        raise ValueError("page_size must be a positive whole number; anything "
+                         "else would send every row")
+    req = request if isinstance(request, dict) else {}
+    fields = {c.get("name"): c.get("field") for c in columns or [] if c.get("sortable")}
+    sort_by = req.get("sortBy")
+    field = fields.get(sort_by) if isinstance(sort_by, str) else None
+    rows = list(rows or [])
+    if field is None:
+        sort_by, descending = None, False
+    else:
+        descending = bool(req.get("descending"))
+        rows = sorted(rows, key=lambda r: sort_value(r.get(field)), reverse=descending)
+    n = len(rows)
+    last = max(1, -(-n // page_size))
+    try:
+        page = int(req.get("page") or 1)
+    except (TypeError, ValueError):
+        page = 1
+    page = min(max(page, 1), last)
+    start = (page - 1) * page_size
+    return rows[start:start + page_size], {
+        "sortBy": sort_by, "descending": descending, "page": page,
+        "rowsPerPage": page_size, "rowsNumber": n}
+
+
 def table(columns, rows=None, *, row_key="id", numeric=(), rows_per_page=0,
           rows_number=None, classes="w-full"):
     """The one table: dense, flat, sticky header (the app-wide ``TABLE_CSS``),

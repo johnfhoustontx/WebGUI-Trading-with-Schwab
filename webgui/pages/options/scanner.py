@@ -710,6 +710,16 @@ def _read_and_build():
 # carrying a q-badge/q-tooltip) rebuilt wholesale on every scan — worst at 3pm,
 # exactly when a trader is looking. Page it.
 _TABLE_PAGINATION = {"rowsPerPage": 100}
+# ... and page it on the SERVER. Quasar paged client-side, so every repaint and
+# every 5-minute re-stamp still sent the whole day union to the browser (about
+# 4.5 MB by the close) to show 100 rows of it (audit PF-05).
+PAGE_ROWS = _TABLE_PAGINATION["rowsPerPage"]
+
+
+def table_page(rows, columns, request):
+    """The one page of ``rows`` a table is sent, and its pagination. PURE - the
+    page kit's pager (shared with the Strategy Finder) at this page's size."""
+    return kit.page_of(rows, columns, request, page_size=PAGE_ROWS)
 
 # A dropped-out row is dimmed via Quasar's `table-row-class-fn`. The page's own
 # ``_ROW_CLASS_PROP`` went with the 2026-09-19 page-kit migration: ``kit.table``
@@ -872,10 +882,15 @@ def render():
     _shell.bind_breadcrumb_leaf(tabs, initial="0-DTE")
 
     def _table(columns):
-        t = kit.table(columns, rows_per_page=_TABLE_PAGINATION["rowsPerPage"],
+        # rows_number=0 puts Quasar in SERVER mode: a page or sort click asks
+        # this page for rows (``_wire_paging``) instead of paging a list the
+        # browser was already sent.
+        t = kit.table(columns, rows_per_page=PAGE_ROWS, rows_number=0,
                       numeric=("dte", "credit", "max_loss", "rr_pct", "pop_pct",
                                "iv_rank", "composite_score"),
                       classes="w-full scan-table")
+        # One page size: an "All" choice in the footer would ship every row.
+        t._props["rows-per-page-options"] = [PAGE_ROWS]
         return t
 
     with kit.page():
@@ -923,6 +938,14 @@ def render():
     # The signals those rows were built from (a re-stamp needs them) and whether
     # today's day union exists (the tab counts need it).
     painted_sigs = {key: [] for key in DAY_LISTS}
+    # What each table is paging THROUGH: the painted rows after the "Only clear"
+    # filter. The browser holds one page of it at a time.
+    shown_rows = {key: [] for key in DAY_LISTS}
+    # The pagination this page last SENT each table (sort, page, total). Kept
+    # here and never read back from the table: a table announces its own
+    # pagination when it mounts (rowsNumber 0) and NiceGUI writes that over the
+    # element's, after this page's first paint has already set the real one.
+    paging = {key: None for key in DAY_LISTS}
     counts = {"have": False}
     # The Opportunity Board version the rows were last stamped against, so the
     # 5-minute timer re-stamps only when the board has actually moved.
@@ -1059,8 +1082,34 @@ def render():
         _apply_populate(_build_populate(day_env, live), notify=notify,
                         acknowledge=acknowledge)
 
+    def _show_page(key, table, request):
+        """Send ``table`` the one page ``request`` asks for, out of the rows it
+        is paging through. The reader's sort and page ride in the pagination, so
+        a repaint keeps both (the page is clamped if the list shrank)."""
+        page, pagination = table_page(shown_rows[key], table.columns, request)
+        paging[key] = pagination
+        table.rows = page
+        table.pagination = dict(pagination)
+        table.update()
+
+    def _wire_paging(key, table):
+        @guard
+        def _on_request(event):
+            args = event.args if isinstance(event.args, dict) else {}
+            _show_page(key, table, args.get("pagination"))
+
+        @guard
+        def _on_announced(_event):
+            # The table's own pagination, sent when it mounts, has just been
+            # written over the element's. Put back what this page last sent.
+            if paging[key] is not None and table.pagination != paging[key]:
+                _show_page(key, table, paging[key])
+
+        table.on("request", _on_request, ["pagination"])
+        table.on_pagination_change(_on_announced)
+
     def _paint_tables():
-        """Assign the stored rows to the tables, filtered when "Only clear" is on,
+        """Page the stored rows into the tables, filtered when "Only clear" is on,
         with the tab counts and the empty-state line following the filter."""
         filtering = bool(clear_toggle.value)
         for key, table, tab, base in (
@@ -1076,8 +1125,8 @@ def render():
                 table._props.pop("no-data-label", None)
             else:
                 table._props["no-data-label"] = empty
-            table.rows = shown
-            table.update()
+            shown_rows[key] = shown
+            _show_page(key, table, paging[key])
             label = filtered_tab_label(base, len(full), len(shown),
                                        have=counts["have"], filtering=filtering)
             tab.props(f'label="{label}"')
@@ -1088,6 +1137,9 @@ def render():
         _paint_tables()             # re-filter the stored rows; no bus read
 
     clear_toggle.on_value_change(_on_clear_toggle)
+    for _key, _tbl in (("signals_0dte", table_0dte), ("signals_swing", table_swing),
+                       ("signals_directional", table_dir)):
+        _wire_paging(_key, _tbl)
 
     def _apply_populate(built, *, notify=True, acknowledge=False):
         """Paint the tables + detail map + bottom status from the OFF-LOOP-built

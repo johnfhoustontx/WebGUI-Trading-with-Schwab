@@ -875,3 +875,53 @@ def test_section_title_is_the_one_heading_style():
     with ui.card():
         s = kit.section_title("Open positions")
     assert s.text == "Open positions" and theme.LABEL in s.classes
+
+
+# ── one pager for every server-paged table (audit PF-05) ────────────────────
+_PAGE_COLS = [{"name": "sym", "field": "sym", "sortable": True},
+              {"name": "risk", "field": "_risk_n", "sortable": True},
+              {"name": "checks", "field": "checks", "sortable": False}]
+
+
+def test_page_of_slices_the_page_size_it_is_given_and_reports_the_total():
+    rows = [{"id": i} for i in range(250)]
+    page, pag = kit.page_of(rows, _PAGE_COLS, None, page_size=100)
+    assert [r["id"] for r in page] == list(range(100))
+    assert pag == {"sortBy": None, "descending": False, "page": 1,
+                   "rowsPerPage": 100, "rowsNumber": 250}
+    page, pag = kit.page_of(rows, _PAGE_COLS, {"page": 3}, page_size=100)
+    assert [r["id"] for r in page] == list(range(200, 250)) and pag["page"] == 3
+
+
+def test_page_of_sorts_the_whole_list_on_the_columns_field_before_slicing():
+    rows = [{"id": i, "_risk_n": (i * 37) % 250} for i in range(250)]
+    req = {"sortBy": "risk", "descending": True, "page": 1}
+    page, pag = kit.page_of(rows, _PAGE_COLS, req, page_size=100)
+    assert [r["_risk_n"] for r in page] == list(range(249, 149, -1))
+    assert (pag["sortBy"], pag["descending"]) == ("risk", True)
+
+
+def test_page_of_ignores_a_column_that_does_not_sort_and_a_page_size_request():
+    rows = [{"id": i, "checks": str(-i)} for i in range(120)]
+    page, pag = kit.page_of(rows, _PAGE_COLS,
+                            {"sortBy": "checks", "page": 9, "rowsPerPage": 0},
+                            page_size=100)
+    # Rows keep their own order, the page is clamped, and a request for "all"
+    # (0) is answered with the fixed size: the list is what this holds back.
+    assert pag == {"sortBy": None, "descending": False, "page": 2,
+                   "rowsPerPage": 100, "rowsNumber": 120}
+    assert [r["id"] for r in page] == list(range(100, 120))
+
+
+def test_page_of_puts_a_missing_value_below_every_number():
+    rows = [{"id": "a", "_risk_n": 4.0}, {"id": "b", "_risk_n": None},
+            {"id": "c", "_risk_n": float("nan")}, {"id": "d", "_risk_n": 1.0}]
+    up, _ = kit.page_of(rows, _PAGE_COLS, {"sortBy": "risk"}, page_size=100)
+    assert [r["id"] for r in up] == ["b", "c", "d", "a"]
+
+
+def test_page_of_refuses_a_page_size_that_would_send_every_row():
+    import pytest as _pytest
+    for bad in (0, None, -5):
+        with _pytest.raises(ValueError):
+            kit.page_of([{"id": 1}], _PAGE_COLS, None, page_size=bad)
