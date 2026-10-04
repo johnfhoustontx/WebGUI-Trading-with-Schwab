@@ -266,7 +266,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | options_svc | 8211 | Scans, paper trading, gamma collection, flow alerts, calculator, simulator, expected move, rescue. |
 | portfolio_svc | 8212 | Holdings, sectors, performance, live P&L stream. |
 | trade_svc | 8213 | On-demand single-symbol analysis + deep dive; the daily watchlist dividend pull. |
-| market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). |
+| market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). Its /ES and /NQ tiles quote the front-month contract: quarterly (H, M, U, Z), expiring the third Friday of the month or the session before when that Friday is a closure, and switched `[futures] roll_days_before_expiry` days (8) before expiry — `shared/futures.py`. |
 | news_svc | 8216 | Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds and the economic calendar (Fed, BLS, BEA, FRED, Nasdaq) into `news.db`. No Schwab, no Claude, no proxy. |
 | webgui | 8500 | The web UI. |
 | webgui_live | 8501 | The seventeen public screens, on their own origin. |

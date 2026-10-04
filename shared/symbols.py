@@ -48,7 +48,16 @@ DEFAULTS = {
          "symbols": ["NVDA", "AVGO", "AAPL", "META", "MSFT",
                      "TSLA", "PLTR", "AMZN", "GOOGL", "AMD"]},
     ],
+    "futures": {
+        "roll_days_before_expiry": 8,
+    },
 }
+
+# The widest roll offset the loader accepts. The Settings editor's upper bound
+# in webgui/config_schema.py is a second copy (that module imports nothing), so
+# test_config_schema pins the two equal. A month is already far past any real
+# roll; the cap is what keeps a typo from skipping a whole contract.
+FUTURES_ROLL_DAYS_MAX = 30
 
 load, reset_cache = toml_loader(SYMBOLS_TOML, DEFAULTS, label="symbols.toml")
 
@@ -103,6 +112,22 @@ def netprem_groups() -> tuple:
         out = [{"key": g["key"], "label": g["label"],
                 "symbols": tuple(g["symbols"])} for g in DEFAULTS["netprem_groups"]]
     return tuple(out)
+
+
+def futures_roll_days() -> int:
+    """Days before a futures contract's expiry that the Macro Board's /ES and
+    /NQ tiles (and the NQ/ES HUD) switch to the next one. See shared/futures.py.
+
+    A whole number from 0 to ``FUTURES_ROLL_DAYS_MAX``; anything else - text, a
+    decimal, a negative, ``true`` - is the shipped default. ``bool`` is refused
+    by name because it is an ``int`` in Python and would read as a 1-day roll.
+    """
+    default = DEFAULTS["futures"]["roll_days_before_expiry"]
+    sec = load().get("futures")
+    val = sec.get("roll_days_before_expiry") if isinstance(sec, dict) else None
+    if isinstance(val, bool) or not isinstance(val, int):
+        return default
+    return val if 0 <= val <= FUTURES_ROLL_DAYS_MAX else default
 
 
 # One ticker allow-list for every tier that accepts a typed symbol. A leading

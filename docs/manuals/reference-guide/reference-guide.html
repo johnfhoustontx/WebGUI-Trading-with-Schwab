@@ -1911,7 +1911,7 @@ intensity scales with the size of the move.</p>
 <tr>
 <td><strong>Equity Index Futures</strong></td>
 <td>/ES, /NQ</td>
-<td>The overnight tape, when cash is closed.</td>
+<td>The overnight tape, when cash is closed. Each tile names its contract in brackets (<code>/ES[Z26]</code> is December 2026) and moves to the next one by itself.</td>
 </tr>
 <tr>
 <td><strong>Broad-Market ETF</strong></td>
@@ -1987,6 +1987,14 @@ are ticking, the gateway and <code>market_svc</code> are both healthy.</p>
 <li><code>$DXY</code> is quoted <strong>via UUP</strong> because Schwab cannot quote the index directly, so its
   absolute level is not the dollar index value — only its direction is meaningful.</li>
 <li>Futures tiles keep moving when cash is closed. That is correct, not a bug.</li>
+<li><strong>The futures tiles change contract four times a year.</strong> Index futures expire
+  on the third Friday of March, June, September and December. The tiles switch
+  to the next contract 8 days before that, the Thursday of the week before
+  expiry, which is when trading volume moves. The label changes with it
+  (<code>/ES[Z26]</code> becomes <code>/ES[H27]</code>), and the price steps by the difference between
+  the two contracts, so a jump on a roll day is the roll and not the market. The
+  8 days is a setting: Settings → Configuration → Symbols &amp; watchlists → <em>Index
+  futures</em>.</li>
 </ul>
 <h3 id="related-pages_5">Related pages</h3>
 <p><a href="#sentiment">Sentiment</a> (turns much of this into one score) ·

@@ -1,6 +1,13 @@
-from shared.bus import Bus
+from datetime import date
 
-from services.market_svc import compute
+from shared.bus import Bus
+from shared import futures
+
+from services.market_svc import compute, symbols
+
+# ``_raw()`` below quotes the September 2026 future, so the test that reads the
+# futures tile resolves the symbol map on a date that contract was the front month.
+_SEP_2026 = date(2026, 9, 1)
 
 
 def _raw():
@@ -71,7 +78,8 @@ def test_build_dashboard_shapes_categories_in_order():
 
 
 def test_vix_tile_is_risk_off_and_spx_risk_off_down():
-    d = compute.build_dashboard(_raw(), sector_pcr=0.99, proxy_up=True)
+    d = compute.build_dashboard(_raw(), sector_pcr=0.99, proxy_up=True,
+                                entries=symbols.symbol_map(_SEP_2026))
     tiles = {t["display"]: t for c in d["categories"] for t in c["tiles"]}
     assert tiles["VIX"]["color_state"] == "risk_off_strong"   # +3.6% inverted
     assert tiles["SPX"]["color_state"] == "risk_off_mild"     # -0.44% normal
@@ -378,3 +386,73 @@ def test_the_caller_label_is_the_shared_clients_own(monkeypatch):
     import proxy_client
     monkeypatch.setattr(proxy_client, "caller_label", lambda name: f"<{name}>")
     assert compute._new_session().headers["X-Caller"] == "<market_svc>"
+
+
+# ── the futures tiles across a contract roll ────────────────────────────────
+
+def _future_quote(last=7001.25, pct=0.31):
+    return {"assetMainType": "FUTURE",
+            "quote": {"lastPrice": last, "netChange": 21.5,
+                      "futurePercentChange": pct, "closePrice": last - 21.5}}
+
+
+def _tiles(d):
+    return {t["display"]: t for c in d["categories"] for t in c["tiles"]}
+
+
+def test_after_the_roll_the_tile_reads_the_december_contract():
+    raw = {"/ESZ26": _future_quote(), "/NQZ26": _future_quote(25800.0, -0.2)}
+    d = compute.build_dashboard(raw, sector_pcr=None, proxy_up=True,
+                                entries=symbols.symbol_map(date(2026, 10, 4)))
+    es, nq = _tiles(d)["/ES[Z26]"], _tiles(d)["/NQ[Z26]"]
+    assert es["last"] == 7001.25
+    assert es["change_pct"] == 0.31                 # futurePercentChange, as-is
+    assert es["color_state"] == "risk_on_mild"
+    assert es["description"] == "E-mini S&P 500 future, Dec 2026"
+    assert nq["color_state"] == "risk_off_mild"
+    assert "/ES[U26]" not in _tiles(d)
+
+
+def test_a_quote_for_the_expired_contract_does_not_fill_the_tile():
+    """Nothing may fall back to the old symbol: a stale September quote sitting
+    in the response must not be drawn under the December label."""
+    d = compute.build_dashboard({"/ESU26": _future_quote()}, sector_pcr=None,
+                                proxy_up=True,
+                                entries=symbols.symbol_map(date(2026, 10, 4)))
+    assert _tiles(d)["/ES[Z26]"]["color_state"] == "no_data"
+    assert _tiles(d)["/ES[Z26]"]["last"] is None
+
+
+def test_collect_asks_for_and_draws_the_same_contract(monkeypatch):
+    """The whole path on the evening the tiles were seen blank: what the poll
+    asks Schwab for and what it labels the answer with are one contract."""
+    asked = []
+
+    def fake_fetch(syms):
+        asked.append(list(syms))
+        return {s: _future_quote() for s in syms if s.startswith("/")}
+
+    monkeypatch.setattr(compute, "fetch_raw_quotes", fake_fetch)
+    monkeypatch.setattr(futures, "today_ct", lambda: date(2026, 10, 4))
+    d = compute.collect(Bus(fake=True))
+    assert "/ESZ26" in asked[0] and "/NQZ26" in asked[0]
+    assert not [s for s in asked[0] if s.endswith("U26")]
+    assert _tiles(d)["/ES[Z26]"]["last"] == 7001.25
+    assert _tiles(d)["/NQ[Z26]"]["last"] == 7001.25
+
+
+def test_collect_resolves_the_symbol_map_once_per_poll(monkeypatch):
+    """The fetch and the build must not each read the calendar, or the poll that
+    straddles a roll fetches one contract and labels the other."""
+    calls = []
+    real = symbols.symbol_map
+
+    def counting(today=None):
+        calls.append(today)
+        return real(today)
+
+    monkeypatch.setattr(symbols, "symbol_map", counting)
+    monkeypatch.setattr(compute, "fetch_raw_quotes", lambda syms: {})
+    monkeypatch.setattr(compute._proxy, "health", lambda: {"up": True})
+    compute.collect(Bus(fake=True))
+    assert len(calls) == 1

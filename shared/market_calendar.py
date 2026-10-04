@@ -77,6 +77,17 @@ def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
     return d + timedelta(days=offset + (n - 1) * 7)
 
 
+def third_friday(year: int, month: int) -> date:
+    """The third Friday of (year, month): monthly option expiration, and the
+    final settlement of a quarterly index future (``shared/futures.py``).
+
+    A WEEKDAY rule only. It does not ask whether that Friday is a session;
+    when it is a closure (June 2026: Juneteenth) the caller moves to
+    ``prev_trading_day``.
+    """
+    return _nth_weekday(year, month, 4, 3)
+
+
 def _last_weekday(year: int, month: int, weekday: int) -> date:
     """Last occurrence of ``weekday`` in (year, month)."""
     if month == 12:

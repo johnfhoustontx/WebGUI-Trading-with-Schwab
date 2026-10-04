@@ -1,7 +1,7 @@
 """
 nq_instruments.py - per-instrument specs for the dealer-positioning HUD
-Version: 1.0.0
-Last Updated: 2026-07-30
+Version: 1.1.0
+Last Updated: 2026-10-04
 
 The HUD renders NQ and ES side by side. Everything that differs between them is
 DATA, collected here, so the readers, the pure signal logic, the state export
@@ -12,9 +12,11 @@ WHAT ACTUALLY DIFFERS — and why each field has to exist:
 
   * cash index and its ETF fallback ($NDX/QQQ vs $SPX/SPY). The gamma grids are
     per-symbol; there is no shared one.
-  * tape tile names and the futures contract. These are duplicated from
-    services/market_svc/symbols.py and change at every quarterly roll, so
-    test_nq_instruments.py asserts they still agree.
+  * the cash tile name and the futures ROOT (/NQ, /ES). The futures tile name
+    and the contract behind it change at every quarterly roll, so neither is
+    written here: both are worked out from the date by shared/futures.py, the
+    same computation services/market_svc/symbols.py uses for the tile itself.
+    test_nq_instruments.py asserts the two agree across a roll.
   * contract point values. NQ is $20/pt, ES is $50/pt — a shared number would
     misstate dollar risk by 2.5x.
   * the STOP BAND, which is the one non-obvious entry. Stops are ATR-scaled but
@@ -31,7 +33,16 @@ and live with the logic in nq_signal.py.
 
 from __future__ import annotations
 
+import pathlib
+import sys
 from dataclasses import dataclass
+
+# Repo root on sys.path -> shared.* is importable (same pattern as nq_hud.py).
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from shared import futures  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -48,9 +59,9 @@ class Instrument:
     cash_tile: str              # tile display name in cache:market:dashboard
     sources: tuple              # GEX source symbols, most-preferred first
 
-    # Futures side — the frame prices are displayed in.
-    future_tile: str            # tile display name in cache:market:dashboard
-    contract: str               # Schwab quote symbol behind that tile
+    # Futures side — the frame prices are displayed in. Only the root is fixed;
+    # ``future_tile`` and ``contract`` below follow the front month.
+    future_root: str            # "/NQ"
 
     # Economics.
     point_value: float          # $ per index point, full-size contract
@@ -60,12 +71,20 @@ class Instrument:
     min_stop: float
     max_stop: float
 
+    # Worked out when READ, not when the spec is built: the HUD runs for days,
+    # and a name fixed at import would outlive a roll and leave the pane reading
+    # a tile market_svc no longer publishes. The HUD still imports no service
+    # module; it and market_svc both ask shared/futures.py.
 
-# NOTE: future_tile/contract are duplicated from services/market_svc/symbols.py
-# and MUST be rolled in lockstep with it each quarter. The duplication is
-# deliberate — the HUD is a Tier-1 reader and importing a service module for two
-# strings would couple it to that service's import graph — but it is guarded by
-# test_nq_instruments.py, which fails loudly when they diverge.
+    @property
+    def future_tile(self) -> str:
+        """Tile display name in cache:market:dashboard, e.g. ``/NQ[Z26]``."""
+        return futures.front_month(self.future_root).display
+
+    @property
+    def contract(self) -> str:
+        """Schwab quote symbol behind that tile, e.g. ``/NQZ26``."""
+        return futures.front_month(self.future_root).quote_symbol
 
 NQ = Instrument(
     key="nq",
@@ -73,8 +92,7 @@ NQ = Instrument(
     micro_label="MNQ",
     cash_tile="NDX",
     sources=("$NDX", "QQQ"),
-    future_tile="/NQ[U26]",
-    contract="/NQU26",
+    future_root="/NQ",
     point_value=20.0,
     micro_point_value=2.0,
     min_stop=15.0,
@@ -87,8 +105,7 @@ ES = Instrument(
     micro_label="MES",
     cash_tile="SPX",
     sources=("$SPX", "SPY"),
-    future_tile="/ES[U26]",
-    contract="/ESU26",
+    future_root="/ES",
     point_value=50.0,
     micro_point_value=5.0,
     # NQ's band divided by the ~4x NDX/SPX index ratio, rounded to whole points

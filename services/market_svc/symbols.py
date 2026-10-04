@@ -16,8 +16,16 @@ Each entry:
   value_only   – True for internals Schwab returns with no % change (color by sign)
   spread       – (leg_a, leg_b, mode) for kind=="spread"; mode ∈ {"diff_last","diff_pct"}
   source       – for kind=="external" (e.g. "sentiment_pcr")
+
+The two Equity Index Futures tiles are the one part of this that is NOT fixed
+data: a futures contract expires every quarter, so their display, quote symbol
+and description are worked out from the date by ``symbol_map()``. Read the map
+through that function. There is deliberately no module-level ``SYMBOL_MAP`` -
+one resolved at import would keep quoting an expired contract until the service
+was next restarted, which is how ``/ES[U26]`` came to be blank in October 2026.
 """
 
+from shared import futures as _futures
 # BIG10's membership must match services/options_svc/net_premium's basket
 # (a comment used to say so; config/symbols.toml now enforces it).
 from shared import symbols as _shared_symbols
@@ -85,6 +93,19 @@ def _basket(display, members, desc, cat, polarity="normal", prem=False):
             "basket": tuple(members), "prem": prem}
 
 
+def _future(root, name, cat, polarity="normal"):
+    """A front-month futures tile, e.g. ``_future("/ES", "E-mini S&P 500 future")``.
+
+    Only the ROOT and the contract's name are written here. ``symbol_map()``
+    fills ``display`` (``/ES[Z26]``), ``quote_symbol`` (``/ESZ26``) and
+    ``description`` ("…, Dec 2026") from the date; until then the entry carries
+    the bare root and no quote symbol, so it can never be fetched half-built.
+    """
+    e = _q(root, None, name, cat, polarity)
+    e["future_root"] = root
+    return e
+
+
 _INT = "Market Internals / Breadth"
 _SEC = "Sector SPDR"
 _THM = "Thematic / Industry ETF"
@@ -92,7 +113,9 @@ _BRD = "Broad-Market ETF"
 _CTY = "Countries"
 _MAG = "Top 10"
 
-SYMBOL_MAP = [
+# The tile table as written. NOT the map to read - the futures entries here are
+# unresolved roots. Every reader goes through ``symbol_map()``.
+_ENTRIES = [
     # Volatility (inverted — fear up = risk-off)
     _q("VIX", "$VIX", "CBOE Volatility Index (30-day)", "Volatility", "inverted"),
     _q("VIX1D", "$VIX1D", "1-day volatility index", "Volatility", "inverted"),
@@ -133,9 +156,9 @@ SYMBOL_MAP = [
     # Cash Index (prem: per-symbol call/put premium skew subline)
     _q("SPX", "$SPX", "S&P 500 Index", "Cash Index", prem=True),
     _q("NDX", "$NDX", "Nasdaq 100 Index", "Cash Index", prem=True),
-    # Equity Index Futures
-    _q("/ES[U26]", "/ESU26", "E-mini S&P 500 future, Sep 2026", "Equity Index Futures"),
-    _q("/NQ[U26]", "/NQU26", "E-mini Nasdaq 100 future, Sep 2026", "Equity Index Futures"),
+    # Equity Index Futures — the front-month contract, resolved by symbol_map()
+    _future("/ES", "E-mini S&P 500 future", "Equity Index Futures"),
+    _future("/NQ", "E-mini Nasdaq 100 future", "Equity Index Futures"),
     # Broad-Market ETF (SPY/DIA/QQQ/IWM carry a premium skew subline)
     _q("SPY", "SPY", "SPDR S&P 500 ETF", _BRD, prem=True),
     _q("DIA", "DIA", "SPDR Dow Jones Industrial Average ETF", _BRD, prem=True),
@@ -208,11 +231,33 @@ SYMBOL_MAP = [
 ]
 
 
-def quote_symbols():
-    """Deduped list of real Schwab symbols to fetch (kind=='quote' + spread legs
-    + basket members)."""
+def symbol_map(today=None):
+    """The tile map for ``today`` (default: today, Central time).
+
+    Every entry is the fixed one from the table above except the futures tiles,
+    which are rebuilt on each call for the front-month contract on that date.
+    The roll offset is ``[futures] roll_days_before_expiry`` in
+    ``config/symbols.toml``. The fixed entries are shared objects, so treat the
+    result as read-only.
+    """
     out = []
-    for t in SYMBOL_MAP:
+    for e in _ENTRIES:
+        root = e.get("future_root")
+        if root:
+            c = _futures.front_month(root, today)
+            e = {**e, "csv_symbol": c.display, "display": c.display,
+                 "quote_symbol": c.quote_symbol,
+                 "description": f"{e['description']}, {c.label}"}
+        out.append(e)
+    return out
+
+
+def quote_symbols(entries=None):
+    """Deduped list of real Schwab symbols to fetch (kind=='quote' + spread legs
+    + basket members). ``entries`` is a ``symbol_map()`` result; pass the one the
+    dashboard is then built from, so both name the same futures contract."""
+    out = []
+    for t in (symbol_map() if entries is None else entries):
         if t["kind"] == "quote" and t["quote_symbol"]:
             out.append(t["quote_symbol"])
         elif t["kind"] == "spread":

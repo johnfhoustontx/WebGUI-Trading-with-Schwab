@@ -4,8 +4,9 @@ The specs are pure data, so most of what is worth asserting is CONSISTENCY
 with the two places the rest of the stack keeps the same facts:
 
   * services/market_svc/symbols.py — the tile display name and quote symbol the
-    HUD reads the tape from. These drift at every quarterly futures roll and the
-    symptom is silent: the basis gets measured against a contract nobody trades.
+    HUD reads the tape from. Both sides work the contract out from the date
+    (shared/futures.py); a mismatch is silent, the basis measured against a
+    contract nobody trades, so it is asserted across a roll.
   * options-scanner/gex_collector.py — the cash symbols whose gamma grids the
     HUD reads. A cash symbol that is not collected leaves that pane blank.
 
@@ -14,6 +15,7 @@ Both are real defects that unit tests over the HUD's own logic cannot see.
 
 import pathlib
 import sys
+from datetime import date
 
 import pytest
 
@@ -57,29 +59,63 @@ def test_labels_are_unique():
 # CROSS-MODULE CONSISTENCY (the drift guards)
 #############################################
 
-def test_tape_tiles_exist_in_market_svc():
+# Either side of a quarterly roll, and the year boundary. September 2026 expires
+# Friday the 18th and rolls eight days earlier, on Thursday the 10th.
+ROLL_DATES = [date(2026, 9, 9), date(2026, 9, 10), date(2026, 10, 4),
+              date(2026, 12, 9), date(2026, 12, 10), date(2027, 1, 4)]
+
+
+@pytest.mark.parametrize("today", ROLL_DATES)
+def test_tape_tiles_exist_in_market_svc(monkeypatch, today):
     """Every tile name the HUD reads must actually be published.
 
-    This is the guard for the quarterly roll: when /NQU26 becomes /NQZ26,
-    market_svc/symbols.py changes and this fails, instead of the HUD quietly
-    reporting a basis measured against a dead contract.
+    This is the guard for the quarterly roll. The two used to be separate
+    literals rolled by hand, and the symptom of missing one was silent: a basis
+    measured against a contract nobody trades. Both now come off the same
+    front-month computation, so this holds on EVERY date, the roll day included.
     """
     from services.market_svc import symbols as ms
+    from shared import futures
 
-    displays = {t["display"] for t in ms.SYMBOL_MAP}
+    monkeypatch.setattr(futures, "today_ct", lambda: today)
+    displays = {t["display"] for t in ms.symbol_map()}
     for spec in ni.INSTRUMENTS:
         assert spec.future_tile in displays, spec.future_tile
         assert spec.cash_tile in displays, spec.cash_tile
 
 
-def test_future_tile_maps_to_the_declared_contract():
-    """The tile DISPLAY name and the quote SYMBOL are different strings and both
-    are duplicated here. Assert they still describe the same contract."""
+@pytest.mark.parametrize("today", ROLL_DATES)
+def test_future_tile_maps_to_the_declared_contract(monkeypatch, today):
+    """The tile DISPLAY name and the quote SYMBOL are different strings. Assert
+    they describe the same contract on both sides of a roll."""
     from services.market_svc import symbols as ms
+    from shared import futures
 
-    by_display = {t["display"]: t for t in ms.SYMBOL_MAP}
+    monkeypatch.setattr(futures, "today_ct", lambda: today)
+    by_display = {t["display"]: t for t in ms.symbol_map()}
     for spec in ni.INSTRUMENTS:
         assert by_display[spec.future_tile]["quote_symbol"] == spec.contract
+
+
+def test_the_contract_follows_the_front_month(monkeypatch):
+    """The HUD runs for days. A contract fixed when the spec was built would
+    survive a roll and leave the HUD reading a tile that is no longer published,
+    so the two names are worked out when they are read."""
+    from shared import futures
+
+    monkeypatch.setattr(futures, "today_ct", lambda: date(2026, 9, 9))
+    assert (ni.NQ.future_tile, ni.NQ.contract) == ("/NQ[U26]", "/NQU26")
+    assert (ni.ES.future_tile, ni.ES.contract) == ("/ES[U26]", "/ESU26")
+    monkeypatch.setattr(futures, "today_ct", lambda: date(2026, 10, 4))
+    assert (ni.NQ.future_tile, ni.NQ.contract) == ("/NQ[Z26]", "/NQZ26")
+    assert (ni.ES.future_tile, ni.ES.contract) == ("/ES[Z26]", "/ESZ26")
+    monkeypatch.setattr(futures, "today_ct", lambda: date(2026, 12, 10))
+    assert (ni.NQ.future_tile, ni.NQ.contract) == ("/NQ[H27]", "/NQH27")
+
+
+def test_the_specs_name_a_root_not_a_contract():
+    """No expiry may be written into the spec, or it is a literal to roll again."""
+    assert (ni.NQ.future_root, ni.ES.future_root) == ("/NQ", "/ES")
 
 
 def test_cash_symbols_are_actually_collected():

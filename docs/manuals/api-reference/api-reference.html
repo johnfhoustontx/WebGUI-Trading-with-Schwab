@@ -988,6 +988,14 @@ MARKET SUMMARY frame.</p>
 <code>BIG10</code> basket, reads the cap-weighted put/call from <code>cache:sentiment:composite</code> and
 the dollar-weighted premium skew from <code>cache:options:matrix</code>, and publishes
 <code>cache:market:dashboard</code>.</p>
+<p><strong>The tile map is a function, <code>symbols.symbol_map(today=None)</code>, not a constant.</strong>
+Two of its entries are futures, and a futures contract expires every quarter, so
+their <code>display</code> (<code>/ES[Z26]</code>), <code>quote_symbol</code> (<code>/ESZ26</code>) and <code>description</code> are
+built on each call from <code>shared.futures.front_month(root, today)</code>. A consumer that
+finds a tile by <code>display</code> must not hard-code the contract: ask
+<code>front_month("/ES").display</code>, as <code>tools/nq_instruments.py</code> does. The roll offset
+is <code>[futures] roll_days_before_expiry</code> in <code>config/symbols.toml</code> (default 8),
+read on every call.</p>
 <p><strong>The summary is read off the published market report, with no Claude call</strong>
 (2026-09-16). The daily market reports are rendered outside this repo and uploaded
 five times a trading day into <code>deploy/site/reports/</code> as <code>latest.html</code> (the page)

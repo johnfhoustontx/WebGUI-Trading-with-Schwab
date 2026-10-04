@@ -753,7 +753,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <tr>
 <td>market_svc</td>
 <td>8215</td>
-<td>Live macro-ticker Market Dashboard (~3 s RTH poll).</td>
+<td>Live macro-ticker Market Dashboard (~3 s RTH poll). Its /ES and /NQ tiles quote the front-month contract: quarterly (H, M, U, Z), expiring the third Friday of the month or the session before when that Friday is a closure, and switched <code>[futures] roll_days_before_expiry</code> days (8) before expiry — <code>shared/futures.py</code>.</td>
 </tr>
 <tr>
 <td>news_svc</td>

@@ -36,7 +36,7 @@ def test_big10_basket_matches_market_dashboard_membership():
     # market_svc-mirroring) so the comparison must stay order-insensitive, but a
     # set() would also swallow a DUPLICATE ticker — and a duplicate is not
     # cosmetic here, it double-counts that member into the BIG10 sum.
-    mkt = next(e["basket"] for e in market_symbols.SYMBOL_MAP
+    mkt = next(e["basket"] for e in market_symbols.symbol_map()
                if e["kind"] == "basket" and e["display"] == "BIG10")
     members = np_mod.BASKETS["BIG10"]
     assert sorted(members) == sorted(mkt)

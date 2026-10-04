@@ -639,6 +639,15 @@ _SYMBOLS = ConfigFile(
                   "Summed into one pseudo-symbol by the market and net-premium "
                   "views.", kind="symbols"),
         )),
+        Section("Index futures", "The /ES and /NQ tiles on the Macro Board "
+                "follow the front-month contract (March, June, September, "
+                "December; each expires on the third Friday of its month).", (
+            Field("futures.roll_days_before_expiry",
+                  "Switch to the next contract this many days before expiry",
+                  "8 is the usual roll, the Thursday of the week before expiry. "
+                  "0 keeps the expiring contract until expiry day.",
+                  kind="int", unit="days", min=0, max=30),
+        ), restart=()),
         Section("Net Prem groups", "The groups on the Dealer Positioning Net Prem "
                 "view, in display order. Every symbol needs a chart colour.", (
             Field("netprem_groups.*.label", "Tab name", "", kind="text"),

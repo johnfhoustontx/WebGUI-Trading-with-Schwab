@@ -1429,6 +1429,10 @@ A live grid of macro tickers, grouped into framed panels by category.
   mega-caps already counted beside it.
 - **Skin toggle** (top right) switches between the two board looks; your choice
   is remembered.
+- **Futures tiles** — **/ES** and **/NQ** name their contract in brackets
+  (`/ES[Z26]` is December 2026). They move to the next quarterly contract by
+  themselves, 8 days before the old one expires; the price steps by the gap
+  between the two contracts on that day.
 - **Auto-updates** every ~3 seconds during market hours, ~15 outside them —
   futures trade nearly around the clock, so off-hours stays live.
 """,
