@@ -221,6 +221,15 @@ at = "18:30"
 # [slots.flow_delta]: moving it needs `generate_units --install` + `daemon-reload`.
 at = "19:00"
 
+[slots.token_watch]
+# The daily check on the Schwab sign-in (tools/token_watch.py). It lasts 7 days
+# and is renewed only by signing in again; when it lapses all market data stops.
+# This sends a "Server alerts" push when it is inside its warning window
+# (config/notify.toml [system] token_warn_hours), has expired, or cannot be read.
+# Runs EVERY day, weekends included. A systemd timer, like [slots.flow_delta]:
+# moving it needs `generate_units --install` + `daemon-reload`.
+at = "07:30"
+
 [slots.trade_idea]
 # The hourly trade idea: ONE graded trade off the live Market Scanner, drawn as a
 # branded image and posted to Discord + Telegram (gate + channel +

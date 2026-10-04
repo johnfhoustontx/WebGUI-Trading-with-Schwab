@@ -53,6 +53,18 @@ discord = true
 telegram = true
 calendar = false               # also create a Google Calendar event (see [calendar])
 
+[channels.system]              # server alerts: a failed unit or backup, a Schwab token about to lapse
+discord = true
+telegram = true
+
+# Server alerts (shared/notify/system_alert.py). Sent by systemd when a unit ends
+# up failed, and by the daily token watch. Read when the alert is sent.
+[system]
+token_warn_hours = 48          # warn when the Schwab refresh token has this long or less left
+                               # (it lasts 7 days and is renewed only by signing in again)
+failure_repeat_hours = 6       # one alert per failing unit per this many hours (a job on a
+                               # 15-minute timer would otherwise alert four times an hour)
+
 # The trade idea's Google Calendar event (shared/notify/gcal.py). Needs the
 # service-account key at shared/google_calendar_sa.json on the server and a
 # calendar shared with that account; with either missing it does nothing. The

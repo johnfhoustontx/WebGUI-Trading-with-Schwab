@@ -265,6 +265,22 @@ class TokenManager:
         except Exception:
             return True
 
+    def refresh_hours_left(self):
+        """Hours until the STAMPED refresh-token expiry, or None when unknown.
+
+        0.0 once it has passed; None for a missing or unreadable stamp - an
+        unknown must never read as zero OR as plenty. The same local-clock
+        caveat as ``_is_refresh_expired`` applies: Schwab can reject a token
+        before this runs out, which ``refresh_rejected`` reports."""
+        ea = self.tokens.get("RefreshTokenExpiresAt") or ""
+        if not ea:
+            return None
+        try:
+            exp = datetime.fromisoformat(str(ea).replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            return None
+        return round(max((exp - datetime.utcnow()).total_seconds(), 0.0) / 3600.0, 2)
+
     def _refresh(self):
         rt = self.tokens.get("RefreshToken", "")
         if not rt:
@@ -565,6 +581,11 @@ def health():
         "refresh_token_expired": refresh_expired,
         "refresh_token_rejected": rejected,
         "refresh_error": getattr(token_mgr, "refresh_error", None) if rejected else None,
+        # How long the 7-day sign-in has left, for the daily token watch. None
+        # when there is no token or the stamp cannot be read.
+        "refresh_token_expires_at": (token_mgr.tokens.get("RefreshTokenExpiresAt") or None)
+                                    if has_token else None,
+        "refresh_token_hours_left": token_mgr.refresh_hours_left() if has_token else None,
         "token_file": str(TOKEN_FILE),
         # Whether /accounts, /positions and /transactions will answer at all.
         "account_routes": account_routes_state(),

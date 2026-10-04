@@ -118,6 +118,10 @@ PROXY_WAIT_TIMEOUT_SEC = 120
 # would otherwise inherit the 90s default and be killed mid-upload.
 BACKUP_TIMEOUT_SEC = 7200
 
+# The failure notifier and the token watch: two short HTTP posts with an
+# 8-second timeout each, plus one proxy /health read.
+NOTIFY_TIMEOUT_SEC = 120
+
 # The flow-delta instrumentation fans 91 symbols out through the proxy and took
 # ~5 minutes measured on 09-01 and 09-09. The ceiling is deliberately generous
 # rather than tight: the run is once a day, off the hot path, and the failure it
@@ -1061,6 +1065,116 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-swing-refit.timer": tmr}
 
 
+def notifier_name():
+    """The failure notifier's TEMPLATE unit (instantiated per failed unit)."""
+    return f"trading-{ENV_NAME}-notify-failure@.service"
+
+
+def _notifier_unit():
+    """The unit systemd starts when another unit ends up FAILED.
+
+    A template: ``OnFailure=...notify-failure@%n.service`` on the failing unit
+    instantiates it with that unit's own name, which arrives here as ``%i``.
+
+    **When it fires.** On the failed STATE, not on every crash: a service with
+    ``Restart=on-failure`` only reaches it once its restart budget
+    (StartLimitBurst) is spent - "down and staying down" - while a timer job
+    (the nightly backup, a report) reaches it on any run that exits non-zero.
+    That asymmetry is what makes one alert mean one thing.
+
+    **It loads the stack's EnvironmentFile**, and has to: the Telegram token and
+    the Discord webhook can be set there (``TELEGRAM_BOT_TOKEN``,
+    ``DISCORD_WEBHOOK_URL`` - ``channels.load_config`` reads both), and on a box
+    configured that way a notifier without the file would send nothing while
+    looking correct. The cost is that this short-lived process sees the other
+    credentials in that file too, exactly as every service already does.
+
+    **No OnFailure of its own** (render_all skips it): an alert about the
+    alerter is a loop. tools/notify_failure.py also refuses its own unit name
+    and always exits 0.
+    """
+    return {notifier_name(): f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - failure alert for %i
+# No PartOf and no [Install]: started only by another unit's OnFailure=.
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# The notification credentials may live here (TELEGRAM_BOT_TOKEN, ...).
+EnvironmentFile={_env_file()}
+TimeoutStartSec={NOTIFY_TIMEOUT_SEC}
+ExecStart={_python()} tools/notify_failure.py %i
+"""}
+
+
+def _token_watch_units():
+    """The daily check on the Schwab sign-in: a oneshot plus its timer.
+
+    The refresh token lasts 7 days and is renewed only by a person signing in
+    again; when it lapses all market data stops. Nothing warned beforehand.
+    tools/token_watch.py asks the proxy's /health and sends a system alert when
+    the token is inside ``[system] token_warn_hours`` (config/notify.toml), has
+    expired or been rejected, or cannot be read.
+
+    **Every day, weekends included.** The 7-day clock does not stop for the
+    weekend, and a sign-in that lapses on a Monday morning costs a session.
+
+    **Persistent=true.** A check missed while the box was down should run when
+    it comes back, not wait a day.
+    """
+    at = slot_times("token_watch")["at"]
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - Schwab sign-in expiry check
+# No PartOf and no [Install]: the timer owns this.
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# The notification credentials may live here (TELEGRAM_BOT_TOKEN, ...).
+EnvironmentFile={_env_file()}
+TimeoutStartSec={NOTIFY_TIMEOUT_SEC}
+ExecStart={_python()} tools/token_watch.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - Schwab sign-in expiry check timer
+
+[Timer]
+# Derived from [slots.token_watch] in config/sessions.toml. Every day: the
+# sign-in's 7-day clock runs through the weekend.
+OnCalendar=*-*-* {at.hour:02d}:{at.minute:02d}:00
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-token-watch.service": svc,
+            f"trading-{ENV_NAME}-token-watch.timer": tmr}
+
+
+def _with_failure_alert(name, text):
+    """``text`` with ``OnFailure=`` naming the notifier, in its [Unit] section.
+
+    Applied to every ``.service`` in ONE place rather than typed into each
+    template, so a unit added tomorrow alerts without anyone remembering to make
+    it. ``%n`` is the failing unit's full name.
+    """
+    if not name.endswith(".service") or name == notifier_name():
+        return text
+    head = "[Unit]\n"
+    if not text.startswith(head):
+        raise ValueError(f"{name} does not start with a [Unit] section")
+    line = f"OnFailure=trading-{ENV_NAME}-notify-failure@%n.service\n"
+    return head + "# Tell a person when this ends up failed (tools/notify_failure.py).\n" \
+        + line + text[len(head):]
+
+
 def render_all():
     """``{unit filename: text}`` for this environment."""
     out = {unit_name(c): _service_text(c, p, s) for c, p, s in components()}
@@ -1073,7 +1187,9 @@ def render_all():
     out.update(_hiro_report_units())
     out.update(_label_journal_units())
     out.update(_swing_refit_units())
-    return out
+    out.update(_token_watch_units())
+    out.update(_notifier_unit())
+    return {name: _with_failure_alert(name, text) for name, text in out.items()}
 
 
 def install(dest=None):

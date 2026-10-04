@@ -494,6 +494,7 @@ def test_route_categories_cover_every_notification_category():
         "signals", "flow_uoa", "flow_crossover", "flow_gamma_flip", "flow_hiro",
         "action_alert", "eod_summary", "gamma_briefing", "market_snapshot",
         "market_state", "trade_idea",
+        "system",          # server alerts (system_alert.py), added 2026-10-03
     }
     # Every legacy key belongs to a real category (no typo'd orphans).
     assert set(ch._LEGACY_DISCORD_KEYS) <= set(ch.ROUTE_CATEGORIES)

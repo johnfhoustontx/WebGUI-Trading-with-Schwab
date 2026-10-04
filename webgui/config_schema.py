@@ -541,6 +541,10 @@ _SESSIONS = ConfigFile(
         Section("After-close jobs", "", (
             Field("slots.eod_report.at", "End-of-day report", "", kind="time",
                   restart=(TIMERS,)),
+            Field("slots.token_watch.at", "Schwab sign-in check",
+                  "Once a day, every day: sends a Server alert when the 7-day "
+                  "Schwab sign-in is close to running out.", kind="time",
+                  restart=(TIMERS,)),
             Field("slots.flow_delta.at", "Flow instrumentation report", "",
                   kind="time", restart=(TIMERS,)),
             Field("slots.hiro_report.at", "Hedging-flow validation report",
@@ -1276,6 +1280,7 @@ NOTIFY_CATEGORY_NAMES = {
     "market_snapshot": "Market snapshot",
     "market_state": "Market state change",
     "trade_idea": "Hourly trade idea",
+    "system": "Server alerts",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1328,6 +1333,20 @@ _NOTIFY = ConfigFile(
                   "How often each open idea's result is recomputed from the stock "
                   "price during the session. One quote call per refresh.",
                   kind="int", unit="min", min=5, max=60, step=5),
+        )),
+        Section("Server alerts", "Sent when a part of the system has stopped "
+                "and stayed down, when the nightly backup fails, and when the "
+                "Schwab sign-in is about to run out. Switch the category on or "
+                "off under Channels above.", (
+            Field("system.token_warn_hours", "Warn before the Schwab sign-in expires",
+                  "The sign-in lasts 7 days and is renewed only by signing in "
+                  "again on the proxy's /auth page. The warning is sent once a "
+                  "day while this many hours or fewer remain.",
+                  kind="int", unit="hours", min=1, max=168, step=1),
+            Field("system.failure_repeat_hours", "Repeat a failure alert after",
+                  "One alert per failing part per this many hours, so a job "
+                  "that fails every 15 minutes does not send four an hour.",
+                  kind="int", unit="hours", min=1, max=168, step=1),
         )),
     ),
 )

@@ -1403,3 +1403,105 @@ def test_the_hiro_report_timer_is_armed_in_prod_and_never_in_dev(monkeypatch):
     monkeypatch.setattr(units, "IS_DEV", True)
     statuses = dict(units.activate(runner=_fake_systemctl()))
     assert statuses[HR_TMR].startswith("skipped")
+
+
+# ---- failure alerts (audit AR-03) --------------------------------------------
+# Failure detection existed only in an open browser tab: no unit had an
+# on-failure action, a failed backup was silent, and nothing warned before the
+# 7-day Schwab sign-in lapsed. Every unit now names a notifier systemd starts
+# when the unit ends up FAILED, and a daily timer watches the sign-in.
+
+NOTIFIER = f"trading-{ENV_NAME}-notify-failure@.service"
+ON_FAILURE = f"trading-{ENV_NAME}-notify-failure@%n.service"
+
+
+def _alerting_services():
+    return {n: t for n, t in units.render_all().items()
+            if n.endswith(".service") and n != NOTIFIER}
+
+
+def test_the_notifier_template_is_generated():
+    assert NOTIFIER in units.render_all()
+
+
+def test_every_service_names_the_notifier_as_its_on_failure_action():
+    services = _alerting_services()
+    assert len(services) >= 10          # the fleet plus the timer jobs
+    for name, text in services.items():
+        assert _directives(text, "OnFailure") == [ON_FAILURE], name
+
+
+def test_on_failure_is_in_the_unit_section(rendered):
+    for name in _alerting_services():
+        assert rendered[name]["Unit"]["OnFailure"] == ON_FAILURE, name
+        assert "OnFailure" not in rendered[name]["Service"], name
+
+
+def test_the_backup_alerts_when_it_fails(rendered):
+    """The specific gap: an offsite backup that quietly stopped happening is
+    indistinguishable from one that is working, until it is needed."""
+    assert rendered[f"trading-{ENV_NAME}-backup.service"]["Unit"]["OnFailure"] == ON_FAILURE
+
+
+def test_the_notifier_has_no_on_failure_of_its_own(rendered):
+    # An alert about the alerter is a loop.
+    assert "OnFailure" not in rendered[NOTIFIER]["Unit"]
+
+
+def test_the_notifier_is_a_oneshot_that_passes_the_failed_units_name(rendered):
+    svc = rendered[NOTIFIER]["Service"]
+    assert svc["Type"] == "oneshot"
+    assert svc["ExecStart"].endswith("tools/notify_failure.py %i")
+    assert svc["ExecStart"].startswith(str(POSIX_ROOT / ".venv" / "bin" / "python"))
+    assert svc["WorkingDirectory"] == str(POSIX_ROOT)
+
+
+def test_the_notifier_is_not_a_member_of_the_fleet(rendered):
+    assert "PartOf" not in rendered[NOTIFIER]["Unit"]
+    assert NOTIFIER not in stack_services()
+    assert not rendered[NOTIFIER].has_section("Install")
+
+
+def test_the_alerting_units_load_the_file_the_notification_credentials_can_live_in():
+    """The Telegram token and the Discord webhook can be set in the stack's
+    environment file (channels.load_config reads TELEGRAM_BOT_TOKEN and
+    DISCORD_WEBHOOK_URL). A notifier without it would send nothing on a box
+    configured that way - and look entirely correct."""
+    rendered_units = units.render_all()
+    for name in (NOTIFIER, f"trading-{ENV_NAME}-token-watch.service"):
+        assert _environment_files(rendered_units[name]) == [str(POSIX_ROOT / ".env")], name
+
+
+TOKEN_SVC = f"trading-{ENV_NAME}-token-watch.service"
+TOKEN_TMR = f"trading-{ENV_NAME}-token-watch.timer"
+
+
+def test_the_token_watch_units_are_generated():
+    assert {TOKEN_SVC, TOKEN_TMR} <= set(units.render_all())
+    assert TOKEN_TMR in units.timer_units()
+
+
+def test_the_token_watch_runs_every_day_of_the_week(rendered):
+    """The sign-in's 7-day clock runs through the weekend, and a Monday-morning
+    lapse is the one that costs a session."""
+    on_calendar = rendered[TOKEN_TMR]["Timer"]["OnCalendar"]
+    assert "Mon" not in on_calendar and on_calendar.startswith("*-*-* ")
+
+
+def test_the_token_watch_follows_its_slot(monkeypatch):
+    import datetime as _dt
+    monkeypatch.setattr(units, "slot_times",
+                        lambda name: {"at": _dt.time(6, 45)} if name == "token_watch"
+                        else {"at": _dt.time(1, 1)})
+    assert "OnCalendar=*-*-* 06:45:00" in units.render_all()[TOKEN_TMR]
+
+
+def test_the_token_watch_catches_up_after_downtime(rendered):
+    assert rendered[TOKEN_TMR]["Timer"]["Persistent"] == "true"
+
+
+def test_the_token_watch_is_a_oneshot_running_the_script(rendered):
+    svc = rendered[TOKEN_SVC]["Service"]
+    assert svc["Type"] == "oneshot"
+    assert svc["ExecStart"].endswith("tools/token_watch.py")
+    assert "PartOf" not in rendered[TOKEN_SVC]["Unit"]

@@ -199,6 +199,9 @@ ROUTE_CATEGORIES = (
     "signals", "flow_uoa", "flow_crossover", "flow_gamma_flip", "flow_hiro",
     "action_alert", "eod_summary", "gamma_briefing", "market_snapshot",
     "market_state", "trade_idea",
+    # Server alerts: a unit that ended up failed, a failed backup, a Schwab
+    # token about to lapse (shared/notify/system_alert.py).
+    "system",
 )
 
 # Category -> the pre-`routes` config key it used to read (back-compat only).

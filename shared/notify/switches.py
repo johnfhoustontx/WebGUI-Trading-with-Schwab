@@ -25,11 +25,15 @@ _CAL_FLOOR = {"lead_min": 0, "duration_min": 1}
 # refresh_min: how often each open idea's result is recomputed from the stock price.
 _SITE_DEFAULTS = {"trade_ideas": True, "keep_days": 6, "refresh_min": 15}
 _SITE_RANGES = {"keep_days": (1, 30), "refresh_min": (5, 60)}
+# [system]: the server alerts (shared/notify/system_alert.py).
+_SYSTEM_DEFAULTS = {"token_warn_hours": 48, "failure_repeat_hours": 6}
+_SYSTEM_RANGES = {"token_warn_hours": (1, 168), "failure_repeat_hours": (1, 168)}
 
 
 def _make_loader(path):
     return toml_loader(path, {"channels": {}, "calendar": dict(_CAL_DEFAULTS),
-                              "site": dict(_SITE_DEFAULTS)},
+                              "site": dict(_SITE_DEFAULTS),
+                              "system": dict(_SYSTEM_DEFAULTS)},
                        label="notify.toml")
 
 
@@ -62,6 +66,24 @@ def calendar_settings() -> dict:
     for key, floor in _CAL_FLOOR.items():
         v = block.get(key)
         if isinstance(v, int) and not isinstance(v, bool) and v >= floor:
+            out[key] = v
+    return out
+
+
+def system_settings() -> dict:
+    """``{"token_warn_hours", "failure_repeat_hours"}`` for the server alerts.
+    A value that is not a whole number inside its range reads as the default,
+    one key at a time; never raises."""
+    out = dict(_SYSTEM_DEFAULTS)
+    try:
+        block = _load().get("system")
+    except Exception:  # noqa: BLE001
+        return out
+    if not isinstance(block, dict):
+        return out
+    for key, (lo, hi) in _SYSTEM_RANGES.items():
+        v = block.get(key)
+        if isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi:
             out[key] = v
     return out
 

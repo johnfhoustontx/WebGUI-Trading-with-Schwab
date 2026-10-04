@@ -304,9 +304,9 @@ _DEFAULTS = {
         # cash close and after [slots.action_alert] close + the 15:10 EOD push,
         # so the books it reads have settled; it costs no Schwab and no Claude
         # call, so sharing the minute with the last autoscan slot is free.
-        # ⚠ SIX of these slots are read by SYSTEMD rather than by a service
+        # ⚠ SEVEN of these slots are read by SYSTEMD rather than by a service
         # scheduler -- flow_delta, hiro_report, eod_report, gallery_capture,
-        # label_journal and swing_refit:
+        # label_journal, swing_refit and token_watch:
         # deploy/systemd/generate_units.py turns each into a timer's OnCalendar
         # at unit-GENERATION time, so moving one needs
         # `generate_units --install` + `daemon-reload`, not a service restart.
@@ -321,6 +321,10 @@ _DEFAULTS = {
         # 1st of each month at this time. Only the time is configurable; the
         # day is the unit's. After the labeler, before the 20:00 backup.
         "swing_refit": {"at": "19:00"},
+        # The daily Schwab sign-in check (tools/token_watch.py): a system alert
+        # when the 7-day refresh token is inside its warning window. Early, so
+        # there is time to sign in again before the open. Read by systemd.
+        "token_watch": {"at": "07:30"},
         # The marketing gallery recapture. It still needs a default here like
         # every other slot -- the TOML only overrides, and a TOML-only slot
         # raises KeyError out of _slot_group.

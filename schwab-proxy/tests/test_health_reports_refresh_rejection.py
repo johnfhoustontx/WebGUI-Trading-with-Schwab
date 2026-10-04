@@ -131,3 +131,35 @@ class TestHealthSurfacesIt:
         monkeypatch.setattr(proxy, "token_mgr", tm)
         h = proxy.health()
         assert h["refresh_token_expired"] is True
+
+
+class TestHealthSaysHowLongTheSignInHasLeft:
+    """The refresh token lasts 7 days and nothing warned before it lapsed (audit
+    AR-03). ``/health`` already knew the stamped expiry; it reported only a
+    yes/no, which is true right up to the moment market data stops. The daily
+    token watch (``tools/token_watch.py``) reads the hours."""
+
+    def _expiring_in(self, hours):
+        from datetime import datetime, timedelta
+        return (datetime.utcnow() + timedelta(hours=hours)).isoformat() + "Z"
+
+    def test_health_reports_the_hours_left(self, monkeypatch):
+        monkeypatch.setattr(proxy, "token_mgr", _manager(self._expiring_in(30)))
+        h = proxy.health()
+        assert h["refresh_token_hours_left"] == pytest.approx(30.0, abs=0.05)
+        assert h["refresh_token_expires_at"].endswith("Z")
+
+    def test_an_expired_token_has_zero_hours_left_not_a_negative_number(self, monkeypatch):
+        monkeypatch.setattr(proxy, "token_mgr", _manager("2020-01-01T00:00:00Z"))
+        assert proxy.health()["refresh_token_hours_left"] == 0.0
+
+    @pytest.mark.parametrize("stamp", ["", "not-a-date", None])
+    def test_an_unreadable_stamp_is_unknown_not_zero(self, monkeypatch, stamp):
+        monkeypatch.setattr(proxy, "token_mgr", _manager(stamp))
+        assert proxy.health()["refresh_token_hours_left"] is None
+
+    def test_no_token_at_all_is_unknown(self, monkeypatch):
+        tm = _manager()
+        tm.tokens = {}
+        monkeypatch.setattr(proxy, "token_mgr", tm)
+        assert proxy.health()["refresh_token_hours_left"] is None
