@@ -690,6 +690,19 @@ def series_difference(stored, fresh, *, moving=None) -> str | None:
     return None
 
 
+def session_slot(key, at: float, ttl: float) -> int:
+    """Which reuse window of length ``ttl`` the moment ``at`` falls in, for the
+    series ``key``.
+
+    Each series has its own window boundaries: they are offset by a stable
+    hash of the key (``crc32``, not ``hash()``, which Python salts per
+    process). A series is reused only inside the window it was fetched in, so
+    it is never older than ``ttl``, and the series one quarter-hour scan
+    fetched together do not all age out together (audit PF-100)."""
+    offset = zlib.crc32(repr(key).encode()) % max(1, int(ttl))
+    return int((at + offset) // ttl)
+
+
 def series_agree(stored, fresh, *, moving=None) -> bool:
     """Whether a stored daily series is the one Schwab sends now. Exactly
     ``series_difference(...) is None``: one comparison, read two ways."""
@@ -1247,18 +1260,19 @@ class Gateway:
             [symbol], max_age=limit, now=self._clock())
         return fresh.get(symbol), age
 
-    def _bar_local(self, seen, live, symbol, cfg, now_ct) -> Served | None:
+    def _bar_local(self, seen, live, key, cfg, now_ct) -> Served | None:
         """The answer mode on gives from the stored series ``seen``, or None
         when it fetches. Records nothing: on and shadow both ask it, so shadow
         cannot count a saving on would not make."""
         if seen is None:
             return None
         body, fetched_at = seen
-        age = self._clock() - fetched_at
+        now = self._clock()
+        age = now - fetched_at
         if not live:
             return Served("hit", age, body=body)
         if self._cfg.today_bar() == "quote":
-            quote, quote_age = self._today_quote(symbol, cfg, now_ct)
+            quote, quote_age = self._today_quote(key[0], cfg, now_ct)
             composed = (compose_today(json.loads(body), quote, now_ct.date())
                         if quote is not None else None)
             if composed is not None:
@@ -1266,9 +1280,14 @@ class Gateway:
                 return Served("composed", quote_age, data=composed)
         # No usable quote, or ttl mode: the series as fetched, inside the
         # session limit. So quote mode is never worse than ttl mode.
-        if age <= float(cfg["session_ttl_sec"]):
-            return Served("hit", age, body=body)
-        return None
+        ttl = float(cfg["session_ttl_sec"])
+        if not age <= ttl:
+            return None
+        # ``is True``: a missing or mistyped setting leaves the plain limit.
+        if (cfg.get("session_spread") is True and ttl >= 1
+                and session_slot(key, now, ttl) != session_slot(key, fetched_at, ttl)):
+            return None
+        return Served("hit", age, body=body)
 
     def _bars(self, params, caller, mode, max_age=None) -> Served:
         cfg = self._cfg.section("bars")
@@ -1286,7 +1305,7 @@ class Gateway:
 
         if mode == "shadow":
             would = (None if closing else self._within(
-                self._bar_local(store.get(key, epoch=epoch), live, symbol,
+                self._bar_local(store.get(key, epoch=epoch), live, key,
                                 cfg, now_ct), limit))
             began = self._clock()
             data = self._fetch("/pricehistory", params)
@@ -1297,7 +1316,7 @@ class Gateway:
             return Served("pass", 0.0, data=data)
 
         seen = None if closing else store.get(key, epoch=epoch)
-        local = self._within(self._bar_local(seen, live, symbol, cfg, now_ct), limit)
+        local = self._within(self._bar_local(seen, live, key, cfg, now_ct), limit)
         if local is not None:
             self._record("pricehistory", caller, local.kind)
             return local

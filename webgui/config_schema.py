@@ -1432,6 +1432,13 @@ _MARKETDATA = ConfigFile(
             Field("bars.session_ttl_sec", "Oldest series to reuse during the session",
                   "Used when today's bar is set to ttl, and in quote mode "
                   "whenever no usable quote is held.", **_SEC, max=7200),
+            Field("bars.session_spread", "Stagger when series are refetched",
+                  "Each series gets its own reuse window inside the limit "
+                  "above, so the series one scan fetched together are not all "
+                  "refetched by the same later scan. A series is then reused "
+                  "for up to the limit, on average about half of it the first "
+                  "time. Off: every series lives exactly the limit.",
+                  kind="bool"),
             Field("bars.today_quote_max_age_sec", "Oldest quote used to build today's bar",
                   "", **_SEC, max=600),
             Field("bars.settle_min", "Minutes after the close before bars are refetched",

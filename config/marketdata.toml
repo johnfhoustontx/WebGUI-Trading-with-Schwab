@@ -43,6 +43,10 @@ enabled = true
 #             no usable quote is handled as in "ttl".
 today_bar = "ttl"
 session_ttl_sec = 1740
+# Give each series its own reuse window inside that limit, so the series one
+# quarter-hour scan fetched together do not all age out on the same later scan.
+# false = every series lives exactly session_ttl_sec.
+session_spread = true
 today_quote_max_age_sec = 120
 settle_min = 10                   # minutes after the close before the settled refetch
 max_entries = 4000                # most series kept; the oldest are dropped past it

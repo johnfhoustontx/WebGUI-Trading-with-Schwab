@@ -33,6 +33,7 @@ DEFAULTS = {
         "enabled": True,
         "today_bar": "ttl",
         "session_ttl_sec": 1740,
+        "session_spread": True,
         "today_quote_max_age_sec": 120,
         "settle_min": 10,
         "max_entries": 4000,

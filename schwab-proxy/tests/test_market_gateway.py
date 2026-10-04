@@ -20,6 +20,7 @@ DEFAULTS = {
                "wide_refetch_max_days": 7},
     "quotes": {"enabled": True, "max_age_sec": 5, "max_symbols": 5000},
     "bars": {"enabled": True, "today_bar": "ttl", "session_ttl_sec": 1740,
+             "session_spread": True,
              "today_quote_max_age_sec": 120, "settle_min": 10, "max_entries": 4000},
 }
 
@@ -870,7 +871,9 @@ def test_well_after_the_open_the_quotes_own_age_limit_still_applies():
 # ---- quote mode is never worse than ttl mode --------------------------------
 
 def test_quote_mode_without_a_quote_serves_the_series_inside_the_session_limit():
-    h = Harness(Cfg(bars__today_bar="quote"), responses=bars_for)
+    # The plain limit, to the second: the spread (PF-100) is tested on its own.
+    h = Harness(Cfg(bars__today_bar="quote", bars__session_spread=False),
+                responses=bars_for)
     h.gw.pricehistory(BAR, "scan")
     h.clock += 600
     got = h.gw.pricehistory(BAR, "sentiment")
@@ -1036,7 +1039,8 @@ def test_a_daily_request_that_does_not_mention_extended_hours_is_stored():
 
 
 def test_a_bar_hit_is_the_stored_series_and_its_age():
-    h = Harness(responses=bars_for)
+    # The plain limit, to the second: the spread (PF-100) is tested on its own.
+    h = Harness(Cfg(bars__session_spread=False), responses=bars_for)
     first = h.gw.pricehistory(BAR, "scan")
     h.clock += 1740                                  # the limit itself still hits
     got = h.gw.pricehistory(BAR, "sentiment")
@@ -1391,7 +1395,8 @@ def test_a_shadow_partial_stores_only_what_on_would_have_fetched():
 
 
 def test_shadow_bars_follow_the_session_limit():
-    h = Harness(Cfg(mode="shadow"), responses=bars_for)
+    # The plain limit: the spread (PF-100) is tested on its own.
+    h = Harness(Cfg(mode="shadow", bars__session_spread=False), responses=bars_for)
     for _ in range(5):                               # every 600 s against 1740 s
         h.gw.pricehistory(BAR, "scan")
         h.clock += 600
@@ -1495,8 +1500,9 @@ SEQUENCES = {
           (1, lambda h: h.gw.quotes("SPY,DIA", "b"))] * 4, quotes_for, {},
          ["fetch", "partial", "hit", "hit", "fetch", "partial", "hit", "hit"]),
     # A daily series every 600 s during the session, against 1740 s.
+    # (The plain limit: the spread, PF-100, is tested on its own.)
     "a daily series every 600 s":
-        ([(600, daily)] * 8, bars_for, {},
+        ([(600, daily)] * 8, bars_for, {"bars__session_spread": False},
          ["fetch", "hit", "hit", "fetch", "hit", "hit", "fetch", "hit"]),
     # Quote mode with the dashboard's poll keeping the quote fresh.
     "quote mode with a polled quote":
@@ -2616,3 +2622,58 @@ def test_a_week_fetch_refused_for_a_reason_that_would_repeat_is_raised_at_once(s
     with pytest.raises(ms.UpstreamError) as err:
         h.gw.chains(P(to="2026-10-09"), "scan")
     assert err.value.status_code == status and len(h.calls) == 2
+
+
+# ---- the session limit is spread across series (audit PF-100) -----------------
+#
+# Every series fetched by one quarter-hour scan aged out together, 29 minutes
+# later, so every SECOND scan refetched the whole watchlist and the scans in
+# between refetched none of it.
+
+SCAN_EVERY = 900
+NAMES = [f"S{i:03d}" for i in range(120)]
+
+
+def scan_fetches(spread, scans=9):
+    """How many series each quarter-hour scan had to fetch."""
+    h = Harness(Cfg(bars__session_spread=spread), responses=bars_for)
+    h.now_ct = dt.datetime(2026, 10, 5, 8, 31, tzinfo=CT)
+    counts, oldest = [], 0.0
+    for _ in range(scans):
+        before = bar_calls(h)
+        for name in NAMES:
+            got = h.gw.pricehistory({**BAR, "symbol": name}, "scan")
+            if got.kind == "hit":
+                oldest = max(oldest, got.age)
+        counts.append(bar_calls(h) - before)
+        h.clock += SCAN_EVERY
+        h.now_ct += dt.timedelta(seconds=SCAN_EVERY)
+    return counts, oldest
+
+
+def test_without_the_spread_every_second_scan_refetches_everything():
+    counts, _ = scan_fetches(False)
+    assert counts == [120, 0, 120, 0, 120, 0, 120, 0, 120]
+
+
+def test_with_the_spread_no_scan_after_the_first_refetches_everything_or_nothing():
+    counts, _ = scan_fetches(True)
+    assert counts[0] == 120
+    assert all(30 <= n <= 90 for n in counts[1:]), counts
+    # The same work in total, to within the first scan's shortened windows.
+    assert sum(counts[1:]) <= 120 * 4 + 120
+
+
+def test_the_spread_never_serves_a_series_older_than_the_limit():
+    _, oldest = scan_fetches(True)
+    assert 0 < oldest <= 1740
+
+
+def test_a_series_keeps_its_own_window_from_run_to_run():
+    # Python salts hash() per process; the window offset must not move with it.
+    key = ms.bar_key(BAR)
+    assert ms.session_slot(key, 1000.0, 1740.0) == ms.session_slot(key, 1000.0, 1740.0)
+    import zlib
+    offset = zlib.crc32(repr(key).encode()) % 1740
+    assert ms.session_slot(key, 1740.0 - offset, 1740.0) == 1
+    assert ms.session_slot(key, 1739.0 - offset, 1740.0) == 0
