@@ -180,7 +180,11 @@ def compute_baseline(holding: dict, stock_df, sector_df, spy_df, entry) -> dict:
     from datetime import date
 
     entry_date = entry.get("entry_date") if entry else None
-    entry_price = (entry or {}).get("avg_price") or holding.get("avg_price")
+    # The BROKER's average cost first. The trade-derived figure averages BUYS
+    # only, so after a partial sale, a transfer in, or a position older than the
+    # synced history it is not the cost of what is held; the broker's is, by
+    # definition. It used to be the other way round (audit AC-54).
+    entry_price = holding.get("avg_price") or (entry or {}).get("avg_price")
 
     window = slice_since(stock_df, entry_date) if entry_date else None
     days_held = None
@@ -303,7 +307,7 @@ def evaluate_portfolio(model: dict, baselines: dict) -> dict:
 
         # No baseline -> no trusted entry; emit a minimal card rather than
         # scoring against the broker average price alone.
-        entry_price = (b.get("entry_price") or h.get("avg_price")) if b else None
+        entry_price = (h.get("avg_price") or b.get("entry_price")) if b else None
         days = b.get("days_held")
         # Prefer a real business-day count; fall back to converting calendar
         # days at the standard 252/365 ratio when only calendar days are known.
@@ -313,7 +317,11 @@ def evaluate_portfolio(model: dict, baselines: dict) -> dict:
 
         total_return = None
         if last is not None and entry_price:
-            total_return = last / entry_price - 1.0
+            # A SHORT position gains when the price falls. Without the sign a
+            # short that had made 10% was scored as having lost 10%, and every
+            # grade built on the return was graded backwards (audit AC-54).
+            direction = -1.0 if qty < 0 else 1.0
+            total_return = direction * (last / entry_price - 1.0)
 
         # Annualize on the TRADING-day (252) basis so this ratio's numerator
         # shares a basis with annualized volatility (sqrt(252)); the Sharpe-like

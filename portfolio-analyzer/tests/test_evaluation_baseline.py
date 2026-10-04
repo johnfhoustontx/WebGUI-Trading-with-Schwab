@@ -275,3 +275,12 @@ def test_baseline_has_no_benchmark_return_for_a_position_older_than_the_history(
     assert b["sector_ret"] is None
     assert b["spy_ret"] is None
     assert b["entry_price"] == 100.0        # the position's own figures are unaffected
+
+
+def test_the_baseline_takes_the_brokers_cost_when_there_is_one():
+    """AC-54: the trade-derived average covers buys only."""
+    from src.evaluation import compute_baseline
+    holding = {"symbol": "T", "avg_price": 120.0}
+    entry = {"avg_price": 110.0, "entry_date": "2026-03-02"}
+    assert compute_baseline(holding, None, None, None, entry)["entry_price"] == 120.0
+    assert compute_baseline({"symbol": "T"}, None, None, None, entry)["entry_price"] == 110.0

@@ -176,3 +176,38 @@ def test_no_benchmark_return_means_no_excess_figure_not_the_whole_return():
     assert card["total_return"] == pytest.approx(0.89)
     assert card["vs_sector"] is None
     assert card["vs_spy"] is None
+
+
+# --- AC-54: the broker's cost, and a short position's sign --------------------
+
+def test_a_short_position_that_fell_has_made_money():
+    short = make_holding(last=90.0, qty=-10, avg=100.0)
+    c = evaluate_portfolio(model_of(short), {"ABC": make_baseline()})["ABC"]
+    assert c["total_return"] == pytest.approx(0.10)
+    assert c["vs_spy"] == pytest.approx(0.10 - 0.03)
+
+
+def test_a_short_position_that_rose_has_lost_money():
+    short = make_holding(last=110.0, qty=-10, avg=100.0)
+    c = evaluate_portfolio(model_of(short), {"ABC": make_baseline()})["ABC"]
+    assert c["total_return"] == pytest.approx(-0.10)
+
+
+def test_a_long_position_is_unchanged():
+    c = evaluate_portfolio(model_of(make_holding()), {"ABC": make_baseline()})["ABC"]
+    assert c["total_return"] == pytest.approx(0.10)
+
+
+def test_the_brokers_average_cost_wins_over_the_buy_only_average():
+    """Bought 10 at 100 and 10 at 120, sold 10: the buy-only average says 110;
+    the broker, which knows about the sale, says 120."""
+    h = make_holding(last=132.0, qty=10, avg=120.0)
+    c = evaluate_portfolio(model_of(h), {"ABC": make_baseline(entry_price=110.0)})["ABC"]
+    assert c["total_return"] == pytest.approx(132.0 / 120.0 - 1.0)
+
+
+def test_with_no_broker_cost_the_trade_derived_one_is_used():
+    h = make_holding(last=121.0, qty=10)
+    h["avg_price"] = None
+    c = evaluate_portfolio(model_of(h), {"ABC": make_baseline(entry_price=110.0)})["ABC"]
+    assert c["total_return"] == pytest.approx(0.10)
