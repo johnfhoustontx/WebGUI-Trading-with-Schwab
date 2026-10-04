@@ -12,9 +12,29 @@ def test_api_stats_rows_formats_counts():
 def test_api_stats_rows_placeholder_when_proxy_down():
     assert S.api_stats_rows(None) == [
         ("Today", "—"), ("Last 7 days", "—"), ("Last 30 days", "—")]
-    # malformed values degrade per-field, never raise
+    # malformed values degrade per-field, never raise. A count the proxy did
+    # not send is "unknown": it printed 0, a number nobody counted (CQ-100).
     rows = S.api_stats_rows({"today": "x"})
-    assert rows[0] == ("Today", "—") and rows[1] == ("Last 7 days", "0")
+    assert rows[0] == ("Today", "—") and rows[1] == ("Last 7 days", "unknown")
+
+
+def test_a_count_the_proxy_could_not_read_is_unknown_not_zero():
+    rows = S.api_stats_rows({"today": None, "last_7_days": None,
+                             "last_30_days": None, "since": None,
+                             "store": {"served_locally": None, "by_outcome": None,
+                                       "rows": None}})
+    assert rows == [("Today", "unknown"), ("Last 7 days", "unknown"),
+                    ("Last 30 days", "unknown")]
+
+
+def test_the_card_states_the_store_mode_and_its_faults():
+    stats = {"today": 10, "last_7_days": 10, "last_30_days": 10,
+             "market_store": {"mode": "shadow", "faults": 0}}
+    assert ("Market data store", "shadow") in S.api_stats_rows(stats)
+    stats["market_store"] = {"mode": "on", "faults": 3}
+    assert ("Market data store", "on · 3 faults") in S.api_stats_rows(stats)
+    stats["market_store"] = None                    # an older proxy: no row
+    assert all(label != "Market data store" for label, _ in S.api_stats_rows(stats))
 
 
 # ── ticker toggle ────────────────────────────────────────────────────────────

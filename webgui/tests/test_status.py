@@ -1259,3 +1259,32 @@ def test_no_persistence_is_said_plainly():
 def test_an_unknown_persistence_is_not_reported_as_fine():
     assert status.redis_detail(True, "unknown") == "PING ok"
     assert status.redis_detail(False, "snapshots") == "no PING response"
+
+
+# ── the proxy card states the market-data store (audit CQ-100) ───────────────
+def test_the_proxy_card_states_the_store_mode():
+    assert status.proxy_detail({"up": True}) == "healthy"          # older proxy
+    assert status.proxy_detail(
+        {"up": True, "market_store": {"mode": "shadow", "faults": 0}}
+    ) == "healthy · market data store: shadow"
+
+
+def test_the_proxy_card_counts_store_faults():
+    assert status.proxy_detail(
+        {"up": True, "market_store": {"mode": "on", "faults": 1}}
+    ) == "healthy · market data store: on · 1 store fault"
+    assert status.proxy_detail(
+        {"up": True, "market_store": {"mode": "on", "faults": 12}}
+    ) == "healthy · market data store: on · 12 store faults"
+
+
+def test_the_proxy_card_survives_a_garbled_store_block():
+    for junk in (None, 5, "x", {"mode": 3}, {"mode": "on", "faults": "many"},
+                 {"mode": "on", "faults": True}):
+        text = status.proxy_detail({"up": True, "market_store": junk})
+        assert text.startswith("healthy") and "fault" not in text
+
+
+def test_a_proxy_that_is_down_keeps_its_own_detail():
+    assert status.proxy_detail({"up": False, "status_code": 500}) == "HTTP 500"
+    assert status.proxy_detail({"up": False}) == "unreachable"

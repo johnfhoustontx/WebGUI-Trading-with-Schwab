@@ -46,7 +46,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from repo_paths import OPTIONS_SCANNER, APPSETTINGS, TOKENS, PROXY_PORT
-from datetime import datetime, timedelta
+from datetime import date as _date, datetime, timedelta
 from typing import Optional, Dict, Any
 from zoneinfo import ZoneInfo
 
@@ -580,19 +580,43 @@ def startup():
 # HEALTH & STATUS
 #############################################
 
+def _store_state():
+    """The market-data store's mode and fault count, or None when it cannot be
+    read. A health answer must never fail on it."""
+    try:
+        return _GATEWAY.state()
+    except Exception:  # noqa: BLE001 — health and stats must still answer.
+        return None
+
+
 @app.get("/stats/api_calls")
-def api_call_stats():
+def api_call_stats(day: str | None = None):
     """Outbound Schwab API-call counts (today / last 7 / last 30 days) — the
     Settings page's "API usage" card. Counted per actual HTTP request at the
     marketdata rate-limit chokepoint + the trader request loop; per-day rows in
     schwab-proxy/data/api_call_counts.db (forward-only from first deploy).
 
-    ``store`` is today's breakdown of market-data REQUESTS by endpoint, caller
-    and outcome, including the ones the local store answered without a call to
-    Schwab. ``store_degrades`` counts store bugs that fell back to a plain
-    fetch since this process started; anything but empty is worth a look."""
+    ``store`` is one day's breakdown of market-data REQUESTS by endpoint,
+    caller and outcome, including the ones the local store answered without a
+    call to Schwab: today's, or ``?day=YYYY-MM-DD`` for an earlier one
+    (``store_day`` says which). ``store_degrades`` counts store bugs that fell
+    back to a plain fetch since this process started; anything but empty is
+    worth a look. ``market_store`` is the store's mode and fault total, the
+    same block ``/health`` carries. A count that cannot be read is null."""
+    if day is None:
+        store_day = datetime.now().date().isoformat()
+    else:
+        try:
+            store_day = _date.fromisoformat(day).isoformat()
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400,
+                                detail="day must be YYYY-MM-DD") from None
+        if store_day != day:
+            raise HTTPException(status_code=400, detail="day must be YYYY-MM-DD")
     return {**api_call_counter.stats(),
-            "store": api_call_counter.detail_summary(),
+            "store": api_call_counter.detail_summary(day=store_day),
+            "store_day": store_day,
+            "market_store": _store_state(),
             "store_degrades": dict(_GATEWAY.degrades),
             "tracker": {"tracked": len(_registry.all_trades()),
                         **_track_attempts.counts()}}
@@ -623,6 +647,9 @@ def health():
         "token_file": str(TOKEN_FILE),
         # Whether /accounts, /positions and /transactions will answer at all.
         "account_routes": account_routes_state(),
+        # The local market-data store: its mode, and how many store faults fell
+        # back to a plain fetch. None when it cannot be read.
+        "market_store": _store_state(),
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
 

@@ -76,8 +76,9 @@ def stats(today: _dt.date | None = None) -> dict:
     """Rollups: ``{"today", "last_7_days", "last_30_days", "since"}``.
 
     Rolling windows INCLUDE today (7 = today + prior 6). ``since`` is the
-    earliest counted day (None before the first count). Never raises — zeros
-    on any failure."""
+    earliest counted day (None before the first count). Never raises. When the
+    counts cannot be read every value is None: unknown, never a zero nobody
+    counted."""
     try:
         t = today or _dt.date.today()
         with _lock:
@@ -94,4 +95,5 @@ def stats(today: _dt.date | None = None) -> dict:
                 "last_30_days": _window(30),
                 "since": min(rows) if rows else None}
     except Exception:  # noqa: BLE001
-        return {"today": 0, "last_7_days": 0, "last_30_days": 0, "since": None}
+        return {"today": None, "last_7_days": None, "last_30_days": None,
+                "since": None}

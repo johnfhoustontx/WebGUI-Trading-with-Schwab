@@ -584,3 +584,66 @@ def test_pricehistory_passes_the_callers_age_limit_to_the_gateway(monkeypatch):
     assert r.status_code == 200
     assert seen["max_age"] == "0"
     assert "maxAge" not in seen["params"]            # never forwarded to Schwab
+
+
+# ---- the store on /health, and a past day's counts (audit CQ-100) -------------
+
+class _Token:
+    tokens = {"AccessToken": "a", "RefreshTokenExpiresAt": "2099-01-01T00:00:00Z"}
+    refresh_rejected, refresh_error = False, None
+
+    def _is_refresh_expired(self):
+        return False
+
+    def _is_expired(self):
+        return False
+
+    def refresh_hours_left(self):
+        return 100.0
+
+
+def test_health_carries_the_market_data_store_state(monkeypatch):
+    monkeypatch.setattr(schwab_proxy, "token_mgr", _Token())
+
+    class Gw:
+        def state(self):
+            return {"mode": "shadow", "stores": {"chains": "shadow"},
+                    "faults": 2, "faults_by_area": {"chains": 2}}
+
+    monkeypatch.setattr(schwab_proxy, "_GATEWAY", Gw())
+    out = schwab_proxy.health()
+    assert out["status"] == "ok"
+    assert out["market_store"] == {"mode": "shadow", "stores": {"chains": "shadow"},
+                                   "faults": 2, "faults_by_area": {"chains": 2}}
+
+
+def test_a_store_state_that_cannot_be_read_does_not_take_health_down(monkeypatch):
+    monkeypatch.setattr(schwab_proxy, "token_mgr", _Token())
+
+    class Gw:
+        def state(self):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(schwab_proxy, "_GATEWAY", Gw())
+    out = schwab_proxy.health()
+    assert out["status"] == "ok" and out["market_store"] is None
+
+
+def test_the_stats_route_answers_for_a_past_day(gw):
+    gw(served=None)
+    schwab_proxy.api_call_counter.record_detail("chains", "scan", "hit", n=4,
+                                                day="2026-10-01")
+    out = schwab_proxy.api_call_stats(day="2026-10-01")
+    assert out["store_day"] == "2026-10-01"
+    assert out["store"]["by_outcome"] == {"hit": 4}
+    today = schwab_proxy.api_call_stats()
+    assert today["store_day"] == dt.date.today().isoformat()
+    assert "hit" not in (today["store"]["by_outcome"] or {})
+
+
+@pytest.mark.parametrize("bad", ["yesterday", "2026-13-40", "2026/10/01", ""])
+def test_the_stats_route_refuses_a_day_it_cannot_read(gw, bad):
+    gw(served=None)
+    with pytest.raises(HTTPException) as err:
+        schwab_proxy.api_call_stats(day=bad)
+    assert err.value.status_code == 400

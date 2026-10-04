@@ -935,6 +935,22 @@ class Gateway:
         # Anything that is not one of the two store modes never answers locally.
         return mode if mode in ("shadow", "on") else "off"
 
+    def state(self) -> dict:
+        """The store's own state, for ``/health``: the configured mode, the
+        mode each store is really in, and how many store faults fell back to a
+        plain fetch since the process started. Never raises."""
+        try:
+            mode = str(self._cfg.mode())
+        except Exception:  # noqa: BLE001 — unreadable config is reported, not raised.
+            mode = "unknown"
+        with self._degrade_lock:
+            by_area = dict(self.degrades)
+        return {"mode": mode,
+                "stores": {name: self._mode(name)
+                           for name in ("chains", "quotes", "bars")},
+                "faults": sum(by_area.values()),
+                "faults_by_area": by_area}
+
     def _fetch(self, endpoint, params):
         """The one call to Schwab. Anything it raises that is not an
         ``UpstreamError`` is tagged, so it is never read as a store bug."""

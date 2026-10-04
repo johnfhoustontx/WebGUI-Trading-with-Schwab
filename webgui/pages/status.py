@@ -424,6 +424,26 @@ def service_detail(body) -> str:
     return text
 
 
+def proxy_detail(health) -> str:
+    """The proxy card's detail line, from its ``/health`` dict.
+
+    Says which mode the local market-data store is in, and how many store
+    faults fell back to a plain fetch since the proxy started: those were
+    visible only on ``/stats/api_calls``, which no screen reads. An older proxy
+    has no ``market_store`` block and a garbled one adds nothing. PURE."""
+    if not isinstance(health, dict) or not health.get("up"):
+        sc = health.get("status_code") if isinstance(health, dict) else None
+        return f"HTTP {sc}" if sc else "unreachable"
+    text = "healthy"
+    block = health.get("market_store")
+    if isinstance(block, dict) and isinstance(block.get("mode"), str):
+        text = f"{text} · market data store: {block['mode']}"
+        n = block.get("faults")
+        if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+            text = f"{text} · {n} store fault{'' if n == 1 else 's'}"
+    return text
+
+
 def dead_letter_text(body) -> str:
     """"3 commands not run", or "" at zero. These are commands the service could
     not run: a handler failed, or a restart stranded them. They are kept for a
@@ -487,13 +507,7 @@ def _probe_one(target, proxy_health=None):
                 up, bus_client.persistence() if up else "unknown"))
         elif kind == "proxy":
             h = proxy_health if proxy_health is not None else proxy.health()
-            up = bool(h.get("up"))
-            if up:
-                detail = "healthy"
-            else:
-                sc = h.get("status_code")
-                detail = f"HTTP {sc}" if sc else "unreachable"
-            out.update(up=up, detail=detail)
+            out.update(up=bool(h.get("up")), detail=proxy_detail(h))
         elif kind == "peer":
             # An HTTP probe, never a TCP connect: a dead accept loop stays bound
             # and passes a connect, which is how a promote once left prod

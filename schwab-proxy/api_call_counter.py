@@ -95,8 +95,9 @@ def stats(today: _dt.date | None = None) -> dict:
     """Rollups: ``{"today", "last_7_days", "last_30_days", "since"}``.
 
     Rolling windows INCLUDE today (7 = today + prior 6). ``since`` is the
-    earliest counted day (None before the first count). Never raises — zeros
-    on any failure."""
+    earliest counted day (None before the first count). Never raises. When the
+    counts cannot be read every value is None: unknown, never a zero nobody
+    counted."""
     try:
         t = today or _dt.date.today()
         with _lock:
@@ -113,7 +114,8 @@ def stats(today: _dt.date | None = None) -> dict:
                 "last_30_days": _window(30),
                 "since": min(rows) if rows else None}
     except Exception:  # noqa: BLE001
-        return {"today": 0, "last_7_days": 0, "last_30_days": 0, "since": None}
+        return {"today": None, "last_7_days": None, "last_30_days": None,
+                "since": None}
 
 
 def record_detail(endpoint: str, caller: str, outcome: str, n: int = 1,
@@ -144,7 +146,8 @@ def detail_summary(day: str | None = None) -> dict:
     ``by_outcome`` and ``served_locally`` are totals over EVERY row of the day.
     ``rows`` lists the ``MAX_DETAIL_ROWS`` largest: the caller name comes from a
     request header, so the number of rows is not ours to bound.
-    Never raises — an empty summary on any failure."""
+    Never raises. A day with no rows is real zeros; a breakdown that cannot be
+    read is None in every field."""
     try:
         d = day or _dt.date.today().isoformat()
         with _lock:
@@ -164,4 +167,4 @@ def detail_summary(day: str | None = None) -> dict:
                      for e, c, o, n in rows],
         }
     except Exception:  # noqa: BLE001
-        return {"served_locally": 0, "by_outcome": {}, "rows": []}
+        return {"served_locally": None, "by_outcome": None, "rows": None}

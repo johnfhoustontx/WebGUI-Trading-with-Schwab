@@ -2677,3 +2677,28 @@ def test_a_series_keeps_its_own_window_from_run_to_run():
     offset = zlib.crc32(repr(key).encode()) % 1740
     assert ms.session_slot(key, 1740.0 - offset, 1740.0) == 1
     assert ms.session_slot(key, 1739.0 - offset, 1740.0) == 0
+
+
+# ---- the store's own state, for /health (audit CQ-100) ------------------------
+
+def test_the_gateway_reports_its_mode_per_store_and_its_fault_count():
+    h = Harness(Cfg(mode="shadow", quotes__enabled=False))
+    assert h.gw.state() == {
+        "mode": "shadow",
+        "stores": {"chains": "shadow", "quotes": "off", "bars": "shadow"},
+        "faults": 0, "faults_by_area": {}}
+    h.gw._degraded("chains")
+    h.gw._degraded("chains", answered=True)
+    h.gw._degraded("quotes")
+    assert h.gw.state()["faults"] == 3
+    assert h.gw.state()["faults_by_area"] == {"chains": 2, "quotes": 1}
+
+
+def test_the_gateway_state_never_raises_on_unreadable_config():
+    class Broken(Cfg):
+        def mode(self):
+            raise RuntimeError("unreadable")
+
+    state = Harness(Broken()).gw.state()
+    assert state["mode"] == "unknown"
+    assert state["stores"] == {"chains": "off", "quotes": "off", "bars": "off"}

@@ -41,7 +41,9 @@ def test_empty_stats_are_zero():
 def test_record_never_raises(monkeypatch):
     monkeypatch.setattr(acc, "_get_conn", lambda: (_ for _ in ()).throw(RuntimeError))
     acc.record(1)                                    # must not raise
-    assert acc.stats()["today"] == 0                 # stats degrade to zeros too
+    # A count that could not be read is unknown, never a zero (audit CQ-100).
+    assert acc.stats() == {"today": None, "last_7_days": None,
+                           "last_30_days": None, "since": None}
 
 
 def test_connect_default_is_memory_under_pytest():
@@ -87,7 +89,9 @@ def test_detail_is_per_day():
 def test_detail_never_raises(monkeypatch):
     monkeypatch.setattr(acc, "_get_conn", lambda: (_ for _ in ()).throw(RuntimeError))
     acc.record_detail("chains", "x", "hit")              # must not raise
-    assert acc.detail_summary()["served_locally"] == 0
+    # Unknown, never a zero nobody counted (audit CQ-100).
+    assert acc.detail_summary() == {"served_locally": None, "by_outcome": None,
+                                    "rows": None}
 
 
 def test_long_caller_names_are_cut():
@@ -144,3 +148,8 @@ def test_detail_rows_with_equal_counts_come_back_in_a_stable_order():
     acc.record_detail("chains", "big", "hit", n=9, day="2026-10-05")
     callers = [r["caller"] for r in acc.detail_summary(day="2026-10-05")["rows"]]
     assert callers == ["big", "alpha", "mid", "zeta"]
+
+
+def test_an_empty_day_is_a_real_zero_not_unknown():
+    assert acc.detail_summary(day="2020-01-01") == {
+        "served_locally": 0, "by_outcome": {}, "rows": []}

@@ -24,12 +24,14 @@ def test_record_and_rollups():
     assert s["since"] == "2026-07-06"
 
 
-def test_empty_and_failure_degrade_to_zero(monkeypatch):
+def test_an_empty_counter_is_zero_and_a_failed_one_is_unknown(monkeypatch):
     assert ac.stats(today=dt.date(2026, 7, 13)) == {
         "today": 0, "last_7_days": 0, "last_30_days": 0, "since": None}
     monkeypatch.setattr(ac, "_get_conn", lambda: (_ for _ in ()).throw(RuntimeError))
     ac.record(1)                       # must not raise
-    assert ac.stats()["today"] == 0
+    # Unknown, never a zero nobody counted (audit CQ-100).
+    assert ac.stats() == {"today": None, "last_7_days": None,
+                          "last_30_days": None, "since": None}
 
 
 def test_connect_default_is_memory_under_pytest():

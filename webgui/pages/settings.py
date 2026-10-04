@@ -84,8 +84,12 @@ def api_stats_rows(stats):
     if not stats:
         return [("Today", "—"), ("Last 7 days", "—"), ("Last 30 days", "—")]
     def _fmt(k):
+        # A count the proxy could not read (null) or did not send is unknown.
+        # It printed 0, a number nobody counted.
+        if stats.get(k) is None:
+            return "unknown"
         try:
-            return f"{int(stats.get(k, 0)):,}"
+            return f"{int(stats.get(k)):,}"
         except (TypeError, ValueError):
             return "—"
     rows = [("Today", _fmt("today")), ("Last 7 days", _fmt("last_7_days")),
@@ -97,7 +101,22 @@ def api_stats_rows(stats):
     local = store.get("served_locally") if isinstance(store, dict) else None
     if isinstance(local, int) and not isinstance(local, bool):
         rows.append(("Answered locally today", f"{local:,}"))
+    text = store_mode_text(stats.get("market_store"))
+    if text:
+        rows.append(("Market data store", text))
     return rows
+
+
+def store_mode_text(block) -> str:
+    """"shadow", or "on · 3 faults", from the proxy's ``market_store`` block.
+    "" for an older proxy or a block that cannot be read. PURE."""
+    if not isinstance(block, dict) or not isinstance(block.get("mode"), str):
+        return ""
+    text = block["mode"]
+    n = block.get("faults")
+    if isinstance(n, int) and not isinstance(n, bool) and n > 0:
+        text = f"{text} · {n} fault{'' if n == 1 else 's'}"
+    return text
 
 
 def plan_stat_cells(existing_labels, rows):
