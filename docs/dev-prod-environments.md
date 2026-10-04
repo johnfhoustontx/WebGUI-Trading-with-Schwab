@@ -13,6 +13,16 @@ box, along with the twelve `.bat` launchers.
 
 ## 1. Which folder is which
 
+> ⚠ **The current server runs ONE checkout, and it is production: it lives at
+> `/home/administrator/dev`.** It was stood up as dev on the replacement server
+> (2026-08-30) and promoted in place by changing `name` in
+> `config/env.local.toml`; the directory kept its name. **There is no
+> `/home/administrator/prod`.** The table below is the two-checkout layout this
+> repository supports and ran until that date. Wherever this runbook says
+> `/home/administrator/prod`, read it as "the production checkout", which today
+> is `/home/administrator/dev`. A second checkout stood up as real dev must be
+> given a different directory name.
+
 | | prod | dev |
 |---|---|---|
 | Folder | `/home/administrator/prod` | `/home/administrator/dev` |
@@ -659,8 +669,11 @@ fast-forward, the two routes are no longer equivalent and you want to know.
 In **prod** — and by this route only:
 
 ```bash
-cd /home/administrator/prod && tools/promote.sh
+ssh vps2 'cd /home/administrator/dev && tools/promote.sh'
 ```
+
+(That directory IS production on the current server; see the note at the top of
+section 1. The script checks the checkout's identity, not its folder name.)
 
 `promote.sh` does everything that can refuse or needs the network **before it
 stops anything**, so none of these can leave prod down: it refuses in a dev
@@ -693,7 +706,9 @@ target commit).
 ⚠ **Never `git pull`, `merge`, `checkout` or `reset` in the prod checkout.**
 Every guard above is skipped, and prod is a live trading stack.
 `.claude/hooks/guard_prod_promote.py` blocks the mutating verbs mechanically —
-it knows both the old Windows path fragment and `/home/administrator/prod`.
+it knows the old Windows path fragment, `/home/administrator/prod`, and
+`/home/administrator/dev`, the checkout that is production today. A git
+worktree under that checkout is not blocked.
 
 If it refuses on a dirty tree, look at the diff — an unexpected edit in the prod
 checkout is for a human to decide about, not a restart script.

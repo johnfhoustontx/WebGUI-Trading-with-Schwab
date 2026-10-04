@@ -41,12 +41,30 @@ import sys
 # Windows prod stays live and authoritative until cutover, and during the
 # parallel-run week BOTH prod checkouts exist at once.
 #
-# Keep these specific. "/prod" would swallow the sibling /home/administrator/dev
-# checkout's neighbours and block ordinary development.
+# Keep these specific. "/prod" would swallow a sibling checkout's neighbours and
+# block ordinary development.
+#
+# ⚠ THE THIRD ENTRY IS THE ONE THAT IS LIVE. The replacement server (2026-08-30)
+# runs ONE checkout, at /home/administrator/dev, and it is PRODUCTION: it was
+# stood up as dev and promoted in place, and the directory kept its name.
+# /home/administrator/prod does not exist there. Until 2026-10-04 this list held
+# only the first two, so the guard protected a path nobody can cd into and waved
+# the real one through (audit AR-10) - the fourth time it has gone quietly inert
+# on a change of address. If a second checkout is ever stood up as real dev,
+# give it a different name: this path is production for as long as that
+# directory's config/env.local.toml says so.
+#
+# A fragment matches a whole path component (see _fragment_pattern), so
+# /home/administrator/dev2 is not /home/administrator/dev.
 PROD_FRAGMENTS = (
-    "webgui trading prod",        # Windows
-    "/home/administrator/prod",   # Linux VPS
+    "webgui trading prod",        # Windows (now an archive)
+    "/home/administrator/prod",   # the original Linux VPS layout
+    "/home/administrator/dev",    # the CURRENT production checkout
 )
+
+# A git worktree lives under the checkout it belongs to. Work happens there, and
+# its git state is not what production runs.
+_WORKTREE = r"[\\/]\.claude[\\/]worktrees[\\/]"
 
 # git subcommands that can move what prod is running. `fetch` is deliberately
 # absent -- it only updates remote-tracking refs and is how you inspect before
@@ -72,15 +90,20 @@ SANCTIONED = ("promote.sh",)
 # which it did within a minute of this hook going live. The cwd check below is the
 # other half, since the Bash tool's cwd persists and `git pull` alone is enough.
 def _fragment_pattern(fragment):
-    """A fragment as a regex, with each space matching one whitespace char."""
-    return r"\s".join(re.escape(part) for part in fragment.split(" "))
+    """A fragment as a regex, with each space matching one whitespace char, that
+    ends on a path-component boundary: ``.../dev`` matches ``.../dev`` and
+    ``.../dev/tools`` and never ``.../dev2`` or ``.../development``."""
+    return (r"\s".join(re.escape(part) for part in fragment.split(" "))
+            + r"(?![\w.-])")
 
 
 _ANY_PROD = "(?:" + "|".join(_fragment_pattern(f) for f in PROD_FRAGMENTS) + ")"
 
 _PROD_CD = re.compile(
     r"^\s*cd\s+(?:/d\s+)?[\"']?[^\"'&;|]*" + _ANY_PROD +
-    r"[^\"'&;|]*[\"']?\s*(?:&&|;)", re.IGNORECASE)
+    r"(?!" + _WORKTREE + r")[^\"'&;|]*[\"']?\s*(?:&&|;)", re.IGNORECASE)
+
+_PROD_PATH = re.compile(_ANY_PROD + r"(?!" + _WORKTREE + r")", re.IGNORECASE)
 
 
 # `git -C <prod>` reaches the checkout with no `cd` at all, and is the natural
@@ -90,8 +113,8 @@ _PROD_CD = re.compile(
 _CMD_POS = r"(?:^|&&|\|\||;|\n)\s*"
 
 _PROD_GIT_C = re.compile(
-    _CMD_POS + r"git\s+(?:-c\s+\S+\s+)*-C\s+[\"']?[^\"'&;|]*" + _ANY_PROD,
-    re.IGNORECASE)
+    _CMD_POS + r"git\s+(?:-c\s+\S+\s+)*-C\s+[\"']?[^\"'&;|]*" + _ANY_PROD
+    + r"(?!" + _WORKTREE + r")", re.IGNORECASE)
 
 # An ssh-wrapped command is the shape EVERY prod command now takes: both stacks
 # moved to the VPS, so the cwd is a dev-side checkout and the prod path lives
@@ -120,8 +143,7 @@ def _ssh_payload(command: str):
 
 def _targets_prod(command: str, cwd: str) -> bool:
     """True when a git verb here would run INSIDE the prod checkout."""
-    low_cwd = (cwd or "").lower()
-    if any(f in low_cwd for f in PROD_FRAGMENTS):
+    if _PROD_PATH.search(cwd or ""):
         return True
     candidates = [command]
     payload = _ssh_payload(command)
@@ -146,7 +168,7 @@ def _mutating_git(command: str) -> str:
             return verb
         if verb == "branch" and re.search(r"\bgit\s+branch\s+(-f|--force|-[a-zA-Z]*f)", low):
             return "branch -f"
-        if verb == "push" and any(f in low for f in PROD_FRAGMENTS):
+        if verb == "push" and _PROD_PATH.search(low):
             return "push"
     return ""
 
@@ -174,7 +196,10 @@ def main() -> int:
         "Development work has to be COMPLETED AND VERIFIED IN DEV before it "
         "moves to prod. Land it in dev, run it there, then promote:\n"
         "\n"
-        "    cd /home/administrator/prod && tools/promote.sh\n"
+        "    ssh vps2 'cd /home/administrator/dev && tools/promote.sh'\n"
+        "\n"
+        "(/home/administrator/dev IS the production checkout on the current "
+        "server; there is no /home/administrator/prod.)\n"
         "\n"
         "promote.sh refuses on a dirty tree, stops the stack before pulling, "
         "reinstalls only if requirements.lock moved, and restarts afterwards - "

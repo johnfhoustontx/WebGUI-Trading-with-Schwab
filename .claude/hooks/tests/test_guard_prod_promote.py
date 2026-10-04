@@ -141,7 +141,11 @@ def test_fails_open_when_there_is_no_command():
 # leave prod unguarded for the whole migration window, including the parallel-run
 # week when two prod checkouts exist at once.
 LINUX_PROD = "/home/administrator/prod"
-LINUX_DEV = "/home/administrator/dev"
+# ⚠ This was "/home/administrator/dev" until 2026-10-04 - which on the current
+# server IS the production checkout (see the AR-10 block at the foot of this
+# file). The tests that use it are about a dev checkout sitting BESIDE prod, so
+# it now names one that could.
+LINUX_DEV = "/home/administrator/dev2"
 
 
 def test_blocks_a_bare_git_pull_in_the_linux_prod_checkout():
@@ -289,5 +293,53 @@ def test_the_refusal_message_names_the_checkout_that_actually_exists():
     src = HOOK.read_text(encoding="utf-8")
     start = src.index("Blocked: `git")
     message = src[start:]
-    assert "/home/administrator/prod" in message
+    assert "/home/administrator/dev" in message      # the one that exists today
     assert "D:" not in message, "refusal still points at the Windows checkout"
+
+
+###############################################
+# The checkout that IS production (audit AR-10)
+###############################################
+#
+# The replacement server runs ONE checkout, at /home/administrator/dev, and it is
+# production: it was stood up as dev and promoted in place, and the directory
+# kept its name. /home/administrator/prod does not exist. So the guard above was
+# protecting a path nobody can cd into, and waving through the real one - the
+# fourth time it went quietly inert on a change of address.
+REAL_PROD = "/home/administrator/dev"
+
+
+def test_blocks_a_mutating_verb_in_the_checkout_that_is_production():
+    assert run("git pull", cwd=REAL_PROD) == BLOCKED
+    assert run(f"ssh vps2 'cd {REAL_PROD} && git pull --ff-only'", cwd=DEV) == BLOCKED
+    assert run(f"ssh vps2 'cd {REAL_PROD} && git checkout some-branch'", cwd=DEV) == BLOCKED
+    assert run(f"ssh vps2 'git -C {REAL_PROD} reset --hard origin/main'", cwd=DEV) == BLOCKED
+
+
+def test_still_allows_reading_and_promoting_there():
+    assert run(f"ssh vps2 'cd {REAL_PROD} && git status --porcelain'", cwd=DEV) == ALLOWED
+    assert run(f"ssh vps2 'cd {REAL_PROD} && git fetch origin main'", cwd=DEV) == ALLOWED
+    assert run(f"ssh vps2 'cd {REAL_PROD} && tools/promote.sh'", cwd=DEV) == ALLOWED
+    assert run(f"ssh vps2 'cd {REAL_PROD} && tools/promote.sh --rollback'", cwd=DEV) == ALLOWED
+
+
+def test_a_sibling_whose_name_only_starts_the_same_is_not_production():
+    """A second checkout stood up as real dev would sit beside it. The match is
+    on the whole path component, so ``dev2`` and ``development`` are not ``dev``."""
+    for sibling in ("/home/administrator/dev2", "/home/administrator/development",
+                    "/home/administrator/dev-work", "/home/administrator/dev.old"):
+        assert run("git pull", cwd=sibling) == ALLOWED, sibling
+        assert run(f"ssh vps2 'cd {sibling} && git checkout main'", cwd=DEV) == ALLOWED, sibling
+
+
+def test_a_worktree_under_the_production_checkout_is_not_the_checkout():
+    """Worktrees are where work happens; their git state is not what prod runs."""
+    wt = REAL_PROD + "/.claude/worktrees/some-feature"
+    assert run("git checkout -b x", cwd=wt) == ALLOWED
+    assert run(f"ssh vps2 'cd {wt} && git merge main'", cwd=DEV) == ALLOWED
+
+
+def test_the_refusal_names_the_real_checkout_and_the_whole_command():
+    src = HOOK.read_text(encoding="utf-8")
+    message = src[src.index("Blocked: `git"):]
+    assert "ssh vps2 'cd /home/administrator/dev && tools/promote.sh'" in message
