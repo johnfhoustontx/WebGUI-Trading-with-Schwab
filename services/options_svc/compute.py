@@ -8230,66 +8230,18 @@ _CALC_ANALYTIC_CODES = {"PCS", "CCS", "IC",
                         "LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT"}
 
 
-# ── intraday time-to-expiry (the 0DTE fix) ───────────────────────────────────
-# Options stop trading at the 4:00pm ET close (QQQ/SPY/equities and PM-settled
-# 0DTE index weeklys). Time-to-expiry is the CALENDAR span from now to that close
-# in years (/365 — the same convention bs_price/calc_summary already use, and the
-# one ThinkorSwim implies IV under). Using calendar ``.days`` instead collapses to
-# 0 on expiration day (intrinsic-only) or a bogus full day — the calculator bug.
-from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
-
-_MARKET_TZ = _ZoneInfo("America/New_York")
-_EXPIRY_CLOSE_HOUR = 16  # 4:00pm ET
-_YEAR_SECONDS = 365.0 * 24.0 * 3600.0
-
-
-def _expiry_settlement(expiry_date):
-    """The 4:00pm ET settlement datetime (tz-aware) for an expiry date."""
-    import datetime as dt
-
-    return dt.datetime(expiry_date.year, expiry_date.month, expiry_date.day,
-                       _EXPIRY_CLOSE_HOUR, 0, 0, tzinfo=_MARKET_TZ)
-
-
-def _year_fraction(start_dt, end_dt):
-    """Calendar years from start to end (never negative), /365."""
-    return max((end_dt - start_dt).total_seconds(), 0.0) / _YEAR_SECONDS
-
-
-def time_to_expiry_years(now_dt, expiry_date):
-    """Years from ``now_dt`` (tz-aware) to the expiry's 4:00pm ET close, /365.
-
-    Sub-day resolution: 3 hours before the close on expiry day → ~3/24/365, not 0;
-    after the close → 0. Multi-day → calendar days + today's fraction."""
-    return _year_fraction(now_dt, _expiry_settlement(expiry_date))
-
-
-_SIM_MIN_DAYS = 0.01   # sweep-stability floor (~14 min), not a time convention
-
-
-def _leg_days_to_expiry(expiry, elapsed=0.0, now=None):
-    """DAYS to ``expiry``'s 16:00 ET close after ``elapsed`` days from ``now``.
-
-    Fractional and intraday-aware: a 0-DTE leg at 11:00 ET returns 5/24, not the
-    ``_SIM_MIN_DAYS`` floor. The What-if sweep previously used whole-day
-    ``(exp - today).days``, which pinned EVERY 0-DTE leg (and its P/L baseline)
-    at 0.01 days regardless of the hours actually left -- a 4.6x understatement
-    at five hours to the close, and inconsistent with the Replay and IV-shock
-    engines on the same page (fixed 2026-08-20).
-
-    Tolerates a string ``expiry`` (test doubles use strings); an unparseable one
-    degrades to the elapsed-only floor, as before.
-    """
-    import datetime as dt
-
-    if isinstance(expiry, str):
-        try:
-            expiry = dt.date.fromisoformat(expiry[:10])
-        except ValueError:
-            return max(float(elapsed), _SIM_MIN_DAYS)
-    now = now or dt.datetime.now(_MARKET_TZ)
-    days_now = time_to_expiry_years(now, expiry) * 365.0
-    return max(days_now - float(elapsed), _SIM_MIN_DAYS)
+# Time to expiry lives in its own module since 2026-10-04 (audit CQ-03). The
+# names stay here for the code below and for the tests that call them.
+from services.options_svc.expiry_time import (  # noqa: E402,F401
+    _EXPIRY_CLOSE_HOUR,
+    _MARKET_TZ,
+    _SIM_MIN_DAYS,
+    _YEAR_SECONDS,
+    _expiry_settlement,
+    _leg_days_to_expiry,
+    _year_fraction,
+    time_to_expiry_years,
+)
 
 
 def calc_iv(spot, strike, option_type, mark, expiry, rate=None, now=None) -> dict:

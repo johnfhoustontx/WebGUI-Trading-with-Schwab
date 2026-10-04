@@ -20,7 +20,7 @@ COMPUTE = pathlib.Path(compute.__file__)
 # Lines in compute.py. LOWER this when code moves out; never raise it. To add
 # behaviour, write it in a sibling module under services/options_svc/ and import
 # it into compute only if compute's own code calls it.
-COMPUTE_MAX_LINES = 10640
+COMPUTE_MAX_LINES = 10600
 
 
 def test_compute_does_not_grow():
@@ -60,3 +60,15 @@ def test_the_tiers_module_does_not_import_compute():
             names.add(node.module or "")
             names |= {f"{node.module}.{a.name}" for a in node.names}
     assert not any(n.endswith("compute") for n in names), names
+
+
+def test_time_to_expiry_lives_in_its_own_module():
+    from services.options_svc import expiry_time
+    assert compute.time_to_expiry_years is expiry_time.time_to_expiry_years
+    assert compute._leg_days_to_expiry is expiry_time._leg_days_to_expiry
+    assert compute._year_fraction is expiry_time._year_fraction
+    import ast
+    tree = ast.parse(pathlib.Path(expiry_time.__file__).read_text(encoding="utf-8"))
+    imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    imported |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+    assert imported <= {"datetime", "zoneinfo"}, imported

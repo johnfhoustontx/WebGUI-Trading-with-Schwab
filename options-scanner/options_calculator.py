@@ -83,7 +83,13 @@ def expiry_time_to_years(ref_dt, expiry_date):
                               tzinfo=_ZoneInfo("America/New_York"))
     if getattr(ref_dt, "tzinfo", None) is None:
         ref_dt = ref_dt.replace(tzinfo=_ZoneInfo(NAIVE_WALLCLOCK_TZ))
-    return max((settlement - ref_dt).total_seconds(), 0.0) / (365.0 * 86400.0)
+    # Subtract in UTC. Two datetimes that carry the SAME timezone object are
+    # subtracted on the wall clock in Python, which ignores a daylight-saving
+    # change between them: a reference time given in New York came out an hour
+    # off across one (audit AC-06).
+    utc = _dt.timezone.utc
+    seconds = (settlement.astimezone(utc) - ref_dt.astimezone(utc)).total_seconds()
+    return max(seconds, 0.0) / (365.0 * 86400.0)
 
 #############################################
 # NORMAL DISTRIBUTION HELPERS
