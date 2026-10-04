@@ -17,17 +17,58 @@ from scoring import vix
     (1.30, 1),    # >=1.30 → 1
 ])
 def test_score_term_piecewise_breakpoints(ratio, expected_band):
-    """Spot-check breakpoint raw values lifted from sentiment_dashboard.py."""
-    raw = vix._vix_term_piecewise(ratio)
-    # The original code rounds with max(1, min(10, round(raw))); confirm
-    # the raw matches the formula. We assert against the recomputed value
-    # rather than a hand-rolled expected_band per row.
-    if ratio < 0.85: assert raw == 10.0
-    elif ratio < 0.95: assert raw == pytest.approx(7.0 + (ratio - 0.85) / 0.10 * 2.0)
-    elif ratio < 1.05: assert raw == pytest.approx(5.0 + (ratio - 0.95) / 0.10 * 1.0)
-    elif ratio < 1.15: assert raw == pytest.approx(4.0 - (ratio - 1.05) / 0.10 * 1.0)
-    elif ratio < 1.30: assert raw == pytest.approx(2.0 - (ratio - 1.15) / 0.15 * 1.0)
-    else: assert raw == 1.0
+    """The value at the start of each band, as the table above states it.
+
+    Until 2026-10-04 this test ignored ``expected_band`` and recomputed the
+    function's own formula, so it passed whatever the formula did - including
+    the two calm-band segments that sloped the wrong way (audit AC-47). The
+    table had the right answers all along: 9 at 0.85 and 6 at 0.95."""
+    assert vix._vix_term_piecewise(ratio) == pytest.approx(float(expected_band))
+
+
+# ── every volatility scorer falls as volatility rises ──────────────────────
+# A ratio at or under each scorer's calm threshold is the calmest reading; each
+# step up is more stress. So the raw score may fall or hold as the ratio rises,
+# and never rise. Two segments in each of the three scorers rose: VIX at 0.94 of
+# its average scored 8.9 and at 0.86 scored 7.2.
+
+def _grid(lo, hi, n=600):
+    return [lo + (hi - lo) * i / n for i in range(n + 1)]
+
+
+def _raw_vix1d(ratio):
+    """score_vix1d rounds; the property is about the curve under the rounding."""
+    return vix._vix1d_piecewise(ratio)
+
+
+@pytest.mark.parametrize("name,fn,lo,hi", [
+    ("term", lambda r: vix._vix_term_piecewise(r), 0.70, 1.45),
+    ("vix1d", _raw_vix1d, 0.70, 1.30),
+    ("slope", lambda r: vix._slope_piecewise(r), 0.75, 1.20),
+])
+def test_the_score_never_rises_as_volatility_rises(name, fn, lo, hi):
+    values = [fn(r) for r in _grid(lo, hi)]
+    rises = [(round(r, 4), round(a, 3), round(b, 3))
+             for r, a, b in zip(_grid(lo, hi)[1:], values, values[1:]) if b > a + 1e-9]
+    assert rises == [], f"{name} rises at {rises[:3]} ({len(rises)} places)"
+
+
+@pytest.mark.parametrize("fn,calm,stressed", [
+    (lambda r: vix._vix_term_piecewise(r), 0.70, 1.45),
+    (_raw_vix1d, 0.70, 1.30),
+    (lambda r: vix._slope_piecewise(r), 0.75, 1.20),
+])
+def test_the_ends_are_ten_and_one(fn, calm, stressed):
+    assert fn(calm) == 10.0 and fn(stressed) == 1.0
+
+
+def test_the_rounded_scores_follow_the_same_direction():
+    """What the composite actually consumes."""
+    for scorer, lo, hi in ((lambda r: vix.score_term(r * 20.0, 20.0).score, 0.70, 1.45),
+                           (lambda r: vix.score_vix1d(r * 20.0, 20.0).score, 0.70, 1.30),
+                           (lambda r: vix.score_term_slope(r * 20.0, 20.0).score, 0.75, 1.20)):
+        scores = [scorer(r) for r in _grid(lo, hi, 300)]
+        assert all(b <= a for a, b in zip(scores, scores[1:]))
 
 
 def test_score_term_missing_vix_returns_zero():

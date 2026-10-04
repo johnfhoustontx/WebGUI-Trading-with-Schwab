@@ -5,8 +5,8 @@
     "vix_term": {
       "inputs": {"vix": 17.0, "vix_ma": 18.0},
       "ratio": 0.9444444444444444,
-      "raw_score": 8.888888888888889,
-      "expected_score": 9,
+      "raw_score": 7.111111111111111,
+      "expected_score": 7,
       "expected_confidence": 1.0
     },
     "vix_term_no_ma_contango": {
@@ -32,8 +32,8 @@
     "vix1d": {
       "inputs": {"vix1d": 15.5, "vix": 17.0},
       "ratio": 0.9117647058823529,
-      "raw_score": 5.3176470588235296,
-      "expected_score": 5,
+      "raw_score": 5.6823529411764704,
+      "expected_score": 6,
       "expected_confidence": 1.0
     },
     "vix1d_missing": {
@@ -44,8 +44,8 @@
     "term_slope": {
       "inputs": {"vix9d": 16.0, "vix": 17.0},
       "slope": 0.9411764705882353,
-      "raw_score": 5.264705882352941,
-      "expected_score": 5,
+      "raw_score": 5.735294117647059,
+      "expected_score": 6,
       "expected_confidence": 1.0
     },
     "put_call_call_dominant": {

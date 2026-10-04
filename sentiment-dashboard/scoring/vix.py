@@ -10,16 +10,23 @@ from .types import ScoreResult
 def _vix_term_piecewise(ratio):
     """v3.9 piecewise mapping for VIX/10d_MA → raw score (float, 1..10).
 
-    Replicates ``SentimentDashboardApp._vix_term_piecewise``.
+    A lower ratio is a calmer tape and a higher score, so the mapping never
+    rises as the ratio rises: 10 below 0.85, then 9 falling to 7, 6 falling to
+    5, 4 falling to 3, 2 falling to 1, and 1 from 1.30.
+
+    ⚠ The two calm segments were lifted from ``SentimentDashboardApp`` sloping
+    the WRONG way (``7 + ...`` and ``5 + ...``): inside each band a higher ratio
+    scored higher, so VIX at 0.94 of its average read calmer than at 0.86. The
+    same slip was in the two scorers below (audit AC-47, fixed 2026-10-04).
     """
     if ratio is None:
         return 5.0
     if ratio < 0.85:
         return 10.0
     if ratio < 0.95:
-        return 7.0 + (ratio - 0.85) / 0.10 * 2.0
+        return 9.0 - (ratio - 0.85) / 0.10 * 2.0
     if ratio < 1.05:
-        return 5.0 + (ratio - 0.95) / 0.10 * 1.0
+        return 6.0 - (ratio - 0.95) / 0.10 * 1.0
     if ratio < 1.15:
         return 4.0 - (ratio - 1.05) / 0.10 * 1.0
     if ratio < 1.30:
@@ -68,24 +75,43 @@ def score_term(vix: float, vix_ma: float,
     return ScoreResult(score=score, confidence=confidence, interp=interp)
 
 
+def _vix1d_piecewise(ratio):
+    """VIX1D / VIX → raw score (float, 1..10), never rising as the ratio rises.
+    10 below 0.80, then 9 → 7, 6 → 5, 4 → 3, 2 → 1, and 1 from 1.15."""
+    if ratio < 0.80:
+        return 10.0
+    if ratio < 0.88:
+        return 9.0 - (ratio - 0.80) / 0.08 * 2.0
+    if ratio < 0.98:
+        return 6.0 - (ratio - 0.88) / 0.10 * 1.0
+    if ratio < 1.05:
+        return 4.0 - (ratio - 0.98) / 0.07 * 1.0
+    if ratio < 1.15:
+        return 2.0 - (ratio - 1.05) / 0.10 * 1.0
+    return 1.0
+
+
+def _slope_piecewise(slope):
+    """VIX9D / VIX → raw score (float, 1..10), never rising as the slope rises.
+    10 below 0.85, then 9 → 7, 6 → 5, 4 → 3, and 1 from 1.05 (backwardation)."""
+    if slope < 0.85:
+        return 10.0
+    if slope < 0.92:
+        return 9.0 - (slope - 0.85) / 0.07 * 2.0
+    if slope < 1.00:
+        return 6.0 - (slope - 0.92) / 0.08 * 1.0
+    if slope < 1.05:
+        return 4.0 - (slope - 1.00) / 0.05 * 1.0
+    return 1.0
+
+
 def score_vix1d(vix1d: float, vix: float,
                 vix1d_prior: float = 0.0) -> ScoreResult:
     """0DTE volatility expansion gauge: VIX1D / VIX ratio (v3.9.1 bands)."""
     if not vix1d or vix1d <= 0 or not vix or vix <= 0:
         return ScoreResult(score=0, confidence=0.0, interp="")
     ratio = vix1d / vix
-    if ratio < 0.80:
-        raw = 10.0
-    elif ratio < 0.88:
-        raw = 7.0 + (ratio - 0.80) / 0.08 * 2.0
-    elif ratio < 0.98:
-        raw = 5.0 + (ratio - 0.88) / 0.10 * 1.0
-    elif ratio < 1.05:
-        raw = 4.0 - (ratio - 0.98) / 0.07 * 1.0
-    elif ratio < 1.15:
-        raw = 2.0 - (ratio - 1.05) / 0.10 * 1.0
-    else:
-        raw = 1.0
+    raw = _vix1d_piecewise(ratio)
     score = max(1, min(10, round(raw)))
     delta = (vix1d - vix1d_prior) if vix1d_prior else None
     delta_str = f" (Δ {delta:+.2f})" if delta is not None else ""
@@ -98,16 +124,7 @@ def score_term_slope(vix9d: float, vix: float) -> ScoreResult:
     if not vix9d or vix9d <= 0 or not vix or vix <= 0:
         return ScoreResult(score=0, confidence=0.0, interp="")
     slope = vix9d / vix
-    if slope < 0.85:
-        raw = 10.0
-    elif slope < 0.92:
-        raw = 7.0 + (slope - 0.85) / 0.07 * 2.0
-    elif slope < 1.00:
-        raw = 5.0 + (slope - 0.92) / 0.08 * 1.0
-    elif slope < 1.05:
-        raw = 4.0 - (slope - 1.00) / 0.05 * 1.0
-    else:
-        raw = 1.0
+    raw = _slope_piecewise(slope)
     score = max(1, min(10, round(raw)))
     regime = ("Contango" if slope < 0.98
               else ("Flat" if slope < 1.02 else "Backwardation"))
