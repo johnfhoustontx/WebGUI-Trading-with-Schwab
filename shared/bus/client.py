@@ -13,6 +13,7 @@
 Under pytest (or with ``fake=True``) it auto-selects an in-memory
 ``fakeredis`` backend so tests need no live server.
 """
+import logging
 import json
 from typing import cast
 import os
@@ -36,6 +37,9 @@ from shared import service_limits as _service_limits  # noqa: E402
 # stack issues at most a few commands/second, so ~1000 is a generous window for
 # inspection/replay while guaranteeing bounded memory.
 _XADD_MAXLEN = 1000
+
+
+log = logging.getLogger(__name__)
 
 
 class _Subscription:
@@ -415,9 +419,10 @@ class Bus:
                     break
                 start = next_cursor
         except Exception:  # noqa: BLE001 — draining must never crash startup.
-            log_exc = getattr(self, "_log_drain_exc", None)
-            if log_exc:
-                log_exc()
+            # Said out loud: a drain that fails leaves commands stranded, and
+            # the optional hook this used to call was never set by anyone.
+            log.exception("drain_pending(%s, %s) failed after %s entries",
+                          stream, group, moved)
         return moved
 
     def consume_commands(

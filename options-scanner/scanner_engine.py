@@ -102,6 +102,8 @@ def _attach_net_economics(sig):
         sig["net_rr_pct"] = (round(net_credit / net_max_loss * 100, 1)
                              if net_max_loss > 0 else sig.get("rr_pct"))
     except Exception:  # pragma: no cover - defensive: never crash a signal
+        log.warning("commission fields for %s %s fell back to gross",
+                    sig.get("symbol"), sig.get("type"), exc_info=True)
         sig.setdefault("commission", 0.0)
         sig.setdefault("net_credit", sig.get("credit"))
         sig.setdefault("net_max_loss", sig.get("max_loss"))

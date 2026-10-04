@@ -3679,9 +3679,7 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
     return {"closed": closed, "armed": armed}
 
 
-# ── the captured score (Daily / Weekly / MTD) ────────────────────────────────
-# The window and the row shape live in ``captured_score`` (pure; moved out of
-# this module 2026-10-04 to hold its size ceiling). Re-exported for callers.
+# ── the captured score (Daily / Weekly / MTD): pure helpers, re-exported ──────
 from services.options_svc.captured_score import (  # noqa: E402,F401
     CAPTURED_SCORE_EPOCH, captured_perf_rows, captured_score_window,
 )
@@ -7184,6 +7182,7 @@ def gamma_analyze(client=None, label: str | None = None, news_client=None) -> di
                 tool_input = getattr(b, "input", None)
                 break
     except Exception as exc:  # noqa: BLE001 — surface the failure in the tab.
+        _degrade.degraded("options.gamma_analyze")     # a PAID call that failed
         return {"html": _analyze_doc(
             f"<p>AI analysis failed: <code>{exc}</code></p>"
             "<p>Try again in a moment — if it persists, check the API key and the "
@@ -7675,6 +7674,7 @@ def eod_briefing(client=None, label: str | None = None, news_client=None) -> dic
                 tool_input = getattr(b, "input", None)
                 break
     except Exception as exc:  # noqa: BLE001 — surface the failure in the tab.
+        _degrade.degraded("options.eod_recap")         # a PAID call that failed
         return {"html": _analyze_doc(
             f"<p>End-of-day recap failed: <code>{exc}</code></p>"
             "<p>Check the API key and the service log.</p>", subtitle, title=_EOD_TITLE),
