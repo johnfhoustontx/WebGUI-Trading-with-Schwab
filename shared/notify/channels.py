@@ -12,6 +12,7 @@ documented `notifier` cross-app module-name collision.
 """
 import datetime as _dt
 import json
+import re
 import logging
 import os
 import smtplib
@@ -287,6 +288,27 @@ _FI_GATEWAY = "@msg.fi.google.com"
 _HTTP_BODY_LOG_MAX = 300
 
 
+# A Telegram bot token inside a URL, and the id/token tail of a Discord webhook.
+_SECRET_IN_TEXT = re.compile(
+    r"(bot)\d+:[A-Za-z0-9_-]+|(api/webhooks/)\d+/[A-Za-z0-9._-]+")
+
+
+def _scrub(text: str) -> str:
+    """``text`` with any Telegram bot token or Discord webhook address removed."""
+    return _SECRET_IN_TEXT.sub(lambda m: (m.group(1) or m.group(2)) + "<redacted>",
+                               str(text))
+
+
+def _why(exc) -> str:
+    """What to log for a failed send: the exception's TYPE and nothing else.
+
+    ``requests`` puts the full URL in a connection error's text. For Telegram
+    that URL holds the bot token, and for Discord the URL is the credential, so
+    ``log.warning("... %s", exc)`` wrote both to the service log on every
+    network blip (audit SE-05). ``x_post`` already logged the type only."""
+    return type(exc).__name__
+
+
 def _log_http(what: str, resp) -> None:
     """Warn when a channel accepted the request but REJECTED the message.
 
@@ -300,7 +322,7 @@ def _log_http(what: str, resp) -> None:
         code = getattr(resp, "status_code", None)
         if code is None or 200 <= code < 300:
             return
-        body = (getattr(resp, "text", "") or "")[:_HTTP_BODY_LOG_MAX]
+        body = _scrub((getattr(resp, "text", "") or "")[:_HTTP_BODY_LOG_MAX])
         log.warning("%s rejected: HTTP %s %s", what, code, body)
     except Exception:  # noqa: BLE001 — logging must never break a send
         pass
@@ -315,7 +337,7 @@ def send_telegram(token: str, chat_id, text: str) -> None:
             "disable_web_page_preview": True,
         }, timeout=8)
     except Exception as exc:  # noqa: BLE001 — best-effort
-        log.warning("Telegram send failed: %s", exc)
+        log.warning("Telegram send failed (%s)", _why(exc))
 
 
 def send_telegram_document(token: str, chat_id, filename: str, content: bytes,
@@ -342,7 +364,7 @@ def send_telegram_document(token: str, chat_id, filename: str, content: bytes,
         )
         _log_http("Telegram document", resp)
     except Exception as exc:  # noqa: BLE001 — best-effort
-        log.warning("Telegram document send failed: %s", exc)
+        log.warning("Telegram document send failed (%s)", _why(exc))
 
 
 def send_telegram_photo(token: str, chat_id, filename: str, content: bytes,
@@ -368,7 +390,7 @@ def send_telegram_photo(token: str, chat_id, filename: str, content: bytes,
         )
         _log_http("Telegram photo", resp)
     except Exception as exc:  # noqa: BLE001 — best-effort
-        log.warning("Telegram photo send failed: %s", exc)
+        log.warning("Telegram photo send failed (%s)", _why(exc))
 
 
 def send_discord(webhook_url: str, embed: dict) -> None:
@@ -377,7 +399,7 @@ def send_discord(webhook_url: str, embed: dict) -> None:
     try:
         requests.post(webhook_url, json={"embeds": [embed]}, timeout=8)
     except Exception as exc:  # noqa: BLE001
-        log.warning("Discord send failed: %s", exc)
+        log.warning("Discord send failed (%s)", _why(exc))
 
 
 def send_discord_file(webhook_url: str, filename: str, content: bytes,
@@ -406,7 +428,7 @@ def send_discord_file(webhook_url: str, filename: str, content: bytes,
         )
         _log_http("Discord file", resp)
     except Exception as exc:  # noqa: BLE001
-        log.warning("Discord file send failed: %s", exc)
+        log.warning("Discord file send failed (%s)", _why(exc))
 
 
 def send_sms(fi_number: str, smtp_user: str, smtp_pw: str, body: str,
@@ -423,7 +445,7 @@ def send_sms(fi_number: str, smtp_user: str, smtp_pw: str, body: str,
             smtp.login(smtp_user, smtp_pw)
             smtp.send_message(msg)
     except Exception as exc:  # noqa: BLE001
-        log.warning("Fi SMS send failed: %s", exc)
+        log.warning("Fi SMS send failed (%s)", _why(exc))
 
 
 # Trading window (CT). The NYSE full-closure holidays behind the gate come from
