@@ -135,7 +135,7 @@ def covering_text(pos) -> str:
         strike = _fmt.num(pos.get("short_strike"))
     parts = []
     if strike is not None:
-        parts.append(f"{strike:g}c")
+        parts.append(f"{_fmt.strike(strike)}c")
     exp = _st._short_exp(pos.get("expiration"))
     if exp != _fmt.NO_READING:
         parts.append(exp)
@@ -281,7 +281,7 @@ def status_text(payload) -> str:
                        if s is not None)
     total_cost = sum(c for c in (lot_cost(l) for l in lots) if c is not None)
     return (f"{n} lot{'' if n == 1 else 's'} · {total_shares:,.0f} shares · "
-            f"${total_cost:,.0f} at cost")
+            f"{_fmt.money(total_cost)} at cost")
 
 
 # The one coloured cell, binding the stamped ``_unrealized_class``. Tailwind-first

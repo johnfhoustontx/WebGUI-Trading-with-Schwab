@@ -84,19 +84,19 @@ def _iron_condor():
 # --- legs_summary ----------------------------------------------------------
 
 def test_legs_summary_two_call_legs():
-    assert st.legs_summary(_bull_call_debit()["legs"]) == "L 450C / S 455C"
+    assert st.legs_summary(_bull_call_debit()["legs"]) == "L 450.00C / S 455.00C"
 
 
 def test_legs_summary_single_leg():
-    assert st.legs_summary(_long_call()["legs"]) == "L 450C"
+    assert st.legs_summary(_long_call()["legs"]) == "L 450.00C"
 
 
 def test_legs_summary_pcs_puts():
-    assert st.legs_summary(_pcs()["legs"]) == "S 440P / L 435P"
+    assert st.legs_summary(_pcs()["legs"]) == "S 440.00P / L 435.00P"
 
 
 def test_legs_summary_iron_condor_four_legs():
-    assert st.legs_summary(_iron_condor()["legs"]) == "S 380P / L 375P / S 420C / L 425C"
+    assert st.legs_summary(_iron_condor()["legs"]) == "S 380.00P / L 375.00P / S 420.00C / L 425.00C"
 
 
 def test_legs_summary_empty_none():
@@ -106,12 +106,12 @@ def test_legs_summary_empty_none():
 
 def test_legs_summary_drops_trailing_zero_on_whole_strike():
     legs = [{"kind": "call", "side": "long", "strike": 450.0}]
-    assert st.legs_summary(legs) == "L 450C"
+    assert st.legs_summary(legs) == "L 450.00C"
 
 
 def test_legs_summary_keeps_fractional_strike():
     legs = [{"kind": "put", "side": "short", "strike": 437.5}]
-    assert st.legs_summary(legs) == "S 437.5P"
+    assert st.legs_summary(legs) == "S 437.50P"
 
 
 # --- debit_credit_text -----------------------------------------------------
@@ -201,7 +201,7 @@ def test_strategy_rows_long_call_unbounded_max_profit():
     assert row["max_profit"] == "∞"
     assert row["rr"] == "—"
     assert row["debit_credit"] == "-2.50 debit"
-    assert row["legs"] == "L 450C"
+    assert row["legs"] == "L 450.00C"
     # long options are now paper-tradeable (defined-risk debit = the premium paid)
     assert row["_allow_paper"] is True
 
@@ -529,26 +529,26 @@ def test_detail_signal_does_not_mutate_its_input():
 def test_legs_summary_prints_a_share_lot():
     legs = [{"kind": "stock", "side": "long", "strike": None, "qty": 1},
             {"kind": "call", "side": "short", "strike": 105.0, "expiration": "2026-10-16"}]
-    assert st.legs_summary(legs) == "L 100 shares / S 105C"
+    assert st.legs_summary(legs) == "L 100 shares / S 105.00C"
 
 
 def test_legs_summary_dates_only_a_leg_on_a_LATER_expiry():
     legs = [{"kind": "call", "side": "short", "strike": 100.0, "expiration": "2026-10-16"},
             {"kind": "call", "side": "long", "strike": 100.0, "expiration": "2026-11-13"}]
-    assert st.legs_summary(legs) == "S 100C / L 100C 11/13"
+    assert st.legs_summary(legs) == "S 100.00C / L 100.00C 11/13"
 
 
 def test_legs_summary_single_expiry_is_unchanged():
     legs = [{"kind": "put", "side": "short", "strike": 445.0, "expiration": "2026-10-16"},
             {"kind": "put", "side": "long", "strike": 440.0, "expiration": "2026-10-16"}]
-    assert st.legs_summary(legs) == "S 445P / L 440P"
+    assert st.legs_summary(legs) == "S 445.00P / L 440.00P"
 
 
 def test_legs_summary_shows_a_multi_lot_butterfly_body():
     legs = [{"kind": "call", "side": "long", "strike": 95.0, "expiration": "2026-10-16", "qty": 1},
             {"kind": "call", "side": "short", "strike": 100.0, "expiration": "2026-10-16", "qty": 2},
             {"kind": "call", "side": "long", "strike": 105.0, "expiration": "2026-10-16", "qty": 1}]
-    assert st.legs_summary(legs) == "L 95C / S 2×100C / L 105C"
+    assert st.legs_summary(legs) == "L 95.00C / S 2×100.00C / L 105.00C"
 
 
 def test_legs_summary_share_lots_scale_with_qty():
@@ -581,27 +581,27 @@ def test_legs_summary_nan_qty_renders_as_one_lot_without_raising():
     legs = [{"kind": "stock", "side": "long", "strike": None, "qty": float("nan")},
             {"kind": "call", "side": "short", "strike": 100.0,
              "expiration": "2026-10-16", "qty": float("nan")}]
-    assert st.legs_summary(legs) == "L 100 shares / S 100C"
+    assert st.legs_summary(legs) == "L 100 shares / S 100.00C"
 
 
 def test_legs_summary_string_qty_renders_as_one_lot_without_raising():
     legs = [{"kind": "stock", "side": "long", "strike": None, "qty": "two"},
             {"kind": "call", "side": "short", "strike": 100.0,
              "expiration": "2026-10-16", "qty": "two"}]
-    assert st.legs_summary(legs) == "L 100 shares / S 100C"
+    assert st.legs_summary(legs) == "L 100 shares / S 100.00C"
 
 
 def test_legs_summary_later_dated_multi_lot_leg_carries_both():
     legs = [{"kind": "call", "side": "long", "strike": 100.0, "expiration": "2026-10-16", "qty": 1},
             {"kind": "call", "side": "short", "strike": 100.0, "expiration": "2026-11-13", "qty": 2}]
-    assert st.legs_summary(legs) == "L 100C / S 2×100C 11/13"
+    assert st.legs_summary(legs) == "L 100.00C / S 2×100.00C 11/13"
 
 
 def test_legs_summary_undated_leg_gets_no_date_and_does_not_move_the_front():
     legs = [{"kind": "call", "side": "short", "strike": 100.0, "expiration": "2026-10-16"},
             {"kind": "put", "side": "long", "strike": 95.0, "expiration": None},
             {"kind": "call", "side": "long", "strike": 100.0, "expiration": "2026-11-13"}]
-    assert st.legs_summary(legs) == "S 100C / L 95P / L 100C 11/13"
+    assert st.legs_summary(legs) == "S 100.00C / L 95.00P / L 100.00C 11/13"
 
 
 

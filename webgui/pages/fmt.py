@@ -98,6 +98,16 @@ def signed_pct(v, nd=DECIMALS):
 # sentence, a "$0" on a fresh account) keeps that contract and calls one of
 # these for the number.
 
+def plain(v):
+    """A count, a day count, a score or a setting, printed as it is: ``5`` for
+    5.0, ``2.5`` for 2.5. NOT for a price, strike, ratio, percentage or dollar
+    total - those are the functions below. This is the only ``:g`` the pages
+    may use (``tests/test_two_decimals_guard.py``), so choosing it is a
+    statement that the number is none of those."""
+    f = num(v)
+    return NO_READING if f is None else f"{f:g}"
+
+
 def price(v):
     """An underlying or option price, or a level: ``6,712.81`` / ``450.00``."""
     f = num(v)
@@ -109,6 +119,14 @@ def strike(v):
     pairs (``5800.00/5795.00``) and beside a right (``5800.00 P``)."""
     f = num(v)
     return NO_READING if f is None else f"{f:.{DECIMALS}f}"
+
+
+def strike_text(v, missing="?"):
+    """A strike inside a strikes cell (``450.00/445.00``): ``missing`` for None,
+    and text that is not a number passes through as it came."""
+    if v is None:
+        return missing
+    return strike(v) if num(v) is not None else str(v)
 
 
 def ratio(v):

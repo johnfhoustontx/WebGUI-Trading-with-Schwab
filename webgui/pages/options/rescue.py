@@ -13,6 +13,7 @@ imported lazily inside ``render()`` only (mirrors ``expected_move.py`` /
 
 import page_help as _page_help
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
+from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
 from .theme import (BADGE_ACCENT, BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN,
                     CARD, MUTED)
 
@@ -113,7 +114,7 @@ def cash_class(value):
     """Tailwind ``text-[<hex>]`` class for a credit/debit value by sign:
     positive green · negative red · zero/missing neutral. Mirrors ``cash_text``."""
     v = _num(value)
-    if v is None or round(v) == 0:
+    if v is None or round(v, 2) == 0:
         return f"text-[{CASH_NEUTRAL}]"
     if v > 0:
         return f"text-[{CASH_GREEN}]"
@@ -129,22 +130,24 @@ def _num(value, default=None):
 
 
 def _strikes_text(row):
-    """'short/long' strike pair, dropping missing sides ('500/495', '500', '')."""
+    """'short/long' strike pair, dropping missing sides ('500.00/495.00',
+    '500.00', '')."""
     short = row.get("short_strike")
     long = row.get("long_strike")
-    parts = [f"{s:g}" if isinstance(s, (int, float)) else None for s in (short, long)]
+    parts = [_fmt.strike(s) if isinstance(s, (int, float)) else None
+             for s in (short, long)]
     parts = [p for p in parts if p is not None]
     return "/".join(parts)
 
 
 def _underlying_vs_short(row):
-    """Short string like '498 vs 500' (underlying vs short strike), else ''."""
+    """Short string like '498.00 vs 500.00' (underlying vs short strike), else ''."""
     under = _num(row.get("underlying"))
     short = _num(row.get("short_strike"))
     if under is None and short is None:
         return ""
-    u = f"{under:g}" if under is not None else "—"
-    s = f"{short:g}" if short is not None else "—"
+    u = _fmt.price(under)
+    s = _fmt.strike(short)
     return f"{u} vs {s}"
 
 
@@ -204,7 +207,7 @@ def _round2(v):
 
 
 def cash_text(value):
-    """Credit/debit display dict: {'text': '+$120'|'-$45'|'$0', 'color': ...,
+    """Credit/debit display dict: {'text': '+$120.00'|'-$45.00'|'$0.00', 'color': ...,
     'class': 'text-[<hex>]'}.
 
     Positive = credit (green), negative = debit (red), zero/missing = neutral.
@@ -212,17 +215,15 @@ def cash_text(value):
     path); ``color`` is retained for back-compat with existing callers/tests."""
     v = _num(value)
     cls = cash_class(value)
-    if v is None or round(v) == 0:
-        return {"text": "$0", "color": CASH_NEUTRAL, "class": cls}
-    mag = abs(round(v))
-    if v > 0:
-        return {"text": f"+${mag}", "color": CASH_GREEN, "class": cls}
-    return {"text": f"-${mag}", "color": CASH_RED, "class": cls}
+    if v is None or round(v, 2) == 0:
+        return {"text": _fmt.money(0), "color": CASH_NEUTRAL, "class": cls}
+    return {"text": _fmt.money(v, signed=True),
+            "color": CASH_GREEN if v > 0 else CASH_RED, "class": cls}
 
 
 # Metric label/key/formatter map for a candidate card (only non-None shown).
 def _fmt_cash(v):
-    return f"${v:,.0f}"
+    return f"${v:,.2f}"
 
 
 def _fmt_delta(v):
@@ -230,23 +231,29 @@ def _fmt_delta(v):
 
 
 def _fmt_plain(v):
-    return f"{v:g}" if isinstance(v, (int, float)) else str(v)
+    """A day count or a date: as it is."""
+    return _fmt.plain(v) if isinstance(v, (int, float)) else str(v)
+
+
+def _fmt_price(v):
+    """A breakeven or a strike width: two places."""
+    return _fmt.strike(v) if isinstance(v, (int, float)) else str(v)
 
 
 _CANDIDATE_METRICS = (
     # ``new_max_loss`` = the max loss of the position that REMAINS after the action
     # (a close leaves you flat → $0 residual risk, NOT "this trade had no loss").
     ("new_max_loss", "Max loss after", _fmt_cash),
-    ("new_breakeven", "Breakeven", _fmt_plain),
+    ("new_breakeven", "Breakeven", _fmt_price),
     ("new_short_delta", "Short delta", _fmt_delta),
-    ("new_width", "Width", _fmt_plain),
+    ("new_width", "Width", _fmt_price),
     ("new_expiry", "Expiry", _fmt_plain),
     ("dte_after", "DTE after", _fmt_plain),
 )
 
 
 def _leg_text(leg, with_price=True):
-    """'SELL PUT 500 @1.20' from an est_fill_legs entry (defensive).
+    """'SELL PUT 500.00 @1.20' from an est_fill_legs entry (defensive).
 
     ``with_price=False`` drops the ``@1.20``: a per-leg fill is worked off that
     leg's own bid and ask, so the public page shows it only when republishing
@@ -254,7 +261,8 @@ def _leg_text(leg, with_price=True):
     side = (leg.get("side") or "").upper()
     right = (leg.get("right") or "").upper()
     strike = leg.get("strike")
-    strike_s = f"{strike:g}" if isinstance(strike, (int, float)) else str(strike or "")
+    strike_s = (_fmt.strike(strike) if isinstance(strike, (int, float))
+                else str(strike or ""))
     price = leg.get("price")
     parts = [p for p in (side, right, strike_s) if p]
     text = " ".join(parts)
@@ -341,7 +349,7 @@ def summary_line(advisory):
     strategy = adv.get("strategy") or ""
     state = (adv.get("state") or "ok").upper()
     heat = adv.get("heat")
-    heat_s = f"{heat:g}" if isinstance(heat, (int, float)) else "—"
+    heat_s = _fmt.plain(heat) if isinstance(heat, (int, float)) else "—"
     n = len(adv.get("candidates") or [])
     opt_word = "option" if n == 1 else "options"
 
@@ -608,7 +616,7 @@ def render_candidate_card(container, card, apply_factory=None):
             with ui.row().classes("items-center gap-3 w-full"):
                 ui.label(card["title"]).classes("text-subtitle1")
                 if card.get("score") is not None:
-                    ui.badge(f"score {card['score']:g}"
+                    ui.badge(f"score {_fmt.plain(card['score'])}"
                              if isinstance(card["score"], (int, float))
                              else f"score {card['score']}").classes(BADGE_ACCENT)
                 ui.space()

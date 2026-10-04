@@ -139,6 +139,11 @@ def matrix_columns():
             for f, l in spec]
 
 
+# The columns printed to two places. "Day %" is not here: its slot colours the
+# cell and prints the number itself.
+_DECIMALS = ("spot", "pc_ratio", "net_prem_m")
+
+
 def matrix_rows(payload):
     rows = []
     for r in (payload or {}).get("rows") or []:
@@ -240,7 +245,7 @@ _SIGNAL_SLOT = r'''
 '''
 _DAYPCT_SLOT = r'''
   <q-td :props="props">
-    <span :class="props.row._daypct_class">{{ props.value == null ? '—' : props.value + '%' }}</span>
+    <span :class="props.row._daypct_class">{{ props.row.day_pct == null ? '—' : Number(props.row.day_pct).toFixed(2) + '%' }}</span>
   </q-td>
 '''
 _TREND_SLOT = r'''
@@ -309,7 +314,7 @@ def render():
         with board.content:
             table = kit.table(matrix_columns(), row_key="symbol", numeric=(
                 "spot", "day_pct", "pc_ratio", "net_prem_m", "n_signals",
-                "n_alerts", "hotness"))
+                "n_alerts", "hotness"), decimals=_DECIMALS)
     table.add_slot("body-cell-symbol", symbol_slot(linked))
     if linked:
         table.on(DOSSIER_EVENT, _open_dossier)

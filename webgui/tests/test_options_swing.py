@@ -100,7 +100,7 @@ def test_list_rows_name_the_strikes_the_card_does():
     rows = {r["id"]: r for r in swing.finder_rows([_FLY, _NAKED])}
     strikes = rows["fly"]["strikes"].replace(" ", " ")
     assert strikes == strategy_table.legs_summary(_FLY["legs"])
-    assert strikes == swing.card_view(_FLY)["legs"] == "L 95C / S 2×100C / L 105C"
+    assert strikes == swing.card_view(_FLY)["legs"] == "L 95.00C / S 2×100.00C / L 105.00C"
 
 
 def test_a_calendar_row_names_its_back_month():
@@ -112,13 +112,13 @@ def test_a_calendar_row_names_its_back_month():
                      "expiration": "2026-10-16", "qty": 1}]}
     (row,) = swing.finder_rows([cal])
     strikes = row["strikes"].replace(" ", " ")
-    assert strikes == strategy_table.legs_summary(cal["legs"]) == "S 220P / L 220P 10/16"
+    assert strikes == strategy_table.legs_summary(cal["legs"]) == "S 220.00P / L 220.00P 10/16"
 
 
 def test_card_view_adds_legs_and_the_paper_gate():
     from pages.options import strategy_table
     card = swing.card_view(_FLY)
-    assert card["legs"] == strategy_table.legs_summary(_FLY["legs"]) == "L 95C / S 2×100C / L 105C"
+    assert card["legs"] == strategy_table.legs_summary(_FLY["legs"]) == "L 95.00C / S 2×100.00C / L 105.00C"
     assert card["allow_paper"] is True and card["title"] == "Call Butterfly"
     assert card["score_class"] == swing.finder_rows([_FLY])[0]["_score_class"]
     assert card["grade_class"] == strategy_table.grade_class("Good")

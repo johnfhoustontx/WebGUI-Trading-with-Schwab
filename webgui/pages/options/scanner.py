@@ -46,6 +46,7 @@ from zoneinfo import ZoneInfo
 
 import bus_client
 from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
+from pages.fmt import strike_text as _fmt_k  # '1085.00'; '?' when missing
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages import ui_kit as kit
 import page_help as _page_help
@@ -100,16 +101,6 @@ def _short_exp(exp):
     if len(s) >= 10 and s[4] == "-" and s[7] == "-":
         return f"{s[5:7]}/{s[8:10]}"
     return s
-
-
-def _fmt_k(v):
-    """Strike -> compact string: drop a trailing '.0' on whole numbers (1085.0 ->
-    '1085'), keep fractional strikes (1085.5), '?' when missing."""
-    if v is None:
-        return "?"
-    if isinstance(v, float) and v.is_integer():
-        return str(int(v))
-    return str(v)
 
 
 def _strikes_text(s):
@@ -243,8 +234,8 @@ def signal_rows(signals):
             "strikes": _strikes_text(s),
             "credit": _round(s.get("credit")),
             "max_loss": _round(s.get("max_loss")),
-            "rr_pct": _round(s.get("rr_pct"), 1),
-            "pop_pct": _round(s.get("pop_pct"), 1),
+            "rr_pct": _round(s.get("rr_pct")),
+            "pop_pct": _round(s.get("pop_pct")),
             "iv_rank": iv_rank_value(s.get("iv_rank")),
             "composite_score": s.get("composite_score"),
             "_score_class": score_zone_class(s.get("composite_score")),
@@ -888,6 +879,9 @@ def render():
         t = kit.table(columns, rows_per_page=PAGE_ROWS, rows_number=0,
                       numeric=("dte", "credit", "max_loss", "rr_pct", "pop_pct",
                                "iv_rank", "composite_score"),
+                      # Prices, dollars and percentages to two places. The
+                      # Directional rows arrive as text and pass through.
+                      decimals=("credit", "max_loss", "rr_pct", "pop_pct"),
                       classes="w-full scan-table")
         # One page size: an "All" choice in the footer would ship every row.
         t._props["rows-per-page-options"] = [PAGE_ROWS]

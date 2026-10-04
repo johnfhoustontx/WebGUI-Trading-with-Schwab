@@ -33,14 +33,8 @@ _PAPER_TYPES = {"PCS", "CCS", "IC", "IRON_CONDOR",
                 "LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
                 "BUTTERFLY_CALL", "BUTTERFLY_PUT", "CONDOR_CALL", "CONDOR_PUT"}
 
-def _fmt_strike(value):
-    """Strike → compact string: drop a trailing '.0' on whole numbers
-    (450.0 → '450'), keep fractional strikes (437.5)."""
-    if value is None:
-        return "?"
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
+# Strike → two-place string (450 → '450.00', 437.5 → '437.50'), '?' when missing.
+_fmt_strike = _fmt.strike_text
 
 
 def _short_exp(expiration):
@@ -55,11 +49,11 @@ def _short_exp(expiration):
 
 
 def legs_summary(legs):
-    """Compact one-line summary of the legs, e.g. ``"L 450C / S 455C"``.
+    """Compact one-line summary of the legs, e.g. ``"L 450.00C / S 455.00C"``.
 
     ``L`` = long, ``S`` = short; strike + ``C``/``P`` for call/put. An option leg
     of more than one contract carries ``N×`` (a butterfly body reads
-    ``S 2×100C``). A share lot prints ``L 100 shares`` (``qty`` counts 100-share
+    ``S 2×100.00C``). A share lot prints ``L 100 shares`` (``qty`` counts 100-share
     lots; a missing or malformed qty reads as 1). A leg on a LATER expiration than the earliest carries its ``MM/DD``
     so a calendar reads without the detail panel. Empty/None → '—'.
     """
@@ -226,10 +220,6 @@ def _fmt_2(value):
     return f"{value:.2f}" if isinstance(value, (int, float)) else "—"
 
 
-def _fmt_1(value):
-    return f"{value:.1f}" if isinstance(value, (int, float)) else "—"
-
-
 def strategy_rows(signals):
     """Display rows for the multi-strategy table, sorted by composite score (desc).
 
@@ -252,7 +242,7 @@ def strategy_rows(signals):
             "max_profit": _fmt_max_profit(s),
             "max_loss": _fmt_max_loss(s),
             "rr": _fmt_2(s.get("rr")),
-            "pop_pct": _fmt_1(s.get("pop_pct")),
+            "pop_pct": _fmt_2(s.get("pop_pct")),
             "breakevens": breakeven_text(s),
             "iv_rank": scanner.iv_rank_value(s.get("iv_rank")),
             "composite_score": score,

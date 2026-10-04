@@ -351,7 +351,7 @@ def test_per_leg_fill_prices_stay_hidden_while_quotes_are_off(page, monkeypatch)
     _answer(key, "done")
     _run(page, "_poll")
     legs = [t for t in _texts(page) if t.startswith("SELL PUT")]
-    assert legs == ["SELL PUT 500"]
+    assert legs == ["SELL PUT 500.00"]
 
 
 def test_compute_before_a_load_asks_for_the_load(page):

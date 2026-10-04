@@ -115,8 +115,8 @@ def test_side_labels_read_directionally():
 
 
 def test_detail_cells_are_type_specific():
-    assert flow.alert_detail(_XO) == "$1.20M calls vs $400k puts"
-    assert flow.alert_detail(_UOA) == "0DTE 737C · 12,400 vol / 1,100 OI (11.3×) · $2.13M"
+    assert flow.alert_detail(_XO) == "$1.20M calls vs $400.00k puts"
+    assert flow.alert_detail(_UOA) == "0DTE 737.00C · 12,400 vol / 1,100 OI (11.27×) · $2.13M"
     assert flow.alert_detail(_GF) == "spot 6412 vs flip 6400"
 
 
@@ -131,7 +131,7 @@ def test_detail_is_total_over_missing_fields():
 
 def test_detail_dated_expiry_when_not_zero_dte():
     a = dict(_UOA, dte=2, expiry="2026-08-11", side="put")
-    assert flow.alert_detail(a).startswith("08/11 737P · ")
+    assert flow.alert_detail(a).startswith("08/11 737.00P · ")
 
 
 def test_tone_class_maps_direction_to_a_fixed_palette_class():
@@ -165,8 +165,8 @@ def test_tone_class_big_delta_is_a_distinct_hue():
 
 def test_detail_big_delta_shows_notional_and_pct_of_gross():
     d = flow.alert_detail(_BD)
-    assert "of gross" in d and "24%" in d
-    assert "100" in d and "C" in d
+    assert "of gross" in d and "24.00%" in d
+    assert "100.00C" in d
 
 
 def test_alert_rows_build_end_to_end_for_big_delta():
@@ -316,8 +316,8 @@ def test_hiro_the_other_two_sides_label_and_tone_the_other_way():
 
 def test_hiro_detail_cells():
     assert flow.alert_detail(_HS) == \
-        "≈$2.40B in 15 min · 3.6× normal · 18% unlabelled · model"
-    assert flow.alert_detail(_HF) == "running total ≈ -$310.00M · spot 571.2 · model"
+        "≈$2.40B in 15 min · 3.60× normal · 18.00% unlabelled · model"
+    assert flow.alert_detail(_HF) == "running total ≈ -$310.00M · spot 571.20 · model"
     assert flow.alert_detail({"type": "hiro_surge"}) == ""
     assert flow.alert_detail({"type": "hiro_flip"}) == ""
 
@@ -328,13 +328,13 @@ def test_hiro_detail_says_model_on_every_surface():
     assert flow.alert_detail(_HS).endswith(" · model")
     assert flow.alert_detail(_HF).endswith(" · model")
     assert flow.alert_detail({**_HF, "cum": 2.0e8}) == \
-        "running total ≈$200.00M · spot 571.2 · model"
+        "running total ≈$200.00M · spot 571.20 · model"
 
 
 def test_hiro_detail_never_prints_an_invented_zero():
     """A missing reading drops its clause; it never renders as 0% / spot 0."""
     no_share = {k: v for k, v in _HS.items() if k != "unclassified_share"}
-    assert flow.alert_detail(no_share) == "≈$2.40B in 15 min · 3.6× normal · model"
+    assert flow.alert_detail(no_share) == "≈$2.40B in 15 min · 3.60× normal · model"
     assert "0%" not in flow.alert_detail({**_HS, "unclassified_share": None})
     assert flow.alert_detail({**_HF, "spot": None}) == \
         "running total ≈ -$310.00M · model"
@@ -344,7 +344,7 @@ def test_hiro_detail_treats_non_finite_numbers_as_missing():
     nan, inf = float("nan"), float("inf")
     assert flow.alert_detail({**_HS, "impact": nan}) == ""
     assert flow.alert_detail({**_HS, "unclassified_share": nan}) == \
-        "≈$2.40B in 15 min · 3.6× normal · model"
+        "≈$2.40B in 15 min · 3.60× normal · model"
     assert flow.alert_detail({**_HF, "cum": inf}) == ""
     assert flow.alert_detail({**_HF, "spot": nan}) == \
         "running total ≈ -$310.00M · model"
@@ -354,17 +354,19 @@ def test_hiro_detail_treats_non_finite_numbers_as_missing():
 def test_hiro_money_signs_and_scales():
     assert flow._hiro_money(2.4e9) == "$2.40B"
     assert flow._hiro_money(-3.1e8) == "-$310.00M"
-    assert flow._hiro_money(-4_000) == "-$4k"
+    assert flow._hiro_money(-4_000) == "-$4.00k"
     assert flow._hiro_money(None) == ""
     assert flow._hiro_money(float("nan")) == ""
 
 
 def test_hiro_money_never_prints_minus_zero():
-    """A value that rounds to zero carries no sign: "-$0" reads as a direction."""
-    assert flow._hiro_money(-0.4) == "$0"
-    assert flow._hiro_money(-0.0) == "$0"
-    assert flow._hiro_money(0.3) == "$0"
-    assert flow._hiro_money(-0.6) == "-$1"
+    """A value that rounds to zero carries no sign: "-$0.00" reads as a
+    direction. At two places that is anything under half a cent."""
+    assert flow._hiro_money(-0.004) == "$0.00"
+    assert flow._hiro_money(-0.0) == "$0.00"
+    assert flow._hiro_money(0.003) == "$0.00"
+    assert flow._hiro_money(-0.4) == "-$0.40"
+    assert flow._hiro_money(-0.6) == "-$0.60"
 
 
 def test_alert_rows_build_end_to_end_for_hiro():

@@ -140,7 +140,7 @@ _TONE_SLOT = r'''
 # for the other alert types (which carry no share).
 _SHARE_SLOT = r'''
   <q-td :props="props" class="text-right">
-    <span v-if="props.value != null">{{ props.value }}%</span>
+    <span v-if="props.value != null">{{ Number(props.value).toFixed(2) }}%</span>
     <span v-else class="text-grey-6">—</span>
   </q-td>
 '''
@@ -160,7 +160,7 @@ def tone_class(a):
 
 
 def _money(v):
-    """Compact dollars: $2.13M / $400k / $912. '' when unusable."""
+    """Compact dollars: $2.13M / $400.00k / $912.00. '' when unusable."""
     try:
         v = float(v)
     except (TypeError, ValueError):
@@ -169,14 +169,14 @@ def _money(v):
     if a >= 999_500:            # rounds to >= $1.00M -> use the M form
         return f"${v/1e6:.2f}M"
     if a >= 1e3:
-        return f"${v/1e3:.0f}k"
-    return f"${v:,.0f}"
+        return f"${v/1e3:.2f}k"
+    return f"${v:,.2f}"
 
 
 def _hiro_money(v):
     """Signed dollars with a B form ($SPX hedging runs to billions): $2.40B /
-    -$310.00M / -$4k. '' when unusable. Page-local: Tier 1 cannot import the
-    service's formatter. A value that ROUNDS to zero carries no sign — "-$0"
+    -$310.00M / -$4.00k. '' when unusable. Page-local: Tier 1 cannot import the
+    service's formatter. A value that ROUNDS to zero carries no sign — "-$0.00"
     would read as a direction the number does not have."""
     v = _fmt.num(v)
     if v is None:
@@ -185,7 +185,7 @@ def _hiro_money(v):
         body = f"${abs(v)/1e9:.2f}B"
     else:
         body = _money(abs(v))
-    return ("-" + body) if v < 0 and body != "$0" else body
+    return ("-" + body) if v < 0 and body != "$0.00" else body
 
 
 def _approx(money):
@@ -214,14 +214,14 @@ def _hiro_detail(d):
         head = _approx(_hiro_money(abs(impact)))
         window = _fmt.num(d.get("window_min"))
         if window is not None and window > 0:
-            head += f" in {window:g} min"
+            head += f" in {_fmt.plain(window)} min"
         parts = [head]
         mult = _fmt.num(d.get("mult"))
         if mult is not None:
-            parts.append(f"{mult:.1f}× normal")
+            parts.append(f"{_fmt.ratio(mult)}× normal")
         share = _fmt.num(d.get("unclassified_share"))
         if share is not None:
-            parts.append(f"{share:.0%} unlabelled")
+            parts.append(f"{share:.2%} unlabelled")
         parts.append(_HIRO_MODEL)
         return " · ".join(parts)
     cum = _fmt.num(d.get("cum"))
@@ -230,7 +230,7 @@ def _hiro_detail(d):
     parts = [f"running total {_approx(_hiro_money(cum))}"]
     spot = _fmt.num(d.get("spot"))
     if spot is not None:
-        parts.append(f"spot {spot:g}")
+        parts.append(f"spot {_fmt.price(spot)}")
     parts.append(_HIRO_MODEL)
     return " · ".join(parts)
 
@@ -259,21 +259,23 @@ def alert_detail(a):
             if d.get("strike") is None or d.get("volume") is None:
                 return ""
             cp = "C" if d.get("side") == "call" else "P"
-            return (f"{_exp_short(d.get('expiry'), d.get('dte'))} {float(d['strike']):g}{cp} · "
+            return (f"{_exp_short(d.get('expiry'), d.get('dte'))} "
+                    f"{float(d['strike']):.2f}{cp} · "
                     f"{int(d['volume']):,} vol / {int(d.get('oi') or 0):,} OI "
-                    f"({float(d.get('vol_oi') or 0):.1f}×) · {_money(d.get('premium'))}")
+                    f"({float(d.get('vol_oi') or 0):.2f}×) · {_money(d.get('premium'))}")
         if t == "gamma_flip":
             spot, flip = d.get("spot"), d.get("flip")
             if spot is None or flip is None:
                 return ""
-            return f"spot {float(spot):g} vs flip {float(flip):g}"
+            return f"spot {float(spot):,.2f} vs flip {float(flip):,.2f}"
         if t == "big_delta":
             if d.get("strike") is None or d.get("delta_notional") is None:
                 return ""
             cp = "C" if d.get("side") == "call" else "P"
             pct = d.get("pct_of_gross")
-            pct_txt = f"{float(pct):.0%}" if isinstance(pct, (int, float)) else "—"
-            return (f"{_exp_short(d.get('expiry'), d.get('dte'))} {float(d['strike']):g}{cp} · "
+            pct_txt = f"{float(pct):.2%}" if isinstance(pct, (int, float)) else "—"
+            return (f"{_exp_short(d.get('expiry'), d.get('dte'))} "
+                    f"{float(d['strike']):.2f}{cp} · "
                     f"{_money(d.get('delta_notional'))} · {pct_txt} of gross")
         if t in ("hiro_surge", "hiro_flip"):
             return _hiro_detail(d)
@@ -320,7 +322,7 @@ def _share_pct(a):
     p = a.get("pct_of_gross")
     if not isinstance(p, (int, float)) or isinstance(p, bool):
         return None
-    return round(float(p) * 100, 1)
+    return round(float(p) * 100, 2)
 
 
 def _hiding():

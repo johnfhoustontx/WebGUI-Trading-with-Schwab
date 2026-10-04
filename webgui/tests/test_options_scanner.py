@@ -61,14 +61,14 @@ def test_signal_columns_merges_short_long_into_strikes():
 def test_signal_rows_builds_strikes_for_spread():
     rows = scanner.signal_rows([
         {"symbol": "SPY", "type": "PCS", "short_strike": 450, "long_strike": 445}])
-    assert rows[0]["strikes"] == "450/445"
+    assert rows[0]["strikes"] == "450.00/445.00"
 
 
 def test_signal_rows_builds_strikes_for_iron_condor():
     rows = scanner.signal_rows([
         {"symbol": "SPY", "type": "IC", "short_strike": 450, "long_strike": 445,
          "call_short": 460, "call_long": 465}])
-    assert "450/445" in rows[0]["strikes"] and "460/465" in rows[0]["strikes"]
+    assert rows[0]["strikes"] == "P450.00/445.00 C460.00/465.00"
 
 
 def test_signal_rows_shortens_expiration_to_mmdd():
@@ -80,7 +80,7 @@ def test_signal_rows_strikes_strip_whole_number_decimals():
     """Whole-number strikes render without a trailing '.0' (narrower column)."""
     rows = scanner.signal_rows([
         {"symbol": "MU", "type": "PCS", "short_strike": 1085.0, "long_strike": 1070.0}])
-    assert rows[0]["strikes"] == "1085/1070"
+    assert rows[0]["strikes"] == "1085.00/1070.00"
 
 
 def test_signal_columns_include_iv_rank():

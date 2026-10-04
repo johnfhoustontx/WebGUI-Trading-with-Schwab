@@ -19,6 +19,7 @@ selected trade's buttons live in the detail panel's footer, and every delete
 asks first. Dialogs stay client-side (input collection only).
 """
 import bus_client
+from pages import fmt as _fmt
 from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
 from pages import ui_kit as kit
 from nicegui import ui
@@ -109,7 +110,7 @@ def analyze_popup_rows(res):
         rows.append(("Unrealized P&L", f"{pnl:+,.2f}", pnl_color(pnl)))
     pct = m.get("unrealized_pnl_pct")
     if isinstance(pct, (int, float)):
-        rows.append(("% of max profit", f"{pct:+.1f}%", PNL_NEUTRAL))
+        rows.append(("% of max profit", _fmt.pct(pct, signed=True), PNL_NEUTRAL))
     und = m.get("underlying_now")
     if isinstance(und, (int, float)):
         rows.append(("Current price", f"{und:,.2f}", PNL_NEUTRAL))
@@ -118,7 +119,7 @@ def analyze_popup_rows(res):
         rows.append(("DTE remaining", str(dte), PNL_NEUTRAL))
     tgt = m.get("target_pct")
     if isinstance(tgt, (int, float)):
-        rows.append(("Profit target", f"{tgt:.0f}%", PNL_NEUTRAL))
+        rows.append(("Profit target", _fmt.pct(tgt), PNL_NEUTRAL))
     be = m.get("breakeven")
     if isinstance(be, (int, float)):
         rows.append(("Breakeven", f"{be:,.2f}", PNL_NEUTRAL))
@@ -170,12 +171,14 @@ def _legs_text(legs):
 
 def _strikes(t):
     if t.get("strategy") == "IC":
-        return f"P {t.get('short_strike','?')}/{t.get('long_strike','?')} " \
-               f"C {t.get('call_short','?')}/{t.get('call_long','?')}"
+        k = _fmt.strike_text
+        return (f"P {k(t.get('short_strike'))}/{k(t.get('long_strike'))} "
+                f"C {k(t.get('call_short'))}/{k(t.get('call_long'))}")
     if t.get("direction") == "DEBIT" and t.get("legs"):
         return _legs_text(t["legs"])
     sk, lk = t.get("short_strike"), t.get("long_strike")
-    return f"{sk}/{lk}" if sk is not None else "—"
+    return (f"{_fmt.strike_text(sk)}/{_fmt.strike_text(lk)}"
+            if sk is not None else "—")
 
 
 def paper_rows(trades):

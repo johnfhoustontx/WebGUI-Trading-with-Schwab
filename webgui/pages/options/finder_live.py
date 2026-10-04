@@ -38,6 +38,7 @@ from nicegui import context, run, ui
 from shared import public_scan as ps
 from shared.symbols import clean_symbol
 
+from pages import fmt as _fmt
 from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 
@@ -73,7 +74,7 @@ def limit_text() -> str:
 # ── pure: what the page says ─────────────────────────────────────────────────
 
 def _pct(fraction) -> str:
-    return f"{round(fraction * 100):g}%"
+    return f"{_fmt.plain(round(fraction * 100))}%"
 
 
 def intro_text(pin, window) -> str:

@@ -378,7 +378,8 @@ def render():
         with ui.row().classes("w-full no-wrap gap-4 items-start"):
             box = kit.region("Refreshing the signals…", classes="flex-grow min-w-0")
             with box.content:
-                table = kit.table(captured_columns(), numeric=_NUMERIC)
+                table = kit.table(captured_columns(), numeric=_NUMERIC,
+                                  decimals=("credit", "max_loss"))
                 # The day footer sits UNDER the table but inside the region, so
                 # a reprice's spinner covers it too - its figures are as stale
                 # as the marks above them while a reprice runs.
@@ -414,7 +415,7 @@ def render():
     table.add_slot('body-cell-unrealized_pnl', r'''
       <q-td :props="props">
         <span :class="props.row._pnl_class + ' font-semibold'">
-          {{ props.value == null ? '' : props.value }}
+          {{ props.value == null ? '' : Number(props.value).toFixed(2) }}
         </span>
       </q-td>
     ''')

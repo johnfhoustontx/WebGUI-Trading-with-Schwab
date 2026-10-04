@@ -23,24 +23,27 @@ def test_module_is_pure():
     assert not {n for n in names if n.endswith("strategy_table") or n.endswith("scanner")}
 
 
-def test_money_formats_by_size():
-    assert fv.money(54057.72) == "$54,058"
-    assert fv.money(195.34) == "$195"
+def test_money_is_always_to_the_cent():
+    """Whole dollars at scale went 2026-10-04: every dollar total prints two
+    places, a $54,000 collar and a $4.50 butterfly alike."""
+    assert fv.money(54057.72) == "$54,057.72"
+    assert fv.money(54058) == "$54,058.00"
+    assert fv.money(195.34) == "$195.34"
     assert fv.money(4.5) == "$4.50"
     assert fv.money(None) == "—"
     assert fv.money(float("nan")) == "—"
 
 
 def test_money_keeps_a_leading_minus():
-    assert fv.money(-300.0) == "-$300"
+    assert fv.money(-300.0) == "-$300.00"
     assert fv.money(-4.5) == "-$4.50"
     assert fv.money(True) == "—"
-    assert fv.money(99.996) == "$100"
+    assert fv.money(99.996) == "$100.00"
 
 
 def test_cost_text_names_credit_debit_and_shares():
-    assert fv.cost_text({"net_debit": 195.34}) == "$195 debit"
-    assert fv.cost_text({"net_credit": 803.67}) == "$804 credit"
+    assert fv.cost_text({"net_debit": 195.34}) == "$195.34 debit"
+    assert fv.cost_text({"net_credit": 803.67}) == "$803.67 credit"
     shares = {"net_debit": 54057.72, "legs": [{"kind": "stock"}]}
     assert fv.cost_text(shares) == "$54,058 debit for 100 shares"
     assert fv.cost_text({}) == "—"
@@ -48,7 +51,7 @@ def test_cost_text_names_credit_debit_and_shares():
 
 def test_cost_text_counts_share_lots():
     two = {"net_debit": 1000.0, "legs": [{"kind": "stock", "qty": 2}]}
-    assert fv.cost_text(two) == "$1,000 debit for 200 shares"
+    assert fv.cost_text(two) == "$1,000.00 debit for 200 shares"
 
 
 def test_expiry_text():
@@ -170,7 +173,7 @@ def test_split_bar_scales_loss_and_profit_to_the_larger():
 
 def test_split_bar_labels_are_money():
     b = fv.risk_reward_bar({"max_loss": 200.0, "max_profit": 800.0})
-    assert b["loss_label"] == "$200" and b["profit_label"] == "$800"
+    assert b["loss_label"] == "$200.00" and b["profit_label"] == "$800.00"
 
 
 def test_split_bar_unbounded_profit_is_full_and_marked():
@@ -203,7 +206,8 @@ def test_width_classes_snap_to_five_and_never_hide_a_positive():
 
 
 def test_pop_bar_snaps_and_colours_by_band():
-    assert fv.pop_bar(46.4) == {"class": "w-[45%]", "tone": "neutral", "label": "46%"}
+    assert fv.pop_bar(46.4) == {"class": "w-[45%]", "tone": "neutral",
+                                "label": "46.40%"}
     assert fv.pop_bar(31.0)["tone"] == "warn"
     assert fv.pop_bar(72.0)["tone"] == "pos"
     assert fv.pop_bar(None) is None
@@ -287,21 +291,25 @@ def test_payoff_svg_segment_touching_zero_takes_its_other_end():
 
 # ------------------------------------------------------------ review nits (Task 5)
 
-def test_pop_bar_colour_follows_the_rounded_label():
-    """The label and the colour must agree: a bar reading "40%" is not amber."""
+def test_pop_bar_colour_follows_the_printed_label():
+    """The label and the colour must agree: a bar reading "40.00%" is not amber,
+    and one reading "39.60%" is."""
+    b = fv.pop_bar(39.996)
+    assert b["label"] == "40.00%" and b["tone"] == "neutral"
+    b = fv.pop_bar(60.004)
+    assert b["label"] == "60.00%" and b["tone"] == "neutral"
     b = fv.pop_bar(39.6)
-    assert b["label"] == "40%" and b["tone"] == "neutral"
+    assert b["label"] == "39.60%" and b["tone"] == "warn"
     b = fv.pop_bar(60.4)
-    assert b["label"] == "60%" and b["tone"] == "neutral"
-    assert fv.pop_bar(39.4)["tone"] == "warn"
-    assert fv.pop_bar(60.6)["tone"] == "pos"
+    assert b["label"] == "60.40%" and b["tone"] == "pos"
 
 
 def test_halves_round_up_everywhere():
     """Python's round() is banker's rounding: round(42.5) == 42, round(12.5/5) == 2.
-    One rule for every number the page shows."""
-    assert fv.pop_bar(42.5)["label"] == "43%"
-    assert fv.pop_bar(41.5)["label"] == "42%"
+    One rule for every WHOLE number the page shows. (The probability label
+    is no longer one of them: it prints two places, ``42.50%``.)"""
+    assert fv.pop_bar(42.5)["label"] == "42.50%"
+    assert fv.pop_bar(41.5)["label"] == "41.50%"
     assert fv._snap(12.5) == 15 and fv._snap(22.5) == 25
     f = fv.summary_facts({"symbol": "X", "signals": [{"iv_rank": 42.5}]})
     assert f["vol_rank"] == "Vol Rank 43"
@@ -455,10 +463,10 @@ _HOOKS = {"score_class": lambda s: f"score-{s}", "grade_class": lambda g: f"grad
 def test_finder_rows_carry_shape_bars_and_paper_gate():
     row = fv.finder_rows([_FLY], **_HOOKS)[0]
     assert row["id"] == "x"
-    assert row["strategy"] == "Call Butterfly" and row["cost"] == "$120 debit"
+    assert row["strategy"] == "Call Butterfly" and row["cost"] == "$120.00 debit"
     assert row["_payoff_svg"].startswith("<svg") and row["_allow_paper"] is True
     assert 'width="72"' in row["_payoff_svg"] and 'height="20"' in row["_payoff_svg"]
-    assert row["_pop"]["label"] == "32%" and row["pop"] == "32%"
+    assert row["_pop"]["label"] == "31.50%" and row["pop"] == "31.50%"
     assert row["_pop_fill"] == fv.POP_FILL["warn"]
     assert row["expiry"] == "Oct 16 · 30d" and row["_dte"] == 30
     assert row["max_profit"] == "$375" and row["max_loss"] == "$125"
@@ -532,7 +540,7 @@ def test_finder_rows_are_ranked_best_first():
 def test_card_facts_for_a_top_pick():
     c = fv.card_facts(_FLY)
     assert c["title"] == "Call Butterfly" and c["score"] == 72.1 and c["grade"] == "Good"
-    assert c["expiry"] == "Oct 16 · 30d" and c["cost"] == "$120 debit"
+    assert c["expiry"] == "Oct 16 · 30d" and c["cost"] == "$120.00 debit"
     # A card is ~300px wide: the shape fills it rather than sitting in a corner.
     assert 'width="280"' in c["payoff_svg"] and 'height="56"' in c["payoff_svg"]
     _assert_dompurify_clean(c["payoff_svg"])

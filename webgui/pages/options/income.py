@@ -132,7 +132,7 @@ def return_on_capital(row):
 
 def _roc_text(row) -> str:
     pct = return_on_capital(row)
-    return _fmt.NO_READING if pct is None else f"{pct:.1f}%"
+    return _fmt.pct(pct)
 
 
 # ── the two covered-call ratios ─────────────────────────────────────────────
@@ -206,7 +206,7 @@ def candidate_rows(candidates):
             "yield_on_cost": _covered_ratio_text(c, "yield_on_cost"),
             "total_return_if_called": _covered_ratio_text(
                 c, "total_return_if_called"),
-            "pop": _fmt.fixed(c.get("pop_pct"), 1),
+            "pop": _fmt.fixed(c.get("pop_pct")),
             "breakeven": _st.breakeven_text(c),
             "earnings": earn_label,
             "_earnings_class": earn_class,

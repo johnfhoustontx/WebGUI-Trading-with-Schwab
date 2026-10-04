@@ -75,7 +75,7 @@ def test_at_risk_rows_filters_and_sorts():
     top = rows[0]
     assert top["symbol"] == "SPY"
     assert top["strategy"] == "put_credit_spread"
-    assert top["strikes"] == "500/495"
+    assert top["strikes"] == "500.00/495.00"
     assert top["state"] == "critical"
     assert top["heat"] == 82.0
     assert top["short_delta"] == -0.42
@@ -140,11 +140,11 @@ def test_at_risk_columns_strike_date_no_underlying():
 
 def test_cash_text_credit_debit_zero():
     cr = rescue.cash_text(120.0)
-    assert cr["text"] == "+$120"
+    assert cr["text"] == "+$120.00"
     assert cr["color"] == rescue.CASH_GREEN
 
     db = rescue.cash_text(-45.0)
-    assert db["text"] == "-$45"
+    assert db["text"] == "-$45.00"
     assert db["color"] == rescue.CASH_RED
 
     z = rescue.cash_text(0)
@@ -199,14 +199,14 @@ def test_candidate_card_rows_two_candidates():
     c0 = rows[0]
     assert c0["title"] == "Roll out 1 week"
     assert c0["apply_kind"] == "execute"
-    assert c0["net_text"]["text"] == "-$51"  # cash_text formatting
+    assert c0["net_text"]["text"] == "-$51.30"  # cash_text formatting
     assert c0["score"] == 0.81
     # metrics include formatted entries; delta 2dp, cash $
     joined = " | ".join(c0["metrics"])
     assert "new_short_delta" in joined.lower() or "delta" in joined.lower()
     assert any("-0.25" in m for m in c0["metrics"])
     # legs formatted
-    assert c0["legs"][0] == "SELL PUT 500 @1.20"
+    assert c0["legs"][0] == "SELL PUT 500.00 @1.20"
     assert c0["rationale"] == ["reduces delta"]
     assert c0["context"] == ["debit roll"]
     assert c0["warnings"] == ["uses margin"]
@@ -233,7 +233,7 @@ def test_candidate_card_close_shows_realized_pnl_not_max_loss():
                        new_max_loss=0.0, new_breakeven=None, new_short_delta=None,
                        new_width=None, new_expiry=None)
     row = rescue.candidate_card_rows(_advisory(candidates=[close]))[0]
-    assert row["realized_text"]["text"] == "-$850"     # colored, the actual loss
+    assert row["realized_text"]["text"] == "-$850.00"     # colored, the actual loss
     assert not any("max loss" in m.lower() for m in row["metrics"])  # $0 suppressed
 
 
@@ -244,7 +244,7 @@ def test_candidate_card_partial_close_keeps_max_loss_and_shows_realized():
                          new_breakeven=None, new_short_delta=None, new_width=None,
                          new_expiry=None)
     row = rescue.candidate_card_rows(_advisory(candidates=[partial]))[0]
-    assert row["realized_text"]["text"] == "-$425"
+    assert row["realized_text"]["text"] == "-$425.00"
     assert any("max loss after" in m.lower() for m in row["metrics"])
 
 

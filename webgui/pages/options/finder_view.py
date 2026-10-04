@@ -55,18 +55,15 @@ def _half_up(x):
 # --------------------------------------------------------------------------- text
 
 def money(v):
-    """Dollars for a card or cell: ``$54,058`` at |v| >= 100, ``$4.50`` below.
-
-    Whole dollars at scale because the page puts a $54,000 collar beside a $196
-    butterfly, and cents on the first only add noise. A negative keeps a leading
-    minus (``-$300``). No reading (None, NaN, a bool) is the em-dash.
+    """Dollars for a card or cell, always to the cent: ``$54,058.00``,
+    ``$4.50``. A negative keeps a leading minus (``-$300.00``). No reading
+    (None, NaN, a bool) is the em-dash.
     """
     f = _fmt.num(v)
     if f is None:
         return NO_READING
     a = abs(f)
-    # Compare the ROUNDED cents, so 99.996 reads "$100", never "$100.00".
-    body = f"{a:,.0f}" if round(a, 2) >= 100 else f"{a:,.2f}"
+    body = f"{a:,.{_fmt.DECIMALS}f}"
     # The sign is decided AFTER rounding: -0.001 is "$0.00", never "-$0.00".
     sign = "-" if f < 0 and body.strip("0.,") else ""
     return f"{sign}${body}"
@@ -85,7 +82,8 @@ def _share_count(legs):
 
 
 def cost_text(sig):
-    """``"$195 debit"`` / ``"$804 credit"`` / ``"$54,058 debit for 100 shares"``.
+    """``"$195.00 debit"`` / ``"$804.00 credit"`` /
+    ``"$54,058.00 debit for 100 shares"``.
 
     The word carries the direction, so the amount is shown unsigned.
     """
@@ -871,11 +869,11 @@ def pop_bar(pop):
     f = _fmt.num(pop)
     if f is None:
         return None
-    # The band is decided on the ROUNDED percent, so the colour always agrees
-    # with the label beside it (39.6 reads "40%" and is not amber).
-    whole = _half_up(f)
-    tone = "warn" if whole < 40 else "pos" if whole > 60 else "neutral"
-    return {"class": _width(f), "tone": tone, "label": f"{whole}%"}
+    # The band is decided on the percent AS PRINTED, so the colour always
+    # agrees with the label beside it (39.996 reads "40.00%" and is not amber).
+    shown = round(f, _fmt.DECIMALS)
+    tone = "warn" if shown < 40 else "pos" if shown > 60 else "neutral"
+    return {"class": _width(f), "tone": tone, "label": _fmt.pct(f)}
 
 
 # The odds bar's fill per tone - a fixed class set, bound through a table slot's

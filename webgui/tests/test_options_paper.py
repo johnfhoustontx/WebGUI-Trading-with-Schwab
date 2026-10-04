@@ -106,10 +106,10 @@ def test_analyze_popup_rows_builds_available_metrics():
     rows = paper.analyze_popup_rows(res)
     by_label = {r[0]: r[1] for r in rows}
     assert by_label["Unrealized P&L"] == "+120.50"
-    assert by_label["% of max profit"] == "+33.0%"
+    assert by_label["% of max profit"] == "+33.00%"
     assert by_label["Current price"] == "515.76"
     assert by_label["DTE remaining"] == "6"
-    assert by_label["Profit target"] == "65%"
+    assert by_label["Profit target"] == "65.00%"
     assert by_label["Breakeven"] == "510.00"
     # P&L row carries a green color for a profit.
     pnl_row = next(r for r in rows if r[0] == "Unrealized P&L")
@@ -146,20 +146,20 @@ def test_paper_columns_hide_id_but_row_keeps_it():
 
 
 def test_strikes_iron_condor_vs_spread():
-    assert paper._strikes(TRADE) == "450/445"
+    assert paper._strikes(TRADE) == "450.00/445.00"
     ic = {"strategy": "IC", "short_strike": 450, "long_strike": 445,
           "call_short": 460, "call_long": 465}
-    assert paper._strikes(ic) == "P 450/445 C 460/465"
+    assert paper._strikes(ic) == "P 450.00/445.00 C 460.00/465.00"
 
 
 def test_strikes_debit_legs():
     long_call = {"strategy": "LONG_CALL", "direction": "DEBIT",
                  "legs": [{"kind": "call", "side": "long", "strike": 450}]}
-    assert paper._strikes(long_call) == "L 450C"
+    assert paper._strikes(long_call) == "L 450.00C"
     debit_spread = {"strategy": "BULL_CALL", "direction": "DEBIT",
                     "legs": [{"kind": "call", "side": "long", "strike": 100},
                              {"kind": "call", "side": "short", "strike": 105}]}
-    assert paper._strikes(debit_spread) == "L 100C / S 105C"
+    assert paper._strikes(debit_spread) == "L 100.00C / S 105.00C"
     # a debit trade with no legs falls back to "—" (None-safe, no crash)
     assert paper._strikes({"strategy": "LONG_CALL", "direction": "DEBIT"}) == "—"
 
@@ -491,7 +491,7 @@ def test_strikes_show_a_butterflys_two_lot_body():
            "legs": [{"kind": "call", "side": "long", "strike": 95.0, "qty": 1},
                     {"kind": "call", "side": "short", "strike": 100.0, "qty": 2},
                     {"kind": "call", "side": "long", "strike": 105.0, "qty": 1}]}
-    assert paper._strikes(fly) == "L 95C / S 2×100C / L 105C"
+    assert paper._strikes(fly) == "L 95.00C / S 2×100.00C / L 105.00C"
 
 
 def test_a_butterfly_rows_breakeven_renders_both_values():

@@ -137,8 +137,8 @@ def test_the_strikes_come_from_legs_so_both_shapes_render():
     like a thin row, not like a bug."""
     rows = income.candidate_rows([_PCS, _CSP])
     assert len(rows) == 2
-    assert rows[0]["legs"] == "S 195P / L 190P"
-    assert rows[1]["legs"] == "S 400P"
+    assert rows[0]["legs"] == "S 195.00P / L 190.00P"
+    assert rows[1]["legs"] == "S 400.00P"
 
 
 def test_the_credit_column_reads_the_field_both_shapes_carry():
@@ -161,8 +161,8 @@ def test_return_on_capital_is_what_makes_the_two_shapes_comparable():
     on."""
     rows = income.candidate_rows([_PCS, _CSP])
     assert len(rows) == 2
-    assert rows[0]["roc"] == "13.3%"
-    assert rows[1]["roc"] == "1.6%"
+    assert rows[0]["roc"] == "13.30%"
+    assert rows[1]["roc"] == "1.62%"
 
 
 def test_the_breakeven_comes_from_the_list_both_shapes_carry():
@@ -318,7 +318,7 @@ def test_a_covered_call_row_renders_off_the_shape_both_products_share():
     assert row["credit"] == "160.00"
     assert row["capital"] == "9500.00"
     # max_profit / capital, the column that makes the board comparable at all.
-    assert row["roc"] == "17.5%"
+    assert row["roc"] == "17.46%"
 
 
 # ── the two covered-call ratios ─────────────────────────────────────────────

@@ -19,6 +19,7 @@ standard): the header line carries the Updated stamp and the page actions
 refresh replaces, and Reset asks before it clears the book.
 """
 import bus_client
+from pages import fmt as _fmt
 from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
 from pages import ui_kit as kit
 from nicegui import ui
@@ -93,7 +94,8 @@ def position_rows(positions):
             "position_id": p.get("position_id"),
             "symbol": p.get("symbol", ""),
             "strategy": p.get("strategy", ""),
-            "strikes": f"{sk}/{lk}" if sk is not None else "—",
+            "strikes": (f"{_fmt.strike_text(sk)}/{_fmt.strike_text(lk)}"
+                        if sk is not None else "—"),
             "expiration": p.get("expiration", ""),
             "quantity": p.get("quantity"),
             "entry_credit": _round(p.get("entry_credit")),
@@ -261,11 +263,15 @@ def render():
             scorecard_label = ui.label("").classes(f"text-xs {MUTED}")
             greeks_label = ui.label("").classes(f"text-xs {MUTED}")
             kit.section_title("Open positions")
-            pos_table = kit.table(position_columns(), numeric=(
-                "quantity", "entry_credit", "current_value", "unrealized_pnl"))
+            pos_table = kit.table(
+                position_columns(),
+                numeric=("quantity", "entry_credit", "current_value",
+                         "unrealized_pnl"),
+                decimals=("entry_credit", "current_value", "unrealized_pnl"))
             kit.section_title("Fills log (last 100)")
             ord_table = kit.table(order_columns(), row_key="order_id",
-                                  numeric=("quantity", "fill_price"))
+                                  numeric=("quantity", "fill_price"),
+                                  decimals=("fill_price",))
 
         # ── Analytics: realized equity curve + MAE/MFE (scanner-baseline) ────
         kit.section_title("Analytics")
