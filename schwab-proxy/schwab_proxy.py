@@ -67,6 +67,7 @@ import perf_writer
 import stream_bridge
 import market_store
 import rate_gate
+import schwab_symbols
 from shared import market_calendar as _market_calendar
 from shared import marketdata_config as _marketdata_config
 
@@ -404,7 +405,13 @@ class TokenManager:
         its token-refresh-then-retry path. On final failure the original
         {status_code, data, error} shape is returned unchanged, so consumers see
         no contract difference.
+
+        A class share (``BRK.B`` in this app) is sent to Schwab as ``BRK/B`` and
+        named ``BRK.B`` again in the answer; see ``schwab_symbols``. This is the
+        one place every marketdata call passes, so nothing above it sees the
+        slash.
         """
+        params, spelled_back = schwab_symbols.outbound(params)
         self.ensure_valid_token()
         headers = {"Authorization": f'Bearer {self.tokens["AccessToken"]}', "Accept": "application/json"}
         url = f"{SCHWAB_BASE_URL}{endpoint}"
@@ -421,7 +428,8 @@ class TokenManager:
                     self._rate_limit()
                     resp = self.session.get(url, headers=headers, params=params, timeout=30)
                 if resp.status_code == 200:
-                    return {"status_code": 200, "data": resp.json(), "error": None}
+                    return {"status_code": 200, "error": None,
+                            "data": schwab_symbols.inbound(resp.json(), spelled_back)}
                 logger.error(f"Schwab {resp.status_code}: {resp.text[:200]}")
                 result = {"status_code": resp.status_code, "data": None, "error": resp.text[:500]}
                 # A deterministic 4xx (400/403/404/…) won't change on re-request:

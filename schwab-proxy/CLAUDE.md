@@ -54,6 +54,7 @@ sentiment-dashboard, and the Tier-2 services all fetch market data through it.
 | `market_store.py`    | What the proxy has already fetched, kept in memory: `ChainStore`, `QuoteStore`, `BarStore`, and the `Gateway` that decides per request between a stored answer and a call to Schwab. No FastAPI and no repo imports, so it is unit-testable on its own. |
 | `api_call_counter.py`| Per-day count of calls SENT to Schwab (`api_calls`), plus the per-day breakdown of REQUESTS by endpoint, caller and outcome (`api_calls_detail`). Never raises. |
 | `proxy_client.py`    | Client helper imported by the other apps to call the proxy. Sets `X-Caller`, takes `max_age=` on `get_option_chain`, and exposes `X-Store` / `X-Store-Age` as `FakeResponse.store_kind` / `store_age`. |
+| `schwab_symbols.py`  | Symbol spelling at the Schwab boundary: a class share is `BRK.B` in this app and `BRK/B` at Schwab. Pure. |
 | `trade_registry.py`  | Registry of tracked OptionsScanner paper trades.                |
 | `trade_detector.py`  | Detects fills/events from the option stream.                    |
 | `perf_writer.py`     | Writes trade-performance events + IV snapshots.                 |
@@ -122,6 +123,27 @@ know are in the root `CLAUDE.md` ("The proxy can answer from memory").
   known exception (the collector's own repeats while every session is closed,
   about 700 a day on `chains` for caller `options_svc`); see the root
   `CLAUDE.md`.
+
+## A class share is `BRK.B` here and `BRK/B` at Schwab
+
+Schwab refuses the dotted form (measured 2026-10-04: `BRK.B`, `BF.B`, `BRK.A`
+and `HEI.A` all came back under `errors.invalidSymbols`; the slash forms
+answered). The app's ticker allow-list (`shared.symbols.SYMBOL_RE`) accepts a
+dot and refuses a slash, because a ticker becomes part of a Redis key name.
+
+- **The translation lives in ONE place, `TokenManager.api_request`**, which
+  every marketdata call passes: `schwab_symbols.outbound` rewrites the `symbol`
+  and `symbols` parameters, and `schwab_symbols.inbound` puts the app's spelling
+  back in the answer (quote keys, `symbol`, `underlying.symbol`, each
+  `instruments` entry, `errors.invalidSymbols`). Nothing above that call (the
+  market-data store's keys included) ever sees the slash.
+- **Only what a request translated is undone.** A caller that asks for
+  `BRK/B` gets `BRK/B` back.
+- **The rule is a pattern, not a list:** letters, one dot, one or two letters.
+  An index keeps its dot (`$NYHGH.X`) and a futures root keeps its slash.
+- ⚠ **Not covered:** the streaming endpoints (`/stream/quotes`) pass symbols to
+  the streamer as given, and the trader endpoints (`/positions`) return
+  Schwab's own spelling.
 
 ## The paper-trade tracker (`/track`, `/untrack`, the 30-second reconcile)
 

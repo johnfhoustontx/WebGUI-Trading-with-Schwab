@@ -1248,7 +1248,11 @@ rate is unchanged. A request answered from the local store never waits.</p>
 </tr>
 </tbody>
 </table>
-<p>Each returns Schwab's JSON body as Schwab sent it. A failure is the upstream HTTP
+<p>Each returns Schwab's JSON body as Schwab sent it, with one exception: a class
+share. Ask for it with a dot (<code>BRK.B</code>, <code>BF.B</code>). The proxy sends Schwab the slash
+form it requires (<code>BRK/B</code>) and names the symbol with a dot again in the answer,
+so quote keys and each <code>symbol</code> field match what was asked. Option contract
+symbols are unchanged. A failure is the upstream HTTP
 status with <code>{"detail": ...}</code>. A token that cannot be made valid (none, or the
 refresh token expired or rejected) answers <strong>500</strong> with a JSON <code>detail</code> naming the
 error.</p>

@@ -4,7 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-04 (**The audit's remaining Medium findings: 14 more fixed, two started.**)
+**Last updated:** 2026-10-04 (**Class shares work: `BRK.B` in the app, `BRK/B` at Schwab.**)
+
+- **What was wrong.** Schwab spells a class share with a slash and refuses the
+  dotted form, while the app's ticker allow-list accepts a dot and refuses a
+  slash. So `BRK.B` could not be quoted, charted or scanned, and `BRK/B` could
+  not be typed on any page. Measured through the proxy: `BRK.B`, `BF.B`, `BRK.A`
+  and `HEI.A` came back under `errors.invalidSymbols`; `BRK/B`, `BF/B`, `BRK/A`,
+  `HEI/A`, `LEN/B` and `MOG/A` answered.
+- **The fix.** `schwab-proxy/schwab_symbols.py` (pure) translates at the one call
+  every marketdata request passes, `TokenManager.api_request`: dot to slash on
+  the way out, and the answer's symbol names back on the way in. The store,
+  the services, the pages and every Redis key keep the app's spelling.
+- **Not covered.** The streaming endpoints and the trader endpoints.
+- **Tests.** `schwab-proxy/tests/test_schwab_symbols.py`.
+- **Same day, data only.** `config/sectors.toml` gained 107 symbols (343 to 450)
+  ahead of a wider watchlist, classified by hand; the file's header names the six
+  judgment calls.
+
+---
+
+**Prior —** 2026-10-04 (**The audit's remaining Medium findings: 14 more fixed, two started.**)
 
 Source: [the audit scorecard](audits/2026-10-03-app-audit-scorecard.md). One
 commit per finding. Not yet promoted. Open Medium rows after this: AC-19 (must be

@@ -174,6 +174,9 @@ def test_a_missing_file_degrades_to_an_empty_map_rather_than_raising(monkeypatch
     ("UBER", "Industrials"),
     ("NLY", "Financials"),
     ("GEV", "Industrials"),
+    ("BRK.B", "Financials"),        # a dotted key: quoted in the file, looked up as typed
+    ("TJX", "Consumer Discretionary"),
+    ("LRCX", "Information Technology"),
 ])
 def test_well_known_names_carry_their_GICS_sector(symbol, sector):
     """The seed workbook swapped AAPL and GOOGL, and this map drives a live cap."""
