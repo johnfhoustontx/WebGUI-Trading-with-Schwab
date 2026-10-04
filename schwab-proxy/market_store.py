@@ -772,6 +772,11 @@ def _request_age(requested):
     return min(value, float(MAX_REQUEST_AGE_SEC))
 
 
+# Statuses that would be the same for the request as asked: not authorized,
+# and rate limited (where a second call also adds to the load).
+_SAME_AGAIN = (401, 429)
+
+
 class _FetchFailed(Exception):
     """``fetch`` raised something that is not an ``UpstreamError``.
 
@@ -837,6 +842,12 @@ class Gateway:
     second call: it is counted, logged, and the caller gets what Schwab sent.
     (One exception: a wider window was fetched and cannot be cut without the
     store, so the request is then fetched as asked.)
+
+    The wider window on a near miss is this gateway's choice, so its failure
+    is not the caller's answer: the request is then fetched once as it was
+    asked (outcome ``wide_failed``, then ``upstream``), and only that call's
+    failure is raised. A 401 or a 429 is raised at once: the second call
+    would say the same.
 
     Every stored entry is stamped with the moment its fetch BEGAN, the
     conservative age: the data cannot be newer than the request for it.
@@ -1071,28 +1082,39 @@ class Gateway:
             return hit
         wide = store.wide_key(key, today=now_ct.date(),
                               max_days=cfg["wide_refetch_max_days"])
-        fetch_key = wide or key
-        lock_key = ("chains", fetch_key)
+        if wide is None:
+            return self._chain_as_asked(key, caller, state, limit, cfg)
+        lock_key = ("chains", wide)
         ticket = next(self._tickets)
+        failed, kept = False, False
         with self._locks.holding(lock_key):
             again = store.lookup(key, max_age=limit, now=self._clock(), state=state)
             if again is not None:
                 self._record("chains", caller, "coalesced")
                 return Served("coalesced", again.age, body=again.body)
-            data, began = self._fetch_once(lock_key, ticket, "/chains",
-                                           fetch_key.params())
-            kept = False
             try:
-                kept = store.put(fetch_key, data, now=began, state=state,
-                                 max_entries=cfg["max_entries"])
-            except Exception:  # noqa: BLE001 — never costs the answer in hand.
-                # Fetched as asked: the answer is returned below. A wider
-                # window cannot be cut without the store, so that one falls
-                # back to fetching the request as asked.
-                self._degraded("chains", answered=wide is None)
-            self._record("chains", caller, "upstream")
-        if wide is None:
-            return Served("miss", 0.0, data=data)
+                data, began = self._fetch_once(lock_key, ticket, "/chains",
+                                               wide.params())
+            except (UpstreamError, _FetchFailed) as error:
+                if (isinstance(error, UpstreamError)
+                        and error.status_code in _SAME_AGAIN):
+                    raise
+                failed = True
+            else:
+                try:
+                    kept = store.put(wide, data, now=began, state=state,
+                                     max_entries=cfg["max_entries"])
+                except Exception:  # noqa: BLE001 — never costs the answer in hand.
+                    # A wider window cannot be cut without the store, so the
+                    # request is fetched as asked below.
+                    self._degraded("chains")
+                self._record("chains", caller, "upstream")
+        if failed:
+            # The week was this gateway's choice, not the caller's, and every
+            # request waiting on it was handed its one failure. Each is now
+            # fetched once exactly as it was asked, outside the week's lock.
+            self._record("chains", caller, "wide_failed")
+            return self._chain_as_asked(key, caller, state, limit, cfg)
         # Cut only from what was JUST stored. When the store would not keep the
         # wide chain, the entry still held under ``wide`` is the OLD one, and a
         # cut of it would be an old answer served as a new one.
@@ -1103,6 +1125,26 @@ class Gateway:
         # or with no expiration in the window: answer the request exactly as it
         # was asked.
         return self._passthrough("chains", "/chains", params, caller)
+
+    def _chain_as_asked(self, key, caller, state, limit, cfg) -> Served:
+        """Fetch ``key`` exactly as it was asked and keep it under its own
+        request. Identical concurrent requests share the one call."""
+        store = self.chain_store
+        lock_key = ("chains", key)
+        ticket = next(self._tickets)
+        with self._locks.holding(lock_key):
+            again = store.lookup(key, max_age=limit, now=self._clock(), state=state)
+            if again is not None:
+                self._record("chains", caller, "coalesced")
+                return Served("coalesced", again.age, body=again.body)
+            data, began = self._fetch_once(lock_key, ticket, "/chains", key.params())
+            try:
+                store.put(key, data, now=began, state=state,
+                          max_entries=cfg["max_entries"])
+            except Exception:  # noqa: BLE001 — never costs the answer in hand.
+                self._degraded("chains", answered=True)
+            self._record("chains", caller, "upstream")
+        return Served("miss", 0.0, data=data)
 
     # ---- quotes ----------------------------------------------------------
     def quotes(self, symbols_csv, caller, max_age=None) -> Served:

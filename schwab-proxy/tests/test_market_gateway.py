@@ -453,7 +453,9 @@ def test_an_upstream_error_on_the_wide_refetch_is_raised_not_cut_from_the_old_en
     state["fail"] = True
     with pytest.raises(ms.UpstreamError) as err:
         h.gw.chains(P(to="2026-10-09"), "scan")
-    assert err.value.status_code == 503 and len(h.calls) == 2
+    # The week, then the request as asked (audit AR-100); both failed.
+    assert err.value.status_code == 503
+    assert [c[1]["toDate"] for c in h.calls] == ["2026-10-12", "2026-10-12", "2026-10-09"]
     assert h.gw.degrades == {}                       # an upstream error is no store bug
 
 
@@ -1553,7 +1555,8 @@ def test_a_fetch_failure_on_the_wide_refetch_is_raised_as_it_is():
     state["crash"] = RuntimeError("connection reset")
     with pytest.raises(RuntimeError) as err:
         h.gw.chains(P(to="2026-10-09"), "scan")
-    assert err.value is state["crash"] and len(h.calls) == 2 and h.gw.degrades == {}
+    # The week, then the request as asked (audit AR-100); both failed.
+    assert err.value is state["crash"] and len(h.calls) == 3 and h.gw.degrades == {}
 
 
 def test_a_fetch_failure_in_the_fallback_after_a_store_bug_is_raised_as_it_is(monkeypatch):
@@ -2538,3 +2541,78 @@ def test_a_stored_chain_with_another_contract_count_is_a_mismatch():
     state["more"] = True
     h.gw.chains(P(), "a")
     assert h.outcomes()[-1] == "shadow_hit_mismatch"
+
+
+# ---- a failed week fetch is not the caller's answer (audit AR-100) ------------
+
+def week_fails(state):
+    """Schwab fails the collector's week once ``state['fail']`` is set, and
+    answers every narrower window."""
+    def respond(endpoint, params):
+        if params["toDate"] == "2026-10-12":
+            return state["fail"] or chain()
+        days = {"2026-10-09": 3, "2026-10-08": 2, "2026-10-07": 2}[params["toDate"]]
+        return chain(exps=EXPS[:days], spot=101.0)
+    return respond
+
+
+def test_a_failed_week_fetch_is_followed_by_the_request_as_asked():
+    state = {"fail": None}
+    h = Harness(responses=week_fails(state))
+    h.gw.chains(P(), "collector")
+    h.clock += 50
+    state["fail"] = ms.UpstreamError(503, "unavailable")
+    got = h.gw.chains(P(to="2026-10-09"), "scan")
+    assert [c[1]["toDate"] for c in h.calls] == ["2026-10-12", "2026-10-12", "2026-10-09"]
+    assert got.kind == "miss" and body(got)["underlyingPrice"] == 101.0
+    assert h.records[1:] == [("chains", "scan", "wide_failed"),
+                             ("chains", "scan", "upstream")]
+    assert h.gw.degrades == {}
+    # It was stored under its own request, so a repeat is answered locally.
+    h.clock += 5
+    assert h.gw.chains(P(to="2026-10-09"), "scan").kind == "hit"
+    assert len(h.calls) == 3
+
+
+def test_a_week_fetch_that_cannot_be_reached_is_followed_by_the_request_as_asked():
+    state = {"fail": None}
+    h = Harness(responses=week_fails(state))
+    h.gw.chains(P(), "collector")
+    h.clock += 50
+    state["fail"] = RuntimeError("read timed out")
+    got = h.gw.chains(P(to="2026-10-09"), "scan")
+    assert got.kind == "miss" and len(h.calls) == 3 and h.gw.degrades == {}
+
+
+def test_requests_waiting_on_one_failed_week_fetch_each_get_their_own_answer():
+    state = {"fail": None}
+    slow = Slow(week_fails(state))
+    h = Harness(responses=slow)
+    slow.gate.set()
+    h.gw.chains(P(), "collector")
+    h.clock += 50
+    state["fail"] = ms.UpstreamError(503, "unavailable")
+    slow.gate.clear()
+    slow.started.clear()
+    answers = all_at_once(
+        h, slow, lambda: h.gw.chains(P(to="2026-10-09"), "a"),
+        [lambda: h.gw.chains(P(to="2026-10-08"), "b"),
+         lambda: h.gw.chains(P(to="2026-10-07"), "c")])
+    assert [type(a).__name__ for a in answers] == ["Served"] * 3
+    asked = sorted(c[1]["toDate"] for c in h.calls[1:])
+    # ONE failed week fetch, then each request once, as it was asked.
+    assert asked == ["2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12"]
+
+
+@pytest.mark.parametrize("status", [401, 429])
+def test_a_week_fetch_refused_for_a_reason_that_would_repeat_is_raised_at_once(status):
+    # Not authorized, or rate limited: asking again says the same and, for a
+    # rate limit, adds to the load.
+    state = {"fail": None}
+    h = Harness(responses=week_fails(state))
+    h.gw.chains(P(), "collector")
+    h.clock += 50
+    state["fail"] = ms.UpstreamError(status, "no")
+    with pytest.raises(ms.UpstreamError) as err:
+        h.gw.chains(P(to="2026-10-09"), "scan")
+    assert err.value.status_code == status and len(h.calls) == 2
