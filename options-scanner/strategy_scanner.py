@@ -385,27 +385,74 @@ def _norm_cdf(x):
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
-def pop_from_payoff(legs, spot, atm_iv, dte, now=None):
-    sigma = spot * max(atm_iv, 1e-6) * math.sqrt(max(dte, 0.5) / 365.0)
-    if sigma <= 0:
+# With no clock time and no whole days to go on, half a day of movement. Only
+# the fallback: a row with a readable expiry uses the time actually left.
+_POP_FALLBACK_DAYS = 0.5
+_POP_Z = 6.0            # the distribution is integrated over +/- this many sigmas
+_POP_STEPS = 801
+
+
+def _years_to_expiry(exp_str, now=None):
+    """Years from ``now`` to ``exp_str``'s 16:00 ET close, on the clock (so an
+    expiration-day row has hours left, not a fixed half day). ``None`` when the
+    date cannot be read; 0.0 once the close has passed."""
+    try:
+        exp = _dt.date.fromisoformat(str(exp_str))
+    except (TypeError, ValueError):
         return None
+    return _oc.expiry_time_to_years(now or _dt.datetime.now(), exp)
+
+
+def pop_from_payoff(legs, spot, atm_iv, dte, now=None, years=None):
+    """Probability (percent) that the position is in profit at its front
+    expiry, or ``None`` when it cannot be computed.
+
+    The stock price at expiry is LOGNORMAL, centred on the forward:
+    ``ln(S_T / S_0) ~ N((r - q - vol^2 / 2) * T, vol^2 * T)``, the distribution
+    the pricing model itself assumes. ``T`` is ``years`` when the caller knows
+    the time actually left (``_assemble`` does, from the row's own expiry and the
+    clock); otherwise ``dte`` whole days.
+
+    Until 2026-10-04 this was a zero-drift NORMAL in price, floored at half a
+    day (audit AC-11). A normal has no skew and puts mass below a price of zero,
+    so it overstated a long-dated short put (66.0% against 54.8% two years out
+    at 70% volatility, 20% out of the money), and every same-day row got twelve
+    hours of movement whatever the clock said (86% for a 1%-out-of-the-money
+    short put, where three hours left is 98.5%). Inside two months the two
+    models agree within a point."""
+    if not spot or spot <= 0:
+        return None
+    if years is None:
+        years = (dte if dte and dte > 0 else _POP_FALLBACK_DAYS) / 365.0
+    years = max(float(years), 0.0)
+    vol = max(atm_iv, 1e-6)
     entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)
     front = _front_expiration(legs) if _needs_front_valuation(legs) else None
     vols = later_leg_vols(legs, spot, front, now) if front is not None else None
-    n = 801
-    lo, hi = spot - 6 * sigma, spot + 6 * sigma
+    spread = vol * math.sqrt(years)             # the std of the log return
+    if spread <= 0:
+        # No time left: the outcome is where the stock is now.
+        return 100.0 if _pl_at(legs, 0.0, spot, front, vols) - entry_cost > 0 else 0.0
+    q = next((_leg_yield(l) for l in _option_legs(legs)), 0.0)
+    centre = (_oc.RISK_FREE_RATE - q - 0.5 * vol * vol) * years
     prob = 0.0
-    prev_S = lo
-    prev_cdf = _norm_cdf((lo - spot) / sigma)
-    for i in range(1, n):
-        S = lo + (hi - lo) * i / (n - 1)
-        cdf = _norm_cdf((S - spot) / sigma)
+    prev_z = -_POP_Z
+    prev_S = spot * math.exp(centre + spread * prev_z)
+    prev_cdf = _norm_cdf(prev_z)
+    if _pl_at(legs, 0.0, prev_S, front, vols) - entry_cost > 0:
+        prob += prev_cdf                         # the tail below the grid
+    for i in range(1, _POP_STEPS):
+        z = -_POP_Z + 2.0 * _POP_Z * i / (_POP_STEPS - 1)
+        S = spot * math.exp(centre + spread * z)
+        cdf = _norm_cdf(z)
         mid = (S + prev_S) / 2
         v = _pl_at(legs, 0.0, mid, front, vols)
         if v - entry_cost > 0:
             prob += (cdf - prev_cdf)
         prev_S, prev_cdf = S, cdf
-    return round(prob * 100, 1)
+    if _pl_at(legs, 0.0, prev_S, front, vols) - entry_cost > 0:
+        prob += 1.0 - prev_cdf                   # ... and above it
+    return round(min(prob, 1.0) * 100, 1)
 
 
 def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0, now=None):
@@ -562,7 +609,10 @@ def _assemble(stype, family, label, bias, legs, symbol, spot, atm_iv):
     m = payoff_metrics(legs, spot, symbol)
     front_exp = _front_expiration(legs)
     dte = _dte_for(front_exp)
-    pop = pop_from_payoff(legs, spot, atm_iv, dte)
+    # The row's own expiry, on the clock. None for an unreadable date, which
+    # falls back to whole days inside.
+    pop = pop_from_payoff(legs, spot, atm_iv, dte,
+                          years=_years_to_expiry(front_exp))
     sk = "_".join("SH" if _is_stock(l) else str(l["strike"]) for l in legs)
     return {"id": f"{symbol}_{stype}_{front_exp}_{sk}",
             "symbol": symbol, "type": stype, "family": family,
