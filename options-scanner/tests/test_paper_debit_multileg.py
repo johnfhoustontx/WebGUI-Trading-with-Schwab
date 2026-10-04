@@ -61,7 +61,7 @@ def test_a_butterfly_reprices_with_the_two_lot_counted(monkeypatch):
     class _Client:
         pass
 
-    monkeypatch.setattr(signal_repricer, "_fetch_chain", lambda client, sym, exp: chain)
+    monkeypatch.setattr(signal_repricer, "_fetch_chain", lambda client, sym, exp, max_age=None: chain)
     rep = signal_repricer.reprice_legs(trade, _Client())
     assert rep["current_value"] == 1.0              # 7 - 2*4 + 2
 

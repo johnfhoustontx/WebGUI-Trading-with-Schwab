@@ -131,10 +131,11 @@ def submit_order(order, client):
         return build_order_response(0, "REJECTED", side, strategy, qty, None,
                                     [], now_iso, "PAPER_MODE_OFF")
     try:
-        # The engine clears signal_repricer's per-(symbol,expiration) chain cache at
-        # cycle start (clear_chain_cache()) so fills use fresh quotes. If submit_order
-        # is ever called outside a cycle, the chain may be a stale snapshot.
-        chain = signal_repricer._fetch_chain(client, order["symbol"], order["expiration"])
+        # A fill is priced from a chain fetched NOW (max_age=0): not the one
+        # this cycle already holds, and not one the proxy has stored. Either is
+        # the snapshot the signal or the mark was built on (audit AC-141).
+        chain = signal_repricer._fetch_chain(client, order["symbol"],
+                                             order["expiration"], max_age=0)
         if chain is None:
             raise FillError("chain unavailable")
         if not isinstance(chain, dict):

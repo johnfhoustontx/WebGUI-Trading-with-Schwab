@@ -3004,7 +3004,7 @@ def run_rescue_apply(bus, position_id, candidate) -> None:
             return
 
         symbol = pos.get("symbol")
-        price_leg = compute._make_leg_pricer(symbol)
+        price_leg = compute._make_leg_pricer(symbol, max_age=0)
         result = _paper_adjust().apply_adjustment(
             None, pos, candidate, price_leg=price_leg)
 

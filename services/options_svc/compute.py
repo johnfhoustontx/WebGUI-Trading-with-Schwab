@@ -3667,10 +3667,9 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
             continue
 
     # The cycle's marks, in one transaction (audit PF-08). Nothing in the loop
-    # reads a mark written by this cycle: the peak is taken before the mark is
-    # built, and a close takes its exit value from the reprice. A failed write
-    # costs this cycle's marks and nothing else - the closes and the armed
-    # stops above are already booked.
+    # reads a mark written by this cycle (the peak is read before the mark is
+    # built; a close takes its exit value from the reprice). A failed write
+    # costs this cycle's marks only: the closes and armed stops are booked.
     if pending_marks:
         try:
             signal_db.insert_marks(pending_marks)
@@ -9415,8 +9414,9 @@ import signal_repricer as _signal_repricer  # noqa: E402
 reprice_swing = _signal_repricer.reprice_swing
 
 
-def _fetch_chain_for_expiry(symbol, expiry):
-    """Fetch the option chain for ONE expiry (from_date == to_date == expiry).
+def _fetch_chain_for_expiry(symbol, expiry, max_age=None):
+    """Fetch the option chain for ONE expiry (from_date == to_date == expiry);
+    ``max_age`` (seconds) is sent only when given, and 0 demands a fresh fetch.
 
     Mirrors ``signal_repricer._fetch_chain`` (a single-expiry pull) using the
     shared proxy client so the leg pricer can price both the position's own
@@ -9427,8 +9427,9 @@ def _fetch_chain_for_expiry(symbol, expiry):
                     if expiry is not None else None)
         if exp_date is None:
             return None
+        kw = {} if max_age is None else {"max_age": max_age}
         resp = _proxy.schwab_py_client.get_option_chain(
-            symbol, contract_type="ALL", from_date=exp_date, to_date=exp_date)
+            symbol, contract_type="ALL", from_date=exp_date, to_date=exp_date, **kw)
         return resp.json() if getattr(resp, "status_code", None) == 200 else None
     except Exception:
         return None
@@ -9456,8 +9457,10 @@ def _leg_mid_from_chain(chain, right, strike):
     return None
 
 
-def _make_leg_pricer(symbol):
+def _make_leg_pricer(symbol, max_age=None):
     """Return ``price_leg(symbol, expiry, right, strike) -> float | None``.
+    ``max_age=0`` (the APPLY path) prices from chains fetched now, so the stale
+    guard is not comparing a candidate with its own stored chain (AC-140).
 
     Backed by the per-expiry chain fetch. The chain for each requested expiry is
     fetched once and cached inside the closure, so repeated leg lookups (and the
@@ -9468,7 +9471,8 @@ def _make_leg_pricer(symbol):
     def price_leg(_sym, expiry, right, strike):
         ek = str(expiry)[:10]
         if ek not in cache:
-            cache[ek] = _fetch_chain_for_expiry(symbol, expiry)
+            kw = {} if max_age is None else {"max_age": max_age}
+            cache[ek] = _fetch_chain_for_expiry(symbol, expiry, **kw)
         chain = cache[ek]
         if chain is None:
             return None

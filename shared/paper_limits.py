@@ -31,7 +31,7 @@ DEFAULTS = {
     # this many dollars a share: the option is nearly worthless, which is what
     # the long leg of a winning spread looks like near expiry. Above it, a zero
     # bid is a broken quote and the position is left unmarked for that cycle.
-    "marks": {"zero_bid_max_ask": 0.25},
+    "marks": {"zero_bid_max_ask": 0.25, "chain_max_age_sec": 45},
 }
 
 load, reset_cache = toml_loader(PAPER_TOML, DEFAULTS, label="paper.toml")
@@ -60,6 +60,20 @@ def zero_bid_max_ask() -> float:
         return DEFAULTS["marks"]["zero_bid_max_ask"]
     val = float(raw)
     return val if math.isfinite(val) and val >= 0 else DEFAULTS["marks"]["zero_bid_max_ask"]
+
+
+def mark_chain_max_age_sec() -> int:
+    """How old a stored chain a position MARK may be priced from, in seconds.
+    (A fill always asks for one fetched now.) A negative, NaN or non-number
+    value reads as the shipped default."""
+    sec = load().get("marks")
+    raw = sec.get("chain_max_age_sec") if isinstance(sec, dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return DEFAULTS["marks"]["chain_max_age_sec"]
+    val = float(raw)
+    if not (math.isfinite(val) and val >= 0):
+        return DEFAULTS["marks"]["chain_max_age_sec"]
+    return int(val)
 
 
 def max_risk_per_trade() -> float:

@@ -185,6 +185,9 @@ class SchwabPyProxyClient:
     # a literal True before passing the argument, so a client double with a
     # fixed signature is called exactly as before.
     supports_priority = True
+    # ``get_option_chain`` takes ``max_age``: how old a stored answer the proxy
+    # may give. Callers check this before sending it, as with ``priority``.
+    supports_max_age = True
 
     def __init__(self, base_url: str = PROXY_BASE):
         self.base = base_url

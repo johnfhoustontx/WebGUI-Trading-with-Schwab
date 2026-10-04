@@ -254,7 +254,7 @@ def test_reprice_swing_from_mock_chain(monkeypatch):
          "expiration": _FUTURE_EXP, "entry_credit": 1.30,
          "call_short": None, "call_long": None}
 
-    def fake_chain(client, sym, exp):
+    def fake_chain(client, sym, exp, max_age=None):
         return {"putExpDateMap": {"2026-04-24:7": {
             "590.0": [{"bid": 0.45, "ask": 0.55, "delta": -0.12}],
             "585.0": [{"bid": 0.15, "ask": 0.25, "delta": -0.05}],
@@ -279,7 +279,7 @@ def test_reprice_swing_ccs_from_mock_chain(monkeypatch):
          "expiration": _FUTURE_EXP, "entry_credit": 0.80,
          "call_short": None, "call_long": None}
 
-    def fake_chain(client, sym, exp):
+    def fake_chain(client, sym, exp, max_age=None):
         return {"callExpDateMap": {"2026-04-24:7": {
             "620.0": [{"bid": 0.30, "ask": 0.40, "delta": 0.18}],
             "625.0": [{"bid": 0.05, "ask": 0.15, "delta": 0.05}],
@@ -297,7 +297,7 @@ def test_reprice_swing_ic_from_mock_chain(monkeypatch):
          "call_short": 610, "call_long": 615, "expiration": _FUTURE_EXP,
          "entry_credit": 1.50}
 
-    def fake_chain(client, sym, exp):
+    def fake_chain(client, sym, exp, max_age=None):
         return {
             "putExpDateMap": {"2026-04-24:7": {
                 "590.0": [{"bid": 0.30, "ask": 0.40, "delta": -0.12}],
@@ -335,7 +335,7 @@ def test_reprice_swing_missing_leg_quotes_returns_error(monkeypatch):
          "expiration": _FUTURE_EXP, "entry_credit": 1.30,
          "call_short": None, "call_long": None}
 
-    def fake_chain(client, sym, exp):
+    def fake_chain(client, sym, exp, max_age=None):
         return {"putExpDateMap": {"2026-04-24:7": {
             "590.0": [{"bid": 0, "ask": 0, "delta": -0.12}],  # no quotes
             "585.0": [{"bid": 0.15, "ask": 0.25, "delta": -0.05}],
@@ -397,7 +397,7 @@ def test_reprice_swing_today_expiration_still_fetches(monkeypatch):
 
     calls = []
 
-    def fake_chain(client, sym, exp):
+    def fake_chain(client, sym, exp, max_age=None):
         calls.append((sym, exp))
         return {"putExpDateMap": {"2026-06-20:0": {
             "590.0": [{"bid": 0.45, "ask": 0.55, "delta": -0.12}],

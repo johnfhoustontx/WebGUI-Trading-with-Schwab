@@ -28,3 +28,7 @@ ledger_max_risk_per_trade = 750.0
 # left unmarked for that cycle, as before. 0 = a leg with no bid is never
 # marked. Read at each mark, so a change needs no restart.
 zero_bid_max_ask = 0.25
+# How old a chain a position MARK may be priced from, in seconds, when the proxy
+# answers from its own store (config/marketdata.toml). An entry or a close is
+# always priced from a chain fetched at that moment, whatever this says.
+chain_max_age_sec = 45

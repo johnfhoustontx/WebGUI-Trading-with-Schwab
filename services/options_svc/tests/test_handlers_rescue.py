@@ -214,7 +214,7 @@ def test_rescue_apply_success_refreshes(monkeypatch):
                         lambda pid: {"position_id": pid, "symbol": "SPY",
                                      "status": "OPEN"})
     monkeypatch.setattr(handlers.compute, "_make_leg_pricer",
-                        lambda sym: (lambda *a, **k: 1.0))
+                        lambda sym, max_age=None: (lambda *a, **k: 1.0))
     monkeypatch.setattr(handlers.compute, "compute_rescue",
                         lambda pid: dict(_SAMPLE_ADVISORY, position_id=pid))
     monkeypatch.setattr(handlers, "refresh_paper_account",
@@ -241,7 +241,7 @@ def test_rescue_apply_stale_surfaces(monkeypatch):
                         lambda pid: {"position_id": pid, "symbol": "SPY",
                                      "status": "OPEN"})
     monkeypatch.setattr(handlers.compute, "_make_leg_pricer",
-                        lambda sym: (lambda *a, **k: 1.0))
+                        lambda sym, max_age=None: (lambda *a, **k: 1.0))
     monkeypatch.setattr(handlers.compute, "compute_rescue",
                         lambda pid: dict(_SAMPLE_ADVISORY, position_id=pid))
     monkeypatch.setattr(handlers, "refresh_paper_account",
@@ -290,7 +290,7 @@ def test_rescue_apply_closed_position_minimal_advisory(monkeypatch):
                         lambda pid: {"position_id": pid, "symbol": "SPY",
                                      "status": "OPEN"})
     monkeypatch.setattr(handlers.compute, "_make_leg_pricer",
-                        lambda sym: (lambda *a, **k: 1.0))
+                        lambda sym, max_age=None: (lambda *a, **k: 1.0))
     monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
     # After a successful close, compute_rescue can't find the position anymore.
     monkeypatch.setattr(handlers.compute, "compute_rescue",
@@ -428,3 +428,26 @@ def test_the_rescue_summary_does_not_expire():
     src = inspect.getsource(handlers._publish_rescue_summary) \
         if hasattr(handlers, "_publish_rescue_summary") else ""
     assert "RESCUE_BOARD_TTL_SEC" not in src
+
+
+def test_rescue_apply_reprices_from_a_chain_fetched_now(monkeypatch):
+    """AC-140: the apply path asks for max_age=0."""
+    bus = Bus(fake=True)
+    seen = {}
+    monkeypatch.setattr(handlers.compute, "_load_position",
+                        lambda pid: {"position_id": pid, "symbol": "SPY",
+                                     "status": "OPEN"})
+
+    def _pricer(sym, max_age=None):
+        seen["max_age"] = max_age
+        return lambda *a, **k: 1.0
+
+    monkeypatch.setattr(handlers.compute, "_make_leg_pricer", _pricer)
+    monkeypatch.setattr(handlers.compute, "compute_rescue",
+                        lambda pid: dict(_SAMPLE_ADVISORY, position_id=pid))
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda b: None)
+    _stub_paper_adjust(monkeypatch,
+                       lambda db, pos, cand, **kw: {"ok": True, "action": "convert_ic",
+                                                    "position_id": 5})
+    handlers.run_rescue_apply(bus, 5, {"action": "convert_ic"})
+    assert seen["max_age"] == 0

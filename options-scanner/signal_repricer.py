@@ -213,7 +213,8 @@ def reprice_legs(trade, client, today=None):
         return {"current_value": None, "unrealized_pnl": None, "pnl_pct_of_credit": None,
                 "current_underlying": None, "current_short_delta": None, "error": "expired"}
     try:
-        chain = _fetch_chain(client, trade["symbol"], trade["expiration"])
+        chain = _fetch_chain(client, trade["symbol"], trade["expiration"],
+                             max_age=_paper_limits.mark_chain_max_age_sec())
         if chain is None:
             raise RuntimeError("chain None")
         pm = chain.get("putExpDateMap", {})
@@ -239,25 +240,36 @@ def reprice_legs(trade, client, today=None):
                 "error": "repricing failed"}
 
 
-def _fetch_chain(client, symbol, expiration):
+def _fetch_chain(client, symbol, expiration, max_age=None):
     """Wrapper for Schwab option chain. Cached per (symbol, expiration) per run.
 
     `expiration` is stored in signals.db as an ISO string ("YYYY-MM-DD"), but
     schwab-py validates from_date/to_date as datetime.date — convert here.
+
+    ``max_age`` is how old an answer the proxy may give from its own store, in
+    seconds. A MARK passes ``paper_limits.mark_chain_max_age_sec()``. A FILL
+    (an entry or a close) passes 0: it is fetched now, and it does not reuse
+    the chain this run already holds either - that is the snapshot the signal
+    or the mark was built on, and a fill priced from it records no movement
+    between the two (audit AC-141). ``None`` sends no limit.
     """
     key = (symbol, expiration)
-    if key in _chain_cache:
+    if key in _chain_cache and max_age != 0:
         return _chain_cache[key]
     exp_date = (
         datetime.date.fromisoformat(expiration)
         if isinstance(expiration, str)
         else expiration
     )
+    kwargs = {}
+    if max_age is not None and getattr(client, "supports_max_age", False) is True:
+        kwargs["max_age"] = max_age
     r = client.get_option_chain(
         symbol,
         from_date=exp_date,
         to_date=exp_date,
         contract_type=client.Options.ContractType.ALL,
+        **kwargs,
     )
     result = r.json() if r.status_code == 200 else None
     _chain_cache[key] = result
@@ -452,7 +464,8 @@ def reprice_swing(trade, client, today=None):
             "error": "expired",
         }
     try:
-        chain = _fetch_chain(client, trade["symbol"], trade["expiration"])
+        chain = _fetch_chain(client, trade["symbol"], trade["expiration"],
+                             max_age=_paper_limits.mark_chain_max_age_sec())
         if chain is None:
             raise RuntimeError("chain None")
 

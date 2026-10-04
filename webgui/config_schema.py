@@ -957,6 +957,11 @@ _PAPER = ConfigFile(
                   kind="money", min=1, max=100000, step=50),
         )),
         Section("Marking positions", "", (
+            Field("marks.chain_max_age_sec", "Oldest chain a mark may be priced from",
+                  "Applies when the proxy answers from its own stored chains. "
+                  "An entry or a close is always priced from a chain fetched at "
+                  "that moment. Applies at once.",
+                  kind="int", unit="seconds", min=0, max=300),
             Field("marks.zero_bid_max_ask", "Largest offer for a leg with no bid",
                   "A leg nobody is bidding for is still priced when its offer is "
                   "at or under this, in dollars a share: a nearly worthless "

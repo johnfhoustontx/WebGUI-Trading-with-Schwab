@@ -6,6 +6,8 @@ gamma_snapshot, paper_account_db). The heavy deps are monkeypatched so these
 tests never touch a proxy or the paper DB — mirroring the patterns in
 ``test_compute.py`` (monkeypatch the engine names / ``_proxy``).
 """
+import pytest
+
 from services.options_svc import compute, rescue
 from shared.contracts.options import RescueAdvisory
 
@@ -772,3 +774,48 @@ def test_compute_rescue_applies_the_regime_tilt_and_names_it(monkeypatch):
     assert tilted["heat"] == calm["heat"] + 6
     assert tilted["state"] == calm["state"]
     assert "Regime: bearish (confidence 80%)." in tilted["context"]
+
+
+# --- AC-140: the apply path prices from a chain fetched for it ------------------
+#
+# Rescue's stale-price guard re-prices the candidate's legs and aborts on a 15%
+# drift. It re-priced from the SAME stored chain the candidate was built from:
+# inside the store's age limit the drift was exactly zero, so the guard could
+# not fire, and the apply booked at that price.
+
+class _ChainClient:
+    """A proxy client stand-in that records each chain request and answers
+    with a one-strike put chain."""
+
+    def __init__(self):
+        self.seen = []
+
+    def get_option_chain(self, symbol, **kw):
+        self.seen.append(kw)
+        chain = {"putExpDateMap": {"2026-07-31:10": {
+            "500.0": [{"bid": 1.00, "ask": 1.20}]}}}
+
+        class _Resp:
+            status_code = 200
+
+            @staticmethod
+            def json():
+                return chain
+
+        return _Resp()
+
+
+def test_the_leg_pricer_can_demand_a_fresh_chain(monkeypatch):
+    client = _ChainClient()
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", client)
+    price = compute._make_leg_pricer("SPY", max_age=0)("SPY", "2026-07-31", "PUT", 500.0)
+    assert price == pytest.approx(1.10)                 # the chain really was read
+    assert client.seen[0]["max_age"] == 0
+
+
+def test_the_leg_pricer_sends_no_limit_unless_asked(monkeypatch):
+    client = _ChainClient()
+    monkeypatch.setattr(compute._proxy, "schwab_py_client", client)
+    price = compute._make_leg_pricer("SPY")("SPY", "2026-07-31", "PUT", 500.0)
+    assert price == pytest.approx(1.10)
+    assert "max_age" not in client.seen[0]
