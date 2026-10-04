@@ -198,7 +198,8 @@ def _render(entry: _ChainEntry, lo=None, hi=None) -> bytes:
 
 def chain_shape(payload) -> frozenset:
     """Which contracts a chain holds: ``(side, expiration date, strike)``.
-    Shadow mode compares these, never values — values move every second."""
+    Values are left out: they move every second. (Shadow mode's verdict is
+    :func:`chain_difference`, which reads more than this.)"""
     out = set()
     if not isinstance(payload, dict):
         return frozenset()
@@ -213,6 +214,68 @@ def chain_shape(payload) -> frozenset:
             for strike in strikes:
                 out.add((side, day, str(strike)))
     return frozenset(out)
+
+
+# Header fields that do not move between two fetches of one request. The
+# moving ones (the underlying's price and quote, interest rate, volatility)
+# are left out: they differ on every comparison.
+_STABLE_HEADER = ("symbol", "status", "strategy", "isDelayed", "isIndex")
+
+
+def _has_price(payload) -> bool:
+    price = payload.get("underlyingPrice")
+    return _real_number(price) and price > 0
+
+
+def chain_difference(stored, fresh) -> str | None:
+    """The first way two chains for one request differ, in words, or None.
+
+    Shadow mode's verdict. It reads what a stored answer must reproduce and
+    nothing that moves: the stable header fields, whether there is an
+    underlying price at all (Schwab sends 0.0 for a window holding no
+    expiration), the full expiration keys (date AND day count), the strikes
+    under each, how many contracts sit at each strike, and last the header's
+    own contract count (last, so a missing expiration is named as itself)."""
+    if not isinstance(stored, dict) or not isinstance(fresh, dict):
+        return "one answer is not a chain"
+    for field in _STABLE_HEADER:
+        if stored.get(field) != fresh.get(field):
+            return (f"{field}: stored {stored.get(field)!r}, "
+                    f"Schwab {fresh.get(field)!r}")
+    if _has_price(stored) != _has_price(fresh):
+        return (f"underlyingPrice: stored {stored.get('underlyingPrice')!r}, "
+                f"Schwab {fresh.get('underlyingPrice')!r}")
+    for side in _SIDES:
+        ours, theirs = stored.get(side), fresh.get(side)
+        if not isinstance(ours, dict) or not isinstance(theirs, dict):
+            if ours != theirs:
+                return f"{side}: one answer has no expiration map"
+            continue
+        if set(ours) != set(theirs):
+            only_ours = sorted(set(ours) - set(theirs))
+            only_theirs = sorted(set(theirs) - set(ours))
+            return (f"{side} expirations: only stored {only_ours[:3]}, "
+                    f"only Schwab {only_theirs[:3]}")
+        for exp_key in ours:
+            a, b = ours[exp_key], theirs[exp_key]
+            if not isinstance(a, dict) or not isinstance(b, dict):
+                if a != b:
+                    return f"{side} {exp_key}: one answer has no strike map"
+                continue
+            if set(a) != set(b):
+                return (f"{side} {exp_key} strikes: only stored "
+                        f"{sorted(set(a) - set(b))[:3]}, only Schwab "
+                        f"{sorted(set(b) - set(a))[:3]}")
+            for strike in a:
+                na = len(a[strike]) if isinstance(a[strike], list) else None
+                nb = len(b[strike]) if isinstance(b[strike], list) else None
+                if na != nb:
+                    return (f"{side} {exp_key} strike {strike}: stored {na} "
+                            f"contracts, Schwab {nb}")
+    if stored.get("numberOfContracts") != fresh.get("numberOfContracts"):
+        return (f"numberOfContracts: stored {stored.get('numberOfContracts')!r}, "
+                f"Schwab {fresh.get('numberOfContracts')!r}")
+    return None
 
 
 # The widest held window a near miss may refetch in place of the one asked for.
@@ -786,7 +849,9 @@ class Gateway:
 
     * chains - ``shadow_hit_match`` / ``shadow_hit_mismatch`` /
       ``shadow_subset_match`` / ``shadow_subset_mismatch``: on would have
-      answered, and whether that answer held the same contracts as Schwab's.
+      answered, and whether that answer is the one Schwab sends now in every
+      respect that does not move (:func:`chain_difference`; the first
+      mismatch per request logs what differed).
       ``shadow_cmp_match`` / ``shadow_cmp_mismatch``: on would NOT have
       answered; an entry inside ``shadow_compare_max_age_sec`` was compared
       anyway. A comparison, never a saving.
@@ -978,7 +1043,8 @@ class Gateway:
                 self._record("chains", caller, "upstream")
                 held = would or compare
                 if held is not None:
-                    same = chain_shape(json.loads(held.body)) == chain_shape(data)
+                    differs = chain_difference(json.loads(held.body), data)
+                    same = differs is None
                     verdict = "match" if same else "mismatch"
                     name = held.kind if would is not None else "cmp"
                     outcome = f"shadow_{name}_{verdict}"
@@ -988,7 +1054,8 @@ class Gateway:
                         # systematically differs on every request.
                         self._warn_once(("chains", key, outcome),
                                         "shadow: the stored %s answer for %s differs "
-                                        "from Schwab's (%s)", held.kind, key, outcome)
+                                        "from Schwab's (%s): %s",
+                                        held.kind, key, outcome, differs)
                 if would is None:
                     # On would have fetched and stored this. When on would have
                     # answered locally there was no fetch: the entry keeps ageing.

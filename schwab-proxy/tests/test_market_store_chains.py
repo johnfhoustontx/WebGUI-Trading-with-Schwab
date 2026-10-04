@@ -564,3 +564,50 @@ def test_the_newest_of_several_covering_chains_beats_an_exact_one_between_them()
     got = s.lookup(WIDE, max_age=210, now=1080.0, state="REGULAR")
     assert (got.kind, got.age) == ("subset", 20.0)
     assert json.loads(got.body)["underlyingPrice"] == 101.0
+
+
+# ---- the shadow verdict: what differs between two chains (audit AC-103) -------
+
+def test_two_chains_that_differ_only_in_values_do_not_differ():
+    assert ms.chain_difference(chain(spot=100.0), chain(spot=101.5)) is None
+
+
+def test_a_different_day_count_in_the_keys_is_a_difference():
+    # Stored before midnight, compared after: same dates, every count one less.
+    later = tuple(f"{e.split(':')[0]}:{int(e.split(':')[1]) + 1}" for e in EXPS)
+    said = ms.chain_difference(chain(exps=later), chain())
+    assert said is not None and "2026-10-05:1" in said and "2026-10-05:0" in said
+
+
+def test_a_different_contract_count_at_one_strike_is_a_difference():
+    fresh = chain()
+    fresh["callExpDateMap"]["2026-10-07:2"]["100.0"].append({"putCall": "CALL"})
+    said = ms.chain_difference(chain(), fresh)
+    assert said is not None and "2026-10-07:2" in said and "100.0" in said
+
+
+def test_a_different_header_count_is_a_difference():
+    fresh = chain()
+    fresh["numberOfContracts"] += 4
+    said = ms.chain_difference(chain(), fresh)
+    assert said is not None and "numberOfContracts" in said
+
+
+def test_a_zero_underlying_price_against_a_real_one_is_a_difference():
+    # What Schwab sends for a window holding no expiration; a moving price is not.
+    said = ms.chain_difference(chain(spot=100.0), chain(spot=0.0))
+    assert said is not None and "underlyingPrice" in said
+
+
+def test_a_missing_expiration_and_a_missing_strike_are_named():
+    said = ms.chain_difference(chain(), chain(exps=EXPS[:3]))
+    assert said is not None and "2026-10-12:7" in said
+    said = ms.chain_difference(chain(), chain(strikes=STRIKES[:2]))
+    assert said is not None and "105.0" in said
+
+
+def test_a_payload_that_is_not_a_chain_differs_without_raising():
+    assert ms.chain_difference(chain(), None) is not None
+    odd = chain()
+    odd["callExpDateMap"]["2026-10-07:2"] = 5
+    assert ms.chain_difference(chain(), odd) is not None

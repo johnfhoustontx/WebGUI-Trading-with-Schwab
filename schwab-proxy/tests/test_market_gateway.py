@@ -2112,7 +2112,7 @@ def test_a_comparison_that_raises_in_shadow_costs_no_second_call(monkeypatch):
     h = Harness(Cfg(mode="shadow"), responses=any_answer)
     h.gw.chains(P(), "a")
     h.gw.pricehistory(BAR, "a")
-    monkeypatch.setattr(ms, "chain_shape", boom)
+    monkeypatch.setattr(ms, "chain_difference", boom)
     monkeypatch.setattr(ms, "series_difference", boom)
     assert h.gw.chains(P(), "a").data == chain()
     assert h.gw.pricehistory(BAR, "a").data == series(FRI, MON)
@@ -2497,3 +2497,44 @@ def test_an_unusable_age_limit_is_no_limit():
     h.clock += 60
     for junk in ("soon", "nan", "-5", ""):
         assert h.gw.pricehistory(BAR, "x", max_age=junk).kind == "hit"
+
+
+# ---- the shadow chain verdict says what differed (audit AC-103) ---------------
+
+def test_a_stored_chain_with_another_day_count_is_a_mismatch_and_says_so(caplog):
+    # Same dates and strikes, every key's day count one higher: the stored
+    # answer is not the one Schwab sends now.
+    state = {"later": False}
+
+    def answer(endpoint, params):
+        if not state["later"]:
+            return chain()
+        return chain(exps=tuple(f"{e.split(':')[0]}:{int(e.split(':')[1]) + 1}"
+                                for e in EXPS))
+
+    h = Harness(Cfg(mode="shadow"), responses=answer)
+    h.gw.chains(P(), "a")
+    h.clock += 10
+    state["later"] = True
+    with caplog.at_level("WARNING", logger="market_store"):
+        h.gw.chains(P(), "a")
+    assert h.outcomes() == ["upstream", "upstream", "shadow_hit_mismatch"]
+    (line,) = store_warnings(caplog)
+    assert "2026-10-05:0" in line and "2026-10-05:1" in line
+
+
+def test_a_stored_chain_with_another_contract_count_is_a_mismatch():
+    state = {"more": False}
+
+    def answer(endpoint, params):
+        out = chain()
+        if state["more"]:
+            out["numberOfContracts"] += 2
+        return out
+
+    h = Harness(Cfg(mode="shadow"), responses=answer)
+    h.gw.chains(P(), "a")
+    h.clock += 10
+    state["more"] = True
+    h.gw.chains(P(), "a")
+    assert h.outcomes()[-1] == "shadow_hit_mismatch"
