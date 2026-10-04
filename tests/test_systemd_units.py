@@ -1517,3 +1517,24 @@ def test_the_token_watch_is_a_oneshot_running_the_script(rendered):
     assert svc["Type"] == "oneshot"
     assert svc["ExecStart"].endswith("tools/token_watch.py")
     assert "PartOf" not in rendered[TOKEN_SVC]["Unit"]
+
+
+# --- SE-09: what a user unit CAN do to contain the public process ------------
+# Measured on the server, 2026-10-04: in a `systemd --user` unit on this host
+# InaccessiblePaths= and ProtectHome= are silently not applied (unprivileged
+# user namespaces are restricted), so a path a unit is told it cannot see is
+# still readable. NoNewPrivileges= is a prctl and does take effect. It is the
+# one hardening line that is real here; the rest would read as protection and
+# be none.
+
+def test_the_public_process_cannot_gain_privileges(rendered):
+    svc = rendered[units.unit_name("webgui_live")]["Service"]
+    assert svc["NoNewPrivileges"] == "yes"
+
+
+def test_no_unit_claims_path_isolation_that_does_not_apply_here():
+    for name, text in units.render_all().items():
+        for key in ("InaccessiblePaths=", "ProtectHome=", "ProtectSystem=",
+                    "ReadOnlyPaths=", "PrivateTmp="):
+            assert key not in text, (
+                f"{name} sets {key} which a user unit on this host silently ignores")

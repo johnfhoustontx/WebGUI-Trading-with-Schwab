@@ -341,6 +341,15 @@ def _service_text(component, port, script):
             "# Caps WHO DIES under a request flood: these screens, alone.",
             f"MemoryHigh={LIVE_MEMORY_HIGH}",
             f"MemoryMax={LIVE_MEMORY_MAX}",
+            # The process cannot gain privileges through a setuid binary. It is
+            # the ONE hardening setting that takes effect in a user unit on this
+            # host: measured 2026-10-04, InaccessiblePaths= and ProtectHome= are
+            # silently not applied here (unprivileged user namespaces are
+            # restricted), so they are deliberately NOT set - a line that reads
+            # as isolation and gives none is worse than no line. Keeping this
+            # process away from the stack's secrets needs a separate OS user,
+            # which is a root-level change (audit SE-09).
+            "NoNewPrivileges=yes",
         ]
 
     if is_webgui:
