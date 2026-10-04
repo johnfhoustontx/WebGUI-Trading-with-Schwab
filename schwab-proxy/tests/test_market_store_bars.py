@@ -563,3 +563,57 @@ def test_series_agree_is_built_on_series_difference(monkeypatch):
     assert ms.series_agree(HELD, HELD) is False
     monkeypatch.setattr(ms, "series_difference", lambda *a, **k: None)
     assert ms.series_agree(HELD, series(FRI)) is True
+
+
+# ---- the moving bar: what a stored series says about TODAY -------------------
+# ``series_difference`` skips the values of today's bar during the session,
+# because that bar legitimately moves. But it is the ONLY bar a stored series
+# can be stale on, so a verdict that skips it reports "match" for exactly the
+# answers that were out of date (audit AC-100: 501.50 held, 501.97 fresh).
+# ``compare_moving_bar`` is the verdict for that one bar: how far the stored
+# close sits from the close Schwab sends now.
+
+def _today(close):
+    out = series(dt.date(2026, 10, 2), dt.date(2026, 10, 5))
+    out["candles"][-1]["close"] = close              # only TODAY's bar moves
+    return out
+
+
+MOVING_DAY = dt.date(2026, 10, 5)
+
+
+def test_an_unmoved_close_is_the_same():
+    assert ms.compare_moving_bar(_today(501.50), _today(501.50), MOVING_DAY) == "same"
+
+
+def test_the_audits_reproduction_is_a_move_of_under_ten_basis_points():
+    # 501.50 against 501.97 is 0.094%.
+    assert ms.compare_moving_bar(_today(501.50), _today(501.97),
+                                 MOVING_DAY) == "under_10bp"
+
+
+def test_the_bands_are_ten_and_fifty_basis_points_of_the_fresh_close():
+    fresh = _today(100.0)
+    assert ms.compare_moving_bar(_today(100.09), fresh, MOVING_DAY) == "under_10bp"
+    assert ms.compare_moving_bar(_today(100.11), fresh, MOVING_DAY) == "under_50bp"
+    assert ms.compare_moving_bar(_today(99.51), fresh, MOVING_DAY) == "under_50bp"
+    assert ms.compare_moving_bar(_today(99.49), fresh, MOVING_DAY) == "over_50bp"
+    assert ms.compare_moving_bar(_today(101.0), fresh, MOVING_DAY) == "over_50bp"
+
+
+def test_no_verdict_unless_both_series_end_on_todays_bar():
+    friday_only = series(dt.date(2026, 10, 2))
+    assert ms.compare_moving_bar(friday_only, _today(100.0), MOVING_DAY) is None
+    assert ms.compare_moving_bar(_today(100.0), friday_only, MOVING_DAY) is None
+    assert ms.compare_moving_bar({}, _today(100.0), MOVING_DAY) is None
+    assert ms.compare_moving_bar(None, None, MOVING_DAY) is None
+
+
+def test_no_verdict_on_a_close_that_is_not_a_real_number():
+    bad = _today(100.0)
+    bad["candles"][-1]["close"] = None
+    assert ms.compare_moving_bar(bad, _today(100.0), MOVING_DAY) is None
+    assert ms.compare_moving_bar(_today(100.0), bad, MOVING_DAY) is None
+    zero = _today(100.0)
+    zero["candles"][-1]["close"] = 0
+    assert ms.compare_moving_bar(_today(100.0), zero, MOVING_DAY) is None

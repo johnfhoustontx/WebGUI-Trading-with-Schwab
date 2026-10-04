@@ -482,6 +482,45 @@ def compare_today_bar(upstream, quote, today) -> str:
     return "match"
 
 
+# How far a STORED today's bar sits from the one Schwab sends now, as a share
+# of the fresh close. 50 basis points is ``_BAR_TOLERANCE``, the standard a
+# quote-built bar is held to; 10 is a finer band below it.
+_MOVING_SMALL, _MOVING_LARGE = 0.001, _BAR_TOLERANCE
+
+
+def compare_moving_bar(stored, fresh, today) -> str | None:
+    """Shadow verdict on the one bar :func:`series_difference` does not judge:
+    today's, during the session in progress. ``same`` / ``under_10bp`` /
+    ``under_50bp`` / ``over_50bp`` - how far the STORED close sits from the
+    close Schwab sends now. None when either series does not end on a bar for
+    ``today``, or a close is not a usable number.
+
+    That bar legitimately moves, so it cannot count against the series
+    verdict. But it is the ONLY bar a stored series can be stale on: a repeat
+    inside the session recorded ``shadow_hit_match`` while ``on`` would have
+    answered with a close minutes old (audit AC-100: 501.50 held, 501.97
+    fresh). This is the outcome that shows it, by size.
+    """
+    ours = stored.get("candles") if isinstance(stored, dict) else None
+    theirs = fresh.get("candles") if isinstance(fresh, dict) else None
+    if not ours or not theirs or not isinstance(ours, list) or not isinstance(theirs, list):
+        return None
+    a, b = ours[-1], theirs[-1]
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return None
+    if _candle_date(a) != today or _candle_date(b) != today:
+        return None
+    held, now = a.get("close"), b.get("close")
+    if not _real_number(held) or not _real_number(now) or now <= 0:
+        return None
+    moved = abs(held - now) / now
+    if moved == 0:
+        return "same"
+    if moved < _MOVING_SMALL:
+        return "under_10bp"
+    return "under_50bp" if moved <= _MOVING_LARGE else "over_50bp"
+
+
 # Today's volume only grows, and the quote may be up to two minutes OLDER than
 # Schwab's bar. So the quote's volume may fall short of the bar's by what trades
 # in two minutes (about 0.5% of an even session; far more in the first minutes),
@@ -1150,10 +1189,24 @@ class Gateway:
             # On would have served the stored series. Is it the series Schwab
             # sends now? Once settled it is served all evening and all
             # weekend, so a difference here is a wrong answer for hours.
-            difference = series_difference(json.loads(would.body), data,
+            stored = json.loads(would.body)
+            difference = series_difference(stored, data,
                                            moving=now_ct.date() if live else None)
             verdict = "match" if difference is None else "mismatch"
             self._record("pricehistory", caller, f"shadow_hit_{verdict}")
+            if live:
+                # The verdict above skips today's bar, the one bar the stored
+                # series can be stale on. Judge it on its own.
+                moved = compare_moving_bar(stored, data, now_ct.date())
+                if moved is not None:
+                    self._record("pricehistory", caller, f"shadow_moving_{moved}")
+                    if moved != "same":
+                        self._warn_once(
+                            ("moving", key), "shadow: on would have served %s "
+                            "today's bar closing %s; Schwab now sends %s "
+                            "(entry %.0fs old)", key,
+                            _shown(stored["candles"][-1].get("close")),
+                            _shown(data["candles"][-1].get("close")), would.age)
             if difference is not None:
                 # What differed, so each mismatch can be explained: a bar
                 # added, the window's first bar sliding, a revised value.
