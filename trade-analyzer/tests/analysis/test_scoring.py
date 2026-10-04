@@ -319,3 +319,37 @@ class TestScoreGuidanceDirection:
 
     def test_unknown(self):
         assert score_guidance_direction("WHATEVER") == 0
+
+
+# ── A ratio at or below zero is NOT a cheap one (audit AC-43) ────────────────
+# A negative P/E means the company lost money; a negative PEG means negative
+# earnings or shrinking earnings. Both sorted below every "cheap" threshold and
+# took the BEST score in the table, so a loss-maker got the maximum valuation
+# score. Neither ratio carries a valuation reading at or below zero.
+
+class TestNonPositiveRatiosCarryNoValuationReading:
+    @pytest.mark.parametrize("pe", [-15.0, -0.01, 0.0])
+    def test_pe_at_or_below_zero_scores_nothing(self, pe):
+        assert score_pe_vs_sector(pe, 20.0) == 0
+
+    @pytest.mark.parametrize("median", [-20.0, 0.0])
+    def test_sector_median_at_or_below_zero_scores_nothing(self, median):
+        # A negative median flips the ratio's sign: an expensive stock read as
+        # ratio -1.5, below 0.7, the best score.
+        assert score_pe_vs_sector(30.0, median) == 0
+
+    @pytest.mark.parametrize("peg", [-0.5, -3.0, 0.0])
+    def test_peg_at_or_below_zero_scores_nothing(self, peg):
+        assert score_peg(peg) == 0
+
+    def test_not_a_number_scores_nothing(self):
+        nan = float("nan")
+        assert score_pe_vs_sector(nan, 20.0) == 0
+        assert score_pe_vs_sector(15.0, nan) == 0
+        assert score_peg(nan) == 0
+
+    def test_a_small_positive_pe_is_still_the_cheapest_band(self):
+        assert score_pe_vs_sector(0.5, 20.0) == 60
+
+    def test_a_small_positive_peg_is_still_the_best_band(self):
+        assert score_peg(0.01) == 40

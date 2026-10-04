@@ -232,3 +232,33 @@ class TestTheCashFlowGateCanFinallyFire:
                                   eps_surprises=[0.10, 0.08, 0.07, -0.02],
                                   last_eps_surprise=-0.02))
         assert not any("FCF" in g for g in out["gates_triggered"])
+
+
+class TestALossMakerGetsNoValuationCredit:
+    """Audit AC-43. P/E -15 against a sector median of 22 is ratio -0.68, below
+    the 0.7 "cheap" line: +60. PEG -0.5 is below 1: +40. The loss-maker's
+    valuation read +50 - the maximum the factor can produce."""
+
+    def test_negative_pe_and_peg_score_zero_valuation(self, strong_inputs):
+        f = replace(strong_inputs.fundamentals, pe_ratio=-15.0, peg_ratio=-0.5)
+        v = InvestorVerdict().score(replace(strong_inputs, fundamentals=f))
+        assert _valuation_raw(v) == 0
+
+    def test_a_negative_pe_does_not_halve_a_real_peg(self, strong_inputs):
+        # P/E carries no reading, so valuation is the PEG's 40 alone - not the
+        # mean of 40 and a structural zero.
+        f = replace(strong_inputs.fundamentals, pe_ratio=-15.0, peg_ratio=0.9)
+        v = InvestorVerdict().score(replace(strong_inputs, fundamentals=f))
+        assert _valuation_raw(v) == 40
+
+    def test_a_negative_peg_does_not_halve_a_real_pe(self, strong_inputs):
+        # P/E 18 against 22 is ratio 0.82: 30, standing alone.
+        f = replace(strong_inputs.fundamentals, pe_ratio=18.0, peg_ratio=-0.5)
+        v = InvestorVerdict().score(replace(strong_inputs, fundamentals=f))
+        assert _valuation_raw(v) == 30
+
+    def test_a_negative_sector_median_admits_no_pe_reading(self, strong_inputs):
+        f = replace(strong_inputs.fundamentals, pe_ratio=30.0, peg_ratio=0.9)
+        v = InvestorVerdict().score(
+            replace(strong_inputs, fundamentals=f, sector_pe_median=-20.0))
+        assert _valuation_raw(v) == 40

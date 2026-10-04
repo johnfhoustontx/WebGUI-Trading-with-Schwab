@@ -1,4 +1,5 @@
 """Normalized sub-score primitives. Each returns int in [-100, +100]."""
+import math
 from typing import Optional, List
 
 
@@ -88,8 +89,26 @@ def score_distance_from_52wk_high(distance_pct: float) -> int:
     return -60
 
 
+def is_positive_ratio(value) -> bool:
+    """Whether a valuation ratio carries a reading: a finite number ABOVE zero.
+
+    A P/E at or below zero means the company lost money, and a PEG at or below
+    zero means negative or shrinking earnings. Neither is "cheap": the ratio
+    has simply stopped measuring valuation. Both sorted below every cheap
+    threshold and took the BEST score in the table, so a loss-maker received
+    the maximum valuation score (audit AC-43). ``InvestorVerdict`` uses this
+    same test to decide which sub-scores to average, so an inadmissible ratio
+    drops out rather than averaging in as a zero.
+    """
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(v) and v > 0
+
+
 def score_pe_vs_sector(pe: Optional[float], sector_pe_median: Optional[float]) -> int:
-    if pe is None or sector_pe_median is None or sector_pe_median == 0:
+    if not is_positive_ratio(pe) or not is_positive_ratio(sector_pe_median):
         return 0
     ratio = pe / sector_pe_median
     if ratio <= 0.7:
@@ -102,7 +121,7 @@ def score_pe_vs_sector(pe: Optional[float], sector_pe_median: Optional[float]) -
 
 
 def score_peg(peg: Optional[float]) -> int:
-    if peg is None:
+    if not is_positive_ratio(peg):
         return 0
     if peg < 1:
         return 40

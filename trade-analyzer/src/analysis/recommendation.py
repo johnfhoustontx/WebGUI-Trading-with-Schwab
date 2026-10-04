@@ -11,6 +11,7 @@ from src.analysis.scoring import (
     score_distance_from_52wk_high,
     score_earnings_surprise_streak,
     score_growth_metric,
+    is_positive_ratio,
     score_guidance_direction,
     score_macd,
     score_margin_trend,
@@ -258,10 +259,15 @@ class InvestorVerdict:
         # which live ``analyze()`` never supplied. The availability test is on
         # the inputs, not the outputs: ``score_peg`` legitimately returns 0 for
         # a PEG between 1 and 2, so a 0 score cannot stand for "missing".
+        #
+        # "Present" means a ratio ABOVE zero (``is_positive_ratio``). A negative
+        # P/E or PEG is a loss-maker, not a bargain, and carries no valuation
+        # reading at all - so it drops out here exactly as a missing one does,
+        # rather than averaging in as a zero.
         valuation_parts = []
-        if f.pe_ratio is not None and inp.sector_pe_median:
+        if is_positive_ratio(f.pe_ratio) and is_positive_ratio(inp.sector_pe_median):
             valuation_parts.append(score_pe_vs_sector(f.pe_ratio, inp.sector_pe_median))
-        if f.peg_ratio is not None:
+        if is_positive_ratio(f.peg_ratio):
             valuation_parts.append(score_peg(f.peg_ratio))
 
         traj_parts = []
