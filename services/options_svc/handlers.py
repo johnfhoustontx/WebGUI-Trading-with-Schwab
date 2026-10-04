@@ -3195,6 +3195,460 @@ def run_x_post(bus, args, now=None):
         return None
 
 
+# ── the command table ─────────────────────────────────────────────────────────
+# One function per ``cmd:options`` command, registered by name. ``handle_command``
+# (below) is the lookup; what each command means is documented in ITS docstring,
+# which two tests in test_handlers.py hold equal to this table.
+#
+# Until 2026-10-04 this was one 370-line if/elif chain (audit CQ-03). The bodies
+# below are that chain's branches, moved without change, with one exception: the
+# replay guard is applied by the dispatcher for every name in _REPLAY_GUARDED, so
+# a handler no longer has to remember it. ``calc_rate`` was listed there and
+# documented as guarded, and its branch never checked.
+_COMMANDS: dict = {}
+
+
+def _command(*names):
+    """Register the decorated function as the handler for each of ``names``."""
+    def register(fn):
+        for name in names:
+            if name in _COMMANDS:
+                raise ValueError(f"command {name!r} is registered twice")
+            _COMMANDS[name] = fn
+        return fn
+    return register
+
+
+# Why each replay-guarded command must not run again, for the refusal's log line.
+_STALE_WHY = {
+    "rescue_apply": "a replayed adjustment would re-mutate the book",
+    "gamma_analyze": "a replayed command must not re-bill a Claude call",
+    "calc_rate": "a replayed rating would re-spend its Schwab calls for a dialog "
+                 "nobody has open",
+    "dossier": "a replayed lookup must not re-spend its Schwab calls",
+    "x_post": "a replayed command must not re-post to X",
+    "x_post_report": "a replayed command must not re-post to X",
+}
+
+
+def _refuse_stale(bus, command) -> None:
+    """Log a replay-guarded command that waited too long, and tell the one page
+    that is watching for an answer."""
+    args = command.args if isinstance(command.args, dict) else {}
+    subject = args.get("position_id", args.get("symbol"))
+    log.warning("REJECTED stale %s%s: age %.0fs > %ds (ts=%s) — %s",
+                command.type, f" for {subject!r}" if subject is not None else "",
+                _command_age_seconds(command) or -1, STALE_OPEN_MAX_AGE_SEC,
+                getattr(command, "ts", None),
+                _STALE_WHY.get(command.type, "a replayed command must not run again"))
+    if command.type == "x_post":
+        # The /x page is watching its log; a silent drop reads as a hang.
+        x_post.record_refusal(bus, "marketing", str(args.get("text") or ""),
+                              "expired in the queue")
+
+
+@_command("rescan")
+def _cmd_rescan(bus, command):
+    rescan(bus)
+
+
+@_command("calibration_refresh")
+def _cmd_calibration_refresh(bus, command):
+    # Also runs from the scheduler's startup one-shot and its nightly slot.
+    # It is a command as well because dev suppresses schedulers, and a page
+    # feature that can never populate in dev is one no future change to it
+    # can be verified against.
+    refresh_calibration(bus)
+
+
+@_command("swing_scan")
+def _cmd_swing_scan(bus, command):
+    swing_scan(bus, command.args)
+
+
+@_command("income_open")
+def _cmd_income_open(bus, command):
+    run_income_open(bus, command)
+
+
+@_command("refresh_paper")
+def _cmd_refresh_paper(bus, command):
+    refresh_paper_account(bus)
+
+
+@_command("paper_entry")
+def _cmd_paper_entry(bus, command):
+    # No account -> don't run the cycle; refresh so the page shows the
+    # no-account state.
+    if compute.has_paper_account():
+        compute.run_entry_cycle()
+    refresh_paper_account(bus)
+
+
+@_command("paper_manage")
+def _cmd_paper_manage(bus, command):
+    run_manage_and_refresh(bus)
+
+
+@_command("paper_reset")
+def _cmd_paper_reset(bus, command):
+    compute.reset_paper_account(float(command.args.get("starting_balance", 25000.0)))
+    refresh_paper_account(bus)
+
+
+@_command("paper_create")
+def _cmd_paper_create(bus, command):
+    # R5: refuse a stale manual paper-open (a restart replay would open on
+    # stale economics). Surfaced via the R1 results list + logged; the ledger
+    # is still refreshed so the page repaints.
+    raw = command.args.get("signal")
+    sig = raw if isinstance(raw, dict) else {}
+    if _is_stale_open(command):
+        age = _command_age_seconds(command)
+        log.warning(
+            "REJECTED stale paper_create for %s: age %.0fs > %ds (enqueue ts=%s)",
+            sig.get("symbol"), age or -1, STALE_OPEN_MAX_AGE_SEC,
+            getattr(command, "ts", None))
+        _publish_paper_create(bus, {"status": "stale", "symbol": sig.get("symbol"),
+                                    "type": sig.get("type"),
+                                    "expiration": sig.get("expiration"),
+                                    "qty": None, "rungs": [],
+                                    "message": "The request waited too long to be "
+                                               "processed. Try again."})
+    else:
+        try:
+            outcome = compute.create_paper_trade(sig, command.args.get("qty", 1)) or {}
+        except Exception:
+            # Answer the page before the scaffold dead-letters the command: a
+            # raise (a locked trades.db, say) must not be a button that does
+            # nothing. Re-raised so the traceback and dead-letter still happen.
+            _publish_paper_create(bus, {
+                "status": "error", "symbol": sig.get("symbol"),
+                "type": sig.get("type"), "expiration": sig.get("expiration"),
+                "rungs": [],
+                "message": "The paper ledger could not process the request."})
+            raise
+        if outcome.get("status") == "refused":
+            log.info("REFUSED paper_create %s %s: %s", sig.get("symbol"),
+                     outcome.get("code"), outcome.get("message"))
+        elif outcome.get("status") == "error":
+            log.warning("paper_create error for %s: %s", sig.get("symbol"),
+                        outcome.get("message"))
+        _publish_paper_create(bus, outcome)
+    refresh_paper_trades(bus)
+
+
+@_command("paper_reload")
+def _cmd_paper_reload(bus, command):
+    refresh_paper_trades(bus)
+
+
+@_command("paper_close")
+def _cmd_paper_close(bus, command):
+    compute.close_paper(command.args.get("trade_id"),
+                        command.args.get("debit", 0.0))
+    refresh_paper_trades(bus)
+
+
+@_command("paper_delete")
+def _cmd_paper_delete(bus, command):
+    compute.delete_paper(command.args.get("trade_id"))
+    refresh_paper_trades(bus)
+
+
+@_command("paper_delete_closed")
+def _cmd_paper_delete_closed(bus, command):
+    compute.delete_closed_paper()
+    refresh_paper_trades(bus)
+
+
+@_command("paper_analyze")
+def _cmd_paper_analyze(bus, command):
+    res = compute.analyze_paper(command.args.get("trade_id"))
+    version = bus.cache_set(CACHE_PAPER_ANALYZE, res)
+    bus.publish(EVENT_PAPER_ANALYZE, {"version": version})
+
+
+@_command("captured_reload")
+def _cmd_captured_reload(bus, command):
+    refresh_captured(bus)
+
+
+@_command("captured_reprice")
+def _cmd_captured_reprice(bus, command):
+    res = compute.reprice_captured()
+    # Cache the repriced signal list (so the table shows fresh marks) +
+    # the flags list (so the page can notify) under separate views.
+    _publish_captured(bus, res["signals"])
+    fver = bus.cache_set(CACHE_CAPTURED_FLAGS, {"flags": res["flags"]})
+    bus.publish(EVENT_CAPTURED_FLAGS, {"version": fver})
+    _notify_captured(bus, res.get("signals"))
+
+
+@_command("captured_close")
+def _cmd_captured_close(bus, command):
+    sid = command.args.get("signal_id")
+    compute.close_captured(sid,
+                           command.args.get("exit_val", 0.0),
+                           command.args.get("reason", "MANUAL_CLOSE"))
+    # Drop ONLY the closed signal from the cached view, preserving the live
+    # marks on the remaining rows (don't revert to the persisted view).
+    remove_closed_from_captured(bus, sid)
+
+
+@_command("captured_manage")
+def _cmd_captured_manage(bus, command):
+    # Manual 'run now' of the captured auto-manage cycle (reprice → arm → close);
+    # runs regardless of the auto-close toggle (the toggle only gates the
+    # scheduled tick — an explicit click should always work).
+    run_captured_manage_and_publish(bus)
+
+
+@_command("set_autoclose")
+def _cmd_set_autoclose(bus, command):
+    # Settings toggle write-through: gate the SCHEDULED captured-manage cycle.
+    enabled = bool((command.args or {}).get("enabled", True))
+    bus.cache_set(CACHE_AUTOCLOSE_ENABLED, {"enabled": enabled})
+
+
+@_command("set_manual_paper_lifecycle")
+def _cmd_set_manual_paper_lifecycle(bus, command):
+    # Settings toggle write-through: gate the MANUAL paper account's opt-in
+    # break-even lifecycle. Defaults False — only an explicit enable turns it
+    # on.
+    enabled = bool((command.args or {}).get("enabled", False))
+    bus.cache_set(CACHE_MANUAL_PAPER_LIFECYCLE, {"enabled": enabled})
+
+
+@_command("gamma_refresh")
+def _cmd_gamma_refresh(bus, command):
+    refresh_gamma(bus, command.args.get("symbol", "$SPX"))
+
+
+@_command("gamma_explain")
+def _cmd_gamma_explain(bus, command):
+    res = compute.gamma_explain(command.args.get("symbol", "$SPX"))
+    version = bus.cache_set(CACHE_GAMMA_EXPLAIN, res)
+    bus.publish(EVENT_GAMMA_EXPLAIN, {"version": version})
+
+
+@_command("gamma_analyze")
+def _cmd_gamma_analyze(bus, command):
+    # Replay-guarded (see _REPLAY_GUARDED): a PAID Claude call.
+    res = compute.gamma_analyze()
+    version = bus.cache_set(CACHE_GAMMA_ANALYZE, res)
+    bus.publish(EVENT_GAMMA_ANALYZE, {"version": version})
+    # Record ad-hoc runs to history too, under a time-stamped slot so repeated
+    # clicks in a day are each kept (distinct from the scheduled slots).
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _ZI
+    _now = _dt.datetime.now(_ZI("America/Chicago"))
+    _persist_briefing(res, f"adhoc-{_now.strftime('%H%M')}", _now)
+    publish_gamma_briefing_index(bus)
+
+
+@_command("gamma_history")
+def _cmd_gamma_history(bus, command):
+    run_gamma_history(bus, command.args.get("date"), command.args.get("slot"))
+
+
+@_command("sim_fetch")
+def _cmd_sim_fetch(bus, command):
+    a = command.args or {}
+    lazy = {"lazy": True, "expiries": a.get("expiries")} if a.get("lazy") else {}
+    meta = compute.sim_fetch(a.get("symbol", "SPY"), **lazy)
+    # The chain goes FIRST: the page reacts to the meta version and then
+    # reads the chain, so chain-already-written is the only skew it can see
+    # (the gamma history ordering, for the same reason).
+    chain = meta.pop("chain", None) if isinstance(meta, dict) else None
+    cver = bus.cache_set(CACHE_SIM_CHAIN, {"symbol": (meta or {}).get("symbol"),
+                                           "chain": chain})
+    bus.publish(EVENT_SIM_CHAIN, {"version": cver})
+    version = bus.cache_set(CACHE_SIM_META, meta)
+    bus.publish(EVENT_SIM_META, {"version": version})
+
+
+@_command("sim_fetch_expiry")
+def _cmd_sim_fetch_expiry(bus, command):
+    a = command.args or {}
+    meta = compute.sim_fetch_expiry(a.get("symbol"), a.get("expiry"))
+    if meta is not None:
+        # Merge the one new expiry into the cached grid chain for the same
+        # symbol, then write chain BEFORE meta, as sim_fetch does.
+        extra = meta.pop("chain", None)
+        env = bus.cache_get(CACHE_SIM_CHAIN)
+        cached = env.payload if env is not None else None
+        base = ((cached or {}).get("chain")
+                if (cached or {}).get("symbol") == meta.get("symbol") else None)
+        cver = bus.cache_set(CACHE_SIM_CHAIN, {"symbol": meta.get("symbol"),
+                                               "chain": compute.merge_chains(base, extra)})
+        bus.publish(EVENT_SIM_CHAIN, {"version": cver})
+        version = bus.cache_set(CACHE_SIM_META, meta)
+        bus.publish(EVENT_SIM_META, {"version": version})
+
+
+@_command("sim_run")
+def _cmd_sim_run(bus, command):
+    a = command.args or {}
+    result = compute.sim_run(
+        a.get("symbol"), a.get("expiry"), a.get("kind"), a.get("strike"),
+        a.get("direction"), a.get("dt", 5.0), a.get("mult", 1.5),
+        legs=a.get("legs"))
+    version = bus.cache_set(CACHE_SIM_RESULT, result)
+    bus.publish(EVENT_SIM_RESULT, {"version": version})
+
+
+@_command("sim_replay")
+def _cmd_sim_replay(bus, command):
+    a = command.args or {}
+    res = compute.sim_replay(
+        a.get("symbol"), a.get("expiry"), a.get("kind"),
+        a.get("strike"), a.get("direction"), a.get("lookback", "auto"),
+        legs=a.get("legs"))
+    version = bus.cache_set(CACHE_SIM_REPLAY, res)
+    bus.publish(EVENT_SIM_REPLAY, {"version": version})
+
+
+@_command("calc_load")
+def _cmd_calc_load(bus, command):
+    a = command.args or {}
+    # Both the Calculator and Rescue's ad-hoc form ask for a lazy load: every
+    # listed expiration, strikes for the nearest two. The eager branch below
+    # survives for a symbol whose expiration list cannot be fetched.
+    lazy = {"lazy": True, "expiries": a.get("expiries")} if a.get("lazy") else {}
+    cc = compute.calc_load_symbol(a.get("symbol", "SPY"), **lazy)
+    version = bus.cache_set(CACHE_CALC_CHAIN, cc)
+    bus.publish(EVENT_CALC_CHAIN, {"version": version})
+
+
+@_command("calc_load_expiry")
+def _cmd_calc_load_expiry(bus, command):
+    a = command.args or {}
+    env = bus.cache_get(CACHE_CALC_CHAIN)
+    cc = compute.calc_load_expiry(env.payload if env is not None else None,
+                                  a.get("symbol"), a.get("expiry"))
+    if cc is not None:          # a stale click writes nothing
+        version = bus.cache_set(CACHE_CALC_CHAIN, cc)
+        bus.publish(EVENT_CALC_CHAIN, {"version": version})
+
+
+@_command("calc_compute")
+def _cmd_calc_compute(bus, command):
+    result = compute.calc_compute(**(command.args or {}))
+    version = bus.cache_set(CACHE_CALC_RESULT, result)
+    bus.publish(EVENT_CALC_RESULT, {"version": version})
+
+
+@_command("calc_iv")
+def _cmd_calc_iv(bus, command):
+    a = command.args or {}
+    res = compute.calc_iv(a.get("spot"), a.get("strike"),
+                          a.get("option_type"), a.get("mark"),
+                          a.get("expiry"), a.get("rate", 0.045))
+    version = bus.cache_set(CACHE_CALC_IV, res)
+    bus.publish(EVENT_CALC_IV, {"version": version})
+
+
+@_command("calc_rate")
+def _cmd_calc_rate(bus, command):
+    # Replay-guarded (see _REPLAY_GUARDED): harmless to repeat, but it spends
+    # Schwab calls answering a dialog nobody has open.
+    a = command.args or {}
+    env = bus.cache_get(CACHE_CALC_CHAIN)
+    out = rate_trade.rate(a.get("symbol"), a.get("structure"), a.get("legs"),
+                          env.payload if env is not None else None,
+                          market_state=_market_state(bus))
+    # Always answers its request - a refusal is a sentence the dialog shows,
+    # never a silence it would wait out.
+    version = bus.cache_set(CACHE_CALC_RATING, {
+        "request_id": a.get("request_id"), "symbol": a.get("symbol"),
+        "legs": a.get("legs"), "row": out.get("row"), "error": out.get("error")})
+    bus.publish(EVENT_CALC_RATING, {"version": version})
+
+
+@_command("dossier")
+def _cmd_dossier(bus, command):
+    # The Symbol page's lookup for a ticker the cache cannot answer.
+    # Replay-guarded (see _REPLAY_GUARDED): each fetch is 4-5 Schwab calls.
+    #
+    # The symbol becomes part of a Redis KEY NAME, and build_dossier stores
+    # it exactly as passed - so it is cleaned here, once, and that one value
+    # is used for both the fetch and the key.
+    symbol = clean_symbol((command.args or {}).get("symbol"))
+    if symbol is None:
+        log.warning("dossier: refusing malformed symbol %r",
+                    (command.args or {}).get("symbol"))
+        return
+    # A duplicate queued behind a slow command, or a second tab: the cache
+    # answered moments ago (see DOSSIER_DEDUP_SEC).
+    recent = _recent_dossier(bus, symbol)
+    if recent is not None:
+        log.info("dossier: %s written %.0fs ago (< %ds) — not re-fetching",
+                 symbol, recent, DOSSIER_DEDUP_SEC)
+        return
+    payload = dossier.build_dossier(symbol)
+    bus.cache_set(dossier_key(symbol), payload,
+                  event=dossier_event(symbol), ttl=DOSSIER_TTL_SEC)
+
+
+@_command("x_post")
+def _cmd_x_post(bus, command):
+    # A public post on X. Replay-guarded (see _REPLAY_GUARDED).
+    # ``x_post`` carries its image as base64 in the command itself, so it stays
+    # in cmd:options until the stream trims (~1000 commands) - acceptable at a
+    # handful of posts a day.
+    run_x_post(bus, command.args or {})
+
+
+@_command("x_post_report")
+def _cmd_x_post_report(bus, command):
+    # A public post on X. Replay-guarded (see _REPLAY_GUARDED).
+    run_x_post_report(bus, command.args or {})
+
+
+@_command("expected_move")
+def _cmd_expected_move(bus, command):
+    a = command.args or {}
+    res = compute.compute_expected_move(
+        a.get("symbol"), a.get("expiry"), a.get("legs") or [],
+        a.get("lookback", "auto"))
+    version = bus.cache_set(CACHE_EXPECTED_MOVE, res)
+    bus.publish(EVENT_EXPECTED_MOVE, {"version": version})
+
+
+@_command("em_chain")
+def _cmd_em_chain(bus, command):
+    res = compute.em_chain_meta((command.args or {}).get("symbol", "SPY"))
+    version = bus.cache_set(CACHE_EM_CHAIN, res)
+    bus.publish(EVENT_EM_CHAIN, {"version": version})
+
+
+@_command("rescue")
+def _cmd_rescue(bus, command):
+    # position_id may be a paper int OR a captured signal_id string. Coerce
+    # to int only for the paper path (the paper loader expects an int id); a
+    # captured signal_id is passed through as-is.
+    source = command.args.get("source", "paper")
+    pid = command.args["position_id"]
+    if source == "paper":
+        pid = int(pid)
+    run_rescue(bus, pid, source)
+
+
+@_command("rescue_adhoc")
+def _cmd_rescue_adhoc(bus, command):
+    # The page sends {"type":"rescue_adhoc","args":{"spec": {...}}}; tolerate
+    # the spec being the args dict itself as a fallback.
+    run_rescue_adhoc(bus, command.args.get("spec") or command.args)
+
+
+@_command("rescue_apply")
+def _cmd_rescue_apply(bus, command):
+    # Replay-guarded (see _REPLAY_GUARDED): it MUTATES the paper book.
+    run_rescue_apply(bus, int(command.args["position_id"]),
+                     command.args["candidate"])
+
+
 def handle_command(bus, command) -> None:
     """Dispatch a ``cmd:options`` command. ``rescan`` → full rescan;
     ``swing_scan`` → on-demand parameterized swing scan;
@@ -3263,305 +3717,16 @@ def handle_command(bus, command) -> None:
     ⚠ This list IS the API the GUI codes against, and prose drifts:
     ``gamma_history``/``rescue_adhoc``/``sim_replay`` were implemented and missing
     from here until 2026-08-20. Two tests in test_handlers.py now fail on drift in
-    either direction, so adding a branch without a line here is a red suite."""
-    if command.type == "rescan":
-        rescan(bus)
-    elif command.type == "calibration_refresh":
-        # Also runs from the scheduler's startup one-shot and its nightly slot.
-        # It is a command as well because dev suppresses schedulers, and a page
-        # feature that can never populate in dev is one no future change to it
-        # can be verified against.
-        refresh_calibration(bus)
-    elif command.type == "swing_scan":
-        swing_scan(bus, command.args)
-    elif command.type == "income_open":
-        run_income_open(bus, command)
-    elif command.type == "refresh_paper":
-        refresh_paper_account(bus)
-    elif command.type == "paper_entry":
-        # No account -> don't run the cycle; refresh so the page shows the
-        # no-account state.
-        if compute.has_paper_account():
-            compute.run_entry_cycle()
-        refresh_paper_account(bus)
-    elif command.type == "paper_manage":
-        run_manage_and_refresh(bus)
-    elif command.type == "paper_reset":
-        compute.reset_paper_account(float(command.args.get("starting_balance", 25000.0)))
-        refresh_paper_account(bus)
-    elif command.type == "paper_create":
-        # R5: refuse a stale manual paper-open (a restart replay would open on
-        # stale economics). Surfaced via the R1 results list + logged; the ledger
-        # is still refreshed so the page repaints.
-        raw = command.args.get("signal")
-        sig = raw if isinstance(raw, dict) else {}
-        if _is_stale_open(command):
-            age = _command_age_seconds(command)
-            log.warning(
-                "REJECTED stale paper_create for %s: age %.0fs > %ds (enqueue ts=%s)",
-                sig.get("symbol"), age or -1, STALE_OPEN_MAX_AGE_SEC,
-                getattr(command, "ts", None))
-            _publish_paper_create(bus, {"status": "stale", "symbol": sig.get("symbol"),
-                                        "type": sig.get("type"),
-                                        "expiration": sig.get("expiration"),
-                                        "qty": None, "rungs": [],
-                                        "message": "The request waited too long to be "
-                                                   "processed. Try again."})
-        else:
-            try:
-                outcome = compute.create_paper_trade(sig, command.args.get("qty", 1)) or {}
-            except Exception:
-                # Answer the page before the scaffold dead-letters the command: a
-                # raise (a locked trades.db, say) must not be a button that does
-                # nothing. Re-raised so the traceback and dead-letter still happen.
-                _publish_paper_create(bus, {
-                    "status": "error", "symbol": sig.get("symbol"),
-                    "type": sig.get("type"), "expiration": sig.get("expiration"),
-                    "rungs": [],
-                    "message": "The paper ledger could not process the request."})
-                raise
-            if outcome.get("status") == "refused":
-                log.info("REFUSED paper_create %s %s: %s", sig.get("symbol"),
-                         outcome.get("code"), outcome.get("message"))
-            elif outcome.get("status") == "error":
-                log.warning("paper_create error for %s: %s", sig.get("symbol"),
-                            outcome.get("message"))
-            _publish_paper_create(bus, outcome)
-        refresh_paper_trades(bus)
-    elif command.type == "paper_reload":
-        refresh_paper_trades(bus)
-    elif command.type == "paper_close":
-        compute.close_paper(command.args.get("trade_id"),
-                            command.args.get("debit", 0.0))
-        refresh_paper_trades(bus)
-    elif command.type == "paper_delete":
-        compute.delete_paper(command.args.get("trade_id"))
-        refresh_paper_trades(bus)
-    elif command.type == "paper_delete_closed":
-        compute.delete_closed_paper()
-        refresh_paper_trades(bus)
-    elif command.type == "paper_analyze":
-        res = compute.analyze_paper(command.args.get("trade_id"))
-        version = bus.cache_set(CACHE_PAPER_ANALYZE, res)
-        bus.publish(EVENT_PAPER_ANALYZE, {"version": version})
-    elif command.type == "captured_reload":
-        refresh_captured(bus)
-    elif command.type == "captured_reprice":
-        res = compute.reprice_captured()
-        # Cache the repriced signal list (so the table shows fresh marks) +
-        # the flags list (so the page can notify) under separate views.
-        _publish_captured(bus, res["signals"])
-        fver = bus.cache_set(CACHE_CAPTURED_FLAGS, {"flags": res["flags"]})
-        bus.publish(EVENT_CAPTURED_FLAGS, {"version": fver})
-        _notify_captured(bus, res.get("signals"))
-    elif command.type == "captured_close":
-        sid = command.args.get("signal_id")
-        compute.close_captured(sid,
-                               command.args.get("exit_val", 0.0),
-                               command.args.get("reason", "MANUAL_CLOSE"))
-        # Drop ONLY the closed signal from the cached view, preserving the live
-        # marks on the remaining rows (don't revert to the persisted view).
-        remove_closed_from_captured(bus, sid)
-    elif command.type == "captured_manage":
-        # Manual 'run now' of the captured auto-manage cycle (reprice → arm → close);
-        # runs regardless of the auto-close toggle (the toggle only gates the
-        # scheduled tick — an explicit click should always work).
-        run_captured_manage_and_publish(bus)
-    elif command.type == "set_autoclose":
-        # Settings toggle write-through: gate the SCHEDULED captured-manage cycle.
-        enabled = bool((command.args or {}).get("enabled", True))
-        bus.cache_set(CACHE_AUTOCLOSE_ENABLED, {"enabled": enabled})
-    elif command.type == "set_manual_paper_lifecycle":
-        # Settings toggle write-through: gate the MANUAL paper account's opt-in
-        # break-even lifecycle. Defaults False — only an explicit enable turns it
-        # on.
-        enabled = bool((command.args or {}).get("enabled", False))
-        bus.cache_set(CACHE_MANUAL_PAPER_LIFECYCLE, {"enabled": enabled})
-    elif command.type == "gamma_refresh":
-        refresh_gamma(bus, command.args.get("symbol", "$SPX"))
-    elif command.type == "gamma_explain":
-        res = compute.gamma_explain(command.args.get("symbol", "$SPX"))
-        version = bus.cache_set(CACHE_GAMMA_EXPLAIN, res)
-        bus.publish(EVENT_GAMMA_EXPLAIN, {"version": version})
-    elif command.type == "gamma_analyze":
-        if _is_stale_side_effect(command):
-            log.warning("REJECTED stale gamma_analyze: age %.0fs > %ds (ts=%s) — "
-                        "a replayed command must not re-bill a Claude call",
-                        _command_age_seconds(command) or -1,
-                        STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
-            return
-        res = compute.gamma_analyze()
-        version = bus.cache_set(CACHE_GAMMA_ANALYZE, res)
-        bus.publish(EVENT_GAMMA_ANALYZE, {"version": version})
-        # Record ad-hoc runs to history too, under a time-stamped slot so repeated
-        # clicks in a day are each kept (distinct from the scheduled slots).
-        import datetime as _dt
-        from zoneinfo import ZoneInfo as _ZI
-        _now = _dt.datetime.now(_ZI("America/Chicago"))
-        _persist_briefing(res, f"adhoc-{_now.strftime('%H%M')}", _now)
-        publish_gamma_briefing_index(bus)
-    elif command.type == "gamma_history":
-        run_gamma_history(bus, command.args.get("date"), command.args.get("slot"))
-    elif command.type == "sim_fetch":
-        a = command.args or {}
-        lazy = {"lazy": True, "expiries": a.get("expiries")} if a.get("lazy") else {}
-        meta = compute.sim_fetch(a.get("symbol", "SPY"), **lazy)
-        # The chain goes FIRST: the page reacts to the meta version and then
-        # reads the chain, so chain-already-written is the only skew it can see
-        # (the gamma history ordering, for the same reason).
-        chain = meta.pop("chain", None) if isinstance(meta, dict) else None
-        cver = bus.cache_set(CACHE_SIM_CHAIN, {"symbol": (meta or {}).get("symbol"),
-                                               "chain": chain})
-        bus.publish(EVENT_SIM_CHAIN, {"version": cver})
-        version = bus.cache_set(CACHE_SIM_META, meta)
-        bus.publish(EVENT_SIM_META, {"version": version})
-    elif command.type == "sim_fetch_expiry":
-        a = command.args or {}
-        meta = compute.sim_fetch_expiry(a.get("symbol"), a.get("expiry"))
-        if meta is not None:
-            # Merge the one new expiry into the cached grid chain for the same
-            # symbol, then write chain BEFORE meta, as sim_fetch does.
-            extra = meta.pop("chain", None)
-            env = bus.cache_get(CACHE_SIM_CHAIN)
-            cached = env.payload if env is not None else None
-            base = ((cached or {}).get("chain")
-                    if (cached or {}).get("symbol") == meta.get("symbol") else None)
-            cver = bus.cache_set(CACHE_SIM_CHAIN, {"symbol": meta.get("symbol"),
-                                                   "chain": compute.merge_chains(base, extra)})
-            bus.publish(EVENT_SIM_CHAIN, {"version": cver})
-            version = bus.cache_set(CACHE_SIM_META, meta)
-            bus.publish(EVENT_SIM_META, {"version": version})
-    elif command.type == "sim_run":
-        a = command.args or {}
-        result = compute.sim_run(
-            a.get("symbol"), a.get("expiry"), a.get("kind"), a.get("strike"),
-            a.get("direction"), a.get("dt", 5.0), a.get("mult", 1.5),
-            legs=a.get("legs"))
-        version = bus.cache_set(CACHE_SIM_RESULT, result)
-        bus.publish(EVENT_SIM_RESULT, {"version": version})
-    elif command.type == "sim_replay":
-        a = command.args or {}
-        res = compute.sim_replay(
-            a.get("symbol"), a.get("expiry"), a.get("kind"),
-            a.get("strike"), a.get("direction"), a.get("lookback", "auto"),
-            legs=a.get("legs"))
-        version = bus.cache_set(CACHE_SIM_REPLAY, res)
-        bus.publish(EVENT_SIM_REPLAY, {"version": version})
-    elif command.type == "calc_load":
-        a = command.args or {}
-        # Both the Calculator and Rescue's ad-hoc form ask for a lazy load: every
-        # listed expiration, strikes for the nearest two. The eager branch below
-        # survives for a symbol whose expiration list cannot be fetched.
-        lazy = {"lazy": True, "expiries": a.get("expiries")} if a.get("lazy") else {}
-        cc = compute.calc_load_symbol(a.get("symbol", "SPY"), **lazy)
-        version = bus.cache_set(CACHE_CALC_CHAIN, cc)
-        bus.publish(EVENT_CALC_CHAIN, {"version": version})
-    elif command.type == "calc_load_expiry":
-        a = command.args or {}
-        env = bus.cache_get(CACHE_CALC_CHAIN)
-        cc = compute.calc_load_expiry(env.payload if env is not None else None,
-                                      a.get("symbol"), a.get("expiry"))
-        if cc is not None:          # a stale click writes nothing
-            version = bus.cache_set(CACHE_CALC_CHAIN, cc)
-            bus.publish(EVENT_CALC_CHAIN, {"version": version})
-    elif command.type == "calc_compute":
-        result = compute.calc_compute(**(command.args or {}))
-        version = bus.cache_set(CACHE_CALC_RESULT, result)
-        bus.publish(EVENT_CALC_RESULT, {"version": version})
-    elif command.type == "calc_iv":
-        a = command.args or {}
-        res = compute.calc_iv(a.get("spot"), a.get("strike"),
-                              a.get("option_type"), a.get("mark"),
-                              a.get("expiry"), a.get("rate", 0.045))
-        version = bus.cache_set(CACHE_CALC_IV, res)
-        bus.publish(EVENT_CALC_IV, {"version": version})
-    elif command.type == "calc_rate":
-        a = command.args or {}
-        env = bus.cache_get(CACHE_CALC_CHAIN)
-        out = rate_trade.rate(a.get("symbol"), a.get("structure"), a.get("legs"),
-                              env.payload if env is not None else None,
-                              market_state=_market_state(bus))
-        # Always answers its request - a refusal is a sentence the dialog shows,
-        # never a silence it would wait out.
-        version = bus.cache_set(CACHE_CALC_RATING, {
-            "request_id": a.get("request_id"), "symbol": a.get("symbol"),
-            "legs": a.get("legs"), "row": out.get("row"), "error": out.get("error")})
-        bus.publish(EVENT_CALC_RATING, {"version": version})
-    elif command.type == "dossier":
-        # The Symbol page's lookup for a ticker the cache cannot answer.
-        # Replay-guarded (see _REPLAY_GUARDED): each fetch is 4-5 Schwab calls.
-        if _is_stale_side_effect(command):
-            log.warning("REJECTED stale dossier for %r: age %.0fs > %ds (ts=%s) — "
-                        "a replayed lookup must not re-spend its Schwab calls",
-                        (command.args or {}).get("symbol"),
-                        _command_age_seconds(command) or -1,
-                        STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
-            return
-        # The symbol becomes part of a Redis KEY NAME, and build_dossier stores
-        # it exactly as passed - so it is cleaned here, once, and that one value
-        # is used for both the fetch and the key.
-        symbol = clean_symbol((command.args or {}).get("symbol"))
-        if symbol is None:
-            log.warning("dossier: refusing malformed symbol %r",
-                        (command.args or {}).get("symbol"))
-            return
-        # A duplicate queued behind a slow command, or a second tab: the cache
-        # answered moments ago (see DOSSIER_DEDUP_SEC).
-        recent = _recent_dossier(bus, symbol)
-        if recent is not None:
-            log.info("dossier: %s written %.0fs ago (< %ds) — not re-fetching",
-                     symbol, recent, DOSSIER_DEDUP_SEC)
-            return
-        payload = dossier.build_dossier(symbol)
-        bus.cache_set(dossier_key(symbol), payload,
-                      event=dossier_event(symbol), ttl=DOSSIER_TTL_SEC)
-    elif command.type == "x_post" or command.type == "x_post_report":
-        # Public posts on X. Replay-guarded (see _REPLAY_GUARDED).
-        if _is_stale_side_effect(command):
-            log.warning("REJECTED stale %s: a replayed command must not re-post to X",
-                        command.type)
-            if command.type == "x_post":
-                # The /x page is watching its log; a silent drop reads as a hang.
-                x_post.record_refusal(
-                    bus, "marketing", str((command.args or {}).get("text") or ""),
-                    "expired in the queue")
-            return
-        # ``x_post`` carries its image as base64 in the command itself, so it stays
-        # in cmd:options until the stream trims (~1000 commands) - acceptable at a
-        # handful of posts a day.
-        (run_x_post_report if command.type == "x_post_report" else run_x_post)(
-            bus, command.args or {})
-    elif command.type == "expected_move":
-        a = command.args or {}
-        res = compute.compute_expected_move(
-            a.get("symbol"), a.get("expiry"), a.get("legs") or [],
-            a.get("lookback", "auto"))
-        version = bus.cache_set(CACHE_EXPECTED_MOVE, res)
-        bus.publish(EVENT_EXPECTED_MOVE, {"version": version})
-    elif command.type == "em_chain":
-        res = compute.em_chain_meta((command.args or {}).get("symbol", "SPY"))
-        version = bus.cache_set(CACHE_EM_CHAIN, res)
-        bus.publish(EVENT_EM_CHAIN, {"version": version})
-    elif command.type == "rescue":
-        # position_id may be a paper int OR a captured signal_id string. Coerce
-        # to int only for the paper path (the paper loader expects an int id); a
-        # captured signal_id is passed through as-is.
-        source = command.args.get("source", "paper")
-        pid = command.args["position_id"]
-        if source == "paper":
-            pid = int(pid)
-        run_rescue(bus, pid, source)
-    elif command.type == "rescue_adhoc":
-        # The page sends {"type":"rescue_adhoc","args":{"spec": {...}}}; tolerate
-        # the spec being the args dict itself as a fallback.
-        run_rescue_adhoc(bus, command.args.get("spec") or command.args)
-    elif command.type == "rescue_apply":
-        if _is_stale_side_effect(command):
-            log.warning("REJECTED stale rescue_apply for position %s: age %.0fs > "
-                        "%ds (ts=%s) — a replayed adjustment would re-mutate the book",
-                        command.args.get("position_id"),
-                        _command_age_seconds(command) or -1,
-                        STALE_OPEN_MAX_AGE_SEC, getattr(command, "ts", None))
-            return
-        run_rescue_apply(bus, int(command.args["position_id"]),
-                         command.args["candidate"])
+    either direction, so registering a command without a line here is a red suite.
+
+    The code is the ``_COMMANDS`` table above: one ``_cmd_*`` function per
+    command, registered by name. This function only looks the name up, refuses a
+    replay-guarded command that waited too long (``_REPLAY_GUARDED`` — applied
+    HERE, so a handler cannot forget it), and calls the handler."""
+    handler = _COMMANDS.get(getattr(command, "type", None))
+    if handler is None:
+        return
+    if _is_stale_side_effect(command):
+        _refuse_stale(bus, command)
+        return
+    handler(bus, command)

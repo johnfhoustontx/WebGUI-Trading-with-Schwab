@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from services import _degrade
+from services.options_svc import collection_tiers as tiers_mod
 from services.options_svc import compute
 from shared import marketdata_config as mdc
 
@@ -321,12 +322,14 @@ def test_tiers_that_cannot_be_decided_never_stop_the_poll(monkeypatch):
 @pytest.fixture
 def warned(monkeypatch, caplog):
     import logging
-    monkeypatch.setattr(compute, "_TIER_WARNED", set())
+    # The warned-once set and the logger belong to the module the tiers moved
+    # to (2026-10-04); compute only re-exports the function.
+    monkeypatch.setattr(tiers_mod, "_TIER_WARNED", set())
 
     def lines():
         return [r.getMessage() for r in caplog.records
-                if r.name == compute.log.name and r.levelno == logging.WARNING]
-    with caplog.at_level(logging.WARNING, logger=compute.log.name):
+                if r.name == tiers_mod.log.name and r.levelno == logging.WARNING]
+    with caplog.at_level(logging.WARNING, logger=tiers_mod.log.name):
         yield lines
 
 

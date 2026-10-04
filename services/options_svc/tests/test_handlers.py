@@ -2615,7 +2615,10 @@ def test_every_implemented_command_is_documented():
 
     src = inspect.getsource(handlers.handle_command)
     fn = ast.parse(src.lstrip()).body[0]
-    implemented = set(re.findall(r'command\.type == "([a-z_]+)"', src))
+    # The code IS the table since 2026-10-04 (it was an if/elif chain, read here
+    # by regex). An empty table would pass this vacuously, so it must not be.
+    implemented = set(handlers._COMMANDS)
+    assert len(implemented) >= 40
     documented = set(re.findall(r"``([a-z_]+)``", ast.get_docstring(fn) or ""))
     missing = implemented - documented
     assert not missing, f"implemented but undocumented: {sorted(missing)}"
@@ -2628,7 +2631,7 @@ def test_no_command_is_documented_that_does_not_exist():
 
     src = inspect.getsource(handlers.handle_command)
     fn = ast.parse(src.lstrip()).body[0]
-    implemented = set(re.findall(r'command\.type == "([a-z_]+)"', src))
+    implemented = set(handlers._COMMANDS)
     doc = ast.get_docstring(fn) or ""
     # names in the "``name`` ->" position are command claims
     claimed = set(re.findall(r"``([a-z_]+)``(?=[^\n]{0,80}?→)", doc))

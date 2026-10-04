@@ -105,3 +105,55 @@ def test_a_fresh_dossier_command_does_fetch(bus, monkeypatch):
                         lambda symbol: fired.append(symbol) or {"symbol": symbol})
     handlers.handle_command(bus, _aged("dossier", 1, symbol="MU"))
     assert fired == ["MU"]
+
+
+# --- the guard is applied by the dispatcher, for every listed command ---------
+# Until 2026-10-04 each branch of handle_command had to remember to call
+# _is_stale_side_effect, and one did not: ``calc_rate`` sat in _REPLAY_GUARDED,
+# was documented as replay-guarded, and ran on a replay all the same.
+
+def test_a_stale_calc_rate_command_does_not_run(bus, monkeypatch):
+    fired = []
+    monkeypatch.setattr(handlers.rate_trade, "rate",
+                        lambda *a, **k: fired.append("rate") or {"row": None, "error": "x"})
+    handlers.handle_command(bus, _aged(
+        "calc_rate", handlers.STALE_OPEN_MAX_AGE_SEC + 60,
+        request_id="r1", symbol="SPY", structure="PCS", legs=[]))
+    assert fired == [], "a replayed calc_rate re-spent its Schwab calls"
+    assert bus.cache_get("cache:options:calc_rating") is None
+
+
+def test_every_replay_guarded_command_is_refused_before_its_handler(bus, monkeypatch):
+    """Structural: membership in _REPLAY_GUARDED is what refuses a stale
+    command, whatever its handler does or forgets to do."""
+    ran = []
+    for name in handlers._REPLAY_GUARDED:
+        monkeypatch.setitem(handlers._COMMANDS, name,
+                            lambda bus, command, _n=name: ran.append(_n))
+    monkeypatch.setattr(handlers.x_post, "record_refusal", lambda *a, **k: None)
+    for name in handlers._REPLAY_GUARDED:
+        handlers.handle_command(
+            bus, _aged(name, handlers.STALE_OPEN_MAX_AGE_SEC + 60))
+    assert ran == []
+    for name in handlers._REPLAY_GUARDED:
+        handlers.handle_command(bus, _aged(name, 1))
+    assert ran == list(handlers._REPLAY_GUARDED)
+
+
+def test_every_replay_guarded_name_is_a_real_command():
+    assert set(handlers._REPLAY_GUARDED) <= set(handlers._COMMANDS)
+
+
+def test_an_unknown_command_is_a_no_op(bus):
+    handlers.handle_command(bus, Command(type="no_such_command", args={}))
+
+
+def test_the_dispatcher_is_a_lookup_not_a_chain():
+    """CQ-03: handle_command was a 370-line if/elif chain. A branch added back
+    into it would bypass the table the drift tests and the replay guard read."""
+    import ast
+    import inspect
+    fn = ast.parse(inspect.getsource(handlers.handle_command).lstrip()).body[0]
+    compares = [n for n in ast.walk(fn) if isinstance(n, ast.Compare)
+                and isinstance(n.left, ast.Attribute) and n.left.attr == "type"]
+    assert compares == [], "handle_command compares command.type again"
