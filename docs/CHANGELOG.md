@@ -18,6 +18,9 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   the services, the pages and every Redis key keep the app's spelling.
 - **Not covered.** The streaming endpoints and the trader endpoints.
 - **Tests.** `schwab-proxy/tests/test_schwab_symbols.py`.
+- **Same day, data only.** `config/sectors.toml` gained 107 symbols (343 to 450)
+  ahead of a wider watchlist, classified by hand; the file's header names the six
+  judgment calls.
 
 **Prior — 2026-10-03** (**The proxy's trade tracker stopped asking Schwab about trades it cannot follow.**)
 
