@@ -120,6 +120,52 @@ _SCANNER = ConfigFile(
     caution="Loosening these produces more signals, including cheaper premium. "
             "The IV-rank floors are the usual reason index names show no signals.",
     sections=(
+        Section("Which strikes may be sold",
+                "The scanner's strike rules. A short leg must pass every one.", (
+            Field("selection.max_entry_short_delta", "Highest short delta at entry",
+                  "A short leg above this delta is not sold. Lower means further "
+                  "from the money: fewer signals, each more likely to expire "
+                  "worthless.",
+                  kind="float", min=0.05, max=0.5, step=0.01),
+            Field("selection.delta_sanity_max", "Delta treated as a data fault",
+                  "A contract whose delta is above this is skipped as bad data. "
+                  "Keep it above the entry limit.",
+                  kind="float", min=0.1, max=1.0, step=0.01),
+            Field("selection.momentum_veto", "Move that stops the offside spread",
+                  "Once a symbol has moved more than this fraction of its daily "
+                  "expected move, the spread on the side it is moving toward is "
+                  "not offered.",
+                  kind="float", unit="of the expected move", min=0.0, max=3.0, step=0.05),
+            Field("selection.edge_margin", "Credit required above break-even",
+                  "A spread must pay credit ÷ width of at least its short delta "
+                  "plus this. 0 is break-even on the model. A larger value "
+                  "removes most spreads.",
+                  kind="float", min=0.0, max=0.2, step=0.005),
+            Field("selection.min_abs_credit", "Smallest credit worth taking",
+                  "Per share: 0.25 is $25 a contract.",
+                  kind="float", unit="$ per share", min=0.0, max=5.0, step=0.05),
+            Field("selection.min_abs_spread", "Quote always accepted as tight",
+                  "A bid-ask gap this small in dollars is accepted however large "
+                  "it is in percent.",
+                  kind="float", unit="$", min=0.0, max=1.0, step=0.01),
+            Field("selection.max_width_dollars", "Widest spread considered",
+                  "The width search stops at this many dollars between strikes.",
+                  kind="int", unit="$", min=1, max=1000, step=5),
+            Field("selection.zero_dte_min_mult", "Same-day: nearest short strike",
+                  "As a multiple of the session's remaining expected move. The "
+                  "1–4 day window uses the same minimum.",
+                  kind="float", unit="× expected move", min=0.0, max=5.0, step=0.05),
+            Field("selection.zero_dte_max_mult", "Same-day: furthest short strike",
+                  "As a multiple of the session's remaining expected move.",
+                  kind="float", unit="× expected move", min=0.1, max=10.0, step=0.1),
+            Field("selection.directional_min_mult", "Directional: nearest short strike",
+                  "As a multiple of the expected move.",
+                  kind="float", unit="× expected move", min=0.0, max=5.0, step=0.05),
+            Field("selection.directional_max_mult", "Directional: furthest short strike",
+                  "As a multiple of the expected move. Keep it at or below the "
+                  "same-day minimum so the two bands do not overlap.",
+                  kind="float", unit="× expected move", min=0.0, max=5.0, step=0.05),
+        )),
         Section("Volatility floor (IV rank)",
                 "A trade that SELLS premium is refused when the symbol's IV rank "
                 "is below this. 0 turns the floor off for that trade type.", (

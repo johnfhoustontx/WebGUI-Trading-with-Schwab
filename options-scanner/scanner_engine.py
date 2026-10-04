@@ -385,8 +385,12 @@ def calc_vix_term_structure(vix, vix9d, vix3m):
 #   1.5x and 3.0x of the REMAINING session EM (daily_EM * sqrt(hours_left/6.5)).
 # Swing uses a DTE-aware multiplier curve (linear interp between anchors)
 #   applied to period_EM = daily_EM * sqrt(DTE).
-ZERO_DTE_MIN_MULT = 0.618
-ZERO_DTE_MAX_MULT = 3.00
+# Every threshold named here comes from config/scanner.toml [selection]
+# (shared/scanner_config.selection); the values in the comments are the shipped
+# ones. They were literals until 2026-10-04 (audit CQ-10).
+_SEL = _scfg.selection()
+ZERO_DTE_MIN_MULT = _SEL["zero_dte_min_mult"]      # 0.618
+ZERO_DTE_MAX_MULT = _SEL["zero_dte_max_mult"]      # 3.0
 
 # CT session boundaries for 0-DTE intraday decay.
 from datetime import time as _dt_time
@@ -398,9 +402,9 @@ SESSION_HOURS = 6.5
 # zero_dte_em_window). Min mult held flat at 0.618; max anchors preserved
 # from the prior shared curve so the outer bound is unchanged.
 ZERO_DTE_BUCKET_EM_CURVE = [
-    (1, 0.618, 2.50),
-    (3, 0.618, 2.20),
-    (4, 0.618, 2.10),
+    (1, ZERO_DTE_MIN_MULT, 2.50),
+    (3, ZERO_DTE_MIN_MULT, 2.20),
+    (4, ZERO_DTE_MIN_MULT, 2.10),
 ]
 
 # Swing EM-window curve (DTE 5-15): (DTE, min_mult, max_mult). Linear interp between rows.
@@ -413,7 +417,8 @@ SWING_EM_CURVE = [
     (15, 0.50, 1.50),
 ]
 
-DELTA_SANITY_MAX = 0.40  # Reject |delta| > this as a data-glitch rail.
+DELTA_SANITY_MAX = _SEL["delta_sanity_max"]  # 0.40. Reject |delta| above this
+                         # as a data-glitch rail.
                          # EM windows are the primary selector now.
 
 # Hard ceiling on the SHORT-leg delta at entry. Sits safely below the
@@ -423,12 +428,12 @@ DELTA_SANITY_MAX = 0.40  # Reject |delta| > this as a data-glitch rail.
 # too loose to provide.
 # 2026-06-11 quality retune: tightened 0.30 -> 0.27 to favor further-OTM shorts
 # (higher PoP per trade). See docs/plans/2026-06-11-quality-first-selection-design.md.
-MAX_ENTRY_SHORT_DELTA = 0.27
+MAX_ENTRY_SHORT_DELTA = _SEL["max_entry_short_delta"]      # 0.27
 
 # Intraday directional veto: suppress the offside vertical once a symbol has
 # moved more than this fraction of its daily expected move. Stops selling calls
 # into a rising tape / puts into a falling one. See the 2026-06-11 design doc.
-MOMENTUM_VETO = 0.6
+MOMENTUM_VETO = _SEL["momentum_veto"]      # 0.6
 
 # Index symbols whose dealer-gamma signal is reliable enough to gate on.
 INDEX_SYMBOLS = frozenset({"$SPX", "SPY", "QQQ"})
@@ -451,7 +456,7 @@ NEG_GEX_MIN_SCORE = _scfg.scores()["neg_gex_min"]
 # 2026-06-11 quality retune: raised 0.00 -> 0.02 to require a thin edge above
 # fair value (cr/w >= |delta| + 0.02), trading a small volume cut for higher
 # per-trade quality. See docs/plans/2026-06-11-quality-first-selection-design.md.
-EDGE_MARGIN = 0.02
+EDGE_MARGIN = _SEL["edge_margin"]      # 0.02
 
 
 # Size the EM strike window off the EXPIRATION's own ATM IV instead of the
@@ -522,8 +527,8 @@ def zero_dte_bucket_em_window(dte):
 # Directional pass: short strike sits 0.0x-0.618x of period EM from spot
 # (or 0.0x-0.618x of remaining EM at DTE=0). The band stops just where the
 # premium band starts, so directional and premium do not overlap.
-DIRECTIONAL_MIN_MULT = 0.0
-DIRECTIONAL_MAX_MULT = 0.618
+DIRECTIONAL_MIN_MULT = _SEL["directional_min_mult"]      # 0.0
+DIRECTIONAL_MAX_MULT = _SEL["directional_max_mult"]      # 0.618
 
 
 def directional_em_window(dte):
@@ -698,7 +703,7 @@ def earnings_gate_applies(trade_type, dte):
 # = 20% is wrong. Far-OTM 0-DTE option chains on SPY/QQQ are entirely
 # composed of 5–25¢ marks with 1–2¢ markets; the % gate alone gives zero
 # qualifying strikes most days.
-MIN_ABS_SPREAD = 0.02
+MIN_ABS_SPREAD = _SEL["min_abs_spread"]      # 0.02
 
 # --- IV Rank hard floor (pre-filter) ---
 # Signals below this IV Rank are rejected — selling cheap premium is destructive.
@@ -1593,7 +1598,7 @@ def build_iron_condors(spreads, max_n=3):
 # FULL SCAN CYCLE
 #############################################
 
-MIN_ABS_CREDIT = 0.25  # $25 per contract minimum
+MIN_ABS_CREDIT = _SEL["min_abs_credit"]  # 0.25: $25 per contract minimum
 
 # --- Profit target and contract sizing for 0-DTE ---
 PROFIT_TARGET = 1000        # Dollar profit target per trade
@@ -1639,7 +1644,7 @@ def calc_effective_min_credit(width, min_cr_pct, min_abs_credit=None):
 WIDTH_MULTIPLIERS = [1, 2, 3, 5, 10, 15, 20, 25, 50, 100]
 
 # Safety cap -- widths above this ($ value) are impractical.
-MAX_WIDTH_DOLLARS = 200
+MAX_WIDTH_DOLLARS = _SEL["max_width_dollars"]      # 200
 
 
 def _entry_credit(short, lo, width):

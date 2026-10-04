@@ -13,6 +13,8 @@ Read from three modules that cannot share imports directly:
 
 Missing file / bad TOML / missing key -> the built-in defaults, never a raise.
 """
+import math
+
 from repo_paths import SCANNER_TOML
 from shared.config_toml import toml_loader
 
@@ -52,6 +54,21 @@ DEFAULTS = {
     # At most this many OPEN captured signals per symbol, counted across every
     # scanner type. 0 = off. See config/scanner.toml [capture].
     "capture": {"max_open_per_symbol": 2},
+    # Which strikes the scanner may sell. Literals in scanner_engine.py until
+    # 2026-10-04 (audit CQ-10). See config/scanner.toml [selection].
+    "selection": {
+        "max_entry_short_delta": 0.27,
+        "momentum_veto": 0.6,
+        "edge_margin": 0.02,
+        "delta_sanity_max": 0.40,
+        "min_abs_credit": 0.25,
+        "min_abs_spread": 0.02,
+        "max_width_dollars": 200,
+        "zero_dte_min_mult": 0.618,
+        "zero_dte_max_mult": 3.0,
+        "directional_min_mult": 0.0,
+        "directional_max_mult": 0.618,
+    },
 }
 
 load, reset_cache = toml_loader(SCANNER_TOML, DEFAULTS, label="scanner.toml")
@@ -149,3 +166,23 @@ def capture_max_open_per_symbol() -> int:
     if isinstance(v, bool) or not isinstance(v, int) or v < 0:
         return default
     return v
+
+
+def selection() -> dict:
+    """The strike-selection thresholds, every key of ``DEFAULTS["selection"]``.
+
+    Closed over the defaults, like :func:`min_iv_rank`: a key the code does not
+    know is dropped (a typo is a no-op, never a phantom threshold), and a value
+    that is not a real, finite number at or above zero is the shipped one. A
+    threshold of NaN would make every comparison against it False, which reads
+    as a gate that is on and never gates."""
+    sec = load().get("selection")
+    if not isinstance(sec, dict):
+        sec = {}
+    out = {}
+    for key, default in DEFAULTS["selection"].items():
+        value = sec.get(key, default)
+        usable = (isinstance(value, (int, float)) and not isinstance(value, bool)
+                  and math.isfinite(value) and value >= 0)
+        out[key] = value if usable else default
+    return out

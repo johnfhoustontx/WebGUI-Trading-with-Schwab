@@ -101,3 +101,44 @@ def test_options_svc_actually_READS_it(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(compute)
+
+
+# ---- the strike-selection thresholds are settings (audit CQ-10) --------------
+# Eleven literals in scanner_engine.py, several retuned by hand with dated
+# comments, decided which strikes the scanner may sell. They are config now.
+
+SELECTION = {
+    "max_entry_short_delta": 0.27, "momentum_veto": 0.6, "edge_margin": 0.02,
+    "delta_sanity_max": 0.40, "min_abs_credit": 0.25, "min_abs_spread": 0.02,
+    "max_width_dollars": 200, "zero_dte_min_mult": 0.618, "zero_dte_max_mult": 3.0,
+    "directional_min_mult": 0.0, "directional_max_mult": 0.618,
+}
+
+
+def test_the_shipped_selection_thresholds_are_the_literals_they_replaced():
+    assert sc.selection() == SELECTION
+
+
+def test_one_selection_override_keeps_its_siblings(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"selection": {"edge_margin": 0.05}})
+    got = sc.selection()
+    assert got["edge_margin"] == 0.05
+    assert {k: v for k, v in got.items() if k != "edge_margin"} == \
+        {k: v for k, v in SELECTION.items() if k != "edge_margin"}
+
+
+@pytest.mark.parametrize("bad", ["0.3", None, True, float("nan"), float("inf"), -0.1, [0.3]])
+def test_an_unusable_selection_value_is_the_shipped_one(monkeypatch, bad):
+    monkeypatch.setattr(sc, "load", lambda: {"selection": {"max_entry_short_delta": bad}})
+    assert sc.selection()["max_entry_short_delta"] == 0.27
+
+
+def test_a_selection_table_that_is_not_a_table_is_the_shipped_one(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"selection": 5})
+    assert sc.selection() == SELECTION
+
+
+def test_a_key_the_code_does_not_know_is_dropped(monkeypatch):
+    # A typo must be a no-op, never a phantom threshold nothing reads.
+    monkeypatch.setattr(sc, "load", lambda: {"selection": {"edge_margn": 0.5}})
+    assert sc.selection() == SELECTION

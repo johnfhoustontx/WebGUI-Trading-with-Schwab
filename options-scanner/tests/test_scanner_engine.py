@@ -3346,3 +3346,52 @@ class TestMomentumVetoSaysWhatItDropped:
             scanner_engine.run_full_scan(fake_client, symbols=_FUNNEL_SYMBOLS)
         assert not [r for r in caplog.records
                     if "momentum veto" in r.getMessage()]
+
+
+class TestSelectionThresholdsComeFromConfig:
+    """Audit CQ-10. Equality with the shipped values proves nothing: the
+    literals had those values. Move the config and require the engine to
+    follow, constant by constant."""
+
+    CONSTANTS = {
+        "MAX_ENTRY_SHORT_DELTA": "max_entry_short_delta",
+        "MOMENTUM_VETO": "momentum_veto",
+        "EDGE_MARGIN": "edge_margin",
+        "DELTA_SANITY_MAX": "delta_sanity_max",
+        "MIN_ABS_CREDIT": "min_abs_credit",
+        "MIN_ABS_SPREAD": "min_abs_spread",
+        "MAX_WIDTH_DOLLARS": "max_width_dollars",
+        "ZERO_DTE_MIN_MULT": "zero_dte_min_mult",
+        "ZERO_DTE_MAX_MULT": "zero_dte_max_mult",
+        "DIRECTIONAL_MIN_MULT": "directional_min_mult",
+        "DIRECTIONAL_MAX_MULT": "directional_max_mult",
+    }
+
+    def test_every_constant_follows_the_config(self, monkeypatch):
+        import importlib
+        from shared import scanner_config as sc
+        moved = {key: 1000.0 + i for i, key in enumerate(self.CONSTANTS.values())}
+        monkeypatch.setattr(sc, "selection", lambda: dict(moved))
+        try:
+            importlib.reload(scanner_engine)
+            got = {name: getattr(scanner_engine, name) for name in self.CONSTANTS}
+            assert got == {name: moved[key] for name, key in self.CONSTANTS.items()}, \
+                "scanner_engine.py is not reading [selection] from config/scanner.toml"
+        finally:
+            monkeypatch.undo()
+            importlib.reload(scanner_engine)
+
+    def test_the_shipped_values_are_unchanged(self):
+        assert (scanner_engine.MAX_ENTRY_SHORT_DELTA, scanner_engine.MOMENTUM_VETO,
+                scanner_engine.EDGE_MARGIN, scanner_engine.DELTA_SANITY_MAX) == \
+            (0.27, 0.6, 0.02, 0.40)
+        assert (scanner_engine.MIN_ABS_CREDIT, scanner_engine.MIN_ABS_SPREAD,
+                scanner_engine.MAX_WIDTH_DOLLARS) == (0.25, 0.02, 200)
+        assert (scanner_engine.ZERO_DTE_MIN_MULT, scanner_engine.ZERO_DTE_MAX_MULT,
+                scanner_engine.DIRECTIONAL_MIN_MULT,
+                scanner_engine.DIRECTIONAL_MAX_MULT) == (0.618, 3.0, 0.0, 0.618)
+
+    def test_the_0dte_curve_follows_its_minimum_multiple(self, monkeypatch):
+        # The 1-4 day curve repeated the 0.618 literal three times.
+        assert {row[1] for row in scanner_engine.ZERO_DTE_BUCKET_EM_CURVE} == \
+            {scanner_engine.ZERO_DTE_MIN_MULT}

@@ -14,6 +14,41 @@
 #   pushed once a signal exists). This file decides what exists.
 # ─────────────────────────────────────────────────────────────────────────────
 
+[selection]
+# WHICH STRIKES THE SCANNER MAY SELL. These were literals in scanner_engine.py
+# until 2026-10-04; the values are unchanged. Edit + restart options_svc.
+
+# Highest delta a SHORT leg may have at entry. Sits below the delta stop's own
+# ceiling, so a position is never opened past its exit. 2026-06-11 quality
+# retune: 0.30 -> 0.27, to favour shorts further from the money.
+max_entry_short_delta = 0.27
+# A delta above this is treated as a data fault, not a strike: the contract is
+# skipped. The expected-move window is the real selector; this is a rail.
+delta_sanity_max = 0.40
+# Once a symbol has moved more than this fraction of its daily expected move,
+# the vertical on the side it is moving toward is not offered (no call spreads
+# into a rising tape, no put spreads into a falling one).
+momentum_veto = 0.6
+# A credit spread must pay credit/width of at least |short delta| + this. 0.00
+# is break-even on the model; 0.02 asks for a thin edge above it. A larger value
+# removes nearly every spread: efficient markets price them at about |delta|.
+edge_margin = 0.02
+# Smallest credit worth taking, per share ($0.25 = $25 a contract).
+min_abs_credit = 0.25
+# A quote this tight in dollars is accepted however wide it is in percent
+# (a $0.05 option with a 1-cent market is the tightest market there is).
+min_abs_spread = 0.02
+# Widest spread the width search will consider, in dollars of strike distance.
+max_width_dollars = 200
+# Same-day trades: the short strike sits between these multiples of the
+# REMAINING session's expected move. The 1-4 day window keeps the same minimum.
+zero_dte_min_mult = 0.618
+zero_dte_max_mult = 3.0
+# Directional tab: the short strike sits between these multiples of the
+# expected move, so it stops where the premium band above starts.
+directional_min_mult = 0.0
+directional_max_mult = 0.618
+
 [iv_rank]
 # Hard pre-filter: reject a SHORT-PREMIUM candidate below this IV Rank. Selling
 # cheap premium is destructive, so this binds only on low-IV days — most days sit
