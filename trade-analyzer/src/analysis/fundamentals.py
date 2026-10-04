@@ -69,19 +69,36 @@ def _short_interest_or_none(v):
     return f if f > 0 else None
 
 
-def _roe_to_fraction(v):
+# Keys only the legacy speculative payload shape carries. The live Schwab
+# ``/instruments`` shape spells the same things ``revChangeTTM`` /
+# ``epsChangePercentTTM`` / ``operatingMarginTTM``.
+_LEGACY_KEYS = ("revGrowthTTM", "epsGrowthTTM", "operatingMargin", "operatingMarginYoy")
+_LIVE_KEYS = ("revChangeTTM", "epsChangePercentTTM", "operatingMarginTTM",
+              "operatingMarginMRQ")
+
+
+def _is_legacy_shape(fund) -> bool:
+    """True for the legacy speculative payload, which passed ROE as a fraction."""
+    return (any(k in fund for k in _LEGACY_KEYS)
+            and not any(k in fund for k in _LIVE_KEYS))
+
+
+def _roe_to_fraction(v, legacy=False):
     """Normalize ROE to a fraction.
 
-    Schwab's ``/instruments`` fundamental returns ROE as a PERCENT (e.g. 141.47
-    for AAPL); the legacy speculative payloads passed a fraction (e.g. 0.21).
-    Heuristic: a magnitude above 2 (i.e. >200% if it were a fraction) can only
-    be a percent, so divide; otherwise treat it as an already-normalized
-    fraction. (Trade-off: a genuine 0–2% percent ROE is left as-is — a rare edge
-    that does not change its scoring tier.)
+    Schwab's ``/instruments`` fundamental returns ROE as a PERCENT (141.47 for
+    AAPL), so the live value is divided by 100, always. Only the legacy
+    speculative payload shape passed a fraction (0.21), and it is told apart by
+    its own keys, not by the size of the number.
+
+    Until 2026-10-04 the unit was GUESSED from the magnitude: above 2 was a
+    percent, anything else a fraction. A real ROE between 0% and 2% was then
+    read as 0% to 200%: 1.0% scored +60 where the true figure scores -40 (audit
+    AC-46). A negative one inside -2% was misread the same way.
     """
     if v is None:
         return None
-    return v / 100.0 if abs(v) > 2 else v
+    return v if legacy else v / 100.0
 
 
 def parse_schwab_fundamentals(payload: Optional[dict], as_of: str) -> Fundamentals:
@@ -156,7 +173,7 @@ def parse_schwab_fundamentals(payload: Optional[dict], as_of: str) -> Fundamenta
         peg_ratio=fund.get("pegRatio"),
         rev_growth_ttm=rev_growth,
         eps_growth_ttm=eps_growth,
-        roe=_roe_to_fraction(fund.get("returnOnEquity")),
+        roe=_roe_to_fraction(fund.get("returnOnEquity"), legacy=_is_legacy_shape(fund)),
         margin_expanding=margin_expanding,
         fcf=fund.get("freeCashFlow"),
         eps_surprises=eps_surprises,

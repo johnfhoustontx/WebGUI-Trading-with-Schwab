@@ -179,8 +179,30 @@ class TestParseSchwabRealInstrumentPayload:
         assert abs(f.roe - 0.12) < 1e-9
 
     def test_legacy_fraction_roe_preserved(self):
-        # Legacy speculative payloads passed ROE as a fraction (<=2); keep as-is.
-        payload = {"fundamental": {"returnOnEquity": 0.21}}
+        # The legacy speculative SHAPE passed ROE as a fraction; it is told apart
+        # by its own keys. (This test used a bare ``{"returnOnEquity": 0.21}``,
+        # which is the live shape with a 0.21% ROE - the very case AC-46 is about.)
+        payload = {"fundamental": {"returnOnEquity": 0.21, "revGrowthTTM": 0.18}}
         assert parse_schwab_fundamentals(payload, as_of="2026-06-16").roe == 0.21
+
+    def test_a_small_live_roe_is_a_percent_like_every_other(self):
+        """AC-46: 1.0 from Schwab is 1.0%, not 100%. It was left undivided, read
+        as 100% and scored in the top tier."""
+        from src.analysis.scoring import score_roe
+        for percent, fraction in ((1.0, 0.01), (0.21, 0.0021), (2.0, 0.02),
+                                  (-1.5, -0.015), (0.0, 0.0)):
+            payload = {"fundamental": {"returnOnEquity": percent}}
+            f = parse_schwab_fundamentals(payload, as_of="2026-06-16")
+            assert abs(f.roe - fraction) < 1e-12, percent
+        low = parse_schwab_fundamentals({"fundamental": {"returnOnEquity": 1.0}},
+                                        as_of="2026-06-16")
+        high = parse_schwab_fundamentals({"fundamental": {"returnOnEquity": 30.0}},
+                                         as_of="2026-06-16")
+        assert score_roe(low.roe) < score_roe(high.roe)
+
+    def test_a_live_payload_with_growth_fields_is_never_taken_for_legacy(self):
+        payload = {"fundamental": {"returnOnEquity": 1.5, "revChangeTTM": 12.0,
+                                   "revGrowthTTM": 0.12}}
+        assert abs(parse_schwab_fundamentals(payload, as_of="2026-06-16").roe - 0.015) < 1e-12
 
 
