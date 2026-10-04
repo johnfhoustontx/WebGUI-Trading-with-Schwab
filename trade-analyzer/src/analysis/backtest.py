@@ -201,14 +201,38 @@ def composite(zscores: pd.DataFrame, weights: Dict[str, float]) -> pd.Series:
     return (zscores[cols] * w).sum(axis=1, min_count=1)
 
 
+# The label horizon, in trading days. Every forward return this package fits is
+# a 20-day one, so a label dated t is built from prices up to t + 20 - and the
+# labels of the last 20 TRAIN dates are built from prices inside the TEST
+# window. A walk-forward that trains right up to the test window has therefore
+# seen the test period's returns. ``purge`` cuts those dates off the train side.
+LABEL_HORIZON = 20
+
+
+def purged_train_end(i: int, train: int, purge: int) -> int:
+    """The exclusive end of the train slice for a fold whose test starts at
+    ``i``. Raises when the purge would leave nothing to train on."""
+    purge = max(0, int(purge))
+    if purge >= train:
+        raise ValueError(
+            f"purge ({purge}) leaves no training data in a train window of {train}")
+    return i - purge
+
+
 def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None,
-                 fit_fn=None) -> dict:
+                 fit_fn=None, purge=LABEL_HORIZON) -> dict:
     """Rolling train->test. Fit weights on each train window (default
     `signed_ic_weights`, n-independent + stable across folds — see that function),
     score the next (unseen) test window, collect the composite's OOS IC. Returns
     oos_ic, fold count, the per-fold OOS ICs, and the weights from the LAST train
     window. Train/test never overlap within a fold; test windows across folds are
     non-overlapping when step >= test (the default step=test tiles them).
+
+    The train slice is ``dates[i - train : i - purge]``: it STOPS ``purge``
+    dates before the test window, because those dates' labels reach into it
+    (see ``LABEL_HORIZON``). Until 2026-10-04 there was no purge, and pure noise
+    showed a small positive out-of-sample IC that is not there (audit AC-53).
+    Pass ``purge=0`` only for a label with no horizon.
 
     Two doors for the weighter, because they need different things:
       * ``weight_fn(ic_by_factor)`` — the univariate schemes, which need only IC
@@ -223,7 +247,7 @@ def walk_forward(factors, forward, train=252, test=63, step=63, weight_fn=None,
     folds, oos_ics, last_weights, scored = 0, [], {}, 0
     i = train
     while i + test <= len(dates):
-        tr = dates[i - train:i]
+        tr = dates[i - train:purged_train_end(i, train, purge)]
         te = dates[i:i + test]
         f_tr = factors[factors.index.get_level_values("date").isin(tr)]
         y_tr = forward[forward.index.get_level_values("date").isin(tr)]

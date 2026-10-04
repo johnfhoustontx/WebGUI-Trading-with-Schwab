@@ -34,7 +34,8 @@ from src.analysis import factors as F                                   # noqa: 
 from src.analysis import backtest as B                                  # noqa: E402
 
 YEARS = 5
-HORIZON = 20                       # primary label horizon (~4 weeks)
+HORIZON = B.LABEL_HORIZON          # primary label horizon (~4 weeks); the
+#                                    walk-forward purges this many train dates
 REPORT_HORIZONS = [10, 20, 40]     # IC reported across these in the research table
 TRAIN, TEST, STEP = 378, 63, 63    # walk-forward windows (trading days)
 

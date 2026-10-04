@@ -150,3 +150,84 @@ def test_walk_forward_default_weighting():
     f, fwd = _panel(n_days=400)
     res = backtest.walk_forward(f, fwd, train=150, test=50, step=50)
     assert res["oos_ic"] > 0.5 and "good" in res["weights"]
+
+
+# --- AC-53: the train window stops a label horizon before the test window -----
+#
+# A forward return dated t is built from prices up to t + 20. So the labels of
+# the last 20 train dates are made of prices INSIDE the test window: the fit
+# has seen the test period's returns. On pure noise that showed up as an
+# out-of-sample information coefficient that is not there.
+
+def _train_ends(f, fwd, **kw):
+    ends, sizes = [], []
+
+    def fit(f_tr, y_tr):
+        d = f_tr.index.get_level_values("date")
+        assert y_tr.index.get_level_values("date").max() == d.max()
+        ends.append(d.max())
+        sizes.append(d.nunique())
+        return {"good": 1.0}
+
+    backtest.walk_forward(f, fwd, train=150, test=50, step=50, fit_fn=fit, **kw)
+    return ends, sizes
+
+
+def test_the_train_window_stops_a_label_horizon_before_the_test_window():
+    f, fwd = _panel(n_days=400)
+    dates = f.index.get_level_values("date").unique().sort_values()
+    ends, sizes = _train_ends(f, fwd)
+    h = backtest.LABEL_HORIZON
+    assert h == 20
+    # fold 1 tests dates[150:200]; the last train date is dates[150 - 20 - 1].
+    assert ends[0] == dates[150 - h - 1]
+    assert ends[1] == dates[200 - h - 1]
+    assert sizes[0] == 150 - h
+
+
+def test_an_explicit_purge_of_zero_is_the_old_window():
+    """For labels with no horizon (a same-day synthetic one). Never the default."""
+    f, fwd = _panel(n_days=400)
+    dates = f.index.get_level_values("date").unique().sort_values()
+    ends, sizes = _train_ends(f, fwd, purge=0)
+    assert ends[0] == dates[149] and sizes[0] == 150
+
+
+def test_a_purge_that_leaves_no_training_data_is_refused():
+    import pytest
+    f, fwd = _panel(n_days=400)
+    with pytest.raises(ValueError):
+        backtest.walk_forward(f, fwd, train=20, test=50, step=50, purge=20)
+
+
+def _overlapping_noise(seed, n_days=200, n_syms=15, h=20):
+    """A persistent factor (one draw per symbol) that is pure noise against
+    DAILY returns, with the label the 20-day forward sum of those returns - so
+    neighbouring labels share 19 of their 20 days, as the real ones do."""
+    rng = np.random.default_rng(seed)
+    dates = pd.date_range("2022-01-03", periods=n_days, freq="B")
+    syms = [f"S{i}" for i in range(n_syms)]
+    daily = rng.normal(size=(n_days, n_syms))
+    fwd = np.full((n_days, n_syms), np.nan)
+    for t in range(n_days - h):
+        fwd[t] = daily[t + 1:t + 1 + h].sum(axis=0)
+    slow = np.repeat(rng.normal(size=(1, n_syms)), n_days, axis=0)
+    idx = pd.MultiIndex.from_product([dates, syms], names=["date", "symbol"])
+    f = pd.DataFrame({"slow": slow.reshape(-1)}, index=idx)
+    y = pd.Series(fwd.reshape(-1), index=idx).dropna()
+    return f.loc[y.index], y
+
+
+def test_the_purge_removes_the_edge_noise_seemed_to_have():
+    """Averaged over seeds, noise scored with NO purge shows a positive
+    out-of-sample IC that the purged walk-forward does not. (Short windows make
+    the overlap a large share of the train set, so twelve seeds separate the
+    two cleanly: about +0.07 against about -0.01.)"""
+    leaky, purged = [], []
+    for seed in range(12):
+        f, y = _overlapping_noise(seed)
+        kw = dict(train=30, test=10, step=10)
+        leaky.append(backtest.walk_forward(f, y, purge=0, **kw)["oos_ic"])
+        purged.append(backtest.walk_forward(f, y, **kw)["oos_ic"])
+    assert np.mean(leaky) > np.mean(purged) + 0.04
+    assert abs(np.mean(purged)) < 0.03

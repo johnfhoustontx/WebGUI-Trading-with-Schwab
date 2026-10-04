@@ -54,7 +54,7 @@ def paired_delta(rec_a, rec_b):
 
 
 def run_variant(panel, forward, *, label, min_abs_ic=None, weight_fn=None,
-                train=378, test=63, step=63):
+                train=378, test=63, step=63, purge=B.LABEL_HORIZON):
     """One comparable record for this variant. ``min_abs_ic`` and ``weight_fn``
     are alternatives; ``weight_fn`` wins when both are given."""
     if weight_fn is None:
@@ -64,7 +64,7 @@ def run_variant(panel, forward, *, label, min_abs_ic=None, weight_fn=None,
     ics = {c: B.factor_ic(panel[c], forward) for c in panel.columns}
     weights = weight_fn(ics)
     wf = B.walk_forward(panel, forward, train=train, test=test, step=step,
-                        weight_fn=weight_fn)
+                        weight_fn=weight_fn, purge=purge)
     folds = wf["oos_ic_by_fold"]
     return {
         "label": label,
@@ -81,11 +81,15 @@ def run_variant(panel, forward, *, label, min_abs_ic=None, weight_fn=None,
     }
 
 
-def _fold_windows(panel, train, test, step):
+def _fold_windows(panel, train, test, step, purge=B.LABEL_HORIZON):
+    """(train dates, test dates) per fold. The train side stops ``purge`` dates
+    before the test window, exactly as ``B.walk_forward`` does - the two must
+    agree, or the out-of-sample calibration is fitted on a different split than
+    the out-of-sample IC beside it."""
     dates = panel.index.get_level_values("date").unique().sort_values()
     i = train
     while i + test <= len(dates):
-        yield dates[i - train:i], dates[i:i + test]
+        yield dates[i - train:B.purged_train_end(i, train, purge)], dates[i:i + test]
         i += step
 
 
@@ -94,7 +98,7 @@ def _slice(frame, dates):
 
 
 def oos_composite(panel, forward, *, train=378, test=63, step=63,
-                  weight_fn=None, fit_fn=None):
+                  weight_fn=None, fit_fn=None, purge=B.LABEL_HORIZON):
     """``(composite, forward)`` over the walk-forward's TEST windows only.
 
     The shipped artifact calibrates its score->outcome bands on the full-sample
@@ -104,7 +108,7 @@ def oos_composite(panel, forward, *, train=378, test=63, step=63,
     to answer whether a band's edge is real."""
     weight_fn = weight_fn or B.signed_ic_weights
     comps, ys = [], []
-    for tr, te in _fold_windows(panel, train, test, step):
+    for tr, te in _fold_windows(panel, train, test, step, purge):
         f_tr, y_tr = _slice(panel, tr), _slice(forward, tr)
         w = (fit_fn(f_tr, y_tr) if fit_fn is not None
              else weight_fn({c: B.factor_ic(f_tr[c], y_tr) for c in f_tr.columns}))
@@ -120,7 +124,8 @@ def oos_composite(panel, forward, *, train=378, test=63, step=63,
 
 
 def regime_walk_forward(panel, forward, regimes, *, label, train=378, test=63,
-                        step=63, weight_fn=None, min_regime_days=60):
+                        step=63, weight_fn=None, min_regime_days=60,
+                        purge=B.LABEL_HORIZON):
     """Walk-forward where each test date is scored under ITS OWN regime's
     weights, fitted on that regime's dates within the same train window.
 
@@ -139,7 +144,7 @@ def regime_walk_forward(panel, forward, regimes, *, label, train=378, test=63,
 
     oos_ics, folds, scored = [], 0, 0
     weights_by_regime, fallback = {}, set()
-    for tr, te in _fold_windows(panel, train, test, step):
+    for tr, te in _fold_windows(panel, train, test, step, purge):
         f_tr, y_tr = _slice(panel, tr), _slice(forward, tr)
         pooled_w = weight_fn({c: B.factor_ic(f_tr[c], y_tr) for c in f_tr.columns})
 

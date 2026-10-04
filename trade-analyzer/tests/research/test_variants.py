@@ -33,7 +33,11 @@ def _panel(n_dates=90, n_syms=12, seed=0):
     return panel, pd.Series(fwd, index=idx)
 
 
-WF = dict(train=40, test=10, step=10)
+# ``purge=0``: this panel's label is a same-day function of ``good`` - it has no
+# horizon, so no train label reaches into the test window. (The default purge is
+# the 20-day label horizon of the real fit; here it would only halve the train
+# window and make the "impossible" 0.5 floor reachable by chance.)
+WF = dict(train=40, test=10, step=10, purge=0)
 
 
 class TestTheChoiceUnderTestReachesTheFolds:
@@ -93,3 +97,26 @@ class TestFoldStability:
     def test_the_label_is_carried_through(self):
         panel, fwd = _panel()
         assert V.run_variant(panel, fwd, label="floor=0.02", **WF)["label"] == "floor=0.02"
+
+
+class TestTheFoldWindowsArePurged:
+    """AC-53. Every walk-forward in ``research`` draws its folds from
+    ``_fold_windows``; the train side stops a label horizon before the test."""
+
+    def _dates(self, n=300):
+        import numpy as np
+        dates = pd.date_range("2023-01-02", periods=n, freq="B")
+        idx = pd.MultiIndex.from_product([dates, ["A", "B"]], names=["date", "symbol"])
+        return dates, pd.DataFrame({"x": np.arange(len(idx), dtype=float)}, index=idx)
+
+    def test_default_purge_is_the_label_horizon(self):
+        dates, panel = self._dates()
+        tr, te = next(iter(V._fold_windows(panel, 150, 50, 50)))
+        assert te[0] == dates[150]
+        assert tr[-1] == dates[150 - B.LABEL_HORIZON - 1]
+        assert tr[0] == dates[0]
+
+    def test_purge_zero_is_explicit(self):
+        dates, panel = self._dates()
+        tr, _ = next(iter(V._fold_windows(panel, 150, 50, 50, purge=0)))
+        assert tr[-1] == dates[149]

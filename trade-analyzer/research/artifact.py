@@ -45,7 +45,8 @@ def _norm(panel):
     return out
 
 
-def _block(panel, forward, *, train, test, step, weight_fn, n_bands, n_days):
+def _block(panel, forward, *, train, test, step, weight_fn, n_bands, n_days,
+           purge=B.LABEL_HORIZON):
     ics = {c: B.factor_ic(panel[c], forward) for c in panel.columns}
     weights = weight_fn(ics)
     if not weights:
@@ -53,12 +54,12 @@ def _block(panel, forward, *, train, test, step, weight_fn, n_bands, n_days):
     z = B.zscore_by_date(panel)
     insample = B.calibrate(B.composite(z, weights), forward, n_bands=n_bands)
     comp_oos, y_oos = V.oos_composite(panel, forward, train=train, test=test,
-                                      step=step, weight_fn=weight_fn)
+                                      step=step, weight_fn=weight_fn, purge=purge)
     oos_bands = B.calibrate(comp_oos, y_oos, n_bands=n_bands)
     if not oos_bands:
         return None
     wf = B.walk_forward(panel, forward, train=train, test=test, step=step,
-                        weight_fn=weight_fn)
+                        weight_fn=weight_fn, purge=purge)
     return {
         "weights": weights,
         "factor_ic": {c: {k: ics[c][k] for k in ("mean_ic", "icir", "n_days")}
@@ -85,7 +86,8 @@ def default_min_regime_days(*, train, test):
 
 
 def build_regimes(panel, forward, regimes, *, train=378, test=63, step=63,
-                  weight_fn=None, min_regime_days=None, n_bands=5):
+                  weight_fn=None, min_regime_days=None, n_bands=5,
+                  purge=B.LABEL_HORIZON):
     """``{regime_key: block}``, always including ``"all"``.
 
     ``min_regime_days`` defaults to ``train + test`` — see
@@ -100,7 +102,7 @@ def build_regimes(panel, forward, regimes, *, train=378, test=63, step=63,
     out = {}
 
     allblk = _block(panel, forward, train=train, test=test, step=step,
-                    weight_fn=weight_fn, n_bands=n_bands,
+                    weight_fn=weight_fn, n_bands=n_bands, purge=purge,
                     n_days=panel.index.get_level_values("date").nunique())
     if allblk:
         out["all"] = allblk
@@ -114,7 +116,8 @@ def build_regimes(panel, forward, regimes, *, train=378, test=63, step=63,
         if sub.empty:
             continue
         blk = _block(sub, sub_fwd, train=train, test=test, step=step,
-                     weight_fn=weight_fn, n_bands=n_bands, n_days=n_days)
+                     weight_fn=weight_fn, n_bands=n_bands, n_days=n_days,
+                     purge=purge)
         if blk and blk["weights"] and blk["calibration"]:
             out[str(key)] = blk
     return out
