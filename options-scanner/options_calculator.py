@@ -46,11 +46,18 @@ EXPIRY_CLOSE_HOUR_ET = 16  # 4:00pm ET
 # the pre-C6 `hour=15` had been right for CT input all along.)
 NAIVE_WALLCLOCK_TZ = "America/Chicago"
 
-# DIVIDEND-YIELD ASSUMPTION (q = 0): every Black-Scholes routine here assumes a
-# ZERO continuous dividend yield. This slightly OVERSTATES call value and
-# UNDERSTATES put value for dividend-paying names (SPX/SPY carry ~1.3% annualized),
-# growing with T. Acceptable for the short-dated retail structures this tool
-# targets, but stated explicitly. A live q term is intentionally OUT OF SCOPE.
+# DIVIDEND-YIELD ASSUMPTION (q = 0 by default): every Black-Scholes routine here
+# assumes a ZERO continuous dividend yield unless told otherwise. That slightly
+# OVERSTATES call value and UNDERSTATES put value for dividend-paying names
+# (SPX/SPY carry ~1.3% annualized), growing with T - acceptable for the
+# short-dated structures most of this tool prices.
+#
+# ``bs_price`` and ``implied_vol`` take an optional ``q`` (Black-Scholes-Merton)
+# since 2026-10-03. ONE caller passes it: the Strategy Finder's valuation of a
+# later-expiring leg (``strategy_scanner.later_leg_vols`` / ``_front_value``),
+# where the gap between two expirations is long enough for the dividend to
+# matter (audit AC-07). Every other caller leaves it at the default, and with
+# ``q = 0.0`` each formula below is the exact expression it was before.
 
 
 def expiry_time_to_years(ref_dt, expiry_date):
@@ -100,21 +107,21 @@ def norm_pdf(x):
 # BLACK-SCHOLES PRICING
 #############################################
 
-def _d1_d2(S, K, T, r, sigma):
-    """Compute d1 and d2 for Black-Scholes formula.
+def _d1_d2(S, K, T, r, sigma, q=0.0):
+    """Compute d1 and d2 for the Black-Scholes(-Merton) formula.
 
-    Assumes a ZERO continuous dividend yield (q = 0) — see the module-level
-    DIVIDEND-YIELD ASSUMPTION note. No dividend drift term appears in d1/d2.
+    ``q`` is a continuous dividend yield; the default 0.0 is the plain
+    Black-Scholes drift - see the module-level DIVIDEND-YIELD ASSUMPTION note.
     """
     sqrt_T = math.sqrt(T)
-    d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
+    d1 = (math.log(S / K) + (r - q + 0.5 * sigma * sigma) * T) / (sigma * sqrt_T)
     d2 = d1 - sigma * sqrt_T
     return d1, d2
 
 
-def bs_price(S, K, T, r, sigma, option_type):
+def bs_price(S, K, T, r, sigma, option_type, q=0.0):
     """
-    Black-Scholes option price.
+    Black-Scholes option price (Black-Scholes-Merton when ``q`` is given).
 
     Parameters:
         S          - Current spot price
@@ -124,10 +131,12 @@ def bs_price(S, K, T, r, sigma, option_type):
         sigma      - Implied volatility (annualized)
         option_type - 'call' or 'put'
 
-    Assumes a ZERO continuous dividend yield (q = 0) — see the module-level
-    DIVIDEND-YIELD ASSUMPTION note. This slightly overstates call value and
+        q          - Continuous dividend yield (annualized); default 0.0
+
+    With the default ``q = 0`` this slightly overstates call value and
     understates put value for dividend-paying underlyings (e.g. SPX/SPY ~1.3%),
-    the error growing with T; acceptable for the short-dated retail options here.
+    the error growing with T; acceptable for the short-dated retail options
+    here. See the module-level DIVIDEND-YIELD ASSUMPTION note.
 
     Returns intrinsic value when T <= 0 (at or past expiration).
     """
@@ -138,15 +147,16 @@ def bs_price(S, K, T, r, sigma, option_type):
         else:
             return max(K - S, 0.0)
 
-    d1, d2 = _d1_d2(S, K, T, r, sigma)
+    d1, d2 = _d1_d2(S, K, T, r, sigma, q)
+    carry = math.exp(-q * T)            # exactly 1.0 at q = 0
 
     if option_type == "call":
-        return S * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
+        return S * carry * norm_cdf(d1) - K * math.exp(-r * T) * norm_cdf(d2)
     else:
-        return K * math.exp(-r * T) * norm_cdf(-d2) - S * norm_cdf(-d1)
+        return K * math.exp(-r * T) * norm_cdf(-d2) - S * carry * norm_cdf(-d1)
 
 
-def implied_vol(price, S, K, T, r, option_type, lo=1e-4, hi=5.0, iters=100):
+def implied_vol(price, S, K, T, r, option_type, lo=1e-4, hi=5.0, iters=100, q=0.0):
     """
     Implied volatility back-solved from an option price via bisection on bs_price.
 
@@ -166,12 +176,12 @@ def implied_vol(price, S, K, T, r, option_type, lo=1e-4, hi=5.0, iters=100):
     if price <= intrinsic + 1e-9:
         return None
     # Price must be bracketed by [bs_price(lo), bs_price(hi)] for bisection.
-    if bs_price(S, K, T, r, hi, option_type) < price:
+    if bs_price(S, K, T, r, hi, option_type, q) < price:
         return None
     a, b = lo, hi
     for _ in range(iters):
         mid = 0.5 * (a + b)
-        if bs_price(S, K, T, r, mid, option_type) < price:
+        if bs_price(S, K, T, r, mid, option_type, q) < price:
             a = mid
         else:
             b = mid

@@ -48,9 +48,24 @@ def _norm_mark(c):
     return m
 
 
+def chain_div_yield(chain):
+    """The chain header's ``dividendYield`` as a FRACTION, or 0.0.
+
+    Schwab sends it as a percent on every chain (2.512 for XOM, 0.0 for a
+    non-payer); measured 2026-10-03 against put-call parity on seven names it
+    agreed within 0.4 points. A missing, non-numeric, non-finite or negative
+    figure is no yield.
+    """
+    v = (chain or {}).get("dividendYield")
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return 0.0
+    return v / 100.0 if math.isfinite(v) and v > 0 else 0.0
+
+
 def extract_options(chain, kind, dte_min, dte_max):
     """{exp_str: {dte, strikes: {strike: leg_data}}} for one option kind."""
     key = "callExpDateMap" if kind == "call" else "putExpDateMap"
+    div_yield = chain_div_yield(chain)
     out = {}
     for exp_key, strikes in (chain.get(key) or {}).items():
         exp_str, dte = exp_key.split(":")[0], int(float(exp_key.split(":")[1]))
@@ -69,6 +84,9 @@ def extract_options(chain, kind, dte_min, dte_max):
                 "theta": c.get("theta") or 0, "vega": c.get("vega") or 0,
                 "gamma": c.get("gamma") or 0, "iv": c.get("volatility") or 0,
                 "volume": c.get("totalVolume") or 0, "oi": c.get("openInterest") or 0,
+                # The UNDERLYING's dividend yield, carried on the leg so a
+                # later-expiring one can be priced with it (see _front_value).
+                "div_yield": div_yield,
             }
         if sd:
             out[exp_str] = {"dte": dte, "strikes": sd}
@@ -131,16 +149,84 @@ def _needs_front_valuation(legs):
     return len({l.get("expiration") for l in legs}) > 1
 
 
-def _front_value(leg, S, front):
+def _leg_yield(leg):
+    """A leg's ``div_yield`` (a fraction) as a usable number, else 0.0."""
+    v = leg.get("div_yield")
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return 0.0
+    return float(v) if math.isfinite(v) and v > 0 else 0.0
+
+
+def later_leg_vols(legs, spot, front, now=None):
+    """Per leg, the volatility its OWN MARK implies today, or None.
+
+    One entry per leg, in order. A number only for an option leg expiring AFTER
+    ``front`` whose mark can be inverted under Black-Scholes-Merton at the
+    leg's dividend yield; None for a share leg, a leg expiring at the front, and
+    any mark with no implied volatility (at or under intrinsic, unreachable, or
+    one that does not survive the round trip).
+
+    WHY the mark and not the chain's ``volatility``. The position is entered at
+    the legs' marks, so the model that values it later has to be worth those
+    marks today - otherwise entry cost and exit value come from two different
+    worlds and their difference, the P&L, is partly an artefact. Schwab's
+    per-contract ``volatility`` does not have that property under this app's
+    model: measured 2026-10-03 on seven names it ran 0.71 to 1.08 of the
+    mark-implied figure, and call and put at one strike share a single value
+    although a dividend prices them apart. A volatility solved from the mark
+    reproduces the mark by construction, whatever convention the feed uses.
+
+    ``now`` is the valuation instant (naive = Central, the project rule);
+    it defaults to the wall clock and exists so tests are deterministic.
+    """
+    out = [None] * len(legs)
+    try:
+        s = float(spot)
+    except (TypeError, ValueError):
+        return out
+    if not front or not math.isfinite(s) or s <= 0:
+        return out
+    now = now or _dt.datetime.now()
+    for i, leg in enumerate(legs):
+        if _is_stock(leg):
+            continue
+        try:
+            exp = leg.get("expiration")
+            if not exp or exp <= front:
+                continue
+            T = _oc.expiry_time_to_years(now, _dt.date.fromisoformat(exp))
+            mark, strike, kind = float(leg["mark"]), float(leg["strike"]), leg["kind"]
+            q = _leg_yield(leg)
+            sigma = _oc.implied_vol(mark, s, strike, T, _oc.RISK_FREE_RATE, kind, q=q)
+            if sigma is None:
+                continue
+            # Bisection returns its lower bound for a price under the model's
+            # floor, so trust a solution only when it prices back to the mark.
+            back = _oc.bs_price(s, strike, T, _oc.RISK_FREE_RATE, sigma, kind, q)
+            if abs(back - mark) <= max(1e-6, 1e-4 * mark):
+                out[i] = sigma
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out
+
+
+def _front_value(leg, S, front, sigma=None):
     """Per-share value of one leg at the FRONT expiration with the underlying at S.
 
     A share is worth S. A leg expiring at the front is worth its intrinsic. A
-    later leg keeps time value: Black-Scholes at its OWN IV (the chain's
-    ``volatility`` is a percent) over the calendar days between the two
-    expirations, floored at intrinsic, and an unusable IV RAISES. Both settle at
-    16:00 ET, so whole days / 365 is exact here and is not the inline
-    time-to-expiry CLAUDE.md forbids (that rule is about a wall-clock ``now``,
-    which does not enter this calculation).
+    later leg keeps time value: Black-Scholes-Merton over the calendar days
+    between the two expirations, floored at intrinsic. Both settle at 16:00 ET,
+    so whole days / 365 is exact here and is not the inline time-to-expiry
+    CLAUDE.md forbids (that rule is about a wall-clock ``now``, which does not
+    enter this calculation).
+
+    ``sigma`` is the leg's entry from ``later_leg_vols``: the volatility its own
+    mark implies, priced here at the leg's dividend yield - the model that is
+    worth the leg's mark today. With no ``sigma`` (a mark that cannot be
+    inverted, or a caller that supplies none) the leg falls back to the chain's
+    own ``volatility`` (a percent) at a zero yield, which is exactly how every
+    later leg was priced before 2026-10-03. An unusable chain ``volatility``
+    RAISES either way.
     """
     if _is_stock(leg):
         return float(S)
@@ -158,8 +244,15 @@ def _front_value(leg, S, front):
     if not math.isfinite(iv) or iv <= 0:
         # Schwab's -999 sentinel, a NaN, or no IV at all. Pricing anyway would turn
         # a missing input into a confident payoff (-999 clamped to a 1% vol, NaN
-        # making max() order-dependent), so refuse loudly.
+        # making max() order-dependent), so refuse loudly. ⚠ Checked BEFORE the
+        # calibrated volatility is used, on purpose: the feed withholding an IV
+        # is its own statement that the contract's quote is not to be trusted,
+        # and a volatility solved from that same quote does not make it so.
         raise ValueError(f"unpriceable later leg: iv={leg.get('iv')!r}")
+    if sigma is not None:
+        vol, q = sigma, _leg_yield(leg)         # the leg's own mark-implied model
+    else:
+        vol, q = iv / 100.0, 0.0                # chain IV is always a percent
     # The floor is INTRINSIC, not European BS: equity options are American, so a
     # long put deep in the money is worth at least K - S (it can be exercised).
     # European BS gives K*e^(-rT) - S there - below intrinsic - which would book a
@@ -169,23 +262,27 @@ def _front_value(leg, S, front):
         # a put is worth its intrinsic, the whole strike.
         return 0.0 if leg["kind"] == "call" else float(leg["strike"])
     theo = _oc.bs_price(S, leg["strike"], days / 365.0, _oc.RISK_FREE_RATE,
-                        iv / 100.0, leg["kind"])      # chain IV is always a percent
+                        vol, leg["kind"], q)
     return max(theo, _intrinsic(leg, S))
 
 
-def _pl_at(legs, entry_cost, S, front=None):
+def _pl_at(legs, entry_cost, S, front=None, sigmas=None):
     if front is None:
         v = sum(_sign(l) * _intrinsic(l, S) * l.get("qty", 1) for l in legs)
     else:
-        v = sum(_sign(l) * _front_value(l, S, front) * l.get("qty", 1) for l in legs)
+        vols = sigmas if sigmas is not None else [None] * len(legs)
+        v = sum(_sign(l) * _front_value(l, S, front, vols[i]) * l.get("qty", 1)
+                for i, l in enumerate(legs))
     return v - entry_cost
 
 
-def payoff_metrics(legs, spot, symbol=None):
+def payoff_metrics(legs, spot, symbol=None, now=None):
     entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)   # +debit
     net = round(entry_cost, 4)
     # None on every single-expiry options set -> the unchanged intrinsic path.
     front = _front_expiration(legs) if _needs_front_valuation(legs) else None
+    # Each later leg's own mark-implied volatility, solved ONCE per position.
+    sigmas = later_leg_vols(legs, spot, front, now) if front is not None else None
 
     # --- Tail analysis (structure-driven, not grid-driven) ---
     # As S->inf the payoff slope equals call_coeff = sum(sign*qty) over CALL legs.
@@ -214,7 +311,7 @@ def payoff_metrics(legs, spot, symbol=None):
         # and the whole debit is lost) sits out there. Measured at IV 150 on a
         # 7/35-DTE ladder, stopping at far_high understated max loss by ~$117.
         points |= {far_high * 2 ** j for j in range(1, 5)}      # out to 32x the top strike
-    pls = [_pl_at(legs, entry_cost, S, front) for S in sorted(points)]
+    pls = [_pl_at(legs, entry_cost, S, front, sigmas) for S in sorted(points)]
     bounded_max = max(pls)
     bounded_min = min(pls)
 
@@ -252,7 +349,7 @@ def payoff_metrics(legs, spot, symbol=None):
     # --- Breakevens: scan a fine grid for sign changes + interpolate ---
     grid = [spot * (_GRID_LO + (_GRID_HI - _GRID_LO) * i / (_GRID_N - 1))
             for i in range(_GRID_N)]
-    gpls = [_pl_at(legs, entry_cost, S, front) for S in grid]
+    gpls = [_pl_at(legs, entry_cost, S, front, sigmas) for S in grid]
     breakevens = []
     for i in range(1, len(grid)):
         if (gpls[i - 1] <= 0 < gpls[i]) or (gpls[i - 1] >= 0 > gpls[i]):
@@ -279,12 +376,13 @@ def _norm_cdf(x):
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
 
-def pop_from_payoff(legs, spot, atm_iv, dte):
+def pop_from_payoff(legs, spot, atm_iv, dte, now=None):
     sigma = spot * max(atm_iv, 1e-6) * math.sqrt(max(dte, 0.5) / 365.0)
     if sigma <= 0:
         return None
     entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)
     front = _front_expiration(legs) if _needs_front_valuation(legs) else None
+    vols = later_leg_vols(legs, spot, front, now) if front is not None else None
     n = 801
     lo, hi = spot - 6 * sigma, spot + 6 * sigma
     prob = 0.0
@@ -294,14 +392,14 @@ def pop_from_payoff(legs, spot, atm_iv, dte):
         S = lo + (hi - lo) * i / (n - 1)
         cdf = _norm_cdf((S - spot) / sigma)
         mid = (S + prev_S) / 2
-        v = _pl_at(legs, 0.0, mid, front)
+        v = _pl_at(legs, 0.0, mid, front, vols)
         if v - entry_cost > 0:
             prob += (cdf - prev_cdf)
         prev_S, prev_cdf = S, cdf
     return round(prob * 100, 1)
 
 
-def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0):
+def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0, now=None):
     """``n`` ``[price, pnl_per_contract]`` points for the Strategy Finder's payoff
     shapes, across the WIDER of spot ± ``width_moves`` × the expected move to the
     front expiry and the outermost OPTION strikes ± 3%. The strike bound is what
@@ -350,9 +448,10 @@ def payoff_curve(legs, spot, atm_iv, dte, n=25, width_moves=2.0):
         lo = max(lo, 0.0)
         entry_cost = sum(_sign(l) * l["mark"] * l.get("qty", 1) for l in legs)
         front = _front_expiration(legs) if _needs_front_valuation(legs) else None
+        vols = later_leg_vols(legs, s, front, now) if front is not None else None
         for i in range(n):
             x = lo + (hi - lo) * i / (n - 1)
-            pnl = _pl_at(legs, entry_cost, x, front) * _CONTRACT_MULT
+            pnl = _pl_at(legs, entry_cost, x, front, vols) * _CONTRACT_MULT
             points.append([round(x, 2), round(pnl, 2)])
     except (KeyError, TypeError, ValueError):
         return None
@@ -439,7 +538,8 @@ def _leg_from(leg_data, kind, side, exp):
             "theta": leg_data["theta"], "vega": leg_data["vega"],
             "gamma": leg_data["gamma"], "iv": leg_data["iv"],
             "bid": leg_data.get("bid"), "ask": leg_data.get("ask"),
-            "volume": leg_data.get("volume"), "oi": leg_data.get("oi")}
+            "volume": leg_data.get("volume"), "oi": leg_data.get("oi"),
+            "div_yield": leg_data.get("div_yield") or 0.0}
 
 
 def _dte_for(exp_str):
