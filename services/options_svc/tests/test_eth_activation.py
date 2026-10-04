@@ -76,7 +76,8 @@ def _fake_collector(monkeypatch, *, eligible=None):
         def close(self):
             pass
 
-    def _poll(client, engine, conn, lock=None, symbols=None, on_chain=None):
+    def _poll(client, engine, conn, lock=None, symbols=None, on_chain=None,
+              tiers=None):
         rec["poll_n"] += 1
         rec["symbols"] = symbols
 

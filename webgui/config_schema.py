@@ -1393,13 +1393,14 @@ _MARKETDATA = ConfigFile(
             Field("chains.enabled", "Reuse option chains", "", kind="bool"),
             Field("chains.max_age_sec", "Oldest chain to reuse while a session is open",
                   "Applies to every caller that sends no limit of its own. The "
-                  "autoscan is one of them.", **_SEC, max=600),
+                  "autoscan is one of them. Never more than five minutes: a "
+                  "higher value in the file is read as 300.", **_SEC, max=300),
             Field("chains.closed_max_age_sec", "Oldest chain to reuse while markets are closed",
-                  "", **_SEC, max=86400),
+                  "Never more than an hour.", **_SEC, max=3600),
             Field("chains.max_entries", "Most chains kept at once", "", kind="int",
                   min=50, max=5000),
             Field("chains.shadow_compare_max_age_sec",
-                  "Oldest chain compared in shadow mode", "", **_SEC, max=600),
+                  "Oldest chain compared in shadow mode", "", **_SEC, max=300),
             Field("chains.wide_refetch_max_days",
                   "Longest held window refetched in place of a shorter one",
                   "When a request just misses, the proxy fetches a wider window "

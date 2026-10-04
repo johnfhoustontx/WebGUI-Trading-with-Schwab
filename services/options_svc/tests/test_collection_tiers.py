@@ -60,9 +60,15 @@ def test_hedging_flow_symbols_stay_on_one_minute(cfg):
                                 dict(chains=False),
                                 dict(mode="shadow", interval=1),
                                 dict(chains=False, interval=1)])
-def test_no_tiers_unless_the_store_is_on(cfg, kw):
+def test_nothing_is_carried_unless_the_store_is_on_but_the_limit_is_still_sent(cfg, kw):
+    """No tail (every fetch real) at an interval of 1 - and the fresh-age limit
+    all the same. This asserted ``tiers() is None`` until 2026-10-04, so in
+    shadow the collector sent NO limit: the proxy then counted the collector's
+    own off-session repeats as would-be savings that "on" does not deliver, and
+    a checkout whose own file said shadow while it borrowed an "on" proxy was
+    handed its previous chain (audit AC-102)."""
     cfg(**kw)
-    assert tiers() is None
+    assert tiers() == no_tail(1)
 
 
 @pytest.mark.parametrize("interval", [1, 0, -2])
@@ -161,7 +167,7 @@ def test_the_ordinary_off_answers_are_not_degrades(cfg):
     _degrade.reset()
     for kw in (dict(mode="shadow"), dict(chains=False)):
         cfg(**kw)
-        assert tiers() is None
+        assert tiers() == no_tail(1)
     cfg(interval=1)
     assert tiers() == no_tail(1)
     cfg()
@@ -169,11 +175,13 @@ def test_the_ordinary_off_answers_are_not_degrades(cfg):
     assert _degrade.counts() == {}
 
 
-def test_the_shipped_settings_mean_no_tiers():
-    """config/marketdata.toml ships with the interval at 1: the feature is off
-    until the operator turns it on."""
+def test_the_shipped_settings_carry_nothing():
+    """config/marketdata.toml ships with the interval at 1 and the mode in
+    shadow: nothing is carried until the operator turns it on. The fresh-age
+    limit is sent regardless (AC-102)."""
     assert mdc.section("collection")["tail_interval_min"] == 1
-    assert tiers() is None
+    assert tiers() == {"tail": frozenset(), "interval_min": 1,
+                       "fresh_max_age_sec": mdc.section("collection")["fresh_max_age_sec"]}
 
 
 #############################################
@@ -200,9 +208,10 @@ def _collector(monkeypatch, *, strict=False, hiro_cfg=None, flow_cfg=None):
             pass
 
     if strict:
-        def _poll(client, engine, conn, lock=None, symbols=None, on_chain=None):
+        def _poll(client, engine, conn, lock=None, symbols=None, on_chain=None,
+                  tiers=None):
             rec["poll_n"] += 1
-            rec["kw"] = {"symbols": symbols, "on_chain": on_chain}
+            rec["kw"] = {"symbols": symbols, "on_chain": on_chain, "tiers": tiers}
     else:
         def _poll(client, engine, conn, **kw):
             rec["poll_n"] += 1
@@ -237,16 +246,18 @@ def _collector(monkeypatch, *, strict=False, hiro_cfg=None, flow_cfg=None):
     return rec
 
 
-def test_with_the_shipped_settings_poll_once_gets_no_tiers_argument(monkeypatch):
-    """The stand-ins for poll_once elsewhere in this suite predate the argument,
-    and so does anything else that calls the collector the old way."""
+def test_with_the_shipped_settings_poll_once_gets_tiers_that_carry_nothing(monkeypatch):
+    """Shadow, interval 1: the collector is handed an EMPTY tail and its
+    fresh-age limit, so every chain request states how old an answer may be."""
     rec = _collector(monkeypatch, strict=True)
     assert compute.collect_gex_snapshots(now=RTH) == len(POLLED)
     assert rec["poll_n"] == 1
 
     rec = _collector(monkeypatch)
     compute.collect_gex_snapshots(now=RTH)
-    assert set(rec["kw"]) == {"symbols", "on_chain"}
+    assert set(rec["kw"]) == {"symbols", "on_chain", "tiers"}
+    assert rec["kw"]["tiers"]["tail"] == frozenset()
+    assert rec["kw"]["tiers"]["fresh_max_age_sec"] == 20
 
 
 def test_the_tail_is_the_polled_symbols_less_base_capture_and_hedging_flow(
@@ -613,12 +624,18 @@ def test_end_to_end_the_store_on_sends_the_fresh_limit_for_every_symbol(cfg, now
 
 
 @pytest.mark.parametrize("kw", [dict(mode="shadow"), dict(mode="off"), dict(chains=False)])
-def test_end_to_end_in_shadow_the_request_is_exactly_todays(cfg, kw):
+def test_end_to_end_while_not_on_only_the_age_limit_is_added(cfg, kw):
+    """Shadow, off, or the chain store disabled: the request is what it always
+    was PLUS the fresh-age limit, for every symbol, and nothing is carried (no
+    quote is fetched to re-price a stored chain). It asserted "exactly today's
+    request", with no limit, until AC-102."""
     cfg(**kw)
-    assert tiers() is None
-    client, _seen = _real_poll(tiers(), RTH)
+    assert tiers() == no_tail(1)
+    client, seen = _real_poll(tiers(), RTH)
     today = RTH.date()
     assert client.kwargs == {s: {"contract_type": "ALL", "from_date": today,
-                                 "to_date": today + dt.timedelta(days=7)}
+                                 "to_date": today + dt.timedelta(days=7),
+                                 "max_age": 20}
                              for s in UNIVERSE}
     assert client.quote_calls == 0
+    assert seen == list(UNIVERSE)                  # every chain reached the detectors

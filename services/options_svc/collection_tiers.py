@@ -77,15 +77,22 @@ def collection_tiers(universe, *, base, capture=None, hiro=None, flip=None):
     one. ``flip`` is None for "the alert watches nothing"; an EMPTY ``flip``
     means it watches every symbol, which leaves no tail at all.
 
-    None unless the proxy's chain store is ON: in shadow or off, every request
-    reaches Schwab whatever limit it carries, so the collector's request stays
-    exactly what it was. Any trouble reading the settings is also None."""
+    While the store is NOT on (shadow, off, or the chain store switched off)
+    nothing is carried - the tail is empty at an interval of 1 - but the
+    fresh-age limit is still sent. It used to be None there, so in shadow the
+    collector sent no limit at all: the proxy counted the collector's own
+    off-session repeats as savings "on" does not deliver, and a checkout whose
+    file said shadow while it borrowed an "on" proxy was handed its own
+    previous chain (audit AC-102). The limit is ignored by a proxy that is off.
+    None only when the settings cannot be read."""
     try:
         from shared import marketdata_config as mdc
 
-        if mdc.mode() != "on" or not mdc.store_on("chains"):
-            return None
+        store_on = mdc.mode() == "on" and mdc.store_on("chains")
         cfg = mdc.section("collection")
+        if not store_on:
+            return {"tail": frozenset(), "interval_min": 1,
+                    "fresh_max_age_sec": int(cfg["fresh_max_age_sec"])}
         interval = max(1, int(cfg["tail_interval_min"]))
         if interval > MAX_TAIL_INTERVAL_MIN:
             if ("tail_interval_min", interval) not in _TIER_WARNED:

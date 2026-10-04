@@ -7,10 +7,13 @@ override applies without a restart.
 
 Missing file / bad TOML / missing key -> the built-in defaults, never a raise.
 """
+import logging
 import math
 
 from repo_paths import MARKETDATA_TOML
 from shared.config_toml import toml_loader
+
+log = logging.getLogger(__name__)
 
 MODES = ("off", "shadow", "on")
 TODAY_BARS = ("ttl", "quote")
@@ -45,6 +48,18 @@ DEFAULTS = {
     # trade it could not start tracking.
     "tracker": {"retry_max_sec": 1800, "fetch_retry_max_sec": 300},
 }
+
+# The most each store AGE limit may be, whatever the file says. Only a caller's
+# own ``maxAge`` used to be capped; these are the limits every caller that
+# sends none gets, and one Settings edit could set them to hours (audit AC-104).
+# Code, not config: a ceiling the same edit can raise is not a ceiling.
+AGE_CEILINGS = {
+    "chains": {"max_age_sec": 300, "closed_max_age_sec": 3600,
+               "shadow_compare_max_age_sec": 300},
+    "quotes": {"max_age_sec": 60},
+    "bars": {"today_quote_max_age_sec": 600},
+}
+_CLAMP_WARNED = set()
 
 load, reset_cache = toml_loader(MARKETDATA_TOML, DEFAULTS, label="marketdata.toml")
 
@@ -87,6 +102,14 @@ def section(name: str) -> dict:
     if not isinstance(got, dict):
         got = {}
     out = {k: _usable(got.get(k, d), d) for k, d in base.items()}
+    for key, ceiling in AGE_CEILINGS.get(name, {}).items():
+        if key in out and out[key] > ceiling:
+            if (name, key, out[key]) not in _CLAMP_WARNED:
+                _CLAMP_WARNED.add((name, key, out[key]))
+                log.warning("marketdata.toml [%s] %s=%s is above its ceiling of "
+                            "%s seconds; using %s", name, key, out[key], ceiling,
+                            ceiling)
+            out[key] = ceiling
     if "enabled" in base:
         out["enabled"] = store_on(name)
     return out

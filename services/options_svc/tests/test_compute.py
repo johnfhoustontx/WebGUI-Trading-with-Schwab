@@ -3512,7 +3512,8 @@ def _fake_gex_modules(monkeypatch, *, lock_ok=True, chains=None, now=None):
         def close(self):
             calls["closed"] = True
 
-    def _poll(client, engine, conn, lock=None, symbols=None, on_chain=None):
+    def _poll(client, engine, conn, lock=None, symbols=None, on_chain=None,
+              tiers=None):
         calls.update(poll=True, client=client, engine=engine, conn=conn,
                      on_chain=on_chain, symbols=symbols)
         calls["poll_n"] += 1

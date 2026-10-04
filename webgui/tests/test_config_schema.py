@@ -538,3 +538,15 @@ def test_the_fresh_limit_and_the_slack_must_fit_in_one_poll_minute():
 def test_the_shipped_marketdata_file_passes_its_own_cross_checks():
     assert cs.cross_check("marketdata.toml",
                           store.flatten(_shipped("marketdata.toml"))) == []
+
+
+def test_the_market_data_age_limits_stop_where_the_loader_stops():
+    """``shared.marketdata_config.AGE_CEILINGS`` clamps these whatever the file
+    says (audit AC-104). The form must not offer a value the loader will not
+    use: it allowed 24 hours for a closed-market chain."""
+    from shared import marketdata_config as mc
+    cfg = next(c for c in cs.EDITABLE if c.name == "marketdata.toml")
+    fields = {f.key: f for sec in cfg.sections for f in sec.fields}
+    for table, keys in mc.AGE_CEILINGS.items():
+        for key, ceiling in keys.items():
+            assert fields[f"{table}.{key}"].max == ceiling, (table, key)

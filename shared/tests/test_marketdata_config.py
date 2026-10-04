@@ -257,3 +257,46 @@ def test_the_trackers_built_in_limits_are_the_shipped_settings():
     assert module.RETRY_CAP_SEC == mc.DEFAULTS["tracker"]["retry_max_sec"]
     assert module.FETCH_RETRY_CAP_SEC == mc.DEFAULTS["tracker"]["fetch_retry_max_sec"]
     assert mc.section("tracker") == mc.DEFAULTS["tracker"]
+
+
+# --- AC-104: a configured age limit has a ceiling ------------------------------
+#
+# Only the CALLER's own maxAge was capped. A Settings edit could make the store
+# answer every caller that sends no limit from a 20-hour-old chain or a
+# 6-hour-old quote.
+
+@pytest.mark.parametrize("name,key,ceiling", [
+    ("chains", "max_age_sec", 300),
+    ("chains", "closed_max_age_sec", 3600),
+    ("chains", "shadow_compare_max_age_sec", 300),
+    ("quotes", "max_age_sec", 60),
+    ("bars", "today_quote_max_age_sec", 600),
+])
+def test_an_age_limit_above_its_ceiling_is_the_ceiling(monkeypatch, name, key, ceiling):
+    assert mc.AGE_CEILINGS[name][key] == ceiling
+    _with(monkeypatch, name, key, 72000)
+    assert mc.section(name)[key] == ceiling
+
+
+def test_an_age_limit_at_or_under_its_ceiling_is_kept(monkeypatch):
+    _with(monkeypatch, "chains", "max_age_sec", 300)
+    assert mc.section("chains")["max_age_sec"] == 300
+    _with(monkeypatch, "quotes", "max_age_sec", 12)
+    assert mc.section("quotes")["max_age_sec"] == 12
+
+
+def test_every_shipped_age_limit_is_inside_its_ceiling():
+    for name, keys in mc.AGE_CEILINGS.items():
+        for key, ceiling in keys.items():
+            assert mc.DEFAULTS[name][key] <= ceiling, (name, key)
+
+
+def test_a_clamped_limit_is_said_once(monkeypatch, caplog):
+    import logging
+    mc._CLAMP_WARNED.clear()
+    _with(monkeypatch, "quotes", "max_age_sec", 21600)
+    with caplog.at_level(logging.WARNING):
+        mc.section("quotes")
+        mc.section("quotes")
+    said = [r for r in caplog.records if "max_age_sec" in r.getMessage()]
+    assert len(said) == 1
