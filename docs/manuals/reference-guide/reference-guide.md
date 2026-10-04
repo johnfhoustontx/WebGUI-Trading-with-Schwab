@@ -2872,7 +2872,8 @@ They are fully isolated. Nothing crosses between them.
 | Service | `options_svc` (:8211), `cache:options:paper_trades` |
 | New trades | Checked against the risk limits below; the answer is `cache:options:paper_create`, shown as a message on the page that sent the trade |
 | Re-pricing | Open trades are re-priced on page load and on the management cycle, during market hours only |
-| Management cycle | **Hourly, 09:00–14:00 CT** on trading days (the manual paper account's own cadence — there is no 15:00 run), plus **Run manage cycle** on [Paper Account](#paper-account) |
+| Management cycle | **Hourly, 09:00–14:00 CT** on trading days (the manual paper account's own cadence), plus **Run manage cycle** on [Paper Account](#paper-account) |
+| Expiry settlement | **15:05 CT** on trading days: a settle-only pass closes each expired trade at intrinsic value against that day's close. One missed is settled later against the expiration day's daily close, never a later day's price |
 
 ### Automatic exits
 

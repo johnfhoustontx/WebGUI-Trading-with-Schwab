@@ -1019,8 +1019,12 @@ Trades you sent by hand live on **Paper Ledger**.
 - **Cards** — equity, cash, P&L, open count, engine status.
 - **Run entry / manage cycle** — open new positions from captured signals, or
   re-price and auto-close existing ones. This also runs on its own **at the top of
-  each hour, 09:00–14:00 CT** (there is no 15:00 run) — so a target hit at 09:15 is
+  each hour, 09:00–14:00 CT** — so a target hit at 09:15 is
   acted on at 10:00 unless you press **Run manage cycle** yourself.
+- **Expiry** — a position that reaches its expiration is settled on its own pass
+  at **15:05 CT**, just after the close, against that day's closing price. One
+  missed then is settled the next morning against the expiration day's close,
+  never against the next day's price.
 - **A cash-secured put or covered call exits on its own rules**: **+50% of the
   credit**, or **21 days to expiry while it is in profit**. It has no money, delta
   or time stop, so a losing one rides to expiry, assignment or call-away — a short

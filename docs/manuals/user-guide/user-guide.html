@@ -2073,8 +2073,13 @@ something to measure.</p>
 </ul>
 <blockquote>
 <p>The entry and manage cycles also run automatically <strong>at the top of each hour,
-09:00–14:00 CT</strong> on trading days — there is no 15:00 run. So a target hit at 09:15
+09:00–14:00 CT</strong> on trading days. So a target hit at 09:15
 is acted on at 10:00 unless you press <strong>Run manage cycle</strong> yourself.</p>
+<p><strong>Expiry is settled separately, at 15:05 CT.</strong> A position that reaches its
+expiration is closed at its intrinsic value against that day's closing price,
+on a pass that does nothing else (no new entries, no exit rules). If that pass
+is missed, the next morning's cycle settles it against the <strong>expiration day's</strong>
+close, not the morning's price. The Paper Ledger settles on the same pass.</p>
 </blockquote>
 <h2 id="shares">Shares</h2>
 <p><strong>Route:</strong> <code>/options/shares</code>.</p>

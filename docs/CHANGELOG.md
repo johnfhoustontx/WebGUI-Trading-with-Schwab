@@ -4,7 +4,74 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-03 (**The proxy's trade tracker stopped asking Schwab about trades it cannot follow.**)
+**Last updated:** 2026-10-03 (**The audit's three Critical and ten High Accuracy findings, fixed.**)
+
+Source: [the audit scorecard](audits/2026-10-03-app-audit-scorecard.md), rows
+AC-01 to AC-05, AC-07, AC-40 to AC-45 and AC-100. One commit per finding (two
+pairs share a commit). Not yet promoted.
+
+- **Expiry settlement (AC-01, AC-02, `f0ed8fd`).** Three books each decided when
+  a position expires and at what price. Captured signals closed as `EXPIRED` at
+  the first cycle of their expiry day, at that morning's option mark. The paper
+  Account and Ledger could not settle on the expiry day at all (the hourly cycle
+  stops at 14:00 CT) and settled the next trading morning against that morning's
+  quote: +$98.70 at Friday's close booked −$401.30 on Monday. One rule now,
+  `paper_engine.settlement_underlying`: on the day, at or after 15:00 CT, the
+  regular-session quote; on a later day, the expiration date's daily close; no
+  usable price defers. A settle-only pass runs at 15:05 CT
+  (`[slots.paper_settle]`). Captured signals are valued by
+  `signal_repricer.expiry_value`, and the outcome row records the price it
+  settled against. **Measured on prod, read-only:** 307 of 930 stored outcomes
+  are `EXPIRED` rows from the old behaviour (172 closed before 15:00 CT on the
+  expiry day, 135 on a later day); 4 of 6 expired Account positions settled on a
+  later day. The fix is forward-only.
+- **Income positions can exit (AC-03, `e0db4d6`).** `paper_broker.simulate_fill_price`
+  priced PCS, CCS and IC only, so every rule-close of a cash-secured put or
+  covered call was rejected. It now prices a single leg off its own market.
+  Measured: no income position has been opened in prod yet, so this was latent.
+- **Iron condors sized off the wider wing (AC-04, `fe4402e`).**
+  `paper_sizing.risk_width` reads the four strikes. Measured: 4 of 10 captured
+  condors have unequal wings, 2 with the call wing wider; none reached the book.
+- **Calculator MAX RISK (AC-05, `7c8d563`).** A position short more calls than it
+  is long returns the unlimited sentinel (a short straddle read $4,310); a
+  position net short puts is scanned to zero (a short 100 put read $4,800
+  against $9,800; a far out-of-the-money one read zero).
+- **Later legs priced at the dividend yield and the mark's own volatility (AC-07,
+  `a553038`).** Measured on real chains before building: the chain header's
+  `dividendYield` agrees with put-call parity within 0.4 points, and Schwab's
+  per-contract `volatility` does not reproduce the contract's own mark (ratio
+  0.71–1.08; weekend marks). `strategy_scanner.later_leg_vols` solves each later
+  leg's volatility from its mark under Black-Scholes-Merton at the chain's
+  yield; the chain volatility is the fallback. `bs_price` / `implied_vol` take
+  an optional `q`. Calendar and diagonal figures on the Strategy Finder move.
+- **A dead data feed is not "Strong Bear" (AC-40, `7cbdecb`).**
+  `live_composite.composite_reading` is the one test for a composite: without
+  one the snapshot carries no band, the bridge writes `unknown`, and the service
+  derives no band and no velocity (the outage had printed
+  "REGIME BREAK: −75.87σ").
+- **The Day gauge (AC-41, AC-42, `8fed641`).** Session structure and the volume
+  profile read today's session (`_session_frame`), not the ten-day frame, where
+  a −3% day after nine up days scored +1.00. The daily frame is passed to
+  `calculate_ema_alignment` as `daily` (weight 3.0, was `1day` → 1.0), and an
+  unknown timeframe name raises. Both move the live Day reading.
+- **Long Term valuation (AC-43, `65a563b`).** A P/E or PEG at or below zero
+  carries no reading; a loss-maker scored the maximum.
+- **Portfolio (AC-44 `9a51eed`, AC-45 `f03482c`).** No vs-sector or vs-SPY figure
+  when the benchmark history starts after the entry; relative-strength figures
+  are labelled by their own period (the 5/21/63-day figures printed as 1D/1W/1M).
+- **Shadow's moving bar (AC-100, `ef67cf6`).** `shadow_moving_same` /
+  `_under_10bp` / `_under_50bp` / `_over_50bp` record how far the stored close
+  for today sat from the fresh one, the bar `shadow_hit_match` skips.
+- **Opened while fixing:** AC-19 (the chain `volatility` against the mark, to be
+  re-measured in regular hours) and AC-60 (the dead feed's numeric `0.00` still
+  draws on the screens).
+- **Tests.** New: `options-scanner/tests/test_expiry_settlement.py`,
+  `test_calc_max_risk.py`, `test_later_leg_pricing.py`;
+  `services/options_svc/tests/test_expiry_settlement.py`;
+  `shared/tests/test_ema_alignment_weights.py`. Two tests that pinned the old
+  captured-expiry behaviour were replaced. Every suite passes.
+
+**Prior — 2026-10-03** (**The proxy's trade tracker stopped asking Schwab about trades it cannot follow.**)
 
 - **What was wrong.** The tracker (`/track`, the 30-second reconcile in
   `schwab-proxy/schwab_proxy.py`) follows credit spreads only, but it learned a

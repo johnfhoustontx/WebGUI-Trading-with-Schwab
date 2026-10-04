@@ -1424,8 +1424,17 @@ that the surface is covered. Two distinct holes, each fixed at its own layer:
   vocabulary at the smallest position size, for six distinct ways of having no
   composite at all. Reached the Desk strip, the Market Regime Console, **and the
   market snapshot pushed to your phone**. Fixed at the call site in
-  `sentiment_svc.compute.derive_composite_extras`, which now publishes
-  `None, None, None` when `_as_finite` says there is nothing to band.
+  `sentiment_svc.compute.derive_composite_extras`, which publishes
+  `None, None, None` when **`live_composite.composite_reading`** says there is
+  nothing to band. ⚠ That test was `_as_finite` until 2026-10-03, and it missed
+  the one shape the producer really emits with every fetch failing: the STRING
+  `"0.00"` at aggregate confidence 0.0 — finite, so it still banded as Strong
+  Bear, and the bridge wrote `strong_bearish`, which the scanner's regime filter
+  counts as a bear vote. `composite_reading` (a finite total ABOVE zero at
+  non-zero confidence) is now the one test, used by the snapshot, the bridge
+  (which writes `unknown` and a null score) and the service; velocity is
+  withheld with it. The NUMBER `0.00` itself still draws on the screens
+  (scorecard AC-60).
   ⚠ **The absence value has to be the one the consumers already test** — `None`
   here, since two of the three gate on `size is not None` and an empty-string
   triple is a truthy tuple that renders blank rather than dashed.
@@ -1715,7 +1724,8 @@ Schwab or Claude call), and the once-daily **`income`** scan (08:52 CT, kept off
 30–45 DTE window, against the ~690 `/chains` calls the autoscan cadence would
 cost; since 2026-09-14 that is more than one call per symbol — each adds an
 expiration-list call, and a symbol listing daily expiries needs several fetch
-runs). They
+runs), and **`paper_settle`** (15:05 CT — the paper books' expiry settlement;
+see "Expiry settlement has ONE rule"). They
 are named clock marks, the same thing `[windows]` already models, and **each
 `analyze` slot is a paid Claude call** while `income` is the largest scheduled
 Schwab spend on that table, so it is the direct control on both.
@@ -3174,7 +3184,12 @@ option-only structure (no vertical, condor or fly can lose more than its width)
 and wrong the moment shares are involved: it reported a covered call on a $100
 stock as risking **$4,800** — the loss at $50 — against a real **$9,800**. It is
 also what proves a protective put's loss is *bounded*, which is the entire reason
-to own one. Option-only sets keep the old floor.
+to own one. A set **net short puts** scans from zero for the same reason (a short
+100 put read $4,800 against a true $9,800, and a far-OTM one read a max loss of
+ZERO), and a set whose upside slope is negative — short more calls than it is
+long, a share lot counting as one — returns the `UNLIMITED` sentinel, because the
+grid's edge at 1.5× spot is where the scan stopped, not a risk figure (a short
+straddle read $4,310). Every other option-only set keeps the old floor.
 
 ⚠ **Five places on the Calculator open-coded `l.get("strike") is None`, and one
 SILENTLY DROPPED the leg** — so the page would have priced a covered call as a
@@ -3244,10 +3259,85 @@ intrinsic on that expiry — ⚠ **that path must stay byte-identical**, because
 every structure the Finder built before 2026-09-13 and their grades and cuts rest on
 it; `test_single_expiry_options_never_take_the_front_valuation_path` guards it. A
 set with a later-expiring leg or a share leg (calendars, diagonals, covered call,
-protective put, collar) is valued at the FRONT expiry: back legs Black-Scholes at
-their own IV floored at intrinsic, shares at spot, commission per option contract
-with shares free. Design:
+protective put, collar) is valued at the FRONT expiry: back legs
+Black-Scholes-Merton floored at intrinsic, shares at spot, commission per option
+contract with shares free. Design:
 [the Finder doc](docs/plans/2026-09-13-strategy-finder-all-structures-design.md).
+
+⚠ **A later leg is priced at the chain's dividend yield and the volatility ITS
+OWN MARK implies (`strategy_scanner.later_leg_vols`), not at the chain's
+per-contract `volatility`.** The position is entered at the legs' marks, so the
+model that values it later has to be worth those marks today. Measured on real
+chains 2026-10-03 (weekend marks, seven names): the chain header's
+`dividendYield` agrees with put-call parity within 0.4 points, while the contract
+`volatility` ran **0.71–1.08** of the mark-implied figure and is one value for
+call and put at a strike. A mark that cannot be inverted falls back to the chain
+`volatility` at q = 0, and an unusable chain `volatility` still raises.
+`bs_price` / `implied_vol` take an optional `q` for this ONE caller; everything
+else prices at q = 0. ⚠ Any other code that reads the chain `volatility` as "the
+IV that prices this contract" inherits that gap until it is checked in regular
+hours (scorecard AC-19).
+
+## Expiry settlement has ONE rule, and three books use it
+
+**`paper_engine.settlement_underlying(client, symbol, expiration, today)`** is
+the price an expired option position settles against, for the paper Account, the
+Ledger and the captured signals alike:
+
+* **expiry day**, at or after the 15:00 CT close (`should_settle` gates it): the
+  regular-session last from a direct quote (`regular.regularMarketLastPrice`
+  when Schwab sends it, else `lastPrice`);
+* **any later day**: the EXPIRATION DATE's daily close — never a live quote;
+* **no usable price**: `None`, and the caller DEFERS. It never falls back from
+  the dated close to a live quote, nor (captured signals) to the entry price.
+
+⚠ **Until 2026-10-03 nothing could settle a paper position on its own expiry
+day.** The hourly cycle's last run is 14:00 CT and settlement needs 15:00, so a
+position settled the next trading morning against THAT morning's quote: a put
+credit spread worth +$98.70 at Friday's close booked −$401.30 on Monday. And
+captured signals closed as `EXPIRED` at the first cycle of their expiry day (the
+gate was `dte <= 0` with no clock), at that morning's option mark. Measured on
+prod: **307 of 930 stored outcomes** are such rows. The fix is forward-only;
+they can be re-settled from daily closes, and the score calibration, the
+entry-volatility-rank study and the ladder replay were computed on them.
+
+**`[slots.paper_settle]` (15:05 CT) runs a settle-ONLY pass**
+(`handlers.run_paper_settle` → `paper_engine.run_settle_cycle` +
+`expire_ledger_trades`). ⚠ It must never become a manage cycle: after the close
+an option quote is a stale or one-sided market, and an exit rule acting on one
+closes positions at prices nobody could trade. Keep the slot AFTER 15:00 —
+earlier, nothing is due and the slot is spent for the day.
+
+⚠ **`signal_repricer.expiry_value` is the CAPTURED-signal settlement value, and
+it is not `intrinsic_value`.** `intrinsic_value` books a single-leg short at
+ZERO whatever the close, which is right for the Account only — there an
+in-the-money cash-secured put is ASSIGNED and its loss lives in the share lot. A
+captured signal has no lot, so `expiry_value` returns the option's own intrinsic,
+and `None` (never 0.0, which books the whole credit as a win) for anything it
+cannot value.
+
+**Two neighbouring rules from the same audit.** The Account sizes a position off
+**`paper_sizing.risk_width(sig)`** — an iron condor's WIDER wing, read off its
+four strikes — never off the row's `width`, which the scanner fills with the PUT
+wing and Rescue's roll builders read that way. And **`paper_broker.simulate_fill_price`
+prices a single-leg short off its own leg** (the branch `reprice_swing` takes to
+mark it); before that every income position's rule-close was rejected each cycle.
+⚠ The manage-cycle tests that use `_FakeBroker` cannot see a broker that cannot
+fill — it fills whatever it is asked.
+
+## A session-scoped scorer gets ONE session, and a timeframe weight is looked up by name
+
+The Day gauge's intraday frames hold **ten sessions** (the EMA alignment needs
+them), but its session structure and its volume profile describe one. They read
+**`sentiment_svc.compute._session_frame(frames)`** — today's bars only, `None`
+with fewer than `SESSION_MIN_BARS` or with no timestamps to tell sessions apart,
+and it never falls back to the multi-day frame. Handed all ten, a −3% day after
+nine up days scored **+1.00**.
+
+`technical.calculate_ema_alignment` **raises on a timeframe name that is not in
+`TIMEFRAME_WEIGHTS`**. It defaulted an unknown key to 1.0, which is how the
+sentiment service's daily frame — passed as `"1day"` where the table says
+`"daily"` — carried the 5-minute frame's weight instead of 3.0.
 
 ## A DEBIT position inverts every credit rule, and the ledger had none of its own
 
@@ -3272,7 +3362,8 @@ expiration day must book the target it reached, and `should_settle` fires from
 
 ⚠ **That cycle is HOURLY (`paper_cycle_due`, 09:00–14:00 CT — six times a trading
 day), not 5-minute**, and `expire_ledger_trades`' own docstring claimed 5-minute
-for months. Six checks a day is the honest resolution of these rules — a target
+for months. (Expiry SETTLEMENT also runs on its own 15:05 CT slot — see
+"Expiry settlement has ONE rule" above.) Six checks a day is the honest resolution of these rules — a target
 reached at 09:15 is acted on at 10:00 — and the pass rides that cadence rather
 than adding a seventh scheduler slot, because the rules are day-scale (a +50%
 target, a 21-DTE exit) and not intraday.
@@ -3588,7 +3679,8 @@ second number, and a **physically settled** name. ⚠ B5's *"close it by a set C
 time"* half is deliberately **not built**: `run_manage_cycle` settles at intrinsic
 against the **15:00 CT** close and models no after-hours leg, so the 17:30 ET
 exercise notice it defends against **cannot occur in this simulation**. Nor can it
-be measured — `signal_outcomes.settlement_underlying` is NULL in all 910 rows and
+be measured — `signal_outcomes.settlement_underlying` was NULL in every row until
+2026-10-03 (an expiry now records the price it settled against) and
 both books hold **zero `equity_lots`**, so no assignment has ever occurred here.
 
 ⚠ **`strategic_context`'s `assignment_risk` was unconditionally `True` for every
@@ -3841,7 +3933,11 @@ what it WOULD have reused, `on` answers repeats locally. Design:
    volume must not assume one-minute data for watchlist-only symbols, and a new
    consumer that needs a minute-fresh chain for a symbol must make that symbol
    core in `compute.collection_tiers`.
-6. **A changed store rule goes through `shadow` before `on`.** Shadow makes
+6. **A changed store rule goes through `shadow` before `on`.** On daily bars,
+   `shadow_hit_match` compares every bar EXCEPT today's during the session — the
+   one bar a stored series can be stale on — so read **`shadow_moving_same` /
+   `_under_10bp` / `_under_50bp` / `_over_50bp`** for how far the stored close
+   sat from the fresh one (they claim no saving). Shadow makes
    `on`'s decision with `on`'s limits and compares the answer with Schwab's. It
    counts low — it cannot reproduce the wider-window refetch or two identical
    requests sharing one call — with one known exception: while the mode is shadow the collector sends no age limit, so in the few minutes it polls while every session is closed (about 08:26-08:29 and 15:16-15:19 CT) its requests count as would-be hits against its own previous chain — about 700 `shadow_hit_match` a day on `chains` for caller `options_svc` that `on` will not save, because there it sends its 20-second limit. Subtract them when reading the counts.

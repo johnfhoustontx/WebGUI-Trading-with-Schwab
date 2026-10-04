@@ -4245,7 +4245,11 @@ source of "why does this number not match" in the app:</p>
 </tr>
 <tr>
 <td>Management cycle</td>
-<td><strong>Hourly, 09:00–14:00 CT</strong> on trading days (the manual paper account's own cadence — there is no 15:00 run), plus <strong>Run manage cycle</strong> on <a href="#paper-account">Paper Account</a></td>
+<td><strong>Hourly, 09:00–14:00 CT</strong> on trading days (the manual paper account's own cadence), plus <strong>Run manage cycle</strong> on <a href="#paper-account">Paper Account</a></td>
+</tr>
+<tr>
+<td>Expiry settlement</td>
+<td><strong>15:05 CT</strong> on trading days: a settle-only pass closes each expired trade at intrinsic value against that day's close. One missed is settled later against the expiration day's daily close, never a later day's price</td>
 </tr>
 </tbody>
 </table>

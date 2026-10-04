@@ -2187,6 +2187,18 @@ exits are **not** credit-denominated. They run on the manual paper manage cycle
 settlement on that tick, so a position at its target on its expiration day books
 the target rather than an intrinsic settlement.
 
+**Expiry settlement — one rule for every paper book.**
+`paper_engine.settlement_underlying` supplies the price for the Account, the
+Ledger and the captured signals: on the expiration day, at or after 15:00 CT,
+the regular-session last from a direct quote; on any later day, the expiration
+date's daily close (never a live quote); with no usable price the settlement is
+deferred. The Account and the Ledger settle on the 15:05 CT slot
+(`[slots.paper_settle]`), which runs no entry, no reprice and no exit rule; the
+captured signals settle on their own 5-minute cycle, which runs to 15:15 CT. A
+captured signal is valued by `signal_repricer.expiry_value` (each short leg's
+intrinsic less each long leg's), and its outcome row records the price it
+settled against in `settlement_underlying`.
+
 ## Why a separate rule set
 
 `recommend` computes `credit_total = entry_credit x 100`, and a debit row stores
@@ -2559,7 +2571,7 @@ the source; this table is a summary of them.
 | Service | Cadence |
 |---------|---------|
 | sentiment_svc | Composite refresh every **120 s** (`REFRESH_INTERVAL_SEC`), throttled to one refresh per **15 min** off-hours (`_OFFHOURS_INTERVAL_MIN`); directional trend recompute every **900 s** (`TREND_INTERVAL_SEC`); market-regime recompute every **5 min** (`REGIME_INTERVAL_MIN`); order-flow publish every **30 s** (`ORDER_FLOW_PUBLISH_SEC`); **momentum cascade once nightly at 16:20** (`momentum_due`); rotation at startup / on demand. |
-| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00, no 15:00 run** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged). |
+| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); paper **expiry settlement at 15:05** — a settle-only pass over the Account and the Ledger (`paper_settle_due`, `[slots.paper_settle]`, grace 120 min); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged). |
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
 | trade_svc | Analysis on demand. One scheduled job: the watchlist **dividend pull**, once a trading day at or after **06:40 CT** (`[calendar.dividends] refresh_at` in `config/news.toml`); the loop wakes every **60 s** and retries a failed pull after **15 min**. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |

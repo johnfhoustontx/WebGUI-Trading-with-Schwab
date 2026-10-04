@@ -633,7 +633,7 @@ count calls **sent to Schwab** — a locally answered request is not in them.
 
 | Key | Contents |
 |---|---|
-| `store` | Today's requests: `served_locally` (total answered without a Schwab call), `by_outcome` (`{outcome: count}` over every row), and `rows` — `[{endpoint, caller, outcome, n}]`, the 500 largest. Outcomes: `upstream`, `hit`, `subset`, `coalesced`, `composed`, `partial`, and in shadow mode the `shadow_*` names (for example `shadow_hit_match`, `shadow_subset_mismatch`, `shadow_bar_match`). |
+| `store` | Today's requests: `served_locally` (total answered without a Schwab call), `by_outcome` (`{outcome: count}` over every row), and `rows` — `[{endpoint, caller, outcome, n}]`, the 500 largest. Outcomes: `upstream`, `hit`, `subset`, `coalesced`, `composed`, `partial`, and in shadow mode the `shadow_*` names (for example `shadow_hit_match`, `shadow_subset_mismatch`, `shadow_bar_match`, and for a daily series in the session `shadow_moving_same` / `_under_10bp` / `_under_50bp` / `_over_50bp` — how far the stored close for today sat from the fresh one). |
 | `store_degrades` | `{area: count}` — store faults since this process started that fell back to a plain fetch. Empty is normal. |
 
 ## Trader API

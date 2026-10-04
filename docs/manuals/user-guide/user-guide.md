@@ -1798,8 +1798,14 @@ The account view for the automated paper-trading engine.
 - **Open Positions** table and a **Fills log** (last 100 orders).
 
 > The entry and manage cycles also run automatically **at the top of each hour,
-> 09:00–14:00 CT** on trading days — there is no 15:00 run. So a target hit at 09:15
+> 09:00–14:00 CT** on trading days. So a target hit at 09:15
 > is acted on at 10:00 unless you press **Run manage cycle** yourself.
+>
+> **Expiry is settled separately, at 15:05 CT.** A position that reaches its
+> expiration is closed at its intrinsic value against that day's closing price,
+> on a pass that does nothing else (no new entries, no exit rules). If that pass
+> is missed, the next morning's cycle settles it against the **expiration day's**
+> close, not the morning's price. The Paper Ledger settles on the same pass.
 
 ## Shares
 

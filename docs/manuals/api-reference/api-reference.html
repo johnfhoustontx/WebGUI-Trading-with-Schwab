@@ -1311,7 +1311,7 @@ count calls <strong>sent to Schwab</strong> — a locally answered request is no
 <tbody>
 <tr>
 <td><code>store</code></td>
-<td>Today's requests: <code>served_locally</code> (total answered without a Schwab call), <code>by_outcome</code> (<code>{outcome: count}</code> over every row), and <code>rows</code> — <code>[{endpoint, caller, outcome, n}]</code>, the 500 largest. Outcomes: <code>upstream</code>, <code>hit</code>, <code>subset</code>, <code>coalesced</code>, <code>composed</code>, <code>partial</code>, and in shadow mode the <code>shadow_*</code> names (for example <code>shadow_hit_match</code>, <code>shadow_subset_mismatch</code>, <code>shadow_bar_match</code>).</td>
+<td>Today's requests: <code>served_locally</code> (total answered without a Schwab call), <code>by_outcome</code> (<code>{outcome: count}</code> over every row), and <code>rows</code> — <code>[{endpoint, caller, outcome, n}]</code>, the 500 largest. Outcomes: <code>upstream</code>, <code>hit</code>, <code>subset</code>, <code>coalesced</code>, <code>composed</code>, <code>partial</code>, and in shadow mode the <code>shadow_*</code> names (for example <code>shadow_hit_match</code>, <code>shadow_subset_mismatch</code>, <code>shadow_bar_match</code>, and for a daily series in the session <code>shadow_moving_same</code> / <code>_under_10bp</code> / <code>_under_50bp</code> / <code>_over_50bp</code> — how far the stored close for today sat from the fresh one).</td>
 </tr>
 <tr>
 <td><code>store_degrades</code></td>

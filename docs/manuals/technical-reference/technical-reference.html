@@ -3063,6 +3063,17 @@ exits are <strong>not</strong> credit-denominated. They run on the manual paper 
 (<strong>hourly</strong>, 09:00-14:00 CT), and the rule pass runs <strong>before</strong> the expiry
 settlement on that tick, so a position at its target on its expiration day books
 the target rather than an intrinsic settlement.</p>
+<p><strong>Expiry settlement — one rule for every paper book.</strong>
+<code>paper_engine.settlement_underlying</code> supplies the price for the Account, the
+Ledger and the captured signals: on the expiration day, at or after 15:00 CT,
+the regular-session last from a direct quote; on any later day, the expiration
+date's daily close (never a live quote); with no usable price the settlement is
+deferred. The Account and the Ledger settle on the 15:05 CT slot
+(<code>[slots.paper_settle]</code>), which runs no entry, no reprice and no exit rule; the
+captured signals settle on their own 5-minute cycle, which runs to 15:15 CT. A
+captured signal is valued by <code>signal_repricer.expiry_value</code> (each short leg's
+intrinsic less each long leg's), and its outcome row records the price it
+settled against in <code>settlement_underlying</code>.</p>
 <h2 id="why-a-separate-rule-set">Why a separate rule set</h2>
 <p><code>recommend</code> computes <code>credit_total = entry_credit x 100</code>, and a debit row stores
 <code>entry_credit</code> as the <strong>negative</strong> per-share debit. The credit rules therefore do
@@ -3653,7 +3664,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>options_svc</td>
-<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00, no 15:00 run</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged).</td>
+<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged).</td>
 </tr>
 <tr>
 <td>portfolio_svc</td>
