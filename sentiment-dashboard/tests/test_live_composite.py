@@ -332,3 +332,26 @@ def test_a_real_bottom_of_scale_reading_is_still_strong_bearish():
     assert p["composite_score"] == 1.2
     assert p["position_size_modifier"] == "0.70x"
     assert p["contrarian_signal"] == "Strong Bear"
+
+
+# --- AC-49: the two consumers of the sector score tell absence from a crash ----
+
+def test_the_history_backfill_drops_a_day_only_when_the_sector_score_is_absent():
+    """It dropped ``sec_score <= 0``, which was every real crash day."""
+    import ast
+    import inspect
+    import history_backfill
+    src = inspect.getsource(history_backfill._score_one_day)
+    tree = ast.parse(src)
+    bad = [n for n in ast.walk(tree) if isinstance(n, ast.Compare)
+           and getattr(n.left, "id", "") == "sec_score"
+           and any(isinstance(op, (ast.LtE, ast.Lt)) for op in n.ops)]
+    assert bad == [], "the backfill still compares sec_score against zero"
+    assert "sec_score is None" in src
+
+
+def test_the_live_composite_carries_an_absent_sector_score_at_no_confidence():
+    import inspect
+    import live_composite
+    src = inspect.getsource(live_composite.compute_live)
+    assert "sec_score is None" in src or "sec_score is not None" in src

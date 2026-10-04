@@ -375,6 +375,10 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
     sec_score = _sector.sectors_score(sector_data, last_quotes)
     n_sec = sum(1 for e in sectors if e in last_quotes)
     sec_conf = (n_sec / 11.0) ** 0.5 if n_sec else 0.0
+    if sec_score is None:
+        # No sector data: the component is absent (0 on this scale) and carries
+        # no weight. A real crash day is 1.0, never this.
+        sec_score, sec_conf = 0.0, 0.0
 
     scores = {"vix_complex": float(vix_complex.score), "put_call": float(pc_res.score),
               "breadth": float(br.score), "rotation": rot_score, "sector_perf": float(sec_score)}

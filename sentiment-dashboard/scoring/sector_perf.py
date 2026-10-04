@@ -35,15 +35,25 @@ def weighted_sector_pct(
 def sectors_score(
     sector_data: List[dict],
     last_sector_quotes: Dict[str, dict],
-) -> float:
-    """Compute 0..10 sentiment score from S&P cap-weighted sector moves.
+) -> Optional[float]:
+    """Sentiment score from S&P cap-weighted sector moves, on the composite's
+    1..10 scale, or ``None`` when there is no sector data.
 
-    +2% weighted move → 10; -2% → 0; 0% → 5. Adjusted ±1 by the breadth
-    of green sectors. Mirrors ``_sectors_score`` exactly.
+    +2% weighted move → 10; 0% → 5; -1.6% or worse → 1. Adjusted +1 when at
+    least 80% of sectors are up and -1 when at least 80% are DOWN.
+
+    ⚠ Two things changed on 2026-10-04 (audit AC-49), and callers rely on both:
+
+    * Absence is ``None``. It was 0.0 - the same value the clamp gave a real
+      crash day - and the history backfill then deleted every day scoring 0.
+    * A real day never scores below 1.0. On this scale 0 means "no reading".
+
+    The penalty used to fire when at most 20% of sectors were UP, so a flat
+    tape (nothing up, nothing down) scored 4.0. It now needs sectors that fell.
     """
     wpct, _ = weighted_sector_pct(sector_data, last_sector_quotes)
     if wpct is None:
-        return 0.0
+        return None
     score = 5.0 + wpct * 2.5
     pcts = []
     for row in sector_data:
@@ -56,8 +66,9 @@ def sectors_score(
             pcts.append(p)
     if pcts:
         pct_up = sum(1 for p in pcts if p > 0) / len(pcts)
+        pct_down = sum(1 for p in pcts if p < 0) / len(pcts)
         if pct_up >= 0.80:
             score += 1.0
-        elif pct_up <= 0.20:
+        elif pct_down >= 0.80:
             score -= 1.0
-    return round(max(0.0, min(10.0, score)), 2)
+    return round(max(1.0, min(10.0, score)), 2)

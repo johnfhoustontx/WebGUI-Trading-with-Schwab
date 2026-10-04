@@ -225,9 +225,11 @@ def _score_one_day(d, frames, sector_data, min_components: int = 4):
     rot_conf = float(rot.get("confidence", 0.0) or 0.0)
 
     sec_score = sector_score.sectors_score(sector_data, last_quotes)
-    if sec_score <= 0:
+    if sec_score is None:
         # Anchor: sector perf is the largest weight (25%); if it can't
-        # be computed at all, the day isn't useful.
+        # be computed at all, the day isn't useful. ONLY absence: this tested
+        # ``<= 0``, and a real crash day scored 0.0, so the worst days of the
+        # history were the ones deleted from it (audit AC-49).
         return None
     n_sectors = sum(
         1 for r in sector_data

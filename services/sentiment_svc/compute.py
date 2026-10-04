@@ -1729,8 +1729,10 @@ def derive_sector_summary(sector):
     try:
         score = scoring_sector.sectors_score(sd, quotes)
     except Exception:  # noqa: BLE001
-        score = 0.0
-    return {"wpct": wpct, "score": score}
+        score = None
+    # ``sectors_score`` is None when there is no sector data. The summary keeps
+    # its documented 0.0 for that, beside ``wpct: None`` which is what says so.
+    return {"wpct": wpct, "score": 0.0 if score is None else score}
 
 
 def rotation_assessment():

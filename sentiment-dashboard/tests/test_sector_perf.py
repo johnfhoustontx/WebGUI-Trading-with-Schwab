@@ -36,17 +36,43 @@ def test_weighted_sector_pct_flat_zero():
     assert total_w > 0
 
 
-def test_sectors_score_missing_returns_zero():
-    assert sector_perf.sectors_score([], {}) == 0.0
+# ── absence is None, a crash is 1.0, a flat tape is 5.0 (audit AC-49) ──────
+# The score is on the composite's 1..10 scale, where 0 means "no reading".
+# It used to return 0.0 for no data AND for a real crash day (the clamp's
+# floor), and the history backfill then deleted every day that scored 0.
+
+def test_no_data_is_none_not_a_score():
+    assert sector_perf.sectors_score([], {}) is None
+    assert sector_perf.sectors_score(SECTORS, {}) is None
+
+
+def test_a_crash_day_is_the_bottom_of_the_scale_not_absent():
+    quotes = {row['etf']: {'change_pct': -4.0} for row in SECTORS}
+    assert sector_perf.sectors_score(SECTORS, quotes) == 1.0
+
+
+def test_no_real_day_scores_below_one():
+    for pct in (-2.0, -2.5, -3.0, -10.0):
+        quotes = {row['etf']: {'change_pct': pct} for row in SECTORS}
+        assert sector_perf.sectors_score(SECTORS, quotes) >= 1.0
 
 
 def test_sectors_score_neutral_day():
-    """All sectors at exactly 0% means 0/N > 0 (pct_up = 0.0 ≤ 0.20) so
-    the breadth-penalty branch fires and trims the base 5.0 down to 4.0
-    — preserved verbatim from the legacy ``_sectors_score`` behavior."""
+    """A flat tape is neutral. Every sector at exactly 0% is neither up nor
+    down, so there is no breadth adjustment in either direction.
+
+    This asserted 4.0 until 2026-10-04, "preserved verbatim from the legacy
+    behavior": zero sectors were UP, which the penalty read as 80% DOWN."""
     quotes = {row['etf']: {'change_pct': 0.0} for row in SECTORS}
     s = sector_perf.sectors_score(SECTORS, quotes)
-    assert s == 4.0
+    assert s == 5.0
+
+
+def test_the_breadth_penalty_needs_sectors_that_are_actually_down():
+    etfs = [row['etf'] for row in SECTORS]
+    mostly_flat = {e: {'change_pct': 0.0} for e in etfs}
+    mostly_flat[etfs[0]] = {'change_pct': -0.11}        # one down, the rest flat
+    assert sector_perf.sectors_score(SECTORS, mostly_flat) > 4.5
 
 
 def test_sectors_score_strong_up_day_with_breadth_bump():
