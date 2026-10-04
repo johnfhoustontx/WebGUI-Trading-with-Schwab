@@ -671,6 +671,32 @@ def calc_summary(legs, strategy, spot, r=RISK_FREE_RATE, iv=0.20, T=None):
     }
 
 
+def _signed_qty(leg):
+    """A leg's quantity, signed by side: long +, short -."""
+    q = leg.get("qty", 1)
+    return q if leg.get("side") == "long" else -q
+
+
+def _upside_slope(legs):
+    """The payoff's slope above the highest strike, in contracts (PURE).
+
+    Each call - and each 100-share lot, which is a call struck at zero - adds its
+    signed quantity; a put is worthless up there and adds nothing. Negative
+    means the loss is UNBOUNDED above; positive, the profit is.
+    """
+    return sum(_signed_qty(leg) for leg in legs
+               if leg.get("option_type") in ("call", STOCK_KIND))
+
+
+def _net_short_puts(legs):
+    """How many more puts the position is short than long (PURE).
+
+    Above zero, the loss keeps growing as the underlying falls, all the way to
+    zero - bounded, but far below any grid that stops at half of spot.
+    """
+    return -sum(_signed_qty(leg) for leg in legs if leg.get("option_type") == "put")
+
+
 def calc_summary_generic(legs, spot, r=RISK_FREE_RATE, iv=0.20, T=None):
     """Numeric summary for ANY leg set (incl. butterfly/condor/calendar).
 
@@ -717,7 +743,13 @@ def calc_summary_generic(legs, spot, r=RISK_FREE_RATE, iv=0.20, T=None):
     # reported a covered call on a $100 stock as risking $4,800 (the loss at
     # $50) when the position risks $9,800. It is also what proves a protective
     # put's loss is BOUNDED, which is the entire reason to own one.
-    lo = 0.0 if has_stock_leg(legs) else spot * 0.5
+    #
+    # ⚠ A leg set NET SHORT PUTS scans from zero too (audit AC-05). Its loss
+    # keeps growing all the way down - a short 100 put loses $9,800 at zero, not
+    # the $4,800 the old floor reported at $50 - and a far-OTM short put whose
+    # strike sits below 0.5x spot never reached the grid at all and read as a
+    # max loss of ZERO.
+    lo = 0.0 if (has_stock_leg(legs) or _net_short_puts(legs) > 0) else spot * 0.5
     hi = spot * 1.5
     n = 601
     xs = [lo + (hi - lo) * k / (n - 1) for k in range(n)]
@@ -733,6 +765,14 @@ def calc_summary_generic(legs, spot, r=RISK_FREE_RATE, iv=0.20, T=None):
     max_profit = max(pnl)
     max_loss_signed = min(pnl)
     max_loss = abs(max_loss_signed) if max_loss_signed < 0 else 0.0
+    # ⚠ The grid stops at 1.5x spot, and above the last strike the payoff is a
+    # straight line whose slope is the net call count. Short more calls than the
+    # position is long (shares count as long calls), and that line falls forever:
+    # the grid's edge is where the scan stopped, not a risk figure. A short
+    # straddle read $4,310 here (audit AC-05). ``UNLIMITED`` is the sentinel the
+    # analytic summaries already return and the page already renders.
+    if _upside_slope(legs) < 0:
+        max_loss = UNLIMITED
 
     # Breakevens: linear-interpolated zero-crossings of the P&L curve.
     bes = []
@@ -742,7 +782,8 @@ def calc_summary_generic(legs, spot, r=RISK_FREE_RATE, iv=0.20, T=None):
             x0, x1 = xs[k - 1], xs[k]
             bes.append(round(x0 + (x1 - x0) * (0 - a) / (b - a), 2))
 
-    ror = (max_profit / max_loss * 100) if max_loss > 0 else 0.0
+    ror = ((max_profit / max_loss * 100)
+           if max_loss > 0 and max_loss != UNLIMITED else 0.0)
 
     # PoP: risk-neutral lognormal mass over the profitable region (P&L > 0).
     mu = math.log(spot) + (r - 0.5 * iv * iv) * T
