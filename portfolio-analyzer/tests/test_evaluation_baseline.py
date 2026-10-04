@@ -232,3 +232,46 @@ def test_a_high_entry_grades_poorly_even_if_the_trade_worked_out():
                             {"avg_price": 108.5, "entry_date": "2026-03-02"})
     assert base["entry_pct"] > 0.85
     assert _grade_execution(base["entry_pct"]) < 0.6
+
+
+# ── A benchmark return must cover the SAME window as the position's (AC-44) ──
+# The position's return runs from its entry. The benchmark's ran from the first
+# bar of whatever history was fetched - one year - so for a position older than
+# that, "vs SPY" subtracted a 12-month benchmark return from an 18-month
+# position return. Reproduced by the audit: both up 88.9% since entry, so the
+# true excess is 0.000, shown as +0.889 because SPY was flat over the last year.
+
+def test_window_return_is_none_when_history_starts_after_the_entry():
+    df = make_df([400, 404, 408], start="2026-01-05")
+    assert window_return(df, "2025-06-02") is None
+
+
+def test_window_return_is_kept_when_history_reaches_back_to_the_entry():
+    df = make_df([400, 404, 408, 412], start="2026-01-05")
+    assert window_return(df, "2026-01-06") == pytest.approx(412 / 404 - 1)
+
+
+def test_an_entry_on_the_first_bars_own_date_is_covered():
+    # Schwab stamps a daily candle at midnight CENTRAL, which reads as 05:00 or
+    # 06:00 on the naive-UTC frame the proxy client returns - later in the day
+    # than the bare entry DATE. The comparison is by date, not by instant.
+    df = make_df([400, 404, 408], start="2026-01-05")
+    df["datetime"] = df["datetime"] + pd.Timedelta(hours=6)
+    assert window_return(df, "2026-01-05") == pytest.approx(408 / 400 - 1)
+
+
+def test_an_entry_on_a_weekend_inside_the_history_is_covered():
+    # 2026-01-10 is a Saturday; the window starts at Monday's bar.
+    df = make_df([400, 404, 408, 412, 416, 420, 424], start="2026-01-05")
+    assert window_return(df, "2026-01-10") == pytest.approx(424 / 420 - 1)
+
+
+def test_baseline_has_no_benchmark_return_for_a_position_older_than_the_history():
+    stock = make_df([150 + i for i in range(20)], start="2026-01-05")
+    sector = make_df([50] * 20, start="2026-01-05")       # flat over the last year
+    spy = make_df([400] * 20, start="2026-01-05")
+    entry = {"avg_price": 100.0, "entry_date": "2024-07-01", "total_quantity": 10.0}
+    b = compute_baseline(_holding(), stock, sector, spy, entry)
+    assert b["sector_ret"] is None
+    assert b["spy_ret"] is None
+    assert b["entry_price"] == 100.0        # the position's own figures are unaffected

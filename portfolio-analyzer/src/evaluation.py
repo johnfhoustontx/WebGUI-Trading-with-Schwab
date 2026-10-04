@@ -33,8 +33,36 @@ def slice_since(df, entry_date: str):
     return out if len(out) else None
 
 
+def covers_entry(df, entry_date: str) -> bool:
+    """Whether ``df``'s history reaches back to ``entry_date`` (by DATE).
+
+    False when the first bar is dated after the entry: the history was fetched
+    for a fixed span (one year) and the position is older than that. Compared
+    by date, not instant - Schwab stamps a daily candle at midnight Central,
+    which is 05:00 or 06:00 on the naive-UTC frame, later than a bare date.
+    """
+    if df is None or entry_date is None or not len(df):
+        return False
+    import pandas as pd
+    try:
+        cutoff = pd.Timestamp(entry_date).normalize()
+        first = pd.Timestamp(df["datetime"].min()).normalize()
+    except (ValueError, TypeError):
+        return False
+    return first <= cutoff
+
+
 def window_return(df, entry_date: str):
-    """First-close to last-close return over the holding window, or None."""
+    """First-close to last-close return over the holding window, or None.
+
+    None when the history does not reach back to the entry. This is a BENCHMARK
+    return, subtracted from a position return that runs from the entry, so the
+    two must cover one window: for a position older than the fetched year the
+    old code returned the benchmark's last-12-months move and the card reported
+    a mismatched-horizon "excess" (audit AC-44: +0.889 shown, 0.000 true).
+    """
+    if not covers_entry(df, entry_date):
+        return None
     window = slice_since(df, entry_date)
     if window is None:
         return None

@@ -156,3 +156,23 @@ def test_annualize_return_guards_total_loss_and_missing_inputs():
     assert annualize_return(None, 60) is None
     assert annualize_return(0.10, None) is None
     assert annualize_return(-1.0, 60) is None      # (1 + r) <= 0
+
+
+def test_no_benchmark_return_means_no_excess_figure_not_the_whole_return():
+    """A position older than the fetched history has no like-for-like benchmark
+    return (audit AC-44). The card must say so rather than report the position's
+    whole return as its outperformance."""
+    from src.evaluation import evaluate_portfolio
+    model = {"holdings": [{"symbol": "ABC", "asset_type": "EQUITY",
+                           "quantity": 10, "avg_price": 100.0, "last": 189.0,
+                           "market_value": 1890.0}],
+             "totals": {"market_value": 1890.0}}
+    baselines = {"ABC": {"symbol": "ABC", "entry_price": 100.0,
+                         "entry_date": "2024-07-01", "days_held": 550,
+                         "trading_days_held": 380, "ann_vol": 0.25, "atr": 3.0,
+                         "peak_close": 190.0, "sector_ret": None, "spy_ret": None,
+                         "entry_pct": None}}
+    card = evaluate_portfolio(model, baselines)["ABC"]
+    assert card["total_return"] == pytest.approx(0.89)
+    assert card["vs_sector"] is None
+    assert card["vs_spy"] is None
