@@ -2900,6 +2900,7 @@ def run_rescue_adhoc(bus, spec) -> None:
     bus.publish(EVENT_RESCUE, {"version": version, "position_id": "adhoc"})
 
 
+@compute._paper_lock.serialized
 def run_rescue_apply(bus, position_id, candidate) -> None:
     """Execute an approved rescue candidate against a paper position.
 

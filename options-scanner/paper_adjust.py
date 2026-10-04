@@ -38,6 +38,7 @@ from zoneinfo import ZoneInfo
 
 import paper_account_db
 import paper_engine
+import paper_lock
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared import structures as _structures  # noqa: E402
@@ -133,6 +134,7 @@ def _exit_debit(position, candidate):
 # CLOSE / PARTIAL
 #############################################
 
+@paper_lock.serialized
 def apply_close(db_path, position, candidate, broker=None):
     """Full close at the candidate's implied debit. Reuses paper_engine._close
     for the BP-release + P&L-realize cash math, then debits commission."""
@@ -142,8 +144,13 @@ def apply_close(db_path, position, candidate, broker=None):
     qty = position.get("quantity") or 1
     exit_debit = _exit_debit(position, candidate)
     realized = round((position["entry_credit"] - exit_debit) * MULTIPLIER * qty, 2)
-    paper_engine._close(db_path, position, exit_debit=exit_debit, exit_order_id=None,
-                        realized_pnl=realized, reason="RESCUE_CLOSE", status="CLOSED")
+    if not paper_engine._close(db_path, position, exit_debit=exit_debit,
+                               exit_order_id=None, realized_pnl=realized,
+                               reason="RESCUE_CLOSE", status="CLOSED"):
+        # Another writer closed it between this caller's read and now. Nothing
+        # was changed, so nothing more may be: no commission, no audit row.
+        return _result(False, "close", position.get("position_id"),
+                       error="position no longer open")
     # commission is on top of the realized spread P&L
     comm = round(candidate.get("commission", 0.0), 2)
     if comm:
@@ -154,6 +161,7 @@ def apply_close(db_path, position, candidate, broker=None):
     return _result(True, "close", position["position_id"], realized=realized)
 
 
+@paper_lock.serialized
 def apply_partial_close(db_path, position, candidate, broker=None):
     """Close qty//2 contracts: reduce quantity, realize P&L on the closed slice,
     release that fraction of reserved BP, and reset max_loss_total to the
@@ -198,6 +206,7 @@ def apply_partial_close(db_path, position, candidate, broker=None):
 # NARROW (update long strike in place)
 #############################################
 
+@paper_lock.serialized
 def apply_narrow(db_path, position, candidate, broker=None):
     """Move the long strike closer (buy a nearer long, sell the old long).
     Recomputes width + max_loss_total from the candidate and applies the net
@@ -288,12 +297,14 @@ def _apply_convert(db_path, position, candidate, action):
     return _result(True, action, position["position_id"])
 
 
+@paper_lock.serialized
 def apply_convert_ic(db_path, position, candidate, broker=None):
     """Convert PCS->IC (or CCS->IC): add the opposite-side spread legs, recompute
     max_loss_total from the candidate, credit the net cash. Stays OPEN."""
     return _apply_convert(db_path, position, candidate, "convert_ic")
 
 
+@paper_lock.serialized
 def apply_convert_butterfly(db_path, position, candidate, broker=None):
     """Convert to an iron-fly-like body (added legs from est_fill_legs). The
     schema's strategy values don't include a butterfly label, so we keep "IC"
@@ -306,6 +317,7 @@ def apply_convert_butterfly(db_path, position, candidate, broker=None):
 # ROLL (close current + open linked new)
 #############################################
 
+@paper_lock.serialized
 def apply_roll(db_path, position, candidate, broker=None):
     """Handles roll_down / roll_out / roll_down_out: CLOSE the current position
     (realize its P&L via the existing close path), then OPEN a new linked
@@ -341,8 +353,13 @@ def apply_roll(db_path, position, candidate, broker=None):
     if exit_debit is None:
         exit_debit = position.get("entry_credit", 0.0)   # fallback: scratch
     realized = round((position["entry_credit"] - exit_debit) * MULTIPLIER * qty, 2)
-    paper_engine._close(db_path, position, exit_debit=exit_debit, exit_order_id=None,
-                        realized_pnl=realized, reason="RESCUE_ROLL", status="CLOSED")
+    if not paper_engine._close(db_path, position, exit_debit=exit_debit,
+                               exit_order_id=None, realized_pnl=realized,
+                               reason="RESCUE_ROLL", status="CLOSED"):
+        # Already closed by another writer: do NOT book the commission or open
+        # the replacement - that would leave a second position with no first.
+        return _result(False, "roll", position.get("position_id"),
+                       error="position no longer open")
 
     # --- account cash for the roll ---
     # The close above already realized (entry_credit - exit_debit) into cash and
@@ -444,6 +461,7 @@ def _pair_credit(legs):
 # INVERTED — advisory-only guard
 #############################################
 
+@paper_lock.serialized
 def apply_inverted(db_path, position, candidate, broker=None):
     """Inverted is advisory-only in the rescue engine — never auto-applied. This
     guard lets the dispatcher refuse it cleanly without mutating anything."""
@@ -496,6 +514,7 @@ def _reprice_candidate_net(candidate, price_leg):
     return round(gross - abs(candidate.get("commission", 0.0)), 2)
 
 
+@paper_lock.serialized
 def apply_adjustment(db_path, position, candidate, price_leg=None, broker=None,
                      tolerance=0.15):
     """Re-price (stale guard) then dispatch to the matching apply primitive.
@@ -512,7 +531,11 @@ def apply_adjustment(db_path, position, candidate, price_leg=None, broker=None,
         return {"ok": False, "action": action,
                 "error": f"{action} is advisory-only — place manually",
                 "position_id": position.get("position_id")}
-    if not _is_open(position):
+    # ``position`` is the caller's READ, taken before this function took the
+    # book lock, so ask the store too: the manage cycle may have closed it in
+    # between. A row the store has never heard of (None) keeps the dict's word.
+    stored = paper_account_db.position_status(db_path, position.get("position_id"))
+    if not _is_open(position) or (stored is not None and stored != "OPEN"):
         return {"ok": False, "action": action, "stale": True,
                 "error": "position no longer open",
                 "position_id": position.get("position_id")}

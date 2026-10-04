@@ -948,7 +948,9 @@ def test_close_paper_persists_closed_dict(monkeypatch):
     import types as _types
 
     seen = {}
-    trade = {"trade_id": "T1", "symbol": "SPY"}
+    # A real Ledger row always carries a status, and only an OPEN one can be
+    # closed (audit AR-02) - see test_paper_book_lock.py for the closed cases.
+    trade = {"trade_id": "T1", "symbol": "SPY", "status": "OPEN"}
     fake_pt = _types.SimpleNamespace(
         get_all_trades=lambda: [trade],
         close_paper_trade=lambda t, debit, reason: (

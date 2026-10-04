@@ -46,6 +46,7 @@ if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
 
 import scanner_engine as se  # noqa: E402
+import paper_lock as _paper_lock  # noqa: E402  (the one lock for both paper books)
 from scanner_engine import run_full_scan  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
 
@@ -1995,6 +1996,7 @@ def _reject(reason: str, message: str, **extra) -> dict:
     return {"status": "rejected", "reason": reason, "message": message, **extra}
 
 
+@_paper_lock.serialized
 def open_income_position(row, qty: int = 1) -> dict:
     """Open one Income-board candidate into the MANUAL paper account.
 
@@ -2494,6 +2496,7 @@ def run_settle_cycle(now_ct=None) -> int:
         _proxy.schwab_py_client, now_ct.date().isoformat(), now_ct=now_ct)
 
 
+@_paper_lock.serialized
 def reset_paper_account(starting_balance: float) -> None:
     """Reset the paper account to ``starting_balance``. Mirrors the page's reset."""
     import paper_account_db
@@ -2508,6 +2511,7 @@ def has_paper_account() -> bool:
     return paper_account_db.get_account() is not None
 
 
+@_paper_lock.serialized
 def reconcile_paper_buying_power() -> dict:
     """R6: reconcile ``buying_power_reserved`` against open positions for the
     manual paper account (default DB).
@@ -2695,6 +2699,7 @@ def _json_safe_scalar(value):
     return None
 
 
+@_paper_lock.serialized
 def create_paper_trade(signal: dict, qty: int) -> dict:
     """Create a Paper LEDGER trade if it clears every risk cap; return the outcome.
 
@@ -2917,6 +2922,7 @@ def _find_trade(trade_id):
                  if t.get("trade_id") == trade_id), None)
 
 
+@_paper_lock.serialized
 def close_paper(trade_id, debit: float) -> None:
     """Close a paper trade at ``debit`` (per spread). No-op if the trade is gone.
 
@@ -2925,11 +2931,18 @@ def close_paper(trade_id, debit: float) -> None:
     import paper_trader
 
     t = _find_trade(trade_id)
-    if t:
+    # Only an OPEN trade can be closed. A trade the manage tick or the settle
+    # pass already closed would otherwise have its exit and realized P&L
+    # overwritten by this second close (audit AR-02).
+    if t and (t.get("status") or "").upper() == "OPEN":
         closed = paper_trader.close_paper_trade(t, float(debit), "MANUAL_CLOSE")
         paper_trader.update_trade(trade_id, closed)
+    elif t:
+        log.warning("close_paper ignored: trade %s is %s, not OPEN", trade_id,
+                    t.get("status"))
 
 
+@_paper_lock.serialized
 def delete_paper(trade_id) -> None:
     """Delete a paper trade by id. Mirrors the page's delete."""
     import paper_trader
@@ -2937,6 +2950,7 @@ def delete_paper(trade_id) -> None:
     paper_trader.delete_trade(trade_id)
 
 
+@_paper_lock.serialized
 def delete_closed_paper() -> None:
     """Delete all closed/expired paper trades. Mirrors the page's delete-all-closed."""
     import paper_trader
@@ -2944,6 +2958,7 @@ def delete_closed_paper() -> None:
     paper_trader.delete_closed_trades()
 
 
+@_paper_lock.serialized
 def expire_ledger_trades(now_ct=None) -> int:
     """Auto-settle expired OPEN ledger trades (``trades.db``) at intrinsic value.
 
@@ -3042,6 +3057,7 @@ def _ledger_exit_ctx(trade, rep, today):
     }
 
 
+@_paper_lock.serialized
 def manage_ledger_trades(now_ct=None) -> int:
     """Apply the DEBIT exit rules to OPEN ledger trades; close the ones that hit.
 

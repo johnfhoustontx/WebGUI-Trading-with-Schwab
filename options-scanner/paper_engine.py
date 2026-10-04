@@ -26,6 +26,7 @@ import config_paper
 import paper_sizing
 import paper_concentration
 import paper_account_db
+import paper_lock
 import signal_repricer
 import signal_recommender
 import scanner_engine
@@ -216,6 +217,7 @@ def _deployment_equity(db_path):
         return None
 
 
+@paper_lock.serialized
 def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
     """Open new paper positions from eligible captured signals. RTH gating is the
     caller's responsibility; this opens nothing when the account is halted."""
@@ -409,13 +411,22 @@ def _close(db_path, pos, exit_debit, exit_order_id, realized_pnl, reason, status
 
     ``realized_pnl`` is expected NET of commission (see ``net_realized_pnl``); it is
     written to both the position row and account cash, keeping equity consistent.
+
+    Returns True when it closed the position. ⚠ False means the row was no
+    longer OPEN - another writer closed it first - and NOTHING was changed: no
+    row, no buying power, no P&L. A caller with follow-on steps (shares to
+    assign, a commission to book, a roll to reopen) must stop on False. The
+    three writes are one transaction (``close_position_and_settle``).
     """
-    paper_account_db.close_position(
+    closed = paper_account_db.close_position_and_settle(
         db_path, pos["position_id"], exit_debit=exit_debit,
         exit_order_id=exit_order_id, realized_pnl=realized_pnl, exit_reason=reason,
-        exit_ts=datetime.now(TZ).isoformat(), status=status)
-    paper_account_db.release_buying_power(db_path, pos["max_loss_total"])
-    paper_account_db.realize_pnl(db_path, realized_pnl)
+        exit_ts=datetime.now(TZ).isoformat(), status=status,
+        release_amount=pos["max_loss_total"])
+    if not closed:
+        log.warning("%s close skipped: position %s is no longer OPEN (%s)",
+                    _default_broker.PREFIX, pos.get("position_id"), reason)
+    return closed
 
 
 # ── Assignment ─────────────────────────────────────────────────────────────
@@ -818,8 +829,9 @@ def _settle_position(db_path, pos, settlement):
     assigned = is_assignment(pos, settlement)
     called = is_called_away(pos, settlement)
     reason = "ASSIGNED" if assigned else ("CALLED_AWAY" if called else "EXPIRED")
-    _close(db_path, pos, exit_debit=round(net, 2), exit_order_id=None,
-           realized_pnl=realized, reason=reason, status="EXPIRED")
+    if not _close(db_path, pos, exit_debit=round(net, 2), exit_order_id=None,
+                  realized_pnl=realized, reason=reason, status="EXPIRED"):
+        return          # already closed by another writer: no shares move twice
     if assigned:
         _assign_shares(db_path, pos)
     elif called:
@@ -843,6 +855,7 @@ def _settle_if_due(db_path, pos, client, now_date, now_ct, close_fn):
     return "settled"
 
 
+@paper_lock.serialized
 def run_settle_cycle(client, now_date, db_path=None, now_ct=None, close_fn=None):
     """Expiration-settle every open position whose expiry is due; nothing else.
 
@@ -865,6 +878,7 @@ def run_settle_cycle(client, now_date, db_path=None, now_ct=None, close_fn=None)
     return settled
 
 
+@paper_lock.serialized
 def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
                      lifecycle=False, be_level_fn=None, close_fn=None):
     """Re-price open positions, apply exit rules (target / CUT / expiration), and
@@ -1010,8 +1024,9 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
             fill = resp["price"]
             gross = round((pos["entry_credit"] - fill) * MULTIPLIER * qty, 2)
             realized = net_realized_pnl(gross, pos, qty, expired=False)
-            _close(db_path, pos, exit_debit=fill, exit_order_id=oid,
-                   realized_pnl=realized, reason=rec["code"], status="CLOSED")
+            if not _close(db_path, pos, exit_debit=fill, exit_order_id=oid,
+                          realized_pnl=realized, reason=rec["code"], status="CLOSED"):
+                continue
             log.info("%s CLOSED %s %s x%s @ %.2f pnl %.2f net (%s)", _default_broker.PREFIX,
                      pos["symbol"], pos["strategy"], qty, fill, realized, rec["code"])
 

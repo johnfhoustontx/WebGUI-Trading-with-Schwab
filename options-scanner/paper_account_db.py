@@ -540,16 +540,80 @@ def set_be_armed(db_path, position_id):
         conn.close()
 
 
+_CLOSE_SQL = ("UPDATE paper_positions SET status=?, exit_debit=?, exit_order_id=?, "
+              "realized_pnl=?, exit_reason=?, exit_ts=? "
+              "WHERE position_id=? AND status='OPEN'")
+
+
 def close_position(db_path, position_id, exit_debit, exit_order_id,
                    realized_pnl, exit_reason, exit_ts, status="CLOSED"):
+    """Close ONE OPEN position row. Returns True when a row was closed.
+
+    ⚠ The ``status='OPEN'`` condition is the point. Without it a second close of
+    the same position - a manual close racing the manage cycle, or a writer
+    acting on a row it read a moment ago - overwrote the first close's exit
+    price, reason and realized P&L (audit AR-02). False means "there was no open
+    row to close", and the caller must then move NO cash.
+    """
     conn = connect(db_path)
     try:
-        conn.execute(
-            "UPDATE paper_positions SET status=?, exit_debit=?, exit_order_id=?, "
-            "realized_pnl=?, exit_reason=?, exit_ts=? WHERE position_id=?",
-            (status, exit_debit, exit_order_id, realized_pnl, exit_reason,
-             exit_ts, position_id))
+        cur = conn.execute(_CLOSE_SQL, (status, exit_debit, exit_order_id,
+                                        realized_pnl, exit_reason, exit_ts,
+                                        position_id))
         conn.commit()
+        return cur.rowcount == 1
+    finally:
+        conn.close()
+
+
+def close_position_and_settle(db_path, position_id, exit_debit, exit_order_id,
+                              realized_pnl, exit_reason, exit_ts, status,
+                              release_amount):
+    """Close an OPEN position, release its reserved buying power and realize its
+    P&L - in ONE transaction. Returns True when it closed a row.
+
+    These were three separate commits (``close_position`` ->
+    ``release_buying_power`` -> ``realize_pnl``), so a failure after the first
+    left a CLOSED position whose risk was still reserved and whose P&L was never
+    booked. Here all three land together or none does, and a position that is
+    not OPEN changes nothing at all.
+
+    The arithmetic is ``release_buying_power`` followed by ``realize_pnl``, step
+    for step, so the account reads the same to the cent as it did through the
+    three calls.
+    """
+    conn = connect(db_path)
+    try:
+        with conn:
+            cur = conn.execute(_CLOSE_SQL, (status, exit_debit, exit_order_id,
+                                            realized_pnl, exit_reason, exit_ts,
+                                            position_id))
+            if cur.rowcount != 1:
+                return False
+            a = conn.execute(
+                "SELECT cash, buying_power_reserved, realized_pnl, "
+                "session_realized_pnl FROM account WHERE id=1").fetchone()
+            release = release_amount or 0.0
+            cash = round(a["cash"] + release, 2)                  # release
+            _update_account(
+                conn,
+                cash=round(cash + realized_pnl, 2),               # then realize
+                buying_power_reserved=round(a["buying_power_reserved"] - release, 2),
+                realized_pnl=round(a["realized_pnl"] + realized_pnl, 2),
+                session_realized_pnl=round(a["session_realized_pnl"] + realized_pnl, 2))
+        return True
+    finally:
+        conn.close()
+
+
+def position_status(db_path, position_id):
+    """The stored status of one position (``OPEN`` / ``CLOSED`` / ``EXPIRED``),
+    or None when there is no such row."""
+    conn = connect(db_path)
+    try:
+        row = conn.execute("SELECT status FROM paper_positions WHERE position_id=?",
+                           (position_id,)).fetchone()
+        return row["status"] if row else None
     finally:
         conn.close()
 
