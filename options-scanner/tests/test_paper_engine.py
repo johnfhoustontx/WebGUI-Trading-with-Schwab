@@ -636,3 +636,66 @@ def test_manage_cycle_closes_a_covered_call_at_its_target_with_the_real_broker(t
     pe.run_manage_cycle(client, _TODAY, db_path=db, now_ct=_NOON_CT)
     assert pdb.fetch_open_positions(db) == []
     assert [o["status"] for o in pdb.fetch_orders(db)] == ["FILLED"]
+
+
+# ── An iron condor is sized off its WIDER wing (audit AC-04) ────────────────
+# Only one side of a condor can finish in the money, so its max loss is the
+# wider wing less the credit. The scanner's IC row carries ``width`` = the PUT
+# wing, and the entry cycle sized and reserved off that field.
+
+def _ic_sig(**kw):
+    # put wing 495/494 = 1 wide; call wing 505/508 = 3 wide; credit 0.50.
+    base = dict(strategy="IC", short_strike=495, long_strike=494, width=1.0,
+                call_short=505, call_long=508, entry_credit=0.50)
+    base.update(kw)
+    return _sig(**base)
+
+
+def test_risk_width_of_an_iron_condor_is_its_wider_wing():
+    import paper_sizing
+    assert paper_sizing.risk_width(_ic_sig()) == 3.0
+    # ...and the wider PUT wing when that is the wide one.
+    assert paper_sizing.risk_width(_ic_sig(long_strike=490)) == 5.0
+
+
+def test_risk_width_of_a_vertical_is_its_own_width():
+    import paper_sizing
+    assert paper_sizing.risk_width(_sig(width=2.5)) == 2.5
+
+
+def test_risk_width_falls_back_to_the_stored_width_when_a_condor_strike_is_missing():
+    import paper_sizing
+    assert paper_sizing.risk_width(_ic_sig(call_long=None)) == 1.0
+
+
+def test_entry_cycle_sizes_an_unequal_wing_condor_off_the_wider_wing(tmp_path):
+    """Per contract the true max loss is (3.00 - 0.50) x 100 = $250, which is
+    the whole $250 cap: ONE contract. Sized off the 1-wide put wing it read as
+    $50 a contract and opened FIVE - $1,250 at risk, booked and reserved as $250."""
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pe.run_entry_cycle(None, "2026-06-03", [_ic_sig()], _FakeBroker(0.50), db)
+    (pos,) = pdb.fetch_open_positions(db)
+    assert pos["quantity"] == 1
+    assert pos["max_loss_per"] == 250.0
+    assert pos["max_loss_total"] == 250.0
+    assert pdb.get_account(db)["buying_power_reserved"] == 250.0
+
+
+def test_entry_cycle_refuses_a_condor_whose_wider_wing_exceeds_the_cap(tmp_path):
+    # call wing 10 wide: (10 - 0.50) x 100 = $950 a contract against a $250 cap.
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pe.run_entry_cycle(None, "2026-06-03", [_ic_sig(call_long=515)],
+                       _FakeBroker(0.50), db)
+    assert pdb.fetch_open_positions(db) == []
+    assert pdb.fetch_orders(db)[0]["reject_reason"] == "RISK_TOO_HIGH"
+
+
+def test_an_equal_wing_condor_is_sized_exactly_as_before(tmp_path):
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    pe.run_entry_cycle(None, "2026-06-03", [_ic_sig(call_long=506)],
+                       _FakeBroker(0.50), db)
+    (pos,) = pdb.fetch_open_positions(db)
+    assert (pos["quantity"], pos["max_loss_per"]) == (5, 50.0)

@@ -263,7 +263,10 @@ def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
             _log_capped(capped_seen, sig["symbol"], capped)
             continue
         try:
-            qty, max_loss_per = paper_sizing.size_contracts(sig["entry_credit"], sig["width"])
+            # The width the RISK is measured across - an iron condor's wider
+            # wing, never the put wing its row's ``width`` field carries.
+            width = paper_sizing.risk_width(sig)
+            qty, max_loss_per = paper_sizing.size_contracts(sig["entry_credit"], width)
             if qty < 1:
                 _record_reject(db_path, sig, "SELL_TO_OPEN", "RISK_TOO_HIGH")
                 log.info("%s REJECTED %s RISK_TOO_HIGH (1 contract > risk cap)",
@@ -292,11 +295,11 @@ def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
             # real fill (often much worse, e.g. an IC filled at bid/ask vs mid)
             # determines true per-contract risk. Sizing off the fill is what keeps
             # realized risk within MAX_RISK_PER_TRADE.
-            qty, max_loss_per = paper_sizing.size_contracts(fill, sig["width"])
+            qty, max_loss_per = paper_sizing.size_contracts(fill, width)
             if max_loss_per <= 0:
                 _record_reject(db_path, sig, "SELL_TO_OPEN", "DEGENERATE_FILL")
                 log.warning("%s REJECTED %s DEGENERATE_FILL (fill %.2f >= width %.2f)",
-                            _default_broker.PREFIX, sig["symbol"], fill, sig["width"])
+                            _default_broker.PREFIX, sig["symbol"], fill, width)
                 continue
             if qty < 1:
                 _record_reject(db_path, sig, "SELL_TO_OPEN", "RISK_TOO_HIGH")

@@ -11,7 +11,7 @@ Version 1.0.0 Changes:
 - Initial implementation
 """
 
-from math import floor
+from math import floor, isfinite
 
 import config_paper
 
@@ -24,6 +24,38 @@ MULTIPLIER = 100
 #############################################
 # SIZING
 #############################################
+
+
+def _strike(value):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if isfinite(v) else None
+
+
+def risk_width(sig):
+    """The width a position's max loss is measured across (PURE).
+
+    A vertical: its own ``width``. An iron condor: the WIDER of its two wings,
+    read off the four strikes themselves. Only one side of a condor can finish
+    in the money, so its max loss is ``wider wing - credit`` - and the scanner's
+    IC row carries ``width`` = the PUT wing (``build_iron_condors``), so a
+    condor with a wider call wing was sized and reserved off the narrow one:
+    put 5 wide, call 10 wide, 2.20 credit booked $560 against a true $1,560
+    (audit AC-04). The stored ``width`` is left alone - Rescue's roll builders
+    read it as the put wing.
+
+    A condor missing a strike falls back to the stored ``width``.
+    """
+    stored = sig.get("width")
+    if str(sig.get("strategy") or "").strip().upper() != "IC":
+        return stored
+    ps, pl = _strike(sig.get("short_strike")), _strike(sig.get("long_strike"))
+    cs, cl = _strike(sig.get("call_short")), _strike(sig.get("call_long"))
+    if None in (ps, pl, cs, cl):
+        return stored
+    return max(abs(ps - pl), abs(cl - cs))
 
 
 def size_contracts(credit, width, max_risk=None):
