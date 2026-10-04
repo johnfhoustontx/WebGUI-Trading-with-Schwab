@@ -443,14 +443,14 @@ def test_a_chain_is_never_priced_at_an_unusable_quote(quote):
 
 
 def test_a_carry_that_raises_for_one_symbol_leaves_the_others_carried(monkeypatch):
-    real = chain_carry.carry_chain
+    real = chain_carry.carry_counted
 
     def flaky(chain, spot, **kw):
         if chain["symbol"] == "AAPL":
             raise RuntimeError("boom")
         return real(chain, spot, **kw)
 
-    monkeypatch.setattr(chain_carry, "carry_chain", flaky)
+    monkeypatch.setattr(chain_carry, "carry_counted", flaky)
     engine = _engine()
     c = _client(ages={"AAPL": 95.0, "SOFI": 95.0}, quotes={"AAPL": 103.0, "SOFI": 9.0})
     _poll(c, ["AAPL", "SOFI"], engine=engine)
@@ -856,15 +856,15 @@ def test_in_the_regular_session_the_one_call_is_the_carrys_own():
 #############################################
 
 def _carry_kwargs(monkeypatch, tiers):
-    """The keyword arguments chain_carry.carry_chain was called with."""
+    """The keyword arguments chain_carry.carry_counted was called with."""
     seen = []
-    real = chain_carry.carry_chain
+    real = chain_carry.carry_counted
 
     def spy(chain, spot, **kw):
         seen.append(kw)
         return real(chain, spot, **kw)
 
-    monkeypatch.setattr(chain_carry, "carry_chain", spy)
+    monkeypatch.setattr(chain_carry, "carry_counted", spy)
     c = _client(ages={"AAPL": 95.0}, quotes={"AAPL": 103.0}, chain=_real_chain)
     _poll(c, ["AAPL"], tiers=tiers)
     assert len(seen) == 1
@@ -1013,14 +1013,14 @@ def test_the_fresh_ceiling_applies_with_an_empty_tail(warned):
 
 def test_a_failed_carry_is_a_warning_the_first_time_and_debug_after(monkeypatch, caplog):
     monkeypatch.setattr(gc, "_WARNED", set())
-    real = chain_carry.carry_chain
+    real = chain_carry.carry_counted
 
     def flaky(chain, spot, **kw):
         if chain["symbol"] in ("AAPL", "UBER"):
             raise RuntimeError("boom")
         return real(chain, spot, **kw)
 
-    monkeypatch.setattr(chain_carry, "carry_chain", flaky)
+    monkeypatch.setattr(chain_carry, "carry_counted", flaky)
 
     def poll():
         caplog.clear()
@@ -1038,7 +1038,7 @@ def test_a_failed_carry_is_a_warning_the_first_time_and_debug_after(monkeypatch,
 
 def test_the_first_failure_warning_carries_the_traceback(monkeypatch, caplog):
     monkeypatch.setattr(gc, "_WARNED", set())
-    monkeypatch.setattr(chain_carry, "carry_chain",
+    monkeypatch.setattr(chain_carry, "carry_counted",
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
     c = _client(ages={"AAPL": 95.0}, quotes={"AAPL": 103.0})
     with caplog.at_level(logging.WARNING, logger="gex_collector"):
@@ -1046,3 +1046,134 @@ def test_the_first_failure_warning_carries_the_traceback(monkeypatch, caplog):
     (record,) = [r for r in caplog.records if "Carry-forward failed" in r.getMessage()]
     assert record.levelno == logging.WARNING and record.exc_info
     assert "stored chain" in record.getMessage()
+
+
+#############################################
+# WHEN THE GAMMA CAP BINDS, THE SYMBOL IS REFETCHED (audit AC-120)
+#############################################
+# The cap holds growth and not shrinkage, so a carried chain it bound on is
+# biased against the move: net GEX can change sign and the flip level and walls
+# move. Such a symbol gets a real fetch in the same poll instead.
+
+LIVE_ON_STRIKE = 104.6
+
+
+def _expiring_chain(symbol, spot=100.0, gamma=0.03):
+    """A chain that expires TODAY: late-session gamma at a strike the price
+    walks onto grows by far more than the cap."""
+    def side(pc, sign):
+        return {"2026-10-05:0": {
+            str(k): [{"putCall": pc, "strikePrice": k, "gamma": gamma,
+                      "delta": sign * 0.3, "volatility": 30.0, "openInterest": 500,
+                      "totalVolume": 40, "mark": 1.25}]
+            for k in (95.0, 100.0, 105.0)}}
+    return {"symbol": symbol, "underlyingPrice": spot,
+            "callExpDateMap": side("CALL", 1), "putExpDateMap": side("PUT", -1)}
+
+
+def _cap_client(binding, refetch_status=200, refetch_raises=False, quotes=None):
+    """Every symbol's first answer is 95 seconds old. A symbol in ``binding``
+    holds a chain the cap binds on; its second answer is a new chain, 1 second
+    old, at the live price."""
+    quotes = quotes or {s: LIVE_ON_STRIKE for s in binding}
+    client = _client(quotes=quotes)
+    client.chain_calls = []
+
+    def get_chain(symbol, **kw):
+        again = any(s == symbol for s, _ in client.chain_calls)
+        client.chain_calls.append((symbol, kw.get("max_age", "none")))
+        resp = MagicMock()
+        if again:
+            if refetch_raises:
+                raise RuntimeError("proxy down")
+            resp.status_code = refetch_status
+            resp.json.return_value = _expiring_chain(symbol, spot=LIVE_ON_STRIKE,
+                                                     gamma=0.2)
+            resp.store_age = 1.0
+            return resp
+        resp.status_code = 200
+        resp.json.return_value = (_expiring_chain(symbol) if symbol in binding
+                                  else _real_chain(symbol))
+        resp.store_age = 95.0
+        return resp
+
+    client.get_option_chain.side_effect = get_chain
+    return client
+
+
+def test_the_fixture_really_binds_the_cap():
+    assert chain_carry.capped_gammas(_expiring_chain("AAPL"), LIVE_ON_STRIKE,
+                                     age_sec=95.0, now=RTH) > 0
+    assert chain_carry.capped_gammas(_real_chain("AAPL"), 103.0,
+                                     age_sec=95.0, now=RTH) == 0
+
+
+def test_a_symbol_the_cap_binds_on_is_refetched_in_the_same_poll():
+    engine, seen = _engine(), []
+    c = _cap_client({"AAPL"})
+    _poll(c, ["AAPL"], engine=engine, on_chain=lambda s, ch: seen.append(s))
+    # Asked again, with the fresh limit: a real fetch.
+    assert c.chain_calls == [("AAPL", c.chain_calls[0][1]), ("AAPL", 20)]
+    got = engine.calc_all_from_chain.call_args.args[0]
+    assert got == _expiring_chain("AAPL", spot=LIVE_ON_STRIKE, gamma=0.2)
+    # It is a fetched chain now: the detectors get it.
+    assert seen == ["AAPL"]
+
+
+def test_a_carry_the_cap_does_not_bind_on_is_not_refetched():
+    c = _cap_client(set(), quotes={"AAPL": 103.0})
+    _poll(c, ["AAPL"])
+    assert [s for s, _ in c.chain_calls] == ["AAPL"]
+
+
+@pytest.mark.parametrize("kw", [{"refetch_status": 500}, {"refetch_raises": True}])
+def test_a_refetch_that_fails_writes_the_carried_chain(kw):
+    engine, seen = _engine(), []
+    c = _cap_client({"AAPL"}, **kw)
+    _poll(c, ["AAPL"], engine=engine, on_chain=lambda s, ch: seen.append(s))
+    got = engine.calc_all_from_chain.call_args.args[0]
+    assert got == chain_carry.carry_chain(_expiring_chain("AAPL"), LIVE_ON_STRIKE,
+                                          age_sec=95.0, now=RTH)
+    assert seen == []                      # still a carried chain
+
+
+def test_at_most_the_configured_number_of_symbols_is_refetched(caplog):
+    c = _cap_client({"AAPL", "SOFI", "UBER"})
+    with caplog.at_level(logging.INFO, logger="gex_collector"):
+        _poll(c, ["AAPL", "SOFI", "UBER"], tiers={**TIERS, "cap_refetch_max": 2})
+    assert len(c.chain_calls) == 3 + 2
+    info = [r.getMessage() for r in caplog.records
+            if r.name == "gex_collector" and r.levelno == logging.INFO]
+    assert info == ["Carried 1 of 3 chain(s) forward (1 on a live quote)",
+                    "Refetched 2 chain(s) whose carried gamma hit the cap "
+                    "(1 left capped)"]
+
+
+def test_a_limit_of_zero_refetches_nothing():
+    c = _cap_client({"AAPL"})
+    _poll(c, ["AAPL"], tiers={**TIERS, "cap_refetch_max": 0})
+    assert [s for s, _ in c.chain_calls] == ["AAPL"]
+
+
+@pytest.mark.parametrize("bad", [None, "many", -1, True, float("nan")])
+def test_an_unusable_refetch_limit_is_the_built_in_one(bad):
+    tiers = gc._usable_tiers({**TIERS, "cap_refetch_max": bad})
+    assert tiers["cap_refetch_max"] == gc.CAP_REFETCH_MAX
+
+
+def test_no_second_line_when_the_cap_never_bound(caplog):
+    c = _cap_client(set(), quotes={"AAPL": 103.0})
+    with caplog.at_level(logging.INFO, logger="gex_collector"):
+        _poll(c, ["AAPL"])
+    info = [r.getMessage() for r in caplog.records
+            if r.name == "gex_collector" and r.levelno == logging.INFO]
+    assert info == ["Carried 1 of 1 chain(s) forward (1 on a live quote)"]
+
+
+def test_a_refetched_symbols_skew_readings_are_its_new_chains(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(gc.flow_skew, "premium_by_strike",
+                        lambda chain: seen.append(chain["underlyingPrice"]) or {})
+    c = _cap_client({"AAPL"})
+    _poll(c, ["AAPL"])
+    assert seen == [LIVE_ON_STRIKE]        # not the stored chain's 100.0

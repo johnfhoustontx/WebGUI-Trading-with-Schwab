@@ -209,7 +209,8 @@ def test_the_stores_built_in_limits_are_the_shipped_settings():
 # ---- the carry's two limits ---------------------------------------------------
 
 CARRY_LIMITS = [("collection", "max_gamma_ratio", 10.0),
-                ("collection", "carry_slack_sec", 30)]
+                ("collection", "carry_slack_sec", 30),
+                ("collection", "cap_refetch_max", 8)]
 
 
 @pytest.mark.parametrize("name, key, shipped", CARRY_LIMITS)
@@ -243,6 +244,8 @@ def test_the_carrys_built_in_limits_are_the_shipped_settings():
                             "MAX_GAMMA_RATIO") == shipped["max_gamma_ratio"]
     assert _module_constant("options-scanner/gex_collector.py",
                             "CARRY_SLACK_SEC") == shipped["carry_slack_sec"]
+    assert _module_constant("options-scanner/gex_collector.py",
+                            "CAP_REFETCH_MAX") == shipped["cap_refetch_max"]
 
 
 def test_the_trackers_built_in_limits_are_the_shipped_settings():

@@ -1503,6 +1503,13 @@ _MARKETDATA = ConfigFile(
                   "Caps how far a carried contract's gamma may move above "
                   "Schwab's value between fetches, as a multiple of that value.",
                   kind="float", unit="times", min=1, max=1000, step=1),
+            Field("collection.cap_refetch_max",
+                  "Most symbols refetched when the gamma cap binds",
+                  "When the cap above holds a carried gamma down, that symbol "
+                  "is fetched for real in the same minute instead of being "
+                  "written capped. This is the most symbols one minute "
+                  "refetches that way. 0 writes the capped chain.",
+                  kind="int", unit="symbols", min=0, max=40),
             Field("collection.carry_slack_sec",
                   "Slack when asking for a stored chain",
                   "Seconds added to the interval when the collector asks for a "

@@ -82,6 +82,11 @@ fresh_max_age_sec = 20
 # strike the price walks onto runs into the thousands; this caps it. Below 1 is
 # read as 10.
 max_gamma_ratio = 10.0
+# When that cap binds on a carried symbol its carried chain is biased against
+# the move, so the symbol is fetched for real in the same poll instead. This is
+# the most symbols one poll refetches that way: each is one more chain call
+# inside the poll's minute. 0 = never refetch; the capped chain is written.
+cap_refetch_max = 8
 # Seconds added to the interval when the collector asks the proxy for a STORED
 # chain (3 minutes + 30 = 210), so a chain fetched a little late in its own
 # minute is still inside the limit.

@@ -111,9 +111,9 @@ def collection_tiers(universe, *, base, capture=None, hiro=None, flip=None):
             tail = frozenset()         # every fetch real; the limit still sent
         out = {"tail": tail, "interval_min": interval,
                "fresh_max_age_sec": int(cfg["fresh_max_age_sec"])}
-        # The carry's two limits, when the settings name them. The collector
+        # The carry's limits, when the settings name them. The collector
         # checks each and falls back to its own built-in value.
-        for key in ("max_gamma_ratio", "carry_slack_sec"):
+        for key in ("max_gamma_ratio", "carry_slack_sec", "cap_refetch_max"):
             if key in cfg:
                 out[key] = cfg[key]
         return out

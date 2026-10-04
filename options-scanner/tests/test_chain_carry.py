@@ -725,3 +725,20 @@ def test_the_cap_given_does_not_touch_a_move_under_it():
     assert cc.capped_gammas(_chain(), 102.0, age_sec=120, now=NOW, max_ratio=5.0) == 0
     assert (cc.carry_chain(_chain(), 102.0, age_sec=120, now=NOW, max_ratio=5.0)
             == cc.carry_chain(_chain(), 102.0, age_sec=120, now=NOW))
+
+
+def test_one_pass_returns_the_carried_chain_and_the_cap_count():
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _Z
+    now = _dt.datetime(2026, 10, 5, 10, 0, tzinfo=_Z("America/Chicago"))
+
+    def side(pc, sign):
+        return {"2026-10-05:0": {
+            str(k): [{"putCall": pc, "strikePrice": k, "gamma": 0.03,
+                      "delta": sign * 0.3, "volatility": 30.0}]
+            for k in (95.0, 100.0, 105.0)}}
+    chain = {"symbol": "X", "underlyingPrice": 100.0,
+             "callExpDateMap": side("CALL", 1), "putExpDateMap": side("PUT", -1)}
+    moved, capped = cc.carry_counted(chain, 104.6, age_sec=95.0, now=now)
+    assert moved == cc.carry_chain(chain, 104.6, age_sec=95.0, now=now)
+    assert capped == cc.capped_gammas(chain, 104.6, age_sec=95.0, now=now) > 0

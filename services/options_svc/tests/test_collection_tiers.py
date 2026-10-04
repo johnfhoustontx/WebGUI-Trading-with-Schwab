@@ -639,3 +639,13 @@ def test_end_to_end_while_not_on_only_the_age_limit_is_added(cfg, kw):
                              for s in UNIVERSE}
     assert client.quote_calls == 0
     assert seen == list(UNIVERSE)                  # every chain reached the detectors
+
+
+def test_the_cap_refetch_limit_is_handed_to_the_collector(monkeypatch):
+    # Audit AC-120: how many symbols one poll refetches because the carry's
+    # gamma cap bound on them.
+    monkeypatch.setattr(mdc, "mode", lambda: "on")
+    monkeypatch.setattr(mdc, "store_on", lambda name: True)
+    monkeypatch.setattr(mdc, "section", lambda name: {
+        "tail_interval_min": 3, "fresh_max_age_sec": 20, "cap_refetch_max": 5})
+    assert tiers()["cap_refetch_max"] == 5

@@ -142,6 +142,14 @@ def carry_chain(chain, live_spot, *, age_sec: float, now, max_ratio=None):
     return _carry(chain, live_spot, age_sec, now, max_ratio)[0]
 
 
+def carry_counted(chain, live_spot, *, age_sec: float, now, max_ratio=None):
+    """``(carry_chain(...), capped_gammas(...))`` from ONE pass. The collector
+    uses it: a carried chain the cap bound on is biased against the move
+    (growth is held, shrinkage is not), so that symbol is refetched instead
+    of written (audit AC-120)."""
+    return _carry(chain, live_spot, age_sec, now, max_ratio)
+
+
 def capped_gammas(chain, live_spot, *, age_sec: float, now, max_ratio=None) -> int:
     """How many contracts ``carry_chain`` would write at ``max_ratio`` times
     Schwab's gamma because the Black-Scholes ratio was larger still.

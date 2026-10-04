@@ -281,6 +281,12 @@ def _reanchor_spots(client, symbols, fetched, now, spots_out=None) -> int:
 # its built-in value, used when the tiers carry no usable one (pinned to the
 # shipped setting by shared/tests/test_marketdata_config.py).
 CARRY_SLACK_SEC = 30
+# The most symbols one poll refetches because the carry's gamma cap bound on
+# them. Each is one more chain call inside the poll's minute, and after a
+# market-wide jump the cap can bind on most of the tail at once. 0 = never
+# refetch (write the capped chain). The setting is config/marketdata.toml
+# [collection] cap_refetch_max; this is its built-in value.
+CAP_REFETCH_MAX = 8
 
 
 # What has already been said at WARNING this process, so a setting that is
@@ -369,6 +375,10 @@ def _usable_tiers(tiers):
     ratio = tiers.get("max_gamma_ratio")
     if not _number(ratio) or ratio < 1:
         ratio = chain_carry.MAX_GAMMA_RATIO
+    refetch_max = tiers.get("cap_refetch_max")
+    if (isinstance(refetch_max, bool) or not isinstance(refetch_max, int)
+            or refetch_max < 0):
+        refetch_max = CAP_REFETCH_MAX
     ceiling = fresh_age_ceiling(slack)
     if fresh > ceiling:
         _warn_once(("fresh_max_age_sec", fresh, ceiling),
@@ -376,7 +386,8 @@ def _usable_tiers(tiers):
                    "interval less the slack); using %s", fresh, ceiling, ceiling)
         fresh = ceiling
     return {"tail": tail, "interval_min": interval, "fresh_max_age_sec": fresh,
-            "max_gamma_ratio": ratio, "carry_slack_sec": slack}
+            "max_gamma_ratio": ratio, "carry_slack_sec": slack,
+            "cap_refetch_max": refetch_max}
 
 
 def _chain_max_age(symbol, minute_index, tiers):
@@ -404,9 +415,20 @@ def _answer_age(resp):
     return float(age)
 
 
-def _carry_forward(client, fetched, ages, tiers, now, spots=None):
+def _carry_forward(client, fetched, ages, tiers, now, spots=None, refetch=None,
+                   report=None):
     """Re-price every carried chain at the live quote, in place in ``fetched``.
     Returns ``(carried symbols, how many were re-priced)``.
+
+    ``refetch(symbol)`` — ``(chain or None, its age)`` from a REAL fetch, or
+    None to never refetch. When the carry's gamma cap binds on a symbol the
+    carried chain is biased against the move (growth is held, shrinkage is
+    not): near the close on a symbol's expiration day, or after a jump, its net
+    exposure can change sign. That symbol is refetched in this poll, up to
+    ``cap_refetch_max`` symbols, and is then a fetched chain: no longer in the
+    carried set, and handed to the detectors like any other. A refetch that
+    fails, or one past the limit, writes the carried chain as before.
+    ``report``, when given, receives ``refetched`` and ``left_capped``.
 
     ``spots`` — live prices this poll ALREADY fetched (the re-anchor's, outside
     the regular session), or None to fetch them here. Given, no quote call is
@@ -425,6 +447,11 @@ def _carry_forward(client, fetched, ages, tiers, now, spots=None):
                if chain and ages.get(s) is not None and ages[s] > limit}
     if not carried:
         return carried, 0
+    # Outside the regular session a chain's own price is the previous close and
+    # the poll has already re-anchored the others on these quotes.
+    reanchored = spots is not None
+    budget = tiers.get("cap_refetch_max", CAP_REFETCH_MAX) if refetch else 0
+    refetched = left_capped = 0
     if spots is None:
         try:
             resp = client.get_quotes(sorted(carried), **_priority_kwargs(client))
@@ -440,7 +467,7 @@ def _carry_forward(client, fetched, ages, tiers, now, spots=None):
         if symbol not in carried or symbol not in spots:
             continue
         try:
-            moved = chain_carry.carry_chain(
+            moved, capped = chain_carry.carry_counted(
                 chain, spots[symbol], age_sec=ages[symbol], now=now,
                 max_ratio=tiers.get("max_gamma_ratio", chain_carry.MAX_GAMMA_RATIO))
         except Exception:  # noqa: BLE001 — one symbol never breaks the poll
@@ -454,9 +481,25 @@ def _carry_forward(client, fetched, ages, tiers, now, spots=None):
                 log.warning("Carry-forward failed for %s; writing its stored chain",
                             symbol, exc_info=True)
             continue
+        if capped and budget > 0:
+            budget -= 1
+            fresh, age = refetch(symbol)
+            if fresh and (age is None or age <= limit):
+                if reanchored and isinstance(fresh, dict):
+                    fresh["underlyingPrice"] = spots[symbol]
+                fetched[i] = (symbol, fresh)
+                ages[symbol] = age
+                carried.discard(symbol)
+                refetched += 1
+                continue
+            left_capped += 1
+        elif capped:
+            left_capped += 1
         if moved is not chain:
             fetched[i] = (symbol, moved)
             repriced += 1
+    if report is not None:
+        report["refetched"], report["left_capped"] = refetched, left_capped
     return carried, repriced
 
 
@@ -506,11 +549,13 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     # key per symbol; a plain dict is safe for that.
     ages: dict = {}
 
-    def _fetch(symbol):
-        """(symbol, chain|None); fetch failures are logged here, never raised."""
+    def _fetch(symbol, fresh=False):
+        """(symbol, chain|None); fetch failures are logged here, never raised.
+        ``fresh``: ask with the fresh-age limit whatever the symbol's tier."""
         try:
             kwargs = _priority_kwargs(client)
-            limit = _chain_max_age(symbol, minute_index, tiers)
+            limit = (tiers["fresh_max_age_sec"] if fresh
+                     else _chain_max_age(symbol, minute_index, tiers))
             if limit is not None:
                 kwargs["max_age"] = limit
             with _maybe_lock(lock):
@@ -561,12 +606,27 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     as_stored: dict = {}
     if tiers:
         as_stored = {s: ch for s, ch in fetched if ch}
+
+        def _refetch(symbol):
+            _symbol, chain = _fetch(symbol, fresh=True)
+            return chain, ages.get(symbol)
+
+        cap: dict = {}
         carried, repriced = _carry_forward(client, fetched, ages, tiers, now,
-                                           spots=reanchor.get("spots"))
+                                           spots=reanchor.get("spots"),
+                                           refetch=_refetch, report=cap)
+        # A refetched symbol's stored chain IS its new one.
+        for symbol, chain in fetched:
+            if chain and symbol not in carried:
+                as_stored[symbol] = chain
         # One line a poll, zeros included: a run of zeros is how the operator
         # sees that the proxy's store is not answering.
         log.info("Carried %d of %d chain(s) forward (%d on a live quote)",
                  len(carried), sum(1 for _s, ch in fetched if ch), repriced)
+        if cap.get("refetched") or cap.get("left_capped"):
+            log.info("Refetched %d chain(s) whose carried gamma hit the cap "
+                     "(%d left capped)", cap.get("refetched", 0),
+                     cap.get("left_capped", 0))
 
     for symbol, chain in fetched:
         if not chain:
