@@ -300,7 +300,12 @@ def test_news_view_imports_only_stdlib_and_shared_symbols():
             assert node.level == 0, "no relative imports"
             found.add(node.module)
     bad = {m for m in found
-           if m != "shared.symbols" and m.split(".")[0] not in sys.stdlib_module_names}
+           if m != "shared.symbols" and m.split(".")[0] not in sys.stdlib_module_names
+           # CPython generates this one per platform at build time, so it is
+           # not in stdlib_module_names: on Linux, zoneinfo pulls in
+           # _sysconfigdata__linux_x86_64-linux-gnu. Without this every one
+           # of these probes failed on Linux and CI was red on every push.
+           and not m.startswith("_sysconfigdata")}
     assert not bad, bad
     assert "shared.symbols" in found
 

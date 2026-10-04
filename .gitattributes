@@ -30,3 +30,7 @@
 # the page merely looks slightly wrong to everyone on the internet.
 *.woff2 binary
 *.webp  binary
+
+# The repository's own git hooks (enabled by tools/install_git_hooks.py). They
+# are POSIX shell scripts with no extension, so the *.sh rule above misses them.
+tools/git-hooks/* text eol=lf

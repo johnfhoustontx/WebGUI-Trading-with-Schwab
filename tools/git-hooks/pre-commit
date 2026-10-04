@@ -1,0 +1,32 @@
+#!/bin/sh
+# The repository's pre-commit hook: ruff over the staged Python files.
+#
+# Enabled per clone by   python tools/install_git_hooks.py
+# (which sets core.hooksPath to this directory; worktrees share the setting).
+# Skipped for one commit by   git commit --no-verify
+#
+# It needs an interpreter that has ruff. A git WORKTREE has no .venv of its own,
+# so this looks in the worktree first and then in the main checkout. With no
+# interpreter at all it says so and lets the commit through: the gate did not
+# run, which is different from the gate passing.
+top="$(git rev-parse --show-toplevel)"
+common="$(cd "$(git rev-parse --git-common-dir)/.." 2>/dev/null && pwd)"
+
+PY="${LINT_GATE_PYTHON:-}"
+if [ -z "$PY" ]; then
+  for root in "$top" "$common"; do
+    for rel in .venv/Scripts/python.exe .venv/bin/python; do
+      if [ -x "$root/$rel" ]; then
+        PY="$root/$rel"
+        break 2
+      fi
+    done
+  done
+fi
+
+if [ -z "$PY" ]; then
+  echo "[lint] no .venv found in $top or $common - THE LINT GATE DID NOT RUN." >&2
+  exit 0
+fi
+
+exec "$PY" "$top/tools/lint_gate.py" --staged

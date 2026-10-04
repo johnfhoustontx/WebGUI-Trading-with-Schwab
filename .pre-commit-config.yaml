@@ -1,5 +1,15 @@
-# Pre-commit hooks — the local mechanical backstop that mirrors CI.
-# Install once:  pipx run pre-commit install   (or: pip install pre-commit && pre-commit install)
+# Pre-commit hooks — an OPTIONAL, wider set for anyone who uses the pre-commit tool.
+#
+# ⚠ This file is NOT what enforces the lint gate, and for months nothing did: it
+# only takes effect after `pre-commit install`, which was never run in any clone
+# (audit CQ-02). The gate that is enforced is the repository's own hook,
+#     tools/git-hooks/pre-commit      (ruff over the staged Python files)
+# enabled per clone by
+#     python tools/install_git_hooks.py
+# plus tools/tests/test_lint_gate.py, which fails the suite on a finding.
+#
+# To use this file as well:  pip install pre-commit && pre-commit install
+# (that writes .git/hooks/pre-commit, which core.hooksPath overrides — pick one).
 # Run on all files:  pre-commit run --all-files
 #
 # Ruff config lives in pyproject.toml [tool.ruff] (scope + rules). These hooks lint

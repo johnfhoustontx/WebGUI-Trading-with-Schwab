@@ -43,3 +43,72 @@ def test_the_windows_path_alone_is_no_longer_hardcoded():
     consulted. This is what would have caught the original bug."""
     src = pathlib.Path(ruff_fix.__file__).read_text(encoding="utf-8")
     assert "bin" in src and "Scripts" in src, "both layouts must be reachable"
+
+
+# ── a worktree has no venv of its own; the main checkout's is the one ────────
+# (audit CQ-02). Every session here works in a worktree, where ``.venv`` does
+# not exist, so the hook found nothing and returned success: it never ran.
+
+def test_a_worktree_falls_back_to_the_main_checkouts_venv(tmp_path):
+    main = tmp_path / "main"
+    want = _fake_venv(main, "Scripts", "python.exe")
+    worktree = main / ".claude" / "worktrees" / "feature"
+    worktree.mkdir(parents=True)
+    assert ruff_fix.find_python(worktree, main_checkout=lambda _: main) == want
+
+
+def test_the_worktrees_own_venv_wins_when_it_has_one(tmp_path):
+    main, worktree = tmp_path / "main", tmp_path / "wt"
+    _fake_venv(main, "bin", "python")
+    want = _fake_venv(worktree, "bin", "python")
+    assert ruff_fix.find_python(worktree, main_checkout=lambda _: main) == want
+
+
+def test_no_venv_anywhere_is_None(tmp_path):
+    assert ruff_fix.find_python(tmp_path, main_checkout=lambda _: None) is None
+    assert ruff_fix.find_python(tmp_path, main_checkout=lambda _: tmp_path / "x") is None
+
+
+# ── what ruff could not fix is REPORTED, not discarded ───────────────────────
+# The hook ran ``ruff check --fix`` with the output captured and dropped. An
+# undefined name is not auto-fixable, so the one finding class the lint gate
+# exists for (F821 - the bug that sat on main for two weeks) passed through the
+# hook unseen.
+
+class _Done:
+    def __init__(self, returncode, stdout=""):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, ""
+
+
+def test_remaining_findings_are_returned(tmp_path):
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        return _Done(1, "a.py:3:5: F821 Undefined name `evaluate_regime`\n")
+
+    out = ruff_fix.lint(tmp_path / "py", "a.py", tmp_path, run=run)
+    assert "F821" in out
+    assert "--fix" in calls[0]
+
+
+def test_a_clean_file_reports_nothing(tmp_path):
+    assert ruff_fix.lint(tmp_path / "py", "a.py", tmp_path,
+                         run=lambda cmd, **kw: _Done(0, "All checks passed!\n")) == ""
+
+
+def test_a_ruff_that_cannot_run_reports_nothing_and_does_not_raise(tmp_path):
+    def run(cmd, **kw):
+        raise OSError("no such interpreter")
+
+    assert ruff_fix.lint(tmp_path / "py", "a.py", tmp_path, run=run) == ""
+
+
+def test_a_missing_ruff_module_is_not_reported_as_a_finding(tmp_path):
+    # ``python -m ruff`` with no ruff installed exits 1 with this on stderr.
+    def run(cmd, **kw):
+        d = _Done(1, "")
+        d.stderr = "No module named ruff"
+        return d
+
+    assert ruff_fix.lint(tmp_path / "py", "a.py", tmp_path, run=run) == ""

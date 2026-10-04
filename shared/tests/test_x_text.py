@@ -78,7 +78,12 @@ def test_x_text_imports_nothing_but_the_stdlib():
     # `shared` itself the first time - that is the package, not a dependency.
     assert ours == {"shared", "shared.x_text"}, sorted(ours)
     third_party = {m for m in new - ours
-                   if m.split(".")[0] not in sys.stdlib_module_names}
+                   if m.split(".")[0] not in sys.stdlib_module_names
+                   # CPython generates this one per platform at build time, so it is
+                   # not in stdlib_module_names: on Linux, zoneinfo pulls in
+                   # _sysconfigdata__linux_x86_64-linux-gnu. Without this every one
+                   # of these probes failed on Linux and CI was red on every push.
+                   and not m.startswith("_sysconfigdata")}
     assert not third_party, sorted(third_party)
 
 
