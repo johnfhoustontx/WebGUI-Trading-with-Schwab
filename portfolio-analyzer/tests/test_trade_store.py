@@ -76,3 +76,55 @@ def test_load_store_treats_malformed_shape_as_empty(tmp_path):
 
     path.write_text(json.dumps({"trades": "oops"}), encoding="utf-8")
     assert trade_store.load_store(path) == {"last_sync": None, "trades": []}
+
+
+# --- AR-09: a corrupt store is set aside, and a save is all-or-nothing --------
+# The store is a single copy of every trade synced from Schwab. A corrupt file
+# used to read as EMPTY, and the next sync then saved that over it: one bad
+# write became the permanent loss of the history. A save was also a plain
+# write, so a crash part-way through left the truncated file.
+
+def test_a_corrupt_store_is_kept_beside_the_file_not_overwritten(tmp_path):
+    path = tmp_path / "entries.json"
+    path.write_text('{"trades": [{"trade_id": "a"', encoding="utf-8")   # cut short
+    store = trade_store.load_store(path)
+    assert store["trades"] == []
+    kept = [p for p in tmp_path.iterdir() if p.name.startswith("entries.json.corrupt-")]
+    assert len(kept) == 1
+    assert kept[0].read_text(encoding="utf-8") == '{"trades": [{"trade_id": "a"'
+    assert not path.exists()            # the next save starts a new file
+
+
+def test_a_store_of_the_wrong_shape_is_set_aside_too(tmp_path):
+    path = tmp_path / "entries.json"
+    path.write_text('["not", "a", "store"]', encoding="utf-8")
+    assert trade_store.load_store(path)["trades"] == []
+    assert any(p.name.startswith("entries.json.corrupt-") for p in tmp_path.iterdir())
+
+
+def test_a_missing_store_is_simply_empty(tmp_path):
+    path = tmp_path / "entries.json"
+    assert trade_store.load_store(path)["trades"] == []
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_good_store_is_left_alone(tmp_path):
+    path = tmp_path / "entries.json"
+    trade_store.save_store(path, {"trades": [_trade("a")], "last_sync": "2026-05-01"})
+    assert trade_store.load_store(path)["trades"][0]["trade_id"] == "a"
+    assert [p.name for p in tmp_path.iterdir()] == ["entries.json"]
+
+
+def test_a_save_that_fails_part_way_leaves_the_old_store(tmp_path, monkeypatch):
+    path = tmp_path / "entries.json"
+    trade_store.save_store(path, {"trades": [_trade("a")], "last_sync": None})
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(trade_store.os, "replace", boom)
+    import pytest
+    with pytest.raises(OSError):
+        trade_store.save_store(path, {"trades": [], "last_sync": None})
+    assert trade_store.load_store(path)["trades"][0]["trade_id"] == "a"
+    assert [p.name for p in tmp_path.iterdir()] == ["entries.json"]   # no temp left

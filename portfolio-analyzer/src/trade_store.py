@@ -13,6 +13,9 @@ Pure logic + filesystem only — no network.
 from __future__ import annotations
 
 import json
+import time
+import os
+import logging
 import sys
 import pathlib
 
@@ -54,26 +57,68 @@ def merge_trades(existing: list[dict], new: list[dict]) -> list[dict]:
     return merged
 
 
+log = logging.getLogger(__name__)
+
+
+def _write_whole(path, text: str) -> None:
+    """Write ``text`` to ``path`` all-or-nothing: a temp file beside it, then one
+    rename. A plain write that is interrupted leaves a truncated file, and this
+    is the only copy (audit AR-09)."""
+    p = pathlib.Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, p)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _set_aside(path) -> None:
+    """Move an unreadable file to ``<name>.corrupt-<time>`` so the next save
+    cannot overwrite what is left of it. Never raises."""
+    p = pathlib.Path(path)
+    try:
+        dest = p.with_name(f"{p.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}")
+        os.replace(p, dest)
+        log.error("%s could not be read; it was moved to %s and a new one will "
+                  "be started", p.name, dest.name)
+    except OSError:
+        log.exception("could not set aside the unreadable %s", p.name)
+
+
 def load_store(path) -> dict:
     """Read the JSON store at ``path``.
 
-    Returns the empty store if the file does not exist or is corrupt/unreadable
-    (a corrupt file is treated as empty rather than crashing the app).
+    Returns the empty store if the file does not exist or cannot be used. A
+    CORRUPT file is moved aside (``<name>.corrupt-<time>``) before the empty
+    store is returned, so it is never overwritten.
     """
     p = pathlib.Path(path)
     if not p.exists():
         return dict(_EMPTY_STORE)
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        # Corrupt/unreadable store — treat as empty so the app can recover.
+    except OSError:
+        # Unreadable right now (a lock, a permission): empty for this pass, and
+        # the file is left exactly where it is.
         return dict(_EMPTY_STORE)
-    # Valid JSON but not a proper store shape — treat as empty.
+    except json.JSONDecodeError:
+        # Corrupt. The app carries on with an empty store, but the file is SET
+        # ASIDE first: the next sync saves whatever load returned, and saving an
+        # empty store over this was how one bad write lost the whole history.
+        _set_aside(p)
+        return dict(_EMPTY_STORE)
+    # Valid JSON but not a proper store shape — the same, for the same reason.
     if (
         not isinstance(data, dict)
         or "trades" not in data
         or not isinstance(data["trades"], list)
     ):
+        _set_aside(p)
         return dict(_EMPTY_STORE)
     data.setdefault("last_sync", None)
     return data
@@ -81,9 +126,7 @@ def load_store(path) -> dict:
 
 def save_store(path, store: dict) -> None:
     """Write ``store`` to ``path`` as pretty JSON, creating parent dirs."""
-    p = pathlib.Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(store, indent=2), encoding="utf-8")
+    _write_whole(path, json.dumps(store, indent=2))
 
 
 def update_store(store: dict, new_trades: list[dict]) -> dict:

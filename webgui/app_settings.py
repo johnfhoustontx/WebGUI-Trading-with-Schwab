@@ -4,6 +4,9 @@ Persists to webgui/data/settings.json (data/ is gitignored — regenerates from
 DEFAULTS on a fresh clone). No engine imports; the GUI tier stays thin.
 """
 import json
+import time
+import os
+import logging
 import pathlib
 
 DEFAULTS = {
@@ -80,13 +83,54 @@ def is_frozen() -> bool:
     return _frozen is not None
 
 
+log = logging.getLogger("webgui.settings")
+
+
+def _write_whole(path, text: str) -> None:
+    """Write ``text`` to ``path`` all-or-nothing: a temp file beside it, then one
+    rename. A plain write that is interrupted leaves a truncated file, and this
+    is the only copy (audit AR-09)."""
+    p = pathlib.Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(f".{p.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, p)
+    finally:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def _set_aside(path) -> None:
+    """Move an unreadable file to ``<name>.corrupt-<time>`` so the next save
+    cannot overwrite what is left of it. Never raises."""
+    p = pathlib.Path(path)
+    try:
+        dest = p.with_name(f"{p.name}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}")
+        os.replace(p, dest)
+        log.error("%s could not be read; it was moved to %s and a new one will "
+                  "be started", p.name, dest.name)
+    except OSError:
+        log.exception("could not set aside the unreadable %s", p.name)
+
+
 def _load_from_disk():
     try:
-        raw = json.loads(_PATH.read_text())
+        text = _PATH.read_text()
+    except OSError:
+        return dict(DEFAULTS)          # no file yet, or unreadable right now
+    try:
+        raw = json.loads(text)
         if not isinstance(raw, dict):
             raise ValueError("settings.json is not an object")
         return {**DEFAULTS, **raw}
     except Exception:
+        # Corrupt. DEFAULTS for now - but the file is SET ASIDE first, because
+        # the next set() saves the whole dict, and saving DEFAULTS plus one key
+        # over it was how one bad write lost every other preference.
+        _set_aside(_PATH)
         return dict(DEFAULTS)
 
 
@@ -126,7 +170,8 @@ def set(key, value):
         return  # read-only store: the public live screens cannot write
     data = load()
     data[key] = value
-    _PATH.parent.mkdir(parents=True, exist_ok=True)
-    _PATH.write_text(json.dumps(data, indent=2))
-    _cache["data"] = data  # keep the in-memory cache in lockstep with disk
+    _write_whole(_PATH, json.dumps(data, indent=2))
+    # Only after the write landed: a failed save must not leave the cache ahead
+    # of the disk, showing a preference that a restart would lose.
+    _cache["data"] = data
     return data

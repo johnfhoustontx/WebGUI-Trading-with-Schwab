@@ -156,3 +156,53 @@ def test_the_desk_section_map_and_the_defaults_agree():
     from pages import desk
     for key in desk.VOICE_SECTIONS.values():
         assert key in app_settings.DEFAULTS
+
+
+# --- AR-09: settings.json is written whole or not at all, and a corrupt one is kept
+
+def test_a_corrupt_settings_file_is_set_aside_before_it_can_be_overwritten(
+        tmp_path, monkeypatch):
+    """A corrupt file read as DEFAULTS, and the next set() saved DEFAULTS plus
+    one key over it: every other preference was gone for good."""
+    _fresh(tmp_path, monkeypatch)
+    path = tmp_path / "settings.json"
+    path.write_text('{"alert_volume": 0.3, "nav_pinned": tr')
+    assert app_settings.load() == app_settings.DEFAULTS
+    kept = [p for p in tmp_path.iterdir() if p.name.startswith("settings.json.corrupt-")]
+    assert len(kept) == 1 and "alert_volume" in kept[0].read_text()
+    app_settings.set("alert_volume", 0.5)
+    assert kept[0].exists()                       # still there after a save
+
+
+def test_a_missing_settings_file_sets_nothing_aside(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    assert app_settings.load() == app_settings.DEFAULTS
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_failed_save_leaves_the_old_settings_file(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    app_settings.set("alert_volume", 0.4)
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(app_settings.os, "replace", boom)
+    import pytest
+    with pytest.raises(OSError):
+        app_settings.set("alert_volume", 0.9)
+    app_settings.reset_cache()
+    assert app_settings.load()["alert_volume"] == 0.4
+    assert [p.name for p in tmp_path.iterdir()] == ["settings.json"]
+
+
+def test_a_failed_save_does_not_leave_the_cache_ahead_of_the_disk(tmp_path, monkeypatch):
+    _fresh(tmp_path, monkeypatch)
+    app_settings.set("alert_volume", 0.4)
+    monkeypatch.setattr(app_settings.os, "replace",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    try:
+        app_settings.set("alert_volume", 0.9)
+    except OSError:
+        pass
+    assert app_settings.load()["alert_volume"] == 0.4
