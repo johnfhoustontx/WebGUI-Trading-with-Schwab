@@ -662,13 +662,33 @@ In **prod** — and by this route only:
 cd /home/administrator/prod && tools/promote.sh
 ```
 
-`promote.sh` refuses in a dev checkout, refuses on a dirty tree (*before*
-stopping anything, so a refusal never leaves prod down), stops the target, waits
-for both the units and their **listening sockets** to go (`is-active` clears
-about a second early), `git pull --ff-only origin main`, reinstalls dependencies
-**only if `requirements.lock` moved**, regenerates the units, restarts, and then
-probes `:8100` and `:8500` over **HTTP** — a dead accept loop stays bound and
-would pass a TCP connect. Check `/status` afterwards.
+`promote.sh` does everything that can refuse or needs the network **before it
+stops anything**, so none of these can leave prod down: it refuses in a dev
+checkout and on a dirty tree, fetches `origin/main`, exits with "nothing to
+promote" when there is nothing new, refuses a `main` that is not a fast-forward,
+and — when `requirements.lock` moves — dry-runs the new install.
+
+Then it records the current commit in `logs/promote_previous_commit`, stops the
+target, waits for both the units and their **listening sockets** to go
+(`is-active` clears about a second early), fast-forwards, reinstalls
+dependencies **only if `requirements.lock` moved**, regenerates the units,
+starts, and probes **every process** over HTTP — the proxy, the six services'
+`/health` and the web GUI (a dead accept loop stays bound and would pass a TCP
+connect). The public screens are probed too, but only warned about.
+
+**If anything fails after the stop, it rolls back by itself**: the previous
+commit is restored (and its dependencies, if the lock had moved), the units are
+regenerated, the stack is restarted and probed again, and the script exits
+non-zero saying `ROLLED BACK`. Check `/status` afterwards either way.
+
+| Command | What it does |
+|---|---|
+| `tools/promote.sh` | Promote to `origin/main`, or say there is nothing to promote |
+| `tools/promote.sh --restart` | Go through the stop/start/probe cycle with nothing new |
+| `tools/promote.sh --rollback` | Put back the commit the **last** promote replaced and restart on it. `origin/main` still holds the newer commit, so fix or revert it there before promoting again |
+
+`logs/promote_history.log` keeps one line per run (previous commit, time, mode,
+target commit).
 
 ⚠ **Never `git pull`, `merge`, `checkout` or `reset` in the prod checkout.**
 Every guard above is skipped, and prod is a live trading stack.

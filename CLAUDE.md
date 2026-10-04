@@ -2282,10 +2282,23 @@ ssh vps2 'cd /home/administrator/dev && tools/promote.sh'
 
 ⚠ **Nothing goes after it.** `promote.sh` already runs
 `deploy.systemd.generate_units --install` *and* a `daemon-reload`, so a change to
-a unit, a timer or a `[slots.*]` time needs no second command. It
-`git pull --ff-only origin main`s, so **push to `main` first** or it pulls nothing
-and promotes the old commit quietly. It guards on `ENV_NAME`, not the folder name,
-so a directory called `dev` is no obstacle.
+a unit, a timer or a `[slots.*]` time needs no second command. It fast-forwards
+to `origin/main`, so **push to `main` first**: with nothing new there it says
+"nothing to promote" and exits WITHOUT stopping the stack (`--restart` cycles it
+anyway). It guards on `ENV_NAME`, not the folder name, so a directory called
+`dev` is no obstacle.
+
+⚠ **Everything that can fail runs BEFORE the stop, and a failure after it rolls
+back.** The fetch, the fast-forward check and (when `requirements.lock` moves) a
+`pip install --dry-run` of the new lock all happen with prod still up; after the
+stop there is no network step left. If the install, the unit start or any
+process's health probe then fails — it probes the proxy, all six services and
+the web GUI — an EXIT trap puts the previous commit back and restarts on it.
+`tools/promote.sh --rollback` does the same on request, to the commit recorded
+in `logs/promote_previous_commit`. Until 2026-10-03 it stopped prod first and
+had no way back. `tools/tests/test_promote_script.py` runs the REAL script under
+bash against a sandbox repository, failures included — change the script and
+that suite together.
 
 **Enforced mechanically**, because knowing the rule was not enough: the whole
 environment split was built in a session that then bypassed `promote.bat` on
@@ -2346,9 +2359,11 @@ DBs resolve equal, and refuses while dev is up. It **excludes `cmd:*`** (a strea
 is a queue dev would drain and EXECUTE). **Promotion is explicit:** merge to `main` and push, then run
 `tools/promote.sh` in the prod checkout — which refuses unless `ENV_NAME`
 resolves to `prod` (the FOLDER NAME is not the test, and today's is `dev`),
-dirty-tree guard *before* stopping anything, `git pull --ff-only`, reinstall only
-if `requirements.lock` moved, `generate_units --install` + `daemon-reload`,
-restart.
+dirty-tree guard, fetch and fast-forward check *before* stopping anything, then
+the fast-forward, reinstall only if `requirements.lock` moved,
+`generate_units --install` + `daemon-reload`, restart, and a health probe of
+every process, rolling back to the previous commit if any step after the stop
+fails.
 
 ⚠ **A NEW DEPENDENCY MUST GO IN `requirements.lock`, NOT ONLY IN
 `requirements.txt` — otherwise it ships to prod MISSING (2026-08-21).** Prod has
