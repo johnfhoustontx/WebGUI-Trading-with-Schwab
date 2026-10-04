@@ -278,3 +278,36 @@ def test_vix_context_unchanged_when_every_term_is_present():
     term = (18.0 - 16.0) / 2.0
     expected = 50 + 50 * (0.4 * lvl + 0.4 * chg + 0.2 * term)
     assert r.score == pytest.approx(round(expected, 2))
+
+
+# --- AC-50: a horizon with no VWAP, and a horizon with one timeframe ----------
+
+def test_no_vwap_renormalises_over_the_terms_present():
+    """``None`` for VWAP means the horizon has none (daily bars). The other
+    three terms then carry the whole direction: every one of them at its bullish
+    extreme is 100, not 90. A literal 0.0 was passed, which counted as a real
+    neutral reading with a fifth of the weight."""
+    full = score_price(100, None, 0.5, 70, 40, n_timeframes=3)
+    assert full.score == 100.0
+    assert score_price(-100, None, -0.5, 30, 40, n_timeframes=3).score == 0.0
+    as_zero = score_price(100, 0.0, 0.5, 70, 40, n_timeframes=3)
+    assert as_zero.score == 90.0          # what the literal 0.0 gave
+
+
+def test_no_vwap_equals_a_vwap_that_agrees_with_the_rest():
+    """Renormalising is the same as a VWAP term equal to the weighted mean of
+    the other three - the definition, checked on a mixed reading."""
+    a, m, r = 0.4, 1.0, (58.0 - 50.0) / 20.0
+    mean = (0.5 * a + 0.15 * m + 0.15 * r) / 0.8
+    assert (score_price(40, None, 0.2, 58, 30, n_timeframes=3).score
+            == score_price(40, mean * 0.5, 0.2, 58, 30, n_timeframes=3).score)
+
+
+def test_confidence_is_the_share_of_the_timeframes_this_horizon_uses():
+    """One daily frame is everything a daily horizon has, so it is a full read.
+    The default stays three, which is the intraday gauge's own count."""
+    assert score_price(50, None, 0.1, 55, 25, n_timeframes=1,
+                       expected_timeframes=1).confidence == 1.0
+    assert score_price(50, 0.1, 0.1, 55, 25, n_timeframes=1).confidence == 0.333
+    assert score_price(50, 0.1, 0.1, 55, 25, n_timeframes=2,
+                       expected_timeframes=3).confidence == 0.667

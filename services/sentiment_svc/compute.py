@@ -379,7 +379,8 @@ _PRICE_DIRECTION_TERMS = (
 _ADX_NEUTRAL = 0.0
 
 
-def _finite_score_price(align_pct, vwap_pct, macd_hist, rsi, adx, n_timeframes):
+def _finite_score_price(align_pct, vwap_pct, macd_hist, rsi, adx, n_timeframes,
+                        expected_timeframes=3, has_vwap=True):
     """``intraday_trend.score_price`` with non-finite indicators degraded to
     NEUTRAL instead of clamped to a BOUND.
 
@@ -401,17 +402,31 @@ def _finite_score_price(align_pct, vwap_pct, macd_hist, rsi, adx, n_timeframes):
     coincidence: an all-finite call returns the untouched ``score_price`` result
     from the early return below, never reaching the substitution branch. Both
     price-scoring call sites go through here — ``compute_intraday_trend`` and
-    ``_structural_trend`` — so there is exactly ONE ``score_price`` call in this
-    module and a later "consistency" edit cannot re-introduce the bug on one side.
-    Never raises: a non-numeric input is treated as non-finite."""
-    raw = (align_pct, vwap_pct, macd_hist, rsi, adx)
+    ``_structural_trend`` — so a later "consistency" edit cannot re-introduce
+    the bug on one side. Never raises: a non-numeric input is treated as
+    non-finite.
+
+    ``has_vwap=False`` is a horizon that HAS no VWAP (the daily Week and Month
+    gauges): ``vwap_pct`` is ignored, the scorer renormalises the direction over
+    the other three terms, and the missing-weight arithmetic below is over the
+    0.80 those three hold. ``expected_timeframes`` is how many timeframes that
+    horizon uses. Until 2026-10-04 the structural path passed a literal 0.0 for
+    VWAP and one timeframe of an assumed three, so its price sub-score sat at
+    one-third confidence by construction and could not leave 10..90 (AC-50)."""
+    raw = (align_pct, vwap_pct if has_vwap else 0.0, macd_hist, rsi, adx)
     finite = [_as_finite(v) for v in raw]
+    vwap_arg = (lambda v: v) if has_vwap else (lambda v: None)
     if all(f is not None for f in finite):
-        # Every input finite -> the original call, byte-for-byte untouched.
-        return intraday_trend.score_price(align_pct, vwap_pct, macd_hist, rsi,
-                                          adx, n_timeframes=n_timeframes)
-    vals, kept = [], 0.0
-    for f, (neutral, weight) in zip(finite[:4], _PRICE_DIRECTION_TERMS):
+        # Every input finite -> the scorer's own answer, untouched.
+        return intraday_trend.score_price(
+            align_pct, vwap_arg(vwap_pct), macd_hist, rsi, adx,
+            n_timeframes=n_timeframes, expected_timeframes=expected_timeframes)
+    vals, kept, total = [], 0.0, 0.0
+    for i, (f, (neutral, weight)) in enumerate(zip(finite[:4], _PRICE_DIRECTION_TERMS)):
+        if i == 1 and not has_vwap:
+            vals.append(None)                # not a term at this horizon
+            continue
+        total += weight
         if f is None:
             vals.append(neutral)
         else:
@@ -420,8 +435,8 @@ def _finite_score_price(align_pct, vwap_pct, macd_hist, rsi, adx, n_timeframes):
     sub = intraday_trend.score_price(
         vals[0], vals[1], vals[2], vals[3],
         finite[4] if finite[4] is not None else _ADX_NEUTRAL,
-        n_timeframes=n_timeframes)
-    scale = max(0.0, min(1.0, kept))
+        n_timeframes=n_timeframes, expected_timeframes=expected_timeframes)
+    scale = max(0.0, min(1.0, kept / total)) if total > 0 else 0.0
     return intraday_trend.TrendSub(sub.score,
                                    round(sub.confidence * scale, 3),
                                    sub.interp)
@@ -1363,8 +1378,11 @@ def _structural_trend(spy_daily_df, sector_pcts, cyc_def_scale) -> dict:
                      if hist is not None and len(hist) else 0.0)
         rsi = float(technical.calculate_rsi(spy_daily_df))
         adx = float(technical.calculate_adx(spy_daily_df))
+        # One daily frame is every timeframe this horizon uses, and it has no
+        # VWAP: a full reading over three terms, not a third of one over four.
         price = _finite_score_price(
-            align_pct, 0.0, macd_hist, rsi, adx, n_timeframes=1)
+            align_pct, None, macd_hist, rsi, adx, n_timeframes=1,
+            expected_timeframes=1, has_vwap=False)
 
     # SECTOR — participation + cyc/def leadership from this horizon's %-moves.
     pcts = _finite_pcts(sector_pcts)

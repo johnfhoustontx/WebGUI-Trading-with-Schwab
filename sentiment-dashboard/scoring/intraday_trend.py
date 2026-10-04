@@ -32,18 +32,36 @@ def _finite(x):
     return None if (v != v or v in (float("inf"), float("-inf"))) else v
 
 
+# The VWAP term's share of the direction. A horizon with no VWAP (daily bars)
+# spreads the direction over the remaining ``1 - PRICE_VWAP_WEIGHT``.
+PRICE_VWAP_WEIGHT = 0.2
+
+
 def score_price(alignment_pct, price_vs_vwap_pct, macd_hist, rsi, adx,
-                n_timeframes) -> TrendSub:
+                n_timeframes, expected_timeframes=3) -> TrendSub:
     """0-100 from MTF EMA alignment (dominant), VWAP, MACD sign, RSI; ADX scales
-    how far the needle leaves 50 (strong trend -> extremes, chop -> ~50)."""
+    how far the needle leaves 50 (strong trend -> extremes, chop -> ~50).
+
+    ``price_vs_vwap_pct=None`` means this horizon HAS no VWAP: the term is left
+    out and the direction is renormalised over the three that remain. It is not
+    the same as 0.0, which is a real reading (price sitting on VWAP) and holds a
+    fifth of the weight at neutral.
+
+    The confidence is the share of the timeframes this horizon uses that were
+    read: ``n_timeframes / expected_timeframes``. Three is the intraday gauge's
+    count; the daily horizons use one (audit AC-50, 2026-10-04)."""
     a = _clamp(alignment_pct / 100.0, -1.0, 1.0)
-    v = _clamp(price_vs_vwap_pct / 0.5, -1.0, 1.0)
     m = 1.0 if macd_hist > 0 else -1.0 if macd_hist < 0 else 0.0
     r = _clamp((rsi - 50.0) / 20.0, -1.0, 1.0)
-    direction = 0.5 * a + 0.2 * v + 0.15 * m + 0.15 * r
+    if price_vs_vwap_pct is None:
+        direction = (0.5 * a + 0.15 * m + 0.15 * r) / (1.0 - PRICE_VWAP_WEIGHT)
+    else:
+        v = _clamp(price_vs_vwap_pct / 0.5, -1.0, 1.0)
+        direction = 0.5 * a + PRICE_VWAP_WEIGHT * v + 0.15 * m + 0.15 * r
     adx_factor = _clamp(adx / 40.0, 0.3, 1.0)
     score = _clamp(50.0 + 50.0 * direction * adx_factor, 0.0, 100.0)
-    confidence = _clamp(n_timeframes / 3.0, 0.0, 1.0)
+    expected = expected_timeframes if expected_timeframes and expected_timeframes > 0 else 3
+    confidence = _clamp(n_timeframes / float(expected), 0.0, 1.0)
     return TrendSub(score=round(score, 2), confidence=round(confidence, 3))
 
 

@@ -854,12 +854,14 @@ def test_all_non_finite_price_indicators_score_neutral_not_maximum():
     live = compute._finite_score_price(nan, nan, nan, nan, nan, n_timeframes=3)
     assert live.score == 50.0
     assert live.confidence == 0.0
-    # _structural_trend's shape: vwap_pct hardcoded 0.0, 1 timeframe. Was 82.50/0.333.
-    struct = compute._finite_score_price(nan, 0.0, nan, nan, nan, n_timeframes=1)
+    # _structural_trend's shape: no VWAP at a daily horizon, one timeframe of
+    # one. Was 82.50/0.333 before the guard. (Until 2026-10-04 this shape passed
+    # a literal 0.0 for VWAP, and that invented reading kept a sliver of
+    # confidence alive here - audit AC-50.)
+    struct = compute._finite_score_price(nan, None, nan, nan, nan, n_timeframes=1,
+                                         expected_timeframes=1, has_vwap=False)
     assert struct.score == 50.0
-    # The one genuinely-known input (that hardcoded 0.0) is all that is left of
-    # the confidence — 20% of a 0.333 single-timeframe read.
-    assert struct.confidence < 0.1
+    assert struct.confidence == 0.0
 
 
 def test_infinite_and_junk_price_indicators_also_degrade():
@@ -1312,3 +1314,61 @@ def test_the_structural_trend_passes_a_weighted_key_too(monkeypatch):
     monkeypatch.setattr(compute.technical, "calculate_ema_alignment", _spy)
     compute._structural_trend(_bars(260, 400.0, 0.6), {"XLK": 1.0}, 1.0)
     assert seen["keys"] <= set(lib_config.TIMEFRAME_WEIGHTS)
+
+
+# --- AC-50: the Week and Month gauges' price score is a full reading ----------
+#
+# The structural path has ONE timeframe (daily) and no VWAP. It called the
+# intraday scorer with ``n_timeframes=1`` of an assumed three and a literal 0.0
+# for VWAP, so by construction the price sub-score carried one-third confidence
+# (0.45 x 0.333 = 0.15 in the blend against the sector's 0.20, where the
+# intended weights are 0.45 against 0.20) and could never leave 10..90.
+
+def test_structural_price_carries_full_confidence_on_a_full_daily_read():
+    out = compute._structural_trend(_bars(260, 400.0, 0.6), {}, 1.0)
+    # No sector data, so the blend's confidence is the price term's own:
+    # weight 0.45 at confidence 1.0. It was 0.45 x 0.333 = 0.15.
+    assert out["confidence"] == 0.45
+
+
+def test_structural_price_outweighs_the_sector_as_the_weights_say():
+    """Price up hard, every sector down: with the intended 0.45 / 0.20 weights
+    the blend sits on the price side of 50. At one-third confidence the sector
+    term outweighed it."""
+    spy = _bars(260, 400.0, 0.6)
+    red = {etf: -1.0 for etf in ("XLK", "XLY", "XLF", "XLI", "XLB", "XLE", "XLC",
+                                 "XLP", "XLU", "XLV", "XLRE")}
+    out = compute._structural_trend(spy, red, 1.0)
+    price, sector = out["sub_scores"]["price"], out["sub_scores"]["sector"]
+    assert price > 50.0 > sector
+    expected = round((0.45 * price + 0.20 * sector) / 0.65, 2)
+    assert out["score"] == expected
+
+
+def test_structural_price_can_reach_the_end_of_the_scale(monkeypatch):
+    """Alignment, MACD, RSI and ADX all at their bullish extreme is 100. With
+    the invented neutral VWAP it stopped at 90."""
+    monkeypatch.setattr(compute.technical, "calculate_ema_alignment",
+                        lambda *a, **k: {"alignment_percentage": 100.0})
+    monkeypatch.setattr(compute.technical, "macd_histogram_series",
+                        lambda *a, **k: pd.Series([1.0]))
+    monkeypatch.setattr(compute.technical, "calculate_rsi", lambda *a, **k: 75.0)
+    monkeypatch.setattr(compute.technical, "calculate_adx", lambda *a, **k: 45.0)
+    out = compute._structural_trend(_bars(260, 400.0, 0.6), {}, 1.0)
+    assert out["sub_scores"]["price"] == 100.0
+
+
+def test_a_missing_structural_indicator_still_costs_its_share(monkeypatch):
+    """The NaN guard keeps working on the three-term shape: a missing RSI is
+    0.15 of the 0.80 of direction weight this horizon has."""
+    monkeypatch.setattr(compute.technical, "calculate_rsi",
+                        lambda *a, **k: float("nan"))
+    out = compute._structural_trend(_bars(260, 400.0, 0.6), {}, 1.0)
+    assert out["confidence"] == round(0.45 * round(0.65 / 0.80, 3), 3)
+
+
+def test_the_day_gauge_shape_is_untouched():
+    """Three timeframes and a live VWAP: the same call as before."""
+    for args in ((25.0, 0.4, 0.1, 55.0, 20.0), (-60.0, -0.3, -0.2, 41.0, 33.0)):
+        assert (compute._finite_score_price(*args, n_timeframes=3)
+                == intraday_trend.score_price(*args, n_timeframes=3))
