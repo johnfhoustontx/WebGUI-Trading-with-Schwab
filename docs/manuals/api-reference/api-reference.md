@@ -571,7 +571,11 @@ attempt** (never duplicate a submitted order).
 | `/instruments` | `symbol, projection` (e.g. `fundamental`) | `{instruments:[{fundamental, symbol, description, ...}]}` |
 | `/passthrough` | `endpoint, params` | Generic marketdata fallback |
 
-Each returns Schwab's JSON body as Schwab sent it. A failure is the upstream HTTP
+Each returns Schwab's JSON body as Schwab sent it, with one exception: a class
+share. Ask for it with a dot (`BRK.B`, `BF.B`). The proxy sends Schwab the slash
+form it requires (`BRK/B`) and names the symbol with a dot again in the answer,
+so quote keys and each `symbol` field match what was asked. Option contract
+symbols are unchanged. A failure is the upstream HTTP
 status with `{"detail": ...}`. A token that cannot be made valid (none, or the
 refresh token expired or rejected) answers **500** with a JSON `detail` naming the
 error.
