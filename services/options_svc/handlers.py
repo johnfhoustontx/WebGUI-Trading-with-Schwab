@@ -1362,6 +1362,39 @@ def run_paper_entry_and_manage(bus) -> None:
     run_manage_and_refresh(bus)
 
 
+def run_paper_settle(bus) -> None:
+    """The 15:05 CT settle slot: expiration-settle the Account and the Ledger,
+    then republish. Settle ONLY - no entry, no reprice, no exit rule.
+
+    The hourly cycle (``run_paper_entry_and_manage``) stops at 14:00 CT, an hour
+    before any option settles, so this is the only run that can settle a
+    position on its own expiry day. It must not become a full manage cycle:
+    after the close an option quote is a stale or one-sided market, and an exit
+    rule acting on one would close positions at prices nobody could trade.
+
+    Each book is guarded on its own, so one failing never costs the other its
+    settlement or the page its refresh. The Ledger is republished WITHOUT a
+    reprice for the same after-close reason."""
+    if compute.has_paper_account():
+        try:
+            compute.run_settle_cycle()
+        except Exception:
+            log.exception("paper settle: account pass degraded")
+    try:
+        compute.expire_ledger_trades()
+    except Exception:
+        log.exception("paper settle: ledger pass degraded")
+    refresh_paper_account(bus)
+    try:
+        refresh_paper_trades(bus, reprice=False)
+    except Exception:
+        log.exception("paper settle: refresh_paper_trades degraded")
+    try:
+        publish_rescue_summary(bus)
+    except Exception:
+        log.exception("paper settle: publish_rescue_summary degraded")
+
+
 def refresh_paper_trades(bus, reprice: bool = True) -> None:
     """Read the paper-trade ledger view and publish it to the bus.
 

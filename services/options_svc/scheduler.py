@@ -229,6 +229,39 @@ def paper_cycle_due(now, ran_slots):
     return None
 
 
+# ── Paper expiry settlement (see config/sessions.toml [slots.paper_settle]) ──
+# The hourly cycle above stops at 14:00 CT and an option settles at the 15:00 CT
+# close, so nothing could settle a paper position on its own expiry day: it
+# waited for the next trading morning and (until 2026-10-03) was then settled
+# against THAT morning's quote (audit AC-02). This slot runs a settle-ONLY pass
+# over the Account and the Ledger a few minutes after the close - no entry, no
+# reprice, no exit rule, since an after-close option quote is not a market.
+_SETTLE_SLOTS = {k: (t.hour, t.minute)
+                 for k, t in mc.slot_times("paper_settle").items()}
+_SETTLE_GRACE_MIN = mc.slot_grace_min("paper_settle")
+
+
+def paper_settle_due(now, ran_slots):
+    """Name of the paper expiry-settlement slot due now, or None.
+
+    Once per trading day when ``target <= now < target + grace`` and that
+    ``(date, slot)`` is not already in ``ran_slots``; the caller records it.
+    The grace is long on purpose: a settlement is the same answer at 15:05 and
+    at 16:30, so a service restarted after the close should still run it rather
+    than leave the day's expiries for the morning. Mirrors ``income_slot_due``."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _SETTLE_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_SETTLE_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Per-tick refresh gating (matrix live spots + GEX status) ────────────────
 # refresh_matrix_spots (a proxy quotes call) and publish_gex_status (a
 # SQLite read + cache write) used to run on EVERY 30 s tick, 24/7 — making proxy
@@ -559,6 +592,7 @@ async def loop(bus):
     last_gex_slot = None  # 1-min GEX history-collection slot (see gex_due)
     last_captured_manage_slot = None  # 5-min captured auto-manage slot (see captured_manage_due)
     paper_ran = set()  # (date, hour) of fired hourly manual paper cycles (see paper_cycle_due)
+    settle_ran = set()  # (date, slot) of fired paper expiry settlements (see paper_settle_due)
     last_periodic_slot = None  # matrix spots + gex_status throttle slot (see periodic_refresh_due)
     calibration_session = None  # nightly calibration session sentinel (see calibration_due)
     analyze_ran = set()  # (date, slot) of fired scheduled Gamma Analyze runs (see analyze_slot_due)
@@ -804,6 +838,28 @@ async def loop(bus):
 
         if paper_h is not None:
             branches.append(("paper_cycle", _paper_cycle_branch()))
+
+        # Paper expiry settlement - a settle-ONLY pass over the Account and the
+        # Ledger just after the 15:00 CT close (the hourly cycle's last run is
+        # 14:00). Latched before the blocking pass, like the hourly cycle;
+        # independently guarded so a failure never skips the work above or kills
+        # the loop.
+        try:
+            settle_slot = paper_settle_due(now, settle_ran)
+            if settle_slot:
+                settle_ran.add((now.date().isoformat(), settle_slot))
+        except Exception:
+            log.exception("paper_settle_due gate degraded")
+            settle_slot = None
+
+        async def _paper_settle_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.run_paper_settle, bus)
+            except Exception:
+                log.exception("run_paper_settle branch degraded")
+
+        if settle_slot:
+            branches.append(("paper_settle", _paper_settle_branch()))
 
         # Scheduled $SPX/SPY/QQQ Gamma Analyze — auto-run the Analyze command at
         # premarket / ~18 min after the open / midday / close on each trading day

@@ -282,6 +282,12 @@ _DEFAULTS = {
         # is ever wanted, is then one line rather than a reshaped table.
         "income": {"grace_min": 20, "morning": "08:52"},
         "finder_public": {"grace_min": 20, "warm": "09:08"},
+        # The paper books' expiry settlement (options_svc): a settle-only pass
+        # over the Account and the Ledger just after the 15:00 CT close. The
+        # time must stay AFTER 15:00 - before it nothing is due yet and the slot
+        # is spent for the day. The grace is long because a settlement is the
+        # same answer an hour later, so a late start should still run it.
+        "paper_settle": {"grace_min": 120, "close": "15:05"},
         # The delta-notional flow-alert instrumentation -- the ONLY measurement
         # of the [big_delta]/UOA thresholds, and a day it misses cannot be
         # recovered (the closing chain is gone, the alert channel resets

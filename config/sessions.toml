@@ -151,6 +151,18 @@ close   = "15:00"     # pre-close sweep
 grace_min = 20
 warm = "09:08"
 
+[slots.paper_settle]
+# The paper books' expiry settlement: a settle-ONLY pass over the Paper Account
+# and the Paper Ledger just after the close (16:00 ET = 15:00 CT). The hourly
+# paper cycle's last run is 14:00 CT, so without this slot a position could not
+# settle on its own expiry day. No Schwab chain call: one stock quote per
+# expiring position.
+# Keep the time AFTER 15:00 - earlier than that nothing is due yet and the slot
+# is spent for the day. The grace is long on purpose: a settlement is the same
+# answer an hour later, so a service restarted after the close still runs it.
+grace_min = 120
+close = "15:05"       # 16:05 ET
+
 [slots.income]
 # The 30-45 DTE income scan (two-sided credit spreads + cash-secured puts).
 # ONE pass a day by design: a 35-DTE candidate does not meaningfully re-rank

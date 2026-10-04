@@ -2479,6 +2479,21 @@ def run_manage_cycle(lifecycle: bool = False) -> None:
         be_level_fn=_manual_paper_be_level if lifecycle else None)
 
 
+def run_settle_cycle(now_ct=None) -> int:
+    """Expiration-settle the paper Account's due positions; nothing else.
+
+    The 15:05 CT slot's Account half (``paper_engine.run_settle_cycle``): no
+    entry, no reprice, no exit rule. Returns the count settled. ``now_ct``
+    defaults to the live CT clock; inject it for deterministic tests."""
+    import datetime as dt
+
+    import paper_engine
+
+    now_ct = now_ct or dt.datetime.now(_PROJ_CT_TZ)
+    return paper_engine.run_settle_cycle(
+        _proxy.schwab_py_client, now_ct.date().isoformat(), now_ct=now_ct)
+
+
 def reset_paper_account(starting_balance: float) -> None:
     """Reset the paper account to ``starting_balance``. Mirrors the page's reset."""
     import paper_account_db
@@ -2938,11 +2953,14 @@ def expire_ledger_trades(now_ct=None) -> int:
     the ledger: for each OPEN trade whose expiration is past — or is today and the
     CT clock is at/after 15:00 (the shared ``paper_engine.should_settle`` gate, so
     a 0-DTE spread is held to the close, not settled at the open) — settle at
-    intrinsic value vs a directly-fetched underlying and persist the EXPIRED row.
+    intrinsic value vs ``paper_engine.settlement_underlying`` and persist the
+    EXPIRED row.
 
     Defensive per-trade (a bad trade never aborts the pass); returns the count
-    settled. ⚠ Runs on the manual account's **HOURLY** cycle (``paper_cycle_due``,
-    09:00-14:00 CT, six times a trading day) plus the "Run manage cycle" button —
+    settled. ⚠ Runs on the **15:05 CT settle slot** (``paper_settle_due`` — the
+    only run that can settle a trade on its own expiry day), on the manual
+    account's **HOURLY** cycle (``paper_cycle_due``, 09:00-14:00 CT, which
+    catches an expiry the slot missed) and on the "Run manage cycle" button —
     NOT on a 5-minute tick, which this docstring claimed for months.
     ``now_ct`` defaults to the live CT clock; inject it for deterministic tests."""
     import datetime as _dt
@@ -2965,9 +2983,14 @@ def expire_ledger_trades(now_ct=None) -> int:
             continue
         if not paper_engine.should_settle(t.get("expiration"), today, now_ct):
             continue
-        sp = paper_engine.underlying_last(_proxy.schwab_py_client, t.get("symbol"))
+        # WHICH price is the shared rule: the regular-session quote on the
+        # expiry day, the expiration date's daily close on any later day - never
+        # a later day's live quote (audit AC-02).
+        sp = paper_engine.settlement_underlying(
+            _proxy.schwab_py_client, t.get("symbol"), t.get("expiration"), today)
         if sp is None:
-            log.warning("ledger EXPIRY DEFERRED %s: no underlying quote", t.get("symbol"))
+            log.warning("ledger EXPIRY DEFERRED %s %s: no settlement price",
+                        t.get("symbol"), t.get("expiration"))
             continue
         try:
             closed = paper_trader.expire_paper_trade(dict(t), sp)
@@ -3478,16 +3501,23 @@ def _captured_be_level(row) -> float:
         return 0.0
 
 
-def run_captured_manage_cycle() -> dict:
+def run_captured_manage_cycle(now_ct=None) -> dict:
     """Reprice → arm break-even → auto-close the OPEN captured signals (paper-only).
 
     Mirrors the paper manage pattern; fully defensive (a per-signal failure
     is skipped, never fatal). For each OPEN captured signal:
-      1. Reprice via ``signal_repricer.reprice_swing`` (stale/failed reprice is
-         skipped — never close on bad data — EXCEPT an expired signal, which
-         settles at intrinsic below).
-      2. **Expiry:** at ``DTE <= 0`` settle at the repriced intrinsic (OTM → ~0 →
-         full credit) with reason ``EXPIRED`` and move on.
+      1. **Expiry**, only when DUE — ``paper_engine.should_settle``: at or after
+         the 15:00 CT close on the expiry day, or any later day. Settle at
+         intrinsic (``signal_repricer.expiry_value``) against
+         ``paper_engine.settlement_underlying`` — the regular-session quote on the
+         day, the expiration date's daily close afterwards — with reason
+         ``EXPIRED``, recording the price it settled against. No usable price or
+         a structure that cannot be valued DEFERS; it never falls back to a live
+         mark or to the entry price.
+      2. Otherwise reprice via ``signal_repricer.reprice_swing`` (a stale/failed
+         reprice is skipped — never close on bad data). A signal on its expiry
+         day BEFORE the close takes this path like any other day: it is marked
+         and its exit rules run until the close.
       3. Build a lifecycle mark (``build_mark`` threads be_armed/strategy/strikes/
          spot + the be_level break-even floor) and persist it (``insert_mark``).
       4. **Arm** break-even the first time pnl reaches +50% credit (``set_be_armed``).
@@ -3495,10 +3525,18 @@ def run_captured_manage_cycle() -> dict:
          (``_CAPTURED_CLOSE_CODES``) via ``close_signal_manually`` (writes an
          outcome + realized P&L — NEVER a broker order).
 
+    ⚠ Until 2026-10-03 the expiry gate was ``dte <= 0`` with no clock (audit
+    AC-01), so every signal closed as EXPIRED at the first cycle of its expiry
+    day — at that morning's option mark, or against the ENTRY underlying when
+    unmarkable — and those rows are what the nightly calibration reads.
+
+    ``now_ct`` defaults to the live CT clock; inject it for deterministic tests.
+
     Returns ``{"closed": [{signal_id, symbol, reason, exit_val}, ...],
     "armed": [{signal_id, symbol}, ...]}`` for the handler to log/notify."""
     import datetime as dt
 
+    import paper_engine
     import signal_db
     import signal_recommender
     import signal_repricer
@@ -3514,7 +3552,8 @@ def run_captured_manage_cycle() -> dict:
         log.exception("captured manage signal read degraded → empty set")
         return {"closed": [], "armed": []}
 
-    now = dt.datetime.now(_PROJ_CT_TZ)
+    now = now_ct or dt.datetime.now(_PROJ_CT_TZ)
+    today = now.date().isoformat()
     # Per STRUCTURE, not the global TP_FRAC: this cycle decides when to ARM
     # break-even from its own threshold read, separately from recommend()'s, so a
     # structure that moves its own tp_frac would otherwise arm at a level the
@@ -3527,30 +3566,33 @@ def run_captured_manage_cycle() -> dict:
     for r in sigs:
         sid = r.get("signal_id")
         try:
+            # Expiry settlement, only when DUE (the same gate and the same price
+            # rule the paper Account and Ledger use). Before the reprice: a
+            # settlement needs the underlying's close, never an option quote.
+            if paper_engine.should_settle(r.get("expiration"), today, now):
+                spot = paper_engine.settlement_underlying(
+                    _proxy.schwab_py_client, r.get("symbol"),
+                    r.get("expiration"), today)
+                exit_val = (None if spot is None
+                            else signal_repricer.expiry_value(r, spot))
+                if exit_val is None:
+                    log.warning("captured EXPIRY DEFERRED %s %s %s: %s", sid,
+                                r.get("symbol"), r.get("expiration"),
+                                "no settlement price" if spot is None
+                                else "structure cannot be valued")
+                    continue
+                exit_val = round(exit_val, 2)
+                signal_db.close_signal_manually(
+                    sid, exit_val, "EXPIRED", settlement_underlying=spot)
+                closed.append({"signal_id": sid, "symbol": r.get("symbol"),
+                               "reason": "EXPIRED", "exit_val": exit_val})
+                continue
+
             rep = signal_repricer.reprice_swing(r, _proxy.schwab_py_client)
             if rep is None:
                 continue
 
-            dte = _rescue_dte(r.get("expiration"))
-            if dte is not None and dte <= 0:
-                # Expiry settlement — settle at the repriced intrinsic; fall back
-                # to the engine intrinsic vs the current/entry spot when there is
-                # no live chain (an already-expired reprice returns no value).
-                exit_val = rep.get("current_value")
-                if exit_val is None:
-                    spot = rep.get("current_underlying") or r.get("entry_underlying")
-                    if spot is not None:
-                        try:
-                            exit_val, _pnl = signal_repricer.intrinsic_value(r, float(spot))
-                        except Exception:
-                            exit_val = None
-                if exit_val is not None:
-                    signal_db.close_signal_manually(sid, exit_val, "EXPIRED")
-                    closed.append({"signal_id": sid, "symbol": r.get("symbol"),
-                                   "reason": "EXPIRED", "exit_val": exit_val})
-                continue
-
-            # Not expired — a stale/failed reprice must NEVER close on bad data.
+            # A stale/failed reprice must NEVER close on bad data.
             if rep.get("error"):
                 continue
 

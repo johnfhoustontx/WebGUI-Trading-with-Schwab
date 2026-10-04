@@ -69,6 +69,66 @@ def intrinsic_value(trade, settlement):
     return net, pnl
 
 
+def _finite_positive(value):
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) and v > 0 else None
+
+
+def expiry_value(trade, settlement):
+    """What it costs to buy the position back at expiry, per share, or None.
+
+    The CAPTURED-signal settlement value: each short leg's intrinsic less each
+    long leg's, against the underlying's settlement price. ``None`` - never 0.0 -
+    for a structure this cannot value, a missing strike or an unusable
+    settlement: a zero books the whole credit as a win, so the caller must defer
+    instead.
+
+    ⚠ Not ``intrinsic_value``, and the difference is deliberate. That one books
+    a single-leg short at zero whatever the close, which is right for the paper
+    ACCOUNT: an in-the-money cash-secured put there is ASSIGNED at the strike and
+    its loss lives in the share lot. A captured signal has no lot - it is an
+    outcome row the calibration reads - so the option's own intrinsic is the
+    whole result.
+    """
+    sp = _finite_positive(settlement)
+    if sp is None:
+        return None
+    strat = _structures.canonical(trade.get("strategy"))
+
+    def k(field):
+        return _finite_positive(trade.get(field))
+
+    def put_spread():
+        sk, lk = k("short_strike"), k("long_strike")
+        if sk is None or lk is None:
+            return None
+        return max(sk - sp, 0.0) - max(lk - sp, 0.0)
+
+    def call_spread(short_field, long_field):
+        sk, lk = k(short_field), k(long_field)
+        if sk is None or lk is None:
+            return None
+        return max(sp - sk, 0.0) - max(sp - lk, 0.0)
+
+    if strat == "PCS":
+        return put_spread()
+    if strat == "CCS":
+        return call_spread("short_strike", "long_strike")
+    if strat == "IC":
+        puts, calls = put_spread(), call_spread("call_short", "call_long")
+        return None if puts is None or calls is None else puts + calls
+    if _structures.is_single_leg(strat):
+        # ONE short option; the strike lives in ``short_strike`` for both.
+        sk = k("short_strike")
+        if sk is None:
+            return None
+        return max(sk - sp, 0.0) if _structures.is_put_side(strat) else max(sp - sk, 0.0)
+    return None
+
+
 def _leg_sign(leg):
     return 1.0 if leg.get("side") == "long" else -1.0
 

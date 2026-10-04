@@ -367,11 +367,16 @@ def get_open_signals_with_latest_mark(db_path=DEFAULT_DB_PATH):
 
 
 def close_signal_manually(signal_id, exit_value, exit_reason, db_path=DEFAULT_DB_PATH,
-                          close_ts=None):
+                          close_ts=None, settlement_underlying=None):
     """Manually close an OPEN signal. Writes signal_outcomes row, flips status to CLOSED.
 
     realized_pnl = (entry_credit - exit_value) * 100  (per-contract dollars).
     Raises ValueError if signal_id is unknown.
+
+    ``settlement_underlying`` is the underlying price an EXPIRY settled against
+    (None for every other close). The column has existed since the table did and
+    was written NULL on every row, so no outcome could be checked against the
+    close it claimed.
     """
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -394,7 +399,8 @@ def close_signal_manually(signal_id, exit_value, exit_reason, db_path=DEFAULT_DB
         "exit_value": float(exit_value),
         "realized_pnl": realized_pnl,
         "exit_reason": exit_reason,
-        "settlement_underlying": None,
+        "settlement_underlying": (None if settlement_underlying is None
+                                  else float(settlement_underlying)),
     }
     insert_outcome(outcome, new_status="CLOSED", db_path=db_path)
 

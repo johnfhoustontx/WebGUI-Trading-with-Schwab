@@ -1126,7 +1126,7 @@ def test_expire_ledger_trades_settles_past_and_close_day(monkeypatch):
 
     fake_pe = _types.SimpleNamespace(
         should_settle=_should_settle,
-        underlying_last=lambda client, sym: 505.0)
+        settlement_underlying=lambda client, sym, exp, today, **kw: 505.0)
     monkeypatch.setitem(_sys.modules, "paper_trader", fake_pt)
     monkeypatch.setitem(_sys.modules, "paper_engine", fake_pe)
 
@@ -1152,7 +1152,7 @@ def test_expire_ledger_trades_defers_when_no_underlying(monkeypatch):
         update_trade=lambda tid, c: settled.append(tid)))
     monkeypatch.setitem(_sys.modules, "paper_engine", _types.SimpleNamespace(
         should_settle=lambda exp, today, nc: True,
-        underlying_last=lambda client, sym: None))   # no quote -> defer
+        settlement_underlying=lambda client, sym, exp, today, **kw: None))  # no price -> defer
 
     assert compute.expire_ledger_trades(now_ct=now_ct) == 0
     assert settled == []
@@ -1816,28 +1816,11 @@ def test_manage_money_stop_closes(monkeypatch):
     assert calls["closed"] == [("M1", 3.0, "MONEY_STOP")]
 
 
-def test_manage_expiry_otm_closes_full_credit(monkeypatch):
-    import datetime as _d
-    today = _d.date.today().isoformat()
-    calls = _patch_manage_seams(
-        monkeypatch, [_manage_signal(be_armed=0, expiration=today)],
-        {"M1": _rep(unrealized_pnl=100.0, current_value=0.0)})
-    compute.run_captured_manage_cycle()
-    # DTE<=0 → settle EXPIRED at the repriced intrinsic (OTM → 0 → full credit).
-    assert calls["closed"] == [("M1", 0.0, "EXPIRED")]
-
-
-def test_manage_expiry_uses_intrinsic_when_no_chain(monkeypatch):
-    import datetime as _d
-    today = _d.date.today().isoformat()
-    # An expired reprice (no live chain) → settle at the engine intrinsic
-    # (stubbed to 0.0 = OTM full credit) via the current spot / entry underlying.
-    calls = _patch_manage_seams(
-        monkeypatch, [_manage_signal(be_armed=0, expiration=today)],
-        {"M1": _rep(error="expired", current_value=None,
-                    current_underlying=500.0)})
-    compute.run_captured_manage_cycle()
-    assert calls["closed"] == [("M1", 0.0, "EXPIRED")]
+# The two expiry tests that sat here pinned the defect (audit AC-01): they
+# asserted that a signal expiring TODAY closes as EXPIRED on the first cycle,
+# at the repriced mark or at a stubbed intrinsic of zero. Expiry is now covered,
+# against hand-worked payoffs and an injected clock, in
+# ``test_expiry_settlement.py``.
 
 
 def test_manage_stale_reprice_skips(monkeypatch):

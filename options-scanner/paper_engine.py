@@ -12,6 +12,7 @@ Version 1.0.0 Changes:
 """
 import json
 import logging
+import math
 import sys as _sys
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -683,8 +684,186 @@ def underlying_last(client, symbol):
         return None
 
 
+def _usable_price(value):
+    """``value`` as a finite float above zero, else None."""
+    try:
+        px = float(value)
+    except (TypeError, ValueError):
+        return None
+    return px if math.isfinite(px) and px > 0 else None
+
+
+def close_on_date(candles, day):
+    """The close of the daily candle for session ``day`` (YYYY-MM-DD), or None (PURE).
+
+    Schwab stamps a daily candle at midnight CENTRAL of its session, so the
+    Central date of the stamp IS the session date. Read from the raw epoch-ms
+    stamp: ``proxy_client``'s DataFrame helpers return NAIVE UTC, the documented
+    trap. A zero, negative or non-finite close is no close.
+    """
+    want = str(day)[:10]
+    for c in candles or ():
+        try:
+            stamp = datetime.fromtimestamp(int(c["datetime"]) / 1000, TZ)
+        except (TypeError, ValueError, KeyError, OverflowError, OSError):
+            continue
+        if stamp.date().isoformat() == want:
+            return _usable_price(c.get("close"))
+    return None
+
+
+def _api_symbol(symbol):
+    return "$SPX" if symbol == "SPX" else symbol
+
+
+def daily_close_on(client, symbol, day):
+    """``symbol``'s daily close on session ``day``, or None. Never raises.
+
+    Reads the year of daily bars - the same request the scan makes for its
+    technicals. A PAST session's bar is final, which is the only case this is
+    used for, so the proxy store's still-moving last bar cannot reach it.
+    """
+    if client is None or not symbol:
+        return None
+    try:
+        r = client.get_price_history_every_day(_api_symbol(symbol))
+        if getattr(r, "status_code", 200) != 200:
+            return None
+        data = r.json() if hasattr(r, "json") else (r or {})
+        return close_on_date((data or {}).get("candles"), day)
+    except Exception:
+        log.warning("daily_close_on %s %s failed", symbol, day, exc_info=True)
+        return None
+
+
+def settlement_last(client, symbol):
+    """The regular-session last for an expiry-DAY settlement, or None.
+
+    Schwab's equity quote carries the regular session's own last trade beside
+    ``lastPrice``, and after 15:00 CT ``lastPrice`` can already be an after-hours
+    print. An index quote has no such block and its ``lastPrice`` IS the close,
+    so anything without one falls back to ``underlying_last``. Never raises.
+    """
+    if client is None or not symbol:
+        return None
+    api = _api_symbol(symbol)
+    try:
+        r = client.get_quotes([api])
+        data = r.json() if hasattr(r, "json") else (r or {})
+        info = data.get(api) or data.get(symbol) or {}
+        regular = info.get("regular") if isinstance(info, dict) else None
+        px = _usable_price((regular or {}).get("regularMarketLastPrice"))
+        if px is not None:
+            return px
+    except Exception:
+        pass
+    return underlying_last(client, symbol)
+
+
+def settlement_underlying(client, symbol, expiration, today, close_fn=None):
+    """The underlying price an expired option position settles against, or None.
+
+    THE one rule for every paper book (the Account, the Ledger and the captured
+    signals), so they cannot disagree about what an expiry was worth:
+
+    * **expiry day** (the caller has already gated on ``should_settle``, so the
+      clock is at or after the 15:00 CT close): the regular-session last from a
+      direct quote;
+    * **any later day**: the EXPIRATION DATE's daily close - never a live quote.
+      A position that expired Friday is worth what Friday's close made it, not
+      what Monday's open says. ``close_fn(symbol, day)`` supplies that close;
+      it defaults to ``daily_close_on`` through ``client``.
+
+    ``None`` means "no usable price": the caller DEFERS and retries next cycle.
+    It never falls back from the dated close to a live quote - that fallback is
+    the defect this replaced (audit AC-02: +$98.70 at Friday's close booked as
+    -$401.30 on Monday).
+    """
+    try:
+        exp = date.fromisoformat(str(expiration)[:10])
+        tod = date.fromisoformat(str(today)[:10])
+    except (ValueError, TypeError):
+        return None
+    if exp >= tod:
+        return settlement_last(client, symbol)
+    day = exp.isoformat()
+    try:
+        px = (close_fn(symbol, day) if close_fn is not None
+              else daily_close_on(client, symbol, day))
+    except Exception:
+        log.warning("settlement close lookup failed for %s %s", symbol, day,
+                    exc_info=True)
+        return None
+    return _usable_price(px)
+
+
+def _settle_position(db_path, pos, settlement):
+    """Expiration-settle ONE open position at intrinsic against ``settlement``.
+
+    An ITM cash-secured put becomes stock, and an ITM covered call delivers its
+    shares. The two are mutually exclusive by construction (a position cannot
+    be both a single-leg short put and a single-leg short call), so the order
+    of the two tests carries no meaning - the settlement itself is identical
+    for all three outcomes, which is why only the REASON and the share step
+    differ. There is deliberately NO second detection path for either: a
+    deferred settlement means a lot can appear or close a cycle late, which
+    beats two mechanisms that can disagree.
+    """
+    qty = pos["quantity"]
+    net, pnl_per = signal_repricer.intrinsic_value(_trade_view(pos), settlement)
+    realized = net_realized_pnl(round(pnl_per * qty, 2), pos, qty, expired=True)
+    assigned = is_assignment(pos, settlement)
+    called = is_called_away(pos, settlement)
+    reason = "ASSIGNED" if assigned else ("CALLED_AWAY" if called else "EXPIRED")
+    _close(db_path, pos, exit_debit=round(net, 2), exit_order_id=None,
+           realized_pnl=realized, reason=reason, status="EXPIRED")
+    if assigned:
+        _assign_shares(db_path, pos)
+    elif called:
+        _call_away_shares(db_path, pos)
+    log.info("%s %s %s %s x%s @ %.2f pnl %.2f (net of fees)", _default_broker.PREFIX,
+             reason, pos["symbol"], pos["strategy"], qty, settlement, realized)
+
+
+def _settle_if_due(db_path, pos, client, now_date, now_ct, close_fn):
+    """Settle ``pos`` when its expiry is due. Returns ``"settled"``,
+    ``"deferred"`` (due, but no usable price yet) or ``None`` (not due)."""
+    if not should_settle(pos["expiration"], now_date, now_ct):
+        return None
+    settlement = settlement_underlying(client, pos["symbol"], pos["expiration"],
+                                       now_date, close_fn=close_fn)
+    if not settlement:
+        log.warning("%s EXPIRY DEFERRED %s %s: no settlement price, retry next cycle",
+                    _default_broker.PREFIX, pos["symbol"], pos["expiration"])
+        return "deferred"
+    _settle_position(db_path, pos, settlement)
+    return "settled"
+
+
+def run_settle_cycle(client, now_date, db_path=None, now_ct=None, close_fn=None):
+    """Expiration-settle every open position whose expiry is due; nothing else.
+
+    The 15:05 CT slot (``[slots.paper_settle]``). The hourly manage cycle's last
+    run is 14:00 CT, an hour before any option settles, so without this pass a
+    position could never settle on its own expiry day. It deliberately does NOT
+    reprice or run an exit rule: after the close an option quote is a stale or
+    one-sided market, and a rule must never act on one. Returns the count settled.
+    """
+    now_ct = now_ct or datetime.now(TZ)
+    paper_account_db.roll_session_if_needed(db_path, now_date)
+    settled = 0
+    for pos in paper_account_db.fetch_open_positions(db_path):
+        try:
+            if _settle_if_due(db_path, pos, client, now_date, now_ct, close_fn) == "settled":
+                settled += 1
+        except Exception:
+            log.exception("%s settle failed for position %s", _default_broker.PREFIX,
+                          pos.get("position_id"))
+    return settled
+
+
 def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
-                     lifecycle=False, be_level_fn=None):
+                     lifecycle=False, be_level_fn=None, close_fn=None):
     """Re-price open positions, apply exit rules (target / CUT / expiration), and
     trip the session drawdown halt. RTH gating is the caller's responsibility.
 
@@ -746,40 +925,11 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
                 last_mark_ts=datetime.now(TZ).isoformat())
 
         # Expiration settlement at intrinsic value vs the underlying — only at/
-        # after the 15:00 CT close on the expiry day (or later). The underlying
-        # comes from the repricer when available, else a direct quote (the
-        # repricer returns None for a past expiration).
-        if should_settle(pos["expiration"], now_date, now_ct):
-            settlement = mark.get("current_underlying") or underlying_last(client, pos["symbol"])
-            if not settlement:
-                log.warning("%s EXPIRY DEFERRED %s: no underlying quote, retry next cycle",
-                            _default_broker.PREFIX, pos["symbol"])
-                continue
-            net, pnl_per = signal_repricer.intrinsic_value(trade, settlement)
-            realized = net_realized_pnl(round(pnl_per * qty, 2), pos, qty, expired=True)
-            # An ITM cash-secured put becomes stock. There is deliberately NO
-            # second detection path: the deferral above means an assignment with
-            # no quote settles on the next cycle, so a lot can appear a cycle
-            # late — better than two mechanisms that can disagree.
-            # ...and an ITM covered call delivers them. The two are mutually
-            # exclusive by construction (a position cannot be both a single-leg
-            # short put and a single-leg short call), so the order of these two
-            # tests carries no meaning — but the settlement itself is identical
-            # for all three outcomes, which is why only the REASON and the share
-            # step differ below. Like assignment, there is deliberately no second
-            # detection path: the no-quote deferral above means a called-away lot
-            # can close a cycle late, which beats two mechanisms that disagree.
-            assigned = is_assignment(pos, settlement)
-            called = is_called_away(pos, settlement)
-            reason = "ASSIGNED" if assigned else ("CALLED_AWAY" if called else "EXPIRED")
-            _close(db_path, pos, exit_debit=round(net, 2), exit_order_id=None,
-                   realized_pnl=realized, reason=reason, status="EXPIRED")
-            if assigned:
-                _assign_shares(db_path, pos)
-            elif called:
-                _call_away_shares(db_path, pos)
-            log.info("%s %s %s %s x%s pnl %.2f (net of fees)", _default_broker.PREFIX,
-                     reason, pos["symbol"], pos["strategy"], qty, realized)
+        # after the 15:00 CT close on the expiry day (or later). WHICH price is
+        # ``settlement_underlying``'s rule, shared with the Ledger and the
+        # captured signals: the regular-session quote on the day, the expiration
+        # date's daily close afterwards. Due but unpriceable defers.
+        if _settle_if_due(db_path, pos, client, now_date, now_ct, close_fn) is not None:
             continue
 
         if per_contract is None:

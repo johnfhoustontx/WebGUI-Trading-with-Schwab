@@ -518,6 +518,15 @@ _SESSIONS = ConfigFile(
                   kind="int", unit="min", min=1, max=120, step=1),
             Field("slots.finder_public.*", "", "", kind="time"),
         ), restart=(OPTIONS,)),
+        Section("Paper expiry settlement",
+                "Settles the Paper Account's and Paper Ledger's expiring "
+                "positions just after the close. Keep the time after 15:00.", (
+            Field("slots.paper_settle.grace_min", "Fire if late by at most",
+                  "Long on purpose: a settlement gives the same answer an hour "
+                  "later, so a late start should still run it.",
+                  kind="int", unit="min", min=1, max=480, step=1),
+            Field("slots.paper_settle.*", "", "", kind="time"),
+        ), restart=(OPTIONS,)),
         Section("Income scan", "The once-a-day 30–45 day scan.", (
             Field("slots.income.grace_min", "Fire if late by at most", "",
                   kind="int", unit="min", min=1, max=120, step=1),
