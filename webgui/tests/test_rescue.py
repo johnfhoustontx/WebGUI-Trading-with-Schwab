@@ -148,11 +148,11 @@ def test_cash_text_credit_debit_zero():
     assert db["color"] == rescue.CASH_RED
 
     z = rescue.cash_text(0)
-    assert z["text"] == "$0"
+    assert z["text"] == "$0.00"
     assert z["color"] == rescue.CASH_NEUTRAL
 
     n = rescue.cash_text(None)
-    assert n["text"] == "$0"
+    assert n["text"] == "$0.00"
     assert n["color"] == rescue.CASH_NEUTRAL
 
 

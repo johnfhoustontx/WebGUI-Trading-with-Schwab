@@ -45,7 +45,7 @@ def test_cost_text_names_credit_debit_and_shares():
     assert fv.cost_text({"net_debit": 195.34}) == "$195.34 debit"
     assert fv.cost_text({"net_credit": 803.67}) == "$803.67 credit"
     shares = {"net_debit": 54057.72, "legs": [{"kind": "stock"}]}
-    assert fv.cost_text(shares) == "$54,058 debit for 100 shares"
+    assert fv.cost_text(shares) == "$54,057.72 debit for 100 shares"
     assert fv.cost_text({}) == "—"
 
 
@@ -469,7 +469,7 @@ def test_finder_rows_carry_shape_bars_and_paper_gate():
     assert row["_pop"]["label"] == "31.50%" and row["pop"] == "31.50%"
     assert row["_pop_fill"] == fv.POP_FILL["warn"]
     assert row["expiry"] == "Oct 16 · 30d" and row["_dte"] == 30
-    assert row["max_profit"] == "$375" and row["max_loss"] == "$125"
+    assert row["max_profit"] == "$374.80" and row["max_loss"] == "$125.20"
     assert row["_max_profit_n"] == 374.8 and row["_max_loss_n"] == 125.2
     assert "_rr" not in row            # no list slot draws the split bar
     assert row["score_text"] == "72"

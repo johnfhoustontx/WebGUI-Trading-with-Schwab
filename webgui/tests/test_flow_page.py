@@ -117,7 +117,7 @@ def test_side_labels_read_directionally():
 def test_detail_cells_are_type_specific():
     assert flow.alert_detail(_XO) == "$1.20M calls vs $400.00k puts"
     assert flow.alert_detail(_UOA) == "0DTE 737.00C · 12,400 vol / 1,100 OI (11.27×) · $2.13M"
-    assert flow.alert_detail(_GF) == "spot 6412 vs flip 6400"
+    assert flow.alert_detail(_GF) == "spot 6,412.00 vs flip 6,400.00"
 
 
 def test_detail_is_total_over_missing_fields():
