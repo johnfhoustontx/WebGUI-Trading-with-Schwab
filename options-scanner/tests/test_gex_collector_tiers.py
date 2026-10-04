@@ -1177,3 +1177,63 @@ def test_a_refetched_symbols_skew_readings_are_its_new_chains(tmp_path, monkeypa
     c = _cap_client({"AAPL"})
     _poll(c, ["AAPL"])
     assert seen == [LIVE_ON_STRIKE]        # not the stored chain's 100.0
+
+
+#############################################
+# A CARRIED ROW SAYS SO IN STORAGE (audit AC-121)
+#############################################
+# At an interval of 3, two of every three rows for a watchlist-only symbol hold
+# modelled Greeks and repeated volume and premium. Nothing stored told them
+# from a fetched row, so a later study would have read them as observations.
+
+def _carried_ages(tmp_path, monkeypatch, client, symbols):
+    import gamma_tool as gt
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    gc.poll_once(client, gt.GammaEngine(), conn, symbols=symbols,
+                 poll_term=False, now=RTH, tiers=TIERS)
+    out = {}
+    for symbol, view, age in conn.execute(
+            "SELECT symbol, view, carried_age_sec FROM snapshots"):
+        out.setdefault(symbol, {})[view] = age
+    conn.close()
+    return out
+
+
+def test_every_view_of_a_carried_minute_records_how_old_its_chain_was(
+        tmp_path, monkeypatch):
+    c = _client(ages={"AAPL": 95.0, "SPY": 3.0}, quotes={"AAPL": 103.0},
+                chain=_real_chain)
+    ages = _carried_ages(tmp_path, monkeypatch, c, ["SPY", "AAPL"])
+    views = {"gex", "charm", "dex", "vanna", "prem"}
+    assert ages["AAPL"] == {v: 95.0 for v in views}
+    assert ages["SPY"] == {v: None for v in views}      # fetched: no age
+
+
+def test_a_carried_chain_that_got_no_live_price_is_still_marked_carried(
+        tmp_path, monkeypatch):
+    # Not re-priced, but still an old chain's volume and premium.
+    c = _client(ages={"AAPL": 95.0}, quotes={}, chain=_real_chain)
+    ages = _carried_ages(tmp_path, monkeypatch, c, ["AAPL"])
+    assert set(ages["AAPL"].values()) == {95.0}
+
+
+def test_a_symbol_refetched_because_the_cap_bound_is_a_fetched_row(
+        tmp_path, monkeypatch):
+    c = _cap_client({"AAPL"})
+    ages = _carried_ages(tmp_path, monkeypatch, c, ["AAPL"])
+    assert set(ages["AAPL"].values()) == {None}
+
+
+def test_without_tiers_no_row_is_marked_carried(tmp_path, monkeypatch):
+    import gamma_tool as gt
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    c = _client(ages={"AAPL": 95.0}, chain=_real_chain)
+    gc.poll_once(c, gt.GammaEngine(), conn, symbols=["AAPL"], poll_term=False,
+                 now=RTH, tiers=None)
+    assert {r[0] for r in conn.execute(
+        "SELECT carried_age_sec FROM snapshots")} == {None}
+    conn.close()

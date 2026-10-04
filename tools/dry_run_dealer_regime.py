@@ -42,8 +42,11 @@ def _day_bounds(d: dt.date) -> tuple[int, int]:
 
 
 def _select(conn, cols, symbol, start, end):
+    # Fetched rows only: a carried row holds modelled Greeks and the last
+    # fetch's volume repeated, and this is a study of what was observed.
     return conn.execute(
         f"SELECT {cols} FROM snapshots WHERE symbol=? AND view='gex' "
+        f"AND {db.fetched_only_clause(conn)} "
         "AND ts>=? AND ts<? ORDER BY ts",
         (symbol, start, end),
     ).fetchall()

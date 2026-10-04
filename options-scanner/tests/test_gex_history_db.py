@@ -901,3 +901,61 @@ def test_load_hedge_series_skips_rows_without_pressure(tmp_path, monkeypatch):
     # A symbol that never has 0-DTE yields nothing at all, not an empty-looking zero.
     assert gh.load_hedge_series(conn, "NOPE") == []
     conn.close()
+
+
+# ---- a carried row is marked as one (audit AC-121) ---------------------------
+
+def _columns(conn):
+    return {row[1] for row in conn.execute("PRAGMA table_info(snapshots)")}
+
+
+def test_a_new_database_has_the_carried_age_column():
+    conn = sqlite3.connect(":memory:")
+    db.init_schema(conn)
+    assert "carried_age_sec" in _columns(conn)
+
+
+def test_an_existing_database_gains_the_carried_age_column_and_keeps_its_rows():
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE snapshots (symbol TEXT NOT NULL, view TEXT NOT NULL, "
+                 "ts INTEGER NOT NULL, spot REAL, flip REAL, top_pos_strike REAL, "
+                 "top_neg_strike REAL, net_total REAL, dte INTEGER, gex_json TEXT, "
+                 "PRIMARY KEY (symbol, view, ts))")
+    conn.execute("INSERT INTO snapshots (symbol, view, ts, spot) "
+                 "VALUES ('SPY', 'gex', 1, 500.0)")
+    db.init_schema(conn)
+    assert "carried_age_sec" in _columns(conn)
+    # Every row written before the column existed was a fetched row.
+    assert conn.execute("SELECT spot, carried_age_sec FROM snapshots").fetchall() == \
+        [(500.0, None)]
+
+
+def test_a_snapshot_stores_its_carried_age_and_a_fetched_one_stores_none():
+    conn = sqlite3.connect(":memory:")
+    db.init_schema(conn)
+    db.insert_snapshot(conn, "AAPL", "gex", {"ts": 60, "spot": 1.0,
+                                             "carried_age_sec": 95.0}, {}, 0)
+    db.insert_snapshot(conn, "SPY", "gex", {"ts": 60, "spot": 1.0}, {}, 0)
+    assert dict(conn.execute(
+        "SELECT symbol, carried_age_sec FROM snapshots").fetchall()) == \
+        {"AAPL": 95.0, "SPY": None}
+
+
+def test_the_fetched_only_clause_selects_only_fetched_rows():
+    conn = sqlite3.connect(":memory:")
+    db.init_schema(conn)
+    db.insert_snapshot(conn, "AAPL", "gex", {"ts": 60, "carried_age_sec": 95.0}, {}, 0)
+    db.insert_snapshot(conn, "AAPL", "gex", {"ts": 120}, {}, 0)
+    rows = conn.execute(
+        f"SELECT ts FROM snapshots WHERE {db.fetched_only_clause(conn)}").fetchall()
+    assert rows == [(120,)]
+
+
+def test_the_fetched_only_clause_keeps_every_row_of_a_database_without_the_column():
+    # A read-only copy made before the column existed: nothing in it was carried.
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE snapshots (symbol TEXT, view TEXT, ts INTEGER)")
+    conn.execute("INSERT INTO snapshots VALUES ('SPY', 'gex', 1)")
+    rows = conn.execute(
+        f"SELECT ts FROM snapshots WHERE {db.fetched_only_clause(conn)}").fetchall()
+    assert rows == [(1,)]

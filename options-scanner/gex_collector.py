@@ -672,6 +672,11 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
                 log.debug("skew compute failed for %s", symbol, exc_info=True)
                 skew_fields = {"rr_25d": None, "call_vol": None, "put_vol": None,
                                "call_prem": None, "put_prem": None, "atm_iv": None}
+            # Every view of a carried minute says so, with the age of the chain
+            # it came from: its Greeks are modelled and its volume and premium
+            # repeat the last fetch. None for a chain fetched this minute.
+            skew_fields["carried_age_sec"] = (ages.get(symbol)
+                                              if symbol in carried else None)
             # Single pass yields GEX, Charm, DEX, Vanna — all persisted below.
             gex, charm, dex, vanna = engine.calc_all_from_chain(chain, use_volume=False)
             dte = engine._last_dte

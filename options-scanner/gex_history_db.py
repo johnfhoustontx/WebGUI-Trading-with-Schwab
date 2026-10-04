@@ -90,9 +90,16 @@ CREATE TABLE IF NOT EXISTS snapshots (
     call_prem                 REAL,
     put_prem                  REAL,
     atm_iv                    REAL,
+    projected_flip            REAL,
+    carried_age_sec           REAL,
     PRIMARY KEY (symbol, view, ts)
 );
 """
+# ``carried_age_sec``: NULL for a row computed from a chain fetched this minute.
+# A number for a CARRIED row: the seconds since its chain left Schwab. Such a
+# row holds modelled Greeks at the live price and the last fetch's volume and
+# premium repeated, so a study must not read it as an observation
+# (``fetched_only_clause``).
 # NOTE: the old ``idx_snap_today ON snapshots(symbol, view, ts)`` was DROPPED
 # (2026-07-18) — it exactly duplicated the PRIMARY KEY autoindex, so every insert
 # maintained two identical b-trees. init_schema drops it from pre-existing DBs.
@@ -287,6 +294,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
         ("put_prem", "REAL"),
         ("atm_iv", "REAL"),
         ("projected_flip", "REAL"),
+        ("carried_age_sec", "REAL"),
     ):
         if col not in existing:
             conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} {col_type}")
@@ -478,6 +486,15 @@ def connect(read_only: bool = False) -> sqlite3.Connection:
     return conn
 
 
+def fetched_only_clause(conn: sqlite3.Connection) -> str:
+    """A WHERE condition that keeps only rows computed from a chain fetched in
+    their own minute. For studies: a carried row is a model, not an
+    observation. A database copied before the column existed has no carried
+    rows, so there the condition keeps everything."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(snapshots)")}
+    return "carried_age_sec IS NULL" if "carried_age_sec" in cols else "1 = 1"
+
+
 def insert_snapshot(
     conn: sqlite3.Connection,
     symbol: str,
@@ -494,8 +511,8 @@ def insert_snapshot(
              top_neg_strike, net_total, dte, gex_json,
              net_delta_0dte, projected_net_delta_close, hedge_pressure,
              rr_25d, call_vol, put_vol, call_prem, put_prem, atm_iv,
-             projected_flip)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             projected_flip, carried_age_sec)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             symbol,
@@ -518,6 +535,7 @@ def insert_snapshot(
             summary.get("put_prem"),
             summary.get("atm_iv"),
             summary.get("projected_flip"),
+            summary.get("carried_age_sec"),
         ),
     )
 
