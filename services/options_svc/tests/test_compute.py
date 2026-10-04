@@ -101,10 +101,18 @@ def test_assign_ids_preserves_existing():
     assert compute.assign_ids([{"symbol": "MU", "id": "keep"}], "MU")[0]["id"] == "keep"
 
 
-def _swing_chain(exp_str="2026-07-15", dte=15):
+def _swing_chain(exp_str=None, dte=15):
     """A minimal multi-strategy chain: a few call + put strikes (each with the
     greeks ``strategy_scanner.extract_options`` needs) within the DTE window so
-    ``build_directional`` / ``build_debit_verticals`` produce real signals."""
+    ``build_directional`` / ``build_debit_verticals`` produce real signals.
+
+    The expiry is ``dte`` days from TODAY. It was the literal "2026-07-15",
+    which drifted into the past: every row built from it was an expired
+    contract, and the Finder's probability of profit - which reads the row's
+    own expiry on the clock since AC-11 - rightly scored it as one."""
+    if exp_str is None:
+        import datetime as _dtm
+        exp_str = (_dtm.date.today() + _dtm.timedelta(days=dte)).isoformat()
     def leg(delta, mark):
         return [{"delta": delta, "mark": mark, "bid": mark - 0.05, "ask": mark + 0.05,
                  "theta": -0.03, "vega": 0.10, "gamma": 0.01, "volatility": 22.0,
@@ -578,10 +586,16 @@ def test_the_finder_path_still_builds_curves_on_the_income_inputs(monkeypatch,
 def test_swing_scan_drops_weak_candidates_across_every_family(monkeypatch):
     """The cut spans ALL families, not just DIRECTIONAL.
 
-    ``_swing_chain`` grades its four DIRECTIONAL candidates and the adapted PCS
-    Weak (34.6-39.0) while BULL_CALL/BEAR_PUT grade Good (66.9-74.3) — so this
-    fixture proves BOTH halves at once: the Weak rows are gone (incl. a VERTICAL
-    one, which a directional-only cut would have kept) and the Good rows remain.
+    ``_swing_chain`` grades its two SHORT directional candidates and the adapted
+    PCS below the bar (34.6-39.0) while the two long options and BULL_CALL /
+    BEAR_PUT grade Good (66.4-76.8) — so this fixture proves BOTH halves at
+    once: the weak rows are gone (incl. a VERTICAL one, which a directional-only
+    cut would have kept) and the Good rows remain.
+
+    (Until 2026-10-04 the two LONG options were listed as Weak here. That was
+    the fixture, not the model: its expiry was a fixed date already in the past,
+    so a long option had half a day to get into profit. The fixture now expires
+    15 days out, as its chain key always said.)
     """
     _swing_scan_market_state_env(monkeypatch)
     # Measures the original three groups; the all-groups default is covered by the new tests.
@@ -590,7 +604,11 @@ def test_swing_scan_drops_weak_candidates_across_every_family(monkeypatch):
 
     # Non-vacuity: something survived, so an "all Weak dropped" pass isn't free.
     assert out["signals"], "the cut emptied a fixture that has Good candidates"
-    assert {s["type"] for s in out["signals"]} == {"BULL_CALL", "BEAR_PUT"}
+    assert {s["type"] for s in out["signals"]} == {"BULL_CALL", "BEAR_PUT",
+                                                   "LONG_CALL", "LONG_PUT"}
+    # A DIRECTIONAL row is cut too, so the survivors are not "everything
+    # directional".
+    assert not any(s["type"] in ("SHORT_PUT", "SHORT_CALL") for s in out["signals"])
     for s in out["signals"]:
         assert s["grade"] != "Weak"
         assert s["composite_score"] >= compute.SWING_MIN_SCORE
@@ -605,9 +623,11 @@ def test_swing_scan_reports_how_many_it_dropped(monkeypatch):
     # Measures the original three groups; the all-groups default is covered by the new tests.
     out = compute.swing_scan("SPY", 5, 30, -0.20, -0.10, 0.10, 0.20, 0.10,
                              families=["DIRECTIONAL", "VERTICAL", "NEUTRAL"])
-    # 4 directional + 1 adapted PCS graded Weak; BULL_CALL/BEAR_PUT survive.
-    assert out["filtered_out"] == 5
-    assert len(out["signals"]) == 2
+    # The two short directionals + the adapted PCS are below the bar; the two
+    # long options and BULL_CALL/BEAR_PUT survive (see the test above for why
+    # this read 5 and 2 while the fixture's expiry was in the past).
+    assert out["filtered_out"] == 3
+    assert len(out["signals"]) == 4
 
 
 def test_swing_scan_cut_boundary_is_inclusive(monkeypatch):
@@ -1772,7 +1792,8 @@ def _patch_manage_seams(monkeypatch, sigs, reprice):
         # Real signature: close_signal_manually(signal_id, exit_value, exit_reason, ...)
         close_signal_manually=lambda sid, exit_value, exit_reason, **kw:
             calls["closed"].append((sid, exit_value, exit_reason)),
-        insert_mark=lambda mark, **kw: calls["marks"].append(mark)))
+        # The cycle writes its marks in ONE batch at the end (PF-08).
+        insert_marks=lambda marks, **kw: calls["marks"].extend(marks)))
     monkeypatch.setitem(_sys.modules, "signal_repricer", _types.SimpleNamespace(
         reprice_swing=lambda r, c: reprice[r["signal_id"]],
         intrinsic_value=lambda t, sp: (0.0, 0.0),
@@ -6581,3 +6602,36 @@ def test_big_delta_runs_only_when_enabled_is_literally_true(monkeypatch, enabled
                            chains={"SPY": _hchain(1000)})
     assert bool(seen) is runs
     compute.reset_hiro_memo()
+
+
+# --- PF-08: a manage cycle writes its marks once -------------------------------
+
+def test_a_manage_cycle_writes_all_its_marks_in_one_call(monkeypatch):
+    """One connection, one commit, for the whole cycle. It was a connection, a
+    ``PRAGMA table_info`` and a commit per open signal."""
+    sigs = [_manage_signal(signal_id=f"M{i}", be_armed=0) for i in range(1, 4)]
+    reps = {s["signal_id"]: _rep(unrealized_pnl=5.0, current_value=1.0) for s in sigs}
+    calls = _patch_manage_seams(monkeypatch, sigs, reps)
+    batches = []
+    import sys as _sys
+    _sys.modules["signal_db"].insert_marks = (
+        lambda marks, **kw: batches.append(list(marks)) or len(marks))
+    compute.run_captured_manage_cycle()
+    assert len(batches) == 1
+    assert [m["signal_id"] for m in batches[0]] == ["M1", "M2", "M3"]
+    assert calls["closed"] == []
+
+
+def test_a_failed_mark_write_does_not_cost_the_cycle_its_result(monkeypatch):
+    sigs = [_manage_signal(be_armed=0)]
+    calls = _patch_manage_seams(monkeypatch, sigs,
+                                {"M1": _rep(unrealized_pnl=60.0, current_value=0.40)})
+    import sys as _sys
+
+    def _boom(marks, **kw):
+        raise OSError("disk full")
+
+    _sys.modules["signal_db"].insert_marks = _boom
+    out = compute.run_captured_manage_cycle()
+    assert calls["armed"] == ["M1"]
+    assert out["armed"][0]["signal_id"] == "M1"

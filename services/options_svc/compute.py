@@ -3579,6 +3579,7 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
         return (signal_recommender.tp_frac_for(row.get("strategy"))
                 * signal_recommender.MULTIPLIER)
     closed, armed = [], []
+    pending_marks = []
     for r in sigs:
         sid = r.get("signal_id")
         try:
@@ -3643,7 +3644,7 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
                                else None))
             if not mark:
                 continue
-            signal_db.insert_mark(mark)
+            pending_marks.append(mark)
 
             # Arm break-even the first time pnl reaches +50% of the credit.
             pnl = mark.get("unrealized_pnl")
@@ -3665,71 +3666,26 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
             log.exception("captured manage: signal %s degraded (skipped)", sid)
             continue
 
+    # The cycle's marks, in one transaction (audit PF-08). Nothing in the loop
+    # reads a mark written by this cycle: the peak is taken before the mark is
+    # built, and a close takes its exit value from the reprice. A failed write
+    # costs this cycle's marks and nothing else - the closes and the armed
+    # stops above are already booked.
+    if pending_marks:
+        try:
+            signal_db.insert_marks(pending_marks)
+        except Exception:  # noqa: BLE001
+            _degrade.degraded("options.captured_marks_write")
+
     return {"closed": closed, "armed": armed}
 
 
 # ── the captured score (Daily / Weekly / MTD) ────────────────────────────────
-# The score's inception. Nothing before this date is part of it: signal_outcomes
-# reaches back to 2026-06-15, from a period whose captures predate the
-# regular-hours recorder gate. The period windows never reach that far on their
-# own - this constant is what guarantees they cannot.
-CAPTURED_SCORE_EPOCH = _dt.date(2026, 9, 1)
-
-
-def captured_score_window(today):
-    """``(lo, hi)`` INCLUSIVE dates the score must read to fill Daily/Weekly/MTD.
-
-    The earlier of the WEEK start and the MONTH start - **not** month-to-date.
-
-    Month-to-date looks like the right bound, because MTD is the widest row in
-    the table. It is wrong: on Thursday 1 October the WTD row starts Monday
-    28 September, before the month began. Bounding the read at the month start
-    would return no rows for 28-30 September and the weekly row would silently
-    under-count on the first days of every month, with nothing on screen to say
-    it had.
-
-    Floored at ``CAPTURED_SCORE_EPOCH``. The width is also what bounds the
-    payload - at most about five weeks of closes.
-    """
-    month_start = today.replace(day=1)
-    week_start = today - _dt.timedelta(days=today.weekday())      # Monday
-    return max(min(month_start, week_start), CAPTURED_SCORE_EPOCH), today
-
-
-def captured_perf_rows(raw):
-    """Outcome rows -> the shape ``eod.normalize_trades(kind="captured")`` reads.
-
-    ``entry_credit_total`` is ``entry_credit * 100``: ONE contract, matching
-    ``close_signal_manually``'s ``(entry_credit - exit_value) * 100``. A captured
-    signal is never sized, so one contract is the only basis either number has -
-    and they must share it, or the two figures on one row describe different
-    position sizes.
-
-    Total over a malformed row. This feeds a nightly report, and one bad row must
-    not cost the whole section.
-    """
-    out = []
-    for r in raw or []:
-        if not isinstance(r, dict):
-            continue
-        credit = _num(r.get("entry_credit"))
-        close_ts = r.get("close_ts") or r.get("close_date")
-        out.append({
-            "symbol": r.get("symbol"),
-            "strategy": r.get("strategy"),
-            "trade_type": r.get("scanner_type"),
-            # DERIVED, never hardcoded: an OPEN signal is a legitimate row
-            # here (see ``captured_performance``), and it is the one that makes
-            # the report's "Opened" column right.
-            "status": "CLOSED" if close_ts else "OPEN",
-            "first_seen_ts": r.get("first_seen_ts"),
-            "close_ts": close_ts,
-            "realized_pnl": _num(r.get("realized_pnl")),
-            "entry_credit_total": (round(credit * 100.0, 2)
-                                   if credit is not None else None),
-            "exit_reason": r.get("exit_reason"),
-        })
-    return out
+# The window and the row shape live in ``captured_score`` (pure; moved out of
+# this module 2026-10-04 to hold its size ceiling). Re-exported for callers.
+from services.options_svc.captured_score import (  # noqa: E402,F401
+    CAPTURED_SCORE_EPOCH, captured_perf_rows, captured_score_window,
+)
 
 
 def captured_performance() -> dict:

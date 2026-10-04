@@ -107,7 +107,7 @@ def captured(monkeypatch):
         get_open_signals_with_latest_mark=lambda: state["signals"],
         set_be_armed=lambda sid, **kw: calls["armed"].append(sid),
         close_signal_manually=_close,
-        insert_mark=lambda mark, **kw: calls["marks"].append(mark),
+        insert_marks=lambda marks, **kw: calls["marks"].extend(marks),
         peak_unrealized=lambda sid: None))
     monkeypatch.setattr(signal_repricer, "reprice_swing", _reprice)
     monkeypatch.setattr(signal_repricer, "clear_chain_cache", lambda: None)

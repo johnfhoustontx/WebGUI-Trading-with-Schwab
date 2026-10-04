@@ -594,3 +594,89 @@ def test_get_outcomes_in_range_is_inclusive_at_both_ends(tmp_path):
         "2026-09-04", "2026-09-05", db_path=db_path) == []
     assert signal_db.get_outcomes_in_range(
         "2026-09-01", "2026-09-02", db_path=db_path) == []
+
+
+# --- PF-08: the latest-mark lookup is indexed, and a cycle's marks are one write --
+
+def _plan(conn, sql, args=()):
+    return " | ".join(str(r[-1]) for r in conn.execute("EXPLAIN QUERY PLAN " + sql, args))
+
+
+def test_the_latest_mark_lookup_uses_one_index_and_no_sort(tmp_path):
+    """``WHERE signal_id = ? ORDER BY mark_ts DESC LIMIT 1`` runs once per open
+    signal on every read of the board. On the single-column index it fetched
+    every mark of the signal and sorted them (280 ms on 640,000 rows)."""
+    db = tmp_path / "signals.db"
+    conn = signal_db.connect(db)
+    try:
+        plan = _plan(conn, "SELECT mark_id FROM signal_marks WHERE signal_id = ? "
+                           "ORDER BY mark_ts DESC LIMIT 1", ("a1",))
+    finally:
+        conn.close()
+    assert "idx_marks_signal_ts" in plan
+    assert "TEMP B-TREE" not in plan.upper()
+
+
+def test_an_existing_database_gains_the_index_and_loses_the_redundant_one(tmp_path):
+    import sqlite3
+    db = tmp_path / "old.db"
+    signal_db.connect(db).close()                       # full schema
+    raw = sqlite3.connect(db)
+    raw.execute("DROP INDEX IF EXISTS idx_marks_signal_ts")
+    raw.execute("CREATE INDEX IF NOT EXISTS idx_marks_signal ON signal_marks(signal_id)")
+    raw.commit()
+    raw.close()
+    signal_db._initialised.discard(db.resolve())
+    conn = signal_db.connect(db)
+    try:
+        names = {r[1] for r in conn.execute("PRAGMA index_list(signal_marks)")}
+    finally:
+        conn.close()
+    assert "idx_marks_signal_ts" in names
+    # (signal_id) alone is a prefix of (signal_id, mark_ts): pure write cost.
+    assert "idx_marks_signal" not in names
+
+
+def _mark(sid, ts, pnl):
+    return {"signal_id": sid, "mark_ts": ts, "mark_date": ts[:10],
+            "current_value": 0.3, "unrealized_pnl": pnl,
+            "recommendation_code": "HOLD"}           # not a column: must be dropped
+
+
+def test_insert_marks_writes_every_row(tmp_path):
+    db = tmp_path / "signals.db"
+    signal_db.insert_signal(_sample_signal_row(dedup_key="k1"), db_path=db)
+    n = signal_db.insert_marks(
+        [_mark("a1", "2026-04-15T10:00:00-05:00", 10.0),
+         _mark("a1", "2026-04-15T11:00:00-05:00", 20.0)], db_path=db)
+    assert n == 2
+    conn = signal_db.connect(db)
+    try:
+        got = [r[0] for r in conn.execute(
+            "SELECT unrealized_pnl FROM signal_marks ORDER BY mark_ts")]
+    finally:
+        conn.close()
+    assert got == [10.0, 20.0]
+    assert signal_db.peak_unrealized("a1", db_path=db) == 20.0
+
+
+def test_insert_marks_is_one_transaction(tmp_path):
+    """A row that cannot be written takes the whole batch with it, which is
+    what one transaction means; nothing is left half-written."""
+    import pytest
+    db = tmp_path / "signals.db"
+    signal_db.insert_signal(_sample_signal_row(dedup_key="k1"), db_path=db)
+    bad = {"signal_id": None, "mark_ts": "2026-04-15T12:00:00-05:00"}   # NOT NULL
+    with pytest.raises(Exception):
+        signal_db.insert_marks(
+            [_mark("a1", "2026-04-15T10:00:00-05:00", 10.0), bad], db_path=db)
+    conn = signal_db.connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM signal_marks").fetchone()[0] == 0
+    finally:
+        conn.close()
+
+
+def test_insert_marks_with_nothing_to_write_opens_nothing(tmp_path):
+    assert signal_db.insert_marks([], db_path=tmp_path / "never.db") == 0
+    assert not (tmp_path / "never.db").exists()

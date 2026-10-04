@@ -108,7 +108,7 @@ def _drive_captured(monkeypatch, entry_credit=1.00):
            "scanner_type": "SWING", "entry_score": 60}
     monkeypatch.setattr(signal_db, "get_open_signals_with_latest_mark",
                         lambda *a, **k: [dict(row)])
-    monkeypatch.setattr(signal_db, "insert_mark", lambda *a, **k: None)
+    monkeypatch.setattr(signal_db, "insert_marks", lambda *a, **k: 0)
     monkeypatch.setattr(signal_db, "set_be_armed", lambda *a, **k: None)
     monkeypatch.setattr(signal_repricer, "reprice_swing",
                         lambda *a, **k: {"unrealized_pnl": 40.0,

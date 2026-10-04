@@ -59,7 +59,13 @@ CREATE TABLE IF NOT EXISTS signal_marks (
     FOREIGN KEY (signal_id) REFERENCES signals(signal_id)
 );
 CREATE INDEX IF NOT EXISTS idx_marks_date ON signal_marks(mark_date);
-CREATE INDEX IF NOT EXISTS idx_marks_signal ON signal_marks(signal_id);
+-- The latest-mark lookup (WHERE signal_id = ? ORDER BY mark_ts DESC LIMIT 1)
+-- runs once per open signal on every read of the board. On (signal_id) alone it
+-- fetched every mark the signal has and sorted them: 280 ms on 640,000 rows
+-- against 0.1 ms with this (audit PF-08). It also serves every plain
+-- signal_id lookup, which is why the single-column index is dropped below.
+CREATE INDEX IF NOT EXISTS idx_marks_signal_ts ON signal_marks(signal_id, mark_ts);
+DROP INDEX IF EXISTS idx_marks_signal;
 
 CREATE TABLE IF NOT EXISTS signal_outcomes (
     signal_id TEXT PRIMARY KEY,
@@ -305,6 +311,33 @@ def insert_mark(mark_row, db_path=DEFAULT_DB_PATH):
             row,
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def insert_marks(mark_rows, db_path=DEFAULT_DB_PATH):
+    """Write a batch of marks in ONE transaction; returns how many.
+
+    A manage cycle marks every open signal. Writing them one call at a time was
+    a connection, a ``PRAGMA table_info`` and a commit (an fsync) per signal.
+    All or nothing: a row that cannot be written rolls the batch back and
+    raises. Unknown keys are dropped per row, as ``insert_mark`` does. An empty
+    batch opens no connection."""
+    rows = list(mark_rows or [])
+    if not rows:
+        return 0
+    conn = connect(db_path)
+    try:
+        valid = {row[1] for row in conn.execute("PRAGMA table_info(signal_marks)")}
+        with conn:                                   # commit, or roll back on error
+            for mark_row in rows:
+                row = {k: v for k, v in mark_row.items() if k in valid}
+                cols = ",".join(row.keys())
+                placeholders = ",".join(":" + k for k in row.keys())
+                conn.execute(
+                    f"INSERT INTO signal_marks ({cols}) VALUES ({placeholders})",
+                    row)
+        return len(rows)
     finally:
         conn.close()
 
