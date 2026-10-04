@@ -154,6 +154,22 @@ _REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "calc_rate", "dossier",
 SAFE_LATE = frozenset({"refresh_paper", "paper_reload", "captured_reload",
                        "calibration_refresh"})
 
+# Commands that run on ``cmd:options``'s SLOW lane (services/_scaffold.py): the
+# ones that take many seconds to minutes and that no follow-up command depends
+# on. A watchlist rescan is about three minutes of chain fetches, a whole-chain
+# Strategy Finder scan up to forty seconds, a Claude briefing longer. On the one
+# serial queue each of them held up every paper, reprice and rescue command
+# behind it, and a paper open that waited past 180 seconds was refused.
+#
+# Deliberately NOT here: anything that changes a paper book (those must never
+# wait on a scan), and the Calculator's and Simulator's loads, whose follow-up
+# math reads what they loaded and so must stay behind them on the same lane.
+# The two lanes run at the same time, which the paper books allow since every
+# writer takes ``paper_lock.BOOK_LOCK``.
+SLOW_LANE = frozenset({"rescan", "swing_scan", "gamma_analyze", "gamma_explain",
+                       "gamma_history", "calc_rate", "dossier",
+                       "x_post", "x_post_report"})
+
 
 def _market_state(bus):
     """The committed five-state market classifier (``cache:sentiment:composite``

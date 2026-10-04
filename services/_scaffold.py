@@ -254,11 +254,14 @@ async def _supervise_scheduler(
 
 
 async def _consume_loop(domain, bus, command_handler, poll_block_ms,
-                        late_ok=frozenset(), on_dropped=None) -> None:
+                        late_ok=frozenset(), on_dropped=None,
+                        slow_commands=frozenset()) -> None:
     """Drain the domain's own ``cmd:{domain}`` stream (see :func:`_consume_stream`),
-    refusing a replayed command unless its type is in ``late_ok``."""
+    refusing a replayed command unless its type is in ``late_ok``, and running
+    the command types in ``slow_commands`` on the stream's slow lane."""
     await _consume_stream(f"cmd:{domain}", f"{domain}-svc", bus, command_handler,
-                          poll_block_ms, late_ok=late_ok, on_dropped=on_dropped)
+                          poll_block_ms, late_ok=late_ok, on_dropped=on_dropped,
+                          slow_commands=slow_commands)
 
 
 def _tell_dropped(on_dropped, bus, command, why) -> None:
@@ -299,7 +302,8 @@ def _is_replay(command, late_ok) -> bool:
 
 
 async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
-                          late_ok=None, on_dropped=None) -> None:
+                          late_ok=None, on_dropped=None,
+                          slow_commands=frozenset()) -> None:
     """Drain ``stream`` forever, dispatching each command to the handler.
 
     Each iteration is wrapped so a bad command (or a transient bus error) can
@@ -321,20 +325,85 @@ async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
     the handler both run on it. They used to borrow the event loop's default
     pool, which every scheduler branch also uses: with that pool full of long
     jobs no stream was read at all (audit PF-03).
+
+    ``slow_commands`` — command types that run on a SECOND thread, the stream's
+    slow lane. They are still serial among themselves and in read order, but a
+    command of any other type no longer waits for them: a three-minute scan
+    held up every paper and rescue command behind it, and a paper open that
+    waited past its age limit was refused (audit PF-04). A slow command is
+    judged for age when its turn comes, not when it was read.
     """
     loop = asyncio.get_event_loop()
     own = ThreadPoolExecutor(max_workers=1, thread_name_prefix=stream)
+    slow = (ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"{stream}-slow")
+            if slow_commands else None)
+    waiting: set = set()          # slow-lane commands not finished yet
     try:
         await _consume_on(own, loop, stream, group, bus, command_handler,
-                          poll_block_ms, late_ok, on_dropped)
+                          poll_block_ms, late_ok, on_dropped,
+                          slow=slow, slow_commands=frozenset(slow_commands or ()),
+                          waiting=waiting)
     finally:
+        for task in list(waiting):
+            task.cancel()
         # Not waited for: a handler in mid-run finishes on its own thread.
         own.shutdown(wait=False, cancel_futures=True)
+        if slow is not None:
+            slow.shutdown(wait=False, cancel_futures=True)
+
+
+_REPLAYED = object()      # a lane's answer for "too old by the time its turn came"
+
+
+async def _run_command(lane, loop, stream, group, bus, command_handler, msg_id,
+                       command, late_ok, on_dropped) -> None:
+    """Run one command on ``lane`` and settle it: dropped as a replay, run, or
+    dead-lettered; acked in every case. Never raises but for cancellation.
+
+    The age check happens ON the lane, immediately before the handler: a
+    command that waited behind a long one is judged by how old it is when it
+    would actually run."""
+    def call():
+        if _is_replay(command, late_ok):
+            return _REPLAYED
+        return command_handler(bus, command)
+
+    try:
+        result = await loop.run_in_executor(lane, call)
+        if result is _REPLAYED:
+            # A consumer group starts at id 0, so a new group is handed the
+            # whole stream. A command this old is that history: not run, not a
+            # failure, acked below.
+            log.warning(
+                "dropped replayed command %r on %s: enqueued %.0fs ago "
+                "(limit %ds)", getattr(command, "type", None), stream,
+                _service_limits.age_seconds(command) or -1,
+                _service_limits.replay_max_sec())
+            _tell_dropped(on_dropped, bus, command, "expired")
+            return
+        if inspect.isawaitable(result):
+            await result
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 — one bad command must not kill the loop.
+        log.exception("command handler failed for %s", msg_id)
+        try:
+            bus.dead_letter(stream, {"data": command.to_json()}, "handler raised")
+        except Exception:  # noqa: BLE001
+            log.exception("dead-letter failed for %s", msg_id)
+    finally:
+        try:
+            bus.ack(stream, group, msg_id)
+        except Exception:  # noqa: BLE001
+            log.exception("ack failed for %s", msg_id)
 
 
 async def _consume_on(own, loop, stream, group, bus, command_handler,
-                      poll_block_ms, late_ok, on_dropped) -> None:
-    """:func:`_consume_stream`'s loop, on the stream's own thread ``own``."""
+                      poll_block_ms, late_ok, on_dropped, *, slow=None,
+                      slow_commands=frozenset(), waiting=None) -> None:
+    """:func:`_consume_stream`'s loop, on the stream's own thread ``own``.
+    A command whose type is in ``slow_commands`` is handed to the ``slow`` lane
+    and not waited for; ``waiting`` collects those still running."""
 
     # Recover a prior crash's un-acked PEL (off the event loop; never raises).
     try:
@@ -364,38 +433,17 @@ async def _consume_on(own, loop, stream, group, bus, command_handler,
                 ),
             )
             for msg_id, command in batch:
-                try:
-                    if _is_replay(command, late_ok):
-                        # A consumer group starts at id 0, so a new group is
-                        # handed the whole stream. A command this old is that
-                        # history: not run, not a failure, acked below.
-                        log.warning(
-                            "dropped replayed command %r on %s: enqueued %.0fs ago "
-                            "(limit %ds)", getattr(command, "type", None), stream,
-                            _service_limits.age_seconds(command) or -1,
-                            _service_limits.replay_max_sec())
-                        _tell_dropped(on_dropped, bus, command, "expired")
-                        continue
-                    result = await loop.run_in_executor(
-                        own, command_handler, bus, command
-                    )
-                    if inspect.isawaitable(result):
-                        await result
-                except asyncio.CancelledError:
-                    raise
-                except Exception:  # noqa: BLE001 — one bad command must not kill the loop.
-                    log.exception("command handler failed for %s", msg_id)
-                    try:
-                        bus.dead_letter(
-                            stream, {"data": command.to_json()}, "handler raised"
-                        )
-                    except Exception:  # noqa: BLE001
-                        log.exception("dead-letter failed for %s", msg_id)
-                finally:
-                    try:
-                        bus.ack(stream, group, msg_id)
-                    except Exception:  # noqa: BLE001
-                        log.exception("ack failed for %s", msg_id)
+                run = _run_command(
+                    slow if (slow is not None and getattr(command, "type", None)
+                             in slow_commands) else own,
+                    loop, stream, group, bus, command_handler, msg_id, command,
+                    late_ok, on_dropped)
+                if slow is not None and getattr(command, "type", None) in slow_commands:
+                    task = asyncio.create_task(run)
+                    waiting.add(task)
+                    task.add_done_callback(waiting.discard)
+                else:
+                    await run
         except asyncio.CancelledError:
             break
         except Exception:  # noqa: BLE001 — keep looping on any transient error.
@@ -431,6 +479,7 @@ def make_app(
     extra_consumers: tuple = (),
     late_ok=frozenset(),
     on_dropped=None,
+    slow_commands=frozenset(),
 ) -> FastAPI:
     """Build the domain FastAPI app (see module docstring).
 
@@ -453,6 +502,10 @@ def make_app(
       own stream that will never run: stranded by a restart (``"restart"``) or
       past the replay limit (``"expired"``). The service uses it to answer a
       page that is still waiting. It is not called for a handler that raised.
+    * ``slow_commands`` — command types on the domain's own stream that run on
+      its slow lane (see :func:`_consume_stream`): the ones that take many
+      seconds to minutes. Everything else runs on the fast lane and never waits
+      for them.
     """
     the_bus = bus  # resolved lazily in lifespan if None (honors pytest fake selection).
 
@@ -495,7 +548,8 @@ def make_app(
                 asyncio.create_task(
                     _consume_loop(domain, b, command_handler, poll_block_ms,
                                   late_ok=frozenset(late_ok or ()),
-                                  on_dropped=on_dropped)
+                                  on_dropped=on_dropped,
+                                  slow_commands=frozenset(slow_commands or ()))
                 )
             )
         for stream, handler in extra_consumers:

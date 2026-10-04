@@ -912,3 +912,121 @@ def test_the_shared_pool_is_the_configured_size(schedulers_enabled, monkeypatch)
         assert done.wait(3.0)
     assert seen["workers"] == 7
     assert seen["thread"].startswith("sizex-work")
+
+
+# --- a long command has a lane of its own on the service's queue (audit PF-04) -
+# ``cmd:options`` was one serial queue: a manual rescan or a Strategy Finder
+# scan held up every paper, reprice and rescue command behind it, and a
+# ``paper_create`` that waited more than 180 seconds was refused as stale.
+
+def _lanes(domain, handler, **kw):
+    bus = Bus(fake=True)
+    app = make_app(domain, command_handler=handler, bus=bus, poll_block_ms=50,
+                   slow_commands=frozenset({"scan", "brief"}), **kw)
+    return bus, app
+
+
+def test_a_long_command_does_not_hold_up_the_one_behind_it():
+    import threading
+    release, seen = threading.Event(), []
+
+    def handler(b, c):
+        if c.type == "scan":
+            release.wait(5.0)
+        seen.append(c.type)
+
+    bus, app = _lanes("lanex", handler)
+    bus.enqueue_command("cmd:lanex", {"type": "scan", "args": {}})
+    bus.enqueue_command("cmd:lanex", {"type": "paper_create", "args": {}})
+    with TestClient(app):
+        try:
+            assert _wait_for(lambda: seen == ["paper_create"], timeout=2.0), \
+                "the paper command waited behind the scan"
+        finally:
+            release.set()
+        assert _wait_for(lambda: seen == ["paper_create", "scan"])
+
+
+def test_long_commands_run_one_at_a_time_in_the_order_they_came():
+    import threading
+    running, overlap, order = [], [], []
+    gate = threading.Event()
+
+    def handler(b, c):
+        if c.type in ("scan", "brief"):
+            running.append(c.type)
+            if len(running) > 1:
+                overlap.append(tuple(running))
+            gate.wait(0.3)
+            order.append(c.args.get("n"))
+            running.remove(c.type)
+
+    bus, app = _lanes("orderx", handler)
+    for n, kind in enumerate(["scan", "brief", "scan"]):
+        bus.enqueue_command("cmd:orderx", {"type": kind, "args": {"n": n}})
+    with TestClient(app):
+        assert _wait_for(lambda: len(order) == 3, timeout=5.0)
+    assert order == [0, 1, 2] and overlap == []
+
+
+def test_a_long_command_that_raises_is_dead_lettered_and_acked():
+    def handler(b, c):
+        raise RuntimeError("scan failed")
+
+    bus, app = _lanes("slowdeadx", handler)
+    bus.enqueue_command("cmd:slowdeadx", {"type": "scan", "args": {}})
+    with TestClient(app):
+        assert _wait_for(lambda: bus._r.llen("cmd:slowdeadx:dead") == 1)
+        assert _wait_for(
+            lambda: bus._r.xpending("cmd:slowdeadx", "slowdeadx-svc")["pending"] == 0)
+
+
+def test_a_long_command_that_went_stale_waiting_for_its_lane_is_not_run(monkeypatch):
+    # Judged when its turn comes, not when it was read off the queue: a scan
+    # that waited behind another for longer than the limit is history by then.
+    import threading
+    from shared import service_limits
+    monkeypatch.setattr(service_limits, "replay_max_sec", lambda: 1)
+    ran, dropped, release = [], [], threading.Event()
+
+    def handler(b, c):
+        ran.append(c.args.get("n"))
+        if c.args.get("n") == 0:
+            release.wait(1.6)
+
+    bus, app = _lanes("stalex", handler,
+                      on_dropped=lambda b, c, why: dropped.append((c.args.get("n"), why)))
+    bus.enqueue_command("cmd:stalex", {"type": "scan", "args": {"n": 0}})
+    bus.enqueue_command("cmd:stalex", {"type": "scan", "args": {"n": 1}})
+    with TestClient(app):
+        assert _wait_for(lambda: dropped, timeout=5.0)
+        release.set()
+    assert ran == [0] and dropped == [(1, "expired")]
+    assert bus._r.llen("cmd:stalex:dead") == 0
+
+
+def test_the_two_lanes_are_two_threads():
+    import threading
+    names = {}
+    bus, app = _lanes("lanethreadx", lambda b, c: names.setdefault(
+        c.type, threading.current_thread().name))
+    bus.enqueue_command("cmd:lanethreadx", {"type": "scan", "args": {}})
+    bus.enqueue_command("cmd:lanethreadx", {"type": "paper_create", "args": {}})
+    with TestClient(app):
+        assert _wait_for(lambda: len(names) == 2)
+    assert names["scan"].startswith("cmd:lanethreadx-slow")
+    assert names["paper_create"].startswith("cmd:lanethreadx")
+    assert names["scan"] != names["paper_create"]
+
+
+def test_without_a_slow_set_every_command_stays_on_the_one_lane():
+    import threading
+    names = []
+    bus = Bus(fake=True)
+    app = make_app("onelanex", command_handler=lambda b, c: names.append(
+        threading.current_thread().name), bus=bus, poll_block_ms=50)
+    bus.enqueue_command("cmd:onelanex", {"type": "scan", "args": {}})
+    bus.enqueue_command("cmd:onelanex", {"type": "paper_create", "args": {}})
+    with TestClient(app):
+        assert _wait_for(lambda: len(names) == 2)
+    assert len(set(names)) == 1

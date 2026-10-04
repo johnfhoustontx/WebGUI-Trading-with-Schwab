@@ -41,6 +41,9 @@ app = make_app(
     command_handler=handlers.handle_command,
     late_ok=handlers.SAFE_LATE,
     on_dropped=handlers.command_dropped,
+    # The scans and the Claude briefings run on the queue's slow lane, so a
+    # paper, reprice or rescue command never waits minutes behind one.
+    slow_commands=handlers.SLOW_LANE,
     # The public Strategy Finder's requests, on their OWN stream and loop, so a
     # visitor's scan never queues ahead of (or behind) the owner's commands.
     # The Rescue form's requests get a third loop, so a slow rescue never holds
