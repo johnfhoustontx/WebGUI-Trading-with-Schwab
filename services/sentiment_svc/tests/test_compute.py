@@ -1190,3 +1190,125 @@ def test_zero_confidence_alone_is_no_reading():
     live["composite"]["aggregate_confidence"] = 0.0
     out = compute.derive_composite_extras(live, [], [])
     assert (out["size"], out["bias"], out["signal"]) == (None, None, None)
+
+
+# ── The Day gauge reads TODAY's session, and weights the daily frame (AC-41/42) ─
+
+def _sessions_15m(day_moves, bars_per_day=26, start=500.0):
+    """A 15-minute SPY frame of consecutive sessions. ``day_moves`` is each
+    session's open-to-close move as a fraction; within a session the price
+    walks that move in equal steps. Stamps are naive UTC, as the proxy client
+    returns them: 13:30-20:00 UTC is one 08:30-15:00 CT session."""
+    rows, price = [], start
+    days = pd.bdate_range("2026-06-01", periods=len(day_moves))
+    for day, move in zip(days, day_moves):
+        step = price * move / bars_per_day
+        for i in range(bars_per_day):
+            o, c = price + i * step, price + (i + 1) * step
+            rows.append({"open": o, "high": max(o, c) + 0.01, "low": min(o, c) - 0.01,
+                         "close": c, "volume": 1_000_000,
+                         "datetime": day + pd.Timedelta(hours=13, minutes=30 + 15 * i)})
+        price += price * move
+    return pd.DataFrame(rows)
+
+
+class _OneBadDaySchwab(_FakeBullSchwab):
+    """Nine sessions up 1% each, then TODAY down 3% from its open."""
+
+    def __init__(self, frame):
+        self._frame = frame
+
+    def get_intraday_history(self, symbol, minutes=15, days=1):
+        if symbol == "SPY":
+            return self._frame
+        return _bars(120, 100.0, 0.2)
+
+
+def _session_evidence(out):
+    (line,) = [e for e in out["evidence"] if e.startswith("session ")]
+    return float(line.split()[1])
+
+
+def test_session_structure_reads_todays_session_not_the_ten_day_frame():
+    """The audit's reproduction: a -3% day after nine up days scored +1.00,
+    because the "session" VWAP and opening range were taken over all ten days -
+    today's price is far above the first day's opening range and above a
+    ten-day VWAP. Today's own session is below both."""
+    frame = _sessions_15m([0.01] * 9 + [-0.03])
+    out = compute.compute_intraday_trend(_OneBadDaySchwab(frame))
+    assert _session_evidence(out) < 0
+
+
+def test_session_structure_is_handed_one_sessions_bars(monkeypatch):
+    seen = {}
+    real = compute.session_structure_mod.score_session_structure
+
+    def _spy(rows, *a, **k):
+        seen["n"] = len(rows)
+        return real(rows, *a, **k)
+
+    monkeypatch.setattr(compute.session_structure_mod, "score_session_structure", _spy)
+    compute.compute_intraday_trend(_OneBadDaySchwab(_sessions_15m([0.01] * 10)))
+    assert seen["n"] == 26
+
+
+def test_profile_shape_is_handed_one_sessions_bars(monkeypatch):
+    seen = {}
+    real = compute.profile_mod.classify_profile_shape
+
+    def _spy(rows, *a, **k):
+        seen["n"] = len(rows)
+        return real(rows, *a, **k)
+
+    monkeypatch.setattr(compute.profile_mod, "classify_profile_shape", _spy)
+    compute.compute_intraday_trend(_OneBadDaySchwab(_sessions_15m([0.01] * 10)))
+    assert seen["n"] == 26
+
+
+def test_a_session_with_fewer_than_six_bars_contributes_nothing(monkeypatch):
+    """Five 15-minute bars is 75 minutes: no opening range, no profile. Neither
+    scorer may be run on it - and it must not fall back to the ten-day frame."""
+    called = []
+    monkeypatch.setattr(compute.session_structure_mod, "score_session_structure",
+                        lambda rows, *a, **k: called.append(("session", len(rows)))
+                        or compute.session_structure_mod.SessionStructure(0.0, 0.0))
+    monkeypatch.setattr(compute.profile_mod, "classify_profile_shape",
+                        lambda rows, *a, **k: called.append(("profile", len(rows))))
+    frame = _sessions_15m([0.01] * 9 + [-0.03])
+    frame = frame.iloc[:9 * 26 + 5].reset_index(drop=True)   # today: 5 bars so far
+    out = compute.compute_intraday_trend(_OneBadDaySchwab(frame))
+    assert called == []
+    assert not any(e.startswith("session ") for e in out["evidence"])
+    assert not any(e.startswith("profile ") for e in out["evidence"])
+
+
+def test_the_daily_frame_reaches_ema_alignment_under_a_weighted_key(monkeypatch):
+    """The weight table is keyed 'daily' (3.0). The Day gauge passed its daily
+    frame as '1day', which the table did not know, so it was weighted 1.0 - the
+    same as the 5-minute frame."""
+    from shared.analysis_lib import config as lib_config
+    seen = {}
+    real = compute.technical.calculate_ema_alignment
+
+    def _spy(frames, price):
+        seen["keys"] = set(frames)
+        return real(frames, price)
+
+    monkeypatch.setattr(compute.technical, "calculate_ema_alignment", _spy)
+    compute.compute_intraday_trend(_FakeBullSchwab())
+    assert "daily" in seen["keys"]
+    assert seen["keys"] <= set(lib_config.TIMEFRAME_WEIGHTS)
+
+
+def test_the_structural_trend_passes_a_weighted_key_too(monkeypatch):
+    from shared.analysis_lib import config as lib_config
+    seen = {}
+    real = compute.technical.calculate_ema_alignment
+
+    def _spy(frames, price):
+        seen["keys"] = set(frames)
+        return real(frames, price)
+
+    monkeypatch.setattr(compute.technical, "calculate_ema_alignment", _spy)
+    compute._structural_trend(_bars(260, 400.0, 0.6), {"XLK": 1.0}, 1.0)
+    assert seen["keys"] <= set(lib_config.TIMEFRAME_WEIGHTS)

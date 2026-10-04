@@ -479,7 +479,11 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
             frames = {}
             for key, df in (("5min", _safe_intraday(schwab, "SPY", 5, 10)),
                             ("15min", _safe_intraday(schwab, "SPY", 15, 10)),
-                            ("1day", _safe_daily(schwab, "SPY", 12))):
+                            # ⚠ "daily", the key shared.analysis_lib.config's
+                            # TIMEFRAME_WEIGHTS knows (3.0). It was "1day" until
+                            # 2026-10-03, which the table did not know, so the
+                            # daily frame was weighted like the 5-minute one.
+                            ("daily", _safe_daily(schwab, "SPY", 12))):
                 if df is not None and len(df) >= 50:
                     frames[key] = df
             if not frames:
@@ -512,11 +516,9 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         #     clearing the OR) nudges the direction up. Defensive -> drops out.
         sess = session_structure_mod.SessionStructure(0.0, 0.0)
         try:
-            # Prefer the 15-min frame; DataFrame-in-``or`` raises, so branch by None.
-            sframe = frames.get("15min")
-            if sframe is None:
-                sframe = frames.get("5min")
-            if sframe is not None and len(sframe):
+            # TODAY's session only - see ``_session_frame``.
+            sframe = _session_frame(frames)
+            if sframe is not None:
                 srows = [{"high": float(r["high"]), "low": float(r["low"]),
                           "close": float(r["close"]), "volume": float(r["volume"])}
                          for _, r in sframe.iterrows()]
@@ -610,7 +612,7 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         #    (a) effort — SPY DAILY volume-vs-result confirmation (signed).
         effort_score, effort_conf = 0.0, 0.0
         try:
-            daily = frames.get("1day")
+            daily = frames.get("daily")
             if daily is not None and len(daily):
                 tail = daily.tail(30)
                 ohlcv = [{"open": float(r["open"]), "high": float(r["high"]),
@@ -626,7 +628,7 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         #         Sign already aligns with aggression (positive = no supply); NO flip.
         rej_score, rej_conf = 0.0, 0.0
         try:
-            daily = frames.get("1day")
+            daily = frames.get("daily")
             if daily is not None and len(daily):
                 tail = daily.tail(20)
                 ohlc = [{"open": float(r["open"]), "high": float(r["high"]),
@@ -696,10 +698,8 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         #        (rotational balance -> more likely Neutral, sharpening that state).
         prof_shape, prof_bal = None, 0.0
         try:
-            pframe = frames.get("15min")
-            if pframe is None:
-                pframe = frames.get("5min")
-            if pframe is not None and len(pframe):
+            pframe = _session_frame(frames)
+            if pframe is not None:
                 prows = [{"high": float(r["high"]), "low": float(r["low"]),
                           "close": float(r["close"]), "volume": float(r["volume"])}
                          for _, r in pframe.iterrows()]
@@ -839,6 +839,35 @@ def _fetch_spy_5m(schwab, now_ts):
     if bars is not None:
         _SPY_5M_CACHE.update(ts=now_ts, bars=bars, daily=daily)
     return bars, daily
+
+
+# Bars of TODAY's session before a session-scoped read means anything: one
+# opening range, which is ``score_session_structure``'s own ``or_bars``.
+SESSION_MIN_BARS = 6
+
+
+def _session_frame(frames):
+    """TODAY's bars of the 15-minute frame (else the 5-minute), or None.
+
+    The Day gauge's intraday frames hold TEN sessions - the EMA alignment needs
+    the history - but its session structure (VWAP hold, opening-range break) and
+    its volume profile describe ONE session. Handed the whole frame they took
+    the "opening range" from ten days ago and the VWAP over all ten: a -3% day
+    after nine up days scored +1.00, maximum bullish structure (audit AC-41).
+
+    None when there is no frame, when its bars carry no timestamps to tell the
+    sessions apart, or when today has fewer than ``SESSION_MIN_BARS`` bars. It
+    never falls back to the multi-day frame - that fallback is the defect.
+    """
+    frame = frames.get("15min")
+    if frame is None:
+        frame = frames.get("5min")
+    if frame is None or "datetime" not in getattr(frame, "columns", ()):
+        return None
+    session = _today_session(frame)
+    if session is None or len(session) < SESSION_MIN_BARS:
+        return None
+    return session
 
 
 def _today_session(frame):
@@ -1305,7 +1334,7 @@ def _structural_trend(spy_daily_df, sector_pcts, cyc_def_scale) -> dict:
     if spy_daily_df is None or len(spy_daily_df) < 50:
         price = intraday_trend.TrendSub(50.0, 0.0)
     else:
-        frames = {"1day": spy_daily_df}
+        frames = {"daily": spy_daily_df}
         price_now = float(spy_daily_df["close"].iloc[-1])
         align = technical.calculate_ema_alignment(frames, price_now)
         align_pct = float(align.get("alignment_percentage", 0.0))

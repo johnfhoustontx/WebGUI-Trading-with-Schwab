@@ -404,7 +404,15 @@ def calculate_ema_alignment(
             status = 'MIXED'
             score = 0
         
-        weight = TIMEFRAME_WEIGHTS.get(tf_name, 1.0)
+        # ⚠ An unknown key RAISES. It defaulted to 1.0 until 2026-10-03, which
+        # is how the sentiment service's daily frame - passed as "1day" where
+        # this table says "daily" - was weighted 1.0 instead of 3.0 for months
+        # with nothing to show for it. A caller's typo must not pick a weight.
+        if tf_name not in TIMEFRAME_WEIGHTS:
+            raise ValueError(
+                f"calculate_ema_alignment: unknown timeframe {tf_name!r}; "
+                f"expected one of {sorted(TIMEFRAME_WEIGHTS)}")
+        weight = TIMEFRAME_WEIGHTS[tf_name]
         weighted_sum += score * weight
         total_weight += weight
         
