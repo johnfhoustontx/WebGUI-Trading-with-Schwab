@@ -1714,7 +1714,7 @@ relocates it.
 | **`config/scanner.toml`** | selection floors — IV-rank minimums, per-VIX-regime credit floors, directional delta band, score cutoffs | `scanner_engine.py`, `signal_recorder.py`, `options_svc/compute.py` |
 | **`config/symbols.toml`** | the traded universe — GEX collection list, Net-Prem display groups, the BIG10 basket | `gex_collector.py`, `options_svc/net_premium.py`, `market_svc/symbols.py`, **and Tier-1 `webgui/pages/options/gamma.py`** |
 | **`config/sectors.toml`** | symbol → GICS sector, behind the paper engine's SECTOR cap. A file because nothing here derives a sector, and the workbook that existed covered 48 of 80 watchlist names | `shared/sectors.py`, read by `options-scanner/paper_concentration.py` |
-| **`config/marketdata.toml`** | the proxy's local market-data store — `mode` (`off` / `shadow` / `on`) and the age limits and size bounds for chains, quotes and daily bars — plus the autoscan's wide fetch (`[scan]`), the collector's tail interval and carry limits (`[collection]`) and the proxy's paper-trade tracker retry limits (`[tracker]`). ⚠ Read at CALL time through `shared/marketdata_config.py`, so a saved change needs **no restart** — the exception to trap (1) below | `schwab-proxy/market_store.py` (through `schwab_proxy`'s gateway), `options-scanner/scanner_engine.py`, `options_svc/compute.collection_tiers` (which hands the collector its tiers) |
+| **`config/marketdata.toml`** | the proxy's local market-data store — `mode` (`off` / `shadow` / `on`) and the age limits and size bounds for chains, quotes and daily bars — plus the autoscan's wide fetch (`[scan]`), the collector's tail interval and carry limits (`[collection]`) the proxy's paper-trade tracker retry limits (`[tracker]`) and the order its Schwab calls are sent in (`[limiter]`). ⚠ Read at CALL time through `shared/marketdata_config.py`, so a saved change needs **no restart** — the exception to trap (1) below | `schwab-proxy/market_store.py` (through `schwab_proxy`'s gateway), `options-scanner/scanner_engine.py`, `options_svc/compute.collection_tiers` (which hands the collector its tiers) |
 
 Plus **`config/sessions.toml` gained `[slots]`** — the scheduled Claude-analyze
 briefings, the thrice-daily action digest, the nightly momentum cascade, and the
@@ -1725,7 +1725,8 @@ Schwab or Claude call), and the once-daily **`income`** scan (08:52 CT, kept off
 cost; since 2026-09-14 that is more than one call per symbol — each adds an
 expiration-list call, and a symbol listing daily expiries needs several fetch
 runs), and **`paper_settle`** (15:05 CT — the paper books' expiry settlement;
-see "Expiry settlement has ONE rule"). They
+see "Expiry settlement has ONE rule"), and **`token_watch`** (07:30 CT, every
+day — a systemd timer that warns before the Schwab sign-in lapses). They
 are named clock marks, the same thing `[windows]` already models, and **each
 `analyze` slot is a paid Claude call** while `income` is the largest scheduled
 Schwab spend on that table, so it is the direct control on both.
@@ -2041,6 +2042,32 @@ kills the stack. The request rate is bounded only when `config/edge.toml`
 turns Caddy's page-load limit on — off by default, because it needs a custom
 Caddy build with no apt security updates (runbook "Edge rate limit").
 
+**A unit that ends up FAILED sends a push (2026-10-03).** `render_all` adds
+`OnFailure=trading-<env>-notify-failure@%n.service` to every generated
+`.service` in ONE place, so a unit added tomorrow alerts without anyone
+remembering. The template runs `tools/notify_failure.py`, which sends through
+the `system` push category (`shared/notify/system_alert.py`; a row in Settings →
+General) and repeats a still-failed unit at most every `[system]
+failure_repeat_hours` (`config/notify.toml`). It fires on the failed STATE: a
+service reaches it only once its restart budget is spent, a timer job (the
+backup, a report) on any non-zero exit. ⚠ A job that exits 0 without doing its
+work still tells nobody. `trading-<env>-token-watch.timer` runs daily, weekends
+included, and warns inside `[system] token_warn_hours` of the Schwab sign-in
+lapsing, off the proxy's `/health` `refresh_token_hours_left`; an answer it
+cannot read is reported, never taken as plenty of time. Dev sends none of this.
+
+**The nightly backup carries every gitignored file a restored checkout needs,
+and a test derives that list from `.gitignore`**: a new credential under
+`shared/` goes in `backup_local.EXTRA_FILES` or, with its reason, in
+`NOT_BACKED_UP`. The login store was missing until 2026-10-03. Kept: three
+dailies plus one generation from each of four earlier weeks (one earlier week
+offsite); a clean run writes `BACKUP_OK`, pruning runs after it, and the newest
+marked generation is never pruned. Restore with `tools/restore_backup.py`
+(stdlib only; it leaves existing files alone unless `--force` and
+integrity-checks each database) — runbook section 11. ⚠ It does not restore
+Redis, and it has been exercised by the test suite only, never against a
+production generation.
+
 ⚠ **`--user`, never system units.** That is what lets the Status page restart its
 own siblings with no polkit rule and no sudoers entry; a system-unit equivalent
 would mean handing root to a network-facing app. `loginctl enable-linger <user>`
@@ -2094,6 +2121,18 @@ the way in must not depend on the thing that broke. The proxy on `:8100` is
 (`proxy_public_url` in `env.local.toml`), never `PROXY_URL` — that is where the
 server reaches the proxy, and in the viewer's browser 127.0.0.1 is their own
 device. The Status page's Authorize button shipped that way and was dead.
+
+⚠ **The proxy's account routes fail CLOSED, and it has no order route
+(2026-10-03).** `/accounts*`, `/positions`, `/transactions` and `/passthrough`
+need `X-Proxy-Secret`, and with no `PROXY_SHARED_SECRET` configured they answer
+**503 naming the variable** rather than 200 (`require_account_secret`). The
+market-data routes stay open on loopback, as before. `/passthrough` forwards
+only `PASSTHROUGH_ENDPOINTS`, five market-data paths: it took any path, and
+`/../../trader/v1/...` normalised onto the brokerage API. `trader_request`
+raises on anything but GET — this app is paper-only, so a second Schwab verb is
+a decision, not an edit. A new caller of an account route sends the secret
+(`proxy_client._apply_secret`) and surfaces the proxy's `detail`, or a missing
+secret reads as "no positions".
 
 ⚠ **Never change any of these binds to `0.0.0.0`.** The login is a second control,
 not a replacement for the first — Caddy is the only thing that should ever talk to
@@ -2484,6 +2523,32 @@ stubs return `bytes | str` where `decode_responses=True` guarantees `str`. They
 are fixed with `cast()` **plus a comment stating the invariant**, never a blanket
 ignore.
 
+**The lint gate is enforced at commit (2026-10-03).** `tools/git-hooks/pre-commit`
+runs `tools/lint_gate.py --staged` (ruff's `E9,F63,F7,F82` over staged Python);
+`python tools/install_git_hooks.py` points `core.hooksPath` at it, once per
+clone, and every worktree shares it. `tools/tests/test_lint_gate.py` runs the
+gate over the whole tree, so a suite run catches what a skipped hook let
+through. The editor hook (`.claude/hooks/ruff_fix.py`) auto-fixes, then exits 2
+with whatever is left, and finds the venv from a worktree. ⚠ The gate was
+configured in three places and enforced in none until then: an undefined name
+sat on `main` for two weeks. ⚠ The hook script must stay LF (`.gitattributes`).
+
+**Three size ceilings can only be lowered.**
+`services/options_svc/tests/test_compute_module_shape.py` holds `compute.py`'s
+line count; `webgui/tests/test_render_size.py` holds the lines and
+nested-function count of `gamma.render`, `desk.render` and `calculator.render`.
+New service code goes in a sibling module — `options_svc/collection_tiers.py` is
+the pattern: it imports nothing from `compute`, and `compute` re-exports the
+names its own code and its tests use. New page code goes in a module-level
+builder that `render` calls and that reads no page state (the Desk's row
+builders take their glow class as an argument). ⚠ Tests patch `compute` by
+attribute name at roughly 495 sites. A moved function keeps its name on
+`compute` for code `compute` itself CALLS; state the moved function READS (a
+warned-once set, its logger) must be patched on the new module. ⚠ The Desk's
+source-reading tests read `render` plus the builders it calls as one source
+(`_painters_source`): a builder moved out of `render` goes on that list, or
+those guards stop seeing it.
+
 **Three cross-tier mirrors are now pinned by test, not discipline**
 (`shared/tests/test_cross_tier_mirrors.py`, which AST-parses the files and
 imports nothing, so it cannot itself trigger the `scoring` collision):
@@ -2745,9 +2810,18 @@ guard**: real books through the real publish and `create_paper_trade`, preview
 and Ledger compared line for line, sub-cent risk and the suggested-quantity
 step-down included. A change to either end that it does not cover is unguarded.
 
-⚠ **The read-book-then-insert is not atomic.** It is safe only because
-`options_svc` runs ONE consumer on `cmd:options` and processes a batch in order; a
-second consumer needs a lock around the check and the insert. Accepted limits:
+**Every mutation of either paper book runs under ONE lock,
+`paper_lock.BOOK_LOCK`** (re-entrant; the `@paper_lock.serialized` decorator).
+The scheduler's cycles and the command consumer are different executor threads,
+and until 2026-10-03 nothing serialized them — the read-book-then-insert above,
+or a rule close racing a Rescue apply. A function that writes `paper_positions`,
+the account row, `equity_lots` or the Ledger takes the decorator; an AST test
+(`test_paper_book_lock.py`) fails on a `compute` writer without it. ⚠ It covers
+ONE process: a second writer process needs a database-side guard. **A close is
+one transaction on a row that is still OPEN** (`close_position_and_settle`):
+`close_position` returns False for a row already closed and every caller stops
+there, where a second close used to overwrite the first's realized P&L.
+Accepted limits:
 **Delete all closed** on the Paper Ledger removes realized history, so equity —
 and the deployment cap — moves with it; an old open row with no usable max loss
 counts **$0** toward the risk sums (it still counts toward the position caps); and
@@ -3163,13 +3237,24 @@ strike ladder, and this block has shipped stale ones twice.
 
 ## What a replayed command may re-do
 
-**Two side-effectful commands are replay-guarded.** Consumer groups are created
-at id `0`, so a fresh group re-delivers the whole backlog — the documented
-incident where a first launch "burned a day's API budget in one go". The service
-already refused a stale `paper_create`; `rescue_apply` (which MUTATES the
-paper book, and whose own is-it-open + 15%-drift guards a fast replay passes) and
-`gamma_analyze` (a PAID Claude call) now share the same
-`STALE_OPEN_MAX_AGE_SEC` gate via `_is_stale_side_effect`.
+**Six side-effectful commands are replay-guarded, and the DISPATCHER applies
+the guard.** Consumer groups are created at id `0`, so a fresh group re-delivers
+the whole backlog — the documented incident where a first launch "burned a day's
+API budget in one go". `handlers._REPLAY_GUARDED` lists them — `rescue_apply`
+(MUTATES the paper book; its own is-it-open + 15%-drift guards pass a fast
+replay), `gamma_analyze` (a PAID Claude call), `calc_rate` and `dossier` (Schwab
+calls for a page that has moved on), `x_post` / `x_post_report` (a public post) —
+and `handle_command` refuses a listed command older than
+`STALE_OPEN_MAX_AGE_SEC` BEFORE its handler runs. ⚠ Until 2026-10-04 each branch
+had to call `_is_stale_side_effect` itself, and `calc_rate` was listed,
+documented as guarded and never checked. `paper_create` keeps its own check
+(`_is_stale_open`), because it must answer the page with a `stale` outcome.
+
+**`cmd:options` commands are a table.** One `_cmd_*` function per command,
+registered by name in `handlers._COMMANDS`; `handle_command` is the lookup, and
+its docstring is the API list, held equal to the table by two tests. Add a
+command by registering a function and adding its docstring line — never a branch
+in `handle_command`, which a test refuses.
 
 ⚠ **That is an age gate, not idempotency** — two genuinely FRESH duplicates still
 both run. It closes the replay case with machinery the service already trusts; a
@@ -3850,8 +3935,9 @@ real levers if a page feels sluggish or a service churns CPU/network. Audited
 - **`reprice_captured`** now clears the repricer chain cache first (was pricing captured
   marks + the 3×/day action-alert reprice off up-to-5-min-stale chains — a freshness fix).
 - **Proxy:** the stats counter uses **WAL + `synchronous=NORMAL`** (drops the per-call
-  fsync on the ~60-70 calls/min hot path), `_rate_limit` holds a dedicated **`_rate_lock`**
-  across its spacing (concurrent fan-outs no longer burst past 5 req/s → 429 risk), and the
+  fsync on the ~60-70 calls/min hot path), `_rate_limit` serializes its spacing (a dedicated lock
+  then, `rate_gate.RateGate` since 2026-10-04; concurrent fan-outs no longer burst
+  past 5 req/s → 429 risk), and the
   30 s reconcile logs INFO only on an actual change (else DEBUG).
 - **market_svc:** the deep-weekend poll throttles to 60 s
   (`WEEKEND_INTERVAL_SEC` — futures closed), and `read_sector_pcr` is **version-gated**
@@ -3904,6 +3990,19 @@ options_svc's own log. With `config/marketdata.toml` `scan.wide_fetch` on (it
 ships off) the autoscan makes ONE chain request per symbol in place of three,
 for every symbol not listed in `scan.wide_fetch_exclude`.
 
+**The one-minute poll's requests go FIRST (2026-10-04).** The collector marks
+its chain and price requests (`X-Priority`, passed only to a client whose
+`supports_priority` is literally `True`), and the proxy's `rate_gate.RateGate`
+sends a marked request ahead of waiting ordinary ones: 4 of every 5 calls while
+the poll is fetching (`config/marketdata.toml` `[limiter] priority_run`; 0 =
+arrival order, read per request). Measured before it: 22 collection slots lost
+over four sessions, 20 of them in the minute after a quarter-hour scan started.
+The total rate is unchanged, so this reorders a busy minute and makes no room
+for more chains — the rule above still stands. ⚠ The lane is the one-minute
+poll's alone: a second marked caller competes with it at the front. ⚠ The mark
+is a HEADER, never a request parameter, which would reach Schwab and change
+which stored chain matches.
+
 **The proxy can answer from memory, and six rules follow from it.**
 `schwab-proxy/market_store.py` keeps what the proxy fetched — chains, quotes,
 daily bars; memory only, empty after a restart — and `config/marketdata.toml`
@@ -3947,7 +4046,7 @@ what it WOULD have reused, `on` answers repeats locally. Design:
    all five views, and **not passed to `on_chain`**. So a new detector that reads
    volume must not assume one-minute data for watchlist-only symbols, and a new
    consumer that needs a minute-fresh chain for a symbol must make that symbol
-   core in `compute.collection_tiers`.
+   core in `compute.collection_tiers` (the code is `options_svc/collection_tiers.py`).
 6. **A changed store rule goes through `shadow` before `on`.** On daily bars,
    `shadow_hit_match` compares every bar EXCEPT today's during the session — the
    one bar a stored series can be stale on — so read **`shadow_moving_same` /

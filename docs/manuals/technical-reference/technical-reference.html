@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-03</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-04</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -873,6 +873,15 @@ poll sends 1.</p>
 <li>A fault in the store falls through to a plain fetch and is counted
   (<code>store_degrades</code> in <code>/stats/api_calls</code>).</li>
 </ul>
+<p><strong>The order calls are sent in.</strong> Every call to Schwab passes one gate, 0.2
+seconds after the one before it. The one-minute collection poll marks its chain
+and price requests, and the gate sends a marked request ahead of ordinary ones
+that are waiting: 4 of every 5 calls while the poll is fetching, then an
+ordinary one, so a scan or a page load is slowed and never stopped
+(<code>[limiter] priority_run</code> in <code>config/marketdata.toml</code>; 0 = arrival order).
+Measured before it, over four sessions: 22 one-minute collection slots lost, 20
+of them in the minute after a quarter-hour scan started. The rate is the same,
+so the lane changes who waits, not how many calls fit.</p>
 <p>A locally answered request skips the proxy's rate limiter and its per-day call
 counter, so the Schwab counts on <strong>Settings → General → API usage</strong> keep meaning
 "calls sent to Schwab". The row <strong>Answered locally today</strong> beside them counts the
@@ -3701,6 +3710,16 @@ firing just rewrites the previous trading day's report from the same stored minu
 </tr>
 </thead>
 <tbody>
+<tr>
+<td>Schwab sign-in check</td>
+<td><strong>07:30</strong>, every day (<code>[slots.token_watch]</code>)</td>
+<td><code>tools/token_watch.py</code> reads the proxy's <code>/health</code> and sends a Server alert when the sign-in has <code>[system] token_warn_hours</code> (48) or fewer left, has expired or been rejected, or cannot be read. A systemd timer.</td>
+</tr>
+<tr>
+<td>Failure alert</td>
+<td>when a unit ends up failed</td>
+<td>Every generated unit carries <code>OnFailure=</code>; <code>tools/notify_failure.py</code> sends a Server alert, at most once per <code>[system] failure_repeat_hours</code> (6) for a unit that stays failed. A service reaches it after its restart budget is spent; a timer job on any error exit.</td>
+</tr>
 <tr>
 <td>EOD report archive</td>
 <td><strong>15:15</strong> (<code>[slots.eod_report]</code>)</td>

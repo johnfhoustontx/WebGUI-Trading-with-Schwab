@@ -4,7 +4,66 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-03 (**The audit's three Critical and ten High Accuracy findings, fixed.**)
+**Last updated:** 2026-10-04 (**The audit's remaining High findings: eight fixed, two started.**)
+
+Source: [the audit scorecard](audits/2026-10-03-app-audit-scorecard.md). One
+commit per finding. Not yet promoted. **Before promoting, set
+`PROXY_SHARED_SECRET` on the server** (`docs/SECURITY.md` section 2): production
+has none, and the Portfolio page shows the proxy's locked message until it does.
+
+- **The proxy's account surface (SE-01, SE-02, SE-08, `88b6ebc`).** Measured on
+  prod: `GET /accounts` answered 200 with no secret. The account routes now
+  refuse everyone until a secret is set (503 naming the variable), then need
+  it (401). `POST /orders/{account_hash}`, which forwarded a real order and had
+  no caller, is deleted, and `trader_request` refuses anything but GET.
+  `/passthrough` forwards five named market-data endpoints; it took any path,
+  and `/../../trader/v1/...` reached the brokerage API. The Portfolio and Deep
+  Dive clients send the secret, which they never did.
+- **Paper books are serialized (AR-02, `95319de`).** One re-entrant lock,
+  `paper_lock.BOOK_LOCK`, around every mutation of the Account and the Ledger.
+  A close is one transaction on a row that is still OPEN; a second close is
+  refused, where it used to overwrite the first's realized P&L.
+- **Promote (AR-01, `1cd9a2d`).** The fetch, the fast-forward check and a
+  dry-run of a moved lock run before the stop. The previous commit is recorded,
+  a failure after the stop rolls back to it and re-probes, and the probe covers
+  all eight processes. `--rollback` and `--restart` are new. The script is
+  tested under bash against a sandbox repository. The first promote that
+  carries it still runs the old script.
+- **The lint gate is enforced (CQ-02, `9e3b700`).** A commit hook, a test that
+  runs the gate over the tree, and an editor hook that reports what it could
+  not fix. CI on `main` had been red on every recent push for a different
+  reason: five import-probe tests that fail only on Linux. Fixed with it.
+- **Server alerts (AR-03, `007c63b`).** Every generated unit carries
+  `OnFailure=` to a notifier, a daily timer warns inside 48 hours of the Schwab
+  sign-in lapsing, and a failed backup alerts through the same path. New push
+  category `system`, a row in Settings → General.
+- **Backup and restore (AR-04, `dbfc3e5`).** The backup omitted the login
+  store, four credential files and the public site's generated ideas and
+  reports. It kept three dailies and pruned before it knew the run had worked.
+  It now carries them, keeps four weekly generations as well, prunes after the
+  result and never removes the newest clean generation. `tools/restore_backup.py`
+  restores a generation; the suite backs up and restores a checkout on every
+  run. Not yet run against a real production generation.
+- **The collection poll goes first (PF-02, `427ae50`, `dfe84d1`).** Measured on
+  prod over four sessions: 22 one-minute collection slots lost, 20 in the
+  minute after a quarter-hour scan started. The proxy's limiter is now a gate
+  with a priority lane, and the collector's requests use it: 4 of every 5 calls
+  while it is fetching. `[limiter] priority_run` in `config/marketdata.toml`.
+  Re-count the skip warnings after the first full session on it.
+- **Commands are a table (CQ-03, first slice, `86e65d1`).** `handle_command`
+  was a 370-line chain; it is a lookup over 41 registered functions. The replay
+  guard is applied by the dispatcher, which closes a real gap: `calc_rate` was
+  listed as guarded and never checked. The collector's tier logic left
+  `compute.py` for its own module, and a test holds a line ceiling on that file
+  (10,726 → 10,638). The rest of the split is still to do.
+- **The Desk's row builders left `render()` (CQ-04, first slice, `3ac2339`).**
+  1,057 → 781 lines, 32 → 22 nested functions, bodies carried over unchanged. A
+  test holds a ceiling on `gamma.render`, `desk.render` and `calculator.render`.
+  Gamma and the Calculator are still to do and need a browser run to verify.
+
+---
+
+**Prior —** 2026-10-03 (**The audit's three Critical and ten High Accuracy findings, fixed.**)
 
 Source: [the audit scorecard](audits/2026-10-03-app-audit-scorecard.md), rows
 AC-01 to AC-05, AC-07, AC-40 to AC-45 and AC-100. One commit per finding (two

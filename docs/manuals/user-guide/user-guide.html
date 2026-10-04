@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-03</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-04</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -152,7 +152,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#system">SYSTEM</a><ul>
-<li><a href="#system-status">System Status</a></li>
+<li><a href="#system-status">System Status</a><ul>
+<li><a href="#server-alerts-being-told-when-you-are-not-looking">Server alerts — being told when you are not looking</a></li>
+</ul>
+</li>
 <li><a href="#settings">Settings</a><ul>
 <li><a href="#configuration">Configuration</a></li>
 <li><a href="#general">General</a></li>
@@ -2992,6 +2995,39 @@ missing or expired <em>refresh</em> token needs <strong>Re-authorize</strong>.</
 web app. A service restarted while the gateway is down will start and then fail to
 fetch anything.</p>
 </blockquote>
+<h3 id="server-alerts-being-told-when-you-are-not-looking">Server alerts — being told when you are not looking</h3>
+<p>The health board only helps while it is open. Three things now reach your phone
+on their own, through the <strong>Server alerts</strong> row under Settings → General → Push
+notifications (Discord and Telegram, both ticked as shipped):</p>
+<table>
+<thead>
+<tr>
+<th>Alert</th>
+<th>When it is sent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>A part of the app is down and staying down</strong></td>
+<td>A service crashed and used up its automatic restarts. One crash that restarts cleanly sends nothing.</td>
+</tr>
+<tr>
+<td><strong>A scheduled job failed</strong></td>
+<td>The nightly backup, the end-of-day report or another timed job exited with an error.</td>
+</tr>
+<tr>
+<td><strong>The Schwab sign-in is about to run out</strong></td>
+<td>Checked every day at 07:30 CT, weekends included. Sent when 48 hours or fewer are left, when it has already expired or been rejected, and when the check cannot read the answer.</td>
+</tr>
+</tbody>
+</table>
+<p>The Schwab sign-in lasts 7 days and only you can renew it (<strong>Re-authorize</strong> on
+the gateway card). When it lapses all market data stops, so the warning repeats
+each morning until you sign in again. A part that stays down is reported again
+every 6 hours. Both numbers, and the time of the daily check, are under
+Settings → Configuration (<em>Push notifications</em> → <em>Server alerts</em>, and <em>Market
+hours &amp; schedules</em> → <em>Schwab sign-in check</em>).</p>
+<p>A job that finishes without an error but did nothing is not reported.</p>
 <h2 id="settings">Settings</h2>
 <p><strong>Route:</strong> <code>/settings</code> — a standalone item at the <strong>foot of the rail</strong>, with System
 Status and Stop All Services. It has three tabs: <strong>General</strong> (your app preferences),
@@ -3105,8 +3141,8 @@ have been read.</p>
 <li><strong>Push notifications</strong> — one row per kind of phone alert (new scanner signals,
   unusual options activity, premium crossover, gamma flip, hedging flow, the position action
   digest, the end-of-day summary, the Dealer Positioning briefings, the market
-  snapshot, the market state change and the hourly trade idea), with a
-  <strong>Discord</strong> and a <strong>Telegram</strong> checkbox on each. <strong>Ticked means that alert is
+  snapshot, the market state change, the hourly trade idea and <strong>Server
+  alerts</strong>), with a <strong>Discord</strong> and a <strong>Telegram</strong> checkbox on each. <strong>Ticked means that alert is
   sent there</strong>; untick it to stop it. A change applies to the very next alert —
   no restart. The hourly trade idea also has a <strong>Calendar</strong> checkbox (off until
   you tick it): see below. A ticked box still needs that channel set up in

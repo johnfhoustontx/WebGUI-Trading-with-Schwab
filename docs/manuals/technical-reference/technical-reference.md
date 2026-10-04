@@ -347,6 +347,16 @@ Rules that hold in every case:
 - A fault in the store falls through to a plain fetch and is counted
   (`store_degrades` in `/stats/api_calls`).
 
+**The order calls are sent in.** Every call to Schwab passes one gate, 0.2
+seconds after the one before it. The one-minute collection poll marks its chain
+and price requests, and the gate sends a marked request ahead of ordinary ones
+that are waiting: 4 of every 5 calls while the poll is fetching, then an
+ordinary one, so a scan or a page load is slowed and never stopped
+(`[limiter] priority_run` in `config/marketdata.toml`; 0 = arrival order).
+Measured before it, over four sessions: 22 one-minute collection slots lost, 20
+of them in the minute after a quarter-hour scan started. The rate is the same,
+so the lane changes who waits, not how many calls fit.
+
 A locally answered request skips the proxy's rate limiter and its per-day call
 counter, so the Schwab counts on **Settings → General → API usage** keep meaning
 "calls sent to Schwab". The row **Answered locally today** beside them counts the
@@ -2588,6 +2598,8 @@ firing just rewrites the previous trading day's report from the same stored minu
 
 | Job | Slot | What it does |
 |-----|------|--------------|
+| Schwab sign-in check | **07:30**, every day (`[slots.token_watch]`) | `tools/token_watch.py` reads the proxy's `/health` and sends a Server alert when the sign-in has `[system] token_warn_hours` (48) or fewer left, has expired or been rejected, or cannot be read. A systemd timer. |
+| Failure alert | when a unit ends up failed | Every generated unit carries `OnFailure=`; `tools/notify_failure.py` sends a Server alert, at most once per `[system] failure_repeat_hours` (6) for a unit that stays failed. A service reaches it after its restart budget is spent; a timer job on any error exit. |
 | EOD report archive | **15:15** (`[slots.eod_report]`) | Writes `webgui/data/eod/<date>/summary.html` + `detail.html` — the `/eod` **Generate** button, unattended. Reads Redis only: no Schwab call, no Claude call. Writes nothing if every cache read was empty. |
 | Marketing gallery recapture | **09:07** (`[slots.gallery_capture]`) | Re-photographs the private app for the public gallery. |
 | Flow-delta instrumentation | **16:00** (`[slots.flow_delta]`) | The only measurement of the `[big_delta]` / UOA thresholds. |

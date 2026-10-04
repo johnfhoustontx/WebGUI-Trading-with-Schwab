@@ -1495,6 +1495,11 @@ the last check ran — the page re-checks itself every 15 seconds, and
   the page you are looking at, and restarting the *Schwab gateway* while the
   market is open takes market data away from every service for a few seconds.
 - **Authorize** re-logs into Schwab.
+
+You do not have to keep this page open to find out something broke. A part that
+goes down and stays down, a scheduled job that fails (the nightly backup, for
+one) and a Schwab login with two days or less left each send a **Server alert**
+to your phone. The Schwab login is checked every morning at 07:30 CT.
 """,
     "/settings": """
 **Settings — the simple version**
@@ -1525,7 +1530,9 @@ The General tab controls the alert chimes, notifications and the ticker.
 - **Market-hours only / minimum score** — when the app is allowed to bother you.
 - **Push notifications** — a Discord and a Telegram checkbox for each kind of
   phone alert: ticked means it is sent there. Applies to the next alert, no
-  restart. The hourly trade idea also has **Calendar**, which creates a Google
+  restart. **Server alerts** is the row that tells you a part of the app is down,
+  a scheduled job failed or the Schwab login is about to expire; leave it on. The
+  hourly trade idea also has **Calendar**, which creates a Google
   Calendar event when it posts (one-time setup in the User Guide; the Calendar ID
   goes under Configuration → Push notifications).
 - **Ticker** — the scrolling market-summary bar at the bottom of every page.

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-03</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-04</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -664,7 +664,7 @@ skip-unchanged).</p>
 </tr>
 <tr>
 <td><code>calc_rate</code></td>
-<td><code>{request_id, symbol, structure, legs[]}</code> — <code>legs</code> in the Calculator's shape (<code>option_type</code>, <code>side</code>, <code>strike</code>, <code>expiry</code>, <code>qty</code>, <code>premium</code>); <code>structure</code> a Calculator template code or <code>"CUSTOM"</code>. Grades against <code>cache:options:calc_chain</code> (no chain fetch) with the Strategy Finder's <code>score_all</code> and <code>stamp_candidate</code>, without the quality cut or the volatility drop. Replay-guarded</td>
+<td>(a command older than 180 s is dropped, as for <code>dossier</code>) <code>{request_id, symbol, structure, legs[]}</code> — <code>legs</code> in the Calculator's shape (<code>option_type</code>, <code>side</code>, <code>strike</code>, <code>expiry</code>, <code>qty</code>, <code>premium</code>); <code>structure</code> a Calculator template code or <code>"CUSTOM"</code>. Grades against <code>cache:options:calc_chain</code> (no chain fetch) with the Strategy Finder's <code>score_all</code> and <code>stamp_candidate</code>, without the quality cut or the volatility drop. Replay-guarded</td>
 <td><code>cache:options:calc_rating</code> — <code>{request_id, symbol, legs, row, error}</code>: <code>row</code> is a Strategy Finder candidate plus <code>grade</code>, <code>composite_score</code>, the checklist stamps, <code>vol_gate_blocks</code> and <code>structure_known</code>; <code>error</code> is a sentence when <code>row</code> is None (no chain, another symbol's chain, a contract the chain lacks, a failure). Always written, so a request is never left unanswered</td>
 </tr>
 <tr>
@@ -1145,9 +1145,17 @@ Keeping them off <code>live.neuralstrike.co</code> is the job of the code that c
 <hr />
 <h1 id="schwab-proxy">Schwab Proxy</h1>
 <p><strong>Entry:</strong> <code>schwab-proxy/schwab_proxy.py</code>, port <strong>8100</strong>. Central token manager +
-HTTP gateway. GET market-data and Trader calls are rate-limited (~200 ms spacing)
-and retried up to 3× with backoff (0.25 / 0.5 / 1.0 s); order POSTs are <strong>single
-attempt</strong> (never duplicate a submitted order).</p>
+HTTP gateway. Market-data calls are spaced ~200 ms apart (5 a second) and
+retried up to 3× with backoff (0.25 / 0.5 / 1.0 s). Every call to Schwab is a
+GET: <strong>the proxy has no order route</strong>, and <code>trader_request</code> refuses any other
+method.</p>
+<p><strong>Request header: <code>X-Priority: 1</code></strong> on <code>/chains</code>, <code>/quotes</code> or <code>/quote</code> — send
+this request ahead of ordinary ones that are waiting for a slot. It is for the
+one-minute collection poll (<code>gex_collector</code>, through
+<code>get_option_chain(..., priority=True)</code> / <code>get_quotes(..., priority=True)</code>).
+After <code>[limiter] priority_run</code> marked requests (4 as shipped) have gone ahead of
+a waiting ordinary one, an ordinary one is sent; <code>0</code> switches the lane off. The
+rate is unchanged. A request answered from the local store never waits.</p>
 <h2 id="health-auth">Health &amp; auth</h2>
 <table>
 <thead>
@@ -1161,7 +1169,7 @@ attempt</strong> (never duplicate a submitted order).</p>
 <tr>
 <td><code>/health</code></td>
 <td>GET</td>
-<td><code>{status, has_token, token_expired, refresh_token_expired, token_file, timestamp}</code></td>
+<td><code>{status, has_token, token_expired, refresh_token_expired, refresh_token_rejected, refresh_token_expires_at, refresh_token_hours_left, account_routes, token_file, timestamp}</code>. <code>refresh_token_hours_left</code> is what the daily sign-in check reads (null when unknown). <code>account_routes</code> is <code>locked_no_secret</code> (every caller refused) or <code>secret_required</code></td>
 </tr>
 <tr>
 <td><code>/auth</code></td>
@@ -1218,7 +1226,7 @@ attempt</strong> (never duplicate a submitted order).</p>
 <tr>
 <td><code>/passthrough</code></td>
 <td><code>endpoint, params</code></td>
-<td>Generic marketdata fallback</td>
+<td>One of five market-data endpoints, matched exactly: <code>/expirationchain</code>, <code>/quotes</code>, <code>/instruments</code>, <code>/pricehistory</code>, <code>/chains</code>. Anything else is <strong>400</strong>. Needs <code>X-Proxy-Secret</code> when a secret is configured</td>
 </tr>
 </tbody>
 </table>
@@ -1320,6 +1328,12 @@ count calls <strong>sent to Schwab</strong> — a locally answered request is no
 </tbody>
 </table>
 <h2 id="trader-api">Trader API</h2>
+<p>Read-only, and closed unless the caller proves itself. Each route needs the
+header <strong><code>X-Proxy-Secret</code></strong> equal to <code>PROXY_SHARED_SECRET</code>. With no secret
+configured they answer <strong>503</strong> with a <code>detail</code> naming the variable (they refuse
+everyone, where before 2026-10-03 they answered everyone); with a wrong or
+missing header, <strong>401</strong>. <code>proxy_client._apply_secret(session)</code> attaches it. See
+<code>docs/SECURITY.md</code>.</p>
 <table>
 <thead>
 <tr>

@@ -2563,6 +2563,27 @@ A health board for the whole stack.
 > web app. A service restarted while the gateway is down will start and then fail to
 > fetch anything.
 
+### Server alerts — being told when you are not looking
+
+The health board only helps while it is open. Three things now reach your phone
+on their own, through the **Server alerts** row under Settings → General → Push
+notifications (Discord and Telegram, both ticked as shipped):
+
+| Alert | When it is sent |
+|---|---|
+| **A part of the app is down and staying down** | A service crashed and used up its automatic restarts. One crash that restarts cleanly sends nothing. |
+| **A scheduled job failed** | The nightly backup, the end-of-day report or another timed job exited with an error. |
+| **The Schwab sign-in is about to run out** | Checked every day at 07:30 CT, weekends included. Sent when 48 hours or fewer are left, when it has already expired or been rejected, and when the check cannot read the answer. |
+
+The Schwab sign-in lasts 7 days and only you can renew it (**Re-authorize** on
+the gateway card). When it lapses all market data stops, so the warning repeats
+each morning until you sign in again. A part that stays down is reported again
+every 6 hours. Both numbers, and the time of the daily check, are under
+Settings → Configuration (*Push notifications* → *Server alerts*, and *Market
+hours & schedules* → *Schwab sign-in check*).
+
+A job that finishes without an error but did nothing is not reported.
+
 ## Settings
 
 **Route:** `/settings` — a standalone item at the **foot of the rail**, with System
@@ -2642,8 +2663,8 @@ Preferences, all saved on your machine:
 - **Push notifications** — one row per kind of phone alert (new scanner signals,
   unusual options activity, premium crossover, gamma flip, hedging flow, the position action
   digest, the end-of-day summary, the Dealer Positioning briefings, the market
-  snapshot, the market state change and the hourly trade idea), with a
-  **Discord** and a **Telegram** checkbox on each. **Ticked means that alert is
+  snapshot, the market state change, the hourly trade idea and **Server
+  alerts**), with a **Discord** and a **Telegram** checkbox on each. **Ticked means that alert is
   sent there**; untick it to stop it. A change applies to the very next alert —
   no restart. The hourly trade idea also has a **Calendar** checkbox (off until
   you tick it): see below. A ticked box still needs that channel set up in

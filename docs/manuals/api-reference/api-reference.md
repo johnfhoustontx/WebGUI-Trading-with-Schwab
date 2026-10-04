@@ -255,7 +255,7 @@ skip-unchanged).
 | `calc_load` | `{symbol, lazy?, expiries?}` — `lazy` (the Calculator) lists every expiration via Schwab `/expirationchain` and fetches strikes for the nearest two plus `expiries`; without it (Rescue) the fixed today..+60-day fetch | `cache:options:calc_chain` (a lazy load adds `expirations`) |
 | `calc_load_expiry` | `{symbol, expiry}` | merges one expiry's strikes into `cache:options:calc_chain`, marked `added` (and `failed` if Schwab returned nothing). A click for another symbol or an unlisted expiry writes nothing |
 | `calc_compute` | `{strategy, spot, iv, rate, ivadj, qty, expiry, legs[], range_*}` (each leg carries its own `expiry`/`qty`; `strategy="CUSTOM"` or any non-PCS/CCS/IC/single code → generic numeric summary) | `cache:options:calc_result` |
-| `calc_rate` | `{request_id, symbol, structure, legs[]}` — `legs` in the Calculator's shape (`option_type`, `side`, `strike`, `expiry`, `qty`, `premium`); `structure` a Calculator template code or `"CUSTOM"`. Grades against `cache:options:calc_chain` (no chain fetch) with the Strategy Finder's `score_all` and `stamp_candidate`, without the quality cut or the volatility drop. Replay-guarded | `cache:options:calc_rating` — `{request_id, symbol, legs, row, error}`: `row` is a Strategy Finder candidate plus `grade`, `composite_score`, the checklist stamps, `vol_gate_blocks` and `structure_known`; `error` is a sentence when `row` is None (no chain, another symbol's chain, a contract the chain lacks, a failure). Always written, so a request is never left unanswered |
+| `calc_rate` | (a command older than 180 s is dropped, as for `dossier`) `{request_id, symbol, structure, legs[]}` — `legs` in the Calculator's shape (`option_type`, `side`, `strike`, `expiry`, `qty`, `premium`); `structure` a Calculator template code or `"CUSTOM"`. Grades against `cache:options:calc_chain` (no chain fetch) with the Strategy Finder's `score_all` and `stamp_candidate`, without the quality cut or the volatility drop. Replay-guarded | `cache:options:calc_rating` — `{request_id, symbol, legs, row, error}`: `row` is a Strategy Finder candidate plus `grade`, `composite_score`, the checklist stamps, `vol_gate_blocks` and `structure_known`; `error` is a sentence when `row` is None (no chain, another symbol's chain, a contract the chain lacks, a failure). Always written, so a request is never left unanswered |
 | `expected_move` | `{symbol, expiry, legs[], lookback}` | `cache:options:expected_move` |
 | `dossier` | `{symbol}` — cleaned by `shared.symbols.clean_symbol` (upper-cased, `[A-Z$][A-Z0-9$.]{0,7}`); anything it refuses is logged and writes nothing, because the symbol becomes part of the key name. Replay-guarded (a command older than 180 s is dropped). **Deduplicated** (`DOSSIER_DEDUP_SEC` = 60): if that symbol's dossier was written less than 60 s ago — measured on the envelope's own `ts`, the write time — the command is dropped and nothing is fetched or re-published. A recent success or `no_quote` blocks the fetch; a recent `fetch_failed` does **not** (a retry costs at most one quote call). An unreadable envelope counts as no recent dossier. Otherwise one fetch of **4 Schwab calls, 5 at most** (quote · GEX chain today..+7 d · 1-year daily price history · IV chain +20..+45 d · the IV analysis' own today..+60 d fallback when that window is empty); a `no_quote` or `fetch_failed` answer spends one | **`cache:options:dossier:<SYMBOL>`** (event `events:options:dossier:<SYMBOL>`), **TTL 900 s**, per symbol so two tabs never share a slot — `{symbol, error, fetched_at, spot, day_pct, flip, put_wall, call_wall, net_gex, iv_rank, current_iv, hv_current, earnings_status, earnings_date}`. Every key is always present; an absent reading is `null`, never 0. `fetched_at` is naive Central ISO. `current_iv` / `hv_current` are **percents** (48.5 = 48.5%); `iv_rank` is the scan's Vol Rank; `day_pct` is always `null` (no day-change parser is shared for a raw quote). `earnings_status` is three-valued: `upcoming` · `none_scheduled` · `not_listed` (the calendar has no data — not "no report"). Walls are assigned by side of spot, and both are `null` when `net_gex` is exactly `0.0` (the after-hours all-zero grid, whose walls would be an argmax tie-break); `flip` is kept either way. `error` is `null` on success, `"no_quote"` when Schwab **answered** and quoted nothing usable for the symbol (a typo — the other legs are skipped), or `"fetch_failed"` when the quote request itself failed (non-200 or raised: proxy down, timeout, token) — the ticker may be fine. One of the three later legs failing blanks only its own keys and records a degrade (`options.dossier_gex` · `_vol` · `_earnings`) |
 | `rescue` | `{position_id}` | `cache:options:rescue:<position_id>` |
@@ -547,15 +547,24 @@ Keeping them off `live.neuralstrike.co` is the job of the code that chooses the 
 # Schwab Proxy
 
 **Entry:** `schwab-proxy/schwab_proxy.py`, port **8100**. Central token manager +
-HTTP gateway. GET market-data and Trader calls are rate-limited (~200 ms spacing)
-and retried up to 3× with backoff (0.25 / 0.5 / 1.0 s); order POSTs are **single
-attempt** (never duplicate a submitted order).
+HTTP gateway. Market-data calls are spaced ~200 ms apart (5 a second) and
+retried up to 3× with backoff (0.25 / 0.5 / 1.0 s). Every call to Schwab is a
+GET: **the proxy has no order route**, and `trader_request` refuses any other
+method.
+
+**Request header: `X-Priority: 1`** on `/chains`, `/quotes` or `/quote` — send
+this request ahead of ordinary ones that are waiting for a slot. It is for the
+one-minute collection poll (`gex_collector`, through
+`get_option_chain(..., priority=True)` / `get_quotes(..., priority=True)`).
+After `[limiter] priority_run` marked requests (4 as shipped) have gone ahead of
+a waiting ordinary one, an ordinary one is sent; `0` switches the lane off. The
+rate is unchanged. A request answered from the local store never waits.
 
 ## Health & auth
 
 | Endpoint | Method | Returns |
 |----------|--------|---------|
-| `/health` | GET | `{status, has_token, token_expired, refresh_token_expired, token_file, timestamp}` |
+| `/health` | GET | `{status, has_token, token_expired, refresh_token_expired, refresh_token_rejected, refresh_token_expires_at, refresh_token_hours_left, account_routes, token_file, timestamp}`. `refresh_token_hours_left` is what the daily sign-in check reads (null when unknown). `account_routes` is `locked_no_secret` (every caller refused) or `secret_required` |
 | `/auth` | GET | HTML OAuth login page |
 | `/auth/callback` | GET | Exchanges the OAuth `code`/`url` for tokens |
 | `/stats/api_calls` | GET | `{today, last_7_days, last_30_days, since, store, store_degrades}` — calls sent to Schwab per day, plus today's request breakdown (see *Local market-data store* below) |
@@ -569,7 +578,7 @@ attempt** (never duplicate a submitted order).
 | `/chains` | `symbol, contractType, range, fromDate?, toDate?, strikeCount?, maxAge?` | Options chain |
 | `/pricehistory` | `symbol, periodType, period, frequencyType, frequency, needExtendedHoursData` | Price bars |
 | `/instruments` | `symbol, projection` (e.g. `fundamental`) | `{instruments:[{fundamental, symbol, description, ...}]}` |
-| `/passthrough` | `endpoint, params` | Generic marketdata fallback |
+| `/passthrough` | `endpoint, params` | One of five market-data endpoints, matched exactly: `/expirationchain`, `/quotes`, `/instruments`, `/pricehistory`, `/chains`. Anything else is **400**. Needs `X-Proxy-Secret` when a secret is configured |
 
 Each returns Schwab's JSON body as Schwab sent it. A failure is the upstream HTTP
 status with `{"detail": ...}`. A token that cannot be made valid (none, or the
@@ -637,6 +646,13 @@ count calls **sent to Schwab** — a locally answered request is not in them.
 | `store_degrades` | `{area: count}` — store faults since this process started that fell back to a plain fetch. Empty is normal. |
 
 ## Trader API
+
+Read-only, and closed unless the caller proves itself. Each route needs the
+header **`X-Proxy-Secret`** equal to `PROXY_SHARED_SECRET`. With no secret
+configured they answer **503** with a `detail` naming the variable (they refuse
+everyone, where before 2026-10-03 they answered everyone); with a wrong or
+missing header, **401**. `proxy_client._apply_secret(session)` attaches it. See
+`docs/SECURITY.md`.
 
 | Endpoint | Method | Returns |
 |----------|--------|---------|

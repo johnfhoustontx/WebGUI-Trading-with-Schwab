@@ -919,8 +919,8 @@ that is in neither `EXTRA_FILES` nor `NOT_BACKED_UP` fails the suite. The login
 store (`shared/webgui_auth.json`) was missing until 2026-10-03: a restore before
 that date produced an app nobody could sign in to.
 
-A failed backup now sends a **Server alert** to your phone (section "Alerts" in
-the User Guide); before 2026-10-03 the only sign was a missing date.
+A failed backup now sends a **Server alert** to your phone (User Guide, "Server
+alerts" under System Status); before 2026-10-03 the only sign was a missing date.
 
 ### Restoring
 
