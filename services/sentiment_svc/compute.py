@@ -579,17 +579,13 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
             sector = intraday_trend.TrendSub(50.0, 0.0)
 
         # 4) VIX context.
-        vix_change_pct = 0.0
+        # None when it cannot be read - never 0.0, which the scorer takes as a
+        # real "unchanged" (35.0 at confidence 0.8 where absence is confidence 0).
+        vix_change_pct = None
         try:
             vq = schwab.get_quotes(_VIX_SYMS) or {}
             vix = _last(schwab.get_quote("$VIX")) or 0.0
-            try:
-                vdf = _safe_daily(schwab, "$VIX", 1)
-                if vdf is not None and len(vdf) >= 2:
-                    prev = float(vdf["close"].iloc[-2])
-                    vix_change_pct = ((vix - prev) / prev * 100.0) if prev else 0.0
-            except Exception:  # noqa: BLE001
-                vix_change_pct = 0.0
+            vix_change_pct = _vix_day_change_pct(schwab, vix)
             v1d = _last(vq.get("$VIX1D")) or 0.0
             v9d = _last(vq.get("$VIX9D")) or 0.0
             vix_sub = intraday_trend.score_vix_context(
@@ -603,7 +599,10 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
         confs = {"price": price.confidence, "breadth": breadth.confidence,
                  "sector": sector.confidence, "vix": vix_sub.confidence}
         raw_score, agg = intraday_trend.blend_trend(scores, confs)
-        agg = round(agg * intraday_trend.vol_confidence_factor(vix_change_pct), 3)
+        # An unknown change damps nothing: the damper answers "did volatility
+        # spike", and no reading is not a spike. Its absence is already carried
+        # by the VIX term's own confidence above.
+        agg = round(agg * intraday_trend.vol_confidence_factor(vix_change_pct or 0.0), 3)
 
         # 6) SMOOTH the directional needle.
         smoothed = intraday_trend.ema_smooth(prev_smoothed, raw_score, span=3)
@@ -964,6 +963,27 @@ def _date_gap_days(earlier_iso, later_iso):
 def _local_date_iso():
     from datetime import datetime
     return datetime.now().date().isoformat()
+
+
+def _vix_day_change_pct(schwab, vix):
+    """``$VIX``'s change from the PRIOR SESSION's close, in percent, or None
+    when either number cannot be read. Never raises.
+
+    The prior close is found by DATE (``_prior_daily_close``). It was
+    ``iloc[-2]``, which is right only while the last daily row is today's
+    unfinished bar; off-hours the frame already ends on the prior session and
+    that reached two sessions back (audit AC-55)."""
+    try:
+        level = _as_finite(vix)
+        if level is None or level <= 0:
+            return None
+        frame = _safe_daily(schwab, "$VIX", 1)
+        prev = _prior_daily_close(frame, _local_date_iso()) if frame is not None else None
+        if prev is None:
+            return None
+        return (level - prev) / prev * 100.0
+    except Exception:  # noqa: BLE001 — a missing reading, not a zero
+        return None
 
 
 def _prior_daily_close(frame, today_iso):
