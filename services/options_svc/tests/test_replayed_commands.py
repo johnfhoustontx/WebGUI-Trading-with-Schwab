@@ -157,3 +157,59 @@ def test_the_dispatcher_is_a_lookup_not_a_chain():
     compares = [n for n in ast.walk(fn) if isinstance(n, ast.Compare)
                 and isinstance(n.left, ast.Attribute) and n.left.attr == "type"]
     assert compares == [], "handle_command compares command.type again"
+
+
+# --- AR-05: the destructive commands are guarded too --------------------------
+
+DESTRUCTIVE = ("paper_reset", "paper_close", "paper_delete", "paper_delete_closed",
+               "captured_close", "set_autoclose", "set_manual_paper_lifecycle")
+
+
+def test_every_destructive_command_is_replay_guarded():
+    assert set(DESTRUCTIVE) <= set(handlers._REPLAY_GUARDED)
+
+
+@pytest.mark.parametrize("cmd_type,args,target", [
+    ("paper_reset", {"starting_balance": 1.0}, "reset_paper_account"),
+    ("paper_close", {"trade_id": 1, "debit": 0.1}, "close_paper"),
+    ("paper_delete", {"trade_id": 1}, "delete_paper"),
+    ("paper_delete_closed", {}, "delete_closed_paper"),
+    ("captured_close", {"signal_id": "s1"}, "close_captured"),
+])
+def test_a_stale_destructive_command_changes_nothing(bus, monkeypatch, cmd_type,
+                                                     args, target):
+    fired = []
+    monkeypatch.setattr(handlers.compute, target,
+                        lambda *a, **k: fired.append(target))
+    handlers.handle_command(
+        bus, _aged(cmd_type, handlers.STALE_OPEN_MAX_AGE_SEC + 60, **args))
+    assert fired == [], f"a replayed {cmd_type} ran"
+
+
+def test_a_stale_toggle_does_not_overwrite_the_switch(bus):
+    bus.cache_set(handlers.CACHE_AUTOCLOSE_ENABLED, {"enabled": False})
+    handlers.handle_command(
+        bus, _aged("set_autoclose", handlers.STALE_OPEN_MAX_AGE_SEC + 60, enabled=True))
+    assert bus.cache_get(handlers.CACHE_AUTOCLOSE_ENABLED).payload == {"enabled": False}
+    handlers.handle_command(bus, _aged("set_autoclose", 1, enabled=True))
+    assert bus.cache_get(handlers.CACHE_AUTOCLOSE_ENABLED).payload == {"enabled": True}
+
+
+def test_the_commands_that_run_at_any_age_only_re_read_a_store():
+    assert handlers.SAFE_LATE == {"refresh_paper", "paper_reload",
+                                  "captured_reload", "calibration_refresh"}
+    assert handlers.SAFE_LATE <= set(handlers._COMMANDS)
+    assert not (handlers.SAFE_LATE & set(handlers._REPLAY_GUARDED))
+
+
+def test_the_side_effect_limit_comes_from_the_settings(monkeypatch):
+    import importlib
+    from shared import command_limits
+    monkeypatch.setattr(command_limits, "side_effect_max_sec", lambda: 77)
+    try:
+        importlib.reload(handlers)
+        assert handlers.STALE_OPEN_MAX_AGE_SEC == 77
+    finally:
+        monkeypatch.undo()
+        importlib.reload(handlers)
+    assert handlers.STALE_OPEN_MAX_AGE_SEC == command_limits.side_effect_max_sec()

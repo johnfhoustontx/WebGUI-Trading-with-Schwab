@@ -1499,7 +1499,36 @@ _MARKETDATA = ConfigFile(
     ),
 )
 
-FILES = (_SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS, _MOMENTUM,
+# ─────────────────────────────────────────────────────────────────────────────
+# Queued commands — config/commands.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_COMMANDS = ConfigFile(
+    name="commands.toml", title="Queued commands", icon="hourglass_bottom",
+    summary="How long a click may wait in a service's queue before the service "
+            "refuses to act on it.",
+    restart=(OPTIONS, SENTIMENT, TRADE, MARKET, NEWS),
+    caution="These stop a restarted service from re-running its queue's history. "
+            "Longer limits let stale clicks through; shorter ones drop a click "
+            "that waited behind a long scan.",
+    sections=(
+        Section("How old a command may be", "", (
+            Field("age.side_effect_max_sec",
+                  "Commands that change a paper book, cost money or post in public",
+                  "Opening, closing or deleting a paper trade, resetting the paper "
+                  "account, applying a Rescue adjustment, the auto-close switches, "
+                  "a Claude briefing, a post to X. Older than this, the command "
+                  "is refused.",
+                  kind="int", unit="seconds", min=30, max=3600, step=30),
+            Field("age.replay_max_sec", "Every other command",
+                  "Older than this, a command is treated as the queue's history "
+                  "being replayed after a restart and is not run. Commands that "
+                  "only re-read a local store run at any age.",
+                  kind="int", unit="seconds", min=60, max=86400, step=60),
+        )),
+    ),
+)
+
+FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS, _MOMENTUM,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _SWING_MODEL, _COMMISSIONS, _MARKETDATA, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

@@ -54,6 +54,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from repo_paths import ENV_FLAGS  # noqa: E402
 from services import _degrade, _heartbeat  # noqa: E402
+from shared import command_limits as _command_limits  # noqa: E402
 from shared.bus import Bus  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -207,13 +208,32 @@ async def _supervise_scheduler(
             raise
 
 
-async def _consume_loop(domain, bus, command_handler, poll_block_ms) -> None:
-    """Drain the domain's own ``cmd:{domain}`` stream (see :func:`_consume_stream`)."""
+async def _consume_loop(domain, bus, command_handler, poll_block_ms,
+                        late_ok=frozenset()) -> None:
+    """Drain the domain's own ``cmd:{domain}`` stream (see :func:`_consume_stream`),
+    refusing a replayed command unless its type is in ``late_ok``."""
     await _consume_stream(f"cmd:{domain}", f"{domain}-svc", bus, command_handler,
-                          poll_block_ms)
+                          poll_block_ms, late_ok=late_ok)
 
 
-async def _consume_stream(stream, group, bus, command_handler, poll_block_ms) -> None:
+def _is_replay(command, late_ok) -> bool:
+    """Whether ``command`` is the stream's history rather than a waiting click.
+
+    ``late_ok`` None switches the check off (the public streams, which answer an
+    expired request themselves). Never raises: a fault here must run the command
+    as before, not drop it."""
+    if late_ok is None:
+        return False
+    try:
+        if getattr(command, "type", None) in late_ok:
+            return False
+        return _command_limits.older_than(command, _command_limits.replay_max_sec())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _consume_stream(stream, group, bus, command_handler, poll_block_ms,
+                          late_ok=None) -> None:
     """Drain ``stream`` forever, dispatching each command to the handler.
 
     Each iteration is wrapped so a bad command (or a transient bus error) can
@@ -259,6 +279,16 @@ async def _consume_stream(stream, group, bus, command_handler, poll_block_ms) ->
             )
             for msg_id, command in batch:
                 try:
+                    if _is_replay(command, late_ok):
+                        # A consumer group starts at id 0, so a new group is
+                        # handed the whole stream. A command this old is that
+                        # history: not run, not a failure, acked below.
+                        log.warning(
+                            "dropped replayed command %r on %s: enqueued %.0fs ago "
+                            "(limit %ds)", getattr(command, "type", None), stream,
+                            _command_limits.age_seconds(command) or -1,
+                            _command_limits.replay_max_sec())
+                        continue
                     result = await loop.run_in_executor(
                         None, command_handler, bus, command
                     )
@@ -312,6 +342,7 @@ def make_app(
     scheduler_restart_backoff_s: float = 3.0,
     scheduler_max_restarts: int = 10,
     extra_consumers: tuple = (),
+    late_ok=frozenset(),
 ) -> FastAPI:
     """Build the domain FastAPI app (see module docstring).
 
@@ -325,6 +356,11 @@ def make_app(
       (``{domain}-svc``). A stream with its own loop cannot be delayed by the
       domain stream's handlers, nor delay them - the reason the public
       Strategy Finder's scans are not on ``cmd:options``.
+    * ``late_ok`` — command types on the domain's OWN stream that may run at any
+      age (a re-read of a local store). Every other command older than
+      ``[age] replay_max_sec`` (config/commands.toml) is dropped: it is the
+      stream's history, replayed to a new consumer group. Extra streams are not
+      checked here; they answer an expired request themselves.
     """
     the_bus = bus  # resolved lazily in lifespan if None (honors pytest fake selection).
 
@@ -359,7 +395,8 @@ def make_app(
         if command_handler is not None:
             tasks.append(
                 asyncio.create_task(
-                    _consume_loop(domain, b, command_handler, poll_block_ms)
+                    _consume_loop(domain, b, command_handler, poll_block_ms,
+                                  late_ok=frozenset(late_ok or ()))
                 )
             )
         for stream, handler in extra_consumers:

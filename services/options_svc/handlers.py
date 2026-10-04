@@ -34,6 +34,7 @@ from services.options_svc import push_notify
 from services.options_svc import rate_trade
 # X (design 2026-09-22): the image card posted with each market report.
 from services.options_svc import report_card
+from shared import command_limits as _command_limits  # noqa: E402
 from shared import market_calendar as mc
 from shared import public_gamma
 from shared import x_text
@@ -56,7 +57,9 @@ log = logging.getLogger(__name__)
 # Idempotent refresh/manage/reset commands are NOT gated (re-running them is safe).
 # Missing ts (a legacy command serialized before the field existed) → treated as
 # fresh (never reject a legacy command). See shared/contracts/envelope.Command.ts.
-STALE_OPEN_MAX_AGE_SEC = 180  # 3 minutes
+# The value is ``[age] side_effect_max_sec`` in config/commands.toml (180 as
+# shipped), read once at import: edit, then restart the service.
+STALE_OPEN_MAX_AGE_SEC = _command_limits.side_effect_max_sec()
 
 # ``paper_adjust`` (the rescue-apply primitives) lives in options-scanner and
 # transitively pulls in ``paper_engine`` → ``scoring``. Importing it at module top
@@ -128,8 +131,25 @@ def _is_stale_open(command) -> bool:
 #                   since moved on.
 # ``x_post`` / ``x_post_report`` -> a PUBLIC post on X: a replayed stream must
 #                   never re-post (the report dedup covers reports only).
+# The paper-book and operator-state commands (audit AR-05): each one deletes
+# or overwrites something, and none was gated. A replayed ``paper_reset`` wiped
+# the account; a replayed ``set_autoclose`` put a toggle back to an old value.
+#   paper_reset, paper_close, paper_delete, paper_delete_closed, captured_close,
+#   set_autoclose, set_manual_paper_lifecycle
+# (``paper_create`` and ``income_open`` keep their own check, ``_is_stale_open``,
+# because they answer the page with a ``stale`` outcome.)
 _REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "calc_rate", "dossier",
-                   "x_post", "x_post_report")
+                   "x_post", "x_post_report",
+                   "paper_reset", "paper_close", "paper_delete",
+                   "paper_delete_closed", "captured_close",
+                   "set_autoclose", "set_manual_paper_lifecycle")
+
+# Commands that only re-read a local store and republish it. They cost no Schwab
+# call and change nothing, so they run at any age; every OTHER command older
+# than ``[age] replay_max_sec`` is dropped by the consumer loop before it gets
+# here (services/_scaffold.py).
+SAFE_LATE = frozenset({"refresh_paper", "paper_reload", "captured_reload",
+                       "calibration_refresh"})
 
 
 def _market_state(bus):
@@ -3228,6 +3248,14 @@ _STALE_WHY = {
     "dossier": "a replayed lookup must not re-spend its Schwab calls",
     "x_post": "a replayed command must not re-post to X",
     "x_post_report": "a replayed command must not re-post to X",
+    "paper_reset": "a replayed reset would wipe the paper account",
+    "paper_close": "a replayed close would act on a price that has moved",
+    "paper_delete": "a replayed delete would remove a ledger row",
+    "paper_delete_closed": "a replayed delete would remove the ledger's closed history",
+    "captured_close": "a replayed close would act on a price that has moved",
+    "set_autoclose": "a replayed toggle would put the switch back to an old value",
+    "set_manual_paper_lifecycle": "a replayed toggle would put the switch back to "
+                                  "an old value",
 }
 
 

@@ -112,6 +112,7 @@ EDGE_TOML = REPO_ROOT / "config" / "edge.toml"
 SWING_MODEL_TOML = REPO_ROOT / "config" / "swing_model.toml"
 # The proxy's local market-data store and the collector cadence built on it.
 MARKETDATA_TOML = REPO_ROOT / "config" / "marketdata.toml"
+COMMANDS_TOML = REPO_ROOT / "config" / "commands.toml"
 
 # History of Gamma Analyze briefings (the 4×/day Auto briefings + ad-hoc/manual runs).
 # Stores the STRUCTURED analysis payload (the source of truth) per (date, slot); the

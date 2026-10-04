@@ -591,3 +591,84 @@ def test_an_extra_stream_handler_that_raises_is_dead_lettered_on_its_own_stream(
     with TestClient(app):
         assert _wait_for(lambda: bus._r.llen("cmd:deadx_public:dead") == 1)
     assert bus._r.llen("cmd:deadx:dead") == 0
+
+
+# --- the consumer refuses a replayed command (audit AR-05) --------------------
+# A consumer group is created at id 0, so a fresh group is handed the stream's
+# whole history. Only a few options commands were age-gated, each in its own
+# branch; ``paper_reset``, ``paper_delete`` and the rest ran on a replay. The
+# gate is now in the one loop every service's own stream goes through.
+
+def _old_ts(seconds):
+    import datetime as dt
+    return (dt.datetime.now(dt.timezone.utc)
+            - dt.timedelta(seconds=seconds)).isoformat()
+
+
+def _run_until(bus, app, done, tries=60):
+    import time
+    with TestClient(app):
+        for _ in range(tries):
+            if done():
+                break
+            time.sleep(0.05)
+
+
+def test_a_replayed_command_is_dropped_not_run():
+    from shared import command_limits
+    bus = Bus(fake=True)
+    seen = []
+    app = make_app("oldx", command_handler=lambda b, c: seen.append(c.type),
+                   bus=bus, poll_block_ms=50)
+    bus.enqueue_command("cmd:oldx", {"type": "paper_reset", "args": {},
+                                     "ts": _old_ts(command_limits.replay_max_sec() + 60)})
+    bus.enqueue_command("cmd:oldx", {"type": "marker", "args": {}})
+    _run_until(bus, app, lambda: seen)
+    assert seen == ["marker"]
+    assert bus._r.xpending("cmd:oldx", "oldx-svc")["pending"] == 0   # acked
+    assert bus._r.llen("cmd:oldx:dead") == 0       # dropped, not a failure
+
+
+def test_a_command_inside_the_limit_runs():
+    from shared import command_limits
+    bus = Bus(fake=True)
+    seen = []
+    app = make_app("freshx", command_handler=lambda b, c: seen.append(c.type),
+                   bus=bus, poll_block_ms=50)
+    bus.enqueue_command("cmd:freshx", {"type": "rescan", "args": {},
+                                       "ts": _old_ts(command_limits.replay_max_sec() - 120)})
+    _run_until(bus, app, lambda: seen)
+    assert seen == ["rescan"]
+
+
+def test_a_command_the_service_marks_safe_runs_at_any_age():
+    bus = Bus(fake=True)
+    seen = []
+    app = make_app("latex", command_handler=lambda b, c: seen.append(c.type),
+                   bus=bus, poll_block_ms=50, late_ok=frozenset({"reload"}))
+    bus.enqueue_command("cmd:latex", {"type": "reload", "args": {}, "ts": _old_ts(86400)})
+    _run_until(bus, app, lambda: seen)
+    assert seen == ["reload"]
+
+
+def test_a_command_with_no_timestamp_is_never_dropped():
+    """A command serialized before ``ts`` existed has no age to judge."""
+    bus = Bus(fake=True)
+    seen = []
+    app = make_app("legacyx", command_handler=lambda b, c: seen.append(c.type),
+                   bus=bus, poll_block_ms=50)
+    bus.enqueue_command("cmd:legacyx", {"type": "anything", "args": {}, "ts": None})
+    _run_until(bus, app, lambda: seen)
+    assert seen == ["anything"]
+
+
+def test_an_extra_stream_keeps_its_own_expiry_rules():
+    """The public streams answer an expired request themselves (the visitor is
+    waiting on a refusal). The scaffold does not drop for them."""
+    bus = Bus(fake=True)
+    seen = []
+    app = make_app("extrax", bus=bus, poll_block_ms=50,
+                   extra_consumers=(("cmd:extrax_pub", lambda b, c: seen.append(c.type)),))
+    bus.enqueue_command("cmd:extrax_pub", {"type": "scan", "args": {}, "ts": _old_ts(86400)})
+    _run_until(bus, app, lambda: seen)
+    assert seen == ["scan"]

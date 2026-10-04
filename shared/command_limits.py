@@ -1,0 +1,70 @@
+"""How old a queued command may be before a service refuses to run it.
+
+A consumer group is created at stream id 0, so a group that is new (a first
+launch, a flushed Redis, a renamed group) is handed the stream's whole history.
+The documented incident: a first launch "burned a day's API budget in one go".
+Two limits, from ``config/commands.toml``:
+
+* ``side_effect_max_sec`` (180) - commands that change a paper book, spend a
+  paid call or post in public. A click that waited longer than this is acted on
+  stale information; it is refused and the page is told where one is watching.
+* ``replay_max_sec`` (900) - every other command on a service's own stream. A
+  command this old is not a click somebody is waiting on; it is history.
+
+A command with no readable enqueue stamp has no age and is never refused: that
+is a command serialized before the stamp existed.
+
+Stdlib and the config loader only, so every tier may read it.
+"""
+import datetime as _dt
+import math
+
+from repo_paths import COMMANDS_TOML
+from shared.config_toml import toml_loader
+
+DEFAULTS = {"age": {"side_effect_max_sec": 180, "replay_max_sec": 900}}
+MAX_SEC = 7 * 24 * 3600        # past a week a "limit" is a typo
+
+load, reset_cache = toml_loader(COMMANDS_TOML, DEFAULTS, label="commands.toml")
+
+
+def _seconds(key) -> int:
+    """``[age].<key>`` as whole seconds from 1 to a week, else the shipped value."""
+    sec = load().get("age")
+    raw = sec.get(key) if isinstance(sec, dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return DEFAULTS["age"][key]
+    try:
+        ok = math.isfinite(raw) and 1 <= raw <= MAX_SEC
+    except (TypeError, OverflowError):
+        ok = False
+    return int(raw) if ok else DEFAULTS["age"][key]
+
+
+def side_effect_max_sec() -> int:
+    return _seconds("side_effect_max_sec")
+
+
+def replay_max_sec() -> int:
+    return _seconds("replay_max_sec")
+
+
+def age_seconds(command):
+    """Seconds since ``command`` was enqueued, or None when it carries no
+    readable stamp. A stamp with no timezone is read as UTC."""
+    ts = getattr(command, "ts", None)
+    if not ts or not isinstance(ts, str):
+        return None
+    try:
+        when = _dt.datetime.fromisoformat(ts)
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=_dt.timezone.utc)
+    return (_dt.datetime.now(_dt.timezone.utc) - when).total_seconds()
+
+
+def older_than(command, limit_sec) -> bool:
+    """True only when the command HAS an age and it is over ``limit_sec``."""
+    age = age_seconds(command)
+    return age is not None and age > limit_sec

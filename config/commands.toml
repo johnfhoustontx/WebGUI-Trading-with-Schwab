@@ -1,0 +1,23 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/commands.toml — how old a queued command may be before it is refused
+#
+#   A page sends a service a command through a queue. If the service was down,
+#   or its queue is replayed after a restart, old commands arrive late. These
+#   two limits decide which are still run. Edit a value here (or in
+#   Settings -> Configuration), then restart the services.
+#   Anything you delete falls back to the default in shared/command_limits.py.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[age]
+# Commands that change a paper book, make a paid call or post in public: open or
+# close a paper trade, reset the paper account, delete ledger rows, apply a
+# Rescue adjustment, switch auto-close, run a Claude briefing, post to X. Older
+# than this many seconds, the command is refused: the click is acting on prices
+# and positions that have moved on.
+side_effect_max_sec = 180
+
+# Every other command on a service's own queue (a scan, a chart, a calculator
+# request). Older than this, it is not a click someone is waiting for; it is the
+# queue's history being replayed, and running it would spend Schwab calls for
+# nobody. A few commands that only re-read a local store run at any age.
+replay_max_sec = 900
