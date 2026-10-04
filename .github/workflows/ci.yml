@@ -82,6 +82,25 @@ jobs:
         # wholesale. The lint gate (select E9,F63,F7,F82) catches real bugs only.
 
   # ---------------------------------------------------------------------------
+  # Type check - deliberately NARROW (pyrightconfig.json): the bus, the
+  # contracts and the one seam every tier crosses. Clean, and it must stay clean.
+  # ---------------------------------------------------------------------------
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install pinned runtime deps + dev tooling (pyright)
+        run: |
+          pip install -r requirements.lock
+          pip install -r requirements-dev.txt
+      - name: Pyright (scope in pyrightconfig.json)
+        run: python -m pyright
+
+  # ---------------------------------------------------------------------------
   # Dependency CVE audit — non-blocking initially (a freshly-disclosed transitive
   # CVE should surface for review, not halt all development). Flip to blocking
   # once the baseline is clean.
@@ -160,6 +179,23 @@ jobs:
           - name: market_svc
             dir: "."
             cmd: python -m pytest services/market_svc -q
+          - name: news_svc
+            dir: "."
+            cmd: python -m pytest services/news_svc -q
+          - name: shared-notify
+            dir: "."
+            cmd: python -m pytest shared/notify/tests -q
+          # The environment profiles, the unit generator and this workflow's own
+          # coverage test (tests/test_ci_covers_every_suite.py).
+          - name: repo-tests
+            dir: "."
+            cmd: python -m pytest tests -q
+          - name: deploy
+            dir: "."
+            cmd: python -m pytest deploy -q
+          - name: hooks
+            dir: "."
+            cmd: python -m pytest .claude/hooks/tests -q
           # tools/ is a utilities dir and was historically left out of CI. It is
           # in now because tools/nq_signal.py is trading-signal logic carrying a
           # money-losing invariant (never fade a short-gamma tape) — a silent
@@ -177,39 +213,28 @@ jobs:
           - name: schwab-proxy
             dir: schwab-proxy
             cmd: python -m pytest tests -q
-          # --- LEGACY engine dirs — grandfathered, non-blocking (soft) ---
+          # --- engine dirs. BLOCKING since 2026-10-04 (audit CQ-05): they were
+          # "soft" and deselected tests from a baseline of failures that no
+          # longer exists. Every one of these suites passes in full. ---
           - name: options-scanner
             dir: options-scanner
-            soft: true
-            # Deselect the documented pre-existing baseline failures (tkinter
-            # dashboard tests need a display + crash headless; the earnings tests
-            # are date-relative; test_key_levels_doc references an uncopied doc).
             # ⚠ -p no:randomly is REQUIRED, not tidiness: CLAUDE.md's Tests
             # section documents this suite's command with it, because the suite
             # is order-sensitive. Omitting it here made two directional-screening
             # tests fail on some seeds and pass on others -- reproduced neither
             # locally nor on the prod box, which is exactly how a seed-dependent
             # failure presents.
-            cmd: >-
-              python -m pytest tests -q -p no:randomly
-              --ignore=tests/test_dashboard_captured_signals_drift.py
-              --ignore=tests/test_dashboard_tree_signal_map.py
-              --ignore=tests/test_key_levels_doc.py
-              --deselect "tests/test_scanner_engine.py::TestEarningsAvoidance"
+            cmd: python -m pytest tests -q -p no:randomly
           - name: sentiment-dashboard
             dir: sentiment-dashboard
-            soft: true
             cmd: python -m pytest tests -q
           - name: trade-analyzer
             dir: trade-analyzer
-            soft: true
             cmd: python -m pytest . -q
           - name: portfolio-analyzer
             dir: portfolio-analyzer
-            soft: true
             cmd: python -m pytest tests -q
     name: test (${{ matrix.name }})
-    continue-on-error: ${{ matrix.soft == true }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
