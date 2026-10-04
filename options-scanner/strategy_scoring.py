@@ -97,12 +97,10 @@ GATE_BARS = {
     # mint a Strong.
     #
     # ⚠ That 56 is a MEASURED ceiling over real inputs, not one the function
-    # enforces. `q_capital_eff` returns 100.0 for a NaN max_profit or capital —
-    # `_clamp(nan)` is `max(0, min(100, nan))` == 100, the pin-the-maximum trap
-    # the root CLAUDE.md documents at length. It is contained today only because
-    # the gate fails on that same input and caps the composite at GATE_FAIL_CAP;
-    # the containment is accidental, not designed. Read the sentence above as
-    # "over real economics", and do not lean on it as a bound.
+    # enforces. (Until 2026-10-04 `q_capital_eff` also returned 100.0 for a NaN
+    # max_profit or capital — the pin-the-maximum trap; `_real` closes that.)
+    # Read the sentence above as "over real economics", and do not lean on it
+    # as a bound.
     #
     # ⚠ UNITS: `capeff` is PER YEAR for this profile only (see _reward_metric) —
     # 0.10 means 10% return on committed capital annualised, not 10% per trade.
@@ -245,6 +243,20 @@ def gate_profile(signal):
 
 def _clamp(x, lo=0.0, hi=100.0):
     return max(lo, min(hi, x))
+
+
+def _real(v):
+    """``v`` as a float when it is a real, finite number, else None.
+
+    ``isinstance(v, (int, float))`` is True for a NaN and for a bool, and
+    ``_clamp(nan)`` is ``max(0, min(100, nan))`` == 100: every normaliser below
+    that checked only the type scored a NaN input as its best possible value
+    (audit AC-10). Each one states what a MISSING input means; this makes a NaN
+    take that same branch."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return None
+    v = float(v)
+    return v if math.isfinite(v) else None
 
 
 #############################################
@@ -414,8 +426,8 @@ def fit_directional(net_delta, view):
     Neutral view: a delta-neutral structure scores high *only when conviction
     is low* (a flat market wants flat exposure).
     """
-    net_delta = net_delta if isinstance(net_delta, (int, float)) else 0.0
-    conviction = float(view.get("conviction", 0.0) or 0.0)
+    net_delta = _real(net_delta) or 0.0
+    conviction = _real(view.get("conviction")) or 0.0
     direction = view.get("direction", "neutral")
 
     d = math.tanh(net_delta / DELTA_SCALE)  # ~ +/-1 for |net_delta| >= 0.5
@@ -435,7 +447,7 @@ def fit_vol(net_vega, vol_regime):
     low regime rewards +vega (long premium), high regime rewards -vega
     (short premium), mid is ~neutral.
     """
-    net_vega = net_vega if isinstance(net_vega, (int, float)) else 0.0
+    net_vega = _real(net_vega) or 0.0
     v = math.tanh(net_vega / VEGA_SCALE)
 
     if vol_regime == "low":
@@ -461,11 +473,12 @@ def q_rr(signal):
     rr = signal.get("rr")
     if rr is None:
         # unbounded profit: use PoP as a neutral-ish proxy.
-        pop = signal.get("pop_pct")
-        if isinstance(pop, (int, float)):
+        pop = _real(signal.get("pop_pct"))
+        if pop is not None:
             return _clamp(pop)
         return 50.0
-    if not isinstance(rr, (int, float)) or rr <= 0:
+    rr = _real(rr)
+    if rr is None or rr <= 0:
         return 0.0
     # `rr` here is the RATIO form (1.0 = 1:1) -> 100 at rr=1.0, capped. This is
     # distinct from scoring.norm_rr's `rr_pct` PERCENTAGE convention (100 at 50%).
@@ -478,11 +491,11 @@ def q_capital_eff(signal):
     ~100 at max_profit/capital >= 1.0 (a 1:1 return on risked capital).
     None max_profit -> PoP fallback, then neutral.
     """
-    mp = signal.get("max_profit")
-    cap = signal.get("capital")
-    if not isinstance(mp, (int, float)) or not isinstance(cap, (int, float)) or cap <= 0:
-        pop = signal.get("pop_pct")
-        if isinstance(pop, (int, float)):
+    mp = _real(signal.get("max_profit"))
+    cap = _real(signal.get("capital"))
+    if mp is None or cap is None or cap <= 0:
+        pop = _real(signal.get("pop_pct"))
+        if pop is not None:
             return _clamp(pop)
         return 50.0
     return _clamp(mp / cap * 100.0)
@@ -497,12 +510,15 @@ def q_breakeven_vs_em(signal, em_1sd):
     apart = more room before either side is breached).
     Defensive: falsy em_1sd -> 50.
     """
+    em_1sd = _positive_finite(em_1sd)
     if not em_1sd:
         return 50.0
 
-    bes = signal.get("breakevens") or []
-    spot = signal.get("underlying_price")
-    if not bes or not isinstance(spot, (int, float)):
+    # Only the breakevens that are numbers: one NaN would make the distance NaN.
+    bes = [b for b in (_real(x) for x in (signal.get("breakevens") or []))
+           if b is not None]
+    spot = _real(signal.get("underlying_price"))
+    if not bes or spot is None:
         return 50.0
 
     family = str(signal.get("family") or "").upper()
@@ -522,8 +538,8 @@ def q_breakeven_vs_em(signal, em_1sd):
 
 def q_pop(signal):
     """Probability of profit pass-through (already 0-100). None -> 50."""
-    pop = signal.get("pop_pct")
-    if not isinstance(pop, (int, float)):
+    pop = _real(signal.get("pop_pct"))
+    if pop is None:
         return 50.0
     return _clamp(pop)
 

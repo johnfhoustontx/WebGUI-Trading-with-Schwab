@@ -172,6 +172,14 @@ def implied_vol(price, S, K, T, r, option_type, lo=1e-4, hi=5.0, iters=100, q=0.
     if (price is None or price <= 0 or T is None or T <= 0
             or S is None or S <= 0 or K is None or K <= 0):
         return None
+    # A NaN passes every comparison above (they are all False), and then every
+    # ``bs_price(...) < price`` in the bisection is False too, so the search
+    # walks to its floor and returns 0.0001 as if it were a volatility.
+    try:
+        if not all(math.isfinite(x) for x in (price, S, K, T, r, q)):
+            return None
+    except TypeError:
+        return None
     intrinsic = max(S - K, 0.0) if option_type == "call" else max(K - S, 0.0)
     if price <= intrinsic + 1e-9:
         return None

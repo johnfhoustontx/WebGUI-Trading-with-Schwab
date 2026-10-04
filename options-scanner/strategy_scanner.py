@@ -27,6 +27,7 @@ import commissions as _cm
 import options_calculator as _oc
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import greeks as _greeks  # noqa: E402
 from shared import structures as _structures  # noqa: E402
 
 _GRID_LO, _GRID_HI, _GRID_N = 0.5, 1.5, 401   # ±50% of spot payoff grid
@@ -94,10 +95,18 @@ def extract_options(chain, kind, dte_min, dte_max):
 
 
 def nearest_by_delta(strikes, target_abs_delta):
-    """Leg whose |delta| is closest to target_abs_delta (None if empty)."""
-    if not strikes:
+    """Leg whose |delta| is closest to target_abs_delta, among the legs whose
+    delta is a reading. None when there is none.
+
+    A NaN delta makes the distance NaN, and ``min`` keeps a NaN key once it
+    holds it (every later ``x < nan`` is False) - so whether a bad contract won
+    depended on its position in the ladder. A missing delta raised. Both are
+    skipped, as is Schwab's -999 placeholder (audit AC-10)."""
+    usable = [(abs(d), leg) for leg in (strikes or {}).values()
+              if (d := _greeks.delta(leg.get("delta"))) is not None]
+    if not usable:
         return None
-    return min(strikes.values(), key=lambda v: abs(abs(v["delta"]) - target_abs_delta))
+    return min(usable, key=lambda pair: abs(pair[0] - target_abs_delta))[1]
 
 
 def _intrinsic(leg, S):
