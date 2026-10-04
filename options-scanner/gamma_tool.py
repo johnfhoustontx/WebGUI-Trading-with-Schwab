@@ -31,6 +31,21 @@ from gex_status import (
 from options_calculator import (RISK_FREE_RATE, bs_charm, bs_delta, bs_gamma,
                                 bs_vanna)
 from dealer_pinch import evaluate_dealer_pinch, dominant_oi_node
+from shared import greeks as _greeks
+
+
+def _gamma(contract):
+    """The contract's gamma, or 0.0 when the chain carries no reading for it
+    (absent, Schwab's -999 placeholder, a NaN, a negative). One -999 produced a
+    -1.8e12 exposure cell (audit AC-09); a contract with no gamma adds none."""
+    return _greeks.gamma(contract.get("gamma")) or 0.0
+
+
+def _delta(contract):
+    """The contract's delta, or None when the chain carries no reading for it.
+    Callers that have a model fall back to it; the rest count the contract as
+    zero. Zero itself is returned as 0.0."""
+    return _greeks.delta(contract.get("delta"))
 from iv_percentile import percentile_rank, realized_vol_trend
 
 # NOTE: this engine imports NO GUI toolkit and no plotting stack, at module
@@ -78,7 +93,7 @@ def project_0dte_pressure(
     total_now = 0.0
     total_proj = 0.0
     for c, opt_type in contracts:
-        delta = c.get("delta") or 0.0
+        delta = _delta(c) or 0.0
         charm = c.get("charm") or 0.0
         oi = c.get("openInterest") or 0
         if oi <= 0 or delta == 0.0:
@@ -122,7 +137,7 @@ def project_0dte_drift_by_strike(contracts, spot, hours_to_close):
         return out
     dt_years = max(0.0, hours_to_close) / (365.0 * 24.0)
     for c, opt_type, strike in contracts:
-        delta = c.get("delta") or 0.0
+        delta = _delta(c) or 0.0
         charm = c.get("charm") or 0.0
         oi = c.get("openInterest") or 0
         if oi <= 0 or delta == 0.0:
@@ -295,7 +310,7 @@ class GammaEngine:
             for strike_str, contracts in call_map.get(call_exp_key, {}).items():
                 strike = float(strike_str)
                 for c in contracts:
-                    gamma = c.get("gamma", 0) or 0
+                    gamma = _gamma(c)
                     weight = c.get(weight_field, 0) or 0
                     # GEX normalized to "per 1% move in underlying":
                     # OI * 100(contract multiplier) * gamma * spot^2 * 0.01
@@ -309,7 +324,7 @@ class GammaEngine:
             for strike_str, contracts in put_map.get(put_exp_key, {}).items():
                 strike = float(strike_str)
                 for c in contracts:
-                    gamma = c.get("gamma", 0) or 0
+                    gamma = _gamma(c)
                     weight = c.get(weight_field, 0) or 0
                     # GEX normalized to "per 1% move in underlying":
                     # OI * 100(contract multiplier) * gamma * spot^2 * 0.01
@@ -522,7 +537,7 @@ class GammaEngine:
                 strike = float(strike_str)
                 for c in contracts:
                     weight = c.get(weight_field, 0) or 0
-                    delta = c.get("delta")
+                    delta = _delta(c)
                     if delta is None or delta == 0:
                         iv_pct = c.get("volatility", 0) or 0
                         if iv_pct > 0:
@@ -710,7 +725,7 @@ class GammaEngine:
             for strike_key, contracts in call_map.get(exp_key, {}).items():
                 K = float(strike_key)
                 c = contracts[0] if contracts else {}
-                gamma_c = float(c.get("gamma") or 0.0)
+                gamma_c = _gamma(c)
                 oi_c = float(c.get("openInterest") or 0)
                 # Per-1% dollar-gamma (SqueezeMetrics/SpotGamma convention):
                 # OI * gamma * 100(contract multiplier) * S^2 * 0.01 — the SAME
@@ -725,7 +740,7 @@ class GammaEngine:
             for strike_key, contracts in put_map.get(exp_key, {}).items():
                 K = float(strike_key)
                 p = contracts[0] if contracts else {}
-                gamma_p = float(p.get("gamma") or 0.0)
+                gamma_p = _gamma(p)
                 oi_p = float(p.get("openInterest") or 0)
                 # Per-1% dollar-gamma — matches call_gex above and the intraday
                 # calc_from_chain path (see the * 0.01 note there).
@@ -812,7 +827,7 @@ class GammaEngine:
                     sigma = iv_pct / 100.0 if iv_pct > 0 else 0.0
 
                     # GEX — uses chain-provided gamma, no BS fallback.
-                    gamma = c.get("gamma", 0) or 0
+                    gamma = _gamma(c)
                     g_val = gamma * weight * 100 * spot * spot * 0.01
                     _ensure(gex, strike)
                     if option_type == "call":
@@ -834,8 +849,8 @@ class GammaEngine:
                         _ensure(vex, strike)
                         vex[strike][option_type] += v_val
 
-                    # DEX — uses chain delta, BS fallback if missing.
-                    delta = c.get("delta")
+                    # DEX — uses chain delta, BS fallback if missing or unusable.
+                    delta = _delta(c)
                     if delta is None or delta == 0:
                         delta = bs_delta(spot, strike, T, r, sigma, option_type) if iv_pct > 0 else 0.0
                     d_val = weight * delta * 100 * spot
@@ -1160,7 +1175,7 @@ def calc_dex_from_chain(chain, use_volume=False):
         for strike_str, contracts in call_map.get(call_exp_key, {}).items():
             strike = float(strike_str)
             for c in contracts:
-                delta = c.get("delta") or 0
+                delta = _delta(c) or 0
                 weight = c.get(weight_field) or 0
                 val = delta * weight * 100 * spot
                 if strike not in dex:
@@ -1171,7 +1186,7 @@ def calc_dex_from_chain(chain, use_volume=False):
         for strike_str, contracts in put_map.get(put_exp_key, {}).items():
             strike = float(strike_str)
             for c in contracts:
-                delta = c.get("delta") or 0
+                delta = _delta(c) or 0
                 weight = c.get(weight_field) or 0
                 val = delta * weight * 100 * spot
                 if strike not in dex:
@@ -1360,7 +1375,7 @@ def calc_gamma_acceleration(chain):
             total = 0.0
             for contracts in strikes.values():
                 for c in contracts:
-                    gamma = c.get("gamma") or 0.0
+                    gamma = _gamma(c)
                     oi = c.get("openInterest") or 0
                     total += gamma * oi
             g_by_dte[dte] = g_by_dte.get(dte, 0.0) + total
@@ -1775,7 +1790,7 @@ def build_eod_probabilities(chain, em_upper, em_lower,
             if key in side_exp:
                 contracts = side_exp[key]
                 if contracts:
-                    d = contracts[0].get("delta")
+                    d = _delta(contracts[0])
                     if d is not None:
                         return d
         return None

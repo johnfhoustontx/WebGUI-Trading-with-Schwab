@@ -8,6 +8,7 @@ import math
 import tomllib
 
 from repo_paths import FLOW_ALERTS_TOML
+from shared import greeks as _greeks
 from shared import config_toml as _config_toml
 from services import _degrade
 
@@ -294,11 +295,15 @@ def detect_big_delta(symbol, chain, cfg):
                         continue
                     for c in (contracts or []):
                         try:
-                            d = c.get("delta")
+                            # A delta that is not a reading is skipped. One NaN
+                            # made ``gross`` NaN, and every ``>= rel * gross``
+                            # below is False against that: no alert for the
+                            # whole symbol (audit AC-52).
+                            d = _greeks.delta(c.get("delta"))
                             vol = c.get("totalVolume") or 0
-                            if d is None or vol <= 0:
+                            if d is None or not (vol > 0):
                                 continue
-                            ad = abs(float(d))
+                            ad = abs(d)
                             if ad > dmax or ad < lo or ad > hi:
                                 continue
                             dn = ad * vol * 100 * (spot or 0)

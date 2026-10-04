@@ -10,6 +10,8 @@ import sys as _sys
 import fill_model
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import greeks as _greeks  # noqa: E402
+from shared import paper_limits as _paper_limits  # noqa: E402
 from shared import structures as _structures  # noqa: E402
 
 log = logging.getLogger("signal_repricer")
@@ -262,17 +264,39 @@ def _fetch_chain(client, symbol, expiration):
     return result
 
 
+def _market(ctr):
+    """``(bid, ask)`` when the contract has a market, else ``(None, None)``.
+
+    A market needs an OFFER above zero. A bid of ZERO is a market when the
+    offer is small: a far out-of-the-money option near expiry is quoted
+    0.00 x 0.05, and that is exactly the long leg of a spread that has won.
+    Until 2026-10-04 any zero bid made the leg "unquoted", so the winning
+    position got no mark, no target and no profit lock (audit AC-08).
+
+    "Small" is ``[marks] zero_bid_max_ask`` in config/paper.toml. A zero bid
+    under a LARGER offer (0.00 x 1.20) is a broken quote, not a worthless
+    option: its midpoint would be fiction, so it stays no market. A negative or
+    non-finite quote is no market."""
+    bid, ask = ctr.get("bid", 0) or 0, ctr.get("ask", 0) or 0
+    try:
+        ok = (math.isfinite(bid) and math.isfinite(ask) and ask > 0 and bid >= 0)
+    except TypeError:
+        ok = False
+    if ok and bid == 0 and ask > _paper_limits.zero_bid_max_ask():
+        ok = False
+    return (float(bid), float(ask)) if ok else (None, None)
+
+
 def _leg_mid(leg_map, strike):
-    """Return (mid_price, delta) or (None, None) if unquoted."""
+    """Return (mid_price, delta) or (None, None) if the leg has no market."""
     for exp_key, strikes in leg_map.items():
         key = f"{float(strike):.1f}"
         if key in strikes:
             ctr = strikes[key][0]
-            bid = ctr.get("bid", 0) or 0
-            ask = ctr.get("ask", 0) or 0
-            if bid <= 0 or ask <= 0:
+            bid, ask = _market(ctr)
+            if ask is None:
                 return None, None
-            return (bid + ask) / 2, ctr.get("delta")
+            return (bid + ask) / 2, _greeks.delta(ctr.get("delta"))
     return None, None
 
 
@@ -284,11 +308,12 @@ def _leg_bid_ask(leg_map, strike):
         key = f"{float(strike):.1f}"
         if key in strikes:
             ctr = strikes[key][0]
-            bid = ctr.get("bid", 0) or 0
-            ask = ctr.get("ask", 0) or 0
-            if bid <= 0 or ask <= 0:
+            bid, ask = _market(ctr)
+            if ask is None:
                 return None, None, None
-            return bid, ask, ctr.get("delta")
+            # A delta that is not a reading (Schwab's -999, a NaN) is None: the
+            # delta stop reads this value, and -999 is past every threshold.
+            return bid, ask, _greeks.delta(ctr.get("delta"))
     return None, None, None
 
 
@@ -339,18 +364,21 @@ def _leg_greeks(leg_map, strike):
         row = (strikes or {}).get(key)
         if row:
             ctr = row[0] or {}
-            return {g: _finite_greek(ctr.get(g)) for g in _GREEK_KEYS}
+            return {g: _READ_GREEK.get(g, _finite_greek)(ctr.get(g))
+                    for g in _GREEK_KEYS}
     return None
 
 
 def _finite_greek(value):
-    """A real number, or ``None``. Rejects bool and every non-finite float - a NaN
-    would propagate into the book's sum and make every comparison against it
-    False, which is this repo's most-documented bug class."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    v = float(value)
-    return v if math.isfinite(v) else None
+    """A real number, or ``None``. Rejects bool, every non-finite float and
+    Schwab's ``-999`` placeholder - a NaN would propagate into the book's sum
+    and make every comparison against it False, and one -999 delta put the
+    book's net delta at -998.7 (audit AC-09)."""
+    return _greeks.usable(value)
+
+
+# Delta and gamma have a range as well as a placeholder; theta and vega do not.
+_READ_GREEK = {"delta": _greeks.delta, "gamma": _greeks.gamma}
 
 
 def position_greeks(trade, chain):

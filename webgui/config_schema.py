@@ -949,6 +949,16 @@ _PAPER = ConfigFile(
                   "credit spreads against, since their trades land here.",
                   kind="money", min=1, max=100000, step=50),
         )),
+        Section("Marking positions", "", (
+            Field("marks.zero_bid_max_ask", "Largest offer for a leg with no bid",
+                  "A leg nobody is bidding for is still priced when its offer is "
+                  "at or under this, in dollars a share: a nearly worthless "
+                  "option, such as the long leg of a spread that has won. Above "
+                  "it the quote is treated as broken and the position is not "
+                  "priced that cycle. 0 never prices a leg with no bid. Applies "
+                  "at once.",
+                  kind="money", min=0, max=5, step=0.05, restart=()),
+        )),
     ),
 )
 

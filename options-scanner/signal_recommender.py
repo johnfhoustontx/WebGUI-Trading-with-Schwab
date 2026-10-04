@@ -12,6 +12,7 @@ import sys as _sys
 from datetime import date
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
+from shared import greeks as _greeks  # noqa: E402
 from shared import structures as _structures  # noqa: E402
 from shared import trade_mgmt as _trade_mgmt  # noqa: E402
 
@@ -317,7 +318,9 @@ def recommend(ctx):
     rules = _trade_mgmt.structure_rules(ctx.get("strategy"))
     credit_total = ctx["entry_credit"] * MULTIPLIER
     pnl = ctx.get("unrealized_pnl") or 0
-    short_delta = ctx.get("current_short_delta")
+    # A delta that is not a reading (Schwab's -999 placeholder, a NaN, anything
+    # past 1) is "no delta", so the delta stop below does not fire on it.
+    short_delta = _greeks.delta(ctx.get("current_short_delta"))
     dte = ctx.get("dte_remaining", 99)
     tp_frac, stop_mult = rules["tp_frac"], rules["stop_mult"]
     # False for the single-leg income structures, which take the target only.

@@ -53,3 +53,22 @@ def test_the_shipped_file_matches_the_defaults():
     with open(PAPER_TOML, "rb") as fh:
         shipped = tomllib.load(fh)
     assert shipped == pl.DEFAULTS
+
+
+# --- the zero-bid mark bound (audit AC-08) -----------------------------------
+
+def test_the_zero_bid_bound_ships_at_a_quarter():
+    from shared import paper_limits
+    assert paper_limits.zero_bid_max_ask() == 0.25
+
+
+def test_an_unusable_zero_bid_bound_reads_as_the_default(monkeypatch):
+    import pytest
+    from shared import paper_limits
+    for bad in (-1, float("nan"), "0.1", True, None):
+        monkeypatch.setattr(paper_limits, "load", lambda b=bad: {"marks": {"zero_bid_max_ask": b}})
+        assert paper_limits.zero_bid_max_ask() == 0.25, bad
+    monkeypatch.setattr(paper_limits, "load", lambda: {"marks": {"zero_bid_max_ask": 0}})
+    assert paper_limits.zero_bid_max_ask() == 0.0
+    monkeypatch.setattr(paper_limits, "load", lambda: {"marks": "oops"})
+    assert paper_limits.zero_bid_max_ask() == pytest.approx(0.25)

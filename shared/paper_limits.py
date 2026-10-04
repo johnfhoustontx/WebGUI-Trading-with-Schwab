@@ -27,6 +27,11 @@ DEFAULTS = {
         "max_risk_per_trade": 750.0,
         "ledger_max_risk_per_trade": 750.0,
     },
+    # A leg quoted with NO BID is still a market when its offer is at or under
+    # this many dollars a share: the option is nearly worthless, which is what
+    # the long leg of a winning spread looks like near expiry. Above it, a zero
+    # bid is a broken quote and the position is left unmarked for that cycle.
+    "marks": {"zero_bid_max_ask": 0.25},
 }
 
 load, reset_cache = toml_loader(PAPER_TOML, DEFAULTS, label="paper.toml")
@@ -43,6 +48,18 @@ def _dollars(key):
         return DEFAULTS["risk"][key]
     val = float(raw)
     return val if math.isfinite(val) and val > 0 else DEFAULTS["risk"][key]
+
+
+def zero_bid_max_ask() -> float:
+    """The largest offer at which a leg with no bid still counts as quoted.
+    Zero switches it off (a zero bid is never a market). A negative, NaN or
+    non-number value reads as the shipped default."""
+    sec = load().get("marks")
+    raw = sec.get("zero_bid_max_ask") if isinstance(sec, dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return DEFAULTS["marks"]["zero_bid_max_ask"]
+    val = float(raw)
+    return val if math.isfinite(val) and val >= 0 else DEFAULTS["marks"]["zero_bid_max_ask"]
 
 
 def max_risk_per_trade() -> float:
