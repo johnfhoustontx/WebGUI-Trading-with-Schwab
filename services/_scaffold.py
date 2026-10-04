@@ -164,6 +164,15 @@ class _SchedulerHealth:
         return _heartbeat.age_s()
 
 
+def _dead_letter_total(bus, streams):
+    """How many refused commands the dead-letter lists hold, or None when that
+    cannot be read. Never raises: /health must answer whatever the bus is."""
+    try:
+        return sum(int(bus.dead_letter_len(s)) for s in streams)
+    except Exception:  # noqa: BLE001 - an unreadable count, not a zero
+        return None
+
+
 def health_verdict(hs: "_SchedulerHealth", stale_sec=None):
     """``(up, reason)`` for ``/health``.
 
@@ -507,9 +516,9 @@ def make_app(
             "scheduler_last_tick_age_s": hs.last_tick_age_s(),
             # Commands on this service's streams that were never run (a handler
             # failed, or a restart stranded them). Kept for a person to read.
-            "dead_letters": sum(
-                app.state.bus.dead_letter_len(s)
-                for s in [f"cmd:{domain}"] + [e[0] for e in extra_consumers]),
+            "dead_letters": _dead_letter_total(
+                app.state.bus,
+                [f"cmd:{domain}"] + [e[0] for e in extra_consumers]),
             "degrades_total": _degrade.total(),
             "degrades": _degrade.counts(),
         }
