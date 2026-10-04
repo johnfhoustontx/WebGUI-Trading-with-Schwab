@@ -31,12 +31,11 @@ from pages.ui_guard import guard
 # record's realized P&L without its sign.
 from pages import scorecard as _scorecard
 from .perf_charts import equity_curve_figure, excursion_text
-from .rescue import AT_RISK_STATES as _AT_RISK_STATES
 # ``rescue_highlight`` was named TWICE on this line. ``heat_border_class`` is
 # not called here and stays anyway: it is a deliberate re-export, and
 # ``test_options_paper_portfolio`` reads it off this module to check that a row's
 # tint IS the shared heat border rather than a second palette.
-from .rescue import heat_border_class, rescue_highlight
+from .rescue import heat_border_class, rescue_highlight  # noqa: F401 - heat_border_class is the re-export described above
 from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, CARD, EYEBROW, LABEL,
                     MUTED)
 

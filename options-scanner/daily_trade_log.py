@@ -29,7 +29,6 @@ Version 1.0.0 Changes:
 
 import sys
 import json
-import math
 import sqlite3
 import pathlib
 import urllib.request

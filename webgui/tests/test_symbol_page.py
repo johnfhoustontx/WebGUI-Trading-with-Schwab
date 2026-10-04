@@ -584,7 +584,7 @@ def test_a_rejected_symbol_renders_not_found_and_enqueues_nothing(world):
     assert "NOT FOUND" in texts
 
 
-def test_a_cold_options_feed_enqueues_nothing(world):
+def test_a_cold_options_feed_renders_the_waiting_line_and_enqueues_nothing(world):
     data, sent = world
     for view in list(data):
         if view.startswith("options:"):

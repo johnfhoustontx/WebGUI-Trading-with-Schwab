@@ -46,7 +46,7 @@ from pages.options import theme
 from pages.ui_guard import guard, guard_async
 from repo_paths import (
     ENV_NAME,
-    IS_DEV,
+    IS_DEV,  # noqa: F401 - not read here; test_status patches it by name
     MEMURAI_PORT,
     NICEGUI_LIVE_PORT,
     NICEGUI_LIVE_URL,

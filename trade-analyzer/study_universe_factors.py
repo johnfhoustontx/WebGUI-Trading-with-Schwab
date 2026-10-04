@@ -25,7 +25,6 @@ import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from src.analysis import backtest as B          # noqa: E402
-from src.analysis import factors as F           # noqa: E402
 from research import harness, variants          # noqa: E402
 from research.universe import EXPANDED          # noqa: E402
 import fit_swing_model as FSM                   # noqa: E402

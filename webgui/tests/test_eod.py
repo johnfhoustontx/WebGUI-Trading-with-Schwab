@@ -397,7 +397,6 @@ def test_captured_closed_section_in_both_fragments():
 
 
 # ── captured signals as the third performance book ───────────────────────────
-import datetime as _dt
 
 _CAP_ROW = {
     "symbol": "SPY", "strategy": "PCS", "trade_type": "0DTE", "status": "CLOSED",

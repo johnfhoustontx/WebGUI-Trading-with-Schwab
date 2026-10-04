@@ -35,7 +35,6 @@ monospace this page no longer loads.
 """
 import json
 import logging
-import math
 import time
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -439,7 +438,7 @@ _DEFAULT_FLAG = "OK"
 UNTAGGED_FLAG = "—"
 
 # The rescue states that genuinely mean "this trade is in trouble" — the same
-# pair ``paper._AT_RISK_STATES`` highlights.
+# pair ``rescue.AT_RISK_STATES`` highlights.
 AT_RISK_STATES = ("tested", "critical")
 
 # The two books the panel merges, and the chip each one's rows wear. Separate

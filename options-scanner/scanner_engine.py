@@ -24,13 +24,11 @@ Version 1.0.0 Changes:
 """
 
 import math
-import json
 import sys
 import pathlib as _pathlib
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import logging
-from pathlib import Path
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 

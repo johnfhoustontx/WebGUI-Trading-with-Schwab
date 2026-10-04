@@ -38,7 +38,6 @@ from scoring.daily_direction import (  # noqa: E402
     forward_returns,
     per_state_stats,
     ordinal_ic,
-    STATE_ORDINAL,
 )
 
 YEARS = 5

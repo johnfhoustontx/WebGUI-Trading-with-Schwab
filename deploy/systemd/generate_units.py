@@ -43,7 +43,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from repo_paths import (ENV_NAME, IS_DEV, NICEGUI_LIVE_PORT,  # noqa: E402
                         NICEGUI_PORT, OWNS_PROXY, PROXY_PORT, REPO_ROOT,
                         SERVICE_PORTS)
-from shared.market_calendar import slot_times, window_bounds  # noqa: E402
+from shared.market_calendar import slot_times  # noqa: E402
 
 
 

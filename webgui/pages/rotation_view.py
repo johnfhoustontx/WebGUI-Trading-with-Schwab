@@ -32,7 +32,6 @@ Industry quadrant text. The supplied design re-hues them (Improving → blue 232
 Weakening → olive 80) and this module implements that for this screen only.
 Unifying the two is a separate decision, not one to make silently here.
 """
-import math
 
 from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
 from pages.oklch import oklch_hex

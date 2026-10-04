@@ -22,7 +22,6 @@ Usage, from the repo root with the environment loaded::
     .venv/bin/python tools/cache_age.py cache:options:matrix # prefix optional
 """
 import datetime
-import os
 import pathlib
 import sys
 

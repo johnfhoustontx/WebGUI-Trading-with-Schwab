@@ -77,7 +77,7 @@ import os
 import pathlib
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date as _date, datetime, timedelta
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]

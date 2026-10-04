@@ -58,16 +58,25 @@ extend-exclude = [
 #   F63 = invalid comparisons / `assert (a, b)` tuple bugs / `is` on literals
 #   F7  = misplaced statements (break/continue/return outside a loop/function, etc.)
 #   F82 = undefined names (typos, missing imports) — the highest-value check
-# Deliberately NOT selected: the broader F401 (unused import) / F811 (redefinition)
-# and all E1xx–E7xx style rules — they flag intentional style, not defects, so
-# including them would make the gate red on code that is working as written.
+#   F401 = unused imports, F811 = redefinitions. Adopted 2026-10-04 (audit
+#          CQ-08) after the 79 findings were read one by one: 52 unused imports
+#          removed, the deliberate re-exports marked where they are, and one
+#          real defect found - two tests with one name, so the first never ran.
+# Deliberately NOT selected: all E1xx–E7xx style rules — they flag intentional
+# style, not defects, so including them would make the gate red on code that is
+# working as written.
 # (Add more rule classes later ONLY after confirming they are already clean.)
-select = ["E9", "F63", "F7", "F82"]
+select = ["E9", "F63", "F7", "F82", "F401", "F811"]
+# Reported, never fixed for you. The editor hook runs `ruff --fix` on every
+# edited file: fixed automatically, F401 would delete an import the moment it
+# was added (before the line that uses it) and a re-export that looks unused,
+# and F811 would delete the second of two same-named tests.
+unfixable = ["F401", "F811"]
 
 [tool.ruff.lint.per-file-ignores]
 # Re-export hubs deliberately import names for their public surface; test modules
-# import fixtures for side effects. (No-ops under the current select, kept so a
-# future widening to F401 stays green here.)
+# import fixtures for side effects. F811 is NOT ignored in tests: a redefinition
+# there is a test that silently replaced another.
 "**/__init__.py" = ["F401"]
 "**/tests/**" = ["F401"]
 

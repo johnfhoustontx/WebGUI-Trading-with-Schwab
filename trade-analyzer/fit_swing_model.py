@@ -21,7 +21,6 @@ import pathlib
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
-import numpy as np
 import pandas as pd
 import requests
 

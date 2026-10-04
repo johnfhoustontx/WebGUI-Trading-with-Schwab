@@ -505,7 +505,6 @@ class TestStrikeValidityWindow:
         return datetime(2026, 4, 24, hour, minute, tzinfo=ZoneInfo("America/Chicago"))
 
     def test_zero_em_passthrough(self):
-        from scanner_engine import is_strike_in_expected_move_window
         assert is_strike_in_expected_move_window(
             strike=100.0, spot=530.0, daily_expected_move=0,
             dte=0, trade_type="0-DTE", now_ct=self._now_ct(10, 0),
@@ -514,7 +513,6 @@ class TestStrikeValidityWindow:
     # --- 0-DTE intraday decay ---
     def test_0dte_open_window(self):
         # daily_em=$5 at open -> remaining_em=$5 -> window [$3.09, $15.00]
-        from scanner_engine import is_strike_in_expected_move_window
         now = self._now_ct(8, 30)
         spot = 100.0
         # distance=10 -> in window
@@ -530,7 +528,6 @@ class TestStrikeValidityWindow:
     def test_0dte_decayed_window_midday(self):
         # 12:00 CT, daily_em=$5 -> rem = 5*sqrt(3/6.5) ~ 3.397
         # window: [0.618*3.397, 3.00*3.397] = [2.10, 10.19]
-        from scanner_engine import is_strike_in_expected_move_window
         now = self._now_ct(12, 0)
         spot = 100.0
         assert is_strike_in_expected_move_window(
@@ -539,7 +536,6 @@ class TestStrikeValidityWindow:
             99.0, spot, 5.0, 0, "0-DTE", now_ct=now) is False  # dist=1 < 2.10
 
     def test_0dte_after_close_rejects_all(self):
-        from scanner_engine import is_strike_in_expected_move_window
         now = self._now_ct(15, 30)
         # rem_em = 0 -> any nonzero distance fails
         assert is_strike_in_expected_move_window(
@@ -548,7 +544,6 @@ class TestStrikeValidityWindow:
     # --- Swing DTE curve ---
     def test_swing_dte_1_window(self):
         # daily_em=$5, DTE=1 -> period_em=$5, window 1.5x-2.5x = [$7.50, $12.50]
-        from scanner_engine import is_strike_in_expected_move_window
         spot = 100.0
         assert is_strike_in_expected_move_window(
             90.0, spot, 5.0, 1, "SWING") is True   # dist=10
@@ -560,7 +555,6 @@ class TestStrikeValidityWindow:
     def test_swing_dte_15_window(self):
         # daily_em=$5, DTE=15 -> period_em=5*sqrt(15)~19.36
         # window 0.5x-1.5x ~ [9.68, 29.05]
-        from scanner_engine import is_strike_in_expected_move_window
         spot = 100.0
         assert is_strike_in_expected_move_window(
             85.0, spot, 5.0, 15, "SWING") is True   # dist=15
@@ -572,7 +566,6 @@ class TestStrikeValidityWindow:
     # --- 0-DTE bucket DTE 1-4 uses dedicated 0.618-floor curve ---
     def test_0dte_bucket_dte_1_uses_zero_dte_curve(self):
         """DTE=1 in the 0-DTE bucket uses min=0.618; max preserved at 2.50."""
-        from scanner_engine import is_strike_in_expected_move_window
         spot = 100.0
         # daily_em=$5, DTE=1 -> period_em=$5, window 0.618x-2.5x = [$3.09, $12.50]
         assert is_strike_in_expected_move_window(
@@ -584,7 +577,6 @@ class TestStrikeValidityWindow:
 
     def test_0dte_bucket_dte_4_uses_zero_dte_curve(self):
         """DTE=4 in the 0-DTE bucket: min=0.618 flat, max preserved at 2.10."""
-        from scanner_engine import is_strike_in_expected_move_window
         spot = 100.0
         # DTE=4 -> period_em=5*sqrt(4)=10
         # 0-DTE bucket curve: min=0.618, max=2.10 -> window [$6.18, $21.00]
@@ -1328,7 +1320,6 @@ class TestDirectionalEMWindow:
 
     def test_is_strike_in_directional_em_window_at_dte_0(self):
         """At DTE=0, directional band uses zero_dte_em_window's remaining_em."""
-        from scanner_engine import is_strike_in_expected_move_window
         from datetime import datetime
         from zoneinfo import ZoneInfo
         now = datetime(2026, 4, 24, 8, 30, tzinfo=ZoneInfo("America/Chicago"))
@@ -1343,7 +1334,6 @@ class TestDirectionalEMWindow:
 
     def test_is_strike_in_directional_em_window_at_dte_5_swing(self):
         """At DTE=5 SWING, period_em=5*sqrt(5)~11.18, directional band [0, 6.91]."""
-        from scanner_engine import is_strike_in_expected_move_window
         spot = 100.0
         assert is_strike_in_expected_move_window(
             95.0, spot, 5.0, 5, "SWING", mode="DIRECTIONAL") is True   # dist=5
@@ -1352,7 +1342,6 @@ class TestDirectionalEMWindow:
 
     def test_premium_mode_unchanged(self):
         """mode='PREMIUM' (default) keeps existing behavior."""
-        from scanner_engine import is_strike_in_expected_move_window
         spot = 100.0
         # DTE=1, daily_em=5, SWING bucket premium band 1.5-2.5 -> [7.5, 12.5]
         # dist=2 should be False under PREMIUM

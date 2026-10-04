@@ -12,11 +12,6 @@ than raising (a swing candidate should never crash on commission math).
 """
 import pathlib
 
-try:
-    import tomllib  # py3.11+
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib
-
 # Repo root = parent of options-scanner/. Kept path-derived (not imported from
 # repo_paths) so this module has zero import-time coupling and can't fail import.
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]

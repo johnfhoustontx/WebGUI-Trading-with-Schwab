@@ -29,13 +29,12 @@ Run manually with the proxy up (uses the cached panel):
 import sys
 import pathlib
 
-import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from src.analysis import backtest as B          # noqa: E402
-from research import harness, variants          # noqa: E402
+from research import harness          # noqa: E402
 from research.universe import EXPANDED          # noqa: E402
 import fit_swing_model as FSM                   # noqa: E402
 

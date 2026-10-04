@@ -12,11 +12,6 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))  # repo roo
 from repo_paths import REPO_ROOT  # noqa: E402
 from shared import config_toml as _config_toml  # noqa: E402
 
-try:
-    import tomllib  # py3.11+
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib
-
 #############################################
 # RATES
 #############################################

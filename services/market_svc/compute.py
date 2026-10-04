@@ -313,7 +313,6 @@ def build_dashboard(raw, *, sector_pcr, proxy_up, net_prem=None, symbol_prem=Non
 
 def collect(bus):
     """Fetch + build the full dashboard payload (the scheduler's per-tick call)."""
-    from services import _proxy
     raw = fetch_raw_quotes(symbols.quote_symbols())
     pcr = read_sector_pcr(bus)
     net_prem = read_net_prem(bus)

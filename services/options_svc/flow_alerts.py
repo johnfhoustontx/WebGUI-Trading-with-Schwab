@@ -5,7 +5,7 @@ call_prem, put_prem) tuples from gex_history_db.load_flow_series) and a cooldown
 map. No I/O, no push — the handler wires those. See the design doc."""
 import logging
 import math
-import tomllib
+import tomllib  # noqa: F401 - not used here; test_flow_alerts patches the parser through this name
 
 from repo_paths import FLOW_ALERTS_TOML
 from shared import greeks as _greeks

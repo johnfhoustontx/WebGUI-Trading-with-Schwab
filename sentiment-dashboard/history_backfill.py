@@ -11,7 +11,7 @@ import logging
 import sys
 import pathlib
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))  # repo root
 

@@ -57,7 +57,7 @@ from . import detail, funnel_view, handoff
 from . import persistence as _persistence
 from .checks_table import (  # re-exported: the scanner's names predate the move
     CHECKS_SLOT as _CHECKS_SLOT, ONLY_CLEAR_TIP as _ONLY_CLEAR_TIP, filtered_tab_label,
-    only_clear, only_clear_empty_label, restamp, stamp_checks)
+    only_clear, only_clear_empty_label, restamp, stamp_checks)  # noqa: F401 - restamp: see above
 from .theme import (BADGE_MUTED, BADGE_WARN, CARD, EYEBROW, LABEL, MUTED,
                     TXT_NEG, TXT_NEUTRAL, TXT_POS, TXT_WARN)
 

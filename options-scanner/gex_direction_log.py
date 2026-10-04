@@ -38,7 +38,6 @@ Version 1.0.0 Changes:
 """
 
 import sys
-import math
 import sqlite3
 import pathlib
 import datetime

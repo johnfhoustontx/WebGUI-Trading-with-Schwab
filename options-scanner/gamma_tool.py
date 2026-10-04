@@ -12,21 +12,20 @@ GEX Formula:
 """
 
 import math
-import json
 import logging
-import os
-import sqlite3
-import threading
-from datetime import date, datetime, timedelta
-from pathlib import Path
+import pathlib
+import sys
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
-import gex_history_db as _history_db
-from gex_status import (
-    classify_collector_status,
-    TZ as STATUS_TZ,
-    STALE_AFTER_SEC,
-)
+# The repo root, for ``shared``. This module used to get it as a side effect of
+# importing gex_status, which it did not otherwise use; when that import went
+# (audit CQ-08) a standalone ``import gamma_tool`` could no longer find
+# ``shared``. The path is put there on purpose now.
+_REPO_ROOT = str(pathlib.Path(__file__).resolve().parents[1])
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
 
 from options_calculator import (RISK_FREE_RATE, bs_charm, bs_delta, bs_gamma,
                                 bs_vanna)
@@ -46,12 +45,10 @@ def _delta(contract):
     Callers that have a model fall back to it; the rest count the contract as
     zero. Zero itself is returned as 0.0."""
     return _greeks.delta(contract.get("delta"))
-from iv_percentile import percentile_rank, realized_vol_trend
 
 # NOTE: this engine imports NO GUI toolkit and no plotting stack, at module
 # scope or anywhere else. Every drawing/Tk helper was deleted 2026-08-20 with
 # the Tk window that called it; keep it that way — options_svc imports this.
-import numpy as np
 
 log = logging.getLogger("scanner")
 TZ = ZoneInfo("America/Chicago")

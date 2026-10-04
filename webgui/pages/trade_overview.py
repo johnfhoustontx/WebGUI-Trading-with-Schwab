@@ -18,7 +18,7 @@ from pages import trade_terminal as tt
 from pages import ui_kit as kit
 from pages.options import theme
 from pages.trade import (dealer_rows, gate_rows, short_gate_rows,
-                         swing_headline, verdict_text_class)
+                         swing_headline)
 
 _P = theme.THEME["palette"]
 # The app's neutral ladder, which replaced the eight rungs this page used to

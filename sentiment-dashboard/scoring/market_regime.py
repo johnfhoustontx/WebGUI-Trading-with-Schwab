@@ -17,7 +17,6 @@ the hysteresis label commit (``CommitState``/``commit_label``), and the crisis
 fast-attack bypass (``apply_crisis_attack``/``crisis_attacked``).
 """
 from __future__ import annotations
-import math
 from dataclasses import dataclass, field
 # _num was a differently-spelled but behaviourally identical seventh copy;
 # verified equivalent across 20 inputs (None/''/NaN/inf/bool/bytes/...) before

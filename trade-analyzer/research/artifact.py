@@ -19,7 +19,6 @@ alongside so the size of that flattery is visible rather than assumed.
 weights and calibration, so a block missing either is dropped here rather than
 silently falling back at score time.
 """
-import numpy as np
 import pandas as pd
 
 from src.analysis import backtest as B

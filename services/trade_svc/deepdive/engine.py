@@ -29,7 +29,6 @@ Version 1.1.0 Changes:
 Version 1.0.0 Changes:
 - Initial implementation
 """
-import os
 import sys
 import json
 import math

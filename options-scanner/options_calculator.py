@@ -17,7 +17,7 @@ Version 1.0.0 Changes:
 
 import math
 import logging
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 
 log = logging.getLogger("scanner")
 

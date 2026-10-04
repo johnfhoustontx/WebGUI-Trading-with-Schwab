@@ -26,8 +26,7 @@ from nicegui import ui
 from pages.ui_guard import guard
 
 from . import detail, handoff
-from .rescue import AT_RISK_STATES as _AT_RISK_STATES
-from .rescue import heat_border_class, rescue_highlight, rescue_highlight
+from .rescue import rescue_highlight
 from .theme import BADGE_ACCENT, BADGE_MUTED, MUTED
 
 # rescue_state values that mark a trade at-risk (tested/critical). The manage-cycle

@@ -14,7 +14,7 @@ def _scan():
     return compute.swing_scan("SPY", 30, 45, -0.20, -0.10, 0.10, 0.20, 0.10)
 
 
-def test_the_width_search_is_sized_against_the_ledger_cap(income_seams, monkeypatch):
+def test_the_width_search_is_sized_against_the_ledger_cap(income_seams, monkeypatch):  # noqa: F811 - a fixture
     # Patched to a value neither book ships, so the test proves WHICH constant
     # is read - both caps ship at $750 - and that it is read at call time.
     import config_paper
@@ -24,14 +24,14 @@ def test_the_width_search_is_sized_against_the_ledger_cap(income_seams, monkeypa
     assert income_seams["screen"]["kw"]["max_risk_dollars"] == 123.0
 
 
-def test_the_reject_tally_rides_back_on_the_result(income_seams):
+def test_the_reject_tally_rides_back_on_the_result(income_seams):  # noqa: F811 - a fixture
     out = _scan()
     assert out["credit_spreads"] == {
         "strikes": 9, "built": 2,
         "reasons": {"outside_move": 1, "edge_floor": 4, "credit_floor": 2}}
 
 
-def test_no_tally_when_the_credit_families_were_not_requested(income_seams):
+def test_no_tally_when_the_credit_families_were_not_requested(income_seams):  # noqa: F811 - a fixture
     out = compute.swing_scan("SPY", 30, 45, -0.20, -0.10, 0.10, 0.20, 0.10,
                              families=["DIRECTIONAL"])
     assert "screen" not in income_seams

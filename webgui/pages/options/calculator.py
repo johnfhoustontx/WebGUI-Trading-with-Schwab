@@ -32,9 +32,8 @@ Pure transforms (banding, grid mapping, formatting, chain extractors) are
 unit-tested; ``render()`` wires the form + visuals.
 """
 import datetime as dt
-import math
 
-from .inputs import select_all_on_focus, should_load
+from .inputs import should_load
 # The page's four SIGNAL colours — all that is left of the ``[calc]`` language
 # (see theme.build_calc_tokens). Everything else the screen wears is the app's.
 from .theme import (CALC_POS, CALC_NEG, CALC_ACCENT, CALC_WARN, CALC_STATE_TEXT,

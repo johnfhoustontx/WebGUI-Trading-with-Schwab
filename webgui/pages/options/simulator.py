@@ -50,7 +50,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from .inputs import select_all_on_focus, should_load
+from .inputs import should_load
 # The app-wide dark-navy vocabulary. The page injects no CSS and wears no scope
 # class of its own: the boxed q-fields, the narrow leg-table tracks and the tab
 # chrome it needs are the SAME rules, shipped app-wide as ``theme.APP_FIELD_CSS``

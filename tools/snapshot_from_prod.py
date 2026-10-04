@@ -36,7 +36,6 @@ Design: docs/plans/2026-08-08-dev-prod-environments-design.md
 """
 import argparse
 import dataclasses
-import json
 import os
 import pathlib
 import shutil

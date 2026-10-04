@@ -4,7 +4,7 @@ Pure functions. Replicates the math in
 ``sentiment_dashboard.calculate_all_scores``, ``_update_velocity``, and
 ``_update_divergence_flag`` without touching tkinter.
 """
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Mapping, Optional, Sequence, Tuple
 
 
 def blend(scores: Mapping[str, float],

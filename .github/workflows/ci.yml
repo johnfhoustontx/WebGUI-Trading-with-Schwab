@@ -79,7 +79,7 @@ jobs:
         run: ruff check .
         # NB: `ruff format` is intentionally NOT enforced — the codebase uses a
         # deliberate compact style (one-line statements) the formatter would rewrite
-        # wholesale. The lint gate (select E9,F63,F7,F82) catches real bugs only.
+        # wholesale. The lint gate (pyproject's select) catches real bugs only.
 
   # ---------------------------------------------------------------------------
   # Type check - deliberately NARROW (pyrightconfig.json): the bus, the

@@ -15,7 +15,6 @@ Version 1.0.0 Changes:
 - Iron Condor scoring with delta-neutrality bonus
 """
 
-import math
 import logging
 
 log = logging.getLogger("scanner")

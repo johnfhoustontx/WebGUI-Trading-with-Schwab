@@ -76,8 +76,6 @@ def test_spread_to_score_linear():
 
 # ── v4.4 Dual Momentum + RRG ──────────────────────────────────────
 
-import pytest
-from scoring import rotation
 
 SP_WEIGHTS_E = {
     "XLK": 32.53, "XLF": 13.42, "XLC": 10.16, "XLY":  9.94,

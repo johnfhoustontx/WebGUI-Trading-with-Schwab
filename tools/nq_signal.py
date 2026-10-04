@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
-from datetime import date as _date, time as _time
+from datetime import time as _time
 
 # Repo root on sys.path so ``services.options_svc.matrix`` resolves regardless of
 # the cwd the tests or the HUD are launched from (same idiom as the other

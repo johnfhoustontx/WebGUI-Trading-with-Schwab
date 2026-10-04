@@ -19,7 +19,6 @@ from scoring import put_call as _pc
 from scoring import breadth as _breadth
 from scoring import rotation as _rotation
 from scoring import sector_perf as _sector
-from scoring.types import ScoreResult
 
 logger = logging.getLogger(__name__)
 
