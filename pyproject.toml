@@ -41,13 +41,11 @@ extend-exclude = [
     "**/frontend",      # legacy built React frontend (not maintained here)
     "**/node_modules",
     "docs",
-    # Grandfathered LEGACY engine app-dirs — copied verbatim from the source
-    # monorepo; they carry pre-existing lint debt (sys.path glue → E402, dormant
-    # bugs in dead Tk code). Tightening them is a separate pass.
-    "options-scanner",
-    "sentiment-dashboard",
-    "trade-analyzer",
-    "portfolio-analyzer",
+    # The four engine folders (options-scanner, sentiment-dashboard,
+    # trade-analyzer, portfolio-analyzer) were excluded here as "copied
+    # verbatim" until 2026-10-04. They are the most actively changed code in the
+    # repo and they pass the rules below, so they are linted like the rest
+    # (audit CQ-08; tests/test_lint_scope.py).
     # (The four "shared/analysis_lib" carve-outs that used to sit here were for
     # gui_main / agents / mtf_analysis / blueprint_scorer -- the abandoned
     # Blueprint Analyzer Tk app, deleted 2026-08-20. shared/analysis_lib is now
