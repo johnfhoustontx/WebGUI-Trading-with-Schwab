@@ -37,6 +37,10 @@ DEFAULTS = {
     "scan": {"wide_fetch": False, "wide_fetch_exclude": ["$SPX", "$NDX", "SPY", "QQQ"]},
     "collection": {"tail_interval_min": 1, "fresh_max_age_sec": 20,
                    "max_gamma_ratio": 10.0, "carry_slack_sec": 30},
+    # The proxy's request gate (schwab-proxy/rate_gate.py): how many requests
+    # the one-minute collection poll may send ahead of a waiting ordinary one
+    # before an ordinary one goes. 0 = no lane, arrival order.
+    "limiter": {"priority_run": 4},
     # The proxy's paper-trade tracker: the longest wait before it retries a
     # trade it could not start tracking.
     "tracker": {"retry_max_sec": 1800, "fetch_retry_max_sec": 300},

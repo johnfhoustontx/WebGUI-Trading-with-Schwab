@@ -251,7 +251,7 @@ def _reanchor_spots(client, symbols, fetched, now, spots_out=None) -> int:
     if _is_regular_hours(now):
         return 0
     try:
-        resp = client.get_quotes(list(symbols))
+        resp = client.get_quotes(list(symbols), **_priority_kwargs(client))
         payload = resp.json() if getattr(resp, "status_code", 500) == 200 else None
         spots = live_spots(payload)
     except Exception as e:  # noqa: BLE001 — a stale spot beats a dead poll
@@ -286,6 +286,21 @@ CARRY_SLACK_SEC = 30
 # What has already been said at WARNING this process, so a setting that is
 # clamped every minute is reported once, not 440 times a day.
 _WARNED: set = set()
+
+
+def _priority_kwargs(client) -> dict:
+    """``{"priority": True}`` for a client that can mark a request for the
+    proxy's priority lane, else ``{}``.
+
+    The one-minute poll shares the proxy's 5 calls a second with everything
+    else. Measured over four sessions (2026-09-29..10-02), 20 of the 22 slots
+    it lost were in the minute after a quarter-hour scan started: first come,
+    first served, the poll ran past 60 seconds. Marked, its requests go ahead
+    of the scan's (schwab-proxy/rate_gate.py).
+
+    A literal ``True`` only: a client double with a fixed signature must be
+    called exactly as before, and every attribute of a Mock is truthy."""
+    return {"priority": True} if getattr(client, "supports_priority", None) is True else {}
 
 
 def _warn_once(key, msg, *args) -> None:
@@ -412,7 +427,7 @@ def _carry_forward(client, fetched, ages, tiers, now, spots=None):
         return carried, 0
     if spots is None:
         try:
-            resp = client.get_quotes(sorted(carried))
+            resp = client.get_quotes(sorted(carried), **_priority_kwargs(client))
             payload = (resp.json()
                        if getattr(resp, "status_code", 500) == 200 else None)
             spots = live_spots(payload)
@@ -494,7 +509,7 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     def _fetch(symbol):
         """(symbol, chain|None); fetch failures are logged here, never raised."""
         try:
-            kwargs = {}
+            kwargs = _priority_kwargs(client)
             limit = _chain_max_age(symbol, minute_index, tiers)
             if limit is not None:
                 kwargs["max_age"] = limit
@@ -715,6 +730,7 @@ def poll_term_once(client, engine, conn, ts_iso: str = None, lock=None) -> None:
                 contract_type=client.Options.ContractType.ALL,
                 from_date=today,
                 to_date=today + timedelta(days=TERM_DTE_HORIZON_DAYS),
+                **_priority_kwargs(client),
             )
         status = getattr(r, "status_code", "?")
         chain = r.json() if status == 200 else None

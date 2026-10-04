@@ -113,6 +113,10 @@ def _apply_identity(session: "requests.Session") -> None:
     session.headers["X-Caller"] = _caller_name()
 
 
+# What a priority request carries. The proxy reads it in ``_wants_priority``.
+PRIORITY_HEADERS = {"X-Priority": "1"}
+
+
 def _store_age(headers):
     """Seconds since the answer left Schwab, from ``X-Store-Age``; None when the
     proxy did not say."""
@@ -176,15 +180,27 @@ class SchwabPyProxyClient:
 
     Options = _Options()
 
+    # This client can mark a request for the proxy's priority lane
+    # (``priority=True`` on get_option_chain / get_quotes). A caller checks for
+    # a literal True before passing the argument, so a client double with a
+    # fixed signature is called exactly as before.
+    supports_priority = True
+
     def __init__(self, base_url: str = PROXY_BASE):
         self.base = base_url
         self.session = requests.Session()
         _apply_secret(self.session)
         _apply_identity(self.session)
 
-    def _get(self, path: str, params: Optional[Dict] = None) -> FakeResponse:
+    def _get(self, path: str, params: Optional[Dict] = None,
+             priority: bool = False) -> FakeResponse:
         try:
-            resp = self.session.get(f"{self.base}{path}", params=params, timeout=30)
+            # The mark travels as a HEADER, never a parameter: it must not reach
+            # Schwab and must not change which stored answer matches. An
+            # ordinary request passes no ``headers`` at all.
+            extra = {"headers": PRIORITY_HEADERS} if priority else {}
+            resp = self.session.get(f"{self.base}{path}", params=params,
+                                    timeout=30, **extra)
             if resp.status_code == 200:
                 headers = getattr(resp, "headers", None) or {}
                 return FakeResponse(status_code=200, _data=resp.json(),
@@ -199,7 +215,7 @@ class SchwabPyProxyClient:
             logger.error(f"Proxy request failed: {e}")
             return FakeResponse(status_code=502, _text=str(e))
 
-    def get_quotes(self, symbols) -> FakeResponse:
+    def get_quotes(self, symbols, priority: bool = False) -> FakeResponse:
         """Get quotes for one or more symbols.
         
         schwab-py accepts a list or string; we normalize to CSV.
@@ -208,7 +224,7 @@ class SchwabPyProxyClient:
             sym_str = ",".join(symbols)
         else:
             sym_str = str(symbols)
-        return self._get("/quotes", params={"symbols": sym_str})
+        return self._get("/quotes", params={"symbols": sym_str}, priority=priority)
 
     def get_option_expirations(self, symbol: str) -> FakeResponse:
         """Every listed expiration for ``symbol`` — Schwab's ``/expirationchain``
@@ -223,9 +239,12 @@ class SchwabPyProxyClient:
         from_date=None,
         to_date=None,
         max_age=None,
+        priority: bool = False,
         **kwargs,
     ) -> FakeResponse:
-        """Get option chain for a symbol."""
+        """Get option chain for a symbol. ``priority`` asks the proxy to send
+        the request ahead of waiting ordinary ones (the one-minute collection
+        poll; see schwab-proxy/rate_gate.py)."""
         params: Dict[str, Any] = {"symbol": symbol}
         if contract_type is not None:
             ct = contract_type if isinstance(contract_type, str) else "ALL"
@@ -244,7 +263,7 @@ class SchwabPyProxyClient:
             )
         if max_age is not None:
             params["maxAge"] = max_age
-        return self._get("/chains", params=params)
+        return self._get("/chains", params=params, priority=priority)
 
     def get_price_history_every_day(self, symbol: str) -> FakeResponse:
         """Get daily price history for ~1 year (matches schwab-py helper)."""

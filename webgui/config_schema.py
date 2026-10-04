@@ -1424,6 +1424,17 @@ _MARKETDATA = ConfigFile(
             Field("scan.wide_fetch_exclude", "Symbols that keep three separate fetches",
                   "Their 45-day chain is too large for one request.", kind="symbols"),
         )),
+        Section("Request order",
+                "Every Schwab market-data call is sent 0.2 seconds after the "
+                "one before it. The one-minute collection poll's calls go "
+                "ahead of other calls that are waiting.", (
+            Field("limiter.priority_run",
+                  "Collection calls sent before one other call",
+                  "At 4, while the collection poll is fetching, 4 of every 5 "
+                  "calls are the poll's and 1 is everything else's, such as a "
+                  "scan or a page load. 0 sends calls in the order they arrive.",
+                  kind="int", unit="calls", min=0, max=20),
+        )),
         Section("Paper-trade tracker",
                 "The proxy streams the legs of open paper credit spreads. A "
                 "trade it could not start tracking is tried again after 30 "

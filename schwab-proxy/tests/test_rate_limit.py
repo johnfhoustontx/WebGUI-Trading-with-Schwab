@@ -1,9 +1,9 @@
 """The marketdata rate limiter must SPACE concurrent callers, not let them burst.
 
-``_rate_limit`` does a read-modify-write on ``_last_request_time`` plus a sleep.
 Unsynchronized, the 8-thread ``parallel_map`` fan-outs could all read the same
-last-time and fire together (a 429 risk); a dedicated ``_rate_lock`` held across
-the sleep genuinely serializes the spacing.
+last-request time and fire together (a 429 risk). The gate ``_rate_limit`` goes
+through (``rate_gate.RateGate``, built by ``_new_gate``) serializes the spacing;
+its ordering is tested in test_rate_gate.py.
 """
 import threading
 import time
@@ -15,7 +15,7 @@ import schwab_proxy as sp
 def test_rate_limit_serializes_concurrent_callers(monkeypatch):
     monkeypatch.setattr(sp, "MIN_REQUEST_INTERVAL", 0.02)
     monkeypatch.setattr(sp.api_call_counter, "record", lambda *a, **k: None)
-    obj = types.SimpleNamespace(_rate_lock=threading.Lock(), _last_request_time=0.0)
+    obj = types.SimpleNamespace(_gate=sp._new_gate())
 
     start = time.monotonic()
     threads = [threading.Thread(target=lambda: sp.TokenManager._rate_limit(obj))

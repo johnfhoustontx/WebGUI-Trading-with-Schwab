@@ -83,6 +83,21 @@ max_gamma_ratio = 10.0
 # minute is still inside the limit.
 carry_slack_sec = 30
 
+[limiter]
+# Every Schwab market-data call the proxy sends is spaced 0.2 seconds apart, 5 a
+# second, whoever asked. The one-minute collection poll marks its requests, and
+# the proxy sends a marked request ahead of ordinary ones that are waiting.
+#
+# priority_run is how many marked requests may go ahead of a waiting ordinary
+# one before an ordinary one is sent. At 4, while the poll is fetching, 4 of
+# every 5 calls are the poll's and 1 is everything else's (scans, page loads),
+# so nothing else is ever stopped. The total rate does not change.
+#
+# 0 = no lane: requests are sent in the order they arrive, as before 2026-10-04.
+# Why it exists: over four sessions the poll lost 22 one-minute slots, 20 of
+# them in the minute after a quarter-hour scan started.
+priority_run = 4
+
 [tracker]
 # The proxy's paper-trade tracker (/track and its 30-second reconcile). A trade
 # it could not start tracking is tried again after 30 seconds, then 60, 120 ...

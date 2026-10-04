@@ -39,6 +39,8 @@ import sqlite3
 import threading
 import pathlib
 import collections
+import contextlib
+import contextvars
 import itertools
 from pathlib import Path
 
@@ -64,6 +66,7 @@ import trade_detector
 import perf_writer
 import stream_bridge
 import market_store
+import rate_gate
 from shared import market_calendar as _market_calendar
 from shared import marketdata_config as _marketdata_config
 
@@ -132,6 +135,43 @@ TOKEN_FILE = Path(__file__).parent / "proxy_tokens.json"
 
 MIN_REQUEST_INTERVAL = 0.2  # seconds between Schwab API calls
 
+# Whether the request being served asked for the limiter's priority lane: the
+# ``X-Priority`` header, sent by the one-minute collection poll. A handler sets
+# it for the length of ONE request and TokenManager._rate_limit reads it. The
+# handlers run on pooled threads, each call in its own copied context, so the
+# mark cannot reach another request - and it is reset anyway. See rate_gate.py
+# for what the lane does and audit PF-02 for why.
+_PRIORITY_REQUEST = contextvars.ContextVar("priority_request", default=False)
+_PRIORITY_VALUES = frozenset({"1", "true"})
+
+
+def _wants_priority(request) -> bool:
+    """True only for an explicit ``X-Priority: 1`` (or ``true``)."""
+    raw = request.headers.get("x-priority")
+    return str(raw if raw is not None else "").strip().lower() in _PRIORITY_VALUES
+
+
+@contextlib.contextmanager
+def _lane(request):
+    """Serve the enclosed fetch in the lane ``request`` asked for."""
+    token = _PRIORITY_REQUEST.set(_wants_priority(request))
+    try:
+        yield
+    finally:
+        _PRIORITY_REQUEST.reset(token)
+
+
+def _priority_run():
+    """``[limiter] priority_run`` from config/marketdata.toml, read per request
+    so a saved change applies without a restart."""
+    return _marketdata_config.section("limiter").get("priority_run")
+
+
+def _new_gate():
+    """The gate every market-data call passes: one slot per MIN_REQUEST_INTERVAL,
+    priority lane first."""
+    return rate_gate.RateGate(lambda: MIN_REQUEST_INTERVAL, priority_run=_priority_run)
+
 # Bounded retry for transient Schwab failures (timeouts, dropped connections,
 # 5xx/404). Reads (market-data + Trader GETs) are retried; order POSTs are NOT
 # (a lost response on a submitted order must never cause a duplicate).
@@ -171,8 +211,7 @@ class TokenManager:
         self.callback_url = self.config.get("CallbackUrl", "https://127.0.0.1:8182")
         self.tokens: Dict = {}
         self._lock = threading.Lock()
-        self._rate_lock = threading.Lock()   # serializes _rate_limit's spacing
-        self._last_request_time = 0.0
+        self._gate = _new_gate()             # spaces every market-data call
         self.session = requests.Session()
         # Schwab's own verdict on the refresh token, as opposed to the expiry
         # we stamped locally. Set when a refresh is REJECTED, cleared when one
@@ -342,18 +381,13 @@ class TokenManager:
         logger.info("OAuth authorization code exchanged — tokens saved")
 
     def _rate_limit(self):
-        # Hold _rate_lock across the read-modify-write AND the sleep so concurrent
-        # callers (the 8-thread parallel_map fan-outs) are genuinely SPACED
-        # ~MIN_REQUEST_INTERVAL apart. Unsynchronized, two threads read the same
-        # last-time, both compute a tiny elapsed, and both fire together → a burst
-        # that risks a 429. A dedicated lock (not self._lock) keeps this off the
-        # token-refresh path.
-        with self._rate_lock:
-            now = time.monotonic()
-            elapsed = now - self._last_request_time
-            if elapsed < MIN_REQUEST_INTERVAL:
-                time.sleep(MIN_REQUEST_INTERVAL - elapsed)
-            self._last_request_time = time.monotonic()
+        # Concurrent callers (the pooled fan-outs) are genuinely SPACED
+        # ~MIN_REQUEST_INTERVAL apart: unsynchronized, two threads read the same
+        # last-time and fire together, a burst that risks a 429. The gate also
+        # decides the ORDER - a request the collection poll marked goes ahead
+        # of waiting ordinary ones (rate_gate.py). It has its own lock, so this
+        # stays off the token-refresh path.
+        self._gate.acquire(priority=_PRIORITY_REQUEST.get())
         # Every marketdata request passes through here (incl. retries + the
         # 401-refresh re-request), so this is the counting chokepoint for the
         # Settings "API usage" stats. record() never raises. Outside the rate lock
@@ -779,14 +813,16 @@ def _served(work) -> Response:
 
 @app.get("/quote")
 def get_quote(request: Request, symbol: str, maxAge: Optional[str] = None):
-    return _served(lambda: _GATEWAY.quotes(symbol, _caller(request), maxAge))
+    with _lane(request):
+        return _served(lambda: _GATEWAY.quotes(symbol, _caller(request), maxAge))
 
 
 @app.get("/quotes")
 def get_quotes(request: Request,
                symbols: str = Query(..., description="Comma-separated symbols"),
                maxAge: Optional[str] = None):
-    return _served(lambda: _GATEWAY.quotes(symbols, _caller(request), maxAge))
+    with _lane(request):
+        return _served(lambda: _GATEWAY.quotes(symbols, _caller(request), maxAge))
 
 
 @app.get("/chains")
@@ -804,7 +840,8 @@ def get_option_chain(
     if fromDate:    params["fromDate"] = fromDate
     if toDate:      params["toDate"] = toDate
     if strikeCount is not None: params["strikeCount"] = strikeCount
-    return _served(lambda: _GATEWAY.chains(params, _caller(request), maxAge))
+    with _lane(request):
+        return _served(lambda: _GATEWAY.chains(params, _caller(request), maxAge))
 
 
 @app.get("/pricehistory")
